@@ -166,8 +166,10 @@ func infraOutputsEnv(entries []infraOutputEntry) error {
 
 // shellQuote returns a single-quoted POSIX shell literal for any value.
 // Non-string scalars are formatted with %v; maps and slices are rendered as
-// compact JSON. Any single-quote characters inside the value are escaped as
-// the sequence '\”.
+// compact JSON. Single-quote characters inside the value are escaped using
+// the standard POSIX sequence: close the literal, emit a backslash-quoted
+// single-quote, then reopen the literal (the four-character sequence apostrophe
+// backslash apostrophe apostrophe).
 func shellQuote(v any) string {
 	var s string
 	switch tv := v.(type) {

@@ -1,12 +1,54 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// ── stdout/stderr capture helpers ────────────────────────────────────────────
+
+// captureStdout redirects os.Stdout to a pipe for the duration of fn, then
+// returns the captured output alongside any error fn returned. os.Stdout is
+// restored via t.Cleanup so it is always recovered even when fn panics or
+// t.Fatalf is called from within fn.
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("captureStdout: create pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	fnErr := fn()
+
+	w.Close()
+	out, _ := io.ReadAll(r)
+	return string(out), fnErr
+}
+
+// captureStderr is the stderr equivalent of captureStdout.
+func captureStderr(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("captureStderr: create pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = orig })
+
+	fnErr := fn()
+
+	w.Close()
+	out, _ := io.ReadAll(r)
+	return string(out), fnErr
+}
 
 // ── infraEnvVarName ──────────────────────────────────────────────────────────
 
@@ -64,20 +106,10 @@ func TestInfraOutputsEnv(t *testing.T) {
 		{module: "bmw-app", outputs: map[string]any{"url": "https://app.example.com"}},
 	}
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	if err := infraOutputsEnv(entries); err != nil {
+	out, err := captureStdout(t, func() error { return infraOutputsEnv(entries) })
+	if err != nil {
 		t.Fatalf("infraOutputsEnv: %v", err)
 	}
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	out := buf.String()
 
 	wantLines := []string{
 		"BMW_STAGING_DB_HOST='db.example.com'",
@@ -98,23 +130,14 @@ func TestInfraOutputsJSON(t *testing.T) {
 		{module: "mydb", outputs: map[string]any{"host": "db.example.com", "port": 5432}},
 	}
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	if err := infraOutputsJSON(entries); err != nil {
+	out, err := captureStdout(t, func() error { return infraOutputsJSON(entries) })
+	if err != nil {
 		t.Fatalf("infraOutputsJSON: %v", err)
 	}
 
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-
 	var result map[string]map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("parse JSON output: %v\noutput was:\n%s", err, buf.String())
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse JSON output: %v\noutput was:\n%s", err, out)
 	}
 	if _, ok := result["mydb"]; !ok {
 		t.Error("JSON output missing 'mydb' key")
@@ -131,20 +154,10 @@ func TestInfraOutputsYAML(t *testing.T) {
 		{module: "mydb", outputs: map[string]any{"host": "db.example.com"}},
 	}
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	if err := infraOutputsYAML(entries); err != nil {
+	out, err := captureStdout(t, func() error { return infraOutputsYAML(entries) })
+	if err != nil {
 		t.Fatalf("infraOutputsYAML: %v", err)
 	}
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	out := buf.String()
 
 	if !strings.Contains(out, "mydb:") {
 		t.Errorf("YAML output missing 'mydb:'\ngot:\n%s", out)
@@ -157,52 +170,32 @@ func TestInfraOutputsYAML(t *testing.T) {
 // ── runInfraOutputs integration ──────────────────────────────────────────────
 
 func TestRunInfraOutputs_EmptyState(t *testing.T) {
-	// Create a temp dir as a filesystem state store with no records.
 	dir := t.TempDir()
-
 	cfgFile := writeInfraOutputsTestConfig(t, dir)
 
-	// Capture stderr (the "No outputs found" message goes there).
-	old := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-
-	err := runInfraOutputs([]string{"--config", cfgFile})
-
-	w.Close()
-	os.Stderr = old
-
+	// "No outputs found" message goes to stderr.
+	errOut, err := captureStderr(t, func() error {
+		return runInfraOutputs([]string{"--config", cfgFile})
+	})
 	if err != nil {
 		t.Fatalf("runInfraOutputs: %v", err)
 	}
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	if !strings.Contains(buf.String(), "No outputs") {
-		t.Errorf("expected 'No outputs' on stderr, got: %s", buf.String())
+	if !strings.Contains(errOut, "No outputs") {
+		t.Errorf("expected 'No outputs' on stderr, got: %s", errOut)
 	}
 }
 
 func TestRunInfraOutputs_WithState_YAML(t *testing.T) {
 	dir := t.TempDir()
 	writeInfraOutputsStateFile(t, dir, "mydb", map[string]any{"host": "localhost", "port": 5432})
-
 	cfgFile := writeInfraOutputsTestConfig(t, dir)
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := runInfraOutputs([]string{"--config", cfgFile, "--format", "yaml"})
-
-	w.Close()
-	os.Stdout = old
-
+	out, err := captureStdout(t, func() error {
+		return runInfraOutputs([]string{"--config", cfgFile, "--format", "yaml"})
+	})
 	if err != nil {
 		t.Fatalf("runInfraOutputs yaml: %v", err)
 	}
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	out := buf.String()
 
 	if !strings.Contains(out, "mydb:") {
 		t.Errorf("YAML missing 'mydb:', got:\n%s", out)
@@ -215,27 +208,18 @@ func TestRunInfraOutputs_WithState_YAML(t *testing.T) {
 func TestRunInfraOutputs_WithState_JSON(t *testing.T) {
 	dir := t.TempDir()
 	writeInfraOutputsStateFile(t, dir, "mydb", map[string]any{"uri": "postgresql://localhost/db"})
-
 	cfgFile := writeInfraOutputsTestConfig(t, dir)
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := runInfraOutputs([]string{"--config", cfgFile, "--format", "json"})
-
-	w.Close()
-	os.Stdout = old
-
+	out, err := captureStdout(t, func() error {
+		return runInfraOutputs([]string{"--config", cfgFile, "--format", "json"})
+	})
 	if err != nil {
 		t.Fatalf("runInfraOutputs json: %v", err)
 	}
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
 
 	var result map[string]map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("parse JSON: %v\noutput:\n%s", err, buf.String())
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse JSON: %v\noutput:\n%s", err, out)
 	}
 	if result["mydb"]["uri"] != "postgresql://localhost/db" {
 		t.Errorf("uri = %v, want postgresql://localhost/db", result["mydb"]["uri"])
@@ -246,24 +230,14 @@ func TestRunInfraOutputs_ModuleFilter(t *testing.T) {
 	dir := t.TempDir()
 	writeInfraOutputsStateFile(t, dir, "db-a", map[string]any{"host": "a.example.com"})
 	writeInfraOutputsStateFile(t, dir, "db-b", map[string]any{"host": "b.example.com"})
-
 	cfgFile := writeInfraOutputsTestConfig(t, dir)
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := runInfraOutputs([]string{"--config", cfgFile, "--module", "db-a", "--format", "yaml"})
-
-	w.Close()
-	os.Stdout = old
-
+	out, err := captureStdout(t, func() error {
+		return runInfraOutputs([]string{"--config", cfgFile, "--module", "db-a", "--format", "yaml"})
+	})
 	if err != nil {
 		t.Fatalf("runInfraOutputs --module: %v", err)
 	}
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	out := buf.String()
 
 	if !strings.Contains(out, "db-a:") {
 		t.Errorf("expected db-a in output, got:\n%s", out)
@@ -289,27 +263,16 @@ func TestRunInfraOutputs_UnknownFormat(t *testing.T) {
 
 func TestRunInfraOutputs_SkipsEmptyOutputs(t *testing.T) {
 	dir := t.TempDir()
-	// Write a state file with empty outputs.
 	writeInfraOutputsStateFileRaw(t, dir, "no-outputs", nil)
 	writeInfraOutputsStateFile(t, dir, "has-outputs", map[string]any{"key": "val"})
-
 	cfgFile := writeInfraOutputsTestConfig(t, dir)
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := runInfraOutputs([]string{"--config", cfgFile, "--format", "yaml"})
-
-	w.Close()
-	os.Stdout = old
-
+	out, err := captureStdout(t, func() error {
+		return runInfraOutputs([]string{"--config", cfgFile, "--format", "yaml"})
+	})
 	if err != nil {
 		t.Fatalf("runInfraOutputs: %v", err)
 	}
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	out := buf.String()
 
 	if strings.Contains(out, "no-outputs") {
 		t.Errorf("resource with empty outputs should be skipped, got:\n%s", out)
@@ -361,7 +324,7 @@ func writeInfraOutputsStateFileRaw(t *testing.T, stateDir, name string, outputs 
 	if err != nil {
 		t.Fatalf("marshal state record: %v", err)
 	}
-	path := stateDir + "/" + name + ".json"
+	path := filepath.Join(stateDir, name+".json")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write state file: %v", err)
 	}
