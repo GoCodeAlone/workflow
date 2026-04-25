@@ -272,6 +272,17 @@ func TestParseGitHubReleaseDownloadURL(t *testing.T) {
 			rawURL: "https://github.com/owner/repo/releases/download/v1.0.0/file.tar.gz/extra",
 			ok:     false,
 		},
+		{
+			// Userinfo present — rejected to prevent credential injection attacks
+			rawURL: "https://user:pass@github.com/owner/repo/releases/download/v1.0.0/file.tar.gz",
+			ok:     false,
+		},
+		{
+			// Non-default port — u.Hostname() strips port before isGitHubHost check,
+			// so explicit rejection via u.Port() != "" is required.
+			rawURL: "https://github.com:8080/owner/repo/releases/download/v1.0.0/file.tar.gz",
+			ok:     false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.rawURL, func(t *testing.T) {

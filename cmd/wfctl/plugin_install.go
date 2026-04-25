@@ -810,6 +810,15 @@ func parseGitHubReleaseDownloadURL(rawURL string) (owner, repo, tag, filename st
 	if err != nil || !strings.EqualFold(u.Scheme, "https") || !isGitHubHost(u.Hostname()) {
 		return
 	}
+	// Reject URLs with userinfo (user:pass@host) — prevents credential injection attacks.
+	if u.User != nil {
+		return
+	}
+	// Reject URLs with a non-default port. u.Hostname() strips the port before
+	// isGitHubHost sees it, so https://github.com:8080/... would pass without this check.
+	if u.Port() != "" {
+		return
+	}
 	// Path must be exactly: /owner/repo/releases/download/tag/filename (6 segments).
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 	if len(parts) != 6 || parts[2] != "releases" || parts[3] != "download" ||
