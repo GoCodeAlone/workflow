@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -81,7 +83,7 @@ func TestInfraApply_EmitsDiagnosticsOnFailure(t *testing.T) {
 	// spec.Type must be non-empty so ref.Type is set and ResourceDriver is called.
 	specs := []interfaces.ResourceSpec{{Name: "bmw-staging", Type: "app_platform"}}
 	var diagBuf bytes.Buffer
-	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf)
+	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "")
 	if err == nil {
 		t.Fatal("expected error from failing apply")
 	}
@@ -105,11 +107,48 @@ func TestInfraApply_NonTroubleshooterNocrash(t *testing.T) {
 	provider := &plainFailProvider{applyErr: errors.New("boom")}
 	var diagBuf bytes.Buffer
 	specs := []interfaces.ResourceSpec{{Name: "x", Type: "app_platform"}}
-	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf)
+	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if diagBuf.Len() != 0 {
 		t.Errorf("non-troubleshooter should produce no diagnostic output, got: %q", diagBuf.String())
+	}
+}
+
+// TestInfraApply_WritesStepSummaryOnFailure verifies that applyWithProviderAndStore
+// writes a GHA step summary even when the provider has no Troubleshooter (empty
+// diagnostics). WriteStepSummary is called unconditionally after the troubleshoot
+// block, so the failure header and root cause still appear.
+// TDD invariant: removing the WriteStepSummary call causes this test to fail.
+func TestInfraApply_WritesStepSummaryOnFailure(t *testing.T) {
+	tmp := t.TempDir()
+	summaryPath := filepath.Join(tmp, "summary.md")
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+
+	// plainFailProvider has no Troubleshooter — ResourceDriver returns (nil, nil).
+	// This exercises the important branch where diagnostics are empty but the
+	// summary is still written with the failure header and root cause.
+	provider := &plainFailProvider{applyErr: errors.New("apply: resource quota exceeded")}
+
+	specs := []interfaces.ResourceSpec{{Name: "bmw-staging", Type: "app_platform"}}
+	var diagBuf bytes.Buffer
+	_ = applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "staging")
+
+	data, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("step summary file not written: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "## wfctl: apply staging — FAILED") {
+		t.Errorf("summary missing failure header: %q", got)
+	}
+	if !strings.Contains(got, "bmw-staging") {
+		t.Errorf("summary missing resource name: %q", got)
+	}
+	// No diagnostics — diagBuf must be empty (no Troubleshooter output).
+	if diagBuf.Len() != 0 {
+		t.Errorf("no-troubleshooter path should produce no diagnostic output, got: %q", diagBuf.String())
 	}
 }

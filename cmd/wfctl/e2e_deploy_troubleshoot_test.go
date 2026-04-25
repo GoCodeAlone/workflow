@@ -26,7 +26,7 @@ func TestE2EDeployFailure_EmitsFullTroubleshootBlock(t *testing.T) {
 	f := &fakeTroubleshootingDriver{diags: diags}
 	var stderr bytes.Buffer
 	em := detectCIProvider()
-	troubleshootAfterFailure(context.Background(), &stderr, f, interfaces.ResourceRef{Name: "bmw-staging"},
+	_ = troubleshootAfterFailure(context.Background(), &stderr, f, interfaces.ResourceRef{Name: "bmw-staging"},
 		errors.New("timed out"), 30*time.Second, em)
 	if f.calls != 1 {
 		t.Fatal("Troubleshoot not called")
@@ -49,7 +49,7 @@ func TestE2EDeployFailure_EmitsFullTroubleshootBlock(t *testing.T) {
 func TestE2ENoTroubleshooter_NoCrash(t *testing.T) {
 	var stderr bytes.Buffer
 	type plainDriver struct{ interfaces.ResourceDriver }
-	troubleshootAfterFailure(context.Background(), &stderr, &plainDriver{}, interfaces.ResourceRef{},
+	_ = troubleshootAfterFailure(context.Background(), &stderr, &plainDriver{}, interfaces.ResourceRef{},
 		errors.New("x"), 30*time.Second, plainEmitter{})
 	if stderr.Len() != 0 {
 		t.Errorf("unexpected output: %q", stderr.String())
