@@ -104,10 +104,17 @@ The `checksums.txt` format is the goreleaser standard:
 Parsing uses the goreleaser standard format (`<sha256hex>  <filename>`), the same format as
 the existing `verifyAssetChecksum` in `update.go`.
 
-A new shared helper `lookupChecksumForURL(downloadURL string) (string, error)` is added. It
-derives the `checksums.txt` URL from the release asset URL (stripping the asset filename and
-appending `checksums.txt`), downloads it, parses each `<sha256hex>  <filename>` line, and
-returns the expected SHA256 hex for the asset matching the basename of `downloadURL`.
+Two new shared helpers are added:
+
+`parseChecksumsTxt(body string) (map[string]string, error)` — parses a goreleaser-style
+`checksums.txt` body into a `map[filename → sha256hex]`. Each line must match
+`<sha256hex>  <filename>`; malformed lines return an error. This is a pure function with no
+I/O, making it directly unit-testable.
+
+`lookupChecksumForURL(downloadURL string) (string, error)` — derives the `checksums.txt`
+URL from the release asset URL (strips the asset filename, appends `checksums.txt`),
+downloads it, delegates to `parseChecksumsTxt`, and returns the expected SHA256 hex for
+the asset matching the basename of `downloadURL`.
 
 `assetName` is derived internally by parsing the URL first, then URL-decoding only the path
 component before extracting the basename — equivalent to:
@@ -290,7 +297,7 @@ workflow as a follow-up.
 
 ## Testing
 
-- Unit: `verifyChecksum` (existing), `parseChecksumsTxt` (new helper), lockfile write-back
+- Unit: `verifyChecksum` (existing), `parseChecksumsTxt` (new — valid input, malformed lines, missing asset), `lookupChecksumForURL` (mock HTTP), lockfile write-back
 - Integration: mock HTTP server serving a release asset + `checksums.txt` — install
   succeeds with correct hash, fails with tampered hash, fails with missing checksums.txt
   (no `--skip-checksum`), succeeds with `--skip-checksum`
