@@ -132,12 +132,17 @@ When a user specifies `--url <url>` directly:
 - If `--sha256 <hex>` is also provided: download, verify, succeed.
 - If the URL matches the GitHub release download pattern and no `--sha256` is given:
   auto-fetch `checksums.txt` via `lookupChecksumForURL`. Fail if the file is absent or the
-  asset is not listed. The match uses the same constraints as `parseGitHubReleaseDownloadURL`:
-  HTTPS scheme only; host lowercased and compared — must equal `github.com` or have a
-  `.github.com` suffix (the dot separator prevents `evilgithub.com` from matching; trailing
-  dots stripped before comparison); no userinfo component (`user:pass@`) allowed; no
-  non-default port (port field must be empty, implying 443); path must be exactly
-  `/owner/repo/releases/download/tag/filename` (six non-empty segments).
+  asset is not listed. The match delegates to `parseGitHubReleaseDownloadURL`, whose current
+  baseline checks are: HTTPS scheme only (`strings.EqualFold(scheme, "https")`); host passes
+  `isGitHubHost` (lowercased, must equal `github.com` or have `.github.com` suffix — the dot
+  prevents `evilgithub.com` matching); path exactly six non-empty segments
+  `/owner/repo/releases/download/tag/filename`.
+
+  **NEW hardening this design adds to `parseGitHubReleaseDownloadURL`**: reject URLs with a
+  userinfo component (`user:pass@host`) and reject URLs with a non-default port. These are
+  not enforced today — `u.Hostname()` strips the port before `isGitHubHost` is called, so
+  `https://github.com:8080/...` currently passes. The implementation should explicitly check
+  `u.User == nil` and `u.Port() == ""`.
 - For any other URL with no `--sha256`: fail with a clear error explaining how to provide
   a hash or use `--skip-checksum`.
 
@@ -154,8 +159,16 @@ unless `--skip-checksum` is passed.
 
 Both `WfctlLockPlatform.SHA256` and `WfctlLockPluginEntry.SHA256` represent
 **installed-binary SHAs** — hashes of the extracted plugin binary on disk, NOT of the
-download archive. This is confirmed by `installFromWfctlLockfile`, which verifies both
-fields against `hashFileSHA256(destDir/fsName)` after extraction.
+download archive. Both resolve to the same file path (`filepath.Join(destDir, fsName)`)
+but use different verification functions in `installFromWfctlLockfile`:
+
+- `WfctlLockPlatform.SHA256`: verified via `hashFileSHA256(filepath.Join(destDir, fsName))`
+  (streaming `io.Copy` into `sha256.New()`).
+- `WfctlLockPluginEntry.SHA256`: verified via `verifyInstalledChecksum(destDir, fsName, sha)`
+  which does `sha256.Sum256(os.ReadFile(filepath.Join(destDir, fsName)))` (in-memory).
+
+Both functions hash the same binary; the implementation approach differs (streaming vs
+in-memory). The write-back also uses `hashFileSHA256` on the same path.
 
 The archive SHA verified against `checksums.txt` at download time is a separate,
 transient check — it is not stored in any lockfile field.
