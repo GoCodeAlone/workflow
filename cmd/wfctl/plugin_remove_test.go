@@ -89,3 +89,31 @@ func TestPluginRemove_NoManifestNoError(t *testing.T) {
 		t.Fatalf("expected no error when manifest absent, got: %v", err)
 	}
 }
+
+func TestPluginRemove_DoesNotRewriteManifestWhenPluginAbsent(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	workflowConfig := `version: 0
+
+workflows:
+  cli:
+    name: wfctl
+    commands:
+      - name: audit
+`
+	if err := os.WriteFile(manifestPath, []byte(workflowConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeFromManifestAndLockfile("workflow-plugin-foo", manifestPath, lockPath); err != nil {
+		t.Fatalf("removeFromManifestAndLockfile: %v", err)
+	}
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != workflowConfig {
+		t.Fatalf("manifest was rewritten:\n%s", data)
+	}
+}
