@@ -15,8 +15,9 @@ import (
 // captureStdout redirects os.Stdout to a pipe for the duration of fn, drains
 // the pipe in a goroutine to prevent deadlocks when fn writes more than the
 // OS pipe buffer (~64 KB), and returns the captured output alongside any error
-// fn returned. The read end is closed by the goroutine; os.Stdout is restored
-// immediately after fn returns.
+// fn returned. The read end is closed by the drain goroutine. os.Stdout and the
+// write end are restored/closed via defer so that panics inside fn do not leave
+// subsequent tests with a redirected stdout.
 func captureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -25,6 +26,8 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	}
 	orig := os.Stdout
 	os.Stdout = w
+	defer func() { os.Stdout = orig }() // panic-safe restore
+	defer w.Close()                     // unblocks goroutine if fn panics
 
 	var buf bytes.Buffer
 	done := make(chan struct{})
@@ -32,8 +35,7 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 
 	fnErr := fn()
 
-	w.Close()
-	os.Stdout = orig // restore immediately so later writes in the test are not captured
+	w.Close() // close immediately on normal return so <-done doesn't block
 	<-done
 	return buf.String(), fnErr
 }
@@ -47,6 +49,8 @@ func captureStderr(t *testing.T, fn func() error) (string, error) {
 	}
 	orig := os.Stderr
 	os.Stderr = w
+	defer func() { os.Stderr = orig }() // panic-safe restore
+	defer w.Close()                     // unblocks goroutine if fn panics
 
 	var buf bytes.Buffer
 	done := make(chan struct{})
@@ -54,10 +58,47 @@ func captureStderr(t *testing.T, fn func() error) (string, error) {
 
 	fnErr := fn()
 
-	w.Close()
-	os.Stderr = orig // restore immediately so later writes in the test are not captured
+	w.Close() // close immediately on normal return so <-done doesn't block
 	<-done
 	return buf.String(), fnErr
+}
+
+// TestCaptureStdout_RestoresOnPanic verifies that os.Stdout is restored even
+// when the function passed to captureStdout panics.
+func TestCaptureStdout_RestoresOnPanic(t *testing.T) {
+	orig := os.Stdout
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic, got none")
+			}
+		}()
+		captureStdout(t, func() error { //nolint:errcheck
+			panic("intentional test panic")
+		})
+	}()
+	if os.Stdout != orig {
+		t.Error("os.Stdout not restored after panic in fn")
+	}
+}
+
+// TestCaptureStderr_RestoresOnPanic verifies that os.Stderr is restored even
+// when the function passed to captureStderr panics.
+func TestCaptureStderr_RestoresOnPanic(t *testing.T) {
+	orig := os.Stderr
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic, got none")
+			}
+		}()
+		captureStderr(t, func() error { //nolint:errcheck
+			panic("intentional test panic")
+		})
+	}()
+	if os.Stderr != orig {
+		t.Error("os.Stderr not restored after panic in fn")
+	}
 }
 
 // ── infraEnvVarName ──────────────────────────────────────────────────────────
