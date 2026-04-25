@@ -14,17 +14,17 @@ import (
 )
 
 type planDoc struct {
-	Path               string
-	Title              string
-	Status             string
-	Area               string
-	Owner              string
-	ImplementationRefs []planImplementationRef
-	ExternalRefs       []string
-	Verification       planVerification
-	Supersedes         []string
-	SupersededBy       []string
-	HasFrontmatter     bool
+	Path               string                  `json:"path"`
+	Title              string                  `json:"title"`
+	Status             string                  `json:"status"`
+	Area               string                  `json:"area"`
+	Owner              string                  `json:"owner"`
+	ImplementationRefs []planImplementationRef `json:"implementation_refs"`
+	ExternalRefs       []string                `json:"external_refs"`
+	Verification       planVerification        `json:"verification"`
+	Supersedes         []string                `json:"supersedes"`
+	SupersededBy       []string                `json:"superseded_by"`
+	HasFrontmatter     bool                    `json:"has_frontmatter"`
 }
 
 type planImplementationRef struct {
@@ -228,7 +228,34 @@ func validatePlanDocs(docs []planDoc, repoRoot string) []planFinding {
 		}
 
 		for _, ref := range doc.ImplementationRefs {
-			if ref.Commit == "" || repoRoot == "" {
+			if !validPlanImplementationRepo(ref.Repo) {
+				findings = append(findings, planFinding{
+					Path:    doc.Path,
+					Level:   "ERROR",
+					Code:    "invalid_implementation_repo",
+					Message: fmt.Sprintf("implementation repo %q must be a sibling repository name", ref.Repo),
+				})
+				continue
+			}
+			if ref.Commit == "" {
+				continue
+			}
+			if !validPlanCommitRef(ref.Commit) {
+				findings = append(findings, planFinding{
+					Path:    doc.Path,
+					Level:   "ERROR",
+					Code:    "invalid_implementation_commit",
+					Message: fmt.Sprintf("implementation commit %q must be a hex commit ID", ref.Commit),
+				})
+				continue
+			}
+			if repoRoot == "" || !filepath.IsAbs(repoRoot) {
+				findings = append(findings, planFinding{
+					Path:    doc.Path,
+					Level:   "ERROR",
+					Code:    "invalid_plan_repo_root",
+					Message: "implementation commit refs require an absolute git repository root",
+				})
 				continue
 			}
 			if !planCommitRepoAvailable(repoRoot, ref) {
@@ -359,7 +386,10 @@ func isActivePlanStatus(status string) bool {
 }
 
 func planCommitExists(repoRoot string, ref planImplementationRef) bool {
-	repoPath := planCommitRepoPath(repoRoot, ref)
+	repoPath, ok := planCommitRepoPath(repoRoot, ref)
+	if !ok {
+		return false
+	}
 	if !validPlanCommitRef(ref.Commit) {
 		return false
 	}
@@ -383,17 +413,68 @@ func validPlanCommitRef(commit string) bool {
 }
 
 func planCommitRepoAvailable(repoRoot string, ref planImplementationRef) bool {
-	repoPath := planCommitRepoPath(repoRoot, ref)
+	repoPath, ok := planCommitRepoPath(repoRoot, ref)
+	if !ok {
+		return false
+	}
 	info, err := os.Stat(filepath.Join(repoPath, ".git"))
 	return err == nil && (info.IsDir() || info.Mode().IsRegular())
 }
 
-func planCommitRepoPath(repoRoot string, ref planImplementationRef) string {
+func planCommitRepoPath(repoRoot string, ref planImplementationRef) (string, bool) {
+	if repoRoot == "" || !filepath.IsAbs(repoRoot) {
+		return "", false
+	}
+	if !validPlanImplementationRepo(ref.Repo) {
+		return "", false
+	}
 	repoPath := repoRoot
 	if ref.Repo != "" && ref.Repo != "workflow" {
-		repoPath = filepath.Join(filepath.Dir(repoRoot), ref.Repo)
+		siblingBase, ok := planCommitSiblingBase(repoRoot)
+		if !ok {
+			return "", false
+		}
+		repoPath = filepath.Join(siblingBase, ref.Repo)
 	}
-	return repoPath
+	return repoPath, true
+}
+
+func planCommitSiblingBase(repoRoot string) (string, bool) {
+	// #nosec G204 -- repoRoot is an already-discovered repository root, not shell-interpreted input.
+	cmd := exec.Command("git", "-C", repoRoot, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	out, err := cmd.Output()
+	if err == nil {
+		commonDir := strings.TrimSpace(string(out))
+		if filepath.Base(commonDir) == ".git" {
+			mainRoot := filepath.Dir(commonDir)
+			if filepath.IsAbs(mainRoot) {
+				return filepath.Dir(mainRoot), true
+			}
+		}
+	}
+	return "", false
+}
+
+func validPlanImplementationRepo(repo string) bool {
+	if repo == "" || repo == "workflow" {
+		return true
+	}
+	if repo == "." || repo == ".." {
+		return false
+	}
+	if strings.HasPrefix(repo, ".") || strings.HasSuffix(repo, ".") {
+		return false
+	}
+	if filepath.IsAbs(repo) || strings.ContainsAny(repo, `/\`) {
+		return false
+	}
+	for _, ch := range repo {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func sortPlanDocs(docs []planDoc) {

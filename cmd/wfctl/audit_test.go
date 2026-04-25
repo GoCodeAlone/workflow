@@ -127,6 +127,9 @@ func TestRunAuditPlansJSON(t *testing.T) {
 	if len(report.Findings) != 1 || report.Findings[0].Code != "missing_frontmatter" {
 		t.Fatalf("unexpected report: %+v", report)
 	}
+	if !bytes.Contains(out.Bytes(), []byte(`"path"`)) || bytes.Contains(out.Bytes(), []byte(`"Path"`)) {
+		t.Fatalf("plan audit JSON should use stable lower-case field names:\n%s", out.String())
+	}
 }
 
 func TestRunAuditPlansFixIndex(t *testing.T) {

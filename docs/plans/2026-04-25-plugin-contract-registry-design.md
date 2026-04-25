@@ -128,7 +128,7 @@ The `workflow-plugin-agent` checksum mismatch found during audit is a high-prior
 Immediate audit command:
 
 ```sh
-for d in /Users/jon/workspace/workflow-plugin-*; do
+	for d in ../workflow-plugin-*; do
   [ -f "$d/go.mod" ] || continue
   (cd "$d" && GOWORK=off go test ./...)
 done
@@ -139,9 +139,9 @@ Expected near-term result after remediation: every public, non-template plugin p
 Follow-up commands:
 
 ```sh
-wfctl plugin validate --all --repo-root /Users/jon/workspace
-wfctl audit plugins --repo-root /Users/jon/workspace --json
-wfctl audit plugins --registry /Users/jon/workspace/workflow-registry
+	wfctl plugin validate --all --repo-root ..
+	wfctl audit plugins --repo-root .. --json
+	wfctl audit plugins --registry ../workflow-registry
 ```
 
 ## Acceptance Criteria

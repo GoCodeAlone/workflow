@@ -44,7 +44,7 @@ func auditPluginRepo(path string) pluginAuditResult {
 
 	data, err := os.ReadFile(filepath.Join(path, "plugin.json"))
 	if err != nil {
-		result.ManifestShape = "invalid-json"
+		result.ManifestShape = "unreadable"
 		result.Findings = append(result.Findings, planFinding{
 			Path:    filepath.Join(path, "plugin.json"),
 			Level:   "ERROR",
@@ -137,7 +137,7 @@ func addPluginManifestFindings(result *pluginAuditResult) {
 		})
 	}
 
-	if strings.Contains(result.ManifestName, "TEMPLATE") || strings.Contains(result.Name, "template") && strings.Contains(result.ManifestName, "workflow-plugin-TEMPLATE") {
+	if result.ManifestName == "workflow-plugin-TEMPLATE" {
 		result.Findings = append(result.Findings, planFinding{
 			Path:    filepath.Join(result.RepoPath, "plugin.json"),
 			Level:   "ERROR",

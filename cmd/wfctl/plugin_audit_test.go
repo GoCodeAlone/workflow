@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -97,6 +98,45 @@ func TestAuditPluginManifestMissingAndPlaceholder(t *testing.T) {
 	placeholderResult := auditPluginRepo(placeholder)
 	if !hasPlanFinding(placeholderResult.Findings, "ERROR", "placeholder_plugin_identity") {
 		t.Fatalf("expected placeholder identity error, got %v", placeholderResult.Findings)
+	}
+
+	templateSubstring := writePluginAuditRepo(t, "workflow-plugin-template-tools", `{
+  "name": "workflow-plugin-template-tools",
+  "version": "0.1.0",
+  "capabilities": {}
+}`)
+	templateSubstringResult := auditPluginRepo(templateSubstring)
+	if hasPlanFinding(templateSubstringResult.Findings, "ERROR", "placeholder_plugin_identity") {
+		t.Fatalf("unexpected placeholder identity error for non-placeholder template name: %v", templateSubstringResult.Findings)
+	}
+}
+
+func TestAuditPluginManifestReadErrorIsNotInvalidJSON(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod read-error behavior is platform-specific")
+	}
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/workflow-plugin-unreadable\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	manifestPath := filepath.Join(repo, "plugin.json")
+	if err := os.WriteFile(manifestPath, []byte(`{"name":"workflow-plugin-unreadable"}`), 0o000); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(manifestPath, 0o644)
+	})
+
+	result := auditPluginRepo(repo)
+	if result.ManifestShape != "unreadable" {
+		t.Fatalf("shape = %q, want unreadable", result.ManifestShape)
+	}
+	if !hasPlanFinding(result.Findings, "ERROR", "read_plugin_manifest") {
+		t.Fatalf("expected read_plugin_manifest error, got %v", result.Findings)
+	}
+	summary := summarizePluginAudit([]pluginAuditResult{result})
+	if summary.Invalid != 1 {
+		t.Fatalf("invalid count = %d, want 1", summary.Invalid)
 	}
 }
 

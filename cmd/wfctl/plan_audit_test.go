@@ -208,6 +208,206 @@ func TestValidatePlanDocsSkipsUnavailableSiblingRepoCommit(t *testing.T) {
 	}
 }
 
+func TestValidatePlanDocsRejectsInvalidImplementationCommit(t *testing.T) {
+	repo := initPlanAuditGitRepo(t)
+	doc := planDoc{
+		Path:           "docs/plans/a.md",
+		Title:          "Bad Commit",
+		Status:         "implemented",
+		Area:           "wfctl",
+		HasFrontmatter: true,
+		ImplementationRefs: []planImplementationRef{
+			{Repo: "workflow-plugin-missing", Commit: "HEAD"},
+		},
+	}
+
+	findings := validatePlanDocs([]planDoc{doc}, repo)
+	if !hasPlanFindingCode(findings, "invalid_implementation_commit") {
+		t.Fatalf("expected invalid_implementation_commit finding, got %v", findings)
+	}
+}
+
+func TestValidatePlanDocsRejectsCommitRefsWithoutRepoRoot(t *testing.T) {
+	doc := planDoc{
+		Path:           "docs/plans/a.md",
+		Title:          "No Root",
+		Status:         "implemented",
+		Area:           "wfctl",
+		HasFrontmatter: true,
+		ImplementationRefs: []planImplementationRef{
+			{Repo: "workflow", Commit: "deadbeef"},
+		},
+	}
+
+	findings := validatePlanDocs([]planDoc{doc}, "")
+	if !hasPlanFindingCode(findings, "invalid_plan_repo_root") {
+		t.Fatalf("expected invalid_plan_repo_root finding, got %v", findings)
+	}
+}
+
+func TestValidatePlanDocsRejectsUnsafeImplementationRepo(t *testing.T) {
+	repo := initPlanAuditGitRepo(t)
+	tests := []struct {
+		name string
+		ref  planImplementationRef
+	}{
+		{name: "current directory", ref: planImplementationRef{Repo: ".", Commit: "deadbeef"}},
+		{name: "parent directory", ref: planImplementationRef{Repo: "..", Commit: "deadbeef"}},
+		{name: "hidden directory", ref: planImplementationRef{Repo: ".git", Commit: "deadbeef"}},
+		{name: "trailing dot", ref: planImplementationRef{Repo: "workflow.", Commit: "deadbeef"}},
+		{name: "parent traversal without commit", ref: planImplementationRef{Repo: "../workflow"}},
+		{name: "parent traversal", ref: planImplementationRef{Repo: "../workflow", Commit: "deadbeef"}},
+		{name: "nested path", ref: planImplementationRef{Repo: "team/workflow", Commit: "deadbeef"}},
+		{name: "windows path", ref: planImplementationRef{Repo: `team\workflow`, Commit: "deadbeef"}},
+		{name: "absolute path", ref: planImplementationRef{Repo: filepath.Join(string(filepath.Separator), "tmp", "workflow"), Commit: "deadbeef"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := planDoc{
+				Path:           "docs/plans/a.md",
+				Title:          "Unsafe Repo",
+				Status:         "implemented",
+				Area:           "wfctl",
+				HasFrontmatter: true,
+				ImplementationRefs: []planImplementationRef{
+					tt.ref,
+				},
+			}
+
+			findings := validatePlanDocs([]planDoc{doc}, repo)
+			if !hasPlanFindingCode(findings, "invalid_implementation_repo") {
+				t.Fatalf("expected invalid_implementation_repo finding, got %v", findings)
+			}
+			if hasPlanFindingCode(findings, "missing_local_commit") {
+				t.Fatalf("unsafe repo should not be checked for missing commit: %v", findings)
+			}
+		})
+	}
+}
+
+func TestValidatePlanDocsAcceptsExistingSiblingRepoCommit(t *testing.T) {
+	repo := initPlanAuditGitRepo(t)
+	sibling := initPlanAuditGitRepoAt(t, filepath.Join(filepath.Dir(repo), "workflow-plugin-auth"))
+	commit := strings.TrimSpace(runPlanAuditGit(t, sibling, "rev-parse", "HEAD"))
+	doc := planDoc{
+		Path:           "docs/plans/a.md",
+		Title:          "Sibling Repo",
+		Status:         "implemented",
+		Area:           "wfctl",
+		HasFrontmatter: true,
+		ImplementationRefs: []planImplementationRef{
+			{Repo: "workflow-plugin-auth", Commit: commit},
+		},
+	}
+
+	findings := validatePlanDocs([]planDoc{doc}, repo)
+	if hasPlanFindingCode(findings, "invalid_implementation_repo") {
+		t.Fatalf("unexpected invalid_implementation_repo finding: %v", findings)
+	}
+	if hasPlanFindingCode(findings, "missing_local_commit") {
+		t.Fatalf("unexpected missing_local_commit finding: %v", findings)
+	}
+}
+
+func TestValidatePlanDocsAcceptsSiblingRepoCommitFromLinkedWorktree(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := initPlanAuditGitRepoAt(t, filepath.Join(root, "workflow"))
+	worktreeRepo := filepath.Join(mainRepo, ".worktrees", "audit")
+	runPlanAuditGit(t, mainRepo, "worktree", "add", "-b", "audit-test", worktreeRepo)
+	sibling := initPlanAuditGitRepoAt(t, filepath.Join(root, "workflow-plugin-auth"))
+	commit := strings.TrimSpace(runPlanAuditGit(t, sibling, "rev-parse", "HEAD"))
+	doc := planDoc{
+		Path:           "docs/plans/a.md",
+		Title:          "Sibling Repo",
+		Status:         "implemented",
+		Area:           "wfctl",
+		HasFrontmatter: true,
+		ImplementationRefs: []planImplementationRef{
+			{Repo: "workflow-plugin-auth", Commit: commit},
+		},
+	}
+
+	findings := validatePlanDocs([]planDoc{doc}, worktreeRepo)
+	if hasPlanFindingCode(findings, "invalid_implementation_repo") || hasPlanFindingCode(findings, "missing_local_commit") {
+		t.Fatalf("unexpected sibling repo findings from linked worktree: %v", findings)
+	}
+}
+
+func TestPlanCommitRepoPathFailsClosed(t *testing.T) {
+	for _, repoRoot := range []string{"", "relative/workflow"} {
+		if path, ok := planCommitRepoPath(repoRoot, planImplementationRef{Repo: "workflow-plugin-auth"}); ok {
+			t.Fatalf("planCommitRepoPath(%q) = %q, true; want false", repoRoot, path)
+		}
+	}
+	if path, ok := planCommitRepoPath(t.TempDir(), planImplementationRef{Repo: "workflow-plugin-auth"}); ok {
+		t.Fatalf("planCommitRepoPath(non-git dir) = %q, true; want false", path)
+	}
+}
+
+func TestValidatePlanDocsAcceptsSafeImplementationRepos(t *testing.T) {
+	repo := initPlanAuditGitRepo(t)
+	tests := []planImplementationRef{
+		{Repo: "workflow-plugin-auth"},
+		{Repo: "buymywishlist"},
+		{Repo: "workflow.plugin_auth-2"},
+		{Repo: "workflow", Commit: strings.TrimSpace(runPlanAuditGit(t, repo, "rev-parse", "HEAD"))},
+		{Commit: strings.TrimSpace(runPlanAuditGit(t, repo, "rev-parse", "HEAD"))},
+	}
+
+	for _, ref := range tests {
+		t.Run(ref.Repo, func(t *testing.T) {
+			doc := planDoc{
+				Path:           "docs/plans/a.md",
+				Title:          "Safe Repo",
+				Status:         "implemented",
+				Area:           "wfctl",
+				HasFrontmatter: true,
+				ImplementationRefs: []planImplementationRef{
+					ref,
+				},
+			}
+
+			findings := validatePlanDocs([]planDoc{doc}, repo)
+			if hasPlanFindingCode(findings, "invalid_implementation_repo") {
+				t.Fatalf("unexpected invalid_implementation_repo finding: %v", findings)
+			}
+		})
+	}
+}
+
+func TestRunAuditPlansReportsUnsafeImplementationRepo(t *testing.T) {
+	withFixedPlanAuditNow(t)
+	repo := initPlanAuditGitRepo(t)
+	dir := filepath.Join(repo, "docs/plans")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir plans: %v", err)
+	}
+	writePlanAuditDoc(t, dir, "unsafe.md", `---
+status: approved
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: ../workflow
+verification:
+  last_checked: 2026-04-25
+  commands: []
+  result: pass
+---
+
+# Unsafe Repo
+`)
+
+	var out strings.Builder
+	err := runAuditWithOutput([]string{"plans", "--dir", dir}, &out)
+	if err == nil {
+		t.Fatal("expected audit error")
+	}
+	if !strings.Contains(out.String(), "invalid_implementation_repo") {
+		t.Fatalf("missing invalid_implementation_repo in output:\n%s", out.String())
+	}
+}
+
 func TestRenderPlanIndex(t *testing.T) {
 	docs := []planDoc{
 		{
@@ -291,6 +491,14 @@ func hasPlanFindingCode(findings []planFinding, code string) bool {
 func initPlanAuditGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	return initPlanAuditGitRepoAt(t, dir)
+}
+
+func initPlanAuditGitRepoAt(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
 	runPlanAuditGit(t, dir, "init")
 	runPlanAuditGit(t, dir, "config", "user.email", "test@example.com")
 	runPlanAuditGit(t, dir, "config", "user.name", "Test User")

@@ -226,7 +226,7 @@ func summarizePluginAudit(results []pluginAuditResult) pluginAuditSummary {
 			summary.Canonical++
 		case "missing":
 			summary.Missing++
-		case "invalid-json":
+		case "invalid-json", "unreadable":
 			summary.Invalid++
 		case "top-level-types", "capabilities-array", "provider-resources":
 			summary.Legacy++

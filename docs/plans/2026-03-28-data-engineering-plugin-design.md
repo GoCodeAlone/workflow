@@ -14,11 +14,11 @@ implementation_refs:
   - repo: workflow-plugin-data-engineering
     commit: b50a5eb
 external_refs:
-  - "/Users/jon/workspace/workflow-plugin-data-engineering"
+  - "workflow-plugin-data-engineering"
 verification:
   last_checked: 2026-04-25
   commands:
-    - "git -C /Users/jon/workspace/workflow-plugin-data-engineering log --oneline --all"
+    - "git -C ../workflow-plugin-data-engineering log --oneline --all"
     - "GOWORK=off go test ./..."
   result: pass
 supersedes: []

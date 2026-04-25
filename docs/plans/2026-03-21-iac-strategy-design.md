@@ -14,7 +14,7 @@ implementation_refs:
   - repo: workflow
     commit: 31d4447
   - repo: workflow-plugin-aws
-    commit: 2b59558
+    commit: 2f59558
   - repo: workflow-plugin-gcp
     commit: 0193b61
   - repo: workflow-plugin-azure
@@ -24,11 +24,11 @@ implementation_refs:
   - repo: workflow-plugin-tofu
     commit: 36284bb
 external_refs:
-  - "/Users/jon/workspace/workflow-plugin-aws"
-  - "/Users/jon/workspace/workflow-plugin-gcp"
-  - "/Users/jon/workspace/workflow-plugin-azure"
-  - "/Users/jon/workspace/workflow-plugin-digitalocean"
-  - "/Users/jon/workspace/workflow-plugin-tofu"
+  - "workflow-plugin-aws"
+  - "workflow-plugin-gcp"
+  - "workflow-plugin-azure"
+  - "workflow-plugin-digitalocean"
+  - "workflow-plugin-tofu"
 verification:
   last_checked: 2026-04-25
   commands:
