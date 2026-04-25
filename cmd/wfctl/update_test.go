@@ -260,6 +260,29 @@ func TestVerifyAssetChecksum_Missing(t *testing.T) {
 	}
 }
 
+// TestVerifyAssetChecksum_SingleSpaceSeparatorRejected verifies that verifyAssetChecksum
+// uses the strict goreleaser two-space format (via parseChecksumsTxt). A checksums.txt
+// with a single-space separator should be rejected as malformed — not silently accepted
+// by a whitespace-splitting parser.
+func TestVerifyAssetChecksum_SingleSpaceSeparatorRejected(t *testing.T) {
+	data := []byte("fake binary content")
+	h := sha256.Sum256(data)
+	hash := hex.EncodeToString(h[:])
+	// Single space between hash and filename — NOT goreleaser format.
+	checksumsContent := fmt.Sprintf("%s wfctl-linux-amd64\n", hash)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(checksumsContent))
+	}))
+	defer srv.Close()
+
+	checksumAsset := &githubAsset{Name: "checksums.txt", BrowserDownloadURL: srv.URL}
+	err := verifyAssetChecksum(checksumAsset, "wfctl-linux-amd64", data)
+	if err == nil {
+		t.Fatal("expected error: single-space separator should be rejected as malformed")
+	}
+}
+
 func TestDownloadWithTimeout_Success(t *testing.T) {
 	body := []byte("hello world")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

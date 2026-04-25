@@ -290,6 +290,12 @@ func TestParseGitHubReleaseDownloadURL(t *testing.T) {
 			rawURL: "https://github.com:8080/owner/repo/releases/download/v1.0.0/file.tar.gz",
 			ok:     false,
 		},
+		{
+			// Any explicit port is rejected — including the HTTPS default :443.
+			// Explicit port = likely proxy or redirect; reject unconditionally.
+			rawURL: "https://github.com:443/owner/repo/releases/download/v1.0.0/file.tar.gz",
+			ok:     false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.rawURL, func(t *testing.T) {
@@ -614,5 +620,37 @@ func TestInstallFromURL_SkipChecksum_NonGitHub(t *testing.T) {
 	dir := t.TempDir()
 	if err := installFromURL(srv.URL+"/myplugin.tar.gz", dir, "", true); err != nil {
 		t.Fatalf("expected success with skipChecksum=true, got: %v", err)
+	}
+}
+
+// ---- flag validation tests (Finding 1) ----
+
+func TestRunPluginInstall_SHA256WithoutURL_Errors(t *testing.T) {
+	err := runPluginInstall([]string{"--sha256", strings.Repeat("a", 64)})
+	if err == nil {
+		t.Fatal("expected error: --sha256 without --url should be rejected")
+	}
+	if !strings.Contains(err.Error(), "--sha256") || !strings.Contains(err.Error(), "--url") {
+		t.Errorf("expected error to mention --sha256 and --url, got: %v", err)
+	}
+}
+
+func TestRunPluginInstall_SkipChecksumAndSHA256Contradiction_Errors(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	err := runPluginInstall([]string{
+		"--url", srv.URL + "/myplugin.tar.gz",
+		"--sha256", strings.Repeat("a", 64),
+		"--skip-checksum",
+	})
+	if err == nil {
+		t.Fatal("expected error: --skip-checksum and --sha256 are contradictory")
+	}
+	if !strings.Contains(err.Error(), "--skip-checksum") || !strings.Contains(err.Error(), "--sha256") {
+		t.Errorf("expected error to mention both flags, got: %v", err)
 	}
 }
