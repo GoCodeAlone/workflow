@@ -67,6 +67,28 @@ func TestParsePlanDocCRLFFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParsePlanDocAcceptsClosingFrontmatterAtEOF(t *testing.T) {
+	input := "---\nstatus: approved\narea: wfctl\nowner: workflow\nimplementation_refs: []\nverification:\n  last_checked: 2026-04-25\n  commands: []\n  result: pass\n---"
+	doc, findings := parsePlanDoc("docs/plans/eof.md", []byte(input), fixedPlanAuditNow(), 30*24*time.Hour)
+	if len(findings) != 0 {
+		t.Fatalf("findings = %v", findings)
+	}
+	if !doc.HasFrontmatter || doc.Status != "approved" {
+		t.Fatalf("unexpected doc: %+v", doc)
+	}
+}
+
+func TestParsePlanDocMissingClosingFrontmatterIsInvalid(t *testing.T) {
+	input := "---\nstatus: approved\narea: wfctl\nowner: workflow\n# missing closing delimiter\n"
+	_, findings := parsePlanDoc("docs/plans/malformed.md", []byte(input), fixedPlanAuditNow(), 30*24*time.Hour)
+	if !hasPlanFinding(findings, "ERROR", "invalid_frontmatter") {
+		t.Fatalf("expected invalid_frontmatter error, got %v", findings)
+	}
+	if hasPlanFinding(findings, "WARN", "missing_frontmatter") {
+		t.Fatalf("malformed frontmatter should not be reported as missing: %v", findings)
+	}
+}
+
 func TestParsePlanDocAcceptsScenariosArea(t *testing.T) {
 	input := `---
 status: approved

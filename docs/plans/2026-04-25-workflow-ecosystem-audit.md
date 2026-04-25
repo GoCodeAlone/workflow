@@ -431,8 +431,8 @@ Expected: PASS.
 Run:
 
 ```sh
-GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace
-GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --json
+GOWORK=off go run ./cmd/wfctl audit plugins --repo-root ..
+GOWORK=off go run ./cmd/wfctl audit plugins --repo-root .. --json
 ```
 
 Expected: exits 0 in non-strict mode; reports canonical, legacy, and missing manifest counts; JSON parses.
@@ -487,7 +487,7 @@ Run:
 
 ```sh
 GOWORK=off go run ./cmd/wfctl audit plans --dir docs/plans
-GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace
+GOWORK=off go run ./cmd/wfctl audit plugins --repo-root ..
 ```
 
 Expected: both exit 0 in default mode and print findings summaries.
@@ -515,6 +515,6 @@ Verification evidence:
 - `GOWORK=off go test ./cmd/wfctl -run 'TestRunAudit|TestParsePlanDoc|TestRenderPlanIndex|TestAuditPlugin' -count=1`
 - `GOWORK=off go test ./cmd/wfctl ./interfaces ./plugin/...`
 - `GOWORK=off go run ./cmd/wfctl audit plans --dir docs/plans`
-- `GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace`
+- `GOWORK=off go run ./cmd/wfctl audit plugins --repo-root ..`
 
 Dogfooding note: runtime verification exposed that `cmd/wfctl/wfctl.yaml` had regressed to a two-line config and no longer created the CLI workflow handler. The implementation restored the embedded CLI workflow and pipeline config, then used `wfctl audit ...` itself for runtime checks. Broader tests then exposed that `wfctl plugin remove` could rewrite an unrelated `wfctl.yaml`; that source issue was fixed so dogfood tests no longer clobber wfctl's own embedded CLI config.

@@ -89,7 +89,7 @@ func parsePlanDoc(path string, data []byte, now time.Time, staleAfter time.Durat
 	doc := planDoc{Path: path, Title: firstMarkdownTitle(data)}
 	var findings []planFinding
 
-	frontmatter, body, ok := splitPlanFrontmatter(data)
+	frontmatter, body, ok, malformed := splitPlanFrontmatter(data)
 	if !ok {
 		findings = append(findings, planFinding{
 			Path:    path,
@@ -100,6 +100,15 @@ func parsePlanDoc(path string, data []byte, now time.Time, staleAfter time.Durat
 		if doc.Title == "" {
 			doc.Title = firstMarkdownTitle(body)
 		}
+		return doc, findings
+	}
+	if malformed {
+		findings = append(findings, planFinding{
+			Path:    path,
+			Level:   "ERROR",
+			Code:    "invalid_frontmatter",
+			Message: "frontmatter opening delimiter has no closing delimiter",
+		})
 		return doc, findings
 	}
 
@@ -353,17 +362,21 @@ func renderPlanIndex(docs []planDoc) string {
 	return b.String()
 }
 
-func splitPlanFrontmatter(data []byte) ([]byte, []byte, bool) {
+func splitPlanFrontmatter(data []byte) ([]byte, []byte, bool, bool) {
 	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 	if !bytes.HasPrefix(normalized, []byte("---\n")) {
-		return nil, normalized, false
+		return nil, normalized, false, false
 	}
 	rest := normalized[len("---\n"):]
 	idx := bytes.Index(rest, []byte("\n---\n"))
-	if idx < 0 {
-		return nil, normalized, false
+	if idx >= 0 {
+		return rest[:idx], rest[idx+len("\n---\n"):], true, false
 	}
-	return rest[:idx], rest[idx+len("\n---\n"):], true
+	if bytes.HasSuffix(rest, []byte("\n---")) {
+		idx = len(rest) - len("\n---")
+		return rest[:idx], nil, true, false
+	}
+	return rest, nil, true, true
 }
 
 func firstMarkdownTitle(data []byte) string {
