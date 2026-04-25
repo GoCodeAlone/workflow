@@ -1089,7 +1089,7 @@ func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig
 		return fmt.Errorf("health check: no ProviderID available — Deploy must run first")
 	}
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType, ProviderID: p.lastProviderID}
-	if err := pollUntilHealthy(ctx, driver, ref, p.resourceName); err != nil {
+	if err := pollUntilHealthy(ctx, driver, ref, p.resourceName, cfg.EnvName); err != nil {
 		return err
 	}
 	return nil
@@ -1107,7 +1107,7 @@ var healthPollProgressInterval = 30 * time.Second
 // healthPollProgressInterval so the user can see the deploy is still running.
 // On timeout, if the driver implements interfaces.Troubleshooter, recent
 // provider-side events are fetched and printed in a structured failure block.
-func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name string) error {
+func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, envName string) error {
 	deadline := time.Now().Add(healthPollDefaultTimeout)
 	pollCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
@@ -1161,7 +1161,7 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 			if errors.Is(pollCtx.Err(), context.Canceled) {
 				return fmt.Errorf("plugin health check %q: cancelled", name)
 			}
-			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start)
+			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start, envName)
 		case <-time.After(interval):
 		}
 
@@ -1170,7 +1170,7 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 			if errors.Is(pollCtx.Err(), context.Canceled) {
 				return fmt.Errorf("plugin health check %q: cancelled", name)
 			}
-			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start)
+			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start, envName)
 		}
 
 		// Emit a heartbeat if nothing has been logged recently.
@@ -1182,7 +1182,7 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 
 // healthPollTimeout builds the timeout error, emits a structured failure block,
 // and auto-troubleshoots via the driver's Troubleshooter (if any) before returning.
-func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, lastMsg string, start time.Time) error {
+func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, lastMsg string, start time.Time, envName string) error {
 	elapsed := time.Since(start).Round(time.Second)
 
 	// Keep the returned error text identical to the pre-v0.18.10 format so
@@ -1200,7 +1200,17 @@ func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, re
 	fmt.Fprintln(os.Stderr)
 
 	em := detectCIProvider()
-	troubleshootAfterFailure(ctx, os.Stderr, driver, ref, errors.New(baseErr), 30*time.Second, em)
+	diags := troubleshootAfterFailure(ctx, os.Stderr, driver, ref, errors.New(baseErr), 30*time.Second, em)
+	if sumErr := WriteStepSummary(em, SummaryInput{
+		Operation:   "deploy",
+		Env:         envName,
+		Resource:    name,
+		Outcome:     "FAILED",
+		RootCause:   lastMsg,
+		Diagnostics: diags,
+	}); sumErr != nil {
+		log.Printf("step summary: %v (ignored)", sumErr)
+	}
 
 	return errors.New(baseErr)
 }
@@ -1226,19 +1236,21 @@ func emitDiagnostics(w io.Writer, resource string, diags []interfaces.Diagnostic
 // troubleshootAfterFailure probes driver for Troubleshooter, calls it with a bounded
 // timeout, and renders diagnostics via the provided emitter. All errors are swallowed —
 // observability is additive; it never masks the original failure.
-func troubleshootAfterFailure(ctx context.Context, w io.Writer, driver interface{}, ref interfaces.ResourceRef, origErr error, timeout time.Duration, em CIGroupEmitter) {
+// Returns the collected diagnostics so callers can include them in a step summary.
+func troubleshootAfterFailure(ctx context.Context, w io.Writer, driver interface{}, ref interfaces.ResourceRef, origErr error, timeout time.Duration, em CIGroupEmitter) []interfaces.Diagnostic {
 	ts, ok := driver.(interfaces.Troubleshooter)
 	if !ok {
-		return
+		return nil
 	}
 	tsCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	diags, err := ts.Troubleshoot(tsCtx, ref, origErr.Error())
 	if err != nil {
 		log.Printf("troubleshoot: %v (ignored)", err)
-		return
+		return nil
 	}
 	emitDiagnostics(w, ref.Name, diags, em)
+	return diags
 }
 
 // ── kubernetes provider ───────────────────────────────────────────────────────

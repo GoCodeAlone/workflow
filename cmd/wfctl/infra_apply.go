@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -170,7 +171,7 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 				}
 			}()
 		}
-		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store, os.Stderr)
+		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store, os.Stderr, envName)
 	}
 	for _, moduleRef := range groupOrder {
 		if err := applyGroup(moduleRef, groups[moduleRef]); err != nil {
@@ -190,7 +191,7 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 // Callers pass a nil store (or noopStateStore) when state persistence is not
 // required. w receives diagnostic output; callers typically pass os.Stderr but
 // tests may supply a bytes.Buffer to capture and assert the output.
-func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, w io.Writer) error {
+func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, w io.Writer, envName string) error {
 	if store == nil {
 		store = &noopStateStore{}
 	}
@@ -273,7 +274,17 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		// ref.Type is set when we have a single-action or single-spec plan.
 		if ref.Type != "" {
 			if rd, rdErr := provider.ResourceDriver(ref.Type); rdErr == nil {
-				troubleshootAfterFailure(ctx, w, rd, ref, err, infraApplyTroubleshootTimeout, em)
+				diags := troubleshootAfterFailure(ctx, w, rd, ref, err, infraApplyTroubleshootTimeout, em)
+				if sumErr := WriteStepSummary(em, SummaryInput{
+					Operation:   "apply",
+					Env:         envName,
+					Resource:    ref.Name,
+					Outcome:     "FAILED",
+					RootCause:   err.Error(),
+					Diagnostics: diags,
+				}); sumErr != nil {
+					log.Printf("step summary: %v (ignored)", sumErr)
+				}
 			}
 			// If ResourceDriver fails we fall through silently — diagnostics are
 			// best-effort and must not mask the original apply error.
