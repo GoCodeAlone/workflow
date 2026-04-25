@@ -588,6 +588,7 @@ func TestRemoteDriver_Troubleshoot_Success(t *testing.T) {
 	if _, hasOldRef := si.args["ref"]; hasOldRef {
 		t.Error("args must not contain a nested 'ref' struct — structpb cannot encode it")
 	}
+	// resource_type assertion lives in TestRemoteDriver_AllMethodsSendResourceType
 }
 
 func TestRemoteDriver_Troubleshoot_UnimplementedSilent(t *testing.T) {
@@ -608,6 +609,115 @@ func TestRemoteDriver_Troubleshoot_OtherErrorSurfaces(t *testing.T) {
 	_, err := d.Troubleshoot(context.Background(), interfaces.ResourceRef{Name: "x"}, "boom")
 	if err == nil {
 		t.Fatal("expected error to surface")
+	}
+}
+
+// TestRemoteDriver_AllMethodsSendResourceType is a regression gate for the
+// class of bug where a new or modified ResourceDriver method omits
+// "resource_type" from its InvokeService args map.  Every method on
+// remoteResourceDriver must include "resource_type": d.resourceType so the
+// plugin side can dispatch to the correct driver implementation.
+//
+// The Troubleshoot method regressed in v0.18.11 (missing resource_type);
+// this table test ensures the invariant holds across all 9 public methods.
+func TestRemoteDriver_AllMethodsSendResourceType(t *testing.T) {
+	ref := sampleRef()
+	spec := sampleSpec()
+	current := &interfaces.ResourceOutput{
+		ProviderID: "pid-123",
+		Name:       "my-resource",
+		Type:       "container_service",
+		Status:     "running",
+		Outputs:    map[string]any{"endpoint": "https://example.com"},
+		Sensitive:  map[string]bool{},
+	}
+
+	type testCase struct {
+		name string
+		call func(d *remoteResourceDriver, si *stubInvoker)
+		resp map[string]any
+	}
+
+	cases := []testCase{
+		{
+			name: "Create",
+			resp: sampleOutputMap(),
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_, _ = d.Create(context.Background(), spec)
+			},
+		},
+		{
+			name: "Read",
+			resp: sampleOutputMap(),
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_, _ = d.Read(context.Background(), ref)
+			},
+		},
+		{
+			name: "Update",
+			resp: sampleOutputMap(),
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_, _ = d.Update(context.Background(), ref, spec)
+			},
+		},
+		{
+			name: "Delete",
+			resp: map[string]any{},
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_ = d.Delete(context.Background(), ref)
+			},
+		},
+		{
+			name: "Diff",
+			resp: map[string]any{"needs_update": false, "needs_replace": false},
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_, _ = d.Diff(context.Background(), spec, current)
+			},
+		},
+		{
+			name: "HealthCheck",
+			resp: map[string]any{"healthy": true, "message": "ok"},
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_, _ = d.HealthCheck(context.Background(), ref)
+			},
+		},
+		{
+			name: "Scale",
+			resp: sampleOutputMap(),
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_, _ = d.Scale(context.Background(), ref, 3)
+			},
+		},
+		{
+			name: "SensitiveKeys",
+			resp: map[string]any{"keys": []any{"secret"}},
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_ = d.SensitiveKeys()
+			},
+		},
+		{
+			name: "Troubleshoot",
+			resp: map[string]any{"diagnostics": []any{}},
+			call: func(d *remoteResourceDriver, _ *stubInvoker) {
+				_, _ = d.Troubleshoot(context.Background(), ref, "boom")
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			si := &stubInvoker{resp: tc.resp}
+			d := newDriver(si)
+			tc.call(d, si)
+			got, ok := si.args["resource_type"]
+			if !ok {
+				t.Errorf("%s: args missing \"resource_type\" — plugin will return 'missing resource_type arg'", tc.name)
+				return
+			}
+			if got != "container_service" {
+				t.Errorf("%s: resource_type = %q, want %q", tc.name, got, "container_service")
+			}
+		})
 	}
 }
 
