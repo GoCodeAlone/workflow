@@ -82,17 +82,19 @@ logic layered on top (the lockfile fields already exist; using them is additive)
 **`installPluginFromManifest`** is modified as follows:
 
 ```
-download binary
+download binary archive
 if manifest SHA256 non-empty:
-    verify against manifest SHA256
+    verify archive against manifest SHA256
 elif binary URL is a GitHub release URL:
     fetch checksums.txt from same owner/repo/tag
-    if found: parse and verify
+    if found: parse and verify archive hash
     if not found or asset not listed: return error
     (unless --skip-checksum is set)
 else (non-GitHub URL, no SHA in manifest):
     return error unless --skip-checksum
-write verified SHA to lockfile entry
+extract binary from archive
+compute binary SHA256 post-extraction
+write binary SHA to WfctlLockPluginEntry.SHA256 in lockfile
 ```
 
 The `checksums.txt` format is the goreleaser standard:
@@ -107,9 +109,15 @@ derives the `checksums.txt` URL from the release asset URL (stripping the asset 
 appending `checksums.txt`), downloads it, parses each `<sha256hex>  <filename>` line, and
 returns the expected SHA256 hex for the asset matching the basename of `downloadURL`.
 
-`assetName` is derived internally as `path.Base(url.PathUnescape(downloadURL))` — the
-URL-decoded last path segment — so that URL-encoded characters in filenames are normalised
-before matching against plain-text `checksums.txt` entries.
+`assetName` is derived internally by parsing the URL first, then URL-decoding only the path
+component before extracting the basename — equivalent to:
+```go
+u, _ := url.Parse(downloadURL)
+assetName, _ := url.PathUnescape(path.Base(u.Path))
+```
+This avoids passing the full raw URL string (which includes query/fragment text) to
+`path.Base`, and ensures URL-encoded characters in filenames are decoded before matching
+against plain-text `checksums.txt` entries.
 
 The `wfctl update` path is refactored to call this same helper, replacing its current
 `findChecksumAsset(rel.Assets)` + `verifyAssetChecksum` pattern — the new helper derives the
@@ -125,9 +133,11 @@ When a user specifies `--url <url>` directly:
 - If the URL matches the GitHub release download pattern and no `--sha256` is given:
   auto-fetch `checksums.txt` via `lookupChecksumForURL`. Fail if the file is absent or the
   asset is not listed. The match uses the same constraints as `parseGitHubReleaseDownloadURL`:
-  HTTPS scheme only, host must be `github.com` or a `*.github.com` subdomain (the dot
-  separator prevents matching lookalike domains such as `evilgithub.com`), and path must be
-  exactly `/owner/repo/releases/download/tag/filename`.
+  HTTPS scheme only; host lowercased and compared — must equal `github.com` or have a
+  `.github.com` suffix (the dot separator prevents `evilgithub.com` from matching; trailing
+  dots stripped before comparison); no userinfo component (`user:pass@`) allowed; no
+  non-default port (port field must be empty, implying 443); path must be exactly
+  `/owner/repo/releases/download/tag/filename` (six non-empty segments).
 - For any other URL with no `--sha256`: fail with a clear error explaining how to provide
   a hash or use `--skip-checksum`.
 
@@ -160,11 +170,14 @@ Current write-back behavior:
   **not written** by any current code path — it must be pre-populated externally (e.g. by
   `wfctl plugin lock` or a future write-back).
 
-This design adds write-back of the binary SHA to `WfctlLockPluginEntry.SHA256` in the
-`installPluginFromManifest` path (first install from a registry manifest or `--url`). The
-`installFromWfctlLockfile` path already writes this field. On subsequent installs (same
-plugin version), the lockfile enforces the binary-level hash without a network round-trip
-— the `checksums.txt` fetch is skipped entirely for lockfile reinstalls.
+This design adds post-extraction binary SHA write-back to `WfctlLockPluginEntry.SHA256` in
+the `installPluginFromManifest` path (first install from a registry manifest or `--url`):
+after the archive is verified and extracted, `hashFileSHA256` is called on the installed
+binary and the result is written to `WfctlLockPluginEntry.SHA256`. The archive hash
+verified against `checksums.txt` is NOT written to the lockfile. The
+`installFromWfctlLockfile` path already performs this binary SHA write-back. On subsequent
+installs (same plugin version), the lockfile enforces the binary-level hash without a
+network round-trip — the `checksums.txt` fetch is skipped entirely for lockfile reinstalls.
 
 ### 5. Escape hatch: `--skip-checksum`
 
@@ -184,17 +197,29 @@ other flags.
 
 ## Error messages
 
-When verification fails or SHA is unavailable:
-
+**Case A — GitHub release URL, `checksums.txt` absent or asset not listed:**
 ```
-error: plugin "foo" downloaded from <url> has no SHA-256 in its manifest and
-no checksums.txt was found at <release-url>/checksums.txt.
+error: plugin "foo": no SHA-256 in manifest and checksums.txt not found or
+asset not listed at https://github.com/OWNER/REPO/releases/download/TAG/checksums.txt
 
 To proceed without verification (not recommended):
   wfctl plugin install --skip-checksum foo
 
 To add verification, ask the plugin author to publish a checksums.txt
 alongside their release assets (goreleaser does this automatically).
+```
+The derived checksums.txt URL is always printed verbatim so users can curl it manually.
+
+**Case B — Non-GitHub URL, no `--sha256` provided:**
+```
+error: plugin "foo": URL https://example.com/plugin.tar.gz is not a GitHub
+release URL and no --sha256 was provided; cannot verify integrity.
+
+Provide a checksum:
+  wfctl plugin install --url https://example.com/plugin.tar.gz --sha256 <hex>
+
+Or proceed without verification (not recommended):
+  wfctl plugin install --skip-checksum --url https://example.com/plugin.tar.gz foo
 ```
 
 When the checksum mismatches:
