@@ -76,6 +76,7 @@ var validPlanAreas = map[string]bool{
 	"ide":       true,
 	"core":      true,
 	"runtime":   true,
+	"scenarios": true,
 	"workflow":  true,
 	"bmw":       true,
 }

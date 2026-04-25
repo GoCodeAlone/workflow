@@ -67,6 +67,30 @@ func TestParsePlanDocCRLFFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParsePlanDocAcceptsScenariosArea(t *testing.T) {
+	input := `---
+status: approved
+area: scenarios
+owner: workflow
+implementation_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands: []
+  result: pass
+---
+
+# Scenario Plan
+`
+
+	doc, findings := parsePlanDoc("docs/plans/scenario.md", []byte(input), fixedPlanAuditNow(), 30*24*time.Hour)
+	if len(findings) != 0 {
+		t.Fatalf("findings = %v", findings)
+	}
+	if doc.Area != "scenarios" {
+		t.Fatalf("area = %q", doc.Area)
+	}
+}
+
 func TestValidatePlanDocFindings(t *testing.T) {
 	now := fixedPlanAuditNow()
 	input := `---
