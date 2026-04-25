@@ -28,7 +28,7 @@ verification:
     - npm run build
     - ./gradlew test
     - GOWORK=off go run ./cmd/wfctl audit plans --dir docs/plans
-    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace
+    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root ..
   result: partial
 supersedes: []
 superseded_by: []
