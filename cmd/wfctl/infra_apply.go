@@ -145,8 +145,8 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		groups[moduleRef].specs = append(groups[moduleRef].specs, spec)
 	}
 
-	// Load current state once; each provider call filters to its own resources.
-	current := loadCurrentState(cfgFile, envName)
+	// Load current state once; nil on first run is valid (no prior state).
+	current, _ := loadCurrentState(cfgFile, envName)
 
 	// Resolve the state store once; failure is non-fatal (state is best-effort).
 	store, storeErr := resolveStateStore(cfgFile, envName)

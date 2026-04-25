@@ -44,7 +44,10 @@ func runInfraOutputs(args []string) error {
 		return err
 	}
 
-	states := loadCurrentState(cfgFile, envFlag)
+	states, err := loadCurrentState(cfgFile, envFlag)
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
 
 	// When --env is used, module names in state are stored under their
 	// env-resolved names (e.g. "bmw-database" resolves to "bmw-staging-db"

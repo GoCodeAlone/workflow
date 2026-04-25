@@ -27,7 +27,6 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	orig := os.Stdout
 	os.Stdout = w
 	defer func() { os.Stdout = orig }() // panic-safe restore
-	defer w.Close()                     // unblocks goroutine if fn panics
 
 	var buf bytes.Buffer
 	done := make(chan struct{})
@@ -35,7 +34,7 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 
 	fnErr := fn()
 
-	w.Close() // close immediately on normal return so <-done doesn't block
+	w.Close() // single close — drives goroutine to EOF; deferred orig restore runs after
 	<-done
 	return buf.String(), fnErr
 }
@@ -50,7 +49,6 @@ func captureStderr(t *testing.T, fn func() error) (string, error) {
 	orig := os.Stderr
 	os.Stderr = w
 	defer func() { os.Stderr = orig }() // panic-safe restore
-	defer w.Close()                     // unblocks goroutine if fn panics
 
 	var buf bytes.Buffer
 	done := make(chan struct{})
@@ -58,7 +56,7 @@ func captureStderr(t *testing.T, fn func() error) (string, error) {
 
 	fnErr := fn()
 
-	w.Close() // close immediately on normal return so <-done doesn't block
+	w.Close() // single close — drives goroutine to EOF; deferred orig restore runs after
 	<-done
 	return buf.String(), fnErr
 }
