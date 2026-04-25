@@ -92,6 +92,19 @@ func TestParseChecksumsTxt_EmptyHashOrName(t *testing.T) {
 	}
 }
 
+func TestParseChecksumsTxt_ThreeSpacesRejected(t *testing.T) {
+	// Three spaces between hash and filename: the name would start with a space,
+	// causing silent lookup failures if not caught.
+	body := "abc123   filename.tar.gz\n"
+	_, err := parseChecksumsTxt(body)
+	if err == nil {
+		t.Fatal("expected error for 3-space separator")
+	}
+	if !strings.Contains(err.Error(), "exactly two spaces") {
+		t.Errorf("expected 'exactly two spaces' in error, got: %v", err)
+	}
+}
+
 // ---- lookupChecksumForURL ----
 
 func TestLookupChecksumForURL_Found(t *testing.T) {

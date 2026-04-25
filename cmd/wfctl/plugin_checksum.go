@@ -30,6 +30,10 @@ func parseChecksumsTxt(body string) (map[string]string, error) {
 		if hash == "" || name == "" {
 			return nil, fmt.Errorf("malformed checksums.txt line: %q (empty hash or filename)", line)
 		}
+		// Reject 3+ spaces: name would start with a space, causing silent lookup failures.
+		if strings.HasPrefix(name, " ") {
+			return nil, fmt.Errorf("malformed checksums.txt line: %q (expected exactly two spaces between hash and filename)", line)
+		}
 		result[name] = hash
 	}
 	return result, nil

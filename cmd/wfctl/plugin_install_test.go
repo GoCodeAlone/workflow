@@ -531,6 +531,24 @@ func TestInstallPluginFromManifest_SkipChecksumBypasses(t *testing.T) {
 	}
 }
 
+// TestInstallPluginFromManifest_SkipChecksumBypassesManifestSHA verifies that
+// skipChecksum=true is a full bypass: even when the manifest provides a SHA256,
+// verification is skipped (the wrong hash must not cause a failure).
+func TestInstallPluginFromManifest_SkipChecksumBypassesManifestSHA(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	// Wrong SHA — would fail without skipChecksum, must succeed with it.
+	dir := t.TempDir()
+	manifest := makeTestManifest("myplugin", srv.URL+"/myplugin.tar.gz", strings.Repeat("0", 64))
+	if err := installPluginFromManifest(dir, "myplugin", manifest, nil, true); err != nil {
+		t.Fatalf("skipChecksum=true should bypass manifest SHA verification, got: %v", err)
+	}
+}
+
 func TestInstallPluginFromManifest_ManifestSHAVerified(t *testing.T) {
 	archiveData := makeTestTarGz(t, "myplugin")
 	h := sha256.Sum256(archiveData)

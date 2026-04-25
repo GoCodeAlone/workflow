@@ -257,24 +257,28 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 	}
 
 	// Integrity check: fail closed unless the checksum can be verified.
-	if dl.SHA256 != "" {
-		// Manifest provides SHA256 directly — verify it.
-		if err := verifyChecksum(data, dl.SHA256); err != nil {
-			return err
+	// skipChecksum bypasses ALL verification — honour it first so that callers
+	// who set the flag never get a surprise verification failure.
+	if !skipChecksum {
+		if dl.SHA256 != "" {
+			// Manifest provides SHA256 directly — verify it.
+			if err := verifyChecksum(data, dl.SHA256); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "Checksum verified.\n")
+		} else if _, _, _, _, isGH := parseGitHubReleaseDownloadURL(dl.URL); isGH {
+			// GitHub release URL without a manifest SHA — auto-fetch checksums.txt.
+			expectedSHA, lookupErr := lookupChecksumForURL(dl.URL)
+			if lookupErr != nil {
+				return fmt.Errorf("auto-fetch checksum for %q: %w", dl.URL, lookupErr)
+			}
+			if err := verifyChecksum(data, expectedSHA); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "Checksum verified (auto-fetched from checksums.txt).\n")
+		} else {
+			return fmt.Errorf("cannot verify integrity of %q: no SHA256 in manifest and URL is not a GitHub release download (use --skip-checksum to bypass)", dl.URL)
 		}
-		fmt.Fprintf(os.Stderr, "Checksum verified.\n")
-	} else if _, _, _, _, isGH := parseGitHubReleaseDownloadURL(dl.URL); isGH {
-		// GitHub release URL without a manifest SHA — auto-fetch checksums.txt.
-		expectedSHA, lookupErr := lookupChecksumForURL(dl.URL)
-		if lookupErr != nil {
-			return fmt.Errorf("auto-fetch checksum for %q: %w", dl.URL, lookupErr)
-		}
-		if err := verifyChecksum(data, expectedSHA); err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stderr, "Checksum verified (auto-fetched from checksums.txt).\n")
-	} else if !skipChecksum {
-		return fmt.Errorf("cannot verify integrity of %q: no SHA256 in manifest and URL is not a GitHub release download (use --skip-checksum to bypass)", dl.URL)
 	}
 
 	// Emit install_verify hook after download and before extraction (opt-in via req.Verify).
@@ -629,21 +633,24 @@ func installFromURL(rawURL, pluginDir, expectedSHA256 string, skipChecksum bool)
 	}
 
 	// Integrity check: fail closed unless the checksum can be verified.
-	if expectedSHA256 != "" {
-		if err := verifyChecksum(data, expectedSHA256); err != nil {
-			return err
+	// skipChecksum bypasses ALL verification — honour it first.
+	if !skipChecksum {
+		if expectedSHA256 != "" {
+			if err := verifyChecksum(data, expectedSHA256); err != nil {
+				return err
+			}
+		} else if _, _, _, _, isGH := parseGitHubReleaseDownloadURL(rawURL); isGH {
+			// GitHub release URL — auto-fetch checksums.txt.
+			expectedSHA, lookupErr := lookupChecksumForURL(rawURL)
+			if lookupErr != nil {
+				return fmt.Errorf("auto-fetch checksum for %q: %w", rawURL, lookupErr)
+			}
+			if err := verifyChecksum(data, expectedSHA); err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("cannot verify integrity of %q: no --sha256 provided and URL is not a GitHub release download (use --skip-checksum to bypass)", rawURL)
 		}
-	} else if _, _, _, _, isGH := parseGitHubReleaseDownloadURL(rawURL); isGH {
-		// GitHub release URL — auto-fetch checksums.txt.
-		expectedSHA, lookupErr := lookupChecksumForURL(rawURL)
-		if lookupErr != nil {
-			return fmt.Errorf("auto-fetch checksum for %q: %w", rawURL, lookupErr)
-		}
-		if err := verifyChecksum(data, expectedSHA); err != nil {
-			return err
-		}
-	} else if !skipChecksum {
-		return fmt.Errorf("cannot verify integrity of %q: no --sha256 provided and URL is not a GitHub release download (use --skip-checksum to bypass)", rawURL)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "wfctl-plugin-*")
