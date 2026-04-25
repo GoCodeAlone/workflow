@@ -59,7 +59,8 @@ func runInfraOutputs(args []string) error {
 
 	// Collect modules with non-empty outputs, in stable alphabetical order.
 	var entries []infraOutputEntry
-	for _, s := range states {
+	for i := range states {
+		s := &states[i]
 		if len(s.Outputs) == 0 {
 			continue
 		}
