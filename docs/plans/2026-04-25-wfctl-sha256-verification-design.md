@@ -134,15 +134,25 @@ unless `--skip-checksum` is passed.
 
 ### 4. Lockfile write-back
 
-After a successful verified install (via manifest SHA or auto-fetched checksums.txt),
-write the verified SHA256 to `WfctlLockPluginEntry.SHA256` in `.wfctl-lock.yaml` — the
-top-level per-plugin binary hash field. On subsequent installs (same plugin version), this
-field is already checked and enforced by `installFromLockfile` / `installFromWfctlLockfile`
-(both paths already hard-fail on SHA mismatch when the field is non-empty).
+Plugin releases ship as archives (e.g. `.tar.gz`). The integrity check verifies the
+**archive** SHA against `checksums.txt` (or the manifest `sha256` field). After extraction,
+the installed **binary** may have a different hash than the archive.
 
-Note: `WfctlLockPlatform.SHA256` is a separate per-platform hash for the download archive.
-This design writes to `WfctlLockPluginEntry.SHA256` (the installed binary hash), matching
-the write-back pattern in `installFromWfctlLockfile`.
+Two distinct SHAs are involved:
+
+- **Archive SHA** — verified at download time against `checksums.txt` (or manifest). This
+  is what goreleaser signs and publishes. Stored in `WfctlLockPlatform.SHA256` (the
+  per-platform archive hash already recorded by the existing lockfile write-back path in
+  `installFromWfctlLockfile`).
+- **Binary SHA** — computed after extraction from the archive. Stored in
+  `WfctlLockPluginEntry.SHA256` (the top-level per-plugin installed-binary hash). This is
+  the value enforced on lockfile reinstalls by `installFromLockfile` and
+  `installFromWfctlLockfile` (both already hard-fail on mismatch when non-empty).
+
+This design adds write-back of the **binary SHA** to `WfctlLockPluginEntry.SHA256` after a
+successful first install. On subsequent installs (same plugin version), the lockfile
+enforces this binary-level hash without requiring a network round-trip — the archive SHA
+path (`checksums.txt` fetch) is skipped entirely for lockfile reinstalls.
 
 ### 5. Escape hatch: `--skip-checksum`
 
