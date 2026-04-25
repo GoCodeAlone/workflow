@@ -1,12 +1,19 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -406,5 +413,206 @@ func TestDownloadURL_PublicReleaseNoToken(t *testing.T) {
 	// No auth header should be sent when there is no token.
 	if hdr := ct.gotHeader(); hdr != "" {
 		t.Errorf("expected no Authorization header with no token, got %q", hdr)
+	}
+}
+
+// ---- test helpers for archive-based install tests ----
+
+// makeTestTarGz builds a minimal .tar.gz with a plugin binary + plugin.json so
+// installPluginFromManifest / installFromURL can successfully extract and install it.
+func makeTestTarGz(t *testing.T, pluginName string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	topDir := pluginName + "-" + runtime.GOOS + "-" + runtime.GOARCH
+	pjContent := fmt.Sprintf(`{"name":%q,"version":"1.0.0","author":"test","description":"test plugin"}`, pluginName)
+	addTestTarFile(t, tw, topDir+"/plugin.json", 0640, []byte(pjContent))
+	addTestTarFile(t, tw, topDir+"/"+pluginName, 0750, []byte("#!/bin/sh\necho ok\n"))
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func addTestTarFile(t *testing.T, tw *tar.Writer, name string, mode int64, data []byte) {
+	t.Helper()
+	hdr := &tar.Header{Name: name, Mode: mode, Size: int64(len(data)), Typeflag: tar.TypeReg}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("write tar header for %s: %v", name, err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		t.Fatalf("write tar data for %s: %v", name, err)
+	}
+}
+
+// makeTestManifest returns a RegistryManifest for the current GOOS/GOARCH.
+func makeTestManifest(name, downloadURL, sha256sum string) *RegistryManifest {
+	return &RegistryManifest{
+		Name:        name,
+		Version:     "1.0.0",
+		Author:      "test",
+		Description: "test plugin",
+		Type:        "external",
+		Tier:        "community",
+		License:     "MIT",
+		Downloads: []PluginDownload{
+			{OS: runtime.GOOS, Arch: runtime.GOARCH, URL: downloadURL, SHA256: sha256sum},
+		},
+	}
+}
+
+// ---- verifyChecksum error format ----
+
+func TestVerifyChecksum_MismatchFormat(t *testing.T) {
+	err := verifyChecksum([]byte("data"), strings.Repeat("0", 64))
+	if err == nil {
+		t.Fatal("expected checksum mismatch error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "got:") || !strings.Contains(msg, "want:") {
+		t.Errorf("expected 'got:'/'want:' in error, got: %s", msg)
+	}
+	if !strings.Contains(msg, "supply-chain") {
+		t.Errorf("expected supply-chain mention in error, got: %s", msg)
+	}
+}
+
+func TestVerifyChecksum_Match(t *testing.T) {
+	data := []byte("hello")
+	h := sha256.Sum256(data)
+	if err := verifyChecksum(data, hex.EncodeToString(h[:])); err != nil {
+		t.Fatalf("expected no error for correct checksum: %v", err)
+	}
+}
+
+// ---- installPluginFromManifest fail-closed tests ----
+
+func TestInstallPluginFromManifest_FailsNonGitHubNoSHA(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	manifest := makeTestManifest("myplugin", srv.URL+"/myplugin.tar.gz", "")
+	err := installPluginFromManifest(dir, "myplugin", manifest, nil, false)
+	if err == nil {
+		t.Fatal("expected error: non-GitHub URL with no SHA should fail closed")
+	}
+	if !strings.Contains(err.Error(), "cannot verify integrity") {
+		t.Errorf("expected 'cannot verify integrity' in error, got: %v", err)
+	}
+}
+
+func TestInstallPluginFromManifest_SkipChecksumBypasses(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	manifest := makeTestManifest("myplugin", srv.URL+"/myplugin.tar.gz", "")
+	if err := installPluginFromManifest(dir, "myplugin", manifest, nil, true); err != nil {
+		t.Fatalf("expected success with skipChecksum=true, got: %v", err)
+	}
+}
+
+func TestInstallPluginFromManifest_ManifestSHAVerified(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	h := sha256.Sum256(archiveData)
+	goodSHA := hex.EncodeToString(h[:])
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	// Correct SHA: must succeed.
+	dir1 := t.TempDir()
+	if err := installPluginFromManifest(dir1, "myplugin", makeTestManifest("myplugin", srv.URL+"/myplugin.tar.gz", goodSHA), nil, false); err != nil {
+		t.Fatalf("expected success with correct SHA, got: %v", err)
+	}
+
+	// Wrong SHA: must fail with got/want format.
+	dir2 := t.TempDir()
+	err := installPluginFromManifest(dir2, "myplugin", makeTestManifest("myplugin", srv.URL+"/myplugin.tar.gz", strings.Repeat("0", 64)), nil, false)
+	if err == nil {
+		t.Fatal("expected checksum mismatch error")
+	}
+	if !strings.Contains(err.Error(), "got:") {
+		t.Errorf("expected 'got:' in mismatch error, got: %v", err)
+	}
+}
+
+// ---- installFromURL fail-closed tests ----
+
+func TestInstallFromURL_NonGitHubNoSHAFails(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	err := installFromURL(srv.URL+"/myplugin.tar.gz", dir, "", false)
+	if err == nil {
+		t.Fatal("expected error: non-GitHub URL with no SHA should fail closed")
+	}
+	if !strings.Contains(err.Error(), "cannot verify integrity") {
+		t.Errorf("expected 'cannot verify integrity' in error, got: %v", err)
+	}
+}
+
+func TestInstallFromURL_WithExpectedSHA256_Correct(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	h := sha256.Sum256(archiveData)
+	sha := hex.EncodeToString(h[:])
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if err := installFromURL(srv.URL+"/myplugin.tar.gz", dir, sha, false); err != nil {
+		t.Fatalf("expected success with correct SHA, got: %v", err)
+	}
+}
+
+func TestInstallFromURL_WithExpectedSHA256_Wrong(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	err := installFromURL(srv.URL+"/myplugin.tar.gz", dir, strings.Repeat("0", 64), false)
+	if err == nil {
+		t.Fatal("expected checksum mismatch error")
+	}
+	if !strings.Contains(err.Error(), "supply-chain") {
+		t.Errorf("expected supply-chain mention in error, got: %v", err)
+	}
+}
+
+func TestInstallFromURL_SkipChecksum_NonGitHub(t *testing.T) {
+	archiveData := makeTestTarGz(t, "myplugin")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archiveData)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if err := installFromURL(srv.URL+"/myplugin.tar.gz", dir, "", true); err != nil {
+		t.Fatalf("expected success with skipChecksum=true, got: %v", err)
 	}
 }
