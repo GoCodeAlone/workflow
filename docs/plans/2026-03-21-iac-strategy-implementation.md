@@ -1,3 +1,47 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 5f8b3b9
+  - repo: workflow
+    commit: 9157e1c
+  - repo: workflow
+    commit: a5148e7
+  - repo: workflow
+    commit: 0ded7f4
+  - repo: workflow
+    commit: 31d4447
+  - repo: workflow
+    commit: 4ec75b7
+  - repo: workflow-plugin-aws
+    commit: 2b59558
+  - repo: workflow-plugin-gcp
+    commit: 0193b61
+  - repo: workflow-plugin-azure
+    commit: f7278b9
+  - repo: workflow-plugin-digitalocean
+    commit: 0aa070c
+  - repo: workflow-plugin-tofu
+    commit: 36284bb
+external_refs:
+  - "/Users/jon/workspace/workflow-plugin-aws"
+  - "/Users/jon/workspace/workflow-plugin-gcp"
+  - "/Users/jon/workspace/workflow-plugin-azure"
+  - "/Users/jon/workspace/workflow-plugin-digitalocean"
+  - "/Users/jon/workspace/workflow-plugin-tofu"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "git log --oneline --all -- interfaces/iac_provider.go interfaces/iac_resource_driver.go interfaces/iac_state.go interfaces/iac_sizing.go platform cmd/wfctl/infra.go cmd/wfctl/ci.go module/infra_module.go"
+    - "GOWORK=off go test ./interfaces ./platform ./cmd/wfctl -run 'TestSize|TestResourceSpec|TestComputePlan|TestResolveSizing|TestGenerateCI|TestCIRun|TestInfra'"
+    - "GOWORK=off go test ./... (workflow-plugin-aws, workflow-plugin-gcp, workflow-plugin-azure, workflow-plugin-digitalocean, workflow-plugin-tofu)"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Workflow IaC Strategy — Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

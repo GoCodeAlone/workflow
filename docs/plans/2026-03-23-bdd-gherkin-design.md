@@ -1,3 +1,25 @@
+---
+status: implemented
+area: core
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 7baff63
+  - repo: workflow
+    commit: 548cce5
+  - repo: workflow
+    commit: 5cdbcc1
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"package bdd|wftest|RunFeatures|godog|ExecutePipeline|MockStep|WithYAML|FireEvent|RunYAML|yaml test\" wftest go.mod docs -g '!docs/plans/**'"
+    - "GOWORK=off go test ./wftest ./wftest/bdd"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wftest/bdd — Gherkin BDD Support for Workflow Testing
 
 **Date:** 2026-03-23

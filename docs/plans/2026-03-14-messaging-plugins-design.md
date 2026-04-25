@@ -1,3 +1,32 @@
+---
+status: implemented
+area: plugins
+owner: workflow
+implementation_refs:
+  - repo: workflow-plugin-messaging-core
+    commit: e68b2ab
+  - repo: workflow-plugin-discord
+    commit: 505cee9
+  - repo: workflow-plugin-slack
+    commit: 39124bf
+  - repo: workflow-plugin-teams
+    commit: ee881db
+external_refs:
+  - "workflow-scenarios: scenarios/59-discord-messaging"
+  - "workflow-scenarios: scenarios/60-slack-messaging"
+  - "workflow-scenarios: scenarios/61-teams-messaging"
+  - "workflow-scenarios: scenarios/62-cross-platform-messaging"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "jq -r '.name, (.capabilities.stepTypes // .stepTypes // [] | length), (.capabilities.triggerTypes // .triggerTypes // [] | length)' /Users/jon/workspace/workflow-plugin-{discord,slack,teams}/plugin.json"
+    - "rg -n \"MessagingProvider|EventListener\" /Users/jon/workspace/workflow-plugin-messaging-core"
+    - "rg -n \"discord-messaging|slack-messaging|teams-messaging|cross-platform-messaging\" /Users/jon/workspace/workflow-scenarios"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Messaging Platform Plugins Design
 
 ## Overview

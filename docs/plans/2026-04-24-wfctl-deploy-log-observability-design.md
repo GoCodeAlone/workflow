@@ -1,3 +1,31 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: dc9d918
+  - repo: workflow
+    commit: b0dce2f
+  - repo: workflow
+    commit: c44ea53
+  - repo: workflow
+    commit: b250e8e
+  - repo: workflow
+    commit: 11a43c9
+  - repo: workflow
+    commit: c02f228
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - rg -n "Troubleshooter|Diagnostic|troubleshootAfterFailure|emitDiagnostics|WriteStepSummary" interfaces cmd/wfctl
+    - GOWORK=off go test ./interfaces ./config ./platform ./cmd/wfctl -run 'Test(Migration|Tenant|Canonical|BuildHook|PluginCLI|ScaffoldDockerfile|ResolveForEnv|ConfigHash|ApplyInfraModules|Diagnostic|Troubleshoot|ProviderID|ValidateProviderID|PluginInstall|ParseChecksums|Audit|WfctlManifest|WfctlLockfile|PluginLock|PluginAdd|PluginRemove|MigratePlugins|InfraOutputs)' -count=1
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wfctl Deploy-Log Observability — Design
 
 **Status:** Approved (autonomous pipeline, 2026-04-24)

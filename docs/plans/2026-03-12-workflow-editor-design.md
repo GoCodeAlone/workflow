@@ -1,3 +1,26 @@
+---
+status: implemented
+area: editor
+owner: workflow
+implementation_refs:
+  - repo: workflow-editor
+    commit: 53ff6b6
+  - repo: workflow-vscode
+    commit: 3acb100
+  - repo: workflow-jetbrains
+    commit: 7e2582b
+external_refs:
+  - "workflow ui/package.json depends on @gocodealone/workflow-editor"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"WorkflowEditor|@gocodealone/workflow-editor|webview|JCEF\" /Users/jon/workspace/workflow-editor /Users/jon/workspace/workflow-vscode /Users/jon/workspace/workflow-jetbrains ui"
+    - "git -C /Users/jon/workspace/workflow-editor log --oneline --max-count=5"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Design: Visual Workflow Editor for IDE Plugins
 
 **Date:** 2026-03-12

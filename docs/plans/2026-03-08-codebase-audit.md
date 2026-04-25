@@ -1,3 +1,30 @@
+---
+status: implemented
+area: ecosystem
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 87fe0d2
+  - repo: workflow
+    commit: 9d842bc
+  - repo: workflow
+    commit: f678468
+  - repo: workflow-scenarios
+    commit: 99e743d
+  - repo: workflow-scenarios-private
+    commit: 3173fd1
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"ErrNotImplemented|SecurityScannerProvider|DockerSandbox|sandbox.docker|scan_sast|scan_container|scan_deps\" module plugins sandbox"
+    - "find /Users/jon/workspace/workflow-scenarios /Users/jon/workspace/workflow-scenarios-private -maxdepth 3 -iname '*security*' -o -iname '*supply*' -o -iname '*sandbox*' -o -iname '*data-protection*'"
+    - "GOWORK=off go test ./sandbox ./plugins/scanner ./module -run 'Test.*Docker|Test.*Scan|Test.*Scanner|Test.*SecurityScanner'"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Codebase Audit Implementation Plan
 
 **Goal:** Fix all stubbed code in the workflow engine, implement DockerSandbox, and build test scenarios for all untested plugins.

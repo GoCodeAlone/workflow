@@ -1,3 +1,25 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 119deea
+  - repo: workflow
+    commit: 31d4447
+  - repo: workflow
+    commit: fe295a7
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'rg -n "type CIConfig|func runCI|secrets detect|secrets setup" config cmd docs -S'
+    - 'git log --oneline --all -- config/ci_config.go config/environments_config.go config/secrets_config.go cmd/wfctl/ci.go cmd/wfctl/secrets.go'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Tier 1 Platform Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

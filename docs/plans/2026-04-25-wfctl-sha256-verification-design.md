@@ -1,3 +1,25 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: e913396
+  - repo: workflow
+    commit: 459e9b6
+  - repo: workflow
+    commit: ab6edc2
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - rg -n "checksums.txt|skip-checksum|sha256|lookupChecksumForURL|parseChecksumsTxt" cmd/wfctl plugin config
+    - GOWORK=off go test ./interfaces ./config ./platform ./cmd/wfctl -run 'Test(Migration|Tenant|Canonical|BuildHook|PluginCLI|ScaffoldDockerfile|ResolveForEnv|ConfigHash|ApplyInfraModules|Diagnostic|Troubleshoot|ProviderID|ValidateProviderID|PluginInstall|ParseChecksums|Audit|WfctlManifest|WfctlLockfile|PluginLock|PluginAdd|PluginRemove|MigratePlugins|InfraOutputs)' -count=1
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Design: wfctl SHA-256 Verification by Default for Binary Downloads
 
 **Date**: 2026-04-25

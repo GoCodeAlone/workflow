@@ -1,3 +1,27 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 5e7edee
+  - repo: workflow
+    commit: 3ee2328
+  - repo: workflow
+    commit: 53a2d4f
+  - repo: workflow
+    commit: 6042cb2
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - rg -n "ProviderIDValidator|ProviderIDFormat|ValidateProviderID" interfaces cmd/wfctl
+    - GOWORK=off go test ./interfaces ./config ./platform ./cmd/wfctl -run 'Test(Migration|Tenant|Canonical|BuildHook|PluginCLI|ScaffoldDockerfile|ResolveForEnv|ConfigHash|ApplyInfraModules|Diagnostic|Troubleshoot|ProviderID|ValidateProviderID|PluginInstall|ParseChecksums|Audit|WfctlManifest|WfctlLockfile|PluginLock|PluginAdd|PluginRemove|MigratePlugins|InfraOutputs)' -count=1
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Typed ProviderID Validation at wfctl ↔ Plugin Boundaries — Design
 
 **Status:** Approved (autonomous pipeline, 2026-04-24)
