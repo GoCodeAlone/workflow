@@ -272,22 +272,27 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		// Resolve the ResourceDriver for the failed resource type so
 		// troubleshootAfterFailure can reach a Troubleshooter implementation.
 		// ref.Type is set when we have a single-action or single-spec plan.
+		var diags []interfaces.Diagnostic
 		if ref.Type != "" {
 			if rd, rdErr := provider.ResourceDriver(ref.Type); rdErr == nil {
-				diags := troubleshootAfterFailure(ctx, w, rd, ref, err, infraApplyTroubleshootTimeout, em)
-				if sumErr := WriteStepSummary(em, SummaryInput{
-					Operation:   "apply",
-					Env:         envName,
-					Resource:    ref.Name,
-					Outcome:     "FAILED",
-					RootCause:   err.Error(),
-					Diagnostics: diags,
-				}); sumErr != nil {
-					log.Printf("step summary: %v (ignored)", sumErr)
-				}
+				diags = troubleshootAfterFailure(ctx, w, rd, ref, err, infraApplyTroubleshootTimeout, em)
 			}
 			// If ResourceDriver fails we fall through silently — diagnostics are
 			// best-effort and must not mask the original apply error.
+		}
+		// WriteStepSummary is called unconditionally so a GHA step summary is
+		// written even when ref.Type is empty (multi-resource plan) or
+		// ResourceDriver is unavailable; diagnostics are empty in those cases
+		// but the failure header and root cause are still useful.
+		if sumErr := WriteStepSummary(em, SummaryInput{
+			Operation:   "apply",
+			Env:         envName,
+			Resource:    ref.Name,
+			Outcome:     "FAILED",
+			RootCause:   err.Error(),
+			Diagnostics: diags,
+		}); sumErr != nil {
+			log.Printf("step summary: %v (ignored)", sumErr)
 		}
 		return fmt.Errorf("apply: %w", err)
 	}

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -111,5 +113,46 @@ func TestInfraApply_NonTroubleshooterNocrash(t *testing.T) {
 	}
 	if diagBuf.Len() != 0 {
 		t.Errorf("non-troubleshooter should produce no diagnostic output, got: %q", diagBuf.String())
+	}
+}
+
+// TestInfraApply_WritesStepSummaryOnFailure verifies that applyWithProviderAndStore
+// writes a GHA step summary even when the provider has no Troubleshooter.
+// TDD invariant: removing the WriteStepSummary call causes this test to fail.
+func TestInfraApply_WritesStepSummaryOnFailure(t *testing.T) {
+	tmp := t.TempDir()
+	summaryPath := filepath.Join(tmp, "summary.md")
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+
+	diags := []interfaces.Diagnostic{
+		{ID: "dep-abc", Phase: "pre_deploy", Cause: "migration failed", At: mustTime("2026-04-24T00:00:00Z")},
+	}
+	tsCalls := 0
+	provider := &applyFailProvider{
+		applyErr: errors.New("API error"),
+		tsDriver: &troubleshootingRD{diags: diags, tsCalls: &tsCalls},
+	}
+
+	infraApplyTroubleshootTimeout = 5 * time.Second
+	defer func() { infraApplyTroubleshootTimeout = 30 * time.Second }()
+
+	specs := []interfaces.ResourceSpec{{Name: "bmw-staging", Type: "app_platform"}}
+	var diagBuf bytes.Buffer
+	_ = applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "staging")
+
+	data, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("step summary file not written: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "## wfctl: apply staging — FAILED") {
+		t.Errorf("summary missing failure header: %q", got)
+	}
+	if !strings.Contains(got, "bmw-staging") {
+		t.Errorf("summary missing resource name: %q", got)
+	}
+	if !strings.Contains(got, "migration failed") {
+		t.Errorf("summary missing diagnostic cause: %q", got)
 	}
 }

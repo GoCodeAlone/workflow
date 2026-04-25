@@ -1199,6 +1199,10 @@ func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, re
 	}
 	fmt.Fprintln(os.Stderr)
 
+	rootCause := lastMsg
+	if rootCause == "" {
+		rootCause = "deploy timed out"
+	}
 	em := detectCIProvider()
 	diags := troubleshootAfterFailure(ctx, os.Stderr, driver, ref, errors.New(baseErr), 30*time.Second, em)
 	if sumErr := WriteStepSummary(em, SummaryInput{
@@ -1206,7 +1210,7 @@ func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, re
 		Env:         envName,
 		Resource:    name,
 		Outcome:     "FAILED",
-		RootCause:   lastMsg,
+		RootCause:   rootCause,
 		Diagnostics: diags,
 	}); sumErr != nil {
 		log.Printf("step summary: %v (ignored)", sumErr)
