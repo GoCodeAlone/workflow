@@ -198,9 +198,10 @@ func TestInfraImport_ConfigAwareWithIDUsesProviderImport(t *testing.T) {
 	}
 }
 
-func TestInfraImport_ConfigAwareWithoutIDReadsByDesiredName(t *testing.T) {
+func TestInfraImport_ConfigAwareWithoutIDReadsByDesiredDomainProviderID(t *testing.T) {
 	cfgPath, _ := writeImportConfig(t, t.TempDir())
 	driver := &readDriver{
+		expectedProviderID: "example.com",
 		readOut: &interfaces.ResourceOutput{
 			Name:       "site-dns",
 			Type:       "infra.dns",
@@ -231,8 +232,8 @@ func TestInfraImport_ConfigAwareWithoutIDReadsByDesiredName(t *testing.T) {
 	if len(driver.reads) != 1 {
 		t.Fatalf("driver.Read calls = %d, want 1", len(driver.reads))
 	}
-	if driver.reads[0].Name != "site-dns" || driver.reads[0].Type != "infra.dns" {
-		t.Fatalf("driver.Read ref = %+v, want desired name/type", driver.reads[0])
+	if driver.reads[0].Name != "site-dns" || driver.reads[0].Type != "infra.dns" || driver.reads[0].ProviderID != "example.com" {
+		t.Fatalf("driver.Read ref = %+v, want desired name/type with ProviderID example.com", driver.reads[0])
 	}
 
 	states, err := loadCurrentState(cfgPath, "")
@@ -244,6 +245,129 @@ func TestInfraImport_ConfigAwareWithoutIDReadsByDesiredName(t *testing.T) {
 	}
 	if states[0].ProviderID != "domain-by-name" {
 		t.Fatalf("saved ProviderID = %q, want domain-by-name", states[0].ProviderID)
+	}
+}
+
+func TestInfraImport_WithoutIDFallsBackToNameProviderIDWhenDomainOmitted(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: site-dns
+    type: infra.dns
+    config:
+      provider: do-provider
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	driver := &readDriver{
+		expectedProviderID: "site-dns",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "site-dns",
+			Outputs:    map[string]any{"domain": "site-dns"},
+		},
+	}
+	fake := &importCaptureProvider{driver: driver}
+
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	_, err := captureInfraImportStdout(t, func() error {
+		return runInfraImport([]string{"--config", cfgPath, "--name", "site-dns"})
+	})
+	if err != nil {
+		t.Fatalf("runInfraImport: %v", err)
+	}
+	if len(driver.reads) != 1 {
+		t.Fatalf("driver.Read calls = %d, want 1", len(driver.reads))
+	}
+	if driver.reads[0].ProviderID != "site-dns" {
+		t.Fatalf("driver.Read ProviderID = %q, want fallback name site-dns", driver.reads[0].ProviderID)
+	}
+}
+
+func TestInfraImport_RejectsMalformedImportedProviderID(t *testing.T) {
+	cfgPath, _ := writeImportConfig(t, t.TempDir())
+	fake := &importCaptureProvider{
+		driver: &readDriver{format: interfaces.IDFormatDomainName},
+		importState: &interfaces.ResourceState{
+			ID:         "not a domain",
+			Name:       "not a domain",
+			Type:       "infra.dns",
+			ProviderID: "not a domain",
+			Outputs:    map[string]any{"domain": "example.com"},
+		},
+	}
+
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	_, err := captureInfraImportStdout(t, func() error {
+		return runInfraImport([]string{"--config", cfgPath, "--name", "site-dns", "--id", "not a domain"})
+	})
+	if err == nil {
+		t.Fatal("expected malformed ProviderID error")
+	}
+	if !strings.Contains(err.Error(), "malformed ProviderID") || !strings.Contains(err.Error(), "state not persisted") {
+		t.Fatalf("error = %v, want strict ProviderID validation failure", err)
+	}
+	states, loadErr := loadCurrentState(cfgPath, "")
+	if loadErr != nil {
+		t.Fatalf("loadCurrentState: %v", loadErr)
+	}
+	if len(states) != 0 {
+		t.Fatalf("states = %d, want none saved for malformed ProviderID", len(states))
+	}
+}
+
+func TestInfraImport_RejectsMalformedReadProviderID(t *testing.T) {
+	cfgPath, _ := writeImportConfig(t, t.TempDir())
+	driver := &readDriver{
+		expectedProviderID: "example.com",
+		format:             interfaces.IDFormatDomainName,
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "not a domain",
+			Outputs:    map[string]any{"domain": "example.com"},
+		},
+	}
+	fake := &importCaptureProvider{driver: driver}
+
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	_, err := captureInfraImportStdout(t, func() error {
+		return runInfraImport([]string{"--config", cfgPath, "--name", "site-dns"})
+	})
+	if err == nil {
+		t.Fatal("expected malformed ProviderID error")
+	}
+	if !strings.Contains(err.Error(), "malformed ProviderID") || !strings.Contains(err.Error(), "state not persisted") {
+		t.Fatalf("error = %v, want strict ProviderID validation failure", err)
 	}
 }
 

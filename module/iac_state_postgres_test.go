@@ -236,3 +236,34 @@ func TestPostgresIaCStateStore_Schema_HasProviderID(t *testing.T) {
 		t.Error("createTableSQL is missing config_hash column (required by spec)")
 	}
 }
+
+func TestPostgresIaCStateStore_Migration_AddsColumnsForExistingPreChangeSchema(t *testing.T) {
+	legacySchemaColumns := map[string]bool{
+		"name":           true,
+		"type":           true,
+		"status":         true,
+		"applied_config": true,
+		"outputs":        true,
+		"dependencies":   true,
+		"created_at":     true,
+		"updated_at":     true,
+	}
+	newColumns := []string{"provider", "provider_id", "config_hash"}
+
+	for _, col := range newColumns {
+		if legacySchemaColumns[col] {
+			t.Fatalf("test setup invalid: %s already exists in legacy schema", col)
+		}
+		needle := "ADD COLUMN IF NOT EXISTS " + col
+		found := false
+		for _, stmt := range module.MigrateTableSQL {
+			if strings.Contains(stmt, needle) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("MigrateTableSQL missing %q for pre-change schema", needle)
+		}
+	}
+}

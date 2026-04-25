@@ -171,9 +171,24 @@ CREATE TABLE IF NOT EXISTS iac_resources (
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`
 
+// MigrateTableSQL is additive DDL for iac_resources tables created by older
+// Workflow versions before provider metadata and config_hash were tracked.
+var MigrateTableSQL = []string{
+	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS provider_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT ''`,
+}
+
 func (c *pgxRealConn) createTable(ctx context.Context) error {
-	_, err := c.pool.Exec(ctx, CreateTableSQL)
-	return err
+	if _, err := c.pool.Exec(ctx, CreateTableSQL); err != nil {
+		return err
+	}
+	for _, stmt := range MigrateTableSQL {
+		if _, err := c.pool.Exec(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *pgxRealConn) UpsertState(ctx context.Context, st *IaCState) error {

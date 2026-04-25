@@ -749,7 +749,7 @@ func runInfraImport(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s/%s: resolve resource driver: %w", spec.Type, spec.Name, err)
 		}
-		live, err := driver.Read(context.Background(), interfaces.ResourceRef{Name: spec.Name, Type: spec.Type})
+		live, err := driver.Read(context.Background(), readRefForSpec(spec))
 		if err != nil {
 			return fmt.Errorf("%s/%s: read existing resource: %w", spec.Type, spec.Name, err)
 		}
@@ -760,6 +760,9 @@ func runInfraImport(args []string) error {
 		if err != nil {
 			return err
 		}
+	}
+	if err := validateStateProviderID(provider, providerType, state); err != nil {
+		return err
 	}
 	if err := store.SaveResource(context.Background(), state); err != nil {
 		return fmt.Errorf("save imported state %q: %w", state.Name, err)

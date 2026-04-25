@@ -50,9 +50,17 @@ func validateInputProviderIDs(provider interfaces.IaCProvider, plan *interfaces.
 // Freeform and Unknown formats pass through. Returns a detailed error on
 // violation so operators can identify the buggy driver immediately.
 func validateOutputProviderID(provider interfaces.IaCProvider, providerType string, r *interfaces.ResourceOutput) error {
-	rd, err := provider.ResourceDriver(r.Type)
+	return validateProviderID(provider, providerType, r.Type, r.Name, r.ProviderID)
+}
+
+func validateStateProviderID(provider interfaces.IaCProvider, providerType string, r interfaces.ResourceState) error {
+	return validateProviderID(provider, providerType, r.Type, r.Name, r.ProviderID)
+}
+
+func validateProviderID(provider interfaces.IaCProvider, providerType, resourceType, resourceName, providerID string) error {
+	rd, err := provider.ResourceDriver(resourceType)
 	if err != nil {
-		log.Printf("warn: wfctl: cannot probe ResourceDriver for validation of %s %q: %v", r.Type, r.Name, err)
+		log.Printf("warn: wfctl: cannot probe ResourceDriver for validation of %s %q: %v", resourceType, resourceName, err)
 		return nil
 	}
 	v, ok := rd.(interfaces.ProviderIDValidator)
@@ -63,11 +71,11 @@ func validateOutputProviderID(provider interfaces.IaCProvider, providerType stri
 	if format == interfaces.IDFormatUnknown || format == interfaces.IDFormatFreeform {
 		return nil
 	}
-	if !interfaces.ValidateProviderID(r.ProviderID, format) {
+	if !interfaces.ValidateProviderID(providerID, format) {
 		return fmt.Errorf(
 			"driver %q returned malformed ProviderID %q for resource %q (type %s); "+
 				"expected %s — state not persisted",
-			providerType, r.ProviderID, r.Name, r.Type, format,
+			providerType, providerID, resourceName, resourceType, format,
 		)
 	}
 	return nil

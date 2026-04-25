@@ -386,7 +386,7 @@ func adoptExistingDNSResources(ctx context.Context, provider interfaces.IaCProvi
 				return nil, fmt.Errorf("%s/%s: resolve resource driver: %w", spec.Type, spec.Name, err)
 			}
 		}
-		live, err := driver.Read(ctx, interfaces.ResourceRef{Name: spec.Name, Type: spec.Type})
+		live, err := driver.Read(ctx, readRefForSpec(spec))
 		if err != nil {
 			if isIaCNotFound(err) {
 				continue
@@ -400,14 +400,29 @@ func adoptExistingDNSResources(ctx context.Context, provider interfaces.IaCProvi
 		if err != nil {
 			return nil, err
 		}
+		if err := validateStateProviderID(provider, providerType, state); err != nil {
+			return nil, err
+		}
 		if saveErr := store.SaveResource(ctx, state); saveErr != nil {
-			fmt.Printf("  WARNING: failed to persist adopted state for %q: %v\n", spec.Name, saveErr)
+			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, saveErr)
 		}
 		fmt.Printf("  Adopted existing %s %q (id=%s)\n", spec.Type, spec.Name, state.ProviderID)
 		current = append(current, state)
 		currentByName[spec.Name] = struct{}{}
 	}
 	return current, nil
+}
+
+func readRefForSpec(spec interfaces.ResourceSpec) interfaces.ResourceRef {
+	ref := interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}
+	if spec.Type == "infra.dns" {
+		if domain, _ := spec.Config["domain"].(string); domain != "" {
+			ref.ProviderID = domain
+		} else {
+			ref.ProviderID = spec.Name
+		}
+	}
+	return ref
 }
 
 func isIaCNotFound(err error) bool {

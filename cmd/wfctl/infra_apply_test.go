@@ -67,9 +67,11 @@ func (f *applyCapture) BootstrapStateBackend(_ context.Context, _ map[string]any
 func (f *applyCapture) Close() error { return nil }
 
 type readDriver struct {
-	readOut *interfaces.ResourceOutput
-	readErr error
-	reads   []interfaces.ResourceRef
+	readOut            *interfaces.ResourceOutput
+	readErr            error
+	reads              []interfaces.ResourceRef
+	expectedProviderID string
+	format             interfaces.ProviderIDFormat
 }
 
 func (d *readDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
@@ -78,6 +80,9 @@ func (d *readDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*i
 
 func (d *readDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
 	d.reads = append(d.reads, ref)
+	if d.expectedProviderID != "" && ref.ProviderID != d.expectedProviderID {
+		return nil, interfaces.ErrResourceNotFound
+	}
 	return d.readOut, d.readErr
 }
 
@@ -100,6 +105,10 @@ func (d *readDriver) Scale(_ context.Context, ref interfaces.ResourceRef, _ int)
 }
 
 func (d *readDriver) SensitiveKeys() []string { return nil }
+
+func (d *readDriver) ProviderIDFormat() interfaces.ProviderIDFormat {
+	return d.format
+}
 
 type readBackedProvider struct {
 	applyCapture
@@ -267,6 +276,7 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 		Config: desiredConfig,
 	}
 	driver := &readDriver{
+		expectedProviderID: "example.com",
 		readOut: &interfaces.ResourceOutput{
 			Name:       "site-dns",
 			Type:       "infra.dns",
@@ -287,8 +297,8 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 	if len(driver.reads) != 1 {
 		t.Fatalf("driver.Read calls = %d, want 1", len(driver.reads))
 	}
-	if driver.reads[0].Name != "site-dns" || driver.reads[0].Type != "infra.dns" {
-		t.Fatalf("driver.Read ref = %+v, want site-dns/infra.dns", driver.reads[0])
+	if driver.reads[0].Name != "site-dns" || driver.reads[0].Type != "infra.dns" || driver.reads[0].ProviderID != "example.com" {
+		t.Fatalf("driver.Read ref = %+v, want site-dns/infra.dns ProviderID example.com", driver.reads[0])
 	}
 
 	provider.mu.Lock()
@@ -333,6 +343,106 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 	}
 	if adopted.ConfigHash == configHashMap(desiredConfig) {
 		t.Fatalf("adopted ConfigHash matched desired hash; ComputePlan would skip required update")
+	}
+}
+
+func TestApplyWithProvider_DNSAdoptionFallsBackToNameWhenDomainOmitted(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"provider": "do-provider"},
+	}
+	driver := &readDriver{
+		expectedProviderID: "site-dns",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "site-dns",
+			Outputs:    map[string]any{"domain": "site-dns"},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, ""); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	if len(driver.reads) != 1 {
+		t.Fatalf("driver.Read calls = %d, want 1", len(driver.reads))
+	}
+	if driver.reads[0].ProviderID != "site-dns" {
+		t.Fatalf("driver.Read ProviderID = %q, want fallback name site-dns", driver.reads[0].ProviderID)
+	}
+}
+
+func TestApplyWithProvider_DNSAdoptionSaveFailureFailsBeforeApply(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"domain": "example.com"},
+	}
+	driver := &readDriver{
+		expectedProviderID: "example.com",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "example.com",
+			Outputs:    map[string]any{"domain": "example.com"},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	store := &fakeStateStore{saveErr: errors.New("disk full")}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	if err == nil {
+		t.Fatal("expected adoption save failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "persist adopted state") || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("error = %v, want adopted state persistence failure", err)
+	}
+	provider.mu.Lock()
+	applyCalled := provider.applyCalled
+	provider.mu.Unlock()
+	if applyCalled {
+		t.Fatal("Apply should not be called after adopted state persistence fails")
+	}
+}
+
+func TestApplyWithProvider_DNSAdoptionRejectsMalformedProviderID(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"domain": "example.com"},
+	}
+	driver := &readDriver{
+		expectedProviderID: "example.com",
+		format:             interfaces.IDFormatDomainName,
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "not a domain",
+			Outputs:    map[string]any{"domain": "example.com"},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	store := &fakeStateStore{}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	if err == nil {
+		t.Fatal("expected malformed ProviderID error")
+	}
+	if !strings.Contains(err.Error(), "malformed ProviderID") || !strings.Contains(err.Error(), "state not persisted") {
+		t.Fatalf("error = %v, want strict ProviderID validation failure", err)
+	}
+	provider.mu.Lock()
+	applyCalled := provider.applyCalled
+	provider.mu.Unlock()
+	if applyCalled {
+		t.Fatal("Apply should not be called after malformed adopted ProviderID")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 0 {
+		t.Fatalf("saved states = %d, want none for malformed ProviderID", len(store.saved))
 	}
 }
 
