@@ -3,9 +3,13 @@ package sdk
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // --- minimal test providers ---
@@ -45,6 +49,25 @@ func (p *sampleProvider) Manifest() PluginManifest {
 		Author:         "tester",
 		ConfigMutable:  true,
 		SampleCategory: "ecommerce",
+	}
+}
+
+type contractProvider struct {
+	minimalProvider
+}
+
+func (p *contractProvider) ContractRegistry() *pb.ContractRegistry {
+	return &pb.ContractRegistry{
+		Contracts: []*pb.ContractDescriptor{
+			{
+				Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+				StepType:      "test.echo",
+				ConfigMessage: "workflow.plugins.test.v1.EchoConfig",
+				InputMessage:  "workflow.plugins.test.v1.EchoInput",
+				OutputMessage: "workflow.plugins.test.v1.EchoOutput",
+				Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			},
+		},
 	}
 }
 
@@ -128,6 +151,52 @@ func TestGetManifest_NewFields(t *testing.T) {
 	}
 	if m.SampleCategory != "ecommerce" {
 		t.Errorf("expected SampleCategory=ecommerce, got %q", m.SampleCategory)
+	}
+}
+
+func TestGetContractRegistry_WithProvider(t *testing.T) {
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	pb.RegisterPluginServiceServer(server, newGRPCServer(&contractProvider{}))
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(server.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+		return listener.DialContext(ctx)
+	}), grpc.WithInsecure())
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := pb.NewPluginServiceClient(conn)
+	registry, err := client.GetContractRegistry(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(registry.Contracts) != 1 {
+		t.Fatalf("expected 1 contract, got %d", len(registry.Contracts))
+	}
+	descriptor := registry.Contracts[0]
+	if descriptor.Kind != pb.ContractKind_CONTRACT_KIND_STEP {
+		t.Errorf("expected step contract kind, got %v", descriptor.Kind)
+	}
+	if descriptor.StepType != "test.echo" {
+		t.Errorf("expected step type test.echo, got %q", descriptor.StepType)
+	}
+	if descriptor.ConfigMessage != "workflow.plugins.test.v1.EchoConfig" {
+		t.Errorf("expected config message, got %q", descriptor.ConfigMessage)
+	}
+	if descriptor.InputMessage != "workflow.plugins.test.v1.EchoInput" {
+		t.Errorf("expected input message, got %q", descriptor.InputMessage)
+	}
+	if descriptor.OutputMessage != "workflow.plugins.test.v1.EchoOutput" {
+		t.Errorf("expected output message, got %q", descriptor.OutputMessage)
+	}
+	if descriptor.Mode != pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+		t.Errorf("expected strict typed mode, got %v", descriptor.Mode)
 	}
 }
 

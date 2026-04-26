@@ -13,6 +13,8 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"gopkg.in/yaml.v3"
 )
@@ -20,11 +22,13 @@ import (
 // ExternalPluginAdapter wraps a gRPC plugin client to implement plugin.EnginePlugin.
 // The engine sees this as a regular plugin — no changes to engine.go needed.
 type ExternalPluginAdapter struct {
-	name           string
-	client         *PluginClient
-	manifest       *pb.Manifest
-	configFragment []byte
-	pluginDir      string
+	name                string
+	client              *PluginClient
+	manifest            *pb.Manifest
+	contractRegistry    *pb.ContractRegistry
+	contractRegistryErr error
+	configFragment      []byte
+	pluginDir           string
 }
 
 // NewExternalPluginAdapter creates an adapter from a connected plugin client.
@@ -39,12 +43,28 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 		client:   client,
 		manifest: manifest,
 	}
+	if registry, registryErr := client.client.GetContractRegistry(ctx, &emptypb.Empty{}); registryErr == nil {
+		a.contractRegistry = registry
+	} else if status.Code(registryErr) == codes.Unimplemented {
+		a.contractRegistry = &pb.ContractRegistry{}
+	} else {
+		a.contractRegistryErr = fmt.Errorf("get contract registry from plugin %s: %w", name, registryErr)
+	}
 	// Fetch config fragment eagerly so it's available before BuildFromConfig runs.
 	if resp, fragErr := client.client.GetConfigFragment(ctx, &emptypb.Empty{}); fragErr == nil && len(resp.YamlConfig) > 0 {
 		a.configFragment = resp.YamlConfig
 		a.pluginDir = resp.PluginDir
 	}
 	return a, nil
+}
+
+func newExternalPluginAdapterWithContractRegistry(manifest *pb.Manifest, registry *pb.ContractRegistry) *ExternalPluginAdapter {
+	return &ExternalPluginAdapter{
+		name:                manifest.Name,
+		manifest:            manifest,
+		contractRegistry:    registry,
+		contractRegistryErr: nil,
+	}
 }
 
 // --- NativePlugin interface ---
@@ -115,6 +135,14 @@ func (a *ExternalPluginAdapter) SampleCategory() string {
 // ConfigFragmentBytes returns the raw YAML config fragment fetched from the plugin.
 func (a *ExternalPluginAdapter) ConfigFragmentBytes() []byte {
 	return a.configFragment
+}
+
+func (a *ExternalPluginAdapter) ContractRegistry() *pb.ContractRegistry {
+	return a.contractRegistry
+}
+
+func (a *ExternalPluginAdapter) ContractRegistryError() error {
+	return a.contractRegistryErr
 }
 
 func (a *ExternalPluginAdapter) Capabilities() []capability.Contract {

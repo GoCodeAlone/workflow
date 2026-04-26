@@ -6,6 +6,7 @@ option go_package = "github.com/GoCodeAlone/workflow/plugin/external/proto";
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/any.proto";
 
 // PluginService is implemented by the plugin process and called by the host.
 service PluginService {
@@ -23,6 +24,9 @@ service PluginService {
 
   // GetModuleSchemas returns UI schema definitions for the plugin's module types.
   rpc GetModuleSchemas(google.protobuf.Empty) returns (ModuleSchemaList);
+
+  // GetContractRegistry returns typed contract descriptors for plugin-provided capabilities.
+  rpc GetContractRegistry(google.protobuf.Empty) returns (ContractRegistry);
 
   // CreateModule instantiates a module of the given type.
   rpc CreateModule(CreateModuleRequest) returns (HandleResponse);
@@ -92,6 +96,42 @@ message Manifest {
   string sample_category = 6;
 }
 
+// ContractKind identifies the plugin surface described by a contract.
+enum ContractKind {
+  CONTRACT_KIND_UNSPECIFIED = 0;
+  CONTRACT_KIND_MODULE = 1;
+  CONTRACT_KIND_STEP = 2;
+  CONTRACT_KIND_SERVICE = 3;
+  CONTRACT_KIND_TRIGGER = 4;
+}
+
+// ContractMode describes how strictly the host and plugin should use typed payloads.
+enum ContractMode {
+  CONTRACT_MODE_UNSPECIFIED = 0;
+  CONTRACT_MODE_LEGACY_STRUCT = 1;
+  CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT = 2;
+  CONTRACT_MODE_STRICT_PROTO = 3;
+}
+
+// ContractRegistry lists the typed contracts a plugin exposes.
+message ContractRegistry {
+  repeated ContractDescriptor contracts = 1;
+}
+
+// ContractDescriptor maps a plugin capability type to protobuf message names.
+message ContractDescriptor {
+  ContractKind kind = 1;
+  string module_type = 2;
+  string step_type = 3;
+  string trigger_type = 4;
+  string service_name = 5;
+  string method = 6;
+  string config_message = 7;
+  string input_message = 8;
+  string output_message = 9;
+  ContractMode mode = 10;
+}
+
 // GetAssetRequest asks the plugin to return an embedded static asset.
 message GetAssetRequest {
   string path = 1;
@@ -147,6 +187,7 @@ message CreateModuleRequest {
   string type = 1;
   string name = 2;
   google.protobuf.Struct config = 3;
+  google.protobuf.Any typed_config = 4;
 }
 
 // CreateStepRequest asks the plugin to instantiate a pipeline step.
@@ -154,6 +195,7 @@ message CreateStepRequest {
   string type = 1;
   string name = 2;
   google.protobuf.Struct config = 3;
+  google.protobuf.Any typed_config = 4;
 }
 
 // HandleResponse returns a handle ID for a created resource.
@@ -183,6 +225,8 @@ message ExecuteStepRequest {
   // the current pipeline context. Plugin steps should prefer this over any
   // config stored at CreateStep time so that dynamic values are honoured.
   google.protobuf.Struct config = 6;
+  google.protobuf.Any typed_config = 7;
+  google.protobuf.Any typed_input = 8;
 }
 
 // ExecuteStepResponse returns the step result.
@@ -190,6 +234,7 @@ message ExecuteStepResponse {
   google.protobuf.Struct output = 1;
   string error = 2;
   bool stop_pipeline = 3;
+  google.protobuf.Any typed_output = 4;
 }
 
 // InvokeServiceRequest calls a method on a module service.
@@ -197,12 +242,14 @@ message InvokeServiceRequest {
   string handle_id = 1;
   string method = 2;
   google.protobuf.Struct args = 3;
+  google.protobuf.Any typed_input = 4;
 }
 
 // InvokeServiceResponse returns the service method result.
 message InvokeServiceResponse {
   google.protobuf.Struct result = 1;
   string error = 2;
+  google.protobuf.Any typed_output = 3;
 }
 
 // TriggerWorkflowRequest fires a trigger from the plugin.
@@ -210,6 +257,7 @@ message TriggerWorkflowRequest {
   string trigger_type = 1;
   string action = 2;
   google.protobuf.Struct data = 3;
+  google.protobuf.Any typed_data = 4;
 }
 
 // GetServiceRequest asks if a named service exists on the host.

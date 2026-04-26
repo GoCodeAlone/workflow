@@ -212,6 +212,18 @@ func (s *grpcServer) GetModuleSchemas(_ context.Context, _ *emptypb.Empty) (*pb.
 	return &pb.ModuleSchemaList{Schemas: pbSchemas}, nil
 }
 
+func (s *grpcServer) GetContractRegistry(_ context.Context, _ *emptypb.Empty) (*pb.ContractRegistry, error) {
+	cp, ok := s.provider.(ContractProvider)
+	if !ok {
+		return &pb.ContractRegistry{}, nil
+	}
+	registry := cp.ContractRegistry()
+	if registry == nil {
+		return &pb.ContractRegistry{}, nil
+	}
+	return registry, nil
+}
+
 // --- Module lifecycle RPCs ---
 
 func (s *grpcServer) CreateModule(_ context.Context, req *pb.CreateModuleRequest) (*pb.HandleResponse, error) {

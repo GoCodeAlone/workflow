@@ -2,12 +2,21 @@
 // Plugin authors implement the interfaces defined here and call Serve() to run.
 package sdk
 
-import "context"
+import (
+	"context"
+
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+)
 
 // PluginProvider is the main interface plugin authors implement.
 type PluginProvider interface {
 	// Manifest returns the plugin's metadata.
 	Manifest() PluginManifest
+}
+
+// ContractProvider is optionally implemented to expose typed contract descriptors.
+type ContractProvider interface {
+	ContractRegistry() *pb.ContractRegistry
 }
 
 // PluginManifest describes the plugin.

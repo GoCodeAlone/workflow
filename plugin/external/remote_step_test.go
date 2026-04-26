@@ -45,6 +45,9 @@ func (c *stubPluginServiceClient) GetTriggerTypes(_ context.Context, _ *emptypb.
 func (c *stubPluginServiceClient) GetModuleSchemas(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.ModuleSchemaList, error) {
 	return &pb.ModuleSchemaList{}, nil
 }
+func (c *stubPluginServiceClient) GetContractRegistry(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.ContractRegistry, error) {
+	return &pb.ContractRegistry{}, nil
+}
 func (c *stubPluginServiceClient) CreateModule(_ context.Context, _ *pb.CreateModuleRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
 	return &pb.HandleResponse{}, nil
 }
