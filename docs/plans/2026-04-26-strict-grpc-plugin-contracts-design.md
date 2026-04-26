@@ -13,6 +13,8 @@ implementation_refs:
     commit: 5c135a0
   - repo: workflow
     commit: dd1b222
+  - repo: workflow
+    commit: 64c15fa
 external_refs:
   - "#76"
 verification:
@@ -31,7 +33,7 @@ Date: 2026-04-26
 
 ## Implementation Checkpoint
 
-Core Workflow support is implemented through `workflow dd1b222`: contract descriptors, typed SDK adapters, host-side strict dispatch, `wfctl` strict contract audit/validation, and strict scaffolding when run from a Workflow source checkout.
+Core Workflow support is implemented through `workflow 64c15fa`: contract descriptors, plugin-owned descriptor-set based dynamic codecs, typed SDK adapters, host-side strict dispatch, `wfctl` strict contract audit/validation, and strict scaffolding when run from a Workflow source checkout.
 
 The design remains `in_progress` because downstream plugin and application repositories still need migration from map-only boundaries to typed descriptors and adapters. The workspace strict-contract audit is expected to fail until that migration completes.
 
