@@ -223,6 +223,26 @@ func TestExternalPluginAdapter_ServiceContractsAttachByModuleType(t *testing.T) 
 	}
 }
 
+func TestExternalPluginAdapter_ServiceContractsDoNotAttachEmptyServiceNameAcrossModules(t *testing.T) {
+	registry := &pb.ContractRegistry{
+		Contracts: []*pb.ContractDescriptor{
+			{
+				Kind:         pb.ContractKind_CONTRACT_KIND_SERVICE,
+				ModuleType:   "payments.processor",
+				Method:       "Authorize",
+				InputMessage: "workflow.plugin.v1.Manifest",
+				Mode:         pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			},
+		},
+	}
+	a := newExternalPluginAdapterWithContractRegistry(&pb.Manifest{Name: "contract-plugin"}, registry)
+
+	contracts := a.contracts.servicesFor("security.scanner")
+	if contract := contracts["Authorize"]; contract != nil {
+		t.Fatalf("expected unrelated empty-service descriptor not to attach, got %#v", contract)
+	}
+}
+
 func TestExternalPluginAdapter_ContractStepFactorySendsTypedConfig(t *testing.T) {
 	client := &adapterTestPluginServiceClient{
 		manifest:  &pb.Manifest{Name: "contract-plugin"},
@@ -262,6 +282,42 @@ func TestExternalPluginAdapter_ContractStepFactorySendsTypedConfig(t *testing.T)
 	}
 	if client.lastCreateStepReq.Config != nil {
 		t.Fatalf("expected strict step creation to omit legacy Config, got %v", client.lastCreateStepReq.Config)
+	}
+	assertAnyTypeForTest(t, client.lastCreateStepReq.TypedConfig, "workflow.plugin.v1.Manifest")
+}
+
+func TestExternalPluginAdapter_ContractStepFactoryProtoWithLegacySendsBothConfigForms(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:  &pb.Manifest{Name: "contract-plugin"},
+		stepTypes: []string{"test.compat"},
+		registry: &pb.ContractRegistry{Contracts: []*pb.ContractDescriptor{
+			{
+				Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+				StepType:      "test.compat",
+				ConfigMessage: "workflow.plugin.v1.Manifest",
+				InputMessage:  "workflow.plugin.v1.Manifest",
+				OutputMessage: "workflow.plugin.v1.Manifest",
+				Mode:          pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT,
+			},
+		}},
+	}
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+
+	_, err = a.StepFactories()["test.compat"]("compat-step", map[string]any{
+		"name":    "typed-config",
+		"version": "v1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory returned error: %v", err)
+	}
+	if client.lastCreateStepReq == nil {
+		t.Fatal("expected CreateStep request")
+	}
+	if client.lastCreateStepReq.Config == nil {
+		t.Fatal("expected compatibility mode to keep legacy Config")
 	}
 	assertAnyTypeForTest(t, client.lastCreateStepReq.TypedConfig, "workflow.plugin.v1.Manifest")
 }

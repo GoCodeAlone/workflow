@@ -21,6 +21,9 @@ type stubPluginServiceClient struct {
 
 	lastRequest *pb.ExecuteStepRequest
 	response    *pb.ExecuteStepResponse
+
+	lastInvokeRequest *pb.InvokeServiceRequest
+	invokeResponse    *pb.InvokeServiceResponse
 }
 
 // ExecuteStep records the request and returns the configured response.
@@ -72,7 +75,11 @@ func (c *stubPluginServiceClient) CreateStep(_ context.Context, _ *pb.CreateStep
 func (c *stubPluginServiceClient) DestroyStep(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
 	return &pb.ErrorResponse{}, nil
 }
-func (c *stubPluginServiceClient) InvokeService(_ context.Context, _ *pb.InvokeServiceRequest, _ ...grpc.CallOption) (*pb.InvokeServiceResponse, error) {
+func (c *stubPluginServiceClient) InvokeService(_ context.Context, req *pb.InvokeServiceRequest, _ ...grpc.CallOption) (*pb.InvokeServiceResponse, error) {
+	c.lastInvokeRequest = req
+	if c.invokeResponse != nil {
+		return c.invokeResponse, nil
+	}
 	return &pb.InvokeServiceResponse{}, nil
 }
 func (c *stubPluginServiceClient) DeliverMessage(_ context.Context, _ *pb.DeliverMessageRequest, _ ...grpc.CallOption) (*pb.DeliverMessageResponse, error) {
@@ -210,6 +217,41 @@ func TestRemoteStep_Execute_StrictContractSendsTypedPayloads(t *testing.T) {
 	}
 }
 
+func TestRemoteStep_Execute_ProtoWithLegacyKeepsStructPayloads(t *testing.T) {
+	stub := &stubPluginServiceClient{}
+	contract := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		StepType:      "test.compat",
+		ConfigMessage: "workflow.plugin.v1.Manifest",
+		InputMessage:  "workflow.plugin.v1.Manifest",
+		OutputMessage: "workflow.plugin.v1.Manifest",
+		Mode:          pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT,
+	}
+	step := NewRemoteStep("test-step", "handle-compat", stub, map[string]any{
+		"name":    "typed-config",
+		"version": "v1",
+	}, contract)
+
+	_, err := step.Execute(context.Background(), module.NewPipelineContext(map[string]any{
+		"name":    "typed-input",
+		"version": "v1",
+	}, nil))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if stub.lastRequest == nil {
+		t.Fatal("expected ExecuteStep to be called")
+	}
+	if stub.lastRequest.Config == nil {
+		t.Fatal("expected compatibility mode to keep legacy Config")
+	}
+	if stub.lastRequest.Current == nil {
+		t.Fatal("expected compatibility mode to keep legacy Current")
+	}
+	assertAnyTypeForTest(t, stub.lastRequest.TypedConfig, "workflow.plugin.v1.Manifest")
+	assertAnyTypeForTest(t, stub.lastRequest.TypedInput, "workflow.plugin.v1.Manifest")
+}
+
 func TestRemoteStep_Execute_StrictContractFailsClosedWithoutCodec(t *testing.T) {
 	stub := &stubPluginServiceClient{}
 	contract := &pb.ContractDescriptor{
@@ -233,6 +275,36 @@ func TestRemoteStep_Execute_StrictContractFailsClosedWithoutCodec(t *testing.T) 
 	if stub.lastRequest != nil {
 		t.Fatal("expected strict failure before ExecuteStep RPC")
 	}
+}
+
+func TestRemoteModule_InvokeService_ProtoWithLegacyKeepsArgs(t *testing.T) {
+	stub := &stubPluginServiceClient{}
+	module := NewRemoteModule("test-module", "module-handle", stub, remoteModuleContracts{
+		services: map[string]*pb.ContractDescriptor{
+			"Scan": {
+				Kind:          pb.ContractKind_CONTRACT_KIND_SERVICE,
+				Method:        "Scan",
+				InputMessage:  "workflow.plugin.v1.Manifest",
+				OutputMessage: "workflow.plugin.v1.Manifest",
+				Mode:          pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT,
+			},
+		},
+	})
+
+	_, err := module.InvokeService("Scan", map[string]any{
+		"name":    "typed-input",
+		"version": "v1",
+	})
+	if err != nil {
+		t.Fatalf("InvokeService returned error: %v", err)
+	}
+	if stub.lastInvokeRequest == nil {
+		t.Fatal("expected InvokeService to be called")
+	}
+	if stub.lastInvokeRequest.Args == nil {
+		t.Fatal("expected compatibility mode to keep legacy Args")
+	}
+	assertAnyTypeForTest(t, stub.lastInvokeRequest.TypedInput, "workflow.plugin.v1.Manifest")
 }
 
 func mustAnyFromMapForTest(t *testing.T, messageName string, values map[string]any) *anypb.Any {

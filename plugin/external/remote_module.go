@@ -136,8 +136,10 @@ func (m *RemoteModule) InvokeService(method string, args map[string]any) (map[st
 				return nil, fmt.Errorf("remote invoke %s STRICT_PROTO input message %q cannot use legacy Struct fallback: %w", method, contract.InputMessage, err)
 			}
 		} else {
-			req.Args = nil
 			req.TypedInput = typedInput
+			if contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+				req.Args = nil
+			}
 		}
 	}
 	resp, err := m.client.InvokeService(context.Background(), req)
@@ -147,7 +149,7 @@ func (m *RemoteModule) InvokeService(method string, args map[string]any) (map[st
 	if resp.Error != "" {
 		return nil, fmt.Errorf("remote invoke %s: %s", method, resp.Error)
 	}
-	if resp.TypedOutput != nil && contract != nil && contract.OutputMessage != "" {
+	if resp.TypedOutput != nil && contract != nil && contract.OutputMessage != "" && contractModeUsesTyped(contract.Mode) {
 		output, err := typedAnyToMap(resp.TypedOutput, contract.OutputMessage, m.types)
 		if err != nil {
 			return nil, fmt.Errorf("remote invoke %s typed output decode: %w", method, err)

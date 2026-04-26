@@ -160,11 +160,11 @@ func (c contractDescriptorCache) step(typeName string) *pb.ContractDescriptor {
 
 func (c contractDescriptorCache) servicesFor(moduleType string) map[string]*pb.ContractDescriptor {
 	out := make(map[string]*pb.ContractDescriptor)
-	for key, descriptor := range c.services {
+	for _, descriptor := range c.services {
 		if descriptor == nil {
 			continue
 		}
-		if descriptor.ModuleType == moduleType || descriptor.ServiceName == moduleType || descriptor.ServiceName == "" || key == descriptor.Method {
+		if descriptor.ModuleType == moduleType || descriptor.ServiceName == moduleType || (descriptor.ModuleType == "" && descriptor.ServiceName == "") {
 			out[descriptor.Method] = descriptor
 		}
 	}
@@ -185,7 +185,14 @@ func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]
 		}
 		return mapToStruct(cfg), nil, nil
 	}
-	return nil, typed, nil
+	if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+		return nil, typed, nil
+	}
+	return mapToStruct(cfg), typed, nil
+}
+
+func contractModeUsesTyped(mode pb.ContractMode) bool {
+	return mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO || mode == pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT
 }
 
 // --- NativePlugin interface ---

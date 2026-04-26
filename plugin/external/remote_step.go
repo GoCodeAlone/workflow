@@ -82,7 +82,7 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 	}
 
 	output := structToMap(resp.Output)
-	if resp.TypedOutput != nil && s.contract != nil && s.contract.OutputMessage != "" {
+	if resp.TypedOutput != nil && s.contract != nil && s.contract.OutputMessage != "" && contractModeUsesTyped(s.contract.Mode) {
 		output, err = typedAnyToMap(resp.TypedOutput, s.contract.OutputMessage, s.types)
 		if err != nil {
 			return nil, fmt.Errorf("remote step %q typed output decode: %w", s.name, err)
@@ -124,10 +124,12 @@ func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig m
 		}
 		return req, nil
 	}
-	req.Config = nil
-	req.Current = nil
 	req.TypedConfig = typedConfig
 	req.TypedInput = typedInput
+	if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+		req.Config = nil
+		req.Current = nil
+	}
 	return req, nil
 }
 

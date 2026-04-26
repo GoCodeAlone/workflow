@@ -62,11 +62,12 @@ func TestTemplateGeneratorGenerateStrictContractScaffoldByDefault(t *testing.T) 
 
 	gen := NewTemplateGenerator()
 	err := gen.Generate(GenerateOptions{
-		Name:        "strict-plugin",
-		Version:     "1.0.0",
-		Author:      "TestOrg",
-		Description: "A strict plugin",
-		OutputDir:   outputDir,
+		Name:            "strict-plugin",
+		Version:         "1.0.0",
+		Author:          "TestOrg",
+		Description:     "A strict plugin",
+		OutputDir:       outputDir,
+		WorkflowReplace: filepath.Join(dir, "workflow"),
 	})
 	if err != nil {
 		t.Fatalf("Generate error: %v", err)
