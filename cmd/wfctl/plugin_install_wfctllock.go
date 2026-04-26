@@ -54,7 +54,7 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 			// recorded for post-install verification. Without a binary hash, allow
 			// GitHub release URLs to auto-verify via checksums.txt; non-GitHub URLs
 			// without a hash fail closed to prevent unverified installs.
-			skipChecksum := plat.SHA256 != ""
+			skipChecksum := expectedWfctlLockfileChecksum(entry) != ""
 			if err := installFromURL(plat.URL, pluginDirVal, "", skipChecksum); err != nil {
 				fmt.Fprintf(os.Stderr, "error installing %s from URL: %v\n", name, err)
 				failed = append(failed, name)
@@ -70,7 +70,7 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 					failed = append(failed, name)
 					continue
 				}
-				if got != plat.SHA256 {
+				if !strings.EqualFold(got, plat.SHA256) {
 					fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: got %s, want %s\n", name, got, plat.SHA256)
 					_ = os.RemoveAll(destDir)
 					failed = append(failed, name)
@@ -93,10 +93,11 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 			}
 		}
 
-		// Verify top-level binary sha256 if present (uses normalized fs name).
-		if entry.SHA256 != "" {
+		// Verify the installed binary against the current platform checksum when
+		// present; fall back to the top-level checksum for legacy lockfiles.
+		if expectedSHA256 := expectedWfctlLockfileChecksum(entry); expectedSHA256 != "" {
 			destDir := filepath.Join(pluginDirVal, fsName)
-			if verifyErr := verifyInstalledChecksum(destDir, fsName, entry.SHA256); verifyErr != nil {
+			if verifyErr := verifyInstalledChecksum(destDir, fsName, expectedSHA256); verifyErr != nil {
 				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v\n", name, verifyErr)
 				_ = os.RemoveAll(destDir)
 				failed = append(failed, name)
@@ -112,9 +113,14 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 		if lockPath != "" {
 			destDir := filepath.Join(pluginDirVal, fsName)
 			binaryPath := filepath.Join(destDir, fsName)
-			if sha, hashErr := hashFileSHA256(binaryPath); hashErr == nil && sha != entry.SHA256 {
+			if sha, hashErr := hashFileSHA256(binaryPath); hashErr == nil && !strings.EqualFold(sha, expectedWfctlLockfileChecksum(entry)) {
 				e := lf.Plugins[name]
-				e.SHA256 = sha
+				if plat, ok := e.Platforms[currentPlatformKey()]; ok {
+					plat.SHA256 = sha
+					e.Platforms[currentPlatformKey()] = plat
+				} else {
+					e.SHA256 = sha
+				}
 				lf.Plugins[name] = e
 			}
 			if saveErr := config.SaveWfctlLockfile(lockPath, lf); saveErr != nil {
@@ -130,7 +136,8 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 }
 
 // verifyWfctlLockfileChecksums checks sha256 of already-installed plugin binaries
-// against the lockfile. Only checks plugins with non-empty sha256 entries.
+// against the lockfile. Platform-specific checksums take precedence over the
+// top-level checksum for the current OS/architecture.
 // Returns an error if any mismatch is detected.
 func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile) error {
 	// Sort plugin names for deterministic verification order and predictable error messages.
@@ -143,14 +150,15 @@ func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile)
 	var mismatches []string
 	for _, name := range names {
 		entry := lf.Plugins[name]
-		if entry.SHA256 == "" {
+		expectedSHA256 := expectedWfctlLockfileChecksum(entry)
+		if expectedSHA256 == "" {
 			continue
 		}
 		// Normalize name for filesystem path — manifest stores full names,
 		// install layer uses short names (strips "workflow-plugin-" prefix).
 		fsName := normalizePluginName(name)
 		destDir := filepath.Join(pluginDirVal, fsName)
-		if err := verifyInstalledChecksum(destDir, fsName, entry.SHA256); err != nil {
+		if err := verifyInstalledChecksum(destDir, fsName, expectedSHA256); err != nil {
 			mismatches = append(mismatches, fmt.Sprintf("%s: %v", name, err))
 		}
 	}
@@ -158,6 +166,13 @@ func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile)
 		return fmt.Errorf("checksum mismatches:\n  %s", strings.Join(mismatches, "\n  "))
 	}
 	return nil
+}
+
+func expectedWfctlLockfileChecksum(entry config.WfctlLockPluginEntry) string {
+	if plat, ok := entry.Platforms[currentPlatformKey()]; ok && plat.SHA256 != "" {
+		return plat.SHA256
+	}
+	return entry.SHA256
 }
 
 // currentPlatformKey returns the GOOS-GOARCH key used in WfctlLockPlatform maps.
