@@ -421,17 +421,3 @@ func TestRunPluginInit_DefaultOutputDir(t *testing.T) {
 		t.Errorf("expected default output dir %s to be created", expectedDir)
 	}
 }
-
-func TestDiscoverWorkflowModuleRootWalksParents(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/GoCodeAlone/workflow\n"), 0600); err != nil {
-		t.Fatalf("write go.mod: %v", err)
-	}
-	nested := filepath.Join(root, "cmd", "wfctl")
-	if err := os.MkdirAll(nested, 0750); err != nil {
-		t.Fatalf("mkdir nested: %v", err)
-	}
-	if got := discoverWorkflowModuleRoot(nested); got != root {
-		t.Fatalf("discoverWorkflowModuleRoot = %q, want %q", got, root)
-	}
-}

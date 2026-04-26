@@ -101,6 +101,7 @@ func TestTemplateGeneratorGenerateStrictContractScaffoldByDefault(t *testing.T) 
 		"CONTRACT_MODE_STRICT_PROTO",
 		"CreateTypedStep(",
 		"TypedStepTypes() []string",
+		"sdk.ErrTypedContractNotHandled",
 	} {
 		if !strings.Contains(providerSrc, want) {
 			t.Errorf("provider.go missing %q:\n%s", want, providerSrc)
@@ -374,8 +375,8 @@ func TestGenerateProjectStructure(t *testing.T) {
 	if !strings.Contains(provSrc, "sdk.StepInstance") {
 		t.Error("provider.go should return sdk.StepInstance")
 	}
-	if !strings.Contains(provSrc, `return nil, fmt.Errorf("unknown step type:`) {
-		t.Error("provider.go should return error for unknown step types")
+	if !strings.Contains(provSrc, "sdk.ErrTypedContractNotHandled") {
+		t.Error("provider.go should let unknown typed step types fall back to legacy providers")
 	}
 
 	// Verify steps.go uses external SDK types.
@@ -399,12 +400,34 @@ func TestGenerateProjectStructure(t *testing.T) {
 	if !strings.Contains(string(modData), "module github.com/TestOrg/workflow-plugin-my-plugin") {
 		t.Errorf("go.mod module path unexpected: %s", string(modData))
 	}
+	if !strings.Contains(string(modData), "go "+workflowMinimumGoVersion) {
+		t.Errorf("go.mod go version should match workflow minimum %s, got:\n%s", workflowMinimumGoVersion, string(modData))
+	}
+
+	ciData, err := os.ReadFile(filepath.Join(outputDir, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatalf("read ci.yml: %v", err)
+	}
+	if !strings.Contains(string(ciData), "go-version: '"+workflowMinimumGoVersion+"'") {
+		t.Errorf("ci.yml should use workflow minimum Go %s, got:\n%s", workflowMinimumGoVersion, string(ciData))
+	}
+
+	releaseData, err := os.ReadFile(filepath.Join(outputDir, ".github/workflows/release.yml"))
+	if err != nil {
+		t.Fatalf("read release.yml: %v", err)
+	}
+	if !strings.Contains(string(releaseData), "go-version: '"+workflowMinimumGoVersion+"'") {
+		t.Errorf("release.yml should use workflow minimum Go %s, got:\n%s", workflowMinimumGoVersion, string(releaseData))
+	}
 }
 
 func TestGenerateGoModWithWorkflowReplace(t *testing.T) {
 	got := generateGoMod("example.com/plugin", "/workspace/workflow", false)
 	if !strings.Contains(got, "github.com/GoCodeAlone/workflow "+workflowStrictContractsVersion) {
 		t.Fatalf("go.mod should require local-development workflow version, got:\n%s", got)
+	}
+	if !strings.Contains(got, "go "+workflowMinimumGoVersion) {
+		t.Fatalf("strict go.mod should use workflow minimum Go version, got:\n%s", got)
 	}
 	if !strings.Contains(got, "replace github.com/GoCodeAlone/workflow => /workspace/workflow") {
 		t.Fatalf("go.mod should include workflow replace, got:\n%s", got)
@@ -415,6 +438,9 @@ func TestGenerateGoModLegacyWithoutWorkflowReplace(t *testing.T) {
 	got := generateGoMod("example.com/plugin", "", true)
 	if !strings.Contains(got, "github.com/GoCodeAlone/workflow "+workflowReleasedVersion) {
 		t.Fatalf("legacy go.mod should require released workflow version, got:\n%s", got)
+	}
+	if !strings.Contains(got, "go "+defaultPluginGoVersion) {
+		t.Fatalf("legacy go.mod should keep default plugin Go version, got:\n%s", got)
 	}
 }
 
@@ -427,7 +453,7 @@ func TestDiscoverWorkflowModuleRootWalksParents(t *testing.T) {
 	if err := os.MkdirAll(nested, 0750); err != nil {
 		t.Fatalf("mkdir nested: %v", err)
 	}
-	if got := discoverWorkflowModuleRoot(nested); got != root {
+	if got := DiscoverWorkflowModuleRoot(nested); got != root {
 		t.Fatalf("discoverWorkflowModuleRoot = %q, want %q", got, root)
 	}
 }

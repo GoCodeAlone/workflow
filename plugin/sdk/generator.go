@@ -16,6 +16,8 @@ type TemplateGenerator struct{}
 const (
 	workflowReleasedVersion        = "v0.18.15"
 	workflowStrictContractsVersion = "v0.19.0-alpha.5"
+	workflowMinimumGoVersion       = "1.26.0"
+	defaultPluginGoVersion         = "1.22"
 )
 
 // NewTemplateGenerator creates a new TemplateGenerator.
@@ -56,7 +58,7 @@ func (g *TemplateGenerator) Generate(opts GenerateOptions) error {
 		opts.OutputDir = opts.Name
 	}
 	if opts.WorkflowReplace == "" {
-		opts.WorkflowReplace = discoverWorkflowModuleRoot(".")
+		opts.WorkflowReplace = DiscoverWorkflowModuleRoot(".")
 	}
 	if !opts.LegacyContracts && opts.WorkflowReplace == "" {
 		// Strict scaffolds depend on APIs in the current Workflow source tree
@@ -128,6 +130,7 @@ func generateProjectStructure(opts GenerateOptions) error {
 	if goModule == "" {
 		goModule = "github.com/" + opts.Author + "/" + binaryName
 	}
+	goVersion := scaffoldGoVersion(opts.WorkflowReplace, opts.LegacyContracts)
 
 	// cmd/workflow-plugin-<name>/main.go
 	cmdDir := filepath.Join(opts.OutputDir, "cmd", binaryName)
@@ -185,10 +188,10 @@ func generateProjectStructure(opts GenerateOptions) error {
 	if err := os.MkdirAll(ghWorkflowsDir, 0750); err != nil {
 		return fmt.Errorf("create .github/workflows dir: %w", err)
 	}
-	if err := writeFile(filepath.Join(ghWorkflowsDir, "ci.yml"), generateCIYML(), 0600); err != nil {
+	if err := writeFile(filepath.Join(ghWorkflowsDir, "ci.yml"), generateCIYML(goVersion), 0600); err != nil {
 		return err
 	}
-	if err := writeFile(filepath.Join(ghWorkflowsDir, "release.yml"), generateReleaseYML(binaryName), 0600); err != nil {
+	if err := writeFile(filepath.Join(ghWorkflowsDir, "release.yml"), generateReleaseYML(binaryName, goVersion), 0600); err != nil {
 		return err
 	}
 
@@ -295,7 +298,7 @@ func generateProviderGo(opts GenerateOptions, shortName string) string {
 	b.WriteString("\t\t)\n")
 	b.WriteString("\t\treturn factory.CreateTypedStep(typeName, name, config)\n")
 	b.WriteString("\t}\n")
-	b.WriteString("\treturn nil, fmt.Errorf(\"unknown step type: %s\", typeName)\n")
+	b.WriteString("\treturn nil, fmt.Errorf(\"%w: step type %q\", sdk.ErrTypedContractNotHandled, typeName)\n")
 	b.WriteString("}\n\n")
 	fmt.Fprintf(&b, "// ContractRegistry implements sdk.ContractProvider.\n")
 	fmt.Fprintf(&b, "func (p *%s) ContractRegistry() *pb.ContractRegistry {\n", typeName)
@@ -477,7 +480,7 @@ func generateLegacyStepsGo(shortName string) string {
 func generateGoMod(goModule, workflowReplace string, legacyContracts bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "module %s\n\n", goModule)
-	b.WriteString("go 1.22\n\n")
+	fmt.Fprintf(&b, "go %s\n\n", scaffoldGoVersion(workflowReplace, legacyContracts))
 	b.WriteString("require (\n")
 	workflowVersion := workflowStrictContractsVersion
 	if legacyContracts || workflowReplace == "" {
@@ -492,7 +495,14 @@ func generateGoMod(goModule, workflowReplace string, legacyContracts bool) strin
 	return b.String()
 }
 
-func discoverWorkflowModuleRoot(start string) string {
+func scaffoldGoVersion(workflowReplace string, legacyContracts bool) string {
+	if !legacyContracts && workflowReplace != "" {
+		return workflowMinimumGoVersion
+	}
+	return defaultPluginGoVersion
+}
+
+func DiscoverWorkflowModuleRoot(start string) string {
 	if start == "" {
 		return ""
 	}
@@ -554,8 +564,8 @@ func generateGoReleaserYML(binaryName string) string {
 	return b.String()
 }
 
-func generateCIYML() string {
-	return `name: CI
+func generateCIYML(goVersion string) string {
+	return fmt.Sprintf(`name: CI
 
 on:
   push:
@@ -570,16 +580,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '%s'
       - name: Test
         run: go test ./...
       - name: Vet
         run: go vet ./...
-`
+`, goVersion)
 }
 
-func generateReleaseYML(binaryName string) string {
-	return `name: Release
+func generateReleaseYML(binaryName, goVersion string) string {
+	return fmt.Sprintf(`name: Release
 
 on:
   push:
@@ -595,7 +605,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '%s'
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -621,7 +631,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REGISTRY_PAT }}
         continue-on-error: true
-`
+`, goVersion)
 }
 
 func generateMakefile(binaryName string) string {

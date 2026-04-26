@@ -3,9 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/sdk"
@@ -110,7 +107,7 @@ func runPluginInit(args []string) error {
 		WithContract:    *withContract,
 		LegacyContracts: *legacyContracts,
 		GoModule:        *module,
-		WorkflowReplace: discoverWorkflowModuleRoot("."),
+		WorkflowReplace: sdk.DiscoverWorkflowModuleRoot("."),
 	}
 	if err := gen.Generate(opts); err != nil {
 		return err
@@ -122,41 +119,6 @@ func runPluginInit(args []string) error {
 	}
 	fmt.Printf("Plugin %q scaffolded in %s/\n", name, outDir)
 	return nil
-}
-
-func discoverWorkflowModuleRoot(start string) string {
-	if start == "" {
-		return ""
-	}
-	current := start
-	if info, err := os.Stat(current); err == nil && !info.IsDir() {
-		current = filepath.Dir(current)
-	}
-	current = filepath.Clean(current)
-	for {
-		if workflowModuleDeclared(current) {
-			return current
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return ""
-		}
-		current = parent
-	}
-}
-
-func workflowModuleDeclared(dir string) bool {
-	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "module ") {
-			return strings.TrimSpace(strings.TrimPrefix(trimmed, "module ")) == "github.com/GoCodeAlone/workflow"
-		}
-	}
-	return false
 }
 
 func runPluginDocs(args []string) error {

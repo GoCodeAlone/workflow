@@ -245,11 +245,11 @@ wfctl audit plugins [options]
 
 Default mode reports canonical, legacy, missing, invalid manifest counts, and contract coverage by type category but exits 0 so it can be used as an inventory command. When a plugin advertises module, step, trigger, or service method types without strict descriptors, default mode emits warnings. Use `--strict-contracts` to fail on missing or legacy descriptors, or `--strict` to fail on any warning.
 
-Strict contract audit reads descriptors from an optional generated `plugin.contracts.json` file next to `plugin.json`, plus an optional inline `contracts` array in `plugin.json`. The descriptor file accepts the compact shape below and proto-shaped keys such as `module_type`, `step_type`, `trigger_type`, `service_name`, `method`, and `CONTRACT_MODE_STRICT_PROTO`. `mode` is required for a descriptor to count as strict.
+Strict contract audit reads descriptors from an optional generated `plugin.contracts.json` file next to `plugin.json`, plus an optional inline `contracts` array in `plugin.json`. The descriptor file accepts the compact shape below and proto-shaped keys such as `module_type`, `step_type`, `trigger_type`, `service_name`, `method`, and `CONTRACT_MODE_STRICT_PROTO`. `mode` is required for a descriptor to count as strict. The top-level `version` field is currently informational; the strict scaffold emits `"version": "v1"`.
 
 ```json
 {
-  "version": "1",
+  "version": "v1",
   "contracts": [
     {
       "kind": "module",
