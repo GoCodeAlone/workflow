@@ -53,6 +53,7 @@ func isHelpRequested(err error) bool {
 // the runtime functions that are registered in the CLICommandRegistry service
 // and invoked by step.cli_invoke from within each command's pipeline.
 var commands = map[string]func([]string) error{
+	"audit":           runAudit,
 	"init":            runInit,
 	"validate":        runValidate,
 	"inspect":         runInspect,

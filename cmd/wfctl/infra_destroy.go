@@ -63,9 +63,11 @@ func destroyInfraModules(ctx context.Context, cfgFile, envName string) error { /
 	for i := range states {
 		st := &states[i]
 		// Try to find the provider ref from the spec.
-		moduleRef := ""
+		moduleRef := resourceStateProviderRef(*st)
 		if spec, ok := specByName[st.Name]; ok {
-			moduleRef, _ = spec.Config["provider"].(string)
+			if moduleRef == "" {
+				moduleRef, _ = spec.Config["provider"].(string)
+			}
 		}
 
 		// If not in spec (orphaned resource), try to infer from state's Provider field.

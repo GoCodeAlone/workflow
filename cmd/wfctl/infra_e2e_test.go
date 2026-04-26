@@ -45,8 +45,8 @@ func TestInfraMultiEnv_E2E(t *testing.T) {
 		if strings.Contains(output, "bmw-dns") {
 			t.Fatalf("staging plan should not include bmw-dns (staging: null), got:\n%s", output)
 		}
-		if !strings.Contains(output, "bmw-database") {
-			t.Fatalf("staging plan should include bmw-database, got:\n%s", output)
+		if !strings.Contains(output, "bmw-staging-db") {
+			t.Fatalf("staging plan should include env-resolved bmw-staging-db, got:\n%s", output)
 		}
 		if !strings.Contains(output, "db-s-1vcpu-1gb") {
 			t.Fatalf("staging plan should show small db size, got:\n%s", output)
@@ -65,8 +65,8 @@ func TestInfraMultiEnv_E2E(t *testing.T) {
 		if !strings.Contains(output, "db-s-2vcpu-4gb") {
 			t.Fatalf("prod plan should show large db size, got:\n%s", output)
 		}
-		if !strings.Contains(output, "bmw-app") {
-			t.Fatalf("prod plan should include bmw-app, got:\n%s", output)
+		if !strings.Contains(output, "buymywishlist") {
+			t.Fatalf("prod plan should include env-resolved buymywishlist app, got:\n%s", output)
 		}
 	})
 }

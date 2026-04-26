@@ -1,3 +1,30 @@
+---
+status: implemented
+area: plugins
+owner: workflow
+implementation_refs:
+  - repo: workflow-plugin-data-engineering
+    commit: 0a65400
+  - repo: workflow-plugin-data-engineering
+    commit: 9fd31aa
+  - repo: workflow-plugin-data-engineering
+    commit: 01352fd
+  - repo: workflow-plugin-data-engineering
+    commit: 655f082
+  - repo: workflow-plugin-data-engineering
+    commit: b50a5eb
+external_refs:
+  - "workflow-plugin-data-engineering"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "git -C ../workflow-plugin-data-engineering log --oneline --all"
+    - "GOWORK=off go test ./..."
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Data Engineering Plugin Design
 
 **Date:** 2026-03-28

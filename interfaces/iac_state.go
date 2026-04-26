@@ -31,6 +31,7 @@ type ResourceState struct {
 	Name           string         `json:"name"`
 	Type           string         `json:"type"`
 	Provider       string         `json:"provider"`
+	ProviderRef    string         `json:"provider_ref,omitempty"`
 	ProviderID     string         `json:"provider_id"`
 	ConfigHash     string         `json:"config_hash"`
 	AppliedConfig  map[string]any `json:"applied_config"`

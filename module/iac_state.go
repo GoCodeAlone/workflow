@@ -5,9 +5,13 @@ type IaCState struct {
 	ResourceID   string         `json:"resource_id"`
 	ResourceType string         `json:"resource_type"` // e.g. "kubernetes", "ecs"
 	Provider     string         `json:"provider"`      // e.g. "aws", "gcp", "local"
-	Status       string         `json:"status"`        // planned, provisioning, active, destroying, destroyed, error
-	Outputs      map[string]any `json:"outputs"`       // provider-specific outputs
-	Config       map[string]any `json:"config"`        // the config used to provision
+	ProviderRef  string         `json:"provider_ref,omitempty"`
+	ProviderID   string         `json:"provider_id,omitempty"`
+	ConfigHash   string         `json:"config_hash,omitempty"`
+	Status       string         `json:"status"`  // planned, provisioning, active, destroying, destroyed, error
+	Outputs      map[string]any `json:"outputs"` // provider-specific outputs
+	Config       map[string]any `json:"config"`  // the config used to provision
+	Dependencies []string       `json:"dependencies,omitempty"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
 	Error        string         `json:"error,omitempty"`

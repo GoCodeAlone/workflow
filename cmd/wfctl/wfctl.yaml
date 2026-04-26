@@ -1,2 +1,267 @@
 version: 0
-plugins: []
+
+workflows:
+  cli:
+    name: wfctl
+    description: Workflow Engine CLI
+    commands:
+      - name: audit
+        description: Audit Workflow ecosystem metadata and plugin contracts
+      - name: init
+        description: Scaffold a new workflow project from a template
+      - name: validate
+        description: Validate a workflow configuration file
+      - name: inspect
+        description: Inspect modules, workflows, and triggers in a config
+      - name: run
+        description: Run a workflow engine from a config file
+      - name: plugin
+        description: Plugin management
+      - name: pipeline
+        description: Pipeline management
+      - name: schema
+        description: Generate JSON Schema for workflow configs
+      - name: snippets
+        description: Export IDE snippets
+      - name: manifest
+        description: Analyze config and report infrastructure requirements
+      - name: migrate
+        description: Manage database schema migrations
+      - name: build-ui
+        description: Build the application UI
+      - name: ui
+        description: UI tooling
+      - name: publish
+        description: Prepare and publish a plugin manifest
+      - name: deploy
+        description: Deploy the workflow application
+      - name: api
+        description: API tooling
+      - name: diff
+        description: Compare two workflow config files
+      - name: template
+        description: Template management
+      - name: contract
+        description: Contract testing
+      - name: compat
+        description: Compatibility checking
+      - name: generate
+        description: Code generation
+      - name: git
+        description: Git integration
+      - name: registry
+        description: Container registry commands
+      - name: plugin-registry
+        description: Plugin catalog registry management
+      - name: update
+        description: Update wfctl
+      - name: mcp
+        description: Start the MCP server over stdio
+      - name: modernize
+        description: Detect and fix YAML config anti-patterns
+      - name: expr-migrate
+        description: Convert Go template expressions to expr syntax
+      - name: infra
+        description: Manage infrastructure lifecycle
+      - name: docs
+        description: Generate documentation from workflow configs
+      - name: editor-schemas
+        description: Export module schemas and type coercion rules
+      - name: dsl-reference
+        description: Parse DSL reference as structured JSON
+      - name: ci
+        description: CI/CD tooling
+      - name: override
+        description: Generate and verify environment overrides
+      - name: test
+        description: Run Workflow integration tests
+      - name: secrets
+        description: Manage declared secrets
+      - name: ports
+        description: Inspect port usage
+      - name: security
+        description: Security tooling
+      - name: wizard
+        description: Interactive project setup wizard
+      - name: dev
+        description: Local development cluster
+      - name: build
+        description: Build artifacts from ci.build config
+      - name: scaffold
+        description: Scaffold Workflow assets
+      - name: tenant
+        description: Tenant registry tooling
+
+pipelines:
+  cmd-audit:
+    trigger: {type: cli, config: {command: audit}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: audit}}
+  cmd-init:
+    trigger: {type: cli, config: {command: init}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: init}}
+  cmd-validate:
+    trigger: {type: cli, config: {command: validate}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: validate}}
+  cmd-inspect:
+    trigger: {type: cli, config: {command: inspect}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: inspect}}
+  cmd-run:
+    trigger: {type: cli, config: {command: run}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: run}}
+  cmd-plugin:
+    trigger: {type: cli, config: {command: plugin}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: plugin}}
+  cmd-pipeline:
+    trigger: {type: cli, config: {command: pipeline}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: pipeline}}
+  cmd-schema:
+    trigger: {type: cli, config: {command: schema}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: schema}}
+  cmd-snippets:
+    trigger: {type: cli, config: {command: snippets}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: snippets}}
+  cmd-manifest:
+    trigger: {type: cli, config: {command: manifest}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: manifest}}
+  cmd-migrate:
+    trigger: {type: cli, config: {command: migrate}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: migrate}}
+  cmd-build-ui:
+    trigger: {type: cli, config: {command: build-ui}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: build-ui}}
+  cmd-ui:
+    trigger: {type: cli, config: {command: ui}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: ui}}
+  cmd-publish:
+    trigger: {type: cli, config: {command: publish}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: publish}}
+  cmd-deploy:
+    trigger: {type: cli, config: {command: deploy}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: deploy}}
+  cmd-api:
+    trigger: {type: cli, config: {command: api}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: api}}
+  cmd-diff:
+    trigger: {type: cli, config: {command: diff}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: diff}}
+  cmd-template:
+    trigger: {type: cli, config: {command: template}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: template}}
+  cmd-contract:
+    trigger: {type: cli, config: {command: contract}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: contract}}
+  cmd-compat:
+    trigger: {type: cli, config: {command: compat}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: compat}}
+  cmd-generate:
+    trigger: {type: cli, config: {command: generate}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: generate}}
+  cmd-git:
+    trigger: {type: cli, config: {command: git}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: git}}
+  cmd-registry:
+    trigger: {type: cli, config: {command: registry}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: registry}}
+  cmd-plugin-registry:
+    trigger: {type: cli, config: {command: plugin-registry}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: plugin-registry}}
+  cmd-update:
+    trigger: {type: cli, config: {command: update}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: update}}
+  cmd-mcp:
+    trigger: {type: cli, config: {command: mcp}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: mcp}}
+  cmd-modernize:
+    trigger: {type: cli, config: {command: modernize}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: modernize}}
+  cmd-expr-migrate:
+    trigger: {type: cli, config: {command: expr-migrate}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: expr-migrate}}
+  cmd-infra:
+    trigger: {type: cli, config: {command: infra}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: infra}}
+  cmd-docs:
+    trigger: {type: cli, config: {command: docs}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: docs}}
+  cmd-editor-schemas:
+    trigger: {type: cli, config: {command: editor-schemas}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: editor-schemas}}
+  cmd-dsl-reference:
+    trigger: {type: cli, config: {command: dsl-reference}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: dsl-reference}}
+  cmd-ci:
+    trigger: {type: cli, config: {command: ci}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: ci}}
+  cmd-override:
+    trigger: {type: cli, config: {command: override}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: override}}
+  cmd-test:
+    trigger: {type: cli, config: {command: test}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: test}}
+  cmd-secrets:
+    trigger: {type: cli, config: {command: secrets}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: secrets}}
+  cmd-ports:
+    trigger: {type: cli, config: {command: ports}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: ports}}
+  cmd-security:
+    trigger: {type: cli, config: {command: security}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: security}}
+  cmd-wizard:
+    trigger: {type: cli, config: {command: wizard}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: wizard}}
+  cmd-dev:
+    trigger: {type: cli, config: {command: dev}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: dev}}
+  cmd-build:
+    trigger: {type: cli, config: {command: build}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: build}}
+  cmd-scaffold:
+    trigger: {type: cli, config: {command: scaffold}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: scaffold}}
+  cmd-tenant:
+    trigger: {type: cli, config: {command: tenant}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: tenant}}

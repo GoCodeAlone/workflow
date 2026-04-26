@@ -48,17 +48,16 @@ func (n *noopStateStore) DeleteResource(_ context.Context, _ string) error { ret
 func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 	cfgToUse := cfgFile
 	if envName != "" {
-		// Attempt env resolution so per-env backend config (e.g. region, prefix)
-		// is applied before initialising the store. Failure is non-fatal — fall
-		// back to the base config rather than dropping state persistence entirely.
-		if tmp, err := writeEnvResolvedConfig(cfgFile, envName); err == nil {
-			defer os.Remove(tmp)
-			cfgToUse = tmp
+		tmp, err := writeEnvResolvedConfig(cfgFile, envName)
+		if err != nil {
+			return nil, fmt.Errorf("resolve %q environment for state store: %w", envName, err)
 		}
+		defer os.Remove(tmp)
+		cfgToUse = tmp
 	}
 	iacStates, _, _, err := discoverInfraModules(cfgToUse)
 	if err != nil {
-		return &noopStateStore{}, nil //nolint:nilerr // config not found / parse error means no state module; noop is correct
+		return nil, fmt.Errorf("discover iac.state modules: %w", err)
 	}
 	if len(iacStates) == 0 {
 		return &noopStateStore{}, nil
@@ -118,9 +117,13 @@ type iacStateRecord struct {
 	ResourceID   string         `json:"resource_id"`
 	ResourceType string         `json:"resource_type"`
 	Provider     string         `json:"provider"`
+	ProviderRef  string         `json:"provider_ref,omitempty"`
+	ProviderID   string         `json:"provider_id,omitempty"`
+	ConfigHash   string         `json:"config_hash,omitempty"`
 	Status       string         `json:"status"`
 	Config       map[string]any `json:"config"`
 	Outputs      map[string]any `json:"outputs"`
+	Dependencies []string       `json:"dependencies,omitempty"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
 }
@@ -140,11 +143,11 @@ func (s *fsWfctlStateStore) ListResources(_ context.Context) ([]interfaces.Resou
 		}
 		data, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read state %q: %w", e.Name(), err)
 		}
 		var r iacStateRecord
 		if err := json.Unmarshal(data, &r); err != nil {
-			continue
+			return nil, fmt.Errorf("parse state %q: %w", e.Name(), err)
 		}
 		states = append(states, iacRecordToResourceState(r))
 	}
@@ -160,9 +163,13 @@ func (s *fsWfctlStateStore) SaveResource(_ context.Context, state interfaces.Res
 		ResourceID:   state.ID,
 		ResourceType: state.Type,
 		Provider:     state.Provider,
+		ProviderRef:  state.ProviderRef,
+		ProviderID:   state.ProviderID,
+		ConfigHash:   state.ConfigHash,
 		Status:       "active",
 		Config:       state.AppliedConfig,
 		Outputs:      state.Outputs,
+		Dependencies: append([]string(nil), state.Dependencies...),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -291,28 +298,48 @@ func (s *postgresWfctlStateStore) DeleteResource(_ context.Context, name string)
 // ── Conversion helpers ─────────────────────────────────────────────────────────
 
 func iacRecordToResourceState(r iacStateRecord) interfaces.ResourceState {
+	providerID := r.ProviderID
+	if providerID == "" {
+		providerID = r.ResourceID
+	}
+	cfgHash := r.ConfigHash
+	if cfgHash == "" {
+		cfgHash = configHashMap(r.Config)
+	}
 	return interfaces.ResourceState{
 		ID:            r.ResourceID,
 		Name:          r.ResourceID,
 		Type:          r.ResourceType,
 		Provider:      r.Provider,
-		ProviderID:    r.ResourceID,
-		ConfigHash:    configHashMap(r.Config),
+		ProviderRef:   r.ProviderRef,
+		ProviderID:    providerID,
+		ConfigHash:    cfgHash,
 		AppliedConfig: r.Config,
 		Outputs:       r.Outputs,
+		Dependencies:  append([]string(nil), r.Dependencies...),
 	}
 }
 
 func iacStateToResourceState(r *module.IaCState) interfaces.ResourceState {
+	providerID := r.ProviderID
+	if providerID == "" {
+		providerID = r.ResourceID
+	}
+	cfgHash := r.ConfigHash
+	if cfgHash == "" {
+		cfgHash = configHashMap(r.Config)
+	}
 	return interfaces.ResourceState{
 		ID:            r.ResourceID,
 		Name:          r.ResourceID,
 		Type:          r.ResourceType,
 		Provider:      r.Provider,
-		ProviderID:    r.ResourceID,
-		ConfigHash:    configHashMap(r.Config),
+		ProviderRef:   r.ProviderRef,
+		ProviderID:    providerID,
+		ConfigHash:    cfgHash,
 		AppliedConfig: r.Config,
 		Outputs:       r.Outputs,
+		Dependencies:  append([]string(nil), r.Dependencies...),
 	}
 }
 
@@ -322,9 +349,13 @@ func resourceStateToIaCState(state interfaces.ResourceState) *module.IaCState {
 		ResourceID:   state.ID,
 		ResourceType: state.Type,
 		Provider:     state.Provider,
+		ProviderRef:  state.ProviderRef,
+		ProviderID:   state.ProviderID,
+		ConfigHash:   state.ConfigHash,
 		Status:       "active",
 		Config:       state.AppliedConfig,
 		Outputs:      state.Outputs,
+		Dependencies: append([]string(nil), state.Dependencies...),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}

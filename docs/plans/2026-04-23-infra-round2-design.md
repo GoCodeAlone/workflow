@@ -1,3 +1,29 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 179868b
+  - repo: workflow
+    commit: 8c76651
+  - repo: workflow
+    commit: 8faadf9
+  - repo: workflow
+    commit: 76497e5
+  - repo: workflow
+    commit: fc4c3e7
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - rg -n "ResolveForEnv|ConfigHash|ResolveSizing|Close\\(\\).*warning|plan-vs-apply" config platform cmd/wfctl
+    - GOWORK=off go test ./interfaces ./config ./platform ./cmd/wfctl -run 'Test(Migration|Tenant|Canonical|BuildHook|PluginCLI|ScaffoldDockerfile|ResolveForEnv|ConfigHash|ApplyInfraModules|Diagnostic|Troubleshoot|ProviderID|ValidateProviderID|PluginInstall|ParseChecksums|Audit|WfctlManifest|WfctlLockfile|PluginLock|PluginAdd|PluginRemove|MigratePlugins|InfraOutputs)' -count=1
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Infra Round 2: Display-vs-Behavior Contract Fixes — Design
 
 **Status:** Approved (autonomous pipeline, 2026-04-23)

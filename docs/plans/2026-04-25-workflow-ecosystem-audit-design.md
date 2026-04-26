@@ -1,8 +1,20 @@
 ---
-status: approved
+status: implemented
 area: ecosystem
 owner: workflow
-implementation_refs: []
+implementation_refs:
+  - repo: workflow
+    commit: b07721e
+  - repo: workflow
+    commit: b82891f
+  - repo: workflow
+    commit: 521d6b9
+  - repo: workflow
+    commit: a29ea93
+  - repo: workflow
+    commit: 4a977ca
+  - repo: workflow
+    commit: c42d6e3
 external_refs:
   - "#76"
   - "#118"
@@ -15,6 +27,8 @@ verification:
     - npm test
     - npm run build
     - ./gradlew test
+    - GOWORK=off go run ./cmd/wfctl audit plans --dir docs/plans
+    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root ..
   result: partial
 supersedes: []
 superseded_by: []

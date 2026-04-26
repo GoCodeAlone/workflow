@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -76,6 +77,9 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		fmt.Println("No infra.* modules to apply.")
 		return nil
 	}
+	if err := validateUniqueInfraResourceNames(infraSpecs); err != nil {
+		return err
+	}
 
 	// Load full config to resolve iac.provider module definitions.
 	cfg, err := config.LoadFromFile(cfgFile)
@@ -91,6 +95,7 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		provCfg  map[string]any
 	}
 	providerDefs := map[string]providerDef{}
+	providerTypeCounts := map[string]int{}
 	disabledProviders := map[string]struct{}{} // providers with environments[envName]: null
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
@@ -112,6 +117,9 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		}
 		pt, _ := modCfg["provider"].(string)
 		providerDefs[m.Name] = providerDef{provType: pt, provCfg: modCfg}
+		if pt != "" {
+			providerTypeCounts[pt]++
+		}
 	}
 
 	// Group infra specs by iac.provider module name, preserving declaration order.
@@ -147,13 +155,18 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	}
 
 	// Load current state once; nil on first run is valid (no prior state).
-	current, _ := loadCurrentState(cfgFile, envName)
+	current, err := loadCurrentState(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("load current state: %w", err)
+	}
 
-	// Resolve the state store once; failure is non-fatal (state is best-effort).
+	// Resolve the state store once. A missing iac.state module resolves to a
+	// noop store, but a configured backend that cannot be opened is fatal:
+	// applying cloud mutations without durable state risks losing provider_ref
+	// ownership metadata.
 	store, storeErr := resolveStateStore(cfgFile, envName)
 	if storeErr != nil {
-		fmt.Printf("WARNING: cannot open state store: %v — state will not be persisted\n", storeErr)
-		store = &noopStateStore{}
+		return fmt.Errorf("open state store: %w", storeErr)
 	}
 
 	// Apply each provider group in declaration order.
@@ -171,7 +184,9 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 				}
 			}()
 		}
-		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store, os.Stderr, envName)
+		allowProviderTypeFallback := providerTypeCounts[g.provType] == 1
+		scopedCurrent := filterCurrentStateForProvider(current, g.provType, moduleRef, g.specs, allowProviderTypeFallback)
+		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, scopedCurrent, store, os.Stderr, envName)
 	}
 	for _, moduleRef := range groupOrder {
 		if err := applyGroup(moduleRef, groups[moduleRef]); err != nil {
@@ -181,11 +196,81 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	return nil
 }
 
+func filterCurrentStateForProvider(current []interfaces.ResourceState, providerType, moduleRef string, specs []interfaces.ResourceSpec, allowProviderTypeFallback bool) []interfaces.ResourceState {
+	if len(current) == 0 {
+		return nil
+	}
+	scoped := make([]interfaces.ResourceState, 0, len(current))
+	for i := range current {
+		st := current[i]
+		if stateProviderRef := resourceStateProviderRef(st); stateProviderRef != "" {
+			if stateProviderRef == moduleRef {
+				scoped = append(scoped, st)
+				continue
+			}
+			continue
+		}
+		if st.Provider == providerType && allowProviderTypeFallback {
+			scoped = append(scoped, st)
+			continue
+		}
+		if st.Provider == "" && allowProviderTypeFallback && stateNameInSpecs(st.Name, specs) {
+			scoped = append(scoped, st)
+		}
+	}
+	return scoped
+}
+
+func stateNameInSpecs(name string, specs []interfaces.ResourceSpec) bool {
+	for i := range specs {
+		if specs[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func validateUniqueInfraResourceNames(specs []interfaces.ResourceSpec) error {
+	seen := make(map[string]interfaces.ResourceSpec, len(specs))
+	for _, spec := range specs {
+		if prev, exists := seen[spec.Name]; exists {
+			prevProvider := resourceSpecProviderRef(prev)
+			provider := resourceSpecProviderRef(spec)
+			if prevProvider != provider || prev.Type != spec.Type {
+				return fmt.Errorf("infra resource name %q is used by both %s/provider %q and %s/provider %q; state identity is name-based, so resource names must be unique across provider groups", spec.Name, prev.Type, prevProvider, spec.Type, provider)
+			}
+			return fmt.Errorf("infra resource name %q is declared more than once", spec.Name)
+		}
+		seen[spec.Name] = spec
+	}
+	return nil
+}
+
+func resourceStateProviderRef(st interfaces.ResourceState) string {
+	if st.ProviderRef != "" {
+		return st.ProviderRef
+	}
+	if st.AppliedConfig == nil {
+		return ""
+	}
+	providerRef, _ := st.AppliedConfig["provider"].(string)
+	return providerRef
+}
+
+func resourceSpecProviderRef(spec interfaces.ResourceSpec) string {
+	if spec.Config == nil {
+		return ""
+	}
+	providerRef, _ := spec.Config["provider"].(string)
+	return providerRef
+}
+
 // applyWithProviderAndStore computes a diff plan for the given specs against
 // the current state and executes it via provider.Apply. On success, each
-// provisioned resource is persisted to store (failures log a warning but do
-// not abort the apply — the cloud resource already exists). Deleted resources
-// are removed from store after a successful destroy action.
+// provisioned resource is persisted to store. Save failures abort the command
+// so callers cannot miss a successful cloud mutation whose state was not
+// recorded. Deleted resources are removed from store after a successful destroy
+// action.
 //
 // providerType is used only as a label when constructing ResourceState records.
 // Callers pass a nil store (or noopStateStore) when state persistence is not
@@ -225,15 +310,16 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 	}
 
-	// Pass the full current state to ComputePlan so that resources which were
-	// previously provisioned but are no longer in the desired spec set generate
-	// delete actions rather than being silently ignored.
-	//
-	// NOTE: in multi-provider configs each provider will see state entries it
-	// does not own, which could produce spurious delete actions. Proper
-	// provider-scoped state isolation requires a "provider" field on
-	// ResourceState (tracked as a follow-up). For the common single-provider
-	// case this is correct and complete.
+	// Pass the caller-provided current state to ComputePlan so resources that
+	// were previously provisioned but are no longer desired generate deletes.
+	// Multi-provider callers must pass only the state owned by this provider
+	// group; applyInfraModules does that before invoking this helper.
+
+	var err error
+	current, err = adoptExistingResources(ctx, provider, providerType, specs, current, store)
+	if err != nil {
+		return err
+	}
 
 	// Compute the diff plan locally (provider-agnostic).
 	plan, err := platform.ComputePlan(specs, current)
@@ -312,9 +398,13 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 
 			// Find the matching spec to get the applied config.
 			var appliedCfg map[string]any
+			var providerRef string
+			var dependencies []string
 			for i := range specs {
 				if specs[i].Name == r.Name {
 					appliedCfg = specs[i].Config
+					providerRef, _ = specs[i].Config["provider"].(string)
+					dependencies = append([]string(nil), specs[i].DependsOn...)
 					break
 				}
 			}
@@ -325,15 +415,17 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 				Name:          r.Name,
 				Type:          r.Type,
 				Provider:      providerType,
+				ProviderRef:   providerRef,
 				ProviderID:    r.ProviderID,
 				ConfigHash:    configHashMap(appliedCfg),
 				AppliedConfig: appliedCfg,
 				Outputs:       r.Outputs,
+				Dependencies:  dependencies,
 				CreatedAt:     now,
 				UpdatedAt:     now,
 			}
 			if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
-				fmt.Printf("  WARNING: failed to persist state for %q: %v — apply succeeded but state may be out of sync\n", r.Name, saveErr)
+				return fmt.Errorf("%s/%s: persist state after apply: %w", r.Type, r.Name, saveErr)
 			}
 		}
 
@@ -353,6 +445,169 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 	}
 	return nil
+}
+
+func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) ([]interfaces.ResourceState, error) {
+	if len(specs) == 0 {
+		return current, nil
+	}
+	currentByName := make(map[string]struct{}, len(current))
+	for i := range current {
+		currentByName[current[i].Name] = struct{}{}
+	}
+
+	drivers := make(map[string]interfaces.ResourceDriver)
+	for _, spec := range specs {
+		if _, exists := currentByName[spec.Name]; exists {
+			continue
+		}
+		builtinAdoptable := hasBuiltInAdoptionRef(spec.Type)
+		driver, ok := drivers[spec.Type]
+		if !ok {
+			var err error
+			driver, err = provider.ResourceDriver(spec.Type)
+			if err != nil {
+				if !builtinAdoptable {
+					continue
+				}
+				return nil, fmt.Errorf("%s/%s: resolve resource driver: %w", spec.Type, spec.Name, err)
+			}
+			drivers[spec.Type] = driver
+		}
+		ref, adoptable, err := adoptionRefForSpec(driver, spec)
+		if err != nil {
+			return nil, err
+		}
+		if !adoptable {
+			continue
+		}
+		live, err := driver.Read(ctx, ref)
+		if err != nil {
+			if isIaCNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("%s/%s: read existing resource for adoption: %w", spec.Type, spec.Name, err)
+		}
+		if live == nil {
+			return nil, fmt.Errorf("%s/%s: read existing resource for adoption: driver returned nil resource without error", spec.Type, spec.Name)
+		}
+		if isNoopStateStore(store) {
+			return nil, fmt.Errorf("%s/%s: adoption requires a writable iac.state backend; add an iac.state module before applying existing resources", spec.Type, spec.Name)
+		}
+		state, err := resourceStateFromLiveOutput(spec, providerType, live)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateStateProviderID(provider, providerType, state); err != nil {
+			return nil, err
+		}
+		if saveErr := store.SaveResource(ctx, state); saveErr != nil {
+			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, saveErr)
+		}
+		fmt.Printf("  Adopted existing %s %q (id=%s)\n", spec.Type, spec.Name, state.ProviderID)
+		current = append(current, state)
+		currentByName[spec.Name] = struct{}{}
+	}
+	return current, nil
+}
+
+func adoptionRefForSpec(driver interfaces.ResourceDriver, spec interfaces.ResourceSpec) (interfaces.ResourceRef, bool, error) {
+	if driver == nil {
+		return interfaces.ResourceRef{}, false, nil
+	}
+	if locator, ok := driver.(interfaces.ResourceAdoptionLocator); ok {
+		return locator.AdoptionRef(spec)
+	}
+	if !hasBuiltInAdoptionRef(spec.Type) {
+		return interfaces.ResourceRef{}, false, nil
+	}
+	if spec.Type == "infra.dns" {
+		ref := interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}
+		if domain, _ := spec.Config["domain"].(string); domain != "" {
+			ref.ProviderID = domain
+		} else {
+			ref.ProviderID = spec.Name
+		}
+		return ref, true, nil
+	}
+	return interfaces.ResourceRef{}, false, nil
+}
+
+func hasBuiltInAdoptionRef(resourceType string) bool {
+	switch resourceType {
+	case "infra.dns":
+		return true
+	default:
+		return false
+	}
+}
+
+func isIaCNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, interfaces.ErrResourceNotFound) {
+		return true
+	}
+	var platformNotFound *platform.ResourceNotFoundError
+	return errors.As(err, &platformNotFound)
+}
+
+func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType string, live *interfaces.ResourceOutput) (interfaces.ResourceState, error) {
+	if live.ProviderID == "" {
+		return interfaces.ResourceState{}, fmt.Errorf("%s/%s: live resource returned empty ProviderID; state not persisted", spec.Type, spec.Name)
+	}
+	appliedConfig := liveConfigFromOutputs(live.Outputs)
+	now := time.Now().UTC()
+	return interfaces.ResourceState{
+		ID:            spec.Name,
+		Name:          spec.Name,
+		Type:          spec.Type,
+		Provider:      providerType,
+		ProviderRef:   resourceSpecProviderRef(spec),
+		ProviderID:    live.ProviderID,
+		ConfigHash:    configHashMap(appliedConfig),
+		AppliedConfig: appliedConfig,
+		Outputs:       cloneMap(live.Outputs),
+		Dependencies:  append([]string(nil), spec.DependsOn...),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}, nil
+}
+
+func liveConfigFromOutputs(outputs map[string]any) map[string]any {
+	for _, key := range []string{"config", "applied_config", "appliedConfig"} {
+		if cfg, ok := mapStringAny(outputs[key]); ok {
+			return cfg
+		}
+	}
+	return cloneMap(outputs)
+}
+
+func mapStringAny(v any) (map[string]any, bool) {
+	switch m := v.(type) {
+	case map[string]any:
+		return cloneMap(m), true
+	case map[string]string:
+		out := make(map[string]any, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // isAbstractSize reports whether s is one of the canonical abstract size tiers

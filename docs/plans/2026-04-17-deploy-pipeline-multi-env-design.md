@@ -1,3 +1,30 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: fc4c3e7
+  - repo: workflow
+    commit: 2942255
+  - repo: workflow
+    commit: 856a7b9
+  - repo: workflow-dnd
+    commit: d2273b3d
+  - repo: buymywishlist
+    commit: f5f7e0c
+external_refs:
+  - "workflow:docs/tutorials/deploy-pipeline.md"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'rg -n "ResolveForEnv|--env|LoadFromFile|deploy-pipeline" config cmd docs -S'
+    - 'rg -n "wfctl infra|wfctl ci run|infra.yaml|environments:|deploy-staging|deploy-prod" /Users/jon/workspace/workflow-dnd /Users/jon/workspace/buymywishlist -S'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Deploy Pipeline Multi-Env — Design
 
 **Status:** Approved

@@ -1,3 +1,28 @@
+---
+status: implemented
+area: plugins
+owner: workflow
+implementation_refs:
+  - repo: workflow-plugin-twilio
+    commit: 1345186
+  - repo: workflow-plugin-monday
+    commit: 94ccd28
+  - repo: workflow-plugin-turnio
+    commit: 670fdbf
+external_refs:
+  - "workflow-scenarios: scenarios/52-monday-integration"
+  - "workflow-scenarios: scenarios/53-turnio-integration"
+  - "workflow-scenarios: scenarios/63-twilio-integration"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "jq -r '.name, (.capabilities.stepTypes // .stepTypes // [] | length)' /Users/jon/workspace/workflow-plugin-{twilio,monday,turnio}/plugin.json"
+    - "rg -n \"workflow-plugin-(twilio|monday|turnio)\" /Users/jon/workspace/workflow-scenarios"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Integration Plugins Design: Twilio, monday.com, turn.io
 
 **Date**: 2026-03-11

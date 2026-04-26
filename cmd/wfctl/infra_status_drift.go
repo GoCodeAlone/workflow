@@ -165,9 +165,11 @@ func groupStatesByProvider(states []interfaces.ResourceState, cfgFile, envName s
 
 	for i := range states {
 		st := &states[i]
-		moduleRef := ""
+		moduleRef := resourceStateProviderRef(*st)
 		if spec, ok := specByName[st.Name]; ok {
-			moduleRef, _ = spec.Config["provider"].(string)
+			if moduleRef == "" {
+				moduleRef, _ = spec.Config["provider"].(string)
+			}
 		}
 		if moduleRef == "" {
 			moduleRef = "__provider__:" + st.Provider
