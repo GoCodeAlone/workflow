@@ -15,18 +15,24 @@ type RemoteStep struct {
 	handleID string
 	config   map[string]any
 	client   pb.PluginServiceClient
+	contract *pb.ContractDescriptor
 	tmpl     *module.TemplateEngine
 }
 
 // NewRemoteStep creates a remote step proxy.
 // config holds the raw (possibly template-containing) step configuration that
 // will be resolved against the live pipeline context on each Execute call.
-func NewRemoteStep(name, handleID string, client pb.PluginServiceClient, config map[string]any) *RemoteStep {
+func NewRemoteStep(name, handleID string, client pb.PluginServiceClient, config map[string]any, contracts ...*pb.ContractDescriptor) *RemoteStep {
+	var contract *pb.ContractDescriptor
+	if len(contracts) > 0 {
+		contract = contracts[0]
+	}
 	return &RemoteStep{
 		name:     name,
 		handleID: handleID,
 		config:   config,
 		client:   client,
+		contract: contract,
 		tmpl:     module.NewTemplateEngine(),
 	}
 }
@@ -55,14 +61,12 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 		stepOutputs[k] = mapToStruct(v)
 	}
 
-	resp, err := s.client.ExecuteStep(ctx, &pb.ExecuteStepRequest{
-		HandleId:    s.handleID,
-		TriggerData: mapToStruct(pc.TriggerData),
-		StepOutputs: stepOutputs,
-		Current:     mapToStruct(pc.Current),
-		Metadata:    mapToStruct(pc.Metadata),
-		Config:      mapToStruct(resolvedConfig),
-	})
+	req, err := s.executeRequest(pc, resolvedConfig, stepOutputs)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.client.ExecuteStep(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("remote step execute: %w", err)
 	}
@@ -70,10 +74,54 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 		return nil, fmt.Errorf("remote step execute: %s", resp.Error)
 	}
 
+	output := structToMap(resp.Output)
+	if resp.TypedOutput != nil && s.contract != nil && s.contract.OutputMessage != "" {
+		output, err = typedAnyToMap(resp.TypedOutput, s.contract.OutputMessage)
+		if err != nil {
+			return nil, fmt.Errorf("remote step %q typed output decode: %w", s.name, err)
+		}
+	}
+
 	return &module.StepResult{
-		Output: structToMap(resp.Output),
+		Output: output,
 		Stop:   resp.StopPipeline,
 	}, nil
+}
+
+func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig map[string]any, stepOutputs map[string]*structpb.Struct) (*pb.ExecuteStepRequest, error) {
+	req := &pb.ExecuteStepRequest{
+		HandleId:    s.handleID,
+		TriggerData: mapToStruct(pc.TriggerData),
+		StepOutputs: stepOutputs,
+		Current:     mapToStruct(pc.Current),
+		Metadata:    mapToStruct(pc.Metadata),
+		Config:      mapToStruct(resolvedConfig),
+	}
+	if s.contract == nil || s.contract.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED {
+		return req, nil
+	}
+	if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
+		return req, nil
+	}
+	typedConfig, err := mapToTypedAny(s.contract.ConfigMessage, resolvedConfig)
+	if err != nil {
+		if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+			return nil, fmt.Errorf("remote step %q STRICT_PROTO config message %q cannot use legacy Struct fallback: %w", s.name, s.contract.ConfigMessage, err)
+		}
+		return req, nil
+	}
+	typedInput, err := mapToTypedAny(s.contract.InputMessage, pc.Current)
+	if err != nil {
+		if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+			return nil, fmt.Errorf("remote step %q STRICT_PROTO input message %q cannot use legacy Struct fallback: %w", s.name, s.contract.InputMessage, err)
+		}
+		return req, nil
+	}
+	req.Config = nil
+	req.Current = nil
+	req.TypedConfig = typedConfig
+	req.TypedInput = typedInput
+	return req, nil
 }
 
 // Destroy releases the remote step resources.

@@ -9,7 +9,10 @@ import (
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // --- minimal test providers ---
@@ -69,6 +72,66 @@ func (p *contractProvider) ContractRegistry() *pb.ContractRegistry {
 			},
 		},
 	}
+}
+
+type typedServiceProvider struct {
+	minimalProvider
+	module ModuleInstance
+}
+
+func (p *typedServiceProvider) ModuleTypes() []string {
+	return []string{"typed.service"}
+}
+
+func (p *typedServiceProvider) CreateModule(typeName, name string, config map[string]any) (ModuleInstance, error) {
+	return p.module, nil
+}
+
+type typedServiceFactoryProvider struct {
+	minimalProvider
+	TypedModuleProvider
+}
+
+type typedServiceModule struct {
+	lastMethod string
+	lastInput  *anypb.Any
+}
+
+func (m *typedServiceModule) Init() error {
+	return nil
+}
+
+func (m *typedServiceModule) Start(context.Context) error {
+	return nil
+}
+
+func (m *typedServiceModule) Stop(context.Context) error {
+	return nil
+}
+
+func (m *typedServiceModule) InvokeTypedMethod(method string, input *anypb.Any) (*anypb.Any, error) {
+	m.lastMethod = method
+	m.lastInput = input
+	return anypb.New(wrapperspb.String("typed-output"))
+}
+
+func (m *typedServiceModule) InvokeMethod(method string, args map[string]any) (map[string]any, error) {
+	m.lastMethod = method
+	return map[string]any{"value": args["value"]}, nil
+}
+
+type typedServiceModuleWithoutTypedInvoker struct{}
+
+func (typedServiceModuleWithoutTypedInvoker) Init() error {
+	return nil
+}
+
+func (typedServiceModuleWithoutTypedInvoker) Start(context.Context) error {
+	return nil
+}
+
+func (typedServiceModuleWithoutTypedInvoker) Stop(context.Context) error {
+	return nil
 }
 
 // --- tests ---
@@ -198,6 +261,183 @@ func TestGetContractRegistry_WithProvider(t *testing.T) {
 	if descriptor.Mode != pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 		t.Errorf("expected strict typed mode, got %v", descriptor.Mode)
 	}
+}
+
+func TestInvokeService_WithTypedInvoker(t *testing.T) {
+	module := &typedServiceModule{}
+	srv := newGRPCServer(&typedServiceProvider{module: module})
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "typed.service",
+		Name: "typed",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected create error: %s", createResp.Error)
+	}
+	input, err := anypb.New(wrapperspb.String("typed-input"))
+	if err != nil {
+		t.Fatalf("pack typed input: %v", err)
+	}
+
+	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
+		HandleId:   createResp.HandleId,
+		Method:     "Echo",
+		TypedInput: input,
+	})
+	if err != nil {
+		t.Fatalf("InvokeService returned rpc error: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("unexpected invoke error: %s", resp.Error)
+	}
+	if module.lastMethod != "Echo" {
+		t.Fatalf("expected method Echo, got %q", module.lastMethod)
+	}
+	if module.lastInput == nil {
+		t.Fatal("expected typed input to reach module")
+	}
+	if resp.TypedOutput == nil {
+		t.Fatal("expected typed output")
+	}
+	var output wrapperspb.StringValue
+	if err := resp.TypedOutput.UnmarshalTo(&output); err != nil {
+		t.Fatalf("unpack typed output: %v", err)
+	}
+	if output.Value != "typed-output" {
+		t.Fatalf("expected typed output value, got %q", output.Value)
+	}
+}
+
+func TestInvokeService_WithTypedModuleFactoryForwardsTypedInvoker(t *testing.T) {
+	module := &typedServiceModule{}
+	srv := newGRPCServer(&typedServiceFactoryProvider{
+		TypedModuleProvider: NewTypedModuleFactory(
+			"typed.service",
+			wrapperspb.String("configured"),
+			func(name string, config *wrapperspb.StringValue) (ModuleInstance, error) {
+				return module, nil
+			},
+		),
+	})
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type:        "typed.service",
+		Name:        "typed",
+		TypedConfig: mustPackGRPCTestMessage(t, wrapperspb.String("configured")),
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected create error: %s", createResp.Error)
+	}
+	input, err := anypb.New(wrapperspb.String("typed-input"))
+	if err != nil {
+		t.Fatalf("pack typed input: %v", err)
+	}
+
+	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
+		HandleId:   createResp.HandleId,
+		Method:     "Echo",
+		TypedInput: input,
+	})
+	if err != nil {
+		t.Fatalf("InvokeService returned rpc error: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("unexpected invoke error: %s", resp.Error)
+	}
+	if module.lastMethod != "Echo" {
+		t.Fatalf("expected method Echo, got %q", module.lastMethod)
+	}
+	if resp.TypedOutput == nil {
+		t.Fatal("expected typed output")
+	}
+}
+
+func TestInvokeService_WithTypedModuleFactoryForwardsLegacyInvoker(t *testing.T) {
+	module := &typedServiceModule{}
+	srv := newGRPCServer(&typedServiceFactoryProvider{
+		TypedModuleProvider: NewTypedModuleFactory(
+			"typed.service",
+			wrapperspb.String("configured"),
+			func(name string, config *wrapperspb.StringValue) (ModuleInstance, error) {
+				return module, nil
+			},
+		),
+	})
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type:        "typed.service",
+		Name:        "typed",
+		TypedConfig: mustPackGRPCTestMessage(t, wrapperspb.String("configured")),
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected create error: %s", createResp.Error)
+	}
+
+	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
+		HandleId: createResp.HandleId,
+		Method:   "Echo",
+		Args: mapToStruct(map[string]any{
+			"value": "legacy-input",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("InvokeService returned rpc error: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("unexpected invoke error: %s", resp.Error)
+	}
+	if module.lastMethod != "Echo" {
+		t.Fatalf("expected method Echo, got %q", module.lastMethod)
+	}
+	if got := resp.Result.AsMap()["value"]; got != "legacy-input" {
+		t.Fatalf("expected legacy result value, got %#v", got)
+	}
+}
+
+func TestInvokeService_WithTypedInputRequiresTypedInvoker(t *testing.T) {
+	srv := newGRPCServer(&typedServiceProvider{module: &typedServiceModuleWithoutTypedInvoker{}})
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "typed.service",
+		Name: "typed",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+	input, err := anypb.New(wrapperspb.String("typed-input"))
+	if err != nil {
+		t.Fatalf("pack typed input: %v", err)
+	}
+
+	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
+		HandleId:   createResp.HandleId,
+		Method:     "Echo",
+		TypedInput: input,
+	})
+	if err != nil {
+		t.Fatalf("InvokeService returned rpc error: %v", err)
+	}
+	if resp.Error == "" {
+		t.Fatal("expected missing TypedServiceInvoker error")
+	}
+}
+
+func mustPackGRPCTestMessage(t *testing.T, msg proto.Message) *anypb.Any {
+	t.Helper()
+	typed, err := anypb.New(msg)
+	if err != nil {
+		t.Fatalf("pack typed message: %v", err)
+	}
+	return typed
 }
 
 // detectContentType maps common extensions to MIME types.

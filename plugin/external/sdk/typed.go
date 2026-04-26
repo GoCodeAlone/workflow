@@ -307,6 +307,22 @@ func (m *TypedModuleInstance[C]) SetMessageSubscriber(sub MessageSubscriber) {
 	}
 }
 
+func (m *TypedModuleInstance[C]) InvokeTypedMethod(method string, input *anypb.Any) (*anypb.Any, error) {
+	invoker, ok := m.ModuleInstance.(TypedServiceInvoker)
+	if !ok {
+		return nil, fmt.Errorf("typed module instance does not implement TypedServiceInvoker")
+	}
+	return invoker.InvokeTypedMethod(method, input)
+}
+
+func (m *TypedModuleInstance[C]) InvokeMethod(method string, args map[string]any) (map[string]any, error) {
+	invoker, ok := m.ModuleInstance.(ServiceInvoker)
+	if !ok {
+		return nil, fmt.Errorf("typed module instance does not implement ServiceInvoker")
+	}
+	return invoker.InvokeMethod(method, args)
+}
+
 // TypedConfig returns the unpacked module config most recently supplied by the
 // host.
 func (m *TypedModuleInstance[C]) TypedConfig() C {

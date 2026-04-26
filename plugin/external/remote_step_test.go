@@ -2,11 +2,14 @@ package external
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -159,5 +162,102 @@ func TestRemoteStep_Execute_StaticConfigPassthrough(t *testing.T) {
 	}
 	if sent["timeout"] != float64(30) {
 		t.Errorf("expected timeout=30, got %v", sent["timeout"])
+	}
+}
+
+func TestRemoteStep_Execute_StrictContractSendsTypedPayloads(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		response: &pb.ExecuteStepResponse{TypedOutput: mustAnyFromMapForTest(t, "workflow.plugin.v1.Manifest", map[string]any{
+			"name":    "typed-output",
+			"version": "v1",
+		})},
+	}
+	contract := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		StepType:      "test.strict",
+		ConfigMessage: "workflow.plugin.v1.Manifest",
+		InputMessage:  "workflow.plugin.v1.Manifest",
+		OutputMessage: "workflow.plugin.v1.Manifest",
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+	}
+	step := NewRemoteStep("test-step", "handle-strict", stub, map[string]any{
+		"name":    "typed-config",
+		"version": "v1",
+	}, contract)
+
+	pc := module.NewPipelineContext(map[string]any{
+		"name":    "typed-input",
+		"version": "v1",
+	}, nil)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if stub.lastRequest == nil {
+		t.Fatal("expected ExecuteStep to be called")
+	}
+	if stub.lastRequest.Config != nil {
+		t.Fatalf("expected strict step to omit legacy Config, got %v", stub.lastRequest.Config)
+	}
+	if stub.lastRequest.Current != nil {
+		t.Fatalf("expected strict step to omit legacy Current, got %v", stub.lastRequest.Current)
+	}
+	assertAnyTypeForTest(t, stub.lastRequest.TypedConfig, "workflow.plugin.v1.Manifest")
+	assertAnyTypeForTest(t, stub.lastRequest.TypedInput, "workflow.plugin.v1.Manifest")
+	if result.Output["name"] != "typed-output" {
+		t.Fatalf("expected typed output to be decoded, got %#v", result.Output)
+	}
+}
+
+func TestRemoteStep_Execute_StrictContractFailsClosedWithoutCodec(t *testing.T) {
+	stub := &stubPluginServiceClient{}
+	contract := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		StepType:      "test.strict",
+		ConfigMessage: "workflow.plugin.v1.DoesNotExist",
+		InputMessage:  "workflow.plugin.v1.DoesNotExist",
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+	}
+	step := NewRemoteStep("test-step", "handle-strict", stub, map[string]any{
+		"name": "legacy-only",
+	}, contract)
+
+	_, err := step.Execute(context.Background(), module.NewPipelineContext(map[string]any{"name": "legacy-only"}, nil))
+	if err == nil {
+		t.Fatal("expected strict step execution to fail without generated codec")
+	}
+	if !strings.Contains(err.Error(), "STRICT_PROTO") {
+		t.Fatalf("expected strict failure to mention STRICT_PROTO, got %v", err)
+	}
+	if stub.lastRequest != nil {
+		t.Fatal("expected strict failure before ExecuteStep RPC")
+	}
+}
+
+func mustAnyFromMapForTest(t *testing.T, messageName string, values map[string]any) *anypb.Any {
+	t.Helper()
+	typed, err := mapToTypedAny(messageName, values)
+	if err != nil {
+		t.Fatalf("mapToTypedAny(%s): %v", messageName, err)
+	}
+	return typed
+}
+
+func assertAnyTypeForTest(t *testing.T, got *anypb.Any, messageName string) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("expected typed Any for %s", messageName)
+	}
+	if !strings.HasSuffix(got.TypeUrl, "/"+messageName) {
+		t.Fatalf("expected Any type %s, got %s", messageName, got.TypeUrl)
+	}
+	var msg pb.Manifest
+	if err := got.UnmarshalTo(&msg); err != nil {
+		t.Fatalf("unmarshal typed Any: %v", err)
+	}
+	if msg.Name == "" {
+		raw, _ := protojson.Marshal(got)
+		t.Fatalf("expected typed Any to contain manifest name, got %s", raw)
 	}
 }

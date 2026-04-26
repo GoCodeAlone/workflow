@@ -15,7 +15,9 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,8 +29,15 @@ type ExternalPluginAdapter struct {
 	manifest            *pb.Manifest
 	contractRegistry    *pb.ContractRegistry
 	contractRegistryErr error
+	contracts           contractDescriptorCache
 	configFragment      []byte
 	pluginDir           string
+}
+
+type contractDescriptorCache struct {
+	modules  map[string]*pb.ContractDescriptor
+	steps    map[string]*pb.ContractDescriptor
+	services map[string]*pb.ContractDescriptor
 }
 
 // NewExternalPluginAdapter creates an adapter from a connected plugin client.
@@ -50,6 +59,7 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 	} else {
 		a.contractRegistryErr = fmt.Errorf("get contract registry from plugin %s: %w", name, registryErr)
 	}
+	a.contracts = buildContractDescriptorCache(a.contractRegistry)
 	// Fetch config fragment eagerly so it's available before BuildFromConfig runs.
 	if resp, fragErr := client.client.GetConfigFragment(ctx, &emptypb.Empty{}); fragErr == nil && len(resp.YamlConfig) > 0 {
 		a.configFragment = resp.YamlConfig
@@ -64,7 +74,87 @@ func newExternalPluginAdapterWithContractRegistry(manifest *pb.Manifest, registr
 		manifest:            manifest,
 		contractRegistry:    registry,
 		contractRegistryErr: nil,
+		contracts:           buildContractDescriptorCache(registry),
 	}
+}
+
+func buildContractDescriptorCache(registry *pb.ContractRegistry) contractDescriptorCache {
+	cache := contractDescriptorCache{
+		modules:  make(map[string]*pb.ContractDescriptor),
+		steps:    make(map[string]*pb.ContractDescriptor),
+		services: make(map[string]*pb.ContractDescriptor),
+	}
+	if registry == nil {
+		return cache
+	}
+	for _, descriptor := range registry.Contracts {
+		if descriptor == nil {
+			continue
+		}
+		switch descriptor.Kind {
+		case pb.ContractKind_CONTRACT_KIND_MODULE:
+			if descriptor.ModuleType != "" {
+				cache.modules[descriptor.ModuleType] = descriptor
+			}
+		case pb.ContractKind_CONTRACT_KIND_STEP:
+			if descriptor.StepType != "" {
+				cache.steps[descriptor.StepType] = descriptor
+			}
+		case pb.ContractKind_CONTRACT_KIND_SERVICE:
+			if descriptor.Method != "" {
+				cache.services[serviceContractKey(descriptor.ServiceName, descriptor.Method)] = descriptor
+				if descriptor.ServiceName == "" {
+					cache.services[descriptor.Method] = descriptor
+				}
+			}
+		}
+	}
+	return cache
+}
+
+func serviceContractKey(serviceName, method string) string {
+	if serviceName == "" {
+		return method
+	}
+	return serviceName + "\x00" + method
+}
+
+func (c contractDescriptorCache) module(typeName string) *pb.ContractDescriptor {
+	return c.modules[typeName]
+}
+
+func (c contractDescriptorCache) step(typeName string) *pb.ContractDescriptor {
+	return c.steps[typeName]
+}
+
+func (c contractDescriptorCache) servicesFor(moduleType string) map[string]*pb.ContractDescriptor {
+	out := make(map[string]*pb.ContractDescriptor)
+	for key, descriptor := range c.services {
+		if descriptor == nil {
+			continue
+		}
+		if descriptor.ModuleType == moduleType || descriptor.ServiceName == moduleType || descriptor.ServiceName == "" || key == descriptor.Method {
+			out[descriptor.Method] = descriptor
+		}
+	}
+	return out
+}
+
+func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]any) (*structpb.Struct, *anypb.Any, error) {
+	if descriptor == nil || descriptor.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED {
+		return mapToStruct(cfg), nil, nil
+	}
+	if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
+		return mapToStruct(cfg), nil, nil
+	}
+	typed, err := mapToTypedAny(descriptor.ConfigMessage, cfg)
+	if err != nil {
+		if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+			return nil, nil, fmt.Errorf("STRICT_PROTO contract for config message %q cannot use legacy Struct fallback: %w", descriptor.ConfigMessage, err)
+		}
+		return mapToStruct(cfg), nil, nil
+	}
+	return nil, typed, nil
 }
 
 // --- NativePlugin interface ---
@@ -159,15 +249,23 @@ func (a *ExternalPluginAdapter) ModuleFactories() map[string]plugin.ModuleFactor
 	for _, typeName := range resp.Types {
 		tn := typeName // capture
 		factories[tn] = func(name string, cfg map[string]any) modular.Module {
+			config, typedConfig, configErr := createTypedConfigRequest(a.contracts.module(tn), cfg)
+			if configErr != nil {
+				return nil
+			}
 			createResp, createErr := a.client.client.CreateModule(ctx, &pb.CreateModuleRequest{
-				Type:   tn,
-				Name:   name,
-				Config: mapToStruct(cfg),
+				Type:        tn,
+				Name:        name,
+				Config:      config,
+				TypedConfig: typedConfig,
 			})
 			if createErr != nil || createResp.Error != "" {
 				return nil
 			}
-			remote := NewRemoteModule(name, createResp.HandleId, a.client.client)
+			remote := NewRemoteModule(name, createResp.HandleId, a.client.client, remoteModuleContracts{
+				module:   a.contracts.module(tn),
+				services: a.contracts.servicesFor(tn),
+			})
 			if tn == "security.scanner" {
 				return NewSecurityScannerRemoteModule(remote)
 			}
@@ -187,10 +285,16 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 	for _, typeName := range resp.Types {
 		tn := typeName // capture
 		factories[tn] = func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+			contract := a.contracts.step(tn)
+			config, typedConfig, configErr := createTypedConfigRequest(contract, cfg)
+			if configErr != nil {
+				return nil, fmt.Errorf("create remote step %s: %w", tn, configErr)
+			}
 			createResp, createErr := a.client.client.CreateStep(ctx, &pb.CreateStepRequest{
-				Type:   tn,
-				Name:   name,
-				Config: mapToStruct(cfg),
+				Type:        tn,
+				Name:        name,
+				Config:      config,
+				TypedConfig: typedConfig,
 			})
 			if createErr != nil {
 				return nil, fmt.Errorf("create remote step %s: %w", tn, createErr)
@@ -198,7 +302,7 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 			if createResp.Error != "" {
 				return nil, fmt.Errorf("create remote step %s: %s", tn, createResp.Error)
 			}
-			return NewRemoteStep(name, createResp.HandleId, a.client.client, cfg), nil
+			return NewRemoteStep(name, createResp.HandleId, a.client.client, cfg, contract), nil
 		}
 	}
 	return factories

@@ -3,6 +3,7 @@ package external
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
@@ -24,9 +25,11 @@ func newTestAdapter(manifest *pb.Manifest, configFragment []byte) *ExternalPlugi
 
 type adapterTestPluginServiceClient struct {
 	stubPluginServiceClient
-	manifest    *pb.Manifest
-	registry    *pb.ContractRegistry
-	registryErr error
+	manifest          *pb.Manifest
+	registry          *pb.ContractRegistry
+	registryErr       error
+	stepTypes         []string
+	lastCreateStepReq *pb.CreateStepRequest
 }
 
 func (c *adapterTestPluginServiceClient) GetManifest(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.Manifest, error) {
@@ -38,6 +41,15 @@ func (c *adapterTestPluginServiceClient) GetContractRegistry(_ context.Context, 
 		return nil, c.registryErr
 	}
 	return c.registry, nil
+}
+
+func (c *adapterTestPluginServiceClient) GetStepTypes(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.TypeList, error) {
+	return &pb.TypeList{Types: c.stepTypes}, nil
+}
+
+func (c *adapterTestPluginServiceClient) CreateStep(_ context.Context, req *pb.CreateStepRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
+	c.lastCreateStepReq = req
+	return &pb.HandleResponse{HandleId: "step-handle"}, nil
 }
 
 func TestIsSamplePlugin_True(t *testing.T) {
@@ -181,5 +193,105 @@ func TestContractRegistry_UnimplementedUsesEmptyRegistry(t *testing.T) {
 	}
 	if a.ContractRegistryError() != nil {
 		t.Fatalf("expected no recorded error for unimplemented registry RPC, got %v", a.ContractRegistryError())
+	}
+}
+
+func TestExternalPluginAdapter_ServiceContractsAttachByModuleType(t *testing.T) {
+	registry := &pb.ContractRegistry{
+		Contracts: []*pb.ContractDescriptor{
+			{
+				Kind:          pb.ContractKind_CONTRACT_KIND_SERVICE,
+				ModuleType:    "security.scanner",
+				ServiceName:   "security.Scanner",
+				Method:        "ScanSAST",
+				InputMessage:  "workflow.plugin.v1.Manifest",
+				OutputMessage: "workflow.plugin.v1.Manifest",
+				Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			},
+		},
+	}
+	a := newExternalPluginAdapterWithContractRegistry(&pb.Manifest{Name: "contract-plugin"}, registry)
+
+	contracts := a.contracts.servicesFor("security.scanner")
+	contract := contracts["ScanSAST"]
+	if contract == nil {
+		t.Fatal("expected service contract to attach to module type")
+	}
+	if contract.ServiceName != "security.Scanner" {
+		t.Fatalf("expected original service name to be preserved, got %q", contract.ServiceName)
+	}
+}
+
+func TestExternalPluginAdapter_ContractStepFactorySendsTypedConfig(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:  &pb.Manifest{Name: "contract-plugin"},
+		stepTypes: []string{"test.strict"},
+		registry: &pb.ContractRegistry{Contracts: []*pb.ContractDescriptor{
+			{
+				Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+				StepType:      "test.strict",
+				ConfigMessage: "workflow.plugin.v1.Manifest",
+				InputMessage:  "workflow.plugin.v1.Manifest",
+				OutputMessage: "workflow.plugin.v1.Manifest",
+				Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			},
+		}},
+	}
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+
+	factory := a.StepFactories()["test.strict"]
+	if factory == nil {
+		t.Fatal("expected strict step factory")
+	}
+	step, err := factory("strict-step", map[string]any{
+		"name":    "typed-config",
+		"version": "v1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory returned error: %v", err)
+	}
+	if step == nil {
+		t.Fatal("expected remote step")
+	}
+	if client.lastCreateStepReq == nil {
+		t.Fatal("expected CreateStep request")
+	}
+	if client.lastCreateStepReq.Config != nil {
+		t.Fatalf("expected strict step creation to omit legacy Config, got %v", client.lastCreateStepReq.Config)
+	}
+	assertAnyTypeForTest(t, client.lastCreateStepReq.TypedConfig, "workflow.plugin.v1.Manifest")
+}
+
+func TestExternalPluginAdapter_ContractStepFactoryFailsClosedWithoutCodec(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:  &pb.Manifest{Name: "contract-plugin"},
+		stepTypes: []string{"test.strict"},
+		registry: &pb.ContractRegistry{Contracts: []*pb.ContractDescriptor{
+			{
+				Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+				StepType:      "test.strict",
+				ConfigMessage: "workflow.plugin.v1.DoesNotExist",
+				InputMessage:  "workflow.plugin.v1.DoesNotExist",
+				Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			},
+		}},
+	}
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+
+	_, err = a.StepFactories()["test.strict"]("strict-step", map[string]any{"name": "legacy-only"}, nil)
+	if err == nil {
+		t.Fatal("expected strict factory to fail without generated codec")
+	}
+	if !strings.Contains(err.Error(), "STRICT_PROTO") {
+		t.Fatalf("expected strict failure to mention STRICT_PROTO, got %v", err)
+	}
+	if client.lastCreateStepReq != nil {
+		t.Fatal("expected strict failure before CreateStep RPC")
 	}
 }

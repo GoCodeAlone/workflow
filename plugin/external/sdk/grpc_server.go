@@ -485,6 +485,20 @@ func (s *grpcServer) InvokeService(_ context.Context, req *pb.InvokeServiceReque
 		return &pb.InvokeServiceResponse{Error: fmt.Sprintf("unknown module handle: %s", req.HandleId)}, nil
 	}
 
+	if req.TypedInput != nil {
+		invoker, ok := inst.(TypedServiceInvoker)
+		if !ok {
+			return &pb.InvokeServiceResponse{
+				Error: fmt.Sprintf("module handle %s does not implement TypedServiceInvoker", req.HandleId),
+			}, nil
+		}
+		output, err := invoker.InvokeTypedMethod(req.Method, req.TypedInput)
+		if err != nil {
+			return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
+		}
+		return &pb.InvokeServiceResponse{TypedOutput: output}, nil
+	}
+
 	invoker, ok := inst.(ServiceInvoker)
 	if !ok {
 		return &pb.InvokeServiceResponse{
