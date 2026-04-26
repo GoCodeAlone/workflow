@@ -19,6 +19,8 @@ implementation_refs:
     commit: 95e80ad
   - repo: workflow
     commit: e91187f
+  - repo: workflow
+    commit: eb53150
 external_refs:
   - "#76"
 verification:
@@ -37,7 +39,7 @@ Date: 2026-04-26
 
 ## Implementation Checkpoint
 
-Core Workflow support is implemented through `workflow e91187f`: contract descriptors, plugin-owned descriptor-set based dynamic codecs, typed SDK adapters, host-side strict dispatch, strict input projection, typed integer output normalization, `wfctl` strict contract audit/validation, and strict scaffolding when run from a Workflow source checkout.
+Core Workflow support is implemented through `workflow eb53150`: contract descriptors, plugin-owned descriptor-set based dynamic codecs, typed SDK adapters, host-side strict dispatch, strict input projection, typed integer output normalization, strict module error surfacing, `wfctl` strict contract audit/validation, and strict scaffolding when run from a Workflow source checkout.
 
 The design remains `in_progress` because downstream plugin and application repositories still need migration from map-only boundaries to typed descriptors and adapters. The workspace strict-contract audit is expected to fail until that migration completes.
 
