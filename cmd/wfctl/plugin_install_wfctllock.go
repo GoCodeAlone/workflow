@@ -170,6 +170,9 @@ func expectedWfctlLockfileChecksum(entry config.WfctlLockPluginEntry) string {
 	if plat, ok := entry.Platforms[currentPlatformKey()]; ok && plat.SHA256 != "" {
 		return plat.SHA256
 	}
+	if len(entry.Platforms) > 0 {
+		return ""
+	}
 	return entry.SHA256
 }
 
