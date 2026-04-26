@@ -196,6 +196,7 @@ func TestRunPluginInit_PluginJSON(t *testing.T) {
 
 // TestRunPluginInit_GoMod verifies that go.mod has the correct module path.
 func TestRunPluginInit_GoMod(t *testing.T) {
+	chdirWorkflowRoot(t)
 	outDir := filepath.Join(t.TempDir(), "mymod-plugin")
 
 	if err := runPluginInit([]string{
