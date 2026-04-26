@@ -115,7 +115,7 @@ plugins:
 	}
 }
 
-func TestPluginLock_FromManifest_PopulatesPlatformURLsFromRegistry(t *testing.T) {
+func TestPluginLock_FromManifest_PopulatesPlatformURLsAndSHA256FromRegistry(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "wfctl.yaml")
 	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
@@ -183,8 +183,11 @@ plugins:
 	if got := platforms["darwin-arm64"].URL; got != "https://example.test/foo-darwin-arm64.tar.gz" {
 		t.Fatalf("darwin-arm64 URL = %q, want registry URL", got)
 	}
-	if got := platforms["linux-amd64"].SHA256; got != "" {
-		t.Fatalf("platform sha256 should not copy registry archive checksum into binary-checksum field, got %q", got)
+	if got := platforms["linux-amd64"].SHA256; got != "archive-sha-linux" {
+		t.Fatalf("linux-amd64 SHA256 = %q, want registry archive checksum", got)
+	}
+	if got := platforms["darwin-arm64"].SHA256; got != "archive-sha-darwin" {
+		t.Fatalf("darwin-arm64 SHA256 = %q, want registry archive checksum", got)
 	}
 }
 
