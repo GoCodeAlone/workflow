@@ -431,10 +431,14 @@ wfctl plugin init [options] <name>
 | `-description` | _(none)_ | Plugin description |
 | `-license` | _(none)_ | Plugin license |
 | `-output` | _(plugin name)_ | Output directory |
-| `-contract` | `false` | Include a contract skeleton |
+| `-contract` | `false` | Include the legacy dynamic field contract skeleton in `plugin.json` |
+| `-legacy-contracts` | `false` | Scaffold legacy map-based step contracts instead of strict typed contracts |
+
+When run from a Workflow source checkout, new plugin scaffolds use strict typed contracts by default. They include `plugin.contracts.json`, a starter proto contract file, typed SDK adapter code, and a local `replace` directive to the current Workflow module. Public installs of `wfctl` scaffold legacy map-based contracts by default until a Workflow module release contains the strict contract APIs. Use `-legacy-contracts` to force compatibility scaffolds that must keep map-based step entrypoints.
 
 ```bash
 wfctl plugin init --author myorg my-plugin
+wfctl plugin init --author myorg --legacy-contracts old-plugin
 ```
 
 #### `plugin docs`

@@ -31,6 +31,8 @@ func TestRunPluginInit_AllFiles(t *testing.T) {
 	// All expected files/dirs.
 	expectedFiles := []string{
 		"plugin.json",
+		"plugin.contracts.json",
+		filepath.Join("proto", "test_plugin.proto"),
 		"go.mod",
 		".goreleaser.yml",
 		"Makefile",
@@ -47,6 +49,82 @@ func TestRunPluginInit_AllFiles(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("expected file missing: %s (%v)", rel, err)
 		}
+	}
+}
+
+func TestRunPluginInit_StrictContractsByDefault(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "strict-plugin")
+
+	if err := runPluginInit([]string{
+		"-author", "TestOrg",
+		"-description", "Strict plugin for unit tests",
+		"-output", outDir,
+		"strict-plugin",
+	}); err != nil {
+		t.Fatalf("runPluginInit: %v", err)
+	}
+
+	protoData, err := os.ReadFile(filepath.Join(outDir, "proto", "strict_plugin.proto"))
+	if err != nil {
+		t.Fatalf("read proto contract: %v", err)
+	}
+	if !strings.Contains(string(protoData), "message ExampleStepContract") {
+		t.Errorf("proto contract missing wrapper contract message:\n%s", protoData)
+	}
+	if !strings.Contains(string(protoData), "google.protobuf.StringValue input") {
+		t.Errorf("proto contract should use the scaffolded wrapper contract:\n%s", protoData)
+	}
+
+	providerData, err := os.ReadFile(filepath.Join(outDir, "internal", "provider.go"))
+	if err != nil {
+		t.Fatalf("read provider.go: %v", err)
+	}
+	providerSrc := string(providerData)
+	for _, want := range []string{
+		"ContractRegistry() *pb.ContractRegistry",
+		"CONTRACT_MODE_STRICT_PROTO",
+		"CreateTypedStep(",
+	} {
+		if !strings.Contains(providerSrc, want) {
+			t.Errorf("provider.go missing %q:\n%s", want, providerSrc)
+		}
+	}
+
+	stepsData, err := os.ReadFile(filepath.Join(outDir, "internal", "steps.go"))
+	if err != nil {
+		t.Fatalf("read steps.go: %v", err)
+	}
+	stepsSrc := string(stepsData)
+	if !strings.Contains(stepsSrc, "sdk.TypedStepRequest") {
+		t.Errorf("steps.go missing typed step request:\n%s", stepsSrc)
+	}
+	if strings.Contains(stepsSrc, `current["input"]`) || strings.Contains(stepsSrc, "current map[string]any") {
+		t.Errorf("steps.go should not parse legacy maps by default:\n%s", stepsSrc)
+	}
+}
+
+func TestRunPluginInit_LegacyContractsFlag(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "legacy-plugin")
+
+	if err := runPluginInit([]string{
+		"-author", "TestOrg",
+		"-description", "Legacy plugin for unit tests",
+		"-legacy-contracts",
+		"-output", outDir,
+		"legacy-plugin",
+	}); err != nil {
+		t.Fatalf("runPluginInit: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(outDir, "proto", "legacy_plugin.proto")); !os.IsNotExist(err) {
+		t.Fatalf("legacy scaffold should not include proto contract, stat err: %v", err)
+	}
+	stepsData, err := os.ReadFile(filepath.Join(outDir, "internal", "steps.go"))
+	if err != nil {
+		t.Fatalf("read steps.go: %v", err)
+	}
+	if !strings.Contains(string(stepsData), "current map[string]any") {
+		t.Errorf("legacy scaffold should keep map step entrypoint:\n%s", stepsData)
 	}
 }
 
@@ -131,6 +209,9 @@ func TestRunPluginInit_GoMod(t *testing.T) {
 	// Should have a go directive.
 	if !strings.Contains(content, "\ngo ") {
 		t.Error("go.mod: missing 'go' version directive")
+	}
+	if !strings.Contains(content, "replace github.com/GoCodeAlone/workflow => ") {
+		t.Errorf("go.mod: expected local workflow replace for source checkout scaffold, got:\n%s", content)
 	}
 }
 

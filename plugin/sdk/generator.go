@@ -3,6 +3,7 @@ package sdk
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,6 +14,8 @@ import (
 // TemplateGenerator scaffolds new plugin projects with a manifest and component skeleton.
 type TemplateGenerator struct{}
 
+const workflowStrictContractsVersion = "v0.4.0"
+
 // NewTemplateGenerator creates a new TemplateGenerator.
 func NewTemplateGenerator() *TemplateGenerator {
 	return &TemplateGenerator{}
@@ -20,14 +23,16 @@ func NewTemplateGenerator() *TemplateGenerator {
 
 // GenerateOptions configures what gets generated.
 type GenerateOptions struct {
-	Name         string
-	Version      string
-	Author       string
-	Description  string
-	License      string
-	OutputDir    string
-	WithContract bool
-	GoModule     string // e.g. "github.com/MyOrg/workflow-plugin-foo"
+	Name            string
+	Version         string
+	Author          string
+	Description     string
+	License         string
+	OutputDir       string
+	WithContract    bool
+	LegacyContracts bool
+	GoModule        string // e.g. "github.com/MyOrg/workflow-plugin-foo"
+	WorkflowReplace string // optional local replace path for github.com/GoCodeAlone/workflow
 }
 
 // Generate creates a new plugin directory with manifest and component skeleton,
@@ -48,6 +53,14 @@ func (g *TemplateGenerator) Generate(opts GenerateOptions) error {
 	if opts.OutputDir == "" {
 		opts.OutputDir = opts.Name
 	}
+	if opts.WorkflowReplace == "" {
+		opts.WorkflowReplace = discoverWorkflowModuleRoot(".")
+	}
+	if !opts.LegacyContracts && opts.WorkflowReplace == "" {
+		// Strict scaffolds depend on APIs in the current Workflow source tree
+		// until the next Workflow module release is published.
+		opts.LegacyContracts = true
+	}
 
 	// Validate the name
 	manifest := &plugin.PluginManifest{
@@ -56,6 +69,10 @@ func (g *TemplateGenerator) Generate(opts GenerateOptions) error {
 		Author:      opts.Author,
 		Description: opts.Description,
 		License:     opts.License,
+	}
+	if !opts.LegacyContracts {
+		shortName := normalizeSDKPluginName(opts.Name)
+		manifest.StepTypes = []string{"step." + shortName + "_example"}
 	}
 	if opts.WithContract {
 		manifest.Contract = dynamic.NewFieldContract()
@@ -127,12 +144,32 @@ func generateProjectStructure(opts GenerateOptions) error {
 	if err := writeFile(filepath.Join(internalDir, "provider.go"), generateProviderGo(opts, shortName), 0600); err != nil {
 		return err
 	}
-	if err := writeFile(filepath.Join(internalDir, "steps.go"), generateStepsGo(shortName), 0600); err != nil {
+	if err := writeFile(filepath.Join(internalDir, "steps.go"), generateStepsGo(opts, shortName), 0600); err != nil {
 		return err
+	}
+	if !opts.LegacyContracts {
+		contractsDir := filepath.Join(internalDir, "contracts")
+		if err := os.MkdirAll(contractsDir, 0750); err != nil {
+			return fmt.Errorf("create internal contracts dir: %w", err)
+		}
+		if err := writeFile(filepath.Join(contractsDir, "contracts.go"), generateContractsGo(shortName), 0600); err != nil {
+			return err
+		}
+
+		protoDir := filepath.Join(opts.OutputDir, "proto")
+		if err := os.MkdirAll(protoDir, 0750); err != nil {
+			return fmt.Errorf("create proto dir: %w", err)
+		}
+		if err := writeFile(filepath.Join(protoDir, protoFileName(shortName)), generateProtoContract(goModule, shortName), 0600); err != nil {
+			return err
+		}
+		if err := writeFile(filepath.Join(opts.OutputDir, "plugin.contracts.json"), generatePluginContractsJSON(shortName), 0600); err != nil {
+			return err
+		}
 	}
 
 	// go.mod
-	if err := writeFile(filepath.Join(opts.OutputDir, "go.mod"), generateGoMod(goModule), 0600); err != nil {
+	if err := writeFile(filepath.Join(opts.OutputDir, "go.mod"), generateGoMod(goModule, opts.WorkflowReplace), 0600); err != nil {
 		return err
 	}
 
@@ -192,7 +229,142 @@ func generateMainGo(goModule, shortName string) string {
 	return b.String()
 }
 
+func resolveGoModule(opts GenerateOptions) string {
+	if opts.GoModule != "" {
+		return opts.GoModule
+	}
+	return "github.com/" + opts.Author + "/workflow-plugin-" + normalizeSDKPluginName(opts.Name)
+}
+
+func protoFileName(shortName string) string {
+	return strings.ReplaceAll(shortName, "-", "_") + ".proto"
+}
+
 func generateProviderGo(opts GenerateOptions, shortName string) string {
+	if opts.LegacyContracts {
+		return generateLegacyProviderGo(opts, shortName)
+	}
+
+	typeName := toCamelCase(shortName) + "Provider"
+	stepType := "step." + shortName + "_example"
+	var b strings.Builder
+	fmt.Fprintf(&b, "package internal\n\n")
+	b.WriteString("import (\n")
+	b.WriteString("\t\"fmt\"\n\n")
+	b.WriteString("\tcontracts \"")
+	b.WriteString(resolveGoModule(opts))
+	b.WriteString("/internal/contracts\"\n")
+	b.WriteString("\tpb \"github.com/GoCodeAlone/workflow/plugin/external/proto\"\n")
+	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
+	b.WriteString("\t\"google.golang.org/protobuf/types/known/anypb\"\n")
+	b.WriteString(")\n\n")
+	fmt.Fprintf(&b, "// %s implements sdk.PluginProvider, sdk.TypedStepProvider, and sdk.ContractProvider.\n", typeName)
+	fmt.Fprintf(&b, "type %s struct{}\n\n", typeName)
+	fmt.Fprintf(&b, "// New%s creates a new %s.\n", typeName, typeName)
+	fmt.Fprintf(&b, "func New%s() *%s {\n", typeName, typeName)
+	fmt.Fprintf(&b, "\treturn &%s{}\n", typeName)
+	b.WriteString("}\n\n")
+	fmt.Fprintf(&b, "// Manifest implements sdk.PluginProvider.\n")
+	fmt.Fprintf(&b, "func (p *%s) Manifest() sdk.PluginManifest {\n", typeName)
+	b.WriteString("\treturn sdk.PluginManifest{\n")
+	fmt.Fprintf(&b, "\t\tName:        %q,\n", "workflow-plugin-"+shortName)
+	fmt.Fprintf(&b, "\t\tVersion:     %q,\n", opts.Version)
+	fmt.Fprintf(&b, "\t\tAuthor:      %q,\n", opts.Author)
+	fmt.Fprintf(&b, "\t\tDescription: %q,\n", opts.Description)
+	b.WriteString("\t}\n")
+	b.WriteString("}\n\n")
+	fmt.Fprintf(&b, "// TypedStepTypes implements sdk.TypedStepProvider.\n")
+	fmt.Fprintf(&b, "func (p *%s) TypedStepTypes() []string {\n", typeName)
+	fmt.Fprintf(&b, "\treturn []string{%q}\n", stepType)
+	b.WriteString("}\n\n")
+	fmt.Fprintf(&b, "// CreateTypedStep implements sdk.TypedStepProvider.\n")
+	fmt.Fprintf(&b, "func (p *%s) CreateTypedStep(typeName, name string, config *anypb.Any) (sdk.StepInstance, error) {\n", typeName)
+	b.WriteString("\tswitch typeName {\n")
+	fmt.Fprintf(&b, "\tcase %q:\n", stepType)
+	b.WriteString("\t\tfactory := sdk.NewTypedStepFactory(\n")
+	fmt.Fprintf(&b, "\t\t\t%q,\n", stepType)
+	b.WriteString("\t\t\t&contracts.")
+	b.WriteString(toCamelCase(shortName))
+	b.WriteString("ExampleConfig{},\n")
+	b.WriteString("\t\t\t&contracts.")
+	b.WriteString(toCamelCase(shortName))
+	b.WriteString("ExampleInput{},\n")
+	fmt.Fprintf(&b, "\t\t\tExecute%sExample,\n", toCamelCase(shortName))
+	b.WriteString("\t\t)\n")
+	b.WriteString("\t\treturn factory.CreateTypedStep(typeName, name, config)\n")
+	b.WriteString("\t}\n")
+	b.WriteString("\treturn nil, fmt.Errorf(\"unknown step type: %s\", typeName)\n")
+	b.WriteString("}\n\n")
+	fmt.Fprintf(&b, "// ContractRegistry implements sdk.ContractProvider.\n")
+	fmt.Fprintf(&b, "func (p *%s) ContractRegistry() *pb.ContractRegistry {\n", typeName)
+	b.WriteString("\treturn &pb.ContractRegistry{Contracts: []*pb.ContractDescriptor{\n")
+	b.WriteString("\t\t{\n")
+	b.WriteString("\t\t\tKind:          pb.ContractKind_CONTRACT_KIND_STEP,\n")
+	fmt.Fprintf(&b, "\t\t\tStepType:      %q,\n", stepType)
+	b.WriteString("\t\t\tConfigMessage: \"google.protobuf.StringValue\",\n")
+	b.WriteString("\t\t\tInputMessage:  \"google.protobuf.StringValue\",\n")
+	b.WriteString("\t\t\tOutputMessage: \"google.protobuf.StringValue\",\n")
+	b.WriteString("\t\t\tMode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,\n")
+	b.WriteString("\t\t},\n")
+	b.WriteString("\t}}\n")
+	b.WriteString("}\n")
+	return b.String()
+}
+
+func generateContractsGo(shortName string) string {
+	prefix := toCamelCase(shortName) + "Example"
+	var b strings.Builder
+	b.WriteString("package contracts\n\n")
+	b.WriteString("import \"google.golang.org/protobuf/types/known/wrapperspb\"\n\n")
+	b.WriteString("// The default scaffold uses protobuf wrapper messages so it builds before\n")
+	b.WriteString("// protoc generation is configured. Replace these aliases with generated\n")
+	b.WriteString("// types from proto/")
+	b.WriteString(protoFileName(shortName))
+	b.WriteString(" after adding protoc generation to this plugin.\n")
+	fmt.Fprintf(&b, "type %sConfig = wrapperspb.StringValue\n", prefix)
+	fmt.Fprintf(&b, "type %sInput = wrapperspb.StringValue\n", prefix)
+	fmt.Fprintf(&b, "type %sOutput = wrapperspb.StringValue\n", prefix)
+	return b.String()
+}
+
+func generateProtoContract(goModule, shortName string) string {
+	pkgName := strings.ReplaceAll(shortName, "-", "_")
+	var b strings.Builder
+	b.WriteString("syntax = \"proto3\";\n\n")
+	fmt.Fprintf(&b, "package workflow.plugins.%s.v1;\n\n", pkgName)
+	b.WriteString("import \"google/protobuf/wrappers.proto\";\n\n")
+	fmt.Fprintf(&b, "option go_package = %q;\n\n", goModule+"/internal/contracts")
+	b.WriteString("// The starter contract uses google.protobuf.StringValue for config, input,\n")
+	b.WriteString("// and output so the scaffold is buildable before protoc generation is wired.\n")
+	b.WriteString("// Replace these fields with plugin-specific messages when you generate Go\n")
+	b.WriteString("// bindings for this proto package.\n")
+	b.WriteString("message ExampleStepContract {\n")
+	b.WriteString("  google.protobuf.StringValue config = 1;\n")
+	b.WriteString("  google.protobuf.StringValue input = 2;\n")
+	b.WriteString("  google.protobuf.StringValue output = 3;\n")
+	b.WriteString("}\n")
+	return b.String()
+}
+
+func generatePluginContractsJSON(shortName string) string {
+	stepType := "step." + shortName + "_example"
+	return fmt.Sprintf(`{
+  "version": "v1",
+  "contracts": [
+    {
+      "kind": "step",
+      "type": %q,
+      "mode": "strict",
+      "config": "google.protobuf.StringValue",
+      "input": "google.protobuf.StringValue",
+      "output": "google.protobuf.StringValue"
+    }
+  ]
+}
+`, stepType)
+}
+
+func generateLegacyProviderGo(opts GenerateOptions, shortName string) string {
 	typeName := toCamelCase(shortName) + "Provider"
 	var b strings.Builder
 	fmt.Fprintf(&b, "package internal\n\n")
@@ -230,7 +402,46 @@ func generateProviderGo(opts GenerateOptions, shortName string) string {
 	return b.String()
 }
 
-func generateStepsGo(shortName string) string {
+func generateStepsGo(opts GenerateOptions, shortName string) string {
+	if opts.LegacyContracts {
+		return generateLegacyStepsGo(shortName)
+	}
+	return generateStrictStepsGo(opts, shortName)
+}
+
+func generateStrictStepsGo(opts GenerateOptions, shortName string) string {
+	funcName := toCamelCase(shortName) + "Example"
+	var b strings.Builder
+	b.WriteString("package internal\n\n")
+	b.WriteString("import (\n")
+	b.WriteString("\t\"context\"\n")
+	b.WriteString("\t\"strings\"\n\n")
+	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
+	b.WriteString("\t\"google.golang.org/protobuf/types/known/wrapperspb\"\n\n")
+	b.WriteString("\tcontracts \"")
+	b.WriteString(resolveGoModule(opts))
+	b.WriteString("/internal/contracts\"\n")
+	b.WriteString(")\n\n")
+	fmt.Fprintf(&b, "// Execute%s handles the typed example step.\n", funcName)
+	fmt.Fprintf(&b, "func Execute%s(\n", funcName)
+	b.WriteString("\tctx context.Context,\n")
+	fmt.Fprintf(&b, "\treq sdk.TypedStepRequest[*contracts.%sConfig, *contracts.%sInput],\n", funcName, funcName)
+	fmt.Fprintf(&b, ") (*sdk.TypedStepResult[*contracts.%sOutput], error) {\n", funcName)
+	b.WriteString("\t_ = ctx\n")
+	b.WriteString("\tvalue := \"\"\n")
+	b.WriteString("\tif req.Input != nil {\n")
+	b.WriteString("\t\tvalue = req.Input.Value\n")
+	b.WriteString("\t}\n")
+	b.WriteString("\treturn &sdk.TypedStepResult[*contracts.")
+	b.WriteString(funcName)
+	b.WriteString("Output]{\n")
+	b.WriteString("\t\tOutput: wrapperspb.String(strings.ToUpper(value)),\n")
+	b.WriteString("\t}, nil\n")
+	b.WriteString("}\n")
+	return b.String()
+}
+
+func generateLegacyStepsGo(shortName string) string {
 	stepType := "step." + shortName + "_example"
 	funcName := toCamelCase(shortName) + "ExampleStep"
 	var b strings.Builder
@@ -261,14 +472,36 @@ func generateStepsGo(shortName string) string {
 	return b.String()
 }
 
-func generateGoMod(goModule string) string {
+func generateGoMod(goModule, workflowReplace string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "module %s\n\n", goModule)
 	b.WriteString("go 1.22\n\n")
 	b.WriteString("require (\n")
-	b.WriteString("\tgithub.com/GoCodeAlone/workflow v0.3.30\n")
+	fmt.Fprintf(&b, "\tgithub.com/GoCodeAlone/workflow %s\n", workflowStrictContractsVersion)
 	b.WriteString(")\n")
+	if workflowReplace != "" {
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "replace github.com/GoCodeAlone/workflow => %s\n", workflowReplace)
+	}
 	return b.String()
+}
+
+func discoverWorkflowModuleRoot(start string) string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = start
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	root := strings.TrimSpace(string(out))
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	if !strings.Contains(string(data), "module github.com/GoCodeAlone/workflow") {
+		return ""
+	}
+	return root
 }
 
 func generateGoReleaserYML(binaryName string) string {

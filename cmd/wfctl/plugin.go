@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/sdk"
@@ -78,6 +81,7 @@ func runPluginInit(args []string) error {
 	license := fs.String("license", "", "Plugin license")
 	output := fs.String("output", "", "Output directory (defaults to plugin name)")
 	withContract := fs.Bool("contract", false, "Include a contract skeleton")
+	legacyContracts := fs.Bool("legacy-contracts", false, "Scaffold legacy map-based plugin contracts instead of strict typed contracts")
 	module := fs.String("module", "", "Go module path (default: github.com/<author>/workflow-plugin-<name>)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin init [options] <name>\n\nScaffold a new plugin project.\n\nOptions:\n")
@@ -97,14 +101,16 @@ func runPluginInit(args []string) error {
 	name := fs.Arg(0)
 	gen := sdk.NewTemplateGenerator()
 	opts := sdk.GenerateOptions{
-		Name:         name,
-		Version:      *ver,
-		Author:       *author,
-		Description:  *desc,
-		License:      *license,
-		OutputDir:    *output,
-		WithContract: *withContract,
-		GoModule:     *module,
+		Name:            name,
+		Version:         *ver,
+		Author:          *author,
+		Description:     *desc,
+		License:         *license,
+		OutputDir:       *output,
+		WithContract:    *withContract,
+		LegacyContracts: *legacyContracts,
+		GoModule:        *module,
+		WorkflowReplace: discoverWorkflowModuleRoot("."),
 	}
 	if err := gen.Generate(opts); err != nil {
 		return err
@@ -116,6 +122,21 @@ func runPluginInit(args []string) error {
 	}
 	fmt.Printf("Plugin %q scaffolded in %s/\n", name, outDir)
 	return nil
+}
+
+func discoverWorkflowModuleRoot(start string) string {
+	root := discoverPlanAuditRepoRoot(start)
+	if root == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	if !strings.Contains(string(data), "module github.com/GoCodeAlone/workflow") {
+		return ""
+	}
+	return root
 }
 
 func runPluginDocs(args []string) error {
