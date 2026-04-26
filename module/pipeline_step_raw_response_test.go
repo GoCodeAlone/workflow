@@ -121,6 +121,37 @@ func TestRawResponseStep_CustomHeaders(t *testing.T) {
 	}
 }
 
+func TestRawResponseStep_TemplateHeaders(t *testing.T) {
+	factory := NewRawResponseStepFactory()
+	step, err := factory("redirect", map[string]any{
+		"status":       302,
+		"content_type": "text/plain",
+		"headers": map[string]any{
+			"Location": "{{ .steps.oauth_start.authorization_url }}",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("oauth_start", map[string]any{
+		"authorization_url": "https://accounts.example.test/oauth?state=abc",
+	})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if got := recorder.Header().Get("Location"); got != "https://accounts.example.test/oauth?state=abc" {
+		t.Fatalf("Location header = %q, want templated authorization URL", got)
+	}
+}
+
 func TestRawResponseStep_TemplateBody(t *testing.T) {
 	factory := NewRawResponseStepFactory()
 	step, err := factory("templated", map[string]any{
