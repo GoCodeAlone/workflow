@@ -31,7 +31,9 @@ type adapterTestPluginServiceClient struct {
 	manifest          *pb.Manifest
 	registry          *pb.ContractRegistry
 	registryErr       error
+	moduleTypes       []string
 	stepTypes         []string
+	lastCreateModReq  *pb.CreateModuleRequest
 	lastCreateStepReq *pb.CreateStepRequest
 }
 
@@ -48,6 +50,15 @@ func (c *adapterTestPluginServiceClient) GetContractRegistry(_ context.Context, 
 
 func (c *adapterTestPluginServiceClient) GetStepTypes(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.TypeList, error) {
 	return &pb.TypeList{Types: c.stepTypes}, nil
+}
+
+func (c *adapterTestPluginServiceClient) GetModuleTypes(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.TypeList, error) {
+	return &pb.TypeList{Types: c.moduleTypes}, nil
+}
+
+func (c *adapterTestPluginServiceClient) CreateModule(_ context.Context, req *pb.CreateModuleRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
+	c.lastCreateModReq = req
+	return &pb.HandleResponse{HandleId: "module-handle"}, nil
 }
 
 func (c *adapterTestPluginServiceClient) CreateStep(_ context.Context, req *pb.CreateStepRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
@@ -242,6 +253,44 @@ func TestExternalPluginAdapter_ServiceContractsDoNotAttachEmptyServiceNameAcross
 	contracts := a.contracts.servicesFor("security.scanner")
 	if contract := contracts["Authorize"]; contract != nil {
 		t.Fatalf("expected unrelated empty-service descriptor not to attach, got %#v", contract)
+	}
+}
+
+func TestExternalPluginAdapter_ContractModuleFactoryPropagatesTypedConfigErrors(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:    &pb.Manifest{Name: "contract-plugin"},
+		moduleTypes: []string{"test.strict_module"},
+		registry: &pb.ContractRegistry{Contracts: []*pb.ContractDescriptor{
+			{
+				Kind:          pb.ContractKind_CONTRACT_KIND_MODULE,
+				ModuleType:    "test.strict_module",
+				ConfigMessage: "workflow.plugin.v1.DoesNotExist",
+				Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			},
+		}},
+	}
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+
+	factory := a.ModuleFactories()["test.strict_module"]
+	if factory == nil {
+		t.Fatal("expected strict module factory")
+	}
+	module := factory("strict-module", map[string]any{"name": "legacy-only"})
+	if module == nil {
+		t.Fatal("expected non-nil module that preserves strict config error")
+	}
+	if client.lastCreateModReq != nil {
+		t.Fatal("expected strict failure before CreateModule RPC")
+	}
+	initErr := module.Init(nil)
+	if initErr == nil {
+		t.Fatal("expected Init to return strict config error")
+	}
+	if !strings.Contains(initErr.Error(), "STRICT_PROTO") {
+		t.Fatalf("expected strict failure to mention STRICT_PROTO, got %v", initErr)
 	}
 }
 

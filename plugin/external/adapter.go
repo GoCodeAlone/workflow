@@ -45,6 +45,22 @@ type contractDescriptorCache struct {
 	services map[string]*pb.ContractDescriptor
 }
 
+type errorModule struct {
+	name string
+	err  error
+}
+
+func (m *errorModule) Name() string               { return m.name }
+func (m *errorModule) Dependencies() []string     { return nil }
+func (m *errorModule) ProvidesServices() []string { return nil }
+func (m *errorModule) RequiresServices() []string { return nil }
+func (m *errorModule) RegisterConfig(modular.Application) error {
+	return nil
+}
+func (m *errorModule) Init(modular.Application) error { return m.err }
+func (m *errorModule) Start(context.Context) error    { return m.err }
+func (m *errorModule) Stop(context.Context) error     { return nil }
+
 // NewExternalPluginAdapter creates an adapter from a connected plugin client.
 func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPluginAdapter, error) {
 	ctx := context.Background()
@@ -293,7 +309,7 @@ func (a *ExternalPluginAdapter) ModuleFactories() map[string]plugin.ModuleFactor
 		factories[tn] = func(name string, cfg map[string]any) modular.Module {
 			config, typedConfig, configErr := createTypedConfigRequest(a.contracts.module(tn), cfg, a.contractTypes)
 			if configErr != nil {
-				return nil
+				return &errorModule{name: name, err: fmt.Errorf("create remote module %s: %w", tn, configErr)}
 			}
 			createResp, createErr := a.client.client.CreateModule(ctx, &pb.CreateModuleRequest{
 				Type:        tn,
