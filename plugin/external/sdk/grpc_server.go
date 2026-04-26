@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -148,6 +149,13 @@ func (s *grpcServer) GetAsset(_ context.Context, req *pb.GetAssetRequest) (*pb.G
 }
 
 func (s *grpcServer) GetModuleTypes(_ context.Context, _ *emptypb.Empty) (*pb.TypeList, error) {
+	if typed, ok := s.provider.(TypedModuleProvider); ok {
+		types := typed.TypedModuleTypes()
+		if legacy, ok := s.provider.(ModuleProvider); ok {
+			types = mergeTypeLists(types, legacy.ModuleTypes())
+		}
+		return &pb.TypeList{Types: types}, nil
+	}
 	if mp, ok := s.provider.(ModuleProvider); ok {
 		return &pb.TypeList{Types: mp.ModuleTypes()}, nil
 	}
@@ -155,6 +163,13 @@ func (s *grpcServer) GetModuleTypes(_ context.Context, _ *emptypb.Empty) (*pb.Ty
 }
 
 func (s *grpcServer) GetStepTypes(_ context.Context, _ *emptypb.Empty) (*pb.TypeList, error) {
+	if typed, ok := s.provider.(TypedStepProvider); ok {
+		types := typed.TypedStepTypes()
+		if legacy, ok := s.provider.(StepProvider); ok {
+			types = mergeTypeLists(types, legacy.StepTypes())
+		}
+		return &pb.TypeList{Types: types}, nil
+	}
 	if sp, ok := s.provider.(StepProvider); ok {
 		return &pb.TypeList{Types: sp.StepTypes()}, nil
 	}
@@ -227,6 +242,19 @@ func (s *grpcServer) GetContractRegistry(_ context.Context, _ *emptypb.Empty) (*
 // --- Module lifecycle RPCs ---
 
 func (s *grpcServer) CreateModule(_ context.Context, req *pb.CreateModuleRequest) (*pb.HandleResponse, error) {
+	if mp, ok := s.provider.(TypedModuleProvider); ok {
+		inst, err := mp.CreateTypedModule(req.Type, req.Name, req.TypedConfig)
+		if err == nil {
+			handle := uuid.New().String()
+			s.registerModuleInstance(handle, inst)
+
+			return &pb.HandleResponse{HandleId: handle}, nil
+		}
+		if !errors.Is(err, ErrTypedContractNotHandled) {
+			return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
+		}
+	}
+
 	mp, ok := s.provider.(ModuleProvider)
 	if !ok {
 		return &pb.HandleResponse{Error: "plugin does not provide modules"}, nil
@@ -236,9 +264,19 @@ func (s *grpcServer) CreateModule(_ context.Context, req *pb.CreateModuleRequest
 	if err != nil {
 		return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
+	if typed, ok := inst.(typedModuleAdapter); ok {
+		if err := typed.setTypedConfig(req.TypedConfig); err != nil {
+			return &pb.HandleResponse{Error: err.Error()}, nil
+		}
+	}
 
 	handle := uuid.New().String()
+	s.registerModuleInstance(handle, inst)
 
+	return &pb.HandleResponse{HandleId: handle}, nil
+}
+
+func (s *grpcServer) registerModuleInstance(handle string, inst ModuleInstance) {
 	// Wire up message capabilities if the module supports them and we have a callback client.
 	if mam, ok := inst.(MessageAwareModule); ok {
 		s.mu.RLock()
@@ -253,8 +291,6 @@ func (s *grpcServer) CreateModule(_ context.Context, req *pb.CreateModuleRequest
 	s.mu.Lock()
 	s.modules[handle] = inst
 	s.mu.Unlock()
-
-	return &pb.HandleResponse{HandleId: handle}, nil
 }
 
 func (s *grpcServer) InitModule(_ context.Context, req *pb.HandleRequest) (*pb.ErrorResponse, error) {
@@ -312,6 +348,21 @@ func (s *grpcServer) DestroyModule(_ context.Context, req *pb.HandleRequest) (*p
 // --- Step lifecycle RPCs ---
 
 func (s *grpcServer) CreateStep(_ context.Context, req *pb.CreateStepRequest) (*pb.HandleResponse, error) {
+	if sp, ok := s.provider.(TypedStepProvider); ok {
+		inst, err := sp.CreateTypedStep(req.Type, req.Name, req.TypedConfig)
+		if err == nil {
+			handle := uuid.New().String()
+			s.mu.Lock()
+			s.steps[handle] = inst
+			s.mu.Unlock()
+
+			return &pb.HandleResponse{HandleId: handle}, nil
+		}
+		if !errors.Is(err, ErrTypedContractNotHandled) {
+			return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
+		}
+	}
+
 	sp, ok := s.provider.(StepProvider)
 	if !ok {
 		return &pb.HandleResponse{Error: "plugin does not provide steps"}, nil
@@ -320,6 +371,11 @@ func (s *grpcServer) CreateStep(_ context.Context, req *pb.CreateStepRequest) (*
 	inst, err := sp.CreateStep(req.Type, req.Name, structToMap(req.Config))
 	if err != nil {
 		return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
+	}
+	if typed, ok := inst.(typedStepAdapter); ok {
+		if err := typed.setTypedConfig(req.TypedConfig); err != nil {
+			return &pb.HandleResponse{Error: err.Error()}, nil
+		}
 	}
 
 	handle := uuid.New().String()
@@ -330,12 +386,42 @@ func (s *grpcServer) CreateStep(_ context.Context, req *pb.CreateStepRequest) (*
 	return &pb.HandleResponse{HandleId: handle}, nil
 }
 
+func mergeTypeLists(primary, secondary []string) []string {
+	if len(primary) == 0 {
+		return secondary
+	}
+	if len(secondary) == 0 {
+		return primary
+	}
+	seen := make(map[string]struct{}, len(primary)+len(secondary))
+	merged := make([]string, 0, len(primary)+len(secondary))
+	for _, typ := range primary {
+		if _, ok := seen[typ]; ok {
+			continue
+		}
+		seen[typ] = struct{}{}
+		merged = append(merged, typ)
+	}
+	for _, typ := range secondary {
+		if _, ok := seen[typ]; ok {
+			continue
+		}
+		seen[typ] = struct{}{}
+		merged = append(merged, typ)
+	}
+	return merged
+}
+
 func (s *grpcServer) ExecuteStep(ctx context.Context, req *pb.ExecuteStepRequest) (*pb.ExecuteStepResponse, error) {
 	s.mu.RLock()
 	inst, ok := s.steps[req.HandleId]
 	s.mu.RUnlock()
 	if !ok {
 		return &pb.ExecuteStepResponse{Error: fmt.Sprintf("unknown step handle: %s", req.HandleId)}, nil
+	}
+
+	if typed, ok := inst.(typedStepAdapter); ok {
+		return typed.executeTyped(ctx, req)
 	}
 
 	// Convert proto step_outputs map to Go map
