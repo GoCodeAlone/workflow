@@ -13,8 +13,8 @@ import (
 
 // installFromWfctlLockfile installs all plugins recorded in a config.WfctlLockfile.
 // For each plugin:
-//   - If a platform URL is recorded, download from that URL.
-//   - After install, verify sha256 when non-empty (hard fail on mismatch).
+//   - If a platform URL is recorded, download from that URL and verify its archive SHA.
+//   - For legacy entries without platforms, verify top-level sha256 as a binary SHA.
 //   - If no platform URL, fall back to registry lookup via the existing install path.
 //
 // lockPath is the on-disk path for .wfctl-lock.yaml. After each successful install
@@ -49,33 +49,10 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 		// If we have platform-specific URL, install from that URL.
 		platKey := currentPlatformKey()
 		if plat, ok := entry.Platforms[platKey]; ok && plat.URL != "" {
-			destDir := filepath.Join(pluginDirVal, fsName)
-			// Only skip download-level integrity enforcement when a binary hash is
-			// recorded for post-install verification. Without a binary hash, allow
-			// GitHub release URLs to auto-verify via checksums.txt; non-GitHub URLs
-			// without a hash fail closed to prevent unverified installs.
-			skipChecksum := expectedWfctlLockfileChecksum(entry) != ""
-			if err := installFromURL(plat.URL, pluginDirVal, "", skipChecksum); err != nil {
+			if err := installFromURL(plat.URL, pluginDirVal, plat.SHA256, false); err != nil {
 				fmt.Fprintf(os.Stderr, "error installing %s from URL: %v\n", name, err)
 				failed = append(failed, name)
 				continue
-			}
-			// Verify platform-specific sha256 if present.
-			if plat.SHA256 != "" {
-				binary := filepath.Join(destDir, fsName)
-				got, err := hashFileSHA256(binary)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "CHECKSUM ERROR for %s: %v\n", name, err)
-					_ = os.RemoveAll(destDir)
-					failed = append(failed, name)
-					continue
-				}
-				if !strings.EqualFold(got, plat.SHA256) {
-					fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: got %s, want %s\n", name, got, plat.SHA256)
-					_ = os.RemoveAll(destDir)
-					failed = append(failed, name)
-					continue
-				}
 			}
 			installed = true
 		}
@@ -93,9 +70,9 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 			}
 		}
 
-		// Verify the installed binary against the current platform checksum when
-		// present; fall back to the top-level checksum for legacy lockfiles.
-		if expectedSHA256 := expectedWfctlLockfileChecksum(entry); expectedSHA256 != "" {
+		// Verify the installed binary only for legacy lockfiles that have no
+		// platform metadata. Platform checksums are archive/artifact checksums.
+		if expectedSHA256 := legacyWfctlLockfileBinaryChecksum(entry); expectedSHA256 != "" {
 			destDir := filepath.Join(pluginDirVal, fsName)
 			if verifyErr := verifyInstalledChecksum(destDir, fsName, expectedSHA256); verifyErr != nil {
 				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v\n", name, verifyErr)
@@ -108,19 +85,9 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 		// Re-save the new-format lockfile after each successful install.
 		// installFromURL and runPluginInstall internally call updateLockfileWithChecksum,
 		// which serializes the OLD PluginLockfile format and can strip source/platforms
-		// fields from the on-disk .wfctl-lock.yaml. Overwrite it here with the correct
-		// new format, updating only existing platform-scoped binary sha256 data.
+		// fields from the on-disk .wfctl-lock.yaml. Overwrite it here with the
+		// original new-format data without recording host-specific binary hashes.
 		if lockPath != "" {
-			destDir := filepath.Join(pluginDirVal, fsName)
-			binaryPath := filepath.Join(destDir, fsName)
-			if sha, hashErr := hashFileSHA256(binaryPath); hashErr == nil && !strings.EqualFold(sha, expectedWfctlLockfileChecksum(entry)) {
-				e := lf.Plugins[name]
-				if plat, ok := e.Platforms[currentPlatformKey()]; ok {
-					plat.SHA256 = sha
-					e.Platforms[currentPlatformKey()] = plat
-				}
-				lf.Plugins[name] = e
-			}
 			if saveErr := config.SaveWfctlLockfile(lockPath, lf); saveErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not persist lockfile after installing %s: %v\n", name, saveErr)
 			}
@@ -133,9 +100,9 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 	return nil
 }
 
-// verifyWfctlLockfileChecksums checks sha256 of already-installed plugin binaries
-// against the lockfile. Platform-specific checksums take precedence over the
-// top-level checksum for the current OS/architecture.
+// verifyWfctlLockfileChecksums checks legacy top-level sha256 values against
+// already-installed plugin binaries. Platform checksums are archive/artifact
+// checksums and are verified during download, not against extracted binaries.
 // Returns an error if any mismatch is detected.
 func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile) error {
 	// Sort plugin names for deterministic verification order and predictable error messages.
@@ -148,7 +115,7 @@ func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile)
 	var mismatches []string
 	for _, name := range names {
 		entry := lf.Plugins[name]
-		expectedSHA256 := expectedWfctlLockfileChecksum(entry)
+		expectedSHA256 := legacyWfctlLockfileBinaryChecksum(entry)
 		if expectedSHA256 == "" {
 			continue
 		}
@@ -166,10 +133,7 @@ func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile)
 	return nil
 }
 
-func expectedWfctlLockfileChecksum(entry config.WfctlLockPluginEntry) string {
-	if plat, ok := entry.Platforms[currentPlatformKey()]; ok && plat.SHA256 != "" {
-		return plat.SHA256
-	}
+func legacyWfctlLockfileBinaryChecksum(entry config.WfctlLockPluginEntry) string {
 	if len(entry.Platforms) > 0 {
 		return ""
 	}

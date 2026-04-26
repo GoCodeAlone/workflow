@@ -134,10 +134,7 @@ func lockPlatformsFromRegistry(registries *MultiRegistry, pluginName, version st
 			continue
 		}
 		key := dl.OS + "-" + dl.Arch
-		// Registry download SHA values are archive checksums. The lockfile
-		// platform SHA is currently verified against the installed plugin binary,
-		// so copying the archive checksum here would make lockfile installs fail.
-		platforms[key] = config.WfctlLockPlatform{URL: dl.URL}
+		platforms[key] = config.WfctlLockPlatform{URL: dl.URL, SHA256: dl.SHA256}
 	}
 	return platforms, nil
 }
