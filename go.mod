@@ -37,7 +37,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.21
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.9
 	github.com/cucumber/godog v0.15.1
-	github.com/digitalocean/godo v1.178.0
+	github.com/digitalocean/godo v1.186.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.9.0
