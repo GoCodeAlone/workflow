@@ -91,6 +91,7 @@ func TestRegistryCapabilities_NewFields(t *testing.T) {
 		"buildHooks": [{"event":"post_container_build","priority":500}],
 		"cliCommands": [{"name":"supply-chain","description":"Supply chain tools"}],
 		"migrationDrivers": ["golang-migrate","goose"],
+		"serviceMethods": ["StrictService/Call"],
 		"portIntrospect": true
 	}`
 	var caps RegistryCapabilities
@@ -111,6 +112,9 @@ func TestRegistryCapabilities_NewFields(t *testing.T) {
 	}
 	if len(caps.MigrationDrivers) != 2 {
 		t.Errorf("MigrationDrivers: got %d, want 2", len(caps.MigrationDrivers))
+	}
+	if len(caps.ServiceMethods) != 1 {
+		t.Errorf("ServiceMethods: got %d, want 1", len(caps.ServiceMethods))
 	}
 	if !caps.PortIntrospect {
 		t.Error("PortIntrospect should be true")
