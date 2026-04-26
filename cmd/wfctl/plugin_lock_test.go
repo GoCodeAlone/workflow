@@ -191,6 +191,93 @@ plugins:
 	}
 }
 
+func TestPluginLock_FromManifest_RefreshesExistingPlatformSHA256FromRegistry(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/plugins/workflow-plugin-foo/manifest.json" {
+			http.NotFound(w, r)
+			return
+		}
+		manifest := RegistryManifest{
+			Name:       "workflow-plugin-foo",
+			Version:    "v1.2.3",
+			Repository: "github.com/GoCodeAlone/workflow-plugin-foo",
+			Downloads: []PluginDownload{
+				{OS: "linux", Arch: "amd64", URL: "https://example.test/fresh-linux-amd64.tar.gz", SHA256: "fresh-archive-sha"},
+			},
+		}
+		data, _ := json.Marshal(manifest)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	registryConfig := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(registryConfig), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+
+	manifest := `version: 1
+plugins:
+  - name: workflow-plugin-foo
+    version: v1.2.3
+    source: github.com/GoCodeAlone/workflow-plugin-foo
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	existing := `version: 1
+generated_at: 2026-04-26T00:00:00Z
+plugins:
+  workflow-plugin-foo:
+    version: v1.2.3
+    source: github.com/GoCodeAlone/workflow-plugin-foo
+    sha256: stale-binary-sha
+    platforms:
+      linux-amd64:
+        url: https://example.test/stale-linux-amd64.tar.gz
+        sha256: stale-platform-sha
+`
+	if err := os.WriteFile(lockPath, []byte(existing), 0o600); err != nil {
+		t.Fatalf("write existing lockfile: %v", err)
+	}
+
+	if err := runPluginLockFromManifest(manifestPath, lockPath); err != nil {
+		t.Fatalf("runPluginLockFromManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lockfile: %v", err)
+	}
+	var parsed struct {
+		Plugins map[string]struct {
+			SHA256    string `yaml:"sha256"`
+			Platforms map[string]struct {
+				URL    string `yaml:"url"`
+				SHA256 string `yaml:"sha256"`
+			} `yaml:"platforms"`
+		} `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse lockfile: %v", err)
+	}
+	entry := parsed.Plugins["workflow-plugin-foo"]
+	if entry.SHA256 != "" {
+		t.Fatalf("platform lock entry should not preserve top-level sha256, got %q", entry.SHA256)
+	}
+	platform := entry.Platforms["linux-amd64"]
+	if platform.URL != "https://example.test/fresh-linux-amd64.tar.gz" {
+		t.Fatalf("platform URL = %q, want fresh registry URL", platform.URL)
+	}
+	if platform.SHA256 != "fresh-archive-sha" {
+		t.Fatalf("platform SHA256 = %q, want fresh registry archive checksum", platform.SHA256)
+	}
+}
+
 func TestPluginLock_FromManifest_DoesNotUseHomeOrDefaultRegistry(t *testing.T) {
 	dir := t.TempDir()
 	homeDir := t.TempDir()

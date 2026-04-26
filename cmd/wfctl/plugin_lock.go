@@ -68,23 +68,29 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 			Version: p.Version,
 			Source:  p.Source,
 		}
-		// Preserve existing sha256/platforms only when both version AND source match.
-		// A source change means the binary origin changed, so cached checksums are stale.
+		var previous *config.WfctlLockPluginEntry
 		if existing != nil {
 			if prev, ok := existing.Plugins[p.Name]; ok &&
 				prev.Version == p.Version &&
 				prev.Source == p.Source {
-				entry.Platforms = prev.Platforms
-				if len(entry.Platforms) == 0 {
-					entry.SHA256 = prev.SHA256
-				}
+				previous = &prev
 			}
 		}
-		if len(entry.Platforms) == 0 && registries != nil {
+
+		if registries != nil {
 			if platforms, err := lockPlatformsFromRegistry(registries, p.Name, p.Version); err == nil {
 				entry.Platforms = platforms
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: could not enrich %s lock entry from registry: %v\n", p.Name, err)
+			}
+		}
+
+		// Preserve existing data only when registry enrichment is unavailable or
+		// failed. A source/version change means cached origin data is stale.
+		if len(entry.Platforms) == 0 && previous != nil {
+			entry.Platforms = previous.Platforms
+			if len(entry.Platforms) == 0 {
+				entry.SHA256 = previous.SHA256
 			}
 		}
 		newLF.Plugins[p.Name] = entry
