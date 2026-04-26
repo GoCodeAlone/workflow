@@ -38,6 +38,14 @@ func structToMap(s *structpb.Struct) map[string]any {
 }
 
 func mapToTypedAny(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver) (*anypb.Any, error) {
+	return mapToTypedAnyWithOptions(messageName, values, resolver, false)
+}
+
+func mapToTypedAnyKnownFields(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver) (*anypb.Any, error) {
+	return mapToTypedAnyWithOptions(messageName, values, resolver, true)
+}
+
+func mapToTypedAnyWithOptions(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver, filterUnknown bool) (*anypb.Any, error) {
 	if messageName == "" {
 		return nil, fmt.Errorf("missing protobuf message name")
 	}
@@ -46,6 +54,9 @@ func mapToTypedAny(messageName string, values map[string]any, resolver protoregi
 		return nil, err
 	}
 	if values != nil {
+		if filterUnknown {
+			values = filterMapToMessageFields(values, msg.ProtoReflect().Descriptor())
+		}
 		raw, err := json.Marshal(values)
 		if err != nil {
 			return nil, fmt.Errorf("marshal %s input as JSON: %w", messageName, err)
@@ -59,6 +70,24 @@ func mapToTypedAny(messageName string, values map[string]any, resolver protoregi
 		return nil, fmt.Errorf("pack %s typed payload: %w", messageName, err)
 	}
 	return typed, nil
+}
+
+func filterMapToMessageFields(values map[string]any, descriptor protoreflect.MessageDescriptor) map[string]any {
+	if values == nil || descriptor == nil {
+		return values
+	}
+	filtered := make(map[string]any)
+	fields := descriptor.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		for _, key := range []string{field.JSONName(), field.TextName(), string(field.Name())} {
+			if value, ok := values[key]; ok {
+				filtered[string(field.Name())] = value
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 func typedAnyToMap(payload *anypb.Any, messageName string, resolver protoregistry.MessageTypeResolver) (map[string]any, error) {

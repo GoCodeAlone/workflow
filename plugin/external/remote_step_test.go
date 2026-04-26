@@ -193,8 +193,9 @@ func TestRemoteStep_Execute_StrictContractSendsTypedPayloads(t *testing.T) {
 	}, contract)
 
 	pc := module.NewPipelineContext(map[string]any{
-		"name":    "typed-input",
-		"version": "v1",
+		"name":       "typed-input",
+		"version":    "v1",
+		"irrelevant": "workflow-context",
 	}, nil)
 
 	result, err := step.Execute(context.Background(), pc)
@@ -215,6 +216,37 @@ func TestRemoteStep_Execute_StrictContractSendsTypedPayloads(t *testing.T) {
 	if result.Output["name"] != "typed-output" {
 		t.Fatalf("expected typed output to be decoded, got %#v", result.Output)
 	}
+}
+
+func TestRemoteStep_Execute_StrictContractFiltersUnknownCurrentFields(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		response: &pb.ExecuteStepResponse{TypedOutput: mustAnyFromMapForTest(t, "workflow.plugin.v1.Manifest", map[string]any{
+			"name":    "typed-output",
+			"version": "v1",
+		})},
+	}
+	contract := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		StepType:      "test.strict",
+		ConfigMessage: "workflow.plugin.v1.Manifest",
+		InputMessage:  "workflow.plugin.v1.Manifest",
+		OutputMessage: "workflow.plugin.v1.Manifest",
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+	}
+	step := NewRemoteStep("test-step", "handle-strict", stub, map[string]any{
+		"name":    "typed-config",
+		"version": "v1",
+	}, contract)
+
+	_, err := step.Execute(context.Background(), module.NewPipelineContext(map[string]any{
+		"name":       "typed-input",
+		"version":    "v1",
+		"irrelevant": "workflow-context",
+	}, nil))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	assertAnyTypeForTest(t, stub.lastRequest.TypedInput, "workflow.plugin.v1.Manifest")
 }
 
 func TestRemoteStep_Execute_StrictContractRequiresTypedOutput(t *testing.T) {

@@ -122,7 +122,7 @@ func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig m
 		}
 		return req, nil
 	}
-	typedInput, err := mapToTypedAny(s.contract.InputMessage, pc.Current, s.types)
+	typedInput, err := mapToTypedAnyKnownFields(s.contract.InputMessage, pc.Current, s.types)
 	if err != nil {
 		if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, fmt.Errorf("remote step %q STRICT_PROTO input message %q cannot use legacy Struct fallback: %w", s.name, s.contract.InputMessage, err)
