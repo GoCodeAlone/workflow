@@ -52,6 +52,15 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 		Plugins:     make(map[string]config.WfctlLockPluginEntry),
 	}
 
+	registryConfig, registryErr := LoadRegistryConfig("")
+	if registryErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load registry config while enriching lockfile: %v\n", registryErr)
+	}
+	var registries *MultiRegistry
+	if registryConfig != nil {
+		registries = NewMultiRegistry(registryConfig)
+	}
+
 	for _, p := range m.Plugins {
 		entry := config.WfctlLockPluginEntry{
 			Version: p.Version,
@@ -67,6 +76,13 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 				entry.Platforms = prev.Platforms
 			}
 		}
+		if len(entry.Platforms) == 0 && registries != nil {
+			if platforms, err := lockPlatformsFromRegistry(registries, p.Name, p.Version); err == nil {
+				entry.Platforms = platforms
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: could not enrich %s lock entry from registry: %v\n", p.Name, err)
+			}
+		}
 		newLF.Plugins[p.Name] = entry
 	}
 
@@ -75,6 +91,29 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 	}
 	fmt.Printf("Lockfile written to %s\n", lockPath)
 	return nil
+}
+
+func lockPlatformsFromRegistry(registries *MultiRegistry, pluginName, version string) (map[string]config.WfctlLockPlatform, error) {
+	manifest, _, err := registries.FetchManifest(pluginName)
+	if err != nil {
+		return nil, err
+	}
+	if version != "" && version != manifest.Version {
+		pinManifestToVersion(manifest, version)
+	}
+
+	platforms := make(map[string]config.WfctlLockPlatform, len(manifest.Downloads))
+	for _, dl := range manifest.Downloads {
+		if dl.OS == "" || dl.Arch == "" || dl.URL == "" {
+			continue
+		}
+		key := dl.OS + "-" + dl.Arch
+		// Registry download SHA values are archive checksums. The lockfile
+		// platform SHA is currently verified against the installed plugin binary,
+		// so copying the archive checksum here would make lockfile installs fail.
+		platforms[key] = config.WfctlLockPlatform{URL: dl.URL}
+	}
+	return platforms, nil
 }
 
 // runPluginLockLegacy is the pre-v0.19.0 behavior: read from workflow.yaml requires.plugins[].
