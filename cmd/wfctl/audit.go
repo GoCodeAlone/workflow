@@ -196,8 +196,8 @@ func runAuditPluginsWithOutput(args []string, out io.Writer) error {
 		Plugins: results,
 		Summary: summarizePluginAudit(results),
 	}
-	for _, result := range results {
-		report.Findings = append(report.Findings, result.Findings...)
+	for i := range results {
+		report.Findings = append(report.Findings, results[i].Findings...)
 	}
 
 	if *jsonOut {
@@ -225,7 +225,8 @@ func summarizePluginAudit(results []pluginAuditResult) pluginAuditSummary {
 		Total:  len(results),
 		Shapes: make(map[string]int),
 	}
-	for _, result := range results {
+	for i := range results {
+		result := &results[i]
 		summary.Shapes[result.ManifestShape]++
 		switch result.ManifestShape {
 		case "canonical":
@@ -272,7 +273,8 @@ func renderPluginAuditReport(out io.Writer, report pluginAuditReport) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "PLUGIN\tSHAPE\tCONTRACTS\tFINDINGS")
 	fmt.Fprintln(tw, "------\t-----\t---------\t--------")
-	for _, result := range report.Plugins {
+	for i := range report.Plugins {
+		result := &report.Plugins[i]
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", result.Name, result.ManifestShape, pluginContractCoverageSummary(result.ContractCoverage), strings.Join(pluginFindingCodes(result.Findings), ", "))
 	}
 	_ = tw.Flush()

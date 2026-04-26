@@ -230,7 +230,8 @@ func addPluginContractFindings(result *pluginAuditResult, manifest map[string]an
 	result.Findings = append(result.Findings, findings...)
 
 	byKindType := make(map[string]pluginContractDescriptor)
-	for _, descriptor := range descriptors {
+	for i := range descriptors {
+		descriptor := descriptors[i]
 		kind := normalizePluginContractKind(descriptor.Kind)
 		typ := strings.TrimSpace(descriptor.contractType(kind))
 		if kind == "" || typ == "" {

@@ -7,6 +7,7 @@ option go_package = "github.com/GoCodeAlone/workflow/plugin/external/proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
 
 // PluginService is implemented by the plugin process and called by the host.
 service PluginService {
@@ -116,6 +117,9 @@ enum ContractMode {
 // ContractRegistry lists the typed contracts a plugin exposes.
 message ContractRegistry {
   repeated ContractDescriptor contracts = 1;
+  // file_descriptor_set contains plugin-owned proto descriptors needed for
+  // host-side dynamic encoding/decoding of strict contract messages.
+  google.protobuf.FileDescriptorSet file_descriptor_set = 2;
 }
 
 // ContractDescriptor maps a plugin capability type to protobuf message names.

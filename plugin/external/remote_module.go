@@ -6,6 +6,7 @@ import (
 
 	"github.com/GoCodeAlone/modular"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -16,22 +17,26 @@ type RemoteModule struct {
 	client           pb.PluginServiceClient
 	contract         *pb.ContractDescriptor
 	serviceContracts map[string]*pb.ContractDescriptor
+	types            protoregistry.MessageTypeResolver
 }
 
 type remoteModuleContracts struct {
 	module   *pb.ContractDescriptor
 	services map[string]*pb.ContractDescriptor
+	types    protoregistry.MessageTypeResolver
 }
 
 // NewRemoteModule creates a remote module proxy.
 func NewRemoteModule(name, handleID string, client pb.PluginServiceClient, contracts ...remoteModuleContracts) *RemoteModule {
 	var contract *pb.ContractDescriptor
+	var types protoregistry.MessageTypeResolver
 	serviceContracts := map[string]*pb.ContractDescriptor{}
 	if len(contracts) > 0 {
 		contract = contracts[0].module
 		if contracts[0].services != nil {
 			serviceContracts = contracts[0].services
 		}
+		types = contracts[0].types
 	}
 	return &RemoteModule{
 		name:             name,
@@ -39,6 +44,7 @@ func NewRemoteModule(name, handleID string, client pb.PluginServiceClient, contr
 		client:           client,
 		contract:         contract,
 		serviceContracts: serviceContracts,
+		types:            types,
 	}
 }
 
@@ -124,7 +130,7 @@ func (m *RemoteModule) InvokeService(method string, args map[string]any) (map[st
 	}
 	contract := m.serviceContracts[method]
 	if contract != nil && contract.Mode != pb.ContractMode_CONTRACT_MODE_UNSPECIFIED && contract.Mode != pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
-		typedInput, err := mapToTypedAny(contract.InputMessage, args)
+		typedInput, err := mapToTypedAny(contract.InputMessage, args, m.types)
 		if err != nil {
 			if contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 				return nil, fmt.Errorf("remote invoke %s STRICT_PROTO input message %q cannot use legacy Struct fallback: %w", method, contract.InputMessage, err)
@@ -142,7 +148,7 @@ func (m *RemoteModule) InvokeService(method string, args map[string]any) (map[st
 		return nil, fmt.Errorf("remote invoke %s: %s", method, resp.Error)
 	}
 	if resp.TypedOutput != nil && contract != nil && contract.OutputMessage != "" {
-		output, err := typedAnyToMap(resp.TypedOutput, contract.OutputMessage)
+		output, err := typedAnyToMap(resp.TypedOutput, contract.OutputMessage, m.types)
 		if err != nil {
 			return nil, fmt.Errorf("remote invoke %s typed output decode: %w", method, err)
 		}

@@ -9,6 +9,7 @@ package proto
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -220,10 +221,13 @@ func (x *Manifest) GetSampleCategory() string {
 
 // ContractRegistry lists the typed contracts a plugin exposes.
 type ContractRegistry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Contracts     []*ContractDescriptor  `protobuf:"bytes,1,rep,name=contracts,proto3" json:"contracts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Contracts []*ContractDescriptor  `protobuf:"bytes,1,rep,name=contracts,proto3" json:"contracts,omitempty"`
+	// file_descriptor_set contains plugin-owned proto descriptors needed for
+	// host-side dynamic encoding/decoding of strict contract messages.
+	FileDescriptorSet *descriptorpb.FileDescriptorSet `protobuf:"bytes,2,opt,name=file_descriptor_set,json=fileDescriptorSet,proto3" json:"file_descriptor_set,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ContractRegistry) Reset() {
@@ -259,6 +263,13 @@ func (*ContractRegistry) Descriptor() ([]byte, []int) {
 func (x *ContractRegistry) GetContracts() []*ContractDescriptor {
 	if x != nil {
 		return x.Contracts
+	}
+	return nil
+}
+
+func (x *ContractRegistry) GetFileDescriptorSet() *descriptorpb.FileDescriptorSet {
+	if x != nil {
+		return x.FileDescriptorSet
 	}
 	return nil
 }
@@ -2042,16 +2053,17 @@ var File_plugin_proto protoreflect.FileDescriptor
 
 const file_plugin_proto_rawDesc = "" +
 	"\n" +
-	"\fplugin.proto\x12\x12workflow.plugin.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x19google/protobuf/any.proto\"\xc2\x01\n" +
+	"\fplugin.proto\x12\x12workflow.plugin.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\"\xc2\x01\n" +
 	"\bManifest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
 	"\x06author\x18\x03 \x01(\tR\x06author\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12%\n" +
 	"\x0econfig_mutable\x18\x05 \x01(\bR\rconfigMutable\x12'\n" +
-	"\x0fsample_category\x18\x06 \x01(\tR\x0esampleCategory\"X\n" +
+	"\x0fsample_category\x18\x06 \x01(\tR\x0esampleCategory\"\xac\x01\n" +
 	"\x10ContractRegistry\x12D\n" +
-	"\tcontracts\x18\x01 \x03(\v2&.workflow.plugin.v1.ContractDescriptorR\tcontracts\"\x8f\x03\n" +
+	"\tcontracts\x18\x01 \x03(\v2&.workflow.plugin.v1.ContractDescriptorR\tcontracts\x12R\n" +
+	"\x13file_descriptor_set\x18\x02 \x01(\v2\".google.protobuf.FileDescriptorSetR\x11fileDescriptorSet\"\x8f\x03\n" +
 	"\x12ContractDescriptor\x124\n" +
 	"\x04kind\x18\x01 \x01(\x0e2 .workflow.plugin.v1.ContractKindR\x04kind\x12\x1f\n" +
 	"\vmodule_type\x18\x02 \x01(\tR\n" +
@@ -2249,129 +2261,131 @@ func file_plugin_proto_rawDescGZIP() []byte {
 var file_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_plugin_proto_goTypes = []any{
-	(ContractKind)(0),              // 0: workflow.plugin.v1.ContractKind
-	(ContractMode)(0),              // 1: workflow.plugin.v1.ContractMode
-	(*Manifest)(nil),               // 2: workflow.plugin.v1.Manifest
-	(*ContractRegistry)(nil),       // 3: workflow.plugin.v1.ContractRegistry
-	(*ContractDescriptor)(nil),     // 4: workflow.plugin.v1.ContractDescriptor
-	(*GetAssetRequest)(nil),        // 5: workflow.plugin.v1.GetAssetRequest
-	(*GetAssetResponse)(nil),       // 6: workflow.plugin.v1.GetAssetResponse
-	(*TypeList)(nil),               // 7: workflow.plugin.v1.TypeList
-	(*ModuleSchemaList)(nil),       // 8: workflow.plugin.v1.ModuleSchemaList
-	(*ModuleSchema)(nil),           // 9: workflow.plugin.v1.ModuleSchema
-	(*ServiceIODef)(nil),           // 10: workflow.plugin.v1.ServiceIODef
-	(*ConfigFieldDef)(nil),         // 11: workflow.plugin.v1.ConfigFieldDef
-	(*CreateModuleRequest)(nil),    // 12: workflow.plugin.v1.CreateModuleRequest
-	(*CreateStepRequest)(nil),      // 13: workflow.plugin.v1.CreateStepRequest
-	(*HandleResponse)(nil),         // 14: workflow.plugin.v1.HandleResponse
-	(*HandleRequest)(nil),          // 15: workflow.plugin.v1.HandleRequest
-	(*ErrorResponse)(nil),          // 16: workflow.plugin.v1.ErrorResponse
-	(*ExecuteStepRequest)(nil),     // 17: workflow.plugin.v1.ExecuteStepRequest
-	(*ExecuteStepResponse)(nil),    // 18: workflow.plugin.v1.ExecuteStepResponse
-	(*InvokeServiceRequest)(nil),   // 19: workflow.plugin.v1.InvokeServiceRequest
-	(*InvokeServiceResponse)(nil),  // 20: workflow.plugin.v1.InvokeServiceResponse
-	(*TriggerWorkflowRequest)(nil), // 21: workflow.plugin.v1.TriggerWorkflowRequest
-	(*GetServiceRequest)(nil),      // 22: workflow.plugin.v1.GetServiceRequest
-	(*GetServiceResponse)(nil),     // 23: workflow.plugin.v1.GetServiceResponse
-	(*LogRequest)(nil),             // 24: workflow.plugin.v1.LogRequest
-	(*PublishMessageRequest)(nil),  // 25: workflow.plugin.v1.PublishMessageRequest
-	(*PublishMessageResponse)(nil), // 26: workflow.plugin.v1.PublishMessageResponse
-	(*SubscribeRequest)(nil),       // 27: workflow.plugin.v1.SubscribeRequest
-	(*UnsubscribeRequest)(nil),     // 28: workflow.plugin.v1.UnsubscribeRequest
-	(*DeliverMessageRequest)(nil),  // 29: workflow.plugin.v1.DeliverMessageRequest
-	(*DeliverMessageResponse)(nil), // 30: workflow.plugin.v1.DeliverMessageResponse
-	(*ConfigFragmentResponse)(nil), // 31: workflow.plugin.v1.ConfigFragmentResponse
-	nil,                            // 32: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
-	nil,                            // 33: workflow.plugin.v1.PublishMessageRequest.MetadataEntry
-	nil,                            // 34: workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
-	(*structpb.Struct)(nil),        // 35: google.protobuf.Struct
-	(*anypb.Any)(nil),              // 36: google.protobuf.Any
-	(*emptypb.Empty)(nil),          // 37: google.protobuf.Empty
+	(ContractKind)(0),                      // 0: workflow.plugin.v1.ContractKind
+	(ContractMode)(0),                      // 1: workflow.plugin.v1.ContractMode
+	(*Manifest)(nil),                       // 2: workflow.plugin.v1.Manifest
+	(*ContractRegistry)(nil),               // 3: workflow.plugin.v1.ContractRegistry
+	(*ContractDescriptor)(nil),             // 4: workflow.plugin.v1.ContractDescriptor
+	(*GetAssetRequest)(nil),                // 5: workflow.plugin.v1.GetAssetRequest
+	(*GetAssetResponse)(nil),               // 6: workflow.plugin.v1.GetAssetResponse
+	(*TypeList)(nil),                       // 7: workflow.plugin.v1.TypeList
+	(*ModuleSchemaList)(nil),               // 8: workflow.plugin.v1.ModuleSchemaList
+	(*ModuleSchema)(nil),                   // 9: workflow.plugin.v1.ModuleSchema
+	(*ServiceIODef)(nil),                   // 10: workflow.plugin.v1.ServiceIODef
+	(*ConfigFieldDef)(nil),                 // 11: workflow.plugin.v1.ConfigFieldDef
+	(*CreateModuleRequest)(nil),            // 12: workflow.plugin.v1.CreateModuleRequest
+	(*CreateStepRequest)(nil),              // 13: workflow.plugin.v1.CreateStepRequest
+	(*HandleResponse)(nil),                 // 14: workflow.plugin.v1.HandleResponse
+	(*HandleRequest)(nil),                  // 15: workflow.plugin.v1.HandleRequest
+	(*ErrorResponse)(nil),                  // 16: workflow.plugin.v1.ErrorResponse
+	(*ExecuteStepRequest)(nil),             // 17: workflow.plugin.v1.ExecuteStepRequest
+	(*ExecuteStepResponse)(nil),            // 18: workflow.plugin.v1.ExecuteStepResponse
+	(*InvokeServiceRequest)(nil),           // 19: workflow.plugin.v1.InvokeServiceRequest
+	(*InvokeServiceResponse)(nil),          // 20: workflow.plugin.v1.InvokeServiceResponse
+	(*TriggerWorkflowRequest)(nil),         // 21: workflow.plugin.v1.TriggerWorkflowRequest
+	(*GetServiceRequest)(nil),              // 22: workflow.plugin.v1.GetServiceRequest
+	(*GetServiceResponse)(nil),             // 23: workflow.plugin.v1.GetServiceResponse
+	(*LogRequest)(nil),                     // 24: workflow.plugin.v1.LogRequest
+	(*PublishMessageRequest)(nil),          // 25: workflow.plugin.v1.PublishMessageRequest
+	(*PublishMessageResponse)(nil),         // 26: workflow.plugin.v1.PublishMessageResponse
+	(*SubscribeRequest)(nil),               // 27: workflow.plugin.v1.SubscribeRequest
+	(*UnsubscribeRequest)(nil),             // 28: workflow.plugin.v1.UnsubscribeRequest
+	(*DeliverMessageRequest)(nil),          // 29: workflow.plugin.v1.DeliverMessageRequest
+	(*DeliverMessageResponse)(nil),         // 30: workflow.plugin.v1.DeliverMessageResponse
+	(*ConfigFragmentResponse)(nil),         // 31: workflow.plugin.v1.ConfigFragmentResponse
+	nil,                                    // 32: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
+	nil,                                    // 33: workflow.plugin.v1.PublishMessageRequest.MetadataEntry
+	nil,                                    // 34: workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
+	(*descriptorpb.FileDescriptorSet)(nil), // 35: google.protobuf.FileDescriptorSet
+	(*structpb.Struct)(nil),                // 36: google.protobuf.Struct
+	(*anypb.Any)(nil),                      // 37: google.protobuf.Any
+	(*emptypb.Empty)(nil),                  // 38: google.protobuf.Empty
 }
 var file_plugin_proto_depIdxs = []int32{
 	4,  // 0: workflow.plugin.v1.ContractRegistry.contracts:type_name -> workflow.plugin.v1.ContractDescriptor
-	0,  // 1: workflow.plugin.v1.ContractDescriptor.kind:type_name -> workflow.plugin.v1.ContractKind
-	1,  // 2: workflow.plugin.v1.ContractDescriptor.mode:type_name -> workflow.plugin.v1.ContractMode
-	9,  // 3: workflow.plugin.v1.ModuleSchemaList.schemas:type_name -> workflow.plugin.v1.ModuleSchema
-	10, // 4: workflow.plugin.v1.ModuleSchema.inputs:type_name -> workflow.plugin.v1.ServiceIODef
-	10, // 5: workflow.plugin.v1.ModuleSchema.outputs:type_name -> workflow.plugin.v1.ServiceIODef
-	11, // 6: workflow.plugin.v1.ModuleSchema.config_fields:type_name -> workflow.plugin.v1.ConfigFieldDef
-	35, // 7: workflow.plugin.v1.CreateModuleRequest.config:type_name -> google.protobuf.Struct
-	36, // 8: workflow.plugin.v1.CreateModuleRequest.typed_config:type_name -> google.protobuf.Any
-	35, // 9: workflow.plugin.v1.CreateStepRequest.config:type_name -> google.protobuf.Struct
-	36, // 10: workflow.plugin.v1.CreateStepRequest.typed_config:type_name -> google.protobuf.Any
-	35, // 11: workflow.plugin.v1.ExecuteStepRequest.trigger_data:type_name -> google.protobuf.Struct
-	32, // 12: workflow.plugin.v1.ExecuteStepRequest.step_outputs:type_name -> workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
-	35, // 13: workflow.plugin.v1.ExecuteStepRequest.current:type_name -> google.protobuf.Struct
-	35, // 14: workflow.plugin.v1.ExecuteStepRequest.metadata:type_name -> google.protobuf.Struct
-	35, // 15: workflow.plugin.v1.ExecuteStepRequest.config:type_name -> google.protobuf.Struct
-	36, // 16: workflow.plugin.v1.ExecuteStepRequest.typed_config:type_name -> google.protobuf.Any
-	36, // 17: workflow.plugin.v1.ExecuteStepRequest.typed_input:type_name -> google.protobuf.Any
-	35, // 18: workflow.plugin.v1.ExecuteStepResponse.output:type_name -> google.protobuf.Struct
-	36, // 19: workflow.plugin.v1.ExecuteStepResponse.typed_output:type_name -> google.protobuf.Any
-	35, // 20: workflow.plugin.v1.InvokeServiceRequest.args:type_name -> google.protobuf.Struct
-	36, // 21: workflow.plugin.v1.InvokeServiceRequest.typed_input:type_name -> google.protobuf.Any
-	35, // 22: workflow.plugin.v1.InvokeServiceResponse.result:type_name -> google.protobuf.Struct
-	36, // 23: workflow.plugin.v1.InvokeServiceResponse.typed_output:type_name -> google.protobuf.Any
-	35, // 24: workflow.plugin.v1.TriggerWorkflowRequest.data:type_name -> google.protobuf.Struct
-	36, // 25: workflow.plugin.v1.TriggerWorkflowRequest.typed_data:type_name -> google.protobuf.Any
-	35, // 26: workflow.plugin.v1.LogRequest.fields:type_name -> google.protobuf.Struct
-	33, // 27: workflow.plugin.v1.PublishMessageRequest.metadata:type_name -> workflow.plugin.v1.PublishMessageRequest.MetadataEntry
-	34, // 28: workflow.plugin.v1.DeliverMessageRequest.metadata:type_name -> workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
-	35, // 29: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry.value:type_name -> google.protobuf.Struct
-	37, // 30: workflow.plugin.v1.PluginService.GetManifest:input_type -> google.protobuf.Empty
-	37, // 31: workflow.plugin.v1.PluginService.GetModuleTypes:input_type -> google.protobuf.Empty
-	37, // 32: workflow.plugin.v1.PluginService.GetStepTypes:input_type -> google.protobuf.Empty
-	37, // 33: workflow.plugin.v1.PluginService.GetTriggerTypes:input_type -> google.protobuf.Empty
-	37, // 34: workflow.plugin.v1.PluginService.GetModuleSchemas:input_type -> google.protobuf.Empty
-	37, // 35: workflow.plugin.v1.PluginService.GetContractRegistry:input_type -> google.protobuf.Empty
-	12, // 36: workflow.plugin.v1.PluginService.CreateModule:input_type -> workflow.plugin.v1.CreateModuleRequest
-	15, // 37: workflow.plugin.v1.PluginService.InitModule:input_type -> workflow.plugin.v1.HandleRequest
-	15, // 38: workflow.plugin.v1.PluginService.StartModule:input_type -> workflow.plugin.v1.HandleRequest
-	15, // 39: workflow.plugin.v1.PluginService.StopModule:input_type -> workflow.plugin.v1.HandleRequest
-	15, // 40: workflow.plugin.v1.PluginService.DestroyModule:input_type -> workflow.plugin.v1.HandleRequest
-	13, // 41: workflow.plugin.v1.PluginService.CreateStep:input_type -> workflow.plugin.v1.CreateStepRequest
-	17, // 42: workflow.plugin.v1.PluginService.ExecuteStep:input_type -> workflow.plugin.v1.ExecuteStepRequest
-	15, // 43: workflow.plugin.v1.PluginService.DestroyStep:input_type -> workflow.plugin.v1.HandleRequest
-	19, // 44: workflow.plugin.v1.PluginService.InvokeService:input_type -> workflow.plugin.v1.InvokeServiceRequest
-	29, // 45: workflow.plugin.v1.PluginService.DeliverMessage:input_type -> workflow.plugin.v1.DeliverMessageRequest
-	37, // 46: workflow.plugin.v1.PluginService.GetConfigFragment:input_type -> google.protobuf.Empty
-	5,  // 47: workflow.plugin.v1.PluginService.GetAsset:input_type -> workflow.plugin.v1.GetAssetRequest
-	21, // 48: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:input_type -> workflow.plugin.v1.TriggerWorkflowRequest
-	22, // 49: workflow.plugin.v1.EngineCallbackService.GetService:input_type -> workflow.plugin.v1.GetServiceRequest
-	24, // 50: workflow.plugin.v1.EngineCallbackService.Log:input_type -> workflow.plugin.v1.LogRequest
-	25, // 51: workflow.plugin.v1.EngineCallbackService.PublishMessage:input_type -> workflow.plugin.v1.PublishMessageRequest
-	27, // 52: workflow.plugin.v1.EngineCallbackService.Subscribe:input_type -> workflow.plugin.v1.SubscribeRequest
-	28, // 53: workflow.plugin.v1.EngineCallbackService.Unsubscribe:input_type -> workflow.plugin.v1.UnsubscribeRequest
-	2,  // 54: workflow.plugin.v1.PluginService.GetManifest:output_type -> workflow.plugin.v1.Manifest
-	7,  // 55: workflow.plugin.v1.PluginService.GetModuleTypes:output_type -> workflow.plugin.v1.TypeList
-	7,  // 56: workflow.plugin.v1.PluginService.GetStepTypes:output_type -> workflow.plugin.v1.TypeList
-	7,  // 57: workflow.plugin.v1.PluginService.GetTriggerTypes:output_type -> workflow.plugin.v1.TypeList
-	8,  // 58: workflow.plugin.v1.PluginService.GetModuleSchemas:output_type -> workflow.plugin.v1.ModuleSchemaList
-	3,  // 59: workflow.plugin.v1.PluginService.GetContractRegistry:output_type -> workflow.plugin.v1.ContractRegistry
-	14, // 60: workflow.plugin.v1.PluginService.CreateModule:output_type -> workflow.plugin.v1.HandleResponse
-	16, // 61: workflow.plugin.v1.PluginService.InitModule:output_type -> workflow.plugin.v1.ErrorResponse
-	16, // 62: workflow.plugin.v1.PluginService.StartModule:output_type -> workflow.plugin.v1.ErrorResponse
-	16, // 63: workflow.plugin.v1.PluginService.StopModule:output_type -> workflow.plugin.v1.ErrorResponse
-	16, // 64: workflow.plugin.v1.PluginService.DestroyModule:output_type -> workflow.plugin.v1.ErrorResponse
-	14, // 65: workflow.plugin.v1.PluginService.CreateStep:output_type -> workflow.plugin.v1.HandleResponse
-	18, // 66: workflow.plugin.v1.PluginService.ExecuteStep:output_type -> workflow.plugin.v1.ExecuteStepResponse
-	16, // 67: workflow.plugin.v1.PluginService.DestroyStep:output_type -> workflow.plugin.v1.ErrorResponse
-	20, // 68: workflow.plugin.v1.PluginService.InvokeService:output_type -> workflow.plugin.v1.InvokeServiceResponse
-	30, // 69: workflow.plugin.v1.PluginService.DeliverMessage:output_type -> workflow.plugin.v1.DeliverMessageResponse
-	31, // 70: workflow.plugin.v1.PluginService.GetConfigFragment:output_type -> workflow.plugin.v1.ConfigFragmentResponse
-	6,  // 71: workflow.plugin.v1.PluginService.GetAsset:output_type -> workflow.plugin.v1.GetAssetResponse
-	16, // 72: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:output_type -> workflow.plugin.v1.ErrorResponse
-	23, // 73: workflow.plugin.v1.EngineCallbackService.GetService:output_type -> workflow.plugin.v1.GetServiceResponse
-	37, // 74: workflow.plugin.v1.EngineCallbackService.Log:output_type -> google.protobuf.Empty
-	26, // 75: workflow.plugin.v1.EngineCallbackService.PublishMessage:output_type -> workflow.plugin.v1.PublishMessageResponse
-	16, // 76: workflow.plugin.v1.EngineCallbackService.Subscribe:output_type -> workflow.plugin.v1.ErrorResponse
-	16, // 77: workflow.plugin.v1.EngineCallbackService.Unsubscribe:output_type -> workflow.plugin.v1.ErrorResponse
-	54, // [54:78] is the sub-list for method output_type
-	30, // [30:54] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	35, // 1: workflow.plugin.v1.ContractRegistry.file_descriptor_set:type_name -> google.protobuf.FileDescriptorSet
+	0,  // 2: workflow.plugin.v1.ContractDescriptor.kind:type_name -> workflow.plugin.v1.ContractKind
+	1,  // 3: workflow.plugin.v1.ContractDescriptor.mode:type_name -> workflow.plugin.v1.ContractMode
+	9,  // 4: workflow.plugin.v1.ModuleSchemaList.schemas:type_name -> workflow.plugin.v1.ModuleSchema
+	10, // 5: workflow.plugin.v1.ModuleSchema.inputs:type_name -> workflow.plugin.v1.ServiceIODef
+	10, // 6: workflow.plugin.v1.ModuleSchema.outputs:type_name -> workflow.plugin.v1.ServiceIODef
+	11, // 7: workflow.plugin.v1.ModuleSchema.config_fields:type_name -> workflow.plugin.v1.ConfigFieldDef
+	36, // 8: workflow.plugin.v1.CreateModuleRequest.config:type_name -> google.protobuf.Struct
+	37, // 9: workflow.plugin.v1.CreateModuleRequest.typed_config:type_name -> google.protobuf.Any
+	36, // 10: workflow.plugin.v1.CreateStepRequest.config:type_name -> google.protobuf.Struct
+	37, // 11: workflow.plugin.v1.CreateStepRequest.typed_config:type_name -> google.protobuf.Any
+	36, // 12: workflow.plugin.v1.ExecuteStepRequest.trigger_data:type_name -> google.protobuf.Struct
+	32, // 13: workflow.plugin.v1.ExecuteStepRequest.step_outputs:type_name -> workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
+	36, // 14: workflow.plugin.v1.ExecuteStepRequest.current:type_name -> google.protobuf.Struct
+	36, // 15: workflow.plugin.v1.ExecuteStepRequest.metadata:type_name -> google.protobuf.Struct
+	36, // 16: workflow.plugin.v1.ExecuteStepRequest.config:type_name -> google.protobuf.Struct
+	37, // 17: workflow.plugin.v1.ExecuteStepRequest.typed_config:type_name -> google.protobuf.Any
+	37, // 18: workflow.plugin.v1.ExecuteStepRequest.typed_input:type_name -> google.protobuf.Any
+	36, // 19: workflow.plugin.v1.ExecuteStepResponse.output:type_name -> google.protobuf.Struct
+	37, // 20: workflow.plugin.v1.ExecuteStepResponse.typed_output:type_name -> google.protobuf.Any
+	36, // 21: workflow.plugin.v1.InvokeServiceRequest.args:type_name -> google.protobuf.Struct
+	37, // 22: workflow.plugin.v1.InvokeServiceRequest.typed_input:type_name -> google.protobuf.Any
+	36, // 23: workflow.plugin.v1.InvokeServiceResponse.result:type_name -> google.protobuf.Struct
+	37, // 24: workflow.plugin.v1.InvokeServiceResponse.typed_output:type_name -> google.protobuf.Any
+	36, // 25: workflow.plugin.v1.TriggerWorkflowRequest.data:type_name -> google.protobuf.Struct
+	37, // 26: workflow.plugin.v1.TriggerWorkflowRequest.typed_data:type_name -> google.protobuf.Any
+	36, // 27: workflow.plugin.v1.LogRequest.fields:type_name -> google.protobuf.Struct
+	33, // 28: workflow.plugin.v1.PublishMessageRequest.metadata:type_name -> workflow.plugin.v1.PublishMessageRequest.MetadataEntry
+	34, // 29: workflow.plugin.v1.DeliverMessageRequest.metadata:type_name -> workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
+	36, // 30: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry.value:type_name -> google.protobuf.Struct
+	38, // 31: workflow.plugin.v1.PluginService.GetManifest:input_type -> google.protobuf.Empty
+	38, // 32: workflow.plugin.v1.PluginService.GetModuleTypes:input_type -> google.protobuf.Empty
+	38, // 33: workflow.plugin.v1.PluginService.GetStepTypes:input_type -> google.protobuf.Empty
+	38, // 34: workflow.plugin.v1.PluginService.GetTriggerTypes:input_type -> google.protobuf.Empty
+	38, // 35: workflow.plugin.v1.PluginService.GetModuleSchemas:input_type -> google.protobuf.Empty
+	38, // 36: workflow.plugin.v1.PluginService.GetContractRegistry:input_type -> google.protobuf.Empty
+	12, // 37: workflow.plugin.v1.PluginService.CreateModule:input_type -> workflow.plugin.v1.CreateModuleRequest
+	15, // 38: workflow.plugin.v1.PluginService.InitModule:input_type -> workflow.plugin.v1.HandleRequest
+	15, // 39: workflow.plugin.v1.PluginService.StartModule:input_type -> workflow.plugin.v1.HandleRequest
+	15, // 40: workflow.plugin.v1.PluginService.StopModule:input_type -> workflow.plugin.v1.HandleRequest
+	15, // 41: workflow.plugin.v1.PluginService.DestroyModule:input_type -> workflow.plugin.v1.HandleRequest
+	13, // 42: workflow.plugin.v1.PluginService.CreateStep:input_type -> workflow.plugin.v1.CreateStepRequest
+	17, // 43: workflow.plugin.v1.PluginService.ExecuteStep:input_type -> workflow.plugin.v1.ExecuteStepRequest
+	15, // 44: workflow.plugin.v1.PluginService.DestroyStep:input_type -> workflow.plugin.v1.HandleRequest
+	19, // 45: workflow.plugin.v1.PluginService.InvokeService:input_type -> workflow.plugin.v1.InvokeServiceRequest
+	29, // 46: workflow.plugin.v1.PluginService.DeliverMessage:input_type -> workflow.plugin.v1.DeliverMessageRequest
+	38, // 47: workflow.plugin.v1.PluginService.GetConfigFragment:input_type -> google.protobuf.Empty
+	5,  // 48: workflow.plugin.v1.PluginService.GetAsset:input_type -> workflow.plugin.v1.GetAssetRequest
+	21, // 49: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:input_type -> workflow.plugin.v1.TriggerWorkflowRequest
+	22, // 50: workflow.plugin.v1.EngineCallbackService.GetService:input_type -> workflow.plugin.v1.GetServiceRequest
+	24, // 51: workflow.plugin.v1.EngineCallbackService.Log:input_type -> workflow.plugin.v1.LogRequest
+	25, // 52: workflow.plugin.v1.EngineCallbackService.PublishMessage:input_type -> workflow.plugin.v1.PublishMessageRequest
+	27, // 53: workflow.plugin.v1.EngineCallbackService.Subscribe:input_type -> workflow.plugin.v1.SubscribeRequest
+	28, // 54: workflow.plugin.v1.EngineCallbackService.Unsubscribe:input_type -> workflow.plugin.v1.UnsubscribeRequest
+	2,  // 55: workflow.plugin.v1.PluginService.GetManifest:output_type -> workflow.plugin.v1.Manifest
+	7,  // 56: workflow.plugin.v1.PluginService.GetModuleTypes:output_type -> workflow.plugin.v1.TypeList
+	7,  // 57: workflow.plugin.v1.PluginService.GetStepTypes:output_type -> workflow.plugin.v1.TypeList
+	7,  // 58: workflow.plugin.v1.PluginService.GetTriggerTypes:output_type -> workflow.plugin.v1.TypeList
+	8,  // 59: workflow.plugin.v1.PluginService.GetModuleSchemas:output_type -> workflow.plugin.v1.ModuleSchemaList
+	3,  // 60: workflow.plugin.v1.PluginService.GetContractRegistry:output_type -> workflow.plugin.v1.ContractRegistry
+	14, // 61: workflow.plugin.v1.PluginService.CreateModule:output_type -> workflow.plugin.v1.HandleResponse
+	16, // 62: workflow.plugin.v1.PluginService.InitModule:output_type -> workflow.plugin.v1.ErrorResponse
+	16, // 63: workflow.plugin.v1.PluginService.StartModule:output_type -> workflow.plugin.v1.ErrorResponse
+	16, // 64: workflow.plugin.v1.PluginService.StopModule:output_type -> workflow.plugin.v1.ErrorResponse
+	16, // 65: workflow.plugin.v1.PluginService.DestroyModule:output_type -> workflow.plugin.v1.ErrorResponse
+	14, // 66: workflow.plugin.v1.PluginService.CreateStep:output_type -> workflow.plugin.v1.HandleResponse
+	18, // 67: workflow.plugin.v1.PluginService.ExecuteStep:output_type -> workflow.plugin.v1.ExecuteStepResponse
+	16, // 68: workflow.plugin.v1.PluginService.DestroyStep:output_type -> workflow.plugin.v1.ErrorResponse
+	20, // 69: workflow.plugin.v1.PluginService.InvokeService:output_type -> workflow.plugin.v1.InvokeServiceResponse
+	30, // 70: workflow.plugin.v1.PluginService.DeliverMessage:output_type -> workflow.plugin.v1.DeliverMessageResponse
+	31, // 71: workflow.plugin.v1.PluginService.GetConfigFragment:output_type -> workflow.plugin.v1.ConfigFragmentResponse
+	6,  // 72: workflow.plugin.v1.PluginService.GetAsset:output_type -> workflow.plugin.v1.GetAssetResponse
+	16, // 73: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:output_type -> workflow.plugin.v1.ErrorResponse
+	23, // 74: workflow.plugin.v1.EngineCallbackService.GetService:output_type -> workflow.plugin.v1.GetServiceResponse
+	38, // 75: workflow.plugin.v1.EngineCallbackService.Log:output_type -> google.protobuf.Empty
+	26, // 76: workflow.plugin.v1.EngineCallbackService.PublishMessage:output_type -> workflow.plugin.v1.PublishMessageResponse
+	16, // 77: workflow.plugin.v1.EngineCallbackService.Subscribe:output_type -> workflow.plugin.v1.ErrorResponse
+	16, // 78: workflow.plugin.v1.EngineCallbackService.Unsubscribe:output_type -> workflow.plugin.v1.ErrorResponse
+	55, // [55:79] is the sub-list for method output_type
+	31, // [31:55] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_plugin_proto_init() }

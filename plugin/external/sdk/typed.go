@@ -145,20 +145,20 @@ func (s *TypedStepInstance[C, I, O]) setTypedConfig(config *anypb.Any) error {
 
 func (s *TypedStepInstance[C, I, O]) executeTyped(ctx context.Context, req *pb.ExecuteStepRequest) (*pb.ExecuteStepResponse, error) {
 	if s.initErr != nil {
-		return &pb.ExecuteStepResponse{Error: s.initErr.Error()}, nil
+		return &pb.ExecuteStepResponse{Error: s.initErr.Error()}, nil //nolint:nilerr // app error in response field
 	}
 	config := cloneMessage(s.config)
 	if req.TypedConfig != nil {
 		decoded, err := unpackAny[C](req.TypedConfig, s.configPrototype, "typed config")
 		if err != nil {
-			return &pb.ExecuteStepResponse{Error: err.Error()}, nil
+			return &pb.ExecuteStepResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 		}
 		config = decoded
 	}
 
 	input, err := unpackAny[I](req.TypedInput, s.inputPrototype, "typed input")
 	if err != nil {
-		return &pb.ExecuteStepResponse{Error: err.Error()}, nil
+		return &pb.ExecuteStepResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
 
 	result, err := s.handler(ctx, TypedStepRequest[C, I]{
@@ -170,7 +170,7 @@ func (s *TypedStepInstance[C, I, O]) executeTyped(ctx context.Context, req *pb.E
 		Metadata:    structToMap(req.Metadata),
 	})
 	if err != nil {
-		return &pb.ExecuteStepResponse{Error: err.Error()}, nil
+		return &pb.ExecuteStepResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
 	if result == nil {
 		return &pb.ExecuteStepResponse{}, nil

@@ -6,6 +6,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/module"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -16,6 +17,7 @@ type RemoteStep struct {
 	config   map[string]any
 	client   pb.PluginServiceClient
 	contract *pb.ContractDescriptor
+	types    protoregistry.MessageTypeResolver
 	tmpl     *module.TemplateEngine
 }
 
@@ -27,12 +29,17 @@ func NewRemoteStep(name, handleID string, client pb.PluginServiceClient, config 
 	if len(contracts) > 0 {
 		contract = contracts[0]
 	}
+	return NewRemoteStepWithContractTypes(name, handleID, client, config, contract, nil)
+}
+
+func NewRemoteStepWithContractTypes(name, handleID string, client pb.PluginServiceClient, config map[string]any, contract *pb.ContractDescriptor, types protoregistry.MessageTypeResolver) *RemoteStep {
 	return &RemoteStep{
 		name:     name,
 		handleID: handleID,
 		config:   config,
 		client:   client,
 		contract: contract,
+		types:    types,
 		tmpl:     module.NewTemplateEngine(),
 	}
 }
@@ -76,7 +83,7 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 
 	output := structToMap(resp.Output)
 	if resp.TypedOutput != nil && s.contract != nil && s.contract.OutputMessage != "" {
-		output, err = typedAnyToMap(resp.TypedOutput, s.contract.OutputMessage)
+		output, err = typedAnyToMap(resp.TypedOutput, s.contract.OutputMessage, s.types)
 		if err != nil {
 			return nil, fmt.Errorf("remote step %q typed output decode: %w", s.name, err)
 		}
@@ -103,14 +110,14 @@ func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig m
 	if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
 		return req, nil
 	}
-	typedConfig, err := mapToTypedAny(s.contract.ConfigMessage, resolvedConfig)
+	typedConfig, err := mapToTypedAny(s.contract.ConfigMessage, resolvedConfig, s.types)
 	if err != nil {
 		if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, fmt.Errorf("remote step %q STRICT_PROTO config message %q cannot use legacy Struct fallback: %w", s.name, s.contract.ConfigMessage, err)
 		}
 		return req, nil
 	}
-	typedInput, err := mapToTypedAny(s.contract.InputMessage, pc.Current)
+	typedInput, err := mapToTypedAny(s.contract.InputMessage, pc.Current, s.types)
 	if err != nil {
 		if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, fmt.Errorf("remote step %q STRICT_PROTO input message %q cannot use legacy Struct fallback: %w", s.name, s.contract.InputMessage, err)

@@ -266,7 +266,7 @@ func (s *grpcServer) CreateModule(_ context.Context, req *pb.CreateModuleRequest
 	}
 	if typed, ok := inst.(typedModuleAdapter); ok {
 		if err := typed.setTypedConfig(req.TypedConfig); err != nil {
-			return &pb.HandleResponse{Error: err.Error()}, nil
+			return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 		}
 	}
 
@@ -374,7 +374,7 @@ func (s *grpcServer) CreateStep(_ context.Context, req *pb.CreateStepRequest) (*
 	}
 	if typed, ok := inst.(typedStepAdapter); ok {
 		if err := typed.setTypedConfig(req.TypedConfig); err != nil {
-			return &pb.HandleResponse{Error: err.Error()}, nil
+			return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 		}
 	}
 

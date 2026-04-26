@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -265,6 +266,59 @@ func TestExternalPluginAdapter_ContractStepFactorySendsTypedConfig(t *testing.T)
 	assertAnyTypeForTest(t, client.lastCreateStepReq.TypedConfig, "workflow.plugin.v1.Manifest")
 }
 
+func TestExternalPluginAdapter_ContractStepFactoryUsesPluginOwnedDescriptors(t *testing.T) {
+	const configMessage = "workflow.plugins.test.v1.DynamicConfig"
+	client := &adapterTestPluginServiceClient{
+		manifest:  &pb.Manifest{Name: "contract-plugin"},
+		stepTypes: []string{"test.strict"},
+		registry: &pb.ContractRegistry{
+			FileDescriptorSet: dynamicContractFileDescriptorSet(),
+			Contracts: []*pb.ContractDescriptor{
+				{
+					Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+					StepType:      "test.strict",
+					ConfigMessage: configMessage,
+					InputMessage:  "workflow.plugins.test.v1.DynamicInput",
+					OutputMessage: "workflow.plugins.test.v1.DynamicOutput",
+					Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+				},
+			},
+		},
+	}
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+
+	_, err = a.StepFactories()["test.strict"]("strict-step", map[string]any{
+		"platform":   "github_actions",
+		"output_dir": "/tmp/ci",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory returned error: %v", err)
+	}
+	if client.lastCreateStepReq == nil || client.lastCreateStepReq.TypedConfig == nil {
+		t.Fatal("expected typed config request")
+	}
+	if client.lastCreateStepReq.Config != nil {
+		t.Fatalf("expected dynamic strict step creation to omit legacy Config, got %v", client.lastCreateStepReq.Config)
+	}
+	if got := client.lastCreateStepReq.TypedConfig.MessageName(); got != configMessage {
+		t.Fatalf("expected Any message %s, got %s", configMessage, got)
+	}
+	msg, err := newMessageByName(configMessage, a.contractTypes)
+	if err != nil {
+		t.Fatalf("new dynamic message: %v", err)
+	}
+	if err := client.lastCreateStepReq.TypedConfig.UnmarshalTo(msg); err != nil {
+		t.Fatalf("unmarshal dynamic typed config: %v", err)
+	}
+	platform := msg.ProtoReflect().Descriptor().Fields().ByName("platform")
+	if got := msg.ProtoReflect().Get(platform).String(); got != "github_actions" {
+		t.Fatalf("expected platform github_actions, got %q", got)
+	}
+}
+
 func TestExternalPluginAdapter_ContractStepFactoryFailsClosedWithoutCodec(t *testing.T) {
 	client := &adapterTestPluginServiceClient{
 		manifest:  &pb.Manifest{Name: "contract-plugin"},
@@ -295,3 +349,41 @@ func TestExternalPluginAdapter_ContractStepFactoryFailsClosedWithoutCodec(t *tes
 		t.Fatal("expected strict failure before CreateStep RPC")
 	}
 }
+
+func dynamicContractFileDescriptorSet() *descriptorpb.FileDescriptorSet {
+	label := descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL
+	stringType := descriptorpb.FieldDescriptorProto_TYPE_STRING
+	int32Type := descriptorpb.FieldDescriptorProto_TYPE_INT32
+	return &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{
+		{
+			Name:    stringPtr("dynamic_contract.proto"),
+			Package: stringPtr("workflow.plugins.test.v1"),
+			Syntax:  stringPtr("proto3"),
+			MessageType: []*descriptorpb.DescriptorProto{
+				{
+					Name: stringPtr("DynamicConfig"),
+					Field: []*descriptorpb.FieldDescriptorProto{
+						{Name: stringPtr("platform"), JsonName: stringPtr("platform"), Number: int32Ptr(1), Label: &label, Type: &stringType},
+						{Name: stringPtr("output_dir"), JsonName: stringPtr("outputDir"), Number: int32Ptr(2), Label: &label, Type: &stringType},
+					},
+				},
+				{
+					Name: stringPtr("DynamicInput"),
+					Field: []*descriptorpb.FieldDescriptorProto{
+						{Name: stringPtr("platform"), JsonName: stringPtr("platform"), Number: int32Ptr(1), Label: &label, Type: &stringType},
+					},
+				},
+				{
+					Name: stringPtr("DynamicOutput"),
+					Field: []*descriptorpb.FieldDescriptorProto{
+						{Name: stringPtr("platform"), JsonName: stringPtr("platform"), Number: int32Ptr(1), Label: &label, Type: &stringType},
+						{Name: stringPtr("file_count"), JsonName: stringPtr("fileCount"), Number: int32Ptr(2), Label: &label, Type: &int32Type},
+					},
+				},
+			},
+		},
+	}}
+}
+
+func stringPtr(v string) *string { return &v }
+func int32Ptr(v int32) *int32    { return &v }

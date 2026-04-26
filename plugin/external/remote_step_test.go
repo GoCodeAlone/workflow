@@ -237,7 +237,7 @@ func TestRemoteStep_Execute_StrictContractFailsClosedWithoutCodec(t *testing.T) 
 
 func mustAnyFromMapForTest(t *testing.T, messageName string, values map[string]any) *anypb.Any {
 	t.Helper()
-	typed, err := mapToTypedAny(messageName, values)
+	typed, err := mapToTypedAny(messageName, values, nil)
 	if err != nil {
 		t.Fatalf("mapToTypedAny(%s): %v", messageName, err)
 	}

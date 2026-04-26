@@ -37,11 +37,11 @@ func structToMap(s *structpb.Struct) map[string]any {
 	return s.AsMap()
 }
 
-func mapToTypedAny(messageName string, values map[string]any) (*anypb.Any, error) {
+func mapToTypedAny(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver) (*anypb.Any, error) {
 	if messageName == "" {
 		return nil, fmt.Errorf("missing protobuf message name")
 	}
-	msg, err := newMessageByName(messageName)
+	msg, err := newMessageByName(messageName, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -61,11 +61,11 @@ func mapToTypedAny(messageName string, values map[string]any) (*anypb.Any, error
 	return typed, nil
 }
 
-func typedAnyToMap(payload *anypb.Any, messageName string) (map[string]any, error) {
+func typedAnyToMap(payload *anypb.Any, messageName string, resolver protoregistry.MessageTypeResolver) (map[string]any, error) {
 	if payload == nil {
 		return nil, nil
 	}
-	msg, err := newMessageByName(messageName)
+	msg, err := newMessageByName(messageName, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,12 @@ func typedAnyToMap(payload *anypb.Any, messageName string) (map[string]any, erro
 	return values, nil
 }
 
-func newMessageByName(messageName string) (goproto.Message, error) {
+func newMessageByName(messageName string, resolver protoregistry.MessageTypeResolver) (goproto.Message, error) {
+	if resolver != nil {
+		if mt, err := resolver.FindMessageByName(protoreflect.FullName(messageName)); err == nil {
+			return mt.New().Interface(), nil
+		}
+	}
 	mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(messageName))
 	if err != nil {
 		return nil, fmt.Errorf("generated codec for protobuf message %q not found: %w", messageName, err)
