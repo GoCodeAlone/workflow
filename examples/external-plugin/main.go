@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"strings"
 
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// uppercasePlugin implements both sdk.PluginProvider and sdk.StepProvider.
+// uppercasePlugin implements sdk.PluginProvider, sdk.TypedStepProvider, and
+// sdk.ContractProvider.
 type uppercasePlugin struct{}
 
 func (p *uppercasePlugin) Manifest() sdk.PluginManifest {
@@ -22,28 +26,46 @@ func (p *uppercasePlugin) Manifest() sdk.PluginManifest {
 	}
 }
 
-func (p *uppercasePlugin) StepTypes() []string {
+func (p *uppercasePlugin) TypedStepTypes() []string {
 	return []string{"step.uppercase"}
 }
 
-func (p *uppercasePlugin) CreateStep(typeName, name string, _ map[string]any) (sdk.StepInstance, error) {
+func (p *uppercasePlugin) CreateTypedStep(typeName, name string, config *anypb.Any) (sdk.StepInstance, error) {
 	if typeName != "step.uppercase" {
 		return nil, fmt.Errorf("unknown step type: %s", typeName)
 	}
-	return &uppercaseStep{name: name}, nil
+	factory := sdk.NewTypedStepFactory(
+		"step.uppercase",
+		wrapperspb.String(""),
+		wrapperspb.String(""),
+		executeUppercase,
+	)
+	return factory.CreateTypedStep(typeName, name, config)
 }
 
-// uppercaseStep reads current["input"] and returns {"output": strings.ToUpper(input)}.
-type uppercaseStep struct {
-	name string
-}
-
-func (s *uppercaseStep) Execute(_ context.Context, _ map[string]any, _ map[string]map[string]any, current map[string]any, _ map[string]any, _ map[string]any) (*sdk.StepResult, error) {
-	input, _ := current["input"].(string)
-	return &sdk.StepResult{
-		Output: map[string]any{
-			"output": strings.ToUpper(input),
+func (p *uppercasePlugin) ContractRegistry() *pb.ContractRegistry {
+	return &pb.ContractRegistry{Contracts: []*pb.ContractDescriptor{
+		{
+			Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+			StepType:      "step.uppercase",
+			ConfigMessage: "google.protobuf.StringValue",
+			InputMessage:  "google.protobuf.StringValue",
+			OutputMessage: "google.protobuf.StringValue",
+			Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
 		},
+	}}
+}
+
+func executeUppercase(
+	_ context.Context,
+	req sdk.TypedStepRequest[*wrapperspb.StringValue, *wrapperspb.StringValue],
+) (*sdk.TypedStepResult[*wrapperspb.StringValue], error) {
+	input := ""
+	if req.Input != nil {
+		input = req.Input.Value
+	}
+	return &sdk.TypedStepResult[*wrapperspb.StringValue]{
+		Output: wrapperspb.String(strings.ToUpper(input)),
 	}, nil
 }
 

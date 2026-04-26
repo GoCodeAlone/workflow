@@ -183,11 +183,12 @@ func runAuditPluginsWithOutput(args []string, out io.Writer) error {
 	repoRoot := fs.String("repo-root", defaultPluginAuditRepoRoot(), "Directory containing workflow-plugin-* repos")
 	jsonOut := fs.Bool("json", false, "Write JSON output")
 	strict := fs.Bool("strict", false, "Treat warnings as failures")
+	strictContracts := fs.Bool("strict-contracts", false, "Fail when advertised plugin types lack strict contract descriptors")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	results, err := auditPluginRepos(*repoRoot)
+	results, err := auditPluginReposWithOptions(*repoRoot, pluginAuditOptions{StrictContracts: *strictContracts})
 	if err != nil {
 		return err
 	}
@@ -195,8 +196,8 @@ func runAuditPluginsWithOutput(args []string, out io.Writer) error {
 		Plugins: results,
 		Summary: summarizePluginAudit(results),
 	}
-	for _, result := range results {
-		report.Findings = append(report.Findings, result.Findings...)
+	for i := range results {
+		report.Findings = append(report.Findings, results[i].Findings...)
 	}
 
 	if *jsonOut {
@@ -212,6 +213,9 @@ func runAuditPluginsWithOutput(args []string, out io.Writer) error {
 	if *strict && (report.Summary.Errors > 0 || report.Summary.Warnings > 0) {
 		return fmt.Errorf("%d plugin audit finding(s) found", report.Summary.Errors+report.Summary.Warnings)
 	}
+	if *strictContracts && countPluginContractFindings(report.Findings) > 0 {
+		return fmt.Errorf("%d plugin contract audit finding(s) found", countPluginContractFindings(report.Findings))
+	}
 	return nil
 }
 
@@ -221,7 +225,8 @@ func summarizePluginAudit(results []pluginAuditResult) pluginAuditSummary {
 		Total:  len(results),
 		Shapes: make(map[string]int),
 	}
-	for _, result := range results {
+	for i := range results {
+		result := &results[i]
 		summary.Shapes[result.ManifestShape]++
 		switch result.ManifestShape {
 		case "canonical":
@@ -266,12 +271,21 @@ func renderPluginAuditReport(out io.Writer, report pluginAuditReport) {
 	}
 
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PLUGIN\tSHAPE\tFINDINGS")
-	fmt.Fprintln(tw, "------\t-----\t--------")
-	for _, result := range report.Plugins {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", result.Name, result.ManifestShape, strings.Join(pluginFindingCodes(result.Findings), ", "))
+	fmt.Fprintln(tw, "PLUGIN\tSHAPE\tCONTRACTS\tFINDINGS")
+	fmt.Fprintln(tw, "------\t-----\t---------\t--------")
+	for i := range report.Plugins {
+		result := &report.Plugins[i]
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", result.Name, result.ManifestShape, pluginContractCoverageSummary(result.ContractCoverage), strings.Join(pluginFindingCodes(result.Findings), ", "))
 	}
 	_ = tw.Flush()
+}
+
+func pluginContractCoverageSummary(coverage pluginContractCoverage) string {
+	return fmt.Sprintf("module %d/%d strict, step %d/%d strict, trigger %d/%d strict, service method %d/%d strict",
+		coverage.Modules.Strict, coverage.Modules.Total,
+		coverage.Steps.Strict, coverage.Steps.Total,
+		coverage.Triggers.Strict, coverage.Triggers.Total,
+		coverage.ServiceMethods.Strict, coverage.ServiceMethods.Total)
 }
 
 func pluginFindingCodes(findings []planFinding) []string {

@@ -13,19 +13,53 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"gopkg.in/yaml.v3"
 )
 
 // ExternalPluginAdapter wraps a gRPC plugin client to implement plugin.EnginePlugin.
 // The engine sees this as a regular plugin — no changes to engine.go needed.
 type ExternalPluginAdapter struct {
-	name           string
-	client         *PluginClient
-	manifest       *pb.Manifest
-	configFragment []byte
-	pluginDir      string
+	name                string
+	client              *PluginClient
+	manifest            *pb.Manifest
+	contractRegistry    *pb.ContractRegistry
+	contractRegistryErr error
+	contracts           contractDescriptorCache
+	contractTypes       *protoregistry.Types
+	configFragment      []byte
+	pluginDir           string
 }
+
+type contractDescriptorCache struct {
+	modules  map[string]*pb.ContractDescriptor
+	steps    map[string]*pb.ContractDescriptor
+	services map[string]*pb.ContractDescriptor
+}
+
+type errorModule struct {
+	name string
+	err  error
+}
+
+func (m *errorModule) Name() string               { return m.name }
+func (m *errorModule) Dependencies() []string     { return nil }
+func (m *errorModule) ProvidesServices() []string { return nil }
+func (m *errorModule) RequiresServices() []string { return nil }
+func (m *errorModule) RegisterConfig(modular.Application) error {
+	return nil
+}
+func (m *errorModule) Init(modular.Application) error { return m.err }
+func (m *errorModule) Start(context.Context) error    { return m.err }
+func (m *errorModule) Stop(context.Context) error     { return nil }
 
 // NewExternalPluginAdapter creates an adapter from a connected plugin client.
 func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPluginAdapter, error) {
@@ -39,12 +73,155 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 		client:   client,
 		manifest: manifest,
 	}
+	if registry, registryErr := client.client.GetContractRegistry(ctx, &emptypb.Empty{}); registryErr == nil {
+		a.contractRegistry = registry
+	} else if status.Code(registryErr) == codes.Unimplemented {
+		a.contractRegistry = &pb.ContractRegistry{}
+	} else {
+		a.contractRegistryErr = fmt.Errorf("get contract registry from plugin %s: %w", name, registryErr)
+	}
+	a.contracts = buildContractDescriptorCache(a.contractRegistry)
+	a.contractTypes, err = buildContractTypeResolver(a.contractRegistry)
+	if err != nil {
+		a.contractRegistryErr = fmt.Errorf("parse contract registry descriptors from plugin %s: %w", name, err)
+	}
 	// Fetch config fragment eagerly so it's available before BuildFromConfig runs.
 	if resp, fragErr := client.client.GetConfigFragment(ctx, &emptypb.Empty{}); fragErr == nil && len(resp.YamlConfig) > 0 {
 		a.configFragment = resp.YamlConfig
 		a.pluginDir = resp.PluginDir
 	}
 	return a, nil
+}
+
+func newExternalPluginAdapterWithContractRegistry(manifest *pb.Manifest, registry *pb.ContractRegistry) *ExternalPluginAdapter {
+	types, err := buildContractTypeResolver(registry)
+	return &ExternalPluginAdapter{
+		name:                manifest.Name,
+		manifest:            manifest,
+		contractRegistry:    registry,
+		contractRegistryErr: err,
+		contracts:           buildContractDescriptorCache(registry),
+		contractTypes:       types,
+	}
+}
+
+func buildContractDescriptorCache(registry *pb.ContractRegistry) contractDescriptorCache {
+	cache := contractDescriptorCache{
+		modules:  make(map[string]*pb.ContractDescriptor),
+		steps:    make(map[string]*pb.ContractDescriptor),
+		services: make(map[string]*pb.ContractDescriptor),
+	}
+	if registry == nil {
+		return cache
+	}
+	for _, descriptor := range registry.Contracts {
+		if descriptor == nil {
+			continue
+		}
+		switch descriptor.Kind {
+		case pb.ContractKind_CONTRACT_KIND_MODULE:
+			if descriptor.ModuleType != "" {
+				cache.modules[descriptor.ModuleType] = descriptor
+			}
+		case pb.ContractKind_CONTRACT_KIND_STEP:
+			if descriptor.StepType != "" {
+				cache.steps[descriptor.StepType] = descriptor
+			}
+		case pb.ContractKind_CONTRACT_KIND_SERVICE:
+			if descriptor.Method != "" {
+				cache.services[serviceContractKey(descriptor.ServiceName, descriptor.Method)] = descriptor
+				if descriptor.ServiceName == "" {
+					cache.services[descriptor.Method] = descriptor
+				}
+			}
+		}
+	}
+	return cache
+}
+
+func buildContractTypeResolver(registry *pb.ContractRegistry) (*protoregistry.Types, error) {
+	if registry == nil || registry.FileDescriptorSet == nil || len(registry.FileDescriptorSet.File) == 0 {
+		return nil, nil
+	}
+	files, err := protodesc.NewFiles(registry.FileDescriptorSet)
+	if err != nil {
+		return nil, err
+	}
+	types := new(protoregistry.Types)
+	var registerErr error
+	files.RangeFiles(func(file protoreflect.FileDescriptor) bool {
+		registerErr = registerFileMessages(types, file.Messages())
+		return registerErr == nil
+	})
+	if registerErr != nil {
+		return nil, fmt.Errorf("register contract message types: %w", registerErr)
+	}
+	return types, nil
+}
+
+func registerFileMessages(types *protoregistry.Types, messages protoreflect.MessageDescriptors) error {
+	for i := 0; i < messages.Len(); i++ {
+		message := messages.Get(i)
+		if err := types.RegisterMessage(dynamicpb.NewMessageType(message)); err != nil {
+			return fmt.Errorf("register message %q: %w", message.FullName(), err)
+		}
+		if err := registerFileMessages(types, message.Messages()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func serviceContractKey(serviceName, method string) string {
+	if serviceName == "" {
+		return method
+	}
+	return serviceName + "\x00" + method
+}
+
+func (c contractDescriptorCache) module(typeName string) *pb.ContractDescriptor {
+	return c.modules[typeName]
+}
+
+func (c contractDescriptorCache) step(typeName string) *pb.ContractDescriptor {
+	return c.steps[typeName]
+}
+
+func (c contractDescriptorCache) servicesFor(moduleType string) map[string]*pb.ContractDescriptor {
+	out := make(map[string]*pb.ContractDescriptor)
+	for _, descriptor := range c.services {
+		if descriptor == nil {
+			continue
+		}
+		if descriptor.ModuleType == moduleType || descriptor.ServiceName == moduleType || (descriptor.ModuleType == "" && descriptor.ServiceName == "") {
+			out[descriptor.Method] = descriptor
+		}
+	}
+	return out
+}
+
+func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]any, resolver protoregistry.MessageTypeResolver) (*structpb.Struct, *anypb.Any, error) {
+	if descriptor == nil || descriptor.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED {
+		return mapToStruct(cfg), nil, nil
+	}
+	if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
+		return mapToStruct(cfg), nil, nil
+	}
+	typed, err := mapToTypedAny(descriptor.ConfigMessage, cfg, resolver)
+	if err != nil {
+		if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+			return nil, nil, fmt.Errorf("STRICT_PROTO contract for config message %q cannot use legacy Struct fallback: %w", descriptor.ConfigMessage, err)
+		}
+		return mapToStruct(cfg), nil, nil
+	}
+	if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+		return nil, typed, nil
+	}
+	return mapToStruct(cfg), typed, nil
+}
+
+func contractModeUsesTyped(mode pb.ContractMode) bool {
+	return mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO || mode == pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT
 }
 
 // --- NativePlugin interface ---
@@ -117,6 +294,14 @@ func (a *ExternalPluginAdapter) ConfigFragmentBytes() []byte {
 	return a.configFragment
 }
 
+func (a *ExternalPluginAdapter) ContractRegistry() *pb.ContractRegistry {
+	return a.contractRegistry
+}
+
+func (a *ExternalPluginAdapter) ContractRegistryError() error {
+	return a.contractRegistryErr
+}
+
 func (a *ExternalPluginAdapter) Capabilities() []capability.Contract {
 	return nil
 }
@@ -131,15 +316,24 @@ func (a *ExternalPluginAdapter) ModuleFactories() map[string]plugin.ModuleFactor
 	for _, typeName := range resp.Types {
 		tn := typeName // capture
 		factories[tn] = func(name string, cfg map[string]any) modular.Module {
+			config, typedConfig, configErr := createTypedConfigRequest(a.contracts.module(tn), cfg, a.contractTypes)
+			if configErr != nil {
+				return &errorModule{name: name, err: fmt.Errorf("create remote module %s: %w", tn, configErr)}
+			}
 			createResp, createErr := a.client.client.CreateModule(ctx, &pb.CreateModuleRequest{
-				Type:   tn,
-				Name:   name,
-				Config: mapToStruct(cfg),
+				Type:        tn,
+				Name:        name,
+				Config:      config,
+				TypedConfig: typedConfig,
 			})
 			if createErr != nil || createResp.Error != "" {
 				return nil
 			}
-			remote := NewRemoteModule(name, createResp.HandleId, a.client.client)
+			remote := NewRemoteModule(name, createResp.HandleId, a.client.client, remoteModuleContracts{
+				module:   a.contracts.module(tn),
+				services: a.contracts.servicesFor(tn),
+				types:    a.contractTypes,
+			})
 			if tn == "security.scanner" {
 				return NewSecurityScannerRemoteModule(remote)
 			}
@@ -159,10 +353,16 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 	for _, typeName := range resp.Types {
 		tn := typeName // capture
 		factories[tn] = func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+			contract := a.contracts.step(tn)
+			config, typedConfig, configErr := createTypedConfigRequest(contract, cfg, a.contractTypes)
+			if configErr != nil {
+				return nil, fmt.Errorf("create remote step %s: %w", tn, configErr)
+			}
 			createResp, createErr := a.client.client.CreateStep(ctx, &pb.CreateStepRequest{
-				Type:   tn,
-				Name:   name,
-				Config: mapToStruct(cfg),
+				Type:        tn,
+				Name:        name,
+				Config:      config,
+				TypedConfig: typedConfig,
 			})
 			if createErr != nil {
 				return nil, fmt.Errorf("create remote step %s: %w", tn, createErr)
@@ -170,7 +370,7 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 			if createResp.Error != "" {
 				return nil, fmt.Errorf("create remote step %s: %s", tn, createResp.Error)
 			}
-			return NewRemoteStep(name, createResp.HandleId, a.client.client, cfg), nil
+			return NewRemoteStepWithContractTypes(name, createResp.HandleId, a.client.client, cfg, contract, a.contractTypes), nil
 		}
 	}
 	return factories

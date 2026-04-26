@@ -2,12 +2,22 @@
 // Plugin authors implement the interfaces defined here and call Serve() to run.
 package sdk
 
-import "context"
+import (
+	"context"
+
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+)
 
 // PluginProvider is the main interface plugin authors implement.
 type PluginProvider interface {
 	// Manifest returns the plugin's metadata.
 	Manifest() PluginManifest
+}
+
+// ContractProvider is optionally implemented to expose typed contract descriptors.
+type ContractProvider interface {
+	ContractRegistry() *pb.ContractRegistry
 }
 
 // PluginManifest describes the plugin.
@@ -138,4 +148,10 @@ type ConfigProvider interface {
 // to the appropriate logic and returns a result map.
 type ServiceInvoker interface {
 	InvokeMethod(method string, args map[string]any) (map[string]any, error)
+}
+
+// TypedServiceInvoker is optionally implemented by ModuleInstance to handle
+// strict protobuf service method invocations from the host.
+type TypedServiceInvoker interface {
+	InvokeTypedMethod(method string, input *anypb.Any) (*anypb.Any, error)
 }
