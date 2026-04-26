@@ -824,9 +824,24 @@ func pinManifestToVersion(manifest *RegistryManifest, requestedVersion string) {
 		if rewritten == url && normalizedOld != "" {
 			rewritten = strings.ReplaceAll(url, normalizedOld, normalizedNew)
 		}
+		if normalizedOld != "" {
+			rewritten = rewriteArchiveFilenameVersion(rewritten, normalizedOld, normalizedNew)
+		}
 		manifest.Downloads[i].URL = rewritten
 		manifest.Downloads[i].SHA256 = "" // checksums are for the old version's assets
 	}
+}
+
+func rewriteArchiveFilenameVersion(rawURL, oldVersion, newVersion string) string {
+	if oldVersion == "" || oldVersion == newVersion {
+		return rawURL
+	}
+	idx := strings.LastIndex(rawURL, "/")
+	if idx < 0 {
+		return strings.ReplaceAll(rawURL, oldVersion, newVersion)
+	}
+	prefix, filename := rawURL[:idx+1], rawURL[idx+1:]
+	return prefix + strings.ReplaceAll(filename, oldVersion, newVersion)
 }
 
 // parseNameVersion splits "name@version" into (name, version). Version is empty if absent.
