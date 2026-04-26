@@ -112,8 +112,8 @@ func TestInstallFromWfctlLockfile_UsesCurrentPlatformSHA256AsArchiveChecksum(t *
 		t.Fatalf("load saved lockfile: %v", err)
 	}
 	entry := loaded.Plugins["workflow-plugin-auth"]
-	if entry.SHA256 != strings.Repeat("0", 64) {
-		t.Fatalf("top-level checksum should remain unchanged when current platform checksum exists: got %q", entry.SHA256)
+	if entry.SHA256 != "" {
+		t.Fatalf("top-level checksum should be omitted when current platform checksum exists: got %q", entry.SHA256)
 	}
 	if got := entry.Platforms[currentPlatformKey()].SHA256; got != sha256Hex(tarball) {
 		t.Fatalf("current platform checksum = %q, want archive checksum %q", got, sha256Hex(tarball))

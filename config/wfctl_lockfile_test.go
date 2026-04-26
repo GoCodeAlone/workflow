@@ -16,11 +16,11 @@ func TestWfctlLockfile_RoundTrip(t *testing.T) {
 			"workflow-plugin-digitalocean": {
 				Version: "v0.7.6",
 				Source:  "github.com/GoCodeAlone/workflow-plugin-digitalocean",
-				SHA256:  "abc123",
+				SHA256:  "legacy-binary-sha",
 				Platforms: map[string]WfctlLockPlatform{
 					"linux-amd64": {
 						URL:    "https://github.com/GoCodeAlone/workflow-plugin-digitalocean/releases/download/v0.7.6/plugin-linux-amd64.tar.gz",
-						SHA256: "def456",
+						SHA256: "archive-sha",
 					},
 				},
 			},
@@ -46,15 +46,51 @@ func TestWfctlLockfile_RoundTrip(t *testing.T) {
 	if entry.Version != "v0.7.6" {
 		t.Errorf("version = %q, want v0.7.6", entry.Version)
 	}
-	if entry.SHA256 != "abc123" {
-		t.Errorf("sha256 = %q, want abc123", entry.SHA256)
+	if entry.SHA256 != "" {
+		t.Errorf("sha256 = %q, want empty when platform archive checksums exist", entry.SHA256)
 	}
 	plat, ok := entry.Platforms["linux-amd64"]
 	if !ok {
 		t.Fatal("platform linux-amd64 missing")
 	}
-	if plat.SHA256 != "def456" {
-		t.Errorf("platform sha256 = %q, want def456", plat.SHA256)
+	if plat.SHA256 != "archive-sha" {
+		t.Errorf("platform sha256 = %q, want archive-sha", plat.SHA256)
+	}
+}
+
+func TestWfctlLockfile_SaveOmitsTopLevelSHA256WhenPlatformsExist(t *testing.T) {
+	lf := WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC),
+		Plugins: map[string]WfctlLockPluginEntry{
+			"workflow-plugin-auth": {
+				Version: "v1.2.3",
+				Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				SHA256:  "legacy-binary-sha",
+				Platforms: map[string]WfctlLockPlatform{
+					"linux-amd64": {
+						URL:    "https://example.test/auth-linux-amd64.tar.gz",
+						SHA256: "archive-sha-linux",
+					},
+				},
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".wfctl-lock.yaml")
+	if err := SaveWfctlLockfile(path, &lf); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read lockfile: %v", err)
+	}
+	if strings.Contains(string(data), "\n        sha256: legacy-binary-sha") {
+		t.Fatalf("lockfile should not write top-level sha256 when platforms exist:\n%s", data)
+	}
+	if !strings.Contains(string(data), "sha256: archive-sha-linux") {
+		t.Fatalf("lockfile should preserve platform archive sha256:\n%s", data)
 	}
 }
 

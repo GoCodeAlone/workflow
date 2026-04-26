@@ -74,8 +74,10 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 			if prev, ok := existing.Plugins[p.Name]; ok &&
 				prev.Version == p.Version &&
 				prev.Source == p.Source {
-				entry.SHA256 = prev.SHA256
 				entry.Platforms = prev.Platforms
+				if len(entry.Platforms) == 0 {
+					entry.SHA256 = prev.SHA256
+				}
 			}
 		}
 		if len(entry.Platforms) == 0 && registries != nil {
