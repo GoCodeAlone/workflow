@@ -54,7 +54,7 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 			// recorded for post-install verification. Without a binary hash, allow
 			// GitHub release URLs to auto-verify via checksums.txt; non-GitHub URLs
 			// without a hash fail closed to prevent unverified installs.
-			skipChecksum := plat.SHA256 != ""
+			skipChecksum := expectedWfctlLockfileChecksum(entry) != ""
 			if err := installFromURL(plat.URL, pluginDirVal, "", skipChecksum); err != nil {
 				fmt.Fprintf(os.Stderr, "error installing %s from URL: %v\n", name, err)
 				failed = append(failed, name)
