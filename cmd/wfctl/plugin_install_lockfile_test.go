@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -118,7 +120,36 @@ func TestInstallFromWfctlLockfile_UsesCurrentPlatformSHA256(t *testing.T) {
 	}
 }
 
-func TestInstallFromWfctlLockfile_PlatformURLUsesLegacyTopLevelSHA256(t *testing.T) {
+func TestVerifyWfctlLockfileChecksums_NoPlatformMetadataUsesLegacyTopLevelSHA256(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	authDir := filepath.Join(pluginDir, "auth")
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binaryContent := []byte("#!/bin/sh\necho auth\n")
+	if err := os.WriteFile(filepath.Join(authDir, "auth"), binaryContent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lf := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins: map[string]config.WfctlLockPluginEntry{
+			"workflow-plugin-auth": {
+				Version: "v1.2.3",
+				Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				SHA256:  sha256Hex(binaryContent),
+			},
+		},
+	}
+
+	if err := verifyWfctlLockfileChecksums(pluginDir, lf); err != nil {
+		t.Fatalf("verifyWfctlLockfileChecksums should use legacy top-level checksum when platform metadata is absent: %v", err)
+	}
+}
+
+func TestInstallFromWfctlLockfile_NoPlatformMetadataDoesNotPersistTopLevelSHA256(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
 	pluginDir := filepath.Join(dir, "plugins")
@@ -138,12 +169,43 @@ func TestInstallFromWfctlLockfile_PlatformURLUsesLegacyTopLevelSHA256(t *testing
 	const pluginName = "auth"
 	binaryContent := []byte("#!/bin/sh\necho auth\n")
 	tarball := buildPluginTarGz(t, pluginName, binaryContent, minimalPluginJSON(pluginName, "v1.2.3"))
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.WriteHeader(http.StatusOK)
-		w.Write(tarball) //nolint:errcheck
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/workflow-plugin-auth/manifest.json":
+			manifest := RegistryManifest{
+				Name:        pluginName,
+				Version:     "v1.2.3",
+				Repository:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				Author:      "tester",
+				Description: "test auth plugin",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:     runtime.GOOS,
+						Arch:   runtime.GOARCH,
+						URL:    "http://" + r.Host + "/releases/download/v1.2.3/auth.tar.gz",
+						SHA256: sha256Hex(tarball),
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(manifest)
+		case "/releases/download/v1.2.3/auth.tar.gz":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer srv.Close()
+
+	regCfg := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(regCfg), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
 
 	lf := &config.WfctlLockfile{
 		Version:     1,
@@ -152,12 +214,7 @@ func TestInstallFromWfctlLockfile_PlatformURLUsesLegacyTopLevelSHA256(t *testing
 			"workflow-plugin-auth": {
 				Version: "v1.2.3",
 				Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
-				SHA256:  sha256Hex(binaryContent),
-				Platforms: map[string]config.WfctlLockPlatform{
-					currentPlatformKey(): {
-						URL: srv.URL + "/workflow-plugin-auth-" + currentPlatformKey() + ".tar.gz",
-					},
-				},
+				SHA256:  "",
 			},
 		},
 	}
@@ -166,7 +223,19 @@ func TestInstallFromWfctlLockfile_PlatformURLUsesLegacyTopLevelSHA256(t *testing
 	}
 
 	if err := installFromWfctlLockfile(pluginDir, lockPath, lf); err != nil {
-		t.Fatalf("installFromWfctlLockfile should verify platform URL installs with legacy top-level checksum: %v", err)
+		t.Fatalf("installFromWfctlLockfile: %v", err)
+	}
+
+	loaded, err := config.LoadWfctlLockfile(lockPath)
+	if err != nil {
+		t.Fatalf("load saved lockfile: %v", err)
+	}
+	entry := loaded.Plugins["workflow-plugin-auth"]
+	if entry.SHA256 != "" {
+		t.Fatalf("top-level checksum should remain empty without platform metadata, got %q", entry.SHA256)
+	}
+	if len(entry.Platforms) != 0 {
+		t.Fatalf("platform metadata should not be synthesized, got %#v", entry.Platforms)
 	}
 }
 
@@ -202,6 +271,40 @@ func TestVerifyWfctlLockfileChecksums_UsesCurrentPlatformSHA256(t *testing.T) {
 
 	if err := verifyWfctlLockfileChecksums(pluginDir, lf); err != nil {
 		t.Fatalf("verifyWfctlLockfileChecksums should use platform checksum instead of top-level checksum: %v", err)
+	}
+}
+
+func TestVerifyWfctlLockfileChecksums_DoesNotFallbackToTopLevelSHA256WhenPlatformsExist(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	authDir := filepath.Join(pluginDir, "auth")
+	if err := os.MkdirAll(authDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binaryContent := []byte("#!/bin/sh\necho auth\n")
+	if err := os.WriteFile(filepath.Join(authDir, "auth"), binaryContent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lf := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins: map[string]config.WfctlLockPluginEntry{
+			"workflow-plugin-auth": {
+				Version: "v1.2.3",
+				Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				SHA256:  strings.Repeat("0", 64),
+				Platforms: map[string]config.WfctlLockPlatform{
+					currentPlatformKey(): {
+						URL: "https://example.test/workflow-plugin-auth-" + currentPlatformKey() + ".tar.gz",
+					},
+				},
+			},
+		},
+	}
+
+	if err := verifyWfctlLockfileChecksums(pluginDir, lf); err != nil {
+		t.Fatalf("verifyWfctlLockfileChecksums should ignore top-level checksum when platform metadata exists without a platform checksum: %v", err)
 	}
 }
 

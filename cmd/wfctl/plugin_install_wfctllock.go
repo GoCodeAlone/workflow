@@ -109,7 +109,7 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 		// installFromURL and runPluginInstall internally call updateLockfileWithChecksum,
 		// which serializes the OLD PluginLockfile format and can strip source/platforms
 		// fields from the on-disk .wfctl-lock.yaml. Overwrite it here with the correct
-		// new format, capturing the binary sha256 while we're at it.
+		// new format, updating only existing platform-scoped binary sha256 data.
 		if lockPath != "" {
 			destDir := filepath.Join(pluginDirVal, fsName)
 			binaryPath := filepath.Join(destDir, fsName)
@@ -118,8 +118,6 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 				if plat, ok := e.Platforms[currentPlatformKey()]; ok {
 					plat.SHA256 = sha
 					e.Platforms[currentPlatformKey()] = plat
-				} else {
-					e.SHA256 = sha
 				}
 				lf.Plugins[name] = e
 			}
@@ -171,6 +169,9 @@ func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile)
 func expectedWfctlLockfileChecksum(entry config.WfctlLockPluginEntry) string {
 	if plat, ok := entry.Platforms[currentPlatformKey()]; ok && plat.SHA256 != "" {
 		return plat.SHA256
+	}
+	if len(entry.Platforms) > 0 {
+		return ""
 	}
 	return entry.SHA256
 }
