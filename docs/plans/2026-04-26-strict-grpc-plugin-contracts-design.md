@@ -1,15 +1,26 @@
 ---
-status: approved
+status: in_progress
 area: plugins
 owner: workflow
-implementation_refs: []
+implementation_refs:
+  - repo: workflow
+    commit: 4150f78
+  - repo: workflow
+    commit: 8daa224
+  - repo: workflow
+    commit: 72d2477
+  - repo: workflow
+    commit: 5c135a0
+  - repo: workflow
+    commit: dd1b222
 external_refs:
   - "#76"
 verification:
   last_checked: 2026-04-26
   commands:
-    - GOWORK=off go test ./cmd/wfctl ./plugin/external/...
-  result: pass
+    - GOWORK=off go test ./plugin/external/... ./cmd/wfctl -count=1
+    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --strict-contracts
+  result: partial
 supersedes: []
 superseded_by: []
 ---
@@ -17,6 +28,12 @@ superseded_by: []
 # Strict gRPC Plugin Contracts Design
 
 Date: 2026-04-26
+
+## Implementation Checkpoint
+
+Core Workflow support is implemented through `workflow dd1b222`: contract descriptors, typed SDK adapters, host-side strict dispatch, `wfctl` strict contract audit/validation, and strict scaffolding when run from a Workflow source checkout.
+
+The design remains `in_progress` because downstream plugin and application repositories still need migration from map-only boundaries to typed descriptors and adapters. The workspace strict-contract audit is expected to fail until that migration completes.
 
 ## Goal
 

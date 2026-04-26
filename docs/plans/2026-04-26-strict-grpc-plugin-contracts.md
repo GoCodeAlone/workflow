@@ -1,16 +1,27 @@
 ---
-status: approved
+status: in_progress
 area: plugins
 owner: workflow
-implementation_refs: []
+implementation_refs:
+  - repo: workflow
+    commit: 4150f78
+  - repo: workflow
+    commit: 8daa224
+  - repo: workflow
+    commit: 72d2477
+  - repo: workflow
+    commit: 5c135a0
+  - repo: workflow
+    commit: dd1b222
 external_refs:
   - "#76"
 verification:
   last_checked: 2026-04-26
   commands:
-    - GOWORK=off go test ./plugin/external/... ./cmd/wfctl
+    - GOWORK=off go test ./plugin/external/... ./cmd/wfctl -count=1
+    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --strict-contracts
     - GOWORK=off go run ./cmd/wfctl audit plans --dir docs/plans --fix-index
-  result: pass
+  result: partial
 supersedes: []
 superseded_by: []
 ---
@@ -26,6 +37,12 @@ superseded_by: []
 **Tech Stack:** Go, gRPC, protobuf `Any`, existing Workflow external plugin SDK, `wfctl audit/validate`, GitHub PR review/CI loop.
 
 ---
+
+## Implementation Checkpoint
+
+Core Workflow support is implemented through `workflow dd1b222`: additive proto descriptors, typed SDK adapters, host-side strict dispatch, `wfctl` strict contract audit/validation, and source-checkout strict plugin scaffolding.
+
+The overall plan remains `in_progress` because downstream first-party plugin and application repos still need typed descriptors and adapters. The strict audit against `/Users/jon/workspace` is expected to fail until those repos migrate.
 
 ### Task 1: Core Proto Contract Descriptors
 
