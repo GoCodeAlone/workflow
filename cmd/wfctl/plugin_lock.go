@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -52,6 +54,15 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 		Plugins:     make(map[string]config.WfctlLockPluginEntry),
 	}
 
+	registryConfig, registryErr := loadPluginLockRegistryConfig(manifestPath, lockPath)
+	if registryErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not load registry config while enriching lockfile: %v\n", registryErr)
+	}
+	var registries *MultiRegistry
+	if registryConfig != nil {
+		registries = NewMultiRegistry(registryConfig)
+	}
+
 	for _, p := range m.Plugins {
 		entry := config.WfctlLockPluginEntry{
 			Version: p.Version,
@@ -67,6 +78,13 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 				entry.Platforms = prev.Platforms
 			}
 		}
+		if len(entry.Platforms) == 0 && registries != nil {
+			if platforms, err := lockPlatformsFromRegistry(registries, p.Name, p.Version); err == nil {
+				entry.Platforms = platforms
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: could not enrich %s lock entry from registry: %v\n", p.Name, err)
+			}
+		}
 		newLF.Plugins[p.Name] = entry
 	}
 
@@ -75,6 +93,57 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 	}
 	fmt.Printf("Lockfile written to %s\n", lockPath)
 	return nil
+}
+
+func loadPluginLockRegistryConfig(manifestPath, lockPath string) (*RegistryConfig, error) {
+	seen := make(map[string]bool)
+	for _, basePath := range []string{manifestPath, lockPath} {
+		dir := filepath.Dir(basePath)
+		if dir == "" {
+			dir = "."
+		}
+		cfgPath := filepath.Join(dir, ".wfctl.yaml")
+		if seen[cfgPath] {
+			continue
+		}
+		seen[cfgPath] = true
+
+		cfg, ok, err := loadRegistryConfigFile(cfgPath)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return cfg, nil
+		}
+	}
+	return nil, nil
+}
+
+func lockPlatformsFromRegistry(registries *MultiRegistry, pluginName, version string) (map[string]config.WfctlLockPlatform, error) {
+	manifest, _, err := registries.FetchManifest(pluginName)
+	if err != nil {
+		return nil, err
+	}
+	if version != "" && !samePluginVersion(version, manifest.Version) {
+		return nil, fmt.Errorf("registry manifest version %q does not match requested version %q", manifest.Version, version)
+	}
+
+	platforms := make(map[string]config.WfctlLockPlatform, len(manifest.Downloads))
+	for _, dl := range manifest.Downloads {
+		if dl.OS == "" || dl.Arch == "" || dl.URL == "" {
+			continue
+		}
+		key := dl.OS + "-" + dl.Arch
+		// Registry download SHA values are archive checksums. The lockfile
+		// platform SHA is currently verified against the installed plugin binary,
+		// so copying the archive checksum here would make lockfile installs fail.
+		platforms[key] = config.WfctlLockPlatform{URL: dl.URL}
+	}
+	return platforms, nil
+}
+
+func samePluginVersion(a, b string) bool {
+	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
 }
 
 // runPluginLockLegacy is the pre-v0.19.0 behavior: read from workflow.yaml requires.plugins[].
