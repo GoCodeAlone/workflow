@@ -82,7 +82,7 @@ func loadRegistryConfigFile(path string) (*RegistryConfig, bool, error) {
 		if os.IsNotExist(err) {
 			return nil, false, nil
 		}
-		return nil, false, err
+		return nil, false, fmt.Errorf("read registry config %s: %w", path, err)
 	}
 	// First, check whether the file contains a "registries" key at all.
 	// A lockfile (plugins: ...) has no such key, and silently treating it as

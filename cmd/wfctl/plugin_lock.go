@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -123,8 +124,8 @@ func lockPlatformsFromRegistry(registries *MultiRegistry, pluginName, version st
 	if err != nil {
 		return nil, err
 	}
-	if version != "" && version != manifest.Version {
-		pinManifestToVersion(manifest, version)
+	if version != "" && !samePluginVersion(version, manifest.Version) {
+		return nil, fmt.Errorf("registry manifest version %q does not match requested version %q", manifest.Version, version)
 	}
 
 	platforms := make(map[string]config.WfctlLockPlatform, len(manifest.Downloads))
@@ -139,6 +140,10 @@ func lockPlatformsFromRegistry(registries *MultiRegistry, pluginName, version st
 		platforms[key] = config.WfctlLockPlatform{URL: dl.URL}
 	}
 	return platforms, nil
+}
+
+func samePluginVersion(a, b string) bool {
+	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
 }
 
 // runPluginLockLegacy is the pre-v0.19.0 behavior: read from workflow.yaml requires.plugins[].

@@ -243,3 +243,66 @@ plugins:
 		t.Fatalf("platforms = %v, want no registry enrichment without project-local registry config", platforms)
 	}
 }
+
+func TestPluginLock_FromManifest_SkipsRegistryPlatformURLsForVersionMismatch(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/plugins/workflow-plugin-foo/manifest.json" {
+			http.NotFound(w, r)
+			return
+		}
+		manifest := RegistryManifest{
+			Name:    "workflow-plugin-foo",
+			Version: "v1.2.2",
+			Downloads: []PluginDownload{
+				{OS: "linux", Arch: "amd64", URL: "https://cdn.example.test/releases/v1.2.2/foo-linux-amd64.tar.gz"},
+			},
+		}
+		data, _ := json.Marshal(manifest)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	registryConfig := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(registryConfig), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+
+	manifest := `version: 1
+plugins:
+  - name: workflow-plugin-foo
+    version: v1.2.3
+    source: github.com/GoCodeAlone/workflow-plugin-foo
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if err := runPluginLockFromManifest(manifestPath, lockPath); err != nil {
+		t.Fatalf("runPluginLockFromManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lockfile: %v", err)
+	}
+
+	var parsed struct {
+		Plugins map[string]struct {
+			Platforms map[string]struct {
+				URL string `yaml:"url"`
+			} `yaml:"platforms"`
+		} `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse lockfile: %v", err)
+	}
+
+	if platforms := parsed.Plugins["workflow-plugin-foo"].Platforms; len(platforms) != 0 {
+		t.Fatalf("platforms = %v, want no registry enrichment when manifest version mismatches requested version", platforms)
+	}
+}
