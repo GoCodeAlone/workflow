@@ -126,6 +126,7 @@ func TestInfraApply_WritesStepSummaryOnFailure(t *testing.T) {
 	summaryPath := filepath.Join(tmp, "summary.md")
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "true")
 
 	// plainFailProvider has no Troubleshooter — ResourceDriver returns (nil, nil).
 	// This exercises the important branch where diagnostics are empty but the

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,6 +16,29 @@ func TestDetectCIProvider_GitHub(t *testing.T) {
 	e := detectCIProvider()
 	if _, ok := e.(githubEmitter); !ok {
 		t.Fatalf("expected githubEmitter, got %T", e)
+	}
+}
+
+func TestDetectCIProvider_GitHubSummaryPathIgnoredInGoTestByDefault(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_STEP_SUMMARY", filepath.Join(t.TempDir(), "summary.md"))
+	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "")
+
+	e := detectCIProvider()
+	if got := e.SummaryPath(); got != "" {
+		t.Fatalf("SummaryPath() = %q, want empty while running go test", got)
+	}
+}
+
+func TestDetectCIProvider_GitHubSummaryPathAllowedInGoTestWithOverride(t *testing.T) {
+	summaryPath := filepath.Join(t.TempDir(), "summary.md")
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "true")
+
+	e := detectCIProvider()
+	if got := e.SummaryPath(); got != summaryPath {
+		t.Fatalf("SummaryPath() = %q, want %q", got, summaryPath)
 	}
 }
 
