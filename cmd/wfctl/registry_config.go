@@ -79,7 +79,10 @@ func LoadRegistryConfig(explicitPath string) (*RegistryConfig, error) {
 func loadRegistryConfigFile(path string) (*RegistryConfig, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, false, nil
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	// First, check whether the file contains a "registries" key at all.
 	// A lockfile (plugins: ...) has no such key, and silently treating it as
