@@ -3,6 +3,7 @@ package external
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -109,7 +110,59 @@ func typedAnyToMap(payload *anypb.Any, messageName string, resolver protoregistr
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return nil, fmt.Errorf("decode %s typed JSON as map: %w", messageName, err)
 	}
+	normalizeTypedJSONMap(values, msg.ProtoReflect().Descriptor())
 	return values, nil
+}
+
+func normalizeTypedJSONMap(values map[string]any, descriptor protoreflect.MessageDescriptor) {
+	if values == nil || descriptor == nil {
+		return
+	}
+	fields := descriptor.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		key := string(field.Name())
+		value, ok := values[key]
+		if !ok {
+			key = field.JSONName()
+			value, ok = values[key]
+		}
+		if !ok {
+			continue
+		}
+		values[key] = normalizeTypedJSONValue(value, field)
+	}
+}
+
+func normalizeTypedJSONValue(value any, field protoreflect.FieldDescriptor) any {
+	if field.IsList() {
+		items, ok := value.([]any)
+		if !ok {
+			return value
+		}
+		for i := range items {
+			items[i] = normalizeTypedJSONScalar(items[i], field)
+		}
+		return items
+	}
+	return normalizeTypedJSONScalar(value, field)
+}
+
+func normalizeTypedJSONScalar(value any, field protoreflect.FieldDescriptor) any {
+	number, ok := value.(float64)
+	if !ok {
+		return value
+	}
+	switch field.Kind() {
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,
+		protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind,
+		protoreflect.Uint32Kind, protoreflect.Fixed32Kind,
+		protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		if math.Trunc(number) == number && number <= float64(math.MaxInt) && number >= float64(math.MinInt) {
+			return int(number)
+		}
+	}
+	return value
 }
 
 func newMessageByName(messageName string, resolver protoregistry.MessageTypeResolver) (goproto.Message, error) {

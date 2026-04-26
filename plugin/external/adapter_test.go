@@ -10,7 +10,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -394,6 +396,33 @@ func TestExternalPluginAdapter_MalformedDescriptorSetRecordsError(t *testing.T) 
 	}
 	if !strings.Contains(a.ContractRegistryError().Error(), "parse contract registry descriptors") {
 		t.Fatalf("expected descriptor parse context, got %v", a.ContractRegistryError())
+	}
+}
+
+func TestTypedAnyToMapNormalizesIntegerFields(t *testing.T) {
+	const outputMessage = "workflow.plugins.test.v1.DynamicOutput"
+	registry := &pb.ContractRegistry{
+		FileDescriptorSet: dynamicContractFileDescriptorSet(),
+	}
+	a := newExternalPluginAdapterWithContractRegistry(&pb.Manifest{Name: "contract-plugin"}, registry)
+	msg, err := newMessageByName(outputMessage, a.contractTypes)
+	if err != nil {
+		t.Fatalf("new dynamic message: %v", err)
+	}
+	fields := msg.ProtoReflect().Descriptor().Fields()
+	msg.ProtoReflect().Set(fields.ByName("platform"), protoreflect.ValueOfString("github_actions"))
+	msg.ProtoReflect().Set(fields.ByName("file_count"), protoreflect.ValueOfInt32(2))
+	payload, err := anypb.New(msg)
+	if err != nil {
+		t.Fatalf("pack dynamic output: %v", err)
+	}
+
+	values, err := typedAnyToMap(payload, outputMessage, a.contractTypes)
+	if err != nil {
+		t.Fatalf("typedAnyToMap: %v", err)
+	}
+	if got, ok := values["file_count"].(int); !ok || got != 2 {
+		t.Fatalf("expected file_count int(2), got %T(%v)", values["file_count"], values["file_count"])
 	}
 }
 
