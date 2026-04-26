@@ -155,15 +155,6 @@ plugins:
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	origWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
-
 	if err := runPluginLockFromManifest(manifestPath, lockPath); err != nil {
 		t.Fatalf("runPluginLockFromManifest: %v", err)
 	}
@@ -194,5 +185,61 @@ plugins:
 	}
 	if got := platforms["linux-amd64"].SHA256; got != "" {
 		t.Fatalf("platform sha256 should not copy registry archive checksum into binary-checksum field, got %q", got)
+	}
+}
+
+func TestPluginLock_FromManifest_DoesNotUseHomeOrDefaultRegistry(t *testing.T) {
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("plugin lock should not query registry config outside the manifest or lockfile directory: %s", r.URL.Path)
+	}))
+	defer srv.Close()
+
+	homeConfigPath := filepath.Join(homeDir, ".config", "wfctl", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(homeConfigPath), 0o750); err != nil {
+		t.Fatalf("create home config dir: %v", err)
+	}
+	homeRegistryConfig := "registries:\n  - name: home\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	if err := os.WriteFile(homeConfigPath, []byte(homeRegistryConfig), 0o600); err != nil {
+		t.Fatalf("write home registry config: %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+
+	manifest := `version: 1
+plugins:
+  - name: workflow-plugin-foo
+    version: v1.2.3
+    source: github.com/GoCodeAlone/workflow-plugin-foo
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if err := runPluginLockFromManifest(manifestPath, lockPath); err != nil {
+		t.Fatalf("runPluginLockFromManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lockfile: %v", err)
+	}
+
+	var parsed struct {
+		Plugins map[string]struct {
+			Platforms map[string]struct {
+				URL string `yaml:"url"`
+			} `yaml:"platforms"`
+		} `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse lockfile: %v", err)
+	}
+
+	if platforms := parsed.Plugins["workflow-plugin-foo"].Platforms; len(platforms) != 0 {
+		t.Fatalf("platforms = %v, want no registry enrichment without project-local registry config", platforms)
 	}
 }

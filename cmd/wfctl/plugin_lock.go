@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -52,7 +53,7 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 		Plugins:     make(map[string]config.WfctlLockPluginEntry),
 	}
 
-	registryConfig, registryErr := LoadRegistryConfig("")
+	registryConfig, registryErr := loadPluginLockRegistryConfig(manifestPath, lockPath)
 	if registryErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load registry config while enriching lockfile: %v\n", registryErr)
 	}
@@ -91,6 +92,30 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 	}
 	fmt.Printf("Lockfile written to %s\n", lockPath)
 	return nil
+}
+
+func loadPluginLockRegistryConfig(manifestPath, lockPath string) (*RegistryConfig, error) {
+	seen := make(map[string]bool)
+	for _, basePath := range []string{manifestPath, lockPath} {
+		dir := filepath.Dir(basePath)
+		if dir == "" {
+			dir = "."
+		}
+		cfgPath := filepath.Join(dir, ".wfctl.yaml")
+		if seen[cfgPath] {
+			continue
+		}
+		seen[cfgPath] = true
+
+		cfg, ok, err := loadRegistryConfigFile(cfgPath)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return cfg, nil
+		}
+	}
+	return nil, nil
 }
 
 func lockPlatformsFromRegistry(registries *MultiRegistry, pluginName, version string) (map[string]config.WfctlLockPlatform, error) {
