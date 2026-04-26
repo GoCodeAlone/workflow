@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ func TestDetectCIProvider_GitHub(t *testing.T) {
 
 func TestDetectCIProvider_GitHubSummaryPathIgnoredInGoTestByDefault(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
-	t.Setenv("GITHUB_STEP_SUMMARY", t.TempDir()+"/summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", filepath.Join(t.TempDir(), "summary.md"))
 	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "")
 
 	e := detectCIProvider()
@@ -30,7 +31,7 @@ func TestDetectCIProvider_GitHubSummaryPathIgnoredInGoTestByDefault(t *testing.T
 }
 
 func TestDetectCIProvider_GitHubSummaryPathAllowedInGoTestWithOverride(t *testing.T) {
-	summaryPath := t.TempDir() + "/summary.md"
+	summaryPath := filepath.Join(t.TempDir(), "summary.md")
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
 	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "true")

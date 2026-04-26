@@ -1,11 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -47,7 +46,7 @@ func githubStepSummaryPath() string {
 }
 
 func runningAsGoTest() bool {
-	return strings.HasSuffix(filepath.Base(os.Args[0]), ".test")
+	return flag.Lookup("test.v") != nil
 }
 
 // --- GitHub Actions ---
