@@ -211,6 +211,39 @@ func TestPinManifestToVersion_URLRewritten(t *testing.T) {
 	}
 }
 
+func TestPinManifestToVersion_RewritesVersionedArchiveFilenames(t *testing.T) {
+	manifest := &RegistryManifest{
+		Name:    "workflow-plugin-auth",
+		Version: "0.1.4",
+		Downloads: []PluginDownload{
+			{
+				OS:   "linux",
+				Arch: "amd64",
+				URL:  "https://github.com/GoCodeAlone/workflow-plugin-auth/releases/download/v0.1.4/workflow-plugin-auth_0.1.4_linux_amd64.tar.gz",
+			},
+			{
+				OS:   "darwin",
+				Arch: "arm64",
+				URL:  "https://github.com/GoCodeAlone/workflow-plugin-auth/releases/download/v0.1.4/workflow-plugin-auth_0.1.4_darwin_arm64.tar.gz",
+			},
+		},
+	}
+
+	pinManifestToVersion(manifest, "v0.1.5")
+
+	for i, dl := range manifest.Downloads {
+		if !strings.Contains(dl.URL, "/releases/download/v0.1.5/") {
+			t.Errorf("download[%d].URL: want release tag v0.1.5 in %q", i, dl.URL)
+		}
+		if !strings.Contains(dl.URL, "workflow-plugin-auth_0.1.5_") {
+			t.Errorf("download[%d].URL: want archive filename version 0.1.5 in %q", i, dl.URL)
+		}
+		if strings.Contains(dl.URL, "0.1.4") {
+			t.Errorf("download[%d].URL: old version remained in %q", i, dl.URL)
+		}
+	}
+}
+
 // TestPinManifestToVersion_SameVersion verifies that no URL rewriting happens
 // when the requested version matches the manifest version.
 func TestPinManifestToVersion_SameVersion(t *testing.T) {
