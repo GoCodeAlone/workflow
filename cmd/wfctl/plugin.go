@@ -125,18 +125,38 @@ func runPluginInit(args []string) error {
 }
 
 func discoverWorkflowModuleRoot(start string) string {
-	root := discoverPlanAuditRepoRoot(start)
-	if root == "" {
+	if start == "" {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	current := start
+	if info, err := os.Stat(current); err == nil && !info.IsDir() {
+		current = filepath.Dir(current)
+	}
+	current = filepath.Clean(current)
+	for {
+		if workflowModuleDeclared(current) {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ""
+		}
+		current = parent
+	}
+}
+
+func workflowModuleDeclared(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
-		return ""
+		return false
 	}
-	if !strings.Contains(string(data), "module github.com/GoCodeAlone/workflow") {
-		return ""
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "module ")) == "github.com/GoCodeAlone/workflow"
+		}
 	}
-	return root
+	return false
 }
 
 func runPluginDocs(args []string) error {

@@ -10,7 +10,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -472,6 +474,24 @@ func TestTypedAnyToMapNormalizesIntegerFields(t *testing.T) {
 	}
 	if got, ok := values["file_count"].(int); !ok || got != 2 {
 		t.Fatalf("expected file_count int(2), got %T(%v)", values["file_count"], values["file_count"])
+	}
+}
+
+func TestRegisterFileMessagesReturnsDuplicateError(t *testing.T) {
+	files, err := protodesc.NewFiles(dynamicContractFileDescriptorSet())
+	if err != nil {
+		t.Fatalf("NewFiles: %v", err)
+	}
+	file, err := files.FindFileByPath("dynamic_contract.proto")
+	if err != nil {
+		t.Fatalf("FindFileByPath: %v", err)
+	}
+	types := new(protoregistry.Types)
+	if err := registerFileMessages(types, file.Messages()); err != nil {
+		t.Fatalf("first registerFileMessages: %v", err)
+	}
+	if err := registerFileMessages(types, file.Messages()); err == nil {
+		t.Fatal("expected duplicate message registration error")
 	}
 }
 

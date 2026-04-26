@@ -316,11 +316,12 @@ func TestGenerateProjectStructure(t *testing.T) {
 
 	gen := NewTemplateGenerator()
 	err := gen.Generate(GenerateOptions{
-		Name:        "my-plugin",
-		Version:     "0.2.0",
-		Author:      "TestOrg",
-		Description: "Project structure test",
-		OutputDir:   outputDir,
+		Name:            "my-plugin",
+		Version:         "0.2.0",
+		Author:          "TestOrg",
+		Description:     "Project structure test",
+		OutputDir:       outputDir,
+		WorkflowReplace: filepath.Join(dir, "workflow"),
 	})
 	if err != nil {
 		t.Fatalf("Generate error: %v", err)
@@ -414,6 +415,20 @@ func TestGenerateGoModLegacyWithoutWorkflowReplace(t *testing.T) {
 	got := generateGoMod("example.com/plugin", "", true)
 	if !strings.Contains(got, "github.com/GoCodeAlone/workflow "+workflowReleasedVersion) {
 		t.Fatalf("legacy go.mod should require released workflow version, got:\n%s", got)
+	}
+}
+
+func TestDiscoverWorkflowModuleRootWalksParents(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/GoCodeAlone/workflow\n"), 0600); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	nested := filepath.Join(root, "cmd", "wfctl")
+	if err := os.MkdirAll(nested, 0750); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if got := discoverWorkflowModuleRoot(nested); got != root {
+		t.Fatalf("discoverWorkflowModuleRoot = %q, want %q", got, root)
 	}
 }
 

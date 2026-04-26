@@ -17,6 +17,7 @@ import (
 // TestRunPluginInit_AllFiles verifies that runPluginInit creates all expected
 // files for a new plugin project.
 func TestRunPluginInit_AllFiles(t *testing.T) {
+	chdirWorkflowRoot(t)
 	outDir := filepath.Join(t.TempDir(), "test-plugin")
 
 	if err := runPluginInit([]string{
@@ -53,6 +54,7 @@ func TestRunPluginInit_AllFiles(t *testing.T) {
 }
 
 func TestRunPluginInit_StrictContractsByDefault(t *testing.T) {
+	chdirWorkflowRoot(t)
 	outDir := filepath.Join(t.TempDir(), "strict-plugin")
 
 	if err := runPluginInit([]string{
@@ -101,6 +103,22 @@ func TestRunPluginInit_StrictContractsByDefault(t *testing.T) {
 	if strings.Contains(stepsSrc, `current["input"]`) || strings.Contains(stepsSrc, "current map[string]any") {
 		t.Errorf("steps.go should not parse legacy maps by default:\n%s", stepsSrc)
 	}
+}
+
+func chdirWorkflowRoot(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/GoCodeAlone/workflow\n"), 0600); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir workflow root: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) }) //nolint:errcheck
 }
 
 func TestRunPluginInit_LegacyContractsFlag(t *testing.T) {
@@ -400,5 +418,19 @@ func TestRunPluginInit_DefaultOutputDir(t *testing.T) {
 	expectedDir := filepath.Join(tmpDir, name)
 	if _, err := os.Stat(expectedDir); os.IsNotExist(err) {
 		t.Errorf("expected default output dir %s to be created", expectedDir)
+	}
+}
+
+func TestDiscoverWorkflowModuleRootWalksParents(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/GoCodeAlone/workflow\n"), 0600); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	nested := filepath.Join(root, "cmd", "wfctl")
+	if err := os.MkdirAll(nested, 0750); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if got := discoverWorkflowModuleRoot(nested); got != root {
+		t.Fatalf("discoverWorkflowModuleRoot = %q, want %q", got, root)
 	}
 }

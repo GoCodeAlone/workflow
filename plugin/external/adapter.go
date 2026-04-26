@@ -148,19 +148,28 @@ func buildContractTypeResolver(registry *pb.ContractRegistry) (*protoregistry.Ty
 		return nil, err
 	}
 	types := new(protoregistry.Types)
+	var registerErr error
 	files.RangeFiles(func(file protoreflect.FileDescriptor) bool {
-		registerFileMessages(types, file.Messages())
-		return true
+		registerErr = registerFileMessages(types, file.Messages())
+		return registerErr == nil
 	})
+	if registerErr != nil {
+		return nil, fmt.Errorf("register contract message types: %w", registerErr)
+	}
 	return types, nil
 }
 
-func registerFileMessages(types *protoregistry.Types, messages protoreflect.MessageDescriptors) {
+func registerFileMessages(types *protoregistry.Types, messages protoreflect.MessageDescriptors) error {
 	for i := 0; i < messages.Len(); i++ {
 		message := messages.Get(i)
-		_ = types.RegisterMessage(dynamicpb.NewMessageType(message))
-		registerFileMessages(types, message.Messages())
+		if err := types.RegisterMessage(dynamicpb.NewMessageType(message)); err != nil {
+			return fmt.Errorf("register message %q: %w", message.FullName(), err)
+		}
+		if err := registerFileMessages(types, message.Messages()); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func serviceContractKey(serviceName, method string) string {

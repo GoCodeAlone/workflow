@@ -3,7 +3,6 @@ package sdk
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -16,7 +15,7 @@ type TemplateGenerator struct{}
 
 const (
 	workflowReleasedVersion        = "v0.18.15"
-	workflowStrictContractsVersion = "v0.4.0"
+	workflowStrictContractsVersion = "v0.19.0-alpha.5"
 )
 
 // NewTemplateGenerator creates a new TemplateGenerator.
@@ -494,21 +493,38 @@ func generateGoMod(goModule, workflowReplace string, legacyContracts bool) strin
 }
 
 func discoverWorkflowModuleRoot(start string) string {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Dir = start
-	out, err := cmd.Output()
+	if start == "" {
+		return ""
+	}
+	current := start
+	if info, err := os.Stat(current); err == nil && !info.IsDir() {
+		current = filepath.Dir(current)
+	}
+	current = filepath.Clean(current)
+	for {
+		if workflowModuleDeclared(current) {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ""
+		}
+		current = parent
+	}
+}
+
+func workflowModuleDeclared(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
-		return ""
+		return false
 	}
-	root := strings.TrimSpace(string(out))
-	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil {
-		return ""
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "module ")) == "github.com/GoCodeAlone/workflow"
+		}
 	}
-	if !strings.Contains(string(data), "module github.com/GoCodeAlone/workflow") {
-		return ""
-	}
-	return root
+	return false
 }
 
 func generateGoReleaserYML(binaryName string) string {
