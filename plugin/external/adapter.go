@@ -65,7 +65,10 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 		a.contractRegistryErr = fmt.Errorf("get contract registry from plugin %s: %w", name, registryErr)
 	}
 	a.contracts = buildContractDescriptorCache(a.contractRegistry)
-	a.contractTypes = buildContractTypeResolver(a.contractRegistry)
+	a.contractTypes, err = buildContractTypeResolver(a.contractRegistry)
+	if err != nil {
+		a.contractRegistryErr = fmt.Errorf("parse contract registry descriptors from plugin %s: %w", name, err)
+	}
 	// Fetch config fragment eagerly so it's available before BuildFromConfig runs.
 	if resp, fragErr := client.client.GetConfigFragment(ctx, &emptypb.Empty{}); fragErr == nil && len(resp.YamlConfig) > 0 {
 		a.configFragment = resp.YamlConfig
@@ -75,13 +78,14 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 }
 
 func newExternalPluginAdapterWithContractRegistry(manifest *pb.Manifest, registry *pb.ContractRegistry) *ExternalPluginAdapter {
+	types, err := buildContractTypeResolver(registry)
 	return &ExternalPluginAdapter{
 		name:                manifest.Name,
 		manifest:            manifest,
 		contractRegistry:    registry,
-		contractRegistryErr: nil,
+		contractRegistryErr: err,
 		contracts:           buildContractDescriptorCache(registry),
-		contractTypes:       buildContractTypeResolver(registry),
+		contractTypes:       types,
 	}
 }
 
@@ -119,20 +123,20 @@ func buildContractDescriptorCache(registry *pb.ContractRegistry) contractDescrip
 	return cache
 }
 
-func buildContractTypeResolver(registry *pb.ContractRegistry) *protoregistry.Types {
+func buildContractTypeResolver(registry *pb.ContractRegistry) (*protoregistry.Types, error) {
 	if registry == nil || registry.FileDescriptorSet == nil || len(registry.FileDescriptorSet.File) == 0 {
-		return nil
+		return nil, nil
 	}
 	files, err := protodesc.NewFiles(registry.FileDescriptorSet)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	types := new(protoregistry.Types)
 	files.RangeFiles(func(file protoreflect.FileDescriptor) bool {
 		registerFileMessages(types, file.Messages())
 		return true
 	})
-	return types
+	return types, nil
 }
 
 func registerFileMessages(types *protoregistry.Types, messages protoreflect.MessageDescriptors) {

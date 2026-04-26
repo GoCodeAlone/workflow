@@ -179,6 +179,14 @@ func TestTemplateGeneratorGenerateLegacyContractsOptOut(t *testing.T) {
 	if !strings.Contains(string(stepsData), "current map[string]any") {
 		t.Errorf("legacy scaffold should keep map step entrypoint:\n%s", stepsData)
 	}
+
+	modData, err := os.ReadFile(filepath.Join(outputDir, "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	if !strings.Contains(string(modData), "github.com/GoCodeAlone/workflow "+workflowReleasedVersion) {
+		t.Fatalf("legacy scaffold should require released workflow version, got:\n%s", modData)
+	}
 }
 
 func TestTemplateGeneratorFallsBackToLegacyOutsideWorkflowCheckout(t *testing.T) {
@@ -393,12 +401,19 @@ func TestGenerateProjectStructure(t *testing.T) {
 }
 
 func TestGenerateGoModWithWorkflowReplace(t *testing.T) {
-	got := generateGoMod("example.com/plugin", "/workspace/workflow")
+	got := generateGoMod("example.com/plugin", "/workspace/workflow", false)
 	if !strings.Contains(got, "github.com/GoCodeAlone/workflow "+workflowStrictContractsVersion) {
 		t.Fatalf("go.mod should require local-development workflow version, got:\n%s", got)
 	}
 	if !strings.Contains(got, "replace github.com/GoCodeAlone/workflow => /workspace/workflow") {
 		t.Fatalf("go.mod should include workflow replace, got:\n%s", got)
+	}
+}
+
+func TestGenerateGoModLegacyWithoutWorkflowReplace(t *testing.T) {
+	got := generateGoMod("example.com/plugin", "", true)
+	if !strings.Contains(got, "github.com/GoCodeAlone/workflow "+workflowReleasedVersion) {
+		t.Fatalf("legacy go.mod should require released workflow version, got:\n%s", got)
 	}
 }
 

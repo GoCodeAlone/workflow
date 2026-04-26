@@ -217,6 +217,37 @@ func TestRemoteStep_Execute_StrictContractSendsTypedPayloads(t *testing.T) {
 	}
 }
 
+func TestRemoteStep_Execute_StrictContractRequiresTypedOutput(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		response: &pb.ExecuteStepResponse{Output: mapToStruct(map[string]any{
+			"name": "legacy-output",
+		})},
+	}
+	contract := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		StepType:      "test.strict",
+		ConfigMessage: "workflow.plugin.v1.Manifest",
+		InputMessage:  "workflow.plugin.v1.Manifest",
+		OutputMessage: "workflow.plugin.v1.Manifest",
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+	}
+	step := NewRemoteStep("test-step", "handle-strict", stub, map[string]any{
+		"name":    "typed-config",
+		"version": "v1",
+	}, contract)
+
+	_, err := step.Execute(context.Background(), module.NewPipelineContext(map[string]any{
+		"name":    "typed-input",
+		"version": "v1",
+	}, nil))
+	if err == nil {
+		t.Fatal("expected strict step to reject missing typed output")
+	}
+	if !strings.Contains(err.Error(), "requires typed_output") {
+		t.Fatalf("expected missing typed output error, got %v", err)
+	}
+}
+
 func TestRemoteStep_Execute_ProtoWithLegacyKeepsStructPayloads(t *testing.T) {
 	stub := &stubPluginServiceClient{}
 	contract := &pb.ContractDescriptor{
@@ -305,6 +336,36 @@ func TestRemoteModule_InvokeService_ProtoWithLegacyKeepsArgs(t *testing.T) {
 		t.Fatal("expected compatibility mode to keep legacy Args")
 	}
 	assertAnyTypeForTest(t, stub.lastInvokeRequest.TypedInput, "workflow.plugin.v1.Manifest")
+}
+
+func TestRemoteModule_InvokeService_StrictContractRequiresTypedOutput(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		invokeResponse: &pb.InvokeServiceResponse{Result: mapToStruct(map[string]any{
+			"name": "legacy-output",
+		})},
+	}
+	module := NewRemoteModule("test-module", "module-handle", stub, remoteModuleContracts{
+		services: map[string]*pb.ContractDescriptor{
+			"Scan": {
+				Kind:          pb.ContractKind_CONTRACT_KIND_SERVICE,
+				Method:        "Scan",
+				InputMessage:  "workflow.plugin.v1.Manifest",
+				OutputMessage: "workflow.plugin.v1.Manifest",
+				Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			},
+		},
+	})
+
+	_, err := module.InvokeService("Scan", map[string]any{
+		"name":    "typed-input",
+		"version": "v1",
+	})
+	if err == nil {
+		t.Fatal("expected strict service invoke to reject missing typed output")
+	}
+	if !strings.Contains(err.Error(), "requires typed_output") {
+		t.Fatalf("expected missing typed output error, got %v", err)
+	}
 }
 
 func mustAnyFromMapForTest(t *testing.T, messageName string, values map[string]any) *anypb.Any {

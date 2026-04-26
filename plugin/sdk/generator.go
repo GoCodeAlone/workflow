@@ -14,7 +14,10 @@ import (
 // TemplateGenerator scaffolds new plugin projects with a manifest and component skeleton.
 type TemplateGenerator struct{}
 
-const workflowStrictContractsVersion = "v0.4.0"
+const (
+	workflowReleasedVersion        = "v0.18.15"
+	workflowStrictContractsVersion = "v0.4.0"
+)
 
 // NewTemplateGenerator creates a new TemplateGenerator.
 func NewTemplateGenerator() *TemplateGenerator {
@@ -169,7 +172,7 @@ func generateProjectStructure(opts GenerateOptions) error {
 	}
 
 	// go.mod
-	if err := writeFile(filepath.Join(opts.OutputDir, "go.mod"), generateGoMod(goModule, opts.WorkflowReplace), 0600); err != nil {
+	if err := writeFile(filepath.Join(opts.OutputDir, "go.mod"), generateGoMod(goModule, opts.WorkflowReplace, opts.LegacyContracts), 0600); err != nil {
 		return err
 	}
 
@@ -472,12 +475,16 @@ func generateLegacyStepsGo(shortName string) string {
 	return b.String()
 }
 
-func generateGoMod(goModule, workflowReplace string) string {
+func generateGoMod(goModule, workflowReplace string, legacyContracts bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "module %s\n\n", goModule)
 	b.WriteString("go 1.22\n\n")
 	b.WriteString("require (\n")
-	fmt.Fprintf(&b, "\tgithub.com/GoCodeAlone/workflow %s\n", workflowStrictContractsVersion)
+	workflowVersion := workflowStrictContractsVersion
+	if legacyContracts || workflowReplace == "" {
+		workflowVersion = workflowReleasedVersion
+	}
+	fmt.Fprintf(&b, "\tgithub.com/GoCodeAlone/workflow %s\n", workflowVersion)
 	b.WriteString(")\n")
 	if workflowReplace != "" {
 		b.WriteString("\n")

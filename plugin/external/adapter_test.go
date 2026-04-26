@@ -375,6 +375,28 @@ func TestExternalPluginAdapter_ContractStepFactoryUsesPluginOwnedDescriptors(t *
 	}
 }
 
+func TestExternalPluginAdapter_MalformedDescriptorSetRecordsError(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest: &pb.Manifest{Name: "contract-plugin"},
+		registry: &pb.ContractRegistry{
+			FileDescriptorSet: malformedContractFileDescriptorSet(),
+		},
+	}
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	if a.contractTypes != nil {
+		t.Fatal("expected no dynamic type resolver for malformed descriptors")
+	}
+	if a.ContractRegistryError() == nil {
+		t.Fatal("expected malformed descriptor parse error to be recorded")
+	}
+	if !strings.Contains(a.ContractRegistryError().Error(), "parse contract registry descriptors") {
+		t.Fatalf("expected descriptor parse context, got %v", a.ContractRegistryError())
+	}
+}
+
 func TestExternalPluginAdapter_ContractStepFactoryFailsClosedWithoutCodec(t *testing.T) {
 	client := &adapterTestPluginServiceClient{
 		manifest:  &pb.Manifest{Name: "contract-plugin"},
@@ -437,6 +459,17 @@ func dynamicContractFileDescriptorSet() *descriptorpb.FileDescriptorSet {
 					},
 				},
 			},
+		},
+	}}
+}
+
+func malformedContractFileDescriptorSet() *descriptorpb.FileDescriptorSet {
+	return &descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{
+		{
+			Name:       stringPtr("malformed_contract.proto"),
+			Package:    stringPtr("workflow.plugins.test.v1"),
+			Syntax:     stringPtr("proto3"),
+			Dependency: []string{"missing_dependency.proto"},
 		},
 	}}
 }

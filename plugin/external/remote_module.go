@@ -149,7 +149,11 @@ func (m *RemoteModule) InvokeService(method string, args map[string]any) (map[st
 	if resp.Error != "" {
 		return nil, fmt.Errorf("remote invoke %s: %s", method, resp.Error)
 	}
-	if resp.TypedOutput != nil && contract != nil && contract.OutputMessage != "" && contractModeUsesTyped(contract.Mode) {
+	usesTypedOutput := contract != nil && contract.OutputMessage != "" && contractModeUsesTyped(contract.Mode)
+	if usesTypedOutput && resp.TypedOutput == nil && contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
+		return nil, fmt.Errorf("remote invoke %s STRICT_PROTO output message %q requires typed_output", method, contract.OutputMessage)
+	}
+	if usesTypedOutput && resp.TypedOutput != nil {
 		output, err := typedAnyToMap(resp.TypedOutput, contract.OutputMessage, m.types)
 		if err != nil {
 			return nil, fmt.Errorf("remote invoke %s typed output decode: %w", method, err)
