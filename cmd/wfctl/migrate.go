@@ -45,7 +45,7 @@ Options:
 
 	if len(args) == 0 {
 		fs.Usage()
-		return fmt.Errorf("subcommand required: status, diff, apply, or plugins")
+		return fmt.Errorf("subcommand required: status, diff, apply, plugins, or repair-dirty")
 	}
 
 	subcmd := args[0]

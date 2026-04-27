@@ -269,7 +269,7 @@ func collectMigrationRepairEnv(jobEnv, jobEnvFromEnv []string) (map[string]strin
 			return nil, fmt.Errorf("--job-env-from-env requires a variable name")
 		}
 		value, ok := os.LookupEnv(key)
-		if !ok || value == "" {
+		if !ok {
 			return nil, fmt.Errorf("--job-env-from-env %s is not set", key)
 		}
 		out[key] = value
@@ -300,10 +300,7 @@ func writeMigrationRepairSummary(result *interfaces.MigrationRepairResult, envNa
 	if result == nil || os.Getenv("GITHUB_STEP_SUMMARY") == "" {
 		return nil
 	}
-	outcome := strings.ToUpper(result.Status)
-	if outcome == "" {
-		outcome = "UNKNOWN"
-	}
+	outcome := migrationRepairSummaryOutcome(result.Status)
 	diagnostics := redactMigrationRepairDiagnostics(result.Diagnostics, secrets)
 	if result.Logs != "" {
 		diagnostics = append(diagnostics, interfaces.Diagnostic{
@@ -327,6 +324,13 @@ func writeMigrationRepairSummary(result *interfaces.MigrationRepairResult, envNa
 		Outcome:     outcome,
 		Diagnostics: diagnostics,
 	})
+}
+
+func migrationRepairSummaryOutcome(status string) string {
+	if status == interfaces.MigrationRepairStatusSucceeded {
+		return "SUCCESS"
+	}
+	return "FAILED"
 }
 
 func redactMigrationRepairDiagnostics(diagnostics []interfaces.Diagnostic, secrets map[string]string) []interfaces.Diagnostic {

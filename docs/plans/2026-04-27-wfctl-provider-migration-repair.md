@@ -1,6 +1,6 @@
 # wfctl Provider-Executed Migration Repair Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Implementation note:** Execute this plan task-by-task and validate each step before proceeding.
 
 **Goal:** Add `wfctl migrate repair-dirty` so guarded dirty migration repairs run inside provider-managed trusted runtime boundaries instead of from CI runners.
 

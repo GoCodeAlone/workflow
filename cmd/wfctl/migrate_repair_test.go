@@ -307,6 +307,42 @@ func TestRunMigrateRepairDirtyRedactsJobIDFromStdout(t *testing.T) {
 	}
 }
 
+func TestRunMigrateRepairDirtyPropagatesEmptyJobEnvFromEnv(t *testing.T) {
+	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
+	fake := &migrationRepairProvider{
+		result: &interfaces.MigrationRepairResult{
+			ProviderJobID: "job-123",
+			Status:        interfaces.MigrationRepairStatusSucceeded,
+		},
+	}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+	t.Setenv("EMPTY_ALLOWED", "")
+
+	_, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--up-if-clean",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+			"--job-env-from-env", "EMPTY_ALLOWED",
+		})
+	})
+	if err != nil {
+		t.Fatalf("runMigrate repair-dirty: %v", err)
+	}
+	if got, ok := fake.req.Env["EMPTY_ALLOWED"]; !ok || got != "" {
+		t.Fatalf("EMPTY_ALLOWED env = %q, present %v; want empty value propagated", got, ok)
+	}
+}
+
 func TestRunMigrateRepairDirtyRedactsJobEnvFromProviderError(t *testing.T) {
 	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
 	secret := "postgres://error-secret"
@@ -510,7 +546,17 @@ func TestRunMigrateRepairDirtyMissingEnvFromEnvFailsBeforeProvider(t *testing.T)
 	fake := &migrationRepairProvider{}
 	restore := installMigrateRepairProvider(t, fake, "digitalocean")
 	defer restore()
-	t.Setenv("DATABASE_URL", "")
+	original, hadOriginal := os.LookupEnv("DATABASE_URL")
+	if err := os.Unsetenv("DATABASE_URL"); err != nil {
+		t.Fatalf("unset DATABASE_URL: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadOriginal {
+			_ = os.Setenv("DATABASE_URL", original)
+		} else {
+			_ = os.Unsetenv("DATABASE_URL")
+		}
+	})
 
 	_, err := captureMigrateRepairStdout(t, func() error {
 		return runMigrate([]string{
@@ -655,7 +701,7 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read summary: %v", readErr)
 	}
-	for _, want := range []string{"migration_repair_dirty", "staging", "[REDACTED]", "succeeded", "repair complete"} {
+	for _, want := range []string{"migration_repair_dirty", "staging", "SUCCESS", "[REDACTED]", "succeeded", "repair complete"} {
 		if !strings.Contains(string(summary), want) {
 			t.Fatalf("summary missing %q:\n%s", want, summary)
 		}
@@ -665,6 +711,22 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 	}
 	if !strings.Contains(string(summary), "[REDACTED]") {
 		t.Fatalf("summary missing redacted secret marker:\n%s", summary)
+	}
+}
+
+func TestMigrationRepairSummaryOutcomeMapsNonSuccessToFailed(t *testing.T) {
+	for _, status := range []string{
+		interfaces.MigrationRepairStatusFailed,
+		interfaces.MigrationRepairStatusApprovalRequired,
+		interfaces.MigrationRepairStatusUnsupported,
+		"",
+	} {
+		if got := migrationRepairSummaryOutcome(status); got != "FAILED" {
+			t.Fatalf("migrationRepairSummaryOutcome(%q) = %q, want FAILED", status, got)
+		}
+	}
+	if got := migrationRepairSummaryOutcome(interfaces.MigrationRepairStatusSucceeded); got != "SUCCESS" {
+		t.Fatalf("migrationRepairSummaryOutcome(succeeded) = %q, want SUCCESS", got)
 	}
 }
 
