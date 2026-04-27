@@ -39,6 +39,8 @@ implementation_refs:
     commit: a720577335c76422e5f732484de1864464e8183d
   - repo: workflow-plugin-sso
     commit: b94f3a661df9f5862b7b736b5824fda2b76d47e8
+  - repo: workflow-plugin-ws-auth
+    commit: 4a27b88580fc64109a5bd723d3dc0b837342dec3
 external_refs:
   - "#76"
 verification:
@@ -68,7 +70,7 @@ superseded_by: []
 
 Core Workflow support is implemented through `workflow eb53150`: additive proto descriptors, plugin-owned descriptor-set based dynamic codecs, typed SDK adapters, host-side strict dispatch, strict input projection, typed integer output normalization, strict module error surfacing, `wfctl` strict contract audit/validation, and source-checkout strict plugin scaffolding.
 
-Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, and `workflow-plugin-sso`. `workflow-plugin-ws-auth` is in PR review, and the next auth/security batch is in progress.
+Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, `workflow-plugin-sso`, and `workflow-plugin-ws-auth`. The next auth/security batch is in progress.
 
 The overall plan remains `in_progress` because downstream first-party plugin and application repos still need typed descriptors and adapters. Set `WORKSPACE` to the local checkout root that contains `workflow` and sibling plugin/application repositories; the strict audit against that workspace is expected to fail until those repos migrate.
 
