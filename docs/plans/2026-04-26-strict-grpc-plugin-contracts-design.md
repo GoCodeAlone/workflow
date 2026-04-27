@@ -21,13 +21,35 @@ implementation_refs:
     commit: e91187f
   - repo: workflow
     commit: eb53150
+  - repo: workflow-plugin-ci-generator
+    commit: 5c158ff154ce43d391473a4ed6cd3d3bf7788931
+  - repo: workflow-plugin-approval
+    commit: 48898f12c10d800d8b60cc9ee06e81c1580d3f01
+  - repo: workflow-plugin-gitlab
+    commit: 93eb57223b9401e8a3bc0812e71211cb3a3770fa
+  - repo: workflow-plugin-marketplace
+    commit: 7ce430e709160e4c77527bb3ce1ee8ff2dd22309
+  - repo: workflow-plugin-infra
+    commit: 6c1802de752f71b1eac895805e01e2e32f92bb5c
+  - repo: workflow-plugin-rooms
+    commit: 575a6171de8ae8ea436cd957b0c279f6dc0c3e34
+  - repo: workflow-plugin-botdetect
+    commit: 40b9a4c11937ce26c01eea292d67bc8c9d098211
+  - repo: workflow-plugin-audit
+    commit: a720577335c76422e5f732484de1864464e8183d
+  - repo: workflow-plugin-sso
+    commit: b94f3a661df9f5862b7b736b5824fda2b76d47e8
+  - repo: workflow-plugin-ws-auth
+    commit: 4a27b88580fc64109a5bd723d3dc0b837342dec3
 external_refs:
   - "#76"
 verification:
-  last_checked: 2026-04-26
+  last_checked: 2026-04-27
   commands:
     - GOWORK=off go test ./plugin/external/... ./cmd/wfctl -count=1
-    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --strict-contracts
+    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root "$WORKSPACE" --strict-contracts
+  notes:
+    - Set WORKSPACE to the local checkout root that contains the workflow repo and sibling plugin/application repositories.
   result: partial
 supersedes: []
 superseded_by: []
@@ -40,6 +62,8 @@ Date: 2026-04-26
 ## Implementation Checkpoint
 
 Core Workflow support is implemented through `workflow eb53150`: contract descriptors, plugin-owned descriptor-set based dynamic codecs, typed SDK adapters, host-side strict dispatch, strict input projection, typed integer output normalization, strict module error surfacing, `wfctl` strict contract audit/validation, and strict scaffolding when run from a Workflow source checkout.
+
+Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, `workflow-plugin-sso`, and `workflow-plugin-ws-auth`. The next auth/security batch is in progress.
 
 The design remains `in_progress` because downstream plugin and application repositories still need migration from map-only boundaries to typed descriptors and adapters. The workspace strict-contract audit is expected to fail until that migration completes.
 

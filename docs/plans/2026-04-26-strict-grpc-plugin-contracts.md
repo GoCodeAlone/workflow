@@ -21,13 +21,33 @@ implementation_refs:
     commit: e91187f
   - repo: workflow
     commit: eb53150
+  - repo: workflow-plugin-ci-generator
+    commit: 5c158ff154ce43d391473a4ed6cd3d3bf7788931
+  - repo: workflow-plugin-approval
+    commit: 48898f12c10d800d8b60cc9ee06e81c1580d3f01
+  - repo: workflow-plugin-gitlab
+    commit: 93eb57223b9401e8a3bc0812e71211cb3a3770fa
+  - repo: workflow-plugin-marketplace
+    commit: 7ce430e709160e4c77527bb3ce1ee8ff2dd22309
+  - repo: workflow-plugin-infra
+    commit: 6c1802de752f71b1eac895805e01e2e32f92bb5c
+  - repo: workflow-plugin-rooms
+    commit: 575a6171de8ae8ea436cd957b0c279f6dc0c3e34
+  - repo: workflow-plugin-botdetect
+    commit: 40b9a4c11937ce26c01eea292d67bc8c9d098211
+  - repo: workflow-plugin-audit
+    commit: a720577335c76422e5f732484de1864464e8183d
+  - repo: workflow-plugin-sso
+    commit: b94f3a661df9f5862b7b736b5824fda2b76d47e8
+  - repo: workflow-plugin-ws-auth
+    commit: 4a27b88580fc64109a5bd723d3dc0b837342dec3
 external_refs:
   - "#76"
 verification:
-  last_checked: 2026-04-26
+  last_checked: 2026-04-27
   commands:
     - GOWORK=off go test ./plugin/external/... ./cmd/wfctl -count=1
-    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --strict-contracts
+    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root "$WORKSPACE" --strict-contracts
     - GOWORK=off go run ./cmd/wfctl audit plans --dir docs/plans --fix-index
   result: partial
 supersedes: []
@@ -50,7 +70,9 @@ superseded_by: []
 
 Core Workflow support is implemented through `workflow eb53150`: additive proto descriptors, plugin-owned descriptor-set based dynamic codecs, typed SDK adapters, host-side strict dispatch, strict input projection, typed integer output normalization, strict module error surfacing, `wfctl` strict contract audit/validation, and source-checkout strict plugin scaffolding.
 
-The overall plan remains `in_progress` because downstream first-party plugin and application repos still need typed descriptors and adapters. The strict audit against `/Users/jon/workspace` is expected to fail until those repos migrate.
+Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, `workflow-plugin-sso`, and `workflow-plugin-ws-auth`. The next auth/security batch is in progress.
+
+The overall plan remains `in_progress` because downstream first-party plugin and application repos still need typed descriptors and adapters. Set `WORKSPACE` to the local checkout root that contains `workflow` and sibling plugin/application repositories; the strict audit against that workspace is expected to fail until those repos migrate.
 
 ### Task 1: Core Proto Contract Descriptors
 
@@ -253,7 +275,7 @@ Expected: PASS.
 
 **Step 2: Run runtime validation**
 
-Run: `GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --strict-contracts`
+Run: `GOWORK=off go run ./cmd/wfctl audit plugins --repo-root "$WORKSPACE" --strict-contracts`
 
 Expected: non-zero before downstream repos migrate, with findings naming each legacy repo/type.
 
@@ -277,7 +299,7 @@ git commit -m "docs: track strict grpc plugin contract plan"
 
 **Step 1: Inventory repos**
 
-Run: `find /Users/jon/workspace -maxdepth 1 -type d \( -name 'workflow-plugin-*' -o -name 'workflow-dnd' -o -name 'workflow-cardgame' -o -name 'core-dump' -o -name 'buymywishlist' \) -print | sort`
+Run: `find "$WORKSPACE" -maxdepth 1 -type d \( -name 'workflow-plugin-*' -o -name 'workflow-dnd' -o -name 'workflow-cardgame' -o -name 'core-dump' -o -name 'buymywishlist' \) -print | sort`
 
 Expected: list includes all first-party plugin and application repos.
 
