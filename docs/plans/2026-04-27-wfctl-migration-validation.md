@@ -1,3 +1,21 @@
+---
+title: wfctl Migration Validation Implementation Plan
+status: in_progress
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    pr: 504
+external_refs: []
+verification:
+  last_checked: 2026-04-27
+  commands:
+    - 'GOWORK=off go test ./cmd/wfctl ./config -run "TestRunMigrations|TestResolveMigration|TestExtractTar|TestGenerateGHA|TestGenerateGitLab|TestRunCIRunDeploy|TestRunDeployCloud|TestCIConfig" -count=1'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wfctl Migration Validation Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
