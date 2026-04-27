@@ -857,7 +857,7 @@ Required guard flags:
 | `--expected-dirty-version` | Dirty version that must be present before repair |
 | `--force-version` | Version to force metadata to before replaying migrations |
 | `--confirm-force` | Must be `FORCE_MIGRATION_METADATA` |
-| `--approve-destructive` | Explicitly approves the metadata repair |
+| `--approve-destructive` | Explicitly approves the metadata repair; required for non-dev environments |
 
 For non-dev environments, omitting `--approve-destructive` writes an approval
 artifact and exits before provider invocation. The artifact defaults to

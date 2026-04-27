@@ -348,7 +348,7 @@ func TestRunMigrateRepairDirtyRejectsUnknownProviderStatus(t *testing.T) {
 	restore := installMigrateRepairProvider(t, fake, "digitalocean")
 	defer restore()
 
-	_, err := captureMigrateRepairStdout(t, func() error {
+	out, err := captureMigrateRepairStdout(t, func() error {
 		return runMigrate([]string{
 			"repair-dirty",
 			"--config", cfgPath,
@@ -368,6 +368,54 @@ func TestRunMigrateRepairDirtyRejectsUnknownProviderStatus(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown migration repair status") {
 		t.Fatalf("error = %v, want unknown status guidance", err)
+	}
+	if strings.Contains(out, "paused") {
+		t.Fatalf("stdout emitted invalid status before validation: %q", out)
+	}
+}
+
+func TestRunMigrateRepairDirtyRejectsSecretBearingProviderStatusBeforeSummary(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeMigrateRepairInfraConfig(t, dir)
+	summaryPath := filepath.Join(dir, "summary.md")
+	secret := "postgres://status-secret"
+	t.Setenv("DATABASE_URL", secret)
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "true")
+	fake := &migrationRepairProvider{
+		result: &interfaces.MigrationRepairResult{
+			ProviderJobID: "job-123",
+			Status:        "failed-" + secret,
+		},
+	}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+
+	out, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--up-if-clean",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+			"--job-env-from-env", "DATABASE_URL",
+		})
+	})
+	if err == nil {
+		t.Fatal("expected unknown provider status error")
+	}
+	if strings.Contains(out, secret) {
+		t.Fatalf("stdout leaked secret status: %q", out)
+	}
+	if _, readErr := os.ReadFile(summaryPath); !os.IsNotExist(readErr) {
+		t.Fatalf("summary should not be written before status validation, read err = %v", readErr)
 	}
 }
 
@@ -484,7 +532,7 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 	t.Setenv("DATABASE_URL", secret)
 	fake := &migrationRepairProvider{
 		result: &interfaces.MigrationRepairResult{
-			ProviderJobID: "job-123",
+			ProviderJobID: "job-postgres://summary-secret",
 			Status:        interfaces.MigrationRepairStatusSucceeded,
 			Logs:          "repair complete for postgres://summary-secret",
 			Diagnostics: []interfaces.Diagnostic{{
@@ -521,7 +569,7 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read summary: %v", readErr)
 	}
-	for _, want := range []string{"migration_repair_dirty", "staging", "job-123", "succeeded", "repair complete"} {
+	for _, want := range []string{"migration_repair_dirty", "staging", "[REDACTED]", "succeeded", "repair complete"} {
 		if !strings.Contains(string(summary), want) {
 			t.Fatalf("summary missing %q:\n%s", want, summary)
 		}

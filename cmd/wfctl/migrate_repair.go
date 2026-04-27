@@ -172,15 +172,17 @@ Options:
 			result = &interfaces.MigrationRepairResult{Status: interfaces.MigrationRepairStatusSucceeded}
 		}
 	}
+	if err == nil {
+		if statusErr := validateMigrationRepairResultStatus(result.Status); statusErr != nil {
+			return statusErr
+		}
+	}
 	printMigrationRepairResult(out, result, jobEnvMap)
 	if summaryErr := writeMigrationRepairSummary(result, envName, appName, jobEnvMap); summaryErr != nil && err == nil {
 		err = summaryErr
 	}
 	if err != nil {
 		return redactMigrationRepairError(err, jobEnvMap)
-	}
-	if err := validateMigrationRepairResultStatus(result.Status); err != nil {
-		return err
 	}
 	if result.Status != interfaces.MigrationRepairStatusSucceeded {
 		return fmt.Errorf("migration repair finished with status %s", result.Status)
@@ -305,16 +307,16 @@ func writeMigrationRepairSummary(result *interfaces.MigrationRepairResult, envNa
 	diagnostics := redactMigrationRepairDiagnostics(result.Diagnostics, secrets)
 	if result.Logs != "" {
 		diagnostics = append(diagnostics, interfaces.Diagnostic{
-			ID:     result.ProviderJobID,
-			Phase:  result.Status,
+			ID:     redactMigrationRepairSecrets(result.ProviderJobID, secrets),
+			Phase:  redactMigrationRepairSecrets(result.Status, secrets),
 			Cause:  "migration repair logs",
 			Detail: redactMigrationRepairSecrets(result.Logs, secrets),
 		})
 	}
 	if len(diagnostics) == 0 && result.ProviderJobID != "" {
 		diagnostics = append(diagnostics, interfaces.Diagnostic{
-			ID:    result.ProviderJobID,
-			Phase: result.Status,
+			ID:    redactMigrationRepairSecrets(result.ProviderJobID, secrets),
+			Phase: redactMigrationRepairSecrets(result.Status, secrets),
 			Cause: "provider job",
 		})
 	}
