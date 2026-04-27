@@ -67,6 +67,8 @@ workflows:
         description: Generate documentation from workflow configs
       - name: editor-schemas
         description: Export module schemas and type coercion rules
+      - name: editor-bundle
+        description: Export the canonical editor contract bundle
       - name: dsl-reference
         description: Parse DSL reference as structured JSON
       - name: ci
@@ -217,6 +219,10 @@ pipelines:
     trigger: {type: cli, config: {command: editor-schemas}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: editor-schemas}}
+  cmd-editor-bundle:
+    trigger: {type: cli, config: {command: editor-bundle}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: editor-bundle}}
   cmd-dsl-reference:
     trigger: {type: cli, config: {command: dsl-reference}}
     steps:

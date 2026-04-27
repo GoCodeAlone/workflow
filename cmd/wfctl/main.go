@@ -84,6 +84,7 @@ var commands = map[string]func([]string) error{
 	"infra":           runInfra,
 	"docs":            runDocs,
 	"editor-schemas":  runEditorSchemas,
+	"editor-bundle":   runEditorBundle,
 	"dsl-reference":   runDSLReference,
 	"ci":              runCI,
 	"override":        runOverride,
