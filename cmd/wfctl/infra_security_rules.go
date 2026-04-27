@@ -75,12 +75,16 @@ func r1CheckFirewallConfig(cfg map[string]any) []string {
 		if allowedPorts[port] {
 			continue
 		}
-		// Support both "sources" (plural) and "source" (singular) key variants.
-		sources := toStringSlice(rule["sources"])
-		if len(sources) == 0 {
-			sources = toStringSlice(rule["source"])
+		// Union "sources" and "source" key variants so rules using either key are
+		// checked — consistent with R7's r7CollectSources union approach.
+		sourceSet := map[string]struct{}{}
+		for _, s := range toStringSlice(rule["sources"]) {
+			sourceSet[s] = struct{}{}
 		}
-		for _, src := range sources {
+		for _, s := range toStringSlice(rule["source"]) {
+			sourceSet[s] = struct{}{}
+		}
+		for src := range sourceSet {
 			for _, pub := range publicCIDRs {
 				if src == pub {
 					msgs = append(msgs, fmt.Sprintf("inbound_rules port %q allows %s (R1: non-public ports must not expose to %s)", port, src, pub))

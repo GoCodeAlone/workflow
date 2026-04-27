@@ -150,8 +150,11 @@ func renderSecurityFindings(w io.Writer, findings []SecurityFinding) error {
 		return err
 	}
 	for _, f := range findings {
+		// Escape pipe characters to prevent breaking the markdown table.
+		resType := strings.ReplaceAll(f.Type, "|", "\\|")
+		msg := strings.ReplaceAll(f.Message, "|", "\\|")
 		if _, err := fmt.Fprintf(w, "| %s | %s | `%s` (%s) | %s |\n",
-			f.RuleID, f.Severity, f.Resource, f.Type, f.Message); err != nil {
+			f.RuleID, f.Severity, f.Resource, resType, msg); err != nil {
 			return err
 		}
 	}
