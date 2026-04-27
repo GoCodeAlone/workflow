@@ -1291,6 +1291,23 @@ security:
 - `security.tls.provider` must be one of `letsencrypt`, `manual`, `acm`, `cloudflare`
 - `security.network.defaultPolicy: deny` causes `wfctl security generate-network-policies` to include `Egress` in policy types
 - `networking.ingress` entries without a `tls` block are flagged as `HIGH` by `wfctl security audit`
+
+---
+
+## Engine Config Migrations
+
+Manage SQLite-backed engine config schema migrations.
+
+### CLI Commands
+
+- `wfctl config migrate status [--db workflow.db]` — show applied and pending migrations
+- `wfctl config migrate diff [--db workflow.db]` — show pending migrations without applying
+- `wfctl config migrate apply [--db workflow.db]` — apply pending migrations
+- `wfctl config migrate plugins [--config workflow.yaml]` — migrate requires.plugins[] entries
+- `wfctl config migrate repair-dirty [options]` — repair dirty golang-migrate metadata
+
+> **Deprecated:** `wfctl migrate` is an alias for `wfctl config migrate` and will be removed in v0.21+.
+> Update scripts to use `wfctl config migrate`.
 - `wfctl validate` checks `security.tls.provider` for valid values
 
 ---
