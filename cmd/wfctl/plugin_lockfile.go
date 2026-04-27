@@ -144,6 +144,10 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 // not the download archive.
 // Silently no-ops if the lockfile cannot be read or written (install still succeeds).
 func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
+	if newLF, err := config.LoadWfctlLockfile(wfctlLockPath); err == nil && newLF.Version > 0 {
+		return
+	}
+
 	lf, err := loadPluginLockfile(wfctlLockPath)
 	if err != nil {
 		return

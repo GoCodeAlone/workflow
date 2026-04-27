@@ -91,7 +91,9 @@ func SaveWfctlLockfile(path string, lf *WfctlLockfile) error {
 		}
 		addField("version", entry.Version)
 		addField("source", entry.Source)
-		addField("sha256", entry.SHA256)
+		if len(entry.Platforms) == 0 {
+			addField("sha256", entry.SHA256)
+		}
 
 		if len(entry.Platforms) > 0 {
 			platKeys := make([]string, 0, len(entry.Platforms))
