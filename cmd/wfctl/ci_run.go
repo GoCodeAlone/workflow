@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -100,9 +101,22 @@ func runMigrationDeployGuard(configFile, envName, pluginDir string, cfg *config.
 }
 
 func currentCICommitSHA() string {
-	for _, key := range []string{"GITHUB_SHA", "CI_COMMIT_SHA"} {
+	for _, key := range []string{"WFCTL_CI_COMMIT_SHA", "GITHUB_SHA", "CI_COMMIT_SHA"} {
 		if value := os.Getenv(key); value != "" {
 			return value
+		}
+	}
+	if eventPath := os.Getenv("GITHUB_EVENT_PATH"); eventPath != "" {
+		data, err := os.ReadFile(eventPath)
+		if err == nil {
+			var event struct {
+				WorkflowRun struct {
+					HeadSHA string `json:"head_sha"`
+				} `json:"workflow_run"`
+			}
+			if json.Unmarshal(data, &event) == nil && event.WorkflowRun.HeadSHA != "" {
+				return event.WorkflowRun.HeadSHA
+			}
 		}
 	}
 	return ""

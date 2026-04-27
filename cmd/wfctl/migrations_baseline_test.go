@@ -241,6 +241,7 @@ ci:
         env: DATABASE_URL
       validation:
         baseline_candidate: true
+        forbid_dirty: true
 `)
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
 
@@ -270,6 +271,53 @@ ci:
 	}
 	if !strings.Contains(err.Error(), "dirty") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunMigrationsValidateRecordsDirtyBaselineStatusWhenNotForbidden(t *testing.T) {
+	cfgPath := writeMigrationBaselineConfigData(t, `
+version: 1
+ci:
+  migrations:
+    - name: app
+      source_dir: migrations
+      database:
+        env: DATABASE_URL
+      validation:
+        baseline_candidate: true
+`)
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+
+	var calls []string
+	restore := stubMigrationBaselineHooks(t, &calls, []string{"migrations/202604270001_add_users.up.sql"}, "abc123")
+	defer restore()
+	oldRunner := newMigrationPluginRunner
+	newMigrationPluginRunner = func() migrationPluginRunner {
+		return migrationPluginRunner{
+			exec: func(_ context.Context, _ string, args []string, _ map[string]string) (migrationCommandResult, error) {
+				if migrationCommandFromArgs(args) == "status" {
+					return migrationCommandResult{Stdout: "Current: 202604270001\nDirty: true\nNo pending migrations.\n"}, nil
+				}
+				return migrationCommandResult{}, nil
+			},
+		}
+	}
+	defer func() { newMigrationPluginRunner = oldRunner }()
+
+	if err := runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci", "--result-file", resultPath}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got migrationValidationResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision != "pass" || len(got.Migrations) != 1 || !got.Migrations[0].Dirty {
+		t.Fatalf("unexpected validation result: %+v", got)
 	}
 }
 

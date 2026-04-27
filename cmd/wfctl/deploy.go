@@ -960,6 +960,10 @@ func runDirectMigrationDeployGuard(configFile, envName string) error {
 	if envName != "" {
 		args = append(args, "--env", envName)
 	}
+	args = append(args, "--validation-result", ".wfctl/migrations-result.json", "--require-validation-result")
+	if commit := currentCICommitSHA(); commit != "" {
+		args = append(args, "--commit", commit, "--require-same-sha")
+	}
 	return runMigrations(args)
 }
 

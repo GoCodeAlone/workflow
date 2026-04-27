@@ -307,6 +307,8 @@ func generateGHADeploy(cfg *config.WorkflowConfig) string {
 				sb.WriteString("      - run: mkdir -p .wfctl && wfctl migrations validate --env " + envName + " --commit " + sha + " --result-file .wfctl/migrations-result.json --format json\n")
 			}
 			sb.WriteString("      - run: wfctl ci run --phase deploy --env " + envName + "\n")
+			sb.WriteString("        env:\n")
+			sb.WriteString("          WFCTL_CI_COMMIT_SHA: " + sha + "\n")
 			prev = jobName
 		}
 	}

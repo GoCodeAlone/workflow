@@ -37,6 +37,7 @@ type migrationEphemeralDatabaseOperations struct {
 var migrationEphemeralDB = migrationEphemeralDatabaseOperations{}
 
 const maxMigrationArchiveFileBytes = 64 << 20
+const maxMigrationArchiveTotalBytes = 256 << 20
 
 type migrationBaselineCandidateResult struct {
 	Current string   `json:"current"`
@@ -147,8 +148,10 @@ func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginR
 	if err != nil {
 		return migrationBaselineCandidateResult{}, err
 	}
-	if err := requireCleanMigrationStatus(parsedStatus); err != nil {
-		return migrationBaselineCandidateResult{}, fmt.Errorf("migration %s status is not clean: %w", migration.Name, err)
+	if migration.Validation.ForbidDirty {
+		if err := requireCleanMigrationStatus(parsedStatus); err != nil {
+			return migrationBaselineCandidateResult{}, fmt.Errorf("migration %s status is not clean: %w", migration.Name, err)
+		}
 	}
 	return parsedStatus, nil
 }
@@ -352,19 +355,49 @@ func defaultMigrationMaterializeSource(ctx context.Context, ref, sourceDir strin
 	}
 
 	// #nosec G204 -- git is a fixed executable and refs/source paths are passed as argv without shell interpolation.
-	out, err := exec.CommandContext(ctx, "git", "archive", "--format=tar", ref, sourceDir).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "git", "archive", "--format=tar", ref, sourceDir)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cleanup()
-		if isMissingMigrationSourceArchiveError(string(out)) {
-			return "", nil, errMigrationSourceMissing
-		}
 		return "", nil, err
 	}
-	if err := extractTar(bytes.NewReader(out), tmpDir); err != nil {
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
 		cleanup()
 		return "", nil, err
 	}
+	extractErr := extractTar(&archiveLimitReader{reader: stdout, remaining: maxMigrationArchiveTotalBytes}, tmpDir)
+	waitErr := cmd.Wait()
+	if extractErr != nil {
+		cleanup()
+		return "", nil, extractErr
+	}
+	if waitErr != nil {
+		cleanup()
+		if isMissingMigrationSourceArchiveError(stderr.String()) {
+			return "", nil, errMigrationSourceMissing
+		}
+		return "", nil, waitErr
+	}
 	return filepath.Join(tmpDir, sourceDir), cleanup, nil
+}
+
+type archiveLimitReader struct {
+	reader    io.Reader
+	remaining int64
+}
+
+func (r *archiveLimitReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, fmt.Errorf("archive exceeds size limit")
+	}
+	if int64(len(p)) > r.remaining {
+		p = p[:r.remaining]
+	}
+	n, err := r.reader.Read(p)
+	r.remaining -= int64(n)
+	return n, err
 }
 
 func isMissingMigrationSourceArchiveError(output string) bool {
@@ -396,7 +429,7 @@ func emptyMigrationSource(sourceDir string) (string, func(), error) {
 	return source, func() { _ = os.RemoveAll(tmpDir) }, nil
 }
 
-func extractTar(r *bytes.Reader, dest string) error {
+func extractTar(r io.Reader, dest string) error {
 	tr := tar.NewReader(r)
 	for {
 		header, err := tr.Next()

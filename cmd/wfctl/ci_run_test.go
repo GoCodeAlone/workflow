@@ -114,6 +114,27 @@ ci:
 	}
 }
 
+func TestCurrentCICommitSHAUsesWorkflowRunHeadSHA(t *testing.T) {
+	eventPath := filepath.Join(t.TempDir(), "event.json")
+	if err := os.WriteFile(eventPath, []byte(`{"workflow_run":{"head_sha":"abc123"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITHUB_EVENT_PATH", eventPath)
+
+	if got := currentCICommitSHA(); got != "abc123" {
+		t.Fatalf("currentCICommitSHA() = %q, want abc123", got)
+	}
+}
+
+func TestCurrentCICommitSHAPrefersExplicitOverride(t *testing.T) {
+	t.Setenv("WFCTL_CI_COMMIT_SHA", "override-sha")
+	t.Setenv("GITHUB_SHA", "github-sha")
+
+	if got := currentCICommitSHA(); got != "override-sha" {
+		t.Fatalf("currentCICommitSHA() = %q, want override-sha", got)
+	}
+}
+
 func TestRunDeployPhase_Placeholder(t *testing.T) {
 	deploy := &config.CIDeployConfig{
 		Environments: map[string]*config.CIDeployEnvironment{
