@@ -35,6 +35,10 @@ plugins:
 	if err != nil {
 		t.Fatalf("read lockfile: %v", err)
 	}
+	fooRaw := pluginRawMap(t, data, "workflow-plugin-foo")
+	if _, ok := fooRaw["sha256"]; ok {
+		t.Fatalf("workflow-plugin-foo should not contain top-level sha256:\n%s", data)
+	}
 
 	var parsed struct {
 		Plugins map[string]struct {
@@ -57,12 +61,13 @@ plugins:
 	}
 }
 
-func TestPluginLock_FromManifest_PreservesExisting(t *testing.T) {
+func TestPluginLock_FromManifest_DropsExistingTopLevelSHA256(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "wfctl.yaml")
 	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
 
-	// Pre-populate lockfile with sha256 for an existing plugin.
+	// Pre-populate lockfile with a host-specific binary sha256 from an older
+	// generated lockfile. Regenerating the new-format lockfile must not preserve it.
 	existingLock := `version: 1
 generated_at: "2026-01-01T00:00:00Z"
 plugins:
@@ -96,6 +101,10 @@ plugins:
 	if err != nil {
 		t.Fatalf("read lockfile: %v", err)
 	}
+	fooRaw := pluginRawMap(t, data, "workflow-plugin-foo")
+	if _, ok := fooRaw["sha256"]; ok {
+		t.Fatalf("workflow-plugin-foo should not contain top-level sha256:\n%s", data)
+	}
 
 	var parsed struct {
 		Plugins map[string]struct {
@@ -108,12 +117,30 @@ plugins:
 	}
 
 	foo := parsed.Plugins["workflow-plugin-foo"]
-	if foo.SHA256 != "existing-sha256" {
-		t.Errorf("existing sha256 not preserved: got %q, want existing-sha256", foo.SHA256)
+	if foo.SHA256 != "" {
+		t.Errorf("existing top-level sha256 should not be preserved: got %q", foo.SHA256)
 	}
 	if _, ok := parsed.Plugins["workflow-plugin-bar"]; !ok {
 		t.Error("new plugin workflow-plugin-bar not added")
 	}
+}
+
+func pluginRawMap(t *testing.T, data []byte, name string) map[string]any {
+	t.Helper()
+
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("parse raw lockfile: %v", err)
+	}
+	pluginsRaw, ok := raw["plugins"].(map[string]any)
+	if !ok {
+		t.Fatalf("plugins should be a map in lockfile:\n%s", data)
+	}
+	pluginRaw, ok := pluginsRaw[name].(map[string]any)
+	if !ok {
+		t.Fatalf("%s should be a plugin map in lockfile:\n%s", name, data)
+	}
+	return pluginRaw
 }
 
 func TestPluginLock_FromManifest_PopulatesPlatformURLsAndSHA256FromRegistry(t *testing.T) {
