@@ -749,7 +749,12 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 		}
 	}
 
-	fmt.Printf("applied %d action(s) from plan\n", len(plan.Actions))
+	n := len(plan.Actions)
+	if n == 1 {
+		fmt.Printf("applied 1 action from plan\n")
+	} else {
+		fmt.Printf("applied %d actions from plan\n", n)
+	}
 	return nil
 }
 

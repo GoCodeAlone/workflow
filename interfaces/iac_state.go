@@ -50,7 +50,7 @@ type IaCPlan struct {
 	// DesiredHash is a SHA-256 hex digest of the canonical desired-state inputs
 	// (sorted ResourceSpecs) at the time the plan was generated. wfctl infra apply
 	// --plan compares this against the current config to detect stale plans.
-	DesiredHash string `json:"desired_hash,omitempty"`
+	DesiredHash string `json:"plan_hash,omitempty"`
 }
 
 // PlanAction is a single planned change within an IaCPlan.
