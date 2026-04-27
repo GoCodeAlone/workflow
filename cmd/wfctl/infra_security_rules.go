@@ -145,7 +145,7 @@ func ruleR3InternalNamingPubliclyExposed(plan interfaces.IaCPlan, _ SecurityChec
 		if !r3InternalPattern.MatchString(name) {
 			continue
 		}
-		httpPort, _ := plan.Actions[i].Resource.Config["http_port"]
+		httpPort := plan.Actions[i].Resource.Config["http_port"]
 		if httpPort == nil || httpPort == "" || httpPort == 0 {
 			continue
 		}
@@ -481,7 +481,7 @@ func ruleR10ChangeBlastRadiusCap(plan interfaces.IaCPlan, opts SecurityCheckOpts
 			findings = append(findings, SecurityFinding{
 				RuleID: "R10", Severity: SeverityFail,
 				Resource: name, Type: "stateful",
-				Message: fmt.Sprintf("plan deletes and recreates stateful resource %q — this destroys all data; use update or replace instead", name),
+				Message: fmt.Sprintf("plan deletes and recreates stateful resource %q — this destroys all data; use an in-place update instead, or perform a manual backup before any recreation", name),
 			})
 		}
 	}

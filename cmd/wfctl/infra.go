@@ -53,16 +53,16 @@ func infraUsage() error {
 Manage infrastructure defined in a workflow config.
 
 Actions:
-  plan      Show planned infrastructure changes
-  apply     Apply infrastructure changes
-  status    Show current infrastructure status
-  drift     Detect configuration drift
-  destroy   Tear down infrastructure
-  import    Import an existing cloud resource into state
+  plan           Show planned infrastructure changes
+  apply          Apply infrastructure changes
+  status         Show current infrastructure status
+  drift          Detect configuration drift
+  destroy        Tear down infrastructure
+  import         Import an existing cloud resource into state
   state          Manage IaC state (list, export, import)
   outputs        Print captured resource outputs from state
   align          Validate IaC config + plan alignment (8 rule families)
-  security-check Scan a plan.json for security policy violations
+  security-check Scan plan.json for security policy violations
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)

@@ -247,6 +247,14 @@ func TestInfraSecurityCheck_R7_Trigger_Warn(t *testing.T) {
 	plan := loadFixturePlan(t, "r7_trigger.json")
 	findings := RunSecurityCheck(plan, defaultOpts())
 	requireFinding(t, findings, "R7", SeverityWarn)
+	// Verify the finding targets the expected resource (uses findingsForRule).
+	r7 := findingsForRule(findings, "R7")
+	if len(r7) == 0 {
+		t.Fatal("expected at least one R7 finding")
+	}
+	if r7[0].Resource == "" {
+		t.Errorf("R7 finding has empty resource name")
+	}
 }
 
 func TestInfraSecurityCheck_R7_StrictCIDR_Fail(t *testing.T) {
@@ -412,6 +420,3 @@ func TestRunInfraSecurityCheck_PassPlan(t *testing.T) {
 		t.Fatalf("expected no error for clean plan, got: %v", err)
 	}
 }
-
-// ensure findingsForRule is used (silence unused warning)
-var _ = findingsForRule
