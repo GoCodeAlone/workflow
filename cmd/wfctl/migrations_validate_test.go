@@ -20,8 +20,8 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 		return migrationPluginRunner{
 			exec: func(_ context.Context, pluginName string, args []string, env map[string]string) (migrationCommandResult, error) {
 				calls = append(calls, pluginName+" "+strings.Join(args, " "))
-				if env["WFCTL_MIGRATION_DSN"] != "postgres://secret@example/db" {
-					t.Fatalf("runner env DSN = %q", env["WFCTL_MIGRATION_DSN"])
+				if env["DATABASE_URL"] != "postgres://secret@example/db" {
+					t.Fatalf("runner env DSN = %q", env["DATABASE_URL"])
 				}
 				return migrationCommandResult{Stdout: `{"dirty":false}`}, nil
 			},

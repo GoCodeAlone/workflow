@@ -46,13 +46,11 @@ func TestMigrationPluginRunnerBuildsWorkflowMigrateArgs(t *testing.T) {
 		"golang-migrate",
 		"--source-dir",
 		"migrations",
-		"--dsn-env",
-		"WFCTL_MIGRATION_DSN",
 	}
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", gotArgs, wantArgs)
 	}
-	if gotEnv["WFCTL_MIGRATION_DSN"] != "postgres://user:secret@example.com/app" {
+	if gotEnv["DATABASE_URL"] != "postgres://user:secret@example.com/app" {
 		t.Fatalf("env did not receive DSN: %#v", gotEnv)
 	}
 }
@@ -111,5 +109,27 @@ func TestMigrationPluginRunnerUsesConfiguredPluginDir(t *testing.T) {
 	}
 	if gotPluginDir != "custom/plugins" {
 		t.Fatalf("WFCTL_PLUGIN_DIR = %q, want custom/plugins", gotPluginDir)
+	}
+}
+
+func TestMigrationPluginRunnerRejectsUnsafePluginName(t *testing.T) {
+	runner := migrationPluginRunner{
+		exec: func(context.Context, string, []string, map[string]string) (migrationCommandResult, error) {
+			t.Fatal("unsafe plugin name must be rejected before exec")
+			return migrationCommandResult{}, nil
+		},
+	}
+
+	_, err := runner.run(context.Background(), migrationPluginRunConfig{
+		Plugin:    "../workflow-plugin-migrations",
+		Driver:    "golang-migrate",
+		SourceDir: "migrations",
+		DSN:       "postgres://user:secret@example.com/app",
+	}, "status")
+	if err == nil {
+		t.Fatal("expected unsafe plugin name error")
+	}
+	if !strings.Contains(err.Error(), "unsafe plugin name") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

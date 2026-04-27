@@ -57,6 +57,9 @@ func resolveMigrationConfigs(cfg *config.WorkflowConfig, envName string) ([]reso
 		if plugin == "" {
 			plugin = defaultMigrationPlugin
 		}
+		if err := validateMigrationPluginName(plugin); err != nil {
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: %w", label, err))
+		}
 		driver := strings.TrimSpace(migration.Driver)
 		if driver == "" {
 			driver = defaultMigrationDriver

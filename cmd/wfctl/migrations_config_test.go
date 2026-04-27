@@ -75,6 +75,23 @@ func TestResolveMigrationConfigsSkipsDisabledEnvironment(t *testing.T) {
 	}
 }
 
+func TestResolveMigrationConfigsRejectsUnsafePluginName(t *testing.T) {
+	cfg := &config.WorkflowConfig{CI: &config.CIConfig{Migrations: []config.CIMigrationConfig{{
+		Name:      "app",
+		Plugin:    "../workflow-plugin-migrations",
+		SourceDir: "migrations",
+		Database:  config.CIMigrationDatabaseConfig{DSN: "postgres://secret@example/db"},
+	}}}}
+
+	_, err := resolveMigrationConfigs(cfg, "staging")
+	if err == nil {
+		t.Fatal("expected unsafe plugin name error")
+	}
+	if !strings.Contains(err.Error(), "unsafe plugin name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveMigrationConfigsReadsDSNFromEnvWithoutLoggingValue(t *testing.T) {
 	const secretDSN = "postgres://secret@example/db"
 	cfg := &config.WorkflowConfig{CI: &config.CIConfig{Migrations: []config.CIMigrationConfig{{

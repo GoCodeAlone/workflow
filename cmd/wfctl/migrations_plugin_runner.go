@@ -29,6 +29,10 @@ type migrationPluginRunner struct {
 }
 
 func (r migrationPluginRunner) run(ctx context.Context, cfg migrationPluginRunConfig, command string) (migrationCommandResult, error) {
+	if err := validateMigrationPluginName(cfg.Plugin); err != nil {
+		return migrationCommandResult{}, err
+	}
+
 	execFn := r.exec
 	if execFn == nil {
 		execFn = defaultMigrationPluginExecutor
@@ -49,14 +53,13 @@ func buildMigrationPluginArgs(cfg migrationPluginRunConfig, command string) []st
 	args = append(args,
 		"--driver", cfg.Driver,
 		"--source-dir", cfg.SourceDir,
-		"--dsn-env", "WFCTL_MIGRATION_DSN",
 	)
 	return args
 }
 
 func buildMigrationPluginEnv(cfg migrationPluginRunConfig) map[string]string {
 	env := map[string]string{
-		"WFCTL_MIGRATION_DSN": cfg.DSN,
+		"DATABASE_URL": cfg.DSN,
 	}
 	if cfg.PluginDir != "" {
 		env["WFCTL_PLUGIN_DIR"] = cfg.PluginDir
@@ -65,6 +68,9 @@ func buildMigrationPluginEnv(cfg migrationPluginRunConfig) map[string]string {
 }
 
 func defaultMigrationPluginExecutor(ctx context.Context, pluginName string, args []string, env map[string]string) (migrationCommandResult, error) {
+	if err := validateMigrationPluginName(pluginName); err != nil {
+		return migrationCommandResult{}, err
+	}
 	pluginDirName := normalizePluginName(pluginName)
 	pluginRoot := defaultDataDir
 	if env != nil && env["WFCTL_PLUGIN_DIR"] != "" {
@@ -104,6 +110,25 @@ func mapEnv(env map[string]string) []string {
 		pairs = append(pairs, key+"="+env[key])
 	}
 	return pairs
+}
+
+func validateMigrationPluginName(pluginName string) error {
+	trimmed := strings.TrimSpace(pluginName)
+	if trimmed == "" {
+		return fmt.Errorf("unsafe plugin name %q", pluginName)
+	}
+	for _, candidate := range []string{trimmed, normalizePluginName(trimmed)} {
+		if candidate == "" || candidate == "." || candidate == ".." || strings.ContainsAny(candidate, `/\`) {
+			return fmt.Errorf("unsafe plugin name %q", pluginName)
+		}
+		for _, r := range candidate {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+				continue
+			}
+			return fmt.Errorf("unsafe plugin name %q", pluginName)
+		}
+	}
+	return nil
 }
 
 func redactMigrationDSN(message, dsn string) string {
