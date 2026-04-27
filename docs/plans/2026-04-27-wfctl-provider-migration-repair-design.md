@@ -43,7 +43,7 @@ wfctl migrate repair-dirty --env staging --config infra.yaml \
   --app bmw-app \
   --job-image registry.digitalocean.com/bmw-registry/workflow-migrate:${IMAGE_SHA} \
   --expected-dirty-version 20260426000005 \
-  --force-version 20260426000004 \
+  --force-version <known-safe-version-before-replay> \
   --then-up \
   --confirm-force FORCE_MIGRATION_METADATA
 ```
@@ -82,7 +82,7 @@ type MigrationRepairRequest struct {
     ForceVersion          string            `json:"force_version"`
     ThenUp                bool              `json:"then_up"`
     UpIfClean             bool              `json:"up_if_clean"`
-    Confirmation          string            `json:"confirmation"`
+    ConfirmForce          string            `json:"confirm_force"`
     Env                   map[string]string `json:"env,omitempty"`
     TimeoutSeconds        int               `json:"timeout_seconds,omitempty"`
 }
@@ -122,7 +122,12 @@ The command:
 
 ### DigitalOcean Plugin
 
-DigitalOcean implements `ProviderMigrationRepairer` by using App Platform jobs:
+DigitalOcean implements `ProviderMigrationRepairer` by using App Platform jobs.
+The official App Platform docs describe jobs as app-spec components that can run
+before or after deployments, and describe adding a job through `doctl apps
+update` or the `PUT /v2/apps/{id}` API. They also expose job invocations and
+logs through App Platform job-invocation APIs. The plugin should use those
+provider-native surfaces rather than opening the database to the caller.
 
 1. Resolve the App Platform app by env-resolved resource name (`bmw-staging`).
 2. Resolve the database URI from provider output or caller-provided env secret.
@@ -143,6 +148,17 @@ DigitalOcean implements `ProviderMigrationRepairer` by using App Platform jobs:
 
 If DigitalOcean cannot run a true ad hoc job without changing app spec, the first implementation may apply a temporary `POST_DEPLOY` or `PRE_DEPLOY` job mutation with a generated job name, deploy it, collect the result, and restore the previous app spec. That path must be treated as a destructive provider operation because it mutates app spec, even if temporary.
 
+The provider result must distinguish:
+
+- `succeeded`: repair command exited zero.
+- `failed`: provider job reached a terminal failed state or exited non-zero.
+- `approval_required`: wfctl stopped before provider invocation.
+- `unsupported`: provider plugin does not implement the capability.
+
+The result diagnostics must include the provider app ID, deployment ID when
+available, job invocation ID when available, terminal phase, component name, and
+a log tail suitable for CI summaries.
+
 ## Human Gate
 
 For `staging`, the command may run with `--approve-destructive` from a GitHub environment-gated job. For `prod`, wfctl should default to requiring a CI approval artifact:
@@ -152,28 +168,59 @@ For `staging`, the command may run with `--approve-destructive` from a GitHub en
   "operation": "migration_repair_dirty",
   "env": "prod",
   "database": "bmw-database",
+  "app": "bmw-app",
   "expected_dirty_version": "20260426000005",
   "force_version": "20260426000004",
   "requires_approval": true
 }
 ```
 
-In GitHub Actions, BMW can bind that job to an environment with required reviewers. In other CI systems, wfctl still emits the same artifact and exits with a clear "approval required" status unless `--approve-destructive` is present.
+In GitHub Actions, BMW can bind that job to an environment with required reviewers. In other CI systems, wfctl still emits the same artifact and exits with a clear "approval required" status unless `--approve-destructive` is present. If the caller omits `--approval-artifact`, wfctl writes a default JSON artifact to `$RUNNER_TEMP/wfctl-destructive-approval.json` when running under GitHub Actions, otherwise `./wfctl-destructive-approval.json`.
+
+The CLI must also be able to pass provider runtime environment values into the
+job request without hardcoding a CI provider. It accepts repeatable
+`--job-env KEY=VALUE` flags and `--job-env-from-env KEY` flags. `--job-env` is
+for non-secret values that are safe in shell history; `--job-env-from-env`
+reads a local environment variable and stores only the key/value in the
+in-memory request. wfctl must redact these values in all logs and summaries.
+
+wfctl also writes a GitHub step summary when `GITHUB_STEP_SUMMARY` is set. The
+summary must be terse and operator-oriented: operation, environment, approval
+state, provider app/job/deployment IDs, terminal status, and the final log tail.
+
+If wfctl stops before provider execution, it should still produce a structured
+result/status for automation:
+
+- Missing human approval: status `approval_required`, exit non-zero, artifact written.
+- Provider does not implement repair capability: status `unsupported`, exit non-zero.
+- Provider runs and fails: status `failed`, exit non-zero with diagnostics.
+- Provider runs and succeeds: status `succeeded`, exit zero.
 
 ## BMW Adoption
 
-BMW keeps the current temporary pre-deploy repair until staging is clean. After the platform feature ships:
+BMW keeps the current temporary pre-deploy repair until staging is clean. The
+safe force target is the newest migration version before any missing prerequisite
+that must be replayed; for example, if the dirty migration alters a table that
+should have been created by an earlier idempotent migration, the force target
+must be before that table-creation migration. After the platform feature ships:
 
 1. Replace `.github/workflows/migration-repair.yml` runner-side `psql` with `wfctl migrate repair-dirty`.
 2. Gate the repair job with the `staging` environment.
 3. Remove the temporary staging `infra.yaml` repair `run_command` after one successful repair and deploy.
 4. Keep normal pre-deploy migrations as `workflow-migrate up --source-dir /migrations`.
 
+Shipping this through BMW requires a cross-repo release sequence:
+
+1. Merge Workflow core support and release a new Workflow/wfctl version.
+2. Update and release `workflow-plugin-digitalocean` against that Workflow interface.
+3. Update BMW setup-wfctl, workflow server image, plugin registry/lockfile, and any workflow-plugin-digitalocean pin to consume the releases.
+4. Merge BMW adoption and verify staging then prod deploy.
+
 ## Acceptance Criteria
 
 - Running `wfctl migrate repair-dirty --help` documents the required guard flags and provider execution behavior.
 - A fake provider test proves wfctl resolves app/database modules for an env and calls `RepairDirtyMigration` with the expected request.
-- A non-dev destructive run without approval emits an approval artifact and does not call the provider.
-- DigitalOcean unit tests prove the provider builds the expected repair command and returns job logs/diagnostics.
+- A non-dev destructive run without approval emits an approval artifact at the default path and does not call the provider.
+- wfctl writes a GitHub step summary when `GITHUB_STEP_SUMMARY` is set.
+- DigitalOcean unit tests prove the provider builds the expected repair command, mutates/restores app spec only when necessary, and returns job logs/diagnostics.
 - BMW staging can repair dirty version `20260426000005` without opening database ingress to GitHub-hosted runners.
-

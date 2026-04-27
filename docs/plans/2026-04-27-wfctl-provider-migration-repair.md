@@ -4,7 +4,7 @@
 
 **Goal:** Add `wfctl migrate repair-dirty` so guarded dirty migration repairs run inside provider-managed trusted runtime boundaries instead of from CI runners.
 
-**Architecture:** wfctl resolves env-aware app/database infra modules, applies destructive-operation gating, and calls an optional provider interface. The first provider implementation target is DigitalOcean App Platform via `workflow-plugin-digitalocean`; Workflow core owns the CLI, request/result types, remote dispatch plumbing, and tests.
+**Architecture:** wfctl resolves env-aware app/database infra modules, applies destructive-operation gating, and calls an optional provider interface. The first provider implementation target is DigitalOcean App Platform via `workflow-plugin-digitalocean`; Workflow core owns the CLI, request/result types, remote dispatch plumbing, CI summaries, and tests. The DigitalOcean plugin owns App Platform job/spec mechanics and diagnostics. BMW owns adoption/removal of temporary app-config repair once the platform path exists.
 
 **Tech Stack:** Go 1.26, wfctl, Workflow `interfaces`, external plugin gRPC service dispatch, DigitalOcean App Platform jobs/deployments, GitHub Actions step summaries.
 
@@ -103,8 +103,11 @@ git commit -m "feat(interfaces): add migration repair request contract"
 
 Add tests covering:
 
-- `staging` without `--approve-destructive` returns approval-required and writes JSON.
-- `prod` without approval returns approval-required.
+- `staging` without `--approve-destructive` returns approval-required and writes JSON to an explicit artifact path.
+- `staging` without `--approve-destructive` and without an explicit artifact writes the default local artifact `wfctl-destructive-approval.json`.
+- `prod` without approval returns approval-required and writes the default artifact.
+- `GITHUB_ACTIONS=true` + `RUNNER_TEMP=<tmp>` defaults the artifact to `<tmp>/wfctl-destructive-approval.json`.
+- approval artifact JSON includes `operation`, `env`, `app`, `database`, `expected_dirty_version`, `force_version`, and `requires_approval`.
 - `dev` executes without explicit approval.
 - `staging` with approval executes.
 
@@ -124,18 +127,23 @@ Add:
 type destructiveDecision struct {
     Operation string `json:"operation"`
     Env string `json:"env"`
-    Resource string `json:"resource,omitempty"`
+    App string `json:"app,omitempty"`
+    Database string `json:"database,omitempty"`
+    ExpectedDirtyVersion string `json:"expected_dirty_version,omitempty"`
+    ForceVersion string `json:"force_version,omitempty"`
     RequiresApproval bool `json:"requires_approval"`
 }
 
-func requireDestructiveApproval(envName, operation, resource string, approved bool, artifactPath string) error
+func requireDestructiveApproval(decision destructiveDecision, approved bool, artifactPath string) (*interfaces.MigrationRepairResult, error)
 ```
 
 Rules:
 
 - `envName` in `dev`, `local`, `test` does not require approval.
 - Any other env requires approval unless `approved == true`.
-- If approval is missing and `artifactPath != ""`, write the JSON decision before returning an error that includes `approval required`.
+- If approval is missing, write the JSON decision before returning `MigrationRepairResult{Status: "approval_required"}` and an error that includes `approval required`.
+- If `artifactPath == ""` and `GITHUB_ACTIONS=true` with `RUNNER_TEMP` set, use `$RUNNER_TEMP/wfctl-destructive-approval.json`.
+- Otherwise use `wfctl-destructive-approval.json` in the current working directory.
 
 **Step 4: Run tests**
 
@@ -272,7 +280,8 @@ Implementation must:
 5. Type-assert `interfaces.ProviderMigrationRepairer`.
 6. Run the destructive gate.
 7. Call provider and print `provider job <id>: <status>`.
-8. Print logs if returned.
+8. Print diagnostics and logs if returned.
+9. Write a GitHub step summary when `GITHUB_STEP_SUMMARY` is set. The summary must include operation, environment, approval status, provider job/deployment IDs, terminal status, and log tail.
 
 **Step 4: Run focused tests**
 
@@ -286,19 +295,55 @@ Run: `GOWORK=off go test ./cmd/wfctl -run TestRunMigrateRepairDirtyHelp -count=1
 
 Expected: PASS and help output contains `--expected-dirty-version`, `--force-version`, and `--approve-destructive`.
 
-**Step 6: Commit**
+**Step 6: Add step-summary tests**
+
+Add `TestRunMigrateRepairDirtyWritesGitHubStepSummary` with temp
+`GITHUB_STEP_SUMMARY`. Assert the summary includes:
+
+- `migration_repair_dirty`
+- selected environment
+- provider job/deployment ID
+- terminal status
+- log tail
+
+Run: `GOWORK=off go test ./cmd/wfctl -run TestRunMigrateRepairDirtyWritesGitHubStepSummary -count=1`
+
+Expected: PASS.
+
+**Step 7: Add env propagation and structured status tests**
+
+Add tests covering:
+
+- `--job-env FOO=bar` places `Env["FOO"] == "bar"` in `MigrationRepairRequest`.
+- `--job-env-from-env DATABASE_URL` reads the process env and places the value in `Env`.
+- missing env for `--job-env-from-env` fails before provider invocation.
+- provider missing `ProviderMigrationRepairer` returns/prints status `unsupported`.
+- missing approval returns/prints status `approval_required` and does not call provider.
+
+Implementation adds flags:
+
+- `--job-env KEY=VALUE`, repeatable.
+- `--job-env-from-env KEY`, repeatable.
+
+wfctl must redact request env values from stdout, stderr, errors, logs, and
+GitHub step summary.
+
+Run: `GOWORK=off go test ./cmd/wfctl -run 'TestRunMigrateRepairDirty.*(Env|Unsupported|Approval)' -count=1`
+
+Expected: PASS.
+
+**Step 8: Commit**
 
 ```bash
 git add cmd/wfctl/migrate.go cmd/wfctl/migrate_repair.go cmd/wfctl/migrate_repair_test.go
 git commit -m "feat(wfctl): add provider-executed migration repair command"
 ```
 
-### Task 5: Document DigitalOcean Provider Contract
+### Task 5: Document Workflow Provider Contract
 
 **Files:**
 - Modify: `docs/WFCTL.md`
 - Modify: `docs/manual/build-deploy/03-ci-deploy-environments.md`
-- Create: `docs/plans/2026-04-27-wfctl-provider-migration-repair-bmw.md`
 
 **Step 1: Update docs**
 
@@ -307,7 +352,8 @@ Document:
 - why repair runs through provider-managed jobs
 - required guard flags
 - GitHub Actions environment gating example
-- BMW staging example command
+- generic env-aware app/database example command
+- default approval artifact and GitHub step summary behavior
 
 **Step 2: Verify docs render paths and command names**
 
@@ -318,7 +364,7 @@ Expected: At least one match in `docs/WFCTL.md`, one in manual docs, one in CLI 
 **Step 3: Commit**
 
 ```bash
-git add docs/WFCTL.md docs/manual/build-deploy/03-ci-deploy-environments.md docs/plans/2026-04-27-wfctl-provider-migration-repair-bmw.md
+git add docs/WFCTL.md docs/manual/build-deploy/03-ci-deploy-environments.md
 git commit -m "docs(wfctl): document provider-executed migration repair"
 ```
 
@@ -349,18 +395,180 @@ Expected: exit 0 and help shows `--expected-dirty-version`, `--force-version`, `
 
 If no fixes were needed, do not create an empty commit.
 
-### Task 7: Hand Off DigitalOcean Plugin Implementation
+### Task 7: Implement DigitalOcean Provider Capability
+
+**Repository:** `/Users/jon/workspace/workflow-plugin-digitalocean`
 
 **Files:**
-- No edits in this Workflow repo.
+- Modify: `internal/module_instance.go`
+- Create: `internal/provider_migration_repair.go`
+- Test: `internal/provider_migration_repair_test.go`
+- Modify: `internal/grpc_dispatch_test.go`
+- Modify: `internal/drivers/app_platform.go` or create an app-job helper if the existing driver boundary is a better fit.
+- Test: `internal/drivers/app_platform_migration_repair_test.go`
 
-**Step 1: Create follow-up implementation issue or plan in `workflow-plugin-digitalocean`**
+**Step 1: Create an isolated plugin worktree after the Workflow interface lands**
 
-The DO plugin must implement `ProviderMigrationRepairer` after the Workflow interface lands. The implementation plan should cover App Platform job/deployment mechanics, log collection, and restoration if temporary app spec mutation is required.
+Use a branch like `feat/provider-migration-repair`. Do not edit the dirty root
+checkout. Update `go.mod` to the Workflow commit/release containing
+`ProviderMigrationRepairer` or use a temporary local `replace` only during
+development.
 
-**Step 2: Verify issue/plan reference**
+**Step 2: Write failing dispatch tests**
 
-Run: `rg -n "ProviderMigrationRepairer|RepairDirtyMigration|migration repair" docs/plans`
+Add a test proving `InvokeMethod("IaCProvider.RepairDirtyMigration", ...)`
+decodes `request`, calls a fake provider implementing the optional interface,
+and encodes `MigrationRepairResult`.
 
-Expected: the follow-up plan exists and references the Workflow PR/commit.
+Run: `GOWORK=off go test ./internal -run TestGRPCDispatch_IaCProvider_RepairDirtyMigration -count=1`
 
+Expected: FAIL before dispatch support exists.
+
+**Step 3: Implement `InvokeMethod` dispatch**
+
+Add `IaCProvider.RepairDirtyMigration` to the switch and return a clear
+unsupported error when the provider does not implement
+`interfaces.ProviderMigrationRepairer`.
+
+Run the focused dispatch test until PASS.
+
+**Step 4: Write failing App Platform command/spec tests**
+
+Tests must prove the provider:
+
+- resolves an App Platform app by resource/app name
+- builds `/workflow-migrate repair-dirty` with source dir, expected dirty version, force version, confirmation, and `--then-up`/`--up-if-clean`
+- injects caller env without logging secret values
+- adds a generated one-shot job name that cannot collide with declared jobs
+- uses official App Platform job/spec behavior: app spec update plus deployment/job invocation polling if a true ad hoc job endpoint is unavailable
+- restores the previous app spec after terminal success or failure when it mutated spec
+- returns app ID, deployment ID, job invocation ID when available, terminal status, diagnostics, and log tail
+
+Run: `GOWORK=off go test ./internal ./internal/drivers -run 'RepairDirtyMigration|MigrationRepair' -count=1`
+
+Expected: FAIL before implementation.
+
+**Step 5: Implement App Platform repair**
+
+Use existing App Platform client abstractions where possible. If godo exposes
+job invocations/log APIs, add them to the narrow client interface. If not, add a
+small HTTP client adapter for the documented endpoints while keeping it behind
+the driver interface for tests.
+
+Implementation rules:
+
+- Never open database trusted sources.
+- Never print env secret values.
+- Treat app-spec mutation as destructive and return diagnostics if restore fails.
+- Poll with context timeout and return the final known deployment/job state on timeout.
+- Prefer job invocation logs; fall back to deployment diagnostics/log tail when invocation logs are unavailable.
+
+**Step 6: Run plugin tests**
+
+Run: `GOWORK=off go test ./internal ./internal/drivers -count=1`
+
+Expected: PASS.
+
+**Step 7: Commit plugin changes**
+
+```bash
+git add internal go.mod go.sum
+git commit -m "feat(do): run migration repair via App Platform jobs"
+```
+
+### Task 8: Release Workflow Core
+
+**Repository:** `/Users/jon/workspace/workflow`
+
+**Files:**
+- Release metadata according to the existing Workflow release process.
+
+**Step 1: Merge Workflow implementation PR**
+
+After code review, Copilot comments, and CI are clean, admin squash merge the
+Workflow PR.
+
+**Step 2: Generate and verify release**
+
+Use the repository's existing release process to tag a new Workflow/wfctl
+version containing `ProviderMigrationRepairer` and `wfctl migrate repair-dirty`.
+
+Verify:
+
+- GitHub release workflow succeeds.
+- `setup-wfctl` can install the new version.
+- `wfctl migrate repair-dirty --help` works from the released binary.
+
+### Task 9: Release DigitalOcean Plugin
+
+**Repository:** `/Users/jon/workspace/workflow-plugin-digitalocean`
+
+**Step 1: Merge plugin implementation PR**
+
+After Workflow release is available, update the plugin dependency to that
+version, ensure CI is green, resolve comments, and admin squash merge.
+
+**Step 2: Generate plugin release**
+
+Use the plugin's existing release process to publish a version containing
+`IaCProvider.RepairDirtyMigration`.
+
+Verify the plugin registry metadata and platform lockfile checksums reference
+the released artifacts, not local or platform-specific top-level hashes.
+
+### Task 10: BMW Adoption Plan
+
+**Repository:** `/Users/jon/workspace/buymywishlist`
+
+**Files:**
+- Modify: `.github/workflows/migration-repair.yml`
+- Modify: `infra.yaml`
+- Modify: docs under `docs/ops/` if present
+- Test: existing config/migration tests
+
+**Step 1: Bump released dependencies**
+
+Update:
+
+- setup-wfctl/workflow version pins to the Workflow release from Task 8.
+- workflow-plugin-digitalocean registry/lockfile pins to the plugin release from Task 9.
+- Any app/deploy image base references that still point at older alpha labels.
+
+Run `wfctl plugin lock` or the repo's lockfile refresh command so BMW consumes
+release artifacts through lockfiles rather than explicit GitHub workflow plugin
+installs.
+
+**Step 2: Replace runner-side DB repair**
+
+After Workflow and DigitalOcean plugin releases are available, update the BMW
+migration repair workflow to call:
+
+```bash
+wfctl migrate repair-dirty --env staging --config infra.yaml \
+  --database bmw-database \
+  --app bmw-app \
+  --job-image "registry.digitalocean.com/bmw-registry/workflow-migrate:${IMAGE_SHA}" \
+  --expected-dirty-version 20260426000005 \
+  --force-version 20260422000001 \
+  --then-up \
+  --confirm-force FORCE_MIGRATION_METADATA \
+  --approve-destructive
+```
+
+Use GitHub environment gating for staging/prod approval. Keep force-version
+selection explicit; it must be before the earliest missing prerequisite that
+needs replay.
+
+**Step 3: Remove temporary pre-deploy repair after staging is clean**
+
+Once one provider-executed repair succeeds and normal deploy migration has run,
+remove the temporary staging `run_command` from `infra.yaml` so the image CMD
+returns to normal `workflow-migrate up --source-dir /migrations`.
+
+**Step 4: Verify BMW**
+
+Run:
+
+- `GOWORK=off go test ./bmwplugin/...`
+- `wfctl validate --skip-unknown-types app.yaml`
+- GitHub staging deploy, then prod deploy.
