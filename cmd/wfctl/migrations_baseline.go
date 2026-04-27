@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 )
 
 type migrationGitOperations struct {
@@ -17,6 +21,17 @@ type migrationGitOperations struct {
 }
 
 var migrationGitOps = migrationGitOperations{}
+
+type migrationEphemeralDatabaseOperations struct {
+	Create func(ctx context.Context, name, baseDSN string) (string, func(), error)
+}
+
+var migrationEphemeralDB = migrationEphemeralDatabaseOperations{}
+
+type migrationBaselineCandidateResult struct {
+	Dirty   bool
+	Pending []string
+}
 
 func (ops migrationGitOperations) withDefaults() migrationGitOperations {
 	if ops.ChangedFiles == nil {
@@ -59,16 +74,25 @@ func shouldRunBaselineCandidateValidation(ctx context.Context, gitOps migrationG
 	return baselineRef, true, nil
 }
 
-func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginRunner, gitOps migrationGitOperations, runCfg migrationPluginRunConfig, migration resolvedMigrationConfig, baselineRef string, candidateRef string, keepTemp bool) error {
+func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginRunner, gitOps migrationGitOperations, runCfg migrationPluginRunConfig, migration resolvedMigrationConfig, baselineRef string, candidateRef string, keepTemp bool) (migrationBaselineCandidateResult, error) {
 	if baselineRef == "" {
 		baselineRef = "origin/main"
 	}
 	if candidateRef == "" {
 		candidateRef = "HEAD"
 	}
+	ephemeralOps := migrationEphemeralDB.withDefaults()
+	validationDSN, cleanupDB, err := ephemeralOps.Create(ctx, migration.Name, runCfg.DSN)
+	if err != nil {
+		return migrationBaselineCandidateResult{}, fmt.Errorf("create ephemeral migration database: %w", err)
+	}
+	if cleanupDB != nil {
+		defer cleanupDB()
+	}
+
 	baselineSource, cleanupBaseline, err := gitOps.MaterializeSource(ctx, baselineRef, migration.SourceDir)
 	if err != nil {
-		return fmt.Errorf("materialize baseline migration source: %w", err)
+		return migrationBaselineCandidateResult{}, fmt.Errorf("materialize baseline migration source: %w", err)
 	}
 	cleanupBaselineDone := false
 	if cleanupBaseline != nil && !keepTemp {
@@ -81,8 +105,9 @@ func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginR
 
 	baselineCfg := runCfg
 	baselineCfg.SourceDir = baselineSource
-	if _, err := runner.run(ctx, baselineCfg, "test"); err != nil {
-		return err
+	baselineCfg.DSN = validationDSN
+	if _, err := runner.run(ctx, baselineCfg, "test --keep-alive"); err != nil {
+		return migrationBaselineCandidateResult{}, err
 	}
 	if cleanupBaseline != nil && !keepTemp {
 		cleanupBaseline()
@@ -91,7 +116,7 @@ func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginR
 
 	candidateSource, cleanupCandidate, err := gitOps.MaterializeSource(ctx, candidateRef, migration.SourceDir)
 	if err != nil {
-		return fmt.Errorf("materialize candidate migration source: %w", err)
+		return migrationBaselineCandidateResult{}, fmt.Errorf("materialize candidate migration source: %w", err)
 	}
 	if cleanupCandidate != nil && !keepTemp {
 		defer cleanupCandidate()
@@ -99,19 +124,24 @@ func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginR
 
 	candidateCfg := runCfg
 	candidateCfg.SourceDir = candidateSource
+	candidateCfg.DSN = validationDSN
 	if _, err := runner.run(ctx, candidateCfg, "up"); err != nil {
-		return err
+		return migrationBaselineCandidateResult{}, err
 	}
 	status, err := runner.run(ctx, candidateCfg, "status")
 	if err != nil {
-		return err
+		return migrationBaselineCandidateResult{}, err
+	}
+	parsedStatus, err := parseMigrationStatus(status.Stdout)
+	if err != nil {
+		return migrationBaselineCandidateResult{}, err
 	}
 	if migration.Validation.ForbidDirty {
-		if err := requireCleanMigrationStatus(status.Stdout); err != nil {
-			return fmt.Errorf("migration %s status is not clean: %w", migration.Name, err)
+		if err := requireCleanMigrationStatus(parsedStatus); err != nil {
+			return migrationBaselineCandidateResult{}, fmt.Errorf("migration %s status is not clean: %w", migration.Name, err)
 		}
 	}
-	return nil
+	return parsedStatus, nil
 }
 
 func migrationSourceChanged(sourceDir string, changedFiles []string) bool {
@@ -125,14 +155,30 @@ func migrationSourceChanged(sourceDir string, changedFiles []string) bool {
 	return false
 }
 
-func requireCleanMigrationStatus(stdout string) error {
-	var status struct {
-		Dirty   bool     `json:"dirty"`
-		Pending []string `json:"pending"`
+func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, error) {
+	var status migrationBaselineCandidateResult
+	if err := json.Unmarshal([]byte(stdout), &status); err == nil {
+		return status, nil
 	}
-	if err := json.Unmarshal([]byte(stdout), &status); err != nil {
-		return fmt.Errorf("decode status JSON: %w", err)
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+			continue
+		case strings.Contains(strings.ToLower(line), "dirty"):
+			status.Dirty = true
+		case strings.HasPrefix(line, "Pending:"):
+			pending := strings.TrimSpace(strings.TrimPrefix(line, "Pending:"))
+			pending = strings.Trim(pending, "[]")
+			if pending != "" {
+				status.Pending = strings.Fields(pending)
+			}
+		}
 	}
+	return status, nil
+}
+
+func requireCleanMigrationStatus(status migrationBaselineCandidateResult) error {
 	if status.Dirty {
 		return fmt.Errorf("dirty")
 	}
@@ -140,6 +186,57 @@ func requireCleanMigrationStatus(stdout string) error {
 		return fmt.Errorf("pending migrations: %s", strings.Join(status.Pending, ", "))
 	}
 	return nil
+}
+
+func (ops migrationEphemeralDatabaseOperations) withDefaults() migrationEphemeralDatabaseOperations {
+	if ops.Create == nil {
+		ops.Create = defaultMigrationEphemeralDatabase
+	}
+	return ops
+}
+
+func defaultMigrationEphemeralDatabase(ctx context.Context, name, baseDSN string) (string, func(), error) {
+	schema := "wfctl_migrations_" + sanitizeMigrationSchemaName(name) + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
+	db, err := sql.Open("postgres", baseDSN)
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := db.ExecContext(ctx, `CREATE SCHEMA "`+schema+`"`); err != nil {
+		_ = db.Close()
+		return "", nil, err
+	}
+	cleanup := func() {
+		_, _ = db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`)
+		_ = db.Close()
+	}
+	dsn, err := dsnWithSearchPath(baseDSN, schema)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return dsn, cleanup, nil
+}
+
+var migrationSchemaUnsafeChars = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+
+func sanitizeMigrationSchemaName(name string) string {
+	name = migrationSchemaUnsafeChars.ReplaceAllString(name, "_")
+	name = strings.Trim(name, "_")
+	if name == "" {
+		return "app"
+	}
+	return strings.ToLower(name)
+}
+
+func dsnWithSearchPath(rawDSN, schema string) (string, error) {
+	u, err := url.Parse(rawDSN)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 func defaultMigrationChangedFiles(ctx context.Context, baselineRef, candidateRef string) ([]string, error) {

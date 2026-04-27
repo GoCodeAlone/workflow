@@ -21,10 +21,12 @@ type migrationValidationResult struct {
 }
 
 type migrationValidationRecord struct {
-	Name       string `json:"name"`
-	Lint       string `json:"lint,omitempty"`
-	FreshCycle string `json:"fresh_cycle,omitempty"`
-	Dirty      bool   `json:"dirty"`
+	Name              string   `json:"name"`
+	Lint              string   `json:"lint,omitempty"`
+	FreshCycle        string   `json:"fresh_cycle,omitempty"`
+	BaselineCandidate string   `json:"baseline_candidate,omitempty"`
+	Dirty             bool     `json:"dirty"`
+	Pending           []string `json:"pending,omitempty"`
 }
 
 func runMigrations(args []string) error {
@@ -104,9 +106,13 @@ func runMigrationsValidate(args []string) error {
 			record.Lint = "pass"
 		}
 		if runBaselineCandidate {
-			if err := runBaselineCandidateValidation(ctx, runner, gitOps, runCfg, migration, baselineRef, *candidateRef, *debugKeepTemp); err != nil {
+			baselineResult, err := runBaselineCandidateValidation(ctx, runner, gitOps, runCfg, migration, baselineRef, *candidateRef, *debugKeepTemp)
+			if err != nil {
 				return err
 			}
+			record.BaselineCandidate = "pass"
+			record.Dirty = baselineResult.Dirty
+			record.Pending = baselineResult.Pending
 		}
 		if migration.Validation.FreshCycle {
 			if _, err := runner.run(ctx, runCfg, "test"); err != nil {

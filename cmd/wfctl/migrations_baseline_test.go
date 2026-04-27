@@ -26,13 +26,15 @@ func TestRunMigrationsValidateAppliesBaselineBeforeCandidate(t *testing.T) {
 	want := []string{
 		"discover origin/main HEAD",
 		"run lint migrations",
+		"ephemeral app postgres://secret@example/db",
 		"materialize origin/main migrations",
-		"run test /tmp/baseline/migrations",
+		"run test --keep-alive /tmp/baseline/migrations postgres://ephemeral/app",
 		"cleanup /tmp/baseline/migrations",
 		"materialize HEAD migrations",
-		"run up /tmp/candidate/migrations",
-		"run status /tmp/candidate/migrations",
+		"run up /tmp/candidate/migrations postgres://ephemeral/app",
+		"run status /tmp/candidate/migrations postgres://ephemeral/app",
 		"cleanup /tmp/candidate/migrations",
+		"cleanup ephemeral app",
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %#v, want %#v", calls, want)
@@ -143,8 +145,32 @@ func TestRunMigrationsValidateRecordsBaselineResultFileForCommit(t *testing.T) {
 	if got.Commit != "abc123" || got.Decision != "pass" {
 		t.Fatalf("unexpected result file: %+v", got)
 	}
+	if len(got.Migrations) != 1 || got.Migrations[0].BaselineCandidate != "pass" || got.Migrations[0].Dirty {
+		t.Fatalf("baseline/candidate status not recorded: %+v", got.Migrations)
+	}
 	if strings.Contains(string(data), "postgres://secret@example/db") {
 		t.Fatal("result file leaked DSN")
+	}
+}
+
+func TestRunMigrationsValidateUsesEphemeralDSNForBaselineCandidate(t *testing.T) {
+	cfgPath := writeMigrationBaselineConfig(t, true)
+	t.Setenv("DATABASE_URL", "postgres://real-db.example/app")
+
+	var calls []string
+	restore := stubMigrationBaselineHooks(t, &calls, []string{"migrations/202604270001_add_users.up.sql"}, "abc123")
+	defer restore()
+
+	if err := runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci"}); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(calls, "\n")
+	if strings.Contains(joined, "run up /tmp/candidate/migrations postgres://real-db.example/app") ||
+		strings.Contains(joined, "run status /tmp/candidate/migrations postgres://real-db.example/app") {
+		t.Fatalf("baseline/candidate replay used configured DSN:\n%s", joined)
+	}
+	if !strings.Contains(joined, "run up /tmp/candidate/migrations postgres://ephemeral/app") {
+		t.Fatalf("candidate replay did not use ephemeral DSN:\n%s", joined)
 	}
 }
 
@@ -153,12 +179,16 @@ func stubMigrationBaselineHooks(t *testing.T, calls *[]string, changedFiles []st
 	oldRunner := newMigrationPluginRunner
 	newMigrationPluginRunner = func() migrationPluginRunner {
 		return migrationPluginRunner{
-			exec: func(_ context.Context, _ string, args []string, _ map[string]string) (migrationCommandResult, error) {
-				command := args[2]
+			exec: func(_ context.Context, _ string, args []string, env map[string]string) (migrationCommandResult, error) {
+				command := strings.Join(args[2:len(args)-4], " ")
 				sourceDir := argValue(args, "--source-dir")
-				*calls = append(*calls, "run "+command+" "+sourceDir)
-				if command == "status" {
-					return migrationCommandResult{Stdout: `{"dirty":false,"pending":[]}`}, nil
+				call := "run " + command + " " + sourceDir
+				if command != "lint" {
+					call += " " + env["DATABASE_URL"]
+				}
+				*calls = append(*calls, call)
+				if strings.HasPrefix(command, "status") {
+					return migrationCommandResult{Stdout: "Current: 202604270001\nNo pending migrations.\n"}, nil
 				}
 				return migrationCommandResult{}, nil
 			},
@@ -186,10 +216,20 @@ func stubMigrationBaselineHooks(t *testing.T, calls *[]string, changedFiles []st
 			return commit, nil
 		},
 	}
+	oldEphemeral := migrationEphemeralDB
+	migrationEphemeralDB = migrationEphemeralDatabaseOperations{
+		Create: func(_ context.Context, name, baseDSN string) (string, func(), error) {
+			*calls = append(*calls, "ephemeral "+name+" "+baseDSN)
+			return "postgres://ephemeral/" + name, func() {
+				*calls = append(*calls, "cleanup ephemeral "+name)
+			}, nil
+		},
+	}
 
 	return func() {
 		newMigrationPluginRunner = oldRunner
 		migrationGitOps = oldGit
+		migrationEphemeralDB = oldEphemeral
 	}
 }
 
