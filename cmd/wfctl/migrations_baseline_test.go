@@ -172,6 +172,9 @@ func TestRunMigrationsValidateWritesFailureResultFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
+	if strings.Contains(err.Error(), "postgres://secret@example/db") {
+		t.Fatalf("returned error leaked DSN: %v", err)
+	}
 	data, readErr := os.ReadFile(resultPath)
 	if readErr != nil {
 		t.Fatal(readErr)
@@ -194,6 +197,68 @@ func TestRunMigrationsValidateWritesFailureResultFile(t *testing.T) {
 func TestParseMigrationStatusRejectsUnknownOutput(t *testing.T) {
 	if _, err := parseMigrationStatus("unexpected status output"); err == nil {
 		t.Fatal("expected unrecognized status error")
+	}
+	if _, err := parseMigrationStatus(`{"message":"plugin changed output"}`); err == nil {
+		t.Fatal("expected unrecognized JSON status error")
+	}
+}
+
+func TestRunMigrationsValidateWritesFailureResultFileForDiffErrors(t *testing.T) {
+	cfgPath := writeMigrationBaselineConfig(t, true)
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+
+	var calls []string
+	restore := stubMigrationBaselineHooks(t, &calls, []string{}, "abc123")
+	defer restore()
+	migrationGitOps.ChangedFiles = func(context.Context, string, string) ([]string, error) {
+		return nil, errors.New("git diff failed for postgres://secret@example/db")
+	}
+
+	err := runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci", "--result-file", resultPath})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if strings.Contains(err.Error(), "postgres://secret@example/db") {
+		t.Fatalf("returned error leaked DSN: %v", err)
+	}
+	data, readErr := os.ReadFile(resultPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(data), "postgres://secret@example/db") {
+		t.Fatal("failure result file leaked DSN")
+	}
+	var got migrationValidationResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode result file: %v\n%s", err, data)
+	}
+	if got.Decision != "fail" || len(got.Migrations) != 1 || got.Migrations[0].BaselineCandidate != "fail" {
+		t.Fatalf("unexpected failure result: %+v", got)
+	}
+}
+
+func TestMaterializeBaselineSourceOnlyFallsBackWhenSourceMissing(t *testing.T) {
+	missingOps := migrationGitOperations{MaterializeSource: func(context.Context, string, string) (string, func(), error) {
+		return "", nil, errMigrationSourceMissing
+	}}
+	source, cleanup, err := materializeBaselineSource(context.Background(), missingOps, "origin/main", "migrations/new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup == nil {
+		t.Fatal("expected cleanup for empty source")
+	}
+	defer cleanup()
+	if !strings.HasSuffix(filepath.ToSlash(source), "migrations/new") {
+		t.Fatalf("unexpected empty source path: %s", source)
+	}
+
+	failingOps := migrationGitOperations{MaterializeSource: func(context.Context, string, string) (string, func(), error) {
+		return "", nil, errors.New("bad ref")
+	}}
+	if _, _, err := materializeBaselineSource(context.Background(), failingOps, "bad-ref", "migrations"); err == nil {
+		t.Fatal("expected non-missing materialization error")
 	}
 }
 

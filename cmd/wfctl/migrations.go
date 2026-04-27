@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -90,7 +91,7 @@ func runMigrationsValidate(args []string) error {
 			var err error
 			baselineRef, runBaselineCandidate, err = shouldRunBaselineCandidateValidation(ctx, gitOps, migration, *candidateRef, *forceBaselineCandidate)
 			if err != nil {
-				return err
+				return failMigrationValidation(result, record, *resultFile, migration, "baseline_candidate", err)
 			}
 		}
 		runCfg := migrationPluginRunConfig{
@@ -116,7 +117,7 @@ func runMigrationsValidate(args []string) error {
 			record.Pending = baselineResult.Pending
 		}
 		if migration.Validation.FreshCycle {
-			if _, err := runner.run(ctx, runCfg, "test"); err != nil {
+			if err := runFreshCycleValidation(ctx, runner, runCfg, migration); err != nil {
 				return failMigrationValidation(result, record, *resultFile, migration, "fresh_cycle", err)
 			}
 			record.FreshCycle = "pass"
@@ -162,7 +163,7 @@ func failMigrationValidation(result migrationValidationResult, record migrationV
 			return writeErr
 		}
 	}
-	return err
+	return errors.New(record.Error)
 }
 
 func writeMigrationValidationResult(path string, result migrationValidationResult) error {

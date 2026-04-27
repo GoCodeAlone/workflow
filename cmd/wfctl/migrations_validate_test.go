@@ -15,12 +15,25 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
 
 	var calls []string
+	oldEphemeral := migrationEphemeralDB
+	migrationEphemeralDB = migrationEphemeralDatabaseOperations{
+		Create: func(_ context.Context, name, baseDSN string) (string, func(), error) {
+			calls = append(calls, "ephemeral "+name+" "+baseDSN)
+			return "postgres://ephemeral/" + name, func() {
+				calls = append(calls, "cleanup ephemeral "+name)
+			}, nil
+		},
+	}
+	defer func() { migrationEphemeralDB = oldEphemeral }()
 	oldFactory := newMigrationPluginRunner
 	newMigrationPluginRunner = func() migrationPluginRunner {
 		return migrationPluginRunner{
 			exec: func(_ context.Context, pluginName string, args []string, env map[string]string) (migrationCommandResult, error) {
-				calls = append(calls, pluginName+" "+strings.Join(args, " "))
-				if env["DATABASE_URL"] != "postgres://secret@example/db" {
+				calls = append(calls, pluginName+" "+strings.Join(args, " ")+" "+env["DATABASE_URL"])
+				if strings.Contains(strings.Join(args, " "), " test ") && env["DATABASE_URL"] != "postgres://ephemeral/app-fresh" {
+					t.Fatalf("fresh cycle used DATABASE_URL = %q", env["DATABASE_URL"])
+				}
+				if strings.Contains(strings.Join(args, " "), " lint ") && env["DATABASE_URL"] != "postgres://secret@example/db" {
 					t.Fatalf("runner env DATABASE_URL = %q", env["DATABASE_URL"])
 				}
 				return migrationCommandResult{Stdout: `{"dirty":false}`}, nil
@@ -35,8 +48,10 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 	}
 
 	want := []string{
-		"workflow-plugin-migrations --wfctl-cli migrate lint --driver golang-migrate --source-dir migrations",
-		"workflow-plugin-migrations --wfctl-cli migrate test --driver golang-migrate --source-dir migrations",
+		"workflow-plugin-migrations --wfctl-cli migrate lint --driver golang-migrate --source-dir migrations postgres://secret@example/db",
+		"ephemeral app-fresh postgres://secret@example/db",
+		"workflow-plugin-migrations --wfctl-cli migrate test --driver golang-migrate --source-dir migrations postgres://ephemeral/app-fresh",
+		"cleanup ephemeral app-fresh",
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %#v, want %#v", calls, want)
@@ -47,6 +62,7 @@ func TestRunMigrationsValidateJSONOutput(t *testing.T) {
 	cfgPath := writeMigrationValidateConfig(t)
 	resultPath := filepath.Join(t.TempDir(), "result.json")
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	t.Setenv("WFCTL_MIGRATION_VALIDATION_DATABASE_URL", "postgres://validation@example/db")
 
 	oldFactory := newMigrationPluginRunner
 	newMigrationPluginRunner = func() migrationPluginRunner {

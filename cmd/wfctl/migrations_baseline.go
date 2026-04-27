@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,8 @@ type migrationGitOperations struct {
 }
 
 var migrationGitOps = migrationGitOperations{}
+
+var errMigrationSourceMissing = errors.New("migration source missing at ref")
 
 type migrationEphemeralDatabaseOperations struct {
 	Create func(ctx context.Context, name, baseDSN string) (string, func(), error)
@@ -156,7 +159,19 @@ func migrationSourceChanged(sourceDir string, changedFiles []string) bool {
 
 func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, error) {
 	var status migrationBaselineCandidateResult
-	if err := json.Unmarshal([]byte(stdout), &status); err == nil {
+	if strings.HasPrefix(strings.TrimSpace(stdout), "{") {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+			return migrationBaselineCandidateResult{}, fmt.Errorf("decode status JSON: %w", err)
+		}
+		if _, hasDirty := raw["Dirty"]; !hasDirty {
+			if _, hasDirty = raw["dirty"]; !hasDirty {
+				return migrationBaselineCandidateResult{}, fmt.Errorf("unrecognized migration status JSON")
+			}
+		}
+		if err := json.Unmarshal([]byte(stdout), &status); err != nil {
+			return migrationBaselineCandidateResult{}, fmt.Errorf("decode status JSON: %w", err)
+		}
 		return status, nil
 	}
 	recognized := false
@@ -197,6 +212,21 @@ func requireCleanMigrationStatus(status migrationBaselineCandidateResult) error 
 	return nil
 }
 
+func runFreshCycleValidation(ctx context.Context, runner migrationPluginRunner, runCfg migrationPluginRunConfig, migration resolvedMigrationConfig) error {
+	ephemeralOps := migrationEphemeralDB.withDefaults()
+	validationDSN, cleanupDB, err := ephemeralOps.Create(ctx, migration.Name+"-fresh", runCfg.DSN)
+	if err != nil {
+		return fmt.Errorf("create ephemeral migration database: %w", err)
+	}
+	if cleanupDB != nil {
+		defer cleanupDB()
+	}
+	freshCfg := runCfg
+	freshCfg.DSN = validationDSN
+	_, err = runner.run(ctx, freshCfg, "test")
+	return err
+}
+
 func (ops migrationEphemeralDatabaseOperations) withDefaults() migrationEphemeralDatabaseOperations {
 	if ops.Create == nil {
 		ops.Create = defaultMigrationEphemeralDatabase
@@ -232,9 +262,12 @@ func defaultMigrationMaterializeSource(ctx context.Context, ref, sourceDir strin
 		_ = os.RemoveAll(tmpDir)
 	}
 
-	out, err := exec.CommandContext(ctx, "git", "archive", "--format=tar", ref, sourceDir).Output()
+	out, err := exec.CommandContext(ctx, "git", "archive", "--format=tar", ref, sourceDir).CombinedOutput()
 	if err != nil {
 		cleanup()
+		if isMissingMigrationSourceArchiveError(string(out)) {
+			return "", nil, errMigrationSourceMissing
+		}
 		return "", nil, err
 	}
 	if err := extractTar(bytes.NewReader(out), tmpDir); err != nil {
@@ -244,10 +277,18 @@ func defaultMigrationMaterializeSource(ctx context.Context, ref, sourceDir strin
 	return filepath.Join(tmpDir, sourceDir), cleanup, nil
 }
 
+func isMissingMigrationSourceArchiveError(output string) bool {
+	output = strings.ToLower(output)
+	return strings.Contains(output, "pathspec") && strings.Contains(output, "did not match")
+}
+
 func materializeBaselineSource(ctx context.Context, gitOps migrationGitOperations, ref, sourceDir string) (string, func(), error) {
 	source, cleanup, err := gitOps.MaterializeSource(ctx, ref, sourceDir)
 	if err == nil {
 		return source, cleanup, nil
+	}
+	if !errors.Is(err, errMigrationSourceMissing) {
+		return "", nil, err
 	}
 	return emptyMigrationSource(sourceDir)
 }
