@@ -17,11 +17,21 @@ type CIConfig struct {
 }
 
 type CIMigrationConfig struct {
-	Name       string                      `json:"name" yaml:"name"`
+	Name         string                                   `json:"name" yaml:"name"`
+	Plugin       string                                   `json:"plugin,omitempty" yaml:"plugin,omitempty"`
+	Driver       string                                   `json:"driver,omitempty" yaml:"driver,omitempty"`
+	SourceDir    string                                   `json:"source_dir" yaml:"source_dir"`
+	Database     CIMigrationDatabaseConfig                `json:"database" yaml:"database"`
+	Baseline     CIMigrationBaselineConfig                `json:"baseline,omitempty" yaml:"baseline,omitempty"`
+	Validation   CIMigrationValidationConfig              `json:"validation,omitempty" yaml:"validation,omitempty"`
+	Environments map[string]*CIMigrationEnvironmentConfig `json:"environments,omitempty" yaml:"environments,omitempty"`
+}
+
+type CIMigrationEnvironmentConfig struct {
 	Plugin     string                      `json:"plugin,omitempty" yaml:"plugin,omitempty"`
 	Driver     string                      `json:"driver,omitempty" yaml:"driver,omitempty"`
-	SourceDir  string                      `json:"source_dir" yaml:"source_dir"`
-	Database   CIMigrationDatabaseConfig   `json:"database" yaml:"database"`
+	SourceDir  string                      `json:"source_dir,omitempty" yaml:"source_dir,omitempty"`
+	Database   CIMigrationDatabaseConfig   `json:"database,omitempty" yaml:"database,omitempty"`
 	Baseline   CIMigrationBaselineConfig   `json:"baseline,omitempty" yaml:"baseline,omitempty"`
 	Validation CIMigrationValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
 }

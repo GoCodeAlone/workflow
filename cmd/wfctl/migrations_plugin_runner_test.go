@@ -26,6 +26,7 @@ func TestMigrationPluginRunnerBuildsWorkflowMigrateArgs(t *testing.T) {
 		Driver:    "golang-migrate",
 		SourceDir: "migrations",
 		DSN:       "postgres://user:secret@example.com/app",
+		PluginDir: "custom/plugins",
 	}, "test")
 	if err != nil {
 		t.Fatal(err)
@@ -45,26 +46,29 @@ func TestMigrationPluginRunnerBuildsWorkflowMigrateArgs(t *testing.T) {
 		"golang-migrate",
 		"--source-dir",
 		"migrations",
-		"--dsn",
-		"postgres://user:secret@example.com/app",
+		"--dsn-env",
+		"WFCTL_MIGRATION_DSN",
 	}
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", gotArgs, wantArgs)
 	}
-	if gotEnv != nil {
-		t.Fatalf("env = %#v, want nil", gotEnv)
+	if gotEnv["WFCTL_MIGRATION_DSN"] != "postgres://user:secret@example.com/app" {
+		t.Fatalf("env did not receive DSN: %#v", gotEnv)
 	}
 }
 
-func TestMigrationPluginRunnerRedactsDSNInErrors(t *testing.T) {
+func TestMigrationPluginRunnerRedactsDSNInErrorsAndOutput(t *testing.T) {
 	const secretDSN = "postgres://user:super-secret@example.com/app"
 	runner := migrationPluginRunner{
 		exec: func(_ context.Context, _ string, _ []string, _ map[string]string) (migrationCommandResult, error) {
-			return migrationCommandResult{}, errors.New("migration failed for " + secretDSN)
+			return migrationCommandResult{
+				Stdout: "connected to " + secretDSN,
+				Stderr: "failed for " + secretDSN,
+			}, errors.New("migration failed for " + secretDSN)
 		},
 	}
 
-	_, err := runner.run(context.Background(), migrationPluginRunConfig{
+	result, err := runner.run(context.Background(), migrationPluginRunConfig{
 		Plugin:    "workflow-plugin-migrations",
 		Driver:    "golang-migrate",
 		SourceDir: "migrations",
@@ -80,5 +84,32 @@ func TestMigrationPluginRunnerRedactsDSNInErrors(t *testing.T) {
 	}
 	if !strings.Contains(msg, "[REDACTED_DSN]") {
 		t.Fatalf("error did not contain redaction marker: %s", msg)
+	}
+	if strings.Contains(result.Stdout, secretDSN) || strings.Contains(result.Stderr, secretDSN) {
+		t.Fatalf("output leaked DSN: stdout=%q stderr=%q", result.Stdout, result.Stderr)
+	}
+}
+
+func TestMigrationPluginRunnerUsesConfiguredPluginDir(t *testing.T) {
+	gotPluginDir := ""
+	runner := migrationPluginRunner{
+		exec: func(_ context.Context, _ string, _ []string, env map[string]string) (migrationCommandResult, error) {
+			gotPluginDir = env["WFCTL_PLUGIN_DIR"]
+			return migrationCommandResult{}, nil
+		},
+	}
+
+	_, err := runner.run(context.Background(), migrationPluginRunConfig{
+		Plugin:    "workflow-plugin-migrations",
+		PluginDir: "custom/plugins",
+		Driver:    "golang-migrate",
+		SourceDir: "migrations",
+		DSN:       "postgres://user:secret@example.com/app",
+	}, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPluginDir != "custom/plugins" {
+		t.Fatalf("WFCTL_PLUGIN_DIR = %q, want custom/plugins", gotPluginDir)
 	}
 }

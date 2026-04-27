@@ -92,6 +92,11 @@ ci:
         fresh_cycle: true
         baseline_candidate: true
         forbid_dirty: true
+      environments:
+        staging:
+          source_dir: migrations/staging
+          database:
+            env: STAGING_DATABASE_URL
 `)
 	var cfg WorkflowConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -106,6 +111,12 @@ ci:
 	}
 	if !got.Validation.FreshCycle || !got.Validation.BaselineCandidate || !got.Validation.ForbidDirty {
 		t.Fatalf("validation flags not parsed: %+v", got.Validation)
+	}
+	if got.Environments["staging"].SourceDir != "migrations/staging" {
+		t.Fatalf("staging source_dir = %q", got.Environments["staging"].SourceDir)
+	}
+	if got.Environments["staging"].Database.Env != "STAGING_DATABASE_URL" {
+		t.Fatalf("staging database env = %q", got.Environments["staging"].Database.Env)
 	}
 }
 

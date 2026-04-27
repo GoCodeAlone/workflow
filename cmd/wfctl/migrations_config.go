@@ -33,6 +33,11 @@ func resolveMigrationConfigs(cfg *config.WorkflowConfig, envName string) ([]reso
 	resolved := make([]resolvedMigrationConfig, 0, len(cfg.CI.Migrations))
 	var errs []error
 	for i, migration := range cfg.CI.Migrations {
+		envMigration, ok := migrationForEnv(migration, envName)
+		if !ok {
+			continue
+		}
+		migration = envMigration
 		itemName := strings.TrimSpace(migration.Name)
 		label := itemName
 		if label == "" {
@@ -70,6 +75,38 @@ func resolveMigrationConfigs(cfg *config.WorkflowConfig, envName string) ([]reso
 	}
 
 	return resolved, errors.Join(errs...)
+}
+
+func migrationForEnv(migration config.CIMigrationConfig, envName string) (config.CIMigrationConfig, bool) {
+	if envName == "" || len(migration.Environments) == 0 {
+		return migration, true
+	}
+	override, listed := migration.Environments[envName]
+	if !listed {
+		return migration, true
+	}
+	if override == nil {
+		return config.CIMigrationConfig{}, false
+	}
+	if strings.TrimSpace(override.Plugin) != "" {
+		migration.Plugin = override.Plugin
+	}
+	if strings.TrimSpace(override.Driver) != "" {
+		migration.Driver = override.Driver
+	}
+	if strings.TrimSpace(override.SourceDir) != "" {
+		migration.SourceDir = override.SourceDir
+	}
+	if override.Database.Env != "" || override.Database.DSN != "" {
+		migration.Database = override.Database
+	}
+	if override.Baseline.Ref != "" || override.Baseline.Mode != "" {
+		migration.Baseline = override.Baseline
+	}
+	if override.Validation != (config.CIMigrationValidationConfig{}) {
+		migration.Validation = override.Validation
+	}
+	return migration, true
 }
 
 func resolveMigrationDSN(migration config.CIMigrationConfig) (string, error) {

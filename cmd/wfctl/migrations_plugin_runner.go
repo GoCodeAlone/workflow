@@ -18,6 +18,7 @@ type migrationCommandResult struct {
 
 type migrationPluginRunConfig struct {
 	Plugin    string
+	PluginDir string
 	Driver    string
 	SourceDir string
 	DSN       string
@@ -33,7 +34,9 @@ func (r migrationPluginRunner) run(ctx context.Context, cfg migrationPluginRunCo
 		execFn = defaultMigrationPluginExecutor
 	}
 
-	result, err := execFn(ctx, cfg.Plugin, buildMigrationPluginArgs(cfg, command), nil)
+	result, err := execFn(ctx, cfg.Plugin, buildMigrationPluginArgs(cfg, command), buildMigrationPluginEnv(cfg))
+	result.Stdout = redactMigrationDSN(result.Stdout, cfg.DSN)
+	result.Stderr = redactMigrationDSN(result.Stderr, cfg.DSN)
 	if err != nil {
 		return result, fmt.Errorf("migration plugin %s migrate %s: %s", cfg.Plugin, command, redactMigrationDSN(err.Error(), cfg.DSN))
 	}
@@ -46,14 +49,28 @@ func buildMigrationPluginArgs(cfg migrationPluginRunConfig, command string) []st
 	args = append(args,
 		"--driver", cfg.Driver,
 		"--source-dir", cfg.SourceDir,
-		"--dsn", cfg.DSN,
+		"--dsn-env", "WFCTL_MIGRATION_DSN",
 	)
 	return args
 }
 
+func buildMigrationPluginEnv(cfg migrationPluginRunConfig) map[string]string {
+	env := map[string]string{
+		"WFCTL_MIGRATION_DSN": cfg.DSN,
+	}
+	if cfg.PluginDir != "" {
+		env["WFCTL_PLUGIN_DIR"] = cfg.PluginDir
+	}
+	return env
+}
+
 func defaultMigrationPluginExecutor(ctx context.Context, pluginName string, args []string, env map[string]string) (migrationCommandResult, error) {
 	pluginDirName := normalizePluginName(pluginName)
-	binaryPath := filepath.Join(defaultDataDir, pluginDirName, pluginDirName)
+	pluginRoot := defaultDataDir
+	if env != nil && env["WFCTL_PLUGIN_DIR"] != "" {
+		pluginRoot = env["WFCTL_PLUGIN_DIR"]
+	}
+	binaryPath := filepath.Join(pluginRoot, pluginDirName, pluginDirName)
 	cmd := exec.CommandContext(ctx, binaryPath, args...) //nolint:gosec // binary path follows wfctl installed-plugin layout.
 
 	if len(env) > 0 {
