@@ -29,6 +29,10 @@ type migrationPluginRunner struct {
 }
 
 func (r migrationPluginRunner) run(ctx context.Context, cfg migrationPluginRunConfig, command string) (migrationCommandResult, error) {
+	return r.runArgs(ctx, cfg, strings.Fields(command))
+}
+
+func (r migrationPluginRunner) runArgs(ctx context.Context, cfg migrationPluginRunConfig, commandArgs []string) (migrationCommandResult, error) {
 	if err := validateMigrationPluginName(cfg.Plugin); err != nil {
 		return migrationCommandResult{}, err
 	}
@@ -38,18 +42,18 @@ func (r migrationPluginRunner) run(ctx context.Context, cfg migrationPluginRunCo
 		execFn = defaultMigrationPluginExecutor
 	}
 
-	result, err := execFn(ctx, cfg.Plugin, buildMigrationPluginArgs(cfg, command), buildMigrationPluginEnv(cfg))
+	result, err := execFn(ctx, cfg.Plugin, buildMigrationPluginArgs(cfg, commandArgs), buildMigrationPluginEnv(cfg))
 	result.Stdout = redactMigrationDSN(result.Stdout, cfg.DSN)
 	result.Stderr = redactMigrationDSN(result.Stderr, cfg.DSN)
 	if err != nil {
-		return result, fmt.Errorf("migration plugin %s migrate %s: %s", cfg.Plugin, command, redactMigrationDSN(err.Error(), cfg.DSN))
+		return result, fmt.Errorf("migration plugin %s migrate %s: %s", cfg.Plugin, strings.Join(commandArgs, " "), redactMigrationDSN(err.Error(), cfg.DSN))
 	}
 	return result, nil
 }
 
-func buildMigrationPluginArgs(cfg migrationPluginRunConfig, command string) []string {
+func buildMigrationPluginArgs(cfg migrationPluginRunConfig, commandArgs []string) []string {
 	args := []string{"--wfctl-cli", "migrate"}
-	args = append(args, strings.Fields(command)...)
+	args = append(args, commandArgs...)
 	args = append(args,
 		"--driver", cfg.Driver,
 		"--source-dir", cfg.SourceDir,

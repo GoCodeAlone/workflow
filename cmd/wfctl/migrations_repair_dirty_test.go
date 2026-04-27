@@ -28,7 +28,6 @@ func TestRunMigrationsRepairDirtyPassesExactVersionAndThenUp(t *testing.T) {
 	restore := stubMigrationRepairRunner(t, &calls, []migrationCommandResult{
 		{Stdout: "Current: 20260426000005\nDirty: true\nNo pending migrations.\n"},
 		{},
-		{},
 		{Stdout: "Current: 20260426000004\nDirty: false\nNo pending migrations.\n"},
 	})
 	defer restore()
@@ -39,8 +38,7 @@ func TestRunMigrationsRepairDirtyPassesExactVersionAndThenUp(t *testing.T) {
 
 	want := []string{
 		"status",
-		"repair-dirty --expected-dirty-version 20260426000005 --force-version 20260426000004 --confirm-force FORCE_MIGRATION_METADATA",
-		"up",
+		"repair-dirty --expected-dirty-version 20260426000005 --force-version 20260426000004 --confirm-force FORCE_MIGRATION_METADATA --then-up",
 		"status",
 	}
 	if !reflect.DeepEqual(calls, want) {
@@ -56,7 +54,7 @@ func TestRunMigrationsRepairDirtyApprovalRequiredForProdWithoutApprovedToken(t *
 	defer restore()
 
 	out, err := captureStdout(t, func() error {
-		return runMigrations([]string{"repair-dirty", "--config", cfgPath, "--env", "prod", "--expected-dirty-version", "20260426000005", "--force-version", "20260426000004", "--confirm-force", "FORCE_MIGRATION_METADATA", "--format", "json"})
+		return runMigrations([]string{"repair-dirty", "--config", cfgPath, "--env", "prod", "--plugin-dir", "custom/plugins", "--expected-dirty-version", "20260426000005", "--force-version", "20260426000004", "--confirm-force", "FORCE_MIGRATION_METADATA"})
 	})
 	if err == nil {
 		t.Fatal("expected approval-required error")
@@ -76,8 +74,28 @@ func TestRunMigrationsRepairDirtyApprovalRequiredForProdWithoutApprovedToken(t *
 	if got.Decision != "fail" || !got.Destructive || !got.HumanApprovalRequired {
 		t.Fatalf("unexpected approval result: %+v", got)
 	}
-	if !strings.Contains(got.ApprovalCommand, "wfctl migrations repair-dirty") || strings.Contains(got.ApprovalCommand, "postgres://secret@example/db") {
+	if !strings.Contains(got.ApprovalCommand, "wfctl migrations repair-dirty") || !strings.Contains(got.ApprovalCommand, "--plugin-dir custom/plugins") || strings.Contains(got.ApprovalCommand, "postgres://secret@example/db") {
 		t.Fatalf("bad approval command: %q", got.ApprovalCommand)
+	}
+}
+
+func TestRunMigrationsRepairDirtyUpIfCleanIsIdempotent(t *testing.T) {
+	cfgPath := writeMigrationStatusConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	var calls []string
+	restore := stubMigrationRepairRunner(t, &calls, []migrationCommandResult{
+		{Stdout: "Current: 20260426000004\nDirty: false\nNo pending migrations.\n"},
+		{},
+		{Stdout: "Current: 20260426000004\nDirty: false\nNo pending migrations.\n"},
+	})
+	defer restore()
+
+	if err := runMigrations([]string{"repair-dirty", "--config", cfgPath, "--env", "staging", "--expected-dirty-version", "20260426000005", "--force-version", "20260426000004", "--confirm-force", "FORCE_MIGRATION_METADATA", "--up-if-clean"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"status", "up", "status"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %#v, want %#v", calls, want)
 	}
 }
 

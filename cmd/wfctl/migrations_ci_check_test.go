@@ -105,6 +105,53 @@ func TestRunMigrationsCICheckFailsClosedWhenPluginLoadFails(t *testing.T) {
 	}
 }
 
+func TestRunMigrationsCICheckFailsClosedOnDirtyWithoutForbidDirty(t *testing.T) {
+	cfgPath := writeMigrationStatusObserveConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	restore := stubMigrationStatusRunner(t, migrationCommandResult{
+		Stdout: "Current: 20260426000005\nNo pending migrations.\nWARNING: database is in dirty state!\n",
+	}, nil)
+	defer restore()
+
+	out, err := captureStdout(t, func() error {
+		return runMigrations([]string{"ci-check", "--config", cfgPath, "--env", "ci", "--format", "json"})
+	})
+	if err == nil {
+		t.Fatal("expected dirty ci-check error")
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode ci-check JSON: %v\n%s", err, out)
+	}
+	reasons := got["reasons"].([]any)
+	if len(reasons) != 1 || reasons[0] != "migration app is dirty at version 20260426000005" {
+		t.Fatalf("reasons = %#v", reasons)
+	}
+}
+
+func TestRunMigrationsCICheckRejectsValidationResultMissingMigration(t *testing.T) {
+	cfgPath := writeMigrationStatusConfig(t)
+	resultPath := writeMigrationValidationResultFixture(t, migrationValidationResult{
+		Decision: "pass",
+		Commit:   "abc123",
+	})
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	restore := stubMigrationStatusRunner(t, migrationCommandResult{
+		Stdout: "Current: 20260426000005\nNo pending migrations.\n",
+	}, nil)
+	defer restore()
+
+	out, err := captureStdout(t, func() error {
+		return runMigrations([]string{"ci-check", "--config", cfgPath, "--env", "ci", "--commit", "abc123", "--validation-result", resultPath, "--require-validation-result", "--format", "json"})
+	})
+	if err == nil {
+		t.Fatal("expected missing validation migration error")
+	}
+	if !strings.Contains(out, "validation result missing migration app") {
+		t.Fatalf("unexpected ci-check output: %s", out)
+	}
+}
+
 func writeMigrationValidationResultFixture(t *testing.T, result migrationValidationResult) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "migrations-result.json")

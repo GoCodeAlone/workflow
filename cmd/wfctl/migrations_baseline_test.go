@@ -207,6 +207,22 @@ func TestParseMigrationStatusRejectsUnknownOutput(t *testing.T) {
 	if _, err := parseMigrationStatus("Current: 202604270001\n"); err == nil {
 		t.Fatal("expected incomplete text status error")
 	}
+	status, err := parseMigrationStatus("Current: 202604270001\nNo pending migrations.\nWARNING: database is in dirty state!\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Dirty {
+		t.Fatal("expected plugin dirty warning to mark status dirty")
+	}
+}
+
+func TestMigrationSourceChangedNormalizesDotSlashAndRoot(t *testing.T) {
+	if !migrationSourceChanged("./migrations", []string{"migrations/202604270001_add_users.up.sql"}) {
+		t.Fatal("expected ./migrations to match git diff path")
+	}
+	if !migrationSourceChanged(".", []string{"migrations/202604270001_add_users.up.sql"}) {
+		t.Fatal("expected repo-root source to match any changed path")
+	}
 }
 
 func TestRunMigrationsValidateFailsClosedOnDirtyBaselineStatus(t *testing.T) {

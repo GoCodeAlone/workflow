@@ -151,7 +151,10 @@ func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginR
 }
 
 func migrationSourceChanged(sourceDir string, changedFiles []string) bool {
-	sourceDir = strings.Trim(strings.TrimSpace(filepath.ToSlash(sourceDir)), "/")
+	sourceDir = normalizeMigrationSourceDir(sourceDir)
+	if sourceDir == "." {
+		return len(changedFiles) > 0
+	}
 	for _, changed := range changedFiles {
 		changed = strings.Trim(strings.TrimSpace(filepath.ToSlash(changed)), "/")
 		if changed == sourceDir || strings.HasPrefix(changed, sourceDir+"/") {
@@ -159,6 +162,16 @@ func migrationSourceChanged(sourceDir string, changedFiles []string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeMigrationSourceDir(sourceDir string) string {
+	sourceDir = strings.TrimSpace(filepath.ToSlash(sourceDir))
+	sourceDir = strings.TrimPrefix(sourceDir, "./")
+	sourceDir = strings.Trim(sourceDir, "/")
+	if sourceDir == "" || sourceDir == "." {
+		return "."
+	}
+	return sourceDir
 }
 
 func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, error) {
@@ -188,6 +201,9 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 		case strings.HasPrefix(lowerLine, "dirty:"):
 			recognized = true
 			status.Dirty = strings.Contains(lowerLine, "true") || strings.Contains(lowerLine, "yes")
+		case strings.Contains(lowerLine, "dirty state"):
+			recognized = true
+			status.Dirty = true
 		case strings.HasPrefix(line, "Current:"):
 			recognized = true
 			currentSeen = true

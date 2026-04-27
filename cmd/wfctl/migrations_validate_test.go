@@ -34,8 +34,8 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 				if strings.Contains(strings.Join(args, " "), " test ") && env["DATABASE_URL"] != "postgres://ephemeral/app-fresh" {
 					t.Fatalf("fresh cycle used DATABASE_URL = %q", env["DATABASE_URL"])
 				}
-				if strings.Contains(strings.Join(args, " "), " lint ") && env["DATABASE_URL"] != "postgres://secret@example/db" {
-					t.Fatalf("runner env DATABASE_URL = %q", env["DATABASE_URL"])
+				if strings.Contains(strings.Join(args, " "), " lint ") && env["DATABASE_URL"] != "" {
+					t.Fatalf("lint received DATABASE_URL = %q", env["DATABASE_URL"])
 				}
 				return migrationCommandResult{Stdout: `{"current":"202604270001","dirty":false,"pending":[]}`}, nil
 			},
@@ -49,7 +49,7 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 	}
 
 	want := []string{
-		"workflow-plugin-migrations --wfctl-cli migrate lint --driver golang-migrate --source-dir migrations postgres://secret@example/db",
+		"workflow-plugin-migrations --wfctl-cli migrate lint --driver golang-migrate --source-dir migrations ",
 		"ephemeral app-fresh postgres://secret@example/db",
 		"workflow-plugin-migrations --wfctl-cli migrate test --driver golang-migrate --source-dir migrations postgres://ephemeral/app-fresh",
 		"cleanup ephemeral app-fresh",
@@ -145,6 +145,24 @@ func TestRunMigrationsValidateJSONOutputOnFailure(t *testing.T) {
 		t.Fatalf("expected JSON failure output: %v\n%s", err, out)
 	}
 	if got.Decision != "fail" || len(got.Migrations) != 1 || got.Migrations[0].Lint != "fail" {
+		t.Fatalf("unexpected failure output: %+v", got)
+	}
+}
+
+func TestRunMigrationsValidateJSONOutputOnConfigResolutionFailure(t *testing.T) {
+	cfgPath := writeMigrationValidateConfig(t)
+
+	out, err := captureStdout(t, func() error {
+		return runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci", "--format", "json"})
+	})
+	if err == nil {
+		t.Fatal("expected missing DATABASE_URL failure")
+	}
+	var got migrationValidationResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("expected JSON failure output: %v\n%s", err, out)
+	}
+	if got.Decision != "fail" || got.Error == "" {
 		t.Fatalf("unexpected failure output: %+v", got)
 	}
 }
