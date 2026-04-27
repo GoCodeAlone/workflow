@@ -1,17 +1,16 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
 )
 
 type migrationGitOperations struct {
@@ -90,7 +89,7 @@ func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginR
 		defer cleanupDB()
 	}
 
-	baselineSource, cleanupBaseline, err := gitOps.MaterializeSource(ctx, baselineRef, migration.SourceDir)
+	baselineSource, cleanupBaseline, err := materializeBaselineSource(ctx, gitOps, baselineRef, migration.SourceDir)
 	if err != nil {
 		return migrationBaselineCandidateResult{}, fmt.Errorf("materialize baseline migration source: %w", err)
 	}
@@ -160,20 +159,30 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 	if err := json.Unmarshal([]byte(stdout), &status); err == nil {
 		return status, nil
 	}
+	recognized := false
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case line == "":
 			continue
 		case strings.Contains(strings.ToLower(line), "dirty"):
+			recognized = true
 			status.Dirty = true
+		case strings.HasPrefix(line, "Current:"):
+			recognized = true
 		case strings.HasPrefix(line, "Pending:"):
+			recognized = true
 			pending := strings.TrimSpace(strings.TrimPrefix(line, "Pending:"))
 			pending = strings.Trim(pending, "[]")
 			if pending != "" {
 				status.Pending = strings.Fields(pending)
 			}
+		case line == "No pending migrations." || line == "No migrations applied.":
+			recognized = true
 		}
+	}
+	if !recognized {
+		return migrationBaselineCandidateResult{}, fmt.Errorf("unrecognized migration status output")
 	}
 	return status, nil
 }
@@ -196,47 +205,10 @@ func (ops migrationEphemeralDatabaseOperations) withDefaults() migrationEphemera
 }
 
 func defaultMigrationEphemeralDatabase(ctx context.Context, name, baseDSN string) (string, func(), error) {
-	schema := "wfctl_migrations_" + sanitizeMigrationSchemaName(name) + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
-	db, err := sql.Open("postgres", baseDSN)
-	if err != nil {
-		return "", nil, err
+	if dsn := os.Getenv("WFCTL_MIGRATION_VALIDATION_DATABASE_URL"); dsn != "" {
+		return dsn, nil, nil
 	}
-	if _, err := db.ExecContext(ctx, `CREATE SCHEMA "`+schema+`"`); err != nil {
-		_ = db.Close()
-		return "", nil, err
-	}
-	cleanup := func() {
-		_, _ = db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`)
-		_ = db.Close()
-	}
-	dsn, err := dsnWithSearchPath(baseDSN, schema)
-	if err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	return dsn, cleanup, nil
-}
-
-var migrationSchemaUnsafeChars = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
-
-func sanitizeMigrationSchemaName(name string) string {
-	name = migrationSchemaUnsafeChars.ReplaceAllString(name, "_")
-	name = strings.Trim(name, "_")
-	if name == "" {
-		return "app"
-	}
-	return strings.ToLower(name)
-}
-
-func dsnWithSearchPath(rawDSN, schema string) (string, error) {
-	u, err := url.Parse(rawDSN)
-	if err != nil {
-		return "", err
-	}
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	return u.String(), nil
+	return "", nil, fmt.Errorf("WFCTL_MIGRATION_VALIDATION_DATABASE_URL is required for baseline/candidate validation")
 }
 
 func defaultMigrationChangedFiles(ctx context.Context, baselineRef, candidateRef string) ([]string, error) {
@@ -260,28 +232,77 @@ func defaultMigrationMaterializeSource(ctx context.Context, ref, sourceDir strin
 		_ = os.RemoveAll(tmpDir)
 	}
 
-	archive := exec.CommandContext(ctx, "git", "archive", "--format=tar", ref, sourceDir)
-	extract := exec.CommandContext(ctx, "tar", "-xf", "-", "-C", tmpDir)
-	pipe, err := archive.StdoutPipe()
+	out, err := exec.CommandContext(ctx, "git", "archive", "--format=tar", ref, sourceDir).Output()
 	if err != nil {
 		cleanup()
 		return "", nil, err
 	}
-	extract.Stdin = pipe
-	if err := extract.Start(); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	if err := archive.Run(); err != nil {
-		cleanup()
-		_ = extract.Wait()
-		return "", nil, err
-	}
-	if err := extract.Wait(); err != nil {
+	if err := extractTar(bytes.NewReader(out), tmpDir); err != nil {
 		cleanup()
 		return "", nil, err
 	}
 	return filepath.Join(tmpDir, sourceDir), cleanup, nil
+}
+
+func materializeBaselineSource(ctx context.Context, gitOps migrationGitOperations, ref, sourceDir string) (string, func(), error) {
+	source, cleanup, err := gitOps.MaterializeSource(ctx, ref, sourceDir)
+	if err == nil {
+		return source, cleanup, nil
+	}
+	return emptyMigrationSource(sourceDir)
+}
+
+func emptyMigrationSource(sourceDir string) (string, func(), error) {
+	tmpDir, err := os.MkdirTemp("", "wfctl-migrations-empty-*")
+	if err != nil {
+		return "", nil, err
+	}
+	source := filepath.Join(tmpDir, sourceDir)
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", nil, err
+	}
+	return source, func() { _ = os.RemoveAll(tmpDir) }, nil
+}
+
+func extractTar(r *bytes.Reader, dest string) error {
+	tr := tar.NewReader(r)
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		target := filepath.Join(dest, header.Name)
+		cleanDest := filepath.Clean(dest) + string(os.PathSeparator)
+		cleanTarget := filepath.Clean(target)
+		if !strings.HasPrefix(cleanTarget, cleanDest) && cleanTarget != filepath.Clean(dest) {
+			return fmt.Errorf("archive entry escapes destination: %s", header.Name)
+		}
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(file, tr); err != nil {
+				_ = file.Close()
+				return err
+			}
+			if err := file.Close(); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func defaultMigrationCurrentCommit(ctx context.Context) (string, error) {

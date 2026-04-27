@@ -27,6 +27,7 @@ type migrationValidationRecord struct {
 	BaselineCandidate string   `json:"baseline_candidate,omitempty"`
 	Dirty             bool     `json:"dirty"`
 	Pending           []string `json:"pending,omitempty"`
+	Error             string   `json:"error,omitempty"`
 }
 
 func runMigrations(args []string) error {
@@ -101,14 +102,14 @@ func runMigrationsValidate(args []string) error {
 		}
 		if migration.Validation.Lint {
 			if _, err := runner.run(ctx, runCfg, "lint"); err != nil {
-				return err
+				return failMigrationValidation(result, record, *resultFile, migration, "lint", err)
 			}
 			record.Lint = "pass"
 		}
 		if runBaselineCandidate {
 			baselineResult, err := runBaselineCandidateValidation(ctx, runner, gitOps, runCfg, migration, baselineRef, *candidateRef, *debugKeepTemp)
 			if err != nil {
-				return err
+				return failMigrationValidation(result, record, *resultFile, migration, "baseline_candidate", err)
 			}
 			record.BaselineCandidate = "pass"
 			record.Dirty = baselineResult.Dirty
@@ -116,7 +117,7 @@ func runMigrationsValidate(args []string) error {
 		}
 		if migration.Validation.FreshCycle {
 			if _, err := runner.run(ctx, runCfg, "test"); err != nil {
-				return err
+				return failMigrationValidation(result, record, *resultFile, migration, "fresh_cycle", err)
 			}
 			record.FreshCycle = "pass"
 		}
@@ -124,12 +125,8 @@ func runMigrationsValidate(args []string) error {
 	}
 
 	if *resultFile != "" {
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Errorf("encode validation result: %w", err)
-		}
-		if err := os.WriteFile(*resultFile, append(data, '\n'), 0o644); err != nil {
-			return fmt.Errorf("write validation result: %w", err)
+		if err := writeMigrationValidationResult(*resultFile, result); err != nil {
+			return err
 		}
 	}
 
@@ -144,6 +141,37 @@ func runMigrationsValidate(args []string) error {
 		fmt.Printf("migrations validation: %s\n", result.Decision)
 	default:
 		return fmt.Errorf("unsupported format %q", *format)
+	}
+	return nil
+}
+
+func failMigrationValidation(result migrationValidationResult, record migrationValidationRecord, resultFile string, migration resolvedMigrationConfig, check string, err error) error {
+	result.Decision = "fail"
+	record.Error = redactMigrationDSN(err.Error(), migration.DSN)
+	switch check {
+	case "lint":
+		record.Lint = "fail"
+	case "baseline_candidate":
+		record.BaselineCandidate = "fail"
+	case "fresh_cycle":
+		record.FreshCycle = "fail"
+	}
+	result.Migrations = append(result.Migrations, record)
+	if resultFile != "" {
+		if writeErr := writeMigrationValidationResult(resultFile, result); writeErr != nil {
+			return writeErr
+		}
+	}
+	return err
+}
+
+func writeMigrationValidationResult(path string, result migrationValidationResult) error {
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode validation result: %w", err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write validation result: %w", err)
 	}
 	return nil
 }

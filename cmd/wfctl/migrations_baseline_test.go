@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -150,6 +151,49 @@ func TestRunMigrationsValidateRecordsBaselineResultFileForCommit(t *testing.T) {
 	}
 	if strings.Contains(string(data), "postgres://secret@example/db") {
 		t.Fatal("result file leaked DSN")
+	}
+}
+
+func TestRunMigrationsValidateWritesFailureResultFile(t *testing.T) {
+	cfgPath := writeMigrationBaselineConfig(t, true)
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+
+	var calls []string
+	restore := stubMigrationBaselineHooks(t, &calls, []string{"migrations/202604270001_add_users.up.sql"}, "abc123")
+	defer restore()
+	migrationEphemeralDB = migrationEphemeralDatabaseOperations{
+		Create: func(context.Context, string, string) (string, func(), error) {
+			return "", nil, errors.New("ephemeral failed for postgres://secret@example/db")
+		},
+	}
+
+	err := runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci", "--result-file", resultPath})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	data, readErr := os.ReadFile(resultPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(data), "postgres://secret@example/db") {
+		t.Fatal("failure result file leaked DSN")
+	}
+	var got migrationValidationResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode result file: %v\n%s", err, data)
+	}
+	if got.Decision != "fail" || len(got.Migrations) != 1 || got.Migrations[0].BaselineCandidate != "fail" {
+		t.Fatalf("unexpected failure result: %+v", got)
+	}
+	if got.Migrations[0].Error == "" {
+		t.Fatalf("failure result missing sanitized error: %+v", got.Migrations[0])
+	}
+}
+
+func TestParseMigrationStatusRejectsUnknownOutput(t *testing.T) {
+	if _, err := parseMigrationStatus("unexpected status output"); err == nil {
+		t.Fatal("expected unrecognized status error")
 	}
 }
 
