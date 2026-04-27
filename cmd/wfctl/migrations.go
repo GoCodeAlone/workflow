@@ -48,6 +48,9 @@ func runMigrationsValidate(args []string) error {
 	format := fs.String("format", "text", "Output format: text or json")
 	resultFile := fs.String("result-file", "", "Write validation result JSON to this path")
 	commit := fs.String("commit", "", "Commit SHA associated with this validation")
+	candidateRef := fs.String("candidate-ref", "HEAD", "Candidate git ref to validate")
+	forceBaselineCandidate := fs.Bool("force-baseline-candidate", false, "Run baseline/candidate replay even when no migration source changed")
+	debugKeepTemp := fs.Bool("debug-keep-temp", false, "Keep temporary migration source materializations")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -61,7 +64,16 @@ func runMigrationsValidate(args []string) error {
 		return err
 	}
 
+	ctx := context.Background()
 	runner := newMigrationPluginRunner()
+	gitOps := migrationGitOps.withDefaults()
+	if *commit == "" && hasBaselineCandidateValidation(migrations) {
+		resolvedCommit, err := gitOps.CurrentCommit(ctx)
+		if err != nil {
+			return fmt.Errorf("resolve current commit: %w", err)
+		}
+		*commit = resolvedCommit
+	}
 	result := migrationValidationResult{
 		Decision:   "pass",
 		Commit:     *commit,
@@ -69,6 +81,15 @@ func runMigrationsValidate(args []string) error {
 	}
 	for _, migration := range migrations {
 		record := migrationValidationRecord{Name: migration.Name}
+		baselineRef := ""
+		runBaselineCandidate := false
+		if migration.Validation.BaselineCandidate {
+			var err error
+			baselineRef, runBaselineCandidate, err = shouldRunBaselineCandidateValidation(ctx, gitOps, migration, *candidateRef, *forceBaselineCandidate)
+			if err != nil {
+				return err
+			}
+		}
 		runCfg := migrationPluginRunConfig{
 			Plugin:    migration.Plugin,
 			PluginDir: *pluginDir,
@@ -77,13 +98,18 @@ func runMigrationsValidate(args []string) error {
 			DSN:       migration.DSN,
 		}
 		if migration.Validation.Lint {
-			if _, err := runner.run(context.Background(), runCfg, "lint"); err != nil {
+			if _, err := runner.run(ctx, runCfg, "lint"); err != nil {
 				return err
 			}
 			record.Lint = "pass"
 		}
+		if runBaselineCandidate {
+			if err := runBaselineCandidateValidation(ctx, runner, gitOps, runCfg, migration, baselineRef, *candidateRef, *debugKeepTemp); err != nil {
+				return err
+			}
+		}
 		if migration.Validation.FreshCycle {
-			if _, err := runner.run(context.Background(), runCfg, "test"); err != nil {
+			if _, err := runner.run(ctx, runCfg, "test"); err != nil {
 				return err
 			}
 			record.FreshCycle = "pass"

@@ -21,7 +21,7 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 			exec: func(_ context.Context, pluginName string, args []string, env map[string]string) (migrationCommandResult, error) {
 				calls = append(calls, pluginName+" "+strings.Join(args, " "))
 				if env["DATABASE_URL"] != "postgres://secret@example/db" {
-					t.Fatalf("runner env DSN = %q", env["DATABASE_URL"])
+					t.Fatalf("runner env DATABASE_URL = %q", env["DATABASE_URL"])
 				}
 				return migrationCommandResult{Stdout: `{"dirty":false}`}, nil
 			},
@@ -35,8 +35,8 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 	}
 
 	want := []string{
-		"workflow-plugin-migrations --wfctl-cli migrate lint --driver golang-migrate --source-dir migrations --dsn-env WFCTL_MIGRATION_DSN",
-		"workflow-plugin-migrations --wfctl-cli migrate test --driver golang-migrate --source-dir migrations --dsn-env WFCTL_MIGRATION_DSN",
+		"workflow-plugin-migrations --wfctl-cli migrate lint --driver golang-migrate --source-dir migrations",
+		"workflow-plugin-migrations --wfctl-cli migrate test --driver golang-migrate --source-dir migrations",
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %#v, want %#v", calls, want)
