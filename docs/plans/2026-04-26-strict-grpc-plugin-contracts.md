@@ -116,9 +116,9 @@ Last updated: 2026-04-27 15:00 America/New_York.
 
 | Repo | Branch / Worktree | Commit | Verification |
 |---|---|---|---|
-| workflow-plugin-admin | `/Users/jon/.config/superpowers/worktrees/workflow-plugin-admin/strict-contracts` | 1ffd6dd71892ce21c2ca11b8bd60a077085fb606 | Race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts`, build passed. |
-| workflow-plugin-agent | `/Users/jon/workspace/workflow-plugin-agent/.worktrees/strict-contracts` | 17925772b257a6530a18af0051306fb797fbb29c | Focused tests, full tests, race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts` passed. |
-| workflow-plugin-azure | `/Users/jon/.config/superpowers/worktrees/workflow-plugin-azure/strict-contract` | 5ed96e2155a5d975bdcd135bbcc575f2234de000 | Focused tests, race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts` passed. |
+| workflow-plugin-admin | `branch: strict-contracts` | 1ffd6dd71892ce21c2ca11b8bd60a077085fb606 | Race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts`, build passed. |
+| workflow-plugin-agent | `branch: strict-contracts` | 17925772b257a6530a18af0051306fb797fbb29c | Focused tests, full tests, race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts` passed. |
+| workflow-plugin-azure | `branch: strict-contract` | 5ed96e2155a5d975bdcd135bbcc575f2234de000 | Focused tests, race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts` passed. |
 
 ### Active Agent Work
 
