@@ -4,14 +4,19 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/lib/pq"
 )
 
 type migrationGitOperations struct {
@@ -31,8 +36,9 @@ type migrationEphemeralDatabaseOperations struct {
 var migrationEphemeralDB = migrationEphemeralDatabaseOperations{}
 
 type migrationBaselineCandidateResult struct {
-	Dirty   bool
-	Pending []string
+	Current string   `json:"current"`
+	Dirty   bool     `json:"dirty"`
+	Pending []string `json:"pending"`
 }
 
 func (ops migrationGitOperations) withDefaults() migrationGitOperations {
@@ -138,10 +144,8 @@ func runBaselineCandidateValidation(ctx context.Context, runner migrationPluginR
 	if err != nil {
 		return migrationBaselineCandidateResult{}, err
 	}
-	if migration.Validation.ForbidDirty {
-		if err := requireCleanMigrationStatus(parsedStatus); err != nil {
-			return migrationBaselineCandidateResult{}, fmt.Errorf("migration %s status is not clean: %w", migration.Name, err)
-		}
+	if err := requireCleanMigrationStatus(parsedStatus); err != nil {
+		return migrationBaselineCandidateResult{}, fmt.Errorf("migration %s status is not clean: %w", migration.Name, err)
 	}
 	return parsedStatus, nil
 }
@@ -164,10 +168,8 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 		if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
 			return migrationBaselineCandidateResult{}, fmt.Errorf("decode status JSON: %w", err)
 		}
-		if _, hasDirty := raw["Dirty"]; !hasDirty {
-			if _, hasDirty = raw["dirty"]; !hasDirty {
-				return migrationBaselineCandidateResult{}, fmt.Errorf("unrecognized migration status JSON")
-			}
+		if !jsonStatusHas(raw, "current") || !jsonStatusHas(raw, "dirty") || !jsonStatusHas(raw, "pending") {
+			return migrationBaselineCandidateResult{}, fmt.Errorf("incomplete migration status JSON")
 		}
 		if err := json.Unmarshal([]byte(stdout), &status); err != nil {
 			return migrationBaselineCandidateResult{}, fmt.Errorf("decode status JSON: %w", err)
@@ -175,18 +177,24 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 		return status, nil
 	}
 	recognized := false
+	currentSeen := false
+	pendingSeen := false
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
+		lowerLine := strings.ToLower(line)
 		switch {
 		case line == "":
 			continue
-		case strings.Contains(strings.ToLower(line), "dirty"):
+		case strings.HasPrefix(lowerLine, "dirty:"):
 			recognized = true
-			status.Dirty = true
+			status.Dirty = strings.Contains(lowerLine, "true") || strings.Contains(lowerLine, "yes")
 		case strings.HasPrefix(line, "Current:"):
 			recognized = true
+			currentSeen = true
+			status.Current = strings.TrimSpace(strings.TrimPrefix(line, "Current:"))
 		case strings.HasPrefix(line, "Pending:"):
 			recognized = true
+			pendingSeen = true
 			pending := strings.TrimSpace(strings.TrimPrefix(line, "Pending:"))
 			pending = strings.Trim(pending, "[]")
 			if pending != "" {
@@ -194,12 +202,25 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 			}
 		case line == "No pending migrations." || line == "No migrations applied.":
 			recognized = true
+			pendingSeen = true
 		}
 	}
 	if !recognized {
 		return migrationBaselineCandidateResult{}, fmt.Errorf("unrecognized migration status output")
 	}
+	if !currentSeen || !pendingSeen {
+		return migrationBaselineCandidateResult{}, fmt.Errorf("incomplete migration status output")
+	}
 	return status, nil
+}
+
+func jsonStatusHas(raw map[string]json.RawMessage, key string) bool {
+	if _, ok := raw[key]; ok {
+		return true
+	}
+	titleKey := strings.ToUpper(key[:1]) + key[1:]
+	_, ok := raw[titleKey]
+	return ok
 }
 
 func requireCleanMigrationStatus(status migrationBaselineCandidateResult) error {
@@ -235,10 +256,52 @@ func (ops migrationEphemeralDatabaseOperations) withDefaults() migrationEphemera
 }
 
 func defaultMigrationEphemeralDatabase(ctx context.Context, name, baseDSN string) (string, func(), error) {
-	if dsn := os.Getenv("WFCTL_MIGRATION_VALIDATION_DATABASE_URL"); dsn != "" {
-		return dsn, nil, nil
+	adminDSN := os.Getenv("WFCTL_MIGRATION_VALIDATION_DATABASE_URL")
+	if adminDSN == "" {
+		return "", nil, fmt.Errorf("WFCTL_MIGRATION_VALIDATION_DATABASE_URL is required for migration validation")
 	}
-	return "", nil, fmt.Errorf("WFCTL_MIGRATION_VALIDATION_DATABASE_URL is required for baseline/candidate validation")
+	validationURL, err := neturl.Parse(adminDSN)
+	if err != nil {
+		return "", nil, fmt.Errorf("parse validation database URL: %w", err)
+	}
+	if validationURL.Scheme != "postgres" && validationURL.Scheme != "postgresql" {
+		return "", nil, fmt.Errorf("WFCTL_MIGRATION_VALIDATION_DATABASE_URL must be a postgres URL")
+	}
+	dbName := migrationValidationDatabaseName(name)
+	db, err := sql.Open("postgres", adminDSN)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return "", nil, fmt.Errorf("connect validation database: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, "CREATE DATABASE "+pq.QuoteIdentifier(dbName)); err != nil {
+		_ = db.Close()
+		return "", nil, fmt.Errorf("create validation database: %w", err)
+	}
+	validationURL.Path = "/" + dbName
+	validationDSN := validationURL.String()
+	cleanup := func() {
+		_, _ = db.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+pq.QuoteIdentifier(dbName))
+		_ = db.Close()
+	}
+	return validationDSN, cleanup, nil
+}
+
+func migrationValidationDatabaseName(name string) string {
+	var b strings.Builder
+	b.WriteString("wfctl_migrations_")
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteRune('_')
+	}
+	b.WriteString("_")
+	b.WriteString(fmt.Sprintf("%d", time.Now().UnixNano()))
+	return b.String()
 }
 
 func defaultMigrationChangedFiles(ctx context.Context, baselineRef, candidateRef string) ([]string, error) {

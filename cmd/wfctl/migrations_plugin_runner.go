@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
+	neturl "net/url"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -79,9 +79,7 @@ func defaultMigrationPluginExecutor(ctx context.Context, pluginName string, args
 	binaryPath := filepath.Join(pluginRoot, pluginDirName, pluginDirName)
 	cmd := exec.CommandContext(ctx, binaryPath, args...) //nolint:gosec // binary path follows wfctl installed-plugin layout.
 
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), mapEnv(env)...)
-	}
+	cmd.Env = mapEnv(env)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -135,5 +133,34 @@ func redactMigrationDSN(message, dsn string) string {
 	if dsn == "" {
 		return message
 	}
-	return strings.ReplaceAll(message, dsn, "[REDACTED_DSN]")
+	candidates := []string{dsn}
+	if parsed, err := neturl.Parse(dsn); err == nil {
+		if parsed.User != nil {
+			if password, ok := parsed.User.Password(); ok && password != "" {
+				candidates = append(candidates, password)
+			}
+			if username := parsed.User.Username(); username != "" {
+				candidates = append(candidates, username)
+			}
+			if userInfo := parsed.User.String(); userInfo != "" {
+				candidates = append(candidates, userInfo)
+			}
+		}
+		withoutQuery := *parsed
+		withoutQuery.RawQuery = ""
+		withoutQuery.Fragment = ""
+		if value := withoutQuery.String(); value != "" {
+			candidates = append(candidates, value)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return len(candidates[i]) > len(candidates[j])
+	})
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		message = strings.ReplaceAll(message, candidate, "[REDACTED_DSN]")
+	}
+	return message
 }

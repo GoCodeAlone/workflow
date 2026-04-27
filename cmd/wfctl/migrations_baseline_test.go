@@ -201,6 +201,55 @@ func TestParseMigrationStatusRejectsUnknownOutput(t *testing.T) {
 	if _, err := parseMigrationStatus(`{"message":"plugin changed output"}`); err == nil {
 		t.Fatal("expected unrecognized JSON status error")
 	}
+	if _, err := parseMigrationStatus(`{"dirty":false}`); err == nil {
+		t.Fatal("expected incomplete JSON status error")
+	}
+	if _, err := parseMigrationStatus("Current: 202604270001\n"); err == nil {
+		t.Fatal("expected incomplete text status error")
+	}
+}
+
+func TestRunMigrationsValidateFailsClosedOnDirtyBaselineStatus(t *testing.T) {
+	cfgPath := writeMigrationBaselineConfigData(t, `
+version: 1
+ci:
+  migrations:
+    - name: app
+      source_dir: migrations
+      database:
+        env: DATABASE_URL
+      validation:
+        baseline_candidate: true
+`)
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+
+	var calls []string
+	restore := stubMigrationBaselineHooks(t, &calls, []string{"migrations/202604270001_add_users.up.sql"}, "abc123")
+	defer restore()
+	oldRunner := newMigrationPluginRunner
+	newMigrationPluginRunner = func() migrationPluginRunner {
+		return migrationPluginRunner{
+			exec: func(_ context.Context, _ string, args []string, env map[string]string) (migrationCommandResult, error) {
+				command := strings.Join(args[2:len(args)-4], " ")
+				if command == "status" {
+					return migrationCommandResult{Stdout: "Current: 202604270001\nDirty: true\nNo pending migrations.\n"}, nil
+				}
+				if command != "lint" && env["DATABASE_URL"] == "postgres://secret@example/db" {
+					t.Fatalf("validation used configured DSN for %s", command)
+				}
+				return migrationCommandResult{}, nil
+			},
+		}
+	}
+	defer func() { newMigrationPluginRunner = oldRunner }()
+
+	err := runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci"})
+	if err == nil {
+		t.Fatal("expected dirty validation to fail")
+	}
+	if !strings.Contains(err.Error(), "dirty") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestRunMigrationsValidateWritesFailureResultFileForDiffErrors(t *testing.T) {

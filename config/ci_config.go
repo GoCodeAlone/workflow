@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // CIConfig holds the ci: section of a workflow config — build, test, and deploy lifecycle.
@@ -28,12 +30,29 @@ type CIMigrationConfig struct {
 }
 
 type CIMigrationEnvironmentConfig struct {
-	Plugin     string                      `json:"plugin,omitempty" yaml:"plugin,omitempty"`
-	Driver     string                      `json:"driver,omitempty" yaml:"driver,omitempty"`
-	SourceDir  string                      `json:"source_dir,omitempty" yaml:"source_dir,omitempty"`
-	Database   CIMigrationDatabaseConfig   `json:"database,omitempty" yaml:"database,omitempty"`
-	Baseline   CIMigrationBaselineConfig   `json:"baseline,omitempty" yaml:"baseline,omitempty"`
-	Validation CIMigrationValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+	Plugin        string                      `json:"plugin,omitempty" yaml:"plugin,omitempty"`
+	Driver        string                      `json:"driver,omitempty" yaml:"driver,omitempty"`
+	SourceDir     string                      `json:"source_dir,omitempty" yaml:"source_dir,omitempty"`
+	Database      CIMigrationDatabaseConfig   `json:"database,omitempty" yaml:"database,omitempty"`
+	Baseline      CIMigrationBaselineConfig   `json:"baseline,omitempty" yaml:"baseline,omitempty"`
+	Validation    CIMigrationValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+	ValidationSet bool                        `json:"-" yaml:"-"`
+}
+
+func (c *CIMigrationEnvironmentConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain CIMigrationEnvironmentConfig
+	var decoded plain
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = CIMigrationEnvironmentConfig(decoded)
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == "validation" {
+			c.ValidationSet = true
+			break
+		}
+	}
+	return nil
 }
 
 type CIMigrationDatabaseConfig struct {

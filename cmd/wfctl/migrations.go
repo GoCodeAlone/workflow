@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
 )
@@ -26,9 +27,19 @@ type migrationValidationRecord struct {
 	Lint              string   `json:"lint,omitempty"`
 	FreshCycle        string   `json:"fresh_cycle,omitempty"`
 	BaselineCandidate string   `json:"baseline_candidate,omitempty"`
+	Driver            string   `json:"driver,omitempty"`
+	Current           string   `json:"current,omitempty"`
 	Dirty             bool     `json:"dirty"`
 	Pending           []string `json:"pending,omitempty"`
 	Error             string   `json:"error,omitempty"`
+}
+
+type migrationStatusResult struct {
+	Decision              string                      `json:"decision"`
+	Reasons               []string                    `json:"reasons,omitempty"`
+	Destructive           bool                        `json:"destructive"`
+	HumanApprovalRequired bool                        `json:"human_approval_required"`
+	Migrations            []migrationValidationRecord `json:"migrations"`
 }
 
 func runMigrations(args []string) error {
@@ -38,9 +49,74 @@ func runMigrations(args []string) error {
 	switch args[0] {
 	case "validate":
 		return runMigrationsValidate(args[1:])
+	case "status":
+		return runMigrationsStatus(args[1:])
+	case "ci-check":
+		return runMigrationsCICheck(args[1:])
 	default:
 		return fmt.Errorf("unknown migrations subcommand %q", args[0])
 	}
+}
+
+func runMigrationsStatus(args []string) error {
+	fs := flag.NewFlagSet("migrations status", flag.ContinueOnError)
+	configFile := fs.String("config", "app.yaml", "Workflow config file")
+	fs.StringVar(configFile, "c", "app.yaml", "Config file (short for --config)")
+	envName := fs.String("env", "", "Environment name")
+	pluginDir := fs.String("plugin-dir", defaultDataDir, "Plugin directory")
+	format := fs.String("format", "text", "Output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	result, err := collectMigrationStatus(context.Background(), *configFile, *envName, *pluginDir)
+	if writeErr := writeMigrationStatusOutput(result, *format); writeErr != nil {
+		return writeErr
+	}
+	if err != nil {
+		return err
+	}
+	if result.Decision == "fail" {
+		return errors.New(strings.Join(result.Reasons, "; "))
+	}
+	return nil
+}
+
+func runMigrationsCICheck(args []string) error {
+	fs := flag.NewFlagSet("migrations ci-check", flag.ContinueOnError)
+	configFile := fs.String("config", "app.yaml", "Workflow config file")
+	fs.StringVar(configFile, "c", "app.yaml", "Config file (short for --config)")
+	envName := fs.String("env", "", "Environment name")
+	pluginDir := fs.String("plugin-dir", defaultDataDir, "Plugin directory")
+	format := fs.String("format", "text", "Output format: text or json")
+	commit := fs.String("commit", "", "Commit SHA to check")
+	validationResult := fs.String("validation-result", "", "Validation result JSON from wfctl migrations validate")
+	requireValidationResult := fs.Bool("require-validation-result", false, "Require a passing validation result for this commit")
+	requireSameSHA := fs.Bool("require-same-sha", false, "Require a passing validation result for the same commit SHA")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	result, statusErr := collectMigrationStatus(context.Background(), *configFile, *envName, *pluginDir)
+	if *requireSameSHA {
+		*requireValidationResult = true
+	}
+	if *requireValidationResult {
+		result.Reasons = append(result.Reasons, checkMigrationValidationResult(*validationResult, *commit, *requireSameSHA)...)
+	}
+	if statusErr != nil && len(result.Reasons) == 0 {
+		result.Reasons = append(result.Reasons, statusErr.Error())
+	}
+	if len(result.Reasons) > 0 {
+		result.Decision = "fail"
+	}
+	if writeErr := writeMigrationStatusOutput(result, *format); writeErr != nil {
+		return writeErr
+	}
+	if result.Decision == "fail" {
+		return errors.New(strings.Join(result.Reasons, "; "))
+	}
+	return nil
 }
 
 func runMigrationsValidate(args []string) error {
@@ -91,7 +167,7 @@ func runMigrationsValidate(args []string) error {
 			var err error
 			baselineRef, runBaselineCandidate, err = shouldRunBaselineCandidateValidation(ctx, gitOps, migration, *candidateRef, *forceBaselineCandidate)
 			if err != nil {
-				return failMigrationValidation(result, record, *resultFile, migration, "baseline_candidate", err)
+				return failMigrationValidation(result, record, *resultFile, *format, migration, "baseline_candidate", err)
 			}
 		}
 		runCfg := migrationPluginRunConfig{
@@ -103,14 +179,14 @@ func runMigrationsValidate(args []string) error {
 		}
 		if migration.Validation.Lint {
 			if _, err := runner.run(ctx, runCfg, "lint"); err != nil {
-				return failMigrationValidation(result, record, *resultFile, migration, "lint", err)
+				return failMigrationValidation(result, record, *resultFile, *format, migration, "lint", err)
 			}
 			record.Lint = "pass"
 		}
 		if runBaselineCandidate {
 			baselineResult, err := runBaselineCandidateValidation(ctx, runner, gitOps, runCfg, migration, baselineRef, *candidateRef, *debugKeepTemp)
 			if err != nil {
-				return failMigrationValidation(result, record, *resultFile, migration, "baseline_candidate", err)
+				return failMigrationValidation(result, record, *resultFile, *format, migration, "baseline_candidate", err)
 			}
 			record.BaselineCandidate = "pass"
 			record.Dirty = baselineResult.Dirty
@@ -118,7 +194,7 @@ func runMigrationsValidate(args []string) error {
 		}
 		if migration.Validation.FreshCycle {
 			if err := runFreshCycleValidation(ctx, runner, runCfg, migration); err != nil {
-				return failMigrationValidation(result, record, *resultFile, migration, "fresh_cycle", err)
+				return failMigrationValidation(result, record, *resultFile, *format, migration, "fresh_cycle", err)
 			}
 			record.FreshCycle = "pass"
 		}
@@ -146,7 +222,7 @@ func runMigrationsValidate(args []string) error {
 	return nil
 }
 
-func failMigrationValidation(result migrationValidationResult, record migrationValidationRecord, resultFile string, migration resolvedMigrationConfig, check string, err error) error {
+func failMigrationValidation(result migrationValidationResult, record migrationValidationRecord, resultFile string, format string, migration resolvedMigrationConfig, check string, err error) error {
 	result.Decision = "fail"
 	record.Error = redactMigrationDSN(err.Error(), migration.DSN)
 	switch check {
@@ -163,7 +239,130 @@ func failMigrationValidation(result migrationValidationResult, record migrationV
 			return writeErr
 		}
 	}
+	if format == "json" {
+		data, encodeErr := json.Marshal(result)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		fmt.Println(string(data))
+	}
 	return errors.New(record.Error)
+}
+
+func collectMigrationStatus(ctx context.Context, configFile, envName, pluginDir string) (migrationStatusResult, error) {
+	cfg, err := config.LoadFromFile(configFile)
+	if err != nil {
+		return migrationStatusResult{}, fmt.Errorf("load config: %w", err)
+	}
+	migrations, err := resolveMigrationConfigs(cfg, envName)
+	if err != nil {
+		return migrationStatusResult{}, err
+	}
+
+	result := migrationStatusResult{
+		Decision:              "pass",
+		Destructive:           false,
+		HumanApprovalRequired: false,
+		Migrations:            make([]migrationValidationRecord, 0, len(migrations)),
+	}
+	runner := newMigrationPluginRunner()
+	var errs []error
+	for _, migration := range migrations {
+		runCfg := migrationPluginRunConfig{
+			Plugin:    migration.Plugin,
+			PluginDir: pluginDir,
+			Driver:    migration.Driver,
+			SourceDir: migration.SourceDir,
+			DSN:       migration.DSN,
+		}
+		record := migrationValidationRecord{Name: migration.Name, Driver: migration.Driver}
+		statusOutput, err := runner.run(ctx, runCfg, "status")
+		if err != nil {
+			reason := fmt.Sprintf("migration %s status failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))
+			result.Reasons = append(result.Reasons, reason)
+			record.Error = reason
+			result.Migrations = append(result.Migrations, record)
+			errs = append(errs, errors.New(reason))
+			continue
+		}
+		status, err := parseMigrationStatus(statusOutput.Stdout)
+		if err != nil {
+			reason := fmt.Sprintf("migration %s status failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))
+			result.Reasons = append(result.Reasons, reason)
+			record.Error = reason
+			result.Migrations = append(result.Migrations, record)
+			errs = append(errs, errors.New(reason))
+			continue
+		}
+		record.Current = status.Current
+		record.Dirty = status.Dirty
+		record.Pending = status.Pending
+		if migration.Validation.ForbidDirty {
+			if status.Dirty {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("migration %s is dirty at version %s", migration.Name, migrationCurrentOrUnknown(status.Current)))
+			}
+			if len(status.Pending) > 0 {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("migration %s has pending migrations: %s", migration.Name, strings.Join(status.Pending, ", ")))
+			}
+		}
+		result.Migrations = append(result.Migrations, record)
+	}
+	if len(result.Reasons) > 0 {
+		result.Decision = "fail"
+	}
+	return result, errors.Join(errs...)
+}
+
+func migrationCurrentOrUnknown(current string) string {
+	current = strings.TrimSpace(current)
+	if current == "" {
+		return "unknown"
+	}
+	return current
+}
+
+func checkMigrationValidationResult(path, commit string, requireSameSHA bool) []string {
+	var reasons []string
+	if strings.TrimSpace(path) == "" {
+		return []string{"validation result is required"}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return []string{fmt.Sprintf("read validation result: %v", err)}
+	}
+	var result migrationValidationResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return []string{fmt.Sprintf("decode validation result: %v", err)}
+	}
+	if result.Decision != "pass" {
+		reasons = append(reasons, fmt.Sprintf("validation result decision is %q", result.Decision))
+	}
+	if requireSameSHA && strings.TrimSpace(commit) == "" {
+		reasons = append(reasons, "commit is required when --require-same-sha is set")
+	}
+	if strings.TrimSpace(commit) != "" && result.Commit != commit {
+		reasons = append(reasons, fmt.Sprintf("validation result commit %s does not match %s", result.Commit, commit))
+	}
+	return reasons
+}
+
+func writeMigrationStatusOutput(result migrationStatusResult, format string) error {
+	switch format {
+	case "json":
+		data, err := json.Marshal(result)
+		if err != nil {
+			return fmt.Errorf("encode migrations status: %w", err)
+		}
+		fmt.Println(string(data))
+	case "text", "":
+		fmt.Printf("migrations ci-check: %s\n", result.Decision)
+		for _, reason := range result.Reasons {
+			fmt.Printf("  - %s\n", reason)
+		}
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
+	return nil
 }
 
 func writeMigrationValidationResult(path string, result migrationValidationResult) error {

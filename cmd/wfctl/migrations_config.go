@@ -33,7 +33,11 @@ func resolveMigrationConfigs(cfg *config.WorkflowConfig, envName string) ([]reso
 	resolved := make([]resolvedMigrationConfig, 0, len(cfg.CI.Migrations))
 	var errs []error
 	for i, migration := range cfg.CI.Migrations {
-		envMigration, ok := migrationForEnv(migration, envName)
+		envMigration, ok, envErr := migrationForEnv(migration, envName)
+		if envErr != nil {
+			errs = append(errs, fmt.Errorf("ci.migrations[%d]: %w", i, envErr))
+			continue
+		}
 		if !ok {
 			continue
 		}
@@ -80,16 +84,16 @@ func resolveMigrationConfigs(cfg *config.WorkflowConfig, envName string) ([]reso
 	return resolved, errors.Join(errs...)
 }
 
-func migrationForEnv(migration config.CIMigrationConfig, envName string) (config.CIMigrationConfig, bool) {
+func migrationForEnv(migration config.CIMigrationConfig, envName string) (config.CIMigrationConfig, bool, error) {
 	if envName == "" || len(migration.Environments) == 0 {
-		return migration, true
+		return migration, true, nil
 	}
 	override, listed := migration.Environments[envName]
 	if !listed {
-		return migration, true
+		return config.CIMigrationConfig{}, false, fmt.Errorf("unknown migration environment %q", envName)
 	}
 	if override == nil {
-		return config.CIMigrationConfig{}, false
+		return config.CIMigrationConfig{}, false, nil
 	}
 	if strings.TrimSpace(override.Plugin) != "" {
 		migration.Plugin = override.Plugin
@@ -106,10 +110,10 @@ func migrationForEnv(migration config.CIMigrationConfig, envName string) (config
 	if override.Baseline.Ref != "" || override.Baseline.Mode != "" {
 		migration.Baseline = override.Baseline
 	}
-	if override.Validation != (config.CIMigrationValidationConfig{}) {
+	if override.ValidationSet {
 		migration.Validation = override.Validation
 	}
-	return migration, true
+	return migration, true, nil
 }
 
 func resolveMigrationDSN(migration config.CIMigrationConfig) (string, error) {

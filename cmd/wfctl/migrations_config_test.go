@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"gopkg.in/yaml.v3"
 )
 
 func TestResolveMigrationConfigsDefaultsPluginAndDriver(t *testing.T) {
@@ -53,6 +54,65 @@ func TestResolveMigrationConfigsAppliesEnvironmentOverrides(t *testing.T) {
 	}
 	if got[0].DSN != "postgres://prod-secret@example/db" {
 		t.Fatalf("dsn = %q", got[0].DSN)
+	}
+}
+
+func TestResolveMigrationConfigsRejectsUnknownExplicitEnvironment(t *testing.T) {
+	cfg := &config.WorkflowConfig{CI: &config.CIConfig{Migrations: []config.CIMigrationConfig{{
+		Name:      "app",
+		SourceDir: "migrations",
+		Database:  config.CIMigrationDatabaseConfig{Env: "DATABASE_URL"},
+		Environments: map[string]*config.CIMigrationEnvironmentConfig{
+			"prod": {Database: config.CIMigrationDatabaseConfig{Env: "PROD_DATABASE_URL"}},
+		},
+	}}}}
+	t.Setenv("DATABASE_URL", "postgres://default-secret@example/db")
+
+	_, err := resolveMigrationConfigs(cfg, "prouction")
+	if err == nil {
+		t.Fatal("expected unknown environment error")
+	}
+	if strings.Contains(err.Error(), "postgres://default-secret@example/db") {
+		t.Fatalf("error leaked default DSN: %v", err)
+	}
+	if !strings.Contains(err.Error(), "unknown migration environment") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveMigrationConfigsAllowsEnvironmentValidationFlagsToDisableBase(t *testing.T) {
+	var cfg config.WorkflowConfig
+	if err := yaml.Unmarshal([]byte(`
+version: 1
+ci:
+  migrations:
+    - name: app
+      source_dir: migrations
+      database:
+        env: DATABASE_URL
+      validation:
+        lint: true
+        fresh_cycle: true
+        baseline_candidate: true
+        forbid_dirty: true
+      environments:
+        local:
+          validation:
+            lint: false
+            fresh_cycle: false
+            baseline_candidate: false
+            forbid_dirty: false
+`), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+
+	got, err := resolveMigrationConfigs(&cfg, "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Validation.Lint || got[0].Validation.FreshCycle || got[0].Validation.BaselineCandidate || got[0].Validation.ForbidDirty {
+		t.Fatalf("environment validation flags did not disable base: %+v", got[0].Validation)
 	}
 }
 

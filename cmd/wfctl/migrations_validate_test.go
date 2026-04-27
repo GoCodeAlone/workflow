@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,7 +37,7 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 				if strings.Contains(strings.Join(args, " "), " lint ") && env["DATABASE_URL"] != "postgres://secret@example/db" {
 					t.Fatalf("runner env DATABASE_URL = %q", env["DATABASE_URL"])
 				}
-				return migrationCommandResult{Stdout: `{"dirty":false}`}, nil
+				return migrationCommandResult{Stdout: `{"current":"202604270001","dirty":false,"pending":[]}`}, nil
 			},
 		}
 	}
@@ -62,7 +63,13 @@ func TestRunMigrationsValidateJSONOutput(t *testing.T) {
 	cfgPath := writeMigrationValidateConfig(t)
 	resultPath := filepath.Join(t.TempDir(), "result.json")
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
-	t.Setenv("WFCTL_MIGRATION_VALIDATION_DATABASE_URL", "postgres://validation@example/db")
+	oldEphemeral := migrationEphemeralDB
+	migrationEphemeralDB = migrationEphemeralDatabaseOperations{
+		Create: func(_ context.Context, name, _ string) (string, func(), error) {
+			return "postgres://ephemeral/" + name, nil, nil
+		},
+	}
+	defer func() { migrationEphemeralDB = oldEphemeral }()
 
 	oldFactory := newMigrationPluginRunner
 	newMigrationPluginRunner = func() migrationPluginRunner {
@@ -104,6 +111,41 @@ func TestRunMigrationsValidateJSONOutput(t *testing.T) {
 	}
 	if strings.Contains(string(data), "postgres://secret@example/db") {
 		t.Fatal("result file leaked DSN")
+	}
+}
+
+func TestRunMigrationsValidateJSONOutputOnFailure(t *testing.T) {
+	cfgPath := writeMigrationValidateConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+
+	oldFactory := newMigrationPluginRunner
+	newMigrationPluginRunner = func() migrationPluginRunner {
+		return migrationPluginRunner{
+			exec: func(_ context.Context, _ string, args []string, _ map[string]string) (migrationCommandResult, error) {
+				if strings.Contains(strings.Join(args, " "), " lint ") {
+					return migrationCommandResult{}, errors.New("lint failed for postgres://secret@example/db")
+				}
+				return migrationCommandResult{}, nil
+			},
+		}
+	}
+	defer func() { newMigrationPluginRunner = oldFactory }()
+
+	out, err := captureStdout(t, func() error {
+		return runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci", "--format", "json"})
+	})
+	if err == nil {
+		t.Fatal("expected validation failure")
+	}
+	if strings.Contains(out, "postgres://secret@example/db") || strings.Contains(err.Error(), "postgres://secret@example/db") {
+		t.Fatalf("failure leaked DSN: err=%v out=%s", err, out)
+	}
+	var got migrationValidationResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("expected JSON failure output: %v\n%s", err, out)
+	}
+	if got.Decision != "fail" || len(got.Migrations) != 1 || got.Migrations[0].Lint != "fail" {
+		t.Fatalf("unexpected failure output: %+v", got)
 	}
 }
 

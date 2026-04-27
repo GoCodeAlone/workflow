@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -56,13 +58,13 @@ func TestMigrationPluginRunnerBuildsWorkflowMigrateArgs(t *testing.T) {
 }
 
 func TestMigrationPluginRunnerRedactsDSNInErrorsAndOutput(t *testing.T) {
-	const secretDSN = "postgres://user:super-secret@example.com/app"
+	const secretDSN = "postgres://user:super-secret@example.com/app?sslmode=require"
 	runner := migrationPluginRunner{
 		exec: func(_ context.Context, _ string, _ []string, _ map[string]string) (migrationCommandResult, error) {
 			return migrationCommandResult{
 				Stdout: "connected to " + secretDSN,
-				Stderr: "failed for " + secretDSN,
-			}, errors.New("migration failed for " + secretDSN)
+				Stderr: "failed for postgres://user:super-secret@example.com/app",
+			}, errors.New("migration failed for password super-secret")
 		},
 	}
 
@@ -83,8 +85,43 @@ func TestMigrationPluginRunnerRedactsDSNInErrorsAndOutput(t *testing.T) {
 	if !strings.Contains(msg, "[REDACTED_DSN]") {
 		t.Fatalf("error did not contain redaction marker: %s", msg)
 	}
-	if strings.Contains(result.Stdout, secretDSN) || strings.Contains(result.Stderr, secretDSN) {
+	if strings.Contains(result.Stdout, secretDSN) || strings.Contains(result.Stderr, "super-secret") || strings.Contains(msg, "super-secret") {
 		t.Fatalf("output leaked DSN: stdout=%q stderr=%q", result.Stdout, result.Stderr)
+	}
+}
+
+func TestDefaultMigrationPluginExecutorDoesNotInheritProcessSecrets(t *testing.T) {
+	root := t.TempDir()
+	pluginDir := filepath.Join(root, "migrations")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	envPath := filepath.Join(root, "env.txt")
+	binaryPath := filepath.Join(pluginDir, "migrations")
+	script := "#!/bin/sh\n/usr/bin/env > " + envPath + "\n"
+	if err := os.WriteFile(binaryPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LEAKED_CI_SECRET", "must-not-reach-plugin")
+
+	_, err := defaultMigrationPluginExecutor(context.Background(), "workflow-plugin-migrations", []string{"--wfctl-cli", "migrate", "status"}, map[string]string{
+		"DATABASE_URL":      "postgres://user:secret@example.com/app",
+		"WFCTL_PLUGIN_DIR":  root,
+		"PLUGIN_PUBLIC_VAR": "ok",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envDump := string(data)
+	if strings.Contains(envDump, "LEAKED_CI_SECRET") || strings.Contains(envDump, "must-not-reach-plugin") {
+		t.Fatalf("plugin inherited process secret env:\n%s", envDump)
+	}
+	if !strings.Contains(envDump, "DATABASE_URL=postgres://user:secret@example.com/app") || !strings.Contains(envDump, "PLUGIN_PUBLIC_VAR=ok") {
+		t.Fatalf("plugin did not receive explicit env:\n%s", envDump)
 	}
 }
 
