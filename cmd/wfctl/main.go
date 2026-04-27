@@ -64,6 +64,7 @@ var commands = map[string]func([]string) error{
 	"snippets":        runSnippets,
 	"manifest":        runManifest,
 	"migrate":         runMigrate,
+	"migrations":      runMigrations,
 	"build-ui":        runBuildUI,
 	"ui":              runUI,
 	"publish":         runPublish,

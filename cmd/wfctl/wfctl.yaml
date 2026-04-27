@@ -27,6 +27,8 @@ workflows:
         description: Analyze config and report infrastructure requirements
       - name: migrate
         description: Manage database schema migrations
+      - name: migrations
+        description: Validate and guard migration workflows
       - name: build-ui
         description: Build the application UI
       - name: ui
@@ -139,6 +141,10 @@ pipelines:
     trigger: {type: cli, config: {command: migrate}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: migrate}}
+  cmd-migrations:
+    trigger: {type: cli, config: {command: migrations}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: migrations}}
   cmd-build-ui:
     trigger: {type: cli, config: {command: build-ui}}
     steps:
