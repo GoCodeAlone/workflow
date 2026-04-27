@@ -1003,36 +1003,41 @@ func runInfraApply(args []string) error {
 		if plan.DesiredHash != currentHash {
 			return fmt.Errorf("plan stale: config hash mismatch (run wfctl infra plan again)")
 		}
-		return applyFromPrecomputedPlan(ctx, plan, cfgFile, envName)
-	}
-
-	// Dispatch: infra.* modules use the direct IaCProvider path; legacy
-	// platform.* configs fall back to the pipeline runner (pipelines.apply).
-	// Mixing both types in the same config is not supported — fail fast with a
-	// descriptive error rather than silently skipping one class of modules.
-	if hasInfraModules(cfgFile) && hasPlatformModules(cfgFile) {
-		return fmt.Errorf(
-			"config %q mixes infra.* and platform.* module types — "+
-				"use one style per config file, or split into separate configs",
-			cfgFile,
-		)
-	}
-	if hasInfraModules(cfgFile) {
-		if err := applyInfraModules(ctx, cfgFile, envName); err != nil {
+		if err := applyFromPrecomputedPlan(ctx, plan, cfgFile, envName); err != nil {
 			return err
 		}
+		// Fall through to post-apply infra_output secrets sync below —
+		// same as the live-diff path so STAGING_DATABASE_URL and similar
+		// infra_output secrets are always refreshed after a successful apply.
 	} else {
-		pipelineCfg := cfgFile
-		if envName != "" {
-			tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
-			if resErr != nil {
-				return resErr
-			}
-			defer os.Remove(tmp)
-			pipelineCfg = tmp
+		// Dispatch: infra.* modules use the direct IaCProvider path; legacy
+		// platform.* configs fall back to the pipeline runner (pipelines.apply).
+		// Mixing both types in the same config is not supported — fail fast with a
+		// descriptive error rather than silently skipping one class of modules.
+		if hasInfraModules(cfgFile) && hasPlatformModules(cfgFile) {
+			return fmt.Errorf(
+				"config %q mixes infra.* and platform.* module types — "+
+					"use one style per config file, or split into separate configs",
+				cfgFile,
+			)
 		}
-		if err := runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"}); err != nil {
-			return err
+		if hasInfraModules(cfgFile) {
+			if err := applyInfraModules(ctx, cfgFile, envName); err != nil {
+				return err
+			}
+		} else {
+			pipelineCfg := cfgFile
+			if envName != "" {
+				tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
+				if resErr != nil {
+					return resErr
+				}
+				defer os.Remove(tmp)
+				pipelineCfg = tmp
+			}
+			if err := runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"}); err != nil {
+				return err
+			}
 		}
 	}
 

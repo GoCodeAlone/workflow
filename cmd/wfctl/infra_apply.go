@@ -630,9 +630,10 @@ func isAbstractSize(s interfaces.Size) bool {
 // embedded in plan.json by runInfraPlan and verified by runInfraApply
 // --plan to detect plans that are stale relative to the current config.
 func desiredStateHash(specs []interfaces.ResourceSpec) string {
-	if len(specs) == 0 {
-		return ""
-	}
+	// Do NOT short-circuit for empty specs: a plan that removes all resources
+	// ("delete all") has a valid, deterministic hash (sha256("[]")). Returning ""
+	// for empty specs would block such plans with a misleading "no hash" error.
+	// The "" sentinel is reserved exclusively for marshal failures below.
 	sorted := make([]interfaces.ResourceSpec, len(specs))
 	copy(sorted, specs)
 	sort.Slice(sorted, func(i, j int) bool {
@@ -716,8 +717,16 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 	for i := range plan.Actions {
 		action := &plan.Actions[i]
 		moduleRef, _ := action.Resource.Config["provider"].(string)
+		// delete actions from ComputePlan carry an empty Resource.Config — the
+		// provider ref must be recovered from the recorded current state instead.
+		if moduleRef == "" && action.Current != nil {
+			moduleRef = action.Current.ProviderRef
+			if moduleRef == "" {
+				moduleRef, _ = action.Current.AppliedConfig["provider"].(string)
+			}
+		}
 		if moduleRef == "" {
-			return fmt.Errorf("plan action for %q: missing 'provider' field in resource config", action.Resource.Name)
+			return fmt.Errorf("plan action for %q: missing 'provider' field in resource config (delete actions require a current state record)", action.Resource.Name)
 		}
 		if _, exists := groups[moduleRef]; !exists {
 			def, ok := providerDefs[moduleRef]
@@ -781,6 +790,32 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	for i := range plan.Actions {
 		if plan.Actions[i].Action == "delete" {
 			deleteNames[plan.Actions[i].Resource.Name] = struct{}{}
+		}
+	}
+
+	// Resolve abstract sizing tiers into concrete provider-specific values,
+	// mirroring the live-diff path in applyWithProviderAndStore. Without this,
+	// specs with Size:"m" would reach the provider unresolved.
+	for i := range plan.Actions {
+		if plan.Actions[i].Action == "delete" {
+			continue // deletes carry no spec to resolve
+		}
+		spec := &plan.Actions[i].Resource
+		if spec.Size == "" || !isAbstractSize(spec.Size) {
+			continue
+		}
+		sizing, sErr := provider.ResolveSizing(spec.Type, spec.Size, spec.Hints)
+		if sErr != nil {
+			return fmt.Errorf("%s/%s: resolve sizing: %w", spec.Type, spec.Name, sErr)
+		}
+		if sizing != nil {
+			if spec.Config == nil {
+				spec.Config = map[string]any{}
+			}
+			spec.Config["instance_type"] = sizing.InstanceType
+			for k, v := range sizing.Specs {
+				spec.Config[k] = v
+			}
 		}
 	}
 
