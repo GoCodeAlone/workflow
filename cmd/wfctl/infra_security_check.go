@@ -100,47 +100,67 @@ func runInfraSecurityCheck(args []string) error {
 	}
 
 	findings := RunSecurityCheck(plan, opts)
-	renderSecurityFindings(os.Stdout, findings)
+	if err := renderSecurityFindings(os.Stdout, findings); err != nil {
+		log.Printf("security-check render: %v (ignored)", err)
+	}
 
 	em := detectCIProvider()
 	if sumErr := writeSecurityCheckSummary(em, plan, findings); sumErr != nil {
 		log.Printf("security-check step summary: %v (ignored)", sumErr)
 	}
 
-	failCount := 0
+	var failCount, warnCount int
 	for _, f := range findings {
-		if f.Severity == SeverityFail {
+		switch f.Severity {
+		case SeverityFail:
 			failCount++
-		}
-		if strict && f.Severity == SeverityWarn {
-			failCount++
+		case SeverityWarn:
+			warnCount++
 		}
 	}
-	if failCount > 0 {
+	strictWarnCount := 0
+	if strict {
+		strictWarnCount = warnCount
+	}
+	if failCount+strictWarnCount > 0 {
+		if strictWarnCount > 0 {
+			return fmt.Errorf("security-check: %d FAIL + %d WARN (treated as FAIL via --strict) finding(s) in plan %q", failCount, strictWarnCount, plan.ID)
+		}
 		return fmt.Errorf("security-check: %d FAIL finding(s) in plan %q", failCount, plan.ID)
 	}
 	return nil
 }
 
 // renderSecurityFindings prints findings as a markdown table to w.
-func renderSecurityFindings(w io.Writer, findings []SecurityFinding) {
+func renderSecurityFindings(w io.Writer, findings []SecurityFinding) error {
 	if len(findings) == 0 {
-		fmt.Fprintln(w, "Security check passed — no findings.")
-		return
+		_, err := fmt.Fprintln(w, "Security check passed — no findings.")
+		return err
 	}
-	fmt.Fprintln(w, "## Security Check Findings")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Rule | Severity | Resource | Message |")
-	fmt.Fprintln(w, "|------|----------|----------|---------|")
+	if _, err := fmt.Fprintln(w, "## Security Check Findings"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "| Rule | Severity | Resource | Message |"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "|------|----------|----------|---------|"); err != nil {
+		return err
+	}
 	for _, f := range findings {
-		fmt.Fprintf(w, "| %s | %s | `%s` (%s) | %s |\n",
-			f.RuleID, f.Severity, f.Resource, f.Type, f.Message)
+		if _, err := fmt.Fprintf(w, "| %s | %s | `%s` (%s) | %s |\n",
+			f.RuleID, f.Severity, f.Resource, f.Type, f.Message); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintln(w)
+	_, err := fmt.Fprintln(w)
+	return err
 }
 
 // writeSecurityCheckSummary writes markdown findings to the GHA step summary path.
-func writeSecurityCheckSummary(em CIGroupEmitter, plan interfaces.IaCPlan, findings []SecurityFinding) error {
+func writeSecurityCheckSummary(em CIGroupEmitter, plan interfaces.IaCPlan, findings []SecurityFinding) (retErr error) {
 	path := em.SummaryPath()
 	if path == "" {
 		return nil
@@ -149,9 +169,12 @@ func writeSecurityCheckSummary(em CIGroupEmitter, plan interfaces.IaCPlan, findi
 	if err != nil {
 		return fmt.Errorf("open summary: %w", err)
 	}
-	defer f.Close() //nolint:errcheck
-	renderSecurityFindings(f, findings)
-	return nil
+	defer func() {
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("close summary: %w", cerr)
+		}
+	}()
+	return renderSecurityFindings(f, findings)
 }
 
 // ─── Declarative YAML rules ──────────────────────────────────────────────────
@@ -170,9 +193,17 @@ type declarativeRule struct {
 func runDeclarativeRules(plan interfaces.IaCPlan, opts SecurityCheckOpts) []SecurityFinding {
 	entries, err := os.ReadDir(opts.ExtraRulesDir)
 	if err != nil {
-		return nil
+		// Fail-loud: a security tool must not silently skip custom rules when the
+		// directory is unreadable — return a synthetic FAIL finding so the gate fails.
+		return []SecurityFinding{{
+			RuleID:   "RULES_DIR_UNREADABLE",
+			Severity: SeverityFail,
+			Resource: opts.ExtraRulesDir,
+			Message:  fmt.Sprintf("failed to read declarative rules directory: %v", err),
+		}}
 	}
 	var rules []declarativeRule
+	var loadFindings []SecurityFinding
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
 			continue
@@ -180,10 +211,22 @@ func runDeclarativeRules(plan interfaces.IaCPlan, opts SecurityCheckOpts) []Secu
 		path := filepath.Join(opts.ExtraRulesDir, entry.Name())
 		data, err := os.ReadFile(path) //nolint:gosec
 		if err != nil {
+			loadFindings = append(loadFindings, SecurityFinding{
+				RuleID:   "RULE_FILE_UNREADABLE",
+				Severity: SeverityFail,
+				Resource: entry.Name(),
+				Message:  fmt.Sprintf("failed to read rule file: %v", err),
+			})
 			continue
 		}
 		var r declarativeRule
 		if err := yaml.Unmarshal(data, &r); err != nil {
+			loadFindings = append(loadFindings, SecurityFinding{
+				RuleID:   "RULE_FILE_INVALID",
+				Severity: SeverityFail,
+				Resource: entry.Name(),
+				Message:  fmt.Sprintf("failed to parse rule file: %v", err),
+			})
 			continue
 		}
 		rules = append(rules, r)
@@ -197,14 +240,14 @@ func runDeclarativeRules(plan interfaces.IaCPlan, opts SecurityCheckOpts) []Secu
 			sev = SeverityFail
 		}
 		actions := secSplitCSV(rule.AppliesToAction)
-		for _, action := range plan.Actions {
-			if rule.AppliesToResourceType != "" && action.Resource.Type != rule.AppliesToResourceType {
+		for i := range plan.Actions {
+			if rule.AppliesToResourceType != "" && plan.Actions[i].Resource.Type != rule.AppliesToResourceType {
 				continue
 			}
-			if len(actions) > 0 && !secContainsStr(actions, action.Action) {
+			if len(actions) > 0 && !secContainsStr(actions, plan.Actions[i].Action) {
 				continue
 			}
-			if evalDeclarativeMatch(rule.Match, action.Resource.Config) {
+			if evalDeclarativeMatch(rule.Match, plan.Actions[i].Resource.Config) {
 				msg := rule.Message
 				if msg == "" {
 					msg = rule.Description
@@ -212,14 +255,14 @@ func runDeclarativeRules(plan interfaces.IaCPlan, opts SecurityCheckOpts) []Secu
 				findings = append(findings, SecurityFinding{
 					RuleID:   rule.ID,
 					Severity: sev,
-					Resource: action.Resource.Name,
-					Type:     action.Resource.Type,
+					Resource: plan.Actions[i].Resource.Name,
+					Type:     plan.Actions[i].Resource.Type,
 					Message:  msg,
 				})
 			}
 		}
 	}
-	return findings
+	return append(loadFindings, findings...)
 }
 
 // evalDeclarativeMatch evaluates a simple match expression against a config map.
@@ -242,7 +285,12 @@ func evalDeclarativeMatch(expr string, cfg map[string]any) bool {
 	if idx := strings.Index(expr, " != "); idx >= 0 {
 		key := strings.TrimSpace(expr[:idx])
 		val := strings.Trim(strings.TrimSpace(expr[idx+4:]), `"`)
-		v, _ := cfg[key].(string)
+		// Key must be present for != to fire; absent key is not a mismatch.
+		raw, ok := cfg[key]
+		if !ok {
+			return false
+		}
+		v, _ := raw.(string)
 		return v != val
 	}
 	if strings.HasSuffix(expr, " absent") {

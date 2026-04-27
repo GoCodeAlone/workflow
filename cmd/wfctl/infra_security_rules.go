@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -27,20 +28,20 @@ func init() {
 // 0.0.0.0/0 or ::/0 for ports OTHER than 80 and 443.
 func ruleR1FirewallOverPermissive(plan interfaces.IaCPlan, _ SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Resource.Type != "infra.firewall" {
+	for i := range plan.Actions {
+		if plan.Actions[i].Resource.Type != "infra.firewall" {
 			continue
 		}
-		if a.Action != "create" && a.Action != "update" {
+		if plan.Actions[i].Action != "create" && plan.Actions[i].Action != "update" {
 			continue
 		}
-		if msgs := r1CheckFirewallConfig(a.Resource.Config); len(msgs) > 0 {
+		if msgs := r1CheckFirewallConfig(plan.Actions[i].Resource.Config); len(msgs) > 0 {
 			for _, msg := range msgs {
 				findings = append(findings, SecurityFinding{
 					RuleID:   "R1",
 					Severity: SeverityFail,
-					Resource: a.Resource.Name,
-					Type:     a.Resource.Type,
+					Resource: plan.Actions[i].Resource.Name,
+					Type:     plan.Actions[i].Resource.Type,
 					Message:  msg,
 				})
 			}
@@ -50,12 +51,16 @@ func ruleR1FirewallOverPermissive(plan interfaces.IaCPlan, _ SecurityCheckOpts) 
 }
 
 func r1CheckFirewallConfig(cfg map[string]any) []string {
+	// Support both "inbound_rules" and "inbound" key variants used across wfctl.
 	raw, ok := cfg["inbound_rules"]
 	if !ok {
-		return nil
+		raw, ok = cfg["inbound"]
+		if !ok {
+			return nil
+		}
 	}
-	rules, ok := raw.([]any)
-	if !ok {
+	rules := toAnySlice(raw)
+	if len(rules) == 0 {
 		return nil
 	}
 	var msgs []string
@@ -70,7 +75,11 @@ func r1CheckFirewallConfig(cfg map[string]any) []string {
 		if allowedPorts[port] {
 			continue
 		}
+		// Support both "sources" (plural) and "source" (singular) key variants.
 		sources := toStringSlice(rule["sources"])
+		if len(sources) == 0 {
+			sources = toStringSlice(rule["source"])
+		}
 		for _, src := range sources {
 			for _, pub := range publicCIDRs {
 				if src == pub {
@@ -85,19 +94,19 @@ func r1CheckFirewallConfig(cfg map[string]any) []string {
 // ─── R2: DB without trusted_sources ─────────────────────────────────────────
 func ruleR2DBWithoutTrustedSources(plan interfaces.IaCPlan, _ SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Resource.Type != "infra.database" {
+	for i := range plan.Actions {
+		if plan.Actions[i].Resource.Type != "infra.database" {
 			continue
 		}
-		if a.Action != "create" && a.Action != "update" {
+		if plan.Actions[i].Action != "create" && plan.Actions[i].Action != "update" {
 			continue
 		}
-		cfg := a.Resource.Config
+		cfg := plan.Actions[i].Resource.Config
 		ts, ok := cfg["trusted_sources"]
 		if !ok {
 			findings = append(findings, SecurityFinding{
 				RuleID: "R2", Severity: SeverityFail,
-				Resource: a.Resource.Name, Type: a.Resource.Type,
+				Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
 				Message: "database has no trusted_sources — access is unrestricted",
 			})
 			continue
@@ -106,7 +115,7 @@ func ruleR2DBWithoutTrustedSources(plan interfaces.IaCPlan, _ SecurityCheckOpts)
 			if src == "0.0.0.0/0" {
 				findings = append(findings, SecurityFinding{
 					RuleID: "R2", Severity: SeverityFail,
-					Resource: a.Resource.Name, Type: a.Resource.Type,
+					Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
 					Message: "database trusted_sources contains 0.0.0.0/0 — access is unrestricted",
 				})
 				break
@@ -121,24 +130,24 @@ var r3InternalPattern = regexp.MustCompile(`(^|-)(nats|redis|db|broker|internal)
 
 func ruleR3InternalNamingPubliclyExposed(plan interfaces.IaCPlan, _ SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Resource.Type != "infra.container_service" {
+	for i := range plan.Actions {
+		if plan.Actions[i].Resource.Type != "infra.container_service" {
 			continue
 		}
-		if a.Action != "create" && a.Action != "update" {
+		if plan.Actions[i].Action != "create" && plan.Actions[i].Action != "update" {
 			continue
 		}
-		name := a.Resource.Name
+		name := plan.Actions[i].Resource.Name
 		if !r3InternalPattern.MatchString(name) {
 			continue
 		}
-		httpPort, _ := a.Resource.Config["http_port"]
+		httpPort, _ := plan.Actions[i].Resource.Config["http_port"]
 		if httpPort == nil || httpPort == "" || httpPort == 0 {
 			continue
 		}
 		findings = append(findings, SecurityFinding{
 			RuleID: "R3", Severity: SeverityFail,
-			Resource: name, Type: a.Resource.Type,
+			Resource: name, Type: plan.Actions[i].Resource.Type,
 			Message: fmt.Sprintf("container service %q matches internal-naming pattern but has http_port set — internal services should not be publicly exposed", name),
 		})
 	}
@@ -156,11 +165,11 @@ var (
 
 func ruleR4SecretShapeLiteralInEnvVars(plan interfaces.IaCPlan, _ SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Action != "create" && a.Action != "update" {
+	for i := range plan.Actions {
+		if plan.Actions[i].Action != "create" && plan.Actions[i].Action != "update" {
 			continue
 		}
-		envVarsRaw, ok := a.Resource.Config["env_vars"]
+		envVarsRaw, ok := plan.Actions[i].Resource.Config["env_vars"]
 		if !ok {
 			continue
 		}
@@ -191,7 +200,7 @@ func ruleR4SecretShapeLiteralInEnvVars(plan interfaces.IaCPlan, _ SecurityCheckO
 			if reason != "" {
 				findings = append(findings, SecurityFinding{
 					RuleID: "R4", Severity: SeverityFail,
-					Resource: a.Resource.Name, Type: a.Resource.Type,
+					Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
 					Message: fmt.Sprintf("env_vars[%q]: %s — use ${VAR} references instead", k, reason),
 				})
 			}
@@ -203,18 +212,18 @@ func ruleR4SecretShapeLiteralInEnvVars(plan interfaces.IaCPlan, _ SecurityCheckO
 // ─── R5: Replace on protected resource ───────────────────────────────────────
 func ruleR5ReplaceOnProtectedResource(plan interfaces.IaCPlan, _ SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Action != "replace" {
+	for i := range plan.Actions {
+		if plan.Actions[i].Action != "replace" {
 			continue
 		}
-		protected, _ := a.Resource.Config["protected"].(bool)
+		protected, _ := plan.Actions[i].Resource.Config["protected"].(bool)
 		if !protected {
 			continue
 		}
 		findings = append(findings, SecurityFinding{
 			RuleID: "R5", Severity: SeverityFail,
-			Resource: a.Resource.Name, Type: a.Resource.Type,
-			Message: fmt.Sprintf("resource %q is protected but plan includes a replace (destructive recreate) action", a.Resource.Name),
+			Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
+			Message: fmt.Sprintf("resource %q is protected but plan includes a replace (destructive recreate) action", plan.Actions[i].Resource.Name),
 		})
 	}
 	return findings
@@ -223,12 +232,12 @@ func ruleR5ReplaceOnProtectedResource(plan interfaces.IaCPlan, _ SecurityCheckOp
 // ─── R6: DB backup/encryption regression ─────────────────────────────────────
 func ruleR6DBBackupEncryptionRegression(plan interfaces.IaCPlan, _ SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Resource.Type != "infra.database" || a.Action != "update" || a.Current == nil {
+	for i := range plan.Actions {
+		if plan.Actions[i].Resource.Type != "infra.database" || plan.Actions[i].Action != "update" || plan.Actions[i].Current == nil {
 			continue
 		}
-		currentCfg := a.Current.AppliedConfig
-		desiredCfg := a.Resource.Config
+		currentCfg := plan.Actions[i].Current.AppliedConfig
+		desiredCfg := plan.Actions[i].Resource.Config
 
 		// Check backup regression.
 		currentBackups, _ := currentCfg["backups"].(string)
@@ -236,7 +245,7 @@ func ruleR6DBBackupEncryptionRegression(plan interfaces.IaCPlan, _ SecurityCheck
 		if currentBackups == "on" && desiredBackups == "off" {
 			findings = append(findings, SecurityFinding{
 				RuleID: "R6", Severity: SeverityFail,
-				Resource: a.Resource.Name, Type: a.Resource.Type,
+				Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
 				Message: "database update disables backups (current: on → desired: off)",
 			})
 		}
@@ -247,7 +256,7 @@ func ruleR6DBBackupEncryptionRegression(plan interfaces.IaCPlan, _ SecurityCheck
 		if currentEnc && !desiredEnc {
 			findings = append(findings, SecurityFinding{
 				RuleID: "R6", Severity: SeverityFail,
-				Resource: a.Resource.Name, Type: a.Resource.Type,
+				Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
 				Message: "database update disables at-rest encryption (current: true → desired: false)",
 			})
 		}
@@ -258,12 +267,12 @@ func ruleR6DBBackupEncryptionRegression(plan interfaces.IaCPlan, _ SecurityCheck
 // ─── R7: CIDR widening ────────────────────────────────────────────────────────
 func ruleR7CIDRWidening(plan interfaces.IaCPlan, opts SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Resource.Type != "infra.firewall" || a.Action != "update" || a.Current == nil {
+	for i := range plan.Actions {
+		if plan.Actions[i].Resource.Type != "infra.firewall" || plan.Actions[i].Action != "update" || plan.Actions[i].Current == nil {
 			continue
 		}
-		currentSrcs := r7CollectSources(a.Current.AppliedConfig)
-		desiredSrcs := r7CollectSources(a.Resource.Config)
+		currentSrcs := r7CollectSources(plan.Actions[i].Current.AppliedConfig)
+		desiredSrcs := r7CollectSources(plan.Actions[i].Resource.Config)
 		if desc := r7WideningDescription(desiredSrcs, currentSrcs); desc != "" {
 			sev := SeverityWarn
 			if opts.StrictCIDR {
@@ -271,7 +280,7 @@ func ruleR7CIDRWidening(plan interfaces.IaCPlan, opts SecurityCheckOpts) []Secur
 			}
 			findings = append(findings, SecurityFinding{
 				RuleID: "R7", Severity: sev,
-				Resource: a.Resource.Name, Type: a.Resource.Type,
+				Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
 				Message: fmt.Sprintf("firewall CIDR widening detected — %s", desc),
 			})
 		}
@@ -281,16 +290,24 @@ func ruleR7CIDRWidening(plan interfaces.IaCPlan, opts SecurityCheckOpts) []Secur
 
 func r7CollectSources(cfg map[string]any) map[string]bool {
 	set := map[string]bool{}
+	// Support both "inbound_rules" and "inbound" key variants.
 	raw, ok := cfg["inbound_rules"]
 	if !ok {
-		return set
+		raw, ok = cfg["inbound"]
+		if !ok {
+			return set
+		}
 	}
 	for _, ruleRaw := range toAnySlice(raw) {
 		rule, ok := ruleRaw.(map[string]any)
 		if !ok {
 			continue
 		}
+		// Support both "sources" (plural) and "source" (singular) key variants.
 		for _, src := range toStringSlice(rule["sources"]) {
+			set[src] = true
+		}
+		for _, src := range toStringSlice(rule["source"]) {
 			set[src] = true
 		}
 	}
@@ -333,6 +350,9 @@ func r7WideningDescription(desired, current map[string]bool) string {
 			added = append(added, d)
 		}
 	}
+	// Sort for deterministic output (map iteration is random).
+	sort.Strings(added)
+	sort.Strings(broadened)
 	var parts []string
 	if len(added) > 0 {
 		parts = append(parts, "new sources: "+strings.Join(added, ", "))
@@ -366,18 +386,18 @@ func cidrContains(widerStr, narrowerStr string) bool {
 // ─── R8: State bucket public ACL ─────────────────────────────────────────────
 func ruleR8StateBucketPublicACL(plan interfaces.IaCPlan, _ SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Resource.Type != "infra.storage" {
+	for i := range plan.Actions {
+		if plan.Actions[i].Resource.Type != "infra.storage" {
 			continue
 		}
-		if a.Action != "create" && a.Action != "update" {
+		if plan.Actions[i].Action != "create" && plan.Actions[i].Action != "update" {
 			continue
 		}
-		acl, _ := a.Resource.Config["acl"].(string)
+		acl, _ := plan.Actions[i].Resource.Config["acl"].(string)
 		if acl != "" && acl != "private" {
 			findings = append(findings, SecurityFinding{
 				RuleID: "R8", Severity: SeverityFail,
-				Resource: a.Resource.Name, Type: a.Resource.Type,
+				Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
 				Message: fmt.Sprintf("storage bucket acl is %q — must be \"private\" to prevent public data exposure", acl),
 			})
 		}
@@ -388,16 +408,16 @@ func ruleR8StateBucketPublicACL(plan interfaces.IaCPlan, _ SecurityCheckOpts) []
 // ─── R9: Registry retention disabled ─────────────────────────────────────────
 func ruleR9RegistryRetentionDisabled(plan interfaces.IaCPlan, _ SecurityCheckOpts) []SecurityFinding {
 	var findings []SecurityFinding
-	for _, a := range plan.Actions {
-		if a.Resource.Type != "infra.registry" || a.Action != "update" || a.Current == nil {
+	for i := range plan.Actions {
+		if plan.Actions[i].Resource.Type != "infra.registry" || plan.Actions[i].Action != "update" || plan.Actions[i].Current == nil {
 			continue
 		}
-		currentRetention := r9GetUntaggedTTL(a.Current.AppliedConfig)
-		desiredRetention := r9GetUntaggedTTL(a.Resource.Config)
+		currentRetention := r9GetUntaggedTTL(plan.Actions[i].Current.AppliedConfig)
+		desiredRetention := r9GetUntaggedTTL(plan.Actions[i].Resource.Config)
 		if currentRetention > 0 && desiredRetention == 0 {
 			findings = append(findings, SecurityFinding{
 				RuleID: "R9", Severity: SeverityWarn,
-				Resource: a.Resource.Name, Type: a.Resource.Type,
+				Resource: plan.Actions[i].Resource.Name, Type: plan.Actions[i].Resource.Type,
 				Message: "registry update removes untagged image retention policy — untagged images will accumulate",
 			})
 		}
@@ -441,15 +461,15 @@ func ruleR10ChangeBlastRadiusCap(plan interfaces.IaCPlan, opts SecurityCheckOpts
 	}
 	deletes := map[string]bool{}
 	creates := map[string]bool{}
-	for _, a := range plan.Actions {
-		if !statefulTypes[a.Resource.Type] {
+	for i := range plan.Actions {
+		if !statefulTypes[plan.Actions[i].Resource.Type] {
 			continue
 		}
-		if a.Action == "delete" {
-			deletes[a.Resource.Name] = true
+		if plan.Actions[i].Action == "delete" {
+			deletes[plan.Actions[i].Resource.Name] = true
 		}
-		if a.Action == "create" {
-			creates[a.Resource.Name] = true
+		if plan.Actions[i].Action == "create" {
+			creates[plan.Actions[i].Resource.Name] = true
 		}
 	}
 	for name := range deletes {
