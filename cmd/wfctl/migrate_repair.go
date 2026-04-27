@@ -172,10 +172,8 @@ Options:
 			result = &interfaces.MigrationRepairResult{Status: interfaces.MigrationRepairStatusSucceeded}
 		}
 	}
-	if err == nil {
-		if statusErr := validateMigrationRepairResultStatus(result.Status); statusErr != nil {
-			return statusErr
-		}
+	if statusErr := validateMigrationRepairResultStatus(result.Status); statusErr != nil {
+		return redactMigrationRepairError(statusErr, jobEnvMap)
 	}
 	printMigrationRepairResult(out, result, jobEnvMap)
 	if summaryErr := writeMigrationRepairSummary(result, envName, appName, jobEnvMap); summaryErr != nil && err == nil {
@@ -286,10 +284,12 @@ func printMigrationRepairResult(out io.Writer, result *interfaces.MigrationRepai
 	if result == nil {
 		return
 	}
+	providerJobID := redactMigrationRepairSecrets(result.ProviderJobID, secrets)
+	status := redactMigrationRepairSecrets(result.Status, secrets)
 	if result.ProviderJobID != "" {
-		fmt.Fprintf(out, "provider job %s: %s\n", result.ProviderJobID, result.Status)
+		fmt.Fprintf(out, "provider job %s: %s\n", providerJobID, status)
 	} else if result.Status != "" {
-		fmt.Fprintf(out, "migration repair: %s\n", result.Status)
+		fmt.Fprintf(out, "migration repair: %s\n", status)
 	}
 	if strings.TrimSpace(result.Logs) != "" {
 		fmt.Fprintln(out, redactMigrationRepairSecrets(result.Logs, secrets))
