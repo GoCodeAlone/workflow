@@ -8,11 +8,39 @@ import (
 
 // CIConfig holds the ci: section of a workflow config — build, test, and deploy lifecycle.
 type CIConfig struct {
-	Build      *CIBuildConfig  `json:"build,omitempty" yaml:"build,omitempty"`
-	Test       *CITestConfig   `json:"test,omitempty" yaml:"test,omitempty"`
-	Deploy     *CIDeployConfig `json:"deploy,omitempty" yaml:"deploy,omitempty"`
-	Infra      *CIInfraConfig  `json:"infra,omitempty" yaml:"infra,omitempty"`
-	Registries []CIRegistry    `json:"registries,omitempty" yaml:"registries,omitempty"`
+	Build      *CIBuildConfig      `json:"build,omitempty" yaml:"build,omitempty"`
+	Test       *CITestConfig       `json:"test,omitempty" yaml:"test,omitempty"`
+	Deploy     *CIDeployConfig     `json:"deploy,omitempty" yaml:"deploy,omitempty"`
+	Infra      *CIInfraConfig      `json:"infra,omitempty" yaml:"infra,omitempty"`
+	Registries []CIRegistry        `json:"registries,omitempty" yaml:"registries,omitempty"`
+	Migrations []CIMigrationConfig `json:"migrations,omitempty" yaml:"migrations,omitempty"`
+}
+
+type CIMigrationConfig struct {
+	Name       string                      `json:"name" yaml:"name"`
+	Plugin     string                      `json:"plugin,omitempty" yaml:"plugin,omitempty"`
+	Driver     string                      `json:"driver,omitempty" yaml:"driver,omitempty"`
+	SourceDir  string                      `json:"source_dir" yaml:"source_dir"`
+	Database   CIMigrationDatabaseConfig   `json:"database" yaml:"database"`
+	Baseline   CIMigrationBaselineConfig   `json:"baseline,omitempty" yaml:"baseline,omitempty"`
+	Validation CIMigrationValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+}
+
+type CIMigrationDatabaseConfig struct {
+	Env string `json:"env,omitempty" yaml:"env,omitempty"`
+	DSN string `json:"dsn,omitempty" yaml:"dsn,omitempty"`
+}
+
+type CIMigrationBaselineConfig struct {
+	Ref  string `json:"ref,omitempty" yaml:"ref,omitempty"`
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
+}
+
+type CIMigrationValidationConfig struct {
+	Lint              bool `json:"lint,omitempty" yaml:"lint,omitempty"`
+	FreshCycle        bool `json:"fresh_cycle,omitempty" yaml:"fresh_cycle,omitempty"`
+	BaselineCandidate bool `json:"baseline_candidate,omitempty" yaml:"baseline_candidate,omitempty"`
+	ForbidDirty       bool `json:"forbid_dirty,omitempty" yaml:"forbid_dirty,omitempty"`
 }
 
 // CIBuildConfig defines what artifacts the build phase produces.

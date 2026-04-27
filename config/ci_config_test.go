@@ -73,6 +73,42 @@ environments:
 	}
 }
 
+func TestCIMigrationsConfigParsesValidationOptions(t *testing.T) {
+	data := []byte(`
+version: 1
+ci:
+  migrations:
+    - name: app
+      plugin: workflow-plugin-migrations
+      driver: golang-migrate
+      source_dir: migrations
+      database:
+        env: DATABASE_URL
+      baseline:
+        ref: origin/main
+        mode: apply-before-candidate
+      validation:
+        lint: true
+        fresh_cycle: true
+        baseline_candidate: true
+        forbid_dirty: true
+`)
+	var cfg WorkflowConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.CI.Migrations[0]
+	if got.Name != "app" || got.Plugin != "workflow-plugin-migrations" || got.Driver != "golang-migrate" {
+		t.Fatalf("unexpected migration config: %+v", got)
+	}
+	if got.Database.Env != "DATABASE_URL" {
+		t.Fatalf("database env = %q", got.Database.Env)
+	}
+	if !got.Validation.FreshCycle || !got.Validation.BaselineCandidate || !got.Validation.ForbidDirty {
+		t.Fatalf("validation flags not parsed: %+v", got.Validation)
+	}
+}
+
 func TestCIConfig_Validate(t *testing.T) {
 	t.Run("nil config is valid", func(t *testing.T) {
 		var c *CIConfig
