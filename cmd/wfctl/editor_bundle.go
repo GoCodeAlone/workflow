@@ -205,7 +205,8 @@ func editorBundleRegistrySources() ([]schema.EditorContractRegistrySource, error
 
 func contractRegistryFromPluginDescriptors(descriptors []pluginContractDescriptor) *pb.ContractRegistry {
 	registry := &pb.ContractRegistry{}
-	for _, descriptor := range descriptors {
+	for i := range descriptors {
+		descriptor := &descriptors[i]
 		contract := contractDescriptorFromPluginDescriptor(descriptor)
 		if contract != nil {
 			registry.Contracts = append(registry.Contracts, contract)
@@ -215,7 +216,8 @@ func contractRegistryFromPluginDescriptors(descriptors []pluginContractDescripto
 }
 
 func firstDescriptorSetRef(descriptors []pluginContractDescriptor) string {
-	for _, descriptor := range descriptors {
+	for i := range descriptors {
+		descriptor := &descriptors[i]
 		if descriptor.DescriptorSetRef != "" {
 			return descriptor.DescriptorSetRef
 		}
@@ -225,7 +227,8 @@ func firstDescriptorSetRef(descriptors []pluginContractDescriptor) string {
 
 func contractDescriptorSetRefsFromPluginDescriptors(descriptors []pluginContractDescriptor) map[string]string {
 	refs := map[string]string{}
-	for _, descriptor := range descriptors {
+	for i := range descriptors {
+		descriptor := &descriptors[i]
 		if descriptor.DescriptorSetRef == "" {
 			continue
 		}
@@ -241,7 +244,7 @@ func contractDescriptorSetRefsFromPluginDescriptors(descriptors []pluginContract
 	return refs
 }
 
-func editorBundleContractIDFromPluginDescriptor(descriptor pluginContractDescriptor) string {
+func editorBundleContractIDFromPluginDescriptor(descriptor *pluginContractDescriptor) string {
 	kind := normalizePluginContractKind(descriptor.Kind)
 	switch kind {
 	case "module":
@@ -279,7 +282,7 @@ func editorBundleContractIDFromPluginDescriptor(descriptor pluginContractDescrip
 	return ""
 }
 
-func contractDescriptorFromPluginDescriptor(descriptor pluginContractDescriptor) *pb.ContractDescriptor {
+func contractDescriptorFromPluginDescriptor(descriptor *pluginContractDescriptor) *pb.ContractDescriptor {
 	kind := normalizePluginContractKind(descriptor.Kind)
 	mode := normalizePluginContractMode(descriptor.Mode)
 	contract := &pb.ContractDescriptor{
