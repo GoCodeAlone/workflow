@@ -46,22 +46,24 @@ type pluginContractKindCoverage struct {
 }
 
 type pluginContractDescriptorFile struct {
-	Version   string                     `json:"version"`
-	Contracts []pluginContractDescriptor `json:"contracts"`
+	Version          string                     `json:"version"`
+	DescriptorSetRef string                     `json:"descriptorSetRef,omitempty"`
+	Contracts        []pluginContractDescriptor `json:"contracts"`
 }
 
 type pluginContractDescriptor struct {
-	Kind        string `json:"kind"`
-	Type        string `json:"type"`
-	Mode        string `json:"mode"`
-	Config      string `json:"config,omitempty"`
-	Input       string `json:"input,omitempty"`
-	Output      string `json:"output,omitempty"`
-	ModuleType  string `json:"moduleType,omitempty"`
-	StepType    string `json:"stepType,omitempty"`
-	TriggerType string `json:"triggerType,omitempty"`
-	ServiceName string `json:"serviceName,omitempty"`
-	Method      string `json:"method,omitempty"`
+	Kind             string `json:"kind"`
+	Type             string `json:"type"`
+	Mode             string `json:"mode"`
+	Config           string `json:"config,omitempty"`
+	Input            string `json:"input,omitempty"`
+	Output           string `json:"output,omitempty"`
+	ModuleType       string `json:"moduleType,omitempty"`
+	StepType         string `json:"stepType,omitempty"`
+	TriggerType      string `json:"triggerType,omitempty"`
+	ServiceName      string `json:"serviceName,omitempty"`
+	Method           string `json:"method,omitempty"`
+	DescriptorSetRef string `json:"descriptorSetRef,omitempty"`
 }
 
 func (d *pluginContractDescriptor) UnmarshalJSON(data []byte) error {
@@ -80,6 +82,7 @@ func (d *pluginContractDescriptor) UnmarshalJSON(data []byte) error {
 	d.TriggerType = firstStringField(raw, "triggerType", "trigger_type")
 	d.ServiceName = firstStringField(raw, "serviceName", "service_name")
 	d.Method = firstStringField(raw, "method")
+	d.DescriptorSetRef = firstStringField(raw, "descriptorSetRef", "descriptor_set_ref")
 	return nil
 }
 
@@ -278,6 +281,7 @@ func loadPluginContractDescriptors(repoPath string, manifest map[string]any, opt
 			})
 			return descriptors, contractPath, true, findings
 		}
+		applyDescriptorSetRef(file.Contracts, file.DescriptorSetRef)
 		descriptors = append(descriptors, file.Contracts...)
 		return descriptors, contractPath, true, findings
 	}
@@ -306,7 +310,19 @@ func parsePluginContractDescriptors(raw any) ([]pluginContractDescriptor, error)
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, err
 	}
+	applyDescriptorSetRef(file.Contracts, file.DescriptorSetRef)
 	return file.Contracts, nil
+}
+
+func applyDescriptorSetRef(descriptors []pluginContractDescriptor, descriptorSetRef string) {
+	if descriptorSetRef == "" {
+		return
+	}
+	for i := range descriptors {
+		if descriptors[i].DescriptorSetRef == "" {
+			descriptors[i].DescriptorSetRef = descriptorSetRef
+		}
+	}
 }
 
 func addPluginContractKindFindings(result *pluginAuditResult, kind string, advertised []string, descriptors map[string]pluginContractDescriptor, opts pluginAuditOptions) pluginContractKindCoverage {
