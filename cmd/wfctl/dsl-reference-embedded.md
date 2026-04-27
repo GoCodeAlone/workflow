@@ -1309,7 +1309,6 @@ Manage SQLite-backed engine config schema migrations.
 
 > **Deprecated:** `wfctl migrate` is an alias for `wfctl config migrate` and will be removed in v0.21+.
 > Update scripts to use `wfctl config migrate`.
-- `wfctl validate` checks `security.tls.provider` for valid values
 
 ---
 
