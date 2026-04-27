@@ -120,6 +120,7 @@ func TestCurrentCICommitSHAUsesWorkflowRunHeadSHA(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GITHUB_EVENT_PATH", eventPath)
+	t.Setenv("GITHUB_SHA", "merge-ref-sha")
 
 	if got := currentCICommitSHA(); got != "abc123" {
 		t.Fatalf("currentCICommitSHA() = %q, want abc123", got)
@@ -132,6 +133,14 @@ func TestCurrentCICommitSHAPrefersExplicitOverride(t *testing.T) {
 
 	if got := currentCICommitSHA(); got != "override-sha" {
 		t.Fatalf("currentCICommitSHA() = %q, want override-sha", got)
+	}
+}
+
+func TestCurrentCICommitSHAFallsBackToProviderSHA(t *testing.T) {
+	t.Setenv("GITHUB_SHA", "github-sha")
+
+	if got := currentCICommitSHA(); got != "github-sha" {
+		t.Fatalf("currentCICommitSHA() = %q, want github-sha", got)
 	}
 }
 
