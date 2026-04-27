@@ -74,7 +74,7 @@ func runInfraAlign(args []string) error {
 
 	// Write to GitHub Step Summary when running in CI
 	if summary := os.Getenv("GITHUB_STEP_SUMMARY"); summary != "" {
-		if f, err := os.OpenFile(summary, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+		if f, err := os.OpenFile(summary, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600); err == nil {
 			fmt.Fprint(f, output)
 			f.Close()
 		}
@@ -178,8 +178,8 @@ func renderAlignMarkdown(findings []AlignFinding) string {
 		// Escape pipe characters to prevent breaking the markdown table.
 		resource := strings.ReplaceAll(f.Resource, "|", "\\|")
 		message := strings.ReplaceAll(f.Message, "|", "\\|")
-		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
-			f.Rule, f.Severity, resource, message))
+		fmt.Fprintf(&sb, "| %s | %s | %s | %s |\n",
+			f.Rule, f.Severity, resource, message)
 	}
 	sb.WriteString("\n")
 
