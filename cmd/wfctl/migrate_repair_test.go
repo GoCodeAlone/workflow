@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
@@ -541,6 +542,50 @@ func TestRunMigrateRepairDirtyRejectsProviderErrorResultStatusBeforeOutput(t *te
 	}
 }
 
+func TestRunMigrateRepairDirtyPrintsDiagnosticsForInvalidStatus(t *testing.T) {
+	for _, status := range []string{"", "unknown"} {
+		t.Run(fmt.Sprintf("status_%q", status), func(t *testing.T) {
+			cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
+			fake := &migrationRepairProvider{
+				result: &interfaces.MigrationRepairResult{
+					ProviderJobID: "job-123",
+					Status:        status,
+					Logs:          "repair log tail",
+					Diagnostics: []interfaces.Diagnostic{{
+						Phase: "decode",
+						Cause: "provider returned invalid status",
+					}},
+				},
+			}
+			restore := installMigrateRepairProvider(t, fake, "digitalocean")
+			defer restore()
+
+			out, err := captureMigrateRepairStdout(t, func() error {
+				return runMigrate([]string{
+					"repair-dirty",
+					"--config", cfgPath,
+					"--env", "staging",
+					"--database", "bmw-database",
+					"--app", "bmw-app",
+					"--job-image", "registry.example/workflow-migrate:sha",
+					"--expected-dirty-version", "20260426000005",
+					"--force-version", "20260422000001",
+					"--confirm-force", interfaces.MigrationRepairConfirmation,
+					"--approve-destructive",
+				})
+			})
+			if err == nil {
+				t.Fatal("expected invalid provider status error")
+			}
+			for _, want := range []string{"repair log tail", "Diagnostics:", "cause: provider returned invalid status"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("stdout missing %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
 func TestRunMigrateRepairDirtyMissingEnvFromEnvFailsBeforeProvider(t *testing.T) {
 	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
 	fake := &migrationRepairProvider{}
@@ -714,6 +759,95 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 	}
 	if !strings.Contains(string(summary), "[REDACTED]") {
 		t.Fatalf("summary missing redacted secret marker:\n%s", summary)
+	}
+}
+
+func TestRunMigrateRepairDirtyPrintsDiagnosticsToStdout(t *testing.T) {
+	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
+	secret := "postgres://diagnostic-secret"
+	at := time.Date(2026, 4, 27, 14, 17, 30, 0, time.UTC)
+	fake := &migrationRepairProvider{
+		result: &interfaces.MigrationRepairResult{
+			Status: interfaces.MigrationRepairStatusFailed,
+			Diagnostics: []interfaces.Diagnostic{{
+				Phase:  "update",
+				Cause:  "temporary repair job update failed\napp platform rejected spec",
+				At:     at,
+				Detail: "failed while using " + secret,
+			}},
+		},
+	}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+	t.Setenv("DATABASE_URL", secret)
+
+	out, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+			"--job-env-from-env", "DATABASE_URL",
+		})
+	})
+	if err == nil {
+		t.Fatal("expected failed repair status error")
+	}
+	for _, want := range []string{"migration repair: failed", "Diagnostics:", "phase: update", "cause:", "    temporary repair job update failed", "    app platform rejected spec", "at: 2026-04-27T14:17:30Z", "detail:", "    failed while using [REDACTED]"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, secret) {
+		t.Fatalf("stdout leaked secret:\n%s", out)
+	}
+}
+
+func TestRunMigrateRepairDirtyRedactsOverlappingSecrets(t *testing.T) {
+	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
+	shortSecret := "postgres://host"
+	longSecret := "postgres://host/db?token=secret"
+	fake := &migrationRepairProvider{
+		result: &interfaces.MigrationRepairResult{
+			Status: interfaces.MigrationRepairStatusFailed,
+			Diagnostics: []interfaces.Diagnostic{{
+				Phase:  "update",
+				Cause:  "temporary repair job update failed",
+				Detail: "failed while using " + longSecret,
+			}},
+		},
+	}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+	t.Setenv("DATABASE_URL", shortSecret)
+
+	out, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+			"--job-env", "DATABASE_URL=" + shortSecret,
+			"--job-env", "DATABASE_URL_FULL=" + longSecret,
+		})
+	})
+	if err == nil {
+		t.Fatal("expected failed repair status error")
+	}
+	if strings.Contains(out, shortSecret) || strings.Contains(out, longSecret) || strings.Contains(out, "/db?token=secret") {
+		t.Fatalf("stdout leaked overlapping secret:\n%s", out)
 	}
 }
 
