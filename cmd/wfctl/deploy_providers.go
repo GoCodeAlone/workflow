@@ -394,6 +394,24 @@ func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.S
 	return &sizing, nil
 }
 
+func (r *remoteIaCProvider) RepairDirtyMigration(_ context.Context, req interfaces.MigrationRepairRequest) (*interfaces.MigrationRepairResult, error) {
+	reqAny, err := jsonToAny(req)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.RepairDirtyMigration: marshal request: %w", err)
+	}
+	res, err := r.invoker.InvokeService("IaCProvider.RepairDirtyMigration", map[string]any{
+		"request": reqAny,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var result interfaces.MigrationRepairResult
+	if err := anyToStruct(res, &result); err != nil {
+		return nil, fmt.Errorf("IaCProvider.RepairDirtyMigration: decode result: %w", err)
+	}
+	return &result, nil
+}
+
 func (r *remoteIaCProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
 	return &remoteResourceDriver{invoker: r.invoker, resourceType: resourceType}, nil
 }
