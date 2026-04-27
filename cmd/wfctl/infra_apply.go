@@ -713,7 +713,8 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 	groups := map[string]*actionGroup{}
 	var groupOrder []string
 
-	for _, action := range plan.Actions {
+	for i := range plan.Actions {
+		action := &plan.Actions[i]
 		moduleRef, _ := action.Resource.Config["provider"].(string)
 		if moduleRef == "" {
 			return fmt.Errorf("plan action for %q: missing 'provider' field in resource config", action.Resource.Name)
@@ -726,7 +727,7 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 			groups[moduleRef] = &actionGroup{provType: def.provType, provCfg: def.provCfg}
 			groupOrder = append(groupOrder, moduleRef)
 		}
-		groups[moduleRef].actions = append(groups[moduleRef].actions, action)
+		groups[moduleRef].actions = append(groups[moduleRef].actions, *action)
 	}
 
 	// Apply each provider group in declaration order.
@@ -742,16 +743,14 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 		if err != nil {
 			return fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
 		}
+		applyErr := applyPrecomputedPlanWithStore(ctx, groupPlan, provider, g.provType, store, os.Stderr, envName)
 		if closer != nil {
-			provType := g.provType
-			defer func() {
-				if cerr := closer.Close(); cerr != nil {
-					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
-				}
-			}()
+			if cerr := closer.Close(); cerr != nil {
+				fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
+			}
 		}
-		if err := applyPrecomputedPlanWithStore(ctx, groupPlan, provider, g.provType, store, os.Stderr, envName); err != nil {
-			return fmt.Errorf("provider %q: %w", moduleRef, err)
+		if applyErr != nil {
+			return fmt.Errorf("provider %q: %w", moduleRef, applyErr)
 		}
 	}
 
@@ -779,9 +778,9 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 
 	// Collect delete-action resource names for post-apply state cleanup.
 	deleteNames := make(map[string]struct{})
-	for _, a := range plan.Actions {
-		if a.Action == "delete" {
-			deleteNames[a.Resource.Name] = struct{}{}
+	for i := range plan.Actions {
+		if plan.Actions[i].Action == "delete" {
+			deleteNames[plan.Actions[i].Resource.Name] = struct{}{}
 		}
 	}
 
@@ -831,11 +830,11 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 			var appliedCfg map[string]any
 			var providerRef string
 			var dependencies []string
-			for _, a := range plan.Actions {
-				if a.Resource.Name == r.Name {
-					appliedCfg = a.Resource.Config
-					providerRef, _ = a.Resource.Config["provider"].(string)
-					dependencies = append([]string(nil), a.Resource.DependsOn...)
+			for i := range plan.Actions {
+				if plan.Actions[i].Resource.Name == r.Name {
+					appliedCfg = plan.Actions[i].Resource.Config
+					providerRef, _ = plan.Actions[i].Resource.Config["provider"].(string)
+					dependencies = append([]string(nil), plan.Actions[i].Resource.DependsOn...)
 					break
 				}
 			}
