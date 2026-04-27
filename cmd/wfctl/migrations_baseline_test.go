@@ -196,6 +196,34 @@ func TestRunMigrationsValidateWritesFailureResultFile(t *testing.T) {
 	}
 }
 
+func TestRunMigrationsValidateRecordsSkippedBaselineCandidateWhenSourceUnchanged(t *testing.T) {
+	cfgPath := writeMigrationBaselineConfig(t, true)
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+
+	var calls []string
+	restore := stubMigrationBaselineHooks(t, &calls, nil, "abc123")
+	defer restore()
+
+	if err := runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci", "--result-file", resultPath}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got migrationValidationResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode result file: %v\n%s", err, data)
+	}
+	if got.Decision != "pass" || len(got.Migrations) != 1 || got.Migrations[0].BaselineCandidate != "skip" {
+		t.Fatalf("unexpected skipped baseline result: %+v", got)
+	}
+	if strings.Contains(strings.Join(calls, "\n"), "materialize") {
+		t.Fatalf("baseline/candidate replay should not materialize unchanged sources: %v", calls)
+	}
+}
+
 func TestParseMigrationStatusRejectsUnknownOutput(t *testing.T) {
 	if _, err := parseMigrationStatus("unexpected status output"); err == nil {
 		t.Fatal("expected unrecognized status error")

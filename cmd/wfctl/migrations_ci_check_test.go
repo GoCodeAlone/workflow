@@ -203,6 +203,30 @@ func TestRunMigrationsCICheckRejectsValidationResultMissingConfiguredChecks(t *t
 	}
 }
 
+func TestRunMigrationsCICheckAcceptsSkippedBaselineCandidateResult(t *testing.T) {
+	cfgPath := writeMigrationBaselineConfig(t, true)
+	resultPath := writeMigrationValidationResultFixture(t, migrationValidationResult{
+		Decision: "pass",
+		Commit:   "abc123",
+		Migrations: []migrationValidationRecord{{
+			Name:              "app",
+			Lint:              "pass",
+			BaselineCandidate: "skip",
+		}},
+	})
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	restore := stubMigrationStatusRunner(t, migrationCommandResult{
+		Stdout: "Current: 20260426000005\nDirty: false\nNo pending migrations.\n",
+	}, nil)
+	defer restore()
+
+	if _, err := captureStdout(t, func() error {
+		return runMigrations([]string{"ci-check", "--config", cfgPath, "--env", "ci", "--commit", "abc123", "--validation-result", resultPath, "--require-validation-result", "--format", "json"})
+	}); err != nil {
+		t.Fatalf("expected skipped baseline/candidate result to pass: %v", err)
+	}
+}
+
 func TestWriteMigrationValidationResultCreatesParentDirectories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".wfctl", "migrations-result.json")
 	err := writeMigrationValidationResult(path, migrationValidationResult{Decision: "pass"})

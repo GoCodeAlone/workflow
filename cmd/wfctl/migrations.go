@@ -425,6 +425,8 @@ func runMigrationsValidate(args []string) error {
 			record.BaselineCandidate = "pass"
 			record.Dirty = baselineResult.Dirty
 			record.Pending = baselineResult.Pending
+		} else if migration.Validation.BaselineCandidate {
+			record.BaselineCandidate = "skip"
 		}
 		if migration.Validation.FreshCycle {
 			if err := runFreshCycleValidation(ctx, runner, runCfg, migration); err != nil {
@@ -657,7 +659,7 @@ func checkMigrationValidationResult(path, commit string, requireSameSHA bool, ex
 		if expected.Validation.FreshCycle && record.FreshCycle != "pass" {
 			reasons = append(reasons, fmt.Sprintf("validation result migration %s missing required fresh_cycle check", expected.Name))
 		}
-		if expected.Validation.BaselineCandidate && record.BaselineCandidate != "pass" {
+		if expected.Validation.BaselineCandidate && record.BaselineCandidate != "pass" && record.BaselineCandidate != "skip" {
 			reasons = append(reasons, fmt.Sprintf("validation result migration %s missing required baseline_candidate check", expected.Name))
 		}
 	}
