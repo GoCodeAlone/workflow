@@ -82,12 +82,15 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 		if registries != nil {
 			if platforms, err := lockPlatformsFromRegistry(registries, p.Name, p.Version); err == nil {
 				entry.Platforms = platforms
-			} else if errors.Is(err, errInvalidRegistrySHA256) {
-				return fmt.Errorf("lock platform metadata for %s@%s: %w", p.Name, p.Version, err)
-			} else if previousHasPlatforms {
-				return fmt.Errorf("refresh platform metadata for %s@%s: %w", p.Name, p.Version, err)
 			} else {
-				fmt.Fprintf(os.Stderr, "warning: could not enrich %s lock entry from registry: %v\n", p.Name, err)
+				switch {
+				case errors.Is(err, errInvalidRegistrySHA256):
+					return fmt.Errorf("lock platform metadata for %s@%s: %w", p.Name, p.Version, err)
+				case previousHasPlatforms:
+					return fmt.Errorf("refresh platform metadata for %s@%s: %w", p.Name, p.Version, err)
+				default:
+					fmt.Fprintf(os.Stderr, "warning: could not enrich %s lock entry from registry: %v\n", p.Name, err)
+				}
 			}
 		} else if previousHasPlatforms {
 			return fmt.Errorf("refresh platform metadata for %s@%s: no project-local registry config available", p.Name, p.Version)

@@ -86,7 +86,7 @@ func TestWfctlLockfile_SaveOmitsTopLevelSHA256WhenPlatformsExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read lockfile: %v", err)
 	}
-	if strings.Contains(string(data), "\n        sha256: legacy-binary-sha") {
+	if strings.Contains(string(data), "sha256: legacy-binary-sha") {
 		t.Fatalf("lockfile should not write top-level sha256 when platforms exist:\n%s", data)
 	}
 	if !strings.Contains(string(data), "sha256: archive-sha-linux") {
