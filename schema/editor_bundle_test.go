@@ -219,6 +219,67 @@ func TestExportEditorBundlePreservesPerContractExternalDescriptorSetReferences(t
 	}
 }
 
+func TestExportEditorBundleKeysServiceContractsByModuleType(t *testing.T) {
+	bundle, err := ExportEditorBundle(EditorBundleOptions{
+		ContractRegistries: []EditorContractRegistrySource{
+			{
+				Plugin: "workflow-plugin-service-test",
+				Source: EditorContractSourcePluginContractsJSON,
+				ContractDescriptorSetRefs: map[string]string{
+					"service:module.alpha/SharedService/Call": "descriptors/alpha.pb",
+					"service:module.beta/SharedService/Call":  "descriptors/beta.pb",
+				},
+				Registry: &pb.ContractRegistry{
+					Contracts: []*pb.ContractDescriptor{
+						{
+							Kind:          pb.ContractKind_CONTRACT_KIND_SERVICE,
+							ModuleType:    "module.alpha",
+							ServiceName:   "SharedService",
+							Method:        "Call",
+							Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+							InputMessage:  "workflow.test.AlphaRequest",
+							OutputMessage: "workflow.test.AlphaResponse",
+						},
+						{
+							Kind:          pb.ContractKind_CONTRACT_KIND_SERVICE,
+							ModuleType:    "module.beta",
+							ServiceName:   "SharedService",
+							Method:        "Call",
+							Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+							InputMessage:  "workflow.test.BetaRequest",
+							OutputMessage: "workflow.test.BetaResponse",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("export editor bundle: %v", err)
+	}
+
+	alpha := bundle.Contracts["service:module.alpha/SharedService/Call"]
+	beta := bundle.Contracts["service:module.beta/SharedService/Call"]
+	if alpha == nil || beta == nil {
+		t.Fatalf("expected module-scoped service contracts, got keys %+v", bundle.Contracts)
+	}
+	if alpha.OwnerKey != "module.alpha/SharedService/Call" {
+		t.Fatalf("alpha owner key = %q", alpha.OwnerKey)
+	}
+	if beta.OwnerKey != "module.beta/SharedService/Call" {
+		t.Fatalf("beta owner key = %q", beta.OwnerKey)
+	}
+	if alpha.DescriptorSetRef != "descriptors/alpha.pb" {
+		t.Fatalf("alpha descriptor set ref = %q", alpha.DescriptorSetRef)
+	}
+	if beta.DescriptorSetRef != "descriptors/beta.pb" {
+		t.Fatalf("beta descriptor set ref = %q", beta.DescriptorSetRef)
+	}
+	if alpha.RequestMessage != "workflow.test.AlphaRequest" || beta.RequestMessage != "workflow.test.BetaRequest" {
+		t.Fatalf("service contracts collided: alpha=%+v beta=%+v", alpha, beta)
+	}
+}
+
 func assertMessageField(t *testing.T, msg *EditorMessageDescriptor, name, typ string, repeated bool) {
 	t.Helper()
 	for _, field := range msg.Fields {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -109,6 +110,28 @@ func TestRunEditorBundleLoadsPluginContractDescriptorSetReference(t *testing.T) 
 	}
 }
 
+func TestRunEditorBundleRejectsMalformedPluginContractDescriptors(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "workflow-plugin-bad-contracts")
+	if err := os.Mkdir(pluginDir, 0755); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"name":"workflow-plugin-bad-contracts"}`), 0644); err != nil {
+		t.Fatalf("write plugin manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.contracts.json"), []byte(`{"contracts": [`), 0644); err != nil {
+		t.Fatalf("write plugin contracts: %v", err)
+	}
+
+	err := runEditorBundle([]string{"--registry=false", "--plugin-dir", pluginDir})
+	if err == nil {
+		t.Fatal("expected malformed plugin.contracts.json to fail")
+	}
+	if !strings.Contains(err.Error(), "invalid_plugin_contract_descriptors") {
+		t.Fatalf("error = %v, want invalid_plugin_contract_descriptors", err)
+	}
+}
+
 func TestRunEditorBundleIncludesRegistryContractsByDefault(t *testing.T) {
 	origList := listEditorBundleRegistryPluginNames
 	origFetch := fetchEditorBundleRegistryManifest
@@ -171,6 +194,29 @@ func TestRunEditorBundleIncludesRegistryContractsByDefault(t *testing.T) {
 	}
 	if bundle.DescriptorSets["proto/registry.pb"].ExternalRef != "proto/registry.pb" {
 		t.Fatalf("descriptor set reference missing: %+v", bundle.DescriptorSets)
+	}
+}
+
+func TestRunEditorBundleFailsWhenRegistryManifestFetchFails(t *testing.T) {
+	origList := listEditorBundleRegistryPluginNames
+	origFetch := fetchEditorBundleRegistryManifest
+	t.Cleanup(func() {
+		listEditorBundleRegistryPluginNames = origList
+		fetchEditorBundleRegistryManifest = origFetch
+	})
+	listEditorBundleRegistryPluginNames = func() ([]string, error) {
+		return []string{"workflow-plugin-bad-registry"}, nil
+	}
+	fetchEditorBundleRegistryManifest = func(name string) (*RegistryManifest, error) {
+		return nil, os.ErrNotExist
+	}
+
+	err := runEditorBundle(nil)
+	if err == nil {
+		t.Fatal("expected registry fetch failure")
+	}
+	if !strings.Contains(err.Error(), "workflow-plugin-bad-registry") {
+		t.Fatalf("error = %v, want plugin name", err)
 	}
 }
 

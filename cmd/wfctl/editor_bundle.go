@@ -151,7 +151,7 @@ func editorBundlePluginRepoSource(path string) (schema.EditorContractRegistrySou
 		pluginName = filepath.Base(path)
 	}
 
-	descriptors, _, _, findings := loadPluginContractDescriptors(path, manifest, pluginAuditOptions{})
+	descriptors, _, _, findings := loadPluginContractDescriptors(path, manifest, pluginAuditOptions{StrictContracts: true})
 	for _, finding := range findings {
 		if finding.Level == "ERROR" {
 			return schema.EditorContractRegistrySource{}, fmt.Errorf("%s: %s", finding.Code, finding.Message)
@@ -186,7 +186,10 @@ func editorBundleRegistrySources() ([]schema.EditorContractRegistrySource, error
 	var sources []schema.EditorContractRegistrySource
 	for _, name := range names {
 		manifest, err := fetchEditorBundleRegistryManifest(name)
-		if err != nil || len(manifest.Contracts) == 0 {
+		if err != nil {
+			return nil, fmt.Errorf("fetch registry manifest %q: %w", name, err)
+		}
+		if len(manifest.Contracts) == 0 {
 			continue
 		}
 		sources = append(sources, schema.EditorContractRegistrySource{
@@ -254,6 +257,7 @@ func editorBundleContractIDFromPluginDescriptor(descriptor pluginContractDescrip
 			return "trigger:" + typ
 		}
 	case "service_method":
+		moduleType := descriptor.ModuleType
 		serviceName := descriptor.ServiceName
 		method := descriptor.Method
 		if serviceName == "" && method == "" {
@@ -261,6 +265,9 @@ func editorBundleContractIDFromPluginDescriptor(descriptor pluginContractDescrip
 				serviceName = parsedService
 				method = parsedMethod
 			}
+		}
+		if moduleType != "" && serviceName != "" {
+			return "service:" + moduleType + "/" + serviceName + "/" + method
 		}
 		if serviceName != "" {
 			return "service:" + serviceName + "/" + method

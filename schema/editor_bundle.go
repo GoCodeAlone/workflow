@@ -207,10 +207,7 @@ func descriptorSetRefForContract(source EditorContractRegistrySource, descriptor
 	if ownerType == "" || ownerKey == "" {
 		return fallback
 	}
-	id := ownerType + ":" + ownerKey
-	if ownerType == "service" && descriptor.GetServiceName() != "" {
-		id = "service:" + descriptor.GetServiceName() + "/" + descriptor.GetMethod()
-	}
+	id := editorContractID(ownerType, ownerKey)
 	if ref := source.ContractDescriptorSetRefs[id]; ref != "" {
 		return ref
 	}
@@ -365,10 +362,7 @@ func normalizeContractDescriptor(source EditorContractRegistrySource, descriptor
 	if ownerType == "" || ownerKey == "" {
 		return nil
 	}
-	id := ownerType + ":" + ownerKey
-	if ownerType == "service" && descriptor.ServiceName != "" {
-		id = "service:" + descriptor.ServiceName + "/" + descriptor.Method
-	}
+	id := editorContractID(ownerType, ownerKey)
 	return &EditorContractDescriptor{
 		ID:               id,
 		Plugin:           source.Plugin,
@@ -392,6 +386,9 @@ func editorContractOwner(descriptor *pb.ContractDescriptor) (string, string) {
 	case pb.ContractKind_CONTRACT_KIND_TRIGGER:
 		return "trigger", descriptor.TriggerType
 	case pb.ContractKind_CONTRACT_KIND_SERVICE:
+		if descriptor.ModuleType != "" && descriptor.ServiceName != "" {
+			return "service", descriptor.ModuleType + "/" + descriptor.ServiceName + "/" + descriptor.Method
+		}
 		if descriptor.ServiceName == "" {
 			return "service", descriptor.Method
 		}
@@ -399,6 +396,13 @@ func editorContractOwner(descriptor *pb.ContractDescriptor) (string, string) {
 	default:
 		return "", ""
 	}
+}
+
+func editorContractID(ownerType, ownerKey string) string {
+	if ownerType == "" || ownerKey == "" {
+		return ""
+	}
+	return ownerType + ":" + ownerKey
 }
 
 func editorContractMode(mode pb.ContractMode) string {
