@@ -63,7 +63,7 @@ Date: 2026-04-26
 
 Core Workflow support is implemented through `workflow eb53150`: contract descriptors, plugin-owned descriptor-set based dynamic codecs, typed SDK adapters, host-side strict dispatch, strict input projection, typed integer output normalization, strict module error surfacing, `wfctl` strict contract audit/validation, and strict scaffolding when run from a Workflow source checkout.
 
-Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, `workflow-plugin-sso`, and `workflow-plugin-ws-auth`. The next auth/security batch is in progress.
+Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, `workflow-plugin-sso`, `workflow-plugin-ws-auth`, `workflow-plugin-authz`, `workflow-plugin-security`, `workflow-plugin-authz-ui`, and `workflow-plugin-auth`. `workflow-plugin-security-scanner` has an open monitored PR; `workflow-plugin-admin`, `workflow-plugin-agent`, and `workflow-plugin-azure` are verified locally and awaiting PRs; `workflow-plugin-aws` is active.
 
 The design remains `in_progress` because downstream plugin and application repositories still need migration from map-only boundaries to typed descriptors and adapters. The workspace strict-contract audit is expected to fail until that migration completes.
 
