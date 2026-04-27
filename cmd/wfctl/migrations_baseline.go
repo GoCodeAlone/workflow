@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,8 @@ type migrationEphemeralDatabaseOperations struct {
 }
 
 var migrationEphemeralDB = migrationEphemeralDatabaseOperations{}
+
+const maxMigrationArchiveFileBytes = 64 << 20
 
 type migrationBaselineCandidateResult struct {
 	Current string   `json:"current"`
@@ -322,11 +325,12 @@ func migrationValidationDatabaseName(name string) string {
 		b.WriteRune('_')
 	}
 	b.WriteString("_")
-	b.WriteString(fmt.Sprintf("%d", time.Now().UnixNano()))
+	b.WriteString(strconv.FormatInt(time.Now().UnixNano(), 10))
 	return b.String()
 }
 
 func defaultMigrationChangedFiles(ctx context.Context, baselineRef, candidateRef string) ([]string, error) {
+	// #nosec G204 -- git is a fixed executable and refs are passed as argv without shell interpolation.
 	out, err := exec.CommandContext(ctx, "git", "diff", "--name-only", baselineRef+"..."+candidateRef).Output()
 	if err != nil {
 		return nil, err
@@ -347,6 +351,7 @@ func defaultMigrationMaterializeSource(ctx context.Context, ref, sourceDir strin
 		_ = os.RemoveAll(tmpDir)
 	}
 
+	// #nosec G204 -- git is a fixed executable and refs/source paths are passed as argv without shell interpolation.
 	out, err := exec.CommandContext(ctx, "git", "archive", "--format=tar", ref, sourceDir).CombinedOutput()
 	if err != nil {
 		cleanup()
@@ -384,7 +389,7 @@ func emptyMigrationSource(sourceDir string) (string, func(), error) {
 		return "", nil, err
 	}
 	source := filepath.Join(tmpDir, sourceDir)
-	if err := os.MkdirAll(source, 0o755); err != nil {
+	if err := os.MkdirAll(source, 0o750); err != nil {
 		_ = os.RemoveAll(tmpDir)
 		return "", nil, err
 	}
@@ -401,6 +406,7 @@ func extractTar(r *bytes.Reader, dest string) error {
 			}
 			return err
 		}
+		// #nosec G305 -- the joined path is cleaned and checked against dest before use.
 		target := filepath.Join(dest, header.Name)
 		cleanDest := filepath.Clean(dest) + string(os.PathSeparator)
 		cleanTarget := filepath.Clean(target)
@@ -409,18 +415,21 @@ func extractTar(r *bytes.Reader, dest string) error {
 		}
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
+			if err := os.MkdirAll(target, 0o750); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if header.Size > maxMigrationArchiveFileBytes {
+				return fmt.Errorf("archive entry exceeds size limit: %s", header.Name)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(file, tr); err != nil {
+			if _, err := io.CopyN(file, tr, header.Size); err != nil {
 				_ = file.Close()
 				return err
 			}

@@ -32,8 +32,9 @@ func resolveMigrationConfigs(cfg *config.WorkflowConfig, envName string) ([]reso
 
 	resolved := make([]resolvedMigrationConfig, 0, len(cfg.CI.Migrations))
 	var errs []error
-	for i, migration := range cfg.CI.Migrations {
-		envMigration, ok, envErr := migrationForEnv(migration, envName)
+	for i := range cfg.CI.Migrations {
+		migration := &cfg.CI.Migrations[i]
+		envMigration, ok, envErr := migrationForEnv(*migration, envName)
 		if envErr != nil {
 			errs = append(errs, fmt.Errorf("ci.migrations[%d]: %w", i, envErr))
 			continue
@@ -41,7 +42,7 @@ func resolveMigrationConfigs(cfg *config.WorkflowConfig, envName string) ([]reso
 		if !ok {
 			continue
 		}
-		migration = envMigration
+		migration = &envMigration
 		itemName := strings.TrimSpace(migration.Name)
 		label := itemName
 		if label == "" {
@@ -52,7 +53,7 @@ func resolveMigrationConfigs(cfg *config.WorkflowConfig, envName string) ([]reso
 			errs = append(errs, fmt.Errorf("ci.migrations[%s]: source_dir is required", label))
 		}
 
-		dsn, err := resolveMigrationDSN(migration)
+		dsn, err := resolveMigrationDSN(*migration)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("ci.migrations[%s]: %w", label, err))
 		}

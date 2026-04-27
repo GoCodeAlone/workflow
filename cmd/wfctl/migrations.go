@@ -579,7 +579,8 @@ func migrationCurrentOrUnknown(current string) string {
 
 func migrationStatusCleanReasons(migrations []migrationValidationRecord) []string {
 	var reasons []string
-	for _, migration := range migrations {
+	for i := range migrations {
+		migration := &migrations[i]
 		if migration.Dirty {
 			reasons = append(reasons, fmt.Sprintf("migration %s is dirty at version %s", migration.Name, migrationCurrentOrUnknown(migration.Current)))
 		}
@@ -592,7 +593,8 @@ func migrationStatusCleanReasons(migrations []migrationValidationRecord) []strin
 
 func migrationStatusDirtyReasons(migrations []migrationValidationRecord) []string {
 	var reasons []string
-	for _, migration := range migrations {
+	for i := range migrations {
+		migration := &migrations[i]
 		if migration.Dirty {
 			reasons = append(reasons, fmt.Sprintf("migration %s is dirty at version %s", migration.Name, migrationCurrentOrUnknown(migration.Current)))
 		}
@@ -623,8 +625,9 @@ func checkMigrationValidationResult(path, commit string, requireSameSHA bool, ex
 		reasons = append(reasons, fmt.Sprintf("validation result commit %s does not match %s", result.Commit, commit))
 	}
 	records := make(map[string]migrationValidationRecord, len(result.Migrations))
-	for _, migration := range result.Migrations {
-		records[migration.Name] = migration
+	for i := range result.Migrations {
+		migration := &result.Migrations[i]
+		records[migration.Name] = *migration
 	}
 	for _, expected := range expectedMigrations {
 		record, ok := records[expected.Name]
@@ -679,11 +682,11 @@ func writeMigrationValidationResult(path string, result migrationValidationResul
 		return fmt.Errorf("encode validation result: %w", err)
 	}
 	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("create validation result directory: %w", err)
 		}
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write validation result: %w", err)
 	}
 	return nil

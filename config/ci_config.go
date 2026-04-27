@@ -280,7 +280,8 @@ func (c *CIConfig) Validate() error {
 		}
 	}
 
-	for i, migration := range c.Migrations {
+	for i := range c.Migrations {
+		migration := &c.Migrations[i]
 		label := migration.Name
 		if label == "" {
 			label = fmt.Sprintf("%d", i)
