@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -175,6 +176,7 @@ Options:
 		}
 	}
 	if statusErr := validateMigrationRepairResultStatus(result.Status); statusErr != nil {
+		printMigrationRepairResultDetails(out, result, jobEnvMap)
 		return redactMigrationRepairError(statusErr, jobEnvMap)
 	}
 	printMigrationRepairResult(out, result, jobEnvMap)
@@ -293,8 +295,74 @@ func printMigrationRepairResult(out io.Writer, result *interfaces.MigrationRepai
 	} else if result.Status != "" {
 		fmt.Fprintf(out, "migration repair: %s\n", status)
 	}
+	printMigrationRepairResultDetails(out, result, secrets)
+}
+
+func printMigrationRepairResultDetails(out io.Writer, result *interfaces.MigrationRepairResult, secrets map[string]string) {
+	if result == nil {
+		return
+	}
 	if strings.TrimSpace(result.Logs) != "" {
 		fmt.Fprintln(out, redactMigrationRepairSecrets(result.Logs, secrets))
+	}
+	printMigrationRepairDiagnostics(out, result.Diagnostics, secrets)
+}
+
+func printMigrationRepairDiagnostics(out io.Writer, diagnostics []interfaces.Diagnostic, secrets map[string]string) {
+	if len(diagnostics) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "Diagnostics:")
+	for _, diagnostic := range redactMigrationRepairDiagnostics(diagnostics, secrets) {
+		if strings.TrimSpace(diagnostic.ID) != "" {
+			printMigrationRepairDiagnosticField(out, "-", "id", diagnostic.ID)
+		} else {
+			fmt.Fprintln(out, "-")
+		}
+		if strings.TrimSpace(diagnostic.Phase) != "" {
+			printMigrationRepairDiagnosticField(out, " ", "phase", diagnostic.Phase)
+		}
+		if strings.TrimSpace(diagnostic.Cause) != "" {
+			printMigrationRepairDiagnosticField(out, " ", "cause", diagnostic.Cause)
+		}
+		if !diagnostic.At.IsZero() {
+			fmt.Fprintf(out, "  at: %s\n", diagnostic.At.Format(time.RFC3339))
+		}
+		if strings.TrimSpace(diagnostic.Detail) != "" {
+			printMigrationRepairDiagnosticBlockField(out, " ", "detail", diagnostic.Detail)
+		}
+	}
+}
+
+func printMigrationRepairDiagnosticField(out io.Writer, bullet, label, value string) {
+	trimmed := strings.TrimRight(value, "\n")
+	lines := strings.Split(trimmed, "\n")
+	if len(lines) == 1 {
+		if bullet == "-" {
+			fmt.Fprintf(out, "- %s: %s\n", label, lines[0])
+		} else {
+			fmt.Fprintf(out, "  %s: %s\n", label, lines[0])
+		}
+		return
+	}
+	if bullet == "-" {
+		fmt.Fprintf(out, "- %s:\n", label)
+	} else {
+		fmt.Fprintf(out, "  %s:\n", label)
+	}
+	for _, line := range lines {
+		fmt.Fprintf(out, "    %s\n", line)
+	}
+}
+
+func printMigrationRepairDiagnosticBlockField(out io.Writer, bullet, label, value string) {
+	if bullet == "-" {
+		fmt.Fprintf(out, "- %s:\n", label)
+	} else {
+		fmt.Fprintf(out, "  %s:\n", label)
+	}
+	for _, line := range strings.Split(strings.TrimRight(value, "\n"), "\n") {
+		fmt.Fprintf(out, "    %s\n", line)
 	}
 }
 
@@ -351,12 +419,26 @@ func redactMigrationRepairDiagnostics(diagnostics []interfaces.Diagnostic, secre
 }
 
 func redactMigrationRepairSecrets(value string, secrets map[string]string) string {
-	for _, secret := range secrets {
-		if secret != "" {
-			value = strings.ReplaceAll(value, secret, "[REDACTED]")
-		}
+	for _, secret := range migrationRepairSecretValues(secrets) {
+		value = strings.ReplaceAll(value, secret, "[REDACTED]")
 	}
 	return value
+}
+
+func migrationRepairSecretValues(secrets map[string]string) []string {
+	if len(secrets) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
+		if secret != "" {
+			values = append(values, secret)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool {
+		return len(values[i]) > len(values[j])
+	})
+	return values
 }
 
 func redactMigrationRepairError(err error, secrets map[string]string) error {
