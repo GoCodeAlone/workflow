@@ -42,7 +42,6 @@ func TestMigrationPluginRunnerBuildsWorkflowMigrateArgs(t *testing.T) {
 	}
 	wantArgs := []string{
 		"--wfctl-cli",
-		"migrate",
 		"test",
 		"--driver",
 		"golang-migrate",
@@ -54,6 +53,25 @@ func TestMigrationPluginRunnerBuildsWorkflowMigrateArgs(t *testing.T) {
 	}
 	if gotEnv["DATABASE_URL"] != "postgres://user:secret@example.com/app" {
 		t.Fatalf("env did not receive DSN: %#v", gotEnv)
+	}
+}
+
+func TestBuildMigrationPluginArgsMatchPluginRootContract(t *testing.T) {
+	got := buildMigrationPluginArgs(migrationPluginRunConfig{
+		Driver:    "golang-migrate",
+		SourceDir: "migrations",
+	}, []string{"status"})
+	want := []string{"--wfctl-cli", "status", "--driver", "golang-migrate", "--source-dir", "migrations"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildMigrationPluginLintArgsMatchPluginContract(t *testing.T) {
+	got := buildMigrationPluginLintArgs(migrationPluginRunConfig{SourceDir: "migrations"})
+	want := []string{"--wfctl-cli", "lint", "migrations"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
 	}
 }
 

@@ -51,7 +51,7 @@ func TestRunMigrationsCICheckRequiresPassingValidationResultForSHA(t *testing.T)
 	})
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
 	restore := stubMigrationStatusRunner(t, migrationCommandResult{
-		Stdout: "Current: 20260426000005\nNo pending migrations.\n",
+		Stdout: "Current: 20260426000005\nDirty: false\nNo pending migrations.\n",
 	}, nil)
 	defer restore()
 
@@ -137,7 +137,7 @@ func TestRunMigrationsCICheckRejectsValidationResultMissingMigration(t *testing.
 	})
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
 	restore := stubMigrationStatusRunner(t, migrationCommandResult{
-		Stdout: "Current: 20260426000005\nNo pending migrations.\n",
+		Stdout: "Current: 20260426000005\nDirty: false\nNo pending migrations.\n",
 	}, nil)
 	defer restore()
 
@@ -148,6 +148,30 @@ func TestRunMigrationsCICheckRejectsValidationResultMissingMigration(t *testing.
 		t.Fatal("expected missing validation migration error")
 	}
 	if !strings.Contains(out, "validation result missing migration app") {
+		t.Fatalf("unexpected ci-check output: %s", out)
+	}
+}
+
+func TestRunMigrationsCICheckRejectsValidationResultWithNoChecks(t *testing.T) {
+	cfgPath := writeMigrationStatusConfig(t)
+	resultPath := writeMigrationValidationResultFixture(t, migrationValidationResult{
+		Decision:   "pass",
+		Commit:     "abc123",
+		Migrations: []migrationValidationRecord{{Name: "app"}},
+	})
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	restore := stubMigrationStatusRunner(t, migrationCommandResult{
+		Stdout: "Current: 20260426000005\nDirty: false\nNo pending migrations.\n",
+	}, nil)
+	defer restore()
+
+	out, err := captureStdout(t, func() error {
+		return runMigrations([]string{"ci-check", "--config", cfgPath, "--env", "ci", "--commit", "abc123", "--validation-result", resultPath, "--require-validation-result", "--format", "json"})
+	})
+	if err == nil {
+		t.Fatal("expected no-checks validation result error")
+	}
+	if !strings.Contains(out, "validation result migration app has no passing checks") {
 		t.Fatalf("unexpected ci-check output: %s", out)
 	}
 }

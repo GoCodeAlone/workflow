@@ -49,7 +49,7 @@ func TestRunMigrationsStatusReportsCurrentPendingDirtyAndDriver(t *testing.T) {
 	cfgPath := writeMigrationStatusObserveConfig(t)
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
 	restore := stubMigrationStatusRunner(t, migrationCommandResult{
-		Stdout: "Current: 20260426000001\nPending: [20260426000002 20260426000003]\n",
+		Stdout: "Current: 20260426000001\nDirty: false\nPending: [20260426000002 20260426000003]\n",
 	}, nil)
 	defer restore()
 
@@ -132,7 +132,7 @@ func stubMigrationStatusRunner(t *testing.T, result migrationCommandResult, runE
 				if pluginName != "workflow-plugin-migrations" {
 					t.Fatalf("pluginName = %q", pluginName)
 				}
-				if got := strings.Join(args, " "); !strings.Contains(got, "migrate status") {
+				if got := strings.Join(args, " "); !strings.Contains(got, "--wfctl-cli status") {
 					t.Fatalf("args = %q, want status", got)
 				}
 				if env["DATABASE_URL"] != "postgres://secret@example/db" {

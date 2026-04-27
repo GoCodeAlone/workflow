@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	neturl "net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -33,6 +34,14 @@ func (r migrationPluginRunner) run(ctx context.Context, cfg migrationPluginRunCo
 }
 
 func (r migrationPluginRunner) runArgs(ctx context.Context, cfg migrationPluginRunConfig, commandArgs []string) (migrationCommandResult, error) {
+	return r.runPluginArgs(ctx, cfg, buildMigrationPluginArgs(cfg, commandArgs), strings.Join(commandArgs, " "))
+}
+
+func (r migrationPluginRunner) runLint(ctx context.Context, cfg migrationPluginRunConfig) (migrationCommandResult, error) {
+	return r.runPluginArgs(ctx, cfg, buildMigrationPluginLintArgs(cfg), "lint")
+}
+
+func (r migrationPluginRunner) runPluginArgs(ctx context.Context, cfg migrationPluginRunConfig, args []string, label string) (migrationCommandResult, error) {
 	if err := validateMigrationPluginName(cfg.Plugin); err != nil {
 		return migrationCommandResult{}, err
 	}
@@ -42,23 +51,27 @@ func (r migrationPluginRunner) runArgs(ctx context.Context, cfg migrationPluginR
 		execFn = defaultMigrationPluginExecutor
 	}
 
-	result, err := execFn(ctx, cfg.Plugin, buildMigrationPluginArgs(cfg, commandArgs), buildMigrationPluginEnv(cfg))
+	result, err := execFn(ctx, cfg.Plugin, args, buildMigrationPluginEnv(cfg))
 	result.Stdout = redactMigrationDSN(result.Stdout, cfg.DSN)
 	result.Stderr = redactMigrationDSN(result.Stderr, cfg.DSN)
 	if err != nil {
-		return result, fmt.Errorf("migration plugin %s migrate %s: %s", cfg.Plugin, strings.Join(commandArgs, " "), redactMigrationDSN(err.Error(), cfg.DSN))
+		return result, fmt.Errorf("migration plugin %s %s: %s", cfg.Plugin, label, redactMigrationDSN(err.Error(), cfg.DSN))
 	}
 	return result, nil
 }
 
 func buildMigrationPluginArgs(cfg migrationPluginRunConfig, commandArgs []string) []string {
-	args := []string{"--wfctl-cli", "migrate"}
+	args := []string{"--wfctl-cli"}
 	args = append(args, commandArgs...)
 	args = append(args,
 		"--driver", cfg.Driver,
 		"--source-dir", cfg.SourceDir,
 	)
 	return args
+}
+
+func buildMigrationPluginLintArgs(cfg migrationPluginRunConfig) []string {
+	return []string{"--wfctl-cli", "lint", cfg.SourceDir}
 }
 
 func buildMigrationPluginEnv(cfg migrationPluginRunConfig) map[string]string {
@@ -83,7 +96,7 @@ func defaultMigrationPluginExecutor(ctx context.Context, pluginName string, args
 	binaryPath := filepath.Join(pluginRoot, pluginDirName, pluginDirName)
 	cmd := exec.CommandContext(ctx, binaryPath, args...) //nolint:gosec // binary path follows wfctl installed-plugin layout.
 
-	cmd.Env = mapEnv(env)
+	cmd.Env = mapEnv(withMigrationPluginBaseEnv(env))
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -98,6 +111,19 @@ func defaultMigrationPluginExecutor(ctx context.Context, pluginName string, args
 		return result, fmt.Errorf("run %s (stderr: %s): %w", binaryPath, stderr.String(), err)
 	}
 	return result, nil
+}
+
+func withMigrationPluginBaseEnv(env map[string]string) map[string]string {
+	merged := map[string]string{}
+	for _, key := range []string{"HOME", "PATH", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"} {
+		if value := os.Getenv(key); value != "" {
+			merged[key] = value
+		}
+	}
+	for key, value := range env {
+		merged[key] = value
+	}
+	return merged
 }
 
 func mapEnv(env map[string]string) []string {

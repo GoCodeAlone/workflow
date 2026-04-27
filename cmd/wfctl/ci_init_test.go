@@ -46,6 +46,21 @@ func TestGenerateGHABootstrap_WithEnvironments(t *testing.T) {
 	}
 }
 
+func TestGenerateGHABootstrap_WithMigrationsAddsDeployGuard(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		CI: &config.CIConfig{
+			Deploy: &config.CIDeployConfig{Environments: map[string]*config.CIDeployEnvironment{
+				"staging": {Provider: "aws-ecs"},
+			}},
+			Migrations: []config.CIMigrationConfig{{Name: "app", SourceDir: "migrations"}},
+		},
+	}
+	content := generateGHABootstrap(cfg)
+	if !strings.Contains(content, "wfctl migrations ci-check --env staging") {
+		t.Fatalf("expected migration ci-check before deploy:\n%s", content)
+	}
+}
+
 func TestGenerateGitLabCIBootstrap_NoConfig(t *testing.T) {
 	content := generateGitLabCIBootstrap(nil)
 	if !strings.Contains(content, "stages:") {

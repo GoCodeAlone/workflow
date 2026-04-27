@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -117,6 +118,36 @@ ci:
 	}
 	if got.Environments["staging"].Database.Env != "STAGING_DATABASE_URL" {
 		t.Fatalf("staging database env = %q", got.Environments["staging"].Database.Env)
+	}
+}
+
+func TestCIConfigValidateRejectsInvalidMigrations(t *testing.T) {
+	cfg := &CIConfig{Migrations: []CIMigrationConfig{
+		{
+			SourceDir: "migrations",
+			Database:  CIMigrationDatabaseConfig{Env: "DATABASE_URL"},
+		},
+		{
+			Name:     "db",
+			Database: CIMigrationDatabaseConfig{},
+		},
+		{
+			Name:      "bad-plugin",
+			Plugin:    "../workflow-plugin-migrations",
+			SourceDir: "migrations",
+			Database:  CIMigrationDatabaseConfig{Env: "DATABASE_URL"},
+			Baseline:  CIMigrationBaselineConfig{Mode: "unknown"},
+		},
+	}}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected migration validation errors")
+	}
+	msg := err.Error()
+	for _, want := range []string{"name is required", "source_dir is required", "database env or dsn is required", "unsafe plugin name", "unknown baseline mode"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("expected %q in error: %v", want, err)
+		}
 	}
 }
 

@@ -207,6 +207,9 @@ func TestParseMigrationStatusRejectsUnknownOutput(t *testing.T) {
 	if _, err := parseMigrationStatus("Current: 202604270001\n"); err == nil {
 		t.Fatal("expected incomplete text status error")
 	}
+	if _, err := parseMigrationStatus("Current: 202604270001\nNo pending migrations.\n"); err == nil {
+		t.Fatal("expected missing dirty status error")
+	}
 	status, err := parseMigrationStatus("Current: 202604270001\nNo pending migrations.\nWARNING: database is in dirty state!\n")
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +249,7 @@ ci:
 	newMigrationPluginRunner = func() migrationPluginRunner {
 		return migrationPluginRunner{
 			exec: func(_ context.Context, _ string, args []string, env map[string]string) (migrationCommandResult, error) {
-				command := strings.Join(args[2:len(args)-4], " ")
+				command := migrationCommandFromArgs(args)
 				if command == "status" {
 					return migrationCommandResult{Stdout: "Current: 202604270001\nDirty: true\nNo pending migrations.\n"}, nil
 				}
@@ -354,15 +357,15 @@ func stubMigrationBaselineHooks(t *testing.T, calls *[]string, changedFiles []st
 	newMigrationPluginRunner = func() migrationPluginRunner {
 		return migrationPluginRunner{
 			exec: func(_ context.Context, _ string, args []string, env map[string]string) (migrationCommandResult, error) {
-				command := strings.Join(args[2:len(args)-4], " ")
-				sourceDir := argValue(args, "--source-dir")
+				command := migrationCommandFromArgs(args)
+				sourceDir := migrationSourceFromArgs(args)
 				call := "run " + command + " " + sourceDir
 				if command != "lint" {
 					call += " " + env["DATABASE_URL"]
 				}
 				*calls = append(*calls, call)
 				if strings.HasPrefix(command, "status") {
-					return migrationCommandResult{Stdout: "Current: 202604270001\nNo pending migrations.\n"}, nil
+					return migrationCommandResult{Stdout: "Current: 202604270001\nDirty: false\nNo pending migrations.\n"}, nil
 				}
 				return migrationCommandResult{}, nil
 			},
@@ -405,6 +408,30 @@ func stubMigrationBaselineHooks(t *testing.T, calls *[]string, changedFiles []st
 		migrationGitOps = oldGit
 		migrationEphemeralDB = oldEphemeral
 	}
+}
+
+func migrationCommandFromArgs(args []string) string {
+	if len(args) < 2 {
+		return ""
+	}
+	if args[1] == "lint" {
+		return "lint"
+	}
+	command := []string{args[1]}
+	for i := 2; i < len(args); i++ {
+		if args[i] == "--driver" || args[i] == "--source-dir" || args[i] == "--dsn" {
+			break
+		}
+		command = append(command, args[i])
+	}
+	return strings.Join(command, " ")
+}
+
+func migrationSourceFromArgs(args []string) string {
+	if len(args) >= 3 && args[1] == "lint" {
+		return args[2]
+	}
+	return argValue(args, "--source-dir")
 }
 
 func writeMigrationBaselineConfig(t *testing.T, baselineCandidate bool) string {

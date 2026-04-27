@@ -192,6 +192,7 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 	recognized := false
 	currentSeen := false
 	pendingSeen := false
+	dirtySeen := false
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		lowerLine := strings.ToLower(line)
@@ -200,9 +201,11 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 			continue
 		case strings.HasPrefix(lowerLine, "dirty:"):
 			recognized = true
+			dirtySeen = true
 			status.Dirty = strings.Contains(lowerLine, "true") || strings.Contains(lowerLine, "yes")
 		case strings.Contains(lowerLine, "dirty state"):
 			recognized = true
+			dirtySeen = true
 			status.Dirty = true
 		case strings.HasPrefix(line, "Current:"):
 			recognized = true
@@ -219,12 +222,15 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 		case line == "No pending migrations." || line == "No migrations applied.":
 			recognized = true
 			pendingSeen = true
+			if line == "No migrations applied." {
+				currentSeen = true
+			}
 		}
 	}
 	if !recognized {
 		return migrationBaselineCandidateResult{}, fmt.Errorf("unrecognized migration status output")
 	}
-	if !currentSeen || !pendingSeen {
+	if !currentSeen || !pendingSeen || !dirtySeen {
 		return migrationBaselineCandidateResult{}, fmt.Errorf("incomplete migration status output")
 	}
 	return status, nil

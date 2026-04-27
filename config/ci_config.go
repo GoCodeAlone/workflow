@@ -280,6 +280,28 @@ func (c *CIConfig) Validate() error {
 		}
 	}
 
+	for i, migration := range c.Migrations {
+		label := migration.Name
+		if label == "" {
+			label = fmt.Sprintf("%d", i)
+			errs = append(errs, fmt.Errorf("ci.migrations[%d]: name is required", i))
+		}
+		if migration.SourceDir == "" {
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: source_dir is required", label))
+		}
+		if migration.Database.Env == "" && migration.Database.DSN == "" {
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: database env or dsn is required", label))
+		}
+		if migration.Plugin != "" && !safeCIPluginName(migration.Plugin) {
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: unsafe plugin name %q", label, migration.Plugin))
+		}
+		switch migration.Baseline.Mode {
+		case "", "apply-before-candidate":
+		default:
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: unknown baseline mode %q", label, migration.Baseline.Mode))
+		}
+	}
+
 	if c.Deploy != nil {
 		for name, env := range c.Deploy.Environments {
 			if env.Provider == "" {
@@ -288,6 +310,30 @@ func (c *CIConfig) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func safeCIPluginName(pluginName string) bool {
+	if pluginName == "" || pluginName == "." || pluginName == ".." || containsAny(pluginName, `/\`) {
+		return false
+	}
+	for _, r := range pluginName {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func containsAny(value, chars string) bool {
+	for _, ch := range chars {
+		for _, r := range value {
+			if r == ch {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ValidateWithWarnings runs Validate and additionally collects non-fatal

@@ -49,9 +49,9 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 	}
 
 	want := []string{
-		"workflow-plugin-migrations --wfctl-cli migrate lint --driver golang-migrate --source-dir migrations ",
+		"workflow-plugin-migrations --wfctl-cli lint migrations ",
 		"ephemeral app-fresh postgres://secret@example/db",
-		"workflow-plugin-migrations --wfctl-cli migrate test --driver golang-migrate --source-dir migrations postgres://ephemeral/app-fresh",
+		"workflow-plugin-migrations --wfctl-cli test --driver golang-migrate --source-dir migrations postgres://ephemeral/app-fresh",
 		"cleanup ephemeral app-fresh",
 	}
 	if !reflect.DeepEqual(calls, want) {

@@ -74,8 +74,25 @@ func TestRunMigrationsRepairDirtyApprovalRequiredForProdWithoutApprovedToken(t *
 	if got.Decision != "fail" || !got.Destructive || !got.HumanApprovalRequired {
 		t.Fatalf("unexpected approval result: %+v", got)
 	}
-	if !strings.Contains(got.ApprovalCommand, "wfctl migrations repair-dirty") || !strings.Contains(got.ApprovalCommand, "--plugin-dir custom/plugins") || strings.Contains(got.ApprovalCommand, "postgres://secret@example/db") {
+	if !strings.Contains(got.ApprovalCommand, "'wfctl' 'migrations' 'repair-dirty'") || !strings.Contains(got.ApprovalCommand, "'--plugin-dir' 'custom/plugins'") || strings.Contains(got.ApprovalCommand, "postgres://secret@example/db") {
 		t.Fatalf("bad approval command: %q", got.ApprovalCommand)
+	}
+}
+
+func TestRunMigrationsRepairDirtyRejectsWrongApprovalTokenForProd(t *testing.T) {
+	cfgPath := writeMigrationStatusConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	t.Setenv("WFCTL_MIGRATION_REPAIR_APPROVAL_TOKEN", "expected-token")
+	var calls []string
+	restore := stubMigrationRepairRunner(t, &calls, nil)
+	defer restore()
+
+	err := runMigrations([]string{"repair-dirty", "--config", cfgPath, "--env", "prod", "--expected-dirty-version", "20260426000005", "--force-version", "20260426000004", "--confirm-force", "FORCE_MIGRATION_METADATA", "--approved-token", "wrong-token"})
+	if err == nil {
+		t.Fatal("expected approval error")
+	}
+	if len(calls) != 0 {
+		t.Fatalf("repair touched plugin with wrong approval token: %#v", calls)
 	}
 }
 
@@ -156,7 +173,7 @@ func stubMigrationRepairRunner(t *testing.T, calls *[]string, results []migratio
 				if env["DATABASE_URL"] != "postgres://secret@example/db" {
 					t.Fatalf("DATABASE_URL = %q", env["DATABASE_URL"])
 				}
-				command := strings.Join(args[2:len(args)-4], " ")
+				command := migrationCommandFromArgs(args)
 				*calls = append(*calls, command)
 				if len(results) == 0 {
 					return migrationCommandResult{}, nil

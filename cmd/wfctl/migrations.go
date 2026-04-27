@@ -162,11 +162,14 @@ func runMigrationsRepairDirty(args []string) error {
 		result.Reasons = []string{"--expected-dirty-version and --force-version are required"}
 		return finishMigrationRepairDirty(result, *format)
 	}
-	if isProtectedMigrationEnvironment(*envName) && strings.TrimSpace(*approvedToken) == "" {
-		result.HumanApprovalRequired = true
-		result.Reasons = []string{"human approval is required for production migration metadata repair"}
-		result.ApprovalCommand = buildMigrationRepairApprovalCommand(*configFile, *envName, *pluginDir, *expectedDirtyVersion, *forceVersion, *thenUp, *upIfClean)
-		return finishMigrationRepairDirty(result, "json")
+	if isProtectedMigrationEnvironment(*envName) {
+		requiredToken := os.Getenv("WFCTL_MIGRATION_REPAIR_APPROVAL_TOKEN")
+		if strings.TrimSpace(*approvedToken) == "" || requiredToken == "" || *approvedToken != requiredToken {
+			result.HumanApprovalRequired = true
+			result.Reasons = []string{"human approval is required for production migration metadata repair"}
+			result.ApprovalCommand = buildMigrationRepairApprovalCommand(*configFile, *envName, *pluginDir, *expectedDirtyVersion, *forceVersion, *thenUp, *upIfClean)
+			return finishMigrationRepairDirty(result, "json")
+		}
 	}
 
 	cfg, err := config.LoadFromFile(*configFile)
@@ -290,7 +293,11 @@ func buildMigrationRepairApprovalCommand(configFile, envName, pluginDir, expecte
 	if upIfClean {
 		parts = append(parts, "--up-if-clean")
 	}
-	return strings.Join(parts, " ")
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		quoted = append(quoted, shellQuote(part))
+	}
+	return strings.Join(quoted, " ")
 }
 
 func finishMigrationRepairDirty(result migrationRepairDirtyResult, format string) error {
@@ -379,7 +386,7 @@ func runMigrationsValidate(args []string) error {
 		if migration.Validation.Lint {
 			lintCfg := runCfg
 			lintCfg.DSN = ""
-			if _, err := runner.run(ctx, lintCfg, "lint"); err != nil {
+			if _, err := runner.runLint(ctx, lintCfg); err != nil {
 				return failMigrationValidation(result, record, *resultFile, *format, migration, "lint", err)
 			}
 			record.Lint = "pass"
@@ -596,6 +603,9 @@ func checkMigrationValidationResult(path, commit string, requireSameSHA bool, ex
 		}
 		if record.Lint == "fail" || record.FreshCycle == "fail" || record.BaselineCandidate == "fail" {
 			reasons = append(reasons, fmt.Sprintf("validation result migration %s has failed checks", expected.Name))
+		}
+		if record.Lint == "" && record.FreshCycle == "" && record.BaselineCandidate == "" {
+			reasons = append(reasons, fmt.Sprintf("validation result migration %s has no passing checks", expected.Name))
 		}
 	}
 	return reasons
