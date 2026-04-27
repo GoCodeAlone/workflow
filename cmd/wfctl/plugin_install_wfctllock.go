@@ -29,13 +29,11 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 	}
 
 	if lockPath != "" {
-		scrubbed, changed := scrubbedWfctlLockfileTopLevelSHA256(lf)
-		if changed {
-			if err := config.SaveWfctlLockfile(lockPath, scrubbed); err != nil {
-				return fmt.Errorf("persist scrubbed lockfile: %w", err)
-			}
-			*lf = *scrubbed
+		scrubbed := scrubbedWfctlLockfileTopLevelSHA256(lf)
+		if err := config.SaveWfctlLockfile(lockPath, scrubbed); err != nil {
+			return fmt.Errorf("persist scrubbed lockfile: %w", err)
 		}
+		*lf = *scrubbed
 	}
 
 	// Sort plugin names for deterministic install order.
@@ -105,21 +103,17 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 	return nil
 }
 
-func scrubbedWfctlLockfileTopLevelSHA256(lf *config.WfctlLockfile) (*config.WfctlLockfile, bool) {
+func scrubbedWfctlLockfileTopLevelSHA256(lf *config.WfctlLockfile) *config.WfctlLockfile {
 	scrubbed := &config.WfctlLockfile{
 		Version:     lf.Version,
 		GeneratedAt: lf.GeneratedAt,
 		Plugins:     make(map[string]config.WfctlLockPluginEntry, len(lf.Plugins)),
 	}
-	changed := false
 	for name, entry := range lf.Plugins {
-		if entry.SHA256 != "" {
-			entry.SHA256 = ""
-			changed = true
-		}
+		entry.SHA256 = ""
 		scrubbed.Plugins[name] = entry
 	}
-	return scrubbed, changed
+	return scrubbed
 }
 
 // currentPlatformKey returns the GOOS-GOARCH key used in WfctlLockPlatform maps.

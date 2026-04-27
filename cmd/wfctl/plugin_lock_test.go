@@ -35,8 +35,9 @@ plugins:
 	if err != nil {
 		t.Fatalf("read lockfile: %v", err)
 	}
-	if strings.Contains(string(data), "sha256:") {
-		t.Fatalf("regenerated new-format lockfile should not contain top-level sha256:\n%s", data)
+	fooRaw := pluginRawMap(t, data, "workflow-plugin-foo")
+	if _, ok := fooRaw["sha256"]; ok {
+		t.Fatalf("workflow-plugin-foo should not contain top-level sha256:\n%s", data)
 	}
 
 	var parsed struct {
@@ -100,12 +101,7 @@ plugins:
 	if err != nil {
 		t.Fatalf("read lockfile: %v", err)
 	}
-	var raw map[string]any
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("parse raw lockfile: %v", err)
-	}
-	pluginsRaw := raw["plugins"].(map[string]any)
-	fooRaw := pluginsRaw["workflow-plugin-foo"].(map[string]any)
+	fooRaw := pluginRawMap(t, data, "workflow-plugin-foo")
 	if _, ok := fooRaw["sha256"]; ok {
 		t.Fatalf("workflow-plugin-foo should not contain top-level sha256:\n%s", data)
 	}
@@ -127,6 +123,24 @@ plugins:
 	if _, ok := parsed.Plugins["workflow-plugin-bar"]; !ok {
 		t.Error("new plugin workflow-plugin-bar not added")
 	}
+}
+
+func pluginRawMap(t *testing.T, data []byte, name string) map[string]any {
+	t.Helper()
+
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("parse raw lockfile: %v", err)
+	}
+	pluginsRaw, ok := raw["plugins"].(map[string]any)
+	if !ok {
+		t.Fatalf("plugins should be a map in lockfile:\n%s", data)
+	}
+	pluginRaw, ok := pluginsRaw[name].(map[string]any)
+	if !ok {
+		t.Fatalf("%s should be a plugin map in lockfile:\n%s", name, data)
+	}
+	return pluginRaw
 }
 
 func TestPluginLock_FromManifest_PopulatesPlatformURLsAndSHA256FromRegistry(t *testing.T) {

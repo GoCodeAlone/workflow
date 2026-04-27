@@ -145,6 +145,58 @@ plugins:
 	}
 }
 
+func TestInstallFromWfctlLockfile_ScrubsExplicitEmptyTopLevelSHA256(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	lockWithEmptySHA := `version: 1
+generated_at: "2026-01-01T00:00:00Z"
+plugins:
+  workflow-plugin-auth:
+    version: v1.2.3
+    source: github.com/GoCodeAlone/workflow-plugin-auth
+    sha256:
+    platforms:
+      ` + currentPlatformKey() + `:
+        url: http://127.0.0.1:1/missing.tar.gz
+        sha256: ` + strings.Repeat("1", 64) + `
+`
+	if err := os.WriteFile(lockPath, []byte(lockWithEmptySHA), 0o600); err != nil {
+		t.Fatalf("write lockfile: %v", err)
+	}
+	lf, err := config.LoadWfctlLockfile(lockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+
+	err = installFromWfctlLockfile(pluginDir, lockPath, lf)
+	if err == nil {
+		t.Fatal("expected install failure from unreachable URL")
+	}
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lockfile: %v", err)
+	}
+	authRaw := pluginRawMap(t, data, "workflow-plugin-auth")
+	if _, ok := authRaw["sha256"]; ok {
+		t.Fatalf("explicit empty top-level sha256 should be scrubbed:\n%s", data)
+	}
+}
+
 func TestInstallFromWfctlLockfile_MissingCurrentPlatformDoesNotFallbackToRegistry(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
@@ -265,7 +317,7 @@ func TestInstallFromWfctlLockfile_InitialScrubSaveFailureFails(t *testing.T) {
 
 func TestInstallFromWfctlLockfile_PostInstallSaveFailureFails(t *testing.T) {
 	dir := t.TempDir()
-	lockPath := filepath.Join(dir, "missing-dir", ".wfctl-lock.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
 	pluginDir := filepath.Join(dir, "plugins")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -286,8 +338,12 @@ func TestInstallFromWfctlLockfile_PostInstallSaveFailureFails(t *testing.T) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		w.Write(tarball) //nolint:errcheck
+		if err := os.Chmod(lockPath, 0o400); err != nil {
+			t.Errorf("chmod lockfile read-only: %v", err)
+		}
 	}))
 	defer srv.Close()
+	t.Cleanup(func() { _ = os.Chmod(lockPath, 0o600) })
 
 	lf := &config.WfctlLockfile{
 		Version:     1,
