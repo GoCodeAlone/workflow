@@ -174,12 +174,12 @@ Repair tests should create a known dirty database state, verify repair refuses w
 
 1. Implement the `wfctl migrations` command family behind plugin CLI dispatch.
 2. Add docs and `wfctl ci init` generation updates.
-3. Replace BMW’s hand-written migration CI/guard shell with `wfctl migrations validate` and `wfctl migrations ci-check`.
-4. Apply the same migration check pattern to other Workflow apps.
+3. Prepare a BMW rollout plan and compatibility fixture in this Workflow PR, then execute the BMW repository replacement as a follow-up PR after the Workflow release is available.
+4. Track the same migration check pattern for other Workflow apps so each can adopt the portable command after any app-specific prerequisites are known.
 
 ## Success Criteria
 
-- BMW no longer carries custom migration baseline/check shell beyond minimal CI wrappers.
+- BMW no longer carries custom migration baseline/check shell beyond minimal CI wrappers after the follow-up BMW rollout PR ships.
 - PR migration checks validate latest-main baseline plus candidate migrations.
 - Deploys fail before app rollout when target database state is dirty.
 - Dirty repair has an auditable, typed-confirmation, human-gated path.
