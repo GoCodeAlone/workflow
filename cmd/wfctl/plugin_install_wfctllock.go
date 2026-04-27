@@ -48,7 +48,20 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 
 		// If we have platform-specific URL, install from that URL.
 		platKey := currentPlatformKey()
-		if plat, ok := entry.Platforms[platKey]; ok && plat.URL != "" {
+		if len(entry.Platforms) > 0 {
+			plat, ok := entry.Platforms[platKey]
+			if !ok {
+				errMsg := fmt.Sprintf("%s (missing current platform %s in lockfile)", name, platKey)
+				fmt.Fprintf(os.Stderr, "error installing %s: %s\n", name, errMsg)
+				failed = append(failed, errMsg)
+				continue
+			}
+			if plat.URL == "" {
+				errMsg := fmt.Sprintf("%s (missing URL for current platform %s in lockfile)", name, platKey)
+				fmt.Fprintf(os.Stderr, "error installing %s: %s\n", name, errMsg)
+				failed = append(failed, errMsg)
+				continue
+			}
 			if err := installFromURL(plat.URL, pluginDirVal, plat.SHA256, false); err != nil {
 				fmt.Fprintf(os.Stderr, "error installing %s from URL: %v\n", name, err)
 				failed = append(failed, name)

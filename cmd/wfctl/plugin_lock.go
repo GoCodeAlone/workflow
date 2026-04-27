@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -76,20 +77,26 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 				previous = &prev
 			}
 		}
+		previousHasPlatforms := previous != nil && len(previous.Platforms) > 0
 
 		if registries != nil {
 			if platforms, err := lockPlatformsFromRegistry(registries, p.Name, p.Version); err == nil {
 				entry.Platforms = platforms
+			} else if errors.Is(err, errInvalidRegistrySHA256) {
+				return fmt.Errorf("lock platform metadata for %s@%s: %w", p.Name, p.Version, err)
+			} else if previousHasPlatforms {
+				return fmt.Errorf("refresh platform metadata for %s@%s: %w", p.Name, p.Version, err)
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: could not enrich %s lock entry from registry: %v\n", p.Name, err)
 			}
+		} else if previousHasPlatforms {
+			return fmt.Errorf("refresh platform metadata for %s@%s: no project-local registry config available", p.Name, p.Version)
 		}
 
-		// Preserve existing data only when registry enrichment is unavailable or
-		// failed. A source/version change means cached origin data is stale.
+		// Preserve existing top-level checksums only for legacy entries. Platform
+		// metadata must be refreshed from the registry instead of copied forward.
 		if len(entry.Platforms) == 0 && previous != nil {
-			entry.Platforms = previous.Platforms
-			if len(entry.Platforms) == 0 {
+			if len(previous.Platforms) == 0 {
 				entry.SHA256 = previous.SHA256
 			}
 		}
@@ -127,6 +134,8 @@ func loadPluginLockRegistryConfig(manifestPath, lockPath string) (*RegistryConfi
 	return nil, nil
 }
 
+var errInvalidRegistrySHA256 = errors.New("invalid sha256")
+
 func lockPlatformsFromRegistry(registries *MultiRegistry, pluginName, version string) (map[string]config.WfctlLockPlatform, error) {
 	manifest, _, err := registries.FetchManifest(pluginName)
 	if err != nil {
@@ -137,12 +146,18 @@ func lockPlatformsFromRegistry(registries *MultiRegistry, pluginName, version st
 	}
 
 	platforms := make(map[string]config.WfctlLockPlatform, len(manifest.Downloads))
-	for _, dl := range manifest.Downloads {
+	for i, dl := range manifest.Downloads {
 		if dl.OS == "" || dl.Arch == "" || dl.URL == "" {
 			continue
 		}
+		if !sha256Regex.MatchString(dl.SHA256) {
+			return nil, fmt.Errorf("%w for %s download %d (%s/%s): must be a 64-character hex string", errInvalidRegistrySHA256, pluginName, i, dl.OS, dl.Arch)
+		}
 		key := dl.OS + "-" + dl.Arch
 		platforms[key] = config.WfctlLockPlatform{URL: dl.URL, SHA256: dl.SHA256}
+	}
+	if len(platforms) == 0 {
+		return nil, fmt.Errorf("no usable platform downloads for %s@%s", pluginName, version)
 	}
 	return platforms, nil
 }

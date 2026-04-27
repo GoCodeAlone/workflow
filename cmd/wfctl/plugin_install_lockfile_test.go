@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -117,6 +118,71 @@ func TestInstallFromWfctlLockfile_UsesCurrentPlatformSHA256AsArchiveChecksum(t *
 	}
 	if got := entry.Platforms[currentPlatformKey()].SHA256; got != sha256Hex(tarball) {
 		t.Fatalf("current platform checksum = %q, want archive checksum %q", got, sha256Hex(tarball))
+	}
+}
+
+func TestInstallFromWfctlLockfile_MissingCurrentPlatformDoesNotFallbackToRegistry(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	var registryHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		registryHits.Add(1)
+		http.Error(w, "registry must not be used", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	regCfg := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(regCfg), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+
+	otherPlatform := "linux-amd64"
+	if otherPlatform == currentPlatformKey() {
+		otherPlatform = "darwin-arm64"
+	}
+	lf := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins: map[string]config.WfctlLockPluginEntry{
+			"workflow-plugin-auth": {
+				Version: "v1.2.3",
+				Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				Platforms: map[string]config.WfctlLockPlatform{
+					otherPlatform: {
+						URL:    "https://example.test/workflow-plugin-auth-" + otherPlatform + ".tar.gz",
+						SHA256: sha256Hex([]byte("auth archive for " + otherPlatform)),
+					},
+				},
+			},
+		},
+	}
+	if err := config.SaveWfctlLockfile(lockPath, lf); err != nil {
+		t.Fatal(err)
+	}
+
+	err = installFromWfctlLockfile(pluginDir, lockPath, lf)
+	if err == nil {
+		t.Fatal("expected missing current platform error, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing current platform") || !strings.Contains(err.Error(), currentPlatformKey()) {
+		t.Fatalf("error = %q, want clear missing current platform message for %s", err, currentPlatformKey())
+	}
+	if got := registryHits.Load(); got != 0 {
+		t.Fatalf("registry was queried %d times; lockfile platform metadata should be authoritative", got)
 	}
 }
 
