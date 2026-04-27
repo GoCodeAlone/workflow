@@ -73,10 +73,12 @@ func runMigrateRepairDirtyWithOutput(args []string, out io.Writer) error {
 
 Run a guarded dirty migration metadata repair inside a provider-managed runtime.
 
-Required guard flags for non-dev environments:
+Always required guard flags:
   --expected-dirty-version <version>
   --force-version <version>
   --confirm-force FORCE_MIGRATION_METADATA
+
+Additional approval required when destructive approval gating applies:
   --approve-destructive
 
 Options:
@@ -143,7 +145,7 @@ Options:
 	}
 	if result, err := requireDestructiveApproval(decision, approveDestructive, approvalArtifact); err != nil {
 		printMigrationRepairResult(out, result, nil)
-		_ = writeMigrationRepairSummary(result, envName, appName, nil)
+		_ = writeMigrationRepairSummary(result, envName, appSpec.Name, nil)
 		return err
 	}
 
@@ -158,7 +160,7 @@ Options:
 	if !ok {
 		result := &interfaces.MigrationRepairResult{Status: interfaces.MigrationRepairStatusUnsupported}
 		printMigrationRepairResult(out, result, nil)
-		_ = writeMigrationRepairSummary(result, envName, appName, nil)
+		_ = writeMigrationRepairSummary(result, envName, appSpec.Name, nil)
 		return fmt.Errorf("provider %q does not support migration repair", appProviderType)
 	}
 
@@ -176,7 +178,7 @@ Options:
 		return redactMigrationRepairError(statusErr, jobEnvMap)
 	}
 	printMigrationRepairResult(out, result, jobEnvMap)
-	if summaryErr := writeMigrationRepairSummary(result, envName, appName, jobEnvMap); summaryErr != nil && err == nil {
+	if summaryErr := writeMigrationRepairSummary(result, envName, appSpec.Name, jobEnvMap); summaryErr != nil && err == nil {
 		err = summaryErr
 	}
 	if err != nil {

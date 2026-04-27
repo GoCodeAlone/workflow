@@ -8,7 +8,9 @@ import (
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -125,6 +127,7 @@ type contextServiceModule struct {
 	typedServiceModule
 	contextErr error
 	called     bool
+	err        error
 }
 
 func (m *contextServiceModule) InvokeMethodContext(ctx context.Context, method string, args map[string]any) (map[string]any, error) {
@@ -133,6 +136,9 @@ func (m *contextServiceModule) InvokeMethodContext(ctx context.Context, method s
 	m.contextErr = ctx.Err()
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if m.err != nil {
+		return nil, m.err
 	}
 	return map[string]any{"value": args["value"]}, nil
 }
@@ -452,6 +458,28 @@ func TestInvokeService_ForwardsContextToLegacyInvoker(t *testing.T) {
 	}
 	if resp.Error == "" {
 		t.Fatal("expected response error from canceled context")
+	}
+}
+
+func TestInvokeService_PreservesStatusErrors(t *testing.T) {
+	module := &contextServiceModule{err: status.Error(codes.Unimplemented, "provider does not implement ProviderMigrationRepairer")}
+	srv := newGRPCServer(&typedServiceProvider{module: module})
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "typed.service",
+		Name: "typed",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+
+	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
+		HandleId: createResp.HandleId,
+		Method:   "IaCProvider.RepairDirtyMigration",
+		Args:     mapToStruct(map[string]any{}),
+	})
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("InvokeService error code = %v, want Unimplemented (resp=%+v, err=%v)", status.Code(err), resp, err)
 	}
 }
 

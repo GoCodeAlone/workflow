@@ -701,10 +701,13 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read summary: %v", readErr)
 	}
-	for _, want := range []string{"migration_repair_dirty", "staging", "SUCCESS", "[REDACTED]", "succeeded", "repair complete"} {
+	for _, want := range []string{"migration_repair_dirty", "staging", "SUCCESS", "**Resource:** bmw-staging", "[REDACTED]", "succeeded", "repair complete"} {
 		if !strings.Contains(string(summary), want) {
 			t.Fatalf("summary missing %q:\n%s", want, summary)
 		}
+	}
+	if strings.Contains(string(summary), "**Resource:** bmw-app") {
+		t.Fatalf("summary used CLI app alias instead of resolved resource:\n%s", summary)
 	}
 	if strings.Contains(string(summary), secret) {
 		t.Fatalf("summary leaked secret:\n%s", summary)
@@ -825,8 +828,10 @@ func TestRunMigrateRepairDirtyHelp(t *testing.T) {
 			t.Fatalf("help missing %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "Required guard flags for non-dev environments") {
-		t.Fatalf("help missing non-dev approval guidance:\n%s", out)
+	for _, want := range []string{"Always required guard flags", "Additional approval required when destructive approval gating applies"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help missing %q guidance:\n%s", want, out)
+		}
 	}
 }
 

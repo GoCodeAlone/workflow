@@ -10,6 +10,7 @@ import (
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -475,8 +476,9 @@ func (s *grpcServer) GetConfigFragment(_ context.Context, _ *emptypb.Empty) (*pb
 // --- Service RPCs ---
 
 // InvokeService routes a service method call to the registered module identified
-// by handle_id. The module must implement ServiceInvoker; if it does not, an
-// error is returned to the host.
+// by handle_id. For untyped requests, ServiceContextInvoker is preferred when
+// implemented; otherwise the module must implement ServiceInvoker. If neither
+// interface is implemented, an error is returned to the host.
 func (s *grpcServer) InvokeService(ctx context.Context, req *pb.InvokeServiceRequest) (*pb.InvokeServiceResponse, error) {
 	s.mu.RLock()
 	inst, ok := s.modules[req.HandleId]
@@ -503,6 +505,9 @@ func (s *grpcServer) InvokeService(ctx context.Context, req *pb.InvokeServiceReq
 	if invoker, ok := inst.(ServiceContextInvoker); ok {
 		result, err := invoker.InvokeMethodContext(ctx, req.Method, args)
 		if err != nil {
+			if isGRPCStatusError(err) {
+				return nil, err
+			}
 			return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 		}
 		return &pb.InvokeServiceResponse{Result: mapToStruct(result)}, nil
@@ -517,9 +522,21 @@ func (s *grpcServer) InvokeService(ctx context.Context, req *pb.InvokeServiceReq
 
 	result, err := invoker.InvokeMethod(req.Method, args)
 	if err != nil {
+		if isGRPCStatusError(err) {
+			return nil, err
+		}
 		return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
 	return &pb.InvokeServiceResponse{Result: mapToStruct(result)}, nil
+}
+
+type grpcStatusError interface {
+	GRPCStatus() *status.Status
+}
+
+func isGRPCStatusError(err error) bool {
+	var statusErr grpcStatusError
+	return errors.As(err, &statusErr) && statusErr.GRPCStatus() != nil
 }
 
 // --- Message delivery RPC ---
