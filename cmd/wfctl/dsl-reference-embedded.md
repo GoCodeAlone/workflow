@@ -1292,3 +1292,57 @@ security:
 - `security.network.defaultPolicy: deny` causes `wfctl security generate-network-policies` to include `Egress` in policy types
 - `networking.ingress` entries without a `tls` block are flagged as `HIGH` by `wfctl security audit`
 - `wfctl validate` checks `security.tls.provider` for valid values
+
+---
+
+<!-- section: wfctl-infra-align -->
+## wfctl infra align
+
+Cross-validates the IaC config (and an optional plan JSON) across 8 rule families. Writes a markdown findings table to stdout and to `$GITHUB_STEP_SUMMARY` when running in CI.
+
+### Usage
+
+```
+wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict] [--strict-health] [--strict-cidr] [--max-changes N]
+```
+
+### Options
+
+- `--config <file>` — Config file (default: `infra.yaml` or `config/infra.yaml`)
+- `--env <name>` — Environment name for per-env config resolution
+- `--plan <file>` — Path to a plan JSON file (enables R-A7 checks)
+- `--strict` — Treat all WARNs as FAILs (exit 1)
+- `--strict-health` — Treat R-A2 health-check WARNs as FAILs
+- `--strict-cidr` — Enable strict CIDR overlap checks (reserved for future use)
+- `--max-changes N` — Warn when plan has more than N actions (default: 50)
+
+### Exit codes
+
+- `0` — no FAIL findings (WARNs allowed unless `--strict`)
+- `1` — any FAIL finding, or any WARN with `--strict`
+
+### Rule families
+
+| Rule | Name | Severity |
+|------|------|----------|
+| R-A1 | Container/runtime alignment | FAIL |
+| R-A2 | Health-check path in source | WARN (FAIL with `--strict-health`) |
+| R-A3 | Service-to-service DNS alignment | FAIL |
+| R-A4 | Env-var resolution | FAIL |
+| R-A5 | Migrations alignment | FAIL |
+| R-A6 | Network/exposure alignment | FAIL or WARN |
+| R-A7 | Plan-output sanity (requires `--plan`) | FAIL or WARN |
+| R-A8 | WebAuthn RP_ID alignment | FAIL |
+
+### Example output
+
+```
+## wfctl infra align
+
+| Rule | Severity | Resource | Message |
+|------|----------|----------|---------|
+| R-A6 | WARN | nats-broker | internal service should use expose: internal |
+| R-A4 | FAIL | api | unresolved env var: ${STRIPE_KEY} |
+
+1 FAIL, 1 WARN
+```

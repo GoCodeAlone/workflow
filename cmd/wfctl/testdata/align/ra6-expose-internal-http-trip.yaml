@@ -1,0 +1,9 @@
+# R-A6 TRIP: expose:internal is mutually exclusive with http_port.
+# R-A6 fires (FAIL).
+modules:
+  - name: internal-svc
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      expose: internal
+      http_port: 8080

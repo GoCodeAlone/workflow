@@ -1,0 +1,17 @@
+# R-A5 TRIP: api has pre_deploy.kind=migrate but no infra.database module
+# exists. R-A5 fires (FAIL).
+modules:
+  - name: build
+    type: ci.build
+    config:
+      containers:
+        - name: migrator
+          dockerfile: Dockerfile.migrate
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      pre_deploy:
+        kind: migrate
+        image: "migrator:latest"

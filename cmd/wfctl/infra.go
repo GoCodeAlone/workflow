@@ -38,6 +38,8 @@ func runInfra(args []string) error {
 		return runInfraBootstrap(args[1:])
 	case "outputs":
 		return runInfraOutputs(args[1:])
+	case "align":
+		return runInfraAlign(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -57,6 +59,7 @@ Actions:
   import    Import an existing cloud resource into state
   state     Manage IaC state (list, export, import)
   outputs   Print captured resource outputs from state
+  align     Validate IaC config + plan alignment (8 rule families)
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)

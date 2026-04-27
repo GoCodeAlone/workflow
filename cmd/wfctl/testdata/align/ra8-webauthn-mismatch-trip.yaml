@@ -1,0 +1,11 @@
+# R-A8 TRIP: WEBAUTHN_ORIGIN host (app.other.com) does not match
+# WEBAUTHN_RP_ID (example.com). R-A8 fires (FAIL).
+modules:
+  - name: auth
+    type: infra.container_service
+    config:
+      image: "auth:latest"
+      http_port: 8080
+      env_vars:
+        WEBAUTHN_RP_ID: "example.com"
+        WEBAUTHN_ORIGIN: "https://app.other.com"

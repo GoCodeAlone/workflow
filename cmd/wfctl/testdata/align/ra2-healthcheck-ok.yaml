@@ -1,0 +1,7 @@
+# R-A2 OK: no health_check.path declared, so R-A2 does not apply.
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
