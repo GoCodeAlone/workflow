@@ -1,0 +1,10 @@
+# R-A3 TRIP: api references "redis-cache.internal:6379" but no
+# infra.container_service named "redis-cache" exists. R-A3 fires (FAIL).
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        CACHE_URL: "redis-cache.internal:6379"

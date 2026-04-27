@@ -1,0 +1,16 @@
+# R-A3 OK: redis-cache is declared as a container_service and exposes port
+# 6379 via internal_ports. R-A3 does NOT fire.
+modules:
+  - name: redis-cache
+    type: infra.container_service
+    config:
+      image: "redis:7"
+      internal_ports:
+        - 6379
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        CACHE_URL: "redis-cache.internal:6379"

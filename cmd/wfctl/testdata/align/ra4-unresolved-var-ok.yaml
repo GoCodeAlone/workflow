@@ -1,0 +1,16 @@
+# R-A4 OK: ${DB_PASSWORD} is declared under secrets.generate, so it resolves
+# correctly. R-A4 does NOT fire.
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        DB_PASS: "${DB_PASSWORD}"
+  - name: secrets
+    type: secrets.generate
+    config:
+      generate:
+        - key: DB_PASSWORD
+          length: 32

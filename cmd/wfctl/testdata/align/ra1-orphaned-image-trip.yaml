@@ -1,0 +1,8 @@
+# R-A1 TRIP: container_service references image "myapp" but no ci.build
+# module declares a container named "myapp". R-A1 fires (FAIL).
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080

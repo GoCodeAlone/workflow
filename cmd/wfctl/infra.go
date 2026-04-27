@@ -59,7 +59,7 @@ Actions:
   import    Import an existing cloud resource into state
   state     Manage IaC state (list, export, import)
   outputs   Print captured resource outputs from state
-  align     Validate IaC config + plan alignment (7 rule families)
+  align     Validate IaC config + plan alignment (8 rule families)
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
