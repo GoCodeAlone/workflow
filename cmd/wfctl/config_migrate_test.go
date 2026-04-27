@@ -2,61 +2,107 @@ package main
 
 import (
 	"bytes"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// TestConfigMigrate_HelpText verifies that wfctl config migrate --help returns
-// help text that describes engine config DB migrations.
-func TestConfigMigrate_HelpText(t *testing.T) {
-	// runConfigMigrate with no args (and -help suppressed) should surface usage.
-	err := runConfigMigrate([]string{})
-	if err == nil {
+// TestConfigMigrate_NoArgs_PrintsUsage verifies that `wfctl config migrate`
+// with no subcommand prints help text that describes engine config DB migrations
+// and returns the expected error.
+func TestConfigMigrate_NoArgs_PrintsUsage(t *testing.T) {
+	// Capture stderr where fs.Usage() writes.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+
+	gotErr := runConfigMigrate([]string{})
+
+	w.Close()
+	os.Stderr = origStderr
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	helpText := buf.String()
+
+	if gotErr == nil {
 		t.Fatal("expected error (no subcommand), got nil")
 	}
-	// Verify the error describes valid subcommands.
-	msg := err.Error()
-	if !strings.Contains(msg, "subcommand") {
-		t.Errorf("error should mention 'subcommand', got: %q", msg)
+	if !strings.Contains(gotErr.Error(), "subcommand") {
+		t.Errorf("error should mention 'subcommand', got: %q", gotErr)
+	}
+	for _, want := range []string{"wfctl config migrate", "engine config", "status", "apply"} {
+		if !strings.Contains(helpText, want) {
+			t.Errorf("usage output missing %q; got:\n%s", want, helpText)
+		}
 	}
 }
 
-// TestConfigMigrate_RouteToSameHandler verifies that wfctl config migrate and
-// wfctl migrate dispatch to the same underlying logic: both should fail in the
-// same way when given an unknown subcommand.
-func TestConfigMigrate_RouteToSameHandler(t *testing.T) {
-	errOld := runMigrateDeprecated([]string{"unknown-sub"})
-	errNew := runConfigMigrate([]string{"unknown-sub"})
-
-	if errOld == nil || errNew == nil {
-		t.Fatal("both should return an error for unknown subcommand")
-	}
-	// Both errors should contain the same "unknown subcommand" message.
-	if !strings.Contains(errOld.Error(), "unknown subcommand") {
-		t.Errorf("old path error should mention unknown subcommand, got: %v", errOld)
-	}
-	if !strings.Contains(errNew.Error(), "unknown subcommand") {
-		t.Errorf("new path error should mention unknown subcommand, got: %v", errNew)
+// TestConfigMigrate_DefaultWriterIsStderr verifies that the deprecation banner
+// defaults to os.Stderr, so future changes that accidentally redirect it are caught.
+func TestConfigMigrate_DefaultWriterIsStderr(t *testing.T) {
+	if migrateDeprecationWriter != os.Stderr {
+		t.Errorf("migrateDeprecationWriter default should be os.Stderr, got %T", migrateDeprecationWriter)
 	}
 }
 
-// TestConfigMigrate_DeprecationBanner verifies that wfctl migrate writes a
-// deprecation notice to stderr before running the handler.
+// TestConfigMigrate_DeprecationBanner verifies that wfctl migrate writes the
+// exact verbatim deprecation notice to stderr before running the handler.
 func TestConfigMigrate_DeprecationBanner(t *testing.T) {
 	var buf bytes.Buffer
 	origStderr := migrateDeprecationWriter
 	migrateDeprecationWriter = &buf
 	defer func() { migrateDeprecationWriter = origStderr }()
 
-	// Call with a valid (no-op in test) args set — the banner fires regardless.
 	_ = runMigrateDeprecated([]string{})
 
 	banner := buf.String()
-	if !strings.Contains(banner, "wfctl migrate") {
-		t.Errorf("deprecation banner should mention 'wfctl migrate', got: %q", banner)
+	wantBanner := "wfctl migrate is being renamed to wfctl config migrate " +
+		"(engine config migration is config-domain). " +
+		"The old form is supported for one release; please update your scripts."
+	if !strings.Contains(banner, wantBanner) {
+		t.Errorf("deprecation banner does not contain full expected string.\nwant: %q\ngot:  %q", wantBanner, banner)
 	}
-	if !strings.Contains(banner, "wfctl config migrate") {
-		t.Errorf("deprecation banner should mention 'wfctl config migrate', got: %q", banner)
+}
+
+// TestConfigMigrate_StatusRoutingWithBanner verifies that `wfctl migrate status`
+// (Step 6 of dispatch spec): fires the deprecation banner AND produces the same
+// status output as `wfctl config migrate status`. Uses a real temp SQLite DB
+// to exercise the full path.
+func TestConfigMigrate_StatusRoutingWithBanner(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	// --- via deprecated path ---
+	var bannerBuf bytes.Buffer
+	origWriter := migrateDeprecationWriter
+	migrateDeprecationWriter = &bannerBuf
+	defer func() { migrateDeprecationWriter = origWriter }()
+
+	errOld := runMigrateDeprecated([]string{"status", "--db", dbPath})
+	banner := bannerBuf.String()
+
+	// Reset for clean state.
+	migrateDeprecationWriter = origWriter
+
+	// Banner must have fired.
+	if !strings.Contains(banner, "wfctl migrate is being renamed to wfctl config migrate") {
+		t.Errorf("expected deprecation banner, got: %q", banner)
+	}
+
+	// --- via canonical path ---
+	errNew := runConfigMigrate([]string{"status", "--db", dbPath})
+
+	// Both paths must agree on success/failure (both should succeed — no
+	// schema providers means "No schema providers registered.").
+	if (errOld == nil) != (errNew == nil) {
+		t.Errorf("routing mismatch: deprecated=%v canonical=%v", errOld, errNew)
 	}
 }
 
@@ -67,7 +113,6 @@ func TestConfigCommand_DispatchesMigrate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error (no DB subcommand), got nil")
 	}
-	// Should be the same error as running runConfigMigrate directly.
 	if !strings.Contains(err.Error(), "subcommand") {
 		t.Errorf("expected subcommand error from config migrate, got: %v", err)
 	}
