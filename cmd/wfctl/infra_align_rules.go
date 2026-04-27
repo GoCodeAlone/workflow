@@ -339,15 +339,18 @@ var sourceExtensions = map[string]struct{}{
 func pathExistsInSource(srcDir, path string) (bool, error) {
 	var found bool
 	err := filepath.Walk(srcDir, func(fp string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || found {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || found {
 			return nil
 		}
 		if _, ok := sourceExtensions[filepath.Ext(fp)]; !ok {
 			return nil
 		}
-		data, err := os.ReadFile(fp)
-		if err != nil {
-			return nil
+		data, readErr := os.ReadFile(fp)
+		if readErr != nil {
+			return nil // skip unreadable files
 		}
 		if strings.Contains(string(data), path) {
 			found = true
@@ -602,7 +605,8 @@ func checkRA7(plan *interfaces.IaCPlan, maxChanges int) []AlignFinding {
 	}
 	var findings []AlignFinding
 
-	for _, action := range plan.Actions {
+	for i := range plan.Actions {
+		action := &plan.Actions[i]
 		if action.Action == "delete" {
 			if protected, _ := action.Resource.Config["protected"].(bool); protected {
 				findings = append(findings, AlignFinding{
