@@ -441,7 +441,10 @@ func addReferencedMessagePlaceholders(messages map[string]*EditorMessageDescript
 		if name == "" {
 			continue
 		}
-		if _, ok := messages[name]; ok {
+		if existing, ok := messages[name]; ok {
+			if existing.DescriptorSetRef == "" && descriptorSetRef != "" {
+				existing.DescriptorSetRef = descriptorSetRef
+			}
 			continue
 		}
 		shortName := name

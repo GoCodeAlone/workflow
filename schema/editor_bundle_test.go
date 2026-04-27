@@ -219,6 +219,52 @@ func TestExportEditorBundlePreservesPerContractExternalDescriptorSetReferences(t
 	}
 }
 
+func TestExportEditorBundleUpgradesPlaceholderDescriptorSetReference(t *testing.T) {
+	bundle, err := ExportEditorBundle(EditorBundleOptions{
+		ContractRegistries: []EditorContractRegistrySource{
+			{
+				Plugin: "workflow-plugin-no-ref",
+				Source: EditorContractSourcePluginContractsJSON,
+				Registry: &pb.ContractRegistry{
+					Contracts: []*pb.ContractDescriptor{
+						{
+							Kind:         pb.ContractKind_CONTRACT_KIND_STEP,
+							StepType:     "step.no_ref",
+							Mode:         pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+							InputMessage: "workflow.test.SharedInput",
+						},
+					},
+				},
+			},
+			{
+				Plugin:           "workflow-plugin-ref-test",
+				Source:           EditorContractSourcePluginContractsJSON,
+				DescriptorSetRef: "descriptors/ref.pb",
+				Registry: &pb.ContractRegistry{
+					Contracts: []*pb.ContractDescriptor{
+						{
+							Kind:         pb.ContractKind_CONTRACT_KIND_STEP,
+							StepType:     "step.with_ref",
+							Mode:         pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+							InputMessage: "workflow.test.SharedInput",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("export editor bundle: %v", err)
+	}
+	msg := bundle.Messages["workflow.test.SharedInput"]
+	if msg == nil {
+		t.Fatalf("expected shared input placeholder, got %+v", bundle.Messages)
+	}
+	if msg.DescriptorSetRef != "descriptors/ref.pb" {
+		t.Fatalf("shared input descriptor set ref = %q", msg.DescriptorSetRef)
+	}
+}
+
 func TestExportEditorBundleKeysServiceContractsByModuleType(t *testing.T) {
 	bundle, err := ExportEditorBundle(EditorBundleOptions{
 		ContractRegistries: []EditorContractRegistrySource{
