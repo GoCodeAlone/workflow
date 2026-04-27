@@ -1291,6 +1291,7 @@ security:
 - `security.tls.provider` must be one of `letsencrypt`, `manual`, `acm`, `cloudflare`
 - `security.network.defaultPolicy: deny` causes `wfctl security generate-network-policies` to include `Egress` in policy types
 - `networking.ingress` entries without a `tls` block are flagged as `HIGH` by `wfctl security audit`
+- `wfctl validate` checks `security.tls.provider` for valid values
 
 ---
 
@@ -1308,6 +1309,7 @@ Manage SQLite-backed engine config schema migrations.
 
 > **Deprecated:** `wfctl migrate` is an alias for `wfctl config migrate` and will be removed in v0.21+.
 > Update scripts to use `wfctl config migrate`.
+<<<<<<< HEAD
 - `wfctl validate` checks `security.tls.provider` for valid values
 
 ---
@@ -1363,3 +1365,5 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 
 1 FAIL, 1 WARN
 ```
+=======
+>>>>>>> 23c8699 (fix(wfctl): address F6 spec review findings)

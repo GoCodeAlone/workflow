@@ -28,7 +28,7 @@ var migrateDeprecationWriter io.Writer = os.Stderr
 // one-time deprecation notice then delegates to runConfigMigrate.
 func runMigrateDeprecated(args []string) error {
 	fmt.Fprintln(migrateDeprecationWriter,
-		"DEPRECATED: wfctl migrate is being renamed to wfctl config migrate "+
+		"wfctl migrate is being renamed to wfctl config migrate "+
 			"(engine config migration is config-domain). "+
 			"The old form is supported for one release; please update your scripts.")
 	return runConfigMigrate(args)
