@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -113,13 +114,21 @@ func runMigrationsCICheck(args []string) error {
 		return err
 	}
 
-	result, statusErr := collectMigrationStatus(context.Background(), *configFile, *envName, *pluginDir)
+	cfg, err := loadMigrationWorkflowConfig(*configFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	migrations, err := resolveMigrationConfigs(cfg, *envName)
+	if err != nil {
+		return err
+	}
+	result, statusErr := collectMigrationStatusForConfigs(context.Background(), migrations, *pluginDir)
 	result.Reasons = append(result.Reasons, migrationStatusCleanReasons(result.Migrations)...)
 	if *requireSameSHA {
 		*requireValidationResult = true
 	}
 	if *requireValidationResult {
-		result.Reasons = append(result.Reasons, checkMigrationValidationResult(*validationResult, *commit, *requireSameSHA, result.Migrations)...)
+		result.Reasons = append(result.Reasons, checkMigrationValidationResult(*validationResult, *commit, *requireSameSHA, migrations)...)
 	}
 	if statusErr != nil && len(result.Reasons) == 0 {
 		result.Reasons = append(result.Reasons, statusErr.Error())
@@ -147,6 +156,7 @@ func runMigrationsRepairDirty(args []string) error {
 	forceVersion := fs.String("force-version", "", "Version to force migration metadata to")
 	confirmForce := fs.String("confirm-force", "", "Typed confirmation token")
 	approvedToken := fs.String("approved-token", "", "External approval token for non-dev destructive repair")
+	approvedTokenEnv := fs.String("approved-token-env", "", "Environment variable containing the external approval token")
 	thenUp := fs.Bool("then-up", false, "Run migrate up after metadata repair")
 	upIfClean := fs.Bool("up-if-clean", false, "Run migrate up when the database is already clean")
 	if err := fs.Parse(args); err != nil {
@@ -164,7 +174,11 @@ func runMigrationsRepairDirty(args []string) error {
 	}
 	if isProtectedMigrationEnvironment(*envName) {
 		requiredToken := os.Getenv("WFCTL_MIGRATION_REPAIR_APPROVAL_TOKEN")
-		if strings.TrimSpace(*approvedToken) == "" || requiredToken == "" || *approvedToken != requiredToken {
+		submittedToken := strings.TrimSpace(*approvedToken)
+		if submittedToken == "" && strings.TrimSpace(*approvedTokenEnv) != "" {
+			submittedToken = os.Getenv(strings.TrimSpace(*approvedTokenEnv))
+		}
+		if submittedToken == "" || requiredToken == "" || submittedToken != requiredToken {
 			result.HumanApprovalRequired = true
 			result.Reasons = []string{"human approval is required for production migration metadata repair"}
 			result.ApprovalCommand = buildMigrationRepairApprovalCommand(*configFile, *envName, *pluginDir, *expectedDirtyVersion, *forceVersion, *thenUp, *upIfClean)
@@ -172,7 +186,7 @@ func runMigrationsRepairDirty(args []string) error {
 		}
 	}
 
-	cfg, err := config.LoadFromFile(*configFile)
+	cfg, err := loadMigrationWorkflowConfig(*configFile)
 	if err != nil {
 		result.Reasons = []string{fmt.Sprintf("load config: %v", err)}
 		return finishMigrationRepairDirty(result, *format)
@@ -223,8 +237,12 @@ func runMigrationsRepairDirty(args []string) error {
 				result.Reasons = []string{fmt.Sprintf("migration %s post-up status failed: %s", migration.Name, err)}
 				return finishMigrationRepairDirty(result, *format)
 			}
-			result.Decision = "pass"
 			result.Migration = migrationValidationRecord{Name: migration.Name, Driver: migration.Driver, Current: afterStatus.Current, Dirty: afterStatus.Dirty, Pending: afterStatus.Pending}
+			if afterStatus.Dirty {
+				result.Reasons = []string{fmt.Sprintf("migration %s is dirty after up", migration.Name)}
+				return finishMigrationRepairDirty(result, *format)
+			}
+			result.Decision = "pass"
 			return finishMigrationRepairDirty(result, *format)
 		}
 		result.Reasons = []string{fmt.Sprintf("migration %s is not dirty", migration.Name)}
@@ -285,7 +303,7 @@ func buildMigrationRepairApprovalCommand(configFile, envName, pluginDir, expecte
 		"--expected-dirty-version", expectedDirtyVersion,
 		"--force-version", forceVersion,
 		"--confirm-force", "FORCE_MIGRATION_METADATA",
-		"--approved-token", "<approval-token>",
+		"--approved-token-env", "WFCTL_MIGRATION_REPAIR_APPROVED_TOKEN",
 	}
 	if thenUp {
 		parts = append(parts, "--then-up")
@@ -341,7 +359,7 @@ func runMigrationsValidate(args []string) error {
 		return err
 	}
 
-	cfg, err := config.LoadFromFile(*configFile)
+	cfg, err := loadMigrationWorkflowConfig(*configFile)
 	if err != nil {
 		return failMigrationValidationEarly(*resultFile, *format, *commit, fmt.Errorf("load config: %w", err))
 	}
@@ -479,8 +497,21 @@ func failMigrationValidationEarly(resultFile string, format string, commit strin
 	return err
 }
 
-func collectMigrationStatus(ctx context.Context, configFile, envName, pluginDir string) (migrationStatusResult, error) {
+func loadMigrationWorkflowConfig(configFile string) (*config.WorkflowConfig, error) {
 	cfg, err := config.LoadFromFile(configFile)
+	if err != nil {
+		return nil, err
+	}
+	if cfg != nil && cfg.CI != nil {
+		if err := cfg.CI.Validate(); err != nil {
+			return nil, fmt.Errorf("validate ci config: %w", err)
+		}
+	}
+	return cfg, nil
+}
+
+func collectMigrationStatus(ctx context.Context, configFile, envName, pluginDir string) (migrationStatusResult, error) {
+	cfg, err := loadMigrationWorkflowConfig(configFile)
 	if err != nil {
 		return migrationStatusResult{}, fmt.Errorf("load config: %w", err)
 	}
@@ -488,7 +519,10 @@ func collectMigrationStatus(ctx context.Context, configFile, envName, pluginDir 
 	if err != nil {
 		return migrationStatusResult{}, err
 	}
+	return collectMigrationStatusForConfigs(ctx, migrations, pluginDir)
+}
 
+func collectMigrationStatusForConfigs(ctx context.Context, migrations []resolvedMigrationConfig, pluginDir string) (migrationStatusResult, error) {
 	result := migrationStatusResult{
 		Decision:              "pass",
 		Destructive:           false,
@@ -566,7 +600,7 @@ func migrationStatusDirtyReasons(migrations []migrationValidationRecord) []strin
 	return reasons
 }
 
-func checkMigrationValidationResult(path, commit string, requireSameSHA bool, expectedMigrations []migrationValidationRecord) []string {
+func checkMigrationValidationResult(path, commit string, requireSameSHA bool, expectedMigrations []resolvedMigrationConfig) []string {
 	var reasons []string
 	if strings.TrimSpace(path) == "" {
 		return []string{"validation result is required"}
@@ -607,6 +641,15 @@ func checkMigrationValidationResult(path, commit string, requireSameSHA bool, ex
 		if record.Lint == "" && record.FreshCycle == "" && record.BaselineCandidate == "" {
 			reasons = append(reasons, fmt.Sprintf("validation result migration %s has no passing checks", expected.Name))
 		}
+		if expected.Validation.Lint && record.Lint != "pass" {
+			reasons = append(reasons, fmt.Sprintf("validation result migration %s missing required lint check", expected.Name))
+		}
+		if expected.Validation.FreshCycle && record.FreshCycle != "pass" {
+			reasons = append(reasons, fmt.Sprintf("validation result migration %s missing required fresh_cycle check", expected.Name))
+		}
+		if expected.Validation.BaselineCandidate && record.BaselineCandidate != "pass" {
+			reasons = append(reasons, fmt.Sprintf("validation result migration %s missing required baseline_candidate check", expected.Name))
+		}
 	}
 	return reasons
 }
@@ -634,6 +677,11 @@ func writeMigrationValidationResult(path string, result migrationValidationResul
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode validation result: %w", err)
+	}
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create validation result directory: %w", err)
+		}
 	}
 	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
 		return fmt.Errorf("write validation result: %w", err)

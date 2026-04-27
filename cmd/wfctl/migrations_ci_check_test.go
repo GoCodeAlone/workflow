@@ -176,6 +176,44 @@ func TestRunMigrationsCICheckRejectsValidationResultWithNoChecks(t *testing.T) {
 	}
 }
 
+func TestRunMigrationsCICheckRejectsValidationResultMissingConfiguredChecks(t *testing.T) {
+	cfgPath := writeMigrationValidateConfig(t)
+	resultPath := writeMigrationValidationResultFixture(t, migrationValidationResult{
+		Decision: "pass",
+		Commit:   "abc123",
+		Migrations: []migrationValidationRecord{{
+			Name: "app",
+			Lint: "pass",
+		}},
+	})
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	restore := stubMigrationStatusRunner(t, migrationCommandResult{
+		Stdout: "Current: 20260426000005\nDirty: false\nNo pending migrations.\n",
+	}, nil)
+	defer restore()
+
+	out, err := captureStdout(t, func() error {
+		return runMigrations([]string{"ci-check", "--config", cfgPath, "--env", "ci", "--commit", "abc123", "--validation-result", resultPath, "--require-validation-result", "--format", "json"})
+	})
+	if err == nil {
+		t.Fatal("expected incomplete validation result error")
+	}
+	if !strings.Contains(out, "validation result migration app missing required fresh_cycle check") {
+		t.Fatalf("unexpected ci-check output: %s", out)
+	}
+}
+
+func TestWriteMigrationValidationResultCreatesParentDirectories(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".wfctl", "migrations-result.json")
+	err := writeMigrationValidationResult(path, migrationValidationResult{Decision: "pass"})
+	if err != nil {
+		t.Fatalf("writeMigrationValidationResult: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("validation result was not written: %v", err)
+	}
+}
+
 func writeMigrationValidationResultFixture(t *testing.T, result migrationValidationResult) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "migrations-result.json")

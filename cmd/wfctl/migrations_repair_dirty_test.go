@@ -96,6 +96,28 @@ func TestRunMigrationsRepairDirtyRejectsWrongApprovalTokenForProd(t *testing.T) 
 	}
 }
 
+func TestRunMigrationsRepairDirtyAcceptsApprovalTokenFromEnvForProd(t *testing.T) {
+	cfgPath := writeMigrationStatusConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	t.Setenv("WFCTL_MIGRATION_REPAIR_APPROVAL_TOKEN", "expected-token")
+	t.Setenv("WFCTL_MIGRATION_REPAIR_APPROVED_TOKEN", "expected-token")
+	var calls []string
+	restore := stubMigrationRepairRunner(t, &calls, []migrationCommandResult{
+		{Stdout: "Current: 20260426000005\nDirty: true\nNo pending migrations.\n"},
+		{},
+		{Stdout: "Current: 20260426000004\nDirty: false\nNo pending migrations.\n"},
+	})
+	defer restore()
+
+	err := runMigrations([]string{"repair-dirty", "--config", cfgPath, "--env", "prod", "--expected-dirty-version", "20260426000005", "--force-version", "20260426000004", "--confirm-force", "FORCE_MIGRATION_METADATA", "--approved-token-env", "WFCTL_MIGRATION_REPAIR_APPROVED_TOKEN"})
+	if err != nil {
+		t.Fatalf("expected env approval token to allow repair: %v", err)
+	}
+	if !containsMigrationString(calls, "repair-dirty --expected-dirty-version 20260426000005 --force-version 20260426000004 --confirm-force FORCE_MIGRATION_METADATA") {
+		t.Fatalf("plugin calls = %#v; want repair-dirty", calls)
+	}
+}
+
 func TestRunMigrationsRepairDirtyUpIfCleanIsIdempotent(t *testing.T) {
 	cfgPath := writeMigrationStatusConfig(t)
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
@@ -109,6 +131,30 @@ func TestRunMigrationsRepairDirtyUpIfCleanIsIdempotent(t *testing.T) {
 
 	if err := runMigrations([]string{"repair-dirty", "--config", cfgPath, "--env", "staging", "--expected-dirty-version", "20260426000005", "--force-version", "20260426000004", "--confirm-force", "FORCE_MIGRATION_METADATA", "--up-if-clean"}); err != nil {
 		t.Fatal(err)
+	}
+	want := []string{"status", "up", "status"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestRunMigrationsRepairDirtyUpIfCleanFailsIfPostUpIsDirty(t *testing.T) {
+	cfgPath := writeMigrationStatusConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	var calls []string
+	restore := stubMigrationRepairRunner(t, &calls, []migrationCommandResult{
+		{Stdout: "Current: 20260426000004\nDirty: false\nNo pending migrations.\n"},
+		{},
+		{Stdout: "Current: 20260426000005\nDirty: true\nNo pending migrations.\n"},
+	})
+	defer restore()
+
+	err := runMigrations([]string{"repair-dirty", "--config", cfgPath, "--env", "staging", "--expected-dirty-version", "20260426000005", "--force-version", "20260426000004", "--confirm-force", "FORCE_MIGRATION_METADATA", "--up-if-clean"})
+	if err == nil {
+		t.Fatal("runMigrations() error = nil; want dirty post-up failure")
+	}
+	if !strings.Contains(err.Error(), "dirty after up") {
+		t.Fatalf("runMigrations() error = %v; want dirty after up", err)
 	}
 	want := []string{"status", "up", "status"}
 	if !reflect.DeepEqual(calls, want) {
