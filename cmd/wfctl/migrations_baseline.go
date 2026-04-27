@@ -406,9 +406,13 @@ func extractTar(r *bytes.Reader, dest string) error {
 			}
 			return err
 		}
-		entryName, err := cleanMigrationArchiveEntryName(header.Name)
+		rawName := header.Name
+		if strings.Contains(rawName, "..") {
+			return fmt.Errorf("archive entry escapes destination: %s", rawName)
+		}
+		entryName, err := cleanMigrationArchiveEntryName(rawName)
 		if err != nil {
-			return fmt.Errorf("archive entry escapes destination: %s", header.Name)
+			return fmt.Errorf("archive entry escapes destination: %s", rawName)
 		}
 		target := filepath.Join(dest, entryName)
 		switch header.Typeflag {
