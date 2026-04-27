@@ -304,6 +304,73 @@ func TestRunMigrateRepairDirtyRedactsJobEnvFromProviderError(t *testing.T) {
 	}
 }
 
+func TestRunMigrateRepairDirtyRejectsEmptyProviderStatus(t *testing.T) {
+	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
+	fake := &migrationRepairProvider{
+		result: &interfaces.MigrationRepairResult{
+			ProviderJobID: "job-123",
+		},
+	}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+
+	_, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--up-if-clean",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+		})
+	})
+	if err == nil {
+		t.Fatal("expected empty provider status error")
+	}
+	if !strings.Contains(err.Error(), "empty migration repair status") {
+		t.Fatalf("error = %v, want empty status guidance", err)
+	}
+}
+
+func TestRunMigrateRepairDirtyRejectsUnknownProviderStatus(t *testing.T) {
+	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
+	fake := &migrationRepairProvider{
+		result: &interfaces.MigrationRepairResult{
+			ProviderJobID: "job-123",
+			Status:        "paused",
+		},
+	}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+
+	_, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--up-if-clean",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+		})
+	})
+	if err == nil {
+		t.Fatal("expected unknown provider status error")
+	}
+	if !strings.Contains(err.Error(), "unknown migration repair status") {
+		t.Fatalf("error = %v, want unknown status guidance", err)
+	}
+}
+
 func TestRunMigrateRepairDirtyMissingEnvFromEnvFailsBeforeProvider(t *testing.T) {
 	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
 	fake := &migrationRepairProvider{}
@@ -421,8 +488,8 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 			Status:        interfaces.MigrationRepairStatusSucceeded,
 			Logs:          "repair complete for postgres://summary-secret",
 			Diagnostics: []interfaces.Diagnostic{{
-				ID:     "deploy-123",
-				Phase:  "ACTIVE",
+				ID:     "deploy-postgres://summary-secret",
+				Phase:  "ACTIVE-postgres://summary-secret",
 				Cause:  "job used postgres://summary-secret",
 				Detail: "repair complete for postgres://summary-secret",
 			}},

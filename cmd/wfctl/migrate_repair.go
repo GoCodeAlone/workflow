@@ -179,7 +179,10 @@ Options:
 	if err != nil {
 		return redactMigrationRepairError(err, jobEnvMap)
 	}
-	if result.Status != "" && result.Status != interfaces.MigrationRepairStatusSucceeded {
+	if err := validateMigrationRepairResultStatus(result.Status); err != nil {
+		return err
+	}
+	if result.Status != interfaces.MigrationRepairStatusSucceeded {
 		return fmt.Errorf("migration repair finished with status %s", result.Status)
 	}
 	return nil
@@ -330,6 +333,8 @@ func redactMigrationRepairDiagnostics(diagnostics []interfaces.Diagnostic, secre
 	}
 	redacted := make([]interfaces.Diagnostic, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
+		diagnostic.ID = redactMigrationRepairSecrets(diagnostic.ID, secrets)
+		diagnostic.Phase = redactMigrationRepairSecrets(diagnostic.Phase, secrets)
 		diagnostic.Cause = redactMigrationRepairSecrets(diagnostic.Cause, secrets)
 		diagnostic.Detail = redactMigrationRepairSecrets(diagnostic.Detail, secrets)
 		redacted = append(redacted, diagnostic)
@@ -351,4 +356,18 @@ func redactMigrationRepairError(err error, secrets map[string]string) error {
 		return nil
 	}
 	return fmt.Errorf("%s", redactMigrationRepairSecrets(err.Error(), secrets))
+}
+
+func validateMigrationRepairResultStatus(status string) error {
+	switch status {
+	case "":
+		return fmt.Errorf("empty migration repair status from provider")
+	case interfaces.MigrationRepairStatusSucceeded,
+		interfaces.MigrationRepairStatusFailed,
+		interfaces.MigrationRepairStatusApprovalRequired,
+		interfaces.MigrationRepairStatusUnsupported:
+		return nil
+	default:
+		return fmt.Errorf("unknown migration repair status %q from provider", status)
+	}
 }
