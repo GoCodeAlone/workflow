@@ -297,30 +297,6 @@ func r7CollectSources(cfg map[string]any) map[string]bool {
 	return set
 }
 
-// r7HasCIDRWidening reports whether the transition from current to desired
-// sources represents a CIDR widening. A desired CIDR constitutes a widening
-// when it is not an exact match for a current CIDR AND it is not a narrowing
-// (i.e. not a subnet of some current CIDR). This covers both:
-//   - New CIDR ranges added (e.g. {10.0.0.1/32} → {10.0.0.1/32, 0.0.0.0/0})
-//   - Prefix broadening (e.g. {10.0.0.0/24} → {10.0.0.0/8})
-//
-// Note: a desired CIDR that is a subnet of a current CIDR is a restriction
-// (e.g. {10.0.0.0/8} → {10.0.0.0/24}) and does NOT constitute widening.
-func r7HasCIDRWidening(desired, current map[string]bool) bool {
-	for d := range desired {
-		if current[d] {
-			continue // unchanged CIDR string
-		}
-		// d is new. If every existing current CIDR contains d, then d is more
-		// specific (narrower) — that is a restriction, not a widening.
-		if r7isCIDRNarrowing(d, current) {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
 // r7isCIDRNarrowing reports whether candidate is a subnet of (contained in)
 // at least one CIDR in the current set. If so the candidate is more restrictive.
 func r7isCIDRNarrowing(candidate string, current map[string]bool) bool {
@@ -385,17 +361,6 @@ func cidrContains(widerStr, narrowerStr string) bool {
 	wOnes, _ := wNet.Mask.Size()
 	nOnes, _ := nNet.Mask.Size()
 	return wOnes <= nOnes && wNet.Contains(nNet.IP)
-}
-
-// r7NewCIDRs returns CIDRs present in desired but not in current (by string).
-func r7NewCIDRs(desired, current map[string]bool) []string {
-	var added []string
-	for k := range desired {
-		if !current[k] {
-			added = append(added, k)
-		}
-	}
-	return added
 }
 
 // ─── R8: State bucket public ACL ─────────────────────────────────────────────
