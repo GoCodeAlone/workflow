@@ -47,6 +47,10 @@ type IaCPlan struct {
 	ID        string       `json:"id"`
 	Actions   []PlanAction `json:"actions"`
 	CreatedAt time.Time    `json:"created_at"`
+	// DesiredHash is a SHA-256 hex digest of the canonical desired-state inputs
+	// (sorted ResourceSpecs) at the time the plan was generated. wfctl infra apply
+	// --plan compares this against the current config to detect stale plans.
+	DesiredHash string `json:"desired_hash,omitempty"`
 }
 
 // PlanAction is a single planned change within an IaCPlan.

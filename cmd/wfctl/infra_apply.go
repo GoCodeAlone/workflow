@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -620,4 +623,240 @@ func isAbstractSize(s interfaces.Size) bool {
 	default:
 		return false
 	}
+}
+
+// desiredStateHash returns a stable SHA-256 hex digest of the canonical
+// desired-state inputs: specs sorted by name and JSON-serialised. It is
+// embedded in plan.json by runInfraPlan and verified by runInfraApply
+// --plan to detect plans that are stale relative to the current config.
+func desiredStateHash(specs []interfaces.ResourceSpec) string {
+	if len(specs) == 0 {
+		return ""
+	}
+	sorted := make([]interfaces.ResourceSpec, len(specs))
+	copy(sorted, specs)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Name < sorted[j].Name
+	})
+	data, _ := json.Marshal(sorted)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum)
+}
+
+// loadPlanFromFile reads and deserialises a plan.json written by wfctl infra plan -o.
+func loadPlanFromFile(path string) (interfaces.IaCPlan, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return interfaces.IaCPlan{}, fmt.Errorf("read plan file %q: %w", path, err)
+	}
+	var plan interfaces.IaCPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return interfaces.IaCPlan{}, fmt.Errorf("parse plan file %q: %w", path, err)
+	}
+	return plan, nil
+}
+
+// applyFromPrecomputedPlan dispatches a pre-computed plan without calling
+// ComputePlan. It loads IaCProvider plugins from cfgFile, groups plan actions
+// by iac.provider module, and calls provider.Apply for each group. State is
+// persisted exactly as in the live-diff path.
+func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgFile, envName string) error { //nolint:cyclop
+	// Load full config to resolve iac.provider module definitions.
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Build provider lookup (mirrors applyInfraModules).
+	type providerDef struct {
+		provType string
+		provCfg  map[string]any
+	}
+	providerDefs := map[string]providerDef{}
+	for i := range cfg.Modules {
+		m := &cfg.Modules[i]
+		if m.Type != "iac.provider" {
+			continue
+		}
+		var modCfg map[string]any
+		if envName != "" {
+			resolved, ok := m.ResolveForEnv(envName)
+			if !ok {
+				continue
+			}
+			modCfg = config.ExpandEnvInMap(resolved.Config)
+		} else {
+			modCfg = config.ExpandEnvInMap(m.Config)
+		}
+		pt, _ := modCfg["provider"].(string)
+		providerDefs[m.Name] = providerDef{provType: pt, provCfg: modCfg}
+	}
+
+	// Resolve state store (noop when no iac.state module is configured).
+	store, storeErr := resolveStateStore(cfgFile, envName)
+	if storeErr != nil {
+		return fmt.Errorf("open state store: %w", storeErr)
+	}
+
+	// Group plan actions by iac.provider module, preserving action order.
+	type actionGroup struct {
+		provType string
+		provCfg  map[string]any
+		actions  []interfaces.PlanAction
+	}
+	groups := map[string]*actionGroup{}
+	var groupOrder []string
+
+	for _, action := range plan.Actions {
+		moduleRef, _ := action.Resource.Config["provider"].(string)
+		if moduleRef == "" {
+			return fmt.Errorf("plan action for %q: missing 'provider' field in resource config", action.Resource.Name)
+		}
+		if _, exists := groups[moduleRef]; !exists {
+			def, ok := providerDefs[moduleRef]
+			if !ok {
+				return fmt.Errorf("plan action for %q references provider %q which is not declared as an iac.provider module", action.Resource.Name, moduleRef)
+			}
+			groups[moduleRef] = &actionGroup{provType: def.provType, provCfg: def.provCfg}
+			groupOrder = append(groupOrder, moduleRef)
+		}
+		groups[moduleRef].actions = append(groups[moduleRef].actions, action)
+	}
+
+	// Apply each provider group in declaration order.
+	for _, moduleRef := range groupOrder {
+		g := groups[moduleRef]
+		groupPlan := interfaces.IaCPlan{
+			ID:        plan.ID,
+			Actions:   g.actions,
+			CreatedAt: plan.CreatedAt,
+		}
+		fmt.Printf("Applying %d resource(s) via provider %q (%s) from plan...\n", len(g.actions), moduleRef, g.provType)
+		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
+		if err != nil {
+			return fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
+		}
+		if closer != nil {
+			provType := g.provType
+			defer func() {
+				if cerr := closer.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+				}
+			}()
+		}
+		if err := applyPrecomputedPlanWithStore(ctx, groupPlan, provider, g.provType, store, os.Stderr, envName); err != nil {
+			return fmt.Errorf("provider %q: %w", moduleRef, err)
+		}
+	}
+
+	fmt.Printf("applied %d action(s) from plan\n", len(plan.Actions))
+	return nil
+}
+
+// applyPrecomputedPlanWithStore executes a pre-computed plan group via
+// provider.Apply and persists state for each provisioned resource. It is the
+// precomputed-plan counterpart of applyWithProviderAndStore, skipping
+// ComputePlan / adoptExistingResources entirely.
+func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan, provider interfaces.IaCProvider, providerType string, store infraStateStore, w io.Writer, envName string) error {
+	if store == nil {
+		store = &noopStateStore{}
+	}
+	if len(plan.Actions) == 0 {
+		fmt.Println("  No changes — infrastructure is up-to-date.")
+		return nil
+	}
+
+	// Collect delete-action resource names for post-apply state cleanup.
+	deleteNames := make(map[string]struct{})
+	for _, a := range plan.Actions {
+		if a.Action == "delete" {
+			deleteNames[a.Resource.Name] = struct{}{}
+		}
+	}
+
+	validateInputProviderIDs(provider, &plan)
+	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
+	result, err := provider.Apply(ctx, &plan)
+	if err != nil {
+		ref := interfaces.ResourceRef{}
+		if len(plan.Actions) == 1 {
+			ref.Name = plan.Actions[0].Resource.Name
+			ref.Type = plan.Actions[0].Resource.Type
+		}
+		em := detectCIProvider()
+		var diags []interfaces.Diagnostic
+		if ref.Type != "" {
+			if rd, rdErr := provider.ResourceDriver(ref.Type); rdErr == nil {
+				diags = troubleshootAfterFailure(ctx, w, rd, ref, err, infraApplyTroubleshootTimeout, em)
+			}
+		}
+		if sumErr := WriteStepSummary(em, SummaryInput{
+			Operation:   "apply",
+			Env:         envName,
+			Resource:    ref.Name,
+			Outcome:     "FAILED",
+			RootCause:   err.Error(),
+			Diagnostics: diags,
+		}); sumErr != nil {
+			log.Printf("step summary: %v (ignored)", sumErr)
+		}
+		return fmt.Errorf("apply: %w", err)
+	}
+
+	if result != nil {
+		for _, r := range result.Resources {
+			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
+
+			if err := validateOutputProviderID(provider, providerType, &r); err != nil {
+				return fmt.Errorf("state write rejected: %w", err)
+			}
+
+			// Retrieve spec metadata from the plan action for state persistence.
+			var appliedCfg map[string]any
+			var providerRef string
+			var dependencies []string
+			for _, a := range plan.Actions {
+				if a.Resource.Name == r.Name {
+					appliedCfg = a.Resource.Config
+					providerRef, _ = a.Resource.Config["provider"].(string)
+					dependencies = append([]string(nil), a.Resource.DependsOn...)
+					break
+				}
+			}
+
+			now := time.Now().UTC()
+			rs := interfaces.ResourceState{
+				ID:            r.Name,
+				Name:          r.Name,
+				Type:          r.Type,
+				Provider:      providerType,
+				ProviderRef:   providerRef,
+				ProviderID:    r.ProviderID,
+				ConfigHash:    configHashMap(appliedCfg),
+				AppliedConfig: appliedCfg,
+				Outputs:       r.Outputs,
+				Dependencies:  dependencies,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			}
+			if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
+				return fmt.Errorf("%s/%s: persist state after apply: %w", r.Type, r.Name, saveErr)
+			}
+		}
+
+		for name := range deleteNames {
+			if delErr := store.DeleteResource(ctx, name); delErr != nil {
+				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
+			}
+		}
+
+		if len(result.Errors) > 0 {
+			msgs := make([]string, 0, len(result.Errors))
+			for _, ae := range result.Errors {
+				msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
+			}
+			return fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
+		}
+	}
+	return nil
 }
