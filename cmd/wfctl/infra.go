@@ -190,6 +190,9 @@ func runInfraPlan(args []string) error {
 	}
 
 	if *output != "" {
+		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
+		// can detect stale plans when the config changes after plan generation.
+		plan.DesiredHash = desiredStateHash(desired)
 		if err := writePlanJSON(plan, *output); err != nil {
 			return fmt.Errorf("write plan: %w", err)
 		}
@@ -916,6 +919,8 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var planFile string
+	fs.StringVar(&planFile, "plan", "", "Apply from a pre-emitted plan.json (skips ComputePlan)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -979,6 +984,27 @@ func runInfraApply(args []string) error {
 	}
 
 	fmt.Printf("Applying infrastructure from %s...\n", cfgFile)
+
+	// --plan: dispatch actions from a pre-emitted plan file, skipping ComputePlan.
+	if planFile != "" {
+		plan, err := loadPlanFromFile(planFile)
+		if err != nil {
+			return err
+		}
+		// Validate that the plan is still current relative to the config.
+		desired, err := parseInfraResourceSpecsForEnv(cfgFile, envName)
+		if err != nil {
+			return fmt.Errorf("parse infra resource specs: %w", err)
+		}
+		if plan.DesiredHash == "" {
+			return fmt.Errorf("plan file has no hash — regenerate with: wfctl infra plan -o plan.json")
+		}
+		currentHash := desiredStateHash(desired)
+		if plan.DesiredHash != currentHash {
+			return fmt.Errorf("plan stale: config hash mismatch (run wfctl infra plan again)")
+		}
+		return applyFromPrecomputedPlan(ctx, plan, cfgFile, envName)
+	}
 
 	// Dispatch: infra.* modules use the direct IaCProvider path; legacy
 	// platform.* configs fall back to the pipeline runner (pipelines.apply).
