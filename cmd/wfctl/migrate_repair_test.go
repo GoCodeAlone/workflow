@@ -562,6 +562,9 @@ func TestRunMigrateRepairDirtyHelp(t *testing.T) {
 			t.Fatalf("help missing %q:\n%s", want, out)
 		}
 	}
+	if !strings.Contains(out, "Required guard flags for non-dev environments") {
+		t.Fatalf("help missing non-dev approval guidance:\n%s", out)
+	}
 }
 
 func TestRunMigrateRepairDirtyRejectsInvalidJobEnv(t *testing.T) {

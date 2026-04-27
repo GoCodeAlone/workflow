@@ -73,7 +73,7 @@ func runMigrateRepairDirtyWithOutput(args []string, out io.Writer) error {
 
 Run a guarded dirty migration metadata repair inside a provider-managed runtime.
 
-Required guard flags:
+Required guard flags for non-dev environments:
   --expected-dirty-version <version>
   --force-version <version>
   --confirm-force FORCE_MIGRATION_METADATA
