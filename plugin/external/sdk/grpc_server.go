@@ -477,7 +477,7 @@ func (s *grpcServer) GetConfigFragment(_ context.Context, _ *emptypb.Empty) (*pb
 // InvokeService routes a service method call to the registered module identified
 // by handle_id. The module must implement ServiceInvoker; if it does not, an
 // error is returned to the host.
-func (s *grpcServer) InvokeService(_ context.Context, req *pb.InvokeServiceRequest) (*pb.InvokeServiceResponse, error) {
+func (s *grpcServer) InvokeService(ctx context.Context, req *pb.InvokeServiceRequest) (*pb.InvokeServiceResponse, error) {
 	s.mu.RLock()
 	inst, ok := s.modules[req.HandleId]
 	s.mu.RUnlock()
@@ -499,6 +499,15 @@ func (s *grpcServer) InvokeService(_ context.Context, req *pb.InvokeServiceReque
 		return &pb.InvokeServiceResponse{TypedOutput: output}, nil
 	}
 
+	args := structToMap(req.Args)
+	if invoker, ok := inst.(ServiceContextInvoker); ok {
+		result, err := invoker.InvokeMethodContext(ctx, req.Method, args)
+		if err != nil {
+			return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
+		}
+		return &pb.InvokeServiceResponse{Result: mapToStruct(result)}, nil
+	}
+
 	invoker, ok := inst.(ServiceInvoker)
 	if !ok {
 		return &pb.InvokeServiceResponse{
@@ -506,7 +515,7 @@ func (s *grpcServer) InvokeService(_ context.Context, req *pb.InvokeServiceReque
 		}, nil
 	}
 
-	result, err := invoker.InvokeMethod(req.Method, structToMap(req.Args))
+	result, err := invoker.InvokeMethod(req.Method, args)
 	if err != nil {
 		return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}

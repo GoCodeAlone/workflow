@@ -121,6 +121,22 @@ func (m *typedServiceModule) InvokeMethod(method string, args map[string]any) (m
 	return map[string]any{"value": args["value"]}, nil
 }
 
+type contextServiceModule struct {
+	typedServiceModule
+	contextErr error
+	called     bool
+}
+
+func (m *contextServiceModule) InvokeMethodContext(ctx context.Context, method string, args map[string]any) (map[string]any, error) {
+	m.called = true
+	m.lastMethod = method
+	m.contextErr = ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"value": args["value"]}, nil
+}
+
 type typedServiceModuleWithoutTypedInvoker struct{}
 
 func (typedServiceModuleWithoutTypedInvoker) Init() error {
@@ -401,6 +417,41 @@ func TestInvokeService_WithTypedModuleFactoryForwardsLegacyInvoker(t *testing.T)
 	}
 	if got := resp.Result.AsMap()["value"]; got != "legacy-input" {
 		t.Fatalf("expected legacy result value, got %#v", got)
+	}
+}
+
+func TestInvokeService_ForwardsContextToLegacyInvoker(t *testing.T) {
+	module := &contextServiceModule{}
+	srv := newGRPCServer(&typedServiceProvider{module: module})
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "typed.service",
+		Name: "typed",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	resp, err := srv.InvokeService(ctx, &pb.InvokeServiceRequest{
+		HandleId: createResp.HandleId,
+		Method:   "Echo",
+		Args: mapToStruct(map[string]any{
+			"value": "legacy-input",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("InvokeService returned rpc error: %v", err)
+	}
+	if !module.called {
+		t.Fatal("context-aware invoker was not called")
+	}
+	if module.contextErr == nil {
+		t.Fatal("expected canceled context to reach invoker")
+	}
+	if resp.Error == "" {
+		t.Fatal("expected response error from canceled context")
 	}
 }
 
