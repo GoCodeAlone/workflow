@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -263,17 +264,15 @@ func ruleR7CIDRWidening(plan interfaces.IaCPlan, opts SecurityCheckOpts) []Secur
 		}
 		currentSrcs := r7CollectSources(a.Current.AppliedConfig)
 		desiredSrcs := r7CollectSources(a.Resource.Config)
-		// CIDR widening: desired strictly contains current (i.e. new CIDRs added).
-		if r7IsStrictSuperset(desiredSrcs, currentSrcs) {
+		if desc := r7WideningDescription(desiredSrcs, currentSrcs); desc != "" {
 			sev := SeverityWarn
 			if opts.StrictCIDR {
 				sev = SeverityFail
 			}
-			added := r7NewCIDRs(desiredSrcs, currentSrcs)
 			findings = append(findings, SecurityFinding{
 				RuleID: "R7", Severity: sev,
 				Resource: a.Resource.Name, Type: a.Resource.Type,
-				Message: fmt.Sprintf("firewall CIDR widening detected — new sources added: %s", strings.Join(added, ", ")),
+				Message: fmt.Sprintf("firewall CIDR widening detected — %s", desc),
 			})
 		}
 	}
@@ -298,18 +297,97 @@ func r7CollectSources(cfg map[string]any) map[string]bool {
 	return set
 }
 
-func r7IsStrictSuperset(desired, current map[string]bool) bool {
-	if len(desired) <= len(current) {
-		return false
-	}
-	for k := range current {
-		if !desired[k] {
-			return false
+// r7HasCIDRWidening reports whether the transition from current to desired
+// sources represents a CIDR widening. A desired CIDR constitutes a widening
+// when it is not an exact match for a current CIDR AND it is not a narrowing
+// (i.e. not a subnet of some current CIDR). This covers both:
+//   - New CIDR ranges added (e.g. {10.0.0.1/32} → {10.0.0.1/32, 0.0.0.0/0})
+//   - Prefix broadening (e.g. {10.0.0.0/24} → {10.0.0.0/8})
+//
+// Note: a desired CIDR that is a subnet of a current CIDR is a restriction
+// (e.g. {10.0.0.0/8} → {10.0.0.0/24}) and does NOT constitute widening.
+func r7HasCIDRWidening(desired, current map[string]bool) bool {
+	for d := range desired {
+		if current[d] {
+			continue // unchanged CIDR string
 		}
+		// d is new. If every existing current CIDR contains d, then d is more
+		// specific (narrower) — that is a restriction, not a widening.
+		if r7isCIDRNarrowing(d, current) {
+			continue
+		}
+		return true
 	}
-	return true
+	return false
 }
 
+// r7isCIDRNarrowing reports whether candidate is a subnet of (contained in)
+// at least one CIDR in the current set. If so the candidate is more restrictive.
+func r7isCIDRNarrowing(candidate string, current map[string]bool) bool {
+	for c := range current {
+		if cidrContains(c, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+// r7WideningDescription returns a human-readable description of the CIDR
+// widening, or "" if no widening is detected.
+func r7WideningDescription(desired, current map[string]bool) string {
+	var added []string
+	var broadened []string
+	for d := range desired {
+		if current[d] {
+			continue
+		}
+		if r7isCIDRNarrowing(d, current) {
+			continue
+		}
+		// Determine whether d broadens an existing CIDR or is entirely new.
+		broadensExisting := false
+		for c := range current {
+			if cidrContains(d, c) {
+				broadened = append(broadened, fmt.Sprintf("%s (broadens %s)", d, c))
+				broadensExisting = true
+				break
+			}
+		}
+		if !broadensExisting {
+			added = append(added, d)
+		}
+	}
+	var parts []string
+	if len(added) > 0 {
+		parts = append(parts, "new sources: "+strings.Join(added, ", "))
+	}
+	if len(broadened) > 0 {
+		parts = append(parts, "broadened prefix: "+strings.Join(broadened, ", "))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// cidrContains reports whether widerStr is a network that contains (is a
+// superset of) the network narrowerStr. Returns false for any parse error or
+// mismatched address families (e.g. IPv4 vs IPv6).
+func cidrContains(widerStr, narrowerStr string) bool {
+	_, wNet, err := net.ParseCIDR(widerStr)
+	if err != nil {
+		return false
+	}
+	_, nNet, err := net.ParseCIDR(narrowerStr)
+	if err != nil {
+		return false
+	}
+	// wider contains narrower iff:
+	// 1. wider's prefix length ≤ narrower's (broader or equal range), AND
+	// 2. wider's network contains narrower's network address.
+	wOnes, _ := wNet.Mask.Size()
+	nOnes, _ := nNet.Mask.Size()
+	return wOnes <= nOnes && wNet.Contains(nNet.IP)
+}
+
+// r7NewCIDRs returns CIDRs present in desired but not in current (by string).
 func r7NewCIDRs(desired, current map[string]bool) []string {
 	var added []string
 	for k := range desired {

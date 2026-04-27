@@ -263,6 +263,23 @@ func TestInfraSecurityCheck_R7_Pass(t *testing.T) {
 	requireNoFinding(t, findings, "R7")
 }
 
+// TestInfraSecurityCheck_R7_Trigger_PrefixBroadened verifies the principal
+// attack vector: replacing 10.0.0.0/24 with 10.0.0.0/8 (same CIDR string count,
+// but /8 is a supernet that allows 16× more IPs).
+func TestInfraSecurityCheck_R7_Trigger_PrefixBroadened(t *testing.T) {
+	plan := loadFixturePlan(t, "r7_trigger_broadened.json")
+	findings := RunSecurityCheck(plan, defaultOpts())
+	requireFinding(t, findings, "R7", SeverityWarn)
+}
+
+// TestInfraSecurityCheck_R7_Pass_PrefixNarrowed is the false-positive guard:
+// replacing 10.0.0.0/8 with 10.0.0.0/24 is a restriction, not a widening.
+func TestInfraSecurityCheck_R7_Pass_PrefixNarrowed(t *testing.T) {
+	plan := loadFixturePlan(t, "r7_pass_narrowed.json")
+	findings := RunSecurityCheck(plan, defaultOpts())
+	requireNoFinding(t, findings, "R7")
+}
+
 // ── R8: State bucket public ACL ───────────────────────────────────────────────
 
 func TestInfraSecurityCheck_R8_Trigger(t *testing.T) {
