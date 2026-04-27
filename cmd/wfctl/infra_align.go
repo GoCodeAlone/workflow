@@ -83,11 +83,11 @@ func runInfraAlign(args []string) error {
 	if alignExitCode(findings, opts.strict) != 0 {
 		var failCount int
 		for _, f := range findings {
-			if f.Severity == "FAIL" {
+			if f.Severity == "FAIL" || (opts.strict && f.Severity == "WARN") {
 				failCount++
 			}
 		}
-		return fmt.Errorf("align: %d FAIL finding(s)", failCount)
+		return fmt.Errorf("align: %d finding(s) require attention", failCount)
 	}
 	return nil
 }
