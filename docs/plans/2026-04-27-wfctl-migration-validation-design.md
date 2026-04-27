@@ -1,5 +1,5 @@
 ---
-status: design
+status: approved
 area: wfctl
 owner: workflow
 implementation_refs: []

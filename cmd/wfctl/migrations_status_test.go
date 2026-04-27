@@ -45,6 +45,60 @@ func TestRunMigrationsStatusReportsDirty(t *testing.T) {
 	}
 }
 
+func TestRunMigrationsStatusObservesDirtyWithoutForbidDirty(t *testing.T) {
+	cfgPath := writeMigrationStatusObserveConfig(t)
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	restore := stubMigrationStatusRunner(t, migrationCommandResult{
+		Stdout: "Current: 20260426000005\nDirty: true\nNo pending migrations.\n",
+	}, nil)
+	defer restore()
+
+	out, err := captureStdout(t, func() error {
+		return runMigrations([]string{"status", "--config", cfgPath, "--env", "ci", "--format", "json"})
+	})
+	if err != nil {
+		t.Fatalf("status should observe dirty migration without failing when forbid_dirty is false: %v", err)
+	}
+
+	var got struct {
+		Decision   string `json:"decision"`
+		Migrations []struct {
+			Dirty bool `json:"dirty"`
+		} `json:"migrations"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode status JSON: %v\n%s", err, out)
+	}
+	if got.Decision != "pass" || len(got.Migrations) != 1 || !got.Migrations[0].Dirty {
+		t.Fatalf("unexpected status: %+v", got)
+	}
+}
+
+func TestRunMigrationsStatusDefaultsPluginDirFromEnv(t *testing.T) {
+	cfgPath := writeMigrationStatusObserveConfig(t)
+	pluginDir := t.TempDir()
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	t.Setenv("WFCTL_PLUGIN_DIR", pluginDir)
+	gotPluginDir := ""
+	oldFactory := newMigrationPluginRunner
+	newMigrationPluginRunner = func() migrationPluginRunner {
+		return migrationPluginRunner{
+			exec: func(_ context.Context, _ string, _ []string, env map[string]string) (migrationCommandResult, error) {
+				gotPluginDir = env["WFCTL_PLUGIN_DIR"]
+				return migrationCommandResult{Stdout: "Current: 20260426000001\nDirty: false\nNo pending migrations.\n"}, nil
+			},
+		}
+	}
+	defer func() { newMigrationPluginRunner = oldFactory }()
+
+	if err := runMigrations([]string{"status", "--config", cfgPath, "--env", "ci"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotPluginDir != pluginDir {
+		t.Fatalf("WFCTL_PLUGIN_DIR = %q, want %q", gotPluginDir, pluginDir)
+	}
+}
+
 func TestRunMigrationsStatusReportsCurrentPendingDirtyAndDriver(t *testing.T) {
 	cfgPath := writeMigrationStatusObserveConfig(t)
 	t.Setenv("DATABASE_URL", "postgres://secret@example/db")

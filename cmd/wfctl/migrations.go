@@ -76,14 +76,22 @@ func runMigrationsStatus(args []string) error {
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
 	fs.StringVar(configFile, "c", "app.yaml", "Config file (short for --config)")
 	envName := fs.String("env", "", "Environment name")
-	pluginDir := fs.String("plugin-dir", defaultDataDir, "Plugin directory")
+	pluginDir := fs.String("plugin-dir", defaultMigrationPluginDir(), "Plugin directory")
 	format := fs.String("format", "text", "Output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	result, err := collectMigrationStatus(context.Background(), *configFile, *envName, *pluginDir)
-	result.Reasons = append(result.Reasons, migrationStatusDirtyReasons(result.Migrations)...)
+	cfg, err := loadMigrationWorkflowConfig(*configFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	migrations, err := resolveMigrationConfigs(cfg, *envName)
+	if err != nil {
+		return err
+	}
+	result, err := collectMigrationStatusForConfigs(context.Background(), migrations, *pluginDir)
+	result.Reasons = append(result.Reasons, migrationStatusDirtyReasons(result.Migrations, migrations)...)
 	if len(result.Reasons) > 0 {
 		result.Decision = "fail"
 	}
@@ -104,7 +112,7 @@ func runMigrationsCICheck(args []string) error {
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
 	fs.StringVar(configFile, "c", "app.yaml", "Config file (short for --config)")
 	envName := fs.String("env", "", "Environment name")
-	pluginDir := fs.String("plugin-dir", defaultDataDir, "Plugin directory")
+	pluginDir := fs.String("plugin-dir", defaultMigrationPluginDir(), "Plugin directory")
 	format := fs.String("format", "text", "Output format: text or json")
 	commit := fs.String("commit", "", "Commit SHA to check")
 	validationResult := fs.String("validation-result", "", "Validation result JSON from wfctl migrations validate")
@@ -150,7 +158,7 @@ func runMigrationsRepairDirty(args []string) error {
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
 	fs.StringVar(configFile, "c", "app.yaml", "Config file (short for --config)")
 	envName := fs.String("env", "", "Environment name")
-	pluginDir := fs.String("plugin-dir", defaultDataDir, "Plugin directory")
+	pluginDir := fs.String("plugin-dir", defaultMigrationPluginDir(), "Plugin directory")
 	format := fs.String("format", "text", "Output format: text or json")
 	expectedDirtyVersion := fs.String("expected-dirty-version", "", "Exact dirty version expected before repair")
 	forceVersion := fs.String("force-version", "", "Version to force migration metadata to")
@@ -348,7 +356,7 @@ func runMigrationsValidate(args []string) error {
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
 	fs.StringVar(configFile, "c", "app.yaml", "Config file (short for --config)")
 	envName := fs.String("env", "", "Environment name")
-	pluginDir := fs.String("plugin-dir", defaultDataDir, "Plugin directory")
+	pluginDir := fs.String("plugin-dir", defaultMigrationPluginDir(), "Plugin directory")
 	format := fs.String("format", "text", "Output format: text or json")
 	resultFile := fs.String("result-file", "", "Write validation result JSON to this path")
 	commit := fs.String("commit", "", "Commit SHA associated with this validation")
@@ -510,18 +518,6 @@ func loadMigrationWorkflowConfig(configFile string) (*config.WorkflowConfig, err
 	return cfg, nil
 }
 
-func collectMigrationStatus(ctx context.Context, configFile, envName, pluginDir string) (migrationStatusResult, error) {
-	cfg, err := loadMigrationWorkflowConfig(configFile)
-	if err != nil {
-		return migrationStatusResult{}, fmt.Errorf("load config: %w", err)
-	}
-	migrations, err := resolveMigrationConfigs(cfg, envName)
-	if err != nil {
-		return migrationStatusResult{}, err
-	}
-	return collectMigrationStatusForConfigs(ctx, migrations, pluginDir)
-}
-
 func collectMigrationStatusForConfigs(ctx context.Context, migrations []resolvedMigrationConfig, pluginDir string) (migrationStatusResult, error) {
 	result := migrationStatusResult{
 		Decision:              "pass",
@@ -591,15 +587,26 @@ func migrationStatusCleanReasons(migrations []migrationValidationRecord) []strin
 	return reasons
 }
 
-func migrationStatusDirtyReasons(migrations []migrationValidationRecord) []string {
+func migrationStatusDirtyReasons(migrations []migrationValidationRecord, configs []resolvedMigrationConfig) []string {
 	var reasons []string
+	forbidDirtyByName := make(map[string]bool, len(configs))
+	for i := range configs {
+		forbidDirtyByName[configs[i].Name] = configs[i].Validation.ForbidDirty
+	}
 	for i := range migrations {
 		migration := &migrations[i]
-		if migration.Dirty {
+		if migration.Dirty && forbidDirtyByName[migration.Name] {
 			reasons = append(reasons, fmt.Sprintf("migration %s is dirty at version %s", migration.Name, migrationCurrentOrUnknown(migration.Current)))
 		}
 	}
 	return reasons
+}
+
+func defaultMigrationPluginDir() string {
+	if pluginDir := strings.TrimSpace(os.Getenv("WFCTL_PLUGIN_DIR")); pluginDir != "" {
+		return pluginDir
+	}
+	return defaultDataDir
 }
 
 func checkMigrationValidationResult(path, commit string, requireSameSHA bool, expectedMigrations []resolvedMigrationConfig) []string {

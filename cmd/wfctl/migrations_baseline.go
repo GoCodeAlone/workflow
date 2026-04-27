@@ -406,15 +406,10 @@ func extractTar(r *bytes.Reader, dest string) error {
 			}
 			return err
 		}
-		rawName := header.Name
-		if strings.Contains(rawName, "..") {
-			return fmt.Errorf("archive entry escapes destination: %s", rawName)
-		}
-		entryName, err := cleanMigrationArchiveEntryName(rawName)
+		target, err := migrationArchiveTarget(dest, header.Name)
 		if err != nil {
-			return fmt.Errorf("archive entry escapes destination: %s", rawName)
+			return fmt.Errorf("archive entry escapes destination: %s", header.Name)
 		}
-		target := filepath.Join(dest, entryName)
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o750); err != nil {
@@ -442,12 +437,28 @@ func extractTar(r *bytes.Reader, dest string) error {
 	}
 }
 
-func cleanMigrationArchiveEntryName(name string) (string, error) {
+func migrationArchiveTarget(dest, name string) (string, error) {
 	name = filepath.Clean(name)
 	if name == "." || filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("unsafe archive entry")
 	}
-	return name, nil
+	target := filepath.Join(dest, name)
+	destAbs, err := filepath.Abs(dest)
+	if err != nil {
+		return "", err
+	}
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(destAbs, targetAbs)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe archive entry")
+	}
+	return targetAbs, nil
 }
 
 func defaultMigrationCurrentCommit(ctx context.Context) (string, error) {

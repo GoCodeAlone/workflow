@@ -355,6 +355,29 @@ func TestExtractTarRejectsTraversalEntry(t *testing.T) {
 	}
 }
 
+func TestExtractTarRejectsCleanedTargetOutsideDestination(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	data := []byte("bad")
+	if err := tw.WriteHeader(&tar.Header{Name: "migrations/../../escape.sql", Typeflag: tar.TypeReg, Size: int64(len(data)), Mode: 0o600}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err := extractTar(bytes.NewReader(buf.Bytes()), t.TempDir())
+	if err == nil {
+		t.Fatal("expected cleaned traversal target to be rejected")
+	}
+	if !strings.Contains(err.Error(), "escapes destination") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunMigrationsValidateUsesEphemeralDSNForBaselineCandidate(t *testing.T) {
 	cfgPath := writeMigrationBaselineConfig(t, true)
 	t.Setenv("DATABASE_URL", "postgres://real-db.example/app")
