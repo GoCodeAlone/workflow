@@ -1,0 +1,1 @@
+{"id":"r8-pass","actions":[{"action":"create","resource":{"name":"state-bucket","type":"infra.storage","config":{"provider":"do-provider","region":"nyc3","acl":"private"}}}],"created_at":"2026-04-27T00:00:00Z"}

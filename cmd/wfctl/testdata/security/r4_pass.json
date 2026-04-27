@@ -1,0 +1,1 @@
+{"id":"r4-pass","actions":[{"action":"create","resource":{"name":"api-service","type":"infra.container_service","config":{"provider":"do-provider","image":"myapp:latest","env_vars":{"STRIPE_SECRET_KEY":"${STRIPE_SECRET_KEY}","DATABASE_URL":"${DATABASE_URL}","NODE_ENV":"production"}}}}],"created_at":"2026-04-27T00:00:00Z"}
