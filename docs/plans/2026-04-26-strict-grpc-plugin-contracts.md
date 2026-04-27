@@ -41,6 +41,14 @@ implementation_refs:
     commit: b94f3a661df9f5862b7b736b5824fda2b76d47e8
   - repo: workflow-plugin-ws-auth
     commit: 4a27b88580fc64109a5bd723d3dc0b837342dec3
+  - repo: workflow-plugin-authz
+    commit: 812905e426b50d8501e91772ea3227da554c654e
+  - repo: workflow-plugin-security
+    commit: ab653a4c8fe836e55c434706b64730fe428c6c01
+  - repo: workflow-plugin-authz-ui
+    commit: a84d965d4ceee35049f6b7ed1c11e103bde68f93
+  - repo: workflow-plugin-auth
+    commit: b7e892e9a05db871d469aedee86cd1b7e45660d2
 external_refs:
   - "#76"
 verification:
@@ -70,9 +78,63 @@ superseded_by: []
 
 Core Workflow support is implemented through `workflow eb53150`: additive proto descriptors, plugin-owned descriptor-set based dynamic codecs, typed SDK adapters, host-side strict dispatch, strict input projection, typed integer output normalization, strict module error surfacing, `wfctl` strict contract audit/validation, and source-checkout strict plugin scaffolding.
 
-Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, `workflow-plugin-sso`, and `workflow-plugin-ws-auth`. The next auth/security batch is in progress.
+Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, `workflow-plugin-sso`, `workflow-plugin-ws-auth`, `workflow-plugin-authz`, `workflow-plugin-security`, `workflow-plugin-authz-ui`, and `workflow-plugin-auth`.
 
 The overall plan remains `in_progress` because downstream first-party plugin and application repos still need typed descriptors and adapters. Set `WORKSPACE` to the local checkout root that contains `workflow` and sibling plugin/application repositories; the strict audit against that workspace is expected to fail until those repos migrate.
+
+## Migration Tracker
+
+Last updated: 2026-04-27 15:00 America/New_York.
+
+### Merged
+
+| Repo | PR | Merge Commit | Notes |
+|---|---:|---|---|
+| workflow | #497 | 9d98ed5 | Core strict contract support merged. |
+| workflow-plugin-ci-generator | #1 | 5c158ff154ce43d391473a4ed6cd3d3bf7788931 | Strict contracts merged. |
+| workflow-plugin-approval | #1 | 48898f12c10d800d8b60cc9ee06e81c1580d3f01 | Strict contracts merged. |
+| workflow-plugin-gitlab | #1 | 93eb57223b9401e8a3bc0812e71211cb3a3770fa | Strict contracts merged. |
+| workflow-plugin-marketplace | #1 | 7ce430e709160e4c77527bb3ce1ee8ff2dd22309 | Strict contracts merged. |
+| workflow-plugin-infra | #1 | 6c1802de752f71b1eac895805e01e2e32f92bb5c | Strict contracts merged. |
+| workflow-plugin-rooms | #1 | 575a6171de8ae8ea436cd957b0c279f6dc0c3e34 | Strict contracts merged. |
+| workflow-plugin-botdetect | #2 | 40b9a4c11937ce26c01eea292d67bc8c9d098211 | Strict contracts merged. |
+| workflow-plugin-audit | #1 | a720577335c76422e5f732484de1864464e8183d | Strict contracts merged. |
+| workflow-plugin-sso | #1 | b94f3a661df9f5862b7b736b5824fda2b76d47e8 | Strict contracts merged. |
+| workflow-plugin-ws-auth | #1 | 4a27b88580fc64109a5bd723d3dc0b837342dec3 | Strict contracts merged. |
+| workflow-plugin-authz | #19 | 812905e426b50d8501e91772ea3227da554c654e | Strict contracts merged. |
+| workflow-plugin-security | #5 | ab653a4c8fe836e55c434706b64730fe428c6c01 | Copilot reviewed; checks green; admin merged. |
+| workflow-plugin-authz-ui | #3 | a84d965d4ceee35049f6b7ed1c11e103bde68f93 | Copilot reviewed; checks green; admin merged. |
+| workflow-plugin-auth | #7 | b7e892e9a05db871d469aedee86cd1b7e45660d2 | Copilot comments fixed; checks green; admin merged. |
+
+### Open PRs / Monitoring
+
+| Repo | PR | Head | Status | Next Action |
+|---|---:|---|---|---|
+| workflow-plugin-security-scanner | #1 | 18a67c3 | Copilot re-review clean; CodeQL green; `test` queued on self-hosted runner. | Merge when queued check passes. |
+
+### Verified Locally, PR Not Opened Yet
+
+| Repo | Branch / Worktree | Commit | Verification |
+|---|---|---|---|
+| workflow-plugin-admin | `/Users/jon/.config/superpowers/worktrees/workflow-plugin-admin/strict-contracts` | 1ffd6dd71892ce21c2ca11b8bd60a077085fb606 | Race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts`, build passed. |
+| workflow-plugin-agent | `/Users/jon/workspace/workflow-plugin-agent/.worktrees/strict-contracts` | 17925772b257a6530a18af0051306fb797fbb29c | Focused tests, full tests, race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts` passed. |
+| workflow-plugin-azure | `/Users/jon/.config/superpowers/worktrees/workflow-plugin-azure/strict-contract` | 5ed96e2155a5d975bdcd135bbcc575f2234de000 | Focused tests, race tests, vet, tidy diff, diff check, JSON validation, `wfctl plugin validate -strict-contracts` passed. |
+
+### Active Agent Work
+
+| Repo | Agent | Status |
+|---|---|---|
+| workflow-plugin-aws | Helmholtz | Recommended provider-operation-only design approved; implementation resumed. |
+
+### Backlog
+
+| Batch | Repos |
+|---|---|
+| Provider / platform | workflow-plugin-broker, workflow-plugin-cicd, workflow-plugin-digitalocean, workflow-plugin-gcp, workflow-plugin-platform, workflow-plugin-supply-chain, workflow-plugin-tofu |
+| SaaS / integration | workflow-plugin-crm, workflow-plugin-data-engineering, workflow-plugin-datadog, workflow-plugin-erp, workflow-plugin-github, workflow-plugin-launchdarkly, workflow-plugin-monday, workflow-plugin-okta, workflow-plugin-openlms, workflow-plugin-payments, workflow-plugin-salesforce, workflow-plugin-slack, workflow-plugin-teams, workflow-plugin-turnio, workflow-plugin-twilio, workflow-plugin-vectorstore |
+| Game / world | workflow-plugin-dnd, workflow-plugin-economy, workflow-plugin-gameserver, workflow-plugin-moderation, workflow-plugin-steam, workflow-plugin-tournament, workflow-plugin-websocket, workflow-plugin-worldengine, workflow-plugin-worldsim |
+| Templates / samples | workflow-plugin-bento, workflow-plugin-messaging-core, workflow-plugin-migrations, workflow-plugin-template, workflow-plugin-template-private |
+| Application-owned plugins | workflow-dnd, workflow-cardgame, core-dump, buymywishlist |
 
 ### Task 1: Core Proto Contract Descriptors
 
