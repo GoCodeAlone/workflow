@@ -68,13 +68,19 @@ func findingsHaveRuleAndSeverity(findings []AlignFinding, rule, severity string)
 func TestInfraAlign_RA1_OrphanedImageRef_Fires(t *testing.T) {
 	yaml := `
 modules:
+  - name: build
+    type: ci.build
+    config:
+      containers:
+        - name: otherapp
+          dockerfile: Dockerfile
   - name: api
     type: infra.container_service
     config:
       image: "myapp:latest"
       http_port: 8080
 `
-	// No ci.build module — should FAIL with orphaned image reference
+	// ci.build exists but has no container named "myapp" → orphaned reference
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
 	findings, err := runInfraAlignChecks(opts)

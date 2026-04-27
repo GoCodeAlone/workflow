@@ -80,8 +80,14 @@ func runInfraAlign(args []string) error {
 		}
 	}
 
-	if code := alignExitCode(findings, opts.strict); code != 0 {
-		os.Exit(code)
+	if alignExitCode(findings, opts.strict) != 0 {
+		var failCount int
+		for _, f := range findings {
+			if f.Severity == "FAIL" {
+				failCount++
+			}
+		}
+		return fmt.Errorf("align: %d FAIL finding(s)", failCount)
 	}
 	return nil
 }
@@ -169,8 +175,11 @@ func renderAlignMarkdown(findings []AlignFinding) string {
 	sb.WriteString("| Rule | Severity | Resource | Message |\n")
 	sb.WriteString("|------|----------|----------|---------|\n")
 	for _, f := range findings {
+		// Escape pipe characters to prevent breaking the markdown table.
+		resource := strings.ReplaceAll(f.Resource, "|", "\\|")
+		message := strings.ReplaceAll(f.Message, "|", "\\|")
 		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
-			f.Rule, f.Severity, f.Resource, f.Message))
+			f.Rule, f.Severity, resource, message))
 	}
 	sb.WriteString("\n")
 

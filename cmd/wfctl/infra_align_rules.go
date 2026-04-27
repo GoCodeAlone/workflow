@@ -126,16 +126,20 @@ func checkRA1(ctx *alignContext) []AlignFinding {
 		parts := strings.Split(imageName, "/")
 		shortName := parts[len(parts)-1]
 
-		// R-A1a: orphaned image reference (only check when ci.build modules exist OR if none exist at all)
-		if _, found := ciImages[shortName]; !found {
-			findings = append(findings, AlignFinding{
-				Rule:     "R-A1",
-				Severity: "FAIL",
-				Resource: svc.Name,
-				Message:  fmt.Sprintf("orphaned image reference %q: no ci.build container named %q", image, shortName),
-			})
-			// Skip Dockerfile checks if we can't match the build
-			continue
+		// R-A1a: orphaned image reference — only enforce when at least one
+		// ci.build module exists. Projects with no build phase use pre-built
+		// external images (redis:7, postgres:15, etc.) and should not be flagged.
+		if len(ctx.ciBuilds) > 0 {
+			if _, found := ciImages[shortName]; !found {
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A1",
+					Severity: "FAIL",
+					Resource: svc.Name,
+					Message:  fmt.Sprintf("orphaned image reference %q: no ci.build container named %q", image, shortName),
+				})
+				// Skip Dockerfile checks if we can't match the build
+				continue
+			}
 		}
 
 		// Resolve dockerfile path
@@ -632,6 +636,13 @@ func checkRA8(ctx *alignContext) []AlignFinding {
 		rpID, hasRPID := envVars["WEBAUTHN_RP_ID"]
 		origin, hasOrigin := envVars["WEBAUTHN_ORIGIN"]
 		if !hasRPID || !hasOrigin {
+			continue
+		}
+
+		// Skip if either value is an unresolved ${...} reference — url.Parse
+		// accepts "${VAR}" without error but returns an empty hostname, causing
+		// a spurious FAIL when the value is runtime-injected via secrets.
+		if strings.Contains(origin, "${") || strings.Contains(rpID, "${") {
 			continue
 		}
 
