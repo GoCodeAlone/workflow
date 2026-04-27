@@ -350,7 +350,7 @@ func pathExistsInSource(srcDir, path string) (bool, error) {
 		}
 		data, readErr := os.ReadFile(fp)
 		if readErr != nil {
-			return nil // skip unreadable files
+			return readErr
 		}
 		if strings.Contains(string(data), path) {
 			found = true
