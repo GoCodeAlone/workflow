@@ -57,7 +57,7 @@ func TestResolveMigrationConfigsAppliesEnvironmentOverrides(t *testing.T) {
 	}
 }
 
-func TestResolveMigrationConfigsRejectsUnknownExplicitEnvironment(t *testing.T) {
+func TestResolveMigrationConfigsFallsBackForUnlistedEnvironment(t *testing.T) {
 	cfg := &config.WorkflowConfig{CI: &config.CIConfig{Migrations: []config.CIMigrationConfig{{
 		Name:      "app",
 		SourceDir: "migrations",
@@ -68,15 +68,12 @@ func TestResolveMigrationConfigsRejectsUnknownExplicitEnvironment(t *testing.T) 
 	}}}}
 	t.Setenv("DATABASE_URL", "postgres://default-secret@example/db")
 
-	_, err := resolveMigrationConfigs(cfg, "prouction")
-	if err == nil {
-		t.Fatal("expected unknown environment error")
+	got, err := resolveMigrationConfigs(cfg, "staging")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(err.Error(), "postgres://default-secret@example/db") {
-		t.Fatalf("error leaked default DSN: %v", err)
-	}
-	if !strings.Contains(err.Error(), "unknown migration environment") {
-		t.Fatalf("unexpected error: %v", err)
+	if len(got) != 1 || got[0].DSN != "postgres://default-secret@example/db" {
+		t.Fatalf("expected base migration config, got %+v", got)
 	}
 }
 

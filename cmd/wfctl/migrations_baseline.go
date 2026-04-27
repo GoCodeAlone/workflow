@@ -280,7 +280,7 @@ func (ops migrationEphemeralDatabaseOperations) withDefaults() migrationEphemera
 	return ops
 }
 
-func defaultMigrationEphemeralDatabase(ctx context.Context, name, baseDSN string) (string, func(), error) {
+func defaultMigrationEphemeralDatabase(ctx context.Context, name string, _ string) (string, func(), error) {
 	adminDSN := os.Getenv("WFCTL_MIGRATION_VALIDATION_DATABASE_URL")
 	if adminDSN == "" {
 		return "", nil, fmt.Errorf("WFCTL_MIGRATION_VALIDATION_DATABASE_URL is required for migration validation")
@@ -406,13 +406,11 @@ func extractTar(r *bytes.Reader, dest string) error {
 			}
 			return err
 		}
-		// #nosec G305 -- the joined path is cleaned and checked against dest before use.
-		target := filepath.Join(dest, header.Name)
-		cleanDest := filepath.Clean(dest) + string(os.PathSeparator)
-		cleanTarget := filepath.Clean(target)
-		if !strings.HasPrefix(cleanTarget, cleanDest) && cleanTarget != filepath.Clean(dest) {
+		entryName, err := cleanMigrationArchiveEntryName(header.Name)
+		if err != nil {
 			return fmt.Errorf("archive entry escapes destination: %s", header.Name)
 		}
+		target := filepath.Join(dest, entryName)
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o750); err != nil {
@@ -438,6 +436,14 @@ func extractTar(r *bytes.Reader, dest string) error {
 			}
 		}
 	}
+}
+
+func cleanMigrationArchiveEntryName(name string) (string, error) {
+	name = filepath.Clean(name)
+	if name == "." || filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("unsafe archive entry")
+	}
+	return name, nil
 }
 
 func defaultMigrationCurrentCommit(ctx context.Context) (string, error) {

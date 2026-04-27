@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -327,6 +329,29 @@ func TestMaterializeBaselineSourceOnlyFallsBackWhenSourceMissing(t *testing.T) {
 	}}
 	if _, _, err := materializeBaselineSource(context.Background(), failingOps, "bad-ref", "migrations"); err == nil {
 		t.Fatal("expected non-missing materialization error")
+	}
+}
+
+func TestExtractTarRejectsTraversalEntry(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	data := []byte("bad")
+	if err := tw.WriteHeader(&tar.Header{Name: "../escape.sql", Typeflag: tar.TypeReg, Size: int64(len(data)), Mode: 0o600}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err := extractTar(bytes.NewReader(buf.Bytes()), t.TempDir())
+	if err == nil {
+		t.Fatal("expected traversal entry to be rejected")
+	}
+	if !strings.Contains(err.Error(), "escapes destination") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

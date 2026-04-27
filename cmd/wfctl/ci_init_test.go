@@ -56,14 +56,11 @@ func TestGenerateGHABootstrap_WithMigrationsAddsDeployGuard(t *testing.T) {
 		},
 	}
 	content := generateGHABootstrap(cfg)
-	if !strings.Contains(content, "wfctl migrations ci-check --env staging") {
-		t.Fatalf("expected migration ci-check before deploy:\n%s", content)
-	}
 	if !strings.Contains(content, "wfctl migrations validate --env staging --commit ${{ github.sha }} --result-file .wfctl/migrations-result.json --format json") {
-		t.Fatalf("expected migration validate result before ci-check:\n%s", content)
+		t.Fatalf("expected migration validate result before deploy:\n%s", content)
 	}
-	if !strings.Contains(content, "wfctl migrations ci-check --env staging --commit ${{ github.sha }} --validation-result .wfctl/migrations-result.json --require-same-sha") {
-		t.Fatalf("expected migration ci-check to require matching validation result:\n%s", content)
+	if strings.Contains(content, "wfctl migrations ci-check --env staging") {
+		t.Fatalf("expected ci run deploy to perform migration ci-check once:\n%s", content)
 	}
 }
 
@@ -78,10 +75,10 @@ func TestGenerateGitLabCIBootstrap_WithMigrationsAddsDeployGuard(t *testing.T) {
 	}
 	content := generateGitLabCIBootstrap(cfg)
 	if !strings.Contains(content, "wfctl migrations validate --env staging --commit $CI_COMMIT_SHA --result-file .wfctl/migrations-result.json --format json") {
-		t.Fatalf("expected migration validate result before ci-check:\n%s", content)
+		t.Fatalf("expected migration validate result before deploy:\n%s", content)
 	}
-	if !strings.Contains(content, "wfctl migrations ci-check --env staging --commit $CI_COMMIT_SHA --validation-result .wfctl/migrations-result.json --require-same-sha") {
-		t.Fatalf("expected migration ci-check to require matching validation result:\n%s", content)
+	if strings.Contains(content, "wfctl migrations ci-check --env staging") {
+		t.Fatalf("expected ci run deploy to perform migration ci-check once:\n%s", content)
 	}
 }
 

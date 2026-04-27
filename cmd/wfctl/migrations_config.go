@@ -91,7 +91,7 @@ func migrationForEnv(migration config.CIMigrationConfig, envName string) (config
 	}
 	override, listed := migration.Environments[envName]
 	if !listed {
-		return config.CIMigrationConfig{}, false, fmt.Errorf("unknown migration environment %q", envName)
+		return migration, true, nil
 	}
 	if override == nil {
 		return config.CIMigrationConfig{}, false, nil

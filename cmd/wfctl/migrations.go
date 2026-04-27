@@ -87,7 +87,7 @@ func runMigrationsStatus(args []string) error {
 	if len(result.Reasons) > 0 {
 		result.Decision = "fail"
 	}
-	if writeErr := writeMigrationStatusOutput(result, *format); writeErr != nil {
+	if writeErr := writeMigrationStatusOutput(result, *format, "migrations"); writeErr != nil {
 		return writeErr
 	}
 	if err != nil {
@@ -136,7 +136,7 @@ func runMigrationsCICheck(args []string) error {
 	if len(result.Reasons) > 0 {
 		result.Decision = "fail"
 	}
-	if writeErr := writeMigrationStatusOutput(result, *format); writeErr != nil {
+	if writeErr := writeMigrationStatusOutput(result, *format, "migrations ci-check"); writeErr != nil {
 		return writeErr
 	}
 	if result.Decision == "fail" {
@@ -657,7 +657,7 @@ func checkMigrationValidationResult(path, commit string, requireSameSHA bool, ex
 	return reasons
 }
 
-func writeMigrationStatusOutput(result migrationStatusResult, format string) error {
+func writeMigrationStatusOutput(result migrationStatusResult, format, label string) error {
 	switch format {
 	case "json":
 		data, err := json.Marshal(result)
@@ -666,7 +666,7 @@ func writeMigrationStatusOutput(result migrationStatusResult, format string) err
 		}
 		fmt.Println(string(data))
 	case "text", "":
-		fmt.Printf("migrations ci-check: %s\n", result.Decision)
+		fmt.Printf("%s: %s\n", label, result.Decision)
 		for _, reason := range result.Reasons {
 			fmt.Printf("  - %s\n", reason)
 		}
