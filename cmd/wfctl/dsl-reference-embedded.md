@@ -1346,3 +1346,80 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 
 1 FAIL, 1 WARN
 ```
+
+---
+
+## Infrastructure Plan Security Check
+
+`wfctl infra security-check` evaluates a pre-generated plan file against a set of adversarial security rules before applying. It is designed to run between `wfctl infra plan -o plan.json` and `wfctl infra apply --plan plan.json`.
+
+### Usage
+
+```
+wfctl infra security-check --plan <plan.json> [--strict] [--strict-cidr] [--max-changes N] [--rules <dir>]
+```
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--plan` | (required) | Path to a plan.json produced by `wfctl infra plan -o` |
+| `--strict` | false | Treat WARN findings as FAIL; exit 1 on any finding |
+| `--strict-cidr` | false | Treat R7 CIDR-widening warnings as FAIL |
+| `--max-changes` | 20 | Maximum allowed plan actions before R10 fires |
+| `--rules <dir>` | (none) | Directory of declarative YAML rule files loaded in addition to built-in rules |
+
+### Built-in Rules
+
+| Rule | Resource Type | Action | Severity | Description |
+|------|--------------|--------|----------|-------------|
+| R1 | `infra.firewall` | create, update | FAIL | Inbound rules permitting `0.0.0.0/0` or `::/0` on ports other than 80/443 |
+| R2 | `infra.database` | create, update | FAIL | Missing `trusted_sources` or `trusted_sources` contains `0.0.0.0/0` |
+| R3 | `infra.container_service` | create, update | FAIL | Name matches internal pattern (`nats`, `redis`, `db`, `broker`, `internal`) and `http_port` is set |
+| R4 | any | create, update | FAIL | Stripe live key, AWS access key ID, JWT Bearer token, or 40+ char base64 literal in `env_vars` |
+| R5 | any | replace | FAIL | `replace` action on resource annotated `protected: true` |
+| R6 | `infra.database` | update | FAIL | Update disables `backups` (on → off) or `at_rest_encryption` (true → false) |
+| R7 | `infra.firewall` | update | WARN / FAIL | Desired sources strictly contain current sources (CIDR widening); FAIL with `--strict-cidr` |
+| R8 | `infra.storage` | create, update | FAIL | Bucket `acl` is not `private` |
+| R9 | `infra.registry` | update | WARN | Update removes or zeroes `retention.untagged_ttl` |
+| R10 | (plan) | any | FAIL | More than `--max-changes` total actions, OR delete+create of the same stateful resource name |
+
+### Exit Codes
+
+- `0` — no FAIL findings (WARN findings only if `--strict` is not set)
+- `1` — one or more FAIL findings, or any findings with `--strict`
+
+### Declarative YAML Rules (`--rules <dir>`)
+
+Custom rules are loaded from `*.yaml` files in the given directory. Schema:
+
+```yaml
+id: custom-rule-id
+description: Human-readable description
+applies_to_action: create,update      # comma-separated; omit for all actions
+applies_to_resource_type: infra.database  # omit for all resource types
+match: trusted_sources == "0.0.0.0/0"    # key == "val" | key != "val" | key absent | key present
+severity: FAIL                        # FAIL or WARN
+message: Human-readable finding message
+```
+
+### Example
+
+```bash
+# Generate plan, security-check it, then apply only if clean.
+wfctl infra plan -c infra.yaml -o plan.json
+wfctl infra security-check --plan plan.json --strict-cidr
+wfctl infra apply -c infra.yaml --plan plan.json --auto-approve
+```
+
+Example output when a finding is detected:
+
+```
+## Security Check Findings
+
+| Rule | Severity | Resource | Message |
+|------|----------|----------|---------|
+| R1 | FAIL | `bmw-firewall` (infra.firewall) | inbound_rules port "22" allows 0.0.0.0/0 (R1: non-public ports must not expose to 0.0.0.0/0) |
+
+security-check: 1 FAIL finding(s) in plan "plan-1234567890"
+```
