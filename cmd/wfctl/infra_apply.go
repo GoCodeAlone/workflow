@@ -638,7 +638,13 @@ func desiredStateHash(specs []interfaces.ResourceSpec) string {
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Name < sorted[j].Name
 	})
-	data, _ := json.Marshal(sorted)
+	data, err := json.Marshal(sorted)
+	if err != nil {
+		// Should never happen for YAML-decoded structs, but return the empty
+		// sentinel rather than silently hashing nil bytes — callers treat ""
+		// as "hash unavailable" and will reject the plan with a clear error.
+		return ""
+	}
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("%x", sum)
 }
@@ -785,6 +791,11 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	if err != nil {
 		ref := interfaces.ResourceRef{}
 		if len(plan.Actions) == 1 {
+			ref.Name = plan.Actions[0].Resource.Name
+			ref.Type = plan.Actions[0].Resource.Type
+		} else if len(plan.Actions) > 1 {
+			// Fall back to first action so the troubleshooter has at least
+			// a name/type to work with on multi-action failures.
 			ref.Name = plan.Actions[0].Resource.Name
 			ref.Type = plan.Actions[0].Resource.Type
 		}

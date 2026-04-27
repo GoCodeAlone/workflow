@@ -993,6 +993,9 @@ func runInfraApply(args []string) error {
 		if err != nil {
 			return fmt.Errorf("parse infra resource specs: %w", err)
 		}
+		if plan.DesiredHash == "" {
+			return fmt.Errorf("plan file has no hash — regenerate with: wfctl infra plan -o plan.json")
+		}
 		currentHash := desiredStateHash(desired)
 		if plan.DesiredHash != currentHash {
 			return fmt.Errorf("plan stale: config hash mismatch (run wfctl infra plan again)")
