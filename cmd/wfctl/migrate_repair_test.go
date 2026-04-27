@@ -81,6 +81,138 @@ func TestRunMigrateRepairDirtyResolvesEnvAndCallsProvider(t *testing.T) {
 	}
 }
 
+func TestRunMigrateRepairDirtyUsesCanonicalEnvDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+environments:
+  staging:
+    provider: do-provider
+    region: nyc3
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: test-token
+  - name: bmw-database
+    type: infra.database
+    config:
+      name: base-db
+    environments:
+      staging:
+        config:
+          name: bmw-staging-db
+  - name: bmw-app
+    type: infra.container_service
+    config:
+      name: base-app
+    environments:
+      staging:
+        config:
+          name: bmw-staging
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	fake := &migrationRepairProvider{}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+
+	_, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--then-up",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+		})
+	})
+	if err != nil {
+		t.Fatalf("runMigrate repair-dirty: %v", err)
+	}
+	if !fake.called {
+		t.Fatal("provider RepairDirtyMigration was not called")
+	}
+	if fake.req.AppResourceName != "bmw-staging" || fake.req.DatabaseResourceName != "bmw-staging-db" {
+		t.Fatalf("request resources = %q/%q, want canonical env-resolved names", fake.req.AppResourceName, fake.req.DatabaseResourceName)
+	}
+}
+
+func TestRunMigrateRepairDirtyRejectsDifferentProviderRefsWithSameType(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+environments:
+  staging:
+    region: nyc3
+modules:
+  - name: do-provider-app
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: app-token
+  - name: do-provider-db
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: db-token
+  - name: bmw-database
+    type: infra.database
+    config:
+      provider: do-provider-db
+      name: base-db
+    environments:
+      staging:
+        config:
+          name: bmw-staging-db
+  - name: bmw-app
+    type: infra.container_service
+    config:
+      provider: do-provider-app
+      name: base-app
+    environments:
+      staging:
+        config:
+          name: bmw-staging
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	fake := &migrationRepairProvider{}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+
+	_, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--then-up",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+		})
+	})
+	if err == nil {
+		t.Fatal("expected provider ref mismatch error")
+	}
+	if fake.called {
+		t.Fatal("provider should not be called for mismatched provider refs")
+	}
+	if !strings.Contains(err.Error(), "same provider module") {
+		t.Fatalf("error = %v, want provider module mismatch guidance", err)
+	}
+}
+
 func TestRunMigrateRepairDirtyPropagatesJobEnv(t *testing.T) {
 	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
 	secret := "postgres://secret"
@@ -457,5 +589,37 @@ func TestRunMigrateRepairDirtyRejectsInvalidJobEnv(t *testing.T) {
 	}
 	if !strings.Contains(fmt.Sprint(err), "KEY=VALUE") {
 		t.Fatalf("error = %v, want KEY=VALUE guidance", err)
+	}
+}
+
+func TestRunMigrateRepairDirtyRejectsInvalidJobEnvWithoutLeakingValue(t *testing.T) {
+	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
+	secret := "postgres://parse-secret"
+	fake := &migrationRepairProvider{}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+
+	_, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "dev",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--job-env", "=" + secret,
+		})
+	})
+	if err == nil {
+		t.Fatal("expected invalid --job-env error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked secret: %v", err)
+	}
+	if fake.called {
+		t.Fatal("provider should not be called for invalid --job-env")
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -484,4 +485,46 @@ func TestRemoteIaCProvider_RepairDirtyMigration_DecodeError(t *testing.T) {
 	if !strings.Contains(err.Error(), "IaCProvider.RepairDirtyMigration: decode result") {
 		t.Fatalf("error %q missing decode context", err)
 	}
+}
+
+func TestRemoteIaCProvider_RepairDirtyMigration_UsesContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ci := &contextRecordingInvoker{resp: map[string]any{
+		"status": interfaces.MigrationRepairStatusSucceeded,
+	}}
+	p := &remoteIaCProvider{invoker: ci}
+
+	_, err := p.RepairDirtyMigration(ctx, interfaces.MigrationRepairRequest{})
+	if err == nil {
+		t.Fatal("expected canceled context error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if !ci.usedContext {
+		t.Fatal("RepairDirtyMigration did not use context-aware invoker")
+	}
+	if ci.fallbackUsed {
+		t.Fatal("RepairDirtyMigration used context-free fallback")
+	}
+}
+
+type contextRecordingInvoker struct {
+	resp         map[string]any
+	usedContext  bool
+	fallbackUsed bool
+}
+
+func (c *contextRecordingInvoker) InvokeService(_ string, _ map[string]any) (map[string]any, error) {
+	c.fallbackUsed = true
+	return c.resp, nil
+}
+
+func (c *contextRecordingInvoker) InvokeServiceContext(ctx context.Context, _ string, _ map[string]any) (map[string]any, error) {
+	c.usedContext = true
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return c.resp, nil
 }

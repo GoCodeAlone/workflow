@@ -95,24 +95,25 @@ Options:
 		return err
 	}
 
-	appSpec, err := findMigrateRepairInfraSpecByName(cfgPath, envName, appName)
+	appSpec, err := findMigrateRepairCanonicalSpecByName(cfgPath, envName, appName)
 	if err != nil {
 		return err
 	}
-	dbSpec, err := findMigrateRepairInfraSpecByName(cfgPath, envName, databaseName)
+	dbSpec, err := findMigrateRepairCanonicalSpecByName(cfgPath, envName, databaseName)
 	if err != nil {
 		return err
+	}
+	appProviderRef := resourceSpecProviderRef(appSpec)
+	dbProviderRef := resourceSpecProviderRef(dbSpec)
+	if appProviderRef == "" || dbProviderRef == "" {
+		return fmt.Errorf("app %q and database %q must both resolve a provider module", appSpec.Name, dbSpec.Name)
+	}
+	if appProviderRef != dbProviderRef {
+		return fmt.Errorf("app %q and database %q must reference the same provider module, got %q and %q", appSpec.Name, dbSpec.Name, appProviderRef, dbProviderRef)
 	}
 	appProviderType, appProviderCfg, err := resolveProviderForSpec(cfgPath, envName, appSpec)
 	if err != nil {
 		return err
-	}
-	dbProviderType, _, err := resolveProviderForSpec(cfgPath, envName, dbSpec)
-	if err != nil {
-		return err
-	}
-	if appProviderType != dbProviderType {
-		return fmt.Errorf("app %q provider %q does not match database %q provider %q", appSpec.Name, appProviderType, dbSpec.Name, dbProviderType)
 	}
 
 	req := interfaces.MigrationRepairRequest{
@@ -184,32 +185,28 @@ Options:
 	return nil
 }
 
-func findMigrateRepairInfraSpecByName(cfgFile, envName, name string) (interfaces.ResourceSpec, error) {
+func findMigrateRepairCanonicalSpecByName(cfgFile, envName, name string) (interfaces.ResourceSpec, error) {
 	if strings.TrimSpace(name) == "" {
 		return interfaces.ResourceSpec{}, fmt.Errorf("infra resource name is required")
 	}
-	cfg, err := config.LoadFromFile(cfgFile)
+	specs, err := parseInfraResourceSpecsForEnv(cfgFile, envName)
 	if err != nil {
-		return interfaces.ResourceSpec{}, fmt.Errorf("load %s: %w", cfgFile, err)
+		return interfaces.ResourceSpec{}, err
 	}
-	for i := range cfg.Modules {
-		m := &cfg.Modules[i]
-		if !isInfraType(m.Type) {
-			continue
-		}
-		if envName == "" {
-			if m.Name == name {
-				r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMap(m.Config)}
-				return resourceSpecFromResolvedModule(r), nil
+	if envName != "" {
+		if resolvedNames, err := findMigrateRepairResolvedNames(cfgFile, envName, name); err != nil {
+			return interfaces.ResourceSpec{}, err
+		} else if len(resolvedNames) > 0 {
+			for _, spec := range specs {
+				if resolvedNames[spec.Name] || resolvedNames[resourceSpecNameFromConfig(spec.Config)] {
+					return spec, nil
+				}
 			}
-			continue
 		}
-		resolved, ok := m.ResolveForEnv(envName)
-		if !ok {
-			continue
-		}
-		if m.Name == name || resolved.Name == name {
-			return resourceSpecFromResolvedModule(resolved), nil
+	}
+	for _, spec := range specs {
+		if spec.Name == name || resourceSpecNameFromConfig(spec.Config) == name {
+			return spec, nil
 		}
 	}
 	if envName != "" {
@@ -218,13 +215,48 @@ func findMigrateRepairInfraSpecByName(cfgFile, envName, name string) (interfaces
 	return interfaces.ResourceSpec{}, fmt.Errorf("infra resource %q not found in %s", name, cfgFile)
 }
 
+func findMigrateRepairResolvedNames(cfgFile, envName, name string) (map[string]bool, error) {
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", cfgFile, err)
+	}
+	for i := range cfg.Modules {
+		m := &cfg.Modules[i]
+		if !isInfraType(m.Type) || m.Name != name {
+			continue
+		}
+		resolved, ok := m.ResolveForEnv(envName)
+		if !ok {
+			return map[string]bool{}, nil
+		}
+		names := map[string]bool{
+			resolved.Name: true,
+		}
+		if resolved.Config != nil {
+			if configName, _ := resolved.Config["name"].(string); strings.TrimSpace(configName) != "" {
+				names[strings.TrimSpace(configName)] = true
+			}
+		}
+		return names, nil
+	}
+	return map[string]bool{}, nil
+}
+
+func resourceSpecNameFromConfig(cfg map[string]any) string {
+	if cfg == nil {
+		return ""
+	}
+	name, _ := cfg["name"].(string)
+	return strings.TrimSpace(name)
+}
+
 func collectMigrationRepairEnv(jobEnv, jobEnvFromEnv []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, entry := range jobEnv {
 		key, value, ok := strings.Cut(entry, "=")
 		key = strings.TrimSpace(key)
 		if !ok || key == "" {
-			return nil, fmt.Errorf("--job-env must be KEY=VALUE, got %q", entry)
+			return nil, fmt.Errorf("--job-env must be KEY=VALUE with a non-empty key")
 		}
 		out[key] = value
 	}
