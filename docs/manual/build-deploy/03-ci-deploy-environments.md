@@ -84,6 +84,43 @@ For environments with `requireApproval: true`, an `environment: <name>` key is a
 
 ---
 
+## Conditional Human Gate for Destructive Operations
+
+Some operational commands are only destructive under specific conditions. For
+example, `wfctl migrate repair-dirty` changes migration metadata only when a
+known dirty version is present. Use GitHub environment protection on the repair
+job, not on every deploy job, when you only want human review for that repair.
+
+```yaml
+repair-staging-migrations:
+  environment: staging
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - uses: GoCodeAlone/setup-wfctl@v1
+    - run: |
+        wfctl migrate repair-dirty --config infra.yaml --env staging \
+          --database app-db \
+          --app app-service \
+          --job-image "registry.example.com/app-migrate:${IMAGE_SHA}" \
+          --expected-dirty-version 20260426000005 \
+          --force-version 20260422000001 \
+          --then-up \
+          --confirm-force FORCE_MIGRATION_METADATA \
+          --approve-destructive \
+          --job-env-from-env DATABASE_URL
+      env:
+        DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+```
+
+Without `--approve-destructive`, wfctl writes a JSON approval artifact and exits
+with status `approval_required` before calling the provider. On GitHub Actions,
+the default artifact path is `$RUNNER_TEMP/wfctl-destructive-approval.json`.
+When `GITHUB_STEP_SUMMARY` is set, wfctl also writes the operation, environment,
+provider job status, diagnostics, and log tail to the run summary.
+
+---
+
 ## `environments.local` (dev overrides)
 
 The special `local` environment is used by `wfctl dev up` and applies build overrides for fast iteration:

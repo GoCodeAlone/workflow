@@ -822,6 +822,7 @@ wfctl migrate <subcommand> [options]
 | `status` | Show applied and pending migrations |
 | `diff` | Show pending migration SQL without applying |
 | `apply` | Apply all pending migrations |
+| `repair-dirty` | Repair a known dirty migration metadata state through an IaC provider job |
 
 **Examples:**
 
@@ -830,6 +831,43 @@ wfctl migrate status --db workflow.db
 wfctl migrate diff --db workflow.db
 wfctl migrate apply --db workflow.db
 ```
+
+#### `migrate repair-dirty`
+
+Run a guarded dirty migration repair inside a provider-managed runtime, such as
+an App Platform job or cloud task that already has database access. This avoids
+opening managed databases to CI runner IP ranges.
+
+```bash
+wfctl migrate repair-dirty --config infra.yaml --env staging \
+  --database app-db \
+  --app app-service \
+  --job-image registry.example.com/app-migrate:${IMAGE_SHA} \
+  --expected-dirty-version 20260426000005 \
+  --force-version 20260422000001 \
+  --then-up \
+  --confirm-force FORCE_MIGRATION_METADATA \
+  --approve-destructive
+```
+
+Required guard flags:
+
+| Flag | Description |
+|------|-------------|
+| `--expected-dirty-version` | Dirty version that must be present before repair |
+| `--force-version` | Version to force metadata to before replaying migrations |
+| `--confirm-force` | Must be `FORCE_MIGRATION_METADATA` |
+| `--approve-destructive` | Explicitly approves the metadata repair |
+
+For non-dev environments, omitting `--approve-destructive` writes an approval
+artifact and exits before provider invocation. The artifact defaults to
+`$RUNNER_TEMP/wfctl-destructive-approval.json` on GitHub Actions or
+`./wfctl-destructive-approval.json` elsewhere. Use `--approval-artifact` to set
+an explicit path.
+
+Pass provider job environment values with repeatable `--job-env KEY=VALUE` or
+`--job-env-from-env KEY`. Use `--job-env-from-env` for secrets; wfctl redacts
+those values from command output and GitHub step summaries.
 
 ---
 
