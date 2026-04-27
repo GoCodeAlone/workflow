@@ -20,9 +20,12 @@ type WfctlLockfile struct {
 
 // WfctlLockPluginEntry is the locked record for a single plugin.
 type WfctlLockPluginEntry struct {
-	Version   string                       `yaml:"version"`
-	Source    string                       `yaml:"source"`
-	SHA256    string                       `yaml:"sha256"`
+	Version string `yaml:"version"`
+	Source  string `yaml:"source"`
+	// SHA256 is deprecated top-level metadata from early new-format lockfiles.
+	// Platform archive checksums live under Platforms; old-format binary
+	// checksums are handled by cmd/wfctl/plugin_lockfile.go.
+	SHA256    string                       `yaml:"sha256,omitempty"`
 	Platforms map[string]WfctlLockPlatform `yaml:"platforms,omitempty"`
 }
 
@@ -91,9 +94,6 @@ func SaveWfctlLockfile(path string, lf *WfctlLockfile) error {
 		}
 		addField("version", entry.Version)
 		addField("source", entry.Source)
-		if len(entry.Platforms) == 0 {
-			addField("sha256", entry.SHA256)
-		}
 
 		if len(entry.Platforms) > 0 {
 			platKeys := make([]string, 0, len(entry.Platforms))

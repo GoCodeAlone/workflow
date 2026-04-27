@@ -35,15 +35,16 @@ func runPluginLock(args []string) error {
 }
 
 // runPluginLockFromManifest regenerates .wfctl-lock.yaml from a wfctl.yaml manifest.
-// Existing sha256/platform data is preserved for plugins that are already locked
-// at the same version.
+// Existing platform data must be refreshed from a project-local registry so the
+// lockfile records portable archive checksums instead of host-specific binary hashes.
 func runPluginLockFromManifest(manifestPath, lockPath string) error {
 	m, err := config.LoadWfctlManifest(manifestPath)
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
 
-	// Load existing lockfile so we can preserve sha256 for unchanged versions.
+	// Load existing lockfile so unchanged versions with platform metadata can be
+	// forced through registry refresh instead of carrying stale archive entries.
 	var existing *config.WfctlLockfile
 	if lf, err := config.LoadWfctlLockfile(lockPath); err == nil {
 		existing = lf
@@ -96,13 +97,6 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 			return fmt.Errorf("refresh platform metadata for %s@%s: no project-local registry config available", p.Name, p.Version)
 		}
 
-		// Preserve existing top-level checksums only for legacy entries. Platform
-		// metadata must be refreshed from the registry instead of copied forward.
-		if len(entry.Platforms) == 0 && previous != nil {
-			if len(previous.Platforms) == 0 {
-				entry.SHA256 = previous.SHA256
-			}
-		}
 		newLF.Plugins[p.Name] = entry
 	}
 
