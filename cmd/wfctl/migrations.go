@@ -42,6 +42,15 @@ type migrationStatusResult struct {
 	Migrations            []migrationValidationRecord `json:"migrations"`
 }
 
+type migrationRepairDirtyResult struct {
+	Decision              string                    `json:"decision"`
+	Reasons               []string                  `json:"reasons,omitempty"`
+	Destructive           bool                      `json:"destructive"`
+	HumanApprovalRequired bool                      `json:"human_approval_required"`
+	ApprovalCommand       string                    `json:"approval_command,omitempty"`
+	Migration             migrationValidationRecord `json:"migration,omitempty"`
+}
+
 func runMigrations(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: wfctl migrations <validate|status|ci-check|repair-dirty>")
@@ -53,6 +62,8 @@ func runMigrations(args []string) error {
 		return runMigrationsStatus(args[1:])
 	case "ci-check":
 		return runMigrationsCICheck(args[1:])
+	case "repair-dirty":
+		return runMigrationsRepairDirty(args[1:])
 	default:
 		return fmt.Errorf("unknown migrations subcommand %q", args[0])
 	}
@@ -112,6 +123,164 @@ func runMigrationsCICheck(args []string) error {
 	}
 	if writeErr := writeMigrationStatusOutput(result, *format); writeErr != nil {
 		return writeErr
+	}
+	if result.Decision == "fail" {
+		return errors.New(strings.Join(result.Reasons, "; "))
+	}
+	return nil
+}
+
+func runMigrationsRepairDirty(args []string) error {
+	fs := flag.NewFlagSet("migrations repair-dirty", flag.ContinueOnError)
+	configFile := fs.String("config", "app.yaml", "Workflow config file")
+	fs.StringVar(configFile, "c", "app.yaml", "Config file (short for --config)")
+	envName := fs.String("env", "", "Environment name")
+	pluginDir := fs.String("plugin-dir", defaultDataDir, "Plugin directory")
+	format := fs.String("format", "text", "Output format: text or json")
+	expectedDirtyVersion := fs.String("expected-dirty-version", "", "Exact dirty version expected before repair")
+	forceVersion := fs.String("force-version", "", "Version to force migration metadata to")
+	confirmForce := fs.String("confirm-force", "", "Typed confirmation token")
+	approvedToken := fs.String("approved-token", "", "External approval token for non-dev destructive repair")
+	thenUp := fs.Bool("then-up", false, "Run migrate up after metadata repair")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	result := migrationRepairDirtyResult{Decision: "fail", Destructive: true}
+	if *confirmForce != "FORCE_MIGRATION_METADATA" {
+		result.Reasons = []string{"--confirm-force FORCE_MIGRATION_METADATA is required"}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	if strings.TrimSpace(*expectedDirtyVersion) == "" || strings.TrimSpace(*forceVersion) == "" {
+		result.Reasons = []string{"--expected-dirty-version and --force-version are required"}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	if isProtectedMigrationEnvironment(*envName) && strings.TrimSpace(*approvedToken) == "" {
+		result.HumanApprovalRequired = true
+		result.Reasons = []string{"human approval is required for production migration metadata repair"}
+		result.ApprovalCommand = buildMigrationRepairApprovalCommand(*configFile, *envName, *expectedDirtyVersion, *forceVersion, *thenUp)
+		return finishMigrationRepairDirty(result, *format)
+	}
+
+	cfg, err := config.LoadFromFile(*configFile)
+	if err != nil {
+		result.Reasons = []string{fmt.Sprintf("load config: %v", err)}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	migrations, err := resolveMigrationConfigs(cfg, *envName)
+	if err != nil {
+		result.Reasons = []string{err.Error()}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	if len(migrations) != 1 {
+		result.Reasons = []string{fmt.Sprintf("repair-dirty requires exactly one configured migration, found %d", len(migrations))}
+		return finishMigrationRepairDirty(result, *format)
+	}
+
+	ctx := context.Background()
+	runner := newMigrationPluginRunner()
+	migration := migrations[0]
+	runCfg := migrationPluginRunConfig{
+		Plugin:    migration.Plugin,
+		PluginDir: *pluginDir,
+		Driver:    migration.Driver,
+		SourceDir: migration.SourceDir,
+		DSN:       migration.DSN,
+	}
+	before, err := runner.run(ctx, runCfg, "status")
+	if err != nil {
+		result.Reasons = []string{fmt.Sprintf("migration %s status failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	beforeStatus, err := parseMigrationStatus(before.Stdout)
+	if err != nil {
+		result.Reasons = []string{fmt.Sprintf("migration %s status failed: %s", migration.Name, err)}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	if !beforeStatus.Dirty {
+		result.Reasons = []string{fmt.Sprintf("migration %s is not dirty", migration.Name)}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	if beforeStatus.Current != *expectedDirtyVersion {
+		result.Reasons = []string{fmt.Sprintf("migration %s dirty version %s does not match expected %s", migration.Name, migrationCurrentOrUnknown(beforeStatus.Current), *expectedDirtyVersion)}
+		return finishMigrationRepairDirty(result, *format)
+	}
+
+	repairCommand := fmt.Sprintf("repair-dirty --expected-dirty-version %s --force-version %s --confirm-force FORCE_MIGRATION_METADATA", *expectedDirtyVersion, *forceVersion)
+	if _, err := runner.run(ctx, runCfg, repairCommand); err != nil {
+		result.Reasons = []string{fmt.Sprintf("migration %s repair failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	if *thenUp {
+		if _, err := runner.run(ctx, runCfg, "up"); err != nil {
+			result.Reasons = []string{fmt.Sprintf("migration %s up failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))}
+			return finishMigrationRepairDirty(result, *format)
+		}
+	}
+	after, err := runner.run(ctx, runCfg, "status")
+	if err != nil {
+		result.Reasons = []string{fmt.Sprintf("migration %s post-repair status failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	afterStatus, err := parseMigrationStatus(after.Stdout)
+	if err != nil {
+		result.Reasons = []string{fmt.Sprintf("migration %s post-repair status failed: %s", migration.Name, err)}
+		return finishMigrationRepairDirty(result, *format)
+	}
+	result.Decision = "pass"
+	result.Migration = migrationValidationRecord{
+		Name:    migration.Name,
+		Driver:  migration.Driver,
+		Current: afterStatus.Current,
+		Dirty:   afterStatus.Dirty,
+		Pending: afterStatus.Pending,
+	}
+	if afterStatus.Dirty {
+		result.Decision = "fail"
+		result.Reasons = []string{fmt.Sprintf("migration %s remains dirty at version %s", migration.Name, migrationCurrentOrUnknown(afterStatus.Current))}
+	}
+	return finishMigrationRepairDirty(result, *format)
+}
+
+func isProtectedMigrationEnvironment(envName string) bool {
+	envName = strings.ToLower(strings.TrimSpace(envName))
+	return envName == "prod" || envName == "production"
+}
+
+func buildMigrationRepairApprovalCommand(configFile, envName, expectedDirtyVersion, forceVersion string, thenUp bool) string {
+	parts := []string{
+		"wfctl", "migrations", "repair-dirty",
+		"--config", configFile,
+		"--env", envName,
+		"--expected-dirty-version", expectedDirtyVersion,
+		"--force-version", forceVersion,
+		"--confirm-force", "FORCE_MIGRATION_METADATA",
+		"--approved-token", "<approval-token>",
+	}
+	if thenUp {
+		parts = append(parts, "--then-up")
+	}
+	return strings.Join(parts, " ")
+}
+
+func finishMigrationRepairDirty(result migrationRepairDirtyResult, format string) error {
+	switch format {
+	case "json":
+		data, err := json.Marshal(result)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+	case "text", "":
+		fmt.Printf("migrations repair-dirty: %s\n", result.Decision)
+		for _, reason := range result.Reasons {
+			fmt.Printf("  - %s\n", reason)
+		}
+		if result.Decision == "pass" {
+			fmt.Printf("  %s current=%s dirty=%v\n", result.Migration.Name, result.Migration.Current, result.Migration.Dirty)
+		}
+	default:
+		return fmt.Errorf("unsupported format %q", format)
 	}
 	if result.Decision == "fail" {
 		return errors.New(strings.Join(result.Reasons, "; "))
