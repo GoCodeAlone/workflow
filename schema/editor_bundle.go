@@ -30,10 +30,11 @@ type EditorBundleOptions struct {
 }
 
 type EditorContractRegistrySource struct {
-	Plugin           string
-	Source           string
-	Registry         *pb.ContractRegistry
-	DescriptorSetRef string
+	Plugin                    string
+	Source                    string
+	Registry                  *pb.ContractRegistry
+	DescriptorSetRef          string
+	ContractDescriptorSetRefs map[string]string
 }
 
 type EditorContractBundle struct {
@@ -178,14 +179,42 @@ func addContractRegistryToBundle(bundle *EditorContractBundle, source EditorCont
 		}
 	}
 	for _, descriptor := range source.Registry.Contracts {
-		contract := normalizeContractDescriptor(source, descriptor, descriptorSetRef)
+		contractDescriptorSetRef := descriptorSetRefForContract(source, descriptor, descriptorSetRef)
+		if contractDescriptorSetRef != "" && bundle.DescriptorSets[contractDescriptorSetRef] == nil {
+			bundle.DescriptorSets[contractDescriptorSetRef] = &EditorDescriptorSet{
+				ID:              contractDescriptorSetRef,
+				Plugin:          source.Plugin,
+				Encoding:        "external",
+				ExternalRef:     contractDescriptorSetRef,
+				ExternalRefType: "path",
+			}
+		}
+		contract := normalizeContractDescriptor(source, descriptor, contractDescriptorSetRef)
 		if contract == nil {
 			continue
 		}
 		bundle.Contracts[contract.ID] = contract
-		addReferencedMessagePlaceholders(bundle.Messages, contract, descriptorSetRef)
+		addReferencedMessagePlaceholders(bundle.Messages, contract, contractDescriptorSetRef)
 	}
 	return nil
+}
+
+func descriptorSetRefForContract(source EditorContractRegistrySource, descriptor *pb.ContractDescriptor, fallback string) string {
+	if len(source.ContractDescriptorSetRefs) == 0 {
+		return fallback
+	}
+	ownerType, ownerKey := editorContractOwner(descriptor)
+	if ownerType == "" || ownerKey == "" {
+		return fallback
+	}
+	id := ownerType + ":" + ownerKey
+	if ownerType == "service" && descriptor.GetServiceName() != "" {
+		id = "service:" + descriptor.GetServiceName() + "/" + descriptor.GetMethod()
+	}
+	if ref := source.ContractDescriptorSetRefs[id]; ref != "" {
+		return ref
+	}
+	return fallback
 }
 
 func normalizeDescriptorSet(plugin string, set *descriptorpb.FileDescriptorSet) (*EditorDescriptorSet, error) {

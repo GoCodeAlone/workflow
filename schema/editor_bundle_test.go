@@ -168,6 +168,57 @@ func TestExportEditorBundleIncludesExternalDescriptorSetReferences(t *testing.T)
 	}
 }
 
+func TestExportEditorBundlePreservesPerContractExternalDescriptorSetReferences(t *testing.T) {
+	bundle, err := ExportEditorBundle(EditorBundleOptions{
+		ContractRegistries: []EditorContractRegistrySource{
+			{
+				Plugin:           "workflow-plugin-ref-test",
+				Source:           EditorContractSourcePluginContractsJSON,
+				DescriptorSetRef: "descriptors/default.pb",
+				ContractDescriptorSetRefs: map[string]string{
+					"step:step.one": "descriptors/one.pb",
+					"step:step.two": "descriptors/two.pb",
+				},
+				Registry: &pb.ContractRegistry{
+					Contracts: []*pb.ContractDescriptor{
+						{
+							Kind:         pb.ContractKind_CONTRACT_KIND_STEP,
+							StepType:     "step.one",
+							Mode:         pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+							InputMessage: "workflow.test.OneInput",
+						},
+						{
+							Kind:         pb.ContractKind_CONTRACT_KIND_STEP,
+							StepType:     "step.two",
+							Mode:         pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+							InputMessage: "workflow.test.TwoInput",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("export editor bundle: %v", err)
+	}
+
+	if got := bundle.Contracts["step:step.one"].DescriptorSetRef; got != "descriptors/one.pb" {
+		t.Fatalf("step.one descriptor set ref = %q", got)
+	}
+	if got := bundle.Contracts["step:step.two"].DescriptorSetRef; got != "descriptors/two.pb" {
+		t.Fatalf("step.two descriptor set ref = %q", got)
+	}
+	if got := bundle.Messages["workflow.test.OneInput"].DescriptorSetRef; got != "descriptors/one.pb" {
+		t.Fatalf("workflow.test.OneInput descriptor set ref = %q", got)
+	}
+	if got := bundle.Messages["workflow.test.TwoInput"].DescriptorSetRef; got != "descriptors/two.pb" {
+		t.Fatalf("workflow.test.TwoInput descriptor set ref = %q", got)
+	}
+	if bundle.DescriptorSets["descriptors/one.pb"] == nil || bundle.DescriptorSets["descriptors/two.pb"] == nil {
+		t.Fatalf("expected both descriptor set refs, got %+v", bundle.DescriptorSets)
+	}
+}
+
 func assertMessageField(t *testing.T, msg *EditorMessageDescriptor, name, typ string, repeated bool) {
 	t.Helper()
 	for _, field := range msg.Fields {

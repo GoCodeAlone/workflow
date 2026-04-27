@@ -12,12 +12,17 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
+var (
+	listEditorBundleRegistryPluginNames = ListPluginNames
+	fetchEditorBundleRegistryManifest   = FetchManifest
+)
+
 func runEditorBundle(args []string) error {
 	fs := flag.NewFlagSet("editor-bundle", flag.ExitOnError)
 	output := fs.String("output", "", "Write bundle to file instead of stdout")
 	format := fs.String("format", "json", "Output format: json")
 	pluginDir := fs.String("plugin-dir", "", "Load plugin contract descriptors from a plugin repo or plugin root")
-	includeRegistry := fs.Bool("registry", false, "Include contract descriptors from the configured plugin registry")
+	includeRegistry := fs.Bool("registry", true, "Include contract descriptors from the configured plugin registry")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl editor-bundle [options]\n\nExport the canonical editor contract bundle.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -153,10 +158,11 @@ func editorBundlePluginRepoSource(path string) (schema.EditorContractRegistrySou
 		}
 	}
 	return schema.EditorContractRegistrySource{
-		Plugin:           pluginName,
-		Source:           schema.EditorContractSourcePluginContractsJSON,
-		DescriptorSetRef: firstDescriptorSetRef(descriptors),
-		Registry:         contractRegistryFromPluginDescriptors(descriptors),
+		Plugin:                    pluginName,
+		Source:                    schema.EditorContractSourcePluginContractsJSON,
+		DescriptorSetRef:          firstDescriptorSetRef(descriptors),
+		ContractDescriptorSetRefs: contractDescriptorSetRefsFromPluginDescriptors(descriptors),
+		Registry:                  contractRegistryFromPluginDescriptors(descriptors),
 	}, nil
 }
 
@@ -173,21 +179,22 @@ func readPluginManifestMap(path string) (map[string]any, error) {
 }
 
 func editorBundleRegistrySources() ([]schema.EditorContractRegistrySource, error) {
-	names, err := ListPluginNames()
+	names, err := listEditorBundleRegistryPluginNames()
 	if err != nil {
 		return nil, err
 	}
 	var sources []schema.EditorContractRegistrySource
 	for _, name := range names {
-		manifest, err := FetchManifest(name)
+		manifest, err := fetchEditorBundleRegistryManifest(name)
 		if err != nil || len(manifest.Contracts) == 0 {
 			continue
 		}
 		sources = append(sources, schema.EditorContractRegistrySource{
-			Plugin:           manifest.Name,
-			Source:           schema.EditorContractSourcePluginManifest,
-			DescriptorSetRef: firstDescriptorSetRef(manifest.Contracts),
-			Registry:         contractRegistryFromPluginDescriptors(manifest.Contracts),
+			Plugin:                    manifest.Name,
+			Source:                    schema.EditorContractSourcePluginManifest,
+			DescriptorSetRef:          firstDescriptorSetRef(manifest.Contracts),
+			ContractDescriptorSetRefs: contractDescriptorSetRefsFromPluginDescriptors(manifest.Contracts),
+			Registry:                  contractRegistryFromPluginDescriptors(manifest.Contracts),
 		})
 	}
 	return sources, nil
@@ -208,6 +215,58 @@ func firstDescriptorSetRef(descriptors []pluginContractDescriptor) string {
 	for _, descriptor := range descriptors {
 		if descriptor.DescriptorSetRef != "" {
 			return descriptor.DescriptorSetRef
+		}
+	}
+	return ""
+}
+
+func contractDescriptorSetRefsFromPluginDescriptors(descriptors []pluginContractDescriptor) map[string]string {
+	refs := map[string]string{}
+	for _, descriptor := range descriptors {
+		if descriptor.DescriptorSetRef == "" {
+			continue
+		}
+		id := editorBundleContractIDFromPluginDescriptor(descriptor)
+		if id == "" {
+			continue
+		}
+		refs[id] = descriptor.DescriptorSetRef
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return refs
+}
+
+func editorBundleContractIDFromPluginDescriptor(descriptor pluginContractDescriptor) string {
+	kind := normalizePluginContractKind(descriptor.Kind)
+	switch kind {
+	case "module":
+		if typ := descriptor.contractType(kind); typ != "" {
+			return "module:" + typ
+		}
+	case "step":
+		if typ := descriptor.contractType(kind); typ != "" {
+			return "step:" + typ
+		}
+	case "trigger":
+		if typ := descriptor.contractType(kind); typ != "" {
+			return "trigger:" + typ
+		}
+	case "service_method":
+		serviceName := descriptor.ServiceName
+		method := descriptor.Method
+		if serviceName == "" && method == "" {
+			if parsedService, parsedMethod, ok := strings.Cut(descriptor.contractType(kind), "/"); ok {
+				serviceName = parsedService
+				method = parsedMethod
+			}
+		}
+		if serviceName != "" {
+			return "service:" + serviceName + "/" + method
+		}
+		if method != "" {
+			return "service:" + method
 		}
 	}
 	return ""
