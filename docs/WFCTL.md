@@ -290,6 +290,32 @@ wfctl audit plugins --repo-root /path/to/workspace --strict
 wfctl audit plugins --repo-root /path/to/workspace --strict-contracts
 ```
 
+### `editor-bundle`
+
+Export the canonical editor contract bundle for Workflow-aware IDEs and visual editors.
+
+```
+wfctl editor-bundle [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output` | _(stdout)_ | Write the bundle JSON to a file |
+| `--format` | `json` | Output format; only `json` is supported |
+| `--plugin-dir` | _(none)_ | Load strict contract descriptors from one plugin repo or a directory of plugin repos |
+| `--registry` | `true` | Include strict contract descriptors from the configured plugin registry |
+
+The bundle includes core module and step schemas, YAML schemas, snippets, DSL reference data, and strict plugin contract metadata. Registry manifests are part of the canonical output by default; unavailable or malformed registry manifests fail the command. Use `--registry=false` for an explicit local-only export.
+
+When `--plugin-dir` is provided, `plugin.contracts.json` is parsed strictly. Invalid or unreadable descriptor files fail the command instead of producing a partial bundle. Service method contracts are keyed by module type when available, using `service:<module-type>/<service-name>/<method>`, so separate module-scoped services can expose the same service and method names without colliding.
+
+Examples:
+
+```bash
+wfctl editor-bundle --output editor-bundle.json
+wfctl editor-bundle --registry=false --plugin-dir ../workflow-plugin-example --output editor-bundle.json
+```
+
 ### `init`
 
 Scaffold a new workflow application project from a built-in template.
