@@ -141,7 +141,7 @@ Options:
 		ForceVersion:         forceVersion,
 	}
 	if result, err := requireDestructiveApproval(decision, approveDestructive, approvalArtifact); err != nil {
-		printMigrationRepairResult(out, result)
+		printMigrationRepairResult(out, result, nil)
 		_ = writeMigrationRepairSummary(result, envName, appName, nil)
 		return err
 	}
@@ -156,7 +156,7 @@ Options:
 	repairer, ok := provider.(interfaces.ProviderMigrationRepairer)
 	if !ok {
 		result := &interfaces.MigrationRepairResult{Status: interfaces.MigrationRepairStatusUnsupported}
-		printMigrationRepairResult(out, result)
+		printMigrationRepairResult(out, result, nil)
 		_ = writeMigrationRepairSummary(result, envName, appName, nil)
 		return fmt.Errorf("provider %q does not support migration repair", appProviderType)
 	}
@@ -171,12 +171,12 @@ Options:
 			result = &interfaces.MigrationRepairResult{Status: interfaces.MigrationRepairStatusSucceeded}
 		}
 	}
-	printMigrationRepairResult(out, result)
+	printMigrationRepairResult(out, result, jobEnvMap)
 	if summaryErr := writeMigrationRepairSummary(result, envName, appName, jobEnvMap); summaryErr != nil && err == nil {
 		err = summaryErr
 	}
 	if err != nil {
-		return err
+		return redactMigrationRepairError(err, jobEnvMap)
 	}
 	if result.Status != "" && result.Status != interfaces.MigrationRepairStatusSucceeded {
 		return fmt.Errorf("migration repair finished with status %s", result.Status)
@@ -245,7 +245,7 @@ func collectMigrationRepairEnv(jobEnv, jobEnvFromEnv []string) (map[string]strin
 	return out, nil
 }
 
-func printMigrationRepairResult(out io.Writer, result *interfaces.MigrationRepairResult) {
+func printMigrationRepairResult(out io.Writer, result *interfaces.MigrationRepairResult, secrets map[string]string) {
 	if result == nil {
 		return
 	}
@@ -255,7 +255,7 @@ func printMigrationRepairResult(out io.Writer, result *interfaces.MigrationRepai
 		fmt.Fprintf(out, "migration repair: %s\n", result.Status)
 	}
 	if strings.TrimSpace(result.Logs) != "" {
-		fmt.Fprintln(out, redactMigrationRepairSecrets(result.Logs, nil))
+		fmt.Fprintln(out, redactMigrationRepairSecrets(result.Logs, secrets))
 	}
 }
 
@@ -267,7 +267,7 @@ func writeMigrationRepairSummary(result *interfaces.MigrationRepairResult, envNa
 	if outcome == "" {
 		outcome = "UNKNOWN"
 	}
-	diagnostics := result.Diagnostics
+	diagnostics := redactMigrationRepairDiagnostics(result.Diagnostics, secrets)
 	if result.Logs != "" {
 		diagnostics = append(diagnostics, interfaces.Diagnostic{
 			ID:     result.ProviderJobID,
@@ -292,6 +292,19 @@ func writeMigrationRepairSummary(result *interfaces.MigrationRepairResult, envNa
 	})
 }
 
+func redactMigrationRepairDiagnostics(diagnostics []interfaces.Diagnostic, secrets map[string]string) []interfaces.Diagnostic {
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	redacted := make([]interfaces.Diagnostic, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		diagnostic.Cause = redactMigrationRepairSecrets(diagnostic.Cause, secrets)
+		diagnostic.Detail = redactMigrationRepairSecrets(diagnostic.Detail, secrets)
+		redacted = append(redacted, diagnostic)
+	}
+	return redacted
+}
+
 func redactMigrationRepairSecrets(value string, secrets map[string]string) string {
 	for _, secret := range secrets {
 		if secret != "" {
@@ -299,4 +312,11 @@ func redactMigrationRepairSecrets(value string, secrets map[string]string) strin
 		}
 	}
 	return value
+}
+
+func redactMigrationRepairError(err error, secrets map[string]string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s", redactMigrationRepairSecrets(err.Error(), secrets))
 }

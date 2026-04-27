@@ -83,12 +83,25 @@ func TestRunMigrateRepairDirtyResolvesEnvAndCallsProvider(t *testing.T) {
 
 func TestRunMigrateRepairDirtyPropagatesJobEnv(t *testing.T) {
 	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
-	fake := &migrationRepairProvider{}
+	secret := "postgres://secret"
+	fake := &migrationRepairProvider{
+		result: &interfaces.MigrationRepairResult{
+			ProviderJobID: "job-123",
+			Status:        interfaces.MigrationRepairStatusSucceeded,
+			Logs:          "connected to postgres://secret and repaired",
+			Diagnostics: []interfaces.Diagnostic{{
+				ID:     "deploy-123",
+				Phase:  "ACTIVE",
+				Cause:  "job used postgres://secret",
+				Detail: "repair complete for postgres://secret",
+			}},
+		},
+	}
 	restore := installMigrateRepairProvider(t, fake, "digitalocean")
 	defer restore()
-	t.Setenv("DATABASE_URL", "postgres://secret")
+	t.Setenv("DATABASE_URL", secret)
 
-	_, err := captureMigrateRepairStdout(t, func() error {
+	out, err := captureMigrateRepairStdout(t, func() error {
 		return runMigrate([]string{
 			"repair-dirty",
 			"--config", cfgPath,
@@ -111,8 +124,51 @@ func TestRunMigrateRepairDirtyPropagatesJobEnv(t *testing.T) {
 	if fake.req.Env["PUBLIC_VALUE"] != "visible" {
 		t.Fatalf("PUBLIC_VALUE env = %q", fake.req.Env["PUBLIC_VALUE"])
 	}
-	if fake.req.Env["DATABASE_URL"] != "postgres://secret" {
+	if fake.req.Env["DATABASE_URL"] != secret {
 		t.Fatalf("DATABASE_URL env was not propagated")
+	}
+	if strings.Contains(out, secret) {
+		t.Fatalf("stdout leaked secret: %q", out)
+	}
+	if !strings.Contains(out, "[REDACTED]") {
+		t.Fatalf("stdout = %q, want redacted secret marker", out)
+	}
+}
+
+func TestRunMigrateRepairDirtyRedactsJobEnvFromProviderError(t *testing.T) {
+	cfgPath := writeMigrateRepairInfraConfig(t, t.TempDir())
+	secret := "postgres://error-secret"
+	fake := &migrationRepairProvider{
+		err: fmt.Errorf("migration failed while connecting to %s", secret),
+	}
+	restore := installMigrateRepairProvider(t, fake, "digitalocean")
+	defer restore()
+	t.Setenv("DATABASE_URL", secret)
+
+	_, err := captureMigrateRepairStdout(t, func() error {
+		return runMigrate([]string{
+			"repair-dirty",
+			"--config", cfgPath,
+			"--env", "staging",
+			"--database", "bmw-database",
+			"--app", "bmw-app",
+			"--job-image", "registry.example/workflow-migrate:sha",
+			"--expected-dirty-version", "20260426000005",
+			"--force-version", "20260422000001",
+			"--up-if-clean",
+			"--confirm-force", interfaces.MigrationRepairConfirmation,
+			"--approve-destructive",
+			"--job-env-from-env", "DATABASE_URL",
+		})
+	})
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked secret: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("error = %v, want redacted marker", err)
 	}
 }
 
@@ -225,7 +281,21 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "true")
-	fake := &migrationRepairProvider{}
+	secret := "postgres://summary-secret"
+	t.Setenv("DATABASE_URL", secret)
+	fake := &migrationRepairProvider{
+		result: &interfaces.MigrationRepairResult{
+			ProviderJobID: "job-123",
+			Status:        interfaces.MigrationRepairStatusSucceeded,
+			Logs:          "repair complete for postgres://summary-secret",
+			Diagnostics: []interfaces.Diagnostic{{
+				ID:     "deploy-123",
+				Phase:  "ACTIVE",
+				Cause:  "job used postgres://summary-secret",
+				Detail: "repair complete for postgres://summary-secret",
+			}},
+		},
+	}
 	restore := installMigrateRepairProvider(t, fake, "digitalocean")
 	defer restore()
 
@@ -242,6 +312,7 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 			"--then-up",
 			"--confirm-force", interfaces.MigrationRepairConfirmation,
 			"--approve-destructive",
+			"--job-env-from-env", "DATABASE_URL",
 		})
 	})
 	if err != nil {
@@ -255,6 +326,12 @@ func TestRunMigrateRepairDirtyWritesGitHubStepSummary(t *testing.T) {
 		if !strings.Contains(string(summary), want) {
 			t.Fatalf("summary missing %q:\n%s", want, summary)
 		}
+	}
+	if strings.Contains(string(summary), secret) {
+		t.Fatalf("summary leaked secret:\n%s", summary)
+	}
+	if !strings.Contains(string(summary), "[REDACTED]") {
+		t.Fatalf("summary missing redacted secret marker:\n%s", summary)
 	}
 }
 
