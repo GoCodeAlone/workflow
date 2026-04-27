@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -65,6 +66,9 @@ func runCIRun(args []string) error {
 			if *pluginDir != "" {
 				os.Setenv("WFCTL_PLUGIN_DIR", *pluginDir) //nolint:errcheck
 			}
+			if err := runMigrationDeployGuard(*configFile, *env, *pluginDir, &cfg); err != nil {
+				return fmt.Errorf("migration guard failed: %w", err)
+			}
 			if len(cfg.Services) > 0 {
 				if err := runMultiServiceDeploy(cfg.CI.Deploy, *env, &cfg, cfg.Services, *verbose); err != nil {
 					return fmt.Errorf("deploy phase failed: %w", err)
@@ -79,6 +83,46 @@ func runCIRun(args []string) error {
 		}
 	}
 	return nil
+}
+
+func runMigrationDeployGuard(configFile, envName, pluginDir string, cfg *config.WorkflowConfig) error {
+	if cfg == nil || cfg.CI == nil || len(cfg.CI.Migrations) == 0 {
+		return nil
+	}
+	args := []string{"ci-check", "--config", configFile, "--env", envName}
+	if pluginDir != "" {
+		args = append(args, "--plugin-dir", pluginDir)
+	}
+	args = append(args, "--validation-result", ".wfctl/migrations-result.json", "--require-validation-result")
+	if commit := currentCICommitSHA(); commit != "" {
+		args = append(args, "--commit", commit, "--require-same-sha")
+	}
+	return runMigrations(args)
+}
+
+func currentCICommitSHA() string {
+	if value := os.Getenv("WFCTL_CI_COMMIT_SHA"); value != "" {
+		return value
+	}
+	if eventPath := os.Getenv("GITHUB_EVENT_PATH"); eventPath != "" {
+		data, err := os.ReadFile(eventPath)
+		if err == nil {
+			var event struct {
+				WorkflowRun struct {
+					HeadSHA string `json:"head_sha"`
+				} `json:"workflow_run"`
+			}
+			if json.Unmarshal(data, &event) == nil && event.WorkflowRun.HeadSHA != "" {
+				return event.WorkflowRun.HeadSHA
+			}
+		}
+	}
+	for _, key := range []string{"GITHUB_SHA", "CI_COMMIT_SHA"} {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {

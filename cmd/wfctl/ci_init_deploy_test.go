@@ -104,6 +104,18 @@ func TestGenerateGHADeploy_DeployJobsChained(t *testing.T) {
 	}
 }
 
+func TestGenerateGHADeploy_WithMigrationsAddsDeployGuard(t *testing.T) {
+	cfg := makeDeployFixture([]string{"staging"}, nil)
+	cfg.CI.Migrations = []config.CIMigrationConfig{{Name: "app", SourceDir: "migrations"}}
+	content := generateGHADeploy(cfg)
+	if !strings.Contains(content, "wfctl migrations validate --env staging") || !strings.Contains(content, "--result-file .wfctl/migrations-result.json") {
+		t.Fatalf("want migration validation result generation:\n%s", content)
+	}
+	if strings.Contains(content, "wfctl migrations ci-check --env staging") {
+		t.Fatalf("want ci run deploy to perform migration guard once:\n%s", content)
+	}
+}
+
 func TestGenerateGHADeploy_RegistryEnvVars(t *testing.T) {
 	cfg := makeDeployFixture([]string{"staging"}, nil)
 	content := generateGHADeploy(cfg)

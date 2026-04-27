@@ -4,15 +4,72 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // CIConfig holds the ci: section of a workflow config — build, test, and deploy lifecycle.
 type CIConfig struct {
-	Build      *CIBuildConfig  `json:"build,omitempty" yaml:"build,omitempty"`
-	Test       *CITestConfig   `json:"test,omitempty" yaml:"test,omitempty"`
-	Deploy     *CIDeployConfig `json:"deploy,omitempty" yaml:"deploy,omitempty"`
-	Infra      *CIInfraConfig  `json:"infra,omitempty" yaml:"infra,omitempty"`
-	Registries []CIRegistry    `json:"registries,omitempty" yaml:"registries,omitempty"`
+	Build      *CIBuildConfig      `json:"build,omitempty" yaml:"build,omitempty"`
+	Test       *CITestConfig       `json:"test,omitempty" yaml:"test,omitempty"`
+	Deploy     *CIDeployConfig     `json:"deploy,omitempty" yaml:"deploy,omitempty"`
+	Infra      *CIInfraConfig      `json:"infra,omitempty" yaml:"infra,omitempty"`
+	Registries []CIRegistry        `json:"registries,omitempty" yaml:"registries,omitempty"`
+	Migrations []CIMigrationConfig `json:"migrations,omitempty" yaml:"migrations,omitempty"`
+}
+
+type CIMigrationConfig struct {
+	Name         string                                   `json:"name" yaml:"name"`
+	Plugin       string                                   `json:"plugin,omitempty" yaml:"plugin,omitempty"`
+	Driver       string                                   `json:"driver,omitempty" yaml:"driver,omitempty"`
+	SourceDir    string                                   `json:"source_dir" yaml:"source_dir"`
+	Database     CIMigrationDatabaseConfig                `json:"database" yaml:"database"`
+	Baseline     CIMigrationBaselineConfig                `json:"baseline,omitempty" yaml:"baseline,omitempty"`
+	Validation   CIMigrationValidationConfig              `json:"validation,omitempty" yaml:"validation,omitempty"`
+	Environments map[string]*CIMigrationEnvironmentConfig `json:"environments,omitempty" yaml:"environments,omitempty"`
+}
+
+type CIMigrationEnvironmentConfig struct {
+	Plugin        string                      `json:"plugin,omitempty" yaml:"plugin,omitempty"`
+	Driver        string                      `json:"driver,omitempty" yaml:"driver,omitempty"`
+	SourceDir     string                      `json:"source_dir,omitempty" yaml:"source_dir,omitempty"`
+	Database      CIMigrationDatabaseConfig   `json:"database,omitempty" yaml:"database,omitempty"`
+	Baseline      CIMigrationBaselineConfig   `json:"baseline,omitempty" yaml:"baseline,omitempty"`
+	Validation    CIMigrationValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+	ValidationSet bool                        `json:"-" yaml:"-"`
+}
+
+func (c *CIMigrationEnvironmentConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain CIMigrationEnvironmentConfig
+	var decoded plain
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = CIMigrationEnvironmentConfig(decoded)
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == "validation" {
+			c.ValidationSet = true
+			break
+		}
+	}
+	return nil
+}
+
+type CIMigrationDatabaseConfig struct {
+	Env string `json:"env,omitempty" yaml:"env,omitempty"`
+	DSN string `json:"dsn,omitempty" yaml:"dsn,omitempty"`
+}
+
+type CIMigrationBaselineConfig struct {
+	Ref  string `json:"ref,omitempty" yaml:"ref,omitempty"`
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
+}
+
+type CIMigrationValidationConfig struct {
+	Lint              bool `json:"lint,omitempty" yaml:"lint,omitempty"`
+	FreshCycle        bool `json:"fresh_cycle,omitempty" yaml:"fresh_cycle,omitempty"`
+	BaselineCandidate bool `json:"baseline_candidate,omitempty" yaml:"baseline_candidate,omitempty"`
+	ForbidDirty       bool `json:"forbid_dirty,omitempty" yaml:"forbid_dirty,omitempty"`
 }
 
 // CIBuildConfig defines what artifacts the build phase produces.
@@ -223,6 +280,29 @@ func (c *CIConfig) Validate() error {
 		}
 	}
 
+	for i := range c.Migrations {
+		migration := &c.Migrations[i]
+		label := migration.Name
+		if label == "" {
+			label = fmt.Sprintf("%d", i)
+			errs = append(errs, fmt.Errorf("ci.migrations[%d]: name is required", i))
+		}
+		if migration.SourceDir == "" {
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: source_dir is required", label))
+		}
+		if migration.Database.Env == "" && migration.Database.DSN == "" {
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: database env or dsn is required", label))
+		}
+		if migration.Plugin != "" && !safeCIPluginName(migration.Plugin) {
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: unsafe plugin name %q", label, migration.Plugin))
+		}
+		switch migration.Baseline.Mode {
+		case "", "apply-before-candidate":
+		default:
+			errs = append(errs, fmt.Errorf("ci.migrations[%s]: unknown baseline mode %q", label, migration.Baseline.Mode))
+		}
+	}
+
 	if c.Deploy != nil {
 		for name, env := range c.Deploy.Environments {
 			if env.Provider == "" {
@@ -231,6 +311,30 @@ func (c *CIConfig) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func safeCIPluginName(pluginName string) bool {
+	if pluginName == "" || pluginName == "." || pluginName == ".." || containsAny(pluginName, `/\`) {
+		return false
+	}
+	for _, r := range pluginName {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func containsAny(value, chars string) bool {
+	for _, ch := range chars {
+		for _, r := range value {
+			if r == ch {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ValidateWithWarnings runs Validate and additionally collects non-fatal
