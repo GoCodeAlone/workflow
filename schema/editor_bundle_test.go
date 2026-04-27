@@ -280,6 +280,38 @@ func TestExportEditorBundleKeysServiceContractsByModuleType(t *testing.T) {
 	}
 }
 
+func TestExportEditorBundleSkipsMalformedServiceContracts(t *testing.T) {
+	bundle, err := ExportEditorBundle(EditorBundleOptions{
+		ContractRegistries: []EditorContractRegistrySource{
+			{
+				Plugin: "workflow-plugin-service-test",
+				Source: EditorContractSourcePluginContractsJSON,
+				Registry: &pb.ContractRegistry{
+					Contracts: []*pb.ContractDescriptor{
+						{
+							Kind:          pb.ContractKind_CONTRACT_KIND_SERVICE,
+							ModuleType:    "module.bad",
+							ServiceName:   "BadService",
+							Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+							InputMessage:  "workflow.test.BadRequest",
+							OutputMessage: "workflow.test.BadResponse",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("export editor bundle: %v", err)
+	}
+	if len(bundle.Contracts) != 0 {
+		t.Fatalf("expected malformed service contract to be skipped, got %+v", bundle.Contracts)
+	}
+	if bundle.Contracts["service:module.bad/BadService/"] != nil {
+		t.Fatal("malformed service contract produced trailing-slash key")
+	}
+}
+
 func assertMessageField(t *testing.T, msg *EditorMessageDescriptor, name, typ string, repeated bool) {
 	t.Helper()
 	for _, field := range msg.Fields {

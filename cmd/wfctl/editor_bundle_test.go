@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,6 +130,56 @@ func TestRunEditorBundleRejectsMalformedPluginContractDescriptors(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "invalid_plugin_contract_descriptors") {
 		t.Fatalf("error = %v, want invalid_plugin_contract_descriptors", err)
+	}
+}
+
+func TestRunEditorBundleRejectsMalformedServiceMethodContract(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "workflow-plugin-bad-service")
+	if err := os.Mkdir(pluginDir, 0755); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"name":"workflow-plugin-bad-service"}`), 0644); err != nil {
+		t.Fatalf("write plugin manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.contracts.json"), []byte(`{
+  "version": "v1",
+  "contracts": [
+    {
+      "kind": "service_method",
+      "moduleType": "module.bad",
+      "serviceName": "BadService",
+      "mode": "strict",
+      "input": "workflow.bad.Input",
+      "output": "workflow.bad.Output"
+    }
+  ]
+}`), 0644); err != nil {
+		t.Fatalf("write plugin contracts: %v", err)
+	}
+
+	err := runEditorBundle([]string{"--registry=false", "--plugin-dir", pluginDir})
+	if err == nil {
+		t.Fatal("expected malformed service_method descriptor to fail")
+	}
+	if !strings.Contains(err.Error(), "malformed service_method") {
+		t.Fatalf("error = %v, want malformed service_method", err)
+	}
+}
+
+func TestRunEditorBundleFailsWhenDSLReferenceCannotLoad(t *testing.T) {
+	orig := loadEditorBundleDSLReferenceFunc
+	t.Cleanup(func() { loadEditorBundleDSLReferenceFunc = orig })
+	loadEditorBundleDSLReferenceFunc = func() (*DSLReferenceOutput, error) {
+		return nil, errors.New("broken reference")
+	}
+
+	err := runEditorBundle([]string{"--registry=false"})
+	if err == nil {
+		t.Fatal("expected DSL reference load failure")
+	}
+	if !strings.Contains(err.Error(), "load DSL reference: broken reference") {
+		t.Fatalf("error = %v, want DSL reference context", err)
 	}
 }
 

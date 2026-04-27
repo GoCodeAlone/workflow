@@ -386,13 +386,19 @@ func editorContractOwner(descriptor *pb.ContractDescriptor) (string, string) {
 	case pb.ContractKind_CONTRACT_KIND_TRIGGER:
 		return "trigger", descriptor.TriggerType
 	case pb.ContractKind_CONTRACT_KIND_SERVICE:
-		if descriptor.ModuleType != "" && descriptor.ServiceName != "" {
+		if descriptor.ModuleType != "" {
+			if descriptor.ServiceName == "" || descriptor.Method == "" {
+				return "", ""
+			}
 			return "service", descriptor.ModuleType + "/" + descriptor.ServiceName + "/" + descriptor.Method
 		}
-		if descriptor.ServiceName == "" {
-			return "service", descriptor.Method
+		if descriptor.ServiceName != "" {
+			if descriptor.Method == "" {
+				return "", ""
+			}
+			return "service", descriptor.ServiceName + "/" + descriptor.Method
 		}
-		return "service", descriptor.ServiceName + "/" + descriptor.Method
+		return "service", descriptor.Method
 	default:
 		return "", ""
 	}

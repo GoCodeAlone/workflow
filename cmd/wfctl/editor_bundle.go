@@ -15,6 +15,7 @@ import (
 var (
 	listEditorBundleRegistryPluginNames = ListPluginNames
 	fetchEditorBundleRegistryManifest   = FetchManifest
+	loadEditorBundleDSLReferenceFunc    = loadEditorBundleDSLReference
 )
 
 func runEditorBundle(args []string) error {
@@ -46,9 +47,11 @@ func runEditorBundle(args []string) error {
 		return err
 	}
 
-	if ref, refErr := loadEditorBundleDSLReference(); refErr == nil {
-		bundle.DSLReference = ref
+	ref, err := loadEditorBundleDSLReferenceFunc()
+	if err != nil {
+		return fmt.Errorf("load DSL reference: %w", err)
 	}
+	bundle.DSLReference = ref
 
 	w := os.Stdout
 	if *output != "" {
@@ -157,13 +160,7 @@ func editorBundlePluginRepoSource(path string) (schema.EditorContractRegistrySou
 			return schema.EditorContractRegistrySource{}, fmt.Errorf("%s: %s", finding.Code, finding.Message)
 		}
 	}
-	return schema.EditorContractRegistrySource{
-		Plugin:                    pluginName,
-		Source:                    schema.EditorContractSourcePluginContractsJSON,
-		DescriptorSetRef:          firstDescriptorSetRef(descriptors),
-		ContractDescriptorSetRefs: contractDescriptorSetRefsFromPluginDescriptors(descriptors),
-		Registry:                  contractRegistryFromPluginDescriptors(descriptors),
-	}, nil
+	return editorBundleSourceFromPluginDescriptors(pluginName, schema.EditorContractSourcePluginContractsJSON, descriptors)
 }
 
 func readPluginManifestMap(path string) (map[string]any, error) {
@@ -192,27 +189,46 @@ func editorBundleRegistrySources() ([]schema.EditorContractRegistrySource, error
 		if len(manifest.Contracts) == 0 {
 			continue
 		}
-		sources = append(sources, schema.EditorContractRegistrySource{
-			Plugin:                    manifest.Name,
-			Source:                    schema.EditorContractSourcePluginManifest,
-			DescriptorSetRef:          firstDescriptorSetRef(manifest.Contracts),
-			ContractDescriptorSetRefs: contractDescriptorSetRefsFromPluginDescriptors(manifest.Contracts),
-			Registry:                  contractRegistryFromPluginDescriptors(manifest.Contracts),
-		})
+		source, err := editorBundleSourceFromPluginDescriptors(manifest.Name, schema.EditorContractSourcePluginManifest, manifest.Contracts)
+		if err != nil {
+			return nil, fmt.Errorf("plugin registry manifest %q: %w", manifest.Name, err)
+		}
+		sources = append(sources, source)
 	}
 	return sources, nil
 }
 
-func contractRegistryFromPluginDescriptors(descriptors []pluginContractDescriptor) *pb.ContractRegistry {
+func editorBundleSourceFromPluginDescriptors(pluginName, source string, descriptors []pluginContractDescriptor) (schema.EditorContractRegistrySource, error) {
+	registry, err := contractRegistryFromPluginDescriptors(descriptors)
+	if err != nil {
+		return schema.EditorContractRegistrySource{}, err
+	}
+	refs, err := contractDescriptorSetRefsFromPluginDescriptors(descriptors)
+	if err != nil {
+		return schema.EditorContractRegistrySource{}, err
+	}
+	return schema.EditorContractRegistrySource{
+		Plugin:                    pluginName,
+		Source:                    source,
+		DescriptorSetRef:          firstDescriptorSetRef(descriptors),
+		ContractDescriptorSetRefs: refs,
+		Registry:                  registry,
+	}, nil
+}
+
+func contractRegistryFromPluginDescriptors(descriptors []pluginContractDescriptor) (*pb.ContractRegistry, error) {
 	registry := &pb.ContractRegistry{}
 	for i := range descriptors {
 		descriptor := &descriptors[i]
-		contract := contractDescriptorFromPluginDescriptor(descriptor)
+		contract, err := contractDescriptorFromPluginDescriptor(descriptor)
+		if err != nil {
+			return nil, err
+		}
 		if contract != nil {
 			registry.Contracts = append(registry.Contracts, contract)
 		}
 	}
-	return registry
+	return registry, nil
 }
 
 func firstDescriptorSetRef(descriptors []pluginContractDescriptor) string {
@@ -225,39 +241,42 @@ func firstDescriptorSetRef(descriptors []pluginContractDescriptor) string {
 	return ""
 }
 
-func contractDescriptorSetRefsFromPluginDescriptors(descriptors []pluginContractDescriptor) map[string]string {
+func contractDescriptorSetRefsFromPluginDescriptors(descriptors []pluginContractDescriptor) (map[string]string, error) {
 	refs := map[string]string{}
 	for i := range descriptors {
 		descriptor := &descriptors[i]
 		if descriptor.DescriptorSetRef == "" {
 			continue
 		}
-		id := editorBundleContractIDFromPluginDescriptor(descriptor)
+		id, err := editorBundleContractIDFromPluginDescriptor(descriptor)
+		if err != nil {
+			return nil, err
+		}
 		if id == "" {
 			continue
 		}
 		refs[id] = descriptor.DescriptorSetRef
 	}
 	if len(refs) == 0 {
-		return nil
+		return nil, nil
 	}
-	return refs
+	return refs, nil
 }
 
-func editorBundleContractIDFromPluginDescriptor(descriptor *pluginContractDescriptor) string {
+func editorBundleContractIDFromPluginDescriptor(descriptor *pluginContractDescriptor) (string, error) {
 	kind := normalizePluginContractKind(descriptor.Kind)
 	switch kind {
 	case "module":
 		if typ := descriptor.contractType(kind); typ != "" {
-			return "module:" + typ
+			return "module:" + typ, nil
 		}
 	case "step":
 		if typ := descriptor.contractType(kind); typ != "" {
-			return "step:" + typ
+			return "step:" + typ, nil
 		}
 	case "trigger":
 		if typ := descriptor.contractType(kind); typ != "" {
-			return "trigger:" + typ
+			return "trigger:" + typ, nil
 		}
 	case "service_method":
 		moduleType := descriptor.ModuleType
@@ -269,20 +288,34 @@ func editorBundleContractIDFromPluginDescriptor(descriptor *pluginContractDescri
 				method = parsedMethod
 			}
 		}
-		if moduleType != "" && serviceName != "" {
-			return "service:" + moduleType + "/" + serviceName + "/" + method
+		if id, ok := editorBundleServiceContractID(moduleType, serviceName, method); ok {
+			return id, nil
 		}
-		if serviceName != "" {
-			return "service:" + serviceName + "/" + method
-		}
-		if method != "" {
-			return "service:" + method
-		}
+		return "", fmt.Errorf("malformed service_method contract descriptor: serviceName and method are required when moduleType or serviceName is set")
 	}
-	return ""
+	return "", nil
 }
 
-func contractDescriptorFromPluginDescriptor(descriptor *pluginContractDescriptor) *pb.ContractDescriptor {
+func editorBundleServiceContractID(moduleType, serviceName, method string) (string, bool) {
+	if moduleType != "" {
+		if serviceName == "" || method == "" {
+			return "", false
+		}
+		return "service:" + moduleType + "/" + serviceName + "/" + method, true
+	}
+	if serviceName != "" {
+		if method == "" {
+			return "", false
+		}
+		return "service:" + serviceName + "/" + method, true
+	}
+	if method != "" {
+		return "service:" + method, true
+	}
+	return "", false
+}
+
+func contractDescriptorFromPluginDescriptor(descriptor *pluginContractDescriptor) (*pb.ContractDescriptor, error) {
 	kind := normalizePluginContractKind(descriptor.Kind)
 	mode := normalizePluginContractMode(descriptor.Mode)
 	contract := &pb.ContractDescriptor{
@@ -313,10 +346,13 @@ func contractDescriptorFromPluginDescriptor(descriptor *pluginContractDescriptor
 				contract.Method = method
 			}
 		}
+		if _, ok := editorBundleServiceContractID(contract.ModuleType, contract.ServiceName, contract.Method); !ok {
+			return nil, fmt.Errorf("malformed service_method contract descriptor: serviceName and method are required when moduleType or serviceName is set")
+		}
 	default:
-		return nil
+		return nil, nil
 	}
-	return contract
+	return contract, nil
 }
 
 func pbContractMode(mode string) pb.ContractMode {
