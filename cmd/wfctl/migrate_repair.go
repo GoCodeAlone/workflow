@@ -176,7 +176,7 @@ Options:
 		}
 	}
 	if statusErr := validateMigrationRepairResultStatus(result.Status); statusErr != nil {
-		printMigrationRepairResultDetails(out, result, jobEnvMap)
+		printMigrationRepairResultDetails(out, result, newMigrationRepairRedactor(jobEnvMap))
 		return redactMigrationRepairError(statusErr, jobEnvMap)
 	}
 	printMigrationRepairResult(out, result, jobEnvMap)
@@ -285,35 +285,39 @@ func collectMigrationRepairEnv(jobEnv, jobEnvFromEnv []string) (map[string]strin
 }
 
 func printMigrationRepairResult(out io.Writer, result *interfaces.MigrationRepairResult, secrets map[string]string) {
+	printMigrationRepairResultWithRedactor(out, result, newMigrationRepairRedactor(secrets))
+}
+
+func printMigrationRepairResultWithRedactor(out io.Writer, result *interfaces.MigrationRepairResult, redactor migrationRepairRedactor) {
 	if result == nil {
 		return
 	}
-	providerJobID := redactMigrationRepairSecrets(result.ProviderJobID, secrets)
-	status := redactMigrationRepairSecrets(result.Status, secrets)
+	providerJobID := redactor.redact(result.ProviderJobID)
+	status := redactor.redact(result.Status)
 	if result.ProviderJobID != "" {
 		fmt.Fprintf(out, "provider job %s: %s\n", providerJobID, status)
 	} else if result.Status != "" {
 		fmt.Fprintf(out, "migration repair: %s\n", status)
 	}
-	printMigrationRepairResultDetails(out, result, secrets)
+	printMigrationRepairResultDetails(out, result, redactor)
 }
 
-func printMigrationRepairResultDetails(out io.Writer, result *interfaces.MigrationRepairResult, secrets map[string]string) {
+func printMigrationRepairResultDetails(out io.Writer, result *interfaces.MigrationRepairResult, redactor migrationRepairRedactor) {
 	if result == nil {
 		return
 	}
 	if strings.TrimSpace(result.Logs) != "" {
-		fmt.Fprintln(out, redactMigrationRepairSecrets(result.Logs, secrets))
+		fmt.Fprintln(out, redactor.redact(result.Logs))
 	}
-	printMigrationRepairDiagnostics(out, result.Diagnostics, secrets)
+	printMigrationRepairDiagnostics(out, result.Diagnostics, redactor)
 }
 
-func printMigrationRepairDiagnostics(out io.Writer, diagnostics []interfaces.Diagnostic, secrets map[string]string) {
+func printMigrationRepairDiagnostics(out io.Writer, diagnostics []interfaces.Diagnostic, redactor migrationRepairRedactor) {
 	if len(diagnostics) == 0 {
 		return
 	}
 	fmt.Fprintln(out, "Diagnostics:")
-	for _, diagnostic := range redactMigrationRepairDiagnostics(diagnostics, secrets) {
+	for _, diagnostic := range redactMigrationRepairDiagnostics(diagnostics, redactor) {
 		if strings.TrimSpace(diagnostic.ID) != "" {
 			printMigrationRepairDiagnosticField(out, "-", "id", diagnostic.ID)
 		} else {
@@ -370,20 +374,21 @@ func writeMigrationRepairSummary(result *interfaces.MigrationRepairResult, envNa
 	if result == nil || os.Getenv("GITHUB_STEP_SUMMARY") == "" {
 		return nil
 	}
+	redactor := newMigrationRepairRedactor(secrets)
 	outcome := migrationRepairSummaryOutcome(result.Status)
-	diagnostics := redactMigrationRepairDiagnostics(result.Diagnostics, secrets)
+	diagnostics := redactMigrationRepairDiagnostics(result.Diagnostics, redactor)
 	if result.Logs != "" {
 		diagnostics = append(diagnostics, interfaces.Diagnostic{
-			ID:     redactMigrationRepairSecrets(result.ProviderJobID, secrets),
-			Phase:  redactMigrationRepairSecrets(result.Status, secrets),
+			ID:     redactor.redact(result.ProviderJobID),
+			Phase:  redactor.redact(result.Status),
 			Cause:  "migration repair logs",
-			Detail: redactMigrationRepairSecrets(result.Logs, secrets),
+			Detail: redactor.redact(result.Logs),
 		})
 	}
 	if len(diagnostics) == 0 && result.ProviderJobID != "" {
 		diagnostics = append(diagnostics, interfaces.Diagnostic{
-			ID:    redactMigrationRepairSecrets(result.ProviderJobID, secrets),
-			Phase: redactMigrationRepairSecrets(result.Status, secrets),
+			ID:    redactor.redact(result.ProviderJobID),
+			Phase: redactor.redact(result.Status),
 			Cause: "provider job",
 		})
 	}
@@ -403,23 +408,35 @@ func migrationRepairSummaryOutcome(status string) string {
 	return "FAILED"
 }
 
-func redactMigrationRepairDiagnostics(diagnostics []interfaces.Diagnostic, secrets map[string]string) []interfaces.Diagnostic {
+func redactMigrationRepairDiagnostics(diagnostics []interfaces.Diagnostic, redactor migrationRepairRedactor) []interfaces.Diagnostic {
 	if len(diagnostics) == 0 {
 		return nil
 	}
 	redacted := make([]interfaces.Diagnostic, 0, len(diagnostics))
 	for _, diagnostic := range diagnostics {
-		diagnostic.ID = redactMigrationRepairSecrets(diagnostic.ID, secrets)
-		diagnostic.Phase = redactMigrationRepairSecrets(diagnostic.Phase, secrets)
-		diagnostic.Cause = redactMigrationRepairSecrets(diagnostic.Cause, secrets)
-		diagnostic.Detail = redactMigrationRepairSecrets(diagnostic.Detail, secrets)
+		diagnostic.ID = redactor.redact(diagnostic.ID)
+		diagnostic.Phase = redactor.redact(diagnostic.Phase)
+		diagnostic.Cause = redactor.redact(diagnostic.Cause)
+		diagnostic.Detail = redactor.redact(diagnostic.Detail)
 		redacted = append(redacted, diagnostic)
 	}
 	return redacted
 }
 
 func redactMigrationRepairSecrets(value string, secrets map[string]string) string {
-	for _, secret := range migrationRepairSecretValues(secrets) {
+	return newMigrationRepairRedactor(secrets).redact(value)
+}
+
+type migrationRepairRedactor struct {
+	secrets []string
+}
+
+func newMigrationRepairRedactor(secrets map[string]string) migrationRepairRedactor {
+	return migrationRepairRedactor{secrets: migrationRepairSecretValues(secrets)}
+}
+
+func (r migrationRepairRedactor) redact(value string) string {
+	for _, secret := range r.secrets {
 		value = strings.ReplaceAll(value, secret, "[REDACTED]")
 	}
 	return value
