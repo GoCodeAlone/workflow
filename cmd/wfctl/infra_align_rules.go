@@ -1,0 +1,679 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/interfaces"
+)
+
+// AlignFinding is a single rule violation emitted by an alignment check.
+type AlignFinding struct {
+	Rule     string // R-A1, R-A2, etc.
+	Severity string // FAIL or WARN
+	Resource string // affected resource name
+	Message  string // human-readable description
+}
+
+// alignContext holds all modules parsed from a config file plus helper indexes.
+type alignContext struct {
+	modules []config.ModuleConfig
+
+	// indexes built once and reused by rules
+	containerServices map[string]config.ModuleConfig // name → infra.container_service
+	ciBuilds          []config.ModuleConfig          // all ci.build modules
+	databases         []config.ModuleConfig          // all infra.database modules
+	secretKeys        map[string]struct{}            // union of secrets.generate/requires keys
+}
+
+func buildAlignContext(cfgFile string) (*alignContext, error) {
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	ctx := &alignContext{
+		modules:           cfg.Modules,
+		containerServices: map[string]config.ModuleConfig{},
+		secretKeys:        map[string]struct{}{},
+	}
+	for _, m := range cfg.Modules {
+		switch {
+		case m.Type == "infra.container_service":
+			ctx.containerServices[m.Name] = m
+		case strings.HasPrefix(m.Type, "ci.build"):
+			ctx.ciBuilds = append(ctx.ciBuilds, m)
+		case m.Type == "infra.database":
+			ctx.databases = append(ctx.databases, m)
+		case m.Type == "secrets.generate" || m.Type == "secrets.requires":
+			if gen, ok := extractSecretKeys(m.Config, "generate"); ok {
+				for _, k := range gen {
+					ctx.secretKeys[k] = struct{}{}
+				}
+			}
+			if req, ok := extractSecretKeys(m.Config, "requires"); ok {
+				for _, k := range req {
+					ctx.secretKeys[k] = struct{}{}
+				}
+			}
+		}
+	}
+	return ctx, nil
+}
+
+// extractSecretKeys extracts key names from config[field] which is expected
+// to be []any where each element is map[string]any with a "key" field.
+func extractSecretKeys(cfg map[string]any, field string) ([]string, bool) {
+	raw, ok := cfg[field]
+	if !ok {
+		return nil, false
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, false
+	}
+	var keys []string
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok {
+			if k, ok := m["key"].(string); ok && k != "" {
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys, true
+}
+
+// ── R-A1: container/runtime alignment ──────────────────────────────────────
+
+func checkRA1(ctx *alignContext) []AlignFinding {
+	// Build a set of image names from ci.build containers.
+	ciImages := map[string]string{} // image name → dockerfile path
+	for _, build := range ctx.ciBuilds {
+		if containers, ok := build.Config["containers"]; ok {
+			if items, ok := containers.([]any); ok {
+				for _, item := range items {
+					if m, ok := item.(map[string]any); ok {
+						name, _ := m["name"].(string)
+						df, _ := m["dockerfile"].(string)
+						if name != "" {
+							ciImages[name] = df
+						}
+					}
+				}
+			}
+		}
+	}
+
+	var findings []AlignFinding
+	for _, svc := range ctx.containerServices {
+		image, _ := svc.Config["image"].(string)
+		if image == "" {
+			continue
+		}
+		// Parse image name (strip tag)
+		imageName := image
+		if idx := strings.LastIndex(image, ":"); idx > 0 {
+			// Handle registry/name:tag — only strip the tag portion
+			imageName = image[:idx]
+		}
+		// Get just the final name component for matching
+		parts := strings.Split(imageName, "/")
+		shortName := parts[len(parts)-1]
+
+		// R-A1a: orphaned image reference (only check when ci.build modules exist OR if none exist at all)
+		if _, found := ciImages[shortName]; !found {
+			findings = append(findings, AlignFinding{
+				Rule:     "R-A1",
+				Severity: "FAIL",
+				Resource: svc.Name,
+				Message:  fmt.Sprintf("orphaned image reference %q: no ci.build container named %q", image, shortName),
+			})
+			// Skip Dockerfile checks if we can't match the build
+			continue
+		}
+
+		// Resolve dockerfile path
+		dfPath := resolveDockerfilePath(svc, ciImages, shortName)
+		if dfPath == "" {
+			continue
+		}
+		if _, err := os.Stat(dfPath); err != nil {
+			// Dockerfile not on disk — skip lint
+			continue
+		}
+
+		// R-A1b: USER directive check
+		if f := checkDockerfileUser(svc.Name, dfPath); f != nil {
+			findings = append(findings, *f)
+		}
+
+		// R-A1c: EXPOSE vs http_port/internal_ports check
+		if f := checkDockerfileExpose(svc, dfPath); f != nil {
+			findings = append(findings, *f...)
+		}
+	}
+	return findings
+}
+
+func resolveDockerfilePath(svc config.ModuleConfig, ciImages map[string]string, shortName string) string {
+	// Check service config directly
+	if df, ok := svc.Config["dockerfile"].(string); ok && df != "" {
+		return df
+	}
+	// Fall back to ci.build container match
+	if df, ok := ciImages[shortName]; ok && df != "" {
+		return df
+	}
+	return ""
+}
+
+func checkDockerfileUser(svcName, dfPath string) *AlignFinding {
+	f, err := os.Open(dfPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var foundUser string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(strings.ToUpper(line), "USER ") {
+			foundUser = strings.TrimSpace(line[5:])
+		}
+	}
+
+	if foundUser == "" {
+		return &AlignFinding{
+			Rule:     "R-A1",
+			Severity: "FAIL",
+			Resource: svcName,
+			Message:  fmt.Sprintf("Dockerfile %q has no USER directive (container runs as root)", dfPath),
+		}
+	}
+	// FAIL if explicitly root
+	if foundUser == "root" || foundUser == "0" {
+		return &AlignFinding{
+			Rule:     "R-A1",
+			Severity: "FAIL",
+			Resource: svcName,
+			Message:  fmt.Sprintf("Dockerfile %q sets USER root — containers must not run as root", dfPath),
+		}
+	}
+	return nil
+}
+
+func checkDockerfileExpose(svc config.ModuleConfig, dfPath string) *[]AlignFinding {
+	f, err := os.Open(dfPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var exposedPorts []int
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		upper := strings.ToUpper(line)
+		if strings.HasPrefix(upper, "EXPOSE ") {
+			parts := strings.Fields(line[7:])
+			for _, p := range parts {
+				// Strip /tcp or /udp
+				portStr := strings.Split(p, "/")[0]
+				if port, err := strconv.Atoi(portStr); err == nil {
+					exposedPorts = append(exposedPorts, port)
+				}
+			}
+		}
+	}
+
+	if len(exposedPorts) == 0 {
+		return nil
+	}
+
+	// Gather declared ports from config
+	declaredPorts := map[int]struct{}{}
+	if httpPort, ok := svc.Config["http_port"]; ok {
+		if p := toInt(httpPort); p > 0 {
+			declaredPorts[p] = struct{}{}
+		}
+	}
+	if raw, ok := svc.Config["internal_ports"]; ok {
+		if items, ok := raw.([]any); ok {
+			for _, item := range items {
+				if p := toInt(item); p > 0 {
+					declaredPorts[p] = struct{}{}
+				}
+			}
+		}
+	}
+
+	if len(declaredPorts) == 0 {
+		return nil
+	}
+
+	var findings []AlignFinding
+	for _, ep := range exposedPorts {
+		if _, ok := declaredPorts[ep]; !ok {
+			findings = append(findings, AlignFinding{
+				Rule:     "R-A1",
+				Severity: "FAIL",
+				Resource: svc.Name,
+				Message:  fmt.Sprintf("Dockerfile EXPOSEs port %d but it is not in http_port or internal_ports", ep),
+			})
+		}
+	}
+	if len(findings) == 0 {
+		return nil
+	}
+	return &findings
+}
+
+// ── R-A2: health-check alignment ───────────────────────────────────────────
+
+func checkRA2(ctx *alignContext, strictHealth bool) []AlignFinding {
+	var findings []AlignFinding
+	for _, svc := range ctx.containerServices {
+		path := healthCheckPath(svc.Config)
+		if path == "" {
+			continue
+		}
+		srcDir, _ := svc.Config["src_dir"].(string)
+		if srcDir == "" {
+			srcDir = "."
+		}
+
+		found, err := pathExistsInSource(srcDir, path)
+		if err != nil || found {
+			continue
+		}
+
+		severity := "WARN"
+		if strictHealth {
+			severity = "FAIL"
+		}
+		findings = append(findings, AlignFinding{
+			Rule:     "R-A2",
+			Severity: severity,
+			Resource: svc.Name,
+			Message:  fmt.Sprintf("health check path %q not found in source tree %q", path, srcDir),
+		})
+	}
+	return findings
+}
+
+func healthCheckPath(cfg map[string]any) string {
+	// Try health_check.path (snake_case)
+	if hc, ok := cfg["health_check"]; ok {
+		if m, ok := hc.(map[string]any); ok {
+			if p, ok := m["path"].(string); ok {
+				return p
+			}
+		}
+	}
+	// Try healthCheck.path (camelCase)
+	if hc, ok := cfg["healthCheck"]; ok {
+		if m, ok := hc.(map[string]any); ok {
+			if p, ok := m["path"].(string); ok {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+var sourceExtensions = map[string]struct{}{
+	".go": {}, ".js": {}, ".ts": {}, ".py": {}, ".rs": {},
+}
+
+func pathExistsInSource(srcDir, path string) (bool, error) {
+	var found bool
+	err := filepath.Walk(srcDir, func(fp string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || found {
+			return nil
+		}
+		if _, ok := sourceExtensions[filepath.Ext(fp)]; !ok {
+			return nil
+		}
+		data, err := os.ReadFile(fp)
+		if err != nil {
+			return nil
+		}
+		if strings.Contains(string(data), path) {
+			found = true
+		}
+		return nil
+	})
+	return found, err
+}
+
+// ── R-A3: service-to-service DNS alignment ──────────────────────────────────
+
+var internalDNSRe = regexp.MustCompile(`([a-z][a-z0-9-]+)\.internal:(\d+)`)
+
+func checkRA3(ctx *alignContext) []AlignFinding {
+	var findings []AlignFinding
+	for _, m := range ctx.modules {
+		envVars := extractEnvVars(m.Config)
+		for _, val := range envVars {
+			matches := internalDNSRe.FindAllStringSubmatch(val, -1)
+			for _, match := range matches {
+				hostname := match[1]
+				portStr := match[2]
+				port, _ := strconv.Atoi(portStr)
+
+				target, ok := ctx.containerServices[hostname]
+				if !ok {
+					findings = append(findings, AlignFinding{
+						Rule:     "R-A3",
+						Severity: "FAIL",
+						Resource: m.Name,
+						Message:  fmt.Sprintf("DNS reference to %q.internal not resolvable: no container_service named %q", hostname, hostname),
+					})
+					continue
+				}
+
+				// Verify port matches http_port or internal_ports
+				if !serviceHasPort(target, port) {
+					findings = append(findings, AlignFinding{
+						Rule:     "R-A3",
+						Severity: "FAIL",
+						Resource: m.Name,
+						Message:  fmt.Sprintf("DNS reference to %s.internal:%d: port %d not declared in service %q (http_port or internal_ports)", hostname, port, port, hostname),
+					})
+				}
+			}
+		}
+	}
+	return findings
+}
+
+func extractEnvVars(cfg map[string]any) map[string]string {
+	result := map[string]string{}
+	if raw, ok := cfg["env_vars"]; ok {
+		if m, ok := raw.(map[string]any); ok {
+			for k, v := range m {
+				if s, ok := v.(string); ok {
+					result[k] = s
+				}
+			}
+		}
+	}
+	return result
+}
+
+func serviceHasPort(svc config.ModuleConfig, port int) bool {
+	if httpPort := toInt(svc.Config["http_port"]); httpPort == port {
+		return true
+	}
+	if raw, ok := svc.Config["internal_ports"]; ok {
+		if items, ok := raw.([]any); ok {
+			for _, item := range items {
+				if toInt(item) == port {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// ── R-A4: env-var resolution ───────────────────────────────────────────────
+
+var envTokenRe = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+func checkRA4(ctx *alignContext) []AlignFinding {
+	var findings []AlignFinding
+	for _, m := range ctx.modules {
+		envVars := extractEnvVars(m.Config)
+		for _, val := range envVars {
+			tokens := envTokenRe.FindAllStringSubmatch(val, -1)
+			for _, tok := range tokens {
+				varName := tok[1]
+				if _, resolved := ctx.secretKeys[varName]; resolved {
+					continue
+				}
+				if os.Getenv(varName) != "" {
+					continue
+				}
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A4",
+					Severity: "FAIL",
+					Resource: m.Name,
+					Message:  fmt.Sprintf("unresolved env var: ${%s}", varName),
+				})
+			}
+		}
+	}
+	return findings
+}
+
+// ── R-A5: migrations alignment ─────────────────────────────────────────────
+
+func checkRA5(ctx *alignContext) []AlignFinding {
+	// Build a set of ci.build container image names
+	ciBuildImages := map[string]struct{}{}
+	for _, build := range ctx.ciBuilds {
+		if containers, ok := build.Config["containers"]; ok {
+			if items, ok := containers.([]any); ok {
+				for _, item := range items {
+					if m, ok := item.(map[string]any); ok {
+						if name, ok := m["name"].(string); ok && name != "" {
+							ciBuildImages[name] = struct{}{}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	var findings []AlignFinding
+	for svcName, svc := range ctx.containerServices {
+		preDeploy, ok := svc.Config["pre_deploy"]
+		if !ok {
+			continue
+		}
+		pdMap, ok := preDeploy.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _ := pdMap["kind"].(string)
+		if kind != "migrate" {
+			continue
+		}
+
+		// R-A5a: must have an infra.database with trusted_sources entry for this service
+		dbFound := false
+		for _, db := range ctx.databases {
+			if dbTrustsService(db, svcName) {
+				dbFound = true
+				break
+			}
+		}
+		if !dbFound {
+			// Also accept any DB at all (spec says "the same env's infra.database must declare trusted_sources")
+			if len(ctx.databases) == 0 {
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A5",
+					Severity: "FAIL",
+					Resource: svcName,
+					Message:  fmt.Sprintf("service %q has pre_deploy migrate but no infra.database module exists", svcName),
+				})
+			} else {
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A5",
+					Severity: "FAIL",
+					Resource: svcName,
+					Message:  fmt.Sprintf("service %q has pre_deploy migrate but no infra.database declares trusted_sources for it", svcName),
+				})
+			}
+		}
+
+		// R-A5b: pre_deploy image must reference a ci.build container
+		if image, ok := pdMap["image"].(string); ok && image != "" {
+			imageName := image
+			if idx := strings.LastIndex(image, ":"); idx > 0 {
+				imageName = image[:idx]
+			}
+			parts := strings.Split(imageName, "/")
+			shortName := parts[len(parts)-1]
+			if len(ciBuildImages) > 0 {
+				if _, ok := ciBuildImages[shortName]; !ok {
+					findings = append(findings, AlignFinding{
+						Rule:     "R-A5",
+						Severity: "FAIL",
+						Resource: svcName,
+						Message:  fmt.Sprintf("pre_deploy image %q not found in any ci.build container", image),
+					})
+				}
+			}
+		}
+	}
+	return findings
+}
+
+func dbTrustsService(db config.ModuleConfig, svcName string) bool {
+	raw, ok := db.Config["trusted_sources"]
+	if !ok {
+		return false
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok {
+			if m["type"] == "app" && m["value"] == svcName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ── R-A6: network/exposure alignment ───────────────────────────────────────
+
+var internalServiceNameRe = regexp.MustCompile(`(^|-)(nats|redis|db|broker|internal)($|-)`)
+
+func checkRA6(ctx *alignContext) []AlignFinding {
+	var findings []AlignFinding
+	for _, svc := range ctx.containerServices {
+		expose, _ := svc.Config["expose"].(string)
+		httpPort := toInt(svc.Config["http_port"])
+
+		// R-A6a: expose:internal AND http_port is mutually exclusive
+		if expose == "internal" && httpPort > 0 {
+			findings = append(findings, AlignFinding{
+				Rule:     "R-A6",
+				Severity: "FAIL",
+				Resource: svc.Name,
+				Message:  "expose: internal with http_port is mutually exclusive",
+			})
+		}
+
+		// R-A6b: name pattern suggests internal service but expose:internal not set
+		if internalServiceNameRe.MatchString(svc.Name) && httpPort > 0 && expose != "internal" {
+			findings = append(findings, AlignFinding{
+				Rule:     "R-A6",
+				Severity: "WARN",
+				Resource: svc.Name,
+				Message:  "internal service should use expose: internal",
+			})
+		}
+	}
+	return findings
+}
+
+// ── R-A7: plan-output sanity ───────────────────────────────────────────────
+
+func checkRA7(plan *interfaces.IaCPlan, maxChanges int) []AlignFinding {
+	if plan == nil {
+		return nil
+	}
+	var findings []AlignFinding
+
+	for _, action := range plan.Actions {
+		if action.Action == "delete" {
+			if protected, _ := action.Resource.Config["protected"].(bool); protected {
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A7",
+					Severity: "FAIL",
+					Resource: action.Resource.Name,
+					Message:  fmt.Sprintf("plan deletes protected resource %q", action.Resource.Name),
+				})
+			}
+		}
+	}
+
+	if len(plan.Actions) > maxChanges {
+		findings = append(findings, AlignFinding{
+			Rule:     "R-A7",
+			Severity: "WARN",
+			Resource: "(plan)",
+			Message:  fmt.Sprintf("plan has %d actions, exceeding max-changes limit of %d", len(plan.Actions), maxChanges),
+		})
+	}
+
+	return findings
+}
+
+// ── R-A8: WebAuthn alignment ───────────────────────────────────────────────
+
+func checkRA8(ctx *alignContext) []AlignFinding {
+	var findings []AlignFinding
+	for _, m := range ctx.modules {
+		envVars := extractEnvVars(m.Config)
+		rpID, hasRPID := envVars["WEBAUTHN_RP_ID"]
+		origin, hasOrigin := envVars["WEBAUTHN_ORIGIN"]
+		if !hasRPID || !hasOrigin {
+			continue
+		}
+
+		u, err := url.Parse(origin)
+		if err != nil {
+			findings = append(findings, AlignFinding{
+				Rule:     "R-A8",
+				Severity: "FAIL",
+				Resource: m.Name,
+				Message:  fmt.Sprintf("WEBAUTHN_ORIGIN %q is not a valid URL: %v", origin, err),
+			})
+			continue
+		}
+
+		host := u.Hostname()
+		if host != rpID {
+			findings = append(findings, AlignFinding{
+				Rule:     "R-A8",
+				Severity: "FAIL",
+				Resource: m.Name,
+				Message:  fmt.Sprintf("WEBAUTHN_RP_ID %q does not match WEBAUTHN_ORIGIN host %q", rpID, host),
+			})
+		}
+	}
+	return findings
+}
+
+// ── utilities ──────────────────────────────────────────────────────────────
+
+// toInt converts an any value to int, handling both int and float64
+// (YAML unmarshal produces float64 for numbers).
+func toInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case string:
+		i, _ := strconv.Atoi(n)
+		return i
+	}
+	return 0
+}
