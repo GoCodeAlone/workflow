@@ -150,6 +150,12 @@ type ServiceInvoker interface {
 	InvokeMethod(method string, args map[string]any) (map[string]any, error)
 }
 
+// ServiceContextInvoker is optionally implemented by ModuleInstance to receive
+// the gRPC request context for long-running service invocations.
+type ServiceContextInvoker interface {
+	InvokeMethodContext(ctx context.Context, method string, args map[string]any) (map[string]any, error)
+}
+
 // TypedServiceInvoker is optionally implemented by ModuleInstance to handle
 // strict protobuf service method invocations from the host.
 type TypedServiceInvoker interface {

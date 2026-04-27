@@ -123,6 +123,12 @@ func (m *RemoteModule) Destroy() error {
 
 // InvokeService calls a named method on the remote module's service interface.
 func (m *RemoteModule) InvokeService(method string, args map[string]any) (map[string]any, error) {
+	return m.InvokeServiceContext(context.Background(), method, args)
+}
+
+// InvokeServiceContext calls a named method on the remote module's service
+// interface using the caller's context.
+func (m *RemoteModule) InvokeServiceContext(ctx context.Context, method string, args map[string]any) (map[string]any, error) {
 	req := &pb.InvokeServiceRequest{
 		HandleId: m.handleID,
 		Method:   method,
@@ -142,7 +148,7 @@ func (m *RemoteModule) InvokeService(method string, args map[string]any) (map[st
 			}
 		}
 	}
-	resp, err := m.client.InvokeService(context.Background(), req)
+	resp, err := m.client.InvokeService(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("remote invoke %s: %w", method, err)
 	}

@@ -8,6 +8,8 @@ import (
 	"github.com/GoCodeAlone/workflow/module"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -24,6 +26,7 @@ type stubPluginServiceClient struct {
 
 	lastInvokeRequest *pb.InvokeServiceRequest
 	invokeResponse    *pb.InvokeServiceResponse
+	invokeErr         error
 }
 
 // ExecuteStep records the request and returns the configured response.
@@ -77,6 +80,9 @@ func (c *stubPluginServiceClient) DestroyStep(_ context.Context, _ *pb.HandleReq
 }
 func (c *stubPluginServiceClient) InvokeService(_ context.Context, req *pb.InvokeServiceRequest, _ ...grpc.CallOption) (*pb.InvokeServiceResponse, error) {
 	c.lastInvokeRequest = req
+	if c.invokeErr != nil {
+		return nil, c.invokeErr
+	}
 	if c.invokeResponse != nil {
 		return c.invokeResponse, nil
 	}
@@ -397,6 +403,18 @@ func TestRemoteModule_InvokeService_StrictContractRequiresTypedOutput(t *testing
 	}
 	if !strings.Contains(err.Error(), "requires typed_output") {
 		t.Fatalf("expected missing typed output error, got %v", err)
+	}
+}
+
+func TestRemoteModule_InvokeService_PreservesStatusErrors(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		invokeErr: status.Error(codes.Unimplemented, "provider does not implement ProviderMigrationRepairer"),
+	}
+	module := NewRemoteModule("test-module", "module-handle", stub)
+
+	_, err := module.InvokeService("IaCProvider.RepairDirtyMigration", map[string]any{})
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("InvokeService error code = %v, want Unimplemented (err=%v)", status.Code(err), err)
 	}
 }
 

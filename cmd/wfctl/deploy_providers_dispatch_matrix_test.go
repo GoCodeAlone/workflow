@@ -319,6 +319,16 @@ func TestDispatchMatrix_RemoteIaCProvider(t *testing.T) {
 			},
 		},
 		{
+			name:         "RepairDirtyMigration",
+			wantMethod:   "IaCProvider.RepairDirtyMigration",
+			requiredKeys: []string{"request"},
+			invoke: func(p *remoteIaCProvider, ri *recordingInvoker) error {
+				ri.resp = map[string]any{}
+				_, err := p.RepairDirtyMigration(ctx, interfaces.MigrationRepairRequest{})
+				return err
+			},
+		},
+		{
 			// BootstrapStateBackend sends cfg directly as the args map (no wrapper key).
 			// When cfg is nil/empty InvokeService must still be called (args may be nil).
 			name:         "BootstrapStateBackend_nilCfg",

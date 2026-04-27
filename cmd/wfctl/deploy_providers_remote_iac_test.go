@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -421,4 +423,108 @@ func TestRemoteIaC_ResolveSizing_Error(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+}
+
+// ── Migration Repair ────────────────────────────────────────────────────────
+
+func TestRemoteIaCProvider_RepairDirtyMigration(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{
+		"provider_job_id": "job-123",
+		"status":          interfaces.MigrationRepairStatusSucceeded,
+		"applied":         []any{"20260426000006"},
+		"logs":            "repair complete",
+	}}
+	p := newIaCProvider(si)
+
+	result, err := p.RepairDirtyMigration(context.Background(), interfaces.MigrationRepairRequest{
+		AppResourceName:      "bmw-app",
+		DatabaseResourceName: "bmw-db",
+		JobImage:             "registry.example/workflow-migrate:sha",
+		SourceDir:            "/migrations",
+		ExpectedDirtyVersion: "20260426000005",
+		ForceVersion:         "20260426000004",
+		ThenUp:               true,
+		ConfirmForce:         interfaces.MigrationRepairConfirmation,
+		Env:                  map[string]string{"DATABASE_URL": "postgres://example"},
+		TimeoutSeconds:       600,
+	})
+	if err != nil {
+		t.Fatalf("RepairDirtyMigration: unexpected error: %v", err)
+	}
+	if si.method != "IaCProvider.RepairDirtyMigration" {
+		t.Errorf("method: got %q, want IaCProvider.RepairDirtyMigration", si.method)
+	}
+	request, ok := si.args["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("request arg: got %T, want map[string]any", si.args["request"])
+	}
+	if request["expected_dirty_version"] != "20260426000005" {
+		t.Errorf("expected_dirty_version arg: got %v", request["expected_dirty_version"])
+	}
+	if result.ProviderJobID != "job-123" {
+		t.Errorf("ProviderJobID: got %q", result.ProviderJobID)
+	}
+	if result.Status != interfaces.MigrationRepairStatusSucceeded {
+		t.Errorf("Status: got %q", result.Status)
+	}
+	if len(result.Applied) != 1 || result.Applied[0] != "20260426000006" {
+		t.Errorf("Applied: got %v", result.Applied)
+	}
+}
+
+func TestRemoteIaCProvider_RepairDirtyMigration_DecodeError(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{
+		"status": 123,
+	}}
+	p := newIaCProvider(si)
+
+	_, err := p.RepairDirtyMigration(context.Background(), interfaces.MigrationRepairRequest{})
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if !strings.Contains(err.Error(), "IaCProvider.RepairDirtyMigration: decode result") {
+		t.Fatalf("error %q missing decode context", err)
+	}
+}
+
+func TestRemoteIaCProvider_RepairDirtyMigration_UsesContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ci := &contextRecordingInvoker{resp: map[string]any{
+		"status": interfaces.MigrationRepairStatusSucceeded,
+	}}
+	p := &remoteIaCProvider{invoker: ci}
+
+	_, err := p.RepairDirtyMigration(ctx, interfaces.MigrationRepairRequest{})
+	if err == nil {
+		t.Fatal("expected canceled context error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if !ci.usedContext {
+		t.Fatal("RepairDirtyMigration did not use context-aware invoker")
+	}
+	if ci.fallbackUsed {
+		t.Fatal("RepairDirtyMigration used context-free fallback")
+	}
+}
+
+type contextRecordingInvoker struct {
+	resp         map[string]any
+	usedContext  bool
+	fallbackUsed bool
+}
+
+func (c *contextRecordingInvoker) InvokeService(_ string, _ map[string]any) (map[string]any, error) {
+	c.fallbackUsed = true
+	return c.resp, nil
+}
+
+func (c *contextRecordingInvoker) InvokeServiceContext(ctx context.Context, _ string, _ map[string]any) (map[string]any, error) {
+	c.usedContext = true
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return c.resp, nil
 }

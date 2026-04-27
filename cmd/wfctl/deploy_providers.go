@@ -188,6 +188,10 @@ type remoteServiceInvoker interface {
 	InvokeService(method string, args map[string]any) (map[string]any, error)
 }
 
+type remoteServiceContextInvoker interface {
+	InvokeServiceContext(ctx context.Context, method string, args map[string]any) (map[string]any, error)
+}
+
 // remoteIaCProvider implements interfaces.IaCProvider by routing every method
 // through InvokeService to the plugin subprocess. Only the methods needed by
 // wfctl ci run deploy are fully implemented; the rest return a clear error.
@@ -392,6 +396,33 @@ func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.S
 		return nil, fmt.Errorf("IaCProvider.ResolveSizing: decode result: %w", err)
 	}
 	return &sizing, nil
+}
+
+func (r *remoteIaCProvider) RepairDirtyMigration(ctx context.Context, req interfaces.MigrationRepairRequest) (*interfaces.MigrationRepairResult, error) {
+	reqAny, err := jsonToAny(req)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.RepairDirtyMigration: marshal request: %w", err)
+	}
+	args := map[string]any{
+		"request": reqAny,
+	}
+	var res map[string]any
+	if invoker, ok := r.invoker.(remoteServiceContextInvoker); ok {
+		res, err = invoker.InvokeServiceContext(ctx, "IaCProvider.RepairDirtyMigration", args)
+	} else {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		res, err = r.invoker.InvokeService("IaCProvider.RepairDirtyMigration", args)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var result interfaces.MigrationRepairResult
+	if err := anyToStruct(res, &result); err != nil {
+		return nil, fmt.Errorf("IaCProvider.RepairDirtyMigration: decode result: %w", err)
+	}
+	return &result, nil
 }
 
 func (r *remoteIaCProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
