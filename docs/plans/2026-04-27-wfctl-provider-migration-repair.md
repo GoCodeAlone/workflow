@@ -1,3 +1,20 @@
+---
+status: in_progress
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: fe94eff
+external_refs: []
+verification:
+  last_checked: 2026-04-27
+  commands:
+    - GOWORK=off go test ./interfaces ./cmd/wfctl -run 'Test.*MigrationRepair|Test.*RepairDirty' -count=1
+  result: partial
+supersedes: []
+superseded_by: []
+---
+
 # wfctl Provider-Executed Migration Repair Implementation Plan
 
 > **Implementation note:** Execute this plan task-by-task and validate each step before proceeding.

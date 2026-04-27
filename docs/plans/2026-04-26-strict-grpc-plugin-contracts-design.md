@@ -45,7 +45,9 @@ verification:
   last_checked: 2026-04-27
   commands:
     - GOWORK=off go test ./plugin/external/... ./cmd/wfctl -count=1
-    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --strict-contracts
+    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root "$WORKSPACE" --strict-contracts
+  notes:
+    - Set WORKSPACE to the local checkout root that contains the workflow repo and sibling plugin/application repositories.
   result: partial
 supersedes: []
 superseded_by: []

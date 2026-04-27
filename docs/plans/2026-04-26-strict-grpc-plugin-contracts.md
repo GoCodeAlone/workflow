@@ -45,7 +45,7 @@ verification:
   last_checked: 2026-04-27
   commands:
     - GOWORK=off go test ./plugin/external/... ./cmd/wfctl -count=1
-    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --strict-contracts
+    - GOWORK=off go run ./cmd/wfctl audit plugins --repo-root "$WORKSPACE" --strict-contracts
     - GOWORK=off go run ./cmd/wfctl audit plans --dir docs/plans --fix-index
   result: partial
 supersedes: []
@@ -70,7 +70,7 @@ Core Workflow support is implemented through `workflow eb53150`: additive proto 
 
 Downstream strict-contract migrations are merged for `workflow-plugin-ci-generator`, `workflow-plugin-approval`, `workflow-plugin-gitlab`, `workflow-plugin-marketplace`, `workflow-plugin-infra`, `workflow-plugin-rooms`, `workflow-plugin-botdetect`, `workflow-plugin-audit`, and `workflow-plugin-sso`. `workflow-plugin-ws-auth` is in PR review, and the next auth/security batch is in progress.
 
-The overall plan remains `in_progress` because downstream first-party plugin and application repos still need typed descriptors and adapters. The strict audit against `/Users/jon/workspace` is expected to fail until those repos migrate.
+The overall plan remains `in_progress` because downstream first-party plugin and application repos still need typed descriptors and adapters. Set `WORKSPACE` to the local checkout root that contains `workflow` and sibling plugin/application repositories; the strict audit against that workspace is expected to fail until those repos migrate.
 
 ### Task 1: Core Proto Contract Descriptors
 
@@ -273,7 +273,7 @@ Expected: PASS.
 
 **Step 2: Run runtime validation**
 
-Run: `GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace --strict-contracts`
+Run: `GOWORK=off go run ./cmd/wfctl audit plugins --repo-root "$WORKSPACE" --strict-contracts`
 
 Expected: non-zero before downstream repos migrate, with findings naming each legacy repo/type.
 
@@ -297,7 +297,7 @@ git commit -m "docs: track strict grpc plugin contract plan"
 
 **Step 1: Inventory repos**
 
-Run: `find /Users/jon/workspace -maxdepth 1 -type d \( -name 'workflow-plugin-*' -o -name 'workflow-dnd' -o -name 'workflow-cardgame' -o -name 'core-dump' -o -name 'buymywishlist' \) -print | sort`
+Run: `find "$WORKSPACE" -maxdepth 1 -type d \( -name 'workflow-plugin-*' -o -name 'workflow-dnd' -o -name 'workflow-cardgame' -o -name 'core-dump' -o -name 'buymywishlist' \) -print | sort`
 
 Expected: list includes all first-party plugin and application repos.
 
