@@ -100,6 +100,11 @@ func (k ValidationKind) String() string {
 //
 // Strict-mode plugins (plugin.json mode == "strict") are immune to BC-2 and do
 // not need this matcher.
+//
+// Returns silently for nil or empty outputs; both are trivially structpb-
+// compatible. Detecting whether Outputs is populated at all (the writer-side
+// invariant) is BC-3's job — pair this matcher with
+// AssertDiffPopulatesAllOutputFields for full coverage.
 func AssertOutputsRoundTripStructpb(t TB, outputs map[string]any) {
 	t.Helper()
 	if outputs == nil {
@@ -211,6 +216,13 @@ func nextEnumID() ValidationKind {
 //
 //	iaclint.AssertValidationMatrix(t, parser, "expose",
 //	    iaclint.WithStringEnumOptions([]string{"public", "internal"}))
+//
+// Note on internal state: each call registers the allowed-values slice in a
+// package-level map keyed by a unique ValidationKind ID. Map entries are not
+// reclaimed after a test exits — practically harmless for `go test` (process
+// exits, OS reclaims memory). If iaclint is ever embedded in a long-running
+// review server, consider threading a *RegistryHandle through the matcher
+// signature instead (deferred to v2).
 func WithStringEnumOptions(allowed []string) ValidationKind {
 	id := nextEnumID()
 	enumOptionsMu.Lock()
@@ -226,6 +238,14 @@ func WithStringEnumOptions(allowed []string) ValidationKind {
 //
 // Plugins typically implement this as a sibling method that returns a static
 // slice of canonical key names — small surface, easy to keep in sync.
+//
+// WARNING: the returned slice is the source of truth for
+// AssertDiffPopulatesAllOutputFields — drift between this slice and the
+// actual Diff implementation makes the matcher silently vacuous (it'll
+// happily verify a stale, shrinking key set while real Diff reads grow
+// uncovered). Treat additions or removals to the Diff body and this slice
+// as paired commits, ideally enforced by code review per BC-3 in
+// docs/IAC_PLUGIN_REVIEW_CHECKLIST.md.
 type DiffOutputKeyDeclarer interface {
 	DiffReadsOutputKeys() []string
 }
