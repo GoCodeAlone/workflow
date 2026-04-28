@@ -129,7 +129,7 @@ git commit -m "feat(iaclint): add ValidationKind enum + package skeleton (D-2)"
 
 ---
 
-## Task 2: D-2 AssertOutputsRoundTripStructpb (BC-2 helper)
+## Task 2: D-2 AssertOutputsStructpbCompatible (BC-2 helper)
 
 **Files:**
 - Modify: `plugin/sdk/iaclint/iaclint.go`
@@ -138,31 +138,31 @@ git commit -m "feat(iaclint): add ValidationKind enum + package skeleton (D-2)"
 **Step 1: Write the failing test**
 
 ```go
-func TestAssertOutputsRoundTripStructpb_RejectsTypedSlice(t *testing.T) {
+func TestAssertOutputsStructpbCompatible_RejectsTypedSlice(t *testing.T) {
 	// Typed slices ([]int, []string, []GoStruct) are rejected by structpb.
-	// AssertOutputsRoundTripStructpb must surface the rejection as a test failure.
+	// AssertOutputsStructpbCompatible must surface the rejection as a test failure.
 	tt := &mockT{}
-	iaclint.AssertOutputsRoundTripStructpb(tt, map[string]any{
+	iaclint.AssertOutputsStructpbCompatible(tt, map[string]any{
 		"droplet_ids": []int{123, 456}, // BC-2: typed slice rejected by structpb
 	})
 	if !tt.failed {
-		t.Fatal("AssertOutputsRoundTripStructpb accepted typed []int slice; expected failure")
+		t.Fatal("AssertOutputsStructpbCompatible accepted typed []int slice; expected failure")
 	}
 	if !strings.Contains(tt.fatalMsg, "droplet_ids") {
 		t.Errorf("fatal msg %q missing field name 'droplet_ids'", tt.fatalMsg)
 	}
 }
 
-func TestAssertOutputsRoundTripStructpb_AcceptsCanonicalShape(t *testing.T) {
+func TestAssertOutputsStructpbCompatible_AcceptsCanonicalShape(t *testing.T) {
 	tt := &mockT{}
-	iaclint.AssertOutputsRoundTripStructpb(tt, map[string]any{
+	iaclint.AssertOutputsStructpbCompatible(tt, map[string]any{
 		"droplet_ids":   []any{float64(123), float64(456)},
 		"tags":          []any{"a", "b"},
 		"inbound_rules": []any{map[string]any{"protocol": "tcp"}},
 		"name":          "fw-1",
 	})
 	if tt.failed {
-		t.Fatalf("AssertOutputsRoundTripStructpb rejected canonical shape: %s", tt.fatalMsg)
+		t.Fatalf("AssertOutputsStructpbCompatible rejected canonical shape: %s", tt.fatalMsg)
 	}
 }
 
@@ -181,8 +181,8 @@ func (m *mockT) Errorf(format string, args ...any)      { m.failed = true; m.fat
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/jon/workspace/workflow/_worktrees/iac-plugin-review && GOWORK=off go test ./plugin/sdk/iaclint/... -run TestAssertOutputsRoundTripStructpb`
-Expected: FAIL with `undefined: iaclint.AssertOutputsRoundTripStructpb`.
+Run: `cd /Users/jon/workspace/workflow/_worktrees/iac-plugin-review && GOWORK=off go test ./plugin/sdk/iaclint/... -run TestAssertOutputsStructpbCompatible`
+Expected: FAIL with `undefined: iaclint.AssertOutputsStructpbCompatible`.
 
 **Step 3: Write minimal implementation**
 
@@ -202,12 +202,16 @@ type TB interface {
 	Errorf(format string, args ...any)
 }
 
-// AssertOutputsRoundTripStructpb verifies that every value in outputs survives
-// a structpb.NewStruct → AsMap() round-trip without breaking downstream type
-// assertions. Closes BC-2 (structpb gRPC boundary): typed slices ([]int,
-// []string, []godo.X) are rejected by structpb.NewStruct outright; godo
-// structs round-trip as map[string]any so reader-side type assertions to the
-// original struct type fail silently.
+// AssertOutputsStructpbCompatible verifies that every value in outputs is
+// structpb-compatible (structpb.NewStruct accepts the outputs map without
+// error). Closes BC-2 (structpb gRPC boundary): typed slices ([]int,
+// []string, []godo.X) are rejected by structpb.NewStruct outright. The
+// matcher catches the most common BC-2 failure mode — typed-slice writes
+// that would degrade at the wfctl→plugin gRPC boundary.
+//
+// Scope note: this matcher does NOT exercise the full NewStruct → AsMap
+// round-trip. If your plugin's Diff reads typed values from current.Outputs,
+// also write a post-roundtrip test in your plugin's test suite.
 //
 // Plugins on legacy compat dispatch (no internal/contracts/ proto package,
 // plugin.json mode != "strict") MUST call this matcher in their test suite for
@@ -216,7 +220,7 @@ type TB interface {
 //
 // Strict-mode plugins (plugin.json mode == "strict") are immune to BC-2 and do
 // not need this matcher.
-func AssertOutputsRoundTripStructpb(t TB, outputs map[string]any) {
+func AssertOutputsStructpbCompatible(t TB, outputs map[string]any) {
 	t.Helper()
 	if outputs == nil {
 		return
@@ -236,14 +240,14 @@ func AssertOutputsRoundTripStructpb(t TB, outputs map[string]any) {
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/jon/workspace/workflow/_worktrees/iac-plugin-review && GOWORK=off go test ./plugin/sdk/iaclint/... -run TestAssertOutputsRoundTripStructpb`
+Run: `cd /Users/jon/workspace/workflow/_worktrees/iac-plugin-review && GOWORK=off go test ./plugin/sdk/iaclint/... -run TestAssertOutputsStructpbCompatible`
 Expected: PASS, both sub-tests green.
 
 **Step 5: Commit**
 
 ```bash
 git add plugin/sdk/iaclint/iaclint.go plugin/sdk/iaclint/iaclint_test.go
-git commit -m "feat(iaclint): AssertOutputsRoundTripStructpb (D-2 BC-2 matcher)"
+git commit -m "feat(iaclint): AssertOutputsStructpbCompatible (D-2 BC-2 matcher)"
 ```
 
 ---
@@ -813,7 +817,7 @@ func Example() {
 	// In a real plugin test:
 	//
 	//   driver := &MyFirewallDriver{client: mockClient}
-	//   iaclint.AssertOutputsRoundTripStructpb(t, mustCreate(t, driver).Outputs)
+	//   iaclint.AssertOutputsStructpbCompatible(t, mustCreate(t, driver).Outputs)
 	//   iaclint.AssertDiffPopulatesAllOutputFields(t, driver, sampleSpec)
 	//   iaclint.AssertValidationMatrix(t, parsePort, "port", iaclint.KindTCPPort)
 	//
@@ -843,9 +847,12 @@ Expand the existing package doc-comment in `iaclint.go` (the one starting with `
 //
 // Three matchers are exposed:
 //
-//   - AssertOutputsRoundTripStructpb (BC-2): verifies Outputs map values
-//     survive structpb.NewStruct round-trip without breaking type assertions.
-//     Use for plugins on legacy compat dispatch.
+//   - AssertOutputsStructpbCompatible (BC-2): verifies Outputs map values
+//     are structpb-compatible (NewStruct accepts them). Catches typed-slice
+//     writes that would degrade at the wfctl→plugin gRPC boundary. Does NOT
+//     exercise the full NewStruct → AsMap round-trip; if your plugin's Diff
+//     reads typed values from current.Outputs, write a post-roundtrip test
+//     in your plugin's test suite. Use for plugins on legacy compat dispatch.
 //
 //   - AssertDiffPopulatesAllOutputFields (BC-3): verifies every Outputs[*]
 //     key the driver's Diff reads is populated by the matching Create writer.
@@ -964,7 +971,7 @@ external-dispatch plugin documents the structpb constraint:
   accept BOTH typed-slice (in-process pre-roundtrip path) AND `[]any` of
   primitive/map (post-roundtrip path).
 
-**Test pattern:** import `iaclint` and call `iaclint.AssertOutputsRoundTripStructpb(t, out.Outputs)`
+**Test pattern:** import `iaclint` and call `iaclint.AssertOutputsStructpbCompatible(t, out.Outputs)`
 in the driver's Create/Read/Update tests. For Diff, write a
 `_StructpbBoundary_DiffSurvivesRoundTrip` test that builds an Outputs map,
 round-trips through `structpb.NewStruct`/`AsMap()`, then calls Diff against a
@@ -1247,7 +1254,7 @@ import (
 func TestIaclintSmokeImport(t *testing.T) {
 	// Verify the package imports and matchers exist with the expected signatures.
 	_ = iaclint.KindTCPPort
-	_ = iaclint.AssertOutputsRoundTripStructpb
+	_ = iaclint.AssertOutputsStructpbCompatible
 	_ = iaclint.AssertDiffPopulatesAllOutputFields
 	_ = iaclint.AssertValidationMatrix
 }
@@ -1331,7 +1338,7 @@ cross-provider discipline that benefits all IaC provider plugins.
   parity, CIDR widening, canonical-key registration). Linked from
   CONTRIBUTING.md.
 - **D-2** \`plugin/sdk/iaclint/\` — Go test-helper package with three
-  matchers: \`AssertOutputsRoundTripStructpb\`, \`AssertDiffPopulatesAllOutputFields\`,
+  matchers: \`AssertOutputsStructpbCompatible\`, \`AssertDiffPopulatesAllOutputFields\`,
   \`AssertValidationMatrix\`. Each IaC plugin imports for CI enforcement.
 - **D-3** \`docs/plans/2026-04-26-strict-grpc-plugin-contracts.md\` —
   extended with IaC plugin migration table (DO/GCP/Tofu rows added; v0.8.0

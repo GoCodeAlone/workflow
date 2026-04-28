@@ -11,9 +11,10 @@
 //   - AssertOutputsStructpbCompatible (BC-2): verifies Outputs map values
 //     are structpb-compatible (NewStruct accepts them). Catches typed-slice
 //     writes that would degrade at the wfctl→plugin gRPC boundary. Does NOT
-//     exercise the full NewStruct → AsMap round-trip; see BC-3 for
-//     post-roundtrip type-assertion coverage. Use for plugins on legacy
-//     compat dispatch.
+//     exercise the full NewStruct → AsMap round-trip; if your plugin's Diff
+//     reads typed values from current.Outputs, write a post-roundtrip test
+//     in your plugin's test suite. Use for plugins on legacy compat
+//     dispatch.
 //
 //   - AssertDiffPopulatesAllOutputFields (BC-3): verifies every Outputs[*]
 //     key the driver's Diff reads is populated by the matching Create writer.
@@ -105,8 +106,10 @@ func (k ValidationKind) String() string {
 // round-trip. Values that NewStruct accepts but degrade structurally on
 // AsMap (e.g., godo structs becoming map[string]any so reader-side type
 // assertions to the original struct type fail silently) are not caught. If
-// your plugin's Diff reads typed values from current.Outputs, also test the
-// post-roundtrip path explicitly — see BC-3 in IAC_PLUGIN_REVIEW_CHECKLIST.md.
+// your plugin's Diff reads typed values from current.Outputs, also write
+// a post-roundtrip test in your plugin's test suite that builds an Outputs
+// map, round-trips through structpb.NewStruct/AsMap(), then asserts your
+// reader-side helpers still extract the values correctly.
 //
 // Plugins on legacy compat dispatch (no internal/contracts/ proto package,
 // plugin.json mode != "strict") MUST call this matcher in their test suite for

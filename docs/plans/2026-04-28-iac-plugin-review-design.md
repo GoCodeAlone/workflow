@@ -119,10 +119,13 @@ import (
     "github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// AssertOutputsRoundTripStructpb verifies that every value in outputs survives
-// structpb.NewStruct → AsMap() round-trip without type degradation that breaks
-// downstream type assertions. Closes BC-2.
-func AssertOutputsRoundTripStructpb(t *testing.T, outputs map[string]any)
+// AssertOutputsStructpbCompatible verifies that every value in outputs is
+// structpb-compatible (structpb.NewStruct accepts them). Catches typed-slice
+// writes that would be rejected at the wfctl→plugin gRPC boundary. Closes
+// BC-2. Does NOT exercise the full NewStruct → AsMap round-trip — plugins
+// whose Diff reads typed values from current.Outputs should write a separate
+// post-roundtrip test.
+func AssertOutputsStructpbCompatible(t *testing.T, outputs map[string]any)
 
 // AssertDiffPopulatesAllOutputFields verifies that for every key the Diff
 // implementation reads from current.Outputs, the matching writer (Create/
