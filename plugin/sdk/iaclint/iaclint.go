@@ -90,12 +90,19 @@ func (k ValidationKind) String() string {
 	return "Unknown"
 }
 
-// AssertOutputsRoundTripStructpb verifies that every value in outputs survives
-// a structpb.NewStruct → AsMap() round-trip without breaking downstream type
-// assertions. Closes BC-2 (structpb gRPC boundary): typed slices ([]int,
-// []string, []godo.X) are rejected by structpb.NewStruct outright; godo
-// structs round-trip as map[string]any so reader-side type assertions to the
-// original struct type fail silently.
+// AssertOutputsRoundTripStructpb verifies that every value in outputs is
+// structpb-compatible — that is, that structpb.NewStruct accepts the outputs
+// map without error. structpb's encoding rejects typed slices ([]int,
+// []string, []godo.X) outright, so this matcher catches the most common BC-2
+// failure mode: typed-slice writes that would silently degrade at the
+// wfctl→plugin gRPC boundary.
+//
+// Scope note: this matcher does NOT exercise the full NewStruct → AsMap
+// round-trip. Values that NewStruct accepts but degrade structurally on
+// AsMap (e.g., godo structs becoming map[string]any so reader-side type
+// assertions to the original struct type fail silently) are not caught. If
+// your plugin's Diff reads typed values from current.Outputs, also test the
+// post-roundtrip path explicitly — see BC-3 in IAC_PLUGIN_REVIEW_CHECKLIST.md.
 //
 // Plugins on legacy compat dispatch (no internal/contracts/ proto package,
 // plugin.json mode != "strict") MUST call this matcher in their test suite for
