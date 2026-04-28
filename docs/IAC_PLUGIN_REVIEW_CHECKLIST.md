@@ -85,7 +85,7 @@ external-dispatch plugin documents the structpb constraint:
   accept BOTH typed-slice (in-process pre-roundtrip path) AND `[]any` of
   primitive/map (post-roundtrip path).
 
-**Test pattern:** import `iaclint` and call `iaclint.AssertOutputsRoundTripStructpb(t, out.Outputs)`
+**Test pattern:** import `iaclint` and call `iaclint.AssertOutputsStructpbCompatible(t, out.Outputs)`
 in the driver's Create/Read/Update tests. For Diff, write a
 `_StructpbBoundary_DiffSurvivesRoundTrip` test that builds an Outputs map,
 round-trips through `structpb.NewStruct`/`AsMap()`, then calls Diff against a

@@ -64,30 +64,30 @@ func TestValidationKind_String(t *testing.T) {
 	}
 }
 
-func TestAssertOutputsRoundTripStructpb_RejectsTypedSlice(t *testing.T) {
+func TestAssertOutputsStructpbCompatible_RejectsTypedSlice(t *testing.T) {
 	// Typed slices ([]int, []string, []GoStruct) are rejected by structpb.
-	// AssertOutputsRoundTripStructpb must surface the rejection as a test failure.
+	// AssertOutputsStructpbCompatible must surface the rejection as a test failure.
 	tt := &mockT{}
-	iaclint.AssertOutputsRoundTripStructpb(tt, map[string]any{
+	iaclint.AssertOutputsStructpbCompatible(tt, map[string]any{
 		"droplet_ids": []int{123, 456}, // BC-2: typed slice rejected by structpb
 	})
 	if !tt.failed {
-		t.Fatal("AssertOutputsRoundTripStructpb accepted typed []int slice; expected failure")
+		t.Fatal("AssertOutputsStructpbCompatible accepted typed []int slice; expected failure")
 	}
 	if !tt.hasMessageContaining("droplet_ids") {
 		t.Errorf("captured messages %q missing field name 'droplet_ids'", tt.messages)
 	}
 }
 
-// TestAssertOutputsRoundTripStructpb_DeterministicOffendingKey guards
+// TestAssertOutputsStructpbCompatible_DeterministicOffendingKey guards
 // against a flaky-test failure mode: when multiple Outputs keys are bad,
 // the matcher's offending-key search MUST report a deterministic key
 // (lexicographically first) rather than whatever Go's randomized map
 // iteration happens to surface first. Without sort, this test is flaky
 // across runs; with sort, it's stable.
-func TestAssertOutputsRoundTripStructpb_DeterministicOffendingKey(t *testing.T) {
+func TestAssertOutputsStructpbCompatible_DeterministicOffendingKey(t *testing.T) {
 	tt := &mockT{}
-	iaclint.AssertOutputsRoundTripStructpb(tt, map[string]any{
+	iaclint.AssertOutputsStructpbCompatible(tt, map[string]any{
 		"z_bad": []int{1, 2, 3}, // lexicographically later — should NOT be reported
 		"a_bad": []int{4, 5, 6}, // lexicographically first — should be reported
 	})
@@ -99,16 +99,16 @@ func TestAssertOutputsRoundTripStructpb_DeterministicOffendingKey(t *testing.T) 
 	}
 }
 
-func TestAssertOutputsRoundTripStructpb_AcceptsCanonicalShape(t *testing.T) {
+func TestAssertOutputsStructpbCompatible_AcceptsCanonicalShape(t *testing.T) {
 	tt := &mockT{}
-	iaclint.AssertOutputsRoundTripStructpb(tt, map[string]any{
+	iaclint.AssertOutputsStructpbCompatible(tt, map[string]any{
 		"droplet_ids":   []any{float64(123), float64(456)},
 		"tags":          []any{"a", "b"},
 		"inbound_rules": []any{map[string]any{"protocol": "tcp"}},
 		"name":          "fw-1",
 	})
 	if tt.failed {
-		t.Fatalf("AssertOutputsRoundTripStructpb rejected canonical shape: %s", tt.lastMessage())
+		t.Fatalf("AssertOutputsStructpbCompatible rejected canonical shape: %s", tt.lastMessage())
 	}
 }
 

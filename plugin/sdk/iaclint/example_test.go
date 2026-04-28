@@ -10,7 +10,7 @@ func Example() {
 	// In a real plugin test:
 	//
 	//   driver := &MyFirewallDriver{client: mockClient}
-	//   iaclint.AssertOutputsRoundTripStructpb(t, mustCreate(t, driver).Outputs)
+	//   iaclint.AssertOutputsStructpbCompatible(t, mustCreate(t, driver).Outputs)
 	//   iaclint.AssertDiffPopulatesAllOutputFields(t, driver, sampleSpec)
 	//   iaclint.AssertValidationMatrix(t, parsePort, "port", iaclint.KindTCPPort)
 	//

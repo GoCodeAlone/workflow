@@ -8,7 +8,7 @@
 //
 // Three matchers are exposed:
 //
-//   - AssertOutputsRoundTripStructpb (BC-2): verifies Outputs map values
+//   - AssertOutputsStructpbCompatible (BC-2): verifies Outputs map values
 //     are structpb-compatible (NewStruct accepts them). Catches typed-slice
 //     writes that would degrade at the wfctl→plugin gRPC boundary. Does NOT
 //     exercise the full NewStruct → AsMap round-trip; see BC-3 for
@@ -27,7 +27,7 @@
 // surfaced during the workflow-plugin-digitalocean v0.8.0 review cycle are
 // caught at CI time rather than during production gRPC dispatch or in code
 // review. Plugins on legacy compat dispatch (no internal/contracts/ proto
-// package, plugin.json mode != "strict") MUST call AssertOutputsRoundTripStructpb
+// package, plugin.json mode != "strict") MUST call AssertOutputsStructpbCompatible
 // for every Outputs map written by Create/Update/Read. Strict-mode plugins
 // (plugin.json mode == "strict") are immune to BC-2 and may skip that matcher.
 package iaclint
@@ -94,7 +94,7 @@ func (k ValidationKind) String() string {
 	return "Unknown"
 }
 
-// AssertOutputsRoundTripStructpb verifies that every value in outputs is
+// AssertOutputsStructpbCompatible verifies that every value in outputs is
 // structpb-compatible — that is, that structpb.NewStruct accepts the outputs
 // map without error. structpb's encoding rejects typed slices ([]int,
 // []string, []godo.X) outright, so this matcher catches the most common BC-2
@@ -120,7 +120,7 @@ func (k ValidationKind) String() string {
 // compatible. Detecting whether Outputs is populated at all (the writer-side
 // invariant) is BC-3's job — pair this matcher with
 // AssertDiffPopulatesAllOutputFields for full coverage.
-func AssertOutputsRoundTripStructpb(t TB, outputs map[string]any) {
+func AssertOutputsStructpbCompatible(t TB, outputs map[string]any) {
 	t.Helper()
 	if outputs == nil {
 		return
