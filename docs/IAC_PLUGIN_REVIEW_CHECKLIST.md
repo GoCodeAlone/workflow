@@ -91,7 +91,7 @@ matching desired and asserts `NeedsUpdate=false`.
    `grep -nE 'func .*Output\b' internal/drivers/*.go provider/drivers/*.go drivers/*.go`
    — read each body manually, since canonical Go uses BOTH map-literal and
    post-construction Outputs writes.
-3. Typed-slice writes (catch BOTH forms — fail-loud on ANY hit):
+3. Typed-slice writes (catch BOTH forms — every non-`[]any` hit is BLOCKING):
    - Post-construction form:
      `grep -nE 'Outputs\["[^"]+"\] *= *\[\][a-zA-Z]' internal/drivers/*.go`
    - Map-literal form (canonical, used by `fwOutput` / `appOutput`):
