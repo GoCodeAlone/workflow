@@ -1,3 +1,15 @@
+---
+status: in_progress
+area: plugins
+owner: workflow
+external_refs: []
+verification:
+  last_checked: 2026-04-28
+  result: pending
+supersedes: []
+superseded_by: []
+---
+
 # IaC Plugin Cross-Provider Review Discipline & Audit — Phase A Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
