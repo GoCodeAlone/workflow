@@ -108,6 +108,33 @@ func TestAssertValidationMatrix_TCPPort_LooseParserFails(t *testing.T) {
 	}
 }
 
+// TestAssertValidationMatrix_TCPPort_FloatLooseParserFails exercises the
+// gRPC-coercion gap: a parser that's strict on int but silently accepts
+// float64 ships green-CI but fails in production gRPC dispatch (where the
+// structpb boundary collapses every numeric to float64). The TCPPort matrix
+// MUST probe both int and float64 shapes for a single call to be sufficient.
+func TestAssertValidationMatrix_TCPPort_FloatLooseParserFails(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		// Strict on int — passes all int probes.
+		if v, ok := cfg["port"].(int); ok {
+			if v < 1 || v > 65535 {
+				return nil, fmt.Errorf("port: %d invalid", v)
+			}
+			return v, nil
+		}
+		// Loose on float64 — accepts everything (BC-4 violation under gRPC coercion).
+		if f, ok := cfg["port"].(float64); ok {
+			return int(f), nil
+		}
+		return nil, fmt.Errorf("port: must be a number")
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
+	if !tt.failed {
+		t.Fatal("float-loose TCPPort parser passed matrix; expected failure on float64 probes (gRPC coercion path uncovered)")
+	}
+}
+
 func TestAssertValidationMatrix_IntegerOnlyFloat_StrictParserPasses(t *testing.T) {
 	parser := func(cfg map[string]any) (any, error) {
 		v, ok := cfg["id"].(float64)

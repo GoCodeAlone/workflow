@@ -53,7 +53,11 @@ type TB interface {
 type ValidationKind int
 
 const (
-	// KindTCPPort probes 0, -1, 1, 65535, 65536. Closes BC-4 port-range gap.
+	// KindTCPPort probes 0, -1, 1, 65535, 65536 in BOTH int and float64
+	// shapes. The float64 probes cover the gRPC-dispatch coercion path
+	// (structpb collapses every numeric to float64), so a single call to
+	// AssertValidationMatrix is sufficient for plugins on either dispatch
+	// path. Closes BC-4 port-range gap.
 	KindTCPPort ValidationKind = iota
 	// KindNonNegativeInt probes 0, -1, 1.
 	KindNonNegativeInt
@@ -138,12 +142,19 @@ func AssertValidationMatrix(t TB, parser ConfigParser, fieldName string, kind Va
 	t.Helper()
 	switch kind {
 	case KindTCPPort:
+		// Probe both int and float64 shapes — gRPC dispatch coerces every
+		// numeric to float64 via structpb, so parsers strict on int but lax
+		// on float64 ship green-CI yet fail in production. Covering both
+		// shapes in a single call closes that BC-4 gap.
 		runProbes(t, parser, fieldName, kind, []validationProbe{
-			{0, false, "zero"},
-			{-1, false, "negative"},
-			{1, true, "min valid"},
-			{65535, true, "max valid"},
-			{65536, false, "above max"},
+			{0, false, "zero (int)"},
+			{-1, false, "negative (int)"},
+			{1, true, "min valid (int)"},
+			{65535, true, "max valid (int)"},
+			{65536, false, "above max (int)"},
+			{float64(0), false, "zero (float64 — gRPC coercion)"},
+			{float64(65535), true, "max valid (float64 — gRPC coercion)"},
+			{float64(65536), false, "above max (float64 — gRPC coercion)"},
 		})
 	case KindIntegerOnlyFloat:
 		runProbes(t, parser, fieldName, kind, []validationProbe{
