@@ -79,6 +79,26 @@ func TestAssertOutputsRoundTripStructpb_RejectsTypedSlice(t *testing.T) {
 	}
 }
 
+// TestAssertOutputsRoundTripStructpb_DeterministicOffendingKey guards
+// against a flaky-test failure mode: when multiple Outputs keys are bad,
+// the matcher's offending-key search MUST report a deterministic key
+// (lexicographically first) rather than whatever Go's randomized map
+// iteration happens to surface first. Without sort, this test is flaky
+// across runs; with sort, it's stable.
+func TestAssertOutputsRoundTripStructpb_DeterministicOffendingKey(t *testing.T) {
+	tt := &mockT{}
+	iaclint.AssertOutputsRoundTripStructpb(tt, map[string]any{
+		"z_bad": []int{1, 2, 3}, // lexicographically later — should NOT be reported
+		"a_bad": []int{4, 5, 6}, // lexicographically first — should be reported
+	})
+	if !tt.failed {
+		t.Fatal("expected failure on multi-bad-key Outputs")
+	}
+	if !strings.Contains(tt.lastMessage(), "a_bad") {
+		t.Errorf("expected 'a_bad' (lex-first) in fatal msg; got %q", tt.lastMessage())
+	}
+}
+
 func TestAssertOutputsRoundTripStructpb_AcceptsCanonicalShape(t *testing.T) {
 	tt := &mockT{}
 	iaclint.AssertOutputsRoundTripStructpb(tt, map[string]any{

@@ -9,8 +9,11 @@
 // Three matchers are exposed:
 //
 //   - AssertOutputsRoundTripStructpb (BC-2): verifies Outputs map values
-//     survive structpb.NewStruct round-trip without breaking type assertions.
-//     Use for plugins on legacy compat dispatch.
+//     are structpb-compatible (NewStruct accepts them). Catches typed-slice
+//     writes that would degrade at the wfctl→plugin gRPC boundary. Does NOT
+//     exercise the full NewStruct → AsMap round-trip; see BC-3 for
+//     post-roundtrip type-assertion coverage. Use for plugins on legacy
+//     compat dispatch.
 //
 //   - AssertDiffPopulatesAllOutputFields (BC-3): verifies every Outputs[*]
 //     key the driver's Diff reads is populated by the matching Create writer.
@@ -32,6 +35,7 @@ package iaclint
 import (
 	"context"
 	"math"
+	"sort"
 	"sync"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -123,9 +127,17 @@ func AssertOutputsRoundTripStructpb(t TB, outputs map[string]any) {
 	}
 	if _, err := structpb.NewStruct(outputs); err != nil {
 		// Identify the offending key to give the test author a direct pointer.
-		for k, v := range outputs {
-			if _, single := structpb.NewStruct(map[string]any{k: v}); single != nil {
-				t.Fatalf("Outputs[%q] (%T) is not structpb-compatible: %v — see BC-2 in IAC_PLUGIN_REVIEW_CHECKLIST.md", k, v, single)
+		// Sort the keys first so the reported key is deterministic when
+		// multiple keys are bad — Go map iteration is randomized, which
+		// would otherwise produce flaky failure messages across test runs.
+		keys := make([]string, 0, len(outputs))
+		for k := range outputs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if _, single := structpb.NewStruct(map[string]any{k: outputs[k]}); single != nil {
+				t.Fatalf("Outputs[%q] (%T) is not structpb-compatible: %v — see BC-2 in IAC_PLUGIN_REVIEW_CHECKLIST.md", k, outputs[k], single)
 				return
 			}
 		}
