@@ -169,6 +169,25 @@ Batch plugin repos by contract shape:
 
 Each batch gets a branch, PR, spec review, adversarial code review, CI monitoring, Copilot review handling, and merge only after green checks and no meaningful unresolved review.
 
+### IaC Provider Plugins
+
+These plugins implement `interfaces.ResourceDriver` and consume the IaC
+canonical schema. They are tracked separately because their migration
+benefits from the cross-provider review discipline at
+[`docs/IAC_PLUGIN_REVIEW_CHECKLIST.md`](../IAC_PLUGIN_REVIEW_CHECKLIST.md).
+
+| Plugin | Strict-mode status (target v0.9.0) | Pre-migration audit findings |
+|---|---|---|
+| `workflow-plugin-aws` | active migration | (Phase C audit pending) |
+| `workflow-plugin-azure` | verified locally, awaiting PR | (Phase C audit pending) |
+| `workflow-plugin-ci-generator` | merged | n/a (already shipped strict) |
+| `workflow-plugin-digitalocean` | pending — v0.8.0 ships legacy compat | F4/F5/F7 cycle: BC-1, BC-2, BC-3, BC-4, BC-5, BC-6, BC-8 closed in v0.8.0; BC-7 not applicable. Issue #37 (Update naming consistency) deferred to v0.8.x |
+| `workflow-plugin-gcp` | pending | (Phase C audit pending) |
+| `workflow-plugin-tofu` | pending | (Phase C audit pending) |
+
+Each plugin's v0.9.0 strict-migration PR adds a "Pre-migration findings
+closed" sub-section to its CHANGELOG referencing the bug classes addressed.
+
 ## Testing
 
 Core tests must cover:

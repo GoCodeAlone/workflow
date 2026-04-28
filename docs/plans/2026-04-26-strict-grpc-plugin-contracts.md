@@ -136,6 +136,25 @@ Last updated: 2026-04-27 15:00 America/New_York.
 | Templates / samples | workflow-plugin-bento, workflow-plugin-messaging-core, workflow-plugin-migrations, workflow-plugin-template, workflow-plugin-template-private |
 | Application-owned plugins | workflow-dnd, workflow-cardgame, core-dump, buymywishlist |
 
+### IaC Provider Plugins
+
+These plugins implement `interfaces.ResourceDriver` and consume the IaC
+canonical schema. They are tracked separately because their migration
+benefits from the cross-provider review discipline at
+[`docs/IAC_PLUGIN_REVIEW_CHECKLIST.md`](../IAC_PLUGIN_REVIEW_CHECKLIST.md).
+
+| Plugin | Strict-mode status (target v0.9.0) | Pre-migration audit findings |
+|---|---|---|
+| `workflow-plugin-aws` | active migration | (Phase C audit pending) |
+| `workflow-plugin-azure` | verified locally, awaiting PR | (Phase C audit pending) |
+| `workflow-plugin-ci-generator` | merged | n/a (already shipped strict) |
+| `workflow-plugin-digitalocean` | pending — v0.8.0 ships legacy compat | F4/F5/F7 cycle: BC-1, BC-2, BC-3, BC-4, BC-5, BC-6, BC-8 closed in v0.8.0; BC-7 not applicable. Issue #37 (Update naming consistency) deferred to v0.8.x |
+| `workflow-plugin-gcp` | pending | (Phase C audit pending) |
+| `workflow-plugin-tofu` | pending | (Phase C audit pending) |
+
+Each plugin's v0.9.0 strict-migration PR adds a "Pre-migration findings
+closed" sub-section to its CHANGELOG referencing the bug classes addressed.
+
 ### Task 1: Core Proto Contract Descriptors
 
 **Files:**

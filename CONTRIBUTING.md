@@ -165,6 +165,17 @@ Before submitting a plugin, ensure it passes the 8-point community validation:
 4. Document the plugin's purpose, inputs, outputs, and usage examples
 5. Reference the plugin in the PR description
 
+### Reviewing IaC plugin PRs
+
+When reviewing a PR in any `GoCodeAlone/workflow-plugin-*` repository that
+implements an IaC provider, apply the cross-provider review checklist:
+
+- [`docs/IAC_PLUGIN_REVIEW_CHECKLIST.md`](docs/IAC_PLUGIN_REVIEW_CHECKLIST.md)
+
+For executable enforcement, plugin authors should import the
+`workflow/plugin/sdk/iaclint/` test helpers in their CI test suite. The
+checklist's "Test pattern" sub-sections name the matcher for each bug class.
+
 ## Test Coverage Targets
 
 | Package | Target |
