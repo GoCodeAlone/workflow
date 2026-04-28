@@ -87,10 +87,22 @@ matching desired and asserts `NeedsUpdate=false`.
 **Reviewer scan:**
 
 1. Check `plugin.json` for `mode: strict`. If `strict`, BC-2 doesn't apply.
-2. Otherwise: `grep -nE 'Outputs\["[^"]+"\] *= *\[\]' internal/drivers/*.go`
-   surfaces typed-slice writes. Each is a **BC-2 BLOCKING** instance.
-3. `grep -nE 'current\.Outputs\["[^"]+"\]\.\(\[\]' internal/drivers/*.go`
-   surfaces typed-slice reads in Diff. Each is a **BC-2 BLOCKING** instance.
+2. Enumerate every Output-emitting helper:
+   `grep -nE 'func .*Output\b' internal/drivers/*.go provider/drivers/*.go drivers/*.go`
+   — read each body manually, since canonical Go uses BOTH map-literal and
+   post-construction Outputs writes.
+3. Typed-slice writes (catch BOTH forms — fail-loud on ANY hit):
+   - Post-construction form:
+     `grep -nE 'Outputs\["[^"]+"\] *= *\[\][a-zA-Z]' internal/drivers/*.go`
+   - Map-literal form (canonical, used by `fwOutput` / `appOutput`):
+     `grep -nE '"[a-zA-Z_]+": *\[\][a-zA-Z]' internal/drivers/*.go`
+     — restrict attention to hits inside `*Output(` builder bodies and
+     test fixtures that round-trip through structpb.
+   Each non-`[]any` typed-slice hit is a **BC-2 BLOCKING** instance.
+4. Typed-slice reads in Diff:
+   `grep -nE 'current\.Outputs\["[^"]+"\]\.\(\[\][a-zA-Z]' internal/drivers/*.go`
+   surfaces type assertions to `[]string` / `[]int` / `[]godo.X`. Each is a
+   **BC-2 BLOCKING** instance.
 
 ## BC-3: Outputs-vs-Diff invariant
 
@@ -119,11 +131,21 @@ every declared key is present in `out.Outputs`.
 
 1. `grep -nE 'current\.Outputs\["[^"]+"\]' internal/drivers/*.go` —
    enumerate every Outputs key Diff reads.
-2. `grep -nE '\.Outputs\["[^"]+"\] *=' internal/drivers/*.go` — enumerate
-   every Outputs key the writers populate.
-3. Compute the set difference. Any key in (1) but not (2) is a **BC-3
-   BLOCKING** finding. Cross-link with BC-1 (Diff that reads phantom keys
-   often pairs with shallow Diff field coverage).
+2. Enumerate every Outputs key the writers populate (catch BOTH map-literal
+   and post-construction forms — canonical Go drivers like `fwOutput` use
+   the map-literal form, which the post-construction grep alone MISSES):
+   - Enumerate Output builders so each can be read manually:
+     `grep -nE 'func .*Output\b' internal/drivers/*.go provider/drivers/*.go drivers/*.go`
+   - Map-literal writers (canonical):
+     `grep -nE '"[a-zA-Z_]+": *[a-zA-Z]' internal/drivers/*.go` —
+     restrict to hits inside `*Output(` bodies; the map-literal key is
+     the Outputs[*] key.
+   - Post-construction writers:
+     `grep -nE '\.Outputs\["[^"]+"\] *=' internal/drivers/*.go`
+3. Compute the set difference between (1) and (2). Any key in (1) but not
+   in the union of (2) is a **BC-3 BLOCKING** finding. Cross-link with
+   BC-1 (Diff that reads phantom keys often pairs with shallow Diff field
+   coverage).
 
 ## BC-4: Validation matrix
 
@@ -156,8 +178,11 @@ kind and asserts the parser accepts/rejects per the documented contract.
 
 **Reviewer scan:**
 
-1. `grep -nE 'func .*\b(canonical|parse|validate)[A-Z][A-Za-z]*\b' \
-   internal/drivers/*.go` — enumerate every field validator.
+1. `grep -niE 'func .*\b(canonical|parse|validate)[a-z]*\b' \
+   internal/drivers/*.go` — enumerate every field validator. The `-i`
+   flag is REQUIRED so Go-convention Title Case exports
+   (`ParseImageRef`, `ValidateConfig`, `CanonicalizeRule`) surface
+   alongside lowercase package-private helpers.
 2. For each validator, identify which `KindX` it should match (port →
    TCPPort, count/replicas → NonNegativeInt, name/identifier →
    NonEmptyString, id/numeric → IntegerOnlyFloat, exposure/visibility →
@@ -231,8 +256,11 @@ validator and asserts both raise the same error class on bad input.
 
 **Reviewer scan:**
 
-1. `grep -nE 'func .*\b(canonical|normalize|equalize)[A-Z]' \
-   internal/drivers/*.go` — every Diff-side canonicalizer.
+1. `grep -niE 'func .*\b(canonical|normalize|equalize)[a-z]' \
+   internal/drivers/*.go` — every Diff-side canonicalizer. The `-i` flag
+   is REQUIRED so Title Case exports (`CanonicalizeRule`,
+   `NormalizeCIDR`, `EqualizeRules`) surface alongside the lowercase
+   package-private form.
 2. For each, find the matching Apply-side validator (`apply<Field>` /
    `validate<Field>` or inline check in `Create` / `Update`).
 3. Compare the input-acceptance contracts. Any silent acceptance on the
