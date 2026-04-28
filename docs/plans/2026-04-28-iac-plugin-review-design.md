@@ -77,9 +77,9 @@ Distilled from the P-2 review cycle, every class shipped at least once in v0.8.0
 **Retroactive applicability:** every IaC plugin where Diff and Create/Update read the same config keys — high.
 
 ### BC-7: CIDR widening regression scan (firewall/SG/NSG drivers)
-**Failure mode:** An Update path that swaps `inbound_rules.sources` (or equivalent) silently widens CIDR ranges instead of erroring. Security regression: caller intends to narrow, plugin silently accepts a wider rule.
+**Failure mode:** An Update path that swaps `inbound_rules.sources` (or equivalent) silently widens CIDR ranges instead of erroring. Security regression: caller intends to narrow; plugin silently keeps the wider state OR widens further.
 **Repro pattern:** identified in P-2 F7 review prompt (the v5.0 framing missed this in workflow's earlier P-3 review; v5.2.0 framing caught it).
-**Fix shape:** Fail Update when desired CIDR sources ⊊ current CIDR sources unless explicit `--strict-cidr=false` flag.
+**Fix shape:** Fail Update when current CIDR sources ⊊ desired CIDR sources (desired allows IPs current didn't = widening) unless explicit `--strict-cidr=false` flag (on `wfctl infra security-check` / `wfctl infra align`).
 **Retroactive applicability:** AWS SG, GCP firewall, Azure NSG, DO firewall — high.
 
 ### BC-8: Schema canonical-key registration

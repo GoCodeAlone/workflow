@@ -280,9 +280,11 @@ validator and asserts both raise the same error class on bad input.
 **Failure mode:** An Update path that swaps `inbound_rules.sources` (or
 the equivalent — AWS SG `IpRanges`, GCP firewall `sourceRanges`, Azure
 NSG `sourceAddressPrefixes`) silently widens CIDR ranges instead of
-erroring. Security regression: caller intends to narrow `10.0.0.0/24` to
-`10.0.0.0/28`, plugin accepts and applies a wider rule. No diff signal,
-no audit trail.
+erroring. Security regression: caller intends to narrow `10.0.0.0/24`
+(256 addresses) to `10.0.0.0/28` (16 addresses), but the plugin silently
+keeps the wider `/24` state OR widens further to a still-broader CIDR.
+No diff signal, no audit trail — the operator believes the narrow rule
+is in effect when in fact the wider rule is still allowing traffic.
 
 **Repro pattern:** identified in the v5.2.0 adversarial framing of
 `workflow-plugin-digitalocean` PR #36 (the v5.0.0 framing missed it on
@@ -291,11 +293,13 @@ reproduced by the v0.8.0 driver because DO firewall replaces all rules
 atomically — but every CIDR-widening Update path in any provider's
 firewall/SG/NSG driver is at risk.
 
-**Fix shape:** Fail Update when desired CIDR `sources` ⊊ current CIDR
-`sources` (i.e., the desired set is strictly broader than current) unless
-an explicit caller flag (`--strict-cidr=false` on `wfctl infra apply`, or
-plugin config `allow_cidr_widening: true`) opts out. The default is
-deny-on-widen; the opt-out makes the broadening intentional and auditable.
+**Fix shape:** Fail Update when `current` CIDR `sources` ⊊ `desired`
+CIDR `sources` (i.e., current's IP set is a strict subset of desired's
+IP set — desired allows IPs current didn't, which is widening) unless an
+explicit caller flag (`--strict-cidr=false` on `wfctl infra
+security-check`, or plugin config `allow_cidr_widening: true`) opts out.
+The default is deny-on-widen; the opt-out makes the broadening
+intentional and auditable.
 
 **Test pattern:** No `iaclint` matcher — verify by reviewer scan and
 manual test cases. Pattern: build a `current.Outputs` with narrow CIDRs,
