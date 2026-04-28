@@ -927,7 +927,8 @@ no-change baseline + reorder/normalization cases).
 
 **Reviewer scan:**
 
-1. `grep -nE 'func.*\bDiff\b' internal/drivers/*.go provider/drivers/*.go`
+1. `grep -nP 'func.*\bDiff\b' internal/drivers/*.go provider/drivers/*.go`
+   (BSD/macOS: substitute `rg` — POSIX ERE doesn't define `\b`.)
 2. For each Diff, read its body. Does it always return nil? Does it only
    compare one or two fields when the Create/Update accepts more?
 3. If the answer is "yes" to either, surface as **BC-1 BLOCKING**.

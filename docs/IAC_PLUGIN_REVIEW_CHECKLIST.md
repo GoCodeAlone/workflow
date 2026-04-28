@@ -19,6 +19,12 @@ it.
   in your test suite and call the named matcher for every driver/field.
 - **As a maintainer auditing existing plugins:** apply each bug-class scan to
   the plugin's `main` HEAD and file one issue per finding.
+- **Grep portability note:** reviewer-scan greps that need word-boundary
+  matching use `grep -P` (PCRE), since POSIX ERE does NOT define `\b` and
+  some grep implementations silently drop or mis-match it. `-P` works on
+  GNU grep. **BSD/macOS reviewers:** stock `grep` does not support `-P` —
+  use [`rg`](https://github.com/BurntSushi/ripgrep) (ripgrep) as a
+  drop-in: e.g., `rg 'func.*\bDiff\b' internal/drivers/*.go`.
 
 ## BC-1: Plan/Diff cascade gap
 
@@ -42,7 +48,8 @@ no-change baseline + reorder/normalization cases).
 
 **Reviewer scan:**
 
-1. `grep -nE 'func.*\bDiff\b' internal/drivers/*.go provider/drivers/*.go`
+1. `grep -nP 'func.*\bDiff\b' internal/drivers/*.go provider/drivers/*.go`
+   (BSD/macOS: substitute `rg`.)
 2. For each Diff, read its body. Does it always return nil? Does it only
    compare one or two fields when the Create/Update accepts more?
 3. If the answer is "yes" to either, surface as **BC-1 BLOCKING**.
@@ -88,7 +95,7 @@ matching desired and asserts `NeedsUpdate=false`.
 
 1. Check `plugin.json` for `mode: strict`. If `strict`, BC-2 doesn't apply.
 2. Enumerate every Output-emitting helper:
-   `grep -nE 'func .*Output\b' internal/drivers/*.go provider/drivers/*.go drivers/*.go`
+   `grep -nP 'func .*Output\b' internal/drivers/*.go provider/drivers/*.go drivers/*.go`
    — read each body manually, since canonical Go uses BOTH map-literal and
    post-construction Outputs writes.
 3. Typed-slice writes (catch BOTH forms — every non-`[]any` hit is BLOCKING):
@@ -135,7 +142,7 @@ every declared key is present in `out.Outputs`.
    and post-construction forms — canonical Go drivers like `fwOutput` use
    the map-literal form, which the post-construction grep alone MISSES):
    - Enumerate Output builders so each can be read manually:
-     `grep -nE 'func .*Output\b' internal/drivers/*.go provider/drivers/*.go drivers/*.go`
+     `grep -nP 'func .*Output\b' internal/drivers/*.go provider/drivers/*.go drivers/*.go`
    - Map-literal writers (canonical):
      `grep -nE '"[a-zA-Z_]+": *[a-zA-Z]' internal/drivers/*.go` —
      restrict to hits inside `*Output(` bodies; the map-literal key is
@@ -178,11 +185,12 @@ kind and asserts the parser accepts/rejects per the documented contract.
 
 **Reviewer scan:**
 
-1. `grep -niE 'func .*\b(canonical|parse|validate)[a-z]*\b' \
+1. `grep -niP 'func .*\b(canonical|parse|validate)[a-z]*\b' \
    internal/drivers/*.go` — enumerate every field validator. The `-i`
    flag is REQUIRED so Go-convention Title Case exports
    (`ParseImageRef`, `ValidateConfig`, `CanonicalizeRule`) surface
-   alongside lowercase package-private helpers.
+   alongside lowercase package-private helpers; `-P` is REQUIRED for
+   `\b` word boundaries (POSIX ERE doesn't define `\b`).
 2. For each validator, identify which `KindX` it should match (port →
    TCPPort, count/replicas → NonNegativeInt, name/identifier →
    NonEmptyString, id/numeric → IntegerOnlyFloat, exposure/visibility →
@@ -256,11 +264,12 @@ validator and asserts both raise the same error class on bad input.
 
 **Reviewer scan:**
 
-1. `grep -niE 'func .*\b(canonical|normalize|equalize)[a-z]' \
+1. `grep -niP 'func .*\b(canonical|normalize|equalize)[a-z]' \
    internal/drivers/*.go` — every Diff-side canonicalizer. The `-i` flag
    is REQUIRED so Title Case exports (`CanonicalizeRule`,
    `NormalizeCIDR`, `EqualizeRules`) surface alongside the lowercase
-   package-private form.
+   package-private form; `-P` is REQUIRED for `\b` word boundaries
+   (POSIX ERE doesn't define `\b`).
 2. For each, find the matching Apply-side validator (`apply<Field>` /
    `validate<Field>` or inline check in `Create` / `Update`).
 3. Compare the input-acceptance contracts. Any silent acceptance on the
