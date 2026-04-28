@@ -63,7 +63,11 @@ const (
 	KindNonNegativeInt
 	// KindNonEmptyString probes "", "  ", "valid".
 	KindNonEmptyString
-	// KindStringEnum probes each known value, "" (absent), random string, non-string Go types.
+	// KindStringEnum probes each known value, "" (absent), random string,
+	// non-string Go types. The bare constant carries no allowed-values set,
+	// so it is NOT directly usable with AssertValidationMatrix — pass
+	// WithStringEnumOptions([]string{...}) instead. AssertValidationMatrix
+	// fails loudly with that guidance if called with the bare constant.
 	KindStringEnum
 	// KindIntegerOnlyFloat probes 1.0, 1.9, NaN, Inf. Closes BC-4 fractional-float gap.
 	KindIntegerOnlyFloat
@@ -158,6 +162,8 @@ func AssertValidationMatrix(t TB, parser ConfigParser, fieldName string, kind Va
 			{65535, true, "max valid (int)"},
 			{65536, false, "above max (int)"},
 			{float64(0), false, "zero (float64 — gRPC coercion)"},
+			{float64(-1), false, "negative (float64 — gRPC coercion)"},
+			{float64(1), true, "min valid (float64 — gRPC coercion)"},
 			{float64(65535), true, "max valid (float64 — gRPC coercion)"},
 			{float64(65536), false, "above max (float64 — gRPC coercion)"},
 		})
@@ -180,6 +186,13 @@ func AssertValidationMatrix(t TB, parser ConfigParser, fieldName string, kind Va
 			{"   ", false, "whitespace"},
 			{"valid", true, "non-empty"},
 		})
+	case KindStringEnum:
+		// Bare KindStringEnum has no allowed-values set, so it cannot run a
+		// matrix on its own. Fail loudly with actionable guidance instead of
+		// the generic "unhandled kind" path. Callers must construct a kind
+		// via WithStringEnumOptions to bind allowed values.
+		t.Fatalf("AssertValidationMatrix: KindStringEnum requires allowed values — call iaclint.WithStringEnumOptions([]string{...}) instead of using the bare KindStringEnum constant")
+		return
 	default:
 		// StringEnum kinds (returned by WithStringEnumOptions) carry IDs >= 1000.
 		enumOptionsMu.Lock()
@@ -251,8 +264,9 @@ type DiffOutputKeyDeclarer interface {
 }
 
 // AssertDiffPopulatesAllOutputFields verifies that for every key the driver's
-// Diff implementation reads from current.Outputs, the matching Create call
-// populates that key. Closes BC-3 (Outputs-vs-Diff invariant).
+// Diff implementation reads from current.Outputs, the driver's Create call
+// populates that key. Closes BC-3 (Outputs-vs-Diff invariant) for the Create
+// path.
 //
 // The driver must implement DiffOutputKeyDeclarer to declare its read set.
 // The matcher invokes Create with the provided sample spec and inspects the
@@ -260,6 +274,13 @@ type DiffOutputKeyDeclarer interface {
 //
 // sampleSpec must be a representative input that exercises the writer's
 // happy path. Use the spec the plugin's own tests use.
+//
+// Scope note: this matcher only verifies the Create writer. Read and Update
+// population are NOT exercised here — if your driver only populates a key on
+// the Read or Update path (e.g., post-deployment status, in-place rotation),
+// add a separate test that calls Read/Update against a representative ref
+// and asserts the same key set. Drift between writer paths is a recurring
+// BC-3 sub-class.
 func AssertDiffPopulatesAllOutputFields(t TB, driver interfaces.ResourceDriver, sampleSpec interfaces.ResourceSpec) {
 	t.Helper()
 	declarer, ok := driver.(DiffOutputKeyDeclarer)

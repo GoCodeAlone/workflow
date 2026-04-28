@@ -258,6 +258,64 @@ func TestAssertValidationMatrix_StringEnum_LooseFailsOnNonString(t *testing.T) {
 	}
 }
 
+// TestAssertValidationMatrix_TCPPort_FloatBoundaryMisbehaviorCaught proves
+// that the float64 probe table covers the negative (-1) and min-valid (1)
+// boundary values claimed by the KindTCPPort docstring. The parser inverts
+// boundary handling (accepts float64(-1), rejects float64(1)) so the matrix
+// MUST flag both probes by name. Without those two probes in the table this
+// test would not see "negative (float64" or "min valid (float64" in the
+// captured failure messages.
+func TestAssertValidationMatrix_TCPPort_FloatBoundaryMisbehaviorCaught(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		// Strict on int — passes all int probes.
+		if v, ok := cfg["port"].(int); ok {
+			if v < 1 || v > 65535 {
+				return nil, fmt.Errorf("port: %d invalid", v)
+			}
+			return v, nil
+		}
+		// Inverted boundary on float64: accepts the values we expect to be
+		// rejected (-1, 0, 65536) and rejects the values we expect to be
+		// accepted (1, 65535) — exercises the full float64 boundary.
+		if f, ok := cfg["port"].(float64); ok {
+			if f == -1 || f == 0 || f == 65536 {
+				return int(f), nil // BUG: silently accepts
+			}
+			return nil, fmt.Errorf("port: %v invalid", f) // BUG: rejects 1, 65535
+		}
+		return nil, fmt.Errorf("port: must be a number")
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
+	if !tt.failed {
+		t.Fatal("expected matrix failure on inverted-boundary float64 parser")
+	}
+	if !tt.hasMessageContaining("negative (float64") {
+		t.Errorf("expected float64(-1) probe to be exercised; messages: %v", tt.messages)
+	}
+	if !tt.hasMessageContaining("min valid (float64") {
+		t.Errorf("expected float64(1) probe to be exercised; messages: %v", tt.messages)
+	}
+}
+
+// TestAssertValidationMatrix_StringEnum_BareKindFailsLoudly verifies that
+// passing the bare KindStringEnum constant (without WithStringEnumOptions)
+// surfaces a targeted error directing the caller to WithStringEnumOptions —
+// the bare exported constant looks usable but isn't, so the matcher must
+// fail loudly with actionable guidance rather than the generic "unhandled
+// kind" message.
+func TestAssertValidationMatrix_StringEnum_BareKindFailsLoudly(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) { return cfg["x"], nil }
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "x", iaclint.KindStringEnum)
+	if !tt.failed {
+		t.Fatal("expected loud failure for bare KindStringEnum constant")
+	}
+	if !tt.hasMessageContaining("WithStringEnumOptions") {
+		t.Errorf("expected fatal message to point caller to WithStringEnumOptions; messages: %v", tt.messages)
+	}
+}
+
 func TestAssertValidationMatrix_IntegerOnlyFloat_LooseAcceptsFractional(t *testing.T) {
 	// A parser that silently truncates 1.9 → 1 should fail the matrix.
 	parser := func(cfg map[string]any) (any, error) {
