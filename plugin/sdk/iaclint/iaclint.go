@@ -1,13 +1,32 @@
 // Package iaclint provides cross-provider review discipline as executable
-// test helpers for IaC plugin authors. The bug-class taxonomy and rationale
-// for each helper live in the project review checklist:
+// test helpers for IaC plugin authors.
+//
+// The bug-class taxonomy and rationale for each helper live in the project
+// review checklist:
 //
 //	docs/IAC_PLUGIN_REVIEW_CHECKLIST.md
+//
+// Three matchers are exposed:
+//
+//   - AssertOutputsRoundTripStructpb (BC-2): verifies Outputs map values
+//     survive structpb.NewStruct round-trip without breaking type assertions.
+//     Use for plugins on legacy compat dispatch.
+//
+//   - AssertDiffPopulatesAllOutputFields (BC-3): verifies every Outputs[*]
+//     key the driver's Diff reads is populated by the matching Create writer.
+//     Use for every ResourceDriver in the plugin.
+//
+//   - AssertValidationMatrix (BC-4): exercises edge values for a config-field
+//     parser (TCP port, integer-only float, non-empty string, string enum,
+//     non-negative int). Use for every field-level config validator.
 //
 // IaC plugins import this package in their test suites so the bug classes
 // surfaced during the workflow-plugin-digitalocean v0.8.0 review cycle are
 // caught at CI time rather than during production gRPC dispatch or in code
-// review.
+// review. Plugins on legacy compat dispatch (no internal/contracts/ proto
+// package, plugin.json mode != "strict") MUST call AssertOutputsRoundTripStructpb
+// for every Outputs map written by Create/Update/Read. Strict-mode plugins
+// (plugin.json mode == "strict") are immune to BC-2 and may skip that matcher.
 package iaclint
 
 import (
