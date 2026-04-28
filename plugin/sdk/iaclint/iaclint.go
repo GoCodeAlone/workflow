@@ -11,6 +11,8 @@
 package iaclint
 
 import (
+	"math"
+
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -87,4 +89,72 @@ func AssertOutputsRoundTripStructpb(t TB, outputs map[string]any) {
 		}
 		t.Fatalf("Outputs not structpb-compatible: %v", err)
 	}
+}
+
+// ConfigParser is a closure that extracts and validates one config field. The
+// parser receives a config map (mirroring the cfg map[string]any shape used
+// across IaC drivers) and returns the parsed value or an error.
+//
+// AssertValidationMatrix calls the parser repeatedly with edge-case inputs and
+// asserts the parser correctly accepts/rejects each.
+type ConfigParser func(cfg map[string]any) (any, error)
+
+// validationProbe is one row of the {value, expectAccept, label} battery.
+type validationProbe struct {
+	value        any
+	expectAccept bool
+	label        string
+}
+
+// AssertValidationMatrix runs the standard {field, value-class} battery
+// against parser. Closes BC-4 (validation matrix) by exercising the edge
+// values that have historically been silently accepted by IaC plugin parsers.
+//
+// fieldName is the cfg key the parser reads (e.g., "port", "droplet_ids").
+// kind selects which battery to run.
+func AssertValidationMatrix(t TB, parser ConfigParser, fieldName string, kind ValidationKind) {
+	t.Helper()
+	switch kind {
+	case KindTCPPort:
+		runProbes(t, parser, fieldName, kind, []validationProbe{
+			{0, false, "zero"},
+			{-1, false, "negative"},
+			{1, true, "min valid"},
+			{65535, true, "max valid"},
+			{65536, false, "above max"},
+		})
+	case KindIntegerOnlyFloat:
+		runProbes(t, parser, fieldName, kind, []validationProbe{
+			{1.0, true, "integer-valued float"},
+			{1.9, false, "fractional"},
+			{math.NaN(), false, "NaN"},
+			{math.Inf(1), false, "Inf"},
+		})
+	default:
+		t.Fatalf("AssertValidationMatrix: unhandled kind %s", kind)
+	}
+}
+
+// runProbes is the shared driver for each kind's probe table.
+func runProbes(t TB, parser ConfigParser, fieldName string, kind ValidationKind, probes []validationProbe) {
+	t.Helper()
+	for _, p := range probes {
+		_, err := parser(map[string]any{fieldName: p.value})
+		got := err == nil
+		if got != p.expectAccept {
+			verb := "rejected"
+			if got {
+				verb = "accepted"
+			}
+			t.Errorf("%s probe %q (value=%v): parser %s; expected %s — see BC-4 in IAC_PLUGIN_REVIEW_CHECKLIST.md",
+				kind, p.label, p.value, verb, acceptStr(p.expectAccept))
+		}
+	}
+}
+
+func acceptStr(b bool) string {
+	if b {
+		return "accept"
+	}
+	return "reject"
 }

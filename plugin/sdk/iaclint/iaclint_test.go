@@ -66,3 +66,60 @@ func TestAssertOutputsRoundTripStructpb_AcceptsCanonicalShape(t *testing.T) {
 		t.Fatalf("AssertOutputsRoundTripStructpb rejected canonical shape: %s", tt.fatalMsg)
 	}
 }
+
+func TestAssertValidationMatrix_TCPPort_StrictParserPasses(t *testing.T) {
+	// A parser that rejects 0, negative, and >65535 should pass the TCPPort matrix.
+	parser := func(cfg map[string]any) (any, error) {
+		v, ok := cfg["port"].(int)
+		if !ok {
+			if f, fok := cfg["port"].(float64); fok && f == float64(int(f)) {
+				v = int(f)
+			} else {
+				return nil, fmt.Errorf("port: must be an integer")
+			}
+		}
+		if v < 1 || v > 65535 {
+			return nil, fmt.Errorf("port: %d invalid (must be 1..65535)", v)
+		}
+		return v, nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
+	if tt.failed {
+		t.Fatalf("strict TCPPort parser failed matrix: %s", tt.fatalMsg)
+	}
+}
+
+func TestAssertValidationMatrix_TCPPort_LooseParserFails(t *testing.T) {
+	// A parser that accepts 0 (loose) should fail the TCPPort matrix.
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["port"].(int)
+		if v < 0 || v > 65535 {
+			return nil, fmt.Errorf("port: %d invalid", v)
+		}
+		return v, nil // accepts 0 — BC-4 violation
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
+	if !tt.failed {
+		t.Fatal("loose TCPPort parser passed matrix; expected failure for value 0")
+	}
+}
+
+func TestAssertValidationMatrix_IntegerOnlyFloat_StrictParserPasses(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		v, ok := cfg["id"].(float64)
+		if !ok {
+			return nil, fmt.Errorf("id: must be a number")
+		}
+		if v != float64(int64(v)) {
+			return nil, fmt.Errorf("id: %v is not an integer", v)
+		}
+		return int64(v), nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "id", iaclint.KindIntegerOnlyFloat)
+	if tt.failed {
+		t.Fatalf("strict IntegerOnlyFloat parser failed matrix: %s", tt.fatalMsg)
+	}
+}
