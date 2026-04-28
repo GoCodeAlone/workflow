@@ -1,10 +1,12 @@
 package iaclint_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/plugin/sdk/iaclint"
 )
 
@@ -194,5 +196,82 @@ func TestAssertValidationMatrix_StringEnum_LooseFailsOnNonString(t *testing.T) {
 	iaclint.AssertValidationMatrix(tt, parser, "expose", iaclint.WithStringEnumOptions(allowed))
 	if !tt.failed {
 		t.Fatal("loose StringEnum parser passed matrix; expected failure on non-string probe")
+	}
+}
+
+// fakeDriver is a minimal interfaces.ResourceDriver impl used to exercise
+// AssertDiffPopulatesAllOutputFields. The contract: every key Diff reads from
+// current.Outputs MUST be populated by Create/Read/Update on the writer side.
+type fakeDriver struct {
+	createOutputs map[string]any
+	diffReadsKeys []string // keys this fake's Diff would read
+}
+
+func (f *fakeDriver) Create(ctx context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{
+		Name:    spec.Name,
+		Type:    spec.Type,
+		Outputs: f.createOutputs,
+		Status:  "running",
+	}, nil
+}
+
+func (f *fakeDriver) Read(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) Update(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) Delete(ctx context.Context, ref interfaces.ResourceRef) error { return nil }
+
+// Diff records that it read the expected keys but doesn't actually compare.
+func (f *fakeDriver) Diff(ctx context.Context, desired interfaces.ResourceSpec, current *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	for _, k := range f.diffReadsKeys {
+		_ = current.Outputs[k] // simulate reading the field
+	}
+	return &interfaces.DiffResult{NeedsUpdate: false}, nil
+}
+
+func (f *fakeDriver) HealthCheck(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) Scale(ctx context.Context, ref interfaces.ResourceRef, replicas int) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) SensitiveKeys() []string { return nil }
+
+func (f *fakeDriver) DiffReadsOutputKeys() []string { return f.diffReadsKeys }
+
+func TestAssertDiffPopulatesAllOutputFields_OK(t *testing.T) {
+	d := &fakeDriver{
+		createOutputs: map[string]any{"image": "x:v1", "expose": "internal"},
+		diffReadsKeys: []string{"image", "expose"},
+	}
+	tt := &mockT{}
+	iaclint.AssertDiffPopulatesAllOutputFields(tt, d,
+		interfaces.ResourceSpec{Name: "fake", Type: "fake.thing", Config: map[string]any{}})
+	if tt.failed {
+		t.Fatalf("driver with matching writer/reader keys failed assertion: %s", tt.fatalMsg)
+	}
+}
+
+func TestAssertDiffPopulatesAllOutputFields_MissingKey(t *testing.T) {
+	// Writer doesn't populate "expose" but Diff reads it.
+	d := &fakeDriver{
+		createOutputs: map[string]any{"image": "x:v1"}, // no "expose"
+		diffReadsKeys: []string{"image", "expose"},
+	}
+	tt := &mockT{}
+	iaclint.AssertDiffPopulatesAllOutputFields(tt, d,
+		interfaces.ResourceSpec{Name: "fake", Type: "fake.thing", Config: map[string]any{}})
+	if !tt.failed {
+		t.Fatal("driver with missing writer key passed assertion; expected failure")
+	}
+	if !strings.Contains(tt.fatalMsg, "expose") {
+		t.Errorf("fatal msg missing key name 'expose': %q", tt.fatalMsg)
 	}
 }

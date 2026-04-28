@@ -11,9 +11,11 @@
 package iaclint
 
 import (
+	"context"
 	"math"
 	"sync"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -185,6 +187,50 @@ func WithStringEnumOptions(allowed []string) ValidationKind {
 	enumOptions[id] = append([]string(nil), allowed...)
 	enumOptionsMu.Unlock()
 	return id
+}
+
+// DiffOutputKeyDeclarer is an optional interface a ResourceDriver may
+// implement to declare which Outputs[*] keys its Diff implementation reads.
+// AssertDiffPopulatesAllOutputFields uses this to verify the writer side
+// (Create/Read/Update) populates all declared keys.
+//
+// Plugins typically implement this as a sibling method that returns a static
+// slice of canonical key names — small surface, easy to keep in sync.
+type DiffOutputKeyDeclarer interface {
+	DiffReadsOutputKeys() []string
+}
+
+// AssertDiffPopulatesAllOutputFields verifies that for every key the driver's
+// Diff implementation reads from current.Outputs, the matching Create call
+// populates that key. Closes BC-3 (Outputs-vs-Diff invariant).
+//
+// The driver must implement DiffOutputKeyDeclarer to declare its read set.
+// The matcher invokes Create with the provided sample spec and inspects the
+// returned ResourceOutput.Outputs map for the declared keys.
+//
+// sampleSpec must be a representative input that exercises the writer's
+// happy path. Use the spec the plugin's own tests use.
+func AssertDiffPopulatesAllOutputFields(t TB, driver interfaces.ResourceDriver, sampleSpec interfaces.ResourceSpec) {
+	t.Helper()
+	declarer, ok := driver.(DiffOutputKeyDeclarer)
+	if !ok {
+		t.Fatalf("driver %T does not implement DiffOutputKeyDeclarer; cannot verify BC-3 invariant", driver)
+		return
+	}
+	out, err := driver.Create(context.Background(), sampleSpec)
+	if err != nil {
+		t.Fatalf("driver.Create failed: %v", err)
+		return
+	}
+	if out == nil || out.Outputs == nil {
+		t.Fatalf("driver.Create returned nil Outputs")
+		return
+	}
+	for _, key := range declarer.DiffReadsOutputKeys() {
+		if _, present := out.Outputs[key]; !present {
+			t.Errorf("Outputs[%q] not populated by Create, but Diff reads it — see BC-3 in IAC_PLUGIN_REVIEW_CHECKLIST.md", key)
+		}
+	}
 }
 
 func runStringEnumProbes(t TB, parser ConfigParser, fieldName string, allowed []string) {
