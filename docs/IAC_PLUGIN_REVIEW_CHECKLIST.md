@@ -185,9 +185,9 @@ kind and asserts the parser accepts/rejects per the documented contract.
 
 **Reviewer scan:**
 
-1. `grep -niP 'func .*\b(canonical|parse|validate)[a-z]*\b' \
-   internal/drivers/*.go` — enumerate every field validator. The `-i`
-   flag is REQUIRED so Go-convention Title Case exports
+1. Enumerate every field validator:
+   `grep -niP 'func .*\b(canonical|parse|validate)[a-z]*\b' internal/drivers/*.go`.
+   The `-i` flag is REQUIRED so Go-convention Title Case exports
    (`ParseImageRef`, `ValidateConfig`, `CanonicalizeRule`) surface
    alongside lowercase package-private helpers; `-P` is REQUIRED for
    `\b` word boundaries (POSIX ERE doesn't define `\b`).
@@ -230,8 +230,8 @@ actual call sites; out of scope for v1.)
 
 **Reviewer scan:**
 
-1. `grep -niE 'plan[- ]?time' plugin.json CHANGELOG.md docs/*.md \
-   internal/drivers/*.go` — every claim of plan-time behavior.
+1. Every claim of plan-time behavior:
+   `grep -niE 'plan[- ]?time' plugin.json CHANGELOG.md docs/*.md internal/drivers/*.go`.
 2. For each hit, trace the named validator. Does it run from
    `Driver.Diff` (or `Driver.Validate` if the SDK supports it), or only
    from `Driver.Create` / `Driver.Update`?
@@ -264,9 +264,9 @@ validator and asserts both raise the same error class on bad input.
 
 **Reviewer scan:**
 
-1. `grep -niP 'func .*\b(canonical|normalize|equalize)[a-z]' \
-   internal/drivers/*.go` — every Diff-side canonicalizer. The `-i` flag
-   is REQUIRED so Title Case exports (`CanonicalizeRule`,
+1. Every Diff-side canonicalizer:
+   `grep -niP 'func .*\b(canonical|normalize|equalize)[a-z]' internal/drivers/*.go`.
+   The `-i` flag is REQUIRED so Title Case exports (`CanonicalizeRule`,
    `NormalizeCIDR`, `EqualizeRules`) surface alongside the lowercase
    package-private form; `-P` is REQUIRED for `\b` word boundaries
    (POSIX ERE doesn't define `\b`).
@@ -308,9 +308,12 @@ assert it returns an error citing the widened rule.
 
 **Reviewer scan:**
 
-1. `grep -nE \
-   'inbound_rules\.sources|outbound_rules\.destinations|IpRanges|sourceRanges|sourceAddressPrefixes' \
-   internal/drivers/*.go` — every CIDR-bearing rule field.
+1. Every CIDR-bearing rule field:
+
+   ```sh
+   grep -nE 'inbound_rules\.sources|outbound_rules\.destinations|IpRanges|sourceRanges|sourceAddressPrefixes' internal/drivers/*.go
+   ```
+
 2. For each Update path that mutates such a field, trace whether the path
    compares desired vs current CIDR set membership before applying.
 3. Any path that swaps without comparing is a **BC-7 BLOCKING** finding
