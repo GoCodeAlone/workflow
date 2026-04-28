@@ -10,6 +10,19 @@
 // review.
 package iaclint
 
+import (
+	"google.golang.org/protobuf/types/known/structpb"
+)
+
+// TB is the subset of testing.TB the iaclint matchers use. Accepting an
+// interface (rather than *testing.T) lets the matchers be unit-tested with a
+// mock that captures failures.
+type TB interface {
+	Helper()
+	Fatalf(format string, args ...any)
+	Errorf(format string, args ...any)
+}
+
 // ValidationKind enumerates the standard {field, value-class} probes used by
 // AssertValidationMatrix. Each kind exercises a battery of edge values that
 // match the bug-class definitions in the project review checklist.
@@ -43,4 +56,35 @@ func (k ValidationKind) String() string {
 		return "IntegerOnlyFloat"
 	}
 	return "Unknown"
+}
+
+// AssertOutputsRoundTripStructpb verifies that every value in outputs survives
+// a structpb.NewStruct → AsMap() round-trip without breaking downstream type
+// assertions. Closes BC-2 (structpb gRPC boundary): typed slices ([]int,
+// []string, []godo.X) are rejected by structpb.NewStruct outright; godo
+// structs round-trip as map[string]any so reader-side type assertions to the
+// original struct type fail silently.
+//
+// Plugins on legacy compat dispatch (no internal/contracts/ proto package,
+// plugin.json mode != "strict") MUST call this matcher in their test suite for
+// every Outputs map written by Create/Update/Read, so the canonical-shape
+// invariant is enforced at CI time.
+//
+// Strict-mode plugins (plugin.json mode == "strict") are immune to BC-2 and do
+// not need this matcher.
+func AssertOutputsRoundTripStructpb(t TB, outputs map[string]any) {
+	t.Helper()
+	if outputs == nil {
+		return
+	}
+	if _, err := structpb.NewStruct(outputs); err != nil {
+		// Identify the offending key to give the test author a direct pointer.
+		for k, v := range outputs {
+			if _, single := structpb.NewStruct(map[string]any{k: v}); single != nil {
+				t.Fatalf("Outputs[%q] (%T) is not structpb-compatible: %v — see BC-2 in IAC_PLUGIN_REVIEW_CHECKLIST.md", k, v, single)
+				return
+			}
+		}
+		t.Fatalf("Outputs not structpb-compatible: %v", err)
+	}
 }
