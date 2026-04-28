@@ -265,25 +265,29 @@ func AssertDiffPopulatesAllOutputFields(t TB, driver interfaces.ResourceDriver, 
 
 func runStringEnumProbes(t TB, parser ConfigParser, fieldName string, allowed []string) {
 	t.Helper()
-	type probe struct {
-		value        any
-		expectAccept bool
-		label        string
+	// stringEnumProbe carries an explicit genuineAbsent flag so the loop
+	// dispatches on a bool rather than on label-string equality, which would
+	// be brittle to label edits.
+	type stringEnumProbe struct {
+		value         any
+		expectAccept  bool
+		label         string
+		genuineAbsent bool // when true, omit the field key from cfg entirely
 	}
-	var probes []probe
+	var probes []stringEnumProbe
 	for _, a := range allowed {
-		probes = append(probes, probe{a, true, "allowed " + a})
+		probes = append(probes, stringEnumProbe{value: a, expectAccept: true, label: "allowed " + a})
 	}
 	probes = append(probes,
-		probe{nil, true, "absent (no key)"},
-		probe{"definitely-not-a-real-value", false, "unknown string"},
-		probe{true, false, "non-string bool"},
-		probe{123, false, "non-string int"},
-		probe{[]string{}, false, "non-string slice"},
+		stringEnumProbe{value: nil, expectAccept: true, label: "absent (no key)", genuineAbsent: true},
+		stringEnumProbe{value: "definitely-not-a-real-value", expectAccept: false, label: "unknown string"},
+		stringEnumProbe{value: true, expectAccept: false, label: "non-string bool"},
+		stringEnumProbe{value: 123, expectAccept: false, label: "non-string int"},
+		stringEnumProbe{value: []string{}, expectAccept: false, label: "non-string slice"},
 	)
 	for _, p := range probes {
 		var cfg map[string]any
-		if p.label == "absent (no key)" {
+		if p.genuineAbsent {
 			cfg = map[string]any{} // genuinely absent — no key
 		} else {
 			cfg = map[string]any{fieldName: p.value}

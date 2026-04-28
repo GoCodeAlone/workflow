@@ -11,19 +11,42 @@ import (
 )
 
 // mockT captures testing.TB calls without actually failing the outer test.
+// All messages are captured (not just the last) so tests can assert on a
+// specific probe's failure even when multiple probes fail in one matrix run.
 type mockT struct {
 	failed   bool
-	fatalMsg string
+	messages []string
 }
 
 func (m *mockT) Helper() {}
 func (m *mockT) Fatalf(format string, args ...any) {
 	m.failed = true
-	m.fatalMsg = fmt.Sprintf(format, args...)
+	m.messages = append(m.messages, fmt.Sprintf(format, args...))
 }
 func (m *mockT) Errorf(format string, args ...any) {
 	m.failed = true
-	m.fatalMsg = fmt.Sprintf(format, args...)
+	m.messages = append(m.messages, fmt.Sprintf(format, args...))
+}
+
+// lastMessage returns the most-recent captured message, or "" if none.
+// Convenience for tests that only care about the latest failure.
+func (m *mockT) lastMessage() string {
+	if len(m.messages) == 0 {
+		return ""
+	}
+	return m.messages[len(m.messages)-1]
+}
+
+// hasMessageContaining reports whether any captured message contains substr.
+// Use when multiple probes may fail and the test needs to assert a specific
+// probe's message was emitted.
+func (m *mockT) hasMessageContaining(substr string) bool {
+	for _, msg := range m.messages {
+		if strings.Contains(msg, substr) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestValidationKind_String(t *testing.T) {
@@ -51,8 +74,8 @@ func TestAssertOutputsRoundTripStructpb_RejectsTypedSlice(t *testing.T) {
 	if !tt.failed {
 		t.Fatal("AssertOutputsRoundTripStructpb accepted typed []int slice; expected failure")
 	}
-	if !strings.Contains(tt.fatalMsg, "droplet_ids") {
-		t.Errorf("fatal msg %q missing field name 'droplet_ids'", tt.fatalMsg)
+	if !tt.hasMessageContaining("droplet_ids") {
+		t.Errorf("captured messages %q missing field name 'droplet_ids'", tt.messages)
 	}
 }
 
@@ -65,7 +88,7 @@ func TestAssertOutputsRoundTripStructpb_AcceptsCanonicalShape(t *testing.T) {
 		"name":          "fw-1",
 	})
 	if tt.failed {
-		t.Fatalf("AssertOutputsRoundTripStructpb rejected canonical shape: %s", tt.fatalMsg)
+		t.Fatalf("AssertOutputsRoundTripStructpb rejected canonical shape: %s", tt.lastMessage())
 	}
 }
 
@@ -88,7 +111,7 @@ func TestAssertValidationMatrix_TCPPort_StrictParserPasses(t *testing.T) {
 	tt := &mockT{}
 	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
 	if tt.failed {
-		t.Fatalf("strict TCPPort parser failed matrix: %s", tt.fatalMsg)
+		t.Fatalf("strict TCPPort parser failed matrix: %s", tt.lastMessage())
 	}
 }
 
@@ -149,7 +172,7 @@ func TestAssertValidationMatrix_IntegerOnlyFloat_StrictParserPasses(t *testing.T
 	tt := &mockT{}
 	iaclint.AssertValidationMatrix(tt, parser, "id", iaclint.KindIntegerOnlyFloat)
 	if tt.failed {
-		t.Fatalf("strict IntegerOnlyFloat parser failed matrix: %s", tt.fatalMsg)
+		t.Fatalf("strict IntegerOnlyFloat parser failed matrix: %s", tt.lastMessage())
 	}
 }
 
@@ -164,7 +187,7 @@ func TestAssertValidationMatrix_NonNegativeInt_Strict(t *testing.T) {
 	tt := &mockT{}
 	iaclint.AssertValidationMatrix(tt, parser, "count", iaclint.KindNonNegativeInt)
 	if tt.failed {
-		t.Fatalf("strict NonNegativeInt parser failed matrix: %s", tt.fatalMsg)
+		t.Fatalf("strict NonNegativeInt parser failed matrix: %s", tt.lastMessage())
 	}
 }
 
@@ -179,7 +202,7 @@ func TestAssertValidationMatrix_NonEmptyString_Strict(t *testing.T) {
 	tt := &mockT{}
 	iaclint.AssertValidationMatrix(tt, parser, "name", iaclint.KindNonEmptyString)
 	if tt.failed {
-		t.Fatalf("strict NonEmptyString parser failed matrix: %s", tt.fatalMsg)
+		t.Fatalf("strict NonEmptyString parser failed matrix: %s", tt.lastMessage())
 	}
 }
 
@@ -208,7 +231,7 @@ func TestAssertValidationMatrix_StringEnum_Strict(t *testing.T) {
 	tt := &mockT{}
 	iaclint.AssertValidationMatrix(tt, parser, "expose", iaclint.WithStringEnumOptions(allowed))
 	if tt.failed {
-		t.Fatalf("strict StringEnum parser failed matrix: %s", tt.fatalMsg)
+		t.Fatalf("strict StringEnum parser failed matrix: %s", tt.lastMessage())
 	}
 }
 
@@ -223,6 +246,54 @@ func TestAssertValidationMatrix_StringEnum_LooseFailsOnNonString(t *testing.T) {
 	iaclint.AssertValidationMatrix(tt, parser, "expose", iaclint.WithStringEnumOptions(allowed))
 	if !tt.failed {
 		t.Fatal("loose StringEnum parser passed matrix; expected failure on non-string probe")
+	}
+	// Assert specifically that the non-string probes were the ones that
+	// triggered failures — guards against regressions where a different
+	// probe class (e.g., unknown-string) starts failing while non-string
+	// rejection silently regresses.
+	for _, label := range []string{"non-string bool", "non-string int", "non-string slice"} {
+		if !tt.hasMessageContaining(label) {
+			t.Errorf("expected failure message for probe %q; captured messages: %v", label, tt.messages)
+		}
+	}
+}
+
+func TestAssertValidationMatrix_IntegerOnlyFloat_LooseAcceptsFractional(t *testing.T) {
+	// A parser that silently truncates 1.9 → 1 should fail the matrix.
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["id"].(float64)
+		return int64(v), nil // BC-4 violation: silently truncates fractional values
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "id", iaclint.KindIntegerOnlyFloat)
+	if !tt.failed {
+		t.Fatal("loose IntegerOnlyFloat parser passed matrix; expected failure on 1.9 / NaN / Inf probes")
+	}
+}
+
+func TestAssertValidationMatrix_NonNegativeInt_LooseAcceptsNegative(t *testing.T) {
+	// A parser that doesn't range-check should fail the matrix on -1.
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["count"].(int)
+		return v, nil // BC-4 violation: accepts -1
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "count", iaclint.KindNonNegativeInt)
+	if !tt.failed {
+		t.Fatal("loose NonNegativeInt parser passed matrix; expected failure on -1 probe")
+	}
+}
+
+func TestAssertValidationMatrix_NonEmptyString_LooseAcceptsEmpty(t *testing.T) {
+	// A parser that doesn't trim/check should fail the matrix on "" and "   ".
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["name"].(string)
+		return v, nil // BC-4 violation: accepts empty / whitespace-only
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "name", iaclint.KindNonEmptyString)
+	if !tt.failed {
+		t.Fatal("loose NonEmptyString parser passed matrix; expected failure on empty / whitespace probes")
 	}
 }
 
@@ -282,7 +353,7 @@ func TestAssertDiffPopulatesAllOutputFields_OK(t *testing.T) {
 	iaclint.AssertDiffPopulatesAllOutputFields(tt, d,
 		interfaces.ResourceSpec{Name: "fake", Type: "fake.thing", Config: map[string]any{}})
 	if tt.failed {
-		t.Fatalf("driver with matching writer/reader keys failed assertion: %s", tt.fatalMsg)
+		t.Fatalf("driver with matching writer/reader keys failed assertion: %s", tt.lastMessage())
 	}
 }
 
@@ -298,7 +369,7 @@ func TestAssertDiffPopulatesAllOutputFields_MissingKey(t *testing.T) {
 	if !tt.failed {
 		t.Fatal("driver with missing writer key passed assertion; expected failure")
 	}
-	if !strings.Contains(tt.fatalMsg, "expose") {
-		t.Errorf("fatal msg missing key name 'expose': %q", tt.fatalMsg)
+	if !strings.Contains(tt.lastMessage(), "expose") {
+		t.Errorf("fatal msg missing key name 'expose': %q", tt.lastMessage())
 	}
 }
