@@ -12,6 +12,7 @@ package iaclint
 
 import (
 	"math"
+	"sync"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -130,8 +131,97 @@ func AssertValidationMatrix(t TB, parser ConfigParser, fieldName string, kind Va
 			{math.NaN(), false, "NaN"},
 			{math.Inf(1), false, "Inf"},
 		})
+	case KindNonNegativeInt:
+		runProbes(t, parser, fieldName, kind, []validationProbe{
+			{-1, false, "negative"},
+			{0, true, "zero"},
+			{1, true, "positive"},
+		})
+	case KindNonEmptyString:
+		runProbes(t, parser, fieldName, kind, []validationProbe{
+			{"", false, "empty"},
+			{"   ", false, "whitespace"},
+			{"valid", true, "non-empty"},
+		})
 	default:
+		// StringEnum kinds (returned by WithStringEnumOptions) carry IDs >= 1000.
+		enumOptionsMu.Lock()
+		allowed, isEnum := enumOptions[kind]
+		enumOptionsMu.Unlock()
+		if isEnum {
+			runStringEnumProbes(t, parser, fieldName, allowed)
+			return
+		}
 		t.Fatalf("AssertValidationMatrix: unhandled kind %s", kind)
+	}
+}
+
+// stringEnum allowed-values registry. Each call to WithStringEnumOptions
+// reserves a fresh ValidationKind id (>= 1000) so callers can pass distinct
+// allowed sets without mutating the package-wide enum constants.
+var (
+	enumOptionsMu sync.Mutex
+	enumOptions   = map[ValidationKind][]string{}
+	nextEnumIDVal = ValidationKind(1000) // reserve [0..999] for static kinds
+)
+
+func nextEnumID() ValidationKind {
+	enumOptionsMu.Lock()
+	defer enumOptionsMu.Unlock()
+	id := nextEnumIDVal
+	nextEnumIDVal++
+	return id
+}
+
+// WithStringEnumOptions returns a StringEnum kind bound to the given allowed
+// values. Use this instead of the bare KindStringEnum constant when calling
+// AssertValidationMatrix:
+//
+//	iaclint.AssertValidationMatrix(t, parser, "expose",
+//	    iaclint.WithStringEnumOptions([]string{"public", "internal"}))
+func WithStringEnumOptions(allowed []string) ValidationKind {
+	id := nextEnumID()
+	enumOptionsMu.Lock()
+	enumOptions[id] = append([]string(nil), allowed...)
+	enumOptionsMu.Unlock()
+	return id
+}
+
+func runStringEnumProbes(t TB, parser ConfigParser, fieldName string, allowed []string) {
+	t.Helper()
+	type probe struct {
+		value        any
+		expectAccept bool
+		label        string
+	}
+	var probes []probe
+	for _, a := range allowed {
+		probes = append(probes, probe{a, true, "allowed " + a})
+	}
+	probes = append(probes,
+		probe{nil, true, "absent (no key)"},
+		probe{"definitely-not-a-real-value", false, "unknown string"},
+		probe{true, false, "non-string bool"},
+		probe{123, false, "non-string int"},
+		probe{[]string{}, false, "non-string slice"},
+	)
+	for _, p := range probes {
+		var cfg map[string]any
+		if p.label == "absent (no key)" {
+			cfg = map[string]any{} // genuinely absent — no key
+		} else {
+			cfg = map[string]any{fieldName: p.value}
+		}
+		_, err := parser(cfg)
+		got := err == nil
+		if got != p.expectAccept {
+			verb := "rejected"
+			if got {
+				verb = "accepted"
+			}
+			t.Errorf("StringEnum probe %q (value=%v): parser %s; expected %s — see BC-4 in IAC_PLUGIN_REVIEW_CHECKLIST.md",
+				p.label, p.value, verb, acceptStr(p.expectAccept))
+		}
 	}
 }
 

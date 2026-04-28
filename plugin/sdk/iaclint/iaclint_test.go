@@ -123,3 +123,76 @@ func TestAssertValidationMatrix_IntegerOnlyFloat_StrictParserPasses(t *testing.T
 		t.Fatalf("strict IntegerOnlyFloat parser failed matrix: %s", tt.fatalMsg)
 	}
 }
+
+func TestAssertValidationMatrix_NonNegativeInt_Strict(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["count"].(int)
+		if v < 0 {
+			return nil, fmt.Errorf("count: %d invalid", v)
+		}
+		return v, nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "count", iaclint.KindNonNegativeInt)
+	if tt.failed {
+		t.Fatalf("strict NonNegativeInt parser failed matrix: %s", tt.fatalMsg)
+	}
+}
+
+func TestAssertValidationMatrix_NonEmptyString_Strict(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["name"].(string)
+		if strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("name: must be non-empty")
+		}
+		return v, nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "name", iaclint.KindNonEmptyString)
+	if tt.failed {
+		t.Fatalf("strict NonEmptyString parser failed matrix: %s", tt.fatalMsg)
+	}
+}
+
+func TestAssertValidationMatrix_StringEnum_Strict(t *testing.T) {
+	allowed := []string{"public", "internal"}
+	parser := func(cfg map[string]any) (any, error) {
+		v, exists := cfg["expose"]
+		if !exists {
+			return "", nil // absent is fine
+		}
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("expose: must be a string, got %T", v)
+		}
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" {
+			return s, nil
+		}
+		for _, a := range allowed {
+			if s == a {
+				return s, nil
+			}
+		}
+		return nil, fmt.Errorf("expose: %q invalid; must be one of %v", s, allowed)
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "expose", iaclint.WithStringEnumOptions(allowed))
+	if tt.failed {
+		t.Fatalf("strict StringEnum parser failed matrix: %s", tt.fatalMsg)
+	}
+}
+
+func TestAssertValidationMatrix_StringEnum_LooseFailsOnNonString(t *testing.T) {
+	allowed := []string{"public", "internal"}
+	parser := func(cfg map[string]any) (any, error) {
+		// BC-4 violation: silently treats non-string as omitted.
+		s, _ := cfg["expose"].(string)
+		return s, nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "expose", iaclint.WithStringEnumOptions(allowed))
+	if !tt.failed {
+		t.Fatal("loose StringEnum parser passed matrix; expected failure on non-string probe")
+	}
+}
