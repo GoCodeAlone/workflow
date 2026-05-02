@@ -773,6 +773,127 @@ func TestInfraAlign_ExitCode_WarnStrict(t *testing.T) {
 	}
 }
 
+// ── R-A9: suspicious provider_credential key ──────────────────────────────────
+
+// TestCheckRA9_SuspiciousProviderCredentialKey is a table-driven unit test
+// for checkRA9. Each case provides secretGens directly to alignContext so the
+// rule logic is tested without file I/O.
+func TestCheckRA9_SuspiciousProviderCredentialKey(t *testing.T) {
+	cases := []struct {
+		name        string
+		gens        []SecretGen
+		wantFinding bool
+		wantMsgSub  string // substring expected in finding.Message
+	}{
+		{
+			name:        "clean — key SPACES with digitalocean.spaces source",
+			gens:        []SecretGen{{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"}},
+			wantFinding: false,
+		},
+		{
+			name:        "suspicious — key ends with _access_key for digitalocean.spaces",
+			gens:        []SecretGen{{Key: "SPACES_access_key", Type: "provider_credential", Source: "digitalocean.spaces"}},
+			wantFinding: true,
+			wantMsgSub:  "_access_key",
+		},
+		{
+			name:        "suspicious — key ends with _secret_key",
+			gens:        []SecretGen{{Key: "MY_THING_secret_key", Type: "provider_credential", Source: "digitalocean.spaces"}},
+			wantFinding: true,
+			wantMsgSub:  "_secret_key",
+		},
+		{
+			name:        "not provider_credential — random_hex with _access_key suffix is fine",
+			gens:        []SecretGen{{Key: "FOO_access_key", Type: "random_hex", Length: 32}},
+			wantFinding: false,
+		},
+		{
+			name:        "unknown source — no rule applies until source is in providerCredentialSubKeys",
+			gens:        []SecretGen{{Key: "FOO_access_key", Type: "provider_credential", Source: "aws.s3"}},
+			wantFinding: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := &alignContext{secretGens: tc.gens}
+			findings := checkRA9(ctx)
+			if tc.wantFinding && len(findings) == 0 {
+				t.Fatal("expected R-A9 finding, got none")
+			}
+			if !tc.wantFinding && len(findings) != 0 {
+				t.Fatalf("expected no findings, got: %+v", findings)
+			}
+			if tc.wantFinding && tc.wantMsgSub != "" && !strings.Contains(findings[0].Message, tc.wantMsgSub) {
+				t.Errorf("expected message to contain %q, got: %s", tc.wantMsgSub, findings[0].Message)
+			}
+			if tc.wantFinding && findings[0].Rule != "R-A9" {
+				t.Errorf("expected Rule=R-A9, got %q", findings[0].Rule)
+			}
+			if tc.wantFinding && findings[0].Severity != "WARN" {
+				t.Errorf("expected Severity=WARN, got %q", findings[0].Severity)
+			}
+		})
+	}
+}
+
+// TestInfraAlign_RA9_SuspiciousKey_Fires verifies R-A9 fires end-to-end
+// through runInfraAlignChecks with a YAML that uses the bad pattern.
+func TestInfraAlign_RA9_SuspiciousKey_Fires(t *testing.T) {
+	yaml := `
+secrets:
+  provider: github
+  config:
+    repo: example/test
+    token_env: GH_TOKEN
+  generate:
+    - key: SPACES_access_key
+      type: provider_credential
+      source: digitalocean.spaces
+      name: example-deploy-key
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: ${DIGITALOCEAN_TOKEN}
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg}
+	findings, err := runInfraAlignChecks(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !findingsHaveRuleAndSeverity(findings, "R-A9", "WARN") {
+		t.Errorf("expected R-A9 WARN, got: %v", findings)
+	}
+}
+
+// TestInfraAlign_RA9_CleanKey_DoesNotFire verifies the canonical SPACES key
+// (BMW/core-dump pattern) does not trigger R-A9.
+func TestInfraAlign_RA9_CleanKey_DoesNotFire(t *testing.T) {
+	yaml := `
+secrets:
+  provider: github
+  config:
+    repo: example/test
+    token_env: GH_TOKEN
+  generate:
+    - key: SPACES
+      type: provider_credential
+      source: digitalocean.spaces
+      name: example-deploy-key
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg}
+	findings, err := runInfraAlignChecks(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A9") {
+		t.Errorf("unexpected R-A9 finding for canonical key: %v", findings)
+	}
+}
+
 func TestInfraAlign_RenderMarkdown(t *testing.T) {
 	findings := []AlignFinding{
 		{Rule: "R-A6", Severity: "WARN", Resource: "nats-broker", Message: "internal service should use expose: internal"},

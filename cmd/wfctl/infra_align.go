@@ -132,6 +132,9 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 	// R-A8: WebAuthn alignment
 	findings = append(findings, checkRA8(ctx)...)
 
+	// R-A9: suspicious provider_credential key suffix
+	findings = append(findings, checkRA9(ctx)...)
+
 	return findings, nil
 }
 

@@ -31,6 +31,7 @@ type alignContext struct {
 	ciBuilds          []config.ModuleConfig          // all ci.build modules
 	databases         []config.ModuleConfig          // all infra.database modules
 	secretKeys        map[string]struct{}            // union of secrets.generate/requires keys
+	secretGens        []SecretGen                    // secrets.generate entries from top-level secrets block
 }
 
 func buildAlignContext(cfgFile string) (*alignContext, error) {
@@ -42,6 +43,9 @@ func buildAlignContext(cfgFile string) (*alignContext, error) {
 		modules:           cfg.Modules,
 		containerServices: map[string]config.ModuleConfig{},
 		secretKeys:        map[string]struct{}{},
+	}
+	if cfg.Secrets != nil {
+		ctx.secretGens = cfg.Secrets.Generate
 	}
 	for _, m := range cfg.Modules {
 		switch {
@@ -669,6 +673,46 @@ func checkRA8(ctx *alignContext) []AlignFinding {
 				Resource: m.Name,
 				Message:  fmt.Sprintf("WEBAUTHN_RP_ID %q does not match WEBAUTHN_ORIGIN host %q", rpID, host),
 			})
+		}
+	}
+	return findings
+}
+
+// ── R-A9: suspicious provider_credential key suffix ────────────────────────
+
+// checkRA9 warns when a secrets.generate entry with type "provider_credential"
+// uses a key that already ends with a known sub-key suffix (e.g. "_access_key",
+// "_secret_key"). This pattern means the caller pre-appended the sub-key name
+// that bootstrapSecrets will append again, producing double-suffixed storage
+// keys such as SPACES_access_key_access_key. The canonical form is to use the
+// root key (e.g. "SPACES") and let bootstrapSecrets derive the sub-key names.
+//
+// The rule only fires for sources registered in providerCredentialSubKeys.
+// Unknown sources are skipped — we cannot predict their sub-key names.
+func checkRA9(ctx *alignContext) []AlignFinding {
+	var findings []AlignFinding
+	for _, gen := range ctx.secretGens {
+		if gen.Type != "provider_credential" {
+			continue
+		}
+		subs, known := subKeysForSource(gen.Source)
+		if !known {
+			continue
+		}
+		for _, sub := range subs {
+			suffix := "_" + sub
+			if strings.HasSuffix(gen.Key, suffix) {
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A9",
+					Severity: "WARN",
+					Resource: gen.Key,
+					Message: fmt.Sprintf(
+						"provider_credential key %q ends with auto-generated suffix %q — use root key (e.g. %q) and let bootstrapSecrets derive sub-keys",
+						gen.Key, suffix, strings.TrimSuffix(gen.Key, suffix),
+					),
+				})
+				break // one finding per gen entry is enough
+			}
 		}
 	}
 	return findings
