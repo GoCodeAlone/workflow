@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -190,8 +192,9 @@ func TestRunSecretsDispatch_NoArgs(t *testing.T) {
 }
 
 func TestSecretsSet_AdHocProviderOverride(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("BMW_TEST_KEY") })
 	err := runSecretsSetWithReader(
-		[]string{"--provider", "env", "--service", "bmw-test", "BMW_TEST_KEY"},
+		[]string{"--provider", "env", "BMW_TEST_KEY"},
 		strings.NewReader("test-value\n"),
 	)
 	if err != nil {
@@ -229,10 +232,24 @@ func TestSecretsSet_AdHocUnknownProvider(t *testing.T) {
 }
 
 func TestSecretsList_AdHocProvider(t *testing.T) {
-	// Set an env var and then list with ad-hoc env provider — no error expected.
-	t.Setenv("BMW_LIST_TEST_KEY", "list-value")
-	err := runSecretsList([]string{"--provider", "env", "--service", ""})
+	// A non-empty --service acts as a prefix for EnvProvider.List, enabling enumeration.
+	t.Setenv("BMW_LIST_PREFIX_KEY", "list-value")
+
+	// Capture stdout to assert the key appears in the output.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runSecretsList([]string{"--provider", "env", "--service", "BMW_LIST_PREFIX_"})
+
+	w.Close()
+	out, _ := io.ReadAll(r)
+	os.Stdout = old
+
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "BMW_LIST_PREFIX_KEY") {
+		t.Errorf("expected BMW_LIST_PREFIX_KEY in output, got:\n%s", out)
 	}
 }

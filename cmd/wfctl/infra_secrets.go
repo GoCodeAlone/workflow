@@ -113,7 +113,7 @@ func buildAdhocProvider(name, service string) (secrets.Provider, error) {
 	case "keychain":
 		return secrets.NewKeychainProvider(service)
 	case "env":
-		return secrets.NewEnvProvider(""), nil
+		return secrets.NewEnvProvider(service), nil
 	case "aws":
 		return secrets.NewAWSSecretsManagerProvider(secrets.AWSConfig{})
 	case "vault", "github":

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/secrets"
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
@@ -178,8 +180,11 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 		secretValue = string(data)
 	case *value != "":
 		secretValue = *value
-	case r != nil: // test injection
-		b, _ := io.ReadAll(r)
+	case r != nil: // explicit reader (e.g. piped input or test)
+		b, err := io.ReadAll(r)
+		if err != nil {
+			return fmt.Errorf("read secret value: %w", err)
+		}
 		secretValue = strings.TrimRight(string(b), "\n")
 	case isatty.IsTerminal(os.Stdin.Fd()): // interactive: masked prompt
 		fmt.Fprintf(os.Stderr, "Value for %s: ", name)
@@ -244,9 +249,11 @@ func runSecretsList(args []string) error {
 		}
 		keys, err := p.List(context.Background())
 		if err != nil {
-			// Some providers (e.g. env without a prefix) do not support enumeration.
-			fmt.Fprintf(os.Stderr, "Provider %q does not support listing secrets: %v\n", *providerName, err)
-			return nil
+			if errors.Is(err, secrets.ErrUnsupported) {
+				fmt.Fprintf(os.Stderr, "Provider %q does not support listing secrets\n", *providerName)
+				return nil
+			}
+			return fmt.Errorf("list secrets from provider %q: %w", *providerName, err)
 		}
 		fmt.Printf("Provider: %s (ad-hoc)\n\n", *providerName)
 		fmt.Printf("%-40s\n", "NAME")
