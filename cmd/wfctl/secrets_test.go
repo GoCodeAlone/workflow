@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 func TestSecretsDetect_EnvRef(t *testing.T) {
@@ -184,5 +186,53 @@ func TestRunSecretsDispatch_NoArgs(t *testing.T) {
 	err := runSecrets([]string{})
 	if err == nil {
 		t.Error("expected error for no args")
+	}
+}
+
+func TestSecretsSet_AdHocProviderOverride(t *testing.T) {
+	err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "--service", "bmw-test", "BMW_TEST_KEY"},
+		strings.NewReader("test-value\n"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := secrets.NewEnvProvider("")
+	got, err := p.Get(context.Background(), "BMW_TEST_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "test-value" {
+		t.Errorf("got %q want %q", got, "test-value")
+	}
+}
+
+func TestSecretsSet_AdHocNoValue_NonTTY(t *testing.T) {
+	// When r is nil and not a TTY (test environment), should return an error.
+	err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "SOME_KEY"},
+		nil,
+	)
+	if err == nil {
+		t.Error("expected error when no value provided and not a TTY")
+	}
+}
+
+func TestSecretsSet_AdHocUnknownProvider(t *testing.T) {
+	err := runSecretsSetWithReader(
+		[]string{"--provider", "vault", "MY_KEY"},
+		strings.NewReader("val\n"),
+	)
+	if err == nil {
+		t.Error("expected error for vault ad-hoc (requires config)")
+	}
+}
+
+func TestSecretsList_AdHocProvider(t *testing.T) {
+	// Set an env var and then list with ad-hoc env provider — no error expected.
+	t.Setenv("BMW_LIST_TEST_KEY", "list-value")
+	err := runSecretsList([]string{"--provider", "env", "--service", ""})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
