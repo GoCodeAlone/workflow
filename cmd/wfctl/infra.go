@@ -944,12 +944,23 @@ func runInfraApply(args []string) error {
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	var planFile string
 	fs.StringVar(&planFile, "plan", "", "Apply from a pre-emitted plan.json (skips ComputePlan)")
+	var refreshFlag bool
+	fs.BoolVar(&refreshFlag, "refresh", false, "Detect drift and prune ghost-in-state entries before applying")
+	var allowProtectedPruneFlag bool
+	fs.BoolVar(&allowProtectedPruneFlag, "allow-protected-prune", false, "Allow pruning state entries for resources marked protected: true (requires --refresh)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	_ = showSensitive // used in apply progress output when provider integration is complete
+
+	// Pre-flight: --allow-protected-prune is only meaningful with --refresh.
+	// Without --refresh, the flag is silently ignored, which could mislead
+	// operators into believing they have authorized a dangerous prune operation.
+	if allowProtectedPruneFlag && !refreshFlag {
+		return fmt.Errorf("--allow-protected-prune requires --refresh")
+	}
 
 	cfgFile := configFlag
 	if cfgFile == "" {
@@ -1002,6 +1013,39 @@ func runInfraApply(args []string) error {
 			}
 			for k, v := range secretVals {
 				os.Setenv(k, v)
+			}
+		}
+	}
+
+	// --refresh: detect drift first and prune ghost-in-state entries (cloud 404s)
+	// before running the normal plan + apply. Only applicable for infra.* configs;
+	// silently skipped for legacy platform.* configs.
+	if refreshFlag && hasInfraModules(cfgFile) {
+		fmt.Println("Refreshing state (detecting drift)...")
+		store, storeErr := resolveStateStore(cfgFile, envName)
+		if storeErr != nil {
+			return fmt.Errorf("open state store for refresh: %w", storeErr)
+		}
+		states, statesErr := store.ListResources(ctx)
+		if statesErr != nil {
+			return fmt.Errorf("list state for refresh: %w", statesErr)
+		}
+		groups, groupOrder := groupStatesByProvider(states, cfgFile, envName)
+		for _, moduleRef := range groupOrder {
+			g := groups[moduleRef]
+			provider, closer, provErr := resolveIaCProvider(ctx, g.provType, g.provCfg)
+			if provErr != nil {
+				return fmt.Errorf("refresh: load provider %q: %w", moduleRef, provErr)
+			}
+			refreshErr := runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
+				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
+			if closer != nil {
+				if cerr := closer.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
+				}
+			}
+			if refreshErr != nil {
+				return fmt.Errorf("refresh phase: %w", refreshErr)
 			}
 		}
 	}

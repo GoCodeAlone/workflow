@@ -119,12 +119,32 @@ type ResourceStatus struct {
 	Outputs    map[string]any `json:"outputs"`
 }
 
+// DriftClass classifies the type of drift detected between IaC state and
+// actual cloud state. Used by wfctl infra drift output and wfctl infra
+// apply --refresh recovery semantics.
+type DriftClass string
+
+const (
+	// DriftClassUnknown is the zero value; preserved for backwards compat
+	// with consumers serialized before the Class field existed.
+	DriftClassUnknown DriftClass = ""
+	// DriftClassInSync — state and cloud agree.
+	DriftClassInSync DriftClass = "in-sync"
+	// DriftClassGhost — state has the resource; cloud Read returned
+	// ErrResourceNotFound. Caller can prune via wfctl infra apply --refresh.
+	DriftClassGhost DriftClass = "ghost"
+	// DriftClassConfig — state and cloud both have the resource but configs
+	// differ. Caller reconciles via wfctl infra apply (normal plan path).
+	DriftClassConfig DriftClass = "config"
+)
+
 // DriftResult captures detected drift between declared and actual resource state.
 type DriftResult struct {
 	Name     string         `json:"name"`
 	Type     string         `json:"type"`
 	Drifted  bool           `json:"drifted"`
-	Expected map[string]any `json:"expected"`
-	Actual   map[string]any `json:"actual"`
-	Fields   []string       `json:"fields"` // which fields drifted
+	Class    DriftClass     `json:"class,omitempty"` // additive; omitted when Unknown
+	Expected map[string]any `json:"expected,omitempty"`
+	Actual   map[string]any `json:"actual,omitempty"`
+	Fields   []string       `json:"fields,omitempty"` // which fields drifted
 }

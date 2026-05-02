@@ -108,22 +108,41 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 
 		found := false
 		for _, d := range results {
-			if d.Drifted {
+			switch d.Class {
+			case interfaces.DriftClassGhost:
 				found = true
-				fmt.Printf("  DRIFT  %s (%s)\n", d.Name, d.Type)
+				fmt.Printf("  GHOST    %-40s  %-20s  — cloud reports not found\n", d.Name, d.Type)
+			case interfaces.DriftClassConfig:
+				found = true
+				fmt.Printf("  CONFIG   %-40s  %-20s\n", d.Name, d.Type)
 				for k, v := range d.Expected {
 					actual := d.Actual[k]
 					if fmt.Sprintf("%v", v) != fmt.Sprintf("%v", actual) {
 						fmt.Printf("    %s: expected=%v  actual=%v\n", k, v, actual)
 					}
 				}
-			} else {
-				fmt.Printf("  OK     %s (%s)\n", d.Name, d.Type)
+			case interfaces.DriftClassInSync:
+				fmt.Printf("  IN-SYNC  %-40s  %-20s\n", d.Name, d.Type)
+			default:
+				// DriftClassUnknown — fall through to legacy Drifted-bool behavior
+				// for providers that have not yet adopted the Class field.
+				if d.Drifted {
+					found = true
+					fmt.Printf("  DRIFT    %-40s  %-20s\n", d.Name, d.Type)
+					for k, v := range d.Expected {
+						actual := d.Actual[k]
+						if fmt.Sprintf("%v", v) != fmt.Sprintf("%v", actual) {
+							fmt.Printf("    %s: expected=%v  actual=%v\n", k, v, actual)
+						}
+					}
+				} else {
+					fmt.Printf("  OK       %-40s  %-20s\n", d.Name, d.Type)
+				}
 			}
 		}
 		if len(results) == 0 {
 			for _, ref := range g.refs {
-				fmt.Printf("  OK     %s (%s)  (provider returned no drift result)\n", ref.Name, ref.Type)
+				fmt.Printf("  OK       %-40s  %-20s  (provider returned no drift result)\n", ref.Name, ref.Type)
 			}
 		}
 		return found
@@ -135,7 +154,7 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 	}
 
 	if driftFound {
-		return fmt.Errorf("drift detected — run 'wfctl infra apply' to reconcile")
+		return fmt.Errorf("drift detected — run 'wfctl infra apply --refresh' to prune ghosts and reconcile")
 	}
 	return nil
 }

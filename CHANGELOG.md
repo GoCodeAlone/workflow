@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`interfaces.DriftClass`** enum with constants `DriftClassUnknown` (zero value, omitempty-safe),
+  `DriftClassInSync`, `DriftClassGhost`, `DriftClassConfig`. Additive `Class DriftClass` field on
+  `DriftResult` with `json:"class,omitempty"` — backwards-compatible with all existing consumers.
+- **`wfctl infra apply --refresh`** flag: detect drift first, prune ghost-in-state entries (cloud
+  returns 404 but state has the resource) before running the normal plan+apply phase.
+  Default is dry-run (prints "would prune" without mutating); pass `--auto-approve` to execute.
+- **`wfctl infra apply --allow-protected-prune`** flag: required two-key for pruning resources with
+  `protected: true` in their state Outputs. Without it, protected ghosts cause an immediate error
+  with a clear message.
+- **`wfctl infra drift`** CLI output now prints drift class column (GHOST / CONFIG / IN-SYNC)
+  for actionable operator feedback. Providers returning `DriftClassUnknown` fall through to the
+  legacy Drifted-bool behavior.
+- **`docs/wfctl/drift-recovery.md`** operator procedure covering detect→dry-run→approve flow,
+  protected-resource handling, audit-log format, and CI integration examples.
+
+### Changed
+
+- `driftInfraModules` uses `DriftClass` constants for output classification; drift-found message
+  updated to suggest `wfctl infra apply --refresh`.
+- `DriftResult.Expected`, `DriftResult.Actual`, and `DriftResult.Fields` now carry `omitempty`
+  tags (additive — previously these fields serialised as `null` / `[]` in JSON; they are now
+  omitted entirely when empty, which is what most consumers expect).
+
 ## [0.18.11.1] - 2026-04-25
 
 ### Fixed
