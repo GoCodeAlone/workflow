@@ -252,6 +252,14 @@ var providerCredentialSubKeys = map[string][]string{
 	"digitalocean.spaces": {"access_key", "secret_key"},
 }
 
+// subKeysForSource returns the sub-key names for a given provider_credential
+// source (e.g. "digitalocean.spaces" → ["access_key", "secret_key"]).
+// Returns nil, false when the source is not registered.
+func subKeysForSource(source string) ([]string, bool) {
+	subs, ok := providerCredentialSubKeys[source]
+	return subs, ok
+}
+
 // generateSecret is the package-level hook used by bootstrapSecrets. Tests
 // override it to exercise provider_credential code paths without reaching
 // out to cloud APIs.
