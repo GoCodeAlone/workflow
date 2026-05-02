@@ -12,6 +12,8 @@ func runSecrets(args []string) error {
 	switch args[0] {
 	case "detect":
 		return runSecretsDetect(args[1:])
+	case "get":
+		return runSecretsGet(args[1:])
 	case "set":
 		return runSecretsSet(args[1:])
 	case "list":

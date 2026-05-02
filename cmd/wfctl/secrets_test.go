@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -251,5 +252,52 @@ func TestSecretsList_AdHocProvider(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "BMW_LIST_PREFIX_KEY") {
 		t.Errorf("expected BMW_LIST_PREFIX_KEY in output, got:\n%s", out)
+	}
+}
+
+func TestSecretsGet_RoundTripWithSet(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TK1") })
+	if err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "--service", "t", "K1"},
+		strings.NewReader("v1\n"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := runSecretsGetWithWriter(
+		[]string{"--provider", "env", "--service", "t", "K1"},
+		&buf,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != "v1" {
+		t.Errorf("got %q want %q", got, "v1")
+	}
+}
+
+func TestSecretsGet_MissingName(t *testing.T) {
+	var buf bytes.Buffer
+	err := runSecretsGetWithWriter([]string{"--provider", "env"}, &buf)
+	if err == nil {
+		t.Error("expected error when secret name is missing")
+	}
+}
+
+func TestSecretsGet_NotFound(t *testing.T) {
+	var buf bytes.Buffer
+	err := runSecretsGetWithWriter(
+		[]string{"--provider", "env", "WFCTL_DEFINITELY_NOT_SET_XYZ999"},
+		&buf,
+	)
+	if err == nil {
+		t.Error("expected error for unset secret with env provider")
+	}
+}
+
+func TestSecretsDispatch_Get(t *testing.T) {
+	// Dispatcher must route "get" without panicking (will error: missing name).
+	err := runSecrets([]string{"get"})
+	if err == nil {
+		t.Error("expected error from get with no name")
 	}
 }
