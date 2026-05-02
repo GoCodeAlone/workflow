@@ -19,6 +19,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/external"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -120,6 +121,31 @@ func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bo
 	return "", false, nil
 }
 
+// loadIaCPlugin finds and loads the IaC plugin for the given provider, returning
+// its name, module factories, and a closer that shuts down the plugin subprocess.
+// Tests replace this var to inject fakes without touching the filesystem.
+var loadIaCPlugin = defaultLoadIaCPlugin
+
+func defaultLoadIaCPlugin(pluginDir, providerName string) (pluginName string, factories map[string]plugin.ModuleFactory, closer io.Closer, err error) {
+	pName, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
+	if findErr != nil {
+		return "", nil, nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, findErr)
+	}
+	if pName == "" {
+		return "", nil, nil, fmt.Errorf("no plugin found for IaC provider %q in %s — run: wfctl plugin install <plugin-name>", providerName, pluginDir)
+	}
+	if !hasBinary {
+		return "", nil, nil, fmt.Errorf("plugin %q declares provider %q but binary is missing — run: wfctl plugin install %s", pName, providerName, pName)
+	}
+	mgr := external.NewExternalPluginManager(pluginDir, nil)
+	adapter, loadErr := mgr.LoadPlugin(pName)
+	if loadErr != nil {
+		mgr.Shutdown()
+		return "", nil, nil, fmt.Errorf("load plugin %q for provider %q: %w", pName, providerName, loadErr)
+	}
+	return pName, adapter.ModuleFactories(), closerFunc(func() error { mgr.Shutdown(); return nil }), nil
+}
+
 // discoverAndLoadIaCProvider implements the default resolveIaCProvider: it scans
 // the plugin directory for a plugin that declares iacProvider.name == providerName,
 // loads it via ExternalPluginManager, and returns the IaCProvider plus a Closer
@@ -130,37 +156,25 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 		pluginDir = "./data/plugins"
 	}
 
-	pluginName, hasBinary, err := findIaCPluginDir(pluginDir, providerName)
+	pluginName, factories, closer, err := loadIaCPlugin(pluginDir, providerName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, err)
-	}
-	if pluginName == "" {
-		return nil, nil, fmt.Errorf("no plugin found for IaC provider %q in %s — run: wfctl plugin install <plugin-name>", providerName, pluginDir)
-	}
-	if !hasBinary {
-		return nil, nil, fmt.Errorf("plugin %q declares provider %q but binary is missing — run: wfctl plugin install %s", pluginName, providerName, pluginName)
+		return nil, nil, err
 	}
 
-	mgr := external.NewExternalPluginManager(pluginDir, nil)
-	closer := closerFunc(func() error { mgr.Shutdown(); return nil })
-
-	adapter, loadErr := mgr.LoadPlugin(pluginName)
-	if loadErr != nil {
-		mgr.Shutdown()
-		return nil, nil, fmt.Errorf("load plugin %q for provider %q: %w", pluginName, providerName, loadErr)
-	}
-
-	factories := adapter.ModuleFactories()
 	factory, ok := factories["iac.provider"]
 	if !ok {
-		mgr.Shutdown()
+		_ = closer.Close()
 		return nil, nil, fmt.Errorf("plugin %q does not expose an iac.provider module type — upgrade with: wfctl plugin update %s", pluginName, pluginName)
 	}
 
 	mod := factory("iac-provider", cfg)
+	if pluginErr := external.AsModuleError(mod); pluginErr != nil {
+		_ = closer.Close()
+		return nil, nil, fmt.Errorf("plugin %q iac.provider factory failed: %w", pluginName, pluginErr)
+	}
 	if mod == nil {
-		mgr.Shutdown()
-		return nil, nil, fmt.Errorf("plugin %q iac.provider factory returned nil", pluginName)
+		_ = closer.Close()
+		return nil, nil, fmt.Errorf("plugin %q iac.provider factory returned nil (unexpected — file an issue)", pluginName)
 	}
 
 	// RemoteModule does not directly implement interfaces.IaCProvider; instead it
@@ -168,7 +182,7 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 	// remoteIaCProvider that routes each IaCProvider call through InvokeService.
 	invoker, ok := mod.(remoteServiceInvoker)
 	if !ok {
-		mgr.Shutdown()
+		_ = closer.Close()
 		return nil, nil, fmt.Errorf("plugin %q iac.provider module (%T) does not support service invocation — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
 	}
 
@@ -176,7 +190,7 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 	// Notify the plugin that Initialize has been called (the plugin may treat
 	// this as a no-op if it already ran Initialize inside CreateModule).
 	if initErr := iacProvider.Initialize(ctx, cfg); initErr != nil {
-		mgr.Shutdown()
+		_ = closer.Close()
 		return nil, nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
 	}
 	return iacProvider, closer, nil

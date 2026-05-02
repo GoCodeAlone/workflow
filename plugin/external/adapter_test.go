@@ -212,6 +212,59 @@ func TestContractRegistry_UnimplementedUsesEmptyRegistry(t *testing.T) {
 	}
 }
 
+// errorOnCreateModuleClient overrides CreateModule to return a plugin-reported
+// error in the response Error field (not as a gRPC error).
+type errorOnCreateModuleClient struct {
+	adapterTestPluginServiceClient
+	createModuleError string
+}
+
+func (c *errorOnCreateModuleClient) CreateModule(_ context.Context, req *pb.CreateModuleRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
+	c.lastCreateModReq = req
+	return &pb.HandleResponse{Error: c.createModuleError}, nil
+}
+
+// TestModuleFactoriesPropagatesPluginError is a regression gate for the class
+// invariant: when CreateModule returns a non-empty Error field, ModuleFactories
+// must return an *errorModule wrapping the plugin's message — not bare nil.
+// Previously the condition `if createErr != nil || createResp.Error != ""` fell
+// through to `return nil`, silently discarding the plugin diagnostic.
+func TestModuleFactoriesPropagatesPluginError(t *testing.T) {
+	const pluginErrMsg = "digitalocean: missing required config key 'token'"
+	client := &errorOnCreateModuleClient{
+		adapterTestPluginServiceClient: adapterTestPluginServiceClient{
+			manifest:    &pb.Manifest{Name: "test-plugin"},
+			moduleTypes: []string{"iac.provider"},
+		},
+		createModuleError: pluginErrMsg,
+	}
+	a, err := NewExternalPluginAdapter("test-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+
+	factories := a.ModuleFactories()
+	factory, ok := factories["iac.provider"]
+	if !ok {
+		t.Fatal("expected iac.provider factory to be registered")
+	}
+
+	mod := factory("test-provider", map[string]any{})
+	if mod == nil {
+		t.Fatal("expected *errorModule, got nil — plugin error was swallowed")
+	}
+	errMod, ok := mod.(*errorModule)
+	if !ok {
+		t.Fatalf("expected *errorModule, got %T", mod)
+	}
+	if errMod.err == nil {
+		t.Fatal("errorModule has nil err")
+	}
+	if !strings.Contains(errMod.err.Error(), pluginErrMsg) {
+		t.Errorf("expected plugin error message %q in propagated error, got: %v", pluginErrMsg, errMod.err)
+	}
+}
+
 func TestExternalPluginAdapter_ServiceContractsAttachByModuleType(t *testing.T) {
 	registry := &pb.ContractRegistry{
 		Contracts: []*pb.ContractDescriptor{

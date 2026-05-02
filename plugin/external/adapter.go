@@ -61,6 +61,24 @@ func (m *errorModule) Init(modular.Application) error { return m.err }
 func (m *errorModule) Start(context.Context) error    { return m.err }
 func (m *errorModule) Stop(context.Context) error     { return nil }
 
+// AsModuleError returns the wrapped error if m was produced by a failed
+// CreateModule call (i.e. the factory returned an *errorModule), or nil if m
+// is a successfully-created module. Callers outside this package use this to
+// surface plugin-reported errors without depending on the unexported type.
+func AsModuleError(m modular.Module) error {
+	if em, ok := m.(*errorModule); ok {
+		return em.err
+	}
+	return nil
+}
+
+// NewErrorModule returns a Module that surfaces err from Init and Start.
+// Exported for use in tests that need to simulate a plugin factory failure
+// without importing the unexported errorModule type directly.
+func NewErrorModule(name string, err error) modular.Module {
+	return &errorModule{name: name, err: err}
+}
+
 // NewExternalPluginAdapter creates an adapter from a connected plugin client.
 func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPluginAdapter, error) {
 	ctx := context.Background()
@@ -326,8 +344,11 @@ func (a *ExternalPluginAdapter) ModuleFactories() map[string]plugin.ModuleFactor
 				Config:      config,
 				TypedConfig: typedConfig,
 			})
-			if createErr != nil || createResp.Error != "" {
-				return nil
+			if createErr != nil {
+				return &errorModule{name: name, err: fmt.Errorf("create remote module %s: %w", tn, createErr)}
+			}
+			if createResp.Error != "" {
+				return &errorModule{name: name, err: fmt.Errorf("create remote module %s: plugin reported: %s", tn, createResp.Error)}
 			}
 			remote := NewRemoteModule(name, createResp.HandleId, a.client.client, remoteModuleContracts{
 				module:   a.contracts.module(tn),
