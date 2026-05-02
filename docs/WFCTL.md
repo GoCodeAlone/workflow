@@ -1181,6 +1181,7 @@ wfctl infra <action> [options] [config.yaml]
 | `--auto-approve` | `false` | Skip confirmation prompt (apply/destroy only) |
 | `--parallelism` | `10` | Number of parallel operations |
 | `--lock-timeout` | `0s` | Timeout for state lock acquisition |
+| `--force-rotate` | `` | (`bootstrap` only) Comma-separated list of secret names to regenerate, replacing existing values. Repeatable. Use to recover from known-bad secrets (empty value, leaked, dead key). Refuses `provider_credential` types. |
 
 **State Subcommands:**
 
@@ -1207,6 +1208,12 @@ wfctl infra import --config infra.yaml --name site-dns
 wfctl infra state list
 wfctl infra state export --output state.json
 wfctl infra state import --source state.json
+
+# Recover from a known-bad secret (empty value, leak, dead key) without manually
+# deleting it from the secret store first:
+wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
+wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN,DATABASE_URL
+wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
 ```
 
 ---

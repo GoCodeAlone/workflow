@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`wfctl infra bootstrap --force-rotate <name>`** flag for known-bad secret recovery. Repeatable
+  flag; also accepts comma-separated values (e.g. `--force-rotate FOO,BAR --force-rotate BAZ`).
+  Validates each name against `secrets.generate[]` before touching the store (fast-fail on typos),
+  refuses `provider_credential` types (must rotate upstream), best-effort deletes the existing value,
+  regenerates via the same code path as create-from-scratch, and emits an RFC3339 audit log line to
+  stderr (`wfctl: rotated secret <name> (replaced existing value at <timestamp>)`). Supported rotatable
+  types: `random_hex`, `random_base64`, `random_alphanumeric`.
+
 - **`interfaces.DriftClass`** enum with constants `DriftClassUnknown` (zero value, omitempty-safe),
   `DriftClassInSync`, `DriftClassGhost`, `DriftClassConfig`. Additive `Class DriftClass` field on
   `DriftResult` with `json:"class,omitempty"` — backwards-compatible with all existing consumers.
