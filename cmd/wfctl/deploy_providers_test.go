@@ -2,12 +2,51 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/plugin/external"
 )
+
+// noopCloser is an io.Closer that does nothing — used in test stubs.
+type noopCloser struct{}
+
+func (noopCloser) Close() error { return nil }
+
+// ── discoverAndLoadIaCProvider — error propagation ────────────────────────────
+
+// TestResolveIaCProviderSurfacesPluginError is the regression gate for the
+// caller-side fix: discoverAndLoadIaCProvider must surface the error message
+// from an *errorModule returned by the factory, not fall through to a generic
+// "does not support service invocation" message.
+func TestResolveIaCProviderSurfacesPluginError(t *testing.T) {
+	const pluginErrMsg = "digitalocean: missing required config key 'token'"
+
+	oldLoader := loadIaCPlugin
+	loadIaCPlugin = func(_, _ string) (string, map[string]plugin.ModuleFactory, io.Closer, error) {
+		factory := func(name string, _ map[string]any) modular.Module {
+			return external.NewErrorModule(name, errors.New(pluginErrMsg))
+		}
+		return "workflow-plugin-digitalocean", map[string]plugin.ModuleFactory{
+			"iac.provider": factory,
+		}, noopCloser{}, nil
+	}
+	defer func() { loadIaCPlugin = oldLoader }()
+
+	_, _, err := discoverAndLoadIaCProvider(context.Background(), "digitalocean", map[string]any{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), pluginErrMsg) {
+		t.Errorf("expected plugin error message %q in returned error, got: %v", pluginErrMsg, err)
+	}
+}
 
 // ── newDeployProvider ─────────────────────────────────────────────────────────
 
