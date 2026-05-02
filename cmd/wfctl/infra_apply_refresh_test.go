@@ -244,3 +244,112 @@ func TestApplyRefresh_InSyncResourceSkipped(t *testing.T) {
 		t.Errorf("in-sync: expected 0 deletes, got %d", store.deleteCount)
 	}
 }
+
+// TestApplyRefresh_MultipleGhostsAllOrNothing verifies that when a list of
+// drift results contains at least one protected ghost without --allow-protected-prune,
+// NO state mutations happen (deleteCount==0) even if other ghosts are unprotected.
+// The error must mention all blocked resource names.
+func TestApplyRefresh_MultipleGhostsAllOrNothing(t *testing.T) {
+	ghosts := []interfaces.DriftResult{
+		{Name: "unprotected-vpc", Type: "infra.vpc", Drifted: true, Class: interfaces.DriftClassGhost},
+		{Name: "protected-db", Type: "infra.database", Drifted: true, Class: interfaces.DriftClassGhost},
+		{Name: "another-unprotected", Type: "infra.vpc", Drifted: true, Class: interfaces.DriftClassGhost},
+		{Name: "protected-cache", Type: "infra.cache", Drifted: true, Class: interfaces.DriftClassGhost},
+	}
+	// Only the two protected resources are in states
+	states := []interfaces.ResourceState{
+		{ID: "protected-db", Name: "protected-db", Type: "infra.database", Outputs: map[string]any{"protected": true}},
+		{ID: "protected-cache", Name: "protected-cache", Type: "infra.cache", Outputs: map[string]any{"protected": true}},
+	}
+	provider := &refreshFakeProvider{driftResults: ghosts}
+	store := &countingStore{}
+	refs := []interfaces.ResourceRef{
+		{Name: "unprotected-vpc", Type: "infra.vpc"},
+		{Name: "protected-db", Type: "infra.database"},
+		{Name: "another-unprotected", Type: "infra.vpc"},
+		{Name: "protected-cache", Type: "infra.cache"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runInfraApplyRefreshPhase(context.Background(), provider, refs, store,
+		true /* autoApprove */, false /* allowProtectedPrune — NOT set */, states, &stdout, &stderr)
+
+	if err == nil {
+		t.Fatal("expected error for protected resources without flag, got nil")
+	}
+	// Error must list ALL blocked names
+	if !strings.Contains(err.Error(), "protected-db") {
+		t.Errorf("expected error to mention 'protected-db', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "protected-cache") {
+		t.Errorf("expected error to mention 'protected-cache', got: %v", err)
+	}
+	// Critical: zero mutations — unprotected ghosts must NOT have been pruned
+	if store.deleteCount != 0 {
+		t.Errorf("all-or-nothing: expected 0 deletes before error, got %d (deleted: %v)",
+			store.deleteCount, store.deletedNames)
+	}
+}
+
+// TestApplyRefresh_UnprotectedThenProtected_NoPartialPrune is a minimal
+// regression test for the atomicity fix: when the first ghost is unprotected
+// and the second is protected, the single-pass implementation would prune the
+// first before discovering the blocker. The two-pass implementation must return
+// an error AND leave deleteCount==0.
+func TestApplyRefresh_UnprotectedThenProtected_NoPartialPrune(t *testing.T) {
+	ghosts := []interfaces.DriftResult{
+		{Name: "vpc-a", Type: "infra.vpc", Drifted: true, Class: interfaces.DriftClassGhost},
+		{Name: "db-staging", Type: "infra.database", Drifted: true, Class: interfaces.DriftClassGhost},
+	}
+	states := []interfaces.ResourceState{
+		{ID: "db-staging", Name: "db-staging", Type: "infra.database", Outputs: map[string]any{"protected": true}},
+	}
+	provider := &refreshFakeProvider{driftResults: ghosts}
+	store := &countingStore{}
+	refs := []interfaces.ResourceRef{
+		{Name: "vpc-a", Type: "infra.vpc"},
+		{Name: "db-staging", Type: "infra.database"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runInfraApplyRefreshPhase(context.Background(), provider, refs, store,
+		true /* autoApprove */, false /* allowProtectedPrune — NOT set */, states, &stdout, &stderr)
+
+	if err == nil {
+		t.Fatal("expected error for protected resource without flag, got nil")
+	}
+	if !strings.Contains(err.Error(), "db-staging") {
+		t.Errorf("expected error to name the blocked resource 'db-staging', got: %v", err)
+	}
+	// The critical invariant: vpc-a must NOT have been pruned before the blocker was found.
+	if store.deleteCount != 0 {
+		t.Errorf("partial-prune: expected 0 deletes (all-or-nothing), got %d (deleted: %v)",
+			store.deleteCount, store.deletedNames)
+	}
+}
+
+// TestApplyRefresh_AllGhostsUnprotectedPrunesAll verifies that when all ghosts
+// are unprotected, the pre-scan passes and all mutations proceed normally.
+func TestApplyRefresh_AllGhostsUnprotectedPrunesAll(t *testing.T) {
+	ghosts := []interfaces.DriftResult{
+		{Name: "ghost-1", Type: "infra.vpc", Drifted: true, Class: interfaces.DriftClassGhost},
+		{Name: "ghost-2", Type: "infra.database", Drifted: true, Class: interfaces.DriftClassGhost},
+	}
+	provider := &refreshFakeProvider{driftResults: ghosts}
+	store := &countingStore{}
+	refs := []interfaces.ResourceRef{
+		{Name: "ghost-1", Type: "infra.vpc"},
+		{Name: "ghost-2", Type: "infra.database"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runInfraApplyRefreshPhase(context.Background(), provider, refs, store,
+		true /* autoApprove */, false /* allowProtectedPrune */, nil /* no states */, &stdout, &stderr)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if store.deleteCount != 2 {
+		t.Errorf("expected 2 deletes, got %d", store.deleteCount)
+	}
+}

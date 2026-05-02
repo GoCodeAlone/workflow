@@ -228,6 +228,19 @@ func TestInfraApply_InputValidation_ValidUUIDNoWarn(t *testing.T) {
 	}
 }
 
+// TestInfraApply_AllowProtectedPruneRequiresRefresh verifies that passing
+// --allow-protected-prune without --refresh returns a clear error at
+// flag-validation time, before any config is loaded or state is mutated.
+func TestInfraApply_AllowProtectedPruneRequiresRefresh(t *testing.T) {
+	err := runInfraApply([]string{"--allow-protected-prune", "--config", "nonexistent.yaml"})
+	if err == nil {
+		t.Fatal("expected error when --allow-protected-prune used without --refresh, got nil")
+	}
+	if !strings.Contains(err.Error(), "--allow-protected-prune") || !strings.Contains(err.Error(), "--refresh") {
+		t.Errorf("expected error to mention both flags, got: %v", err)
+	}
+}
+
 // ── regression-proof: fakeValidationProvider.ResourceDriver returns the driver ─
 
 func TestFakeValidationProvider_ResourceDriverReturnsDriver(t *testing.T) {

@@ -955,6 +955,13 @@ func runInfraApply(args []string) error {
 	}
 	_ = showSensitive // used in apply progress output when provider integration is complete
 
+	// Pre-flight: --allow-protected-prune is only meaningful with --refresh.
+	// Without --refresh, the flag is silently ignored, which could mislead
+	// operators into believing they have authorized a dangerous prune operation.
+	if allowProtectedPruneFlag && !refreshFlag {
+		return fmt.Errorf("--allow-protected-prune requires --refresh")
+	}
+
 	cfgFile := configFlag
 	if cfgFile == "" {
 		var err error

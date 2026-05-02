@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -51,6 +52,27 @@ func runInfraApplyRefreshPhase(
 		return fmt.Errorf("detect drift: %w", err)
 	}
 
+	// First pass: pre-scan ALL ghost results for protected resources without the
+	// override flag. Collecting all blocked names before any mutation ensures the
+	// operator sees the complete list and that no partial state mutation occurs.
+	var blocked []string
+	for _, r := range results {
+		if r.Class != interfaces.DriftClassGhost {
+			continue
+		}
+		if isRefProtected(states, r.Name) && !allowProtectedPrune {
+			blocked = append(blocked, r.Name)
+		}
+	}
+	if len(blocked) > 0 {
+		for _, name := range blocked {
+			fmt.Fprintf(stderr, "wfctl: BLOCKED: %s is protected; cannot prune without --allow-protected-prune\n", name)
+		}
+		return fmt.Errorf("refresh blocked: %d protected resource(s) require --allow-protected-prune: %s",
+			len(blocked), strings.Join(blocked, ", "))
+	}
+
+	// Second pass: all pre-validation passed — execute mutations.
 	for _, r := range results {
 		if r.Class != interfaces.DriftClassGhost {
 			// In-sync or config-drift: leave for regular plan/apply phase.
@@ -58,12 +80,6 @@ func runInfraApplyRefreshPhase(
 		}
 
 		isProtected := isRefProtected(states, r.Name)
-		if isProtected && !allowProtectedPrune {
-			// Hard-block: return an error immediately so the caller sees the
-			// problem. No prunes have happened at this point.
-			fmt.Fprintf(stderr, "wfctl: BLOCKED: %s is protected; cannot prune without --allow-protected-prune\n", r.Name)
-			return fmt.Errorf("refresh: blocked on protected resource %q (use --allow-protected-prune to override)", r.Name)
-		}
 
 		if !autoApprove {
 			// Dry-run: report what would happen without mutating.
@@ -85,7 +101,11 @@ func runInfraApplyRefreshPhase(
 }
 
 // isRefProtected returns true if the named resource has protected: true in its
-// state Outputs map.
+// state Outputs map. The type assertion is intentionally strict: if
+// Outputs["protected"] is a non-bool (e.g. the string "true"), the assertion
+// fails and the function returns false. YAML unmarshals bare `true` as bool,
+// so this should not occur in practice, but callers should be aware of the
+// silent false-return for unexpected types.
 func isRefProtected(states []interfaces.ResourceState, name string) bool {
 	for i := range states {
 		if states[i].Name == name {

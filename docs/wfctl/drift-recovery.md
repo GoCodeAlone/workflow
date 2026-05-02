@@ -138,5 +138,6 @@ after an interrupted apply:
   if: github.event_name == 'workflow_dispatch'
 ```
 
-See `docs/plans/2026-05-02-infra-drift-recovery.md` for the full recovery
-design rationale.
+This document is the canonical operator reference for drift recovery.
+For detailed design rationale see the inline comments in
+`cmd/wfctl/infra_apply_refresh.go`.
