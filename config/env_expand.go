@@ -42,3 +42,83 @@ func ExpandEnvInValue(v any) any {
 		return v
 	}
 }
+
+// ExpandEnvInMapPreservingKeys is like ExpandEnvInMap but when a key in
+// preserveKeys is encountered, the corresponding value (and any nested
+// content inside it) is left untouched — ${VAR} / $VAR references are
+// preserved literally instead of being substituted from the process env.
+//
+// Use case: plan-time serialization of resource specs where certain
+// submaps (env_vars, env_vars_secret, secret_env_vars) carry secret
+// references that should resolve only at apply time. Without this,
+// security-check rules see resolved literals and incorrectly flag them
+// as accidentally-pasted secret values.
+//
+// preserveKeys is matched case-sensitively against the immediate map key
+// at every depth. An empty or nil preserveKeys list makes this function
+// behave identically to ExpandEnvInMap.
+func ExpandEnvInMapPreservingKeys(m map[string]any, preserveKeys []string) map[string]any {
+	if m == nil {
+		return nil
+	}
+	preserve := make(map[string]struct{}, len(preserveKeys))
+	for _, k := range preserveKeys {
+		preserve[k] = struct{}{}
+	}
+	return expandEnvInMapWithPreserve(m, preserve)
+}
+
+func expandEnvInMapWithPreserve(m map[string]any, preserve map[string]struct{}) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if _, isPreserved := preserve[k]; isPreserved {
+			// Copy the value verbatim. For maps/slices, deep-copy so callers
+			// can mutate without aliasing back into the source. Strings and
+			// scalars are immutable; pass through.
+			out[k] = deepCopyValue(v)
+			continue
+		}
+		out[k] = expandEnvInValueWithPreserve(v, preserve)
+	}
+	return out
+}
+
+func expandEnvInValueWithPreserve(v any, preserve map[string]struct{}) any {
+	switch val := v.(type) {
+	case string:
+		return os.ExpandEnv(val)
+	case map[string]any:
+		return expandEnvInMapWithPreserve(val, preserve)
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = expandEnvInValueWithPreserve(item, preserve)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// deepCopyValue copies a value preserving its structure. Maps and slices
+// are recursively copied; scalars (string, int, bool, nil) are returned
+// as-is. Used by ExpandEnvInMapPreservingKeys to insulate preserved
+// subtrees from caller mutation.
+func deepCopyValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, vv := range val {
+			out[k] = deepCopyValue(vv)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = deepCopyValue(item)
+		}
+		return out
+	default:
+		return v
+	}
+}

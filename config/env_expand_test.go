@@ -193,3 +193,56 @@ func TestExpandEnvInValue(t *testing.T) {
 		}
 	})
 }
+
+func TestExpandEnvInMapPreservingKeys_PreservesEnvVarsSubmap(t *testing.T) {
+	t.Setenv("MY_TOKEN", "actual-secret-value")
+	t.Setenv("OTHER", "resolved-other")
+	in := map[string]any{
+		"name":   "myapp",
+		"region": "${OTHER}", // top-level: should resolve
+		"env_vars": map[string]any{
+			"AUTH_TOKEN": "${MY_TOKEN}", // inside env_vars: should PRESERVE literal
+			"PORT":       "8080",        // no var ref, preserved as-is
+		},
+		"env_vars_secret": map[string]any{
+			"DB_URL": "${OTHER}", // inside env_vars_secret: PRESERVE
+		},
+	}
+	out := ExpandEnvInMapPreservingKeys(in, []string{"env_vars", "env_vars_secret", "secret_env_vars"})
+	if got := out["region"]; got != "resolved-other" {
+		t.Errorf("top-level region: got %q, want resolved-other", got)
+	}
+	envVars := out["env_vars"].(map[string]any)
+	if got := envVars["AUTH_TOKEN"]; got != "${MY_TOKEN}" {
+		t.Errorf("env_vars.AUTH_TOKEN: got %q, want literal ${MY_TOKEN}", got)
+	}
+	envVarsSecret := out["env_vars_secret"].(map[string]any)
+	if got := envVarsSecret["DB_URL"]; got != "${OTHER}" {
+		t.Errorf("env_vars_secret.DB_URL: got %q, want literal ${OTHER}", got)
+	}
+}
+
+func TestExpandEnvInMapPreservingKeys_NestedNonPreservedSubmapsStillResolve(t *testing.T) {
+	t.Setenv("DEEP", "deep-value")
+	in := map[string]any{
+		"services": map[string]any{
+			"api": map[string]any{
+				"image": "${DEEP}", // not in preserve list: should resolve
+			},
+		},
+	}
+	out := ExpandEnvInMapPreservingKeys(in, []string{"env_vars"})
+	got := out["services"].(map[string]any)["api"].(map[string]any)["image"]
+	if got != "deep-value" {
+		t.Errorf("services.api.image: got %q, want deep-value", got)
+	}
+}
+
+func TestExpandEnvInMapPreservingKeys_EmptyPreserveListEqualsExpandEnvInMap(t *testing.T) {
+	t.Setenv("V", "vv")
+	in := map[string]any{"k": "${V}"}
+	out := ExpandEnvInMapPreservingKeys(in, []string{})
+	if out["k"] != "vv" {
+		t.Errorf("with empty preserve list, behavior should equal ExpandEnvInMap; got %q", out["k"])
+	}
+}

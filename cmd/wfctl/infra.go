@@ -77,6 +77,26 @@ Options:
 	return fmt.Errorf("missing or unknown action")
 }
 
+// infraPreserveKeys lists the submap keys whose contents should be left
+// as ${VAR} literals through plan serialization. Apply-time injection
+// (per the existing pattern in deploy_providers.go + driver Apply
+// methods) resolves them when the plugin actually creates/updates the
+// resource.
+//
+// Why these three keys:
+//   - env_vars: App Platform service env vars that downstream consumers
+//     reference in YAML as ${VAR}.
+//   - env_vars_secret: canonical secret-typed env vars per
+//     workflow-plugin-digitalocean's envVarsFromConfig.
+//   - secret_env_vars: legacy alias for env_vars_secret kept for
+//     backwards compat (same source).
+//
+// This preservation is the fix for core-dump#154 (R4 fired on
+// env_vars["NATS_AUTH_TOKEN"] because the secret had been eagerly
+// resolved into the plan output). See
+// docs/plans/2026-05-02-staging-deploy-blockers-design.md.
+var infraPreserveKeys = []string{"env_vars", "env_vars_secret", "secret_env_vars"}
+
 // resolveInfraConfig finds the config file from flags or defaults.
 // configFile is the resolved value from --config / -c flags (may be empty).
 func resolveInfraConfig(fs *flag.FlagSet, configFile ...string) (string, error) {
@@ -258,7 +278,7 @@ func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) 
 		if !isInfraType(m.Type) {
 			continue
 		}
-		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMap(m.Config)}
+		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingKeys(m.Config, infraPreserveKeys)}
 		specs = append(specs, resourceSpecFromResolvedModule(r))
 	}
 	return specs, nil
@@ -304,7 +324,7 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 			continue
 		}
 		if envName == "" {
-			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMap(m.Config)})
+			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingKeys(m.Config, infraPreserveKeys)})
 			continue
 		}
 		resolved, ok := m.ResolveForEnv(envName)
@@ -349,7 +369,10 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 		}
 		// Expand ${VAR} / $VAR references in the per-env resolved config so
 		// that plan output and apply pipeline both see substituted values.
-		resolved.Config = config.ExpandEnvInMap(resolved.Config)
+		// Use the preserving variant so that env_vars submaps retain their
+		// ${VAR} literals through plan serialization (apply-time injection
+		// resolves them when the plugin creates/updates the resource).
+		resolved.Config = config.ExpandEnvInMapPreservingKeys(resolved.Config, infraPreserveKeys)
 		out = append(out, resolved)
 	}
 	return out, nil
@@ -832,9 +855,9 @@ func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpe
 			if !ok {
 				return "", nil, fmt.Errorf("infra module %q references provider %q which is disabled for environment %q", spec.Name, moduleRef, envName)
 			}
-			modCfg = config.ExpandEnvInMap(resolved.Config)
+			modCfg = config.ExpandEnvInMapPreservingKeys(resolved.Config, infraPreserveKeys)
 		} else {
-			modCfg = config.ExpandEnvInMap(m.Config)
+			modCfg = config.ExpandEnvInMapPreservingKeys(m.Config, infraPreserveKeys)
 		}
 		providerType, _ := modCfg["provider"].(string)
 		if providerType == "" {
