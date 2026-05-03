@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"path/filepath"
 )
 
 // runDev dispatches wfctl dev subcommands.
@@ -102,17 +103,17 @@ func runDevUp(args []string) error {
 	}
 
 	// Write secrets env file if --secrets-from is set.
+	// The file is intentionally NOT cleaned up here — it persists until `dev down`.
 	var secretsEnvFile string
 	if *secretsFrom != "" {
 		outDir := "."
 		if cfgPath != "" {
-			outDir = cfgPath
+			outDir = filepath.Dir(cfgPath)
 		}
 		envFile, err := writeDevSecretsEnvFile(*secretsFrom, *secretsService, outDir)
 		if err != nil {
 			return fmt.Errorf("--secrets-from: %w", err)
 		}
-		defer func() { _ = removeDevSecretsEnvFile(envFile) }()
 		secretsEnvFile = envFile
 	}
 
@@ -180,6 +181,14 @@ func runDevDown(args []string) error {
 		return err
 	}
 	_ = *configFile
+
+	// Resolve config dir for secrets env file cleanup.
+	cfgDir := "."
+	if *configFile != "" {
+		cfgDir = filepath.Dir(*configFile)
+	}
+	// Clean up the secrets env file written by dev up, if present.
+	_ = removeDevSecretsEnvFile(filepath.Join(cfgDir, devSecretsEnvFileName))
 
 	if *k8s {
 		return devK8sDown(*verbose)
