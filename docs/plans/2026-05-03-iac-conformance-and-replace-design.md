@@ -1,8 +1,22 @@
 # IaC Root-Cause Fixes + Provider Conformance Suite — Design
 
-**Status:** Revision 1 (post adversarial review #1 — addresses 2 Critical + 8 Important + 6 Minor findings)
+**Status:** Revision 2 (post adversarial review #2 — user accepted Critical findings via Path A override + scope correction)
 **Authors:** Claude (Jon's instruction)
 **Forcing function:** core-dump's 12-hour self-hosted-PG deploy iteration (2026-05-03) surfaced compounding wfctl + workflow-plugin-digitalocean gaps that aren't surface bugs — they're missing semantic guarantees.
+
+## User overrides recorded (per skill PASS/FAIL semantics)
+
+Adversarial review #2 raised 2 unresolved Critical findings; per skill max-2-cycle bound, escalated to user. User responded:
+
+> approach A. have the codemod / migrate script provide instructions on what's incompatible and how to handle the migration for things that it doesn't handle automatically. I think we only have DO iac actually built anywhere, so realistically there shouldn't be any migration effort outside of DO
+
+Two overrides:
+
+1. **Critical 1 (codemod uniformity assumption false across 4 plugins)** → ACCEPTED. Reframe Approach 3 as Path A: codemod targets DO patterns; emits informative dry-run report flagging incompatibilities + suggested manual handling for non-canonical idioms. AWS/GCP/Azure migration is best-effort + advisory.
+
+2. **Critical 2 (BC-2 audit closure not enforceable for AWS/GCP/Azure)** → ACCEPTED with scope correction. **Only DO is in active production use anywhere.** AWS/GCP/Azure plugin migrations are deferred until those plugins are activated. DO BC-2 is already closed per strict-contracts tracker (`2026-04-26-strict-grpc-plugin-contracts.md:151`, v0.8.0). Per-plugin audit-closure happens when each plugin is activated, not as a precondition for this work.
+
+Conformance suite ships regardless — it's the regression net for any future plugin work, including AWS/GCP/Azure when they're eventually activated.
 
 ## Problem
 
@@ -31,30 +45,39 @@ The investigation revealed two latent bugs that the design must address explicit
 
 ## Approach
 
-**Approach 3 (chosen): Refactor `IaCProvider` semantics in-place + ship the conformance suite as proof of correctness + provide codemod tooling so the per-plugin migration is mechanical.**
+**Path A (chosen, post-override): Refactor `IaCProvider` semantics in-place + ship the conformance suite as proof of correctness + provide codemod tooling that targets DO patterns and emits an informative dry-run report for any non-canonical idioms it can't safely rewrite.**
 
-Two alternatives considered + rejected with explicit cost-benefit:
+**Scope correction (per user override):** AWS/GCP/Azure plugins are not in active production use. Their conformance + codemod migration is deferred until each is activated. This design ships against the DO plugin only; the conformance suite establishes the regression net for any future plugin activation.
+
+The original Approach 3 ("flag-day in-place refactor across all 4 plugins via codemod") rested on a false assumption — adversarial review #2 spot-checked the actual provider Apply implementations and found heterogeneous shapes (DO has `ErrResourceAlreadyExists` upsert recovery; AWS has `case "update", "replace"` collapsed; GCP has separate replace; Azure has no replace). The user override resolves this by narrowing the codemod's safe scope to DO and treating other plugins' migration as best-effort + advisory rather than mechanical.
+
+Three alternatives considered + rejected with explicit cost-benefit:
 
 ### Approach 1 — Surgical patches per issue
 Eight independent bugfix PRs, no cross-cutting refactor.
 
-**Trade-off**: fast individual reviews; no enforced contract; a new provider can re-introduce any gap. **Rejected** — violates the user's "build benefits all providers" mandate.
+**Trade-off**: fast individual reviews; no enforced contract; a new provider can re-introduce any gap. **Rejected** — violates the user's "build benefits all providers" mandate. Conformance suite (H) requires a stable contract to test against.
 
 ### Approach 2 — `IaCPlannerV2` interface alongside V1
-The user's second message named "iacplannerv2" — this design originally pivoted away too quickly. Re-examining now per review #1 Important finding:
+Original brainstorm option. Migration is per-plugin via V2 implementation; old plugins keep running V1 indefinitely.
 
-| Dimension | Approach 2 (V1+V2 dual) + codemods | Approach 3 (in-place) + codemods |
+| Dimension | Approach 2 (V1+V2 dual) | Path A (in-place + per-plugin migration) |
 |---|---|---|
-| Per-plugin PR count | 1 PR per plugin (V2 implementation) | 1 PR per plugin (codemod-applied) |
+| Per-plugin migration | Plugin author implements V2 (full method-set) | Plugin author runs codemod (DO-shaped) or hand-ports (other shapes) |
 | Wfctl-side maintenance | Two interfaces forever; adapter shim per gap | Single interface; helpers package |
-| Migration safety | Old plugins keep running V1 during migration | Flag-day for plugin upgrade — but codemod produces same correctness |
-| Conformance enforcement | Test V2 only; V1 plugins exempt → silent drift on legacy | Test the single interface; no exempt path |
-| User mandate "build benefits all providers" | Yes, IF all providers migrate; deferred V1 plugins skip the benefit | Yes, immediately for all 4 providers |
-| Long-tail edge cases | Bugs accumulate in V1 wrapper for plugins that don't migrate | None — single code path |
+| Migration safety | Old plugins keep running V1 during migration | Per-plugin migration; conformance suite gates each |
+| Conformance enforcement | Test V2 only; V1 plugins exempt → silent drift on legacy | Test the single interface; gates per-plugin opt-in |
+| Cost when only DO is active | Maintain both interfaces for hypothetical future plugins | Migrate just DO; AWS/GCP/Azure stay un-migrated until activated |
+| Reversibility | Built-in (V1 stays) | Per-plugin revert by un-applying codemod or restoring legacy methods |
 
-**Why Approach 3 strictly dominates Approach 2 in this context**: codemods give the same migration ergonomics either way. The difference is what happens AFTER migration. Approach 2 leaves V1 supported indefinitely; we keep paying for the adapter layer + risk silent V1 divergence. Approach 3 deletes V1 once the codemod runs — single code path forever, conformance suite is the regression net. The user said "build these fixes the right way" + "core-dump is in no rush" → flag-day is acceptable.
+**Why Path A wins under the scope correction**: the user clarified that only DO is in active production use. Approach 2's V1+V2 dual maintenance cost is paid for hypothetical future plugins; Path A pays nothing for AWS/GCP/Azure until they're activated, at which point each gets its own targeted migration PR. Conformance suite is the regression net either way.
 
-If the user later disagrees and wants V1/V2 dual, the in-place refactor is reversible by un-applying the codemods + restoring `provider.Plan()` body. Direction is auditable.
+### Path A (chosen) — In-place refactor + DO-targeted codemod + conformance suite
+**Migration strategy per plugin:**
+- **DO** (active): codemod can mechanically refactor most idioms; manually-handled exceptions (`ErrResourceAlreadyExists` upsert recovery) are preserved by the codemod's exception list and surfaced in the migration report. Single PR.
+- **AWS / GCP / Azure** (inactive): no migration PR ships in this design. The codemod's `lint` mode is run advisory-only against each plugin's source to produce a "what would need to change" report for future activation work. Reports filed as GitHub issues against each plugin repo.
+
+If a future plugin is activated, the activation work includes running the codemod (or equivalent manual port) + adding the conformance test + closing the plugin's BC-2 audit. The design provides the tooling; activation triggers the use.
 
 ### What changes (Approach 3 detail)
 
@@ -128,9 +151,11 @@ For each existing resource, `ComputePlan` calls `provider.ResourceDriver(spec.Ty
 
 **Plan-time gRPC cost mitigation** (review #1 Critical #1):
 - **Bounded-concurrency parallel Diff** (default 8 concurrent, configurable via `WFCTL_PLAN_DIFF_CONCURRENCY`). For 50 resources at 50ms gRPC roundtrip each = 312ms wall time at concurrency 8.
-- **Diff cache** keyed by `(plugin-version, resource-type, sha256(spec.Config), sha256(current.Outputs))`. Stored at `~/.cache/wfctl/diff/`. Cache hit skips gRPC roundtrip. For an operator iterating `wfctl infra plan` while authoring config, second run hits cache for unchanged resources.
+- **Diff cache** keyed by `(plugin-version, resource-type, current.ProviderID, sha256(spec.Config), sha256(current.Outputs))` — ProviderID added per review #2 Minor (distinguishes import-vs-managed). Stored at `~/.cache/wfctl/diff/`. Cache hit skips gRPC roundtrip. For an operator iterating `wfctl infra plan` while authoring config, second run hits cache for unchanged resources.
 - **Conformance scenario `Scenario_DiffSurvivesGRPCRoundTrip`** (variant of precedent BC-2 / `Scenario_StructpbBoundary_DiffSurvivesRoundTrip`) — runs against actual `remoteResourceDriver` wrapper, NOT in-process driver. Catches structpb-corruption interactions where typed-slice Outputs at Create time arrive nil at in-process Diff after gRPC.
-- **Sequencing constraint**: W-3 gates on each plugin's BC-2 audit being closed (per precedent `2026-04-28-iac-plugin-review-design.md`). Plugins with open BC-2 findings cannot opt into the new ComputePlan path until their Outputs marshalling is verified gRPC-safe.
+- **Per-plugin opt-in sequencing** (replaces "BC-2 audit closed" gate per user override): each plugin opts into the new ComputePlan path via a `plugin.json` flag (`iacProvider.computePlanVersion: "v2"`). DO opts in alongside its codemod migration in this design. AWS/GCP/Azure remain at v1 (legacy: provider's own Plan() method called) until each is activated for production use, at which point that activation work includes the v2 opt-in. wfctl branches: `computePlanVersion=v2` plugins use the new platform.ComputePlan + driver.Diff dispatch; v1 plugins call provider.Plan() per the legacy contract.
+
+This per-plugin opt-in is also the BC-2 enforcement story (review #2 Critical #2): a plugin can't claim `computePlanVersion: v2` until its BC-2 audit is closed, because the v2 path puts Diff results through gRPC where structpb corruption would manifest. The gate is mechanical (the plugin.json field is checked at wfctl load time + by the conformance suite).
 
 **`wfctlhelpers.ApplyPlan(ctx, provider, plan)` shared helper:**
 
@@ -348,11 +373,11 @@ Full conformance scenarios (run nightly):
 10. `Scenario_OutputsConsistencyAcrossReadCycles` (cloud-required — load-bearing for refresh-outputs)
 11. `Scenario_ReplaceCascadePreservesDependents` (cloud-required — most complex)
 
-#### W-8: Codemod tooling at `cmd/iac-codemod/` (cross-cutting migration)
+#### W-8: Codemod tooling at `cmd/iac-codemod/` (DO-targeted; advisory for others)
 
-User asked: "for the refactor/migration ... think about if there's codemods or similar we can introduce". Per Approach 3, per-plugin Plan/Apply refactor across 4 providers needs mechanical tooling.
+**Scope correction per user override:** Codemod safely targets DO patterns. For non-canonical idioms (DO's `ErrResourceAlreadyExists` upsert recovery, AWS's `case "update", "replace"` collapse, GCP's separate replace, etc.), the codemod's dry-run report describes WHAT was detected + HOW the maintainer should handle it — it does not silently rewrite. AWS/GCP/Azure plugins are run advisory-only (no `-fix`); their reports are filed as GitHub issues against the respective plugin repos for activation-time triage.
 
-**Package boundary fix** (review #1 Important #7 + Minor #3):
+**Package boundaries** (review #1 Important #7 + Minor #3):
 
 | Concern | Package | Boundary |
 |---|---|---|
@@ -363,66 +388,87 @@ User asked: "for the refactor/migration ... think about if there's codemods or s
 
 `cmd/iac-codemod/` built using `golang.org/x/tools/go/analysis/passes` framework. Modes:
 
-- `cmd/iac-codemod/refactor-plan` — Detects `func (p *XProvider) Plan(...)` body matching the configHash compare pattern; replaces body with `return wfctlhelpers.Plan(ctx, p, desired, current)`.
-- `cmd/iac-codemod/refactor-apply` — Detects the create/update switch in `Apply`; replaces with `return wfctlhelpers.ApplyPlan(ctx, p, plan)`.
+- `cmd/iac-codemod/refactor-plan` — Detects `func (p *XProvider) Plan(...)` body matching the configHash compare pattern; replaces body with `return wfctlhelpers.Plan(ctx, p, desired, current)`. **Aborts with informative report** if the body has additional logic the codemod doesn't recognize (e.g., adoption fallback, pre-flight validation, batch-API optimization).
+- `cmd/iac-codemod/refactor-apply` — Detects the create/update/(replace?)/(delete?) switch in `Apply`. **Aborts with informative report** if the Apply has out-of-template idioms the codemod can't safely preserve. Specific deviations the report names + how to handle:
+  - **`ErrResourceAlreadyExists` upsert recovery** (DO has this): codemod writes a sample patch the maintainer can hand-apply, preserving the upsert path INSIDE wfctlhelpers.ApplyPlan via an optional `upsertSupporter` interface (the same one DO already implements at `internal/provider.go:177-179`).
+  - **Collapsed switch arms like `case "update", "replace":`** (AWS has this): codemod refuses to rewrite + emits a high-priority report finding ("AWS Apply collapses replace into Update — this is a silent miscompile of replace; manual port required to add a separate replace arm").
+  - **Custom error wrapping** (e.g., wrapping `Update` errors with provider-specific context): codemod preserves wrapping by detecting the pattern + emitting a wfctlhelpers extension-point hook the maintainer wires.
 - `cmd/iac-codemod/add-validate-plan` — Detects providers missing `ValidatePlan`; inserts no-op stub.
-- `cmd/iac-codemod/remove-plan` — REMOVES `Plan()` method from providers post-deprecation (see W-9 below). Default mode is dry-run report; `-fix` applies.
-- `cmd/iac-codemod/lint` — Static checks (no rewrite): `AssertPlanDelegatesToHelper`, `AssertApplyDelegatesToHelper`, `AssertDiffSetsNeedsReplaceForForceNew`, `AssertProviderImplementsValidatePlan`. Extends PR #512's iaclint matchers but in a new package.
+- `cmd/iac-codemod/lint` — Static checks (no rewrite): `AssertPlanDelegatesToHelper`, `AssertApplyDelegatesToHelper`, `AssertDiffSetsNeedsReplaceForForceNew`, `AssertProviderImplementsValidatePlan`. Run advisory-only against AWS/GCP/Azure (per-plugin issue-filing).
 
-**Dry-run-by-default safety** (review #1 Critical #1 sub-finding): every codemod defaults to dry-run report mode; `-fix` flag opts into mutation. Reports show:
-- Per-file: which functions match the codemod pattern + would be rewritten
-- Per-file: which functions DON'T match (might be intentional divergence — flagged for review)
-- Recommended `// wfctl:skip-plan-codemod` markers for non-canonical providers
+**Note:** removed `cmd/iac-codemod/remove-plan` — superseded by W-9's per-plugin opt-in (`computePlanVersion: v2`) which doesn't require deleting `Plan()` until the v2-default-on cycle.
 
-**Workspace migration runner**:
-```sh
-# Make target in workflow/Makefile
-migrate-providers:
-    @for p in workflow-plugin-{aws,gcp,azure,digitalocean}; do \
-      cd $$WORKSPACE/$$p && \
-      go run github.com/GoCodeAlone/workflow/cmd/iac-codemod refactor-plan -dry-run . | tee codemod-report.md && \
-      echo "Review codemod-report.md and add // wfctl:skip-plan-codemod to any opt-out functions, then re-run with -fix"; \
-    done
-```
+**Dry-run-by-default safety + informative reports**: every codemod defaults to dry-run report mode; `-fix` flag opts into mutation. Reports show:
+- Per-file: which functions match the codemod's canonical pattern + would be rewritten cleanly
+- Per-file: which functions DON'T match — with a description of WHY ("ErrResourceAlreadyExists upsert recovery branch detected on lines 196-225"), and a suggested manual handling ("preserve via wfctlhelpers.ApplyPlan's upsertSupporter hook; sample patch:" + diff)
+- Per-file: estimated effort to manually port (rough — "5 minutes" / "needs design discussion")
+- Per-file: link to the matching conformance scenario the maintainer should run after porting
 
-Two-step (dry-run → review → -fix) avoids the silent-corruption risk surfaced in review #1 Critical #1.
+**Two-step migration flow per plugin:**
+1. `wfctl iac codemod refactor-apply -dry-run /path/to/plugin` → outputs `codemod-report.md`
+2. Maintainer reviews report; either accepts the proposed rewrite (re-runs with `-fix`), hand-ports the divergent idioms, or adds `// wfctl:skip-plan-codemod` to opt out for legitimate divergence
+3. Maintainer runs `wfctl iac codemod lint /path/to/plugin` to verify post-port state matches conformance expectations
+4. Maintainer adds the conformance test (`go test -tags=conformance ./...`); commits the migration as a single PR
 
-#### W-9: Deprecate `IaCProvider.Plan()` (review #1 Important #5)
+**Plugin migration scope in this design:**
+- **DO**: ships in P-DO PR with codemod + manual upsert hand-port + conformance opt-in (`computePlanVersion: v2`)
+- **AWS/GCP/Azure**: codemod lint-only run produces issue-tracker reports; no migration PR ships in this design
 
-Today `provider.Plan()` is dead code (no caller in `cmd/wfctl` or `platform`); wfctl exclusively uses `platform.ComputePlan`. After W-3, providers exclusively delegate Apply to `wfctlhelpers.ApplyPlan`.
+#### W-9: Per-plugin `computePlanVersion` opt-in + optional `ProviderPlanner` interface
 
-W-3 marks `IaCProvider.Plan()` as deprecated:
+**Replaces "deprecate Plan()" approach** per review #2 Important finding (Tofu/Pulumi-style providers may need custom planning).
 
-```go
-// Deprecated: Plan was never called by wfctl; platform.ComputePlan is the
-// canonical planner. Existing implementations may be removed via
-// `cmd/iac-codemod/remove-plan`. Will be removed from IaCProvider in v0.21.
-Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error)
-```
+Two changes:
 
-The codemod `remove-plan` removes the method body from each plugin (after maintainer review). v0.21 removes `Plan()` from the interface entirely.
+1. **`plugin.json` gains `iacProvider.computePlanVersion: "v1"|"v2"`** — declares which planning contract the plugin satisfies:
+   - `v1` (default if unset): legacy contract. `provider.Plan()` is called; provider's own logic governs action classification.
+   - `v2`: new contract. wfctl skips `provider.Plan()` and uses `platform.ComputePlan` (which calls `driver.Diff()` per resource per W-3) instead. Provider must implement `Diff()` faithfully (covered by conformance + iaclint).
 
-**Why deprecate rather than delete in W-3**: gives plugin maintainers one minor-version cycle to migrate. Conformance suite tests the new contract (no `Plan()` call); existing plugins keep compiling.
+2. **Optional `ProviderPlanner` interface** — for plugins (e.g., future Tofu/Pulumi adapters) that need custom planning even at v2:
+   ```go
+   // ProviderPlanner is an optional interface plugins may implement when
+   // platform.ComputePlan's driver-Diff-loop isn't sufficient (e.g., a Tofu
+   // adapter that delegates to `tofu plan`, or a multi-resource batch planner).
+   //
+   // wfctl checks for this interface AFTER consulting computePlanVersion: a v2
+   // plugin that implements ProviderPlanner uses its custom Plan; a v2 plugin
+   // that doesn't gets platform.ComputePlan as the default.
+   type ProviderPlanner interface {
+       PlanResources(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error)
+   }
+   ```
 
-### Sequencing (review #1 Minor #4 corrected)
+   This preserves the future-extension capability without forcing every plugin to ship a Plan stub. The existing `IaCProvider.Plan()` method remains available for v1 plugins; v2 plugins are recommended to use `ProviderPlanner` if they need overrides.
 
-Critical sequencing change: **W-7 (conformance) MUST land before any P-* PR** so the per-plugin codemod migration has scenarios to run against.
+**`IaCProvider.Plan()` is NOT deprecated in this design.** It stays as the v1 contract method. Future versions may consolidate after enough plugins migrate to v2; that decision is out of scope here.
+
+**Migration story per plugin:**
+- DO: P-DO PR sets `computePlanVersion: v2`. wfctl uses `platform.ComputePlan`. DO's existing `Plan()` body becomes unused but stays for v1 fallback compatibility.
+- AWS/GCP/Azure: stay at default v1 (no plugin.json change required). Their existing `Plan()` methods continue to be called by wfctl. No code change.
+
+**Backward compatibility**: a wfctl binary that doesn't yet know about `computePlanVersion` field treats absence as v1 (current behavior). A wfctl binary that DOES know the field still calls `provider.Plan()` for v1 plugins. No flag day.
+
+### Sequencing (Path A scope)
 
 | PR | Repo | Scope | Depends on |
 |---|---|---|---|
 | W-1 | workflow | `IaCPlan.InputSnapshot` + `PlanAction.ResolvedConfigHash` + `IaCPlan.SchemaVersion`; plan-stale diagnostic upgrade (#1) | — |
 | W-2 | workflow | `wfctl infra refresh-outputs` + cheap apply-time refresh (#2); bounded concurrency | W-1 |
-| W-3 | workflow | Replace action — `ComputePlan` calls Diff + emits replace; `wfctlhelpers.ApplyPlan` shared helper; delete-via-Apply fix; gRPC concurrency + cache (#3) | W-1, W-2; per-plugin BC-2 audit closed |
+| W-3 | workflow | Replace action — `ComputePlan` calls Diff + emits replace; `wfctlhelpers.ApplyPlan` shared helper; delete-via-Apply fix; gRPC concurrency + cache (#3); honors `computePlanVersion` per W-9 | W-1, W-2 |
 | W-4 | workflow | `Provider.ValidatePlan` interface method + R-A10 align rule (#4) | W-3 |
 | W-5 | workflow | Per-module infra_output JIT secret resolution + ProviderID propagation (#5); SchemaVersion bump | W-3 |
 | W-6 | workflow | `--allow-replace=<names>` flag (#6); partial-cascade batch discovery | W-3 |
 | W-7 | workflow | `iac/conformance/` package + smoke gate (#7) | W-3, W-4, W-5, W-6 (so all scenarios are testable) |
-| W-8 | workflow | `cmd/iac-codemod/` (codemod tooling, dry-run default) | W-3, W-4 |
-| W-9 | workflow | `IaCProvider.Plan()` deprecation marker | W-3 |
-| P-DO, P-AWS, P-GCP, P-AZ | each plugin | Run codemod; collapse Plan/Apply; implement `ValidatePlan`; add conformance test | W-7 + W-8 |
+| W-8 | workflow | `cmd/iac-codemod/` (codemod tooling, dry-run default + informative reports) | W-3, W-4 |
+| W-9 | workflow | `plugin.json: iacProvider.computePlanVersion` field + optional `ProviderPlanner` interface (replaces "Plan() deprecation" approach) | W-3 |
+| P-DO | workflow-plugin-digitalocean | Run codemod against DO; hand-port upsert recovery via `wfctlhelpers.ApplyPlan` upsertSupporter hook; implement `ValidatePlan` for DO region constraints; opt into `computePlanVersion: v2`; add conformance test | W-7 + W-8 + W-9 |
 | C-1 | core-dump | Bump wfctl + plugin pins; revert tactical workarounds in deploy.yml; complete the staging-PG migration to `nyc1` (region was the original blocker) | P-DO |
 
-W-1..W-9 are workflow PRs (sequenced as shown). P-* runs after W-7 + W-8 in parallel. C-1 closes the core-dump deploy iteration.
+**Out of scope for this design (per user override):** P-AWS / P-GCP / P-AZ. Activation work for those plugins includes their own conformance opt-in PRs.
+
+**Advisory work shipped alongside W-8:** run `cmd/iac-codemod/lint -dry-run` against AWS/GCP/Azure plugins; file the resulting reports as GitHub issues against each plugin repo. No code change to those plugins.
+
+W-1..W-9 are workflow PRs (sequenced as shown). P-DO follows after W-7 + W-8 + W-9. C-1 closes the core-dump deploy iteration.
 
 ### Tests
 
@@ -468,28 +514,31 @@ digraph iac_v2 {
     subgraph cluster_plugin {
         label="provider plugins";
         style=dashed;
-        do_plugin [label="DO Provider\nApply → wfctlhelpers"];
-        aws_plugin [label="AWS Provider\nApply → wfctlhelpers"];
-        gcp_plugin [label="GCP Provider\nApply → wfctlhelpers"];
+        do_plugin [label="DO Provider (v2)\nApply → wfctlhelpers\n+ upsertSupporter hook"];
+        aws_plugin [label="AWS Provider (v1)\nlegacy Plan() + Apply()\nadvisory codemod report"];
+        gcp_plugin [label="GCP Provider (v1)\nlegacy Plan() + Apply()\nadvisory codemod report"];
+        az_plugin [label="Azure Provider (v1)\nlegacy Plan() + Apply()\nadvisory codemod report"];
         do_drivers [label="ResourceDrivers\n(VPC, Droplet, etc.)\nDiff sets NeedsReplace"];
     }
 
-    infra_apply -> platform_diff [label="compute (parallel Diff)"];
+    infra_apply -> platform_diff [label="compute (parallel Diff, v2 only)"];
     platform_diff -> iac_driver [label="Diff() per resource"];
-    infra_apply -> wfctlhelpers [label="ApplyPlan"];
-    wfctlhelpers -> iac_driver [label="Create/Update/Replace/Delete"];
+    infra_apply -> wfctlhelpers [label="ApplyPlan (v2)"];
+    infra_apply -> aws_plugin [label="legacy Plan/Apply (v1)" style=dotted];
+    wfctlhelpers -> iac_driver [label="Create/Update/Replace/Delete\n+ upsert hook"];
     do_plugin -> wfctlhelpers;
-    aws_plugin -> wfctlhelpers;
-    gcp_plugin -> wfctlhelpers;
     do_plugin -> do_drivers;
-    conformance -> iac_provider [label="black-box scenarios"];
-    codemod -> do_plugin [label="-dry-run / -fix"];
-    codemod -> aws_plugin;
-    codemod -> gcp_plugin;
+    conformance -> iac_provider [label="black-box scenarios\n(v2 plugins)"];
+    codemod -> do_plugin [label="-dry-run / -fix\n(canonical patterns)"];
+    codemod -> aws_plugin [label="-dry-run lint only" style=dashed];
+    codemod -> gcp_plugin [label="-dry-run lint only" style=dashed];
+    codemod -> az_plugin [label="-dry-run lint only" style=dashed];
     iac_provider -> infra_apply [label="ValidatePlan"];
     infra_apply -> iac_state [label="reads/writes plan.json"];
 }
 ```
+
+Solid arrows = v2 path (DO). Dotted/dashed = v1 legacy path (AWS/GCP/Azure) + advisory tooling.
 
 ## Assumptions
 
@@ -511,15 +560,23 @@ digraph iac_v2 {
 
 9. **Existing plugins (DO, AWS, GCP, Azure) have closed BC-2 (structpb-boundary) audit before W-3 lands** — if a plugin's Outputs contain typed slices that corrupt across gRPC, in-process Diff sees nil and silently misclassifies. **Falsity:** a plugin's BC-2 audit is incomplete; W-3 makes the bug worse (now it affects plan classification, not just runtime). **Mitigation:** W-3 sequencing constraint — gates per-plugin migration on BC-2 audit closed for that plugin (per precedent design `2026-04-28-iac-plugin-review-design.md`).
 
-10. **AWS/GCP/Azure provider plugins are actively used or will be in foreseeable future** — if they're orphaned, the per-plugin PRs are wasted effort. **Falsity:** the migration becomes 4 PRs of refactor with no consumer. **Mitigation:** workflow has shipped these plugins (per Explore agent's report); even if not in production today, they're the obvious onboarding path for new clouds. Per-plugin PR cost is bounded (codemod-driven). If user signals "abandon AWS/GCP/Azure", reduce scope.
+10. **AWS/GCP/Azure plugins are NOT in active production use** (per user override 2026-05-03). They exist as code in the workspace but have no live consumer. **Implication:** their migration is deferred to activation time. This design ships codemod tooling + advisory reports for them; no migration PRs. **Falsity:** if a plugin IS being used by an undocumented downstream, deferring its migration leaves it on the v1 legacy path. **Mitigation:** the v1 path remains fully supported by wfctl (W-9's per-plugin opt-in means absence-of-v2 = legacy contract); the only loss is access to the new mechanism fixes. Activation work for any plugin includes its own conformance opt-in PR.
 
-## Top doubts (for adversarial review #2 to attack — review #1's doubts addressed above)
+## Top doubts (post-review #2 + user override)
 
-1. **Diff cache invalidation correctness** — keying by `(plugin-version, resource-type, sha256(spec.Config), sha256(current.Outputs))` should cover all inputs to Diff. But if a Diff implementation depends on an environment variable or a side-channel (e.g. cloud rate-limit-aware backoff that returns different DiffResult under load), cache returns stale. Mitigation: document Diff invariants in the conformance contract; scenario `Scenario_DiffPureFunction` could enforce.
+Review #2 surfaced 2 Critical + 6 Important + 5 Minor; user resolved Criticals via Path A override + scope correction. Remaining open doubts:
 
-2. **`replaceIDMap` thread safety** — if W-3 parallel Diff and W-5 JIT substitution share state, the per-apply mutex needs to be explicit. Worth specifying in implementation but not load-bearing for design correctness.
+1. **Diff cache invalidation correctness** — keying by `(plugin-version, resource-type, current.ProviderID, sha256(spec.Config), sha256(current.Outputs))` should cover all inputs to Diff. But if a Diff implementation depends on an environment variable or a side-channel (e.g. cloud rate-limit-aware backoff that returns different DiffResult under load), cache returns stale. Mitigation: document Diff-pure-function invariant in the conformance contract; conformance `Scenario_DiffPureFunction` enforces.
 
-3. **Smoke gate failure rate from cloud flakes** — DO/AWS/GCP/Azure APIs occasionally return 5xx; the smoke gate could become a flaky PR-blocker. Mitigation: 2-attempt retry with exponential backoff in the smoke runner; fail only after both attempts.
+2. **Plan/apply two-step UX with persisted plan.json under JIT semantics** (review #2 Important): explicitly out of scope — plan.json persisted across `wfctl infra plan -o file` + `wfctl infra apply --plan file` does NOT support cascade-replace or JIT-resolved fields in this design. Apply-without-`--plan` is the canonical path for JIT-aware plans. `wfctl infra plan -o file` adds a clear error when the resulting plan would require JIT resolution: "this plan requires JIT resolution; persisted plan.json is not supported. Run `wfctl infra apply` directly without `-o`/`--plan`." Doc-gap (operator may not know this), filed as follow-up.
+
+3. **Smoke gate AWS cost cap** (review #2 Important): the "$0.01/PR/provider" claim was speculative. **In Path A, smoke gate ships only against DO** (since DO is the only active provider). AWS/GCP/Azure smoke gates are deferred to their respective activation work, at which point each provider's smoke scenario gets its own pricing audit + cost-cap calibration.
+
+4. **Codemod opt-out marker durability across rollback** (review #2 Minor): `// wfctl:skip-plan-codemod` markers added to DO during P-DO migration are durable code; W-3 rollback leaves them as no-op comments; next-forward re-runs the codemod respecting them. Documented in §Rollback below.
+
+5. **Diff-semantics version drift between plugin upgrades** (review #2 Important): `IaCPlan.SchemaVersion` only catches plan-format changes, not Diff-semantics changes. If DO plugin v0.10.x changes its Diff to flag a previously-non-ForceNew field as ForceNew, an old persisted plan.json loaded by new wfctl might apply with the old classification. **Mitigation:** plan.json includes plugin version per-action; apply checks if the plugin in use matches the plugin-at-plan-time and warns on mismatch. Implementation detail in W-1.
+
+6. **W-2 partial-Read failure semantics** (review #2 Important): if Read fails for a resource during apply-time refresh, plan computation uses stale Outputs → Diff misclassifies. **Resolved**: refresh failures abort apply with a clear error ("could not refresh resource X; rerun or use --skip-refresh"); `--skip-refresh` flag opts into proceed-with-stale (not default).
 
 ## Rollback
 
@@ -561,4 +618,6 @@ ADR added at `decisions/<NNNN>-iac-conformance-and-replace.md` in the same commi
 
 ## Changelog
 
-- **Revision 1 (2026-05-03)**: Addresses adversarial review #1 — 2 Critical (W-3 gRPC cost + delete-via-Apply latent bug), 8 Important (Approach 2 cost-benefit, plan-format-version, partial-cascade discovery, ProviderID cascade propagation, Plan() deprecation, InputSnapshot fingerprint length, package boundaries, conformance smoke gate), 6 Minor (terminology, ValidatePlan examples, codemod marker, sequencing, reverse codemod scope, JIT restart). Added W-9 (Plan() deprecation). Renamed `cmd/iaclint/codemod/` → `cmd/iac-codemod/`. Bumped InputSnapshot fingerprint to 16 hex / 64 bits. Made codemod default mode dry-run.
+- **Revision 2 (2026-05-03)**: Addresses adversarial review #2 + user override (Path A + scope correction). Reframed Approach 3 as Path A (DO-targeted codemod + advisory reports for AWS/GCP/Azure). Replaced W-9 "Plan() deprecation" with `computePlanVersion` per-plugin opt-in + optional `ProviderPlanner` interface (preserves Tofu/Pulumi-style extension capability). Codemod refactor-apply now describes WHAT was detected + HOW to handle each non-canonical idiom in dry-run report (DO upsert recovery → wfctlhelpers upsertSupporter hook; AWS update+replace collapse → manual port required; GCP separate replace → no-op detected). Removed `remove-plan` codemod (Plan() not deprecated). BC-2 audit gate replaced by per-plugin `computePlanVersion` opt-in (mechanical check, not manual interpretation). Diff cache key gains `current.ProviderID`. AWS/GCP/Azure migration deferred to activation work; this design ships codemod + advisory reports against them, no PRs. Smoke gate scope narrowed to DO. Added doubt: plan.json persisted across plan→apply with JIT semantics is explicitly out-of-scope (apply-without-`--plan` is canonical for JIT-aware plans). Added doubt: Diff-semantics drift between plugin versions caught via per-action plugin-version annotation.
+
+- **Revision 1 (2026-05-03)**: Addresses adversarial review #1 — 2 Critical (W-3 gRPC cost + delete-via-Apply latent bug), 8 Important (Approach 2 cost-benefit, plan-format-version, partial-cascade discovery, ProviderID cascade propagation, Plan() deprecation, InputSnapshot fingerprint length, package boundaries, conformance smoke gate), 6 Minor (terminology, ValidatePlan examples, codemod marker, sequencing, reverse codemod scope, JIT restart). Added W-9 (Plan() deprecation — superseded in rev2). Renamed `cmd/iaclint/codemod/` → `cmd/iac-codemod/`. Bumped InputSnapshot fingerprint to 16 hex / 64 bits. Made codemod default mode dry-run.
