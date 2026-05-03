@@ -104,6 +104,19 @@
     - rev7 placeholder dropped (matches rev6's rev6-placeholder removal).
     - rev4 changelog line 41 wording rewritten to describe rev4 actual delivery, not later-revision intent.
   - **Process fix (rev7 — closes the recurrent sweep-incompleteness defect class):** every rename/relocate from rev7 onward MUST run `grep -n "<old form>"` over the file before commit; every match either updated or explicitly tagged as historical/changelog. The cycle-6 reviewer observed this defect class is now 3 cycles deep (rev3 sentinel rename incomplete; rev5 ADR path incomplete; rev6 ADR cross-references incomplete); rev7 adopts the discipline + documents it.
+- rev8 (this revision) — addresses cycle-7 findings:
+  - **Critical fixes:**
+    - **ADR Status returned to bare `Accepted`** per repo precedent (all 5 prior ADRs use the bare token). Provenance + ratification cross-reference moved to a `**Provenance:**` line in the Context section. Cycle-7 caught that rev7's parenthetical-extended Status broke bare-Accepted tooling compatibility despite the rev7 changelog claiming otherwise; rev8 actually realizes cycle-6 Option (b)'s intent.
+    - **`unsetFingerprintPlaceholder` constant declaration hoisted into T1.5** (where the test references it). T1.5 Files section extended to list `iac/inputsnapshot/compute_drift.go` (Create) + `iac/inputsnapshot/compute_drift_test.go` (Create). T3.1.5's body re-states the code block for reading-flow context but the canonical declaration is now in T1.5. Closes cycle-7 Critical 2.
+    - **Open Questions § "Default if no user input"** changed from silent-ratification to halt-and-surface: "the autonomous-pipeline HALTS at W-9's pre-merge gate and surfaces the ratification ask via PR comment; W-9 does NOT merge until the user replies." Aligns with the user's "don't defer fixes" mandate (rev7's silent-ratification default contradicted it). Earlier PRs in the dependency graph still ship per the autonomous pipeline; only W-9 (and downstream C-1) wait at the gate.
+  - **Important fixes:**
+    - PR-count contradiction at Final Verification (line 2797: "After all 11 PRs merge") corrected to 12.
+    - Open Questions ratification ask gains markdown checkboxes (`- [ ] Ratify the deferral` / `- [ ] Override`) for a literal answering surface.
+    - W-3a rebase strategy: workspace-memory file reference replaced with inline summary of the rule (`git pull --ff-only origin <parent-branch>` before each commit + additive-only conflict resolution guidance).
+    - rev7 process discipline elevated from changelog footnote to first-class Task Conventions line. Extended to cover numerical-claim sweeps + Files-section-vs-code-block consistency + declaration-site-vs-reference-site placement.
+  - **Minor fixes:**
+    - Open Questions section number `### 1.` dropped (single-item section doesn't need numbering).
+    - ADR Context section deduplicated (rev7 left two competing `## Context` blocks; rev8 keeps the one with the Provenance line).
 
 **Out of scope:**
 - AWS / GCP / Azure plugin migrations (deferred to plugin-activation work; advisory codemod-lint reports filed as issues only)
@@ -137,17 +150,22 @@
 
 ## Open Questions
 
-The autonomous design pipeline (rev1–rev7) made one decision that requires explicit user ratification before W-9 ships. The user encounters this section before any task body, so the question cannot land in attribution-limbo.
+The autonomous design pipeline (rev1–rev8) made one decision that requires explicit user ratification before W-9 ships. The user encounters this section before any task body, so the question cannot land in attribution-limbo.
 
-### 1. ProviderPlanner deferral — ratify or override
+### ProviderPlanner deferral — ratify or override
 
 **Decision recorded:** the optional `ProviderPlanner` interface (proposed in rev1–rev3 of this plan as W-9's T9.1) is dropped from this plan series. W-9 ships only the cross-plugin-build CI gate. The interface is reserved for the first concrete consumer (a future Tofu/Pulumi-style adapter PR), which will define it freshly with concrete tests + design discussion.
 
 **ADR record:** `docs/adr/006-providerplanner-deferred-to-first-consumer.md` (created by W-9 T9.1 Step 0).
 
-**Why surfaced as an open question:** rev1–rev3 reviewed the interface as scope; cycle-3 review flagged YAGNI; cycle-4 review noted dropping might contradict the user-mandate "don't defer fixes"; cycle-5 review caught that earlier ADR drafts ghost-attributed user approval. The autonomous-pipeline interpreted "don't defer fixes" as referring to the 8 root-cause issues from the design pass, which do NOT include speculative future-extension scaffolding. **The user can override this interpretation on next interaction** — if user says "ratify the deferral," W-9 ships as-is; if user says "no, build ProviderPlanner now," W-9 expands to include the interface definition + a TDD test verifying type-assertion compiles (estimated +30 min plan revision + ~1 hour implementation).
+**Why surfaced as an open question:** rev1–rev3 reviewed the interface as scope; cycle-3 review flagged YAGNI; cycle-4 review noted dropping might contradict the user-mandate "don't defer fixes"; cycle-5 review caught that earlier ADR drafts ghost-attributed user approval. The autonomous-pipeline interpreted "don't defer fixes" as referring to the 8 root-cause issues from the design pass, which do NOT include speculative future-extension scaffolding.
 
-**Default if no user input by W-9 merge time:** the autonomous-pipeline ratifies its own interpretation and W-9 merges with the deferral. The ADR Status remains `Accepted`; the user can still override post-merge by filing ADR 007 superseding ADR 006.
+**User ratification ask (check exactly one):**
+
+- [ ] **Ratify the deferral** — W-9 ships as-is (CI gate only; ProviderPlanner deferred to first concrete consumer). ADR 006 stays `Accepted`.
+- [ ] **Override** — W-9 expands to include the ProviderPlanner interface definition + a TDD test verifying type-assertion compiles. File ADR 007 superseding ADR 006. Estimated cost: +30 min plan revision + ~1 hour implementation in W-9.
+
+**Default if no user input by W-9 pre-merge gate (rev8 — corrected per cycle-7 Critical 3):** the autonomous-pipeline HALTS at W-9's pre-merge gate and surfaces the ratification ask via PR comment; W-9 does NOT merge until the user replies with "ratified" or "override". This default aligns with the user's "don't defer fixes" mandate (rev6's "ratify-by-silence" default contradicted that mandate; cycle-7 review caught it). Earlier PRs in the dependency graph (W-1 → … → W-8, P-DO is gated on W-7+W-8 only) are NOT blocked by this open question — they ship per the autonomous pipeline. W-9 + (downstream) C-1 wait at the gate.
 
 ---
 
@@ -158,6 +176,7 @@ The autonomous design pipeline (rev1–rev7) made one decision that requires exp
 - Commit messages follow conventional commits (`feat(iac): ...`, `fix(plugin): ...`).
 - Conformance scenarios are referenced by name in earlier PRs' verification sections only. The actual scenario stub + body both ship in W-7 (no ghost-stub Go file ships in any earlier PR). This is the rev2/rev3 fix for the stub-then-fill anti-pattern.
 - All workflow tasks run from `/Users/jon/workspace/workflow/_worktrees/<branch>/`. P-DO from `/Users/jon/workspace/workflow-plugin-digitalocean/_worktrees/<branch>/`. C-1 from `/Users/jon/workspace/core-dump/_worktrees/<branch>/`.
+- **Sweep verification (rev7+):** every rename/relocate, file-path change, or numerical-count change MUST be verified before commit. Run `grep -n '<old form>'` over the plan file; every match is either updated or explicitly tagged as historical/changelog. For numerical claims (PR counts, task counts), cross-check against the Scope Manifest table + the Final Verification cross-PR section + each PR's Files entries. The discipline closes the recurrent sweep-incompleteness defect class observed across cycles 1-7 (rev3 sentinel rename, rev5 ADR path, rev6 ADR cross-references, rev7 PR-count + Files-section, rev8 Files-section-vs-code-block placement).
 
 ---
 
@@ -575,6 +594,8 @@ git commit -m "feat(iac): ComputePlan sets PlanAction.ResolvedConfigHash"
 **Files:**
 - Create: `iac/inputsnapshot/errors.go` (typed sentinel `ErrEnvVarChanged`)
 - Create: `iac/inputsnapshot/diagnostic.go` (shared `FormatStaleError` formatter)
+- Create: `iac/inputsnapshot/compute_drift.go` (rev8 — added per cycle-7 Critical 2; declares `unsetFingerprintPlaceholder` constant + `ComputeDrift` function; honors `preservedFingerprint` sentinel from T1.2)
+- Create: `iac/inputsnapshot/compute_drift_test.go` (rev8 — added per cycle-7 Critical 2; sentinel-honoring branch tests)
 - Modify: `cmd/wfctl/infra.go:1071` (persisted `--plan` path — wrap with `ErrEnvVarChanged`)
 - Test: `cmd/wfctl/infra_apply_plan_test.go` (extend — persisted-plan path TDD)
 
@@ -644,7 +665,47 @@ In `iac/inputsnapshot/`:
      ...
      hint: ensure all env vars referenced by infra.yaml are exported to both Plan and Apply steps
    ```
-3. `compute_drift.go`: `func ComputeDrift(planSnap, applySnap map[string]string) []interfaces.DriftEntry` — pure function that compares two snapshots and produces drift entries. Iterates over `planSnap` keys (the plan-time names; rev4 fix per cycle-3 Critical 2 — derive names from map keys, NOT from a phantom `plan.InputNames` field). **rev5/rev6: honors the in-package `preservedFingerprint` sentinel** (unexported per rev6) — if `applySnap[k]` equals it, skip drift detection for that key (sub-action cleanup case). Concrete implementation: see T3.1.5's "Step 3" code block where `ComputeDrift` is fully spec'd alongside the postcondition that consumes it. Cross-function contract documented at all 3 call sites: `Compute` passes the sentinel through; `NewTolerantEnvProvider` (sole sanctioned injector) returns the sentinel for plan-time-set apply-time-unset vars; `ComputeDrift` honors it.
+3. `compute_drift.go`: declares `unsetFingerprintPlaceholder = "(unset)"` constant + `ComputeDrift` function. **rev8 — declaration site is T1.5** (per cycle-7 Critical 2 fix; the constant lives in the same file as the function that uses it). Code:
+   ```go
+   // iac/inputsnapshot/compute_drift.go (T1.5)
+   package inputsnapshot
+
+   import "github.com/GoCodeAlone/workflow/interfaces"
+
+   // unsetFingerprintPlaceholder is the in-package constant displayed in the
+   // ApplyFingerprint field when the var was set at plan time but is missing
+   // entirely from the applySnap. UNEXPORTED to keep the placeholder a private
+   // contract between ComputeDrift + FormatStaleError + tests.
+   const unsetFingerprintPlaceholder = "(unset)"
+
+   // ComputeDrift compares plan-time vs apply-time fingerprint snapshots and
+   // produces a drift report. Iterates over planSnap keys (no phantom
+   // InputNames field needed; map keys ARE the names). Honors the in-package
+   // preservedFingerprint sentinel from T1.2 — keys whose applySnap value
+   // equals the sentinel are skipped (sub-action cleanup case).
+   func ComputeDrift(planSnap, applySnap map[string]string) []interfaces.DriftEntry {
+       var drift []interfaces.DriftEntry
+       for name, planFP := range planSnap {
+           applyFP, present := applySnap[name]
+           if !present {
+               drift = append(drift, interfaces.DriftEntry{
+                   Name: name, PlanFingerprint: planFP, ApplyFingerprint: unsetFingerprintPlaceholder,
+               })
+               continue
+           }
+           if applyFP == preservedFingerprint {
+               continue // Sentinel — sub-action cleanup unset; not real drift.
+           }
+           if applyFP != planFP {
+               drift = append(drift, interfaces.DriftEntry{
+                   Name: name, PlanFingerprint: planFP, ApplyFingerprint: applyFP,
+               })
+           }
+       }
+       return drift
+   }
+   ```
+   Cross-function contract documented at all 3 call sites: `Compute` passes the sentinel through; `NewTolerantEnvProvider` (sole sanctioned injector) returns the sentinel for plan-time-set apply-time-unset vars; `ComputeDrift` (above) honors it. T3.1.5's body re-states this code block for reading-flow context but the canonical declaration is here.
 
 In `cmd/wfctl/infra.go` near line 1071, before raising "plan stale":
 1. Re-compute apply-time InputSnapshot using `keys(plan.InputSnapshot)` as the name list (rev4 — derives from existing field; no `InputNames` field needed).
@@ -1029,7 +1090,7 @@ git commit -m "feat(iac): apply-time refresh-outputs pre-step (opt-in via WFCTL_
 
 **rev7 — Cross-PR W-1 prerequisite + WHO performs the rebase (cycle-6 finding):**
 - **Prerequisite:** W-1 (`feat/iac-plan-schema-diagnostic`) must merge before W-3a's T3.0.4 can be applied, because T1.1 also modifies `interfaces/iac_state.go` (adds IaCPlan + PlanAction fields). T3.0.4 rebases on W-1's tip before adding the 3 ApplyResult fields.
-- **WHO:** the implementer performs the rebase per `feedback_worktree_agents_must_ff_before_commit.md` (each agent fast-forwards before each commit; the team-lead does NOT perform per-implementer rebases). For the autonomous-pipeline, this is the implementer agent receiving the receiving-code-review feedback.
+- **WHO:** the implementer performs the rebase as part of receiving the code-review feedback. Concretely (rev8 — addresses cycle-7 Important on workspace-memory dependency, inlining the relevant rule): before each commit, run `git pull --ff-only origin <parent-branch>` to fast-forward on the parent branch tip; resolve any conflicts that surface (additive-only conflicts on `interfaces/iac_state.go` between W-1's IaCPlan/PlanAction fields and W-3a's ApplyResult fields are mechanically resolvable — combine both sides). The team-lead does NOT perform per-implementer rebases; each agent is responsible for fast-forwarding before each commit.
 - **Conflict resolution:** since T1.1 and T3.0.4 add disjoint field sets to the same struct, conflicts should be resolvable mechanically (additive-only). If a conflict surfaces, do NOT discard either side; combine them — T1.1's IaCPlan/PlanAction + DriftEntry + T3.0.4's 3 ApplyResult fields all coexist.
 
 **Note (rev2/rev3):** T3.0 hoists the `iacProvider.computePlanVersion` plugin-manifest field schema into W-3a so T3.7 (in W-3b) can read the manifest directly with no transitional env-var (`WFCTL_USE_V2_APPLY`) in main. Plugins that don't set the field default to v1 (legacy `provider.Apply`); plugins that set `v2` route through `wfctlhelpers.ApplyPlan` once W-3b lands. W-9 retains only the optional `ProviderPlanner` interface + cross-plugin build verification — no env-var to remove.
@@ -2399,19 +2460,15 @@ Commit: `chore(make): add migrate-providers target for workspace-wide codemod`
 # ADR 006: ProviderPlanner Deferred to First Consumer
 
 ## Status
-Accepted (autonomous-pipeline; user-ratification deferred — see plan § Open Questions § "ProviderPlanner deferral")
-
-(rev7 — preserves `Status: Accepted` for any tooling that scans for the canonical value while keeping honest provenance in the body via `Decided by` + the Open Questions surface. The cycle-5 review correctly caught that prior revisions ghost-wrote user approval; rev6/rev7 honestly attribute the deferral to the autonomous-pipeline cycle-3 → cycle-5 reasoning. User can override on next interaction by filing ADR 007 superseding this one; if no override, the deferral stands.)
+Accepted
 
 ## Context
 
 Surfaced during the autonomous design pass for `docs/plans/2026-05-03-iac-conformance-and-replace-design.md` (the 8 root-cause issues from core-dump's self-hosted-PG deploy iteration). Rev1–rev3 of the implementation plan included an optional `ProviderPlanner` interface in W-9, intended to preserve a Tofu/Pulumi-style extension hook without locking the IaCProvider interface to `platform.ComputePlan`'s `driver.Diff` dispatch.
 
-Cycle-3 adversarial review flagged the interface as YAGNI (no concrete consumer in the plan series). Rev3 downgraded the interface to "definition only — reserved for future adapter; not consumed by core wfctl." Cycle-4 review noted that the downgraded form is the worst of both worlds: an interface name lives in `interfaces/iac_provider.go` that no caller exercises and that a future adapter design may wish to define differently. Cycle-4 also raised the concern that dropping the interface contradicts the user-mandate "don't defer any fixes."
+Cycle-3 adversarial review flagged the interface as YAGNI (no concrete consumer in the plan series). Rev3 downgraded the interface to "definition only — reserved for future adapter; not consumed by core wfctl." Cycle-4 review noted that the downgraded form is the worst of both worlds. Cycle-5 caught earlier ADR drafts ghost-attributing user approval; cycle-6 caught dangling cross-references; cycle-7 caught the parenthetical-Status format breaking repo precedent. rev8 returns Status to bare `Accepted` per repo precedent.
 
-Cycle-5 review correctly caught that rev5's earlier ADR draft attributed the decision to "Decided by: Jon Langevin" without explicit user consent. Rev6 corrects the attribution and surfaces the deferral as a Provisional decision pending user ratification.
-
-**Decided by:** Claude (autonomous-pipeline rev3-rev6). User-mandate disambiguation: the "8 root-cause issues" list does NOT include ProviderPlanner; the user said "don't defer fixes" referring to those concrete issues, not to speculative future-interface scaffolding. The autonomous-pipeline's reading is documented here for the user to ratify or override.
+**Provenance:** Decided by Claude (autonomous-pipeline rev3-rev8) — the user has not explicitly approved the deferral. The autonomous-pipeline interpreted the user-mandate "don't defer fixes" as referring to the 8 root-cause issues from the design pass (which do NOT include speculative future-extension scaffolding). User-ratification surface: see plan § Open Questions § "ProviderPlanner deferral". If user overrides, file ADR 007 superseding this one; W-9 expands to include the ProviderPlanner interface definition.
 
 ## Decision
 
@@ -2751,7 +2808,7 @@ git commit -m "fix(infra): staging PG infra in nyc1; cascade replace via --allow
 
 ## Final verification (cross-PR)
 
-After all 11 PRs merge:
+After all 12 PRs merge:
 
 1. **W-7 conformance suite green for DO** — `cd workflow-plugin-digitalocean && go test -tags=conformance ./...`
 2. **C-1 staging /healthz green** — `curl https://coredump-staging.ondigitalocean.app/healthz` returns 200
