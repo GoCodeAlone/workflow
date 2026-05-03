@@ -56,8 +56,10 @@ type IaCPlan struct {
 	SchemaVersion int `json:"schema_version,omitempty"`
 
 	// InputSnapshot records every env var name read during ${VAR} substitution
-	// at plan time, mapped to a 16-hex-char (64-bit) sha256 prefix of the value.
-	// Apply re-computes inputs and prints diagnostic on mismatch.
+	// at plan time, fingerprinting only those that were SET (16-hex-char sha256
+	// prefix of the value). Unset vars are omitted from the map; their absence
+	// at apply time is therefore not flagged as drift. Apply re-computes inputs
+	// and prints diagnostic on mismatch.
 	InputSnapshot map[string]string `json:"input_snapshot,omitempty"`
 }
 
