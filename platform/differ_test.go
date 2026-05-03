@@ -206,3 +206,46 @@ func TestDiffer_CycleDetection(t *testing.T) {
 		t.Errorf("error = %q, expected 'cycle' in message", err.Error())
 	}
 }
+
+func TestComputePlan_PerActionResolvedConfigHash(t *testing.T) {
+	desired := []interfaces.ResourceSpec{
+		{Name: "vpc", Type: "infra.vpc", Config: map[string]any{"region": "nyc1"}},
+	}
+	plan, err := platform.ComputePlan(desired, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].ResolvedConfigHash == "" {
+		t.Errorf("expected ResolvedConfigHash on create action, got %+v", plan.Actions[0])
+	}
+	want := platform.ConfigHash(desired[0].Config)
+	if got := plan.Actions[0].ResolvedConfigHash; got != want {
+		t.Errorf("ResolvedConfigHash = %q, want %q", got, want)
+	}
+}
+
+func TestComputePlan_ResolvedConfigHashOnUpdate(t *testing.T) {
+	desired := []interfaces.ResourceSpec{
+		{Name: "db", Type: "infra.database", Config: map[string]any{"engine": "postgres", "size": "db-s"}},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "db", Type: "infra.database", ConfigHash: "stale-hash"},
+	}
+	plan, err := platform.ComputePlan(desired, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Actions) != 1 || plan.Actions[0].Action != "update" {
+		t.Fatalf("expected 1 update action, got %+v", plan.Actions)
+	}
+	if plan.Actions[0].ResolvedConfigHash == "" {
+		t.Errorf("expected ResolvedConfigHash on update action, got %+v", plan.Actions[0])
+	}
+	want := platform.ConfigHash(desired[0].Config)
+	if got := plan.Actions[0].ResolvedConfigHash; got != want {
+		t.Errorf("ResolvedConfigHash = %q, want %q", got, want)
+	}
+}
