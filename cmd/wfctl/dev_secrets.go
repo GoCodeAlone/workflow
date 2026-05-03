@@ -12,7 +12,7 @@ import (
 )
 
 // devSecretsEnvFileName is the temp env file written when --secrets-from is set.
-const devSecretsEnvFileName = ".env.wfctl-dev-secrets"
+const devSecretsEnvFileName = ".env.wfctl-dev-secrets" //nolint:gosec // G101: this is a filename, not a credential
 
 // writeDevSecretsEnvFile resolves all secrets from the named ad-hoc provider
 // and writes them as KEY=value lines to <dir>/.env.wfctl-dev-secrets (mode 0600).
