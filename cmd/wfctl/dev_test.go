@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -231,5 +232,55 @@ func TestExtractInfraPort(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("extractInfraPort(%q) = %d, want %d", tt.modType, got, tt.want)
 		}
+	}
+}
+
+// ── writeDevSecretsEnvFile ────────────────────────────────────────────────────
+
+func TestDevUp_SecretsFrom_WritesEnvFile(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TSVCKEY1"); os.Unsetenv("TSVCKEY2") })
+
+	if err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "--service", "tsvc", "KEY1"},
+		strings.NewReader("value1\n"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "--service", "tsvc", "KEY2"},
+		strings.NewReader("value2\n"),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	envFile, err := writeDevSecretsEnvFile("env", "tsvc", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(data)
+	if !strings.Contains(out, "TSVCKEY1=value1") || !strings.Contains(out, "TSVCKEY2=value2") {
+		t.Errorf("expected key/value pairs in env file:\n%s", out)
+	}
+
+	info, err := os.Stat(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("expected file mode 0600, got %04o", info.Mode().Perm())
+	}
+}
+
+func TestDevUp_SecretsFrom_UnsupportedProvider(t *testing.T) {
+	dir := t.TempDir()
+	_, err := writeDevSecretsEnvFile("env", "", dir) // empty service → ErrUnsupported
+	if err == nil {
+		t.Error("expected error for env provider without service prefix")
 	}
 }

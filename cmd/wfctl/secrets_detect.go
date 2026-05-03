@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/secrets"
+	"github.com/mattn/go-isatty"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -139,10 +144,18 @@ func maskValue(val string) string {
 }
 
 func runSecretsSet(args []string) error {
+	return runSecretsSetWithReader(args, nil)
+}
+
+// runSecretsSetWithReader is the testable core of "wfctl secrets set".
+// r is an optional reader for the secret value (used in tests); pass nil for normal operation.
+func runSecretsSetWithReader(args []string, r io.Reader) error {
 	fs := flag.NewFlagSet("secrets set", flag.ContinueOnError)
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
 	value := fs.String("value", "", "Secret value to set")
 	fromFile := fs.String("from-file", "", "Read secret value from file (for certs/keys)")
+	providerName := fs.String("provider", "", "Ad-hoc provider override (keychain|env|aws); bypasses app.yaml")
+	service := fs.String("service", "", "Service name for keychain provider")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl secrets set <name> [options]\n\nSet a secret value in the provider.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -156,6 +169,7 @@ func runSecretsSet(args []string) error {
 	}
 	name := fs.Arg(0)
 
+	// Resolve the secret value from the highest-priority source available.
 	var secretValue string
 	switch {
 	case *fromFile != "":
@@ -166,20 +180,46 @@ func runSecretsSet(args []string) error {
 		secretValue = string(data)
 	case *value != "":
 		secretValue = *value
+	case r != nil: // explicit reader (e.g. piped input or test)
+		b, err := io.ReadAll(r)
+		if err != nil {
+			return fmt.Errorf("read secret value: %w", err)
+		}
+		secretValue = strings.TrimRight(string(b), "\n")
+	case isatty.IsTerminal(os.Stdin.Fd()): // interactive: masked prompt
+		fmt.Fprintf(os.Stderr, "Value for %s: ", name)
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			return fmt.Errorf("read password: %w", err)
+		}
+		fmt.Fprintln(os.Stderr)
+		secretValue = string(b)
 	default:
-		return fmt.Errorf("either --value or --from-file is required")
+		return fmt.Errorf("must provide --value, --from-file, or run interactively (TTY)")
 	}
 
+	// When --provider is given, bypass app.yaml and use the ad-hoc provider directly.
+	if *providerName != "" {
+		p, err := buildAdhocProvider(*providerName, *service)
+		if err != nil {
+			return err
+		}
+		if err := p.Set(context.Background(), name, secretValue); err != nil {
+			return fmt.Errorf("set secret %s: %w", name, err)
+		}
+		fmt.Printf("set %s\n", name)
+		return nil
+	}
+
+	// Default path: load provider from app.yaml secrets block.
 	cfg, err := loadSecretsConfig(*configFile)
 	if err != nil {
 		return err
 	}
-
 	provider, err := newSecretsProvider(cfg.Provider)
 	if err != nil {
 		return err
 	}
-
 	if err := provider.Set(context.Background(), name, secretValue); err != nil {
 		return fmt.Errorf("set secret %s: %w", name, err)
 	}
@@ -191,12 +231,37 @@ func runSecretsList(args []string) error {
 	fs := flag.NewFlagSet("secrets list", flag.ContinueOnError)
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
 	envName := fs.String("env", "", "Environment name for store resolution (optional)")
+	providerName := fs.String("provider", "", "Ad-hoc provider override (keychain|env|aws); bypasses app.yaml")
+	service := fs.String("service", "", "Service name for keychain provider")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl secrets list [options]\n\nList declared secrets and their status.\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// When --provider is given, bypass app.yaml and list directly from the ad-hoc provider.
+	if *providerName != "" {
+		p, err := buildAdhocProvider(*providerName, *service)
+		if err != nil {
+			return err
+		}
+		keys, err := p.List(context.Background())
+		if err != nil {
+			if errors.Is(err, secrets.ErrUnsupported) {
+				fmt.Fprintf(os.Stderr, "Provider %q does not support listing secrets\n", *providerName)
+				return nil
+			}
+			return fmt.Errorf("list secrets from provider %q: %w", *providerName, err)
+		}
+		fmt.Printf("Provider: %s (ad-hoc)\n\n", *providerName)
+		fmt.Printf("%-40s\n", "NAME")
+		fmt.Printf("%-40s\n", strings.Repeat("-", 40))
+		for _, k := range keys {
+			fmt.Printf("%-40s\n", k)
+		}
+		return nil
 	}
 
 	// Load the full WorkflowConfig so we can use multi-store resolution.

@@ -1530,13 +1530,37 @@ Set a secret value in the configured provider.
 ```bash
 wfctl secrets set DATABASE_URL --value "postgres://..."
 wfctl secrets set TLS_CERT --from-file ./certs/server.crt
+
+# Ad-hoc provider override (no config file needed)
+wfctl secrets set --provider keychain --service buymywishlist STRIPE_SECRET_KEY
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--value` | Secret value to set |
-| `--from-file` | Read secret value from file (for certificates/keys) |
-| `--config` | Workflow config file (default: `app.yaml`) |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--value` | _(prompt)_ | Secret value to set |
+| `--from-file` | _(none)_ | Read secret value from file (for certificates/keys) |
+| `--config` | `app.yaml` | Workflow config file |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+
+When no `--value` or `--from-file` is given and stdin is a TTY, the value is prompted with hidden input (`read -s` style).
+
+#### `secrets get`
+
+Retrieve a single secret value.
+
+```bash
+wfctl secrets get STRIPE_SECRET_KEY
+wfctl secrets get --provider keychain --service buymywishlist STRIPE_SECRET_KEY
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+
+Returns an error (exit non-zero) when the secret is not set.
 
 #### `secrets list`
 
@@ -1544,7 +1568,55 @@ List all declared secrets, their store routing, and access-aware set/unset statu
 
 ```bash
 wfctl secrets list --config app.yaml
+
+# Ad-hoc: list all env vars with a given prefix
+wfctl secrets list --provider env --service MYAPP_
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--env` | _(none)_ | Environment name for multi-store secret resolution |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+
+#### `secrets delete`
+
+Remove a secret from the provider. Idempotent — succeeds even when the key does not exist.
+
+```bash
+wfctl secrets delete STRIPE_SECRET_KEY
+wfctl secrets delete --provider keychain --service buymywishlist STRIPE_SECRET_KEY
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+
+#### `secrets export`
+
+Emit all secrets from a provider as a dotenv file or shell export statements. Useful for piping into CI pipelines or bootstrapping other tools.
+
+```bash
+# From config-defined provider
+wfctl secrets export --config app.yaml --format dotenv > .env
+
+# Ad-hoc: dump all keychain secrets for a service
+wfctl secrets export --provider keychain --service buymywishlist --format dotenv
+
+# Shell-eval compatible
+wfctl secrets export --provider env --service MYAPP_ --format export
+eval "$(wfctl secrets export --provider keychain --service myapp --format export)"
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+| `--format` | `dotenv` | Output format: `dotenv` (`KEY=value`) or `export` (`export KEY="value"`) |
 
 #### `secrets validate`
 
@@ -1930,7 +2002,11 @@ wfctl dev up [options]
 | `--local` | `false` | Run app services as local Go processes with hot-reload (infra still in Docker) |
 | `--k8s` | `false` | Deploy to local minikube cluster |
 | `--expose` | _(from config)_ | Expose services externally: `tailscale`, `cloudflare`, `ngrok` |
+| `--secrets-from` | _(none)_ | Inject secrets from an ad-hoc provider (`keychain`, `env`, `aws`) into the dev cluster via a generated `--env-file` |
+| `--secrets-service` | _(none)_ | Service name / prefix passed to the `--secrets-from` provider |
 | `--verbose` | `false` | Show detailed output |
+
+When `--secrets-from` is set, all secrets for the named provider/service are written to `.env.wfctl-dev-secrets` (mode `0600`) in the config directory and passed to docker compose as `--env-file`. The file is removed automatically on `wfctl dev down` and on any error during startup.
 
 The default mode generates `docker-compose.dev.yml` from the workflow config, mapping infrastructure module types to Docker images:
 
@@ -1958,6 +2034,13 @@ wfctl dev up --expose tailscale
 
 # Expose via Cloudflare Tunnel
 wfctl dev up --expose cloudflare
+
+# Inject Stripe sandbox secrets from macOS Keychain (BMW local-dev flow)
+wfctl secrets set --provider keychain --service buymywishlist STRIPE_SECRET_KEY
+wfctl dev up --secrets-from keychain --secrets-service buymywishlist
+
+# Inject secrets from environment variables with a shared prefix
+wfctl dev up --secrets-from env --secrets-service MYAPP_
 ```
 
 The `--expose` method can also be configured in the workflow config under `environments.local.exposure.method`.

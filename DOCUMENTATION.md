@@ -17,7 +17,7 @@ The engine is built on the [GoCodeAlone/modular](https://github.com/GoCodeAlone/
 
 **CLI tools:**
 - `cmd/server` -- runs workflow configs as a server process
-- `cmd/wfctl` -- validates and inspects workflow configs offline
+- `cmd/wfctl` -- validates and inspects workflow configs offline (see [CLI Reference](docs/WFCTL.md))
 
 ## Module Types (90+)
 

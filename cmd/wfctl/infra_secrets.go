@@ -104,3 +104,21 @@ func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 		return nil, fmt.Errorf("unknown secrets provider %q (supported: github, vault, aws, env, keychain)", cfg.Provider)
 	}
 }
+
+// buildAdhocProvider constructs a secrets.Provider for ad-hoc operations without
+// requiring an app.yaml secrets block. Supports keychain, env, and aws.
+// vault and github require explicit config via the app.yaml secrets block.
+func buildAdhocProvider(name, service string) (secrets.Provider, error) {
+	switch name {
+	case "keychain":
+		return secrets.NewKeychainProvider(service)
+	case "env":
+		return secrets.NewEnvProvider(service), nil
+	case "aws":
+		return secrets.NewAWSSecretsManagerProvider(secrets.AWSConfig{})
+	case "vault", "github":
+		return nil, fmt.Errorf("provider %q requires explicit config; use app.yaml secrets block", name)
+	default:
+		return nil, fmt.Errorf("unknown ad-hoc provider %q (supported: keychain, env, aws)", name)
+	}
+}
