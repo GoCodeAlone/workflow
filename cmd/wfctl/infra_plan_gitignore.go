@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -62,7 +63,7 @@ func warnIfPlanNotGitignored(w io.Writer, planPath string) {
 // relative to the gitignore directory) and ignores negation rules.
 func gitignoreCovers(data []byte, base, planAbs, gitignoreDir string) bool {
 	ext := filepath.Ext(base)
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -91,6 +92,13 @@ func gitignoreCovers(data []byte, base, planAbs, gitignoreDir string) bool {
 				return true
 			}
 		}
+	}
+	// Scanner errors (e.g. line longer than bufio.MaxScanTokenSize) cause
+	// silent fall-through if not checked. Conservative: treat scan failure
+	// as not-covered, which surfaces a warning the operator can investigate
+	// rather than silently letting plan.json land in source control.
+	if err := scanner.Err(); err != nil {
+		return false
 	}
 	return false
 }
