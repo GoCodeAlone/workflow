@@ -342,7 +342,7 @@ func TestSecretsExport_DotenvFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "K1=v1") || !strings.Contains(out, "K2=v2") {
+	if !strings.Contains(out, "TK1=v1") || !strings.Contains(out, "TK2=v2") {
 		t.Errorf("missing keys in dotenv output:\n%s", out)
 	}
 }

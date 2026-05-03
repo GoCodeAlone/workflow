@@ -41,36 +41,47 @@ func runSecretsExportWithWriter(args []string, w io.Writer) error {
 
 	ctx := context.Background()
 
-	var keys []string
+	// Resolve provider and keys once — no per-key rebuilds.
+	var (
+		provider secrets.Provider
+		keys     []string
+		src      string
+	)
 
 	if *providerName != "" {
+		// Ad-hoc path: build provider from --provider/--service flags.
 		p, err := buildAdhocProvider(*providerName, *service)
 		if err != nil {
 			return err
 		}
-		keys, err = p.List(ctx)
+		provider = p
+		k, err := provider.List(ctx)
 		if err != nil {
 			if errors.Is(err, secrets.ErrUnsupported) {
 				return fmt.Errorf("provider %q does not support listing; export requires an enumerable provider (use --service to set a prefix for env)", *providerName)
 			}
 			return fmt.Errorf("list secrets from provider %q: %w", *providerName, err)
 		}
+		keys = k
+		src = *providerName
 	} else {
-		// Default path: load declared entries from app.yaml.
+		// Default path: load the real configured provider from app.yaml.
 		cfg, err := loadSecretsConfig(*configFile)
 		if err != nil {
 			return err
 		}
+		p, err := resolveSecretsProvider(cfg)
+		if err != nil {
+			return err
+		}
+		provider = p
 		for _, e := range cfg.Entries {
 			keys = append(keys, e.Name)
 		}
+		src = "app.yaml"
 	}
 
 	// Header identifying the source.
-	src := *providerName
-	if src == "" {
-		src = "app.yaml"
-	}
 	switch *format {
 	case "dotenv":
 		fmt.Fprintf(w, "# exported from %s\n", src)
@@ -79,7 +90,7 @@ func runSecretsExportWithWriter(args []string, w io.Writer) error {
 	}
 
 	for _, key := range keys {
-		val, err := fetchExportValue(ctx, *providerName, *service, key)
+		val, err := exportGetValue(ctx, *providerName, provider, key)
 		if err != nil {
 			// Skip keys we cannot read (e.g. access-denied) with a comment.
 			fmt.Fprintf(w, "# SKIP %s: %v\n", key, err)
@@ -95,28 +106,20 @@ func runSecretsExportWithWriter(args []string, w io.Writer) error {
 	return nil
 }
 
-// fetchExportValue retrieves the value for a key returned by List().
-// For env providers, List() returns full env var names; os.Getenv is used
-// directly to avoid the double-prefix issue (envKey would prepend prefix again).
-func fetchExportValue(ctx context.Context, providerName, service, key string) (string, error) {
+// exportGetValue retrieves the secret value for a key returned by the provider's List().
+// For env providers, List() returns full env var names; os.LookupEnv is used directly to
+// avoid double-prefix application (the provider's envKey would prepend the prefix again).
+// For all other providers, the listed key is the logical key name understood by Get().
+func exportGetValue(ctx context.Context, providerName string, p secrets.Provider, key string) (string, error) {
 	if providerName == "env" {
-		// List() for EnvProvider returns full env var names already.
-		// Reading via os.Getenv avoids double-applying the prefix.
+		// EnvProvider.List() returns full env var names (e.g. "MYPREFIX_KEY").
+		// Calling p.Get("MYPREFIX_KEY") with prefix "MYPREFIX_" would look up
+		// "MYPREFIX_MYPREFIX_KEY" — wrong. Read the env var directly instead.
 		val, ok := os.LookupEnv(key)
 		if !ok {
 			return "", fmt.Errorf("env var %s not set", key)
 		}
 		return val, nil
-	}
-	// For all other providers (keychain, aws, etc.), List() returns logical key names
-	// that Get() understands directly.
-	if providerName == "" {
-		// Config-file path: use local env provider fallback.
-		return os.Getenv(key), nil
-	}
-	p, err := buildAdhocProvider(providerName, service)
-	if err != nil {
-		return "", err
 	}
 	return p.Get(ctx, key)
 }
