@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -1081,6 +1082,21 @@ func runInfraApply(args []string) error {
 		}
 		if plan.DesiredHash == "" {
 			return fmt.Errorf("plan file has no hash — regenerate with: wfctl infra plan -o plan.json")
+		}
+		// Check the input-fingerprint drift first so the operator gets a
+		// per-key diagnostic instead of the generic config-hash mismatch.
+		// (Env-var changes are a strict subset of config-hash differences;
+		// flagging them here yields the actionable message.) Names list is
+		// derived from plan.InputSnapshot keys — no separate InputNames field.
+		if len(plan.InputSnapshot) > 0 {
+			names := make([]string, 0, len(plan.InputSnapshot))
+			for k := range plan.InputSnapshot {
+				names = append(names, k)
+			}
+			applySnap := inputsnapshot.Compute(names, inputsnapshot.OSEnvProvider)
+			if drift := inputsnapshot.ComputeDrift(plan.InputSnapshot, applySnap); len(drift) > 0 {
+				return fmt.Errorf("%w\n%s", inputsnapshot.ErrEnvVarChanged, inputsnapshot.FormatStaleError(drift))
+			}
 		}
 		currentHash := desiredStateHash(desired)
 		if plan.DesiredHash != currentHash {

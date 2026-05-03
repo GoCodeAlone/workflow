@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,8 +13,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+// fingerprintForTest matches inputsnapshot.Compute's fingerprint format
+// (16-hex-char sha256 prefix) so tests can construct expected plan-time
+// snapshots without depending on the concrete env-provider closure.
+func fingerprintForTest(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:16]
+}
 
 // TestInfraApplyConsumesPlan verifies that wfctl infra apply --plan <file>:
 //  1. Reads actions from the plan file without calling ComputePlan.
@@ -396,6 +408,89 @@ modules:
 	// With the delete action resolved via Current.ProviderRef, provider.Apply is called.
 	if err != nil && strings.Contains(err.Error(), "missing 'provider' field") {
 		t.Errorf("delete action should resolve provider from Current, got: %v", err)
+	}
+}
+
+// TestApply_PlanStaleDiagnostic_NamesChangedKeys_Persisted verifies that the
+// persisted-`--plan` apply path returns the typed inputsnapshot.ErrEnvVarChanged
+// sentinel when an env-var fingerprint embedded in the plan differs from the
+// env at apply time, and that the error message names the changed key. This
+// is the W-1 cross-PR test for the persisted-plan path; the in-process apply
+// path is wired in T3.1.5 (W-3a).
+func TestApply_PlanStaleDiagnostic_NamesChangedKeys_Persisted(t *testing.T) {
+	// Plan was generated with old-value; embed its fingerprint in the plan.
+	t.Setenv("STAGING_PG_PASSWORD", "old-value")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: test-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+      token: "test-token"
+
+  - name: my-db
+    type: infra.database
+    config:
+      provider: test-provider
+      engine: postgres
+      size: s
+      env_vars:
+        DATABASE_PASSWORD: "${STAGING_PG_PASSWORD}"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	specs, err := parseInfraResourceSpecs(cfgPath)
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs: %v", err)
+	}
+	plan := interfaces.IaCPlan{
+		ID:            "stale-input-plan",
+		DesiredHash:   desiredStateHash(specs),
+		SchemaVersion: 1,
+		InputSnapshot: map[string]string{
+			"STAGING_PG_PASSWORD": fingerprintForTest("old-value"),
+		},
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: specs[0]},
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	planData, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, planData, 0o600); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+
+	// Mock provider so apply doesn't try to reach a real cloud.
+	fake := &applyCapture{}
+	origResolve := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	defer func() { resolveIaCProvider = origResolve }()
+
+	// Apply with a different value — should trigger the drift diagnostic.
+	t.Setenv("STAGING_PG_PASSWORD", "new-value")
+	err = runInfraApply([]string{"--auto-approve", "--config", cfgPath, "--plan", planPath})
+	if err == nil {
+		t.Fatal("expected plan-stale error from changed env-var fingerprint, got nil")
+	}
+	if !errors.Is(err, inputsnapshot.ErrEnvVarChanged) {
+		t.Errorf("expected sentinel inputsnapshot.ErrEnvVarChanged; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "STAGING_PG_PASSWORD") {
+		t.Errorf("error should name the changed key; got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "plan stale") {
+		t.Errorf("error should preserve the 'plan stale' marker; got: %s", err.Error())
+	}
+	if fake.applyCalled {
+		t.Error("provider.Apply should not be invoked when plan is stale on input snapshot")
 	}
 }
 
