@@ -44,9 +44,12 @@ func OSEnvProvider(name string) (string, bool) { return os.LookupEnv(name) }
 // preservedFingerprint is a sentinel value indicating an env-var was set at
 // plan time but is unset at apply time (sub-action cleanup is the canonical
 // case). ComputeDrift (T1.5) skips drift detection for keys whose applySnap
-// value is this sentinel. UNEXPORTED (rev6 — addresses cycle-5 Important on
-// external-bypass channel): NewTolerantEnvProvider is the only sanctioned
-// way to inject the sentinel; external callers cannot defeat drift detection.
+// value is this sentinel. The constant is unexported, so external code cannot
+// reference the value by name; NewTolerantEnvProvider is the sole sanctioned
+// injector. A determined caller could return the literal string from a custom
+// env-provider closure passed to Compute, but doing so is a deliberate
+// discipline violation, not a tooling bypass — the unexported boundary is
+// about API hygiene, not security.
 //
 // Cross-function contract:
 //   - Compute (this file, in-package) passes the sentinel through unhashed.
@@ -65,8 +68,10 @@ const preservedFingerprint = "__plan_time_preserved__"
 // key from the resulting map.
 //
 // This is the ONLY sanctioned way to inject the preservation sentinel.
-// Direct callers of Compute with a custom env-provider cannot construct
-// the sentinel value because it is unexported.
+// The sentinel constant is unexported, so external code cannot reference it
+// by name; a determined caller could still return the literal string from a
+// custom env-provider, but doing so is a deliberate discipline violation
+// rather than a tooling bypass.
 func NewTolerantEnvProvider(planSnapshot map[string]string) func(name string) (string, bool) {
 	return func(name string) (string, bool) {
 		if val, ok := os.LookupEnv(name); ok {
