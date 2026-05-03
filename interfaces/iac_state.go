@@ -51,6 +51,14 @@ type IaCPlan struct {
 	// (sorted ResourceSpecs) at the time the plan was generated. wfctl infra apply
 	// --plan compares this against the current config to detect stale plans.
 	DesiredHash string `json:"plan_hash,omitempty"`
+
+	// SchemaVersion is bumped when on-disk plan format changes (W-5 sets to 2 when JIT is required).
+	SchemaVersion int `json:"schema_version,omitempty"`
+
+	// InputSnapshot records every env var name read during ${VAR} substitution
+	// at plan time, mapped to a 16-hex-char (64-bit) sha256 prefix of the value.
+	// Apply re-computes inputs and prints diagnostic on mismatch.
+	InputSnapshot map[string]string `json:"input_snapshot,omitempty"`
 }
 
 // PlanAction is a single planned change within an IaCPlan.
@@ -59,6 +67,20 @@ type PlanAction struct {
 	Resource ResourceSpec   `json:"resource"`
 	Current  *ResourceState `json:"current,omitempty"`
 	Changes  []FieldChange  `json:"changes,omitempty"`
+
+	// ResolvedConfigHash is the SHA-256 of POST-substitution Resource.Config.
+	// Apply re-computes per-action and surfaces per-resource diagnostic on mismatch.
+	ResolvedConfigHash string `json:"resolved_config_hash,omitempty"`
+}
+
+// DriftEntry names a single env-var whose fingerprint changed between plan-time
+// and apply-time. Used by both the persisted-`--plan` path (cmd/wfctl/infra.go,
+// wired in T1.5) and the in-process apply path (wfctlhelpers.ApplyPlan, wired
+// in T3.1.5 — both via inputsnapshot.FormatStaleError).
+type DriftEntry struct {
+	Name             string `json:"name"`
+	PlanFingerprint  string `json:"plan_fingerprint"`
+	ApplyFingerprint string `json:"apply_fingerprint"`
 }
 
 // ApplyResult summarises the outcome of applying a plan.
