@@ -1576,6 +1576,7 @@ wfctl secrets list --provider env --service MYAPP_
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | `app.yaml` | Workflow config file |
+| `--env` | _(none)_ | Environment name for multi-store secret resolution |
 | `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
 | `--service` | _(none)_ | Service name / prefix for the selected provider |
 
