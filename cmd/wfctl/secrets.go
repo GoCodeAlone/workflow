@@ -45,18 +45,30 @@ Manage application secrets lifecycle.
 Actions:
   detect    Scan config for secret-like values and env var references
   set       Set a secret value (use --from-file for certificates/keys)
+  get       Retrieve a single secret value
   list      List all declared secrets and their status
+  delete    Remove a secret (idempotent)
+  export    Emit all secrets in dotenv or shell-export format
   validate  Validate that all declared secrets are set in the provider
   init      Initialize secrets provider configuration
   rotate    Trigger rotation of a secret
   sync      Copy secret structure between environments
   setup     Interactively set all secrets for an environment
 
+Ad-hoc provider flags (set, get, list, delete, export):
+  --provider  Override provider: keychain, env, aws
+  --service   Service name / prefix for the selected provider
+
 Examples:
   wfctl secrets detect --config app.yaml
   wfctl secrets set DATABASE_URL --value "postgres://..."
   wfctl secrets set TLS_CERT --from-file ./certs/server.crt
+  wfctl secrets set --provider keychain --service myapp STRIPE_SECRET_KEY
+  wfctl secrets get --provider keychain --service myapp STRIPE_SECRET_KEY
   wfctl secrets list --config app.yaml
+  wfctl secrets list --provider env --service MYAPP_
+  wfctl secrets delete --provider env MY_SECRET
+  wfctl secrets export --provider keychain --service myapp --format dotenv
   wfctl secrets validate --config app.yaml
   wfctl secrets init --provider env --env staging
   wfctl secrets rotate DATABASE_URL --env production
