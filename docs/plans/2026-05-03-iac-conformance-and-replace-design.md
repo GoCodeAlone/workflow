@@ -1,6 +1,6 @@
 # IaC Root-Cause Fixes + Provider Conformance Suite — Design
 
-**Status:** Draft for adversarial review
+**Status:** Revision 1 (post adversarial review #1 — addresses 2 Critical + 8 Important + 6 Minor findings)
 **Authors:** Claude (Jon's instruction)
 **Forcing function:** core-dump's 12-hour self-hosted-PG deploy iteration (2026-05-03) surfaced compounding wfctl + workflow-plugin-digitalocean gaps that aren't surface bugs — they're missing semantic guarantees.
 
@@ -21,61 +21,88 @@ The 8 issues:
 | G | `protected: true` rejects all replace-required plans even when the operator wants the replace (e.g. region migration of an empty resource) | `--allow-protected-prune` (workflow PR #519) is all-or-nothing |
 | H | Each provider plugin has its own driver tests (CRUD + Diff); wfctl's behavior across these scenarios isn't tested per-provider | No shared conformance suite — providers can re-introduce any of A-G silently |
 
+### Latent bugs incidentally surfaced (review #1 Critical #2)
+
+The investigation revealed two latent bugs that the design must address explicitly:
+
+1. **Delete-via-Apply state leakage.** `platform.ComputePlan` emits `delete` actions today (`platform/differ.go:54-69`), but `DOProvider.Apply` has no `case "delete"` (`workflow-plugin-digitalocean/internal/provider.go:194-235`); deletes fall to `default: unknown action`. wfctl's apply path then unconditionally removes state for delete-named resources after Apply returns regardless of whether the cloud resource was actually deleted (`cmd/wfctl/infra_apply.go:435-440`). Today, a `wfctl infra apply` plan containing a delete silently leaves the cloud resource alive while pruning state. **W-3 fixes this by adding `case "delete"` to `wfctlhelpers.ApplyPlan`** — operators relying on the current (broken) behavior MUST be alerted via the W-3 PR description and conformance scenario `Scenario_DeleteActionInApplyInvokesDriverDelete`.
+
+2. **Plan-time gRPC cost regression risk in W-3.** Calling `provider.ResourceDriver(spec.Type).Diff(ctx, spec, current)` per existing resource adds N gRPC roundtrips per plan render (every external plugin uses `remoteResourceDriver` per `cmd/wfctl/deploy_providers.go:642-678`). For 50+ resources, plan render becomes slow + structpb-corruption-interactions with BC-2 (precedent design `2026-04-28-iac-plugin-review-design.md`) can silently regress W-3's whole purpose. Mitigation specified in W-3 below.
+
 ## Approach
 
 **Approach 3 (chosen): Refactor `IaCProvider` semantics in-place + ship the conformance suite as proof of correctness + provide codemod tooling so the per-plugin migration is mechanical.**
 
-Two alternatives considered + rejected:
+Two alternatives considered + rejected with explicit cost-benefit:
 
-- **Approach 1 — Surgical patches per issue.** Eight independent bugfix PRs, no cross-cutting refactor. Trade-off: fast individual reviews, but no enforced contract; a new provider can re-introduce any gap. **Rejected** — violates the user's "build benefits all providers" mandate.
-- **Approach 2 — New `IaCPlannerV2` interface alongside V1.** Existing providers keep V1; new ones implement V2. Trade-off: cleanest separation, but two interfaces to maintain; long tail of V1 edge-case divergence. **Rejected** — Go's lack of inheritance makes the V1/V2 adapter awkward; codemods make in-place refactor cheap enough that the cost-benefit favors a single canonical interface.
+### Approach 1 — Surgical patches per issue
+Eight independent bugfix PRs, no cross-cutting refactor.
 
-### What changes
+**Trade-off**: fast individual reviews; no enforced contract; a new provider can re-introduce any gap. **Rejected** — violates the user's "build benefits all providers" mandate.
+
+### Approach 2 — `IaCPlannerV2` interface alongside V1
+The user's second message named "iacplannerv2" — this design originally pivoted away too quickly. Re-examining now per review #1 Important finding:
+
+| Dimension | Approach 2 (V1+V2 dual) + codemods | Approach 3 (in-place) + codemods |
+|---|---|---|
+| Per-plugin PR count | 1 PR per plugin (V2 implementation) | 1 PR per plugin (codemod-applied) |
+| Wfctl-side maintenance | Two interfaces forever; adapter shim per gap | Single interface; helpers package |
+| Migration safety | Old plugins keep running V1 during migration | Flag-day for plugin upgrade — but codemod produces same correctness |
+| Conformance enforcement | Test V2 only; V1 plugins exempt → silent drift on legacy | Test the single interface; no exempt path |
+| User mandate "build benefits all providers" | Yes, IF all providers migrate; deferred V1 plugins skip the benefit | Yes, immediately for all 4 providers |
+| Long-tail edge cases | Bugs accumulate in V1 wrapper for plugins that don't migrate | None — single code path |
+
+**Why Approach 3 strictly dominates Approach 2 in this context**: codemods give the same migration ergonomics either way. The difference is what happens AFTER migration. Approach 2 leaves V1 supported indefinitely; we keep paying for the adapter layer + risk silent V1 divergence. Approach 3 deletes V1 once the codemod runs — single code path forever, conformance suite is the regression net. The user said "build these fixes the right way" + "core-dump is in no rush" → flag-day is acceptable.
+
+If the user later disagrees and wants V1/V2 dual, the in-place refactor is reversible by un-applying the codemods + restoring `provider.Plan()` body. Direction is auditable.
+
+### What changes (Approach 3 detail)
 
 The design has 9 components: 8 issue fixes + 1 cross-cutting test/migration infrastructure.
 
-#### 1. `IaCPlan` schema extension (issue A)
+#### W-1: `IaCPlan` schema extension + per-action diagnostic (issue A)
 
 Add to `interfaces/iac_state.go`:
 
 ```go
 type IaCPlan struct {
     // ... existing fields ...
+    DesiredHash       string  // existing — unchanged
+    SchemaVersion     int     // NEW — bumped when on-disk plan format changes (W-5 also bumps)
+    InputSnapshot     map[string]string  // NEW — env-var name → 16-hex-char (64-bit) sha256 prefix of value
+}
 
-    // ResolvedConfigHash is a SHA-256 of every resource's POST-substitution
-    // Config. Apply re-computes this and rejects if mismatched against the
-    // raw ConfigHash; the diagnostic prints which resources differ.
-    ResolvedConfigHash string `json:"resolved_config_hash,omitempty"`
-
-    // InputSnapshot records every env var name read during ${VAR} substitution
-    // along with a value-fingerprint (first 8 chars of sha256(value)). Apply
-    // re-computes inputs, compares fingerprints, and prints exact key diffs.
-    // Names alone aren't enough — same key with different value would mismatch
-    // hash but match name set.
-    InputSnapshot map[string]string `json:"input_snapshot,omitempty"`
+type PlanAction struct {
+    // ... existing fields ...
+    ResolvedConfigHash string  // NEW — per-action SHA-256 of POST-substitution Config
+                                // (was discussed as IaCPlan-level; per-action enables per-resource diagnostic)
 }
 ```
 
-Apply's "plan stale" diagnostic upgrades from:
+Apply re-computes per-action `ResolvedConfigHash` at apply-time using the SAME substitution pipeline used at plan-time. Mismatch detection:
+
 ```
-error: plan stale: config hash mismatch (run wfctl infra plan again)
-```
-to:
-```
-error: plan stale: 1 input changed since plan
-  STAGING_PG_PASSWORD: fingerprint a3f1c89d (plan) → b7e2406d (apply)
-  hint: ensure all env vars referenced by infra.yaml are exported to both
-        the Plan and Apply steps. Plan ran at 14:18Z without STAGING_PG_PASSWORD;
-        Apply at 14:20Z had it set.
+error: plan stale: 1 resource's resolved config differs since plan
+  resource: coredump-staging-app
+  hint: plan ran at 14:18Z without STAGING_PG_PASSWORD; apply at 14:20Z had it set
+        env vars referenced by this resource that changed:
+          STAGING_PG_PASSWORD: fingerprint a3f1c89d4e617923 (plan) → b7e2406d8c91c5f1 (apply)
+        rerun `wfctl infra plan` to refresh
 ```
 
-The fingerprint is 8 hex chars (32 bits), low collision risk for a typo-detection use case but no value-leak.
+**InputSnapshot fingerprint length** (review #1 Important #6 — was 8 hex / 32 bits, feasible reverse-lookup for low-entropy secrets like `random_hex 8` = 64 bits): bumped to **16 hex chars (64 bits preimage resistance)**. No real cost difference vs 8 chars. Plus:
 
-#### 2. `wfctl infra refresh-outputs` + cheap apply-time refresh (issues B, F)
+- Wfctl validate-time check: warn if any repo using `wfctl infra plan` lacks `**/plan.json` in `.gitignore`
+- `InputSnapshot` marked sensitive in state-store schema; logging filters apply
+- Plan output strips InputSnapshot from human-readable summary (only the diagnostic on mismatch shows fingerprints)
+
+#### W-2: `wfctl infra refresh-outputs` + cheap apply-time refresh (issues B, F)
 
 **Two mechanisms, intentionally complementary:**
 
-a. **Cheap apply-time refresh** — `runInfraApply` adds an `outputs-only refresh` pre-step before computing the plan. For each tracked resource: call `Read`, compare returned Outputs to `state.outputs`, write to state ONLY if any field differs (or new field appears). Cost: one API call per resource per apply. Eliminates the entire `outputsSchemaVersion` mechanism considered earlier — refresh is just-in-time, no schema version bookkeeping.
+a. **Cheap apply-time refresh** — `runInfraApply` adds an `outputs-only refresh` pre-step before computing the plan. For each tracked resource: call `Read`, compare returned Outputs to `state.outputs`, write to state ONLY if any field differs (or new field appears). Cost: one Read API call per tracked resource per apply.
+
+  **Cost analysis (review #1 Important):** for a 50-resource staging deploy, 50 cloud Read calls. DO API rate limit is 5000/hour/account → ~70 deploys/hour worth of headroom for refresh alone. AWS API limits per-service. Mitigation: **parallel Reads with bounded concurrency (default 8 concurrent, configurable via `WFCTL_REFRESH_CONCURRENCY`)**; per-Read 5s timeout; partial failure logs but doesn't block plan (state stays at last-known value for failed Reads).
 
 b. **Standalone command** for emergency state recovery — `wfctl infra refresh-outputs --env staging` does the same thing as (a) but as a one-shot. Useful when an operator needs to surface current Outputs to a downstream consumer (e.g. `wfctl infra outputs --module X.field`) without performing an apply.
 
@@ -83,104 +110,60 @@ Neither path invokes `Update` or `Replace`; both are read-only at the cloud leve
 
 Distinction from existing `wfctl infra apply --refresh` (workflow PR #519): that command is **drift reconciliation** — re-reads + tries to reconcile config drift via Update calls. Refresh-outputs is **read-only** — re-reads + persists Outputs only, never invokes Update/Replace.
 
-#### 3. `Replace` action: ComputePlan + ApplyHelper (issue C)
+#### W-3: `Replace` action + ComputePlan refactor + ApplyPlan helper (issue C)
 
 The single biggest refactor.
 
 **`platform.ComputePlan` calls Diff per existing resource:**
 
 ```go
-// Pseudocode
-for _, spec := range desired {
-    if cur, exists := currentMap[spec.Name]; !exists {
-        actions = append(actions, PlanAction{Action: "create", Resource: spec})
-    } else {
-        driver, err := provider.ResourceDriver(spec.Type)
-        if err != nil {
-            return nil, fmt.Errorf("plan %s: %w", spec.Name, err)
-        }
-        currentOut := outputsToResourceOutput(cur)
-        diff, err := driver.Diff(ctx, spec, currentOut)
-        if err != nil {
-            return nil, fmt.Errorf("diff %s: %w", spec.Name, err)
-        }
-        switch {
-        case !diff.NeedsUpdate && !diff.NeedsReplace:
-            // skip
-        case diff.NeedsReplace || hasForceNew(diff.Changes):
-            actions = append(actions, PlanAction{
-                Action: "replace", Resource: spec, Current: &cur, Changes: diff.Changes,
-            })
-        default:
-            actions = append(actions, PlanAction{
-                Action: "update", Resource: spec, Current: &cur, Changes: diff.Changes,
-            })
-        }
-    }
-}
+// New signature: takes provider so it can dispatch Diff to drivers
+func ComputePlan(ctx context.Context, provider IaCProvider, desired []ResourceSpec, current []ResourceState) (IaCPlan, error)
 ```
 
-Note `ComputePlan`'s signature gains a `provider IaCProvider` parameter (currently doesn't have one). Existing callers updated to thread the provider through.
+For each existing resource, `ComputePlan` calls `provider.ResourceDriver(spec.Type).Diff(ctx, spec, currentOut)`:
+- `!NeedsUpdate && !NeedsReplace` → skip
+- `NeedsReplace=true OR any FieldChange.ForceNew=true` → emit `Action="replace"` with Changes
+- otherwise → emit `Action="update"` with Changes
+
+**Plan-time gRPC cost mitigation** (review #1 Critical #1):
+- **Bounded-concurrency parallel Diff** (default 8 concurrent, configurable via `WFCTL_PLAN_DIFF_CONCURRENCY`). For 50 resources at 50ms gRPC roundtrip each = 312ms wall time at concurrency 8.
+- **Diff cache** keyed by `(plugin-version, resource-type, sha256(spec.Config), sha256(current.Outputs))`. Stored at `~/.cache/wfctl/diff/`. Cache hit skips gRPC roundtrip. For an operator iterating `wfctl infra plan` while authoring config, second run hits cache for unchanged resources.
+- **Conformance scenario `Scenario_DiffSurvivesGRPCRoundTrip`** (variant of precedent BC-2 / `Scenario_StructpbBoundary_DiffSurvivesRoundTrip`) — runs against actual `remoteResourceDriver` wrapper, NOT in-process driver. Catches structpb-corruption interactions where typed-slice Outputs at Create time arrive nil at in-process Diff after gRPC.
+- **Sequencing constraint**: W-3 gates on each plugin's BC-2 audit being closed (per precedent `2026-04-28-iac-plugin-review-design.md`). Plugins with open BC-2 findings cannot opt into the new ComputePlan path until their Outputs marshalling is verified gRPC-safe.
 
 **`wfctlhelpers.ApplyPlan(ctx, provider, plan)` shared helper:**
 
 ```go
 // New package: workflow/iac/wfctlhelpers/
-func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-    result := &interfaces.ApplyResult{PlanID: plan.ID}
-    for _, action := range plan.Actions {
-        d, err := p.ResourceDriver(action.Resource.Type)
-        if err != nil { result.AddError(action, err); continue }
-        var out *interfaces.ResourceOutput
-        switch action.Action {
-        case "create": out, err = d.Create(ctx, action.Resource)
-        case "update":
-            ref := refFromCurrent(action)
-            out, err = d.Update(ctx, ref, action.Resource)
-        case "replace":
-            // Delete-current-then-create-new. Wraps a state-checkpoint
-            // around each step so a mid-replace failure leaves state in a
-            // recoverable shape.
-            ref := refFromCurrent(action)
-            if err = d.Delete(ctx, ref); err != nil { result.AddError(action, err); continue }
-            result.RecordIntermediate(action, "deleted")
-            out, err = d.Create(ctx, action.Resource)
-            // If Create fails, state shows the resource as gone — operator
-            // can re-run apply to retry the Create only. The intermediate
-            // marker tells wfctl on next apply that this resource is in
-            // half-replaced state.
-        case "delete":
-            ref := refFromCurrent(action)
-            err = d.Delete(ctx, ref)
-        default:
-            err = fmt.Errorf("unknown action %q", action.Action)
-        }
-        if err != nil { result.AddError(action, err); continue }
-        if out != nil { result.Resources = append(result.Resources, *out) }
-    }
-    // Post-apply: propagate replaced resources' new IDs into still-referencing
-    // resources. If module B references coredump-staging-pg.private_ip and
-    // coredump-staging-pg was just replaced, B's secret fingerprint changes
-    // and B will plan as needing-update on next apply. We do NOT auto-update
-    // B in this same apply — that would violate the plan-was-reviewed
-    // invariant. The next plan/apply cycle picks it up.
-    return result, nil
-}
+func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error)
 ```
 
-**Provider implementations collapse**: `DOProvider.Apply` becomes:
-```go
-func (p *DOProvider) Apply(ctx context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-    return wfctlhelpers.ApplyPlan(ctx, p, plan)
-}
-```
-~60 lines → 3 lines. Same collapse for AWS/GCP/Azure providers.
+Handles all 4 actions:
+- `create` → `driver.Create(ctx, spec)`
+- `update` → `driver.Update(ctx, ref, spec)`
+- `replace` → `driver.Delete(ctx, ref)` then `driver.Create(ctx, spec)` with state checkpoint between (intermediate marker so a mid-replace failure leaves state recoverable)
+- `delete` → `driver.Delete(ctx, ref)` (the case absent in DOProvider today — see Latent Bugs above)
 
-**Replace ordering** (topological): `platform.ComputePlan` already does topo-sort for create/update (deps-first) and reverse-topo for delete (dependents-first). Replace inherits BOTH: dependents are deleted first (reverse-topo), then the target is replaced, then dependents are recreated (topo). This requires Replace to expand into a sub-plan: `[delete-dep1, delete-dep2, replace-target, create-dep1, create-dep2]`. The expansion happens in ComputePlan, surfaced as an indented sub-action list in the plan output for operator review.
+**Cascade replace + ProviderID propagation** (resolves review #1 Important #4 / author doubt #3):
 
-**Critical edge case — protected dependents.** If the target is protected and has a `--allow-replace` override but its dependents are also protected without overrides, the plan FAILS at plan time (not apply time). Operator must add overrides for every protected resource in the replace cascade.
+Replace expands into a sub-plan: `[delete-dep1, delete-dep2, replace-target, create-dep1, create-dep2]`. Topological + reverse-topological ordering already exists in `platform/differ.go`.
 
-#### 4. `Provider.ValidatePlan(plan) []Diagnostic` hook + R-A10 align rule (issue D)
+**Critical addition**: when `replace-target` Create completes, its new ProviderID writes to a per-apply substitution map (`replaceIDMap`). Subsequent dependent `create-depN` actions resolve `${MODULE.id}` references against this map AT APPLY TIME (not just plan time). The dependent's effective config differs from the plan's pre-computed config in ONE field (the parent's ID); we log a single-line WARN noting the auto-update and proceed.
+
+This is implemented as part of W-5's per-module substitution pipeline (it's the same mechanism — substituting late-binding values JIT). W-5's section spells out the implementation; this section names the dependency.
+
+**Bugs incidentally fixed by W-3** (must call out in W-3 PR description):
+- Delete-via-Apply state leakage (latent bug #1 above)
+- ForceNew fields silently downgraded to Update (issue C itself)
+
+**Conformance scenarios for W-3:**
+- `Scenario_NeedsReplaceTriggersReplaceAction` — driver Diff returns NeedsReplace=true → Plan emits Action=replace → Apply does Delete+Create
+- `Scenario_DeleteActionInApplyInvokesDriverDelete` — plan with delete action → Apply calls driver.Delete → cloud resource gone
+- `Scenario_DiffSurvivesGRPCRoundTrip` — typed Outputs at Create survive gRPC roundtrip without corruption at Diff time
+- `Scenario_ReplaceCascadePreservesDependents` — module A is replaced; module B (depends on A) is deleted first, A is replaced, B is recreated, B's resolved config sees A's NEW ProviderID via replaceIDMap
+
+#### W-4: `Provider.ValidatePlan` hook + R-A10 align rule (issue D)
 
 New optional method on `interfaces.IaCProvider`:
 
@@ -193,16 +176,25 @@ New optional method on `interfaces.IaCProvider`:
 ValidatePlan(plan *IaCPlan) []Diagnostic
 ```
 
-DO plugin implements it for known constraints:
-- App Platform `region: nyc` → `vpc_ref` must reference VPC with `region: nyc1`
-- App Platform `region: sfo` → `vpc_ref` must reference VPC with `region: sfo2 or sfo3`
-- (Future: managed_database `trusted_sources type=app` requires App in same project)
+`cmd/wfctl/infra_align_rules.go` gains `checkRA10_provider_validate_plan(ctx)` that calls `provider.ValidatePlan(plan)` for each provider and surfaces results as align findings.
 
-`cmd/wfctl/infra_align_rules.go` gains `checkRA10_provider_validate_plan(ctx)` that calls `provider.ValidatePlan(plan)` for each provider and surfaces results as align findings. Slots into the existing R-A1..R-A9 dispatch.
+**Cross-provider constraint examples** (review #1 Minor #2 — was DO-only):
 
-Why a hook on the provider rather than a manifest schema (DSL): the constraint matrix for each cloud is provider-specific knowledge. A schema would be premature abstraction. The provider knows its own rules; wfctl just asks.
+| Provider | Example constraint |
+|---|---|
+| DO | App Platform `region: nyc` → `vpc_ref` must reference VPC with `region: nyc1` (the bug we hit) |
+| DO | App Platform `region: sfo` → `vpc_ref` must be `sfo2` or `sfo3` |
+| AWS | Security Group rule referencing source SG ID — both must be in same VPC |
+| AWS | Subnet `availability_zone` must be in the parent VPC's region |
+| GCP | Regional load-balancer backend service requires regional NEG (not zonal/global) |
+| Azure | NSG attached to NIC must be in same region as the VNet |
+| Azure | Storage Account `account_kind: BlobStorage` only supports specific replication types |
 
-#### 5. Per-module infra_output secret resolution (issue E)
+These are illustrative; the design doesn't require shipping all of them in W-4. Each provider plugin ships its own ValidatePlan implementation per its known constraints. Conformance scenario `Scenario_CrossResourceConstraintRejection` is generic — provider supplies its own constraint-violating fixture.
+
+**Why a hook on the provider rather than a manifest schema (DSL):** the constraint matrix for each cloud is provider-specific knowledge. A schema would be premature abstraction. The provider knows its own rules; wfctl just asks. (Considered: extracting to DSL later if 4+ providers converge on common constraint patterns. Not now.)
+
+#### W-5: Per-module infra_output JIT secret resolution + ProviderID propagation (issue E + W-3 cascade)
 
 Today (`cmd/wfctl/infra.go:1111-1141`):
 
@@ -214,34 +206,68 @@ runInfraApply:
   syncInfraOutputSecrets   ← infra_output secrets resolved here, after apply
 ```
 
-Problem: a downstream module that references `${UPSTREAM_OUTPUT}` sees empty during its own create.
-
 After:
 
 ```
 runInfraApply:
-  Plan (against best-known state — infra_output secrets may be empty initially)
+  Plan (against best-known state — infra_output secrets may be empty initially;
+        plan.SchemaVersion bumped to mark JIT-style)
   ApplyPlan iterates plan.Actions:
     for each action:
-      resolveJITSecretsForModule(action.Resource)  ← resolves any infra_output
-                                                     secrets whose source modules
-                                                     have already been applied
-                                                     this run
-      execute action with newly-resolved secrets in env
+      resolveJITSubstitutions(action.Resource, replaceIDMap, syncedInfraOutputs)
+        ← resolves ${SECRET} for any infra_output where source module
+          has already been applied this run; AND resolves ${MODULE.id}
+          against replaceIDMap from W-3 cascade Replace
+      execute action with newly-resolved values in env
   Final syncInfraOutputSecrets (sync to GH for next run)
 ```
 
-Plan-time gets a "best effort" plan — it can't know an upstream resource's output yet. Apply-time fills in the gap as resources come up. This requires `IaCPlan.PerModuleSubstitutionDeferred bool` flag (default true for new plans) so apply knows to do JIT substitution.
+**Plan format compatibility** (review #1 Important #2 — rollback): `IaCPlan.SchemaVersion int` introduced in W-1 is bumped by W-5. Older wfctl reading a JIT-style plan rejects with:
 
-**Edge case — circular reference.** Module A's `${B_OUTPUT}` referencing Module B's `${A_OUTPUT}` is rejected at plan time (graph cycle in dependencies).
+```
+error: plan was generated by a newer wfctl (schema version 2);
+       this binary only supports schema version 1.
+       run `wfctl infra plan` with the current binary to regenerate.
+```
 
-#### 6. Per-resource `--allow-replace` flag (issue G)
+This makes W-5 rollback safe — operator gets a clear message instead of silent hash mismatch.
 
-Apply gains `--allow-replace=name1,name2,...` (multi-value, comma-separated). At plan-action evaluation:
+**Plan output operator audit** (review #1 Important): plan output annotates each action with substitution variables it WILL resolve at apply time:
+
+```
+plan: 3 actions
+  create coredump-staging-vpc (infra.vpc)
+  create coredump-staging-pg (infra.droplet)
+    will resolve at apply: ${STAGING_PG_PASSWORD} (infra-output)
+  update coredump-staging (infra.container_service)
+    will resolve at apply: ${STAGING_PG_HOST} ← from coredump-staging-pg.private_ip
+                           ${STAGING_VPC_UUID} ← from coredump-staging-vpc.id
+```
+
+Operator sees what apply will fill in, even though plan can't compute the values yet.
+
+**Mid-apply restart safety** (review #1 Minor #6): JIT resolution reads from STATE (which is written per-resource on success) and from `replaceIDMap` (in-memory, this-apply only). On restart after partial apply, state has the just-applied resource's outputs; JIT re-reads them. Naturally idempotent.
+
+**Edge case — circular reference**: Module A's `${B_OUTPUT}` referencing Module B's `${A_OUTPUT}` → rejected at plan time (cycle in resolution graph).
+
+**Partial-cascade discovery** (review #1 Important #3): ComputePlan batch-discovers ALL protected-dependent blockers in one pass (not one-at-a-time). Error message lists the entire cascade with copy-paste-ready flag value:
+
+```
+error: plan would require replacing 3 protected resources:
+  coredump-staging-vpc      (region nyc3 → nyc1)
+  coredump-staging-pg-data  (region nyc3 → nyc1)
+  coredump-staging-pg       (cascade dependent — vpc_uuid changed)
+to authorize, re-run with:
+  --allow-replace=coredump-staging-vpc,coredump-staging-pg-data,coredump-staging-pg
+```
+
+#### W-6: Per-resource `--allow-replace` flag (issue G)
+
+Apply gains `--allow-replace=name1,name2,...` (multi-value). At plan-action evaluation:
 
 ```go
-if action.Action == "replace" || action.Action == "delete" {
-    if isProtected(action.Resource) && !inAllowReplaceList(action.Resource.Name) {
+if (action.Action == "replace" || action.Action == "delete") && isProtected(action.Resource) {
+    if !inAllowReplaceList(action.Resource.Name) {
         return fmt.Errorf("resource %q is protected: true and would be %sd; pass --allow-replace=%s to override",
             action.Resource.Name, action.Action, action.Resource.Name)
     }
@@ -250,9 +276,11 @@ if action.Action == "replace" || action.Action == "delete" {
 
 Existing `--allow-protected-prune` (PR #519) becomes a synonym for "all protected resources are allowed to be pruned this apply" — equivalent to listing every protected resource in `--allow-replace`. The new flag is the recommended one for production (intent-explicit per resource).
 
-#### 7. Conformance suite at `workflow/iac/conformance/` (issue H)
+**Cross-team coordination story** (review #1 Important): for organizations where dependent resources have different owners, the plan output (W-5) prints the FULL cascade list including dependents. Owners coordinate by sharing the `--allow-replace=...` flag value before apply. This isn't a wfctl-enforced workflow (organizational); design only ensures the information needed for coordination is surfaced at plan time.
 
-New package `iac/conformance/` with:
+#### W-7: Conformance suite at `iac/conformance/` + smoke gate (issue H)
+
+New package `iac/conformance/` (NOT under `plugin/sdk/iaclint/` — see W-8 for package boundary fix):
 
 ```
 iac/conformance/
@@ -269,11 +297,9 @@ package conformance
 
 type Config struct {
     Provider func() interfaces.IaCProvider
-    // Whether to skip scenarios that require live cloud calls. Set true in
-    // PR-time CI (no creds); false in nightly + tag-time CI.
-    SkipCloudCalls bool
-    // Per-scenario opt-out for known-not-applicable cases (with reason).
-    SkipScenarios map[string]string
+    SkipScenarios map[string]string  // per-scenario opt-out with reason
+    SmokeOnly     bool                // PR-time fast subset
+    LiveCloud     bool                // permit cloud-required scenarios
 }
 
 func Run(t *testing.T, cfg Config)
@@ -286,37 +312,67 @@ Each provider's `_test.go`:
 func TestConformance(t *testing.T) {
     conformance.Run(t, conformance.Config{
         Provider: func() interfaces.IaCProvider { return digitalocean.NewProvider() },
-        SkipCloudCalls: testing.Short(),
+        SmokeOnly: testing.Short(),  // -short flag → smoke gate only
+        LiveCloud: os.Getenv("CONFORMANCE_LIVE_CLOUD") == "1",
     })
 }
 ```
 
-Initial scenario coverage (one scenario file each):
+**Smoke gate** (review #1 Important #8 — conformance bit-rot): one cloud-bound scenario per provider runs on every PR (not just nightly):
 
-1. **`Scenario_NeedsReplaceTriggersReplaceAction`** — desired spec with field marked ForceNew, plus existing state. Plan must emit Action=replace; Apply must do Delete+Create.
-2. **`Scenario_OutputsRefreshDetectsNewFields`** — state has Outputs from plugin v1; Read returns Outputs from plugin v2 with a new field. Apply's pre-step refresh must persist the new field without invoking Update.
-3. **`Scenario_PlanStaleDiagnostic`** — plan with env var X; apply with env var X changed. Error must name the changed key.
-4. **`Scenario_CrossResourceConstraintRejection`** — desired plan that violates a provider constraint (region mismatch). `ValidatePlan` must surface a fatal diagnostic; align must FAIL.
-5. **`Scenario_InfraOutputCrossModuleResolution`** — module B's config references module A's output. Plan applies A first → B sees A's output during its own create.
-6. **`Scenario_ProtectedReplaceWithoutOverride`** — protected resource with NeedsReplace; plan must FAIL with hint to use `--allow-replace=<name>`.
-7. **`Scenario_ProtectedReplaceWithOverride`** — same plan with `--allow-replace`; succeeds.
-8. **`Scenario_OutputsConsistencyAcrossReadCycles`** — Read-after-Create must return Outputs that match Create's Outputs (the consistency invariant — load-bearing for refresh-outputs).
-9. **`Scenario_ReplaceCascadePreservesDependents`** — module A is replaced; module B (depends on A) is deleted first, A is replaced, B is recreated, and B's resolved config sees A's new ID.
+| Provider | Smoke scenario | Resource | Cleanup |
+|---|---|---|---|
+| DO | `Scenario_NeedsReplaceTriggersReplaceAction` | `s-1vcpu-512mb-10gb` Droplet | `t.Cleanup` force-delete + verify |
+| AWS | (same pattern) | `t4g.nano` EC2 | `t.Cleanup` |
+| GCP | (same pattern) | `e2-micro` Compute | `t.Cleanup` |
+| Azure | (same pattern) | `Standard_B1ls` VM | `t.Cleanup` |
 
-The suite extends `plugin/sdk/iaclint/` (PR #512) static matchers with runtime scenarios. `iaclint` catches structural bugs at compile/test time; conformance catches behavioral gaps at integration time. Complementary.
+Constraints:
+- Per-PR ephemeral OIDC creds (not long-lived secrets in CI)
+- Resource lifetime ≤5 min
+- Force-cleanup in `t.Cleanup` even if test panics
+- Cost cap: ≤$0.01/PR/provider (~$0.10/PR all 4 providers)
+- Smoke runs ONLY on PRs touching the plugin OR `iac/`/`platform/` paths in workflow (not every workflow PR)
 
-**Cloud-call gating**: each scenario declares `RequiresCloud: bool`. Default CI run (PR-time) sets `SkipCloudCalls: true` → only runs scenarios that work with mock providers. Nightly CI runs the full suite with creds. This keeps PR-time cycles fast and avoids burning DO/AWS/GCP credits on every PR.
+Full conformance scenarios (run nightly):
 
-#### 8. Codemod tooling at `cmd/iaclint/codemod/` (cross-cutting migration)
+1. `Scenario_NeedsReplaceTriggersReplaceAction` (smoke gate; cloud-required)
+2. `Scenario_DeleteActionInApplyInvokesDriverDelete` (cloud-required)
+3. `Scenario_DiffSurvivesGRPCRoundTrip` (mock-only — exercises remoteResourceDriver wrapper)
+4. `Scenario_OutputsRefreshDetectsNewFields` (mock-only)
+5. `Scenario_PlanStaleDiagnostic` (mock-only)
+6. `Scenario_CrossResourceConstraintRejection` (mock-only — provider supplies fixture)
+7. `Scenario_InfraOutputCrossModuleResolution` (cloud-required for full coverage; mock variant for PR-time)
+8. `Scenario_ProtectedReplaceWithoutOverride` (mock-only)
+9. `Scenario_ProtectedReplaceWithOverride` (cloud-required)
+10. `Scenario_OutputsConsistencyAcrossReadCycles` (cloud-required — load-bearing for refresh-outputs)
+11. `Scenario_ReplaceCascadePreservesDependents` (cloud-required — most complex)
 
-User asked: "for the refactor/migration ... think about if there's codemods or similar we can introduce to help along migrations". Since Approach 3 mandates a per-plugin Plan/Apply refactor across 4 providers, codemod tooling is essential.
+#### W-8: Codemod tooling at `cmd/iac-codemod/` (cross-cutting migration)
 
-Built using `golang.org/x/tools/go/analysis/passes` framework with `-fix` mode (well-precedented Go ecosystem pattern):
+User asked: "for the refactor/migration ... think about if there's codemods or similar we can introduce". Per Approach 3, per-plugin Plan/Apply refactor across 4 providers needs mechanical tooling.
 
-- `cmd/iaclint/codemod/refactor-plan` — Detects `func (p *XProvider) Plan(...)` body matching the configHash compare pattern; replaces body with `return wfctlhelpers.Plan(ctx, p, desired, current)`.
-- `cmd/iaclint/codemod/refactor-apply` — Detects the create/update switch in `Apply`; replaces with `return wfctlhelpers.ApplyPlan(ctx, p, plan)`.
-- `cmd/iaclint/codemod/add-validate-plan` — Detects providers missing `ValidatePlan`; inserts no-op stub `func (p *XProvider) ValidatePlan(*interfaces.IaCPlan) []interfaces.Diagnostic { return nil }`.
-- `cmd/iaclint/codemod/lint` — Static checks (no rewrite): `AssertPlanDelegatesToHelper`, `AssertApplyDelegatesToHelper`, `AssertDiffSetsNeedsReplaceForForceNew`, `AssertProviderImplementsValidatePlan`. Extends PR #512's matchers.
+**Package boundary fix** (review #1 Important #7 + Minor #3):
+
+| Concern | Package | Boundary |
+|---|---|---|
+| Driver-level test helpers (existing, per BC-1..BC-8 from precedent) | `plugin/sdk/iaclint/` | unchanged |
+| Provider-level scenarios (this design) | `iac/conformance/` | NEW |
+| Code-rewrite CLI (this design) | `cmd/iac-codemod/` | NEW (NOT under iaclint) |
+| Source-code marker for codemod opt-out | `// wfctl:skip-plan-codemod` | NEW (clearly a codemod-tool concern) |
+
+`cmd/iac-codemod/` built using `golang.org/x/tools/go/analysis/passes` framework. Modes:
+
+- `cmd/iac-codemod/refactor-plan` — Detects `func (p *XProvider) Plan(...)` body matching the configHash compare pattern; replaces body with `return wfctlhelpers.Plan(ctx, p, desired, current)`.
+- `cmd/iac-codemod/refactor-apply` — Detects the create/update switch in `Apply`; replaces with `return wfctlhelpers.ApplyPlan(ctx, p, plan)`.
+- `cmd/iac-codemod/add-validate-plan` — Detects providers missing `ValidatePlan`; inserts no-op stub.
+- `cmd/iac-codemod/remove-plan` — REMOVES `Plan()` method from providers post-deprecation (see W-9 below). Default mode is dry-run report; `-fix` applies.
+- `cmd/iac-codemod/lint` — Static checks (no rewrite): `AssertPlanDelegatesToHelper`, `AssertApplyDelegatesToHelper`, `AssertDiffSetsNeedsReplaceForForceNew`, `AssertProviderImplementsValidatePlan`. Extends PR #512's iaclint matchers but in a new package.
+
+**Dry-run-by-default safety** (review #1 Critical #1 sub-finding): every codemod defaults to dry-run report mode; `-fix` flag opts into mutation. Reports show:
+- Per-file: which functions match the codemod pattern + would be rewritten
+- Per-file: which functions DON'T match (might be intentional divergence — flagged for review)
+- Recommended `// wfctl:skip-plan-codemod` markers for non-canonical providers
 
 **Workspace migration runner**:
 ```sh
@@ -324,47 +380,63 @@ Built using `golang.org/x/tools/go/analysis/passes` framework with `-fix` mode (
 migrate-providers:
     @for p in workflow-plugin-{aws,gcp,azure,digitalocean}; do \
       cd $$WORKSPACE/$$p && \
-      go run github.com/GoCodeAlone/workflow/cmd/iaclint/codemod refactor-plan -fix . && \
-      go run github.com/GoCodeAlone/workflow/cmd/iaclint/codemod refactor-apply -fix . && \
-      go run github.com/GoCodeAlone/workflow/cmd/iaclint/codemod add-validate-plan -fix . && \
-      go test -tags=conformance ./...; \
+      go run github.com/GoCodeAlone/workflow/cmd/iac-codemod refactor-plan -dry-run . | tee codemod-report.md && \
+      echo "Review codemod-report.md and add // wfctl:skip-plan-codemod to any opt-out functions, then re-run with -fix"; \
     done
 ```
 
-A maintainer runs this once across the workspace; each plugin gets a self-contained PR with the codemod-generated diff + conformance suite verification.
+Two-step (dry-run → review → -fix) avoids the silent-corruption risk surfaced in review #1 Critical #1.
 
-**Limitation**: codemods only handle the canonical pattern. Providers with idiosyncratic Plan/Apply (intentional divergence) are flagged for manual review by `lint`. Doc explicitly says: "if your provider has custom Plan/Apply for legitimate reasons, opt out by adding `// iaclint:skip-plan-codemod` above the function."
+#### W-9: Deprecate `IaCProvider.Plan()` (review #1 Important #5)
 
-### Sequencing
+Today `provider.Plan()` is dead code (no caller in `cmd/wfctl` or `platform`); wfctl exclusively uses `platform.ComputePlan`. After W-3, providers exclusively delegate Apply to `wfctlhelpers.ApplyPlan`.
 
-The 9 components can ship as 7 PRs in 2 repos plus per-plugin PRs:
+W-3 marks `IaCProvider.Plan()` as deprecated:
 
-| PR | Repo | Scope |
-|---|---|---|
-| W-1 | workflow | Add `IaCPlan.ResolvedConfigHash` + `InputSnapshot` schema; plan-stale diagnostic upgrade (#1) |
-| W-2 | workflow | `wfctl infra refresh-outputs` + cheap apply-time refresh (#2) |
-| W-3 | workflow | Replace action — `ComputePlan` calls Diff + emits replace; `wfctlhelpers.ApplyPlan` shared helper (#3) |
-| W-4 | workflow | `Provider.ValidatePlan` interface method + R-A10 align rule (#4) |
-| W-5 | workflow | Per-module infra_output JIT secret resolution (#5) |
-| W-6 | workflow | `--allow-replace=<names>` flag (#6) |
-| W-7 | workflow | `iac/conformance/` package + `cmd/iaclint/codemod/` (#7, #8) |
-| P-DO | workflow-plugin-digitalocean | Run codemod; collapse Plan/Apply; implement `ValidatePlan` for DO region constraints; add conformance test |
-| P-AWS, P-GCP, P-AZ | each plugin | Same codemod treatment |
-| C-1 | core-dump | Bump wfctl + plugin pins; revert tactical workarounds in deploy.yml; complete the staging-PG migration to `nyc1` (region was the original blocker) |
+```go
+// Deprecated: Plan was never called by wfctl; platform.ComputePlan is the
+// canonical planner. Existing implementations may be removed via
+// `cmd/iac-codemod/remove-plan`. Will be removed from IaCProvider in v0.21.
+Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error)
+```
 
-W-1..W-7 are sequential in workflow. P-* runs in parallel against the new contracts.
+The codemod `remove-plan` removes the method body from each plugin (after maintainer review). v0.21 removes `Plan()` from the interface entirely.
+
+**Why deprecate rather than delete in W-3**: gives plugin maintainers one minor-version cycle to migrate. Conformance suite tests the new contract (no `Plan()` call); existing plugins keep compiling.
+
+### Sequencing (review #1 Minor #4 corrected)
+
+Critical sequencing change: **W-7 (conformance) MUST land before any P-* PR** so the per-plugin codemod migration has scenarios to run against.
+
+| PR | Repo | Scope | Depends on |
+|---|---|---|---|
+| W-1 | workflow | `IaCPlan.InputSnapshot` + `PlanAction.ResolvedConfigHash` + `IaCPlan.SchemaVersion`; plan-stale diagnostic upgrade (#1) | — |
+| W-2 | workflow | `wfctl infra refresh-outputs` + cheap apply-time refresh (#2); bounded concurrency | W-1 |
+| W-3 | workflow | Replace action — `ComputePlan` calls Diff + emits replace; `wfctlhelpers.ApplyPlan` shared helper; delete-via-Apply fix; gRPC concurrency + cache (#3) | W-1, W-2; per-plugin BC-2 audit closed |
+| W-4 | workflow | `Provider.ValidatePlan` interface method + R-A10 align rule (#4) | W-3 |
+| W-5 | workflow | Per-module infra_output JIT secret resolution + ProviderID propagation (#5); SchemaVersion bump | W-3 |
+| W-6 | workflow | `--allow-replace=<names>` flag (#6); partial-cascade batch discovery | W-3 |
+| W-7 | workflow | `iac/conformance/` package + smoke gate (#7) | W-3, W-4, W-5, W-6 (so all scenarios are testable) |
+| W-8 | workflow | `cmd/iac-codemod/` (codemod tooling, dry-run default) | W-3, W-4 |
+| W-9 | workflow | `IaCProvider.Plan()` deprecation marker | W-3 |
+| P-DO, P-AWS, P-GCP, P-AZ | each plugin | Run codemod; collapse Plan/Apply; implement `ValidatePlan`; add conformance test | W-7 + W-8 |
+| C-1 | core-dump | Bump wfctl + plugin pins; revert tactical workarounds in deploy.yml; complete the staging-PG migration to `nyc1` (region was the original blocker) | P-DO |
+
+W-1..W-9 are workflow PRs (sequenced as shown). P-* runs after W-7 + W-8 in parallel. C-1 closes the core-dump deploy iteration.
 
 ### Tests
 
 Per the verification-per-change-class table in `writing-plans/SKILL.md`:
 
-- W-1 (schema extension + diagnostic): unit tests for hash compute + diagnostic format
-- W-2 (refresh): unit tests for state-write-only-on-diff invariant
-- W-3 (replace): conformance scenario `NeedsReplaceTriggersReplaceAction` + topology test
+- W-1 (schema extension + diagnostic): unit tests for hash compute + diagnostic format + InputSnapshot fingerprint length
+- W-2 (refresh): unit tests for state-write-only-on-diff invariant; concurrency test
+- W-3 (replace): conformance scenarios `NeedsReplaceTriggersReplaceAction`, `DeleteActionInApplyInvokesDriverDelete`, `DiffSurvivesGRPCRoundTrip`, `ReplaceCascadePreservesDependents`; topology test; concurrency stress test
 - W-4 (ValidatePlan): conformance scenario `CrossResourceConstraintRejection`
-- W-5 (JIT secret resolution): conformance scenario `InfraOutputCrossModuleResolution` + cycle-detect test
-- W-6 (--allow-replace): conformance scenarios `ProtectedReplaceWithoutOverride` + `ProtectedReplaceWithOverride`
-- W-7 (conformance + codemod): self-tests for each scenario using a fake provider; codemod golden-file tests
+- W-5 (JIT secret resolution): conformance scenario `InfraOutputCrossModuleResolution` + cycle-detect test + restart-mid-apply test + SchemaVersion-rollback rejection test
+- W-6 (--allow-replace): conformance scenarios `ProtectedReplaceWithoutOverride` + `ProtectedReplaceWithOverride`; partial-cascade batch test
+- W-7 (conformance + smoke gate): self-tests for each scenario using fake provider; smoke gate cost-cap test; cleanup-on-panic test
+- W-8 (codemod): golden-file tests for each codemod across multiple plugin shapes (canonical, with-batch-optimization, with-mock-injection); dry-run-output snapshot test
+- W-9 (deprecation): build-time test that `// Deprecated:` marker is present
 - P-* (per-plugin migration): conformance suite must pass; existing driver tests unchanged
 
 For runtime-affecting changes (W-2, W-3, W-5, P-*), the verification step includes runtime-launch-validation: build the plugin binary, run a representative apply against an ephemeral test provider, confirm exit 0 + expected state writes.
@@ -379,39 +451,39 @@ digraph iac_v2 {
         label="wfctl (workflow repo)";
         style=dashed;
         infra_apply [label="cmd/wfctl/infra_apply.go"];
-        platform_diff [label="platform/differ.go\n(ComputePlan)"];
+        platform_diff [label="platform/differ.go\n(ComputePlan + Diff dispatch)"];
         wfctlhelpers [label="iac/wfctlhelpers/\nApplyPlan, Plan"];
-        conformance [label="iac/conformance/\nscenarios"];
-        codemod [label="cmd/iaclint/codemod/"];
+        conformance [label="iac/conformance/\nscenarios + smoke gate"];
+        codemod [label="cmd/iac-codemod/"];
     }
 
     subgraph cluster_iface {
         label="interfaces/";
         style=dashed;
-        iac_provider [label="IaCProvider\n+ ValidatePlan"];
-        iac_state [label="IaCPlan\n+ ResolvedConfigHash\n+ InputSnapshot"];
+        iac_provider [label="IaCProvider\n+ ValidatePlan\n(Plan() deprecated)"];
+        iac_state [label="IaCPlan\n+ SchemaVersion\n+ InputSnapshot\nPlanAction\n+ ResolvedConfigHash"];
         iac_driver [label="ResourceDriver\n(unchanged)"];
     }
 
     subgraph cluster_plugin {
         label="provider plugins";
         style=dashed;
-        do_plugin [label="DO Provider\nPlan/Apply → wfctlhelpers"];
-        aws_plugin [label="AWS Provider\nPlan/Apply → wfctlhelpers"];
-        gcp_plugin [label="GCP Provider\nPlan/Apply → wfctlhelpers"];
+        do_plugin [label="DO Provider\nApply → wfctlhelpers"];
+        aws_plugin [label="AWS Provider\nApply → wfctlhelpers"];
+        gcp_plugin [label="GCP Provider\nApply → wfctlhelpers"];
         do_drivers [label="ResourceDrivers\n(VPC, Droplet, etc.)\nDiff sets NeedsReplace"];
     }
 
-    infra_apply -> platform_diff [label="compute"];
-    platform_diff -> iac_driver [label="Diff()"];
+    infra_apply -> platform_diff [label="compute (parallel Diff)"];
+    platform_diff -> iac_driver [label="Diff() per resource"];
     infra_apply -> wfctlhelpers [label="ApplyPlan"];
     wfctlhelpers -> iac_driver [label="Create/Update/Replace/Delete"];
     do_plugin -> wfctlhelpers;
     aws_plugin -> wfctlhelpers;
     gcp_plugin -> wfctlhelpers;
     do_plugin -> do_drivers;
-    conformance -> iac_provider [label="black-box test"];
-    codemod -> do_plugin [label="-fix"];
+    conformance -> iac_provider [label="black-box scenarios"];
+    codemod -> do_plugin [label="-dry-run / -fix"];
     codemod -> aws_plugin;
     codemod -> gcp_plugin;
     iac_provider -> infra_apply [label="ValidatePlan"];
@@ -421,55 +493,72 @@ digraph iac_v2 {
 
 ## Assumptions
 
-1. **Driver `Diff` is faithful** — providers correctly set `NeedsReplace` and `FieldChange.ForceNew` in their Diff implementations. **Falsity:** wfctl emits wrong action class; e.g. update when replace was needed. **Mitigation:** conformance scenario 1 + codemod lint `AssertDiffSetsNeedsReplaceForForceNew`. Existing `iaclint` (PR #512) already tests for some of this.
+1. **Driver `Diff` is faithful** — providers correctly set `NeedsReplace` and `FieldChange.ForceNew` in their Diff implementations. **Falsity:** wfctl emits wrong action class. **Mitigation:** conformance scenario `NeedsReplaceTriggersReplaceAction` + codemod lint `AssertDiffSetsNeedsReplaceForForceNew` + smoke gate runs on every relevant PR.
 
-2. **Driver `Read` is deterministic per resource** — calling Read twice on an unchanged resource returns identical Outputs. **Falsity:** state thrash on every refresh-outputs cycle; cheap apply-time refresh writes garbage. **Mitigation:** conformance scenario 8 (`OutputsConsistencyAcrossReadCycles`).
+2. **Driver `Read` is deterministic per resource** — calling Read twice on an unchanged resource returns identical Outputs. **Falsity:** state thrash on every refresh-outputs cycle. **Mitigation:** conformance scenario `OutputsConsistencyAcrossReadCycles`.
 
-3. **Plugin manifest is the right place for cross-resource constraints — REVISED to runtime hook.** Self-challenge surfaced that DSL was speculative YAGNI. Providers expose constraints via `ValidatePlan(plan) []Diagnostic`. **Falsity:** constraints can't be expressed for some provider class. **Mitigation:** the hook returns arbitrary diagnostics; providers can compute anything.
+3. **Cross-resource constraints expressible per-provider in Go** — DO/AWS/GCP/Azure can each express their constraint matrix in `ValidatePlan`. **Falsity:** some constraint requires cross-provider coordination (rare). **Mitigation:** ValidatePlan returns `[]Diagnostic` — generic; provider can compute anything. If 4+ providers converge on common patterns, extract DSL later.
 
-4. **`InputSnapshot` of `{name: sha256-prefix(value)}` doesn't leak secrets** — 8-char (32-bit) prefix has ~4B possible values; reverse-lookup is feasible only if the attacker has both the snapshot AND a candidate set of values to test. Diagnostic prints only the **key name**, never the fingerprint hex. Fingerprint is only used for internal compare. **Falsity:** if an attacker has the plan.json file (which they shouldn't — it's CI-internal), they could test guesses against the fingerprint. **Mitigation:** plan.json is treated as semi-sensitive (gitignored, not in build artifacts); short fingerprint reduces leak surface vs full hash.
+4. **`InputSnapshot` 16-hex (64-bit) fingerprint resists targeted reverse-lookup** — preimage attack on 64 bits requires 2^63 work expected. Even for low-entropy secrets the attacker would need the snapshot file AND a candidate value to verify. **Falsity:** a sophisticated targeted attacker with both inputs can verify a guess. **Mitigation:** plan.json marked sensitive; gitignore-check at validate time; logging filters strip InputSnapshot from traces.
 
-5. **Per-module JIT secret resolution doesn't break determinism** — secrets like `random_hex` are generated once + persisted; `infra_output` resolution reads from current state. JIT just changes WHEN, not WHAT. **Falsity:** a secret generator with mutating side effects could trigger the side effect at unexpected times. **Mitigation:** existing `secrets.generate` already has skip-if-exists semantics; per-module ordering doesn't bypass it.
+5. **Per-module JIT secret resolution + ProviderID propagation doesn't break determinism** — secrets resolved JIT either come from durable state (just-applied resource's outputs) or from the in-apply replaceIDMap (deterministic for this apply). **Falsity:** a non-deterministic Read could return different outputs across JIT calls. **Mitigation:** assumption #2 covers this.
 
-6. **Replace cascade order — delete-dependents → delete-target → create-target → create-dependents — is the right pattern**. Trade-off: brief unavailability of dependents during the replace cycle. **Falsity:** cascade orphans (dependent created with reference to old-and-now-deleted target). **Mitigation:** topological + reverse-topological sort already in `platform/differ.go`; conformance scenario 9 verifies dependent-recreated-with-new-ID.
+6. **Replace cascade order — delete-dependents → delete-target → replace-target → create-dependents — is the right pattern** for the workloads we deploy. Trade-off: brief unavailability of dependents during the replace cycle. **Falsity:** zero-downtime replace requires blue-green orchestration which this design doesn't address. **Mitigation:** documented limitation; out of scope for this design.
 
-7. **Conformance suite runs without cloud creds via mock providers** — most scenarios can use `iaclint` mock fixtures + scenario-specific fake driver implementations. Cloud-required scenarios opt in via `RequiresCloud: true`. **Falsity:** some scenarios genuinely need cloud (e.g. live region constraint validation). **Mitigation:** `Config.SkipCloudCalls` honored; nightly CI runs full suite with creds.
+7. **Conformance suite cloud-bound smoke gate is affordable** — ≤$0.01/PR/provider × 4 providers = ≤$0.04/PR. At 50 PRs/week = $2/week ≈ $100/year. **Falsity:** PR volume ramps 10x or providers add expensive smoke resources. **Mitigation:** smoke gate runs ONLY on PRs touching the plugin OR `iac/`/`platform/` paths; explicit cost cap config; revisit at the 10x-PR milestone.
 
-8. **Codemod can mechanically refactor canonical Plan/Apply switch statements** — providers with idiosyncratic Plan/Apply (intentional divergence) are flagged via `// iaclint:skip-plan-codemod`. **Falsity:** codemod silently corrupts a non-canonical provider. **Mitigation:** golden-file tests for codemod input/output across multiple known plugin shapes; lint flags "codemod would change this file" before -fix is applied.
+8. **Codemod can mechanically refactor canonical Plan/Apply switch statements** — providers with idiosyncratic Plan/Apply use `// wfctl:skip-plan-codemod` opt-out. Codemod default mode is dry-run report (review-then-fix), not silent mutation. **Falsity:** codemod misses an idiom and silently corrupts a non-canonical provider that didn't add the opt-out. **Mitigation:** dry-run default + per-file diff report + golden-file tests across multiple known plugin shapes.
 
-## Top doubts (for adversarial review to attack)
+9. **Existing plugins (DO, AWS, GCP, Azure) have closed BC-2 (structpb-boundary) audit before W-3 lands** — if a plugin's Outputs contain typed slices that corrupt across gRPC, in-process Diff sees nil and silently misclassifies. **Falsity:** a plugin's BC-2 audit is incomplete; W-3 makes the bug worse (now it affects plan classification, not just runtime). **Mitigation:** W-3 sequencing constraint — gates per-plugin migration on BC-2 audit closed for that plugin (per precedent design `2026-04-28-iac-plugin-review-design.md`).
 
-1. **Codemod scope limit unclear** — a provider with custom Plan/Apply that intentionally diverges (e.g. for batch-API optimization) might be silently broken. The `// iaclint:skip-plan-codemod` marker is a manual opt-out; what if the maintainer doesn't know to add it? The codemod should output a per-file dry-run report for review BEFORE applying.
+10. **AWS/GCP/Azure provider plugins are actively used or will be in foreseeable future** — if they're orphaned, the per-plugin PRs are wasted effort. **Falsity:** the migration becomes 4 PRs of refactor with no consumer. **Mitigation:** workflow has shipped these plugins (per Explore agent's report); even if not in production today, they're the obvious onboarding path for new clouds. Per-plugin PR cost is bounded (codemod-driven). If user signals "abandon AWS/GCP/Azure", reduce scope.
 
-2. **Conformance suite cloud-call gating risks bit-rot** — if PR-time CI skips cloud-required scenarios, those scenarios only run in nightly. Bugs landing between nightly cycles aren't caught at PR time. Mitigation idea: a single "smoke" cloud scenario per provider runs on every PR (using a per-PR-ephemeral resource); the rest opt out at PR time.
+## Top doubts (for adversarial review #2 to attack — review #1's doubts addressed above)
 
-3. **Replace-cascade dependent-update step assumes wfctl can compute new IDs into still-referencing resources before they fail** — but the current design creates dependents in a SECOND apply cycle (after the replace is committed to state), not in-line. This means there's a window where the App's `vpc_ref` points at the OLD VPC ID for one apply cycle. In practice this means an extra apply is needed to settle. Should we make replace-cascade dependent-recreation in-line with the same apply (single transaction)? That requires resolving secrets per-action, not per-module — possibly forcing the full secret pipeline rebuild.
+1. **Diff cache invalidation correctness** — keying by `(plugin-version, resource-type, sha256(spec.Config), sha256(current.Outputs))` should cover all inputs to Diff. But if a Diff implementation depends on an environment variable or a side-channel (e.g. cloud rate-limit-aware backoff that returns different DiffResult under load), cache returns stale. Mitigation: document Diff invariants in the conformance contract; scenario `Scenario_DiffPureFunction` could enforce.
+
+2. **`replaceIDMap` thread safety** — if W-3 parallel Diff and W-5 JIT substitution share state, the per-apply mutex needs to be explicit. Worth specifying in implementation but not load-bearing for design correctness.
+
+3. **Smoke gate failure rate from cloud flakes** — DO/AWS/GCP/Azure APIs occasionally return 5xx; the smoke gate could become a flaky PR-blocker. Mitigation: 2-attempt retry with exponential backoff in the smoke runner; fail only after both attempts.
 
 ## Rollback
 
-This design changes runtime semantics for every IaC apply (issue C is the largest behavior change). Rollback strategy:
+This design changes runtime semantics for every IaC apply (W-3 is the largest behavior change). Rollback strategy per PR:
 
-- W-1, W-2, W-4, W-6, W-7 are additive (new fields/methods/commands; no behavior change to existing code paths). Roll back by unmerging.
-- W-3 (Replace action) is the most invasive — rollback requires reverting `platform.ComputePlan` to no-Diff behavior + reverting plugin Apply switches. Plugin PRs (P-DO, etc.) depend on W-3 — must roll back together.
-- W-5 (per-module JIT secret resolution) changes apply ordering — rollback requires switching back to batch post-apply. Can be feature-flagged via `IaCPlan.PerModuleSubstitutionDeferred bool` (already in design); old-behavior plans set false.
+- **W-1, W-4, W-6, W-9** are additive (new fields/methods/commands; no behavior change to existing code paths). Roll back by unmerging.
+- **W-2** (apply-time refresh): pre-step is opt-in via `WFCTL_REFRESH_OUTPUTS` env var initially (default off in v0.20.x; default on in v0.21.x). Rollback = unset the env or revert.
+- **W-3** (Replace action) is the most invasive — rollback requires reverting `platform.ComputePlan` to no-Diff behavior + reverting plugin Apply switches. **Plugin PRs (P-DO, etc.) depend on W-3 — must roll back together.** `wfctlhelpers.ApplyPlan` stays available even during rollback so plugins can choose to migrate later.
+- **W-5** (per-module JIT) changes apply ordering AND plan format. Rollback = bump wfctl back to a binary with `IaCPlan.SchemaVersion <= N`. Older binary REJECTS newer plans with a clear "regenerate this plan" error (per W-1's SchemaVersion check) — operator regenerates plan with old binary, applies safely. Avoids silent hash mismatch corruption.
+- **W-7, W-8** are tooling — roll back by unmerging.
 
-For each W-PR, the PR description includes a "Rollback" section pointing at the inverse commit. Per-plugin P-PRs include a `wfctl plugin migrate-back-from-v0.X` codemod target.
+For each W-PR, the PR description includes a "Rollback" section pointing at the inverse commit + any required env-var or schema-version state. **Reverse codemod is NOT promised** (review #1 Minor #5) — plugin rollback is manual revert; conformance suite catches incorrect rollback.
 
-If we roll back W-3 mid-flight (e.g. after P-DO has merged but before P-AWS), the plugins pinned to the helper API would still work — `wfctlhelpers.ApplyPlan` is just a Go function; reverting its callers happens at the plugin level. Workflow keeps the helper available for late-mover plugins to migrate.
+For post-W-3 rollback in production: if a deploy detects unexpected replace behavior (e.g. operator missed `--allow-replace`), the operator can:
+1. Cancel apply mid-flight (signal handling per cmd/wfctl/main.go ctx cancellation)
+2. Re-run plan to confirm desired state
+3. Either add `--allow-replace` or revert the config change
+
+If the deploy completed an unintended replace, recovery requires manual cloud restoration (out of scope — same as today's accidental destroy).
 
 ## Out of scope
 
-- AWS/GCP/Azure provider feature parity beyond the conformance fix (the user explicitly said "core-dump is in no rush" but didn't ask for new resource types in non-DO providers; we ONLY refactor existing Plan/Apply).
+- AWS/GCP/Azure provider feature parity beyond the conformance fix (the user said "core-dump is in no rush" but didn't ask for new resource types in non-DO providers; we ONLY refactor existing Plan/Apply).
 - New resource types in DO plugin (those are downstream of this design).
-- DO Managed Postgres support for AGE (orthogonal — that's a DO product limitation).
-- Removing the `apply --refresh` flag (workflow PR #519). It's complementary; refresh-outputs is read-only, apply --refresh is drift reconciliation. Both stay.
+- DO Managed Postgres support for AGE (orthogonal — DO product limitation).
+- Removing `apply --refresh` flag (workflow PR #519). Complementary; refresh-outputs is read-only, apply --refresh is drift reconciliation. Both stay.
+- Zero-downtime replace orchestration (blue-green-style); current design has dependent unavailability window during cascade replace.
+- Cross-team protected-replace coordination as a wfctl-enforced workflow; design only ensures the cascade information is surfaced at plan time.
 
 ## Decision record
 
-This design is a candidate for ADR (Architecture Decision Record) per `recording-decisions/SKILL.md` because it represents:
+This design is a candidate for ADR (Architecture Decision Record) per `recording-decisions/SKILL.md`:
 
 - Divergence from precedent (current ComputePlan never calls Diff)
-- Non-trivial trade-off between ≥2 plausible approaches (Approach 1 surgical patches vs Approach 3 in-place refactor)
-- Cross-skill structural change (introduces conformance suite as a new test class)
+- Non-trivial trade-off between ≥3 plausible approaches (Approach 1 surgical patches, Approach 2 V1+V2 dual, Approach 3 in-place refactor — explicitly compared in Approach section)
+- Cross-skill structural change (introduces conformance suite as a new test class; deprecates an interface method)
 
-ADR will be added at `decisions/<NNNN>-iac-conformance-and-replace.md` in a follow-up commit if this design passes adversarial review.
+ADR added at `decisions/<NNNN>-iac-conformance-and-replace.md` in the same commit as the writing-plans handoff.
+
+## Changelog
+
+- **Revision 1 (2026-05-03)**: Addresses adversarial review #1 — 2 Critical (W-3 gRPC cost + delete-via-Apply latent bug), 8 Important (Approach 2 cost-benefit, plan-format-version, partial-cascade discovery, ProviderID cascade propagation, Plan() deprecation, InputSnapshot fingerprint length, package boundaries, conformance smoke gate), 6 Minor (terminology, ValidatePlan examples, codemod marker, sequencing, reverse codemod scope, JIT restart). Added W-9 (Plan() deprecation). Renamed `cmd/iaclint/codemod/` → `cmd/iac-codemod/`. Bumped InputSnapshot fingerprint to 16 hex / 64 bits. Made codemod default mode dry-run.
