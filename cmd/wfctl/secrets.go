@@ -16,6 +16,10 @@ func runSecrets(args []string) error {
 		return runSecretsGet(args[1:])
 	case "set":
 		return runSecretsSet(args[1:])
+	case "delete":
+		return runSecretsDelete(args[1:])
+	case "export":
+		return runSecretsExport(args[1:])
 	case "list":
 		return runSecretsList(args[1:])
 	case "validate":

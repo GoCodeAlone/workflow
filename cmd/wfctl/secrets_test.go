@@ -301,3 +301,62 @@ func TestSecretsDispatch_Get(t *testing.T) {
 		t.Error("expected error from get with no name")
 	}
 }
+
+func TestSecretsDelete_Idempotent(t *testing.T) {
+	// Deleting a key that does not exist must succeed (idempotent).
+	err := runSecretsDelete([]string{"--provider", "env", "--service", "t", "NONEXISTENT_KEY"})
+	if err != nil {
+		t.Errorf("expected no error on missing key, got %v", err)
+	}
+}
+
+func TestSecretsDelete_SetThenDelete(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TDEL_KEY") })
+	if err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "--service", "t", "DEL_KEY"},
+		strings.NewReader("to-delete\n"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSecretsDelete([]string{"--provider", "env", "--service", "t", "DEL_KEY"}); err != nil {
+		t.Fatal(err)
+	}
+	// Value should no longer be retrievable.
+	var buf bytes.Buffer
+	err := runSecretsGetWithWriter([]string{"--provider", "env", "--service", "t", "DEL_KEY"}, &buf)
+	if err == nil {
+		t.Error("expected error getting deleted key, got nil")
+	}
+}
+
+func TestSecretsExport_DotenvFormat(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TK1"); os.Unsetenv("TK2") })
+	if err := runSecretsSetWithReader([]string{"--provider", "env", "--service", "t", "K1"}, strings.NewReader("v1\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSecretsSetWithReader([]string{"--provider", "env", "--service", "t", "K2"}, strings.NewReader("v2\n")); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := runSecretsExportWithWriter([]string{"--provider", "env", "--service", "t", "--format", "dotenv"}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "K1=v1") || !strings.Contains(out, "K2=v2") {
+		t.Errorf("missing keys in dotenv output:\n%s", out)
+	}
+}
+
+func TestSecretsExport_ShellExportFormat(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TK1") })
+	if err := runSecretsSetWithReader([]string{"--provider", "env", "--service", "t", "K1"}, strings.NewReader("v1\n")); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := runSecretsExportWithWriter([]string{"--provider", "env", "--service", "t", "--format", "export"}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `export TK1="v1"`) {
+		t.Errorf("missing export line:\n%s", buf.String())
+	}
+}
