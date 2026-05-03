@@ -18,8 +18,9 @@ import (
 //	  hint: ensure all env vars referenced by infra.yaml are exported to both Plan and Apply steps
 //
 // Drift entries are sorted by Name for deterministic output. An empty drift
-// report yields the singular line "plan stale: 0 input(s) changed since plan"
-// — callers should avoid invoking the formatter when no drift exists.
+// report yields the singular header line "plan stale: 0 input(s) changed since
+// plan" with no trailing hint — callers should avoid invoking the formatter
+// when no drift exists, but if they do the output stays minimal.
 func FormatStaleError(drift []interfaces.DriftEntry) string {
 	sorted := make([]interfaces.DriftEntry, len(drift))
 	copy(sorted, drift)
@@ -30,6 +31,8 @@ func FormatStaleError(drift []interfaces.DriftEntry) string {
 	for _, d := range sorted {
 		fmt.Fprintf(&b, "  %s: fingerprint %s (plan) → %s (apply)\n", d.Name, d.PlanFingerprint, d.ApplyFingerprint)
 	}
-	b.WriteString("  hint: ensure all env vars referenced by infra.yaml are exported to both Plan and Apply steps")
+	if len(sorted) > 0 {
+		b.WriteString("  hint: ensure all env vars referenced by infra.yaml are exported to both Plan and Apply steps")
+	}
 	return b.String()
 }
