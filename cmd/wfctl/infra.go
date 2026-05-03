@@ -228,6 +228,11 @@ func runInfraPlan(args []string) error {
 			return fmt.Errorf("write plan: %w", err)
 		}
 		fmt.Printf("\nPlan saved to %s\n", *output)
+		// Plan files carry semi-sensitive content (env-var fingerprints,
+		// resolved configs); warn the operator when none of the reachable
+		// .gitignore files cover the output path. Silent when the directory
+		// is not under a tracked repo (no .gitignore present).
+		warnIfPlanNotGitignored(os.Stderr, *output)
 	}
 
 	return nil
