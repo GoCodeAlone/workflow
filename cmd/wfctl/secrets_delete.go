@@ -51,7 +51,7 @@ func runSecretsDelete(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := provider.Delete(ctx, name); err != nil {
+	if err := provider.Delete(ctx, name); err != nil && !errors.Is(err, secrets.ErrNotFound) {
 		return fmt.Errorf("delete secret %s: %w", name, err)
 	}
 	fmt.Printf("deleted %s\n", name)
