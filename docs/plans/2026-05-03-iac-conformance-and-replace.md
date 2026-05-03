@@ -15,12 +15,12 @@
 ## Scope Manifest
 
 **PR Count:** 12
-**Tasks:** 71 (counting T3.6a–f as 6 separate tasks and T7.2–T7.12 as 11 scenario tasks; rev5 net: rev3=72; +T3.1.5 (formerly T3.0.5; T1.5 split into W-1 portion + W-3a portion); +T3.0.4 (NEW field declarations); −T9.1 + −T9.2 (rev4 W-9 ProviderPlanner drop); = 71)
+**Tasks:** 72 (counting T3.6a–f as 6 separate tasks and T7.2–T7.12 as 11 scenario tasks). rev9 — corrected per cycle-8 Critical 3: prior rev5-rev8 claim of 71 was arithmetically wrong (72 + T3.1.5 + T3.0.4 - T9.1 - T9.2 = 72 + 1 + 1 - 1 - 1 = 72, not 71; rev5 changelog dropped T9.1+T9.2 but T9.3 was promoted to T9.1, so the W-9 net is -1 not -2). Verified by counting `^### Task T` headings (62 visible) + the T7.2-T7.12 expansion (+10 implicit) = 72.
 
 **Revision history:**
 - rev1 (commit 9ea390b) — initial draft, FAILED plan-phase adversarial review (3 Critical + 7 Important + 5 Minor)
 - rev2 (commit b29b297) — addressed cycle-1 findings; FAILED cycle-2 review with 3 new Critical + 7 Important
-- rev3 (this revision) — addresses cycle-2 findings (user override unlocked unbounded revision per "keep up autonomously … take as many review/correction cycles as needed"). Specifically:
+- rev3 — addresses cycle-2 findings (user override unlocked unbounded revision per "keep up autonomously … take as many review/correction cycles as needed"). Specifically:
   - **W-3 split into W-3a (foundation: T3.0, T3.1–T3.5) + W-3b (refactor + dispatch: T3.6a–f, T3.7, T3.9, T3.10)** — addresses 16-task PR-size finding; W-3a ships zero runtime change so reviewer cost is bounded.
   - **T3.6a no longer creates a skipped TDD harness** — sub-task only changes the function signature + updates in-package tests. The new failing TDD test (Replace emission) is co-committed with the implementation in T3.6e (clean red→green in one commit). No `t.Skip("dispatch lands later")` ever lands in main.
   - **W-9 sequenced strictly after W-4** in the dependency graph — both modify `interfaces/iac_provider.go` (W-4 adds `ProviderValidator`, W-9 adds `ProviderPlanner`); strict ordering eliminates the merge-conflict race.
@@ -50,7 +50,7 @@
   - **Minor fixes:**
     - **T9.3 trigger gains `paths` filter** — runs only on IaC-touching PRs, saves ~5min on doc-only PRs.
     - **T9.3 commit message + rollback note minor wording fixed** per cycle-3 minor finding.
-- rev5 (this revision) — addresses cycle-4 findings:
+- rev5 — addresses cycle-4 findings:
   - **Critical fixes:**
     - `envProviderTolerantOfUnset` invocation bug fixed: factory is now CALLED (`envProviderTolerantOfUnset(plan.InputSnapshot)`) returning the closure. New `inputsnapshot.PreservedFingerprint` constant added to `iac/inputsnapshot/snapshot.go` (T1.2). `ComputeDrift` (T1.5) special-cases keys whose applySnap fingerprint equals `PreservedFingerprint` (skips drift detection). Cross-function contract documented at all 3 call sites (T1.2 closure, T1.5 ComputeDrift, T3.1.5 postcondition).
     - rev4 changelog line 41 contradiction with task content fixed. The actual rev5 implementation: T1.1 declares only IaCPlan + PlanAction fields + the `DriftEntry` type. ApplyResult field additions move to W-3a: T3.0.4 (NEW) declares `InitialInputSnapshot` + `InputDriftReport`; T3.4 declares `ReplaceIDMap` (in same commit that populates it). No "field declared in W-1 but populated in W-3a" surface area.
@@ -64,13 +64,13 @@
     - T7.14 BOTH-labels dedup gains operator runbook note: do not remove `auto-filed-leak` label during triage; close the issue instead.
     - T7.13 YAML gains inline comment explaining `actions/cache@v4` post-step write-back semantics.
   - **Minor fixes:**
-    - rev4 changelog grouped by Critical/Important/Minor (this revision).
+    - rev4 changelog grouped by Critical/Important/Minor (this rev7 sub-block; rev4 itself had a flat list).
     - T3.1.5 (formerly T3.0.5) intro cross-references T1.5 (W-1) for the persisted-plan-path counterpart.
     - T3.6e rollback wording de-magicked: explains commit-stack semantics instead of "PERSISTS across the revert."
     - Scope manifest task count recomputed: 71 tasks (rev3 was 72; rev4 split T1.5 into T1.5+T3.0.5 = +1; W-9 dropped T9.1+T9.2 = -2; rev5 adds T3.0.4 = +1; net: 72-1=71).
     - Revision history count format unified ("3C+7I+5M" shorthand).
     - All `T9.3` references swept to `T9.1` (rev4 renumber).
-- rev6 (this revision) — addresses cycle-5 findings:
+- rev6 — addresses cycle-5 findings:
   - **Critical fixes:**
     - **ADR relocated to `docs/adr/006-providerplanner-deferred-to-first-consumer.md`** with repo-native Nygard-3 format (`# ADR NNN: Title` + `## Status` / `## Context` / `## Decision` / `## Consequences`). Verified: `docs/adr/` exists in workflow repo with 5 prior ADRs (`001-yaml-driven-config.md` through `005-field-contracts.md`); the next free number is `006`. The rev5 location (`decisions/0001-...`) was the `recording-decisions` skill default and conflicted with repo precedent.
     - **ADR `Decided by` attribution corrected to honest provenance**: `Decided by: Claude (autonomous-pipeline rev3-rev6; user did not explicitly approve — open question, see plan §W-9 § "Pending user ratification")`. Added `Status: Provisional — awaiting user ratification` until the user explicitly approves or rejects on next interaction. The cycle-5 reviewer correctly caught that rev5 ghost-wrote the user's name on a contested decision.
@@ -88,7 +88,7 @@
     - T3.4 commit message trimmed to ≤72 chars: `feat(iac): doReplace populates ApplyResult.ReplaceIDMap`.
     - T7.13 cache YAML inline comment specifies the cache path explicitly.
     - "T9.3 references swept" wording clarified to "active T9.3 references swept; historical changelog references retained".
-- rev7 (this revision) — addresses cycle-6 findings:
+- rev7 — addresses cycle-6 findings:
   - **Critical fixes:**
     - Added top-level `## Open Questions` section after Scope Manifest with the ProviderPlanner-deferral ratification ask. ADR cross-reference (`See plan § Open Questions § "ProviderPlanner deferral"`) now points at a section that exists. User encounters the ratification question at the top of the plan.
     - Swept all 3 stale `decisions/0001-...` references (W-9 intro, TP1 Step 4 implementer instruction, Final Verification cross-PR note) to `docs/adr/006-...`. TP1 instruction additionally rewritten to teach the implementer the repo-native ADR format (`docs/adr/NNN-...md`, Nygard-3) instead of the skill default. Verified by post-sweep `grep -n "decisions/0001\|decisions/<NNNN>"` returning only changelog/historical references.
@@ -104,7 +104,7 @@
     - rev7 placeholder dropped (matches rev6's rev6-placeholder removal).
     - rev4 changelog line 41 wording rewritten to describe rev4 actual delivery, not later-revision intent.
   - **Process fix (rev7 — closes the recurrent sweep-incompleteness defect class):** every rename/relocate from rev7 onward MUST run `grep -n "<old form>"` over the file before commit; every match either updated or explicitly tagged as historical/changelog. The cycle-6 reviewer observed this defect class is now 3 cycles deep (rev3 sentinel rename incomplete; rev5 ADR path incomplete; rev6 ADR cross-references incomplete); rev7 adopts the discipline + documents it.
-- rev8 (this revision) — addresses cycle-7 findings:
+- rev8 — addresses cycle-7 findings:
   - **Critical fixes:**
     - **ADR Status returned to bare `Accepted`** per repo precedent (all 5 prior ADRs use the bare token). Provenance + ratification cross-reference moved to a `**Provenance:**` line in the Context section. Cycle-7 caught that rev7's parenthetical-extended Status broke bare-Accepted tooling compatibility despite the rev7 changelog claiming otherwise; rev8 actually realizes cycle-6 Option (b)'s intent.
     - **`unsetFingerprintPlaceholder` constant declaration hoisted into T1.5** (where the test references it). T1.5 Files section extended to list `iac/inputsnapshot/compute_drift.go` (Create) + `iac/inputsnapshot/compute_drift_test.go` (Create). T3.1.5's body re-states the code block for reading-flow context but the canonical declaration is now in T1.5. Closes cycle-7 Critical 2.
@@ -115,8 +115,18 @@
     - W-3a rebase strategy: workspace-memory file reference replaced with inline summary of the rule (`git pull --ff-only origin <parent-branch>` before each commit + additive-only conflict resolution guidance).
     - rev7 process discipline elevated from changelog footnote to first-class Task Conventions line. Extended to cover numerical-claim sweeps + Files-section-vs-code-block consistency + declaration-site-vs-reference-site placement.
   - **Minor fixes:**
-    - Open Questions section number `### 1.` dropped (single-item section doesn't need numbering).
-    - ADR Context section deduplicated (rev7 left two competing `## Context` blocks; rev8 keeps the one with the Provenance line).
+    - (no minor fixes verified for rev8; cycle-8 caught two false-defect claims that prior reviewers had flagged but that did not actually exist in rev7. rev9 removes those claims rather than perpetuating them.)
+- rev9 (this revision) — addresses cycle-8 findings:
+  - **Critical fixes:**
+    - Open Questions § Default — removed phantom "(downstream) C-1" parenthetical. The dependency graph at the bottom of this plan explicitly shows W-9 on a parallel branch with no `W-9 → C-1` edge; C-1 is gated on P-DO only. Only W-9 itself waits at the gate.
+    - Removed fabricated "two competing Context blocks" Minor changelog claim (rev8 invented a defect that didn't exist in rev7; cycle-8 verified via `git show 791494a`).
+    - Task count corrected from 71 to 72. The arithmetic was wrong since rev5 (the rev4 W-9 ProviderPlanner removal was -1 net, not -2, because T9.3 promoted to T9.1 in the same revision).
+  - **Important fixes:**
+    - Open Questions Mechanism sub-section added: specifies HOW the halt happens (executing-plans agent reads the section + halts before opening W-9 PR), HOW the user resumes (edit + commit checkbox; PR-comment fallback), HOW the checkbox UX actually surfaces (committed-file checkboxes are visual only; canonical surface is edit+commit).
+    - T3.1.5 dual-code-block risk addressed: T3.1.5 body now cross-references T1.5 for the `ComputeDrift` + `unsetFingerprintPlaceholder` declarations instead of re-stating the code block.
+    - rev7 changelog `Decided by:` reference left intact as historical (the cycle-8 reviewer noted it's stale post-rev8 collapse, but historical changelogs describe truth-at-that-revision; rewriting them rewrites history).
+    - 5 stale "(this revision)" markers swept (lines 23, 53, 67, 73, 91); only the rev9 line retains the marker.
+  - **Process observation (cycle-8):** the reviewer correctly identified that meta-content (changelog-about-changelog, sweep-rules-about-sweep-rules) is now the dominant defect surface. rev9 deliberately keeps the changelog terse + adds nothing speculative. Future revisions should follow suit: one-line bullets per finding addressed, no narrative meta-claims that need their own verification.
 
 **Out of scope:**
 - AWS / GCP / Azure plugin migrations (deferred to plugin-activation work; advisory codemod-lint reports filed as issues only)
@@ -165,7 +175,12 @@ The autonomous design pipeline (rev1–rev8) made one decision that requires exp
 - [ ] **Ratify the deferral** — W-9 ships as-is (CI gate only; ProviderPlanner deferred to first concrete consumer). ADR 006 stays `Accepted`.
 - [ ] **Override** — W-9 expands to include the ProviderPlanner interface definition + a TDD test verifying type-assertion compiles. File ADR 007 superseding ADR 006. Estimated cost: +30 min plan revision + ~1 hour implementation in W-9.
 
-**Default if no user input by W-9 pre-merge gate (rev8 — corrected per cycle-7 Critical 3):** the autonomous-pipeline HALTS at W-9's pre-merge gate and surfaces the ratification ask via PR comment; W-9 does NOT merge until the user replies with "ratified" or "override". This default aligns with the user's "don't defer fixes" mandate (rev6's "ratify-by-silence" default contradicted that mandate; cycle-7 review caught it). Earlier PRs in the dependency graph (W-1 → … → W-8, P-DO is gated on W-7+W-8 only) are NOT blocked by this open question — they ship per the autonomous pipeline. W-9 + (downstream) C-1 wait at the gate.
+**Default if no user input by W-9 pre-merge gate (rev8/rev9 — corrected per cycle-7 + cycle-8):** the autonomous-pipeline HALTS at W-9's pre-merge gate and surfaces the ratification ask via PR comment; W-9 does NOT merge until the user replies with "ratified" or "override". This default aligns with the user's "don't defer fixes" mandate (rev6's "ratify-by-silence" default contradicted that mandate; cycle-7 review caught it). Earlier PRs in the dependency graph (W-1 → … → W-8 → P-DO → C-1) are NOT blocked by this open question — they ship per the autonomous pipeline. **Only W-9 itself waits at the gate** (rev9 — addresses cycle-8 Critical 1; the dependency graph at the bottom of this plan explicitly shows W-9 on a parallel branch with no downstream edge, so C-1 is gated on P-DO only, not W-9).
+
+**Mechanism (rev9 — addresses cycle-8 Important on operational specifics):**
+- **Halt:** the executing-plans agent reads `## Open Questions` immediately before opening the W-9 PR. If neither checkbox in the ratification ask is checked, the agent does NOT push the W-9 branch + does NOT open the PR; instead it posts a status update to the conversation surface (the `team-lead` agent in subagent-driven-development mode, or the user directly in manual mode) with the ratification ask + the ADR 006 link.
+- **Resume signal:** the user edits this plan file to check exactly one of the ratification checkboxes (under § Open Questions § "ProviderPlanner deferral") and commits the change. The executing-plans agent re-reads the section on its next iteration; if `[x] Ratify` is checked, W-9 proceeds as-spec; if `[x] Override` is checked, the agent reverts to rev3's W-9 spec (ProviderPlanner interface definition + TDD test) before pushing.
+- **Checkbox UX (rev9 — addresses cycle-8 Important on click-surface):** the checkboxes in this committed plan file are visual signaling only (GitHub renders them but does not actuate them). User ratifies by **editing the file + committing** (this is the canonical surface). The PR comment alternative ("reply 'ratified' or 'override' on W-9 PR") is a fallback if the user prefers PR-thread interaction; the agent watches both surfaces and accepts whichever signals first.
 
 ---
 
@@ -1443,47 +1458,7 @@ func NewTolerantEnvProvider(planSnapshot map[string]string) func(name string) (s
 }
 ```
 
-And T1.5's `ComputeDrift` MUST honor the sentinel (rev5 cross-function contract):
-```go
-// iac/inputsnapshot/compute_drift.go (T1.5 — UPDATED in rev5/rev6/rev7 to
-// honor preservedFingerprint AND to use a named constant for the unset-
-// placeholder string so tests don't couple to a literal.)
-
-// unsetFingerprintPlaceholder is the in-package constant displayed in the
-// ApplyFingerprint field when the var was set at plan time but is missing
-// entirely from the applySnap (operator-facing "var was unset since plan").
-// Tests reference the constant via in-package access. UNEXPORTED to keep
-// the placeholder a private contract between ComputeDrift + FormatStaleError.
-const unsetFingerprintPlaceholder = "(unset)"
-
-func ComputeDrift(planSnap, applySnap map[string]string) []interfaces.DriftEntry {
-    var drift []interfaces.DriftEntry
-    for name, planFP := range planSnap {
-        applyFP, present := applySnap[name]
-        if !present {
-            // Key dropped from applySnap entirely — could be a missing env or
-            // a closure that returned (_, false). Either way, treat as drift
-            // (operator-facing "var was set but unset since" is genuine drift
-            // for the persisted-`--plan` path). The in-process path uses
-            // NewTolerantEnvProvider which returns preservedFingerprint
-            // instead of dropping the key — see below.
-            drift = append(drift, interfaces.DriftEntry{
-                Name: name, PlanFingerprint: planFP, ApplyFingerprint: unsetFingerprintPlaceholder,
-            })
-            continue
-        }
-        if applyFP == preservedFingerprint {
-            continue // Sentinel — sub-action cleanup unset; not real drift.
-        }
-        if applyFP != planFP {
-            drift = append(drift, interfaces.DriftEntry{
-                Name: name, PlanFingerprint: planFP, ApplyFingerprint: applyFP,
-            })
-        }
-    }
-    return drift
-}
-```
+And T1.5's `ComputeDrift` MUST honor the sentinel — see **T1.5 Step 3 §3** for the canonical declaration of `unsetFingerprintPlaceholder` + `ComputeDrift` body. (rev9 — addresses cycle-8 Important on dual code-block drift risk: T3.1.5 no longer re-states the code; single source of truth in T1.5.)
 
 **Cross-function contract documented in 3 places (rev5/rev6):**
 - `iac/inputsnapshot/snapshot.go::preservedFingerprint` doc comment (the sentinel definition; UNEXPORTED per rev6)
