@@ -4,7 +4,7 @@
 
 **Goal:** Refactor wfctl IaC semantics to honor `NeedsReplace`, add per-module JIT secret resolution, ship a provider conformance suite + DO-targeted codemod, and migrate the DO plugin to the new contract — closing the 8 root-cause gaps surfaced by core-dump's self-hosted-PG deploy iteration.
 
-**Architecture:** Per-plugin `computePlanVersion` opt-in (DO migrates to v2; AWS/GCP/Azure stay v1 until activated). New `wfctlhelpers.ApplyPlan` shared helper handles all 4 plan actions (create/update/replace/delete) with `upsertSupporter` hook + `replaceIDMap` for cascade ID propagation. Conformance suite at `iac/conformance/` runs scenarios against any `IaCProvider` implementation; DO smoke gate runs on every relevant PR.
+**Architecture:** Per-plugin `computePlanVersion` opt-in (DO migrates to v2; AWS/GCP/Azure stay v1 until activated). New `wfctlhelpers.ApplyPlan` shared helper handles all 4 plan actions (create/update/replace/delete) with `upsertSupporter` hook + `ApplyResult.ReplaceIDMap` for cascade ID propagation. Conformance suite at `iac/conformance/` runs scenarios against any `IaCProvider` implementation; DO smoke gate runs on every relevant PR.
 
 **Tech Stack:** Go 1.23+, `golang.org/x/tools/go/analysis/passes` for codemod, `google.golang.org/protobuf` for plan.json, GitHub Actions for CI.
 
@@ -15,7 +15,7 @@
 ## Scope Manifest
 
 **PR Count:** 12
-**Tasks:** 72 (counting T3.6a–f as 6 separate tasks and T7.2–T7.12 as 11 scenario tasks; W-9 ProviderPlanner dropped per cycle-3 YAGNI finding, replaced with W-9 cross-plugin-build CI gate alone — same task count net of T1.5 split into T1.5 (W-1) + T3.0.5 (W-3a))
+**Tasks:** 71 (counting T3.6a–f as 6 separate tasks and T7.2–T7.12 as 11 scenario tasks; rev5 net: rev3=72; +T3.1.5 (formerly T3.0.5; T1.5 split into W-1 portion + W-3a portion); +T3.0.4 (NEW field declarations); −T9.1 + −T9.2 (rev4 W-9 ProviderPlanner drop); = 71)
 
 **Revision history:**
 - rev1 (commit 9ea390b) — initial draft, FAILED plan-phase adversarial review (3 Critical + 7 Important + 5 Minor)
@@ -38,7 +38,7 @@
   - **T1.5 split into T1.5 (W-1) + T3.0.5 (W-3a)** — eliminates the rev3 ghost-stub anti-pattern. T1.5 (W-1) ships only the typed-error sentinel + persisted-`--plan` path (no helper-package dependency). T3.0.5 (W-3a) ships the in-process postcondition wiring as the FIRST task in W-3a after T3.0, depending on T3.1's `wfctlhelpers.ApplyPlan` body. No stub `wfctlhelpers.ApplyPlan` ever ships in W-1.
   - **`plan.InputNames` references corrected to derive from `plan.InputSnapshot` map keys** — rev3's pseudo-code was uncompilable; rev4 uses `keys(plan.InputSnapshot)` consistently.
   - **W-9's ProviderPlanner interface DROPPED entirely** per cycle-3 YAGNI finding. W-9 now only ships T9.3 (cross-plugin-build CI gate) + brief docs. ProviderPlanner ships when the first concrete consumer arrives (a future Tofu/Pulumi adapter design). T9.1 + T9.2 removed.
-  - **Field-add sites corrected**: T1.1 + T3.0.5 + T3.4 each list `Modify: interfaces/iac_state.go` for new ApplyResult fields (`InitialInputSnapshot`, `InputDriftReport`, `replaceIDMap`). T3.1 doesn't add the fields itself; it accepts the already-declared fields from the `interfaces` package.
+  - **Field-add sites corrected (rev4 intent; rev5 implementation moved fields to W-3a)**: see rev5 changelog for the actual field-declaration site (T1.1 declares `IaCPlan` + `PlanAction` fields + `DriftEntry` only; T3.0.4 declares `ApplyResult.InitialInputSnapshot` + `InputDriftReport`; T3.4 declares + populates `ApplyResult.ReplaceIDMap`).
   - **W-9 → P-DO edge dropped from sequencing rule #8**; rule #4 keeps `W-3b → W-4 → W-9` only. P-DO can draft after W-7 + W-8 with no W-9 dep (T9.3's CI gate runs on every plugin PR, not as a P-DO dep).
   - **Third-party action `marocchino/sticky-pull-request-comment@v2` replaced with `actions/github-script@v7`** in TP1 codemod-report.yml — keeps PR-comment behavior with first-party supply chain.
   - **T7.14 dedup helper now requires BOTH `conformance-leak-incident` AND `auto-filed-leak` labels** — guards against operator-filed issues with the same primary label.
@@ -48,7 +48,27 @@
   - **W-3b sub-task ordering documented**: T3.6e (binding TDD test+impl) MUST land before T3.6c/d are considered "complete coverage"; cherry-pick rule documented inline.
   - **T9.3 trigger gains `paths` filter** — runs only on IaC-touching PRs, saves ~5min on doc-only PRs.
   - **T9.3 commit message + rollback note minor wording fixed** per cycle-3 minor finding.
-- rev5 (if needed) — further revisions per cycle-4 review.
+- rev5 (this revision) — addresses cycle-4 findings:
+  - **Critical fixes:**
+    - `envProviderTolerantOfUnset` invocation bug fixed: factory is now CALLED (`envProviderTolerantOfUnset(plan.InputSnapshot)`) returning the closure. New `inputsnapshot.PreservedFingerprint` constant added to `iac/inputsnapshot/snapshot.go` (T1.2). `ComputeDrift` (T1.5) special-cases keys whose applySnap fingerprint equals `PreservedFingerprint` (skips drift detection). Cross-function contract documented at all 3 call sites (T1.2 closure, T1.5 ComputeDrift, T3.1.5 postcondition).
+    - rev4 changelog line 41 contradiction with task content fixed. The actual rev5 implementation: T1.1 declares only IaCPlan + PlanAction fields + the `DriftEntry` type. ApplyResult field additions move to W-3a: T3.0.4 (NEW) declares `InitialInputSnapshot` + `InputDriftReport`; T3.4 declares `ReplaceIDMap` (in same commit that populates it). No "field declared in W-1 but populated in W-3a" surface area.
+    - **T3.0.5 renamed to T3.1.5** — dot-suffix-after-its-prefix convention restored. T3.1.5 sits between T3.1 and T3.2 both numerically and sequentially. T3.0.4 is the new field-declaration task that ships BETWEEN T3.0 and T3.1 (numerically AND sequentially).
+  - **Important fixes:**
+    - `replaceIDMap` → `ReplaceIDMap` swept everywhere except function-parameter names (where lowercase is conventional). Verified via `grep "\\breplaceIDMap\\b" docs/plans/...`.
+    - `actions/github-script` invocation gains `github.paginate(github.rest.issues.listComments, {...})` for >30-comment PRs; pinned to commit SHA per workflow security policy (even first-party actions).
+    - T7.13 cache key fixed: discrete `id: hour` step added before the cache step; cache key references `steps.hour.outputs.value` correctly.
+    - ApplyResult field additions moved out of W-1 into W-3a (Option 1 from cycle-4 review) — eliminates the "declared early, populated later" surface area concern.
+    - ADR added: `decisions/0001-providerplanner-deferred-to-first-consumer.md` records the cycle-4 reasoning for dropping W-9's ProviderPlanner. Cited from the W-9 section.
+    - T7.14 BOTH-labels dedup gains operator runbook note: do not remove `auto-filed-leak` label during triage; close the issue instead.
+    - T7.13 YAML gains inline comment explaining `actions/cache@v4` post-step write-back semantics.
+  - **Minor fixes:**
+    - rev4 changelog grouped by Critical/Important/Minor (this revision).
+    - T3.1.5 (formerly T3.0.5) intro cross-references T1.5 (W-1) for the persisted-plan-path counterpart.
+    - T3.6e rollback wording de-magicked: explains commit-stack semantics instead of "PERSISTS across the revert."
+    - Scope manifest task count recomputed: 71 tasks (rev3 was 72; rev4 split T1.5 into T1.5+T3.0.5 = +1; W-9 dropped T9.1+T9.2 = -2; rev5 adds T3.0.4 = +1; net: 72-1=71).
+    - Revision history count format unified ("3C+7I+5M" shorthand).
+    - All `T9.3` references swept to `T9.1` (rev4 renumber).
+- rev6 (if needed) — further revisions per cycle-5 review.
 
 **Out of scope:**
 - AWS / GCP / Azure plugin migrations (deferred to plugin-activation work; advisory codemod-lint reports filed as issues only)
@@ -65,7 +85,7 @@
 |------|-------|-------|--------|
 | 1 | W-1 IaCPlan schema + plan-stale diagnostic | T1.1 – T1.6 | feat/iac-plan-schema-diagnostic |
 | 2 | W-2 wfctl infra refresh-outputs + cheap apply-time refresh | T2.1, T2.2, T2.3, T2.5, T2.6, T2.7 | feat/iac-refresh-outputs |
-| 3 | **W-3a** Replace foundation: manifest field + helper package + drift postcondition + diff cache (no runtime change for v1 plugins) | T3.0, T3.1, T3.0.5, T3.2 – T3.5 | feat/iac-replace-foundation |
+| 3 | **W-3a** Replace foundation: manifest field + helper package + drift postcondition + diff cache (no runtime change for v1 plugins) | T3.0, T3.0.4, T3.1, T3.1.5, T3.2 – T3.5 | feat/iac-replace-foundation |
 | 4 | **W-3b** Replace dispatch: ComputePlan refactor + apply-path branching + runtime validation | T3.6a – T3.6f, T3.7, T3.9, T3.10 | feat/iac-replace-dispatch |
 | 5 | W-4 Provider.ValidatePlan + R-A10 align rule | T4.1, T4.2, T4.4, T4.5 | feat/iac-validate-plan |
 | 6 | W-5 Per-module JIT secret resolution + ProviderID propagation | T5.1, T5.2, T5.3, T5.4, T5.5, T5.7 | feat/iac-jit-secrets |
@@ -94,13 +114,15 @@
 
 **Goal:** Apply detects plan-vs-apply input drift with per-key diagnostic; per-action ResolvedConfigHash enables per-resource error scoping.
 
-### Task T1.1: Define `IaCPlan.SchemaVersion` + `IaCPlan.InputSnapshot` + `PlanAction.ResolvedConfigHash` + `ApplyResult` postcondition fields + `replaceIDMap`
+### Task T1.1: Define `IaCPlan.SchemaVersion` + `IaCPlan.InputSnapshot` + `PlanAction.ResolvedConfigHash` + `DriftEntry` type
 
 **Files:**
-- Modify: `interfaces/iac_state.go` (single source of truth for all IaC type field additions per rev4 — the package-boundary fix from cycle-3 Critical 3)
+- Modify: `interfaces/iac_state.go`
 - Test: `interfaces/iac_state_test.go` (create)
 
-**Note (rev4):** All field additions to `IaCPlan`, `PlanAction`, AND `ApplyResult` (the latter consumed by T1.5/T3.0.5/T3.4) live in this single task — `interfaces/iac_state.go` is the type-declaration site for all three structs. T3.1, T3.4, T1.5, T3.0.5 each consume these fields without re-adding them at the wfctlhelpers layer (which would be a Go compile error).
+**Note (rev5 — addresses cycle-4 Important on declared-but-unpopulated fields):** This task adds ONLY `IaCPlan` + `PlanAction` fields + the standalone `DriftEntry` type — all of which are populated by W-1 itself (T1.3, T1.4, T1.5). `ApplyResult` field additions (`InitialInputSnapshot`, `InputDriftReport`, `ReplaceIDMap`) move to W-3a where they are populated by the same PR that declares them: `T3.0.4` adds `InitialInputSnapshot` + `InputDriftReport` (T3.1 + T3.1.5 populate them); `T3.4` adds `ReplaceIDMap` (T3.4 populates it).
+
+**Pre-step verification (rev5 — addresses cycle-4 Option 5):** before modifying anything, run `grep -n "type ApplyResult" interfaces/iac_state.go` to verify `ApplyResult` is declared at the expected site. If not, halt and update task to point at the actual declaration site. (rev5 documents the assumption that `ApplyResult` lives in `interfaces/iac_state.go` per the design's pre-state.)
 
 **Step 1: Write failing test for schema fields**
 
@@ -170,28 +192,12 @@ Add to `type PlanAction struct`:
 ResolvedConfigHash string `json:"resolved_config_hash,omitempty"`
 ```
 
-Add to `type ApplyResult struct` (rev4 — consolidates all post-apply field additions here so T3.1/T3.4/T1.5/T3.0.5 can consume them without ghost-stub patterns):
-```go
-// InitialInputSnapshot captures env-var fingerprints at start of apply.
-// Populated by wfctlhelpers.ApplyPlan (T3.1) at apply entry.
-// Used by the deferred postcondition (T3.0.5) to compute drift report.
-InitialInputSnapshot map[string]string `json:"initial_input_snapshot,omitempty"`
-
-// InputDriftReport names env-vars whose fingerprint changed between plan and apply.
-// Populated by the deferred postcondition (T3.0.5) regardless of apply success/error path.
-// Empty (or nil) means no drift detected.
-InputDriftReport []DriftEntry `json:"input_drift_report,omitempty"`
-
-// ReplaceIDMap propagates new ProviderIDs from Replace actions to dependent
-// resources whose Apply runs later in the same plan.
-// Populated by doReplace (T3.4); consumed by JIT substitution (T5.2/T5.3 in W-5).
-ReplaceIDMap map[string]string `json:"replace_id_map,omitempty"`
-```
-
-Add adjacent type:
+Add adjacent standalone type:
 ```go
 // DriftEntry names a single env-var whose fingerprint changed between plan-time
-// and apply-time. See iac/inputsnapshot.FormatStaleError for the human-readable form.
+// and apply-time. Used by both the persisted-`--plan` path (cmd/wfctl/infra.go,
+// wired in T1.5) and the in-process apply path (wfctlhelpers.ApplyPlan, wired
+// in T3.1.5 — both via inputsnapshot.FormatStaleError).
 type DriftEntry struct {
     Name             string `json:"name"`
     PlanFingerprint  string `json:"plan_fingerprint"`
@@ -199,43 +205,16 @@ type DriftEntry struct {
 }
 ```
 
-**Step 4: Add tests for the new ApplyResult fields**
-
-Append to `interfaces/iac_state_test.go`:
-```go
-func TestApplyResult_InputDriftReport_RoundTrip(t *testing.T) {
-    r := ApplyResult{InputDriftReport: []DriftEntry{
-        {Name: "STAGING_PG_PASSWORD", PlanFingerprint: "abc", ApplyFingerprint: "def"},
-    }}
-    data, _ := json.Marshal(r)
-    var got ApplyResult
-    json.Unmarshal(data, &got)
-    if len(got.InputDriftReport) != 1 || got.InputDriftReport[0].Name != "STAGING_PG_PASSWORD" {
-        t.Errorf("InputDriftReport roundtrip failed: %+v", got)
-    }
-}
-
-func TestApplyResult_ReplaceIDMap_RoundTrip(t *testing.T) {
-    r := ApplyResult{ReplaceIDMap: map[string]string{"vpc": "new-uuid"}}
-    data, _ := json.Marshal(r)
-    var got ApplyResult
-    json.Unmarshal(data, &got)
-    if got.ReplaceIDMap["vpc"] != "new-uuid" {
-        t.Errorf("ReplaceIDMap roundtrip failed: %+v", got)
-    }
-}
-```
-
-**Step 5: Run tests to verify pass**
+**Step 4: Run tests to verify pass**
 
 Run: `cd interfaces && go test -v`
-Expected: PASS — 5 tests in iac_state_test.go (3 plan/action + 2 ApplyResult).
+Expected: PASS — 3 tests in iac_state_test.go (SchemaVersion + InputSnapshot + ResolvedConfigHash). DriftEntry is a standalone type — no test required at declaration site; T1.5 covers it via the formatter test.
 
-**Step 6: Commit**
+**Step 5: Commit**
 
 ```bash
 git add interfaces/iac_state.go interfaces/iac_state_test.go
-git commit -m "feat(iac): add IaCPlan + PlanAction + ApplyResult fields for InputSnapshot/drift/replaceIDMap"
+git commit -m "feat(iac): add IaCPlan.SchemaVersion + InputSnapshot + PlanAction.ResolvedConfigHash + DriftEntry type"
 ```
 
 ### Task T1.2: Implement `inputSnapshot.Compute(envProvider)` helper
@@ -295,7 +274,7 @@ func TestCompute_MissingEnvVarOmitted(t *testing.T) {
 Run: `cd iac/inputsnapshot && go test -v`
 Expected: FAIL with package not found
 
-**Step 3: Implement**
+**Step 3: Implement (rev5 — adds PreservedFingerprint sentinel + NewTolerantEnvProvider for the in-process apply postcondition contract)**
 
 ```go
 // iac/inputsnapshot/snapshot.go
@@ -307,6 +286,7 @@ package inputsnapshot
 import (
     "crypto/sha256"
     "encoding/hex"
+    "os"
 )
 
 // Compute returns a map of env-var name → 16-hex-char sha256 prefix of the value.
@@ -318,23 +298,94 @@ func Compute(varNames []string, lookup func(string) (string, bool)) map[string]s
         if !ok {
             continue
         }
+        if val == PreservedFingerprint {
+            // Sentinel from NewTolerantEnvProvider — pass through unhashed
+            // so ComputeDrift recognizes the preservation signal.
+            out[name] = PreservedFingerprint
+            continue
+        }
         sum := sha256.Sum256([]byte(val))
         out[name] = hex.EncodeToString(sum[:])[:16]
     }
     return out
 }
+
+// Snapshot is an alias for Compute that reads slightly more naturally at
+// the in-process apply postcondition call site (T3.1.5).
+func Snapshot(names []string, provider func(string) (string, bool)) map[string]string {
+    return Compute(names, provider)
+}
+
+// OSEnvProvider is the canonical env-provider closure that reads from
+// process env via os.LookupEnv. Used by start-of-apply InputSnapshot capture.
+func OSEnvProvider(name string) (string, bool) { return os.LookupEnv(name) }
+
+// PreservedFingerprint is a sentinel value indicating an env-var was set at
+// plan time but is unset at apply time (sub-action cleanup is the canonical
+// case). ComputeDrift (T1.5) skips drift detection for keys whose applySnap
+// value is this sentinel.
+//
+// Cross-function contract:
+// - Compute (this file) passes the sentinel through unhashed.
+// - NewTolerantEnvProvider (this file) returns the sentinel for plan-time-set
+//   but apply-time-unset vars.
+// - ComputeDrift (compute_drift.go, T1.5) honors the sentinel by skipping
+//   drift detection for that key.
+const PreservedFingerprint = "__plan_time_preserved__"
+
+// NewTolerantEnvProvider returns an EnvProvider closure used by the
+// in-process apply postcondition (T3.1.5). When a var was set at plan time
+// (present in planSnapshot) but is now unset (sub-action cleanup), the
+// closure returns PreservedFingerprint so ComputeDrift suppresses the
+// (false-positive) drift entry. For vars genuinely unset at both times,
+// returns ("", false) → Compute drops the key from the resulting map.
+func NewTolerantEnvProvider(planSnapshot map[string]string) func(name string) (string, bool) {
+    return func(name string) (string, bool) {
+        if val, ok := os.LookupEnv(name); ok {
+            return val, true
+        }
+        if _, wasInPlan := planSnapshot[name]; wasInPlan {
+            return PreservedFingerprint, true
+        }
+        return "", false
+    }
+}
 ```
 
-**Step 4: Run tests to verify pass**
+**Step 4: Add tests for the sentinel + tolerant-provider behavior**
+
+Append to `iac/inputsnapshot/snapshot_test.go`:
+```go
+func TestNewTolerantEnvProvider_UnsetButPlanned_ReturnsSentinel(t *testing.T) {
+    os.Unsetenv("STAGING_PG_PASSWORD")
+    plan := map[string]string{"STAGING_PG_PASSWORD": "deadbeef00000000"}
+    provider := NewTolerantEnvProvider(plan)
+    val, ok := provider("STAGING_PG_PASSWORD")
+    if !ok || val != PreservedFingerprint {
+        t.Errorf("expected (PreservedFingerprint, true) for plan-time-set unset-now var; got (%q, %v)", val, ok)
+    }
+}
+
+func TestCompute_PreservesSentinel(t *testing.T) {
+    snap := Compute([]string{"FOO"}, func(name string) (string, bool) {
+        return PreservedFingerprint, true
+    })
+    if snap["FOO"] != PreservedFingerprint {
+        t.Errorf("Compute should pass sentinel through unhashed; got %q", snap["FOO"])
+    }
+}
+```
+
+**Step 5: Run tests to verify pass**
 
 Run: `cd iac/inputsnapshot && go test -v`
-Expected: PASS — 4 tests
+Expected: PASS — 6 tests (4 from rev1 + 2 sentinel tests)
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add iac/inputsnapshot/
-git commit -m "feat(iac): add inputsnapshot.Compute for plan-stale diagnostic fingerprints"
+git commit -m "feat(iac): add inputsnapshot.Compute + Snapshot + NewTolerantEnvProvider + PreservedFingerprint sentinel"
 ```
 
 ### Task T1.3: Wire InputSnapshot into `wfctl infra plan` output
@@ -458,9 +509,9 @@ git add platform/differ.go platform/differ_test.go
 git commit -m "feat(iac): ComputePlan sets PlanAction.ResolvedConfigHash"
 ```
 
-### Task T1.5: Apply diagnostic — typed-error sentinel + persisted `--plan` path (in-process path moves to T3.0.5)
+### Task T1.5: Apply diagnostic — typed-error sentinel + persisted `--plan` path (in-process path moves to T3.1.5)
 
-**Note (rev4):** Per cycle-3 Critical 1, T1.5 was creating a circular dependency by trying to wire the in-process postcondition into `iac/wfctlhelpers/apply.go` from W-1 (which would require either a ghost-stub of `wfctlhelpers.ApplyPlan` shipping in W-1, or a forward dependency on W-3a). rev4 splits T1.5: this task ships ONLY the typed-error sentinel + the persisted-`--plan` path (`cmd/wfctl/infra.go:1071`) — both of which depend solely on `IaCPlan.InputSnapshot` from T1.1, no helper-package dep. The in-process apply path moves to **T3.0.5 (W-3a)** as the FIRST task after T3.1, where `wfctlhelpers.ApplyPlan` actually exists.
+**Note (rev4/rev5):** Per cycle-3 Critical 1, T1.5 was creating a circular dependency by trying to wire the in-process postcondition into `iac/wfctlhelpers/apply.go` from W-1 (which would require either a ghost-stub of `wfctlhelpers.ApplyPlan` shipping in W-1, or a forward dependency on W-3a). rev4 splits T1.5: this task ships ONLY the typed-error sentinel + the persisted-`--plan` path (`cmd/wfctl/infra.go:1071`) — both of which depend solely on `IaCPlan.InputSnapshot` from T1.1, no helper-package dep. The in-process apply path moves to **T3.1.5 (W-3a)** as the task after T3.1, where `wfctlhelpers.ApplyPlan` actually exists.
 
 **Files:**
 - Create: `iac/inputsnapshot/errors.go` (typed sentinel `ErrEnvVarChanged`)
@@ -534,7 +585,7 @@ In `iac/inputsnapshot/`:
      ...
      hint: ensure all env vars referenced by infra.yaml are exported to both Plan and Apply steps
    ```
-3. `compute_drift.go`: `func ComputeDrift(planSnap, applySnap map[string]string) []interfaces.DriftEntry` — pure function that compares two snapshots and produces drift entries. Iterates over `planSnap` keys (the plan-time names; rev4 fix per cycle-3 Critical 2 — derive names from map keys, NOT from a phantom `plan.InputNames` field).
+3. `compute_drift.go`: `func ComputeDrift(planSnap, applySnap map[string]string) []interfaces.DriftEntry` — pure function that compares two snapshots and produces drift entries. Iterates over `planSnap` keys (the plan-time names; rev4 fix per cycle-3 Critical 2 — derive names from map keys, NOT from a phantom `plan.InputNames` field). **rev5: honors `inputsnapshot.PreservedFingerprint` sentinel** — if `applySnap[k] == PreservedFingerprint`, skip drift detection for that key (sub-action cleanup case). Concrete implementation: see T3.1.5's "Step 3" code block where `ComputeDrift` is fully spec'd alongside the postcondition that consumes it. Cross-function contract documented at all 3 call sites: `Compute` passes the sentinel through; `NewTolerantEnvProvider` returns the sentinel for plan-time-set apply-time-unset vars; `ComputeDrift` honors it.
 
 In `cmd/wfctl/infra.go` near line 1071, before raising "plan stale":
 1. Re-compute apply-time InputSnapshot using `keys(plan.InputSnapshot)` as the name list (rev4 — derives from existing field; no `InputNames` field needed).
@@ -550,9 +601,9 @@ git add iac/inputsnapshot/errors.go iac/inputsnapshot/diagnostic.go iac/inputsna
 git commit -m "feat(iac): typed ErrEnvVarChanged sentinel + plan-stale diagnostic on persisted --plan path"
 ```
 
-**Rollback (T1.5):** revert commit; persisted-`--plan` path returns to bare `error: plan stale: config hash mismatch` (existing behavior). In-process apply path is unaffected (T1.5 doesn't touch it; T3.0.5 in W-3a does).
+**Rollback (T1.5):** revert commit; persisted-`--plan` path returns to bare `error: plan stale: config hash mismatch` (existing behavior). In-process apply path is unaffected (T1.5 doesn't touch it; T3.1.5 in W-3a does).
 
-**Cross-PR note:** T1.5 only ships the typed sentinel + persisted-plan path. The in-process apply path's drift postcondition lives in **T3.0.5** as the first task after T3.1 in W-3a. This split is the rev4 fix for cycle-3 Critical 1 (no ghost-stub of `wfctlhelpers.ApplyPlan` in W-1).
+**Cross-PR note:** T1.5 only ships the typed sentinel + persisted-plan path. The in-process apply path's drift postcondition lives in **T3.1.5** as the task after T3.1 in W-3a. This split is the rev4 fix for cycle-3 Critical 1 (no ghost-stub of `wfctlhelpers.ApplyPlan` in W-1).
 
 ### Task T1.6: Add `plan.json` gitignore-validate warning at `wfctl infra plan` time
 
@@ -918,6 +969,67 @@ git commit -m "feat(iac): plugin manifest gains iacProvider.computePlanVersion (
 
 **Rollback (T3.0):** revert commit; field is `omitempty` and unread by anything until T3.7 lands in same PR — no behavioral change for existing v1 plugins.
 
+### Task T3.0.4: Declare `ApplyResult.InitialInputSnapshot` + `ApplyResult.InputDriftReport` on `interfaces/iac_state.go`
+
+**Files:**
+- Modify: `interfaces/iac_state.go` (add 2 fields to `ApplyResult` — same package as T1.1's IaCPlan/PlanAction additions)
+- Test: `interfaces/iac_state_test.go` (extend with roundtrip tests)
+
+**Note (rev5 — addresses cycle-4 Important on declared-early-populated-later):** This task lands in W-3a, the same PR that populates the fields (T3.1 reads `InitialInputSnapshot` at apply entry; T3.1.5 populates `InputDriftReport` via deferred postcondition). No "field exists but is permanently zero" window for these fields. (`ReplaceIDMap` is added by T3.4 in the same PR using the same pattern.)
+
+**Step 1: Write failing tests**
+
+Append to `interfaces/iac_state_test.go`:
+```go
+func TestApplyResult_InputDriftReport_RoundTrip(t *testing.T) {
+    r := ApplyResult{InputDriftReport: []DriftEntry{
+        {Name: "STAGING_PG_PASSWORD", PlanFingerprint: "abc", ApplyFingerprint: "def"},
+    }}
+    data, _ := json.Marshal(r)
+    var got ApplyResult
+    json.Unmarshal(data, &got)
+    if len(got.InputDriftReport) != 1 || got.InputDriftReport[0].Name != "STAGING_PG_PASSWORD" {
+        t.Errorf("InputDriftReport roundtrip failed: %+v", got)
+    }
+}
+
+func TestApplyResult_InitialInputSnapshot_RoundTrip(t *testing.T) {
+    r := ApplyResult{InitialInputSnapshot: map[string]string{"FOO": "fp1234"}}
+    data, _ := json.Marshal(r)
+    var got ApplyResult
+    json.Unmarshal(data, &got)
+    if got.InitialInputSnapshot["FOO"] != "fp1234" {
+        t.Errorf("InitialInputSnapshot roundtrip failed: %+v", got)
+    }
+}
+```
+
+**Step 2: Run tests → FAIL** (fields don't exist).
+
+**Step 3: Add fields to `type ApplyResult struct` in `interfaces/iac_state.go`:**
+```go
+// InitialInputSnapshot captures env-var fingerprints at start of apply.
+// Populated by wfctlhelpers.ApplyPlan (T3.1) at apply entry.
+// Used by the deferred postcondition (T3.1.5) to compute drift report.
+InitialInputSnapshot map[string]string `json:"initial_input_snapshot,omitempty"`
+
+// InputDriftReport names env-vars whose fingerprint changed between plan and apply.
+// Populated by the deferred postcondition (T3.1.5) regardless of apply success/error path.
+// Empty (or nil) means no drift detected.
+InputDriftReport []DriftEntry `json:"input_drift_report,omitempty"`
+```
+
+**Step 4: Run tests → PASS** (5 tests in iac_state_test.go: 3 from T1.1 + 2 here).
+
+**Step 5: Commit**
+
+```bash
+git add interfaces/iac_state.go interfaces/iac_state_test.go
+git commit -m "feat(iac): add ApplyResult.InitialInputSnapshot + InputDriftReport fields"
+```
+
+**Rollback (T3.0.4):** revert commit; T3.1 + T3.1.5 fail to compile (they reference these fields). Reverting T3.0.4 + T3.1 + T3.1.5 as a unit returns ApplyResult to its pre-W-3a shape.
+
 ### Task T3.1: Create `iac/wfctlhelpers/` package skeleton + ApplyPlan signature
 
 **Files:**
@@ -1022,15 +1134,17 @@ git add iac/wfctlhelpers/
 git commit -m "feat(iac): add wfctlhelpers.ApplyPlan skeleton (4-action dispatch)"
 ```
 
-### Task T3.0.5: In-process apply drift postcondition (rev4 — split out of T1.5 to eliminate the W-1↔W-3a cycle)
+### Task T3.1.5: In-process apply drift postcondition (rev4/rev5 — split out of T1.5 to eliminate the W-1↔W-3a cycle; renamed from T3.0.5 per cycle-4 finding)
+
+**See also:** **T1.5 (W-1)** for the persisted-`--plan`-path counterpart. T1.5 wraps the existing `cmd/wfctl/infra.go:1071` plan-stale check with `inputsnapshot.ErrEnvVarChanged`; T3.1.5 adds the unconditional postcondition for the in-process apply path. Both call the same `inputsnapshot.FormatStaleError` formatter and use the same `interfaces.DriftEntry` type.
 
 **Files:**
-- Modify: `iac/wfctlhelpers/apply.go` (the ApplyPlan body created in T3.1; T3.0.5 lands AFTER T3.1 — see Note below)
+- Modify: `iac/wfctlhelpers/apply.go` (the ApplyPlan body created in T3.1; T3.1.5 lands AFTER T3.1 — see Note below)
 - Modify: `cmd/wfctl/infra_apply.go` (in-process apply caller)
 - Test: `cmd/wfctl/infra_apply_in_process_test.go` (NEW)
-- Test: `iac/wfctlhelpers/apply_postcondition_test.go` (NEW — exercises the deferred postcondition + panic-recover)
+- Test: `iac/wfctlhelpers/apply_postcondition_test.go` (NEW — exercises the deferred postcondition + panic-recover + env-unset tolerance)
 
-**Sequencing within W-3a:** T3.0.5 runs sequentially after T3.1 (which creates the helper package + `ApplyPlan` body). T3.0.5 modifies the ApplyPlan body to add the deferred postcondition; T3.2/T3.3/T3.4 then implement the per-action sub-functions on top. The in-PR commit order is: T3.0 → T3.1 → T3.0.5 → T3.2 → T3.3 → T3.4 → T3.5. (T3.0.5 numbering keeps the within-PR ordering visible without renumbering downstream tasks; the dot suffix matches the precedent set by TC1.5.)
+**Sequencing within W-3a (rev5 — addresses cycle-4 Critical 3):** T3.1.5 runs sequentially after T3.1 (which creates the helper package + `ApplyPlan` body). The dot-suffix-after-its-prefix convention matches TC1.5 (lands between TC1 and TC2). The in-PR commit order is: T3.0 → T3.0.4 → T3.1 → T3.1.5 → T3.2 → T3.3 → T3.4 → T3.5.
 
 **Step 1: Write failing tests**
 
@@ -1079,14 +1193,17 @@ func TestApply_Postcondition_FingerprintAfterEnvUnset_NoFalsePositive(t *testing
 
 **Step 2: Run tests → FAIL** (postcondition not implemented).
 
-**Step 3: Implement the deferred postcondition in `wfctlhelpers.ApplyPlan` (panic-safe + unset-tolerant)**
+**Step 3: Implement the deferred postcondition in `wfctlhelpers.ApplyPlan` (panic-safe + unset-tolerant; rev5 — fixes cycle-4 Critical 1)**
 
 ```go
-// iac/wfctlhelpers/apply.go (added by T3.0.5)
+// iac/wfctlhelpers/apply.go (added by T3.1.5)
 func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-    result := &interfaces.ApplyResult{InitialInputSnapshot: snapshotEnvProvider(keys(plan.InputSnapshot), defaultEnvProvider)}
+    inputNames := keys(plan.InputSnapshot)
+    result := &interfaces.ApplyResult{
+        InitialInputSnapshot: inputsnapshot.Snapshot(inputNames, inputsnapshot.OSEnvProvider),
+    }
 
-    // rev4 deferred postcondition — runs unconditionally, panic-safe.
+    // rev4+rev5 deferred postcondition — runs unconditionally, panic-safe.
     defer func() {
         defer func() {
             if r := recover(); r != nil {
@@ -1096,35 +1213,85 @@ func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.I
                 log.Printf("warning: input-drift postcondition panicked: %v", r)
             }
         }()
-        applyTimeSnap := snapshotEnvProvider(keys(plan.InputSnapshot), envProviderTolerantOfUnset)
+        // rev5 — INVOKE the closure factory (not pass it as a value).
+        // Returns a closure that yields PreservedFingerprint for vars that were
+        // set at plan-time but are unset now (sub-action cleanup).
+        tolerantProvider := inputsnapshot.NewTolerantEnvProvider(plan.InputSnapshot)
+        applyTimeSnap := inputsnapshot.Snapshot(inputNames, tolerantProvider)
         result.InputDriftReport = inputsnapshot.ComputeDrift(plan.InputSnapshot, applyTimeSnap)
     }()
 
     // ... rest of ApplyPlan body (delegates to doCreate/doUpdate/doReplace/doDelete) ...
     return result, nil
 }
+```
 
-// envProviderTolerantOfUnset returns the value if set, or the OPERATOR-FACING
-// "value-was-set-at-plan-time" sentinel if unset (rev4 — addresses the
-// fingerprint-after-env-unset false-positive concern from cycle-3).
-// Concretely: if the var was in plan.InputSnapshot (so it WAS set at plan time)
-// and is now unset, we treat it as still-the-plan-time-value (no drift) rather
-// than as zero-value (drift). The plan-time fingerprint is the source of truth.
-func envProviderTolerantOfUnset(plan map[string]string) func(name string) (string, bool) {
+The factory + sentinel are added in T1.2 (`iac/inputsnapshot/snapshot.go`):
+```go
+// PreservedFingerprint is a sentinel value indicating an env-var was set at
+// plan time but is unset at apply time (sub-action cleanup is the canonical
+// case). ComputeDrift skips drift detection for keys whose applySnap value
+// is this sentinel.
+const PreservedFingerprint = "__plan_time_preserved__"
+
+// NewTolerantEnvProvider returns an EnvProvider closure that preserves
+// fingerprints for vars set at plan-time but unset at apply-time. Used by
+// the in-process apply postcondition (T3.1.5).
+//
+// Cross-function contract: when this provider is the source for Snapshot,
+// the resulting map's PreservedFingerprint values MUST be honored by
+// ComputeDrift (T1.5 / iac/inputsnapshot/compute_drift.go) — drift on a
+// preserved key is suppressed, NOT reported as DriftEntry.
+func NewTolerantEnvProvider(planSnapshot map[string]string) func(name string) (string, bool) {
     return func(name string) (string, bool) {
         if val, ok := os.LookupEnv(name); ok {
             return val, true
         }
-        // Var was set at plan time, now unset — assume sub-action cleanup;
-        // postcondition treats as no-change (returning the plan-time fingerprint
-        // sentinel via a special path in ComputeDrift).
-        if _, plannedFP := plan[name]; plannedFP {
-            return "", false // ComputeDrift handles this as "preserved at plan-time fingerprint"
+        // Var was set at plan time, now unset — sub-action cleanup case.
+        if _, wasInPlan := planSnapshot[name]; wasInPlan {
+            return PreservedFingerprint, true // Sentinel, NOT a real value.
         }
         return "", false
     }
 }
 ```
+
+And T1.5's `ComputeDrift` MUST honor the sentinel (rev5 cross-function contract):
+```go
+// iac/inputsnapshot/compute_drift.go (T1.5 — UPDATED in rev5 to honor PreservedFingerprint)
+func ComputeDrift(planSnap, applySnap map[string]string) []interfaces.DriftEntry {
+    var drift []interfaces.DriftEntry
+    for name, planFP := range planSnap {
+        applyFP, present := applySnap[name]
+        if !present {
+            // Key dropped from applySnap entirely — could be a missing env or
+            // a closure that returned (_, false). Either way, treat as drift
+            // (operator-facing "var was set but unset since" is genuine drift
+            // for the persisted-`--plan` path). The in-process path uses
+            // NewTolerantEnvProvider which returns PreservedFingerprint
+            // instead of dropping the key — see below.
+            drift = append(drift, interfaces.DriftEntry{
+                Name: name, PlanFingerprint: planFP, ApplyFingerprint: "(unset)",
+            })
+            continue
+        }
+        if applyFP == PreservedFingerprint {
+            continue // Sentinel — sub-action cleanup unset; not real drift.
+        }
+        if applyFP != planFP {
+            drift = append(drift, interfaces.DriftEntry{
+                Name: name, PlanFingerprint: planFP, ApplyFingerprint: applyFP,
+            })
+        }
+    }
+    return drift
+}
+```
+
+**Cross-function contract documented in 3 places (rev5):**
+- `iac/inputsnapshot/snapshot.go::PreservedFingerprint` doc comment (the sentinel definition)
+- `iac/inputsnapshot/snapshot.go::NewTolerantEnvProvider` doc comment (cites the contract)
+- `iac/inputsnapshot/compute_drift.go::ComputeDrift` body comment (honors the sentinel)
 
 In `cmd/wfctl/infra_apply.go`:
 4. After `wfctlhelpers.ApplyPlan` returns, if `result.InputDriftReport` is non-empty, print `inputsnapshot.FormatStaleError(result.InputDriftReport)` to stderr as a warning (or wrap as `ErrEnvVarChanged` if the apply itself failed).
@@ -1138,7 +1305,7 @@ git add iac/wfctlhelpers/apply.go cmd/wfctl/infra_apply.go cmd/wfctl/infra_apply
 git commit -m "feat(iac): in-process apply unconditional drift postcondition (panic-safe + tolerant of mid-apply env unset)"
 ```
 
-**Rollback (T3.0.5):** revert commit; in-process apply path stops emitting `InputDriftReport` (field stays declared on `ApplyResult` from T1.1 but is never populated by core wfctl). Persisted-`--plan` path (T1.5 in W-1) is unaffected — that path computes drift inline at the cmd/wfctl level. Operators relying on the in-process diagnostic see the original raw error from sub-actions; no regression beyond pre-rev4 behavior.
+**Rollback (T3.1.5):** revert commit; in-process apply path stops emitting `InputDriftReport` (field stays declared on `ApplyResult` from T3.0.4 but is never populated by core wfctl). Persisted-`--plan` path (T1.5 in W-1) is unaffected — that path computes drift inline at the cmd/wfctl level. Operators relying on the in-process diagnostic see the original raw error from sub-actions; no regression beyond pre-rev4 behavior.
 
 ### Task T3.2: Implement `doCreate` with `upsertSupporter` recovery
 
@@ -1232,11 +1399,13 @@ git commit -m "feat(iac): doCreate honors UpsertSupporter for ErrResourceAlready
 
 Commit: `feat(iac): doUpdate + doDelete actions`
 
-### Task T3.4: Implement `doReplace` with replaceIDMap propagation
+### Task T3.4: Implement `doReplace` with `ApplyResult.ReplaceIDMap` propagation (declares + populates the field in same commit)
 
 **Files:**
-- Modify: `iac/wfctlhelpers/apply.go`
+- Modify: `interfaces/iac_state.go` (rev5 — declare `ApplyResult.ReplaceIDMap` field; declared + populated in this same commit, eliminating the "declared early, populated later" surface area)
+- Modify: `iac/wfctlhelpers/apply.go` (populate the field via doReplace)
 - Test: `iac/wfctlhelpers/apply_replace_test.go`
+- Test: `interfaces/iac_state_test.go` (extend with `ReplaceIDMap` roundtrip)
 
 **Step 1: Write failing test**
 
@@ -1268,18 +1437,38 @@ func TestApplyPlan_Replace_DeletesThenCreates_PropagatesNewID(t *testing.T) {
 }
 ```
 
-**Step 2-5:** Implement `doReplace`:
+**Step 2 (rev5): Add `ApplyResult.ReplaceIDMap` field declaration to `interfaces/iac_state.go`**
+
+```go
+// ReplaceIDMap propagates new ProviderIDs from Replace actions to dependent
+// resources whose Apply runs later in the same plan.
+// Populated by doReplace (this task); consumed by JIT substitution (T5.2/T5.3 in W-5).
+ReplaceIDMap map[string]string `json:"replace_id_map,omitempty"`
+```
+
+Add roundtrip test to `interfaces/iac_state_test.go`:
+```go
+func TestApplyResult_ReplaceIDMap_RoundTrip(t *testing.T) {
+    r := ApplyResult{ReplaceIDMap: map[string]string{"vpc": "new-uuid"}}
+    data, _ := json.Marshal(r)
+    var got ApplyResult
+    json.Unmarshal(data, &got)
+    if got.ReplaceIDMap["vpc"] != "new-uuid" {
+        t.Errorf("ReplaceIDMap roundtrip failed: %+v", got)
+    }
+}
+```
+
+**Step 3-5: Implement `doReplace`:**
 1. Call `Delete(ctx, refFromCurrent(action))`
 2. On success, call `Create(ctx, action.Resource)`
-3. On Create success, write `result.ReplaceIDMap[action.Resource.Name] = newOutput.ProviderID` (rev4 capitalization — the field is the exported `ApplyResult.ReplaceIDMap` declared in `interfaces/iac_state.go` per T1.1; will be consumed by JIT substitution in W-5).
+3. On Create success: lazy-init the map if nil (`if result.ReplaceIDMap == nil { result.ReplaceIDMap = map[string]string{} }`), then `result.ReplaceIDMap[action.Resource.Name] = newOutput.ProviderID`. Field name uses exported `ReplaceIDMap` (capital R; rev5 fix per cycle-4 Important on capitalization drift). Will be consumed by JIT substitution in W-5.
 
-For now (this PR), `ReplaceIDMap` is populated by `doReplace` but not yet read by anything. W-5 wires the consumer in T5.2/T5.3.
+For this PR, `ReplaceIDMap` is populated by `doReplace` AND declared in the same commit (rev5 — addresses cycle-4 declared-early-populated-later concern). W-5 wires the consumer in T5.2/T5.3.
 
-**Note (rev4 — addresses cycle-3 Critical 3):** `ReplaceIDMap` is declared on `interfaces.ApplyResult` in T1.1 (the type-declaration site is `interfaces/iac_state.go`). T3.4 only POPULATES the field — it does not declare it. Verify before implementation: `grep ReplaceIDMap interfaces/iac_state.go` should show the field added by T1.1.
+Commit: `feat(iac): doReplace declares + populates ApplyResult.ReplaceIDMap (delete-then-create with ProviderID propagation)`
 
-Commit: `feat(iac): doReplace deletes-then-creates with ProviderID propagation via ApplyResult.ReplaceIDMap`
-
-**Rollback (T3.4):** revert commit; un-merged W-3 means Replace actions never emit (no plugin sets `iacProvider.computePlanVersion: v2` until P-DO ships, and v1 plugins never reach `doReplace`). Existing apply paths unchanged. For mid-replace failures during the W-3 development cycle: the `ApplyResult.replaceIDMap` state checkpoint allows operators to inspect post-Delete pre-Create state in the apply log; manual cloud restoration is the recovery path for the in-flight resource (out of scope for this task — same recovery semantics as today's bare delete + manual recreate). Production exposure for v2 plugins is gated by P-DO + C-1 cutover; rollback at C-1 reverts wfctl-lock pin, returning operators to the v1 path with no Replace emission.
+**Rollback (T3.4):** revert commit; un-merged W-3 means Replace actions never emit (no plugin sets `iacProvider.computePlanVersion: v2` until P-DO ships, and v1 plugins never reach `doReplace`). Existing apply paths unchanged. For mid-replace failures during the W-3 development cycle: the `ApplyResult.ReplaceIDMap` state checkpoint allows operators to inspect post-Delete pre-Create state in the apply log; manual cloud restoration is the recovery path for the in-flight resource (out of scope for this task — same recovery semantics as today's bare delete + manual recreate). Production exposure for v2 plugins is gated by P-DO + C-1 cutover; rollback at C-1 reverts wfctl-lock pin, returning operators to the v1 path with no Replace emission.
 
 ### Task T3.5: Add diff cache at `iac/diffcache/` keyed by `(plugin-version, type, providerID, sha-config, sha-outputs)`
 
@@ -1888,20 +2077,26 @@ Pre-step in every smoke job runs `conformance-budget-check.yml` which:
 **Overhead reduction (rev3+rev4 — caching per-PR-base-SHA via actions/cache@v4):**
 
 ```yaml
-# In conformance-budget-check.yml:
+# In conformance-budget-check.yml (rev5 — fixed step ordering):
 concurrency:
   group: ${{ github.event.pull_request.base.sha }}-budget-check
   cancel-in-progress: false
 steps:
+  # rev5 — discrete first step computes the hour-bucket as a step output,
+  # so the cache step (next) can reference it via steps.hour.outputs.value.
+  - id: hour
+    run: echo "value=$(date -u +%Y%m%d%H)" >> $GITHUB_OUTPUT
   - uses: actions/cache@v4
     id: budget-cache
+    # rev5 inline note — actions/cache@v4 does post-step write-back automatically:
+    # if cache-hit is false, the action records the path's contents at job-end
+    # and uploads under this key for the next run on the same key. No explicit
+    # upload-cache step is needed.
     with:
       key: budget-${{ github.event.pull_request.base.sha }}-${{ steps.hour.outputs.value }}
       path: /tmp/budget-result.json
   - if: steps.budget-cache.outputs.cache-hit != 'true'
     run: |
-      # Compute current hour for TTL bucketing
-      HOUR=$(date -u +%Y%m%d%H)
       curl -sH "Authorization: Bearer $DO_CONFORMANCE_API_TOKEN" \
         "https://api.digitalocean.com/v2/customers/my/balance" > /tmp/budget-result.json
   - run: |
@@ -1911,7 +2106,7 @@ steps:
         exit 1
       fi
       if (( $(echo "$SPEND > 15" | bc -l) )); then
-        # rev4 — second-channel alert at 60% of cap
+        # rev4 — second-channel alert at 60% of cap (uses dedup helper).
         bash .github/workflows/scripts/file-or-comment-leak-issue.sh "$SPEND" "Spend approaching cap"
       fi
 ```
@@ -1960,6 +2155,11 @@ fi
 ```
 
 The workflow only runs the helper if `SCRUBBED_COUNT > 0`. The helper checks for an existing OPEN issue with BOTH labels (`conformance-leak-incident` AND `auto-filed-leak`); if present, appends a comment; if absent, creates a new issue with both labels. Operators who file issues manually with only the primary label (for human investigation) are not appended to. Operators close the auto-filed issue after investigating; next leak opens a fresh auto-filed issue with full history visible via the closed-issue trail.
+
+**Operator runbook note (rev5 — addresses cycle-4 Important on label-removal failure mode):** add to `docs/conformance-runbook.md` (created in T7.13) under § "Helper conventions":
+> **Do not remove the `auto-filed-leak` label from helper-filed issues during triage.** It is the dedup key; removing it causes the next leak to file a NEW issue rather than appending. To stop the helper from dedup'ing onto a particular issue, **close the issue** (the helper queries `--state open`).
+>
+> If you need a cleaner postmortem swimlane, file a new issue with only the primary label `conformance-leak-incident` (NOT `auto-filed-leak`), link to the auto-filed issue, then close the auto-filed one. The next leak will re-open the dedup chain on a fresh helper-filed issue, leaving your postmortem issue undisturbed.
 
 Same workflow also checks balance API; if balance > $25/mo (rev3 cap — bumped from $5 per TC1.5 finding) OR consecutive scrub events > 3/day, file an issue with label `conformance-budget-incident` (also via the dedup helper, scoped to that label).
 
@@ -2068,13 +2268,46 @@ Commit: `chore(make): add migrate-providers target for workspace-wide codemod`
 
 **Goal:** Verify the W-1 + W-3a + W-3b + W-4 interface changes don't break AWS/GCP/Azure plugins (which stay un-migrated at v1).
 
-> **Note (rev4 — cycle-3 YAGNI fix):** rev3's `ProviderPlanner` interface was speculative — no concrete consumer existed in the plan series. Cycle-3 review flagged it as YAGNI; rev4 drops it entirely. The interface ships when the first concrete adapter (Tofu/Pulumi-style) lands with its own design discussion. W-9 is now a single-task CI-only PR (T9.3 is renumbered to T9.1).
+> **Note (rev4 — cycle-3 YAGNI fix; rev5 — ADR added per cycle-4):** rev3's `ProviderPlanner` interface was speculative — no concrete consumer existed in the plan series. Cycle-3 review flagged it as YAGNI; rev4 drops it entirely. The interface ships when the first concrete adapter (Tofu/Pulumi-style) lands with its own design discussion. W-9 is now a single-task CI-only PR (T9.3 is renumbered to T9.1).
+>
+> **Decision record (rev5):** see `decisions/0001-providerplanner-deferred-to-first-consumer.md` for the recorded reasoning. The user-mandate "don't defer fixes" refers to the 8 root-cause issues from the design pass, not to speculative future-interface scaffolding. ProviderPlanner ships when the first concrete consumer (Tofu/Pulumi adapter) arrives with its own design discussion. The conformance-suite + cross-plugin-build CI gate (W-9 T9.1) provide the regression net for any future interface evolution.
 
-### Task T9.1: Cross-plugin build verification (AWS/GCP/Azure stay-on-v1 compile gate)
+### Task T9.1: Cross-plugin build verification (AWS/GCP/Azure stay-on-v1 compile gate) + ADR for ProviderPlanner deferral
 
 **Files:**
 - Create: `.github/workflows/cross-plugin-build-test.yml` (workflow repo)
+- Create: `decisions/0001-providerplanner-deferred-to-first-consumer.md` (rev5 ADR per cycle-4 Important 5)
 - (No source changes in AWS/GCP/Azure repos; this is a verification gate)
+
+**Step 0 (rev5): Create the ADR** at `decisions/0001-providerplanner-deferred-to-first-consumer.md`:
+
+```markdown
+# 0001 — ProviderPlanner interface deferred to first concrete consumer
+
+**Status:** Accepted
+**Date:** 2026-05-03
+**Decided by:** Jon Langevin
+**Context (the design pass that surfaced this):** docs/plans/2026-05-03-iac-conformance-and-replace-design.md
+
+## Decision
+
+The optional `ProviderPlanner` interface (proposed in rev1–rev3 of the implementation plan as W-9's T9.1) is deferred. It does NOT ship in this plan series.
+
+## Reasoning
+
+- **Cycle-3 adversarial review flagged the interface as YAGNI.** No concrete consumer exists in this plan series. The rev3 plan downgraded the interface to "definition only — reserved for future Tofu/Pulumi adapter; not consumed by core wfctl." Cycle-4 review noted that this stance is the worst of both worlds: an interface lives in `interfaces/iac_provider.go` that no caller exercises and that a future adapter design may wish to define differently.
+- **The user-mandate "don't defer fixes" refers to the 8 root-cause issues** surfaced by core-dump's self-hosted-PG deploy iteration — Replace action emission, refresh-outputs, plan-stale diagnostic, JIT secret resolution, --allow-replace flag, conformance suite, codemod tooling, manifest-driven dispatch. ProviderPlanner is NOT on that list; it is speculative future-extension scaffolding.
+- **The conformance-suite (W-7) + cross-plugin-build CI gate (W-9 T9.1) provide the regression net** for any future interface evolution. When the first concrete adapter (Tofu/Pulumi-style) lands, that PR will define ProviderPlanner with a concrete consumer + design discussion + tests; the cross-plugin-build gate will surface any compile-breakage at that PR's CI.
+- **Avoiding speculative interfaces is repo precedent** (per workspace memory entry `feedback_proper_fixes_over_workarounds.md` — prefer architecturally correct fix over the expedient shortcut; speculative APIs are an expedient shortcut for "we might need this later").
+
+## Consequences
+
+- The W-3b apply path branches only on `iacProvider.computePlanVersion` ("v1" → legacy `provider.Apply`; "v2" → `wfctlhelpers.ApplyPlan`). No third routing for "custom planner".
+- A future Tofu/Pulumi adapter PR will need to add the ProviderPlanner interface AND wire it into `platform.ComputePlan` + `wfctlhelpers.ApplyPlan` AND ship a concrete consumer + tests in one PR. Estimated cost: ~5 tasks, single-PR scope.
+- This ADR is the source of truth for the deferral. If the decision is reversed, file a new ADR (0002) that supersedes this one.
+```
+
+Commit: `decision(iac): record ProviderPlanner deferred-to-first-consumer rationale (rev5)`
 
 **Step 1: Write failing CI workflow** — workflow check that clones AWS, GCP, Azure plugin repos at their main branches, runs `go build ./...` against THIS PR's workflow head via a `go.mod` replace directive. Initially fails because the workflow doesn't exist.
 
@@ -2166,20 +2399,26 @@ jobs:
           name: codemod-report-${{ github.event.pull_request.number }}
           path: /tmp/codemod-report.md
           retention-days: 90
-      - name: Comment summary on PR (first-party — no third-party SHA-pin needed)
-        uses: actions/github-script@v7
+      - name: Comment summary on PR (first-party action SHA-pinned per workflow security policy)
+        # rev5 — pin to commit SHA even though first-party. Tag mutability is a known risk
+        # category covered by the workflow security-policy precedent. Renovate config tracks
+        # upstream releases via .github/renovate.json.
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
           script: |
             const fs = require('fs');
             const summary = fs.readFileSync('/tmp/codemod-summary.md', 'utf8');
             const marker = '<!-- codemod-report-sticky -->';
             const body = `${marker}\n${summary}`;
-            const { data: comments } = await github.rest.issues.listComments({
+            // rev5 — paginate to handle PRs with >30 comments (default page size).
+            // github.paginate auto-iterates all pages.
+            const allComments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
+              per_page: 100,
             });
-            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            const existing = allComments.find(c => c.body && c.body.startsWith(marker));
             if (existing) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -2393,7 +2632,7 @@ After all 11 PRs merge:
 
 1. **W-7 conformance suite green for DO** — `cd workflow-plugin-digitalocean && go test -tags=conformance ./...`
 2. **C-1 staging /healthz green** — `curl https://coredump-staging.ondigitalocean.app/healthz` returns 200
-3. **AWS/GCP/Azure plugins still build** — owned by W-9/T9.3 (cross-plugin-build-test CI gate); manual confirmation: `cd workflow-plugin-aws && go build ./...` exit 0; same for gcp, azure
+3. **AWS/GCP/Azure plugins still build** — owned by W-9/T9.1 (cross-plugin-build-test CI gate; rev4 renumbered from T9.3); manual confirmation: `cd workflow-plugin-aws && go build ./...` exit 0; same for gcp, azure
 4. **wfctl regression suite** — `cd workflow && go test ./... -count=1 -race`
 5. **codemod advisory reports filed** — issues open against AWS/GCP/Azure plugin repos with the lint-only output (TP1 attached the DO report to the P-DO PR; per-non-DO advisory issues filed manually after W-8 lands)
 
@@ -2406,7 +2645,7 @@ W-1 → W-2 → W-3a → W-3b → W-4 → W-5 → W-6 → W-7 → W-8 → P-DO �
 ```
 
 **rev4 sequencing changes (per cycle-3 finding):**
-- W-9 dropped its ProviderPlanner interface (YAGNI per cycle-3 Important 5); W-9 is now a single CI-only PR (T9.1 = cross-plugin-build gate). It can merge anytime after W-3b lands (the gate exercises whether W-3b's interface changes break AWS/GCP/Azure compilation). It is NOT on P-DO's critical path — T9.3's CI gate runs on every plugin PR irrespective of W-9's merge status.
+- W-9 dropped its ProviderPlanner interface (YAGNI per cycle-3 Important 5; ADR `decisions/0001-providerplanner-deferred-to-first-consumer.md` records the cycle-4 reasoning); W-9 is now a single CI-only PR (T9.1 = cross-plugin-build gate). It can merge anytime after W-3b lands (the gate exercises whether W-3b's interface changes break AWS/GCP/Azure compilation). It is NOT on P-DO's critical path — T9.1's CI gate runs on every plugin PR irrespective of W-9's merge status.
 - W-4 and W-9 no longer share a file (rev3's W-4↔W-9 race was on `interfaces/iac_provider.go` for `ProviderValidator` vs `ProviderPlanner` — with `ProviderPlanner` dropped in rev4, that overlap disappears).
 
 **Drafting (rev3 — addresses cycle-2 file-overlap finding):**
