@@ -201,6 +201,17 @@ func runInfraPlan(args []string) error {
 		return fmt.Errorf("compute plan: %w", err)
 	}
 
+	// Capture env-var fingerprints so apply (persisted-plan path: T1.5; in-process
+	// path: T3.1.5) can surface a per-key diagnostic when a referenced env var
+	// changed between plan and apply. Bumped to schema version 1 so older
+	// readers that predate this field can be detected and rejected.
+	snap, err := computeInfraInputSnapshot(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("compute input snapshot: %w", err)
+	}
+	plan.InputSnapshot = snap
+	plan.SchemaVersion = 1
+
 	switch *format {
 	case "markdown":
 		fmt.Print(formatPlanMarkdown(plan, showSensitive))
