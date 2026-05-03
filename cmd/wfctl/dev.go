@@ -67,7 +67,7 @@ Examples:
 	return fmt.Errorf("missing or unknown action")
 }
 
-func runDevUp(args []string) error {
+func runDevUp(args []string) (retErr error) {
 	fs := flag.NewFlagSet("dev up", flag.ContinueOnError)
 	configFile := fs.String("config", "", "Workflow config file")
 	local := fs.Bool("local", false, "Run app services as local Go processes with hot-reload")
@@ -103,7 +103,8 @@ func runDevUp(args []string) error {
 	}
 
 	// Write secrets env file if --secrets-from is set.
-	// The file is intentionally NOT cleaned up here — it persists until `dev down`.
+	// The file is intentionally NOT cleaned up here on success — it persists until `dev down`.
+	// On error, clean it up so we don't leave stale secrets on disk.
 	var secretsEnvFile string
 	if *secretsFrom != "" {
 		outDir := "."
@@ -115,6 +116,11 @@ func runDevUp(args []string) error {
 			return fmt.Errorf("--secrets-from: %w", err)
 		}
 		secretsEnvFile = envFile
+		defer func() {
+			if retErr != nil {
+				_ = removeDevSecretsEnvFile(secretsEnvFile)
+			}
+		}()
 	}
 
 	// Build local artifacts before starting services.
