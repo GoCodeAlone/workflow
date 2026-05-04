@@ -46,7 +46,7 @@ func warnIfPlanNotGitignored(w io.Writer, planPath string) {
 				// Surface parse failure to the operator (line over
 				// bufio.MaxScanTokenSize, etc.) rather than silently
 				// pretending the file is/isn't covered.
-				fmt.Fprintf(w, "warning: could not scan %s for plan.json coverage: %v\n", gitignore, scanErr)
+				fmt.Fprintf(w, "warning: could not scan %s for %s coverage: %v\n", gitignore, base, scanErr)
 				scanFailed = true
 			}
 			if ok {
@@ -61,7 +61,7 @@ func warnIfPlanNotGitignored(w io.Writer, planPath string) {
 		dir = parent
 	}
 	if foundAny && !covered && !scanFailed {
-		fmt.Fprintf(w, "warning: %s is not covered by .gitignore — plan.json may contain semi-sensitive data; add %q to .gitignore before committing.\n", planPath, base)
+		fmt.Fprintf(w, "warning: %s is not covered by .gitignore — %s may contain semi-sensitive data; add %q to .gitignore before committing.\n", planPath, base, base)
 	}
 }
 
