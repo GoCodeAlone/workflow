@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/diffcache"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 )
@@ -28,15 +29,15 @@ import (
 // LiveCloud=true so the scenario fires against the configured fake.
 func scenarioNeedsReplaceTriggersReplaceAction(t *testing.T, cfg Config) {
 	t.Helper()
-	// Conformance always tests the LIVE driver contract; bypass the
-	// platform diff cache so a stale entry from a prior run can't make
-	// the scenario pass for the wrong reason. NOTE: platform.getDiffCache
-	// is sync.Once-initialized per process — this t.Setenv only takes
-	// effect if no prior code in the test process has triggered the once.
-	// For real provider plugins, conformance.Run should be invoked before
-	// any other platform.ComputePlan call. A public
-	// platform.SetDiffCacheForTest helper is filed as a W-7 follow-up.
-	t.Setenv("WFCTL_DIFFCACHE", "disabled")
+	// Conformance always tests the LIVE driver contract; install a
+	// fresh no-op diff cache so a stale entry from a prior run can't
+	// make the scenario pass for the wrong reason. SetDiffCacheForTest
+	// Stores into platform's atomic.Pointer directly, bypassing the
+	// sync.Once-sealed env-var path that the prior t.Setenv workaround
+	// relied on. t.Cleanup restores the prior cache when the scenario
+	// subtest returns, so consecutive Runs in the same process get
+	// independent cache state.
+	platform.SetDiffCacheForTest(t, diffcache.NewNoop())
 
 	p := cfg.Provider()
 	defer func() { _ = p.Close() }()

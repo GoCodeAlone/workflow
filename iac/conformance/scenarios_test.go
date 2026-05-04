@@ -4,8 +4,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/diffcache"
 	"github.com/GoCodeAlone/workflow/iac/iactest"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/platform"
 )
 
 // fakeProvider is the in-tree fake used by the conformance self-tests.
@@ -144,6 +146,63 @@ func TestScenario_NeedsReplaceTriggersReplaceAction(t *testing.T) {
 		},
 	}
 	scenarioNeedsReplaceTriggersReplaceAction(t, cfg)
+}
+
+// TestRun_ConsecutiveRunsObserveLiveDriverIndependently is the
+// regression-pin for the W-7 follow-up that exported
+// platform.SetDiffCacheForTest. Before the fix, conformance scenarios
+// bypassed the diff cache via t.Setenv("WFCTL_DIFFCACHE", "disabled"),
+// which only worked on a fresh process — sync.Once initialization
+// sealed the cache backend on first call to platform.getDiffCache, so
+// a CI run that exercised ComputePlan in another test first left a
+// primed cache that masked live-driver regressions in subsequent
+// conformance runs.
+//
+// This test seeds the package cache with an in-memory backend
+// (simulating prior-test pollution that fired sync.Once with a real
+// cache), then runs conformance.Run twice against fresh provider
+// instances whose resource shapes hash to identical cache keys. With
+// SetDiffCacheForTest installed per-Run by the scenario, each Run
+// swaps in a fresh noop cache and the live driver dispatches both
+// times. Without the helper, the second Run would hit the seeded
+// cache and skip dispatch — driver2.DiffCallCount would stay at 0.
+func TestRun_ConsecutiveRunsObserveLiveDriverIndependently(t *testing.T) {
+	// Seed cache with an in-memory backend, simulating prior-test
+	// pollution. SetDiffCacheForTest's t.Cleanup restores the prior
+	// pointer (or a fresh default) when this test returns, so the seed
+	// does not leak to sibling tests.
+	platform.SetDiffCacheForTest(t, diffcache.NewMemory())
+
+	// runOnce executes conformance.Run with the smoke + live-cloud
+	// filter so Scenario_NeedsReplaceTriggersReplaceAction fires (it is
+	// the only currently-registered scenario that exercises ComputePlan
+	// against the live driver and is therefore the regression surface
+	// for cache-pollution masking).
+	runOnce := func(t *testing.T) *iactest.NoopDriver {
+		t.Helper()
+		driver := &iactest.NoopDriver{
+			DiffResult: &interfaces.DiffResult{NeedsReplace: true},
+		}
+		cfg := Config{
+			LiveCloud: true,
+			Provider: func() interfaces.IaCProvider {
+				return &iactest.NoopProvider{Driver: driver}
+			},
+		}
+		Run(t, cfg)
+		return driver
+	}
+
+	var driver1, driver2 *iactest.NoopDriver
+	t.Run("first", func(t *testing.T) { driver1 = runOnce(t) })
+	t.Run("second", func(t *testing.T) { driver2 = runOnce(t) })
+
+	if got := driver1.DiffCallCount.Load(); got < 1 {
+		t.Errorf("first Run: driver Diff calls = %d, want >= 1 (driver must be dispatched at least once)", got)
+	}
+	if got := driver2.DiffCallCount.Load(); got < 1 {
+		t.Errorf("second Run: driver Diff calls = %d, want >= 1 (cache MUST be reset between Runs to observe live driver — regression in W-7 SetDiffCacheForTest)", got)
+	}
 }
 
 // TestRegister_AppendsToAllScenarios verifies the registration hook used

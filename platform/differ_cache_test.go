@@ -10,35 +10,13 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// setDiffCacheForTest swaps the package-level diff cache for c and
-// restores the previous instance via t.Cleanup. Lives in this
-// internal-package test file so it can touch the unexported
-// planDiffCachePtr var without exposing a production-visible setter.
-//
-// After getDiffCache was refactored to sync.Once + atomic.Pointer
-// (Copilot review round 4), the swap mechanism stores into the atomic
-// directly. Cleanup restores the prior pointer if there was one, or
-// seeds a fresh default cache when no prior value existed (so any
-// subsequent test that doesn't call setDiffCacheForTest still observes
-// a working cache and doesn't trip getDiffCache's defensive
-// noop-fallback).
-func setDiffCacheForTest(t *testing.T, c diffcache.Cache) {
-	t.Helper()
-	prev := planDiffCachePtr.Load() // may be nil if Once hasn't fired
-	planDiffCachePtr.Store(&c)
-	t.Cleanup(func() {
-		if prev != nil {
-			planDiffCachePtr.Store(prev)
-			return
-		}
-		// No prior value — seed a fresh default so subsequent
-		// production code paths in this test binary still observe a
-		// working cache. Avoids leaving the atomic at nil, which would
-		// hit getDiffCache's defensive noop-fallback.
-		fresh := diffcache.New()
-		planDiffCachePtr.Store(&fresh)
-	})
-}
+// The test-helper that swaps the package-level diff cache used to
+// live here as the package-private setDiffCacheForTest. It was
+// promoted to the exported platform.SetDiffCacheForTest in
+// differ_test_helper.go (W-7 follow-up) so external test packages
+// (notably iac/conformance) can install a deterministic no-op cache
+// without relying on the WFCTL_DIFFCACHE env var, which only takes
+// effect on the very first call to getDiffCache (sync.Once).
 
 // TestComputePlan_CacheHitSkipsDiff verifies that running ComputePlan
 // twice against unchanged inputs hits the diffcache on the second
@@ -49,7 +27,7 @@ func setDiffCacheForTest(t *testing.T, c diffcache.Cache) {
 // Run against an in-memory cache so the test owns the eviction
 // horizon and doesn't read/write the developer's filesystem cache.
 func TestComputePlan_CacheHitSkipsDiff(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewMemory())
+	SetDiffCacheForTest(t, diffcache.NewMemory())
 
 	driver := &cacheTestDriver{
 		diff: &interfaces.DiffResult{NeedsUpdate: true},
@@ -82,7 +60,7 @@ func TestComputePlan_CacheHitSkipsDiff(t *testing.T) {
 // any cache-key field (config, outputs, providerID) forces a re-Diff:
 // the second invocation must hit the provider, not the cache.
 func TestComputePlan_CacheMissesOnDifferentInputs(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewMemory())
+	SetDiffCacheForTest(t, diffcache.NewMemory())
 
 	driver := &cacheTestDriver{
 		diff: &interfaces.DiffResult{NeedsUpdate: true},
@@ -115,7 +93,7 @@ func TestComputePlan_CacheMissesOnDifferentInputs(t *testing.T) {
 // behaviour in cache-disabled mode is correct because every call
 // re-dispatches Diff.
 func TestComputePlan_NoopCacheNeverHits(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewNoop())
+	SetDiffCacheForTest(t, diffcache.NewNoop())
 
 	driver := &cacheTestDriver{
 		diff: &interfaces.DiffResult{NeedsUpdate: true},
@@ -268,7 +246,7 @@ func TestParseConcurrencyEnv(t *testing.T) {
 // future refactor that drops the errgroup loop entirely (regressing
 // to a serial loop that happens to skip one) would fail this test.
 func TestComputePlan_ParallelDispatch_AllCandidatesObserveDiff(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewNoop()) // disable cache so every dispatch hits the driver
+	SetDiffCacheForTest(t, diffcache.NewNoop()) // disable cache so every dispatch hits the driver
 
 	driver := &cacheTestDriver{diff: &interfaces.DiffResult{NeedsUpdate: true}}
 	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
@@ -310,7 +288,7 @@ func TestComputePlan_ParallelDispatch_AllCandidatesObserveDiff(t *testing.T) {
 // goroutine would enter Diff and the test would hang on the second
 // `<-entered`.
 func TestComputePlan_ParallelDiffDispatch_InFlightGoroutinesObserved(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewNoop())
+	SetDiffCacheForTest(t, diffcache.NewNoop())
 
 	const n = 4
 	driver := &channelGatedDriver{
@@ -465,7 +443,7 @@ func TestPluginVersionKey_Stable(t *testing.T) {
 // action). Was implicitly covered by the no-changes test in T3.6e but
 // pinned explicitly here per T3.6e adversarial review #3.
 func TestComputePlan_DriverReturnsNilDiff_EmitsNothing(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewNoop())
+	SetDiffCacheForTest(t, diffcache.NewNoop())
 
 	driver := &cacheTestDriver{diff: nil} // explicit nil
 	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
@@ -497,7 +475,7 @@ func TestComputePlan_DriverReturnsNilDiff_EmitsNothing(t *testing.T) {
 // has ProviderID=="") and asserts the driver receives a Diff call
 // for each, not just one.
 func TestComputePlan_EmptyProviderID_BypassesCache(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewMemory())
+	SetDiffCacheForTest(t, diffcache.NewMemory())
 
 	driver := &cacheTestDriver{diff: &interfaces.DiffResult{NeedsUpdate: true}}
 	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
@@ -541,7 +519,7 @@ func TestComputePlan_EmptyProviderID_BypassesCache(t *testing.T) {
 // action), so the semantic is preserved while the cache stays
 // effective.
 func TestComputePlan_NilDiffResult_CachesAsZeroValue(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewMemory())
+	SetDiffCacheForTest(t, diffcache.NewMemory())
 
 	driver := &cacheTestDriver{diff: nil} // nil-as-no-op convention
 	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
@@ -588,7 +566,7 @@ func TestComputePlan_NilDiffResult_CachesAsZeroValue(t *testing.T) {
 // types, so this is defensive coverage for custom-provider Outputs
 // or future code paths.
 func TestComputePlan_UnhashableInputs_BypassCache(t *testing.T) {
-	setDiffCacheForTest(t, diffcache.NewMemory())
+	SetDiffCacheForTest(t, diffcache.NewMemory())
 
 	driver := &cacheTestDriver{diff: &interfaces.DiffResult{NeedsUpdate: true}}
 	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}

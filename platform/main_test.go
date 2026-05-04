@@ -15,7 +15,7 @@ import (
 //
 // Tests in this package that specifically exercise cache-hit
 // behaviour (differ_cache_test.go, internal package) override the
-// noop backend per-test via setDiffCacheForTest with a controlled
+// noop backend per-test via SetDiffCacheForTest with a controlled
 // in-memory cache, then restore the noop backend on cleanup.
 func TestMain(m *testing.M) {
 	// Unset WFCTL_PLAN_DIFF_CONCURRENCY so tests that exercise
