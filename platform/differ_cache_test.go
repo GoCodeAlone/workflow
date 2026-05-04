@@ -575,3 +575,87 @@ func TestComputePlan_NilDiffResult_CachesAsZeroValue(t *testing.T) {
 		t.Errorf("after second ComputePlan: Diff calls = %d, want 1 (cache hit on zero-value DiffResult; round-5 fix)", got)
 	}
 }
+
+// TestComputePlan_UnhashableInputs_BypassCache pins the round-9 fix:
+// when spec.Config or rs.Outputs contains a non-marshalable value
+// (channel, function, cycle), configHashErr surfaces the marshal
+// failure and ComputePlan bypasses the diff cache for that resource —
+// rather than collapsing all unmarshalable inputs to the constant
+// sha256("") hash and risking cache-key collisions across distinct
+// resources serving each other's cached DiffResult.
+//
+// In practice IaC configs come from YAML and cannot contain these
+// types, so this is defensive coverage for custom-provider Outputs
+// or future code paths.
+func TestComputePlan_UnhashableInputs_BypassCache(t *testing.T) {
+	setDiffCacheForTest(t, diffcache.NewMemory())
+
+	driver := &cacheTestDriver{diff: &interfaces.DiffResult{NeedsUpdate: true}}
+	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
+
+	// Two resources, both with non-marshalable values in Outputs (a
+	// channel, which json.Marshal rejects). Without the bypass, both
+	// would hash to the constant sha256("") and the second resource
+	// would be served the first's cached DiffResult.
+	unmarshalable := make(chan int)
+	desired := []interfaces.ResourceSpec{
+		{Name: "vpc-a", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
+		{Name: "vpc-b", Type: "infra.vpc", Config: map[string]any{"region": "sfo3"}},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "vpc-a", Type: "infra.vpc", ProviderID: "pid-a", Outputs: map[string]any{"poison": unmarshalable}},
+		{Name: "vpc-b", Type: "infra.vpc", ProviderID: "pid-b", Outputs: map[string]any{"poison": unmarshalable}},
+	}
+
+	if _, err := ComputePlan(context.Background(), provider, desired, current); err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	if got := driver.diffCount.Load(); got != 2 {
+		t.Errorf("Diff calls = %d, want 2 (one per resource on first pass)", got)
+	}
+	// Second pass: both resources should re-Diff (cache bypassed),
+	// not share a cached entry. Without the round-9 fix, both
+	// resources collapse to the same SHAOutputs="" key on the first
+	// pass, only one cache.Put happens (overwriting), and the
+	// second pass hits cache for both — diffCount would stop at 3
+	// (one re-dispatch + one bogus hit).
+	if _, err := ComputePlan(context.Background(), provider, desired, current); err != nil {
+		t.Fatalf("second ComputePlan: %v", err)
+	}
+	if got := driver.diffCount.Load(); got != 4 {
+		t.Errorf("Diff calls after 2nd ComputePlan = %d, want 4 (no cache hits when Outputs are unhashable; round-9 fix)", got)
+	}
+}
+
+// TestConfigHashErr_PropagatesMarshalFailure is a unit-level pin for
+// configHashErr. Marshalable inputs return (hash, nil); a non-
+// marshalable value (channel) returns ("", non-nil-err). Backward
+// compatibility: the un-suffixed configHash returns the empty hash
+// for the same input (silently swallowing the error, as documented
+// in its docstring; legacy callers operating on YAML-derived configs
+// don't reach this path).
+func TestConfigHashErr_PropagatesMarshalFailure(t *testing.T) {
+	good := map[string]any{"region": "nyc3", "size": 4}
+	gotHash, gotErr := configHashErr(good)
+	if gotErr != nil {
+		t.Fatalf("configHashErr(good): unexpected err: %v", gotErr)
+	}
+	if len(gotHash) != 64 {
+		t.Errorf("configHashErr(good): hash len = %d, want 64 (sha256 hex)", len(gotHash))
+	}
+
+	bad := map[string]any{"poison": make(chan int)}
+	gotHash, gotErr = configHashErr(bad)
+	if gotErr == nil {
+		t.Errorf("configHashErr(bad): expected non-nil error for unmarshalable input; got hash=%q", gotHash)
+	}
+	if gotHash != "" {
+		t.Errorf("configHashErr(bad): hash = %q, want empty string when err != nil", gotHash)
+	}
+
+	// Backward-compatible wrapper: configHash silently returns "" for
+	// the same bad input (legacy contract; documented in its docstring).
+	if got := configHash(bad); got != "" {
+		t.Errorf("configHash(bad) = %q, want empty string (backward-compat: errors swallowed)", got)
+	}
+}
