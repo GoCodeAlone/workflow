@@ -111,12 +111,17 @@ GCP ?= ../workflow-plugin-gcp
 AZURE ?= ../workflow-plugin-azure
 
 migrate-providers: build-iac-codemod
+	@# iac-codemod lint exit-code semantics (review round-5 finding #7):
+	@#   0 = clean / 1 = advisory findings (continue) / 2 = parse errors (fail).
+	@# Naive `|| true` would swallow real execution failures alongside the
+	@# expected advisory findings; gate on exit code 1 specifically so a
+	@# parse-error or unknown-flag (>=2) still fails the target.
 	@echo "==> Running iac-codemod lint (advisory) against AWS plugin: $(AWS)"
-	@if [ -d "$(AWS)" ]; then ./iac-codemod lint -dry-run "$(AWS)" || true; else echo "  (skipping: $(AWS) not found)"; fi
+	@if [ -d "$(AWS)" ]; then ./iac-codemod lint -dry-run "$(AWS)"; ec=$$?; if [ $$ec -ne 0 ] && [ $$ec -ne 1 ]; then echo "  iac-codemod lint failed (exit=$$ec)"; exit $$ec; fi; else echo "  (skipping: $(AWS) not found)"; fi
 	@echo "==> Running iac-codemod lint (advisory) against GCP plugin: $(GCP)"
-	@if [ -d "$(GCP)" ]; then ./iac-codemod lint -dry-run "$(GCP)" || true; else echo "  (skipping: $(GCP) not found)"; fi
+	@if [ -d "$(GCP)" ]; then ./iac-codemod lint -dry-run "$(GCP)"; ec=$$?; if [ $$ec -ne 0 ] && [ $$ec -ne 1 ]; then echo "  iac-codemod lint failed (exit=$$ec)"; exit $$ec; fi; else echo "  (skipping: $(GCP) not found)"; fi
 	@echo "==> Running iac-codemod lint (advisory) against Azure plugin: $(AZURE)"
-	@if [ -d "$(AZURE)" ]; then ./iac-codemod lint -dry-run "$(AZURE)" || true; else echo "  (skipping: $(AZURE) not found)"; fi
+	@if [ -d "$(AZURE)" ]; then ./iac-codemod lint -dry-run "$(AZURE)"; ec=$$?; if [ $$ec -ne 0 ] && [ $$ec -ne 1 ]; then echo "  iac-codemod lint failed (exit=$$ec)"; exit $$ec; fi; else echo "  (skipping: $(AZURE) not found)"; fi
 	@echo "==> migrate-providers complete (advisory-only; no files mutated)"
 
 # Clean build artifacts

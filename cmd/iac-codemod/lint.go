@@ -140,12 +140,21 @@ func runLint(args []string, opts *Options, stdout, stderr io.Writer) int {
 		}
 	}
 	report.print(stdout)
-	// Exit non-zero on EITHER findings OR per-file errors. Review round-1
-	// finding #10: rev0 returned 0 when there were no findings even if
-	// every file failed to parse, which let a green CI run hide the
-	// fact that no analysis happened. Treating per-file errors as
-	// failure surfaces the coverage gap honestly.
-	if len(report.findings) > 0 || len(report.errors) > 0 {
+	// Exit code semantics:
+	//   0 = clean (no findings, no errors)
+	//   1 = advisory findings present (no per-file errors)
+	//   2 = per-file parse/type-check errors (findings count
+	//       irrelevant; the analyzer never got a chance to run on
+	//       at least one file)
+	//
+	// Round-1 #10 conflated findings and errors at exit 1, which let
+	// `make migrate-providers || true` swallow real failures. Round-5
+	// #7 splits the codes so callers can `|| [ $? -eq 1 ]` to accept
+	// findings as advisory while still failing on unparseable input.
+	if len(report.errors) > 0 {
+		return 2
+	}
+	if len(report.findings) > 0 {
 		return 1
 	}
 	return 0
@@ -616,20 +625,13 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 			routeSkipName(pass, methods[0].Pos(), recv)
 			continue
 		}
-		// Signature-match (review round-1 finding #11): rev0 of this
-		// analyzer matched ValidatePlan by name only, so a method with
-		// the wrong parameter or result type passed silently — even
-		// though the type still failed to satisfy
-		// interfaces.ProviderValidator. validatePlanSignatureMatches
-		// (in add_validate_plan.go) is the shared signature checker.
-		hasValidate := false
-		for _, m := range methods {
-			if m.Name.Name == "ValidatePlan" && validatePlanSignatureMatches(m.Type) {
-				hasValidate = true
-				break
-			}
-		}
-		if hasValidate {
+		// Signature + receiver-kind match. Round-1 #11 added the
+		// signature check; round-5 #4 added the receiver-kind check
+		// (a value-receiver provider with a pointer-receiver
+		// ValidatePlan still fails the ProviderValidator type
+		// assertion because the method set on `T` does not include
+		// `*T` methods). hasValidatePlanMethod centralises the logic.
+		if hasValidatePlanMethod(methods) {
 			continue
 		}
 		// Report at the type decl if available, else at the first method.

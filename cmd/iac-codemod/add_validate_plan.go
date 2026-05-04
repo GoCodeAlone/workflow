@@ -525,23 +525,31 @@ func providerReceiversWithMethods(file *ast.File) (
 
 // hasValidatePlanMethod returns true if the method list contains a
 // ValidatePlan method whose signature matches
-// `ValidatePlan(*IaCPlan) []PlanDiagnostic` (qualified or unqualified).
-// Review round-1 finding #8: rev0 of this function only checked the
-// method name, so a ValidatePlan with the wrong parameter or result
-// type passed silently — defeating the codemod's purpose since the
-// type would still fail to satisfy interfaces.ProviderValidator.
+// `ValidatePlan(*IaCPlan) []PlanDiagnostic` AND whose receiver kind
+// matches the dominant receiver kind of the type's existing
+// Plan/Apply methods.
 //
-// Signature match is conservative-syntactic: 1 parameter that's a
-// pointer type with name suffix "IaCPlan", and 1 result that's a
-// slice type with element name suffix "PlanDiagnostic". Suffix match
-// covers both qualified (`*interfaces.IaCPlan`,
-// `[]interfaces.PlanDiagnostic`) and unqualified shapes.
+// Review history:
+//   - round-1 #8: rev0 only checked the method name; a ValidatePlan
+//     with the wrong parameter or result type passed silently. Fixed
+//     by adding validatePlanSignatureMatches.
+//   - round-5 #3: rev1 ignored receiver kind; a value-receiver
+//     provider (Plan/Apply on `T`) with a pointer-receiver
+//     ValidatePlan on `*T` still failed the
+//     interfaces.ProviderValidator type assertion (method set on `T`
+//     does not include `*T` methods). hasValidatePlanMethod now
+//     accepts ValidatePlan only if its receiver kind matches the
+//     existing convention; otherwise the type is reported as missing.
 func hasValidatePlanMethod(methods []*ast.FuncDecl) bool {
+	wantPointer := providerReceiverConvention(methods)
 	for _, m := range methods {
 		if m.Name.Name != "ValidatePlan" {
 			continue
 		}
 		if !validatePlanSignatureMatches(m.Type) {
+			continue
+		}
+		if receiverIsPointer(m) != wantPointer {
 			continue
 		}
 		return true

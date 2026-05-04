@@ -277,12 +277,75 @@ func classifyApplyBody(fn *ast.FuncDecl, file *ast.File, fset *token.FileSet, pa
 		return applyCustomErrorWrapping, fmtPosShort(path, offender.Line), "manual port required: wfctlhelpers.ApplyPlan does NOT expose a per-action error-wrap hook today (review round-1 finding #6: rev0 of this report named a fictional ApplyResultErrorHook / WrapActionError API). Two honest options: (a) preserve the domain-context wrap by adding `// wfctl:skip-iac-codemod` to the Apply method and keeping the manual switch; (b) move the wrap into the driver itself (Create/Update/Delete return the already-wrapped error) so wfctlhelpers' generic dispatcher records it verbatim. Option (b) is preferred because it survives any future migration."
 	}
 	// Heuristic: if the switch has the canonical create/update[/delete]
-	// triple (plus optional separate replace) and no detected non-canonical
-	// idiom, treat as canonical.
-	if hasCanonicalCases(sw) {
+	// triple (plus optional separate replace), no non-canonical idiom
+	// inside the switch, AND the surrounding Apply body matches the
+	// canonical scaffold (result-init + range-loop + return), treat as
+	// canonical. Round-5 finding #2: rev3 only verified the switch
+	// shape — setup/teardown/custom result aggregation OUTSIDE the
+	// switch was silently dropped on -fix.
+	if hasCanonicalCases(sw) && isCanonicalApplyOuterShape(fn.Body) {
 		return applyCanonical, "", ""
 	}
-	return applyNonCanonicalOther, "", "Apply switch has unrecognised case shape; review manually."
+	return applyNonCanonicalOther, "", "Apply outer shape (result-init + range-loop + return) or switch has unrecognised statements; review manually."
+}
+
+// isCanonicalApplyOuterShape returns true if fn.Body matches the
+// canonical 3-statement scaffold around the action switch:
+//
+//  1. `result := &ApplyResult{...}`
+//  2. `for _, action := range plan.Actions { ... }`
+//  3. `return result, nil`
+//
+// Reject any deviation (extra setup, teardown, custom aggregation,
+// trailing helper calls) so bespoke logic outside the switch is
+// preserved as non-canonical (review round-5 #2).
+func isCanonicalApplyOuterShape(body *ast.BlockStmt) bool {
+	if body == nil || len(body.List) != 3 {
+		return false
+	}
+	// 1. result := &ApplyResult{...}
+	a, ok := body.List[0].(*ast.AssignStmt)
+	if !ok || a.Tok != token.DEFINE || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
+		return false
+	}
+	if id, ok := a.Lhs[0].(*ast.Ident); !ok || id.Name != "result" {
+		return false
+	}
+	un, ok := a.Rhs[0].(*ast.UnaryExpr)
+	if !ok || un.Op != token.AND {
+		return false
+	}
+	cl, ok := un.X.(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	if !typeNameTailMatches(cl.Type, "ApplyResult") {
+		return false
+	}
+	// 2. for _, action := range plan.Actions { ... }
+	rng, ok := body.List[1].(*ast.RangeStmt)
+	if !ok {
+		return false
+	}
+	xSel, ok := rng.X.(*ast.SelectorExpr)
+	if !ok || xSel.Sel.Name != "Actions" {
+		return false
+	}
+	if planId, ok := xSel.X.(*ast.Ident); !ok || planId.Name != "plan" {
+		return false
+	}
+	// 3. return result, nil
+	ret, ok := body.List[2].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 2 {
+		return false
+	}
+	if id, ok := ret.Results[0].(*ast.Ident); !ok || id.Name != "result" {
+		return false
+	}
+	if id, ok := ret.Results[1].(*ast.Ident); !ok || id.Name != "nil" {
+		return false
+	}
+	return true
 }
 
 // fmtPosShort renders a path:line short form for offender positions.
@@ -717,8 +780,14 @@ func isDriverMethodCall(expr ast.Expr) bool {
 	if !ok {
 		return false
 	}
+	// Conservative driver-receiver allowlist. Round-5 finding #9: rev3
+	// allowlist {d, drv, driver} missed `dr`, `rd`, `rdrv`, etc. Widen
+	// to a slightly larger set of common single-/short-identifier names
+	// while still rejecting bookkeeping-style receivers like `metrics`,
+	// `audit`, `helper` (per round-4 #3 — that's the whole point of
+	// the receiver check).
 	switch x.Name {
-	case "d", "drv", "driver":
+	case "d", "dr", "drv", "rdrv", "driver", "resourceDriver":
 		return true
 	}
 	return false

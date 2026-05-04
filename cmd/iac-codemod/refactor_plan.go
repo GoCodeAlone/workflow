@@ -291,6 +291,14 @@ func planLikeReceiversInDir(dir string) map[string]bool {
 // callers can inspect ValidatePlan presence + receiver-kind for
 // providers split across sibling files (round-2 #5 + round-3 #1).
 //
+// Files are filtered by package name: only files whose `package P`
+// clause matches the dominant (most-common) package in dir are
+// aggregated. Review round-5 finding #6: rev2 merged methods from
+// EVERY non-test .go file regardless of package, so a build-tagged
+// or mixed-package directory could fold methods from unrelated
+// packages into a synthetic provider and drive incorrect rewrites /
+// stub insertion.
+//
 // The returned slice contains *ast.FuncDecl values from a SEPARATE
 // parser.ParseFile call than any caller's primary file parse, so
 // caller code that relies on AST-pointer identity must dedupe (see
@@ -300,7 +308,14 @@ func planLikeProviderMethodsInDir(dir string) (map[string]bool, map[string][]*as
 	if err != nil {
 		return nil, nil
 	}
-	methodsByRecv := make(map[string][]*ast.FuncDecl)
+	// Pass 1: parse every candidate file's package clause to find the
+	// dominant package.
+	type parsedFile struct {
+		pkg  string
+		file *ast.File
+	}
+	var files []parsedFile
+	pkgCounts := make(map[string]int)
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -319,7 +334,27 @@ func planLikeProviderMethodsInDir(dir string) (map[string]bool, map[string][]*as
 		if err != nil {
 			continue
 		}
-		for _, decl := range file.Decls {
+		pkgCounts[file.Name.Name]++
+		files = append(files, parsedFile{pkg: file.Name.Name, file: file})
+	}
+	if len(files) == 0 {
+		return nil, nil
+	}
+	dominant := ""
+	dominantCount := 0
+	for pkg, count := range pkgCounts {
+		if count > dominantCount {
+			dominant = pkg
+			dominantCount = count
+		}
+	}
+	// Pass 2: aggregate methods only from the dominant package.
+	methodsByRecv := make(map[string][]*ast.FuncDecl)
+	for _, p := range files {
+		if p.pkg != dominant {
+			continue
+		}
+		for _, decl := range p.file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
 				continue
@@ -404,62 +439,33 @@ func classifyPlanBody(fn *ast.FuncDecl, file *ast.File) (planClassification, str
 	return planNonCanonical, "Plan body does not match configHash-compare template"
 }
 
-// isAlreadyDelegatedPlanBody returns true if the body is one of the
-// recognised already-delegated shapes (with package alias resolution
-// per review round-4 finding #4):
+// isAlreadyDelegatedPlanBody returns true ONLY for the canonical
+// 2-statement rev2 form (with package alias resolution per round-4 #4):
 //
-//  1. The canonical 2-statement rev2 form (round-2 finding #1):
+//	plan, err := <platform-alias>.ComputePlan(ctx, p, desired, current)
+//	return &plan, err
 //
-//     plan, err := <platform-alias>.ComputePlan(ctx, p, desired, current)
-//     return &plan, err
+// Round-5 finding #5: the legacy single-statement forms (broken rev1
+// `return platform.ComputePlan(...)` and rev0 `return wfctlhelpers.Plan(...)`)
+// are NOT accepted as already-delegated. They're uncompilable broken
+// output. Treating them as no-op meant rerunning the fixed codemod
+// would never repair them. They now classify as non-canonical (the
+// classifyPlanBody fallthrough) so a fresh -fix produces the correct
+// 2-statement form.
 //
-//  2. Single-statement legacy `return <wfctlhelpers-alias>.Plan(...)`
-//     (rev0 planned-but-not-shipped target).
-//
-//  3. Single-statement legacy `return <platform-alias>.ComputePlan(...)`
-//     (rev1 ill-formed rewrite — uncompilable due to value/pointer
-//     mismatch but accepted here so a hand-applied rev1 fixture isn't
-//     re-rewritten into the rev2 form).
-//
-// pkgAliasFor resolves the local alias the file uses for the
-// platform / wfctlhelpers import paths; literal names are accepted as
-// fallbacks so test fixtures without a real import work.
+// (The lint analyzer's "delegated" check still accepts the legacy
+// forms as delegated for advisory purposes, since the marker mismatch
+// is benign there. Only the rewriter distinguishes "broken output
+// needing repair" from "true no-op idempotent".)
 func isAlreadyDelegatedPlanBody(body *ast.BlockStmt, file *ast.File) bool {
 	platformAlias := pkgAliasFor(file, planHelperImportPath, "platform")
-	wfhAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
-	// Shape 1: 2-statement form.
-	if len(body.List) == 2 {
-		if isPlatformComputePlanAssign(body.List[0], platformAlias) && isAddrPlanReturn(body.List[1]) {
-			return true
-		}
-	}
-	// Shape 2/3: single-statement legacy returns.
-	if len(body.List) != 1 {
+	if len(body.List) != 2 {
 		return false
 	}
-	ret, ok := body.List[0].(*ast.ReturnStmt)
-	if !ok || len(ret.Results) != 1 {
+	if !isPlatformComputePlanAssign(body.List[0], platformAlias) {
 		return false
 	}
-	call, ok := ret.Results[0].(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	x, ok := sel.X.(*ast.Ident)
-	if !ok {
-		return false
-	}
-	switch {
-	case (x.Name == platformAlias || x.Name == "platform") && sel.Sel.Name == "ComputePlan":
-		return true
-	case (x.Name == wfhAlias || x.Name == "wfctlhelpers") && sel.Sel.Name == "Plan":
-		return true
-	}
-	return false
+	return isAddrPlanReturn(body.List[1])
 }
 
 // isPlatformComputePlanAssign returns true if stmt is
@@ -657,20 +663,26 @@ func isPlanCompositeAssign(stmt ast.Stmt) bool {
 // range-over-desired loop is EXACTLY the configHash-compare template:
 //
 //  1. lookup statement (`cur, exists := <X>[<key>]`)
-//  2. `if !exists { ...append create... }` (the body must not return
-//     anything bespoke — only the create-action append + continue/break
-//     control flow)
-//  3. `if configHash(...) != configHash(...) { ...append update... }`
+//  2. `if !exists { plan.Actions = append(plan.Actions, ...); continue }`
+//     — body MUST be exactly: one append-to-plan.Actions + one continue.
+//  3. `if configHash(...) != configHash(...) { plan.Actions = append(plan.Actions, ...) }`
+//     — body MUST be exactly: one append-to-plan.Actions.
 //
 // Reject any statement that doesn't fit these three slots — bespoke
-// telemetry, metrics, alternate construction, etc. — to keep the canonical
-// detector tight (review round-1 finding #3: a too-loose detector
-// silently rewrites bespoke planners that happen to share keywords).
+// telemetry, metrics, alternate construction, etc. — to keep the
+// canonical detector tight. Round-5 finding #1: rev3 only checked the
+// guard expressions and statement count; it never inspected what the
+// branch bodies did, so extra logic inside `!exists` (or different
+// create/update behavior) classified as canonical and was silently
+// dropped during -fix.
 //
-// Top-level statement count must be exactly 3; the second-and-third
-// must be the !exists guard and configHash guard respectively. The
-// lookup statement may be assignment-style (`:=`) or simple-assign
-// (`=`) — both are valid Go.
+// Both branch bodies are validated by isCanonicalPlanActionsAppendOnly
+// (append + optional continue) so a planner with extra side-effects
+// inside either branch is rejected.
+//
+// Top-level statement count must be exactly 3. The lookup statement
+// may be assignment-style (`:=`) or simple-assign (`=`) — both are
+// valid Go.
 func rangeBodyMatchesCanonicalDesired(body *ast.BlockStmt) bool {
 	stmts := body.List
 	if len(stmts) != 3 {
@@ -687,7 +699,7 @@ func rangeBodyMatchesCanonicalDesired(body *ast.BlockStmt) bool {
 	if _, isIndex := a.Rhs[0].(*ast.IndexExpr); !isIndex {
 		return false
 	}
-	// 2. !exists guard.
+	// 2. !exists guard with append+continue body.
 	notExists, ok := stmts[1].(*ast.IfStmt)
 	if !ok {
 		return false
@@ -696,13 +708,20 @@ func rangeBodyMatchesCanonicalDesired(body *ast.BlockStmt) bool {
 	if !ok || u.Op != token.NOT {
 		return false
 	}
-	if id, ok := u.X.(*ast.Ident); !ok || id.Name != "exists" {
+	// Accept both `exists` (DO convention) and `ok` (idiomatic Go).
+	// Round-5 finding #8: rev3 hardcoded "exists", missing the
+	// semantically-identical `cur, ok := currentByName[...]` form.
+	id, ok := u.X.(*ast.Ident)
+	if !ok || (id.Name != "exists" && id.Name != "ok") {
 		return false
 	}
 	if notExists.Else != nil {
-		return false // else-branch means out-of-template logic
+		return false
 	}
-	// 3. configHash != configHash guard.
+	if !isCanonicalCreateBranchBody(notExists.Body) {
+		return false
+	}
+	// 3. configHash != configHash guard with append-only body.
 	hashGuard, ok := stmts[2].(*ast.IfStmt)
 	if !ok {
 		return false
@@ -715,6 +734,68 @@ func rangeBodyMatchesCanonicalDesired(body *ast.BlockStmt) bool {
 		return false
 	}
 	if hashGuard.Else != nil {
+		return false
+	}
+	if !isCanonicalUpdateBranchBody(hashGuard.Body) {
+		return false
+	}
+	return true
+}
+
+// isCanonicalCreateBranchBody returns true if body is exactly:
+//
+//	plan.Actions = append(plan.Actions, ...)
+//	continue
+//
+// (review round-5 #1).
+func isCanonicalCreateBranchBody(body *ast.BlockStmt) bool {
+	if body == nil || len(body.List) != 2 {
+		return false
+	}
+	if !isPlanActionsAppendAssign(body.List[0]) {
+		return false
+	}
+	br, ok := body.List[1].(*ast.BranchStmt)
+	if !ok || br.Tok != token.CONTINUE {
+		return false
+	}
+	return true
+}
+
+// isCanonicalUpdateBranchBody returns true if body is exactly:
+//
+//	plan.Actions = append(plan.Actions, ...)
+//
+// (review round-5 #1).
+func isCanonicalUpdateBranchBody(body *ast.BlockStmt) bool {
+	if body == nil || len(body.List) != 1 {
+		return false
+	}
+	return isPlanActionsAppendAssign(body.List[0])
+}
+
+// isPlanActionsAppendAssign returns true if stmt is
+// `plan.Actions = append(plan.Actions, ...)`. The append's first arg
+// must reference plan.Actions; the rest is unconstrained (composite
+// literal payload is fine).
+func isPlanActionsAppendAssign(stmt ast.Stmt) bool {
+	a, ok := stmt.(*ast.AssignStmt)
+	if !ok || a.Tok != token.ASSIGN || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
+		return false
+	}
+	sel, ok := a.Lhs[0].(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Actions" {
+		return false
+	}
+	if id, ok := sel.X.(*ast.Ident); !ok || id.Name != "plan" {
+		return false
+	}
+	call, ok := a.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	idFn, ok := call.Fun.(*ast.Ident)
+	if !ok || idFn.Name != "append" || len(call.Args) < 2 {
 		return false
 	}
 	return true
