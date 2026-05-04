@@ -63,9 +63,16 @@
 // # Lifecycle
 //
 //   - T5.1 (this file) defines the helper.
-//   - T5.2 wires it into wfctlhelpers.ApplyPlan's per-action dispatch.
-//   - T5.3 wires it into doReplace so replaced resources' dependents see
-//     the new ProviderID.
+//   - T5.2 wires it into wfctlhelpers.ApplyPlan's per-action dispatch —
+//     a single ResolveSpec call per PlanAction immediately before driver
+//     dispatch.
+//   - T5.3 verifies cascade behavior: doReplace populates
+//     ApplyResult.ReplaceIDMap when a Replace action successfully
+//     Delete-then-Creates, and the existing T5.2 ResolveSpec call site
+//     consumes that map on subsequent PlanActions in the same apply
+//     loop. T5.3 does NOT add a second ResolveSpec call inside
+//     doReplace — see ADR 008 for the rationale (single resolution
+//     boundary, ReplaceIDMap-first ordering).
 package jitsubst
 
 import (

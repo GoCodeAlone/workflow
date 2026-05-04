@@ -43,42 +43,16 @@ modules:
 // scenario: a config whose env_vars carry a ${MODULE.field} reference (a
 // JIT-required ref) bumps the plan to V2 so older wfctl binaries (which
 // only read V1) reject the plan with the standard "newer than supported"
-// diagnostic. T5.5 will additionally reject persisting V2 plans via -o.
+// diagnostic. T5.5 owns the persisted-plan rejection contract end-to-end;
+// this test focuses on the planRequiresJITSubstitution helper logic via a
+// direct in-process assertion (no CLI driving needed).
 func TestInfraPlan_SchemaVersionV2_WhenJITModuleFieldRef(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "infra.yaml")
 	// env_vars is a preserve-key submap, so ${pg.private_ip} survives
 	// plan-time ExpandEnvInMapPreservingKeys verbatim and lands in
-	// plan.Actions[0].Resource.Config["env_vars"]["DB_HOST"].
-	if err := os.WriteFile(cfgPath, []byte(`
-modules:
-  - name: app
-    type: infra.container_service
-    config:
-      env_vars:
-        DB_HOST: "${pg.private_ip}"
-`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	planFile := filepath.Join(dir, "plan.json")
-	// Note: -o causes a separate persisted-plan rejection in T5.5; for
-	// T5.4 we only need to verify the SchemaVersion bumping logic. We
-	// run plan WITHOUT -o (stdout-only) which is allowed for V2 in T5.5.
-	if err := runInfraPlan([]string{"--config", cfgPath}); err != nil {
-		// runInfraPlan with no -o still computes the plan and prints
-		// to stdout; SchemaVersion bumping is observable only via -o
-		// or via the in-process plan struct. For test purposes we use
-		// -o on this V2 path under T5.4 ONLY — T5.5's rejection adds
-		// a guard later and this test predates it. To keep T5.4 a
-		// pure-logic test we exercise the helper directly below.
-		t.Fatalf("runInfraPlan (no -o): %v", err)
-	}
-
-	// Direct helper assertion: build a plan struct with a JIT ref and
-	// verify planRequiresJITSubstitution flags it. This locks the
-	// SchemaVersion-stamp logic without depending on T5.5's persistence
-	// rejection coming online.
-	_ = planFile
+	// plan.Actions[0].Resource.Config["env_vars"]["DB_HOST"]. We assert
+	// directly against the helper rather than re-driving runInfraPlan, which
+	// would not surface the SchemaVersion bump without -o (and -o is
+	// rejected for V2 plans by T5.5's contract).
 	plan := &interfaces.IaCPlan{
 		Actions: []interfaces.PlanAction{{
 			Action: "create",
