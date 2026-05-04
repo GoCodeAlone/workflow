@@ -109,10 +109,21 @@ jobs:
       #  1. Month-to-date spend > $25/mo cap (the smoke-gate kill-
       #     switch already aborts new runs above this; this branch
       #     ensures an audit-trail issue exists).
-      #  2. Scrub events today > 3 — sustained leak rate that warrants
-      #     human investigation regardless of dollar value.
+      #  2. Scrub EVENTS today > 3 — sustained leak rate that
+      #     warrants human investigation regardless of dollar value.
       # Files into a SEPARATE dedup chain so leak vs. budget swimlanes
       # stay clean.
+      #
+      # IMPORTANT: counting "scrub events" means counting actual
+      # scrub runs that detected leaks, NOT counting issues created
+      # today. Because the dedup helper appends comments to a single
+      # open issue rather than filing fresh ones, an issues-created-
+      # today count caps at 1 even during a steady-state leak —
+      # silently failing the > 3/day escalation. The fix counts the
+      # COMMENTS on the open dedup issue (each scrub appends one),
+      # plus 1 if the issue itself was filed today (first-detection-
+      # of-day case). Identified by spec-review of T7.14, fixed in
+      # this commit.
       - name: Check balance + escalate budget incident
         env:
           GH_TOKEN: ${{ github.token }}
@@ -122,16 +133,35 @@ jobs:
             -H "Authorization: Bearer ${DO_CONFORMANCE_API_TOKEN}" \
             "https://api.digitalocean.com/v2/customers/my/balance")
           SPEND=$(jq -r '.month_to_date_usage // "0"' <<< "${BALANCE}")
-          # Count today's auto-filed-leak issues (regardless of state)
-          # to detect sustained scrub-firing.
+
+          # Count today's scrub events from the open dedup issue's
+          # comment trail. Each scrub run that detected leaks appends
+          # one comment via the dedup helper. If no open dedup issue
+          # exists yet (no leaks today), the count is 0.
           TODAY="$(date -u '+%Y-%m-%d')"
-          TODAY_SCRUBS=$(gh issue list \
+          EXISTING=$(gh issue list \
             --label conformance-leak-incident \
             --label auto-filed-leak \
-            --state all \
-            --search "created:>=${TODAY}" \
+            --state open \
             --json number \
-            --jq 'length')
+            --jq '.[0].number // empty')
+          if [[ -n "${EXISTING}" ]]; then
+            # paginate over comments; count those created today.
+            COMMENTS_TODAY=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/issues/${EXISTING}/comments" \
+              --paginate \
+              --jq "[.[] | select(.created_at >= \"${TODAY}T00:00:00Z\")] | length")
+            # Include the issue creation itself if it was today
+            # (covers the first-detection-of-day case where there
+            # are 0 comments yet but 1 scrub event has fired).
+            ISSUE_TODAY=$(gh issue view "${EXISTING}" \
+              --json createdAt \
+              --jq "if .createdAt >= \"${TODAY}T00:00:00Z\" then 1 else 0 end")
+            TODAY_SCRUBS=$(( COMMENTS_TODAY + ISSUE_TODAY ))
+          else
+            TODAY_SCRUBS=0
+          fi
+
           ESCALATE=0
           REASON=""
           if awk "BEGIN { exit !(${SPEND} > ${BUDGET_HARD_CAP_USD}) }"; then

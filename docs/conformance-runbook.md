@@ -203,9 +203,13 @@ Steps:
 
 ## Known follow-ups
 
-- **`wfctl infra cleanup --tag <name>`** — needed by the smoke
-  workflow's outer-job cleanup step. Current stub logs intent and
-  defers to the hourly scrubber. Backlog item.
+- **`wfctl infra cleanup --tag <name>` does not exist yet.** Until
+  implemented, smoke jobs rely on T7.14's hourly leak scrubber to
+  catch orphaned resources from panicking tests. The smoke
+  workflow's outer-job `always()` step currently logs the cleanup
+  intent and defers to the scrubber. Tracked as a workflow-repo
+  issue (filed at PR-create time) titled "implement wfctl infra
+  cleanup --tag for full-wfctl conformance gate cleanup".
 - **Sister workflow in `workflow-plugin-digitalocean`** (P-DO/TP5)
   — provisions the actual Droplet for the smoke run. This repo's
   workflow currently exercises the in-tree self-tests until the
