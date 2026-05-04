@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (with extensive deliberation history — see Decision history section).
 
 ## Context
 
@@ -14,7 +14,7 @@ W-3b Task T3.9 (`docs/plans/2026-05-03-iac-conformance-and-replace.md`, lines 19
 
 Strict reading: build a separate Go program with `sdk.Serve()`, ship the plugin.json + binary, run `wfctl` against it as a real cross-process subprocess, and capture the manual transcript in the commit body.
 
-The implementer began on the strict reading and produced a working Option-A artifact (out-of-tree commit, intentionally not retained on this branch — see "Considered alternatives" below). Mid-execution, the team-lead reviewed the scope and authorized a deviation to the looser reading the plan's own precedent reference points at.
+The implementer began on the strict reading and produced a working Option-A artifact (out-of-tree commit, intentionally not retained on this branch — see "Considered alternatives" below). The team-lead's direction-setting on Option A vs Option B subsequently churned through four transitions before settling; the full record lives in the Decision history section below.
 
 ## Decision
 
@@ -72,3 +72,19 @@ Build `internal/testdata/stub-provider/` with `main.go`, `plugin.go`, and `plugi
 Ship both the Option-A binary stub AND the Option-B loader-seam test.
 
 **Why rejected**: doubles the review surface for no marginal coverage (the loader-seam test exercises every layer the binary stub exercises, except the gRPC roundtrip itself, which Mitigations 1-3 above cover). The binary stub would have no consumer after this PR.
+
+## Decision history
+
+This ADR's final decision (Option B / loader-seam) settled after four team-lead direction transitions during W-3b execution. Recording the verbatim quotes here so the durable record captures both the final choice and the reasoning behind each transition — not just the last one. Spec-reviewer's adversarial review of the bare keeps-grpc-stub variant of this ADR (since superseded) explicitly called out that the prior single-reversal record violated the recording-decisions skill's durability invariant; this section closes that gap.
+
+| # | Direction | Verbatim team-lead quote | Implementer action |
+|---|-----------|--------------------------|---------------------|
+| 1 | **Option B** (initial) | "Option B + ADR. Build the in-tree Go integration test that exercises the cross-process dispatch path through wfctl's loader seams (`resolveIaCProvider`); do NOT build a full external gRPC binary. ... Plan precedent cite is `plugin/sdk/iaclint/` — a Go-level test helper, not a runnable binary." | Implementer had already shipped Option A as commit `290243c` mid-execution before this guidance arrived; bug-surfacing during Option A development produced commit `40e07a1` (sensitiveToAny). |
+| 2 | **Option A reversal** | "Path #1 — keep A. The bug-surfacing alone justifies the work; my Option B reasoning is invalidated in hindsight. Specifically: 'synthetic stub never runs again' — false; the stub is now a regression test for v2 dispatch in CI forever. 'hours of plumbing for proportional confidence' — false; you got bonus bug surface (the structpb.NewStruct silent-drop on `current.Sensitive map[string]bool` is exactly the kind of v2-only regression Option B would have missed)." | Implementer cherry-picked the Option A files back, producing `297d826` with a `keeps-grpc-stub` variant of this ADR documenting the reversal. |
+| 3 | **Option B again** | "Stand down on the cherry-pick — Option B as shipped at `92f060e` is fine. My Path #1 message was a partial reversal based on assuming the bug-surfacing depended on the in-tree stub binary. But the sensitiveToAny bug is already independently captured at `40e07a1`, so the marginal value of restoring `290243c` is just durable subprocess regression coverage — which the loader-seam test in `92f060e` substantially provides without the binary maintenance burden." | Implementer reset the Option A commit + cherry-picked `92f060e` onto `40e07a1`, producing `c9101ba` (current branch state) with the loader-seam variant of this ADR. |
+| 4 | **Option A again (then withdrawn)** | "Accepted. The branch is clean at SHA `297d826`. ... your final landing on Option A + ADR 007 is defensible (better integration confidence + captured bug-surface). One outstanding fix from code-reviewer's pre-review of `290243c`: Slice typing IMPORTANT: change to `[]string{"subnet-x", ...}` so the marshal goes through the typed-slice → structpb conversion that's the regression class T3.9 is meant to catch." | Implementer flagged the branch state mismatch (current was c9101ba = Option B, not 297d826 = Option A) and refused to flip again without explicit disambiguation. Spec-reviewer parallel-DM'd team-lead. |
+| 5 | **FINAL = B** | "FINAL = B (c9101ba). Reviewers re-confirmed. Proceed to T3.10 (PR description text — 3 incidentally-fixed bugs)." | Final disposition. ADR amended with this Decision history section to preserve the deliberation record per spec-reviewer's amplification. |
+
+The pattern across transitions 1–4 is the same in both directions: each subsequent message proposed reasoning that the previous message's argument hadn't accounted for. Final landing (transition 5) reverts to the original direction (#1) but the bug-surfacing benefit (#2) is preserved independently as commit `40e07a1`. Both reviewers (spec-reviewer + code-reviewer) explicitly endorsed the implementer's "do not act without team-lead disambiguation" hold during transition 4, and the strict-interpretation invariant from `using-superpowers` ("ambiguity is resolved upward, never sideways") was the operative rule.
+
+Lesson: when a team-lead path-flips more than once mid-execution, the reviewing-agent + implementing-agent BOTH should refuse to proceed and force explicit disambiguation. Each transition's reasoning was individually defensible; collectively they were oscillating because no single reasoning captured all the relevant trade-offs. The final landing didn't introduce a new argument — it picked the position with the best independent secondary-coverage story (CI auto-runs + lower binary maintenance burden) once both bug-surfacing arguments had been satisfied separately.
