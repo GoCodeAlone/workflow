@@ -36,10 +36,21 @@ import (
 const SkipMarker = "// wfctl:skip-iac-codemod"
 
 // Options carries flags shared by every codemod mode.
+//
+// Mode implementations MUST treat Fix as the sole authority for mutation.
+// DryRun is mirrored as `!Fix` purely for ergonomic reading of report
+// preambles and is normalized by run() at the dispatcher boundary so a
+// user-supplied -dry-run=false cannot bypass the explicit -fix gate
+// (plan §W-8 line 2347: "-dry-run flag default true; -fix opts into
+// mutation"). Predicates like `if !opts.DryRun { mutate() }` are safe
+// because the dispatcher guarantees DryRun==true whenever Fix==false.
 type Options struct {
-	// DryRun reports findings without mutating files. Default true.
+	// DryRun reports findings without mutating files. Forced true when
+	// Fix is false; forced false when Fix is true. The user's
+	// -dry-run= value is informational once dispatcher normalization
+	// runs.
 	DryRun bool
-	// Fix opts into mutation; when set, DryRun is forced false by run().
+	// Fix opts into mutation. Sole authority for mutation gating.
 	Fix bool
 }
 
@@ -105,8 +116,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
+	// Normalize the mutation gate at the dispatcher boundary: Fix is the
+	// sole authority for "may I mutate?". A user-supplied -dry-run=false
+	// without -fix must NOT bypass the gate (plan §W-8 line 2347), and
+	// -fix must override an explicit -dry-run=true. This makes any mode
+	// predicate (`!opts.DryRun`, `opts.Fix`, etc.) safe by construction.
 	if opts.Fix {
 		opts.DryRun = false
+	} else {
+		opts.DryRun = true
 	}
 	return fn(fs.Args(), opts, stdout, stderr)
 }

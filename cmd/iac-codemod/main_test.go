@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -127,6 +128,76 @@ func TestRun_FixOptsIntoMutation(t *testing.T) {
 	}
 	if opts.DryRun {
 		t.Errorf("DryRun should be false when -fix passed (mutation opt-in)")
+	}
+}
+
+// TestRun_DryRunFalseWithoutFix_StillForcesDryRun pins the mutation-gate
+// contract from plan §W-8 line 2347: "-dry-run flag default true; -fix opts
+// into mutation". Fix must be the SINGLE source of truth for "may I
+// mutate?" — if a user passes -dry-run=false without -fix, the dispatcher
+// must reassert DryRun=true so T8.2-T8.5 modes that naturally check
+// !opts.DryRun cannot be tricked into a silent rewrite.
+func TestRun_DryRunFalseWithoutFix_StillForcesDryRun(t *testing.T) {
+	opts, teardown := captureMode(t, "lint")
+	defer teardown()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"lint", "-dry-run=false"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !opts.DryRun {
+		t.Errorf("DryRun must remain true without -fix; -dry-run=false alone must NOT bypass the mutation gate (plan §W-8 line 2347)")
+	}
+	if opts.Fix {
+		t.Errorf("Fix should remain false; got true")
+	}
+}
+
+// TestRun_FixWithDryRunFalse_MutationStillAuthorized covers the redundant
+// but legal case: -fix wins regardless of -dry-run's user-supplied value.
+func TestRun_FixWithDryRunFalse_MutationStillAuthorized(t *testing.T) {
+	opts, teardown := captureMode(t, "refactor-plan")
+	defer teardown()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"refactor-plan", "-fix", "-dry-run=false"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !opts.Fix {
+		t.Errorf("Fix should be true")
+	}
+	if opts.DryRun {
+		t.Errorf("DryRun should be false when -fix is set")
+	}
+}
+
+// TestRun_FixWithExplicitDryRunTrue_FixWins covers the inverse: -fix wins
+// over a user-supplied -dry-run=true. -fix is the single mutation gate;
+// -dry-run is informational once -fix is set.
+func TestRun_FixWithExplicitDryRunTrue_FixWins(t *testing.T) {
+	opts, teardown := captureMode(t, "refactor-apply")
+	defer teardown()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"refactor-apply", "-dry-run=true", "-fix"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !opts.Fix {
+		t.Errorf("Fix should be true")
+	}
+	if opts.DryRun {
+		t.Errorf("DryRun should be false; -fix overrides explicit -dry-run=true")
+	}
+}
+
+// TestPackageDoc_MentionsSkipMarker is documentation-only insurance that
+// the package doc comment in main.go does not silently desync from the
+// SkipMarker const. godoc is human-read, not parser-read, so this is
+// belt-and-suspenders against a future rename.
+func TestPackageDoc_MentionsSkipMarker(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	if !strings.Contains(string(src), SkipMarker) {
+		t.Errorf("main.go must reference SkipMarker literal %q somewhere; package doc may have desynced", SkipMarker)
 	}
 }
 
