@@ -71,6 +71,7 @@ package jitsubst
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -88,6 +89,21 @@ import (
 // config.ExpandEnvInMap handles the simpler cases via os.ExpandEnv; JIT-time
 // is the strict-form residue.
 var refRE = regexp.MustCompile(`\$\{([^}]*)\}`)
+
+// moduleRefRE matches a JIT-style ${MODULE.field} reference — any ${...}
+// whose body has a "." separator AND non-empty module + field segments.
+// Used by HasModuleRefs to gate plan.SchemaVersion bumping (T5.4) and the
+// persisted-plan rejection (T5.5). Plain ${VAR} env-var references (no
+// dot in body) do NOT match — they are NOT JIT-required at apply time
+// since plan-time config.ExpandEnvInMap has already collapsed them
+// (preserved-key submaps aside; those still resolve from env, not from
+// other modules' outputs).
+//
+// Anchoring contract: the body MUST have at least one non-`.` character on
+// EACH side of the first dot — `${.}`, `${.x}`, `${x.}` are NOT counted as
+// JIT-required, matching jitsubst.ResolveSpec's strict rejection of those
+// forms as malformed (they could never resolve at apply time anyway).
+var moduleRefRE = regexp.MustCompile(`\$\{[^}.]+\.[^}]+\}`)
 
 // ResolveSpec returns a deep copy of spec where every ${...} reference in
 // any string value of spec.Config (recursively, including nested maps and
@@ -122,6 +138,37 @@ func ResolveSpec(
 	out := spec
 	out.Config = resolved.(map[string]any)
 	return out, nil
+}
+
+// HasModuleRefs returns true when any string value reachable from v
+// (recursively walking map[string]any and []any) contains a JIT-style
+// ${MODULE.field} reference — i.e., a ${...} reference whose body has a
+// "." separator with non-empty segments on both sides. Plain ${VAR}
+// env-var references (no dot in body) do NOT count.
+//
+// Used by cmd/wfctl/infra.go::runInfraPlan (T5.4) to decide whether to
+// stamp plan.SchemaVersion = 2 (JIT-required) and by the persisted-plan
+// rejection in T5.5. Walking input is intentionally permissive: pass any
+// value (a single map[string]any, a slice, a ResourceSpec.Config, even a
+// raw string) — non-string scalars are ignored, nil yields false.
+func HasModuleRefs(v any) bool {
+	switch val := v.(type) {
+	case nil:
+		return false
+	case string:
+		return moduleRefRE.MatchString(val)
+	case map[string]any:
+		for _, vv := range val {
+			if HasModuleRefs(vv) {
+				return true
+			}
+		}
+		return false
+	case []any:
+		return slices.ContainsFunc(val, HasModuleRefs)
+	default:
+		return false
+	}
 }
 
 // resolveAny walks any value in a ResourceSpec.Config tree, deep-copying

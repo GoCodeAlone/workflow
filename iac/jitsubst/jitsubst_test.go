@@ -351,6 +351,94 @@ func TestResolveSpec_NilConfig_NoOp(t *testing.T) {
 	}
 }
 
+// TestHasModuleRefs_PlainEnvVar_False verifies that a ${VAR} (no dot in
+// the body) is NOT classified as a JIT reference — env-var refs do not
+// require apply-time module-output resolution.
+func TestHasModuleRefs_PlainEnvVar_False(t *testing.T) {
+	cfg := map[string]any{"x": "${SOME_ENV}"}
+	if HasModuleRefs(cfg) {
+		t.Errorf("plain ${VAR} should NOT be classified as JIT")
+	}
+}
+
+// TestHasModuleRefs_ModuleField_True verifies the canonical positive case.
+func TestHasModuleRefs_ModuleField_True(t *testing.T) {
+	cfg := map[string]any{"x": "${pg.private_ip}"}
+	if !HasModuleRefs(cfg) {
+		t.Errorf("${pg.private_ip} should be classified as JIT")
+	}
+}
+
+// TestHasModuleRefs_ModuleID_True verifies the .id form is also classified.
+func TestHasModuleRefs_ModuleID_True(t *testing.T) {
+	cfg := map[string]any{"x": "${vpc.id}"}
+	if !HasModuleRefs(cfg) {
+		t.Errorf("${vpc.id} should be classified as JIT")
+	}
+}
+
+// TestHasModuleRefs_NestedMap_True verifies recursion into nested maps.
+func TestHasModuleRefs_NestedMap_True(t *testing.T) {
+	cfg := map[string]any{
+		"env_vars": map[string]any{"DB_HOST": "${pg.private_ip}"},
+	}
+	if !HasModuleRefs(cfg) {
+		t.Errorf("nested ${pg.private_ip} should be classified as JIT")
+	}
+}
+
+// TestHasModuleRefs_NestedSlice_True verifies recursion into slice elements.
+func TestHasModuleRefs_NestedSlice_True(t *testing.T) {
+	cfg := map[string]any{
+		"args": []any{"--vpc=${vpc.id}"},
+	}
+	if !HasModuleRefs(cfg) {
+		t.Errorf("ref inside slice element should be classified as JIT")
+	}
+}
+
+// TestHasModuleRefs_NoRefs_False verifies the negative case: plain values
+// with no ${...} references at all.
+func TestHasModuleRefs_NoRefs_False(t *testing.T) {
+	cfg := map[string]any{
+		"cidr":   "10.0.0.0/16",
+		"region": "nyc3",
+		"port":   5432,
+	}
+	if HasModuleRefs(cfg) {
+		t.Errorf("ref-free config should NOT be classified as JIT")
+	}
+}
+
+// TestHasModuleRefs_NilValue_False verifies the safe-on-nil contract.
+func TestHasModuleRefs_NilValue_False(t *testing.T) {
+	if HasModuleRefs(nil) {
+		t.Errorf("nil should NOT be classified as JIT")
+	}
+}
+
+// TestHasModuleRefs_MalformedRef_False verifies that ${.}, ${.x}, ${x.}
+// are NOT classified as JIT — they could not resolve at apply time anyway,
+// so bumping SchemaVersion=2 for them would force a rejection on a plan
+// that's structurally broken regardless of JIT support.
+func TestHasModuleRefs_MalformedRef_False(t *testing.T) {
+	for _, body := range []string{"${.}", "${.x}", "${x.}"} {
+		cfg := map[string]any{"x": body}
+		if HasModuleRefs(cfg) {
+			t.Errorf("malformed ref %q should NOT be classified as JIT", body)
+		}
+	}
+}
+
+// TestHasModuleRefs_MixedString_True verifies a ref embedded in a longer
+// string (prefix/suffix text) is still detected.
+func TestHasModuleRefs_MixedString_True(t *testing.T) {
+	cfg := map[string]any{"x": "postgres://user:${PG_PASSWORD}@${pg.private_ip}/db"}
+	if !HasModuleRefs(cfg) {
+		t.Errorf("embedded ${pg.private_ip} should be classified as JIT")
+	}
+}
+
 // TestResolveSpec_OnError_ReturnsInputSpecUnchanged verifies the error
 // contract: when substitution fails, the returned ResourceSpec is the
 // original (untouched) input — callers MUST NOT use a partially-resolved

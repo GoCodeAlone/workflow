@@ -11,17 +11,47 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
+	"github.com/GoCodeAlone/workflow/iac/jitsubst"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
-// infraPlanSchemaVersion is the on-disk plan format version this wfctl
-// binary writes and is willing to read. runInfraPlan stamps it on every
-// emitted plan; runInfraApply rejects plans with a higher version so a
-// future schema bump (e.g. W-5 JIT-required plans) fails fast rather than
-// being silently mis-read by an older binary.
-const infraPlanSchemaVersion = 1
+// infraPlanSchemaVersion is the maximum on-disk plan format version this
+// wfctl binary is willing to read. runInfraApply rejects plans with a
+// higher version so a future schema bump fails fast rather than being
+// silently mis-read by an older binary.
+//
+// runInfraPlan stamps either V1 (no JIT references in plan.Actions) or
+// V2 (any ${MODULE.field} or ${MODULE.id} surviving in
+// plan.Actions[*].Resource.Config). The choice is per-plan via
+// jitsubst.HasModuleRefs; see runInfraPlan and the persisted-plan
+// rejection in T5.5 (V2 plans cannot be persisted via -o; canonical path
+// is `wfctl infra apply` without --plan).
+const (
+	infraPlanSchemaVersion    = 2 // max readable
+	infraPlanSchemaVersionV1  = 1 // pre-JIT baseline
+	infraPlanSchemaVersionJIT = 2 // bumped when plan has ${MODULE.field|id} refs
+)
+
+// planRequiresJITSubstitution returns true when any action in plan
+// carries a ${MODULE.field} or ${MODULE.id} reference somewhere in its
+// resolved Resource.Config. Plain ${VAR} env-var references do NOT
+// count — see jitsubst.HasModuleRefs for the exact rule.
+//
+// Used by runInfraPlan (T5.4) to gate plan.SchemaVersion = 2 stamping
+// and by runInfraPlan's persisted-plan rejection (T5.5).
+func planRequiresJITSubstitution(plan *interfaces.IaCPlan) bool {
+	if plan == nil {
+		return false
+	}
+	for i := range plan.Actions {
+		if jitsubst.HasModuleRefs(plan.Actions[i].Resource.Config) {
+			return true
+		}
+	}
+	return false
+}
 
 func runInfra(args []string) error {
 	if len(args) < 1 {
@@ -228,7 +258,17 @@ func runInfraPlan(args []string) error {
 		return fmt.Errorf("compute input snapshot: %w", err)
 	}
 	plan.InputSnapshot = snap
-	plan.SchemaVersion = infraPlanSchemaVersion
+	// Stamp SchemaVersion based on whether any plan action's resolved
+	// Config carries a JIT-required ${MODULE.field|id} reference. Plain
+	// ${VAR} env-var refs (no dot in body) do NOT trigger the bump —
+	// plan-time config.ExpandEnvInMapPreservingKeys has already
+	// collapsed them outside preserved keys, and inside preserved keys
+	// they remain operator-managed across plan/apply (drift detection
+	// in plan.InputSnapshot covers the change-after-plan case).
+	plan.SchemaVersion = infraPlanSchemaVersionV1
+	if planRequiresJITSubstitution(&plan) {
+		plan.SchemaVersion = infraPlanSchemaVersionJIT
+	}
 
 	switch *format {
 	case "markdown":
