@@ -9,11 +9,18 @@ import (
 
 // expectedJITRejectError is the EXACT error string runInfraPlan must
 // emit when -o is passed alongside a config that produces a
-// SchemaVersion=2 (JIT-required) plan. The string is kept literal here
-// (not built via fmt formatting) so any drift between the implementation
-// and the operator-facing diagnostic fails this test loudly. Runbooks
-// and operator search-engines may match on this exact phrase.
-const expectedJITRejectError = "error: plan -o requires JIT-free config; this plan references ${MODULE.field} which only resolves at apply time. Use 'wfctl infra apply' (without --plan) for JIT-aware applies."
+// SchemaVersion=2 (JIT-required) plan. Verbatim from the plan literal
+// at docs/plans/2026-05-03-iac-conformance-and-replace.md §T5.5
+// line 2104. The string is kept literal here (not built via fmt
+// formatting) so any drift between the implementation and the
+// operator-facing diagnostic fails this test loudly. Runbooks and
+// operator search-engines may match on this exact phrase.
+//
+// Note: the operator's displayed error includes a leading "error: "
+// prefix from cmd/wfctl/main.go's top-level error wrapper; the value
+// returned by runInfraPlan (and asserted here) does NOT include that
+// prefix.
+const expectedJITRejectError = "this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan."
 
 // TestInfraPlan_RejectsPersistedJITPlan_WithExactErrorString is the
 // canonical T5.5 scenario: a config whose env_vars carry a
@@ -123,11 +130,10 @@ modules:
 		t.Fatal("expected error")
 	}
 	keywords := []string{
-		"plan -o",
-		"JIT-free",
-		"${MODULE.field}",
+		"JIT resolution",
+		"persisted plan.json",
 		"wfctl infra apply",
-		"--plan",
+		"-o/--plan",
 	}
 	for _, kw := range keywords {
 		if !strings.Contains(err.Error(), kw) {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -289,7 +290,12 @@ func runInfraPlan(args []string) error {
 		// (no -o) of a JIT-style plan IS allowed — it's a preview, not
 		// a contract — and falls through this guard untouched.
 		if plan.SchemaVersion == infraPlanSchemaVersionJIT {
-			return fmt.Errorf("error: plan -o requires JIT-free config; this plan references ${MODULE.field} which only resolves at apply time. Use 'wfctl infra apply' (without --plan) for JIT-aware applies.")
+			// Plan literal per docs/plans/2026-05-03-iac-conformance-and-replace.md
+			// §T5.5 line 2104. NO leading "error:" — that's prepended by
+			// cmd/wfctl/main.go's top-level wrapper. errors.New (rather than
+			// fmt.Errorf) avoids govet's no-verbs noise and is canonical for
+			// fixed-string error literals per Go convention.
+			return errors.New("this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan.")
 		}
 		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
 		// can detect stale plans when the config changes after plan generation.
