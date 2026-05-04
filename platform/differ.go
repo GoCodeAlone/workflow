@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -16,7 +17,17 @@ import (
 // first); deletes are ordered in reverse dependency order.
 //
 // Returns an error if the DependsOn graph contains a cycle.
-func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+//
+// The ctx and provider parameters are accepted on the v2 contract so that
+// later commits in W-3b can dispatch provider.Diff per resource for
+// Replace-action emission and bounded-concurrency Diff calls. In this
+// commit they are unused — the body still relies on the legacy ConfigHash
+// compare. Callers should pass a non-nil provider whenever they have one
+// loaded so the future Diff dispatch works without further plumbing
+// changes; nil is tolerated and falls back to the ConfigHash path.
+func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+	_ = ctx
+	_ = p
 	// Index current state by resource name.
 	currentMap := make(map[string]interfaces.ResourceState, len(current))
 	for i := range current {
