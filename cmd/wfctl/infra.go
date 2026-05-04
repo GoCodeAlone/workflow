@@ -984,6 +984,9 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&allowProtectedPruneFlag, "allow-protected-prune", false, "Allow pruning state entries for resources marked protected: true (requires --refresh)")
 	var skipRefreshFlag bool
 	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set")
+	var allowReplaceFlag string
+	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
+		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -997,6 +1000,15 @@ func runInfraApply(args []string) error {
 	if allowProtectedPruneFlag && !refreshFlag {
 		return fmt.Errorf("--allow-protected-prune requires --refresh")
 	}
+
+	// W-6/T6.1: publish the parsed --allow-replace set for the apply
+	// path's gate (validateAllowReplaceProtected, called from both
+	// applyWithProviderAndStore and applyPrecomputedPlanWithStore).
+	// Reset to nil at the top of every invocation so the gate fails
+	// closed when subsequent runs do not pass the flag — package-level
+	// state would otherwise leak override authorization across runs.
+	applyAllowReplaceSet = parseAllowReplaceFlag(allowReplaceFlag)
+	defer func() { applyAllowReplaceSet = nil }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {

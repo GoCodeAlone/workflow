@@ -58,6 +58,115 @@ var computeInfraPlan = platform.ComputePlan
 // Same var-seam pattern as computeInfraPlan / resolveIaCProvider.
 var applyV2ApplyPlanFn = wfctlhelpers.ApplyPlan
 
+// applyAllowReplaceSet is the per-invocation allow-list of resource
+// names whose `protected: true` annotation is overridden for this
+// apply. Populated by runInfraApply from the --allow-replace=<csv>
+// flag value via parseAllowReplaceFlag; reset to nil at the top of
+// every runInfraApply so the gate fails closed on subsequent
+// invocations that do not pass the flag.
+//
+// Read inside validateAllowReplaceProtected, called from both apply
+// dispatch paths (live-diff and --plan). nil/empty set means no
+// override — every replace/delete on a protected resource errors
+// before dispatch.
+var applyAllowReplaceSet map[string]struct{}
+
+// parseAllowReplaceFlag turns a comma-separated --allow-replace=<csv>
+// flag value into a name-set. Empty input → nil (the canonical
+// "no override" value, indistinguishable from the flag never being
+// passed). Whitespace around each name is trimmed so operators can
+// copy-paste the design's plan-output format
+// (`--allow-replace=name1,name2`) without it falling apart on
+// stray spaces.
+func parseAllowReplaceFlag(raw string) map[string]struct{} {
+	if raw == "" {
+		return nil
+	}
+	out := map[string]struct{}{}
+	for _, name := range strings.Split(raw, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		out[name] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// validateAllowReplaceProtected gates dispatch on the per-resource
+// `protected: true` annotation. For every replace or delete action in
+// plan, if the targeted resource is protected and its name is not in
+// allow, return the design-spec error literal:
+//
+//	resource %q is protected: true and would be %sd; pass --allow-replace=%s to override
+//
+// (T6.1 spec — fail-fast on the first blocker. T6.2 swaps this for an
+// aggregated multi-blocker report with a copy-paste flag value.)
+//
+// `protected: true` is sourced from PlanAction.Resource.Config for
+// replace actions (where Resource carries the desired spec) and from
+// PlanAction.Current.AppliedConfig for delete actions (where
+// platform.differ leaves Resource.Config empty and the protected
+// status is preserved on the previously-applied state).
+func validateAllowReplaceProtected(plan interfaces.IaCPlan, allow map[string]struct{}) error {
+	for i := range plan.Actions {
+		a := &plan.Actions[i]
+		if a.Action != "replace" && a.Action != "delete" {
+			continue
+		}
+		if !planActionIsProtected(a) {
+			continue
+		}
+		if _, ok := allow[a.Resource.Name]; ok {
+			continue
+		}
+		verb := actionVerbPastTense(a.Action)
+		return fmt.Errorf("resource %q is protected: true and would be %s; pass --allow-replace=%s to override",
+			a.Resource.Name, verb, a.Resource.Name)
+	}
+	return nil
+}
+
+// planActionIsProtected reports whether the action targets a resource
+// annotated `protected: true`. Replace actions carry the desired
+// Config on Resource; delete actions (built by platform.differ from
+// current state) carry the protected flag on Current.AppliedConfig.
+// Returning true if either source declares protected covers both
+// classes.
+func planActionIsProtected(a *interfaces.PlanAction) bool {
+	if a.Resource.Config != nil {
+		if p, ok := a.Resource.Config["protected"].(bool); ok && p {
+			return true
+		}
+	}
+	if a.Current != nil && a.Current.AppliedConfig != nil {
+		if p, ok := a.Current.AppliedConfig["protected"].(bool); ok && p {
+			return true
+		}
+	}
+	return false
+}
+
+// actionVerbPastTense renders the plan-action verb in past tense for
+// the gate error message. The design literal embeds the verb between
+// "would be" and the override hint:
+//
+//	would be replaced; pass --allow-replace=...
+//	would be deleted; pass --allow-replace=...
+func actionVerbPastTense(action string) string {
+	switch action {
+	case "replace":
+		return "replaced"
+	case "delete":
+		return "deleted"
+	default:
+		return action + "d"
+	}
+}
+
 // hasInfraModules reports whether cfgFile contains any modules with the new
 // infra.* type prefix. Used by runInfraApply to select the dispatch path:
 // direct IaCProvider path for infra.* configs, pipeline path for legacy
@@ -373,6 +482,16 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	if len(plan.Actions) == 0 {
 		fmt.Println("  No changes — infrastructure is up-to-date.")
 		return nil
+	}
+
+	// W-6/T6.1: gate replace and delete actions on `protected: true`
+	// resources behind --allow-replace. Without an explicit per-resource
+	// opt-in, the apply errors before any provider Apply / wfctlhelpers
+	// dispatch — destructive actions on protected infrastructure must
+	// be intentional. T6.2 swaps this fail-fast for an aggregated
+	// multi-blocker report.
+	if err := validateAllowReplaceProtected(plan, applyAllowReplaceSet); err != nil {
+		return err
 	}
 
 	// Collect delete-action resource names so we can clean up state afterward.
@@ -849,6 +968,13 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	if len(plan.Actions) == 0 {
 		fmt.Println("  No changes — infrastructure is up-to-date.")
 		return nil
+	}
+
+	// W-6/T6.1: same protected-resource gate as the live-diff path. The
+	// --plan path skips ComputePlan entirely but the safety guarantee
+	// must hold regardless of how the plan was produced.
+	if err := validateAllowReplaceProtected(plan, applyAllowReplaceSet); err != nil {
+		return err
 	}
 
 	// Collect delete-action resource names for post-apply state cleanup.
