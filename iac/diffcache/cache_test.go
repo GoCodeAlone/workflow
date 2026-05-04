@@ -79,6 +79,60 @@ func TestCache_MemoryRoundtrip(t *testing.T) {
 	}
 }
 
+// TestCache_MemoryDeepCopiesChanges verifies that the in-memory
+// cache returns a deep copy of the DiffResult so a caller mutating
+// the returned Changes slice cannot leak that mutation back into
+// the cached entry. Pre-fix, the cached value and the returned value
+// shared the same backing array for Changes; mutating one mutated
+// the other.
+//
+// The test pattern: Put a value with a single Change, Get it, mutate
+// the returned Changes slice (both element-level and length-level
+// via append-into-cap), Get again, assert the second Get returns
+// the original unmodified value. Also verifies the symmetric case:
+// mutating the original argument after Put does not affect the
+// cached value.
+func TestCache_MemoryDeepCopiesChanges(t *testing.T) {
+	c := NewMemory()
+	key := Key{Type: "infra.vpc"}
+	original := interfaces.DiffResult{
+		NeedsUpdate: true,
+		Changes: []interfaces.FieldChange{
+			{Path: "size", Old: "small", New: "large"},
+		},
+	}
+	c.Put(key, original)
+
+	// Mutate the original argument after Put. A leaky implementation
+	// would let this mutation reach the cached value.
+	original.Changes[0].Path = "MUTATED-AFTER-PUT"
+
+	// First Get + mutate the returned slice element + length.
+	got1, hit := c.Get(key)
+	if !hit {
+		t.Fatal("expected hit on first Get")
+	}
+	if got1.Changes[0].Path != "size" {
+		t.Errorf("first Get: cached value leaked from post-Put mutation; Path=%q want %q",
+			got1.Changes[0].Path, "size")
+	}
+	got1.Changes[0].Path = "MUTATED-VIA-GET"
+	got1.Changes = append(got1.Changes, interfaces.FieldChange{Path: "extra"})
+
+	// Second Get must see the original value, not the mutated one.
+	got2, hit := c.Get(key)
+	if !hit {
+		t.Fatal("expected hit on second Get")
+	}
+	if len(got2.Changes) != 1 {
+		t.Errorf("second Get: Changes len=%d want 1; mutation via append leaked into cache", len(got2.Changes))
+	}
+	if len(got2.Changes) > 0 && got2.Changes[0].Path != "size" {
+		t.Errorf("second Get: Changes[0].Path=%q want %q; mutation via Get leaked into cache",
+			got2.Changes[0].Path, "size")
+	}
+}
+
 // TestCache_NoopAlwaysMisses verifies the disabled cache: Put is a
 // no-op, every Get returns hit=false.
 func TestCache_NoopAlwaysMisses(t *testing.T) {
