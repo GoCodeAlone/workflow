@@ -151,8 +151,10 @@ type DriftResult struct {
 
 // PlanDiagnosticSeverity classifies the severity of a plan-validation
 // PlanDiagnostic returned by a provider that implements ProviderValidator.
-// Strict align runs treat PlanDiagnosticError as a FAIL; Warning and Info are
-// advisory.
+// Exit-code mapping for `wfctl infra align`:
+//   - PlanDiagnosticError → always fails the run (regardless of --strict).
+//   - PlanDiagnosticWarning → advisory by default; fails the run under --strict.
+//   - PlanDiagnosticInfo → never affects the exit code (even under --strict).
 //
 // Note: distinct from the unrelated Troubleshooter Diagnostic type
 // (iac_resource_driver.go), which describes runtime/deploy events. The plan

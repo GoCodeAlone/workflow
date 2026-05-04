@@ -212,6 +212,36 @@ func TestCheckRA10_PlanLevelDiagnostic_UsesProviderName(t *testing.T) {
 	}
 }
 
+func TestCheckRA10_PlanLevelInfoDiagnostic_LogsAsProviderSlashPlan(t *testing.T) {
+	// Plan-level Info diagnostics must log as `<provider>/plan` per the
+	// documented `R-A10 [info] <provider>/<resource>: ...` format — not the
+	// redundant `<provider>/<provider>:plan: ...` that fell out of using the
+	// table label as the log identifier.
+	var buf strings.Builder
+	origLog := ra10LogInfo
+	t.Cleanup(func() { ra10LogInfo = origLog })
+	ra10LogInfo = func(format string, args ...any) {
+		fmt.Fprintf(&buf, format, args...)
+	}
+
+	providers := []interfaces.IaCProvider{
+		validatingStubProvider{
+			stubIaCProvider: stubIaCProvider{name: "do"},
+			diags: []interfaces.PlanDiagnostic{
+				{Severity: interfaces.PlanDiagnosticInfo, Message: "plan-level hint"},
+			},
+		},
+	}
+	_ = checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	logged := buf.String()
+	if !strings.Contains(logged, "do/plan") {
+		t.Errorf("log: expected `do/plan` for plan-level Info, got %q", logged)
+	}
+	if strings.Contains(logged, "do/do:plan") {
+		t.Errorf("log: must not double-qualify provider name (got %q)", logged)
+	}
+}
+
 func TestCheckRA10_MultipleProviders_OnlyValidatorsContribute(t *testing.T) {
 	providers := []interfaces.IaCProvider{
 		stubIaCProvider{name: "plain"},
@@ -245,7 +275,7 @@ func TestInfraAlign_RA10_FixtureProvider_Fires(t *testing.T) {
 	// when --plan is set, without touching the live plugin loader.
 	orig := alignLoadProviders
 	t.Cleanup(func() { alignLoadProviders = orig })
-	alignLoadProviders = func(_ string, _ string, _ *interfaces.IaCPlan) ([]interfaces.IaCProvider, []io.Closer, error) {
+	alignLoadProviders = func(_ *alignContext, _ string, _ *interfaces.IaCPlan) ([]interfaces.IaCProvider, []io.Closer, error) {
 		return []interfaces.IaCProvider{
 			validatingStubProvider{
 				stubIaCProvider: stubIaCProvider{name: "fixture"},
@@ -296,7 +326,7 @@ func TestInfraAlign_RA10_NotInvokedWithoutPlan(t *testing.T) {
 	calls := 0
 	orig := alignLoadProviders
 	t.Cleanup(func() { alignLoadProviders = orig })
-	alignLoadProviders = func(_ string, _ string, _ *interfaces.IaCPlan) ([]interfaces.IaCProvider, []io.Closer, error) {
+	alignLoadProviders = func(_ *alignContext, _ string, _ *interfaces.IaCPlan) ([]interfaces.IaCProvider, []io.Closer, error) {
 		calls++
 		return nil, nil, nil
 	}

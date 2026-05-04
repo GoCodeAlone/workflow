@@ -123,12 +123,20 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 	// R-A6: network/exposure alignment
 	findings = append(findings, checkRA6(ctx)...)
 
-	// R-A7: plan-output sanity (only when --plan provided)
+	// Load plan once if --plan provided; reused by R-A7 and R-A10 to avoid
+	// duplicate file I/O + JSON parsing (and to keep the two rules consistent
+	// if loadPlanJSON behavior ever changes).
+	var plan *interfaces.IaCPlan
 	if opts.planFile != "" {
-		plan, err := loadPlanJSON(opts.planFile)
+		p, err := loadPlanJSON(opts.planFile)
 		if err != nil {
 			return nil, fmt.Errorf("load plan: %w", err)
 		}
+		plan = p
+	}
+
+	// R-A7: plan-output sanity (only when --plan provided)
+	if plan != nil {
 		findings = append(findings, checkRA7(plan, opts.maxChanges)...)
 	}
 
@@ -140,15 +148,11 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 
 	// R-A10: provider.ValidatePlan dispatch — only when --plan is provided.
 	// alignLoadProviders is a test seam; the default loader enumerates
-	// iac.provider modules in the config and loads each via the existing
-	// resolveIaCProvider plugin path. Closers (if any) are released after the
-	// rule runs.
-	if opts.planFile != "" {
-		plan, err := loadPlanJSON(opts.planFile)
-		if err != nil {
-			return nil, fmt.Errorf("load plan for R-A10: %w", err)
-		}
-		providers, closers, err := alignLoadProviders(opts.configFile, opts.envName, plan)
+	// iac.provider modules in ctx.Config (already parsed) and loads each via
+	// the existing resolveIaCProvider plugin path. Closers (if any) are
+	// released after the rule runs.
+	if plan != nil {
+		providers, closers, err := alignLoadProviders(ctx, opts.envName, plan)
 		if err != nil {
 			return nil, fmt.Errorf("load providers for R-A10: %w", err)
 		}
@@ -170,24 +174,21 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 
 // alignLoadProviders is the seam used by R-A10 to obtain the IaCProvider
 // instances referenced by a config. The default implementation enumerates
-// every iac.provider module in the YAML and loads each via the existing
-// resolveIaCProvider plugin path; tests override this var to inject fakes
-// without spinning up real plugin subprocesses.
+// every iac.provider module already parsed into the alignContext (no second
+// disk read of the YAML) and loads each via the existing resolveIaCProvider
+// plugin path; tests override this var to inject fakes without spinning up
+// real plugin subprocesses.
 //
 // Returned closers (one per provider, indices aligned) MAY be nil. Callers
 // MUST close them after the rule runs.
 var alignLoadProviders = defaultAlignLoadProviders
 
-func defaultAlignLoadProviders(cfgFile, envName string, _ *interfaces.IaCPlan) ([]interfaces.IaCProvider, []io.Closer, error) {
-	cfg, err := config.LoadFromFile(cfgFile)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load %s: %w", cfgFile, err)
-	}
+func defaultAlignLoadProviders(alignCtx *alignContext, envName string, _ *interfaces.IaCPlan) ([]interfaces.IaCProvider, []io.Closer, error) {
 	var providers []interfaces.IaCProvider
 	var closers []io.Closer
 	ctx := context.Background()
-	for i := range cfg.Modules {
-		m := &cfg.Modules[i]
+	for i := range alignCtx.modules {
+		m := &alignCtx.modules[i]
 		if m.Type != "iac.provider" {
 			continue
 		}

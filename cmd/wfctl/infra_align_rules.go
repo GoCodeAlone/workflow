@@ -763,9 +763,18 @@ func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *
 		}
 		diags := v.ValidatePlan(plan)
 		for _, d := range diags {
+			// resource: rendered table label (provider-qualified for plan-
+			// level findings so the table always identifies the source).
+			// logResource: log-line identifier; for plan-level findings use
+			// the bare "plan" sentinel so the documented
+			// `R-A10 [info] <provider>/<resource>: ...` format renders as
+			// `<provider>/plan: ...` instead of the redundant
+			// `<provider>/<provider>:plan: ...`.
 			resource := d.Resource
+			logResource := d.Resource
 			if resource == "" {
 				resource = fmt.Sprintf("%s:plan", p.Name())
+				logResource = "plan"
 			}
 			msg := d.Message
 			if d.Field != "" {
@@ -789,7 +798,7 @@ func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *
 			case interfaces.PlanDiagnosticInfo:
 				// Info tier: log to stderr; no AlignFinding so exit code
 				// is never affected (even under --strict).
-				ra10LogInfo("R-A10 [info] %s/%s: %s\n", p.Name(), resource, msg)
+				ra10LogInfo("R-A10 [info] %s/%s: %s\n", p.Name(), logResource, msg)
 			default:
 				// Unknown severity — treat conservatively as WARN so it
 				// doesn't slip past --strict.
