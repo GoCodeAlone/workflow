@@ -371,13 +371,18 @@ func TestComputePlan_ParallelDiffDispatch_InFlightGoroutinesObserved(t *testing.
 
 // channelGatedDriver is a ResourceDriver that blocks every Diff call
 // on a shared release channel so tests can observe in-flight
-// concurrency. inFlight tracks the peak number of simultaneous Diff
-// goroutines.
+// concurrency. inFlight is the *current* (live) count of in-progress
+// Diff goroutines — incremented on Diff entry, decremented on return.
+// It is NOT a peak/high-water-mark counter; the parallel-dispatch
+// assertion is made via the `entered` channel (which receives one
+// signal per goroutine that has reached the gate), not via
+// inFlight. The atomic counter is retained for diagnostic logging
+// and as a sanity invariant (reaches zero after release).
 type channelGatedDriver struct {
 	entered   chan struct{}
 	release   chan struct{}
 	diffCount atomic.Int64
-	inFlight  atomic.Int64
+	inFlight  atomic.Int64 // current in-flight count (NOT peak); see docstring
 }
 
 var _ interfaces.ResourceDriver = (*channelGatedDriver)(nil)
@@ -393,11 +398,13 @@ func (d *channelGatedDriver) Update(_ context.Context, _ interfaces.ResourceRef,
 }
 func (d *channelGatedDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
 func (d *channelGatedDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
-	cur := d.inFlight.Add(1)
+	// inFlight is bumped/decremented for diagnostic visibility + the
+	// "drains to zero after release" sanity invariant. The actual
+	// parallel-dispatch assertion is made via the `entered` channel
+	// (one signal per goroutine that has reached this gate); see the
+	// channelGatedDriver docstring.
+	d.inFlight.Add(1)
 	defer d.inFlight.Add(-1)
-	// Track peak via CAS-style monotonic increase — simpler to just
-	// rely on the entered channel for the assertion.
-	_ = cur
 	d.diffCount.Add(1)
 	d.entered <- struct{}{}
 	<-d.release

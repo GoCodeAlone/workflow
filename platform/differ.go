@@ -360,9 +360,12 @@ func hasForceNew(changes []interfaces.FieldChange) bool {
 const planDiffConcurrencyDefault = 8
 
 // planDiffConcurrencyMin and Max are the clamp bounds for
-// WFCTL_PLAN_DIFF_CONCURRENCY parsing. Below 1 disables concurrency
-// (worse than serial); above 32 is unlikely to help on any reachable
-// provider and can trip rate limits.
+// WFCTL_PLAN_DIFF_CONCURRENCY parsing. Values <= 0 are clamped UP to
+// planDiffConcurrencyMin (=1), which produces effectively serial
+// dispatch (one Diff in flight at a time) — operators cannot turn
+// the worker pool fully off, only narrow it to one. Above 32 is
+// unlikely to help on any reachable provider and can trip rate
+// limits, so values >max clamp DOWN to planDiffConcurrencyMax.
 const (
 	planDiffConcurrencyMin = 1
 	planDiffConcurrencyMax = 32
