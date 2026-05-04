@@ -22,6 +22,9 @@ env:
   GOPRIVATE: github.com/GoCodeAlone/*
   GONOSUMCHECK: github.com/GoCodeAlone/*
   TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+  # See ci.yml for rationale. Force in-memory diffcache in CI per the
+  # T3.5 rev3 lifecycle constraint.
+  WFCTL_DIFFCACHE: ":memory:"
 
 jobs:
   test:

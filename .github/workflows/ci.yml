@@ -13,6 +13,12 @@ permissions:
 env:
   GOPRIVATE: github.com/GoCodeAlone/*
   GONOSUMCHECK: github.com/GoCodeAlone/*
+  # CI runners are ephemeral; the iac/diffcache filesystem cache would
+  # cold-miss every job and waste a few ms on disk I/O. Force in-memory
+  # mode per the T3.5 rev3 lifecycle constraint — no filesystem writes
+  # in containerized runners. Operators running wfctl locally see the
+  # default filesystem cache at ~/.cache/wfctl/diff/.
+  WFCTL_DIFFCACHE: ":memory:"
 
 jobs:
   test:

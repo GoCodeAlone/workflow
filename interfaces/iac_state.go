@@ -107,6 +107,37 @@ type ApplyResult struct {
 	PlanID    string           `json:"plan_id"`
 	Resources []ResourceOutput `json:"resources"`
 	Errors    []ActionError    `json:"errors,omitempty"`
+
+	// InitialInputSnapshot captures env-var fingerprints at the start of apply.
+	// Populated by wfctlhelpers.ApplyPlan (T3.1) at apply entry by snapshotting
+	// every name listed in plan.InputSnapshot through inputsnapshot.OSEnvProvider.
+	// Used by the deferred postcondition (T3.1.5) to compute the drift report
+	// against the apply-time snapshot.
+	InitialInputSnapshot map[string]string `json:"initial_input_snapshot,omitempty"`
+
+	// InputDriftReport names env-vars whose fingerprint changed between plan
+	// and apply. Populated by the deferred postcondition in
+	// wfctlhelpers.ApplyPlan (T3.1.5) regardless of whether the apply
+	// itself succeeded or errored. Empty (or nil) means no drift detected.
+	// Entries are sorted by Name for deterministic comparison and stable
+	// diagnostic output; the sort guarantee is enforced by
+	// inputsnapshot.ComputeDrift (covered by
+	// TestComputeDrift_ResultIsSortedByName in
+	// iac/inputsnapshot/compute_drift_test.go).
+	InputDriftReport []DriftEntry `json:"input_drift_report,omitempty"`
+
+	// ReplaceIDMap propagates new ProviderIDs from Replace actions to
+	// dependent resources whose Apply runs later in the same plan.
+	// Populated by doReplace (T3.4); consumed by JIT substitution in W-5
+	// (T5.2/T5.3).
+	//
+	// Keyed by the *replaced* resource's Name (i.e., action.Resource.Name
+	// from the Replace PlanAction — the resource whose Delete-then-Create
+	// just produced a fresh ProviderID). The value is the new ProviderID
+	// returned from the post-Delete Create. Dependent resources reference
+	// the replaced resource by name in their config, so JIT substitution
+	// in W-5 translates "name → new ProviderID" via this map.
+	ReplaceIDMap map[string]string `json:"replace_id_map,omitempty"`
 }
 
 // DestroyResult summarises the outcome of a destroy operation.

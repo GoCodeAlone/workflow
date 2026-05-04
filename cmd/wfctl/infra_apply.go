@@ -14,9 +14,31 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 )
+
+// printDriftReportIfAny writes the canonical FormatStaleError output to w
+// when result.InputDriftReport is non-empty. Safe to call when result is
+// nil or InputDriftReport is empty/nil — both yield a no-op so callers
+// don't need to defensively check the field before calling.
+//
+// Wired in by W-3a/T3.1.5 as a standalone helper; the actual call site in
+// applyWithProviderAndStore (or its successor) lands when W-3b/T3.7
+// switches the in-process apply path through wfctlhelpers.ApplyPlan for
+// v2 plugins. Until then this helper is exercised solely by the
+// in-process drift test, NOT yet by any production caller — preserving
+// the W-3a "zero runtime change for v1 plugins" invariant.
+func printDriftReportIfAny(w io.Writer, result *interfaces.ApplyResult) {
+	if result == nil || len(result.InputDriftReport) == 0 {
+		return
+	}
+	// FormatStaleError emits the multi-line "plan stale: N input(s) changed"
+	// header + per-key fingerprint diff + trailing hint. Println adds the
+	// terminating newline so the next stderr line is not glued to the hint.
+	fmt.Fprintln(w, inputsnapshot.FormatStaleError(result.InputDriftReport))
+}
 
 // infraApplyTroubleshootTimeout is the budget for a Troubleshoot call when
 // infra apply fails. Kept separate so tests can override it.
