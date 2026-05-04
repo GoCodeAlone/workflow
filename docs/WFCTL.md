@@ -2221,3 +2221,51 @@ deploy:
     runtime: minikube       # minikube | kind | docker-desktop | k3d | remote
     registry: ghcr.io/myorg
 ```
+
+---
+
+## Diff Cache
+
+`wfctl infra plan` consults a per-resource diff cache so a Plan re-run against unchanged inputs can skip the (sometimes network-expensive) provider-side `Diff` call. The cache lives at the package `iac/diffcache/` and is keyed by `(plugin-version, resource-type, provider-id, sha256(config), sha256(outputs))`.
+
+**The cache is purely an amortization optimization, NOT a correctness mechanism.** Apply paths remain correct on a 100 % miss rate, which is exactly what CI sees on every fresh runner. Workflows MUST NOT depend on a cache hit for correctness or reproducibility.
+
+### Backend selection (`WFCTL_DIFFCACHE`)
+
+The env var `WFCTL_DIFFCACHE` selects the cache backend at process start:
+
+| Value         | Backend                                                                                        |
+|---------------|------------------------------------------------------------------------------------------------|
+| `disabled`    | No-op cache: every `Get` misses; `Put` is a no-op. Use this for fully-deterministic timing or to bypass any disk state. |
+| `:memory:`    | In-memory cache that lives only for the current process. **CI workflows in this repo set this explicitly** so containerized runners never write cache data to disk. |
+| _(unset)_ or anything else | Filesystem cache rooted at `~/.cache/wfctl/diff/<sha256-of-key>.json` (honors `XDG_CACHE_HOME` on Linux via `os.UserCacheDir`). The default for operators running `wfctl` locally. |
+
+If the user cache directory cannot be resolved, the helper falls back to the in-memory cache automatically — so the caller always gets a working `Cache`.
+
+### Eviction (filesystem backend)
+
+The filesystem cache enforces an LRU eviction policy on each `Put`:
+
+- **By count:** at most 1024 entries.
+- **By total size:** at most 64 MiB on disk.
+
+Whichever cap is exceeded first triggers the eviction pass. The pass evicts the oldest 10 % of entries (sorted by mtime; secondary sort by path for determinism) so amortized cost stays bounded.
+
+### Corruption recovery
+
+If a cache file fails to parse on `Get` (truncated, partial-write, JSON syntax error, or a `schemaVersion` mismatch from a wfctl downgrade), the cache silently deletes the corrupt file and returns a miss. No error is surfaced to the caller; a single info-level log line fires the first time corruption is observed in a process so operators have a breadcrumb without log spam.
+
+### Plugin downgrade
+
+`PluginVersion` is part of the cache key, so a plugin downgrade naturally invalidates entries (cache key miss). Old entries persist on disk until the LRU eviction reclaims them; the size cap above bounds the disk waste.
+
+### CI configuration
+
+Per the T3.5 rev3 lifecycle constraint, **all CI workflows in this repository set `WFCTL_DIFFCACHE=:memory:` at the workflow level** so containerized runners never write to disk:
+
+```yaml
+env:
+  WFCTL_DIFFCACHE: ":memory:"
+```
+
+Files: `.github/workflows/ci.yml`, `benchmark.yml`, `pre-release.yml`, `release.yml`, `dependency-update.yml`. New workflow files that invoke `go test` or `wfctl` should add the same env var.
