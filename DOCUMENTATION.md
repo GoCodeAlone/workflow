@@ -1113,6 +1113,22 @@ modules:
 
 ---
 
+### `ProviderPlanner` (IaC plugin interface)
+
+Optional interface in `interfaces/iac_provider.go` for v2 IaC plugins that need custom plan logic instead of core wfctl's default `platform.ComputePlan` + `driver.Diff` dispatch. Reserved as an extension hook for Tofu/Pulumi-style adapter plugins.
+
+```go
+type ProviderPlanner interface {
+    PlanV2(ctx context.Context, desired []ResourceSpec, current []ResourceState) (IaCPlan, error)
+}
+```
+
+Purely additive — plugins that do not implement `ProviderPlanner` remain valid `IaCProvider` implementations. Core wfctl does NOT type-assert against this interface in v0.21.0; future adapter PRs add the type-assertion at the dispatch site alongside their concrete consumer.
+
+See [docs/iac/providerplanner.md](docs/iac/providerplanner.md) for the adapter author guide and [ADR 009](docs/adr/009-providerplanner-included-per-user-override.md) for the ratification provenance.
+
+---
+
 ### `observability.otel`
 
 Initializes an OpenTelemetry distributed tracing provider that exports spans via OTLP/HTTP to a collector. Sets the global OTel tracer provider so all instrumented code in the process is covered.

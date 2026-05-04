@@ -49,6 +49,20 @@ type IaCProvider interface {
 	Close() error
 }
 
+// ProviderPlanner is an optional interface for v2 plugins that need custom
+// plan logic (replacing platform.ComputePlan's default driver.Diff dispatch).
+//
+// Reserved as an extension hook for Tofu/Pulumi-style adapter plugins. Core
+// wfctl's platform.ComputePlan + wfctlhelpers.ApplyPlan do NOT type-assert
+// against this interface in v0.21.0 — adapter PRs that wish to use it will
+// add the type-assertion at the dispatch site in their own design discussion.
+//
+// Plugins implementing this interface are accepted by the loader; the
+// implementation is not yet exercised by core code.
+type ProviderPlanner interface {
+	PlanV2(ctx context.Context, desired []ResourceSpec, current []ResourceState) (IaCPlan, error)
+}
+
 // BootstrapResult contains metadata returned by a successful BootstrapStateBackend call.
 type BootstrapResult struct {
 	// Bucket is the name of the created or confirmed state bucket/container.
