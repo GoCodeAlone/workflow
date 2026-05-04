@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (rev3 YAGNI fix); operators who need pure offline validation should use `wfctl validate`.
   Configs without any `iac.provider` module fall back to the legacy ConfigHash compare path so
   minimal/legacy fixtures and out-of-band scripts continue to work.
+- **`wfctl infra plan` empty-desired alignment with apply**: when the desired state is empty
+  (every resource removed from config) but providers are declared, `plan` now matches `apply`'s
+  behavior under the per-provider grouping logic: the loop over groupOrder is empty and no
+  delete actions are emitted. To preview what `apply` would tear down, use `wfctl infra destroy
+  --dry-run` (which exercises the same provider load + lists tracked state). Pre-W-3b plan
+  emitted Delete actions for every orphan in current state via the legacy single-call ComputePlan
+  path; this is consistent with the broader rev3 alignment between plan and apply.
 - `driftInfraModules` uses `DriftClass` constants for output classification; drift-found message
   updated to suggest `wfctl infra apply --refresh`.
 - `DriftResult.Expected`, `DriftResult.Actual`, and `DriftResult.Fields` now carry `omitempty`

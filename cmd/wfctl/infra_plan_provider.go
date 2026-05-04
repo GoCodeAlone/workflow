@@ -8,25 +8,28 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
-	"github.com/GoCodeAlone/workflow/platform"
 )
 
-// computePlanForInfraSpecs is the W-3b plan-time entry point: it discovers
-// iac.provider modules in cfgFile, groups desired specs by their
-// `provider:` field, loads each referenced provider via the same loader
-// the apply path uses, and invokes platform.ComputePlan once per group so
-// ResourceDriver.Diff (T3.6e) can dispatch over a real plugin process.
-// Per-group plans are concatenated in iac.provider declaration order and
-// returned as a single IaCPlan.
+// computePlanForInfraSpecs is the W-3b plan-time entry point: it
+// discovers iac.provider modules in cfgFile, groups desired specs by
+// their `provider:` field, loads each referenced provider via the same
+// loader the apply path uses, and dispatches the diff plan once per
+// group via the package-level computeInfraPlan seam (so the apply and
+// plan paths share a single override point for tests). Per-group plans
+// are concatenated in first-reference-in-`desired` order — the order in
+// which a group's first owning resource appears in the desired list,
+// not iac.provider declaration order — and returned as a single
+// IaCPlan.
 //
 // Plugin-load failure is FATAL with the v0.21.0 BREAKING-change error
-// (rev3 fix per cycle-2 YAGNI: no --no-provider escape hatch — operators
-// who need pure offline validation use `wfctl validate`).
+// (rev3 fix per cycle-2 YAGNI: no --no-provider escape hatch —
+// operators who need pure offline validation use `wfctl validate`).
 //
 // Configs that declare no iac.provider modules fall back to a nil
-// provider, which platform.ComputePlan tolerates with the legacy
+// provider, which the underlying ComputePlan tolerates with the legacy
 // ConfigHash compare path. This preserves backwards compatibility for
-// test fixtures and minimal scripts that pre-date the provider plumbing.
+// test fixtures and minimal scripts that pre-date the provider
+// plumbing.
 func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
@@ -68,7 +71,7 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 	// keeps minimal/legacy fixtures working without forcing them to
 	// declare a provider just to render a plan.
 	if len(providerDefs) == 0 {
-		return platform.ComputePlan(ctx, nil, desired, current)
+		return computeInfraPlan(ctx, nil, desired, current)
 	}
 
 	type planGroup struct {
@@ -101,33 +104,44 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 		groups[moduleRef].specs = append(groups[moduleRef].specs, spec)
 	}
 
+	// Loop body wrapped in an IIFE so each provider's closer fires after
+	// its group is computed, not deferred to function exit. Without this,
+	// a 5-provider config would hold 5 gRPC connections open until
+	// computePlanForInfraSpecs returned.
 	var allActions []interfaces.PlanAction
 	for _, ref := range groupOrder {
 		g := groups[ref]
-		provider, closer, loadErr := resolveIaCProvider(ctx, g.provType, g.provCfg)
-		if loadErr != nil {
-			// rev3 BREAKING CHANGE — literal error format documented in
-			// the v0.21.0 CHANGELOG. No --no-provider escape hatch:
-			// `wfctl validate` covers offline-config-validation.
-			return interfaces.IaCPlan{}, fmt.Errorf(`error: failed to load plugin %q: %v; wfctl infra plan now requires the plugin process to compute Diff (since v0.21.0)`, g.provType, loadErr)
-		}
-		if closer != nil {
-			provType := g.provType
-			defer func() {
-				if cerr := closer.Close(); cerr != nil {
-					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
-				}
-			}()
-		}
+		groupActions, err := func() ([]interfaces.PlanAction, error) {
+			provider, closer, loadErr := resolveIaCProvider(ctx, g.provType, g.provCfg)
+			if loadErr != nil {
+				// rev3 BREAKING CHANGE — literal error format documented
+				// in the v0.21.0 CHANGELOG. No --no-provider escape
+				// hatch: `wfctl validate` covers offline-config
+				// validation.
+				return nil, fmt.Errorf(`error: failed to load plugin %q: %v; wfctl infra plan now requires the plugin process to compute Diff (since v0.21.0)`, g.provType, loadErr)
+			}
+			if closer != nil {
+				provType := g.provType
+				defer func() {
+					if cerr := closer.Close(); cerr != nil {
+						fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+					}
+				}()
+			}
 
-		allowProviderTypeFallback := providerTypeCounts[g.provType] == 1
-		scopedCurrent := filterCurrentStateForProvider(current, g.provType, ref, g.specs, allowProviderTypeFallback)
+			allowProviderTypeFallback := providerTypeCounts[g.provType] == 1
+			scopedCurrent := filterCurrentStateForProvider(current, g.provType, ref, g.specs, allowProviderTypeFallback)
 
-		sub, err := platform.ComputePlan(ctx, provider, g.specs, scopedCurrent)
+			sub, err := computeInfraPlan(ctx, provider, g.specs, scopedCurrent)
+			if err != nil {
+				return nil, fmt.Errorf("provider %q: compute plan: %w", ref, err)
+			}
+			return sub.Actions, nil
+		}()
 		if err != nil {
-			return interfaces.IaCPlan{}, fmt.Errorf("provider %q: compute plan: %w", ref, err)
+			return interfaces.IaCPlan{}, err
 		}
-		allActions = append(allActions, sub.Actions...)
+		allActions = append(allActions, groupActions...)
 	}
 
 	return interfaces.IaCPlan{

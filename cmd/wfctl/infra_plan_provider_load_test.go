@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/iactest"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -84,10 +86,11 @@ modules:
 		t.Fatalf("write cfg: %v", err)
 	}
 
-	stub := &planNoopProvider{}
+	stub := &iactest.NoopProvider{}
+	var loadCount atomic.Int64
 	orig := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-		stub.loadCount++
+		loadCount.Add(1)
 		return stub, nil, nil
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
@@ -95,52 +98,7 @@ modules:
 	if err := runInfraPlan([]string{"--config", cfgPath}); err != nil {
 		t.Fatalf("runInfraPlan: %v", err)
 	}
-	if stub.loadCount != 1 {
-		t.Errorf("expected provider loaded once, got %d", stub.loadCount)
+	if got := loadCount.Load(); got != 1 {
+		t.Errorf("expected provider loaded once, got %d", got)
 	}
 }
-
-// planNoopProvider is a minimal interfaces.IaCProvider for plan-path tests
-// that only need to confirm the provider was constructed. ComputePlan in
-// T3.6a still uses the legacy ConfigHash compare and ignores the provider;
-// in T3.6e it dispatches Diff via ResourceDriver, which this stub returns
-// as nil so ComputePlan must guard the nil driver per the contract.
-type planNoopProvider struct {
-	loadCount int
-}
-
-func (p *planNoopProvider) Name() string                                         { return "stub" }
-func (p *planNoopProvider) Version() string                                      { return "0.0.0" }
-func (p *planNoopProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
-func (p *planNoopProvider) Capabilities() []interfaces.IaCCapabilityDeclaration {
-	return nil
-}
-func (p *planNoopProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) SupportedCanonicalKeys() []string { return nil }
-func (p *planNoopProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
-	return nil, nil
-}
-func (p *planNoopProvider) Close() error { return nil }
