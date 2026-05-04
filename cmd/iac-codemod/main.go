@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // SkipMarker is the single canonical comment that opts a function or type
@@ -134,6 +135,31 @@ func run(args []string, stdout, stderr io.Writer) int {
 		opts.DryRun = true
 	}
 	return fn(fs.Args(), opts, stdout, stderr)
+}
+
+// shouldSkipDir is the canonical directory-walk filter shared by every
+// mode's filepath.WalkDir callback. It excludes:
+//
+//   - "vendor" — the standard Go vendor tree; mirrors `go build`'s
+//     behavior of treating vendor/ as a private dependency island.
+//   - "testdata" — by convention not real source.
+//   - hidden directories (prefix ".", except the literal "."): .git,
+//     .idea, .vscode, etc.
+//   - underscore-prefix directories (prefix "_", except the literal
+//     "_"): Go tooling itself ignores these (cmd/go skips package paths
+//     starting with underscore). The DigitalOcean plugin uses
+//     `_worktrees/` for parallel feature branches; without this filter
+//     a single lint run reports the same site dozens of times across
+//     stale checkouts.
+func shouldSkipDir(base string) bool {
+	switch base {
+	case "vendor", "testdata":
+		return true
+	}
+	if len(base) > 1 && (strings.HasPrefix(base, ".") || strings.HasPrefix(base, "_")) {
+		return true
+	}
+	return false
 }
 
 func usage(w io.Writer) {

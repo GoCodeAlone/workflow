@@ -107,7 +107,7 @@ func addValidatePlanPath(path string, opts *Options, report *validatePlanReport)
 		}
 		if d.IsDir() {
 			base := d.Name()
-			if base == "vendor" || base == "testdata" || (strings.HasPrefix(base, ".") && base != ".") {
+			if shouldSkipDir(base) {
 				return filepath.SkipDir
 			}
 			return nil

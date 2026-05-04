@@ -151,7 +151,7 @@ func refactorApplyPath(path string, opts *Options, report *applyReport) error {
 		}
 		if d.IsDir() {
 			base := d.Name()
-			if base == "vendor" || base == "testdata" || (strings.HasPrefix(base, ".") && base != ".") {
+			if shouldSkipDir(base) {
 				return filepath.SkipDir
 			}
 			return nil
