@@ -389,6 +389,19 @@ func TestScenario_CrossResourceConstraintRejection_SkipsWhenNotImplemented(t *te
 	}
 }
 
+// TestScenario_InfraOutputCrossModuleResolution is the in-tree self-test
+// for T7.8: invokes the scenario body directly. The scenario exercises
+// platform-level jitsubst.ResolveSpec, so a no-op fake provider satisfies
+// Run's validateConfig precondition — the body never calls cfg.Provider().
+func TestScenario_InfraOutputCrossModuleResolution(t *testing.T) {
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &iactest.NoopProvider{}
+		},
+	}
+	scenarioInfraOutputCrossModuleResolution(t, cfg)
+}
+
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
 // by each scenario_<name>.go init() in T7.2-T7.12. The test save/restores
 // the package-level registry so it does not leak state to other tests.
