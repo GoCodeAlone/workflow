@@ -211,10 +211,18 @@ func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interface
 	return err
 }
 
-// doUpdate is the T3.1 skeleton — invokes Update with a ResourceRef
-// derived from action.Current's ProviderID (when present) and appends the
-// output to result.Resources on success. T3.3 will fill in the typed
-// pre-condition checks.
+// doUpdate invokes Update with a ResourceRef carrying action.Current's
+// ProviderID (when action.Current is non-nil), appending the driver's
+// returned ResourceOutput to result.Resources on success. Driver errors
+// pass through unchanged so the caller's per-action error wrapper
+// (ApplyPlan's loop body) records them with the canonical action +
+// resource fields.
+//
+// Defensive contract: doUpdate does NOT synthesize a precondition error
+// when action.Current is nil — the driver is the authority on what an
+// empty ProviderID means. ComputePlan upstream is responsible for never
+// emitting an Update without action.Current; if it does, the driver's
+// own typed validation surfaces the bug.
 func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
 	ref := refFromAction(action)
 	out, err := d.Update(ctx, ref, action.Resource)
@@ -244,9 +252,17 @@ func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfac
 	return nil
 }
 
-// doDelete is the T3.1 skeleton — invokes Delete. T3.3 fills in the typed
-// pre-condition checks; this skeleton already closes the latent gap noted
-// in the design (DOProvider.Apply has no "case delete" today).
+// doDelete invokes Delete with a ResourceRef carrying action.Current's
+// ProviderID. This closes the latent gap documented in the design
+// (DOProvider.Apply has no "case delete" arm today, so wfctl's
+// state-prune action silently skipped cloud-resource deletion through
+// the v1 dispatch path); under v2 dispatch wfctlhelpers.ApplyPlan
+// always invokes the driver's Delete, ensuring state-prune is paired
+// with a real cloud-side mutation.
+//
+// Driver errors pass through unchanged for the caller's per-action
+// error wrapping. doDelete does not append to result.Resources — a
+// successful delete has no resource to record.
 func doDelete(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction) error {
 	return d.Delete(ctx, refFromAction(action))
 }
