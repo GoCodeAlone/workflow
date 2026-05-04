@@ -55,11 +55,18 @@ type IaCPlan struct {
 	// SchemaVersion is bumped when on-disk plan format changes (W-5 sets to 2 when JIT is required).
 	SchemaVersion int `json:"schema_version,omitempty"`
 
-	// InputSnapshot records every env var name read during ${VAR} substitution
-	// at plan time, fingerprinting only those that were SET (16-hex-char sha256
+	// InputSnapshot records env var names read during ${VAR} substitution at
+	// plan time, fingerprinting only those that were SET (16-hex-char sha256
 	// prefix of the value). Unset vars are omitted from the map; their absence
 	// at apply time is therefore not flagged as drift. Apply re-computes inputs
 	// and prints diagnostic on mismatch.
+	//
+	// Completeness caveat: the cmd/wfctl scanner that populates this map
+	// (cmd/wfctl/infra_inputsnapshot.go::collectInfraEnvVarRefs) currently
+	// walks each module's own Config but does not apply top-level
+	// environments[env].envVars defaults. Vars that originate solely from a
+	// top-level envVars default may therefore be absent from the snapshot;
+	// closing this gap is tracked as a follow-up to W-1.
 	InputSnapshot map[string]string `json:"input_snapshot,omitempty"`
 }
 
