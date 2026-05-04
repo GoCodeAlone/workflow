@@ -124,29 +124,34 @@ type Driver interface {
 
 type AnonProvider struct{}
 
-func (p *AnonProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
-	plan, err := platform.ComputePlan(ctx, p, desired, current)
+func (anon *AnonProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	plan, err := platform.ComputePlan(ctx, anon, desired, current)
 	return &plan, err
 }
+
+func driverForApply(action PlanAction) Driver { return nil }
 
 // Unnamed receiver: ` + "`func (*AnonProvider) Apply(...)`" + `.
 func (*AnonProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
 	result := &ApplyResult{PlanID: plan.ID}
 	for _, action := range plan.Actions {
+		d := driverForApply(action)
 		var out *ResourceOutput
+		var err error
 		switch action.Action {
 		case "create":
-			_ = action
-			_ = out
+			out, err = d.Create(ctx, action.Resource)
 		case "update":
-			_ = action
-			_ = out
+			ref := ResourceRef{Name: action.Resource.Name}
+			out, err = d.Update(ctx, ref, action.Resource)
 		}
+		_ = out
+		_ = err
 	}
 	return result, nil
 }
 
-func (p *AnonProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
+func (anon *AnonProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
 `
 
 func TestRefactorApply_Fix_UnnamedReceiverGetsName(t *testing.T) {

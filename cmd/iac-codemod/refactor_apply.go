@@ -224,7 +224,7 @@ func refactorApplyFile(path string, opts *Options, report *applyReport) error {
 			Suggestion:  suggestion,
 		}
 		if class == applyCanonical && opts != nil && opts.Fix {
-			rewriteApplyBody(fn)
+			rewriteApplyBody(fn, file)
 			mutated = true
 			site.Rewrote = true
 		}
@@ -572,27 +572,95 @@ func caseBodyIsCanonical(body []ast.Stmt) bool {
 }
 
 // canonicalCaseStmt returns true if stmt fits one of the canonical
-// shapes inside an action-switch case body. See caseBodyIsCanonical
-// for the rationale.
+// shapes inside an action-switch case body. The whitelist is
+// intentionally narrow: any statement outside the recognised set
+// (bookkeeping counters, map updates, accumulators, alternate calls)
+// causes rejection. Review round-3 finding #5: rev2 of this function
+// accepted ANY AssignStmt, so `createsTotal++` / `metrics[action.Action]++`
+// / `result.Stats.Updates++` all passed and the bespoke logic was
+// silently dropped during -fix.
+//
+// Recognised AssignStmt shapes:
+//
+//   - Multi-target call: `out, err = <X>.<METHOD>(...)` with X a Driver
+//     identifier and METHOD in {Create, Read, Update, Delete}
+//   - Single-target call: `err = <X>.<METHOD>(...)` (delete-style)
+//   - Composite literal: `ref := <T>{...}` where T is ResourceRef-shaped
+//   - Selector assignment: `<X>.<F> = <Y>.<G>` where the LHS is a known
+//     ProviderID-style field (ProviderID, Name, Type)
+//
+// Recognised non-Assign shapes:
+//
+//   - if-guard: `if action.Current != nil { ... }` containing only
+//     canonical shapes (recursion via isProviderIDGuard)
+//   - var-decl: `var out *ResourceOutput`
 func canonicalCaseStmt(stmt ast.Stmt) bool {
 	switch s := stmt.(type) {
 	case *ast.AssignStmt:
-		// `out, err = drv.Create(...)` / `ref := ResourceRef{...}` /
-		// `err = drv.Delete(...)` / `ref.ProviderID = ...` are all
-		// AssignStmts. We don't introspect RHS shape further: the
-		// tighter detectors (findCustomErrorWrap, findUpsertRecovery)
-		// catch the bespoke wrapping that would matter.
-		_ = s
-		return true
+		return isCanonicalCaseAssign(s)
 	case *ast.IfStmt:
-		// Allow `if action.Current != nil { ref.ProviderID = ... }` —
-		// the standard ProviderID-set guard. Conservative match: cond
-		// is BinaryExpr NEQ where one side is a SelectorExpr ending in
-		// ".Current" and the other is `nil`.
 		return isProviderIDGuard(s)
 	case *ast.DeclStmt:
-		// `var out *ResourceOutput` — local declaration. wfctlhelpers
-		// owns its own out variable so the local is just bookkeeping.
+		return true
+	}
+	return false
+}
+
+// isCanonicalCaseAssign tightens the AssignStmt acceptance whitelist
+// to known canonical shapes (round-3 #5).
+func isCanonicalCaseAssign(a *ast.AssignStmt) bool {
+	// Multi-target driver call: `out, err = <X>.<METHOD>(...)`.
+	// Two LHS, one RHS that is a CallExpr on a SelectorExpr.
+	if len(a.Lhs) == 2 && len(a.Rhs) == 1 {
+		if isDriverMethodCall(a.Rhs[0]) {
+			return true
+		}
+	}
+	// Single-target driver call: `err = <X>.<METHOD>(...)`.
+	if len(a.Lhs) == 1 && len(a.Rhs) == 1 {
+		if isDriverMethodCall(a.Rhs[0]) {
+			// LHS must be `err` — a different LHS would mean
+			// custom variable bookkeeping.
+			if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Name == "err" {
+				return true
+			}
+			return false
+		}
+		// Composite-literal `ref := ResourceRef{...}` (or any *T{...}).
+		if a.Tok == token.DEFINE {
+			if cl, ok := a.Rhs[0].(*ast.CompositeLit); ok {
+				_ = cl
+				return true
+			}
+		}
+		// Selector assignment `<X>.<F> = <Y>` to a ResourceRef-style
+		// field (ProviderID, Name, Type).
+		if sel, ok := a.Lhs[0].(*ast.SelectorExpr); ok && a.Tok == token.ASSIGN {
+			switch sel.Sel.Name {
+			case "ProviderID", "Name", "Type":
+				return true
+			}
+			return false
+		}
+	}
+	return false
+}
+
+// isDriverMethodCall reports whether expr is a call to a Driver method
+// (Create/Read/Update/Delete on a SelectorExpr receiver). Used by the
+// canonical-case classifier to distinguish driver dispatch from
+// bookkeeping AssignStmts.
+func isDriverMethodCall(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	switch sel.Sel.Name {
+	case "Create", "Read", "Update", "Delete":
 		return true
 	}
 	return false
@@ -667,14 +735,18 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 //   - ctx: ensureCtxParamName renames `_` → `ctx`; preserves any other
 //     non-blank name.
 //   - plan: same shape as ctx, applied to the second parameter slot.
-func rewriteApplyBody(fn *ast.FuncDecl) {
+func rewriteApplyBody(fn *ast.FuncDecl, file *ast.File) {
 	recvName := ensureReceiverName(fn, "p")
 	ctxName := ensureCtxParamName(fn)
 	planName := ensureNthParamName(fn, 1, "plan")
+	// Resolve the wfctlhelpers package alias (review round-3 finding #6:
+	// rev2 hardcoded "wfctlhelpers" but a file using
+	// `wf "github.com/.../wfctlhelpers"` wouldn't compile).
+	pkgAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
 
 	call := &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent("wfctlhelpers"),
+			X:   ast.NewIdent(pkgAlias),
 			Sel: ast.NewIdent("ApplyPlan"),
 		},
 		Args: []ast.Expr{

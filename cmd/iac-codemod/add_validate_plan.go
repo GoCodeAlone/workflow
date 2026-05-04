@@ -146,20 +146,47 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 	}
 
 	provs, methodsByRecv, typeDecls := providerReceiversWithMethods(file)
-	// Widen `provs` to include directory-scoped providers so a type
-	// whose Plan and Apply live in sibling files is still recognised
-	// (review round-1 finding #9). The TypeSpec of any directory-only
-	// provider declared in this file remains in `typeDecls`; the stub
-	// only injects when typeDecls[recv] is non-nil, so we never
-	// append a stub for a provider type declared in a sibling file.
-	for recv := range planLikeReceiversInDir(filepath.Dir(path)) {
-		if _, ok := provs[recv]; !ok && typeDecls[recv] != nil {
-			provs[recv] = typeDecls[recv]
-			// Bring in this file's view of methodsByRecv[recv]; the
-			// directory-wide method set isn't preserved here because
-			// hasValidatePlanMethod and the skip-marker walk only need
-			// methods declared in the CURRENT file (decisions about
-			// stub injection happen on a per-file basis).
+	// Widen `provs` AND `methodsByRecv` to the directory-wide method
+	// set so all per-receiver decisions (skip-marker check,
+	// hasValidatePlanMethod, receiver-kind inference) consult ALL
+	// methods of the type, not only the ones declared in this file.
+	// Review round-2 finding #9: rev1 only widened `provs`, leaving
+	// methodsByRecv file-local. A provider whose ValidatePlan was
+	// already implemented in a sibling file would still receive a
+	// duplicate stub here. Now methodsByRecv carries the package-wide
+	// view; stub injection still only fires when typeDecls[recv] is
+	// non-nil so we never APPEND to a sibling file.
+	if dirProvs, dirMethods := planLikeProviderMethodsInDir(filepath.Dir(path)); dirProvs != nil {
+		for recv := range dirProvs {
+			if _, ok := provs[recv]; !ok && typeDecls[recv] != nil {
+				provs[recv] = typeDecls[recv]
+			}
+		}
+		// Merge sibling methods into methodsByRecv. Per-recv slice is
+		// append-merged so any sibling ValidatePlan declaration is
+		// visible to hasValidatePlanMethod, and any sibling Plan/Apply
+		// is visible to providerReceiverConvention.
+		for recv, sibMethods := range dirMethods {
+			if _, ok := provs[recv]; !ok {
+				continue
+			}
+			// Avoid double-counting methods declared in `file` (already
+			// in methodsByRecv from providerReceiversWithMethods); the
+			// directory-walker re-parses every file, so a method's
+			// *ast.FuncDecl identity may differ between the local and
+			// directory parses even for the same source line. We
+			// dedupe by name+file-path.
+			existing := make(map[string]bool)
+			for _, m := range methodsByRecv[recv] {
+				existing[m.Name.Name] = true
+			}
+			for _, m := range sibMethods {
+				if existing[m.Name.Name] {
+					// Already represented by the local parse.
+					continue
+				}
+				methodsByRecv[recv] = append(methodsByRecv[recv], m)
+			}
 		}
 	}
 	// Determine the qualifier for *IaCPlan / []PlanDiagnostic so the

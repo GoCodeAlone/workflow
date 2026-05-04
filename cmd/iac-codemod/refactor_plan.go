@@ -222,7 +222,7 @@ func refactorPlanFile(path string, opts *Options, report *planReport) error {
 			Reason:   reason,
 		}
 		if class == planCanonical && opts != nil && opts.Fix {
-			rewritePlanBody(fn)
+			rewritePlanBody(fn, file)
 			mutated = true
 			site.Rewrote = true
 		}
@@ -282,9 +282,23 @@ func planLikeReceivers(file *ast.File) map[string]bool {
 // detection net, not to enforce package-correctness (which is the
 // linter's job).
 func planLikeReceiversInDir(dir string) map[string]bool {
+	out, _ := planLikeProviderMethodsInDir(dir)
+	return out
+}
+
+// planLikeProviderMethodsInDir is like planLikeReceiversInDir but also
+// returns the per-receiver method slice (across all files in dir) so
+// callers can inspect ValidatePlan presence + receiver-kind for
+// providers split across sibling files (round-2 #5 + round-3 #1).
+//
+// The returned slice contains *ast.FuncDecl values from a SEPARATE
+// parser.ParseFile call than any caller's primary file parse, so
+// caller code that relies on AST-pointer identity must dedupe (see
+// add_validate_plan.go's name-based merge).
+func planLikeProviderMethodsInDir(dir string) (map[string]bool, map[string][]*ast.FuncDecl) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	methodsByRecv := make(map[string][]*ast.FuncDecl)
 	for _, e := range entries {
@@ -323,7 +337,7 @@ func planLikeReceiversInDir(dir string) map[string]bool {
 			out[recv] = true
 		}
 	}
-	return out
+	return out, methodsByRecv
 }
 
 // receiverDoc captures the documentation positions where a skip marker
@@ -555,12 +569,23 @@ func isCanonicalPlanBody(body *ast.BlockStmt) bool {
 	}
 	idx++
 
-	// 5. return plan, nil
+	// 5. return plan, nil — must be EXACTLY this shape. Review round-3
+	// finding #2: rev2 accepted any 2-result return, so a planner with
+	// the canonical scaffold but a bespoke final return (returning a
+	// cloned plan, propagating an error value, etc.) would still
+	// classify as canonical and the bespoke return logic would be
+	// silently dropped during rewrite.
 	if idx >= len(stmts) {
 		return false
 	}
 	ret, ok := stmts[idx].(*ast.ReturnStmt)
 	if !ok || len(ret.Results) != 2 {
+		return false
+	}
+	if id, ok := ret.Results[0].(*ast.Ident); !ok || id.Name != "plan" {
+		return false
+	}
+	if id, ok := ret.Results[1].(*ast.Ident); !ok || id.Name != "nil" {
 		return false
 	}
 	idx++
@@ -729,20 +754,35 @@ func isConfigHashCall(expr ast.Expr) bool {
 //     decl, so the rewritten call referenced an undefined identifier.
 //   - Blank `_` ctx parameters are renamed to `ctx` (standard idiom);
 //     non-blank ctx names are preserved.
-func rewritePlanBody(fn *ast.FuncDecl) {
+func rewritePlanBody(fn *ast.FuncDecl, file *ast.File) {
 	recvName := ensureReceiverName(fn, "p")
 	ctxName := ensureCtxParamName(fn)
+	// Review round-3 finding #3: rev2 hardcoded "desired" and "current"
+	// as the 2nd/3rd argument names. A canonical Plan declared as
+	// `Plan(ctx, specs, state)` rewrites to references to undefined
+	// identifiers `desired` / `current`. Extract the actual parameter
+	// names from the signature so the substituted call always
+	// references real identifiers.
+	desiredName := ensureNthParamName(fn, 1, "desired")
+	currentName := ensureNthParamName(fn, 2, "current")
+
+	// Resolve the package alias for github.com/GoCodeAlone/workflow/platform
+	// so the call uses whatever name the file already imports under
+	// (review round-3 finding #4: rev2 hardcoded "platform" but a file
+	// using `pf "github.com/.../platform"` wouldn't compile because
+	// `platform` is undefined).
+	pkgAlias := pkgAliasFor(file, planHelperImportPath, "platform")
 
 	call := &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent("platform"),
+			X:   ast.NewIdent(pkgAlias),
 			Sel: ast.NewIdent("ComputePlan"),
 		},
 		Args: []ast.Expr{
 			ast.NewIdent(ctxName),
 			ast.NewIdent(recvName),
-			ast.NewIdent("desired"),
-			ast.NewIdent("current"),
+			ast.NewIdent(desiredName),
+			ast.NewIdent(currentName),
 		},
 	}
 	// plan, err := platform.ComputePlan(ctx, p, desired, current)
@@ -860,6 +900,43 @@ func ensurePlatformImport(file *ast.File) bool {
 // wfctlhelpers.ApplyPlan calls.
 func ensureWfctlhelpersImport(file *ast.File) bool {
 	return ensureImport(file, helperImportPath)
+}
+
+// pkgAliasFor returns the local package name used by `file` for
+// `importPath`. If the file imports the path under an explicit alias
+// (`pf "github.com/.../platform"`), the alias is returned; otherwise
+// the package's default name is `defaultName`. If the file does not
+// import the path at all, returns `defaultName` (the caller is
+// expected to call ensureImport before relying on this name).
+//
+// Review round-3 findings #4 + #6: rev2 of refactor-plan / refactor-apply
+// hardcoded "platform" / "wfctlhelpers" as the call-site selector even
+// when the file already used an aliased import. ensureImport saw the
+// aliased import as satisfying the path check and skipped adding a
+// fresh one, leaving the rewritten code referring to an undefined
+// identifier. pkgAliasFor closes that gap by selecting the right name
+// at rewrite time.
+func pkgAliasFor(file *ast.File, importPath, defaultName string) string {
+	if file == nil {
+		return defaultName
+	}
+	for _, imp := range file.Imports {
+		if imp.Path == nil {
+			continue
+		}
+		if strings.Trim(imp.Path.Value, `"`) != importPath {
+			continue
+		}
+		if imp.Name != nil {
+			n := imp.Name.Name
+			if n == "" || n == "_" || n == "." {
+				return defaultName
+			}
+			return n
+		}
+		return defaultName
+	}
+	return defaultName
 }
 
 // writeFileAtomic prints `file` to a temp sibling and renames it over

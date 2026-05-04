@@ -534,8 +534,13 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 	}
 	// Group method sets by receiver type name, walking AST so we can
 	// surface the original ast.FuncDecl for skip-marker handling.
+	// typeDocsByName captures both TypeSpec.Doc and the wrapping
+	// GenDecl.Doc so the skip-marker check can consult both — review
+	// round-3 finding #7: rev2 only checked ts.Doc, missing markers
+	// placed before the `type` keyword (the wrapping GenDecl).
 	methodsByRecv := make(map[string][]*ast.FuncDecl)
 	typeDecls := make(map[string]*ast.TypeSpec)
+	typeDocsByName := make(map[string]receiverDoc)
 	for _, file := range pass.Files {
 		for _, decl := range file.Decls {
 			switch d := decl.(type) {
@@ -561,6 +566,10 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 						continue
 					}
 					typeDecls[ts.Name.Name] = ts
+					typeDocsByName[ts.Name.Name] = receiverDoc{
+						TypeSpecDoc: ts.Doc,
+						GenDeclDoc:  d.Doc,
+					}
 				}
 			}
 		}
@@ -569,12 +578,20 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 		if !looksLikeProvider(methods) {
 			continue
 		}
-		// Skip if the type's own decl carries the marker, or any of the
-		// provider's signature methods (Plan/Apply) carry it. ValidatePlan
-		// being absent is the whole point of this analyzer, so checking
-		// only Plan/Apply is sufficient.
-		if ts, ok := typeDecls[recv]; ok && hasSkipMarkerOn(ts.Doc) {
-			routeSkipName(pass, ts.Pos(), recv)
+		// Skip if the type's TypeSpec.Doc OR wrapping GenDecl.Doc
+		// carries the marker, or any of the provider's signature
+		// methods (Plan/Apply) carry it. ValidatePlan being absent is
+		// the whole point of this analyzer, so checking only
+		// Plan/Apply is sufficient.
+		if typeDocsByName[recv].carriesMarker() {
+			ts := typeDecls[recv]
+			pos := token.NoPos
+			if ts != nil {
+				pos = ts.Pos()
+			} else if len(methods) > 0 {
+				pos = methods[0].Pos()
+			}
+			routeSkipName(pass, pos, recv)
 			continue
 		}
 		anyMarker := false
