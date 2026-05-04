@@ -96,6 +96,14 @@ func (c *filesystemCache) Get(k Key) (interfaces.DiffResult, bool) {
 // don't honor atomicity, but with this pattern the corruption
 // recovery essentially never fires in production.
 //
+// Concurrency: safe for concurrent use, including concurrent Puts
+// of the same Key. Each Put uses [os.CreateTemp] to obtain a unique
+// temp filename (`<key>.json.<random>.tmp`) so two goroutines writing
+// the same Key cannot clobber each other's temp file. The final
+// rename is racy in the sense that one goroutine's payload "wins,"
+// but both payloads were derived from the caller's DiffResult so the
+// outcome is deterministic from the caller's perspective.
+//
 // Disk-side errors during Put are intentionally silent: the next Get
 // will miss (correct), and the operator already has "stuff isn't
 // working" signal from elsewhere. The cache-as-amortization framing
@@ -110,8 +118,25 @@ func (c *filesystemCache) Put(k Key, result interfaces.DiffResult) {
 		return
 	}
 	path := c.pathFor(k)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// os.CreateTemp gives us a per-call unique tempfile name and an
+	// open *os.File. Pattern uses a "*" suffix so the random token
+	// lands before ".tmp", giving filenames like
+	// `<sha256>.json.123456789.tmp` — easy to spot during eviction
+	// and unambiguous about origin. Two concurrent Puts of the same
+	// Key end up with two distinct temp files; whichever rename
+	// completes last wins for the final cache path.
+	tmpFile, err := os.CreateTemp(c.dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return
+	}
+	tmp := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
+		return
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return
 	}
 	if err := os.Rename(tmp, path); err != nil {
