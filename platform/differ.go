@@ -262,8 +262,21 @@ func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec in
 		if err != nil {
 			return fmt.Errorf("provider.Diff(%q/%q): %w", spec.Type, spec.Name, err)
 		}
-		if cacheable && fresh != nil {
-			cache.Put(key, *fresh)
+		if cacheable {
+			// Cache both the populated DiffResult and the no-op case
+			// (driver returned (nil, nil) to signal "no changes"). The
+			// downstream switch treats a zero-value DiffResult as no-op
+			// just like nil, so caching the zero value here gives
+			// providers that use the nil-as-no-op convention the same
+			// cache benefit as those that return &DiffResult{} —
+			// next ComputePlan against unchanged inputs gets a cache
+			// hit instead of re-dispatching to the (potentially
+			// network-expensive) Diff.
+			toCache := interfaces.DiffResult{}
+			if fresh != nil {
+				toCache = *fresh
+			}
+			cache.Put(key, toCache)
 		}
 		diff = fresh
 	}

@@ -29,12 +29,24 @@ const DispatchVersionV2 = "v2"
 // Providers that don't implement ComputePlanVersionDeclarer, or that
 // return anything other than "v2", get "v1" (the legacy
 // provider.Apply path). Centralizing the type assertion + default
-// keeps the dispatch decision in one place.
-func DispatchVersionFor(p ComputePlanVersionDeclarer) string {
+// keeps the dispatch decision in one place — call sites pass the raw
+// provider value (typed as interfaces.IaCProvider or any concrete
+// provider type) rather than type-asserting at every dispatch site.
+//
+// Param is `any` rather than interfaces.IaCProvider so this package
+// stays import-free of the engine's interfaces package (and so
+// non-engine call sites such as tests can pass concrete provider
+// stubs without an extra adapter). The contract is identical: pass
+// the loaded provider; receive "v1" or "v2".
+func DispatchVersionFor(p any) string {
 	if p == nil {
 		return "v1"
 	}
-	if v := p.ComputePlanVersion(); v == DispatchVersionV2 {
+	d, ok := p.(ComputePlanVersionDeclarer)
+	if !ok {
+		return "v1"
+	}
+	if v := d.ComputePlanVersion(); v == DispatchVersionV2 {
 		return DispatchVersionV2
 	}
 	return "v1"

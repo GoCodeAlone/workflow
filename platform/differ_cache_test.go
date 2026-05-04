@@ -516,3 +516,50 @@ func TestComputePlan_EmptyProviderID_BypassesCache(t *testing.T) {
 		t.Errorf("Diff calls after 2nd ComputePlan = %d, want 4 (no cache hits when ProviderID is empty)", got)
 	}
 }
+
+// TestComputePlan_NilDiffResult_CachesAsZeroValue pins the round-5
+// fix: providers that return (nil, nil) from driver.Diff to indicate
+// "no changes" (a documented option in the (DiffResult|nil, error|nil)
+// return shape) get the same cache benefit as providers that return
+// &DiffResult{}. Before the fix, the cache.Put was guarded by
+// `fresh != nil`, so nil-as-no-op convention providers re-Diffed on
+// every ComputePlan call, undermining the cache contract. The fix
+// caches a zero-value DiffResult on (nil, nil) returns; classifyModification's
+// downstream switch treats zero-value the same as nil (no plan
+// action), so the semantic is preserved while the cache stays
+// effective.
+func TestComputePlan_NilDiffResult_CachesAsZeroValue(t *testing.T) {
+	setDiffCacheForTest(t, diffcache.NewMemory())
+
+	driver := &cacheTestDriver{diff: nil} // nil-as-no-op convention
+	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
+
+	desired := []interfaces.ResourceSpec{
+		{Name: "vpc", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "vpc", Type: "infra.vpc", ProviderID: "pid-vpc", Outputs: map[string]any{"cidr": "10.0.0.0/16"}},
+	}
+
+	plan1, err := ComputePlan(context.Background(), provider, desired, current)
+	if err != nil {
+		t.Fatalf("first ComputePlan: %v", err)
+	}
+	if len(plan1.Actions) != 0 {
+		t.Errorf("first ComputePlan: expected no actions for nil-DiffResult; got %+v", plan1.Actions)
+	}
+	if got := driver.diffCount.Load(); got != 1 {
+		t.Errorf("after first ComputePlan: Diff calls = %d, want 1 (cache miss)", got)
+	}
+
+	plan2, err := ComputePlan(context.Background(), provider, desired, current)
+	if err != nil {
+		t.Fatalf("second ComputePlan: %v", err)
+	}
+	if len(plan2.Actions) != 0 {
+		t.Errorf("second ComputePlan: expected no actions on cache hit; got %+v", plan2.Actions)
+	}
+	if got := driver.diffCount.Load(); got != 1 {
+		t.Errorf("after second ComputePlan: Diff calls = %d, want 1 (cache hit on zero-value DiffResult; round-5 fix)", got)
+	}
+}
