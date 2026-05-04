@@ -425,6 +425,33 @@ func TestScenario_ProtectedReplaceWithOverride(t *testing.T) {
 	scenarioProtectedReplaceWithOverride(t, cfg)
 }
 
+// TestScenario_OutputsConsistencyAcrossReadCycles is the in-tree self-
+// test for T7.11. The fake's NoopDriver returns a fixed ReadResult on
+// every call, so consecutive Reads trivially yield identical Outputs;
+// a faulty implementation that mutated the returned map between calls
+// (e.g., regenerating a "last_seen" timestamp on every Read) would
+// fail the DeepEqual check.
+func TestScenario_OutputsConsistencyAcrossReadCycles(t *testing.T) {
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &iactest.NoopProvider{
+				Driver: &iactest.NoopDriver{
+					ReadResult: &interfaces.ResourceOutput{
+						Name:       "vm",
+						Type:       "infra.compute",
+						ProviderID: "vm-id",
+						Outputs: map[string]any{
+							"ip":   "1.2.3.4",
+							"size": "s-1vcpu-1gb",
+						},
+					},
+				},
+			}
+		},
+	}
+	scenarioOutputsConsistencyAcrossReadCycles(t, cfg)
+}
+
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
 // by each scenario_<name>.go init() in T7.2-T7.12. The test save/restores
 // the package-level registry so it does not leak state to other tests.
