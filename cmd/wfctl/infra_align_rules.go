@@ -718,6 +718,66 @@ func checkRA9(ctx *alignContext) []AlignFinding {
 	return findings
 }
 
+// ── R-A10: provider.ValidatePlan dispatch ──────────────────────────────────
+
+// checkRA10_provider_validate_plan iterates the loaded providers, type-asserts
+// each as interfaces.ProviderValidator, calls ValidatePlan(plan) and surfaces
+// each returned PlanDiagnostic as an AlignFinding.
+//
+// Severity mapping (matches the existing FAIL/WARN binary model used by all
+// other R-A* rules — there is no "INFO" tier today):
+//
+//	PlanDiagnosticError   → FAIL (always non-zero exit)
+//	PlanDiagnosticWarning → WARN (non-zero only under --strict)
+//	PlanDiagnosticInfo    → WARN (advisory; same behaviour as Warning today,
+//	                              kept distinguishable via diagnostic.Message
+//	                              and the underlying PlanDiagnostic struct)
+//
+// Resource label: prefer the diagnostic's Resource field; fall back to
+// "<provider-name>:plan" for plan-level findings so the rendered table
+// always identifies the source provider.
+//
+// No-op when plan is nil or providers is empty (matches R-A7's predicate so
+// running `wfctl infra align` without --plan never triggers R-A10).
+//
+// Naming follows the plan T4.2 spec literally; existing rule helpers use the
+// shorter checkRA<N> form, but the descriptive suffix here documents the
+// rule's intent at the call site in infra_align.go.
+func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *interfaces.IaCPlan) []AlignFinding {
+	if plan == nil || len(providers) == 0 {
+		return nil
+	}
+	var findings []AlignFinding
+	for _, p := range providers {
+		v, ok := p.(interfaces.ProviderValidator)
+		if !ok {
+			continue
+		}
+		diags := v.ValidatePlan(plan)
+		for _, d := range diags {
+			severity := "WARN"
+			if d.Severity == interfaces.PlanDiagnosticError {
+				severity = "FAIL"
+			}
+			resource := d.Resource
+			if resource == "" {
+				resource = fmt.Sprintf("%s:plan", p.Name())
+			}
+			msg := d.Message
+			if d.Field != "" {
+				msg = fmt.Sprintf("%s (field: %s)", d.Message, d.Field)
+			}
+			findings = append(findings, AlignFinding{
+				Rule:     "R-A10",
+				Severity: severity,
+				Resource: resource,
+				Message:  msg,
+			})
+		}
+	}
+	return findings
+}
+
 // ── utilities ──────────────────────────────────────────────────────────────
 
 // toInt converts an any value to int, handling both int and float64

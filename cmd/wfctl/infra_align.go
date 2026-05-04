@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -135,7 +138,85 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 	// R-A9: suspicious provider_credential key suffix
 	findings = append(findings, checkRA9(ctx)...)
 
+	// R-A10: provider.ValidatePlan dispatch — only when --plan is provided.
+	// alignLoadProviders is a test seam; the default loader enumerates
+	// iac.provider modules in the config and loads each via the existing
+	// resolveIaCProvider plugin path. Closers (if any) are released after the
+	// rule runs.
+	if opts.planFile != "" {
+		plan, err := loadPlanJSON(opts.planFile)
+		if err != nil {
+			return nil, fmt.Errorf("load plan for R-A10: %w", err)
+		}
+		providers, closers, err := alignLoadProviders(opts.configFile, opts.envName, plan)
+		if err != nil {
+			return nil, fmt.Errorf("load providers for R-A10: %w", err)
+		}
+		defer func() {
+			for _, c := range closers {
+				if c == nil {
+					continue
+				}
+				if cerr := c.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: provider shutdown: %v\n", cerr)
+				}
+			}
+		}()
+		findings = append(findings, checkRA10_provider_validate_plan(providers, plan)...)
+	}
+
 	return findings, nil
+}
+
+// alignLoadProviders is the seam used by R-A10 to obtain the IaCProvider
+// instances referenced by a config. The default implementation enumerates
+// every iac.provider module in the YAML and loads each via the existing
+// resolveIaCProvider plugin path; tests override this var to inject fakes
+// without spinning up real plugin subprocesses.
+//
+// Returned closers (one per provider, indices aligned) MAY be nil. Callers
+// MUST close them after the rule runs.
+var alignLoadProviders = defaultAlignLoadProviders
+
+func defaultAlignLoadProviders(cfgFile, envName string, _ *interfaces.IaCPlan) ([]interfaces.IaCProvider, []io.Closer, error) {
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load %s: %w", cfgFile, err)
+	}
+	var providers []interfaces.IaCProvider
+	var closers []io.Closer
+	ctx := context.Background()
+	for i := range cfg.Modules {
+		m := &cfg.Modules[i]
+		if m.Type != "iac.provider" {
+			continue
+		}
+		var modCfg map[string]any
+		if envName != "" {
+			resolved, ok := m.ResolveForEnv(envName)
+			if !ok {
+				continue // disabled for this env
+			}
+			modCfg = config.ExpandEnvInMapPreservingKeys(resolved.Config, infraPreserveKeys)
+		} else {
+			modCfg = config.ExpandEnvInMapPreservingKeys(m.Config, infraPreserveKeys)
+		}
+		providerType, _ := modCfg["provider"].(string)
+		if providerType == "" {
+			continue
+		}
+		p, closer, err := resolveIaCProvider(ctx, providerType, modCfg)
+		if err != nil {
+			// Best-effort: a missing or unloadable provider plugin must not
+			// hide the other R-A* findings. Surface as stderr warning and
+			// continue; R-A10 simply can't validate that provider's plan.
+			fmt.Fprintf(os.Stderr, "warning: R-A10: load provider %q (%s): %v\n", m.Name, providerType, err)
+			continue
+		}
+		providers = append(providers, p)
+		closers = append(closers, closer)
+	}
+	return providers, closers, nil
 }
 
 // loadPlanJSON reads and decodes a plan JSON file.
