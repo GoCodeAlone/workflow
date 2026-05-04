@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/iac/diffcache"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -129,11 +130,13 @@ func TestComputePlan_NoopCacheNeverHits(t *testing.T) {
 // cacheTestProvider is a minimal in-package fake satisfying
 // interfaces.IaCProvider. Lives in the internal-package test file (not
 // platform_test) so the same fake can drive cache-injection tests
-// without exporting a setter from production code.
+// without exporting a setter from production code. driver is typed as
+// interfaces.ResourceDriver so different test fixtures (counting,
+// channel-gated) can share the provider shell.
 type cacheTestProvider struct {
 	name    string
 	version string
-	driver  *cacheTestDriver
+	driver  interfaces.ResourceDriver
 }
 
 var _ interfaces.IaCProvider = (*cacheTestProvider)(nil)
@@ -278,6 +281,117 @@ func TestComputePlan_ParallelDispatch_AllCandidatesObserveDiff(t *testing.T) {
 		}
 	}
 }
+
+// TestComputePlan_ParallelDiffDispatch_InFlightGoroutinesObserved
+// strengthens the count-only parallel-dispatch test by proving that
+// 2+ Diff goroutines run simultaneously, not just sequentially. Uses
+// a channel-gated driver: each Diff invocation increments an
+// in-flight counter, signals on `entered`, then blocks on `release`
+// until the test releases all candidates at once. If the dispatch
+// were accidentally serialized (g.SetLimit(1) regression), only one
+// goroutine would enter Diff and the test would hang on the second
+// `<-entered`.
+func TestComputePlan_ParallelDiffDispatch_InFlightGoroutinesObserved(t *testing.T) {
+	setDiffCacheForTest(t, diffcache.NewNoop())
+
+	const n = 4
+	driver := &channelGatedDriver{
+		entered: make(chan struct{}, n),
+		release: make(chan struct{}),
+	}
+	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
+
+	desired := make([]interfaces.ResourceSpec, n)
+	current := make([]interfaces.ResourceState, n)
+	for i := 0; i < n; i++ {
+		name := "vpc-" + string(rune('A'+i))
+		desired[i] = interfaces.ResourceSpec{Name: name, Type: "infra.vpc", Config: map[string]any{"region": "r" + string(rune('0'+i))}}
+		current[i] = interfaces.ResourceState{Name: name, Type: "infra.vpc", ProviderID: "id-" + name}
+	}
+
+	// Run ComputePlan in a separate goroutine so the test can observe
+	// in-flight Diff calls before the dispatch returns.
+	done := make(chan error, 1)
+	go func() {
+		_, err := ComputePlan(context.Background(), provider, desired, current)
+		done <- err
+	}()
+
+	// Wait for at least 2 Diff calls to enter concurrently. The default
+	// concurrency is 8 (clamped above) so up to all 4 candidates can
+	// run in parallel; we conservatively assert ≥2 to avoid relying on
+	// scheduler timing for the upper bound.
+	deadline := time.After(5 * time.Second)
+	const minInFlight = 2
+	for i := 0; i < minInFlight; i++ {
+		select {
+		case <-driver.entered:
+		case <-deadline:
+			t.Fatalf("only %d Diff goroutine(s) entered concurrently after 5s; expected ≥%d (regression toward serial dispatch)", i, minInFlight)
+		}
+	}
+	if got := driver.inFlight.Load(); got < minInFlight {
+		t.Errorf("inFlight peak = %d, want ≥%d", got, minInFlight)
+	}
+
+	// Release all blocked Diff calls and let ComputePlan finish.
+	close(driver.release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ComputePlan: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ComputePlan did not return after release; goroutines stuck")
+	}
+
+	if got := driver.diffCount.Load(); got != int64(n) {
+		t.Errorf("Diff calls = %d, want %d (one per candidate)", got, n)
+	}
+}
+
+// channelGatedDriver is a ResourceDriver that blocks every Diff call
+// on a shared release channel so tests can observe in-flight
+// concurrency. inFlight tracks the peak number of simultaneous Diff
+// goroutines.
+type channelGatedDriver struct {
+	entered   chan struct{}
+	release   chan struct{}
+	diffCount atomic.Int64
+	inFlight  atomic.Int64
+}
+
+var _ interfaces.ResourceDriver = (*channelGatedDriver)(nil)
+
+func (d *channelGatedDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+func (d *channelGatedDriver) Read(_ context.Context, _ interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+func (d *channelGatedDriver) Update(_ context.Context, _ interfaces.ResourceRef, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+func (d *channelGatedDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+func (d *channelGatedDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	cur := d.inFlight.Add(1)
+	defer d.inFlight.Add(-1)
+	// Track peak via CAS-style monotonic increase — simpler to just
+	// rely on the entered channel for the assertion.
+	_ = cur
+	d.diffCount.Add(1)
+	d.entered <- struct{}{}
+	<-d.release
+	return &interfaces.DiffResult{NeedsUpdate: true}, nil
+}
+func (d *channelGatedDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	return nil, nil
+}
+func (d *channelGatedDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+func (d *channelGatedDriver) SensitiveKeys() []string { return nil }
 
 // TestComputePlan_DriverReturnsNilDiff_EmitsNothing covers the (nil,
 // nil) return shape of ResourceDriver.Diff: a driver that knows the
