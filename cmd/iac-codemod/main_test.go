@@ -140,12 +140,13 @@ func TestRun_FixOptsIntoMutation(t *testing.T) {
 	}
 }
 
-// TestRun_HelpAfterMode_PrintsGlobalUsage pins T8.2 carry-forward #1:
-// `iac-codemod <mode> -h` must produce the same structured output as
-// `iac-codemod -h`. The dispatcher's FlagSet.Usage is overridden to call
-// the global usage() rather than the default per-FlagSet banner so users
-// see the mode catalog regardless of where they ask for help.
-func TestRun_HelpAfterMode_PrintsGlobalUsage(t *testing.T) {
+// TestRun_HelpAfterMode_PrintsGlobalUsageToStdout pins T8.2 carry-forward
+// #1 (and review round-2 finding #1): `iac-codemod <mode> -h` must
+// produce the same structured output as `iac-codemod -h` — including
+// the destination stream. Per kubectl / git / gh convention, -h on
+// success goes to stdout; the test asserts stream specifically so a
+// regression to stderr cannot pass via a string-union check.
+func TestRun_HelpAfterMode_PrintsGlobalUsageToStdout(t *testing.T) {
 	for _, mode := range []string{"refactor-plan", "refactor-apply", "add-validate-plan", "lint"} {
 		t.Run(mode, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -153,11 +154,10 @@ func TestRun_HelpAfterMode_PrintsGlobalUsage(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
 			}
-			combined := stdout.String() + stderr.String()
-			// Hallmarks of the global usage: mode catalog listed.
+			// Global usage on -h must land on STDOUT, not stderr.
 			for _, modeName := range []string{"refactor-plan", "refactor-apply", "add-validate-plan", "lint"} {
-				if !strings.Contains(combined, modeName) {
-					t.Errorf("global usage should list %q; got:\n%s", modeName, combined)
+				if !strings.Contains(stdout.String(), modeName) {
+					t.Errorf("global usage on -h must go to stdout (matching `iac-codemod -h`); mode %q missing from stdout=%q (stderr=%q)", modeName, stdout.String(), stderr.String())
 				}
 			}
 		})

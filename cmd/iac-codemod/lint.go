@@ -227,9 +227,6 @@ func lintFile(path string, report *lintReport) error {
 		if _, err := analyzer.Run(pass); err != nil {
 			return fmt.Errorf("%s: %w", analyzer.Name, err)
 		}
-		// Drain any skipped sites the analyzer recorded into the
-		// per-pass scratch field. We piggyback on the report directly
-		// (analyzers reach into it via passSkippedSink).
 	}
 	return nil
 }
@@ -257,13 +254,29 @@ var (
 // hasSkipMarkerOn reports whether the given doc CommentGroup contains
 // the canonical SkipMarker from main.go. Used by every analyzer that
 // flags a function or type declaration.
+//
+// Accepted shapes:
+//
+//	// wfctl:skip-iac-codemod
+//	// wfctl:skip-iac-codemod  legacy upsert recovery, see ADR-042
+//
+// A trailing space + arbitrary justification text is permitted per
+// review-round-2 finding #2 — Go maintainers idiomatically annotate WHY
+// a site is skipped, and a justification suffix must NOT silently turn
+// the marker into a no-op (plan rev2 line 2400 unifies the marker
+// specifically to prevent silent-no-op surfaces).
+//
+// A different prefix (e.g. legacy `// wfctl:skip-codemod`) is rejected
+// — the trailing-space requirement keeps the match tight enough that
+// a substring shadow cannot bypass the marker discipline.
 func hasSkipMarkerOn(doc *ast.CommentGroup) bool {
 	if doc == nil {
 		return false
 	}
 	for _, c := range doc.List {
 		// Comment text includes the leading `//` per ast.Comment convention.
-		if strings.TrimSpace(c.Text) == SkipMarker {
+		text := strings.TrimSpace(c.Text)
+		if text == SkipMarker || strings.HasPrefix(text, SkipMarker+" ") {
 			return true
 		}
 	}
@@ -366,6 +379,7 @@ func runAssertApplyDelegatesToHelper(pass *analysis.Pass) (any, error) {
 // ============================================================
 
 func runAssertDiffSetsNeedsReplaceForForceNew(pass *analysis.Pass) (any, error) {
+	drivers := driverLikeReceivers(pass)
 	for _, file := range pass.Files {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -375,14 +389,20 @@ func runAssertDiffSetsNeedsReplaceForForceNew(pass *analysis.Pass) (any, error) 
 			if !isProviderMethod(fn, "Diff", 3, 2) {
 				continue
 			}
+			if !drivers[receiverTypeName(fn)] {
+				// Method named Diff on a non-driver type (e.g., a
+				// settings struct or config differ). Skip to keep
+				// precision high — review finding #3.
+				continue
+			}
 			if hasSkipMarkerOn(fn.Doc) {
 				routeSkip(pass, fn)
 				continue
 			}
 			refsForceNew := bodyReferencesField(fn.Body, "ForceNew")
-			assignsNeedsReplaceTrue := bodyAssignsFieldTrue(fn.Body, "NeedsReplace")
-			if refsForceNew && !assignsNeedsReplaceTrue {
-				pass.Reportf(fn.Pos(), "%s.%s references ForceNew but never assigns NeedsReplace=true; W-3 force-new contract violated", receiverTypeName(fn), fn.Name.Name)
+			assignsNeedsReplace := bodyAssignsField(fn.Body, "NeedsReplace")
+			if refsForceNew && !assignsNeedsReplace {
+				pass.Reportf(fn.Pos(), "%s.%s references ForceNew but never assigns NeedsReplace; W-3 force-new contract violated", receiverTypeName(fn), fn.Name.Name)
 			}
 		}
 	}
@@ -477,6 +497,48 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 		pass.Reportf(pos, "provider type %s does not implement ValidatePlan; ProviderValidator (R-A10) cannot run on plans involving this provider", recv)
 	}
 	return nil, nil
+}
+
+// driverLikeReceivers returns the set of receiver type names whose
+// method set in pass.Files contains a Diff method AND at least one
+// canonical companion driver method (Read, Create, Update, Delete).
+// Used by AssertDiffSetsNeedsReplaceForForceNew to keep precision high
+// — review finding #3: a type with only Diff (e.g. a config differ)
+// is not a resource driver and should not be analysed for force-new
+// contract compliance.
+func driverLikeReceivers(pass *analysis.Pass) map[string]bool {
+	methodsByRecv := make(map[string][]*ast.FuncDecl)
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			recv := receiverTypeName(fn)
+			if recv == "" {
+				continue
+			}
+			methodsByRecv[recv] = append(methodsByRecv[recv], fn)
+		}
+	}
+	out := make(map[string]bool)
+	for recv, methods := range methodsByRecv {
+		hasDiff, hasCompanion := false, false
+		for _, m := range methods {
+			switch m.Name.Name {
+			case "Diff":
+				if m.Type.Params != nil && len(m.Type.Params.List) >= 2 && m.Type.Results != nil && len(m.Type.Results.List) == 2 {
+					hasDiff = true
+				}
+			case "Read", "Create", "Update", "Delete":
+				hasCompanion = true
+			}
+		}
+		if hasDiff && hasCompanion {
+			out[recv] = true
+		}
+	}
+	return out
 }
 
 // providerLikeReceivers returns the set of receiver type names whose
@@ -632,11 +694,15 @@ func bodyReferencesField(body *ast.BlockStmt, fieldName string) bool {
 	return found
 }
 
-// bodyAssignsFieldTrue reports whether the function body contains an
-// assignment `<X>.fieldName = true` (or `:=` with the same RHS, though
-// := on a selector is invalid Go and won't compile, so we only check
-// AssignStmt with Tok=ASSIGN).
-func bodyAssignsFieldTrue(body *ast.BlockStmt, fieldName string) bool {
+// bodyAssignsField reports whether the function body contains any
+// assignment `<X>.fieldName = <expr>` regardless of RHS shape. Both
+// `r.NeedsReplace = true` (inside an `if c.ForceNew` guard) and the
+// terser `r.NeedsReplace = c.ForceNew` are valid expressions of the
+// W-3 force-new contract — review finding #4 widened the matcher so
+// the second pattern doesn't trigger a false positive. Maintainers
+// who genuinely don't propagate ForceNew leave NeedsReplace untouched
+// entirely, which the analyzer still catches.
+func bodyAssignsField(body *ast.BlockStmt, fieldName string) bool {
 	if body == nil {
 		return false
 	}
@@ -649,22 +715,12 @@ func bodyAssignsFieldTrue(body *ast.BlockStmt, fieldName string) bool {
 		if !ok {
 			return true
 		}
-		for i, lhs := range assign.Lhs {
+		for _, lhs := range assign.Lhs {
 			sel, ok := lhs.(*ast.SelectorExpr)
 			if !ok {
 				continue
 			}
-			if sel.Sel.Name != fieldName {
-				continue
-			}
-			if i >= len(assign.Rhs) {
-				continue
-			}
-			id, ok := assign.Rhs[i].(*ast.Ident)
-			if !ok {
-				continue
-			}
-			if id.Name == "true" {
+			if sel.Sel.Name == fieldName {
 				found = true
 				return false
 			}

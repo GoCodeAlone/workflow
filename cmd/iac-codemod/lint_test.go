@@ -174,6 +174,44 @@ func TestAssertPlanDelegatesToHelper_SkipMarker_Honored(t *testing.T) {
 	}
 }
 
+// TestSkipMarker_AcceptsTrailingJustification pins review-round-2 finding
+// #2: a trailing space + justification context after SkipMarker is a
+// natural Go idiom (`// wfctl:skip-iac-codemod legacy upsert recovery,
+// see ADR-042`) and must NOT silently turn the marker into a no-op.
+// Plan rev2 line 2400 unifies the marker specifically to prevent
+// silent-no-op surfaces; permissive trailing-context is in that family.
+const planSkippedWithJustificationSrc = providerScaffold + `
+// wfctl:skip-iac-codemod legacy upsert recovery, see ADR-042
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return &IaCPlan{}, nil
+}
+`
+
+func TestSkipMarker_AcceptsTrailingJustification(t *testing.T) {
+	diags := runAnalyzerOnSource(t, planSkippedWithJustificationSrc, AssertPlanDelegatesToHelper)
+	if len(diags) != 0 {
+		t.Errorf("trailing justification text after marker must NOT silently break suppression; got %d diagnostics:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+// TestSkipMarker_RejectsCloseButWrongMarker confirms we only accept the
+// canonical marker — a different prefix (e.g. legacy
+// `// wfctl:skip-codemod` from the design rev1 era) should still
+// flag the diagnostic. Guards against accidentally-too-loose matching.
+const planSkippedWithWrongMarkerSrc = providerScaffold + `
+// wfctl:skip-codemod
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return &IaCPlan{}, nil
+}
+`
+
+func TestSkipMarker_RejectsCloseButWrongMarker(t *testing.T) {
+	diags := runAnalyzerOnSource(t, planSkippedWithWrongMarkerSrc, AssertPlanDelegatesToHelper)
+	if len(diags) != 1 {
+		t.Errorf("non-canonical marker `// wfctl:skip-codemod` must NOT suppress the diagnostic (plan rev2 unifies on // wfctl:skip-iac-codemod ONLY); got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
 // ============================================================
 // AssertApplyDelegatesToHelper
 // ============================================================
@@ -232,11 +270,15 @@ func TestAssertApplyDelegatesToHelper_NonCanonical_Diagnoses(t *testing.T) {
 // AssertDiffSetsNeedsReplaceForForceNew
 // ============================================================
 
-const diffCanonicalSrc = `package p
+// driverScaffold provides the Read companion method that
+// driverLikeReceivers requires before AssertDiffSetsNeedsReplaceForForceNew
+// will fire. Drivers conventionally have Read in addition to Diff.
+const driverScaffold = `package p
 import "context"
 
 type ResourceSpec struct{}
 type ResourceOutput struct{}
+type ResourceState struct{}
 type FieldChange struct {
 	ForceNew bool
 }
@@ -247,6 +289,12 @@ type DiffResult struct {
 
 type FooDriver struct{}
 
+func (d *FooDriver) Read(ctx context.Context, s ResourceState) (*ResourceOutput, error) {
+	return nil, nil
+}
+`
+
+const diffCanonicalSrc = driverScaffold + `
 func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
 	r := &DiffResult{}
 	for _, c := range r.Changes {
@@ -258,21 +306,7 @@ func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *Res
 }
 `
 
-const diffMissingNeedsReplaceSrc = `package p
-import "context"
-
-type ResourceSpec struct{}
-type ResourceOutput struct{}
-type FieldChange struct {
-	ForceNew bool
-}
-type DiffResult struct {
-	NeedsReplace bool
-	Changes      []FieldChange
-}
-
-type FooDriver struct{}
-
+const diffMissingNeedsReplaceSrc = driverScaffold + `
 func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
 	r := &DiffResult{}
 	for _, c := range r.Changes {
@@ -295,12 +329,103 @@ func TestAssertDiffSetsNeedsReplaceForForceNew_Canonical_NoDiagnostic(t *testing
 func TestAssertDiffSetsNeedsReplaceForForceNew_MissingAssign_Diagnoses(t *testing.T) {
 	diags := runAnalyzerOnSource(t, diffMissingNeedsReplaceSrc, AssertDiffSetsNeedsReplaceForForceNew)
 	if len(diags) != 1 {
-		t.Fatalf("Diff that references ForceNew but never sets NeedsReplace=true should produce 1 diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+		t.Fatalf("Diff that references ForceNew but never assigns NeedsReplace should produce 1 diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
 	}
 	if !strings.Contains(diags[0].Message, "NeedsReplace") {
 		t.Errorf("diagnostic should reference NeedsReplace; got %q", diags[0].Message)
 	}
 }
+
+// TestAssertDiffSetsNeedsReplaceForForceNew_AcceptsDirectAssign pins
+// review finding #4: the alternate canonical pattern `r.NeedsReplace =
+// c.ForceNew` (instead of `if c.ForceNew { r.NeedsReplace = true }`)
+// also satisfies the W-3 force-new contract and must NOT trigger a
+// false-positive diagnostic.
+const diffDirectAssignSrc = `package p
+import "context"
+
+type ResourceSpec struct{}
+type ResourceOutput struct{}
+type ResourceState struct{}
+type IaCPlan struct{}
+type ApplyResult struct{}
+type FieldChange struct {
+	ForceNew bool
+}
+type DiffResult struct {
+	NeedsReplace bool
+	Changes      []FieldChange
+}
+
+type FooDriver struct{}
+
+func (d *FooDriver) Read(ctx context.Context, s ResourceState) (*ResourceOutput, error) {
+	return nil, nil
+}
+
+func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
+	r := &DiffResult{}
+	for _, c := range r.Changes {
+		r.NeedsReplace = c.ForceNew
+	}
+	return r, nil
+}
+`
+
+func TestAssertDiffSetsNeedsReplaceForForceNew_AcceptsDirectAssign(t *testing.T) {
+	diags := runAnalyzerOnSource(t, diffDirectAssignSrc, AssertDiffSetsNeedsReplaceForForceNew)
+	if len(diags) != 0 {
+		t.Errorf("`r.NeedsReplace = c.ForceNew` is a valid alternate canonical; should NOT flag; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+// TestAssertDiffSetsNeedsReplaceForForceNew_NonDriverNotFlagged pins
+// review finding #3: the analyzer must NOT fire on types that have a
+// method named Diff but are not resource drivers (no Read / Create /
+// Update / Delete companion methods). Adversarially: a `func (s
+// *Settings) Diff(...)` that happens to match the arity should be
+// invisible to this analyzer.
+const diffNonDriverSrc = `package p
+import "context"
+
+type ResourceSpec struct{}
+type ResourceOutput struct{}
+type FieldChange struct {
+	ForceNew bool
+}
+type DiffResult struct {
+	NeedsReplace bool
+	Changes      []FieldChange
+}
+
+// Not a driver — no Read/Create/Update/Delete. Just a settings struct
+// that exposes a "Diff" method for unrelated reasons (e.g. config diff).
+type SettingsDiff struct{}
+
+func (s *SettingsDiff) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
+	r := &DiffResult{}
+	for _, c := range r.Changes {
+		if c.ForceNew {
+			// No NeedsReplace assign — but this isn't a driver, so we
+			// should not flag.
+			_ = c
+		}
+	}
+	return r, nil
+}
+`
+
+func TestAssertDiffSetsNeedsReplaceForForceNew_NonDriverNotFlagged(t *testing.T) {
+	diags := runAnalyzerOnSource(t, diffNonDriverSrc, AssertDiffSetsNeedsReplaceForForceNew)
+	if len(diags) != 0 {
+		t.Errorf("type with Diff() but no driver-companion method (Read/Create/Update/Delete) should NOT be flagged; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+// Refresh diffCanonicalSrc to include a Read companion method so it
+// passes the new precision filter (provider/driver heuristic).
+// (The constant is replaced via Edit after the analyzer is updated;
+// this comment is an intent marker only — see lint_test.go body.)
 
 // ============================================================
 // AssertProviderImplementsValidatePlan

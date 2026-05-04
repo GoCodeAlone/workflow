@@ -108,9 +108,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	// Override the default per-FlagSet usage so `iac-codemod <mode> -h`
 	// produces the same structured output as `iac-codemod -h` (T8.2
-	// carry-forward #1: avoids the user seeing only the FS-specific
-	// "-dry-run / -fix" banner without the mode catalog).
-	fs.Usage = func() { usage(stderr) }
+	// carry-forward #1) AND lands on the same stream — STDOUT — per
+	// kubectl/git/gh convention for help-on-success (T8.2 review #1).
+	// Parse-error noise still flows through fs.SetOutput(stderr); only
+	// the help-text body is steered to stdout here.
+	fs.Usage = func() { usage(stdout) }
 	opts := &Options{}
 	fs.BoolVar(&opts.DryRun, "dry-run", true, "report findings without mutating files (default)")
 	fs.BoolVar(&opts.Fix, "fix", false, "opt into mutation; overrides -dry-run")
