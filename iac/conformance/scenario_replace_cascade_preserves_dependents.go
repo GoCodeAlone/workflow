@@ -40,6 +40,29 @@ func scenarioReplaceCascadePreservesDependents(t *testing.T, cfg Config) {
 	p := cfg.Provider()
 	defer func() { _ = p.Close() }()
 
+	// Preflight: skip when the provider does not expose drivers for
+	// both the documented infra.vpc parent AND the conformance-suite-
+	// only infra.app dependent. infra.app is not in the published
+	// type set (DOCUMENTATION.md); providers opt in when they surface
+	// an application primitive (DO AppPlatform, AWS Beanstalk, etc.).
+	// Without the driver, ApplyPlan fails for type-resolution reasons
+	// unrelated to the cascade contract this scenario pins.
+	parent, err := p.ResourceDriver("infra.vpc")
+	if err != nil {
+		t.Fatalf("ResourceDriver(\"infra.vpc\") errored: %v", err)
+	}
+	dependent, err := p.ResourceDriver("infra.app")
+	if err != nil {
+		t.Fatalf("ResourceDriver(\"infra.app\") errored: %v", err)
+	}
+	if parent == nil || dependent == nil {
+		t.Skipf("provider %s lacks driver(s) for replace-cascade probe "+
+			"(infra.vpc=%v, infra.app=%v); cascade-preserves-dependents "+
+			"is opt-in for providers exposing both primitives",
+			p.Name(), parent != nil, dependent != nil)
+		return
+	}
+
 	plan := &interfaces.IaCPlan{
 		Actions: []interfaces.PlanAction{
 			{

@@ -95,6 +95,14 @@ jobs:
 
       - name: Enforce budget caps
         if: steps.gate.outputs.armed == 'true'
+        env:
+          # Soft-alert path invokes the file-or-comment-leak-issue.sh
+          # helper which calls `gh issue list/create/comment`. Without
+          # GH_TOKEN, those calls fail and the promised dedup'd issue
+          # never lands. The hard-stop path is independent of GH_TOKEN
+          # (it only emits ::error and exits 1), but the env is set
+          # at step scope so both branches behave consistently.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           SPEND=$(jq -r '.month_to_date_usage // "0"' /tmp/budget-result.json)

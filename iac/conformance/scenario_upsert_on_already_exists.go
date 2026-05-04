@@ -43,6 +43,24 @@ func scenarioUpsertOnAlreadyExists(t *testing.T, cfg Config) {
 	p := cfg.Provider()
 	defer func() { _ = p.Close() }()
 
+	// Preflight: skip when the provider does not expose a driver for
+	// the well-known "infra.compute" probe type. The documented type
+	// set (DOCUMENTATION.md) does not include "infra.compute" — it is
+	// a conformance-suite-only probe that providers opt into when they
+	// surface a compute primitive. Without the driver, ApplyPlan would
+	// fail for type-resolution reasons unrelated to the upsert
+	// recovery contract this scenario pins.
+	d, err := p.ResourceDriver("infra.compute")
+	if err != nil {
+		t.Fatalf("ResourceDriver(\"infra.compute\") errored: %v", err)
+	}
+	if d == nil {
+		t.Skipf("provider %s does not expose a ResourceDriver for infra.compute "+
+			"(upsert-recovery probe is opt-in for providers with a compute primitive)",
+			p.Name())
+		return
+	}
+
 	plan := &interfaces.IaCPlan{
 		Actions: []interfaces.PlanAction{
 			{
