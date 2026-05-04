@@ -14,8 +14,10 @@ import (
 // the methods that Refresh exercises (ResourceDriver); the rest panic to
 // make accidental use during testing obvious.
 type fakeIaCProvider struct {
-	// readOutputs maps ProviderID → fake driver output Outputs map. nil
-	// entries produce a ResourceOutput with empty Outputs.
+	// readOutputs maps ProviderID → fake driver output Outputs map. Missing
+	// or nil entries cause Read to return a ResourceOutput whose Outputs is
+	// nil (not an empty map) — that's what map indexing into a
+	// map[string]map[string]any returns for an absent key.
 	readOutputs map[string]map[string]any
 	// readErr, when non-nil, causes the driver Read to return the error
 	// regardless of the resource ref.
