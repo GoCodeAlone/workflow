@@ -36,7 +36,11 @@ func TestIaCPlan_InputSnapshotField(t *testing.T) {
 }
 
 func TestPlanAction_ResolvedConfigHashField(t *testing.T) {
-	a := PlanAction{Action: "create", ResolvedConfigHash: "sha256:abc"}
+	// platform.ConfigHash returns a lower-case hex sha256 digest with no
+	// "sha256:" prefix; use a realistic 64-hex value so the test's expected
+	// shape matches the on-disk format and won't mislead a future validator.
+	const realisticHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	a := PlanAction{Action: "create", ResolvedConfigHash: realisticHash}
 	data, err := json.Marshal(a)
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +49,7 @@ func TestPlanAction_ResolvedConfigHashField(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ResolvedConfigHash != "sha256:abc" {
-		t.Errorf("ResolvedConfigHash: got %q", got.ResolvedConfigHash)
+	if got.ResolvedConfigHash != realisticHash {
+		t.Errorf("ResolvedConfigHash: got %q want %q", got.ResolvedConfigHash, realisticHash)
 	}
 }
