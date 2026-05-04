@@ -101,10 +101,20 @@ type iacPluginManifest struct {
 // declares capabilities.iacProvider.name == providerName.
 // Returns ("", "", false, nil) when not found; ("name", "computePlanVersion",
 // true/false, nil) when the manifest matches (hasBinary indicates whether
-// the executable is present). The computePlanVersion return is the raw
-// SDK-manifest value ("", "v1", or "v2") — callers should pass it through
-// wfctlhelpers.DispatchVersionFor (or treat empty as "v1") rather than
-// string-comparing directly.
+// the executable is present).
+//
+// The computePlanVersion return is the RAW value from the SDK manifest's
+// iacProvider.computePlanVersion field. This loader path performs only
+// minimal json.Unmarshal — no schema validation — so callers must NOT
+// assume the returned string is constrained to {"", "v1", "v2"}. Use
+// the wfctlhelpers.DispatchVersionV2 constant for the v2-equality check
+// (anything else, including unknown values and empty, defaults to v1):
+//
+//	if computePlanVersion == wfctlhelpers.DispatchVersionV2 { ... v2 path ... }
+//
+// (wfctlhelpers.DispatchVersionFor takes a provider value, not a raw
+// string, so it does not apply at this loader-level seam where only
+// the string is in hand.)
 func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion string, hasBinary bool, err error) {
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
@@ -720,13 +730,20 @@ func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.Resour
 		"current_provider_id": current.ProviderID,
 		"current_status":      current.Status,
 		"current_outputs":     current.Outputs,
-		// Sensitive crosses the gRPC boundary as map[string]any.
-		// structpb.NewStruct rejects map[string]bool; without this
-		// conversion the entire args struct silently drops to empty
-		// (mapToStruct in plugin/external/convert.go falls back to
-		// &structpb.Struct{} on err) and the plugin observes args=map[]
-		// — the bug T3.9 runtime-launch-validation surfaced.
-		"current_sensitive": sensitiveToAny(current.Sensitive),
+	}
+	// Sensitive crosses the gRPC boundary as map[string]any.
+	// structpb.NewStruct rejects map[string]bool; without this
+	// conversion the entire args struct silently drops to empty
+	// (mapToStruct in plugin/external/convert.go falls back to
+	// &structpb.Struct{} on err) and the plugin observes args=map[]
+	// — the bug T3.9 runtime-launch-validation surfaced.
+	//
+	// Only include the key when the converted map is non-empty, so the
+	// wire stays trim-friendly (matches sensitiveToAny's docstring).
+	// Setting `args["current_sensitive"] = nil` would serialize as a
+	// NullValue rather than omitting the field, defeating that intent.
+	if conv := sensitiveToAny(current.Sensitive); conv != nil {
+		args["current_sensitive"] = conv
 	}
 	res, err := d.invoker.InvokeService("ResourceDriver.Diff", args)
 	if err != nil {
