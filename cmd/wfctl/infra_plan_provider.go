@@ -117,8 +117,11 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 				// rev3 BREAKING CHANGE — literal error format documented
 				// in the v0.21.0 CHANGELOG. No --no-provider escape
 				// hatch: `wfctl validate` covers offline-config
-				// validation.
-				return nil, fmt.Errorf(`error: failed to load plugin %q: %v; wfctl infra plan now requires the plugin process to compute Diff (since v0.21.0)`, g.provType, loadErr)
+				// validation. Note: no leading "error:" prefix here —
+				// cmd/wfctl/main.go's top-level printer already emits
+				// "error: %v" on command failure, so prefixing here
+				// would produce double "error: error: ...".
+				return nil, fmt.Errorf(`failed to load plugin %q: %v; wfctl infra plan now requires the plugin process to compute Diff (since v0.21.0)`, g.provType, loadErr)
 			}
 			if closer != nil {
 				provType := g.provType

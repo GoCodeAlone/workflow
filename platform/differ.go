@@ -89,6 +89,7 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 	type modCandidate struct {
 		spec interfaces.ResourceSpec
 		rs   interfaces.ResourceState
+		hash string // precomputed configHash(spec.Config); reused by classifyModification
 	}
 	var candidates []modCandidate
 	for _, spec := range desired {
@@ -100,7 +101,7 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 				ResolvedConfigHash: hash,
 			})
 		} else {
-			candidates = append(candidates, modCandidate{spec: spec, rs: rs})
+			candidates = append(candidates, modCandidate{spec: spec, rs: rs, hash: hash})
 		}
 	}
 
@@ -114,7 +115,7 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 		g.SetLimit(planDiffConcurrency())
 		for i := range candidates {
 			g.Go(func() error {
-				return classifyModification(gctx, p, candidates[i].spec, candidates[i].rs, &mods[i])
+				return classifyModification(gctx, p, candidates[i].spec, candidates[i].rs, candidates[i].hash, &mods[i])
 			})
 		}
 		if err := g.Wait(); err != nil {
@@ -175,9 +176,11 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 // and writes the resulting PlanAction (or nil for skip) to *out. It
 // honors the nil-provider / nil-driver fallback contract documented on
 // ComputePlan: when no driver is available, the resource is classified
-// via the legacy ConfigHash compare.
-func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, rs interfaces.ResourceState, out **interfaces.PlanAction) error {
-	hash := configHash(spec.Config)
+// via the legacy ConfigHash compare. The hash argument is the
+// precomputed configHash(spec.Config), threaded in by the caller so
+// the per-candidate hashing happens once during candidate-bucketing
+// rather than redundantly here on every Diff dispatch.
+func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, rs interfaces.ResourceState, hash string, out **interfaces.PlanAction) error {
 	rsCopy := rs
 
 	// Nil-provider fallback: legacy ConfigHash compare.
