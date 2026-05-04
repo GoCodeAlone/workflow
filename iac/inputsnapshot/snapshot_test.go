@@ -1,6 +1,7 @@
 package inputsnapshot
 
 import (
+	"os"
 	"testing"
 )
 
@@ -42,10 +43,18 @@ func TestCompute_MissingEnvVarOmitted(t *testing.T) {
 }
 
 func TestNewTolerantEnvProvider_UnsetButPlanned_ReturnsSentinel(t *testing.T) {
-	// Use a test-unique env-var name to avoid colliding with anything the
-	// process or other tests might rely on; we never set or unset it, so
-	// no cleanup is required and there is no cross-test state leak.
+	// Use a test-unique env-var name; even so a hostile CI could pre-set
+	// it, so explicitly Unsetenv to guarantee the precondition and restore
+	// any prior value via t.Cleanup so the test cannot leak state.
 	const key = "WFCTL_TEST_INPUTSNAPSHOT_UNSET_KEY"
+	if prior, had := os.LookupEnv(key); had {
+		t.Cleanup(func() { _ = os.Setenv(key, prior) })
+	} else {
+		t.Cleanup(func() { _ = os.Unsetenv(key) })
+	}
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("Unsetenv(%q): %v", key, err)
+	}
 	plan := map[string]string{key: "deadbeef00000000"}
 	provider := NewTolerantEnvProvider(plan)
 	val, ok := provider(key)
