@@ -28,7 +28,10 @@ import (
 // ApplyPlan dispatches each plan action to the matching ResourceDriver on
 // the provider. Per-action errors are recorded on result.Errors and do NOT
 // abort the loop — apply best-effort across actions, surface every failure
-// for the operator to triage.
+// for the operator to triage. Context cancellation between actions IS
+// respected: when ctx is canceled or its deadline expires, the loop stops
+// at the next iteration boundary and returns ctx.Err() as the top-level
+// error so a long apply terminates promptly on Ctrl-C / SIGTERM.
 //
 // The function is concurrency-safe with respect to its inputs: result is
 // owned by ApplyPlan for the duration of the call and is not shared with
@@ -41,12 +44,19 @@ import (
 func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
 	result := &interfaces.ApplyResult{PlanID: plan.ID}
 	for _, action := range plan.Actions {
+		// Honor cancellation at the loop boundary. Drivers should also
+		// check ctx internally for in-flight work, but the loop check
+		// guarantees apply stops between actions even if a driver
+		// happens to ignore ctx.
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		d, err := p.ResourceDriver(action.Resource.Type)
 		if err != nil {
 			result.Errors = append(result.Errors, interfaces.ActionError{
 				Resource: action.Resource.Name,
 				Action:   action.Action,
-				Error:    fmt.Errorf("resolve driver: %w", err).Error(),
+				Error:    fmt.Sprintf("resolve driver: %v", err),
 			})
 			continue
 		}
@@ -139,6 +149,14 @@ func doDelete(ctx context.Context, d interfaces.ResourceDriver, action interface
 // from existing state. For net-new actions (action.Current == nil) the
 // returned ref has an empty ProviderID, matching the contract that
 // drivers locate by Name when ProviderID is absent.
+//
+// Invariant: callers MUST ensure action.Current's Name/Type match
+// action.Resource — Replace plans assume same-name same-type. If a future
+// plan generator emits a Replace where Current.Name != Resource.Name
+// (e.g., a rename across replace), the Delete would target the new name
+// with the old ProviderID — likely a "not found" or wrong-resource bug.
+// This function does not enforce the invariant; the contract is upstream
+// in ComputePlan.
 func refFromAction(action interfaces.PlanAction) interfaces.ResourceRef {
 	ref := interfaces.ResourceRef{
 		Name: action.Resource.Name,
