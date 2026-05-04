@@ -134,44 +134,11 @@ func TestInfraPlan_SchemaVersionV1_OnlyEnvVarRef_NoJIT(t *testing.T) {
 	}
 }
 
-// TestInfraPlan_SchemaVersionV2_PersistedToFileMatches verifies the
-// end-to-end stamping: a plan with a JIT ref persisted via -o has
-// SchemaVersion=2 in the on-disk JSON.
-func TestInfraPlan_SchemaVersionV2_PersistedToFileMatches(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "infra.yaml")
-	// We use a config that ComputePlan classifies as a no-op create
-	// (no current state; no provider) — the plan still includes the
-	// action with the JIT ref preserved through env_vars.
-	if err := os.WriteFile(cfgPath, []byte(`
-modules:
-  - name: app
-    type: infra.container_service
-    config:
-      env_vars:
-        VPC_UUID: "${vpc.id}"
-`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	planFile := filepath.Join(dir, "plan.json")
-	// T5.5 will add a rejection here for V2 + -o; once it lands, this
-	// test will need to switch to a direct planRequiresJITSubstitution
-	// assertion (the helper-only tests above already cover that path).
-	// For now, T5.4 is happy as long as the file contains
-	// schema_version=2 IF the persisted path even reaches that point.
-	err := runInfraPlan([]string{"--config", cfgPath, "--output", planFile})
-	if err != nil {
-		// T5.5 may reject; allow either outcome and, if no error, check
-		// the on-disk version. The strict T5.5 rejection assertion lives
-		// in its own dedicated test file.
-		return
-	}
-	plan := readPlanFile(t, planFile)
-	if plan.SchemaVersion != infraPlanSchemaVersionJIT {
-		t.Errorf("SchemaVersion (persisted): got %d want %d (JIT)",
-			plan.SchemaVersion, infraPlanSchemaVersionJIT)
-	}
-}
+// (T5.4's earlier persisted-end-to-end test was superseded by T5.5's
+// rejection contract — V2 plans now error at -o time rather than being
+// written to disk. The helper-only assertions above already cover the
+// stamp-logic correctness; T5.5's own test file owns the rejection
+// scenario end-to-end.)
 
 // readPlanFile is a small helper that loads + unmarshals a plan.json,
 // failing the test on any IO/decode error.

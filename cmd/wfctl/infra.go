@@ -279,6 +279,18 @@ func runInfraPlan(args []string) error {
 	}
 
 	if *output != "" {
+		// T5.5: persisted plan.json is the wfctl-infra-apply --plan
+		// canonical input. JIT-style plans cannot be persisted because
+		// every ${MODULE.field|id} ref needs apply-time resolution
+		// against this-apply ReplaceIDMap + syncedOutputs (data that
+		// does NOT exist at plan time and CANNOT be preserved across
+		// the plan/apply boundary). Reject up-front with an exact
+		// error string the operator can grep for. Stdout-only emission
+		// (no -o) of a JIT-style plan IS allowed — it's a preview, not
+		// a contract — and falls through this guard untouched.
+		if plan.SchemaVersion == infraPlanSchemaVersionJIT {
+			return fmt.Errorf("error: plan -o requires JIT-free config; this plan references ${MODULE.field} which only resolves at apply time. Use 'wfctl infra apply' (without --plan) for JIT-aware applies.")
+		}
 		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
 		// can detect stale plans when the config changes after plan generation.
 		plan.DesiredHash = desiredStateHash(desired)
