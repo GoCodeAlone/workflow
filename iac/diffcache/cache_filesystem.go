@@ -75,11 +75,21 @@ func (c *filesystemCache) Get(k Key) (interfaces.DiffResult, bool) {
 	return env.Result, true
 }
 
+// Put writes the cache entry atomically via write-temp-then-rename.
+// POSIX rename(2) is atomic on the same filesystem — if the process
+// crashes mid-write the temp file is orphaned but the final cache
+// path is either the prior contents or the new contents, never a
+// partial write. The corruption-recovery path in [Get] is still the
+// safety net for cross-filesystem renames or NFS edge cases that
+// don't honor atomicity, but with this pattern the corruption
+// recovery essentially never fires in production.
+//
+// Disk-side errors during Put are intentionally silent: the next Get
+// will miss (correct), and the operator already has "stuff isn't
+// working" signal from elsewhere. The cache-as-amortization framing
+// in the package godoc sets the expectation.
 func (c *filesystemCache) Put(k Key, result interfaces.DiffResult) {
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
-		// Disk-side errors during Put are intentionally silent: the
-		// next Get will miss (correct), and the operator already has
-		// "stuff isn't working" signal from elsewhere.
 		return
 	}
 	env := envelope{SchemaVersion: cacheSchemaVersion, Result: result}
@@ -88,7 +98,17 @@ func (c *filesystemCache) Put(k Key, result interfaces.DiffResult) {
 		return
 	}
 	path := c.pathFor(k)
-	_ = os.WriteFile(path, data, 0o644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		// Best-effort cleanup of the orphaned temp file; ignore
+		// errors since the next Put may overwrite it anyway and
+		// LRU eviction will eventually reclaim the space.
+		_ = os.Remove(tmp)
+		return
+	}
 	c.maybeEvict()
 }
 

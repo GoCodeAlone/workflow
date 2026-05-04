@@ -2,7 +2,6 @@ package diffcache
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,6 +14,15 @@ import (
 // (10% per-overflow batch), the eviction is amortized — for the test
 // we drive it with a small cap (10 entries; 10% = 1 evicted per
 // over-cap Put) to keep the test fast.
+//
+// Mtime-resolution assumption: the 1ms inter-Put sleep relies on the
+// underlying filesystem providing mtime granularity ≤ 1ms (true on
+// Linux ext4/btrfs/xfs, macOS APFS, Windows NTFS — the CI matrix).
+// Coarse-mtime filesystems (FAT32 with 2s, SMB shares with ~1s) would
+// produce indistinguishable mtimes for adjacent Puts and the
+// secondary path-sort (by sha256 hash of the cache key) would decide
+// eviction order — uncorrelated with insertion order. The package
+// intentionally does not support such filesystems.
 func TestCache_LRUEvictionByCount(t *testing.T) {
 	dir := t.TempDir()
 	c := &filesystemCache{
@@ -23,9 +31,8 @@ func TestCache_LRUEvictionByCount(t *testing.T) {
 		maxBytes:   defaultMaxBytes, // not the trigger here
 	}
 	// Fill to the cap. Each Put with a different key creates a new file.
-	// We sleep 1ms between Puts so mtimes are distinguishable; the OS
-	// mtime resolution is 1ns on most filesystems but coarse on some,
-	// so 1ms is a safe lower bound.
+	// 1ms between Puts so mtimes are distinguishable on the supported
+	// filesystems (see godoc above).
 	for i := range 10 {
 		c.Put(Key{Type: fmt.Sprintf("k%d", i)}, interfaces.DiffResult{})
 		time.Sleep(time.Millisecond)
@@ -114,9 +121,5 @@ func TestCache_EvictionTouchesNothingWhenUnderCap(t *testing.T) {
 		if _, hit := c.Get(Key{Type: k}); !hit {
 			t.Errorf("under-cap key %q should be retained", k)
 		}
-	}
-	// Sanity: verify no errant background eviction took place.
-	if _, err := os.Stat(filepath.Join(dir, "*.json")); err == nil {
-		t.Error("glob path should not exist as a literal file (sanity check)")
 	}
 }

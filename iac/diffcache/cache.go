@@ -78,6 +78,12 @@ const evictionFraction = 0.10
 // Key tuples the inputs to a single Diff. Two Keys are equal iff every
 // field matches; the canonical sha256 fingerprint of the key
 // determines the on-disk filename.
+//
+// JSON tags on the fields are for log / transcript serialization
+// only — cache keying uses NUL-separated string concatenation in
+// [keyFingerprint], not JSON marshaling. A reader checking the
+// fingerprint shape should follow the keyFingerprint code, not the
+// tags.
 type Key struct {
 	// PluginVersion is the plugin's name@version string, e.g.,
 	// "do@v0.10.0". Plugin downgrades naturally invalidate cache
@@ -146,7 +152,12 @@ func (noopCache) Get(_ Key) (interfaces.DiffResult, bool) { return interfaces.Di
 func (noopCache) Put(_ Key, _ interfaces.DiffResult)      { /* no-op */ }
 
 // userCacheDir returns the diff-cache root under the user cache
-// directory, e.g., `~/.cache/wfctl/diff/` on Linux. Honors XDG_CACHE_HOME.
+// directory. Resolution follows os.UserCacheDir conventions per
+// platform:
+//
+//   - Linux:   $XDG_CACHE_HOME or $HOME/.cache (e.g., ~/.cache/wfctl/diff/).
+//   - macOS:   $HOME/Library/Caches (e.g., ~/Library/Caches/wfctl/diff/).
+//   - Windows: %LocalAppData% (e.g., C:\Users\<user>\AppData\Local\wfctl\diff\).
 func userCacheDir() (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
