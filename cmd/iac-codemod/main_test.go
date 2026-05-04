@@ -1,6 +1,15 @@
 // Copyright (c) 2026 Jon Langevin
 // SPDX-License-Identifier: Apache-2.0
 
+// Tests in this file MUST NOT call t.Parallel(). The package-global
+// `modes` map is mutated and restored under defer (see captureMode,
+// TestRun_FlagAfterPath_SilentlyTreatedAsPositional,
+// TestRun_PositionalArgsForwardedToMode); concurrent test goroutines
+// would race on the same map and -race would catch it only at high
+// concurrency. If a future T8.x test needs parallelism, refactor `run`
+// to take the mode map as a parameter (dependency injection) so each
+// test can build a local map per-test.
+
 package main
 
 import (
