@@ -523,6 +523,25 @@ type remoteResourceDriver struct {
 	resourceType string
 }
 
+// sensitiveToAny converts a map[string]bool (the Sensitive field on
+// ResourceOutput) into the map[string]any shape structpb.NewStruct
+// accepts. Returns nil for empty/nil input so the wire stays
+// trim-friendly. Without this conversion, the upstream
+// plugin/external/convert.go::mapToStruct silently drops the entire
+// args struct on NewStruct failure (it returns &structpb.Struct{}
+// rather than surfacing the typing error) — the bug T3.9
+// runtime-launch-validation surfaced.
+func sensitiveToAny(s map[string]bool) map[string]any {
+	if len(s) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(s))
+	for k, v := range s {
+		out[k] = v
+	}
+	return out
+}
+
 // wrapIaCError categorizes plugin errors by matching HTTP status codes and
 // common message patterns, wrapping with the appropriate IaC sentinel so
 // callers can use errors.Is for control flow. Errors crossing the plugin
@@ -701,7 +720,13 @@ func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.Resour
 		"current_provider_id": current.ProviderID,
 		"current_status":      current.Status,
 		"current_outputs":     current.Outputs,
-		"current_sensitive":   current.Sensitive,
+		// Sensitive crosses the gRPC boundary as map[string]any.
+		// structpb.NewStruct rejects map[string]bool; without this
+		// conversion the entire args struct silently drops to empty
+		// (mapToStruct in plugin/external/convert.go falls back to
+		// &structpb.Struct{} on err) and the plugin observes args=map[]
+		// — the bug T3.9 runtime-launch-validation surfaced.
+		"current_sensitive": sensitiveToAny(current.Sensitive),
 	}
 	res, err := d.invoker.InvokeService("ResourceDriver.Diff", args)
 	if err != nil {
