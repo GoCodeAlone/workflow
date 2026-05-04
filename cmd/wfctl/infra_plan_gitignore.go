@@ -70,7 +70,16 @@ func gitignoreCovers(data []byte, base, planAbs, gitignoreDir string) bool {
 			continue
 		}
 		if strings.HasPrefix(line, "!") {
-			continue // negation rules — skip; conservative (warn even if a later rule re-includes)
+			// Negation rules are skipped entirely. Combined with the early-return
+			// on first positive match below, this means a pattern like "*.json"
+			// followed by "!plan.json" (re-include) is incorrectly treated as
+			// covered — producing a false-NEGATIVE warning (operator sees no
+			// warning when one was warranted). Acceptable for a heuristic whose
+			// purpose is to nudge, not enforce; full last-match-wins gitignore
+			// semantics are out of scope. If false negatives become a problem,
+			// either implement last-matching-rule-wins for the supported
+			// pattern set, or shell out to `git check-ignore`.
+			continue
 		}
 		// Strip a leading "/" — gitignore-relative anchor; we treat both
 		// "/foo" and "foo" as candidates against the basename or relative path.
