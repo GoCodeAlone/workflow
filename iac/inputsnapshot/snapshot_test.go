@@ -1,7 +1,6 @@
 package inputsnapshot
 
 import (
-	"os"
 	"testing"
 )
 
@@ -43,10 +42,13 @@ func TestCompute_MissingEnvVarOmitted(t *testing.T) {
 }
 
 func TestNewTolerantEnvProvider_UnsetButPlanned_ReturnsSentinel(t *testing.T) {
-	os.Unsetenv("STAGING_PG_PASSWORD")
-	plan := map[string]string{"STAGING_PG_PASSWORD": "deadbeef00000000"}
+	// Use a test-unique env-var name to avoid colliding with anything the
+	// process or other tests might rely on; we never set or unset it, so
+	// no cleanup is required and there is no cross-test state leak.
+	const key = "WFCTL_TEST_INPUTSNAPSHOT_UNSET_KEY"
+	plan := map[string]string{key: "deadbeef00000000"}
 	provider := NewTolerantEnvProvider(plan)
-	val, ok := provider("STAGING_PG_PASSWORD")
+	val, ok := provider(key)
 	if !ok || val != preservedFingerprint {
 		t.Errorf("expected (preservedFingerprint, true) for plan-time-set unset-now var; got (%q, %v)", val, ok)
 	}
