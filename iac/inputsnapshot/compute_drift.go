@@ -1,6 +1,10 @@
 package inputsnapshot
 
-import "github.com/GoCodeAlone/workflow/interfaces"
+import (
+	"sort"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
+)
 
 // unsetFingerprintPlaceholder is the in-package constant displayed in the
 // ApplyFingerprint field when the var was set at plan time but is missing
@@ -42,5 +46,10 @@ func ComputeDrift(planSnap, applySnap map[string]string) []interfaces.DriftEntry
 			})
 		}
 	}
+	// Sort by Name so the returned slice is deterministic across runs —
+	// callers may marshal/log/compare the slice (StaleError.Drift is
+	// publicly exposed). FormatStaleError sorts independently for its own
+	// output; this sort makes the structured slice match the printed order.
+	sort.Slice(drift, func(i, j int) bool { return drift[i].Name < drift[j].Name })
 	return drift
 }

@@ -45,3 +45,36 @@ func TestComputeDrift_MatchingFingerprints_NoDrift(t *testing.T) {
 		t.Errorf("matching fingerprints should produce no drift; got %+v", drift)
 	}
 }
+
+// TestComputeDrift_ResultIsSortedByName verifies the returned slice is
+// stable across map-iteration randomness so callers (logs, JSON marshal,
+// test asserts) get deterministic output. Multiple keys + multiple runs
+// would each produce a different non-deterministic order without the sort;
+// asserting a single canonical order across one call is enough to catch
+// regression of the sort.
+func TestComputeDrift_ResultIsSortedByName(t *testing.T) {
+	planSnap := map[string]string{
+		"ZULU":   "ffff000000000000",
+		"ALPHA":  "1111000000000000",
+		"MIKE":   "8888000000000000",
+		"BRAVO":  "2222000000000000",
+		"YANKEE": "eeee000000000000",
+	}
+	applySnap := map[string]string{
+		"ZULU":   "f0f0000000000000",
+		"ALPHA":  "1010000000000000",
+		"MIKE":   "8080000000000000",
+		"BRAVO":  "2020000000000000",
+		"YANKEE": "e0e0000000000000",
+	}
+	drift := ComputeDrift(planSnap, applySnap)
+	if len(drift) != 5 {
+		t.Fatalf("expected 5 drift entries; got %d", len(drift))
+	}
+	want := []string{"ALPHA", "BRAVO", "MIKE", "YANKEE", "ZULU"}
+	for i, w := range want {
+		if drift[i].Name != w {
+			t.Errorf("drift[%d].Name = %q; want %q (slice should be sorted by Name)", i, drift[i].Name, w)
+		}
+	}
+}
