@@ -109,6 +109,26 @@ func findGitWorktreeRoot(startDir string) string {
 // scan-failure as either covered or not-covered.
 func gitignoreCovers(data []byte, base, planAbs, gitignoreDir string) (bool, error) {
 	ext := filepath.Ext(base)
+	// Hoist the constant relative-path computation out of the per-line
+	// scan loop — planAbs and gitignoreDir don't change per iteration, so
+	// computing rel/relSlash once avoids repeated filesystem-string work
+	// for every gitignore entry. Empty rel/relSlash + relErr means we
+	// skip the path-equality branch in-loop.
+	var rel, relSlash string
+	rel, relErr := filepath.Rel(gitignoreDir, planAbs)
+	if relErr == nil {
+		relSlash = filepath.ToSlash(rel)
+	}
+
+	// Pre-compute the patterns derived from base/ext for the same reason.
+	starExt := ""
+	doubleStarExt := ""
+	if ext != "" {
+		starExt = "*" + ext
+		doubleStarExt = "**/*" + ext
+	}
+	doubleStarBase := "**/" + base
+
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -134,18 +154,16 @@ func gitignoreCovers(data []byte, base, planAbs, gitignoreDir string) (bool, err
 		if anchored == base {
 			return true, nil
 		}
-		if ext != "" && (anchored == "*"+ext || anchored == "**/*"+ext) {
+		if ext != "" && (anchored == starExt || anchored == doubleStarExt) {
 			return true, nil
 		}
 		// "**/<base>" matches at any depth.
-		if anchored == "**/"+base {
+		if anchored == doubleStarBase {
 			return true, nil
 		}
 		// Relative path from .gitignore dir, e.g. "cmd/wfctl/plan.json".
-		if rel, err := filepath.Rel(gitignoreDir, planAbs); err == nil {
-			if anchored == rel || anchored == filepath.ToSlash(rel) {
-				return true, nil
-			}
+		if relErr == nil && (anchored == rel || anchored == relSlash) {
+			return true, nil
 		}
 	}
 	if err := scanner.Err(); err != nil {

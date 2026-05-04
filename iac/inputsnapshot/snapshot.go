@@ -12,7 +12,10 @@ import (
 // Compute returns a map of env-var name → 16-hex-char sha256 prefix of the value.
 // Variables that aren't set (lookup returns ok=false) are omitted from the snapshot.
 func Compute(varNames []string, lookup func(string) (string, bool)) map[string]string {
-	out := make(map[string]string)
+	// Capacity hint = len(varNames) — even if some keys are omitted (unset),
+	// over-allocating by at most that fraction is cheaper than the
+	// reallocations that would otherwise happen as the map grows.
+	out := make(map[string]string, len(varNames))
 	for _, name := range varNames {
 		val, ok := lookup(name)
 		if !ok {
