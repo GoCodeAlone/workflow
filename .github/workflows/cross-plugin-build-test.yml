@@ -2,16 +2,33 @@ name: cross-plugin-build-test
 on:
   pull_request:
     paths:
-      # rev4 — cycle-3 minor: only run on IaC-touching PRs to save ~5min/docs-PR
+      # rev4 — cycle-3 minor: only run on IaC-touching PRs to save ~5min/docs-PR.
+      # T9.2 quality-review fix: include go.mod/go.sum so transitive dep bumps
+      # (a frequent source of downstream-plugin compile breakage) trigger the gate
+      # even when interfaces/iac/platform/plugin code is untouched.
       - 'interfaces/**'
       - 'iac/**'
       - 'platform/**'
       - 'plugin/sdk/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/cross-plugin-build-test.yml'
+
+# T9.2 quality-review fix: cancel older in-flight runs when a PR is updated.
+# Standard CI hygiene; saves CI minutes on rapid push cycles.
+concurrency:
+  group: cross-plugin-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cross-plugin-build:
     runs-on: ubuntu-latest
     strategy:
+      # T9.2 quality-review fix: matches codeql.yml + release.yml precedent.
+      # The whole point of a cross-plugin gate is to surface ALL three plugins'
+      # breakage in a single CI run; default fail-fast: true would cancel the
+      # other two on first failure and force iterative re-runs to debug.
+      fail-fast: false
       matrix:
         plugin: [workflow-plugin-aws, workflow-plugin-gcp, workflow-plugin-azure]
     steps:
