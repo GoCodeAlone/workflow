@@ -20,6 +20,7 @@ package wfctlhelpers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -166,18 +167,48 @@ func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action int
 	}
 }
 
-// doCreate is the T3.1 skeleton — invokes Create and appends the output
-// to result.Resources on success. T3.2 will replace this with the full
-// UpsertSupporter recovery path on ErrResourceAlreadyExists.
+// doCreate invokes Create and, on ErrResourceAlreadyExists, attempts an
+// idempotent upsert recovery for drivers that opt in via the
+// UpsertSupporter interface. The recovery path is:
+//
+//  1. Probe the driver for UpsertSupporter — if absent or
+//     SupportsUpsert()==false, the original conflict surfaces unchanged
+//     and downstream callers see ErrResourceAlreadyExists in
+//     result.Errors.
+//  2. Read the existing resource by Name + Type (no ProviderID — the
+//     driver's Read is responsible for locating by name when ProviderID
+//     is empty; SupportsUpsert()==true is the contract that this works).
+//  3. Defensive: if Read returns an empty ProviderID, fail with a named
+//     diagnostic — Update with an empty ProviderID would route to a
+//     create-by-spec path on most drivers, defeating the upsert.
+//  4. Update the existing resource with the desired spec, threading
+//     the ProviderID found in step 2.
+//
+// Read-after-conflict failures wrap both the original Create error and
+// the Read error via errors.Join, so callers can match either via
+// errors.Is.
 func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
 	out, err := d.Create(ctx, action.Resource)
-	if err != nil {
-		return err
+	if errors.Is(err, interfaces.ErrResourceAlreadyExists) {
+		us, ok := d.(interfaces.UpsertSupporter)
+		if !ok || !us.SupportsUpsert() {
+			return err // no recovery available; surface the conflict
+		}
+		ref := interfaces.ResourceRef{Name: action.Resource.Name, Type: action.Resource.Type}
+		existing, readErr := d.Read(ctx, ref)
+		if readErr != nil {
+			return fmt.Errorf("upsert: read after conflict: %w", errors.Join(err, readErr))
+		}
+		if existing == nil || existing.ProviderID == "" {
+			return fmt.Errorf("upsert: resource %q found by name but ProviderID is empty: %w", ref.Name, err)
+		}
+		ref.ProviderID = existing.ProviderID
+		out, err = d.Update(ctx, ref, action.Resource)
 	}
-	if out != nil {
+	if err == nil && out != nil {
 		result.Resources = append(result.Resources, *out)
 	}
-	return nil
+	return err
 }
 
 // doUpdate is the T3.1 skeleton — invokes Update with a ResourceRef

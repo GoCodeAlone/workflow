@@ -40,6 +40,26 @@ type ResourceAdoptionLocator interface {
 	AdoptionRef(spec ResourceSpec) (ResourceRef, bool, error)
 }
 
+// UpsertSupporter is an optional interface implemented by ResourceDrivers
+// that support locating an existing resource by name alone (empty
+// ProviderID) in their Read method. wfctlhelpers.ApplyPlan uses this hook
+// to recover from Create that returns ErrResourceAlreadyExists: when the
+// driver opts in via SupportsUpsert()==true, ApplyPlan calls Read with a
+// name-only ResourceRef to obtain the existing ProviderID, then calls
+// Update to bring the resource to the desired state — net effect of an
+// idempotent upsert without requiring drivers to implement upsert
+// natively.
+//
+// Drivers that do not implement this interface (or return false) yield
+// the original ErrResourceAlreadyExists unchanged — ApplyPlan does NOT
+// silently swallow the conflict. Implementations should return true only
+// when their Read can locate a resource by Name + Type without a
+// ProviderID; returning true while requiring a non-empty ProviderID in
+// Read defeats the recovery path.
+type UpsertSupporter interface {
+	SupportsUpsert() bool
+}
+
 // ResourceOutput is the concrete output of a provisioned or read resource.
 type ResourceOutput struct {
 	Name       string          `json:"name"`
