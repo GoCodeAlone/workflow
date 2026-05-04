@@ -402,9 +402,13 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		result, err = applyV2ApplyPlanFn(ctx, provider, &plan)
 		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
 		// v2 dispatch is the production caller that surfaces input
-		// drift to the operator. Run on success or partial failure;
-		// silently no-op when the report is empty.
-		if err == nil {
+		// drift to the operator. Run on success OR partial failure
+		// (the operator most needs the drift diagnostic when an apply
+		// fails — "which input went stale during the failed apply?"
+		// — so we print whenever a result was produced rather than
+		// gating on err == nil). Silently no-ops when the report is
+		// empty, so unconditional-on-result-non-nil is safe.
+		if result != nil {
 			printDriftReportIfAny(w, result)
 		}
 	} else {

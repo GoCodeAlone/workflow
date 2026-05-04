@@ -188,6 +188,96 @@ func TestApplyWithProviderAndStore_V2PrintsDriftReport(t *testing.T) {
 	}
 }
 
+// TestApplyWithProviderAndStore_V2PrintsDriftReportOnPartialFailure
+// covers the rev3 fix for the T3.7 review IMPORTANT #1: when
+// wfctlhelpers.ApplyPlan returns (resultWithDrift, applyErr), the
+// drift report MUST still be printed. Operators most need the
+// stale-input diagnostic when an apply fails — without it, the
+// failed-apply error and the "which input changed" context are
+// disconnected. Pre-fix the gate was `if err == nil`, which dropped
+// drift on partial failure.
+func TestApplyWithProviderAndStore_V2PrintsDriftReportOnPartialFailure(t *testing.T) {
+	v2Provider := &iactest.NoopProvider{ProviderName: "drift-stub", DispatchVersion: "v2"}
+
+	driftResult := &interfaces.ApplyResult{
+		InputDriftReport: []interfaces.DriftEntry{
+			{Name: "PARTIAL_FAILURE_VAR", PlanFingerprint: "abc", ApplyFingerprint: "def"},
+		},
+	}
+	applyErr := errors.New("partial failure during apply")
+
+	origApply := applyV2ApplyPlanFn
+	applyV2ApplyPlanFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+		return driftResult, applyErr
+	}
+	t.Cleanup(func() { applyV2ApplyPlanFn = origApply })
+
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		actions := make([]interfaces.PlanAction, len(specs))
+		for i, s := range specs {
+			actions[i] = interfaces.PlanAction{Action: "create", Resource: s}
+		}
+		return interfaces.IaCPlan{Actions: actions}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	specs := []interfaces.ResourceSpec{{Name: "vpc", Type: "infra.vpc"}}
+
+	var w bytes.Buffer
+	err := applyWithProviderAndStore(context.Background(), v2Provider, "stub", specs, nil, nil, &w, "test")
+	if err == nil {
+		t.Fatal("expected error from ApplyPlan to propagate, got nil")
+	}
+	if !strings.Contains(w.String(), "PARTIAL_FAILURE_VAR") {
+		t.Errorf("expected drift report on partial failure to mention PARTIAL_FAILURE_VAR; got %q", w.String())
+	}
+}
+
+// TestApplyWithProviderAndStore_V1Path_DeclarerReturnsEmpty pins the
+// "Path B" v1 fallback (rev3 fix for T3.7 review IMPORTANT #3): a
+// provider that DOES implement ComputePlanVersionDeclarer but
+// returns "" (or any non-"v2" value) routes through the legacy
+// provider.Apply path, not wfctlhelpers.ApplyPlan. This is the
+// expected mid-transition state for v1 plugins after the SDK update
+// lands but before they explicitly migrate. iactest.NoopProvider
+// always implements the interface (the method exists on the type);
+// leaving DispatchVersion empty exercises Path B specifically. Path
+// A (provider doesn't implement the interface at all) is covered by
+// TestApplyWithProviderAndStore_V1FallsThroughToProviderApply via
+// v1RecordingProvider, which omits the method.
+func TestApplyWithProviderAndStore_V1Path_DeclarerReturnsEmpty(t *testing.T) {
+	v1Provider := &iactest.NoopProvider{ProviderName: "v1-empty-decl", DispatchVersion: ""}
+
+	var v2Called atomic.Bool
+	origApply := applyV2ApplyPlanFn
+	applyV2ApplyPlanFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+		v2Called.Store(true)
+		return nil, errors.New("v2 must not be invoked when DispatchVersion is empty")
+	}
+	t.Cleanup(func() { applyV2ApplyPlanFn = origApply })
+
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		actions := make([]interfaces.PlanAction, len(specs))
+		for i, s := range specs {
+			actions[i] = interfaces.PlanAction{Action: "create", Resource: s}
+		}
+		return interfaces.IaCPlan{Actions: actions}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	specs := []interfaces.ResourceSpec{{Name: "vpc", Type: "infra.vpc"}}
+
+	var w bytes.Buffer
+	if err := applyWithProviderAndStore(context.Background(), v1Provider, "stub", specs, nil, nil, &w, "test"); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	if v2Called.Load() {
+		t.Error("v2 ApplyPlan was invoked when ComputePlanVersion() returned empty — dispatch routed to wrong path")
+	}
+}
+
 // v1RecordingProvider is a minimal interfaces.IaCProvider that does
 // NOT implement ComputePlanVersionDeclarer (the entire point of this
 // fixture: prove the dispatch defaults to v1 for un-declared
