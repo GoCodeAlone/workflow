@@ -28,7 +28,7 @@ If your plugin's resources can be planned independently per driver and the per-d
 
 ## How core wfctl handles plugins that do not implement it
 
-In v0.21.0, core wfctl's `platform.ComputePlan` calls each provider's `IaCProvider.Plan` method (which delegates to `driver.Diff` per resource type) and then assembles an `IaCPlan` from the per-driver output. There is no type-assertion against `ProviderPlanner` at the dispatch site — meaning even a plugin that does implement `ProviderPlanner` will not have its `PlanV2` method invoked by core code in v0.21.0.
+In v0.21.0, core wfctl's `platform.ComputePlan` (in [`platform/differ.go`](../../platform/differ.go)) dispatches `driver.Diff` directly per resource — it resolves a `ResourceDriver` for each spec via `p.ResourceDriver(spec.Type)`, calls `driver.Diff(ctx, spec, currentOut)` for every modification candidate, and assembles the per-driver output into an `IaCPlan`. (Note: `IaCProvider.Plan`, when implemented, typically delegates back to `platform.ComputePlan` — but `ComputePlan` itself does not call `provider.Plan`.) There is no type-assertion against `ProviderPlanner` at the dispatch site — meaning even a plugin that does implement `ProviderPlanner` will not have its `PlanV2` method invoked by core code in v0.21.0.
 
 The `ProviderPlanner` interface is reserved as a forward-compatible extension hook. Adapter PRs that wish to use it will add the type-assertion at the dispatch site as part of their own design discussion.
 
@@ -37,12 +37,12 @@ The `ProviderPlanner` interface is reserved as a forward-compatible extension ho
 The future adapter PR is expected to wire `ProviderPlanner` into `platform.ComputePlan` with a pattern of the following shape:
 
 ```go
-// At the dispatch site in platform/compute_plan.go (illustrative — not yet wired in v0.21.0).
+// Illustrative pattern for the dispatch site in platform/differ.go's
+// ComputePlan (not yet wired in v0.21.0).
 if planner, ok := provider.(interfaces.ProviderPlanner); ok {
     return planner.PlanV2(ctx, desired, current)
 }
-// Fall through to default Diff dispatch.
-return defaultComputePlan(ctx, provider, desired, current)
+// Fall through to the existing per-driver Diff dispatch in ComputePlan.
 ```
 
 The pattern is the standard Go optional-interface idiom: type-assert against the optional interface, fall through to the default if the provider does not implement it. The same optional-interface pattern is already used by `ProviderIDValidator` in [`interfaces/iac_resource_driver.go`](../../interfaces/iac_resource_driver.go) — type-assert against the optional interface, fall through to a default if the implementer does not satisfy it.

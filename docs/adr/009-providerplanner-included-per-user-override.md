@@ -7,9 +7,9 @@ Accepted
 
 Cycle-3 → cycle-7 adversarial reviews of the implementation plan oscillated between "drop entirely" (YAGNI) and "ship as definition-only" (preserve extension hook); rev6 surfaced the ratification ask to the user via plan § Open Questions.
 
-The user explicitly ratified Option C ("Override — W-9 expands to include the `ProviderPlanner` interface definition") on 2026-05-03 (jon@langevin.me, direct chat reply). User reasoning paraphrased: the design pass mandate "don't defer any fixes" + "build these fixes the right way" applies to the extension hook as well; the workspace roadmap includes future Tofu/Pulumi adapter work and the cost of shipping the interface now is bounded (~30 min plan revision + ~1 hour implementation).
+The user explicitly ratified Option C ("Override — W-9 expands to include the `ProviderPlanner` interface definition") on 2026-05-03 (the workspace owner, direct chat reply). User reasoning paraphrased: the design pass mandate "don't defer any fixes" + "build these fixes the right way" applies to the extension hook as well; the workspace roadmap includes future Tofu/Pulumi adapter work and the cost of shipping the interface now is bounded (~30 min plan revision + ~1 hour implementation).
 
-**Provenance:** Decided by jon@langevin.me 2026-05-03 via direct chat reply ("option C"). Recorded in plan § Open Questions § "ProviderPlanner deferral".
+**Provenance:** Decided by the workspace owner 2026-05-03 via direct chat reply ("option C"). Recorded in plan § Open Questions § "ProviderPlanner deferral".
 
 ## Decision
 

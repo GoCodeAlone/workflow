@@ -20,6 +20,17 @@ concurrency:
   group: cross-plugin-build-${{ github.ref }}
   cancel-in-progress: true
 
+# R2 review: explicit minimal token permissions per CodeQL workflow-permissions
+# scan; this gate only needs to read the workflow + plugin checkouts.
+permissions:
+  contents: read
+
+# R2 review: match the repo-standard Go module env used by ci.yml + codeql.yml so
+# downstream plugin builds resolve github.com/GoCodeAlone/* deps consistently.
+env:
+  GOPRIVATE: github.com/GoCodeAlone/*
+  GONOSUMCHECK: github.com/GoCodeAlone/*
+
 jobs:
   cross-plugin-build:
     runs-on: ubuntu-latest
