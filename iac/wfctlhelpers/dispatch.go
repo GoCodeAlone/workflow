@@ -13,9 +13,15 @@ package wfctlhelpers
 // provider that does not satisfy this interface defaults to v1 (legacy
 // dispatch); a provider that returns "v2" routes through ApplyPlan; any
 // other return value is treated as "v1" so a typo in the manifest
-// silently degrades to the safe legacy path. Schema validation in
-// plugin/sdk.ParseManifest catches unknown values at parse time so
-// this branch only sees "v1", "v2", or empty in practice.
+// silently degrades to the safe legacy path.
+//
+// NOTE on validation: when the manifest is loaded via plugin/sdk.ParseManifest,
+// schema validation rejects unknown values at parse time. However, some
+// loader paths in wfctl (e.g. cmd/wfctl/deploy_providers.go's
+// findIaCPluginDir) currently use a minimal json.Unmarshal without
+// schema validation, so unknown values CAN reach DispatchVersionFor at
+// runtime. The default-to-v1 behavior is the safety net for those
+// paths — DO NOT rely on the manifest-validation guarantee in callers.
 type ComputePlanVersionDeclarer interface {
 	ComputePlanVersion() string
 }
