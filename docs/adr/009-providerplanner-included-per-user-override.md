@@ -5,7 +5,7 @@ Accepted
 
 ## Context
 
-During the W-9 design pass, the autonomous-pipeline interpretation oscillated between dropping the optional `ProviderPlanner` interface entirely (YAGNI: no concrete in-tree consumer) and shipping it as definition-only (preserve the Tofu/Pulumi-style extension hook). Cycle-3 → cycle-7 adversarial reviews of the implementation plan surfaced both readings; rev6 escalated the ratification ask to the user via plan § Open Questions.
+Cycle-3 → cycle-7 adversarial reviews of the implementation plan oscillated between "drop entirely" (YAGNI) and "ship as definition-only" (preserve extension hook); rev6 surfaced the ratification ask to the user via plan § Open Questions.
 
 The user explicitly ratified Option C ("Override — W-9 expands to include the `ProviderPlanner` interface definition") on 2026-05-03 (jon@langevin.me, direct chat reply). User reasoning paraphrased: the design pass mandate "don't defer any fixes" + "build these fixes the right way" applies to the extension hook as well; the workspace roadmap includes future Tofu/Pulumi adapter work and the cost of shipping the interface now is bounded (~30 min plan revision + ~1 hour implementation).
 
