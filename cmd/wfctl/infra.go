@@ -207,7 +207,14 @@ func runInfraPlan(args []string) error {
 		return fmt.Errorf("load current state: %w", err)
 	}
 
-	plan, err := platform.ComputePlan(desired, current)
+	// W-3b: load each iac.provider plugin and dispatch ComputePlan per
+	// provider group. The provider is required so platform.ComputePlan can
+	// invoke ResourceDriver.Diff for ForceNew-aware Replace classification
+	// (T3.6e). Configs without any iac.provider module fall back to a nil
+	// provider, which platform.ComputePlan tolerates with the legacy
+	// ConfigHash compare path (preserves minimal test fixtures and
+	// out-of-band scripts that never declared one).
+	plan, err := computePlanForInfraSpecs(context.Background(), cfgFile, envName, desired, current)
 	if err != nil {
 		return fmt.Errorf("compute plan: %w", err)
 	}

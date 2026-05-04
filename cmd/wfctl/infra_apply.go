@@ -346,8 +346,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		return err
 	}
 
-	// Compute the diff plan locally (provider-agnostic).
-	plan, err := platform.ComputePlan(specs, current)
+	// Compute the diff plan locally (provider-agnostic). T3.6c will replace
+	// the nil provider with the live `provider` handle so platform.ComputePlan
+	// can dispatch ResourceDriver.Diff over the loaded plugin process; until
+	// that commit lands, nil keeps the legacy ConfigHash compare path active
+	// and the package compilable.
+	plan, err := platform.ComputePlan(ctx, nil, specs, current)
 	if err != nil {
 		return fmt.Errorf("compute plan: %w", err)
 	}
