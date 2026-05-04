@@ -3,25 +3,30 @@ package platform_test
 import (
 	"context"
 	"sync/atomic"
-	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // fakeProvider is a no-op interfaces.IaCProvider used by in-package
-// ComputePlan tests. It satisfies the interface with zero-value returns and
-// optionally exposes a per-resource-type ResourceDriver whose Diff method
-// returns a caller-configured *interfaces.DiffResult.
+// ComputePlan tests. It satisfies the interface with zero-value returns
+// and optionally exposes a per-resource-type ResourceDriver whose Diff
+// method returns a caller-configured *interfaces.DiffResult.
 //
-// In T3.6a only the no-op shape is used (ComputePlan accepts the provider
-// but does not dispatch to it). T3.6e extends this fake via
-// newFakeProviderWithDiff and exercises the Diff dispatch path; T3.6f's
-// cache test uses the diffCallCount counter to assert cache hits.
+// The driver field is nil by default — that's the no-op shape used when
+// the test only needs ComputePlan to dispatch via the legacy ConfigHash
+// compare. To exercise the Diff-dispatch path use newFakeProviderWithDiff
+// (or set driver on a value constructed directly).
 type fakeProvider struct {
-	// driver is returned from ResourceDriver for any resource type. When nil,
-	// ResourceDriver returns (nil, nil) — the no-op shape used by T3.6a.
+	// driver is returned from ResourceDriver for any resource type. When
+	// nil, ResourceDriver returns (nil, nil) — ComputePlan must fall back
+	// to the legacy ConfigHash compare in that case (per nil-tolerance
+	// contract on ComputePlan godoc).
 	driver *fakeDriver
 }
+
+// Compile-time interface conformance — fails the build if
+// interfaces.IaCProvider drifts in a way that breaks this stub.
+var _ interfaces.IaCProvider = (*fakeProvider)(nil)
 
 func (f *fakeProvider) Name() string                                         { return "fake" }
 func (f *fakeProvider) Version() string                                      { return "0.0.0-test" }
@@ -63,10 +68,19 @@ func (f *fakeProvider) BootstrapStateBackend(_ context.Context, _ map[string]any
 func (f *fakeProvider) Close() error { return nil }
 
 // newFakeProvider returns a no-op fakeProvider that does not expose any
-// ResourceDriver. Use this for T3.6a-style tests that exercise the legacy
-// ConfigHash compare path without invoking provider.Diff.
-func newFakeProvider(_ *testing.T) *fakeProvider {
+// ResourceDriver. ComputePlan dispatched through this provider must fall
+// back to the legacy ConfigHash compare path (per the nil-tolerance
+// contract).
+func newFakeProvider() *fakeProvider {
 	return &fakeProvider{}
+}
+
+// newFakeProviderWithDiff returns a fakeProvider whose ResourceDriver
+// (for any type) returns a fakeDriver pre-configured to yield diff. Use
+// to exercise ComputePlan's Diff-dispatch path with deterministic
+// per-resource diff results.
+func newFakeProviderWithDiff(diff *interfaces.DiffResult) *fakeProvider {
+	return &fakeProvider{driver: &fakeDriver{diff: diff}}
 }
 
 // fakeDriver is a minimal interfaces.ResourceDriver whose Diff method
@@ -77,6 +91,9 @@ type fakeDriver struct {
 	diffErr       error
 	diffCallCount atomic.Int64
 }
+
+// Compile-time interface conformance check.
+var _ interfaces.ResourceDriver = (*fakeDriver)(nil)
 
 func (d *fakeDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	return nil, nil
@@ -90,7 +107,10 @@ func (d *fakeDriver) Update(_ context.Context, _ interfaces.ResourceRef, _ inter
 func (d *fakeDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
 func (d *fakeDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
 	d.diffCallCount.Add(1)
-	return d.diff, d.diffErr
+	if d.diffErr != nil {
+		return nil, d.diffErr
+	}
+	return d.diff, nil
 }
 func (d *fakeDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
 	return nil, nil

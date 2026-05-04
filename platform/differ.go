@@ -5,29 +5,54 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"golang.org/x/sync/errgroup"
 )
 
-// ComputePlan compares desired ResourceSpecs against current ResourceStates
-// and returns a Plan with the minimal set of ordered actions needed to
-// reconcile them. Creates and updates are ordered by DependsOn (dependencies
-// first); deletes are ordered in reverse dependency order.
+// ComputePlan compares desired ResourceSpecs against current
+// ResourceStates and returns a Plan with the minimal set of ordered
+// actions needed to reconcile them. Creates, updates, and replaces are
+// ordered by DependsOn (dependencies first); deletes are ordered in
+// reverse dependency order.
 //
-// Returns an error if the DependsOn graph contains a cycle.
+// Returns an error if the DependsOn graph contains a cycle or if any
+// per-resource provider.Diff call fails.
 //
-// The ctx and provider parameters are accepted on the v2 contract so that
-// later commits in W-3b can dispatch provider.Diff per resource for
-// Replace-action emission and bounded-concurrency Diff calls. In this
-// commit they are unused — the body still relies on the legacy ConfigHash
-// compare. Callers should pass a non-nil provider whenever they have one
-// loaded so the future Diff dispatch works without further plumbing
-// changes; nil is tolerated and falls back to the ConfigHash path.
+// Action classification for resources that exist in both desired and
+// current state is delegated to the provider via
+// p.ResourceDriver(spec.Type).Diff(ctx, spec, currentOut):
+//
+//   - replace, when DiffResult.NeedsReplace is true OR any
+//     FieldChange.ForceNew is true (the latter closes the latent
+//     bug-fix surface where ForceNew silently downgraded to update);
+//   - update,  when DiffResult.NeedsUpdate is true and replace did not
+//     fire;
+//   - skip,    when neither flag is set (no plan action emitted for
+//     that resource).
+//
+// Net-new resources (no current state) emit create without dispatching
+// Diff; resources removed from the desired set emit delete in reverse
+// dependency order.
+//
+// The Diff dispatch is parallelised across resources via errgroup with
+// a bounded worker pool. The worker count defaults to 8 and can be
+// overridden via the WFCTL_PLAN_DIFF_CONCURRENCY env var (clamped to
+// 1..32). Operators tuning for high-fan-out plans (50+ resources) can
+// raise the cap; constrained-network operators can lower it.
+//
+// Nil-tolerance contract: if p is nil, or if p.ResourceDriver(typ)
+// returns (nil, nil) for a particular resource type, ComputePlan falls
+// back to the legacy ConfigHash compare for the affected resource(s) —
+// emit update when ConfigHash diverges, skip otherwise. Replace cannot
+// be expressed via the legacy path; callers that depend on Replace
+// classification must supply a provider whose drivers implement Diff.
 func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
-	_ = ctx
-	_ = p
 	// Index current state by resource name.
 	currentMap := make(map[string]interfaces.ResourceState, len(current))
 	for i := range current {
@@ -40,9 +65,16 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 		desiredMap[spec.Name] = spec
 	}
 
-	var creates, updates, deletes []interfaces.PlanAction
-
-	// Creates and updates: iterate desired in stable order.
+	// Partition desired into creates (net-new) and modifications
+	// (existing-resource updates/replaces resolved via Diff dispatch).
+	// Modifications are dispatched in parallel below; creates are
+	// emitted synchronously since they don't need the provider.
+	var creates []interfaces.PlanAction
+	type modCandidate struct {
+		spec interfaces.ResourceSpec
+		rs   interfaces.ResourceState
+	}
+	var candidates []modCandidate
 	for _, spec := range desired {
 		hash := configHash(spec.Config)
 		if rs, exists := currentMap[spec.Name]; !exists {
@@ -51,19 +83,40 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 				Resource:           spec,
 				ResolvedConfigHash: hash,
 			})
-		} else if rs.ConfigHash != hash {
-			rsCopy := rs
-			updates = append(updates, interfaces.PlanAction{
-				Action:             "update",
-				Resource:           spec,
-				Current:            &rsCopy,
-				ResolvedConfigHash: hash,
+		} else {
+			candidates = append(candidates, modCandidate{spec: spec, rs: rs})
+		}
+	}
+
+	// Dispatch Diff per modification candidate. Pre-allocate the result
+	// slice indexed by candidate position so workers can write
+	// concurrently without a mutex; the nil entries left for skip
+	// candidates are filtered out below.
+	mods := make([]*interfaces.PlanAction, len(candidates))
+	if len(candidates) > 0 {
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(planDiffConcurrency())
+		for i := range candidates {
+			i := i
+			g.Go(func() error {
+				return classifyModification(gctx, p, candidates[i].spec, candidates[i].rs, &mods[i])
 			})
 		}
-		// No change: skip.
+		if err := g.Wait(); err != nil {
+			return interfaces.IaCPlan{}, err
+		}
+	}
+
+	// Collect non-nil modifications into a flat slice for topoSort.
+	modifications := make([]interfaces.PlanAction, 0, len(mods))
+	for _, m := range mods {
+		if m != nil {
+			modifications = append(modifications, *m)
+		}
 	}
 
 	// Deletes: resources in current that are not in desired.
+	var deletes []interfaces.PlanAction
 	for i := range current {
 		rs := &current[i]
 		if _, exists := desiredMap[rs.Name]; !exists {
@@ -81,18 +134,19 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 		}
 	}
 
-	// Topological sort: creates and updates in dependency order (deps first).
-	sorted, err := topoSort(creates, updates, desired)
+	// Topological sort: creates + modifications in dependency order
+	// (deps first); deletes in reverse dependency order (dependents
+	// first). Reusing the same topoSort by concatenating the
+	// non-delete buckets keeps the deterministic
+	// desired-iteration-order seeding.
+	sorted, err := topoSort(creates, modifications, desired)
 	if err != nil {
 		return interfaces.IaCPlan{}, err
 	}
-
-	// Deletes in reverse dependency order (dependents deleted before deps).
 	sortedDeletes, err := reverseTopoSort(deletes)
 	if err != nil {
 		return interfaces.IaCPlan{}, err
 	}
-
 	sorted = append(sorted, sortedDeletes...)
 
 	return interfaces.IaCPlan{
@@ -100,6 +154,152 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 		Actions:   sorted,
 		CreatedAt: time.Now().UTC(),
 	}, nil
+}
+
+// classifyModification dispatches Diff for a single existing resource
+// and writes the resulting PlanAction (or nil for skip) to *out. It
+// honors the nil-provider / nil-driver fallback contract documented on
+// ComputePlan: when no driver is available, the resource is classified
+// via the legacy ConfigHash compare.
+func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, rs interfaces.ResourceState, out **interfaces.PlanAction) error {
+	hash := configHash(spec.Config)
+	rsCopy := rs
+
+	// Nil-provider fallback: legacy ConfigHash compare.
+	if p == nil {
+		if rs.ConfigHash != hash {
+			*out = &interfaces.PlanAction{
+				Action:             "update",
+				Resource:           spec,
+				Current:            &rsCopy,
+				ResolvedConfigHash: hash,
+			}
+		}
+		return nil
+	}
+
+	driver, err := p.ResourceDriver(spec.Type)
+	if err != nil {
+		return fmt.Errorf("provider.ResourceDriver(%q): %w", spec.Type, err)
+	}
+	// Nil-driver fallback: same as nil provider.
+	if driver == nil {
+		if rs.ConfigHash != hash {
+			*out = &interfaces.PlanAction{
+				Action:             "update",
+				Resource:           spec,
+				Current:            &rsCopy,
+				ResolvedConfigHash: hash,
+			}
+		}
+		return nil
+	}
+
+	currentOut := resourceStateToOutput(&rs)
+	diff, err := driver.Diff(ctx, spec, currentOut)
+	if err != nil {
+		return fmt.Errorf("provider.Diff(%q/%q): %w", spec.Type, spec.Name, err)
+	}
+	if diff == nil {
+		// Driver returned no diff — treat as no change.
+		return nil
+	}
+
+	replace := diff.NeedsReplace || hasForceNew(diff.Changes)
+	switch {
+	case replace:
+		*out = &interfaces.PlanAction{
+			Action:             "replace",
+			Resource:           spec,
+			Current:            &rsCopy,
+			Changes:            diff.Changes,
+			ResolvedConfigHash: hash,
+		}
+	case diff.NeedsUpdate:
+		*out = &interfaces.PlanAction{
+			Action:             "update",
+			Resource:           spec,
+			Current:            &rsCopy,
+			Changes:            diff.Changes,
+			ResolvedConfigHash: hash,
+		}
+	}
+	return nil
+}
+
+// resourceStateToOutput converts the persisted ResourceState into the
+// *interfaces.ResourceOutput shape that ResourceDriver.Diff expects.
+// Sensitive map is not reconstructed here — drivers that need it should
+// re-Read; this conversion preserves only the data ComputePlan has on
+// hand (Outputs, ProviderID, identity).
+func resourceStateToOutput(rs *interfaces.ResourceState) *interfaces.ResourceOutput {
+	if rs == nil {
+		return nil
+	}
+	return &interfaces.ResourceOutput{
+		Name:       rs.Name,
+		Type:       rs.Type,
+		ProviderID: rs.ProviderID,
+		Outputs:    rs.Outputs,
+	}
+}
+
+// hasForceNew reports whether any change in the slice has ForceNew=true.
+// Used by ComputePlan to escalate update → replace when the provider
+// signals a non-mutable field change but forgets to set NeedsReplace.
+func hasForceNew(changes []interfaces.FieldChange) bool {
+	for _, c := range changes {
+		if c.ForceNew {
+			return true
+		}
+	}
+	return false
+}
+
+// planDiffConcurrencyDefault is the worker-pool size used when
+// WFCTL_PLAN_DIFF_CONCURRENCY is unset or invalid. Chosen to keep gRPC
+// roundtrip latency dominant over per-resource parallelism on typical
+// 5–20-resource configs while staying well under provider rate limits.
+const planDiffConcurrencyDefault = 8
+
+// planDiffConcurrencyMin and Max are the clamp bounds for
+// WFCTL_PLAN_DIFF_CONCURRENCY parsing. Below 1 disables concurrency
+// (worse than serial); above 32 is unlikely to help on any reachable
+// provider and can trip rate limits.
+const (
+	planDiffConcurrencyMin = 1
+	planDiffConcurrencyMax = 32
+)
+
+// planDiffConcurrencyOnce caches the parsed env-var value across the
+// process lifetime. Operators changing the value mid-process need to
+// restart wfctl, which matches the apply-time concurrency knob's
+// established behavior.
+var planDiffConcurrencyOnce sync.Once
+var planDiffConcurrencyCached int
+
+// planDiffConcurrency returns the parsed and clamped value of
+// WFCTL_PLAN_DIFF_CONCURRENCY (or planDiffConcurrencyDefault when unset).
+func planDiffConcurrency() int {
+	planDiffConcurrencyOnce.Do(func() {
+		planDiffConcurrencyCached = planDiffConcurrencyDefault
+		v := os.Getenv("WFCTL_PLAN_DIFF_CONCURRENCY")
+		if v == "" {
+			return
+		}
+		parsed, err := strconv.Atoi(v)
+		if err != nil {
+			return
+		}
+		if parsed < planDiffConcurrencyMin {
+			parsed = planDiffConcurrencyMin
+		}
+		if parsed > planDiffConcurrencyMax {
+			parsed = planDiffConcurrencyMax
+		}
+		planDiffConcurrencyCached = parsed
+	})
+	return planDiffConcurrencyCached
 }
 
 // ConfigHash is the exported counterpart of configHash. It allows callers
@@ -139,11 +339,12 @@ func planID() string {
 	return fmt.Sprintf("plan-%d", time.Now().UnixNano())
 }
 
-// topoSort returns creates and updates ordered so that a resource's
-// dependencies appear before itself. Iteration order is seeded from
-// desiredSpecs to ensure deterministic output for independent resources.
-// Returns an error if a dependency cycle is detected.
-func topoSort(creates, updates []interfaces.PlanAction, desiredSpecs []interfaces.ResourceSpec) ([]interfaces.PlanAction, error) {
+// topoSort returns creates and modifications ordered so that a
+// resource's dependencies appear before itself. Iteration order is
+// seeded from desiredSpecs to ensure deterministic output for
+// independent resources. Returns an error if a dependency cycle is
+// detected.
+func topoSort(creates, modifications []interfaces.PlanAction, desiredSpecs []interfaces.ResourceSpec) ([]interfaces.PlanAction, error) {
 	// Build a map of name → DependsOn from desired specs.
 	deps := make(map[string][]string, len(desiredSpecs))
 	for _, s := range desiredSpecs {
@@ -155,8 +356,8 @@ func topoSort(creates, updates []interfaces.PlanAction, desiredSpecs []interface
 	for i := range creates {
 		actionMap[creates[i].Resource.Name] = creates[i]
 	}
-	for i := range updates {
-		actionMap[updates[i].Resource.Name] = updates[i]
+	for i := range modifications {
+		actionMap[modifications[i].Resource.Name] = modifications[i]
 	}
 
 	visited := make(map[string]bool)

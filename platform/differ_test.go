@@ -42,7 +42,7 @@ func TestDiffer_NewResource(t *testing.T) {
 	}
 	current := []interfaces.ResourceState{}
 
-	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestDiffer_DeletedResource(t *testing.T) {
 		{Name: "old-db", Type: "infra.database", ConfigHash: "abc123"},
 	}
 
-	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestDiffer_UpdatedResource(t *testing.T) {
 		{Name: "db", Type: "infra.database", ConfigHash: hashConfig(config)},
 	}
 
-	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestDiffer_NoChanges(t *testing.T) {
 		{Name: "db", Type: "infra.database", ConfigHash: hashConfig(config)},
 	}
 
-	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestDiffer_DependencyOrdering(t *testing.T) {
 	}
 	current := []interfaces.ResourceState{}
 
-	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestDiffer_MixedActions(t *testing.T) {
 		{Name: "old-cache", Type: "infra.cache"},
 	}
 
-	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestDiffer_CycleDetection(t *testing.T) {
 	}
 	current := []interfaces.ResourceState{}
 
-	_, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, current)
+	_, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err == nil {
 		t.Fatal("expected error for cyclic dependency, got nil")
 	}
@@ -212,7 +212,7 @@ func TestComputePlan_PerActionResolvedConfigHash(t *testing.T) {
 	desired := []interfaces.ResourceSpec{
 		{Name: "vpc", Type: "infra.vpc", Config: map[string]any{"region": "nyc1"}},
 	}
-	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, nil)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestComputePlan_ResolvedConfigHashOnUpdate(t *testing.T) {
 	current := []interfaces.ResourceState{
 		{Name: "db", Type: "infra.database", ConfigHash: "stale-hash"},
 	}
-	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(t), desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatal(err)
 	}

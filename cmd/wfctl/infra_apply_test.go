@@ -93,7 +93,13 @@ func (d *readDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec 
 func (d *readDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
 
 func (d *readDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
-	return nil, nil
+	// W-3b ComputePlan dispatches Diff per resource. The adoption tests
+	// expect the post-adoption ComputePlan to emit "update" because
+	// desired and adopted-live configs diverge; pre-W-3b that was the
+	// ConfigHash compare's job, post-W-3b a real driver would return
+	// NeedsUpdate=true. Modeling that here keeps the adoption-flow
+	// assertions tight without each test reconstructing the diff.
+	return &interfaces.DiffResult{NeedsUpdate: true}, nil
 }
 
 func (d *readDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
