@@ -56,9 +56,20 @@ modules:
 		t.Fatal("expected error on plugin-load failure, got nil")
 	}
 	got := err.Error()
-	want := `error: failed to load plugin "digitalocean": dial tcp: connection refused; wfctl infra plan now requires the plugin process to compute Diff (since v0.21.0)`
+	// Note: assertion does NOT include the "error:" prefix — that is
+	// added by cmd/wfctl/main.go's top-level printer when the command
+	// returns a non-nil error. Prefixing here would produce double
+	// "error: error: ..." in operator output.
+	want := `failed to load plugin "digitalocean": dial tcp: connection refused; wfctl infra plan now requires the plugin process to compute Diff (since v0.21.0)`
 	if !strings.Contains(got, want) {
 		t.Errorf("error message:\n  got:  %q\n  want: contains %q", got, want)
+	}
+	// errors.Is must reach loadErr through the two %w wrappings
+	// (computePlanForInfraSpecs's "failed to load plugin %q: %w; ..." +
+	// runInfraPlan's "compute plan: %w"). Pins the round-4 fix that
+	// switched the inner wrap from %v to %w.
+	if !errors.Is(err, loadErr) {
+		t.Errorf("errors.Is(err, loadErr) = false; want true (the underlying load error must remain unwrappable so callers can errors.Is/As against it across both wrap layers)")
 	}
 }
 
