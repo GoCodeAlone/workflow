@@ -25,6 +25,16 @@ import (
 	"os"
 )
 
+// SkipMarker is the single canonical comment that opts a function or type
+// declaration out of every iac-codemod mode (refactor-plan, refactor-apply,
+// add-validate-plan, lint). Plan rev2 (line 2400) unifies the four modes
+// on this marker specifically to prevent mismatched-marker silent-no-op
+// surfaces (e.g. // wfctl:skip-codemod or // wfctl:skip-plan-codemod). All
+// downstream parsers (T8.3-T8.5) MUST reference this constant rather than
+// the literal string, and each mode surfaces a list of skipped sites in
+// its report.
+const SkipMarker = "// wfctl:skip-iac-codemod"
+
 // Options carries flags shared by every codemod mode.
 type Options struct {
 	// DryRun reports findings without mutating files. Default true.
@@ -52,7 +62,7 @@ var modes = map[string]modeFunc{
 // T8.5 add-validate-plan) replace these entries with real implementations
 // in the package's init() inside their own files.
 func stubMode(name string) modeFunc {
-	return func(args []string, opts *Options, stdout, stderr io.Writer) int {
+	return func(_ []string, _ *Options, stdout, _ io.Writer) int {
 		fmt.Fprintf(stdout, "iac-codemod %s: not yet implemented (skeleton stub)\n", name)
 		return 0
 	}
@@ -115,9 +125,13 @@ Flags (all modes):
   -dry-run   Report findings without mutating files (default true).
   -fix       Opt into mutation; overrides -dry-run.
 
+  Flags must precede paths. The standard library flag parser stops at the
+  first non-flag argument, so 'iac-codemod refactor-plan /path -fix' will
+  silently treat -fix as a positional. Always pass flags first.
+
 Marker:
   Functions and type declarations annotated with the comment
-  // wfctl:skip-iac-codemod
+  %s
   are skipped by every mode and surfaced in each mode's report.
-`)
+`, SkipMarker)
 }
