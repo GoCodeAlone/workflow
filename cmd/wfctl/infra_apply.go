@@ -525,7 +525,10 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// load time and surfaced via the optional
 	// wfctlhelpers.ComputePlanVersionDeclarer interface.
 	var result *interfaces.ApplyResult
-	if v, ok := provider.(wfctlhelpers.ComputePlanVersionDeclarer); ok && wfctlhelpers.DispatchVersionFor(v) == wfctlhelpers.DispatchVersionV2 {
+	// DispatchVersionFor centralises the type-assertion + default; pass the
+	// raw provider rather than re-asserting ComputePlanVersionDeclarer at the
+	// call site (per dispatch.go contract).
+	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
 		result, err = applyV2ApplyPlanFn(ctx, provider, &plan)
 		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
 		// v2 dispatch is the production caller that surfaces input
