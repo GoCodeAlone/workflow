@@ -1108,7 +1108,10 @@ func runInfraApply(args []string) error {
 			}
 			applySnap := inputsnapshot.Compute(names, inputsnapshot.OSEnvProvider)
 			if drift := inputsnapshot.ComputeDrift(plan.InputSnapshot, applySnap); len(drift) > 0 {
-				return fmt.Errorf("%w\n%s", inputsnapshot.ErrEnvVarChanged, inputsnapshot.FormatStaleError(drift))
+				// *StaleError: Error() yields the canonical FormatStaleError
+				// output (no sentinel prefix); Unwrap() yields ErrEnvVarChanged
+				// so errors.Is(err, inputsnapshot.ErrEnvVarChanged) still matches.
+				return inputsnapshot.NewStaleError(drift)
 			}
 		}
 		currentHash := desiredStateHash(desired)
