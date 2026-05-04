@@ -43,10 +43,21 @@ func TestCompute_MissingEnvVarOmitted(t *testing.T) {
 }
 
 func TestNewTolerantEnvProvider_UnsetButPlanned_ReturnsSentinel(t *testing.T) {
-	os.Unsetenv("STAGING_PG_PASSWORD")
-	plan := map[string]string{"STAGING_PG_PASSWORD": "deadbeef00000000"}
+	// Use a test-unique env-var name; even so a hostile CI could pre-set
+	// it, so explicitly Unsetenv to guarantee the precondition and restore
+	// any prior value via t.Cleanup so the test cannot leak state.
+	const key = "WFCTL_TEST_INPUTSNAPSHOT_UNSET_KEY"
+	if prior, had := os.LookupEnv(key); had {
+		t.Cleanup(func() { _ = os.Setenv(key, prior) })
+	} else {
+		t.Cleanup(func() { _ = os.Unsetenv(key) })
+	}
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("Unsetenv(%q): %v", key, err)
+	}
+	plan := map[string]string{key: "deadbeef00000000"}
 	provider := NewTolerantEnvProvider(plan)
-	val, ok := provider("STAGING_PG_PASSWORD")
+	val, ok := provider(key)
 	if !ok || val != preservedFingerprint {
 		t.Errorf("expected (preservedFingerprint, true) for plan-time-set unset-now var; got (%q, %v)", val, ok)
 	}
