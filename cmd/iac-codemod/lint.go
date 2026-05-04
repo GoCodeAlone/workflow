@@ -448,14 +448,33 @@ func runAssertPlanDelegatesToHelper(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-// receiverTypeDocsForPass builds the receiverDoc map for every file in
-// pass.Files so the per-analyzer skip-marker check can consult both
-// fn.Doc AND the receiver's TypeSpec.Doc / GenDecl.Doc. Used by all
-// three function-site analyzers (round-2 findings #6/#7/#8).
+// receiverTypeDocsForPass builds a SINGLE merged receiverDoc map
+// across every file in pass.Files. The same map is returned per-file
+// (callers do `typeDocs := typeDocsByFile[file]`) — they get the
+// directory-wide view so a skip-marker on a sibling file's type
+// declaration is honored even when the function being analyzed lives
+// in a different file. Round-6 finding #1: rev2 returned per-file
+// maps, so `typeDocs[recv]` missed sibling-file TypeSpec docs and
+// providers split across files were rewritten despite type-doc skip
+// markers.
+//
+// First-occurrence wins: if multiple files declare the same receiver
+// type name (an unusual layout but possible), the first iteration
+// order wins. The lint analyzers prefer the in-file declaration over
+// shadows since they iterate pass.Files in stable order.
 func receiverTypeDocsForPass(pass *analysis.Pass) map[*ast.File]map[string]receiverDoc {
+	merged := make(map[string]receiverDoc)
+	for _, file := range pass.Files {
+		for recv, doc := range receiverTypeDocs(file) {
+			if _, ok := merged[recv]; ok {
+				continue
+			}
+			merged[recv] = doc
+		}
+	}
 	out := make(map[*ast.File]map[string]receiverDoc, len(pass.Files))
 	for _, file := range pass.Files {
-		out[file] = receiverTypeDocs(file)
+		out[file] = merged
 	}
 	return out
 }

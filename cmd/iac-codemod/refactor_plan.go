@@ -182,7 +182,11 @@ func refactorPlanFile(path string, opts *Options, report *planReport) error {
 	if len(provs) == 0 {
 		provs = planLikeReceivers(file)
 	}
-	typeDocs := receiverTypeDocs(file)
+	// Directory-wide type-doc lookup so a `// wfctl:skip-iac-codemod`
+	// marker on a sibling file's type declaration is honored even when
+	// the Plan/Apply methods we're walking live in a separate file
+	// (review round-6 finding #1).
+	typeDocs := receiverTypeDocsInDir(filepath.Dir(path), file)
 
 	mutated := false
 	for _, decl := range file.Decls {
@@ -394,6 +398,11 @@ func (d receiverDoc) carriesMarker() bool {
 // refactor-apply to check the SkipMarker at type-doc and GenDecl-doc
 // levels in addition to the function-doc level (review round-1
 // finding #4).
+//
+// Single-file scope only — for cross-file scenarios (provider type
+// declared in a sibling file from its Plan/Apply methods), use
+// receiverTypeDocsInDir which merges across the directory's dominant
+// package (review round-6 finding #1).
 func receiverTypeDocs(file *ast.File) map[string]receiverDoc {
 	out := make(map[string]receiverDoc)
 	for _, decl := range file.Decls {
@@ -410,6 +419,89 @@ func receiverTypeDocs(file *ast.File) map[string]receiverDoc {
 				TypeSpecDoc: ts.Doc,
 				GenDeclDoc:  gd.Doc,
 			}
+		}
+	}
+	return out
+}
+
+// receiverTypeDocsInDir returns the receiver-type doc map merged across
+// every non-test .go file in dir whose `package P` clause matches the
+// dominant package. Closes review round-6 finding #1: rev3 of refactor-*
+// ran receiverTypeDocs on the per-file AST only, so a provider whose
+// type declaration lived in a SIBLING file (round-3's directory-wide
+// method-set scan made this layout possible) had its `// wfctl:skip-iac-codemod`
+// type-doc marker silently ignored, and the methods in the current
+// file would still be rewritten.
+//
+// File parses are reused (not deduped) — each file gets its own
+// FileSet/parse — but all yielded receiverDocs share the same
+// dominant-package filter as planLikeProviderMethodsInDir to keep the
+// build-tagged / mixed-package case safe.
+//
+// Falls back to the per-file map if the directory walk fails (e.g.
+// path is a single file, not a directory).
+func receiverTypeDocsInDir(dir string, primary *ast.File) map[string]receiverDoc {
+	out := receiverTypeDocs(primary)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return out
+	}
+	// Determine dominant package from the directory.
+	pkgCounts := make(map[string]int)
+	type parsedDoc struct {
+		pkg  string
+		file *ast.File
+	}
+	var files []parsedDoc
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fpath := filepath.Join(dir, name)
+		src, err := readFile(fpath)
+		if err != nil {
+			continue
+		}
+		fs := token.NewFileSet()
+		f, err := parser.ParseFile(fs, fpath, src, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+		pkgCounts[f.Name.Name]++
+		files = append(files, parsedDoc{pkg: f.Name.Name, file: f})
+	}
+	dominant := primary.Name.Name
+	if dominantCount, ok := pkgCounts[dominant]; !ok || dominantCount == 0 {
+		// Primary's package isn't in the directory walk (rare —
+		// happens when `path` is outside the dominant package). Just
+		// return the per-file map unchanged.
+		return out
+	}
+	for pkg, c := range pkgCounts {
+		if c > pkgCounts[dominant] {
+			dominant = pkg
+		}
+	}
+	// Merge sibling docs into out. The primary file's TypeSpec docs
+	// take precedence (they're already in `out` from receiverTypeDocs);
+	// sibling-file docs are added only for receivers not yet in `out`.
+	for _, p := range files {
+		if p.pkg != dominant {
+			continue
+		}
+		if p.file == primary {
+			continue // already merged via receiverTypeDocs(primary)
+		}
+		sib := receiverTypeDocs(p.file)
+		for recv, doc := range sib {
+			if _, ok := out[recv]; ok {
+				continue
+			}
+			out[recv] = doc
 		}
 	}
 	return out

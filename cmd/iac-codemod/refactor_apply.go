@@ -188,7 +188,9 @@ func refactorApplyFile(path string, opts *Options, report *applyReport) error {
 	if len(provs) == 0 {
 		provs = planLikeReceivers(file)
 	}
-	typeDocs := receiverTypeDocs(file)
+	// Directory-wide type-doc lookup (review round-6 finding #1) so
+	// skip-marker on a sibling file's type declaration is honored.
+	typeDocs := receiverTypeDocsInDir(filepath.Dir(path), file)
 
 	mutated := false
 	for _, decl := range file.Decls {
