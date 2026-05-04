@@ -1312,13 +1312,17 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 `infra align` enumerates the `iac.provider` modules in the config, loads each,
 and dispatches `interfaces.ProviderValidator.ValidatePlan(plan)` against any
 provider that implements that optional interface. Each returned
-`PlanDiagnostic` is rendered as an `AlignFinding`:
+`PlanDiagnostic` is rendered according to its severity tier:
 
-| `PlanDiagnostic.Severity` | `AlignFinding.Severity` |
-|---------------------------|-------------------------|
-| `PlanDiagnosticError` | `FAIL` |
-| `PlanDiagnosticWarning` | `WARN` |
-| `PlanDiagnosticInfo` | `WARN` (advisory; failed only under `--strict`) |
+| `PlanDiagnostic.Severity` | Result |
+|---------------------------|--------|
+| `PlanDiagnosticError` | `FAIL` AlignFinding (always non-zero exit) |
+| `PlanDiagnosticWarning` | `WARN` AlignFinding (non-zero only under `--strict`) |
+| `PlanDiagnosticInfo` | Logged to stderr; no AlignFinding emitted; never affects exit code |
+
+`PlanDiagnosticInfo` deliberately does *not* contribute an AlignFinding so
+that `--strict` CI gates cannot fail on a purely informational hint. The
+log line is prefixed `R-A10 [info] <provider>/<resource>: <message>`.
 
 Providers that do not implement `ProviderValidator` are skipped — the
 interface is purely additive (no behaviour change for older plugins).

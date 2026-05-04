@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -142,23 +143,52 @@ func TestCheckRA10_WarningDiagnostic_BecomesWARN(t *testing.T) {
 	}
 }
 
-func TestCheckRA10_InfoDiagnostic_BecomesWARN(t *testing.T) {
-	// Info maps to WARN (advisory) since the existing align FAIL/WARN model
-	// has no INFO tier; default-mode exit stays 0, --strict still flags.
+func TestCheckRA10_InfoDiagnostic_LogsAndEmitsNoFinding(t *testing.T) {
+	// Plan T4.2 spec: "Info → logs". An Info diagnostic must be written to
+	// the stderr-style log sink AND must NOT produce an AlignFinding —
+	// otherwise --strict would exit non-zero on a purely informational hint,
+	// defeating the tier's purpose.
+	var buf strings.Builder
+	origLog := ra10LogInfo
+	t.Cleanup(func() { ra10LogInfo = origLog })
+	ra10LogInfo = func(format string, args ...any) {
+		fmt.Fprintf(&buf, format, args...)
+	}
+
 	providers := []interfaces.IaCProvider{
 		validatingStubProvider{
 			stubIaCProvider: stubIaCProvider{name: "do"},
 			diags: []interfaces.PlanDiagnostic{
-				{Severity: interfaces.PlanDiagnosticInfo, Resource: "lb", Message: "hint"},
+				{Severity: interfaces.PlanDiagnosticInfo, Resource: "lb", Field: "tier", Message: "hint about tier"},
 			},
 		},
 	}
 	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
-	if len(got) != 1 {
-		t.Fatalf("expected 1 finding, got %d", len(got))
+	if len(got) != 0 {
+		t.Fatalf("expected 0 findings for Info diagnostic, got %d: %+v", len(got), got)
 	}
-	if got[0].Severity != "WARN" {
-		t.Errorf("Severity: got %q, want WARN", got[0].Severity)
+
+	logged := buf.String()
+	if !strings.Contains(logged, "R-A10") {
+		t.Errorf("log: expected to contain rule tag 'R-A10', got %q", logged)
+	}
+	if !strings.Contains(logged, "[info]") {
+		t.Errorf("log: expected to mark severity as [info], got %q", logged)
+	}
+	if !strings.Contains(logged, "do/lb") {
+		t.Errorf("log: expected to identify provider/resource as 'do/lb', got %q", logged)
+	}
+	if !strings.Contains(logged, "hint about tier") {
+		t.Errorf("log: expected to include diagnostic message, got %q", logged)
+	}
+	if !strings.Contains(logged, "field: tier") {
+		t.Errorf("log: expected to include field path 'field: tier', got %q", logged)
+	}
+
+	// Critical guarantee: even under --strict, an Info-only run exits 0.
+	if alignExitCode(got, true) != 0 {
+		t.Errorf("alignExitCode(strict=true) = %d, want 0 — Info must never affect exit code",
+			alignExitCode(got, true))
 	}
 }
 

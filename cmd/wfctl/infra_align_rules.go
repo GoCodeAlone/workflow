@@ -720,22 +720,30 @@ func checkRA9(ctx *alignContext) []AlignFinding {
 
 // ── R-A10: provider.ValidatePlan dispatch ──────────────────────────────────
 
+// ra10LogInfo is the sink used to surface PlanDiagnosticInfo diagnostics
+// without emitting an AlignFinding. The default writes to os.Stderr; tests
+// override this var to capture the log line and assert on it.
+var ra10LogInfo = func(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
+}
+
 // checkRA10_provider_validate_plan iterates the loaded providers, type-asserts
-// each as interfaces.ProviderValidator, calls ValidatePlan(plan) and surfaces
-// each returned PlanDiagnostic as an AlignFinding.
+// each as interfaces.ProviderValidator, calls ValidatePlan(plan) and renders
+// each returned PlanDiagnostic according to its severity tier.
 //
-// Severity mapping (matches the existing FAIL/WARN binary model used by all
-// other R-A* rules — there is no "INFO" tier today):
+// Three-tier severity mapping (matches the rev10 plan T4.2 acceptance
+// criteria: "Errors → align failures; Warnings → warnings; Info → logs"):
 //
-//	PlanDiagnosticError   → FAIL (always non-zero exit)
-//	PlanDiagnosticWarning → WARN (non-zero only under --strict)
-//	PlanDiagnosticInfo    → WARN (advisory; same behaviour as Warning today,
-//	                              kept distinguishable via diagnostic.Message
-//	                              and the underlying PlanDiagnostic struct)
+//	PlanDiagnosticError   → AlignFinding{Severity: "FAIL"} (always non-zero exit)
+//	PlanDiagnosticWarning → AlignFinding{Severity: "WARN"} (non-zero only under --strict)
+//	PlanDiagnosticInfo    → logged to stderr via ra10LogInfo; NO AlignFinding,
+//	                        never affects exit code (Info exists precisely so a
+//	                        provider can surface a hint without breaking
+//	                        `--strict` CI gates).
 //
 // Resource label: prefer the diagnostic's Resource field; fall back to
-// "<provider-name>:plan" for plan-level findings so the rendered table
-// always identifies the source provider.
+// "<provider-name>:plan" for plan-level findings so the rendered table (and
+// the stderr log line for Info) always identifies the source provider.
 //
 // No-op when plan is nil or providers is empty (matches R-A7's predicate so
 // running `wfctl infra align` without --plan never triggers R-A10).
@@ -755,10 +763,6 @@ func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *
 		}
 		diags := v.ValidatePlan(plan)
 		for _, d := range diags {
-			severity := "WARN"
-			if d.Severity == interfaces.PlanDiagnosticError {
-				severity = "FAIL"
-			}
 			resource := d.Resource
 			if resource == "" {
 				resource = fmt.Sprintf("%s:plan", p.Name())
@@ -767,12 +771,35 @@ func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *
 			if d.Field != "" {
 				msg = fmt.Sprintf("%s (field: %s)", d.Message, d.Field)
 			}
-			findings = append(findings, AlignFinding{
-				Rule:     "R-A10",
-				Severity: severity,
-				Resource: resource,
-				Message:  msg,
-			})
+			switch d.Severity {
+			case interfaces.PlanDiagnosticError:
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A10",
+					Severity: "FAIL",
+					Resource: resource,
+					Message:  msg,
+				})
+			case interfaces.PlanDiagnosticWarning:
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A10",
+					Severity: "WARN",
+					Resource: resource,
+					Message:  msg,
+				})
+			case interfaces.PlanDiagnosticInfo:
+				// Info tier: log to stderr; no AlignFinding so exit code
+				// is never affected (even under --strict).
+				ra10LogInfo("R-A10 [info] %s/%s: %s\n", p.Name(), resource, msg)
+			default:
+				// Unknown severity — treat conservatively as WARN so it
+				// doesn't slip past --strict.
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A10",
+					Severity: "WARN",
+					Resource: resource,
+					Message:  msg,
+				})
+			}
 		}
 	}
 	return findings

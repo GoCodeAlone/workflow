@@ -1857,9 +1857,17 @@ The CLI consumer is the `R-A10` align rule
 (`cmd/wfctl/infra_align_rules.go::checkRA10_provider_validate_plan`), which
 runs every loaded provider that implements `ProviderValidator` against the
 plan supplied via `wfctl infra align --plan`. Severity mapping:
-`PlanDiagnosticError` → `FAIL`; `PlanDiagnosticWarning` and
-`PlanDiagnosticInfo` → `WARN` (advisory in default mode; both fail under
-`--strict`). See `docs/WFCTL.md` § `infra align` for the full table.
+
+| `PlanDiagnostic.Severity` | Result |
+|---------------------------|--------|
+| `PlanDiagnosticError` | `FAIL` AlignFinding (always non-zero exit) |
+| `PlanDiagnosticWarning` | `WARN` AlignFinding (non-zero only under `--strict`) |
+| `PlanDiagnosticInfo` | Logged to stderr; no AlignFinding emitted; never affects exit code |
+
+`PlanDiagnosticInfo` is intentionally *not* surfaced as a finding so that
+`--strict` CI gates do not exit non-zero on a purely informational hint
+(billing tier change, deprecation notice, etc.). See `docs/WFCTL.md` §
+`infra align` for the full table.
 
 > **Naming note:** The runtime/deploy event finding type
 > `interfaces.Diagnostic` (used by `interfaces.Troubleshooter`) is a
