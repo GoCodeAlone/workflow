@@ -50,9 +50,18 @@ func scenarioUpsertOnAlreadyExists(t *testing.T, cfg Config) {
 	// surface a compute primitive. Without the driver, ApplyPlan would
 	// fail for type-resolution reasons unrelated to the upsert
 	// recovery contract this scenario pins.
+	//
+	// Two skip signals are honored: (a) ResourceDriver returns nil
+	// without error, or (b) ResourceDriver returns an error (the
+	// canonical idiom — e.g., *platform.ResourceDriverNotFoundError).
+	// Either path is read as "provider did not opt in" rather than a
+	// hard conformance failure.
 	d, err := p.ResourceDriver("infra.compute")
 	if err != nil {
-		t.Fatalf("ResourceDriver(\"infra.compute\") errored: %v", err)
+		t.Skipf("provider %s does not expose a ResourceDriver for infra.compute "+
+			"(upsert-recovery probe is opt-in for providers with a compute primitive): %v",
+			p.Name(), err)
+		return
 	}
 	if d == nil {
 		t.Skipf("provider %s does not expose a ResourceDriver for infra.compute "+

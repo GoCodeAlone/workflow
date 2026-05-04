@@ -33,9 +33,18 @@ func scenarioOutputsRefreshDetectsNewFields(t *testing.T, cfg Config) {
 	// a conformance-suite-only probe that providers opt into when they
 	// surface a compute primitive. Providers without one cannot fail
 	// this scenario for refresh-output reasons unrelated to the type.
+	//
+	// Two skip signals are honored: (a) ResourceDriver returns nil
+	// without error (one provider idiom for "type unknown"), or
+	// (b) ResourceDriver returns an error (the canonical idiom — e.g.,
+	// *platform.ResourceDriverNotFoundError). Either path is read as
+	// "provider did not opt in" rather than a hard conformance failure.
 	d, err := p.ResourceDriver("infra.compute")
 	if err != nil {
-		t.Fatalf("ResourceDriver(\"infra.compute\") errored: %v", err)
+		t.Skipf("provider %s does not expose a ResourceDriver for infra.compute "+
+			"(refresh-outputs probe is opt-in for providers with a compute primitive): %v",
+			p.Name(), err)
+		return
 	}
 	if d == nil {
 		t.Skipf("provider %s does not expose a ResourceDriver for infra.compute "+

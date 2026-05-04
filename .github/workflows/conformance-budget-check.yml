@@ -119,11 +119,24 @@ jobs:
           # Soft alert at $15/mo (60% of cap). Files (or appends to)
           # an auto-dedup issue via the T7.14 helper. Dedup logic in
           # scripts/file-or-comment-leak-issue.sh.
+          #
+          # IMPORTANT: override PRIMARY_LABEL / HELPER_LABEL / ISSUE_TITLE
+          # so the budget alert files into the conformance-budget-incident
+          # swimlane (mirrors leak-scrubber's pattern at line 186-189 of
+          # conformance-leak-scrubber.yml). Without the override, the
+          # helper's defaults route the budget alert into the leak-
+          # incident dedup chain, mixing two unrelated operational
+          # workflows and breaking docs/conformance-runbook.md §
+          # "Operator interventions" (which document distinct triage
+          # paths per swimlane).
           if awk "BEGIN { exit !(${SPEND} > 15) }"; then
             echo "::warning title=Budget approaching cap::Conformance month-to-date \$${SPEND} > \$15 soft-alert (60% of \$25 cap)"
             if [[ -x .github/workflows/scripts/file-or-comment-leak-issue.sh ]]; then
-              .github/workflows/scripts/file-or-comment-leak-issue.sh \
-                "${SPEND}" "Spend approaching cap"
+              PRIMARY_LABEL=conformance-budget-incident \
+              HELPER_LABEL=auto-filed-budget \
+              ISSUE_TITLE="Conformance budget soft-alert: \$${SPEND} > \$15 (60% of \$25 cap)" \
+                .github/workflows/scripts/file-or-comment-leak-issue.sh \
+                  "${SPEND}" "Spend approaching cap"
             else
               echo "::notice::T7.14 helper script not yet installed; skipping auto-issue file"
             fi

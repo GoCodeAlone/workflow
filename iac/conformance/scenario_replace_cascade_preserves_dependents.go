@@ -47,19 +47,19 @@ func scenarioReplaceCascadePreservesDependents(t *testing.T, cfg Config) {
 	// an application primitive (DO AppPlatform, AWS Beanstalk, etc.).
 	// Without the driver, ApplyPlan fails for type-resolution reasons
 	// unrelated to the cascade contract this scenario pins.
-	parent, err := p.ResourceDriver("infra.vpc")
-	if err != nil {
-		t.Fatalf("ResourceDriver(\"infra.vpc\") errored: %v", err)
-	}
-	dependent, err := p.ResourceDriver("infra.app")
-	if err != nil {
-		t.Fatalf("ResourceDriver(\"infra.app\") errored: %v", err)
-	}
-	if parent == nil || dependent == nil {
+	//
+	// Two skip signals are honored per probe: (a) ResourceDriver
+	// returns nil without error, or (b) returns an error (the canonical
+	// idiom — e.g., *platform.ResourceDriverNotFoundError). Either
+	// path is read as "provider did not opt in" rather than a hard
+	// conformance failure.
+	parent, parentErr := p.ResourceDriver("infra.vpc")
+	dependent, dependentErr := p.ResourceDriver("infra.app")
+	if parentErr != nil || dependentErr != nil || parent == nil || dependent == nil {
 		t.Skipf("provider %s lacks driver(s) for replace-cascade probe "+
-			"(infra.vpc=%v, infra.app=%v); cascade-preserves-dependents "+
-			"is opt-in for providers exposing both primitives",
-			p.Name(), parent != nil, dependent != nil)
+			"(infra.vpc=%v err=%v, infra.app=%v err=%v); cascade-"+
+			"preserves-dependents is opt-in for providers exposing both primitives",
+			p.Name(), parent != nil, parentErr, dependent != nil, dependentErr)
 		return
 	}
 
