@@ -121,7 +121,13 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 				// cmd/wfctl/main.go's top-level printer already emits
 				// "error: %v" on command failure, so prefixing here
 				// would produce double "error: error: ...".
-				return nil, fmt.Errorf(`failed to load plugin %q: %v; wfctl infra plan now requires the plugin process to compute Diff (since v0.21.0)`, g.provType, loadErr)
+				//
+				// loadErr is wrapped with %w (not %v) so callers can
+				// errors.Is/errors.As against the underlying loader
+				// failure even after this error is re-wrapped by
+				// runInfraPlan's `compute plan: %w`. Rendered text is
+				// identical to %v.
+				return nil, fmt.Errorf(`failed to load plugin %q: %w; wfctl infra plan now requires the plugin process to compute Diff (since v0.21.0)`, g.provType, loadErr)
 			}
 			if closer != nil {
 				provType := g.provType

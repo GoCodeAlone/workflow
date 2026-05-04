@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/iac/diffcache"
@@ -231,9 +232,18 @@ func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec in
 	// not correctness.
 	var diff *interfaces.DiffResult
 	cacheable := rs.ProviderID != ""
-	cache := getDiffCache()
-	var key diffcache.Key
+	var (
+		cache diffcache.Cache
+		key   diffcache.Key
+	)
 	if cacheable {
+		// getDiffCache lives inside this branch so the empty-ProviderID
+		// bypass path is fully side-effect free — no sync.Once init
+		// firing, no atomic load, and (most importantly) no eager
+		// lazy-construction of the filesystem cache backend creating
+		// ~/.cache/wfctl/diff/ on the operator's machine for resources
+		// that won't use the cache anyway.
+		cache = getDiffCache()
 		key = diffcache.Key{
 			PluginVersion: pluginVersionKey(p),
 			Type:          spec.Type,
@@ -385,23 +395,55 @@ func parseConcurrencyEnv(v string) int {
 
 // planDiffCache is the package-level diff cache used by
 // classifyModification. Lazy-initialized on first call to getDiffCache
-// from the WFCTL_DIFFCACHE env var via diffcache.New(). Tests in the
-// same package may swap it via setDiffCacheForTest (defined in
-// differ_cache_test.go).
+// from the WFCTL_DIFFCACHE env var via diffcache.New(), then served
+// lock-free from the atomic.Pointer for the lifetime of the process.
+// Tests in the same package may swap it via setDiffCacheForTest
+// (defined in differ_cache_test.go) — Store on the atomic is safe
+// concurrently with production Loads, and atomic.Pointer cleanly
+// handles the nil case (test cleanup may restore a nil prior value
+// without panicking the way atomic.Value would).
+//
+// Refactored from a per-call sync.Mutex to sync.Once + atomic.Pointer
+// (Copilot review round 4): under ComputePlan's parallel Diff fan-out,
+// the per-call mutex was contention on the hot path, especially on
+// cache hits where the Get itself is cheap.
 var (
-	planDiffCacheMu sync.Mutex
-	planDiffCache   diffcache.Cache
+	planDiffCacheOnce sync.Once
+	planDiffCachePtr  atomic.Pointer[diffcache.Cache] // Load is lock-free; nil means uninitialized
 )
 
 // getDiffCache returns the package-level diff cache, initializing it
-// from the environment on first call. Safe for concurrent use.
+// from the environment on first call. Safe for concurrent use; the
+// initialization fires exactly once via sync.Once and subsequent
+// reads are lock-free atomic.Load. classifyModification only calls
+// this when the resource is cacheable (non-empty ProviderID), so the
+// bypass path neither acquires the Once nor eagerly initializes the
+// filesystem cache backend on ~/.cache/wfctl/diff/.
 func getDiffCache() diffcache.Cache {
-	planDiffCacheMu.Lock()
-	defer planDiffCacheMu.Unlock()
-	if planDiffCache == nil {
-		planDiffCache = diffcache.New()
+	if p := planDiffCachePtr.Load(); p != nil {
+		// Fast path: already initialized (production hot path AND any
+		// test that has swapped a cache in via setDiffCacheForTest).
+		return *p
 	}
-	return planDiffCache
+	planDiffCacheOnce.Do(func() {
+		// Re-check under Once: a concurrent setDiffCacheForTest could
+		// have Stored between our Load above and entering the Once
+		// body. Only seed the default if no value is present.
+		if planDiffCachePtr.Load() == nil {
+			c := diffcache.New()
+			planDiffCachePtr.Store(&c)
+		}
+	})
+	if p := planDiffCachePtr.Load(); p != nil {
+		return *p
+	}
+	// Defensive: should be unreachable. A concurrent test cleanup that
+	// restored a nil prior value AFTER our Once fired could in
+	// principle leave Load returning nil; fall through to a fresh
+	// noop-cache rather than panic. Test code never relies on this
+	// (cleanups always restore the prior concrete cache or a fresh
+	// default — see setDiffCacheForTest below).
+	return diffcache.NewNoop()
 }
 
 // ConfigHash is the exported counterpart of configHash. It allows callers

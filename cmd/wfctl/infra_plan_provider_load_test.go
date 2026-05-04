@@ -64,6 +64,13 @@ modules:
 	if !strings.Contains(got, want) {
 		t.Errorf("error message:\n  got:  %q\n  want: contains %q", got, want)
 	}
+	// errors.Is must reach loadErr through the two %w wrappings
+	// (computePlanForInfraSpecs's "failed to load plugin %q: %w; ..." +
+	// runInfraPlan's "compute plan: %w"). Pins the round-4 fix that
+	// switched the inner wrap from %v to %w.
+	if !errors.Is(err, loadErr) {
+		t.Errorf("errors.Is(err, loadErr) = false; want true (the underlying load error must remain unwrappable so callers can errors.Is/As against it across both wrap layers)")
+	}
 }
 
 // TestRunInfraPlan_PassesProviderToComputePlan verifies T3.6b's positive

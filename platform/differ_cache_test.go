@@ -13,17 +13,30 @@ import (
 // setDiffCacheForTest swaps the package-level diff cache for c and
 // restores the previous instance via t.Cleanup. Lives in this
 // internal-package test file so it can touch the unexported
-// planDiffCache var without exposing a production-visible setter.
+// planDiffCachePtr var without exposing a production-visible setter.
+//
+// After getDiffCache was refactored to sync.Once + atomic.Pointer
+// (Copilot review round 4), the swap mechanism stores into the atomic
+// directly. Cleanup restores the prior pointer if there was one, or
+// seeds a fresh default cache when no prior value existed (so any
+// subsequent test that doesn't call setDiffCacheForTest still observes
+// a working cache and doesn't trip getDiffCache's defensive
+// noop-fallback).
 func setDiffCacheForTest(t *testing.T, c diffcache.Cache) {
 	t.Helper()
-	planDiffCacheMu.Lock()
-	prev := planDiffCache
-	planDiffCache = c
-	planDiffCacheMu.Unlock()
+	prev := planDiffCachePtr.Load() // may be nil if Once hasn't fired
+	planDiffCachePtr.Store(&c)
 	t.Cleanup(func() {
-		planDiffCacheMu.Lock()
-		planDiffCache = prev
-		planDiffCacheMu.Unlock()
+		if prev != nil {
+			planDiffCachePtr.Store(prev)
+			return
+		}
+		// No prior value — seed a fresh default so subsequent
+		// production code paths in this test binary still observe a
+		// working cache. Avoids leaving the atomic at nil, which would
+		// hit getDiffCache's defensive noop-fallback.
+		fresh := diffcache.New()
+		planDiffCachePtr.Store(&fresh)
 	})
 }
 
