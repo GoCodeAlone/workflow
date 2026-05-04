@@ -96,6 +96,7 @@ graph TD
     infra --> infra-bootstrap["bootstrap"]
     infra --> infra-state["state"]
     infra --> infra-outputs["outputs"]
+    infra --> infra-refresh-outputs["refresh-outputs"]
 
     infra-state --> infra-state-list["list"]
     infra-state --> infra-state-export["export"]
@@ -1171,6 +1172,7 @@ wfctl infra <action> [options] [config.yaml]
 | `bootstrap` | Generate secrets and initialise state backend before first apply |
 | `state` | Manage state storage (list/export/import) |
 | `outputs` | Print resource outputs from state (yaml/json/env formats) |
+| `refresh-outputs` | Read live outputs from each provider and reconcile state (no cloud writes) |
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -1214,6 +1216,63 @@ wfctl infra state import --source state.json
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN,DATABASE_URL
 wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
+```
+
+#### `infra refresh-outputs`
+
+Read live outputs from each `iac.provider` for resources already in state and persist any field-level changes back to the state backend. The contract is strictly read-only at the cloud level — `refresh-outputs` never invokes Update or Replace.
+
+```
+wfctl infra refresh-outputs [-c CONFIG] [--env ENV] [--concurrency N]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c`, `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `-e`, `--env` | `` | Environment name (resolves per-module overrides; iac.provider modules disabled for the env are skipped) |
+| `--concurrency` | `8` | Maximum concurrent Read calls. Values < 1 fall back to the default. |
+
+**Behavior:**
+
+- Discovers `iac.provider` modules with per-env resolution.
+- Loads current state from the configured `iac.state` backend.
+- Groups state entries by their owning provider module (`provider_ref` first, falling back to provider type when exactly one module of that type is declared).
+- Calls each provider's `ResourceDriver.Read` once per resource via the bounded-concurrency `iac/refreshoutputs.Refresh` helper.
+- Persists any state entry whose `outputs` map changed — entries whose live outputs equal the persisted outputs are left alone.
+
+**Errors:**
+
+When the resolved config has no usable `iac.provider` module for the requested env, `wfctl` exits 1 with the literal stderr line:
+
+```
+error: refresh-outputs: provider not configured for env "<env>"
+```
+
+This wording is load-bearing — CI gates and runtime-launch validation pin the exact form. On any provider Read or driver-resolution failure, the command returns the wrapped error from the `iac/refreshoutputs` helper without persisting partial progress.
+
+**Apply-time pre-step (opt-in):**
+
+`wfctl infra apply` can run the same refresh as a pre-plan step, ensuring the planner doesn't make decisions against stale outputs.
+
+| Variable / Flag | Effect |
+|------|---------|
+| `WFCTL_REFRESH_OUTPUTS=1` (or any `strconv.ParseBool` truthy value) | Enable the apply pre-step. |
+| `WFCTL_REFRESH_OUTPUTS=0` (or any falsey value, empty, or unrecognised) | Disable the apply pre-step (default). |
+| `wfctl infra apply --skip-refresh` | Suppress the apply pre-step regardless of the env var (CI escape hatch). |
+
+The pre-step only fires for `infra.*` configs; legacy `platform.*` configs are silently skipped.
+
+**Examples:**
+
+```bash
+# One-off explicit refresh against the staging env.
+wfctl infra refresh-outputs -c infra.yaml --env staging
+
+# Apply with pre-plan refresh enabled.
+WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve -c infra.yaml --env staging
+
+# Apply with pre-step suppressed even though CI exports the env var.
+WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve --skip-refresh -c infra.yaml
 ```
 
 ---
