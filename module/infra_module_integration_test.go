@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/iactest"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/platform"
@@ -280,7 +281,7 @@ func TestInfraModule_PlanProducesCorrectActions(t *testing.T) {
 		},
 	}
 
-	plan, err := platform.ComputePlan(desired, nil)
+	plan, err := platform.ComputePlan(context.Background(), &iactest.NoopProvider{}, desired, nil)
 	if err != nil {
 		t.Fatalf("ComputePlan: %v", err)
 	}
@@ -329,7 +330,7 @@ func TestInfraModule_DriftDetectionFlow(t *testing.T) {
 			UpdatedAt:  time.Now(),
 		},
 	}
-	plan, err := platform.ComputePlan([]interfaces.ResourceSpec{vpc}, staleState)
+	plan, err := platform.ComputePlan(context.Background(), &iactest.NoopProvider{}, []interfaces.ResourceSpec{vpc}, staleState)
 	if err != nil {
 		t.Fatalf("ComputePlan (drift): %v", err)
 	}
@@ -347,7 +348,7 @@ func TestInfraModule_DriftDetectionFlow(t *testing.T) {
 			UpdatedAt:  time.Now(),
 		},
 	}
-	plan2, err := platform.ComputePlan([]interfaces.ResourceSpec{vpc}, freshState)
+	plan2, err := platform.ComputePlan(context.Background(), &iactest.NoopProvider{}, []interfaces.ResourceSpec{vpc}, freshState)
 	if err != nil {
 		t.Fatalf("ComputePlan (no drift): %v", err)
 	}
@@ -380,7 +381,7 @@ func TestInfraModule_DestroyReverseOrder(t *testing.T) {
 		},
 	}
 
-	plan, err := platform.ComputePlan(nil, current)
+	plan, err := platform.ComputePlan(context.Background(), &iactest.NoopProvider{}, nil, current)
 	if err != nil {
 		t.Fatalf("ComputePlan: %v", err)
 	}

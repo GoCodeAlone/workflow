@@ -263,6 +263,66 @@ func TestRemoteDriver_Diff(t *testing.T) {
 	}
 }
 
+// TestRemoteDriver_Diff_OmitsCurrentSensitiveWhenEmpty pins
+// sensitiveToAny's "wire stays trim-friendly" docstring: when
+// current.Sensitive is nil/empty, the "current_sensitive" arg is
+// omitted entirely rather than serialized as null. (Setting
+// args["current_sensitive"] = nil would round-trip through structpb
+// as a NullValue, defeating the trim intent.)
+func TestRemoteDriver_Diff_OmitsCurrentSensitiveWhenEmpty(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{"needs_update": false, "needs_replace": false}}
+	d := newDriver(si)
+	spec := sampleSpec()
+	current := &interfaces.ResourceOutput{
+		Name:       "my-resource",
+		Type:       "container_service",
+		ProviderID: "pid-123",
+		Outputs:    map[string]any{},
+		Sensitive:  nil, // explicit empty
+	}
+	if _, err := d.Diff(context.Background(), spec, current); err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if _, present := si.args["current_sensitive"]; present {
+		t.Errorf("current_sensitive arg present with empty Sensitive map; should be omitted (got %v)", si.args["current_sensitive"])
+	}
+}
+
+// TestRemoteDriver_Diff_IncludesCurrentSensitiveWhenPopulated is the
+// positive complement: when Sensitive is non-empty, the converted
+// map[string]any is sent across the wire so the plugin can observe
+// per-key sensitivity flags (the round-trip that T3.9 runtime-launch-
+// validation surfaced as silently dropped before sensitiveToAny existed).
+func TestRemoteDriver_Diff_IncludesCurrentSensitiveWhenPopulated(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{"needs_update": false, "needs_replace": false}}
+	d := newDriver(si)
+	spec := sampleSpec()
+	current := &interfaces.ResourceOutput{
+		Name:       "my-resource",
+		Type:       "container_service",
+		ProviderID: "pid-123",
+		Outputs:    map[string]any{},
+		Sensitive:  map[string]bool{"password": true, "api_key": false},
+	}
+	if _, err := d.Diff(context.Background(), spec, current); err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	v, ok := si.args["current_sensitive"]
+	if !ok {
+		t.Fatal("current_sensitive missing; expected populated map[string]any")
+	}
+	got, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("current_sensitive type: got %T, want map[string]any", v)
+	}
+	if got["password"] != true {
+		t.Errorf("current_sensitive[password] = %v, want true", got["password"])
+	}
+	if got["api_key"] != false {
+		t.Errorf("current_sensitive[api_key] = %v, want false", got["api_key"])
+	}
+}
+
 // ── Scale ─────────────────────────────────────────────────────────────────────
 
 func TestRemoteDriver_Scale(t *testing.T) {

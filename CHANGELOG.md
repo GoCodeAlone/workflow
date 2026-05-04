@@ -34,6 +34,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING (`wfctl infra plan`)**: configs declaring at least one `iac.provider` module now
+  require the plugin process to load successfully — `plan` invokes the same loader that `apply`
+  uses so `platform.ComputePlan` can dispatch `ResourceDriver.Diff` for honest Replace-action
+  classification (rev3 / W-3b T3.6b). On plugin-load failure `wfctl` exits non-zero and prints
+  `error: failed to load plugin "<name>": <reason>; wfctl infra plan now requires the plugin
+  process to compute Diff (since v0.21.0)` (the `error:` prefix is added by wfctl's top-level
+  printer; the underlying error returned from the command does not include it). There is no
+  `--no-provider` escape hatch
+  (rev3 YAGNI fix); operators who need pure offline validation should use `wfctl validate`.
+  Configs without any `iac.provider` module fall back to the legacy ConfigHash compare path so
+  minimal/legacy fixtures and out-of-band scripts continue to work.
+- **`wfctl infra plan` empty-desired alignment with apply**: when the desired state is empty
+  (every resource removed from config) but providers are declared, `plan` now matches `apply`'s
+  behavior under the per-provider grouping logic: the loop over groupOrder is empty and no
+  delete actions are emitted. To preview what `apply` would tear down, use `wfctl infra destroy
+  --dry-run` (which exercises the same provider load + lists tracked state). Pre-W-3b plan
+  emitted Delete actions for every orphan in current state via the legacy single-call ComputePlan
+  path; this is consistent with the broader rev3 alignment between plan and apply.
 - `driftInfraModules` uses `DriftClass` constants for output classification; drift-found message
   updated to suggest `wfctl infra apply --refresh`.
 - `DriftResult.Expected`, `DriftResult.Actual`, and `DriftResult.Fields` now carry `omitempty`

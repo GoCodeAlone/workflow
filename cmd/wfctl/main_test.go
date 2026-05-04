@@ -13,6 +13,23 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
+// TestMain forces WFCTL_DIFFCACHE=disabled across the cmd/wfctl test
+// suite. The platform diffcache (consumed by computeInfraPlan via
+// the var-seam introduced in W-3b T3.6c/f) lazily initializes its
+// process-level planDiffCache from this env var on the first
+// ComputePlan call. Without this override, tests that depend on
+// driver.Diff actually firing would observe stale entries from a
+// developer's local ~/.cache/wfctl/diff/ as false-positive cache
+// hits. Disabled is the safe default for tests; cache-hit semantics
+// are exercised by platform/differ_cache_test.go via its own
+// in-memory swap.
+func TestMain(m *testing.M) {
+	if err := os.Setenv("WFCTL_DIFFCACHE", "disabled"); err != nil {
+		panic("setenv WFCTL_DIFFCACHE: " + err.Error())
+	}
+	os.Exit(m.Run())
+}
+
 func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
 	if !isHelpRequested(flag.ErrHelp) {
 		t.Error("isHelpRequested should return true for flag.ErrHelp")

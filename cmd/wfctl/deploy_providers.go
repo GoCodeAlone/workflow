@@ -76,27 +76,52 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig, envName st
 // they may return nil for the closer.
 var resolveIaCProvider = discoverAndLoadIaCProvider
 
-// iacPluginManifest is the minimal shape needed to read capabilities.iacProvider.name
-// from a plugin.json without relying on the full PluginCapabilities struct.
+// iacPluginManifest is the minimal shape needed to read both:
+//   - capabilities.iacProvider.name — used by findIaCPluginDir to
+//     match a plugin to a desired provider name; AND
+//   - iacProvider.computePlanVersion — used by W-3b T3.7 to decide
+//     between v1 (legacy provider.Apply) and v2
+//     (wfctlhelpers.ApplyPlan) dispatch at apply time.
+//
+// Both fields are unmarshaled from the same plugin.json bytes — no
+// double parse — and either may be empty without affecting the
+// other.
 type iacPluginManifest struct {
 	Capabilities struct {
 		IaCProvider struct {
 			Name string `json:"name"`
 		} `json:"iacProvider"`
 	} `json:"capabilities"`
+	IaCProvider struct {
+		ComputePlanVersion string `json:"computePlanVersion"`
+	} `json:"iacProvider"`
 }
 
 // findIaCPluginDir scans pluginDir subdirectories for a plugin.json that
 // declares capabilities.iacProvider.name == providerName.
-// Returns ("", false, nil) when not found; ("name", true/false, nil) when the
-// manifest matches (hasBinary indicates whether the executable is present).
-func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bool, err error) {
+// Returns ("", "", false, nil) when not found; ("name", "computePlanVersion",
+// true/false, nil) when the manifest matches (hasBinary indicates whether
+// the executable is present).
+//
+// The computePlanVersion return is the RAW value from the SDK manifest's
+// iacProvider.computePlanVersion field. This loader path performs only
+// minimal json.Unmarshal — no schema validation — so callers must NOT
+// assume the returned string is constrained to {"", "v1", "v2"}. Use
+// the wfctlhelpers.DispatchVersionV2 constant for the v2-equality check
+// (anything else, including unknown values and empty, defaults to v1):
+//
+//	if computePlanVersion == wfctlhelpers.DispatchVersionV2 { ... v2 path ... }
+//
+// (wfctlhelpers.DispatchVersionFor takes a provider value, not a raw
+// string, so it does not apply at this loader-level seam where only
+// the string is in hand.)
+func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion string, hasBinary bool, err error) {
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", false, nil
+			return "", "", false, nil
 		}
-		return "", false, fmt.Errorf("scan plugin directory %q: %w", pluginDir, err)
+		return "", "", false, fmt.Errorf("scan plugin directory %q: %w", pluginDir, err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -116,9 +141,9 @@ func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bo
 		}
 		binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
 		_, statErr := os.Stat(binaryPath)
-		return pluginName, statErr == nil, nil
+		return pluginName, m.IaCProvider.ComputePlanVersion, statErr == nil, nil
 	}
-	return "", false, nil
+	return "", "", false, nil
 }
 
 // loadIaCPlugin finds and loads the IaC plugin for the given provider, returning
@@ -127,7 +152,7 @@ func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bo
 var loadIaCPlugin = defaultLoadIaCPlugin
 
 func defaultLoadIaCPlugin(pluginDir, providerName string) (pluginName string, factories map[string]plugin.ModuleFactory, closer io.Closer, err error) {
-	pName, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
+	pName, _, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
 	if findErr != nil {
 		return "", nil, nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, findErr)
 	}
@@ -144,6 +169,25 @@ func defaultLoadIaCPlugin(pluginDir, providerName string) (pluginName string, fa
 		return "", nil, nil, fmt.Errorf("load plugin %q for provider %q: %w", pName, providerName, loadErr)
 	}
 	return pName, adapter.ModuleFactories(), closerFunc(func() error { mgr.Shutdown(); return nil }), nil
+}
+
+// readIaCPluginComputePlanVersion re-reads plugin.json under
+// pluginDir to extract iacProvider.computePlanVersion for providerName.
+// Returns "" (treated as v1 by the dispatcher) when the manifest
+// can't be read or the field is omitted. Callers MUST tolerate empty
+// — apply behavior degrades to the legacy v1 path on any read
+// failure rather than blocking the apply.
+//
+// Re-reads rather than threading the version through loadIaCPlugin's
+// existing 4-tuple return so the var-seam signature (and its 1 test
+// override) stays stable. Cost: one extra os.ReadFile of a tiny JSON
+// file per provider load — negligible vs. the gRPC plugin start.
+func readIaCPluginComputePlanVersion(pluginDir, providerName string) string {
+	_, version, _, err := findIaCPluginDir(pluginDir, providerName)
+	if err != nil {
+		return ""
+	}
+	return version
 }
 
 // discoverAndLoadIaCProvider implements the default resolveIaCProvider: it scans
@@ -186,7 +230,10 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 		return nil, nil, fmt.Errorf("plugin %q iac.provider module (%T) does not support service invocation — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
 	}
 
-	iacProvider := &remoteIaCProvider{invoker: invoker}
+	iacProvider := &remoteIaCProvider{
+		invoker:            invoker,
+		computePlanVersion: readIaCPluginComputePlanVersion(pluginDir, providerName),
+	}
 	// Notify the plugin that Initialize has been called (the plugin may treat
 	// this as a no-op if it already ran Initialize inside CreateModule).
 	if initErr := iacProvider.Initialize(ctx, cfg); initErr != nil {
@@ -209,8 +256,22 @@ type remoteServiceContextInvoker interface {
 // remoteIaCProvider implements interfaces.IaCProvider by routing every method
 // through InvokeService to the plugin subprocess. Only the methods needed by
 // wfctl ci run deploy are fully implemented; the rest return a clear error.
+//
+// W-3b T3.7: also satisfies wfctlhelpers.ComputePlanVersionDeclarer via
+// ComputePlanVersion(), populated from the plugin.json SDK manifest at
+// load time. wfctl's apply path type-asserts the interface to choose
+// between v1 (legacy provider.Apply) and v2 (wfctlhelpers.ApplyPlan)
+// dispatch.
 type remoteIaCProvider struct {
-	invoker remoteServiceInvoker
+	invoker            remoteServiceInvoker
+	computePlanVersion string
+}
+
+// ComputePlanVersion satisfies wfctlhelpers.ComputePlanVersionDeclarer.
+// Returns the SDK-manifest value cached at load time ("", "v1", or
+// "v2"); empty defaults to v1 in the dispatcher.
+func (r *remoteIaCProvider) ComputePlanVersion() string {
+	return r.computePlanVersion
 }
 
 func (r *remoteIaCProvider) Name() string {
@@ -472,6 +533,25 @@ type remoteResourceDriver struct {
 	resourceType string
 }
 
+// sensitiveToAny converts a map[string]bool (the Sensitive field on
+// ResourceOutput) into the map[string]any shape structpb.NewStruct
+// accepts. Returns nil for empty/nil input so the wire stays
+// trim-friendly. Without this conversion, the upstream
+// plugin/external/convert.go::mapToStruct silently drops the entire
+// args struct on NewStruct failure (it returns &structpb.Struct{}
+// rather than surfacing the typing error) — the bug T3.9
+// runtime-launch-validation surfaced.
+func sensitiveToAny(s map[string]bool) map[string]any {
+	if len(s) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(s))
+	for k, v := range s {
+		out[k] = v
+	}
+	return out
+}
+
 // wrapIaCError categorizes plugin errors by matching HTTP status codes and
 // common message patterns, wrapping with the appropriate IaC sentinel so
 // callers can use errors.Is for control flow. Errors crossing the plugin
@@ -650,7 +730,20 @@ func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.Resour
 		"current_provider_id": current.ProviderID,
 		"current_status":      current.Status,
 		"current_outputs":     current.Outputs,
-		"current_sensitive":   current.Sensitive,
+	}
+	// Sensitive crosses the gRPC boundary as map[string]any.
+	// structpb.NewStruct rejects map[string]bool; without this
+	// conversion the entire args struct silently drops to empty
+	// (mapToStruct in plugin/external/convert.go falls back to
+	// &structpb.Struct{} on err) and the plugin observes args=map[]
+	// — the bug T3.9 runtime-launch-validation surfaced.
+	//
+	// Only include the key when the converted map is non-empty, so the
+	// wire stays trim-friendly (matches sensitiveToAny's docstring).
+	// Setting `args["current_sensitive"] = nil` would serialize as a
+	// NullValue rather than omitting the field, defeating that intent.
+	if conv := sensitiveToAny(current.Sensitive); conv != nil {
+		args["current_sensitive"] = conv
 	}
 	res, err := d.invoker.InvokeService("ResourceDriver.Diff", args)
 	if err != nil {

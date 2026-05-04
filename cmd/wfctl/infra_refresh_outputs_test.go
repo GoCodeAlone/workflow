@@ -84,7 +84,10 @@ func (d *refreshOutputsCmdFakeDriver) Delete(context.Context, interfaces.Resourc
 	panic("not used")
 }
 func (d *refreshOutputsCmdFakeDriver) Diff(context.Context, interfaces.ResourceSpec, *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
-	panic("not used")
+	// W-3b ComputePlan now dispatches Diff per resource for v2 plugins;
+	// returning (nil, nil) classifies as "no change" so this fake stays
+	// safe for refresh-outputs tests that only exercise Read.
+	return nil, nil
 }
 func (d *refreshOutputsCmdFakeDriver) HealthCheck(context.Context, interfaces.ResourceRef) (*interfaces.HealthResult, error) {
 	panic("not used")

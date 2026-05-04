@@ -15,6 +15,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 )
@@ -43,6 +44,19 @@ func printDriftReportIfAny(w io.Writer, result *interfaces.ApplyResult) {
 // infraApplyTroubleshootTimeout is the budget for a Troubleshoot call when
 // infra apply fails. Kept separate so tests can override it.
 var infraApplyTroubleshootTimeout = 30 * time.Second
+
+// computeInfraPlan is the indirection seam through which apply dispatches
+// the diff plan. Defaults to platform.ComputePlan; tests override it to
+// observe the provider arg without standing up a real gRPC plugin
+// (mirroring resolveIaCProvider/loadIaCPlugin in deploy_providers.go).
+var computeInfraPlan = platform.ComputePlan
+
+// applyV2ApplyPlanFn is the indirection seam through which apply
+// dispatches the v2 path (wfctlhelpers.ApplyPlan). Defaults to the
+// production helper; tests override it to assert routing decisions
+// without standing up a real plugin or executing real driver calls.
+// Same var-seam pattern as computeInfraPlan / resolveIaCProvider.
+var applyV2ApplyPlanFn = wfctlhelpers.ApplyPlan
 
 // hasInfraModules reports whether cfgFile contains any modules with the new
 // infra.* type prefix. Used by runInfraApply to select the dispatch path:
@@ -346,8 +360,13 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		return err
 	}
 
-	// Compute the diff plan locally (provider-agnostic).
-	plan, err := platform.ComputePlan(specs, current)
+	// Compute the diff plan via the loaded provider so platform.ComputePlan
+	// can dispatch ResourceDriver.Diff over the live plugin process for
+	// honest Replace-action classification (T3.6e). Indirected through
+	// computeInfraPlan so tests can spy on the provider arg without
+	// standing up a real gRPC plugin (var-seam pattern matches
+	// resolveIaCProvider/loadIaCPlugin in deploy_providers.go).
+	plan, err := computeInfraPlan(ctx, provider, specs, current)
 	if err != nil {
 		return fmt.Errorf("compute plan: %w", err)
 	}
@@ -369,7 +388,32 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// we log and continue rather than blocking the apply.
 	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
-	result, err := provider.Apply(ctx, &plan)
+
+	// W-3b T3.7: branch on the loaded plugin's manifest. Providers
+	// declaring iacProvider.computePlanVersion: v2 in plugin.json route
+	// through wfctlhelpers.ApplyPlan (Replace + drift postcondition);
+	// everything else takes the legacy provider.Apply path. NO env-var
+	// gate (rev2/rev3 fix per cycle-2 — there is no transitional
+	// WFCTL_USE_V2_APPLY); the choice is plugin-author-controlled at
+	// load time and surfaced via the optional
+	// wfctlhelpers.ComputePlanVersionDeclarer interface.
+	var result *interfaces.ApplyResult
+	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
+		result, err = applyV2ApplyPlanFn(ctx, provider, &plan)
+		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
+		// v2 dispatch is the production caller that surfaces input
+		// drift to the operator. Run on success OR partial failure
+		// (the operator most needs the drift diagnostic when an apply
+		// fails — "which input went stale during the failed apply?"
+		// — so we print whenever a result was produced rather than
+		// gating on err == nil). Silently no-ops when the report is
+		// empty, so unconditional-on-result-non-nil is safe.
+		if result != nil {
+			printDriftReportIfAny(w, result)
+		}
+	} else {
+		result, err = provider.Apply(ctx, &plan)
+	}
 	if err != nil {
 		// Derive the most specific resource ref we can for troubleshooting.
 		// Single-action plans give us an exact resource; multi-resource plans
