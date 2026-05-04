@@ -28,16 +28,15 @@ import (
 //     spec is returned unmodified (strict contract — partial-state
 //     spec must not be returned to callers).
 //
-// Smoke=false, RequiresCloud=true per design table row 7. The
-// parenthetical "(smoke variant: mock-only)" in the plan reflects
-// that the assertion is against jitsubst directly — real provider
-// plugins exercise the same scenario via conformance.Run with
-// LiveCloud=true; the in-tree self-test enables LiveCloud so the
-// scenario fires against the configured fake.
-//
-// cfg.Provider is required by Run's validateConfig precondition but
-// is intentionally NOT invoked here; the scenario exercises pure
-// platform substitution.
+// Smoke=false, RequiresCloud=false per round-3 review correction. The
+// design table row 7 originally listed RequiresCloud=true, but this
+// scenario is a pure in-process check against jitsubst.ResolveSpec
+// and never calls cfg.Provider() or any cloud API. Marking it cloud-
+// only would silently skip the ${module.field} resolution contract
+// in non-cloud runs (runWithScenarios skips RequiresCloud=true when
+// LiveCloud=false), reducing offline coverage. The scenario stays in
+// the suite's offline lane so local + non-cloud full-suite runs
+// observe the JIT contract.
 func scenarioInfraOutputCrossModuleResolution(t *testing.T, _ Config) {
 	t.Helper()
 
@@ -97,7 +96,7 @@ func init() {
 	register(Scenario{
 		Name:          "Scenario_InfraOutputCrossModuleResolution",
 		Smoke:         false,
-		RequiresCloud: true,
+		RequiresCloud: false,
 		Run:           scenarioInfraOutputCrossModuleResolution,
 	})
 }

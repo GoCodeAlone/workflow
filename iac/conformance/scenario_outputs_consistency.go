@@ -84,6 +84,14 @@ func scenarioOutputsConsistencyAcrossReadCycles(t *testing.T, cfg Config) {
 		t.Errorf("ProviderID drift between consecutive Reads: first=%q second=%q",
 			first.ProviderID, second.ProviderID)
 	}
+	// Status must also be stable across consecutive reads — the comment
+	// header advertises this contract, and a provider whose Status flips
+	// between Reads (e.g., transient "syncing" → "ready" without state
+	// mutation) would break Refresh's no-op detection downstream.
+	if first.Status != second.Status {
+		t.Errorf("Status drift between consecutive Reads: first=%q second=%q",
+			first.Status, second.Status)
+	}
 }
 
 func init() {

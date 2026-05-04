@@ -175,11 +175,24 @@ jobs:
             --json number \
             --jq '.[0].number // empty')
           if [[ -n "${EXISTING}" ]]; then
-            # paginate over comments; count those created today.
+            # Paginate over comments; count those created today.
+            #
+            # IMPORTANT: --paginate runs the --jq filter PER PAGE, so a
+            # `... | length` inside --jq emits one length per page and
+            # would yield a multi-line string once the issue paginates
+            # (every 30 comments by default). Bash arithmetic on a
+            # multi-line string fails with "syntax error in expression"
+            # exactly when the scrubber is most needed (sustained-leak
+            # incident has accumulated comments). Mitigation: extract
+            # one created_at line per matching comment, then count the
+            # resulting lines via wc -l. This survives any number of
+            # pages because wc operates on the merged stream.
             COMMENTS_TODAY=$(gh api \
               "repos/${GITHUB_REPOSITORY}/issues/${EXISTING}/comments" \
               --paginate \
-              --jq "[.[] | select(.created_at >= \"${TODAY}T00:00:00Z\")] | length")
+              --jq ".[] | select(.created_at >= \"${TODAY}T00:00:00Z\") | .created_at" \
+              | wc -l \
+              | tr -d ' ')
             # Include the issue creation itself if it was today
             # (covers the first-detection-of-day case where there
             # are 0 comments yet but 1 scrub event has fired).

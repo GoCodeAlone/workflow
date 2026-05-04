@@ -16,15 +16,17 @@ import (
 //   - Without override → error, names the resource, surfaces hint.
 //   - With override   → no error, dispatch unblocks.
 //
-// Smoke=false, RequiresCloud=true per design table row 9. The
-// "RequiresCloud" gate matches the plan literal even though the
-// in-process check itself does not touch cloud — real provider
-// plugins running this scenario commonly pair it with a live replace
-// to confirm the cloud-side outcome of the override.
-//
-// cfg.Provider is required by Run's validateConfig precondition but
-// is intentionally NOT invoked here; the scenario exercises pure
-// platform-side gate logic via wfctlhelpers.
+// Smoke=false, RequiresCloud=false per round-3 review correction. The
+// design table row 9 originally listed RequiresCloud=true to align
+// with cloud-side replace verification, but this scenario is a pure
+// in-process check against wfctlhelpers.ValidateAllowReplaceProtected
+// and never calls cfg.Provider(). Marking it cloud-only would silently
+// skip one of the non-cloud gate contracts in offline / local runs
+// (runWithScenarios skips RequiresCloud=true when LiveCloud=false).
+// Real provider plugins that want to additionally confirm the cloud-
+// side outcome of the override are encouraged to layer their own
+// scenario on top; this one stays in the offline lane so the gate
+// logic is exercised on every run.
 func scenarioProtectedReplaceWithOverride(t *testing.T, _ Config) {
 	t.Helper()
 
@@ -65,7 +67,7 @@ func init() {
 	register(Scenario{
 		Name:          "Scenario_ProtectedReplaceWithOverride",
 		Smoke:         false,
-		RequiresCloud: true,
+		RequiresCloud: false,
 		Run:           scenarioProtectedReplaceWithOverride,
 	})
 }
