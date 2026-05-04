@@ -20,6 +20,16 @@ import (
 // scanned just like any other map: their ${VAR} literals are kept verbatim
 // in the persisted plan but the plan-time fingerprint of the underlying env
 // var is still recorded so apply-time drift is detectable.
+//
+// LIMITATION (tracked, not addressed in W-1): top-level
+// environments[env].envVars defaults that planResourcesForEnv merges into
+// container-style modules are NOT applied here. References that originate
+// solely from a top-level envVars default (without appearing in the
+// module's own Config map) won't appear in InputSnapshot, so plan-stale
+// drift detection will miss those vars changing between plan and apply.
+// Closing the gap requires reusing planResourcesForEnv's merge logic
+// before walkValueForEnvRefs; deferred to a follow-up that can extend
+// ResolveForEnv to expose the merged form.
 func collectInfraEnvVarRefs(cfgFile, envName string) ([]string, error) {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
