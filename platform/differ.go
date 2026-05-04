@@ -95,13 +95,18 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 	}
 	var candidates []modCandidate
 	for _, spec := range desired {
-		// Use configHashErr so a non-marshalable spec.Config doesn't
-		// collapse to the constant sha256("") hash silently. The
-		// returned hash is stored on the action either way (legacy
-		// callers compare ResolvedConfigHash on YAML-derived configs
-		// where marshal can't fail), but the hashable flag gates
-		// cache participation for the modification path.
+		// Use configHashErr to detect non-marshalable spec.Config values
+		// so we can bypass the diff-cache for those resources. For the
+		// stored ResolvedConfigHash we fall back to the legacy
+		// configHash (sha256-of-best-effort) when configHashErr fails;
+		// that preserves byte-for-byte stability with any persisted
+		// plans + ConfigHash values produced under the pre-T3.6
+		// implementation, while the hashable flag gates cache
+		// participation for the modification path.
 		hash, hashErr := configHashErr(spec.Config)
+		if hashErr != nil {
+			hash = configHash(spec.Config)
+		}
 		if rs, exists := currentMap[spec.Name]; !exists {
 			creates = append(creates, interfaces.PlanAction{
 				Action:             "create",
@@ -514,17 +519,35 @@ func ConfigHash(config map[string]any) string {
 // configHash IGNORES json.Marshal errors. If the config contains a value
 // json.Marshal cannot encode (channels, functions, cycles, custom types
 // with broken MarshalJSON), this collapses to the constant
-// sha256("") hash. That is fine for the legacy callers that compare
-// hashes for "did anything change" semantics on YAML-derived configs
+// sha256(<nil>) = e3b0c4429... hash. That preserves the legacy "did
+// anything change" comparison semantics for YAML-derived configs
 // (YAML can't express those types, so the failure mode is unreachable
-// in practice for those callers). Cache-key callers MUST use
-// configHashErr instead — collapsing all unmarshalable inputs to the
-// same constant hash would cause cache-key collisions and let two
+// in practice for those callers) and keeps the exported ConfigHash
+// byte-for-byte stable against any persisted ResolvedConfigHash values
+// computed under the pre-T3.6 implementation. Cache-key callers MUST
+// use configHashErr instead — collapsing all unmarshalable inputs to
+// the same constant hash would cause cache-key collisions and let two
 // genuinely-different resources serve each other's cached DiffResult.
 // See the differ.go:235 comment block for the cache-bypass plumbing.
 func configHash(config map[string]any) string {
-	h, _ := configHashErr(config)
-	return h
+	if len(config) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	type kv struct {
+		K string
+		V any
+	}
+	ordered := make([]kv, len(keys))
+	for i, k := range keys {
+		ordered[i] = kv{K: k, V: config[k]}
+	}
+	data, _ := json.Marshal(ordered)
+	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
 // configHashErr is the error-aware variant of configHash, used by the

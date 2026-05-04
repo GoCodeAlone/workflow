@@ -629,11 +629,15 @@ func TestComputePlan_UnhashableInputs_BypassCache(t *testing.T) {
 
 // TestConfigHashErr_PropagatesMarshalFailure is a unit-level pin for
 // configHashErr. Marshalable inputs return (hash, nil); a non-
-// marshalable value (channel) returns ("", non-nil-err). Backward
-// compatibility: the un-suffixed configHash returns the empty hash
-// for the same input (silently swallowing the error, as documented
-// in its docstring; legacy callers operating on YAML-derived configs
-// don't reach this path).
+// marshalable value (channel) returns ("", non-nil-err) so cache-key
+// callers can deterministically bypass the cache.
+//
+// Backward compatibility: the un-suffixed configHash silently swallows
+// the marshal error and returns the sha256-of-best-effort-bytes hash
+// (matches the pre-T3.6 implementation byte-for-byte) so any persisted
+// ResolvedConfigHash / ConfigHash values computed under the old
+// behavior stay stable. configHashErr is the strict variant that must
+// be used for cache keys; configHash is the legacy ABI.
 func TestConfigHashErr_PropagatesMarshalFailure(t *testing.T) {
 	good := map[string]any{"region": "nyc3", "size": 4}
 	gotHash, gotErr := configHashErr(good)
@@ -653,9 +657,15 @@ func TestConfigHashErr_PropagatesMarshalFailure(t *testing.T) {
 		t.Errorf("configHashErr(bad): hash = %q, want empty string when err != nil", gotHash)
 	}
 
-	// Backward-compatible wrapper: configHash silently returns "" for
-	// the same bad input (legacy contract; documented in its docstring).
-	if got := configHash(bad); got != "" {
-		t.Errorf("configHash(bad) = %q, want empty string (backward-compat: errors swallowed)", got)
+	// Backward-compatible wrapper: configHash returns the legacy
+	// sha256-of-best-effort hash for unmarshalable inputs (matches the
+	// pre-T3.6 implementation byte-for-byte; cache callers MUST use
+	// configHashErr instead). The exact value here is sha256(nil),
+	// which is what json.Marshal followed by sha256.Sum256 produces
+	// when Marshal returns nil + err.
+	got := configHash(bad)
+	const sha256OfNil = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if got != sha256OfNil {
+		t.Errorf("configHash(bad) = %q, want %q (legacy sha256(nil) — pre-T3.6 byte-for-byte stability)", got, sha256OfNil)
 	}
 }
