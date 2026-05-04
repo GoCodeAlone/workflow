@@ -1,0 +1,97 @@
+name: Conformance Budget Check
+
+# Reusable kill-switch workflow. Smoke jobs in conformance-smoke.yml call
+# this BEFORE provisioning any cloud resource so a runaway burn rate
+# stops new PR jobs from compounding the spend. The cap is enforced
+# against month-to-date usage on the dedicated wfctl-conformance@
+# DigitalOcean account (no production resources colocated). Approved
+# 2026-05-03 by jon@langevin.me — see docs/conformance-runbook.md
+# § "Budget approval" for the source-of-truth entry.
+
+on:
+  workflow_call:
+    secrets:
+      DO_CONFORMANCE_API_TOKEN:
+        description: >
+          Long-lived DO API token scoped to the wfctl-conformance account.
+          Rotated quarterly per docs/conformance-runbook.md § "Token rotation".
+          Stored in GitHub Actions repository secret. NEVER echo or log this
+          value — the script body references it via env block only.
+        required: true
+
+permissions:
+  contents: read
+  issues: write  # for soft-alert auto-filed issue at $15/mo (T7.14 helper)
+
+# Per-PR-base-SHA cache keying collapses N smoke jobs/PR into 1 budget
+# API call per hour. cancel-in-progress=true so a stacked PR series
+# does not block on duplicate budget checks. The base-sha grouping
+# matches the cache key so concurrency + cache cooperate cleanly.
+concurrency:
+  group: budget-check-${{ github.event.pull_request.base.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  check-budget:
+    name: Pre-flight budget check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out workflow repo
+        uses: actions/checkout@v4
+
+      # Compute the hour-bucket as a step output so the cache step
+      # can reference it. Hourly TTL: same PR series re-checking
+      # within an hour reuses the cached balance result.
+      - name: Compute hour bucket
+        id: hour
+        run: echo "value=$(date -u +%Y%m%d%H)" >> "$GITHUB_OUTPUT"
+
+      # actions/cache@v4 does post-step write-back automatically:
+      # if cache-hit is false, the action records the path's contents
+      # at job-end and uploads under this key for the next run on the
+      # same key. No explicit upload-cache step is needed.
+      - name: Restore budget result cache
+        id: budget-cache
+        uses: actions/cache@v4
+        with:
+          key: budget-${{ github.event.pull_request.base.sha || github.sha }}-${{ steps.hour.outputs.value }}
+          path: /tmp/budget-result.json
+
+      - name: Fetch DO month-to-date balance
+        if: steps.budget-cache.outputs.cache-hit != 'true'
+        env:
+          DO_CONFORMANCE_API_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Token is referenced via env, never via echo / log.
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer ${DO_CONFORMANCE_API_TOKEN}" \
+            "https://api.digitalocean.com/v2/customers/my/balance" \
+            > /tmp/budget-result.json
+
+      - name: Enforce budget caps
+        run: |
+          set -euo pipefail
+          SPEND=$(jq -r '.month_to_date_usage // "0"' /tmp/budget-result.json)
+          echo "month_to_date_usage=${SPEND}" >> "$GITHUB_STEP_SUMMARY"
+
+          # Hard stop at $25/mo. Operators authorize raises by
+          # updating docs/conformance-runbook.md § "Budget approval"
+          # AND landing a follow-up PR that bumps the threshold here.
+          if awk "BEGIN { exit !(${SPEND} > 25) }"; then
+            echo "::error title=Budget exceeded::Conformance month-to-date $${SPEND} > $25 cap; aborting before any cloud provisioning"
+            exit 1
+          fi
+
+          # Soft alert at $15/mo (60% of cap). Files (or appends to)
+          # an auto-dedup issue via the T7.14 helper. Dedup logic in
+          # scripts/file-or-comment-leak-issue.sh.
+          if awk "BEGIN { exit !(${SPEND} > 15) }"; then
+            echo "::warning title=Budget approaching cap::Conformance month-to-date $${SPEND} > $15 soft-alert (60% of $25 cap)"
+            if [[ -x .github/workflows/scripts/file-or-comment-leak-issue.sh ]]; then
+              .github/workflows/scripts/file-or-comment-leak-issue.sh \
+                "${SPEND}" "Spend approaching cap"
+            else
+              echo "::notice::T7.14 helper script not yet installed; skipping auto-issue file"
+            fi
+          fi
