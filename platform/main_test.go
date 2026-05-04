@@ -18,6 +18,13 @@ import (
 // noop backend per-test via setDiffCacheForTest with a controlled
 // in-memory cache, then restore the noop backend on cleanup.
 func TestMain(m *testing.M) {
+	// Unset WFCTL_PLAN_DIFF_CONCURRENCY so tests that exercise
+	// ComputePlan's parallel Diff dispatch observe the default
+	// concurrency. A developer-shell override (e.g., =1) would
+	// serialize dispatch and break the parallelism assertions.
+	if err := os.Unsetenv("WFCTL_PLAN_DIFF_CONCURRENCY"); err != nil {
+		panic("unsetenv WFCTL_PLAN_DIFF_CONCURRENCY: " + err.Error())
+	}
 	if err := os.Setenv("WFCTL_DIFFCACHE", "disabled"); err != nil {
 		panic("setenv WFCTL_DIFFCACHE: " + err.Error())
 	}
