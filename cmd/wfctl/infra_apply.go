@@ -44,6 +44,12 @@ func printDriftReportIfAny(w io.Writer, result *interfaces.ApplyResult) {
 // infra apply fails. Kept separate so tests can override it.
 var infraApplyTroubleshootTimeout = 30 * time.Second
 
+// computeInfraPlan is the indirection seam through which apply dispatches
+// the diff plan. Defaults to platform.ComputePlan; tests override it to
+// observe the provider arg without standing up a real gRPC plugin
+// (mirroring resolveIaCProvider/loadIaCPlugin in deploy_providers.go).
+var computeInfraPlan = platform.ComputePlan
+
 // hasInfraModules reports whether cfgFile contains any modules with the new
 // infra.* type prefix. Used by runInfraApply to select the dispatch path:
 // direct IaCProvider path for infra.* configs, pipeline path for legacy
@@ -346,12 +352,13 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		return err
 	}
 
-	// Compute the diff plan locally (provider-agnostic). T3.6c will replace
-	// the nil provider with the live `provider` handle so platform.ComputePlan
-	// can dispatch ResourceDriver.Diff over the loaded plugin process; until
-	// that commit lands, nil keeps the legacy ConfigHash compare path active
-	// and the package compilable.
-	plan, err := platform.ComputePlan(ctx, nil, specs, current)
+	// Compute the diff plan via the loaded provider so platform.ComputePlan
+	// can dispatch ResourceDriver.Diff over the live plugin process for
+	// honest Replace-action classification (T3.6e). Indirected through
+	// computeInfraPlan so tests can spy on the provider arg without
+	// standing up a real gRPC plugin (var-seam pattern matches
+	// resolveIaCProvider/loadIaCPlugin in deploy_providers.go).
+	plan, err := computeInfraPlan(ctx, provider, specs, current)
 	if err != nil {
 		return fmt.Errorf("compute plan: %w", err)
 	}
