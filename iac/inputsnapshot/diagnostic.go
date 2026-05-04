@@ -15,7 +15,7 @@ import (
 //	plan stale: %d input(s) changed since plan
 //	  KEY1: fingerprint planFP1 (plan) → applyFP1 (apply)
 //	  KEY2: fingerprint planFP2 (plan) → applyFP2 (apply)
-//	  hint: ensure all env vars referenced by infra.yaml are exported to both Plan and Apply steps
+//	  hint: ensure all env vars referenced by your infra config are exported to both Plan and Apply steps
 //
 // Drift entries are sorted by Name for deterministic output. An empty drift
 // report yields the singular header line "plan stale: 0 input(s) changed since
@@ -32,7 +32,7 @@ func FormatStaleError(drift []interfaces.DriftEntry) string {
 		fmt.Fprintf(&b, "  %s: fingerprint %s (plan) → %s (apply)\n", d.Name, d.PlanFingerprint, d.ApplyFingerprint)
 	}
 	if len(sorted) > 0 {
-		b.WriteString("  hint: ensure all env vars referenced by infra.yaml are exported to both Plan and Apply steps")
+		b.WriteString("  hint: ensure all env vars referenced by your infra config are exported to both Plan and Apply steps")
 	}
 	return b.String()
 }
