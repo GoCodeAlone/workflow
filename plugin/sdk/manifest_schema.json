@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/GoCodeAlone/workflow/plugin/sdk/manifest_schema.json",
   "title": "Plugin SDK manifest",
-  "description": "Schema for the SDK-level plugin manifest (plugin.json) consumed by wfctl. Pure-additive; existing manifests without iacProvider remain valid.",
+  "description": "Schema for the SDK-level plugin manifest (plugin.json) consumed by wfctl. Pure-additive; existing manifests without iacProvider remain valid. The root object permits additional properties so existing plugin.json files (with name/version/author/etc.) parse cleanly. The iacProvider sub-object is strict so typos like 'computeplanversion' or unknown keys are rejected at parse time, not silently downgraded to v1 dispatch.",
   "type": "object",
   "properties": {
     "name": {
@@ -11,6 +11,7 @@
     "iacProvider": {
       "type": "object",
       "description": "IaC-provider-specific manifest fields. Only present for plugins that implement the IaCProvider interface.",
+      "additionalProperties": false,
       "properties": {
         "computePlanVersion": {
           "type": "string",

@@ -12,6 +12,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -27,8 +28,11 @@ var manifestSchemaJSON []byte
 // SDK manifests. Exported for plugin authors and external tooling that
 // want to validate plugin.json without depending on this package's
 // ParseManifest entry point.
+//
+// Returns a copy so callers cannot mutate the embedded schema; the
+// underlying slice from //go:embed is technically writable.
 func ManifestSchemaJSON() []byte {
-	return manifestSchemaJSON
+	return bytes.Clone(manifestSchemaJSON)
 }
 
 // Manifest captures the SDK-level fields wfctl reads from plugin.json.
@@ -70,30 +74,41 @@ func (p IaCProvider) EffectiveComputePlanVersion() string {
 // compiledSchema is the parsed manifest schema. It is compiled lazily on
 // first ParseManifest call and cached for the process lifetime; the schema
 // is embedded and immutable, so a single compilation is correct.
-var compiledSchema *jsonschema.Schema
+//
+// The compilation is guarded by sync.Once so concurrent callers cannot race
+// on the cache pointer or on the jsonschema compiler's internal state. Both
+// the success result and the error are captured so subsequent calls return
+// the same outcome without re-compiling.
+var (
+	compiledSchema     *jsonschema.Schema
+	compiledSchemaErr  error
+	compiledSchemaOnce sync.Once
+)
 
-// loadSchema compiles manifestSchemaJSON. Returns the compiled schema or
-// an error wrapping the underlying compile failure. Separate function so
-// failures surface with a clear "schema bug" diagnostic rather than as a
-// generic "ParseManifest failed."
+// loadSchema compiles manifestSchemaJSON exactly once per process. Returns
+// the compiled schema or an error wrapping the underlying compile failure
+// (so failures surface with a clear "schema bug" diagnostic rather than as
+// a generic "ParseManifest failed").
 func loadSchema() (*jsonschema.Schema, error) {
-	if compiledSchema != nil {
-		return compiledSchema, nil
-	}
-	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(manifestSchemaJSON))
-	if err != nil {
-		return nil, fmt.Errorf("sdk manifest schema: unmarshal: %w", err)
-	}
-	c := jsonschema.NewCompiler()
-	if err := c.AddResource("manifest.json", doc); err != nil {
-		return nil, fmt.Errorf("sdk manifest schema: add resource: %w", err)
-	}
-	s, err := c.Compile("manifest.json")
-	if err != nil {
-		return nil, fmt.Errorf("sdk manifest schema: compile: %w", err)
-	}
-	compiledSchema = s
-	return s, nil
+	compiledSchemaOnce.Do(func() {
+		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(manifestSchemaJSON))
+		if err != nil {
+			compiledSchemaErr = fmt.Errorf("sdk manifest schema: unmarshal: %w", err)
+			return
+		}
+		c := jsonschema.NewCompiler()
+		if err := c.AddResource("manifest.json", doc); err != nil {
+			compiledSchemaErr = fmt.Errorf("sdk manifest schema: add resource: %w", err)
+			return
+		}
+		s, err := c.Compile("manifest.json")
+		if err != nil {
+			compiledSchemaErr = fmt.Errorf("sdk manifest schema: compile: %w", err)
+			return
+		}
+		compiledSchema = s
+	})
+	return compiledSchema, compiledSchemaErr
 }
 
 // ParseManifest validates raw plugin.json bytes against the SDK schema and
