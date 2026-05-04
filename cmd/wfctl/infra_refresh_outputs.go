@@ -230,10 +230,14 @@ func refreshOneProviderGroup(
 	}
 	for j, idx := range idxs {
 		fresh := refreshed[j]
-		// reflect.DeepEqual handles non-comparable nested values
-		// (slices, maps, structs) that the Outputs maps can carry from
-		// real cloud APIs. A `==` compare on `any` panics for those.
-		if reflect.DeepEqual(states[idx].Outputs, fresh.Outputs) {
+		// refreshoutputs.Refresh has already done the deep-equality check:
+		// it preserves the original Outputs map (same header) when nothing
+		// changed and only allocates a fresh map when fields differ. A
+		// pointer-equality check on the map header is therefore sufficient
+		// — and avoids re-walking nested slices/maps that real cloud
+		// outputs carry. nil ↔ nil compares equal (both .Pointer() == 0)
+		// which is the correct unchanged-case answer.
+		if reflect.ValueOf(states[idx].Outputs).Pointer() == reflect.ValueOf(fresh.Outputs).Pointer() {
 			continue
 		}
 		states[idx] = fresh
