@@ -136,8 +136,11 @@ func (p *NoopProvider) Close() error { return nil }
 
 // NoopDriver is a minimal interfaces.ResourceDriver whose Diff method
 // returns DiffResult (or DiffErr when set) and tracks call count so
-// cache-hit tests can assert deduplication. Other methods return zero
-// values.
+// cache-hit tests can assert deduplication. Other lifecycle methods
+// (Delete) also bump per-method counters so dispatch-coverage tests
+// (notably iac/conformance/scenario_delete_action.go) can pin
+// driver-side invocation. Methods without an explicit counter return
+// zero values.
 type NoopDriver struct {
 	// DiffResult is returned from Diff(). When nil with DiffErr also nil,
 	// callers receive the plain (nil, nil) shape (treated by ComputePlan
@@ -148,10 +151,21 @@ type NoopDriver struct {
 	// DiffResult.
 	DiffErr error
 
+	// DeleteErr is returned from Delete() when set. The default zero
+	// value (nil) makes Delete a no-op success — matching the rest of
+	// the NoopDriver shape.
+	DeleteErr error
+
 	// DiffCallCount is bumped on every Diff invocation. Exposed via
 	// atomic.Int64 so cache-hit tests under -race do not need separate
 	// synchronization.
 	DiffCallCount atomic.Int64
+
+	// DeleteCallCount is bumped on every Delete invocation. Exposed via
+	// atomic.Int64 so dispatch-coverage tests (e.g.,
+	// iac/conformance/scenarios_test.go) under -race can assert
+	// driver.Delete was invoked without separate synchronization.
+	DeleteCallCount atomic.Int64
 }
 
 // Compile-time interface conformance check.
@@ -172,8 +186,15 @@ func (d *NoopDriver) Update(_ context.Context, _ interfaces.ResourceRef, _ inter
 	return nil, nil
 }
 
-// Delete returns nil.
-func (d *NoopDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+// Delete bumps DeleteCallCount and returns DeleteErr (nil by default).
+// The counter is the dispatch-coverage hook used by conformance
+// scenarios that need to assert the v2 apply path actually reached
+// driver.Delete (closing the latent gap from T3.3 where DOProvider's
+// case-arm-less dispatch silently skipped Delete).
+func (d *NoopDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
+	d.DeleteCallCount.Add(1)
+	return d.DeleteErr
+}
 
 // Diff bumps DiffCallCount and returns the configured DiffResult/DiffErr
 // pair (DiffErr takes precedence when non-nil).

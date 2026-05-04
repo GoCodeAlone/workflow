@@ -148,6 +148,39 @@ func TestScenario_NeedsReplaceTriggersReplaceAction(t *testing.T) {
 	scenarioNeedsReplaceTriggersReplaceAction(t, cfg)
 }
 
+// TestScenario_DeleteActionInApplyInvokesDriverDelete is the in-tree
+// self-test for T7.3: invokes the scenario body directly against a fake
+// provider whose Driver bumps DeleteCallCount on every Delete invocation,
+// asserting the v2 ApplyPlan dispatch reaches driver.Delete for a delete
+// action. This pins the latent-bug-fix from T3.3 — pre-W-3a, DOProvider's
+// case-arm-less Apply silently skipped Delete on state-prune actions.
+//
+// The scenario body itself only asserts portable invariants
+// (no per-action error in result.Errors, result.Resources unchanged). The
+// driver-dispatch invariant is observed here in the self-test because it
+// requires a counter the scenario body cannot portably introspect; for
+// real provider plugins the equivalent observation is the cloud
+// resource being gone (Read-after-delete returns 404), which the smoke
+// gate in T7.13 covers.
+func TestScenario_DeleteActionInApplyInvokesDriverDelete(t *testing.T) {
+	// Share one driver instance across cfg.Provider() calls so the
+	// post-check sees the count incremented by the scenario's
+	// ApplyPlan dispatch. iactest.NoopProvider holds the driver by
+	// pointer, so wrapping the same *NoopDriver in a fresh
+	// NoopProvider per call still routes Diff/Delete/Read into the
+	// shared counter.
+	driver := &iactest.NoopDriver{}
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &iactest.NoopProvider{Driver: driver}
+		},
+	}
+	scenarioDeleteActionInApplyInvokesDriverDelete(t, cfg)
+	if got := driver.DeleteCallCount.Load(); got != 1 {
+		t.Errorf("driver.Delete should be invoked exactly once for a single delete action; got %d (pre-T3.3 dispatch silently skipped delete — this regression-pins the v2 fix)", got)
+	}
+}
+
 // TestRun_ConsecutiveRunsObserveLiveDriverIndependently is the
 // regression-pin for the W-7 follow-up that exported
 // platform.SetDiffCacheForTest. Before the fix, conformance scenarios
