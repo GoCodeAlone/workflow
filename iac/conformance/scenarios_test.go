@@ -402,6 +402,17 @@ func TestScenario_InfraOutputCrossModuleResolution(t *testing.T) {
 	scenarioInfraOutputCrossModuleResolution(t, cfg)
 }
 
+// TestScenario_ProtectedReplaceWithoutOverride is the in-tree self-test
+// for T7.9: invokes the scenario body. The body uses
+// wfctlhelpers.ValidateAllowReplaceProtected directly, so the fake
+// provider exists only to satisfy Run's validateConfig precondition.
+func TestScenario_ProtectedReplaceWithoutOverride(t *testing.T) {
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider { return &iactest.NoopProvider{} },
+	}
+	scenarioProtectedReplaceWithoutOverride(t, cfg)
+}
+
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
 // by each scenario_<name>.go init() in T7.2-T7.12. The test save/restores
 // the package-level registry so it does not leak state to other tests.
