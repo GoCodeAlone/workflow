@@ -235,9 +235,30 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 	return nil
 }
 
-// doReplace is the T3.1 skeleton — Delete + Create. T3.4 fills in the
-// ReplaceIDMap propagation so dependent resources can pick up the new
-// ProviderID via JIT substitution in W-5.
+// doReplace decomposes a Replace action into Delete-then-Create on the
+// driver and propagates the new ProviderID through
+// result.ReplaceIDMap[action.Resource.Name] so JIT substitution in W-5
+// can patch dependent resources whose configs reference the replaced
+// resource by name.
+//
+// Failure semantics:
+//   - Delete fails → return wrapped "replace: delete: <err>"; Create
+//     does NOT run; ReplaceIDMap is NOT populated for this resource.
+//   - Delete succeeds, Create fails → return wrapped
+//     "replace: create: <err>"; ReplaceIDMap stays empty for this
+//     resource. Operators inspect the apply log + the empty-for-this-
+//     name slot in ReplaceIDMap to know which resources are in a
+//     half-replaced state and need manual cloud restoration.
+//   - Both succeed → result.Resources gets the new output appended,
+//     result.ReplaceIDMap[action.Resource.Name] = new ProviderID. Map
+//     is lazily-initialized on first successful Replace so plans with
+//     no Replace actions don't carry an empty map through serialisation.
+//
+// The "replace: ..." prefix is essential because Replace decomposes
+// into two driver calls — without it, an operator reading
+// result.Errors couldn't tell whether the Delete or the Create failed.
+// Other sub-functions (doCreate non-recovery path, doUpdate, doDelete)
+// pass driver errors through unchanged.
 func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
 	if err := d.Delete(ctx, refFromAction(action)); err != nil {
 		return fmt.Errorf("replace: delete: %w", err)
@@ -248,6 +269,15 @@ func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfac
 	}
 	if out != nil {
 		result.Resources = append(result.Resources, *out)
+		// Lazy-init: only allocate the map when there's an actual
+		// entry to record. ApplyResult.ReplaceIDMap stays nil for
+		// plans with no Replace actions, which the omitempty JSON tag
+		// then drops from the encoded form (covered by
+		// TestApplyResult_OmitEmptyContract in interfaces/iac_state_test.go).
+		if result.ReplaceIDMap == nil {
+			result.ReplaceIDMap = make(map[string]string)
+		}
+		result.ReplaceIDMap[action.Resource.Name] = out.ProviderID
 	}
 	return nil
 }
