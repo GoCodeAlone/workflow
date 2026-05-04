@@ -148,3 +148,55 @@ type DriftResult struct {
 	Actual   map[string]any `json:"actual,omitempty"`
 	Fields   []string       `json:"fields,omitempty"` // which fields drifted
 }
+
+// PlanDiagnosticSeverity classifies the severity of a plan-validation
+// PlanDiagnostic returned by a provider that implements ProviderValidator.
+// Strict align runs treat PlanDiagnosticError as a FAIL; Warning and Info are
+// advisory.
+//
+// Note: distinct from the unrelated Troubleshooter Diagnostic type
+// (iac_resource_driver.go), which describes runtime/deploy events. The plan
+// spec for T4.1 originally proposed `Diagnostic` for the plan-validation type;
+// renamed to PlanDiagnostic to remain purely additive (W-4 contract) without
+// disturbing existing Troubleshooter consumers.
+type PlanDiagnosticSeverity int
+
+const (
+	// PlanDiagnosticInfo is purely informational — surfaced to the user but
+	// never fails an align run.
+	PlanDiagnosticInfo PlanDiagnosticSeverity = iota
+	// PlanDiagnosticWarning flags a likely-misconfiguration that does not
+	// block apply but should be reviewed (advisory under --strict).
+	PlanDiagnosticWarning
+	// PlanDiagnosticError indicates a constraint violation that the provider
+	// would reject at apply time. Fails an align run under --strict.
+	PlanDiagnosticError
+)
+
+// PlanDiagnostic is a single finding emitted by a ProviderValidator
+// implementation against an IaCPlan. PlanDiagnostics surface cross-resource
+// constraints (e.g. a database referencing an unknown VPC) at plan time rather
+// than at the provider's API call.
+type PlanDiagnostic struct {
+	// Severity is Error|Warning|Info; see PlanDiagnosticSeverity.
+	Severity PlanDiagnosticSeverity `json:"severity"`
+	// Resource is the offending resource name; empty for plan-level findings.
+	Resource string `json:"resource,omitempty"`
+	// Field is a dotted/bracketed field path within Resource (e.g. "vpc_ref"
+	// or "tags[0].key"); empty for resource-level findings.
+	Field string `json:"field,omitempty"`
+	// Message is a human-readable description of the finding.
+	Message string `json:"message"`
+}
+
+// ProviderValidator is an OPTIONAL interface that an IaCProvider implementation
+// MAY also satisfy to expose provider-side cross-resource constraint validation
+// at plan time. Consumers (e.g. R-A10 in cmd/wfctl/infra_align*.go) use a
+// type-assertion to discover whether a given provider implements ValidatePlan;
+// providers that do not implement it continue to work unchanged.
+//
+// ValidatePlan is read-only: it MUST NOT mutate plan and MUST NOT make remote
+// calls. The returned slice may be nil (no diagnostics).
+type ProviderValidator interface {
+	ValidatePlan(plan *IaCPlan) []PlanDiagnostic
+}
