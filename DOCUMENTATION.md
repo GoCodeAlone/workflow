@@ -1814,6 +1814,67 @@ The plugin is auto-registered via `init()` in `plugin/admincore/plugin.go`. No Y
 
 ---
 
+## IaC Provider Plugin Interfaces
+
+Cloud-provider plugins implement the core `interfaces.IaCProvider` Go
+interface (Plan / Apply / Destroy / Status / DetectDrift / etc.) plus,
+optionally, narrower interfaces that the engine and `wfctl` discover via
+type-assertion. Optional interfaces are purely additive — providers that do
+not implement them keep working unchanged.
+
+### `ProviderValidator` (optional)
+
+```go
+package interfaces
+
+type ProviderValidator interface {
+    ValidatePlan(plan *IaCPlan) []PlanDiagnostic
+}
+
+type PlanDiagnostic struct {
+    Severity PlanDiagnosticSeverity // Info | Warning | Error
+    Resource string                 // resource name; "" for plan-level findings
+    Field    string                 // dotted/bracketed field path; "" for resource-level
+    Message  string                 // human-readable description
+}
+
+type PlanDiagnosticSeverity int
+
+const (
+    PlanDiagnosticInfo PlanDiagnosticSeverity = iota
+    PlanDiagnosticWarning
+    PlanDiagnosticError
+)
+```
+
+`ValidatePlan` lets a provider surface cross-resource constraint violations
+at plan time — for example "this `infra.database` references a `vpc_ref`
+that no `infra.vpc` in this plan declares" — instead of failing later at the
+provider's API call. It is read-only: implementations MUST NOT mutate the
+plan and MUST NOT make remote calls. The returned slice may be `nil`.
+
+The CLI consumer is the `R-A10` align rule
+(`cmd/wfctl/infra_align_rules.go::checkRA10_provider_validate_plan`), which
+runs every loaded provider that implements `ProviderValidator` against the
+plan supplied via `wfctl infra align --plan`. Severity mapping:
+
+| `PlanDiagnostic.Severity` | Result |
+|---------------------------|--------|
+| `PlanDiagnosticError` | `FAIL` AlignFinding (always non-zero exit) |
+| `PlanDiagnosticWarning` | `WARN` AlignFinding (non-zero only under `--strict`) |
+| `PlanDiagnosticInfo` | Logged to stderr; no AlignFinding emitted; never affects exit code |
+
+`PlanDiagnosticInfo` is intentionally *not* surfaced as a finding so that
+`--strict` CI gates do not exit non-zero on a purely informational hint
+(billing tier change, deprecation notice, etc.). See `docs/WFCTL.md` §
+`infra align` for the full table.
+
+> **Naming note:** The runtime/deploy event finding type
+> `interfaces.Diagnostic` (used by `interfaces.Troubleshooter`) is a
+> distinct, pre-existing type and is not affected by `PlanDiagnostic`. The
+> two intentionally describe different problem domains (post-apply runtime
+> events vs. pre-apply plan validation).
+
 ## Workflow Types
 
 Workflows are configured in YAML and dispatched by the engine through registered handlers (`handlers/` package):

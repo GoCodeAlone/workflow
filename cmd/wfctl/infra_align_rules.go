@@ -718,6 +718,102 @@ func checkRA9(ctx *alignContext) []AlignFinding {
 	return findings
 }
 
+// ── R-A10: provider.ValidatePlan dispatch ──────────────────────────────────
+
+// ra10LogInfo is the sink used to surface PlanDiagnosticInfo diagnostics
+// without emitting an AlignFinding. The default writes to os.Stderr; tests
+// override this var to capture the log line and assert on it.
+var ra10LogInfo = func(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
+}
+
+// checkRA10_provider_validate_plan iterates the loaded providers, type-asserts
+// each as interfaces.ProviderValidator, calls ValidatePlan(plan) and renders
+// each returned PlanDiagnostic according to its severity tier.
+//
+// Three-tier severity mapping (matches the rev10 plan T4.2 acceptance
+// criteria: "Errors → align failures; Warnings → warnings; Info → logs"):
+//
+//	PlanDiagnosticError   → AlignFinding{Severity: "FAIL"} (always non-zero exit)
+//	PlanDiagnosticWarning → AlignFinding{Severity: "WARN"} (non-zero only under --strict)
+//	PlanDiagnosticInfo    → logged to stderr via ra10LogInfo; NO AlignFinding,
+//	                        never affects exit code (Info exists precisely so a
+//	                        provider can surface a hint without breaking
+//	                        `--strict` CI gates).
+//
+// Resource label: prefer the diagnostic's Resource field; fall back to
+// "<provider-name>:plan" for plan-level findings so the rendered table (and
+// the stderr log line for Info) always identifies the source provider.
+//
+// No-op when plan is nil or providers is empty (matches R-A7's predicate so
+// running `wfctl infra align` without --plan never triggers R-A10).
+//
+// Naming follows the plan T4.2 spec literally; existing rule helpers use the
+// shorter checkRA<N> form, but the descriptive suffix here documents the
+// rule's intent at the call site in infra_align.go.
+func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *interfaces.IaCPlan) []AlignFinding {
+	if plan == nil || len(providers) == 0 {
+		return nil
+	}
+	var findings []AlignFinding
+	for _, p := range providers {
+		v, ok := p.(interfaces.ProviderValidator)
+		if !ok {
+			continue
+		}
+		diags := v.ValidatePlan(plan)
+		for _, d := range diags {
+			// resource: rendered table label (provider-qualified for plan-
+			// level findings so the table always identifies the source).
+			// logResource: log-line identifier; for plan-level findings use
+			// the bare "plan" sentinel so the documented
+			// `R-A10 [info] <provider>/<resource>: ...` format renders as
+			// `<provider>/plan: ...` instead of the redundant
+			// `<provider>/<provider>:plan: ...`.
+			resource := d.Resource
+			logResource := d.Resource
+			if resource == "" {
+				resource = fmt.Sprintf("%s:plan", p.Name())
+				logResource = "plan"
+			}
+			msg := d.Message
+			if d.Field != "" {
+				msg = fmt.Sprintf("%s (field: %s)", d.Message, d.Field)
+			}
+			switch d.Severity {
+			case interfaces.PlanDiagnosticError:
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A10",
+					Severity: "FAIL",
+					Resource: resource,
+					Message:  msg,
+				})
+			case interfaces.PlanDiagnosticWarning:
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A10",
+					Severity: "WARN",
+					Resource: resource,
+					Message:  msg,
+				})
+			case interfaces.PlanDiagnosticInfo:
+				// Info tier: log to stderr; no AlignFinding so exit code
+				// is never affected (even under --strict).
+				ra10LogInfo("R-A10 [info] %s/%s: %s\n", p.Name(), logResource, msg)
+			default:
+				// Unknown severity — treat conservatively as WARN so it
+				// doesn't slip past --strict.
+				findings = append(findings, AlignFinding{
+					Rule:     "R-A10",
+					Severity: "WARN",
+					Resource: resource,
+					Message:  msg,
+				})
+			}
+		}
+	}
+	return findings
+}
+
 // ── utilities ──────────────────────────────────────────────────────────────
 
 // toInt converts an any value to int, handling both int and float64

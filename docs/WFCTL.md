@@ -1218,6 +1218,65 @@ wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
 wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
 ```
 
+#### `infra apply`
+
+Reconcile cloud infrastructure to match the desired state declared in the config. Computes a diff plan via each `iac.provider` and dispatches creates/updates/replaces/deletes through the loaded provider plugin. State is persisted after every successful action so the next run sees the cloud-truth.
+
+```
+wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
+                  [--refresh] [--allow-protected-prune] [--skip-refresh]
+                  [--allow-replace=NAME1,NAME2,...]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c`, `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `-y`, `--auto-approve` | `false` | Skip the confirmation prompt |
+| `-S`, `--show-sensitive` | `false` | Show sensitive values in plaintext |
+| `--env` | `` | Environment name (resolves per-module `environments:` overrides) |
+| `--plan` | `` | Apply from a pre-emitted `plan.json` (skips `ComputePlan`) |
+| `--refresh` | `false` | Detect drift and prune ghost-in-state entries before applying |
+| `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
+| `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
+| `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
+
+**Protected-resource gate:**
+
+Resources annotated `protected: true` cannot be replaced or deleted by `infra apply` without an explicit per-resource opt-in. When a plan would replace or delete a protected resource, `wfctl` aborts before any provider dispatch and prints the full set of blockers in one pass with a copy-paste-ready flag value:
+
+```
+plan would require destructive action on 3 protected resource(s):
+  coredump-staging-vpc (replace)
+  coredump-staging-pg-data (replace)
+  coredump-staging-pg (replace)
+to authorize, re-run with:
+  --allow-replace=coredump-staging-vpc,coredump-staging-pg-data,coredump-staging-pg
+```
+
+The gate fires on both dispatch paths — live diff (`apply` without `--plan`) and precomputed plan (`apply --plan plan.json`) — so the safety guarantee holds regardless of plan provenance. The blocker listing and the csv preserve plan-action declaration order so output is deterministic across runs.
+
+To authorize, re-run with the printed flag value. Names not in the list keep their protection; the override is per-invocation and never persisted.
+
+| Knob | Effect |
+|------|--------|
+| `--allow-replace=name1,name2` | Authorize replace/delete on the listed resources for this apply only. |
+| `--allow-protected-prune` (requires `--refresh`) | Older flag — authorizes pruning state entries for **all** protected resources during the refresh phase. Recommended only for state cleanup; for production use prefer `--allow-replace` (intent-explicit per resource). |
+
+**Examples:**
+
+```bash
+# Standard apply.
+wfctl infra apply --auto-approve -c infra.yaml --env staging
+
+# Apply from a pre-emitted plan.
+wfctl infra plan -c infra.yaml --env staging -o plan.json
+wfctl infra apply --auto-approve -c infra.yaml --env staging --plan plan.json
+
+# Authorize a Replace cascade on protected resources.
+wfctl infra apply --auto-approve -c infra.yaml --env prod \
+  --allow-replace=coredump-prod-vpc,coredump-prod-pg
+```
+
 #### `infra refresh-outputs`
 
 Read live outputs from each `iac.provider` for resources already in state and persist any field-level changes back to the state backend. The contract is strictly read-only at the cloud level — `refresh-outputs` never invokes Update or Replace.
@@ -1273,6 +1332,67 @@ WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve -c infra.yaml --env sta
 
 # Apply with pre-step suppressed even though CI exports the env var.
 WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve --skip-refresh -c infra.yaml
+```
+
+#### `infra align`
+
+Run a battery of static alignment checks against a config (and optionally a
+plan). Each rule (`R-A1` … `R-A10`) emits findings as a `FAIL` (always
+non-zero exit) or `WARN` (non-zero only with `--strict`).
+
+```
+wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict] [--strict-health] [--strict-cidr] [--max-changes N]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config`, `-c` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for per-env config resolution |
+| `--plan` | `` | Path to a plan JSON file. Enables `R-A7` (plan-output sanity) and `R-A10` (provider `ValidatePlan` dispatch). |
+| `--strict` | `false` | Treat all `WARN` findings as `FAIL` (exit 1) |
+| `--strict-health` | `false` | Treat `R-A2` health-check `WARN`s as `FAIL` |
+| `--strict-cidr` | `false` | Enable strict CIDR overlap checks (reserved) |
+| `--max-changes` | `50` | Warn when the plan has more than N actions |
+
+| Rule | Name | Severity |
+|------|------|----------|
+| R-A1 | Container/runtime alignment | FAIL |
+| R-A2 | Health-check path in source | WARN (FAIL with `--strict-health`) |
+| R-A3 | Service-to-service DNS alignment | FAIL |
+| R-A4 | Env-var resolution | FAIL |
+| R-A5 | Migrations alignment | FAIL |
+| R-A6 | Network/exposure alignment | FAIL or WARN |
+| R-A7 | Plan-output sanity (requires `--plan`) | FAIL or WARN |
+| R-A8 | WebAuthn RP_ID alignment | FAIL |
+| R-A9 | Suspicious `provider_credential` key suffix | WARN |
+| R-A10 | Provider `ValidatePlan` diagnostics (requires `--plan`) | FAIL or WARN |
+
+**R-A10 — provider-side cross-resource validation.** When `--plan` is given,
+`infra align` enumerates the `iac.provider` modules in the config, loads each,
+and dispatches `interfaces.ProviderValidator.ValidatePlan(plan)` against any
+provider that implements that optional interface. Each returned
+`PlanDiagnostic` is rendered according to its severity tier:
+
+| `PlanDiagnostic.Severity` | Result |
+|---------------------------|--------|
+| `PlanDiagnosticError` | `FAIL` AlignFinding (always non-zero exit) |
+| `PlanDiagnosticWarning` | `WARN` AlignFinding (non-zero only under `--strict`) |
+| `PlanDiagnosticInfo` | Logged to stderr; no AlignFinding emitted; never affects exit code |
+
+`PlanDiagnosticInfo` deliberately does *not* contribute an AlignFinding so
+that `--strict` CI gates cannot fail on a purely informational hint. The
+log line is prefixed `R-A10 [info] <provider>/<resource>: <message>`.
+
+Providers that do not implement `ProviderValidator` are skipped — the
+interface is purely additive (no behaviour change for older plugins).
+
+```bash
+# Run all align rules without a plan (R-A10 silent).
+wfctl infra align -c infra.yaml --env staging
+
+# Include R-A7 + R-A10 by passing a plan file; --strict promotes WARNs to FAILs.
+wfctl infra plan -c infra.yaml --env staging -o plan.json
+wfctl infra align -c infra.yaml --env staging --plan plan.json --strict
 ```
 
 ---

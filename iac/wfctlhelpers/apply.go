@@ -43,8 +43,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"os"
 
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
+	"github.com/GoCodeAlone/workflow/iac/jitsubst"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -122,6 +125,17 @@ func applyPlanWithEnvProvider(
 		result.InputDriftReport = inputsnapshot.ComputeDrift(plan.InputSnapshot, applyTimeSnap)
 	}()
 
+	// syncedOutputs maps resource Name → flat outputs map (with the
+	// canonical "id" key shadowed by ProviderID when set). Pre-populated
+	// from every action.Current entry so a NEW action can reference
+	// existing in-state modules' outputs from action zero — not just
+	// modules whose action has already run in this loop. Mutated below
+	// after each successful dispatch so subsequent actions see this-apply
+	// outputs (the W-5 design's "JIT resolution reads from STATE" path:
+	// new outputs are written per-resource on success and become visible
+	// to later actions in the same plan).
+	syncedOutputs := buildInitialSyncedOutputs(plan.Actions)
+
 	for _, action := range plan.Actions {
 		// Honor cancellation at the loop boundary. Drivers should also
 		// check ctx internally for in-flight work, but the loop check
@@ -132,6 +146,26 @@ func applyPlanWithEnvProvider(
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
+		// Per-action JIT substitution — resolve ${VAR} / ${MODULE.field}
+		// / ${MODULE.id} in action.Resource.Config against
+		// result.ReplaceIDMap (this-apply Replace ProviderIDs) and
+		// syncedOutputs (state + this-apply prior outputs). On error,
+		// record a per-action diagnostic with the canonical "jit
+		// substitution:" prefix and SKIP dispatch — the unresolved spec
+		// must not reach the driver. The loop continues to the next
+		// action (best-effort apply contract). os.LookupEnv is the
+		// production env source; nil-safe inside ResolveSpec — refs that
+		// only need replaceIDMap / syncedOutputs still resolve.
+		resolved, err := jitsubst.ResolveSpec(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv)
+		if err != nil {
+			result.Errors = append(result.Errors, interfaces.ActionError{
+				Resource: action.Resource.Name,
+				Action:   action.Action,
+				Error:    fmt.Sprintf("jit substitution: %v", err),
+			})
+			continue
+		}
+		action.Resource = resolved
 		d, err := p.ResourceDriver(action.Resource.Type)
 		if err != nil {
 			result.Errors = append(result.Errors, interfaces.ActionError{
@@ -141,6 +175,11 @@ func applyPlanWithEnvProvider(
 			})
 			continue
 		}
+		// Capture result.Resources length pre-dispatch so we can identify
+		// the entry (if any) that this action appended and propagate its
+		// outputs into syncedOutputs for subsequent actions. doCreate /
+		// doUpdate / doReplace each append on success; doDelete does not.
+		preLen := len(result.Resources)
 		if err := dispatchAction(ctx, d, action, result); err != nil {
 			result.Errors = append(result.Errors, interfaces.ActionError{
 				Resource: action.Resource.Name,
@@ -148,8 +187,59 @@ func applyPlanWithEnvProvider(
 				Error:    err.Error(),
 			})
 		}
+		if len(result.Resources) > preLen {
+			out := result.Resources[len(result.Resources)-1]
+			syncedOutputs[out.Name] = flattenOutputs(out)
+		}
 	}
 	return result, nil
+}
+
+// buildInitialSyncedOutputs walks plan.Actions once and returns a map of
+// every action.Current entry's outputs (keyed by Name). Used to seed the
+// JIT substitution map before the dispatch loop begins so a brand-new
+// action created in this plan can reference an in-state sibling module's
+// outputs even if the sibling has no action of its own — or if its
+// action runs later in the loop. Each entry is a flat copy (output
+// fields plus the canonical "id" key shadowed with the state-side
+// ProviderID).
+func buildInitialSyncedOutputs(actions []interfaces.PlanAction) map[string]map[string]any {
+	out := make(map[string]map[string]any)
+	for _, a := range actions {
+		if a.Current == nil {
+			continue
+		}
+		out[a.Current.Name] = flattenStateOutputs(a.Current)
+	}
+	return out
+}
+
+// flattenStateOutputs returns a flat outputs map for a ResourceState:
+// the state's Outputs entries plus a canonical "id" key set to the
+// state's ProviderID. The "id" override is intentional — JIT
+// substitution treats ${MODULE.id} as the canonical ProviderID
+// reference; if a state's Outputs map happens to also have an "id"
+// key, the ProviderID still wins so JIT semantics stay predictable.
+func flattenStateOutputs(s *interfaces.ResourceState) map[string]any {
+	m := make(map[string]any, len(s.Outputs)+1)
+	maps.Copy(m, s.Outputs)
+	if s.ProviderID != "" {
+		m["id"] = s.ProviderID
+	}
+	return m
+}
+
+// flattenOutputs returns a flat outputs map for a freshly-applied
+// ResourceOutput. Mirrors flattenStateOutputs but reads from
+// ResourceOutput rather than ResourceState — same canonical "id" rule:
+// ProviderID shadows any "id" entry in Outputs.
+func flattenOutputs(o interfaces.ResourceOutput) map[string]any {
+	m := make(map[string]any, len(o.Outputs)+1)
+	maps.Copy(m, o.Outputs)
+	if o.ProviderID != "" {
+		m["id"] = o.ProviderID
+	}
+	return m
 }
 
 // snapshotKeys returns the keys of m as an unordered slice. ComputeDrift
@@ -271,9 +361,24 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 
 // doReplace decomposes a Replace action into Delete-then-Create on the
 // driver and propagates the new ProviderID through
-// result.ReplaceIDMap[action.Resource.Name] so JIT substitution in W-5
-// can patch dependent resources whose configs reference the replaced
-// resource by name.
+// result.ReplaceIDMap[action.Resource.Name] so the JIT substitution wired
+// into ApplyPlan's loop (T5.2) can patch dependent resources whose
+// configs reference the replaced resource by name.
+//
+// # Cascade contract (T5.3)
+//
+// When a plan has [Replace parent, X dependent] where dependent's
+// Config carries ${parent.id}, the cascade lands automatically:
+// doReplace's post-Create write to result.ReplaceIDMap completes
+// BEFORE the dispatch loop's next iteration calls
+// jitsubst.ResolveSpec on the dependent's spec, so the dependent's
+// driver call (Create or Replace's post-Delete Create) sees the
+// freshly-resolved parent ProviderID. Delete continues to use
+// action.Current.ProviderID via refFromAction — JIT substitution does
+// NOT alter action.Current, so Replace's Delete still targets the
+// pre-Replace cloud resource.
+//
+// Verified by apply_replace_cascade_test.go.
 //
 // Failure semantics:
 //   - Delete fails → return wrapped "replace: delete: <err>"; Create

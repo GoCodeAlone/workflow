@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -11,17 +12,47 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
+	"github.com/GoCodeAlone/workflow/iac/jitsubst"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
-// infraPlanSchemaVersion is the on-disk plan format version this wfctl
-// binary writes and is willing to read. runInfraPlan stamps it on every
-// emitted plan; runInfraApply rejects plans with a higher version so a
-// future schema bump (e.g. W-5 JIT-required plans) fails fast rather than
-// being silently mis-read by an older binary.
-const infraPlanSchemaVersion = 1
+// infraPlanSchemaVersion is the maximum on-disk plan format version this
+// wfctl binary is willing to read. runInfraApply rejects plans with a
+// higher version so a future schema bump fails fast rather than being
+// silently mis-read by an older binary.
+//
+// runInfraPlan stamps either V1 (no JIT references in plan.Actions) or
+// V2 (any ${MODULE.field} or ${MODULE.id} surviving in
+// plan.Actions[*].Resource.Config). The choice is per-plan via
+// jitsubst.HasModuleRefs; see runInfraPlan and the persisted-plan
+// rejection in T5.5 (V2 plans cannot be persisted via -o; canonical path
+// is `wfctl infra apply` without --plan).
+const (
+	infraPlanSchemaVersion    = 2 // max readable
+	infraPlanSchemaVersionV1  = 1 // pre-JIT baseline
+	infraPlanSchemaVersionJIT = 2 // bumped when plan has ${MODULE.field|id} refs
+)
+
+// planRequiresJITSubstitution returns true when any action in plan
+// carries a ${MODULE.field} or ${MODULE.id} reference somewhere in its
+// resolved Resource.Config. Plain ${VAR} env-var references do NOT
+// count — see jitsubst.HasModuleRefs for the exact rule.
+//
+// Used by runInfraPlan (T5.4) to gate plan.SchemaVersion = 2 stamping
+// and by runInfraPlan's persisted-plan rejection (T5.5).
+func planRequiresJITSubstitution(plan *interfaces.IaCPlan) bool {
+	if plan == nil {
+		return false
+	}
+	for i := range plan.Actions {
+		if jitsubst.HasModuleRefs(plan.Actions[i].Resource.Config) {
+			return true
+		}
+	}
+	return false
+}
 
 func runInfra(args []string) error {
 	if len(args) < 1 {
@@ -228,7 +259,17 @@ func runInfraPlan(args []string) error {
 		return fmt.Errorf("compute input snapshot: %w", err)
 	}
 	plan.InputSnapshot = snap
-	plan.SchemaVersion = infraPlanSchemaVersion
+	// Stamp SchemaVersion based on whether any plan action's resolved
+	// Config carries a JIT-required ${MODULE.field|id} reference. Plain
+	// ${VAR} env-var refs (no dot in body) do NOT trigger the bump —
+	// plan-time config.ExpandEnvInMapPreservingKeys has already
+	// collapsed them outside preserved keys, and inside preserved keys
+	// they remain operator-managed across plan/apply (drift detection
+	// in plan.InputSnapshot covers the change-after-plan case).
+	plan.SchemaVersion = infraPlanSchemaVersionV1
+	if planRequiresJITSubstitution(&plan) {
+		plan.SchemaVersion = infraPlanSchemaVersionJIT
+	}
 
 	switch *format {
 	case "markdown":
@@ -239,6 +280,23 @@ func runInfraPlan(args []string) error {
 	}
 
 	if *output != "" {
+		// T5.5: persisted plan.json is the wfctl-infra-apply --plan
+		// canonical input. JIT-style plans cannot be persisted because
+		// every ${MODULE.field|id} ref needs apply-time resolution
+		// against this-apply ReplaceIDMap + syncedOutputs (data that
+		// does NOT exist at plan time and CANNOT be preserved across
+		// the plan/apply boundary). Reject up-front with an exact
+		// error string the operator can grep for. Stdout-only emission
+		// (no -o) of a JIT-style plan IS allowed — it's a preview, not
+		// a contract — and falls through this guard untouched.
+		if plan.SchemaVersion == infraPlanSchemaVersionJIT {
+			// Plan literal per docs/plans/2026-05-03-iac-conformance-and-replace.md
+			// §T5.5 line 2104. NO leading "error:" — that's prepended by
+			// cmd/wfctl/main.go's top-level wrapper. errors.New (rather than
+			// fmt.Errorf) avoids govet's no-verbs noise and is canonical for
+			// fixed-string error literals per Go convention.
+			return errors.New("this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan.")
+		}
 		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
 		// can detect stale plans when the config changes after plan generation.
 		plan.DesiredHash = desiredStateHash(desired)
@@ -984,6 +1042,9 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&allowProtectedPruneFlag, "allow-protected-prune", false, "Allow pruning state entries for resources marked protected: true (requires --refresh)")
 	var skipRefreshFlag bool
 	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set")
+	var allowReplaceFlag string
+	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
+		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -997,6 +1058,15 @@ func runInfraApply(args []string) error {
 	if allowProtectedPruneFlag && !refreshFlag {
 		return fmt.Errorf("--allow-protected-prune requires --refresh")
 	}
+
+	// W-6/T6.1: publish the parsed --allow-replace set for the apply
+	// path's gate (validateAllowReplaceProtected, called from both
+	// applyWithProviderAndStore and applyPrecomputedPlanWithStore).
+	// Reset to nil at the top of every invocation so the gate fails
+	// closed when subsequent runs do not pass the flag — package-level
+	// state would otherwise leak override authorization across runs.
+	applyAllowReplaceSet = parseAllowReplaceFlag(allowReplaceFlag)
+	defer func() { applyAllowReplaceSet = nil }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {

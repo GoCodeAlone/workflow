@@ -88,13 +88,25 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 	// emitted synchronously since they don't need the provider.
 	var creates []interfaces.PlanAction
 	type modCandidate struct {
-		spec interfaces.ResourceSpec
-		rs   interfaces.ResourceState
-		hash string // precomputed configHash(spec.Config); reused by classifyModification
+		spec     interfaces.ResourceSpec
+		rs       interfaces.ResourceState
+		hash     string // precomputed configHash(spec.Config); reused by classifyModification
+		hashable bool   // true when configHashErr succeeded; false → cache-bypass for this candidate
 	}
 	var candidates []modCandidate
 	for _, spec := range desired {
-		hash := configHash(spec.Config)
+		// Use configHashErr to detect non-marshalable spec.Config values
+		// so we can bypass the diff-cache for those resources. For the
+		// stored ResolvedConfigHash we fall back to the legacy
+		// configHash (sha256-of-best-effort) when configHashErr fails;
+		// that preserves byte-for-byte stability with any persisted
+		// plans + ConfigHash values produced under the pre-T3.6
+		// implementation, while the hashable flag gates cache
+		// participation for the modification path.
+		hash, hashErr := configHashErr(spec.Config)
+		if hashErr != nil {
+			hash = configHash(spec.Config)
+		}
 		if rs, exists := currentMap[spec.Name]; !exists {
 			creates = append(creates, interfaces.PlanAction{
 				Action:             "create",
@@ -102,7 +114,12 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 				ResolvedConfigHash: hash,
 			})
 		} else {
-			candidates = append(candidates, modCandidate{spec: spec, rs: rs, hash: hash})
+			candidates = append(candidates, modCandidate{
+				spec:     spec,
+				rs:       rs,
+				hash:     hash,
+				hashable: hashErr == nil,
+			})
 		}
 	}
 
@@ -116,7 +133,7 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 		g.SetLimit(planDiffConcurrency())
 		for i := range candidates {
 			g.Go(func() error {
-				return classifyModification(gctx, p, candidates[i].spec, candidates[i].rs, candidates[i].hash, &mods[i])
+				return classifyModification(gctx, p, candidates[i].spec, candidates[i].rs, candidates[i].hash, candidates[i].hashable, &mods[i])
 			})
 		}
 		if err := g.Wait(); err != nil {
@@ -180,8 +197,13 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 // via the legacy ConfigHash compare. The hash argument is the
 // precomputed configHash(spec.Config), threaded in by the caller so
 // the per-candidate hashing happens once during candidate-bucketing
-// rather than redundantly here on every Diff dispatch.
-func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, rs interfaces.ResourceState, hash string, out **interfaces.PlanAction) error {
+// rather than redundantly here on every Diff dispatch. The hashable
+// argument is true when configHashErr succeeded for spec.Config; when
+// false, the cache is bypassed for this resource (same defensive
+// treatment as the empty-ProviderID path) — collapsing all
+// non-marshalable inputs to the constant sha256("") hash would risk
+// cache-key collisions across distinct resources.
+func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, rs interfaces.ResourceState, hash string, hashable bool, out **interfaces.PlanAction) error {
 	rsCopy := rs
 
 	// Nil-provider fallback: legacy ConfigHash compare.
@@ -231,25 +253,45 @@ func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec in
 	// Always re-dispatch in that case; the cost is one extra Diff call,
 	// not correctness.
 	var diff *interfaces.DiffResult
-	cacheable := rs.ProviderID != ""
+	// cacheable = (1) ProviderID is the disambiguator across same-Type
+	// resources (see the empty-ProviderID bypass docstring just above
+	// the if-block) AND (2) we can deterministically hash both
+	// spec.Config and rs.Outputs (configHashErr surfaces marshal
+	// failures on non-YAML-derivable values so we don't collapse all
+	// unmarshalable inputs to the constant sha256("") hash and serve
+	// each other's cached DiffResult). Bypass cases all fall through
+	// to the unconditional driver.Diff dispatch below.
+	cacheable := rs.ProviderID != "" && hashable
 	var (
-		cache diffcache.Cache
-		key   diffcache.Key
+		cache  diffcache.Cache
+		key    diffcache.Key
+		shaOut string
 	)
 	if cacheable {
+		var outErr error
+		shaOut, outErr = configHashErr(rs.Outputs)
+		if outErr != nil {
+			// Outputs contained a non-marshalable value; bypass cache
+			// for this resource (same defensive treatment as the
+			// empty-ProviderID and unhashable-spec.Config paths) and
+			// re-Diff every time.
+			cacheable = false
+		}
+	}
+	if cacheable {
 		// getDiffCache lives inside this branch so the empty-ProviderID
-		// bypass path is fully side-effect free — no sync.Once init
-		// firing, no atomic load, and (most importantly) no eager
-		// lazy-construction of the filesystem cache backend creating
-		// ~/.cache/wfctl/diff/ on the operator's machine for resources
-		// that won't use the cache anyway.
+		// AND unhashable-inputs bypass paths are fully side-effect free
+		// — no sync.Once init firing, no atomic load, and (most
+		// importantly) no eager lazy-construction of the filesystem
+		// cache backend creating ~/.cache/wfctl/diff/ on the operator's
+		// machine for resources that won't use the cache anyway.
 		cache = getDiffCache()
 		key = diffcache.Key{
 			PluginVersion: pluginVersionKey(p),
 			Type:          spec.Type,
 			ProviderID:    rs.ProviderID,
 			SHAConfig:     hash,
-			SHAOutputs:    configHash(rs.Outputs),
+			SHAOutputs:    shaOut,
 		}
 		if cached, hit := cache.Get(key); hit {
 			c := cached
@@ -473,6 +515,20 @@ func ConfigHash(config map[string]any) string {
 // configHash returns a deterministic SHA-256 hex hash of a config map.
 // Keys are explicitly sorted before marshalling so the hash is stable across
 // Go's randomised map-iteration order — matching the DO plugin's pattern.
+//
+// configHash IGNORES json.Marshal errors. If the config contains a value
+// json.Marshal cannot encode (channels, functions, cycles, custom types
+// with broken MarshalJSON), this collapses to the constant
+// sha256(<nil>) = e3b0c4429... hash. That preserves the legacy "did
+// anything change" comparison semantics for YAML-derived configs
+// (YAML can't express those types, so the failure mode is unreachable
+// in practice for those callers) and keeps the exported ConfigHash
+// byte-for-byte stable against any persisted ResolvedConfigHash values
+// computed under the pre-T3.6 implementation. Cache-key callers MUST
+// use configHashErr instead — collapsing all unmarshalable inputs to
+// the same constant hash would cause cache-key collisions and let two
+// genuinely-different resources serve each other's cached DiffResult.
+// See the differ.go:235 comment block for the cache-bypass plumbing.
 func configHash(config map[string]any) string {
 	if len(config) == 0 {
 		return ""
@@ -492,6 +548,45 @@ func configHash(config map[string]any) string {
 	}
 	data, _ := json.Marshal(ordered)
 	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+// configHashErr is the error-aware variant of configHash, used by the
+// diff-cache keying path so non-marshalable inputs bypass caching for
+// that resource (rather than silently collapsing to the constant
+// sha256("") hash and risking cache-key collisions across distinct
+// resources). When err != nil, the returned string is the empty
+// hash and callers MUST NOT use it for cache keys; they should
+// re-Diff every time for that resource (same defensive bypass as
+// the empty-ProviderID path documented at differ.go:235).
+//
+// In practice IaC configs come from YAML and cannot contain
+// non-marshalable values (channels, functions, cycles), so this
+// path is unreachable for the common case. Defensive coverage is
+// for custom-provider Outputs that could conceivably contain
+// types with broken MarshalJSON, or for future code paths that
+// pass non-YAML-derived configs into ComputePlan.
+func configHashErr(config map[string]any) (string, error) {
+	if len(config) == 0 {
+		return "", nil
+	}
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	type kv struct {
+		K string
+		V any
+	}
+	ordered := make([]kv, len(keys))
+	for i, k := range keys {
+		ordered[i] = kv{K: k, V: config[k]}
+	}
+	data, err := json.Marshal(ordered)
+	if err != nil {
+		return "", fmt.Errorf("configHash: marshal: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
 }
 
 // planID generates a simple unique plan ID based on current time.
