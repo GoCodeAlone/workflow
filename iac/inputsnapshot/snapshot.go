@@ -51,13 +51,18 @@ func OSEnvProvider(name string) (string, bool) { return os.LookupEnv(name) }
 // discipline violation, not a tooling bypass — the unexported boundary is
 // about API hygiene, not security.
 //
+// Collision-safety: the embedded NUL byte (\x00) makes value-collision with
+// a real env var impossible — POSIX exec(3) and Windows CreateProcess both
+// reject NUL inside env values, so no var the OS can deliver to a Go process
+// could match this constant by accident.
+//
 // Cross-function contract:
 //   - Compute (this file, in-package) passes the sentinel through unhashed.
 //   - NewTolerantEnvProvider (this file) returns the sentinel for plan-time-set
 //     but apply-time-unset vars (in-package access to the constant).
 //   - ComputeDrift (compute_drift.go, T1.5, same package) honors the sentinel
 //     by skipping drift detection for that key.
-const preservedFingerprint = "__plan_time_preserved__"
+const preservedFingerprint = "__plan_time_preserved__\x00"
 
 // NewTolerantEnvProvider returns an EnvProvider closure used by the
 // in-process apply postcondition (T3.1.5). When a var was set at plan time
