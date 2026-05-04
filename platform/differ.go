@@ -218,7 +218,7 @@ func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec in
 	// on cache hits — every miss falls through to provider.Diff.
 	cache := getDiffCache()
 	key := diffcache.Key{
-		PluginVersion: p.Name() + "@" + p.Version(),
+		PluginVersion: pluginVersionKey(p),
 		Type:          spec.Type,
 		ProviderID:    rs.ProviderID,
 		SHAConfig:     hash,
@@ -282,6 +282,22 @@ func resourceStateToOutput(rs *interfaces.ResourceState) *interfaces.ResourceOut
 		ProviderID: rs.ProviderID,
 		Outputs:    rs.Outputs,
 	}
+}
+
+// pluginVersionKey returns an ambiguity-free fingerprint of the
+// provider's (Name, Version) tuple for use as the cache PluginVersion
+// component. Concatenating with `@` would let `("foo", "bar@1.0")` and
+// `("foo@bar", "1.0")` collide on the same key and serve each other's
+// cached DiffResults; the sha256-hex digest of the NUL-separated
+// concatenation eliminates that class of collision. Cheap (one hash
+// per cached resource per ComputePlan) and matches how configHash
+// already keys per-config inputs.
+func pluginVersionKey(p interfaces.IaCProvider) string {
+	if p == nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(p.Name() + "\x00" + p.Version()))
+	return fmt.Sprintf("%x", sum)
 }
 
 // hasForceNew reports whether any change in the slice has ForceNew=true.

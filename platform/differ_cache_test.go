@@ -393,6 +393,46 @@ func (d *channelGatedDriver) Scale(_ context.Context, _ interfaces.ResourceRef, 
 }
 func (d *channelGatedDriver) SensitiveKeys() []string { return nil }
 
+// TestPluginVersionKey_NoCollisionOnAtSeparator covers the rev3 fix
+// for the cache-collision risk introduced when PluginVersion was
+// composed via `name + "@" + version`. Two genuinely-different
+// providers — `("foo", "bar@1.0")` vs `("foo@bar", "1.0")` — would
+// both produce the literal string `"foo@bar@1.0"` and serve each
+// other's cached DiffResults. The sha256(name + "\x00" + version)
+// composition pins these as distinct keys.
+func TestPluginVersionKey_NoCollisionOnAtSeparator(t *testing.T) {
+	a := &cacheTestProvider{name: "foo", version: "bar@1.0"}
+	b := &cacheTestProvider{name: "foo@bar", version: "1.0"}
+	keyA := pluginVersionKey(a)
+	keyB := pluginVersionKey(b)
+	if keyA == keyB {
+		t.Errorf("pluginVersionKey collision: %q == %q for distinct (name, version) pairs", keyA, keyB)
+	}
+}
+
+// TestPluginVersionKey_NilProvider returns the empty key without
+// panicking; classifyModification's nil-provider path doesn't reach
+// the cache lookup, but defending the helper protects future callers.
+func TestPluginVersionKey_NilProvider(t *testing.T) {
+	if got := pluginVersionKey(nil); got != "" {
+		t.Errorf("pluginVersionKey(nil) = %q, want empty", got)
+	}
+}
+
+// TestPluginVersionKey_Stable verifies the helper is deterministic —
+// the same (name, version) pair always produces the same key.
+func TestPluginVersionKey_Stable(t *testing.T) {
+	p := &cacheTestProvider{name: "do", version: "v0.10.0"}
+	first := pluginVersionKey(p)
+	second := pluginVersionKey(p)
+	if first != second {
+		t.Errorf("pluginVersionKey not deterministic: %q vs %q", first, second)
+	}
+	if first == "" {
+		t.Error("pluginVersionKey returned empty string for non-nil provider")
+	}
+}
+
 // TestComputePlan_DriverReturnsNilDiff_EmitsNothing covers the (nil,
 // nil) return shape of ResourceDriver.Diff: a driver that knows the
 // resource has no changes returns nil rather than a zero-value
