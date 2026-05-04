@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/iactest"
@@ -120,6 +121,22 @@ func TestRun_DefaultEntryPointAcceptsFakeProvider(t *testing.T) {
 		LiveCloud: true,
 	}
 	Run(t, cfg)
+}
+
+// TestValidateConfig_RequiresProvider asserts the precondition that
+// Run guards via t.Fatal: an unset Config.Provider must produce
+// errProviderRequired. Tested on validateConfig directly because
+// asserting t.Fatal-via-Goexit from a sibling *testing.T is not
+// cleanly supported (subtest failure propagates). The contract is:
+// Run calls validateConfig and t.Fatals on any non-nil error, so
+// asserting validateConfig's behavior is equivalent.
+func TestValidateConfig_RequiresProvider(t *testing.T) {
+	if err := validateConfig(Config{}); !errors.Is(err, errProviderRequired) {
+		t.Errorf("expected errProviderRequired for Config{}, got %v", err)
+	}
+	if err := validateConfig(Config{Provider: newFakeProvider}); err != nil {
+		t.Errorf("expected nil error for Config with Provider set, got %v", err)
+	}
 }
 
 // TestRegister_AppendsToAllScenarios verifies the registration hook used

@@ -13,10 +13,16 @@
 package conformance
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+// errProviderRequired is the error validateConfig returns when
+// Config.Provider is nil. Exposed as a package-private sentinel so the
+// sibling test can assert via errors.Is rather than string-matching.
+var errProviderRequired = errors.New("conformance.Config.Provider is required")
 
 // Scenario is a single conformance test case. Each scenario lives in its
 // own file (scenario_<name>.go) and registers itself via register() in an
@@ -78,6 +84,18 @@ func allScenarios() []Scenario {
 	return registered
 }
 
+// validateConfig returns a non-nil error when cfg is missing required
+// fields. Run calls this and t.Fatals on error; the sibling test
+// asserts this function directly. Extracted because asserting on
+// t.Fatal-via-Goexit from a sibling *testing.T is not cleanly
+// supported by the testing framework (subtest failure propagates).
+func validateConfig(cfg Config) error {
+	if cfg.Provider == nil {
+		return errProviderRequired
+	}
+	return nil
+}
+
 // Run is the public entry point provider plugins call from a *_test.go.
 // It iterates the registered scenarios, applies the SmokeOnly /
 // LiveCloud / SkipScenarios filters, and invokes each via t.Run so
@@ -89,6 +107,10 @@ func allScenarios() []Scenario {
 // behavior — per-scenario skipped subtests — requires wrapping the
 // Skipf in t.Run, which is what we do.
 func Run(t *testing.T, cfg Config) {
+	t.Helper()
+	if err := validateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
 	runWithScenarios(t, cfg, allScenarios())
 }
 
