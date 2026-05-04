@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -451,6 +452,77 @@ func TestScenario_OutputsConsistencyAcrossReadCycles(t *testing.T) {
 	}
 	scenarioOutputsConsistencyAcrossReadCycles(t, cfg)
 }
+
+// cascadeFakeDriver embeds iactest.NoopDriver and overrides Create +
+// Delete with the minimal behaviors T7.12's cascade scenario needs:
+// per-name CreateResults so the parent's post-Delete Create returns
+// the new ProviderID; Delete is a no-op success.
+type cascadeFakeDriver struct {
+	iactest.NoopDriver
+	createResults map[string]*interfaces.ResourceOutput
+}
+
+// Compile-time assertion the wrapper satisfies the driver contract.
+var _ interfaces.ResourceDriver = (*cascadeFakeDriver)(nil)
+
+func (d *cascadeFakeDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	if out, ok := d.createResults[spec.Name]; ok {
+		return out, nil
+	}
+	// Default: return a synthetic output so ApplyPlan records the resource.
+	return &interfaces.ResourceOutput{
+		Name:       spec.Name,
+		Type:       spec.Type,
+		ProviderID: spec.Name + "-id",
+		Outputs:    map[string]any{},
+	}, nil
+}
+
+// TestScenario_ReplaceCascadePreservesDependents is the in-tree self-
+// test for T7.12 (first scenario): asserts the Replace-then-Create
+// cascade resolves ${parent.id} via result.ReplaceIDMap before the
+// dependent's Create dispatches. The fake's Create returns a
+// configured ProviderID for the parent so ReplaceIDMap is populated.
+func TestScenario_ReplaceCascadePreservesDependents(t *testing.T) {
+	driver := &cascadeFakeDriver{
+		createResults: map[string]*interfaces.ResourceOutput{
+			"parent": {Name: "parent", Type: "infra.vpc", ProviderID: "vpc-new-id"},
+		},
+	}
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &iactest.NoopProvider{Driver: &driver.NoopDriver, DispatchVersion: "v2"}
+		},
+	}
+	// The cascade scenario calls wfctlhelpers.ApplyPlan; it routes
+	// through p.ResourceDriver(typ) to fetch the driver. Wire the
+	// outer NoopProvider's Driver field to point at our cascadeFakeDriver
+	// via the embedded NoopDriver (NoopProvider holds the driver by
+	// pointer and is type-asserted to ResourceDriver — embedding works
+	// for the method set).
+	cfg.Provider = func() interfaces.IaCProvider {
+		return &cascadeProviderShim{driver: driver}
+	}
+	scenarioReplaceCascadePreservesDependents(t, cfg)
+}
+
+// cascadeProviderShim wraps a cascadeFakeDriver in an IaCProvider so
+// p.ResourceDriver returns the cascade-aware driver (rather than the
+// plain NoopDriver embedded inside it). Necessary because
+// iactest.NoopProvider returns its embedded NoopDriver — we need the
+// override-aware wrapper instead.
+type cascadeProviderShim struct {
+	iactest.NoopProvider
+	driver *cascadeFakeDriver
+}
+
+func (p *cascadeProviderShim) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return p.driver, nil
+}
+
+// ComputePlanVersion returns "v2" so wfctlhelpers.ApplyPlan dispatches
+// through the v2 path that exercises JIT substitution + ReplaceIDMap.
+func (p *cascadeProviderShim) ComputePlanVersion() string { return "v2" }
 
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
 // by each scenario_<name>.go init() in T7.2-T7.12. The test save/restores
