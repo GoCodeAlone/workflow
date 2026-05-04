@@ -217,7 +217,15 @@ func TestRun_ConsecutiveRunsObserveLiveDriverIndependently(t *testing.T) {
 			DiffResult: &interfaces.DiffResult{NeedsReplace: true},
 		}
 		cfg := Config{
+			// SmokeOnly=true narrows the run to Smoke=true scenarios so
+			// the cache-isolation regression-pin only exercises
+			// Scenario_NeedsReplaceTriggersReplaceAction (the sole
+			// ComputePlan-using Smoke scenario). Without this filter,
+			// later Smoke=false scenarios with their own driver-shape
+			// requirements (T7.3 Delete, T7.5 Refresh, …) would also
+			// fire here and fail or panic against the bare driver.
 			LiveCloud: true,
+			SmokeOnly: true,
 			Provider: func() interfaces.IaCProvider {
 				return &iactest.NoopProvider{Driver: driver}
 			},
@@ -236,6 +244,33 @@ func TestRun_ConsecutiveRunsObserveLiveDriverIndependently(t *testing.T) {
 	if got := driver2.DiffCallCount.Load(); got < 1 {
 		t.Errorf("second Run: driver Diff calls = %d, want >= 1 (cache MUST be reset between Runs to observe live driver — regression in W-7 SetDiffCacheForTest)", got)
 	}
+}
+
+// TestScenario_OutputsRefreshDetectsNewFields is the in-tree self-test
+// for T7.5: invokes the scenario body against a fake whose Driver.Read
+// returns Outputs with one extra key ("endpoint") beyond what the
+// persisted state held ("ip"). Asserts iac/refreshoutputs.Refresh
+// reconciles the new key into the returned state. Closes W-3a root-
+// cause issue B — state outputs lag after a plugin upgrade.
+func TestScenario_OutputsRefreshDetectsNewFields(t *testing.T) {
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &iactest.NoopProvider{
+				Driver: &iactest.NoopDriver{
+					ReadResult: &interfaces.ResourceOutput{
+						Name:       "vm",
+						Type:       "infra.compute",
+						ProviderID: "vm-id",
+						Outputs: map[string]any{
+							"ip":       "1.2.3.4",
+							"endpoint": "https://api.example.com",
+						},
+					},
+				},
+			}
+		},
+	}
+	scenarioOutputsRefreshDetectsNewFields(t, cfg)
 }
 
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
