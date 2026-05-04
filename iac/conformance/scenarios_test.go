@@ -524,6 +524,83 @@ func (p *cascadeProviderShim) ResourceDriver(_ string) (interfaces.ResourceDrive
 // through the v2 path that exercises JIT substitution + ReplaceIDMap.
 func (p *cascadeProviderShim) ComputePlanVersion() string { return "v2" }
 
+// upsertingFakeDriver embeds iactest.NoopDriver and overrides Create
+// to return ErrResourceAlreadyExists for a configured set of names.
+// Read returns a fixed ResourceOutput with non-empty ProviderID so
+// ApplyPlan's upsert-recovery path can populate the Update ref.
+// Update returns the ResourceOutput so the result.Resources entry
+// is observable.
+type upsertingFakeDriver struct {
+	iactest.NoopDriver
+	conflictNames map[string]struct{}
+}
+
+var (
+	_ interfaces.ResourceDriver  = (*upsertingFakeDriver)(nil)
+	_ interfaces.UpsertSupporter = (*upsertingFakeDriver)(nil)
+)
+
+func (d *upsertingFakeDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	if _, ok := d.conflictNames[spec.Name]; ok {
+		return nil, interfaces.ErrResourceAlreadyExists
+	}
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: spec.Name + "-id"}, nil
+}
+
+func (d *upsertingFakeDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	// Recovery path: ApplyPlan probes Read with empty ProviderID after
+	// the create-conflict; locate by name + type and return a synthesized
+	// ProviderID so Update can dispatch.
+	return &interfaces.ResourceOutput{
+		Name:       ref.Name,
+		Type:       ref.Type,
+		ProviderID: ref.Name + "-existing-id",
+	}, nil
+}
+
+func (d *upsertingFakeDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{
+		Name:       spec.Name,
+		Type:       spec.Type,
+		ProviderID: ref.ProviderID,
+		Outputs:    map[string]any{},
+	}, nil
+}
+
+func (d *upsertingFakeDriver) SupportsUpsert() bool { return true }
+
+// upsertProviderShim wraps an upsertingFakeDriver in an IaCProvider so
+// p.ResourceDriver returns the upsert-aware driver. Like
+// cascadeProviderShim, declares ComputePlanVersion()=="v2" so the
+// dispatcher routes through ApplyPlan's UpsertSupporter recovery path.
+type upsertProviderShim struct {
+	iactest.NoopProvider
+	driver *upsertingFakeDriver
+}
+
+func (p *upsertProviderShim) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return p.driver, nil
+}
+
+func (p *upsertProviderShim) ComputePlanVersion() string { return "v2" }
+
+// TestScenario_UpsertOnAlreadyExists is the in-tree self-test for
+// T7.12 (second scenario): asserts that a driver implementing
+// UpsertSupporter recovers from ErrResourceAlreadyExists by
+// dispatching Read+Update, yielding result.Errors empty and the
+// upserted resource present in result.Resources.
+func TestScenario_UpsertOnAlreadyExists(t *testing.T) {
+	driver := &upsertingFakeDriver{
+		conflictNames: map[string]struct{}{"existing-resource": {}},
+	}
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &upsertProviderShim{driver: driver}
+		},
+	}
+	scenarioUpsertOnAlreadyExists(t, cfg)
+}
+
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
 // by each scenario_<name>.go init() in T7.2-T7.12. The test save/restores
 // the package-level registry so it does not leak state to other tests.
