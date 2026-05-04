@@ -214,7 +214,7 @@ func refactorApplyFile(path string, opts *Options, report *applyReport) error {
 			})
 			continue
 		}
-		class, offenderPos, suggestion := classifyApplyBody(fn, fset, path)
+		class, offenderPos, suggestion := classifyApplyBody(fn, file, fset, path)
 		site := applySite{
 			Path:        path,
 			Line:        fset.Position(fn.Pos()).Line,
@@ -248,11 +248,11 @@ func refactorApplyFile(path string, opts *Options, report *applyReport) error {
 // migrated, then upsert (which has a clean wfctlhelpers hook), then
 // custom-error-wrapping. Multiple idioms in one body produce a single
 // label; the report points at the first detected.
-func classifyApplyBody(fn *ast.FuncDecl, fset *token.FileSet, path string) (applyClassification, string, string) {
+func classifyApplyBody(fn *ast.FuncDecl, file *ast.File, fset *token.FileSet, path string) (applyClassification, string, string) {
 	if fn.Body == nil {
 		return applyNonCanonicalOther, "", ""
 	}
-	if isAlreadyDelegatedApplyBody(fn.Body) {
+	if isAlreadyDelegatedApplyBody(fn.Body, file) {
 		return applyAlreadyDelegated, "", ""
 	}
 	sw := findActionSwitch(fn.Body)
@@ -292,8 +292,13 @@ func fmtPosShort(path string, line int) string {
 }
 
 // isAlreadyDelegatedApplyBody returns true if fn.Body is a single
-// `return wfctlhelpers.ApplyPlan(...)`.
-func isAlreadyDelegatedApplyBody(body *ast.BlockStmt) bool {
+// `return <wfctlhelpers-alias>.ApplyPlan(...)`. Review round-4 finding
+// #4: rev3 hardcoded the package identifier as `wfctlhelpers`. A
+// provider that already delegates through an aliased import (e.g.
+// `wf "github.com/.../wfctlhelpers"; return wf.ApplyPlan(...)`) was
+// misreported as non-canonical. Resolves the import alias via
+// pkgAliasFor so any aliased delegation is recognised.
+func isAlreadyDelegatedApplyBody(body *ast.BlockStmt, file *ast.File) bool {
 	if len(body.List) != 1 {
 		return false
 	}
@@ -313,7 +318,14 @@ func isAlreadyDelegatedApplyBody(body *ast.BlockStmt) bool {
 	if !ok {
 		return false
 	}
-	return x.Name == "wfctlhelpers" && sel.Sel.Name == "ApplyPlan"
+	if sel.Sel.Name != "ApplyPlan" {
+		return false
+	}
+	// Accept the literal default name OR the file's local alias for
+	// the wfctlhelpers import path. Falls back to the literal name
+	// when file is nil (test paths that don't pass it).
+	wantAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
+	return x.Name == wantAlias || x.Name == "wfctlhelpers"
 }
 
 // findActionSwitch returns the first switch statement whose tag is a
@@ -601,9 +613,33 @@ func canonicalCaseStmt(stmt ast.Stmt) bool {
 	case *ast.IfStmt:
 		return isProviderIDGuard(s)
 	case *ast.DeclStmt:
-		return true
+		// Only `var out *ResourceOutput` (or qualified equivalent).
+		// Review round-4 finding #6: rev3 accepted ALL DeclStmts, so
+		// `var x SomeBookkeepingType` declarations passed as canonical
+		// and the bespoke local variable was silently dropped.
+		return isLocalOutPointerDecl(s)
 	}
 	return false
+}
+
+// isLocalOutPointerDecl returns true if stmt is a single
+// `var <name> *<ResourceOutput-shaped>` declaration. The name is not
+// constrained (the standard convention is `out` but `o` / `result`
+// are valid) but the type tail must be ResourceOutput.
+func isLocalOutPointerDecl(s *ast.DeclStmt) bool {
+	gd, ok := s.Decl.(*ast.GenDecl)
+	if !ok || gd.Tok != token.VAR || len(gd.Specs) != 1 {
+		return false
+	}
+	vs, ok := gd.Specs[0].(*ast.ValueSpec)
+	if !ok || vs.Type == nil || len(vs.Names) != 1 {
+		return false
+	}
+	star, ok := vs.Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	return typeNameTailMatches(star.X, "ResourceOutput")
 }
 
 // isCanonicalCaseAssign tightens the AssignStmt acceptance whitelist
@@ -626,10 +662,14 @@ func isCanonicalCaseAssign(a *ast.AssignStmt) bool {
 			}
 			return false
 		}
-		// Composite-literal `ref := ResourceRef{...}` (or any *T{...}).
+		// Composite-literal `ref := ResourceRef{...}` ONLY. Review
+		// round-4 finding #2: rev3 of this branch accepted any
+		// composite literal, so a bookkeeping struct construction
+		// (`payload := AuditPayload{...}`) was misclassified as
+		// canonical and silently dropped. Now the literal type's
+		// name (qualified or unqualified) must be ResourceRef.
 		if a.Tok == token.DEFINE {
-			if cl, ok := a.Rhs[0].(*ast.CompositeLit); ok {
-				_ = cl
+			if cl, ok := a.Rhs[0].(*ast.CompositeLit); ok && typeNameTailMatches(cl.Type, "ResourceRef") {
 				return true
 			}
 		}
@@ -647,9 +687,17 @@ func isCanonicalCaseAssign(a *ast.AssignStmt) bool {
 }
 
 // isDriverMethodCall reports whether expr is a call to a Driver method
-// (Create/Read/Update/Delete on a SelectorExpr receiver). Used by the
-// canonical-case classifier to distinguish driver dispatch from
-// bookkeeping AssignStmts.
+// (Create/Read/Update/Delete) where the receiver is a known
+// driver-bound identifier. Review round-4 finding #3: rev3 of this
+// function only checked the selector NAME, so any call like
+// `helper.Update(...)` or `metrics.Delete(...)` was misclassified as
+// canonical driver dispatch and the case body was rewritten away.
+//
+// The receiver allowlist is intentionally narrow: `d`, `drv`,
+// `driver` are the canonical names produced by the standard
+// `d, err := p.ResourceDriver(action.Resource.Type)` pattern (DO,
+// AWS, GCP, Azure). Anything else falls outside the rewrite-safe
+// shape and the case body is reported as non-canonical.
 func isDriverMethodCall(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
@@ -661,6 +709,16 @@ func isDriverMethodCall(expr ast.Expr) bool {
 	}
 	switch sel.Sel.Name {
 	case "Create", "Read", "Update", "Delete":
+		// fall through to receiver check
+	default:
+		return false
+	}
+	x, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	switch x.Name {
+	case "d", "drv", "driver":
 		return true
 	}
 	return false

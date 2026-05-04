@@ -422,8 +422,15 @@ func runAssertPlanDelegatesToHelper(pass *analysis.Pass) (any, error) {
 			}
 			// Accept either the canonical platform.ComputePlan (rev1
 			// review-corrected target) or the legacy wfctlhelpers.Plan
-			// (planned-but-not-shipped API) as delegated.
-			if !bodyCallsSelector(fn.Body, "platform", "ComputePlan") &&
+			// (planned-but-not-shipped API) as delegated. Resolve the
+			// platform / wfctlhelpers package aliases so files using
+			// `pf "github.com/.../platform"` style imports aren't
+			// false-flagged (review round-4 finding #5).
+			platformAlias := pkgAliasFor(file, planHelperImportPath, "platform")
+			wfhAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
+			if !bodyCallsSelector(fn.Body, platformAlias, "ComputePlan") &&
+				!bodyCallsSelector(fn.Body, "platform", "ComputePlan") &&
+				!bodyCallsSelector(fn.Body, wfhAlias, "Plan") &&
 				!bodyCallsSelector(fn.Body, "wfctlhelpers", "Plan") {
 				pass.Reportf(fn.Pos(), "%s.%s does not delegate to platform.ComputePlan; non-canonical Plan() body", receiverTypeName(fn), fn.Name.Name)
 			}
@@ -472,7 +479,11 @@ func runAssertApplyDelegatesToHelper(pass *analysis.Pass) (any, error) {
 				routeSkip(pass, fn)
 				continue
 			}
-			if !bodyCallsSelector(fn.Body, "wfctlhelpers", "ApplyPlan") {
+			// Resolve wfctlhelpers package alias to avoid false
+			// positives on aliased imports (review round-4 #5).
+			wfhAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
+			if !bodyCallsSelector(fn.Body, wfhAlias, "ApplyPlan") &&
+				!bodyCallsSelector(fn.Body, "wfctlhelpers", "ApplyPlan") {
 				pass.Reportf(fn.Pos(), "%s.%s does not delegate to wfctlhelpers.ApplyPlan; non-canonical Apply() body", receiverTypeName(fn), fn.Name.Name)
 			}
 		}

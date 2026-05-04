@@ -213,7 +213,7 @@ func refactorPlanFile(path string, opts *Options, report *planReport) error {
 			})
 			continue
 		}
-		class, reason := classifyPlanBody(fn)
+		class, reason := classifyPlanBody(fn, file)
 		site := planSite{
 			Path:     path,
 			Line:     fset.Position(fn.Pos()).Line,
@@ -389,12 +389,12 @@ func receiverTypeDocs(file *ast.File) map[string]receiverDoc {
 // intentional: a false-canonical risks silently dropping bespoke logic
 // during rewrite, whereas a false-non-canonical merely surfaces a
 // finding the maintainer can review and either skip-mark or hand-port.
-func classifyPlanBody(fn *ast.FuncDecl) (planClassification, string) {
+func classifyPlanBody(fn *ast.FuncDecl, file *ast.File) (planClassification, string) {
 	if fn.Body == nil {
 		return planNonCanonical, "missing body"
 	}
 	// Already-delegated: single statement `return wfctlhelpers.Plan(...)`.
-	if isAlreadyDelegatedPlanBody(fn.Body) {
+	if isAlreadyDelegatedPlanBody(fn.Body, file) {
 		return planAlreadyDelegated, ""
 	}
 	// Canonical: body matches the configHash-compare template.
@@ -405,28 +405,31 @@ func classifyPlanBody(fn *ast.FuncDecl) (planClassification, string) {
 }
 
 // isAlreadyDelegatedPlanBody returns true if the body is one of the
-// recognised already-delegated shapes:
+// recognised already-delegated shapes (with package alias resolution
+// per review round-4 finding #4):
 //
 //  1. The canonical 2-statement rev2 form (round-2 finding #1):
 //
-//     plan, err := platform.ComputePlan(ctx, p, desired, current)
+//     plan, err := <platform-alias>.ComputePlan(ctx, p, desired, current)
 //     return &plan, err
 //
-//  2. Single-statement legacy `return wfctlhelpers.Plan(...)` (rev0
-//     planned-but-not-shipped target).
+//  2. Single-statement legacy `return <wfctlhelpers-alias>.Plan(...)`
+//     (rev0 planned-but-not-shipped target).
 //
-//  3. Single-statement legacy `return platform.ComputePlan(...)` (rev1
-//     ill-formed rewrite — uncompilable due to value/pointer mismatch
-//     but accepted here so a hand-applied rev1 fixture isn't
-//     re-rewritten into the rev2 form, which would then be byte-clean
-//     under -fix; the maintainer can rerun -fix to upgrade.).
+//  3. Single-statement legacy `return <platform-alias>.ComputePlan(...)`
+//     (rev1 ill-formed rewrite — uncompilable due to value/pointer
+//     mismatch but accepted here so a hand-applied rev1 fixture isn't
+//     re-rewritten into the rev2 form).
 //
-// The argument lists are not inspected: any of these shapes is
-// considered done and idempotent.
-func isAlreadyDelegatedPlanBody(body *ast.BlockStmt) bool {
+// pkgAliasFor resolves the local alias the file uses for the
+// platform / wfctlhelpers import paths; literal names are accepted as
+// fallbacks so test fixtures without a real import work.
+func isAlreadyDelegatedPlanBody(body *ast.BlockStmt, file *ast.File) bool {
+	platformAlias := pkgAliasFor(file, planHelperImportPath, "platform")
+	wfhAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
 	// Shape 1: 2-statement form.
 	if len(body.List) == 2 {
-		if isPlatformComputePlanAssign(body.List[0]) && isAddrPlanReturn(body.List[1]) {
+		if isPlatformComputePlanAssign(body.List[0], platformAlias) && isAddrPlanReturn(body.List[1]) {
 			return true
 		}
 	}
@@ -451,17 +454,18 @@ func isAlreadyDelegatedPlanBody(body *ast.BlockStmt) bool {
 		return false
 	}
 	switch {
-	case x.Name == "platform" && sel.Sel.Name == "ComputePlan":
+	case (x.Name == platformAlias || x.Name == "platform") && sel.Sel.Name == "ComputePlan":
 		return true
-	case x.Name == "wfctlhelpers" && sel.Sel.Name == "Plan":
+	case (x.Name == wfhAlias || x.Name == "wfctlhelpers") && sel.Sel.Name == "Plan":
 		return true
 	}
 	return false
 }
 
-// isPlatformComputePlanAssign returns true if stmt is the canonical
-// `plan, err := platform.ComputePlan(...)` shape.
-func isPlatformComputePlanAssign(stmt ast.Stmt) bool {
+// isPlatformComputePlanAssign returns true if stmt is
+// `plan, err := <pkgAlias>.ComputePlan(...)`. pkgAlias is the local
+// name the file uses for the platform import (resolved by caller).
+func isPlatformComputePlanAssign(stmt ast.Stmt, pkgAlias string) bool {
 	a, ok := stmt.(*ast.AssignStmt)
 	if !ok || a.Tok != token.DEFINE || len(a.Lhs) != 2 || len(a.Rhs) != 1 {
 		return false
@@ -478,7 +482,7 @@ func isPlatformComputePlanAssign(stmt ast.Stmt) bool {
 	if !ok {
 		return false
 	}
-	return x.Name == "platform" && sel.Sel.Name == "ComputePlan"
+	return (x.Name == pkgAlias || x.Name == "platform") && sel.Sel.Name == "ComputePlan"
 }
 
 // isAddrPlanReturn returns true if stmt is `return &<X>, <Y>` for

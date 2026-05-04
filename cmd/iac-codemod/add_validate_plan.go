@@ -4,8 +4,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"io"
@@ -191,8 +193,20 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 	}
 	// Determine the qualifier for *IaCPlan / []PlanDiagnostic so the
 	// stub's signature matches whatever import-naming convention the
-	// file already uses (review round-1 finding #7).
+	// file already uses (review round-1 finding #7). Review round-4
+	// finding #1: when the type declaration lives in a sibling file
+	// (no interfaces import in THIS file) but ANY sibling does import
+	// interfaces, fall back to the qualifier the package uses ("interfaces")
+	// AND inject the import into this file via AST manipulation so the
+	// stub's qualified types resolve.
 	qualifier := interfacesQualifier(file)
+	needsInterfacesImport := false
+	if qualifier == "" {
+		if siblingUsesInterfacesImport(filepath.Dir(path), path) {
+			qualifier = "interfaces"
+			needsInterfacesImport = true
+		}
+	}
 	// Deterministic order for the report and for mutation: sort by
 	// declaration line.
 	type recvOrder struct {
@@ -270,13 +284,22 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 	}
 
 	if mutated && opts != nil && opts.Fix {
-		// Append stubs as raw text to the existing file source. This
-		// preserves the original formatting of the un-touched portion
-		// of the file (vs. reprinting the whole AST through
-		// format.Node, which would normalize unrelated whitespace).
-		appended := append([]byte{}, src...)
-		// Ensure the source ends with a single trailing newline before
-		// appending — otherwise the first stub joins onto the last line.
+		baseSrc := src
+		// Round-4 finding #1: when the stub uses a qualified type but
+		// the file doesn't import interfaces, add the import via AST
+		// printing first so the qualified type resolves.
+		if needsInterfacesImport {
+			ensureImport(file, "github.com/GoCodeAlone/workflow/interfaces")
+			var buf bytes.Buffer
+			if err := format.Node(&buf, fset, file); err != nil {
+				return fmt.Errorf("format %s: %w", path, err)
+			}
+			baseSrc = buf.Bytes()
+		}
+		// Append stubs as raw text. baseSrc is either the unmodified
+		// original (no interfaces import needed) or the AST-reprinted
+		// form with the interfaces import injected.
+		appended := append([]byte{}, baseSrc...)
 		if len(appended) == 0 || appended[len(appended)-1] != '\n' {
 			appended = append(appended, '\n')
 		}
@@ -362,6 +385,50 @@ func providerReceiverConvention(methods []*ast.FuncDecl) bool {
 		}
 	}
 	return true
+}
+
+// siblingUsesInterfacesImport returns true if any non-test .go file
+// in dir (other than excludePath) imports
+// github.com/GoCodeAlone/workflow/interfaces. Used to decide whether
+// to inject an interfaces import into a file that doesn't have one
+// when emitting a qualified ValidatePlan stub (review round-4 #1).
+func siblingUsesInterfacesImport(dir, excludePath string) bool {
+	const wantPath = "github.com/GoCodeAlone/workflow/interfaces"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fpath := filepath.Join(dir, name)
+		if fpath == excludePath {
+			continue
+		}
+		src, err := readFile(fpath)
+		if err != nil {
+			continue
+		}
+		fs := token.NewFileSet()
+		sib, err := parser.ParseFile(fs, fpath, src, parser.ImportsOnly)
+		if err != nil {
+			continue
+		}
+		for _, imp := range sib.Imports {
+			if imp.Path == nil {
+				continue
+			}
+			if strings.Trim(imp.Path.Value, `"`) == wantPath {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // interfacesQualifier returns the package alias `file` uses for
