@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/iac/diffcache"
@@ -89,6 +90,7 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 	type modCandidate struct {
 		spec interfaces.ResourceSpec
 		rs   interfaces.ResourceState
+		hash string // precomputed configHash(spec.Config); reused by classifyModification
 	}
 	var candidates []modCandidate
 	for _, spec := range desired {
@@ -100,7 +102,7 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 				ResolvedConfigHash: hash,
 			})
 		} else {
-			candidates = append(candidates, modCandidate{spec: spec, rs: rs})
+			candidates = append(candidates, modCandidate{spec: spec, rs: rs, hash: hash})
 		}
 	}
 
@@ -114,7 +116,7 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 		g.SetLimit(planDiffConcurrency())
 		for i := range candidates {
 			g.Go(func() error {
-				return classifyModification(gctx, p, candidates[i].spec, candidates[i].rs, &mods[i])
+				return classifyModification(gctx, p, candidates[i].spec, candidates[i].rs, candidates[i].hash, &mods[i])
 			})
 		}
 		if err := g.Wait(); err != nil {
@@ -175,9 +177,11 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 // and writes the resulting PlanAction (or nil for skip) to *out. It
 // honors the nil-provider / nil-driver fallback contract documented on
 // ComputePlan: when no driver is available, the resource is classified
-// via the legacy ConfigHash compare.
-func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, rs interfaces.ResourceState, out **interfaces.PlanAction) error {
-	hash := configHash(spec.Config)
+// via the legacy ConfigHash compare. The hash argument is the
+// precomputed configHash(spec.Config), threaded in by the caller so
+// the per-candidate hashing happens once during candidate-bucketing
+// rather than redundantly here on every Diff dispatch.
+func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, rs interfaces.ResourceState, hash string, out **interfaces.PlanAction) error {
 	rsCopy := rs
 
 	// Nil-provider fallback: legacy ConfigHash compare.
@@ -216,26 +220,63 @@ func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec in
 	// downgrades naturally invalidate via PluginVersion; outputs drift
 	// invalidates via SHAOutputs. Apply-time correctness does NOT depend
 	// on cache hits — every miss falls through to provider.Diff.
-	cache := getDiffCache()
-	key := diffcache.Key{
-		PluginVersion: pluginVersionKey(p),
-		Type:          spec.Type,
-		ProviderID:    rs.ProviderID,
-		SHAConfig:     hash,
-		SHAOutputs:    configHash(rs.Outputs),
-	}
+	//
+	// Cache is bypassed when rs.ProviderID is empty: ProviderID is the
+	// disambiguator across multiple resources of the same Type that
+	// otherwise hash-collide on (SHAConfig, SHAOutputs). Empty ProviderID
+	// occurs during state-bootstrap, broken-plugin paths, or transient
+	// races; honoring those cache entries could let two newly-discovered
+	// resources of the same Type with default-config / empty-outputs
+	// serve each other's cached DiffResult and misclassify actions.
+	// Always re-dispatch in that case; the cost is one extra Diff call,
+	// not correctness.
 	var diff *interfaces.DiffResult
-	if cached, hit := cache.Get(key); hit {
-		c := cached
-		diff = &c
-	} else {
+	cacheable := rs.ProviderID != ""
+	var (
+		cache diffcache.Cache
+		key   diffcache.Key
+	)
+	if cacheable {
+		// getDiffCache lives inside this branch so the empty-ProviderID
+		// bypass path is fully side-effect free — no sync.Once init
+		// firing, no atomic load, and (most importantly) no eager
+		// lazy-construction of the filesystem cache backend creating
+		// ~/.cache/wfctl/diff/ on the operator's machine for resources
+		// that won't use the cache anyway.
+		cache = getDiffCache()
+		key = diffcache.Key{
+			PluginVersion: pluginVersionKey(p),
+			Type:          spec.Type,
+			ProviderID:    rs.ProviderID,
+			SHAConfig:     hash,
+			SHAOutputs:    configHash(rs.Outputs),
+		}
+		if cached, hit := cache.Get(key); hit {
+			c := cached
+			diff = &c
+		}
+	}
+	if diff == nil {
 		currentOut := resourceStateToOutput(&rs)
 		fresh, err := driver.Diff(ctx, spec, currentOut)
 		if err != nil {
 			return fmt.Errorf("provider.Diff(%q/%q): %w", spec.Type, spec.Name, err)
 		}
-		if fresh != nil {
-			cache.Put(key, *fresh)
+		if cacheable {
+			// Cache both the populated DiffResult and the no-op case
+			// (driver returned (nil, nil) to signal "no changes"). The
+			// downstream switch treats a zero-value DiffResult as no-op
+			// just like nil, so caching the zero value here gives
+			// providers that use the nil-as-no-op convention the same
+			// cache benefit as those that return &DiffResult{} —
+			// next ComputePlan against unchanged inputs gets a cache
+			// hit instead of re-dispatching to the (potentially
+			// network-expensive) Diff.
+			toCache := interfaces.DiffResult{}
+			if fresh != nil {
+				toCache = *fresh
+			}
+			cache.Put(key, toCache)
 		}
 		diff = fresh
 	}
@@ -319,9 +360,12 @@ func hasForceNew(changes []interfaces.FieldChange) bool {
 const planDiffConcurrencyDefault = 8
 
 // planDiffConcurrencyMin and Max are the clamp bounds for
-// WFCTL_PLAN_DIFF_CONCURRENCY parsing. Below 1 disables concurrency
-// (worse than serial); above 32 is unlikely to help on any reachable
-// provider and can trip rate limits.
+// WFCTL_PLAN_DIFF_CONCURRENCY parsing. Values <= 0 are clamped UP to
+// planDiffConcurrencyMin (=1), which produces effectively serial
+// dispatch (one Diff in flight at a time) — operators cannot turn
+// the worker pool fully off, only narrow it to one. Above 32 is
+// unlikely to help on any reachable provider and can trip rate
+// limits, so values >max clamp DOWN to planDiffConcurrencyMax.
 const (
 	planDiffConcurrencyMin = 1
 	planDiffConcurrencyMax = 32
@@ -367,23 +411,55 @@ func parseConcurrencyEnv(v string) int {
 
 // planDiffCache is the package-level diff cache used by
 // classifyModification. Lazy-initialized on first call to getDiffCache
-// from the WFCTL_DIFFCACHE env var via diffcache.New(). Tests in the
-// same package may swap it via setDiffCacheForTest (defined in
-// differ_cache_test.go).
+// from the WFCTL_DIFFCACHE env var via diffcache.New(), then served
+// lock-free from the atomic.Pointer for the lifetime of the process.
+// Tests in the same package may swap it via setDiffCacheForTest
+// (defined in differ_cache_test.go) — Store on the atomic is safe
+// concurrently with production Loads, and atomic.Pointer cleanly
+// handles the nil case (test cleanup may restore a nil prior value
+// without panicking the way atomic.Value would).
+//
+// Refactored from a per-call sync.Mutex to sync.Once + atomic.Pointer
+// (Copilot review round 4): under ComputePlan's parallel Diff fan-out,
+// the per-call mutex was contention on the hot path, especially on
+// cache hits where the Get itself is cheap.
 var (
-	planDiffCacheMu sync.Mutex
-	planDiffCache   diffcache.Cache
+	planDiffCacheOnce sync.Once
+	planDiffCachePtr  atomic.Pointer[diffcache.Cache] // Load is lock-free; nil means uninitialized
 )
 
 // getDiffCache returns the package-level diff cache, initializing it
-// from the environment on first call. Safe for concurrent use.
+// from the environment on first call. Safe for concurrent use; the
+// initialization fires exactly once via sync.Once and subsequent
+// reads are lock-free atomic.Load. classifyModification only calls
+// this when the resource is cacheable (non-empty ProviderID), so the
+// bypass path neither acquires the Once nor eagerly initializes the
+// filesystem cache backend on ~/.cache/wfctl/diff/.
 func getDiffCache() diffcache.Cache {
-	planDiffCacheMu.Lock()
-	defer planDiffCacheMu.Unlock()
-	if planDiffCache == nil {
-		planDiffCache = diffcache.New()
+	if p := planDiffCachePtr.Load(); p != nil {
+		// Fast path: already initialized (production hot path AND any
+		// test that has swapped a cache in via setDiffCacheForTest).
+		return *p
 	}
-	return planDiffCache
+	planDiffCacheOnce.Do(func() {
+		// Re-check under Once: a concurrent setDiffCacheForTest could
+		// have Stored between our Load above and entering the Once
+		// body. Only seed the default if no value is present.
+		if planDiffCachePtr.Load() == nil {
+			c := diffcache.New()
+			planDiffCachePtr.Store(&c)
+		}
+	})
+	if p := planDiffCachePtr.Load(); p != nil {
+		return *p
+	}
+	// Defensive: should be unreachable. A concurrent test cleanup that
+	// restored a nil prior value AFTER our Once fired could in
+	// principle leave Load returning nil; fall through to a fresh
+	// noop-cache rather than panic. Test code never relies on this
+	// (cleanups always restore the prior concrete cache or a fresh
+	// default — see setDiffCacheForTest below).
+	return diffcache.NewNoop()
 }
 
 // ConfigHash is the exported counterpart of configHash. It allows callers

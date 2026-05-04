@@ -13,17 +13,30 @@ import (
 // setDiffCacheForTest swaps the package-level diff cache for c and
 // restores the previous instance via t.Cleanup. Lives in this
 // internal-package test file so it can touch the unexported
-// planDiffCache var without exposing a production-visible setter.
+// planDiffCachePtr var without exposing a production-visible setter.
+//
+// After getDiffCache was refactored to sync.Once + atomic.Pointer
+// (Copilot review round 4), the swap mechanism stores into the atomic
+// directly. Cleanup restores the prior pointer if there was one, or
+// seeds a fresh default cache when no prior value existed (so any
+// subsequent test that doesn't call setDiffCacheForTest still observes
+// a working cache and doesn't trip getDiffCache's defensive
+// noop-fallback).
 func setDiffCacheForTest(t *testing.T, c diffcache.Cache) {
 	t.Helper()
-	planDiffCacheMu.Lock()
-	prev := planDiffCache
-	planDiffCache = c
-	planDiffCacheMu.Unlock()
+	prev := planDiffCachePtr.Load() // may be nil if Once hasn't fired
+	planDiffCachePtr.Store(&c)
 	t.Cleanup(func() {
-		planDiffCacheMu.Lock()
-		planDiffCache = prev
-		planDiffCacheMu.Unlock()
+		if prev != nil {
+			planDiffCachePtr.Store(prev)
+			return
+		}
+		// No prior value — seed a fresh default so subsequent
+		// production code paths in this test binary still observe a
+		// working cache. Avoids leaving the atomic at nil, which would
+		// hit getDiffCache's defensive noop-fallback.
+		fresh := diffcache.New()
+		planDiffCachePtr.Store(&fresh)
 	})
 }
 
@@ -219,21 +232,26 @@ func (d *cacheTestDriver) SensitiveKeys() []string { return nil }
 // so the boundary cases can be exercised without process restart.
 func TestParseConcurrencyEnv(t *testing.T) {
 	cases := []struct {
+		// name is the subtest label (avoids using the raw empty string
+		// from `in` as the t.Run name, which Go's testing package
+		// silently rewrites to "#00" — readable in -v output but masks
+		// the case identity in failure reports).
+		name string
 		in   string
 		want int
 	}{
-		{"", planDiffConcurrencyDefault},
-		{"abc", planDiffConcurrencyDefault},
-		{"-5", planDiffConcurrencyMin},
-		{"0", planDiffConcurrencyMin},
-		{"1", 1},
-		{"8", 8},
-		{"32", 32},
-		{"33", planDiffConcurrencyMax},
-		{"100", planDiffConcurrencyMax},
+		{"empty", "", planDiffConcurrencyDefault},
+		{"non_numeric", "abc", planDiffConcurrencyDefault},
+		{"negative", "-5", planDiffConcurrencyMin},
+		{"zero", "0", planDiffConcurrencyMin},
+		{"one", "1", 1},
+		{"eight", "8", 8},
+		{"thirty_two", "32", 32},
+		{"thirty_three_clamped_to_max", "33", planDiffConcurrencyMax},
+		{"one_hundred_clamped_to_max", "100", planDiffConcurrencyMax},
 	}
 	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			if got := parseConcurrencyEnv(tc.in); got != tc.want {
 				t.Errorf("parseConcurrencyEnv(%q) = %d, want %d", tc.in, got, tc.want)
 			}
@@ -353,13 +371,18 @@ func TestComputePlan_ParallelDiffDispatch_InFlightGoroutinesObserved(t *testing.
 
 // channelGatedDriver is a ResourceDriver that blocks every Diff call
 // on a shared release channel so tests can observe in-flight
-// concurrency. inFlight tracks the peak number of simultaneous Diff
-// goroutines.
+// concurrency. inFlight is the *current* (live) count of in-progress
+// Diff goroutines — incremented on Diff entry, decremented on return.
+// It is NOT a peak/high-water-mark counter; the parallel-dispatch
+// assertion is made via the `entered` channel (which receives one
+// signal per goroutine that has reached the gate), not via
+// inFlight. The atomic counter is retained for diagnostic logging
+// and as a sanity invariant (reaches zero after release).
 type channelGatedDriver struct {
 	entered   chan struct{}
 	release   chan struct{}
 	diffCount atomic.Int64
-	inFlight  atomic.Int64
+	inFlight  atomic.Int64 // current in-flight count (NOT peak); see docstring
 }
 
 var _ interfaces.ResourceDriver = (*channelGatedDriver)(nil)
@@ -375,11 +398,13 @@ func (d *channelGatedDriver) Update(_ context.Context, _ interfaces.ResourceRef,
 }
 func (d *channelGatedDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
 func (d *channelGatedDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
-	cur := d.inFlight.Add(1)
+	// inFlight is bumped/decremented for diagnostic visibility + the
+	// "drains to zero after release" sanity invariant. The actual
+	// parallel-dispatch assertion is made via the `entered` channel
+	// (one signal per goroutine that has reached this gate); see the
+	// channelGatedDriver docstring.
+	d.inFlight.Add(1)
 	defer d.inFlight.Add(-1)
-	// Track peak via CAS-style monotonic increase — simpler to just
-	// rely on the entered channel for the assertion.
-	_ = cur
 	d.diffCount.Add(1)
 	d.entered <- struct{}{}
 	<-d.release
@@ -457,5 +482,96 @@ func TestComputePlan_DriverReturnsNilDiff_EmitsNothing(t *testing.T) {
 	}
 	if got := driver.diffCount.Load(); got != 1 {
 		t.Errorf("Diff was called %d times, want 1 (verifies dispatch reached driver)", got)
+	}
+}
+
+// TestComputePlan_EmptyProviderID_BypassesCache pins the bypass for
+// the empty-ProviderID hash-collision risk: the cache key shape
+// (PluginVersion, Type, ProviderID, SHAConfig, SHAOutputs) does not
+// include the resource Name, so two existing-state resources of the
+// same Type with ProviderID=="" + matching SHAConfig + SHAOutputs
+// would otherwise serve each other's cached DiffResult and
+// misclassify actions. classifyModification skips Get/Put when
+// ProviderID is empty and always re-dispatches. This test exercises
+// two same-Type resources whose only differentiator is Name (each
+// has ProviderID=="") and asserts the driver receives a Diff call
+// for each, not just one.
+func TestComputePlan_EmptyProviderID_BypassesCache(t *testing.T) {
+	setDiffCacheForTest(t, diffcache.NewMemory())
+
+	driver := &cacheTestDriver{diff: &interfaces.DiffResult{NeedsUpdate: true}}
+	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
+
+	// Two resources, same Type + Config + Outputs, distinct Names —
+	// hash-collide on (Type, ProviderID="", SHAConfig, SHAOutputs).
+	desired := []interfaces.ResourceSpec{
+		{Name: "vpc-a", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
+		{Name: "vpc-b", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "vpc-a", Type: "infra.vpc", ProviderID: "", Outputs: map[string]any{"cidr": "10.0.0.0/16"}},
+		{Name: "vpc-b", Type: "infra.vpc", ProviderID: "", Outputs: map[string]any{"cidr": "10.0.0.0/16"}},
+	}
+
+	if _, err := ComputePlan(context.Background(), provider, desired, current); err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	if got := driver.diffCount.Load(); got != 2 {
+		t.Errorf("Diff calls = %d, want 2 (empty ProviderID bypasses cache; both resources re-dispatched)", got)
+	}
+	// Sanity: a second invocation also re-dispatches both, since cache
+	// is bypassed entirely on the empty-ProviderID path.
+	if _, err := ComputePlan(context.Background(), provider, desired, current); err != nil {
+		t.Fatalf("second ComputePlan: %v", err)
+	}
+	if got := driver.diffCount.Load(); got != 4 {
+		t.Errorf("Diff calls after 2nd ComputePlan = %d, want 4 (no cache hits when ProviderID is empty)", got)
+	}
+}
+
+// TestComputePlan_NilDiffResult_CachesAsZeroValue pins the round-5
+// fix: providers that return (nil, nil) from driver.Diff to indicate
+// "no changes" (a documented option in the (DiffResult|nil, error|nil)
+// return shape) get the same cache benefit as providers that return
+// &DiffResult{}. Before the fix, the cache.Put was guarded by
+// `fresh != nil`, so nil-as-no-op convention providers re-Diffed on
+// every ComputePlan call, undermining the cache contract. The fix
+// caches a zero-value DiffResult on (nil, nil) returns; classifyModification's
+// downstream switch treats zero-value the same as nil (no plan
+// action), so the semantic is preserved while the cache stays
+// effective.
+func TestComputePlan_NilDiffResult_CachesAsZeroValue(t *testing.T) {
+	setDiffCacheForTest(t, diffcache.NewMemory())
+
+	driver := &cacheTestDriver{diff: nil} // nil-as-no-op convention
+	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
+
+	desired := []interfaces.ResourceSpec{
+		{Name: "vpc", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "vpc", Type: "infra.vpc", ProviderID: "pid-vpc", Outputs: map[string]any{"cidr": "10.0.0.0/16"}},
+	}
+
+	plan1, err := ComputePlan(context.Background(), provider, desired, current)
+	if err != nil {
+		t.Fatalf("first ComputePlan: %v", err)
+	}
+	if len(plan1.Actions) != 0 {
+		t.Errorf("first ComputePlan: expected no actions for nil-DiffResult; got %+v", plan1.Actions)
+	}
+	if got := driver.diffCount.Load(); got != 1 {
+		t.Errorf("after first ComputePlan: Diff calls = %d, want 1 (cache miss)", got)
+	}
+
+	plan2, err := ComputePlan(context.Background(), provider, desired, current)
+	if err != nil {
+		t.Fatalf("second ComputePlan: %v", err)
+	}
+	if len(plan2.Actions) != 0 {
+		t.Errorf("second ComputePlan: expected no actions on cache hit; got %+v", plan2.Actions)
+	}
+	if got := driver.diffCount.Load(); got != 1 {
+		t.Errorf("after second ComputePlan: Diff calls = %d, want 1 (cache hit on zero-value DiffResult; round-5 fix)", got)
 	}
 }

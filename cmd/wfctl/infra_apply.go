@@ -58,123 +58,6 @@ var computeInfraPlan = platform.ComputePlan
 // Same var-seam pattern as computeInfraPlan / resolveIaCProvider.
 var applyV2ApplyPlanFn = wfctlhelpers.ApplyPlan
 
-// applyAllowReplaceSet is the per-invocation allow-list of resource
-// names whose `protected: true` annotation is overridden for this
-// apply. Populated by runInfraApply from the --allow-replace=<csv>
-// flag value via parseAllowReplaceFlag; reset to nil at the top of
-// every runInfraApply so the gate fails closed on subsequent
-// invocations that do not pass the flag.
-//
-// Read inside validateAllowReplaceProtected, called from both apply
-// dispatch paths (live-diff and --plan). nil/empty set means no
-// override — every replace/delete on a protected resource errors
-// before dispatch.
-var applyAllowReplaceSet map[string]struct{}
-
-// parseAllowReplaceFlag turns a comma-separated --allow-replace=<csv>
-// flag value into a name-set. Empty input → nil (the canonical
-// "no override" value, indistinguishable from the flag never being
-// passed). Whitespace around each name is trimmed so operators can
-// copy-paste the design's plan-output format
-// (`--allow-replace=name1,name2`) without it falling apart on
-// stray spaces.
-func parseAllowReplaceFlag(raw string) map[string]struct{} {
-	if raw == "" {
-		return nil
-	}
-	out := map[string]struct{}{}
-	for _, name := range strings.Split(raw, ",") {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		out[name] = struct{}{}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-// validateAllowReplaceProtected gates dispatch on the per-resource
-// `protected: true` annotation. It walks every replace or delete
-// action in plan and aggregates ALL blockers (resources protected and
-// not in `allow`) into a single error before returning, so the
-// operator sees the full set of names in one apply attempt and can
-// authorize them with one round-trip via the pre-formatted
-// --allow-replace=<csv> value.
-//
-// Format (T6.2):
-//
-//	plan would require destructive action on N protected resource(s):
-//	  <name1> (replace)
-//	  <name2> (delete)
-//	  ...
-//	to authorize, re-run with:
-//	  --allow-replace=<name1>,<name2>,...
-//
-// Both names and the csv preserve plan-action declaration order so
-// the output is deterministic across runs.
-//
-// `protected: true` is sourced from PlanAction.Resource.Config for
-// replace actions (where Resource carries the desired spec) and from
-// PlanAction.Current.AppliedConfig for delete actions (where
-// platform.differ leaves Resource.Config empty and the protected
-// status is preserved on the previously-applied state).
-func validateAllowReplaceProtected(plan interfaces.IaCPlan, allow map[string]struct{}) error {
-	type blocker struct {
-		name   string
-		action string
-	}
-	var blockers []blocker
-	for i := range plan.Actions {
-		a := &plan.Actions[i]
-		if a.Action != "replace" && a.Action != "delete" {
-			continue
-		}
-		if !planActionIsProtected(a) {
-			continue
-		}
-		if _, ok := allow[a.Resource.Name]; ok {
-			continue
-		}
-		blockers = append(blockers, blocker{name: a.Resource.Name, action: a.Action})
-	}
-	if len(blockers) == 0 {
-		return nil
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "plan would require destructive action on %d protected resource(s):", len(blockers))
-	names := make([]string, 0, len(blockers))
-	for _, blk := range blockers {
-		fmt.Fprintf(&b, "\n  %s (%s)", blk.name, blk.action)
-		names = append(names, blk.name)
-	}
-	fmt.Fprintf(&b, "\nto authorize, re-run with:\n  --allow-replace=%s", strings.Join(names, ","))
-	return errors.New(b.String())
-}
-
-// planActionIsProtected reports whether the action targets a resource
-// annotated `protected: true`. Replace actions carry the desired
-// Config on Resource; delete actions (built by platform.differ from
-// current state) carry the protected flag on Current.AppliedConfig.
-// Returning true if either source declares protected covers both
-// classes.
-func planActionIsProtected(a *interfaces.PlanAction) bool {
-	if a.Resource.Config != nil {
-		if p, ok := a.Resource.Config["protected"].(bool); ok && p {
-			return true
-		}
-	}
-	if a.Current != nil && a.Current.AppliedConfig != nil {
-		if p, ok := a.Current.AppliedConfig["protected"].(bool); ok && p {
-			return true
-		}
-	}
-	return false
-}
-
 // hasInfraModules reports whether cfgFile contains any modules with the new
 // infra.* type prefix. Used by runInfraApply to select the dispatch path:
 // direct IaCProvider path for infra.* configs, pipeline path for legacy
@@ -525,7 +408,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// load time and surfaced via the optional
 	// wfctlhelpers.ComputePlanVersionDeclarer interface.
 	var result *interfaces.ApplyResult
-	if v, ok := provider.(wfctlhelpers.ComputePlanVersionDeclarer); ok && wfctlhelpers.DispatchVersionFor(v) == wfctlhelpers.DispatchVersionV2 {
+	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
 		result, err = applyV2ApplyPlanFn(ctx, provider, &plan)
 		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
 		// v2 dispatch is the production caller that surfaces input

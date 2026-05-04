@@ -13,9 +13,15 @@ package wfctlhelpers
 // provider that does not satisfy this interface defaults to v1 (legacy
 // dispatch); a provider that returns "v2" routes through ApplyPlan; any
 // other return value is treated as "v1" so a typo in the manifest
-// silently degrades to the safe legacy path. Schema validation in
-// plugin/sdk.ParseManifest catches unknown values at parse time so
-// this branch only sees "v1", "v2", or empty in practice.
+// silently degrades to the safe legacy path.
+//
+// NOTE on validation: when the manifest is loaded via plugin/sdk.ParseManifest,
+// schema validation rejects unknown values at parse time. However, some
+// loader paths in wfctl (e.g. cmd/wfctl/deploy_providers.go's
+// findIaCPluginDir) currently use a minimal json.Unmarshal without
+// schema validation, so unknown values CAN reach DispatchVersionFor at
+// runtime. The default-to-v1 behavior is the safety net for those
+// paths — DO NOT rely on the manifest-validation guarantee in callers.
 type ComputePlanVersionDeclarer interface {
 	ComputePlanVersion() string
 }
@@ -29,12 +35,24 @@ const DispatchVersionV2 = "v2"
 // Providers that don't implement ComputePlanVersionDeclarer, or that
 // return anything other than "v2", get "v1" (the legacy
 // provider.Apply path). Centralizing the type assertion + default
-// keeps the dispatch decision in one place.
-func DispatchVersionFor(p ComputePlanVersionDeclarer) string {
+// keeps the dispatch decision in one place — call sites pass the raw
+// provider value (typed as interfaces.IaCProvider or any concrete
+// provider type) rather than type-asserting at every dispatch site.
+//
+// Param is `any` rather than interfaces.IaCProvider so this package
+// stays import-free of the engine's interfaces package (and so
+// non-engine call sites such as tests can pass concrete provider
+// stubs without an extra adapter). The contract is identical: pass
+// the loaded provider; receive "v1" or "v2".
+func DispatchVersionFor(p any) string {
 	if p == nil {
 		return "v1"
 	}
-	if v := p.ComputePlanVersion(); v == DispatchVersionV2 {
+	d, ok := p.(ComputePlanVersionDeclarer)
+	if !ok {
+		return "v1"
+	}
+	if v := d.ComputePlanVersion(); v == DispatchVersionV2 {
 		return DispatchVersionV2
 	}
 	return "v1"
