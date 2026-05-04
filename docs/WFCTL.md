@@ -1218,6 +1218,65 @@ wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
 wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
 ```
 
+#### `infra apply`
+
+Reconcile cloud infrastructure to match the desired state declared in the config. Computes a diff plan via each `iac.provider` and dispatches creates/updates/replaces/deletes through the loaded provider plugin. State is persisted after every successful action so the next run sees the cloud-truth.
+
+```
+wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
+                  [--refresh] [--allow-protected-prune] [--skip-refresh]
+                  [--allow-replace=NAME1,NAME2,...]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c`, `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `-y`, `--auto-approve` | `false` | Skip the confirmation prompt |
+| `-S`, `--show-sensitive` | `false` | Show sensitive values in plaintext |
+| `--env` | `` | Environment name (resolves per-module `environments:` overrides) |
+| `--plan` | `` | Apply from a pre-emitted `plan.json` (skips `ComputePlan`) |
+| `--refresh` | `false` | Detect drift and prune ghost-in-state entries before applying |
+| `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
+| `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
+| `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
+
+**Protected-resource gate:**
+
+Resources annotated `protected: true` cannot be replaced or deleted by `infra apply` without an explicit per-resource opt-in. When a plan would replace or delete a protected resource, `wfctl` aborts before any provider dispatch and prints the full set of blockers in one pass with a copy-paste-ready flag value:
+
+```
+plan would require destructive action on 3 protected resource(s):
+  coredump-staging-vpc (replace)
+  coredump-staging-pg-data (replace)
+  coredump-staging-pg (replace)
+to authorize, re-run with:
+  --allow-replace=coredump-staging-vpc,coredump-staging-pg-data,coredump-staging-pg
+```
+
+The gate fires on both dispatch paths — live diff (`apply` without `--plan`) and precomputed plan (`apply --plan plan.json`) — so the safety guarantee holds regardless of plan provenance. The blocker listing and the csv preserve plan-action declaration order so output is deterministic across runs.
+
+To authorize, re-run with the printed flag value. Names not in the list keep their protection; the override is per-invocation and never persisted.
+
+| Knob | Effect |
+|------|--------|
+| `--allow-replace=name1,name2` | Authorize replace/delete on the listed resources for this apply only. |
+| `--allow-protected-prune` (requires `--refresh`) | Older flag — authorizes pruning state entries for **all** protected resources during the refresh phase. Recommended only for state cleanup; for production use prefer `--allow-replace` (intent-explicit per resource). |
+
+**Examples:**
+
+```bash
+# Standard apply.
+wfctl infra apply --auto-approve -c infra.yaml --env staging
+
+# Apply from a pre-emitted plan.
+wfctl infra plan -c infra.yaml --env staging -o plan.json
+wfctl infra apply --auto-approve -c infra.yaml --env staging --plan plan.json
+
+# Authorize a Replace cascade on protected resources.
+wfctl infra apply --auto-approve -c infra.yaml --env prod \
+  --allow-replace=coredump-prod-vpc,coredump-prod-pg
+```
+
 #### `infra refresh-outputs`
 
 Read live outputs from each `iac.provider` for resources already in state and persist any field-level changes back to the state backend. The contract is strictly read-only at the cloud level — `refresh-outputs` never invokes Update or Replace.
