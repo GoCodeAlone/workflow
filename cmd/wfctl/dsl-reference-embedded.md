@@ -1355,8 +1355,11 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 
 R-A10 dispatches the optional `interfaces.ProviderValidator.ValidatePlan(plan)`
 to every loaded `iac.provider`. Providers that do not implement it are skipped.
-`PlanDiagnosticError` becomes FAIL; `PlanDiagnosticWarning` and `PlanDiagnosticInfo`
-become WARN (advisory in default mode, fail under `--strict`). See the
+`PlanDiagnosticError` becomes a FAIL AlignFinding (always non-zero exit);
+`PlanDiagnosticWarning` becomes a WARN AlignFinding (non-zero only under
+`--strict`); `PlanDiagnosticInfo` is logged to stderr as
+`R-A10 [info] <provider>/<resource>: <message>` with no AlignFinding so
+`--strict` CI gates never fail on informational hints. See the
 `ProviderValidator` section in `DOCUMENTATION.md` for the SDK-side contract.
 
 ### Example output
