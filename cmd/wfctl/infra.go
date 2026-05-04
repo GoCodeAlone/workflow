@@ -46,6 +46,8 @@ func runInfra(args []string) error {
 		return runInfraBootstrap(args[1:])
 	case "outputs":
 		return runInfraOutputs(args[1:])
+	case "refresh-outputs":
+		return runInfraRefreshOutputs(args[1:])
 	case "align":
 		return runInfraAlign(args[1:])
 	case "security-check":
@@ -69,6 +71,7 @@ Actions:
   import         Import an existing cloud resource into state
   state          Manage IaC state (list, export, import)
   outputs        Print captured resource outputs from state
+  refresh-outputs Read live outputs and reconcile state (no cloud writes)
   align          Validate IaC config + plan alignment (8 rule families)
   security-check Scan plan.json for security policy violations
 
@@ -972,6 +975,8 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&refreshFlag, "refresh", false, "Detect drift and prune ghost-in-state entries before applying")
 	var allowProtectedPruneFlag bool
 	fs.BoolVar(&allowProtectedPruneFlag, "allow-protected-prune", false, "Allow pruning state entries for resources marked protected: true (requires --refresh)")
+	var skipRefreshFlag bool
+	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -1071,6 +1076,18 @@ func runInfraApply(args []string) error {
 			if refreshErr != nil {
 				return fmt.Errorf("refresh phase: %w", refreshErr)
 			}
+		}
+	}
+
+	// WFCTL_REFRESH_OUTPUTS pre-step (T2.3): when opted in, read live
+	// Outputs from each provider and persist any field-level changes
+	// before computing the plan, so apply doesn't make decisions on
+	// stale state. Default off; --skip-refresh always wins. Only
+	// applicable for infra.* configs (legacy platform.* path doesn't
+	// flow through iac/refreshoutputs).
+	if applyPreStepRefreshEnabled(skipRefreshFlag) && hasInfraModules(cfgFile) {
+		if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
+			return fmt.Errorf("apply pre-step refresh-outputs: %w", err)
 		}
 	}
 
