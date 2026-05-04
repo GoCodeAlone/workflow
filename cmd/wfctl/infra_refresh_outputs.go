@@ -37,7 +37,10 @@ func runInfraRefreshOutputs(args []string) error {
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module overrides)")
 	fs.StringVar(&envName, "e", "", "Environment name (short for --env)")
-	fs.IntVar(&concurrency, "concurrency", 0, "Maximum concurrent Read calls (default 8)")
+	// Default mirrors refreshoutputs.defaultConcurrency. Refresh still treats
+	// values < 1 as "use default" so callers passing an explicit 0 (or
+	// negative) keep working; this default just makes `--help` honest.
+	fs.IntVar(&concurrency, "concurrency", 8, "Maximum concurrent Read calls")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
