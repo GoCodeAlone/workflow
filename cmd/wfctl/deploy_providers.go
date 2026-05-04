@@ -720,13 +720,20 @@ func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.Resour
 		"current_provider_id": current.ProviderID,
 		"current_status":      current.Status,
 		"current_outputs":     current.Outputs,
-		// Sensitive crosses the gRPC boundary as map[string]any.
-		// structpb.NewStruct rejects map[string]bool; without this
-		// conversion the entire args struct silently drops to empty
-		// (mapToStruct in plugin/external/convert.go falls back to
-		// &structpb.Struct{} on err) and the plugin observes args=map[]
-		// — the bug T3.9 runtime-launch-validation surfaced.
-		"current_sensitive": sensitiveToAny(current.Sensitive),
+	}
+	// Sensitive crosses the gRPC boundary as map[string]any.
+	// structpb.NewStruct rejects map[string]bool; without this
+	// conversion the entire args struct silently drops to empty
+	// (mapToStruct in plugin/external/convert.go falls back to
+	// &structpb.Struct{} on err) and the plugin observes args=map[]
+	// — the bug T3.9 runtime-launch-validation surfaced.
+	//
+	// Only include the key when the converted map is non-empty, so the
+	// wire stays trim-friendly (matches sensitiveToAny's docstring).
+	// Setting `args["current_sensitive"] = nil` would serialize as a
+	// NullValue rather than omitting the field, defeating that intent.
+	if conv := sensitiveToAny(current.Sensitive); conv != nil {
+		args["current_sensitive"] = conv
 	}
 	res, err := d.invoker.InvokeService("ResourceDriver.Diff", args)
 	if err != nil {

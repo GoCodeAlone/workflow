@@ -219,25 +219,40 @@ func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec in
 	// downgrades naturally invalidate via PluginVersion; outputs drift
 	// invalidates via SHAOutputs. Apply-time correctness does NOT depend
 	// on cache hits — every miss falls through to provider.Diff.
-	cache := getDiffCache()
-	key := diffcache.Key{
-		PluginVersion: pluginVersionKey(p),
-		Type:          spec.Type,
-		ProviderID:    rs.ProviderID,
-		SHAConfig:     hash,
-		SHAOutputs:    configHash(rs.Outputs),
-	}
+	//
+	// Cache is bypassed when rs.ProviderID is empty: ProviderID is the
+	// disambiguator across multiple resources of the same Type that
+	// otherwise hash-collide on (SHAConfig, SHAOutputs). Empty ProviderID
+	// occurs during state-bootstrap, broken-plugin paths, or transient
+	// races; honoring those cache entries could let two newly-discovered
+	// resources of the same Type with default-config / empty-outputs
+	// serve each other's cached DiffResult and misclassify actions.
+	// Always re-dispatch in that case; the cost is one extra Diff call,
+	// not correctness.
 	var diff *interfaces.DiffResult
-	if cached, hit := cache.Get(key); hit {
-		c := cached
-		diff = &c
-	} else {
+	cacheable := rs.ProviderID != ""
+	cache := getDiffCache()
+	var key diffcache.Key
+	if cacheable {
+		key = diffcache.Key{
+			PluginVersion: pluginVersionKey(p),
+			Type:          spec.Type,
+			ProviderID:    rs.ProviderID,
+			SHAConfig:     hash,
+			SHAOutputs:    configHash(rs.Outputs),
+		}
+		if cached, hit := cache.Get(key); hit {
+			c := cached
+			diff = &c
+		}
+	}
+	if diff == nil {
 		currentOut := resourceStateToOutput(&rs)
 		fresh, err := driver.Diff(ctx, spec, currentOut)
 		if err != nil {
 			return fmt.Errorf("provider.Diff(%q/%q): %w", spec.Type, spec.Name, err)
 		}
-		if fresh != nil {
+		if cacheable && fresh != nil {
 			cache.Put(key, *fresh)
 		}
 		diff = fresh

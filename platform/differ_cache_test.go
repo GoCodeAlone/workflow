@@ -459,3 +459,47 @@ func TestComputePlan_DriverReturnsNilDiff_EmitsNothing(t *testing.T) {
 		t.Errorf("Diff was called %d times, want 1 (verifies dispatch reached driver)", got)
 	}
 }
+
+// TestComputePlan_EmptyProviderID_BypassesCache pins the bypass for
+// the empty-ProviderID hash-collision risk: the cache key shape
+// (PluginVersion, Type, ProviderID, SHAConfig, SHAOutputs) does not
+// include the resource Name, so two existing-state resources of the
+// same Type with ProviderID=="" + matching SHAConfig + SHAOutputs
+// would otherwise serve each other's cached DiffResult and
+// misclassify actions. classifyModification skips Get/Put when
+// ProviderID is empty and always re-dispatches. This test exercises
+// two same-Type resources whose only differentiator is Name (each
+// has ProviderID=="") and asserts the driver receives a Diff call
+// for each, not just one.
+func TestComputePlan_EmptyProviderID_BypassesCache(t *testing.T) {
+	setDiffCacheForTest(t, diffcache.NewMemory())
+
+	driver := &cacheTestDriver{diff: &interfaces.DiffResult{NeedsUpdate: true}}
+	provider := &cacheTestProvider{name: "fake", version: "0.0.0-test", driver: driver}
+
+	// Two resources, same Type + Config + Outputs, distinct Names —
+	// hash-collide on (Type, ProviderID="", SHAConfig, SHAOutputs).
+	desired := []interfaces.ResourceSpec{
+		{Name: "vpc-a", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
+		{Name: "vpc-b", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "vpc-a", Type: "infra.vpc", ProviderID: "", Outputs: map[string]any{"cidr": "10.0.0.0/16"}},
+		{Name: "vpc-b", Type: "infra.vpc", ProviderID: "", Outputs: map[string]any{"cidr": "10.0.0.0/16"}},
+	}
+
+	if _, err := ComputePlan(context.Background(), provider, desired, current); err != nil {
+		t.Fatalf("ComputePlan: %v", err)
+	}
+	if got := driver.diffCount.Load(); got != 2 {
+		t.Errorf("Diff calls = %d, want 2 (empty ProviderID bypasses cache; both resources re-dispatched)", got)
+	}
+	// Sanity: a second invocation also re-dispatches both, since cache
+	// is bypassed entirely on the empty-ProviderID path.
+	if _, err := ComputePlan(context.Background(), provider, desired, current); err != nil {
+		t.Fatalf("second ComputePlan: %v", err)
+	}
+	if got := driver.diffCount.Load(); got != 4 {
+		t.Errorf("Diff calls after 2nd ComputePlan = %d, want 4 (no cache hits when ProviderID is empty)", got)
+	}
+}
