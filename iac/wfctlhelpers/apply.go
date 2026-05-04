@@ -278,6 +278,10 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 // Failure semantics:
 //   - Delete fails → return wrapped "replace: delete: <err>"; Create
 //     does NOT run; ReplaceIDMap is NOT populated for this resource.
+//   - Delete succeeds, ctx canceled before Create → return wrapped
+//     "replace: canceled after delete: <err>"; Create does NOT run;
+//     ReplaceIDMap is NOT populated. The half-replaced state is the
+//     operator's recovery surface (same as the Create-fails case).
 //   - Delete succeeds, Create fails → return wrapped
 //     "replace: create: <err>"; ReplaceIDMap stays empty for this
 //     resource. Operators inspect the apply log + the empty-for-this-
@@ -296,6 +300,15 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
 	if err := d.Delete(ctx, refFromAction(action)); err != nil {
 		return fmt.Errorf("replace: delete: %w", err)
+	}
+	// Honor cancellation between Delete and Create. Without this guard
+	// a Ctrl-C / SIGTERM that arrives mid-Replace would still trigger
+	// the Create call, leaving the operator without the cleanest
+	// possible interruption point. The half-replaced state is still
+	// recoverable (Delete already happened; Create did not, so
+	// ReplaceIDMap stays empty) but cancellation propagates fast.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("replace: canceled after delete: %w", err)
 	}
 	out, err := d.Create(ctx, action.Resource)
 	if err != nil {

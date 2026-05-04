@@ -212,6 +212,78 @@ func TestApplyPlan_Replace_DeleteFailsDoesNotCreate(t *testing.T) {
 	}
 }
 
+// TestApplyPlan_Replace_CtxCancelAfterDelete_SkipsCreate verifies the
+// post-Delete cancellation guard: if ctx is canceled between Delete
+// and Create, doReplace must NOT call Create — instead returning a
+// wrapped error with the canonical "replace: canceled after delete:"
+// prefix. The half-replaced state is the operator's recovery surface
+// (Delete happened, Create did not, ReplaceIDMap stays empty for the
+// resource).
+func TestApplyPlan_Replace_CtxCancelAfterDelete_SkipsCreate(t *testing.T) {
+	// cancelOnDeleteDriver cancels the context inside Delete after
+	// recording the call but before returning. This simulates
+	// SIGTERM/SIGINT arriving exactly between the Delete and Create
+	// driver calls.
+	ctx, cancel := context.WithCancel(context.Background())
+	fp := &cancelOnDeleteFakeProvider{
+		fakeProvider: newFakeProvider(),
+		cancel:       cancel,
+	}
+	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
+		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
+	}}
+	result, err := ApplyPlan(ctx, fp, plan)
+	if err != nil {
+		// ApplyPlan's loop check catches the cancellation at the next
+		// iteration, but the per-action ctx check inside doReplace
+		// fires first. Either path yields a per-action error rather
+		// than a top-level error from this single-action plan.
+		t.Fatalf("ApplyPlan should not surface top-level error: %v", err)
+	}
+	if fp.driver.deleteCount != 1 {
+		t.Errorf("Delete should have run before cancellation; deleteCount=%d", fp.driver.deleteCount)
+	}
+	if fp.driver.createCount != 0 {
+		t.Errorf("Create must NOT run after ctx cancellation; createCount=%d", fp.driver.createCount)
+	}
+	if _, present := result.ReplaceIDMap["vpc"]; present {
+		t.Errorf("ReplaceIDMap must not contain vpc when Create skipped; got %+v", result.ReplaceIDMap)
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected 1 per-action error; got %d (%v)", len(result.Errors), result.Errors)
+	}
+	if !strings.HasPrefix(result.Errors[0].Error, "replace: canceled after delete:") {
+		t.Errorf("expected canonical 'replace: canceled after delete:' prefix; got %q", result.Errors[0].Error)
+	}
+}
+
+// cancelOnDeleteFakeProvider returns a driver whose Delete cancels a
+// supplied context.CancelFunc as a side-effect, simulating exact
+// post-Delete pre-Create cancellation.
+type cancelOnDeleteFakeProvider struct {
+	*fakeProvider
+	cancel context.CancelFunc
+	driver *cancelOnDeleteDriver
+}
+
+func (p *cancelOnDeleteFakeProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	if p.driver == nil {
+		p.driver = &cancelOnDeleteDriver{fakeDriver: p.fakeProvider.driver, cancel: p.cancel}
+	}
+	return p.driver, nil
+}
+
+type cancelOnDeleteDriver struct {
+	*fakeDriver
+	cancel context.CancelFunc
+}
+
+func (d *cancelOnDeleteDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
+	d.fakeDriver.deleteCount++
+	d.cancel() // ctx is now canceled; Create must not run.
+	return nil
+}
+
 // TestApplyPlan_Replace_CreateFailsLeavesMapEmpty verifies the
 // post-Delete pre-Create failure window: Delete succeeded but Create
 // failed → ReplaceIDMap stays empty for this resource (no spurious
