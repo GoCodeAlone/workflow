@@ -46,6 +46,8 @@ func runInfra(args []string) error {
 		return runInfraBootstrap(args[1:])
 	case "outputs":
 		return runInfraOutputs(args[1:])
+	case "refresh-outputs":
+		return runInfraRefreshOutputs(args[1:])
 	case "align":
 		return runInfraAlign(args[1:])
 	case "security-check":
@@ -69,6 +71,7 @@ Actions:
   import         Import an existing cloud resource into state
   state          Manage IaC state (list, export, import)
   outputs        Print captured resource outputs from state
+  refresh-outputs Read live outputs and reconcile state (no cloud writes)
   align          Validate IaC config + plan alignment (8 rule families)
   security-check Scan plan.json for security policy violations
 
