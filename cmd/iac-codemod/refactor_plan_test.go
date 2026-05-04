@@ -136,6 +136,138 @@ func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current 
 func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) { return nil, nil }
 `
 
+// canonicalPlanUnnamedReceiverSrc — review round-2 finding #3. A
+// canonical Plan method whose receiver is unnamed
+// (`func (*DOProvider) Plan(...)`) must produce a rewrite that compiles:
+// the rewriter must inject a receiver name (`p`) AND update the receiver
+// decl so the substituted call has a real referent.
+const canonicalPlanUnnamedReceiverSrc = `package p
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+type ResourceSpec struct{ Name string; Config map[string]any }
+type ResourceState struct{ Name string; AppliedConfig map[string]any }
+type IaCPlan struct{ ID string; CreatedAt time.Time; Actions []PlanAction }
+type PlanAction struct{ Action string; Resource ResourceSpec; Current *ResourceState }
+type ApplyResult struct{}
+type PlanDiagnostic struct{}
+
+type DOProvider struct{}
+
+func configHash(m map[string]any) string { return "" }
+
+// Unnamed receiver: ` + "`func (*DOProvider) Plan(...)`" + ` style.
+func (*DOProvider) Plan(_ context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	currentByName := make(map[string]ResourceState, len(current))
+	for _, r := range current {
+		currentByName[r.Name] = r
+	}
+	plan := &IaCPlan{ID: fmt.Sprintf("plan-%d", time.Now().UnixNano()), CreatedAt: time.Now()}
+	for _, spec := range desired {
+		cur, exists := currentByName[spec.Name]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlanAction{Action: "create", Resource: spec})
+			continue
+		}
+		if configHash(cur.AppliedConfig) != configHash(spec.Config) {
+			plan.Actions = append(plan.Actions, PlanAction{Action: "update", Resource: spec, Current: &cur})
+		}
+	}
+	return plan, nil
+}
+
+func (p *DOProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return wfctlhelpers.ApplyPlan(ctx, p, plan)
+}
+func (p *DOProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
+`
+
+func TestRefactorPlan_Fix_UnnamedReceiverGetsName(t *testing.T) {
+	path := writeFixture(t, "provider.go", canonicalPlanUnnamedReceiverSrc)
+	var stdout, stderr bytes.Buffer
+	if code := runRefactorPlan([]string{path}, &Options{DryRun: false, Fix: true}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	got, _ := os.ReadFile(path)
+	gotStr := string(got)
+	// The receiver must have been given a name (`p`) AND the call must
+	// reference it. Bare ast manipulation of an unnamed receiver into
+	// the body would refer to a non-existent `p` — test pins the fix.
+	if !strings.Contains(gotStr, "func (p *DOProvider) Plan(") {
+		t.Errorf("rewrite must inject a receiver name on previously-anonymous receivers; got:\n%s", gotStr)
+	}
+	if !strings.Contains(gotStr, "platform.ComputePlan(ctx, p,") {
+		t.Errorf("rewrite must reference the injected receiver name; got:\n%s", gotStr)
+	}
+}
+
+// canonicalPlanCustomCtxNameSrc — review round-1 finding #2 regression
+// test (non-blank ctx-param name preserved). The rewriter must NOT
+// rename `c` to `ctx`; the substituted call must reference `c`.
+const canonicalPlanCustomCtxNameSrc = `package p
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+type ResourceSpec struct{ Name string; Config map[string]any }
+type ResourceState struct{ Name string; AppliedConfig map[string]any }
+type IaCPlan struct{ ID string; CreatedAt time.Time; Actions []PlanAction }
+type PlanAction struct{ Action string; Resource ResourceSpec; Current *ResourceState }
+type ApplyResult struct{}
+type PlanDiagnostic struct{}
+
+type DOProvider struct{}
+
+func configHash(m map[string]any) string { return "" }
+
+func (p *DOProvider) Plan(c context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	currentByName := make(map[string]ResourceState, len(current))
+	for _, r := range current {
+		currentByName[r.Name] = r
+	}
+	plan := &IaCPlan{ID: fmt.Sprintf("plan-%d", time.Now().UnixNano()), CreatedAt: time.Now()}
+	for _, spec := range desired {
+		cur, exists := currentByName[spec.Name]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlanAction{Action: "create", Resource: spec})
+			continue
+		}
+		if configHash(cur.AppliedConfig) != configHash(spec.Config) {
+			plan.Actions = append(plan.Actions, PlanAction{Action: "update", Resource: spec, Current: &cur})
+		}
+	}
+	return plan, nil
+}
+
+func (p *DOProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return wfctlhelpers.ApplyPlan(ctx, p, plan)
+}
+func (p *DOProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
+`
+
+func TestRefactorPlan_Fix_PreservesCustomCtxName(t *testing.T) {
+	path := writeFixture(t, "provider.go", canonicalPlanCustomCtxNameSrc)
+	var stdout, stderr bytes.Buffer
+	if code := runRefactorPlan([]string{path}, &Options{DryRun: false, Fix: true}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	got, _ := os.ReadFile(path)
+	gotStr := string(got)
+	if !strings.Contains(gotStr, "Plan(c context.Context") {
+		t.Errorf("rewrite should preserve the custom ctx-param name `c`; got:\n%s", gotStr)
+	}
+	if !strings.Contains(gotStr, "platform.ComputePlan(c, p,") {
+		t.Errorf("substituted call must reference the original ctx name `c`, not `ctx`; got:\n%s", gotStr)
+	}
+}
+
 // canonicalPlanWithExtraLoggingSrc — review round-1 finding #3. A Plan
 // body whose desired-loop has an additional logging call (a real-world
 // bespoke planner) must NOT be classified as canonical: silently
@@ -206,8 +338,9 @@ func TestRefactorPlan_ExtraLoggingNotCanonical(t *testing.T) {
 	}
 }
 
-// alreadyDelegatedPlanSrc has a Plan body that is already
-// `return platform.ComputePlan(...)` (the rev1 review-corrected target).
+// alreadyDelegatedPlanSrc has a Plan body that is the canonical
+// 2-statement delegation to platform.ComputePlan (the rev2 form which
+// bridges the value/pointer mismatch from review round-2 finding #1).
 // The mode must NOT report it as non-canonical and must NOT mutate it
 // (idempotent).
 const alreadyDelegatedPlanSrc = `package p
@@ -221,7 +354,8 @@ type ApplyResult struct{}
 type FooProvider struct{}
 
 func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
-	return platform.ComputePlan(ctx, p, desired, current)
+	plan, err := platform.ComputePlan(ctx, p, desired, current)
+	return &plan, err
 }
 
 func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) { return nil, nil }
@@ -331,8 +465,15 @@ func TestRefactorPlan_Fix_RewritesCanonical(t *testing.T) {
 		t.Fatalf("read after fix: %v", err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(gotStr, "return platform.ComputePlan(ctx, p, desired, current)") {
-		t.Errorf("rewritten body should call platform.ComputePlan; got:\n%s", gotStr)
+	// Round-2 finding #1: platform.ComputePlan returns IaCPlan by value;
+	// provider Plan returns *IaCPlan. The rewrite uses the 2-statement
+	// form (`plan, err := platform.ComputePlan(...); return &plan, err`)
+	// to bridge the value/pointer mismatch.
+	if !strings.Contains(gotStr, "plan, err := platform.ComputePlan(ctx, p, desired, current)") {
+		t.Errorf("rewritten body should call platform.ComputePlan via 2-statement form; got:\n%s", gotStr)
+	}
+	if !strings.Contains(gotStr, "return &plan, err") {
+		t.Errorf("rewritten body should return &plan, err to bridge value→pointer; got:\n%s", gotStr)
 	}
 	if strings.Contains(gotStr, "currentByName := make(") {
 		t.Errorf("canonical body should be removed by rewrite; got:\n%s", gotStr)

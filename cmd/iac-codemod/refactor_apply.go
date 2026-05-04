@@ -655,43 +655,22 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 	return bl.Value[1 : len(bl.Value)-1], true
 }
 
-// rewriteApplyBody replaces fn.Body with `return wfctlhelpers.ApplyPlan(ctx, p, plan)`.
-// Receiver name is recovered from fn.Recv.List[0].Names[0]; default "p".
-// Both `ctx` and `plan` parameter names are recovered from the function
-// signature so the rewrite compiles.
+// rewriteApplyBody replaces fn.Body with
+// `return wfctlhelpers.ApplyPlan(<ctx>, <recv>, <plan>)`.
+//
+// Identifier recovery + injection (review round-1 #2, round-2 #4):
+//
+//   - Receiver: ensureReceiverName injects "p" if the receiver is
+//     unnamed (`func (*Provider) Apply(...)`). rev1 fell back to a
+//     hardcoded "p" without updating the receiver decl, so the
+//     rewritten call referenced an undefined identifier.
+//   - ctx: ensureCtxParamName renames `_` → `ctx`; preserves any other
+//     non-blank name.
+//   - plan: same shape as ctx, applied to the second parameter slot.
 func rewriteApplyBody(fn *ast.FuncDecl) {
-	recvName := "p"
-	if len(fn.Recv.List) > 0 && len(fn.Recv.List[0].Names) > 0 {
-		n := fn.Recv.List[0].Names[0].Name
-		if n != "" && n != "_" {
-			recvName = n
-		}
-	}
-	// Recover or rename the ctx and plan param names so the substituted
-	// call references real identifiers. Apply has 2 parameters in
-	// position [ctx context.Context, plan *IaCPlan].
-	ctxName := "ctx"
-	planName := "plan"
-	if fn.Type.Params != nil && len(fn.Type.Params.List) >= 1 {
-		if len(fn.Type.Params.List[0].Names) == 1 {
-			n := fn.Type.Params.List[0].Names[0].Name
-			if n == "_" {
-				fn.Type.Params.List[0].Names[0] = ast.NewIdent("ctx")
-			} else if n != "" {
-				ctxName = n
-			}
-		}
-	}
-	if fn.Type.Params != nil && len(fn.Type.Params.List) >= 2 {
-		if len(fn.Type.Params.List[1].Names) == 1 {
-			n := fn.Type.Params.List[1].Names[0].Name
-			if n == "_" {
-				fn.Type.Params.List[1].Names[0] = ast.NewIdent("plan")
-			} else if n != "" {
-				planName = n
-			}
-		}
-	}
+	recvName := ensureReceiverName(fn, "p")
+	ctxName := ensureCtxParamName(fn)
+	planName := ensureNthParamName(fn, 1, "plan")
 
 	call := &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
@@ -709,6 +688,34 @@ func rewriteApplyBody(fn *ast.FuncDecl) {
 			&ast.ReturnStmt{Results: []ast.Expr{call}},
 		},
 	}
+}
+
+// ensureNthParamName returns the name of fn's `idx`-th parameter,
+// injecting `defaultName` (and renaming `_`) the same way
+// ensureCtxParamName does for the first parameter. Used by
+// rewriteApplyBody for the `plan` argument slot.
+func ensureNthParamName(fn *ast.FuncDecl, idx int, defaultName string) string {
+	if fn.Type.Params == nil || len(fn.Type.Params.List) <= idx {
+		return defaultName
+	}
+	field := fn.Type.Params.List[idx]
+	if len(field.Names) == 0 {
+		field.Names = []*ast.Ident{ast.NewIdent(defaultName)}
+		return defaultName
+	}
+	if len(field.Names) == 1 {
+		n := field.Names[0].Name
+		if n == "_" || n == "" {
+			field.Names[0] = ast.NewIdent(defaultName)
+			return defaultName
+		}
+		return n
+	}
+	if field.Names[0].Name != "" && field.Names[0].Name != "_" {
+		return field.Names[0].Name
+	}
+	field.Names[0] = ast.NewIdent(defaultName)
+	return defaultName
 }
 
 // (writeFileAtomic + ensureImport live in refactor_plan.go;

@@ -390,14 +390,33 @@ func classifyPlanBody(fn *ast.FuncDecl) (planClassification, string) {
 	return planNonCanonical, "Plan body does not match configHash-compare template"
 }
 
-// isAlreadyDelegatedPlanBody returns true if the body is a single
-// `return platform.ComputePlan(...)` statement. The argument list is not
-// inspected: any prior migration that already routed to the helper is
-// considered done and idempotent. Legacy `wfctlhelpers.Plan(...)` bodies
-// (the planned-but-not-shipped API) are also accepted as already-delegated
-// so a maintainer who hand-applied an earlier rev of this codemod isn't
-// re-rewritten on the next pass.
+// isAlreadyDelegatedPlanBody returns true if the body is one of the
+// recognised already-delegated shapes:
+//
+//  1. The canonical 2-statement rev2 form (round-2 finding #1):
+//
+//     plan, err := platform.ComputePlan(ctx, p, desired, current)
+//     return &plan, err
+//
+//  2. Single-statement legacy `return wfctlhelpers.Plan(...)` (rev0
+//     planned-but-not-shipped target).
+//
+//  3. Single-statement legacy `return platform.ComputePlan(...)` (rev1
+//     ill-formed rewrite — uncompilable due to value/pointer mismatch
+//     but accepted here so a hand-applied rev1 fixture isn't
+//     re-rewritten into the rev2 form, which would then be byte-clean
+//     under -fix; the maintainer can rerun -fix to upgrade.).
+//
+// The argument lists are not inspected: any of these shapes is
+// considered done and idempotent.
 func isAlreadyDelegatedPlanBody(body *ast.BlockStmt) bool {
+	// Shape 1: 2-statement form.
+	if len(body.List) == 2 {
+		if isPlatformComputePlanAssign(body.List[0]) && isAddrPlanReturn(body.List[1]) {
+			return true
+		}
+	}
+	// Shape 2/3: single-statement legacy returns.
 	if len(body.List) != 1 {
 		return false
 	}
@@ -421,11 +440,52 @@ func isAlreadyDelegatedPlanBody(body *ast.BlockStmt) bool {
 	case x.Name == "platform" && sel.Sel.Name == "ComputePlan":
 		return true
 	case x.Name == "wfctlhelpers" && sel.Sel.Name == "Plan":
-		// Legacy target. Recognised so re-runs are idempotent if any
-		// pre-rev1 fixtures linger in the workspace.
 		return true
 	}
 	return false
+}
+
+// isPlatformComputePlanAssign returns true if stmt is the canonical
+// `plan, err := platform.ComputePlan(...)` shape.
+func isPlatformComputePlanAssign(stmt ast.Stmt) bool {
+	a, ok := stmt.(*ast.AssignStmt)
+	if !ok || a.Tok != token.DEFINE || len(a.Lhs) != 2 || len(a.Rhs) != 1 {
+		return false
+	}
+	call, ok := a.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	x, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return x.Name == "platform" && sel.Sel.Name == "ComputePlan"
+}
+
+// isAddrPlanReturn returns true if stmt is `return &<X>, <Y>` for
+// some idents X, Y. Conservative match for the canonical 2-statement
+// rewrite output.
+func isAddrPlanReturn(stmt ast.Stmt) bool {
+	ret, ok := stmt.(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 2 {
+		return false
+	}
+	un, ok := ret.Results[0].(*ast.UnaryExpr)
+	if !ok || un.Op != token.AND {
+		return false
+	}
+	if _, ok := un.X.(*ast.Ident); !ok {
+		return false
+	}
+	if _, ok := ret.Results[1].(*ast.Ident); !ok {
+		return false
+	}
+	return true
 }
 
 // isCanonicalPlanBody recognizes the configHash-compare template. The
@@ -646,43 +706,32 @@ func isConfigHashCall(expr ast.Expr) bool {
 	return id.Name == "configHash"
 }
 
-// rewritePlanBody replaces the entire body of fn with a single
-// `return platform.ComputePlan(<ctx>, <recv>, desired, current)`
-// statement. The receiver identifier and ctx parameter name are
-// recovered from the function signature so the rewrite compiles
-// regardless of the original author's naming choice:
+// rewritePlanBody replaces fn.Body with the canonical 2-statement
+// delegation to platform.ComputePlan:
 //
-//   - blank `_` ctx parameters are renamed to `ctx` (standard idiom);
-//   - non-blank ctx parameters keep their original name and the call
-//     references that name (review round-1 finding #2: not just blank
-//     idents need handling — if the maintainer wrote `c context.Context`
-//     the rewrite must reference `c`, not an undefined `ctx`).
-//   - the receiver identifier is recovered from fn.Recv.List[0].Names[0].
+//	plan, err := platform.ComputePlan(<ctx>, <recv>, desired, current)
+//	return &plan, err
+//
+// platform.ComputePlan returns `(interfaces.IaCPlan, error)` BY VALUE,
+// but provider Plan methods return `(*interfaces.IaCPlan, error)`.
+// Review round-2 finding #1: a single-statement
+// `return platform.ComputePlan(...)` rewrite produces uncompilable code
+// because the value/pointer mismatch can't be implicitly bridged. The
+// 2-statement form takes the address of the local return value before
+// returning it, matching the provider interface.
+//
+// Receiver and ctx identifiers are recovered from the signature; rules
+// (review round-1 #2, round-2 #3):
+//
+//   - If the receiver is unnamed (`func (*Provider) Plan(...)`), give
+//     it a name (`p`) so the substituted call has a referent. rev1
+//     fell back to a hardcoded "p" but didn't update the receiver
+//     decl, so the rewritten call referenced an undefined identifier.
+//   - Blank `_` ctx parameters are renamed to `ctx` (standard idiom);
+//     non-blank ctx names are preserved.
 func rewritePlanBody(fn *ast.FuncDecl) {
-	// Recover receiver identifier (default "p" if not declared).
-	recvName := "p"
-	if len(fn.Recv.List) > 0 && len(fn.Recv.List[0].Names) > 0 {
-		n := fn.Recv.List[0].Names[0].Name
-		if n != "" && n != "_" {
-			recvName = n
-		}
-	}
-
-	// Recover or rename the ctx (first) parameter so the rewrite
-	// references a real identifier. Blank `_` is renamed to "ctx";
-	// any other non-empty name is preserved as-is.
-	ctxName := "ctx"
-	if fn.Type.Params != nil && len(fn.Type.Params.List) >= 1 {
-		first := fn.Type.Params.List[0]
-		if len(first.Names) == 1 {
-			n := first.Names[0].Name
-			if n == "_" || n == "" {
-				first.Names[0] = ast.NewIdent("ctx")
-			} else {
-				ctxName = n
-			}
-		}
-	}
+	recvName := ensureReceiverName(fn, "p")
+	ctxName := ensureCtxParamName(fn)
 
 	call := &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
@@ -696,11 +745,67 @@ func rewritePlanBody(fn *ast.FuncDecl) {
 			ast.NewIdent("current"),
 		},
 	}
-	fn.Body = &ast.BlockStmt{
-		List: []ast.Stmt{
-			&ast.ReturnStmt{Results: []ast.Expr{call}},
+	// plan, err := platform.ComputePlan(ctx, p, desired, current)
+	planAssign := &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent("plan"), ast.NewIdent("err")},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{call},
+	}
+	// return &plan, err
+	returnStmt := &ast.ReturnStmt{
+		Results: []ast.Expr{
+			&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent("plan")},
+			ast.NewIdent("err"),
 		},
 	}
+	fn.Body = &ast.BlockStmt{List: []ast.Stmt{planAssign, returnStmt}}
+}
+
+// ensureReceiverName returns the receiver identifier of fn, mutating
+// the AST to add `defaultName` if the receiver is unnamed (e.g.
+// `func (*Provider) Plan(...)`). Used by rewritePlanBody and
+// rewriteApplyBody to make the substituted call site valid even on
+// previously-anonymous receivers (review round-2 #3 + #4).
+func ensureReceiverName(fn *ast.FuncDecl, defaultName string) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return defaultName
+	}
+	first := fn.Recv.List[0]
+	if len(first.Names) > 0 && first.Names[0].Name != "" && first.Names[0].Name != "_" {
+		return first.Names[0].Name
+	}
+	// Receiver is unnamed (or `_`). Inject `defaultName` so the
+	// rewritten call has a referent.
+	first.Names = []*ast.Ident{ast.NewIdent(defaultName)}
+	return defaultName
+}
+
+// ensureCtxParamName returns the name of the first parameter, renaming
+// blank `_` to `ctx` so the substituted call has a referent. If the
+// parameter already has a non-blank name, that name is preserved and
+// returned (review round-1 #2).
+func ensureCtxParamName(fn *ast.FuncDecl) string {
+	if fn.Type.Params == nil || len(fn.Type.Params.List) < 1 {
+		return "ctx"
+	}
+	first := fn.Type.Params.List[0]
+	if len(first.Names) == 0 {
+		first.Names = []*ast.Ident{ast.NewIdent("ctx")}
+		return "ctx"
+	}
+	if len(first.Names) == 1 {
+		n := first.Names[0].Name
+		if n == "_" || n == "" {
+			first.Names[0] = ast.NewIdent("ctx")
+			return "ctx"
+		}
+		return n
+	}
+	if first.Names[0].Name != "" && first.Names[0].Name != "_" {
+		return first.Names[0].Name
+	}
+	first.Names[0] = ast.NewIdent("ctx")
+	return "ctx"
 }
 
 // ensureImport adds an ImportSpec for `path` if one is not already

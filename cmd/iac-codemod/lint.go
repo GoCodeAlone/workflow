@@ -192,20 +192,71 @@ func lintPath(path string, report *lintReport) error {
 	})
 }
 
-// lintFile parses path, type-checks it tolerantly (unresolved imports
-// are stubbed via stubImporterRuntime so the file-by-file loader works
-// even on plugins that haven't vendored their dependencies), and runs
-// every analyzer in lintAnalyzers. Diagnostics are appended to report.
+// lintFile parses path, loads its sibling .go files (same directory,
+// non-test) so cross-file method sets are visible to the analyzers,
+// type-checks tolerantly, and runs every analyzer in lintAnalyzers.
+//
+// Review round-2 finding #9: rev0/rev1 of this function passed only
+// the target file in pass.Files, so providerLikeReceivers /
+// driverLikeReceivers / AssertProviderImplementsValidatePlan saw
+// only methods declared in that file. Providers with Plan/Apply (or
+// drivers with Diff + companion methods) split across sibling files
+// were silently skipped — same blind spot the refactor-* modes had
+// in round 1. Now lintFile loads every non-test .go file in the same
+// directory and feeds the full slice to each analyzer.
+//
+// Diagnostics for files OTHER than `path` are silently dropped: each
+// invocation of lintFile only owns the report for `path`, and the
+// outer walker visits each file in turn. This avoids duplicate
+// findings without requiring a higher-level dedup. Sibling files
+// serve only as method-set context.
 func lintFile(path string, report *lintReport) error {
 	src, err := readFile(path)
 	if err != nil {
 		return err
 	}
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, src, parser.ParseComments)
+	primary, err := parser.ParseFile(fset, path, src, parser.ParseComments)
 	if err != nil {
 		return err
 	}
+	files := []*ast.File{primary}
+	// Load sibling .go files from the same package directory so the
+	// analyzers see the full method set. Errors on siblings are
+	// tolerated — they only widen the context, never narrow it.
+	dir := filepath.Dir(path)
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			sibPath := filepath.Join(dir, name)
+			if sibPath == path {
+				continue
+			}
+			sibSrc, err := readFile(sibPath)
+			if err != nil {
+				continue
+			}
+			sib, err := parser.ParseFile(fset, sibPath, sibSrc, parser.ParseComments)
+			if err != nil {
+				continue
+			}
+			// Same-package check: skip files in a different package
+			// (e.g. `package main` test fixtures alongside `package p`
+			// production source). Cross-package context would mislead
+			// the method-set walker.
+			if sib.Name.Name != primary.Name.Name {
+				continue
+			}
+			files = append(files, sib)
+		}
+	}
+
 	conf := &types.Config{
 		Importer: stubImporterRuntime{},
 		Error:    func(error) {}, // tolerate type errors; lint is best-effort
@@ -217,16 +268,22 @@ func lintFile(path string, report *lintReport) error {
 		Implicits:  make(map[ast.Node]types.Object),
 		Selections: make(map[*ast.SelectorExpr]*types.Selection),
 	}
-	pkg, _ := conf.Check(file.Name.Name, fset, []*ast.File{file}, info)
+	pkg, _ := conf.Check(primary.Name.Name, fset, files, info)
 
 	for _, analyzer := range lintAnalyzers {
 		pass := &analysis.Pass{
 			Analyzer:  analyzer,
 			Fset:      fset,
-			Files:     []*ast.File{file},
+			Files:     files,
 			Pkg:       pkg,
 			TypesInfo: info,
 			Report: func(d analysis.Diagnostic) {
+				// Drop diagnostics targeting other files: the outer
+				// walker will visit them in their own turn.
+				diagPath := fset.Position(d.Pos).Filename
+				if diagPath != "" && diagPath != path {
+					return
+				}
 				report.findings = append(report.findings, lintFinding{
 					Path:     path,
 					Line:     fset.Position(d.Pos).Line,
@@ -340,7 +397,9 @@ func reportSkip(pass *analysis.Pass, pos token.Pos, declName string) {
 
 func runAssertPlanDelegatesToHelper(pass *analysis.Pass) (any, error) {
 	provs := providerLikeReceivers(pass)
+	typeDocsByFile := receiverTypeDocsForPass(pass)
 	for _, file := range pass.Files {
+		typeDocs := typeDocsByFile[file]
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
@@ -349,12 +408,15 @@ func runAssertPlanDelegatesToHelper(pass *analysis.Pass) (any, error) {
 			if !isProviderMethod(fn, "Plan", 3, 2) {
 				continue
 			}
-			if !provs[receiverTypeName(fn)] {
+			recv := receiverTypeName(fn)
+			if !provs[recv] {
 				// Method named Plan on a non-provider type (e.g., a
 				// deploy target). Skip to keep precision high.
 				continue
 			}
-			if hasSkipMarkerOn(fn.Doc) {
+			// Honor SkipMarker on fn.Doc OR receiver-type docs (review
+			// round-2 finding #6).
+			if hasSkipMarkerOn(fn.Doc) || typeDocs[recv].carriesMarker() {
 				routeSkip(pass, fn)
 				continue
 			}
@@ -370,13 +432,27 @@ func runAssertPlanDelegatesToHelper(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
+// receiverTypeDocsForPass builds the receiverDoc map for every file in
+// pass.Files so the per-analyzer skip-marker check can consult both
+// fn.Doc AND the receiver's TypeSpec.Doc / GenDecl.Doc. Used by all
+// three function-site analyzers (round-2 findings #6/#7/#8).
+func receiverTypeDocsForPass(pass *analysis.Pass) map[*ast.File]map[string]receiverDoc {
+	out := make(map[*ast.File]map[string]receiverDoc, len(pass.Files))
+	for _, file := range pass.Files {
+		out[file] = receiverTypeDocs(file)
+	}
+	return out
+}
+
 // ============================================================
 // Analyzer #2: AssertApplyDelegatesToHelper
 // ============================================================
 
 func runAssertApplyDelegatesToHelper(pass *analysis.Pass) (any, error) {
 	provs := providerLikeReceivers(pass)
+	typeDocsByFile := receiverTypeDocsForPass(pass)
 	for _, file := range pass.Files {
+		typeDocs := typeDocsByFile[file]
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
@@ -385,11 +461,14 @@ func runAssertApplyDelegatesToHelper(pass *analysis.Pass) (any, error) {
 			if !isProviderMethod(fn, "Apply", 2, 2) {
 				continue
 			}
-			if !provs[receiverTypeName(fn)] {
+			recv := receiverTypeName(fn)
+			if !provs[recv] {
 				// Method named Apply on a non-provider type. Skip.
 				continue
 			}
-			if hasSkipMarkerOn(fn.Doc) {
+			// Honor SkipMarker on fn.Doc OR receiver-type docs (review
+			// round-2 finding #7).
+			if hasSkipMarkerOn(fn.Doc) || typeDocs[recv].carriesMarker() {
 				routeSkip(pass, fn)
 				continue
 			}
@@ -407,7 +486,9 @@ func runAssertApplyDelegatesToHelper(pass *analysis.Pass) (any, error) {
 
 func runAssertDiffSetsNeedsReplaceForForceNew(pass *analysis.Pass) (any, error) {
 	drivers := driverLikeReceivers(pass)
+	typeDocsByFile := receiverTypeDocsForPass(pass)
 	for _, file := range pass.Files {
+		typeDocs := typeDocsByFile[file]
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
@@ -416,13 +497,16 @@ func runAssertDiffSetsNeedsReplaceForForceNew(pass *analysis.Pass) (any, error) 
 			if !isProviderMethod(fn, "Diff", 3, 2) {
 				continue
 			}
-			if !drivers[receiverTypeName(fn)] {
+			recv := receiverTypeName(fn)
+			if !drivers[recv] {
 				// Method named Diff on a non-driver type (e.g., a
 				// settings struct or config differ). Skip to keep
 				// precision high — review finding #3.
 				continue
 			}
-			if hasSkipMarkerOn(fn.Doc) {
+			// Honor SkipMarker on fn.Doc OR receiver-type docs (review
+			// round-2 finding #8).
+			if hasSkipMarkerOn(fn.Doc) || typeDocs[recv].carriesMarker() {
 				routeSkip(pass, fn)
 				continue
 			}

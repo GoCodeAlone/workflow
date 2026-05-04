@@ -318,6 +318,54 @@ func TestAddValidatePlan_DryRun_FlagsWrongSignature(t *testing.T) {
 }
 
 // ============================================================
+// Review round-2 regression tests
+// ============================================================
+
+// avpProviderValueReceiverSrc — review round-2 finding #5. A provider
+// whose existing Plan/Apply use VALUE receivers (`(p FooProvider)`)
+// must get a ValidatePlan stub with a value receiver too. rev1 always
+// emitted `(p *T)`, mismatching method-sets and breaking the
+// ProviderValidator type assertion.
+const avpProviderValueReceiverSrc = `package p
+
+import "context"
+
+type ResourceSpec struct{}
+type ResourceState struct{}
+type IaCPlan struct{}
+type ApplyResult struct{}
+type PlanDiagnostic struct{}
+
+type ValueProvider struct{}
+
+func (p ValueProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return &IaCPlan{}, nil
+}
+
+func (p ValueProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return &ApplyResult{}, nil
+}
+`
+
+func TestAddValidatePlan_Fix_ValueReceiverConvention(t *testing.T) {
+	path := writeFixture(t, "provider.go", avpProviderValueReceiverSrc)
+	var stdout, stderr bytes.Buffer
+	if code := runAddValidatePlan([]string{path}, &Options{DryRun: false, Fix: true}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	got, _ := os.ReadFile(path)
+	gotStr := string(got)
+	// Stub MUST use value receiver to match Plan/Apply.
+	if !strings.Contains(gotStr, "func (p ValueProvider) ValidatePlan(") {
+		t.Errorf("stub must use value receiver to match Plan/Apply convention; got:\n%s", gotStr)
+	}
+	// And NOT pointer receiver.
+	if strings.Contains(gotStr, "func (p *ValueProvider) ValidatePlan(") {
+		t.Errorf("stub must NOT use pointer receiver when Plan/Apply use value; got:\n%s", gotStr)
+	}
+}
+
+// ============================================================
 // Mutation-gate negative test
 // ============================================================
 
