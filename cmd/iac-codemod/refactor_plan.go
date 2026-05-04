@@ -23,17 +23,26 @@ func init() {
 }
 
 // helperImportPath is the canonical Go import path for the wfctlhelpers
-// package. The codemod's rewrites substitute calls into this package, so
-// any source file that gains a `wfctlhelpers.Plan` call must also import
-// this package.
+// package (used by refactor-apply for ApplyPlan delegation). Any source
+// file that gains a `wfctlhelpers.ApplyPlan` call must also import this
+// package.
 const helperImportPath = "github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 
+// planHelperImportPath is the import path for platform.ComputePlan, the
+// canonical Plan helper provider Plan() bodies delegate to. This is a
+// rev1-review correction: the plan-doc named `wfctlhelpers.Plan` as the
+// rewrite target, but no such API exists today in the repo. The actual
+// Plan-equivalent helper is `platform.ComputePlan(ctx, p, desired, current)`
+// at platform/differ.go:72. Switching the codemod target to the real API
+// closes Copilot review finding #1 (lint.go:45 + refactor_plan.go:36):
+// "the rewrite target does not exist in the repository today; rewritten
+// files would fail to compile".
+const planHelperImportPath = "github.com/GoCodeAlone/workflow/platform"
+
 // planCanonicalCallExpr is the canonical replacement-body expression
-// emitted by refactor-plan. The receiver name `p` mirrors the convention
-// in DOProvider.Plan; the codemod rewrites (and renames) the receiver
-// param accordingly. The constant is centralized so the report and the
-// AST emitter cannot drift.
-const planCanonicalCallExpr = "wfctlhelpers.Plan(ctx, p, desired, current)"
+// emitted by refactor-plan. Calls platform.ComputePlan (the real helper);
+// see planHelperImportPath above for the review-correction rationale.
+const planCanonicalCallExpr = "platform.ComputePlan(ctx, p, desired, current)"
 
 // planClassification labels the disposition of a single Plan() method
 // site. Each report entry carries one classification; the rewriter
@@ -164,11 +173,16 @@ func refactorPlanFile(path string, opts *Options, report *planReport) error {
 		return err
 	}
 
-	// Build the receiver-shape filter used by lint's
-	// providerLikeReceivers helper. We can't import the lint pass
-	// directly (it requires an analysis.Pass), so we replicate the
-	// minimal "has Plan AND Apply with the right shape" walk inline.
-	provs := planLikeReceivers(file)
+	// Build the receiver-shape filter using the directory-wide
+	// method set so providers whose Plan/Apply live in sibling files
+	// are still recognised (review round-1 finding #9). Per-file
+	// fallback when the directory walk fails — keeps the rev0
+	// behavior on isolated single-file targets.
+	provs := planLikeReceiversInDir(filepath.Dir(path))
+	if len(provs) == 0 {
+		provs = planLikeReceivers(file)
+	}
+	typeDocs := receiverTypeDocs(file)
 
 	mutated := false
 	for _, decl := range file.Decls {
@@ -186,7 +200,11 @@ func refactorPlanFile(path string, opts *Options, report *planReport) error {
 			// codemod focuses on rewriting providers).
 			continue
 		}
-		if hasSkipMarkerOn(fn.Doc) {
+		// Honor the marker on the function doc, the receiver type's
+		// TypeSpec doc, AND the wrapping GenDecl doc. Review round-1
+		// finding #4: PR description promises type-doc + GenDecl-doc
+		// honoring; rev0 only checked fn.Doc.
+		if hasSkipMarkerOn(fn.Doc) || typeDocs[recv].carriesMarker() {
 			report.sites = append(report.sites, planSite{
 				Path:     path,
 				Line:     fset.Position(fn.Pos()).Line,
@@ -212,13 +230,9 @@ func refactorPlanFile(path string, opts *Options, report *planReport) error {
 	}
 
 	if mutated && opts != nil && opts.Fix {
-		// Ensure the helper import is present. AST-level import
-		// management is tricky; the pre-existing list is walked and a
-		// new ImportSpec appended only if absent.
-		if ensurePlanHelperImport(file) {
-			// no-op: the spec was added; printing below produces the
-			// updated source. The function returns true if added.
-		}
+		// Ensure the platform import is present (refactor-plan emits
+		// platform.ComputePlan). The function is idempotent.
+		ensurePlatformImport(file)
 		if err := writeFileAtomic(path, fset, file); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
@@ -228,9 +242,11 @@ func refactorPlanFile(path string, opts *Options, report *planReport) error {
 
 // planLikeReceivers returns the set of receiver type names whose method
 // set in `file` includes both Plan and Apply with shapes matching
-// IaCProvider. Mirror of providerLikeReceivers in lint.go but operates
-// on a single *ast.File (refactor-plan is single-file at a time; the
-// lint analyzer takes a full pass).
+// IaCProvider. Used as a fallback path when no package context is
+// available; production callers should prefer planLikeReceiversInDir
+// (review round-1 finding #9: rev0 of this function only consulted
+// the current file, missing providers whose Plan and Apply live in
+// sibling files).
 func planLikeReceivers(file *ast.File) map[string]bool {
 	methodsByRecv := make(map[string][]*ast.FuncDecl)
 	for _, decl := range file.Decls {
@@ -248,6 +264,103 @@ func planLikeReceivers(file *ast.File) map[string]bool {
 	for recv, methods := range methodsByRecv {
 		if looksLikeProvider(methods) {
 			out[recv] = true
+		}
+	}
+	return out
+}
+
+// planLikeReceiversInDir returns the set of receiver type names whose
+// method set across ALL non-test .go files in dir includes both Plan
+// and Apply (canonical IaCProvider shape). Closes review round-1
+// finding #9: a provider whose Plan() and Apply() live in sibling
+// files (e.g. provider_plan.go + provider_apply.go) is invisible to
+// the per-file planLikeReceivers helper. Per-directory aggregation
+// matches Go's package-scoped method-set semantics.
+//
+// Errors are tolerated: any file whose parser.ParseFile call fails is
+// silently dropped from the aggregation. The intent is to widen the
+// detection net, not to enforce package-correctness (which is the
+// linter's job).
+func planLikeReceiversInDir(dir string) map[string]bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	methodsByRecv := make(map[string][]*ast.FuncDecl)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fpath := filepath.Join(dir, name)
+		src, err := readFile(fpath)
+		if err != nil {
+			continue
+		}
+		fs := token.NewFileSet()
+		file, err := parser.ParseFile(fs, fpath, src, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			recv := receiverTypeName(fn)
+			if recv == "" {
+				continue
+			}
+			methodsByRecv[recv] = append(methodsByRecv[recv], fn)
+		}
+	}
+	out := make(map[string]bool)
+	for recv, methods := range methodsByRecv {
+		if looksLikeProvider(methods) {
+			out[recv] = true
+		}
+	}
+	return out
+}
+
+// receiverDoc captures the documentation positions where a skip marker
+// could be placed for a given receiver type: the inner TypeSpec.Doc
+// (between `type` and the type name) and the wrapping GenDecl.Doc
+// (before the `type` keyword). hasSkipMarkerOn handles nil so the
+// call site can pass either field unconditionally.
+type receiverDoc struct {
+	TypeSpecDoc *ast.CommentGroup
+	GenDeclDoc  *ast.CommentGroup
+}
+
+func (d receiverDoc) carriesMarker() bool {
+	return hasSkipMarkerOn(d.TypeSpecDoc) || hasSkipMarkerOn(d.GenDeclDoc)
+}
+
+// receiverTypeDocs returns a map from receiver type name to its
+// associated documentation positions. Used by refactor-plan and
+// refactor-apply to check the SkipMarker at type-doc and GenDecl-doc
+// levels in addition to the function-doc level (review round-1
+// finding #4).
+func receiverTypeDocs(file *ast.File) map[string]receiverDoc {
+	out := make(map[string]receiverDoc)
+	for _, decl := range file.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			out[ts.Name.Name] = receiverDoc{
+				TypeSpecDoc: ts.Doc,
+				GenDeclDoc:  gd.Doc,
+			}
 		}
 	}
 	return out
@@ -278,9 +391,12 @@ func classifyPlanBody(fn *ast.FuncDecl) (planClassification, string) {
 }
 
 // isAlreadyDelegatedPlanBody returns true if the body is a single
-// `return wfctlhelpers.Plan(...)` statement. The argument list is not
+// `return platform.ComputePlan(...)` statement. The argument list is not
 // inspected: any prior migration that already routed to the helper is
-// considered done and idempotent.
+// considered done and idempotent. Legacy `wfctlhelpers.Plan(...)` bodies
+// (the planned-but-not-shipped API) are also accepted as already-delegated
+// so a maintainer who hand-applied an earlier rev of this codemod isn't
+// re-rewritten on the next pass.
 func isAlreadyDelegatedPlanBody(body *ast.BlockStmt) bool {
 	if len(body.List) != 1 {
 		return false
@@ -301,7 +417,15 @@ func isAlreadyDelegatedPlanBody(body *ast.BlockStmt) bool {
 	if !ok {
 		return false
 	}
-	return x.Name == "wfctlhelpers" && sel.Sel.Name == "Plan"
+	switch {
+	case x.Name == "platform" && sel.Sel.Name == "ComputePlan":
+		return true
+	case x.Name == "wfctlhelpers" && sel.Sel.Name == "Plan":
+		// Legacy target. Recognised so re-runs are idempotent if any
+		// pre-rev1 fixtures linger in the workspace.
+		return true
+	}
+	return false
 }
 
 // isCanonicalPlanBody recognizes the configHash-compare template. The
@@ -441,37 +565,70 @@ func isPlanCompositeAssign(stmt ast.Stmt) bool {
 }
 
 // rangeBodyMatchesCanonicalDesired verifies the body of the
-// range-over-desired loop has the expected create/update branches:
+// range-over-desired loop is EXACTLY the configHash-compare template:
 //
-//   - cur, exists := currentByName[spec.Name] (or compatible lookup)
-//   - if !exists { append "create" action; continue }
-//   - if configHash(...) != configHash(...) { append "update" action }
+//  1. lookup statement (`cur, exists := <X>[<key>]`)
+//  2. `if !exists { ...append create... }` (the body must not return
+//     anything bespoke — only the create-action append + continue/break
+//     control flow)
+//  3. `if configHash(...) != configHash(...) { ...append update... }`
 //
-// Soft-match: we look for a configHash != configHash binary expression
-// guarding an append, and a !exists guard around a different append,
-// without requiring exact identifier names (cur/exists/spec are
-// conventional but not enforced).
+// Reject any statement that doesn't fit these three slots — bespoke
+// telemetry, metrics, alternate construction, etc. — to keep the canonical
+// detector tight (review round-1 finding #3: a too-loose detector
+// silently rewrites bespoke planners that happen to share keywords).
+//
+// Top-level statement count must be exactly 3; the second-and-third
+// must be the !exists guard and configHash guard respectively. The
+// lookup statement may be assignment-style (`:=`) or simple-assign
+// (`=`) — both are valid Go.
 func rangeBodyMatchesCanonicalDesired(body *ast.BlockStmt) bool {
-	hasNotExistsGuard := false
-	hasConfigHashCompare := false
-	ast.Inspect(body, func(n ast.Node) bool {
-		// !exists guard.
-		if ifs, ok := n.(*ast.IfStmt); ok {
-			if u, ok := ifs.Cond.(*ast.UnaryExpr); ok && u.Op == token.NOT {
-				if id, ok := u.X.(*ast.Ident); ok && id.Name == "exists" {
-					hasNotExistsGuard = true
-				}
-			}
-			// configHash(...) != configHash(...) guard.
-			if be, ok := ifs.Cond.(*ast.BinaryExpr); ok && be.Op == token.NEQ {
-				if isConfigHashCall(be.X) && isConfigHashCall(be.Y) {
-					hasConfigHashCompare = true
-				}
-			}
-		}
-		return true
-	})
-	return hasNotExistsGuard && hasConfigHashCompare
+	stmts := body.List
+	if len(stmts) != 3 {
+		return false
+	}
+	// 1. lookup `<a>, <b> := <map>[<key>]` or single-target equivalent.
+	a, ok := stmts[0].(*ast.AssignStmt)
+	if !ok || (a.Tok != token.DEFINE && a.Tok != token.ASSIGN) {
+		return false
+	}
+	if len(a.Lhs) != 2 || len(a.Rhs) != 1 {
+		return false
+	}
+	if _, isIndex := a.Rhs[0].(*ast.IndexExpr); !isIndex {
+		return false
+	}
+	// 2. !exists guard.
+	notExists, ok := stmts[1].(*ast.IfStmt)
+	if !ok {
+		return false
+	}
+	u, ok := notExists.Cond.(*ast.UnaryExpr)
+	if !ok || u.Op != token.NOT {
+		return false
+	}
+	if id, ok := u.X.(*ast.Ident); !ok || id.Name != "exists" {
+		return false
+	}
+	if notExists.Else != nil {
+		return false // else-branch means out-of-template logic
+	}
+	// 3. configHash != configHash guard.
+	hashGuard, ok := stmts[2].(*ast.IfStmt)
+	if !ok {
+		return false
+	}
+	be, ok := hashGuard.Cond.(*ast.BinaryExpr)
+	if !ok || be.Op != token.NEQ {
+		return false
+	}
+	if !isConfigHashCall(be.X) || !isConfigHashCall(be.Y) {
+		return false
+	}
+	if hashGuard.Else != nil {
+		return false
+	}
+	return true
 }
 
 // isConfigHashCall reports whether expr is a call to the unexported
@@ -490,11 +647,17 @@ func isConfigHashCall(expr ast.Expr) bool {
 }
 
 // rewritePlanBody replaces the entire body of fn with a single
-// `return wfctlhelpers.Plan(ctx, p, desired, current)` statement. If
-// the receiver param is named `_`, it is renamed to `ctx` so the
-// substituted call site can reference the context. The receiver
-// identifier is recovered from fn.Recv.List[0].Names[0] so the rewrite
-// uses the same receiver name the original method declared.
+// `return platform.ComputePlan(<ctx>, <recv>, desired, current)`
+// statement. The receiver identifier and ctx parameter name are
+// recovered from the function signature so the rewrite compiles
+// regardless of the original author's naming choice:
+//
+//   - blank `_` ctx parameters are renamed to `ctx` (standard idiom);
+//   - non-blank ctx parameters keep their original name and the call
+//     references that name (review round-1 finding #2: not just blank
+//     idents need handling — if the maintainer wrote `c context.Context`
+//     the rewrite must reference `c`, not an undefined `ctx`).
+//   - the receiver identifier is recovered from fn.Recv.List[0].Names[0].
 func rewritePlanBody(fn *ast.FuncDecl) {
 	// Recover receiver identifier (default "p" if not declared).
 	recvName := "p"
@@ -505,21 +668,29 @@ func rewritePlanBody(fn *ast.FuncDecl) {
 		}
 	}
 
-	// Rename `_` ctx parameter to `ctx`.
+	// Recover or rename the ctx (first) parameter so the rewrite
+	// references a real identifier. Blank `_` is renamed to "ctx";
+	// any other non-empty name is preserved as-is.
+	ctxName := "ctx"
 	if fn.Type.Params != nil && len(fn.Type.Params.List) >= 1 {
 		first := fn.Type.Params.List[0]
-		if len(first.Names) == 1 && first.Names[0].Name == "_" {
-			first.Names[0] = ast.NewIdent("ctx")
+		if len(first.Names) == 1 {
+			n := first.Names[0].Name
+			if n == "_" || n == "" {
+				first.Names[0] = ast.NewIdent("ctx")
+			} else {
+				ctxName = n
+			}
 		}
 	}
 
 	call := &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
-			X:   ast.NewIdent("wfctlhelpers"),
-			Sel: ast.NewIdent("Plan"),
+			X:   ast.NewIdent("platform"),
+			Sel: ast.NewIdent("ComputePlan"),
 		},
 		Args: []ast.Expr{
-			ast.NewIdent("ctx"),
+			ast.NewIdent(ctxName),
 			ast.NewIdent(recvName),
 			ast.NewIdent("desired"),
 			ast.NewIdent("current"),
@@ -532,21 +703,21 @@ func rewritePlanBody(fn *ast.FuncDecl) {
 	}
 }
 
-// ensurePlanHelperImport adds an ImportSpec for helperImportPath if one
-// is not already present. Returns true if an import was added.
-func ensurePlanHelperImport(file *ast.File) bool {
+// ensureImport adds an ImportSpec for `path` if one is not already
+// present. Returns true if an import was added.
+func ensureImport(file *ast.File, path string) bool {
 	for _, imp := range file.Imports {
 		if imp.Path == nil {
 			continue
 		}
 		// Path.Value includes the surrounding quotes.
 		v := strings.Trim(imp.Path.Value, `"`)
-		if v == helperImportPath {
+		if v == path {
 			return false
 		}
 	}
 	newImport := &ast.ImportSpec{
-		Path: &ast.BasicLit{Kind: token.STRING, Value: `"` + helperImportPath + `"`},
+		Path: &ast.BasicLit{Kind: token.STRING, Value: `"` + path + `"`},
 	}
 	// Locate the first import GenDecl; append a spec to it. If no
 	// import block exists, prepend a new one to the file decls.
@@ -570,6 +741,20 @@ func ensurePlanHelperImport(file *ast.File) bool {
 	}
 	file.Decls = append([]ast.Decl{gd}, file.Decls...)
 	return true
+}
+
+// ensurePlatformImport adds a `platform` import to file if absent;
+// idempotent. Used by refactor-plan rewrites which substitute
+// platform.ComputePlan calls.
+func ensurePlatformImport(file *ast.File) bool {
+	return ensureImport(file, planHelperImportPath)
+}
+
+// ensureWfctlhelpersImport adds a `wfctlhelpers` import to file if
+// absent; idempotent. Used by refactor-apply rewrites which substitute
+// wfctlhelpers.ApplyPlan calls.
+func ensureWfctlhelpersImport(file *ast.File) bool {
+	return ensureImport(file, helperImportPath)
 }
 
 // writeFileAtomic prints `file` to a temp sibling and renames it over

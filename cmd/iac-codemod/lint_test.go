@@ -115,13 +115,22 @@ func (p *FooProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil 
 
 const planCanonicalSrc = providerScaffold + `
 func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return platform.ComputePlan(ctx, p, desired, current)
+}
+`
+
+// planLegacyDelegatedSrc preserves the rev0 codemod's planned-but-not-shipped
+// `wfctlhelpers.Plan` target as also-accepted. Pinned regression: a maintainer
+// who hand-applied an early version of the codemod must NOT be re-flagged.
+const planLegacyDelegatedSrc = providerScaffold + `
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
 	return wfctlhelpers.Plan(ctx, p, desired, current)
 }
 `
 
 const planNonCanonicalSrc = providerScaffold + `
 func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
-	// Custom planning logic, not delegating to wfctlhelpers.Plan.
+	// Custom planning logic, not delegating to platform.ComputePlan.
 	return &IaCPlan{}, nil
 }
 `
@@ -145,8 +154,19 @@ func TestAssertPlanDelegatesToHelper_NonCanonical_Diagnoses(t *testing.T) {
 	if len(diags) != 1 {
 		t.Fatalf("non-canonical Plan should produce 1 diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
 	}
-	if !strings.Contains(diags[0].Message, "wfctlhelpers.Plan") {
-		t.Errorf("diagnostic should reference wfctlhelpers.Plan; got %q", diags[0].Message)
+	if !strings.Contains(diags[0].Message, "platform.ComputePlan") {
+		t.Errorf("diagnostic should reference platform.ComputePlan (canonical target); got %q", diags[0].Message)
+	}
+}
+
+// TestAssertPlanDelegatesToHelper_LegacyTargetAccepted pins review round-1
+// finding #1: the analyzer accepts the legacy `wfctlhelpers.Plan` target as
+// already-delegated so a maintainer who hand-applied the rev0 codemod isn't
+// re-flagged on the next run.
+func TestAssertPlanDelegatesToHelper_LegacyTargetAccepted(t *testing.T) {
+	diags := runAnalyzerOnSource(t, planLegacyDelegatedSrc, AssertPlanDelegatesToHelper)
+	if len(diags) != 0 {
+		t.Errorf("legacy wfctlhelpers.Plan target must be accepted as delegated; got %d:\n%s", len(diags), diagSummary(diags))
 	}
 }
 
@@ -268,7 +288,7 @@ type PlanDiagnostic struct{}
 type FooProvider struct{}
 
 func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
-	return wfctlhelpers.Plan(ctx, p, desired, current)
+	return platform.ComputePlan(ctx, p, desired, current)
 }
 func (p *FooProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
 `

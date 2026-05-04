@@ -18,6 +18,87 @@ import (
 // Source fixtures
 // ============================================================
 
+// applyWithExtraBookkeepingSrc — review round-1 finding #5. An Apply
+// body with bespoke bookkeeping inside a case body (here, a metrics
+// counter / println) must NOT be classified as canonical: silently
+// rewriting would drop the bookkeeping. Test fixture defined below the
+// canonicalApplySrc anchor; lookup test follows it.
+const applyWithExtraBookkeepingSrc = `package p
+
+import (
+	"context"
+	"fmt"
+)
+
+type ResourceSpec struct{ Name, Type string }
+type ResourceState struct{ Name string; ProviderID string }
+type IaCPlan struct{ ID string; Actions []PlanAction }
+type PlanAction struct{ Action string; Resource ResourceSpec; Current *ResourceState }
+type ApplyResult struct{ PlanID string; Errors []ActionError; Resources []ResourceOutput }
+type ActionError struct{ Resource, Action, Error string }
+type ResourceRef struct{ Name, Type, ProviderID string }
+type ResourceOutput struct{ ProviderID string }
+type PlanDiagnostic struct{}
+
+type Driver interface {
+	Create(ctx context.Context, r ResourceSpec) (*ResourceOutput, error)
+	Update(ctx context.Context, ref ResourceRef, r ResourceSpec) (*ResourceOutput, error)
+	Delete(ctx context.Context, ref ResourceRef) error
+}
+
+type BookkeepingProvider struct{}
+
+func (p *BookkeepingProvider) ResourceDriver(string) (Driver, error) { return nil, nil }
+
+func (p *BookkeepingProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return platform.ComputePlan(ctx, p, desired, current)
+}
+
+func (p *BookkeepingProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	result := &ApplyResult{PlanID: plan.ID}
+	for _, action := range plan.Actions {
+		d, err := p.ResourceDriver(action.Resource.Type)
+		if err != nil {
+			result.Errors = append(result.Errors, ActionError{Resource: action.Resource.Name, Action: action.Action, Error: err.Error()})
+			continue
+		}
+		var out *ResourceOutput
+		switch action.Action {
+		case "create":
+			fmt.Println("creating")
+			out, err = d.Create(ctx, action.Resource)
+		case "update":
+			ref := ResourceRef{Name: action.Resource.Name, Type: action.Resource.Type}
+			out, err = d.Update(ctx, ref, action.Resource)
+		}
+		if err != nil {
+			result.Errors = append(result.Errors, ActionError{Resource: action.Resource.Name, Action: action.Action, Error: err.Error()})
+			continue
+		}
+		_ = out
+	}
+	return result, nil
+}
+
+func (p *BookkeepingProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
+`
+
+func TestRefactorApply_ExtraBookkeepingNotCanonical(t *testing.T) {
+	path := writeFixture(t, "provider.go", applyWithExtraBookkeepingSrc)
+	var stdout, stderr bytes.Buffer
+	code := runRefactorApply([]string{path}, &Options{DryRun: true, Fix: false}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	if strings.Contains(out, "BookkeepingProvider.Apply canonical") && !strings.Contains(out, "non-canonical") {
+		t.Errorf("Apply with extra bookkeeping inside a case body must NOT be canonical; got:\n%s", out)
+	}
+	if !strings.Contains(out, "non-canonical") {
+		t.Errorf("Apply with extra bookkeeping should be reported non-canonical; got:\n%s", out)
+	}
+}
+
 // canonicalApplySrc is a minimal Apply body the codemod will rewrite.
 // Loop+switch on action.Action with create/update/delete branches that
 // dispatch directly to the driver. Modeled on the simplest pattern

@@ -91,7 +91,11 @@ func runRefactorApply(args []string, opts *Options, stdout, stderr io.Writer) in
 	fs := flag.NewFlagSet("iac-codemod refactor-apply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	// Steer per-mode -h to stdout for symmetry with the top-level
-	// `iac-codemod -h` (T8.2 carry-forward #1).
+	// `iac-codemod -h` (T8.2 carry-forward #1). The dispatcher in main.go
+	// intercepts `-h` before it reaches this FlagSet, so this closure
+	// only fires on parse errors. Mode-specific flags (-report-file)
+	// are documented in main.go's global usage() text — that's the
+	// fix surface for review round-1 finding #11.
 	fs.Usage = func() { usage(stdout) }
 	reportFile := fs.String("report-file", "", "if set, also write the report (Markdown) to this path; default is stdout-only")
 	if err := fs.Parse(args); err != nil {
@@ -179,7 +183,12 @@ func refactorApplyFile(path string, opts *Options, report *applyReport) error {
 		return err
 	}
 
-	provs := planLikeReceivers(file)
+	// Directory-wide method set (review round-1 finding #9).
+	provs := planLikeReceiversInDir(filepath.Dir(path))
+	if len(provs) == 0 {
+		provs = planLikeReceivers(file)
+	}
+	typeDocs := receiverTypeDocs(file)
 
 	mutated := false
 	for _, decl := range file.Decls {
@@ -194,7 +203,9 @@ func refactorApplyFile(path string, opts *Options, report *applyReport) error {
 		if !provs[recv] {
 			continue
 		}
-		if hasSkipMarkerOn(fn.Doc) {
+		// Honor SkipMarker on fn.Doc OR receiver-type docs (review
+		// round-1 finding #4).
+		if hasSkipMarkerOn(fn.Doc) || typeDocs[recv].carriesMarker() {
 			report.sites = append(report.sites, applySite{
 				Path:     path,
 				Line:     fset.Position(fn.Pos()).Line,
@@ -221,7 +232,7 @@ func refactorApplyFile(path string, opts *Options, report *applyReport) error {
 	}
 
 	if mutated && opts != nil && opts.Fix {
-		ensurePlanHelperImport(file) // shared with refactor-plan: idempotent if present
+		ensureWfctlhelpersImport(file) // refactor-apply emits wfctlhelpers.ApplyPlan
 		if err := writeFileAtomic(path, fset, file); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
@@ -263,7 +274,7 @@ func classifyApplyBody(fn *ast.FuncDecl, fset *token.FileSet, path string) (appl
 	// fmt.Errorf with %w wrapping after a driver call.
 	if pos := findCustomErrorWrap(sw); pos.IsValid() {
 		offender := fset.Position(pos)
-		return applyCustomErrorWrapping, fmtPosShort(path, offender.Line), "preserve domain-context wrapping by registering a post-action error hook on the provider (extension-point hook ApplyResultErrorHook). Sample: implement `WrapActionError(action, err) error` on the provider type; wfctlhelpers calls it before appending to ApplyResult.Errors. Without the hook, the helper records the raw driver error and the bespoke wrap is lost."
+		return applyCustomErrorWrapping, fmtPosShort(path, offender.Line), "manual port required: wfctlhelpers.ApplyPlan does NOT expose a per-action error-wrap hook today (review round-1 finding #6: rev0 of this report named a fictional ApplyResultErrorHook / WrapActionError API). Two honest options: (a) preserve the domain-context wrap by adding `// wfctl:skip-iac-codemod` to the Apply method and keeping the manual switch; (b) move the wrap into the driver itself (Create/Update/Delete return the already-wrapped error) so wfctlhelpers' generic dispatcher records it verbatim. Option (b) is preferred because it survives any future migration."
 	}
 	// Heuristic: if the switch has the canonical create/update[/delete]
 	// triple (plus optional separate replace) and no detected non-canonical
@@ -471,8 +482,28 @@ func findCustomErrorWrap(sw *ast.SwitchStmt) token.Pos {
 
 // hasCanonicalCases returns true if the switch has at least the
 // "create" + "update" cases (delete is conventional but optional in
-// providers that don't support delete via Apply). Replace as a
-// separate case is allowed; collapse is filtered earlier.
+// providers that don't support delete via Apply) AND every case body
+// has only the canonical-shape statements (driver method calls,
+// ResourceRef construction, simple if-guards on action.Current). The
+// body-shape validation closes review round-1 finding #5: rev0 of this
+// function only checked case labels, so extra bookkeeping or metrics
+// inside a case body would still classify as canonical and get silently
+// dropped during rewrite.
+//
+// Recognised case-body statement kinds (each maps to a known shape
+// in wfctlhelpers' generic dispatcher):
+//
+//   - AssignStmt: `out, err = drv.Create(ctx, action.Resource)` /
+//     `err = drv.Delete(ctx, ref)` / `ref := ResourceRef{...}` /
+//     `ref.ProviderID = action.Current.ProviderID`
+//   - IfStmt: only the `if action.Current != nil` ProviderID-set
+//     guard pattern (cond is BinaryExpr NEQ on action.Current and nil)
+//   - DeclStmt: `var out *ResourceOutput` (rare but legal; wfctlhelpers
+//     handles its own out variable)
+//
+// Anything else (including `default:` cases that error on unknown
+// action) is acceptable in the `default` case but rejected in the
+// canonical "create"/"update"/"delete"/"replace" cases.
 func hasCanonicalCases(sw *ast.SwitchStmt) bool {
 	hasCreate, hasUpdate := false, false
 	for _, stmt := range sw.Body.List {
@@ -480,20 +511,134 @@ func hasCanonicalCases(sw *ast.SwitchStmt) bool {
 		if !ok {
 			continue
 		}
-		for _, expr := range cc.List {
-			s, ok := stringLiteral(expr)
-			if !ok {
-				continue
-			}
-			switch s {
+		labels := caseLabels(cc)
+		isCanonicalLabel := false
+		for _, l := range labels {
+			switch l {
 			case "create":
 				hasCreate = true
+				isCanonicalLabel = true
 			case "update":
 				hasUpdate = true
+				isCanonicalLabel = true
+			case "delete", "replace":
+				isCanonicalLabel = true
 			}
+		}
+		// `default:` (no labels) is allowed regardless of body shape;
+		// the wfctlhelpers dispatcher already errors on unknown
+		// actions, so a default body that does the same is
+		// behaviourally redundant rather than dropped.
+		if len(labels) == 0 {
+			continue
+		}
+		if !isCanonicalLabel {
+			// A non-create/update/delete/replace label inside the
+			// switch is an out-of-template idiom; reject.
+			return false
+		}
+		if !caseBodyIsCanonical(cc.Body) {
+			return false
 		}
 	}
 	return hasCreate && hasUpdate
+}
+
+// caseLabels returns the unquoted string-literal values of the case
+// clause's case-list. A `default:` clause returns an empty slice.
+func caseLabels(cc *ast.CaseClause) []string {
+	var out []string
+	for _, expr := range cc.List {
+		if s, ok := stringLiteral(expr); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// caseBodyIsCanonical returns true if every statement in body is in
+// the recognised whitelist (driver call, ResourceRef construction,
+// ProviderID guard). The whitelist is intentionally narrow so that
+// bespoke statements (logging, metrics, alternate construction) cause
+// rejection — the codemod errs on the side of NOT rewriting in
+// ambiguous shapes.
+func caseBodyIsCanonical(body []ast.Stmt) bool {
+	for _, stmt := range body {
+		if !canonicalCaseStmt(stmt) {
+			return false
+		}
+	}
+	return true
+}
+
+// canonicalCaseStmt returns true if stmt fits one of the canonical
+// shapes inside an action-switch case body. See caseBodyIsCanonical
+// for the rationale.
+func canonicalCaseStmt(stmt ast.Stmt) bool {
+	switch s := stmt.(type) {
+	case *ast.AssignStmt:
+		// `out, err = drv.Create(...)` / `ref := ResourceRef{...}` /
+		// `err = drv.Delete(...)` / `ref.ProviderID = ...` are all
+		// AssignStmts. We don't introspect RHS shape further: the
+		// tighter detectors (findCustomErrorWrap, findUpsertRecovery)
+		// catch the bespoke wrapping that would matter.
+		_ = s
+		return true
+	case *ast.IfStmt:
+		// Allow `if action.Current != nil { ref.ProviderID = ... }` —
+		// the standard ProviderID-set guard. Conservative match: cond
+		// is BinaryExpr NEQ where one side is a SelectorExpr ending in
+		// ".Current" and the other is `nil`.
+		return isProviderIDGuard(s)
+	case *ast.DeclStmt:
+		// `var out *ResourceOutput` — local declaration. wfctlhelpers
+		// owns its own out variable so the local is just bookkeeping.
+		return true
+	}
+	return false
+}
+
+// isProviderIDGuard checks for the canonical
+// `if action.Current != nil { ... }` guard. Permissive on the body
+// since the inner statement is itself a canonical AssignStmt
+// (`ref.ProviderID = action.Current.ProviderID`).
+func isProviderIDGuard(ifs *ast.IfStmt) bool {
+	be, ok := ifs.Cond.(*ast.BinaryExpr)
+	if !ok || be.Op != token.NEQ {
+		return false
+	}
+	xIsCurrent := false
+	if sel, ok := be.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "Current" {
+		xIsCurrent = true
+	}
+	yIsNil := false
+	if id, ok := be.Y.(*ast.Ident); ok && id.Name == "nil" {
+		yIsNil = true
+	}
+	if !(xIsCurrent && yIsNil) {
+		// Allow the reverse order too (`nil != action.Current`),
+		// though it's not idiomatic Go.
+		yIsCurrent := false
+		if sel, ok := be.Y.(*ast.SelectorExpr); ok && sel.Sel.Name == "Current" {
+			yIsCurrent = true
+		}
+		xIsNil := false
+		if id, ok := be.X.(*ast.Ident); ok && id.Name == "nil" {
+			xIsNil = true
+		}
+		if !(yIsCurrent && xIsNil) {
+			return false
+		}
+	}
+	if ifs.Else != nil {
+		return false
+	}
+	for _, s := range ifs.Body.List {
+		if !canonicalCaseStmt(s) {
+			return false
+		}
+	}
+	return true
 }
 
 // stringLiteral returns the unquoted value of a BasicLit STRING
@@ -566,8 +711,8 @@ func rewriteApplyBody(fn *ast.FuncDecl) {
 	}
 }
 
-// (writeFileAtomic + ensurePlanHelperImport live in refactor_plan.go;
-// refactor-apply reuses them.)
+// (writeFileAtomic + ensureImport live in refactor_plan.go;
+// refactor-apply reuses them via ensureWfctlhelpersImport.)
 
 // ============================================================
 // Report rendering

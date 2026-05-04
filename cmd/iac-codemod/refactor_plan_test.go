@@ -136,9 +136,80 @@ func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current 
 func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) { return nil, nil }
 `
 
+// canonicalPlanWithExtraLoggingSrc — review round-1 finding #3. A Plan
+// body whose desired-loop has an additional logging call (a real-world
+// bespoke planner) must NOT be classified as canonical: silently
+// rewriting it would drop the log line.
+const canonicalPlanWithExtraLoggingSrc = `package p
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+type ResourceSpec struct{ Name string; Config map[string]any }
+type ResourceState struct{ Name string; AppliedConfig map[string]any }
+type IaCPlan struct{ ID string; CreatedAt time.Time; Actions []PlanAction }
+type PlanAction struct{ Action string; Resource ResourceSpec; Current *ResourceState }
+type ApplyResult struct{}
+type PlanDiagnostic struct{}
+
+type DOProvider struct{}
+
+func configHash(m map[string]any) string { return "" }
+
+func (p *DOProvider) Plan(_ context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	currentByName := make(map[string]ResourceState, len(current))
+	for _, r := range current {
+		currentByName[r.Name] = r
+	}
+
+	plan := &IaCPlan{
+		ID:        fmt.Sprintf("plan-%d", time.Now().UnixNano()),
+		CreatedAt: time.Now(),
+	}
+
+	for _, spec := range desired {
+		fmt.Println("planning:", spec.Name)  // BESPOKE TELEMETRY — must not be silently dropped
+		cur, exists := currentByName[spec.Name]
+		if !exists {
+			plan.Actions = append(plan.Actions, PlanAction{Action: "create", Resource: spec})
+			continue
+		}
+		if configHash(cur.AppliedConfig) != configHash(spec.Config) {
+			plan.Actions = append(plan.Actions, PlanAction{Action: "update", Resource: spec, Current: &cur})
+		}
+	}
+	return plan, nil
+}
+
+func (p *DOProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return wfctlhelpers.ApplyPlan(ctx, p, plan)
+}
+func (p *DOProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
+`
+
+func TestRefactorPlan_ExtraLoggingNotCanonical(t *testing.T) {
+	path := writeFixture(t, "provider.go", canonicalPlanWithExtraLoggingSrc)
+	var stdout, stderr bytes.Buffer
+	code := runRefactorPlan([]string{path}, &Options{DryRun: true, Fix: false}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	if strings.Contains(out, "DOProvider.Plan canonical") {
+		t.Errorf("Plan body with extra side-effect (telemetry) must NOT be classified canonical; got:\n%s", out)
+	}
+	if !strings.Contains(out, "non-canonical") {
+		t.Errorf("Plan body with extra side-effect should be reported non-canonical; got:\n%s", out)
+	}
+}
+
 // alreadyDelegatedPlanSrc has a Plan body that is already
-// `return wfctlhelpers.Plan(...)`. The mode must NOT report it as
-// non-canonical (it's already migrated) and must NOT mutate it (idempotent).
+// `return platform.ComputePlan(...)` (the rev1 review-corrected target).
+// The mode must NOT report it as non-canonical and must NOT mutate it
+// (idempotent).
 const alreadyDelegatedPlanSrc = `package p
 
 import "context"
@@ -150,7 +221,7 @@ type ApplyResult struct{}
 type FooProvider struct{}
 
 func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
-	return wfctlhelpers.Plan(ctx, p, desired, current)
+	return platform.ComputePlan(ctx, p, desired, current)
 }
 
 func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) { return nil, nil }
@@ -260,15 +331,15 @@ func TestRefactorPlan_Fix_RewritesCanonical(t *testing.T) {
 		t.Fatalf("read after fix: %v", err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(gotStr, "return wfctlhelpers.Plan(ctx, p, desired, current)") {
-		t.Errorf("rewritten body should call wfctlhelpers.Plan; got:\n%s", gotStr)
+	if !strings.Contains(gotStr, "return platform.ComputePlan(ctx, p, desired, current)") {
+		t.Errorf("rewritten body should call platform.ComputePlan; got:\n%s", gotStr)
 	}
 	if strings.Contains(gotStr, "currentByName := make(") {
 		t.Errorf("canonical body should be removed by rewrite; got:\n%s", gotStr)
 	}
 	// Helper import must be present after rewrite.
-	if !strings.Contains(gotStr, `"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"`) {
-		t.Errorf("rewrite should add wfctlhelpers import; got:\n%s", gotStr)
+	if !strings.Contains(gotStr, `"github.com/GoCodeAlone/workflow/platform"`) {
+		t.Errorf("rewrite should add platform import; got:\n%s", gotStr)
 	}
 }
 

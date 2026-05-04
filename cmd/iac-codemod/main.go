@@ -5,7 +5,7 @@
 //
 // Modes:
 //
-//	refactor-plan      — rewrite Plan() bodies to delegate to wfctlhelpers.Plan
+//	refactor-plan      — rewrite Plan() bodies to delegate to platform.ComputePlan
 //	refactor-apply     — rewrite Apply() bodies to delegate to wfctlhelpers.ApplyPlan
 //	                     (with informative reports for non-canonical idioms)
 //	add-validate-plan  — inject a no-op ValidatePlan stub on providers missing it
@@ -166,7 +166,7 @@ func usage(w io.Writer) {
 	fmt.Fprintf(w, `usage: iac-codemod <mode> [flags] [paths...]
 
 Modes:
-  refactor-plan      Rewrite Plan() bodies to delegate to wfctlhelpers.Plan.
+  refactor-plan      Rewrite Plan() bodies to delegate to platform.ComputePlan.
   refactor-apply     Rewrite Apply() bodies to delegate to wfctlhelpers.ApplyPlan
                      (with informative reports for non-canonical idioms).
   add-validate-plan  Insert a no-op ValidatePlan stub on providers missing it.
@@ -175,6 +175,11 @@ Modes:
 Flags (all modes):
   -dry-run   Report findings without mutating files (default true).
   -fix       Opt into mutation; overrides -dry-run.
+
+Mode-specific flags:
+  refactor-apply:
+    -report-file <path>  Also write the Markdown report to <path>. Default
+                         is stdout-only.
 
   Flags must precede paths. The standard library flag parser stops at the
   first non-flag argument, so 'iac-codemod refactor-plan /path -fix' will

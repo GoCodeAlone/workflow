@@ -32,16 +32,20 @@ func init() {
 	modes["lint"] = runLint
 }
 
-// AssertPlanDelegatesToHelper flags any provider type's Plan method whose
-// body does NOT call wfctlhelpers.Plan. The canonical migration target is
-// `return wfctlhelpers.Plan(ctx, p, desired, current)`; non-delegating
-// bodies are reported so the maintainer knows which providers still need
-// to be ported. The check is syntactic — it matches the SelectorExpr
-// `wfctlhelpers.Plan` regardless of whether the call resolves at type-check
-// time, so it works on plugins that have not yet vendored the helper.
+// AssertPlanDelegatesToHelper flags any provider type's Plan method
+// whose body does NOT call platform.ComputePlan (the canonical Plan
+// helper at platform/differ.go:72). Legacy `wfctlhelpers.Plan(...)` calls
+// are also accepted as delegated, for forward-compatibility with rev0
+// of this analyzer when the rewrite target was still misnamed. See
+// refactor_plan.go's planHelperImportPath docstring for the rev1
+// review-correction history (Copilot review finding #1).
+//
+// The check is syntactic — it matches the SelectorExpr regardless of
+// whether the call resolves at type-check time, so it works on plugins
+// that have not yet vendored the helper.
 var AssertPlanDelegatesToHelper = &analysis.Analyzer{
 	Name: "AssertPlanDelegatesToHelper",
-	Doc:  "Provider Plan() must delegate to wfctlhelpers.Plan.",
+	Doc:  "Provider Plan() must delegate to platform.ComputePlan.",
 	Run:  runAssertPlanDelegatesToHelper,
 }
 
@@ -136,7 +140,12 @@ func runLint(args []string, opts *Options, stdout, stderr io.Writer) int {
 		}
 	}
 	report.print(stdout)
-	if len(report.findings) > 0 {
+	// Exit non-zero on EITHER findings OR per-file errors. Review round-1
+	// finding #10: rev0 returned 0 when there were no findings even if
+	// every file failed to parse, which let a green CI run hide the
+	// fact that no analysis happened. Treating per-file errors as
+	// failure surfaces the coverage gap honestly.
+	if len(report.findings) > 0 || len(report.errors) > 0 {
 		return 1
 	}
 	return 0
@@ -349,8 +358,12 @@ func runAssertPlanDelegatesToHelper(pass *analysis.Pass) (any, error) {
 				routeSkip(pass, fn)
 				continue
 			}
-			if !bodyCallsSelector(fn.Body, "wfctlhelpers", "Plan") {
-				pass.Reportf(fn.Pos(), "%s.%s does not delegate to wfctlhelpers.Plan; non-canonical Plan() body", receiverTypeName(fn), fn.Name.Name)
+			// Accept either the canonical platform.ComputePlan (rev1
+			// review-corrected target) or the legacy wfctlhelpers.Plan
+			// (planned-but-not-shipped API) as delegated.
+			if !bodyCallsSelector(fn.Body, "platform", "ComputePlan") &&
+				!bodyCallsSelector(fn.Body, "wfctlhelpers", "Plan") {
+				pass.Reportf(fn.Pos(), "%s.%s does not delegate to platform.ComputePlan; non-canonical Plan() body", receiverTypeName(fn), fn.Name.Name)
 			}
 		}
 	}
@@ -491,9 +504,15 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 			routeSkipName(pass, methods[0].Pos(), recv)
 			continue
 		}
+		// Signature-match (review round-1 finding #11): rev0 of this
+		// analyzer matched ValidatePlan by name only, so a method with
+		// the wrong parameter or result type passed silently — even
+		// though the type still failed to satisfy
+		// interfaces.ProviderValidator. validatePlanSignatureMatches
+		// (in add_validate_plan.go) is the shared signature checker.
 		hasValidate := false
 		for _, m := range methods {
-			if m.Name.Name == "ValidatePlan" {
+			if m.Name.Name == "ValidatePlan" && validatePlanSignatureMatches(m.Type) {
 				hasValidate = true
 				break
 			}

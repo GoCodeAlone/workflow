@@ -232,6 +232,92 @@ func TestAddValidatePlan_Fix_DoesNotTouchNonProvider(t *testing.T) {
 }
 
 // ============================================================
+// Review round-1 regression tests
+// ============================================================
+
+// avpProviderInterfacesQualifierSrc — review round-1 finding #7. A
+// provider whose package imports interfaces and references the
+// canonical types as `*interfaces.IaCPlan` etc. must receive a stub
+// whose signature uses the same qualifier. rev0 always emitted
+// unqualified types and broke compilation.
+const avpProviderInterfacesQualifierSrc = `package p
+
+import (
+	"context"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
+)
+
+type FooProvider struct{}
+
+func (p *FooProvider) Plan(ctx context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return &interfaces.IaCPlan{}, nil
+}
+
+func (p *FooProvider) Apply(ctx context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return &interfaces.ApplyResult{}, nil
+}
+`
+
+func TestAddValidatePlan_Fix_QualifiedSignature(t *testing.T) {
+	path := writeFixture(t, "provider.go", avpProviderInterfacesQualifierSrc)
+	var stdout, stderr bytes.Buffer
+	if code := runAddValidatePlan([]string{path}, &Options{DryRun: false, Fix: true}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	got, _ := os.ReadFile(path)
+	gotStr := string(got)
+	if !strings.Contains(gotStr, "ValidatePlan(plan *interfaces.IaCPlan) []interfaces.PlanDiagnostic") {
+		t.Errorf("stub must use the same qualifier as the file's existing imports (interfaces.IaCPlan); got:\n%s", gotStr)
+	}
+}
+
+// avpProviderWrongSignatureSrc — review round-1 finding #8. A provider
+// with a `ValidatePlan` method whose signature is wrong (takes a string
+// instead of *IaCPlan) must NOT be classified as already-implemented;
+// the codemod would then leave the type failing to satisfy
+// interfaces.ProviderValidator.
+const avpProviderWrongSignatureSrc = `package p
+
+import "context"
+
+type ResourceSpec struct{}
+type ResourceState struct{}
+type IaCPlan struct{}
+type ApplyResult struct{}
+type PlanDiagnostic struct{}
+
+type FooProvider struct{}
+
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return &IaCPlan{}, nil
+}
+
+func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return &ApplyResult{}, nil
+}
+
+// Wrong signature: parameter is a string, not *IaCPlan.
+func (p *FooProvider) ValidatePlan(name string) []PlanDiagnostic { return nil }
+`
+
+func TestAddValidatePlan_DryRun_FlagsWrongSignature(t *testing.T) {
+	path := writeFixture(t, "provider.go", avpProviderWrongSignatureSrc)
+	var stdout, stderr bytes.Buffer
+	code := runAddValidatePlan([]string{path}, &Options{DryRun: true, Fix: false}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+	}
+	out := stdout.String()
+	if strings.Contains(out, "already-implemented") {
+		t.Errorf("ValidatePlan with wrong signature must NOT be classified as already-implemented; got:\n%s", out)
+	}
+	if !strings.Contains(out, "missing-validate-plan") {
+		t.Errorf("ValidatePlan with wrong signature should be classified as missing (signature mismatch); got:\n%s", out)
+	}
+}
+
+// ============================================================
 // Mutation-gate negative test
 // ============================================================
 
