@@ -104,6 +104,19 @@ production resources colocated). Rotation cadence: **quarterly**.
 |---|---|---|
 | 2026-05-03 | jon@langevin.me | Initial provisioning of the wfctl-conformance@ account + token |
 
+### Kill-switch arming state
+
+Until `DO_CONFORMANCE_API_TOKEN` is provisioned in repo secrets, the
+budget-check workflow logs `::notice title=Budget kill-switch
+unarmed::...` and skips the balance-fetch step. The downstream smoke
+job has `needs: [budget-check]` so it cascades to a no-op too — no
+real cloud provisioning can run without the token, so the kill-
+switch's safety property is preserved by the missing secret. The
+hourly leak-scrubber follows the same pattern (skips with notice).
+Operators arming the gate must follow the rotation procedure above
+to land the secret AND verify a manual workflow_dispatch run goes
+green before the gate is considered live.
+
 ### Token security invariants
 
 - **NEVER** echo or log `${DO_CONFORMANCE_API_TOKEN}` in a workflow

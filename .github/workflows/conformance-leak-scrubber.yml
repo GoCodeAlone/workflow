@@ -48,7 +48,25 @@ jobs:
       - name: Check out workflow repo
         uses: actions/checkout@v4
 
+      # Detect unconfigured secret. The cron fires on a fixed
+      # schedule regardless of secret provisioning state; if the
+      # operator hasn't yet provisioned DO_CONFORMANCE_API_TOKEN
+      # there are also no resources to scrub (the smoke gate
+      # cannot have created any). Skip the entire job in that case
+      # rather than cascading curl-401 failures into hourly noise.
+      - name: Detect unconfigured token
+        id: gate
+        run: |
+          set -euo pipefail
+          if [[ -z "${DO_CONFORMANCE_API_TOKEN}" ]]; then
+            echo "::notice title=Scrubber unarmed::DO_CONFORMANCE_API_TOKEN secret not configured; skipping hourly scrub. No conformance resources can exist without the token."
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: List + delete leaked Droplets
+        if: steps.gate.outputs.armed == 'true'
         id: scrub
         run: |
           set -euo pipefail
@@ -103,7 +121,7 @@ jobs:
       # documented mitigation:
       # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
       - name: File / comment on dedup leak issue
-        if: steps.scrub.outputs.count != '0'
+        if: steps.gate.outputs.armed == 'true' && steps.scrub.outputs.count != '0'
         env:
           GH_TOKEN: ${{ github.token }}
           PRIMARY_LABEL: conformance-leak-incident
@@ -135,6 +153,7 @@ jobs:
       # of-day case). Identified by spec-review of T7.14, fixed in
       # this commit.
       - name: Check balance + escalate budget incident
+        if: steps.gate.outputs.armed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

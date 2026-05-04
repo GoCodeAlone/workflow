@@ -57,8 +57,32 @@ jobs:
           key: budget-${{ github.event.pull_request.base.sha || github.sha }}-${{ steps.hour.outputs.value }}
           path: /tmp/budget-result.json
 
+      # Detect unconfigured secret BEFORE attempting the API call.
+      # On PRs from forks (and on the W-7 PR itself, before
+      # operators provision the wfctl-conformance@ token), the
+      # secret is unset. Treat that as "kill-switch not yet armed"
+      # and emit a notice instead of curl-401 failing the job. The
+      # downstream smoke job has `needs: [budget-check]` so it
+      # cascades to a no-op too — the safety property is preserved
+      # because no real cloud provisioning can run without the
+      # token. Operator action: provision the secret per
+      # docs/conformance-runbook.md § "Token rotation" to arm the
+      # kill-switch.
+      - name: Detect unconfigured budget kill-switch
+        id: gate
+        env:
+          DO_CONFORMANCE_API_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DO_CONFORMANCE_API_TOKEN}" ]]; then
+            echo "::notice title=Budget kill-switch unarmed::DO_CONFORMANCE_API_TOKEN secret not configured; skipping balance check. See docs/conformance-runbook.md § 'Token rotation' to arm the gate."
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Fetch DO month-to-date balance
-        if: steps.budget-cache.outputs.cache-hit != 'true'
+        if: steps.gate.outputs.armed == 'true' && steps.budget-cache.outputs.cache-hit != 'true'
         env:
           DO_CONFORMANCE_API_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
         run: |
@@ -70,6 +94,7 @@ jobs:
             > /tmp/budget-result.json
 
       - name: Enforce budget caps
+        if: steps.gate.outputs.armed == 'true'
         run: |
           set -euo pipefail
           SPEND=$(jq -r '.month_to_date_usage // "0"' /tmp/budget-result.json)
