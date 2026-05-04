@@ -1,0 +1,153 @@
+name: Conformance Leak Scrubber
+
+# Hourly safety net for conformance Droplets that escaped both the
+# in-test t.Cleanup and the smoke-job's outer always() cleanup. Lists
+# DO resources tagged conformance-pr-* older than 1 hour, deletes
+# each, aggregates counts. If anything was scrubbed, files (or
+# appends to) a dedup'd GitHub issue via
+# scripts/file-or-comment-leak-issue.sh.
+#
+# Same job ALSO runs the budget-incident dedup: if month-to-date
+# spend exceeds the $25/mo cap (recovery window after a soft-alert
+# preceding hour), or if scrub events have fired more than 3 times
+# today, files a separate dedup'd issue under the
+# conformance-budget-incident label.
+#
+# Cadence: hourly cron + on-demand workflow_dispatch for operator
+# manual triggers (e.g., after a budget calibration to clear stale
+# state). The cron uses the standard `0 * * * *` pattern so the
+# wall-clock TTL on conformance-pr-* tags lines up with the leak
+# detection threshold.
+
+on:
+  schedule:
+    # Top of every hour, UTC. Fires regardless of branch state.
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write  # required by the dedup helper to file/comment
+
+# Single concurrent scrubber: stacked cron + manual dispatches must
+# not double-delete or double-file.
+concurrency:
+  group: conformance-leak-scrubber
+  cancel-in-progress: false
+
+jobs:
+  scrub:
+    name: Hourly DO leak scrub
+    runs-on: ubuntu-latest
+    env:
+      DO_CONFORMANCE_API_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
+      AGE_THRESHOLD_SECONDS: 3600  # 1 hour — matches the smoke job's expected lifetime
+      BUDGET_HARD_CAP_USD: 25      # mirrors conformance-budget-check.yml
+      DAILY_SCRUB_THRESHOLD: 3     # > 3 scrub events / day → file budget incident too
+    steps:
+      - name: Check out workflow repo
+        uses: actions/checkout@v4
+
+      - name: List + delete leaked Droplets
+        id: scrub
+        run: |
+          set -euo pipefail
+          NOW_EPOCH=$(date -u +%s)
+          # GET /v2/droplets?tag_name=... pages at 200/page; the
+          # conformance account holds zero baseline resources so we
+          # do not expect to paginate, but we follow the next-page
+          # link defensively.
+          PAGE_URL="https://api.digitalocean.com/v2/droplets?per_page=200"
+          SCRUBBED=0
+          DETAILS=""
+          while [[ -n "${PAGE_URL}" ]]; do
+            RESPONSE=$(curl --silent --show-error --fail \
+              -H "Authorization: Bearer ${DO_CONFORMANCE_API_TOKEN}" \
+              "${PAGE_URL}")
+            # Iterate Droplets whose tags include any conformance-pr-*
+            # entry AND whose created_at is older than the threshold.
+            while IFS=$'\t' read -r ID NAME CREATED_AT; do
+              [[ -z "${ID}" ]] && continue
+              CREATED_EPOCH=$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${CREATED_AT}" +%s 2>/dev/null \
+                || date -u -d "${CREATED_AT}" +%s)
+              AGE=$(( NOW_EPOCH - CREATED_EPOCH ))
+              if [[ "${AGE}" -gt "${AGE_THRESHOLD_SECONDS}" ]]; then
+                # Force-delete via DELETE /v2/droplets/{id}.
+                curl --silent --show-error --fail \
+                  -X DELETE \
+                  -H "Authorization: Bearer ${DO_CONFORMANCE_API_TOKEN}" \
+                  "https://api.digitalocean.com/v2/droplets/${ID}"
+                SCRUBBED=$(( SCRUBBED + 1 ))
+                DETAILS+="- droplet ${ID} (${NAME}, age=${AGE}s)\\n"
+                echo "deleted droplet ${ID} (${NAME}, age=${AGE}s)"
+              fi
+            done < <(echo "${RESPONSE}" \
+              | jq -r '.droplets[]? | select(.tags // [] | any(startswith("conformance-pr-"))) | [.id, .name, .created_at] | @tsv')
+            PAGE_URL=$(echo "${RESPONSE}" | jq -r '.links.pages.next // ""')
+          done
+          echo "count=${SCRUBBED}" >> "$GITHUB_OUTPUT"
+          # Use a delimiter for multi-line outputs so newlines survive.
+          {
+            echo "details<<EOF"
+            printf '%b' "${DETAILS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "scrubbed_count=${SCRUBBED}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File / comment on dedup leak issue
+        if: steps.scrub.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIMARY_LABEL: conformance-leak-incident
+          HELPER_LABEL: auto-filed-leak
+        run: |
+          .github/workflows/scripts/file-or-comment-leak-issue.sh \
+            "${{ steps.scrub.outputs.count }}" \
+            "${{ steps.scrub.outputs.details }}"
+
+      # Budget-incident gate. Two independent triggers:
+      #  1. Month-to-date spend > $25/mo cap (the smoke-gate kill-
+      #     switch already aborts new runs above this; this branch
+      #     ensures an audit-trail issue exists).
+      #  2. Scrub events today > 3 — sustained leak rate that warrants
+      #     human investigation regardless of dollar value.
+      # Files into a SEPARATE dedup chain so leak vs. budget swimlanes
+      # stay clean.
+      - name: Check balance + escalate budget incident
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BALANCE=$(curl --silent --show-error --fail \
+            -H "Authorization: Bearer ${DO_CONFORMANCE_API_TOKEN}" \
+            "https://api.digitalocean.com/v2/customers/my/balance")
+          SPEND=$(jq -r '.month_to_date_usage // "0"' <<< "${BALANCE}")
+          # Count today's auto-filed-leak issues (regardless of state)
+          # to detect sustained scrub-firing.
+          TODAY="$(date -u '+%Y-%m-%d')"
+          TODAY_SCRUBS=$(gh issue list \
+            --label conformance-leak-incident \
+            --label auto-filed-leak \
+            --state all \
+            --search "created:>=${TODAY}" \
+            --json number \
+            --jq 'length')
+          ESCALATE=0
+          REASON=""
+          if awk "BEGIN { exit !(${SPEND} > ${BUDGET_HARD_CAP_USD}) }"; then
+            ESCALATE=1
+            REASON="month-to-date $${SPEND} > $${BUDGET_HARD_CAP_USD} cap"
+          fi
+          if [[ "${TODAY_SCRUBS}" -gt "${DAILY_SCRUB_THRESHOLD}" ]]; then
+            ESCALATE=1
+            REASON="${REASON:+${REASON}; }${TODAY_SCRUBS} scrub events today > ${DAILY_SCRUB_THRESHOLD} threshold"
+          fi
+          if [[ "${ESCALATE}" -eq 1 ]]; then
+            PRIMARY_LABEL=conformance-budget-incident \
+            HELPER_LABEL=auto-filed-budget \
+            ISSUE_TITLE="Conformance budget incident: ${REASON}" \
+              .github/workflows/scripts/file-or-comment-leak-issue.sh \
+                "${SPEND}" "${REASON}"
+          else
+            echo "::notice title=Budget OK::month_to_date_usage=${SPEND}; today_scrubs=${TODAY_SCRUBS}"
+          fi
