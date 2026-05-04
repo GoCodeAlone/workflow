@@ -21,7 +21,9 @@ package wfctlhelpers
 import (
 	"context"
 	"fmt"
+	"log"
 
+	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -33,21 +35,79 @@ import (
 // at the next iteration boundary and returns ctx.Err() as the top-level
 // error so a long apply terminates promptly on Ctrl-C / SIGTERM.
 //
+// At entry ApplyPlan captures result.InitialInputSnapshot by fingerprinting
+// every name listed in plan.InputSnapshot through the OS env. After the
+// dispatch loop completes — successfully or not — a deferred postcondition
+// computes result.InputDriftReport against an apply-time snapshot taken
+// through inputsnapshot.NewTolerantEnvProvider (sub-action env unsets are
+// preserved, not flagged as drift). The postcondition is wrapped in
+// recover() so a buggy env-provider closure cannot corrupt apply results;
+// on panic, InputDriftReport is reset to nil and a warning is logged.
+//
 // The function is concurrency-safe with respect to its inputs: result is
 // owned by ApplyPlan for the duration of the call and is not shared with
 // the provider or driver implementations.
 //
-// T3.1 ships the dispatch skeleton. T3.1.5 wraps the body with the input-
-// drift postcondition; T3.2/T3.3/T3.4 fill the per-action sub-functions
-// with their full bodies. Test smoke-coverage verifies dispatch wiring;
-// per-action behavior is exercised by the per-task test files.
+// T3.1 ships the dispatch skeleton; T3.1.5 added the postcondition above;
+// T3.2/T3.3/T3.4 fill the per-action sub-functions with their full bodies.
 func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	result := &interfaces.ApplyResult{PlanID: plan.ID}
+	return applyPlanWithEnvProvider(ctx, p, plan, nil)
+}
+
+// applyPlanWithEnvProvider is the same-package test seam used by
+// apply_postcondition_test.go to inject a custom apply-time env provider
+// into the deferred drift postcondition (e.g., a panicky closure that
+// stresses the recover() guard). When applyTimeEnv is nil, the function
+// uses inputsnapshot.NewTolerantEnvProvider(plan.InputSnapshot) — the
+// production behavior. The seam stays unexported because the only
+// sanctioned external entry point is ApplyPlan.
+func applyPlanWithEnvProvider(
+	ctx context.Context,
+	p interfaces.IaCProvider,
+	plan *interfaces.IaCPlan,
+	applyTimeEnv func(string) (string, bool),
+) (*interfaces.ApplyResult, error) {
+	inputNames := snapshotKeys(plan.InputSnapshot)
+	result := &interfaces.ApplyResult{
+		PlanID:               plan.ID,
+		InitialInputSnapshot: inputsnapshot.Snapshot(inputNames, inputsnapshot.OSEnvProvider),
+	}
+
+	// Deferred drift postcondition — runs unconditionally (success OR
+	// per-action failure), wrapped in recover() so a buggy env-provider
+	// closure (e.g., one freed mid-flight) cannot corrupt the apply
+	// result. On panic, drop the report rather than ship a partial one.
+	defer func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result.InputDriftReport = nil
+				log.Printf("warning: input-drift postcondition panicked: %v", r)
+			}
+		}()
+		// Resolve the apply-time env provider lazily so the production
+		// path's NewTolerantEnvProvider closure isn't constructed when a
+		// test override is in play.
+		env := applyTimeEnv
+		if env == nil {
+			// CRITICAL: factory MUST be invoked here, NOT passed by
+			// reference (NewTolerantEnvProvider returns the closure;
+			// passing the function value would call the factory itself
+			// every Snapshot call and short-circuit the planSnapshot
+			// closure-capture). The cycle-4 reviewer caught this exact
+			// bug-class in the rev3 pseudo-code.
+			env = inputsnapshot.NewTolerantEnvProvider(plan.InputSnapshot)
+		}
+		applyTimeSnap := inputsnapshot.Snapshot(inputNames, env)
+		result.InputDriftReport = inputsnapshot.ComputeDrift(plan.InputSnapshot, applyTimeSnap)
+	}()
+
 	for _, action := range plan.Actions {
 		// Honor cancellation at the loop boundary. Drivers should also
 		// check ctx internally for in-flight work, but the loop check
 		// guarantees apply stops between actions even if a driver
-		// happens to ignore ctx.
+		// happens to ignore ctx. The deferred postcondition still runs
+		// on early return so InputDriftReport is populated even on a
+		// canceled apply.
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -69,6 +129,22 @@ func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.I
 		}
 	}
 	return result, nil
+}
+
+// snapshotKeys returns the keys of m as an unordered slice. ComputeDrift
+// sorts its output, and Snapshot iterates in any order, so no key sort
+// is needed at this stage. Inlined helper to keep the dependency
+// surface minimal and avoid pulling in slices/maps at the postcondition
+// call site.
+func snapshotKeys(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 // dispatchAction routes a single PlanAction to the per-kind sub-function.
