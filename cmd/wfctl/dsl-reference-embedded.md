@@ -1327,7 +1327,7 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 
 - `--config <file>` — Config file (default: `infra.yaml` or `config/infra.yaml`)
 - `--env <name>` — Environment name for per-env config resolution
-- `--plan <file>` — Path to a plan JSON file (enables R-A7 checks)
+- `--plan <file>` — Path to a plan JSON file (enables R-A7 and R-A10 checks)
 - `--strict` — Treat all WARNs as FAILs (exit 1)
 - `--strict-health` — Treat R-A2 health-check WARNs as FAILs
 - `--strict-cidr` — Enable strict CIDR overlap checks (reserved for future use)
@@ -1350,6 +1350,14 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 | R-A6 | Network/exposure alignment | FAIL or WARN |
 | R-A7 | Plan-output sanity (requires `--plan`) | FAIL or WARN |
 | R-A8 | WebAuthn RP_ID alignment | FAIL |
+| R-A9 | Suspicious `provider_credential` key suffix | WARN |
+| R-A10 | Provider `ValidatePlan` diagnostics (requires `--plan`) | FAIL or WARN |
+
+R-A10 dispatches the optional `interfaces.ProviderValidator.ValidatePlan(plan)`
+to every loaded `iac.provider`. Providers that do not implement it are skipped.
+`PlanDiagnosticError` becomes FAIL; `PlanDiagnosticWarning` and `PlanDiagnosticInfo`
+become WARN (advisory in default mode, fail under `--strict`). See the
+`ProviderValidator` section in `DOCUMENTATION.md` for the SDK-side contract.
 
 ### Example output
 

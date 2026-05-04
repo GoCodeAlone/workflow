@@ -1275,6 +1275,63 @@ WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve -c infra.yaml --env sta
 WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve --skip-refresh -c infra.yaml
 ```
 
+#### `infra align`
+
+Run a battery of static alignment checks against a config (and optionally a
+plan). Each rule (`R-A1` … `R-A10`) emits findings as a `FAIL` (always
+non-zero exit) or `WARN` (non-zero only with `--strict`).
+
+```
+wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict] [--strict-health] [--strict-cidr] [--max-changes N]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config`, `-c` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for per-env config resolution |
+| `--plan` | `` | Path to a plan JSON file. Enables `R-A7` (plan-output sanity) and `R-A10` (provider `ValidatePlan` dispatch). |
+| `--strict` | `false` | Treat all `WARN` findings as `FAIL` (exit 1) |
+| `--strict-health` | `false` | Treat `R-A2` health-check `WARN`s as `FAIL` |
+| `--strict-cidr` | `false` | Enable strict CIDR overlap checks (reserved) |
+| `--max-changes` | `50` | Warn when the plan has more than N actions |
+
+| Rule | Name | Severity |
+|------|------|----------|
+| R-A1 | Container/runtime alignment | FAIL |
+| R-A2 | Health-check path in source | WARN (FAIL with `--strict-health`) |
+| R-A3 | Service-to-service DNS alignment | FAIL |
+| R-A4 | Env-var resolution | FAIL |
+| R-A5 | Migrations alignment | FAIL |
+| R-A6 | Network/exposure alignment | FAIL or WARN |
+| R-A7 | Plan-output sanity (requires `--plan`) | FAIL or WARN |
+| R-A8 | WebAuthn RP_ID alignment | FAIL |
+| R-A9 | Suspicious `provider_credential` key suffix | WARN |
+| R-A10 | Provider `ValidatePlan` diagnostics (requires `--plan`) | FAIL or WARN |
+
+**R-A10 — provider-side cross-resource validation.** When `--plan` is given,
+`infra align` enumerates the `iac.provider` modules in the config, loads each,
+and dispatches `interfaces.ProviderValidator.ValidatePlan(plan)` against any
+provider that implements that optional interface. Each returned
+`PlanDiagnostic` is rendered as an `AlignFinding`:
+
+| `PlanDiagnostic.Severity` | `AlignFinding.Severity` |
+|---------------------------|-------------------------|
+| `PlanDiagnosticError` | `FAIL` |
+| `PlanDiagnosticWarning` | `WARN` |
+| `PlanDiagnosticInfo` | `WARN` (advisory; failed only under `--strict`) |
+
+Providers that do not implement `ProviderValidator` are skipped — the
+interface is purely additive (no behaviour change for older plugins).
+
+```bash
+# Run all align rules without a plan (R-A10 silent).
+wfctl infra align -c infra.yaml --env staging
+
+# Include R-A7 + R-A10 by passing a plan file; --strict promotes WARNs to FAILs.
+wfctl infra plan -c infra.yaml --env staging -o plan.json
+wfctl infra align -c infra.yaml --env staging --plan plan.json --strict
+```
+
 ---
 
 ### `docs generate`
