@@ -31,7 +31,7 @@ func runInfraAlign(args []string) error {
 	fs.StringVar(&opts.configFile, "config", "", "Config file (default: infra.yaml or config/infra.yaml)")
 	fs.StringVar(&opts.configFile, "c", "", "Config file (short for --config)")
 	fs.StringVar(&opts.envName, "env", "", "Environment name")
-	fs.StringVar(&opts.planFile, "plan", "", "Path to plan JSON file (enables R-A7 checks)")
+	fs.StringVar(&opts.planFile, "plan", "", "Path to plan JSON file (enables R-A7 and R-A10 checks)")
 	fs.BoolVar(&opts.strict, "strict", false, "Treat WARNs as FAILs")
 	fs.BoolVar(&opts.strictHealth, "strict-health", false, "Treat R-A2 health-check WARNs as FAILs")
 	fs.BoolVar(&opts.strictCIDR, "strict-cidr", false, "Enable strict CIDR overlap checks (reserved for future use)")
