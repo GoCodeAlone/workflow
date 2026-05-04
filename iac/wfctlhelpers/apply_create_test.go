@@ -122,6 +122,64 @@ func TestApplyPlan_Create_AlreadyExists_NoUpsertSupport(t *testing.T) {
 	}
 }
 
+// alreadyExistsBareDriver is a ResourceDriver that does NOT implement
+// UpsertSupporter at all (no SupportsUpsert method). Used to exercise
+// doCreate's `!ok` interface-assertion fall-through — distinct from
+// the `SupportsUpsert()==false` path covered above. Behavioral
+// outcome is identical (conflict surfaces unchanged, no Read/Update),
+// but the code path through the type assertion is different.
+type alreadyExistsBareDriver struct {
+	*fakeDriver
+}
+
+func (d *alreadyExistsBareDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	d.fakeDriver.createCount++
+	return nil, interfaces.ErrResourceAlreadyExists
+}
+
+// TestApplyPlan_Create_AlreadyExists_DriverDoesNotImplementUpsertSupporter
+// covers the `!ok` arm of doCreate's `us, ok := d.(interfaces.UpsertSupporter)`
+// type assertion: a driver that does not implement UpsertSupporter at
+// all. Distinct from TestApplyPlan_Create_AlreadyExists_NoUpsertSupport,
+// which covers the `ok && !us.SupportsUpsert()` arm.
+func TestApplyPlan_Create_AlreadyExists_DriverDoesNotImplementUpsertSupporter(t *testing.T) {
+	bare := &alreadyExistsBareDriver{fakeDriver: &fakeDriver{}}
+	// Sanity-check the test premise: bare must NOT satisfy UpsertSupporter.
+	// If a future refactor lifts SupportsUpsert onto the embedded fakeDriver,
+	// this test would silently switch to the "ok && !SupportsUpsert" branch
+	// and stop covering the `!ok` arm. The compile-time assertion locks
+	// the premise.
+	var _ interfaces.ResourceDriver = bare
+	if _, ok := any(bare).(interfaces.UpsertSupporter); ok {
+		t.Fatal("test premise broken: alreadyExistsBareDriver must not implement UpsertSupporter")
+	}
+	// Inject the bare driver via a one-off provider that returns it for
+	// any resource type.
+	fp := &bareDriverProvider{fakeProvider: newFakeProvider(), driver: bare}
+	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
+		{Action: "create", Resource: spec("a", "infra.vpc")},
+	}}
+	result, _ := ApplyPlan(context.Background(), fp, plan)
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected 1 per-action error; got %d (%v)", len(result.Errors), result.Errors)
+	}
+	if !strings.Contains(result.Errors[0].Error, "already exists") {
+		t.Errorf("expected ErrResourceAlreadyExists in error; got %q", result.Errors[0].Error)
+	}
+}
+
+// bareDriverProvider returns the alreadyExistsBareDriver for any
+// resource type so the test stays focused on the type-assertion
+// fall-through.
+type bareDriverProvider struct {
+	*fakeProvider
+	driver *alreadyExistsBareDriver
+}
+
+func (p *bareDriverProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return p.driver, nil
+}
+
 // TestApplyPlan_Create_UpsertReadFailureWraps verifies the diagnostic
 // when Read fails after an ErrResourceAlreadyExists conflict: the error
 // wraps both the original create error and the read error so callers

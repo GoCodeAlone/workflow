@@ -2,22 +2,25 @@ package wfctlhelpers
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"os"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// fingerprint returns the canonical 16-hex-char sha256 prefix used by
-// inputsnapshot.Compute. Local helper so tests can build plan
-// InputSnapshot fixtures with realistic-looking values without coupling
-// to the inputsnapshot package's unexported constants.
+// fingerprint delegates to inputsnapshot.Compute so this test file's
+// fixtures always use the production fingerprint algorithm. If
+// Compute's prefix length or hash algorithm ever changes, every
+// expected-fingerprint constant flowing through here re-aligns
+// automatically — keeping the cross-package guarantee that
+// `apply_postcondition_test.go::fingerprint` and
+// `cmd/wfctl/infra_apply_plan_test.go::fingerprintForTest` produce
+// identical outputs. Mirrors that helper deliberately.
 func fingerprint(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])[:16]
+	snap := inputsnapshot.Compute([]string{"k"}, func(string) (string, bool) { return value, true })
+	return snap["k"]
 }
 
 // TestApplyPlan_InitialInputSnapshot_CapturedAtEntry verifies that

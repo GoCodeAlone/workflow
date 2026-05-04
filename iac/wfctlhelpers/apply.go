@@ -16,6 +16,26 @@
 // Until W-3b lands the cmd/wfctl dispatch wiring, [ApplyPlan] has no
 // in-tree caller — the helper ships in W-3a as foundation only and is
 // exercised solely by this package's tests.
+//
+// # Per-action error-prefix policy
+//
+// Sub-functions follow a "decompose-then-prefix" rule for the strings
+// recorded in [interfaces.ApplyResult].Errors[].Error:
+//
+//   - doCreate, doUpdate, doDelete pass driver errors through
+//     unchanged. The ActionError struct already carries Resource +
+//     Action context fields, so a per-kind prefix would be redundant.
+//   - doCreate's upsert recovery path prefixes "upsert: " (e.g.,
+//     "upsert: read after conflict: ...") because the failure is
+//     specifically about the recovery flow, not the original Create.
+//   - doReplace prefixes "replace: delete: " or "replace: create: "
+//     because a Replace decomposes into two driver calls — without
+//     the prefix, an operator reading result.Errors couldn't tell
+//     which sub-step failed.
+//
+// Tests in apply_update_delete_test.go and apply_replace_test.go
+// lock this contract via exact-string assertions; future refactors
+// that drop or rename a prefix fail loudly.
 package wfctlhelpers
 
 import (
@@ -171,10 +191,9 @@ func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action int
 // idempotent upsert recovery for drivers that opt in via the
 // UpsertSupporter interface. The recovery path is:
 //
-//  1. Probe the driver for UpsertSupporter — if absent or
-//     SupportsUpsert()==false, the original conflict surfaces unchanged
-//     and downstream callers see ErrResourceAlreadyExists in
-//     result.Errors.
+//  1. Probe the driver for UpsertSupporter — if absent (interface
+//     assertion fails) or SupportsUpsert()==false, the original
+//     conflict surfaces unchanged.
 //  2. Read the existing resource by Name + Type (no ProviderID — the
 //     driver's Read is responsible for locating by name when ProviderID
 //     is empty; SupportsUpsert()==true is the contract that this works).
@@ -184,9 +203,24 @@ func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action int
 //  4. Update the existing resource with the desired spec, threading
 //     the ProviderID found in step 2.
 //
-// Read-after-conflict failures wrap both the original Create error and
-// the Read error via errors.Join, so callers can match either via
-// errors.Is.
+// Recovery is single-pass: if the recovery Update itself returns
+// ErrResourceAlreadyExists (a driver bug — Update with a known
+// ProviderID should not conflict), the second conflict surfaces
+// unchanged rather than retriggering the recovery loop.
+//
+// Error wrapping (in-package contract):
+//
+//   - Read-after-conflict failures wrap both the original Create error
+//     and the Read error via errors.Join, so callers in this package
+//     can match either via errors.Is.
+//   - The doCreate return value preserves the wrap chain. ApplyPlan's
+//     dispatch loop, however, flattens errors to a string in
+//     result.Errors[].Error (see [ApplyPlan]) — external callers
+//     reading [interfaces.ApplyResult].Errors lose errors.Is matching
+//     and must inspect the canonical "upsert: read after conflict:"
+//     prefix instead. This boundary is deliberate: ActionError carries
+//     the per-resource action context fields the wrap chain otherwise
+//     duplicates.
 func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
 	out, err := d.Create(ctx, action.Resource)
 	if errors.Is(err, interfaces.ErrResourceAlreadyExists) {

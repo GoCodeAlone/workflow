@@ -124,6 +124,45 @@ func TestApplyPlan_Update_NilCurrentIsHandledDefensively(t *testing.T) {
 	if len(result.Errors) != 0 {
 		t.Errorf("unexpected per-action errors for nil Current: %v", result.Errors)
 	}
+	// Lock the resource-append contract on the success path so a
+	// regression that made doUpdate skip the append on nil Current
+	// would fail this test loudly.
+	if len(result.Resources) != 1 {
+		t.Errorf("expected 1 Resources entry on driver-success path; got %d", len(result.Resources))
+	}
+}
+
+// TestApplyPlan_Delete_NilCurrentIsHandledDefensively mirrors the
+// Update nil-Current contract for doDelete: a delete action without
+// action.Current must not panic; the empty ProviderID flows to the
+// driver, which is the authority on what to do (most drivers will
+// surface a typed validation error). doDelete itself does not
+// synthesize a precondition error — same defensive shape as doUpdate.
+func TestApplyPlan_Delete_NilCurrentIsHandledDefensively(t *testing.T) {
+	plan := &interfaces.IaCPlan{
+		Actions: []interfaces.PlanAction{
+			{Action: "delete", Resource: spec("orphan", "infra.vpc"), Current: nil},
+		},
+	}
+	fp := newCaptureFakeProvider()
+	result, err := ApplyPlan(context.Background(), fp, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fp.driver.deleteRef.ProviderID; got != "" {
+		t.Errorf("nil Current must yield empty ProviderID on Delete; got %q", got)
+	}
+	if got := fp.driver.deleteRef.Name; got != "orphan" {
+		t.Errorf("Delete ResourceRef.Name: got %q want %q", got, "orphan")
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("unexpected per-action errors for nil Current Delete: %v", result.Errors)
+	}
+	// Sanity: driver was called exactly once (latent bug-fix contract
+	// from T3.3 — Delete must not be silently skipped).
+	if fp.driver.deleteCount != 1 {
+		t.Errorf("driver.Delete must be called exactly once; got %d", fp.driver.deleteCount)
+	}
 }
 
 // TestApplyPlan_Delete_InvokesDriverDelete is the latent-bug-fix test
