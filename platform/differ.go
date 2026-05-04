@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/diffcache"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"golang.org/x/sync/errgroup"
 )
@@ -52,6 +53,21 @@ import (
 // emit update when ConfigHash diverges, skip otherwise. Replace cannot
 // be expressed via the legacy path; callers that depend on Replace
 // classification must supply a provider whose drivers implement Diff.
+//
+// Concurrency contract: p (and the ResourceDriver instances it returns)
+// MUST be safe for concurrent use across goroutines, since Diff
+// dispatch fans out under errgroup. gRPC-loaded plugins satisfy this
+// trivially (each call is an independent RPC); in-process providers
+// must internally serialize state mutations.
+//
+// Per-resource Diff results are cached via iac/diffcache when the
+// caller has set a non-noop backend (default: filesystem cache at
+// ~/.cache/wfctl/diff/; controlled via the WFCTL_DIFFCACHE env var per
+// the diffcache package godoc). Cache hits skip the provider.Diff
+// roundtrip entirely; cache misses store the freshly-computed
+// DiffResult under the (PluginVersion, Type, ProviderID, SHAConfig,
+// SHAOutputs) tuple. Apply-time correctness does not depend on cache
+// hits — fresh CI runners always miss and re-Diff.
 func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
 	// Index current state by resource name.
 	currentMap := make(map[string]interfaces.ResourceState, len(current))
@@ -97,7 +113,6 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 		g, gctx := errgroup.WithContext(ctx)
 		g.SetLimit(planDiffConcurrency())
 		for i := range candidates {
-			i := i
 			g.Go(func() error {
 				return classifyModification(gctx, p, candidates[i].spec, candidates[i].rs, &mods[i])
 			})
@@ -195,13 +210,38 @@ func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec in
 		return nil
 	}
 
-	currentOut := resourceStateToOutput(&rs)
-	diff, err := driver.Diff(ctx, spec, currentOut)
-	if err != nil {
-		return fmt.Errorf("provider.Diff(%q/%q): %w", spec.Type, spec.Name, err)
+	// Consult the diff cache before dispatching to the (potentially
+	// network-expensive) provider.Diff. Key shape per iac/diffcache:
+	// (PluginVersion, Type, ProviderID, SHAConfig, SHAOutputs). Plugin
+	// downgrades naturally invalidate via PluginVersion; outputs drift
+	// invalidates via SHAOutputs. Apply-time correctness does NOT depend
+	// on cache hits — every miss falls through to provider.Diff.
+	cache := getDiffCache()
+	key := diffcache.Key{
+		PluginVersion: p.Name() + "@" + p.Version(),
+		Type:          spec.Type,
+		ProviderID:    rs.ProviderID,
+		SHAConfig:     hash,
+		SHAOutputs:    configHash(rs.Outputs),
+	}
+	var diff *interfaces.DiffResult
+	if cached, hit := cache.Get(key); hit {
+		c := cached
+		diff = &c
+	} else {
+		currentOut := resourceStateToOutput(&rs)
+		fresh, err := driver.Diff(ctx, spec, currentOut)
+		if err != nil {
+			return fmt.Errorf("provider.Diff(%q/%q): %w", spec.Type, spec.Name, err)
+		}
+		if fresh != nil {
+			cache.Put(key, *fresh)
+		}
+		diff = fresh
 	}
 	if diff == nil {
-		// Driver returned no diff — treat as no change.
+		// Driver returned no diff (and nothing was cached) — treat as
+		// no change.
 		return nil
 	}
 
@@ -282,24 +322,52 @@ var planDiffConcurrencyCached int
 // WFCTL_PLAN_DIFF_CONCURRENCY (or planDiffConcurrencyDefault when unset).
 func planDiffConcurrency() int {
 	planDiffConcurrencyOnce.Do(func() {
-		planDiffConcurrencyCached = planDiffConcurrencyDefault
-		v := os.Getenv("WFCTL_PLAN_DIFF_CONCURRENCY")
-		if v == "" {
-			return
-		}
-		parsed, err := strconv.Atoi(v)
-		if err != nil {
-			return
-		}
-		if parsed < planDiffConcurrencyMin {
-			parsed = planDiffConcurrencyMin
-		}
-		if parsed > planDiffConcurrencyMax {
-			parsed = planDiffConcurrencyMax
-		}
-		planDiffConcurrencyCached = parsed
+		planDiffConcurrencyCached = parseConcurrencyEnv(os.Getenv("WFCTL_PLAN_DIFF_CONCURRENCY"))
 	})
 	return planDiffConcurrencyCached
+}
+
+// parseConcurrencyEnv returns the clamped concurrency value for v.
+// Empty, non-numeric, or out-of-bounds inputs fall back to safe values:
+// empty/non-numeric → planDiffConcurrencyDefault; v<min → min; v>max →
+// max. Extracted as a pure function so the clamping logic is unit
+// testable without process-wide env-var mutation.
+func parseConcurrencyEnv(v string) int {
+	if v == "" {
+		return planDiffConcurrencyDefault
+	}
+	parsed, err := strconv.Atoi(v)
+	if err != nil {
+		return planDiffConcurrencyDefault
+	}
+	if parsed < planDiffConcurrencyMin {
+		return planDiffConcurrencyMin
+	}
+	if parsed > planDiffConcurrencyMax {
+		return planDiffConcurrencyMax
+	}
+	return parsed
+}
+
+// planDiffCache is the package-level diff cache used by
+// classifyModification. Lazy-initialized on first call to getDiffCache
+// from the WFCTL_DIFFCACHE env var via diffcache.New(). Tests in the
+// same package may swap it via setDiffCacheForTest (defined in
+// differ_cache_test.go).
+var (
+	planDiffCacheMu sync.Mutex
+	planDiffCache   diffcache.Cache
+)
+
+// getDiffCache returns the package-level diff cache, initializing it
+// from the environment on first call. Safe for concurrent use.
+func getDiffCache() diffcache.Cache {
+	planDiffCacheMu.Lock()
+	defer planDiffCacheMu.Unlock()
+	if planDiffCache == nil {
+		planDiffCache = diffcache.New()
+	}
+	return planDiffCache
 }
 
 // ConfigHash is the exported counterpart of configHash. It allows callers

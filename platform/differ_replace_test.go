@@ -2,6 +2,7 @@ package platform_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -167,8 +168,4 @@ func TestComputePlan_DriverDiffError_PropagatesAsError(t *testing.T) {
 
 // errSentinel is a package-private sentinel used by the Diff-error
 // propagation test.
-var errSentinel = errFromTest("synthetic Diff failure")
-
-type errFromTest string
-
-func (e errFromTest) Error() string { return string(e) }
+var errSentinel = errors.New("synthetic Diff failure")
