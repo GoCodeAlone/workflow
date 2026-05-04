@@ -90,6 +90,44 @@ func TestCache_LRUEvictionBatchOf10Percent(t *testing.T) {
 	}
 }
 
+// TestCache_LRURefreshesOnGet verifies that Get touches the cache
+// file's mtime so that frequently-read entries are NOT evicted as if
+// they were stale. The contract: an entry written first but Get'd
+// after a newer entry was Put should outlive the newer entry under
+// LRU eviction. Without the mtime-refresh in Get, eviction would
+// behave as FIFO-by-write rather than true LRU.
+func TestCache_LRURefreshesOnGet(t *testing.T) {
+	dir := t.TempDir()
+	c := &filesystemCache{
+		dir:        dir,
+		maxEntries: 10,
+		maxBytes:   defaultMaxBytes,
+	}
+	// Fill exactly to the cap. k0 is the oldest by write order.
+	for i := range 10 {
+		c.Put(Key{Type: fmt.Sprintf("k%d", i)}, interfaces.DiffResult{})
+		time.Sleep(time.Millisecond)
+	}
+	// Get k0 — this MUST refresh mtime so k0 is now the youngest by
+	// access time, even though it was the oldest by write time. Without
+	// the refresh, k0 retains its original (oldest) mtime and gets
+	// evicted on the next over-cap Put.
+	if _, hit := c.Get(Key{Type: "k0"}); !hit {
+		t.Fatal("expected hit on k0 before eviction")
+	}
+	time.Sleep(time.Millisecond)
+	// Trigger overflow: one extra Put → evict 1 (10% of 10). Under true
+	// LRU (mtime refreshed on Get), k0 is now the freshest entry and k1
+	// is the oldest, so k1 should be evicted, not k0.
+	c.Put(Key{Type: "k_overflow"}, interfaces.DiffResult{})
+	if _, hit := c.Get(Key{Type: "k0"}); !hit {
+		t.Errorf("k0 was Get'd before eviction; LRU should retain it (Get must refresh mtime)")
+	}
+	if _, hit := c.Get(Key{Type: "k1"}); hit {
+		t.Errorf("k1 was the oldest by access time; LRU should have evicted it")
+	}
+}
+
 // countCacheFiles returns the number of *.json files under dir. Used
 // to assert eviction behavior without depending on cache internals.
 func countCacheFiles(t *testing.T, dir string) int {

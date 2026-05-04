@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
@@ -72,6 +73,17 @@ func (c *filesystemCache) Get(k Key) (interfaces.DiffResult, bool) {
 		c.handleCorruption(path, errors.New("schema-version mismatch"))
 		return interfaces.DiffResult{}, false
 	}
+	// Refresh mtime so [maybeEvict] (which orders by mtime) treats this
+	// entry as recently-used. Without this, frequently-read but
+	// infrequently-rewritten entries get evicted as if they were stale —
+	// the cache would be FIFO-by-write, not LRU. We chose mtime-touch
+	// over a sidecar "last-accessed" file to keep the on-disk shape
+	// trivial; the small cost is one extra syscall per cache hit.
+	// Errors are intentionally ignored: a Chtimes failure degrades
+	// eviction precision (this entry may be evicted earlier than
+	// preferred) but never produces wrong cache results.
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
 	return env.Result, true
 }
 
@@ -83,6 +95,28 @@ func (c *filesystemCache) Get(k Key) (interfaces.DiffResult, bool) {
 // safety net for cross-filesystem renames or NFS edge cases that
 // don't honor atomicity, but with this pattern the corruption
 // recovery essentially never fires in production.
+//
+// Concurrency: safe for concurrent use, including concurrent Puts
+// of the same Key. Each Put uses [os.CreateTemp] to obtain a unique
+// temp filename (`<key>.json.<random>.tmp`) so two goroutines writing
+// the same Key cannot clobber each other's temp file. The final
+// rename is racy in the sense that one goroutine's payload "wins,"
+// but both payloads were derived from the caller's DiffResult so the
+// outcome is deterministic from the caller's perspective.
+//
+// Windows portability: this implementation uses the bare [os.Rename]
+// for the atomic publish step, which matches the precedent set by
+// other rename sites in this repo (cmd/wfctl/update.go,
+// cmd/wfctl/plugin_install.go). On Windows, [os.Rename] fails when
+// the destination already exists, so an in-place cache update via
+// Put will fail on Windows; the caller treats this as a write
+// failure and proceeds without caching (correct, by the cache-as-
+// amortization framing in the package godoc — apply remains correct
+// on a 100% miss rate). A future improvement is to vendor
+// github.com/google/renameio for cross-platform atomic rename;
+// doing so here would introduce the first such dependency in the
+// repo, so deferred until there's a Windows-supported wfctl use
+// case. Tracked as a known limitation in the package godoc.
 //
 // Disk-side errors during Put are intentionally silent: the next Get
 // will miss (correct), and the operator already has "stuff isn't
@@ -98,14 +132,32 @@ func (c *filesystemCache) Put(k Key, result interfaces.DiffResult) {
 		return
 	}
 	path := c.pathFor(k)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// os.CreateTemp gives us a per-call unique tempfile name and an
+	// open *os.File. Pattern uses a "*" suffix so the random token
+	// lands before ".tmp", giving filenames like
+	// `<sha256>.json.123456789.tmp` — easy to spot during eviction
+	// and unambiguous about origin. Two concurrent Puts of the same
+	// Key end up with two distinct temp files; whichever rename
+	// completes last wins for the final cache path.
+	tmpFile, err := os.CreateTemp(c.dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return
+	}
+	tmp := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmp)
+		return
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		// Best-effort cleanup of the orphaned temp file; ignore
-		// errors since the next Put may overwrite it anyway and
-		// LRU eviction will eventually reclaim the space.
+		// Best-effort cleanup of the orphaned temp file. On Windows
+		// this rename can fail when path already exists (see godoc
+		// above); on Unix it's atomic-replace. Either way the next
+		// Put may succeed and LRU eviction reclaims any orphans.
 		_ = os.Remove(tmp)
 		return
 	}

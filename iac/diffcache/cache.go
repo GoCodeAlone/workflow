@@ -40,6 +40,18 @@
 // Get, a mismatched version is treated identically to file corruption:
 // the entry is silently evicted and the caller re-Diffs.
 //
+// # Known limitations
+//
+// Windows: the filesystem cache uses [os.Rename] for the atomic
+// publish step on Put. On Windows, [os.Rename] fails when the
+// destination already exists, so updating an existing cache entry
+// will fail (the entry is treated as a write failure and the
+// operator gets a cache miss on the next Get — correct, since
+// apply does not depend on cache hits). A future improvement is to
+// vendor github.com/google/renameio for cross-platform atomic
+// rename; deferred until there's a Windows-supported wfctl use
+// case.
+//
 // # T3.5 / W-3a status
 //
 // This package ships in W-3a. The consumer that wires it into
