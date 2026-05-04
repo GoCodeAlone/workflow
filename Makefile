@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build build-wfctl
+.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build build-wfctl build-iac-codemod migrate-providers
 
 # Common benchmark flags
 BENCH_FLAGS = -bench=. -benchmem -run=^$$ -timeout=30m
@@ -83,8 +83,46 @@ run-admin: build
 ko-build:
 	KO_DOCKER_REPO=ko.local ko build ./cmd/server --bare --platform=linux/$(shell go env GOARCH)
 
+# Build the iac-codemod CLI (W-8 / cmd/iac-codemod). GOWORK=off keeps
+# the build self-contained: contributors with a workspace go.work file
+# that doesn't include this module shouldn't have to amend their
+# environment to run `make migrate-providers`.
+build-iac-codemod:
+	GOWORK=off go build -o iac-codemod ./cmd/iac-codemod
+
+# Workspace-wide IaC migration runner (W-8 / T8.6).
+#
+# Runs `iac-codemod lint -dry-run` against the AWS, GCP, and Azure plugin
+# repos as advisory-only checks. The plugins themselves stay un-migrated
+# at v1 (per plan §W-8: "AWS/GCP/Azure plugins are run advisory-only (no
+# `-fix`); their reports are filed as GitHub issues against the
+# respective plugin repos for activation-time triage"). For DO, run the
+# refactor-* modes manually with `-fix` against the workspace's DO
+# checkout — that migration is the subject of P-DO and is intentionally
+# excluded from this target's mechanical sweep.
+#
+# Provider paths are sibling-repo defaults; override on the command line:
+#
+#	make migrate-providers AWS=/path/to/workflow-plugin-aws \
+#	                       GCP=/path/to/workflow-plugin-gcp \
+#	                       AZURE=/path/to/workflow-plugin-azure
+AWS ?= ../workflow-plugin-aws
+GCP ?= ../workflow-plugin-gcp
+AZURE ?= ../workflow-plugin-azure
+
+migrate-providers: build-iac-codemod
+	@echo "==> Running iac-codemod lint (advisory) against AWS plugin: $(AWS)"
+	@if [ -d "$(AWS)" ]; then ./iac-codemod lint -dry-run "$(AWS)" || true; else echo "  (skipping: $(AWS) not found)"; fi
+	@echo "==> Running iac-codemod lint (advisory) against GCP plugin: $(GCP)"
+	@if [ -d "$(GCP)" ]; then ./iac-codemod lint -dry-run "$(GCP)" || true; else echo "  (skipping: $(GCP) not found)"; fi
+	@echo "==> Running iac-codemod lint (advisory) against Azure plugin: $(AZURE)"
+	@if [ -d "$(AZURE)" ]; then ./iac-codemod lint -dry-run "$(AZURE)" || true; else echo "  (skipping: $(AZURE) not found)"; fi
+	@echo "==> migrate-providers complete (advisory-only; no files mutated)"
+
 # Clean build artifacts
 clean:
 	rm -f server
+	rm -f wfctl
+	rm -f iac-codemod
 	rm -f example/workflow-example
 	rm -rf module/ui_dist/assets module/ui_dist/index.html module/ui_dist/vite.svg
