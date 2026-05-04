@@ -76,27 +76,42 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig, envName st
 // they may return nil for the closer.
 var resolveIaCProvider = discoverAndLoadIaCProvider
 
-// iacPluginManifest is the minimal shape needed to read capabilities.iacProvider.name
-// from a plugin.json without relying on the full PluginCapabilities struct.
+// iacPluginManifest is the minimal shape needed to read both:
+//   - capabilities.iacProvider.name — used by findIaCPluginDir to
+//     match a plugin to a desired provider name; AND
+//   - iacProvider.computePlanVersion — used by W-3b T3.7 to decide
+//     between v1 (legacy provider.Apply) and v2
+//     (wfctlhelpers.ApplyPlan) dispatch at apply time.
+//
+// Both fields are unmarshaled from the same plugin.json bytes — no
+// double parse — and either may be empty without affecting the
+// other.
 type iacPluginManifest struct {
 	Capabilities struct {
 		IaCProvider struct {
 			Name string `json:"name"`
 		} `json:"iacProvider"`
 	} `json:"capabilities"`
+	IaCProvider struct {
+		ComputePlanVersion string `json:"computePlanVersion"`
+	} `json:"iacProvider"`
 }
 
 // findIaCPluginDir scans pluginDir subdirectories for a plugin.json that
 // declares capabilities.iacProvider.name == providerName.
-// Returns ("", false, nil) when not found; ("name", true/false, nil) when the
-// manifest matches (hasBinary indicates whether the executable is present).
-func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bool, err error) {
+// Returns ("", "", false, nil) when not found; ("name", "computePlanVersion",
+// true/false, nil) when the manifest matches (hasBinary indicates whether
+// the executable is present). The computePlanVersion return is the raw
+// SDK-manifest value ("", "v1", or "v2") — callers should pass it through
+// wfctlhelpers.DispatchVersionFor (or treat empty as "v1") rather than
+// string-comparing directly.
+func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion string, hasBinary bool, err error) {
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", false, nil
+			return "", "", false, nil
 		}
-		return "", false, fmt.Errorf("scan plugin directory %q: %w", pluginDir, err)
+		return "", "", false, fmt.Errorf("scan plugin directory %q: %w", pluginDir, err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -116,9 +131,9 @@ func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bo
 		}
 		binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
 		_, statErr := os.Stat(binaryPath)
-		return pluginName, statErr == nil, nil
+		return pluginName, m.IaCProvider.ComputePlanVersion, statErr == nil, nil
 	}
-	return "", false, nil
+	return "", "", false, nil
 }
 
 // loadIaCPlugin finds and loads the IaC plugin for the given provider, returning
@@ -127,7 +142,7 @@ func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bo
 var loadIaCPlugin = defaultLoadIaCPlugin
 
 func defaultLoadIaCPlugin(pluginDir, providerName string) (pluginName string, factories map[string]plugin.ModuleFactory, closer io.Closer, err error) {
-	pName, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
+	pName, _, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
 	if findErr != nil {
 		return "", nil, nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, findErr)
 	}
@@ -144,6 +159,25 @@ func defaultLoadIaCPlugin(pluginDir, providerName string) (pluginName string, fa
 		return "", nil, nil, fmt.Errorf("load plugin %q for provider %q: %w", pName, providerName, loadErr)
 	}
 	return pName, adapter.ModuleFactories(), closerFunc(func() error { mgr.Shutdown(); return nil }), nil
+}
+
+// readIaCPluginComputePlanVersion re-reads plugin.json under
+// pluginDir to extract iacProvider.computePlanVersion for providerName.
+// Returns "" (treated as v1 by the dispatcher) when the manifest
+// can't be read or the field is omitted. Callers MUST tolerate empty
+// — apply behavior degrades to the legacy v1 path on any read
+// failure rather than blocking the apply.
+//
+// Re-reads rather than threading the version through loadIaCPlugin's
+// existing 4-tuple return so the var-seam signature (and its 1 test
+// override) stays stable. Cost: one extra os.ReadFile of a tiny JSON
+// file per provider load — negligible vs. the gRPC plugin start.
+func readIaCPluginComputePlanVersion(pluginDir, providerName string) string {
+	_, version, _, err := findIaCPluginDir(pluginDir, providerName)
+	if err != nil {
+		return ""
+	}
+	return version
 }
 
 // discoverAndLoadIaCProvider implements the default resolveIaCProvider: it scans
@@ -186,7 +220,10 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 		return nil, nil, fmt.Errorf("plugin %q iac.provider module (%T) does not support service invocation — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
 	}
 
-	iacProvider := &remoteIaCProvider{invoker: invoker}
+	iacProvider := &remoteIaCProvider{
+		invoker:            invoker,
+		computePlanVersion: readIaCPluginComputePlanVersion(pluginDir, providerName),
+	}
 	// Notify the plugin that Initialize has been called (the plugin may treat
 	// this as a no-op if it already ran Initialize inside CreateModule).
 	if initErr := iacProvider.Initialize(ctx, cfg); initErr != nil {
@@ -209,8 +246,22 @@ type remoteServiceContextInvoker interface {
 // remoteIaCProvider implements interfaces.IaCProvider by routing every method
 // through InvokeService to the plugin subprocess. Only the methods needed by
 // wfctl ci run deploy are fully implemented; the rest return a clear error.
+//
+// W-3b T3.7: also satisfies wfctlhelpers.ComputePlanVersionDeclarer via
+// ComputePlanVersion(), populated from the plugin.json SDK manifest at
+// load time. wfctl's apply path type-asserts the interface to choose
+// between v1 (legacy provider.Apply) and v2 (wfctlhelpers.ApplyPlan)
+// dispatch.
 type remoteIaCProvider struct {
-	invoker remoteServiceInvoker
+	invoker            remoteServiceInvoker
+	computePlanVersion string
+}
+
+// ComputePlanVersion satisfies wfctlhelpers.ComputePlanVersionDeclarer.
+// Returns the SDK-manifest value cached at load time ("", "v1", or
+// "v2"); empty defaults to v1 in the dispatcher.
+func (r *remoteIaCProvider) ComputePlanVersion() string {
+	return r.computePlanVersion
 }
 
 func (r *remoteIaCProvider) Name() string {

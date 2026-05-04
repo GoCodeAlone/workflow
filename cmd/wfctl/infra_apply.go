@@ -15,6 +15,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 )
@@ -49,6 +50,13 @@ var infraApplyTroubleshootTimeout = 30 * time.Second
 // observe the provider arg without standing up a real gRPC plugin
 // (mirroring resolveIaCProvider/loadIaCPlugin in deploy_providers.go).
 var computeInfraPlan = platform.ComputePlan
+
+// applyV2ApplyPlanFn is the indirection seam through which apply
+// dispatches the v2 path (wfctlhelpers.ApplyPlan). Defaults to the
+// production helper; tests override it to assert routing decisions
+// without standing up a real plugin or executing real driver calls.
+// Same var-seam pattern as computeInfraPlan / resolveIaCProvider.
+var applyV2ApplyPlanFn = wfctlhelpers.ApplyPlan
 
 // hasInfraModules reports whether cfgFile contains any modules with the new
 // infra.* type prefix. Used by runInfraApply to select the dispatch path:
@@ -380,7 +388,28 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// we log and continue rather than blocking the apply.
 	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
-	result, err := provider.Apply(ctx, &plan)
+
+	// W-3b T3.7: branch on the loaded plugin's manifest. Providers
+	// declaring iacProvider.computePlanVersion: v2 in plugin.json route
+	// through wfctlhelpers.ApplyPlan (Replace + drift postcondition);
+	// everything else takes the legacy provider.Apply path. NO env-var
+	// gate (rev2/rev3 fix per cycle-2 — there is no transitional
+	// WFCTL_USE_V2_APPLY); the choice is plugin-author-controlled at
+	// load time and surfaced via the optional
+	// wfctlhelpers.ComputePlanVersionDeclarer interface.
+	var result *interfaces.ApplyResult
+	if v, ok := provider.(wfctlhelpers.ComputePlanVersionDeclarer); ok && wfctlhelpers.DispatchVersionFor(v) == wfctlhelpers.DispatchVersionV2 {
+		result, err = applyV2ApplyPlanFn(ctx, provider, &plan)
+		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
+		// v2 dispatch is the production caller that surfaces input
+		// drift to the operator. Run on success or partial failure;
+		// silently no-op when the report is empty.
+		if err == nil {
+			printDriftReportIfAny(w, result)
+		}
+	} else {
+		result, err = provider.Apply(ctx, &plan)
+	}
 	if err != nil {
 		// Derive the most specific resource ref we can for troubleshooting.
 		// Single-action plans give us an exact resource; multi-resource plans
