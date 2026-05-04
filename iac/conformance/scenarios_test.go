@@ -273,6 +273,19 @@ func TestScenario_OutputsRefreshDetectsNewFields(t *testing.T) {
 	scenarioOutputsRefreshDetectsNewFields(t, cfg)
 }
 
+// TestScenario_PlanStaleDiagnostic is the in-tree self-test for T7.6:
+// invokes the scenario body directly. The scenario is platform-level
+// (provider-agnostic) so a no-op fake provider satisfies Run's
+// validateConfig precondition — the body never calls cfg.Provider().
+func TestScenario_PlanStaleDiagnostic(t *testing.T) {
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &iactest.NoopProvider{}
+		},
+	}
+	scenarioPlanStaleDiagnostic(t, cfg)
+}
+
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
 // by each scenario_<name>.go init() in T7.2-T7.12. The test save/restores
 // the package-level registry so it does not leak state to other tests.
