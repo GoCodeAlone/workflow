@@ -1,0 +1,35 @@
+name: cross-plugin-build-test
+on:
+  pull_request:
+    paths:
+      # rev4 — cycle-3 minor: only run on IaC-touching PRs to save ~5min/docs-PR
+      - 'interfaces/**'
+      - 'iac/**'
+      - 'platform/**'
+      - 'plugin/sdk/**'
+      - '.github/workflows/cross-plugin-build-test.yml'
+jobs:
+  cross-plugin-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        plugin: [workflow-plugin-aws, workflow-plugin-gcp, workflow-plugin-azure]
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: workflow }
+      - uses: actions/checkout@v4
+        with:
+          repository: GoCodeAlone/${{ matrix.plugin }}
+          path: ${{ matrix.plugin }}
+      - uses: actions/setup-go@v5
+        with: { go-version-file: workflow/go.mod }
+      # The replace directive points the plugin's go.mod at THIS PR's checkout
+      # of workflow (../workflow), NOT at workflow main. The gate exercises
+      # whether the PR's interface changes break AWS/GCP/Azure compilation —
+      # which is precisely the per-PR signal we want.
+      - run: |
+          cd ${{ matrix.plugin }}
+          go mod edit -replace github.com/GoCodeAlone/workflow=../workflow
+          go mod tidy
+          go build ./...
+          # NOTE: not `go test` — those plugins have their own CI; we just verify compile-compat
