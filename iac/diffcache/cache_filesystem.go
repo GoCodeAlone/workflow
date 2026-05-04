@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
@@ -72,6 +73,17 @@ func (c *filesystemCache) Get(k Key) (interfaces.DiffResult, bool) {
 		c.handleCorruption(path, errors.New("schema-version mismatch"))
 		return interfaces.DiffResult{}, false
 	}
+	// Refresh mtime so [maybeEvict] (which orders by mtime) treats this
+	// entry as recently-used. Without this, frequently-read but
+	// infrequently-rewritten entries get evicted as if they were stale —
+	// the cache would be FIFO-by-write, not LRU. We chose mtime-touch
+	// over a sidecar "last-accessed" file to keep the on-disk shape
+	// trivial; the small cost is one extra syscall per cache hit.
+	// Errors are intentionally ignored: a Chtimes failure degrades
+	// eviction precision (this entry may be evicted earlier than
+	// preferred) but never produces wrong cache results.
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
 	return env.Result, true
 }
 
