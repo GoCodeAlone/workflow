@@ -168,23 +168,46 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 		// append-merged so any sibling ValidatePlan declaration is
 		// visible to hasValidatePlanMethod, and any sibling Plan/Apply
 		// is visible to providerReceiverConvention.
+		//
+		// Round-7 #10: rev3 deduped by method NAME only ("avoid
+		// double-counting" was the rationale, since the directory
+		// re-parser produces fresh *ast.FuncDecl values for the local
+		// file too). But name-dedupe drops a sibling-correct
+		// ValidatePlan when the local file has a wrong-signature
+		// shadow, leading to a duplicate stub injection. The fix:
+		// dedupe by (name, file-path) using fset.Position. A method
+		// from a sibling file always has a different file path than
+		// methods from `file`, so adding it never duplicates.
 		for recv, sibMethods := range dirMethods {
 			if _, ok := provs[recv]; !ok {
 				continue
 			}
-			// Avoid double-counting methods declared in `file` (already
-			// in methodsByRecv from providerReceiversWithMethods); the
-			// directory-walker re-parses every file, so a method's
-			// *ast.FuncDecl identity may differ between the local and
-			// directory parses even for the same source line. We
-			// dedupe by name+file-path.
-			existing := make(map[string]bool)
-			for _, m := range methodsByRecv[recv] {
-				existing[m.Name.Name] = true
-			}
 			for _, m := range sibMethods {
-				if existing[m.Name.Name] {
-					// Already represented by the local parse.
+				// Position uses the *separate* FileSet from
+				// planLikeProviderMethodsInDir. We can't compare
+				// directly to the primary fset's positions. The
+				// safest signal: is the FuncDecl's own *ast.FuncDecl
+				// pointer present in methodsByRecv[recv] (the local
+				// methods)? Pointer comparison handles the dedupe
+				// without name shadowing.
+				present := false
+				for _, lm := range methodsByRecv[recv] {
+					if lm == m {
+						present = true
+						break
+					}
+				}
+				if present {
+					continue
+				}
+				// Distinct *ast.FuncDecl: name+signature dedupe so a
+				// sibling Plan/Apply with identical signature to a
+				// local one (re-parsed) doesn't duplicate. ValidatePlan
+				// is INTENTIONALLY not deduped by name alone; if the
+				// local has wrong-signature ValidatePlan and sibling
+				// has correct, both are added so hasValidatePlanMethod
+				// can find the correct one (it ignores wrong shapes).
+				if isLocalDuplicate(m, methodsByRecv[recv]) {
 					continue
 				}
 				methodsByRecv[recv] = append(methodsByRecv[recv], m)
@@ -193,45 +216,76 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 	}
 	// Determine the qualifier for *IaCPlan / []PlanDiagnostic so the
 	// stub's signature matches whatever import-naming convention the
-	// file already uses (review round-1 finding #7). Review round-4
-	// finding #1: when the type declaration lives in a sibling file
-	// (no interfaces import in THIS file) but ANY sibling does import
-	// interfaces, fall back to the qualifier the package uses ("interfaces")
-	// AND inject the import into this file via AST manipulation so the
-	// stub's qualified types resolve.
+	// file already uses (review round-1 finding #7).
+	//
+	// Round-4 #1: when the type declaration lives in a sibling file
+	// (no interfaces import in THIS file), fall back to the qualifier
+	// the package uses AND inject the import.
+	//
+	// Round-7 #4: rev3 fell back to "interfaces" if ANY sibling imports
+	// interfaces. That's wrong if the provider itself uses LOCAL
+	// IaCPlan types (e.g., a unit-test fixture in package `p` with
+	// local types, where an unrelated sibling imports interfaces for
+	// other reasons). The correct signal is per-receiver: inspect THIS
+	// PROVIDER's existing Plan/Apply parameter types (now visible via
+	// the directory-wide methodsByRecv merge from round-3 #1) to see
+	// what qualifier they use. Only fall back if the provider's own
+	// methods reference the qualified shape.
 	qualifier := interfacesQualifier(file)
 	needsInterfacesImport := false
-	if qualifier == "" {
-		if siblingUsesInterfacesImport(filepath.Dir(path), path) {
-			qualifier = "interfaces"
-			needsInterfacesImport = true
-		}
-	}
 	// Deterministic order for the report and for mutation: sort by
-	// declaration line.
+	// declaration line. Round-7 finding #7 + #8: provs[recv] can be
+	// nil when the type declaration lives in a sibling file (round-3's
+	// directory-wide method-set scan supports this layout). Calling
+	// .Pos() on a nil *ast.TypeSpec panics. Default position to NoPos
+	// for nil specs; sort still works (NoPos sorts equal-to-zero).
 	type recvOrder struct {
 		Name string
 		Pos  token.Pos
 	}
 	var ordered []recvOrder
 	for recv := range provs {
-		ordered = append(ordered, recvOrder{Name: recv, Pos: provs[recv].Pos()})
+		var pos token.Pos
+		if ts := provs[recv]; ts != nil {
+			pos = ts.Pos()
+		}
+		ordered = append(ordered, recvOrder{Name: recv, Pos: pos})
 	}
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Pos < ordered[j].Pos })
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Pos != ordered[j].Pos {
+			return ordered[i].Pos < ordered[j].Pos
+		}
+		return ordered[i].Name < ordered[j].Name
+	})
+
+	// Directory-wide type-doc lookup so a skip-marker on a sibling
+	// file's type declaration is honored (round-7 #5).
+	siblingTypeDocs := receiverTypeDocsInDir(filepath.Dir(path), file)
 
 	mutated := false
 	var pendingStubs []string
 	for _, rec := range ordered {
 		recv := rec.Name
 		methods := methodsByRecv[recv]
-		// Skip-marker check: the type decl OR any of the existing
-		// Plan/Apply methods carrying the marker suppresses the
-		// classification. (Mirrors the lint analyzer's logic for
-		// AssertProviderImplementsValidatePlan.)
+		// Skip-marker check: the type decl (in this file OR a sibling
+		// file via the directory-wide doc lookup) OR any of the
+		// existing Plan/Apply methods (across files) carrying the
+		// marker suppresses the classification.
+		//
+		// Round-7 #5: rev3 only consulted typeDecls (this file's TypeSpec).
+		// When Plan/Apply are here but the provider type with
+		// `// wfctl:skip-iac-codemod` lives in a SIBLING file, the
+		// skip got ignored. siblingTypeDocs now provides the
+		// directory-wide view (matching the round-6 fix in refactor-*).
 		ts := typeDecls[recv]
 		skipped := false
 		if ts != nil && hasSkipMarkerOn(ts.Doc) {
 			skipped = true
+		}
+		if !skipped {
+			if doc, ok := siblingTypeDocs[recv]; ok && doc.carriesMarker() {
+				skipped = true
+			}
 		}
 		if !skipped {
 			for _, m := range methods {
@@ -242,10 +296,8 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 			}
 		}
 		// Also honor the parent GenDecl's doc for a `type Foo struct{}`
-		// declared in a single-spec block: hasSkipMarkerOn already
-		// short-circuits if the doc is nil, but we explicitly look at
-		// the GenDecl wrapper's Doc as well so a marker placed before
-		// the `type` keyword is honored.
+		// declared in a single-spec block (current file only —
+		// receiverTypeDocsInDir's GenDeclDoc already covers siblings).
 		if !skipped {
 			if gd := genDeclFor(file, ts); gd != nil && hasSkipMarkerOn(gd.Doc) {
 				skipped = true
@@ -276,7 +328,21 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 		}
 		if class == validatePlanMissing && opts != nil && opts.Fix {
 			pointerRecv := providerReceiverConvention(methods)
-			pendingStubs = append(pendingStubs, validatePlanStubText(recv, qualifier, pointerRecv))
+			// Per-receiver qualifier resolution. If THIS file has its
+			// own interfaces import, qualifier already reflects that
+			// (set above). Otherwise inspect this provider's existing
+			// Plan/Apply parameter types for the qualifier they use —
+			// round-7 #4: an unrelated sibling importing interfaces is
+			// not a reliable signal that THIS provider uses qualified
+			// types.
+			recvQualifier := qualifier
+			if recvQualifier == "" {
+				recvQualifier = qualifierFromProviderMethods(methods)
+				if recvQualifier != "" {
+					needsInterfacesImport = true
+				}
+			}
+			pendingStubs = append(pendingStubs, validatePlanStubText(recv, recvQualifier, pointerRecv))
 			site.Inserted = true
 			mutated = true
 		}
@@ -385,6 +451,98 @@ func providerReceiverConvention(methods []*ast.FuncDecl) bool {
 		}
 	}
 	return true
+}
+
+// isLocalDuplicate returns true if `m` appears to be a re-parse of a
+// FuncDecl already in `existing` (same method name + same parameter
+// arity + same return arity). Round-7 #10: a name-only dedupe drops
+// sibling ValidatePlan declarations when the local file has a
+// wrong-signature shadow; the arity-aware dedupe lets the correct
+// sibling through.
+func isLocalDuplicate(m *ast.FuncDecl, existing []*ast.FuncDecl) bool {
+	mParams := 0
+	mResults := 0
+	if m.Type != nil {
+		if m.Type.Params != nil {
+			mParams = len(m.Type.Params.List)
+		}
+		if m.Type.Results != nil {
+			mResults = len(m.Type.Results.List)
+		}
+	}
+	for _, lm := range existing {
+		if lm == m {
+			continue
+		}
+		if lm.Name.Name != m.Name.Name {
+			continue
+		}
+		lParams := 0
+		lResults := 0
+		if lm.Type != nil {
+			if lm.Type.Params != nil {
+				lParams = len(lm.Type.Params.List)
+			}
+			if lm.Type.Results != nil {
+				lResults = len(lm.Type.Results.List)
+			}
+		}
+		if lParams != mParams || lResults != mResults {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// qualifierFromProviderMethods inspects the parameter types of the
+// supplied methods (the receiver's directory-wide method set per
+// round-3 #1) and returns the qualifier used for the IaCPlan type if
+// any method's signature references it qualified (e.g. *interfaces.IaCPlan).
+// Returns "" if no method's signature uses a qualified IaCPlan.
+//
+// Round-7 #4: rev3 of add_validate_plan fell back to qualifier="interfaces"
+// based on whether ANY sibling file in the directory imported
+// interfaces. That signal is unreliable: if the provider itself uses
+// LOCAL IaCPlan types (test fixtures, etc.) but an unrelated sibling
+// imports interfaces for some other reason, the stub got a wrongly-
+// qualified signature and broke compilation. Per-receiver inspection
+// of the actual signatures the provider already uses is the
+// trustworthy signal.
+func qualifierFromProviderMethods(methods []*ast.FuncDecl) string {
+	for _, m := range methods {
+		switch m.Name.Name {
+		case "Plan", "Apply":
+			// continue
+		default:
+			continue
+		}
+		if m.Type == nil || m.Type.Params == nil {
+			continue
+		}
+		for _, p := range m.Type.Params.List {
+			// Look for *<X>.IaCPlan or *IaCPlan.
+			star, ok := p.Type.(*ast.StarExpr)
+			if !ok {
+				// Slice form `[]<X>.ResourceSpec` etc. also
+				// indicates qualified usage; check.
+				if arr, ok := p.Type.(*ast.ArrayType); ok && arr.Len == nil {
+					if sel, ok := arr.Elt.(*ast.SelectorExpr); ok {
+						if id, ok := sel.X.(*ast.Ident); ok {
+							return id.Name
+						}
+					}
+				}
+				continue
+			}
+			if sel, ok := star.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "IaCPlan" {
+				if id, ok := sel.X.(*ast.Ident); ok {
+					return id.Name
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // siblingUsesInterfacesImport returns true if any non-test .go file

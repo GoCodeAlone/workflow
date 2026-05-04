@@ -336,6 +336,14 @@ func isCanonicalApplyOuterShape(body *ast.BlockStmt) bool {
 	if planId, ok := xSel.X.(*ast.Ident); !ok || planId.Name != "plan" {
 		return false
 	}
+	// Round-7 #3 + #9: validate the loop body is one of the recognised
+	// canonical scaffolds. rev5 only checked the OUTER 3 statements,
+	// so any per-action logic INSIDE the for loop besides the switch
+	// (logging, metrics, custom error handling, accumulators) was
+	// silently dropped during -fix.
+	if !isCanonicalApplyLoopBody(rng.Body) {
+		return false
+	}
 	// 3. return result, nil
 	ret, ok := body.List[2].(*ast.ReturnStmt)
 	if !ok || len(ret.Results) != 2 {
@@ -348,6 +356,151 @@ func isCanonicalApplyOuterShape(body *ast.BlockStmt) bool {
 		return false
 	}
 	return true
+}
+
+// isCanonicalApplyLoopBody returns true if the for-loop body matches
+// one of the canonical scaffolds. Round-7 #3 + #9: rev5 of
+// isCanonicalApplyOuterShape only verified the outer 3 statements;
+// any per-action logging/metrics/accumulators inside the for loop
+// was silently dropped on -fix.
+//
+// Whitelist (every loop-body statement must match one of these):
+//
+//   - SwitchStmt with tag `<X>.Action` (the action dispatch). Exactly 1
+//     such switch is required across the loop body.
+//   - DeclStmt: `var out *ResourceOutput` (or qualified equivalent).
+//   - AssignStmt: `<a>, err := <X>.ResourceDriver(...)` (driver lookup).
+//   - IfStmt: `if err != nil { result.Errors = append(...); continue }`
+//     OR `if out != nil { result.Resources = append(*out) }`
+//
+// Anything else (bare logging calls, metric increments, helper-call
+// statements, alternate-driver lookup) rejects the canonical
+// classification.
+func isCanonicalApplyLoopBody(body *ast.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	switchCount := 0
+	for _, stmt := range body.List {
+		switch s := stmt.(type) {
+		case *ast.SwitchStmt:
+			switchCount++
+			// (the switch body itself is validated by hasCanonicalCases
+			// in classifyApplyBody before this function fires).
+		case *ast.DeclStmt:
+			if !isLocalOutPointerDecl(s) {
+				return false
+			}
+		case *ast.AssignStmt:
+			if !isCanonicalApplyLoopAssign(s) {
+				return false
+			}
+		case *ast.IfStmt:
+			if !isCanonicalApplyLoopIf(s) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return switchCount == 1
+}
+
+// isCanonicalApplyLoopAssign returns true for the canonical loop-body
+// AssignStmt shapes (driver lookup at the top, plus assignments to
+// out/err that are part of the canonical scaffold).
+func isCanonicalApplyLoopAssign(a *ast.AssignStmt) bool {
+	// Multi-target: `<a>, err := <X>.ResourceDriver(...)` or
+	// `<a>, err := <X>.<METHOD>(...)`.
+	if len(a.Lhs) == 2 && len(a.Rhs) == 1 {
+		// Second LHS must be `err`.
+		if id, ok := a.Lhs[1].(*ast.Ident); !ok || id.Name != "err" {
+			return false
+		}
+		call, ok := a.Rhs[0].(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		switch sel.Sel.Name {
+		case "ResourceDriver", "Driver", "DriverFor":
+			return true
+		}
+	}
+	return false
+}
+
+// isCanonicalApplyLoopIf returns true for the canonical loop-body
+// IfStmt shapes:
+//
+//   - `if err != nil { result.Errors = append(...); continue }`
+//   - `if out != nil { result.Resources = append(...) }`
+//
+// Permissive on the result-update body: any append-to-result-field
+// + optional continue/break is accepted, since wfctlhelpers handles
+// equivalent dispatch internally.
+func isCanonicalApplyLoopIf(ifs *ast.IfStmt) bool {
+	if ifs == nil {
+		return false
+	}
+	be, ok := ifs.Cond.(*ast.BinaryExpr)
+	if !ok || be.Op != token.NEQ {
+		return false
+	}
+	// LHS must be `err` or `out` (the canonical guard variables).
+	id, ok := be.X.(*ast.Ident)
+	if !ok || (id.Name != "err" && id.Name != "out") {
+		return false
+	}
+	// RHS must be `nil`.
+	if rhs, ok := be.Y.(*ast.Ident); !ok || rhs.Name != "nil" {
+		return false
+	}
+	if ifs.Else != nil {
+		return false
+	}
+	// Body: 1-2 statements, all canonical update-result shapes.
+	for _, s := range ifs.Body.List {
+		if !isCanonicalApplyLoopIfBodyStmt(s) {
+			return false
+		}
+	}
+	return true
+}
+
+// isCanonicalApplyLoopIfBodyStmt returns true for the recognised
+// statements inside a canonical loop-body if-guard: an append-to-result
+// AssignStmt (LHS shape `result.<F>`), or a continue/break.
+func isCanonicalApplyLoopIfBodyStmt(stmt ast.Stmt) bool {
+	switch s := stmt.(type) {
+	case *ast.AssignStmt:
+		if len(s.Lhs) != 1 || len(s.Rhs) != 1 || s.Tok != token.ASSIGN {
+			return false
+		}
+		sel, ok := s.Lhs[0].(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		if id, ok := sel.X.(*ast.Ident); !ok || id.Name != "result" {
+			return false
+		}
+		// RHS must be a call to append.
+		call, ok := s.Rhs[0].(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		idFn, ok := call.Fun.(*ast.Ident)
+		if !ok || idFn.Name != "append" {
+			return false
+		}
+		return true
+	case *ast.BranchStmt:
+		return s.Tok == token.CONTINUE || s.Tok == token.BREAK
+	}
+	return false
 }
 
 // fmtPosShort renders a path:line short form for offender positions.

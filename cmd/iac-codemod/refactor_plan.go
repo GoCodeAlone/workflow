@@ -867,9 +867,15 @@ func isCanonicalUpdateBranchBody(body *ast.BlockStmt) bool {
 }
 
 // isPlanActionsAppendAssign returns true if stmt is
-// `plan.Actions = append(plan.Actions, ...)`. The append's first arg
-// must reference plan.Actions; the rest is unconstrained (composite
-// literal payload is fine).
+// `plan.Actions = append(plan.Actions, <payload>)`. Both LHS AND
+// the append's first argument must reference plan.Actions; the
+// payload (second arg) is unconstrained (composite literal is fine).
+//
+// Round-7 finding #1: rev5 only verified the LHS, so a bespoke
+// `plan.Actions = append(otherSlice, ...)` (e.g., a planner that
+// builds actions from an alternate slice) was misclassified as
+// canonical and the alternate-slice logic silently dropped during
+// rewrite.
 func isPlanActionsAppendAssign(stmt ast.Stmt) bool {
 	a, ok := stmt.(*ast.AssignStmt)
 	if !ok || a.Tok != token.ASSIGN || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
@@ -888,6 +894,14 @@ func isPlanActionsAppendAssign(stmt ast.Stmt) bool {
 	}
 	idFn, ok := call.Fun.(*ast.Ident)
 	if !ok || idFn.Name != "append" || len(call.Args) < 2 {
+		return false
+	}
+	// Verify append's first argument is also `plan.Actions`.
+	firstSel, ok := call.Args[0].(*ast.SelectorExpr)
+	if !ok || firstSel.Sel.Name != "Actions" {
+		return false
+	}
+	if id, ok := firstSel.X.(*ast.Ident); !ok || id.Name != "plan" {
 		return false
 	}
 	return true

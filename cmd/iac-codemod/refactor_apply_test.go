@@ -124,20 +124,23 @@ type Driver interface {
 
 type AnonProvider struct{}
 
+func (anon *AnonProvider) ResourceDriver(string) (Driver, error) { return nil, nil }
+
 func (anon *AnonProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
 	plan, err := platform.ComputePlan(ctx, anon, desired, current)
 	return &plan, err
 }
 
-func driverForApply(action PlanAction) Driver { return nil }
-
 // Unnamed receiver: ` + "`func (*AnonProvider) Apply(...)`" + `.
 func (*AnonProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
 	result := &ApplyResult{PlanID: plan.ID}
 	for _, action := range plan.Actions {
-		d := driverForApply(action)
+		d, err := plan.ResourceDriver(action.Resource.Type)
+		if err != nil {
+			result.Errors = append(result.Errors, ActionError{Resource: action.Resource.Name})
+			continue
+		}
 		var out *ResourceOutput
-		var err error
 		switch action.Action {
 		case "create":
 			out, err = d.Create(ctx, action.Resource)
@@ -145,8 +148,13 @@ func (*AnonProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, er
 			ref := ResourceRef{Name: action.Resource.Name}
 			out, err = d.Update(ctx, ref, action.Resource)
 		}
-		_ = out
-		_ = err
+		if err != nil {
+			result.Errors = append(result.Errors, ActionError{Resource: action.Resource.Name})
+			continue
+		}
+		if out != nil {
+			result.Resources = append(result.Resources, *out)
+		}
 	}
 	return result, nil
 }
