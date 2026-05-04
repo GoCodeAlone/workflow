@@ -16,6 +16,13 @@ import (
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
+// infraPlanSchemaVersion is the on-disk plan format version this wfctl
+// binary writes and is willing to read. runInfraPlan stamps it on every
+// emitted plan; runInfraApply rejects plans with a higher version so a
+// future schema bump (e.g. W-5 JIT-required plans) fails fast rather than
+// being silently mis-read by an older binary.
+const infraPlanSchemaVersion = 1
+
 func runInfra(args []string) error {
 	if len(args) < 1 {
 		return infraUsage()
@@ -211,7 +218,7 @@ func runInfraPlan(args []string) error {
 		return fmt.Errorf("compute input snapshot: %w", err)
 	}
 	plan.InputSnapshot = snap
-	plan.SchemaVersion = 1
+	plan.SchemaVersion = infraPlanSchemaVersion
 
 	switch *format {
 	case "markdown":
@@ -1074,6 +1081,12 @@ func runInfraApply(args []string) error {
 		plan, err := loadPlanFromFile(planFile)
 		if err != nil {
 			return err
+		}
+		// Reject plans whose on-disk schema is newer than this binary
+		// understands. SchemaVersion == 0 (unset) is grandfathered in for
+		// plans emitted by wfctl predating the field.
+		if plan.SchemaVersion > infraPlanSchemaVersion {
+			return fmt.Errorf("plan schema_version %d is newer than this wfctl supports (max %d) — upgrade wfctl or re-plan with the older format", plan.SchemaVersion, infraPlanSchemaVersion)
 		}
 		// Validate that the plan is still current relative to the config.
 		desired, err := parseInfraResourceSpecsForEnv(cfgFile, envName)

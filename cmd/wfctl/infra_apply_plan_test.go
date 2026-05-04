@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,12 +15,13 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// fingerprintForTest matches inputsnapshot.Compute's fingerprint format
-// (16-hex-char sha256 prefix) so tests can construct expected plan-time
-// snapshots without depending on the concrete env-provider closure.
+// fingerprintForTest delegates to inputsnapshot.Compute so the test always
+// uses the production fingerprint algorithm. Re-implementing sha256 + 16-hex
+// inline would silently drift if the scheme changed; routing through the
+// same function the apply path uses makes that impossible.
 func fingerprintForTest(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])[:16]
+	snap := inputsnapshot.Compute([]string{"k"}, func(string) (string, bool) { return value, true })
+	return snap["k"]
 }
 
 // TestInfraApplyConsumesPlan verifies that wfctl infra apply --plan <file>:
@@ -246,6 +245,53 @@ modules:
 	}
 	if !strings.Contains(err.Error(), "no hash") {
 		t.Errorf("error should mention 'no hash', got: %v", err)
+	}
+}
+
+// TestInfraApplyConsumesPlan_FutureSchemaRejected verifies that a plan whose
+// SchemaVersion is greater than the current binary supports is rejected with
+// a clear "newer than this wfctl" message rather than being silently
+// mis-read as a v1 plan with stray fields.
+func TestInfraApplyConsumesPlan_FutureSchemaRejected(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: test-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+  - name: my-db
+    type: infra.database
+    config:
+      provider: test-provider
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Plan declares a schema version newer than this binary supports.
+	plan := interfaces.IaCPlan{
+		ID:            "future-schema",
+		SchemaVersion: infraPlanSchemaVersion + 1,
+		DesiredHash:   "deadbeef",
+		Actions:       []interfaces.PlanAction{{Action: "create", Resource: interfaces.ResourceSpec{Name: "my-db", Type: "infra.database"}}},
+		CreatedAt:     time.Now().UTC(),
+	}
+	planData, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, planData, 0o600); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+
+	err = runInfraApply([]string{"--auto-approve", "--config", cfgPath, "--plan", planPath})
+	if err == nil {
+		t.Fatal("expected error for future schema_version, got nil")
+	}
+	if !strings.Contains(err.Error(), "schema_version") || !strings.Contains(err.Error(), "newer") {
+		t.Errorf("error should mention schema_version + newer; got: %v", err)
 	}
 }
 
