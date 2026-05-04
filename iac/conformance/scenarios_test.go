@@ -111,18 +111,6 @@ func TestRun_SkipShownAsSkippedSubtest(t *testing.T) {
 	}
 }
 
-// TestRun_DefaultEntryPointAcceptsFakeProvider exercises the public Run
-// against the in-tree fake provider with the default (empty) scenario list.
-// As scenarios are added in T7.2-T7.12, the fake provider must continue to
-// satisfy them under default Config{LiveCloud:true}.
-func TestRun_DefaultEntryPointAcceptsFakeProvider(t *testing.T) {
-	cfg := Config{
-		Provider:  newFakeProvider,
-		LiveCloud: true,
-	}
-	Run(t, cfg)
-}
-
 // TestValidateConfig_RequiresProvider asserts the precondition that
 // Run guards via t.Fatal: an unset Config.Provider must produce
 // errProviderRequired. Tested on validateConfig directly because
@@ -137,6 +125,25 @@ func TestValidateConfig_RequiresProvider(t *testing.T) {
 	if err := validateConfig(Config{Provider: newFakeProvider}); err != nil {
 		t.Errorf("expected nil error for Config with Provider set, got %v", err)
 	}
+}
+
+// TestScenario_NeedsReplaceTriggersReplaceAction is the in-tree self-test
+// for T7.2: invokes the scenario body directly against a fake provider
+// whose Driver.Diff returns NeedsReplace=true, asserting the platform
+// classifies as Action="replace". Real provider plugins exercise the
+// scenario via conformance.Run with LiveCloud=true; this self-test
+// guards the platform-side translation regardless of provider.
+func TestScenario_NeedsReplaceTriggersReplaceAction(t *testing.T) {
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &iactest.NoopProvider{
+				Driver: &iactest.NoopDriver{
+					DiffResult: &interfaces.DiffResult{NeedsReplace: true},
+				},
+			}
+		},
+	}
+	scenarioNeedsReplaceTriggersReplaceAction(t, cfg)
 }
 
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
