@@ -361,9 +361,24 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 
 // doReplace decomposes a Replace action into Delete-then-Create on the
 // driver and propagates the new ProviderID through
-// result.ReplaceIDMap[action.Resource.Name] so JIT substitution in W-5
-// can patch dependent resources whose configs reference the replaced
-// resource by name.
+// result.ReplaceIDMap[action.Resource.Name] so the JIT substitution wired
+// into ApplyPlan's loop (T5.2) can patch dependent resources whose
+// configs reference the replaced resource by name.
+//
+// # Cascade contract (T5.3)
+//
+// When a plan has [Replace parent, X dependent] where dependent's
+// Config carries ${parent.id}, the cascade lands automatically:
+// doReplace's post-Create write to result.ReplaceIDMap completes
+// BEFORE the dispatch loop's next iteration calls
+// jitsubst.ResolveSpec on the dependent's spec, so the dependent's
+// driver call (Create or Replace's post-Delete Create) sees the
+// freshly-resolved parent ProviderID. Delete continues to use
+// action.Current.ProviderID via refFromAction — JIT substitution does
+// NOT alter action.Current, so Replace's Delete still targets the
+// pre-Replace cloud resource.
+//
+// Verified by apply_replace_cascade_test.go.
 //
 // Failure semantics:
 //   - Delete fails → return wrapped "replace: delete: <err>"; Create
