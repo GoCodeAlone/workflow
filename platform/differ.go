@@ -455,11 +455,12 @@ func parseConcurrencyEnv(v string) int {
 // classifyModification. Lazy-initialized on first call to getDiffCache
 // from the WFCTL_DIFFCACHE env var via diffcache.New(), then served
 // lock-free from the atomic.Pointer for the lifetime of the process.
-// Tests in the same package may swap it via setDiffCacheForTest
-// (defined in differ_cache_test.go) — Store on the atomic is safe
-// concurrently with production Loads, and atomic.Pointer cleanly
-// handles the nil case (test cleanup may restore a nil prior value
-// without panicking the way atomic.Value would).
+// Tests (in this package and external packages, notably
+// iac/conformance) may swap it via SetDiffCacheForTest (defined in
+// differ_test_helper.go) — Store on the atomic is safe concurrently
+// with production Loads, and atomic.Pointer cleanly handles the nil
+// case (test cleanup may restore a nil prior value without panicking
+// the way atomic.Value would).
 //
 // Refactored from a per-call sync.Mutex to sync.Once + atomic.Pointer
 // (Copilot review round 4): under ComputePlan's parallel Diff fan-out,
@@ -480,11 +481,11 @@ var (
 func getDiffCache() diffcache.Cache {
 	if p := planDiffCachePtr.Load(); p != nil {
 		// Fast path: already initialized (production hot path AND any
-		// test that has swapped a cache in via setDiffCacheForTest).
+		// test that has swapped a cache in via SetDiffCacheForTest).
 		return *p
 	}
 	planDiffCacheOnce.Do(func() {
-		// Re-check under Once: a concurrent setDiffCacheForTest could
+		// Re-check under Once: a concurrent SetDiffCacheForTest could
 		// have Stored between our Load above and entering the Once
 		// body. Only seed the default if no value is present.
 		if planDiffCachePtr.Load() == nil {
@@ -500,7 +501,7 @@ func getDiffCache() diffcache.Cache {
 	// principle leave Load returning nil; fall through to a fresh
 	// noop-cache rather than panic. Test code never relies on this
 	// (cleanups always restore the prior concrete cache or a fresh
-	// default — see setDiffCacheForTest below).
+	// default — see SetDiffCacheForTest in differ_test_helper.go).
 	return diffcache.NewNoop()
 }
 

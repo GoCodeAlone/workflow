@@ -136,8 +136,13 @@ func (p *NoopProvider) Close() error { return nil }
 
 // NoopDriver is a minimal interfaces.ResourceDriver whose Diff method
 // returns DiffResult (or DiffErr when set) and tracks call count so
-// cache-hit tests can assert deduplication. Other methods return zero
-// values.
+// cache-hit tests can assert deduplication. Other lifecycle methods
+// (Delete, Read) also bump per-method counters and accept a configured
+// return value, so dispatch-coverage tests (notably
+// iac/conformance/scenario_delete_action.go and
+// iac/conformance/scenario_outputs_refresh.go) can pin driver-side
+// invocation and observe live-shape reconciliation. Methods without an
+// explicit counter return zero values.
 type NoopDriver struct {
 	// DiffResult is returned from Diff(). When nil with DiffErr also nil,
 	// callers receive the plain (nil, nil) shape (treated by ComputePlan
@@ -148,10 +153,38 @@ type NoopDriver struct {
 	// DiffResult.
 	DiffErr error
 
+	// DeleteErr is returned from Delete() when set. The default zero
+	// value (nil) makes Delete a no-op success — matching the rest of
+	// the NoopDriver shape.
+	DeleteErr error
+
+	// ReadResult is returned from Read(). When nil with ReadErr also
+	// nil, callers receive the plain (nil, nil) shape that pre-T7.5
+	// code expects from the Noop fake. Tests that exercise
+	// iac/refreshoutputs.Refresh set this to a *ResourceOutput whose
+	// Outputs map carries the live-shape keys the scenario asserts
+	// reconciliation for.
+	ReadResult *interfaces.ResourceOutput
+
+	// ReadErr is returned from Read() when set; takes precedence over
+	// ReadResult.
+	ReadErr error
+
 	// DiffCallCount is bumped on every Diff invocation. Exposed via
 	// atomic.Int64 so cache-hit tests under -race do not need separate
 	// synchronization.
 	DiffCallCount atomic.Int64
+
+	// DeleteCallCount is bumped on every Delete invocation. Exposed via
+	// atomic.Int64 so dispatch-coverage tests (e.g.,
+	// iac/conformance/scenarios_test.go) under -race can assert
+	// driver.Delete was invoked without separate synchronization.
+	DeleteCallCount atomic.Int64
+
+	// ReadCallCount is bumped on every Read invocation. Exposed via
+	// atomic.Int64 so refresh-outputs tests can assert driver.Read was
+	// dispatched without separate synchronization.
+	ReadCallCount atomic.Int64
 }
 
 // Compile-time interface conformance check.
@@ -162,9 +195,16 @@ func (d *NoopDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*inte
 	return nil, nil
 }
 
-// Read returns (nil, nil).
+// Read bumps ReadCallCount and returns the configured ReadResult/
+// ReadErr pair (ReadErr takes precedence when non-nil). The (nil, nil)
+// shape is preserved when neither field is set, matching pre-T7.5
+// callers that only need the no-op signature.
 func (d *NoopDriver) Read(_ context.Context, _ interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
-	return nil, nil
+	d.ReadCallCount.Add(1)
+	if d.ReadErr != nil {
+		return nil, d.ReadErr
+	}
+	return d.ReadResult, nil
 }
 
 // Update returns (nil, nil).
@@ -172,8 +212,15 @@ func (d *NoopDriver) Update(_ context.Context, _ interfaces.ResourceRef, _ inter
 	return nil, nil
 }
 
-// Delete returns nil.
-func (d *NoopDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+// Delete bumps DeleteCallCount and returns DeleteErr (nil by default).
+// The counter is the dispatch-coverage hook used by conformance
+// scenarios that need to assert the v2 apply path actually reached
+// driver.Delete (closing the latent gap from T3.3 where DOProvider's
+// case-arm-less dispatch silently skipped Delete).
+func (d *NoopDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
+	d.DeleteCallCount.Add(1)
+	return d.DeleteErr
+}
 
 // Diff bumps DiffCallCount and returns the configured DiffResult/DiffErr
 // pair (DiffErr takes precedence when non-nil).
