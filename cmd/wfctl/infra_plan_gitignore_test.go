@@ -95,3 +95,24 @@ modules:
 		t.Errorf("did not expect gitignore warning without .gitignore file, got: %q", stderr)
 	}
 }
+
+// TestGitignoreCovers_ScanError_Propagates verifies that when the underlying
+// bufio.Scanner fails (e.g. a single line over bufio.MaxScanTokenSize), the
+// helper returns the error to the caller rather than silently treating
+// scan-failure as either covered or not-covered. The caller (warnIfPlanNotGitignored)
+// then surfaces this as an operator-visible "could not scan" warning.
+func TestGitignoreCovers_ScanError_Propagates(t *testing.T) {
+	// One contiguous 70 KiB line — well over bufio.MaxScanTokenSize (64 KiB)
+	// so Scanner.Scan returns false and Scanner.Err returns the long-line error.
+	huge := make([]byte, 70*1024)
+	for i := range huge {
+		huge[i] = 'x'
+	}
+	covered, err := gitignoreCovers(huge, "plan.json", "/tmp/plan.json", "/tmp")
+	if err == nil {
+		t.Fatal("expected non-nil scan error for oversized line; got nil")
+	}
+	if covered {
+		t.Errorf("oversized line should not report covered=true; got %v", covered)
+	}
+}

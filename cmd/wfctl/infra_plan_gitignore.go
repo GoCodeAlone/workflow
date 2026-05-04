@@ -36,11 +36,20 @@ func warnIfPlanNotGitignored(w io.Writer, planPath string) {
 
 	foundAny := false
 	covered := false
+	scanFailed := false
 	for {
 		gitignore := filepath.Join(dir, ".gitignore")
 		if data, err := os.ReadFile(gitignore); err == nil {
 			foundAny = true
-			if gitignoreCovers(data, base, abs, dir) {
+			ok, scanErr := gitignoreCovers(data, base, abs, dir)
+			if scanErr != nil {
+				// Surface parse failure to the operator (line over
+				// bufio.MaxScanTokenSize, etc.) rather than silently
+				// pretending the file is/isn't covered.
+				fmt.Fprintf(w, "warning: could not scan %s for plan.json coverage: %v\n", gitignore, scanErr)
+				scanFailed = true
+			}
+			if ok {
 				covered = true
 				break
 			}
@@ -51,7 +60,7 @@ func warnIfPlanNotGitignored(w io.Writer, planPath string) {
 		}
 		dir = parent
 	}
-	if foundAny && !covered {
+	if foundAny && !covered && !scanFailed {
 		fmt.Fprintf(w, "warning: %s is not covered by .gitignore — plan.json may contain semi-sensitive data; add %q to .gitignore before committing.\n", planPath, base)
 	}
 }
@@ -61,7 +70,12 @@ func warnIfPlanNotGitignored(w io.Writer, planPath string) {
 // This is intentionally a heuristic, not full gitignore semantics: it covers
 // the common cases (literal basename, "*.ext", "**/<base>", and a path
 // relative to the gitignore directory) and ignores negation rules.
-func gitignoreCovers(data []byte, base, planAbs, gitignoreDir string) bool {
+//
+// Returns (covered, scanErr). scanErr is non-nil only when the underlying
+// bufio.Scanner failed (e.g. a line over bufio.MaxScanTokenSize); the caller
+// surfaces that to the operator via stderr instead of silently treating
+// scan-failure as either covered or not-covered.
+func gitignoreCovers(data []byte, base, planAbs, gitignoreDir string) (bool, error) {
 	ext := filepath.Ext(base)
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
@@ -86,28 +100,24 @@ func gitignoreCovers(data []byte, base, planAbs, gitignoreDir string) bool {
 		anchored := strings.TrimPrefix(line, "/")
 
 		if anchored == base {
-			return true
+			return true, nil
 		}
 		if ext != "" && (anchored == "*"+ext || anchored == "**/*"+ext) {
-			return true
+			return true, nil
 		}
 		// "**/<base>" matches at any depth.
 		if anchored == "**/"+base {
-			return true
+			return true, nil
 		}
 		// Relative path from .gitignore dir, e.g. "cmd/wfctl/plan.json".
 		if rel, err := filepath.Rel(gitignoreDir, planAbs); err == nil {
 			if anchored == rel || anchored == filepath.ToSlash(rel) {
-				return true
+				return true, nil
 			}
 		}
 	}
-	// Scanner errors (e.g. line longer than bufio.MaxScanTokenSize) cause
-	// silent fall-through if not checked. Conservative: treat scan failure
-	// as not-covered, which surfaces a warning the operator can investigate
-	// rather than silently letting plan.json land in source control.
 	if err := scanner.Err(); err != nil {
-		return false
+		return false, err
 	}
-	return false
+	return false, nil
 }
