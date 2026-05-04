@@ -413,6 +413,18 @@ func TestScenario_ProtectedReplaceWithoutOverride(t *testing.T) {
 	scenarioProtectedReplaceWithoutOverride(t, cfg)
 }
 
+// TestScenario_ProtectedReplaceWithOverride is the in-tree self-test
+// for T7.10: companion to T7.9 covering the positive path (allow-list
+// names the protected resource → gate returns nil) plus a negative
+// cross-check (allow-list names a different resource → gate still
+// errors).
+func TestScenario_ProtectedReplaceWithOverride(t *testing.T) {
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider { return &iactest.NoopProvider{} },
+	}
+	scenarioProtectedReplaceWithOverride(t, cfg)
+}
+
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
 // by each scenario_<name>.go init() in T7.2-T7.12. The test save/restores
 // the package-level registry so it does not leak state to other tests.
