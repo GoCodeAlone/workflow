@@ -10,10 +10,18 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
+
+// infraPlanSchemaVersion is the on-disk plan format version this wfctl
+// binary writes and is willing to read. runInfraPlan stamps it on every
+// emitted plan; runInfraApply rejects plans with a higher version so a
+// future schema bump (e.g. W-5 JIT-required plans) fails fast rather than
+// being silently mis-read by an older binary.
+const infraPlanSchemaVersion = 1
 
 func runInfra(args []string) error {
 	if len(args) < 1 {
@@ -201,6 +209,17 @@ func runInfraPlan(args []string) error {
 		return fmt.Errorf("compute plan: %w", err)
 	}
 
+	// Capture env-var fingerprints so apply (persisted-plan path: T1.5; in-process
+	// path: T3.1.5) can surface a per-key diagnostic when a referenced env var
+	// changed between plan and apply. Bumped to schema version 1 so older
+	// readers that predate this field can be detected and rejected.
+	snap, err := computeInfraInputSnapshot(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("compute input snapshot: %w", err)
+	}
+	plan.InputSnapshot = snap
+	plan.SchemaVersion = infraPlanSchemaVersion
+
 	switch *format {
 	case "markdown":
 		fmt.Print(formatPlanMarkdown(plan, showSensitive))
@@ -217,6 +236,11 @@ func runInfraPlan(args []string) error {
 			return fmt.Errorf("write plan: %w", err)
 		}
 		fmt.Printf("\nPlan saved to %s\n", *output)
+		// Plan files carry semi-sensitive content (env-var fingerprints,
+		// resolved configs); warn the operator when none of the reachable
+		// .gitignore files cover the output path. Silent when the directory
+		// is not under a tracked repo (no .gitignore present).
+		warnIfPlanNotGitignored(os.Stderr, *output)
 	}
 
 	return nil
@@ -1058,6 +1082,12 @@ func runInfraApply(args []string) error {
 		if err != nil {
 			return err
 		}
+		// Reject plans whose on-disk schema is newer than this binary
+		// understands. SchemaVersion == 0 (unset) is grandfathered in for
+		// plans emitted by wfctl predating the field.
+		if plan.SchemaVersion > infraPlanSchemaVersion {
+			return fmt.Errorf("plan schema_version %d is newer than this wfctl supports (max %d) — upgrade wfctl or re-plan with the older format", plan.SchemaVersion, infraPlanSchemaVersion)
+		}
 		// Validate that the plan is still current relative to the config.
 		desired, err := parseInfraResourceSpecsForEnv(cfgFile, envName)
 		if err != nil {
@@ -1065,6 +1095,24 @@ func runInfraApply(args []string) error {
 		}
 		if plan.DesiredHash == "" {
 			return fmt.Errorf("plan file has no hash — regenerate with: wfctl infra plan -o plan.json")
+		}
+		// Check the input-fingerprint drift first so the operator gets a
+		// per-key diagnostic instead of the generic config-hash mismatch.
+		// (Env-var changes are a strict subset of config-hash differences;
+		// flagging them here yields the actionable message.) Names list is
+		// derived from plan.InputSnapshot keys — no separate InputNames field.
+		if len(plan.InputSnapshot) > 0 {
+			names := make([]string, 0, len(plan.InputSnapshot))
+			for k := range plan.InputSnapshot {
+				names = append(names, k)
+			}
+			applySnap := inputsnapshot.Compute(names, inputsnapshot.OSEnvProvider)
+			if drift := inputsnapshot.ComputeDrift(plan.InputSnapshot, applySnap); len(drift) > 0 {
+				// *StaleError: Error() yields the canonical FormatStaleError
+				// output (no sentinel prefix); Unwrap() yields ErrEnvVarChanged
+				// so errors.Is(err, inputsnapshot.ErrEnvVarChanged) still matches.
+				return inputsnapshot.NewStaleError(drift)
+			}
 		}
 		currentHash := desiredStateHash(desired)
 		if plan.DesiredHash != currentHash {

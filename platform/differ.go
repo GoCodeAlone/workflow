@@ -36,15 +36,17 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 		hash := configHash(spec.Config)
 		if rs, exists := currentMap[spec.Name]; !exists {
 			creates = append(creates, interfaces.PlanAction{
-				Action:   "create",
-				Resource: spec,
+				Action:             "create",
+				Resource:           spec,
+				ResolvedConfigHash: hash,
 			})
 		} else if rs.ConfigHash != hash {
 			rsCopy := rs
 			updates = append(updates, interfaces.PlanAction{
-				Action:   "update",
-				Resource: spec,
-				Current:  &rsCopy,
+				Action:             "update",
+				Resource:           spec,
+				Current:            &rsCopy,
+				ResolvedConfigHash: hash,
 			})
 		}
 		// No change: skip.
