@@ -246,6 +246,37 @@ func TestRun_ConsecutiveRunsObserveLiveDriverIndependently(t *testing.T) {
 	}
 }
 
+// TestScenario_DiffSurvivesGRPCRoundTrip is the in-tree self-test for
+// T7.4: invokes the scenario body against a fake whose Driver.Diff
+// returns a DiffResult with mixed-type FieldChange.Old/New (string,
+// number, bool) so the structpb encode/decode path the scenario
+// exercises has non-trivial values to round-trip. Asserts driver
+// dispatch happened (DiffCallCount >= 1) — proving the wrapper's
+// structpb roundtrip on inputs did not short-circuit before reaching
+// the delegate.
+func TestScenario_DiffSurvivesGRPCRoundTrip(t *testing.T) {
+	driver := &iactest.NoopDriver{
+		DiffResult: &interfaces.DiffResult{
+			NeedsUpdate:  true,
+			NeedsReplace: false,
+			Changes: []interfaces.FieldChange{
+				{Path: "config.region", Old: "nyc1", New: "nyc3"},
+				{Path: "config.size", Old: 1, New: 2, ForceNew: true},
+				{Path: "config.protected", Old: true, New: false},
+			},
+		},
+	}
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &iactest.NoopProvider{Driver: driver}
+		},
+	}
+	scenarioDiffSurvivesGRPCRoundTrip(t, cfg)
+	if got := driver.DiffCallCount.Load(); got < 1 {
+		t.Errorf("driver.Diff must be invoked through the structpb roundtrip wrapper; got DiffCallCount=%d", got)
+	}
+}
+
 // TestScenario_OutputsRefreshDetectsNewFields is the in-tree self-test
 // for T7.5: invokes the scenario body against a fake whose Driver.Read
 // returns Outputs with one extra key ("endpoint") beyond what the
@@ -284,6 +315,78 @@ func TestScenario_PlanStaleDiagnostic(t *testing.T) {
 		},
 	}
 	scenarioPlanStaleDiagnostic(t, cfg)
+}
+
+// validatingFakeProvider embeds iactest.NoopProvider and adds a
+// configurable ValidatePlan implementation so the type satisfies
+// interfaces.ProviderValidator. Used by the T7.7 self-test to drive
+// the cross-resource constraint scenario against a deterministic
+// diagnostic shape.
+type validatingFakeProvider struct {
+	*iactest.NoopProvider
+	diags []interfaces.PlanDiagnostic
+}
+
+// Compile-time assertion that the wrapper satisfies both interfaces.
+var (
+	_ interfaces.IaCProvider       = (*validatingFakeProvider)(nil)
+	_ interfaces.ProviderValidator = (*validatingFakeProvider)(nil)
+)
+
+// ValidatePlan returns the pre-configured diagnostics regardless of plan
+// content; the scenario constructs a plan known to be invalid and the
+// fake's job is only to surface the diag to verify the contract path.
+func (p *validatingFakeProvider) ValidatePlan(_ *interfaces.IaCPlan) []interfaces.PlanDiagnostic {
+	return p.diags
+}
+
+// TestScenario_CrossResourceConstraintRejection is the in-tree self-test
+// for T7.7: invokes the scenario body against a fake that satisfies
+// ProviderValidator and returns one Error-severity diagnostic naming
+// the dangling vpc_ref. Asserts the contract surface (interface
+// assertion succeeds + non-empty Error diag with non-empty Message).
+func TestScenario_CrossResourceConstraintRejection(t *testing.T) {
+	cfg := Config{
+		Provider: func() interfaces.IaCProvider {
+			return &validatingFakeProvider{
+				NoopProvider: &iactest.NoopProvider{},
+				diags: []interfaces.PlanDiagnostic{
+					{
+						Severity: interfaces.PlanDiagnosticError,
+						Resource: "db",
+						Field:    "vpc_ref",
+						Message:  "vpc 'missing-vpc' is not present in this plan",
+					},
+				},
+			}
+		},
+	}
+	scenarioCrossResourceConstraintRejection(t, cfg)
+}
+
+// TestScenario_CrossResourceConstraintRejection_SkipsWhenNotImplemented
+// asserts the negative-path contract: providers that don't implement
+// ProviderValidator (the optional interface) cause the scenario to
+// skip rather than fail. Pre-W-4 providers and non-validating
+// implementations stay green.
+func TestScenario_CrossResourceConstraintRejection_SkipsWhenNotImplemented(t *testing.T) {
+	cfg := Config{
+		// NoopProvider does NOT implement ProviderValidator — the
+		// scenario must t.Skipf rather than fail.
+		Provider: func() interfaces.IaCProvider { return &iactest.NoopProvider{} },
+	}
+	// Run the scenario in a subtest and confirm it was skipped (Go's
+	// testing.T propagates skip up to the parent only as a "did not
+	// pass / did not fail" — we observe via t.Run's return-bool +
+	// the inner t.Skipped() flag captured before propagation).
+	var innerSkipped bool
+	t.Run("inner", func(it *testing.T) {
+		defer func() { innerSkipped = it.Skipped() }()
+		scenarioCrossResourceConstraintRejection(it, cfg)
+	})
+	if !innerSkipped {
+		t.Errorf("scenario must Skip when provider does not implement ProviderValidator")
+	}
 }
 
 // TestRegister_AppendsToAllScenarios verifies the registration hook used
