@@ -69,11 +69,16 @@ func TestValidateAllowReplaceProtected_ReplaceProtected_WithoutAllowList_Errors(
 	if err == nil {
 		t.Fatal("expected error for replace on protected resource without --allow-replace")
 	}
-	// Per design doc literal:
-	//   resource %q is protected: true and would be %sd; pass --allow-replace=%s to override
-	want := `resource "prod-db" is protected: true and would be replaced; pass --allow-replace=prod-db to override`
-	if err.Error() != want {
-		t.Errorf("error mismatch\n  got:  %q\n  want: %q", err.Error(), want)
+	// T6.2 superseded T6.1's single-line literal with an aggregated
+	// multi-blocker format that always emits a copy-paste flag value.
+	// Assert the operator-facing essentials: resource name surfaces +
+	// copy-paste flag is pre-formatted with the blocked name.
+	msg := err.Error()
+	if !strings.Contains(msg, "prod-db") {
+		t.Errorf("expected error to mention resource name; got %q", msg)
+	}
+	if !strings.Contains(msg, "--allow-replace=prod-db") {
+		t.Errorf("expected error to include copy-paste flag --allow-replace=prod-db; got %q", msg)
 	}
 }
 
@@ -102,9 +107,16 @@ func TestValidateAllowReplaceProtected_DeleteProtected_WithoutAllowList_Errors(t
 	if err == nil {
 		t.Fatal("expected error for delete on protected resource without --allow-replace")
 	}
-	want := `resource "prod-db" is protected: true and would be deleted; pass --allow-replace=prod-db to override`
-	if err.Error() != want {
-		t.Errorf("error mismatch\n  got:  %q\n  want: %q", err.Error(), want)
+	// T6.2 batch format: assert the essentials — name surfaces + the
+	// copy-paste flag is pre-formatted with the blocked name. The
+	// "delete" verb is preserved in the per-line listing (covered by
+	// the mixed-replace-and-delete test in T6.2 set).
+	msg := err.Error()
+	if !strings.Contains(msg, "prod-db") {
+		t.Errorf("expected error to mention resource name; got %q", msg)
+	}
+	if !strings.Contains(msg, "--allow-replace=prod-db") {
+		t.Errorf("expected error to include copy-paste flag --allow-replace=prod-db; got %q", msg)
 	}
 }
 

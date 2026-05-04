@@ -97,14 +97,24 @@ func parseAllowReplaceFlag(raw string) map[string]struct{} {
 }
 
 // validateAllowReplaceProtected gates dispatch on the per-resource
-// `protected: true` annotation. For every replace or delete action in
-// plan, if the targeted resource is protected and its name is not in
-// allow, return the design-spec error literal:
+// `protected: true` annotation. It walks every replace or delete
+// action in plan and aggregates ALL blockers (resources protected and
+// not in `allow`) into a single error before returning, so the
+// operator sees the full set of names in one apply attempt and can
+// authorize them with one round-trip via the pre-formatted
+// --allow-replace=<csv> value.
 //
-//	resource %q is protected: true and would be %sd; pass --allow-replace=%s to override
+// Format (T6.2):
 //
-// (T6.1 spec — fail-fast on the first blocker. T6.2 swaps this for an
-// aggregated multi-blocker report with a copy-paste flag value.)
+//	plan would require destructive action on N protected resource(s):
+//	  <name1> (replace)
+//	  <name2> (delete)
+//	  ...
+//	to authorize, re-run with:
+//	  --allow-replace=<name1>,<name2>,...
+//
+// Both names and the csv preserve plan-action declaration order so
+// the output is deterministic across runs.
 //
 // `protected: true` is sourced from PlanAction.Resource.Config for
 // replace actions (where Resource carries the desired spec) and from
@@ -112,6 +122,11 @@ func parseAllowReplaceFlag(raw string) map[string]struct{} {
 // platform.differ leaves Resource.Config empty and the protected
 // status is preserved on the previously-applied state).
 func validateAllowReplaceProtected(plan interfaces.IaCPlan, allow map[string]struct{}) error {
+	type blocker struct {
+		name   string
+		action string
+	}
+	var blockers []blocker
 	for i := range plan.Actions {
 		a := &plan.Actions[i]
 		if a.Action != "replace" && a.Action != "delete" {
@@ -123,11 +138,21 @@ func validateAllowReplaceProtected(plan interfaces.IaCPlan, allow map[string]str
 		if _, ok := allow[a.Resource.Name]; ok {
 			continue
 		}
-		verb := actionVerbPastTense(a.Action)
-		return fmt.Errorf("resource %q is protected: true and would be %s; pass --allow-replace=%s to override",
-			a.Resource.Name, verb, a.Resource.Name)
+		blockers = append(blockers, blocker{name: a.Resource.Name, action: a.Action})
 	}
-	return nil
+	if len(blockers) == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "plan would require destructive action on %d protected resource(s):", len(blockers))
+	names := make([]string, 0, len(blockers))
+	for _, blk := range blockers {
+		fmt.Fprintf(&b, "\n  %s (%s)", blk.name, blk.action)
+		names = append(names, blk.name)
+	}
+	fmt.Fprintf(&b, "\nto authorize, re-run with:\n  --allow-replace=%s", strings.Join(names, ","))
+	return errors.New(b.String())
 }
 
 // planActionIsProtected reports whether the action targets a resource
@@ -148,23 +173,6 @@ func planActionIsProtected(a *interfaces.PlanAction) bool {
 		}
 	}
 	return false
-}
-
-// actionVerbPastTense renders the plan-action verb in past tense for
-// the gate error message. The design literal embeds the verb between
-// "would be" and the override hint:
-//
-//	would be replaced; pass --allow-replace=...
-//	would be deleted; pass --allow-replace=...
-func actionVerbPastTense(action string) string {
-	switch action {
-	case "replace":
-		return "replaced"
-	case "delete":
-		return "deleted"
-	default:
-		return action + "d"
-	}
 }
 
 // hasInfraModules reports whether cfgFile contains any modules with the new
