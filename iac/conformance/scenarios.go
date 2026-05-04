@@ -106,6 +106,18 @@ func validateConfig(cfg Config) error {
 // the dispatcher entirely on the first skip-match. The intended
 // behavior — per-scenario skipped subtests — requires wrapping the
 // Skipf in t.Run, which is what we do.
+//
+// Diff-cache caveat: scenarios that exercise platform.ComputePlan
+// with cacheable resources (non-empty ProviderID) use t.Setenv to
+// force WFCTL_DIFFCACHE=disabled so a stale entry from a prior run
+// cannot make the scenario pass against a regressed live driver.
+// The platform diff cache is sync.Once-initialized per process, so
+// the env-var override only takes effect when conformance.Run is
+// invoked BEFORE any other platform.ComputePlan call in the test
+// process. Real provider plugins that mix conformance with other
+// platform.ComputePlan-based tests should arrange for conformance
+// to run first, OR follow the W-7 follow-up that exposes a public
+// platform.SetDiffCacheForTest helper.
 func Run(t *testing.T, cfg Config) {
 	t.Helper()
 	if err := validateConfig(cfg); err != nil {

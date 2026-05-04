@@ -28,6 +28,16 @@ import (
 // LiveCloud=true so the scenario fires against the configured fake.
 func scenarioNeedsReplaceTriggersReplaceAction(t *testing.T, cfg Config) {
 	t.Helper()
+	// Conformance always tests the LIVE driver contract; bypass the
+	// platform diff cache so a stale entry from a prior run can't make
+	// the scenario pass for the wrong reason. NOTE: platform.getDiffCache
+	// is sync.Once-initialized per process — this t.Setenv only takes
+	// effect if no prior code in the test process has triggered the once.
+	// For real provider plugins, conformance.Run should be invoked before
+	// any other platform.ComputePlan call. A public
+	// platform.SetDiffCacheForTest helper is filed as a W-7 follow-up.
+	t.Setenv("WFCTL_DIFFCACHE", "disabled")
+
 	p := cfg.Provider()
 	defer func() { _ = p.Close() }()
 
