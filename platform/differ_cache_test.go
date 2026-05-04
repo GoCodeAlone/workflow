@@ -232,21 +232,26 @@ func (d *cacheTestDriver) SensitiveKeys() []string { return nil }
 // so the boundary cases can be exercised without process restart.
 func TestParseConcurrencyEnv(t *testing.T) {
 	cases := []struct {
+		// name is the subtest label (avoids using the raw empty string
+		// from `in` as the t.Run name, which Go's testing package
+		// silently rewrites to "#00" — readable in -v output but masks
+		// the case identity in failure reports).
+		name string
 		in   string
 		want int
 	}{
-		{"", planDiffConcurrencyDefault},
-		{"abc", planDiffConcurrencyDefault},
-		{"-5", planDiffConcurrencyMin},
-		{"0", planDiffConcurrencyMin},
-		{"1", 1},
-		{"8", 8},
-		{"32", 32},
-		{"33", planDiffConcurrencyMax},
-		{"100", planDiffConcurrencyMax},
+		{"empty", "", planDiffConcurrencyDefault},
+		{"non_numeric", "abc", planDiffConcurrencyDefault},
+		{"negative", "-5", planDiffConcurrencyMin},
+		{"zero", "0", planDiffConcurrencyMin},
+		{"one", "1", 1},
+		{"eight", "8", 8},
+		{"thirty_two", "32", 32},
+		{"thirty_three_clamped_to_max", "33", planDiffConcurrencyMax},
+		{"one_hundred_clamped_to_max", "100", planDiffConcurrencyMax},
 	}
 	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			if got := parseConcurrencyEnv(tc.in); got != tc.want {
 				t.Errorf("parseConcurrencyEnv(%q) = %d, want %d", tc.in, got, tc.want)
 			}
