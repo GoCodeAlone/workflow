@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GoCodeAlone/workflow/plugin/sdk/manifest_schema.json",
+  "title": "Plugin SDK manifest",
+  "description": "Schema for the SDK-level plugin manifest (plugin.json) consumed by wfctl. Pure-additive; existing manifests without iacProvider remain valid.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "iacProvider": {
+      "type": "object",
+      "description": "IaC-provider-specific manifest fields. Only present for plugins that implement the IaCProvider interface.",
+      "properties": {
+        "computePlanVersion": {
+          "type": "string",
+          "description": "Selects the apply-time dispatch path. v1 (default when omitted) routes through the legacy in-provider Apply switch. v2 routes through wfctlhelpers.ApplyPlan with full Replace + drift-postcondition support.",
+          "enum": ["v1", "v2"]
+        }
+      }
+    }
+  }
+}
