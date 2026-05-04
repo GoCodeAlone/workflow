@@ -45,7 +45,9 @@ if planner, ok := provider.(interfaces.ProviderPlanner); ok {
 return defaultComputePlan(ctx, provider, desired, current)
 ```
 
-The pattern is the standard Go optional-interface idiom: type-assert against the optional interface, fall through to the default if the provider does not implement it. The same pattern is used by `ProviderValidator` in `interfaces/iac_provider.go` once it lands.
+The pattern is the standard Go optional-interface idiom: type-assert against the optional interface, fall through to the default if the provider does not implement it. The same optional-interface pattern is already used by `ProviderIDValidator` in [`interfaces/iac_resource_driver.go`](../../interfaces/iac_resource_driver.go) — type-assert against the optional interface, fall through to a default if the implementer does not satisfy it.
+
+Adapter authors wiring `PlanV2` into the dispatch site should also note the pointer/value asymmetry: `IaCProvider.Plan` returns `*IaCPlan` while `PlanV2` returns `IaCPlan` by value, so the wrapper at the dispatch site converts as needed (e.g. `p := planner.PlanV2(...); return &p, nil`).
 
 ## Provenance
 
