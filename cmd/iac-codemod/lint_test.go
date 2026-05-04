@@ -212,6 +212,42 @@ func TestSkipMarker_RejectsCloseButWrongMarker(t *testing.T) {
 	}
 }
 
+// TestSkipMarker_AcceptsTabDelimitedJustification — review round-2
+// follow-up A. Maintainers who tab-align justifications must NOT see a
+// silent no-op; the marker logic widens to accept any whitespace
+// separator.
+const planSkippedTabJustifiedSrc = providerScaffold + "\n// wfctl:skip-iac-codemod\tlegacy upsert recovery, see ADR-042\nfunc (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {\n\treturn &IaCPlan{}, nil\n}\n"
+
+func TestSkipMarker_AcceptsTabDelimitedJustification(t *testing.T) {
+	diags := runAnalyzerOnSource(t, planSkippedTabJustifiedSrc, AssertPlanDelegatesToHelper)
+	if len(diags) != 0 {
+		t.Errorf("tab-delimited justification must NOT silently break the marker; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+// TestSkipMarker_RejectsAdjacentNonWhitespace — review round-2 follow-up
+// C. Pin that strings sharing the marker prefix but extending without a
+// whitespace separator (dash/letter/digit suffix) are NOT accepted as
+// the marker, so future loosening of hasSkipMarkerOn fails this test.
+func TestSkipMarker_RejectsAdjacentNonWhitespace(t *testing.T) {
+	cases := []struct {
+		name, comment string
+	}{
+		{"dash-suffix", "// wfctl:skip-iac-codemod-extension"},
+		{"letters-suffix", "// wfctl:skip-iac-codemodSOMETHING"},
+		{"digit-suffix", "// wfctl:skip-iac-codemod1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := providerScaffold + "\n" + tc.comment + "\nfunc (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {\n\treturn &IaCPlan{}, nil\n}\n"
+			diags := runAnalyzerOnSource(t, src, AssertPlanDelegatesToHelper)
+			if len(diags) != 1 {
+				t.Errorf("comment %q without whitespace separator must NOT match the marker; got %d:\n%s", tc.comment, len(diags), diagSummary(diags))
+			}
+		})
+	}
+}
+
 // ============================================================
 // AssertApplyDelegatesToHelper
 // ============================================================
@@ -376,6 +412,31 @@ func TestAssertDiffSetsNeedsReplaceForForceNew_AcceptsDirectAssign(t *testing.T)
 	diags := runAnalyzerOnSource(t, diffDirectAssignSrc, AssertDiffSetsNeedsReplaceForForceNew)
 	if len(diags) != 0 {
 		t.Errorf("`r.NeedsReplace = c.ForceNew` is a valid alternate canonical; should NOT flag; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+// TestAssertDiffSetsNeedsReplaceForForceNew_RejectsLiteralFalseAssign
+// — review round-2 follow-up B. The widened bodyAssignsField (any RHS)
+// would silently accept `r.NeedsReplace = false` inside a ForceNew
+// branch — a real copy-paste bug pattern. The matcher must specifically
+// treat literal-`false` RHS as no-assignment so this typo is still
+// flagged.
+const diffLiteralFalseSrc = driverScaffold + `
+func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
+	r := &DiffResult{}
+	for _, c := range r.Changes {
+		if c.ForceNew {
+			r.NeedsReplace = false
+		}
+	}
+	return r, nil
+}
+`
+
+func TestAssertDiffSetsNeedsReplaceForForceNew_RejectsLiteralFalseAssign(t *testing.T) {
+	diags := runAnalyzerOnSource(t, diffLiteralFalseSrc, AssertDiffSetsNeedsReplaceForForceNew)
+	if len(diags) != 1 {
+		t.Errorf("`r.NeedsReplace = false` is a copy-paste bug — analyzer must flag; got %d:\n%s", len(diags), diagSummary(diags))
 	}
 }
 

@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -258,17 +260,23 @@ var (
 // Accepted shapes:
 //
 //	// wfctl:skip-iac-codemod
-//	// wfctl:skip-iac-codemod  legacy upsert recovery, see ADR-042
+//	// wfctl:skip-iac-codemod legacy upsert recovery, see ADR-042
+//	// wfctl:skip-iac-codemod\tlegacy upsert recovery, see ADR-042
 //
-// A trailing space + arbitrary justification text is permitted per
-// review-round-2 finding #2 — Go maintainers idiomatically annotate WHY
-// a site is skipped, and a justification suffix must NOT silently turn
-// the marker into a no-op (plan rev2 line 2400 unifies the marker
-// specifically to prevent silent-no-op surfaces).
+// The marker followed by ANY whitespace separator + arbitrary
+// justification text is honored (review round-2 follow-up A). Go
+// maintainers may use spaces or tabs to align justifications; silently
+// ignoring tab-delimited reasons would replicate the silent-no-op
+// surface plan rev2 line 2400 unifies the marker to prevent.
 //
-// A different prefix (e.g. legacy `// wfctl:skip-codemod`) is rejected
-// — the trailing-space requirement keeps the match tight enough that
-// a substring shadow cannot bypass the marker discipline.
+// Rejected shapes (a non-whitespace suffix means a different marker):
+//
+//	// wfctl:skip-iac-codemod-extension
+//	// wfctl:skip-iac-codemodSOMETHING
+//	// wfctl:skip-codemod                (legacy, design rev1)
+//
+// The whitespace-separator discipline keeps the match tight enough
+// that no substring shadow can bypass marker discipline.
 func hasSkipMarkerOn(doc *ast.CommentGroup) bool {
 	if doc == nil {
 		return false
@@ -276,8 +284,14 @@ func hasSkipMarkerOn(doc *ast.CommentGroup) bool {
 	for _, c := range doc.List {
 		// Comment text includes the leading `//` per ast.Comment convention.
 		text := strings.TrimSpace(c.Text)
-		if text == SkipMarker || strings.HasPrefix(text, SkipMarker+" ") {
+		if text == SkipMarker {
 			return true
+		}
+		if strings.HasPrefix(text, SkipMarker) && len(text) > len(SkipMarker) {
+			next, _ := utf8.DecodeRuneInString(text[len(SkipMarker):])
+			if unicode.IsSpace(next) {
+				return true
+			}
 		}
 	}
 	return false
@@ -695,13 +709,17 @@ func bodyReferencesField(body *ast.BlockStmt, fieldName string) bool {
 }
 
 // bodyAssignsField reports whether the function body contains any
-// assignment `<X>.fieldName = <expr>` regardless of RHS shape. Both
-// `r.NeedsReplace = true` (inside an `if c.ForceNew` guard) and the
-// terser `r.NeedsReplace = c.ForceNew` are valid expressions of the
-// W-3 force-new contract — review finding #4 widened the matcher so
-// the second pattern doesn't trigger a false positive. Maintainers
+// assignment `<X>.fieldName = <expr>` regardless of RHS shape, EXCEPT
+// for an explicit literal `false` (which is treated as no-assignment).
+// Both `r.NeedsReplace = true` (inside an `if c.ForceNew` guard) and
+// the terser `r.NeedsReplace = c.ForceNew` are valid expressions of
+// the W-3 force-new contract — review round-1 finding #4 widened the
+// matcher so the second pattern doesn't trigger a false positive.
+// Review round-2 follow-up B then narrowed the widening so the
+// copy-paste bug `r.NeedsReplace = false` (assigning the wrong
+// constant inside a ForceNew branch) is still flagged. Maintainers
 // who genuinely don't propagate ForceNew leave NeedsReplace untouched
-// entirely, which the analyzer still catches.
+// entirely, which the analyzer also catches.
 func bodyAssignsField(body *ast.BlockStmt, fieldName string) bool {
 	if body == nil {
 		return false
@@ -715,15 +733,24 @@ func bodyAssignsField(body *ast.BlockStmt, fieldName string) bool {
 		if !ok {
 			return true
 		}
-		for _, lhs := range assign.Lhs {
+		for i, lhs := range assign.Lhs {
 			sel, ok := lhs.(*ast.SelectorExpr)
 			if !ok {
 				continue
 			}
-			if sel.Sel.Name == fieldName {
-				found = true
-				return false
+			if sel.Sel.Name != fieldName {
+				continue
 			}
+			if i < len(assign.Rhs) {
+				if id, ok := assign.Rhs[i].(*ast.Ident); ok && id.Name == "false" {
+					// Literal-false assignment is treated as
+					// no-assignment so a copy-paste typo inside the
+					// ForceNew branch is still flagged.
+					continue
+				}
+			}
+			found = true
+			return false
 		}
 		return true
 	})
