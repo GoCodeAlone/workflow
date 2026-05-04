@@ -106,6 +106,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	fs := flag.NewFlagSet("iac-codemod "+mode, flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	// Override the default per-FlagSet usage so `iac-codemod <mode> -h`
+	// produces the same structured output as `iac-codemod -h` (T8.2
+	// carry-forward #1: avoids the user seeing only the FS-specific
+	// "-dry-run / -fix" banner without the mode catalog).
+	fs.Usage = func() { usage(stderr) }
 	opts := &Options{}
 	fs.BoolVar(&opts.DryRun, "dry-run", true, "report findings without mutating files (default)")
 	fs.BoolVar(&opts.Fix, "fix", false, "opt into mutation; overrides -dry-run")

@@ -1,0 +1,541 @@
+// Copyright (c) 2026 Jon Langevin
+// SPDX-License-Identifier: Apache-2.0
+
+// See main_test.go for the t.Parallel() prohibition (this file follows
+// the same constraint — modes map is mutated transitively via the lint
+// init() call and cross-test analyzer state).
+
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"golang.org/x/tools/go/analysis"
+)
+
+// runAnalyzerOnSource parses a single Go source string, type-checks it
+// tolerantly, runs the supplied analyzer, and returns the REAL diagnostics
+// (skip-encoded synthetic diagnostics from skip-marker handling are
+// filtered out here, matching the driver's post-processing). Use
+// runAnalyzerOnSourceRaw if you need to inspect skip records directly.
+func runAnalyzerOnSource(t *testing.T, src string, analyzer *analysis.Analyzer) []analysis.Diagnostic {
+	t.Helper()
+	all := runAnalyzerOnSourceRaw(t, src, analyzer)
+	out := all[:0]
+	for _, d := range all {
+		if strings.HasPrefix(d.Message, skipDiagnosticPrefix) {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// runAnalyzerOnSourceRaw is like runAnalyzerOnSource but returns ALL
+// diagnostics (including skip-encoded ones). Used by skip-marker tests
+// that need to verify the synthetic record was emitted at all.
+func runAnalyzerOnSourceRaw(t *testing.T, src string, analyzer *analysis.Analyzer) []analysis.Diagnostic {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "src.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse: %v\nsrc:\n%s", err, src)
+	}
+	conf := &types.Config{
+		Importer: stubImporter{},
+		Error:    func(err error) {}, // tolerate unresolved-import / undeclared-name errors
+	}
+	info := &types.Info{
+		Types:      make(map[ast.Expr]types.TypeAndValue),
+		Defs:       make(map[*ast.Ident]types.Object),
+		Uses:       make(map[*ast.Ident]types.Object),
+		Implicits:  make(map[ast.Node]types.Object),
+		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+	pkg, _ := conf.Check(file.Name.Name, fset, []*ast.File{file}, info)
+	var diags []analysis.Diagnostic
+	pass := &analysis.Pass{
+		Analyzer:  analyzer,
+		Fset:      fset,
+		Files:     []*ast.File{file},
+		Pkg:       pkg,
+		TypesInfo: info,
+		Report:    func(d analysis.Diagnostic) { diags = append(diags, d) },
+	}
+	if _, err := analyzer.Run(pass); err != nil {
+		t.Fatalf("analyzer %s: %v", analyzer.Name, err)
+	}
+	return diags
+}
+
+// stubImporter is a tolerant importer that returns an empty package for
+// any import path. It lets type-check proceed past unresolved imports
+// like "wfctlhelpers" or "interfaces" without bailing.
+type stubImporter struct{}
+
+func (stubImporter) Import(path string) (*types.Package, error) {
+	return types.NewPackage(path, filepath.Base(path)), nil
+}
+
+// ============================================================
+// AssertPlanDelegatesToHelper
+// ============================================================
+
+// providerScaffold is the boilerplate every Plan/Apply test source
+// includes so its receiver type satisfies the precision filter
+// (providerLikeReceivers — must have BOTH Plan and Apply matching
+// IaCProvider shape) and the integration-test "no findings" cases pass
+// every analyzer. Apply is canonical and ValidatePlan is present so
+// only the method under test (Plan) drives the analyzer behaviour.
+const providerScaffold = `package p
+import "context"
+
+type ResourceSpec struct{}
+type ResourceState struct{}
+type IaCPlan struct{}
+type ApplyResult struct{}
+type PlanDiagnostic struct{}
+
+type FooProvider struct{}
+
+func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return wfctlhelpers.ApplyPlan(ctx, p, plan)
+}
+func (p *FooProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
+`
+
+const planCanonicalSrc = providerScaffold + `
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return wfctlhelpers.Plan(ctx, p, desired, current)
+}
+`
+
+const planNonCanonicalSrc = providerScaffold + `
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	// Custom planning logic, not delegating to wfctlhelpers.Plan.
+	return &IaCPlan{}, nil
+}
+`
+
+const planSkippedSrc = providerScaffold + `
+// wfctl:skip-iac-codemod
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return &IaCPlan{}, nil
+}
+`
+
+func TestAssertPlanDelegatesToHelper_Canonical_NoDiagnostic(t *testing.T) {
+	diags := runAnalyzerOnSource(t, planCanonicalSrc, AssertPlanDelegatesToHelper)
+	if len(diags) != 0 {
+		t.Errorf("canonical Plan should produce no diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+func TestAssertPlanDelegatesToHelper_NonCanonical_Diagnoses(t *testing.T) {
+	diags := runAnalyzerOnSource(t, planNonCanonicalSrc, AssertPlanDelegatesToHelper)
+	if len(diags) != 1 {
+		t.Fatalf("non-canonical Plan should produce 1 diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+	if !strings.Contains(diags[0].Message, "wfctlhelpers.Plan") {
+		t.Errorf("diagnostic should reference wfctlhelpers.Plan; got %q", diags[0].Message)
+	}
+}
+
+func TestAssertPlanDelegatesToHelper_SkipMarker_Honored(t *testing.T) {
+	// Real findings should be empty (the marker suppresses the
+	// non-canonical-Plan diagnostic).
+	diags := runAnalyzerOnSource(t, planSkippedSrc, AssertPlanDelegatesToHelper)
+	if len(diags) != 0 {
+		t.Errorf("skip-marker should suppress real diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+	// And a skip-encoded synthetic diagnostic should be present so the
+	// driver can surface the skipped site in its report (plan rev2 line
+	// 2400: "Each mode also surfaces a list of skipped sites in its
+	// report").
+	all := runAnalyzerOnSourceRaw(t, planSkippedSrc, AssertPlanDelegatesToHelper)
+	gotSkip := false
+	for _, d := range all {
+		if strings.HasPrefix(d.Message, skipDiagnosticPrefix) {
+			gotSkip = true
+			break
+		}
+	}
+	if !gotSkip {
+		t.Errorf("skip-marker should produce a skip record for the driver to surface; got:\n%s", diagSummary(all))
+	}
+}
+
+// ============================================================
+// AssertApplyDelegatesToHelper
+// ============================================================
+
+// applyTestScaffold mirrors providerScaffold but with a canonical Plan
+// (so the receiver passes the provider-like filter without the Apply
+// analyzer under test being affected). ValidatePlan is included so
+// integration-test "no findings" cases stay clean across all analyzers.
+const applyTestScaffold = `package p
+import "context"
+
+type ResourceSpec struct{}
+type ResourceState struct{}
+type IaCPlan struct{}
+type ApplyResult struct{}
+type PlanDiagnostic struct{}
+
+type FooProvider struct{}
+
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return wfctlhelpers.Plan(ctx, p, desired, current)
+}
+func (p *FooProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
+`
+
+const applyCanonicalSrc = applyTestScaffold + `
+func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return wfctlhelpers.ApplyPlan(ctx, p, plan)
+}
+`
+
+const applyNonCanonicalSrc = applyTestScaffold + `
+func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return &ApplyResult{}, nil
+}
+`
+
+func TestAssertApplyDelegatesToHelper_Canonical_NoDiagnostic(t *testing.T) {
+	diags := runAnalyzerOnSource(t, applyCanonicalSrc, AssertApplyDelegatesToHelper)
+	if len(diags) != 0 {
+		t.Errorf("canonical Apply should produce no diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+func TestAssertApplyDelegatesToHelper_NonCanonical_Diagnoses(t *testing.T) {
+	diags := runAnalyzerOnSource(t, applyNonCanonicalSrc, AssertApplyDelegatesToHelper)
+	if len(diags) != 1 {
+		t.Fatalf("non-canonical Apply should produce 1 diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+	if !strings.Contains(diags[0].Message, "wfctlhelpers.ApplyPlan") {
+		t.Errorf("diagnostic should reference wfctlhelpers.ApplyPlan; got %q", diags[0].Message)
+	}
+}
+
+// ============================================================
+// AssertDiffSetsNeedsReplaceForForceNew
+// ============================================================
+
+const diffCanonicalSrc = `package p
+import "context"
+
+type ResourceSpec struct{}
+type ResourceOutput struct{}
+type FieldChange struct {
+	ForceNew bool
+}
+type DiffResult struct {
+	NeedsReplace bool
+	Changes      []FieldChange
+}
+
+type FooDriver struct{}
+
+func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
+	r := &DiffResult{}
+	for _, c := range r.Changes {
+		if c.ForceNew {
+			r.NeedsReplace = true
+		}
+	}
+	return r, nil
+}
+`
+
+const diffMissingNeedsReplaceSrc = `package p
+import "context"
+
+type ResourceSpec struct{}
+type ResourceOutput struct{}
+type FieldChange struct {
+	ForceNew bool
+}
+type DiffResult struct {
+	NeedsReplace bool
+	Changes      []FieldChange
+}
+
+type FooDriver struct{}
+
+func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
+	r := &DiffResult{}
+	for _, c := range r.Changes {
+		if c.ForceNew {
+			// Forgot to set NeedsReplace=true — this is the bug the analyzer flags.
+			_ = c
+		}
+	}
+	return r, nil
+}
+`
+
+func TestAssertDiffSetsNeedsReplaceForForceNew_Canonical_NoDiagnostic(t *testing.T) {
+	diags := runAnalyzerOnSource(t, diffCanonicalSrc, AssertDiffSetsNeedsReplaceForForceNew)
+	if len(diags) != 0 {
+		t.Errorf("canonical Diff should produce no diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+func TestAssertDiffSetsNeedsReplaceForForceNew_MissingAssign_Diagnoses(t *testing.T) {
+	diags := runAnalyzerOnSource(t, diffMissingNeedsReplaceSrc, AssertDiffSetsNeedsReplaceForForceNew)
+	if len(diags) != 1 {
+		t.Fatalf("Diff that references ForceNew but never sets NeedsReplace=true should produce 1 diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+	if !strings.Contains(diags[0].Message, "NeedsReplace") {
+		t.Errorf("diagnostic should reference NeedsReplace; got %q", diags[0].Message)
+	}
+}
+
+// ============================================================
+// AssertProviderImplementsValidatePlan
+// ============================================================
+
+const providerWithValidatePlanSrc = `package p
+import "context"
+
+type ResourceSpec struct{}
+type ResourceState struct{}
+type IaCPlan struct{}
+type ApplyResult struct{}
+type PlanDiagnostic struct{}
+
+type FooProvider struct{}
+
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return nil, nil
+}
+func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return nil, nil
+}
+func (p *FooProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic {
+	return nil
+}
+`
+
+const providerWithoutValidatePlanSrc = `package p
+import "context"
+
+type ResourceSpec struct{}
+type ResourceState struct{}
+type IaCPlan struct{}
+type ApplyResult struct{}
+
+type FooProvider struct{}
+
+func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
+	return nil, nil
+}
+func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
+	return nil, nil
+}
+`
+
+func TestAssertProviderImplementsValidatePlan_HasValidatePlan_NoDiagnostic(t *testing.T) {
+	diags := runAnalyzerOnSource(t, providerWithValidatePlanSrc, AssertProviderImplementsValidatePlan)
+	if len(diags) != 0 {
+		t.Errorf("provider with ValidatePlan should produce no diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+func TestAssertProviderImplementsValidatePlan_Missing_Diagnoses(t *testing.T) {
+	diags := runAnalyzerOnSource(t, providerWithoutValidatePlanSrc, AssertProviderImplementsValidatePlan)
+	if len(diags) != 1 {
+		t.Fatalf("provider without ValidatePlan should produce 1 diagnostic; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+	if !strings.Contains(diags[0].Message, "ValidatePlan") {
+		t.Errorf("diagnostic should reference ValidatePlan; got %q", diags[0].Message)
+	}
+}
+
+// ============================================================
+// runLint dispatcher (integration)
+// ============================================================
+
+// writeTempPackage writes a single-package set of files to a tempdir
+// and returns the dir.
+func writeTempPackage(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		full := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(full), err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+// runLintInDir invokes runLint against dir with the given Options and
+// returns stdout, stderr, exit code.
+func runLintInDir(t *testing.T, dir string, opts Options) (string, string, int) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := runLint([]string{dir}, &opts, &stdout, &stderr)
+	return stdout.String(), stderr.String(), code
+}
+
+func TestRunLint_NoArgs_Exits2(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runLint(nil, &Options{DryRun: true}, &stdout, &stderr)
+	if code != 2 {
+		t.Errorf("exit = %d, want 2", code)
+	}
+}
+
+func TestRunLint_CanonicalSource_NoFindings(t *testing.T) {
+	dir := writeTempPackage(t, map[string]string{
+		"provider.go": planCanonicalSrc,
+	})
+	stdout, _, code := runLintInDir(t, dir, Options{DryRun: true})
+	if code != 0 {
+		t.Errorf("exit = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "AssertPlanDelegatesToHelper") {
+		t.Errorf("canonical source should not be flagged; stdout:\n%s", stdout)
+	}
+}
+
+func TestRunLint_NonCanonical_FindingsPresent(t *testing.T) {
+	dir := writeTempPackage(t, map[string]string{
+		"provider.go": planNonCanonicalSrc,
+	})
+	stdout, _, code := runLintInDir(t, dir, Options{DryRun: true})
+	if code != 1 {
+		t.Errorf("exit = %d, want 1 (findings present); stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "AssertPlanDelegatesToHelper") {
+		t.Errorf("expected analyzer name in report; stdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "provider.go") {
+		t.Errorf("expected file path in report; stdout:\n%s", stdout)
+	}
+}
+
+func TestRunLint_SkipMarker_SurfacedInReport(t *testing.T) {
+	dir := writeTempPackage(t, map[string]string{
+		"provider.go": planSkippedSrc,
+	})
+	stdout, _, code := runLintInDir(t, dir, Options{DryRun: true})
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 (skipped, no findings); stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "Skipped") {
+		t.Errorf("report must surface skipped sites; stdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "provider.go") {
+		t.Errorf("skipped section must include file path; stdout:\n%s", stdout)
+	}
+}
+
+// TestRunLint_DoesNotMutateFilesEvenWithFixFlag pins the contract from
+// carry-forward #2: lint is read-only by definition. Even with -fix and
+// -dry-run=false, file mtimes and contents must be unchanged across the
+// run. (Fix=true cannot reach this code path through the dispatcher
+// because run() in main.go normalizes the gate, but the in-mode contract
+// is also pinned for defense-in-depth.)
+func TestRunLint_DoesNotMutateFilesEvenWithFixFlag(t *testing.T) {
+	dir := writeTempPackage(t, map[string]string{
+		"provider.go": planNonCanonicalSrc,
+	})
+	target := filepath.Join(dir, "provider.go")
+
+	beforeStat, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+	beforeContent, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+
+	// Hostile flags: simulate a caller bypassing the dispatcher's gate.
+	_, _, _ = runLintInDir(t, dir, Options{Fix: true, DryRun: false})
+
+	afterStat, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	afterContent, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+
+	if !beforeStat.ModTime().Equal(afterStat.ModTime()) {
+		t.Errorf("mtime changed: before=%v, after=%v — lint must never mutate", beforeStat.ModTime(), afterStat.ModTime())
+	}
+	if !bytes.Equal(beforeContent, afterContent) {
+		t.Errorf("content changed — lint must never mutate")
+	}
+}
+
+func TestRunLint_FixFlag_WarnsItHasNoEffect(t *testing.T) {
+	dir := writeTempPackage(t, map[string]string{
+		"provider.go": planCanonicalSrc,
+	})
+	_, stderr, _ := runLintInDir(t, dir, Options{Fix: true, DryRun: false})
+	if !strings.Contains(stderr, "no effect") {
+		t.Errorf("stderr should warn that -fix has no effect on lint; got:\n%s", stderr)
+	}
+}
+
+func TestRunLint_AnalyzerCount_FourRegistered(t *testing.T) {
+	if len(lintAnalyzers) != 4 {
+		t.Errorf("plan §T8.2 mandates 4 analyzers; got %d", len(lintAnalyzers))
+	}
+	want := []string{
+		"AssertPlanDelegatesToHelper",
+		"AssertApplyDelegatesToHelper",
+		"AssertDiffSetsNeedsReplaceForForceNew",
+		"AssertProviderImplementsValidatePlan",
+	}
+	got := make(map[string]bool)
+	for _, a := range lintAnalyzers {
+		got[a.Name] = true
+	}
+	for _, name := range want {
+		if !got[name] {
+			t.Errorf("plan-literal analyzer %q is missing from lintAnalyzers", name)
+		}
+	}
+}
+
+func TestRunLint_RegistersIntoModesMap(t *testing.T) {
+	fn, ok := modes["lint"]
+	if !ok {
+		t.Fatalf("lint init() must register runLint into modes map")
+	}
+	if fn == nil {
+		t.Fatalf("modes[\"lint\"] is nil")
+	}
+}
+
+// diagSummary formats a slice of diagnostics for test failure messages.
+func diagSummary(diags []analysis.Diagnostic) string {
+	if len(diags) == 0 {
+		return "  (none)"
+	}
+	var sb strings.Builder
+	for i, d := range diags {
+		fmt.Fprintf(&sb, "  [%d] pos=%d: %s\n", i, d.Pos, d.Message)
+	}
+	return sb.String()
+}

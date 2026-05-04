@@ -140,6 +140,30 @@ func TestRun_FixOptsIntoMutation(t *testing.T) {
 	}
 }
 
+// TestRun_HelpAfterMode_PrintsGlobalUsage pins T8.2 carry-forward #1:
+// `iac-codemod <mode> -h` must produce the same structured output as
+// `iac-codemod -h`. The dispatcher's FlagSet.Usage is overridden to call
+// the global usage() rather than the default per-FlagSet banner so users
+// see the mode catalog regardless of where they ask for help.
+func TestRun_HelpAfterMode_PrintsGlobalUsage(t *testing.T) {
+	for _, mode := range []string{"refactor-plan", "refactor-apply", "add-validate-plan", "lint"} {
+		t.Run(mode, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run([]string{mode, "-h"}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
+			}
+			combined := stdout.String() + stderr.String()
+			// Hallmarks of the global usage: mode catalog listed.
+			for _, modeName := range []string{"refactor-plan", "refactor-apply", "add-validate-plan", "lint"} {
+				if !strings.Contains(combined, modeName) {
+					t.Errorf("global usage should list %q; got:\n%s", modeName, combined)
+				}
+			}
+		})
+	}
+}
+
 // TestRun_DryRunFalseWithoutFix_StillForcesDryRun pins the mutation-gate
 // contract from plan §W-8 line 2347: "-dry-run flag default true; -fix opts
 // into mutation". Fix must be the SINGLE source of truth for "may I

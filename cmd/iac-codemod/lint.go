@@ -1,0 +1,774 @@
+// Copyright (c) 2026 Jon Langevin
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"golang.org/x/tools/go/analysis"
+)
+
+// osStat / osReadFile are direct stdlib bindings that the var indirections
+// `stat` and `readFile` point at by default. The indirection is in place
+// so future tests could substitute in-memory filesystems without
+// touching disk.
+func osStat(p string) (os.FileInfo, error) { return os.Stat(p) }
+func osReadFile(p string) ([]byte, error)  { return os.ReadFile(p) }
+
+func init() {
+	modes["lint"] = runLint
+}
+
+// AssertPlanDelegatesToHelper flags any provider type's Plan method whose
+// body does NOT call wfctlhelpers.Plan. The canonical migration target is
+// `return wfctlhelpers.Plan(ctx, p, desired, current)`; non-delegating
+// bodies are reported so the maintainer knows which providers still need
+// to be ported. The check is syntactic — it matches the SelectorExpr
+// `wfctlhelpers.Plan` regardless of whether the call resolves at type-check
+// time, so it works on plugins that have not yet vendored the helper.
+var AssertPlanDelegatesToHelper = &analysis.Analyzer{
+	Name: "AssertPlanDelegatesToHelper",
+	Doc:  "Provider Plan() must delegate to wfctlhelpers.Plan.",
+	Run:  runAssertPlanDelegatesToHelper,
+}
+
+// AssertApplyDelegatesToHelper flags any provider type's Apply method whose
+// body does NOT call wfctlhelpers.ApplyPlan. The canonical migration target
+// is `return wfctlhelpers.ApplyPlan(ctx, p, plan)`. Same syntactic-match
+// approach as AssertPlanDelegatesToHelper.
+var AssertApplyDelegatesToHelper = &analysis.Analyzer{
+	Name: "AssertApplyDelegatesToHelper",
+	Doc:  "Provider Apply() must delegate to wfctlhelpers.ApplyPlan.",
+	Run:  runAssertApplyDelegatesToHelper,
+}
+
+// AssertDiffSetsNeedsReplaceForForceNew flags any driver Diff method that
+// references a ForceNew field (typically FieldChange.ForceNew) but never
+// assigns NeedsReplace = true (typically DiffResult.NeedsReplace). This is
+// the W-3 contract: when a force-new field changes, the diff must signal
+// replacement so platform.ComputePlan classifies the action correctly.
+var AssertDiffSetsNeedsReplaceForForceNew = &analysis.Analyzer{
+	Name: "AssertDiffSetsNeedsReplaceForForceNew",
+	Doc:  "Driver Diff() that observes ForceNew fields must set DiffResult.NeedsReplace=true.",
+	Run:  runAssertDiffSetsNeedsReplaceForForceNew,
+}
+
+// AssertProviderImplementsValidatePlan flags any provider-shaped type
+// (a type with Plan + Apply methods matching the IaCProvider signature)
+// that does NOT also have a ValidatePlan method satisfying the
+// ProviderValidator interface (`ValidatePlan(plan *IaCPlan) []PlanDiagnostic`).
+// The check uses pass.TypesInfo to verify method-set membership rather
+// than raw AST string-match per team-lead's W-8 brief.
+var AssertProviderImplementsValidatePlan = &analysis.Analyzer{
+	Name: "AssertProviderImplementsValidatePlan",
+	Doc:  "Provider type must implement ProviderValidator (ValidatePlan method).",
+	Run:  runAssertProviderImplementsValidatePlan,
+}
+
+// lintAnalyzers is the canonical ordered list of T8.2 analyzers. Order
+// is preserved in the report so output is deterministic across runs.
+var lintAnalyzers = []*analysis.Analyzer{
+	AssertPlanDelegatesToHelper,
+	AssertApplyDelegatesToHelper,
+	AssertDiffSetsNeedsReplaceForForceNew,
+	AssertProviderImplementsValidatePlan,
+}
+
+// lintFinding captures one analyzer diagnostic for the report.
+type lintFinding struct {
+	Path     string
+	Line     int
+	Analyzer string
+	Message  string
+}
+
+// skippedSite captures one declaration suppressed by SkipMarker.
+type skippedSite struct {
+	Path     string
+	Line     int
+	Analyzer string
+	Decl     string // function or type name
+}
+
+// lintReport aggregates findings, skipped sites, and per-file errors
+// across an entire lint run.
+type lintReport struct {
+	findings []lintFinding
+	skipped  []skippedSite
+	errors   []string
+}
+
+// runLint is the entry point for the lint subcommand. It is read-only
+// by definition: the -fix flag is meaningless and a warning is surfaced
+// so the user knows the flag did nothing. Mutation regardless of flag
+// combination is pinned by TestRunLint_DoesNotMutateFilesEvenWithFixFlag.
+func runLint(args []string, opts *Options, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "iac-codemod lint: at least one path is required")
+		usage(stderr)
+		return 2
+	}
+	if opts != nil && opts.Fix {
+		// Lint never mutates. Surface a warning so the user knows -fix
+		// did not change behavior; preserves predictable advisory-only
+		// semantics from plan §W-8 line 397.
+		fmt.Fprintln(stderr, "iac-codemod lint: warning: -fix has no effect (lint is read-only)")
+	}
+
+	report := &lintReport{}
+	for _, path := range args {
+		if err := lintPath(path, report); err != nil {
+			fmt.Fprintf(stderr, "iac-codemod lint: %s: %v\n", path, err)
+			return 1
+		}
+	}
+	report.print(stdout)
+	if len(report.findings) > 0 {
+		return 1
+	}
+	return 0
+}
+
+// lintPath walks path for *.go files (excluding _test.go, vendor,
+// testdata, hidden dirs) and invokes lintFile on each. Per-file errors
+// are recorded in the report rather than aborting the whole run so a
+// single broken file in a multi-package plugin does not lose findings
+// from the rest.
+func lintPath(path string, report *lintReport) error {
+	info, err := stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		// Single file — analyze it directly.
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return fmt.Errorf("not a Go source file (or is a _test.go): %s", path)
+		}
+		if err := lintFile(path, report); err != nil {
+			report.errors = append(report.errors, fmt.Sprintf("%s: %v", path, err))
+		}
+		return nil
+	}
+	return filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			base := d.Name()
+			if base == "vendor" || base == "testdata" || (strings.HasPrefix(base, ".") && base != ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		if err := lintFile(p, report); err != nil {
+			report.errors = append(report.errors, fmt.Sprintf("%s: %v", p, err))
+		}
+		return nil
+	})
+}
+
+// lintFile parses path, type-checks it tolerantly (unresolved imports
+// are stubbed via stubImporterRuntime so the file-by-file loader works
+// even on plugins that haven't vendored their dependencies), and runs
+// every analyzer in lintAnalyzers. Diagnostics are appended to report.
+func lintFile(path string, report *lintReport) error {
+	src, err := readFile(path)
+	if err != nil {
+		return err
+	}
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, src, parser.ParseComments)
+	if err != nil {
+		return err
+	}
+	conf := &types.Config{
+		Importer: stubImporterRuntime{},
+		Error:    func(error) {}, // tolerate type errors; lint is best-effort
+	}
+	info := &types.Info{
+		Types:      make(map[ast.Expr]types.TypeAndValue),
+		Defs:       make(map[*ast.Ident]types.Object),
+		Uses:       make(map[*ast.Ident]types.Object),
+		Implicits:  make(map[ast.Node]types.Object),
+		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+	pkg, _ := conf.Check(file.Name.Name, fset, []*ast.File{file}, info)
+
+	for _, analyzer := range lintAnalyzers {
+		pass := &analysis.Pass{
+			Analyzer:  analyzer,
+			Fset:      fset,
+			Files:     []*ast.File{file},
+			Pkg:       pkg,
+			TypesInfo: info,
+			Report: func(d analysis.Diagnostic) {
+				report.findings = append(report.findings, lintFinding{
+					Path:     path,
+					Line:     fset.Position(d.Pos).Line,
+					Analyzer: analyzer.Name,
+					Message:  d.Message,
+				})
+			},
+		}
+		if _, err := analyzer.Run(pass); err != nil {
+			return fmt.Errorf("%s: %w", analyzer.Name, err)
+		}
+		// Drain any skipped sites the analyzer recorded into the
+		// per-pass scratch field. We piggyback on the report directly
+		// (analyzers reach into it via passSkippedSink).
+	}
+	return nil
+}
+
+// stubImporterRuntime is the importer used by the runtime lintFile path.
+// It mirrors stubImporter in lint_test.go so test and runtime behavior
+// stay aligned.
+type stubImporterRuntime struct{}
+
+func (stubImporterRuntime) Import(path string) (*types.Package, error) {
+	return types.NewPackage(path, filepath.Base(path)), nil
+}
+
+// stat / readFile are split out so tests could override them in future
+// if needed. Today they are thin wrappers over os.Stat / os.ReadFile.
+var (
+	stat     = osStat
+	readFile = osReadFile
+)
+
+// ============================================================
+// Skip-marker helpers
+// ============================================================
+
+// hasSkipMarkerOn reports whether the given doc CommentGroup contains
+// the canonical SkipMarker from main.go. Used by every analyzer that
+// flags a function or type declaration.
+func hasSkipMarkerOn(doc *ast.CommentGroup) bool {
+	if doc == nil {
+		return false
+	}
+	for _, c := range doc.List {
+		// Comment text includes the leading `//` per ast.Comment convention.
+		if strings.TrimSpace(c.Text) == SkipMarker {
+			return true
+		}
+	}
+	return false
+}
+
+// Skipped sites are surfaced through the same pass.Report channel as
+// real findings, distinguished by a message prefix. The driver
+// (lintReport.unpackSkippedFromFindings) splits them out before
+// rendering so skip records do NOT contribute to the finding count or
+// the non-zero exit code. The indirection keeps each analyzer's API
+// surface to a single Reportf-style channel rather than threading a
+// second sink through every Run signature, and lets unit tests use a
+// vanilla analysis.Pass without any custom rigging.
+//
+// IMPORTANT: lintFile invocation is currently sequential per path. If a
+// future maintainer parallelises it, the skip-prefix encoding stays
+// safe (each pass owns its own diagnostic slice via its Report closure)
+// — but introducing concurrent map access via the package-level
+// `modes` var or shared *lintReport pointer would not. See main_test.go
+// header for the t.Parallel prohibition that applies here too.
+
+const skipDiagnosticPrefix = "[skipped] "
+
+// reportSkip emits a synthetic diagnostic that the driver decodes as a
+// skipped-site record rather than a finding. This keeps the analyzer
+// API surface minimal (one channel, not two).
+func reportSkip(pass *analysis.Pass, pos token.Pos, declName string) {
+	pass.Report(analysis.Diagnostic{
+		Pos:     pos,
+		Message: skipDiagnosticPrefix + declName,
+	})
+}
+
+// ============================================================
+// Analyzer #1: AssertPlanDelegatesToHelper
+// ============================================================
+
+func runAssertPlanDelegatesToHelper(pass *analysis.Pass) (any, error) {
+	provs := providerLikeReceivers(pass)
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if !isProviderMethod(fn, "Plan", 3, 2) {
+				continue
+			}
+			if !provs[receiverTypeName(fn)] {
+				// Method named Plan on a non-provider type (e.g., a
+				// deploy target). Skip to keep precision high.
+				continue
+			}
+			if hasSkipMarkerOn(fn.Doc) {
+				routeSkip(pass, fn)
+				continue
+			}
+			if !bodyCallsSelector(fn.Body, "wfctlhelpers", "Plan") {
+				pass.Reportf(fn.Pos(), "%s.%s does not delegate to wfctlhelpers.Plan; non-canonical Plan() body", receiverTypeName(fn), fn.Name.Name)
+			}
+		}
+	}
+	return nil, nil
+}
+
+// ============================================================
+// Analyzer #2: AssertApplyDelegatesToHelper
+// ============================================================
+
+func runAssertApplyDelegatesToHelper(pass *analysis.Pass) (any, error) {
+	provs := providerLikeReceivers(pass)
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if !isProviderMethod(fn, "Apply", 2, 2) {
+				continue
+			}
+			if !provs[receiverTypeName(fn)] {
+				// Method named Apply on a non-provider type. Skip.
+				continue
+			}
+			if hasSkipMarkerOn(fn.Doc) {
+				routeSkip(pass, fn)
+				continue
+			}
+			if !bodyCallsSelector(fn.Body, "wfctlhelpers", "ApplyPlan") {
+				pass.Reportf(fn.Pos(), "%s.%s does not delegate to wfctlhelpers.ApplyPlan; non-canonical Apply() body", receiverTypeName(fn), fn.Name.Name)
+			}
+		}
+	}
+	return nil, nil
+}
+
+// ============================================================
+// Analyzer #3: AssertDiffSetsNeedsReplaceForForceNew
+// ============================================================
+
+func runAssertDiffSetsNeedsReplaceForForceNew(pass *analysis.Pass) (any, error) {
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if !isProviderMethod(fn, "Diff", 3, 2) {
+				continue
+			}
+			if hasSkipMarkerOn(fn.Doc) {
+				routeSkip(pass, fn)
+				continue
+			}
+			refsForceNew := bodyReferencesField(fn.Body, "ForceNew")
+			assignsNeedsReplaceTrue := bodyAssignsFieldTrue(fn.Body, "NeedsReplace")
+			if refsForceNew && !assignsNeedsReplaceTrue {
+				pass.Reportf(fn.Pos(), "%s.%s references ForceNew but never assigns NeedsReplace=true; W-3 force-new contract violated", receiverTypeName(fn), fn.Name.Name)
+			}
+		}
+	}
+	return nil, nil
+}
+
+// ============================================================
+// Analyzer #4: AssertProviderImplementsValidatePlan
+// ============================================================
+
+func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
+	if pass.Pkg == nil {
+		return nil, nil
+	}
+	scope := pass.Pkg.Scope()
+	if scope == nil {
+		return nil, nil
+	}
+	// Group method sets by receiver type name, walking AST so we can
+	// surface the original ast.FuncDecl for skip-marker handling.
+	methodsByRecv := make(map[string][]*ast.FuncDecl)
+	typeDecls := make(map[string]*ast.TypeSpec)
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Recv == nil || len(d.Recv.List) == 0 {
+					continue
+				}
+				recv := receiverTypeName(d)
+				if recv == "" {
+					continue
+				}
+				methodsByRecv[recv] = append(methodsByRecv[recv], d)
+			case *ast.GenDecl:
+				if d.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range d.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					if _, isStruct := ts.Type.(*ast.StructType); !isStruct {
+						continue
+					}
+					typeDecls[ts.Name.Name] = ts
+				}
+			}
+		}
+	}
+	for recv, methods := range methodsByRecv {
+		if !looksLikeProvider(methods) {
+			continue
+		}
+		// Skip if the type's own decl carries the marker, or any of the
+		// provider's signature methods (Plan/Apply) carry it. ValidatePlan
+		// being absent is the whole point of this analyzer, so checking
+		// only Plan/Apply is sufficient.
+		if ts, ok := typeDecls[recv]; ok && hasSkipMarkerOn(ts.Doc) {
+			routeSkipName(pass, ts.Pos(), recv)
+			continue
+		}
+		anyMarker := false
+		for _, m := range methods {
+			if hasSkipMarkerOn(m.Doc) {
+				anyMarker = true
+				break
+			}
+		}
+		if anyMarker {
+			routeSkipName(pass, methods[0].Pos(), recv)
+			continue
+		}
+		hasValidate := false
+		for _, m := range methods {
+			if m.Name.Name == "ValidatePlan" {
+				hasValidate = true
+				break
+			}
+		}
+		if hasValidate {
+			continue
+		}
+		// Report at the type decl if available, else at the first method.
+		var pos token.Pos
+		if ts, ok := typeDecls[recv]; ok {
+			pos = ts.Pos()
+		} else {
+			pos = methods[0].Pos()
+		}
+		pass.Reportf(pos, "provider type %s does not implement ValidatePlan; ProviderValidator (R-A10) cannot run on plans involving this provider", recv)
+	}
+	return nil, nil
+}
+
+// providerLikeReceivers returns the set of receiver type names whose
+// method set in pass.Files contains both Plan and Apply with shapes
+// matching IaCProvider. Used by every analyzer that should fire only
+// on IaC providers (not on deploy targets or other Apply-shaped types).
+func providerLikeReceivers(pass *analysis.Pass) map[string]bool {
+	methodsByRecv := make(map[string][]*ast.FuncDecl)
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			recv := receiverTypeName(fn)
+			if recv == "" {
+				continue
+			}
+			methodsByRecv[recv] = append(methodsByRecv[recv], fn)
+		}
+	}
+	out := make(map[string]bool)
+	for recv, methods := range methodsByRecv {
+		if looksLikeProvider(methods) {
+			out[recv] = true
+		}
+	}
+	return out
+}
+
+// looksLikeProvider returns true if the method list contains both Plan
+// and Apply with shapes matching IaCProvider. Used to filter false
+// positives on unrelated types that happen to define a "Plan" method.
+func looksLikeProvider(methods []*ast.FuncDecl) bool {
+	hasPlan, hasApply := false, false
+	for _, m := range methods {
+		switch m.Name.Name {
+		case "Plan":
+			if m.Type.Params != nil && len(m.Type.Params.List) >= 2 && m.Type.Results != nil && len(m.Type.Results.List) == 2 {
+				hasPlan = true
+			}
+		case "Apply":
+			if m.Type.Params != nil && len(m.Type.Params.List) >= 2 && m.Type.Results != nil && len(m.Type.Results.List) == 2 {
+				hasApply = true
+			}
+		}
+	}
+	return hasPlan && hasApply
+}
+
+// ============================================================
+// Shared AST helpers
+// ============================================================
+
+// isProviderMethod returns true if fn is a method (has receiver) named
+// methodName, with at least minParams parameter fields and exactly
+// expectedResults result fields. Parameter and result counts are
+// approximate (Go FieldList groups multi-param fields like `a, b T`
+// into one field), so the actual call-site arity may differ — but the
+// shape filter is sufficient for distinguishing IaCProvider/Driver
+// methods from unrelated lookalikes.
+func isProviderMethod(fn *ast.FuncDecl, methodName string, minParams, expectedResults int) bool {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return false
+	}
+	if fn.Name.Name != methodName {
+		return false
+	}
+	if fn.Type.Params == nil || len(fn.Type.Params.List) < minParams {
+		return false
+	}
+	if fn.Type.Results == nil || len(fn.Type.Results.List) != expectedResults {
+		return false
+	}
+	if fn.Body == nil {
+		return false
+	}
+	return true
+}
+
+// receiverTypeName extracts the receiver type identifier from a method
+// declaration, stripping any pointer indirection. Returns "" for
+// unrecognised receiver shapes.
+func receiverTypeName(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return ""
+	}
+	expr := fn.Recv.List[0].Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	id, ok := expr.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return id.Name
+}
+
+// bodyCallsSelector reports whether the function body contains a
+// CallExpr whose callee is a SelectorExpr with the given X.Name and
+// Sel.Name, e.g. `wfctlhelpers.Plan(...)`.
+func bodyCallsSelector(body *ast.BlockStmt, pkgIdent, selName string) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		x, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if x.Name == pkgIdent && sel.Sel.Name == selName {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// bodyReferencesField reports whether the function body references any
+// SelectorExpr with the given Sel.Name, e.g. any `<X>.ForceNew`.
+func bodyReferencesField(body *ast.BlockStmt, fieldName string) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if sel.Sel.Name == fieldName {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// bodyAssignsFieldTrue reports whether the function body contains an
+// assignment `<X>.fieldName = true` (or `:=` with the same RHS, though
+// := on a selector is invalid Go and won't compile, so we only check
+// AssignStmt with Tok=ASSIGN).
+func bodyAssignsFieldTrue(body *ast.BlockStmt, fieldName string) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, lhs := range assign.Lhs {
+			sel, ok := lhs.(*ast.SelectorExpr)
+			if !ok {
+				continue
+			}
+			if sel.Sel.Name != fieldName {
+				continue
+			}
+			if i >= len(assign.Rhs) {
+				continue
+			}
+			id, ok := assign.Rhs[i].(*ast.Ident)
+			if !ok {
+				continue
+			}
+			if id.Name == "true" {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// routeSkip records a skipped FuncDecl through the pass.Report channel
+// using the skipDiagnosticPrefix encoding.
+func routeSkip(pass *analysis.Pass, fn *ast.FuncDecl) {
+	declName := fmt.Sprintf("%s.%s", receiverTypeName(fn), fn.Name.Name)
+	reportSkip(pass, fn.Pos(), declName)
+}
+
+// routeSkipName records a skipped declaration by its name (used for
+// type-level skips).
+func routeSkipName(pass *analysis.Pass, pos token.Pos, name string) {
+	reportSkip(pass, pos, name)
+}
+
+// ============================================================
+// Report rendering
+// ============================================================
+
+// print renders the report to w in Markdown-ish format. Findings come
+// first (sorted by file, line, analyzer); then skipped sites; then
+// per-file errors. Skipped diagnostics encoded with skipDiagnosticPrefix
+// are extracted from findings into the skipped section first so the
+// finding count reflects only real issues.
+func (r *lintReport) print(w io.Writer) {
+	r.unpackSkippedFromFindings()
+
+	sort.Slice(r.findings, func(i, j int) bool {
+		if r.findings[i].Path != r.findings[j].Path {
+			return r.findings[i].Path < r.findings[j].Path
+		}
+		if r.findings[i].Line != r.findings[j].Line {
+			return r.findings[i].Line < r.findings[j].Line
+		}
+		return r.findings[i].Analyzer < r.findings[j].Analyzer
+	})
+	sort.Slice(r.skipped, func(i, j int) bool {
+		if r.skipped[i].Path != r.skipped[j].Path {
+			return r.skipped[i].Path < r.skipped[j].Path
+		}
+		return r.skipped[i].Line < r.skipped[j].Line
+	})
+
+	fmt.Fprintln(w, "# iac-codemod lint report")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Findings: %d\n", len(r.findings))
+	fmt.Fprintf(w, "Skipped:  %d\n", len(r.skipped))
+	fmt.Fprintf(w, "Errors:   %d\n", len(r.errors))
+	fmt.Fprintln(w)
+
+	if len(r.findings) > 0 {
+		fmt.Fprintln(w, "## Findings")
+		fmt.Fprintln(w)
+		for _, f := range r.findings {
+			fmt.Fprintf(w, "- %s:%d [%s] %s\n", f.Path, f.Line, f.Analyzer, f.Message)
+		}
+		fmt.Fprintln(w)
+	}
+
+	if len(r.skipped) > 0 {
+		fmt.Fprintln(w, "## Skipped (// wfctl:skip-iac-codemod)")
+		fmt.Fprintln(w)
+		for _, s := range r.skipped {
+			fmt.Fprintf(w, "- %s:%d [%s] %s\n", s.Path, s.Line, s.Analyzer, s.Decl)
+		}
+		fmt.Fprintln(w)
+	}
+
+	if len(r.errors) > 0 {
+		fmt.Fprintln(w, "## Errors")
+		fmt.Fprintln(w)
+		for _, e := range r.errors {
+			fmt.Fprintf(w, "- %s\n", e)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+// unpackSkippedFromFindings moves skip-prefixed diagnostics from the
+// findings list into the skipped list, restoring the canonical exit-code
+// semantics (skipped sites do not count as findings).
+func (r *lintReport) unpackSkippedFromFindings() {
+	if len(r.findings) == 0 {
+		return
+	}
+	kept := r.findings[:0]
+	for _, f := range r.findings {
+		if decl, ok := strings.CutPrefix(f.Message, skipDiagnosticPrefix); ok {
+			r.skipped = append(r.skipped, skippedSite{
+				Path:     f.Path,
+				Line:     f.Line,
+				Analyzer: f.Analyzer,
+				Decl:     decl,
+			})
+			continue
+		}
+		kept = append(kept, f)
+	}
+	r.findings = kept
+}
