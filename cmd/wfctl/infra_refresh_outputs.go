@@ -37,7 +37,10 @@ func runInfraRefreshOutputs(args []string) error {
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module overrides)")
 	fs.StringVar(&envName, "e", "", "Environment name (short for --env)")
-	fs.IntVar(&concurrency, "concurrency", 0, "Maximum concurrent Read calls (default 8)")
+	// Default mirrors refreshoutputs.defaultConcurrency. Refresh still treats
+	// values < 1 as "use default" so callers passing an explicit 0 (or
+	// negative) keep working; this default just makes `--help` honest.
+	fs.IntVar(&concurrency, "concurrency", 8, "Maximum concurrent Read calls")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -227,10 +230,14 @@ func refreshOneProviderGroup(
 	}
 	for j, idx := range idxs {
 		fresh := refreshed[j]
-		// reflect.DeepEqual handles non-comparable nested values
-		// (slices, maps, structs) that the Outputs maps can carry from
-		// real cloud APIs. A `==` compare on `any` panics for those.
-		if reflect.DeepEqual(states[idx].Outputs, fresh.Outputs) {
+		// refreshoutputs.Refresh has already done the deep-equality check:
+		// it preserves the original Outputs map (same header) when nothing
+		// changed and only allocates a fresh map when fields differ. A
+		// pointer-equality check on the map header is therefore sufficient
+		// — and avoids re-walking nested slices/maps that real cloud
+		// outputs carry. nil ↔ nil compares equal (both .Pointer() == 0)
+		// which is the correct unchanged-case answer.
+		if reflect.ValueOf(states[idx].Outputs).Pointer() == reflect.ValueOf(fresh.Outputs).Pointer() {
 			continue
 		}
 		states[idx] = fresh

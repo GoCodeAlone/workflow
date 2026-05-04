@@ -80,7 +80,7 @@ func Refresh(ctx context.Context, p interfaces.IaCProvider, states []interfaces.
 func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.ResourceState, src interfaces.ResourceState) error {
 	d, err := p.ResourceDriver(src.Type)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not resolve driver for %q (%s): %w", src.Name, src.Type, err)
 	}
 	ref := interfaces.ResourceRef{Name: src.Name, Type: src.Type, ProviderID: src.ProviderID}
 	live, err := d.Read(ctx, ref)
