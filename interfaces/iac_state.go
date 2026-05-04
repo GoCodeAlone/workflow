@@ -80,7 +80,9 @@ type PlanAction struct {
 	// ResolvedConfigHash is the SHA-256 of POST-substitution Resource.Config,
 	// computed via platform.ConfigHash. Encoded as lower-case hex (no
 	// "sha256:" prefix); empty string when the config map is empty
-	// (platform.ConfigHash short-circuit).
+	// (platform.ConfigHash short-circuit). The field uses `omitempty`, so the
+	// empty-string case is ABSENT from plan.json — consumers should treat
+	// "key missing" and "value == empty string" as the same condition.
 	//
 	// Currently populated by ComputePlan and persisted in plan.json so apply
 	// has the per-action hash available; the apply-time consumer that surfaces
