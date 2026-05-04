@@ -13,6 +13,11 @@ import (
 // configs) and must not land in version control by default.
 func TestPlan_WarnsOnMissingGitignoreEntry(t *testing.T) {
 	repo := t.TempDir()
+	// Mark repo as a git worktree so warnIfPlanNotGitignored activates;
+	// .git can be a directory or file (git-worktree pointer) — empty dir is fine.
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o700); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("# empty\n"), 0o600); err != nil {
 		t.Fatalf("write .gitignore: %v", err)
 	}
@@ -43,6 +48,9 @@ modules:
 // (no stderr warning) when the output file is already covered by .gitignore.
 func TestPlan_NoWarningWhenGitignored(t *testing.T) {
 	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o700); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("plan.json\n"), 0o600); err != nil {
 		t.Fatalf("write .gitignore: %v", err)
 	}
@@ -69,10 +77,15 @@ modules:
 	}
 }
 
-// TestPlan_NoGitignoreFile_NoWarning verifies the warning is silent when no
-// .gitignore exists in the repo (no git context — likely not a tracked repo).
+// TestPlan_NoGitignoreFile_NoWarning verifies the warning is silent when
+// the repo IS a git worktree but contains no .gitignore yet (a fresh repo
+// is more likely to have an unrelated unconfigured tree than a hostile
+// "leak my plan" intent).
 func TestPlan_NoGitignoreFile_NoWarning(t *testing.T) {
 	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o700); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
 	cfgPath := filepath.Join(repo, "infra.yaml")
 	if err := os.WriteFile(cfgPath, []byte(`
 modules:
@@ -93,6 +106,35 @@ modules:
 	}
 	if strings.Contains(stderr, "gitignore") {
 		t.Errorf("did not expect gitignore warning without .gitignore file, got: %q", stderr)
+	}
+}
+
+// TestPlan_NoGitWorktree_NoWarning verifies that runInfraPlan stays silent
+// when the plan output path is not inside any git worktree — operators
+// running plan in /tmp or other untracked locations should not be nagged
+// about an unrelated parent .gitignore that happens to live above them.
+func TestPlan_NoGitWorktree_NoWarning(t *testing.T) {
+	repo := t.TempDir() // intentionally NO .git marker
+	cfgPath := filepath.Join(repo, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: vpc
+    type: infra.vpc
+    config:
+      region: nyc1
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	planFile := filepath.Join(repo, "plan.json")
+
+	stderr, fnErr := captureStderr(t, func() error {
+		return runInfraPlan([]string{"--config", cfgPath, "--output", planFile})
+	})
+	if fnErr != nil {
+		t.Fatalf("runInfraPlan: %v", fnErr)
+	}
+	if strings.Contains(stderr, "gitignore") {
+		t.Errorf("did not expect gitignore warning outside any git worktree, got: %q", stderr)
 	}
 }
 
