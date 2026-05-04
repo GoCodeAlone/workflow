@@ -79,7 +79,7 @@ jobs:
           # updating docs/conformance-runbook.md § "Budget approval"
           # AND landing a follow-up PR that bumps the threshold here.
           if awk "BEGIN { exit !(${SPEND} > 25) }"; then
-            echo "::error title=Budget exceeded::Conformance month-to-date $${SPEND} > $25 cap; aborting before any cloud provisioning"
+            echo "::error title=Budget exceeded::Conformance month-to-date \$${SPEND} > \$25 cap; aborting before any cloud provisioning"
             exit 1
           fi
 
@@ -87,7 +87,7 @@ jobs:
           # an auto-dedup issue via the T7.14 helper. Dedup logic in
           # scripts/file-or-comment-leak-issue.sh.
           if awk "BEGIN { exit !(${SPEND} > 15) }"; then
-            echo "::warning title=Budget approaching cap::Conformance month-to-date $${SPEND} > $15 soft-alert (60% of $25 cap)"
+            echo "::warning title=Budget approaching cap::Conformance month-to-date \$${SPEND} > \$15 soft-alert (60% of \$25 cap)"
             if [[ -x .github/workflows/scripts/file-or-comment-leak-issue.sh ]]; then
               .github/workflows/scripts/file-or-comment-leak-issue.sh \
                 "${SPEND}" "Spend approaching cap"
