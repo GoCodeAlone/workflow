@@ -70,8 +70,11 @@ type PlanAction struct {
 	Current  *ResourceState `json:"current,omitempty"`
 	Changes  []FieldChange  `json:"changes,omitempty"`
 
-	// ResolvedConfigHash is the SHA-256 of POST-substitution Resource.Config.
-	// Apply re-computes per-action and surfaces per-resource diagnostic on mismatch.
+	// ResolvedConfigHash is the SHA-256 of POST-substitution Resource.Config,
+	// computed via platform.ConfigHash. Encoded as lower-case hex (no
+	// "sha256:" prefix); empty string when the config map is empty
+	// (platform.ConfigHash short-circuit). Apply re-computes per-action and
+	// surfaces per-resource diagnostic on mismatch.
 	ResolvedConfigHash string `json:"resolved_config_hash,omitempty"`
 }
 
