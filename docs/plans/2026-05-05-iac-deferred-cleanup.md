@@ -860,7 +860,7 @@ git commit -m "ci(conformance): use wfctl infra cleanup --tag in smoke gate (wor
 
 (Same orchestration shape as Task 1.2.) PR title: `feat(wfctl): infra cleanup --tag subcommand + opt-in Enumerator interface (workflow#536)`. Body: cite #536, design rev3, note opt-in semantics + visible-skip behavior + future plugin-impl roadmap.
 
-**Rollback:** revert all commits on this branch (subcommand registration in main.go, infra_cleanup.go, conformance-smoke.yml edit, WFCTL.md, runbook update, Enumerator interface). The leak-scrubber hourly job continues to clean orphans. **No plugin-stub revert required** because Enumerator is opt-in. DO plugin's Enumerator impl is a separate PR (PR 6 Task 6.3); if PR 4 is reverted, DO plugin's impl simply doesn't get used (no compile break).
+**Rollback:** revert all commits on this branch (subcommand registration in main.go, infra_cleanup.go, conformance-smoke.yml edit, WFCTL.md, runbook update, Enumerator interface). The leak-scrubber hourly job continues to clean orphans. **No plugin-stub revert required** because Enumerator is opt-in. DO plugin's Enumerator impl is a separate PR (PR 6b Task 6b.1); if PR 4 is reverted, DO plugin's impl simply doesn't get used (no compile break).
 
 ---
 
