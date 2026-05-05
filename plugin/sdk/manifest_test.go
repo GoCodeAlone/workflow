@@ -1,9 +1,14 @@
 package sdk
 
 import (
+	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
 // TestManifest_IaCProvider_ComputePlanVersion exercises the new
@@ -100,10 +105,12 @@ func TestManifest_RootPermitsAdditionalProperties(t *testing.T) {
 // Fixtures cover the exact key names cited in the issue
 // (`name`, `resourceTypes`, `configSchema`) plus a synthetic key, since
 // the bug surfaced on real `iacProvider` content rather than on
-// arbitrary unknown keys. Each case must produce an error whose chain
-// includes the `additionalProperties` schema rejection — accepting any
-// non-nil error would mask unrelated regressions (e.g. schema
-// compilation failure) as success.
+// arbitrary unknown keys. Each case must produce a `*jsonschema.ValidationError`
+// whose causes tree contains a `*kind.AdditionalProperties` entry naming
+// the offending keys — asserting against the structured ErrorKind
+// rather than against English error wording so the test does not break
+// when the library localises or rewords its messages (Copilot review on
+// workflow#553, commit e0ae98b).
 //
 // SHAPE: assertive regression guard. The plan rev3 §I-5 alt-shape
 // originally specified `t.Skip` because the bug was assumed live on
@@ -112,61 +119,96 @@ func TestManifest_RootPermitsAdditionalProperties(t *testing.T) {
 // shape is strictly stronger — any future regression fails CI loudly
 // with a clear pointer to workflow#540.
 func TestManifest_IaCProvider_AdditionalPropertiesFalse_IsEnforced(t *testing.T) {
-	cases := map[string]string{
-		"issue-name": `{
-			"name": "test-plugin",
-			"iacProvider": {
-				"computePlanVersion": "v2",
-				"name": "do"
-			}
-		}`,
-		"issue-resourceTypes": `{
-			"name": "test-plugin",
-			"iacProvider": {
-				"computePlanVersion": "v2",
-				"resourceTypes": ["droplet"]
-			}
-		}`,
-		"issue-configSchema": `{
-			"name": "test-plugin",
-			"iacProvider": {
-				"computePlanVersion": "v2",
-				"configSchema": {}
-			}
-		}`,
-		"issue-all-three": `{
-			"name": "test-plugin",
-			"iacProvider": {
-				"computePlanVersion": "v2",
-				"name": "do",
-				"resourceTypes": ["droplet"],
-				"configSchema": {}
-			}
-		}`,
-		"synthetic-extra-key": `{
-			"name": "test-plugin",
-			"iacProvider": {
-				"computePlanVersion": "v2",
-				"bogusKeyThatShouldBeRejected": "value"
-			}
-		}`,
+	cases := map[string]struct {
+		manifest string
+		// wantKeys is the set of extra iacProvider keys the test expects
+		// the schema validator to flag with an additionalProperties
+		// rejection. Asserting against the structured ErrorKind tree
+		// means the assertion does not depend on the library's English
+		// error wording — only on the contractual behaviour ("the
+		// `additionalProperties` keyword fired on these specific keys").
+		wantKeys []string
+	}{
+		"issue-name": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","name":"do"}}`,
+			wantKeys: []string{"name"},
+		},
+		"issue-resourceTypes": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","resourceTypes":["droplet"]}}`,
+			wantKeys: []string{"resourceTypes"},
+		},
+		"issue-configSchema": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","configSchema":{}}}`,
+			wantKeys: []string{"configSchema"},
+		},
+		"issue-all-three": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","name":"do","resourceTypes":["droplet"],"configSchema":{}}}`,
+			wantKeys: []string{"name", "resourceTypes", "configSchema"},
+		},
+		"synthetic-extra-key": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","bogusKeyThatShouldBeRejected":"value"}}`,
+			wantKeys: []string{"bogusKeyThatShouldBeRejected"},
+		},
 	}
-	for name, in := range cases {
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseManifest([]byte(in))
+			_, err := ParseManifest([]byte(c.manifest))
 			if err == nil {
-				t.Fatalf("workflow#540 regressed: ParseManifest accepted extra iacProvider key on %q; expected schema rejection",
-					name)
+				t.Fatalf("workflow#540 regressed: ParseManifest accepted extra iacProvider key(s) %v; expected schema rejection",
+					c.wantKeys)
 			}
-			// Pin the rejection cause so unrelated failures (schema
-			// compile, JSON parse, etc.) don't masquerade as success.
-			// santhosh-tekuri/jsonschema/v6 reports the violation
-			// using the lowercase phrase below.
-			if !strings.Contains(err.Error(), "additional properties") {
-				t.Errorf("workflow#540: expected 'additional properties' rejection; got %v", err)
+			// Walk the *jsonschema.ValidationError tree and collect
+			// every key that triggered an `additionalProperties`
+			// rejection. Library wording can change; the structured
+			// ErrorKind cannot without a behaviour change.
+			rejected := collectAdditionalPropertiesRejections(err)
+			if len(rejected) == 0 {
+				t.Fatalf("workflow#540: no additionalProperties ErrorKind in error tree; got %v", err)
+			}
+			for _, want := range c.wantKeys {
+				if !rejected[want] {
+					t.Errorf("workflow#540: expected key %q rejected by additionalProperties; rejected=%v err=%v",
+						want, keysOf(rejected), err)
+				}
 			}
 		})
 	}
+}
+
+// collectAdditionalPropertiesRejections walks a validation error
+// (typically wrapped by ParseManifest) and returns every key that the
+// jsonschema library flagged via the `additionalProperties` keyword.
+// Returns an empty map if no such ErrorKind is present, which
+// distinguishes a real workflow#540 regression from an unrelated
+// failure (JSON parse, schema compile, etc.).
+func collectAdditionalPropertiesRejections(err error) map[string]bool {
+	out := map[string]bool{}
+	var verr *jsonschema.ValidationError
+	if !errors.As(err, &verr) {
+		return out
+	}
+	var visit func(*jsonschema.ValidationError)
+	visit = func(e *jsonschema.ValidationError) {
+		if ap, ok := e.ErrorKind.(*kind.AdditionalProperties); ok {
+			for _, p := range ap.Properties {
+				out[p] = true
+			}
+		}
+		for _, child := range e.Causes {
+			visit(child)
+		}
+	}
+	visit(verr)
+	return out
+}
+
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out) // stable diagnostic output
+	return out
 }
 
 // TestManifestSchemaJSON_ReturnsCopy verifies that mutating the slice
