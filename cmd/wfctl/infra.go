@@ -1143,20 +1143,29 @@ func runInfraApply(args []string) error {
 			return fmt.Errorf("list state for refresh: %w", statesErr)
 		}
 		groups, groupOrder := groupStatesByProvider(states, cfgFile, envName)
-		for _, moduleRef := range groupOrder {
-			g := groups[moduleRef]
+		// Wrap each group in a helper so the deferred closer fires after the
+		// group finishes, not at runInfraApply exit. Without this, a config
+		// with N provider groups would hold N connections open throughout the
+		// rest of the apply path (same pattern as infra_plan_provider.go and
+		// infra_apply.go).
+		refreshGroup := func(moduleRef string, g *providerGroup) error {
 			provider, closer, provErr := resolveIaCProvider(ctx, g.provType, g.provCfg)
 			if provErr != nil {
 				return fmt.Errorf("refresh: load provider %q: %w", moduleRef, provErr)
 			}
-			refreshErr := runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
-				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
 			if closer != nil {
-				if cerr := closer.Close(); cerr != nil {
-					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
-				}
+				provType := g.provType
+				defer func() {
+					if cerr := closer.Close(); cerr != nil {
+						fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+					}
+				}()
 			}
-			if refreshErr != nil {
+			return runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
+				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
+		}
+		for _, moduleRef := range groupOrder {
+			if refreshErr := refreshGroup(moduleRef, groups[moduleRef]); refreshErr != nil {
 				return fmt.Errorf("refresh phase: %w", refreshErr)
 			}
 		}
