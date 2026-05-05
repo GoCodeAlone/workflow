@@ -1,3 +1,20 @@
+---
+status: in_progress
+area: ecosystem
+owner: workflow
+implementation_refs: []
+external_refs:
+  - "buymywishlist-phase3: app.yaml has X-Workflow-Trace and some step.parallel use, but parse_body remains"
+  - "ratchet: config/modules.yaml has X-Workflow-Trace and routes-core.yaml has step.parallel, but parse_body remains"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"step\\.parallel|X-Workflow-Trace|parse_body|user-dashboard|analytics-overview\" /Users/jon/workspace/buymywishlist* /Users/jon/workspace/ratchet*"
+  result: partial
+supersedes: []
+superseded_by: []
+---
+
 # Downstream Modernization: BMW, Ratchet, Ratchet-CLI
 
 **Date:** 2026-03-11

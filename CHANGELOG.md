@@ -5,6 +5,340 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`wfctl infra bootstrap --force-rotate <name>`** flag for known-bad secret recovery. Repeatable
+  flag; also accepts comma-separated values (e.g. `--force-rotate FOO,BAR --force-rotate BAZ`).
+  Validates each name against `secrets.generate[]` before touching the store (fast-fail on typos),
+  refuses `provider_credential` types (must rotate upstream), best-effort deletes the existing value,
+  regenerates via the same code path as create-from-scratch, and emits an RFC3339 audit log line to
+  stderr (`wfctl: rotated secret <name> (replaced existing value at <timestamp>)`). Supported rotatable
+  types: `random_hex`, `random_base64`, `random_alphanumeric`.
+
+- **`interfaces.DriftClass`** enum with constants `DriftClassUnknown` (zero value, omitempty-safe),
+  `DriftClassInSync`, `DriftClassGhost`, `DriftClassConfig`. Additive `Class DriftClass` field on
+  `DriftResult` with `json:"class,omitempty"` — backwards-compatible with all existing consumers.
+- **`wfctl infra apply --refresh`** flag: detect drift first, prune ghost-in-state entries (cloud
+  returns 404 but state has the resource) before running the normal plan+apply phase.
+  Default is dry-run (prints "would prune" without mutating); pass `--auto-approve` to execute.
+- **`wfctl infra apply --allow-protected-prune`** flag: required two-key for pruning resources with
+  `protected: true` in their state Outputs. Without it, protected ghosts cause an immediate error
+  with a clear message.
+- **`wfctl infra drift`** CLI output now prints drift class column (GHOST / CONFIG / IN-SYNC)
+  for actionable operator feedback. Providers returning `DriftClassUnknown` fall through to the
+  legacy Drifted-bool behavior.
+- **`docs/wfctl/drift-recovery.md`** operator procedure covering detect→dry-run→approve flow,
+  protected-resource handling, audit-log format, and CI integration examples.
+
+### Changed
+
+- **BREAKING (`wfctl infra plan`)**: configs declaring at least one `iac.provider` module now
+  require the plugin process to load successfully — `plan` invokes the same loader that `apply`
+  uses so `platform.ComputePlan` can dispatch `ResourceDriver.Diff` for honest Replace-action
+  classification (rev3 / W-3b T3.6b). On plugin-load failure `wfctl` exits non-zero and prints
+  `error: failed to load plugin "<name>": <reason>; wfctl infra plan now requires the plugin
+  process to compute Diff (since v0.21.0)` (the `error:` prefix is added by wfctl's top-level
+  printer; the underlying error returned from the command does not include it). There is no
+  `--no-provider` escape hatch
+  (rev3 YAGNI fix); operators who need pure offline validation should use `wfctl validate`.
+  Configs without any `iac.provider` module fall back to the legacy ConfigHash compare path so
+  minimal/legacy fixtures and out-of-band scripts continue to work.
+- **`wfctl infra plan` empty-desired alignment with apply**: when the desired state is empty
+  (every resource removed from config) but providers are declared, `plan` now matches `apply`'s
+  behavior under the per-provider grouping logic: the loop over groupOrder is empty and no
+  delete actions are emitted. To preview what `apply` would tear down, use `wfctl infra destroy
+  --dry-run` (which exercises the same provider load + lists tracked state). Pre-W-3b plan
+  emitted Delete actions for every orphan in current state via the legacy single-call ComputePlan
+  path; this is consistent with the broader rev3 alignment between plan and apply.
+- `driftInfraModules` uses `DriftClass` constants for output classification; drift-found message
+  updated to suggest `wfctl infra apply --refresh`.
+- `DriftResult.Expected`, `DriftResult.Actual`, and `DriftResult.Fields` now carry `omitempty`
+  tags (additive — previously these fields serialised as `null` / `[]` in JSON; they are now
+  omitted entirely when empty, which is what most consumers expect).
+
+## [0.18.11.1] - 2026-04-25
+
+### Fixed
+
+- **`remoteResourceDriver.Troubleshoot` missing `resource_type` arg** — the Troubleshoot method was the only `remoteResourceDriver` dispatcher that omitted `"resource_type": d.resourceType` from its `InvokeService` args map, causing the plugin to return `"missing resource_type arg"` and silently swallow auto-troubleshoot output (regression observed during a downstream consumer's CI deployment). Fixed by adding the missing arg. Regression gate added: `TestRemoteDriver_AllMethodsSendResourceType` is a 9-case table test covering every public ResourceDriver method; any future omission causes an immediate CI failure.
+
+## [0.18.11] - 2026-04-24
+
+### Added
+
+- **`interfaces.ProviderIDFormat`** enum (`IDFormatUnknown`, `IDFormatUUID`, `IDFormatDomainName`,
+  `IDFormatARN`, `IDFormatFreeform`) with `String()` and a `ProviderIDValidator` optional interface
+  that `ResourceDriver` implementations can adopt to declare their identifier shape.
+- **`interfaces.ValidateProviderID(s string, format ProviderIDFormat) bool`** dispatch function
+  with three unexported validators: `validateUUID` (positional, no-alloc), `validateDomainName`
+  (RFC 1035 relaxed), `validateARN` (6-segment colon split). Unknown and unrecognized formats
+  always return true for forward compatibility.
+- **`cmd/wfctl/infra_validation.go`**: two helpers wired into `applyWithProviderAndStore`:
+  - `validateInputProviderIDs` — soft-warn (log only) before `provider.Apply` when an
+    update/delete action's current-state ProviderID does not match the driver's declared format;
+    lets the driver's self-heal path recover without blocking the apply.
+  - `validateOutputProviderID` — hard-fail (return error) before state write when the driver
+    returns a malformed ProviderID for a strict format (UUID/DomainName/ARN), preventing corrupt
+    data from ever reaching the state store.
+
+### Changed
+
+- Validation helpers are no-ops when the `ResourceDriver` does not implement `ProviderIDValidator`
+  — fully backward compatible with existing plugins.
+
+## [0.18.10.1] - 2026-04-24
+
+### Fixed
+
+- **`cmd/wfctl/deploy_providers.go`**: `remoteResourceDriver.Troubleshoot` was passing
+  `interfaces.ResourceRef` as a nested struct in the `InvokeService` args map. The gRPC
+  transport (`structpb.NewStruct`) cannot encode Go structs — the plugin received empty args
+  and Troubleshoot was a silent no-op. Args are now flattened to scalar primitives:
+  `ref_name`, `ref_type`, `ref_provider_id`, `failure_msg`.
+- **`cmd/wfctl/infra_apply.go`**: `applyWithProviderAndStore` was passing the `IaCProvider`
+  to `troubleshootAfterFailure`, whose type assertion against `interfaces.Troubleshooter` always
+  failed — the hook was a silent no-op. Now calls `provider.ResourceDriver(ref.Type)` and passes
+  the resulting `ResourceDriver` to `troubleshootAfterFailure`, enabling real plugin-backed
+  diagnostics on `wfctl infra apply` failure.
+- **`cmd/wfctl/ci_output_summary.go`**: `WriteStepSummary` used `defer f.Close()` which
+  discards the close error (potential data loss on buffer flush). Now uses a named return
+  and captures the close error, surfacing it only when there is no prior write error.
+
+## [0.18.10] - 2026-04-24
+
+### Added
+
+- **`interfaces.Troubleshooter`** optional interface on `ResourceDriver`. Drivers implementing it
+  return structured `[]Diagnostic` (phase, cause, timestamp, log-tail detail) that wfctl renders
+  in CI output on deploy/apply failure. No changes required for drivers that don't implement it;
+  `codes.Unimplemented` is swallowed silently.
+- **`cmd/wfctl/ci_output.go`**: CI-provider detection (GitHub Actions, GitLab CI, Jenkins, CircleCI)
+  with grouped output via provider-native markers (`::group::`, `section_start`, dashed separators).
+- **`cmd/wfctl/ci_output_summary.go`**: Markdown step-summary writer for
+  `$GITHUB_STEP_SUMMARY` (and equivalents) with resource, root cause, phase timings,
+  and collapsible per-diagnostic log tails.
+
+### Changed
+
+- `wfctl ci run --phase deploy` and `wfctl infra apply` automatically invoke
+  `Troubleshooter.Troubleshoot` on any terminal failure (health-check timeout or driver
+  error), render diagnostics, and write the step-summary. Original exit codes and error
+  messages are preserved (observability is additive).
+
+### Not yet
+
+- Generic `IaCProvider.StreamLogs` for real-time log display during builds — deferred to
+  v0.19.0 alongside plugin-manifest split (#42) and provider-agnostic CI summary (#63).
+- AWS, GCP, Azure, tofu Troubleshoot implementations — DO only in v0.7.8; others no-op.
+
+## [0.18.9] - 2026-04-24
+
+### Fixed
+
+- **`wfctl ci run --phase deploy` now uses env-resolved module name** — `pluginDeployProvider.resourceName` was populated from `m.Name` (base config name) instead of `ResolvedModule.Name` (env-override lifted from `Config["name"]`). When infra apply had env-renamed a module (e.g. BMW's `bmw-app` → `bmw-staging` for staging), the deploy phase used the base name for `driver.Read` lookup, didn't find the resource, and went down the Create path — producing duplicate DO resources. Same class as v0.18.7 Task #32 fix, but in the ci-run code path. Root cause from BMW deploy run 24888583717.
+- **`infra_output` source resolution now applies env override to module name** — `secrets.generate[].source: "bmw-database.uri"` now resolves to the env-resolved state key (e.g. `bmw-staging-db`) when `--env staging` is set, matching how infra apply persists state. Closes task #56.
+
+### Tests
+
+- `cmd/wfctl/deploy_providers_env_test.go` — `TestPluginDeployProvider_UsesEnvResolvedName`, `TestPluginDeployProvider_FallsBackToModuleNameWhenNoEnv`
+- `cmd/wfctl/infra_secrets_env_test.go` — `TestInfraOutput_EnvResolvesModuleSource`, `TestInfraOutput_NoEnvUsesBaseName`
+
+## [0.18.8] - 2026-04-24
+
+### Fixed
+
+- **`resolveStateStore` and `loadCurrentState` now accept `envName`** — when `--env` is passed to `wfctl infra apply/destroy/status/drift`, per-environment overrides on the `iac.state` module (e.g. `region`, `bucket` prefix) are now applied before the state backend is initialised. Previously the base config was always used, so remote backends (Spaces, S3) that declare credentials or endpoints only under `environments.<env>:` failed with "region or endpoint must be set", silently falling back to no-op persistence and causing every deploy to re-create already-provisioned resources (409 cascades).
+
+### Tests
+
+- `cmd/wfctl/infra_state_store_test.go` — `TestResolveStateStore_NoEnv_FallsBackToBase`, `TestResolveStateStore_EnvOverride_UsesEnvConfig`, `TestApplyInfraModules_PersistsResourceState` (end-to-end regression gate: verifies provider.Apply results are persisted to state store)
+
+## [0.18.7] - 2026-04-23
+
+### Fixed
+
+- **`ResolveForEnv` lifts `Config["name"]` into `ResolvedModule.Name`** — when an environment override sets `config.name`, the value is promoted to `ResolvedModule.Name` and removed from `Config`. This closes the plan-vs-apply divergence where `wfctl infra plan --env staging` displayed `bmw-staging-vpc` but `wfctl infra apply --env staging` created a resource named `bmw-vpc` (the raw module name). Downstream `ResourceSpec.Name` now carries the env-resolved identity in both paths. (closes follow-up #32)
+- **`platform.configHash` — deterministic key ordering** — `configHash` now sorts map keys explicitly before JSON-marshalling, matching the DO plugin's existing pattern. Previously, Go's randomised map-iteration order could produce different hashes for identical configs on successive runs, generating spurious "update" plan actions on second apply with no config change.
+- **`applyWithProviderAndStore` calls `provider.ResolveSizing`** — for each spec with a non-empty `Size` field, `ResolveSizing(type, size, hints)` is now called before `platform.ComputePlan`. The returned `ProviderSizing.InstanceType` and extra `Specs` are merged into `spec.Config` so that plan and apply agree on the concrete instance type.
+- **Provider `closer.Close()` errors logged as warnings** — `defer closer.Close() //nolint:errcheck` replaced with an explicit defer that writes `warning: provider %q shutdown: %v` to stderr in `infra_apply.go`, `infra_destroy.go`, `infra_status_drift.go`, and `infra_bootstrap.go`. Plugin subprocess leaks now surface instead of being silently discarded.
+- **`configHashMap` in `infra.go` uses sorted kv encoding** — aligns with `platform.configHash` so `ResourceState.ConfigHash` values written during apply are comparable to hashes computed by `ComputePlan` on the next run.
+
+### Tests
+
+- `config/module_resolve_env_test.go` — `TestResolveForEnv_LiftsConfigNameIntoIdentity`, `TestResolveForEnv_PreservesNameWhenNoOverride`, `TestResolveForEnv_EmptyNameFieldIgnored`
+- `platform/differ_hash_test.go` — `TestConfigHash_Stable_AcrossMapIterationOrder` (100 iterations), `TestConfigHash_EmptyMapReturnsEmpty`, `TestConfigHash_DifferentConfigsDifferentHashes`
+- `cmd/wfctl/infra_apply_test.go` — `TestApplyInfraModules_CallsResolveSizing_ForEachSpec`, `TestApplyWithProvider_LogsCloseError`
+- `cmd/wfctl/infra_plan_apply_equivalence_test.go` — `TestPlanApplyEquivalence_EnvOverrideNames` (end-to-end regression gate for plan-vs-apply name divergence)
+- `cmd/wfctl/infra_env_wire_test.go` — `TestPlanResourcesForEnv_UsesEnvOverrideNames`
+
+## [0.18.6] - 2026-04-23
+
+### Fixed
+
+- **`wfctl infra apply` — state persistence** — `applyWithProviderAndStore` now saves a `ResourceState` record for each successfully provisioned resource. Previously, state was never written after apply, so every subsequent run re-attempted creates on resources that already existed. Save failures log a loud warning but do not abort the apply (the cloud resource exists). Delete-action resources are removed from state after provider.Destroy succeeds.
+- **`loadCurrentState` — remote state backends** — `resolveStateStore` supports filesystem and DO Spaces backends; previously only the filesystem path was wired up. `loadCurrentState` now delegates to `resolveStateStore` so Spaces-backed state is readable by plan and apply.
+- **`wfctl infra destroy` — direct-path for infra.\* modules** — `runInfraDestroy` dispatches to `destroyInfraModules` when the config contains `infra.*` modules. Previously it required a non-existent `pipelines.destroy` pipeline and always failed for modern configs.
+- **`wfctl infra status` / `wfctl infra drift` — direct-path for infra.\* modules** — same dispatch fix; now calls `provider.Status` / `provider.DetectDrift` directly on tracked state records.
+- **`wfctl infra bootstrap` — provider-interface state bucket dispatch** — `bootstrapStateBackend` now dispatches through the `IaCProvider` plugin interface. The new `IaCProvider.BootstrapStateBackend(ctx, cfg) (*BootstrapResult, error)` method (added to `interfaces/iac_provider.go`) lets each cloud provider implement its own bucket creation logic. Self-contained backends (`filesystem`, `memory`, `postgres`, `""`) remain no-ops in wfctl core; all other backends require an `iac.provider` module in the config and delegate to the plugin. After a successful bootstrap, every entry in `result.EnvVars` is printed as `export KEY=VALUE` (sorted, for deterministic CI capture) and `result.Bucket` is written back to the on-disk config so downstream commands load state without re-setting env vars. Concrete provider implementations (e.g. DO Spaces) are delivered via the plugin — see follow-up task #31 (DO plugin v0.7.4).
+- **`wfctl infra state` — postgres backend wired** — `resolveStateStore` now instantiates `module.PostgresIaCStateStore` for `backend: postgres` configs; `s3`/`gcs`/`azure` return a clear error with contribution guidance instead of silently falling back to noop.
+
+## [0.18.5] - 2026-04-23
+
+### Fixed
+
+- **wfctl infra apply — infra.\* module support** — `runInfraApply` now detects configs using the new `infra.*` module abstraction (v0.3.55+) and, instead of requiring a `pipelines.apply` section, computes a diff plan locally via `platform.ComputePlan` and calls `IaCProvider.Apply` directly. Previously, running `wfctl infra apply` against a modern `infra.yaml` failed with "pipeline apply not found". The legacy `platform.*` path is preserved; configs without any `infra.*` modules continue to use the pipeline runner unchanged. Configs that mix `infra.*` and `platform.*` module types now fail fast with a descriptive error.
+
+## [0.18.4] - 2026-04-23
+
+### Fixed
+
+- **wfctl plugin install private repos** — for `github.com/.../releases/download/...` URLs, when a GitHub token is present, `downloadURL` now uses the two-step GitHub REST API flow (`releases/tags/:tag` to resolve the asset ID, then `releases/assets/:id` with `Accept: application/octet-stream`) instead of a plain GET. The direct download URL redirects to a signed S3 URL which does not propagate the Authorization header, causing 404s on private repos. Falls back to direct GET when no token is set (public repos unaffected).
+
+## [0.18.3] - 2026-04-23
+
+### Fixed
+
+- **wfctl plugin install auth** — `downloadURL` now sends an `Authorization: token <tok>` header for any `github.com` URL. Token resolution order: `RELEASES_TOKEN` → `GH_TOKEN` → `GITHUB_TOKEN`. Falls back to unauthenticated for public repos or non-GitHub URLs. Enables `wfctl plugin install` to fetch release assets from private GitHub repositories when a token is present in the environment (e.g. BMW CI with `RELEASES_TOKEN`).
+
+## [0.18.1] - 2026-04-22
+
+### Fixed
+
+Post-hoc review (two independent agents audited commit `a48a9b7`) surfaced the
+following items; all fixed in #467 (`fix/v0.18.1-polish`).
+
+- **gofmt alignment** — `interfaces/iac_canonical_types.go`, `module/tenants.go`,
+  `cmd/wfctl/scaffold_dockerfile_test.go` had minor formatting drift; corrected.
+- **Missing nil-DB test** — `TestNewSQLTenantRegistry_NilDB` asserts the constructor
+  returns a descriptive error ("cfg.DB is required") when `DB` is nil.
+- **Cache-disabled coverage** — `TestNewSQLTenantRegistry_CacheDisabled` exercises
+  the full `Ensure → GetBySlug → Disable → GetBySlug` sequence with `CacheSize=-1`,
+  proving nil-cache code paths do not panic.
+- **Transient-error propagation** — `TestEnsure_PropagatesNonNotFoundError` guards
+  against a regression where a transient DB error could be silently swallowed and
+  trigger a spurious `INSERT`.
+- **Stale domain-cache invalidation** — `TestUpdate_InvalidatesStaleDomainCache`
+  verifies that after `Update` changes a tenant's domains, the old domain key is
+  evicted from the LRU cache so the next `GetByDomain` goes to the DB.
+- **Mixed-case subdomain matching** — `TestSubdomainSelector_MixedCase` confirms
+  that both the root domain and the incoming host are lowercased before comparison,
+  returning a consistent lowercase tenant key.
+- **Dockerfile validation subtests** — `TestValidateBaseImage_FullyQualifiedRefs`
+  converted to `t.Run` subtests with five additional cases: digest-only ref,
+  registry-with-port, tag+digest combined, empty string, and `docker.io/library/alpine`.
+- **Double-slug in Ensure error** — the outer `fmt.Errorf` in `Ensure` no longer
+  re-embeds the slug (it was already present in the wrapped `GetBySlug` error).
+- **Misleading scaffold comment** — replaced the ambiguous comment at
+  `scaffold_dockerfile.go:181` with a precise description of the colon-after-last-slash
+  heuristic used to distinguish tag separators from registry host:port colons.
+- **Hand-rolled string helpers removed** — `splitByNewline`, `splitLines`, and
+  `joinLines` in `module/tenants_test.go` replaced with `strings.Split` /
+  `strings.Join`.
+
+### Breaking changes
+
+- **`TenantSpec.Slug` must be all-lowercase.** `TenantSpec.Validate()` now returns
+  `ErrValidation` when `Slug != strings.ToLower(Slug)`. Mixed-case slugs were
+  previously accepted and stored verbatim, which caused cache-key collisions and
+  inconsistent URL routing. If you have existing tenants with mixed-case slugs,
+  lowercase the `slug` column before upgrading.
+- **`SubdomainSelector` now returns a lowercase subdomain key.** The host header is
+  already lowercased before suffix matching, so the returned key is always lowercase.
+  `HostSelector` has had this behaviour since v0.18.0; this change makes both
+  selectors consistent. If your code compared the key against a mixed-case string,
+  update the comparison.
+
+## [0.18.0] - 2026-04-22
+
+### Added
+
+#### Tenancy — multi-tenant first-class support
+
+- **`interfaces.Tenant`, `interfaces.TenantRegistry`** — core tenant struct and registry contract
+  (`Ensure`, `GetByID`, `GetBySlug`, `GetByDomain`, `List`, `Update`, `Disable`).
+- **`module.SQLTenantRegistry`** — PostgreSQL-backed `TenantRegistry` with configurable
+  table/column names (`TenantSchemaConfig`) and an LRU cache (configurable size + TTL).
+- **Embedded SQL migrations** — `module.TenantsMigrationsFS()` returns an `embed.FS`
+  with goose-format up/down migrations (`20260422000001_tenants.up.sql`).
+- **7 tenant selectors** (`interfaces.Selector`) — `host`, `subdomain`, `header`, `cookie`,
+  `jwt_claim`, `session`, and `static`; all are composable with the resolver.
+- **`module.TenantContextResolver`** — HTTP middleware with three combination modes:
+  - `first_match` — first matching selector wins.
+  - `all_must_match` — all selectors must agree; disagreement emits `tenant.mismatch`
+    event via `TenantMismatchEmitter`, returns `ErrTenantMismatch`, and the `TenantMiddleware`
+    responds 403 + `{"error":"tenant.mismatch"}`.
+  - `consensus` — configurable `MinVotes` threshold; defaults to simple majority.
+- **`module.WithTenant` / `module.TenantFromContext`** — inject and retrieve the resolved
+  tenant from `context.Context` via a typed unexported key.
+- **5 tenant pipeline steps** — `tenant_ensure`, `tenant_list`, `tenant_get_by_domain`,
+  `tenant_update`, `tenant_disable`; each resolves `TenantRegistry` from the app service
+  registry at execute time via the narrow `tenantAppProvider` interface.
+- **`wfctl tenant`** — CLI subcommand with `ensure`, `list`, `get`, `update`, `disable`;
+  supports `--format table|json` and `--dsn` / `WFCTL_TENANT_DSN`.
+
+#### Canonical IaC key registry
+
+- **32 canonical config key constants** in `interfaces` (`KeyName`, `KeyRegion`, `KeyImage`,
+  `KeyHTTPPort`, `KeyInternalPorts`, `KeyProtocol`, `KeyInstanceCount`, `KeySize`,
+  `KeyEnvVars`, `KeyEnvVarsSecret`, `KeyVPCRef`, `KeyAutoscaling`, `KeyRoutes`, `KeyCORS`,
+  `KeyDomains`, `KeyHealthCheck`, `KeyLivenessCheck`, `KeyIngress`, `KeyEgress`, `KeyAlerts`,
+  `KeyLogDestinations`, `KeyTermination`, `KeyMaintenance`, `KeyJobs`, `KeyWorkers`,
+  `KeyStaticSites`, `KeySidecars`, `KeyBuildCommand`, `KeyRunCommand`, `KeyDockerfilePath`,
+  `KeySourceDir`, `KeyProviderSpecific`).
+- **`IsCanonicalKey(string) bool`** and **`CanonicalKeys() []string`** helpers.
+- **JSON Schema** for the canonical key set (machine-readable; used by wfctl validation).
+- **Canonical spec types** — `Job`, `Worker`, `StaticSite`, `Sidecar`, `Port` structs
+  with full JSON/YAML tags.
+- **`interfaces.IaCProvider.SupportedCanonicalKeys() []string`** — new method on the
+  IaC provider interface; implementations declare which canonical keys they support.
+
+#### Build-pipeline hook system
+
+- **12 hook event types** (`pre_build`, `pre_target_build`, `post_target_build`,
+  `pre_container_build`, `post_container_build`, `pre_container_push`,
+  `post_container_push`, `pre_artifacts_publish`, `post_artifacts_publish`,
+  `pre_build_fail`, `post_build`, `install_verify`) in `interfaces`.
+- **`wfctl` hook dispatcher** — priority-ordered subprocess dispatch with configurable
+  timeout; plugins register handlers via `BuildHookDeclaration` in `plugin.json`.
+- **`plugin.json` schema extensions** — `BuildHooks`, `CLICommands`, `MigrationDrivers`,
+  `PortIntrospect` in `RegistryCapabilities`; `PluginRequirement.Verify` block
+  (`Signature`, `SBOM`, `VulnPolicy`) for supply-chain verification.
+- **`install_verify` hook** — emitted by `wfctl plugin install` after tarball download,
+  before extraction, when `req.Verify != nil`; non-zero dispatch aborts install.
+
+#### Plugin SDK & extensibility
+
+- **`plugin.ServePluginFull`** — single helper for full plugin lifecycle: CLI flag
+  dispatch, build-hook event routing, and optional gRPC server start.
+- **Dynamic CLI command registry** — plugins declare top-level `wfctl` subcommands via
+  `CLICommandDeclaration` in `plugin.json`; `wfctl` discovers and dispatches them at
+  runtime.
+
+#### Module contract extensions
+
+- **`interfaces.MigrationProvider`** — module contract (`ProvidesMigrations() (fs.FS, error)`,
+  `MigrationsDependencies() []string`) for modules to ship embedded SQL migrations.
+- **`interfaces.MigrationDriver`** — driver interface for executing goose-format migrations
+  against a target database.
+
+#### wfctl improvements
+
+- **`wfctl scaffold dockerfile`** — generates canonical Dockerfiles with `--mode`
+  (`server`|`library`) and `--base-image` flags.
+- **Port introspection aggregator** — `wfctl` aggregates declared ports from all loaded
+  plugins using `PortPaths` in `plugin.json`; plugins may also provide a `PortIntrospect`
+  hook handler.
+
+### Changed
+
+- `interfaces.IaCProvider` gains `SupportedCanonicalKeys() []string` (breaking for
+  implementations outside this repo — add `return interfaces.CanonicalKeys()` as a
+  temporary stub).
+
+---
+
 ## [0.14.1] - 2026-04-19
 
 ### Added

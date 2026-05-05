@@ -1,3 +1,31 @@
+---
+status: implemented
+area: core
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 508718d
+  - repo: workflow
+    commit: 8d71683
+  - repo: workflow
+    commit: 3678419
+  - repo: workflow
+    commit: f86df2f
+  - repo: workflow
+    commit: d2b82df
+  - repo: workflow
+    commit: a9ff883
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "git log --oneline --all -- wftest go.mod docs/testing.md"
+    - "GOWORK=off go test ./wftest ./wftest/bdd"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wftest Integration Test Harness — Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

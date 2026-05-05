@@ -1,3 +1,29 @@
+---
+status: implemented
+area: core
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 508718d
+  - repo: workflow
+    commit: 8d71683
+  - repo: workflow
+    commit: 3678419
+  - repo: workflow
+    commit: f86df2f
+  - repo: workflow
+    commit: a9ff883
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"package bdd|wftest|RunFeatures|godog|ExecutePipeline|MockStep|WithYAML|FireEvent|RunYAML|yaml test\" wftest go.mod docs -g '!docs/plans/**'"
+    - "GOWORK=off go test ./wftest ./wftest/bdd"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Workflow Test Harness (`wftest`) — Design Document
 
 **Date:** 2026-03-23

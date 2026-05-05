@@ -147,6 +147,10 @@ func generateGHABootstrap(cfg *config.WorkflowConfig) string {
 			sb.WriteString("    steps:\n")
 			sb.WriteString("      - uses: actions/checkout@v4\n")
 			sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+			if configHasMigrations(cfg) {
+				sb.WriteString("      - run: mkdir -p .wfctl\n")
+				sb.WriteString("      - run: wfctl migrations validate --env " + envName + " --commit ${{ github.sha }} --result-file .wfctl/migrations-result.json --format json\n")
+			}
 			sb.WriteString("      - run: wfctl ci run --phase deploy --env " + envName + "\n")
 		}
 	}
@@ -202,6 +206,10 @@ func generateGitLabCIBootstrap(cfg *config.WorkflowConfig) string {
 			sb.WriteString("  stage: deploy-" + stageID + "\n")
 			sb.WriteString("  needs: [test]\n")
 			sb.WriteString("  script:\n")
+			if configHasMigrations(cfg) {
+				sb.WriteString("    - mkdir -p .wfctl\n")
+				sb.WriteString("    - wfctl migrations validate --env " + envName + " --commit $CI_COMMIT_SHA --result-file .wfctl/migrations-result.json --format json\n")
+			}
 			sb.WriteString("    - wfctl ci run --phase deploy --env " + envName + "\n")
 			if env.RequireApproval {
 				sb.WriteString("  when: manual\n")
@@ -295,12 +303,21 @@ func generateGHADeploy(cfg *config.WorkflowConfig) string {
 			sb.WriteString("        with:\n")
 			sb.WriteString("          ref: " + sha + "\n")
 			sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+			if configHasMigrations(cfg) {
+				sb.WriteString("      - run: mkdir -p .wfctl && wfctl migrations validate --env " + envName + " --commit " + sha + " --result-file .wfctl/migrations-result.json --format json\n")
+			}
 			sb.WriteString("      - run: wfctl ci run --phase deploy --env " + envName + "\n")
+			sb.WriteString("        env:\n")
+			sb.WriteString("          WFCTL_CI_COMMIT_SHA: " + sha + "\n")
 			prev = jobName
 		}
 	}
 
 	return sb.String()
+}
+
+func configHasMigrations(cfg *config.WorkflowConfig) bool {
+	return cfg != nil && cfg.CI != nil && len(cfg.CI.Migrations) > 0
 }
 
 // generateRetentionYML emits registry-retention.yml when any registry has a

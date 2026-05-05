@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"path/filepath"
 )
 
 // runDev dispatches wfctl dev subcommands.
@@ -66,13 +67,15 @@ Examples:
 	return fmt.Errorf("missing or unknown action")
 }
 
-func runDevUp(args []string) error {
+func runDevUp(args []string) (retErr error) {
 	fs := flag.NewFlagSet("dev up", flag.ContinueOnError)
 	configFile := fs.String("config", "", "Workflow config file")
 	local := fs.Bool("local", false, "Run app services as local Go processes with hot-reload")
 	k8s := fs.Bool("k8s", false, "Deploy to local minikube cluster")
 	expose := fs.String("expose", "", "Exposure method: tailscale, cloudflare, ngrok")
 	verbose := fs.Bool("verbose", false, "Show detailed output")
+	secretsFrom := fs.String("secrets-from", "", "Inject secrets from ad-hoc provider (keychain|env|aws) into dev cluster")
+	secretsService := fs.String("secrets-service", "", "Service name / env prefix for --secrets-from provider")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl dev up [options]\n\nStart local development cluster.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -99,6 +102,27 @@ func runDevUp(args []string) error {
 		}
 	}
 
+	// Write secrets env file if --secrets-from is set.
+	// The file is intentionally NOT cleaned up here on success — it persists until `dev down`.
+	// On error, clean it up so we don't leave stale secrets on disk.
+	var secretsEnvFile string
+	if *secretsFrom != "" {
+		outDir := "."
+		if cfgPath != "" {
+			outDir = filepath.Dir(cfgPath)
+		}
+		envFile, err := writeDevSecretsEnvFile(*secretsFrom, *secretsService, outDir)
+		if err != nil {
+			return fmt.Errorf("--secrets-from: %w", err)
+		}
+		secretsEnvFile = envFile
+		defer func() {
+			if retErr != nil {
+				_ = removeDevSecretsEnvFile(secretsEnvFile)
+			}
+		}()
+	}
+
 	// Build local artifacts before starting services.
 	if err := runDevBuild(cfgPath, "local"); err != nil {
 		return fmt.Errorf("dev build: %w", err)
@@ -114,7 +138,7 @@ func runDevUp(args []string) error {
 			return err
 		}
 	default:
-		if err := runDevCompose(cfg, cfgPath, *verbose); err != nil {
+		if err := runDevCompose(cfg, cfgPath, *verbose, secretsEnvFile); err != nil {
 			return err
 		}
 	}
@@ -163,6 +187,14 @@ func runDevDown(args []string) error {
 		return err
 	}
 	_ = *configFile
+
+	// Resolve config dir for secrets env file cleanup.
+	cfgDir := "."
+	if *configFile != "" {
+		cfgDir = filepath.Dir(*configFile)
+	}
+	// Clean up the secrets env file written by dev up, if present.
+	_ = removeDevSecretsEnvFile(filepath.Join(cfgDir, devSecretsEnvFileName))
 
 	if *k8s {
 		return devK8sDown(*verbose)

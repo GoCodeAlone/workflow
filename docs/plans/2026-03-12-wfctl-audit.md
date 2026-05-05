@@ -1,3 +1,29 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 31f2154
+  - repo: workflow
+    commit: c114e1f
+  - repo: workflow
+    commit: b5a6f53
+  - repo: workflow
+    commit: fb6ca6b
+  - repo: workflow
+    commit: b7e6eda
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"isHelpRequested|checkTrailingFlags|plugin-dir|data-dir|PluginManifest|include:\" cmd/wfctl mcp plugins schema .github"
+    - "git log --oneline --all -- cmd/wfctl/main.go cmd/wfctl/plugin_install.go cmd/wfctl/flag_helpers.go cmd/wfctl/validate.go cmd/wfctl/plugin_audit.go"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wfctl Audit & Plugin Ecosystem Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

@@ -1,8 +1,17 @@
 package external
 
 import (
+	"encoding/json"
+	"fmt"
+	"math"
+
 	"github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
+	"google.golang.org/protobuf/encoding/protojson"
+	goproto "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -27,6 +36,146 @@ func structToMap(s *structpb.Struct) map[string]any {
 		return nil
 	}
 	return s.AsMap()
+}
+
+func mapToTypedAny(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver) (*anypb.Any, error) {
+	return mapToTypedAnyWithOptions(messageName, values, resolver, false)
+}
+
+func mapToTypedAnyKnownFields(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver) (*anypb.Any, error) {
+	return mapToTypedAnyWithOptions(messageName, values, resolver, true)
+}
+
+func mapToTypedAnyWithOptions(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver, filterUnknown bool) (*anypb.Any, error) {
+	if messageName == "" {
+		return nil, fmt.Errorf("missing protobuf message name")
+	}
+	msg, err := newMessageByName(messageName, resolver)
+	if err != nil {
+		return nil, err
+	}
+	if values != nil {
+		if filterUnknown {
+			values = filterMapToMessageFields(values, msg.ProtoReflect().Descriptor())
+		}
+		raw, err := json.Marshal(values)
+		if err != nil {
+			return nil, fmt.Errorf("marshal %s input as JSON: %w", messageName, err)
+		}
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(raw, msg); err != nil {
+			return nil, fmt.Errorf("decode %s input as protobuf JSON: %w", messageName, err)
+		}
+	}
+	typed, err := anypb.New(msg)
+	if err != nil {
+		return nil, fmt.Errorf("pack %s typed payload: %w", messageName, err)
+	}
+	return typed, nil
+}
+
+func filterMapToMessageFields(values map[string]any, descriptor protoreflect.MessageDescriptor) map[string]any {
+	if values == nil || descriptor == nil {
+		return values
+	}
+	filtered := make(map[string]any)
+	fields := descriptor.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		for _, key := range []string{field.JSONName(), field.TextName(), string(field.Name())} {
+			if value, ok := values[key]; ok {
+				filtered[string(field.Name())] = value
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+func typedAnyToMap(payload *anypb.Any, messageName string, resolver protoregistry.MessageTypeResolver) (map[string]any, error) {
+	if payload == nil {
+		return nil, nil
+	}
+	msg, err := newMessageByName(messageName, resolver)
+	if err != nil {
+		return nil, err
+	}
+	if err := payload.UnmarshalTo(msg); err != nil {
+		return nil, fmt.Errorf("unpack %s typed payload: %w", messageName, err)
+	}
+	raw, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal %s typed payload as JSON: %w", messageName, err)
+	}
+	var values map[string]any
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, fmt.Errorf("decode %s typed JSON as map: %w", messageName, err)
+	}
+	normalizeTypedJSONMap(values, msg.ProtoReflect().Descriptor())
+	return values, nil
+}
+
+func normalizeTypedJSONMap(values map[string]any, descriptor protoreflect.MessageDescriptor) {
+	if values == nil || descriptor == nil {
+		return
+	}
+	fields := descriptor.Fields()
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		key := string(field.Name())
+		value, ok := values[key]
+		if !ok {
+			key = field.JSONName()
+			value, ok = values[key]
+		}
+		if !ok {
+			continue
+		}
+		values[key] = normalizeTypedJSONValue(value, field)
+	}
+}
+
+func normalizeTypedJSONValue(value any, field protoreflect.FieldDescriptor) any {
+	if field.IsList() {
+		items, ok := value.([]any)
+		if !ok {
+			return value
+		}
+		for i := range items {
+			items[i] = normalizeTypedJSONScalar(items[i], field)
+		}
+		return items
+	}
+	return normalizeTypedJSONScalar(value, field)
+}
+
+func normalizeTypedJSONScalar(value any, field protoreflect.FieldDescriptor) any {
+	number, ok := value.(float64)
+	if !ok {
+		return value
+	}
+	switch field.Kind() {
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,
+		protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind,
+		protoreflect.Uint32Kind, protoreflect.Fixed32Kind,
+		protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		if math.Trunc(number) == number && number <= float64(math.MaxInt) && number >= float64(math.MinInt) {
+			return int(number)
+		}
+	}
+	return value
+}
+
+func newMessageByName(messageName string, resolver protoregistry.MessageTypeResolver) (goproto.Message, error) {
+	if resolver != nil {
+		if mt, err := resolver.FindMessageByName(protoreflect.FullName(messageName)); err == nil {
+			return mt.New().Interface(), nil
+		}
+	}
+	mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(messageName))
+	if err != nil {
+		return nil, fmt.Errorf("generated codec for protobuf message %q not found: %w", messageName, err)
+	}
+	return mt.New().Interface(), nil
 }
 
 // protoSchemaToSchema converts a proto ModuleSchema to the workflow schema type.

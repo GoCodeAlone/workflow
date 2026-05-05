@@ -168,6 +168,9 @@ func runBuildOrchestrate(cfg *config.WorkflowConfig, opts buildOpts) error {
 		if opts.cfgPath != "" {
 			pushArgs = append(pushArgs, "--config", opts.cfgPath)
 		}
+		if opts.tag != "" {
+			pushArgs = append(pushArgs, "--tag", opts.tag)
+		}
 		if err := runBuildPush(pushArgs); err != nil {
 			return fmt.Errorf("push: %w", err)
 		}

@@ -97,6 +97,43 @@ func TestRunDeployCloudValidTarget(t *testing.T) {
 	}
 }
 
+func TestRunDeployCloudRunsMigrationGuardBeforeApply(t *testing.T) {
+	tmp := t.TempDir()
+	orig, _ := os.Getwd()
+	os.Chdir(tmp)
+	defer os.Chdir(orig)
+
+	if err := os.WriteFile("app.yaml", []byte(`
+version: 1
+modules:
+  - name: app
+    type: platform.digitalocean.app
+    config:
+      account: do
+ci:
+  migrations:
+    - name: app
+      source_dir: migrations
+      database:
+        env: DATABASE_URL
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+	restore := stubMigrationStatusRunner(t, migrationCommandResult{
+		Stdout: "Current: 20260426000005\nDirty: true\nNo pending migrations.\n",
+	}, nil)
+	defer restore()
+
+	err := runDeployCloud([]string{"--target", "production", "--yes"})
+	if err == nil {
+		t.Fatal("expected deploy cloud to fail before apply on dirty migration")
+	}
+	if !strings.Contains(err.Error(), "migration guard failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // TestWriteDockerfile verifies the generated Dockerfile is non-empty and contains expected content.
 func TestWriteDockerfile(t *testing.T) {
 	dir := t.TempDir()

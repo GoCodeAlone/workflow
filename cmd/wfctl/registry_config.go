@@ -26,23 +26,26 @@ type RegistrySourceConfig struct {
 	Token    string `yaml:"token" json:"token"`       // Auth token (optional)
 }
 
-// DefaultRegistryConfig returns the built-in config with a static GitHub Pages
-// primary registry and a GitHub API fallback.
+// DefaultRegistryConfig returns the built-in registry config.
+// The GitHub raw source is the primary registry (priority 0) because it serves
+// manifest.json files directly from the repo and is always up to date.
+// The static GitHub Pages source is a secondary fallback (priority 100) for
+// organisations that mirror the registry to a CDN for lower-latency reads.
 func DefaultRegistryConfig() *RegistryConfig {
 	return &RegistryConfig{
 		Registries: []RegistrySourceConfig{
 			{
 				Name:     "default",
-				Type:     "static",
-				URL:      "https://gocodealone.github.io/workflow-registry/v1",
-				Priority: 0,
-			},
-			{
-				Name:     "github-fallback",
 				Type:     "github",
 				Owner:    registryOwner,
 				Repo:     registryRepo,
 				Branch:   registryBranch,
+				Priority: 0,
+			},
+			{
+				Name:     "static-mirror",
+				Type:     "static",
+				URL:      "https://gocodealone.github.io/workflow-registry/v1",
 				Priority: 100,
 			},
 		},
@@ -62,26 +65,53 @@ func LoadRegistryConfig(explicitPath string) (*RegistryConfig, error) {
 	}
 
 	for _, p := range paths {
-		data, err := os.ReadFile(p)
+		cfg, ok, err := loadRegistryConfigFile(p)
 		if err != nil {
-			continue
+			return nil, err
 		}
-		var cfg RegistryConfig
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return nil, fmt.Errorf("parse registry config %s: %w", p, err)
+		if ok {
+			return cfg, nil
 		}
-		// Ensure defaults
-		for i := range cfg.Registries {
-			if cfg.Registries[i].Branch == "" {
-				cfg.Registries[i].Branch = "main"
-			}
-			if cfg.Registries[i].Type == "" {
-				cfg.Registries[i].Type = "github"
-			}
-		}
-		return &cfg, nil
 	}
 	return DefaultRegistryConfig(), nil
+}
+
+func loadRegistryConfigFile(path string) (*RegistryConfig, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("read registry config %s: %w", path, err)
+	}
+	// First, check whether the file contains a "registries" key at all.
+	// A lockfile (plugins: ...) has no such key, and silently treating it as
+	// an empty registry config would cause "no registry sources configured"
+	// for every subsequent plugin install.
+	// We distinguish "key absent" (lockfile / unrelated file -> skip) from
+	// "key present but empty" (intentional empty config -> respect it).
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, false, fmt.Errorf("parse registry config %s: %w", path, err)
+	}
+	if _, hasKey := raw["registries"]; !hasKey {
+		// No "registries" key - this is probably a lockfile or project config.
+		return nil, false, nil
+	}
+	var cfg RegistryConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, false, fmt.Errorf("parse registry config %s: %w", path, err)
+	}
+	// Ensure defaults.
+	for i := range cfg.Registries {
+		if cfg.Registries[i].Branch == "" {
+			cfg.Registries[i].Branch = "main"
+		}
+		if cfg.Registries[i].Type == "" {
+			cfg.Registries[i].Type = "github"
+		}
+	}
+	return &cfg, true, nil
 }
 
 // SaveRegistryConfig writes a registry config to a YAML file.

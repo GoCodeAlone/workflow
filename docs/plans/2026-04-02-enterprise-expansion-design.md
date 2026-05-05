@@ -1,3 +1,31 @@
+---
+status: implemented
+area: plugins
+owner: workflow
+implementation_refs:
+  - repo: workflow-plugin-crm
+    commit: 8505ec2
+  - repo: workflow-plugin-erp
+    commit: e42221e
+  - repo: workflow-plugin-vectorstore
+    commit: 2ca8a20
+  - repo: workflow-plugin-sso
+    commit: 81b9aba
+  - repo: workflow-plugin-audit
+    commit: 941a032
+  - repo: workflow-plugin-approval
+    commit: 0f8d899
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'ls -d /Users/jon/workspace/workflow-plugin-{crm,erp,vectorstore,sso,audit,approval}'
+    - 'rg -n "crm.provider|erp.provider|vectorstore.provider|sso.oidc|audit.collector|approval.engine" /Users/jon/workspace/workflow-plugin-*/plugin.json /Users/jon/workspace/workflow-plugin-*/internal -S'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Enterprise Expansion Design
 
 **Date:** 2026-04-02

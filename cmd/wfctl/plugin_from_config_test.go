@@ -90,6 +90,28 @@ func TestInstallFromConfig_FlagWired(t *testing.T) {
 	}
 }
 
+// TestInstallFromConfig_NormalizedSkipCheck verifies that when requires.plugins
+// lists "workflow-plugin-auth", the already-installed check uses the normalized
+// name ("auth") so it correctly detects the plugin as installed — rather than
+// looking in <pluginDir>/workflow-plugin-auth and always thinking it needs install.
+func TestInstallFromConfig_NormalizedSkipCheck(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+
+	// runPluginInstall normalizes "workflow-plugin-auth" → "auth" and installs
+	// to <pluginDir>/auth. Pre-create that directory so the skip check fires.
+	fakeInstalledPlugin(t, pluginDir, "auth", "0.1.2")
+
+	cfgPath := writeWorkflowWithPlugins(t, dir, []struct{ name, version string }{
+		{"workflow-plugin-auth", "0.1.2"},
+	})
+
+	// Should skip without error (no network call needed).
+	if err := installFromWorkflowConfig(cfgPath, pluginDir, ""); err != nil {
+		t.Fatalf("installFromWorkflowConfig: %v", err)
+	}
+}
+
 func TestInstallFromConfig_MissingConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "plugins")

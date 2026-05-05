@@ -62,3 +62,4 @@ benchmark-results.txt
 benchstat-output.txt
 .worktrees
 cmd/wfctl/.wfctl.yaml
+cmd/wfctl/.wfctl-lock.yaml

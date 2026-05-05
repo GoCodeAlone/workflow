@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -15,23 +16,74 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func runMigrate(args []string) error {
-	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+// TODO(v0.21+): reclaim wfctl migrate namespace for app DB migrations
+// via workflow-migrate integration. The current wfctl migrate handler
+// moves permanently to `wfctl config migrate`.
+
+// runConfig is the wfctl config command dispatcher. It groups
+// engine-config-domain subcommands under a single namespace, starting with
+// `wfctl config migrate` (formerly `wfctl migrate`).
+func runConfig(args []string) error {
+	if len(args) < 1 {
+		fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl config <subcommand> [options]
+
+Manage engine configuration.
+
+Subcommands:
+  migrate   Manage engine config database schema migrations
+            (replaces the deprecated wfctl migrate command)
+
+`)
+		return fmt.Errorf("missing or unknown subcommand")
+	}
+	switch args[0] {
+	case "migrate":
+		return runConfigMigrate(args[1:])
+	default:
+		return fmt.Errorf("unknown wfctl config subcommand %q (available: migrate)", args[0])
+	}
+}
+
+// migrateDeprecationWriter is the io.Writer that receives the deprecation
+// banner from runMigrateDeprecated. Defaults to os.Stderr; overridden in tests.
+var migrateDeprecationWriter io.Writer = os.Stderr
+
+// runMigrateDeprecated is the legacy wfctl migrate dispatcher. It prints a
+// one-time deprecation notice then delegates to runConfigMigrate.
+func runMigrateDeprecated(args []string) error {
+	fmt.Fprintln(migrateDeprecationWriter,
+		"wfctl migrate is being renamed to wfctl config migrate "+
+			"(engine config migration is config-domain). "+
+			"The old form is supported for one release; please update your scripts.")
+	return runConfigMigrate(args)
+}
+
+// runConfigMigrate is the canonical wfctl config migrate handler.
+// It manages engine config database schema migrations.
+func runConfigMigrate(args []string) error {
+	fs := flag.NewFlagSet("config migrate", flag.ContinueOnError)
 	dbPath := fs.String("db", "workflow.db", "Path to SQLite database file")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: wfctl migrate <subcommand> [options]
+		fmt.Fprintf(fs.Output(), `Usage: wfctl config migrate <subcommand> [options]
 
-Manage database schema migrations.
+Manage engine config database schema migrations.
 
 Subcommands:
   status    Show applied and pending migrations
   diff      Show pending migrations without applying them
   apply     Apply pending migrations
+  plugins   Migrate requires.plugins[] from app.yaml → wfctl.yaml + .wfctl-lock.yaml
+  repair-dirty
+            Repair a known dirty golang-migrate metadata state via an IaC provider job
 
 Examples:
-  wfctl migrate status --db workflow.db
-  wfctl migrate diff --db workflow.db
-  wfctl migrate apply --db workflow.db
+  wfctl config migrate status --db workflow.db
+  wfctl config migrate diff --db workflow.db
+  wfctl config migrate apply --db workflow.db
+  wfctl config migrate plugins --config workflow.yaml
+  wfctl config migrate repair-dirty --config infra.yaml --env staging --database db --app app --job-image image --expected-dirty-version 20260426000005 --force-version 20260422000001 --confirm-force FORCE_MIGRATION_METADATA
+
+Note: wfctl migrate is a deprecated alias for wfctl config migrate.
 
 Options:
 `)
@@ -40,10 +92,19 @@ Options:
 
 	if len(args) == 0 {
 		fs.Usage()
-		return fmt.Errorf("subcommand required: status, diff, or apply")
+		return fmt.Errorf("subcommand required: status, diff, apply, plugins, or repair-dirty")
 	}
 
 	subcmd := args[0]
+
+	// Handle non-DB subcommands before opening the database.
+	if subcmd == "plugins" {
+		return runMigratePlugins(args[1:])
+	}
+	if subcmd == "repair-dirty" {
+		return runMigrateRepairDirty(args[1:])
+	}
+
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -83,6 +144,11 @@ Options:
 		return fmt.Errorf("unknown subcommand: %s", subcmd)
 	}
 }
+
+// runMigrate is a package-level alias for runConfigMigrate retained for
+// backward compatibility with existing tests and internal callers.
+// Production use of wfctl migrate routes through runMigrateDeprecated.
+func runMigrate(args []string) error { return runConfigMigrate(args) }
 
 func migrateStatus(ctx context.Context, runner *migration.MigrationRunner, providers []migration.SchemaProvider) error {
 	if len(providers) == 0 {

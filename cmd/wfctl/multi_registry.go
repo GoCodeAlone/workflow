@@ -56,26 +56,72 @@ func normalizePluginName(name string) string {
 	return strings.TrimPrefix(name, "workflow-plugin-")
 }
 
-// FetchManifest tries each source in priority order, returning the first successful result.
-// It first tries the normalized name (stripping "workflow-plugin-" prefix); if the
-// normalized name differs from the original, it also tries the original name as a fallback.
-func (m *MultiRegistry) FetchManifest(name string) (*RegistryManifest, string, error) {
-	normalized := normalizePluginName(name)
+// debugRegistryLog is true when the WFCTL_DEBUG environment variable is non-empty.
+// It enables per-source trace logging in FetchManifest to aid CI diagnostics.
+var debugRegistryLog = os.Getenv("WFCTL_DEBUG") != ""
 
-	// Try normalized name first across all sources.
+// FetchManifest tries each source in priority order, returning the first successful result.
+// It first tries the original name across all sources; if the original name differs from
+// its normalized form (after stripping the "workflow-plugin-" prefix) and no source
+// matched the original, it retries with the normalized name as a fallback.
+//
+// Trying the original name first prevents name collisions where both "auth" (a builtin
+// module plugin) and "workflow-plugin-auth" (an external plugin) exist in the registry —
+// the caller's intent is respected rather than conflating the two.
+//
+// Set WFCTL_DEBUG=1 to enable per-source trace logging on stderr.
+func (m *MultiRegistry) FetchManifest(name string) (*RegistryManifest, string, error) {
+	// Guard against misconfigured / empty registries early so the error message
+	// is actionable rather than "not found in any configured registry" with no
+	// hint about why.
+	if len(m.sources) == 0 {
+		return nil, "", fmt.Errorf("plugin %q not found: no registry sources configured"+
+			" (missing .wfctl.yaml? run `wfctl registry list` or set WFCTL_DEBUG=1)", name)
+	}
+
+	normalized := normalizePluginName(name)
+	if debugRegistryLog {
+		fmt.Fprintf(os.Stderr, "[wfctl debug] FetchManifest %q: %d source(s), normalized=%q\n",
+			name, len(m.sources), normalized)
+	}
+
+	// Try the original name first across all sources.
 	var lastErr error
 	for _, src := range m.sources {
-		manifest, err := src.FetchManifest(normalized)
+		manifest, err := src.FetchManifest(name)
+		if debugRegistryLog {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (original %q): %v\n", src.Name(), name, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (original %q): found v%s\n",
+					src.Name(), name, strings.TrimPrefix(manifest.Version, "v"))
+			}
+		}
 		if err == nil {
 			return manifest, src.Name(), nil
 		}
 		lastErr = err
 	}
 
-	// If normalized differs from original, try original name as fallback.
+	// If the original name was not found and the normalized short name differs,
+	// retry with the short name. This lets callers omit the "workflow-plugin-"
+	// prefix (e.g. passing "auth" resolves to the registry entry named "auth"
+	// when no entry named "auth" exists under the full original name).
 	if normalized != name {
+		if debugRegistryLog {
+			fmt.Fprintf(os.Stderr, "[wfctl debug] FetchManifest %q: original not found, retrying as normalized %q\n",
+				name, normalized)
+		}
 		for _, src := range m.sources {
-			manifest, err := src.FetchManifest(name)
+			manifest, err := src.FetchManifest(normalized)
+			if debugRegistryLog {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (normalized %q): %v\n", src.Name(), normalized, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (normalized %q): found v%s\n",
+						src.Name(), normalized, strings.TrimPrefix(manifest.Version, "v"))
+				}
+			}
 			if err == nil {
 				return manifest, src.Name(), nil
 			}

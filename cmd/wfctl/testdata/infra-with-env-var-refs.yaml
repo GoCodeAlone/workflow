@@ -1,0 +1,17 @@
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: ${DIGITALOCEAN_TOKEN}
+  - name: example-app
+    type: infra.container_service
+    config:
+      services:
+        - name: api
+          image: "${IMAGE_REF}"
+          env_vars:
+            DEPLOY_ENV: staging
+            AUTH_TOKEN: "${AUTH_TOKEN}"
+          env_vars_secret:
+            DB_URL: "${DATABASE_URL}"

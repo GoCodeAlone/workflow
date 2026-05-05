@@ -132,8 +132,8 @@ requires:
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// Write .wfctl.yaml lockfile.
-	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(`plugins:
+	// Write .wfctl-lock.yaml lockfile (new canonical path).
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl-lock.yaml"), []byte(`plugins:
   my-plugin:
     version: 1.0.0
 `), 0600); err != nil {
