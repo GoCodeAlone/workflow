@@ -204,7 +204,8 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		return fmt.Errorf("open state store: %w", storeErr)
 	}
 
-	// Apply each provider group in declaration order.
+	// Apply each provider group in first-reference order (the order in which
+	// each group's first spec appeared in infraSpecs, not iac.provider declaration order).
 	applyGroup := func(moduleRef string, g *specGroup) error {
 		fmt.Printf("Applying %d resource(s) via provider %q (%s)...\n", len(g.specs), moduleRef, g.provType)
 		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)

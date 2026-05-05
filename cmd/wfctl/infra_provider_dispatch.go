@@ -82,7 +82,10 @@ func resolveProviderDefs(cfg *config.WorkflowConfig, envName string) (defs map[s
 func groupSpecsByProviderRef(specs []interfaces.ResourceSpec, defs map[string]providerDef, disabled map[string]struct{}, envName string) (groupOrder []string, groups map[string]*specGroup, err error) {
 	groups = map[string]*specGroup{}
 	for _, spec := range specs {
-		moduleRef, _ := spec.Config["provider"].(string)
+		var moduleRef string
+		if spec.Config != nil {
+			moduleRef, _ = spec.Config["provider"].(string)
+		}
 		if moduleRef == "" {
 			return nil, nil, fmt.Errorf("infra module %q (%s): missing required 'provider' field", spec.Name, spec.Type)
 		}

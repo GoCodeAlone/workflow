@@ -1,6 +1,10 @@
 package main
 
 import (
+	"context"
+	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -153,7 +157,19 @@ func TestGroupSpecsByProviderRef_UndeclaredProviderError(t *testing.T) {
 	}
 }
 
-func TestGroupSpecsByProviderRef_EmptyProvTypError(t *testing.T) {
+func TestGroupSpecsByProviderRef_NilConfigTreatedAsMissingProvider(t *testing.T) {
+	defs := map[string]providerDef{"prov-a": {provType: "cloud-a"}}
+	specs := []interfaces.ResourceSpec{
+		{Name: "nil-cfg-res", Type: "infra.vpc", Config: nil},
+	}
+
+	_, _, err := groupSpecsByProviderRef(specs, defs, nil, "")
+	if err == nil {
+		t.Fatal("expected error for nil Config (treated as missing provider field), got nil")
+	}
+}
+
+func TestGroupSpecsByProviderRef_EmptyProvTypeError(t *testing.T) {
 	defs := map[string]providerDef{
 		"prov-no-type": {provType: ""}, // provider field missing from module config
 	}
@@ -167,66 +183,106 @@ func TestGroupSpecsByProviderRef_EmptyProvTypError(t *testing.T) {
 	}
 }
 
-// ── plan-apply grouping equivalence ───────────────────────────────────────────
+// ── plan-apply grouping equivalence via real entry points ─────────────────────
 
-// TestPlanApplyGroupingEquivalence asserts that plan and apply produce the
-// same provider grouping (group order + spec membership) for the same input
-// config, satisfying the issue's acceptance criterion:
+// capturedPlanCall records what was passed to the computeInfraPlan seam for
+// one provider group, allowing plan- and apply-path behaviour to be compared.
+type capturedPlanCall struct {
+	provType  string
+	specNames []string
+}
+
+// TestPlanApplyGroupingEquivalence_ViaRealEntryPoints exercises both
+// computePlanForInfraSpecs (plan path) and applyInfraModules (apply path)
+// against the same YAML config and asserts that both dispatch through
+// computeInfraPlan with the same (provType, specNames) sequence per group.
 //
-//	"New unit test asserts plan and apply produce the same provider grouping
-//	for the same input config"
-//
-// Since both paths now call resolveProviderDefs + groupSpecsByProviderRef, a
-// single call exercises both paths identically.
-func TestPlanApplyGroupingEquivalence(t *testing.T) {
-	cfg := &config.WorkflowConfig{
-		Modules: []config.ModuleConfig{
-			{Name: "aws-prov", Type: "iac.provider", Config: map[string]any{"provider": "aws"}},
-			{Name: "gcp-prov", Type: "iac.provider", Config: map[string]any{"provider": "gcp"}},
-		},
+// Because we spy on the actual package-level seams used by both functions,
+// any future change that makes one path bypass the shared helpers will be
+// caught here — unlike a test that re-invokes the helpers directly.
+func TestPlanApplyGroupingEquivalence_ViaRealEntryPoints(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: aws-prov
+    type: iac.provider
+    config:
+      provider: aws
+  - name: gcp-prov
+    type: iac.provider
+    config:
+      provider: gcp
+  - name: bucket
+    type: infra.s3_bucket
+    config:
+      provider: aws-prov
+  - name: cluster
+    type: infra.gke_cluster
+    config:
+      provider: gcp-prov
+  - name: fn
+    type: infra.function
+    config:
+      provider: aws-prov
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 
-	specs := []interfaces.ResourceSpec{
-		{Name: "bucket", Type: "infra.s3_bucket", Config: map[string]any{"provider": "aws-prov"}},
-		{Name: "cluster", Type: "infra.gke_cluster", Config: map[string]any{"provider": "gcp-prov"}},
-		{Name: "lambda", Type: "infra.function", Config: map[string]any{"provider": "aws-prov"}},
+	origResolve := resolveIaCProvider
+	origPlan := computeInfraPlan
+	t.Cleanup(func() {
+		resolveIaCProvider = origResolve
+		computeInfraPlan = origPlan
+	})
+
+	// currentProvType is set by the resolveIaCProvider spy immediately before
+	// each group's computeInfraPlan call. Both seam calls happen sequentially
+	// within the same group closure/goroutine, so this is safe without a mutex.
+	var currentProvType string
+	resolveIaCProvider = func(_ context.Context, pt string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		currentProvType = pt
+		return &applyCapture{}, nil, nil
 	}
 
-	defs, typeCounts, disabled := resolveProviderDefs(cfg, "")
-
-	// Simulate the plan path grouping.
-	planOrder, planGroups, err := groupSpecsByProviderRef(specs, defs, disabled, "")
-	if err != nil {
-		t.Fatalf("plan groupSpecsByProviderRef: %v", err)
-	}
-
-	// Simulate the apply path grouping (same inputs → must produce same outputs).
-	applyOrder, applyGroups, err := groupSpecsByProviderRef(specs, defs, disabled, "")
-	if err != nil {
-		t.Fatalf("apply groupSpecsByProviderRef: %v", err)
-	}
-
-	// Group order must be identical.
-	if !reflect.DeepEqual(planOrder, applyOrder) {
-		t.Errorf("group order diverges:\n  plan:  %v\n  apply: %v", planOrder, applyOrder)
-	}
-
-	// Spec membership per group must be identical.
-	for _, ref := range planOrder {
-		pSpecs := specNames(planGroups[ref].specs)
-		aSpecs := specNames(applyGroups[ref].specs)
-		if !reflect.DeepEqual(pSpecs, aSpecs) {
-			t.Errorf("group %q spec divergence:\n  plan:  %v\n  apply: %v", ref, pSpecs, aSpecs)
+	// ── plan path ────────────────────────────────────────────────────────────
+	var planCalls []capturedPlanCall
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		names := make([]string, len(specs))
+		for i, s := range specs {
+			names[i] = s.Name
 		}
+		planCalls = append(planCalls, capturedPlanCall{provType: currentProvType, specNames: names})
+		return interfaces.IaCPlan{}, nil
 	}
 
-	// typeCounts heuristic must be the same for both paths (they share the
-	// map, so just verify the values are present).
-	if typeCounts["aws"] != 1 {
-		t.Errorf("typeCounts[aws] = %d, want 1", typeCounts["aws"])
+	desired, err := parseInfraResourceSpecsForEnv(cfgPath, "")
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecsForEnv: %v", err)
 	}
-	if typeCounts["gcp"] != 1 {
-		t.Errorf("typeCounts[gcp] = %d, want 1", typeCounts["gcp"])
+	if _, err := computePlanForInfraSpecs(context.Background(), cfgPath, "", desired, nil); err != nil {
+		t.Fatalf("computePlanForInfraSpecs: %v", err)
+	}
+
+	// ── apply path ───────────────────────────────────────────────────────────
+	currentProvType = ""
+	var applyCalls []capturedPlanCall
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		names := make([]string, len(specs))
+		for i, s := range specs {
+			names[i] = s.Name
+		}
+		applyCalls = append(applyCalls, capturedPlanCall{provType: currentProvType, specNames: names})
+		return interfaces.IaCPlan{}, nil // empty plan → applyWithProviderAndStore returns immediately
+	}
+
+	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+		t.Fatalf("applyInfraModules: %v", err)
+	}
+
+	// ── assert same grouping sequence ────────────────────────────────────────
+	if !reflect.DeepEqual(planCalls, applyCalls) {
+		t.Errorf("plan-vs-apply computeInfraPlan call sequence diverges:\n  plan:  %v\n  apply: %v", planCalls, applyCalls)
 	}
 }
 
