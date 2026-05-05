@@ -156,12 +156,18 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 		}
 		args = append(args, "--provenance=mode=max", "--sbom=true")
 		// The docker-container driver caches the build result but does not export
-		// it unless --push or --load is explicitly specified. Pass the appropriate
-		// flag so the image is either pushed to the registry or loaded into the
-		// local docker daemon for downstream use (e.g. docker run in CI).
-		if push {
+		// it unless --push or --load is explicitly specified.
+		if push && len(ctr.PushTo) > 0 {
+			// Multi-registry: add every push_to ref as a --tag flag so buildx
+			// pushes to all registries in a single invocation.
+			allRefs := allImageRefsForContainer(ctr, tag, registries)
+			for _, ref := range allRefs[1:] {
+				args = append(args, "--tag", ref)
+			}
 			args = append(args, "--push")
-		} else {
+		} else if len(ctr.Platforms) <= 1 {
+			// Single-platform with no push (or no push_to): load into local daemon.
+			// Multi-platform + no-push: --load is unsupported; leave in buildkit cache.
 			args = append(args, "--load")
 		}
 	}
@@ -276,4 +282,28 @@ func imageRefForContainer(ctr config.CIContainerTarget, tag string, registries [
 		return ctr.PushTo[0] + "/" + ctr.Name + ":" + tag
 	}
 	return ctr.Name + ":" + tag
+}
+
+// allImageRefsForContainer returns image refs for every registry listed in push_to[].
+// Falls back to local name:tag when push_to is empty.
+// Used by hardened buildx builds to populate multiple --tag flags so all registries
+// are pushed in a single buildx invocation.
+func allImageRefsForContainer(ctr config.CIContainerTarget, tag string, registries []config.CIRegistry) []string {
+	if len(ctr.PushTo) == 0 {
+		return []string{ctr.Name + ":" + tag}
+	}
+	regMap := make(map[string]string, len(registries))
+	for _, reg := range registries {
+		regMap[reg.Name] = reg.Path
+	}
+	refs := make([]string, 0, len(ctr.PushTo))
+	for _, regName := range ctr.PushTo {
+		if path, ok := regMap[regName]; ok {
+			refs = append(refs, path+"/"+ctr.Name+":"+tag)
+		} else {
+			// Fall back to raw registry name when path not configured.
+			refs = append(refs, regName+"/"+ctr.Name+":"+tag)
+		}
+	}
+	return refs
 }
