@@ -1039,6 +1039,41 @@ func receiverTypeName(fn *ast.FuncDecl) string {
 	return id.Name
 }
 
+// bodyCallsSelector reports whether the function body contains a
+// CallExpr whose callee is a SelectorExpr with the given X.Name and
+// Sel.Name, e.g. `wfctlhelpers.Plan(...)`.
+//
+//nolint:unused
+func bodyCallsSelector(body *ast.BlockStmt, pkgIdent, selName string) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		x, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if x.Name == pkgIdent && sel.Sel.Name == selName {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 // bodyReferencesField reports whether the function body references any
 // SelectorExpr with the given Sel.Name, e.g. any `<X>.ForceNew`.
 func bodyReferencesField(body *ast.BlockStmt, fieldName string) bool {

@@ -54,18 +54,9 @@ linters:
         linters:
           - staticcheck
         text: "SA5011"
-      # Exclude third-party vendored Go code bundled under ui/node_modules from all linters
-      - path: ui/node_modules
-        linters:
-          - errcheck
-          - govet
-          - ineffassign
-          - staticcheck
-          - unused
-          - gocritic
-          - gosec
-          - bodyclose
-          - nilerr
+    paths:
+      # Exclude third-party vendored Go code bundled under ui/node_modules from analysis entirely
+      - ui/node_modules
     presets:
       - std-error-handling
 

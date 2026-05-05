@@ -39,6 +39,13 @@ const helperImportPath = "github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 // files would fail to compile".
 const planHelperImportPath = "github.com/GoCodeAlone/workflow/platform"
 
+// planCanonicalCallExpr is the canonical replacement-body expression
+// emitted by refactor-plan. Calls platform.ComputePlan (the real helper);
+// see planHelperImportPath above for the review-correction rationale.
+//
+//nolint:unused
+const planCanonicalCallExpr = "platform.ComputePlan(ctx, p, desired, current)"
+
 // planClassification labels the disposition of a single Plan() method
 // site. Each report entry carries one classification; the rewriter
 // honors only `planCanonical`.
