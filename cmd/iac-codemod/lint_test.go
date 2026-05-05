@@ -113,9 +113,12 @@ func (p *FooProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, e
 func (p *FooProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
 `
 
+// planCanonicalSrc uses the canonical 2-statement form per round-2
+// finding #1 (the value/pointer bridge for platform.ComputePlan).
 const planCanonicalSrc = providerScaffold + `
 func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
-	return platform.ComputePlan(ctx, p, desired, current)
+	plan, err := platform.ComputePlan(ctx, p, desired, current)
+	return &plan, err
 }
 `
 
@@ -288,7 +291,8 @@ type PlanDiagnostic struct{}
 type FooProvider struct{}
 
 func (p *FooProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
-	return platform.ComputePlan(ctx, p, desired, current)
+	plan, err := platform.ComputePlan(ctx, p, desired, current)
+	return &plan, err
 }
 func (p *FooProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
 `

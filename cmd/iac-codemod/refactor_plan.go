@@ -56,8 +56,13 @@ const (
 	// planNonCanonical: body has out-of-template logic; report only,
 	// never rewrite.
 	planNonCanonical
-	// planAlreadyDelegated: body is already `return wfctlhelpers.Plan(...)`;
-	// report as no-op (idempotent), do NOT rewrite.
+	// planAlreadyDelegated: body is the canonical 2-statement
+	// `plan, err := platform.ComputePlan(...); return &plan, err`
+	// form (or the legacy `return wfctlhelpers.Plan(...)` shape);
+	// report as no-op (idempotent), do NOT rewrite. Round-11 #6:
+	// rev1 of this comment still referenced the old `wfctlhelpers.Plan`
+	// target; the actual recognised shape is platform.ComputePlan
+	// per planHelperImportPath above.
 	planAlreadyDelegated
 	// planSkipped: function carries the SkipMarker; report into the
 	// Skipped section. (Distinct from the lint-mode skip path because
@@ -1177,6 +1182,11 @@ func pkgAliasFor(file *ast.File, importPath, defaultName string) string {
 // `path`. The two-step write protects against partial writes on crash:
 // either the destination contains the full new contents or it remains
 // unchanged.
+//
+// Round-11 #2: rev1 left the temp file at os.CreateTemp's default
+// 0600 mode, so the rename clobbered the source's original permissions
+// (e.g., 0644 → 0600). Now captures the original mode via os.Stat
+// and chmods the temp file to match before the rename.
 func writeFileAtomic(path string, fset *token.FileSet, file *ast.File) error {
 	var buf bytes.Buffer
 	// format.Node produces gofmt-canonical output (the same algorithm
@@ -1186,6 +1196,21 @@ func writeFileAtomic(path string, fset *token.FileSet, file *ast.File) error {
 	// codemod-touched files in code review.
 	if err := format.Node(&buf, fset, file); err != nil {
 		return err
+	}
+	return writeFileAtomicBytesPreserveMode(path, buf.Bytes())
+}
+
+// writeFileAtomicBytesPreserveMode is the underlying atomic-write
+// helper that captures the source file's mode and applies it to the
+// temp file before rename. Used by both writeFileAtomic and
+// writeFileAtomicBytes so both AST-printing and raw-bytes writers
+// preserve permissions (round-11 #2 + #5).
+func writeFileAtomicBytesPreserveMode(path string, data []byte) error {
+	// Capture the source's original mode so the rename doesn't
+	// clobber it with CreateTemp's default 0600.
+	var origMode os.FileMode = 0o644
+	if info, err := os.Stat(path); err == nil {
+		origMode = info.Mode().Perm()
 	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".codemod-")
@@ -1197,11 +1222,14 @@ func writeFileAtomic(path string, fset *token.FileSet, file *ast.File) error {
 		// Best-effort cleanup if rename fails.
 		_ = os.Remove(tmpPath)
 	}()
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, origMode); err != nil {
 		return err
 	}
 	return os.Rename(tmpPath, path)

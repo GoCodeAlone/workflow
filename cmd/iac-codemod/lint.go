@@ -546,19 +546,24 @@ func planBodyDelegatesCanonically(body *ast.BlockStmt, file *ast.File) bool {
 	if isAlreadyDelegatedPlanBody(body, file) {
 		return true
 	}
-	// Shape 2: single-statement `return <X>.Plan(...)` /
-	// `return <X>.ComputePlan(...)`.
+	// Shape 2: single-statement legacy `return <wfctlhelpers>.Plan(...)`.
+	// The planned-but-not-shipped wfctlhelpers.Plan target was speculative;
+	// any code using it is fictional and the type-check will fail anyway,
+	// but we accept it as advisory-clean so a maintainer who hand-applied
+	// rev0 of this codemod isn't re-flagged.
+	//
+	// Round-11 #1: the BROKEN `return platform.ComputePlan(...)`
+	// single-statement form (rev1 ill-formed rewrite — uncompilable
+	// due to value/pointer mismatch) is REJECTED here. Lint should
+	// surface this as still-needs-fixup so `migrate-providers`
+	// catches partially-migrated providers.
 	if len(body.List) == 1 {
 		if ret, ok := body.List[0].(*ast.ReturnStmt); ok && len(ret.Results) == 1 {
 			if call, ok := ret.Results[0].(*ast.CallExpr); ok {
 				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 					if x, ok := sel.X.(*ast.Ident); ok {
-						platformAlias := pkgAliasFor(file, planHelperImportPath, "platform")
 						wfhAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
-						switch {
-						case (x.Name == platformAlias || x.Name == "platform") && sel.Sel.Name == "ComputePlan":
-							return true
-						case (x.Name == wfhAlias || x.Name == "wfctlhelpers") && sel.Sel.Name == "Plan":
+						if (x.Name == wfhAlias || x.Name == "wfctlhelpers") && sel.Sel.Name == "Plan" {
 							return true
 						}
 					}
@@ -784,14 +789,12 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 		if hasValidatePlanMethod(methods) {
 			continue
 		}
-		// Round-10 #3: provider with embedded fields may inherit
-		// ValidatePlan via method promotion. Without full type info we
-		// can't resolve promotion, so suppress the missing-stub
-		// diagnostic when embedded fields are present (consistent with
-		// add-validate-plan's round-10 #2 fix).
-		if ts, ok := typeDecls[recv]; ok && typeHasEmbeddedFields(ts) {
-			continue
-		}
+		// Round-11 #4 reverts round-10 #3's broad-suppress on
+		// embedded fields: many embeddings (sync.Mutex, loggers,
+		// config mixins) don't promote ValidatePlan, so real targets
+		// were silently missed. Maintainers whose providers actually
+		// promote ValidatePlan can suppress with the explicit
+		// `// wfctl:skip-iac-codemod` marker (the universal opt-out).
 		// Report at the type decl if available, else at the first method.
 		var pos token.Pos
 		if ts, ok := typeDecls[recv]; ok {

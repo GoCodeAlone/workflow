@@ -322,18 +322,16 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 			class = validatePlanSkipped
 		case hasValidatePlanMethod(methods):
 			class = validatePlanAlreadyImplemented
-		case typeHasEmbeddedFields(ts):
-			// Round-10 #2: a provider with embedded fields may
-			// already satisfy ProviderValidator via a promoted
-			// method from the embedded type. We can't statically
-			// resolve promotion without full type-info, so err on
-			// the side of NOT injecting a stub (which would shadow
-			// the promoted method and silently drop diagnostics).
-			// Maintainers who genuinely want a stub can either
-			// remove the embedding or add an explicit
-			// `// wfctl:skip-iac-codemod` marker.
-			class = validatePlanAlreadyImplemented
 		default:
+			// Round-11 #3 reverts round-10 #2's broad-suppress: ANY
+			// embedded field would suppress the missing diagnostic,
+			// but `sync.Mutex`, loggers, config mixins, etc. don't
+			// promote a `ValidatePlan` method, so real migration
+			// targets were silently missed. Without full type info we
+			// can't resolve promotion, so report missing
+			// unconditionally; maintainers whose providers actually
+			// satisfy ProviderValidator via promotion can suppress
+			// with the explicit `// wfctl:skip-iac-codemod` marker.
 			class = validatePlanMissing
 		}
 
@@ -871,29 +869,15 @@ func typeNameTailMatches(expr ast.Expr, want string) bool {
 	return false
 }
 
-// typeHasEmbeddedFields returns true if ts is a struct with at least
-// one embedded (anonymous) field. Used by add-validate-plan and the
-// lint analyzer to skip the missing-ValidatePlan diagnostic on
-// providers that may inherit ValidatePlan via method promotion from
-// an embedded type — round-10 #2 + #3: the codemod can't statically
-// resolve method promotion without full type info, so it errs on
-// the side of NOT injecting a stub (which would shadow the promoted
-// method and silently drop diagnostics).
-func typeHasEmbeddedFields(ts *ast.TypeSpec) bool {
-	if ts == nil {
-		return false
-	}
-	st, ok := ts.Type.(*ast.StructType)
-	if !ok || st.Fields == nil {
-		return false
-	}
-	for _, f := range st.Fields.List {
-		if len(f.Names) == 0 {
-			return true // embedded (anonymous) field
-		}
-	}
-	return false
-}
+// (typeHasEmbeddedFields was added in round-10 #2/#3 to suppress the
+// missing-ValidatePlan diagnostic on providers with ANY embedded
+// field, on the assumption embedding might promote ValidatePlan.
+// Round-11 #3/#4 reverted that broad suppression because most
+// embeddings — sync.Mutex, loggers, config mixins — don't promote
+// ValidatePlan, so real targets were silently missed. The function
+// is removed; maintainers whose providers ACTUALLY satisfy
+// ProviderValidator via promotion suppress with the explicit
+// `// wfctl:skip-iac-codemod` marker.)
 
 // genDeclFor returns the *ast.GenDecl wrapper for the given TypeSpec,
 // which is where a doc comment placed before the `type` keyword
@@ -917,26 +901,14 @@ func genDeclFor(file *ast.File, ts *ast.TypeSpec) *ast.GenDecl {
 	return nil
 }
 
-// writeFileAtomicBytes is the bytes-input twin of writeFileAtomic. It
-// writes `data` to a sibling temp file, flushes, and renames over
-// `path` so concurrent readers see either the old or new contents,
-// never a partial write.
+// writeFileAtomicBytes is the bytes-input twin of writeFileAtomic.
+// Round-11 #5: rev1 left the temp file at os.CreateTemp's default
+// 0600 mode, so the rename clobbered the source's original
+// permissions. Now delegates to writeFileAtomicBytesPreserveMode
+// (defined in refactor_plan.go) which captures the original mode
+// and chmods the temp file before rename.
 func writeFileAtomicBytes(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".codemod-")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return writeFileAtomicBytesPreserveMode(path, data)
 }
 
 // ============================================================
