@@ -1034,6 +1034,10 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var dryRun bool
+	fs.BoolVar(&dryRun, "dry-run", false, "Show planned operations without executing provider mutations")
+	var dryRunFormat string
+	fs.StringVar(&dryRunFormat, "format", "table", "Dry-run output format: table, json")
 	var planFile string
 	fs.StringVar(&planFile, "plan", "", "Apply from a pre-emitted plan.json (skips ComputePlan)")
 	var refreshFlag bool
@@ -1075,6 +1079,11 @@ func runInfraApply(args []string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// --dry-run: compute and display the plan without executing any mutations.
+	if dryRun {
+		return runInfraApplyDryRun(cfgFile, envName, dryRunFormat, showSensitiveVal)
 	}
 
 	if !*autoApprove {
