@@ -248,6 +248,15 @@ func TestDispatchMatrix_RemoteIaCProvider(t *testing.T) {
 		requiredKeys []string
 		invoke       func(p *remoteIaCProvider, ri *recordingInvoker) error
 	}{
+		// Plan and Apply exercise the v1-default branch: per W-Refactor
+		// (PR 5), remoteIaCProvider's Plan / Apply are manifest-conditional
+		// — they proxy IaCProvider.Plan / IaCProvider.Apply via
+		// InvokeService when computePlanVersion is "" / "v1" / unknown,
+		// and delegate to platform.ComputePlan / wfctlhelpers.ApplyPlan
+		// when computePlanVersion == "v2". The matrix below pins the v1
+		// wire shape (the default constructed *remoteIaCProvider has
+		// computePlanVersion: "" so the legacy proxy fires). v2 branch
+		// behavior is pinned in deploy_providers_remote_iac_test.go.
 		{
 			name:         "Plan",
 			wantMethod:   "IaCProvider.Plan",
