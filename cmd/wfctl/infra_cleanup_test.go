@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"io"
 	"strings"
 	"testing"
@@ -80,7 +81,7 @@ func runInfraCleanupForTest(t *testing.T, providers []interfaces.IaCProvider, ar
 	t.Helper()
 	orig := cleanupLoadProviders
 	t.Cleanup(func() { cleanupLoadProviders = orig })
-	cleanupLoadProviders = func(_ context.Context, _, _ string) ([]interfaces.IaCProvider, []io.Closer, error) {
+	cleanupLoadProviders = func(_ context.Context, _ *flag.FlagSet, _, _ string) ([]interfaces.IaCProvider, []io.Closer, error) {
 		return providers, nil, nil
 	}
 
@@ -203,5 +204,32 @@ func TestInfraCleanup_TagRequired(t *testing.T) {
 	}
 	if err != nil && !strings.Contains(err.Error(), "--tag") {
 		t.Errorf("expected error to mention --tag; got: %v", err)
+	}
+}
+
+// TestInfraCleanup_SafeDefault_DryRunFalseWithoutFixStillSkipsDelete pins the
+// safe-default invariant: passing --dry-run=false WITHOUT --fix must NOT
+// delete resources. Cleanup is destructive; mutation requires the explicit
+// --fix opt-in regardless of any --dry-run override. A future refactor that
+// accidentally honors --dry-run=false alone would silently start deleting
+// production resources from a flag a user thought was a preview toggle.
+func TestInfraCleanup_SafeDefault_DryRunFalseWithoutFixStillSkipsDelete(t *testing.T) {
+	fp := &fakeEnumeratingProvider{
+		stubIaCProvider: stubIaCProvider{name: "do-fake"},
+		resources: []interfaces.ResourceRef{
+			{Name: "vpc-1", Type: "infra.vpc"},
+		},
+	}
+
+	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp},
+		"--tag", "test-tag", "--dry-run=false")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fp.deleteCallCount != 0 {
+		t.Errorf("safe-default invariant violated: --dry-run=false without --fix invoked Delete %d times; expected 0", fp.deleteCallCount)
+	}
+	if !strings.Contains(out, "[dry-run]") {
+		t.Errorf("expected [dry-run] marker even with --dry-run=false (because --fix is absent); got: %s", out)
 	}
 }

@@ -27,6 +27,12 @@ var (
 // resolveIaCProvider plugin path; tests override this var to inject fakes
 // without spinning up real plugin subprocesses.
 //
+// fs + cfgFile are passed through so the default implementation can defer to
+// the canonical resolveInfraConfig helper (which honors --config / -c /
+// auto-discovery / positional .yaml argument). envName is empty when no
+// --env was passed. Tests that don't exercise the config-resolution path
+// can ignore both arguments.
+//
 // Returned closers (one per provider, indices aligned) MAY be nil. Callers
 // MUST close them after the cleanup run.
 var cleanupLoadProviders = defaultCleanupLoadProviders
@@ -68,14 +74,10 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 	// --fix is the explicit opt-in to mutation; if absent, --dry-run remains
 	// true regardless of any explicit --dry-run=false. This keeps the safe-
 	// default invariant (cleanup is destructive: never delete without --fix).
-	if !*fix {
-		*dryRun = true
-	} else {
-		*dryRun = false
-	}
+	*dryRun = !*fix
 
 	ctx := context.Background()
-	providers, closers, err := cleanupLoadProviders(ctx, configFile, envName)
+	providers, closers, err := cleanupLoadProviders(ctx, fs, configFile, envName)
 	if err != nil {
 		return fmt.Errorf("load providers: %w", err)
 	}
@@ -134,17 +136,21 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 	return nil
 }
 
-// defaultCleanupLoadProviders walks cfgFile's iac.provider modules and loads
-// each via the canonical resolveIaCProvider plugin path. Mirrors the pattern
-// established by defaultAlignLoadProviders (R-A10) so the cleanup subcommand
-// inherits the same env-resolution + plugin-discovery contract.
+// defaultCleanupLoadProviders walks the resolved config's iac.provider modules
+// and loads each via the canonical resolveIaCProvider plugin path. Mirrors the
+// pattern established by defaultAlignLoadProviders (R-A10) so the cleanup
+// subcommand inherits the same env-resolution + plugin-discovery contract.
+//
+// Config resolution honors the standard precedence: explicit --config / -c
+// flag → auto-discovered infra.yaml / config/infra.yaml → positional
+// .yaml/.yml argument (consistent with the other infra subcommands).
 //
 // Best-effort behaviour: a provider that fails to load emits a stderr warning
 // and is skipped (the rest of the cleanup proceeds). This matches the align
 // path and prevents a single bad iac.provider entry from turning a smoke-gate
 // cleanup into a hard failure that masks other providers' resources.
-func defaultCleanupLoadProviders(ctx context.Context, cfgFile, envName string) ([]interfaces.IaCProvider, []io.Closer, error) {
-	resolved, resolveErr := resolveCleanupConfigFile(cfgFile)
+func defaultCleanupLoadProviders(ctx context.Context, fs *flag.FlagSet, cfgFile, envName string) ([]interfaces.IaCProvider, []io.Closer, error) {
+	resolved, resolveErr := resolveInfraConfig(fs, cfgFile)
 	if resolveErr != nil {
 		return nil, nil, resolveErr
 	}
@@ -183,19 +189,4 @@ func defaultCleanupLoadProviders(ctx context.Context, cfgFile, envName string) (
 		closers = append(closers, closer)
 	}
 	return providers, closers, nil
-}
-
-// resolveCleanupConfigFile applies the same default-discovery rules as the
-// other infra subcommands: explicit --config wins; otherwise scan for
-// infra.yaml / config/infra.yaml in cwd.
-func resolveCleanupConfigFile(cfgFile string) (string, error) {
-	if cfgFile != "" {
-		return cfgFile, nil
-	}
-	for _, candidate := range []string{"infra.yaml", "config/infra.yaml"} {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("no infrastructure config found (tried infra.yaml, config/infra.yaml)")
 }

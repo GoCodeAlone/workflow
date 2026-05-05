@@ -108,6 +108,10 @@ jobs:
         if: always()
         env:
           DO_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
+          # DIGITALOCEAN_TOKEN is what .github/conformance/cleanup.yaml
+          # expands at apply time (the canonical env var name in the
+          # workflow-plugin-digitalocean iac.provider config).
+          DIGITALOCEAN_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${DO_TOKEN:-}" ]; then
@@ -115,4 +119,4 @@ jobs:
             exit 0
           fi
           echo "Cleanup target tag: ${CONFORMANCE_TAG}"
-          ./wfctl infra cleanup --tag "${CONFORMANCE_TAG}" --fix
+          ./wfctl infra cleanup --config .github/conformance/cleanup.yaml --tag "${CONFORMANCE_TAG}" --fix

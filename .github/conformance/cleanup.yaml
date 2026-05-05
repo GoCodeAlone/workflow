@@ -1,0 +1,26 @@
+# Minimal infra config used solely by the conformance smoke gate's
+# `wfctl infra cleanup --tag` step (.github/workflows/conformance-smoke.yml).
+#
+# Why this exists:
+#   `wfctl infra cleanup` loads providers from a config's `iac.provider`
+#   modules; when the smoke job runs at the repo root, no `infra.yaml` exists
+#   there. Without an explicit `--config`, cleanup would fail with
+#   "no infrastructure config found" once `DO_CONFORMANCE_API_TOKEN` is
+#   provisioned (workflow#542). Pinning this minimal config — single
+#   digitalocean iac.provider, no resources, no platform.* modules — gives
+#   the cleanup dispatcher the provider it needs to call EnumerateByTag
+#   without any ambient state.
+#
+# Token resolution:
+#   `${DIGITALOCEAN_TOKEN}` is expanded from the environment at apply time
+#   (config.ExpandEnvInMap). The smoke job sets it via the `DO_TOKEN` env
+#   var bound from `secrets.DO_CONFORMANCE_API_TOKEN`.
+#
+# Refs: workflow#536 (PR 4 Task 4.4 + Copilot review fix).
+
+modules:
+  - name: do
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: ${DIGITALOCEAN_TOKEN}
