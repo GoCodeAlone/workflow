@@ -361,6 +361,52 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 			cfg.Sidecars = append(cfg.Sidecars, sc)
 			existingSidecars[sc.Name] = struct{}{}
 		}
+
+		// Merge top-level secrets — Generate (dedupe by Key) and Entries
+		// (dedupe by Name) are appended; scalar/map fields follow main-wins
+		// semantics consistent with the rest of processImports.
+		if impCfg.Secrets != nil {
+			if cfg.Secrets == nil {
+				cfg.Secrets = &SecretsConfig{}
+			}
+			// Scalar/map fields: parent wins; only adopt if unset on parent.
+			if cfg.Secrets.DefaultStore == "" {
+				cfg.Secrets.DefaultStore = impCfg.Secrets.DefaultStore
+			}
+			if cfg.Secrets.Provider == "" {
+				cfg.Secrets.Provider = impCfg.Secrets.Provider
+			}
+			if cfg.Secrets.Config == nil {
+				cfg.Secrets.Config = impCfg.Secrets.Config
+			}
+			if cfg.Secrets.Rotation == nil {
+				cfg.Secrets.Rotation = impCfg.Secrets.Rotation
+			}
+			// Generate slice — dedupe by Key (first definition wins).
+			existingGen := make(map[string]struct{}, len(cfg.Secrets.Generate))
+			for _, g := range cfg.Secrets.Generate {
+				existingGen[g.Key] = struct{}{}
+			}
+			for _, g := range impCfg.Secrets.Generate {
+				if _, exists := existingGen[g.Key]; exists {
+					continue
+				}
+				cfg.Secrets.Generate = append(cfg.Secrets.Generate, g)
+				existingGen[g.Key] = struct{}{}
+			}
+			// Entries slice — dedupe by Name (first definition wins).
+			existingEntries := make(map[string]struct{}, len(cfg.Secrets.Entries))
+			for _, e := range cfg.Secrets.Entries {
+				existingEntries[e.Name] = struct{}{}
+			}
+			for _, e := range impCfg.Secrets.Entries {
+				if _, exists := existingEntries[e.Name]; exists {
+					continue
+				}
+				cfg.Secrets.Entries = append(cfg.Secrets.Entries, e)
+				existingEntries[e.Name] = struct{}{}
+			}
+		}
 	}
 
 	cfg.Imports = nil // clear after processing

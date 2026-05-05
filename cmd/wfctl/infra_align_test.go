@@ -504,6 +504,59 @@ modules:
 	}
 }
 
+// TestInfraAlign_RA4_TopLevelSecrets_FromImport_DoesNotFire pins the imports
+// merge path: when a `secrets:` block is declared in an imported file rather
+// than the main config, R-A4 must still see those keys. This requires
+// processImports to merge WorkflowConfig.Secrets — without that, cfg.Secrets
+// is nil/empty after LoadFromFile and R-A4 fires false-positive.
+func TestInfraAlign_RA4_TopLevelSecrets_FromImport_DoesNotFire(t *testing.T) {
+	os.Unsetenv("STAGING_PG_PASSWORD")
+	os.Unsetenv("STAGING_API_TOKEN")
+	dir := t.TempDir()
+
+	sharedYAML := `
+secrets:
+  generate:
+    - key: STAGING_PG_PASSWORD
+      type: random_hex
+      length: 32
+  entries:
+    - name: STAGING_API_TOKEN
+      store: vault
+`
+	if err := os.WriteFile(filepath.Join(dir, "shared.yaml"), []byte(sharedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+appName: test
+imports:
+  - shared.yaml
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        DATABASE_URL: "postgres://user:${STAGING_PG_PASSWORD}@host:5432/db"
+        API_TOKEN: "${STAGING_API_TOKEN}"
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := alignOptions{configFile: mainPath}
+	findings, err := runInfraAlignChecks(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A4") {
+		t.Errorf("unexpected R-A4 finding for imported top-level secrets: %v", findings)
+	}
+}
+
 // ── R-A5: migrations alignment ─────────────────────────────────────────────
 
 func TestInfraAlign_RA5_PreDeployMigrateNoDB_Fires(t *testing.T) {

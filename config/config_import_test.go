@@ -641,3 +641,148 @@ modules:
 		t.Errorf("expected exactly 4 modules (no duplicates), got %d", len(cfg.Modules))
 	}
 }
+
+// TestLoadFromFile_ImportSecretsMerge pins the processImports behavior for
+// top-level WorkflowConfig.Secrets: Generate (dedupe by Key) and Entries
+// (dedupe by Name) are merged from imports; scalar/map fields follow
+// main-wins precedence consistent with the rest of the import path.
+func TestLoadFromFile_ImportSecretsMerge(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secrets:
+  defaultStore: import-store
+  provider: import-provider
+  generate:
+    - key: IMPORTED_KEY
+      type: random_hex
+      length: 32
+    - key: SHARED_KEY
+      type: random_hex
+      length: 16
+  entries:
+    - name: IMPORTED_ENTRY
+      store: vault
+    - name: SHARED_ENTRY
+      store: vault
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+secrets:
+  defaultStore: main-store
+  generate:
+    - key: MAIN_KEY
+      type: random_hex
+      length: 64
+    - key: SHARED_KEY
+      type: provider_credential
+      source: main
+  entries:
+    - name: MAIN_ENTRY
+      store: vault
+    - name: SHARED_ENTRY
+      store: main-store
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Secrets == nil {
+		t.Fatal("expected merged Secrets, got nil")
+	}
+
+	// Scalar precedence: main wins where set, import fills where unset.
+	if cfg.Secrets.DefaultStore != "main-store" {
+		t.Errorf("expected DefaultStore=main-store, got %q", cfg.Secrets.DefaultStore)
+	}
+	if cfg.Secrets.Provider != "import-provider" {
+		t.Errorf("expected Provider=import-provider (filled from import), got %q", cfg.Secrets.Provider)
+	}
+
+	// Generate: dedupe by Key, main-wins on conflict, append new entries.
+	genByKey := make(map[string]SecretGen)
+	for _, g := range cfg.Secrets.Generate {
+		if _, exists := genByKey[g.Key]; exists {
+			t.Errorf("duplicate Generate key %q after merge", g.Key)
+		}
+		genByKey[g.Key] = g
+	}
+	for _, k := range []string{"MAIN_KEY", "IMPORTED_KEY", "SHARED_KEY"} {
+		if _, ok := genByKey[k]; !ok {
+			t.Errorf("expected Generate key %q present after merge", k)
+		}
+	}
+	if shared, ok := genByKey["SHARED_KEY"]; ok && shared.Type != "provider_credential" {
+		t.Errorf("expected main-wins for SHARED_KEY type, got %q", shared.Type)
+	}
+
+	// Entries: dedupe by Name, main-wins on conflict, append new entries.
+	entryByName := make(map[string]SecretEntry)
+	for _, e := range cfg.Secrets.Entries {
+		if _, exists := entryByName[e.Name]; exists {
+			t.Errorf("duplicate Entries name %q after merge", e.Name)
+		}
+		entryByName[e.Name] = e
+	}
+	for _, n := range []string{"MAIN_ENTRY", "IMPORTED_ENTRY", "SHARED_ENTRY"} {
+		if _, ok := entryByName[n]; !ok {
+			t.Errorf("expected Entries name %q present after merge", n)
+		}
+	}
+	if shared, ok := entryByName["SHARED_ENTRY"]; ok && shared.Store != "main-store" {
+		t.Errorf("expected main-wins for SHARED_ENTRY store, got %q", shared.Store)
+	}
+}
+
+// TestLoadFromFile_ImportSecretsOnlyInImport covers the case the original
+// PR-1 fix missed: top-level secrets:`appears only in an imported file, not
+// in main. Without the merge, cfg.Secrets is nil after LoadFromFile.
+func TestLoadFromFile_ImportSecretsOnlyInImport(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secrets:
+  generate:
+    - key: ONLY_IN_IMPORT
+      type: random_hex
+      length: 32
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+modules:
+  - name: dummy
+    type: noop
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Secrets == nil {
+		t.Fatal("expected cfg.Secrets to be populated from import, got nil")
+	}
+	if len(cfg.Secrets.Generate) != 1 || cfg.Secrets.Generate[0].Key != "ONLY_IN_IMPORT" {
+		t.Errorf("expected Generate=[{Key:ONLY_IN_IMPORT}], got %v", cfg.Secrets.Generate)
+	}
+}
