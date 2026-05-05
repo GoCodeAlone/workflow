@@ -2,8 +2,6 @@ version: "2"
 
 run:
   timeout: 10m
-  exclude-dirs:
-    - ui/node_modules
 
 linters:
   default: none
@@ -55,6 +53,18 @@ linters:
         linters:
           - staticcheck
         text: "SA5011"
+      # Exclude third-party vendored Go code bundled under ui/node_modules from all linters
+      - path: ui/node_modules
+        linters:
+          - errcheck
+          - govet
+          - ineffassign
+          - staticcheck
+          - unused
+          - gocritic
+          - gosec
+          - bodyclose
+          - nilerr
     presets:
       - std-error-handling
 
