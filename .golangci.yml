@@ -27,6 +27,7 @@ linters:
         - G104 # Duplicates errcheck
         - G304 # File inclusion from variable - expected for config/dynamic loading
         - G704 # SSRF via taint analysis - URLs from admin config are intentional
+        - G710 # Open redirect via taint - OAuth2 redirect targets are provider-issued URLs from admin-configured provider endpoints
         - G118 # Context cancel/goroutine patterns - cancel is returned to caller or used in signal handler; background goroutines are intentional
         - G120 # Form data size - ParseMultipartForm already sets explicit limits; FormValue after that is already bounded
         - G122 # WalkDir/Walk TOCTOU - OS-provided walk paths; acceptable for CI/CD pipeline tooling
@@ -53,6 +54,14 @@ linters:
         linters:
           - staticcheck
         text: "SA5011"
+      # Third-party vendored Go code in ui/node_modules is not ours to fix
+      - path: ui/node_modules/
+        linters:
+          - govet
+          - staticcheck
+          - unused
+          - gocritic
+          - gosec
     presets:
       - std-error-handling
 
