@@ -322,6 +322,17 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 			class = validatePlanSkipped
 		case hasValidatePlanMethod(methods):
 			class = validatePlanAlreadyImplemented
+		case typeHasEmbeddedFields(ts):
+			// Round-10 #2: a provider with embedded fields may
+			// already satisfy ProviderValidator via a promoted
+			// method from the embedded type. We can't statically
+			// resolve promotion without full type-info, so err on
+			// the side of NOT injecting a stub (which would shadow
+			// the promoted method and silently drop diagnostics).
+			// Maintainers who genuinely want a stub can either
+			// remove the embedding or add an explicit
+			// `// wfctl:skip-iac-codemod` marker.
+			class = validatePlanAlreadyImplemented
 		default:
 			class = validatePlanMissing
 		}
@@ -339,6 +350,18 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 			Class:    class,
 		}
 		if class == validatePlanMissing && opts != nil && opts.Fix {
+			// Round-10 #1: only inject the stub in the file that
+			// contains the receiver TYPE declaration. When the type is
+			// in a sibling file (`ts == nil` here because it wasn't
+			// found in the local file's typeDecls), skip injection;
+			// the sibling's own pass will inject the stub. Without
+			// this guard, both files write a `ValidatePlan` stub for
+			// the same receiver, producing duplicate method
+			// declarations in the package.
+			if ts == nil {
+				report.sites = append(report.sites, site)
+				continue
+			}
 			pointerRecv := providerReceiverConvention(methods)
 			// Per-receiver qualifier resolution. If THIS file has its
 			// own interfaces import, qualifier already reflects that
@@ -844,6 +867,30 @@ func typeNameTailMatches(expr ast.Expr, want string) bool {
 		return e.Name == want
 	case *ast.SelectorExpr:
 		return e.Sel.Name == want
+	}
+	return false
+}
+
+// typeHasEmbeddedFields returns true if ts is a struct with at least
+// one embedded (anonymous) field. Used by add-validate-plan and the
+// lint analyzer to skip the missing-ValidatePlan diagnostic on
+// providers that may inherit ValidatePlan via method promotion from
+// an embedded type — round-10 #2 + #3: the codemod can't statically
+// resolve method promotion without full type info, so it errs on
+// the side of NOT injecting a stub (which would shadow the promoted
+// method and silently drop diagnostics).
+func typeHasEmbeddedFields(ts *ast.TypeSpec) bool {
+	if ts == nil {
+		return false
+	}
+	st, ok := ts.Type.(*ast.StructType)
+	if !ok || st.Fields == nil {
+		return false
+	}
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 {
+			return true // embedded (anonymous) field
+		}
 	}
 	return false
 }

@@ -165,22 +165,30 @@ func runLint(args []string, opts *Options, stdout, stderr io.Writer) int {
 // are recorded in the report rather than aborting the whole run so a
 // single broken file in a multi-package plugin does not lose findings
 // from the rest.
+//
+// Round-10 #5: rev2 of this walker called lintFile per file, and
+// lintFile re-parsed every sibling per-call → O(n²) on packages with
+// many files. Now lintFile takes an optional pre-parsed sibling
+// cache (lintDirCache) so per-directory parses are reused across the
+// directory's files.
 func lintPath(path string, report *lintReport) error {
 	info, err := stat(path)
 	if err != nil {
 		return err
 	}
 	if !info.IsDir() {
-		// Single file — analyze it directly.
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return fmt.Errorf("not a Go source file (or is a _test.go): %s", path)
 		}
-		if err := lintFile(path, report); err != nil {
+		if err := lintFile(path, nil, report); err != nil {
 			report.errors = append(report.errors, fmt.Sprintf("%s: %v", path, err))
 		}
 		return nil
 	}
-	return filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+	// Group files by directory so we can build a per-directory sibling
+	// parse cache once and reuse it across the directory's files.
+	dirFiles := make(map[string][]string)
+	if err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -194,11 +202,67 @@ func lintPath(path string, report *lintReport) error {
 		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			return nil
 		}
-		if err := lintFile(p, report); err != nil {
-			report.errors = append(report.errors, fmt.Sprintf("%s: %v", p, err))
-		}
+		dir := filepath.Dir(p)
+		dirFiles[dir] = append(dirFiles[dir], p)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	// Process each directory with a fresh sibling cache. Errors per
+	// file are recorded in the report; we never abort the walk.
+	for dir, paths := range dirFiles {
+		cache := newLintDirCache(dir)
+		for _, p := range paths {
+			if err := lintFile(p, cache, report); err != nil {
+				report.errors = append(report.errors, fmt.Sprintf("%s: %v", p, err))
+			}
+		}
+	}
+	return nil
+}
+
+// lintDirCache caches parsed sibling files for a single directory so
+// lintFile doesn't re-parse them per-target. Round-10 #5: closes the
+// O(n²) perf gap.
+type lintDirCache struct {
+	dir   string
+	files map[string]*ast.File // path → parsed file (re-used across siblings)
+	fset  *token.FileSet
+}
+
+// newLintDirCache constructs a cache and pre-parses every non-test
+// .go file in dir. Errors during pre-parse are silently dropped (the
+// per-file pass will surface them via its own parse).
+func newLintDirCache(dir string) *lintDirCache {
+	c := &lintDirCache{
+		dir:   dir,
+		files: make(map[string]*ast.File),
+		fset:  token.NewFileSet(),
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return c
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fpath := filepath.Join(dir, name)
+		src, err := readFile(fpath)
+		if err != nil {
+			continue
+		}
+		f, err := parser.ParseFile(c.fset, fpath, src, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+		c.files[fpath] = f
+	}
+	return c
 }
 
 // lintFile parses path, loads its sibling .go files (same directory,
@@ -219,22 +283,41 @@ func lintPath(path string, report *lintReport) error {
 // outer walker visits each file in turn. This avoids duplicate
 // findings without requiring a higher-level dedup. Sibling files
 // serve only as method-set context.
-func lintFile(path string, report *lintReport) error {
-	src, err := readFile(path)
-	if err != nil {
-		return err
+func lintFile(path string, cache *lintDirCache, report *lintReport) error {
+	// Round-10 #5: prefer the per-directory cache (built once per dir
+	// in lintPath) so sibling parses are reused across the directory's
+	// files. Falls back to per-call parsing when no cache is supplied
+	// (single-file invocation).
+	var primary *ast.File
+	var fset *token.FileSet
+	files := []*ast.File{}
+	if cache != nil && cache.files[path] != nil {
+		primary = cache.files[path]
+		fset = cache.fset
+	} else {
+		src, err := readFile(path)
+		if err != nil {
+			return err
+		}
+		fset = token.NewFileSet()
+		primary, err = parser.ParseFile(fset, path, src, parser.ParseComments)
+		if err != nil {
+			return err
+		}
 	}
-	fset := token.NewFileSet()
-	primary, err := parser.ParseFile(fset, path, src, parser.ParseComments)
-	if err != nil {
-		return err
-	}
-	files := []*ast.File{primary}
-	// Load sibling .go files from the same package directory so the
-	// analyzers see the full method set. Errors on siblings are
-	// tolerated — they only widen the context, never narrow it.
-	dir := filepath.Dir(path)
-	if entries, err := os.ReadDir(dir); err == nil {
+	files = append(files, primary)
+	// Sibling files from the cache (or per-call fallback walk).
+	if cache != nil {
+		for sibPath, sib := range cache.files {
+			if sibPath == path || sib == nil {
+				continue
+			}
+			if sib.Name.Name != primary.Name.Name {
+				continue
+			}
+			files = append(files, sib)
+		}
+	} else if entries, err := os.ReadDir(filepath.Dir(path)); err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
 				continue
@@ -243,7 +326,7 @@ func lintFile(path string, report *lintReport) error {
 			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 				continue
 			}
-			sibPath := filepath.Join(dir, name)
+			sibPath := filepath.Join(filepath.Dir(path), name)
 			if sibPath == path {
 				continue
 			}
@@ -255,10 +338,6 @@ func lintFile(path string, report *lintReport) error {
 			if err != nil {
 				continue
 			}
-			// Same-package check: skip files in a different package
-			// (e.g. `package main` test fixtures alongside `package p`
-			// production source). Cross-package context would mislead
-			// the method-set walker.
 			if sib.Name.Name != primary.Name.Name {
 				continue
 			}
@@ -429,23 +508,65 @@ func runAssertPlanDelegatesToHelper(pass *analysis.Pass) (any, error) {
 				routeSkip(pass, fn)
 				continue
 			}
-			// Accept either the canonical platform.ComputePlan (rev1
-			// review-corrected target) or the legacy wfctlhelpers.Plan
-			// (planned-but-not-shipped API) as delegated. Resolve the
-			// platform / wfctlhelpers package aliases so files using
-			// `pf "github.com/.../platform"` style imports aren't
-			// false-flagged (review round-4 finding #5).
-			platformAlias := pkgAliasFor(file, planHelperImportPath, "platform")
-			wfhAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
-			if !bodyCallsSelector(fn.Body, platformAlias, "ComputePlan") &&
-				!bodyCallsSelector(fn.Body, "platform", "ComputePlan") &&
-				!bodyCallsSelector(fn.Body, wfhAlias, "Plan") &&
-				!bodyCallsSelector(fn.Body, "wfctlhelpers", "Plan") {
+			// Round-10 #7: rev3 accepted ANY platform.ComputePlan or
+			// wfctlhelpers.Plan call anywhere in the body, so a Plan
+			// method that called the helper as an intermediate step
+			// (then added bespoke logic, returned a wrapped value,
+			// etc.) was reported clean despite NOT actually delegating.
+			// Now we require the canonical SHAPE: either the
+			// 2-statement delegation form (matching
+			// isAlreadyDelegatedPlanBody) OR a single-statement legacy
+			// `return <alias>.Plan(...)`. Anything else flags the
+			// diagnostic so the maintainer reviews the bespoke wrapper.
+			if !planBodyDelegatesCanonically(fn.Body, file) {
 				pass.Reportf(fn.Pos(), "%s.%s does not delegate to platform.ComputePlan; non-canonical Plan() body", receiverTypeName(fn), fn.Name.Name)
 			}
 		}
 	}
 	return nil, nil
+}
+
+// planBodyDelegatesCanonically returns true if body matches the
+// canonical Plan-delegation shape (round-10 #7). Accepts EITHER:
+//
+//   - 2-statement rev2 form: `plan, err := <platform>.ComputePlan(...);
+//     return &plan, err` (matches isAlreadyDelegatedPlanBody)
+//   - single-statement legacy form: `return <wfctlhelpers>.Plan(...)`
+//     OR `return <platform>.ComputePlan(...)` (planned-but-not-shipped
+//     and broken-rev1 fixtures, accepted as advisory-clean here even
+//     though the rewriter would repair them)
+//
+// Anything else (including bodies that CALL the helper anywhere but
+// don't return its value verbatim) is rejected as non-canonical.
+func planBodyDelegatesCanonically(body *ast.BlockStmt, file *ast.File) bool {
+	if body == nil {
+		return false
+	}
+	// Shape 1: 2-statement form (matches the rewriter's idempotency).
+	if isAlreadyDelegatedPlanBody(body, file) {
+		return true
+	}
+	// Shape 2: single-statement `return <X>.Plan(...)` /
+	// `return <X>.ComputePlan(...)`.
+	if len(body.List) == 1 {
+		if ret, ok := body.List[0].(*ast.ReturnStmt); ok && len(ret.Results) == 1 {
+			if call, ok := ret.Results[0].(*ast.CallExpr); ok {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+					if x, ok := sel.X.(*ast.Ident); ok {
+						platformAlias := pkgAliasFor(file, planHelperImportPath, "platform")
+						wfhAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
+						switch {
+						case (x.Name == platformAlias || x.Name == "platform") && sel.Sel.Name == "ComputePlan":
+							return true
+						case (x.Name == wfhAlias || x.Name == "wfctlhelpers") && sel.Sel.Name == "Plan":
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // receiverTypeDocsForPass builds a SINGLE merged receiverDoc map
@@ -507,11 +628,14 @@ func runAssertApplyDelegatesToHelper(pass *analysis.Pass) (any, error) {
 				routeSkip(pass, fn)
 				continue
 			}
-			// Resolve wfctlhelpers package alias to avoid false
-			// positives on aliased imports (review round-4 #5).
-			wfhAlias := pkgAliasFor(file, helperImportPath, "wfctlhelpers")
-			if !bodyCallsSelector(fn.Body, wfhAlias, "ApplyPlan") &&
-				!bodyCallsSelector(fn.Body, "wfctlhelpers", "ApplyPlan") {
+			// Round-10 #8: rev3 accepted ANY wfctlhelpers.ApplyPlan
+			// call anywhere in the body, so an Apply that referenced
+			// the helper incidentally (with extra work before/after)
+			// was reported clean despite NOT actually delegating. Now
+			// we require the canonical single-statement
+			// `return <alias>.ApplyPlan(...)` form (the same shape the
+			// rewriter checks for idempotency).
+			if !isAlreadyDelegatedApplyBody(fn.Body, file) {
 				pass.Reportf(fn.Pos(), "%s.%s does not delegate to wfctlhelpers.ApplyPlan; non-canonical Apply() body", receiverTypeName(fn), fn.Name.Name)
 			}
 		}
@@ -658,6 +782,14 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 		// assertion because the method set on `T` does not include
 		// `*T` methods). hasValidatePlanMethod centralises the logic.
 		if hasValidatePlanMethod(methods) {
+			continue
+		}
+		// Round-10 #3: provider with embedded fields may inherit
+		// ValidatePlan via method promotion. Without full type info we
+		// can't resolve promotion, so suppress the missing-stub
+		// diagnostic when embedded fields are present (consistent with
+		// add-validate-plan's round-10 #2 fix).
+		if ts, ok := typeDecls[recv]; ok && typeHasEmbeddedFields(ts) {
 			continue
 		}
 		// Report at the type decl if available, else at the first method.

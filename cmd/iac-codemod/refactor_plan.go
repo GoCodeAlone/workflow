@@ -344,12 +344,21 @@ func planLikeProviderMethodsInDir(dir string) (map[string]bool, map[string][]*as
 	if len(files) == 0 {
 		return nil, nil
 	}
+	// Round-10 #6: rev3 used range-over-map which has random iteration
+	// order, so on a tie the dominant package selection was
+	// nondeterministic. Sort the package names so the tie-break is
+	// stable (lexicographic-first wins).
+	pkgNames := make([]string, 0, len(pkgCounts))
+	for pkg := range pkgCounts {
+		pkgNames = append(pkgNames, pkg)
+	}
+	sort.Strings(pkgNames)
 	dominant := ""
 	dominantCount := 0
-	for pkg, count := range pkgCounts {
-		if count > dominantCount {
+	for _, pkg := range pkgNames {
+		if pkgCounts[pkg] > dominantCount {
 			dominant = pkg
-			dominantCount = count
+			dominantCount = pkgCounts[pkg]
 		}
 	}
 	// Pass 2: aggregate methods only from the dominant package.

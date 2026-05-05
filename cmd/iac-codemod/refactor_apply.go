@@ -992,9 +992,17 @@ func isCanonicalCaseAssign(a *ast.AssignStmt) bool {
 				return true
 			}
 		}
-		// Selector assignment `<X>.<F> = <Y>` to a ResourceRef-style
-		// field (ProviderID, Name, Type).
+		// Selector assignment `ref.<F> = <Y>` to a ResourceRef-style
+		// field (ProviderID, Name, Type). Round-10 #4: rev3 accepted
+		// any LHS selector with this field name, so unrelated bookkeeping
+		// like `audit.Type = ...` or `result.ProviderID = ...` was
+		// misclassified as canonical and dropped on rewrite. The LHS
+		// receiver must be `ref` (the canonical ResourceRef
+		// construction site name).
 		if sel, ok := a.Lhs[0].(*ast.SelectorExpr); ok && a.Tok == token.ASSIGN {
+			if id, ok := sel.X.(*ast.Ident); !ok || id.Name != "ref" {
+				return false
+			}
 			switch sel.Sel.Name {
 			case "ProviderID", "Name", "Type":
 				return true
