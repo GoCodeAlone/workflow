@@ -21,6 +21,10 @@ func runPlugin(args []string) error {
 		return runPluginTest(args[1:])
 	case "search":
 		return runPluginSearch(args[1:])
+	case "add":
+		return runPluginAdd(args[1:])
+	case "lock":
+		return runPluginLock(args[1:])
 	case "install":
 		return runPluginInstall(args[1:])
 	case "list":
@@ -44,14 +48,16 @@ func pluginUsage() error {
 	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl plugin <subcommand> [options]
 
 Subcommands:
+  add      Add a plugin to wfctl.yaml manifest
+  lock     Regenerate .wfctl-lock.yaml from wfctl.yaml manifest
   init     Scaffold a new plugin project
   docs     Generate documentation for an existing plugin
   test     Run a plugin through its full lifecycle in a test harness
   search   Search the plugin registry
-  install  Install a plugin from the registry
+  install  Install plugins (reads .wfctl-lock.yaml when present)
   list     List installed plugins
   update   Update an installed plugin to its latest version
-  remove   Uninstall a plugin
+  remove   Uninstall a plugin (also removes from manifest + lockfile)
   validate Validate a plugin manifest from the registry or a local file
   info     Show details about an installed plugin
   deps     List dependencies for a plugin
@@ -72,6 +78,7 @@ func runPluginInit(args []string) error {
 	license := fs.String("license", "", "Plugin license")
 	output := fs.String("output", "", "Output directory (defaults to plugin name)")
 	withContract := fs.Bool("contract", false, "Include a contract skeleton")
+	legacyContracts := fs.Bool("legacy-contracts", false, "Scaffold legacy map-based plugin contracts instead of strict typed contracts")
 	module := fs.String("module", "", "Go module path (default: github.com/<author>/workflow-plugin-<name>)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin init [options] <name>\n\nScaffold a new plugin project.\n\nOptions:\n")
@@ -91,14 +98,16 @@ func runPluginInit(args []string) error {
 	name := fs.Arg(0)
 	gen := sdk.NewTemplateGenerator()
 	opts := sdk.GenerateOptions{
-		Name:         name,
-		Version:      *ver,
-		Author:       *author,
-		Description:  *desc,
-		License:      *license,
-		OutputDir:    *output,
-		WithContract: *withContract,
-		GoModule:     *module,
+		Name:            name,
+		Version:         *ver,
+		Author:          *author,
+		Description:     *desc,
+		License:         *license,
+		OutputDir:       *output,
+		WithContract:    *withContract,
+		LegacyContracts: *legacyContracts,
+		GoModule:        *module,
+		WorkflowReplace: sdk.DiscoverWorkflowModuleRoot("."),
 	}
 	if err := gen.Generate(opts); err != nil {
 		return err

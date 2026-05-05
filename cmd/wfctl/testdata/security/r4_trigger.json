@@ -1,0 +1,1 @@
+{"id":"r4-trigger","actions":[{"action":"create","resource":{"name":"api-service","type":"infra.container_service","config":{"env_vars":{"API_SECRET_KEY":"dGhpcyBpcyBhIHZlcnkgbG9uZyBzZWNyZXQga2V5IHRoYXQgbG9va3MgbGlrZSBiYXNlNjQ="}}}}],"created_at":"2026-04-27T00:00:00Z"}

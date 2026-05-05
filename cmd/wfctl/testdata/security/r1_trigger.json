@@ -1,0 +1,1 @@
+{"id":"r1-trigger","actions":[{"action":"create","resource":{"name":"bmw-firewall","type":"infra.firewall","config":{"provider":"do-provider","inbound_rules":[{"ports":"22","sources":["0.0.0.0/0"]}]}}}],"created_at":"2026-04-27T00:00:00Z"}

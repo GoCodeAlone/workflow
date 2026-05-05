@@ -40,6 +40,7 @@ wfctl update --check  # check for updates without installing
 ```mermaid
 graph TD
     wfctl --> init
+    wfctl --> audit
     wfctl --> validate
     wfctl --> inspect
     wfctl --> run
@@ -83,13 +84,19 @@ graph TD
     security --> security-audit["audit"]
     security --> security-gennetpol["generate-network-policies"]
 
+    audit --> audit-plans["plans"]
+    audit --> audit-plugins["plugins"]
+
     infra --> infra-plan["plan"]
     infra --> infra-apply["apply"]
     infra --> infra-destroy["destroy"]
     infra --> infra-status["status"]
     infra --> infra-drift["drift"]
     infra --> infra-import["import"]
+    infra --> infra-bootstrap["bootstrap"]
     infra --> infra-state["state"]
+    infra --> infra-outputs["outputs"]
+    infra --> infra-refresh-outputs["refresh-outputs"]
 
     infra-state --> infra-state-list["list"]
     infra-state --> infra-state-export["export"]
@@ -153,19 +160,162 @@ graph TD
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
-| **Infrastructure** | `infra plan/apply/destroy/status/drift/import`, `infra state list/export/import` |
+| **Infrastructure** | `infra plan/apply/destroy/status/drift/import/bootstrap/outputs`, `infra state list/export/import` |
 | **CI/CD** | `ci generate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
 | **Plugin Management** | `plugin`, `registry`, `publish` |
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
-| **Platform Inspection** | `ports list`, `security audit`, `security generate-network-policies` |
+| **Platform Inspection** | `audit plans`, `audit plugins`, `ports list`, `security audit`, `security generate-network-policies` |
 | **Utilities** | `snippets`, `manifest`, `pipeline`, `update`, `mcp` |
 
 ---
 
 ## Command Reference
+
+### `audit`
+
+Audit Workflow ecosystem metadata without mutating project code. The command is intended for dogfooding release readiness checks: plans and design docs should carry implementation evidence, and plugin repos should expose compatible manifests.
+
+```
+wfctl audit <subject> [options]
+```
+
+#### `wfctl audit plans`
+
+Scan `docs/plans` Markdown files for tracking metadata and implementation evidence.
+
+```
+wfctl audit plans [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dir` | `docs/plans` | Plan directory to scan |
+| `--json` | `false` | Emit machine-readable JSON |
+| `--stale-after` | `30d` | Warn when verification evidence is older than this duration |
+| `--fix-index` | `false` | Regenerate `docs/plans/INDEX.md` from parsed metadata |
+
+The audit warns on legacy docs without frontmatter and fails on unverifiable implementation claims, invalid metadata, broken supersession links, duplicate active designs, or local implementation commits that cannot be found.
+
+New design docs should use this frontmatter shape:
+
+```yaml
+---
+status: approved
+area: wfctl
+owner: workflow
+implementation_refs: []
+external_refs:
+  - "#123"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - GOWORK=off go test ./cmd/wfctl
+  result: pass
+supersedes: []
+superseded_by: []
+---
+```
+
+Status values are `proposed`, `approved`, `planned`, `in_progress`, `implemented`, `superseded`, and `abandoned`. Area values are `ecosystem`, `wfctl`, `plugins`, `editor`, `cloud`, `ide`, `core`, `runtime`, `scenarios`, `workflow`, and `bmw`. A doc marked `implemented` must include implementation refs and verification commands.
+
+Examples:
+
+```bash
+wfctl audit plans --dir docs/plans
+wfctl audit plans --dir docs/plans --json
+wfctl audit plans --dir docs/plans --fix-index
+```
+
+#### `wfctl audit plugins`
+
+Scan local `workflow-plugin-*` repositories and classify `plugin.json` manifest shape.
+
+```
+wfctl audit plugins [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--repo-root` | parent of current repo | Directory containing `workflow-plugin-*` repos |
+| `--json` | `false` | Emit machine-readable JSON |
+| `--strict` | `false` | Treat warnings and errors as command failures |
+| `--strict-contracts` | `false` | Require strict contract descriptors for advertised module, step, trigger, and service method types |
+
+Default mode reports canonical, legacy, missing, invalid manifest counts, and contract coverage by type category but exits 0 so it can be used as an inventory command. When a plugin advertises module, step, trigger, or service method types without strict descriptors, default mode emits warnings. Use `--strict-contracts` to fail on missing or legacy descriptors, or `--strict` to fail on any warning.
+
+Strict contract audit reads descriptors from an optional generated `plugin.contracts.json` file next to `plugin.json`, plus an optional inline `contracts` array in `plugin.json`. The descriptor file accepts the compact shape below and proto-shaped keys such as `module_type`, `step_type`, `trigger_type`, `service_name`, `method`, and `CONTRACT_MODE_STRICT_PROTO`. `mode` is required for a descriptor to count as strict. The top-level `version` field is currently informational; the strict scaffold emits `"version": "v1"`.
+
+```json
+{
+  "version": "v1",
+  "contracts": [
+    {
+      "kind": "module",
+      "type": "storage.example",
+      "mode": "strict",
+      "config": "workflow.plugins.example.StorageConfig"
+    },
+    {
+      "kind": "step",
+      "type": "example.process",
+      "mode": "strict",
+      "input": "workflow.plugins.example.ProcessInput",
+      "output": "workflow.plugins.example.ProcessOutput"
+    },
+    {
+      "kind": "trigger",
+      "type": "example.event",
+      "mode": "strict",
+      "config": "workflow.plugins.example.EventTriggerConfig"
+    },
+    {
+      "kind": "service_method",
+      "type": "ExampleService/Call",
+      "mode": "strict",
+      "input": "workflow.plugins.example.CallRequest",
+      "output": "workflow.plugins.example.CallResponse"
+    }
+  ]
+}
+```
+
+Examples:
+
+```bash
+wfctl audit plugins
+wfctl audit plugins --repo-root /path/to/workspace --json
+wfctl audit plugins --repo-root /path/to/workspace --strict
+wfctl audit plugins --repo-root /path/to/workspace --strict-contracts
+```
+
+### `editor-bundle`
+
+Export the canonical editor contract bundle for Workflow-aware IDEs and visual editors.
+
+```
+wfctl editor-bundle [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output` | _(stdout)_ | Write the bundle JSON to a file |
+| `--format` | `json` | Output format; only `json` is supported |
+| `--plugin-dir` | _(none)_ | Load strict contract descriptors from one plugin repo or a directory of plugin repos |
+| `--registry` | `true` | Include strict contract descriptors from the configured plugin registry |
+
+The bundle includes core module and step schemas, YAML schemas, snippets, DSL reference data, and strict plugin contract metadata. Registry manifests are part of the canonical output by default; unavailable or malformed registry manifests fail the command. Use `--registry=false` for an explicit local-only export.
+
+When `--plugin-dir` is provided, `plugin.contracts.json` is parsed strictly. Invalid or unreadable descriptor files fail the command instead of producing a partial bundle. Service method contracts are keyed by module type when available, using `service:<module-type>/<service-name>/<method>`, so separate module-scoped services can expose the same service and method names without colliding.
+
+Examples:
+
+```bash
+wfctl editor-bundle --output editor-bundle.json
+wfctl editor-bundle --registry=false --plugin-dir ../workflow-plugin-example --output editor-bundle.json
+```
 
 ### `init`
 
@@ -308,10 +458,14 @@ wfctl plugin init [options] <name>
 | `-description` | _(none)_ | Plugin description |
 | `-license` | _(none)_ | Plugin license |
 | `-output` | _(plugin name)_ | Output directory |
-| `-contract` | `false` | Include a contract skeleton |
+| `-contract` | `false` | Include the legacy dynamic field contract skeleton in `plugin.json` |
+| `-legacy-contracts` | `false` | Scaffold legacy map-based step contracts instead of strict typed contracts |
+
+When run from a Workflow source checkout, new plugin scaffolds use strict typed contracts by default. They include `plugin.contracts.json`, a starter proto contract file, typed SDK adapter code, and a local `replace` directive to the current Workflow module. Public installs of `wfctl` scaffold legacy map-based contracts by default until a Workflow module release contains the strict contract APIs. Use `-legacy-contracts` to force compatibility scaffolds that must keep map-based step entrypoints.
 
 ```bash
 wfctl plugin init --author myorg my-plugin
+wfctl plugin init --author myorg --legacy-contracts old-plugin
 ```
 
 #### `plugin docs`
@@ -414,6 +568,16 @@ Validate a plugin manifest from the registry or a local file.
 ```
 wfctl plugin validate [options]
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--file` | _(none)_ | Validate a local manifest file instead of fetching from the registry |
+| `--all` | `false` | Validate all configured registry plugins |
+| `--verify-urls` | `false` | HEAD-check download URLs |
+| `--strict-contracts` | `false` | Fail when advertised plugin types lack strict contract descriptors |
+| `--config` | _(default registry config)_ | Registry config file path |
+
+When `--file` points at a local `plugin.json`, `--strict-contracts` also checks `plugin.contracts.json` in the same directory using the descriptor format documented under `wfctl audit plugins`.
 
 #### `plugin info`
 
@@ -685,6 +849,7 @@ wfctl migrate <subcommand> [options]
 | `status` | Show applied and pending migrations |
 | `diff` | Show pending migration SQL without applying |
 | `apply` | Apply all pending migrations |
+| `repair-dirty` | Repair a known dirty migration metadata state through an IaC provider job |
 
 **Examples:**
 
@@ -693,6 +858,43 @@ wfctl migrate status --db workflow.db
 wfctl migrate diff --db workflow.db
 wfctl migrate apply --db workflow.db
 ```
+
+#### `migrate repair-dirty`
+
+Run a guarded dirty migration repair inside a provider-managed runtime, such as
+an App Platform job or cloud task that already has database access. This avoids
+opening managed databases to CI runner IP ranges.
+
+```bash
+wfctl migrate repair-dirty --config infra.yaml --env staging \
+  --database app-db \
+  --app app-service \
+  --job-image registry.example.com/app-migrate:${IMAGE_SHA} \
+  --expected-dirty-version 20260426000005 \
+  --force-version 20260422000001 \
+  --then-up \
+  --confirm-force FORCE_MIGRATION_METADATA \
+  --approve-destructive
+```
+
+Required guard flags:
+
+| Flag | Description |
+|------|-------------|
+| `--expected-dirty-version` | Dirty version that must be present before repair |
+| `--force-version` | Version to force metadata to before replaying migrations |
+| `--confirm-force` | Must be `FORCE_MIGRATION_METADATA` |
+| `--approve-destructive` | Explicitly approves the metadata repair; required for non-dev environments |
+
+For non-dev environments, omitting `--approve-destructive` writes an approval
+artifact and exits before provider invocation. The artifact defaults to
+`$RUNNER_TEMP/wfctl-destructive-approval.json` on GitHub Actions or
+`./wfctl-destructive-approval.json` elsewhere. Use `--approval-artifact` to set
+an explicit path.
+
+Pass provider job environment values with repeatable `--job-env KEY=VALUE` or
+`--job-env-from-env KEY`. Use `--job-env-from-env` for secrets; wfctl redacts
+those values from command output and GitHub step summaries.
 
 ---
 
@@ -967,14 +1169,21 @@ wfctl infra <action> [options] [config.yaml]
 | `drift` | Detect configuration drift between desired and actual state |
 | `destroy` | Tear down all managed infrastructure |
 | `import` | Import existing resources into IaC state |
+| `bootstrap` | Generate secrets and initialise state backend before first apply |
 | `state` | Manage state storage (list/export/import) |
+| `outputs` | Print resource outputs from state (yaml/json/env formats) |
+| `refresh-outputs` | Read live outputs from each provider and reconcile state (no cloud writes) |
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for config and state resolution |
+| `--name` | `` | Desired resource name from config (`infra import` only) |
+| `--id` | `` | Cloud-provider resource ID (`infra import` only; omitted imports by desired provider ID) |
 | `--auto-approve` | `false` | Skip confirmation prompt (apply/destroy only) |
 | `--parallelism` | `10` | Number of parallel operations |
 | `--lock-timeout` | `0s` | Timeout for state lock acquisition |
+| `--force-rotate` | `` | (`bootstrap` only) Comma-separated list of secret names to regenerate, replacing existing values. Repeatable. Use to recover from known-bad secrets (empty value, leaked, dead key). Refuses `provider_credential` types. |
 
 **State Subcommands:**
 
@@ -996,10 +1205,194 @@ wfctl infra apply --auto-approve infra.yaml
 wfctl infra status --config infra.yaml
 wfctl infra drift infra.yaml
 wfctl infra destroy --auto-approve infra.yaml
-wfctl infra import --config infra.yaml
+wfctl infra import --config infra.yaml --env staging --name site-dns --id do-domain-123
+wfctl infra import --config infra.yaml --name site-dns
 wfctl infra state list
 wfctl infra state export --output state.json
 wfctl infra state import --source state.json
+
+# Recover from a known-bad secret (empty value, leak, dead key) without manually
+# deleting it from the secret store first:
+wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
+wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN,DATABASE_URL
+wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
+```
+
+#### `infra apply`
+
+Reconcile cloud infrastructure to match the desired state declared in the config. Computes a diff plan via each `iac.provider` and dispatches creates/updates/replaces/deletes through the loaded provider plugin. State is persisted after every successful action so the next run sees the cloud-truth.
+
+```
+wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
+                  [--refresh] [--allow-protected-prune] [--skip-refresh]
+                  [--allow-replace=NAME1,NAME2,...]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c`, `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `-y`, `--auto-approve` | `false` | Skip the confirmation prompt |
+| `-S`, `--show-sensitive` | `false` | Show sensitive values in plaintext |
+| `--env` | `` | Environment name (resolves per-module `environments:` overrides) |
+| `--plan` | `` | Apply from a pre-emitted `plan.json` (skips `ComputePlan`) |
+| `--refresh` | `false` | Detect drift and prune ghost-in-state entries before applying |
+| `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
+| `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
+| `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
+
+**Protected-resource gate:**
+
+Resources annotated `protected: true` cannot be replaced or deleted by `infra apply` without an explicit per-resource opt-in. When a plan would replace or delete a protected resource, `wfctl` aborts before any provider dispatch and prints the full set of blockers in one pass with a copy-paste-ready flag value:
+
+```
+plan would require destructive action on 3 protected resource(s):
+  coredump-staging-vpc (replace)
+  coredump-staging-pg-data (replace)
+  coredump-staging-pg (replace)
+to authorize, re-run with:
+  --allow-replace=coredump-staging-vpc,coredump-staging-pg-data,coredump-staging-pg
+```
+
+The gate fires on both dispatch paths — live diff (`apply` without `--plan`) and precomputed plan (`apply --plan plan.json`) — so the safety guarantee holds regardless of plan provenance. The blocker listing and the csv preserve plan-action declaration order so output is deterministic across runs.
+
+To authorize, re-run with the printed flag value. Names not in the list keep their protection; the override is per-invocation and never persisted.
+
+| Knob | Effect |
+|------|--------|
+| `--allow-replace=name1,name2` | Authorize replace/delete on the listed resources for this apply only. |
+| `--allow-protected-prune` (requires `--refresh`) | Older flag — authorizes pruning state entries for **all** protected resources during the refresh phase. Recommended only for state cleanup; for production use prefer `--allow-replace` (intent-explicit per resource). |
+
+**Examples:**
+
+```bash
+# Standard apply.
+wfctl infra apply --auto-approve -c infra.yaml --env staging
+
+# Apply from a pre-emitted plan.
+wfctl infra plan -c infra.yaml --env staging -o plan.json
+wfctl infra apply --auto-approve -c infra.yaml --env staging --plan plan.json
+
+# Authorize a Replace cascade on protected resources.
+wfctl infra apply --auto-approve -c infra.yaml --env prod \
+  --allow-replace=coredump-prod-vpc,coredump-prod-pg
+```
+
+#### `infra refresh-outputs`
+
+Read live outputs from each `iac.provider` for resources already in state and persist any field-level changes back to the state backend. The contract is strictly read-only at the cloud level — `refresh-outputs` never invokes Update or Replace.
+
+```
+wfctl infra refresh-outputs [-c CONFIG] [--env ENV] [--concurrency N]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c`, `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `-e`, `--env` | `` | Environment name (resolves per-module overrides; iac.provider modules disabled for the env are skipped) |
+| `--concurrency` | `8` | Maximum concurrent Read calls. Values < 1 fall back to the default. |
+
+**Behavior:**
+
+- Discovers `iac.provider` modules with per-env resolution.
+- Loads current state from the configured `iac.state` backend.
+- Groups state entries by their owning provider module (`provider_ref` first, falling back to provider type when exactly one module of that type is declared).
+- Calls each provider's `ResourceDriver.Read` once per resource via the bounded-concurrency `iac/refreshoutputs.Refresh` helper.
+- Persists any state entry whose `outputs` map changed — entries whose live outputs equal the persisted outputs are left alone.
+
+**Errors:**
+
+When the resolved config has no usable `iac.provider` module for the requested env, `wfctl` exits 1 with the literal stderr line:
+
+```
+error: refresh-outputs: provider not configured for env "<env>"
+```
+
+This wording is load-bearing — CI gates and runtime-launch validation pin the exact form. On any provider Read or driver-resolution failure, the command returns the wrapped error from the `iac/refreshoutputs` helper without persisting partial progress.
+
+**Apply-time pre-step (opt-in):**
+
+`wfctl infra apply` can run the same refresh as a pre-plan step, ensuring the planner doesn't make decisions against stale outputs.
+
+| Variable / Flag | Effect |
+|------|---------|
+| `WFCTL_REFRESH_OUTPUTS=1` (or any `strconv.ParseBool` truthy value) | Enable the apply pre-step. |
+| `WFCTL_REFRESH_OUTPUTS=0` (or any falsey value, empty, or unrecognised) | Disable the apply pre-step (default). |
+| `wfctl infra apply --skip-refresh` | Suppress the apply pre-step regardless of the env var (CI escape hatch). |
+
+The pre-step only fires for `infra.*` configs; legacy `platform.*` configs are silently skipped.
+
+**Examples:**
+
+```bash
+# One-off explicit refresh against the staging env.
+wfctl infra refresh-outputs -c infra.yaml --env staging
+
+# Apply with pre-plan refresh enabled.
+WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve -c infra.yaml --env staging
+
+# Apply with pre-step suppressed even though CI exports the env var.
+WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve --skip-refresh -c infra.yaml
+```
+
+#### `infra align`
+
+Run a battery of static alignment checks against a config (and optionally a
+plan). Each rule (`R-A1` … `R-A10`) emits findings as a `FAIL` (always
+non-zero exit) or `WARN` (non-zero only with `--strict`).
+
+```
+wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict] [--strict-health] [--strict-cidr] [--max-changes N]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config`, `-c` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for per-env config resolution |
+| `--plan` | `` | Path to a plan JSON file. Enables `R-A7` (plan-output sanity) and `R-A10` (provider `ValidatePlan` dispatch). |
+| `--strict` | `false` | Treat all `WARN` findings as `FAIL` (exit 1) |
+| `--strict-health` | `false` | Treat `R-A2` health-check `WARN`s as `FAIL` |
+| `--strict-cidr` | `false` | Enable strict CIDR overlap checks (reserved) |
+| `--max-changes` | `50` | Warn when the plan has more than N actions |
+
+| Rule | Name | Severity |
+|------|------|----------|
+| R-A1 | Container/runtime alignment | FAIL |
+| R-A2 | Health-check path in source | WARN (FAIL with `--strict-health`) |
+| R-A3 | Service-to-service DNS alignment | FAIL |
+| R-A4 | Env-var resolution | FAIL |
+| R-A5 | Migrations alignment | FAIL |
+| R-A6 | Network/exposure alignment | FAIL or WARN |
+| R-A7 | Plan-output sanity (requires `--plan`) | FAIL or WARN |
+| R-A8 | WebAuthn RP_ID alignment | FAIL |
+| R-A9 | Suspicious `provider_credential` key suffix | WARN |
+| R-A10 | Provider `ValidatePlan` diagnostics (requires `--plan`) | FAIL or WARN |
+
+**R-A10 — provider-side cross-resource validation.** When `--plan` is given,
+`infra align` enumerates the `iac.provider` modules in the config, loads each,
+and dispatches `interfaces.ProviderValidator.ValidatePlan(plan)` against any
+provider that implements that optional interface. Each returned
+`PlanDiagnostic` is rendered according to its severity tier:
+
+| `PlanDiagnostic.Severity` | Result |
+|---------------------------|--------|
+| `PlanDiagnosticError` | `FAIL` AlignFinding (always non-zero exit) |
+| `PlanDiagnosticWarning` | `WARN` AlignFinding (non-zero only under `--strict`) |
+| `PlanDiagnosticInfo` | Logged to stderr; no AlignFinding emitted; never affects exit code |
+
+`PlanDiagnosticInfo` deliberately does *not* contribute an AlignFinding so
+that `--strict` CI gates cannot fail on a purely informational hint. The
+log line is prefixed `R-A10 [info] <provider>/<resource>: <message>`.
+
+Providers that do not implement `ProviderValidator` are skipped — the
+interface is purely additive (no behaviour change for older plugins).
+
+```bash
+# Run all align rules without a plan (R-A10 silent).
+wfctl infra align -c infra.yaml --env staging
+
+# Include R-A7 + R-A10 by passing a plan file; --strict promotes WARNs to FAILs.
+wfctl infra plan -c infra.yaml --env staging -o plan.json
+wfctl infra align -c infra.yaml --env staging --plan plan.json --strict
 ```
 
 ---
@@ -1316,13 +1709,37 @@ Set a secret value in the configured provider.
 ```bash
 wfctl secrets set DATABASE_URL --value "postgres://..."
 wfctl secrets set TLS_CERT --from-file ./certs/server.crt
+
+# Ad-hoc provider override (no config file needed)
+wfctl secrets set --provider keychain --service buymywishlist STRIPE_SECRET_KEY
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--value` | Secret value to set |
-| `--from-file` | Read secret value from file (for certificates/keys) |
-| `--config` | Workflow config file (default: `app.yaml`) |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--value` | _(prompt)_ | Secret value to set |
+| `--from-file` | _(none)_ | Read secret value from file (for certificates/keys) |
+| `--config` | `app.yaml` | Workflow config file |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+
+When no `--value` or `--from-file` is given and stdin is a TTY, the value is prompted with hidden input (`read -s` style).
+
+#### `secrets get`
+
+Retrieve a single secret value.
+
+```bash
+wfctl secrets get STRIPE_SECRET_KEY
+wfctl secrets get --provider keychain --service buymywishlist STRIPE_SECRET_KEY
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+
+Returns an error (exit non-zero) when the secret is not set.
 
 #### `secrets list`
 
@@ -1330,7 +1747,55 @@ List all declared secrets, their store routing, and access-aware set/unset statu
 
 ```bash
 wfctl secrets list --config app.yaml
+
+# Ad-hoc: list all env vars with a given prefix
+wfctl secrets list --provider env --service MYAPP_
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--env` | _(none)_ | Environment name for multi-store secret resolution |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+
+#### `secrets delete`
+
+Remove a secret from the provider. Idempotent — succeeds even when the key does not exist.
+
+```bash
+wfctl secrets delete STRIPE_SECRET_KEY
+wfctl secrets delete --provider keychain --service buymywishlist STRIPE_SECRET_KEY
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+
+#### `secrets export`
+
+Emit all secrets from a provider as a dotenv file or shell export statements. Useful for piping into CI pipelines or bootstrapping other tools.
+
+```bash
+# From config-defined provider
+wfctl secrets export --config app.yaml --format dotenv > .env
+
+# Ad-hoc: dump all keychain secrets for a service
+wfctl secrets export --provider keychain --service buymywishlist --format dotenv
+
+# Shell-eval compatible
+wfctl secrets export --provider env --service MYAPP_ --format export
+eval "$(wfctl secrets export --provider keychain --service myapp --format export)"
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--service` | _(none)_ | Service name / prefix for the selected provider |
+| `--format` | `dotenv` | Output format: `dotenv` (`KEY=value`) or `export` (`export KEY="value"`) |
 
 #### `secrets validate`
 
@@ -1716,7 +2181,11 @@ wfctl dev up [options]
 | `--local` | `false` | Run app services as local Go processes with hot-reload (infra still in Docker) |
 | `--k8s` | `false` | Deploy to local minikube cluster |
 | `--expose` | _(from config)_ | Expose services externally: `tailscale`, `cloudflare`, `ngrok` |
+| `--secrets-from` | _(none)_ | Inject secrets from an ad-hoc provider (`keychain`, `env`, `aws`) into the dev cluster via a generated `--env-file` |
+| `--secrets-service` | _(none)_ | Service name / prefix passed to the `--secrets-from` provider |
 | `--verbose` | `false` | Show detailed output |
+
+When `--secrets-from` is set, all secrets for the named provider/service are written to `.env.wfctl-dev-secrets` (mode `0600`) in the config directory and passed to docker compose as `--env-file`. The file is removed automatically on `wfctl dev down` and on any error during startup.
 
 The default mode generates `docker-compose.dev.yml` from the workflow config, mapping infrastructure module types to Docker images:
 
@@ -1744,6 +2213,13 @@ wfctl dev up --expose tailscale
 
 # Expose via Cloudflare Tunnel
 wfctl dev up --expose cloudflare
+
+# Inject Stripe sandbox secrets from macOS Keychain (BMW local-dev flow)
+wfctl secrets set --provider keychain --service buymywishlist STRIPE_SECRET_KEY
+wfctl dev up --secrets-from keychain --secrets-service buymywishlist
+
+# Inject secrets from environment variables with a shared prefix
+wfctl dev up --secrets-from env --secrets-service MYAPP_
 ```
 
 The `--expose` method can also be configured in the workflow config under `environments.local.exposure.method`.
@@ -1865,3 +2341,51 @@ deploy:
     runtime: minikube       # minikube | kind | docker-desktop | k3d | remote
     registry: ghcr.io/myorg
 ```
+
+---
+
+## Diff Cache
+
+`wfctl infra plan` consults a per-resource diff cache so a Plan re-run against unchanged inputs can skip the (sometimes network-expensive) provider-side `Diff` call. The cache lives at the package `iac/diffcache/` and is keyed by `(plugin-version, resource-type, provider-id, sha256(config), sha256(outputs))`.
+
+**The cache is purely an amortization optimization, NOT a correctness mechanism.** Apply paths remain correct on a 100 % miss rate, which is exactly what CI sees on every fresh runner. Workflows MUST NOT depend on a cache hit for correctness or reproducibility.
+
+### Backend selection (`WFCTL_DIFFCACHE`)
+
+The env var `WFCTL_DIFFCACHE` selects the cache backend at process start:
+
+| Value         | Backend                                                                                        |
+|---------------|------------------------------------------------------------------------------------------------|
+| `disabled`    | No-op cache: every `Get` misses; `Put` is a no-op. Use this for fully-deterministic timing or to bypass any disk state. |
+| `:memory:`    | In-memory cache that lives only for the current process. **CI workflows in this repo set this explicitly** so containerized runners never write cache data to disk. |
+| _(unset)_ or anything else | Filesystem cache rooted at `~/.cache/wfctl/diff/<sha256-of-key>.json` (honors `XDG_CACHE_HOME` on Linux via `os.UserCacheDir`). The default for operators running `wfctl` locally. |
+
+If the user cache directory cannot be resolved, the helper falls back to the in-memory cache automatically — so the caller always gets a working `Cache`.
+
+### Eviction (filesystem backend)
+
+The filesystem cache enforces an LRU eviction policy on each `Put`:
+
+- **By count:** at most 1024 entries.
+- **By total size:** at most 64 MiB on disk.
+
+Whichever cap is exceeded first triggers the eviction pass. The pass evicts the oldest 10 % of entries (sorted by mtime; secondary sort by path for determinism) so amortized cost stays bounded.
+
+### Corruption recovery
+
+If a cache file fails to parse on `Get` (truncated, partial-write, JSON syntax error, or a `schemaVersion` mismatch from a wfctl downgrade), the cache silently deletes the corrupt file and returns a miss. No error is surfaced to the caller; a single info-level log line fires the first time corruption is observed in a process so operators have a breadcrumb without log spam.
+
+### Plugin downgrade
+
+`PluginVersion` is part of the cache key, so a plugin downgrade naturally invalidates entries (cache key miss). Old entries persist on disk until the LRU eviction reclaims them; the size cap above bounds the disk waste.
+
+### CI configuration
+
+Per the T3.5 rev3 lifecycle constraint, **all CI workflows in this repository set `WFCTL_DIFFCACHE=:memory:` at the workflow level** so containerized runners never write to disk:
+
+```yaml
+env:
+  WFCTL_DIFFCACHE: ":memory:"
+```
+
+Files: `.github/workflows/ci.yml`, `benchmark.yml`, `pre-release.yml`, `release.yml`, `dependency-update.yml`. New workflow files that invoke `go test` or `wfctl` should add the same env var.

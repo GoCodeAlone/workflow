@@ -1,3 +1,25 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 4ec75b7
+  - repo: workflow
+    commit: ad72f2f
+  - repo: workflow
+    commit: 89ce08a
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'rg -n "runInfraBootstrap|bootstrapStateBackend|bootstrapSecrets|auto_bootstrap|infra outputs" cmd/wfctl config docs -S'
+    - 'git log --oneline --all -- cmd/wfctl/infra_bootstrap.go cmd/wfctl/infra_output_secrets.go cmd/wfctl/infra_outputs.go config/infra_config.go'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wfctl Infra Bootstrap, Output Wiring, and Secrets Provider — Design
 
 **Date:** 2026-04-08

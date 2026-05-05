@@ -174,6 +174,74 @@ func TestResolveForEnv_ProviderWrittenToConfig(t *testing.T) {
 	}
 }
 
+// ── Fix 1: name lift ──────────────────────────────────────────────────────────
+
+func TestResolveForEnv_LiftsConfigNameIntoIdentity(t *testing.T) {
+	m := &ModuleConfig{
+		Name:   "bmw-vpc",
+		Type:   "infra.vpc",
+		Config: map[string]any{"cidr": "10.0.0.0/24"},
+		Environments: map[string]*InfraEnvironmentResolution{
+			"staging": {Config: map[string]any{"name": "bmw-staging-vpc"}},
+		},
+	}
+	resolved, ok := m.ResolveForEnv("staging")
+	if !ok {
+		t.Fatal("ResolveForEnv returned !ok")
+	}
+	if resolved.Name != "bmw-staging-vpc" {
+		t.Errorf("Name = %q, want bmw-staging-vpc", resolved.Name)
+	}
+	if _, present := resolved.Config["name"]; present {
+		t.Error("name should be stripped from Config after lift")
+	}
+	// Original cidr must still be present.
+	if resolved.Config["cidr"] != "10.0.0.0/24" {
+		t.Errorf("cidr should be preserved, got %v", resolved.Config["cidr"])
+	}
+}
+
+func TestResolveForEnv_PreservesNameWhenNoOverride(t *testing.T) {
+	m := &ModuleConfig{
+		Name:   "bmw-db",
+		Type:   "infra.database",
+		Config: map[string]any{"engine": "postgres"},
+		Environments: map[string]*InfraEnvironmentResolution{
+			"staging": {Config: map[string]any{"size": "small"}},
+		},
+	}
+	resolved, ok := m.ResolveForEnv("staging")
+	if !ok {
+		t.Fatal("ResolveForEnv returned !ok")
+	}
+	// No name override in env — module name must be preserved.
+	if resolved.Name != "bmw-db" {
+		t.Errorf("Name = %q, want bmw-db", resolved.Name)
+	}
+	if _, present := resolved.Config["name"]; present {
+		t.Error("name key must not appear in Config when no override was set")
+	}
+}
+
+func TestResolveForEnv_EmptyNameFieldIgnored(t *testing.T) {
+	m := &ModuleConfig{
+		Name:   "bmw-firewall",
+		Type:   "infra.firewall",
+		Config: map[string]any{},
+		Environments: map[string]*InfraEnvironmentResolution{
+			"staging": {Config: map[string]any{"name": ""}},
+		},
+	}
+	resolved, ok := m.ResolveForEnv("staging")
+	if !ok {
+		t.Fatal("ResolveForEnv returned !ok")
+	}
+	// Empty string name must NOT overwrite the module identity.
+	if resolved.Name != "bmw-firewall" {
+		t.Errorf("Name = %q, want bmw-firewall (empty name override must be ignored)", resolved.Name)
+	}
+}
+
 func TestResolveForEnv_ProviderOverrideWins(t *testing.T) {
 	m := &ModuleConfig{
 		Name:   "db",

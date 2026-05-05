@@ -1,0 +1,11 @@
+# R-A8 OK: WEBAUTHN_ORIGIN host (example.com) matches WEBAUTHN_RP_ID.
+# R-A8 does NOT fire.
+modules:
+  - name: auth
+    type: infra.container_service
+    config:
+      image: "auth:latest"
+      http_port: 8080
+      env_vars:
+        WEBAUTHN_RP_ID: "example.com"
+        WEBAUTHN_ORIGIN: "https://example.com"

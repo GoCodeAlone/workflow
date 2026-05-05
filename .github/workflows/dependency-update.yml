@@ -10,6 +10,12 @@ on:
    - cron: '0 9 * * 1'
   workflow_dispatch:
 
+env:
+  # See ci.yml for rationale. Force in-memory diffcache in CI per the
+  # T3.5 rev3 lifecycle constraint — no filesystem writes from this
+  # workflow's `go test ./...` step.
+  WFCTL_DIFFCACHE: ":memory:"
+
 jobs:
   update-dependencies:
     name: Update Go Dependencies

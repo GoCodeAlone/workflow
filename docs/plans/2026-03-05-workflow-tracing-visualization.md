@@ -1,3 +1,32 @@
+---
+status: implemented
+area: workflow
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 34f06fc
+  - repo: workflow
+    commit: b537333
+  - repo: workflow
+    commit: 9fe1d31
+  - repo: workflow-ui
+    commit: 89293c4
+  - repo: workflow-cloud
+    commit: 514eb47
+  - repo: workflow-cloud-ui
+    commit: 9ec959c
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"X-Workflow-Trace|explicit_trace|TraceView\" module store ui"
+    - "rg -n \"sampling|retention|trace|PII|config_version\" /Users/jon/workspace/workflow-cloud /Users/jon/workspace/workflow-cloud-ui /Users/jon/workspace/workflow-ui /Users/jon/workspace/workflow-plugin-admin"
+    - "GOWORK=off go test ./module -run 'Test(ExplicitTraceHeader|TrackPipelineExecution|ParallelStep|ForEachStep|TemplateEngine_Func|Scan)'"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Workflow Tracing & Visualization Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

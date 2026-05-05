@@ -1,0 +1,453 @@
+package iaclint_test
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/plugin/sdk/iaclint"
+)
+
+// mockT captures testing.TB calls without actually failing the outer test.
+// All messages are captured (not just the last) so tests can assert on a
+// specific probe's failure even when multiple probes fail in one matrix run.
+type mockT struct {
+	failed   bool
+	messages []string
+}
+
+func (m *mockT) Helper() {}
+func (m *mockT) Fatalf(format string, args ...any) {
+	m.failed = true
+	m.messages = append(m.messages, fmt.Sprintf(format, args...))
+}
+func (m *mockT) Errorf(format string, args ...any) {
+	m.failed = true
+	m.messages = append(m.messages, fmt.Sprintf(format, args...))
+}
+
+// lastMessage returns the most-recent captured message, or "" if none.
+// Convenience for tests that only care about the latest failure.
+func (m *mockT) lastMessage() string {
+	if len(m.messages) == 0 {
+		return ""
+	}
+	return m.messages[len(m.messages)-1]
+}
+
+// hasMessageContaining reports whether any captured message contains substr.
+// Use when multiple probes may fail and the test needs to assert a specific
+// probe's message was emitted.
+func (m *mockT) hasMessageContaining(substr string) bool {
+	for _, msg := range m.messages {
+		if strings.Contains(msg, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestValidationKind_String(t *testing.T) {
+	cases := map[iaclint.ValidationKind]string{
+		iaclint.KindTCPPort:          "TCPPort",
+		iaclint.KindNonNegativeInt:   "NonNegativeInt",
+		iaclint.KindNonEmptyString:   "NonEmptyString",
+		iaclint.KindStringEnum:       "StringEnum",
+		iaclint.KindIntegerOnlyFloat: "IntegerOnlyFloat",
+	}
+	for kind, want := range cases {
+		if got := kind.String(); got != want {
+			t.Errorf("kind %d: got %q, want %q", kind, got, want)
+		}
+	}
+}
+
+func TestAssertOutputsStructpbCompatible_RejectsTypedSlice(t *testing.T) {
+	// Typed slices ([]int, []string, []GoStruct) are rejected by structpb.
+	// AssertOutputsStructpbCompatible must surface the rejection as a test failure.
+	tt := &mockT{}
+	iaclint.AssertOutputsStructpbCompatible(tt, map[string]any{
+		"droplet_ids": []int{123, 456}, // BC-2: typed slice rejected by structpb
+	})
+	if !tt.failed {
+		t.Fatal("AssertOutputsStructpbCompatible accepted typed []int slice; expected failure")
+	}
+	if !tt.hasMessageContaining("droplet_ids") {
+		t.Errorf("captured messages %q missing field name 'droplet_ids'", tt.messages)
+	}
+}
+
+// TestAssertOutputsStructpbCompatible_DeterministicOffendingKey guards
+// against a flaky-test failure mode: when multiple Outputs keys are bad,
+// the matcher's offending-key search MUST report a deterministic key
+// (lexicographically first) rather than whatever Go's randomized map
+// iteration happens to surface first. Without sort, this test is flaky
+// across runs; with sort, it's stable.
+func TestAssertOutputsStructpbCompatible_DeterministicOffendingKey(t *testing.T) {
+	tt := &mockT{}
+	iaclint.AssertOutputsStructpbCompatible(tt, map[string]any{
+		"z_bad": []int{1, 2, 3}, // lexicographically later — should NOT be reported
+		"a_bad": []int{4, 5, 6}, // lexicographically first — should be reported
+	})
+	if !tt.failed {
+		t.Fatal("expected failure on multi-bad-key Outputs")
+	}
+	if !strings.Contains(tt.lastMessage(), "a_bad") {
+		t.Errorf("expected 'a_bad' (lex-first) in fatal msg; got %q", tt.lastMessage())
+	}
+}
+
+func TestAssertOutputsStructpbCompatible_AcceptsCanonicalShape(t *testing.T) {
+	tt := &mockT{}
+	iaclint.AssertOutputsStructpbCompatible(tt, map[string]any{
+		"droplet_ids":   []any{float64(123), float64(456)},
+		"tags":          []any{"a", "b"},
+		"inbound_rules": []any{map[string]any{"protocol": "tcp"}},
+		"name":          "fw-1",
+	})
+	if tt.failed {
+		t.Fatalf("AssertOutputsStructpbCompatible rejected canonical shape: %s", tt.lastMessage())
+	}
+}
+
+func TestAssertValidationMatrix_TCPPort_StrictParserPasses(t *testing.T) {
+	// A parser that rejects 0, negative, and >65535 should pass the TCPPort matrix.
+	parser := func(cfg map[string]any) (any, error) {
+		v, ok := cfg["port"].(int)
+		if !ok {
+			if f, fok := cfg["port"].(float64); fok && f == float64(int(f)) {
+				v = int(f)
+			} else {
+				return nil, fmt.Errorf("port: must be an integer")
+			}
+		}
+		if v < 1 || v > 65535 {
+			return nil, fmt.Errorf("port: %d invalid (must be 1..65535)", v)
+		}
+		return v, nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
+	if tt.failed {
+		t.Fatalf("strict TCPPort parser failed matrix: %s", tt.lastMessage())
+	}
+}
+
+func TestAssertValidationMatrix_TCPPort_LooseParserFails(t *testing.T) {
+	// A parser that accepts 0 (loose) should fail the TCPPort matrix.
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["port"].(int)
+		if v < 0 || v > 65535 {
+			return nil, fmt.Errorf("port: %d invalid", v)
+		}
+		return v, nil // accepts 0 — BC-4 violation
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
+	if !tt.failed {
+		t.Fatal("loose TCPPort parser passed matrix; expected failure for value 0")
+	}
+}
+
+// TestAssertValidationMatrix_TCPPort_FloatLooseParserFails exercises the
+// gRPC-coercion gap: a parser that's strict on int but silently accepts
+// float64 ships green-CI but fails in production gRPC dispatch (where the
+// structpb boundary collapses every numeric to float64). The TCPPort matrix
+// MUST probe both int and float64 shapes for a single call to be sufficient.
+func TestAssertValidationMatrix_TCPPort_FloatLooseParserFails(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		// Strict on int — passes all int probes.
+		if v, ok := cfg["port"].(int); ok {
+			if v < 1 || v > 65535 {
+				return nil, fmt.Errorf("port: %d invalid", v)
+			}
+			return v, nil
+		}
+		// Loose on float64 — accepts everything (BC-4 violation under gRPC coercion).
+		if f, ok := cfg["port"].(float64); ok {
+			return int(f), nil
+		}
+		return nil, fmt.Errorf("port: must be a number")
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
+	if !tt.failed {
+		t.Fatal("float-loose TCPPort parser passed matrix; expected failure on float64 probes (gRPC coercion path uncovered)")
+	}
+}
+
+func TestAssertValidationMatrix_IntegerOnlyFloat_StrictParserPasses(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		v, ok := cfg["id"].(float64)
+		if !ok {
+			return nil, fmt.Errorf("id: must be a number")
+		}
+		if v != float64(int64(v)) {
+			return nil, fmt.Errorf("id: %v is not an integer", v)
+		}
+		return int64(v), nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "id", iaclint.KindIntegerOnlyFloat)
+	if tt.failed {
+		t.Fatalf("strict IntegerOnlyFloat parser failed matrix: %s", tt.lastMessage())
+	}
+}
+
+func TestAssertValidationMatrix_NonNegativeInt_Strict(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["count"].(int)
+		if v < 0 {
+			return nil, fmt.Errorf("count: %d invalid", v)
+		}
+		return v, nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "count", iaclint.KindNonNegativeInt)
+	if tt.failed {
+		t.Fatalf("strict NonNegativeInt parser failed matrix: %s", tt.lastMessage())
+	}
+}
+
+func TestAssertValidationMatrix_NonEmptyString_Strict(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["name"].(string)
+		if strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("name: must be non-empty")
+		}
+		return v, nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "name", iaclint.KindNonEmptyString)
+	if tt.failed {
+		t.Fatalf("strict NonEmptyString parser failed matrix: %s", tt.lastMessage())
+	}
+}
+
+func TestAssertValidationMatrix_StringEnum_Strict(t *testing.T) {
+	allowed := []string{"public", "internal"}
+	parser := func(cfg map[string]any) (any, error) {
+		v, exists := cfg["expose"]
+		if !exists {
+			return "", nil // absent is fine
+		}
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("expose: must be a string, got %T", v)
+		}
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" {
+			return s, nil
+		}
+		for _, a := range allowed {
+			if s == a {
+				return s, nil
+			}
+		}
+		return nil, fmt.Errorf("expose: %q invalid; must be one of %v", s, allowed)
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "expose", iaclint.WithStringEnumOptions(allowed))
+	if tt.failed {
+		t.Fatalf("strict StringEnum parser failed matrix: %s", tt.lastMessage())
+	}
+}
+
+func TestAssertValidationMatrix_StringEnum_LooseFailsOnNonString(t *testing.T) {
+	allowed := []string{"public", "internal"}
+	parser := func(cfg map[string]any) (any, error) {
+		// BC-4 violation: silently treats non-string as omitted.
+		s, _ := cfg["expose"].(string)
+		return s, nil
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "expose", iaclint.WithStringEnumOptions(allowed))
+	if !tt.failed {
+		t.Fatal("loose StringEnum parser passed matrix; expected failure on non-string probe")
+	}
+	// Assert specifically that the non-string probes were the ones that
+	// triggered failures — guards against regressions where a different
+	// probe class (e.g., unknown-string) starts failing while non-string
+	// rejection silently regresses.
+	for _, label := range []string{"non-string bool", "non-string int", "non-string slice"} {
+		if !tt.hasMessageContaining(label) {
+			t.Errorf("expected failure message for probe %q; captured messages: %v", label, tt.messages)
+		}
+	}
+}
+
+// TestAssertValidationMatrix_TCPPort_FloatBoundaryMisbehaviorCaught proves
+// that the float64 probe table covers the negative (-1) and min-valid (1)
+// boundary values claimed by the KindTCPPort docstring. The parser inverts
+// boundary handling (accepts float64(-1), rejects float64(1)) so the matrix
+// MUST flag both probes by name. Without those two probes in the table this
+// test would not see "negative (float64" or "min valid (float64" in the
+// captured failure messages.
+func TestAssertValidationMatrix_TCPPort_FloatBoundaryMisbehaviorCaught(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) {
+		// Strict on int — passes all int probes.
+		if v, ok := cfg["port"].(int); ok {
+			if v < 1 || v > 65535 {
+				return nil, fmt.Errorf("port: %d invalid", v)
+			}
+			return v, nil
+		}
+		// Inverted boundary on float64: accepts the values we expect to be
+		// rejected (-1, 0, 65536) and rejects the values we expect to be
+		// accepted (1, 65535) — exercises the full float64 boundary.
+		if f, ok := cfg["port"].(float64); ok {
+			if f == -1 || f == 0 || f == 65536 {
+				return int(f), nil // BUG: silently accepts
+			}
+			return nil, fmt.Errorf("port: %v invalid", f) // BUG: rejects 1, 65535
+		}
+		return nil, fmt.Errorf("port: must be a number")
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "port", iaclint.KindTCPPort)
+	if !tt.failed {
+		t.Fatal("expected matrix failure on inverted-boundary float64 parser")
+	}
+	if !tt.hasMessageContaining("negative (float64") {
+		t.Errorf("expected float64(-1) probe to be exercised; messages: %v", tt.messages)
+	}
+	if !tt.hasMessageContaining("min valid (float64") {
+		t.Errorf("expected float64(1) probe to be exercised; messages: %v", tt.messages)
+	}
+}
+
+// TestAssertValidationMatrix_StringEnum_BareKindFailsLoudly verifies that
+// passing the bare KindStringEnum constant (without WithStringEnumOptions)
+// surfaces a targeted error directing the caller to WithStringEnumOptions —
+// the bare exported constant looks usable but isn't, so the matcher must
+// fail loudly with actionable guidance rather than the generic "unhandled
+// kind" message.
+func TestAssertValidationMatrix_StringEnum_BareKindFailsLoudly(t *testing.T) {
+	parser := func(cfg map[string]any) (any, error) { return cfg["x"], nil }
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "x", iaclint.KindStringEnum)
+	if !tt.failed {
+		t.Fatal("expected loud failure for bare KindStringEnum constant")
+	}
+	if !tt.hasMessageContaining("WithStringEnumOptions") {
+		t.Errorf("expected fatal message to point caller to WithStringEnumOptions; messages: %v", tt.messages)
+	}
+}
+
+func TestAssertValidationMatrix_IntegerOnlyFloat_LooseAcceptsFractional(t *testing.T) {
+	// A parser that silently truncates 1.9 → 1 should fail the matrix.
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["id"].(float64)
+		return int64(v), nil // BC-4 violation: silently truncates fractional values
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "id", iaclint.KindIntegerOnlyFloat)
+	if !tt.failed {
+		t.Fatal("loose IntegerOnlyFloat parser passed matrix; expected failure on 1.9 / NaN / Inf probes")
+	}
+}
+
+func TestAssertValidationMatrix_NonNegativeInt_LooseAcceptsNegative(t *testing.T) {
+	// A parser that doesn't range-check should fail the matrix on -1.
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["count"].(int)
+		return v, nil // BC-4 violation: accepts -1
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "count", iaclint.KindNonNegativeInt)
+	if !tt.failed {
+		t.Fatal("loose NonNegativeInt parser passed matrix; expected failure on -1 probe")
+	}
+}
+
+func TestAssertValidationMatrix_NonEmptyString_LooseAcceptsEmpty(t *testing.T) {
+	// A parser that doesn't trim/check should fail the matrix on "" and "   ".
+	parser := func(cfg map[string]any) (any, error) {
+		v, _ := cfg["name"].(string)
+		return v, nil // BC-4 violation: accepts empty / whitespace-only
+	}
+	tt := &mockT{}
+	iaclint.AssertValidationMatrix(tt, parser, "name", iaclint.KindNonEmptyString)
+	if !tt.failed {
+		t.Fatal("loose NonEmptyString parser passed matrix; expected failure on empty / whitespace probes")
+	}
+}
+
+// fakeDriver is a minimal interfaces.ResourceDriver impl used to exercise
+// AssertDiffPopulatesAllOutputFields. The contract: every key Diff reads from
+// current.Outputs MUST be populated by Create/Read/Update on the writer side.
+type fakeDriver struct {
+	createOutputs map[string]any
+	diffReadsKeys []string // keys this fake's Diff would read
+}
+
+func (f *fakeDriver) Create(ctx context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{
+		Name:    spec.Name,
+		Type:    spec.Type,
+		Outputs: f.createOutputs,
+		Status:  "running",
+	}, nil
+}
+
+func (f *fakeDriver) Read(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) Update(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) Delete(ctx context.Context, ref interfaces.ResourceRef) error { return nil }
+
+// Diff records that it read the expected keys but doesn't actually compare.
+func (f *fakeDriver) Diff(ctx context.Context, desired interfaces.ResourceSpec, current *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	for _, k := range f.diffReadsKeys {
+		_ = current.Outputs[k] // simulate reading the field
+	}
+	return &interfaces.DiffResult{NeedsUpdate: false}, nil
+}
+
+func (f *fakeDriver) HealthCheck(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) Scale(ctx context.Context, ref interfaces.ResourceRef, replicas int) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+
+func (f *fakeDriver) SensitiveKeys() []string { return nil }
+
+func (f *fakeDriver) DiffReadsOutputKeys() []string { return f.diffReadsKeys }
+
+func TestAssertDiffPopulatesAllOutputFields_OK(t *testing.T) {
+	d := &fakeDriver{
+		createOutputs: map[string]any{"image": "x:v1", "expose": "internal"},
+		diffReadsKeys: []string{"image", "expose"},
+	}
+	tt := &mockT{}
+	iaclint.AssertDiffPopulatesAllOutputFields(tt, d,
+		interfaces.ResourceSpec{Name: "fake", Type: "fake.thing", Config: map[string]any{}})
+	if tt.failed {
+		t.Fatalf("driver with matching writer/reader keys failed assertion: %s", tt.lastMessage())
+	}
+}
+
+func TestAssertDiffPopulatesAllOutputFields_MissingKey(t *testing.T) {
+	// Writer doesn't populate "expose" but Diff reads it.
+	d := &fakeDriver{
+		createOutputs: map[string]any{"image": "x:v1"}, // no "expose"
+		diffReadsKeys: []string{"image", "expose"},
+	}
+	tt := &mockT{}
+	iaclint.AssertDiffPopulatesAllOutputFields(tt, d,
+		interfaces.ResourceSpec{Name: "fake", Type: "fake.thing", Config: map[string]any{}})
+	if !tt.failed {
+		t.Fatal("driver with missing writer key passed assertion; expected failure")
+	}
+	if !strings.Contains(tt.lastMessage(), "expose") {
+		t.Errorf("fatal msg missing key name 'expose': %q", tt.lastMessage())
+	}
+}

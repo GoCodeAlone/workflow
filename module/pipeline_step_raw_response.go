@@ -87,7 +87,11 @@ func (s *RawResponseStep) Execute(_ context.Context, pc *PipelineContext) (*Step
 
 	// Set additional headers
 	for k, v := range s.headers {
-		w.Header().Set(k, v)
+		resolvedValue, err := s.resolveHeaderValue(v, pc)
+		if err != nil {
+			return nil, fmt.Errorf("raw_response step %q: failed to resolve header %q: %w", s.name, k, err)
+		}
+		w.Header().Set(k, resolvedValue)
 	}
 
 	// Write status code
@@ -132,4 +136,8 @@ func (s *RawResponseStep) resolveBody(pc *PipelineContext) string {
 		return resolved
 	}
 	return ""
+}
+
+func (s *RawResponseStep) resolveHeaderValue(value string, pc *PipelineContext) (string, error) {
+	return s.tmpl.Resolve(value, pc)
 }

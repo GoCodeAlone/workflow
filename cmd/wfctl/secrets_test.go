@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 func TestSecretsDetect_EnvRef(t *testing.T) {
@@ -184,5 +189,174 @@ func TestRunSecretsDispatch_NoArgs(t *testing.T) {
 	err := runSecrets([]string{})
 	if err == nil {
 		t.Error("expected error for no args")
+	}
+}
+
+func TestSecretsSet_AdHocProviderOverride(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("BMW_TEST_KEY") })
+	err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "BMW_TEST_KEY"},
+		strings.NewReader("test-value\n"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := secrets.NewEnvProvider("")
+	got, err := p.Get(context.Background(), "BMW_TEST_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "test-value" {
+		t.Errorf("got %q want %q", got, "test-value")
+	}
+}
+
+func TestSecretsSet_AdHocNoValue_NonTTY(t *testing.T) {
+	// When r is nil and not a TTY (test environment), should return an error.
+	err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "SOME_KEY"},
+		nil,
+	)
+	if err == nil {
+		t.Error("expected error when no value provided and not a TTY")
+	}
+}
+
+func TestSecretsSet_AdHocUnknownProvider(t *testing.T) {
+	err := runSecretsSetWithReader(
+		[]string{"--provider", "vault", "MY_KEY"},
+		strings.NewReader("val\n"),
+	)
+	if err == nil {
+		t.Error("expected error for vault ad-hoc (requires config)")
+	}
+}
+
+func TestSecretsList_AdHocProvider(t *testing.T) {
+	// A non-empty --service acts as a prefix for EnvProvider.List, enabling enumeration.
+	t.Setenv("BMW_LIST_PREFIX_KEY", "list-value")
+
+	// Capture stdout to assert the key appears in the output.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runSecretsList([]string{"--provider", "env", "--service", "BMW_LIST_PREFIX_"})
+
+	w.Close()
+	out, _ := io.ReadAll(r)
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "BMW_LIST_PREFIX_KEY") {
+		t.Errorf("expected BMW_LIST_PREFIX_KEY in output, got:\n%s", out)
+	}
+}
+
+func TestSecretsGet_RoundTripWithSet(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TK1") })
+	if err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "--service", "t", "K1"},
+		strings.NewReader("v1\n"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := runSecretsGetWithWriter(
+		[]string{"--provider", "env", "--service", "t", "K1"},
+		&buf,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != "v1" {
+		t.Errorf("got %q want %q", got, "v1")
+	}
+}
+
+func TestSecretsGet_MissingName(t *testing.T) {
+	var buf bytes.Buffer
+	err := runSecretsGetWithWriter([]string{"--provider", "env"}, &buf)
+	if err == nil {
+		t.Error("expected error when secret name is missing")
+	}
+}
+
+func TestSecretsGet_NotFound(t *testing.T) {
+	var buf bytes.Buffer
+	err := runSecretsGetWithWriter(
+		[]string{"--provider", "env", "WFCTL_DEFINITELY_NOT_SET_XYZ999"},
+		&buf,
+	)
+	if err == nil {
+		t.Error("expected error for unset secret with env provider")
+	}
+}
+
+func TestSecretsDispatch_Get(t *testing.T) {
+	// Dispatcher must route "get" without panicking (will error: missing name).
+	err := runSecrets([]string{"get"})
+	if err == nil {
+		t.Error("expected error from get with no name")
+	}
+}
+
+func TestSecretsDelete_Idempotent(t *testing.T) {
+	// Deleting a key that does not exist must succeed (idempotent).
+	err := runSecretsDelete([]string{"--provider", "env", "--service", "t", "NONEXISTENT_KEY"})
+	if err != nil {
+		t.Errorf("expected no error on missing key, got %v", err)
+	}
+}
+
+func TestSecretsDelete_SetThenDelete(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TDEL_KEY") })
+	if err := runSecretsSetWithReader(
+		[]string{"--provider", "env", "--service", "t", "DEL_KEY"},
+		strings.NewReader("to-delete\n"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSecretsDelete([]string{"--provider", "env", "--service", "t", "DEL_KEY"}); err != nil {
+		t.Fatal(err)
+	}
+	// Value should no longer be retrievable.
+	var buf bytes.Buffer
+	err := runSecretsGetWithWriter([]string{"--provider", "env", "--service", "t", "DEL_KEY"}, &buf)
+	if err == nil {
+		t.Error("expected error getting deleted key, got nil")
+	}
+}
+
+func TestSecretsExport_DotenvFormat(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TK1"); os.Unsetenv("TK2") })
+	if err := runSecretsSetWithReader([]string{"--provider", "env", "--service", "t", "K1"}, strings.NewReader("v1\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSecretsSetWithReader([]string{"--provider", "env", "--service", "t", "K2"}, strings.NewReader("v2\n")); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := runSecretsExportWithWriter([]string{"--provider", "env", "--service", "t", "--format", "dotenv"}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "TK1=v1") || !strings.Contains(out, "TK2=v2") {
+		t.Errorf("missing keys in dotenv output:\n%s", out)
+	}
+}
+
+func TestSecretsExport_ShellExportFormat(t *testing.T) {
+	t.Cleanup(func() { os.Unsetenv("TK1") })
+	if err := runSecretsSetWithReader([]string{"--provider", "env", "--service", "t", "K1"}, strings.NewReader("v1\n")); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := runSecretsExportWithWriter([]string{"--provider", "env", "--service", "t", "--format", "export"}, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `export TK1="v1"`) {
+		t.Errorf("missing export line:\n%s", buf.String())
 	}
 }
