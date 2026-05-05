@@ -129,10 +129,14 @@ func (m *RemoteModule) InvokeService(method string, args map[string]any) (map[st
 // InvokeServiceContext calls a named method on the remote module's service
 // interface using the caller's context.
 func (m *RemoteModule) InvokeServiceContext(ctx context.Context, method string, args map[string]any) (map[string]any, error) {
+	argsStruct, err := mapToStruct(args)
+	if err != nil {
+		return nil, fmt.Errorf("remote invoke %s: encode args as Struct: %w", method, err)
+	}
 	req := &pb.InvokeServiceRequest{
 		HandleId: m.handleID,
 		Method:   method,
-		Args:     mapToStruct(args),
+		Args:     argsStruct,
 	}
 	contract := m.serviceContracts[method]
 	if contract != nil && contract.Mode != pb.ContractMode_CONTRACT_MODE_UNSPECIFIED && contract.Mode != pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {

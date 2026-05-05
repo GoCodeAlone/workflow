@@ -220,22 +220,38 @@ func (c contractDescriptorCache) servicesFor(moduleType string) map[string]*pb.C
 
 func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]any, resolver protoregistry.MessageTypeResolver) (*structpb.Struct, *anypb.Any, error) {
 	if descriptor == nil || descriptor.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED {
-		return mapToStruct(cfg), nil, nil
+		s, err := mapToStruct(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode config as Struct: %w", err)
+		}
+		return s, nil, nil
 	}
 	if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
-		return mapToStruct(cfg), nil, nil
+		s, err := mapToStruct(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode LEGACY_STRUCT config as Struct: %w", err)
+		}
+		return s, nil, nil
 	}
 	typed, err := mapToTypedAny(descriptor.ConfigMessage, cfg, resolver)
 	if err != nil {
 		if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, nil, fmt.Errorf("STRICT_PROTO contract for config message %q cannot use legacy Struct fallback: %w", descriptor.ConfigMessage, err)
 		}
-		return mapToStruct(cfg), nil, nil
+		s, sErr := mapToStruct(cfg)
+		if sErr != nil {
+			return nil, nil, fmt.Errorf("encode config as Struct after typed fallback: %w", sErr)
+		}
+		return s, nil, nil
 	}
 	if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 		return nil, typed, nil
 	}
-	return mapToStruct(cfg), typed, nil
+	s, err := mapToStruct(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode PROTO_WITH_LEGACY_STRUCT config as Struct: %w", err)
+	}
+	return s, typed, nil
 }
 
 func contractModeUsesTyped(mode pb.ContractMode) bool {

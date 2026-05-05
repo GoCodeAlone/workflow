@@ -65,7 +65,11 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 	// Convert step outputs to proto map
 	stepOutputs := make(map[string]*structpb.Struct)
 	for k, v := range pc.StepOutputs {
-		stepOutputs[k] = mapToStruct(v)
+		out, err := mapToStruct(v)
+		if err != nil {
+			return nil, fmt.Errorf("remote step %q (handle %s) encode step output %q as Struct: %w", s.name, s.handleID, k, err)
+		}
+		stepOutputs[k] = out
 	}
 
 	req, err := s.executeRequest(pc, resolvedConfig, stepOutputs)
@@ -101,13 +105,29 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 }
 
 func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig map[string]any, stepOutputs map[string]*structpb.Struct) (*pb.ExecuteStepRequest, error) {
+	triggerData, err := mapToStruct(pc.TriggerData)
+	if err != nil {
+		return nil, fmt.Errorf("remote step %q (handle %s) encode trigger_data as Struct: %w", s.name, s.handleID, err)
+	}
+	current, err := mapToStruct(pc.Current)
+	if err != nil {
+		return nil, fmt.Errorf("remote step %q (handle %s) encode current as Struct: %w", s.name, s.handleID, err)
+	}
+	metadata, err := mapToStruct(pc.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("remote step %q (handle %s) encode metadata as Struct: %w", s.name, s.handleID, err)
+	}
+	configStruct, err := mapToStruct(resolvedConfig)
+	if err != nil {
+		return nil, fmt.Errorf("remote step %q (handle %s) encode config as Struct: %w", s.name, s.handleID, err)
+	}
 	req := &pb.ExecuteStepRequest{
 		HandleId:    s.handleID,
-		TriggerData: mapToStruct(pc.TriggerData),
+		TriggerData: triggerData,
 		StepOutputs: stepOutputs,
-		Current:     mapToStruct(pc.Current),
-		Metadata:    mapToStruct(pc.Metadata),
-		Config:      mapToStruct(resolvedConfig),
+		Current:     current,
+		Metadata:    metadata,
+		Config:      configStruct,
 	}
 	if s.contract == nil || s.contract.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED {
 		return req, nil

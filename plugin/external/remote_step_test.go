@@ -257,7 +257,7 @@ func TestRemoteStep_Execute_StrictContractFiltersUnknownCurrentFields(t *testing
 
 func TestRemoteStep_Execute_StrictContractRequiresTypedOutput(t *testing.T) {
 	stub := &stubPluginServiceClient{
-		response: &pb.ExecuteStepResponse{Output: mapToStruct(map[string]any{
+		response: &pb.ExecuteStepResponse{Output: mustMapToStruct(t, map[string]any{
 			"name": "legacy-output",
 		})},
 	}
@@ -378,7 +378,7 @@ func TestRemoteModule_InvokeService_ProtoWithLegacyKeepsArgs(t *testing.T) {
 
 func TestRemoteModule_InvokeService_StrictContractRequiresTypedOutput(t *testing.T) {
 	stub := &stubPluginServiceClient{
-		invokeResponse: &pb.InvokeServiceResponse{Result: mapToStruct(map[string]any{
+		invokeResponse: &pb.InvokeServiceResponse{Result: mustMapToStruct(t, map[string]any{
 			"name": "legacy-output",
 		})},
 	}
