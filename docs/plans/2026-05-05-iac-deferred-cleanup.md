@@ -14,8 +14,8 @@
 
 ## Scope Manifest
 
-**PR Count:** 8
-**Tasks:** 22
+**PR Count:** 9
+**Tasks:** 28 (includes per-PR `PR + Copilot cycle + admin-merge` orchestration tasks; implementation work is ~21 tasks)
 **Estimated Lines of Change:** ~700 (informational; not enforced)
 
 **Out of scope:**
@@ -26,16 +26,27 @@
 
 **PR Grouping:**
 
-| PR # | Title | Tasks | Branch |
-|------|-------|-------|--------|
-| 1 | W-541: R-A4 align rule consults top-level secrets.generate + entries | Task 1.1, Task 1.2 | feat/r-a4-toplevel-secrets |
-| 2 | W-Precision: convert.go silent-drop + iac-codemod accumulator pattern | Task 2.1, Task 2.2 | feat/iac-precision-fixes |
-| 3 | W-Diagnose-540: failing-CI test for plugin SDK manifest schema strictness | Task 3.1 | test/manifest-schema-strict-diagnostic |
-| 4 | W-Cleanup: wfctl infra cleanup --tag subcommand + opt-in Enumerator interface | Task 4.1, Task 4.2, Task 4.3, Task 4.4 | feat/wfctl-infra-cleanup |
-| 5 | W-Refactor: deploy_providers.remoteIaCProvider canonicalization + ADR 010 | Task 5.1, Task 5.2 | refactor/remote-iac-provider |
-| 6 | DO-Plugin: Initialize ctx + Plan canonicalization + Enumerator impl | Task 6.1, Task 6.2, Task 6.3 | fix/initialize-ctx-and-plan-canonical |
-| 7 | C-1 TC1: pin bumps to v0.21.2 + v0.10.1 (amend existing PR #190) | Task 7.0a, Task 7.0b, Task 7.0c, Task 7.1, Task 7.2 | feat/c1-staging-pg-cutover (existing) |
-| 8 | C-1 TC2: cascade-replace 4 protected resources to nyc1 | Task 8.1, Task 8.2, Task 8.3 | feat/c2-staging-pg-cutover-nyc1 (NEW from main post-TC1-merge) |
+| PR # | Title | Tasks | Branch | Dependencies |
+|------|-------|-------|--------|--------------|
+| 1 | W-541: R-A4 align rule consults top-level secrets.generate + entries | Task 1.1, Task 1.2 | feat/r-a4-toplevel-secrets | — (Phase 1 leader) |
+| 2 | W-Precision: convert.go silent-drop + iac-codemod accumulator pattern | Task 2.1, Task 2.2 | feat/iac-precision-fixes | Phase 2 Set A; independent |
+| 3 | W-Diagnose-540: failing-CI test for plugin SDK manifest schema strictness | Task 3.1 | test/manifest-schema-strict-diagnostic | Phase 2 Set A; independent |
+| 4 | W-Cleanup: wfctl infra cleanup --tag subcommand + opt-in Enumerator interface | Task 4.1, Task 4.2, Task 4.3, Task 4.4 | feat/wfctl-infra-cleanup | Phase 2 Set B; independent |
+| 5 | W-Refactor: deploy_providers.remoteIaCProvider canonicalization + ADR 010 | Task 5.1, Task 5.2 | refactor/remote-iac-provider | Phase 2 Set B; rebases on PR 4 if WFCTL.md overlap |
+| 6 | DO-Plugin (#62 + #63 only): Initialize ctx + Plan canonicalization | Task 6.1, 6.2, 6.3 | fix/initialize-ctx-and-plan-canonical | Phase 2 Set A; independent |
+| 6b | DO-Plugin (Enumerator impl, follow-up): EnumerateByTag using godo.Tags.Get | Task 6b.1, 6b.2 | feat/do-enumerator-impl (NEW from DO main post-PR-6-merge) | **BLOCKS on PR 4 Task 4.1 reaching workflow main** |
+| 7 | C-1 TC1: pin bumps to v0.21.2 + v0.10.1 (amend existing PR #190) | Task 7.1, Task 7.2 | feat/c1-staging-pg-cutover (existing) | Blocks on Coordination 2 + Coordination 3 |
+| 8 | C-1 TC2: cascade-replace 4 protected resources to nyc1 | Task 8.1, Task 8.2, Task 8.3 | feat/c2-staging-pg-cutover-nyc1 (NEW from main post-TC1-merge) | Blocks on PR 7 merge |
+
+**Coordination tasks** (orchestrator-side; NOT part of any PR branch):
+
+| Coord | Action | Repo | Triggers after |
+|-------|--------|------|----------------|
+| Coord-1 | Cut workflow v0.21.1 tag | GoCodeAlone/workflow | PR 1 merges |
+| Coord-2 | Cut workflow-plugin-digitalocean v0.10.1 tag | GoCodeAlone/workflow-plugin-digitalocean | PR 6b merges |
+| Coord-3 | Cut workflow v0.21.2 tag | GoCodeAlone/workflow | PRs 2, 3, 4, 5 ALL merged |
+
+**Hard gate**: Task 7.1 starts ONLY after both Coord-2 AND Coord-3 complete (Release CI green + binaries live).
 
 **Status:** Draft
 
@@ -54,11 +65,20 @@
 **Files:**
 - Modify: `cmd/wfctl/infra_align_rules.go:45-68` (the `buildAlignContext` function and its top-level secrets handling at lines 47-49)
 
-**Step 1: Verify current behavior + symbols against origin/main**
+**Step 1: Verify current behavior + field names against origin/main**
 
-Run: `git -C /Users/jon/workspace/workflow show origin/main:cmd/wfctl/infra_align_rules.go | sed -n '40,70p'`
+Run: `git -C /Users/jon/workspace/workflow show origin/main:cmd/wfctl/infra_align_rules.go | grep -n -A 3 "secretGens\|cfg.Secrets" | head -20`
 
-Confirm: the function has an existing branch at line 47 that populates `ctx.secretGens = cfg.Secrets.Generate` but does NOT populate `ctx.secretKeys` from the top-level `cfg.Secrets`. The module-form switch arm at line 58-66 IS the only path that populates `ctx.secretKeys`. Also confirm `cfg.Secrets.Generate` has a `Key` field (at `config/secrets_config.go:14` per design rev3) and `cfg.Secrets.Entries` has a `Name` field (at line 47).
+Confirm: `buildAlignContext` has an existing branch that populates `ctx.secretGens = cfg.Secrets.Generate` but does NOT populate `ctx.secretKeys` from the top-level `cfg.Secrets`. The module-form switch arm IS the only path that populates `ctx.secretKeys`.
+
+Then verify field NAMES (not line numbers — line drift is a recurring failure mode):
+
+```
+git -C /Users/jon/workspace/workflow show origin/main:config/secrets_config.go | grep -n "^	Generate \|^	Entries \|type Secret"
+git -C /Users/jon/workspace/workflow show origin/main:config/secrets_config.go | grep -n "^	Key \|^	Name "
+```
+
+Confirm: `SecretGen` struct has a `Key string` field; `SecretEntry` struct has a `Name string` field. Drop reliance on line numbers.
 
 **Step 2: Write the failing test**
 
@@ -409,15 +429,29 @@ Confirm: `"additionalProperties": false` IS declared on the `iacProvider` sub-ob
 
 Then verify the lax-validation behavior empirically: write a quick Go script (or use `wfctl plugin validate`) to load a manifest with extra `iacProvider.bogusKey` and confirm validation accepts it (it should, per the bug).
 
-**Step 2: Write the test**
+**Step 2: Write the test using `t.Skip` alt-shape**
+
+Per adversarial-plan-review-1 finding I-5: ship the alt-shape (`t.Skip` with runbook entry) instead of the failing-CI shape. This avoids:
+- Red CI on workflow main blocking other PRs.
+- Trade-off significant enough to require ADR per `superpowers:recording-decisions`.
+- Future contributors reverting the test to "fix CI" without understanding intent.
 
 Add to `plugin/sdk/manifest_test.go`:
 
 ```go
 func TestManifest_iacProviderAdditionalPropertiesFalse_IsEnforced(t *testing.T) {
-    // Per workflow#540: schema declares additionalProperties:false on iacProvider
-    // sub-object, but the jsonschema library currently accepts extra keys silently.
-    // This test FAILS while the bug exists; it PASSES when the fix lands.
+    // Diagnostic test for workflow#540.
+    // Schema declares additionalProperties:false on iacProvider sub-object,
+    // but the jsonschema library currently accepts extra keys silently.
+    //
+    // SHAPE: t.Skip + workflow#540 link. Once the fix lands (separate PR),
+    // remove the t.Skip line + the test will assert the validator REJECTS
+    // the bogus key. Until then, this test is a documented BUG marker that
+    // future contributors can grep for.
+    t.Skip("BUG: workflow#540 — extra iacProvider key not rejected; " +
+        "schema declares additionalProperties:false but library accepts extra keys. " +
+        "Diagnostic test pending fix follow-up PR.")
+
     manifest := []byte(`{
         "name": "test-plugin",
         "version": "0.0.0",
@@ -428,39 +462,48 @@ func TestManifest_iacProviderAdditionalPropertiesFalse_IsEnforced(t *testing.T) 
     }`)
     err := ValidateManifest(manifest)  // or whichever validator function is used
     if err == nil {
-        t.Errorf("BUG: extra iacProvider key not rejected — see workflow#540; " +
-            "schema declares additionalProperties:false but library accepts extra keys")
+        t.Errorf("BUG: extra iacProvider key not rejected — see workflow#540")
     }
 }
 ```
 
 (If `ValidateManifest` doesn't exist, look for the equivalent function — likely in `plugin/sdk/manifest.go`. Test should call whatever's already used by `wfctl plugin validate`.)
 
-**Step 3: Run the test to verify it FAILS**
+**Step 3: Run the test to verify it SKIPS (not fails)**
 
 Run: `GOWORK=off go test ./plugin/sdk/ -run "iacProviderAdditionalPropertiesFalse" -v`
 
-Expected: FAIL with the t.Errorf message above.
+Expected: `--- SKIP: TestManifest_iacProviderAdditionalPropertiesFalse_IsEnforced (0.00s)` with the SKIP message naming workflow#540.
 
-**Step 4: Commit (test only; no implementation change)**
+**Step 4: Add runbook entry naming the active SKIPs**
+
+Add to `docs/test-skips.md` (create if not present):
+
+```markdown
+# Active test skips
+
+| Test | Issue | Plan to remove |
+|------|-------|----------------|
+| TestManifest_iacProviderAdditionalPropertiesFalse_IsEnforced | workflow#540 | Remove `t.Skip` line in fix follow-up PR |
+```
+
+**Step 5: Commit (test + runbook entry; no implementation change)**
 
 ```bash
-git add plugin/sdk/manifest_test.go
-git commit -m "test(plugin): failing-CI test for manifest schema additionalProperties enforcement (workflow#540 diagnostic)"
+git add plugin/sdk/manifest_test.go docs/test-skips.md
+git commit -m "test(plugin): diagnostic test (skipped) for manifest schema strictness (workflow#540)"
 ```
 
 ### Task 3.2: PR + Copilot cycle + admin-merge
 
-(Same orchestration shape as Task 1.2.) PR title: `test(plugin): failing-CI test for manifest schema strictness diagnostic (workflow#540)`. Body explicitly notes:
+(Same orchestration shape as Task 1.2.) PR title: `test(plugin): diagnostic test for manifest schema strictness (workflow#540)`. Body notes:
 
-- This PR ships the diagnostic test only.
-- Test FAILS CI on workflow main from the moment it lands.
-- Red CI is the visible "needs fix" signal per design rev3 §W-Diagnose-540 §Behavior.
-- Fix follow-up PR (separate) lands the actual library bisection / config flag toggle, flipping the test green.
-- Per `feedback_proper_fixes_over_workarounds`: visible-pending-fix beats invisible-bug.
-- If red CI on main is operationally unacceptable to reviewers, alt-shape is `t.Skip("BUG: ...; see workflow#540")` with runbook entry; document this in PR body.
+- This PR ships the diagnostic test in `t.Skip` shape (alt-shape per design rev3 §Behavior).
+- CI stays green; the SKIP shows up in `go test -v` output as a reminder.
+- Fix follow-up PR removes the `t.Skip` line + the test asserts the validator REJECTS the bogus key.
+- `docs/test-skips.md` runbook entry tracks the active SKIP.
 
-**Rollback:** revert commit; CI returns to green-but-buggy state.
+**Rollback:** revert commit; runbook entry stays as a TODO.
 
 ---
 
@@ -471,6 +514,8 @@ git commit -m "test(plugin): failing-CI test for manifest schema additionalPrope
 **Issue:** workflow#536
 
 ### Task 4.1: Add opt-in `Enumerator` interface
+
+**Pre-DM team-lead** before this task per workspace policy (new public interface in `interfaces/iac_provider.go` is a cross-package contract change; same trigger as Task 4.4 + Task 7.1).
 
 **Files:**
 - Modify: `interfaces/iac_provider.go` (add new optional interface)
@@ -612,9 +657,17 @@ Run: `GOWORK=off go test ./cmd/wfctl/ -run "TestInfraCleanup" -v`
 
 Expected: FAIL with `undefined: runInfraCleanup`.
 
-**Step 3: Implement the subcommand**
+**Step 3: Implement the subcommand using the canonical `runInfra*` dispatcher signature**
 
-Create `cmd/wfctl/infra_cleanup.go`:
+Verify the canonical pattern against origin/main first:
+
+```
+git -C /Users/jon/workspace/workflow show origin/main:cmd/wfctl/infra.go | grep -n "^func runInfra" | head -10
+```
+
+Expected: all sibling sub-functions (`runInfra`, `runInfraPlan`, `runInfraApply`, etc.) take `args []string` and return `error`. They get providers/stdout via package-level state set up in `runInfra` itself.
+
+Create `cmd/wfctl/infra_cleanup.go` matching the precedent:
 
 ```go
 package main
@@ -624,15 +677,17 @@ import (
     "errors"
     "flag"
     "fmt"
-    "io"
 
     "github.com/GoCodeAlone/workflow/interfaces"
 )
 
-func runInfraCleanup(ctx context.Context, args []string, stdout, stderr io.Writer, providers []interfaces.IaCProvider) error {
+func runInfraCleanup(args []string) error {
+    // Use the same package-level helpers other runInfra* functions use:
+    // - load config + providers via the same path runInfraPlan / runInfraApply use
+    // - emit to os.Stdout / os.Stderr per the canonical pattern
     fs := flag.NewFlagSet("infra cleanup", flag.ContinueOnError)
-    fs.SetOutput(stderr)
-    fs.Usage = func() { usage(stderr) }
+    fs.SetOutput(os.Stderr)
+    fs.Usage = func() { usage(os.Stderr) }
 
     tag := fs.String("tag", "", "tag to match resources for cleanup (required)")
     dryRun := fs.Bool("dry-run", true, "preview only; do not delete resources")
@@ -642,22 +697,29 @@ func runInfraCleanup(ctx context.Context, args []string, stdout, stderr io.Write
     if *tag == "" { return errors.New("infra cleanup: --tag is required") }
     if !*fix { *dryRun = true }
 
+    // Load providers via the same helper runInfraPlan/runInfraApply use.
+    // (Verify the actual helper name against origin/main; likely loadIaCProviders
+    // or similar — see cmd/wfctl/infra.go for the canonical pattern.)
+    ctx := context.Background()
+    providers, err := loadIaCProvidersForCleanup() // canonical helper; replace name per actual
+    if err != nil { return err }
+
     var totalErrs []error
     for _, p := range providers {
         enum, ok := p.(interfaces.Enumerator)
         if !ok {
-            fmt.Fprintf(stdout, "skipped %s: no Enumerator interface\n", p.Name())
+            fmt.Fprintf(os.Stdout, "skipped %s: no Enumerator interface\n", p.Name())
             continue
         }
         refs, err := enum.EnumerateByTag(ctx, *tag)
         if err != nil {
-            fmt.Fprintf(stderr, "%s: enumeration failed: %v\n", p.Name(), err)
+            fmt.Fprintf(os.Stderr, "%s: enumeration failed: %v\n", p.Name(), err)
             totalErrs = append(totalErrs, err)
             continue
         }
         for _, ref := range refs {
             if *dryRun {
-                fmt.Fprintf(stdout, "[dry-run] would delete %s/%s (provider: %s)\n", ref.Type, ref.Name, p.Name())
+                fmt.Fprintf(os.Stdout, "[dry-run] would delete %s/%s (provider: %s)\n", ref.Type, ref.Name, p.Name())
                 continue
             }
             // Live mode: get driver + delete
@@ -670,7 +732,7 @@ func runInfraCleanup(ctx context.Context, args []string, stdout, stderr io.Write
                 totalErrs = append(totalErrs, fmt.Errorf("%s: delete: %w", ref.Name, err))
                 continue
             }
-            fmt.Fprintf(stdout, "deleted %s/%s (provider: %s)\n", ref.Type, ref.Name, p.Name())
+            fmt.Fprintf(os.Stdout, "deleted %s/%s (provider: %s)\n", ref.Type, ref.Name, p.Name())
         }
     }
     if len(totalErrs) > 0 {
@@ -679,6 +741,8 @@ func runInfraCleanup(ctx context.Context, args []string, stdout, stderr io.Write
     return nil
 }
 ```
+
+(The implementer must verify the actual provider-loading helper name in `cmd/wfctl/infra.go` on origin/main. The canonical pattern matches the existing `runInfraPlan` / `runInfraApply` precedent — package-level state, args-only signature, no DI.)
 
 **Step 4: Wire subcommand into `cmd/wfctl/main.go`**
 
@@ -771,11 +835,13 @@ With:
     DO_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
   run: |
     if [ -z "$DO_TOKEN" ]; then
-      echo "::warning::DO_CONFORMANCE_API_TOKEN unset; skipping cleanup. Hourly leak-scrubber will catch orphans."
+      echo "::notice::DO_CONFORMANCE_API_TOKEN not provisioned (workflow#542 deferred); cleanup gate is wired but inactive. Hourly leak-scrubber catches orphans in the meantime."
       exit 0
     fi
     wfctl infra cleanup --tag "conformance-pr-${{ github.event.pull_request.number }}" --fix
 ```
+
+**Important note for PR 4 body**: explicitly call out: "Smoke-gate cleanup wiring activates only after workflow#542 (DO_CONFORMANCE_API_TOKEN provisioning) lands. Until then, the smoke gate emits a `::notice::` indicating the wiring is in place but inactive. Unit tests in Task 4.2 ARE the integration verification; Task 4.4 is wiring-only."
 
 **Step 2: Validate YAML**
 
@@ -956,12 +1022,13 @@ git commit -m "docs(adr): add ADR 010 — platform-vs-provider conformance scena
 
 ---
 
-## PR 6: DO-Plugin — Initialize ctx + Plan canonicalization + Enumerator impl
+## PR 6: DO-Plugin (#62 + #63 only) — Initialize ctx + Plan canonicalization
 
 **Repo:** `GoCodeAlone/workflow-plugin-digitalocean`
 **Branch:** `fix/initialize-ctx-and-plan-canonical`
 **Issues:** workflow-plugin-digitalocean#62 + workflow-plugin-digitalocean#63
-**Tag-cut after merge:** v0.10.1
+**Sequencing:** Phase 2 Set A; independent of PR 4 (Enumerator impl moved to PR 6b)
+**Tag-cut after merge:** none (PR 6b's Enumerator impl rolls into v0.10.1)
 
 ### Task 6.1: workflow-plugin-digitalocean#62 — Thread ctx through DOProvider.Initialize to godo client
 
@@ -1079,17 +1146,40 @@ git add internal/provider.go internal/provider_canonical_plan_test.go
 git commit -m "refactor(provider): collapse Plan to platform.ComputePlan (workflow-plugin-digitalocean#63)"
 ```
 
-### Task 6.3: Implement opt-in Enumerator interface
+### Task 6.3: PR 6 PR + Copilot cycle + admin-merge
+
+(Same orchestration shape as Task 1.2.) PR title: `fix/refactor(provider): Initialize ctx + Plan canonicalization (#62, #63)`. Body cites both issues + design rev3.
+
+**Rollback:** revert each commit independently. v0.10.0 behavior continues.
+
+---
+
+## PR 6b: DO-Plugin Enumerator impl (FOLLOW-UP after PR 4)
+
+**Repo:** `GoCodeAlone/workflow-plugin-digitalocean`
+**Branch:** `feat/do-enumerator-impl` (NEW from DO main post-PR-6-merge)
+**Issue:** workflow#536 (DO-side Enumerator impl)
+**Sequencing:** **BLOCKS on PR 4 Task 4.1 reaching workflow main** (need `interfaces.Enumerator` to exist before DO can satisfy it). Runs AFTER PR 6 merges + AFTER PR 4 Task 4.1's Enumerator interface lands on workflow main.
+**Tag-cut after merge:** v0.10.1
+
+### Task 6b.1: Implement opt-in Enumerator interface
 
 **Files:**
 - Modify: `internal/provider.go` (add `EnumerateByTag` method to DOProvider)
+- Modify: `go.mod` (bump workflow dep to a ref that includes the Enumerator interface)
 - Test: `internal/provider_enumerator_test.go`
 
 **Step 1: Verify Enumerator interface is on workflow main**
 
 Run: `git -C /Users/jon/workspace/workflow show origin/main:interfaces/iac_provider.go | grep -A 10 "^type Enumerator"`
 
-Verify the interface signature is what PR 4 Task 4.1 lands. (Note: this task depends on PR 4 having merged AND workflow tag v0.21.2 being cut OR DO-Plugin's go.mod referencing workflow main HEAD. The implementer should bump DO-Plugin's go.mod to a workflow ref that includes the Enumerator interface BEFORE writing this task's code.)
+Verify the interface signature is what PR 4 Task 4.1 landed. If the grep returns empty, PR 4 hasn't merged yet — this task is BLOCKED. STOP and DM team-lead.
+
+**Step 1b: Bump DO-Plugin go.mod to a workflow ref containing Enumerator**
+
+Run: `cd _worktrees/feat-do-enumerator-impl && go mod edit -require=github.com/GoCodeAlone/workflow@<workflow-main-SHA-with-Enumerator> && go mod tidy`
+
+(Alternatively: bump to a workflow tag that includes Enumerator, if Coord-3 has already cut v0.21.2. If not yet, use the post-PR-4 main HEAD SHA.)
 
 **Step 2: Write the failing test**
 
@@ -1145,11 +1235,11 @@ git add internal/provider.go internal/provider_enumerator_test.go
 git commit -m "feat(provider): implement Enumerator interface for tag-based resource listing"
 ```
 
-### Task 6.4: PR + Copilot cycle + admin-merge
+### Task 6b.2: PR 6b PR + Copilot cycle + admin-merge
 
-(Same orchestration.) PR title: `fix/refactor(provider): Initialize ctx + Plan canonical + Enumerator impl (#62, #63)`. Body: cite both DO issues + workflow#536 (the cleanup subcommand consumes Enumerator).
+(Same orchestration.) PR title: `feat(provider): implement opt-in Enumerator interface (workflow#536 follow-up)`. Body: cite workflow#536 + design rev3 + workflow PR 4 (which lands the interface).
 
-**Rollback:** revert each commit independently. v0.10.0 behavior continues. EnumerateByTag-impl revert is independent of W-Cleanup PR (opt-in interface).
+**Rollback:** revert PR 6b commit; v0.10.0 behavior continues. The cleanup subcommand will still work (opt-in interface; type-assertion at use site sees `ok=false` when Enumerator-impl is reverted).
 
 ---
 
@@ -1191,13 +1281,19 @@ Poll: `gh release view v0.21.1 --repo GoCodeAlone/workflow --json assets --jq '.
 
 Expected: assets array contains the wfctl binaries (~2-3 min after push).
 
-### Task 7.0b: Cut DO plugin v0.10.1 (after PR 6 merges)
+**Step 5: If Release CI fails — escalate**
 
-(Identical shape to 7.0a but on `workflow-plugin-digitalocean` repo, tag `v0.10.1`, body: cites #62, #63, and #536 Enumerator impl.)
+If after ~10 min the assets array is still empty: capture failed run via `gh run view --log-failed`; DM team-lead with the run ID + failed-step name + workflow file path; do NOT proceed to Phase 2. Recovery is typically a config drift in `.goreleaser.yml` or upstream tag-resolution issue (see workspace memory `feedback_go_sum_mismatch_check_compare_first`). The team-lead will dispatch a fix PR or restart the run as appropriate.
+
+### Task 7.0b: Cut DO plugin v0.10.1 (after PR 6b merges)
+
+(Identical shape to 7.0a INCLUDING Step 5 escalation but on `workflow-plugin-digitalocean` repo, tag `v0.10.1`, body: cites #62, #63, and #536 Enumerator impl.)
 
 ### Task 7.0c: Cut workflow v0.21.2 (after PRs 2-5 merge)
 
-(Identical shape; tag body cites W-Precision, W-Diagnose-540, W-Cleanup, W-Refactor.)
+(Identical shape INCLUDING Step 5 escalation; tag body cites W-Precision, W-Diagnose-540, W-Cleanup, W-Refactor.)
+
+**Tasks 7.0a/b/c clarification (per adversarial-plan-review-1 finding C-2)**: these tasks are orchestrator-side coordination, NOT commits on PR 7's `feat/c1-staging-pg-cutover` branch. They appear in the §Coordination tasks table at the top of the plan. Task 7.1 starts ONLY after BOTH Coord-2 (DO v0.10.1) AND Coord-3 (workflow v0.21.2) complete with binaries live.
 
 ### Task 7.1: Bump core-dump pins to v0.21.2 + v0.10.1
 
@@ -1328,17 +1424,7 @@ wfctl infra apply -c infra.yaml --env staging \
   --allow-replace=core-dump-vpc,coredump-staging-pg-data,coredump-staging-pg,coredump-staging-pg-fw
 ```
 
-Expected output (sketch):
-```
-Loading config from infra.yaml (env: staging) ...
-Replace cascade: 4 protected resources will be replaced + N dependents recreated.
-Allow-list verified: 4/4 protected resources opted-in.
-[1/4] core-dump-vpc: Delete + Create ... (region: nyc1, ID: vpc-XXX → vpc-YYY)
-[2/4] coredump-staging-pg-data: Delete + Create ... (volume-XXX → volume-YYY)
-[3/4] coredump-staging-pg: Delete + Create ... (db-cluster-XXX → db-cluster-YYY)
-[4/4] coredump-staging-pg-fw: Delete + Create ... (fw-XXX → fw-YYY)
-Cascade complete in N minutes; ApplyResult.ReplaceIDMap captured.
-```
+Expected: actual stdout format will be whatever `wfctl infra apply --allow-replace=...` emits in v0.21.2. The plan does NOT pre-specify a sketch (per adversarial-plan-review-1 finding C-3 — sketches that aren't verified against actual binary behavior are a credibility-erosion class). The implementer captures the FULL stdout transcript verbatim into the TC2 cutover doc (see Step 4 below). Operator-side verification: the transcript MUST show 4 Delete+Create pairs corresponding to the 4 protected resources, plus an `ApplyResult.ReplaceIDMap`-style summary mapping pre→post resource IDs.
 
 Capture the full transcript including the pre/post resource IDs from the ReplaceIDMap output.
 
