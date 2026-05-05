@@ -457,10 +457,12 @@ func isCanonicalApplyLoopAssign(a *ast.AssignStmt, recvName string) bool {
 	if !ok {
 		return false
 	}
-	switch sel.Sel.Name {
-	case "ResourceDriver", "Driver", "DriverFor":
-		// continue
-	default:
+	// Round-9 #2: only ResourceDriver is canonical. wfctlhelpers.ApplyPlan
+	// dispatches through IaCProvider.ResourceDriver specifically — a
+	// provider that wraps lookup in `Driver(...)` or `DriverFor(...)`
+	// would have its wrapper bypassed on rewrite, which can change the
+	// driver returned (caching, instrumentation, etc.).
+	if sel.Sel.Name != "ResourceDriver" {
 		return false
 	}
 	// Receiver must be the provider's own identifier.
@@ -518,7 +520,12 @@ func isCanonicalApplyLoopIf(ifs *ast.IfStmt, resultName string) bool {
 			}
 			hasAppend = true
 		case *ast.BranchStmt:
-			if ss.Tok != token.CONTINUE && ss.Tok != token.BREAK {
+			// Round-9 #1: only `continue` is canonical; `break`
+			// silently aborts the loop on first error, but
+			// wfctlhelpers.ApplyPlan records the error and KEEPS
+			// processing later actions, so accepting `break` would
+			// silently change behavior on rewrite.
+			if ss.Tok != token.CONTINUE {
 				return false
 			}
 			hasBranch = true

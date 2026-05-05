@@ -1063,14 +1063,24 @@ func ensureCtxParamName(fn *ast.FuncDecl) string {
 	return "ctx"
 }
 
-// ensureImport adds an ImportSpec for `path` if one is not already
-// present. Returns true if an import was added.
+// ensureImport adds an unaliased ImportSpec for `path` if one is not
+// already present. Returns true if an import was added.
 func ensureImport(file *ast.File, path string) bool {
+	return ensureImportAs(file, path, "")
+}
+
+// ensureImportAs adds an ImportSpec for `path` with optional `alias`
+// if one is not already present. If `alias` is non-empty, the spec is
+// emitted as `alias "path"` so call sites referencing `alias.X`
+// resolve. Round-9 #4: round-4's ensureImport injected the unaliased
+// import even when the stub used a sibling-derived alias (e.g.
+// `iface.IaCPlan`), leaving the rewritten file referring to undefined
+// `iface`. ensureImportAs propagates the alias through.
+func ensureImportAs(file *ast.File, path, alias string) bool {
 	for _, imp := range file.Imports {
 		if imp.Path == nil {
 			continue
 		}
-		// Path.Value includes the surrounding quotes.
 		v := strings.Trim(imp.Path.Value, `"`)
 		if v == path {
 			return false
@@ -1079,15 +1089,15 @@ func ensureImport(file *ast.File, path string) bool {
 	newImport := &ast.ImportSpec{
 		Path: &ast.BasicLit{Kind: token.STRING, Value: `"` + path + `"`},
 	}
-	// Locate the first import GenDecl; append a spec to it. If no
-	// import block exists, prepend a new one to the file decls.
+	if alias != "" {
+		newImport.Name = ast.NewIdent(alias)
+	}
 	for _, decl := range file.Decls {
 		gd, ok := decl.(*ast.GenDecl)
 		if !ok || gd.Tok != token.IMPORT {
 			continue
 		}
 		gd.Specs = append(gd.Specs, newImport)
-		// Force parens so multi-spec rendering stays lexically valid.
 		if !gd.Lparen.IsValid() {
 			gd.Lparen = gd.Pos()
 			gd.Rparen = gd.End()

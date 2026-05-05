@@ -233,6 +233,10 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 	// methods reference the qualified shape.
 	qualifier := interfacesQualifier(file)
 	needsInterfacesImport := false
+	// Captures the per-receiver qualifier set in the loop below, so the
+	// post-loop import injection (round-9 #4) can match the alias name
+	// the stub will reference.
+	injectedQualifier := ""
 	// Deterministic order for the report and for mutation: sort by
 	// declaration line. Round-7 finding #7 + #8: provs[recv] can be
 	// nil when the type declaration lives in a sibling file (round-3's
@@ -348,6 +352,12 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 				recvQualifier = qualifierFromProviderMethods(methods)
 				if recvQualifier != "" {
 					needsInterfacesImport = true
+					// Round-9 #4: capture for post-loop import-alias
+					// matching. If multiple receivers in the same file
+					// derive different aliases, the LAST one wins —
+					// rare in practice (a single file usually has one
+					// interfaces alias).
+					injectedQualifier = recvQualifier
 				}
 			}
 			pendingStubs = append(pendingStubs, validatePlanStubText(recv, recvQualifier, pointerRecv))
@@ -362,8 +372,18 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 		// Round-4 finding #1: when the stub uses a qualified type but
 		// the file doesn't import interfaces, add the import via AST
 		// printing first so the qualified type resolves.
+		//
+		// Round-9 finding #4: if the qualifier we derived from a
+		// sibling method's signature is NOT "interfaces" (e.g. the
+		// sibling uses an alias like `iface "github.com/.../interfaces"`),
+		// the injected import must also use that alias so the stub's
+		// `iface.IaCPlan` resolves to the imported package.
 		if needsInterfacesImport {
-			ensureImport(file, "github.com/GoCodeAlone/workflow/interfaces")
+			injectedAlias := ""
+			if injectedQualifier != "" && injectedQualifier != "interfaces" {
+				injectedAlias = injectedQualifier
+			}
+			ensureImportAs(file, "github.com/GoCodeAlone/workflow/interfaces", injectedAlias)
 			var buf bytes.Buffer
 			if err := format.Node(&buf, fset, file); err != nil {
 				return fmt.Errorf("format %s: %w", path, err)
@@ -750,7 +770,20 @@ func providerReceiversWithMethods(file *ast.File) (
 //     accepts ValidatePlan only if its receiver kind matches the
 //     existing convention; otherwise the type is reported as missing.
 func hasValidatePlanMethod(methods []*ast.FuncDecl) bool {
-	wantPointer := providerReceiverConvention(methods)
+	// Round-5 #3 added receiver-kind enforcement; round-9 #3 corrects
+	// the asymmetry: per Go spec, *T's method set includes both
+	// pointer- and value-receiver methods of T. So:
+	//
+	//   - value-receiver provider (Plan/Apply on T): ValidatePlan
+	//     MUST also be value-receiver, because T's method set excludes
+	//     pointer methods.
+	//   - pointer-receiver provider (Plan/Apply on *T): ValidatePlan
+	//     can be EITHER value- or pointer-receiver; *T's method set
+	//     includes both.
+	//
+	// Only the value-receiver provider case requires strict matching;
+	// pointer-receiver providers accept either kind.
+	providerWantsPointer := providerReceiverConvention(methods)
 	for _, m := range methods {
 		if m.Name.Name != "ValidatePlan" {
 			continue
@@ -758,7 +791,10 @@ func hasValidatePlanMethod(methods []*ast.FuncDecl) bool {
 		if !validatePlanSignatureMatches(m.Type) {
 			continue
 		}
-		if receiverIsPointer(m) != wantPointer {
+		if !providerWantsPointer && receiverIsPointer(m) {
+			// Value-receiver provider can't satisfy ProviderValidator
+			// via a pointer-receiver ValidatePlan (T's method set
+			// excludes *T methods).
 			continue
 		}
 		return true
