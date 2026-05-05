@@ -1143,14 +1143,15 @@ func runInfraApply(args []string) error {
 			if provErr != nil {
 				return fmt.Errorf("refresh: load provider %q: %w", moduleRef, provErr)
 			}
-			refreshErr := runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
-				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
 			if closer != nil {
-				if cerr := closer.Close(); cerr != nil {
-					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
-				}
+				defer func() {
+					if cerr := closer.Close(); cerr != nil {
+						fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
+					}
+				}()
 			}
-			if refreshErr != nil {
+			if refreshErr := runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
+				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr); refreshErr != nil {
 				return fmt.Errorf("refresh phase: %w", refreshErr)
 			}
 		}
