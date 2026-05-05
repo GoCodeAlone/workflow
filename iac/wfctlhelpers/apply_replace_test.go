@@ -25,14 +25,14 @@ type orderRecordingDriver struct {
 }
 
 func (d *orderRecordingDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
-	d.fakeDriver.deleteCount++
+	d.deleteCount++
 	d.step++
 	d.deleteAt = d.step
 	return d.deleteErr
 }
 
 func (d *orderRecordingDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.createCount++
+	d.createCount++
 	d.step++
 	d.createAt = d.step
 	if d.createErr != nil {
@@ -169,12 +169,12 @@ type perResourceReplaceDriver struct {
 }
 
 func (d *perResourceReplaceDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
-	d.fakeDriver.deleteCount++
+	d.deleteCount++
 	return nil
 }
 
 func (d *perResourceReplaceDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.createCount++
+	d.createCount++
 	id := d.newIDs[spec.Name]
 	if id == "" {
 		id = "fallback-id"
@@ -279,7 +279,7 @@ type cancelOnDeleteDriver struct {
 }
 
 func (d *cancelOnDeleteDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
-	d.fakeDriver.deleteCount++
+	d.deleteCount++
 	d.cancel() // ctx is now canceled; Create must not run.
 	return nil
 }
