@@ -97,22 +97,22 @@ jobs:
       # success + ordinary failure paths). Uses wfctl rather than
       # doctl per the full-wfctl-dogfooding policy.
       #
-      # KNOWN GAP: `wfctl infra cleanup --tag <name>` is not yet
-      # implemented (tracked as a follow-up alongside T7.13 in the
-      # conformance-runbook). Until it lands, this step is a stub
-      # that logs the cleanup intent so the leak-scrubber cron
-      # (T7.14, runs hourly) catches anything missed. Once wfctl
-      # gains the command, swap this stub for the real call.
+      # The wiring is gated on DO_CONFORMANCE_API_TOKEN being
+      # provisioned (workflow#542). Until that lands the secret is
+      # unset; this step emits a ::notice:: indicating the wiring is
+      # in place but inactive, and the hourly leak-scrubber cron
+      # (T7.14, conformance-leak-scrubber.yml) is the active safety
+      # net. Once workflow#542 ships, the gate flips automatically:
+      # no further changes to this workflow are needed.
       - name: Force-delete tagged resources (cleanup safety net)
         if: always()
         env:
-          DO_CONFORMANCE_API_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
+          DO_TOKEN: ${{ secrets.DO_CONFORMANCE_API_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "${DO_TOKEN:-}" ]; then
+            echo "::notice::DO_CONFORMANCE_API_TOKEN not provisioned (workflow#542 deferred); cleanup gate is wired but inactive. Hourly leak-scrubber catches orphans in the meantime."
+            exit 0
+          fi
           echo "Cleanup target tag: ${CONFORMANCE_TAG}"
-          # TODO(W-7 follow-up): replace stub with
-          #   ./wfctl infra cleanup --tag "${CONFORMANCE_TAG}"
-          # once the command exists. The hourly leak-scrubber
-          # (conformance-leak-scrubber.yml, T7.14) is the safety net
-          # that catches anything this stub misses.
-          echo "::notice::wfctl infra cleanup not yet implemented; relying on T7.14 hourly scrubber"
+          ./wfctl infra cleanup --tag "${CONFORMANCE_TAG}" --fix
