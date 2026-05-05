@@ -63,6 +63,26 @@ type ProviderPlanner interface {
 	PlanV2(ctx context.Context, desired []ResourceSpec, current []ResourceState) (IaCPlan, error)
 }
 
+// Enumerator is an OPTIONAL interface for providers that can list resources
+// by tag across the cloud account. Used by `wfctl infra cleanup --tag <name>`.
+// Providers without a tag-query API simply do not implement it; the cleanup
+// subcommand skips them with a structured stdout log line so operators see
+// the explicit skip rather than silent under-cleanup.
+//
+// The contract is intentionally narrow: implementations MUST return refs that
+// the same provider's ResourceDriver(type).Delete can act on. ProviderID is
+// recommended (the cleanup command may use it for log correlation), but Name
+// + Type are the load-bearing identifiers Delete needs.
+//
+// Plugins implementing this interface are accepted by the loader; the
+// implementation is not yet exercised by core code outside the cleanup
+// subcommand. AWS/GCP/Azure plugins do not implement Enumerator as of
+// workflow v0.21.x; only DO does (workflow-plugin-digitalocean v0.10.x
+// per PR 6b follow-up).
+type Enumerator interface {
+	EnumerateByTag(ctx context.Context, tag string) ([]ResourceRef, error)
+}
+
 // BootstrapResult contains metadata returned by a successful BootstrapStateBackend call.
 type BootstrapResult struct {
 	// Bucket is the name of the created or confirmed state bucket/container.
