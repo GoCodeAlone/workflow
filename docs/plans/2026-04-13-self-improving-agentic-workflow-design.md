@@ -1,3 +1,29 @@
+---
+status: implemented
+area: ecosystem
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 49d7b64
+  - repo: workflow
+    commit: 5dfe7e0
+  - repo: workflow
+    commit: 102d493
+  - repo: workflow-plugin-agent
+    commit: 0145aee
+external_refs:
+  - "workflow-scenarios: scenarios/85-self-improving-api scenarios/86-self-extending-mcp scenarios/87-autonomous-agile-agent"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'rg -n "NewInProcessServer|mcp_tool|self-improvement|guardrails" mcp module plugins docs -S'
+    - 'rg -n "blackboard|guardrails|self_improve|step.blackboard|step.self_improve" /Users/jon/workspace/workflow-plugin-agent -S'
+    - 'find /Users/jon/workspace/workflow-scenarios -maxdepth 2 -type d -name "8[5-7]*" -print'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Self-Improving Agentic Workflow — Design Document
 
 **Date:** 2026-04-13

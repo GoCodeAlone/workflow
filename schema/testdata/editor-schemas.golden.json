@@ -1353,6 +1353,51 @@
         "readyPath": "/readyz"
       }
     },
+    "http.client": {
+      "type": "http.client",
+      "label": "HTTP Client",
+      "category": "http",
+      "description": "Reusable HTTP client with shared auth (none/static_bearer/oauth2_client_credentials/oauth2_refresh_token) referenced by step.http_call",
+      "outputs": [
+        {
+          "name": "client",
+          "type": "HTTPClient",
+          "description": "Configured *http.Client with base URL and auth"
+        }
+      ],
+      "configFields": [
+        {
+          "key": "timeout",
+          "label": "Timeout",
+          "type": "duration",
+          "description": "Request timeout for outgoing calls",
+          "defaultValue": "30s",
+          "placeholder": "30s"
+        },
+        {
+          "key": "base_url",
+          "label": "Base URL",
+          "type": "string",
+          "description": "Optional base URL prepended to relative request paths",
+          "placeholder": "https://api.example.com"
+        },
+        {
+          "key": "auth",
+          "label": "Auth",
+          "type": "map",
+          "description": "Auth block. Supported values: {type: none}; {type: static_bearer, bearer_token: \u003ctoken\u003e} or {type: static_bearer, bearer_token_ref: \u003cref\u003e}; {type: oauth2_client_credentials, token_url: \u003curl\u003e, client_id: \u003cid\u003e, client_secret: \u003csecret\u003e, scopes: [\u003cscope\u003e]}; {type: oauth2_refresh_token, token_secrets: \u003cmodule-name\u003e, token_secrets_key: \u003ckey\u003e, scopes: [\u003cscope\u003e]}.",
+          "defaultValue": {
+            "type": "none"
+          }
+        }
+      ],
+      "defaultConfig": {
+        "auth": {
+          "type": "none"
+        },
+        "timeout": "30s"
+      }
+    },
     "http.handler": {
       "type": "http.handler",
       "label": "HTTP Handler",
@@ -7859,6 +7904,28 @@
       "description": "Rotates a secret",
       "configFields": []
     },
+    "step.secret_set": {
+      "type": "step.secret_set",
+      "label": "Secret Set",
+      "category": "pipeline",
+      "description": "Writes one or more secrets to a named secrets module",
+      "configFields": [
+        {
+          "key": "module",
+          "label": "Module",
+          "type": "string",
+          "description": "Secrets module name",
+          "required": true
+        },
+        {
+          "key": "secrets",
+          "label": "Secrets",
+          "type": "map",
+          "description": "Map of secret key to value (supports template expressions)",
+          "required": true
+        }
+      ]
+    },
     "step.set": {
       "type": "step.set",
       "label": "Set Values",
@@ -8425,6 +8492,53 @@
           "type": "string",
           "description": "HTTP header containing the signature (provider/legacy mode)",
           "placeholder": "X-Hub-Signature-256"
+        }
+      ]
+    },
+    "step.while": {
+      "type": "step.while",
+      "label": "While",
+      "category": "pipeline_steps",
+      "description": "Executes sub-steps repeatedly while a condition template is truthy, with a hard iteration cap",
+      "configFields": [
+        {
+          "key": "condition",
+          "label": "Condition",
+          "type": "string",
+          "description": "Template expression evaluated each iteration; loop runs while truthy",
+          "required": true,
+          "placeholder": "{{.steps.fetch.has_next_page}}"
+        },
+        {
+          "key": "max_iterations",
+          "label": "Max Iterations",
+          "type": "number",
+          "description": "Hard cap on iterations to prevent runaway loops",
+          "defaultValue": 1000
+        },
+        {
+          "key": "iteration_var",
+          "label": "Iteration Variable",
+          "type": "string",
+          "description": "Optional context variable exposing {index, first} for the current iteration"
+        },
+        {
+          "key": "accumulate",
+          "label": "Accumulate",
+          "type": "map",
+          "description": "Optional {key, from} block that flattens per-iteration values into an output slice"
+        },
+        {
+          "key": "step",
+          "label": "Step",
+          "type": "map",
+          "description": "Single step map to execute per iteration (mutually exclusive with steps); must include 'type' key"
+        },
+        {
+          "key": "steps",
+          "label": "Steps",
+          "type": "array",
+          "description": "Array of step maps to execute per iteration (mutually exclusive with step)"
         }
       ]
     },

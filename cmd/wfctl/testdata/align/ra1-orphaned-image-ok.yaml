@@ -1,0 +1,14 @@
+# R-A1 OK: ci.build declares "myapp" container matching the image name.
+# R-A1 does NOT fire.
+modules:
+  - name: build
+    type: ci.build
+    config:
+      containers:
+        - name: myapp
+          dockerfile: Dockerfile
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080

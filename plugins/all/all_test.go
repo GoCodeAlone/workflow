@@ -5,6 +5,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/plugin/builder"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
@@ -120,5 +121,15 @@ func TestLoadAll_WithRealLoader(t *testing.T) {
 	}
 	if len(loader.TriggerFactories()) == 0 {
 		t.Error("no trigger factories registered after loading all plugins")
+	}
+}
+
+func TestAllBuilderPluginsRegistered(t *testing.T) {
+	// Importing plugins/all triggers init() in each builder plugin,
+	// which registers them in the builder registry.
+	for _, name := range []string{"go", "nodejs", "custom"} {
+		if _, ok := builder.Get(name); !ok {
+			t.Errorf("builder %q not registered after importing plugins/all", name)
+		}
 	}
 }

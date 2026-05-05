@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -41,11 +42,11 @@ environments:
 	if cfg.CI == nil {
 		t.Fatal("ci section missing")
 	}
-	if len(cfg.CI.Build.Binaries) != 1 {
-		t.Fatalf("expected 1 binary, got %d", len(cfg.CI.Build.Binaries))
+	if len(cfg.CI.Build.Targets) != 1 {
+		t.Fatalf("expected 1 target (coerced from binaries:), got %d", len(cfg.CI.Build.Targets))
 	}
-	if cfg.CI.Build.Binaries[0].Name != "server" {
-		t.Errorf("expected 'server', got %q", cfg.CI.Build.Binaries[0].Name)
+	if cfg.CI.Build.Targets[0].Name != "server" {
+		t.Errorf("expected 'server', got %q", cfg.CI.Build.Targets[0].Name)
 	}
 	if cfg.CI.Test.Unit.Command != "go test ./... -race" {
 		t.Errorf("unexpected test command: %q", cfg.CI.Test.Unit.Command)
@@ -73,6 +74,83 @@ environments:
 	}
 }
 
+func TestCIMigrationsConfigParsesValidationOptions(t *testing.T) {
+	data := []byte(`
+version: 1
+ci:
+  migrations:
+    - name: app
+      plugin: workflow-plugin-migrations
+      driver: golang-migrate
+      source_dir: migrations
+      database:
+        env: DATABASE_URL
+      baseline:
+        ref: origin/main
+        mode: apply-before-candidate
+      validation:
+        lint: true
+        fresh_cycle: true
+        baseline_candidate: true
+        forbid_dirty: true
+      environments:
+        staging:
+          source_dir: migrations/staging
+          database:
+            env: STAGING_DATABASE_URL
+`)
+	var cfg WorkflowConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.CI.Migrations[0]
+	if got.Name != "app" || got.Plugin != "workflow-plugin-migrations" || got.Driver != "golang-migrate" {
+		t.Fatalf("unexpected migration config: %+v", got)
+	}
+	if got.Database.Env != "DATABASE_URL" {
+		t.Fatalf("database env = %q", got.Database.Env)
+	}
+	if !got.Validation.FreshCycle || !got.Validation.BaselineCandidate || !got.Validation.ForbidDirty {
+		t.Fatalf("validation flags not parsed: %+v", got.Validation)
+	}
+	if got.Environments["staging"].SourceDir != "migrations/staging" {
+		t.Fatalf("staging source_dir = %q", got.Environments["staging"].SourceDir)
+	}
+	if got.Environments["staging"].Database.Env != "STAGING_DATABASE_URL" {
+		t.Fatalf("staging database env = %q", got.Environments["staging"].Database.Env)
+	}
+}
+
+func TestCIConfigValidateRejectsInvalidMigrations(t *testing.T) {
+	cfg := &CIConfig{Migrations: []CIMigrationConfig{
+		{
+			SourceDir: "migrations",
+			Database:  CIMigrationDatabaseConfig{Env: "DATABASE_URL"},
+		},
+		{
+			Name:     "db",
+			Database: CIMigrationDatabaseConfig{},
+		},
+		{
+			Name:      "bad-plugin",
+			Plugin:    "../workflow-plugin-migrations",
+			SourceDir: "migrations",
+			Database:  CIMigrationDatabaseConfig{Env: "DATABASE_URL"},
+			Baseline:  CIMigrationBaselineConfig{Mode: "unknown"},
+		},
+	}}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected migration validation errors")
+	}
+	msg := err.Error()
+	for _, want := range []string{"name is required", "source_dir is required", "database env or dsn is required", "unsafe plugin name", "unknown baseline mode"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("expected %q in error: %v", want, err)
+		}
+	}
+}
+
 func TestCIConfig_Validate(t *testing.T) {
 	t.Run("nil config is valid", func(t *testing.T) {
 		var c *CIConfig
@@ -84,8 +162,8 @@ func TestCIConfig_Validate(t *testing.T) {
 	t.Run("binary missing name", func(t *testing.T) {
 		c := &CIConfig{
 			Build: &CIBuildConfig{
-				Binaries: []CIBinaryTarget{
-					{Name: "", Path: "./cmd/server"},
+				Targets: []CITarget{
+					{Name: "", Type: "go", Path: "./cmd/server"},
 				},
 			},
 		}
@@ -97,8 +175,8 @@ func TestCIConfig_Validate(t *testing.T) {
 	t.Run("binary missing path", func(t *testing.T) {
 		c := &CIConfig{
 			Build: &CIBuildConfig{
-				Binaries: []CIBinaryTarget{
-					{Name: "server", Path: ""},
+				Targets: []CITarget{
+					{Name: "server", Type: "go", Path: ""},
 				},
 			},
 		}
@@ -123,8 +201,8 @@ func TestCIConfig_Validate(t *testing.T) {
 	t.Run("valid config passes", func(t *testing.T) {
 		c := &CIConfig{
 			Build: &CIBuildConfig{
-				Binaries: []CIBinaryTarget{
-					{Name: "server", Path: "./cmd/server"},
+				Targets: []CITarget{
+					{Name: "server", Type: "go", Path: "./cmd/server"},
 				},
 			},
 			Deploy: &CIDeployConfig{

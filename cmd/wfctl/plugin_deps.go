@@ -6,7 +6,110 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
+
+// installFromWorkflowConfig reads requires.plugins[] from a workflow config file
+// and installs each plugin that is not already present on disk.
+func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath string) error {
+	cfg, err := config.LoadFromFile(workflowCfgPath)
+	if err != nil {
+		return fmt.Errorf("load workflow config: %w", err)
+	}
+
+	if cfg.Requires == nil || len(cfg.Requires.Plugins) == 0 {
+		fmt.Println("No requires.plugins[] in config — nothing to install.")
+		return nil
+	}
+
+	var failed []string
+	for _, req := range cfg.Requires.Plugins {
+		// Normalize the name before checking the install directory so the skip check
+		// matches the actual install location. runPluginInstall normalizes names via
+		// normalizePluginName (stripping "workflow-plugin-" prefix), so
+		// "workflow-plugin-auth" is installed at <pluginDir>/auth, not
+		// <pluginDir>/workflow-plugin-auth.
+		normalizedName := normalizePluginName(req.Name)
+		installDir := filepath.Join(pluginDir, normalizedName)
+		if ver := readInstalledVersion(installDir); ver != "" && ver != "unknown" {
+			fmt.Fprintf(os.Stderr, "%s v%s already installed, skipping.\n", req.Name, ver)
+			continue
+		}
+
+		// Apply private repo auth if declared.
+		var authCleanup func()
+		if req.Auth != nil && req.Auth.Env != "" {
+			domain := extractDomain(req.Source)
+			if domain == "" {
+				domain = "github.com"
+			}
+			cleanup, authErr := applyPrivateAuth(req.Auth.Env, domain)
+			if authErr != nil {
+				fmt.Fprintf(os.Stderr, "auth error for %s: %v\n", req.Name, authErr)
+				failed = append(failed, req.Name)
+				continue
+			}
+			authCleanup = cleanup
+		}
+
+		nameArg := req.Name
+		if req.Version != "" {
+			nameArg = req.Name + "@" + req.Version
+		}
+
+		fmt.Fprintf(os.Stderr, "Installing %s...\n", nameArg)
+		installErr := installPluginReqDirect(pluginDir, registryCfgPath, req)
+		if authCleanup != nil {
+			authCleanup()
+		}
+		if installErr != nil {
+			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", req.Name, installErr)
+			failed = append(failed, req.Name)
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("failed to install: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+// installPluginReqDirect installs a single PluginRequirement by performing a
+// registry lookup and calling installPluginFromManifest directly, propagating
+// req.Verify so that the install_verify hook fires when a supply-chain verify
+// config is present. This avoids re-parsing CLI args and losing the Verify field.
+func installPluginReqDirect(pluginDir, registryCfgPath string, req config.PluginRequirement) error {
+	rawName, requestedVersion := parseNameVersion(req.Name)
+	if requestedVersion == "" {
+		requestedVersion = req.Version
+	}
+	pluginName := normalizePluginName(rawName)
+
+	regCfg, err := LoadRegistryConfig(registryCfgPath)
+	if err != nil {
+		return fmt.Errorf("load registry config: %w", err)
+	}
+	mr := NewMultiRegistry(regCfg)
+
+	manifest, _, registryErr := mr.FetchManifest(rawName)
+	if registryErr != nil {
+		return registryErr
+	}
+
+	if requestedVersion != "" && requestedVersion != manifest.Version {
+		pinManifestToVersion(manifest, requestedVersion)
+	}
+
+	if len(manifest.Dependencies) > 0 {
+		resolved := make(map[string]string)
+		if err := resolveDependencies(pluginName, manifest, pluginDir, registryCfgPath, []string{}, resolved); err != nil {
+			return fmt.Errorf("resolve dependencies for %q: %w", pluginName, err)
+		}
+	}
+
+	return installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify, false)
+}
 
 // runPluginDeps lists dependencies for a plugin without installing them.
 func runPluginDeps(args []string) error {
@@ -34,9 +137,11 @@ func runPluginDeps(args []string) error {
 	}
 	mr := NewMultiRegistry(cfg)
 
-	manifest, _, err := mr.FetchManifest(pluginName)
+	// Pass rawName (original, un-normalized) to FetchManifest so the original-
+	// name-first lookup in MultiRegistry can engage before the short-name fallback.
+	manifest, _, err := mr.FetchManifest(rawName)
 	if err != nil {
-		return fmt.Errorf("fetch manifest for %q: %w", pluginName, err)
+		return fmt.Errorf("fetch manifest for %q: %w", rawName, err)
 	}
 
 	if len(manifest.Dependencies) == 0 {
@@ -160,7 +265,7 @@ func resolveDependencies(
 
 		// Install the dependency.
 		fmt.Fprintf(os.Stderr, "Installing %s v%s (dependency of %s)...\n", dep.Name, depManifest.Version, pluginName)
-		if err := installPluginFromManifest(pluginDir, dep.Name, depManifest); err != nil {
+		if err := installPluginFromManifest(pluginDir, dep.Name, depManifest, nil, false); err != nil {
 			return fmt.Errorf("install dependency %q of %q: %w", dep.Name, pluginName, err)
 		}
 		resolved[dep.Name] = depManifest.Version

@@ -1,3 +1,27 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: e89521d
+  - repo: workflow
+    commit: 6bd5399
+  - repo: workflow
+    commit: 93d24ba
+  - repo: workflow
+    commit: 2144385
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"modernize\" cmd/wfctl modernize mcp"
+    - "GOWORK=off go test ./modernize ./cmd/wfctl -run 'Test.*Modernize|Test.*Rule|Test.*RequestParse|Test.*Manifest'"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wfctl modernize — YAML Config Codemod Tool
 
 ## Problem

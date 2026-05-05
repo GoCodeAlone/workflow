@@ -17,7 +17,7 @@ The engine is built on the [GoCodeAlone/modular](https://github.com/GoCodeAlone/
 
 **CLI tools:**
 - `cmd/server` -- runs workflow configs as a server process
-- `cmd/wfctl` -- validates and inspects workflow configs offline
+- `cmd/wfctl` -- validates and inspects workflow configs offline (see [CLI Reference](docs/WFCTL.md))
 
 ## Module Types (90+)
 
@@ -28,6 +28,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 ### HTTP & Routing
 | Type | Description | Plugin |
 |------|-------------|--------|
+| `http.client` | Reusable authenticated HTTP client with oauth2 and bearer token support | http |
 | `http.server` | Configurable web server | http |
 | `http.router` | Request routing with path and method matching | http |
 | `http.handler` | HTTP request processing with configurable responses | http |
@@ -165,6 +166,7 @@ flowchart TD
 | `step.validate_pagination` | Validates and normalizes pagination query params | pipelinesteps |
 | `step.validate_request_body` | Validates request body against a JSON schema | pipelinesteps |
 | `step.foreach` | Iterates over a slice and runs sub-steps per element. Optional `concurrency: N` for parallel processing | pipelinesteps |
+| `step.while` | Executes sub-steps repeatedly while a condition template is truthy, with a hard `max_iterations` cap (default 1000). Supports optional accumulator for paginated APIs | pipelinesteps |
 | `step.parallel` | Executes named sub-steps concurrently and collects results. O(max(branch)) time | pipelinesteps |
 | `step.webhook_verify` | Verifies an inbound webhook signature | pipelinesteps |
 | `step.base64_decode` | Decodes a base64-encoded field | pipelinesteps |
@@ -186,6 +188,7 @@ flowchart TD
 | `step.hash` | Computes a cryptographic hash (md5/sha256/sha512) of a template-resolved input | pipelinesteps |
 | `step.regex_match` | Matches a regular expression against a template-resolved input | pipelinesteps |
 | `step.secret_fetch` | Fetches one or more secrets from a secrets module (secrets.aws, secrets.vault) with dynamic tenant-aware secret ID resolution | pipelinesteps |
+| `step.secret_set` | Writes one or more secrets to a secrets module; values are Go template expressions resolved against the pipeline context | pipelinesteps |
 | `step.jq` | Applies a JQ expression to pipeline data for complex transformations | pipelinesteps |
 | `step.ai_complete` | AI text completion using a configured provider | ai |
 | `step.ai_classify` | AI text classification into named categories | ai |
@@ -581,6 +584,7 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 |------|-------------|--------|
 | `secrets.vault` | HashiCorp Vault integration | secrets |
 | `secrets.aws` | AWS Secrets Manager integration | secrets |
+| `secrets.keychain` | OS credential store (macOS Keychain, Linux Secret Service, Windows Credential Manager); requires libsecret/gnome-keyring/KWallet on Linux | secrets |
 
 ### Event Sourcing & Messaging Services
 | Type | Description | Plugin |
@@ -1109,6 +1113,22 @@ modules:
 
 ---
 
+### `ProviderPlanner` (IaC plugin interface)
+
+Optional interface in `interfaces/iac_provider.go` for v2 IaC plugins that need custom plan logic instead of core wfctl's default `platform.ComputePlan` + `driver.Diff` dispatch. Reserved as an extension hook for Tofu/Pulumi-style adapter plugins.
+
+```go
+type ProviderPlanner interface {
+    PlanV2(ctx context.Context, desired []ResourceSpec, current []ResourceState) (IaCPlan, error)
+}
+```
+
+Purely additive — plugins that do not implement `ProviderPlanner` remain valid `IaCProvider` implementations. Core wfctl does NOT type-assert against this interface in v0.21.0; future adapter PRs add the type-assertion at the dispatch site alongside their concrete consumer.
+
+See [docs/iac/providerplanner.md](docs/iac/providerplanner.md) for the adapter author guide and [ADR 009](docs/adr/009-providerplanner-included-per-user-override.md) for the ratification provenance.
+
+---
+
 ### `observability.otel`
 
 Initializes an OpenTelemetry distributed tracing provider that exports spans via OTLP/HTTP to a collector. Sets the global OTel tracer provider so all instrumented code in the process is covered.
@@ -1281,6 +1301,33 @@ steps:
       module: aws-secrets
       secrets:
         api_key: "arn:aws:secretsmanager:us-east-1:123:secret:{{.tenant_id}}-api-key"
+```
+
+---
+
+### `step.secret_set`
+
+Writes one or more secrets to a named secrets module (`secrets.aws`, `secrets.vault`, etc.). Secret values are Go template expressions evaluated against the live pipeline context, enabling values from prior step outputs or trigger data to be persisted into a secrets provider.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `module` | string | yes | Service name of the secrets module (the `name` field in the module config). |
+| `secrets` | map[string]string | yes | Map of secret key → value (or template expression). Values support Go template syntax for dynamic resolution. |
+
+**Output fields:** `set_keys` — sorted list of secret keys that were written.
+
+**Example:**
+
+```yaml
+- type: step.secret_set
+  name: save-creds
+  config:
+    module: zoom-secrets
+    secrets:
+      client_id: "{{ .steps.setup_form.client_id }}"
+      client_secret: "{{ .steps.setup_form.client_secret }}"
 ```
 
 ---
@@ -1782,6 +1829,67 @@ Global pages appear in the main navigation. Workflow-scoped pages (`executions`,
 The plugin is auto-registered via `init()` in `plugin/admincore/plugin.go`. No YAML configuration is required.
 
 ---
+
+## IaC Provider Plugin Interfaces
+
+Cloud-provider plugins implement the core `interfaces.IaCProvider` Go
+interface (Plan / Apply / Destroy / Status / DetectDrift / etc.) plus,
+optionally, narrower interfaces that the engine and `wfctl` discover via
+type-assertion. Optional interfaces are purely additive — providers that do
+not implement them keep working unchanged.
+
+### `ProviderValidator` (optional)
+
+```go
+package interfaces
+
+type ProviderValidator interface {
+    ValidatePlan(plan *IaCPlan) []PlanDiagnostic
+}
+
+type PlanDiagnostic struct {
+    Severity PlanDiagnosticSeverity // Info | Warning | Error
+    Resource string                 // resource name; "" for plan-level findings
+    Field    string                 // dotted/bracketed field path; "" for resource-level
+    Message  string                 // human-readable description
+}
+
+type PlanDiagnosticSeverity int
+
+const (
+    PlanDiagnosticInfo PlanDiagnosticSeverity = iota
+    PlanDiagnosticWarning
+    PlanDiagnosticError
+)
+```
+
+`ValidatePlan` lets a provider surface cross-resource constraint violations
+at plan time — for example "this `infra.database` references a `vpc_ref`
+that no `infra.vpc` in this plan declares" — instead of failing later at the
+provider's API call. It is read-only: implementations MUST NOT mutate the
+plan and MUST NOT make remote calls. The returned slice may be `nil`.
+
+The CLI consumer is the `R-A10` align rule
+(`cmd/wfctl/infra_align_rules.go::checkRA10_provider_validate_plan`), which
+runs every loaded provider that implements `ProviderValidator` against the
+plan supplied via `wfctl infra align --plan`. Severity mapping:
+
+| `PlanDiagnostic.Severity` | Result |
+|---------------------------|--------|
+| `PlanDiagnosticError` | `FAIL` AlignFinding (always non-zero exit) |
+| `PlanDiagnosticWarning` | `WARN` AlignFinding (non-zero only under `--strict`) |
+| `PlanDiagnosticInfo` | Logged to stderr; no AlignFinding emitted; never affects exit code |
+
+`PlanDiagnosticInfo` is intentionally *not* surfaced as a finding so that
+`--strict` CI gates do not exit non-zero on a purely informational hint
+(billing tier change, deprecation notice, etc.). See `docs/WFCTL.md` §
+`infra align` for the full table.
+
+> **Naming note:** The runtime/deploy event finding type
+> `interfaces.Diagnostic` (used by `interfaces.Troubleshooter`) is a
+> distinct, pre-existing type and is not affected by `PlanDiagnostic`. The
+> two intentionally describe different problem domains (post-apply runtime
+> events vs. pre-apply plan validation).
 
 ## Workflow Types
 

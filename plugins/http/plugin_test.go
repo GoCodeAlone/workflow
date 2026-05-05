@@ -60,6 +60,7 @@ func TestModuleFactories(t *testing.T) {
 	factories := p.ModuleFactories()
 
 	expectedTypes := []string{
+		"http.client",
 		"http.server",
 		"http.router",
 		"http.handler",
@@ -127,6 +128,7 @@ func TestModuleSchemas(t *testing.T) {
 	}
 
 	expectedTypes := []string{
+		"http.client",
 		"http.server",
 		"http.router",
 		"http.handler",
@@ -183,8 +185,8 @@ func TestEngineManifest(t *testing.T) {
 	if m.Name != "workflow-plugin-http" {
 		t.Errorf("manifest.Name = %q, want %q", m.Name, "workflow-plugin-http")
 	}
-	if len(m.ModuleTypes) != 13 {
-		t.Errorf("manifest has %d module types, want 13", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 14 {
+		t.Errorf("manifest has %d module types, want 14", len(m.ModuleTypes))
 	}
 	if len(m.StepTypes) != 2 {
 		t.Errorf("manifest has %d step types, want 2", len(m.StepTypes))
@@ -206,6 +208,7 @@ func TestModuleFactorySmoke(t *testing.T) {
 		moduleType string
 		config     map[string]any
 	}{
+		{"http.client", map[string]any{"timeout": "5s", "auth": map[string]any{"type": "none"}}},
 		{"http.server", map[string]any{"address": ":9090"}},
 		{"http.router", map[string]any{}},
 		{"http.handler", map[string]any{"contentType": "text/plain"}},
@@ -499,8 +502,8 @@ func TestPluginLoaderIntegration(t *testing.T) {
 
 	// Verify factories were registered
 	mf := loader.ModuleFactories()
-	if len(mf) < 13 {
-		t.Errorf("loader has %d module factories, want >= 13", len(mf))
+	if len(mf) < 14 {
+		t.Errorf("loader has %d module factories, want >= 14", len(mf))
 	}
 
 	sf := loader.StepFactories()

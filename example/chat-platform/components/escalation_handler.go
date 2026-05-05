@@ -126,18 +126,18 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 			location = "not provided"
 		}
 		return map[string]interface{}{
-			"escalationId":    escalationId,
-			"type":            "medical",
-			"conversationId":  conversationId,
-			"status":          "contacted",
+			"escalationId":     escalationId,
+			"type":             "medical",
+			"conversationId":   conversationId,
+			"status":           "contacted",
 			"contactedService": "National Crisis Medical Line",
-			"referenceNumber": refNumber,
-			"urgency":         urgency,
-			"location":        location,
-			"referralType":    "mental_health_professional",
-			"responseTime":    "15-30 minutes",
-			"instructions":    "Medical professional has been notified. Maintain contact with texter until professional arrives.",
-			"timestamp":       time.Now().UTC().Format(time.RFC3339),
+			"referenceNumber":  refNumber,
+			"urgency":          urgency,
+			"location":         location,
+			"referralType":     "mental_health_professional",
+			"responseTime":     "15-30 minutes",
+			"instructions":     "Medical professional has been notified. Maintain contact with texter until professional arrives.",
+			"timestamp":        time.Now().UTC().Format(time.RFC3339),
 		}, nil
 
 	case "police":
@@ -154,18 +154,18 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		}
 		caseNumber := fmt.Sprintf("PD-%04d-%06d", time.Now().Year(), r.Intn(999999))
 		return map[string]interface{}{
-			"escalationId":    escalationId,
-			"type":            "police",
-			"conversationId":  conversationId,
-			"status":          "dispatched",
+			"escalationId":     escalationId,
+			"type":             "police",
+			"conversationId":   conversationId,
+			"status":           "dispatched",
 			"contactedService": "Local Emergency Services",
-			"referenceNumber": refNumber,
-			"caseNumber":      caseNumber,
-			"urgency":         urgency,
-			"location":        location,
-			"responseTime":    "immediate",
-			"instructions":    "Emergency services dispatched. Keep texter engaged and calm. Do NOT disconnect.",
-			"timestamp":       time.Now().UTC().Format(time.RFC3339),
+			"referenceNumber":  refNumber,
+			"caseNumber":       caseNumber,
+			"urgency":          urgency,
+			"location":         location,
+			"responseTime":     "immediate",
+			"instructions":     "Emergency services dispatched. Keep texter engaged and calm. Do NOT disconnect.",
+			"timestamp":        time.Now().UTC().Format(time.RFC3339),
 		}, nil
 
 	default:

@@ -129,3 +129,123 @@ func TestPluginLockfile_Save_RoundTrip(t *testing.T) {
 		t.Error("expected 'git' field to be preserved after save")
 	}
 }
+
+// TestLoadPluginLockfile_BackwardCompatFallback verifies that when wfctlLockPath
+// (.wfctl-lock.yaml) does not exist, loadPluginLockfile transparently reads the
+// legacy .wfctl.yaml so repos created before the rename still work.
+func TestLoadPluginLockfile_BackwardCompatFallback(t *testing.T) {
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	// Write plugins to the legacy .wfctl.yaml (no .wfctl-lock.yaml present).
+	legacyContent := `plugins:
+  authz:
+    version: v0.3.1
+    sha256: abc123
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".wfctl.yaml"), []byte(legacyContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	lf, err := loadPluginLockfile(wfctlLockPath)
+	if err != nil {
+		t.Fatalf("loadPluginLockfile (legacy fallback): %v", err)
+	}
+	if _, ok := lf.Plugins["authz"]; !ok {
+		t.Fatalf("expected authz plugin from legacy .wfctl.yaml fallback; entries: %v", lf.Plugins)
+	}
+}
+
+// TestLoadPluginLockfile_NewPathTakesPrecedence verifies that when both
+// .wfctl-lock.yaml and the legacy .wfctl.yaml exist, the new path is used.
+func TestLoadPluginLockfile_NewPathTakesPrecedence(t *testing.T) {
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	newContent := `plugins:
+  authz:
+    version: v1.0.0
+`
+	legacyContent := `plugins:
+  authz:
+    version: v0.1.0
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, wfctlLockPath), []byte(newContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, wfctlYAMLPath), []byte(legacyContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	lf, err := loadPluginLockfile(wfctlLockPath)
+	if err != nil {
+		t.Fatalf("loadPluginLockfile: %v", err)
+	}
+	if got := lf.Plugins["authz"].Version; got != "v1.0.0" {
+		t.Errorf("expected version from new lockfile v1.0.0, got %q (legacy file took precedence)", got)
+	}
+}
+
+func TestPluginInstall_FromConfig_NoRequires(t *testing.T) {
+	dir := t.TempDir()
+	cfg := "modules: []\n"
+	cfgPath := writeLockTestFile(t, dir, "workflow.yaml", cfg)
+	err := runPluginInstall([]string{"--from-config", cfgPath, "--plugin-dir", dir})
+	if err != nil {
+		t.Fatalf("--from-config with no requires: %v", err)
+	}
+}
+
+func TestPluginLock_NoPlugins(t *testing.T) {
+	dir := t.TempDir()
+	cfg := "modules: []\n"
+	cfgPath := writeLockTestFile(t, dir, "workflow.yaml", cfg)
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	err := runPluginLock([]string{"--config", cfgPath, "--lock-file", lockPath})
+	if err != nil {
+		t.Fatalf("plugin lock with no plugins: %v", err)
+	}
+	// Empty lockfile is created.
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Fatal("lockfile not created")
+	}
+}
+
+func TestPluginLock_PinsVersions(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `requires:
+  plugins:
+    - name: workflow-plugin-ai
+      version: "1.0.0"
+`
+	cfgPath := writeLockTestFile(t, dir, "workflow.yaml", cfg)
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	err := runPluginLock([]string{"--config", cfgPath, "--lock-file", lockPath})
+	if err != nil {
+		t.Fatalf("plugin lock: %v", err)
+	}
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lockfile: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("lockfile is empty")
+	}
+}
+
+func writeLockTestFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

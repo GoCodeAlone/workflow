@@ -1,3 +1,27 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 7695ee0
+  - repo: workflow
+    commit: 0317ab2
+  - repo: workflow
+    commit: 01b2e97
+  - repo: workflow
+    commit: 71d80f1
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'rg -n "func runDev|dev up|bubbletea|tailscale|cloudflared" cmd docs -S'
+    - 'git log --oneline --all -- cmd/wfctl/dev.go cmd/wfctl/dev_compose.go cmd/wfctl/dev_process.go cmd/wfctl/dev_k8s.go cmd/wfctl/wizard.go'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Tier 3 Platform Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

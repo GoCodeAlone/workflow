@@ -193,6 +193,7 @@ func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request)
 			slog.Error("panic in HTTP handler", "panic", rec, "stack", string(debug.Stack()))
 			if !rw.written.Load() {
 				http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
+				return
 			}
 		}
 	}()

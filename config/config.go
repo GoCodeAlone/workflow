@@ -71,11 +71,12 @@ func IsApplicationConfig(data []byte) bool {
 
 // ModuleConfig represents a single module configuration
 type ModuleConfig struct {
-	Name      string            `json:"name" yaml:"name"`
-	Type      string            `json:"type" yaml:"type"`
-	Config    map[string]any    `json:"config,omitempty" yaml:"config,omitempty"`
-	DependsOn []string          `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
-	Branches  map[string]string `json:"branches,omitempty" yaml:"branches,omitempty"`
+	Name         string                                 `json:"name" yaml:"name"`
+	Type         string                                 `json:"type" yaml:"type"`
+	Config       map[string]any                         `json:"config,omitempty" yaml:"config,omitempty"`
+	DependsOn    []string                               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Branches     map[string]string                      `json:"branches,omitempty" yaml:"branches,omitempty"`
+	Environments map[string]*InfraEnvironmentResolution `json:"environments,omitempty" yaml:"environments,omitempty"`
 }
 
 // RequiresConfig declares what capabilities and plugins a workflow needs.
@@ -86,8 +87,27 @@ type RequiresConfig struct {
 
 // PluginRequirement specifies a required plugin with optional version constraint.
 type PluginRequirement struct {
-	Name    string `json:"name" yaml:"name"`
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	Name    string                 `json:"name" yaml:"name"`
+	Version string                 `json:"version,omitempty" yaml:"version,omitempty"`
+	Source  string                 `json:"source,omitempty" yaml:"source,omitempty"`
+	Auth    *PluginRequirementAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Verify  *PluginVerifyConfig    `json:"verify,omitempty" yaml:"verify,omitempty"`
+}
+
+// PluginRequirementAuth holds credentials for fetching a private plugin.
+type PluginRequirementAuth struct {
+	Env string `json:"env,omitempty" yaml:"env,omitempty"`
+}
+
+// PluginVerifyConfig controls supply-chain verification for a plugin install.
+// Consumed by the install_verify hook handler in workflow-plugin-supply-chain.
+type PluginVerifyConfig struct {
+	// Signature controls cosign signature verification: required | allow-missing | off
+	Signature string `json:"signature,omitempty" yaml:"signature,omitempty"`
+	// SBOM controls SBOM presence check: required | allow-missing | off
+	SBOM string `json:"sbom,omitempty" yaml:"sbom,omitempty"`
+	// VulnPolicy controls OSV vulnerability scan policy: block-critical | warn | off
+	VulnPolicy string `json:"vuln_policy,omitempty" yaml:"vuln_policy,omitempty"`
 }
 
 // SidecarConfig defines a sidecar container to run alongside the workflow application.
@@ -122,26 +142,27 @@ type PluginsConfig struct {
 
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
-	Imports        []string              `json:"imports,omitempty" yaml:"imports,omitempty"`
-	Modules        []ModuleConfig        `json:"modules" yaml:"modules"`
-	Workflows      map[string]any        `json:"workflows" yaml:"workflows"`
-	Triggers       map[string]any        `json:"triggers" yaml:"triggers"`
-	Pipelines      map[string]any        `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
-	Platform       map[string]any        `json:"platform,omitempty" yaml:"platform,omitempty"`
-	Requires       *RequiresConfig       `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Plugins        *PluginsConfig        `json:"plugins,omitempty" yaml:"plugins,omitempty"`
-	Sidecars       []SidecarConfig       `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
-	Infrastructure *InfrastructureConfig           `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
-	Engine         *EngineConfig                   `json:"engine,omitempty" yaml:"engine,omitempty"`
-	CI             *CIConfig                       `json:"ci,omitempty" yaml:"ci,omitempty"`
-	Environments   map[string]*EnvironmentConfig   `json:"environments,omitempty" yaml:"environments,omitempty"`
-	Secrets        *SecretsConfig                  `json:"secrets,omitempty" yaml:"secrets,omitempty"`
-	SecretStores   map[string]*SecretStoreConfig   `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
-	Services       map[string]*ServiceConfig       `json:"services,omitempty" yaml:"services,omitempty"`
-	Mesh           *MeshConfig                     `json:"mesh,omitempty" yaml:"mesh,omitempty"`
-	Networking     *NetworkingConfig               `json:"networking,omitempty" yaml:"networking,omitempty"`
-	Security       *SecurityConfig                 `json:"security,omitempty" yaml:"security,omitempty"`
-	ConfigDir      string                          `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+	Imports        []string                      `json:"imports,omitempty" yaml:"imports,omitempty"`
+	Modules        []ModuleConfig                `json:"modules" yaml:"modules"`
+	Workflows      map[string]any                `json:"workflows" yaml:"workflows"`
+	Triggers       map[string]any                `json:"triggers" yaml:"triggers"`
+	Pipelines      map[string]any                `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
+	Platform       map[string]any                `json:"platform,omitempty" yaml:"platform,omitempty"`
+	Requires       *RequiresConfig               `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Plugins        *PluginsConfig                `json:"plugins,omitempty" yaml:"plugins,omitempty"`
+	Sidecars       []SidecarConfig               `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
+	Infrastructure *InfrastructureConfig         `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
+	Engine         *EngineConfig                 `json:"engine,omitempty" yaml:"engine,omitempty"`
+	CI             *CIConfig                     `json:"ci,omitempty" yaml:"ci,omitempty"`
+	Environments   map[string]*EnvironmentConfig `json:"environments,omitempty" yaml:"environments,omitempty"`
+	Secrets        *SecretsConfig                `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Infra          *InfraConfig                  `json:"infra,omitempty" yaml:"infra,omitempty"`
+	SecretStores   map[string]*SecretStoreConfig `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
+	Services       map[string]*ServiceConfig     `json:"services,omitempty" yaml:"services,omitempty"`
+	Mesh           *MeshConfig                   `json:"mesh,omitempty" yaml:"mesh,omitempty"`
+	Networking     *NetworkingConfig             `json:"networking,omitempty" yaml:"networking,omitempty"`
+	Security       *SecurityConfig               `json:"security,omitempty" yaml:"security,omitempty"`
+	ConfigDir      string                        `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 
 // EngineConfig holds engine-level runtime settings.
@@ -226,6 +247,12 @@ func loadFromFileWithImports(filepath string, seen map[string]bool) (*WorkflowCo
 			return nil, err
 		}
 	}
+
+	// Apply hardened defaults for ci.build.security after all merging is done.
+	cfg.applyBuildDefaults()
+
+	// Emit deprecation warning when inline plugin version/source fields are present.
+	warnIfInlinePluginVersions(&cfg)
 
 	return &cfg, nil
 }
@@ -349,6 +376,7 @@ func LoadFromBytes(data []byte) (*WorkflowConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config bytes: %w", err)
 	}
+	warnIfInlinePluginVersions(&cfg)
 	return &cfg, nil
 }
 
@@ -360,6 +388,7 @@ func LoadFromString(yamlContent string) (*WorkflowConfig, error) {
 	if err := yaml.Unmarshal([]byte(yamlContent), &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config string: %w", err)
 	}
+	warnIfInlinePluginVersions(&cfg)
 	return &cfg, nil
 }
 

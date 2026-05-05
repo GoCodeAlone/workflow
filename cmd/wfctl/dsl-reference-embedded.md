@@ -1292,3 +1292,162 @@ security:
 - `security.network.defaultPolicy: deny` causes `wfctl security generate-network-policies` to include `Egress` in policy types
 - `networking.ingress` entries without a `tls` block are flagged as `HIGH` by `wfctl security audit`
 - `wfctl validate` checks `security.tls.provider` for valid values
+
+---
+
+## Engine Config Migrations
+
+Manage SQLite-backed engine config schema migrations.
+
+### CLI Commands
+
+- `wfctl config migrate status [--db workflow.db]` — show applied and pending migrations
+- `wfctl config migrate diff [--db workflow.db]` — show pending migrations without applying
+- `wfctl config migrate apply [--db workflow.db]` — apply pending migrations
+- `wfctl config migrate plugins [--config workflow.yaml]` — migrate requires.plugins[] entries
+- `wfctl config migrate repair-dirty [options]` — repair dirty golang-migrate metadata
+
+> **Deprecated:** `wfctl migrate` is an alias for `wfctl config migrate` and will be removed in v0.21+.
+> Update scripts to use `wfctl config migrate`.
+
+---
+
+<!-- section: wfctl-infra-align -->
+## wfctl infra align
+
+Cross-validates the IaC config (and an optional plan JSON) across 8 rule families. Writes a markdown findings table to stdout and to `$GITHUB_STEP_SUMMARY` when running in CI.
+
+### Usage
+
+```
+wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict] [--strict-health] [--strict-cidr] [--max-changes N]
+```
+
+### Options
+
+- `--config <file>` — Config file (default: `infra.yaml` or `config/infra.yaml`)
+- `--env <name>` — Environment name for per-env config resolution
+- `--plan <file>` — Path to a plan JSON file (enables R-A7 and R-A10 checks)
+- `--strict` — Treat all WARNs as FAILs (exit 1)
+- `--strict-health` — Treat R-A2 health-check WARNs as FAILs
+- `--strict-cidr` — Enable strict CIDR overlap checks (reserved for future use)
+- `--max-changes N` — Warn when plan has more than N actions (default: 50)
+
+### Exit codes
+
+- `0` — no FAIL findings (WARNs allowed unless `--strict`)
+- `1` — any FAIL finding, or any WARN with `--strict`
+
+### Rule families
+
+| Rule | Name | Severity |
+|------|------|----------|
+| R-A1 | Container/runtime alignment | FAIL |
+| R-A2 | Health-check path in source | WARN (FAIL with `--strict-health`) |
+| R-A3 | Service-to-service DNS alignment | FAIL |
+| R-A4 | Env-var resolution | FAIL |
+| R-A5 | Migrations alignment | FAIL |
+| R-A6 | Network/exposure alignment | FAIL or WARN |
+| R-A7 | Plan-output sanity (requires `--plan`) | FAIL or WARN |
+| R-A8 | WebAuthn RP_ID alignment | FAIL |
+| R-A9 | Suspicious `provider_credential` key suffix | WARN |
+| R-A10 | Provider `ValidatePlan` diagnostics (requires `--plan`) | FAIL or WARN |
+
+R-A10 dispatches the optional `interfaces.ProviderValidator.ValidatePlan(plan)`
+to every loaded `iac.provider`. Providers that do not implement it are skipped.
+`PlanDiagnosticError` becomes a FAIL AlignFinding (always non-zero exit);
+`PlanDiagnosticWarning` becomes a WARN AlignFinding (non-zero only under
+`--strict`); `PlanDiagnosticInfo` is logged to stderr as
+`R-A10 [info] <provider>/<resource>: <message>` with no AlignFinding so
+`--strict` CI gates never fail on informational hints. See the
+`ProviderValidator` section in `DOCUMENTATION.md` for the SDK-side contract.
+
+### Example output
+
+```
+## wfctl infra align
+
+| Rule | Severity | Resource | Message |
+|------|----------|----------|---------|
+| R-A6 | WARN | nats-broker | internal service should use expose: internal |
+| R-A4 | FAIL | api | unresolved env var: ${STRIPE_KEY} |
+
+1 FAIL, 1 WARN
+```
+
+---
+
+## Infrastructure Plan Security Check
+
+`wfctl infra security-check` evaluates a pre-generated plan file against a set of adversarial security rules before applying. It is designed to run between `wfctl infra plan -o plan.json` and `wfctl infra apply --plan plan.json`.
+
+### Usage
+
+```
+wfctl infra security-check --plan <plan.json> [--strict] [--strict-cidr] [--max-changes N] [--rules <dir>]
+```
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--plan` | (required) | Path to a plan.json produced by `wfctl infra plan -o` |
+| `--strict` | false | Treat WARN findings as FAIL; exit 1 on any finding |
+| `--strict-cidr` | false | Treat R7 CIDR-widening warnings as FAIL |
+| `--max-changes` | 20 | Maximum allowed plan actions before R10 fires |
+| `--rules <dir>` | (none) | Directory of declarative YAML rule files loaded in addition to built-in rules |
+
+### Built-in Rules
+
+| Rule | Resource Type | Action | Severity | Description |
+|------|--------------|--------|----------|-------------|
+| R1 | `infra.firewall` | create, update | FAIL | Inbound rules permitting `0.0.0.0/0` or `::/0` on ports other than 80/443 |
+| R2 | `infra.database` | create, update | FAIL | Missing `trusted_sources` or `trusted_sources` contains `0.0.0.0/0` |
+| R3 | `infra.container_service` | create, update | FAIL | Name matches internal pattern (`nats`, `redis`, `db`, `broker`, `internal`) and `http_port` is set |
+| R4 | any | create, update | FAIL | Stripe live key, AWS access key ID, JWT Bearer token, or 40+ char base64 literal in `env_vars` |
+| R5 | any | replace | FAIL | `replace` action on resource annotated `protected: true` |
+| R6 | `infra.database` | update | FAIL | Update disables `backups` (on → off) or `at_rest_encryption` (true → false) |
+| R7 | `infra.firewall` | update | WARN / FAIL | Desired sources strictly contain current sources (CIDR widening); FAIL with `--strict-cidr` |
+| R8 | `infra.storage` | create, update | FAIL | Bucket `acl` is not `private` |
+| R9 | `infra.registry` | update | WARN | Update removes or zeroes `retention.untagged_ttl` |
+| R10 | (plan) | any | FAIL | More than `--max-changes` total actions, OR delete+create of the same stateful resource name |
+
+### Exit Codes
+
+- `0` — no FAIL findings (WARN findings only if `--strict` is not set)
+- `1` — one or more FAIL findings, or any findings with `--strict`
+
+### Declarative YAML Rules (`--rules <dir>`)
+
+Custom rules are loaded from `*.yaml` files in the given directory. Schema:
+
+```yaml
+id: custom-rule-id
+description: Human-readable description
+applies_to_action: create,update      # comma-separated; omit for all actions
+applies_to_resource_type: infra.database  # omit for all resource types
+match: trusted_sources == "0.0.0.0/0"    # key == "val" | key != "val" | key absent | key present
+severity: FAIL                        # FAIL or WARN
+message: Human-readable finding message
+```
+
+### Example
+
+```bash
+# Generate plan, security-check it, then apply only if clean.
+wfctl infra plan -c infra.yaml -o plan.json
+wfctl infra security-check --plan plan.json --strict-cidr
+wfctl infra apply -c infra.yaml --plan plan.json --auto-approve
+```
+
+Example output when a finding is detected:
+
+```
+## Security Check Findings
+
+| Rule | Severity | Resource | Message |
+|------|----------|----------|---------|
+| R1 | FAIL | `bmw-firewall` (infra.firewall) | inbound_rules port "22" allows 0.0.0.0/0 (R1: non-public ports must not expose to 0.0.0.0/0) |
+
+security-check: 1 FAIL finding(s) in plan "plan-1234567890"
+```

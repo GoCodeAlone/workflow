@@ -1,3 +1,25 @@
+---
+status: implemented
+area: plugins
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: a0929e9
+  - repo: workflow
+    commit: bacd7f5
+  - repo: workflow
+    commit: 9a886f8
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'rg -n "moduleInfraRequirements|SecretStore|secretsStoreOverride" config cmd mcp docs -S'
+    - 'git log --oneline --all -- config/plugin_manifest.go cmd/wfctl/plugin_infra.go cmd/wfctl/secrets_resolve.go'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Plugin IaC Registration Design
 
 **Date:** 2026-03-29

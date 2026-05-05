@@ -3,7 +3,10 @@ package integration
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +31,7 @@ import (
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // testLogger is a simple logger for integration tests.
@@ -629,4 +633,205 @@ func TestCustomModuleFactory_Integration(t *testing.T) {
 	if !factoryCalled {
 		t.Error("custom module factory was not invoked")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// HTTP Client Integration — end-to-end: YAML config → engine → service registry
+// ---------------------------------------------------------------------------
+
+// integrationMemSecretsProvider is a simple map-backed secrets.Provider for
+// integration tests.  It avoids a dependency on the module-internal helper.
+type integrationMemSecretsProvider struct {
+	mu   sync.RWMutex
+	data map[string]string
+}
+
+func newIntegrationMemSecretsProvider(initial map[string]string) *integrationMemSecretsProvider {
+	p := &integrationMemSecretsProvider{data: make(map[string]string)}
+	for k, v := range initial {
+		p.data[k] = v
+	}
+	return p
+}
+
+func (p *integrationMemSecretsProvider) Name() string { return "integration-mem-secrets" }
+
+func (p *integrationMemSecretsProvider) Get(_ context.Context, key string) (string, error) {
+	if key == "" {
+		return "", secrets.ErrInvalidKey
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	v, ok := p.data[key]
+	if !ok {
+		return "", secrets.ErrNotFound
+	}
+	return v, nil
+}
+
+func (p *integrationMemSecretsProvider) Set(_ context.Context, key, value string) error {
+	if key == "" {
+		return secrets.ErrInvalidKey
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.data[key] = value
+	return nil
+}
+
+func (p *integrationMemSecretsProvider) Delete(_ context.Context, key string) error {
+	if key == "" {
+		return secrets.ErrInvalidKey
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.data, key)
+	return nil
+}
+
+func (p *integrationMemSecretsProvider) List(_ context.Context) ([]string, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	keys := make([]string, 0, len(p.data))
+	for k := range p.data {
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+// TestHTTPClient_Integration_EndToEnd proves the full path:
+//
+//	YAML config string
+//	  → config.LoadFromString
+//	  → engine.BuildFromConfig  (http.client factory called, module registered)
+//	  → engine.Start            (Init + Start on each module, credentials resolved)
+//	  → app.GetService          (service registry lookup)
+//	  → module.Client().Do      (real HTTP round-trip with Authorization header)
+//
+// PR 3 owns the module itself; PR 4 will add the step.http_call → client: ref wiring.
+// This test therefore exercises YAML → engine → service registry → working http client,
+// which is the end-to-end guarantee this PR is responsible for.
+func TestHTTPClient_Integration_EndToEnd(t *testing.T) {
+	const wantToken = "integration-bearer-token" //nolint:gosec // G101: test credential, not a real secret
+
+	// Upstream records received requests so we can assert the auth header.
+	var requestCount int32
+	var gotAuthHeader string
+	var headerMu sync.Mutex
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		headerMu.Lock()
+		gotAuthHeader = r.Header.Get("Authorization")
+		headerMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer upstream.Close()
+
+	// Seed a secrets provider with the bearer token; it will be pre-registered in
+	// the app so the http.client module can resolve it during Start().
+	secretsProv := newIntegrationMemSecretsProvider(map[string]string{
+		"api-bearer": wantToken,
+	})
+
+	// Build the workflow config from an inline YAML string — this is the
+	// "minimal inline YAML" required by Task 1.13 Step 2.
+	yamlContent := `
+modules:
+  - name: upstream-client
+    type: http.client
+    config:
+      base_url: "` + upstream.URL + `"
+      timeout: 5s
+      auth:
+        type: static_bearer
+        bearer_token_ref:
+          provider: integration-secrets
+          key: api-bearer
+workflows: {}
+triggers: {}
+`
+	cfg, err := config.LoadFromString(yamlContent)
+	if err != nil {
+		t.Fatalf("LoadFromString failed: %v", err)
+	}
+
+	// Build engine with http plugin loaded (provides http.client factory).
+	app, logger := newTestApp(t)
+	engine := workflow.NewStdEngine(app, logger)
+	for _, p := range integrationPlugins() {
+		if err := engine.LoadPlugin(p); err != nil {
+			t.Fatalf("LoadPlugin(%s) failed: %v", p.Name(), err)
+		}
+	}
+
+	// Register the secrets provider in the app *before* BuildFromConfig so that
+	// Init/Start can resolve the bearer_token_ref during engine start.
+	if err := app.RegisterService("integration-secrets", secretsProv); err != nil {
+		t.Fatalf("RegisterService(integration-secrets): %v", err)
+	}
+
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("BuildFromConfig failed: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("engine.Start failed: %v", err)
+	}
+	defer func() {
+		if err := engine.Stop(ctx); err != nil {
+			t.Errorf("engine.Stop failed: %v", err)
+		}
+	}()
+
+	// Look up the http.client service from the DI registry by the module name.
+	var httpClientSvc module.HTTPClient
+	if err := app.GetService("upstream-client", &httpClientSvc); err != nil {
+		t.Fatalf("GetService(upstream-client): %v — http.client module not in service registry", err)
+	}
+	if httpClientSvc == nil {
+		t.Fatal("http.client service is nil")
+	}
+
+	// Verify BaseURL was set from the YAML config.
+	if httpClientSvc.BaseURL() != upstream.URL {
+		t.Errorf("BaseURL: got %q, want %q", httpClientSvc.BaseURL(), upstream.URL)
+	}
+
+	// Make a real HTTP request through the configured client.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream.URL+"/api/check", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp, err := httpClientSvc.Client().Do(req)
+	if err != nil {
+		t.Fatalf("http request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// The upstream must have received exactly one request.
+	if n := atomic.LoadInt32(&requestCount); n != 1 {
+		t.Errorf("expected 1 upstream request, got %d", n)
+	}
+
+	// The Authorization header must carry the token that was in the secrets provider.
+	headerMu.Lock()
+	got := gotAuthHeader
+	headerMu.Unlock()
+
+	want := "Bearer " + wantToken
+	if got != want {
+		t.Errorf("Authorization header: got %q, want %q", got, want)
+	}
+
+	t.Logf("End-to-end: YAML config → engine → service registry → http.client → upstream OK (auth header set: %v)", got != "")
 }

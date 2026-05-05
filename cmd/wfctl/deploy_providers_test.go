@@ -2,18 +2,57 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/plugin/external"
 )
+
+// noopCloser is an io.Closer that does nothing — used in test stubs.
+type noopCloser struct{}
+
+func (noopCloser) Close() error { return nil }
+
+// ── discoverAndLoadIaCProvider — error propagation ────────────────────────────
+
+// TestResolveIaCProviderSurfacesPluginError is the regression gate for the
+// caller-side fix: discoverAndLoadIaCProvider must surface the error message
+// from an *errorModule returned by the factory, not fall through to a generic
+// "does not support service invocation" message.
+func TestResolveIaCProviderSurfacesPluginError(t *testing.T) {
+	const pluginErrMsg = "digitalocean: missing required config key 'token'"
+
+	oldLoader := loadIaCPlugin
+	loadIaCPlugin = func(_, _ string) (string, map[string]plugin.ModuleFactory, io.Closer, error) {
+		factory := func(name string, _ map[string]any) modular.Module {
+			return external.NewErrorModule(name, errors.New(pluginErrMsg))
+		}
+		return "workflow-plugin-digitalocean", map[string]plugin.ModuleFactory{
+			"iac.provider": factory,
+		}, noopCloser{}, nil
+	}
+	defer func() { loadIaCPlugin = oldLoader }()
+
+	_, _, err := discoverAndLoadIaCProvider(context.Background(), "digitalocean", map[string]any{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), pluginErrMsg) {
+		t.Errorf("expected plugin error message %q in returned error, got: %v", pluginErrMsg, err)
+	}
+}
 
 // ── newDeployProvider ─────────────────────────────────────────────────────────
 
 func TestNewDeployProvider_Kubernetes(t *testing.T) {
 	for _, name := range []string{"kubernetes", "k8s"} {
-		p, err := newDeployProvider(name)
+		p, err := newDeployProvider(name, nil, "")
 		if err != nil {
 			t.Fatalf("newDeployProvider(%q): unexpected error: %v", name, err)
 		}
@@ -25,7 +64,7 @@ func TestNewDeployProvider_Kubernetes(t *testing.T) {
 
 func TestNewDeployProvider_Docker(t *testing.T) {
 	for _, name := range []string{"docker", "docker-compose"} {
-		p, err := newDeployProvider(name)
+		p, err := newDeployProvider(name, nil, "")
 		if err != nil {
 			t.Fatalf("newDeployProvider(%q): unexpected error: %v", name, err)
 		}
@@ -36,7 +75,7 @@ func TestNewDeployProvider_Docker(t *testing.T) {
 }
 
 func TestNewDeployProvider_AWSECS(t *testing.T) {
-	p, err := newDeployProvider("aws-ecs")
+	p, err := newDeployProvider("aws-ecs", nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,9 +85,175 @@ func TestNewDeployProvider_AWSECS(t *testing.T) {
 }
 
 func TestNewDeployProvider_Unknown(t *testing.T) {
-	_, err := newDeployProvider("unknown-provider")
+	_, err := newDeployProvider("unknown-provider", nil, "")
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
+	}
+}
+
+// ── newPluginDeployProvider env-resolution ─────────────────────────────────────
+
+// TestNewPluginDeployProvider_MergesEnvironmentConfig verifies that when envName
+// is set, the per-env config overlay is merged into the top-level config before
+// the provider is constructed, so environment-specific fields (like image) are
+// visible in resourceCfg.
+func TestNewPluginDeployProvider_MergesEnvironmentConfig(t *testing.T) {
+	wfCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "do-provider",
+				Type:   "iac.provider",
+				Config: map[string]any{"provider": "do-provider"},
+			},
+			{
+				Name: "bmw-app",
+				Type: "infra.container_service",
+				Config: map[string]any{
+					"provider":  "do-provider",
+					"http_port": 8080,
+				},
+				Environments: map[string]*config.InfraEnvironmentResolution{
+					"staging": {
+						Config: map[string]any{
+							"image": "foo:bar",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	p, err := newDeployProvider("do-provider", wfCfg, "staging")
+	if err != nil {
+		t.Fatalf("newDeployProvider: %v", err)
+	}
+	pdp, ok := p.(*pluginDeployProvider)
+	if !ok {
+		t.Fatalf("expected *pluginDeployProvider, got %T", p)
+	}
+	got, _ := pdp.resourceCfg["image"].(string)
+	if got != "foo:bar" {
+		t.Errorf("resourceCfg[image]: want %q, got %q", "foo:bar", got)
+	}
+}
+
+// TestNewPluginDeployProvider_EnvOverridesTopLevel verifies that a per-env
+// config value overrides the corresponding top-level value.
+func TestNewPluginDeployProvider_EnvOverridesTopLevel(t *testing.T) {
+	wfCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "do-provider",
+				Type:   "iac.provider",
+				Config: map[string]any{"provider": "do-provider"},
+			},
+			{
+				Name: "bmw-app",
+				Type: "infra.container_service",
+				Config: map[string]any{
+					"provider": "do-provider",
+					"image":    "old:v1",
+				},
+				Environments: map[string]*config.InfraEnvironmentResolution{
+					"staging": {
+						Config: map[string]any{
+							"image": "new:v2",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	p, err := newDeployProvider("do-provider", wfCfg, "staging")
+	if err != nil {
+		t.Fatalf("newDeployProvider: %v", err)
+	}
+	pdp := p.(*pluginDeployProvider)
+	got, _ := pdp.resourceCfg["image"].(string)
+	if got != "new:v2" {
+		t.Errorf("resourceCfg[image]: want %q, got %q", "new:v2", got)
+	}
+}
+
+// TestNewPluginDeployProvider_NoEnv verifies that when envName is empty the
+// top-level module config is used unchanged.
+func TestNewPluginDeployProvider_NoEnv(t *testing.T) {
+	wfCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "do-provider",
+				Type:   "iac.provider",
+				Config: map[string]any{"provider": "do-provider"},
+			},
+			{
+				Name: "bmw-app",
+				Type: "infra.container_service",
+				Config: map[string]any{
+					"provider": "do-provider",
+					"image":    "top-level:tag",
+				},
+				Environments: map[string]*config.InfraEnvironmentResolution{
+					"staging": {
+						Config: map[string]any{
+							"image": "staging:tag",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	p, err := newDeployProvider("do-provider", wfCfg, "")
+	if err != nil {
+		t.Fatalf("newDeployProvider: %v", err)
+	}
+	pdp := p.(*pluginDeployProvider)
+	got, _ := pdp.resourceCfg["image"].(string)
+	if got != "top-level:tag" {
+		t.Errorf("resourceCfg[image]: want %q, got %q", "top-level:tag", got)
+	}
+}
+
+// TestNewPluginDeployProvider_EnvSubstitutionAfterMerge verifies that
+// ExpandEnvInMap runs after the env-config merge, so ${VAR} placeholders in
+// per-env config fields are expanded using the OS environment.
+func TestNewPluginDeployProvider_EnvSubstitutionAfterMerge(t *testing.T) {
+	t.Setenv("DEPLOY_RESOLVE_TEST_IMAGE_TAG", "registry/org/app:abc123")
+
+	wfCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "do-provider",
+				Type:   "iac.provider",
+				Config: map[string]any{"provider": "do-provider"},
+			},
+			{
+				Name: "bmw-app",
+				Type: "infra.container_service",
+				Config: map[string]any{
+					"provider": "do-provider",
+				},
+				Environments: map[string]*config.InfraEnvironmentResolution{
+					"staging": {
+						Config: map[string]any{
+							"image": "${DEPLOY_RESOLVE_TEST_IMAGE_TAG}",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	p, err := newDeployProvider("do-provider", wfCfg, "staging")
+	if err != nil {
+		t.Fatalf("newDeployProvider: %v", err)
+	}
+	pdp := p.(*pluginDeployProvider)
+	got, _ := pdp.resourceCfg["image"].(string)
+	want := "registry/org/app:abc123"
+	if got != want {
+		t.Errorf("resourceCfg[image]: want %q, got %q", want, got)
 	}
 }
 

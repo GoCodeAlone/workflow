@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -20,6 +22,7 @@ func runCIRun(args []string) error {
 	phases := fs.String("phase", "build,test", "Comma-separated phases: build, test, deploy")
 	env := fs.String("env", "", "Target environment (required for deploy phase)")
 	verbose := fs.Bool("verbose", false, "Show detailed output")
+	pluginDir := fs.String("plugin-dir", "", "Directory containing installed plugins (default: $WFCTL_PLUGIN_DIR or ./data/plugins)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl ci run [options]\n\nRun CI phases from workflow config.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -60,6 +63,12 @@ func runCIRun(args []string) error {
 			if *env == "" {
 				return fmt.Errorf("--env is required for deploy phase")
 			}
+			if *pluginDir != "" {
+				os.Setenv("WFCTL_PLUGIN_DIR", *pluginDir) //nolint:errcheck
+			}
+			if err := runMigrationDeployGuard(*configFile, *env, *pluginDir, &cfg); err != nil {
+				return fmt.Errorf("migration guard failed: %w", err)
+			}
 			if len(cfg.Services) > 0 {
 				if err := runMultiServiceDeploy(cfg.CI.Deploy, *env, &cfg, cfg.Services, *verbose); err != nil {
 					return fmt.Errorf("deploy phase failed: %w", err)
@@ -76,19 +85,83 @@ func runCIRun(args []string) error {
 	return nil
 }
 
+func runMigrationDeployGuard(configFile, envName, pluginDir string, cfg *config.WorkflowConfig) error {
+	if cfg == nil || cfg.CI == nil || len(cfg.CI.Migrations) == 0 {
+		return nil
+	}
+	args := []string{"ci-check", "--config", configFile, "--env", envName}
+	if pluginDir != "" {
+		args = append(args, "--plugin-dir", pluginDir)
+	}
+	args = append(args, "--validation-result", ".wfctl/migrations-result.json", "--require-validation-result")
+	if commit := currentCICommitSHA(); commit != "" {
+		args = append(args, "--commit", commit, "--require-same-sha")
+	}
+	return runMigrations(args)
+}
+
+func currentCICommitSHA() string {
+	if value := os.Getenv("WFCTL_CI_COMMIT_SHA"); value != "" {
+		return value
+	}
+	if eventPath := os.Getenv("GITHUB_EVENT_PATH"); eventPath != "" {
+		data, err := os.ReadFile(eventPath)
+		if err == nil {
+			var event struct {
+				WorkflowRun struct {
+					HeadSHA string `json:"head_sha"`
+				} `json:"workflow_run"`
+			}
+			if json.Unmarshal(data, &event) == nil && event.WorkflowRun.HeadSHA != "" {
+				return event.WorkflowRun.HeadSHA
+			}
+		}
+	}
+	for _, key := range []string{"GITHUB_SHA", "CI_COMMIT_SHA"} {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 	if build == nil {
 		fmt.Println("No build configuration, skipping build phase")
 		return nil
 	}
 
-	// Build binaries
-	for _, bin := range build.Binaries {
-		osList := bin.OS
+	// Build go targets (type: go or legacy binaries coerced to go)
+	for _, bin := range build.Targets {
+		if bin.Type != "go" && bin.Type != "" {
+			continue // non-go targets handled by dedicated builders (Phase 2)
+		}
+		// Extract os/arch from Config map (set by backcompat shim or user config).
+		// Values may be []string (direct config) or []any (YAML unmarshal).
+		var osList, archList []string
+		if v, ok := bin.Config["os"]; ok {
+			switch val := v.(type) {
+			case []string:
+				osList = val
+			case []any:
+				for _, s := range val {
+					osList = append(osList, fmt.Sprintf("%v", s))
+				}
+			}
+		}
 		if len(osList) == 0 {
 			osList = []string{runtime.GOOS}
 		}
-		archList := bin.Arch
+		if v, ok := bin.Config["arch"]; ok {
+			switch val := v.(type) {
+			case []string:
+				archList = val
+			case []any:
+				for _, s := range val {
+					archList = append(archList, fmt.Sprintf("%v", s))
+				}
+			}
+		}
 		if len(archList) == 0 {
 			archList = []string{runtime.GOARCH}
 		}
@@ -98,8 +171,8 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 				fmt.Printf("Building %s (%s/%s)...\n", bin.Name, goos, goarch)
 
 				buildArgs := []string{"build", "-o", outputName}
-				if bin.LDFlags != "" {
-					ldflags := os.ExpandEnv(bin.LDFlags)
+				if ldf, ok := bin.Config["ldflags"].(string); ok && ldf != "" {
+					ldflags := os.ExpandEnv(ldf)
 					buildArgs = append(buildArgs, "-ldflags", ldflags)
 				}
 				buildArgs = append(buildArgs, bin.Path)
@@ -109,8 +182,15 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 					"GOOS="+goos,
 					"GOARCH="+goarch,
 				)
-				for k, v := range bin.Env {
-					cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(v))
+				switch envVal := bin.Config["env"].(type) {
+				case map[string]string:
+					for k, v := range envVal {
+						cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(v))
+					}
+				case map[string]any:
+					for k, v := range envVal {
+						cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(fmt.Sprintf("%v", v)))
+					}
 				}
 				if verbose {
 					cmd.Stdout = os.Stdout
@@ -125,7 +205,8 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 	}
 
 	// Build containers
-	for _, ctr := range build.Containers {
+	for i := range build.Containers {
+		ctr := &build.Containers[i]
 		fmt.Printf("Building container %s...\n", ctr.Name)
 		dockerfile := ctr.Dockerfile
 		if dockerfile == "" {
@@ -326,9 +407,12 @@ func runDeployPhaseWithConfig(
 	}
 
 	// Step 3: resolve provider and deploy.
-	provider, err := newDeployProvider(env.Provider)
+	provider, err := newDeployProvider(env.Provider, wfCfg, envName)
 	if err != nil {
 		return err
+	}
+	if c, ok := provider.(io.Closer); ok {
+		defer c.Close() //nolint:errcheck
 	}
 
 	deployCfg := DeployConfig{
@@ -373,6 +457,4 @@ func runPreDeploySteps(ctx context.Context, steps []string, verbose bool) error 
 }
 
 // newCommandContext wraps exec.CommandContext so tests can replace it.
-var newCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
-}
+var newCommandContext = exec.CommandContext //nolint:gosec // G204: subprocess args come from validated user config

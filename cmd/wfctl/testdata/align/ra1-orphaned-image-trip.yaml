@@ -1,0 +1,14 @@
+# R-A1 TRIP: ci.build exists (so the check is active) but has no container
+# named "myapp" — the image reference is orphaned. R-A1 fires (FAIL).
+modules:
+  - name: build
+    type: ci.build
+    config:
+      containers:
+        - name: otherapp
+          dockerfile: Dockerfile
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080

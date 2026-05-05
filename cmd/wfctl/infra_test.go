@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -217,7 +218,11 @@ modules:
 		t.Fatal(err)
 	}
 
-	plan, err := platform.ComputePlan(specs, nil)
+	// Test fixture has no iac.provider module; pass nil provider to exercise
+	// platform.ComputePlan's legacy ConfigHash compare fallback (matches the
+	// runtime behavior computePlanForInfraSpecs uses when no providers are
+	// declared).
+	plan, err := platform.ComputePlan(context.Background(), nil, specs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

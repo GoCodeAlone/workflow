@@ -46,6 +46,42 @@ func TestGenerateGHABootstrap_WithEnvironments(t *testing.T) {
 	}
 }
 
+func TestGenerateGHABootstrap_WithMigrationsAddsDeployGuard(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		CI: &config.CIConfig{
+			Deploy: &config.CIDeployConfig{Environments: map[string]*config.CIDeployEnvironment{
+				"staging": {Provider: "aws-ecs"},
+			}},
+			Migrations: []config.CIMigrationConfig{{Name: "app", SourceDir: "migrations"}},
+		},
+	}
+	content := generateGHABootstrap(cfg)
+	if !strings.Contains(content, "wfctl migrations validate --env staging --commit ${{ github.sha }} --result-file .wfctl/migrations-result.json --format json") {
+		t.Fatalf("expected migration validate result before deploy:\n%s", content)
+	}
+	if strings.Contains(content, "wfctl migrations ci-check --env staging") {
+		t.Fatalf("expected ci run deploy to perform migration ci-check once:\n%s", content)
+	}
+}
+
+func TestGenerateGitLabCIBootstrap_WithMigrationsAddsDeployGuard(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		CI: &config.CIConfig{
+			Deploy: &config.CIDeployConfig{Environments: map[string]*config.CIDeployEnvironment{
+				"staging": {Provider: "k8s"},
+			}},
+			Migrations: []config.CIMigrationConfig{{Name: "app", SourceDir: "migrations"}},
+		},
+	}
+	content := generateGitLabCIBootstrap(cfg)
+	if !strings.Contains(content, "wfctl migrations validate --env staging --commit $CI_COMMIT_SHA --result-file .wfctl/migrations-result.json --format json") {
+		t.Fatalf("expected migration validate result before deploy:\n%s", content)
+	}
+	if strings.Contains(content, "wfctl migrations ci-check --env staging") {
+		t.Fatalf("expected ci run deploy to perform migration ci-check once:\n%s", content)
+	}
+}
+
 func TestGenerateGitLabCIBootstrap_NoConfig(t *testing.T) {
 	content := generateGitLabCIBootstrap(nil)
 	if !strings.Contains(content, "stages:") {

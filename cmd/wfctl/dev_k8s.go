@@ -38,7 +38,7 @@ func runDevK8s(cfg *config.WorkflowConfig, verbose bool) error {
 
 	// 5. Write manifests to a temp file and apply.
 	const manifestFile = "dev-manifests.yaml"
-	if err := os.WriteFile(manifestFile, []byte(manifests), 0o644); err != nil {
+	if err := os.WriteFile(manifestFile, []byte(manifests), 0o600); err != nil {
 		return fmt.Errorf("write manifests: %w", err)
 	}
 	defer os.Remove(manifestFile) //nolint:errcheck

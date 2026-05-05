@@ -130,6 +130,12 @@ func buildTemplateFuncDefs() []TemplateFuncDef {
 			Example:     `{{ .query | urlEncode }}`,
 		},
 		{
+			Name:        "b64",
+			Signature:   "b64(s string) string",
+			Description: "Encodes a string as standard base64 (RFC 4648). Typical use: HTTP Basic auth header from an id:secret pair.",
+			Example:     `Basic {{ b64 (printf "%s:%s" .client_id .client_secret) }}`,
+		},
+		{
 			Name:        "add",
 			Signature:   "add(a any, b any) any",
 			Description: "Returns a + b. Returns int64 if both are integer types, float64 otherwise.",

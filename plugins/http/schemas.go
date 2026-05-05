@@ -5,6 +5,7 @@ import "github.com/GoCodeAlone/workflow/schema"
 // moduleSchemas returns UI schema definitions for all HTTP module types.
 func moduleSchemas() []*schema.ModuleSchema {
 	return []*schema.ModuleSchema{
+		httpClientSchema(),
 		httpServerSchema(),
 		httpRouterSchema(),
 		httpHandlerSchema(),
@@ -226,6 +227,26 @@ func securityHeadersMiddlewareSchema() *schema.ModuleSchema {
 			"hstsMaxAge":         31536000,
 			"referrerPolicy":     "strict-origin-when-cross-origin",
 			"permissionsPolicy":  "camera=(), microphone=(), geolocation=()",
+		},
+	}
+}
+
+func httpClientSchema() *schema.ModuleSchema {
+	return &schema.ModuleSchema{
+		Type:        "http.client",
+		Label:       "HTTP Client",
+		Category:    "http",
+		Description: "Reusable authenticated HTTP client provided as a DI service",
+		ConfigFields: []schema.ConfigFieldDef{
+			{Key: "base_url", Label: "Base URL", Type: schema.FieldTypeString, Description: "Optional base URL prepended to relative request paths", Placeholder: "https://api.example.com"},
+			{Key: "timeout", Label: "Timeout", Type: schema.FieldTypeString, Description: "Per-request deadline (e.g. 30s, 1m)", DefaultValue: "30s"},
+			{Key: "auth.type", Label: "Auth Type", Type: schema.FieldTypeSelect,
+				Options:     []string{"none", "static_bearer", "oauth2_client_credentials", "oauth2_refresh_token"},
+				Description: "Authentication strategy for outgoing requests"},
+		},
+		DefaultConfig: map[string]any{
+			"timeout": "30s",
+			"auth":    map[string]any{"type": "none"},
 		},
 	}
 }

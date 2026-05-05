@@ -54,6 +54,11 @@ import (
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
 	plugintimeline "github.com/GoCodeAlone/workflow/plugins/timeline"
+
+	// Register built-in builder plugins into the builder registry at init time.
+	_ "github.com/GoCodeAlone/workflow/plugins/builder-custom"
+	_ "github.com/GoCodeAlone/workflow/plugins/builder-go"
+	_ "github.com/GoCodeAlone/workflow/plugins/builder-nodejs"
 )
 
 // PluginLoader is the minimal interface required by [LoadAll].

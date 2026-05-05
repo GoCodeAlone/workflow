@@ -1,9 +1,11 @@
 package platform_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -11,9 +13,26 @@ import (
 	"github.com/GoCodeAlone/workflow/platform"
 )
 
-// hashConfig produces a deterministic SHA-256 hex hash of a config map for test setup.
+// hashConfig produces a deterministic SHA-256 hex hash of a config map for
+// test setup. Must match platform.configHash — sorted kv-pair encoding.
 func hashConfig(config map[string]any) string {
-	data, _ := json.Marshal(config)
+	if len(config) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	type kv struct {
+		K string
+		V any
+	}
+	ordered := make([]kv, len(keys))
+	for i, k := range keys {
+		ordered[i] = kv{K: k, V: config[k]}
+	}
+	data, _ := json.Marshal(ordered)
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
@@ -23,7 +42,7 @@ func TestDiffer_NewResource(t *testing.T) {
 	}
 	current := []interfaces.ResourceState{}
 
-	plan, err := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -45,7 +64,7 @@ func TestDiffer_DeletedResource(t *testing.T) {
 		{Name: "old-db", Type: "infra.database", ConfigHash: "abc123"},
 	}
 
-	plan, err := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +91,7 @@ func TestDiffer_UpdatedResource(t *testing.T) {
 		{Name: "db", Type: "infra.database", ConfigHash: hashConfig(config)},
 	}
 
-	plan, err := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +114,7 @@ func TestDiffer_NoChanges(t *testing.T) {
 		{Name: "db", Type: "infra.database", ConfigHash: hashConfig(config)},
 	}
 
-	plan, err := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,7 +134,7 @@ func TestDiffer_DependencyOrdering(t *testing.T) {
 	}
 	current := []interfaces.ResourceState{}
 
-	plan, err := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -151,7 +170,7 @@ func TestDiffer_MixedActions(t *testing.T) {
 		{Name: "old-cache", Type: "infra.cache"},
 	}
 
-	plan, err := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -180,11 +199,54 @@ func TestDiffer_CycleDetection(t *testing.T) {
 	}
 	current := []interfaces.ResourceState{}
 
-	_, err := platform.ComputePlan(desired, current)
+	_, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
 	if err == nil {
 		t.Fatal("expected error for cyclic dependency, got nil")
 	}
 	if !strings.Contains(err.Error(), "cycle") {
 		t.Errorf("error = %q, expected 'cycle' in message", err.Error())
+	}
+}
+
+func TestComputePlan_PerActionResolvedConfigHash(t *testing.T) {
+	desired := []interfaces.ResourceSpec{
+		{Name: "vpc", Type: "infra.vpc", Config: map[string]any{"region": "nyc1"}},
+	}
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].ResolvedConfigHash == "" {
+		t.Errorf("expected ResolvedConfigHash on create action, got %+v", plan.Actions[0])
+	}
+	want := platform.ConfigHash(desired[0].Config)
+	if got := plan.Actions[0].ResolvedConfigHash; got != want {
+		t.Errorf("ResolvedConfigHash = %q, want %q", got, want)
+	}
+}
+
+func TestComputePlan_ResolvedConfigHashOnUpdate(t *testing.T) {
+	desired := []interfaces.ResourceSpec{
+		{Name: "db", Type: "infra.database", Config: map[string]any{"engine": "postgres", "size": "db-s"}},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "db", Type: "infra.database", ConfigHash: "stale-hash"},
+	}
+	plan, err := platform.ComputePlan(context.Background(), newFakeProvider(), desired, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Actions) != 1 || plan.Actions[0].Action != "update" {
+		t.Fatalf("expected 1 update action, got %+v", plan.Actions)
+	}
+	if plan.Actions[0].ResolvedConfigHash == "" {
+		t.Errorf("expected ResolvedConfigHash on update action, got %+v", plan.Actions[0])
+	}
+	want := platform.ConfigHash(desired[0].Config)
+	if got := plan.Actions[0].ResolvedConfigHash; got != want {
+		t.Errorf("ResolvedConfigHash = %q, want %q", got, want)
 	}
 }

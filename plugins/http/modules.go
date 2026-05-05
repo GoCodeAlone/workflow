@@ -13,6 +13,8 @@ import (
 // moduleFactories returns factory functions for all HTTP module types.
 func moduleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
+		"http.client": httpClientModuleFactory,
+
 		"http.server":  httpServerFactory,
 		"http.router":  httpRouterFactory,
 		"http.handler": httpHandlerFactory,
@@ -237,4 +239,9 @@ func securityHeadersMiddlewareFactory(name string, cfg map[string]any) modular.M
 		secCfg.PermissionsPolicy = v
 	}
 	return module.NewSecurityHeadersMiddleware(name, secCfg)
+}
+
+// httpClientModuleFactory creates an HTTPClientModule from the plugin module config map.
+func httpClientModuleFactory(name string, cfg map[string]any) modular.Module {
+	return module.HTTPClientModuleFactory(name, cfg)
 }

@@ -48,9 +48,19 @@ func WithInProcessEngine(eng EngineProvider) InProcessOption {
 
 // InProcessServer exposes the workflow MCP tools for direct in-process
 // invocation without HTTP or subprocess overhead.
+// ToolSchema describes an MCP tool's name, description, and parameter schema.
+type ToolSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema,omitempty"`
+}
+
+// InProcessServer wraps the MCP Server for direct in-process invocation
+// without HTTP or subprocess overhead.
 type InProcessServer struct {
 	server      *Server
 	tools       map[string]ToolHandlerFunc
+	schemas     map[string]ToolSchema
 	auditLogger *slog.Logger
 }
 
@@ -75,9 +85,29 @@ func NewInProcessServer(opts ...InProcessOption) *InProcessServer {
 		s.documentationFile = cfg.documentationFile
 	}
 
+	// Collect tool schemas from the MCP server's registered tools.
+	schemas := make(map[string]ToolSchema)
+	for name, st := range s.mcpServer.ListTools() {
+		ts := ToolSchema{
+			Name:        st.Tool.Name,
+			Description: st.Tool.Description,
+		}
+		if st.Tool.InputSchema.Properties != nil {
+			ts.InputSchema = map[string]any{
+				"type":       "object",
+				"properties": st.Tool.InputSchema.Properties,
+			}
+			if len(st.Tool.InputSchema.Required) > 0 {
+				ts.InputSchema["required"] = st.Tool.InputSchema.Required
+			}
+		}
+		schemas[name] = ts
+	}
+
 	return &InProcessServer{
 		server:      s,
 		tools:       s.toolHandlers,
+		schemas:     schemas,
 		auditLogger: cfg.auditLogger,
 	}
 }
@@ -89,6 +119,21 @@ func (p *InProcessServer) ListTools() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// ListToolSchemas returns all registered tools with their parameter schemas.
+func (p *InProcessServer) ListToolSchemas() []ToolSchema {
+	result := make([]ToolSchema, 0, len(p.schemas))
+	for _, s := range p.schemas {
+		result = append(result, s)
+	}
+	return result
+}
+
+// GetToolSchema returns the schema for a specific tool, or false if not found.
+func (p *InProcessServer) GetToolSchema(name string) (ToolSchema, bool) {
+	s, ok := p.schemas[name]
+	return s, ok
 }
 
 // CallTool invokes the named tool with the given arguments.

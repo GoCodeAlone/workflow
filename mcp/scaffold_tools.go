@@ -308,8 +308,8 @@ func (s *Server) handleScaffoldInfra(_ context.Context, req mcp.CallToolRequest)
 	}
 
 	type infraResource struct {
-		ModuleType  string
-		ModuleName  string
+		ModuleType   string
+		ModuleName   string
 		ResourceType string
 		ServiceName  string
 	}
@@ -395,7 +395,7 @@ func (s *Server) handleDetectSecrets(_ context.Context, req mcp.CallToolRequest)
 		for field, val := range mod.Config {
 			fieldLower := strings.ToLower(field)
 			for _, secretField := range secretFields {
-				if fieldLower == strings.ToLower(secretField) {
+				if strings.EqualFold(fieldLower, secretField) {
 					valStr, _ := val.(string)
 					reason := "field name matches secret pattern"
 					suggested := strings.ToUpper(strings.ReplaceAll(field, ".", "_"))
@@ -571,7 +571,8 @@ func (s *Server) handleDetectInfraNeeds(_ context.Context, req mcp.CallToolReque
 			for _, n := range needs {
 				seen[n.ModuleType+":"+n.ModuleName] = true
 			}
-			for _, req := range pluginReqs {
+			for i := range pluginReqs {
+				req := pluginReqs[i]
 				needs = append(needs, infraNeed{
 					Category:    req.Type,
 					ModuleType:  req.Type,
@@ -633,7 +634,8 @@ func loadPluginInfraNeeds(pluginsDir string, cfg *config.WorkflowConfig) ([]conf
 			if !usedTypes[moduleType] {
 				continue
 			}
-			for _, req := range spec.Requires {
+			for i := range spec.Requires {
+				req := spec.Requires[i]
 				key := req.Type + ":" + req.Name
 				if seen[key] {
 					continue
