@@ -83,6 +83,8 @@ func runInfra(args []string) error {
 		return runInfraAlign(args[1:])
 	case "security-check":
 		return runInfraSecurityCheck(args[1:])
+	case "cleanup":
+		return runInfraCleanup(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -105,6 +107,7 @@ Actions:
   refresh-outputs Read live outputs and reconcile state (no cloud writes)
   align          Validate IaC config + plan alignment (8 rule families)
   security-check Scan plan.json for security policy violations
+  cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
@@ -115,6 +118,9 @@ Options:
   --format <fmt>       Output format: table (default) or markdown (plan only)
   --output <file>      Write plan to JSON file (plan only)
   --show-sensitive/-S  Show sensitive values in plaintext (plan/apply only)
+  --tag <name>         Tag to match resources (cleanup only; required)
+  --dry-run            Preview only (cleanup; default true)
+  --fix                Opt into deletion (cleanup; overrides --dry-run)
 `)
 	return fmt.Errorf("missing or unknown action")
 }

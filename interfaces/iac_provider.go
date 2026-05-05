@@ -63,6 +63,27 @@ type ProviderPlanner interface {
 	PlanV2(ctx context.Context, desired []ResourceSpec, current []ResourceState) (IaCPlan, error)
 }
 
+// Enumerator is an OPTIONAL interface for providers that can list resources
+// by tag across the cloud account. Used by `wfctl infra cleanup --tag <name>`.
+// Providers without a tag-query API simply do not implement it; the cleanup
+// subcommand skips them with a structured stdout log line so operators see
+// the explicit skip rather than silent under-cleanup.
+//
+// The contract is intentionally narrow: implementations MUST return refs that
+// the same provider's ResourceDriver(type).Delete can act on. ProviderID is
+// recommended (the cleanup command may use it for log correlation), but Name
+// + Type are the load-bearing identifiers Delete needs.
+//
+// Callers MUST type-assert against this interface and treat the negative
+// case as a skip — providers may or may not implement Enumerator depending
+// on whether their cloud API exposes a tag-query primitive. The
+// implementation status of individual provider plugins is documented in
+// docs/WFCTL.md `#### infra cleanup`, not here, so the API comment does
+// not go stale every time a new plugin gains tag-query support.
+type Enumerator interface {
+	EnumerateByTag(ctx context.Context, tag string) ([]ResourceRef, error)
+}
+
 // BootstrapResult contains metadata returned by a successful BootstrapStateBackend call.
 type BootstrapResult struct {
 	// Bucket is the name of the created or confirmed state bucket/container.
