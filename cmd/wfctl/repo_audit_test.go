@@ -24,27 +24,24 @@ func TestRunAuditRepoCleanPass(t *testing.T) {
 	}
 }
 
+// TestRunAuditRepoNonPortablePath verifies the portable-path check fires for
+// Windows-incompatible characters without relying on creating OS-invalid filenames
+// on disk. It calls checkPortablePath directly as an integration check.
 func TestRunAuditRepoNonPortablePath(t *testing.T) {
-	dir := t.TempDir()
-	// Create a file with a colon in its name (Windows-incompatible)
-	writeRepoAuditFile(t, filepath.Join(dir, "file:name.txt"), "content\n")
-
-	var out bytes.Buffer
-	err := runAuditWithOutput([]string{"repo", "--dir", dir}, &out)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	f := checkPortablePath("path:with:colons.txt")
+	if f == nil {
+		t.Fatal("expected non_portable_path finding for colon in path")
 	}
-	if !strings.Contains(out.String(), "non_portable_path") {
-		t.Fatalf("expected non_portable_path finding:\n%s", out.String())
+	if f.Code != "non_portable_path" {
+		t.Fatalf("expected non_portable_path, got %s", f.Code)
 	}
-	if !strings.Contains(out.String(), "WARN") {
-		t.Fatalf("expected WARN status:\n%s", out.String())
+	if f.Level != "WARN" {
+		t.Fatalf("expected WARN level, got %s", f.Level)
 	}
 }
 
 func TestRunAuditRepoUnsafePath(t *testing.T) {
-	// The unsafe path check works on the relative path itself.
-	// Since WalkDir won't produce ../ paths, test the checker directly.
+	// checkUnsafePath validates user-supplied path strings, not WalkDir entries.
 	f := checkUnsafePath("../etc/passwd")
 	if f == nil {
 		t.Fatal("expected finding for path traversal")
@@ -145,9 +142,16 @@ func TestRunAuditRepoJSON(t *testing.T) {
 	}
 }
 
+// TestRunAuditRepoStrictMode uses the index_drift check (no OS-invalid filenames needed)
+// to produce a warning and verify that --strict causes a non-zero exit.
 func TestRunAuditRepoStrictMode(t *testing.T) {
 	dir := t.TempDir()
-	writeRepoAuditFile(t, filepath.Join(dir, "file:name.txt"), "content\n")
+	plansDir := filepath.Join(dir, "docs", "plans")
+	if err := os.MkdirAll(plansDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRepoAuditFile(t, filepath.Join(plansDir, "INDEX.md"), "# Plans\n")
+	writeRepoAuditFile(t, filepath.Join(plansDir, "untracked.md"), "# Untracked\n")
 
 	var out bytes.Buffer
 	err := runAuditWithOutput([]string{"repo", "--dir", dir, "--strict"}, &out)
@@ -159,12 +163,19 @@ func TestRunAuditRepoStrictMode(t *testing.T) {
 	}
 }
 
+// TestRunAuditRepoConfigIgnores verifies that a matching ignore pattern suppresses findings.
+// Uses doc frontmatter check to avoid OS-invalid filenames.
 func TestRunAuditRepoConfigIgnores(t *testing.T) {
 	dir := t.TempDir()
-	writeRepoAuditFile(t, filepath.Join(dir, "file:name.txt"), "content\n")
+	docsDir := filepath.Join(dir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Structured doc without frontmatter — would normally produce a finding
+	writeRepoAuditFile(t, filepath.Join(docsDir, "guide.md"), "# Title\n\n## Section\n\ncontent\n")
 	writeRepoAuditFile(t, filepath.Join(dir, ".wfctl.yaml"), `audit:
   ignores:
-    - "file:name.txt"
+    - "docs/guide.md"
 `)
 
 	var out bytes.Buffer
@@ -172,17 +183,23 @@ func TestRunAuditRepoConfigIgnores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(out.String(), "non_portable_path") {
+	if strings.Contains(out.String(), "missing_doc_frontmatter") {
 		t.Fatalf("expected ignore to suppress finding:\n%s", out.String())
 	}
 }
 
+// TestRunAuditRepoConfigDisableCheck verifies that disabling doc_frontmatter suppresses findings.
 func TestRunAuditRepoConfigDisableCheck(t *testing.T) {
 	dir := t.TempDir()
-	writeRepoAuditFile(t, filepath.Join(dir, "file:name.txt"), "content\n")
+	docsDir := filepath.Join(dir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Structured doc without frontmatter — would normally produce a finding
+	writeRepoAuditFile(t, filepath.Join(docsDir, "guide.md"), "# Title\n\n## Section\n\ncontent\n")
 	writeRepoAuditFile(t, filepath.Join(dir, ".wfctl.yaml"), `audit:
   checks:
-    portable_paths: false
+    doc_frontmatter: false
 `)
 
 	var out bytes.Buffer
@@ -190,8 +207,23 @@ func TestRunAuditRepoConfigDisableCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(out.String(), "non_portable_path") {
+	if strings.Contains(out.String(), "missing_doc_frontmatter") {
 		t.Fatalf("expected disabled check to suppress finding:\n%s", out.String())
+	}
+}
+
+// TestRunAuditRepoConfigParseError verifies that a malformed .wfctl.yaml causes an error.
+func TestRunAuditRepoConfigParseError(t *testing.T) {
+	dir := t.TempDir()
+	writeRepoAuditFile(t, filepath.Join(dir, ".wfctl.yaml"), "audit: [\ninvalid yaml")
+
+	var out bytes.Buffer
+	err := runAuditWithOutput([]string{"repo", "--dir", dir}, &out)
+	if err == nil {
+		t.Fatal("expected error for malformed config")
+	}
+	if !strings.Contains(err.Error(), "parse audit config") {
+		t.Fatalf("expected parse error message, got: %v", err)
 	}
 }
 
@@ -283,13 +315,13 @@ func TestIsDocFile(t *testing.T) {
 }
 
 // writeRepoAuditFile is a test helper for writing files.
-func writeRepoAuditFile(t *testing.T, path, content string) {
+func writeRepoAuditFile(t *testing.T, fpath, content string) {
 	t.Helper()
-	dir := filepath.Dir(path)
+	dir := filepath.Dir(fpath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
+	if err := os.WriteFile(fpath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", fpath, err)
 	}
 }

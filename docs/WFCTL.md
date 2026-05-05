@@ -293,7 +293,7 @@ wfctl audit plugins --repo-root /path/to/workspace --strict-contracts
 
 #### `wfctl audit repo`
 
-Run repository-level quality gate checks. Catches portable-path issues, unsafe path patterns, documentation frontmatter problems, and generated index drift before PR push/merge.
+Run repository-level quality gate checks. Catches portable-path issues, documentation frontmatter problems, and generated index drift before PR push/merge.
 
 ```
 wfctl audit repo [options]
@@ -304,15 +304,13 @@ wfctl audit repo [options]
 | `--dir` | `.` | Repository root directory to audit |
 | `--json` | `false` | Write machine-readable JSON output |
 | `--strict` | `false` | Treat warnings as errors (exit non-zero) |
-| `--config` | `.wfctl.yaml` | Path to project config with audit section |
+| `--config` | _(none; resolves to `<dir>/.wfctl.yaml`)_ | Explicit path to project config with audit section |
 
 **Built-in checks:**
 
 | Code | Level | Description |
 |------|-------|-------------|
 | `non_portable_path` | WARN | File path contains non-ASCII, control characters, or Windows-incompatible characters |
-| `unsafe_path_traversal` | ERROR | File path contains `../` directory traversal |
-| `unsafe_absolute_path` | ERROR | File path is absolute |
 | `missing_doc_frontmatter` | WARN | Structured documentation file in `docs/` lacks YAML frontmatter |
 | `malformed_frontmatter` | ERROR | Frontmatter opening `---` has no closing delimiter |
 | `index_drift` | WARN | Plan file not referenced in `docs/plans/INDEX.md` |
@@ -323,7 +321,6 @@ wfctl audit repo [options]
 audit:
   checks:
     portable_paths: true
-    unsafe_paths: true
     index_drift: true
     doc_frontmatter: true
   ignores:

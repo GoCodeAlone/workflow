@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -46,7 +47,6 @@ type repoAuditConfig struct {
 
 type repoAuditChecksConfig struct {
 	PortablePaths  *bool `yaml:"portable_paths"`
-	UnsafePaths    *bool `yaml:"unsafe_paths"`
 	IndexDrift     *bool `yaml:"index_drift"`
 	DocFrontmatter *bool `yaml:"doc_frontmatter"`
 }
@@ -55,8 +55,6 @@ func (c *repoAuditChecksConfig) isEnabled(name string) bool {
 	switch name {
 	case "portable_paths":
 		return c.PortablePaths == nil || *c.PortablePaths
-	case "unsafe_paths":
-		return c.UnsafePaths == nil || *c.UnsafePaths
 	case "index_drift":
 		return c.IndexDrift == nil || *c.IndexDrift
 	case "doc_frontmatter":
@@ -66,17 +64,21 @@ func (c *repoAuditChecksConfig) isEnabled(name string) bool {
 }
 
 func runAuditRepoWithOutput(args []string, out io.Writer) error {
-	fs := flag.NewFlagSet("audit repo", flag.ContinueOnError)
-	fs.SetOutput(out)
-	dir := fs.String("dir", ".", "Repository root directory to audit")
-	jsonOut := fs.Bool("json", false, "Write JSON output")
-	strict := fs.Bool("strict", false, "Treat warnings as errors")
-	configFile := fs.String("config", "", "Path to audit config (default: .wfctl.yaml)")
-	if err := fs.Parse(args); err != nil {
+	fset := flag.NewFlagSet("audit repo", flag.ContinueOnError)
+	fset.SetOutput(out)
+	dir := fset.String("dir", ".", "Repository root directory to audit")
+	jsonOut := fset.Bool("json", false, "Write JSON output")
+	strict := fset.Bool("strict", false, "Treat warnings as errors")
+	configFile := fset.String("config", "", "Path to audit config; defaults to <dir>/.wfctl.yaml")
+	if err := fset.Parse(args); err != nil {
 		return err
 	}
 
-	cfg := loadRepoAuditConfig(*configFile, *dir)
+	cfg, err := loadRepoAuditConfig(*configFile, *dir)
+	if err != nil {
+		return fmt.Errorf("audit repo: load config: %w", err)
+	}
+
 	report := runRepoAuditChecks(*dir, cfg)
 
 	if *jsonOut {
@@ -103,13 +105,17 @@ func runRepoAuditChecks(dir string, cfg repoAuditConfig) repoAuditReport {
 	var fileCount int
 	var checkCount int
 
-	ignoreMatchers := compileIgnorePatterns(cfg.Ignores)
-
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(dir, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			findings = append(findings, repoAuditFinding{
+				Path:    fpath,
+				Level:   "ERROR",
+				Code:    "walk_error",
+				Message: fmt.Sprintf("cannot access path: %v", err),
+			})
+			return nil //nolint:nilerr // intentionally continue walking after per-entry errors
 		}
-		// Skip hidden directories and common non-source directories
+		// Skip common noise directories
 		base := d.Name()
 		if d.IsDir() {
 			if base == ".git" || base == "node_modules" || base == "vendor" || base == ".next" {
@@ -118,14 +124,14 @@ func runRepoAuditChecks(dir string, cfg repoAuditConfig) repoAuditReport {
 			return nil
 		}
 
-		relPath, _ := filepath.Rel(dir, path)
+		relPath, _ := filepath.Rel(dir, fpath)
 		if relPath == "" {
-			relPath = path
+			relPath = fpath
 		}
-		// Use forward slashes for consistent matching
+		// Use forward slashes for consistent cross-platform matching
 		relPath = filepath.ToSlash(relPath)
 
-		if isIgnored(relPath, ignoreMatchers) {
+		if isIgnored(relPath, cfg.Ignores) {
 			return nil
 		}
 
@@ -138,16 +144,9 @@ func runRepoAuditChecks(dir string, cfg repoAuditConfig) repoAuditReport {
 			}
 		}
 
-		if cfg.Checks.isEnabled("unsafe_paths") {
+		if cfg.Checks.isEnabled("doc_frontmatter") && isDocFile(relPath) && d.Type().IsRegular() {
 			checkCount++
-			if f := checkUnsafePath(relPath); f != nil {
-				findings = append(findings, *f)
-			}
-		}
-
-		if cfg.Checks.isEnabled("doc_frontmatter") && isDocFile(relPath) {
-			checkCount++
-			if f := checkDocFrontmatter(path, relPath); f != nil {
+			if f := checkDocFrontmatter(fpath, relPath); f != nil {
 				findings = append(findings, *f)
 			}
 		}
@@ -206,9 +205,8 @@ func checkPortablePath(relPath string) *repoAuditFinding {
 			Message: "path contains characters not allowed on Windows",
 		}
 	}
-	// Check for trailing spaces or dots (Windows issue)
-	parts := strings.Split(relPath, "/")
-	for _, part := range parts {
+	// Check for trailing spaces or dots in path segments (Windows issue)
+	for _, part := range strings.Split(relPath, "/") {
 		if strings.HasSuffix(part, " ") || strings.HasSuffix(part, ".") {
 			return &repoAuditFinding{
 				Path:    relPath,
@@ -224,7 +222,10 @@ func checkPortablePath(relPath string) *repoAuditFinding {
 // unsafePathRe matches path traversal sequences.
 var unsafePathRe = regexp.MustCompile(`(^|/)\.\.(/|$)`)
 
-// checkUnsafePath detects path traversal and absolute paths in filenames.
+// checkUnsafePath reports path traversal and absolute path patterns. It is
+// intended for validating user-supplied path strings (e.g. from config files
+// or manifests), not for paths returned by filepath.WalkDir, which never
+// produces traversal or absolute entries.
 func checkUnsafePath(relPath string) *repoAuditFinding {
 	if unsafePathRe.MatchString(relPath) {
 		return &repoAuditFinding{
@@ -245,7 +246,7 @@ func checkUnsafePath(relPath string) *repoAuditFinding {
 	return nil
 }
 
-// isDocFile returns true if the file is a markdown doc.
+// isDocFile returns true if the file is a markdown doc inside a documentation directory.
 func isDocFile(relPath string) bool {
 	ext := strings.ToLower(filepath.Ext(relPath))
 	if ext != ".md" && ext != ".mdx" {
@@ -257,7 +258,7 @@ func isDocFile(relPath string) bool {
 		strings.HasPrefix(relPath, "documentation/")
 }
 
-// checkDocFrontmatter checks that markdown files in docs directories have valid frontmatter.
+// checkDocFrontmatter checks that regular markdown files in docs directories have valid frontmatter.
 func checkDocFrontmatter(absPath, relPath string) *repoAuditFinding {
 	data, err := os.ReadFile(absPath)
 	if err != nil {
@@ -267,10 +268,9 @@ func checkDocFrontmatter(absPath, relPath string) *repoAuditFinding {
 		return nil
 	}
 	// Only warn on docs that look like they should have frontmatter
-	// (have heading structure but no frontmatter)
+	// (have multiple headings but no frontmatter)
 	content := string(data)
 	if !strings.HasPrefix(content, "---\n") && !strings.HasPrefix(content, "---\r\n") {
-		// No frontmatter — check if this looks like a structured doc
 		if hasStructuredContent(content) {
 			return &repoAuditFinding{
 				Path:    relPath,
@@ -370,48 +370,50 @@ func renderRepoAuditReport(out io.Writer, report repoAuditReport) {
 }
 
 // loadRepoAuditConfig loads audit configuration from .wfctl.yaml or a specified config file.
-func loadRepoAuditConfig(configPath, dir string) repoAuditConfig {
+// It returns an error only when the config file exists but cannot be parsed; a missing default
+// config is silently ignored.
+func loadRepoAuditConfig(configPath, dir string) (repoAuditConfig, error) {
 	var cfg repoAuditConfig
 
-	if configPath == "" {
+	explicitPath := configPath != ""
+	if !explicitPath {
 		configPath = filepath.Join(dir, ".wfctl.yaml")
 	}
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return cfg
+		if !explicitPath && os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return cfg, fmt.Errorf("read audit config %s: %w", configPath, err)
 	}
 
 	var raw struct {
 		Audit repoAuditConfig `yaml:"audit"`
 	}
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return cfg
+		return cfg, fmt.Errorf("parse audit config %s: %w", configPath, err)
 	}
-	return raw.Audit
+	return raw.Audit, nil
 }
 
-// compileIgnorePatterns compiles glob patterns for path matching.
-func compileIgnorePatterns(patterns []string) []string {
-	return patterns
-}
-
-// isIgnored checks if a path matches any ignore pattern.
-func isIgnored(path string, patterns []string) bool {
+// isIgnored checks if a path matches any ignore pattern using slash-based glob matching.
+func isIgnored(relPath string, patterns []string) bool {
 	for _, pattern := range patterns {
-		matched, _ := filepath.Match(pattern, path)
+		// Use path.Match (slash-based) since relPath is already normalised with forward slashes.
+		matched, _ := path.Match(pattern, relPath)
 		if matched {
 			return true
 		}
-		// Also check if the pattern matches the basename
-		matched, _ = filepath.Match(pattern, filepath.Base(path))
+		// Also check if the pattern matches just the basename
+		matched, _ = path.Match(pattern, path.Base(relPath))
 		if matched {
 			return true
 		}
-		// Check prefix match for directory patterns
+		// Support "dir/*" prefix patterns
 		if strings.HasSuffix(pattern, "/*") {
 			prefix := strings.TrimSuffix(pattern, "/*")
-			if strings.HasPrefix(path, prefix+"/") {
+			if strings.HasPrefix(relPath, prefix+"/") {
 				return true
 			}
 		}
