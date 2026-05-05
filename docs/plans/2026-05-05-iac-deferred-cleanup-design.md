@@ -213,7 +213,7 @@ wfctl infra apply -c infra.yaml --env staging \
 
 **Expected stdout (sketch)**:
 ```
-Loading plan from /tmp/tc2-plan.json ...
+Loading config from infra.yaml (env: staging) ...
 Replace cascade: 4 protected resources will be replaced + N dependents recreated.
 Allow-list verified: 4/4 protected resources opted-in.
 [1/4] core-dump-vpc: Delete + Create ... (region: nyc1, ID: vpc-XXX → vpc-YYY)
