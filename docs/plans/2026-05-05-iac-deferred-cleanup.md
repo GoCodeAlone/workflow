@@ -48,7 +48,7 @@
 
 **Hard gate**: Task 7.1 starts ONLY after both Coord-2 AND Coord-3 complete (Release CI green + binaries live).
 
-**Status:** Draft
+**Status:** Locked (alignment-check PASS at commit 497d1ed5, 2026-05-05)
 
 ---
 
