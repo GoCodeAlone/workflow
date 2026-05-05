@@ -641,3 +641,332 @@ modules:
 		t.Errorf("expected exactly 4 modules (no duplicates), got %d", len(cfg.Modules))
 	}
 }
+
+// TestLoadFromFile_ImportSecretsMerge pins the processImports behavior for
+// top-level WorkflowConfig.Secrets: Generate (dedupe by Key) and Entries
+// (dedupe by Name) are merged from imports; scalar/map fields follow
+// main-wins precedence consistent with the rest of the import path.
+func TestLoadFromFile_ImportSecretsMerge(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secrets:
+  defaultStore: import-store
+  provider: import-provider
+  generate:
+    - key: IMPORTED_KEY
+      type: random_hex
+      length: 32
+    - key: SHARED_KEY
+      type: random_hex
+      length: 16
+  entries:
+    - name: IMPORTED_ENTRY
+      store: vault
+    - name: SHARED_ENTRY
+      store: vault
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+secrets:
+  defaultStore: main-store
+  generate:
+    - key: MAIN_KEY
+      type: random_hex
+      length: 64
+    - key: SHARED_KEY
+      type: provider_credential
+      source: main
+  entries:
+    - name: MAIN_ENTRY
+      store: vault
+    - name: SHARED_ENTRY
+      store: main-store
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Secrets == nil {
+		t.Fatal("expected merged Secrets, got nil")
+	}
+
+	// Scalar precedence: main wins where set, import fills where unset.
+	if cfg.Secrets.DefaultStore != "main-store" {
+		t.Errorf("expected DefaultStore=main-store, got %q", cfg.Secrets.DefaultStore)
+	}
+	if cfg.Secrets.Provider != "import-provider" {
+		t.Errorf("expected Provider=import-provider (filled from import), got %q", cfg.Secrets.Provider)
+	}
+
+	// Generate: dedupe by Key, main-wins on conflict, append new entries.
+	genByKey := make(map[string]SecretGen)
+	for _, g := range cfg.Secrets.Generate {
+		if _, exists := genByKey[g.Key]; exists {
+			t.Errorf("duplicate Generate key %q after merge", g.Key)
+		}
+		genByKey[g.Key] = g
+	}
+	for _, k := range []string{"MAIN_KEY", "IMPORTED_KEY", "SHARED_KEY"} {
+		if _, ok := genByKey[k]; !ok {
+			t.Errorf("expected Generate key %q present after merge", k)
+		}
+	}
+	if shared, ok := genByKey["SHARED_KEY"]; ok && shared.Type != "provider_credential" {
+		t.Errorf("expected main-wins for SHARED_KEY type, got %q", shared.Type)
+	}
+
+	// Entries: dedupe by Name, main-wins on conflict, append new entries.
+	entryByName := make(map[string]SecretEntry)
+	for _, e := range cfg.Secrets.Entries {
+		if _, exists := entryByName[e.Name]; exists {
+			t.Errorf("duplicate Entries name %q after merge", e.Name)
+		}
+		entryByName[e.Name] = e
+	}
+	for _, n := range []string{"MAIN_ENTRY", "IMPORTED_ENTRY", "SHARED_ENTRY"} {
+		if _, ok := entryByName[n]; !ok {
+			t.Errorf("expected Entries name %q present after merge", n)
+		}
+	}
+	if shared, ok := entryByName["SHARED_ENTRY"]; ok && shared.Store != "main-store" {
+		t.Errorf("expected main-wins for SHARED_ENTRY store, got %q", shared.Store)
+	}
+}
+
+// TestLoadFromFile_ImportSecretsOnlyInImport covers the case the original
+// PR-1 fix missed: top-level `secrets:` appears only in an imported file,
+// not in main. Without the merge, cfg.Secrets is nil after LoadFromFile.
+func TestLoadFromFile_ImportSecretsOnlyInImport(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secrets:
+  generate:
+    - key: ONLY_IN_IMPORT
+      type: random_hex
+      length: 32
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+modules:
+  - name: dummy
+    type: noop
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Secrets == nil {
+		t.Fatal("expected cfg.Secrets to be populated from import, got nil")
+	}
+	if len(cfg.Secrets.Generate) != 1 || cfg.Secrets.Generate[0].Key != "ONLY_IN_IMPORT" {
+		t.Errorf("expected Generate=[{Key:ONLY_IN_IMPORT}], got %v", cfg.Secrets.Generate)
+	}
+}
+
+// TestProcessImports_MergesSecretStoresFromImport pins that
+// WorkflowConfig.SecretStores is merged across imports. ResolveSecretStore
+// and getProviderForStore look up store names against this map; without the
+// merge an imported defaultStore or entries[*].store fails as an
+// unknown-provider error.
+func TestProcessImports_MergesSecretStoresFromImport(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secretStores:
+  vault:
+    provider: vault
+    config:
+      address: https://vault.example.com
+  shared-store:
+    provider: aws-secrets-manager
+    config:
+      region: us-east-1
+secrets:
+  defaultStore: vault
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+secretStores:
+  shared-store:
+    provider: gcp-secret-manager
+    config:
+      project: my-project
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// vault came from import only — must survive the merge.
+	if _, ok := cfg.SecretStores["vault"]; !ok {
+		t.Error("expected SecretStores[vault] from import")
+	}
+	// shared-store: parent wins.
+	if shared, ok := cfg.SecretStores["shared-store"]; !ok {
+		t.Error("expected SecretStores[shared-store]")
+	} else if shared.Provider != "gcp-secret-manager" {
+		t.Errorf("expected main-wins on shared-store provider, got %q", shared.Provider)
+	}
+	// defaultStore came from imported secrets:
+	if cfg.Secrets == nil || cfg.Secrets.DefaultStore != "vault" {
+		t.Errorf("expected Secrets.DefaultStore=vault from import, got %v", cfg.Secrets)
+	}
+}
+
+// TestProcessImports_SecretsConfigMergesPerKey_LocalOverride pins the
+// per-key merge for Secrets.Config. The "shared defaults + local override"
+// pattern requires that an imported Config provides defaults (e.g. `repo`)
+// while the main file overrides only specific keys (e.g. `token_env`); the
+// imported keys not present in main must survive.
+func TestProcessImports_SecretsConfigMergesPerKey_LocalOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secrets:
+  config:
+    repo: GoCodeAlone/workflow
+    token_env: SHARED_TOKEN
+    api_url: https://api.github.com
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+secrets:
+  config:
+    token_env: MAIN_TOKEN
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Secrets == nil {
+		t.Fatal("expected cfg.Secrets non-nil")
+	}
+	// Imported defaults survive.
+	if cfg.Secrets.Config["repo"] != "GoCodeAlone/workflow" {
+		t.Errorf("expected repo=GoCodeAlone/workflow (imported default), got %v", cfg.Secrets.Config["repo"])
+	}
+	if cfg.Secrets.Config["api_url"] != "https://api.github.com" {
+		t.Errorf("expected api_url survived from import, got %v", cfg.Secrets.Config["api_url"])
+	}
+	// Main override wins on conflict.
+	if cfg.Secrets.Config["token_env"] != "MAIN_TOKEN" {
+		t.Errorf("expected token_env=MAIN_TOKEN (main override), got %v", cfg.Secrets.Config["token_env"])
+	}
+}
+
+// TestProcessImports_MergesEnvironmentsFromImport pins that
+// WorkflowConfig.Environments is merged across imports. ResolveSecretStore
+// consults Environments[env].SecretsStoreOverride to route secrets to a
+// specific store per environment; without the merge, an imported per-env
+// override is dropped and secret resolution silently falls back to
+// defaultStore/provider — fetching from the wrong backend.
+func TestProcessImports_MergesEnvironmentsFromImport(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+environments:
+  staging:
+    provider: aws
+    region: us-east-1
+    secretsStoreOverride: vault
+  production:
+    provider: aws
+    region: us-west-2
+    secretsStoreOverride: aws-prod
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+environments:
+  production:
+    provider: aws
+    region: us-west-2
+    secretsStoreOverride: aws-prod-main
+  local:
+    provider: docker
+    region: localhost
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// staging came from import only — must survive merge.
+	staging, ok := cfg.Environments["staging"]
+	if !ok {
+		t.Fatal("expected Environments[staging] from import")
+	}
+	if staging.SecretsStoreOverride != "vault" {
+		t.Errorf("expected staging.SecretsStoreOverride=vault from import, got %q", staging.SecretsStoreOverride)
+	}
+
+	// production: parent wins (main override).
+	prod, ok := cfg.Environments["production"]
+	if !ok {
+		t.Fatal("expected Environments[production]")
+	}
+	if prod.SecretsStoreOverride != "aws-prod-main" {
+		t.Errorf("expected main-wins on production.SecretsStoreOverride, got %q", prod.SecretsStoreOverride)
+	}
+
+	// local came from main only.
+	if _, ok := cfg.Environments["local"]; !ok {
+		t.Error("expected Environments[local] from main")
+	}
+}
