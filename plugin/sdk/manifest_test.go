@@ -83,6 +83,40 @@ func TestManifest_RootPermitsAdditionalProperties(t *testing.T) {
 	}
 }
 
+// TestManifest_iacProviderAdditionalPropertiesFalse_IsEnforced is a
+// diagnostic marker for workflow#540.
+//
+// Background: workflow#540 surfaced from P-DO PR #61 as "the
+// `iacProvider` block accepts extra keys (`name`, `resourceTypes`,
+// `configSchema`) without validation error, despite the schema
+// declaring `additionalProperties: false`." The fix follow-up will
+// (a) confirm whether the jsonschema library is honouring the
+// constraint correctly across all input shapes, and (b) if a regression
+// or library quirk is found, land the schema-loader fix and remove the
+// t.Skip line so this test asserts strict rejection.
+//
+// SHAPE: t.Skip + workflow#540 link (per plan §I-5 alt-shape). CI stays
+// green, the SKIP surfaces in `go test -v` output, and `docs/test-skips.md`
+// tracks the active skip. Once the fix lands, drop the t.Skip line — the
+// remaining body already asserts the expected REJECT behaviour.
+func TestManifest_iacProviderAdditionalPropertiesFalse_IsEnforced(t *testing.T) {
+	t.Skip("BUG: workflow#540 — extra iacProvider key not rejected; " +
+		"schema declares additionalProperties:false but library may accept extra keys " +
+		"on some manifest shapes. Diagnostic test pending fix follow-up PR.")
+
+	manifest := []byte(`{
+		"name": "test-plugin",
+		"version": "0.0.0",
+		"iacProvider": {
+			"computePlanVersion": "v2",
+			"bogusKeyThatShouldBeRejected": "value"
+		}
+	}`)
+	if _, err := ParseManifest(manifest); err == nil {
+		t.Errorf("BUG: extra iacProvider key not rejected — see workflow#540")
+	}
+}
+
 // TestManifestSchemaJSON_ReturnsCopy verifies that mutating the slice
 // returned from ManifestSchemaJSON cannot affect the embedded schema
 // observed by subsequent callers.
