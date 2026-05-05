@@ -162,8 +162,11 @@ Layers, in order of execution:
    provider's driver API.
 2. **Outer-job `always()` step** in `conformance-smoke.yml` —
    safety net for panicking tests where `t.Cleanup` did not run.
-   Currently a STUB pending `wfctl infra cleanup --tag <name>`
-   (tracked as a W-7 follow-up); falls through to layer 3.
+   Calls `wfctl infra cleanup --tag <name> --fix` (PR 4 of the IaC
+   deferred-cleanup plan, workflow#536). The wiring is gated on
+   `DO_CONFORMANCE_API_TOKEN`: when the secret is unset (workflow#542
+   not yet merged), the step emits a `::notice::` and falls through to
+   layer 3.
 3. **Hourly leak-scrubber cron** (`conformance-leak-scrubber.yml`,
    added in T7.14) — lists DO resources tagged
    `conformance-pr-*` older than 1 hour and deletes them.
@@ -216,13 +219,13 @@ Steps:
 
 ## Known follow-ups
 
-- **`wfctl infra cleanup --tag <name>` does not exist yet.** Until
-  implemented, smoke jobs rely on T7.14's hourly leak scrubber to
-  catch orphaned resources from panicking tests. The smoke
-  workflow's outer-job `always()` step currently logs the cleanup
-  intent and defers to the scrubber. Tracked as a workflow-repo
-  issue (filed at PR-create time) titled "implement wfctl infra
-  cleanup --tag for full-wfctl conformance gate cleanup".
+- ~~**`wfctl infra cleanup --tag <name>` does not exist yet.**~~ **CLOSED.**
+  Implemented in workflow PR 4 of the IaC deferred-cleanup plan
+  (workflow#536); see `docs/WFCTL.md` `#### infra cleanup`. The smoke
+  gate calls the new subcommand directly when `DO_CONFORMANCE_API_TOKEN`
+  is provisioned. Until workflow#542 lands the conformance token, the
+  cleanup step in `conformance-smoke.yml` emits a `::notice::` and the
+  hourly leak-scrubber remains the active safety net.
 - **Sister workflow in `workflow-plugin-digitalocean`** (P-DO/TP5)
   — provisions the actual Droplet for the smoke run. This repo's
   workflow currently exercises the in-tree self-tests until the

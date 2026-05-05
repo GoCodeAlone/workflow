@@ -1108,6 +1108,13 @@ func bodyReferencesField(body *ast.BlockStmt, fieldName string) bool {
 // constant inside a ForceNew branch) is still flagged. Maintainers
 // who genuinely don't propagate ForceNew leave NeedsReplace untouched
 // entirely, which the analyzer also catches.
+//
+// workflow#539 widened the matcher again to recognize struct-literal
+// assignment via *ast.KeyValueExpr (e.g. `&DiffResult{NeedsReplace:
+// needsReplace}`), the local-accumulator pattern. The same
+// literal-`false` no-assignment carve-out applies symmetrically so a
+// struct literal `{NeedsReplace: false}` inside a ForceNew-observing
+// function is still flagged.
 func bodyAssignsField(body *ast.BlockStmt, fieldName string) bool {
 	if body == nil {
 		return false
@@ -1117,25 +1124,37 @@ func bodyAssignsField(body *ast.BlockStmt, fieldName string) bool {
 		if found {
 			return false
 		}
-		assign, ok := n.(*ast.AssignStmt)
-		if !ok {
-			return true
-		}
-		for i, lhs := range assign.Lhs {
-			sel, ok := lhs.(*ast.SelectorExpr)
-			if !ok {
-				continue
-			}
-			if sel.Sel.Name != fieldName {
-				continue
-			}
-			if i < len(assign.Rhs) {
-				if id, ok := assign.Rhs[i].(*ast.Ident); ok && id.Name == "false" {
+		switch v := n.(type) {
+		case *ast.AssignStmt:
+			for i, lhs := range v.Lhs {
+				sel, ok := lhs.(*ast.SelectorExpr)
+				if !ok {
+					continue
+				}
+				if sel.Sel.Name != fieldName {
+					continue
+				}
+				if i < len(v.Rhs) && isLiteralFalse(v.Rhs[i]) {
 					// Literal-false assignment is treated as
 					// no-assignment so a copy-paste typo inside the
 					// ForceNew branch is still flagged.
 					continue
 				}
+				found = true
+				return false
+			}
+		case *ast.KeyValueExpr:
+			// Struct-literal assignment, e.g. `&DiffResult{NeedsReplace:
+			// needsReplace}` (workflow#539 accumulator pattern).
+			ident, ok := v.Key.(*ast.Ident)
+			if !ok || ident.Name != fieldName {
+				return true
+			}
+			if isLiteralFalse(v.Value) {
+				// Symmetric literal-false carve-out: a struct literal
+				// `{NeedsReplace: false}` inside a ForceNew-observing
+				// function is still a copy-paste bug.
+				return true
 			}
 			found = true
 			return false
@@ -1143,6 +1162,14 @@ func bodyAssignsField(body *ast.BlockStmt, fieldName string) bool {
 		return true
 	})
 	return found
+}
+
+// isLiteralFalse reports whether expr is the literal Go identifier
+// `false`. Used as a no-assignment carve-out for both AssignStmt and
+// struct-literal KeyValueExpr forms.
+func isLiteralFalse(expr ast.Expr) bool {
+	id, ok := expr.(*ast.Ident)
+	return ok && id.Name == "false"
 }
 
 // routeSkip records a skipped FuncDecl through the pass.Report channel

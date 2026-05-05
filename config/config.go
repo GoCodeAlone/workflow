@@ -361,6 +361,97 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 			cfg.Sidecars = append(cfg.Sidecars, sc)
 			existingSidecars[sc.Name] = struct{}{}
 		}
+
+		// Merge SecretStores — per-store dedupe by name (parent wins).
+		// SecretsConfig.DefaultStore + SecretEntry.Store reference these by
+		// name via ResolveSecretStore / getProviderForStore, so the import
+		// merge must include the store map; otherwise an imported store name
+		// is later treated as a raw provider and provider construction fails.
+		if len(impCfg.SecretStores) > 0 {
+			if cfg.SecretStores == nil {
+				cfg.SecretStores = make(map[string]*SecretStoreConfig, len(impCfg.SecretStores))
+			}
+			for k, v := range impCfg.SecretStores {
+				if _, exists := cfg.SecretStores[k]; !exists {
+					cfg.SecretStores[k] = v
+				}
+			}
+		}
+
+		// Merge Environments — per-env dedupe by name (parent wins).
+		// ResolveSecretStore consults Environments[env].SecretsStoreOverride
+		// to route secrets to a specific store for a given environment. A
+		// shared imported file commonly defines per-env overrides while the
+		// main file only redeclares envs it customizes; without merging,
+		// imported overrides are dropped and secrets fall back to
+		// defaultStore/provider — silently fetching from the wrong backend.
+		if len(impCfg.Environments) > 0 {
+			if cfg.Environments == nil {
+				cfg.Environments = make(map[string]*EnvironmentConfig, len(impCfg.Environments))
+			}
+			for k, v := range impCfg.Environments {
+				if _, exists := cfg.Environments[k]; !exists {
+					cfg.Environments[k] = v
+				}
+			}
+		}
+
+		// Merge top-level secrets. Generate (dedupe by Key) and Entries
+		// (dedupe by Name) are appended. Scalar fields follow parent-wins.
+		// `Config` is a map[string]any: per-key merge so an imported "shared
+		// defaults" config can survive a partial main-file override (e.g.
+		// import provides {repo, token_env}; main only sets {token_env}).
+		if impCfg.Secrets != nil {
+			if cfg.Secrets == nil {
+				cfg.Secrets = &SecretsConfig{}
+			}
+			// Scalar fields: parent wins; only adopt if unset on parent.
+			if cfg.Secrets.DefaultStore == "" {
+				cfg.Secrets.DefaultStore = impCfg.Secrets.DefaultStore
+			}
+			if cfg.Secrets.Provider == "" {
+				cfg.Secrets.Provider = impCfg.Secrets.Provider
+			}
+			// Config map: per-key merge — main wins on conflicts, imported
+			// keys not present in main are preserved (shared-defaults pattern).
+			if len(impCfg.Secrets.Config) > 0 {
+				if cfg.Secrets.Config == nil {
+					cfg.Secrets.Config = make(map[string]any, len(impCfg.Secrets.Config))
+				}
+				for k, v := range impCfg.Secrets.Config {
+					if _, exists := cfg.Secrets.Config[k]; !exists {
+						cfg.Secrets.Config[k] = v
+					}
+				}
+			}
+			if cfg.Secrets.Rotation == nil {
+				cfg.Secrets.Rotation = impCfg.Secrets.Rotation
+			}
+			// Generate slice — dedupe by Key (first definition wins).
+			existingGen := make(map[string]struct{}, len(cfg.Secrets.Generate))
+			for _, g := range cfg.Secrets.Generate {
+				existingGen[g.Key] = struct{}{}
+			}
+			for _, g := range impCfg.Secrets.Generate {
+				if _, exists := existingGen[g.Key]; exists {
+					continue
+				}
+				cfg.Secrets.Generate = append(cfg.Secrets.Generate, g)
+				existingGen[g.Key] = struct{}{}
+			}
+			// Entries slice — dedupe by Name (first definition wins).
+			existingEntries := make(map[string]struct{}, len(cfg.Secrets.Entries))
+			for _, e := range cfg.Secrets.Entries {
+				existingEntries[e.Name] = struct{}{}
+			}
+			for _, e := range impCfg.Secrets.Entries {
+				if _, exists := existingEntries[e.Name]; exists {
+					continue
+				}
+				cfg.Secrets.Entries = append(cfg.Secrets.Entries, e)
+				existingEntries[e.Name] = struct{}{}
+			}
+		}
 	}
 
 	cfg.Imports = nil // clear after processing

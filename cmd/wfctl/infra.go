@@ -83,6 +83,8 @@ func runInfra(args []string) error {
 		return runInfraAlign(args[1:])
 	case "security-check":
 		return runInfraSecurityCheck(args[1:])
+	case "cleanup":
+		return runInfraCleanup(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -105,6 +107,7 @@ Actions:
   refresh-outputs Read live outputs and reconcile state (no cloud writes)
   align          Validate IaC config + plan alignment (8 rule families)
   security-check Scan plan.json for security policy violations
+  cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
@@ -115,6 +118,9 @@ Options:
   --format <fmt>       Output format: table (default) or markdown (plan only)
   --output <file>      Write plan to JSON file (plan only)
   --show-sensitive/-S  Show sensitive values in plaintext (plan/apply only)
+  --tag <name>         Tag to match resources (cleanup only; required)
+  --dry-run            Preview only (cleanup; default true)
+  --fix                Opt into deletion (cleanup; overrides --dry-run)
 `)
 	return fmt.Errorf("missing or unknown action")
 }
@@ -1146,20 +1152,29 @@ func runInfraApply(args []string) error {
 			return fmt.Errorf("list state for refresh: %w", statesErr)
 		}
 		groups, groupOrder := groupStatesByProvider(states, cfgFile, envName)
-		for _, moduleRef := range groupOrder {
-			g := groups[moduleRef]
+		// Wrap each group in a helper so the deferred closer fires after the
+		// group finishes, not at runInfraApply exit. Without this, a config
+		// with N provider groups would hold N connections open throughout the
+		// rest of the apply path (same pattern as infra_plan_provider.go and
+		// infra_apply.go).
+		refreshGroup := func(moduleRef string, g *providerGroup) error {
 			provider, closer, provErr := resolveIaCProvider(ctx, g.provType, g.provCfg)
 			if provErr != nil {
 				return fmt.Errorf("refresh: load provider %q: %w", moduleRef, provErr)
 			}
-			refreshErr := runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
-				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
 			if closer != nil {
-				if cerr := closer.Close(); cerr != nil {
-					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
-				}
+				provType := g.provType
+				defer func() {
+					if cerr := closer.Close(); cerr != nil {
+						fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+					}
+				}()
 			}
-			if refreshErr != nil {
+			return runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
+				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
+		}
+		for _, moduleRef := range groupOrder {
+			if refreshErr := refreshGroup(moduleRef, groups[moduleRef]); refreshErr != nil {
 				return fmt.Errorf("refresh phase: %w", refreshErr)
 			}
 		}

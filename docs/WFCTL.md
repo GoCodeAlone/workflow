@@ -1173,6 +1173,7 @@ wfctl infra <action> [options] [config.yaml]
 | `state` | Manage state storage (list/export/import) |
 | `outputs` | Print resource outputs from state (yaml/json/env formats) |
 | `refresh-outputs` | Read live outputs from each provider and reconcile state (no cloud writes) |
+| `cleanup` | Tag-based force-cleanup across providers that implement `interfaces.Enumerator` |
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -1216,6 +1217,51 @@ wfctl infra state import --source state.json
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN,DATABASE_URL
 wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
+```
+
+#### `infra cleanup`
+
+Tag-based force-cleanup across every provider declared in the config. For each `iac.provider` module, type-asserts to the optional `interfaces.Enumerator`; providers that implement it are queried via `EnumerateByTag`, and the matched resources are either listed (`--dry-run`, default) or deleted (`--fix`). Providers that do **not** implement `Enumerator` are skipped with `skipped <provider>: provider does not implement Enumerator` to stdout so operators see the explicit skip.
+
+Used by the conformance smoke gate (`.github/workflows/conformance-smoke.yml`) to scrub resources orphaned by panicking tests before the hourly leak-scrubber cron picks them up. Safe to call from any operator workstation against any IaC config.
+
+```
+wfctl infra cleanup --tag NAME [-c CONFIG] [--env ENV] [--dry-run | --fix]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tag` | _(required)_ | Tag value to match resources against. Format is provider-specific (DO uses single-string tags). |
+| `-c`, `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for config and state resolution |
+| `--dry-run` | `true` | Preview only — list matched resources without deleting. |
+| `--fix` | `false` | Opt into deletion. Overrides `--dry-run`. |
+
+**Behaviour:**
+
+- Per-provider failures (enumerate or delete) are collected but do **not** short-circuit the run — one bad provider must not suppress the rest. The exit code is non-zero when any provider failed.
+- Skip-on-non-Enumerator is logged to **stdout** (not stderr) so CI step output captures it as run metadata rather than as a failure signal.
+- `--dry-run` defaults to `true`. Even when explicitly setting `--dry-run=false`, the safe-default invariant requires `--fix` to actually mutate cloud resources.
+
+**Provider support (workflow v0.21.x):**
+
+| Provider plugin | Implements `Enumerator`? |
+|---|---|
+| `workflow-plugin-digitalocean` | Yes (PR 6b follow-up; uses `godo.Tags.Get`). |
+| `workflow-plugin-aws` | Not yet — skipped. |
+| `workflow-plugin-gcp` | Not yet — skipped. |
+| `workflow-plugin-azure` | Not yet — skipped. |
+
+When AWS/GCP/Azure providers gain `Enumerator` implementations on their own per-plugin cycles, the cleanup subcommand picks them up automatically — no core change required.
+
+**Example:**
+
+```bash
+# Preview what would be deleted for tag "conformance-pr-123":
+wfctl infra cleanup --tag conformance-pr-123
+
+# Actually delete:
+wfctl infra cleanup --tag conformance-pr-123 --fix
 ```
 
 #### `infra apply`
