@@ -2,6 +2,8 @@ version: "2"
 
 run:
   timeout: 10m
+  exclude-dirs:
+    - ui/node_modules
 
 linters:
   default: none

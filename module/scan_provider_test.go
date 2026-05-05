@@ -51,7 +51,7 @@ func (a *scanMockApp) GetService(name string, target any) error {
 		return fmt.Errorf("service %q not found", name)
 	}
 	rv := reflect.ValueOf(target)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return fmt.Errorf("target must be a non-nil pointer")
 	}
 	rv.Elem().Set(reflect.ValueOf(svc))
