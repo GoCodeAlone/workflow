@@ -66,7 +66,13 @@ func runCIRun(args []string) error {
 				return fmt.Errorf("--env is required for deploy phase")
 			}
 			if *dryRun {
-				return runDeployPhaseDryRun(cfg.CI.Deploy, *env, &cfg, cfg.Services, *dryRunFormat)
+				// Load via config.LoadFromFile to honor top-level imports:
+				// sections that yaml.Unmarshal above would not resolve.
+				fullCfg, loadErr := config.LoadFromFile(*configFile)
+				if loadErr != nil {
+					return fmt.Errorf("load config for dry-run: %w", loadErr)
+				}
+				return runDeployPhaseDryRun(fullCfg.CI.Deploy, *env, fullCfg, fullCfg.Services, *dryRunFormat, *configFile)
 			}
 			if *pluginDir != "" {
 				os.Setenv("WFCTL_PLUGIN_DIR", *pluginDir) //nolint:errcheck

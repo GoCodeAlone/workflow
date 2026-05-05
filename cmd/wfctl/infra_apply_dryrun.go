@@ -39,9 +39,9 @@ type DryRunSecretRef struct {
 
 // DryRunProviderGroup summarizes resources grouped by provider.
 type DryRunProviderGroup struct {
-	ModuleRef    string `json:"module_ref"`
-	ProviderType string `json:"provider_type"`
-	ResourceCount int   `json:"resource_count"`
+	ModuleRef     string `json:"module_ref"`
+	ProviderType  string `json:"provider_type"`
+	ResourceCount int    `json:"resource_count"`
 }
 
 // DryRunSummary provides counts of planned operations.
@@ -56,6 +56,10 @@ type DryRunSummary struct {
 // (config resolution, environment overrides, provider selection) but
 // prints the plan and exits without executing any provider mutations.
 func runInfraApplyDryRun(cfgFile, envName, format string, showSensitive bool) error {
+	if format != "table" && format != "json" {
+		return fmt.Errorf("unknown --format %q: supported values are table, json", format)
+	}
+
 	desired, err := parseInfraResourceSpecsForEnv(cfgFile, envName)
 	if err != nil {
 		return fmt.Errorf("parse infra resource specs: %w", err)
@@ -64,9 +68,15 @@ func runInfraApplyDryRun(cfgFile, envName, format string, showSensitive bool) er
 		return err
 	}
 
+	// Treat state-load failure as empty state so dry-run works even when the
+	// remote state backend does not yet exist (e.g. a fresh config whose
+	// iac.state Spaces bucket has not been bootstrapped yet). The same
+	// first-run assumption is safe here because a missing backend yields an
+	// all-create plan — the correct preview for that scenario.
 	current, err := loadCurrentState(cfgFile, envName)
 	if err != nil {
-		return fmt.Errorf("load current state: %w", err)
+		fmt.Fprintf(os.Stderr, "note: could not load current state (treating as empty for dry-run): %v\n", err)
+		current = nil
 	}
 
 	plan, err := computePlanForInfraSpecs(context.Background(), cfgFile, envName, desired, current)
@@ -121,7 +131,11 @@ func printDryRunTable(cfgFile, envName string, plan interfaces.IaCPlan, provider
 	}
 
 	fmt.Printf("Dry run complete. No changes were applied.\n")
-	fmt.Printf("To apply, run: wfctl infra apply --env %s -c %s\n", envName, cfgFile)
+	applyCmd := fmt.Sprintf("wfctl infra apply -c %s", cfgFile)
+	if envName != "" {
+		applyCmd += fmt.Sprintf(" --env %s", envName)
+	}
+	fmt.Printf("To apply, run: %s\n", applyCmd)
 	return nil
 }
 
@@ -138,13 +152,7 @@ func printDryRunJSON(cfgFile, envName string, plan interfaces.IaCPlan, providerG
 		})
 	}
 
-	creates, updates, deletes := countActions(plan)
-	replaces := 0
-	for i := range plan.Actions {
-		if plan.Actions[i].Action == "replace" {
-			replaces++
-		}
-	}
+	creates, updates, replaces, deletes := countActions(plan)
 
 	output := DryRunApplyPlan{
 		Command:     "infra apply",
@@ -239,10 +247,10 @@ func collectSecretRefs(cfgFile, envName string) []DryRunSecretRef {
 
 	var refs []DryRunSecretRef
 	for _, entry := range cfg.Secrets.Entries {
-		store := ""
-		if entry.Store != "" {
-			store = entry.Store
-		}
+		// Use ResolveSecretStore so env-level overrides (secretsStoreOverride)
+		// and defaultStore are applied — matching the priority order the real
+		// apply path uses when it calls injectSecrets.
+		store := ResolveSecretStore(entry.Name, envName, cfg)
 		refs = append(refs, DryRunSecretRef{
 			Key:      entry.Name,
 			Store:    store,

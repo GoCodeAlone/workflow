@@ -535,9 +535,9 @@ func formatPlanTable(plan interfaces.IaCPlan, showSensitive bool) string {
 		fmt.Fprintln(&sb)
 	}
 
-	creates, updates, deletes := countActions(plan)
-	fmt.Fprintf(&sb, "Plan: %d to create, %d to update, %d to destroy.\n",
-		creates, updates, deletes)
+	creates, updates, replaces, deletes := countActions(plan)
+	fmt.Fprintf(&sb, "Plan: %d to create, %d to update, %d to replace, %d to destroy.\n",
+		creates, updates, replaces, deletes)
 	return sb.String()
 }
 
@@ -577,9 +577,9 @@ func formatPlanMarkdown(plan interfaces.IaCPlan, showSensitive bool) string {
 		sb.WriteString("</details>\n\n")
 	}
 
-	creates, updates, deletes := countActions(plan)
-	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to destroy.**\n",
-		creates, updates, deletes)
+	creates, updates, replaces, deletes := countActions(plan)
+	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to replace, %d to destroy.**\n",
+		creates, updates, replaces, deletes)
 	return sb.String()
 }
 
@@ -796,6 +796,8 @@ func actionSymbol(action string) string {
 		return "+"
 	case "update":
 		return "~"
+	case "replace":
+		return "±"
 	case "delete":
 		return "-"
 	default:
@@ -803,13 +805,15 @@ func actionSymbol(action string) string {
 	}
 }
 
-func countActions(plan interfaces.IaCPlan) (creates, updates, deletes int) {
+func countActions(plan interfaces.IaCPlan) (creates, updates, replaces, deletes int) {
 	for i := range plan.Actions {
 		switch plan.Actions[i].Action {
 		case "create":
 			creates++
 		case "update":
 			updates++
+		case "replace":
+			replaces++
 		case "delete":
 			deletes++
 		}

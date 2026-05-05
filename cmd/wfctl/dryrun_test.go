@@ -387,9 +387,9 @@ func TestDryRunSharesPlanningLogic(t *testing.T) {
 	deploy := &config.CIDeployConfig{
 		Environments: map[string]*config.CIDeployEnvironment{
 			"staging": {
-				Provider: "do-app-platform",
-				Cluster:  "bmw-staging",
-				Strategy: "rolling",
+				Provider:  "do-app-platform",
+				Cluster:   "bmw-staging",
+				Strategy:  "rolling",
 				PreDeploy: []string{"run-migrations"},
 				HealthCheck: &config.CIHealthCheck{
 					Path:    "/health",
@@ -405,7 +405,7 @@ func TestDryRunSharesPlanningLogic(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := runDeployPhaseDryRun(deploy, "staging", nil, nil, "json")
+	err := runDeployPhaseDryRun(deploy, "staging", nil, nil, "json", "")
 
 	w.Close()
 	os.Stdout = origStdout
@@ -423,6 +423,7 @@ func TestDryRunSharesPlanningLogic(t *testing.T) {
 	}
 
 	// These are the same values that runDeployPhaseWithConfig would resolve.
+	// When wfCfg is nil (no modules), deploy target falls back to env.Cluster.
 	if result.DeployTarget != "bmw-staging" {
 		t.Errorf("expected deploy target 'bmw-staging', got %q", result.DeployTarget)
 	}
@@ -436,3 +437,262 @@ func TestDryRunSharesPlanningLogic(t *testing.T) {
 		t.Errorf("expected pre-deploy [run-migrations], got %v", result.PreDeploy)
 	}
 }
+
+func TestDryRunInvalidFormat_InfraApply(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: p
+    type: iac.provider
+    config:
+      provider: mock
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubProviderForDryRunTests(t)
+	platform.SetDiffCacheForTest(t, nil)
+
+	err := runInfraApply([]string{"--dry-run", "--format", "jsno", "--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected error for unknown format, got nil")
+	}
+	if !strings.Contains(err.Error(), "jsno") {
+		t.Errorf("expected error to mention the bad value, got: %v", err)
+	}
+}
+
+func TestDryRunInvalidFormat_CIDeploy(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "app.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+version: 1
+ci:
+  deploy:
+    environments:
+      staging:
+        provider: do-app-platform
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runCIRun([]string{"--config", cfgPath, "--phase", "deploy", "--env", "staging", "--dry-run", "--format", "jsno"})
+	if err == nil {
+		t.Fatal("expected error for unknown format, got nil")
+	}
+	if !strings.Contains(err.Error(), "jsno") {
+		t.Errorf("expected error to mention the bad value, got: %v", err)
+	}
+}
+
+func TestCIRunDeployDryRun_SecretStoreEnvOverride(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "app.yaml")
+	cfgContent := `
+version: 1
+ci:
+  deploy:
+    environments:
+      staging:
+        provider: do-app-platform
+secrets:
+  defaultStore: github
+  entries:
+    - name: API_KEY
+    - name: DB_PASS
+      store: vault
+environments:
+  staging:
+    secretsStoreOverride: doppler
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runCIRun([]string{"--config", cfgPath, "--phase", "deploy", "--env", "staging", "--dry-run", "--format", "json"})
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("dry-run should not error: %v", err)
+	}
+
+	var result DryRunDeployPlan
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON: %v\nOutput: %s", err, buf.String())
+	}
+
+	// API_KEY: no per-secret store → env secretsStoreOverride = "doppler"
+	// DB_PASS: per-secret store = "vault" (highest priority)
+	stores := map[string]string{}
+	for _, s := range result.Secrets {
+		stores[s.Key] = s.Store
+	}
+	if stores["API_KEY"] != "doppler" {
+		t.Errorf("expected API_KEY store 'doppler' (env override), got %q", stores["API_KEY"])
+	}
+	if stores["DB_PASS"] != "vault" {
+		t.Errorf("expected DB_PASS store 'vault' (per-secret), got %q", stores["DB_PASS"])
+	}
+}
+
+func TestDeployDryRun_ImageFromModuleConfig(t *testing.T) {
+	// When IMAGE_TAG is unset, the dry-run should show the image from the
+	// module config — matching what pluginDeployProvider.Deploy preserves.
+	t.Setenv("IMAGE_TAG", "")
+
+	wfCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "do-provider",
+				Type:   "iac.provider",
+				Config: map[string]any{"provider": "digitalocean"},
+			},
+			{
+				Name: "my-app",
+				Type: "infra.container_service",
+				Config: map[string]any{
+					"provider": "do-provider",
+					"image":    "registry.example.com/my-app:v1.2.3",
+				},
+			},
+		},
+	}
+
+	deploy := &config.CIDeployConfig{
+		Environments: map[string]*config.CIDeployEnvironment{
+			"staging": {Provider: "digitalocean"},
+		},
+	}
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runDeployPhaseDryRun(deploy, "staging", wfCfg, nil, "json", "")
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result DryRunDeployPlan
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON: %v\nOutput: %s", err, buf.String())
+	}
+
+	if result.ImageRef != "registry.example.com/my-app:v1.2.3" {
+		t.Errorf("expected image from module config, got %q", result.ImageRef)
+	}
+	if result.ImageTagSource != "module config image field" {
+		t.Errorf("expected image tag source 'module config image field', got %q", result.ImageTagSource)
+	}
+}
+
+func TestDeployDryRun_EnvResolvedModuleName(t *testing.T) {
+	// Verify that the env-resolved infra module name is used as the deploy target,
+	// matching the behavior of newPluginDeployProvider.
+	t.Setenv("IMAGE_TAG", "api:latest")
+
+	wfCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "do-provider",
+				Type:   "iac.provider",
+				Config: map[string]any{"provider": "digitalocean"},
+			},
+			{
+				Name:   "bmw-app",
+				Type:   "infra.container_service",
+				Config: map[string]any{"provider": "do-provider"},
+				Environments: map[string]*config.InfraEnvironmentResolution{
+					"staging": {
+						Config: map[string]any{"name": "bmw-staging"},
+					},
+				},
+			},
+		},
+	}
+
+	deploy := &config.CIDeployConfig{
+		Environments: map[string]*config.CIDeployEnvironment{
+			"staging": {Provider: "digitalocean"},
+		},
+	}
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runDeployPhaseDryRun(deploy, "staging", wfCfg, nil, "json", "")
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result DryRunDeployPlan
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("invalid JSON: %v\nOutput: %s", err, buf.String())
+	}
+
+	// The env-resolved name comes from ResolveForEnv("staging") which lifts
+	// the "name" field from environments.staging.config into resolved.Name
+	// (for infra.* types). This matches exactly what newPluginDeployProvider
+	// uses as resourceName — the env-overridden identity "bmw-staging".
+	if result.DeployTarget != "bmw-staging" {
+		t.Errorf("expected env-resolved deploy target 'bmw-staging', got %q", result.DeployTarget)
+	}
+}
+
+func TestDryRunFollowUpCommand_IncludesConfigPath(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "myconfig.yaml")
+	cfgContent := `
+version: 1
+ci:
+  deploy:
+    environments:
+      staging:
+        provider: do-app-platform
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runCIRun([]string{"--config", cfgPath, "--phase", "deploy", "--env", "staging", "--dry-run"})
+
+	w.Close()
+	os.Stdout = origStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if err != nil {
+		t.Fatalf("dry-run should not error: %v", err)
+	}
+	output := buf.String()
+	// The suggested follow-up command must include the config file path.
+	if !strings.Contains(output, "--config") || !strings.Contains(output, "myconfig.yaml") {
+		t.Errorf("follow-up command should include --config <path>, got:\n%s", output)
+	}
+}
+
