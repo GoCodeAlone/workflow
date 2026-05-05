@@ -57,9 +57,15 @@ func runBuild(args []string) error {
 	fs.StringVar(&tag, "tag", "", "Override image tag for all container targets")
 	fs.StringVar(&format, "format", "table", "Output format: table | json | yaml")
 	fs.BoolVar(&noPush, "no-push", false, "Build but do not push images to registries")
+	var push bool
+	fs.BoolVar(&push, "push", true, "Push images to registries after build (default true; --push=false is equivalent to --no-push)")
 	fs.StringVar(&envName, "env", "", "Environment name for per-env config overrides")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	// --push=false is equivalent to --no-push.
+	if !push {
+		noPush = true
 	}
 
 	if dryRun {
@@ -104,6 +110,11 @@ type buildOpts struct {
 // Honors --only, --skip, --no-push. Behavior is wired fully in T19.
 func runBuildOrchestrate(cfg *config.WorkflowConfig, opts buildOpts) error {
 	build := cfg.CI.Build
+
+	// Detect hardened mode once; with buildx (docker-container driver) the push
+	// must be done inside the buildx invocation itself — a separate docker push
+	// would fail because the image is only in buildkit's cache, not the local daemon.
+	hardened := cfg.CI.Build.Security != nil && cfg.CI.Build.Security.Hardened
 
 	// Go targets.
 	for i := range build.Targets {
@@ -157,13 +168,21 @@ func runBuildOrchestrate(cfg *config.WorkflowConfig, opts buildOpts) error {
 		if opts.tag != "" {
 			imgArgs = append(imgArgs, "--tag", opts.tag)
 		}
+		// For hardened builds (docker buildx with docker-container driver), pass
+		// --push so buildx pushes directly from the buildkit cache. Without this,
+		// buildx would silently cache the result and the subsequent docker push
+		// would fail with "image does not exist locally".
+		if !opts.noPush && hardened {
+			imgArgs = append(imgArgs, "--push")
+		}
 		if err := runBuildImage(imgArgs); err != nil {
 			return err
 		}
 	}
 
-	// Push step (unless --no-push).
-	if !opts.noPush && !opts.dryRun {
+	// Push step (unless --no-push, dry-run, or hardened mode where buildx
+	// already pushed directly from the buildkit cache).
+	if !opts.noPush && !opts.dryRun && !hardened {
 		pushArgs := []string{}
 		if opts.cfgPath != "" {
 			pushArgs = append(pushArgs, "--config", opts.cfgPath)

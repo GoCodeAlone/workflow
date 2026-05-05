@@ -156,7 +156,203 @@ func TestRunBuildImage_NotHardenedNoProvenanceArgs(t *testing.T) {
 	}
 }
 
-// TestRunBuildImage_HardenedUsesBuildx verifies hardened=true produces "docker buildx build".
+// TestRunBuildImage_HardenedPushFlag verifies that --push passed to runBuildImage
+// adds --push to the docker buildx build args in hardened mode when push_to is set.
+func TestRunBuildImage_HardenedPushFlag(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  registries:
+    - name: docr
+      type: do
+      path: registry.digitalocean.com/myorg
+  build:
+    security:
+      hardened: true
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+        push_to:
+          - docr
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	t.Setenv("DOCKER_BUILDKIT", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath, "--push"}, &buf); err != nil {
+		t.Fatalf("hardened --push dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "--push") {
+		t.Errorf("expected --push in hardened dry-run output with --push flag, got: %q", out)
+	}
+	if strings.Contains(out, "--load") {
+		t.Errorf("expected no --load when --push is set, got: %q", out)
+	}
+}
+
+// TestRunBuildImage_HardenedPushNoPushTo verifies that without push_to, hardened
+// buildx falls back to --load (not --push), even when --push is requested.
+func TestRunBuildImage_HardenedPushNoPushTo(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    security:
+      hardened: true
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	t.Setenv("DOCKER_BUILDKIT", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath, "--push"}, &buf); err != nil {
+		t.Fatalf("hardened --push no-push_to dry-run: %v", err)
+	}
+
+	out := buf.String()
+	// No push_to → should not add --push (would try to push a local-only name).
+	if strings.Contains(out, " --push") {
+		t.Errorf("expected no --push when push_to is empty, got: %q", out)
+	}
+	// Single-platform fallback → should add --load.
+	if !strings.Contains(out, "--load") {
+		t.Errorf("expected --load for single-platform no-push_to, got: %q", out)
+	}
+}
+
+// TestRunBuildImage_HardenedMultiRegistryPush verifies that multi-registry push
+// (push_to: [docr, ghcr]) adds all registry refs as --tag flags so buildx pushes
+// to every registry in a single invocation.
+func TestRunBuildImage_HardenedMultiRegistryPush(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  registries:
+    - name: docr
+      type: do
+      path: registry.digitalocean.com/myorg
+    - name: ghcr
+      type: github
+      path: ghcr.io/myorg
+  build:
+    security:
+      hardened: true
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+        push_to:
+          - docr
+          - ghcr
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	t.Setenv("DOCKER_BUILDKIT", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath, "--push"}, &buf); err != nil {
+		t.Fatalf("hardened multi-registry push dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "registry.digitalocean.com/myorg/app") {
+		t.Errorf("expected docr registry ref in output, got: %q", out)
+	}
+	if !strings.Contains(out, "ghcr.io/myorg/app") {
+		t.Errorf("expected ghcr registry ref in output, got: %q", out)
+	}
+	if !strings.Contains(out, "--push") {
+		t.Errorf("expected --push in multi-registry output, got: %q", out)
+	}
+}
+
+// TestRunBuildImage_HardenedNoPushAddsLoad verifies that without --push, hardened
+// single-platform buildx invocations include --load so the image is available in
+// the local daemon.
+func TestRunBuildImage_HardenedNoPushAddsLoad(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    security:
+      hardened: true
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	t.Setenv("DOCKER_BUILDKIT", "1")
+
+	var buf bytes.Buffer
+	// Note: no --push flag — default is no push (load only).
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath}, &buf); err != nil {
+		t.Fatalf("hardened no-push dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "--load") {
+		t.Errorf("expected --load in hardened dry-run output without --push flag, got: %q", out)
+	}
+	if strings.Contains(out, " --push") {
+		t.Errorf("expected no --push when push flag is not set, got: %q", out)
+	}
+}
+
+// TestRunBuildImage_HardenedMultiPlatformNoPushNoLoad verifies that multi-platform
+// hardened builds without --push do NOT add --load (unsupported by buildx) and leave
+// the result in buildkit cache instead.
+func TestRunBuildImage_HardenedMultiPlatformNoPushNoLoad(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    security:
+      hardened: true
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+        platforms:
+          - linux/amd64
+          - linux/arm64
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	t.Setenv("DOCKER_BUILDKIT", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath}, &buf); err != nil {
+		t.Fatalf("hardened multi-platform no-push dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "--load") {
+		t.Errorf("expected no --load for multi-platform no-push (unsupported), got: %q", out)
+	}
+	if strings.Contains(out, " --push") {
+		t.Errorf("expected no --push for multi-platform no-push, got: %q", out)
+	}
+}
 func TestRunBuildImage_HardenedUsesBuildx(t *testing.T) {
 	dir := t.TempDir()
 	cfg := `ci:
