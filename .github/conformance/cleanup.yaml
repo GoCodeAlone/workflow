@@ -13,8 +13,10 @@
 #
 # Token resolution:
 #   `${DIGITALOCEAN_TOKEN}` is expanded from the environment at apply time
-#   (config.ExpandEnvInMap). The smoke job sets it via the `DO_TOKEN` env
-#   var bound from `secrets.DO_CONFORMANCE_API_TOKEN`.
+#   (config.ExpandEnvInMap). The smoke job exports `DIGITALOCEAN_TOKEN`
+#   directly from `secrets.DO_CONFORMANCE_API_TOKEN`, matching the
+#   canonical env var name the workflow-plugin-digitalocean iac.provider
+#   config consumes.
 #
 # Refs: workflow#536 (PR 4 Task 4.4 + Copilot review fix).
 

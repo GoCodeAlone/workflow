@@ -116,7 +116,7 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 			}
 			drv, drvErr := p.ResourceDriver(ref.Type)
 			if drvErr != nil {
-				err := fmt.Errorf("%s: resolve driver for %s: %w", p.Name(), ref.Name, drvErr)
+				err := fmt.Errorf("%s: resolve driver for %s/%s: %w", p.Name(), ref.Type, ref.Name, drvErr)
 				fmt.Fprintln(cleanupStderr, err)
 				totalErrs = append(totalErrs, err)
 				continue

@@ -74,11 +74,12 @@ type ProviderPlanner interface {
 // recommended (the cleanup command may use it for log correlation), but Name
 // + Type are the load-bearing identifiers Delete needs.
 //
-// Plugins implementing this interface are accepted by the loader; the
-// implementation is not yet exercised by core code outside the cleanup
-// subcommand. AWS/GCP/Azure plugins do not implement Enumerator as of
-// workflow v0.21.x; only DO does (workflow-plugin-digitalocean v0.10.x
-// per PR 6b follow-up).
+// Callers MUST type-assert against this interface and treat the negative
+// case as a skip — providers may or may not implement Enumerator depending
+// on whether their cloud API exposes a tag-query primitive. The
+// implementation status of individual provider plugins is documented in
+// docs/WFCTL.md `#### infra cleanup`, not here, so the API comment does
+// not go stale every time a new plugin gains tag-query support.
 type Enumerator interface {
 	EnumerateByTag(ctx context.Context, tag string) ([]ResourceRef, error)
 }
