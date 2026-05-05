@@ -104,6 +104,10 @@ func (p *infraMockProvider) ResourceDriver(resourceType string) (interfaces.Reso
 	}
 	return nil, errors.New("no driver for " + resourceType)
 }
+func (p *infraMockProvider) SupportedCanonicalKeys() []string { return nil }
+func (p *infraMockProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
 func (p *infraMockProvider) Close() error { return nil }
 
 // infraMockDriver records calls made to it.
@@ -139,6 +143,7 @@ func (d *infraMockDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRe
 func (d *infraMockDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
 	return nil, nil
 }
+func (d *infraMockDriver) SensitiveKeys() []string { return nil }
 
 // helpers
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -106,36 +107,36 @@ func TestDefaultRegistryConfig(t *testing.T) {
 	if len(cfg.Registries) != 2 {
 		t.Fatalf("expected 2 registries, got %d", len(cfg.Registries))
 	}
-	// Primary: static registry
+	// Primary: github registry (raw.githubusercontent.com — reliable and always current).
 	r := cfg.Registries[0]
 	if r.Name != "default" {
 		t.Errorf("name: got %q, want %q", r.Name, "default")
 	}
-	if r.Type != "static" {
-		t.Errorf("type: got %q, want %q", r.Type, "static")
+	if r.Type != "github" {
+		t.Errorf("type: got %q, want %q", r.Type, "github")
 	}
-	if r.URL == "" {
-		t.Error("expected non-empty URL for static registry")
+	if r.Owner != registryOwner {
+		t.Errorf("owner: got %q, want %q", r.Owner, registryOwner)
+	}
+	if r.Repo != registryRepo {
+		t.Errorf("repo: got %q, want %q", r.Repo, registryRepo)
+	}
+	if r.Branch != registryBranch {
+		t.Errorf("branch: got %q, want %q", r.Branch, registryBranch)
 	}
 	if r.Priority != 0 {
 		t.Errorf("priority: got %d, want 0", r.Priority)
 	}
-	// Fallback: github registry
+	// Secondary fallback: static mirror (GitHub Pages CDN — lower priority).
 	fb := cfg.Registries[1]
-	if fb.Name != "github-fallback" {
-		t.Errorf("fallback name: got %q, want %q", fb.Name, "github-fallback")
+	if fb.Name != "static-mirror" {
+		t.Errorf("fallback name: got %q, want %q", fb.Name, "static-mirror")
 	}
-	if fb.Type != "github" {
-		t.Errorf("fallback type: got %q, want %q", fb.Type, "github")
+	if fb.Type != "static" {
+		t.Errorf("fallback type: got %q, want %q", fb.Type, "static")
 	}
-	if fb.Owner != registryOwner {
-		t.Errorf("fallback owner: got %q, want %q", fb.Owner, registryOwner)
-	}
-	if fb.Repo != registryRepo {
-		t.Errorf("fallback repo: got %q, want %q", fb.Repo, registryRepo)
-	}
-	if fb.Branch != registryBranch {
-		t.Errorf("fallback branch: got %q, want %q", fb.Branch, registryBranch)
+	if fb.URL == "" {
+		t.Error("expected non-empty URL for static-mirror registry")
 	}
 	if fb.Priority != 100 {
 		t.Errorf("fallback priority: got %d, want 100", fb.Priority)
@@ -187,13 +188,18 @@ func TestLoadRegistryConfigDefault(t *testing.T) {
 	// Test DefaultRegistryConfig directly.
 	cfg := DefaultRegistryConfig()
 	if len(cfg.Registries) != 2 {
-		t.Fatalf("expected 2 registries (static + github fallback), got %d", len(cfg.Registries))
+		t.Fatalf("expected 2 registries (github primary + static mirror), got %d", len(cfg.Registries))
 	}
-	if cfg.Registries[0].Type != "static" {
-		t.Errorf("first registry type: got %q, want %q", cfg.Registries[0].Type, "static")
+	// Primary must be the github source.
+	if cfg.Registries[0].Type != "github" {
+		t.Errorf("first registry type: got %q, want %q", cfg.Registries[0].Type, "github")
 	}
-	if cfg.Registries[1].Owner != registryOwner {
-		t.Errorf("fallback owner: got %q, want %q", cfg.Registries[1].Owner, registryOwner)
+	if cfg.Registries[0].Owner != registryOwner {
+		t.Errorf("primary owner: got %q, want %q", cfg.Registries[0].Owner, registryOwner)
+	}
+	// Secondary must be the static mirror.
+	if cfg.Registries[1].Type != "static" {
+		t.Errorf("second registry type: got %q, want %q", cfg.Registries[1].Type, "static")
 	}
 }
 
@@ -212,7 +218,11 @@ func TestLoadRegistryConfigFallback(t *testing.T) {
 		t.Fatalf("LoadRegistryConfig: %v", err)
 	}
 	if len(cfg.Registries) != 2 {
-		t.Fatalf("expected 2 registries (default fallback), got %d", len(cfg.Registries))
+		t.Fatalf("expected 2 registries (github primary + static mirror), got %d", len(cfg.Registries))
+	}
+	// Primary must be the github source (reliable raw.githubusercontent.com access).
+	if cfg.Registries[0].Type != "github" {
+		t.Errorf("first registry type: got %q, want %q (github should be primary)", cfg.Registries[0].Type, "github")
 	}
 }
 
@@ -362,6 +372,61 @@ func TestMultiRegistryFetchPriority(t *testing.T) {
 	}
 }
 
+// TestMultiRegistryFetchOriginalNameFirst verifies that FetchManifest tries the
+// full original name before the normalized short name. This prevents "workflow-plugin-auth"
+// from colliding with a builtin "auth" plugin: if both exist in the registry,
+// the full-name entry is returned rather than the builtin.
+func TestMultiRegistryFetchOriginalNameFirst(t *testing.T) {
+	// srcA has both "auth" (builtin, wrong one) and "workflow-plugin-auth" (correct).
+	srcA := &mockRegistrySource{
+		name: "registry",
+		manifests: map[string]*RegistryManifest{
+			"auth":                 {Name: "auth", Version: "0.3.51", Description: "builtin auth module"},
+			"workflow-plugin-auth": {Name: "workflow-plugin-auth", Version: "0.1.2", Description: "external auth plugin"},
+		},
+	}
+
+	mr := NewMultiRegistryFromSources(srcA)
+
+	// Requesting "workflow-plugin-auth" should return the external plugin, NOT the builtin.
+	manifest, source, err := mr.FetchManifest("workflow-plugin-auth")
+	if err != nil {
+		t.Fatalf("FetchManifest: %v", err)
+	}
+	_ = source
+	if manifest.Version != "0.1.2" {
+		t.Errorf("version: got %q, want %q (should return workflow-plugin-auth, not builtin auth)",
+			manifest.Version, "0.1.2")
+	}
+	if manifest.Name != "workflow-plugin-auth" {
+		t.Errorf("name: got %q, want %q", manifest.Name, "workflow-plugin-auth")
+	}
+}
+
+// TestMultiRegistryFetchNormalizedFallback verifies that when the full name is not
+// found in any source, the normalized short name is used as a fallback. This allows
+// users to omit the "workflow-plugin-" prefix in their config.
+func TestMultiRegistryFetchNormalizedFallback(t *testing.T) {
+	// srcA only has the short name "auth" (no full-name entry).
+	srcA := &mockRegistrySource{
+		name: "registry",
+		manifests: map[string]*RegistryManifest{
+			"auth": {Name: "auth", Version: "1.0.0"},
+		},
+	}
+
+	mr := NewMultiRegistryFromSources(srcA)
+
+	// "workflow-plugin-auth" not found under full name → falls back to "auth".
+	manifest, _, err := mr.FetchManifest("workflow-plugin-auth")
+	if err != nil {
+		t.Fatalf("FetchManifest: %v", err)
+	}
+	if manifest.Version != "1.0.0" {
+		t.Errorf("version: got %q, want %q", manifest.Version, "1.0.0")
+	}
+}
+
 func TestMultiRegistryFetchFallback(t *testing.T) {
 	// Source A errors for "unique-plugin", source B has it.
 	srcA := &mockRegistrySource{
@@ -400,6 +465,52 @@ func TestMultiRegistryFetchNotFound(t *testing.T) {
 	_, _, err := mr.FetchManifest("does-not-exist")
 	if err == nil {
 		t.Fatal("expected error when plugin not found in any registry")
+	}
+}
+
+// TestMultiRegistryFetchNoSources verifies that an empty MultiRegistry returns a
+// clear, actionable error rather than the generic "not found in any configured
+// registry" message (which would be misleading when the real problem is zero sources).
+func TestMultiRegistryFetchNoSources(t *testing.T) {
+	mr := NewMultiRegistryFromSources() // zero sources
+	_, _, err := mr.FetchManifest("any-plugin")
+	if err == nil {
+		t.Fatal("expected error for empty registry")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no registry sources configured") {
+		t.Errorf("error should mention empty sources, got: %q", msg)
+	}
+}
+
+// TestMultiRegistryDebugLogging verifies that setting WFCTL_DEBUG produces
+// trace lines on stderr. We test this by checking the package-level
+// debugRegistryLog flag can be flipped and the function path is exercised.
+// (We do not capture stderr output — just confirm no panic / data race.)
+func TestMultiRegistryDebugLogging_NoSourcesPanic(t *testing.T) {
+	// Temporarily enable debug logging.
+	orig := debugRegistryLog
+	debugRegistryLog = true
+	t.Cleanup(func() { debugRegistryLog = orig })
+
+	src := &mockRegistrySource{
+		name: "test",
+		manifests: map[string]*RegistryManifest{
+			"myplugin": {Name: "myplugin", Version: "v1.0.0"},
+		},
+	}
+	mr := NewMultiRegistryFromSources(src)
+
+	// Should succeed without panicking even with debug on.
+	manifest, srcName, err := mr.FetchManifest("myplugin")
+	if err != nil {
+		t.Fatalf("FetchManifest: %v", err)
+	}
+	if manifest.Name != "myplugin" {
+		t.Errorf("name: got %q, want %q", manifest.Name, "myplugin")
+	}
+	if srcName != "test" {
+		t.Errorf("source: got %q, want %q", srcName, "test")
 	}
 }
 
@@ -942,5 +1053,72 @@ func TestNewMultiRegistryPriorityOrder(t *testing.T) {
 	}
 	if sources[1].Name() != "low-prio" {
 		t.Errorf("second source: got %q, want %q", sources[1].Name(), "low-prio")
+	}
+}
+
+// TestLoadRegistryConfig_LockfileCollision is a regression test for the bug where
+// writing a plugin lockfile to .wfctl.yaml caused subsequent LoadRegistryConfig calls
+// to find no registries section and return zero sources, making every install fail with
+// "not found in any configured registry".
+//
+// The fix: LoadRegistryConfig skips YAML files that lack a "registries" key entirely
+// (i.e., have no top-level "registries:" field), falling back to DefaultRegistryConfig.
+func TestLoadRegistryConfig_LockfileCollision(t *testing.T) {
+	// Simulate a .wfctl.yaml that was written as a lockfile (has plugins: but no registries:).
+	lockfileContent := `plugins:
+  authz:
+    version: v0.3.1
+    repository: GoCodeAlone/workflow-plugin-authz
+    sha256: abc123
+  payments:
+    version: v0.1.0
+    repository: GoCodeAlone/workflow-plugin-payments
+`
+	tmpDir := t.TempDir()
+	wfctlYAML := filepath.Join(tmpDir, ".wfctl.yaml")
+	if err := os.WriteFile(wfctlYAML, []byte(lockfileContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change to tmpDir so LoadRegistryConfig finds our fake .wfctl.yaml.
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	// Also redirect HOME so ~/.config/wfctl/config.yaml is not found.
+	t.Setenv("HOME", tmpDir)
+
+	cfg, err := LoadRegistryConfig("")
+	if err != nil {
+		t.Fatalf("LoadRegistryConfig with lockfile at .wfctl.yaml: %v", err)
+	}
+	// Must fall back to defaults — not return empty sources.
+	if len(cfg.Registries) == 0 {
+		t.Fatal("LoadRegistryConfig returned zero registries when .wfctl.yaml is a lockfile; " +
+			"expected fallback to DefaultRegistryConfig")
+	}
+	// Default primary source must be github.
+	if cfg.Registries[0].Type != "github" {
+		t.Errorf("expected github primary source, got %q", cfg.Registries[0].Type)
+	}
+}
+
+// TestLoadRegistryConfig_ExplicitEmptyRegistries verifies that a file with an
+// explicit "registries: []" is respected (not silently skipped), so users can
+// intentionally configure an empty registry list (e.g., in tests or air-gapped envs).
+func TestLoadRegistryConfig_ExplicitEmptyRegistries(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "custom.yaml")
+	if err := os.WriteFile(cfgPath, []byte("registries: []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadRegistryConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadRegistryConfig: %v", err)
+	}
+	// Explicit empty registries list must be returned as-is (0 sources).
+	if len(cfg.Registries) != 0 {
+		t.Errorf("expected 0 registries for explicit empty list, got %d: %v", len(cfg.Registries), cfg.Registries)
 	}
 }

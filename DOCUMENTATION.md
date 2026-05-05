@@ -17,7 +17,7 @@ The engine is built on the [GoCodeAlone/modular](https://github.com/GoCodeAlone/
 
 **CLI tools:**
 - `cmd/server` -- runs workflow configs as a server process
-- `cmd/wfctl` -- validates and inspects workflow configs offline
+- `cmd/wfctl` -- validates and inspects workflow configs offline (see [CLI Reference](docs/WFCTL.md))
 
 ## Module Types (90+)
 
@@ -28,6 +28,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 ### HTTP & Routing
 | Type | Description | Plugin |
 |------|-------------|--------|
+| `http.client` | Reusable authenticated HTTP client with oauth2 and bearer token support | http |
 | `http.server` | Configurable web server | http |
 | `http.router` | Request routing with path and method matching | http |
 | `http.handler` | HTTP request processing with configurable responses | http |
@@ -165,6 +166,7 @@ flowchart TD
 | `step.validate_pagination` | Validates and normalizes pagination query params | pipelinesteps |
 | `step.validate_request_body` | Validates request body against a JSON schema | pipelinesteps |
 | `step.foreach` | Iterates over a slice and runs sub-steps per element. Optional `concurrency: N` for parallel processing | pipelinesteps |
+| `step.while` | Executes sub-steps repeatedly while a condition template is truthy, with a hard `max_iterations` cap (default 1000). Supports optional accumulator for paginated APIs | pipelinesteps |
 | `step.parallel` | Executes named sub-steps concurrently and collects results. O(max(branch)) time | pipelinesteps |
 | `step.webhook_verify` | Verifies an inbound webhook signature | pipelinesteps |
 | `step.base64_decode` | Decodes a base64-encoded field | pipelinesteps |
@@ -186,6 +188,7 @@ flowchart TD
 | `step.hash` | Computes a cryptographic hash (md5/sha256/sha512) of a template-resolved input | pipelinesteps |
 | `step.regex_match` | Matches a regular expression against a template-resolved input | pipelinesteps |
 | `step.secret_fetch` | Fetches one or more secrets from a secrets module (secrets.aws, secrets.vault) with dynamic tenant-aware secret ID resolution | pipelinesteps |
+| `step.secret_set` | Writes one or more secrets to a secrets module; values are Go template expressions resolved against the pipeline context | pipelinesteps |
 | `step.jq` | Applies a JQ expression to pipeline data for complex transformations | pipelinesteps |
 | `step.ai_complete` | AI text completion using a configured provider | ai |
 | `step.ai_classify` | AI text classification into named categories | ai |
@@ -581,6 +584,7 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 |------|-------------|--------|
 | `secrets.vault` | HashiCorp Vault integration | secrets |
 | `secrets.aws` | AWS Secrets Manager integration | secrets |
+| `secrets.keychain` | OS credential store (macOS Keychain, Linux Secret Service, Windows Credential Manager); requires libsecret/gnome-keyring/KWallet on Linux | secrets |
 
 ### Event Sourcing & Messaging Services
 | Type | Description | Plugin |
@@ -590,6 +594,24 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 | `timeline.service` | Timeline and replay service for execution visualization | timeline |
 | `featureflag.service` | Feature flag evaluation engine with SSE change streaming | featureflags |
 | `config.provider` | Application configuration registry with schema validation, defaults, and source layering | configprovider |
+
+### AI Agents & Self-Improvement
+> **Requires workflow-plugin-agent v0.8.0+.** All types in this section are provided
+> by the agent plugin, not the workflow core engine. Install with: `wfctl plugin install workflow-plugin-agent`
+
+| Type | Description | Plugin |
+|------|-------------|--------|
+| `agent.provider` | AI agent provider (Ollama, OpenAI, Anthropic) with model config | agent |
+| `agent.guardrails` | Safety guardrails: tool scope, command policy, immutable sections, override tokens | agent |
+
+### MCP
+
+> **Requires workflow-plugin-mcp.** Types in this section are provided by the MCP plugin.
+> Install with: `wfctl plugin install workflow-plugin-mcp`
+
+| Type | Description | Plugin |
+|------|-------------|--------|
+| `mcp.registry` | Registry and audit log for MCP tool registrations and invocations | mcp |
 
 ### Other
 | Type | Description | Plugin |
@@ -1091,6 +1113,22 @@ modules:
 
 ---
 
+### `ProviderPlanner` (IaC plugin interface)
+
+Optional interface in `interfaces/iac_provider.go` for v2 IaC plugins that need custom plan logic instead of core wfctl's default `platform.ComputePlan` + `driver.Diff` dispatch. Reserved as an extension hook for Tofu/Pulumi-style adapter plugins.
+
+```go
+type ProviderPlanner interface {
+    PlanV2(ctx context.Context, desired []ResourceSpec, current []ResourceState) (IaCPlan, error)
+}
+```
+
+Purely additive — plugins that do not implement `ProviderPlanner` remain valid `IaCProvider` implementations. Core wfctl does NOT type-assert against this interface in v0.21.0; future adapter PRs add the type-assertion at the dispatch site alongside their concrete consumer.
+
+See [docs/iac/providerplanner.md](docs/iac/providerplanner.md) for the adapter author guide and [ADR 009](docs/adr/009-providerplanner-included-per-user-override.md) for the ratification provenance.
+
+---
+
 ### `observability.otel`
 
 Initializes an OpenTelemetry distributed tracing provider that exports spans via OTLP/HTTP to a collector. Sets the global OTel tracer provider so all instrumented code in the process is covered.
@@ -1263,6 +1301,33 @@ steps:
       module: aws-secrets
       secrets:
         api_key: "arn:aws:secretsmanager:us-east-1:123:secret:{{.tenant_id}}-api-key"
+```
+
+---
+
+### `step.secret_set`
+
+Writes one or more secrets to a named secrets module (`secrets.aws`, `secrets.vault`, etc.). Secret values are Go template expressions evaluated against the live pipeline context, enabling values from prior step outputs or trigger data to be persisted into a secrets provider.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `module` | string | yes | Service name of the secrets module (the `name` field in the module config). |
+| `secrets` | map[string]string | yes | Map of secret key → value (or template expression). Values support Go template syntax for dynamic resolution. |
+
+**Output fields:** `set_keys` — sorted list of secret keys that were written.
+
+**Example:**
+
+```yaml
+- type: step.secret_set
+  name: save-creds
+  config:
+    module: zoom-secrets
+    secrets:
+      client_id: "{{ .steps.setup_form.client_id }}"
+      client_secret: "{{ .steps.setup_form.client_secret }}"
 ```
 
 ---
@@ -1610,6 +1675,137 @@ steps:
 
 ---
 
+> **The following step types require workflow-plugin-agent v0.8.0+.**
+> Install with: `wfctl plugin install workflow-plugin-agent`
+
+### `step.agent_execute`
+
+Executes an AI agent within a pipeline step. The agent uses the configured
+provider and has access to MCP tools. Tool access is filtered by the active
+guardrails configuration.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `provider` | string | yes | Named `agent.provider` module |
+| `system_prompt` | string | yes | System prompt for the agent |
+| `tools` | array | no | MCP tool URIs the agent may call (e.g., `"mcp:wfctl:validate_config"`) |
+| `max_iterations` | int | no | Maximum LLM turns (default: 10) |
+| `input_from` | string | no | Template expression for initial user message |
+| `tool_scope` | object | no | Per-step tool scope override (overrides guardrails defaults) |
+
+**Output fields:** `content`, `tool_calls`, `iterations`, `finish_reason`.
+
+**Example:**
+
+```yaml
+- name: designer
+  type: step.agent_execute
+  config:
+    provider: ai
+    system_prompt: "Improve this workflow config. Validate before submitting."
+    tools:
+      - "mcp:wfctl:validate_config"
+      - "mcp:wfctl:inspect_config"
+      - "mcp:lsp:diagnose"
+    max_iterations: 15
+```
+
+---
+
+### `step.blackboard_post`
+
+Posts an artifact to the shared blackboard for multi-agent coordination.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `phase` | string | yes | Blackboard phase (e.g., `design`, `review`, `deploy`) |
+| `artifact_type` | string | yes | Type of artifact (e.g., `config_proposal`, `diff`, `test_result`) |
+| `content_from` | string | no | Template expression for artifact content (defaults to previous step output) |
+
+---
+
+### `step.blackboard_read`
+
+Reads an artifact from the shared blackboard.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `phase` | string | yes | Blackboard phase to read from |
+| `artifact_type` | string | yes | Type of artifact to read |
+
+**Output fields:** `content`, `phase`, `artifact_type`, `created_at`.
+
+---
+
+### `step.self_improve_validate`
+
+Validates a proposed config change through wfctl and LSP before deployment.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `validation_level` | string | no | `strict` (zero errors) or `lenient` (warnings allowed) |
+| `require_zero_errors` | bool | no | Fail if any errors (default: true at strict level) |
+| `skip_unknown_types` | bool | no | Allow unknown module/step types (for forward-compatible configs) |
+
+**Output fields:** `valid`, `errors`, `warnings`, `diagnostics`.
+
+---
+
+### `step.self_improve_diff`
+
+Computes a semantic diff between the current and proposed config.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `force` | bool | no | Proceed even if diff is empty |
+| `base_config_path` | string | no | Override path to the current config |
+
+**Output fields:** `diff`, `added_modules`, `removed_modules`, `modified_modules`, `added_pipelines`, `removed_pipelines`.
+
+---
+
+### `step.self_improve_deploy`
+
+Deploys an improved config using the specified strategy.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `strategy` | string | yes | Deploy strategy: `hot_reload`, `git_pr`, `canary`, `blue_green` |
+| `config_path` | string | yes | Path to the config file to update |
+| `health_check_url` | string | no | URL to check after deployment |
+| `rollback_on_failure` | bool | no | Automatically rollback if health check fails |
+| `git` | object | no | Git settings for `git_pr` strategy |
+| `canary` | object | no | Canary settings for `canary` strategy |
+
+---
+
+### `step.lsp_diagnose`
+
+Runs LSP diagnostics on YAML content directly from a pipeline step.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `content` | string | yes | YAML content to diagnose (template expression) |
+| `min_severity` | string | no | Minimum severity to report: `error`, `warning`, `hint` |
+
+**Output fields:** `diagnostics`, `error_count`, `warning_count`, `hint_count`.
+
+---
+
 ### Admin Core Plugin (`plugin/admincore/`)
 
 The `admincore` plugin is a NativePlugin that registers the built-in admin UI page definitions. It declares no HTTP routes -- all views are rendered entirely in the React frontend. Registering this plugin ensures navigation is driven by the plugin system with no static fallbacks.
@@ -1634,6 +1830,67 @@ The plugin is auto-registered via `init()` in `plugin/admincore/plugin.go`. No Y
 
 ---
 
+## IaC Provider Plugin Interfaces
+
+Cloud-provider plugins implement the core `interfaces.IaCProvider` Go
+interface (Plan / Apply / Destroy / Status / DetectDrift / etc.) plus,
+optionally, narrower interfaces that the engine and `wfctl` discover via
+type-assertion. Optional interfaces are purely additive — providers that do
+not implement them keep working unchanged.
+
+### `ProviderValidator` (optional)
+
+```go
+package interfaces
+
+type ProviderValidator interface {
+    ValidatePlan(plan *IaCPlan) []PlanDiagnostic
+}
+
+type PlanDiagnostic struct {
+    Severity PlanDiagnosticSeverity // Info | Warning | Error
+    Resource string                 // resource name; "" for plan-level findings
+    Field    string                 // dotted/bracketed field path; "" for resource-level
+    Message  string                 // human-readable description
+}
+
+type PlanDiagnosticSeverity int
+
+const (
+    PlanDiagnosticInfo PlanDiagnosticSeverity = iota
+    PlanDiagnosticWarning
+    PlanDiagnosticError
+)
+```
+
+`ValidatePlan` lets a provider surface cross-resource constraint violations
+at plan time — for example "this `infra.database` references a `vpc_ref`
+that no `infra.vpc` in this plan declares" — instead of failing later at the
+provider's API call. It is read-only: implementations MUST NOT mutate the
+plan and MUST NOT make remote calls. The returned slice may be `nil`.
+
+The CLI consumer is the `R-A10` align rule
+(`cmd/wfctl/infra_align_rules.go::checkRA10_provider_validate_plan`), which
+runs every loaded provider that implements `ProviderValidator` against the
+plan supplied via `wfctl infra align --plan`. Severity mapping:
+
+| `PlanDiagnostic.Severity` | Result |
+|---------------------------|--------|
+| `PlanDiagnosticError` | `FAIL` AlignFinding (always non-zero exit) |
+| `PlanDiagnosticWarning` | `WARN` AlignFinding (non-zero only under `--strict`) |
+| `PlanDiagnosticInfo` | Logged to stderr; no AlignFinding emitted; never affects exit code |
+
+`PlanDiagnosticInfo` is intentionally *not* surfaced as a finding so that
+`--strict` CI gates do not exit non-zero on a purely informational hint
+(billing tier change, deprecation notice, etc.). See `docs/WFCTL.md` §
+`infra align` for the full table.
+
+> **Naming note:** The runtime/deploy event finding type
+> `interfaces.Diagnostic` (used by `interfaces.Troubleshooter`) is a
+> distinct, pre-existing type and is not affected by `PlanDiagnostic`. The
+> two intentionally describe different problem domains (post-apply runtime
+> events vs. pre-apply plan validation).
+
 ## Workflow Types
 
 Workflows are configured in YAML and dispatched by the engine through registered handlers (`handlers/` package):
@@ -1646,6 +1903,7 @@ Workflows are configured in YAML and dispatched by the engine through registered
 | **Scheduler** | Cron-based recurring task execution |
 | **Integration** | External service composition and orchestration |
 | **Actors** | Message-driven stateful actor pools with per-message handler pipelines (goakt v4) |
+| **mcp** | MCP (Model Context Protocol) handler — serves pipeline-defined tools to AI agents and IDE clients |
 
 ## Trigger Types
 
@@ -1657,6 +1915,7 @@ Triggers start workflow execution in response to external events:
 | **Event** | EventBus subscription triggers workflow action |
 | **EventBus** | EventBus topic subscription |
 | **Schedule** | Cron expression-based scheduling |
+| **mcp_tool** | Exposes a pipeline as an MCP tool callable by AI agents or IDE clients |
 
 ## Configuration Format
 

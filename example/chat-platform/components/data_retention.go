@@ -108,11 +108,11 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		retentionRecordsLock.Unlock()
 
 		return map[string]interface{}{
-			"eligibleCount":  len(eligible),
-			"conversations":  eligible,
-			"retentionDays":  retentionDays,
-			"cutoffDate":     cutoff.Format(time.RFC3339),
-			"checkedAt":      time.Now().UTC().Format(time.RFC3339),
+			"eligibleCount": len(eligible),
+			"conversations": eligible,
+			"retentionDays": retentionDays,
+			"cutoffDate":    cutoff.Format(time.RFC3339),
+			"checkedAt":     time.Now().UTC().Format(time.RFC3339),
 		}, nil
 
 	case "enforce":
@@ -142,10 +142,10 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		retentionRecordsLock.Unlock()
 
 		return map[string]interface{}{
-			"processed":   processed,
-			"anonymized":  anonymized,
-			"deleted":     0,
-			"enforcedAt":  time.Now().UTC().Format(time.RFC3339),
+			"processed":  processed,
+			"anonymized": anonymized,
+			"deleted":    0,
+			"enforcedAt": time.Now().UTC().Format(time.RFC3339),
 		}, nil
 
 	case "report":

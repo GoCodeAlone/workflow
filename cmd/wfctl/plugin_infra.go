@@ -60,7 +60,8 @@ func DetectPluginInfraNeeds(cfg *config.WorkflowConfig, manifests map[string]*co
 	var needs []config.InfraRequirement
 
 	addRequirements := func(reqs []config.InfraRequirement) {
-		for _, req := range reqs {
+		for i := range reqs {
+			req := reqs[i]
 			key := req.Type + ":" + req.Name
 			if seen[key] {
 				continue

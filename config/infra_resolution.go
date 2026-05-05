@@ -6,17 +6,17 @@ package config
 // "existing" means connect to an already-running instance.
 type InfraEnvironmentResolution struct {
 	// Strategy determines how the resource is obtained: container, provision, existing.
-	Strategy    string         `json:"strategy" yaml:"strategy"`
+	Strategy string `json:"strategy" yaml:"strategy"`
 	// DockerImage is used when Strategy is "container".
-	DockerImage string         `json:"dockerImage,omitempty" yaml:"dockerImage,omitempty"`
+	DockerImage string `json:"dockerImage,omitempty" yaml:"dockerImage,omitempty"`
 	// Port overrides the default service port when Strategy is "container".
-	Port        int            `json:"port,omitempty" yaml:"port,omitempty"`
+	Port int `json:"port,omitempty" yaml:"port,omitempty"`
 	// Provider names the cloud provider when Strategy is "provision".
-	Provider    string         `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"`
 	// Config holds provider-specific provisioning options.
-	Config      map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
+	Config map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
 	// Connection holds connection details when Strategy is "existing".
-	Connection  *InfraConnectionConfig `json:"connection,omitempty" yaml:"connection,omitempty"`
+	Connection *InfraConnectionConfig `json:"connection,omitempty" yaml:"connection,omitempty"`
 }
 
 // InfraConnectionConfig holds connection details for an existing infrastructure resource.

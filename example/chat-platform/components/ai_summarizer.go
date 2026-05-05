@@ -73,16 +73,16 @@ func Stop(ctx context.Context) error {
 }
 
 var topicKeywords = map[string][]string{
-	"anxiety":         {"anxious", "worried", "panic", "nervous", "fear", "scared"},
-	"depression":      {"sad", "hopeless", "depressed", "empty", "numb", "tired"},
-	"relationships":   {"friend", "family", "partner", "boyfriend", "girlfriend", "parent"},
-	"school":          {"school", "exam", "grade", "teacher", "homework", "college"},
-	"self-harm":       {"cut", "hurt myself", "self-harm", "pain"},
-	"suicidal":        {"suicide", "kill myself", "end it", "die", "not alive"},
-	"substance-use":   {"drink", "drug", "alcohol", "high", "smoke", "substance"},
-	"bullying":        {"bully", "picked on", "harassed", "mean"},
-	"trauma":          {"abuse", "assault", "trauma", "ptsd", "nightmare"},
-	"grief":           {"died", "lost", "death", "grief", "mourning", "funeral"},
+	"anxiety":       {"anxious", "worried", "panic", "nervous", "fear", "scared"},
+	"depression":    {"sad", "hopeless", "depressed", "empty", "numb", "tired"},
+	"relationships": {"friend", "family", "partner", "boyfriend", "girlfriend", "parent"},
+	"school":        {"school", "exam", "grade", "teacher", "homework", "college"},
+	"self-harm":     {"cut", "hurt myself", "self-harm", "pain"},
+	"suicidal":      {"suicide", "kill myself", "end it", "die", "not alive"},
+	"substance-use": {"drink", "drug", "alcohol", "high", "smoke", "substance"},
+	"bullying":      {"bully", "picked on", "harassed", "mean"},
+	"trauma":        {"abuse", "assault", "trauma", "ptsd", "nightmare"},
+	"grief":         {"died", "lost", "death", "grief", "mourning", "funeral"},
 }
 
 func Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {

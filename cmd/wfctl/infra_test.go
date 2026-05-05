@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -119,7 +120,7 @@ modules:
 
 func TestFormatPlanTable_ShowsAllActions(t *testing.T) {
 	plan := makeMixedPlan()
-	out := formatPlanTable(plan)
+	out := formatPlanTable(plan, false)
 
 	if !strings.Contains(out, "create") {
 		t.Error("expected 'create' in table output")
@@ -134,7 +135,7 @@ func TestFormatPlanTable_ShowsAllActions(t *testing.T) {
 
 func TestFormatPlanTable_EmptyPlanMessage(t *testing.T) {
 	plan := interfaces.IaCPlan{Actions: nil}
-	out := formatPlanTable(plan)
+	out := formatPlanTable(plan, false)
 	if !strings.Contains(out, "No changes") {
 		t.Errorf("expected 'No changes' for empty plan, got: %q", out)
 	}
@@ -144,7 +145,7 @@ func TestFormatPlanTable_EmptyPlanMessage(t *testing.T) {
 
 func TestFormatPlanMarkdown_ContainsTable(t *testing.T) {
 	plan := makeMixedPlan()
-	out := formatPlanMarkdown(plan)
+	out := formatPlanMarkdown(plan, false)
 
 	if !strings.Contains(out, "|") {
 		t.Error("expected markdown table pipes")
@@ -156,7 +157,7 @@ func TestFormatPlanMarkdown_ContainsTable(t *testing.T) {
 
 func TestFormatPlanMarkdown_EmptyPlanMessage(t *testing.T) {
 	plan := interfaces.IaCPlan{Actions: nil}
-	out := formatPlanMarkdown(plan)
+	out := formatPlanMarkdown(plan, false)
 	if !strings.Contains(out, "No changes") {
 		t.Errorf("expected 'No changes' for empty plan, got: %q", out)
 	}
@@ -217,7 +218,11 @@ modules:
 		t.Fatal(err)
 	}
 
-	plan, err := platform.ComputePlan(specs, nil)
+	// Test fixture has no iac.provider module; pass nil provider to exercise
+	// platform.ComputePlan's legacy ConfigHash compare fallback (matches the
+	// runtime behavior computePlanForInfraSpecs uses when no providers are
+	// declared).
+	plan, err := platform.ComputePlan(context.Background(), nil, specs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +233,81 @@ modules:
 		if a.Action != "create" {
 			t.Errorf("action = %q, want 'create'", a.Action)
 		}
+	}
+}
+
+// --- sensitive masking tests ---
+
+func TestResourceSummaryKeys_MasksSensitiveKeys(t *testing.T) {
+	cfg := map[string]any{
+		"uri":      "postgres://admin:secret@host:5432/db",
+		"password": "supersecret",
+		"engine":   "pg",
+		"size":     "db-s-1vcpu-1gb",
+	}
+	// Without showSensitive — uri and password must be masked.
+	pairs := resourceSummaryKeys("infra.unknown", cfg, false)
+	got := make(map[string]string)
+	for _, kv := range pairs {
+		got[kv[0]] = kv[1]
+	}
+	if got["uri"] != "(sensitive)" {
+		t.Errorf("uri: got %q, want (sensitive)", got["uri"])
+	}
+	if got["password"] != "(sensitive)" {
+		t.Errorf("password: got %q, want (sensitive)", got["password"])
+	}
+	if got["engine"] == "(sensitive)" {
+		t.Errorf("engine should not be masked, got %q", got["engine"])
+	}
+}
+
+func TestResourceSummaryKeys_ShowSensitiveRevealsValues(t *testing.T) {
+	cfg := map[string]any{
+		"uri":    "postgres://admin:secret@host:5432/db",
+		"engine": "pg",
+	}
+	pairs := resourceSummaryKeys("infra.unknown", cfg, true)
+	got := make(map[string]string)
+	for _, kv := range pairs {
+		got[kv[0]] = kv[1]
+	}
+	if got["uri"] == "(sensitive)" {
+		t.Error("uri should be revealed with showSensitive=true")
+	}
+	if got["uri"] != "postgres://admin:secret@host:5432/db" {
+		t.Errorf("uri: got %q, want actual value", got["uri"])
+	}
+}
+
+func TestFormatPlanTable_MasksSensitiveInDefaultMode(t *testing.T) {
+	// Use infra.custom (default case) so all config keys are rendered and masking can be verified.
+	plan := interfaces.IaCPlan{
+		Actions: []interfaces.PlanAction{
+			{
+				Action: "create",
+				Resource: interfaces.ResourceSpec{
+					Name: "mydb",
+					Type: "infra.custom",
+					Config: map[string]any{
+						"password": "secret123",
+						"engine":   "pg",
+					},
+				},
+			},
+		},
+	}
+	out := formatPlanTable(plan, false)
+	if strings.Contains(out, "secret123") {
+		t.Error("plan table must not reveal sensitive value when showSensitive=false")
+	}
+	if !strings.Contains(out, "(sensitive)") {
+		t.Error("plan table must show (sensitive) for password key")
+	}
+
+	outRevealed := formatPlanTable(plan, true)
+	if !strings.Contains(outRevealed, "secret123") {
+		t.Error("plan table must reveal value when showSensitive=true")
 	}
 }
 

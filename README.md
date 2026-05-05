@@ -59,7 +59,7 @@ workflows:
 | **Storage/Persistence** | 7 | database.workflow, persistence.store, storage.s3, storage.gcs, storage.local, storage.sqlite, static.fileserver |
 | **Observability** | 4 | metrics.collector, health.checker, observability.otel, log.collector |
 | **Auth** | 2 | auth.jwt, auth.user-store |
-| **Other** | 6 | data.transformer, webhook.sender, dynamic.component, secrets.vault, secrets.aws, workflow.registry |
+| **Other** | 7 | data.transformer, webhook.sender, dynamic.component, secrets.vault, secrets.aws, secrets.keychain, workflow.registry |
 | **Triggers** | 5 | http, schedule, event, eventbus, mock |
 
 ### Security

@@ -1,0 +1,63 @@
+name: cross-plugin-build-test
+on:
+  pull_request:
+    paths:
+      # rev4 — cycle-3 minor: only run on IaC-touching PRs to save ~5min/docs-PR.
+      # T9.2 quality-review fix: include go.mod/go.sum so transitive dep bumps
+      # (a frequent source of downstream-plugin compile breakage) trigger the gate
+      # even when interfaces/iac/platform/plugin code is untouched.
+      - 'interfaces/**'
+      - 'iac/**'
+      - 'platform/**'
+      - 'plugin/sdk/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/cross-plugin-build-test.yml'
+
+# T9.2 quality-review fix: cancel older in-flight runs when a PR is updated.
+# Standard CI hygiene; saves CI minutes on rapid push cycles.
+concurrency:
+  group: cross-plugin-build-${{ github.ref }}
+  cancel-in-progress: true
+
+# R2 review: explicit minimal token permissions per CodeQL workflow-permissions
+# scan; this gate only needs to read the workflow + plugin checkouts.
+permissions:
+  contents: read
+
+# R2 review: match the repo-standard Go module env used by ci.yml + codeql.yml so
+# downstream plugin builds resolve github.com/GoCodeAlone/* deps consistently.
+env:
+  GOPRIVATE: github.com/GoCodeAlone/*
+  GONOSUMCHECK: github.com/GoCodeAlone/*
+
+jobs:
+  cross-plugin-build:
+    runs-on: ubuntu-latest
+    strategy:
+      # T9.2 quality-review fix: matches codeql.yml + release.yml precedent.
+      # The whole point of a cross-plugin gate is to surface ALL three plugins'
+      # breakage in a single CI run; default fail-fast: true would cancel the
+      # other two on first failure and force iterative re-runs to debug.
+      fail-fast: false
+      matrix:
+        plugin: [workflow-plugin-aws, workflow-plugin-gcp, workflow-plugin-azure]
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: workflow }
+      - uses: actions/checkout@v4
+        with:
+          repository: GoCodeAlone/${{ matrix.plugin }}
+          path: ${{ matrix.plugin }}
+      - uses: actions/setup-go@v5
+        with: { go-version-file: workflow/go.mod }
+      # The replace directive points the plugin's go.mod at THIS PR's checkout
+      # of workflow (../workflow), NOT at workflow main. The gate exercises
+      # whether the PR's interface changes break AWS/GCP/Azure compilation —
+      # which is precisely the per-PR signal we want.
+      - run: |
+          cd ${{ matrix.plugin }}
+          go mod edit -replace github.com/GoCodeAlone/workflow=../workflow
+          go mod tidy
+          go build ./...
+          # NOTE: not `go test` — those plugins have their own CI; we just verify compile-compat

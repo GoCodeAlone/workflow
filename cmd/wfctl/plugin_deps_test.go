@@ -10,16 +10,6 @@ import (
 	"testing"
 )
 
-// makeManifestJSON returns a JSON-encoded RegistryManifest for use in test servers.
-func makeManifestJSON(t *testing.T, m RegistryManifest) []byte {
-	t.Helper()
-	data, err := json.Marshal(m)
-	if err != nil {
-		t.Fatalf("marshal manifest: %v", err)
-	}
-	return data
-}
-
 // TestCompareSemverConstraints verifies semver comparison used in version constraint checks.
 func TestCompareSemverConstraints(t *testing.T) {
 	tests := []struct {
@@ -47,10 +37,10 @@ func TestCompareSemverConstraints(t *testing.T) {
 // TestCheckVersionConstraints verifies min/max version enforcement.
 func TestCheckVersionConstraints(t *testing.T) {
 	tests := []struct {
-		name       string
-		dep        PluginDependency
-		version    string
-		wantErr    bool
+		name        string
+		dep         PluginDependency
+		version     string
+		wantErr     bool
 		errContains string
 	}{
 		{
@@ -287,7 +277,7 @@ func TestPluginInstall_ResolveDependencies(t *testing.T) {
 		Author: "test", Description: "bento stream processor",
 		Type: "external", Tier: "community", License: "MIT",
 		Downloads: []PluginDownload{
-			{OS: "linux", Arch: "amd64", URL: ""},  // filled below
+			{OS: "linux", Arch: "amd64", URL: ""}, // filled below
 			{OS: "darwin", Arch: "amd64", URL: ""},
 			{OS: "darwin", Arch: "arm64", URL: ""},
 		},

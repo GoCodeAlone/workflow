@@ -1,0 +1,102 @@
+environments:
+  staging:
+    provider: digitalocean
+    region: nyc3
+  prod:
+    provider: digitalocean
+    region: nyc1
+
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      credentials: env
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: /tmp/test-iac-state
+    environments:
+      staging:
+        config:
+          directory: /tmp/test-iac-state-staging
+      prod:
+        config:
+          directory: /tmp/test-iac-state-prod
+
+  - name: bmw-vpc
+    type: infra.vpc
+    config:
+      cidr: "10.10.0.0/16"
+      provider: do-provider
+    environments:
+      staging:
+        config:
+          name: bmw-staging-vpc
+          region: nyc3
+      prod:
+        config:
+          name: bmw-prod-vpc
+          region: nyc1
+
+  - name: bmw-firewall
+    type: infra.firewall
+    config:
+      provider: do-provider
+    environments:
+      staging:
+        config:
+          name: bmw-staging-firewall
+      prod:
+        config:
+          name: bmw-prod-firewall
+
+  - name: bmw-registry
+    type: infra.registry
+    config:
+      name: bmw-registry
+      tier: basic
+      provider: do-provider
+
+  - name: bmw-database
+    type: infra.database
+    config:
+      engine: pg
+      version: "16"
+      provider: do-provider
+    environments:
+      staging:
+        config:
+          name: bmw-staging-db
+          size: db-s-1vcpu-1gb
+      prod:
+        config:
+          name: bmw-prod-db
+          size: db-s-2vcpu-4gb
+
+  - name: bmw-app
+    type: infra.container_service
+    config:
+      http_port: 8080
+      provider: do-provider
+    environments:
+      staging:
+        config:
+          name: bmw-staging
+          instance_count: 1
+      prod:
+        config:
+          name: buymywishlist
+          instance_count: 2
+
+  - name: bmw-dns
+    type: infra.dns
+    config:
+      provider: do-provider
+    environments:
+      staging: null
+      prod:
+        config:
+          domain: buymywishlist.com

@@ -57,6 +57,7 @@ func TestStepFactories(t *testing.T) {
 		"step.validate_pagination",
 		"step.validate_request_body",
 		"step.foreach",
+		"step.while",
 		"step.webhook_verify",
 		"step.cache_get",
 		"step.cache_set",
@@ -82,6 +83,7 @@ func TestStepFactories(t *testing.T) {
 		"step.parallel",
 		"step.graphql",
 		"step.secret_fetch",
+		"step.secret_set",
 		"step.branch",
 	}
 

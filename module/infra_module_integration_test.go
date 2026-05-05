@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/iactest"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/platform"
@@ -75,6 +77,10 @@ func (p *recordingProvider) ResourceDriver(resourceType string) (interfaces.Reso
 	p.driverType = resourceType
 	return p.driver, nil
 }
+func (p *recordingProvider) SupportedCanonicalKeys() []string { return nil }
+func (p *recordingProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
 func (p *recordingProvider) Close() error { return nil }
 
 func (d *recordingDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
@@ -97,6 +103,7 @@ func (d *recordingDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRe
 func (d *recordingDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
 	return nil, nil
 }
+func (d *recordingDriver) SensitiveKeys() []string { return nil }
 
 // ─── planningProvider: mock that implements Plan() with provider-specific types ──
 
@@ -143,11 +150,26 @@ func (p *planningProvider) Plan(_ context.Context, desired []interfaces.Resource
 }
 
 // configHashIntegration replicates platform.configHash for test assertions.
+// Keys are explicitly sorted before marshalling to match the sorted kv-pair
+// encoding used by platform.ComputePlan — ensuring test hashes are stable.
 func configHashIntegration(config map[string]any) string {
 	if len(config) == 0 {
 		return ""
 	}
-	data, _ := json.Marshal(config)
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	type kv struct {
+		K string
+		V any
+	}
+	ordered := make([]kv, len(keys))
+	for i, k := range keys {
+		ordered[i] = kv{K: k, V: config[k]}
+	}
+	data, _ := json.Marshal(ordered)
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
@@ -259,7 +281,7 @@ func TestInfraModule_PlanProducesCorrectActions(t *testing.T) {
 		},
 	}
 
-	plan, err := platform.ComputePlan(desired, nil)
+	plan, err := platform.ComputePlan(context.Background(), &iactest.NoopProvider{}, desired, nil)
 	if err != nil {
 		t.Fatalf("ComputePlan: %v", err)
 	}
@@ -308,7 +330,7 @@ func TestInfraModule_DriftDetectionFlow(t *testing.T) {
 			UpdatedAt:  time.Now(),
 		},
 	}
-	plan, err := platform.ComputePlan([]interfaces.ResourceSpec{vpc}, staleState)
+	plan, err := platform.ComputePlan(context.Background(), &iactest.NoopProvider{}, []interfaces.ResourceSpec{vpc}, staleState)
 	if err != nil {
 		t.Fatalf("ComputePlan (drift): %v", err)
 	}
@@ -326,7 +348,7 @@ func TestInfraModule_DriftDetectionFlow(t *testing.T) {
 			UpdatedAt:  time.Now(),
 		},
 	}
-	plan2, err := platform.ComputePlan([]interfaces.ResourceSpec{vpc}, freshState)
+	plan2, err := platform.ComputePlan(context.Background(), &iactest.NoopProvider{}, []interfaces.ResourceSpec{vpc}, freshState)
 	if err != nil {
 		t.Fatalf("ComputePlan (no drift): %v", err)
 	}
@@ -359,7 +381,7 @@ func TestInfraModule_DestroyReverseOrder(t *testing.T) {
 		},
 	}
 
-	plan, err := platform.ComputePlan(nil, current)
+	plan, err := platform.ComputePlan(context.Background(), &iactest.NoopProvider{}, nil, current)
 	if err != nil {
 		t.Fatalf("ComputePlan: %v", err)
 	}

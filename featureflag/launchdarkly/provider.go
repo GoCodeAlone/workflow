@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/featureflag"
+	ldcontext "github.com/launchdarkly/go-sdk-common/v3/ldcontext"
+	"github.com/launchdarkly/go-sdk-common/v3/ldvalue"
 	ld "github.com/launchdarkly/go-server-sdk/v7"
 	"github.com/launchdarkly/go-server-sdk/v7/interfaces"
 	"github.com/launchdarkly/go-server-sdk/v7/ldcomponents"
-	ldcontext "github.com/launchdarkly/go-sdk-common/v3/ldcontext"
-	"github.com/launchdarkly/go-sdk-common/v3/ldvalue"
 )
 
 // Config holds configuration for the LaunchDarkly provider.

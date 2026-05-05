@@ -1,3 +1,27 @@
+---
+status: implemented
+area: core
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 21c20fd
+  - repo: workflow
+    commit: 1ca0515
+  - repo: workflow
+    commit: 431d35a
+  - repo: workflow
+    commit: e05c2c0
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"knownStepTypeDescriptions|PipelineStep|StepFactory|GetStepSchemaRegistry|drift\" mcp schema interfaces infra"
+    - "git log --oneline --all -- mcp/tools.go mcp/wfctl_tools.go interfaces/pipeline.go schema/step_schema_builtins.go schema/step_schema_drift_test.go"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Workflow Audit Fix Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

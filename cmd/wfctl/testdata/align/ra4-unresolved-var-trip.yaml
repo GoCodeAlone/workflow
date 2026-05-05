@@ -1,0 +1,10 @@
+# R-A4 TRIP: env_var references ${STRIPE_KEY} which is not declared in
+# secrets.generate, secrets.requires, or the OS environment. R-A4 fires (FAIL).
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        PAYMENT_KEY: "${STRIPE_KEY}"

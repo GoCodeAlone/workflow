@@ -613,4 +613,3 @@ func metaFieldCompletions() []protocol.CompletionItem {
 	}
 	return items
 }
-

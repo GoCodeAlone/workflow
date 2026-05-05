@@ -117,6 +117,7 @@ func TestSpacesIaCStateStore_SaveAndGetState(t *testing.T) {
 		Status:       "active",
 		Outputs:      map[string]any{"endpoint": "https://k8s.example.com"},
 		Config:       map[string]any{"region": "nyc3"},
+		Dependencies: []string{"network-1"},
 		CreatedAt:    "2026-03-09T00:00:00Z",
 		UpdatedAt:    "2026-03-09T00:00:00Z",
 	}
@@ -140,6 +141,9 @@ func TestSpacesIaCStateStore_SaveAndGetState(t *testing.T) {
 	}
 	if got.Status != "active" {
 		t.Errorf("Status = %q, want %q", got.Status, "active")
+	}
+	if len(got.Dependencies) != 1 || got.Dependencies[0] != "network-1" {
+		t.Errorf("Dependencies = %#v, want [network-1]", got.Dependencies)
 	}
 }
 
@@ -370,6 +374,8 @@ func TestSpacesIaCStateStore_JSONRoundTrip(t *testing.T) {
 		ResourceID:   "rt-1",
 		ResourceType: "ecs",
 		Provider:     "aws",
+		ProviderID:   "arn:aws:ecs:us-east-1:123:cluster/test",
+		ConfigHash:   "config-hash-rt-1",
 		Status:       "provisioning",
 		Outputs:      map[string]any{"arn": "arn:aws:ecs:us-east-1:123:cluster/test"},
 		Config:       map[string]any{"cpu": float64(256), "memory": float64(512)},

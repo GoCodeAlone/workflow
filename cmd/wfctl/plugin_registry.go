@@ -24,31 +24,59 @@ type PluginDependency struct {
 
 // RegistryManifest is the manifest format for the GoCodeAlone/workflow-registry.
 type RegistryManifest struct {
-	Name             string                `json:"name"`
-	Version          string                `json:"version"`
-	Author           string                `json:"author"`
-	Description      string                `json:"description"`
-	Source           string                `json:"source,omitempty"`
-	Type             string                `json:"type"`
-	Tier             string                `json:"tier"`
-	License          string                `json:"license"`
-	MinEngineVersion string                `json:"minEngineVersion,omitempty"`
-	Repository       string                `json:"repository,omitempty"`
-	Keywords         []string              `json:"keywords,omitempty"`
-	Homepage         string                `json:"homepage,omitempty"`
-	Capabilities     *RegistryCapabilities `json:"capabilities,omitempty"`
-	Downloads        []PluginDownload      `json:"downloads,omitempty"`
-	Assets           *PluginAssets         `json:"assets,omitempty"`
-	Dependencies     []PluginDependency    `json:"dependencies,omitempty"`
+	Name             string                     `json:"name"`
+	Version          string                     `json:"version"`
+	Author           string                     `json:"author"`
+	Description      string                     `json:"description"`
+	Source           string                     `json:"source,omitempty"`
+	Type             string                     `json:"type"`
+	Tier             string                     `json:"tier"`
+	License          string                     `json:"license"`
+	MinEngineVersion string                     `json:"minEngineVersion,omitempty"`
+	Repository       string                     `json:"repository,omitempty"`
+	Keywords         []string                   `json:"keywords,omitempty"`
+	Homepage         string                     `json:"homepage,omitempty"`
+	Capabilities     *RegistryCapabilities      `json:"capabilities,omitempty"`
+	Contracts        []pluginContractDescriptor `json:"contracts,omitempty"`
+	Downloads        []PluginDownload           `json:"downloads,omitempty"`
+	Assets           *PluginAssets              `json:"assets,omitempty"`
+	Dependencies     []PluginDependency         `json:"dependencies,omitempty"`
 }
 
 // RegistryCapabilities describes what module/step/trigger types a plugin provides.
 type RegistryCapabilities struct {
-	ConfigProvider   bool     `json:"configProvider,omitempty"`
-	ModuleTypes      []string `json:"moduleTypes,omitempty"`
-	StepTypes        []string `json:"stepTypes,omitempty"`
-	TriggerTypes     []string `json:"triggerTypes,omitempty"`
-	WorkflowHandlers []string `json:"workflowHandlers,omitempty"`
+	ConfigProvider   bool                 `json:"configProvider,omitempty"`
+	ModuleTypes      []string             `json:"moduleTypes,omitempty"`
+	StepTypes        []string             `json:"stepTypes,omitempty"`
+	TriggerTypes     []string             `json:"triggerTypes,omitempty"`
+	ServiceMethods   []string             `json:"serviceMethods,omitempty"`
+	WorkflowHandlers []string             `json:"workflowHandlers,omitempty"`
+	IaCProvider      *RegistryIaCProvider `json:"iacProvider,omitempty"`
+	BuildHooks       []RegistryBuildHook  `json:"buildHooks,omitempty"`
+	CLICommands      []RegistryCLICommand `json:"cliCommands,omitempty"`
+	MigrationDrivers []string             `json:"migrationDrivers,omitempty"`
+	PortIntrospect   bool                 `json:"portIntrospect,omitempty"`
+}
+
+// RegistryBuildHook declares a hook event + priority a plugin handles.
+type RegistryBuildHook struct {
+	Event    string `json:"event"`
+	Priority int    `json:"priority,omitempty"`
+}
+
+// RegistryCLICommand declares a top-level wfctl subcommand a plugin provides.
+type RegistryCLICommand struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// RegistryIaCProvider describes an IaC provider plugin's provider name and the
+// infra.* resource types it manages. findIaCPluginDir reads this from the
+// installed plugin.json to match a requested provider name (e.g. "digitalocean")
+// to a plugin directory.
+type RegistryIaCProvider struct {
+	Name          string   `json:"name"`
+	ResourceTypes []string `json:"resourceTypes,omitempty"`
 }
 
 // PluginDownload describes a platform-specific binary download for a plugin.
@@ -129,7 +157,8 @@ func ListPluginNames() ([]string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("registry API returned HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("registry API returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var entries []githubContentsEntry
 	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {

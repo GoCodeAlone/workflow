@@ -23,6 +23,8 @@ func runCI(args []string) error {
 		return runCIRun(args[1:])
 	case "init":
 		return runCIInit(args[1:])
+	case "validate":
+		return runCIValidate(args[1:])
 	default:
 		return ciUsage()
 	}

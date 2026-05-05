@@ -33,16 +33,6 @@ var topLevelKeyToSectionID = map[string]string{
 	"sidecars":        "platform",
 }
 
-// sectionKindToSectionID maps SectionKind values to DSL section IDs.
-var sectionKindToSectionID = map[SectionKind]string{
-	SectionModules:  "modules",
-	SectionWorkflow: "workflows",
-	SectionPipeline: "pipelines",
-	SectionTriggers: "triggers",
-	SectionImports:  "imports",
-	SectionRequires: "application",
-}
-
 // loadDSLSections locates docs/dsl-reference.md by searching upward from cwd,
 // parses it, and returns a map of section ID → DSLSectionDoc.
 // Returns nil (no error) if the file cannot be found — hover will skip DSL docs.

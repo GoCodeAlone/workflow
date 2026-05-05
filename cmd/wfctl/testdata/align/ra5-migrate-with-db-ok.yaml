@@ -1,0 +1,24 @@
+# R-A5 OK: api has pre_deploy.kind=migrate, infra.database exists, and
+# trusted_sources includes the service. R-A5 does NOT fire.
+modules:
+  - name: build
+    type: ci.build
+    config:
+      containers:
+        - name: migrator
+          dockerfile: Dockerfile.migrate
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      pre_deploy:
+        kind: migrate
+        image: "migrator:latest"
+  - name: db
+    type: infra.database
+    config:
+      engine: postgres
+      trusted_sources:
+        - type: app
+          value: api

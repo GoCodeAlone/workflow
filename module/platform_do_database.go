@@ -23,7 +23,7 @@ type DODatabaseState struct {
 	Port         int       `json:"port"`
 	DatabaseName string    `json:"databaseName"`
 	User         string    `json:"user"`
-	Password     string    `json:"password"`
+	Password     string    `json:"password"` //nolint:gosec // G117: DigitalOcean database state DTO; password is a standard DB connection field
 	URI          string    `json:"uri"`
 	CreatedAt    time.Time `json:"createdAt"`
 }

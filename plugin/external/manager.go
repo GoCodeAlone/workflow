@@ -83,7 +83,16 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 
 	pluginDir := filepath.Join(m.pluginsDir, name)
 	manifestPath := filepath.Join(pluginDir, "plugin.json")
-	binaryPath := filepath.Join(pluginDir, name)
+	// Resolve the binary path to absolute. os/exec.Cmd.Start evaluates a
+	// relative Path *inside* cmd.Dir, so a relative binary path + relative
+	// cmd.Dir would double-nest to "<pluginDir>/<pluginDir>/<name>", which
+	// fails with ENOENT ("no such file or directory") even though the binary
+	// exists at the intended location. Absolutising here makes Path + Dir
+	// independent.
+	binaryPath, err := filepath.Abs(filepath.Join(pluginDir, name))
+	if err != nil {
+		return nil, fmt.Errorf("resolve binary path for plugin %q: %w", name, err)
+	}
 
 	// Validate manifest
 	manifest, err := pluginpkg.LoadManifest(manifestPath)

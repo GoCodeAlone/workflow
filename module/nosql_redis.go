@@ -15,7 +15,7 @@ import (
 // When addr == "memory://" the module falls back to the in-memory backend.
 type RedisNoSQLConfig struct {
 	Addr     string `json:"addr"     yaml:"addr"     editor:"type=string,description=Redis server address (memory:// for in-memory fallback),default=localhost:6379,label=Address"` // "memory://" => in-memory fallback
-	Password string `json:"password" yaml:"password" editor:"type=string,sensitive,description=Redis password,label=Password"`                                                    //nolint:gosec // G117: config struct field, not a hardcoded secret
+	Password string `json:"password" yaml:"password" editor:"type=string,sensitive,description=Redis password,label=Password"`                                                      //nolint:gosec // G117: config struct field, not a hardcoded secret
 	DB       int    `json:"db"       yaml:"db"       editor:"type=number,description=Redis database number,default=0,label=Database"`
 }
 

@@ -44,7 +44,11 @@ func (m *mockProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.
 	return nil, nil
 }
 func (m *mockProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) { return nil, nil }
-func (m *mockProvider) Close() error                                               { return nil }
+func (m *mockProvider) SupportedCanonicalKeys() []string                           { return interfaces.CanonicalKeys() }
+func (m *mockProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (m *mockProvider) Close() error { return nil }
 
 // mockDriver implements ResourceDriver
 type mockDriver struct{}
@@ -68,6 +72,7 @@ func (d *mockDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*
 func (d *mockDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
 	return nil, nil
 }
+func (d *mockDriver) SensitiveKeys() []string { return nil }
 
 // noopLockHandle is a no-op IaCLockHandle for tests.
 type noopLockHandle struct{}

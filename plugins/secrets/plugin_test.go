@@ -30,13 +30,13 @@ func TestModuleFactories(t *testing.T) {
 	p := New()
 	factories := p.ModuleFactories()
 
-	for _, name := range []string{"secrets.vault", "secrets.aws"} {
+	for _, name := range []string{"secrets.vault", "secrets.aws", "secrets.keychain"} {
 		if _, ok := factories[name]; !ok {
 			t.Errorf("missing module factory: %s", name)
 		}
 	}
-	if len(factories) != 2 {
-		t.Errorf("expected 2 module factories, got %d", len(factories))
+	if len(factories) != 3 {
+		t.Errorf("expected 3 module factories, got %d", len(factories))
 	}
 }
 
@@ -77,6 +77,22 @@ func TestAWSModuleFactory(t *testing.T) {
 	}
 }
 
+func TestKeychainModuleFactory(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+	factory := factories["secrets.keychain"]
+
+	mod := factory("my-keychain", map[string]any{
+		"service": "my-app",
+	})
+	if mod == nil {
+		t.Fatal("keychain factory returned nil")
+	}
+	if mod.Name() != "my-keychain" {
+		t.Errorf("expected name my-keychain, got %s", mod.Name())
+	}
+}
+
 func TestPluginLoads(t *testing.T) {
 	p := New()
 	loader := plugin.NewPluginLoader(capability.NewRegistry(), schema.NewModuleSchemaRegistry())
@@ -85,7 +101,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	modules := loader.ModuleFactories()
-	if len(modules) != 2 {
-		t.Fatalf("expected 2 module factories after load, got %d", len(modules))
+	if len(modules) != 3 {
+		t.Fatalf("expected 3 module factories after load, got %d", len(modules))
 	}
 }

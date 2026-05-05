@@ -1,0 +1,10 @@
+# R-A7 TRIP: plan.json (supplied via --plan) contains a delete action on a
+# resource with protected:true. Use with a plan JSON that has:
+#   {"actions":[{"action":"delete","resource":{"name":"prod-db","type":"infra.database","config":{"protected":true}}}]}
+# R-A7 fires (FAIL).
+modules:
+  - name: prod-db
+    type: infra.database
+    config:
+      engine: postgres
+      protected: true
