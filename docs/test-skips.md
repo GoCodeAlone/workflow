@@ -9,4 +9,18 @@ delete the matching row here in the same PR.
 
 | Test | Issue | Plan to remove |
 |------|-------|----------------|
-| `plugin/sdk.TestManifest_IaCProviderAdditionalPropertiesFalse_IsEnforced` | [workflow#540](https://github.com/GoCodeAlone/workflow/issues/540) | Behaviour-probed skip: the test SKIPs only while `ParseManifest` accepts the canonical bug input and PASSes (silent regression guard) when the bug is fixed. No source change required when the fix lands; this row exists so the SKIP is grep-able while it triggers. Drop the row when workflow#540 closes. |
+
+<!--
+Currently no active skips.
+
+Removed entry (2026-05-05): the diagnostic test for workflow#540
+(`plugin/sdk.TestManifest_IaCProvider_AdditionalPropertiesFalse_IsEnforced`)
+was originally proposed in `t.Skip` shape per plan rev3 §I-5, but
+empirical verification during PR #553 showed the bug does not reproduce
+against the current jsonschema/v6 build. The test was promoted to an
+assertive regression guard on the canonical issue inputs (`name`,
+`resourceTypes`, `configSchema` plus a synthetic key) so any future
+regression turns CI red, and the runbook entry was retired alongside.
+workflow#540 stays open until the upstream investigation confirms the
+schema-loader behaviour is correct across all draft dialects.
+-->

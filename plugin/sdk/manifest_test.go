@@ -83,52 +83,90 @@ func TestManifest_RootPermitsAdditionalProperties(t *testing.T) {
 	}
 }
 
-// TestManifest_IaCProviderAdditionalPropertiesFalse_IsEnforced is a
-// diagnostic marker for workflow#540.
+// TestManifest_IaCProvider_AdditionalPropertiesFalse_IsEnforced is an
+// active regression guard for workflow#540.
 //
 // Background: workflow#540 surfaced from P-DO PR #61 as "the
 // `iacProvider` block accepts extra keys (`name`, `resourceTypes`,
 // `configSchema`) without validation error, despite the schema
-// declaring `additionalProperties: false`." The fix follow-up will
-// (a) confirm whether the jsonschema library is honouring the
-// constraint correctly across all input shapes, and (b) if a regression
-// or library quirk is found, land the schema-loader fix; once
-// `ParseManifest` rejects the extra key on the canonical bug input, the
-// probe below auto-promotes this test from SKIP to active regression
-// guard with no source change required. (Per Copilot review on
-// workflow#553: an unconditional skip can rot indefinitely; a
-// behaviour-conditioned skip self-heals when the bug is fixed.)
+// declaring `additionalProperties: false`." The bug does not reproduce
+// against the current `jsonschema/v6` build (verified empirically with
+// `ParseManifest` rejecting the canonical fixtures during the test
+// authoring); this test enforces the contract going forward so any
+// future regression — library upgrade, schema-loader change, draft
+// dialect drift — turns CI red on the same canonical inputs that
+// motivated the issue.
 //
-// SHAPE: behaviour-probed t.Skip + workflow#540 link (per plan §I-5
-// alt-shape, refined). CI stays green while the bug reproduces; the
-// SKIP surfaces in `go test -v` output, and `docs/test-skips.md`
-// tracks the active skip.
-func TestManifest_IaCProviderAdditionalPropertiesFalse_IsEnforced(t *testing.T) {
-	manifest := []byte(`{
-		"name": "test-plugin",
-		"version": "0.0.0",
-		"iacProvider": {
-			"computePlanVersion": "v2",
-			"bogusKeyThatShouldBeRejected": "value"
-		}
-	}`)
-	if _, err := ParseManifest(manifest); err == nil {
-		// Bug still reproduces: ParseManifest accepted the extra key.
-		// Skip rather than fail so workflow main CI stays green; the
-		// runbook entry in docs/test-skips.md tracks the open SKIP and
-		// the fix PR removes that row when ParseManifest starts
-		// rejecting the extra key (no source change in this test
-		// needed — the t.Skip simply stops triggering, and the test
-		// auto-promotes to an active regression guard).
-		t.Skip("BUG: workflow#540 — extra iacProvider key not rejected; " +
-			"schema declares additionalProperties:false but library accepts extra keys " +
-			"on this manifest shape. Diagnostic skip; fix follow-up PR pending.")
+// Fixtures cover the exact key names cited in the issue
+// (`name`, `resourceTypes`, `configSchema`) plus a synthetic key, since
+// the bug surfaced on real `iacProvider` content rather than on
+// arbitrary unknown keys. Each case must produce an error whose chain
+// includes the `additionalProperties` schema rejection — accepting any
+// non-nil error would mask unrelated regressions (e.g. schema
+// compilation failure) as success.
+//
+// SHAPE: assertive regression guard. The plan rev3 §I-5 alt-shape
+// originally specified `t.Skip` because the bug was assumed live on
+// main; that assumption did not hold (Copilot review on workflow#553,
+// commit 6563b57). With the bug not reproducing today, the assertive
+// shape is strictly stronger — any future regression fails CI loudly
+// with a clear pointer to workflow#540.
+func TestManifest_IaCProvider_AdditionalPropertiesFalse_IsEnforced(t *testing.T) {
+	cases := map[string]string{
+		"issue-name": `{
+			"name": "test-plugin",
+			"iacProvider": {
+				"computePlanVersion": "v2",
+				"name": "do"
+			}
+		}`,
+		"issue-resourceTypes": `{
+			"name": "test-plugin",
+			"iacProvider": {
+				"computePlanVersion": "v2",
+				"resourceTypes": ["droplet"]
+			}
+		}`,
+		"issue-configSchema": `{
+			"name": "test-plugin",
+			"iacProvider": {
+				"computePlanVersion": "v2",
+				"configSchema": {}
+			}
+		}`,
+		"issue-all-three": `{
+			"name": "test-plugin",
+			"iacProvider": {
+				"computePlanVersion": "v2",
+				"name": "do",
+				"resourceTypes": ["droplet"],
+				"configSchema": {}
+			}
+		}`,
+		"synthetic-extra-key": `{
+			"name": "test-plugin",
+			"iacProvider": {
+				"computePlanVersion": "v2",
+				"bogusKeyThatShouldBeRejected": "value"
+			}
+		}`,
 	}
-	// Bug fixed: ParseManifest rejected the extra key. The test passes
-	// silently and any future regression that re-allows the extra key
-	// will fall back into the t.Skip branch above — at which point the
-	// fix PR maintainers should investigate before re-adding the skip
-	// row to docs/test-skips.md.
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseManifest([]byte(in))
+			if err == nil {
+				t.Fatalf("workflow#540 regressed: ParseManifest accepted extra iacProvider key on %q; expected schema rejection",
+					name)
+			}
+			// Pin the rejection cause so unrelated failures (schema
+			// compile, JSON parse, etc.) don't masquerade as success.
+			// santhosh-tekuri/jsonschema/v6 reports the violation
+			// using the lowercase phrase below.
+			if !strings.Contains(err.Error(), "additional properties") {
+				t.Errorf("workflow#540: expected 'additional properties' rejection; got %v", err)
+			}
+		})
+	}
 }
 
 // TestManifestSchemaJSON_ReturnsCopy verifies that mutating the slice
