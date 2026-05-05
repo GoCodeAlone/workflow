@@ -22,10 +22,6 @@ func init() {
 	modes["refactor-apply"] = runRefactorApply
 }
 
-// applyCanonicalCallExpr is the canonical replacement-body expression
-// emitted by refactor-apply.
-const applyCanonicalCallExpr = "wfctlhelpers.ApplyPlan(ctx, p, plan)"
-
 // applyClassification labels the disposition of a single Apply()
 // method site. The non-canonical idioms are surfaced as distinct
 // classes so the report can suggest the right hand-port handling.
@@ -123,7 +119,7 @@ func runRefactorApply(args []string, opts *Options, stdout, stderr io.Writer) in
 	if *reportFile != "" {
 		var buf bytes.Buffer
 		report.print(&buf, opts)
-		if err := os.WriteFile(*reportFile, buf.Bytes(), 0o644); err != nil {
+		if err := os.WriteFile(*reportFile, buf.Bytes(), 0o600); err != nil {
 			fmt.Fprintf(stderr, "iac-codemod refactor-apply: write report-file %s: %v\n", *reportFile, err)
 			return 1
 		}
@@ -476,7 +472,7 @@ func isCanonicalApplyLoopAssign(a *ast.AssignStmt, recvName string) bool {
 	if !ok {
 		return false
 	}
-	if !((recvName != "" && x.Name == recvName) || (recvName == "" && x.Name == "p")) {
+	if (recvName == "" || x.Name != recvName) && (recvName != "" || x.Name != "p") {
 		return false
 	}
 	// Round-12 #7: also verify the lookup KEY is `action.Resource.Type`.
@@ -1162,7 +1158,7 @@ func isProviderIDGuard(ifs *ast.IfStmt) bool {
 	if id, ok := be.Y.(*ast.Ident); ok && id.Name == "nil" {
 		yIsNil = true
 	}
-	if !(xIsCurrent && yIsNil) {
+	if !xIsCurrent || !yIsNil {
 		// Allow the reverse order too (`nil != action.Current`),
 		// though it's not idiomatic Go.
 		yIsCurrent := false
@@ -1173,7 +1169,7 @@ func isProviderIDGuard(ifs *ast.IfStmt) bool {
 		if id, ok := be.X.(*ast.Ident); ok && id.Name == "nil" {
 			xIsNil = true
 		}
-		if !(yIsCurrent && xIsNil) {
+		if !yIsCurrent || !xIsNil {
 			return false
 		}
 	}

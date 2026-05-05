@@ -301,7 +301,7 @@ func runInfraPlan(args []string) error {
 			// cmd/wfctl/main.go's top-level wrapper. errors.New (rather than
 			// fmt.Errorf) avoids govet's no-verbs noise and is canonical for
 			// fixed-string error literals per Go convention.
-			return errors.New("this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan.")
+			return errors.New("this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan")
 		}
 		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
 		// can detect stale plans when the config changes after plan generation.

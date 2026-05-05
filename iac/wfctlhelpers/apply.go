@@ -136,7 +136,8 @@ func applyPlanWithEnvProvider(
 	// to later actions in the same plan).
 	syncedOutputs := buildInitialSyncedOutputs(plan.Actions)
 
-	for _, action := range plan.Actions {
+	for i := range plan.Actions {
+		action := plan.Actions[i]
 		// Honor cancellation at the loop boundary. Drivers should also
 		// check ctx internally for in-flight work, but the loop check
 		// guarantees apply stops between actions even if a driver
@@ -205,7 +206,8 @@ func applyPlanWithEnvProvider(
 // ProviderID).
 func buildInitialSyncedOutputs(actions []interfaces.PlanAction) map[string]map[string]any {
 	out := make(map[string]map[string]any)
-	for _, a := range actions {
+	for i := range actions {
+		a := actions[i]
 		if a.Current == nil {
 			continue
 		}
