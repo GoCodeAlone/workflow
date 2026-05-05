@@ -167,7 +167,7 @@ graph TD
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
-| **Platform Inspection** | `audit plans`, `audit plugins`, `ports list`, `security audit`, `security generate-network-policies` |
+| **Platform Inspection** | `audit plans`, `audit plugins`, `audit repo`, `ports list`, `security audit`, `security generate-network-policies` |
 | **Utilities** | `snippets`, `manifest`, `pipeline`, `update`, `mcp` |
 
 ---
@@ -176,7 +176,7 @@ graph TD
 
 ### `audit`
 
-Audit Workflow ecosystem metadata without mutating project code. The command is intended for dogfooding release readiness checks: plans and design docs should carry implementation evidence, and plugin repos should expose compatible manifests.
+Audit Workflow ecosystem metadata without mutating project code. The command is intended for dogfooding release readiness checks: plans and design docs should carry implementation evidence, plugin repos should expose compatible manifests, and repository files should be portable and safe.
 
 ```
 wfctl audit <subject> [options]
@@ -289,6 +289,55 @@ wfctl audit plugins
 wfctl audit plugins --repo-root /path/to/workspace --json
 wfctl audit plugins --repo-root /path/to/workspace --strict
 wfctl audit plugins --repo-root /path/to/workspace --strict-contracts
+```
+
+#### `wfctl audit repo`
+
+Run repository-level quality gate checks. Catches portable-path issues, unsafe path patterns, documentation frontmatter problems, and generated index drift before PR push/merge.
+
+```
+wfctl audit repo [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dir` | `.` | Repository root directory to audit |
+| `--json` | `false` | Write machine-readable JSON output |
+| `--strict` | `false` | Treat warnings as errors (exit non-zero) |
+| `--config` | `.wfctl.yaml` | Path to project config with audit section |
+
+**Built-in checks:**
+
+| Code | Level | Description |
+|------|-------|-------------|
+| `non_portable_path` | WARN | File path contains non-ASCII, control characters, or Windows-incompatible characters |
+| `unsafe_path_traversal` | ERROR | File path contains `../` directory traversal |
+| `unsafe_absolute_path` | ERROR | File path is absolute |
+| `missing_doc_frontmatter` | WARN | Structured documentation file in `docs/` lacks YAML frontmatter |
+| `malformed_frontmatter` | ERROR | Frontmatter opening `---` has no closing delimiter |
+| `index_drift` | WARN | Plan file not referenced in `docs/plans/INDEX.md` |
+
+**Project config (`.wfctl.yaml`):**
+
+```yaml
+audit:
+  checks:
+    portable_paths: true
+    unsafe_paths: true
+    index_drift: true
+    doc_frontmatter: true
+  ignores:
+    - "vendor/*"
+    - "testdata/*"
+```
+
+Examples:
+
+```bash
+wfctl audit repo
+wfctl audit repo --dir /path/to/project --json
+wfctl audit repo --strict
+wfctl audit repo --config custom-audit.yaml
 ```
 
 ### `editor-bundle`
