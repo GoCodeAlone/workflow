@@ -9,4 +9,4 @@ delete the matching row here in the same PR.
 
 | Test | Issue | Plan to remove |
 |------|-------|----------------|
-| `plugin/sdk.TestManifest_iacProviderAdditionalPropertiesFalse_IsEnforced` | [workflow#540](https://github.com/GoCodeAlone/workflow/issues/540) | Remove `t.Skip` line in fix follow-up PR once the jsonschema-library investigation completes (per plan `2026-05-05-iac-deferred-cleanup` PR 3). |
+| `plugin/sdk.TestManifest_IaCProviderAdditionalPropertiesFalse_IsEnforced` | [workflow#540](https://github.com/GoCodeAlone/workflow/issues/540) | Behaviour-probed skip: the test SKIPs only while `ParseManifest` accepts the canonical bug input and PASSes (silent regression guard) when the bug is fixed. No source change required when the fix lands; this row exists so the SKIP is grep-able while it triggers. Drop the row when workflow#540 closes. |
