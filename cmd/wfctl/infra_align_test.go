@@ -447,6 +447,63 @@ modules:
 	}
 }
 
+func TestInfraAlign_RA4_TopLevelSecretsGenerate_DoesNotFire(t *testing.T) {
+	os.Unsetenv("STAGING_PG_PASSWORD")
+	yaml := `
+appName: test
+secrets:
+  generate:
+    - key: STAGING_PG_PASSWORD
+      type: random_hex
+      length: 32
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        DATABASE_URL: "postgres://user:${STAGING_PG_PASSWORD}@host:5432/db"
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg}
+	findings, err := runInfraAlignChecks(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A4") {
+		t.Errorf("unexpected R-A4 finding for top-level secrets.generate key: %v", findings)
+	}
+}
+
+func TestInfraAlign_RA4_TopLevelSecretsEntries_DoesNotFire(t *testing.T) {
+	os.Unsetenv("STAGING_PG_PASSWORD")
+	yaml := `
+appName: test
+secrets:
+  entries:
+    - name: STAGING_PG_PASSWORD
+      store: vault
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        DATABASE_URL: "postgres://user:${STAGING_PG_PASSWORD}@host:5432/db"
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg}
+	findings, err := runInfraAlignChecks(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A4") {
+		t.Errorf("unexpected R-A4 finding for top-level secrets.entries name: %v", findings)
+	}
+}
+
 // ── R-A5: migrations alignment ─────────────────────────────────────────────
 
 func TestInfraAlign_RA5_PreDeployMigrateNoDB_Fires(t *testing.T) {
