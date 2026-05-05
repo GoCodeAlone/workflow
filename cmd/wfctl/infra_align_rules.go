@@ -46,6 +46,12 @@ func buildAlignContext(cfgFile string) (*alignContext, error) {
 	}
 	if cfg.Secrets != nil {
 		ctx.secretGens = cfg.Secrets.Generate
+		for _, gen := range cfg.Secrets.Generate {
+			ctx.secretKeys[gen.Key] = struct{}{}
+		}
+		for _, entry := range cfg.Secrets.Entries {
+			ctx.secretKeys[entry.Name] = struct{}{}
+		}
 	}
 	for _, m := range cfg.Modules {
 		switch {

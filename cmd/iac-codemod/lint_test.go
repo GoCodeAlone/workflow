@@ -464,6 +464,67 @@ func TestAssertDiffSetsNeedsReplaceForForceNew_RejectsLiteralFalseAssign(t *test
 	}
 }
 
+// TestAssertDiffSetsNeedsReplaceForForceNew_AccumulatorPatternIsClean pins
+// workflow#539: the local-accumulator pattern is a valid expression of
+// the W-3 force-new contract. The driver declares `var needsReplace
+// bool`, sets `needsReplace = true` inside ForceNew-driven branches,
+// then returns `&DiffResult{NeedsReplace: needsReplace, ...}`. The
+// analyzer must recognize the struct-literal `KeyValueExpr` form as an
+// assignment site, not just `*ast.AssignStmt` — otherwise the
+// accumulator pattern is reported as a contract violation.
+const diffAccumulatorSrc = driverScaffold + `
+func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
+	if current == nil {
+		return &DiffResult{}, nil
+	}
+	var changes []FieldChange
+	var needsReplace bool
+	for _, c := range changes {
+		if c.ForceNew {
+			needsReplace = true
+		}
+	}
+	return &DiffResult{
+		NeedsReplace: needsReplace,
+		Changes:      changes,
+	}, nil
+}
+`
+
+func TestAssertDiffSetsNeedsReplaceForForceNew_AccumulatorPatternIsClean(t *testing.T) {
+	diags := runAnalyzerOnSource(t, diffAccumulatorSrc, AssertDiffSetsNeedsReplaceForForceNew)
+	if len(diags) != 0 {
+		t.Errorf("accumulator pattern `&DiffResult{NeedsReplace: needsReplace}` is a valid alternate canonical (workflow#539); should NOT flag; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
+// TestAssertDiffSetsNeedsReplaceForForceNew_StructLiteralFalseStillFlags
+// is the symmetry test for the accumulator widening: a struct literal
+// `&DiffResult{NeedsReplace: false}` inside a function that observes
+// ForceNew is still a copy-paste bug and must be flagged. Without this
+// guard, the widened matcher would silently accept the bug-shape.
+const diffStructLiteralFalseSrc = driverScaffold + `
+func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
+	var changes []FieldChange
+	for _, c := range changes {
+		if c.ForceNew {
+			_ = c
+		}
+	}
+	return &DiffResult{
+		NeedsReplace: false,
+		Changes:      changes,
+	}, nil
+}
+`
+
+func TestAssertDiffSetsNeedsReplaceForForceNew_StructLiteralFalseStillFlags(t *testing.T) {
+	diags := runAnalyzerOnSource(t, diffStructLiteralFalseSrc, AssertDiffSetsNeedsReplaceForForceNew)
+	if len(diags) != 1 {
+		t.Errorf("`&DiffResult{NeedsReplace: false}` is a copy-paste bug; analyzer must flag; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
 // TestAssertDiffSetsNeedsReplaceForForceNew_NonDriverNotFlagged pins
 // review finding #3: the analyzer must NOT fire on types that have a
 // method named Diff but are not resource drivers (no Read / Create /

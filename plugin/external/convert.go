@@ -16,17 +16,14 @@ import (
 )
 
 // mapToStruct converts a Go map to a protobuf Struct.
-// Returns nil if the input is nil.
-func mapToStruct(m map[string]any) *structpb.Struct {
+// Returns nil if the input is nil. Propagates errors from structpb.NewStruct
+// (workflow#537) so callers can surface conversion failures rather than
+// silently dropping unrepresentable values.
+func mapToStruct(m map[string]any) (*structpb.Struct, error) {
 	if m == nil {
-		return nil
+		return nil, nil
 	}
-	s, err := structpb.NewStruct(m)
-	if err != nil {
-		// Fall back to empty struct on conversion error
-		return &structpb.Struct{}
-	}
-	return s
+	return structpb.NewStruct(m)
 }
 
 // structToMap converts a protobuf Struct to a Go map.

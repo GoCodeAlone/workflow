@@ -65,7 +65,11 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 	// Convert step outputs to proto map
 	stepOutputs := make(map[string]*structpb.Struct)
 	for k, v := range pc.StepOutputs {
-		stepOutputs[k] = mapToStruct(v)
+		out, err := mapToStruct(v)
+		if err != nil {
+			return nil, fmt.Errorf("remote step %q (handle %s) encode step output %q as Struct: %w", s.name, s.handleID, k, err)
+		}
+		stepOutputs[k] = out
 	}
 
 	req, err := s.executeRequest(pc, resolvedConfig, stepOutputs)
@@ -101,13 +105,43 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 }
 
 func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig map[string]any, stepOutputs map[string]*structpb.Struct) (*pb.ExecuteStepRequest, error) {
+	// trigger_data and metadata are always sent as Struct — there's no
+	// typed alternative — so encode them up front.
+	triggerData, err := mapToStruct(pc.TriggerData)
+	if err != nil {
+		return nil, fmt.Errorf("remote step %q (handle %s) encode trigger_data as Struct: %w", s.name, s.handleID, err)
+	}
+	metadata, err := mapToStruct(pc.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("remote step %q (handle %s) encode metadata as Struct: %w", s.name, s.handleID, err)
+	}
 	req := &pb.ExecuteStepRequest{
 		HandleId:    s.handleID,
-		TriggerData: mapToStruct(pc.TriggerData),
+		TriggerData: triggerData,
 		StepOutputs: stepOutputs,
-		Current:     mapToStruct(pc.Current),
-		Metadata:    mapToStruct(pc.Metadata),
-		Config:      mapToStruct(resolvedConfig),
+		Metadata:    metadata,
+	}
+	// Current and Config are sent as Struct only when the contract is
+	// UNSPECIFIED, LEGACY_STRUCT, or PROTO_WITH_LEGACY_STRUCT — STRICT_PROTO
+	// nils them out and relies on TypedInput/TypedConfig instead. Defer
+	// Struct encoding so values that JSON can marshal but Struct cannot
+	// (e.g. time.Time fields targeting STRICT_PROTO typed payloads) don't
+	// fail the request unnecessarily — Copilot review #555 finding.
+	encodeLegacyStruct := s.contract == nil ||
+		s.contract.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED ||
+		s.contract.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT ||
+		s.contract.Mode == pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT
+	if encodeLegacyStruct {
+		current, err := mapToStruct(pc.Current)
+		if err != nil {
+			return nil, fmt.Errorf("remote step %q (handle %s) encode current as Struct: %w", s.name, s.handleID, err)
+		}
+		configStruct, err := mapToStruct(resolvedConfig)
+		if err != nil {
+			return nil, fmt.Errorf("remote step %q (handle %s) encode config as Struct: %w", s.name, s.handleID, err)
+		}
+		req.Current = current
+		req.Config = configStruct
 	}
 	if s.contract == nil || s.contract.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED {
 		return req, nil
@@ -120,6 +154,8 @@ func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig m
 		if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, fmt.Errorf("remote step %q STRICT_PROTO config message %q cannot use legacy Struct fallback: %w", s.name, s.contract.ConfigMessage, err)
 		}
+		// PROTO_WITH_LEGACY_STRUCT: typed encoding failed, fall back to
+		// the legacy Struct already populated above.
 		return req, nil
 	}
 	typedInput, err := mapToTypedAnyKnownFields(s.contract.InputMessage, pc.Current, s.types)
@@ -131,6 +167,9 @@ func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig m
 	}
 	req.TypedConfig = typedConfig
 	req.TypedInput = typedInput
+	// STRICT_PROTO drops legacy Struct payloads (already not encoded above
+	// in the deferred path; this is a no-op safety net for any future
+	// branch that ends up here with Current/Config non-nil).
 	if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 		req.Config = nil
 		req.Current = nil

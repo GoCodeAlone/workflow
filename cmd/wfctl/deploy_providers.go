@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/external"
 	"google.golang.org/grpc/codes"
@@ -337,7 +339,32 @@ func (r *remoteIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration
 	return caps
 }
 
-func (r *remoteIaCProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+// Plan branches on the plugin manifest's iacProvider.computePlanVersion:
+//
+//   - "v2"  — delegates to platform.ComputePlan, the canonical wfctl-side
+//     diff engine. ResourceDriver.Diff for per-resource classification
+//     hits the plugin via remoteResourceDriver, so the gRPC fan-out is
+//     preserved while wfctl owns the plan-shape contract.
+//   - "" / "v1" / unknown — proxies the legacy monolithic IaCProvider.Plan
+//     call to the plugin via InvokeService, preserving the v1 contract
+//     for plugins that compute their own plans. This is the safe-default
+//     branch per dispatch.go's "default-to-v1" doctrine.
+//
+// The branch mirrors infra_apply.go's DispatchVersionFor gate so the
+// wfctl-side proxy honors the same plugin-author-controlled routing that
+// the in-tree apply path honors. PR #556 R1 review correction: the
+// initial implementation collapsed both branches into the v2 path, which
+// silently bypassed v1 plugins' own Plan endpoint via this proxy.
+//
+// wfctl:skip-iac-codemod (manifest-conditional dispatch is intentional —
+// canonical-delegation lint expects unconditional v2 forms for plugin-
+// side providers; this is a wfctl-side proxy that supports BOTH versions
+// per dispatch.go's "default-to-v1" safety net.)
+func (r *remoteIaCProvider) Plan(ctx context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	if r.computePlanVersion == wfctlhelpers.DispatchVersionV2 {
+		plan, err := platform.ComputePlan(ctx, r, desired, current)
+		return &plan, err
+	}
 	desiredAny, err := jsonToAny(desired)
 	if err != nil {
 		return nil, fmt.Errorf("IaCProvider.Plan: marshal desired: %w", err)
@@ -360,7 +387,29 @@ func (r *remoteIaCProvider) Plan(_ context.Context, desired []interfaces.Resourc
 	return &plan, nil
 }
 
-func (r *remoteIaCProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+// Apply branches on the plugin manifest's iacProvider.computePlanVersion,
+// matching the same dispatch policy as Plan above:
+//
+//   - "v2"  — delegates to wfctlhelpers.ApplyPlan, which fans out per-
+//     action through ResourceDriver.{Create,Update,Delete,Replace} (the
+//     remoteResourceDriver proxies each over gRPC) and runs the
+//     drift-postcondition + per-action error decomposition.
+//   - "" / "v1" / unknown — proxies the legacy monolithic IaCProvider.
+//     Apply call to the plugin via InvokeService, preserving the v1
+//     contract for plugins that own their own apply orchestration.
+//
+// The branch keeps the v1/v2 routing contract documented in dispatch.go
+// intact: the dispatch gate in infra_apply.go and this proxy now agree.
+// PR #556 R1 review correction (Copilot inline finding) — the initial
+// implementation collapsed both branches into the v2 path, which
+// silently broke v1 plugins routed through this proxy.
+//
+// wfctl:skip-iac-codemod (manifest-conditional dispatch is intentional —
+// see Plan above for the canonical-delegation-lint rationale.)
+func (r *remoteIaCProvider) Apply(ctx context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	if r.computePlanVersion == wfctlhelpers.DispatchVersionV2 {
+		return wfctlhelpers.ApplyPlan(ctx, r, plan)
+	}
 	planAny, err := jsonToAny(plan)
 	if err != nil {
 		return nil, fmt.Errorf("IaCProvider.Apply: marshal plan: %w", err)
