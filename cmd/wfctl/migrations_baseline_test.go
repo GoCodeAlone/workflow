@@ -249,6 +249,62 @@ func TestParseMigrationStatusRejectsUnknownOutput(t *testing.T) {
 	}
 }
 
+func TestParseMigrationStatusFreshDatabaseNoMigrationsApplied(t *testing.T) {
+	// A fresh database with no migrations applied cannot be dirty. Drivers such as
+	// atlas omit the "Dirty:" line in this case; parseMigrationStatus must not
+	// require it when "No migrations applied." is the reported state.
+	status, err := parseMigrationStatus("No migrations applied.\n")
+	if err != nil {
+		t.Fatalf("fresh-database status without Dirty line: %v", err)
+	}
+	if status.Dirty {
+		t.Fatal("fresh-database status: expected dirty=false")
+	}
+	if status.Current != "" {
+		t.Fatalf("fresh-database status: expected empty current, got %q", status.Current)
+	}
+	if len(status.Pending) != 0 {
+		t.Fatalf("fresh-database status: expected no pending, got %v", status.Pending)
+	}
+
+	// Explicit "Dirty: false" alongside "No migrations applied." must also work.
+	status, err = parseMigrationStatus("No migrations applied.\nDirty: false\n")
+	if err != nil {
+		t.Fatalf("fresh-database status with explicit Dirty: false: %v", err)
+	}
+	if status.Dirty {
+		t.Fatal("expected dirty=false")
+	}
+
+	// "Dirty: true" with "No migrations applied." is unusual but must be respected
+	// when the driver explicitly signals it (edge case: corrupted revisions table).
+	status, err = parseMigrationStatus("No migrations applied.\nDirty: true\n")
+	if err != nil {
+		t.Fatalf("fresh-database status with explicit Dirty: true: %v", err)
+	}
+	if !status.Dirty {
+		t.Fatal("expected dirty=true when driver explicitly reports it")
+	}
+
+	// JSON format: fresh database with empty current and no pending.
+	status, err = parseMigrationStatus(`{"current":"","dirty":false,"pending":[]}`)
+	if err != nil {
+		t.Fatalf("fresh-database JSON status: %v", err)
+	}
+	if status.Dirty || status.Current != "" || len(status.Pending) != 0 {
+		t.Fatalf("unexpected fresh-database JSON status: %+v", status)
+	}
+
+	// JSON format: null pending (some drivers emit null instead of []).
+	status, err = parseMigrationStatus(`{"current":"","dirty":false,"pending":null}`)
+	if err != nil {
+		t.Fatalf("fresh-database JSON status with null pending: %v", err)
+	}
+	if status.Dirty || status.Current != "" || len(status.Pending) != 0 {
+		t.Fatalf("unexpected fresh-database JSON status (null pending): %+v", status)
+	}
+}
+
 func TestMigrationSourceChangedNormalizesDotSlashAndRoot(t *testing.T) {
 	if !migrationSourceChanged("./migrations", []string{"migrations/202604270001_add_users.up.sql"}) {
 		t.Fatal("expected ./migrations to match git diff path")
@@ -451,6 +507,66 @@ func TestExtractTarRejectsCleanedTargetOutsideDestination(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "escapes destination") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunMigrationsValidateAtlasFreshDatabaseStatusWithoutDirtyLine(t *testing.T) {
+	// Simulates the atlas driver returning "No migrations applied." without a
+	// "Dirty:" line after running `up` on a fresh (empty) ephemeral database.
+	// This is the scenario surfaced by the atlas executor panic fix: once the
+	// binary no longer panics, wfctl must parse the status output correctly.
+	cfgPath := writeMigrationBaselineConfigData(t, `
+version: 1
+ci:
+  migrations:
+    - name: app
+      driver: atlas
+      source_dir: migrations
+      database:
+        env: DATABASE_URL
+      validation:
+        baseline_candidate: true
+`)
+	resultPath := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv("DATABASE_URL", "postgres://secret@example/db")
+
+	var calls []string
+	restore := stubMigrationBaselineHooks(t, &calls, []string{"migrations/202604270001_add_users.up.sql"}, "abc123")
+	defer restore()
+	oldRunner := newMigrationPluginRunner
+	newMigrationPluginRunner = func() migrationPluginRunner {
+		return migrationPluginRunner{
+			exec: func(_ context.Context, _ string, args []string, _ map[string]string) (migrationCommandResult, error) {
+				command := migrationCommandFromArgs(args)
+				if command == "status" {
+					// Atlas driver output for a fresh database: no "Dirty:" line.
+					return migrationCommandResult{Stdout: "No migrations applied.\n"}, nil
+				}
+				return migrationCommandResult{}, nil
+			},
+		}
+	}
+	defer func() { newMigrationPluginRunner = oldRunner }()
+
+	if err := runMigrations([]string{"validate", "--config", cfgPath, "--env", "ci", "--result-file", resultPath}); err != nil {
+		t.Fatalf("validation failed for fresh-database atlas status: %v", err)
+	}
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got migrationValidationResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode result file: %v\n%s", err, data)
+	}
+	if got.Decision != "pass" || len(got.Migrations) != 1 {
+		t.Fatalf("unexpected validation result: %+v", got)
+	}
+	if got.Migrations[0].BaselineCandidate != "pass" {
+		t.Fatalf("baseline_candidate check should pass: %+v", got.Migrations[0])
+	}
+	if got.Migrations[0].Dirty {
+		t.Fatal("fresh database should not be dirty")
 	}
 }
 
