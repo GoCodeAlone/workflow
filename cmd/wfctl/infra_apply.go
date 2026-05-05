@@ -179,68 +179,14 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	// Build a lookup table of iac.provider module name → (providerType, providerCfg).
 	// Also track which providers are explicitly disabled for this env so we can
 	// emit a precise error if an infra module references one.
-	type providerDef struct {
-		provType string
-		provCfg  map[string]any
-	}
-	providerDefs := map[string]providerDef{}
-	providerTypeCounts := map[string]int{}
-	disabledProviders := map[string]struct{}{} // providers with environments[envName]: null
-	for i := range cfg.Modules {
-		m := &cfg.Modules[i]
-		if m.Type != "iac.provider" {
-			continue
-		}
-		// Apply per-env overrides when envName is set so that provider credentials
-		// or regions declared under environments: are respected.
-		var modCfg map[string]any
-		if envName != "" {
-			resolved, ok := m.ResolveForEnv(envName)
-			if !ok {
-				disabledProviders[m.Name] = struct{}{} // disabled via null env entry
-				continue
-			}
-			modCfg = config.ExpandEnvInMap(resolved.Config)
-		} else {
-			modCfg = config.ExpandEnvInMap(m.Config)
-		}
-		pt, _ := modCfg["provider"].(string)
-		providerDefs[m.Name] = providerDef{provType: pt, provCfg: modCfg}
-		if pt != "" {
-			providerTypeCounts[pt]++
-		}
-	}
+	// Per-env overrides are applied when envName is set so that provider credentials
+	// or regions declared under environments: are respected.
+	providerDefs, providerTypeCounts, disabledProviders := resolveProviderDefs(cfg, envName)
 
-	// Group infra specs by iac.provider module name, preserving declaration order.
-	type provGroup struct {
-		moduleRef string
-		provType  string
-		provCfg   map[string]any
-		specs     []interfaces.ResourceSpec
-	}
-	groups := map[string]*provGroup{}
-	var groupOrder []string
-
-	for _, spec := range infraSpecs {
-		moduleRef, _ := spec.Config["provider"].(string)
-		if moduleRef == "" {
-			return fmt.Errorf("infra module %q (%s): missing required 'provider' field", spec.Name, spec.Type)
-		}
-		if _, exists := groups[moduleRef]; !exists {
-			def, ok := providerDefs[moduleRef]
-			if !ok {
-				if _, disabled := disabledProviders[moduleRef]; disabled {
-					return fmt.Errorf("infra module %q references provider %q which is disabled for environment %q", spec.Name, moduleRef, envName)
-				}
-				return fmt.Errorf("infra module %q references provider %q which is not declared as an iac.provider module", spec.Name, moduleRef)
-			}
-			if def.provType == "" {
-				return fmt.Errorf("provider module %q has no 'provider' type configured", moduleRef)
-			}
-			groups[moduleRef] = &provGroup{moduleRef: moduleRef, provType: def.provType, provCfg: def.provCfg}
-			groupOrder = append(groupOrder, moduleRef)
-		}
-		groups[moduleRef].specs = append(groups[moduleRef].specs, spec)
+	// Group infra specs by iac.provider module name, preserving first-reference order.
+	groupOrder, groups, err := groupSpecsByProviderRef(infraSpecs, providerDefs, disabledProviders, envName)
+	if err != nil {
+		return err
 	}
 
 	// Load current state once; nil on first run is valid (no prior state).
@@ -258,8 +204,9 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		return fmt.Errorf("open state store: %w", storeErr)
 	}
 
-	// Apply each provider group in declaration order.
-	applyGroup := func(moduleRef string, g *provGroup) error {
+	// Apply each provider group in first-reference order (the order in which
+	// each group's first spec appeared in infraSpecs, not iac.provider declaration order).
+	applyGroup := func(moduleRef string, g *specGroup) error {
 		fmt.Printf("Applying %d resource(s) via provider %q (%s)...\n", len(g.specs), moduleRef, g.provType)
 		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
 		if err != nil {
