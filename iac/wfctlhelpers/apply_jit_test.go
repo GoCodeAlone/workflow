@@ -26,7 +26,7 @@ type jitRecordingDriver struct {
 }
 
 func (d *jitRecordingDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.createCount++
+	d.createCount++
 	d.mu.Lock()
 	if d.seenConfigs == nil {
 		d.seenConfigs = make(map[string]map[string]any)
@@ -40,7 +40,7 @@ func (d *jitRecordingDriver) Create(_ context.Context, spec interfaces.ResourceS
 }
 
 func (d *jitRecordingDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.updateCount++
+	d.updateCount++
 	d.mu.Lock()
 	if d.seenUpdateCfgs == nil {
 		d.seenUpdateCfgs = make(map[string]map[string]any)

@@ -232,6 +232,6 @@ type erroringFakeDriver struct {
 }
 
 func (d *erroringFakeDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.createCount++
+	d.createCount++
 	return nil, errFromDispatch
 }
