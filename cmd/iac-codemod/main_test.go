@@ -254,23 +254,25 @@ func TestUsage_MentionsSkipMarker(t *testing.T) {
 	}
 }
 
-func TestUsage_DocumentsFlagOrdering(t *testing.T) {
-	// Reviewer finding #2: stdlib flag stops at the first non-flag arg, so
-	// `iac-codemod refactor-plan /path -fix` silently drops -fix. The
-	// constraint is documented in usage so future maintainers know the
-	// flag-after-path failure is intentional, not a parser bug.
+// TestUsage_DocumentsFlagOrderingFlexibility — round-12 #1: usage now
+// documents the position-independent flag handling (was: documented a
+// stdlib limitation that the manual-scan dispatcher no longer has).
+func TestUsage_DocumentsFlagOrderingFlexibility(t *testing.T) {
 	var buf bytes.Buffer
 	usage(&buf)
-	if !strings.Contains(buf.String(), "Flags must precede paths") {
-		t.Errorf("usage must document flag-ordering constraint; got:\n%s", buf.String())
+	if !strings.Contains(buf.String(), "Flags may appear anywhere") {
+		t.Errorf("usage must document flag-position flexibility; got:\n%s", buf.String())
 	}
 }
 
-func TestRun_FlagAfterPath_SilentlyTreatedAsPositional(t *testing.T) {
-	// Documents (and pins) the stdlib flag-pkg behavior: once a non-flag arg
-	// appears, every subsequent token — including what looks like a flag —
-	// is forwarded to the mode as a positional. The mode receives the raw
-	// token; -fix does NOT take effect on the run's Options.
+// TestRun_FlagAfterPath_RecognizedByDispatcher pins the round-12 #1
+// fix: the manual scan in run() now recognises -dry-run/-fix anywhere
+// in the argument list, including after positional args. Previous
+// behavior (stdlib flag-pkg stopping at the first non-flag) was
+// surprising and made the documented `-report-file` mode flag
+// unusable from the CLI entrypoint. The post-round-12 behavior is
+// position-independent for the dispatcher's two flags.
+func TestRun_FlagAfterPath_RecognizedByDispatcher(t *testing.T) {
 	var capturedOpts Options
 	var capturedArgs []string
 	orig := modes["refactor-plan"]
@@ -285,13 +287,15 @@ func TestRun_FlagAfterPath_SilentlyTreatedAsPositional(t *testing.T) {
 	if code := run([]string{"refactor-plan", "/path", "-fix"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
 	}
-	if capturedOpts.Fix {
-		t.Errorf("Fix should be false when -fix appears AFTER positional (stdlib flag stops at first non-flag); got Fix=true")
+	if !capturedOpts.Fix {
+		t.Errorf("Fix should be true when -fix appears AFTER positional (manual-scan dispatcher recognises flags anywhere); got Fix=false")
 	}
-	if capturedOpts.DryRun != true {
-		t.Errorf("DryRun should remain default true when -fix is silently dropped; got %v", capturedOpts.DryRun)
+	if capturedOpts.DryRun {
+		t.Errorf("DryRun should be false when -fix is set; got true")
 	}
-	wantArgs := []string{"/path", "-fix"}
+	// Mode receives only the positional path; -fix was consumed by
+	// the dispatcher.
+	wantArgs := []string{"/path"}
 	if len(capturedArgs) != len(wantArgs) {
 		t.Fatalf("got args %v, want %v", capturedArgs, wantArgs)
 	}

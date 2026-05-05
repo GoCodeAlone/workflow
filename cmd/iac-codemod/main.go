@@ -18,8 +18,6 @@
 package main
 
 import (
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -105,36 +103,51 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	fs := flag.NewFlagSet("iac-codemod "+mode, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	// Override the default per-FlagSet usage so `iac-codemod <mode> -h`
-	// produces the same structured output as `iac-codemod -h` (T8.2
-	// carry-forward #1) AND lands on the same stream — STDOUT — per
-	// kubectl/git/gh convention for help-on-success (T8.2 review #1).
-	// Parse-error noise still flows through fs.SetOutput(stderr); only
-	// the help-text body is steered to stdout here.
-	fs.Usage = func() { usage(stdout) }
+	// Round-12 #1: rev1 used a single FlagSet with only `-dry-run`
+	// and `-fix` registered, so any mode-specific flag (e.g.
+	// `-report-file` for refactor-apply) failed with
+	// "flag provided but not defined" BEFORE the mode could parse
+	// it. Now we manually extract the two shared flags from the
+	// argument list, leaving the rest (including unknown-to-dispatcher
+	// flags) intact for the mode's own FlagSet. Manual extraction is
+	// preferred over flag.NewFlagSet's `flag.ContinueOnError` because
+	// stdlib's parser stops at the first unknown flag and consumes
+	// nothing further — manual lets us preserve EVERYTHING the mode
+	// needs.
 	opts := &Options{}
-	fs.BoolVar(&opts.DryRun, "dry-run", true, "report findings without mutating files (default)")
-	fs.BoolVar(&opts.Fix, "fix", false, "opt into mutation; overrides -dry-run")
-
-	if err := fs.Parse(rest); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
+	residual := []string{}
+	for i := 0; i < len(rest); i++ {
+		arg := rest[i]
+		switch arg {
+		case "-h", "--help":
+			usage(stdout)
 			return 0
+		case "-dry-run", "--dry-run":
+			opts.DryRun = true
+		case "-dry-run=true", "--dry-run=true":
+			opts.DryRun = true
+		case "-dry-run=false", "--dry-run=false":
+			opts.DryRun = false
+		case "-fix", "--fix":
+			opts.Fix = true
+		case "-fix=true", "--fix=true":
+			opts.Fix = true
+		case "-fix=false", "--fix=false":
+			opts.Fix = false
+		default:
+			residual = append(residual, arg)
 		}
-		return 2
 	}
 	// Normalize the mutation gate at the dispatcher boundary: Fix is the
 	// sole authority for "may I mutate?". A user-supplied -dry-run=false
 	// without -fix must NOT bypass the gate (plan §W-8 line 2347), and
-	// -fix must override an explicit -dry-run=true. This makes any mode
-	// predicate (`!opts.DryRun`, `opts.Fix`, etc.) safe by construction.
+	// -fix must override an explicit -dry-run=true.
 	if opts.Fix {
 		opts.DryRun = false
 	} else {
 		opts.DryRun = true
 	}
-	return fn(fs.Args(), opts, stdout, stderr)
+	return fn(residual, opts, stdout, stderr)
 }
 
 // shouldSkipDir is the canonical directory-walk filter shared by every
@@ -181,9 +194,10 @@ Mode-specific flags:
     -report-file <path>  Also write the Markdown report to <path>. Default
                          is stdout-only.
 
-  Flags must precede paths. The standard library flag parser stops at the
-  first non-flag argument, so 'iac-codemod refactor-plan /path -fix' will
-  silently treat -fix as a positional. Always pass flags first.
+  Flags may appear anywhere on the command line (round-12 #1: the
+  dispatcher uses a manual flag scan instead of stdlib flag, so
+  positional-then-flag ordering is supported). Mode-specific flags
+  (e.g. -report-file) are passed through to the mode's own parser.
 
 Marker:
   Functions and type declarations annotated with the comment

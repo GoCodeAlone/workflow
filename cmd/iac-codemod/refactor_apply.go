@@ -183,6 +183,12 @@ func refactorApplyFile(path string, opts *Options, report *applyReport) error {
 		return err
 	}
 
+	// Round-12 #3: skip files in a non-dominant package (same
+	// rationale as refactor-plan #2).
+	dominant := dominantPackageForDir(filepath.Dir(path))
+	if dominant != "" && file.Name.Name != dominant {
+		return nil
+	}
 	// Directory-wide method set (review round-1 finding #9).
 	provs := planLikeReceiversInDir(filepath.Dir(path))
 	if len(provs) == 0 {
@@ -470,11 +476,30 @@ func isCanonicalApplyLoopAssign(a *ast.AssignStmt, recvName string) bool {
 	if !ok {
 		return false
 	}
-	if recvName != "" && x.Name == recvName {
-		return true
+	if !((recvName != "" && x.Name == recvName) || (recvName == "" && x.Name == "p")) {
+		return false
 	}
-	// Tolerate the conventional `p` when recvName is empty/unknown.
-	return recvName == "" && x.Name == "p"
+	// Round-12 #7: also verify the lookup KEY is `action.Resource.Type`.
+	// wfctlhelpers.ApplyPlan always dispatches with `action.Resource.Type`,
+	// so a provider that picks drivers by some other key (e.g.
+	// `action.Tag` or a computed value) would see different driver
+	// behavior on rewrite. Require the canonical key shape.
+	if len(call.Args) != 1 {
+		return false
+	}
+	keySel, ok := call.Args[0].(*ast.SelectorExpr)
+	if !ok || keySel.Sel.Name != "Type" {
+		return false
+	}
+	innerSel, ok := keySel.X.(*ast.SelectorExpr)
+	if !ok || innerSel.Sel.Name != "Resource" {
+		return false
+	}
+	innerId, ok := innerSel.X.(*ast.Ident)
+	if !ok || innerId.Name != "action" {
+		return false
+	}
+	return true
 }
 
 // isCanonicalApplyLoopIf returns true for the canonical loop-body
@@ -841,8 +866,71 @@ func hasCanonicalCases(sw *ast.SwitchStmt, recvName string) bool {
 		if !caseBodyIsCanonical(cc.Body) {
 			return false
 		}
+		// Round-12 #6: verify the case body's driver call matches the
+		// case label. A `case "create"` body that actually calls
+		// `.Update(...)` or `.Delete(...)` would be silently rewritten
+		// away because wfctlhelpers.ApplyPlan dispatches "create" to
+		// Driver.Create. Mismatch means the rewrite changes semantics.
+		if !caseBodyMatchesLabel(cc.Body, labels) {
+			return false
+		}
 	}
 	return hasCreate && hasUpdate
+}
+
+// caseBodyMatchesLabel returns true if the driver-method calls inside
+// body match the case labels. The mapping is:
+//
+//	"create"  → .Create
+//	"update"  → .Update
+//	"replace" → either .Update OR .Delete+.Create (helpers may use either)
+//	"delete"  → .Delete
+//
+// A case body with no driver call still passes (helpers like ref-init
+// don't have a method call). A case body whose ONLY driver call has
+// the wrong method-name for ANY of the labels rejects.
+//
+// Round-12 #6: rev1 of hasCanonicalCases didn't link labels to body
+// operations; mismatched implementations were silently rewritten.
+func caseBodyMatchesLabel(body []ast.Stmt, labels []string) bool {
+	calledMethods := make(map[string]bool)
+	for _, stmt := range body {
+		ast.Inspect(stmt, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch sel.Sel.Name {
+			case "Create", "Read", "Update", "Delete":
+				calledMethods[sel.Sel.Name] = true
+			}
+			return true
+		})
+	}
+	if len(calledMethods) == 0 {
+		// No driver call (e.g., body just inits a ref var). Passes —
+		// the canonical detector elsewhere handles ref-init shapes.
+		return true
+	}
+	for _, label := range labels {
+		expected := map[string]string{
+			"create":  "Create",
+			"update":  "Update",
+			"delete":  "Delete",
+			"replace": "Update", // wfctlhelpers' doReplace internally uses Delete+Create
+		}[label]
+		if expected == "" {
+			continue
+		}
+		if !calledMethods[expected] {
+			return false
+		}
+	}
+	return true
 }
 
 // caseLabels returns the unquoted string-literal values of the case

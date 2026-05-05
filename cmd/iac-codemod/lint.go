@@ -878,23 +878,117 @@ func providerLikeReceivers(pass *analysis.Pass) map[string]bool {
 }
 
 // looksLikeProvider returns true if the method list contains both Plan
-// and Apply with shapes matching IaCProvider. Used to filter false
-// positives on unrelated types that happen to define a "Plan" method.
+// and Apply with shapes matching IaCProvider:
+//
+//	Plan(context.Context, []ResourceSpec, []ResourceState) (*IaCPlan, error)
+//	Apply(context.Context, *IaCPlan) (*ApplyResult, error)
+//
+// Round-12 #8: rev1 only checked method NAMES + rough arity, so any
+// unrelated type with `Plan(...)` and `Apply(...)` (e.g., a deploy
+// strategy or a UI handler) was treated as a provider. Tightened to
+// match the signature shape via type-name suffix checks (qualified or
+// unqualified): IaCPlan / ResourceSpec / ResourceState / ApplyResult /
+// context.Context.
 func looksLikeProvider(methods []*ast.FuncDecl) bool {
 	hasPlan, hasApply := false, false
 	for _, m := range methods {
 		switch m.Name.Name {
 		case "Plan":
-			if m.Type.Params != nil && len(m.Type.Params.List) >= 2 && m.Type.Results != nil && len(m.Type.Results.List) == 2 {
+			if planSignatureMatches(m.Type) {
 				hasPlan = true
 			}
 		case "Apply":
-			if m.Type.Params != nil && len(m.Type.Params.List) >= 2 && m.Type.Results != nil && len(m.Type.Results.List) == 2 {
+			if applySignatureMatches(m.Type) {
 				hasApply = true
 			}
 		}
 	}
 	return hasPlan && hasApply
+}
+
+// planSignatureMatches verifies the function type matches
+// `Plan(ctx, []ResourceSpec, []ResourceState) (*IaCPlan, error)`.
+// Returns true if the parameter and result types match by name suffix
+// (qualified or unqualified). Used by looksLikeProvider to filter
+// false positives on unrelated `Plan` methods (round-12 #8).
+func planSignatureMatches(ft *ast.FuncType) bool {
+	if ft == nil || ft.Params == nil || ft.Results == nil {
+		return false
+	}
+	paramTypes := flattenFieldTypes(ft.Params.List)
+	if len(paramTypes) != 3 {
+		return false
+	}
+	resultTypes := flattenFieldTypes(ft.Results.List)
+	if len(resultTypes) != 2 {
+		return false
+	}
+	// Param 1: context.Context (selector .Context)
+	if !typeNameTailMatches(paramTypes[0], "Context") {
+		return false
+	}
+	// Param 2: []ResourceSpec
+	arr, ok := paramTypes[1].(*ast.ArrayType)
+	if !ok || arr.Len != nil || !typeNameTailMatches(arr.Elt, "ResourceSpec") {
+		return false
+	}
+	// Param 3: []ResourceState
+	arr2, ok := paramTypes[2].(*ast.ArrayType)
+	if !ok || arr2.Len != nil || !typeNameTailMatches(arr2.Elt, "ResourceState") {
+		return false
+	}
+	// Result 1: *IaCPlan
+	star, ok := resultTypes[0].(*ast.StarExpr)
+	if !ok || !typeNameTailMatches(star.X, "IaCPlan") {
+		return false
+	}
+	// Result 2: error
+	return typeNameTailMatches(resultTypes[1], "error")
+}
+
+// applySignatureMatches verifies the function type matches
+// `Apply(ctx, *IaCPlan) (*ApplyResult, error)`.
+func applySignatureMatches(ft *ast.FuncType) bool {
+	if ft == nil || ft.Params == nil || ft.Results == nil {
+		return false
+	}
+	paramTypes := flattenFieldTypes(ft.Params.List)
+	if len(paramTypes) != 2 {
+		return false
+	}
+	resultTypes := flattenFieldTypes(ft.Results.List)
+	if len(resultTypes) != 2 {
+		return false
+	}
+	if !typeNameTailMatches(paramTypes[0], "Context") {
+		return false
+	}
+	star, ok := paramTypes[1].(*ast.StarExpr)
+	if !ok || !typeNameTailMatches(star.X, "IaCPlan") {
+		return false
+	}
+	starR, ok := resultTypes[0].(*ast.StarExpr)
+	if !ok || !typeNameTailMatches(starR.X, "ApplyResult") {
+		return false
+	}
+	return typeNameTailMatches(resultTypes[1], "error")
+}
+
+// flattenFieldTypes expands a Go FieldList (where `a, b T` is one
+// field with two names) into a flat slice of types — one per
+// parameter or return value.
+func flattenFieldTypes(list []*ast.Field) []ast.Expr {
+	var out []ast.Expr
+	for _, f := range list {
+		count := 1
+		if len(f.Names) > 1 {
+			count = len(f.Names)
+		}
+		for i := 0; i < count; i++ {
+			out = append(out, f.Type)
+		}
+	}
+	return out
 }
 
 // ============================================================

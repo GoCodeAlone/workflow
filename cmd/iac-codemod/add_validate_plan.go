@@ -147,6 +147,12 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 		return err
 	}
 
+	// Round-12 #4: skip files in a non-dominant package (same
+	// rationale as refactor-plan #2 / refactor-apply #3).
+	dominant := dominantPackageForDir(filepath.Dir(path))
+	if dominant != "" && file.Name.Name != dominant {
+		return nil
+	}
 	provs, methodsByRecv, typeDecls := providerReceiversWithMethods(file)
 	// Widen `provs` AND `methodsByRecv` to the directory-wide method
 	// set so all per-receiver decisions (skip-marker check,

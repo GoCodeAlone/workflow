@@ -183,6 +183,15 @@ func refactorPlanFile(path string, opts *Options, report *planReport) error {
 	// are still recognised (review round-1 finding #9). Per-file
 	// fallback when the directory walk fails — keeps the rev0
 	// behavior on isolated single-file targets.
+	// Round-12 #2: skip files in a non-dominant package. The
+	// directory-wide provs/typeDocs are built from the dominant
+	// package only; processing a non-dominant file against another
+	// package's method set could rewrite the wrong file when
+	// receiver names overlap.
+	dominant := dominantPackageForDir(filepath.Dir(path))
+	if dominant != "" && file.Name.Name != dominant {
+		return nil
+	}
 	provs := planLikeReceiversInDir(filepath.Dir(path))
 	if len(provs) == 0 {
 		provs = planLikeReceivers(file)
@@ -293,6 +302,59 @@ func planLikeReceivers(file *ast.File) map[string]bool {
 func planLikeReceiversInDir(dir string) map[string]bool {
 	out, _ := planLikeProviderMethodsInDir(dir)
 	return out
+}
+
+// dominantPackageForDir returns the most-common `package P` clause
+// across non-test .go files in dir (lex-first wins on tie). Used by
+// refactor-* and add-validate-plan to skip files in non-dominant
+// packages — round-12 #2/#3/#4: rev2 walked every file but built
+// provs/typeDocs from only the dominant package, so a non-dominant
+// file with overlapping receiver names could be rewritten against
+// the dominant package's method set and produce a wrong-file
+// migration. Returns "" when dir cannot be read.
+func dominantPackageForDir(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	pkgCounts := make(map[string]int)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fpath := filepath.Join(dir, name)
+		src, err := readFile(fpath)
+		if err != nil {
+			continue
+		}
+		fs := token.NewFileSet()
+		f, err := parser.ParseFile(fs, fpath, src, parser.PackageClauseOnly)
+		if err != nil {
+			continue
+		}
+		pkgCounts[f.Name.Name]++
+	}
+	if len(pkgCounts) == 0 {
+		return ""
+	}
+	pkgNames := make([]string, 0, len(pkgCounts))
+	for pkg := range pkgCounts {
+		pkgNames = append(pkgNames, pkg)
+	}
+	sort.Strings(pkgNames)
+	dominant := ""
+	dominantCount := 0
+	for _, pkg := range pkgNames {
+		if pkgCounts[pkg] > dominantCount {
+			dominant = pkg
+			dominantCount = pkgCounts[pkg]
+		}
+	}
+	return dominant
 }
 
 // planLikeProviderMethodsInDir is like planLikeReceiversInDir but also
@@ -874,15 +936,18 @@ func rangeBodyMatchesCanonicalDesired(body *ast.BlockStmt) bool {
 
 // isCanonicalCreateBranchBody returns true if body is exactly:
 //
-//	plan.Actions = append(plan.Actions, ...)
+//	plan.Actions = append(plan.Actions, PlanAction{Action: "create", ...})
 //	continue
 //
-// (review round-5 #1).
+// Round-12 #5: requires the appended action's `Action: "create"` field
+// so a planner that builds different actions (e.g., "queue", "noop")
+// from the canonical scaffold is rejected, preventing silent drop of
+// custom action types.
 func isCanonicalCreateBranchBody(body *ast.BlockStmt) bool {
 	if body == nil || len(body.List) != 2 {
 		return false
 	}
-	if !isPlanActionsAppendAssign(body.List[0]) {
+	if !isPlanActionsAppendAssign(body.List[0], "create") {
 		return false
 	}
 	br, ok := body.List[1].(*ast.BranchStmt)
@@ -894,14 +959,14 @@ func isCanonicalCreateBranchBody(body *ast.BlockStmt) bool {
 
 // isCanonicalUpdateBranchBody returns true if body is exactly:
 //
-//	plan.Actions = append(plan.Actions, ...)
+//	plan.Actions = append(plan.Actions, PlanAction{Action: "update", ...})
 //
-// (review round-5 #1).
+// Round-12 #5: requires the appended action's `Action: "update"` field.
 func isCanonicalUpdateBranchBody(body *ast.BlockStmt) bool {
 	if body == nil || len(body.List) != 1 {
 		return false
 	}
-	return isPlanActionsAppendAssign(body.List[0])
+	return isPlanActionsAppendAssign(body.List[0], "update")
 }
 
 // isPlanActionsAppendAssign returns true if stmt is
@@ -914,7 +979,7 @@ func isCanonicalUpdateBranchBody(body *ast.BlockStmt) bool {
 // builds actions from an alternate slice) was misclassified as
 // canonical and the alternate-slice logic silently dropped during
 // rewrite.
-func isPlanActionsAppendAssign(stmt ast.Stmt) bool {
+func isPlanActionsAppendAssign(stmt ast.Stmt, expectedAction string) bool {
 	a, ok := stmt.(*ast.AssignStmt)
 	if !ok || a.Tok != token.ASSIGN || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
 		return false
@@ -941,6 +1006,35 @@ func isPlanActionsAppendAssign(stmt ast.Stmt) bool {
 	}
 	if id, ok := firstSel.X.(*ast.Ident); !ok || id.Name != "plan" {
 		return false
+	}
+	// Round-12 #5: verify the appended payload is a PlanAction
+	// composite literal whose Action field matches expectedAction.
+	// This rejects bespoke planners that use the canonical scaffold
+	// but build different actions (e.g., a planner that emits "noop"
+	// or "queue" instead of "create"/"update"); silent rewrite would
+	// drop those custom action types.
+	if expectedAction != "" {
+		cl, ok := call.Args[1].(*ast.CompositeLit)
+		if !ok {
+			return false
+		}
+		actionLit := ""
+		for _, elt := range cl.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if k, ok := kv.Key.(*ast.Ident); !ok || k.Name != "Action" {
+				continue
+			}
+			if bl, ok := kv.Value.(*ast.BasicLit); ok && bl.Kind == token.STRING {
+				actionLit = strings.Trim(bl.Value, `"`)
+			}
+			break
+		}
+		if actionLit != expectedAction {
+			return false
+		}
 	}
 	return true
 }
