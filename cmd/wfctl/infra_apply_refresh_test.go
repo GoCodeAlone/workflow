@@ -144,6 +144,9 @@ func TestApplyRefresh_AutoApprovePrunesAndApplies(t *testing.T) {
 	if !strings.Contains(stderr.String(), "test-vpc") {
 		t.Errorf("auto-approve: expected audit log on stderr mentioning test-vpc, got:\n%s", stderr.String())
 	}
+	if !strings.Contains(stderr.String(), "state mutation prune") {
+		t.Errorf("auto-approve: expected 'state mutation prune' operation keyword in audit log on stderr, got:\n%s", stderr.String())
+	}
 }
 
 func TestApplyRefresh_ProtectedResourceBlockedWithoutFlag(t *testing.T) {

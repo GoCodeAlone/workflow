@@ -8,10 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // newIaCProvider builds a remoteIaCProvider backed by the given stubInvoker.
+// Defaults to empty computePlanVersion (the safe-default v1 branch in
+// dispatch.go's "default-to-v1" doctrine). Tests that need the v2 branch
+// set p.computePlanVersion = wfctlhelpers.DispatchVersionV2 directly.
 func newIaCProvider(si *stubInvoker) *remoteIaCProvider {
 	return &remoteIaCProvider{invoker: si}
 }
@@ -67,6 +71,17 @@ func TestRemoteIaC_Capabilities_Error(t *testing.T) {
 }
 
 // ── Plan ──────────────────────────────────────────────────────────────────────
+//
+// Plan() is manifest-conditional after W-Refactor (PR 5):
+//   - computePlanVersion == "v2" → delegates to platform.ComputePlan
+//     (wfctl owns plan classification; ResourceDriver.Diff dispatches
+//     remotely on a per-resource basis);
+//   - otherwise (default v1) → proxies the legacy monolithic
+//     IaCProvider.Plan call to the plugin via InvokeService.
+//
+// Tests below pin BOTH branches.
+
+// v1-default branch: legacy proxy to plugin.
 
 func samplePlanResponse() map[string]any {
 	return map[string]any{
@@ -85,9 +100,9 @@ func samplePlanResponse() map[string]any {
 	}
 }
 
-func TestRemoteIaC_Plan(t *testing.T) {
+func TestRemoteIaC_Plan_V1Default_ProxiesIaCProviderPlan(t *testing.T) {
 	si := &stubInvoker{resp: samplePlanResponse()}
-	p := newIaCProvider(si)
+	p := newIaCProvider(si) // default computePlanVersion == ""
 
 	desired := []interfaces.ResourceSpec{
 		{Name: "db", Type: "infra.database", Config: map[string]any{"engine": "postgres"}},
@@ -101,9 +116,8 @@ func TestRemoteIaC_Plan(t *testing.T) {
 		t.Fatalf("Plan: unexpected error: %v", err)
 	}
 	if si.method != "IaCProvider.Plan" {
-		t.Errorf("method: got %q, want IaCProvider.Plan", si.method)
+		t.Errorf("v1-default branch must proxy IaCProvider.Plan; got %q", si.method)
 	}
-	// Args must include desired and current as slices
 	if _, ok := si.args["desired"]; !ok {
 		t.Error("missing arg key 'desired'")
 	}
@@ -121,18 +135,89 @@ func TestRemoteIaC_Plan(t *testing.T) {
 	}
 }
 
-func TestRemoteIaC_Plan_Error(t *testing.T) {
+func TestRemoteIaC_Plan_V1Default_PropagatesError(t *testing.T) {
 	si := &stubInvoker{err: fmt.Errorf("rpc error")}
 	p := newIaCProvider(si)
 	_, err := p.Plan(context.Background(), nil, nil)
 	if err == nil {
-		t.Fatal("expected error")
+		t.Fatal("expected error from v1 IaCProvider.Plan proxy")
+	}
+}
+
+// v2 branch: delegates to platform.ComputePlan.
+
+func TestRemoteIaC_Plan_V2_DelegatesToComputePlan_NetNewResource(t *testing.T) {
+	// stubInvoker tracks the LAST InvokeService call. With ComputePlan
+	// delegation, a net-new resource emits "create" without touching the
+	// invoker — confirming the v2 branch routes through wfctl-side
+	// classification rather than the v1 IaCProvider.Plan wire.
+	si := &stubInvoker{}
+	p := newIaCProvider(si)
+	p.computePlanVersion = wfctlhelpers.DispatchVersionV2
+
+	desired := []interfaces.ResourceSpec{
+		{Name: "db", Type: "infra.database", Config: map[string]any{"engine": "postgres"}},
+	}
+	plan, err := p.Plan(context.Background(), desired, nil)
+	if err != nil {
+		t.Fatalf("Plan: unexpected error: %v", err)
+	}
+	if si.method != "" {
+		t.Errorf("v2 branch + net-new create should not hit InvokeService; got %q", si.method)
+	}
+	if plan == nil {
+		t.Fatal("Plan returned nil plan")
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("expected 1 action (create), got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].Action != "create" {
+		t.Errorf("action: got %q, want %q", plan.Actions[0].Action, "create")
+	}
+	if plan.Actions[0].Resource.Name != "db" {
+		t.Errorf("action resource name: got %q, want %q", plan.Actions[0].Resource.Name, "db")
+	}
+}
+
+func TestRemoteIaC_Plan_V2_DelegatesToComputePlan_DeleteEmittedForRemoved(t *testing.T) {
+	si := &stubInvoker{}
+	p := newIaCProvider(si)
+	p.computePlanVersion = wfctlhelpers.DispatchVersionV2
+
+	current := []interfaces.ResourceState{
+		{Name: "old-db", Type: "infra.database", ProviderID: "pid-old"},
+	}
+	plan, err := p.Plan(context.Background(), nil, current)
+	if err != nil {
+		t.Fatalf("Plan: unexpected error: %v", err)
+	}
+	if si.method != "" {
+		t.Errorf("v2 branch + delete path should not hit InvokeService; got %q", si.method)
+	}
+	if plan == nil {
+		t.Fatal("Plan returned nil plan")
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("expected 1 action (delete), got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].Action != "delete" {
+		t.Errorf("action: got %q, want %q", plan.Actions[0].Action, "delete")
 	}
 }
 
 // ── Apply ─────────────────────────────────────────────────────────────────────
+//
+// Apply() is manifest-conditional after W-Refactor (PR 5):
+//   - computePlanVersion == "v2" → delegates to wfctlhelpers.ApplyPlan
+//     (per-action driver dispatch + drift postcondition);
+//   - otherwise (default v1) → proxies the legacy monolithic
+//     IaCProvider.Apply call to the plugin via InvokeService.
+//
+// Tests below pin BOTH branches.
 
-func TestRemoteIaC_Apply(t *testing.T) {
+// v1-default branch: legacy proxy to plugin.
+
+func TestRemoteIaC_Apply_V1Default_ProxiesIaCProviderApply(t *testing.T) {
 	si := &stubInvoker{resp: map[string]any{
 		"plan_id": "plan-abc",
 		"resources": []any{
@@ -144,7 +229,7 @@ func TestRemoteIaC_Apply(t *testing.T) {
 			},
 		},
 	}}
-	p := newIaCProvider(si)
+	p := newIaCProvider(si) // default computePlanVersion == ""
 
 	plan := &interfaces.IaCPlan{
 		ID: "plan-abc",
@@ -152,15 +237,13 @@ func TestRemoteIaC_Apply(t *testing.T) {
 			{Action: "create", Resource: interfaces.ResourceSpec{Name: "db", Type: "infra.database"}},
 		},
 	}
-
 	result, err := p.Apply(context.Background(), plan)
 	if err != nil {
 		t.Fatalf("Apply: unexpected error: %v", err)
 	}
 	if si.method != "IaCProvider.Apply" {
-		t.Errorf("method: got %q, want IaCProvider.Apply", si.method)
+		t.Errorf("v1-default branch must proxy IaCProvider.Apply; got %q", si.method)
 	}
-	// Plan must be wrapped under "plan" key
 	if _, ok := si.args["plan"]; !ok {
 		t.Error("missing arg key 'plan'")
 	}
@@ -175,12 +258,80 @@ func TestRemoteIaC_Apply(t *testing.T) {
 	}
 }
 
-func TestRemoteIaC_Apply_Error(t *testing.T) {
+func TestRemoteIaC_Apply_V1Default_PropagatesError(t *testing.T) {
 	si := &stubInvoker{err: fmt.Errorf("apply failed")}
 	p := newIaCProvider(si)
 	_, err := p.Apply(context.Background(), &interfaces.IaCPlan{ID: "p1"})
 	if err == nil {
-		t.Fatal("expected error")
+		t.Fatal("expected error from v1 IaCProvider.Apply proxy")
+	}
+}
+
+// v2 branch: delegates to wfctlhelpers.ApplyPlan (per-action driver dispatch).
+
+func TestRemoteIaC_Apply_V2_DelegatesToApplyPlan_PerDriverDispatch(t *testing.T) {
+	// ApplyPlan dispatches Create on a single-create plan via
+	// remoteResourceDriver, which invokes "ResourceDriver.Create" through
+	// the stub invoker. The v1 monolithic "IaCProvider.Apply" wire is
+	// not used in the v2 branch.
+	si := &stubInvoker{resp: map[string]any{
+		"output": map[string]any{
+			"provider_id": "pid-123",
+			"name":        "db",
+			"type":        "infra.database",
+			"status":      "running",
+		},
+	}}
+	p := newIaCProvider(si)
+	p.computePlanVersion = wfctlhelpers.DispatchVersionV2
+
+	plan := &interfaces.IaCPlan{
+		ID: "plan-abc",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "db", Type: "infra.database"}},
+		},
+	}
+	result, err := p.Apply(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+	if si.method == "IaCProvider.Apply" {
+		t.Error("v2 branch must NOT invoke legacy IaCProvider.Apply wire")
+	}
+	if !strings.HasPrefix(si.method, "ResourceDriver.") {
+		t.Errorf("v2 branch: expected ResourceDriver.* per-driver dispatch, got %q", si.method)
+	}
+	if result == nil {
+		t.Fatal("Apply returned nil result")
+	}
+	if result.PlanID != "plan-abc" {
+		t.Errorf("PlanID: got %q, want %q (ApplyPlan stamps plan.ID onto result)", result.PlanID, "plan-abc")
+	}
+}
+
+func TestRemoteIaC_Apply_V2_DelegatesToApplyPlan_RecordsErrorsPerAction(t *testing.T) {
+	// When the underlying driver returns an error, ApplyPlan records it
+	// in result.Errors rather than returning the error from the top-level
+	// call (per the per-action error decomposition contract).
+	si := &stubInvoker{err: fmt.Errorf("driver create failed")}
+	p := newIaCProvider(si)
+	p.computePlanVersion = wfctlhelpers.DispatchVersionV2
+
+	plan := &interfaces.IaCPlan{
+		ID: "p1",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "db", Type: "infra.database"}},
+		},
+	}
+	result, err := p.Apply(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Apply: unexpected top-level error (wfctlhelpers.ApplyPlan records per-action errors): %v", err)
+	}
+	if result == nil {
+		t.Fatal("Apply returned nil result")
+	}
+	if len(result.Errors) == 0 {
+		t.Error("expected ApplyResult.Errors to contain the per-action driver error")
 	}
 }
 
