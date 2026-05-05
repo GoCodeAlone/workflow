@@ -746,8 +746,8 @@ secrets:
 }
 
 // TestLoadFromFile_ImportSecretsOnlyInImport covers the case the original
-// PR-1 fix missed: top-level secrets:`appears only in an imported file, not
-// in main. Without the merge, cfg.Secrets is nil after LoadFromFile.
+// PR-1 fix missed: top-level `secrets:` appears only in an imported file,
+// not in main. Without the merge, cfg.Secrets is nil after LoadFromFile.
 func TestLoadFromFile_ImportSecretsOnlyInImport(t *testing.T) {
 	dir := t.TempDir()
 
@@ -784,5 +784,118 @@ modules:
 	}
 	if len(cfg.Secrets.Generate) != 1 || cfg.Secrets.Generate[0].Key != "ONLY_IN_IMPORT" {
 		t.Errorf("expected Generate=[{Key:ONLY_IN_IMPORT}], got %v", cfg.Secrets.Generate)
+	}
+}
+
+// TestProcessImports_MergesSecretStoresFromImport pins that
+// WorkflowConfig.SecretStores is merged across imports. ResolveSecretStore
+// and getProviderForStore look up store names against this map; without the
+// merge an imported defaultStore or entries[*].store fails as an
+// unknown-provider error.
+func TestProcessImports_MergesSecretStoresFromImport(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secretStores:
+  vault:
+    provider: vault
+    config:
+      address: https://vault.example.com
+  shared-store:
+    provider: aws-secretsmanager
+    config:
+      region: us-east-1
+secrets:
+  defaultStore: vault
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+secretStores:
+  shared-store:
+    provider: gcp-secretmanager
+    config:
+      project: my-project
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// vault came from import only — must survive the merge.
+	if _, ok := cfg.SecretStores["vault"]; !ok {
+		t.Error("expected SecretStores[vault] from import")
+	}
+	// shared-store: parent wins.
+	if shared, ok := cfg.SecretStores["shared-store"]; !ok {
+		t.Error("expected SecretStores[shared-store]")
+	} else if shared.Provider != "gcp-secretmanager" {
+		t.Errorf("expected main-wins on shared-store provider, got %q", shared.Provider)
+	}
+	// defaultStore came from imported secrets:
+	if cfg.Secrets == nil || cfg.Secrets.DefaultStore != "vault" {
+		t.Errorf("expected Secrets.DefaultStore=vault from import, got %v", cfg.Secrets)
+	}
+}
+
+// TestProcessImports_SecretsConfigMergesPerKey_LocalOverride pins the
+// per-key merge for Secrets.Config. The "shared defaults + local override"
+// pattern requires that an imported Config provides defaults (e.g. `repo`)
+// while the main file overrides only specific keys (e.g. `token_env`); the
+// imported keys not present in main must survive.
+func TestProcessImports_SecretsConfigMergesPerKey_LocalOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secrets:
+  config:
+    repo: GoCodeAlone/workflow
+    token_env: SHARED_TOKEN
+    api_url: https://api.github.com
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+secrets:
+  config:
+    token_env: MAIN_TOKEN
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Secrets == nil {
+		t.Fatal("expected cfg.Secrets non-nil")
+	}
+	// Imported defaults survive.
+	if cfg.Secrets.Config["repo"] != "GoCodeAlone/workflow" {
+		t.Errorf("expected repo=GoCodeAlone/workflow (imported default), got %v", cfg.Secrets.Config["repo"])
+	}
+	if cfg.Secrets.Config["api_url"] != "https://api.github.com" {
+		t.Errorf("expected api_url survived from import, got %v", cfg.Secrets.Config["api_url"])
+	}
+	// Main override wins on conflict.
+	if cfg.Secrets.Config["token_env"] != "MAIN_TOKEN" {
+		t.Errorf("expected token_env=MAIN_TOKEN (main override), got %v", cfg.Secrets.Config["token_env"])
 	}
 }

@@ -362,22 +362,49 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 			existingSidecars[sc.Name] = struct{}{}
 		}
 
-		// Merge top-level secrets — Generate (dedupe by Key) and Entries
-		// (dedupe by Name) are appended; scalar/map fields follow main-wins
-		// semantics consistent with the rest of processImports.
+		// Merge SecretStores — per-store dedupe by name (parent wins).
+		// SecretsConfig.DefaultStore + SecretEntry.Store reference these by
+		// name via ResolveSecretStore / getProviderForStore, so the import
+		// merge must include the store map; otherwise an imported store name
+		// is later treated as a raw provider and provider construction fails.
+		if len(impCfg.SecretStores) > 0 {
+			if cfg.SecretStores == nil {
+				cfg.SecretStores = make(map[string]*SecretStoreConfig, len(impCfg.SecretStores))
+			}
+			for k, v := range impCfg.SecretStores {
+				if _, exists := cfg.SecretStores[k]; !exists {
+					cfg.SecretStores[k] = v
+				}
+			}
+		}
+
+		// Merge top-level secrets. Generate (dedupe by Key) and Entries
+		// (dedupe by Name) are appended. Scalar fields follow parent-wins.
+		// `Config` is a map[string]any: per-key merge so an imported "shared
+		// defaults" config can survive a partial main-file override (e.g.
+		// import provides {repo, token_env}; main only sets {token_env}).
 		if impCfg.Secrets != nil {
 			if cfg.Secrets == nil {
 				cfg.Secrets = &SecretsConfig{}
 			}
-			// Scalar/map fields: parent wins; only adopt if unset on parent.
+			// Scalar fields: parent wins; only adopt if unset on parent.
 			if cfg.Secrets.DefaultStore == "" {
 				cfg.Secrets.DefaultStore = impCfg.Secrets.DefaultStore
 			}
 			if cfg.Secrets.Provider == "" {
 				cfg.Secrets.Provider = impCfg.Secrets.Provider
 			}
-			if cfg.Secrets.Config == nil {
-				cfg.Secrets.Config = impCfg.Secrets.Config
+			// Config map: per-key merge — main wins on conflicts, imported
+			// keys not present in main are preserved (shared-defaults pattern).
+			if len(impCfg.Secrets.Config) > 0 {
+				if cfg.Secrets.Config == nil {
+					cfg.Secrets.Config = make(map[string]any, len(impCfg.Secrets.Config))
+				}
+				for k, v := range impCfg.Secrets.Config {
+					if _, exists := cfg.Secrets.Config[k]; !exists {
+						cfg.Secrets.Config[k] = v
+					}
+				}
 			}
 			if cfg.Secrets.Rotation == nil {
 				cfg.Secrets.Rotation = impCfg.Secrets.Rotation
