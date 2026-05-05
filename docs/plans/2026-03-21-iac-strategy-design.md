@@ -1,3 +1,45 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 5f8b3b9
+  - repo: workflow
+    commit: 9157e1c
+  - repo: workflow
+    commit: a5148e7
+  - repo: workflow
+    commit: 0ded7f4
+  - repo: workflow
+    commit: 31d4447
+  - repo: workflow-plugin-aws
+    commit: 2f59558
+  - repo: workflow-plugin-gcp
+    commit: 0193b61
+  - repo: workflow-plugin-azure
+    commit: f7278b9
+  - repo: workflow-plugin-digitalocean
+    commit: 0aa070c
+  - repo: workflow-plugin-tofu
+    commit: 36284bb
+external_refs:
+  - "workflow-plugin-aws"
+  - "workflow-plugin-gcp"
+  - "workflow-plugin-azure"
+  - "workflow-plugin-digitalocean"
+  - "workflow-plugin-tofu"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"IaCProvider|ResourceDriver|StateStore|infra\\.|platform\\.|OpenTofu|Terraform|tofu|ci generator|deploy_rolling|deploy_blue_green|deploy_canary\" interfaces platform plugins cmd module docs -g '!docs/plans/**'"
+    - "GOWORK=off go test ./interfaces ./platform ./cmd/wfctl -run 'TestSize|TestResourceSpec|TestComputePlan|TestResolveSizing|TestGenerateCI|TestCIRun|TestInfra'"
+    - "GOWORK=off go test ./... (workflow-plugin-aws, workflow-plugin-gcp, workflow-plugin-azure, workflow-plugin-digitalocean, workflow-plugin-tofu)"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Workflow IaC Strategy — Design Document
 
 **Date:** 2026-03-21

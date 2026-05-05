@@ -4,29 +4,20 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
 	"gopkg.in/yaml.v3"
 )
 
-// SecretsConfig is the "secrets:" section of an infra config file.
-type SecretsConfig struct {
-	Provider string         `yaml:"provider"`
-	Config   map[string]any `yaml:"config"`
-	Generate []SecretGen    `yaml:"generate"`
-}
-
-// SecretGen describes a secret to generate and store.
-type SecretGen struct {
-	Key    string `yaml:"key"`
-	Type   string `yaml:"type"`   // e.g. "random_hex", "provider_credential"
-	Length int    `yaml:"length"` // for random generators
-	Source string `yaml:"source"` // for provider_credential
-}
-
-// InfraConfig is the "infra:" top-level section of an infra config file.
-type InfraConfig struct {
-	AutoBootstrap *bool `yaml:"auto_bootstrap"`
-}
+// SecretsConfig, SecretGen and InfraConfig are type aliases for the canonical
+// definitions in the config package. Aliases keep all existing cmd/wfctl code
+// (including test files) working without renaming, while ensuring that any
+// round-trip through config.WorkflowConfig preserves the generate[] and
+// infra.auto_bootstrap fields (which were previously dropped because the local
+// struct definitions were not reflected in config.WorkflowConfig).
+type SecretsConfig = config.SecretsConfig
+type SecretGen = config.SecretGen
+type InfraConfig = config.InfraConfig
 
 // parseSecretsConfig reads the "secrets:" top-level key from a YAML file.
 // Returns nil, nil if the section is absent.
@@ -61,11 +52,15 @@ func parseInfraConfig(cfgFile string) (*InfraConfig, error) {
 }
 
 // resolveSecretsProvider constructs the appropriate secrets.Provider from cfg.
+// ${VAR} / $VAR references in cfg.Config are expanded via os.ExpandEnv before
+// the provider is constructed, so credentials can be passed through the environment
+// (e.g. VAULT_TOKEN=s.xxx in CI) rather than hard-coded in YAML. cfg.Config is
+// never mutated — expansion produces a deep copy.
 func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("no secrets config provided")
 	}
-	c := cfg.Config
+	c := config.ExpandEnvInMap(cfg.Config)
 	if c == nil {
 		c = map[string]any{}
 	}
@@ -107,5 +102,23 @@ func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 
 	default:
 		return nil, fmt.Errorf("unknown secrets provider %q (supported: github, vault, aws, env, keychain)", cfg.Provider)
+	}
+}
+
+// buildAdhocProvider constructs a secrets.Provider for ad-hoc operations without
+// requiring an app.yaml secrets block. Supports keychain, env, and aws.
+// vault and github require explicit config via the app.yaml secrets block.
+func buildAdhocProvider(name, service string) (secrets.Provider, error) {
+	switch name {
+	case "keychain":
+		return secrets.NewKeychainProvider(service)
+	case "env":
+		return secrets.NewEnvProvider(service), nil
+	case "aws":
+		return secrets.NewAWSSecretsManagerProvider(secrets.AWSConfig{})
+	case "vault", "github":
+		return nil, fmt.Errorf("provider %q requires explicit config; use app.yaml secrets block", name)
+	default:
+		return nil, fmt.Errorf("unknown ad-hoc provider %q (supported: keychain, env, aws)", name)
 	}
 }

@@ -1,3 +1,29 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: ee2f925
+  - repo: workflow
+    commit: 90257d9
+  - repo: workflow
+    commit: 48440c7
+  - repo: workflow-dnd
+    commit: 02c4815e
+external_refs:
+  - "core-dump: infra.yaml ci.registries evidence"
+  - "buymywishlist: app.yaml/infra.yaml ci.registries evidence"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'rg -n "func runBuild|wfctl build|func runRegistry|CIRegistry|CIBuildSecurity|GenerateSBOM" cmd config plugins docs -S'
+    - 'git log --oneline --all -- cmd/wfctl/build.go cmd/wfctl/registry_container.go config/ci_registry.go config/ci_build_security.go plugins/builder-go'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wfctl Build + Deploy Orchestration — Design
 
 **Status:** Approved

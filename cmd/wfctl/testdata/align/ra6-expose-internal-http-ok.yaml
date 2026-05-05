@@ -1,0 +1,10 @@
+# R-A6 OK: expose:internal without http_port is valid (internal service).
+# R-A6 does NOT fire (FAIL).
+modules:
+  - name: internal-svc
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      expose: internal
+      internal_ports:
+        - 9000

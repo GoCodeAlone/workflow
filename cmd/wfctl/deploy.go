@@ -861,6 +861,9 @@ Options:
 			provider, _ := ca.Config["provider"].(string)
 			region, _ := ca.Config["region"].(string)
 			fmt.Printf("  - %s (provider: %s, region: %s)\n", ca.Name, provider, region)
+			// TODO(follow-up #28): delegate credential validation to the provider plugin
+			// rather than hard-coding per-provider env var names here. Each provider
+			// plugin should expose a ValidateCredentials() method or similar.
 			// Validate credentials exist
 			switch {
 			case provider == "aws":
@@ -921,6 +924,9 @@ Options:
 			return fmt.Errorf("deployment cancelled")
 		}
 	}
+	if err := runDirectMigrationDeployGuard(cfg, *target); err != nil {
+		return fmt.Errorf("migration guard failed: %w", err)
+	}
 
 	// Execute deployment via the engine
 	fmt.Printf("\nApplying infrastructure...\n")
@@ -940,6 +946,25 @@ Options:
 
 	fmt.Printf("\nDeployment complete.\n")
 	return nil
+}
+
+func runDirectMigrationDeployGuard(configFile, envName string) error {
+	cfg, err := loadMigrationWorkflowConfig(configFile)
+	if err != nil {
+		return err
+	}
+	if cfg == nil || cfg.CI == nil || len(cfg.CI.Migrations) == 0 {
+		return nil
+	}
+	args := []string{"ci-check", "--config", configFile}
+	if envName != "" {
+		args = append(args, "--env", envName)
+	}
+	args = append(args, "--validation-result", ".wfctl/migrations-result.json", "--require-validation-result")
+	if commit := currentCICommitSHA(); commit != "" {
+		args = append(args, "--commit", commit, "--require-same-sha")
+	}
+	return runMigrations(args)
 }
 
 // writeDockerfile writes a minimal multi-stage Dockerfile suitable for workflow engine projects.

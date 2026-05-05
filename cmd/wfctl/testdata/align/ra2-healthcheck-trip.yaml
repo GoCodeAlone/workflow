@@ -1,0 +1,12 @@
+# R-A2 TRIP: container_service declares health_check.path "/healthz" but
+# src_dir contains no file referencing that path. R-A2 fires (WARN or FAIL
+# with --strict-health).
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      src_dir: "./src"
+      health_check:
+        path: "/healthz"

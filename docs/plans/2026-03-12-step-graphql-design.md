@@ -1,3 +1,27 @@
+---
+status: implemented
+area: core
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 9d9ac78
+  - repo: workflow
+    commit: 668b643
+  - repo: workflow
+    commit: 431d35a
+external_refs:
+  - "buymywishlist-phase3: app.yaml uses step.graphql for BwP delivery preview, create order, status, cancel, and return flows"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"step\\.graphql|NewGraphQLStepFactory|GraphQLStep\" module plugins/pipelinesteps schema DOCUMENTATION.md"
+    - "git log --oneline --all -- module/pipeline_step_graphql.go module/pipeline_step_graphql_test.go plugins/pipelinesteps/plugin.go schema/step_schema_builtins.go DOCUMENTATION.md"
+    - "rg -n \"step\\.bmw\\.bwp|step\\.graphql|bwp_\" /Users/jon/workspace/buymywishlist-phase3/app.yaml"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Design: `step.graphql` — Generic GraphQL Step
 
 **Date:** 2026-03-12

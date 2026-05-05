@@ -91,11 +91,23 @@ type PluginRequirement struct {
 	Version string                 `json:"version,omitempty" yaml:"version,omitempty"`
 	Source  string                 `json:"source,omitempty" yaml:"source,omitempty"`
 	Auth    *PluginRequirementAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Verify  *PluginVerifyConfig    `json:"verify,omitempty" yaml:"verify,omitempty"`
 }
 
 // PluginRequirementAuth holds credentials for fetching a private plugin.
 type PluginRequirementAuth struct {
 	Env string `json:"env,omitempty" yaml:"env,omitempty"`
+}
+
+// PluginVerifyConfig controls supply-chain verification for a plugin install.
+// Consumed by the install_verify hook handler in workflow-plugin-supply-chain.
+type PluginVerifyConfig struct {
+	// Signature controls cosign signature verification: required | allow-missing | off
+	Signature string `json:"signature,omitempty" yaml:"signature,omitempty"`
+	// SBOM controls SBOM presence check: required | allow-missing | off
+	SBOM string `json:"sbom,omitempty" yaml:"sbom,omitempty"`
+	// VulnPolicy controls OSV vulnerability scan policy: block-critical | warn | off
+	VulnPolicy string `json:"vuln_policy,omitempty" yaml:"vuln_policy,omitempty"`
 }
 
 // SidecarConfig defines a sidecar container to run alongside the workflow application.
@@ -144,6 +156,7 @@ type WorkflowConfig struct {
 	CI             *CIConfig                     `json:"ci,omitempty" yaml:"ci,omitempty"`
 	Environments   map[string]*EnvironmentConfig `json:"environments,omitempty" yaml:"environments,omitempty"`
 	Secrets        *SecretsConfig                `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Infra          *InfraConfig                  `json:"infra,omitempty" yaml:"infra,omitempty"`
 	SecretStores   map[string]*SecretStoreConfig `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
 	Services       map[string]*ServiceConfig     `json:"services,omitempty" yaml:"services,omitempty"`
 	Mesh           *MeshConfig                   `json:"mesh,omitempty" yaml:"mesh,omitempty"`
@@ -237,6 +250,9 @@ func loadFromFileWithImports(filepath string, seen map[string]bool) (*WorkflowCo
 
 	// Apply hardened defaults for ci.build.security after all merging is done.
 	cfg.applyBuildDefaults()
+
+	// Emit deprecation warning when inline plugin version/source fields are present.
+	warnIfInlinePluginVersions(&cfg)
 
 	return &cfg, nil
 }
@@ -360,6 +376,7 @@ func LoadFromBytes(data []byte) (*WorkflowConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config bytes: %w", err)
 	}
+	warnIfInlinePluginVersions(&cfg)
 	return &cfg, nil
 }
 
@@ -371,6 +388,7 @@ func LoadFromString(yamlContent string) (*WorkflowConfig, error) {
 	if err := yaml.Unmarshal([]byte(yamlContent), &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config string: %w", err)
 	}
+	warnIfInlinePluginVersions(&cfg)
 	return &cfg, nil
 }
 

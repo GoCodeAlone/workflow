@@ -25,7 +25,13 @@ func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath strin
 
 	var failed []string
 	for _, req := range cfg.Requires.Plugins {
-		installDir := filepath.Join(pluginDir, req.Name)
+		// Normalize the name before checking the install directory so the skip check
+		// matches the actual install location. runPluginInstall normalizes names via
+		// normalizePluginName (stripping "workflow-plugin-" prefix), so
+		// "workflow-plugin-auth" is installed at <pluginDir>/auth, not
+		// <pluginDir>/workflow-plugin-auth.
+		normalizedName := normalizePluginName(req.Name)
+		installDir := filepath.Join(pluginDir, normalizedName)
 		if ver := readInstalledVersion(installDir); ver != "" && ver != "unknown" {
 			fmt.Fprintf(os.Stderr, "%s v%s already installed, skipping.\n", req.Name, ver)
 			continue
@@ -52,14 +58,8 @@ func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath strin
 			nameArg = req.Name + "@" + req.Version
 		}
 
-		installArgs := []string{"--plugin-dir", pluginDir}
-		if registryCfgPath != "" {
-			installArgs = append(installArgs, "--config", registryCfgPath)
-		}
-		installArgs = append(installArgs, nameArg)
-
 		fmt.Fprintf(os.Stderr, "Installing %s...\n", nameArg)
-		installErr := runPluginInstall(installArgs)
+		installErr := installPluginReqDirect(pluginDir, registryCfgPath, req)
 		if authCleanup != nil {
 			authCleanup()
 		}
@@ -73,6 +73,42 @@ func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath strin
 		return fmt.Errorf("failed to install: %s", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+// installPluginReqDirect installs a single PluginRequirement by performing a
+// registry lookup and calling installPluginFromManifest directly, propagating
+// req.Verify so that the install_verify hook fires when a supply-chain verify
+// config is present. This avoids re-parsing CLI args and losing the Verify field.
+func installPluginReqDirect(pluginDir, registryCfgPath string, req config.PluginRequirement) error {
+	rawName, requestedVersion := parseNameVersion(req.Name)
+	if requestedVersion == "" {
+		requestedVersion = req.Version
+	}
+	pluginName := normalizePluginName(rawName)
+
+	regCfg, err := LoadRegistryConfig(registryCfgPath)
+	if err != nil {
+		return fmt.Errorf("load registry config: %w", err)
+	}
+	mr := NewMultiRegistry(regCfg)
+
+	manifest, _, registryErr := mr.FetchManifest(rawName)
+	if registryErr != nil {
+		return registryErr
+	}
+
+	if requestedVersion != "" && requestedVersion != manifest.Version {
+		pinManifestToVersion(manifest, requestedVersion)
+	}
+
+	if len(manifest.Dependencies) > 0 {
+		resolved := make(map[string]string)
+		if err := resolveDependencies(pluginName, manifest, pluginDir, registryCfgPath, []string{}, resolved); err != nil {
+			return fmt.Errorf("resolve dependencies for %q: %w", pluginName, err)
+		}
+	}
+
+	return installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify, false)
 }
 
 // runPluginDeps lists dependencies for a plugin without installing them.
@@ -101,9 +137,11 @@ func runPluginDeps(args []string) error {
 	}
 	mr := NewMultiRegistry(cfg)
 
-	manifest, _, err := mr.FetchManifest(pluginName)
+	// Pass rawName (original, un-normalized) to FetchManifest so the original-
+	// name-first lookup in MultiRegistry can engage before the short-name fallback.
+	manifest, _, err := mr.FetchManifest(rawName)
 	if err != nil {
-		return fmt.Errorf("fetch manifest for %q: %w", pluginName, err)
+		return fmt.Errorf("fetch manifest for %q: %w", rawName, err)
 	}
 
 	if len(manifest.Dependencies) == 0 {
@@ -227,7 +265,7 @@ func resolveDependencies(
 
 		// Install the dependency.
 		fmt.Fprintf(os.Stderr, "Installing %s v%s (dependency of %s)...\n", dep.Name, depManifest.Version, pluginName)
-		if err := installPluginFromManifest(pluginDir, dep.Name, depManifest); err != nil {
+		if err := installPluginFromManifest(pluginDir, dep.Name, depManifest, nil, false); err != nil {
 			return fmt.Errorf("install dependency %q of %q: %w", dep.Name, pluginName, err)
 		}
 		resolved[dep.Name] = depManifest.Version

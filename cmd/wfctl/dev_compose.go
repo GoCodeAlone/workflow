@@ -261,7 +261,8 @@ func moduleTypeToDNS(modType string) string {
 }
 
 // runDevCompose generates docker-compose.dev.yml and runs docker compose up -d.
-func runDevCompose(cfg *config.WorkflowConfig, cfgPath string, verbose bool) error {
+// envFile, if non-empty, is passed as --env-file to docker compose.
+func runDevCompose(cfg *config.WorkflowConfig, cfgPath string, verbose bool, envFile string) error {
 	composeYAML, err := generateDevCompose(cfg)
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
@@ -275,7 +276,12 @@ func runDevCompose(cfg *config.WorkflowConfig, cfgPath string, verbose bool) err
 	}
 	fmt.Printf("Generated %s\n", outPath)
 
-	args := []string{"compose", "-f", outPath, "up", "-d"}
+	// --env-file is a global docker compose flag; it must precede the subcommand.
+	args := []string{"compose"}
+	if envFile != "" {
+		args = append(args, "--env-file="+envFile)
+	}
+	args = append(args, "-f", outPath, "up", "-d")
 	cmd := exec.Command("docker", args...) //nolint:gosec
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

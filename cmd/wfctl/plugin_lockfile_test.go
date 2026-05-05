@@ -130,6 +130,70 @@ func TestPluginLockfile_Save_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestLoadPluginLockfile_BackwardCompatFallback verifies that when wfctlLockPath
+// (.wfctl-lock.yaml) does not exist, loadPluginLockfile transparently reads the
+// legacy .wfctl.yaml so repos created before the rename still work.
+func TestLoadPluginLockfile_BackwardCompatFallback(t *testing.T) {
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	// Write plugins to the legacy .wfctl.yaml (no .wfctl-lock.yaml present).
+	legacyContent := `plugins:
+  authz:
+    version: v0.3.1
+    sha256: abc123
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".wfctl.yaml"), []byte(legacyContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	lf, err := loadPluginLockfile(wfctlLockPath)
+	if err != nil {
+		t.Fatalf("loadPluginLockfile (legacy fallback): %v", err)
+	}
+	if _, ok := lf.Plugins["authz"]; !ok {
+		t.Fatalf("expected authz plugin from legacy .wfctl.yaml fallback; entries: %v", lf.Plugins)
+	}
+}
+
+// TestLoadPluginLockfile_NewPathTakesPrecedence verifies that when both
+// .wfctl-lock.yaml and the legacy .wfctl.yaml exist, the new path is used.
+func TestLoadPluginLockfile_NewPathTakesPrecedence(t *testing.T) {
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	newContent := `plugins:
+  authz:
+    version: v1.0.0
+`
+	legacyContent := `plugins:
+  authz:
+    version: v0.1.0
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, wfctlLockPath), []byte(newContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, wfctlYAMLPath), []byte(legacyContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	lf, err := loadPluginLockfile(wfctlLockPath)
+	if err != nil {
+		t.Fatalf("loadPluginLockfile: %v", err)
+	}
+	if got := lf.Plugins["authz"].Version; got != "v1.0.0" {
+		t.Errorf("expected version from new lockfile v1.0.0, got %q (legacy file took precedence)", got)
+	}
+}
+
 func TestPluginInstall_FromConfig_NoRequires(t *testing.T) {
 	dir := t.TempDir()
 	cfg := "modules: []\n"

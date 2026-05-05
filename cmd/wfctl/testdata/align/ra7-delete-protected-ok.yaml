@@ -1,0 +1,8 @@
+# R-A7 OK: plan contains an update (not delete) on the protected resource,
+# and total actions are within --max-changes (default 50). R-A7 does NOT fire.
+modules:
+  - name: prod-db
+    type: infra.database
+    config:
+      engine: postgres
+      protected: true

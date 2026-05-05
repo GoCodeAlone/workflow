@@ -53,6 +53,7 @@ func isHelpRequested(err error) bool {
 // the runtime functions that are registered in the CLICommandRegistry service
 // and invoked by step.cli_invoke from within each command's pipeline.
 var commands = map[string]func([]string) error{
+	"audit":           runAudit,
 	"init":            runInit,
 	"validate":        runValidate,
 	"inspect":         runInspect,
@@ -62,7 +63,9 @@ var commands = map[string]func([]string) error{
 	"schema":          runSchema,
 	"snippets":        runSnippets,
 	"manifest":        runManifest,
-	"migrate":         runMigrate,
+	"config":          runConfig,
+	"migrate":         runMigrateDeprecated,
+	"migrations":      runMigrations,
 	"build-ui":        runBuildUI,
 	"ui":              runUI,
 	"publish":         runPublish,
@@ -83,6 +86,7 @@ var commands = map[string]func([]string) error{
 	"infra":           runInfra,
 	"docs":            runDocs,
 	"editor-schemas":  runEditorSchemas,
+	"editor-bundle":   runEditorBundle,
 	"dsl-reference":   runDSLReference,
 	"ci":              runCI,
 	"override":        runOverride,
@@ -93,6 +97,8 @@ var commands = map[string]func([]string) error{
 	"wizard":          runWizard,
 	"dev":             runDev,
 	"build":           runBuild,
+	"scaffold":        runScaffold,
+	"tenant":          runTenant,
 }
 
 func main() {

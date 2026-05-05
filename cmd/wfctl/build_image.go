@@ -84,7 +84,7 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 				return fmt.Errorf("ko build %q: %w", ctr.Name, err)
 			}
 		default: // dockerfile
-			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, out); err != nil {
+			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, cfg.CI.Registries, out); err != nil {
 				return fmt.Errorf("dockerfile build %q: %w", ctr.Name, err)
 			}
 		}
@@ -92,14 +92,20 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 	return nil
 }
 
-func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, out io.Writer) error {
+func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, registries []config.CIRegistry, out io.Writer) error {
 	dockerfile := ctr.Dockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
 	}
 
-	imageRef := imageRefForContainer(ctr, tag)
-	args := []string{"build", "--file", dockerfile, "--tag", imageRef}
+	imageRef := imageRefForContainer(ctr, tag, registries)
+	// hardened mode uses buildx for provenance/SBOM attestation support.
+	var args []string
+	if hardened {
+		args = []string{"buildx", "build", "--file", dockerfile, "--tag", imageRef}
+	} else {
+		args = []string{"build", "--file", dockerfile, "--tag", imageRef}
+	}
 
 	// Platforms (BuildKit multi-arch).
 	if len(ctr.Platforms) > 0 {
@@ -155,6 +161,15 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 	if dryRun {
 		fmt.Fprintf(out, "[dry-run] docker %s\n", strings.Join(args, " "))
 		return nil
+	}
+
+	if hardened {
+		// buildx with the docker-container driver is required for attestation flags.
+		// Verify a non-default builder is active; the default "docker" driver rejects --provenance.
+		if err := exec.Command("docker", "buildx", "inspect", "--bootstrap").Run(); err != nil {
+			return fmt.Errorf("hardened build requires docker buildx: run 'docker buildx create --use' "+
+				"or add 'docker/setup-buildx-action@v3' to your CI workflow (%w)", err)
+		}
 	}
 
 	//nolint:gosec // G204: docker command constructed from validated config fields
@@ -238,7 +253,15 @@ func buildExternalImageRef(ctr config.CIContainerTarget, tag string, registries 
 	return ctr.Name + ":" + tag
 }
 
-func imageRefForContainer(ctr config.CIContainerTarget, tag string) string {
+func imageRefForContainer(ctr config.CIContainerTarget, tag string, registries []config.CIRegistry) string {
+	for _, regName := range ctr.PushTo {
+		for _, reg := range registries {
+			if reg.Name == regName {
+				return reg.Path + "/" + ctr.Name + ":" + tag
+			}
+		}
+	}
+	// Fall back to raw push_to name when no registry path is configured.
 	if len(ctr.PushTo) > 0 {
 		return ctr.PushTo[0] + "/" + ctr.Name + ":" + tag
 	}

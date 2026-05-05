@@ -13,6 +13,7 @@ import (
 func runBuildPush(args []string) error {
 	fs := flag.NewFlagSet("build push", flag.ContinueOnError)
 	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow config file")
+	tagOverride := fs.String("tag", "", "Override image tag for all containers")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -47,7 +48,11 @@ func runBuildPush(args []string) error {
 			if !ok {
 				return fmt.Errorf("container %q references unknown registry %q", ct.Name, regName)
 			}
-			imageRef := fmt.Sprintf("%s/%s:%s", reg.Path, ct.Name, imageTag(ct.Tag))
+			tag := *tagOverride
+			if tag == "" {
+				tag = ct.Tag
+			}
+			imageRef := fmt.Sprintf("%s/%s:%s", reg.Path, ct.Name, imageTag(tag))
 			if dryRun {
 				fmt.Printf("push %s → %s\n", ct.Name, imageRef)
 				continue

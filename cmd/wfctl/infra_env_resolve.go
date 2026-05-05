@@ -73,6 +73,20 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 				rm.Config["env_vars"] = ev
 			}
 		}
+		// Intentionally DO NOT expand ${VAR} / $VAR env-var references here.
+		// Bootstrap generates some secrets (e.g. SPACES_access_key) AFTER
+		// this temp file is written, so eager expansion here substitutes
+		// empty strings for those variables. Instead, leave the literal
+		// "${VAR}" references intact and let downstream consumers call
+		// config.ExpandEnvInMap at read time (they all already do: infra.go
+		// apply/plan/status/destroy, infra_bootstrap.go bootstrapStateBackend).
+		// ExpandEnvInMap is idempotent on already-expanded values, so this
+		// is safe even for callers whose secrets are Setenv'd before this
+		// runs.
+		//
+		// Note: ${scheme:path} secret references (vault, aws-sm, etc.) are
+		// resolved at apply time via injectSecrets, not here.
+
 		// Rebuild as ModuleConfig preserving DependsOn and Branches from the
 		// original (ResolvedModule doesn't carry them).
 		resolved = append(resolved, config.ModuleConfig{

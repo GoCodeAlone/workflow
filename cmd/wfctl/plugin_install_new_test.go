@@ -53,7 +53,7 @@ func minimalPluginJSON(name, version string) []byte {
 // with a valid plugin.json, calls installFromURL, and verifies:
 //   - the plugin binary is extracted to <pluginDir>/<normalizedName>/<normalizedName>
 //   - the plugin.json is written
-//   - the lockfile (.wfctl.yaml in cwd) is updated with a checksum
+//   - the lockfile (.wfctl-lock.yaml in cwd) is updated with a checksum
 func TestInstallFromURL(t *testing.T) {
 	const pluginName = "url-test-plugin"
 	binaryContent := []byte("#!/bin/sh\necho url-test\n")
@@ -71,7 +71,7 @@ func TestInstallFromURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Run inside a temp cwd so .wfctl.yaml ends up there, not the repo root.
+	// Run inside a temp cwd so .wfctl-lock.yaml ends up there, not the repo root.
 	origWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -84,7 +84,7 @@ func TestInstallFromURL(t *testing.T) {
 
 	pluginsDir := t.TempDir()
 
-	if err := installFromURL(srv.URL+"/"+pluginName+".tar.gz", pluginsDir); err != nil {
+	if err := installFromURL(srv.URL+"/"+pluginName+".tar.gz", pluginsDir, "", true); err != nil {
 		t.Fatalf("installFromURL: %v", err)
 	}
 
@@ -105,8 +105,8 @@ func TestInstallFromURL(t *testing.T) {
 	}
 
 	// Lockfile should record the plugin with a checksum. It is written to
-	// .wfctl.yaml in the cwd (cwdDir).
-	lockfilePath := filepath.Join(cwdDir, ".wfctl.yaml")
+	// .wfctl-lock.yaml in the cwd (cwdDir).
+	lockfilePath := filepath.Join(cwdDir, ".wfctl-lock.yaml")
 	lf, loadErr := loadPluginLockfile(lockfilePath)
 	if loadErr != nil {
 		t.Fatalf("load lockfile: %v", loadErr)
@@ -130,7 +130,7 @@ func TestInstallFromURL_404(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := installFromURL(srv.URL+"/missing.tar.gz", t.TempDir())
+	err := installFromURL(srv.URL+"/missing.tar.gz", t.TempDir(), "", true)
 	if err == nil {
 		t.Fatal("expected error for 404, got nil")
 	}
@@ -152,7 +152,7 @@ func TestInstallFromURL_MissingPluginJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := installFromURL(srv.URL+"/plugin.tar.gz", t.TempDir())
+	err := installFromURL(srv.URL+"/plugin.tar.gz", t.TempDir(), "", true)
 	if err == nil {
 		t.Fatal("expected error for missing plugin.json, got nil")
 	}
@@ -177,7 +177,7 @@ func TestInstallFromURL_NameNormalization(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Run in a temp cwd so .wfctl.yaml lockfile stays isolated.
+	// Run in a temp cwd so .wfctl-lock.yaml lockfile stays isolated.
 	origWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -188,7 +188,7 @@ func TestInstallFromURL_NameNormalization(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
 
 	pluginsDir := t.TempDir()
-	if err := installFromURL(srv.URL+"/plugin.tar.gz", pluginsDir); err != nil {
+	if err := installFromURL(srv.URL+"/plugin.tar.gz", pluginsDir, "", true); err != nil {
 		t.Fatalf("installFromURL: %v", err)
 	}
 
