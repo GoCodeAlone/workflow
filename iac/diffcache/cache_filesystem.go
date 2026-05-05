@@ -123,7 +123,7 @@ func (c *filesystemCache) Get(k Key) (interfaces.DiffResult, bool) {
 // working" signal from elsewhere. The cache-as-amortization framing
 // in the package godoc sets the expectation.
 func (c *filesystemCache) Put(k Key, result interfaces.DiffResult) {
-	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+	if err := os.MkdirAll(c.dir, 0o750); err != nil {
 		return
 	}
 	env := envelope{SchemaVersion: cacheSchemaVersion, Result: result}

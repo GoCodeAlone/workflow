@@ -34,6 +34,7 @@ linters:
         - G703 # Path traversal via taint - paths come from admin config or are internal CI/CD pipeline paths, not user input
         - G705 # XSS via taint - raw-response/static-file steps write admin-configured content by design
         - G706 # Log injection via taint - step.log and publish steps are designed to log arbitrary admin-configured content
+        - G710 # Open redirect via taint - redirect target is the admin-configured OAuth2 provider authorization URL
     gocritic:
       enabled-tags:
         - diagnostic

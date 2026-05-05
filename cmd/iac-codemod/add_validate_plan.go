@@ -12,7 +12,6 @@ import (
 	"go/token"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -641,50 +640,6 @@ func qualifierFromProviderMethods(methods []*ast.FuncDecl) string {
 		}
 	}
 	return ""
-}
-
-// siblingUsesInterfacesImport returns true if any non-test .go file
-// in dir (other than excludePath) imports
-// github.com/GoCodeAlone/workflow/interfaces. Used to decide whether
-// to inject an interfaces import into a file that doesn't have one
-// when emitting a qualified ValidatePlan stub (review round-4 #1).
-func siblingUsesInterfacesImport(dir, excludePath string) bool {
-	const wantPath = "github.com/GoCodeAlone/workflow/interfaces"
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		fpath := filepath.Join(dir, name)
-		if fpath == excludePath {
-			continue
-		}
-		src, err := readFile(fpath)
-		if err != nil {
-			continue
-		}
-		fs := token.NewFileSet()
-		sib, err := parser.ParseFile(fs, fpath, src, parser.ImportsOnly)
-		if err != nil {
-			continue
-		}
-		for _, imp := range sib.Imports {
-			if imp.Path == nil {
-				continue
-			}
-			if strings.Trim(imp.Path.Value, `"`) == wantPath {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // interfacesQualifier returns the package alias `file` uses for

@@ -28,7 +28,7 @@ type fakeDriverWithUpsert struct {
 }
 
 func (d *fakeDriverWithUpsert) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.createCount++
+	d.createCount++
 	if d.createErr != nil {
 		return nil, d.createErr
 	}
@@ -44,7 +44,7 @@ func (d *fakeDriverWithUpsert) Read(_ context.Context, _ interfaces.ResourceRef)
 
 func (d *fakeDriverWithUpsert) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	d.updateCalled = true
-	d.fakeDriver.updateCount++
+	d.updateCount++
 	if d.updateOut != nil {
 		return d.updateOut, nil
 	}
@@ -133,7 +133,7 @@ type alreadyExistsBareDriver struct {
 }
 
 func (d *alreadyExistsBareDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.createCount++
+	d.createCount++
 	return nil, interfaces.ErrResourceAlreadyExists
 }
 
