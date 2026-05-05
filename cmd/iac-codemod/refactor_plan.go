@@ -525,10 +525,36 @@ func classifyPlanBody(fn *ast.FuncDecl, file *ast.File) (planClassification, str
 		return planAlreadyDelegated, ""
 	}
 	// Canonical: body matches the configHash-compare template.
-	if isCanonicalPlanBody(fn.Body) {
+	// Extract the actual `desired` and `current` parameter names from
+	// the signature so the canonical detector can validate the body
+	// against THIS provider's naming convention (round-8 #6: rev3
+	// hardcoded "current"/"desired", missing providers using `state`/
+	// `specs`).
+	desiredParam := nthParamName(fn, 1, "desired")
+	currentParam := nthParamName(fn, 2, "current")
+	if isCanonicalPlanBody(fn.Body, desiredParam, currentParam) {
 		return planCanonical, ""
 	}
 	return planNonCanonical, "Plan body does not match configHash-compare template"
+}
+
+// nthParamName returns the name of fn's `idx`-th parameter (0-based)
+// or `defaultName` if the parameter is unnamed/blank. Used by the
+// canonical detector and rewriter to honor whatever names the original
+// author used.
+func nthParamName(fn *ast.FuncDecl, idx int, defaultName string) string {
+	if fn.Type.Params == nil || len(fn.Type.Params.List) <= idx {
+		return defaultName
+	}
+	field := fn.Type.Params.List[idx]
+	if len(field.Names) == 0 {
+		return defaultName
+	}
+	n := field.Names[0].Name
+	if n == "" || n == "_" {
+		return defaultName
+	}
+	return n
 }
 
 // isAlreadyDelegatedPlanBody returns true ONLY for the canonical
@@ -620,11 +646,8 @@ func isAddrPlanReturn(stmt ast.Stmt) bool {
 // This is intentionally tighter than "first-pass heuristic" — review
 // round 0 finding (anticipated): a too-loose canonical detector silently
 // rewrites bespoke planners that happen to share keywords.
-func isCanonicalPlanBody(body *ast.BlockStmt) bool {
+func isCanonicalPlanBody(body *ast.BlockStmt, desiredParam, currentParam string) bool {
 	stmts := body.List
-
-	// Skip leading comment-only statements (none in Go AST: comments are
-	// CommentGroup-attached, not statements). So we proceed directly.
 
 	// 1. currentByName := make(map[string]...)
 	idx := 0
@@ -636,11 +659,11 @@ func isCanonicalPlanBody(body *ast.BlockStmt) bool {
 	}
 	idx++
 
-	// 2. range over `current`
+	// 2. range over the `current` parameter (whatever the actual name).
 	if idx >= len(stmts) {
 		return false
 	}
-	if !isRangeOverIdent(stmts[idx], "current") {
+	if !isRangeOverIdent(stmts[idx], currentParam) {
 		return false
 	}
 	idx++
@@ -654,7 +677,8 @@ func isCanonicalPlanBody(body *ast.BlockStmt) bool {
 	}
 	idx++
 
-	// 4. range over `desired` whose body has create + configHash-gated update
+	// 4. range over the `desired` parameter (whatever the actual name)
+	// whose body has create + configHash-gated update.
 	if idx >= len(stmts) {
 		return false
 	}
@@ -663,7 +687,7 @@ func isCanonicalPlanBody(body *ast.BlockStmt) bool {
 		return false
 	}
 	xIdent, ok := rng.X.(*ast.Ident)
-	if !ok || xIdent.Name != "desired" {
+	if !ok || xIdent.Name != desiredParam {
 		return false
 	}
 	if !rangeBodyMatchesCanonicalDesired(rng.Body) {

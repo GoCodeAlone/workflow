@@ -285,7 +285,20 @@ func classifyApplyBody(fn *ast.FuncDecl, file *ast.File, fset *token.FileSet, pa
 	// canonical. Round-5 finding #2: rev3 only verified the switch
 	// shape — setup/teardown/custom result aggregation OUTSIDE the
 	// switch was silently dropped on -fix.
-	if hasCanonicalCases(sw) && isCanonicalApplyOuterShape(fn.Body) {
+	// Extract receiver + plan parameter identifier names so the
+	// outer-shape and loop-body validators don't hardcode `p` /
+	// `result` / `plan` (round-8 #5 + #9: providers using `res` /
+	// `pl` / etc. were misclassified as non-canonical even though
+	// rewriteApplyBody preserves custom names).
+	recvName := ""
+	if fn.Recv != nil && len(fn.Recv.List) > 0 && len(fn.Recv.List[0].Names) > 0 {
+		recvName = fn.Recv.List[0].Names[0].Name
+	}
+	planName := ""
+	if fn.Type.Params != nil && len(fn.Type.Params.List) >= 2 && len(fn.Type.Params.List[1].Names) >= 1 {
+		planName = fn.Type.Params.List[1].Names[0].Name
+	}
+	if hasCanonicalCases(sw, recvName) && isCanonicalApplyOuterShape(fn.Body, recvName, planName) {
 		return applyCanonical, "", ""
 	}
 	return applyNonCanonicalOther, "", "Apply outer shape (result-init + range-loop + return) or switch has unrecognised statements; review manually."
@@ -294,23 +307,42 @@ func classifyApplyBody(fn *ast.FuncDecl, file *ast.File, fset *token.FileSet, pa
 // isCanonicalApplyOuterShape returns true if fn.Body matches the
 // canonical 3-statement scaffold around the action switch:
 //
-//  1. `result := &ApplyResult{...}`
-//  2. `for _, action := range plan.Actions { ... }`
-//  3. `return result, nil`
+//  1. `<result-ident> := &ApplyResult{...}`
+//  2. `for _, action := range <plan-ident>.Actions { ... }`
+//  3. `return <result-ident>, nil`
+//
+// `recvName` is the receiver identifier (used by isCanonicalApplyLoopBody
+// to validate the driver-lookup receiver is the provider).
+// `planName` is the actual `plan` parameter name from the signature
+// (round-8 #9: providers using `pl` etc. were misclassified).
+//
+// The accumulator-variable name is recovered from statement 1 and
+// then required to match in statement 3, so any local convention
+// (`result`, `res`, `out`) survives as long as it's consistent.
 //
 // Reject any deviation (extra setup, teardown, custom aggregation,
 // trailing helper calls) so bespoke logic outside the switch is
 // preserved as non-canonical (review round-5 #2).
-func isCanonicalApplyOuterShape(body *ast.BlockStmt) bool {
+func isCanonicalApplyOuterShape(body *ast.BlockStmt, recvName, planName string) bool {
 	if body == nil || len(body.List) != 3 {
 		return false
 	}
-	// 1. result := &ApplyResult{...}
+	if planName == "" {
+		planName = "plan"
+	}
+	// 1. <result-ident> := &ApplyResult{...} — recover the local
+	// accumulator name so the canonical detector doesn't hardcode
+	// "result" (round-8 #9).
 	a, ok := body.List[0].(*ast.AssignStmt)
 	if !ok || a.Tok != token.DEFINE || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
 		return false
 	}
-	if id, ok := a.Lhs[0].(*ast.Ident); !ok || id.Name != "result" {
+	resultIdent, ok := a.Lhs[0].(*ast.Ident)
+	if !ok {
+		return false
+	}
+	resultName := resultIdent.Name
+	if resultName == "" || resultName == "_" {
 		return false
 	}
 	un, ok := a.Rhs[0].(*ast.UnaryExpr)
@@ -324,7 +356,7 @@ func isCanonicalApplyOuterShape(body *ast.BlockStmt) bool {
 	if !typeNameTailMatches(cl.Type, "ApplyResult") {
 		return false
 	}
-	// 2. for _, action := range plan.Actions { ... }
+	// 2. for _, action := range <planName>.Actions { ... }
 	rng, ok := body.List[1].(*ast.RangeStmt)
 	if !ok {
 		return false
@@ -333,23 +365,22 @@ func isCanonicalApplyOuterShape(body *ast.BlockStmt) bool {
 	if !ok || xSel.Sel.Name != "Actions" {
 		return false
 	}
-	if planId, ok := xSel.X.(*ast.Ident); !ok || planId.Name != "plan" {
+	if planId, ok := xSel.X.(*ast.Ident); !ok || planId.Name != planName {
 		return false
 	}
 	// Round-7 #3 + #9: validate the loop body is one of the recognised
-	// canonical scaffolds. rev5 only checked the OUTER 3 statements,
-	// so any per-action logic INSIDE the for loop besides the switch
-	// (logging, metrics, custom error handling, accumulators) was
-	// silently dropped during -fix.
-	if !isCanonicalApplyLoopBody(rng.Body) {
+	// canonical scaffolds. Pass the provider receiver name so the
+	// driver-lookup check (round-8 #5) verifies <recvName>.ResourceDriver
+	// rather than accepting any selector.
+	if !isCanonicalApplyLoopBody(rng.Body, recvName, resultName) {
 		return false
 	}
-	// 3. return result, nil
+	// 3. return <resultName>, nil
 	ret, ok := body.List[2].(*ast.ReturnStmt)
 	if !ok || len(ret.Results) != 2 {
 		return false
 	}
-	if id, ok := ret.Results[0].(*ast.Ident); !ok || id.Name != "result" {
+	if id, ok := ret.Results[0].(*ast.Ident); !ok || id.Name != resultName {
 		return false
 	}
 	if id, ok := ret.Results[1].(*ast.Ident); !ok || id.Name != "nil" {
@@ -376,7 +407,7 @@ func isCanonicalApplyOuterShape(body *ast.BlockStmt) bool {
 // Anything else (bare logging calls, metric increments, helper-call
 // statements, alternate-driver lookup) rejects the canonical
 // classification.
-func isCanonicalApplyLoopBody(body *ast.BlockStmt) bool {
+func isCanonicalApplyLoopBody(body *ast.BlockStmt, recvName, resultName string) bool {
 	if body == nil {
 		return false
 	}
@@ -392,11 +423,11 @@ func isCanonicalApplyLoopBody(body *ast.BlockStmt) bool {
 				return false
 			}
 		case *ast.AssignStmt:
-			if !isCanonicalApplyLoopAssign(s) {
+			if !isCanonicalApplyLoopAssign(s, recvName) {
 				return false
 			}
 		case *ast.IfStmt:
-			if !isCanonicalApplyLoopIf(s) {
+			if !isCanonicalApplyLoopIf(s, resultName) {
 				return false
 			}
 		default:
@@ -407,42 +438,59 @@ func isCanonicalApplyLoopBody(body *ast.BlockStmt) bool {
 }
 
 // isCanonicalApplyLoopAssign returns true for the canonical loop-body
-// AssignStmt shapes (driver lookup at the top, plus assignments to
-// out/err that are part of the canonical scaffold).
-func isCanonicalApplyLoopAssign(a *ast.AssignStmt) bool {
-	// Multi-target: `<a>, err := <X>.ResourceDriver(...)` or
-	// `<a>, err := <X>.<METHOD>(...)`.
-	if len(a.Lhs) == 2 && len(a.Rhs) == 1 {
-		// Second LHS must be `err`.
-		if id, ok := a.Lhs[1].(*ast.Ident); !ok || id.Name != "err" {
-			return false
-		}
-		call, ok := a.Rhs[0].(*ast.CallExpr)
-		if !ok {
-			return false
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return false
-		}
-		switch sel.Sel.Name {
-		case "ResourceDriver", "Driver", "DriverFor":
-			return true
-		}
+// AssignStmt shapes: `<a>, err := <recvName>.ResourceDriver(...)`. The
+// receiver MUST be the provider's own receiver identifier (round-8 #5:
+// rev3 accepted any `<x>.ResourceDriver(...)`, so `helper.ResourceDriver(...)`
+// or `plan.ResourceDriver(...)` falsely classified as canonical).
+func isCanonicalApplyLoopAssign(a *ast.AssignStmt, recvName string) bool {
+	if len(a.Lhs) != 2 || len(a.Rhs) != 1 {
+		return false
 	}
-	return false
+	if id, ok := a.Lhs[1].(*ast.Ident); !ok || id.Name != "err" {
+		return false
+	}
+	call, ok := a.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	switch sel.Sel.Name {
+	case "ResourceDriver", "Driver", "DriverFor":
+		// continue
+	default:
+		return false
+	}
+	// Receiver must be the provider's own identifier.
+	x, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	if recvName != "" && x.Name == recvName {
+		return true
+	}
+	// Tolerate the conventional `p` when recvName is empty/unknown.
+	return recvName == "" && x.Name == "p"
 }
 
 // isCanonicalApplyLoopIf returns true for the canonical loop-body
 // IfStmt shapes:
 //
-//   - `if err != nil { result.Errors = append(...); continue }`
-//   - `if out != nil { result.Resources = append(...) }`
+//   - `if err != nil { <resultName>.Errors = append(...); continue }`
+//   - `if out != nil { <resultName>.Resources = append(...) }`
 //
-// Permissive on the result-update body: any append-to-result-field
-// + optional continue/break is accepted, since wfctlhelpers handles
-// equivalent dispatch internally.
-func isCanonicalApplyLoopIf(ifs *ast.IfStmt) bool {
+// `resultName` is the local accumulator identifier (recovered from the
+// outer scaffold).
+//
+// Round-8 #8: rev6 of isCanonicalApplyLoopIfBodyStmt accepted a bare
+// `continue`/`break` statement, but wfctlhelpers ALWAYS records an
+// ActionError before continuing past a failure. So a guard like
+// `if err != nil { continue }` (no append) would silently change
+// behavior on rewrite. Now we require: when the guard body contains a
+// continue/break, it MUST also contain an append-to-result statement.
+func isCanonicalApplyLoopIf(ifs *ast.IfStmt, resultName string) bool {
 	if ifs == nil {
 		return false
 	}
@@ -450,57 +498,66 @@ func isCanonicalApplyLoopIf(ifs *ast.IfStmt) bool {
 	if !ok || be.Op != token.NEQ {
 		return false
 	}
-	// LHS must be `err` or `out` (the canonical guard variables).
 	id, ok := be.X.(*ast.Ident)
 	if !ok || (id.Name != "err" && id.Name != "out") {
 		return false
 	}
-	// RHS must be `nil`.
 	if rhs, ok := be.Y.(*ast.Ident); !ok || rhs.Name != "nil" {
 		return false
 	}
 	if ifs.Else != nil {
 		return false
 	}
-	// Body: 1-2 statements, all canonical update-result shapes.
+	hasAppend := false
+	hasBranch := false
 	for _, s := range ifs.Body.List {
-		if !isCanonicalApplyLoopIfBodyStmt(s) {
+		switch ss := s.(type) {
+		case *ast.AssignStmt:
+			if !isCanonicalAppendToResult(ss, resultName) {
+				return false
+			}
+			hasAppend = true
+		case *ast.BranchStmt:
+			if ss.Tok != token.CONTINUE && ss.Tok != token.BREAK {
+				return false
+			}
+			hasBranch = true
+		default:
 			return false
 		}
+	}
+	// A bare continue/break (no append) is rejected — wfctlhelpers
+	// always records the ActionError before continuing.
+	if hasBranch && !hasAppend {
+		return false
 	}
 	return true
 }
 
-// isCanonicalApplyLoopIfBodyStmt returns true for the recognised
-// statements inside a canonical loop-body if-guard: an append-to-result
-// AssignStmt (LHS shape `result.<F>`), or a continue/break.
-func isCanonicalApplyLoopIfBodyStmt(stmt ast.Stmt) bool {
-	switch s := stmt.(type) {
-	case *ast.AssignStmt:
-		if len(s.Lhs) != 1 || len(s.Rhs) != 1 || s.Tok != token.ASSIGN {
-			return false
-		}
-		sel, ok := s.Lhs[0].(*ast.SelectorExpr)
-		if !ok {
-			return false
-		}
-		if id, ok := sel.X.(*ast.Ident); !ok || id.Name != "result" {
-			return false
-		}
-		// RHS must be a call to append.
-		call, ok := s.Rhs[0].(*ast.CallExpr)
-		if !ok {
-			return false
-		}
-		idFn, ok := call.Fun.(*ast.Ident)
-		if !ok || idFn.Name != "append" {
-			return false
-		}
-		return true
-	case *ast.BranchStmt:
-		return s.Tok == token.CONTINUE || s.Tok == token.BREAK
+// isCanonicalAppendToResult returns true if stmt is
+// `<resultName>.<F> = append(...)`. Used inside loop-body if-guards
+// (round-8 #8: tightened to require this shape, not just "any
+// append").
+func isCanonicalAppendToResult(s *ast.AssignStmt, resultName string) bool {
+	if len(s.Lhs) != 1 || len(s.Rhs) != 1 || s.Tok != token.ASSIGN {
+		return false
 	}
-	return false
+	sel, ok := s.Lhs[0].(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	if id, ok := sel.X.(*ast.Ident); !ok || id.Name != resultName {
+		return false
+	}
+	call, ok := s.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	idFn, ok := call.Fun.(*ast.Ident)
+	if !ok || idFn.Name != "append" {
+		return false
+	}
+	return true
 }
 
 // fmtPosShort renders a path:line short form for offender positions.
@@ -731,10 +788,17 @@ func findCustomErrorWrap(sw *ast.SwitchStmt) token.Pos {
 //   - DeclStmt: `var out *ResourceOutput` (rare but legal; wfctlhelpers
 //     handles its own out variable)
 //
-// Anything else (including `default:` cases that error on unknown
-// action) is acceptable in the `default` case but rejected in the
-// canonical "create"/"update"/"delete"/"replace" cases.
-func hasCanonicalCases(sw *ast.SwitchStmt) bool {
+// Round-8 #4: rev3 of this function accepted `default:` clauses
+// without inspecting their body. Logging/metrics/etc. in default
+// silently dropped. Now default bodies are validated against the
+// same shape: only AssignStmt of `err = fmt.Errorf(...)` (the
+// canonical unknown-action error pattern) is allowed. Everything
+// else (including bare logging) rejects.
+//
+// `recvName` is the provider receiver identifier — passed through to
+// caseBodyIsCanonical → isCanonicalCaseAssign → isDriverMethodCall to
+// validate driver-receiver names per the round-4 #3 fix.
+func hasCanonicalCases(sw *ast.SwitchStmt, recvName string) bool {
 	hasCreate, hasUpdate := false, false
 	for _, stmt := range sw.Body.List {
 		cc, ok := stmt.(*ast.CaseClause)
@@ -755,16 +819,16 @@ func hasCanonicalCases(sw *ast.SwitchStmt) bool {
 				isCanonicalLabel = true
 			}
 		}
-		// `default:` (no labels) is allowed regardless of body shape;
-		// the wfctlhelpers dispatcher already errors on unknown
-		// actions, so a default body that does the same is
-		// behaviourally redundant rather than dropped.
+		// `default:` (no labels) — round-8 #4: validate body matches
+		// the canonical unknown-action error shape. Anything else
+		// (logging, metrics, alternate side-effect) rejects.
 		if len(labels) == 0 {
+			if !isCanonicalDefaultBody(cc.Body) {
+				return false
+			}
 			continue
 		}
 		if !isCanonicalLabel {
-			// A non-create/update/delete/replace label inside the
-			// switch is an out-of-template idiom; reject.
 			return false
 		}
 		if !caseBodyIsCanonical(cc.Body) {
@@ -776,6 +840,36 @@ func hasCanonicalCases(sw *ast.SwitchStmt) bool {
 
 // caseLabels returns the unquoted string-literal values of the case
 // clause's case-list. A `default:` clause returns an empty slice.
+// isCanonicalDefaultBody returns true if body matches the canonical
+// `default:` clause shape: a single `err = fmt.Errorf("unknown action
+// %q", ...)` assignment. Anything else (logging, metrics, alternate
+// side-effects) rejects (round-8 #4).
+func isCanonicalDefaultBody(body []ast.Stmt) bool {
+	if len(body) != 1 {
+		return false
+	}
+	a, ok := body[0].(*ast.AssignStmt)
+	if !ok || a.Tok != token.ASSIGN || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
+		return false
+	}
+	if id, ok := a.Lhs[0].(*ast.Ident); !ok || id.Name != "err" {
+		return false
+	}
+	call, ok := a.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	x, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return x.Name == "fmt" && sel.Sel.Name == "Errorf"
+}
+
 func caseLabels(cc *ast.CaseClause) []string {
 	var out []string
 	for _, expr := range cc.List {
@@ -942,7 +1036,7 @@ func isDriverMethodCall(expr ast.Expr) bool {
 	// `audit`, `helper` (per round-4 #3 — that's the whole point of
 	// the receiver check).
 	switch x.Name {
-	case "d", "dr", "drv", "rdrv", "driver", "resourceDriver":
+	case "d", "dr", "drv", "rd", "rdrv", "driver", "resourceDriver":
 		return true
 	}
 	return false

@@ -633,8 +633,15 @@ func runAssertProviderImplementsValidatePlan(pass *analysis.Pass) (any, error) {
 			routeSkipName(pass, pos, recv)
 			continue
 		}
+		// Round-8 #3: rev2 checked the marker on EVERY method, so a
+		// marker on Destroy/Status/etc. accidentally suppressed the
+		// whole provider's analysis. Restrict to Plan and Apply (the
+		// provider-defining methods that actually opt the type out).
 		anyMarker := false
 		for _, m := range methods {
+			if m.Name.Name != "Plan" && m.Name.Name != "Apply" {
+				continue
+			}
 			if hasSkipMarkerOn(m.Doc) {
 				anyMarker = true
 				break

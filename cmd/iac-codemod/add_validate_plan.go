@@ -288,7 +288,15 @@ func addValidatePlanFile(path string, opts *Options, report *validatePlanReport)
 			}
 		}
 		if !skipped {
+			// Round-8 #2: rev2 checked the marker on EVERY method, so
+			// a marker on Destroy/Status/etc. accidentally suppressed
+			// add-validate-plan for the whole provider. Restrict to
+			// Plan and Apply (the provider-defining methods that
+			// actually opt the type out of the migration).
 			for _, m := range methods {
+				if m.Name.Name != "Plan" && m.Name.Name != "Apply" {
+					continue
+				}
 				if hasSkipMarkerOn(m.Doc) {
 					skipped = true
 					break
@@ -454,22 +462,15 @@ func providerReceiverConvention(methods []*ast.FuncDecl) bool {
 }
 
 // isLocalDuplicate returns true if `m` appears to be a re-parse of a
-// FuncDecl already in `existing` (same method name + same parameter
-// arity + same return arity). Round-7 #10: a name-only dedupe drops
-// sibling ValidatePlan declarations when the local file has a
-// wrong-signature shadow; the arity-aware dedupe lets the correct
-// sibling through.
+// FuncDecl already in `existing`. Round-8 #1: arity-only dedupe (rev2)
+// still mistreated a correct ValidatePlan(plan *IaCPlan)
+// []PlanDiagnostic as a duplicate of a wrong-signature
+// ValidatePlan(name string) []PlanDiagnostic — same arity, different
+// types. Now compares parameter and return TYPES via a structural
+// fingerprint (typeFingerprint) so signatures with matching names but
+// different types are correctly distinguished.
 func isLocalDuplicate(m *ast.FuncDecl, existing []*ast.FuncDecl) bool {
-	mParams := 0
-	mResults := 0
-	if m.Type != nil {
-		if m.Type.Params != nil {
-			mParams = len(m.Type.Params.List)
-		}
-		if m.Type.Results != nil {
-			mResults = len(m.Type.Results.List)
-		}
-	}
+	mSig := signatureFingerprint(m.Type)
 	for _, lm := range existing {
 		if lm == m {
 			continue
@@ -477,22 +478,72 @@ func isLocalDuplicate(m *ast.FuncDecl, existing []*ast.FuncDecl) bool {
 		if lm.Name.Name != m.Name.Name {
 			continue
 		}
-		lParams := 0
-		lResults := 0
-		if lm.Type != nil {
-			if lm.Type.Params != nil {
-				lParams = len(lm.Type.Params.List)
-			}
-			if lm.Type.Results != nil {
-				lResults = len(lm.Type.Results.List)
-			}
+		if signatureFingerprint(lm.Type) == mSig {
+			return true
 		}
-		if lParams != mParams || lResults != mResults {
-			continue
-		}
-		return true
 	}
 	return false
+}
+
+// signatureFingerprint returns a string fingerprint of a FuncType
+// that's stable across distinct *ast.FuncDecl values (as produced by
+// re-parsing the same file in planLikeProviderMethodsInDir). The
+// fingerprint includes BOTH parameter and return type strings so
+// same-name same-arity DIFFERENT-type methods (the wrong-signature
+// shadow scenario) get distinct fingerprints (round-8 #1).
+func signatureFingerprint(ft *ast.FuncType) string {
+	if ft == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("(")
+	if ft.Params != nil {
+		for i, p := range ft.Params.List {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString(typeFingerprint(p.Type))
+		}
+	}
+	b.WriteString(")")
+	if ft.Results != nil {
+		b.WriteString("(")
+		for i, r := range ft.Results.List {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString(typeFingerprint(r.Type))
+		}
+		b.WriteString(")")
+	}
+	return b.String()
+}
+
+// typeFingerprint returns a structural string for an ast.Expr type.
+// Conservative: covers the type shapes used by IaC provider methods
+// (Ident, SelectorExpr, StarExpr, ArrayType, MapType, InterfaceType,
+// FuncType, Ellipsis). Anything else returns "?", which still
+// participates in fingerprint comparison correctly.
+func typeFingerprint(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		return typeFingerprint(e.X) + "." + e.Sel.Name
+	case *ast.StarExpr:
+		return "*" + typeFingerprint(e.X)
+	case *ast.ArrayType:
+		return "[]" + typeFingerprint(e.Elt)
+	case *ast.MapType:
+		return "map[" + typeFingerprint(e.Key) + "]" + typeFingerprint(e.Value)
+	case *ast.InterfaceType:
+		return "interface{}"
+	case *ast.Ellipsis:
+		return "..." + typeFingerprint(e.Elt)
+	case *ast.FuncType:
+		return "func" + signatureFingerprint(e)
+	}
+	return "?"
 }
 
 // qualifierFromProviderMethods inspects the parameter types of the

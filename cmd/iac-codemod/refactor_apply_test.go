@@ -99,84 +99,13 @@ func TestRefactorApply_ExtraBookkeepingNotCanonical(t *testing.T) {
 	}
 }
 
-// canonicalApplyUnnamedReceiverSrc — review round-2 finding #4. A
-// canonical Apply method whose receiver is unnamed
-// (`func (*Provider) Apply(...)`) must produce a rewrite that compiles:
-// the rewriter must inject a receiver name AND update the receiver decl.
-const canonicalApplyUnnamedReceiverSrc = `package p
-
-import "context"
-
-type ResourceSpec struct{ Name, Type string }
-type ResourceState struct{ Name string; ProviderID string }
-type IaCPlan struct{ ID string; Actions []PlanAction }
-type PlanAction struct{ Action string; Resource ResourceSpec; Current *ResourceState }
-type ApplyResult struct{ PlanID string; Errors []ActionError; Resources []ResourceOutput }
-type ActionError struct{ Resource, Action, Error string }
-type ResourceRef struct{ Name, Type, ProviderID string }
-type ResourceOutput struct{ ProviderID string }
-type PlanDiagnostic struct{}
-
-type Driver interface {
-	Create(ctx context.Context, r ResourceSpec) (*ResourceOutput, error)
-	Update(ctx context.Context, ref ResourceRef, r ResourceSpec) (*ResourceOutput, error)
-}
-
-type AnonProvider struct{}
-
-func (anon *AnonProvider) ResourceDriver(string) (Driver, error) { return nil, nil }
-
-func (anon *AnonProvider) Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error) {
-	plan, err := platform.ComputePlan(ctx, anon, desired, current)
-	return &plan, err
-}
-
-// Unnamed receiver: ` + "`func (*AnonProvider) Apply(...)`" + `.
-func (*AnonProvider) Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error) {
-	result := &ApplyResult{PlanID: plan.ID}
-	for _, action := range plan.Actions {
-		d, err := plan.ResourceDriver(action.Resource.Type)
-		if err != nil {
-			result.Errors = append(result.Errors, ActionError{Resource: action.Resource.Name})
-			continue
-		}
-		var out *ResourceOutput
-		switch action.Action {
-		case "create":
-			out, err = d.Create(ctx, action.Resource)
-		case "update":
-			ref := ResourceRef{Name: action.Resource.Name}
-			out, err = d.Update(ctx, ref, action.Resource)
-		}
-		if err != nil {
-			result.Errors = append(result.Errors, ActionError{Resource: action.Resource.Name})
-			continue
-		}
-		if out != nil {
-			result.Resources = append(result.Resources, *out)
-		}
-	}
-	return result, nil
-}
-
-func (anon *AnonProvider) ValidatePlan(plan *IaCPlan) []PlanDiagnostic { return nil }
-`
-
-func TestRefactorApply_Fix_UnnamedReceiverGetsName(t *testing.T) {
-	path := writeFixture(t, "provider.go", canonicalApplyUnnamedReceiverSrc)
-	var stdout, stderr bytes.Buffer
-	if code := runRefactorApply([]string{path}, &Options{DryRun: false, Fix: true}, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit = %d, want 0; stderr=%q", code, stderr.String())
-	}
-	got, _ := os.ReadFile(path)
-	gotStr := string(got)
-	if !strings.Contains(gotStr, "func (p *AnonProvider) Apply(") {
-		t.Errorf("rewrite must inject a receiver name on previously-anonymous receivers; got:\n%s", gotStr)
-	}
-	if !strings.Contains(gotStr, "wfctlhelpers.ApplyPlan(ctx, p, plan)") {
-		t.Errorf("rewrite must reference the injected receiver name; got:\n%s", gotStr)
-	}
-}
+// Round-2 finding #4 also applied to refactor-apply but the
+// unnamed-receiver path can't have a canonical-shape body in real Go:
+// without a receiver identifier in scope, the body can't call
+// `<recv>.ResourceDriver(...)`, which the round-7+round-8-tightened
+// canonical detector now requires. The receiver-injection helper
+// ensureReceiverName is shared between refactor-plan and refactor-apply;
+// coverage is in TestRefactorPlan_Fix_UnnamedReceiverGetsName.
 
 // canonicalApplySrc is a minimal Apply body the codemod will rewrite.
 // Loop+switch on action.Action with create/update/delete branches that
