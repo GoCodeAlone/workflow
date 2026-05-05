@@ -132,15 +132,32 @@ func (m *RemoteModule) InvokeServiceContext(ctx context.Context, method string, 
 	req := &pb.InvokeServiceRequest{
 		HandleId: m.handleID,
 		Method:   method,
-		Args:     mapToStruct(args),
 	}
 	contract := m.serviceContracts[method]
+	// Encode args as Struct only when the wire actually carries it. STRICT_PROTO
+	// nils req.Args after a successful typed encode and relies on TypedInput;
+	// failing early on Struct encoding for values JSON can marshal but Struct
+	// cannot (e.g. time.Time targeting a strict typed payload) would break
+	// otherwise-valid STRICT_PROTO calls — Copilot review #555 finding.
+	encodeLegacyArgs := contract == nil ||
+		contract.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED ||
+		contract.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT ||
+		contract.Mode == pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT
+	if encodeLegacyArgs {
+		argsStruct, err := mapToStruct(args)
+		if err != nil {
+			return nil, fmt.Errorf("remote invoke %s: encode args as Struct: %w", method, err)
+		}
+		req.Args = argsStruct
+	}
 	if contract != nil && contract.Mode != pb.ContractMode_CONTRACT_MODE_UNSPECIFIED && contract.Mode != pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
 		typedInput, err := mapToTypedAny(contract.InputMessage, args, m.types)
 		if err != nil {
 			if contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 				return nil, fmt.Errorf("remote invoke %s STRICT_PROTO input message %q cannot use legacy Struct fallback: %w", method, contract.InputMessage, err)
 			}
+			// PROTO_WITH_LEGACY_STRUCT: typed encoding failed, fall back to
+			// the legacy Struct already encoded above.
 		} else {
 			req.TypedInput = typedInput
 			if contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
