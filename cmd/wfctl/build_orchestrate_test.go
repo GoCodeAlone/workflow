@@ -110,7 +110,7 @@ func TestRunBuild_SplitCSV(t *testing.T) {
 func TestRunBuild_FlagsRegistered(t *testing.T) {
 	// Verify all required flags are registered in the FlagSet.
 	fs := newBuildFlagSet()
-	required := []string{"config", "dry-run", "only", "skip", "tag", "format", "no-push", "env"}
+	required := []string{"config", "dry-run", "only", "skip", "tag", "format", "no-push", "push", "env"}
 	for _, name := range required {
 		if fs.Lookup(name) == nil {
 			t.Errorf("flag --%s not registered in wfctl build FlagSet", name)
@@ -142,6 +142,7 @@ func buildFlagNames() map[string]bool {
 		"tag":     true,
 		"format":  true,
 		"no-push": true,
+		"push":    true,
 		"env":     true,
 	}
 }

@@ -156,7 +156,74 @@ func TestRunBuildImage_NotHardenedNoProvenanceArgs(t *testing.T) {
 	}
 }
 
-// TestRunBuildImage_HardenedUsesBuildx verifies hardened=true produces "docker buildx build".
+// TestRunBuildImage_HardenedPushFlag verifies that --push passed to runBuildImage
+// adds --push to the docker buildx build args in hardened mode.
+func TestRunBuildImage_HardenedPushFlag(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    security:
+      hardened: true
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	t.Setenv("DOCKER_BUILDKIT", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath, "--push"}, &buf); err != nil {
+		t.Fatalf("hardened --push dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "--push") {
+		t.Errorf("expected --push in hardened dry-run output with --push flag, got: %q", out)
+	}
+	if strings.Contains(out, "--load") {
+		t.Errorf("expected no --load when --push is set, got: %q", out)
+	}
+}
+
+// TestRunBuildImage_HardenedNoPushAddsLoad verifies that without --push, hardened
+// buildx invocations include --load so the image is available in the local daemon.
+func TestRunBuildImage_HardenedNoPushAddsLoad(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    security:
+      hardened: true
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	t.Setenv("DOCKER_BUILDKIT", "1")
+
+	var buf bytes.Buffer
+	// Note: no --push flag — default is no push (load only).
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath}, &buf); err != nil {
+		t.Fatalf("hardened no-push dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "--load") {
+		t.Errorf("expected --load in hardened dry-run output without --push flag, got: %q", out)
+	}
+	if strings.Contains(out, " --push") {
+		t.Errorf("expected no --push when push flag is not set, got: %q", out)
+	}
+}
 func TestRunBuildImage_HardenedUsesBuildx(t *testing.T) {
 	dir := t.TempDir()
 	cfg := `ci:

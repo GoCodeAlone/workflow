@@ -25,6 +25,7 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 	cfgPath := fs.String("config", "", "Config file")
 	dryRun := fs.Bool("dry-run", false, "Print planned actions without executing")
 	tagOverride := fs.String("tag", "", "Override image tag for all containers")
+	pushImages := fs.Bool("push", false, "Push images directly via buildx (hardened mode: adds --push to buildx; non-hardened: no effect, separate push step handles it)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 				return fmt.Errorf("ko build %q: %w", ctr.Name, err)
 			}
 		default: // dockerfile
-			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, cfg.CI.Registries, out); err != nil {
+			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, *pushImages, cfg.CI.Registries, out); err != nil {
 				return fmt.Errorf("dockerfile build %q: %w", ctr.Name, err)
 			}
 		}
@@ -92,7 +93,7 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 	return nil
 }
 
-func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, registries []config.CIRegistry, out io.Writer) error {
+func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, push bool, registries []config.CIRegistry, out io.Writer) error {
 	dockerfile := ctr.Dockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
@@ -154,6 +155,15 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 			fmt.Fprintf(out, "warning: DOCKER_BUILDKIT is not set to 1; provenance attestation requires BuildKit\n")
 		}
 		args = append(args, "--provenance=mode=max", "--sbom=true")
+		// The docker-container driver caches the build result but does not export
+		// it unless --push or --load is explicitly specified. Pass the appropriate
+		// flag so the image is either pushed to the registry or loaded into the
+		// local docker daemon for downstream use (e.g. docker run in CI).
+		if push {
+			args = append(args, "--push")
+		} else {
+			args = append(args, "--load")
+		}
 	}
 
 	args = append(args, ".")
