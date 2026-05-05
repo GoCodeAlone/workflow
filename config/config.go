@@ -378,6 +378,24 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 			}
 		}
 
+		// Merge Environments — per-env dedupe by name (parent wins).
+		// ResolveSecretStore consults Environments[env].SecretsStoreOverride
+		// to route secrets to a specific store for a given environment. A
+		// shared imported file commonly defines per-env overrides while the
+		// main file only redeclares envs it customizes; without merging,
+		// imported overrides are dropped and secrets fall back to
+		// defaultStore/provider — silently fetching from the wrong backend.
+		if len(impCfg.Environments) > 0 {
+			if cfg.Environments == nil {
+				cfg.Environments = make(map[string]*EnvironmentConfig, len(impCfg.Environments))
+			}
+			for k, v := range impCfg.Environments {
+				if _, exists := cfg.Environments[k]; !exists {
+					cfg.Environments[k] = v
+				}
+			}
+		}
+
 		// Merge top-level secrets. Generate (dedupe by Key) and Entries
 		// (dedupe by Name) are appended. Scalar fields follow parent-wins.
 		// `Config` is a map[string]any: per-key merge so an imported "shared

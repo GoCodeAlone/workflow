@@ -802,7 +802,7 @@ secretStores:
     config:
       address: https://vault.example.com
   shared-store:
-    provider: aws-secretsmanager
+    provider: aws-secrets-manager
     config:
       region: us-east-1
 secrets:
@@ -818,7 +818,7 @@ imports:
 
 secretStores:
   shared-store:
-    provider: gcp-secretmanager
+    provider: gcp-secret-manager
     config:
       project: my-project
 `
@@ -839,7 +839,7 @@ secretStores:
 	// shared-store: parent wins.
 	if shared, ok := cfg.SecretStores["shared-store"]; !ok {
 		t.Error("expected SecretStores[shared-store]")
-	} else if shared.Provider != "gcp-secretmanager" {
+	} else if shared.Provider != "gcp-secret-manager" {
 		t.Errorf("expected main-wins on shared-store provider, got %q", shared.Provider)
 	}
 	// defaultStore came from imported secrets:
@@ -897,5 +897,76 @@ secrets:
 	// Main override wins on conflict.
 	if cfg.Secrets.Config["token_env"] != "MAIN_TOKEN" {
 		t.Errorf("expected token_env=MAIN_TOKEN (main override), got %v", cfg.Secrets.Config["token_env"])
+	}
+}
+
+// TestProcessImports_MergesEnvironmentsFromImport pins that
+// WorkflowConfig.Environments is merged across imports. ResolveSecretStore
+// consults Environments[env].SecretsStoreOverride to route secrets to a
+// specific store per environment; without the merge, an imported per-env
+// override is dropped and secret resolution silently falls back to
+// defaultStore/provider — fetching from the wrong backend.
+func TestProcessImports_MergesEnvironmentsFromImport(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+environments:
+  staging:
+    provider: aws
+    region: us-east-1
+    secretsStoreOverride: vault
+  production:
+    provider: aws
+    region: us-west-2
+    secretsStoreOverride: aws-prod
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+environments:
+  production:
+    provider: aws
+    region: us-west-2
+    secretsStoreOverride: aws-prod-main
+  local:
+    provider: docker
+    region: localhost
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// staging came from import only — must survive merge.
+	staging, ok := cfg.Environments["staging"]
+	if !ok {
+		t.Fatal("expected Environments[staging] from import")
+	}
+	if staging.SecretsStoreOverride != "vault" {
+		t.Errorf("expected staging.SecretsStoreOverride=vault from import, got %q", staging.SecretsStoreOverride)
+	}
+
+	// production: parent wins (main override).
+	prod, ok := cfg.Environments["production"]
+	if !ok {
+		t.Fatal("expected Environments[production]")
+	}
+	if prod.SecretsStoreOverride != "aws-prod-main" {
+		t.Errorf("expected main-wins on production.SecretsStoreOverride, got %q", prod.SecretsStoreOverride)
+	}
+
+	// local came from main only.
+	if _, ok := cfg.Environments["local"]; !ok {
+		t.Error("expected Environments[local] from main")
 	}
 }
