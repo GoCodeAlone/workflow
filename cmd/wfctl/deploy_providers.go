@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/external"
 	"google.golang.org/grpc/codes"
@@ -337,43 +339,42 @@ func (r *remoteIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration
 	return caps
 }
 
-func (r *remoteIaCProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
-	desiredAny, err := jsonToAny(desired)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.Plan: marshal desired: %w", err)
-	}
-	currentAny, err := jsonToAny(current)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.Plan: marshal current: %w", err)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.Plan", map[string]any{
-		"desired": desiredAny,
-		"current": currentAny,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var plan interfaces.IaCPlan
-	if err := anyToStruct(res, &plan); err != nil {
-		return nil, fmt.Errorf("IaCProvider.Plan: decode result: %w", err)
-	}
-	return &plan, nil
+// Plan delegates to platform.ComputePlan, the canonical wfctl-side diff
+// engine. The pre-W-Refactor body proxied a monolithic IaCProvider.Plan
+// call to the plugin via InvokeService — a v1-wire shape that platform/
+// differ.go superseded once Diff dispatch landed (W-3 / W-7). Delegating
+// here keeps the wfctl-loaded provider's Plan body in lockstep with the
+// canonical Plan flow that infra_apply.go's computeInfraPlan var already
+// uses; the lint analyzer in cmd/iac-codemod/lint.go::AssertPlanDelegates
+// ToHelper now reports zero findings on this file. The 2-statement
+// `plan, err := platform.ComputePlan(...); return &plan, err` shape is
+// the canonical form recognized by isAlreadyDelegatedPlanBody (the
+// rewriter's idempotency check). ResourceDriver.Diff for per-resource
+// classification still hits the plugin via remoteResourceDriver, so the
+// gRPC fan-out is preserved.
+func (r *remoteIaCProvider) Plan(ctx context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	plan, err := platform.ComputePlan(ctx, r, desired, current)
+	return &plan, err
 }
 
-func (r *remoteIaCProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	planAny, err := jsonToAny(plan)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.Apply: marshal plan: %w", err)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.Apply", map[string]any{"plan": planAny})
-	if err != nil {
-		return nil, err
-	}
-	var result interfaces.ApplyResult
-	if err := anyToStruct(res, &result); err != nil {
-		return nil, fmt.Errorf("IaCProvider.Apply: decode result: %w", err)
-	}
-	return &result, nil
+// Apply delegates to wfctlhelpers.ApplyPlan, the canonical per-action
+// dispatcher. The pre-W-Refactor body proxied a monolithic IaCProvider.
+// Apply call to the plugin via InvokeService — a v1-wire shape that
+// wfctlhelpers.ApplyPlan supersedes by fanning out per-action through
+// ResourceDriver.{Create,Update,Delete,Replace} (which remoteResource
+// Driver still proxies via gRPC). The single-statement
+// `return wfctlhelpers.ApplyPlan(ctx, p, plan)` shape is the canonical
+// form recognized by isAlreadyDelegatedApplyBody.
+//
+// Note: this delegation also activates wfctlhelpers.ApplyPlan's drift
+// postcondition + per-action error decomposition for any plugin loaded
+// via this proxy, regardless of plugin.json's iacProvider.compute
+// PlanVersion declaration. The dispatch gate in infra_apply.go that
+// branches on DispatchVersionFor remains, but both branches now route
+// through the same per-driver dispatch — the v1 monolithic Apply
+// endpoint is no longer reachable through wfctl.
+func (r *remoteIaCProvider) Apply(ctx context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return wfctlhelpers.ApplyPlan(ctx, r, plan)
 }
 
 func (r *remoteIaCProvider) Destroy(_ context.Context, refs []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {

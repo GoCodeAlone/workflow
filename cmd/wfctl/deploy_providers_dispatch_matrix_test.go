@@ -248,26 +248,15 @@ func TestDispatchMatrix_RemoteIaCProvider(t *testing.T) {
 		requiredKeys []string
 		invoke       func(p *remoteIaCProvider, ri *recordingInvoker) error
 	}{
-		{
-			name:         "Plan",
-			wantMethod:   "IaCProvider.Plan",
-			requiredKeys: []string{"desired", "current"},
-			invoke: func(p *remoteIaCProvider, ri *recordingInvoker) error {
-				ri.resp = map[string]any{}
-				_, err := p.Plan(ctx, nil, nil)
-				return err
-			},
-		},
-		{
-			name:         "Apply",
-			wantMethod:   "IaCProvider.Apply",
-			requiredKeys: []string{"plan"},
-			invoke: func(p *remoteIaCProvider, ri *recordingInvoker) error {
-				ri.resp = map[string]any{}
-				_, err := p.Apply(ctx, &interfaces.IaCPlan{})
-				return err
-			},
-		},
+		// Plan and Apply intentionally absent from this matrix.
+		// Per W-Refactor (PR 5), remoteIaCProvider.Plan delegates to
+		// platform.ComputePlan and Apply delegates to wfctlhelpers.ApplyPlan.
+		// Neither method forwards a monolithic IaCProvider.Plan /
+		// IaCProvider.Apply RPC anymore — the per-action driver dispatch
+		// (ResourceDriver.Diff / Create / Update / Delete) covers the
+		// underlying gRPC traffic and is exercised by
+		// TestDispatchMatrix_RemoteResourceDriver. Canonical-delegation
+		// behavior is pinned in deploy_providers_remote_iac_test.go.
 		{
 			name:         "Destroy",
 			wantMethod:   "IaCProvider.Destroy",

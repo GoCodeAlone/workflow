@@ -67,81 +67,108 @@ func TestRemoteIaC_Capabilities_Error(t *testing.T) {
 }
 
 // ── Plan ──────────────────────────────────────────────────────────────────────
+//
+// Pre-W-Refactor, Plan() proxied a monolithic IaCProvider.Plan call to
+// the plugin via InvokeService. After W-Refactor (PR 5), Plan() delegates
+// to platform.ComputePlan, which classifies actions locally:
+//   - net-new resources (no current state) → emit "create" without
+//     dispatching ResourceDriver.Diff (no InvokeService traffic);
+//   - removed-from-desired resources → emit "delete" without dispatching
+//     Diff (also no InvokeService traffic);
+//   - updates/replaces fan out via remoteResourceDriver.Diff →
+//     InvokeService("ResourceDriver.Diff", ...).
+//
+// The test below pins the create-only path because it exercises the
+// canonical-delegation contract without standing up the full diff-cache
+// + Diff dispatch. The delegation-via-driver path is covered by the
+// canonical test below + the existing remote-driver tests.
 
-func samplePlanResponse() map[string]any {
-	return map[string]any{
-		"id": "plan-abc",
-		"actions": []any{
-			map[string]any{
-				"action": "create",
-				"resource": map[string]any{
-					"name":   "db",
-					"type":   "infra.database",
-					"config": map[string]any{},
-				},
-			},
-		},
-		"created_at": time.Now().Format(time.RFC3339Nano),
-	}
-}
-
-func TestRemoteIaC_Plan(t *testing.T) {
-	si := &stubInvoker{resp: samplePlanResponse()}
+func TestRemoteIaC_Plan_DelegatesToComputePlan_NetNewResource(t *testing.T) {
+	// stubInvoker tracks the LAST InvokeService call. With ComputePlan
+	// delegation, a net-new resource emits "create" without touching the
+	// invoker — confirming the per-resource Diff fan-out is bypassed for
+	// creates and the v1-monolithic IaCProvider.Plan wire is gone.
+	si := &stubInvoker{}
 	p := newIaCProvider(si)
 
 	desired := []interfaces.ResourceSpec{
 		{Name: "db", Type: "infra.database", Config: map[string]any{"engine": "postgres"}},
 	}
-	current := []interfaces.ResourceState{
-		{Name: "old-db", Type: "infra.database", ProviderID: "pid-old"},
-	}
-
-	plan, err := p.Plan(context.Background(), desired, current)
+	// No current state → "db" is net-new → ComputePlan emits "create"
+	// without calling driver.Diff.
+	plan, err := p.Plan(context.Background(), desired, nil)
 	if err != nil {
 		t.Fatalf("Plan: unexpected error: %v", err)
 	}
-	if si.method != "IaCProvider.Plan" {
-		t.Errorf("method: got %q, want IaCProvider.Plan", si.method)
+	if si.method != "" {
+		t.Errorf("invoker.method: net-new create path should not call InvokeService; got %q", si.method)
 	}
-	// Args must include desired and current as slices
-	if _, ok := si.args["desired"]; !ok {
-		t.Error("missing arg key 'desired'")
-	}
-	if _, ok := si.args["current"]; !ok {
-		t.Error("missing arg key 'current'")
-	}
-	if plan.ID != "plan-abc" {
-		t.Errorf("plan ID: got %q", plan.ID)
+	if plan == nil {
+		t.Fatal("Plan returned nil plan")
 	}
 	if len(plan.Actions) != 1 {
-		t.Fatalf("expected 1 action, got %d", len(plan.Actions))
+		t.Fatalf("expected 1 action (create), got %d", len(plan.Actions))
 	}
 	if plan.Actions[0].Action != "create" {
-		t.Errorf("action: got %q", plan.Actions[0].Action)
+		t.Errorf("action: got %q, want %q", plan.Actions[0].Action, "create")
+	}
+	if plan.Actions[0].Resource.Name != "db" {
+		t.Errorf("action resource name: got %q, want %q", plan.Actions[0].Resource.Name, "db")
 	}
 }
 
-func TestRemoteIaC_Plan_Error(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("rpc error")}
+func TestRemoteIaC_Plan_DelegatesToComputePlan_DeleteEmittedForRemoved(t *testing.T) {
+	// A resource present in current state but absent from desired must
+	// emit "delete". ComputePlan emits deletes without calling driver.Diff.
+	si := &stubInvoker{}
 	p := newIaCProvider(si)
-	_, err := p.Plan(context.Background(), nil, nil)
-	if err == nil {
-		t.Fatal("expected error")
+
+	current := []interfaces.ResourceState{
+		{Name: "old-db", Type: "infra.database", ProviderID: "pid-old"},
+	}
+	plan, err := p.Plan(context.Background(), nil, current)
+	if err != nil {
+		t.Fatalf("Plan: unexpected error: %v", err)
+	}
+	if si.method != "" {
+		t.Errorf("invoker.method: delete path should not call InvokeService; got %q", si.method)
+	}
+	if plan == nil {
+		t.Fatal("Plan returned nil plan")
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("expected 1 action (delete), got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].Action != "delete" {
+		t.Errorf("action: got %q, want %q", plan.Actions[0].Action, "delete")
 	}
 }
 
 // ── Apply ─────────────────────────────────────────────────────────────────────
+//
+// Pre-W-Refactor, Apply() proxied a monolithic IaCProvider.Apply call to
+// the plugin via InvokeService. After W-Refactor (PR 5), Apply() delegates
+// to wfctlhelpers.ApplyPlan, which fans out per-action through
+// ResourceDriver.{Create,Update,Delete,Replace}. Through the remoteIaC
+// Provider those calls hit InvokeService("ResourceDriver.Create", ...) etc.
+//
+// The tests below pin the canonical delegation by:
+//   (a) verifying the wire-method is the per-driver call (not the legacy
+//       IaCProvider.Apply); and
+//   (b) verifying the ApplyResult is populated with the correct PlanID
+//       (set by ApplyPlan from plan.ID) regardless of the per-driver
+//       response shape.
 
-func TestRemoteIaC_Apply(t *testing.T) {
+func TestRemoteIaC_Apply_DelegatesToApplyPlan_PerDriverDispatch(t *testing.T) {
+	// ApplyPlan dispatches Create on a single-create plan via
+	// remoteResourceDriver, which invokes "ResourceDriver.Create" through
+	// the stub invoker. The legacy "IaCProvider.Apply" wire is gone.
 	si := &stubInvoker{resp: map[string]any{
-		"plan_id": "plan-abc",
-		"resources": []any{
-			map[string]any{
-				"provider_id": "pid-123",
-				"name":        "db",
-				"type":        "infra.database",
-				"status":      "running",
-			},
+		"output": map[string]any{
+			"provider_id": "pid-123",
+			"name":        "db",
+			"type":        "infra.database",
+			"status":      "running",
 		},
 	}}
 	p := newIaCProvider(si)
@@ -152,35 +179,48 @@ func TestRemoteIaC_Apply(t *testing.T) {
 			{Action: "create", Resource: interfaces.ResourceSpec{Name: "db", Type: "infra.database"}},
 		},
 	}
-
 	result, err := p.Apply(context.Background(), plan)
 	if err != nil {
 		t.Fatalf("Apply: unexpected error: %v", err)
 	}
-	if si.method != "IaCProvider.Apply" {
-		t.Errorf("method: got %q, want IaCProvider.Apply", si.method)
+	if si.method == "IaCProvider.Apply" {
+		t.Error("invoker.method: legacy IaCProvider.Apply wire should not be invoked after W-Refactor")
 	}
-	// Plan must be wrapped under "plan" key
-	if _, ok := si.args["plan"]; !ok {
-		t.Error("missing arg key 'plan'")
+	if !strings.HasPrefix(si.method, "ResourceDriver.") {
+		t.Errorf("invoker.method: expected ResourceDriver.* per-driver dispatch, got %q", si.method)
+	}
+	if result == nil {
+		t.Fatal("Apply returned nil result")
 	}
 	if result.PlanID != "plan-abc" {
-		t.Errorf("PlanID: got %q", result.PlanID)
-	}
-	if len(result.Resources) != 1 {
-		t.Fatalf("expected 1 resource, got %d", len(result.Resources))
-	}
-	if result.Resources[0].Name != "db" {
-		t.Errorf("resource name: got %q", result.Resources[0].Name)
+		t.Errorf("PlanID: got %q, want %q (ApplyPlan stamps plan.ID onto result)", result.PlanID, "plan-abc")
 	}
 }
 
-func TestRemoteIaC_Apply_Error(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("apply failed")}
+func TestRemoteIaC_Apply_DelegatesToApplyPlan_RecordsErrorsPerAction(t *testing.T) {
+	// When the underlying driver returns an error, ApplyPlan records it
+	// in result.Errors rather than returning the error from the top-level
+	// call (per the per-action error decomposition contract). This pins
+	// the canonical-delegation behavior — pre-refactor the same error
+	// would have been returned directly.
+	si := &stubInvoker{err: fmt.Errorf("driver create failed")}
 	p := newIaCProvider(si)
-	_, err := p.Apply(context.Background(), &interfaces.IaCPlan{ID: "p1"})
-	if err == nil {
-		t.Fatal("expected error")
+
+	plan := &interfaces.IaCPlan{
+		ID: "p1",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "db", Type: "infra.database"}},
+		},
+	}
+	result, err := p.Apply(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Apply: unexpected top-level error (wfctlhelpers.ApplyPlan records per-action errors): %v", err)
+	}
+	if result == nil {
+		t.Fatal("Apply returned nil result")
+	}
+	if len(result.Errors) == 0 {
+		t.Error("expected ApplyResult.Errors to contain the per-action driver error")
 	}
 }
 
