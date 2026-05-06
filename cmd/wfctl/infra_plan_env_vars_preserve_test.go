@@ -95,8 +95,9 @@ func TestParseInfraResourceSpecs_PreservesSecretGenVarsInUserData(t *testing.T) 
 	t.Setenv("AUTH_TOKEN", "would-be-resolved-secret")
 	t.Setenv("DATABASE_URL", "postgres://would-be-resolved")
 
-	// --- Plan-time: POSTGRES_PASSWORD is NOT set (as happens in CI) ---
-	os.Unsetenv("POSTGRES_PASSWORD")
+	// --- Plan-time: POSTGRES_PASSWORD is NOT set (as happens in CI).
+	// Use t.Setenv so that the original value is restored by t.Cleanup.
+	t.Setenv("POSTGRES_PASSWORD", "")
 	specsAtPlan, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
 	if err != nil {
 		t.Fatalf("parseInfraResourceSpecs (plan): %v", err)
