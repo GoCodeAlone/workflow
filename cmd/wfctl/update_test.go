@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -144,6 +145,152 @@ func TestCheckForUpdateNotice_RespectsEnvVar(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("expected done channel to be closed immediately when update check disabled")
+	}
+}
+
+func TestCheckForUpdateNotice_SkipsInCI(t *testing.T) {
+	// Simulate GitHub Actions / generic CI environment.
+	t.Setenv(envCI, "true")
+	done := checkForUpdateNotice()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("expected done channel to be closed immediately in CI environment (CI=true)")
+	}
+}
+
+func TestCheckForUpdateNotice_SkipsInGitHubActions(t *testing.T) {
+	t.Setenv(envGitHubActions, "true")
+	done := checkForUpdateNotice()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("expected done channel to be closed immediately in CI environment (GITHUB_ACTIONS=true)")
+	}
+}
+
+func TestCheckForUpdateNotice_DailyThrottle_Skips(t *testing.T) {
+	// Write a very recent timestamp to the cache file → throttle should skip.
+	cacheFile := filepath.Join(t.TempDir(), "last_update_check")
+	if err := os.WriteFile(cacheFile, []byte(time.Now().UTC().Format(time.RFC3339)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	updateCheckCachePathOverride = cacheFile
+	defer func() { updateCheckCachePathOverride = "" }()
+
+	// Point at a server that must never be reached.
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		http.Error(w, "should not be reached", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	githubReleasesURLOverride = srv.URL
+	defer func() { githubReleasesURLOverride = "" }()
+
+	done := checkForUpdateNotice()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("expected done channel to be closed immediately when throttled")
+	}
+	if callCount != 0 {
+		t.Errorf("expected no network calls due to daily throttle, got %d", callCount)
+	}
+}
+
+func TestCheckForUpdateNotice_DailyThrottle_Allows(t *testing.T) {
+	// Use an empty temp dir → no cache file yet → throttle allows the check.
+	cacheFile := filepath.Join(t.TempDir(), "last_update_check")
+	updateCheckCachePathOverride = cacheFile
+	defer func() { updateCheckCachePathOverride = "" }()
+
+	// Ensure CI environment variables don't suppress the check in this test.
+	t.Setenv(envCI, "")
+	t.Setenv(envGitHubActions, "")
+	t.Setenv(envNoUpdateCheck, "")
+
+	origVersion := version
+	version = "v1.0.0"
+	defer func() { version = origVersion }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		rel := githubRelease{TagName: "v1.0.0", HTMLURL: "https://example.com", Assets: []githubAsset{}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(rel)
+	}))
+	defer srv.Close()
+	githubReleasesURLOverride = srv.URL
+	defer func() { githubReleasesURLOverride = "" }()
+
+	done := checkForUpdateNotice()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for update check to complete")
+	}
+
+	// Cache file must have been written.
+	data, err := os.ReadFile(cacheFile)
+	if err != nil {
+		t.Fatalf("cache file not written: %v", err)
+	}
+	ts, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("cache file contains invalid timestamp: %v", err)
+	}
+	if time.Since(ts) > 5*time.Second {
+		t.Errorf("cache timestamp is too old: %v", ts)
+	}
+}
+
+func TestShouldCheckForUpdate_NoCacheFile(t *testing.T) {
+	updateCheckCachePathOverride = filepath.Join(t.TempDir(), "missing_file")
+	defer func() { updateCheckCachePathOverride = "" }()
+	if !shouldCheckForUpdate() {
+		t.Error("expected shouldCheckForUpdate=true when cache file is absent")
+	}
+}
+
+func TestShouldCheckForUpdate_FreshCache(t *testing.T) {
+	cacheFile := filepath.Join(t.TempDir(), "last_update_check")
+	if err := os.WriteFile(cacheFile, []byte(time.Now().UTC().Format(time.RFC3339)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	updateCheckCachePathOverride = cacheFile
+	defer func() { updateCheckCachePathOverride = "" }()
+	if shouldCheckForUpdate() {
+		t.Error("expected shouldCheckForUpdate=false for a fresh cache")
+	}
+}
+
+func TestShouldCheckForUpdate_StaleCache(t *testing.T) {
+	cacheFile := filepath.Join(t.TempDir(), "last_update_check")
+	stale := time.Now().Add(-25 * time.Hour)
+	if err := os.WriteFile(cacheFile, []byte(stale.UTC().Format(time.RFC3339)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	updateCheckCachePathOverride = cacheFile
+	defer func() { updateCheckCachePathOverride = "" }()
+	if !shouldCheckForUpdate() {
+		t.Error("expected shouldCheckForUpdate=true for a stale (25h old) cache")
+	}
+}
+
+func TestMarkUpdateChecked_CreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	cacheFile := filepath.Join(dir, "subdir", "last_update_check")
+	updateCheckCachePathOverride = cacheFile
+	defer func() { updateCheckCachePathOverride = "" }()
+
+	markUpdateChecked()
+
+	data, err := os.ReadFile(cacheFile)
+	if err != nil {
+		t.Fatalf("cache file not created: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data))); err != nil {
+		t.Errorf("invalid timestamp in cache file: %v", err)
 	}
 }
 
