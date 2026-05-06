@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
-	"gopkg.in/yaml.v3"
 )
 
 // runSecretsSetup implements `wfctl secrets setup --env <name>`.
@@ -35,13 +34,9 @@ Options:
 		return err
 	}
 
-	data, err := os.ReadFile(*configFile)
+	cfg, err := config.LoadFromFile(*configFile)
 	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-	var cfg config.WorkflowConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config: %w", err)
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	if cfg.Secrets == nil || len(cfg.Secrets.Entries) == 0 {
@@ -56,7 +51,7 @@ Options:
 
 	var set, skipped int
 	for _, entry := range cfg.Secrets.Entries {
-		storeName := resolveSecretStoreForSetup(entry, *envName, &cfg)
+		storeName := resolveSecretStoreForSetup(entry, *envName, cfg)
 		provider, provErr := newSecretsProvider(storeName)
 		if provErr != nil {
 			fmt.Printf("  %-24s  [SKIP] store %q not accessible: %v\n", entry.Name, storeName, provErr)
