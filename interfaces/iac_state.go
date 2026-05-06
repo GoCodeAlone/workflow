@@ -27,19 +27,29 @@ type IaCStateStore interface {
 
 // ResourceState is the persisted state record for a single managed resource.
 type ResourceState struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	Type           string         `json:"type"`
-	Provider       string         `json:"provider"`
-	ProviderRef    string         `json:"provider_ref,omitempty"`
-	ProviderID     string         `json:"provider_id"`
-	ConfigHash     string         `json:"config_hash"`
-	AppliedConfig  map[string]any `json:"applied_config"`
-	Outputs        map[string]any `json:"outputs"`
-	Dependencies   []string       `json:"dependencies"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	LastDriftCheck time.Time      `json:"last_drift_check,omitempty"`
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	Type          string         `json:"type"`
+	Provider      string         `json:"provider"`
+	ProviderRef   string         `json:"provider_ref,omitempty"`
+	ProviderID    string         `json:"provider_id"`
+	ConfigHash    string         `json:"config_hash"`
+	AppliedConfig map[string]any `json:"applied_config"`
+	// AppliedConfigSource records the provenance of AppliedConfig:
+	//   - "apply": AppliedConfig came from a user-supplied ResourceSpec.Config
+	//     (set by applyWithProviderAndStore / applyPrecomputedPlanWithStore).
+	//   - "adoption": AppliedConfig was reflowed from live cloud Outputs
+	//     (set by adoptExistingResources). Comparing such entries against
+	//     a fresh Read produces false-positive config-drift; consumers MUST
+	//     refuse to compute config-drift on adoption-shaped entries.
+	//   - "" (empty): legacy state written before this field existed.
+	//     Consumers MUST treat as "adoption" (conservative default).
+	AppliedConfigSource string         `json:"applied_config_source,omitempty"`
+	Outputs             map[string]any `json:"outputs"`
+	Dependencies        []string       `json:"dependencies"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+	LastDriftCheck      time.Time      `json:"last_drift_check,omitempty"`
 }
 
 // IaCPlan is the complete execution plan for a set of infrastructure changes.

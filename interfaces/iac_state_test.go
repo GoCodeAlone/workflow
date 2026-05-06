@@ -1,6 +1,7 @@
 package interfaces
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -152,4 +153,86 @@ func containsString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestResourceState_AppliedConfigSourceJSONRoundtrip(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"apply provenance", "apply"},
+		{"adoption provenance", "adoption"},
+		{"empty (legacy state)", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := ResourceState{Name: "x", Type: "infra.foo", AppliedConfigSource: tc.src}
+			data, err := json.Marshal(in)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var out ResourceState
+			if err := json.Unmarshal(data, &out); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if out.AppliedConfigSource != tc.src {
+				t.Errorf("source: got %q, want %q", out.AppliedConfigSource, tc.src)
+			}
+		})
+	}
+}
+
+func TestResourceState_AppliedConfigSourceOmitemptyWhenLegacy(t *testing.T) {
+	// Legacy state: AppliedConfigSource not set. JSON output must omit
+	// the field so old state-store readers don't trip on unknown keys.
+	in := ResourceState{Name: "x", Type: "infra.foo"}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if bytes.Contains(data, []byte("applied_config_source")) {
+		t.Errorf("legacy state should omit applied_config_source; got %s", data)
+	}
+}
+
+// TestResourceState_OldReaderTolerates_NewWriter pins state-store roundtrip
+// compat: state JSON written by NEW code (with applied_config_source field)
+// MUST still decode without error in OLD code (which has no AppliedConfigSource
+// field). Go's encoding/json silently ignores unknown fields by default; this
+// test pins that contract.
+func TestResourceState_OldReaderTolerates_NewWriter(t *testing.T) {
+	in := ResourceState{Name: "x", Type: "infra.foo", AppliedConfigSource: "apply"}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// "Old" reader = a struct with NO AppliedConfigSource field.
+	type oldResourceState struct {
+		Name          string         `json:"name"`
+		Type          string         `json:"type"`
+		AppliedConfig map[string]any `json:"applied_config"`
+	}
+	var old oldResourceState
+	if err := json.Unmarshal(data, &old); err != nil {
+		t.Fatalf("old reader rejected new state: %v", err)
+	}
+	if old.Name != "x" {
+		t.Errorf("old reader: Name corrupted; got %q", old.Name)
+	}
+}
+
+// TestResourceState_NewReaderTolerates_OldWriter: legacy state with NO
+// applied_config_source key must decode cleanly in new code with the field
+// defaulted to empty string (which downstream code treats as "adoption" per
+// ADR 0010, conservative default).
+func TestResourceState_NewReaderTolerates_OldWriter(t *testing.T) {
+	legacyJSON := []byte(`{"name":"x","type":"infra.foo","applied_config":{"k":"v"}}`)
+	var out ResourceState
+	if err := json.Unmarshal(legacyJSON, &out); err != nil {
+		t.Fatalf("new reader rejected legacy state: %v", err)
+	}
+	if out.AppliedConfigSource != "" {
+		t.Errorf("AppliedConfigSource on legacy state: got %q, want empty", out.AppliedConfigSource)
+	}
 }
