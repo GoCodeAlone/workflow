@@ -436,8 +436,12 @@ func (s *grpcServer) ExecuteStep(ctx context.Context, req *pb.ExecuteStepRequest
 		return &pb.ExecuteStepResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
 
+	output, encErr := mapToStruct(result.Output)
+	if encErr != nil {
+		return &pb.ExecuteStepResponse{Error: fmt.Sprintf("encode step output: %v", encErr)}, nil //nolint:nilerr // app error in response field
+	}
 	return &pb.ExecuteStepResponse{
-		Output:       mapToStruct(result.Output),
+		Output:       output,
 		StopPipeline: result.StopPipeline,
 	}, nil
 }
@@ -510,7 +514,11 @@ func (s *grpcServer) InvokeService(ctx context.Context, req *pb.InvokeServiceReq
 			}
 			return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 		}
-		return &pb.InvokeServiceResponse{Result: mapToStruct(result)}, nil
+		resultStruct, encErr := mapToStruct(result)
+		if encErr != nil {
+			return &pb.InvokeServiceResponse{Error: fmt.Sprintf("encode service result: %v", encErr)}, nil //nolint:nilerr // app error in response field
+		}
+		return &pb.InvokeServiceResponse{Result: resultStruct}, nil
 	}
 
 	invoker, ok := inst.(ServiceInvoker)
@@ -527,7 +535,11 @@ func (s *grpcServer) InvokeService(ctx context.Context, req *pb.InvokeServiceReq
 		}
 		return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
-	return &pb.InvokeServiceResponse{Result: mapToStruct(result)}, nil
+	resultStruct, encErr := mapToStruct(result)
+	if encErr != nil {
+		return &pb.InvokeServiceResponse{Error: fmt.Sprintf("encode service result: %v", encErr)}, nil //nolint:nilerr // app error in response field
+	}
+	return &pb.InvokeServiceResponse{Result: resultStruct}, nil
 }
 
 type grpcStatusError interface {
@@ -572,10 +584,13 @@ func structToMap(s *structpb.Struct) map[string]any {
 	return s.AsMap()
 }
 
-func mapToStruct(m map[string]any) *structpb.Struct {
+func mapToStruct(m map[string]any) (*structpb.Struct, error) {
 	if m == nil {
-		return nil
+		return nil, nil
 	}
-	s, _ := structpb.NewStruct(m)
-	return s
+	s, err := structpb.NewStruct(m)
+	if err != nil {
+		return nil, fmt.Errorf("structpb.NewStruct: %w", err)
+	}
+	return s, nil
 }

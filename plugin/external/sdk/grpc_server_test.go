@@ -15,10 +15,22 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // --- minimal test providers ---
+
+// mustMapToStruct is a test helper wrapping mapToStruct; it fails the test if
+// the map contains a structpb-incompatible value (e.g. chan, func).
+func mustMapToStruct(t *testing.T, m map[string]any) *structpb.Struct {
+	t.Helper()
+	s, err := mapToStruct(m)
+	if err != nil {
+		t.Fatalf("mustMapToStruct: %v", err)
+	}
+	return s
+}
 
 type minimalProvider struct{}
 
@@ -408,7 +420,7 @@ func TestInvokeService_WithTypedModuleFactoryForwardsLegacyInvoker(t *testing.T)
 	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
 		HandleId: createResp.HandleId,
 		Method:   "Echo",
-		Args: mapToStruct(map[string]any{
+		Args: mustMapToStruct(t, map[string]any{
 			"value": "legacy-input",
 		}),
 	})
@@ -443,7 +455,7 @@ func TestInvokeService_ForwardsContextToLegacyInvoker(t *testing.T) {
 	resp, err := srv.InvokeService(ctx, &pb.InvokeServiceRequest{
 		HandleId: createResp.HandleId,
 		Method:   "Echo",
-		Args: mapToStruct(map[string]any{
+		Args: mustMapToStruct(t, map[string]any{
 			"value": "legacy-input",
 		}),
 	})
@@ -476,7 +488,7 @@ func TestInvokeService_PreservesStatusErrors(t *testing.T) {
 	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
 		HandleId: createResp.HandleId,
 		Method:   "IaCProvider.RepairDirtyMigration",
-		Args:     mapToStruct(map[string]any{}),
+		Args:     mustMapToStruct(t, map[string]any{}),
 	})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("InvokeService error code = %v, want Unimplemented (resp=%+v, err=%v)", status.Code(err), resp, err)
@@ -509,6 +521,67 @@ func TestInvokeService_WithTypedInputRequiresTypedInvoker(t *testing.T) {
 	if resp.Error == "" {
 		t.Fatal("expected missing TypedServiceInvoker error")
 	}
+}
+
+// TestMapToStruct_SDK_PropagatesError verifies that the SDK's local mapToStruct
+// surfaces structpb.NewStruct errors instead of silently dropping data
+// (workflow#537 — mirrors the same test in plugin/external/convert_test.go).
+func TestMapToStruct_SDK_PropagatesError(t *testing.T) {
+	m := map[string]any{
+		"ok":  "value",
+		"bad": make(chan int), // chan is not structpb-representable
+	}
+	s, err := mapToStruct(m)
+	if err == nil {
+		t.Fatal("expected error from structpb.NewStruct on chan, got nil")
+	}
+	if s != nil {
+		t.Errorf("expected nil struct on error, got %v", s)
+	}
+}
+
+// TestInvokeService_PropagatesOutputEncodingError verifies that InvokeService
+// surfaces a structpb-encoding failure in the Response.Error field instead of
+// silently returning an empty result (workflow#537).
+func TestInvokeService_PropagatesOutputEncodingError(t *testing.T) {
+	// Module whose InvokeMethod returns a value that structpb cannot encode.
+	badModule := &badOutputModule{}
+	srv := newGRPCServer(&typedServiceProvider{module: badModule})
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "typed.service",
+		Name: "svc",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateModule application error: %s", createResp.Error)
+	}
+	if createResp.HandleId == "" {
+		t.Fatal("CreateModule returned empty HandleId")
+	}
+
+	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
+		HandleId: createResp.HandleId,
+		Method:   "BadOutput",
+	})
+	if err != nil {
+		t.Fatalf("InvokeService returned unexpected rpc error: %v", err)
+	}
+	if resp.Error == "" {
+		t.Fatal("expected encoding error in Response.Error, got empty string")
+	}
+}
+
+// badOutputModule returns a map with a chan value which structpb cannot encode.
+type badOutputModule struct{}
+
+func (badOutputModule) Init() error                  { return nil }
+func (badOutputModule) Start(context.Context) error  { return nil }
+func (badOutputModule) Stop(context.Context) error   { return nil }
+func (badOutputModule) InvokeMethod(_ string, _ map[string]any) (map[string]any, error) {
+	return map[string]any{"bad": make(chan int)}, nil
 }
 
 func mustPackGRPCTestMessage(t *testing.T, msg proto.Message) *anypb.Any {
