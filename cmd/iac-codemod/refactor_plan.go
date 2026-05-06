@@ -39,6 +39,13 @@ const helperImportPath = "github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 // files would fail to compile".
 const planHelperImportPath = "github.com/GoCodeAlone/workflow/platform"
 
+// planCanonicalCallExpr is the canonical replacement-body expression
+// emitted by refactor-plan. Calls platform.ComputePlan (the real helper);
+// see planHelperImportPath above for the review-correction rationale.
+//
+//nolint:unused
+const planCanonicalCallExpr = "platform.ComputePlan(ctx, p, desired, current)"
+
 // planClassification labels the disposition of a single Plan() method
 // site. Each report entry carries one classification; the rewriter
 // honors only `planCanonical`.
@@ -1103,14 +1110,13 @@ func rewritePlanBody(fn *ast.FuncDecl, file *ast.File) {
 			ast.NewIdent(currentName),
 		},
 	}
-	// Builds the short variable declaration that assigns the plan value and err
-	// returned by platform.ComputePlan(ctx, p, desired, current).
+	// emits an assignment: plan, err := platform.ComputePlan(ctx, p, desired, current)
 	planAssign := &ast.AssignStmt{
 		Lhs: []ast.Expr{ast.NewIdent("plan"), ast.NewIdent("err")},
 		Tok: token.DEFINE,
 		Rhs: []ast.Expr{call},
 	}
-	// Builds the return statement that returns a pointer to plan together with err.
+	// emits a return statement: return &plan, err
 	returnStmt := &ast.ReturnStmt{
 		Results: []ast.Expr{
 			&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent("plan")},
