@@ -84,6 +84,27 @@ type Enumerator interface {
 	EnumerateByTag(ctx context.Context, tag string) ([]ResourceRef, error)
 }
 
+// DriftConfigDetector is an OPTIONAL interface a provider MAY implement to
+// surface config-drift in addition to the existence-only Ghost / InSync /
+// Unknown classifications produced by DetectDrift.
+//
+// applied is the per-ref applied_config map recorded in state. Callers
+// pass it from ResourceState.AppliedConfig; missing or empty entries
+// instruct the provider to fall back to existence-only behavior for
+// that ref. The map key is ref.Name (matches ResourceState.Name).
+//
+// Callers MUST type-assert against this interface and fall back to
+// IaCProvider.DetectDrift(refs) on the negative case. Providers that do
+// not implement DriftConfigDetector continue to work unchanged.
+//
+// Providers SHOULD only return DriftClassConfig when they have high
+// confidence the applied entry represents user-supplied config (not
+// adoption-shaped Outputs reflow); see ResourceState.AppliedConfigSource
+// (iac_state.go) for the canonical discriminator.
+type DriftConfigDetector interface {
+	DetectDriftWithApplied(ctx context.Context, resources []ResourceRef, applied map[string]map[string]any) ([]DriftResult, error)
+}
+
 // BootstrapResult contains metadata returned by a successful BootstrapStateBackend call.
 type BootstrapResult struct {
 	// Bucket is the name of the created or confirmed state bucket/container.

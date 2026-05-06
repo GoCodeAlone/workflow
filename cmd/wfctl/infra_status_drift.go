@@ -100,7 +100,20 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 			}()
 		}
 
-		results, err := provider.DetectDrift(ctx, g.refs)
+		// Use DriftConfigDetector when the provider supports it (optional interface).
+		// Short-circuits to legacy DetectDrift when appliedMap is nil (no "apply"-
+		// provenance entries available) to avoid unnecessary RPC round-trips.
+		var results []interfaces.DriftResult
+		if d, ok := provider.(interfaces.DriftConfigDetector); ok {
+			appliedMap := buildAppliedSpecMap(states, g.refs)
+			if appliedMap != nil {
+				results, err = d.DetectDriftWithApplied(ctx, g.refs, appliedMap)
+			} else {
+				results, err = provider.DetectDrift(ctx, g.refs)
+			}
+		} else {
+			results, err = provider.DetectDrift(ctx, g.refs)
+		}
 		if err != nil {
 			fmt.Printf("WARNING: drift detection for provider %q: %v\n", moduleRef, err)
 			return false

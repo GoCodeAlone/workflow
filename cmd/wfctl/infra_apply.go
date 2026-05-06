@@ -490,18 +490,19 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 
 			now := time.Now().UTC()
 			rs := interfaces.ResourceState{
-				ID:            r.Name,
-				Name:          r.Name,
-				Type:          r.Type,
-				Provider:      providerType,
-				ProviderRef:   providerRef,
-				ProviderID:    r.ProviderID,
-				ConfigHash:    configHashMap(appliedCfg),
-				AppliedConfig: appliedCfg,
-				Outputs:       r.Outputs,
-				Dependencies:  dependencies,
-				CreatedAt:     now,
-				UpdatedAt:     now,
+				ID:                  r.Name,
+				Name:                r.Name,
+				Type:                r.Type,
+				Provider:            providerType,
+				ProviderRef:         providerRef,
+				ProviderID:          r.ProviderID,
+				ConfigHash:          configHashMap(appliedCfg),
+				AppliedConfig:       appliedCfg,
+				AppliedConfigSource: "apply",
+				Outputs:             r.Outputs,
+				Dependencies:        dependencies,
+				CreatedAt:           now,
+				UpdatedAt:           now,
 			}
 			if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
 				return fmt.Errorf("%s/%s: persist state after apply: %w", r.Type, r.Name, saveErr)
@@ -639,18 +640,19 @@ func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType stri
 	appliedConfig := liveConfigFromOutputs(live.Outputs)
 	now := time.Now().UTC()
 	return interfaces.ResourceState{
-		ID:            spec.Name,
-		Name:          spec.Name,
-		Type:          spec.Type,
-		Provider:      providerType,
-		ProviderRef:   resourceSpecProviderRef(spec),
-		ProviderID:    live.ProviderID,
-		ConfigHash:    configHashMap(appliedConfig),
-		AppliedConfig: appliedConfig,
-		Outputs:       cloneMap(live.Outputs),
-		Dependencies:  append([]string(nil), spec.DependsOn...),
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                  spec.Name,
+		Name:                spec.Name,
+		Type:                spec.Type,
+		Provider:            providerType,
+		ProviderRef:         resourceSpecProviderRef(spec),
+		ProviderID:          live.ProviderID,
+		ConfigHash:          configHashMap(appliedConfig),
+		AppliedConfig:       appliedConfig,
+		AppliedConfigSource: "adoption",
+		Outputs:             cloneMap(live.Outputs),
+		Dependencies:        append([]string(nil), spec.DependsOn...),
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}, nil
 }
 
@@ -959,18 +961,19 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 
 			now := time.Now().UTC()
 			rs := interfaces.ResourceState{
-				ID:            r.Name,
-				Name:          r.Name,
-				Type:          r.Type,
-				Provider:      providerType,
-				ProviderRef:   providerRef,
-				ProviderID:    r.ProviderID,
-				ConfigHash:    configHashMap(appliedCfg),
-				AppliedConfig: appliedCfg,
-				Outputs:       r.Outputs,
-				Dependencies:  dependencies,
-				CreatedAt:     now,
-				UpdatedAt:     now,
+				ID:                  r.Name,
+				Name:                r.Name,
+				Type:                r.Type,
+				Provider:            providerType,
+				ProviderRef:         providerRef,
+				ProviderID:          r.ProviderID,
+				ConfigHash:          configHashMap(appliedCfg),
+				AppliedConfig:       appliedCfg,
+				AppliedConfigSource: "apply",
+				Outputs:             r.Outputs,
+				Dependencies:        dependencies,
+				CreatedAt:           now,
+				UpdatedAt:           now,
 			}
 			if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
 				return fmt.Errorf("%s/%s: persist state after apply: %w", r.Type, r.Name, saveErr)
