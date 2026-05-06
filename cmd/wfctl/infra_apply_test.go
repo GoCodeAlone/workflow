@@ -1592,3 +1592,79 @@ modules:
 		t.Errorf("stderr = %q, want it to contain 'warning'", stderrOutput)
 	}
 }
+
+// ── TestApply_StateRecordsAppliedConfigSource* ─────────────────────────────────
+
+// TestApply_StateRecordsAppliedConfigSourceApply asserts that applyWithProviderAndStore
+// writes AppliedConfigSource="apply" on successful resource creation.
+func TestApply_StateRecordsAppliedConfigSourceApply(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "res-A",
+		Type:   "infra.test",
+		Config: map[string]any{"k": "v"},
+	}
+	fake := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Resources: []interfaces.ResourceOutput{
+				{Name: "res-A", Type: "infra.test", ProviderID: "id-A", Outputs: map[string]any{"k": "v"}},
+			},
+		},
+	}
+	store := &fakeStateStore{}
+
+	if err := applyWithProviderAndStore(t.Context(), fake, "test", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, ""); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 1 {
+		t.Fatalf("expected 1 saved state; got %d", len(store.saved))
+	}
+	saved := store.saved[0]
+	if saved.AppliedConfigSource != "apply" {
+		t.Errorf("AppliedConfigSource: got %q, want %q", saved.AppliedConfigSource, "apply")
+	}
+}
+
+// TestAdoption_StateRecordsAppliedConfigSourceAdoption asserts that state saved
+// via the adoption path (adoptExistingResources) records AppliedConfigSource="adoption".
+func TestAdoption_StateRecordsAppliedConfigSourceAdoption(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"provider": "do-provider", "domain": "example.com"},
+	}
+	driver := &readDriver{
+		expectedProviderID: "example.com",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "do-domain-123",
+			Outputs:    map[string]any{"domain": "example.com"},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	store := &fakeStateStore{}
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, ""); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	// The first saved state is from adoption; subsequent saves are from apply.
+	var adoptedState *interfaces.ResourceState
+	for i := range store.saved {
+		if store.saved[i].Name == "site-dns" && store.saved[i].AppliedConfigSource == "adoption" {
+			adoptedState = &store.saved[i]
+			break
+		}
+	}
+	if adoptedState == nil {
+		t.Fatalf("expected adopted state with AppliedConfigSource=adoption; saved=%+v", store.saved)
+	}
+	if adoptedState.AppliedConfigSource != "adoption" {
+		t.Errorf("AppliedConfigSource: got %q, want %q", adoptedState.AppliedConfigSource, "adoption")
+	}
+}
