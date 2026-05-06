@@ -30,13 +30,6 @@ import (
 // All parameters must be non-nil except states (nil is valid = no state for
 // protected-resource lookup). stdout receives human-readable progress; stderr
 // receives audit log lines.
-// configDetector is a local interface alias for DriftConfigDetector to avoid
-// importing the full interfaces package name in the type-assertion switch.
-// It matches interfaces.DriftConfigDetector exactly.
-type configDetector interface {
-	DetectDriftWithApplied(ctx context.Context, refs []interfaces.ResourceRef, applied map[string]map[string]any) ([]interfaces.DriftResult, error)
-}
-
 func runInfraApplyRefreshPhase(
 	ctx context.Context,
 	provider interfaces.IaCProvider,
@@ -54,12 +47,17 @@ func runInfraApplyRefreshPhase(
 	}
 
 	// Use DriftConfigDetector when the provider supports it (optional interface).
-	// Falls back to existence-only DetectDrift on the negative type-assertion.
+	// Short-circuits to legacy DetectDrift when appliedMap is nil (no "apply"-
+	// provenance entries available) to avoid unnecessary RPC round-trips.
 	var results []interfaces.DriftResult
 	var err error
-	if d, ok := provider.(configDetector); ok {
+	if d, ok := provider.(interfaces.DriftConfigDetector); ok {
 		appliedMap := buildAppliedSpecMap(states, refs)
-		results, err = d.DetectDriftWithApplied(ctx, refs, appliedMap)
+		if appliedMap != nil {
+			results, err = d.DetectDriftWithApplied(ctx, refs, appliedMap)
+		} else {
+			results, err = provider.DetectDrift(ctx, refs)
+		}
 	} else {
 		results, err = provider.DetectDrift(ctx, refs)
 	}

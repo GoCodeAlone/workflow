@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-05-06
 - **Deciders:** Claude (autonomous design pipeline), Jon Langevin (mandate)
-- **Refs:** ADR 0007, docs/plans/2026-05-06-iac-state-truth-and-tc2-closeout-design.md
+- **Refs:** ADR 0007, [IaC state-truth design (GoCodeAlone/workflow-plugin-digitalocean)](https://github.com/GoCodeAlone/workflow-plugin-digitalocean/blob/main/docs/plans/2026-05-06-iac-state-truth-and-tc2-closeout-design.md)
 
 ## Context
 
