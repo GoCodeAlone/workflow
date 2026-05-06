@@ -376,6 +376,36 @@ func TestExpandEnvInMapPreservingVars_EmptyVarListBehavesLikePreservingKeys(t *t
 	}
 }
 
+// TestExpandEnvInMapPreservingVars_UnbracedSecretVarCanonicalised verifies that
+// an unbraced $SECRET_VAR reference (no curly braces) in a preserved var is
+// canonicalised to ${SECRET_VAR} rather than being expanded.
+// Apply-time JIT resolution only supports the braced form, so canonicalisation
+// is the correct and expected behaviour for unbraced references.
+func TestExpandEnvInMapPreservingVars_UnbracedSecretVarCanonicalised(t *testing.T) {
+	t.Setenv("DB_PASSWORD", "supersecret")
+	t.Setenv("REGION", "us-east-1")
+
+	in := map[string]any{
+		// unbraced: $DB_PASSWORD — secret var, should be canonicalised to ${DB_PASSWORD}
+		"user_data": "PASSWORD=$DB_PASSWORD region=${REGION}",
+	}
+	out := ExpandEnvInMapPreservingVars(in, nil, []string{"DB_PASSWORD"})
+
+	ud, _ := out["user_data"].(string)
+	// Secret var must be preserved — canonicalised to braced form.
+	if !strings.Contains(ud, "${DB_PASSWORD}") {
+		t.Errorf("user_data: want ${DB_PASSWORD} (canonicalised), got: %q", ud)
+	}
+	// Non-secret var must still be expanded normally.
+	if !strings.Contains(ud, "us-east-1") {
+		t.Errorf("user_data: want REGION expanded to us-east-1, got: %q", ud)
+	}
+	// The raw unbraced form must not appear in the output.
+	if strings.Contains(ud, "$DB_PASSWORD") && !strings.Contains(ud, "${DB_PASSWORD}") {
+		t.Errorf("user_data: unbraced $DB_PASSWORD should have been canonicalised, got: %q", ud)
+	}
+}
+
 func TestExpandEnvInMapPreservingVars_SecretVarInNestedSlice(t *testing.T) {
 	t.Setenv("PG_PASSWORD", "should-be-preserved")
 	in := map[string]any{
