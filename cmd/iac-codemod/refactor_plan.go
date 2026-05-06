@@ -1110,7 +1110,7 @@ func rewritePlanBody(fn *ast.FuncDecl, file *ast.File) {
 			ast.NewIdent(currentName),
 		},
 	}
-	// emits an assignment: plan, err := platform.ComputePlan(ctx, p, desired, current)
+	// emits an assignment: plan, err := <pkgAlias>.ComputePlan(ctx, p, desired, current)
 	planAssign := &ast.AssignStmt{
 		Lhs: []ast.Expr{ast.NewIdent("plan"), ast.NewIdent("err")},
 		Tok: token.DEFINE,
