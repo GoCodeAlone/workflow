@@ -535,9 +535,9 @@ func formatPlanTable(plan interfaces.IaCPlan, showSensitive bool) string {
 		fmt.Fprintln(&sb)
 	}
 
-	creates, updates, deletes := countActions(plan)
-	fmt.Fprintf(&sb, "Plan: %d to create, %d to update, %d to destroy.\n",
-		creates, updates, deletes)
+	creates, updates, replaces, deletes := countActions(plan)
+	fmt.Fprintf(&sb, "Plan: %d to create, %d to update, %d to replace, %d to destroy.\n",
+		creates, updates, replaces, deletes)
 	return sb.String()
 }
 
@@ -577,9 +577,9 @@ func formatPlanMarkdown(plan interfaces.IaCPlan, showSensitive bool) string {
 		sb.WriteString("</details>\n\n")
 	}
 
-	creates, updates, deletes := countActions(plan)
-	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to destroy.**\n",
-		creates, updates, deletes)
+	creates, updates, replaces, deletes := countActions(plan)
+	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to replace, %d to destroy.**\n",
+		creates, updates, replaces, deletes)
 	return sb.String()
 }
 
@@ -796,6 +796,8 @@ func actionSymbol(action string) string {
 		return "+"
 	case "update":
 		return "~"
+	case "replace":
+		return "±"
 	case "delete":
 		return "-"
 	default:
@@ -803,13 +805,15 @@ func actionSymbol(action string) string {
 	}
 }
 
-func countActions(plan interfaces.IaCPlan) (creates, updates, deletes int) {
+func countActions(plan interfaces.IaCPlan) (creates, updates, replaces, deletes int) {
 	for i := range plan.Actions {
 		switch plan.Actions[i].Action {
 		case "create":
 			creates++
 		case "update":
 			updates++
+		case "replace":
+			replaces++
 		case "delete":
 			deletes++
 		}
@@ -1040,6 +1044,10 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var dryRun bool
+	fs.BoolVar(&dryRun, "dry-run", false, "Show planned operations without executing provider mutations")
+	var dryRunFormat string
+	fs.StringVar(&dryRunFormat, "format", "table", "Dry-run output format: table, json")
 	var planFile string
 	fs.StringVar(&planFile, "plan", "", "Apply from a pre-emitted plan.json (skips ComputePlan)")
 	var refreshFlag bool
@@ -1081,6 +1089,11 @@ func runInfraApply(args []string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// --dry-run: compute and display the plan without executing any mutations.
+	if dryRun {
+		return runInfraApplyDryRun(cfgFile, envName, dryRunFormat, showSensitiveVal)
 	}
 
 	if !*autoApprove {

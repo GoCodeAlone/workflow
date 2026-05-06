@@ -1317,7 +1317,7 @@ Reconcile cloud infrastructure to match the desired state declared in the config
 ```
 wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
                   [--refresh] [--allow-protected-prune] [--skip-refresh]
-                  [--allow-replace=NAME1,NAME2,...]
+                  [--allow-replace=NAME1,NAME2,...] [--dry-run] [--format FMT]
 ```
 
 | Flag | Default | Description |
@@ -1327,6 +1327,8 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `-S`, `--show-sensitive` | `false` | Show sensitive values in plaintext |
 | `--env` | `` | Environment name (resolves per-module `environments:` overrides) |
 | `--plan` | `` | Apply from a pre-emitted `plan.json` (skips `ComputePlan`) |
+| `--dry-run` | `false` | Show planned operations without executing provider mutations |
+| `--format` | `table` | Dry-run output format: `table`, `json` |
 | `--refresh` | `false` | Detect drift and prune ghost-in-state entries before applying |
 | `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
 | `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
@@ -1357,6 +1359,12 @@ To authorize, re-run with the printed flag value. Names not in the list keep the
 **Examples:**
 
 ```bash
+# Dry-run: preview what apply would do without mutations.
+wfctl infra apply --dry-run --env staging -c infra.yaml
+
+# Dry-run with JSON output for automation.
+wfctl infra apply --dry-run --format json --env staging -c infra.yaml
+
 # Standard apply.
 wfctl infra apply --auto-approve -c infra.yaml --env staging
 
@@ -1732,6 +1740,8 @@ wfctl ci run [options]
 | `--phase` | `build,test` | Comma-separated phases: `build`, `test`, `deploy` |
 | `--env` | `` | Target environment (required for `deploy` phase) |
 | `--verbose` | `false` | Show detailed command output |
+| `--dry-run` | `false` | Show planned deploy operations without executing (deploy phase only) |
+| `--format` | `table` | Dry-run output format: `table`, `json` |
 
 **Examples:**
 
@@ -1741,6 +1751,12 @@ wfctl ci run --phase build,test
 
 # Deploy to staging
 wfctl ci run --phase deploy --env staging
+
+# Dry-run deploy: preview what deploy would do without mutations.
+wfctl ci run --phase deploy --dry-run --env staging
+
+# Dry-run with JSON output for CI automation.
+wfctl ci run --phase deploy --dry-run --format json --env staging
 
 # Full pipeline
 wfctl ci run --phase build,test,deploy --env production

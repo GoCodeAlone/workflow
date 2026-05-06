@@ -22,6 +22,8 @@ func runCIRun(args []string) error {
 	phases := fs.String("phase", "build,test", "Comma-separated phases: build, test, deploy")
 	env := fs.String("env", "", "Target environment (required for deploy phase)")
 	verbose := fs.Bool("verbose", false, "Show detailed output")
+	dryRun := fs.Bool("dry-run", false, "Show planned operations without executing (deploy phase only)")
+	dryRunFormat := fs.String("format", "table", "Dry-run output format: table, json")
 	pluginDir := fs.String("plugin-dir", "", "Directory containing installed plugins (default: $WFCTL_PLUGIN_DIR or ./data/plugins)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl ci run [options]\n\nRun CI phases from workflow config.\n\nOptions:\n")
@@ -62,6 +64,15 @@ func runCIRun(args []string) error {
 		case "deploy":
 			if *env == "" {
 				return fmt.Errorf("--env is required for deploy phase")
+			}
+			if *dryRun {
+				// Load via config.LoadFromFile to honor top-level imports:
+				// sections that yaml.Unmarshal above would not resolve.
+				fullCfg, loadErr := config.LoadFromFile(*configFile)
+				if loadErr != nil {
+					return fmt.Errorf("load config for dry-run: %w", loadErr)
+				}
+				return runDeployPhaseDryRun(fullCfg.CI.Deploy, *env, fullCfg, fullCfg.Services, *dryRunFormat, *configFile)
 			}
 			if *pluginDir != "" {
 				os.Setenv("WFCTL_PLUGIN_DIR", *pluginDir) //nolint:errcheck
