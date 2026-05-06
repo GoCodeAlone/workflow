@@ -473,6 +473,33 @@ func TestRemoteIaC_DetectDrift_Empty(t *testing.T) {
 	}
 }
 
+// ── DetectDriftWithApplied ─────────────────────────────────────────────────────
+
+func TestRemoteIaC_DetectDriftWithApplied_HappyPath(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{
+		"drifts": []any{map[string]any{
+			"name":    "x",
+			"type":    "infra.test",
+			"drifted": true,
+			"class":   "config",
+			"fields":  []any{"region"},
+		}},
+	}}
+	p := newIaCProvider(si)
+	refs := []interfaces.ResourceRef{{Name: "x", Type: "infra.test"}}
+	applied := map[string]map[string]any{"x": {"region": "nyc1"}}
+	drifts, err := p.DetectDriftWithApplied(context.Background(), refs, applied)
+	if err != nil {
+		t.Fatalf("DetectDriftWithApplied: %v", err)
+	}
+	if si.method != "IaCProvider.DetectDriftWithApplied" {
+		t.Errorf("method: got %q, want IaCProvider.DetectDriftWithApplied", si.method)
+	}
+	if len(drifts) != 1 || drifts[0].Class != interfaces.DriftClassConfig {
+		t.Errorf("drifts: %+v", drifts)
+	}
+}
+
 // ── Import ────────────────────────────────────────────────────────────────────
 
 func TestRemoteIaC_Import(t *testing.T) {

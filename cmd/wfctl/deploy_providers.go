@@ -487,6 +487,61 @@ func (r *remoteIaCProvider) DetectDrift(_ context.Context, refs []interfaces.Res
 	return drifts, nil
 }
 
+// DetectDriftWithApplied dispatches to the v2 RPC if the remote plugin
+// supports it, falling back to legacy DetectDrift when the remote returns
+// "method not found". This is the wire-format counterpart of the type-
+// assertion fallback in callers; both layers need the fallback because:
+//   - Caller-side: provider may not implement the interface (type-
+//     assertion fails → legacy path).
+//   - Wire-side: provider implements the interface in newer code but the
+//     LOADED plugin binary on disk is older (manifest accepted but RPC
+//     dispatch returns method-not-found).
+func (r *remoteIaCProvider) DetectDriftWithApplied(ctx context.Context, refs []interfaces.ResourceRef, applied map[string]map[string]any) ([]interfaces.DriftResult, error) {
+	refsAny, err := jsonToAny(refs)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.DetectDriftWithApplied: marshal refs: %w", err)
+	}
+	appliedAny, err := jsonToAny(applied)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.DetectDriftWithApplied: marshal applied: %w", err)
+	}
+	res, err := r.invoker.InvokeService("IaCProvider.DetectDriftWithApplied", map[string]any{
+		"refs": refsAny, "applied": appliedAny,
+	})
+	if err != nil {
+		// Method-not-found from the plugin: fall back to legacy DetectDrift.
+		// Match on substring to tolerate framework-specific error wrappers
+		// (HashiCorp go-plugin emits "method not found"; future schemes may
+		// wrap the literal differently). DO NOT fall back on other errors —
+		// a transient cloud failure must propagate so callers don't silently
+		// lose drift signal.
+		if isMethodNotFound(err) {
+			return r.DetectDrift(ctx, refs)
+		}
+		return nil, err
+	}
+	raw, ok := res["drifts"]
+	if !ok {
+		return nil, nil
+	}
+	var drifts []interfaces.DriftResult
+	if err := anyToStruct(raw, &drifts); err != nil {
+		return nil, fmt.Errorf("IaCProvider.DetectDriftWithApplied: decode result: %w", err)
+	}
+	return drifts, nil
+}
+
+// isMethodNotFound reports whether err is the canonical signal a remote
+// plugin emits when it has no case for the requested RPC method. Tolerant
+// substring match across known wrapper formats.
+func isMethodNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "method not found") || strings.Contains(msg, "Method not found")
+}
+
 func (r *remoteIaCProvider) Import(_ context.Context, cloudID string, resourceType string) (*interfaces.ResourceState, error) {
 	res, err := r.invoker.InvokeService("IaCProvider.Import", map[string]any{
 		"provider_id":   cloudID,
