@@ -81,7 +81,7 @@ All complex data (configurations, pipeline context, step outputs, service invoca
 Conversion functions in `plugin/external/convert.go` handle the mapping between Go `map[string]any` and `protobuf.Struct`:
 
 ```go
-func mapToStruct(m map[string]any) *structpb.Struct
+func mapToStruct(m map[string]any) (*structpb.Struct, error)
 func structToMap(s *structpb.Struct) map[string]any
 ```
 
