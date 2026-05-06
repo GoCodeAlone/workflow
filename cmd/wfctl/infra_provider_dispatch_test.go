@@ -248,11 +248,7 @@ modules:
 	// ── plan path ────────────────────────────────────────────────────────────
 	var planCalls []capturedPlanCall
 	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {
-		names := make([]string, len(specs))
-		for i, s := range specs {
-			names[i] = s.Name
-		}
-		planCalls = append(planCalls, capturedPlanCall{provType: currentProvType, specNames: names})
+		planCalls = append(planCalls, capturedPlanCall{provType: currentProvType, specNames: specNames(specs)})
 		return interfaces.IaCPlan{}, nil
 	}
 
@@ -268,11 +264,7 @@ modules:
 	currentProvType = ""
 	var applyCalls []capturedPlanCall
 	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {
-		names := make([]string, len(specs))
-		for i, s := range specs {
-			names[i] = s.Name
-		}
-		applyCalls = append(applyCalls, capturedPlanCall{provType: currentProvType, specNames: names})
+		applyCalls = append(applyCalls, capturedPlanCall{provType: currentProvType, specNames: specNames(specs)})
 		return interfaces.IaCPlan{}, nil // empty plan → applyWithProviderAndStore returns immediately
 	}
 
