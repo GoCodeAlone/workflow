@@ -222,3 +222,26 @@ func TestProviderValidator_TypeAssertion_NonImplementor(t *testing.T) {
 		t.Errorf("nonValidatingProvider must NOT satisfy ProviderValidator (interface must remain optional)")
 	}
 }
+
+// TestDriftConfigDetector_OptionalInterface verifies the optional-declarer
+// pattern works as intended: an IaCProvider impl that does NOT implement
+// DriftConfigDetector type-asserts to false (caller falls back to existence-
+// only DetectDrift); an impl that DOES implement it type-asserts to true.
+func TestDriftConfigDetector_OptionalInterface(t *testing.T) {
+	var minimal interfaces.IaCProvider = nonValidatingProvider{}
+	if _, ok := minimal.(interfaces.DriftConfigDetector); ok {
+		t.Errorf("nonValidatingProvider should NOT satisfy DriftConfigDetector")
+	}
+
+	var capable interfaces.IaCProvider = &capableIaCProvider{}
+	if _, ok := capable.(interfaces.DriftConfigDetector); !ok {
+		t.Errorf("capableIaCProvider MUST satisfy DriftConfigDetector")
+	}
+}
+
+// capableIaCProvider extends nonValidatingProvider with DriftConfigDetector.
+type capableIaCProvider struct{ nonValidatingProvider }
+
+func (*capableIaCProvider) DetectDriftWithApplied(context.Context, []interfaces.ResourceRef, map[string]map[string]any) ([]interfaces.DriftResult, error) {
+	return nil, nil
+}
