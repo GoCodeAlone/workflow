@@ -51,8 +51,8 @@ Options:
 
 	var set, skipped int
 	for _, entry := range cfg.Secrets.Entries {
-		storeName := resolveSecretStoreForSetup(entry, *envName, cfg)
-		provider, provErr := newSecretsProvider(storeName)
+		storeName := ResolveSecretStore(entry.Name, *envName, cfg)
+		provider, provErr := getProviderForStore(storeName, cfg)
 		if provErr != nil {
 			fmt.Printf("  %-24s  [SKIP] store %q not accessible: %v\n", entry.Name, storeName, provErr)
 			skipped++
@@ -116,31 +116,6 @@ Options:
 
 	fmt.Printf("\nDone: %d set, %d skipped.\n", set, skipped)
 	return nil
-}
-
-// resolveSecretStoreForSetup determines which store to use for a secret in a given environment.
-// Priority: per-secret store field → environment override → defaultStore → legacy provider → "env".
-// This matches the order in ResolveSecretStore so that setup and runtime agree on which store owns a secret.
-func resolveSecretStoreForSetup(entry config.SecretEntry, envName string, cfg *config.WorkflowConfig) string {
-	// 1. Per-secret store field (highest priority).
-	if entry.Store != "" {
-		return entry.Store
-	}
-	// 2. Environment-level store override.
-	if cfg.Environments != nil {
-		if env, ok := cfg.Environments[envName]; ok && env.SecretsProvider != "" {
-			return env.SecretsProvider
-		}
-	}
-	// 3. Default store from secretStores config.
-	if cfg.Secrets != nil && cfg.Secrets.DefaultStore != "" {
-		return cfg.Secrets.DefaultStore
-	}
-	// 4. Legacy provider field.
-	if cfg.Secrets != nil && cfg.Secrets.Provider != "" {
-		return cfg.Secrets.Provider
-	}
-	return "env"
 }
 
 // isAutoGenCandidate returns true if the secret name looks like a key, token, or signing secret.

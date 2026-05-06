@@ -20,8 +20,9 @@ type SecretGen = config.SecretGen
 type InfraConfig = config.InfraConfig
 
 // parseSecretsConfig reads the "secrets:" top-level key from a YAML file,
-// honoring any imports: directives so that imported secretStores and entries
-// are visible to callers. Returns nil, nil if the section is absent after merging.
+// honoring any imports: directives so that the merged secrets section
+// (entries, defaultStore, generate, etc.) is visible to callers.
+// Returns nil, nil if the section is absent after merging.
 func parseSecretsConfig(cfgFile string) (*SecretsConfig, error) {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {

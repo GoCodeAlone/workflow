@@ -61,7 +61,9 @@ func TestLoadSecretsConfig_HonorsImports(t *testing.T) {
 }
 
 // TestLoadSecretsConfig_MainWinsOverImport verifies that when the same entry
-// is declared in both main and imported files, the main file's definition wins.
+// name is declared in both main and imported files, the main file's definition
+// wins (first-definition-wins semantics), and that unique entries from both
+// files are present in the merged result.
 func TestLoadSecretsConfig_MainWinsOverImport(t *testing.T) {
 	dir := t.TempDir()
 
@@ -69,6 +71,9 @@ func TestLoadSecretsConfig_MainWinsOverImport(t *testing.T) {
   defaultStore: imported-store
   entries:
     - name: SHARED_SECRET
+      description: from-import
+    - name: DUPLICATE_SECRET
+      description: imported-desc
 `
 	main := `imports:
   - shared.yaml
@@ -76,6 +81,8 @@ secrets:
   defaultStore: main-store
   entries:
     - name: MAIN_SECRET
+    - name: DUPLICATE_SECRET
+      description: main-desc
 `
 	if err := os.WriteFile(filepath.Join(dir, "shared.yaml"), []byte(shared), 0o600); err != nil {
 		t.Fatal(err)
@@ -92,16 +99,34 @@ secrets:
 	if cfg.DefaultStore != "main-store" {
 		t.Errorf("defaultStore = %q, want %q", cfg.DefaultStore, "main-store")
 	}
-	// Both entries visible.
-	names := make(map[string]bool)
+	// Collect entries by name.
+	byName := make(map[string]string) // name → description
 	for _, e := range cfg.Entries {
-		names[e.Name] = true
+		byName[e.Name] = e.Description
 	}
-	if !names["MAIN_SECRET"] {
+	// Main-only entry present.
+	if _, ok := byName["MAIN_SECRET"]; !ok {
 		t.Error("expected MAIN_SECRET in merged entries")
 	}
-	if !names["SHARED_SECRET"] {
+	// Import-only entry present.
+	if _, ok := byName["SHARED_SECRET"]; !ok {
 		t.Error("expected SHARED_SECRET from import in merged entries")
+	}
+	// Duplicate entry: main definition wins (first-definition-wins).
+	if desc, ok := byName["DUPLICATE_SECRET"]; !ok {
+		t.Error("expected DUPLICATE_SECRET in merged entries")
+	} else if desc != "main-desc" {
+		t.Errorf("DUPLICATE_SECRET.description = %q, want %q (main wins)", desc, "main-desc")
+	}
+	// No duplicate entries.
+	seen := make(map[string]int)
+	for _, e := range cfg.Entries {
+		seen[e.Name]++
+	}
+	for name, count := range seen {
+		if count > 1 {
+			t.Errorf("entry %q appears %d times; expected exactly 1", name, count)
+		}
 	}
 }
 
@@ -254,7 +279,7 @@ func TestSecretsValidate_ImportedEntryUnset(t *testing.T) {
 	}
 }
 
-// TestSecretsSetup_HonorsImportedDefaultStore verifies that resolveSecretStoreForSetup
+// TestSecretsSetup_HonorsImportedDefaultStore verifies that ResolveSecretStore
 // uses the defaultStore from an imported secrets section.
 func TestSecretsSetup_HonorsImportedDefaultStore(t *testing.T) {
 	dir := t.TempDir()
@@ -279,20 +304,13 @@ func TestSecretsSetup_HonorsImportedDefaultStore(t *testing.T) {
 		t.Fatalf("loadWorkflowConfigForSecrets: %v", err)
 	}
 
-	// Find the MY_SECRET entry in the merged config.
-	var entry SecretsConfig
-	if wfCfg.Secrets != nil {
-		entry = *wfCfg.Secrets
-	}
-	_ = entry
-
 	if len(wfCfg.Secrets.Entries) == 0 {
 		t.Fatal("expected entries from import, got none")
 	}
 	secretEntry := wfCfg.Secrets.Entries[0]
-	store := resolveSecretStoreForSetup(secretEntry, "local", wfCfg)
+	store := ResolveSecretStore(secretEntry.Name, "local", wfCfg)
 	if store != "vault" {
-		t.Errorf("resolveSecretStoreForSetup = %q, want %q (from imported defaultStore)", store, "vault")
+		t.Errorf("ResolveSecretStore = %q, want %q (from imported defaultStore)", store, "vault")
 	}
 }
 
