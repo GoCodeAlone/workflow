@@ -12,16 +12,16 @@ import (
 
 // DryRunDeployPlan is the structured dry-run output for ci run --phase deploy.
 type DryRunDeployPlan struct {
-	Command        string              `json:"command"`
-	Environment    string              `json:"environment"`
-	Provider       string              `json:"provider"`
-	Strategy       string              `json:"strategy"`
-	PreDeploy      []string            `json:"pre_deploy,omitempty"`
-	DeployTarget   string              `json:"deploy_target"`
-	ImageRef       string              `json:"image_ref"`
-	ImageTagSource string              `json:"image_tag_source"`
-	HealthCheck    *DryRunHealthCheck  `json:"health_check,omitempty"`
-	Secrets        []DryRunSecretRef   `json:"secrets,omitempty"`
+	Command        string               `json:"command"`
+	Environment    string               `json:"environment"`
+	Provider       string               `json:"provider"`
+	Strategy       string               `json:"strategy"`
+	PreDeploy      []string             `json:"pre_deploy,omitempty"`
+	DeployTarget   string               `json:"deploy_target"`
+	ImageRef       string               `json:"image_ref"`
+	ImageTagSource string               `json:"image_tag_source"`
+	HealthCheck    *DryRunHealthCheck   `json:"health_check,omitempty"`
+	Secrets        []DryRunSecretRef    `json:"secrets,omitempty"`
 	Services       []DryRunServiceEntry `json:"services,omitempty"`
 }
 

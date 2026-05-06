@@ -100,6 +100,76 @@ func expandEnvInValueWithPreserve(v any, preserve map[string]struct{}) any {
 	}
 }
 
+// ExpandEnvInMapPreservingVars is like ExpandEnvInMapPreservingKeys but adds
+// a second dimension of preservation: individual ${VAR} / $VAR references
+// whose variable name appears in preserveVarNames are emitted as the literal
+// "${name}" instead of being substituted from the process environment.
+//
+// Use case: plan-time serialisation of resource specs where a known set of
+// secret variable names (e.g. cfg.Secrets.Generate keys) must produce
+// hash-identical output regardless of whether the variable is present in the
+// current environment.  Without this, fields such as user_data that contain
+// ${SECRET_VAR} produce different hashes at plan time (var unset → empty
+// substitution) and apply time (var set → actual value), causing a spurious
+// "plan stale: config hash mismatch".
+//
+// Precedence: preserveKeys takes priority — if a map key is in preserveKeys
+// the entire subtree is deep-copied as-is (no expansion at all, matching
+// ExpandEnvInMapPreservingKeys semantics). preserveVarNames only affects
+// string values in portions of the tree that are NOT inside a preserved-key
+// subtree.
+func ExpandEnvInMapPreservingVars(m map[string]any, preserveKeys []string, preserveVarNames []string) map[string]any {
+	if m == nil {
+		return nil
+	}
+	preserveK := make(map[string]struct{}, len(preserveKeys))
+	for _, k := range preserveKeys {
+		preserveK[k] = struct{}{}
+	}
+	preserveV := make(map[string]struct{}, len(preserveVarNames))
+	for _, v := range preserveVarNames {
+		preserveV[v] = struct{}{}
+	}
+	return expandEnvInMapWithPreserveVars(m, preserveK, preserveV)
+}
+
+func expandEnvInMapWithPreserveVars(m map[string]any, preserveK, preserveV map[string]struct{}) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if _, isPreservedKey := preserveK[k]; isPreservedKey {
+			out[k] = deepCopyValue(v)
+			continue
+		}
+		out[k] = expandEnvInValueWithPreserveVars(v, preserveK, preserveV)
+	}
+	return out
+}
+
+func expandEnvInValueWithPreserveVars(v any, preserveK, preserveV map[string]struct{}) any {
+	switch val := v.(type) {
+	case string:
+		if len(preserveV) == 0 {
+			return os.ExpandEnv(val)
+		}
+		return os.Expand(val, func(name string) string {
+			if _, ok := preserveV[name]; ok {
+				return "${" + name + "}"
+			}
+			return os.Getenv(name)
+		})
+	case map[string]any:
+		return expandEnvInMapWithPreserveVars(val, preserveK, preserveV)
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = expandEnvInValueWithPreserveVars(item, preserveK, preserveV)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 // deepCopyValue copies a value preserving its structure. Maps and slices
 // are recursively copied; scalars (string, int, bool, nil) are returned
 // as-is. Used by ExpandEnvInMapPreservingKeys to insulate preserved

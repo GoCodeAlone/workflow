@@ -1,3 +1,10 @@
+secrets:
+  provider: github
+  generate:
+    - key: POSTGRES_PASSWORD
+      type: random_hex
+      length: 32
+
 modules:
   - name: do-provider
     type: iac.provider
@@ -15,3 +22,16 @@ modules:
             AUTH_TOKEN: "${AUTH_TOKEN}"
           env_vars_secret:
             DB_URL: "${DATABASE_URL}"
+  - name: example-droplet
+    type: infra.droplet
+    config:
+      region: nyc3
+      user_data: |
+        #cloud-config
+        write_files:
+          - path: /opt/app/docker-compose.yml
+            content: |
+              services:
+                postgres:
+                  environment:
+                    POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}'

@@ -364,6 +364,27 @@ func resourceSpecFromResolvedModule(r *config.ResolvedModule) interfaces.Resourc
 	return spec
 }
 
+// secretGenKeys returns the variable names declared in cfg.Secrets.Generate.
+// These keys are preserved as literal ${VAR} references during plan-time
+// config expansion so that desiredStateHash produces the same result
+// regardless of whether the variable is currently set in the process
+// environment. This fixes the "plan stale: config hash mismatch" error that
+// occurs when a generated secret (e.g. STAGING_PG_PASSWORD) is referenced
+// outside env_vars — for example in a Droplet user_data cloud-init script —
+// where the variable is absent at plan time but present at apply time.
+func secretGenKeys(cfg *config.WorkflowConfig) []string {
+	if cfg == nil || cfg.Secrets == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(cfg.Secrets.Generate))
+	for _, g := range cfg.Secrets.Generate {
+		if g.Key != "" {
+			keys = append(keys, g.Key)
+		}
+	}
+	return keys
+}
+
 // parseInfraResourceSpecs reads an infra config (resolving imports:) and
 // returns ResourceSpecs for all infra.* and platform.* modules.
 func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) {
@@ -371,12 +392,13 @@ func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) 
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", cfgFile, err)
 	}
+	secretVars := secretGenKeys(cfg)
 	var specs []interfaces.ResourceSpec
 	for _, m := range cfg.Modules {
 		if !isInfraType(m.Type) {
 			continue
 		}
-		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingKeys(m.Config, infraPreserveKeys)}
+		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)}
 		specs = append(specs, resourceSpecFromResolvedModule(r))
 	}
 	return specs, nil
@@ -415,6 +437,7 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 	if envName != "" && cfg.Environments != nil {
 		topEnv = cfg.Environments[envName]
 	}
+	secretVars := secretGenKeys(cfg)
 	var out []*config.ResolvedModule
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
@@ -422,7 +445,7 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 			continue
 		}
 		if envName == "" {
-			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingKeys(m.Config, infraPreserveKeys)})
+			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)})
 			continue
 		}
 		resolved, ok := m.ResolveForEnv(envName)
@@ -470,7 +493,10 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 		// Use the preserving variant so that env_vars submaps retain their
 		// ${VAR} literals through plan serialization (apply-time injection
 		// resolves them when the plugin creates/updates the resource).
-		resolved.Config = config.ExpandEnvInMapPreservingKeys(resolved.Config, infraPreserveKeys)
+		// secretVars are also preserved so that fields like user_data that
+		// reference generated secrets produce the same hash at plan time
+		// (variable unset) and apply time (variable set).
+		resolved.Config = config.ExpandEnvInMapPreservingVars(resolved.Config, infraPreserveKeys, secretVars)
 		out = append(out, resolved)
 	}
 	return out, nil

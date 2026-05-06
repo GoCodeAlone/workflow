@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ func TestParseInfraResourceSpecs_PreservesEnvVarRefs(t *testing.T) {
 	t.Setenv("IMAGE_REF", "registry.example.com/api:abc123")
 	t.Setenv("AUTH_TOKEN", "would-be-resolved-secret")
 	t.Setenv("DATABASE_URL", "postgres://would-be-resolved")
+	// POSTGRES_PASSWORD is in secrets.generate — leave it unset to simulate plan time.
 
 	specs, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
 	if err != nil {
@@ -82,6 +84,64 @@ func TestParseInfraResourceSpecs_PreservesEnvVarRefs(t *testing.T) {
 	}
 }
 
+// TestParseInfraResourceSpecs_PreservesSecretGenVarsInUserData is the regression
+// test for the DesiredHash mismatch bug: a secret declared in secrets.generate
+// that appears in a non-env_vars field (e.g. Droplet user_data) must be
+// preserved as a literal ${VAR} so that desiredStateHash is identical whether
+// or not the variable is present in the environment.
+func TestParseInfraResourceSpecs_PreservesSecretGenVarsInUserData(t *testing.T) {
+	t.Setenv("DIGITALOCEAN_TOKEN", "actual-do-token")
+	t.Setenv("IMAGE_REF", "registry.example.com/api:abc123")
+	t.Setenv("AUTH_TOKEN", "would-be-resolved-secret")
+	t.Setenv("DATABASE_URL", "postgres://would-be-resolved")
+
+	// --- Plan-time: POSTGRES_PASSWORD is NOT set (as happens in CI).
+	// Use t.Setenv so that the original value is restored by t.Cleanup.
+	t.Setenv("POSTGRES_PASSWORD", "")
+	specsAtPlan, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs (plan): %v", err)
+	}
+	hashAtPlan := desiredStateHash(specsAtPlan)
+
+	// --- Apply-time: POSTGRES_PASSWORD IS set to the generated value ---
+	t.Setenv("POSTGRES_PASSWORD", "deadbeef1234567890abcdef12345678")
+	specsAtApply, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs (apply): %v", err)
+	}
+	hashAtApply := desiredStateHash(specsAtApply)
+
+	if hashAtPlan != hashAtApply {
+		// Serialize both spec lists for diagnostics.
+		planJSON, _ := json.MarshalIndent(specsAtPlan, "", "  ")
+		applyJSON, _ := json.MarshalIndent(specsAtApply, "", "  ")
+		t.Errorf("desiredStateHash mismatch between plan and apply:\n"+
+			"  plan hash:  %s\n  apply hash: %s\n\nplan specs:\n%s\n\napply specs:\n%s",
+			hashAtPlan, hashAtApply, planJSON, applyJSON)
+	}
+
+	// Also verify that the user_data field in the droplet spec contains the
+	// literal ${POSTGRES_PASSWORD} reference (not an empty string or the value).
+	var dropletCfg map[string]any
+	for _, s := range specsAtApply {
+		if s.Name == "example-droplet" {
+			dropletCfg = s.Config
+			break
+		}
+	}
+	if dropletCfg == nil {
+		t.Fatal("example-droplet spec not found in parsed specs")
+	}
+	ud, _ := dropletCfg["user_data"].(string)
+	if !strings.Contains(ud, "${POSTGRES_PASSWORD}") {
+		t.Errorf("user_data should contain literal ${POSTGRES_PASSWORD}, got:\n%s", ud)
+	}
+	if strings.Contains(ud, "deadbeef") {
+		t.Errorf("user_data should NOT contain the resolved secret value, got:\n%s", ud)
+	}
+}
+
 // TestPlanEnvVarPreserveTestdataExists ensures the fixture file exists and
 // has the env_vars_secret block required for the preservation test.
 func TestPlanEnvVarPreserveTestdataExists(t *testing.T) {
@@ -95,5 +155,11 @@ func TestPlanEnvVarPreserveTestdataExists(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "env_vars_secret") {
 		t.Errorf("fixture missing env_vars_secret block — needed for preservation test")
+	}
+	if !strings.Contains(string(b), "user_data") {
+		t.Errorf("fixture missing user_data block — needed for secret-gen preservation test")
+	}
+	if !strings.Contains(string(b), "secrets:") {
+		t.Errorf("fixture missing secrets: section — needed for secret-gen preservation test")
 	}
 }

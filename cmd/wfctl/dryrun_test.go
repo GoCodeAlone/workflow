@@ -695,4 +695,3 @@ ci:
 		t.Errorf("follow-up command should include --config <path>, got:\n%s", output)
 	}
 }
-
