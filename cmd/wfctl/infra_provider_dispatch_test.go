@@ -286,6 +286,7 @@ modules:
 	}
 }
 
+//nolint:unused
 func specNames(specs []interfaces.ResourceSpec) []string {
 	names := make([]string, len(specs))
 	for i, s := range specs {
