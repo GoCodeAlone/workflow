@@ -35,6 +35,7 @@ linters:
         - G703 # Path traversal via taint - paths come from admin config or are internal CI/CD pipeline paths, not user input
         - G705 # XSS via taint - raw-response/static-file steps write admin-configured content by design
         - G706 # Log injection via taint - step.log and publish steps are designed to log arbitrary admin-configured content
+        - G710 # Open redirect via taint - redirect target is the admin-configured OAuth2 provider authorization URL
     gocritic:
       enabled-tags:
         - diagnostic
@@ -54,14 +55,9 @@ linters:
         linters:
           - staticcheck
         text: "SA5011"
-      # Third-party vendored Go code in ui/node_modules is not ours to fix
-      - path: ui/node_modules/
-        linters:
-          - govet
-          - staticcheck
-          - unused
-          - gocritic
-          - gosec
+    paths:
+      # Exclude third-party vendored Go code bundled under ui/node_modules from analysis entirely
+      - ui/node_modules
     presets:
       - std-error-handling
 
