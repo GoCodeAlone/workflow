@@ -555,6 +555,12 @@ func TestInvokeService_PropagatesOutputEncodingError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateModule rpc error: %v", err)
 	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateModule application error: %s", createResp.Error)
+	}
+	if createResp.HandleId == "" {
+		t.Fatal("CreateModule returned empty HandleId")
+	}
 
 	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
 		HandleId: createResp.HandleId,
@@ -578,7 +584,8 @@ func (badOutputModule) InvokeMethod(_ string, _ map[string]any) (map[string]any,
 	return map[string]any{"bad": make(chan int)}, nil
 }
 
-func mustPackGRPCTestMessage(t *testing.T, msg proto.Message) *anypb.Any {	t.Helper()
+func mustPackGRPCTestMessage(t *testing.T, msg proto.Message) *anypb.Any {
+	t.Helper()
 	typed, err := anypb.New(msg)
 	if err != nil {
 		t.Fatalf("pack typed message: %v", err)
