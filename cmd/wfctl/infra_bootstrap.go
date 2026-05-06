@@ -429,8 +429,8 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 		if forceRotate[gen.Key] {
 			deleteKey := gen.Key
 			if delErr := provider.Delete(ctx, deleteKey); delErr != nil {
-				// Log a warning for all delete errors (absent, unsupported, or other)
-				// and continue — the create path below handles all cases.
+			// Log and continue regardless of the error kind — both absent/unsupported
+				// secrets and unexpected errors should not block the rotation flow.
 				fmt.Fprintf(os.Stderr, "warn: rotate-pre-delete %s: %v (continuing)\n", deleteKey, delErr)
 			}
 			// Invalidate the List cache so the existence check below reflects the

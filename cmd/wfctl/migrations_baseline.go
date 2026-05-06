@@ -230,6 +230,13 @@ func parseMigrationStatus(stdout string) (migrationBaselineCandidateResult, erro
 			pendingSeen = true
 			if line == "No migrations applied." {
 				currentSeen = true
+				// A fresh database with no migrations applied cannot be dirty.
+				// Set dirtySeen so callers don't require a redundant "Dirty: false" line
+				// in output from drivers (e.g. atlas) that omit it on a clean first run.
+				if !dirtySeen {
+					dirtySeen = true
+					// status.Dirty is already false (zero value)
+				}
 			}
 		}
 	}

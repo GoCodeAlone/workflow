@@ -36,35 +36,7 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 		return interfaces.IaCPlan{}, fmt.Errorf("load config: %w", err)
 	}
 
-	type providerDef struct {
-		provType string
-		provCfg  map[string]any
-	}
-	providerDefs := map[string]providerDef{}
-	providerTypeCounts := map[string]int{}
-	disabledProviders := map[string]struct{}{}
-	for i := range cfg.Modules {
-		m := &cfg.Modules[i]
-		if m.Type != "iac.provider" {
-			continue
-		}
-		var modCfg map[string]any
-		if envName != "" {
-			resolved, ok := m.ResolveForEnv(envName)
-			if !ok {
-				disabledProviders[m.Name] = struct{}{}
-				continue
-			}
-			modCfg = config.ExpandEnvInMap(resolved.Config)
-		} else {
-			modCfg = config.ExpandEnvInMap(m.Config)
-		}
-		pt, _ := modCfg["provider"].(string)
-		providerDefs[m.Name] = providerDef{provType: pt, provCfg: modCfg}
-		if pt != "" {
-			providerTypeCounts[pt]++
-		}
-	}
+	providerDefs, providerTypeCounts, disabledProviders := resolveProviderDefs(cfg, envName)
 
 	// Configs without iac.provider modules: fall back to ConfigHash-only
 	// path. The nil provider is tolerated by platform.ComputePlan and
@@ -74,34 +46,9 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 		return computeInfraPlan(ctx, nil, desired, current)
 	}
 
-	type planGroup struct {
-		moduleRef string
-		provType  string
-		provCfg   map[string]any
-		specs     []interfaces.ResourceSpec
-	}
-	groups := map[string]*planGroup{}
-	var groupOrder []string
-	for _, spec := range desired {
-		moduleRef, _ := spec.Config["provider"].(string)
-		if moduleRef == "" {
-			return interfaces.IaCPlan{}, fmt.Errorf("infra module %q (%s): missing required 'provider' field", spec.Name, spec.Type)
-		}
-		if _, exists := groups[moduleRef]; !exists {
-			def, ok := providerDefs[moduleRef]
-			if !ok {
-				if _, disabled := disabledProviders[moduleRef]; disabled {
-					return interfaces.IaCPlan{}, fmt.Errorf("infra module %q references provider %q which is disabled for environment %q", spec.Name, moduleRef, envName)
-				}
-				return interfaces.IaCPlan{}, fmt.Errorf("infra module %q references provider %q which is not declared as an iac.provider module", spec.Name, moduleRef)
-			}
-			if def.provType == "" {
-				return interfaces.IaCPlan{}, fmt.Errorf("provider module %q has no 'provider' type configured", moduleRef)
-			}
-			groups[moduleRef] = &planGroup{moduleRef: moduleRef, provType: def.provType, provCfg: def.provCfg}
-			groupOrder = append(groupOrder, moduleRef)
-		}
-		groups[moduleRef].specs = append(groups[moduleRef].specs, spec)
+	groupOrder, groups, err := groupSpecsByProviderRef(desired, providerDefs, disabledProviders, envName)
+	if err != nil {
+		return interfaces.IaCPlan{}, err
 	}
 
 	// Loop body wrapped in an IIFE so each provider's closer fires after

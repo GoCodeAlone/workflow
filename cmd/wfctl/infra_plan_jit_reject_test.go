@@ -20,7 +20,7 @@ import (
 // prefix from cmd/wfctl/main.go's top-level error wrapper; the value
 // returned by runInfraPlan (and asserted here) does NOT include that
 // prefix.
-const expectedJITRejectError = "this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan."
+const expectedJITRejectError = "this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan"
 
 // TestInfraPlan_RejectsPersistedJITPlan_WithExactErrorString is the
 // canonical T5.5 scenario: a config whose env_vars carry a
