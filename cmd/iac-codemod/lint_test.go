@@ -525,6 +525,37 @@ func TestAssertDiffSetsNeedsReplaceForForceNew_StructLiteralFalseStillFlags(t *t
 	}
 }
 
+// TestAssertDiffSetsNeedsReplaceForForceNew_DirectAccumulatorAssignIsClean pins
+// the direct-assignment accumulator form described in the issue: the driver
+// initializes a local `needsReplace` bool, sets it to true inside a ForceNew
+// branch, then assigns `r.NeedsReplace = needsReplace` (an *ast.AssignStmt
+// with a selector LHS and a local-variable RHS). This is distinct from the
+// struct-literal KeyValueExpr form (workflow#539) but must equally NOT produce
+// a false-positive diagnostic.
+const diffDirectAccumulatorSrc = driverScaffold + `
+func (d *FooDriver) Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error) {
+	if current == nil {
+		return &DiffResult{}, nil
+	}
+	r := &DiffResult{}
+	needsReplace := false
+	for _, c := range r.Changes {
+		if c.ForceNew {
+			needsReplace = true
+		}
+	}
+	r.NeedsReplace = needsReplace
+	return r, nil
+}
+`
+
+func TestAssertDiffSetsNeedsReplaceForForceNew_DirectAccumulatorAssignIsClean(t *testing.T) {
+	diags := runAnalyzerOnSource(t, diffDirectAccumulatorSrc, AssertDiffSetsNeedsReplaceForForceNew)
+	if len(diags) != 0 {
+		t.Errorf("direct-assignment accumulator `r.NeedsReplace = needsReplace` is a valid W-3 expression; should NOT flag; got %d:\n%s", len(diags), diagSummary(diags))
+	}
+}
+
 // TestAssertDiffSetsNeedsReplaceForForceNew_NonDriverNotFlagged pins
 // review finding #3: the analyzer must NOT fire on types that have a
 // method named Diff but are not resource drivers (no Read / Create /
