@@ -13,7 +13,6 @@ import (
 	"github.com/GoCodeAlone/workflow/secrets"
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
-	"gopkg.in/yaml.v3"
 )
 
 // secretFieldPatterns are field name substrings that indicate a secret value.
@@ -35,16 +34,12 @@ func runSecretsDetect(args []string) error {
 		return err
 	}
 
-	data, err := os.ReadFile(*configFile)
+	cfg, err := config.LoadFromFile(*configFile)
 	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-	var cfg config.WorkflowConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config: %w", err)
+		return fmt.Errorf("load config: %w", err)
 	}
 
-	detected := detectSecrets(&cfg)
+	detected := detectSecrets(cfg)
 	if len(detected) == 0 {
 		fmt.Println("No secret-like values detected.")
 		return nil
@@ -336,23 +331,19 @@ func secretStateLabel(state SecretState) string {
 // loadWorkflowConfigForSecrets loads the full WorkflowConfig for secret operations.
 // Falls back to a default env-provider config if the file does not exist.
 func loadWorkflowConfigForSecrets(configFile string) (*config.WorkflowConfig, error) {
-	data, err := os.ReadFile(configFile)
+	cfg, err := config.LoadFromFile(configFile)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return &config.WorkflowConfig{ //nolint:nilerr // gracefully fall back when file is absent
 				Secrets: &config.SecretsConfig{Provider: "env"},
 			}, nil
 		}
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-	var cfg config.WorkflowConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		return nil, fmt.Errorf("load config: %w", err)
 	}
 	if cfg.Secrets == nil {
 		cfg.Secrets = &config.SecretsConfig{Provider: "env"}
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
 func runSecretsValidate(args []string) error {
@@ -486,16 +477,12 @@ func runSecretsSync(args []string) error {
 // loadSecretsConfig reads a workflow config and returns its SecretsConfig.
 // Returns a default env-provider config if no secrets: section is defined.
 func loadSecretsConfig(configFile string) (*config.SecretsConfig, error) {
-	data, err := os.ReadFile(configFile)
+	cfg, err := config.LoadFromFile(configFile)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return &config.SecretsConfig{Provider: "env"}, nil //nolint:nilerr // gracefully fall back when file is absent
 		}
-		return nil, fmt.Errorf("read config %q: %w", configFile, err)
-	}
-	var cfg config.WorkflowConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		return nil, fmt.Errorf("load config %q: %w", configFile, err)
 	}
 	if cfg.Secrets == nil {
 		return &config.SecretsConfig{Provider: "env"}, nil
