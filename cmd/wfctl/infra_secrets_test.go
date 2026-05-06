@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -182,3 +183,88 @@ func TestResolveSecretsProvider_KeychainMissingService(t *testing.T) {
 
 // Ensure GitHubSecretsProvider satisfies secrets.Provider interface.
 var _ secrets.Provider = (*secrets.GitHubSecretsProvider)(nil)
+
+// TestParseSecretsConfig_HonorsImports verifies that parseSecretsConfig
+// resolves imports: a secrets.generate block declared only in an imported file
+// is visible in the returned SecretsConfig.
+func TestParseSecretsConfig_HonorsImports(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+secrets:
+  provider: env
+  config:
+    prefix: TEST_
+  generate:
+    - key: STAGING_PG_PASSWORD
+      type: random_hex
+      length: 32
+`
+	mainYAML := `
+imports:
+  - shared.yaml
+
+modules:
+  - name: dummy
+    type: noop
+`
+	if err := os.WriteFile(filepath.Join(dir, "shared.yaml"), []byte(importedYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := parseSecretsConfig(mainPath)
+	if err != nil {
+		t.Fatalf("parseSecretsConfig: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil SecretsConfig from imported file, got nil")
+	}
+	if len(cfg.Generate) != 1 {
+		t.Fatalf("expected 1 generate entry from import, got %d", len(cfg.Generate))
+	}
+	if cfg.Generate[0].Key != "STAGING_PG_PASSWORD" {
+		t.Errorf("expected key STAGING_PG_PASSWORD, got %q", cfg.Generate[0].Key)
+	}
+}
+
+// TestParseInfraConfig_HonorsImports verifies that parseInfraConfig resolves
+// imports: an infra: block declared only in an imported file is visible in the
+// returned InfraConfig.
+func TestParseInfraConfig_HonorsImports(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+infra:
+  auto_bootstrap: false
+`
+	mainYAML := `
+imports:
+  - shared.yaml
+
+modules:
+  - name: dummy
+    type: noop
+`
+	if err := os.WriteFile(filepath.Join(dir, "shared.yaml"), []byte(importedYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := parseInfraConfig(mainPath)
+	if err != nil {
+		t.Fatalf("parseInfraConfig: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil InfraConfig from imported file, got nil")
+	}
+	if cfg.AutoBootstrap == nil || *cfg.AutoBootstrap {
+		t.Error("expected auto_bootstrap=false from import")
+	}
+}

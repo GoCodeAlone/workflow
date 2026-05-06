@@ -970,3 +970,43 @@ environments:
 		t.Error("expected Environments[local] from main")
 	}
 }
+
+// TestProcessImports_MergesInfraFromImport pins that WorkflowConfig.Infra is
+// merged from imported files when the main config has no infra: block.
+// parseInfraConfig (cmd/wfctl) uses config.LoadFromFile, so this exercises
+// the same code path as wfctl infra apply auto-bootstrap detection.
+func TestProcessImports_MergesInfraFromImport(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+infra:
+  auto_bootstrap: false
+`
+	if err := os.WriteFile(filepath.Join(dir, "shared.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - shared.yaml
+
+modules:
+  - name: dummy
+    type: noop
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Infra == nil {
+		t.Fatal("expected cfg.Infra to be populated from import, got nil")
+	}
+	if cfg.Infra.AutoBootstrap == nil || *cfg.Infra.AutoBootstrap {
+		t.Error("expected AutoBootstrap=false from import")
+	}
+}

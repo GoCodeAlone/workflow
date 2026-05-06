@@ -452,6 +452,10 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 				existingEntries[e.Name] = struct{}{}
 			}
 		}
+		// Merge Infra config — parent wins; import fills in if parent has no Infra block.
+		if impCfg.Infra != nil && cfg.Infra == nil {
+			cfg.Infra = impCfg.Infra
+		}
 	}
 
 	cfg.Imports = nil // clear after processing

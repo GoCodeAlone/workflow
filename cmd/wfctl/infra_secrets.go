@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
-	"gopkg.in/yaml.v3"
 )
 
 // SecretsConfig, SecretGen and InfraConfig are type aliases for the canonical
@@ -20,35 +18,27 @@ type SecretGen = config.SecretGen
 type InfraConfig = config.InfraConfig
 
 // parseSecretsConfig reads the "secrets:" top-level key from a YAML file.
+// Imports declared in the file are resolved via config.LoadFromFile so that
+// secrets.generate / secrets.entries blocks in imported files are visible.
 // Returns nil, nil if the section is absent.
 func parseSecretsConfig(cfgFile string) (*SecretsConfig, error) {
-	data, err := os.ReadFile(cfgFile)
+	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", cfgFile, err)
-	}
-	var parsed struct {
-		Secrets *SecretsConfig `yaml:"secrets"`
-	}
-	if err := yaml.Unmarshal(data, &parsed); err != nil {
 		return nil, fmt.Errorf("parse secrets config %s: %w", cfgFile, err)
 	}
-	return parsed.Secrets, nil
+	return cfg.Secrets, nil
 }
 
 // parseInfraConfig reads the "infra:" top-level section from a YAML file.
+// Imports declared in the file are resolved via config.LoadFromFile so that
+// infra: blocks in imported files are visible.
 // Returns nil, nil if the section is absent.
 func parseInfraConfig(cfgFile string) (*InfraConfig, error) {
-	data, err := os.ReadFile(cfgFile)
+	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", cfgFile, err)
-	}
-	var parsed struct {
-		Infra *InfraConfig `yaml:"infra"`
-	}
-	if err := yaml.Unmarshal(data, &parsed); err != nil {
 		return nil, fmt.Errorf("parse infra config %s: %w", cfgFile, err)
 	}
-	return parsed.Infra, nil
+	return cfg.Infra, nil
 }
 
 // resolveSecretsProvider constructs the appropriate secrets.Provider from cfg.
