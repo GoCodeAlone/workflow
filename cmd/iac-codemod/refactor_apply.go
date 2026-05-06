@@ -22,6 +22,12 @@ func init() {
 	modes["refactor-apply"] = runRefactorApply
 }
 
+// applyCanonicalCallExpr is the canonical replacement-body expression
+// emitted by refactor-apply.
+//
+//nolint:unused
+const applyCanonicalCallExpr = "wfctlhelpers.ApplyPlan(ctx, p, plan)"
+
 // applyClassification labels the disposition of a single Apply()
 // method site. The non-canonical idioms are surfaced as distinct
 // classes so the report can suggest the right hand-port handling.
