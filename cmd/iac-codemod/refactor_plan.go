@@ -1103,13 +1103,14 @@ func rewritePlanBody(fn *ast.FuncDecl, file *ast.File) {
 			ast.NewIdent(currentName),
 		},
 	}
-	// generates: plan, err := platform.ComputePlan(ctx, p, desired, current)
+	// Builds the short variable declaration that assigns the plan value and err
+	// returned by platform.ComputePlan(ctx, p, desired, current).
 	planAssign := &ast.AssignStmt{
 		Lhs: []ast.Expr{ast.NewIdent("plan"), ast.NewIdent("err")},
 		Tok: token.DEFINE,
 		Rhs: []ast.Expr{call},
 	}
-	// generates: return &plan, err
+	// Builds the return statement that returns a pointer to plan together with err.
 	returnStmt := &ast.ReturnStmt{
 		Results: []ast.Expr{
 			&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent("plan")},
