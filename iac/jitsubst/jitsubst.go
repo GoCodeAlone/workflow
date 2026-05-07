@@ -154,8 +154,8 @@ func ResolveSpec(
 // strict-rejection contract as ResolveSpec, since a malformed template
 // could never resolve and is operator-actionable at plan time.
 //
-// Used by cmd/wfctl/infra.go::resolveSpecsAgainstState (PR-1) to
-// substitute state-output and env-var references at plan time so that
+// Used by cmd/wfctl/infra_resolve_state.go::resolveSpecsAgainstState (PR-1)
+// to substitute state-output and env-var references at plan time so that
 // driver.Diff sees real values instead of literal templates. Surviving
 // unresolved refs flow through to apply-time strict ResolveSpec.
 //
@@ -425,6 +425,8 @@ func resolveString(
 
 // resolveRef resolves a single reference body (the text between ${ and }).
 // Reference forms and source precedence are documented at the package level.
+// Uses lookupModuleField for ${MODULE.field} resolution so the strict and
+// lenient paths share the same lookup logic and cannot drift.
 func resolveRef(
 	body string,
 	replaceIDMap map[string]string,
@@ -438,26 +440,17 @@ func resolveRef(
 		if module == "" || field == "" {
 			return "", fmt.Errorf("malformed reference ${%s}: empty module or field", body)
 		}
-		if field == "id" {
-			if id, ok := replaceIDMap[module]; ok {
-				return id, nil
-			}
-			if outs, ok := syncedOutputs[module]; ok {
-				if v, ok := outs["id"]; ok {
-					return fmt.Sprintf("%v", v), nil
-				}
-			}
-			return "", fmt.Errorf("unresolved reference ${%s}: module %q has no .id in replaceIDMap or syncedOutputs", body, module)
-		}
-		outs, ok := syncedOutputs[module]
+		val, ok := lookupModuleField(module, field, replaceIDMap, syncedOutputs)
 		if !ok {
-			return "", fmt.Errorf("unresolved reference ${%s}: module %q not found in syncedOutputs", body, module)
-		}
-		v, ok := outs[field]
-		if !ok {
+			if field == "id" {
+				return "", fmt.Errorf("unresolved reference ${%s}: module %q has no .id in replaceIDMap or syncedOutputs", body, module)
+			}
+			if _, hasModule := syncedOutputs[module]; !hasModule {
+				return "", fmt.Errorf("unresolved reference ${%s}: module %q not found in syncedOutputs", body, module)
+			}
 			return "", fmt.Errorf("unresolved reference ${%s}: module %q has no field %q", body, module, field)
 		}
-		return fmt.Sprintf("%v", v), nil
+		return val, nil
 	}
 	// No dot → ${VAR} env-var lookup. A nil envLookup means "no env source
 	// configured" — equivalent to an unset var, so the same error surfaces.

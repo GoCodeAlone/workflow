@@ -263,26 +263,15 @@ func runInfraPlan(args []string) error {
 	// values instead of literal templates. Refs whose source isn't in
 	// state stay templated; planRequiresJITSubstitution detects them
 	// and SchemaVersion=2 stamping handles the apply-time path.
+	var resolutionDiags []ResolutionDiagnostic
 	{
 		wfCfgForResolver, cfgLoadErr := config.LoadFromFile(cfgFile)
 		if cfgLoadErr != nil {
 			return fmt.Errorf("load config for plan-time resolver: %w", cfgLoadErr)
 		}
-		var resolutionDiags []ResolutionDiagnostic
 		desired, resolutionDiags, err = resolveSpecsAgainstState(desired, current, wfCfgForResolver, envName)
 		if err != nil {
 			return fmt.Errorf("resolve specs against state: %w", err)
-		}
-		if len(resolutionDiags) > 0 {
-			// Deferred-resolution notice printed after plan table (see below).
-			// Store in closure so the print lands after the plan table.
-			defer func() {
-				fmt.Println()
-				fmt.Println("Pending JIT resolution (apply-time):")
-				for _, d := range resolutionDiags {
-					fmt.Printf("  %s: ${%s}\n", d.ResourceName, d.Ref)
-				}
-			}()
 		}
 	}
 
@@ -325,6 +314,16 @@ func runInfraPlan(args []string) error {
 	default:
 		fmt.Printf("Infrastructure Plan — %s\n\n", cfgFile)
 		fmt.Print(formatPlanTable(plan, showSensitive))
+	}
+
+	// Print any plan-time JIT resolution diagnostics after the plan table
+	// so they're visible only when the plan rendering succeeded.
+	if len(resolutionDiags) > 0 {
+		fmt.Println()
+		fmt.Println("Pending JIT resolution (apply-time):")
+		for _, d := range resolutionDiags {
+			fmt.Printf("  %s: ${%s}\n", d.ResourceName, d.Ref)
+		}
 	}
 
 	if *output != "" {
@@ -1344,6 +1343,25 @@ func runInfraApply(args []string) error {
 				// output (no sentinel prefix); Unwrap() yields ErrEnvVarChanged
 				// so errors.Is(err, inputsnapshot.ErrEnvVarChanged) still matches.
 				return inputsnapshot.NewStaleError(drift)
+			}
+		}
+		// Mirror the plan-time resolver: apply resolveSpecsAgainstState before
+		// hashing so that DesiredHash is computed on post-resolution specs, matching
+		// what runInfraPlan recorded in plan.DesiredHash. Without this step, any ref
+		// that resolved at plan time would cause a currentHash != plan.DesiredHash
+		// mismatch on every --plan apply.
+		{
+			currentState, stateErr := loadCurrentState(cfgFile, envName)
+			if stateErr != nil {
+				return fmt.Errorf("load state for stale-check: %w", stateErr)
+			}
+			planApplyCfg, cfgErr := config.LoadFromFile(cfgFile)
+			if cfgErr != nil {
+				return fmt.Errorf("load config for stale-check: %w", cfgErr)
+			}
+			desired, _, err = resolveSpecsAgainstState(desired, currentState, planApplyCfg, envName)
+			if err != nil {
+				return fmt.Errorf("resolve specs for stale-check: %w", err)
 			}
 		}
 		currentHash := desiredStateHash(desired)
