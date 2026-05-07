@@ -47,14 +47,14 @@ func runInfraApplyRefreshPhase(
 	}
 
 	// Use DriftConfigDetector when the provider supports it (optional interface).
-	// Short-circuits to legacy DetectDrift when appliedMap is nil (no "apply"-
+	// Short-circuits to legacy DetectDrift when specsMap is nil (no "apply"-
 	// provenance entries available) to avoid unnecessary RPC round-trips.
 	var results []interfaces.DriftResult
 	var err error
 	if d, ok := provider.(interfaces.DriftConfigDetector); ok {
-		appliedMap := buildAppliedSpecMap(states, refs)
-		if appliedMap != nil {
-			results, err = d.DetectDriftWithApplied(ctx, refs, appliedMap)
+		specsMap := buildAppliedSpecMap(states, refs)
+		if specsMap != nil {
+			results, err = d.DetectDriftWithSpecs(ctx, refs, specsMap)
 		} else {
 			results, err = provider.DetectDrift(ctx, refs)
 		}

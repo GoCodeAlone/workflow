@@ -242,6 +242,6 @@ func TestDriftConfigDetector_OptionalInterface(t *testing.T) {
 // capableIaCProvider extends nonValidatingProvider with DriftConfigDetector.
 type capableIaCProvider struct{ nonValidatingProvider }
 
-func (*capableIaCProvider) DetectDriftWithApplied(context.Context, []interfaces.ResourceRef, map[string]map[string]any) ([]interfaces.DriftResult, error) {
+func (*capableIaCProvider) DetectDriftWithSpecs(context.Context, []interfaces.ResourceRef, map[string]interfaces.ResourceSpec) ([]interfaces.DriftResult, error) {
 	return nil, nil
 }

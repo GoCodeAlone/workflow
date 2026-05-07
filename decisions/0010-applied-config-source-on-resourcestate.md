@@ -7,15 +7,15 @@
 
 ## Context
 
-`DriftConfigDetector.DetectDriftWithApplied` (ADR 0007) receives the `applied` map from `ResourceState.AppliedConfig`. However, `AppliedConfig` can contain two distinct kinds of data:
+`DriftConfigDetector.DetectDriftWithSpecs` (ADR 0007, formerly `DetectDriftWithApplied`) receives per-ref specs built from `ResourceState.AppliedConfig`. However, `AppliedConfig` can contain two distinct kinds of data:
 
 1. **True user config** — set by `applyWithProviderAndStore` and `applyPrecomputedPlanWithStore` from `ResourceSpec.Config`. Comparing this against a fresh cloud Read is safe and meaningful.
 
 2. **Adoption-shaped Outputs reflow** — set by `adoptExistingResources` via `liveConfigFromOutputs(live.Outputs)`. When no embedded "config" key exists in Outputs, `liveConfigFromOutputs` falls back to `cloneMap(live.Outputs)`. Comparing such an entry against a fresh Read yields false-positive config-drift (Outputs contain fields like `id`, `created_at`, `endpoint` that are not user-controllable via spec).
 
-Without discrimination, `DetectDriftWithApplied` cannot tell safe from unsafe entries. Two placement options were considered:
+Without discrimination, `DetectDriftWithSpecs` cannot tell safe from unsafe entries. Two placement options were considered:
 
-1. **Magic key in AppliedConfig** — store the sentinel as `applied_config["_source"]`. Reads directly during `DetectDriftWithApplied` without a separate lookup.
+1. **Magic key in AppliedConfig** — store the sentinel as `applied_config["_source"]`. Reads directly during `DetectDriftWithSpecs` without a separate lookup.
 2. **Dedicated field on ResourceState** — `ResourceState.AppliedConfigSource string`. Clean separation of concerns; sentinel is not part of the user-config payload; JSON encoding is `omitempty` so legacy state files remain unaffected.
 
 ## Decision

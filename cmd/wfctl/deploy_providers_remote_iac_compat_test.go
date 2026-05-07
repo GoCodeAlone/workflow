@@ -2,54 +2,42 @@ package main
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// TestRemoteIaC_OptionalDriftConfigDetector_FallsBackOnLegacyPlugin pins the
-// pipeline's compat story: when a remote plugin does NOT support
-// IaCProvider.DetectDriftWithApplied (legacy plugin: returns "method not
-// found"), the wfctl caller falls through to legacy IaCProvider.DetectDrift.
-//
-// This is the wire-format counterpart of the type-assertion fallback in
-// runInfraApplyRefreshPhase / runInfraStatusDrift; without this gate, a v0.22
-// wfctl talking to a v0.10.3 DO plugin (or an out-of-tree plugin) could trip
-// a hard error instead of falling back.
-func TestRemoteIaC_OptionalDriftConfigDetector_FallsBackOnLegacyPlugin(t *testing.T) {
+// TestRemoteIaC_DriftConfigDetector_SendsSpecsViaDetectDrift pins the wire
+// protocol: DetectDriftWithSpecs sends "IaCProvider.DetectDrift" with a
+// "specs" arg map. The DO plugin v0.10.5+ dispatches spec-injection inside
+// IaCProvider.DetectDrift when the "specs" key is present — no separate RPC
+// method name is required.
+func TestRemoteIaC_DriftConfigDetector_SendsSpecsViaDetectDrift(t *testing.T) {
 	si := &multiMethodStubInvoker{
-		// Method not found = canonical signal a legacy plugin emits when
-		// it doesn't have a case for this RPC name.
-		errByMethod: map[string]error{
-			"IaCProvider.DetectDriftWithApplied": errors.New("method not found: IaCProvider.DetectDriftWithApplied"),
-		},
-		// Legacy DetectDrift returns success.
 		respByMethod: map[string]map[string]any{
 			"IaCProvider.DetectDrift": {
-				"drifts": []any{map[string]any{"name": "x", "type": "infra.test", "drifted": false, "class": "in-sync"}},
+				"drifts": []any{map[string]any{"name": "x", "type": "infra.test", "drifted": true, "class": "config"}},
 			},
 		},
 	}
 	p := &remoteIaCProvider{invoker: si}
 
-	// Caller-side type-assertion: remoteIaCProvider implements
-	// DetectDriftWithApplied (it always does, since the wfctl-side wrapper
-	// ALWAYS exposes the method). The fallback happens INSIDE the wrapper:
-	// if the remote returns method-not-found, the wrapper retries with
-	// legacy DetectDrift.
 	refs := []interfaces.ResourceRef{{Name: "x", Type: "infra.test"}}
-	drifts, err := p.DetectDriftWithApplied(context.Background(), refs, nil)
-	if err != nil {
-		t.Fatalf("DetectDriftWithApplied should NOT propagate method-not-found; should fall back. err=%v", err)
+	specs := map[string]interfaces.ResourceSpec{
+		"x": {Name: "x", Type: "infra.test", Config: map[string]any{"region": "nyc3"}},
 	}
-	if len(drifts) != 1 || drifts[0].Class != interfaces.DriftClassInSync {
-		t.Errorf("expected fallback InSync drift; got %+v", drifts)
+	drifts, err := p.DetectDriftWithSpecs(context.Background(), refs, specs)
+	if err != nil {
+		t.Fatalf("DetectDriftWithSpecs: unexpected error: %v", err)
+	}
+	if len(drifts) != 1 || drifts[0].Class != interfaces.DriftClassConfig {
+		t.Errorf("expected config-drift result; got %+v", drifts)
 	}
 
-	// Verify the second call to invoker WAS the legacy method.
+	// Verify the invoker was called with IaCProvider.DetectDrift (not a
+	// separate DetectDriftWithSpecs method) — this is the wire contract.
 	if !si.calledMethods["IaCProvider.DetectDrift"] {
-		t.Errorf("expected fallback to call IaCProvider.DetectDrift; called methods: %v", si.calledMethods)
+		t.Errorf("DetectDriftWithSpecs must invoke IaCProvider.DetectDrift; called methods: %v", si.calledMethods)
 	}
 }
 
