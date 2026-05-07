@@ -258,6 +258,34 @@ func runInfraPlan(args []string) error {
 	desired = filterSpecsByInclude(desired, planIncludeSet)
 	current = filterStatesByInclude(current, planIncludeSet)
 
+	// Plan-time JIT resolution (PR-1): substitute ${MODULE.field} and
+	// ${SECRET} refs against current state so driver.Diff sees real
+	// values instead of literal templates. Refs whose source isn't in
+	// state stay templated; planRequiresJITSubstitution detects them
+	// and SchemaVersion=2 stamping handles the apply-time path.
+	{
+		wfCfgForResolver, cfgLoadErr := config.LoadFromFile(cfgFile)
+		if cfgLoadErr != nil {
+			return fmt.Errorf("load config for plan-time resolver: %w", cfgLoadErr)
+		}
+		var resolutionDiags []ResolutionDiagnostic
+		desired, resolutionDiags, err = resolveSpecsAgainstState(desired, current, wfCfgForResolver, envName)
+		if err != nil {
+			return fmt.Errorf("resolve specs against state: %w", err)
+		}
+		if len(resolutionDiags) > 0 {
+			// Deferred-resolution notice printed after plan table (see below).
+			// Store in closure so the print lands after the plan table.
+			defer func() {
+				fmt.Println()
+				fmt.Println("Pending JIT resolution (apply-time):")
+				for _, d := range resolutionDiags {
+					fmt.Printf("  %s: ${%s}\n", d.ResourceName, d.Ref)
+				}
+			}()
+		}
+	}
+
 	// W-3b: load each iac.provider plugin and dispatch ComputePlan per
 	// provider group. The provider is required so platform.ComputePlan can
 	// invoke ResourceDriver.Diff for ForceNew-aware Replace classification
