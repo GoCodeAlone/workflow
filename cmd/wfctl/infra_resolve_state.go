@@ -30,6 +30,19 @@ type ResolutionDiagnostic struct {
 //
 // envName threads through resolveInfraOutput so per-env module-name
 // renaming (e.g., bmw-database → bmw-staging-db) is honored.
+//
+// Replace-cascade note: this resolver collapses ${MODULE.id} refs to
+// literal ProviderIDs from current state. When a parent resource is also
+// being replaced in the same plan, the dependent's resolved spec will
+// carry the OLD ProviderID. However, if the parent is being replaced, the
+// dependent's Diff will also see no change (both desired and state have the
+// same old ProviderID) and NO action is emitted for the dependent — so
+// there is no spec in the plan that needs the new ProviderID via ReplaceIDMap.
+// The replace-cascade path (where parent.id changes AND dependent has an
+// action) requires the dependent's config to differ from state for a non-id
+// field, at which point ${parent.id} would stay unresolved (source module's
+// ProviderID is the same as before until apply actually runs) and apply-time
+// JIT handles the substitution via ReplaceIDMap. See ADR 0013.
 func resolveSpecsAgainstState(
 	specs []interfaces.ResourceSpec,
 	current []interfaces.ResourceState,
