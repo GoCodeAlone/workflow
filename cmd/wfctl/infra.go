@@ -219,6 +219,9 @@ func runInfraPlan(args []string) error {
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var planIncludeFlag string
+	fs.StringVar(&planIncludeFlag, "include", "",
+		"Comma-separated list of resource names to scope this command to (filters both desired specs and current state)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -235,6 +238,15 @@ func runInfraPlan(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Filter to infra.* specs only (mirrors applyInfraModules behavior).
+	var infraDesired []interfaces.ResourceSpec
+	for _, s := range desired {
+		if strings.HasPrefix(s.Type, "infra.") {
+			infraDesired = append(infraDesired, s)
+		}
+	}
+	desired = infraDesired
+
 	if err := validateUniqueInfraResourceNames(desired); err != nil {
 		return err
 	}
@@ -243,6 +255,16 @@ func runInfraPlan(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load current state: %w", err)
 	}
+
+	// --include: apply scope filter. Validate before filtering so unknown names
+	// produce a descriptive error. State-only resources (eligible for delete)
+	// are accepted in the include set.
+	planIncludeSet := parseIncludeFlag(planIncludeFlag)
+	if err := validateIncludeSet(planIncludeSet, desired, current); err != nil {
+		return err
+	}
+	desired = filterSpecsByInclude(desired, planIncludeSet)
+	current = filterStatesByInclude(current, planIncludeSet)
 
 	// W-3b: load each iac.provider plugin and dispatch ComputePlan per
 	// provider group. The provider is required so platform.ComputePlan can
