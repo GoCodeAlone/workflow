@@ -105,19 +105,29 @@ func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.R
 		}
 		return fmt.Errorf("could not refresh %q: %w", src.Name, err)
 	}
-	if !reflect.DeepEqual(live.Outputs, src.Outputs) {
-		dst.Outputs = cloneMap(live.Outputs)
+	// Merge: preserve fields in src.Outputs that don't appear in live.Outputs.
+	// Some cloud Read endpoints don't return all fields that were captured at
+	// create-time (e.g., DO Droplet's user_data is write-only on Read). A naive
+	// replace clobbers those fields, causing plan to falsely detect drift on the
+	// next plan/apply cycle. Merge ensures refresh-outputs is idempotent for
+	// fields beyond cloud's Read scope.
+	//
+	// Copy-on-write: the clone is only allocated on the first detected change,
+	// so resources that haven't changed incur no per-resource allocation.
+	var merged map[string]any
+	for k, v := range live.Outputs {
+		if existing, ok := src.Outputs[k]; ok && reflect.DeepEqual(existing, v) {
+			continue
+		}
+		// First change detected: clone src.Outputs (nil-safe) and start merging.
+		if merged == nil {
+			merged = make(map[string]any, len(src.Outputs)+len(live.Outputs))
+			maps.Copy(merged, src.Outputs)
+		}
+		merged[k] = v
+	}
+	if merged != nil {
+		dst.Outputs = merged
 	}
 	return nil
-}
-
-// cloneMap returns an independent shallow copy of m. Callers receive a map
-// they can mutate without aliasing the live driver output.
-func cloneMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	c := make(map[string]any, len(m))
-	maps.Copy(c, m)
-	return c
 }
