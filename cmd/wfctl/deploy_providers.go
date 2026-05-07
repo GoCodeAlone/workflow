@@ -617,6 +617,36 @@ func (r *remoteIaCProvider) SupportedCanonicalKeys() []string {
 	return interfaces.CanonicalKeys()
 }
 
+// RevokeProviderCredential implements interfaces.ProviderCredentialRevoker.
+// It dispatches through InvokeService to the plugin subprocess, which calls
+// the provider's upstream DELETE endpoint (e.g. DO SpacesKeys.Delete).
+// This method is called by `wfctl infra bootstrap --force-rotate <name>` after
+// the new credential has been minted and stored (mint-new-then-revoke-old,
+// see ADR 0012 in the workflow repo decisions/).
+func (r *remoteIaCProvider) RevokeProviderCredential(ctx context.Context, source string, credentialID string) error {
+	args := map[string]any{
+		"source":       source,
+		"credentialID": credentialID,
+	}
+	var (
+		res map[string]any
+		err error
+	)
+	if invoker, ok := r.invoker.(remoteServiceContextInvoker); ok {
+		res, err = invoker.InvokeServiceContext(ctx, "IaCProvider.RevokeProviderCredential", args)
+	} else {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		res, err = r.invoker.InvokeService("IaCProvider.RevokeProviderCredential", args)
+	}
+	if err != nil {
+		return fmt.Errorf("IaCProvider.RevokeProviderCredential: %w", err)
+	}
+	_ = res
+	return nil
+}
+
 func (r *remoteIaCProvider) Close() error { return nil }
 
 // remoteResourceDriver routes ResourceDriver calls to the plugin via InvokeService.

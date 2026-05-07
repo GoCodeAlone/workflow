@@ -698,6 +698,72 @@ func TestRemoteIaCProvider_RepairDirtyMigration_UsesContext(t *testing.T) {
 	}
 }
 
+// ── RevokeProviderCredential ─────────────────────────────────────────────────
+
+func TestRemoteIaCProvider_RevokeProviderCredential(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{}}
+	p := newIaCProvider(si)
+
+	err := p.RevokeProviderCredential(context.Background(), "digitalocean.spaces", "AKID123")
+	if err != nil {
+		t.Fatalf("RevokeProviderCredential: unexpected error: %v", err)
+	}
+	if si.method != "IaCProvider.RevokeProviderCredential" {
+		t.Errorf("method: got %q, want IaCProvider.RevokeProviderCredential", si.method)
+	}
+	if si.args["source"] != "digitalocean.spaces" {
+		t.Errorf("args[source]: got %q, want digitalocean.spaces", si.args["source"])
+	}
+	if si.args["credentialID"] != "AKID123" {
+		t.Errorf("args[credentialID]: got %q, want AKID123", si.args["credentialID"])
+	}
+}
+
+func TestRemoteIaCProvider_RevokeProviderCredential_PropagatesError(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("upstream revoke failed")}
+	p := newIaCProvider(si)
+
+	err := p.RevokeProviderCredential(context.Background(), "digitalocean.spaces", "AKID_FAIL")
+	if err == nil {
+		t.Fatal("expected error from RevokeProviderCredential when invoker fails")
+	}
+	if !strings.Contains(err.Error(), "IaCProvider.RevokeProviderCredential") {
+		t.Errorf("error message should include method name, got: %v", err)
+	}
+}
+
+func TestRemoteIaCProvider_RevokeProviderCredential_UsesContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel
+
+	ci := &contextRecordingInvoker{resp: map[string]any{}}
+	p := &remoteIaCProvider{invoker: ci}
+
+	err := p.RevokeProviderCredential(ctx, "digitalocean.spaces", "AKID_CTX")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if !ci.usedContext {
+		t.Fatal("RevokeProviderCredential did not use context-aware invoker")
+	}
+	if ci.fallbackUsed {
+		t.Fatal("RevokeProviderCredential used context-free fallback")
+	}
+}
+
+// ── ProviderCredentialRevoker interface satisfaction ─────────────────────────
+
+// TestRemoteIaCProvider_ImplementsProviderCredentialRevoker asserts that
+// *remoteIaCProvider satisfies interfaces.ProviderCredentialRevoker at compile
+// time. The type assertion below will cause a compile error if the method
+// signature doesn't match — this is the compile-time contract check that was
+// deferred from the initial ADR 0012 implementation.
+func TestRemoteIaCProvider_ImplementsProviderCredentialRevoker(t *testing.T) {
+	p := &remoteIaCProvider{}
+	var _ interfaces.ProviderCredentialRevoker = p // compile-time assertion
+	t.Log("remoteIaCProvider satisfies interfaces.ProviderCredentialRevoker")
+}
+
 type contextRecordingInvoker struct {
 	resp         map[string]any
 	usedContext  bool
