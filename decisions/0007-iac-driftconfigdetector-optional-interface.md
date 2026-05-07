@@ -18,8 +18,9 @@
 Add `DriftConfigDetector` as an **OPTIONAL interface** (Path 2). `IaCProvider.DetectDrift` is unchanged.
 
 ```go
+// As of v0.22.3 (see addendum below for rename rationale):
 type DriftConfigDetector interface {
-    DetectDriftWithApplied(ctx context.Context, resources []ResourceRef, applied map[string]map[string]any) ([]DriftResult, error)
+    DetectDriftWithSpecs(ctx context.Context, resources []ResourceRef, specs map[string]ResourceSpec) ([]DriftResult, error)
 }
 ```
 
@@ -27,13 +28,13 @@ Callers type-assert and fall back:
 
 ```go
 if d, ok := provider.(DriftConfigDetector); ok {
-    results, err = d.DetectDriftWithApplied(ctx, refs, appliedMap)
+    results, err = d.DetectDriftWithSpecs(ctx, refs, specsMap)
 } else {
     results, err = provider.DetectDrift(ctx, refs)
 }
 ```
 
-The `applied` map is keyed by `ref.Name` and sourced from `ResourceState.AppliedConfig`. The sentinel field `ResourceState.AppliedConfigSource` (see ADR 0010) discriminates "apply" (true user-supplied config) from "adoption" (Outputs reflow). Providers MUST refuse to compute config-drift on adoption-shaped entries to avoid false-positives.
+The `specs` map is keyed by `ref.Name` and built from `ResourceState.AppliedConfig` via `buildAppliedSpecMap`. Each entry is a `ResourceSpec{Name, Type, Config}` — the typed form allows providers to read Name and Type directly without key lookup. The sentinel field `ResourceState.AppliedConfigSource` (see ADR 0010) discriminates "apply" (true user-supplied config) from "adoption" (Outputs reflow). Providers MUST refuse to compute config-drift on adoption-shaped entries to avoid false-positives.
 
 ## Consequences
 
