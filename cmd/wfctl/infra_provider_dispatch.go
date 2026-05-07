@@ -67,6 +67,37 @@ func resolveProviderDefs(cfg *config.WorkflowConfig, envName string) (defs map[s
 	return
 }
 
+// groupStatesByProviderRef builds a supplemental set of provider groups from
+// current state entries. It is used when the desired spec list is empty after
+// include filtering (e.g. an include set that names only state-only resources)
+// so that delete actions are still dispatched to the correct provider.
+//
+// Only state entries whose ProviderRef maps to a known, non-disabled iac.provider
+// module are included. Entries without a resolvable provider are silently skipped
+// (they would be skipped by filterCurrentStateForProvider anyway).
+func groupStatesByProviderRef(states []interfaces.ResourceState, defs map[string]providerDef, disabled map[string]struct{}) (groupOrder []string, groups map[string]*specGroup) {
+	groups = map[string]*specGroup{}
+	for i := range states {
+		moduleRef := resourceStateProviderRef(states[i])
+		if moduleRef == "" {
+			continue
+		}
+		if _, isDisabled := disabled[moduleRef]; isDisabled {
+			continue
+		}
+		def, ok := defs[moduleRef]
+		if !ok || def.provType == "" {
+			continue
+		}
+		if _, exists := groups[moduleRef]; !exists {
+			groups[moduleRef] = &specGroup{moduleRef: moduleRef, provType: def.provType, provCfg: def.provCfg}
+			groupOrder = append(groupOrder, moduleRef)
+		}
+		// specs slice stays empty — this group is delete-only
+	}
+	return groupOrder, groups
+}
+
 // groupSpecsByProviderRef walks specs, reads each spec's `provider` config
 // field, and groups specs into specGroup values keyed by provider module
 // reference name. The returned groupOrder slice contains the unique moduleRef

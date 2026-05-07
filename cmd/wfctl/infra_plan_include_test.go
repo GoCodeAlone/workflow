@@ -192,6 +192,8 @@ modules:
 	}
 
 	// Seed state with both res-A (in config) and orphan-B (state-only).
+	// orphan-B has ProviderRef set so the state-based group-by-provider path
+	// can route it to the correct provider for delete planning.
 	store, err := resolveStateStore(cfgPath, "")
 	if err != nil {
 		t.Fatalf("resolveStateStore: %v", err)
@@ -200,6 +202,7 @@ modules:
 		entry := interfaces.ResourceState{
 			ID: name, Name: name, Type: "infra.vpc",
 			Provider: "fake-provider", ProviderID: "pid-" + name,
+			ProviderRef: "cloud-provider",
 		}
 		if serr := store.SaveResource(context.Background(), entry); serr != nil {
 			t.Fatalf("seed %q: %v", name, serr)
@@ -209,13 +212,17 @@ modules:
 	cleanup := installFakeRefreshProvider(t, map[string]map[string]any{})
 	defer cleanup()
 
-	// --include=orphan-B should be accepted (it's in state).
-	_, err = captureStdout(t, func() error {
+	// --include=orphan-B should be accepted AND produce a delete action for
+	// the state-only resource (not a silent no-op).
+	out, err := captureStdout(t, func() error {
 		return runInfraPlan([]string{"--include=orphan-B", "-c", cfgPath})
 	})
-	// May return an error from the plan itself (provider not initialized, etc.)
-	// but should NOT fail with "does-not-exist" for orphan-B.
+	// Should not fail with "not declared" for orphan-B.
 	if err != nil && strings.Contains(err.Error(), "--include: 1 resource(s) not declared") {
 		t.Errorf("state-only resource should be accepted by --include; got %v", err)
+	}
+	// orphan-B must appear in the plan output (not silently skipped).
+	if err == nil && !strings.Contains(out, "orphan-B") {
+		t.Errorf("--include=orphan-B: state-only resource should appear in plan output; got:\n%s", out)
 	}
 }

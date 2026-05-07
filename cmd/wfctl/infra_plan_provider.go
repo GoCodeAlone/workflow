@@ -51,6 +51,21 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 		return interfaces.IaCPlan{}, err
 	}
 
+	// Supplement with state-only groups when desired is empty after include
+	// filtering. Without this, an --include set that names only state-only
+	// resources (eligible for delete) would produce an empty plan because
+	// groupSpecsByProviderRef finds no provider groups from an empty spec
+	// list. Merge: state groups only add entries not already in groups.
+	if len(desired) == 0 && len(current) > 0 {
+		stateOrder, stateGroups := groupStatesByProviderRef(current, providerDefs, disabledProviders)
+		for _, ref := range stateOrder {
+			if _, exists := groups[ref]; !exists {
+				groups[ref] = stateGroups[ref]
+				groupOrder = append(groupOrder, ref)
+			}
+		}
+	}
+
 	// Loop body wrapped in an IIFE so each provider's closer fires after
 	// its group is computed, not deferred to function exit. Without this,
 	// a 5-provider config would hold 5 gRPC connections open until

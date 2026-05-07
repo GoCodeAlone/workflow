@@ -213,6 +213,21 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		return err
 	}
 
+	// Supplement with state-only groups when infraSpecs is empty after include
+	// filtering. Without this, an --include set that names only state-only
+	// resources (eligible for delete) would become a silent no-op because
+	// groupSpecsByProviderRef finds no provider groups from an empty spec
+	// list. Merge: state groups only add entries not already in groups.
+	if len(infraSpecs) == 0 && len(current) > 0 {
+		stateOrder, stateGroups := groupStatesByProviderRef(current, providerDefs, disabledProviders)
+		for _, ref := range stateOrder {
+			if _, exists := groups[ref]; !exists {
+				groups[ref] = stateGroups[ref]
+				groupOrder = append(groupOrder, ref)
+			}
+		}
+	}
+
 	// Resolve the state store once. A missing iac.state module resolves to a
 	// noop store, but a configured backend that cannot be opened is fatal:
 	// applying cloud mutations without durable state risks losing provider_ref

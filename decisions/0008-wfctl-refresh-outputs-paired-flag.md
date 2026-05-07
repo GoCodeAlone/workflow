@@ -15,7 +15,7 @@ The TC2 cutover workflow (`core-dump/.github/workflows/tc2-cutover.yml`) needs t
 
 ## Decision
 
-Add a new `--refresh-outputs` flag to `wfctl infra apply` (and `wfctl infra plan`). The flag is independent of `--refresh`:
+Add a new `--refresh-outputs` flag to `wfctl infra apply`. The flag is apply-only (not added to `wfctl infra plan`) and is independent of `--refresh`:
 
 - `--refresh-outputs` triggers `applyPreStepRefreshOutputs` (reads live cloud Outputs, persists field-level changes).
 - `--refresh` continues to detect drift and prune ghost-in-state entries.
