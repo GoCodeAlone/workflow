@@ -38,16 +38,13 @@ func writeStateFile(t *testing.T, dir, name, resourceType, providerID string, ou
 	}
 }
 
-// tc2MockProvider is an IaCProvider that returns a Diff-based plan
-// simulating the DO DropletDriver behavior: if the desired config's
-// vpc_uuid field differs from the state's, it emits a replace action.
-// This faithfully reproduces the TC2 spurious-replace root cause.
-type tc2MockProvider struct {
-	applyCapture
-}
-
-func (p *tc2MockProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
-	// Build a lookup of current state by name.
+// tc2PlanFn simulates the DO DropletDriver.Diff behavior: if any desired
+// config field differs from the stored state config/outputs, emit a replace
+// action. This faithfully reproduces the TC2 spurious-replace root cause.
+//
+// Used as a computeInfraPlan override so the plan path exercises the real
+// field-compare Diff logic (not ConfigHash fallback).
+func tc2PlanFn(_ context.Context, _ interfaces.IaCProvider, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
 	currentMap := make(map[string]interfaces.ResourceState, len(current))
 	for _, s := range current {
 		currentMap[s.Name] = s
@@ -63,12 +60,10 @@ func (p *tc2MockProvider) Plan(_ context.Context, desired []interfaces.ResourceS
 		// compare against the stored state config. If any field differs,
 		// emit a replace action (ForceNew semantics for vpc_uuid).
 		//
-		// This faithfully reproduces the TC2 root cause: before plan-time
-		// resolution, spec.Config["vpc_uuid"] was "${STAGING_VPC_UUID}"
-		// but rs.Config["vpc_uuid"] was the real UUID — mismatch → replace.
-		//
-		// After plan-time resolution, spec.Config["vpc_uuid"] is the real
-		// UUID (matching rs.Config["vpc_uuid"]) → no action.
+		// Before PR-1: spec.Config["vpc_uuid"] == "${STAGING_VPC_UUID}"
+		//              rs.Outputs["vpc_uuid"]   == real UUID → mismatch → replace
+		// After PR-1:  spec.Config["vpc_uuid"] == real UUID (resolved from state)
+		//              rs.Outputs["vpc_uuid"]   == real UUID → no diff → no action
 		anyDiff := false
 		for k, desiredVal := range spec.Config {
 			if k == "provider" {
@@ -76,8 +71,6 @@ func (p *tc2MockProvider) Plan(_ context.Context, desired []interfaces.ResourceS
 			}
 			stateVal, hasField := rs.AppliedConfig[k]
 			if !hasField {
-				// Check state Config (iacStateRecord.config maps to AppliedConfig
-				// but some backends persist as Outputs). Check outputs too.
 				stateVal, hasField = rs.Outputs[k]
 			}
 			if !hasField || fmt.Sprintf("%v", desiredVal) != fmt.Sprintf("%v", stateVal) {
@@ -93,17 +86,7 @@ func (p *tc2MockProvider) Plan(_ context.Context, desired []interfaces.ResourceS
 			})
 		}
 	}
-	plan := &interfaces.IaCPlan{Actions: actions}
-	return plan, nil
-}
-
-func (p *tc2MockProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
-	return nil, nil
-}
-
-// Satisfy the IaCProvider interface (reuse applyCapture no-ops).
-func (p *tc2MockProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	return &interfaces.ApplyResult{}, nil
+	return interfaces.IaCPlan{Actions: actions}, nil
 }
 
 // TestRunInfraPlan_TC2RegressionScenario: VPC in state, droplet referencing
@@ -167,13 +150,21 @@ secrets:
 		t.Fatalf("write config: %v", err)
 	}
 
-	// Inject the TC2 mock provider to avoid real plugin load.
-	mock := &tc2MockProvider{}
+	// Override resolveIaCProvider to avoid real plugin load.
 	origResolve := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-		return mock, nil, nil
+		return &applyCapture{}, nil, nil
 	}
 	t.Cleanup(func() { resolveIaCProvider = origResolve })
+
+	// Override computeInfraPlan with TC2 field-compare Diff logic. This is the
+	// load-bearing seam: platform.ComputePlan (the default) falls back to
+	// ConfigHash when ResourceDriver is nil, which would make the test vacuously
+	// green. The override exercises the actual Diff comparison that exposes the
+	// spurious-replace bug.
+	origCompute := computeInfraPlan
+	computeInfraPlan = tc2PlanFn
+	t.Cleanup(func() { computeInfraPlan = origCompute })
 
 	planFile := filepath.Join(dir, "plan.json")
 	if err := runInfraPlan([]string{"--config", cfgPath, "--output", planFile}); err != nil {
