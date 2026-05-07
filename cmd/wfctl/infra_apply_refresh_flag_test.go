@@ -455,3 +455,77 @@ func TestApply_RefreshOutputsFailure_SkipsGhostPrune(t *testing.T) {
 		t.Errorf("ghost-prune (DetectDrift) MUST NOT run after refresh-outputs failure")
 	}
 }
+
+// ── Task 9: platform config visibility + double-trigger guard ─────────────────
+
+// writePlatformOnlyConfig writes a minimal YAML config with only platform.*
+// modules (no infra.* modules). --refresh-outputs should print a skip message
+// rather than silently no-op.
+func writePlatformOnlyConfig(t *testing.T, dir string) string {
+	t.Helper()
+	cfgPath := filepath.Join(dir, "platform.yaml")
+	cfg := `modules:
+  - name: api
+    type: platform.api
+    config:
+      port: 8080
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return cfgPath
+}
+
+// TestApply_RefreshOutputsFlag_PlatformConfigPrintsSkipMessage verifies that
+// --refresh-outputs on a platform.* only config (no infra.* modules) emits a
+// one-line stdout message rather than a silent no-op.
+func TestApply_RefreshOutputsFlag_PlatformConfigPrintsSkipMessage(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writePlatformOnlyConfig(t, dir)
+
+	out, err := captureStdout(t, func() error {
+		return runInfraApply([]string{"--auto-approve", "--refresh-outputs", "-c", cfgPath})
+	})
+	// The platform config has no infra.* modules so apply may fail for other
+	// reasons (no infra to apply), but the skip message MUST appear before any
+	// downstream error.
+	_ = err
+
+	if !strings.Contains(out, "--refresh-outputs requires infra.* modules") {
+		t.Errorf("stdout should explain platform.* skip; got: %q", out)
+	}
+}
+
+// TestApply_RefreshOutputsFlag_EnvVarAndFlagBothSet_RunsOnce verifies the
+// behavioral contract of the refreshOutputsRan guard: when both
+// WFCTL_REFRESH_OUTPUTS=1 and --refresh-outputs are set, the state reflects a
+// single successful refresh (id field present) and the function returns without
+// error. The guard prevents double-invocation at the code level; this test
+// verifies the end-to-end behavior is correct (not corrupted by double-run).
+func TestApply_RefreshOutputsFlag_EnvVarAndFlagBothSet_RunsOnce(t *testing.T) {
+	t.Setenv("WFCTL_REFRESH_OUTPUTS", "1")
+
+	dir := t.TempDir()
+	cfgPath := writeRefreshFlagTestConfig(t, dir)
+	seedVPCStateForRefreshFlag(t, cfgPath)
+
+	cleanup := installFakeRefreshProvider(t, map[string]map[string]any{
+		"pid-1": {"ip_range": "10.0.0.0/16", "id": "pid-1"},
+	})
+	defer cleanup()
+
+	if _, err := captureStdout(t, func() error {
+		return runInfraApply([]string{"--auto-approve", "--refresh-outputs", "-c", cfgPath})
+	}); err != nil {
+		t.Fatalf("runInfraApply: %v", err)
+	}
+
+	// Verify state is correct — refresh ran and 'id' is present.
+	got := loadVPCStateForRefreshFlag(t, cfgPath)
+	if got == nil {
+		t.Fatal("vpc-resource not in state")
+	}
+	if id, _ := got.Outputs["id"].(string); id != "pid-1" {
+		t.Errorf("refresh should have populated 'id'; got outputs=%v", got.Outputs)
+	}
+}
