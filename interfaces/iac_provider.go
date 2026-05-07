@@ -88,7 +88,7 @@ type Enumerator interface {
 // surface config-drift in addition to the existence-only Ghost / InSync /
 // Unknown classifications produced by DetectDrift.
 //
-// specs is the per-ref desired-spec map recorded in state. Callers build it
+// specs is the per-ref applied-config map sourced from state. Callers build it
 // from ResourceState.AppliedConfig (wrapped into ResourceSpec); missing or
 // empty entries instruct the provider to fall back to existence-only behavior
 // for that ref. The map key is ref.Name (matches ResourceState.Name).
