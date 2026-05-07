@@ -258,3 +258,25 @@ type PlanDiagnostic struct {
 type ProviderValidator interface {
 	ValidatePlan(plan *IaCPlan) []PlanDiagnostic
 }
+
+// ProviderCredentialRevoker is an OPTIONAL interface a provider MAY implement
+// to support revoking previously-issued provider_credential credentials.
+// Used by `wfctl infra bootstrap --force-rotate <name>` to invalidate the OLD
+// credential at the upstream provider AFTER the new one has been minted and
+// stored (mint-new-then-revoke-old ordering; see ADR 0012).
+//
+// source is the provider_credential source string (e.g. "digitalocean.spaces").
+// credentialID is the provider-specific identifier of the OLD credential
+// (e.g. the access_key_id for DO Spaces).
+//
+// Callers MUST type-assert before calling and treat the negative case as a
+// "log warning, not implemented" path — providers that do not implement this
+// interface are valid; revocation just does not happen automatically.
+//
+// Error contract:
+//   - nil → successfully revoked (or credential was already absent)
+//   - non-nil → revocation failed; caller logs warning + emits telemetry but
+//     MUST NOT roll back the newly-stored credential (the new key is valid)
+type ProviderCredentialRevoker interface {
+	RevokeProviderCredential(ctx context.Context, source string, credentialID string) error
+}

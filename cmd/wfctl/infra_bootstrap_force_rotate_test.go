@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -126,23 +127,127 @@ func TestInfraBootstrap_ForceRotate_UnknownNameFailsFast(t *testing.T) {
 	}
 }
 
-// TestInfraBootstrap_ForceRotate_ProviderCredentialRefused asserts that
-// --force-rotate on a provider_credential type returns a descriptive error
-// before touching the store.
-func TestInfraBootstrap_ForceRotate_ProviderCredentialRefused(t *testing.T) {
+// TestInfraBootstrap_ForceRotate_ProviderCredentialAllowed asserts that
+// --force-rotate on a provider_credential type is now permitted (ADR 0012).
+// The old rejection ("must be rotated via the upstream provider") was removed
+// to enable wfctl-managed mint-new-then-revoke-old rotation.
+func TestInfraBootstrap_ForceRotate_ProviderCredentialAllowed(t *testing.T) {
 	cfg := &SecretsConfig{
 		Generate: []SecretGen{
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
 	rotateNames := multiStringFlag{"SPACES"}
-	_, err := buildForceRotateSet(rotateNames, cfg)
-	if err == nil {
-		t.Fatal("expected error for provider_credential, got nil")
+	set, err := buildForceRotateSet(rotateNames, cfg)
+	if err != nil {
+		t.Fatalf("buildForceRotateSet: expected no error for provider_credential, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "must be rotated via the upstream provider") {
-		t.Errorf("error message should mention upstream provider rotation; got: %v", err)
+	if !set["SPACES"] {
+		t.Errorf("force-rotate set missing SPACES; got: %v", set)
 	}
+}
+
+// TestInfraBootstrap_ForceRotate_ProviderCredential_MintsAndRevokes verifies
+// the full mint-new-then-revoke-old flow for provider_credential force-rotate.
+// The revoker captures the old credentialID; the new sub-keys are stored.
+func TestInfraBootstrap_ForceRotate_ProviderCredential_MintsAndRevokes(t *testing.T) {
+	// Stub generator returns a new DO Spaces credential JSON.
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		return `{"access_key":"NEW_AK","secret_key":"NEW_SK"}`, nil
+	})
+
+	// Store has old sub-keys pre-populated.
+	p := newTrackingProvider(map[string]string{
+		"SPACES_access_key": "OLD_AK",
+		"SPACES_secret_key": "OLD_SK",
+	})
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	forceRotate := map[string]bool{"SPACES": true}
+
+	// Capture revoke calls.
+	var revokedSource, revokedID string
+	revoker := &stubProviderRevoker{
+		fn: func(_ context.Context, source, credentialID string) error {
+			revokedSource = source
+			revokedID = credentialID
+			return nil
+		},
+	}
+
+	result, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	if err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+
+	// New sub-keys should be stored.
+	if p.inner["SPACES_access_key"] != "NEW_AK" {
+		t.Errorf("SPACES_access_key = %q, want NEW_AK", p.inner["SPACES_access_key"])
+	}
+	if p.inner["SPACES_secret_key"] != "NEW_SK" {
+		t.Errorf("SPACES_secret_key = %q, want NEW_SK", p.inner["SPACES_secret_key"])
+	}
+	// Result map should contain new values.
+	if result["SPACES_access_key"] != "NEW_AK" {
+		t.Errorf("generated[SPACES_access_key] = %q, want NEW_AK", result["SPACES_access_key"])
+	}
+	// Revocation should have been called with old access_key_id.
+	if revokedSource != "digitalocean.spaces" {
+		t.Errorf("revokedSource = %q, want digitalocean.spaces", revokedSource)
+	}
+	if revokedID != "OLD_AK" {
+		t.Errorf("revokedID = %q, want OLD_AK", revokedID)
+	}
+}
+
+// TestInfraBootstrap_ForceRotate_ProviderCredential_RevokeFailNonFatal verifies
+// that when revocation fails, the new credential is still retained (non-fatal).
+func TestInfraBootstrap_ForceRotate_ProviderCredential_RevokeFailNonFatal(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		return `{"access_key":"NEW_AK2","secret_key":"NEW_SK2"}`, nil
+	})
+
+	p := newTrackingProvider(map[string]string{
+		"SPACES_access_key": "OLD_AK2",
+		"SPACES_secret_key": "OLD_SK2",
+	})
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	forceRotate := map[string]bool{"SPACES": true}
+
+	// Revoker that always fails.
+	revoker := &stubProviderRevoker{
+		fn: func(_ context.Context, _, _ string) error {
+			return fmt.Errorf("simulated revoke failure")
+		},
+	}
+
+	result, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	if err != nil {
+		t.Fatalf("bootstrapSecrets should not fail on revoke error; got: %v", err)
+	}
+	// New credential MUST still be stored even when revoke fails.
+	if p.inner["SPACES_access_key"] != "NEW_AK2" {
+		t.Errorf("SPACES_access_key = %q, want NEW_AK2 (must not roll back on revoke fail)", p.inner["SPACES_access_key"])
+	}
+	if result["SPACES_access_key"] != "NEW_AK2" {
+		t.Errorf("generated[SPACES_access_key] = %q, want NEW_AK2", result["SPACES_access_key"])
+	}
+}
+
+// stubProviderRevoker is a test double for interfaces.ProviderCredentialRevoker.
+type stubProviderRevoker struct {
+	fn func(ctx context.Context, source, credentialID string) error
+}
+
+func (r *stubProviderRevoker) RevokeProviderCredential(ctx context.Context, source, credentialID string) error {
+	return r.fn(ctx, source, credentialID)
 }
 
 // TestInfraBootstrap_ForceRotate_BestEffortDeleteOnMissing asserts that when
