@@ -3,6 +3,7 @@ package wfctlhelpers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -90,9 +91,11 @@ func TestDoReplace_ReplacerError_IsWrappedByBackstop(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from failing Replacer")
 	}
-	// After Task 11 lands, this will assert "replace: driver: kaboom".
-	// For now assert only that an error was returned (pre-Task-11 compilation).
-	if err.Error() == "" {
-		t.Error("error message is empty")
+	// wrapDriverReplaceError (also in this PR) applies the backstop prefix to
+	// non-conforming errors. "kaboom" has no recognized replace prefix family,
+	// so it must be wrapped as "replace: driver: kaboom".
+	const wantPrefix = "replace: driver: "
+	if !strings.HasPrefix(err.Error(), wantPrefix) {
+		t.Errorf("expected backstop prefix %q on non-conforming error; got: %v", wantPrefix, err)
 	}
 }

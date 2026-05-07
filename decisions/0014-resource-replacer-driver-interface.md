@@ -68,4 +68,4 @@ family) pass through unchanged.
 - `iac/wfctlhelpers/apply.go` — `doReplace` dispatch + `DefaultReplace` + `wrapDriverReplaceError`.
 - `iac/wfctlhelpers/apply_replacer_dispatch_test.go` — dispatch tests.
 - `iac/wfctlhelpers/apply_replacer_prefix_test.go` — prefix backstop tests.
-- core-dump decisions/0010 — canonical source for this decision.
+- `decisions/0010-applied-config-source-on-resourcestate.md` — related ADR on applied-config provenance (workflow repo).

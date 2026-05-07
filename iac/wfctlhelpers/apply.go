@@ -514,7 +514,10 @@ func hasReplaceErrorPrefix(err error) bool {
 		return false
 	}
 	head := msg[:idx]
-	// head must be one alphanumeric token (no spaces, no colons).
+	// head must be a single token with no spaces or colons — e.g. "droplet",
+	// "vpc", "database". Other characters (hyphens, underscores, digits) are
+	// accepted intentionally so resource types like "infra.droplet" or
+	// "k8s-node" can adopt the prefix freely.
 	for _, r := range head {
 		if r == ' ' || r == ':' {
 			return false
