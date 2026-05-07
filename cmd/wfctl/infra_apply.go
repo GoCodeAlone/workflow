@@ -198,6 +198,15 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// Plan-time JIT resolution (PR-1): substitute ${MODULE.field} and
+	// ${SECRET} refs against current state so driver.Diff sees real
+	// values instead of literal templates. Apply does not print the
+	// diagnostics — they're plan-output sugar only.
+	infraSpecs, _, err = resolveSpecsAgainstState(infraSpecs, current, cfg, envName)
+	if err != nil {
+		return fmt.Errorf("resolve specs against state: %w", err)
+	}
+
 	// Build a lookup table of iac.provider module name → (providerType, providerCfg).
 	// Also track which providers are explicitly disabled for this env so we can
 	// emit a precise error if an infra module references one.

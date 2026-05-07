@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Plan-time JIT resolver**: `wfctl infra plan` and `wfctl infra apply` now resolve
+  `${MODULE.field}` and `infra_output`-typed `${SECRET}` references against existing state outputs
+  before computing the diff plan. Eliminates spurious `replace` actions caused by drivers (e.g.
+  `DropletDriver.Diff`) comparing template literals against real state values. Refs whose source
+  module is not yet in state stay templated for apply-time JIT (existing W-5 path). See ADR 0013.
+- **`jitsubst.TryResolveSpec`**: lenient sibling of `ResolveSpec` for plan-time use. Substitutes
+  resolvable refs and leaves unresolved refs verbatim (with diagnostics). Strict `ResolveSpec`
+  semantics and error contract unchanged.
+
 - **`wfctl infra bootstrap --force-rotate <name>`** flag for known-bad secret recovery. Repeatable
   flag; also accepts comma-separated values (e.g. `--force-rotate FOO,BAR --force-rotate BAZ`).
   Validates each name against `secrets.generate[]` before touching the store (fast-fail on typos),

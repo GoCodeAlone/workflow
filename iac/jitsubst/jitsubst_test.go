@@ -1,6 +1,7 @@
 package jitsubst
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -461,5 +462,73 @@ func TestResolveSpec_OnError_ReturnsInputSpecUnchanged(t *testing.T) {
 	// match the unresolved originals.
 	if got.Config["good"] != "${KNOWN}" || got.Config["bad"] != "${UNKNOWN}" {
 		t.Errorf("error path leaked partial substitution: %+v", got.Config)
+	}
+}
+
+// TestTryResolveSpec_LenientLeavesUnresolvedVerbatim verifies that
+// TryResolveSpec resolves what it can and leaves unresolvable refs intact.
+func TestTryResolveSpec_LenientLeavesUnresolvedVerbatim(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "droplet",
+		Config: map[string]any{
+			"vpc_uuid": "${vpc.id}",
+			"image":    "${BRAND_NEW_VAR}",
+			"name":     "literal-text",
+		},
+	}
+	syncedOutputs := map[string]map[string]any{
+		"vpc": {"id": "14badc41-1234"},
+	}
+	envLookup := func(name string) (string, bool) {
+		// BRAND_NEW_VAR not set
+		return "", false
+	}
+
+	resolved, unresolved, err := TryResolveSpec(spec, nil, syncedOutputs, envLookup)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := resolved.Config["vpc_uuid"]; got != "14badc41-1234" {
+		t.Errorf("vpc_uuid: got %q, want resolved literal", got)
+	}
+	if got := resolved.Config["image"]; got != "${BRAND_NEW_VAR}" {
+		t.Errorf("image: got %q, want preserved template", got)
+	}
+	if got := resolved.Config["name"]; got != "literal-text" {
+		t.Errorf("name: got %q, want untouched", got)
+	}
+	wantUnresolved := []string{"BRAND_NEW_VAR"}
+	if !reflect.DeepEqual(unresolved, wantUnresolved) {
+		t.Errorf("unresolved: got %v, want %v", unresolved, wantUnresolved)
+	}
+}
+
+// TestTryResolveSpec_RejectsMalformed verifies that malformed refs are hard errors.
+func TestTryResolveSpec_RejectsMalformed(t *testing.T) {
+	cases := []string{"${.x}", "${x.}", "${}"}
+	for _, body := range cases {
+		spec := interfaces.ResourceSpec{
+			Name:   "x",
+			Config: map[string]any{"k": body},
+		}
+		_, _, err := TryResolveSpec(spec, nil, nil, nil)
+		if err == nil {
+			t.Errorf("TryResolveSpec(%q): want error, got nil", body)
+		}
+	}
+}
+
+// TestTryResolveSpec_NilConfig_NoOp verifies nil Config returns cleanly.
+func TestTryResolveSpec_NilConfig_NoOp(t *testing.T) {
+	spec := interfaces.ResourceSpec{Name: "x", Type: "infra.x"}
+	got, unresolved, err := TryResolveSpec(spec, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Config != nil {
+		t.Errorf("Config should remain nil; got %v", got.Config)
+	}
+	if len(unresolved) != 0 {
+		t.Errorf("unresolved should be empty; got %v", unresolved)
 	}
 }
