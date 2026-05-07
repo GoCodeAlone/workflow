@@ -42,9 +42,15 @@ func buildAppliedSpecMap(states []interfaces.ResourceState, refs []interfaces.Re
 		for k, v := range st.AppliedConfig {
 			cfg[k] = v
 		}
+		// Prefer st.Type (canonical from state) over ref.Type (from grouping
+		// which may be a lightweight ref without full type info).
+		specType := st.Type
+		if specType == "" {
+			specType = ref.Type
+		}
 		out[ref.Name] = interfaces.ResourceSpec{
 			Name:   ref.Name,
-			Type:   ref.Type,
+			Type:   specType,
 			Config: cfg,
 		}
 	}

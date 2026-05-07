@@ -498,6 +498,13 @@ func TestRemoteIaC_DetectDriftWithSpecs_HappyPath(t *testing.T) {
 	if si.method != "IaCProvider.DetectDrift" {
 		t.Errorf("method: got %q, want IaCProvider.DetectDrift", si.method)
 	}
+	// "specs" key must be present; legacy "applied" key must not be present.
+	if _, ok := si.args["specs"]; !ok {
+		t.Errorf("InvokeService args must contain 'specs' key; got %v", si.args)
+	}
+	if _, ok := si.args["applied"]; ok {
+		t.Errorf("InvokeService args must NOT contain legacy 'applied' key; got %v", si.args)
+	}
 	if len(drifts) != 1 || drifts[0].Class != interfaces.DriftClassConfig {
 		t.Errorf("drifts: %+v", drifts)
 	}

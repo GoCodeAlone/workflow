@@ -45,6 +45,25 @@ func TestBuildAppliedSpecMap_OmitsAdoptionAndLegacy(t *testing.T) {
 	}
 }
 
+// TestBuildAppliedSpecMap_PrefersStateTypeOverRefType verifies that when
+// ResourceState.Type is set, it takes precedence over ref.Type in the
+// ResourceSpec output (state is canonical; ref may be a lightweight lookup).
+func TestBuildAppliedSpecMap_PrefersStateTypeOverRefType(t *testing.T) {
+	states := []interfaces.ResourceState{
+		{Name: "x", Type: "infra.database", AppliedConfig: map[string]any{"k": "v"}, AppliedConfigSource: "apply"},
+	}
+	refs := []interfaces.ResourceRef{{Name: "x", Type: "infra.other"}} // ref has wrong type
+
+	got := buildAppliedSpecMap(states, refs)
+	spec, ok := got["x"]
+	if !ok {
+		t.Fatalf("expected 'x' in result")
+	}
+	if spec.Type != "infra.database" {
+		t.Errorf("spec.Type: got %q, want %q (state type should win)", spec.Type, "infra.database")
+	}
+}
+
 func TestBuildAppliedSpecMap_NilStatesReturnsNil(t *testing.T) {
 	refs := []interfaces.ResourceRef{{Name: "x"}}
 	got := buildAppliedSpecMap(nil, refs)
