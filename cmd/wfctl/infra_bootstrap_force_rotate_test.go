@@ -250,6 +250,74 @@ func (r *stubProviderRevoker) RevokeProviderCredential(ctx context.Context, sour
 	return r.fn(ctx, source, credentialID)
 }
 
+// TestInfraBootstrap_ForceRotate_ProviderCredential_WriteOnlyStore verifies that
+// when the secrets provider is write-only (Get returns ErrUnsupported, e.g.
+// GitHub Actions), revocation is skipped with a warning and the new credential
+// is still stored. The revoker MUST NOT be called because the old credential ID
+// is unknown (ADR 0012 §write-only contract).
+func TestInfraBootstrap_ForceRotate_ProviderCredential_WriteOnlyStore(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		return `{"access_key":"WO_AK","secret_key":"WO_SK"}`, nil
+	})
+
+	// writeOnlyGetUnsupportedProvider returns ErrUnsupported from Get (GitHub Actions model).
+	p := &writeOnlyGetUnsupportedProvider{inner: map[string]string{}}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	forceRotate := map[string]bool{"SPACES": true}
+
+	// Revoker must NOT be called when the old credential ID is unknown.
+	revokeCalled := false
+	revoker := &stubProviderRevoker{
+		fn: func(_ context.Context, _, _ string) error {
+			revokeCalled = true
+			return nil
+		},
+	}
+
+	result, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	if err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+	// New credential stored.
+	if result["SPACES_access_key"] != "WO_AK" {
+		t.Errorf("generated[SPACES_access_key] = %q, want WO_AK", result["SPACES_access_key"])
+	}
+	// Revoker must not have been called (no old credential ID to revoke).
+	if revokeCalled {
+		t.Error("revoker was called despite write-only provider (old credential ID unknown); must not revoke")
+	}
+}
+
+// writeOnlyGetUnsupportedProvider is a secrets.Provider where Get returns ErrUnsupported
+// (simulates GitHub Actions secrets — write-only, no read access).
+type writeOnlyGetUnsupportedProvider struct {
+	inner map[string]string
+}
+
+func (p *writeOnlyGetUnsupportedProvider) Name() string { return "write-only" }
+func (p *writeOnlyGetUnsupportedProvider) Get(_ context.Context, _ string) (string, error) {
+	return "", secrets.ErrUnsupported
+}
+func (p *writeOnlyGetUnsupportedProvider) Set(_ context.Context, key, value string) error {
+	if p.inner == nil {
+		p.inner = map[string]string{}
+	}
+	p.inner[key] = value
+	return nil
+}
+func (p *writeOnlyGetUnsupportedProvider) Delete(_ context.Context, _ string) error { return nil }
+func (p *writeOnlyGetUnsupportedProvider) List(_ context.Context) ([]string, error) {
+	names := make([]string, 0, len(p.inner))
+	for k := range p.inner {
+		names = append(names, k)
+	}
+	return names, nil
+}
+
 // TestInfraBootstrap_ForceRotate_BestEffortDeleteOnMissing asserts that when
 // the secret doesn't exist in the store yet, bootstrap still creates the fresh
 // value and returns no error (Delete returns ErrNotFound → warning, no error).
