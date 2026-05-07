@@ -1080,8 +1080,11 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&refreshFlag, "refresh", false, "Detect drift and prune ghost-in-state entries before applying")
 	var allowProtectedPruneFlag bool
 	fs.BoolVar(&allowProtectedPruneFlag, "allow-protected-prune", false, "Allow pruning state entries for resources marked protected: true (requires --refresh)")
+	var refreshOutputsFlag bool
+	fs.BoolVar(&refreshOutputsFlag, "refresh-outputs", false,
+		"Refresh per-field Outputs from cloud truth before applying (recommended pair with --refresh for cutover-style operations)")
 	var skipRefreshFlag bool
-	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set")
+	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set (does NOT cancel explicit --refresh-outputs)")
 	var allowReplaceFlag string
 	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
 		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
@@ -1210,13 +1213,32 @@ func runInfraApply(args []string) error {
 		}
 	}
 
+	// --refresh-outputs: read cloud-truth Outputs and persist field-level
+	// changes to state. Runs as a pre-step to either --refresh ghost-prune
+	// or the regular plan/apply path. NOT gated by skipRefreshFlag — that
+	// flag only cancels the env-var-driven pre-step; explicit
+	// --refresh-outputs is operator-opt-in and overrides skip semantics.
+	// Per ADR 0008: paired flag, not a semantic change to --refresh.
+	refreshOutputsRan := false
+	if refreshOutputsFlag {
+		if hasInfraModules(cfgFile) {
+			if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
+				return fmt.Errorf("--refresh-outputs: %w", err)
+			}
+			refreshOutputsRan = true
+		} else {
+			fmt.Println("Refresh-outputs: --refresh-outputs requires infra.* modules; legacy platform.* config — no-op.")
+		}
+	}
+
 	// WFCTL_REFRESH_OUTPUTS pre-step (T2.3): when opted in, read live
 	// Outputs from each provider and persist any field-level changes
 	// before computing the plan, so apply doesn't make decisions on
 	// stale state. Default off; --skip-refresh always wins. Only
 	// applicable for infra.* configs (legacy platform.* path doesn't
-	// flow through iac/refreshoutputs).
-	if applyPreStepRefreshEnabled(skipRefreshFlag) && hasInfraModules(cfgFile) {
+	// flow through iac/refreshoutputs). Skipped when --refresh-outputs
+	// already ran (refreshOutputsRan guard prevents double-trigger).
+	if !refreshOutputsRan && applyPreStepRefreshEnabled(skipRefreshFlag) && hasInfraModules(cfgFile) {
 		if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
 			return fmt.Errorf("apply pre-step refresh-outputs: %w", err)
 		}
