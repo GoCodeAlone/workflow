@@ -1088,6 +1088,9 @@ func runInfraApply(args []string) error {
 	var allowReplaceFlag string
 	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
 		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
+	var includeFlag string
+	fs.StringVar(&includeFlag, "include", "",
+		"Comma-separated list of resource names to scope this command to (filters both desired specs and current state)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -1102,6 +1105,13 @@ func runInfraApply(args []string) error {
 		return fmt.Errorf("--allow-protected-prune requires --refresh")
 	}
 
+	// Pre-flight: --include + --plan is rejected. The plan already carries the
+	// scope from the plan-time --include invocation; applying a scoped plan with
+	// a different --include would produce confusing partial-apply behavior.
+	if includeFlag != "" && planFile != "" {
+		return fmt.Errorf("--include cannot be combined with --plan (use --include at plan time, then apply with --plan; the plan already carries the scope)")
+	}
+
 	// W-6/T6.1: publish the parsed --allow-replace set for the apply
 	// path's gate (validateAllowReplaceProtected, called from both
 	// applyWithProviderAndStore and applyPrecomputedPlanWithStore).
@@ -1110,6 +1120,12 @@ func runInfraApply(args []string) error {
 	// state would otherwise leak override authorization across runs.
 	applyAllowReplaceSet = parseAllowReplaceFlag(allowReplaceFlag)
 	defer func() { applyAllowReplaceSet = nil }()
+
+	// Publish the --include flag value for the apply path's filter helpers.
+	// Reset to "" at the top of every invocation so the filter fails open
+	// (all-resources) on subsequent invocations that do not pass the flag.
+	currentApplyIncludeFlag = includeFlag
+	defer func() { currentApplyIncludeFlag = "" }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {
