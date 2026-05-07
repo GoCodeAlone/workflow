@@ -60,6 +60,40 @@ type UpsertSupporter interface {
 	SupportsUpsert() bool
 }
 
+// ResourceReplacer is an optional interface ResourceDriver
+// implementations may provide when a resource's Replace transition
+// needs more than naive Delete-then-Create — typically because the
+// resource owns single-attach dependents (e.g., a DO Droplet with
+// Block Storage Volumes, an AWS EC2 instance with EBS Volumes, a GCP
+// VM with persistent disks) that the cloud refuses to associate with
+// a new parent until the old parent releases them.
+//
+// wfctlhelpers.doReplace probes for this interface; on opt-in, the
+// driver receives the OLD ref and the NEW spec and is responsible for
+// the full transition. On non-opt-in, doReplace calls
+// wfctlhelpers.DefaultReplace (the existing Delete-then-Create logic,
+// exported for direct dispatch).
+//
+// Drivers SHOULD NOT implement this interface unless the resource has
+// orchestration needs the engine cannot satisfy generically — naive
+// Delete-then-Create is correct for the majority of cloud resources
+// and is the default for a reason (atomicity, error attribution).
+//
+// A driver that opts in but wants engine-default behavior for a
+// particular spec calls wfctlhelpers.DefaultReplace directly. The
+// engine never inspects the returned error to decide between paths,
+// so there is no sentinel-error round-trip.
+//
+// Error attribution: drivers MUST wrap their sub-step errors with a
+// recognizable prefix (e.g., "<resource-type> replace %q: detach
+// volume %q: %w"). Non-conforming returns are wrapped by the engine
+// with "replace: driver: " at the dispatch boundary so operator
+// attribution is preserved at runtime regardless of per-plugin
+// discipline.
+type ResourceReplacer interface {
+	Replace(ctx context.Context, oldRef ResourceRef, spec ResourceSpec) (*ResourceOutput, error)
+}
+
 // ResourceOutput is the concrete output of a provisioned or read resource.
 type ResourceOutput struct {
 	Name       string          `json:"name"`
