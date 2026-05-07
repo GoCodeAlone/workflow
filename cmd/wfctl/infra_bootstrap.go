@@ -112,30 +112,9 @@ func runInfraBootstrap(args []string) error {
 		// target is a provider_credential type. We do this lazily (only when needed)
 		// so that runs without --force-rotate on provider_credential don't require
 		// the plugin binary to be installed.
-		var revoker interfaces.ProviderCredentialRevoker
-		if len(forceRotate) > 0 {
-			for _, gen := range secretsCfg.Generate {
-				if forceRotate[gen.Key] && gen.Type == "provider_credential" {
-					iacProv, iacProvCloser, loadErr := loadIaCProviderFromConfig(ctx, cfgFile)
-					if loadErr != nil {
-						// Non-fatal: log warning and continue without revocation.
-						// The new credential will still be minted; the old one will
-						// not be explicitly revoked (operator must do so manually).
-						fmt.Fprintf(os.Stderr, "warn: could not load IaC provider for credential revocation: %v\n", loadErr)
-						fmt.Fprintf(os.Stderr, "warn: old provider credential will NOT be revoked automatically — revoke manually\n")
-					} else {
-						if iacProvCloser != nil {
-							defer iacProvCloser.Close() //nolint:errcheck
-						}
-						if r, ok := iacProv.(interfaces.ProviderCredentialRevoker); ok {
-							revoker = r
-						} else {
-							fmt.Fprintf(os.Stderr, "warn: IaC provider does not implement ProviderCredentialRevoker — old credential will NOT be revoked automatically\n")
-						}
-					}
-					break // only need to load the provider once
-				}
-			}
+		revoker, iacCloser := resolveCredentialRevoker(ctx, cfgFile, secretsCfg, forceRotate)
+		if iacCloser != nil {
+			defer iacCloser.Close() //nolint:errcheck
 		}
 
 		generated, err := bootstrapSecrets(ctx, provider, secretsCfg, forceRotate, revoker)
@@ -299,6 +278,52 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 		}
 	}
 	return nil
+}
+
+// resolveCredentialRevoker checks whether any force-rotate target is a
+// provider_credential type and, if so, loads the IaC provider plugin and
+// returns a ProviderCredentialRevoker (if the plugin supports it) and an
+// io.Closer for the plugin process. Returns (nil, nil) when no
+// provider_credential rotation is requested or the provider doesn't implement
+// ProviderCredentialRevoker (a warning is logged in that case).
+//
+// The returned Closer (if non-nil) must be closed by the caller — it MUST NOT
+// be deferred inside a loop; callers should defer it at the function scope.
+func resolveCredentialRevoker(ctx context.Context, cfgFile string, secretsCfg *SecretsConfig, forceRotate map[string]bool) (interfaces.ProviderCredentialRevoker, interface{ Close() error }) {
+	if len(forceRotate) == 0 || secretsCfg == nil {
+		return nil, nil
+	}
+	// Check if any force-rotate target is provider_credential.
+	needsRevoker := false
+	for _, gen := range secretsCfg.Generate {
+		if forceRotate[gen.Key] && gen.Type == "provider_credential" {
+			needsRevoker = true
+			break
+		}
+	}
+	if !needsRevoker {
+		return nil, nil
+	}
+
+	iacProv, iacCloser, loadErr := loadIaCProviderFromConfig(ctx, cfgFile)
+	if loadErr != nil {
+		// Non-fatal: log warning; credential will still be minted but old one
+		// won't be automatically revoked at the upstream provider.
+		fmt.Fprintf(os.Stderr, "warn: could not load IaC provider for credential revocation: %v\n", loadErr)
+		fmt.Fprintf(os.Stderr, "warn: old provider credential will NOT be revoked automatically — revoke manually\n")
+		return nil, nil
+	}
+	if iacProv == nil {
+		// No iac.provider module in config.
+		fmt.Fprintf(os.Stderr, "warn: no iac.provider module in config — old provider credential will NOT be revoked automatically\n")
+		return nil, nil
+	}
+	r, ok := iacProv.(interfaces.ProviderCredentialRevoker)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "warn: IaC provider does not implement ProviderCredentialRevoker — old credential will NOT be revoked automatically\n")
+		return nil, iacCloser
+	}
+	return r, iacCloser
 }
 
 // loadIaCProviderFromConfig finds the first iac.provider module in cfgFile,
