@@ -301,3 +301,33 @@ func TestRefresh_NewFieldsFromLiveAdded(t *testing.T) {
 		t.Errorf("private_ip from live Read should be added: %v", got)
 	}
 }
+
+// TestRefresh_NilSrcOutputs_LiveFieldsPopulated verifies that when a resource
+// has no previously-persisted Outputs (nil map), and the provider Read returns
+// non-empty Outputs, the merge correctly populates dst.Outputs without panicking.
+// This covers resources that enter state before any outputs were captured.
+func TestRefresh_NilSrcOutputs_LiveFieldsPopulated(t *testing.T) {
+	states := []interfaces.ResourceState{
+		{
+			Name:       "new-droplet",
+			Type:       "infra.droplet",
+			ProviderID: "droplet-nil",
+			Outputs:    nil, // no persisted outputs yet
+		},
+	}
+	fakeProvider := &fakeIaCProvider{readOutputs: map[string]map[string]any{
+		"droplet-nil": {"id": "abc123", "ip": "1.2.3.4"},
+	}}
+
+	refreshed, err := Refresh(context.Background(), fakeProvider, states, Options{Concurrency: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := refreshed[0].Outputs["id"]; got != "abc123" {
+		t.Errorf("id should be populated from live Read: %v", got)
+	}
+	if got := refreshed[0].Outputs["ip"]; got != "1.2.3.4" {
+		t.Errorf("ip should be populated from live Read: %v", got)
+	}
+}
