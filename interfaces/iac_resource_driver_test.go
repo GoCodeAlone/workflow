@@ -1,6 +1,7 @@
 package interfaces_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -42,6 +43,20 @@ func TestSentinels_ErrorsIs(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestResourceReplacerInterfaceShape asserts at compile time that a driver
+// implementing ResourceReplacer satisfies the interface shape.
+func TestResourceReplacerInterfaceShape(t *testing.T) {
+	// Compile-time assertion: a no-op driver that implements
+	// ResourceReplacer satisfies the interface.
+	var _ interfaces.ResourceReplacer = (*noopReplacer)(nil)
+}
+
+type noopReplacer struct{}
+
+func (*noopReplacer) Replace(_ context.Context, _ interfaces.ResourceRef, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, nil
 }
 
 // TestSentinels_Wrappable verifies a wrapped sentinel still matches via errors.Is.

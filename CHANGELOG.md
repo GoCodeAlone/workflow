@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`interfaces.ResourceReplacer`**: optional driver interface for resources requiring
+  orchestration beyond naive Delete-then-Create (e.g., Droplets with attached Block Storage
+  Volumes). Drivers implementing `Replace(ctx, oldRef, spec) → (*ResourceOutput, error)` take
+  ownership of the full Replace transition; non-implementing drivers continue to use
+  `DefaultReplace`. Engine-side error-prefix backstop wraps non-conforming errors with
+  `"replace: driver: "` for consistent operator attribution. See ADR 0014.
+- **`wfctlhelpers.DefaultReplace`**: exported version of the prior `doReplace` body. Drivers
+  opting into `ResourceReplacer` can delegate specific specs back to engine-default
+  Delete-then-Create without a sentinel-error round-trip.
+
 - **Plan-time JIT resolver**: `wfctl infra plan` and `wfctl infra apply` now resolve
   `${MODULE.field}` and `infra_output`-typed `${SECRET}` references against existing state outputs
   before computing the diff plan. Eliminates spurious `replace` actions caused by drivers (e.g.
