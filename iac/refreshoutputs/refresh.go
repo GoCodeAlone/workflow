@@ -105,8 +105,22 @@ func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.R
 		}
 		return fmt.Errorf("could not refresh %q: %w", src.Name, err)
 	}
-	if !reflect.DeepEqual(live.Outputs, src.Outputs) {
-		dst.Outputs = cloneMap(live.Outputs)
+	// Merge: preserve fields in src.Outputs that don't appear in live.Outputs.
+	// Some cloud Read endpoints don't return all fields that were captured at
+	// create-time (e.g., DO Droplet's user_data is write-only on Read). A naive
+	// replace clobbers those fields, causing plan to falsely detect drift on the
+	// next plan/apply cycle. Merge ensures refresh-outputs is idempotent for
+	// fields beyond cloud's Read scope.
+	needsUpdate := false
+	merged := cloneMap(src.Outputs)
+	for k, v := range live.Outputs {
+		if existing, ok := merged[k]; !ok || !reflect.DeepEqual(existing, v) {
+			merged[k] = v
+			needsUpdate = true
+		}
+	}
+	if needsUpdate {
+		dst.Outputs = merged
 	}
 	return nil
 }
