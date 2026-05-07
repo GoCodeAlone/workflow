@@ -487,37 +487,29 @@ func (r *remoteIaCProvider) DetectDrift(_ context.Context, refs []interfaces.Res
 	return drifts, nil
 }
 
-// DetectDriftWithApplied dispatches to the v2 RPC if the remote plugin
-// supports it, falling back to legacy DetectDrift when the remote returns
-// "method not found". This is the wire-format counterpart of the type-
-// assertion fallback in callers; both layers need the fallback because:
-//   - Caller-side: provider may not implement the interface (type-
-//     assertion fails → legacy path).
-//   - Wire-side: provider implements the interface in newer code but the
-//     LOADED plugin binary on disk is older (manifest accepted but RPC
-//     dispatch returns method-not-found).
-func (r *remoteIaCProvider) DetectDriftWithApplied(ctx context.Context, refs []interfaces.ResourceRef, applied map[string]map[string]any) ([]interfaces.DriftResult, error) {
+// DetectDriftWithSpecs dispatches IaCProvider.DetectDrift with a "specs" arg
+// map so the remote plugin can perform config-level drift detection (in
+// addition to ghost/in-sync existence checks). This aligns with the DO plugin
+// v0.10.5 wire protocol: the plugin dispatches on "IaCProvider.DetectDrift"
+// and checks for a "specs" key in the args to activate the spec-injection
+// path. No separate RPC method name is needed.
+//
+// The fallback to legacy DetectDrift (no specs) is preserved at the caller
+// level (infra_apply_refresh.go, infra_status_drift.go) when buildAppliedSpecMap
+// returns nil — this function is only invoked when specs are available.
+func (r *remoteIaCProvider) DetectDriftWithSpecs(ctx context.Context, refs []interfaces.ResourceRef, specs map[string]interfaces.ResourceSpec) ([]interfaces.DriftResult, error) {
 	refsAny, err := jsonToAny(refs)
 	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.DetectDriftWithApplied: marshal refs: %w", err)
+		return nil, fmt.Errorf("IaCProvider.DetectDrift(specs): marshal refs: %w", err)
 	}
-	appliedAny, err := jsonToAny(applied)
+	specsAny, err := jsonToAny(specs)
 	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.DetectDriftWithApplied: marshal applied: %w", err)
+		return nil, fmt.Errorf("IaCProvider.DetectDrift(specs): marshal specs: %w", err)
 	}
-	res, err := r.invoker.InvokeService("IaCProvider.DetectDriftWithApplied", map[string]any{
-		"refs": refsAny, "applied": appliedAny,
+	res, err := r.invoker.InvokeService("IaCProvider.DetectDrift", map[string]any{
+		"refs": refsAny, "specs": specsAny,
 	})
 	if err != nil {
-		// Method-not-found from the plugin: fall back to legacy DetectDrift.
-		// Match on substring to tolerate framework-specific error wrappers
-		// (HashiCorp go-plugin emits "method not found"; future schemes may
-		// wrap the literal differently). DO NOT fall back on other errors —
-		// a transient cloud failure must propagate so callers don't silently
-		// lose drift signal.
-		if isMethodNotFound(err) {
-			return r.DetectDrift(ctx, refs)
-		}
 		return nil, err
 	}
 	raw, ok := res["drifts"]
@@ -526,7 +518,7 @@ func (r *remoteIaCProvider) DetectDriftWithApplied(ctx context.Context, refs []i
 	}
 	var drifts []interfaces.DriftResult
 	if err := anyToStruct(raw, &drifts); err != nil {
-		return nil, fmt.Errorf("IaCProvider.DetectDriftWithApplied: decode result: %w", err)
+		return nil, fmt.Errorf("IaCProvider.DetectDrift(specs): decode result: %w", err)
 	}
 	return drifts, nil
 }

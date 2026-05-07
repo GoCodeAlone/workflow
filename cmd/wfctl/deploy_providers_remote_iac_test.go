@@ -473,9 +473,9 @@ func TestRemoteIaC_DetectDrift_Empty(t *testing.T) {
 	}
 }
 
-// ── DetectDriftWithApplied ─────────────────────────────────────────────────────
+// ── DetectDriftWithSpecs ───────────────────────────────────────────────────────
 
-func TestRemoteIaC_DetectDriftWithApplied_HappyPath(t *testing.T) {
+func TestRemoteIaC_DetectDriftWithSpecs_HappyPath(t *testing.T) {
 	si := &stubInvoker{resp: map[string]any{
 		"drifts": []any{map[string]any{
 			"name":    "x",
@@ -487,13 +487,16 @@ func TestRemoteIaC_DetectDriftWithApplied_HappyPath(t *testing.T) {
 	}}
 	p := newIaCProvider(si)
 	refs := []interfaces.ResourceRef{{Name: "x", Type: "infra.test"}}
-	applied := map[string]map[string]any{"x": {"region": "nyc1"}}
-	drifts, err := p.DetectDriftWithApplied(context.Background(), refs, applied)
-	if err != nil {
-		t.Fatalf("DetectDriftWithApplied: %v", err)
+	specs := map[string]interfaces.ResourceSpec{
+		"x": {Name: "x", Type: "infra.test", Config: map[string]any{"region": "nyc1"}},
 	}
-	if si.method != "IaCProvider.DetectDriftWithApplied" {
-		t.Errorf("method: got %q, want IaCProvider.DetectDriftWithApplied", si.method)
+	drifts, err := p.DetectDriftWithSpecs(context.Background(), refs, specs)
+	if err != nil {
+		t.Fatalf("DetectDriftWithSpecs: %v", err)
+	}
+	// Wire protocol: specs are sent via IaCProvider.DetectDrift with "specs" arg.
+	if si.method != "IaCProvider.DetectDrift" {
+		t.Errorf("method: got %q, want IaCProvider.DetectDrift", si.method)
 	}
 	if len(drifts) != 1 || drifts[0].Class != interfaces.DriftClassConfig {
 		t.Errorf("drifts: %+v", drifts)

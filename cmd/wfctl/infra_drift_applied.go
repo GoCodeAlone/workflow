@@ -2,10 +2,10 @@ package main
 
 import "github.com/GoCodeAlone/workflow/interfaces"
 
-// buildAppliedSpecMap walks states + refs and returns the per-ref applied-
-// config map for DriftConfigDetector.DetectDriftWithApplied. Entries whose
-// AppliedConfigSource is anything other than "apply" are OMITTED from the
-// returned map — providers cannot meaningfully compute config-drift against
+// buildAppliedSpecMap walks states + refs and returns the per-ref
+// ResourceSpec map for DriftConfigDetector.DetectDriftWithSpecs. Entries
+// whose AppliedConfigSource is anything other than "apply" are OMITTED from
+// the returned map — providers cannot meaningfully compute config-drift against
 // adoption-shaped Outputs (would yield false-positives) and legacy state
 // (no provenance recorded) defaults to adoption treatment per ADR 0010.
 //
@@ -14,7 +14,7 @@ import "github.com/GoCodeAlone/workflow/interfaces"
 //
 // Returns nil when no safe entries exist, so callers can short-circuit the
 // type-assertion entirely and fall back to legacy DetectDrift.
-func buildAppliedSpecMap(states []interfaces.ResourceState, refs []interfaces.ResourceRef) map[string]map[string]any {
+func buildAppliedSpecMap(states []interfaces.ResourceState, refs []interfaces.ResourceRef) map[string]interfaces.ResourceSpec {
 	if len(states) == 0 || len(refs) == 0 {
 		return nil
 	}
@@ -22,7 +22,7 @@ func buildAppliedSpecMap(states []interfaces.ResourceState, refs []interfaces.Re
 	for i := range states {
 		byName[states[i].Name] = &states[i]
 	}
-	out := make(map[string]map[string]any, len(refs))
+	out := make(map[string]interfaces.ResourceSpec, len(refs))
 	for _, ref := range refs {
 		st, ok := byName[ref.Name]
 		if !ok {
@@ -42,7 +42,11 @@ func buildAppliedSpecMap(states []interfaces.ResourceState, refs []interfaces.Re
 		for k, v := range st.AppliedConfig {
 			cfg[k] = v
 		}
-		out[ref.Name] = cfg
+		out[ref.Name] = interfaces.ResourceSpec{
+			Name:   ref.Name,
+			Type:   ref.Type,
+			Config: cfg,
+		}
 	}
 	if len(out) == 0 {
 		return nil

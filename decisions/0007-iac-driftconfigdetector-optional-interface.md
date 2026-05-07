@@ -61,3 +61,25 @@ Adversarial design review #1 (Critical finding) rejected changing `DetectDrift(c
 - `cmd/wfctl/infra_apply_refresh.go` — caller type-assertion
 - `cmd/wfctl/infra_status_drift.go` — caller type-assertion
 - `cmd/wfctl/infra_drift_applied.go` — `buildAppliedSpecMap` helper
+
+---
+
+## 2026-05-07 update: rename DetectDriftWithApplied → DetectDriftWithSpecs (v0.22.3)
+
+**Context:** While v0.22.2 was being finalized, workflow-plugin-digitalocean shipped v0.10.5 with its own implementation of the DriftConfigDetector interface. The DO plugin chose the signature:
+
+```go
+DetectDriftWithSpecs(ctx context.Context, resources []ResourceRef, specs map[string]ResourceSpec) ([]DriftResult, error)
+```
+
+This uses `ResourceSpec` (the typed wrapper with `Name`, `Type`, and `Config` fields) instead of `map[string]map[string]any`. The typed form is cleaner — callers pass all of Name/Type/Config in one value, providers can read Name and Type directly without key lookup.
+
+**Decision:** Adopt the DO plugin's signature as canonical. The autonomous mandate includes "build the right way; refactor where needed." Aligning the interface with the shipped implementation avoids a duplicate method on DOProvider and is the correct long-term design.
+
+**Wire protocol change:** The original plan called `IaCProvider.DetectDriftWithApplied` as a separate RPC method. The DO plugin v0.10.5 routes spec-injection through `IaCProvider.DetectDrift` by checking for a `"specs"` key in the args map — no new RPC case needed. The wfctl `remoteIaCProvider.DetectDriftWithSpecs` now calls `IaCProvider.DetectDrift` with `refs` + `specs` args. This is more robust: plugins that predate DriftConfigDetector support still handle `IaCProvider.DetectDrift` (they ignore the unknown `specs` key and return existence-only results).
+
+**Changes in this release (v0.22.3):**
+- `interfaces.DriftConfigDetector.DetectDriftWithApplied` renamed to `DetectDriftWithSpecs`; parameter changed from `map[string]map[string]any` to `map[string]ResourceSpec`
+- `buildAppliedSpecMap` return type changed from `map[string]map[string]any` to `map[string]interfaces.ResourceSpec`; each entry is now wrapped as `ResourceSpec{Name, Type, Config}`
+- `remoteIaCProvider.DetectDriftWithSpecs` sends `IaCProvider.DetectDrift` with `specs` arg (not a separate `DetectDriftWithApplied` RPC name)
+- All callers and tests updated accordingly

@@ -25,17 +25,23 @@ func TestBuildAppliedSpecMap_OmitsAdoptionAndLegacy(t *testing.T) {
 	}
 
 	got := buildAppliedSpecMap(states, refs)
-	want := map[string]map[string]any{
-		"apply-resource": {"k": "v"},
-		// adoption-resource: omitted (refuse false-positive on adoption)
-		// legacy-resource: omitted (legacy default-to-adoption)
-		// nil-config-resource: omitted (nil AppliedConfig)
-		// empty-map-config-resource: omitted (len 0 — same branch as nil)
-		// missing-from-state: omitted (no state)
+	// adoption-resource: omitted (refuse false-positive on adoption)
+	// legacy-resource: omitted (legacy default-to-adoption)
+	// nil-config-resource: omitted (nil AppliedConfig)
+	// empty-map-config-resource: omitted (len 0 — same branch as nil)
+	// missing-from-state: omitted (no state)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry in result, got %d: %v", len(got), got)
 	}
-
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	spec, ok := got["apply-resource"]
+	if !ok {
+		t.Fatalf("expected 'apply-resource' in result; got %v", got)
+	}
+	if spec.Name != "apply-resource" {
+		t.Errorf("spec.Name: got %q, want %q", spec.Name, "apply-resource")
+	}
+	if !reflect.DeepEqual(spec.Config, map[string]any{"k": "v"}) {
+		t.Errorf("spec.Config: got %v, want %v", spec.Config, map[string]any{"k": "v"})
 	}
 }
 
@@ -75,8 +81,9 @@ func TestBuildAppliedSpecMap_ShallowCopyPreventsCallerMutation(t *testing.T) {
 	refs := []interfaces.ResourceRef{{Name: "x"}}
 
 	got := buildAppliedSpecMap(states, refs)
-	// Mutate the returned map; verify the source state is not affected.
-	got["x"]["k"] = "mutated"
+	// Mutate the returned spec's Config; verify the source state is not affected.
+	spec := got["x"]
+	spec.Config["k"] = "mutated"
 	if states[0].AppliedConfig["k"] == "mutated" {
 		t.Errorf("buildAppliedSpecMap must return a shallow copy; source state was mutated")
 	}
