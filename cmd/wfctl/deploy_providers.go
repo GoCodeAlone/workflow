@@ -523,17 +523,6 @@ func (r *remoteIaCProvider) DetectDriftWithSpecs(ctx context.Context, refs []int
 	return drifts, nil
 }
 
-// isMethodNotFound reports whether err is the canonical signal a remote
-// plugin emits when it has no case for the requested RPC method. Tolerant
-// substring match across known wrapper formats.
-func isMethodNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "method not found") || strings.Contains(msg, "Method not found")
-}
-
 func (r *remoteIaCProvider) Import(_ context.Context, cloudID string, resourceType string) (*interfaces.ResourceState, error) {
 	res, err := r.invoker.InvokeService("IaCProvider.Import", map[string]any{
 		"provider_id":   cloudID,
