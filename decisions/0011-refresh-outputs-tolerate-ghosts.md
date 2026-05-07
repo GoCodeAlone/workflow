@@ -1,4 +1,4 @@
-# 0011 — refresh-outputs tolerates ErrResourceNotFound (ghosts) — skip with warn, not error
+# 0011 — refresh-outputs tolerates ErrResourceNotFound (ghosts) — skip silently, not error
 
 **Date:** 2026-05-06
 **Status:** Accepted

@@ -81,10 +81,11 @@ func Refresh(ctx context.Context, p interfaces.IaCProvider, states []interfaces.
 //
 // Ghost handling: if the provider reports ErrResourceNotFound, the resource
 // exists in local state but cloud has no record of it (deleted out-of-band).
-// Refresh-outputs is a non-mutating operation; it leaves the ghost's Outputs
-// unchanged so that the downstream ghost-prune phase (wfctl infra apply
-// --refresh) can act on it. This separates "refresh outputs of live resources"
-// from "remove state entries for gone resources" — they are orthogonal.
+// refreshOne skips the ghost silently — it preserves dst.Outputs == src.Outputs
+// and returns nil so the batch continues. Ghost-prune (wfctl infra apply
+// --refresh) remains the canonical mechanism for removing stale state entries.
+// This separates "refresh outputs of live resources" from "remove state entries
+// for gone resources" — they are orthogonal concerns.
 func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.ResourceState, src interfaces.ResourceState) error {
 	d, err := p.ResourceDriver(src.Type)
 	if err != nil {
@@ -94,10 +95,12 @@ func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.R
 	live, err := d.Read(ctx, ref)
 	if err != nil {
 		if errors.Is(err, interfaces.ErrResourceNotFound) {
-			// Ghost: cloud reports the resource does not exist. Leave Outputs
-			// unchanged; the caller's --refresh phase (or operator) handles
-			// ghost-prune separately. Refresh-outputs is non-mutating for
-			// ghosts: state remains intact for the prune phase to act on.
+			// Ghost: cloud reports the resource does not exist. Explicitly keep
+			// dst.Outputs aligned with src so refreshOne is self-contained and
+			// does not rely on the caller having pre-copied src into dst.
+			// The caller's --refresh phase (or operator) handles ghost-prune
+			// separately; refresh-outputs is non-mutating for ghosts.
+			dst.Outputs = src.Outputs
 			return nil
 		}
 		return fmt.Errorf("could not refresh %q: %w", src.Name, err)
