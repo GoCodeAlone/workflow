@@ -219,6 +219,9 @@ func runInfraPlan(args []string) error {
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var planIncludeFlag string
+	fs.StringVar(&planIncludeFlag, "include", "",
+		"Comma-separated list of resource names to scope this command to (filters both desired specs and current state)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -243,6 +246,17 @@ func runInfraPlan(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load current state: %w", err)
 	}
+
+	// --include: apply scope filter. Validate before filtering so unknown names
+	// produce a descriptive error. State-only resources (eligible for delete)
+	// are accepted in the include set. parseInfraResourceSpecsForEnv returns
+	// both infra.* and platform.* specs; --include works across both.
+	planIncludeSet := parseIncludeFlag(planIncludeFlag)
+	if err := validateIncludeSet(planIncludeSet, desired, current); err != nil {
+		return err
+	}
+	desired = filterSpecsByInclude(desired, planIncludeSet)
+	current = filterStatesByInclude(current, planIncludeSet)
 
 	// W-3b: load each iac.provider plugin and dispatch ComputePlan per
 	// provider group. The provider is required so platform.ComputePlan can
@@ -1080,11 +1094,17 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&refreshFlag, "refresh", false, "Detect drift and prune ghost-in-state entries before applying")
 	var allowProtectedPruneFlag bool
 	fs.BoolVar(&allowProtectedPruneFlag, "allow-protected-prune", false, "Allow pruning state entries for resources marked protected: true (requires --refresh)")
+	var refreshOutputsFlag bool
+	fs.BoolVar(&refreshOutputsFlag, "refresh-outputs", false,
+		"Refresh per-field Outputs from cloud truth before applying (recommended pair with --refresh for cutover-style operations)")
 	var skipRefreshFlag bool
-	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set")
+	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set (does NOT cancel explicit --refresh-outputs)")
 	var allowReplaceFlag string
 	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
 		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
+	var includeFlag string
+	fs.StringVar(&includeFlag, "include", "",
+		"Comma-separated list of resource names to scope this command to (filters both desired specs and current state)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -1099,6 +1119,13 @@ func runInfraApply(args []string) error {
 		return fmt.Errorf("--allow-protected-prune requires --refresh")
 	}
 
+	// Pre-flight: --include + --plan is rejected. The plan already carries the
+	// scope from the plan-time --include invocation; applying a scoped plan with
+	// a different --include would produce confusing partial-apply behavior.
+	if parseIncludeFlag(includeFlag) != nil && planFile != "" {
+		return fmt.Errorf("--include cannot be combined with --plan (use --include at plan time, then apply with --plan; the plan already carries the scope)")
+	}
+
 	// W-6/T6.1: publish the parsed --allow-replace set for the apply
 	// path's gate (validateAllowReplaceProtected, called from both
 	// applyWithProviderAndStore and applyPrecomputedPlanWithStore).
@@ -1107,6 +1134,14 @@ func runInfraApply(args []string) error {
 	// state would otherwise leak override authorization across runs.
 	applyAllowReplaceSet = parseAllowReplaceFlag(allowReplaceFlag)
 	defer func() { applyAllowReplaceSet = nil }()
+
+	// Publish the --include flag value for the apply path's filter helpers
+	// (including dry-run). Reset to "" at the top of every invocation so the
+	// filter fails open (all-resources) on subsequent invocations that do not
+	// pass the flag. Must be set before the dry-run early return so the dry-run
+	// planner can see the same include scope.
+	currentApplyIncludeFlag = includeFlag
+	defer func() { currentApplyIncludeFlag = "" }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {
@@ -1168,9 +1203,29 @@ func runInfraApply(args []string) error {
 		}
 	}
 
+	// --refresh-outputs: read cloud-truth Outputs and persist field-level
+	// changes to state. Runs as a pre-step to either --refresh ghost-prune
+	// or the regular plan/apply path — so ghost-prune sees fresh Outputs.
+	// NOT gated by skipRefreshFlag — that flag only cancels the env-var-
+	// driven pre-step; explicit --refresh-outputs is operator-opt-in and
+	// overrides skip semantics. Per ADR 0008: paired flag, not a semantic
+	// change to --refresh.
+	refreshOutputsRan := false
+	if refreshOutputsFlag {
+		if hasInfraModules(cfgFile) {
+			if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
+				return fmt.Errorf("--refresh-outputs: %w", err)
+			}
+			refreshOutputsRan = true
+		} else {
+			fmt.Println("Refresh-outputs: --refresh-outputs requires infra.* modules; legacy platform.* config — no-op.")
+		}
+	}
+
 	// --refresh: detect drift first and prune ghost-in-state entries (cloud 404s)
 	// before running the normal plan + apply. Only applicable for infra.* configs;
-	// silently skipped for legacy platform.* configs.
+	// silently skipped for legacy platform.* configs. Runs AFTER --refresh-outputs
+	// so the drift check sees the freshest possible Outputs.
 	if refreshFlag && hasInfraModules(cfgFile) {
 		fmt.Println("Refreshing state (detecting drift)...")
 		store, storeErr := resolveStateStore(cfgFile, envName)
@@ -1215,8 +1270,9 @@ func runInfraApply(args []string) error {
 	// before computing the plan, so apply doesn't make decisions on
 	// stale state. Default off; --skip-refresh always wins. Only
 	// applicable for infra.* configs (legacy platform.* path doesn't
-	// flow through iac/refreshoutputs).
-	if applyPreStepRefreshEnabled(skipRefreshFlag) && hasInfraModules(cfgFile) {
+	// flow through iac/refreshoutputs). Skipped when --refresh-outputs
+	// already ran (refreshOutputsRan guard prevents double-trigger).
+	if !refreshOutputsRan && applyPreStepRefreshEnabled(skipRefreshFlag) && hasInfraModules(cfgFile) {
 		if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
 			return fmt.Errorf("apply pre-step refresh-outputs: %w", err)
 		}

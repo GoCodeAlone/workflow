@@ -79,6 +79,16 @@ func runInfraApplyDryRun(cfgFile, envName, format string, showSensitive bool) er
 		current = nil
 	}
 
+	// --include: apply the same scope filter as the live apply path.
+	// currentApplyIncludeFlag is set by runInfraApply before this call
+	// so dry-run sees the same resource subset as a live apply would.
+	dryRunIncludeSet := parseIncludeFlag(currentApplyIncludeFlag)
+	if err := validateIncludeSet(dryRunIncludeSet, desired, current); err != nil {
+		return err
+	}
+	desired = filterSpecsByInclude(desired, dryRunIncludeSet)
+	current = filterStatesByInclude(current, dryRunIncludeSet)
+
 	plan, err := computePlanForInfraSpecs(context.Background(), cfgFile, envName, desired, current)
 	if err != nil {
 		return fmt.Errorf("compute plan: %w", err)

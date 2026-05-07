@@ -170,6 +170,28 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		return err
 	}
 
+	// --include: apply scope filter. Resolve the include set from the package-
+	// level flag var (set by runInfraApply). State is loaded first so that
+	// state-only resources (eligible for delete) are accepted in the include
+	// set. Filtering happens before grouping so provider groups only see the
+	// scoped specs.
+	includeSet := parseIncludeFlag(currentApplyIncludeFlag)
+
+	// Load current state once; nil on first run is valid (no prior state).
+	current, err := loadCurrentState(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("load current state: %w", err)
+	}
+
+	// Validate and apply the include filter to both specs and state before
+	// grouping by provider so that out-of-scope resources are never passed
+	// down to any provider.
+	if err := validateIncludeSet(includeSet, infraSpecs, current); err != nil {
+		return err
+	}
+	infraSpecs = filterSpecsByInclude(infraSpecs, includeSet)
+	current = filterStatesByInclude(current, includeSet)
+
 	// Load full config to resolve iac.provider module definitions.
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
@@ -184,15 +206,26 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	providerDefs, providerTypeCounts, disabledProviders := resolveProviderDefs(cfg, envName)
 
 	// Group infra specs by iac.provider module name, preserving first-reference order.
+	// Uses the already-filtered infraSpecs so provider groups only contain
+	// in-scope resources.
 	groupOrder, groups, err := groupSpecsByProviderRef(infraSpecs, providerDefs, disabledProviders, envName)
 	if err != nil {
 		return err
 	}
 
-	// Load current state once; nil on first run is valid (no prior state).
-	current, err := loadCurrentState(cfgFile, envName)
-	if err != nil {
-		return fmt.Errorf("load current state: %w", err)
+	// Supplement with state-only groups when infraSpecs is empty after include
+	// filtering. Without this, an --include set that names only state-only
+	// resources (eligible for delete) would become a silent no-op because
+	// groupSpecsByProviderRef finds no provider groups from an empty spec
+	// list. Merge: state groups only add entries not already in groups.
+	if len(infraSpecs) == 0 && len(current) > 0 {
+		stateOrder, stateGroups := groupStatesByProviderRef(current, providerDefs, disabledProviders)
+		for _, ref := range stateOrder {
+			if _, exists := groups[ref]; !exists {
+				groups[ref] = stateGroups[ref]
+				groupOrder = append(groupOrder, ref)
+			}
+		}
 	}
 
 	// Resolve the state store once. A missing iac.state module resolves to a
