@@ -497,7 +497,7 @@ func (r *remoteIaCProvider) DetectDrift(_ context.Context, refs []interfaces.Res
 // The fallback to legacy DetectDrift (no specs) is preserved at the caller
 // level (infra_apply_refresh.go, infra_status_drift.go) when buildAppliedSpecMap
 // returns nil — this function is only invoked when specs are available.
-func (r *remoteIaCProvider) DetectDriftWithSpecs(ctx context.Context, refs []interfaces.ResourceRef, specs map[string]interfaces.ResourceSpec) ([]interfaces.DriftResult, error) {
+func (r *remoteIaCProvider) DetectDriftWithSpecs(_ context.Context, refs []interfaces.ResourceRef, specs map[string]interfaces.ResourceSpec) ([]interfaces.DriftResult, error) {
 	refsAny, err := jsonToAny(refs)
 	if err != nil {
 		return nil, fmt.Errorf("IaCProvider.DetectDrift(specs): marshal refs: %w", err)
