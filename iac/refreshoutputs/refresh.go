@@ -12,6 +12,7 @@ package refreshoutputs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -77,6 +78,14 @@ func Refresh(ctx context.Context, p interfaces.IaCProvider, states []interfaces.
 // refreshOne performs a single resource Read and writes the live Outputs
 // into dst when they differ from src.Outputs. It returns nil on success or
 // the error otherwise.
+//
+// Ghost handling: if the provider reports ErrResourceNotFound, the resource
+// exists in local state but cloud has no record of it (deleted out-of-band).
+// refreshOne skips the ghost silently — it preserves dst.Outputs == src.Outputs
+// and returns nil so the batch continues. Ghost-prune (wfctl infra apply
+// --refresh) remains the canonical mechanism for removing stale state entries.
+// This separates "refresh outputs of live resources" from "remove state entries
+// for gone resources" — they are orthogonal concerns.
 func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.ResourceState, src interfaces.ResourceState) error {
 	d, err := p.ResourceDriver(src.Type)
 	if err != nil {
@@ -85,6 +94,15 @@ func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.R
 	ref := interfaces.ResourceRef{Name: src.Name, Type: src.Type, ProviderID: src.ProviderID}
 	live, err := d.Read(ctx, ref)
 	if err != nil {
+		if errors.Is(err, interfaces.ErrResourceNotFound) {
+			// Ghost: cloud reports the resource does not exist. Explicitly keep
+			// dst.Outputs aligned with src so refreshOne is self-contained and
+			// does not rely on the caller having pre-copied src into dst.
+			// The caller's --refresh phase (or operator) handles ghost-prune
+			// separately; refresh-outputs is non-mutating for ghosts.
+			dst.Outputs = src.Outputs
+			return nil
+		}
 		return fmt.Errorf("could not refresh %q: %w", src.Name, err)
 	}
 	if !reflect.DeepEqual(live.Outputs, src.Outputs) {
