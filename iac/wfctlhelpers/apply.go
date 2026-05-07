@@ -361,8 +361,13 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 	return nil
 }
 
-// doReplace decomposes a Replace action into Delete-then-Create on the
-// driver and propagates the new ProviderID through
+// DefaultReplace is the engine's default Replace dispatcher: Delete the
+// resource at action.Current, then Create from action.Resource. Public
+// so drivers that opt into ResourceReplacer can delegate a particular
+// spec to engine-default behavior without a sentinel-error round-trip.
+//
+// Decomposes a Replace action into Delete-then-Create on the driver and
+// propagates the new ProviderID through
 // result.ReplaceIDMap[action.Resource.Name] so the JIT substitution wired
 // into ApplyPlan's loop (T5.2) can patch dependent resources whose
 // configs reference the replaced resource by name.
@@ -371,7 +376,7 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 //
 // When a plan has [Replace parent, X dependent] where dependent's
 // Config carries ${parent.id}, the cascade lands automatically:
-// doReplace's post-Create write to result.ReplaceIDMap completes
+// DefaultReplace's post-Create write to result.ReplaceIDMap completes
 // BEFORE the dispatch loop's next iteration calls
 // jitsubst.ResolveSpec on the dependent's spec, so the dependent's
 // driver call (Create or Replace's post-Delete Create) sees the
@@ -404,7 +409,7 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 // result.Errors couldn't tell whether the Delete or the Create failed.
 // Other sub-functions (doCreate non-recovery path, doUpdate, doDelete)
 // pass driver errors through unchanged.
-func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+func DefaultReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
 	if err := d.Delete(ctx, refFromAction(action)); err != nil {
 		return fmt.Errorf("replace: delete: %w", err)
 	}
@@ -434,6 +439,13 @@ func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfac
 		result.ReplaceIDMap[action.Resource.Name] = out.ProviderID
 	}
 	return nil
+}
+
+// doReplace is the dispatch entry point for Replace actions. It probes
+// the driver for the optional ResourceReplacer interface (Task 10);
+// for now it delegates directly to DefaultReplace.
+func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+	return DefaultReplace(ctx, d, action, result)
 }
 
 // doDelete invokes Delete with a ResourceRef carrying action.Current's
