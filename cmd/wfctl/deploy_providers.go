@@ -625,8 +625,8 @@ func (r *remoteIaCProvider) SupportedCanonicalKeys() []string {
 // see ADR 0012 in the workflow repo decisions/).
 func (r *remoteIaCProvider) RevokeProviderCredential(ctx context.Context, source string, credentialID string) error {
 	args := map[string]any{
-		"source":       source,
-		"credentialID": credentialID,
+		"source":        source,
+		"credential_id": credentialID,
 	}
 	var (
 		res map[string]any

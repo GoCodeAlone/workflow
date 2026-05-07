@@ -714,8 +714,8 @@ func TestRemoteIaCProvider_RevokeProviderCredential(t *testing.T) {
 	if si.args["source"] != "digitalocean.spaces" {
 		t.Errorf("args[source]: got %q, want digitalocean.spaces", si.args["source"])
 	}
-	if si.args["credentialID"] != "AKID123" {
-		t.Errorf("args[credentialID]: got %q, want AKID123", si.args["credentialID"])
+	if si.args["credential_id"] != "AKID123" {
+		t.Errorf("args[credential_id]: got %q, want AKID123", si.args["credential_id"])
 	}
 }
 
