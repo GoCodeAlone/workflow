@@ -238,15 +238,6 @@ func runInfraPlan(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Filter to infra.* specs only (mirrors applyInfraModules behavior).
-	var infraDesired []interfaces.ResourceSpec
-	for _, s := range desired {
-		if strings.HasPrefix(s.Type, "infra.") {
-			infraDesired = append(infraDesired, s)
-		}
-	}
-	desired = infraDesired
-
 	if err := validateUniqueInfraResourceNames(desired); err != nil {
 		return err
 	}
@@ -258,7 +249,8 @@ func runInfraPlan(args []string) error {
 
 	// --include: apply scope filter. Validate before filtering so unknown names
 	// produce a descriptive error. State-only resources (eligible for delete)
-	// are accepted in the include set.
+	// are accepted in the include set. parseInfraResourceSpecsForEnv returns
+	// both infra.* and platform.* specs; --include works across both.
 	planIncludeSet := parseIncludeFlag(planIncludeFlag)
 	if err := validateIncludeSet(planIncludeSet, desired, current); err != nil {
 		return err
@@ -1130,7 +1122,7 @@ func runInfraApply(args []string) error {
 	// Pre-flight: --include + --plan is rejected. The plan already carries the
 	// scope from the plan-time --include invocation; applying a scoped plan with
 	// a different --include would produce confusing partial-apply behavior.
-	if includeFlag != "" && planFile != "" {
+	if parseIncludeFlag(includeFlag) != nil && planFile != "" {
 		return fmt.Errorf("--include cannot be combined with --plan (use --include at plan time, then apply with --plan; the plan already carries the scope)")
 	}
 
@@ -1143,9 +1135,11 @@ func runInfraApply(args []string) error {
 	applyAllowReplaceSet = parseAllowReplaceFlag(allowReplaceFlag)
 	defer func() { applyAllowReplaceSet = nil }()
 
-	// Publish the --include flag value for the apply path's filter helpers.
-	// Reset to "" at the top of every invocation so the filter fails open
-	// (all-resources) on subsequent invocations that do not pass the flag.
+	// Publish the --include flag value for the apply path's filter helpers
+	// (including dry-run). Reset to "" at the top of every invocation so the
+	// filter fails open (all-resources) on subsequent invocations that do not
+	// pass the flag. Must be set before the dry-run early return so the dry-run
+	// planner can see the same include scope.
 	currentApplyIncludeFlag = includeFlag
 	defer func() { currentApplyIncludeFlag = "" }()
 

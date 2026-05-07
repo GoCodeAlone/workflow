@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -51,6 +52,7 @@ func validateIncludeSet(include map[string]struct{}, specs []interfaces.Resource
 		}
 	}
 	if len(missing) > 0 {
+		sort.Strings(missing) // deterministic order for stable CLI output
 		return fmt.Errorf("--include: %d resource(s) not declared in config or state: %s",
 			len(missing), strings.Join(missing, ", "))
 	}
