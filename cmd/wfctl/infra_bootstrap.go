@@ -287,9 +287,15 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 // resolveCredentialRevoker checks whether any force-rotate target is a
 // provider_credential type and, if so, loads the IaC provider plugin and
 // returns a ProviderCredentialRevoker (if the plugin supports it) and an
-// io.Closer for the plugin process. Returns (nil, nil) when no
-// provider_credential rotation is requested or the provider doesn't implement
-// ProviderCredentialRevoker (a warning is logged in that case).
+// io.Closer for the plugin process.
+//
+// Returns (nil, nil) when:
+//   - no provider_credential rotation is requested, OR
+//   - the config has no iac.provider module, OR
+//   - loading the IaC provider fails (warning logged).
+//
+// Returns (nil, iacCloser) when the provider was loaded but does not implement
+// ProviderCredentialRevoker (warning logged; caller must close iacCloser).
 //
 // The returned Closer (if non-nil) must be closed by the caller — it MUST NOT
 // be deferred inside a loop; callers should defer it at the function scope.
@@ -527,7 +533,7 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 			genConfig["source"] = gen.Source
 		}
 
-		// --force-rotate path: for provider_credential, read the OLD access_key_id
+		// --force-rotate path: for provider_credential, read the OLD access_key
 		// BEFORE deleting so we can revoke it at the upstream provider after minting
 		// the new one (mint-new-then-revoke-old; see ADR 0012).
 		// For other types, delete the existing value (best-effort) so that the
@@ -535,7 +541,7 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 		var oldCredentialID string // non-empty only for provider_credential + force-rotate
 		if forceRotate[gen.Key] {
 			if gen.Type == "provider_credential" {
-				// Always attempt to read the old access_key_id, even when credRevoker
+				// Always attempt to read the old access_key, even when credRevoker
 				// is nil: this allows the "no revoker available" warning to include the
 				// old credential ID so operators can revoke it manually.
 				accessKeyName := gen.Key + "_access_key"
@@ -545,6 +551,11 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 					// Write-only provider (e.g. GitHub Actions) — Get is not supported.
 					// Revocation will be skipped; warn the operator.
 					fmt.Fprintf(os.Stderr, "warn: secrets provider does not support Get — cannot read old %s for revocation; revoke manually after rotation\n", accessKeyName)
+				} else if !errors.Is(getErr, secrets.ErrNotFound) {
+					// Unexpected error reading old credential (not "doesn't exist" and not "unsupported").
+					// Log a warning so operators know revocation may not occur, but continue — we still
+					// mint and store the new credential.
+					fmt.Fprintf(os.Stderr, "warn: could not read old %s for revocation (%v) — revoke manually after rotation\n", accessKeyName, getErr)
 				}
 				// Delete all sub-keys for this provider_credential.
 				subKeys, hasSubKeys := subKeysForSource(gen.Source)

@@ -267,7 +267,7 @@ type ProviderValidator interface {
 //
 // source is the provider_credential source string (e.g. "digitalocean.spaces").
 // credentialID is the provider-specific identifier of the OLD credential
-// (e.g. the access_key_id for DO Spaces).
+// (e.g. the access_key for DO Spaces — stored as <name>_access_key).
 //
 // Callers MUST type-assert before calling and treat the negative case as a
 // "log warning, not implemented" path — providers that do not implement this

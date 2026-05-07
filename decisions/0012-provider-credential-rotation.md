@@ -24,7 +24,7 @@ is error-prone, undocumented, and not audited by wfctl.
 
 Enable `--force-rotate` for `provider_credential` secrets with the following ordering guarantee:
 
-1. **Read** the OLD `access_key_id` from the secrets store before any deletion.
+1. **Read** the OLD `access_key` (stored as `<name>_access_key`) from the secrets store before any deletion.
 2. **Delete** all existing sub-keys from the secrets store.
 3. **Mint** new credentials via `secrets.GenerateSecret` (calls the provider API).
 4. **Store** new sub-keys in the secrets store.
@@ -73,9 +73,9 @@ temporarily.
 - Requires explicit `--force-rotate <name>` flag — never triggered automatically.
 - Validates against `secrets.generate[]` first (fast-fail on typos).
 - `infra_output` types are still rejected (they are derived from apply state, not generated).
-- The OLD `access_key_id` is captured from the secrets store before deletion. If the store
-  doesn't expose Get (write-only provider like GitHub Actions), revocation is skipped with a
-  warning.
+- The OLD `access_key` (sub-key `<name>_access_key`) is captured from the secrets store before
+  deletion. If the store doesn't expose Get (write-only provider like GitHub Actions), revocation
+  is skipped with a warning.
 
 ---
 
