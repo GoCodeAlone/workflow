@@ -147,6 +147,170 @@ func ResolveSpec(
 	return out, nil
 }
 
+// TryResolveSpec is the lenient sibling of ResolveSpec. ${VAR} or
+// ${MODULE.field} references that cannot resolve are LEFT UNTOUCHED in
+// the returned spec and recorded by name in the unresolved slice.
+// Malformed references (${}, ${.x}, ${x.}) ARE hard errors — same
+// strict-rejection contract as ResolveSpec, since a malformed template
+// could never resolve and is operator-actionable at plan time.
+//
+// Used by cmd/wfctl/infra.go::resolveSpecsAgainstState (PR-1) to
+// substitute state-output and env-var references at plan time so that
+// driver.Diff sees real values instead of literal templates. Surviving
+// unresolved refs flow through to apply-time strict ResolveSpec.
+//
+// Returned `unresolved` is sorted (deterministic across map-iteration
+// randomization) and de-duplicated per-call.
+func TryResolveSpec(
+	spec interfaces.ResourceSpec,
+	replaceIDMap map[string]string,
+	syncedOutputs map[string]map[string]any,
+	envLookup func(string) (string, bool),
+) (interfaces.ResourceSpec, []string, error) {
+	if spec.Config == nil {
+		return spec, nil, nil
+	}
+	seenUnresolved := map[string]struct{}{}
+	resolved, err := tryResolveAny(spec.Config, replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
+	if err != nil {
+		return spec, nil, err
+	}
+	out := spec
+	out.Config = resolved.(map[string]any)
+	unresolved := make([]string, 0, len(seenUnresolved))
+	for k := range seenUnresolved {
+		unresolved = append(unresolved, k)
+	}
+	sort.Strings(unresolved)
+	return out, unresolved, nil
+}
+
+// tryResolveAny mirrors resolveAny (the helper for strict ResolveSpec)
+// but on unresolved-non-malformed refs, it preserves the original
+// ${...} literal AND records the ref body in seenUnresolved.
+func tryResolveAny(
+	v any,
+	replaceIDMap map[string]string,
+	syncedOutputs map[string]map[string]any,
+	envLookup func(string) (string, bool),
+	seenUnresolved map[string]struct{},
+) (any, error) {
+	switch val := v.(type) {
+	case string:
+		return tryResolveString(val, replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		keys := make([]string, 0, len(val))
+		for k := range val {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			r, err := tryResolveAny(val[k], replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = r
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(val))
+		for i, vv := range val {
+			r, err := tryResolveAny(vv, replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = r
+		}
+		return out, nil
+	default:
+		return v, nil
+	}
+}
+
+// tryResolveString substitutes resolvable ${...} refs in s; refs that
+// cannot resolve are passed through verbatim and recorded by body in
+// seenUnresolved. Malformed refs return an error (matching strict
+// ResolveSpec's contract).
+func tryResolveString(
+	s string,
+	replaceIDMap map[string]string,
+	syncedOutputs map[string]map[string]any,
+	envLookup func(string) (string, bool),
+	seenUnresolved map[string]struct{},
+) (string, error) {
+	var firstErr error
+	out := refRE.ReplaceAllStringFunc(s, func(match string) string {
+		if firstErr != nil {
+			return match
+		}
+		body := match[2 : len(match)-1]
+		// Reject malformed bodies eagerly (same as strict resolveRef).
+		if body == "" {
+			firstErr = fmt.Errorf("malformed reference ${}: empty body")
+			return match
+		}
+		if module, field, hasDot := strings.Cut(body, "."); hasDot {
+			if module == "" || field == "" {
+				firstErr = fmt.Errorf("malformed reference ${%s}: empty module or field", body)
+				return match
+			}
+			// Try resolution; on miss, preserve template + record.
+			val, ok := lookupModuleField(module, field, replaceIDMap, syncedOutputs)
+			if !ok {
+				seenUnresolved[body] = struct{}{}
+				return match
+			}
+			return val
+		}
+		// No dot → ${VAR} env-var lookup.
+		if envLookup == nil {
+			seenUnresolved[body] = struct{}{}
+			return match
+		}
+		val, ok := envLookup(body)
+		if !ok {
+			seenUnresolved[body] = struct{}{}
+			return match
+		}
+		return val
+	})
+	if firstErr != nil {
+		return "", firstErr
+	}
+	return out, nil
+}
+
+// lookupModuleField factors the ${MODULE.id|field} resolution from
+// resolveRef so both strict and lenient paths share it. Returns
+// (value, true) when found; (_, false) when missing.
+func lookupModuleField(
+	module, field string,
+	replaceIDMap map[string]string,
+	syncedOutputs map[string]map[string]any,
+) (string, bool) {
+	if field == "id" {
+		if id, ok := replaceIDMap[module]; ok {
+			return id, true
+		}
+		if outs, ok := syncedOutputs[module]; ok {
+			if v, ok := outs["id"]; ok {
+				return fmt.Sprintf("%v", v), true
+			}
+		}
+		return "", false
+	}
+	outs, ok := syncedOutputs[module]
+	if !ok {
+		return "", false
+	}
+	v, ok := outs[field]
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%v", v), true
+}
+
 // HasModuleRefs returns true when any string value reachable from v
 // (recursively walking map[string]any and []any) contains a JIT-style
 // ${MODULE.field} reference — i.e., a ${...} reference whose body has a
