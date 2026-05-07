@@ -13,19 +13,6 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// countingStateStore wraps a fakeStateStore and counts SaveResource calls
-// per resource name, so the apply-resolver test can assert that a
-// spurious replace did NOT fire (= 0 writes to coredump-staging-pg).
-type countingStateStore struct {
-	saved []string
-	fakeStateStore
-}
-
-func (c *countingStateStore) SaveResource(ctx context.Context, s interfaces.ResourceState) error {
-	c.saved = append(c.saved, s.Name)
-	return c.fakeStateStore.SaveResource(ctx, s)
-}
-
 // writeApplyStateFile creates a state JSON file for the apply tests.
 // Duplicated here rather than shared because test helpers are package-scoped
 // and we want to keep each test file self-contained.
@@ -155,8 +142,6 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = origResolve })
 
-	origCompute := computeInfraPlan
-	_ = origCompute
 	// We inject through resolveIaCProvider; computeInfraPlan is used by
 	// applyWithProviderAndStore which calls p.Plan — handled above.
 
