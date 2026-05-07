@@ -1171,9 +1171,29 @@ func runInfraApply(args []string) error {
 		}
 	}
 
+	// --refresh-outputs: read cloud-truth Outputs and persist field-level
+	// changes to state. Runs as a pre-step to either --refresh ghost-prune
+	// or the regular plan/apply path — so ghost-prune sees fresh Outputs.
+	// NOT gated by skipRefreshFlag — that flag only cancels the env-var-
+	// driven pre-step; explicit --refresh-outputs is operator-opt-in and
+	// overrides skip semantics. Per ADR 0008: paired flag, not a semantic
+	// change to --refresh.
+	refreshOutputsRan := false
+	if refreshOutputsFlag {
+		if hasInfraModules(cfgFile) {
+			if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
+				return fmt.Errorf("--refresh-outputs: %w", err)
+			}
+			refreshOutputsRan = true
+		} else {
+			fmt.Println("Refresh-outputs: --refresh-outputs requires infra.* modules; legacy platform.* config — no-op.")
+		}
+	}
+
 	// --refresh: detect drift first and prune ghost-in-state entries (cloud 404s)
 	// before running the normal plan + apply. Only applicable for infra.* configs;
-	// silently skipped for legacy platform.* configs.
+	// silently skipped for legacy platform.* configs. Runs AFTER --refresh-outputs
+	// so the drift check sees the freshest possible Outputs.
 	if refreshFlag && hasInfraModules(cfgFile) {
 		fmt.Println("Refreshing state (detecting drift)...")
 		store, storeErr := resolveStateStore(cfgFile, envName)
@@ -1210,24 +1230,6 @@ func runInfraApply(args []string) error {
 			if refreshErr := refreshGroup(moduleRef, groups[moduleRef]); refreshErr != nil {
 				return fmt.Errorf("refresh phase: %w", refreshErr)
 			}
-		}
-	}
-
-	// --refresh-outputs: read cloud-truth Outputs and persist field-level
-	// changes to state. Runs as a pre-step to either --refresh ghost-prune
-	// or the regular plan/apply path. NOT gated by skipRefreshFlag — that
-	// flag only cancels the env-var-driven pre-step; explicit
-	// --refresh-outputs is operator-opt-in and overrides skip semantics.
-	// Per ADR 0008: paired flag, not a semantic change to --refresh.
-	refreshOutputsRan := false
-	if refreshOutputsFlag {
-		if hasInfraModules(cfgFile) {
-			if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
-				return fmt.Errorf("--refresh-outputs: %w", err)
-			}
-			refreshOutputsRan = true
-		} else {
-			fmt.Println("Refresh-outputs: --refresh-outputs requires infra.* modules; legacy platform.* config — no-op.")
 		}
 	}
 

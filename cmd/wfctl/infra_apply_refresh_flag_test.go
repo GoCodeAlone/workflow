@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -347,5 +349,109 @@ func TestApply_RefreshOutputsFlag_HelpTextPresent(t *testing.T) {
 	parseErr := runInfraApply([]string{"--auto-approve", "--refresh-outputs", "-c", cfgPath})
 	if parseErr != nil && strings.Contains(parseErr.Error(), "flag provided but not defined: -refresh-outputs") {
 		t.Errorf("--refresh-outputs flag not registered: %v", parseErr)
+	}
+}
+
+// ── Task 8: failure-mode coverage ────────────────────────────────────────────
+
+// errorRefreshProvider is a fake IaCProvider whose ResourceDriver returns an
+// error, causing applyPreStepRefreshOutputs to fail. DetectDrift is
+// instrumented so tests can detect if ghost-prune was attempted after the
+// refresh-outputs failure.
+type errorRefreshProvider struct {
+	refreshErr     error
+	driftCalled    bool
+	driftCallCount int
+}
+
+func (f *errorRefreshProvider) Name() string    { return "fake-error-refresh" }
+func (f *errorRefreshProvider) Version() string { return "0.0.0" }
+func (f *errorRefreshProvider) Initialize(_ context.Context, _ map[string]any) error {
+	return nil
+}
+func (f *errorRefreshProvider) Capabilities() []interfaces.IaCCapabilityDeclaration { return nil }
+func (f *errorRefreshProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return &interfaces.IaCPlan{}, nil
+}
+func (f *errorRefreshProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return &interfaces.ApplyResult{}, nil
+}
+func (f *errorRefreshProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	return nil, nil
+}
+func (f *errorRefreshProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, nil
+}
+func (f *errorRefreshProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	f.driftCalled = true
+	f.driftCallCount++
+	return nil, nil
+}
+func (f *errorRefreshProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
+	return nil, nil
+}
+func (f *errorRefreshProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, nil
+}
+func (f *errorRefreshProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return nil, f.refreshErr
+}
+func (f *errorRefreshProvider) SupportedCanonicalKeys() []string { return nil }
+func (f *errorRefreshProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (f *errorRefreshProvider) Close() error { return nil }
+
+// TestApply_RefreshOutputsFailure_PropagatesError verifies that when
+// --refresh-outputs encounters an error (e.g. cloud read failure), the error
+// is propagated to the caller and apply does not proceed.
+func TestApply_RefreshOutputsFailure_PropagatesError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRefreshFlagTestConfig(t, dir)
+	seedVPCStateForRefreshFlag(t, cfgPath)
+
+	simulatedErr := "simulated cloud read failure"
+	ep := &errorRefreshProvider{refreshErr: errors.New(simulatedErr)}
+	origResolver := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return ep, nil, nil
+	}
+	defer func() { resolveIaCProvider = origResolver }()
+
+	_, err := captureStdout(t, func() error {
+		return runInfraApply([]string{"--auto-approve", "--refresh-outputs", "-c", cfgPath})
+	})
+	if err == nil {
+		t.Fatal("expected error from refresh-outputs failure; got nil")
+	}
+	if !strings.Contains(err.Error(), simulatedErr) {
+		t.Errorf("error should propagate refresh-outputs cause; got %v", err)
+	}
+}
+
+// TestApply_RefreshOutputsFailure_SkipsGhostPrune verifies that when
+// --refresh-outputs fails, the --refresh ghost-prune phase does NOT run.
+// The error ordering guarantee: refresh-outputs runs first; on failure,
+// ghost-prune is skipped entirely.
+func TestApply_RefreshOutputsFailure_SkipsGhostPrune(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeRefreshFlagTestConfig(t, dir)
+	seedVPCStateForRefreshFlag(t, cfgPath)
+
+	ep := &errorRefreshProvider{refreshErr: errors.New("simulated cloud read failure")}
+	origResolver := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return ep, nil, nil
+	}
+	defer func() { resolveIaCProvider = origResolver }()
+
+	_, _ = captureStdout(t, func() error {
+		return runInfraApply([]string{"--auto-approve", "--refresh", "--refresh-outputs", "-c", cfgPath})
+	})
+
+	// DetectDrift (ghost-prune path) must NOT have been called because
+	// --refresh-outputs returned an error before the --refresh block.
+	if ep.driftCalled {
+		t.Errorf("ghost-prune (DetectDrift) MUST NOT run after refresh-outputs failure")
 	}
 }
