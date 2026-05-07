@@ -45,6 +45,7 @@ import (
 	"log"
 	"maps"
 	"os"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/iac/jitsubst"
@@ -442,10 +443,84 @@ func DefaultReplace(ctx context.Context, d interfaces.ResourceDriver, action int
 }
 
 // doReplace is the dispatch entry point for Replace actions. It probes
-// the driver for the optional ResourceReplacer interface (Task 10);
-// for now it delegates directly to DefaultReplace.
+// the driver for the optional ResourceReplacer interface and routes to
+// the driver's Replace implementation when present. Drivers that do not
+// implement ResourceReplacer fall back to DefaultReplace.
 func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+	if r, ok := d.(interfaces.ResourceReplacer); ok {
+		out, err := r.Replace(ctx, refFromAction(action), action.Resource)
+		if err != nil {
+			return wrapDriverReplaceError(err)
+		}
+		return finalizeReplace(out, action.Resource.Name, result)
+	}
 	return DefaultReplace(ctx, d, action, result)
+}
+
+// finalizeReplace runs the post-Replace bookkeeping that DefaultReplace's
+// own Create branch does inline. When a driver-owned Replacer returns a
+// ResourceOutput, this function appends it to result.Resources and
+// populates result.ReplaceIDMap[name] so downstream JIT substitution
+// (apply_replace_cascade) sees the new ProviderID. Lazy-init matches
+// DefaultReplace's existing map-initialization logic.
+func finalizeReplace(out *interfaces.ResourceOutput, name string, result *interfaces.ApplyResult) error {
+	if out != nil {
+		result.Resources = append(result.Resources, *out)
+		if result.ReplaceIDMap == nil {
+			result.ReplaceIDMap = make(map[string]string)
+		}
+		result.ReplaceIDMap[name] = out.ProviderID
+	}
+	return nil
+}
+
+// wrapDriverReplaceError ensures driver-owned Replace errors carry a
+// recognizable prefix so operators can attribute failures consistently
+// regardless of whether engine-default or driver-owned paths fired.
+// Drivers that already wrap with a recognized prefix family pass
+// through unchanged; non-conforming drivers get a "replace: driver: "
+// backstop applied at the dispatch boundary.
+//
+// See hasReplaceErrorPrefix for the accepted prefix families.
+func wrapDriverReplaceError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if hasReplaceErrorPrefix(err) {
+		return err
+	}
+	return fmt.Errorf("replace: driver: %w", err)
+}
+
+// hasReplaceErrorPrefix returns true when err.Error() begins with one
+// of the recognized prefix families (case-sensitive prefix match):
+//   - "replace:"                    (engine-default + the backstop wrapper itself)
+//   - "<resource-type> replace "    (driver-owned, e.g. "droplet replace ")
+//
+// The accepted prefix families are intentionally closed to keep error
+// attribution predictable; new families require a workflow-side change.
+// Drivers that adopt either family are exempt from re-wrapping.
+func hasReplaceErrorPrefix(err error) bool {
+	msg := err.Error()
+	if strings.HasPrefix(msg, "replace:") {
+		return true
+	}
+	// "<word> replace " form — require at least one non-space char
+	// before " replace ", and the substring " replace " in the prefix.
+	// We don't bind specific resource types so future plugins can adopt
+	// freely.
+	idx := strings.Index(msg, " replace ")
+	if idx <= 0 {
+		return false
+	}
+	head := msg[:idx]
+	// head must be one alphanumeric token (no spaces, no colons).
+	for _, r := range head {
+		if r == ' ' || r == ':' {
+			return false
+		}
+	}
+	return true
 }
 
 // doDelete invokes Delete with a ResourceRef carrying action.Current's
