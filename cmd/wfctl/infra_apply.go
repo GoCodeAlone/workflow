@@ -171,11 +171,26 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	}
 
 	// --include: apply scope filter. Resolve the include set from the package-
-	// level flag var (set by runInfraApply). Validation uses both specs and
-	// state so state-only resources (eligible for delete) are accepted.
-	// infraSpecs filtering happens here (before grouping), so provider groups
-	// only see the scoped specs.
+	// level flag var (set by runInfraApply). State is loaded first so that
+	// state-only resources (eligible for delete) are accepted in the include
+	// set. Filtering happens before grouping so provider groups only see the
+	// scoped specs.
 	includeSet := parseIncludeFlag(currentApplyIncludeFlag)
+
+	// Load current state once; nil on first run is valid (no prior state).
+	current, err := loadCurrentState(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("load current state: %w", err)
+	}
+
+	// Validate and apply the include filter to both specs and state before
+	// grouping by provider so that out-of-scope resources are never passed
+	// down to any provider.
+	if err := validateIncludeSet(includeSet, infraSpecs, current); err != nil {
+		return err
+	}
+	infraSpecs = filterSpecsByInclude(infraSpecs, includeSet)
+	current = filterStatesByInclude(current, includeSet)
 
 	// Load full config to resolve iac.provider module definitions.
 	cfg, err := config.LoadFromFile(cfgFile)
@@ -191,27 +206,12 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	providerDefs, providerTypeCounts, disabledProviders := resolveProviderDefs(cfg, envName)
 
 	// Group infra specs by iac.provider module name, preserving first-reference order.
+	// Uses the already-filtered infraSpecs so provider groups only contain
+	// in-scope resources.
 	groupOrder, groups, err := groupSpecsByProviderRef(infraSpecs, providerDefs, disabledProviders, envName)
 	if err != nil {
 		return err
 	}
-
-	// Load current state once; nil on first run is valid (no prior state).
-	current, err := loadCurrentState(cfgFile, envName)
-	if err != nil {
-		return fmt.Errorf("load current state: %w", err)
-	}
-
-	// Apply --include validation and filtering to both specs and state.
-	// Validate after loading state so state-only resources (eligible for
-	// delete) are accepted in the include set. Filter current state by the
-	// include set so only in-scope resources are passed to ComputePlan;
-	// out-of-scope state entries are left untouched by this apply.
-	if err := validateIncludeSet(includeSet, infraSpecs, current); err != nil {
-		return err
-	}
-	infraSpecs = filterSpecsByInclude(infraSpecs, includeSet)
-	current = filterStatesByInclude(current, includeSet)
 
 	// Resolve the state store once. A missing iac.state module resolves to a
 	// noop store, but a configured backend that cannot be opened is fatal:

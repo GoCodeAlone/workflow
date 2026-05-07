@@ -39,11 +39,11 @@ func validateIncludeSet(include map[string]struct{}, specs []interfaces.Resource
 		return nil
 	}
 	known := map[string]struct{}{}
-	for _, s := range specs {
-		known[s.Name] = struct{}{}
+	for i := range specs {
+		known[specs[i].Name] = struct{}{}
 	}
-	for _, st := range states {
-		known[st.Name] = struct{}{}
+	for i := range states {
+		known[states[i].Name] = struct{}{}
 	}
 	var missing []string
 	for name := range include {
@@ -66,9 +66,9 @@ func filterSpecsByInclude(specs []interfaces.ResourceSpec, include map[string]st
 		return specs
 	}
 	out := make([]interfaces.ResourceSpec, 0, len(include))
-	for _, s := range specs {
-		if _, ok := include[s.Name]; ok {
-			out = append(out, s)
+	for i := range specs {
+		if _, ok := include[specs[i].Name]; ok {
+			out = append(out, specs[i])
 		}
 	}
 	return out
@@ -81,9 +81,9 @@ func filterStatesByInclude(states []interfaces.ResourceState, include map[string
 		return states
 	}
 	out := make([]interfaces.ResourceState, 0, len(include))
-	for _, st := range states {
-		if _, ok := include[st.Name]; ok {
-			out = append(out, st)
+	for i := range states {
+		if _, ok := include[states[i].Name]; ok {
+			out = append(out, states[i])
 		}
 	}
 	return out
