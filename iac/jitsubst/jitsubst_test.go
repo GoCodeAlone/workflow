@@ -532,3 +532,122 @@ func TestTryResolveSpec_NilConfig_NoOp(t *testing.T) {
 		t.Errorf("unresolved should be empty; got %v", unresolved)
 	}
 }
+
+// TestTryResolveSpec_InfraOutput_Substitutes verifies that when the envLookup
+// function (simulating a plan-time resolver that only handles infra_output
+// secrets) returns a value for a key, TryResolveSpec substitutes it.
+// This is the infra_output case: state-derived values collapse to literals in
+// the plan so that Diff sees the resolved value.
+func TestTryResolveSpec_InfraOutput_Substitutes(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "droplet",
+		Config: map[string]any{
+			"vpc_uuid": "${STAGING_VPC_UUID}",
+		},
+	}
+	// Simulate planTimeEnvLookup where only infra_output key is resolved.
+	envLookup := envFn(map[string]string{
+		"STAGING_VPC_UUID": "14badc41-abcd-1234",
+	})
+
+	got, unresolved, err := TryResolveSpec(spec, nil, nil, envLookup)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := got.Config["vpc_uuid"]; got != "14badc41-abcd-1234" {
+		t.Errorf("vpc_uuid: got %q, want resolved infra_output literal", got)
+	}
+	if len(unresolved) != 0 {
+		t.Errorf("unresolved: got %v, want empty (infra_output should resolve)", unresolved)
+	}
+}
+
+// TestTryResolveSpec_RandomHex_PreservesTemplate verifies that when the
+// envLookup function returns not-found for a key (simulating planTimeEnvLookup
+// blocking random_hex secrets from os.LookupEnv), TryResolveSpec preserves
+// the ${VAR} template verbatim. This is the ADR-0014 contract: random_hex
+// secrets must not be substituted at plan time so their literal values never
+// appear in plan output, avoiding security-check R4 findings.
+func TestTryResolveSpec_RandomHex_PreservesTemplate(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "nats",
+		Config: map[string]any{
+			"env_vars": map[string]any{
+				"NATS_AUTH_TOKEN": "${NATS_AUTH_TOKEN}",
+			},
+		},
+	}
+	// envLookup returns not-found for NATS_AUTH_TOKEN (blocked as random_hex).
+	envLookup := envFn(nil)
+
+	got, unresolved, err := TryResolveSpec(spec, nil, nil, envLookup)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	envVars, _ := got.Config["env_vars"].(map[string]any)
+	if val := envVars["NATS_AUTH_TOKEN"]; val != "${NATS_AUTH_TOKEN}" {
+		t.Errorf("NATS_AUTH_TOKEN: got %q, want preserved template (random_hex must not resolve at plan time)", val)
+	}
+	if len(unresolved) != 1 || unresolved[0] != "NATS_AUTH_TOKEN" {
+		t.Errorf("unresolved: got %v, want [NATS_AUTH_TOKEN]", unresolved)
+	}
+}
+
+// TestTryResolveSpec_RandomBase64_PreservesTemplate verifies the same ADR-0014
+// contract for random_base64 secrets: the ${VAR} template is preserved when
+// envLookup returns not-found (simulating the runtime-only blocklist).
+func TestTryResolveSpec_RandomBase64_PreservesTemplate(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "app",
+		Config: map[string]any{
+			"env_vars": map[string]any{
+				"SESSION_SECRET": "${SESSION_SECRET}",
+			},
+		},
+	}
+	// envLookup returns not-found for SESSION_SECRET (blocked as random_base64).
+	envLookup := envFn(nil)
+
+	got, unresolved, err := TryResolveSpec(spec, nil, nil, envLookup)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	envVars, _ := got.Config["env_vars"].(map[string]any)
+	if val := envVars["SESSION_SECRET"]; val != "${SESSION_SECRET}" {
+		t.Errorf("SESSION_SECRET: got %q, want preserved template (random_base64 must not resolve at plan time)", val)
+	}
+	if len(unresolved) != 1 || unresolved[0] != "SESSION_SECRET" {
+		t.Errorf("unresolved: got %v, want [SESSION_SECRET]", unresolved)
+	}
+}
+
+// TestTryResolveSpec_ProviderCredential_PreservesTemplate verifies the ADR-0014
+// contract for provider_credential secrets: the ${VAR} template is preserved
+// when envLookup returns not-found (simulating the runtime-only blocklist).
+// Provider credentials are runtime concerns managed by the cloud provider's
+// secret store; they must not appear as literals in the plan.
+func TestTryResolveSpec_ProviderCredential_PreservesTemplate(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "state",
+		Config: map[string]any{
+			"accessKey": "${SPACES_access_key}",
+			"secretKey": "${SPACES_secret_key}",
+		},
+	}
+	// envLookup returns not-found for both keys (blocked as provider_credential).
+	envLookup := envFn(nil)
+
+	got, unresolved, err := TryResolveSpec(spec, nil, nil, envLookup)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val := got.Config["accessKey"]; val != "${SPACES_access_key}" {
+		t.Errorf("accessKey: got %q, want preserved template (provider_credential must not resolve at plan time)", val)
+	}
+	if val := got.Config["secretKey"]; val != "${SPACES_secret_key}" {
+		t.Errorf("secretKey: got %q, want preserved template (provider_credential must not resolve at plan time)", val)
+	}
+	if len(unresolved) != 2 {
+		t.Errorf("unresolved: got %v, want 2 entries (SPACES_access_key, SPACES_secret_key)", unresolved)
+	}
+}
