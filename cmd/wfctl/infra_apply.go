@@ -504,6 +504,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
+		// Provider.Apply can surface a top-level error (vs. populating
+		// result.Errors[]). Emit the actionable hint here too if the
+		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
+		// otherwise plugin paths that bubble the sentinel via err escape
+		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
+		emitImageNotInRegistryHint(os.Stderr, err)
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {
@@ -982,6 +988,12 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
+		// Provider.Apply can surface a top-level error (vs. populating
+		// result.Errors[]). Emit the actionable hint here too if the
+		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
+		// otherwise plugin paths that bubble the sentinel via err escape
+		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
+		emitImageNotInRegistryHint(os.Stderr, err)
 		return fmt.Errorf("apply: %w", err)
 	}
 
