@@ -261,15 +261,20 @@ jobs:
         cd dist
         sha256sum * > checksums.txt
 
-    - name: Create Release
+    - name: Create Release (draft during asset upload)
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ env.TAG_NAME }}
         files: |
           dist/*
-        draft: false
+        draft: true
         prerelease: ${{ contains(env.TAG_NAME, '-') }}
         generate_release_notes: true
+
+    - name: Publish release (was draft during asset upload)
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: gh release edit ${{ env.TAG_NAME }} --draft=false --repo ${{ github.repository }}
 
   update-homebrew:
     name: Update Homebrew Tap
