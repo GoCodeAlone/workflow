@@ -22,6 +22,7 @@ func TestSentinels_ErrorsIs(t *testing.T) {
 		{"ErrUnauthorized", interfaces.ErrUnauthorized},
 		{"ErrForbidden", interfaces.ErrForbidden},
 		{"ErrValidation", interfaces.ErrValidation},
+		{"ErrImageNotInRegistry", interfaces.ErrImageNotInRegistry},
 	}
 
 	for i, s := range sentinels {
@@ -72,6 +73,7 @@ func TestSentinels_Wrappable(t *testing.T) {
 		{"ErrUnauthorized", interfaces.ErrUnauthorized},
 		{"ErrForbidden", interfaces.ErrForbidden},
 		{"ErrValidation", interfaces.ErrValidation},
+		{"ErrImageNotInRegistry", interfaces.ErrImageNotInRegistry},
 	}
 
 	for _, c := range cases {
@@ -79,5 +81,18 @@ func TestSentinels_Wrappable(t *testing.T) {
 		if !errors.Is(wrapped, c.sentinel) {
 			t.Errorf("%s: wrapped error not matched by errors.Is", c.name)
 		}
+	}
+}
+
+// TestErrImageNotInRegistry_MessageStringStable asserts the exact message
+// string. The wfctl render layer matches this string verbatim as the
+// gRPC-boundary fallback (structpb does not preserve sentinel identity), so
+// changing this string silently breaks the actionable hint for plugin-driven
+// drivers. See decisions/0004 in core-dump for the rationale.
+func TestErrImageNotInRegistry_MessageStringStable(t *testing.T) {
+	want := "iac: image tag or digest not found in registry"
+	got := interfaces.ErrImageNotInRegistry.Error()
+	if got != want {
+		t.Fatalf("ErrImageNotInRegistry.Error() = %q; want %q (load-bearing for gRPC string-match fallback)", got, want)
 	}
 }

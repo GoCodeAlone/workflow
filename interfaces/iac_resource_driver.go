@@ -16,6 +16,16 @@ var (
 	ErrUnauthorized          = errors.New("iac: unauthorized")            // 401
 	ErrForbidden             = errors.New("iac: forbidden")               // 403
 	ErrValidation            = errors.New("iac: validation error")        // 400/422
+	// ErrImageNotInRegistry indicates that an image tag or digest referenced
+	// by a desired ResourceSpec is not present in the registry. Drivers
+	// SHOULD return this (wrapped) from Diff, Create, and Update when an
+	// image-presence pre-flight fails. Callers can use errors.Is for typed
+	// identification, but gRPC-bound callers should ALSO match the message
+	// string "iac: image tag or digest not found in registry" for
+	// cross-process robustness — structpb does not preserve sentinel
+	// identity across the gRPC plugin boundary. The message string is
+	// load-bearing; do not change it.
+	ErrImageNotInRegistry = errors.New("iac: image tag or digest not found in registry")
 )
 
 // ResourceDriver handles CRUD for a single resource type within a provider.

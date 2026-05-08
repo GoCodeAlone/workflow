@@ -504,6 +504,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
+		// Provider.Apply can surface a top-level error (vs. populating
+		// result.Errors[]). Emit the actionable hint here too if the
+		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
+		// otherwise plugin paths that bubble the sentinel via err escape
+		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
+		emitImageNotInRegistryHint(os.Stderr, err)
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {
@@ -563,7 +569,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 			for _, ae := range result.Errors {
 				msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
 			}
-			return fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
+			finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
+			// Emit an actionable hint to stderr if any per-resource error
+			// matches interfaces.ErrImageNotInRegistry (typed in-process or
+			// string-match across gRPC boundary). See infra_image_presence_hint.go.
+			emitImageNotInRegistryHint(os.Stderr, finalErr)
+			return finalErr
 		}
 	}
 	return nil
@@ -977,6 +988,12 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
+		// Provider.Apply can surface a top-level error (vs. populating
+		// result.Errors[]). Emit the actionable hint here too if the
+		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
+		// otherwise plugin paths that bubble the sentinel via err escape
+		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
+		emitImageNotInRegistryHint(os.Stderr, err)
 		return fmt.Errorf("apply: %w", err)
 	}
 
@@ -1033,7 +1050,12 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 			for _, ae := range result.Errors {
 				msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
 			}
-			return fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
+			finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
+			// Emit an actionable hint to stderr if any per-resource error
+			// matches interfaces.ErrImageNotInRegistry (typed in-process or
+			// string-match across gRPC boundary). See infra_image_presence_hint.go.
+			emitImageNotInRegistryHint(os.Stderr, finalErr)
+			return finalErr
 		}
 	}
 	return nil
