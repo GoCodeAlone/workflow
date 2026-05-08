@@ -284,7 +284,12 @@ func runInfraPlan(args []string) error {
 	// out-of-band scripts that never declared one).
 	plan, err := computePlanForInfraSpecs(context.Background(), cfgFile, envName, desired, current)
 	if err != nil {
-		return fmt.Errorf("compute plan: %w", err)
+		wrapped := fmt.Errorf("compute plan: %w", err)
+		// Emit an actionable hint to stderr if the underlying driver Diff
+		// rejected an AppSpec image that's missing from its registry. See
+		// infra_image_presence_hint.go.
+		emitImageNotInRegistryHint(os.Stderr, wrapped)
+		return wrapped
 	}
 
 	// Capture env-var fingerprints so apply (persisted-plan path: T1.5; in-process
