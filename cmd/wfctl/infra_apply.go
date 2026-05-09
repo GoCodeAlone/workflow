@@ -665,8 +665,12 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 		if err := validateStateProviderID(provider, providerType, state); err != nil {
 			return nil, err
 		}
-		if saveErr := store.SaveResource(ctx, state); saveErr != nil {
-			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, saveErr)
+		// Sanitize-only via persistResourceWithSecretRouting in read mode:
+		// drivers may declare Sensitive on Read but we MUST NOT call
+		// provider.Set from a Read path (cache-pollution risk per design §4.4).
+		// Provider passed nil; helper is nil-safe in read mode.
+		if _, err := persistResourceWithSecretRouting(ctx, store, nil, driver, state, *live, persistModeRead); err != nil {
+			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, err)
 		}
 		fmt.Printf("  Adopted existing %s %q (id=%s)\n", spec.Type, spec.Name, state.ProviderID)
 		current = append(current, state)
