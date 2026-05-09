@@ -27,6 +27,7 @@ func TestGenerateGitHubActions(t *testing.T) {
 	markers := []string{
 		"actions/checkout@v4",
 		"actions/setup-go@v5",
+		"GoCodeAlone/setup-wfctl@v1",
 		"wfctl infra plan",
 		"permissions",
 		"actions/github-script@v7",
@@ -47,8 +48,17 @@ func TestGenerateGitHubActions(t *testing.T) {
 	if !strings.Contains(buildYML, "actions/setup-go@v5") {
 		t.Error("build.yml missing actions/setup-go@v5")
 	}
+	if !strings.Contains(buildYML, "GoCodeAlone/setup-wfctl@v1") {
+		t.Error("build.yml missing setup-wfctl action")
+	}
+	if !strings.Contains(buildYML, "awk '/^[^[:space:]#][^:]*:/") {
+		t.Error("build.yml missing top-level ci section check")
+	}
 	if !strings.Contains(buildYML, "wfctl ci run --config 'infra.yaml' --phase test") {
 		t.Error("build.yml missing wfctl ci run test phase")
+	}
+	if !strings.Contains(buildYML, "go test ./...") {
+		t.Error("build.yml missing fallback go test command")
 	}
 	if !strings.Contains(buildYML, "wfctl build --config 'infra.yaml' --no-push --tag ci") {
 		t.Error("build.yml missing wfctl build")
@@ -77,8 +87,11 @@ func TestGenerateGitLabCI(t *testing.T) {
 	markers := []string{
 		"rules:",
 		"needs:",
+		"before_script:",
+		"export PATH=\"$(go env GOPATH)/bin:$PATH\"",
 		"wfctl infra plan",
 		"wfctl ci run --config \"$INFRA_CONFIG\" --phase test",
+		"go test ./...",
 		"wfctl build --config \"$INFRA_CONFIG\" --no-push --tag ci",
 		"environment:",
 	}

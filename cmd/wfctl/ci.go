@@ -230,7 +230,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install wfctl
-        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+        uses: GoCodeAlone/setup-wfctl@v1
       - name: Plan infrastructure
         run: wfctl infra plan --config '{{.InfraConfig}}' --format markdown > plan.md
       - name: Post plan comment
@@ -255,7 +255,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install wfctl
-        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+        uses: GoCodeAlone/setup-wfctl@v1
       - name: Apply infrastructure
         run: wfctl infra apply --config '{{.InfraConfig}}' --auto-approve
 `
@@ -281,9 +281,14 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install wfctl
-        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+        uses: GoCodeAlone/setup-wfctl@v1
       - name: Run tests
-        run: wfctl ci run --config '{{.InfraConfig}}' --phase test
+        run: |
+          if awk '/^[^[:space:]#][^:]*:/ { if ($0 ~ /^ci:/) found=1 } END { exit found ? 0 : 1 }' '{{.InfraConfig}}'; then
+            wfctl ci run --config '{{.InfraConfig}}' --phase test
+          else
+            go test ./...
+          fi
       - name: Build without push
         run: wfctl build --config '{{.InfraConfig}}' --no-push --tag ci
 `
@@ -319,10 +324,13 @@ const gitlabCITemplate = `stages:
 variables:
   INFRA_CONFIG: "{{.InfraConfig}}"
 
+before_script:
+  - go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+  - export PATH="$(go env GOPATH)/bin:$PATH"
+
 infra-plan:
   stage: plan
   script:
-    - go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
     - wfctl infra plan --config "$INFRA_CONFIG" --format markdown > plan.md
   artifacts:
     paths:
@@ -340,7 +348,6 @@ infra-apply:
     - job: infra-plan
       artifacts: true
   script:
-    - go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
     - wfctl infra apply --config "$INFRA_CONFIG" --auto-approve
   environment:
     name: production
@@ -354,8 +361,12 @@ build:
   stage: build
   needs: []
   script:
-    - go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
-    - wfctl ci run --config "$INFRA_CONFIG" --phase test
+    - |
+      if awk '/^[^[:space:]#][^:]*:/ { if ($0 ~ /^ci:/) found=1 } END { exit found ? 0 : 1 }' "$INFRA_CONFIG"; then
+        wfctl ci run --config "$INFRA_CONFIG" --phase test
+      else
+        go test ./...
+      fi
     - wfctl build --config "$INFRA_CONFIG" --no-push --tag ci
   rules:
     - if: $CI_COMMIT_BRANCH == "{{.Branch}}"
