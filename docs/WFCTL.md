@@ -1220,6 +1220,10 @@ wfctl infra <action> [options] [config.yaml]
 | `outputs` | Print resource outputs from state (yaml/json/env formats) |
 | `refresh-outputs` | Read live outputs from each provider and reconcile state (no cloud writes) |
 | `cleanup` | Tag-based force-cleanup across providers that implement `interfaces.Enumerator` |
+| `audit-secrets` | Report `provider_credential` anti-patterns in `secrets.generate` |
+| `audit-keys` | List cloud-side resources of `--type` via the provider's `interfaces.EnumeratorAll` |
+| `prune` | Destructively delete cloud resources by `--created-before` / `--exclude-access-key` (two-key opt-in) |
+| `rotate-and-prune` | All-in-one: rotate the canonical credential, then prune older keys with the new key as exclusion target |
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -1499,6 +1503,115 @@ wfctl infra align -c infra.yaml --env staging
 # Include R-A7 + R-A10 by passing a plan file; --strict promotes WARNs to FAILs.
 wfctl infra plan -c infra.yaml --env staging -o plan.json
 wfctl infra align -c infra.yaml --env staging --plan plan.json --strict
+```
+
+#### `infra audit-keys`
+
+List every cloud-side resource of `--type <T>` via the provider's
+optional `interfaces.EnumeratorAll`. Renders Name, ProviderID
+(access_key), and CreatedAt as a fixed-width table — the read-only
+surface for drift correction before the destructive `infra prune`.
+
+```
+wfctl infra audit-keys --type <T> [-c CONFIG] [--env ENV]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | _(required)_ | Resource type to enumerate (e.g. `infra.spaces_key`) |
+| `--config`, `-c` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for config resolution |
+
+`audit-keys` requires the loaded `iac.provider` to implement the optional
+`interfaces.EnumeratorAll` interface (per ADR 0016). Providers that don't
+are surfaced as a structured error (`audit-keys: no loaded provider
+implements EnumeratorAll`); pair with `audit-secrets` for the
+config-side equivalent.
+
+```bash
+wfctl infra audit-keys --type infra.spaces_key
+wfctl infra audit-keys --type infra.spaces_key -c infra.yaml --env staging
+```
+
+#### `infra prune`
+
+Destructively delete cloud-side resources matching a time + access_key
+discriminator. The command refuses to run unless **all three** opt-ins
+are satisfied (`--confirm` flag + `WFCTL_CONFIRM_PRUNE=1` env var +
+interactive y/N prompt unless `--non-interactive`), AND the
+`--exclude-access-key` flag names the active credential to preserve
+(paranoia rail — prevents a typo from nuking the live key).
+
+```
+wfctl infra prune --type <T> --created-before <RFC3339> --exclude-access-key <AK> --confirm [--non-interactive] [--preserve-names <regex>] [--recovery-from-last-rotation]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | _(required)_ | Resource type (e.g. `infra.spaces_key`) |
+| `--created-before` | _(required)_ | RFC3339 timestamp; only resources older than this are eligible |
+| `--exclude-access-key` | _(required)_ | Access key to preserve (paranoia rail) |
+| `--preserve-names` | `` | Regex of resource names to preserve (skip during delete; orthogonal to time filter) |
+| `--confirm` | `false` | Required: explicit confirmation flag (paired with `WFCTL_CONFIRM_PRUNE=1` env var) |
+| `--non-interactive` | `false` | Skip the y/N prompt (CI-friendly) |
+| `--recovery-from-last-rotation` | `false` | Read filter args from `${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json` (written by `infra rotate-and-prune` for recovery from partial-failure rotations without re-rotating) |
+
+Exit codes:
+
+- `0`: prune succeeded (zero or more deletions; no failures)
+- `1`: opt-in/filter validation failed, enumerate failed, or one or more deletes failed
+- `2`: argument parse error or missing required `--type`
+
+On success when `--recovery-from-last-rotation` was used, the recovery
+file is removed. On failure, it is retained so the operator can re-invoke
+after diagnosing.
+
+```bash
+WFCTL_CONFIRM_PRUNE=1 wfctl infra prune \
+  --type infra.spaces_key \
+  --created-before 2026-05-08T00:00:00Z \
+  --exclude-access-key AK_ACTIVE \
+  --confirm
+
+# Recovery flow after a partial-failure rotate-and-prune:
+WFCTL_CONFIRM_PRUNE=1 wfctl infra prune \
+  --type infra.spaces_key \
+  --recovery-from-last-rotation \
+  --confirm
+```
+
+#### `infra rotate-and-prune`
+
+All-in-one: rotate the canonical credential for `--name` (mints a new
+key, revokes the old credential per ADR 0012), persist a recovery
+record, then delegate to `infra prune` with the new access_key as the
+exclusion target. On full success, the recovery file is removed (no
+durable evidence beyond the new credential itself + pruned-key state).
+On prune-step failure, the recovery file is retained at
+`${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json` (perms `0600`) so
+the operator can re-invoke `infra prune --recovery-from-last-rotation`
+without re-rotating (which would leak yet another key).
+
+```
+wfctl infra rotate-and-prune --type <T> --name <name> --confirm [--non-interactive] [-c CONFIG] [--env ENV] [--preserve-names <regex>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | _(required)_ | Resource type (e.g. `infra.spaces_key`) |
+| `--name` | _(required)_ | Canonical credential name to rotate (matches `secrets.generate[].name`) |
+| `--config`, `-c` | _(auto-detected)_ | Config file |
+| `--env` | `` | Environment name |
+| `--preserve-names` | `` | Regex of resource names to preserve during the prune step (forwarded as `--preserve-names` to `infra prune`) |
+| `--confirm` | `false` | Required: paired with `WFCTL_CONFIRM_PRUNE=1` env var |
+| `--non-interactive` | `false` | Skip the y/N prompt (forwarded to the prune step) |
+
+```bash
+WFCTL_CONFIRM_PRUNE=1 wfctl infra rotate-and-prune \
+  --type infra.spaces_key \
+  --name SPACES \
+  --confirm \
+  --non-interactive
 ```
 
 ---
