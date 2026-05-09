@@ -939,8 +939,8 @@ func TestCheckRA9_SuspiciousProviderCredentialKey(t *testing.T) {
 			if tc.wantFinding && findings[0].Rule != "R-A9" {
 				t.Errorf("expected Rule=R-A9, got %q", findings[0].Rule)
 			}
-			if tc.wantFinding && findings[0].Severity != "WARN" {
-				t.Errorf("expected Severity=WARN, got %q", findings[0].Severity)
+			if tc.wantFinding && findings[0].Severity != "ERROR" {
+				t.Errorf("expected Severity=ERROR, got %q", findings[0].Severity)
 			}
 		})
 	}
@@ -1001,6 +1001,36 @@ secrets:
 	}
 	if findingsHaveRule(findings, "R-A9") {
 		t.Errorf("unexpected R-A9 finding for canonical key: %v", findings)
+	}
+}
+
+// TestRA9_CanonicalSingleEntry_Passes is the positive happy-path fixture for
+// the R-A9 severity flip (rev3): the canonical single-entry SPACES key with
+// no doubled-create anti-pattern must pass `wfctl infra align --strict` with
+// exit code 0 and produce zero R-A9 findings.
+//
+// This is the inverse of TestInfraAlign_RA9_SuspiciousKey_Fires: it locks in
+// that the rule does not regress into false positives once it fires as ERROR.
+func TestRA9_CanonicalSingleEntry_Passes(t *testing.T) {
+	yaml := `
+secrets:
+  generate:
+    - key: SPACES
+      type: provider_credential
+      source: digitalocean.spaces
+      name: my-deploy-key
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg, strict: true}
+	findings, err := runInfraAlignChecks(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A9") {
+		t.Fatalf("canonical shape should not trigger R-A9; got: %+v", findings)
+	}
+	if code := alignExitCode(findings, true); code != 0 {
+		t.Fatalf("canonical shape should pass --strict; got exit=%d, findings=%+v", code, findings)
 	}
 }
 
