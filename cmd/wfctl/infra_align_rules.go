@@ -16,8 +16,13 @@ import (
 
 // AlignFinding is a single rule violation emitted by an alignment check.
 type AlignFinding struct {
-	Rule     string // R-A1, R-A2, etc.
-	Severity string // FAIL or WARN
+	Rule string // R-A1, R-A2, etc.
+	// Severity is one of:
+	//   - "FAIL"  — always blocks (exit 1)
+	//   - "ERROR" — always blocks (exit 1); used by rules that want to
+	//               carry a fix-suggestion in the message (e.g. R-A9)
+	//   - "WARN"  — blocks only under --strict
+	Severity string
 	Resource string // affected resource name
 	Message  string // human-readable description
 }
@@ -686,15 +691,21 @@ func checkRA8(ctx *alignContext) []AlignFinding {
 
 // ── R-A9: suspicious provider_credential key suffix ────────────────────────
 
-// checkRA9 warns when a secrets.generate entry with type "provider_credential"
-// uses a key that already ends with a known sub-key suffix (e.g. "_access_key",
-// "_secret_key"). This pattern means the caller pre-appended the sub-key name
-// that bootstrapSecrets will append again, producing double-suffixed storage
-// keys such as SPACES_access_key_access_key. The canonical form is to use the
-// root key (e.g. "SPACES") and let bootstrapSecrets derive the sub-key names.
+// checkRA9 fires (as an ERROR) when a secrets.generate entry with type
+// "provider_credential" uses a key that already ends with a known sub-key
+// suffix (e.g. "_access_key", "_secret_key"). This is the doubled-create
+// anti-pattern: each sub-keyed entry causes bootstrapSecrets to create a
+// separate cloud credential, producing an orphaned pair of keys instead of
+// a single canonical credential. The canonical form is to use the root key
+// (e.g. "SPACES") and let bootstrapSecrets auto-derive the sub-key names
+// from providerCredentialSubKeys[source].
 //
 // The rule only fires for sources registered in providerCredentialSubKeys.
 // Unknown sources are skipped — we cannot predict their sub-key names.
+//
+// Severity: ERROR (was WARN through rev2 of the spaces-key plan; flipped to
+// ERROR in rev3 so `wfctl infra align --strict` blocks deploy when the
+// anti-pattern is present).
 func checkRA9(ctx *alignContext) []AlignFinding {
 	var findings []AlignFinding
 	for _, gen := range ctx.secretGens {
@@ -710,11 +721,11 @@ func checkRA9(ctx *alignContext) []AlignFinding {
 			if strings.HasSuffix(gen.Key, suffix) {
 				findings = append(findings, AlignFinding{
 					Rule:     "R-A9",
-					Severity: "WARN",
+					Severity: "ERROR",
 					Resource: gen.Key,
 					Message: fmt.Sprintf(
-						"provider_credential key %q ends with auto-generated suffix %q — use root key (e.g. %q) and let bootstrapSecrets derive sub-keys",
-						gen.Key, suffix, strings.TrimSuffix(gen.Key, suffix),
+						"provider_credential key %q ends in %q; use canonical key %q — bootstrap auto-derives the sub-keys for source %q",
+						gen.Key, suffix, strings.TrimSuffix(gen.Key, suffix), gen.Source,
 					),
 				})
 				break // one finding per gen entry is enough

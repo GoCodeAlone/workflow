@@ -883,6 +883,41 @@ func TestInfraAlign_ExitCode_WarnStrict(t *testing.T) {
 	}
 }
 
+// TestAlignExitCode_ErrorSeverity_Returns1 verifies that ERROR severity
+// (introduced in rev3 of the spaces-key plan for R-A9) blocks deploy with
+// exit 1 even without --strict. Without this, an ERROR finding silently
+// downgrades to non-blocking — defeating the rev3 requirement that the
+// doubled-create anti-pattern fail CI.
+func TestAlignExitCode_ErrorSeverity_Returns1(t *testing.T) {
+	findings := []AlignFinding{
+		{Rule: "R-A9", Severity: "ERROR", Resource: "SPACES_access_key", Message: "doubled-create"},
+	}
+	if code := alignExitCode(findings, false); code != 1 {
+		t.Errorf("alignExitCode(ERROR, strict=false) = %d, want 1 — ERROR must always block", code)
+	}
+	if code := alignExitCode(findings, true); code != 1 {
+		t.Errorf("alignExitCode(ERROR, strict=true) = %d, want 1", code)
+	}
+}
+
+// TestAlignRender_ErrorSeverity_CountedInSummary verifies that the markdown
+// summary includes ERROR alongside FAIL/WARN counts. Without this, ERROR
+// findings would render in the table but be invisible in the summary line,
+// hiding the deploy-blocking signal from CI consumers.
+func TestAlignRender_ErrorSeverity_CountedInSummary(t *testing.T) {
+	findings := []AlignFinding{
+		{Rule: "R-A9", Severity: "ERROR", Resource: "SPACES_access_key", Message: "doubled-create"},
+		{Rule: "R-A6", Severity: "WARN", Resource: "nats", Message: "advisory"},
+	}
+	out := renderAlignMarkdown(findings)
+	if !strings.Contains(out, "1 ERROR") {
+		t.Errorf("summary should report '1 ERROR', got: %s", out)
+	}
+	if !strings.Contains(out, "1 WARN") {
+		t.Errorf("summary should still report '1 WARN', got: %s", out)
+	}
+}
+
 // ── R-A9: suspicious provider_credential key ──────────────────────────────────
 
 // TestCheckRA9_SuspiciousProviderCredentialKey is a table-driven unit test
@@ -939,8 +974,8 @@ func TestCheckRA9_SuspiciousProviderCredentialKey(t *testing.T) {
 			if tc.wantFinding && findings[0].Rule != "R-A9" {
 				t.Errorf("expected Rule=R-A9, got %q", findings[0].Rule)
 			}
-			if tc.wantFinding && findings[0].Severity != "WARN" {
-				t.Errorf("expected Severity=WARN, got %q", findings[0].Severity)
+			if tc.wantFinding && findings[0].Severity != "ERROR" {
+				t.Errorf("expected Severity=ERROR, got %q", findings[0].Severity)
 			}
 		})
 	}
@@ -973,8 +1008,16 @@ modules:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !findingsHaveRuleAndSeverity(findings, "R-A9", "WARN") {
-		t.Errorf("expected R-A9 WARN, got: %v", findings)
+	if !findingsHaveRuleAndSeverity(findings, "R-A9", "ERROR") {
+		t.Errorf("expected R-A9 ERROR, got: %v", findings)
+	}
+	// End-to-end: ERROR severity must produce a non-zero exit code regardless
+	// of --strict (the user-visible CI gate, not just the severity label).
+	if code := alignExitCode(findings, false); code != 1 {
+		t.Errorf("alignExitCode(strict=false) = %d, want 1 — R-A9 ERROR must block without --strict", code)
+	}
+	if code := alignExitCode(findings, true); code != 1 {
+		t.Errorf("alignExitCode(strict=true) = %d, want 1", code)
 	}
 }
 
@@ -1001,6 +1044,36 @@ secrets:
 	}
 	if findingsHaveRule(findings, "R-A9") {
 		t.Errorf("unexpected R-A9 finding for canonical key: %v", findings)
+	}
+}
+
+// TestInfraAlign_RA9_CanonicalSingleEntry_Passes is the positive happy-path fixture for
+// the R-A9 severity flip (rev3): the canonical single-entry SPACES key with
+// no doubled-create anti-pattern must pass `wfctl infra align --strict` with
+// exit code 0 and produce zero R-A9 findings.
+//
+// This is the inverse of TestInfraAlign_RA9_SuspiciousKey_Fires: it locks in
+// that the rule does not regress into false positives once it fires as ERROR.
+func TestInfraAlign_RA9_CanonicalSingleEntry_Passes(t *testing.T) {
+	yaml := `
+secrets:
+  generate:
+    - key: SPACES
+      type: provider_credential
+      source: digitalocean.spaces
+      name: my-deploy-key
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg, strict: true}
+	findings, err := runInfraAlignChecks(opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A9") {
+		t.Fatalf("canonical shape should not trigger R-A9; got: %+v", findings)
+	}
+	if code := alignExitCode(findings, true); code != 0 {
+		t.Fatalf("canonical shape should pass --strict; got exit=%d, findings=%+v", code, findings)
 	}
 }
 

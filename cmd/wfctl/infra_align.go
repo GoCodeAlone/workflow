@@ -86,7 +86,7 @@ func runInfraAlign(args []string) error {
 	if alignExitCode(findings, opts.strict) != 0 {
 		var failCount int
 		for _, f := range findings {
-			if f.Severity == "FAIL" || (opts.strict && f.Severity == "WARN") {
+			if f.Severity == "FAIL" || f.Severity == "ERROR" || (opts.strict && f.Severity == "WARN") {
 				failCount++
 			}
 		}
@@ -235,9 +235,19 @@ func loadPlanJSON(path string) (*interfaces.IaCPlan, error) {
 }
 
 // alignExitCode returns 0 (success) or 1 (failure) based on findings and flags.
+//
+// Severities that always block (exit 1):
+//   - FAIL: deterministic failure (e.g. unresolved env var, R-A1 missing image)
+//   - ERROR: hard rule violation that must block deploy regardless of --strict
+//     (introduced in rev3 of the spaces-key plan for R-A9; ERROR is treated
+//     identically to FAIL by exit-code logic so a rule author can use ERROR to
+//     signal "this is fixable; here's the fix" without weakening the gate)
+//
+// Severities that block only under --strict:
+//   - WARN: advisory, surfaced as a heads-up but non-blocking by default
 func alignExitCode(findings []AlignFinding, strict bool) int {
 	for _, f := range findings {
-		if f.Severity == "FAIL" {
+		if f.Severity == "FAIL" || f.Severity == "ERROR" {
 			return 1
 		}
 		if strict && f.Severity == "WARN" {
@@ -268,11 +278,13 @@ func renderAlignMarkdown(findings []AlignFinding) string {
 	}
 	sb.WriteString("\n")
 
-	var failCount, warnCount int
+	var failCount, errorCount, warnCount int
 	for _, f := range findings {
 		switch f.Severity {
 		case "FAIL":
 			failCount++
+		case "ERROR":
+			errorCount++
 		case "WARN":
 			warnCount++
 		}
@@ -281,6 +293,9 @@ func renderAlignMarkdown(findings []AlignFinding) string {
 	parts := []string{}
 	if failCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d FAIL", failCount))
+	}
+	if errorCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d ERROR", errorCount))
 	}
 	if warnCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d WARN", warnCount))
