@@ -1464,7 +1464,7 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 | R-A6 | Network/exposure alignment | FAIL or WARN |
 | R-A7 | Plan-output sanity (requires `--plan`) | FAIL or WARN |
 | R-A8 | WebAuthn RP_ID alignment | FAIL |
-| R-A9 | Suspicious `provider_credential` key suffix | WARN |
+| R-A9 | Suspicious `provider_credential` key suffix (doubled-create anti-pattern) | ERROR |
 | R-A10 | Provider `ValidatePlan` diagnostics (requires `--plan`) | FAIL or WARN |
 
 **R-A10 — provider-side cross-resource validation.** When `--plan` is given,

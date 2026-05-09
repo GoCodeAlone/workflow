@@ -973,8 +973,8 @@ modules:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !findingsHaveRuleAndSeverity(findings, "R-A9", "WARN") {
-		t.Errorf("expected R-A9 WARN, got: %v", findings)
+	if !findingsHaveRuleAndSeverity(findings, "R-A9", "ERROR") {
+		t.Errorf("expected R-A9 ERROR, got: %v", findings)
 	}
 }
 
