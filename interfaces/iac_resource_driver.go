@@ -26,6 +26,34 @@ var (
 	// identity across the gRPC plugin boundary. The message string is
 	// load-bearing; do not change it.
 	ErrImageNotInRegistry = errors.New("iac: image tag or digest not found in registry")
+	// ErrProviderMethodUnimplemented indicates that a remote IaC provider
+	// plugin does not implement the optional method that was just dispatched.
+	// Used by the wfctl gRPC proxy *remoteIaCProvider to translate
+	// gRPC codes.Unimplemented (and equivalent string-matched plugin errors)
+	// into a stable sentinel that dispatch sites can errors.Is on.
+	//
+	// Why this exists
+	// ───────────────
+	// v0.27.0 added optional sub-interfaces (EnumeratorAll, Enumerator, etc.)
+	// to interfaces.IaCProvider. Dispatch sites (infra_audit_keys.go,
+	// infra_cleanup.go, infra_prune.go) iterate providers and use a
+	// type-assertion `p.(interfaces.X)` as the "does this provider support X?"
+	// gate. v0.27.1 bridged these methods on remoteIaCProvider so audit-keys
+	// could reach plugins that DO implement them, but as a side effect every
+	// gRPC-loaded provider now satisfies the optional interface — even ones
+	// whose plugin process does not implement the underlying method.
+	//
+	// To preserve the iterate-and-skip semantics, dispatch sites now call the
+	// method and check for ErrProviderMethodUnimplemented via errors.Is. A
+	// match is treated identically to the pre-v0.27.1 negative type-assert:
+	// log "skipped <provider>: does not implement <Interface>" and continue
+	// iterating to the next provider.
+	//
+	// Plugins SHOULD return status.Error(codes.Unimplemented, "...") from
+	// their InvokeMethod / InvokeMethodContext dispatcher when an optional
+	// method is not supported. The proxy translates this to
+	// ErrProviderMethodUnimplemented for callers.
+	ErrProviderMethodUnimplemented = errors.New("iac: provider method unimplemented")
 )
 
 // ResourceDriver handles CRUD for a single resource type within a provider.

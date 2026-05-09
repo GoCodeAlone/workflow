@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -384,14 +385,95 @@ func runInfraPruneCmd(args []string) error {
 		inner = append(inner, "--recovery-from-last-rotation")
 	}
 
+	// Strict-mode dispatch (v0.27.1, per user mandate "remove the fallback
+	// and force strict mode"): if every loaded provider's EnumerateAll
+	// returns ErrProviderMethodUnimplemented, that is a loud failure — NOT
+	// swallowed into "Dry-run: 0 resource(s) to prune". Plugins that
+	// declare the bridge but lack the underlying implementation MUST
+	// surface the gap so operators are not misled into thinking there is
+	// nothing to prune.
+	//
+	// Multi-provider semantics (PR #589 Copilot Thread 1): bridging
+	// EnumerateAll into *remoteIaCProvider means EVERY gRPC-loaded
+	// provider satisfies interfaces.EnumeratorAll at the Go-type level,
+	// even when the plugin process does not implement the method. A naive
+	// type-assert-then-break loop would pick the first remote provider
+	// and fail the whole run on its Unimplemented response, never trying
+	// later providers that DO support it. The dispatcher therefore probes
+	// EnumerateAll once on each candidate and only delegates to
+	// runInfraPrune for the first provider that actually returns data;
+	// the cached-enumerator wrapper avoids a second cloud call inside
+	// runInfraPrune.
+	var lastUnimpl error
+	var anyEnumerator bool
 	for _, p := range providers {
-		if _, ok := p.(interfaces.EnumeratorAll); ok {
-			adapter := &pruneProviderAdapter{p: p}
-			if rc := runInfraPrune(inner, adapter, pruneStdout); rc != 0 {
+		if _, ok := p.(interfaces.EnumeratorAll); !ok {
+			continue
+		}
+		anyEnumerator = true
+		adapter := &pruneProviderAdapter{p: p}
+		// Probe EnumerateAll. Note: resourceType may be empty if the
+		// operator omitted --type — runInfraPrune validates that and
+		// exits 2 itself, so skip the probe in that case and let the
+		// inner validator surface the standard "--type is required"
+		// message rather than the dispatcher emitting a less helpful
+		// "all providers Unimplemented" wrapper.
+		if resourceType == "" {
+			rc := runInfraPrune(inner, adapter, pruneStdout)
+			if rc != 0 {
 				return fmt.Errorf("prune exited with code %d", rc)
 			}
 			return nil
 		}
+		outs, probeErr := adapter.EnumerateAll(ctx, resourceType)
+		if probeErr != nil {
+			if errors.Is(probeErr, interfaces.ErrProviderMethodUnimplemented) {
+				// Plugin doesn't support EnumerateAll behind the bridge.
+				// Continue probing remaining providers.
+				lastUnimpl = fmt.Errorf("%s: %w", p.Name(), probeErr)
+				continue
+			}
+			// Any other error is loud — this is real provider failure.
+			return fmt.Errorf("prune: enumerate from %s: %w", p.Name(), probeErr)
+		}
+		// Success — wrap the probed outs in a cached adapter so
+		// runInfraPrune's internal EnumerateAll call serves from cache
+		// and we don't double-bill the cloud API.
+		cached := &cachedPruneProvider{cached: outs, inner: adapter, resourceType: resourceType}
+		rc := runInfraPrune(inner, cached, pruneStdout)
+		if rc != 0 {
+			return fmt.Errorf("prune exited with code %d", rc)
+		}
+		return nil
+	}
+	if anyEnumerator && lastUnimpl != nil {
+		return fmt.Errorf("prune: no loaded provider implements EnumeratorAll for %q (last probed: %w)", resourceType, lastUnimpl)
 	}
 	return fmt.Errorf("prune: no loaded provider implements EnumeratorAll")
+}
+
+// cachedPruneProvider serves a previously-probed EnumerateAll result for
+// a single resourceType. Used by runInfraPruneCmd's dispatcher to avoid
+// issuing the same cloud-API enumerate twice (once for the dispatcher's
+// Unimplemented probe, again inside runInfraPrune).
+//
+// Falls through to the underlying provider for any non-cached resourceType
+// (defensive — runInfraPrune's --type matches the dispatcher's --type so
+// this branch is never hit in production, but keeping it correct avoids
+// surprising future call sites).
+type cachedPruneProvider struct {
+	cached       []*interfaces.ResourceOutput
+	resourceType string
+	inner        pruneProvider
+}
+
+func (c *cachedPruneProvider) EnumerateAll(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
+	if resourceType == c.resourceType {
+		return c.cached, nil
+	}
+	return c.inner.EnumerateAll(ctx, resourceType)
+}
+
+func (c *cachedPruneProvider) DeleteResource(ctx context.Context, ref interfaces.ResourceRef) error {
+	return c.inner.DeleteResource(ctx, ref)
 }

@@ -101,6 +101,16 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 		}
 		refs, enumErr := enum.EnumerateByTag(ctx, *tag)
 		if enumErr != nil {
+			// v0.27.1: every gRPC-loaded provider satisfies interfaces.Enumerator
+			// after the proxy bridge, so plugins that don't actually implement
+			// EnumerateByTag now reach this point with a translated
+			// interfaces.ErrProviderMethodUnimplemented. Treat that identically
+			// to the negative type-assert above so the structured "skipped"
+			// log line is preserved for plugins that don't support tag queries.
+			if errors.Is(enumErr, interfaces.ErrProviderMethodUnimplemented) {
+				fmt.Fprintf(cleanupStdout, "skipped %s: provider does not implement Enumerator\n", p.Name())
+				continue
+			}
 			fmt.Fprintf(cleanupStderr, "%s: enumerate by tag %q: %v\n", p.Name(), *tag, enumErr)
 			totalErrs = append(totalErrs, fmt.Errorf("%s: enumerate: %w", p.Name(), enumErr))
 			continue
