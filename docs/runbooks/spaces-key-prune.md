@@ -73,8 +73,8 @@ The flow is:
    failure the recovery file is RETAINED (see "Recovery from partial
    failure" below).
 
-Add `--allowlist` to skip keys whose names match a regex even if they're
-older than the cutoff (see "Allowlist for manual keys").
+Add `--preserve-names` to skip keys whose names match a regex even if
+they're older than the cutoff (see "Preserving hand-created keys").
 
 ## Multi-step variant: audit then prune
 
@@ -163,18 +163,18 @@ yet another new credential — leaking another key to the audit log and
 making the cleanup harder. The `--recovery-from-last-rotation` path is
 the only correct recovery.
 
-## Allowlist for manual keys
+## Preserving hand-created keys
 
 If your DO account has hand-created keys outside the IaC graph that
 must be preserved regardless of age (e.g., a vendor integration key, a
-contractor's access key with no managed lifecycle), pass `--allowlist`
-with a regex that matches their `name`:
+contractor's access key with no managed lifecycle), pass
+`--preserve-names` with a regex that matches their `name`:
 
 ```bash
 wfctl infra rotate-and-prune \
   --type infra.spaces_key \
   --name coredump-deploy-key \
-  --allowlist '^manual-' \
+  --preserve-names '^manual-' \
   --confirm
 ```
 
@@ -183,9 +183,16 @@ their `created_at` is older than the cutoff. The regex is matched
 against the resource `name` (cloud-side `name` field, not the
 `access_key`).
 
-The allowlist is orthogonal to `--exclude-access-key`: the active
+`--preserve-names` is orthogonal to `--exclude-access-key`: the active
 credential's access_key is always preserved, AND any name matching the
-allowlist is preserved on top.
+regex is preserved on top.
+
+> **Why "preserve-names" and not "allowlist"?** On a destructive
+> command the verb has to be unambiguous. `--allowlist '^manual-'`
+> reads to some operators as "delete only manual-* keys" and to
+> others as "preserve manual-* keys". The opposite mental models
+> would yield opposite outcomes — one of them deleting every
+> production key. `--preserve-names` only reads one way. Per ADR 0017.
 
 ## GH Secrets convention for managed `infra.spaces_key` resources
 

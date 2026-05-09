@@ -14,11 +14,10 @@ key and cause downtime.
 
 The design considered three discriminator shapes:
 
-- **Name regex** (`--allowlist '^manual-'` style as the primary
-  filter): rejected by adversarial review #2. A regex protects
-  *everything matching the regex*, including any leaked key whose
-  name happens to match. The leak surface is exactly what we're
-  trying to remove.
+- **Name regex as the primary filter**: rejected by adversarial
+  review #2. A regex protects *everything matching the regex*,
+  including any leaked key whose name happens to match. The leak
+  surface is exactly what we're trying to remove.
 
 - **Per-key tag**: rejected because spaces keys don't support tags
   (motivated ADR 0016).
@@ -60,9 +59,13 @@ The opt-in shape considered three levels:
 If ANY of (1)-(5) is missing, prune exits with a structured error and
 NO cloud calls are made.
 
-`--allowlist <regex>` is offered as a secondary, additive filter — it
-preserves resources whose `name` matches the regex on top of the
-`--exclude-access-key` exclusion.
+`--preserve-names <regex>` is offered as a secondary, additive filter —
+it preserves resources whose `name` matches the regex on top of the
+`--exclude-access-key` exclusion. The verb-in-the-name (`preserve` vs.
+the original `--allowlist`) is deliberate: on a destructive command,
+"allowlist" reads ambiguously (some operators map it to "list of
+resources allowed to be deleted", which would invert the semantics
+catastrophically); "preserve-names" only reads one way.
 
 `--recovery-from-last-rotation` is the recovery-mode shortcut: reads
 the discriminator from the recovery file written by `infra
