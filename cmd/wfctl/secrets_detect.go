@@ -183,7 +183,11 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 		secretValue = strings.TrimRight(string(b), "\n")
 	case isatty.IsTerminal(os.Stdin.Fd()): // interactive: masked prompt
 		fmt.Fprintf(os.Stderr, "Value for %s: ", name)
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fd, err := stdinFileDescriptor()
+		if err != nil {
+			return err
+		}
+		b, err := term.ReadPassword(fd)
 		if err != nil {
 			return fmt.Errorf("read password: %w", err)
 		}
@@ -220,6 +224,15 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 	}
 	fmt.Printf("set %s\n", name)
 	return nil
+}
+
+func stdinFileDescriptor() (int, error) {
+	fd := os.Stdin.Fd()
+	maxInt := int(^uint(0) >> 1)
+	if fd > uintptr(maxInt) {
+		return 0, fmt.Errorf("stdin file descriptor %d exceeds supported int range", fd)
+	}
+	return int(fd), nil //nolint:gosec // fd is range-checked before conversion.
 }
 
 func runSecretsList(args []string) error {

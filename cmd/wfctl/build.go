@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -40,14 +41,15 @@ func runBuild(args []string) error {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		cfgPath string
-		dryRun  bool
-		only    string
-		skip    string
-		tag     string
-		format  string
-		noPush  bool
-		envName string
+		cfgPath         string
+		dryRun          bool
+		only            string
+		skip            string
+		tag             string
+		format          string
+		noPush          bool
+		envName         string
+		fallbackGoBuild bool
 	)
 	fs.StringVar(&cfgPath, "config", "workflow.yaml", "Path to workflow config file")
 	fs.StringVar(&cfgPath, "c", "workflow.yaml", "Path to workflow config file (short)")
@@ -57,6 +59,7 @@ func runBuild(args []string) error {
 	fs.StringVar(&tag, "tag", "", "Override image tag for all container targets")
 	fs.StringVar(&format, "format", "table", "Output format: table | json | yaml")
 	fs.BoolVar(&noPush, "no-push", false, "Build but do not push images to registries")
+	fs.BoolVar(&fallbackGoBuild, "fallback-go-build", false, "Run go build ./... when ci.build has no build targets")
 	var push bool
 	fs.BoolVar(&push, "push", true, "Push images to registries after build (default true; --push=false is equivalent to --no-push)")
 	fs.StringVar(&envName, "env", "", "Environment name for per-env config overrides")
@@ -77,7 +80,10 @@ func runBuild(args []string) error {
 	if err != nil {
 		return fmt.Errorf("wfctl build: load config: %w", err)
 	}
-	if cfg.CI == nil || cfg.CI.Build == nil {
+	if cfg.CI == nil || cfg.CI.Build == nil || !hasConfiguredBuildTargets(cfg.CI.Build) {
+		if fallbackGoBuild {
+			return runDefaultGoBuild(dryRun)
+		}
 		fmt.Println("No build configuration, skipping build phase")
 		return nil
 	}
@@ -92,6 +98,25 @@ func runBuild(args []string) error {
 		envName: envName,
 		cfgPath: cfgPath,
 	})
+}
+
+func hasConfiguredBuildTargets(build *config.CIBuildConfig) bool {
+	if build == nil {
+		return false
+	}
+	return len(build.Targets) > 0 || len(build.Containers) > 0 || len(build.Assets) > 0
+}
+
+func runDefaultGoBuild(dryRun bool) error {
+	if dryRun {
+		fmt.Println("[dry-run] go build ./...")
+		return nil
+	}
+	fmt.Println("No build targets configured, running go build ./...")
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // buildOpts carries parsed build flags for use across subcommands.

@@ -241,7 +241,7 @@ func TestRunBuild_PushFlagDefined(t *testing.T) {
 // TestRunBuild_FlagsRegistered documents the expected flag surface. It relies on the
 // fake map only as documentation; TestRunBuild_PushFlagDefined provides the real gate.
 func TestRunBuild_FlagsRegistered(t *testing.T) {
-	required := []string{"config", "dry-run", "only", "skip", "tag", "format", "no-push", "push", "env"}
+	required := []string{"config", "dry-run", "only", "skip", "tag", "format", "no-push", "push", "env", "fallback-go-build"}
 	registered := buildFlagNames()
 	for _, name := range required {
 		if !registered[name] {
@@ -252,16 +252,17 @@ func TestRunBuild_FlagsRegistered(t *testing.T) {
 
 func buildFlagNames() map[string]bool {
 	return map[string]bool{
-		"config":  true,
-		"c":       true,
-		"dry-run": true,
-		"only":    true,
-		"skip":    true,
-		"tag":     true,
-		"format":  true,
-		"no-push": true,
-		"push":    true,
-		"env":     true,
+		"config":            true,
+		"c":                 true,
+		"dry-run":           true,
+		"only":              true,
+		"skip":              true,
+		"tag":               true,
+		"format":            true,
+		"no-push":           true,
+		"push":              true,
+		"env":               true,
+		"fallback-go-build": true,
 	}
 }
 

@@ -298,7 +298,7 @@ jobs:
       - name: Build without push
         env:
           INFRA_CONFIG: '{{.InfraConfig}}'
-        run: wfctl build --config "$INFRA_CONFIG" --no-push --tag ci
+        run: wfctl build --config "$INFRA_CONFIG" --no-push --tag ci --fallback-go-build
 `
 
 // ── GitLab CI ─────────────────────────────────────────────────────────────────
@@ -373,7 +373,7 @@ build:
   needs: []
   script:
     - wfctl ci run --config "$INFRA_CONFIG" --phase test
-    - wfctl build --config "$INFRA_CONFIG" --no-push --tag ci
+    - wfctl build --config "$INFRA_CONFIG" --no-push --tag ci --fallback-go-build
   rules:
     - if: $CI_COMMIT_BRANCH == "{{.Branch}}"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
