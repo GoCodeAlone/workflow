@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -384,14 +385,55 @@ func runInfraPruneCmd(args []string) error {
 		inner = append(inner, "--recovery-from-last-rotation")
 	}
 
+	// v0.27.1 dispatch policy: every gRPC-loaded provider satisfies
+	// interfaces.EnumeratorAll at the type level after the proxy bridge
+	// (PR #589). To preserve the pre-v0.27.1 iterate-and-skip semantics for
+	// plugins whose process does NOT implement EnumerateAll, we wrap each
+	// candidate adapter in a probedPruneProvider that translates
+	// interfaces.ErrProviderMethodUnimplemented into a "skip and try next"
+	// signal. The probe is single-call: the wrapper records whether the
+	// underlying EnumerateAll returned Unimplemented and the dispatcher
+	// uses the recorded flag to emit the structured "skipped" message
+	// without issuing a second RPC.
 	for _, p := range providers {
-		if _, ok := p.(interfaces.EnumeratorAll); ok {
-			adapter := &pruneProviderAdapter{p: p}
-			if rc := runInfraPrune(inner, adapter, pruneStdout); rc != 0 {
-				return fmt.Errorf("prune exited with code %d", rc)
-			}
-			return nil
+		if _, ok := p.(interfaces.EnumeratorAll); !ok {
+			continue
 		}
+		adapter := &pruneProviderAdapter{p: p}
+		probed := &probedPruneProvider{inner: adapter}
+		rc := runInfraPrune(inner, probed, pruneStdout)
+		if probed.unimplemented {
+			fmt.Fprintf(pruneStdout, "skipped %s: provider does not implement EnumeratorAll\n", p.Name())
+			continue
+		}
+		if rc != 0 {
+			return fmt.Errorf("prune exited with code %d", rc)
+		}
+		return nil
 	}
 	return fmt.Errorf("prune: no loaded provider implements EnumeratorAll")
+}
+
+// probedPruneProvider wraps a pruneProvider and traps
+// interfaces.ErrProviderMethodUnimplemented from EnumerateAll, returning
+// (nil, nil) so the runner renders an empty result and the dispatcher can
+// emit the structured "skipped" message and continue to the next provider.
+// DeleteResource is forwarded unchanged — if EnumerateAll returned
+// Unimplemented there are no refs to delete anyway.
+type probedPruneProvider struct {
+	inner         pruneProvider
+	unimplemented bool
+}
+
+func (p *probedPruneProvider) EnumerateAll(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
+	outs, err := p.inner.EnumerateAll(ctx, resourceType)
+	if err != nil && errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
+		p.unimplemented = true
+		return nil, nil
+	}
+	return outs, err
+}
+
+func (p *probedPruneProvider) DeleteResource(ctx context.Context, ref interfaces.ResourceRef) error {
+	return p.inner.DeleteResource(ctx, ref)
 }

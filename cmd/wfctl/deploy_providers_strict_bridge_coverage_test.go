@@ -82,6 +82,7 @@ var (
 	_ interfaces.DriftConfigDetector       = (*remoteIaCProvider)(nil) // v0.20.x
 	_ interfaces.ProviderMigrationRepairer = (*remoteIaCProvider)(nil) // v0.21.x
 	_ interfaces.ProviderCredentialRevoker = (*remoteIaCProvider)(nil) // v0.22.x
+	_ interfaces.ProviderValidator         = (*remoteIaCProvider)(nil) // v0.27.1 (R-A10 bridge)
 )
 
 // optionalIaCProviderInterfaces is the canonical registry of every optional
@@ -100,6 +101,7 @@ var optionalIaCProviderInterfaces = []reflect.Type{
 	reflect.TypeOf((*interfaces.DriftConfigDetector)(nil)).Elem(),
 	reflect.TypeOf((*interfaces.ProviderMigrationRepairer)(nil)).Elem(),
 	reflect.TypeOf((*interfaces.ProviderCredentialRevoker)(nil)).Elem(),
+	reflect.TypeOf((*interfaces.ProviderValidator)(nil)).Elem(),
 }
 
 // methodsExemptFromWireCoverage are interface methods that legitimately do
@@ -174,29 +176,56 @@ func TestStrictBridgeCoverage_WireMethodCoverage(t *testing.T) {
 // TestStrictBridgeCoverage_NoFallbackOrSkip is a meta-check that the gate
 // methods (TestStrictBridgeCoverage_CompileTimeAssertions and
 // TestStrictBridgeCoverage_WireMethodCoverage) cannot be silently downgraded
-// by an env var, build tag, or testing.Short skip. Per the v0.27.1 user
-// mandate ("remove the fallback and force strict mode"), the strict-
+// by an env var, build constraint, or testing.Short skip. Per the v0.27.1
+// user mandate ("remove the fallback and force strict mode"), the strict-
 // bridge-coverage test must always run unconditionally.
 //
-// Implementation note: this scan reads the source file and inspects ONLY the
-// two gate-test function bodies (between their `func` declarations and the
-// next top-level `func`). This deliberately excludes this meta-check's own
-// body, where the banned tokens appear as data. A future commit that adds
-// `t.Skip(...)` or `os.Getenv(...)` inside either gate body will fail here.
+// Two-layer enforcement
+// ─────────────────────
+//  1. File-header scan: reject build constraints (//go:build or // +build)
+//     anywhere in the file header — these can disable the entire test file
+//     via tag, which the function-body scan can't see.
+//  2. Function-body scan: reject t.Skip / t.SkipNow / testing.Short() /
+//     os.Getenv inside either gate function body. This deliberately excludes
+//     this meta-check's own body, where the banned tokens appear as data.
+//
+// A future commit that adds `t.Skip(...)` inside either gate body, or
+// `//go:build !strict` at the file header, will fail this check.
 func TestStrictBridgeCoverage_NoFallbackOrSkip(t *testing.T) {
 	src := readThisFile(t)
+
+	// Layer 1: file-header build-constraint scan. Build constraints in Go
+	// must appear before the package clause, so we scan everything above
+	// the `package main` line. This catches both old-style `// +build` and
+	// modern `//go:build` directives regardless of what's inside any test
+	// function body. The package clause may appear at offset 0 (no leading
+	// build constraint) or later (with constraints above it).
+	pkgIdx := strings.Index(src, "package ")
+	if pkgIdx < 0 {
+		t.Fatal("could not locate package declaration in source")
+	}
+	header := src[:pkgIdx]
+	// Tokens assembled from fragments so the banned literal does not
+	// appear here as a single string.
+	if strings.Contains(header, "//"+"go:build") {
+		t.Errorf("strict-bridge-coverage file header must not declare a //go:build constraint "+
+			"— the gate is unconditional per v0.27.1 user mandate. Header was:\n%s", header)
+	}
+	if strings.Contains(header, "// +"+"build") {
+		t.Errorf("strict-bridge-coverage file header must not declare a // +build constraint "+
+			"— the gate is unconditional per v0.27.1 user mandate. Header was:\n%s", header)
+	}
+
+	// Layer 2: function-body scan for runtime bypass tokens.
 	gateBodies := []string{
 		extractFunctionBody(t, src, "TestStrictBridgeCoverage_CompileTimeAssertions"),
 		extractFunctionBody(t, src, "TestStrictBridgeCoverage_WireMethodCoverage"),
 	}
-	// Tokens are assembled from fragments so the banned literal does not
-	// appear in this function's source body either.
 	banned := []string{
 		"t" + ".Skip(",
 		"t" + ".SkipNow(",
 		"testing" + ".Short()",
 		"os" + ".Getenv",
-		"build " + "tag", // catches `// +build !strict` style bypasses by name
 	}
 	for _, body := range gateBodies {
 		for _, b := range banned {

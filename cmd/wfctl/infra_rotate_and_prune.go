@@ -73,14 +73,29 @@ func runInfraRotateAndPruneCmd(args []string) error {
 		}
 	}()
 
+	// v0.27.1 dispatch policy: every gRPC-loaded provider satisfies
+	// interfaces.EnumeratorAll at the type level (proxy bridge in PR #589).
+	// To preserve the pre-v0.27.1 iterate-and-skip semantics, we wrap each
+	// adapter in probedPruneProvider — same probe-once pattern used by
+	// runInfraPruneCmd above. Plugins whose process does not implement
+	// EnumerateAll (translated to interfaces.ErrProviderMethodUnimplemented
+	// by the proxy) are skipped with a structured stdout line and the loop
+	// continues to the next provider.
 	for _, p := range providers {
-		if _, ok := p.(interfaces.EnumeratorAll); ok {
-			adapter := &pruneProviderAdapter{p: p}
-			if rc := runInfraRotateAndPrune(args, adapter, rotateAndPruneStdout); rc != 0 {
-				return fmt.Errorf("rotate-and-prune exited with code %d", rc)
-			}
-			return nil
+		if _, ok := p.(interfaces.EnumeratorAll); !ok {
+			continue
 		}
+		adapter := &pruneProviderAdapter{p: p}
+		probed := &probedPruneProvider{inner: adapter}
+		rc := runInfraRotateAndPrune(args, probed, rotateAndPruneStdout)
+		if probed.unimplemented {
+			fmt.Fprintf(rotateAndPruneStdout, "skipped %s: provider does not implement EnumeratorAll\n", p.Name())
+			continue
+		}
+		if rc != 0 {
+			return fmt.Errorf("rotate-and-prune exited with code %d", rc)
+		}
+		return nil
 	}
 	return fmt.Errorf("rotate-and-prune: no loaded provider implements EnumeratorAll")
 }

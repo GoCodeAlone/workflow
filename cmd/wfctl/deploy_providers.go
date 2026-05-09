@@ -565,6 +565,40 @@ func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.S
 	return &sizing, nil
 }
 
+// isPluginMethodUnimplemented returns true when err indicates the remote
+// plugin's InvokeMethod / InvokeMethodContext dispatcher does not recognise
+// the requested method name. This translates the gRPC codes.Unimplemented
+// status (canonical signal) AND a small set of message-string fallbacks
+// emitted by older plugins that did not adopt the gRPC status convention.
+//
+// Why string fallbacks: per workspace memory feedback_workflow_plugin_structpb_boundary,
+// errors crossing the gRPC plugin boundary lose sentinel identity (structpb
+// roundtrip), so message-string matching is the cross-process robust check.
+// The string-set is conservative: only "unimplemented", "not implemented",
+// "no service handler", and "method handle %s does not implement
+// ServiceInvoker" — which is what plugin/external/sdk/grpc_server.go emits
+// for missing-handler cases.
+func isPluginMethodUnimplemented(err error) bool {
+	if err == nil {
+		return false
+	}
+	if status.Code(err) == codes.Unimplemented {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "unimplemented"):
+		return true
+	case strings.Contains(msg, "not implemented"):
+		return true
+	case strings.Contains(msg, "does not implement serviceinvoker"):
+		return true
+	case strings.Contains(msg, "does not implement servicecontextinvoker"):
+		return true
+	}
+	return false
+}
+
 // EnumerateAll implements interfaces.EnumeratorAll for the gRPC-loaded IaC
 // provider. Dispatches via InvokeServiceContext when the underlying invoker
 // supports it; falls back to InvokeService for legacy invokers.
@@ -573,6 +607,17 @@ func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.S
 // the "IaCProvider.EnumerateAll" method string to the provider's typed
 // EnumerateAll(ctx, resourceType) implementation and returns []*ResourceOutput
 // under the "outputs" key.
+//
+// Unimplemented translation
+// ─────────────────────────
+// Because every gRPC-loaded provider now satisfies interfaces.EnumeratorAll
+// (compile-time bridge), dispatch sites (cmd/wfctl/infra_audit_keys.go,
+// infra_prune.go, infra_rotate_and_prune.go) need a runtime way to detect
+// "this remote plugin does not actually support EnumerateAll". This proxy
+// translates gRPC codes.Unimplemented and equivalent message-matched errors
+// from the plugin's InvokeMethod dispatcher into interfaces.ErrProviderMethodUnimplemented,
+// which dispatch sites errors.Is on to preserve the pre-v0.27.1
+// iterate-and-skip semantics.
 //
 // This bridge closes the v0.27.0 gap surfaced by `wfctl infra audit-keys`: the
 // audit-keys command type-asserted the loaded provider against EnumeratorAll,
@@ -595,6 +640,10 @@ func (r *remoteIaCProvider) EnumerateAll(ctx context.Context, resourceType strin
 		res, err = r.invoker.InvokeService("IaCProvider.EnumerateAll", args)
 	}
 	if err != nil {
+		if isPluginMethodUnimplemented(err) {
+			return nil, fmt.Errorf("IaCProvider.EnumerateAll: %w: %v",
+				interfaces.ErrProviderMethodUnimplemented, err)
+		}
 		return nil, fmt.Errorf("IaCProvider.EnumerateAll: %w", err)
 	}
 	if res == nil {
@@ -624,7 +673,10 @@ func (r *remoteIaCProvider) EnumerateAll(ctx context.Context, resourceType strin
 //
 // Bridged in v0.27.1 alongside EnumerateAll; both optional interfaces had
 // the same root cause (no compile-time enforcement of proxy coverage for
-// optional IaCProvider sub-interfaces).
+// optional IaCProvider sub-interfaces). Same Unimplemented-translation
+// applies so infra_cleanup.go's "skipped <provider>: does not implement
+// Enumerator" log line is preserved for plugins that don't support tag
+// queries (e.g. AppPlatform-only plugins).
 func (r *remoteIaCProvider) EnumerateByTag(ctx context.Context, tag string) ([]interfaces.ResourceRef, error) {
 	args := map[string]any{
 		"tag": tag,
@@ -642,6 +694,10 @@ func (r *remoteIaCProvider) EnumerateByTag(ctx context.Context, tag string) ([]i
 		res, err = r.invoker.InvokeService("IaCProvider.EnumerateByTag", args)
 	}
 	if err != nil {
+		if isPluginMethodUnimplemented(err) {
+			return nil, fmt.Errorf("IaCProvider.EnumerateByTag: %w: %v",
+				interfaces.ErrProviderMethodUnimplemented, err)
+		}
 		return nil, fmt.Errorf("IaCProvider.EnumerateByTag: %w", err)
 	}
 	if res == nil {
@@ -708,6 +764,53 @@ func (r *remoteIaCProvider) BootstrapStateBackend(ctx context.Context, cfg map[s
 
 func (r *remoteIaCProvider) SupportedCanonicalKeys() []string {
 	return interfaces.CanonicalKeys()
+}
+
+// ValidatePlan implements interfaces.ProviderValidator for the gRPC-loaded
+// IaC provider. Dispatches "IaCProvider.ValidatePlan" via InvokeService and
+// decodes the result["diagnostics"] entry as []PlanDiagnostic.
+//
+// Contract preservation
+// ─────────────────────
+// interfaces.ProviderValidator.ValidatePlan returns ONLY a []PlanDiagnostic
+// (no error). To preserve the pre-v0.27.1 R-A10 semantics where plugins that
+// don't implement ValidatePlan are silently skipped (the type-assert at
+// cmd/wfctl/infra_align_rules.go:777 fails and the loop continues), this
+// proxy translates BOTH transport errors AND interfaces.ErrProviderMethodUnimplemented
+// into an empty diagnostics slice. Plugins that genuinely error during
+// ValidatePlan (e.g. malformed plan input) will appear silent under R-A10
+// in this PR; emitting a warning at that boundary is left to a follow-up
+// PR that extends the ProviderValidator contract to return an error.
+//
+// Bridged in v0.27.1 to close the strict-bridge-coverage gate; without
+// this method *remoteIaCProvider would not satisfy interfaces.ProviderValidator
+// and R-A10 would silently skip every gRPC-loaded provider.
+func (r *remoteIaCProvider) ValidatePlan(plan *interfaces.IaCPlan) []interfaces.PlanDiagnostic {
+	planAny, err := jsonToAny(plan)
+	if err != nil {
+		return nil
+	}
+	args := map[string]any{"plan": planAny}
+	res, err := r.invoker.InvokeService("IaCProvider.ValidatePlan", args)
+	if err != nil {
+		// All errors (Unimplemented + transport + plugin) are silenced to
+		// preserve the pre-v0.27.1 type-assert-skip behavior. The contract
+		// has no error channel; surfacing failures requires an upstream
+		// interface change.
+		return nil
+	}
+	if res == nil {
+		return nil
+	}
+	raw, ok := res["diagnostics"]
+	if !ok {
+		return nil
+	}
+	var diags []interfaces.PlanDiagnostic
+	if err := anyToStruct(raw, &diags); err != nil {
+		return nil
+	}
+	return diags
 }
 
 // RevokeProviderCredential implements interfaces.ProviderCredentialRevoker.

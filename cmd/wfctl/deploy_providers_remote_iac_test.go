@@ -10,6 +10,8 @@ import (
 
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // newIaCProvider builds a remoteIaCProvider backed by the given stubInvoker.
@@ -690,6 +692,116 @@ func TestRemoteIaCProvider_EnumerateAll_PropagatesError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "IaCProvider.EnumerateAll") {
 		t.Errorf("error should include method name, got: %v", err)
+	}
+}
+
+// TestRemoteIaCProvider_EnumerateAll_TranslatesUnimplemented verifies that
+// gRPC codes.Unimplemented from the plugin's InvokeMethod dispatcher is
+// translated to interfaces.ErrProviderMethodUnimplemented so dispatch sites
+// can errors.Is on the sentinel and skip non-implementing providers. This
+// preserves the pre-v0.27.1 iterate-and-skip semantics now that every
+// gRPC-loaded provider satisfies interfaces.EnumeratorAll at the type level
+// (per Copilot review feedback on PR #589 round 1).
+func TestRemoteIaCProvider_EnumerateAll_TranslatesUnimplemented(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "grpc_codes_unimplemented",
+			err:  status.Error(codes.Unimplemented, "method not implemented"),
+		},
+		{
+			name: "string_unimplemented",
+			err:  fmt.Errorf("provider does not support EnumerateAll: unimplemented"),
+		},
+		{
+			name: "string_not_implemented",
+			err:  fmt.Errorf("method EnumerateAll not implemented by this plugin"),
+		},
+		{
+			name: "string_does_not_implement_serviceinvoker",
+			err:  fmt.Errorf("module handle abc does not implement ServiceInvoker"),
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			si := &stubInvoker{err: tc.err}
+			p := newIaCProvider(si)
+
+			_, err := p.EnumerateAll(context.Background(), "infra.spaces_key")
+			if err == nil {
+				t.Fatal("expected error from EnumerateAll")
+			}
+			if !errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
+				t.Errorf("err = %v; want errors.Is(ErrProviderMethodUnimplemented) = true", err)
+			}
+		})
+	}
+}
+
+// TestRemoteIaCProvider_EnumerateByTag_TranslatesUnimplemented mirrors the
+// EnumerateAll Unimplemented-translation test for the Enumerator bridge.
+func TestRemoteIaCProvider_EnumerateByTag_TranslatesUnimplemented(t *testing.T) {
+	si := &stubInvoker{err: status.Error(codes.Unimplemented, "tag query unsupported")}
+	p := newIaCProvider(si)
+
+	_, err := p.EnumerateByTag(context.Background(), "any")
+	if err == nil {
+		t.Fatal("expected error from EnumerateByTag")
+	}
+	if !errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
+		t.Errorf("err = %v; want errors.Is(ErrProviderMethodUnimplemented) = true", err)
+	}
+}
+
+// TestRemoteIaCProvider_ValidatePlan_HappyPath verifies that the v0.27.1
+// ProviderValidator bridge dispatches "IaCProvider.ValidatePlan" and decodes
+// the result["diagnostics"] entry as []PlanDiagnostic.
+func TestRemoteIaCProvider_ValidatePlan_HappyPath(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{
+		"diagnostics": []any{
+			map[string]any{
+				"severity": float64(interfaces.PlanDiagnosticError),
+				"resource": "db-1",
+				"field":    "vpc_ref",
+				"message":  "vpc_ref points to an unknown VPC",
+			},
+		},
+	}}
+	p := newIaCProvider(si)
+
+	diags := p.ValidatePlan(&interfaces.IaCPlan{})
+	if si.method != "IaCProvider.ValidatePlan" {
+		t.Errorf("method: got %q, want IaCProvider.ValidatePlan", si.method)
+	}
+	if _, ok := si.args["plan"]; !ok {
+		t.Errorf("plan arg missing; got keys: %v", mapKeys(si.args))
+	}
+	if len(diags) != 1 {
+		t.Fatalf("diags: got %d, want 1", len(diags))
+	}
+	if diags[0].Severity != interfaces.PlanDiagnosticError {
+		t.Errorf("Severity: got %v, want PlanDiagnosticError", diags[0].Severity)
+	}
+	if diags[0].Field != "vpc_ref" {
+		t.Errorf("Field: got %q", diags[0].Field)
+	}
+}
+
+// TestRemoteIaCProvider_ValidatePlan_SilentOnError verifies that the
+// ProviderValidator bridge silently returns nil on error, preserving the
+// pre-v0.27.1 R-A10 behavior where plugins that don't implement ValidatePlan
+// are skipped (no diagnostics surface). The contract has no error channel,
+// so this is the architecturally correct trade-off.
+func TestRemoteIaCProvider_ValidatePlan_SilentOnError(t *testing.T) {
+	si := &stubInvoker{err: status.Error(codes.Unimplemented, "plugin does not implement ValidatePlan")}
+	p := newIaCProvider(si)
+
+	diags := p.ValidatePlan(&interfaces.IaCPlan{})
+	if diags != nil {
+		t.Errorf("ValidatePlan should return nil on Unimplemented; got %v", diags)
 	}
 }
 
