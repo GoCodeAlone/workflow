@@ -84,6 +84,21 @@ type Enumerator interface {
 	EnumerateByTag(ctx context.Context, tag string) ([]ResourceRef, error)
 }
 
+// EnumeratorAll is an OPTIONAL provider interface for resource types that
+// don't support tagging (e.g. DO Spaces keys). Returns ALL resources of
+// resourceType in the account regardless of tag, with full metadata
+// (Outputs map populated) so callers can filter without re-reading.
+//
+// Returns []*ResourceOutput rather than []ResourceRef because filtering
+// (drift detection, prune) needs the metadata. Implementations should
+// paginate transparently. Returning *ResourceOutput keeps the contract
+// consistent with ResourceDriver.Read which also returns this shape.
+//
+// Per ADR 0016. Used by `wfctl infra audit-keys` + `wfctl infra prune`.
+type EnumeratorAll interface {
+	EnumerateAll(ctx context.Context, resourceType string) ([]*ResourceOutput, error)
+}
+
 // DriftConfigDetector is an OPTIONAL interface a provider MAY implement to
 // surface config-drift in addition to the existence-only Ghost / InSync /
 // Unknown classifications produced by DetectDrift.
