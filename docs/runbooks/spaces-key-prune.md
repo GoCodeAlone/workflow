@@ -21,13 +21,18 @@ This runbook assumes:
 | Tool | Use when |
 |------|----------|
 | `infra audit-keys` | Read-only — list every cloud-side key for a `--type` to compare against IaC state. Always safe. |
-| `infra prune` | Destructive — delete cloud-side keys older than `--created-before` except `--exclude-access-key`. Two-key opt-in. |
-| `infra rotate-and-prune` | Destructive — mint new credential, then prune older keys with the new one as exclusion target. Two-key opt-in + recovery file. |
+| `infra prune` | Destructive — delete cloud-side keys older than `--created-before` except `--exclude-access-key`. Three-step opt-in (see below). |
+| `infra rotate-and-prune` | Destructive — mint new credential, then prune older keys with the new one as exclusion target. Three-step opt-in + recovery file. |
 
-Both destructive subcommands require **all three** opt-ins:
+Both destructive subcommands require **three** opt-ins to fire. The
+first two are the **two-key** authorization (env var + flag — both
+required, named after the two-person rule from physical security
+contexts); the third is the runtime confirmation:
 
-1. The `--confirm` flag on the CLI invocation.
-2. `WFCTL_CONFIRM_PRUNE=1` exported in the environment.
+1. The `--confirm` flag on the CLI invocation (per-invocation consent).
+2. `WFCTL_CONFIRM_PRUNE=1` exported in the environment (per-session
+   authorization). Together with (1) this is the "two-key opt-in"
+   referred to throughout the rest of this runbook + ADR 0017.
 3. An interactive `y/N` prompt — skipped only with `--non-interactive`
    (CI workflows MUST opt in explicitly).
 
@@ -93,10 +98,28 @@ to identify orphans.
 ```bash
 # Step 2: rotate the canonical credential (separate command — no prune).
 wfctl infra bootstrap --force-rotate SPACES --env staging
-# Capture the stderr sidecar lines:
+# Capture the stderr sidecar line — only sidecar metadata fields emit
+# WFCTL_NEW_KEY_<UPPER>= markers (per the storage-filter contract,
+# ADR 0020). The new credential's access_key is NOT in the stderr
+# stream — it's stored as the SPACES_access_key GH Secret instead:
 #   wfctl: rotated provider_credential SPACES (replaced existing value at <ts>)
-#   WFCTL_NEW_KEY_ACCESS_KEY=<ak>
 #   WFCTL_NEW_KEY_CREATED_AT=<ts>
+```
+
+`access_key` is canonical credential data, not sidecar metadata, so
+it goes through the same code path as `secret_key` (stored as a GH
+Secret named `SPACES_access_key`, never logged). To recover it for
+the prune step, pick whichever lookup matches your environment:
+
+```bash
+# Option A: read directly from the GH Secrets store where bootstrap put it.
+gh secret view SPACES_access_key --repo <owner>/<repo>
+
+# Option B: list cloud-side keys and identify the new one by created_at
+# (the WFCTL_NEW_KEY_CREATED_AT= line you captured above).
+wfctl infra audit-keys --type infra.spaces_key
+# → grep the row whose CREATED_AT matches; its ACCESS_KEY column
+#   is the value to pass as --exclude-access-key.
 ```
 
 ```bash
@@ -110,8 +133,8 @@ wfctl infra prune \
 ```
 
 If the rotation happened out-of-band (DO console, not bootstrap), get
-the access_key + created_at from `audit-keys` output for the new key
-and use those values directly in step 3.
+both `access_key` and `created_at` from the `audit-keys` output for
+the new key and use those values directly in step 3.
 
 ## Recovery from partial failure
 
@@ -197,7 +220,9 @@ anti-pattern can't reach `apply`.
 a stuck-in-history shell line in someone's `~/.bash_history` running
 under their UID. The env var is operator-provided per session; the
 flag is operator-provided per invocation. Either alone is insufficient.
-ADR 0017.
+This is opt-ins (1) + (2) from the "Overview" three-step list; the
+interactive y/N prompt (3) is the third gate, skippable only with
+`--non-interactive`. ADR 0017.
 
 **Q: What happens if I omit `--exclude-access-key`?** `prune` exits
 with `prune: --created-before AND --exclude-access-key are both
