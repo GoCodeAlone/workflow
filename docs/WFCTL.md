@@ -1543,7 +1543,7 @@ interactive y/N prompt unless `--non-interactive`), AND the
 (paranoia rail — prevents a typo from nuking the live key).
 
 ```
-wfctl infra prune --type <T> --created-before <RFC3339> --exclude-access-key <AK> --confirm [--non-interactive] [--allowlist <regex>] [--recovery-from-last-rotation]
+wfctl infra prune --type <T> --created-before <RFC3339> --exclude-access-key <AK> --confirm [--non-interactive] [--preserve-names <regex>] [--recovery-from-last-rotation]
 ```
 
 | Flag | Default | Description |
@@ -1551,7 +1551,7 @@ wfctl infra prune --type <T> --created-before <RFC3339> --exclude-access-key <AK
 | `--type` | _(required)_ | Resource type (e.g. `infra.spaces_key`) |
 | `--created-before` | _(required)_ | RFC3339 timestamp; only resources older than this are eligible |
 | `--exclude-access-key` | _(required)_ | Access key to preserve (paranoia rail) |
-| `--allowlist` | `` | Regex matching resource names to skip (orthogonal to time filter) |
+| `--preserve-names` | `` | Regex of resource names to preserve (skip during delete; orthogonal to time filter) |
 | `--confirm` | `false` | Required: explicit confirmation flag (paired with `WFCTL_CONFIRM_PRUNE=1` env var) |
 | `--non-interactive` | `false` | Skip the y/N prompt (CI-friendly) |
 | `--recovery-from-last-rotation` | `false` | Read filter args from `${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json` (written by `infra rotate-and-prune` for recovery from partial-failure rotations without re-rotating) |
@@ -1593,7 +1593,7 @@ the operator can re-invoke `infra prune --recovery-from-last-rotation`
 without re-rotating (which would leak yet another key).
 
 ```
-wfctl infra rotate-and-prune --type <T> --name <name> --confirm [--non-interactive] [-c CONFIG] [--env ENV] [--allowlist <regex>]
+wfctl infra rotate-and-prune --type <T> --name <name> --confirm [--non-interactive] [-c CONFIG] [--env ENV] [--preserve-names <regex>]
 ```
 
 | Flag | Default | Description |
@@ -1602,7 +1602,7 @@ wfctl infra rotate-and-prune --type <T> --name <name> --confirm [--non-interacti
 | `--name` | _(required)_ | Canonical credential name to rotate (matches `secrets.generate[].name`) |
 | `--config`, `-c` | _(auto-detected)_ | Config file |
 | `--env` | `` | Environment name |
-| `--allowlist` | `` | Regex of resource names to skip during the prune step |
+| `--preserve-names` | `` | Regex of resource names to preserve during the prune step (forwarded as `--preserve-names` to `infra prune`) |
 | `--confirm` | `false` | Required: paired with `WFCTL_CONFIRM_PRUNE=1` env var |
 | `--non-interactive` | `false` | Skip the y/N prompt (forwarded to the prune step) |
 
