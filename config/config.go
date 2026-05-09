@@ -504,14 +504,16 @@ func mergeImportedCI(cfg *WorkflowConfig, imported *CIConfig) {
 	}
 	if len(imported.Migrations) > 0 {
 		existing := make(map[string]struct{}, len(cfg.CI.Migrations))
-		for _, migration := range cfg.CI.Migrations {
+		for i := range cfg.CI.Migrations {
+			migration := &cfg.CI.Migrations[i]
 			existing[migration.Name] = struct{}{}
 		}
-		for _, migration := range imported.Migrations {
+		for i := range imported.Migrations {
+			migration := &imported.Migrations[i]
 			if _, exists := existing[migration.Name]; exists {
 				continue
 			}
-			cfg.CI.Migrations = append(cfg.CI.Migrations, migration)
+			cfg.CI.Migrations = append(cfg.CI.Migrations, *migration)
 			existing[migration.Name] = struct{}{}
 		}
 	}
@@ -631,14 +633,16 @@ func markSecurityFieldSet(security *CIBuildSecurity, field string) {
 
 func appendMissingCITargets(current, imported []CITarget) []CITarget {
 	existing := make(map[string]struct{}, len(current))
-	for _, target := range current {
+	for i := range current {
+		target := &current[i]
 		existing[target.Name] = struct{}{}
 	}
-	for _, target := range imported {
+	for i := range imported {
+		target := &imported[i]
 		if _, exists := existing[target.Name]; exists {
 			continue
 		}
-		current = append(current, target)
+		current = append(current, *target)
 		existing[target.Name] = struct{}{}
 	}
 	return current
@@ -646,14 +650,16 @@ func appendMissingCITargets(current, imported []CITarget) []CITarget {
 
 func appendMissingCIContainers(current, imported []CIContainerTarget) []CIContainerTarget {
 	existing := make(map[string]struct{}, len(current))
-	for _, target := range current {
+	for i := range current {
+		target := &current[i]
 		existing[target.Name] = struct{}{}
 	}
-	for _, target := range imported {
+	for i := range imported {
+		target := &imported[i]
 		if _, exists := existing[target.Name]; exists {
 			continue
 		}
-		current = append(current, target)
+		current = append(current, *target)
 		existing[target.Name] = struct{}{}
 	}
 	return current
