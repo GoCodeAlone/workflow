@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -40,15 +41,16 @@ var rotateAndPruneLoadProviders = defaultCleanupLoadProviders
 func runInfraRotateAndPruneCmd(args []string) error {
 	fs := flag.NewFlagSet("infra rotate-and-prune (dispatch)", flag.ContinueOnError)
 	fs.SetOutput(rotateAndPruneStderr)
-	var configFile, envName string
+	var configFile, envName, resourceType string
 	// Declare every flag runInfraRotateAndPrune accepts so flag.Parse
-	// doesn't error here. Only --config / --env are captured (used by the
-	// provider loader); the rest are re-parsed inside runInfraRotateAndPrune
-	// against the same args slice (Go's flag package is idempotent).
+	// doesn't error here. Only --config / --env / --type are captured here
+	// (used by the provider loader and the EnumerateAll pre-flight probe);
+	// the rest are re-parsed inside runInfraRotateAndPrune against the same
+	// args slice (Go's flag package is idempotent).
 	fs.StringVar(&configFile, "config", "", "Config file (default: infra.yaml or config/infra.yaml)")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	fs.StringVar(&envName, "env", "", "Environment name for config resolution")
-	_ = fs.String("type", "", "Resource type")
+	fs.StringVar(&resourceType, "type", "", "Resource type")
 	_ = fs.String("name", "", "Canonical credential name")
 	_ = fs.String("preserve-names", "", "Regex of names to preserve during prune")
 	_ = fs.Bool("confirm", false, "Confirmation flag")
@@ -73,25 +75,43 @@ func runInfraRotateAndPruneCmd(args []string) error {
 		}
 	}()
 
-	// v0.27.1 dispatch policy: every gRPC-loaded provider satisfies
-	// interfaces.EnumeratorAll at the type level (proxy bridge in PR #589).
-	// To preserve the pre-v0.27.1 iterate-and-skip semantics, we wrap each
-	// adapter in probedPruneProvider — same probe-once pattern used by
-	// runInfraPruneCmd above. Plugins whose process does not implement
-	// EnumerateAll (translated to interfaces.ErrProviderMethodUnimplemented
-	// by the proxy) are skipped with a structured stdout line and the loop
-	// continues to the next provider.
+	// Strict-mode dispatch (v0.27.1, per user mandate "remove the fallback
+	// and force strict mode"): every gRPC-loaded provider satisfies
+	// interfaces.EnumeratorAll at the type level (proxy bridge in PR #589),
+	// but the underlying plugin process may not. Step 1 of
+	// runInfraRotateAndPrune is rotation — DESTRUCTIVE and irreversible. If
+	// we discover the bridge gap only during Step 2 (prune), the operator is
+	// left with a freshly-rotated credential, the old credential still live,
+	// and no automated path to clean up.
+	//
+	// To prevent that, we run a pre-flight probe of EnumerateAll on each
+	// candidate provider BEFORE delegating to runInfraRotateAndPrune. If the
+	// probe fails Unimplemented, we surface a loud error (no rotation
+	// occurs, no state mutated). If the probe fails for any other reason
+	// (auth, network), surface that too — the operator should fix it before
+	// rotating.
 	for _, p := range providers {
 		if _, ok := p.(interfaces.EnumeratorAll); !ok {
 			continue
 		}
+		// Pre-flight: probe EnumerateAll BEFORE Step 1 rotation. The probe
+		// uses the resourceType extracted from the dispatcher flag scan
+		// above so it exercises the same RPC the prune step will issue.
+		// resourceType may be empty if the operator omitted --type;
+		// runInfraRotateAndPrune validates that itself and exits 2 before
+		// reaching rotation, so we don't duplicate the check here.
 		adapter := &pruneProviderAdapter{p: p}
-		probed := &probedPruneProvider{inner: adapter}
-		rc := runInfraRotateAndPrune(args, probed, rotateAndPruneStdout)
-		if probed.unimplemented {
-			fmt.Fprintf(rotateAndPruneStdout, "skipped %s: provider does not implement EnumeratorAll\n", p.Name())
-			continue
+		if resourceType != "" {
+			if _, probeErr := adapter.EnumerateAll(ctx, resourceType); probeErr != nil {
+				if errors.Is(probeErr, interfaces.ErrProviderMethodUnimplemented) {
+					return fmt.Errorf("rotate-and-prune pre-flight: provider %q does not implement IaCProvider.EnumerateAll bridge wiring (rotation aborted; no state mutated): %w",
+						p.Name(), probeErr)
+				}
+				return fmt.Errorf("rotate-and-prune pre-flight: provider %q EnumerateAll(%q) failed (rotation aborted; no state mutated): %w",
+					p.Name(), resourceType, probeErr)
+			}
 		}
+		rc := runInfraRotateAndPrune(args, adapter, rotateAndPruneStdout)
 		if rc != 0 {
 			return fmt.Errorf("rotate-and-prune exited with code %d", rc)
 		}

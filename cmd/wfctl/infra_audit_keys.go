@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -105,6 +104,14 @@ func runInfraAuditKeys(args []string, enumerator interfaces.EnumeratorAll, w io.
 // the flags runInfraAuditKeys understands. Forwarding the raw args slice
 // would error inside runInfraAuditKeys with "flag provided but not
 // defined: -config" because its inner FlagSet only declares --type.
+//
+// Strict-mode policy (v0.27.1, per user mandate "remove the fallback and
+// force strict mode"): if an enumeration call returns
+// interfaces.ErrProviderMethodUnimplemented, that error propagates LOUD
+// rather than being swallowed into "Found 0 resources". Plugins that
+// declare the bridge but lack the underlying implementation MUST surface
+// the gap so operators are not misled into thinking the cloud account is
+// empty.
 func runInfraAuditKeysCmd(args []string) error {
 	fs := flag.NewFlagSet("infra audit-keys", flag.ContinueOnError)
 	fs.SetOutput(auditKeysStderr)
@@ -137,61 +144,21 @@ func runInfraAuditKeysCmd(args []string) error {
 	// declares. resourceType may be empty; runInfraAuditKeys handles the
 	// "--type required" error itself with its own structured message.
 	inner := []string{"--type", resourceType}
-	//
-	// v0.27.1 dispatch policy: every gRPC-loaded provider satisfies
-	// interfaces.EnumeratorAll at the type level (the proxy bridge added in
-	// PR #589 closed the audit-keys gap). To preserve the pre-v0.27.1
-	// iterate-and-skip semantics for plugins whose process does NOT
-	// implement EnumerateAll, we wrap each candidate enumerator in a probe
-	// that translates interfaces.ErrProviderMethodUnimplemented (from the
-	// proxy's codes.Unimplemented translation) into a "skip this provider"
-	// signal. Other errors (auth, network) are surfaced normally — the
-	// renderer prints them and returns exit code 1.
-	//
-	// The probe is single-call: the wrapper records whether the underlying
-	// EnumerateAll already failed Unimplemented, so the renderer's own
-	// EnumerateAll dispatch is short-circuited and no second RPC is issued.
 	for _, p := range providers {
 		enum, ok := p.(interfaces.EnumeratorAll)
 		if !ok {
 			continue
 		}
-		probed := &probedEnumerator{inner: enum}
-		// Run the renderer; if the inner call hit Unimplemented, the probed
-		// wrapper signals "skip" by returning a sentinel that we trap below.
-		rc := runInfraAuditKeys(inner, probed, auditKeysStdout)
-		if probed.unimplemented {
-			fmt.Fprintf(auditKeysStdout, "skipped %s: provider does not implement EnumeratorAll\n", p.Name())
-			continue
-		}
+		// Strict-mode dispatch: hand the enumerator directly to the
+		// renderer. If the underlying RPC returns
+		// ErrProviderMethodUnimplemented, runInfraAuditKeys prints the
+		// error to stdout and returns exit code 1 — exactly the loud
+		// failure mode the user mandate requires. No silent swallow.
+		rc := runInfraAuditKeys(inner, enum, auditKeysStdout)
 		if rc != 0 {
 			return fmt.Errorf("audit-keys exited with code %d", rc)
 		}
 		return nil
 	}
 	return fmt.Errorf("audit-keys: no loaded provider implements EnumeratorAll")
-}
-
-// probedEnumerator wraps an interfaces.EnumeratorAll and records whether the
-// underlying call returned interfaces.ErrProviderMethodUnimplemented. When
-// it does, the wrapper returns (nil, nil) so the caller renders an empty
-// result rather than printing a confusing "unimplemented" error line, and
-// the dispatcher uses the recorded flag to emit the structured "skipped"
-// message and continue to the next provider.
-//
-// This pattern preserves the single-call invariant (no double RPC to the
-// cloud provider in the success path) while keeping runInfraAuditKeys pure
-// and table-driven.
-type probedEnumerator struct {
-	inner         interfaces.EnumeratorAll
-	unimplemented bool
-}
-
-func (p *probedEnumerator) EnumerateAll(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
-	outs, err := p.inner.EnumerateAll(ctx, resourceType)
-	if err != nil && errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
-		p.unimplemented = true
-		return nil, nil
-	}
-	return outs, err
 }

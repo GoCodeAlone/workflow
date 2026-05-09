@@ -574,10 +574,18 @@ func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.S
 // Why string fallbacks: per workspace memory feedback_workflow_plugin_structpb_boundary,
 // errors crossing the gRPC plugin boundary lose sentinel identity (structpb
 // roundtrip), so message-string matching is the cross-process robust check.
-// The string-set is conservative: only "unimplemented", "not implemented",
-// "no service handler", and "method handle %s does not implement
-// ServiceInvoker" — which is what plugin/external/sdk/grpc_server.go emits
-// for missing-handler cases.
+// The string-set is conservative: "unimplemented", "not implemented", and
+// the two `does not implement (Service|ServiceContext)Invoker` literals that
+// plugin/external/sdk/grpc_server.go emits for missing-handler cases. The
+// helper does NOT match "no service handler" — that string is not produced
+// by any current plugin sdk path.
+//
+// Strict-mode role (v0.27.1): this helper exists ONLY to translate transport
+// errors into interfaces.ErrProviderMethodUnimplemented at the proxy
+// boundary so callers can errors.Is on a stable sentinel. Per the v0.27.1
+// user mandate ("remove the fallback and force strict mode"), every call
+// site that previously swallowed the sentinel into (nil, nil) has been
+// changed to propagate loudly. Do NOT introduce new swallowing call sites.
 func isPluginMethodUnimplemented(err error) bool {
 	if err == nil {
 		return false
@@ -776,11 +784,12 @@ func (r *remoteIaCProvider) SupportedCanonicalKeys() []string {
 // (no error). To preserve the pre-v0.27.1 R-A10 semantics where plugins that
 // don't implement ValidatePlan are silently skipped (the type-assert at
 // cmd/wfctl/infra_align_rules.go:777 fails and the loop continues), this
-// proxy translates BOTH transport errors AND interfaces.ErrProviderMethodUnimplemented
-// into an empty diagnostics slice. Plugins that genuinely error during
-// ValidatePlan (e.g. malformed plan input) will appear silent under R-A10
-// in this PR; emitting a warning at that boundary is left to a follow-up
-// PR that extends the ProviderValidator contract to return an error.
+// proxy returns nil (which []PlanDiagnostic permits) on transport errors,
+// interfaces.ErrProviderMethodUnimplemented, and decode failures. Plugins
+// that genuinely error during ValidatePlan (e.g. malformed plan input) will
+// appear silent under R-A10 in this PR; emitting a warning at that boundary
+// is left to a follow-up PR that extends the ProviderValidator contract to
+// return an error.
 //
 // Bridged in v0.27.1 to close the strict-bridge-coverage gate; without
 // this method *remoteIaCProvider would not satisfy interfaces.ProviderValidator
