@@ -120,7 +120,10 @@ func buildResolvedSecretsFromState(
 		if gen.Type != "infra_output" {
 			continue
 		}
-		val, err := resolveInfraOutput(cfg, gen.Source, envName, stateOutputs)
+		// nil hydrated: this caller is offline drift-resolution / preview;
+		// no same-process apply hand-off available. Sensitive placeholders
+		// will fail-and-skip (the loop continues).
+		val, err := resolveInfraOutput(cfg, gen.Source, envName, stateOutputs, nil)
 		if err != nil {
 			continue
 		}

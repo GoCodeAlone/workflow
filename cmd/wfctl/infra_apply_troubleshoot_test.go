@@ -83,7 +83,7 @@ func TestInfraApply_EmitsDiagnosticsOnFailure(t *testing.T) {
 	// spec.Type must be non-empty so ref.Type is set and ResourceDriver is called.
 	specs := []interfaces.ResourceSpec{{Name: "bmw-staging", Type: "app_platform"}}
 	var diagBuf bytes.Buffer
-	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "")
+	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error from failing apply")
 	}
@@ -107,7 +107,7 @@ func TestInfraApply_NonTroubleshooterNocrash(t *testing.T) {
 	provider := &plainFailProvider{applyErr: errors.New("boom")}
 	var diagBuf bytes.Buffer
 	specs := []interfaces.ResourceSpec{{Name: "x", Type: "app_platform"}}
-	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "")
+	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -135,7 +135,7 @@ func TestInfraApply_WritesStepSummaryOnFailure(t *testing.T) {
 
 	specs := []interfaces.ResourceSpec{{Name: "bmw-staging", Type: "app_platform"}}
 	var diagBuf bytes.Buffer
-	_ = applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "staging")
+	_ = applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "staging", "", nil)
 
 	data, err := os.ReadFile(summaryPath)
 	if err != nil {

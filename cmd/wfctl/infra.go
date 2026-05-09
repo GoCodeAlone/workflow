@@ -1110,6 +1110,13 @@ func platformNow() time.Time {
 }
 
 func runInfraApply(args []string) error {
+	// runHydrated carries routed-secret values from the same-process apply
+	// (sensitive.Route's hydrated map) to syncInfraOutputSecrets below.
+	// Empty when no driver emitted sensitive outputs; nil for the
+	// precomputed-plan branch unless threaded through. Required for
+	// rehydration on write-only providers (GitHub Actions secrets are
+	// write-only after Set).
+	var runHydrated map[string]string
 	fs := flag.NewFlagSet("infra apply", flag.ContinueOnError)
 	var configFlag string
 	fs.StringVar(&configFlag, "config", "", "Config file")
@@ -1398,9 +1405,11 @@ func runInfraApply(args []string) error {
 			)
 		}
 		if hasInfraModules(cfgFile) {
-			if err := applyInfraModules(ctx, cfgFile, envName); err != nil {
+			h, err := applyInfraModules(ctx, cfgFile, envName)
+			if err != nil {
 				return err
 			}
+			runHydrated = h
 		} else {
 			pipelineCfg := cfgFile
 			if envName != "" {
@@ -1447,7 +1456,7 @@ func runInfraApply(args []string) error {
 			}
 		}
 	}
-	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName)
+	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated)
 }
 
 func runInfraStatus(args []string) error {

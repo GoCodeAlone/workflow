@@ -220,7 +220,7 @@ func TestApplyWithProviderAndStore_ProtectedReplace_WithoutAllowReplace_Errors(t
 	}
 
 	var w bytes.Buffer
-	err := applyWithProviderAndStore(context.Background(), provider, "stub", specs, nil, nil, &w, "test")
+	err := applyWithProviderAndStore(context.Background(), provider, "stub", specs, nil, nil, &w, "test", "", nil)
 	if err == nil {
 		t.Fatal("expected gate error before dispatch")
 	}
@@ -264,7 +264,7 @@ func TestApplyWithProviderAndStore_ProtectedReplace_WithAllowReplace_Proceeds(t 
 	}
 
 	var w bytes.Buffer
-	err := applyWithProviderAndStore(context.Background(), provider, "stub", specs, nil, nil, &w, "test")
+	err := applyWithProviderAndStore(context.Background(), provider, "stub", specs, nil, nil, &w, "test", "", nil)
 	if err == nil || !errors.Is(err, dispatched) {
 		t.Fatalf("expected gate to allow apply through to dispatch (sentinel %v); got %v", dispatched, err)
 	}
@@ -295,7 +295,7 @@ func TestApplyPrecomputedPlanWithStore_ProtectedReplace_WithoutAllowReplace_Erro
 	}
 
 	var w bytes.Buffer
-	err := applyPrecomputedPlanWithStore(context.Background(), plan, provider, "stub", nil, &w, "test")
+	err := applyPrecomputedPlanWithStore(context.Background(), plan, provider, "stub", nil, &w, "test", "", nil)
 	if err == nil {
 		t.Fatal("expected gate error before dispatch via precomputed-plan path")
 	}

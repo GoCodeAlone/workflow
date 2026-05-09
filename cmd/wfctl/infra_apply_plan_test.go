@@ -337,7 +337,7 @@ func TestInfraApplyPrecomputedPlan_PersistsState(t *testing.T) {
 		},
 	}
 
-	err := applyPrecomputedPlanWithStore(context.Background(), plan, provider, "fake-cloud", store, io.Discard, "")
+	err := applyPrecomputedPlanWithStore(context.Background(), plan, provider, "fake-cloud", store, io.Discard, "", "", nil)
 	if err != nil {
 		t.Fatalf("applyPrecomputedPlanWithStore: %v", err)
 	}
