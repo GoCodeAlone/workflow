@@ -338,6 +338,34 @@ func TestDispatchMatrix_RemoteIaCProvider(t *testing.T) {
 			},
 		},
 		{
+			// v0.27.1 — bridges interfaces.EnumeratorAll. The dispatcher in
+			// runInfraAuditKeysCmd type-asserts the loaded provider against
+			// EnumeratorAll, so this row pins the wire shape.
+			name:         "EnumerateAll",
+			wantMethod:   "IaCProvider.EnumerateAll",
+			requiredKeys: []string{"resource_type"},
+			invoke: func(p *remoteIaCProvider, ri *recordingInvoker) error {
+				ri.resp = map[string]any{}
+				_, err := p.EnumerateAll(ctx, "infra.spaces_key")
+				return err
+			},
+		},
+		{
+			// v0.27.1 — bridges interfaces.Enumerator. wfctl infra cleanup
+			// type-asserts against this and skips providers that don't
+			// implement; the proxy now satisfies the assertion for all
+			// gRPC-loaded plugins, with the actual provider-side support
+			// surfaced as a normal RPC error.
+			name:         "EnumerateByTag",
+			wantMethod:   "IaCProvider.EnumerateByTag",
+			requiredKeys: []string{"tag"},
+			invoke: func(p *remoteIaCProvider, ri *recordingInvoker) error {
+				ri.resp = map[string]any{}
+				_, err := p.EnumerateByTag(ctx, "wfctl-managed")
+				return err
+			},
+		},
+		{
 			// BootstrapStateBackend sends cfg directly as the args map (no wrapper key).
 			// When cfg is nil/empty InvokeService must still be called (args may be nil).
 			name:         "BootstrapStateBackend_nilCfg",

@@ -565,6 +565,99 @@ func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.S
 	return &sizing, nil
 }
 
+// EnumerateAll implements interfaces.EnumeratorAll for the gRPC-loaded IaC
+// provider. Dispatches via InvokeServiceContext when the underlying invoker
+// supports it; falls back to InvokeService for legacy invokers.
+//
+// The plugin-side dispatcher (e.g. DO v0.14.0's DOProvider.InvokeMethod) routes
+// the "IaCProvider.EnumerateAll" method string to the provider's typed
+// EnumerateAll(ctx, resourceType) implementation and returns []*ResourceOutput
+// under the "outputs" key.
+//
+// This bridge closes the v0.27.0 gap surfaced by `wfctl infra audit-keys`: the
+// audit-keys command type-asserted the loaded provider against EnumeratorAll,
+// but remoteIaCProvider did not implement EnumerateAll, so the assertion
+// always failed even when the plugin process itself implemented it.
+func (r *remoteIaCProvider) EnumerateAll(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
+	args := map[string]any{
+		"resource_type": resourceType,
+	}
+	var (
+		res map[string]any
+		err error
+	)
+	if invoker, ok := r.invoker.(remoteServiceContextInvoker); ok {
+		res, err = invoker.InvokeServiceContext(ctx, "IaCProvider.EnumerateAll", args)
+	} else {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		res, err = r.invoker.InvokeService("IaCProvider.EnumerateAll", args)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.EnumerateAll: %w", err)
+	}
+	if res == nil {
+		return nil, nil
+	}
+	raw, ok := res["outputs"]
+	if !ok {
+		return nil, nil
+	}
+	// Round-trip through any to avoid carrying structpb-only types into the
+	// typed slice. anyToStruct wraps json.Marshal → json.Unmarshal.
+	var outs []*interfaces.ResourceOutput
+	if err := anyToStruct(raw, &outs); err != nil {
+		return nil, fmt.Errorf("IaCProvider.EnumerateAll: decode result: %w", err)
+	}
+	return outs, nil
+}
+
+// EnumerateByTag implements interfaces.Enumerator for the gRPC-loaded IaC
+// provider. Dispatches via InvokeServiceContext when available; falls back
+// to InvokeService for legacy invokers.
+//
+// The plugin-side dispatcher routes "IaCProvider.EnumerateByTag" to the
+// provider's typed EnumerateByTag(ctx, tag) implementation and returns
+// []ResourceRef under the "refs" key. Returns Name + Type + ProviderID per
+// the contract documented in interfaces/iac_provider.go.
+//
+// Bridged in v0.27.1 alongside EnumerateAll; both optional interfaces had
+// the same root cause (no compile-time enforcement of proxy coverage for
+// optional IaCProvider sub-interfaces).
+func (r *remoteIaCProvider) EnumerateByTag(ctx context.Context, tag string) ([]interfaces.ResourceRef, error) {
+	args := map[string]any{
+		"tag": tag,
+	}
+	var (
+		res map[string]any
+		err error
+	)
+	if invoker, ok := r.invoker.(remoteServiceContextInvoker); ok {
+		res, err = invoker.InvokeServiceContext(ctx, "IaCProvider.EnumerateByTag", args)
+	} else {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		res, err = r.invoker.InvokeService("IaCProvider.EnumerateByTag", args)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.EnumerateByTag: %w", err)
+	}
+	if res == nil {
+		return nil, nil
+	}
+	raw, ok := res["refs"]
+	if !ok {
+		return nil, nil
+	}
+	var refs []interfaces.ResourceRef
+	if err := anyToStruct(raw, &refs); err != nil {
+		return nil, fmt.Errorf("IaCProvider.EnumerateByTag: decode result: %w", err)
+	}
+	return refs, nil
+}
+
 func (r *remoteIaCProvider) RepairDirtyMigration(ctx context.Context, req interfaces.MigrationRepairRequest) (*interfaces.MigrationRepairResult, error) {
 	reqAny, err := jsonToAny(req)
 	if err != nil {

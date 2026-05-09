@@ -613,6 +613,200 @@ func TestRemoteIaC_ResolveSizing_Error(t *testing.T) {
 	}
 }
 
+// ── EnumerateAll (interfaces.EnumeratorAll) ─────────────────────────────────
+//
+// Bridged in v0.27.1 to close the audit-keys gap: remoteIaCProvider missed
+// EnumerateAll, so `wfctl infra audit-keys` errored "no loaded provider
+// implements EnumeratorAll" even when the plugin process implemented it.
+
+func TestRemoteIaCProvider_EnumerateAll(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{
+		"outputs": []any{
+			map[string]any{
+				"name":        "key-1",
+				"type":        "infra.spaces_key",
+				"provider_id": "AKID0000000000000001",
+				"status":      "active",
+				"outputs":     map[string]any{"created_at": "2026-05-01T00:00:00Z"},
+			},
+			map[string]any{
+				"name":        "key-2",
+				"type":        "infra.spaces_key",
+				"provider_id": "AKID0000000000000002",
+				"status":      "active",
+				"outputs":     map[string]any{"created_at": "2026-05-08T00:00:00Z"},
+			},
+		},
+	}}
+	p := newIaCProvider(si)
+
+	outs, err := p.EnumerateAll(context.Background(), "infra.spaces_key")
+	if err != nil {
+		t.Fatalf("EnumerateAll: unexpected error: %v", err)
+	}
+	if si.method != "IaCProvider.EnumerateAll" {
+		t.Errorf("method: got %q, want IaCProvider.EnumerateAll", si.method)
+	}
+	if si.args["resource_type"] != "infra.spaces_key" {
+		t.Errorf("args[resource_type]: got %v, want infra.spaces_key", si.args["resource_type"])
+	}
+	if len(outs) != 2 {
+		t.Fatalf("outs: got %d, want 2", len(outs))
+	}
+	if outs[0].Name != "key-1" {
+		t.Errorf("outs[0].Name: got %q, want key-1", outs[0].Name)
+	}
+	if outs[1].ProviderID != "AKID0000000000000002" {
+		t.Errorf("outs[1].ProviderID: got %q, want AKID0000000000000002", outs[1].ProviderID)
+	}
+	createdAt, _ := outs[0].Outputs["created_at"].(string)
+	if createdAt != "2026-05-01T00:00:00Z" {
+		t.Errorf("outs[0].Outputs[created_at]: got %q", createdAt)
+	}
+}
+
+func TestRemoteIaCProvider_EnumerateAll_NilResponse(t *testing.T) {
+	// Plugins are allowed to return an empty result for an empty account; the
+	// proxy must not crash when "outputs" is missing or response is nil.
+	si := &stubInvoker{resp: nil}
+	p := newIaCProvider(si)
+
+	outs, err := p.EnumerateAll(context.Background(), "infra.spaces_key")
+	if err != nil {
+		t.Fatalf("EnumerateAll: unexpected error: %v", err)
+	}
+	if len(outs) != 0 {
+		t.Errorf("outs: got %d, want 0", len(outs))
+	}
+}
+
+func TestRemoteIaCProvider_EnumerateAll_PropagatesError(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("upstream listing failed")}
+	p := newIaCProvider(si)
+
+	_, err := p.EnumerateAll(context.Background(), "infra.spaces_key")
+	if err == nil {
+		t.Fatal("expected error from EnumerateAll when invoker fails")
+	}
+	if !strings.Contains(err.Error(), "IaCProvider.EnumerateAll") {
+		t.Errorf("error should include method name, got: %v", err)
+	}
+}
+
+func TestRemoteIaCProvider_EnumerateAll_DecodeError(t *testing.T) {
+	// outputs as a non-array value (string) cannot be decoded into
+	// []*ResourceOutput. The proxy must wrap the error with method context.
+	si := &stubInvoker{resp: map[string]any{
+		"outputs": "not-an-array",
+	}}
+	p := newIaCProvider(si)
+
+	_, err := p.EnumerateAll(context.Background(), "infra.spaces_key")
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if !strings.Contains(err.Error(), "IaCProvider.EnumerateAll: decode result") {
+		t.Fatalf("error %q missing decode context", err)
+	}
+}
+
+func TestRemoteIaCProvider_EnumerateAll_UsesContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel
+	ci := &contextRecordingInvoker{resp: map[string]any{}}
+	p := &remoteIaCProvider{invoker: ci}
+
+	_, err := p.EnumerateAll(ctx, "infra.spaces_key")
+	if err == nil {
+		t.Fatal("expected canceled context error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if !ci.usedContext {
+		t.Fatal("EnumerateAll did not use context-aware invoker")
+	}
+	if ci.fallbackUsed {
+		t.Fatal("EnumerateAll used context-free fallback when context invoker available")
+	}
+}
+
+// ── EnumerateByTag (interfaces.Enumerator) ───────────────────────────────────
+//
+// Bridged in v0.27.1 alongside EnumerateAll. Same root gap: the optional
+// Enumerator interface had no proxy method, so any caller that
+// type-asserted a remote provider against interfaces.Enumerator silently
+// fell through to the negative branch.
+
+func TestRemoteIaCProvider_EnumerateByTag(t *testing.T) {
+	si := &stubInvoker{resp: map[string]any{
+		"refs": []any{
+			map[string]any{
+				"name":        "vpc-1",
+				"type":        "infra.vpc",
+				"provider_id": "vpc-aaaa",
+			},
+			map[string]any{
+				"name":        "vpc-2",
+				"type":        "infra.vpc",
+				"provider_id": "vpc-bbbb",
+			},
+		},
+	}}
+	p := newIaCProvider(si)
+
+	refs, err := p.EnumerateByTag(context.Background(), "wfctl-managed:env=staging")
+	if err != nil {
+		t.Fatalf("EnumerateByTag: unexpected error: %v", err)
+	}
+	if si.method != "IaCProvider.EnumerateByTag" {
+		t.Errorf("method: got %q, want IaCProvider.EnumerateByTag", si.method)
+	}
+	if si.args["tag"] != "wfctl-managed:env=staging" {
+		t.Errorf("args[tag]: got %v", si.args["tag"])
+	}
+	if len(refs) != 2 {
+		t.Fatalf("refs: got %d, want 2", len(refs))
+	}
+	if refs[0].Name != "vpc-1" || refs[0].ProviderID != "vpc-aaaa" {
+		t.Errorf("refs[0]: got %+v", refs[0])
+	}
+}
+
+func TestRemoteIaCProvider_EnumerateByTag_PropagatesError(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("tag query unsupported")}
+	p := newIaCProvider(si)
+
+	_, err := p.EnumerateByTag(context.Background(), "any")
+	if err == nil {
+		t.Fatal("expected error from EnumerateByTag when invoker fails")
+	}
+	if !strings.Contains(err.Error(), "IaCProvider.EnumerateByTag") {
+		t.Errorf("error should include method name, got: %v", err)
+	}
+}
+
+func TestRemoteIaCProvider_EnumerateByTag_UsesContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ci := &contextRecordingInvoker{resp: map[string]any{}}
+	p := &remoteIaCProvider{invoker: ci}
+
+	_, err := p.EnumerateByTag(ctx, "any")
+	if err == nil {
+		t.Fatal("expected canceled context error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if !ci.usedContext {
+		t.Fatal("EnumerateByTag did not use context-aware invoker")
+	}
+	if ci.fallbackUsed {
+		t.Fatal("EnumerateByTag used context-free fallback when context invoker available")
+	}
+}
+
 // ── Migration Repair ────────────────────────────────────────────────────────
 
 func TestRemoteIaCProvider_RepairDirtyMigration(t *testing.T) {
