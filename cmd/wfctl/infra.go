@@ -85,6 +85,11 @@ func runInfra(args []string) error {
 		return runInfraSecurityCheck(args[1:])
 	case "cleanup":
 		return runInfraCleanup(args[1:])
+	case "audit-secrets":
+		if rc := runInfraAuditSecrets(args[1:], os.Stdout); rc != 0 {
+			return fmt.Errorf("audit-secrets exited with code %d", rc)
+		}
+		return nil
 	default:
 		return infraUsage()
 	}
@@ -108,6 +113,7 @@ Actions:
   align          Validate IaC config + plan alignment (8 rule families)
   security-check Scan plan.json for security policy violations
   cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
+  audit-secrets  Report provider_credential anti-patterns in secrets.generate
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)

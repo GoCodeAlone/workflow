@@ -1,0 +1,10 @@
+secrets:
+  generate:
+    - key: SPACES_access_key
+      type: provider_credential
+      source: digitalocean.spaces
+      name: test-key
+    - key: SPACES_secret_key
+      type: provider_credential
+      source: digitalocean.spaces
+      name: test-key
