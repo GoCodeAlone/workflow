@@ -1,6 +1,10 @@
 package config
 
-import "log"
+import (
+	"log"
+
+	"gopkg.in/yaml.v3"
+)
 
 // CIBuildSecurity configures supply-chain hardening for the build phase.
 type CIBuildSecurity struct {
@@ -10,12 +14,27 @@ type CIBuildSecurity struct {
 	Sign            bool               `json:"sign,omitempty" yaml:"sign,omitempty"`
 	NonRoot         bool               `json:"non_root" yaml:"non_root"`
 	BaseImagePolicy *CIBaseImagePolicy `json:"base_image_policy,omitempty" yaml:"base_image_policy,omitempty"`
+	set             map[string]bool
 }
 
 // CIBaseImagePolicy restricts which base images may be used in container builds.
 type CIBaseImagePolicy struct {
 	AllowPrefixes []string `json:"allow_prefixes,omitempty" yaml:"allow_prefixes,omitempty"`
 	DenyPrefixes  []string `json:"deny_prefixes,omitempty" yaml:"deny_prefixes,omitempty"`
+}
+
+func (s *CIBuildSecurity) UnmarshalYAML(value *yaml.Node) error {
+	type plain CIBuildSecurity
+	var decoded plain
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*s = CIBuildSecurity(decoded)
+	s.set = make(map[string]bool)
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		s.set[value.Content[i].Value] = true
+	}
+	return nil
 }
 
 // ApplyDefaults returns a CIBuildSecurity with opinionated secure defaults applied.

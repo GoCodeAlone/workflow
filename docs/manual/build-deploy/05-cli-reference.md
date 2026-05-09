@@ -72,10 +72,11 @@ Wraps the `nodejs` builder plugin.
 ## `wfctl build image`
 
 ```
-wfctl build image [--config <file>] [--dry-run] [--tag <tag>] [--push]
+wfctl build image [--config <file>] [--dry-run] [--tag <tag>] [--only <names>] [--skip <names>] [--push]
 ```
 
-Builds all `ci.build.containers[]` entries. External containers are resolved (not built).
+Builds matching `ci.build.containers[]` entries. External containers are resolved (not built).
+`--only` and `--skip` accept comma-separated container names.
 
 When `--push` is passed and `ci.build.security.hardened: true`, buildx pushes directly to
 every registry in `push_to[]` via multiple `--tag` flags in a single invocation (no separate
@@ -88,10 +89,11 @@ the buildkit cache.
 ## `wfctl build push`
 
 ```
-wfctl build push [--config <file>]
+wfctl build push [--config <file>] [--tag <tag>] [--only <names>] [--skip <names>]
 ```
 
-Pushes each container's image to every registry listed in `push_to[]`.
+Pushes each matching container's image to every registry listed in `push_to[]`.
+`--only` and `--skip` accept comma-separated container names.
 
 ---
 
