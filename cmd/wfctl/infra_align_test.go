@@ -883,6 +883,41 @@ func TestInfraAlign_ExitCode_WarnStrict(t *testing.T) {
 	}
 }
 
+// TestAlignExitCode_ErrorSeverity_Returns1 verifies that ERROR severity
+// (introduced in rev3 of the spaces-key plan for R-A9) blocks deploy with
+// exit 1 even without --strict. Without this, an ERROR finding silently
+// downgrades to non-blocking — defeating the rev3 requirement that the
+// doubled-create anti-pattern fail CI.
+func TestAlignExitCode_ErrorSeverity_Returns1(t *testing.T) {
+	findings := []AlignFinding{
+		{Rule: "R-A9", Severity: "ERROR", Resource: "SPACES_access_key", Message: "doubled-create"},
+	}
+	if code := alignExitCode(findings, false); code != 1 {
+		t.Errorf("alignExitCode(ERROR, strict=false) = %d, want 1 — ERROR must always block", code)
+	}
+	if code := alignExitCode(findings, true); code != 1 {
+		t.Errorf("alignExitCode(ERROR, strict=true) = %d, want 1", code)
+	}
+}
+
+// TestAlignRender_ErrorSeverity_CountedInSummary verifies that the markdown
+// summary includes ERROR alongside FAIL/WARN counts. Without this, ERROR
+// findings would render in the table but be invisible in the summary line,
+// hiding the deploy-blocking signal from CI consumers.
+func TestAlignRender_ErrorSeverity_CountedInSummary(t *testing.T) {
+	findings := []AlignFinding{
+		{Rule: "R-A9", Severity: "ERROR", Resource: "SPACES_access_key", Message: "doubled-create"},
+		{Rule: "R-A6", Severity: "WARN", Resource: "nats", Message: "advisory"},
+	}
+	out := renderAlignMarkdown(findings)
+	if !strings.Contains(out, "1 ERROR") {
+		t.Errorf("summary should report '1 ERROR', got: %s", out)
+	}
+	if !strings.Contains(out, "1 WARN") {
+		t.Errorf("summary should still report '1 WARN', got: %s", out)
+	}
+}
+
 // ── R-A9: suspicious provider_credential key ──────────────────────────────────
 
 // TestCheckRA9_SuspiciousProviderCredentialKey is a table-driven unit test

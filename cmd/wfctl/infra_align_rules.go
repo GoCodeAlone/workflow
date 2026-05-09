@@ -16,8 +16,13 @@ import (
 
 // AlignFinding is a single rule violation emitted by an alignment check.
 type AlignFinding struct {
-	Rule     string // R-A1, R-A2, etc.
-	Severity string // FAIL or WARN
+	Rule string // R-A1, R-A2, etc.
+	// Severity is one of:
+	//   - "FAIL"  — always blocks (exit 1)
+	//   - "ERROR" — always blocks (exit 1); used by rules that want to
+	//               carry a fix-suggestion in the message (e.g. R-A9)
+	//   - "WARN"  — blocks only under --strict
+	Severity string
 	Resource string // affected resource name
 	Message  string // human-readable description
 }
