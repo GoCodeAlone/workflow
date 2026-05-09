@@ -47,6 +47,15 @@ func TestGenerateGitHubActions(t *testing.T) {
 	if !strings.Contains(buildYML, "actions/setup-go@v5") {
 		t.Error("build.yml missing actions/setup-go@v5")
 	}
+	if !strings.Contains(buildYML, "wfctl ci run --config 'infra.yaml' --phase test") {
+		t.Error("build.yml missing wfctl ci run test phase")
+	}
+	if !strings.Contains(buildYML, "wfctl build --config 'infra.yaml' --no-push --tag ci") {
+		t.Error("build.yml missing wfctl build")
+	}
+	if strings.Contains(buildYML, "go build ./...") {
+		t.Error("build.yml should use wfctl build instead of raw go build")
+	}
 }
 
 func TestGenerateGitLabCI(t *testing.T) {
@@ -69,6 +78,8 @@ func TestGenerateGitLabCI(t *testing.T) {
 		"rules:",
 		"needs:",
 		"wfctl infra plan",
+		"wfctl ci run --config \"$INFRA_CONFIG\" --phase test",
+		"wfctl build --config \"$INFRA_CONFIG\" --no-push --tag ci",
 		"environment:",
 	}
 	for _, m := range markers {

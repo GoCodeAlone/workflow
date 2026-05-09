@@ -280,10 +280,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install wfctl
+        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
       - name: Run tests
-        run: go test ./...
-      - name: Build
-        run: go build ./...
+        run: wfctl ci run --config '{{.InfraConfig}}' --phase test
+      - name: Build without push
+        run: wfctl build --config '{{.InfraConfig}}' --no-push --tag ci
 `
 
 // ── GitLab CI ─────────────────────────────────────────────────────────────────
@@ -352,8 +354,9 @@ build:
   stage: build
   needs: []
   script:
-    - go test ./...
-    - go build ./...
+    - go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+    - wfctl ci run --config "$INFRA_CONFIG" --phase test
+    - wfctl build --config "$INFRA_CONFIG" --no-push --tag ci
   rules:
     - if: $CI_COMMIT_BRANCH == "{{.Branch}}"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
