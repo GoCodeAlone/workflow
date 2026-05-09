@@ -15,9 +15,11 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
+	"github.com/GoCodeAlone/workflow/iac/sensitive"
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // printDriftReportIfAny writes the canonical FormatStaleError output to w
@@ -148,11 +150,17 @@ func hasPlatformModules(cfgFile string) bool {
 //
 // This is the new dispatch path used when the config contains infra.* modules
 // instead of the legacy platform.* + pipelines.apply pipeline path.
-func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //nolint:cyclop
+// applyInfraModules applies infra.* modules and returns the hydrated
+// routed-secret map for in-process hand-off to post-apply consumers
+// (syncInfraOutputSecrets). The map may be empty when no driver emitted
+// sensitive outputs in this run, or when no secrets.Provider is
+// configured. Returning a separate map (rather than threading via a
+// callback) keeps the caller's flow explicit: apply → consume hydrated.
+func applyInfraModules(ctx context.Context, cfgFile, envName string) (map[string]string, error) { //nolint:cyclop
 	// Resolve specs (env overrides applied when envName is set).
 	specs, err := parseInfraResourceSpecsForEnv(cfgFile, envName)
 	if err != nil {
-		return fmt.Errorf("parse infra resource specs: %w", err)
+		return nil, fmt.Errorf("parse infra resource specs: %w", err)
 	}
 
 	// Keep only infra.* specs for the direct path.
@@ -164,10 +172,10 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	}
 	if len(infraSpecs) == 0 {
 		fmt.Println("No infra.* modules to apply.")
-		return nil
+		return nil, nil
 	}
 	if err := validateUniqueInfraResourceNames(infraSpecs); err != nil {
-		return err
+		return nil, err
 	}
 
 	// --include: apply scope filter. Resolve the include set from the package-
@@ -180,14 +188,14 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	// Load current state once; nil on first run is valid (no prior state).
 	current, err := loadCurrentState(cfgFile, envName)
 	if err != nil {
-		return fmt.Errorf("load current state: %w", err)
+		return nil, fmt.Errorf("load current state: %w", err)
 	}
 
 	// Validate and apply the include filter to both specs and state before
 	// grouping by provider so that out-of-scope resources are never passed
 	// down to any provider.
 	if err := validateIncludeSet(includeSet, infraSpecs, current); err != nil {
-		return err
+		return nil, err
 	}
 	infraSpecs = filterSpecsByInclude(infraSpecs, includeSet)
 	current = filterStatesByInclude(current, includeSet)
@@ -195,7 +203,7 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	// Load full config to resolve iac.provider module definitions.
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return nil, fmt.Errorf("load config: %w", err)
 	}
 
 	// Plan-time JIT resolution (PR-1): substitute ${MODULE.field} and
@@ -204,7 +212,7 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	// diagnostics — they're plan-output sugar only.
 	infraSpecs, _, err = resolveSpecsAgainstState(infraSpecs, current, cfg, envName)
 	if err != nil {
-		return fmt.Errorf("resolve specs against state: %w", err)
+		return nil, fmt.Errorf("resolve specs against state: %w", err)
 	}
 
 	// Build a lookup table of iac.provider module name → (providerType, providerCfg).
@@ -219,7 +227,7 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	// in-scope resources.
 	groupOrder, groups, err := groupSpecsByProviderRef(infraSpecs, providerDefs, disabledProviders, envName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Supplement with state-only groups when infraSpecs is empty after include
@@ -243,8 +251,14 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	// ownership metadata.
 	store, storeErr := resolveStateStore(cfgFile, envName)
 	if storeErr != nil {
-		return fmt.Errorf("open state store: %w", storeErr)
+		return nil, fmt.Errorf("open state store: %w", storeErr)
 	}
+
+	// runHydrated accumulates routed-secret values from this apply across all
+	// provider groups. Passed to syncInfraOutputSecrets after the loop so
+	// post-apply consumers can read just-routed values via in-memory hand-off
+	// (works on write-only providers like GitHub Actions).
+	runHydrated := make(map[string]string)
 
 	// Apply each provider group in first-reference order (the order in which
 	// each group's first spec appeared in infraSpecs, not iac.provider declaration order).
@@ -264,14 +278,14 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		}
 		allowProviderTypeFallback := providerTypeCounts[g.provType] == 1
 		scopedCurrent := filterCurrentStateForProvider(current, g.provType, moduleRef, g.specs, allowProviderTypeFallback)
-		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, scopedCurrent, store, os.Stderr, envName)
+		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, scopedCurrent, store, os.Stderr, envName, cfgFile, runHydrated)
 	}
 	for _, moduleRef := range groupOrder {
 		if err := applyGroup(moduleRef, groups[moduleRef]); err != nil {
-			return fmt.Errorf("provider %q: %w", moduleRef, err)
+			return runHydrated, fmt.Errorf("provider %q: %w", moduleRef, err)
 		}
 	}
-	return nil
+	return runHydrated, nil
 }
 
 func filterCurrentStateForProvider(current []interfaces.ResourceState, providerType, moduleRef string, specs []interfaces.ResourceSpec, allowProviderTypeFallback bool) []interfaces.ResourceState {
@@ -357,9 +371,13 @@ func resourceSpecProviderRef(spec interfaces.ResourceSpec) string {
 // envName labels the failure step-summary output (e.g. "staging", "prod");
 // pass empty string when not running in a CI context or when env metadata is
 // unavailable.
-func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, w io.Writer, envName string) error {
+func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, w io.Writer, envName string, cfgFile string, hydratedOut map[string]string) error {
 	if store == nil {
 		store = &noopStateStore{}
+	}
+	secretsProvider, secretsErr := loadSecretsProviderForRouting(cfgFile)
+	if secretsErr != nil {
+		return secretsErr
 	}
 
 	// Resolve abstract sizing tiers into concrete provider-specific values
@@ -513,6 +531,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {
+		// Pre-flight: if any driver emitted sensitive outputs but no
+		// secrets.Provider is configured, fail fast with a complete
+		// diagnostic before per-resource persistence kicks off.
+		if err := requireSecretsProviderForSensitiveOutputs(secretsProvider, result); err != nil {
+			return fmt.Errorf("state write rejected: %w", err)
+		}
 		// Persist state for every successfully provisioned resource.
 		for _, r := range result.Resources {
 			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
@@ -547,13 +571,20 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 				ConfigHash:          configHashMap(appliedCfg),
 				AppliedConfig:       appliedCfg,
 				AppliedConfigSource: "apply",
-				Outputs:             r.Outputs,
-				Dependencies:        dependencies,
-				CreatedAt:           now,
-				UpdatedAt:           now,
+				// Outputs is set by persistResourceWithSecretRouting after Route.
+				Dependencies: dependencies,
+				CreatedAt:    now,
+				UpdatedAt:    now,
 			}
-			if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
-				return fmt.Errorf("%s/%s: persist state after apply: %w", r.Type, r.Name, saveErr)
+			driver, _ := provider.ResourceDriver(r.Type) // best-effort for compensating Delete; nil-safe
+			hyd, persistErr := persistResourceWithSecretRouting(ctx, store, secretsProvider, driver, rs, r, persistModeApply)
+			if persistErr != nil {
+				return persistErr
+			}
+			if hydratedOut != nil {
+				for k, v := range hyd {
+					hydratedOut[k] = v
+				}
 			}
 		}
 
@@ -587,6 +618,20 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 	currentByName := make(map[string]struct{}, len(current))
 	for i := range current {
 		currentByName[current[i].Name] = struct{}{}
+	}
+
+	// Precompute prior-state lookup once per adoption pass. persistReadMode
+	// inherits routed-secret placeholders from prior state for sensitive
+	// keys. Without the cache, each Read would re-ListResources + linear
+	// scan — O(n²) on filesystem-backed stores. priorByName remains stable
+	// for the duration of this loop (newly-adopted records are appended to
+	// store and to current[] but the placeholder-inheritance lookup only
+	// needs the pre-loop snapshot).
+	priorByName := make(map[string]*interfaces.ResourceState)
+	if all, listErr := store.ListResources(ctx); listErr == nil {
+		for i := range all {
+			priorByName[all[i].Name] = &all[i]
+		}
 	}
 
 	drivers := make(map[string]interfaces.ResourceDriver)
@@ -634,8 +679,14 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 		if err := validateStateProviderID(provider, providerType, state); err != nil {
 			return nil, err
 		}
-		if saveErr := store.SaveResource(ctx, state); saveErr != nil {
-			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, saveErr)
+		// Sanitize-only via persistResourceWithSecretRouting in read mode:
+		// drivers may declare Sensitive on Read but we MUST NOT call
+		// provider.Set from a Read path (cache-pollution risk per design §4.4).
+		// Provider passed nil; helper is nil-safe in read mode.
+		// Cached-prior variant: avoids per-resource ListResources scans
+		// when adoption pass touches many resources.
+		if _, err := persistResourceWithSecretRoutingCachedPrior(ctx, store, nil, driver, state, *live, persistModeRead, priorByName); err != nil {
+			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, err)
 		}
 		fmt.Printf("  Adopted existing %s %q (id=%s)\n", spec.Type, spec.Name, state.ProviderID)
 		current = append(current, state)
@@ -744,6 +795,261 @@ func cloneMap(in map[string]any) map[string]any {
 	return out
 }
 
+// persistMode controls how persistResourceWithSecretRouting handles a
+// driver output: persistModeApply routes sensitive fields through the
+// provider; persistModeRead is sanitize-only (no provider writes — used
+// by adoption / refresh paths to avoid cache pollution).
+type persistMode int
+
+const (
+	persistModeApply persistMode = iota
+	persistModeRead
+)
+
+// persistResourceWithSecretRouting builds rs.Outputs from out (routing
+// sensitive fields through provider in apply mode), calls
+// store.SaveResource, and returns the hydrated routed-secret map for
+// in-process hand-off. On SaveResource failure after provider.Set
+// succeeded (apply mode only), invokes driver.Delete + provider.Delete
+// to compensate the partial cloud-resource creation. Returns a wrapped
+// error naming both the original SaveResource failure and the
+// compensating-Delete outcome.
+//
+// In read mode, the helper does NOT call provider.Set; instead it consults
+// the prior state via store.GetResource and inherits any
+// PlaceholderPrefix entries; new sensitive keys (declared by the driver
+// at Read time but not previously routed) are dropped from sanitized.
+//
+// Returns nil hydrated map in read mode (consumers don't need post-apply
+// hand-off for a Read).
+//
+// store is the wfctl-internal infraStateStore interface, not
+// interfaces.IaCStateStore. The helper lives in cmd/wfctl; using the
+// package-private interface keeps the boundary clean and matches existing
+// callers (applyWithProviderAndStore, adoptExistingResources).
+func persistResourceWithSecretRouting(
+	ctx context.Context,
+	store infraStateStore,
+	provider secrets.Provider,
+	driver interfaces.ResourceDriver,
+	rs interfaces.ResourceState,
+	out interfaces.ResourceOutput,
+	mode persistMode,
+) (map[string]string, error) {
+	switch mode {
+	case persistModeApply:
+		return persistApplyMode(ctx, store, provider, driver, rs, out)
+	case persistModeRead:
+		return nil, persistReadMode(ctx, store, rs, out, nil)
+	default:
+		return nil, fmt.Errorf("persistResourceWithSecretRouting: unknown mode %d", mode)
+	}
+}
+
+// persistResourceWithSecretRoutingCachedPrior is the loop-friendly variant for
+// callers that drive multiple Reads in a tight loop (refresh, adoption). It
+// accepts a precomputed prior-state lookup map so persistReadMode does not
+// have to ListResources + linear-scan per call (O(n²) on filesystem-backed
+// stores). When mode != persistModeRead the priorByName map is ignored.
+//
+// Pass priorByName=nil to fall back to per-call ListResources behaviour
+// (equivalent to persistResourceWithSecretRouting).
+func persistResourceWithSecretRoutingCachedPrior(
+	ctx context.Context,
+	store infraStateStore,
+	provider secrets.Provider,
+	driver interfaces.ResourceDriver,
+	rs interfaces.ResourceState,
+	out interfaces.ResourceOutput,
+	mode persistMode,
+	priorByName map[string]*interfaces.ResourceState,
+) (map[string]string, error) {
+	switch mode {
+	case persistModeApply:
+		return persistApplyMode(ctx, store, provider, driver, rs, out)
+	case persistModeRead:
+		return nil, persistReadMode(ctx, store, rs, out, priorByName)
+	default:
+		return nil, fmt.Errorf("persistResourceWithSecretRoutingCachedPrior: unknown mode %d", mode)
+	}
+}
+
+func persistApplyMode(
+	ctx context.Context,
+	store infraStateStore,
+	provider secrets.Provider,
+	driver interfaces.ResourceDriver,
+	rs interfaces.ResourceState,
+	out interfaces.ResourceOutput,
+) (map[string]string, error) {
+	sanitized, hydrated, err := sensitive.Route(ctx, provider, rs.Name, &out)
+	if err != nil {
+		return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w", rs.Type, rs.Name, err)
+	}
+	rs.Outputs = sanitized
+	if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
+		// Compensating Delete: if we routed secrets, the matching cloud
+		// resource is real but the state record didn't land. Roll back so
+		// a re-Apply doesn't double-create.
+		if len(hydrated) > 0 {
+			compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
+			if compErr != nil {
+				return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete failed: %v)", rs.Type, rs.Name, saveErr, compErr)
+			}
+			return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete succeeded)", rs.Type, rs.Name, saveErr)
+		}
+		return nil, fmt.Errorf("%s/%s: persist state after apply: %w", rs.Type, rs.Name, saveErr)
+	}
+	return hydrated, nil
+}
+
+func persistReadMode(
+	ctx context.Context,
+	store infraStateStore,
+	rs interfaces.ResourceState,
+	out interfaces.ResourceOutput,
+	priorByName map[string]*interfaces.ResourceState,
+) error {
+	// Sanitize-only: inherit placeholders from prior state for sensitive
+	// keys; drop newly-declared sensitive keys. Do NOT call provider.Set.
+	//
+	// Prior state lookup: prefer the caller-supplied map (precomputed once
+	// per refresh/adoption pass) to avoid O(n²) ListResources scans. Fall
+	// back to ListResources + filter when the cache is nil — keeps the
+	// helper safe for ad-hoc one-shot callers (infraStateStore has no
+	// GetResource).
+	var prior *interfaces.ResourceState
+	if priorByName != nil {
+		prior = priorByName[rs.Name]
+	} else if all, listErr := store.ListResources(ctx); listErr == nil {
+		for i := range all {
+			if all[i].Name == rs.Name {
+				prior = &all[i]
+				break
+			}
+		}
+	}
+	sanitized := make(map[string]any, len(out.Outputs))
+	for k, v := range out.Outputs {
+		sanitized[k] = v
+	}
+	for k, flag := range out.Sensitive {
+		if !flag {
+			continue
+		}
+		// If prior state has a placeholder for this key, preserve it.
+		if prior != nil {
+			if pv, ok := prior.Outputs[k]; ok && sensitive.IsPlaceholder(pv) {
+				sanitized[k] = pv
+				continue
+			}
+		}
+		// Otherwise drop the field from sanitized — we don't have a
+		// previously-routed secret and we won't pollute the provider
+		// from a Read.
+		delete(sanitized, k)
+	}
+	rs.Outputs = sanitized
+	if err := store.SaveResource(ctx, rs); err != nil {
+		return fmt.Errorf("%s/%s: persist state after read: %w", rs.Type, rs.Name, err)
+	}
+	return nil
+}
+
+// compensateAfterSaveFailure rolls back routed secrets and the underlying
+// cloud resource when SaveResource fails after provider.Set succeeded.
+// Uses a fresh 30-second context: the apply context may already be
+// canceled (operator Ctrl-C) but compensation must proceed to avoid
+// orphaning cloud resources + routed secrets.
+func compensateAfterSaveFailure(
+	provider secrets.Provider,
+	driver interfaces.ResourceDriver,
+	rs interfaces.ResourceState,
+	hydrated map[string]string,
+) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var errs []error
+	if driver != nil {
+		ref := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type, ProviderID: rs.ProviderID}
+		if delErr := driver.Delete(ctx, ref); delErr != nil {
+			errs = append(errs, fmt.Errorf("driver.Delete: %w", delErr))
+		}
+	}
+	if provider != nil {
+		// Reverse-engineer the original output keys from the secret names.
+		// Format: "<rs.Name>_<output_key>"; strip the prefix.
+		for secretName := range hydrated {
+			if delErr := provider.Delete(ctx, secretName); delErr != nil && !errors.Is(delErr, secrets.ErrNotFound) {
+				errs = append(errs, fmt.Errorf("provider.Delete(%s): %w", secretName, delErr))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+// loadSecretsProviderForRouting returns the configured secrets.Provider
+// for this apply run, or (nil, nil) when secretsCfg is absent (the
+// caller's downstream sensitive.Route will hard-fail if any driver
+// emits sensitive outputs).
+func loadSecretsProviderForRouting(cfgFile string) (secrets.Provider, error) {
+	if cfgFile == "" {
+		return nil, nil
+	}
+	cfg, err := parseSecretsConfig(cfgFile)
+	if err != nil {
+		return nil, fmt.Errorf("parse secrets config for sensitive routing: %w", err)
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+	return resolveSecretsProvider(cfg)
+}
+
+// hasSensitiveOutputs reports whether r has any Sensitive[k]==true entry.
+func hasSensitiveOutputs(r *interfaces.ResourceOutput) bool {
+	for _, v := range r.Sensitive {
+		if v {
+			return true
+		}
+	}
+	return false
+}
+
+// sensitiveKeysFor returns the sorted list of keys with Sensitive[k]==true.
+func sensitiveKeysFor(r *interfaces.ResourceOutput) []string {
+	var keys []string
+	for k, v := range r.Sensitive {
+		if v {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// requireSecretsProviderForSensitiveOutputs returns an error if any of the
+// resources in result has sensitive outputs but provider is nil. Surfaced
+// before the per-resource persistence loop so an apply with sensitive
+// drivers and no provider fails fast with a complete diagnostic instead
+// of partial state writes.
+func requireSecretsProviderForSensitiveOutputs(provider secrets.Provider, result *interfaces.ApplyResult) error {
+	if provider != nil || result == nil {
+		return nil
+	}
+	for i := range result.Resources {
+		if hasSensitiveOutputs(&result.Resources[i]) {
+			return fmt.Errorf(
+				"secrets.Provider not configured but driver emitted sensitive outputs (resource %q has Sensitive keys %v); add `secrets:` block to your config or use `secrets: { provider: env }`",
+				result.Resources[i].Name, sensitiveKeysFor(&result.Resources[i]))
+		}
+	}
+	return nil
+}
+
 // isAbstractSize reports whether s is one of the canonical abstract size tiers
 // (xs/s/m/l/xl). Provider-specific slugs such as "db-s-1vcpu-1gb" return false
 // so that ResolveSizing is not called for already-concrete values.
@@ -798,11 +1104,24 @@ func loadPlanFromFile(path string) (interfaces.IaCPlan, error) {
 // ComputePlan. It loads IaCProvider plugins from cfgFile, groups plan actions
 // by iac.provider module, and calls provider.Apply for each group. State is
 // persisted exactly as in the live-diff path.
-func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgFile, envName string) error { //nolint:cyclop
+//
+// The same-process hydrated routed-secret map (sensitive.Route output) is
+// accumulated across provider groups and returned to the caller so the
+// post-apply syncInfraOutputSecrets step can rehydrate placeholders without
+// having to re-Get from a write-only secrets provider (e.g. GitHub Actions
+// secrets, where Set succeeds but Get returns ErrUnsupported). Returns an
+// empty (non-nil) map when no driver emitted sensitive outputs.
+func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgFile, envName string) (map[string]string, error) { //nolint:cyclop
+	// runHydrated accumulates routed-secret values across all provider groups
+	// in this plan. Returned to the caller so the post-apply
+	// syncInfraOutputSecrets step can rehydrate placeholders without re-Get
+	// from write-only secrets providers. Mirrors applyInfraModules's pattern.
+	runHydrated := make(map[string]string)
+
 	// Load full config to resolve iac.provider module definitions.
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return runHydrated, fmt.Errorf("load config: %w", err)
 	}
 
 	// Build provider lookup (mirrors applyInfraModules).
@@ -833,7 +1152,7 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 	// Resolve state store (noop when no iac.state module is configured).
 	store, storeErr := resolveStateStore(cfgFile, envName)
 	if storeErr != nil {
-		return fmt.Errorf("open state store: %w", storeErr)
+		return runHydrated, fmt.Errorf("open state store: %w", storeErr)
 	}
 
 	// Group plan actions by iac.provider module, preserving action order.
@@ -857,12 +1176,12 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 			}
 		}
 		if moduleRef == "" {
-			return fmt.Errorf("plan action for %q: missing 'provider' field in resource config (delete actions require a current state record)", action.Resource.Name)
+			return runHydrated, fmt.Errorf("plan action for %q: missing 'provider' field in resource config (delete actions require a current state record)", action.Resource.Name)
 		}
 		if _, exists := groups[moduleRef]; !exists {
 			def, ok := providerDefs[moduleRef]
 			if !ok {
-				return fmt.Errorf("plan action for %q references provider %q which is not declared as an iac.provider module", action.Resource.Name, moduleRef)
+				return runHydrated, fmt.Errorf("plan action for %q references provider %q which is not declared as an iac.provider module", action.Resource.Name, moduleRef)
 			}
 			groups[moduleRef] = &actionGroup{provType: def.provType, provCfg: def.provCfg}
 			groupOrder = append(groupOrder, moduleRef)
@@ -881,16 +1200,16 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 		fmt.Printf("Applying %d resource(s) via provider %q (%s) from plan...\n", len(g.actions), moduleRef, g.provType)
 		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
 		if err != nil {
-			return fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
+			return runHydrated, fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
 		}
-		applyErr := applyPrecomputedPlanWithStore(ctx, groupPlan, provider, g.provType, store, os.Stderr, envName)
+		applyErr := applyPrecomputedPlanWithStore(ctx, groupPlan, provider, g.provType, store, os.Stderr, envName, cfgFile, runHydrated)
 		if closer != nil {
 			if cerr := closer.Close(); cerr != nil {
 				fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
 			}
 		}
 		if applyErr != nil {
-			return fmt.Errorf("provider %q: %w", moduleRef, applyErr)
+			return runHydrated, fmt.Errorf("provider %q: %w", moduleRef, applyErr)
 		}
 	}
 
@@ -900,16 +1219,20 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 	} else {
 		fmt.Printf("applied %d actions from plan\n", n)
 	}
-	return nil
+	return runHydrated, nil
 }
 
 // applyPrecomputedPlanWithStore executes a pre-computed plan group via
 // provider.Apply and persists state for each provisioned resource. It is the
 // precomputed-plan counterpart of applyWithProviderAndStore, skipping
 // ComputePlan / adoptExistingResources entirely.
-func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan, provider interfaces.IaCProvider, providerType string, store infraStateStore, w io.Writer, envName string) error {
+func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan, provider interfaces.IaCProvider, providerType string, store infraStateStore, w io.Writer, envName string, cfgFile string, hydratedOut map[string]string) error {
 	if store == nil {
 		store = &noopStateStore{}
+	}
+	secretsProvider, secretsErr := loadSecretsProviderForRouting(cfgFile)
+	if secretsErr != nil {
+		return secretsErr
 	}
 	if len(plan.Actions) == 0 {
 		fmt.Println("  No changes — infrastructure is up-to-date.")
@@ -998,6 +1321,10 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	}
 
 	if result != nil {
+		// Pre-flight: same hard-fail as live-diff path.
+		if err := requireSecretsProviderForSensitiveOutputs(secretsProvider, result); err != nil {
+			return fmt.Errorf("state write rejected: %w", err)
+		}
 		for _, r := range result.Resources {
 			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
 
@@ -1029,13 +1356,20 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 				ConfigHash:          configHashMap(appliedCfg),
 				AppliedConfig:       appliedCfg,
 				AppliedConfigSource: "apply",
-				Outputs:             r.Outputs,
-				Dependencies:        dependencies,
-				CreatedAt:           now,
-				UpdatedAt:           now,
+				// Outputs is set by persistResourceWithSecretRouting after Route.
+				Dependencies: dependencies,
+				CreatedAt:    now,
+				UpdatedAt:    now,
 			}
-			if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
-				return fmt.Errorf("%s/%s: persist state after apply: %w", r.Type, r.Name, saveErr)
+			driver, _ := provider.ResourceDriver(r.Type)
+			hyd, persistErr := persistResourceWithSecretRouting(ctx, store, secretsProvider, driver, rs, r, persistModeApply)
+			if persistErr != nil {
+				return persistErr
+			}
+			if hydratedOut != nil {
+				for k, v := range hyd {
+					hydratedOut[k] = v
+				}
 			}
 		}
 

@@ -42,7 +42,7 @@ func TestApplyWithProviderAndStore_PassesLiveProviderToComputePlan(t *testing.T)
 	}
 
 	var w bytes.Buffer
-	err := applyWithProviderAndStore(context.Background(), fake, "stub", specs, nil, nil, &w, "test")
+	err := applyWithProviderAndStore(context.Background(), fake, "stub", specs, nil, nil, &w, "test", "", nil)
 	if !errors.Is(err, stop) {
 		t.Fatalf("expected sentinel error %v, got %v", stop, err)
 	}
@@ -98,7 +98,7 @@ func TestApplyWithProviderAndStore_V2RoutesThroughWfctlhelpers(t *testing.T) {
 	}
 
 	var w bytes.Buffer
-	err := applyWithProviderAndStore(context.Background(), v2Provider, "stub", specs, nil, nil, &w, "test")
+	err := applyWithProviderAndStore(context.Background(), v2Provider, "stub", specs, nil, nil, &w, "test", "", nil)
 	if !errors.Is(err, v2Stop) {
 		t.Fatalf("expected v2 sentinel error %v, got %v", v2Stop, err)
 	}
@@ -135,7 +135,7 @@ func TestApplyWithProviderAndStore_V1FallsThroughToProviderApply(t *testing.T) {
 	specs := []interfaces.ResourceSpec{{Name: "vpc", Type: "infra.vpc"}}
 
 	var w bytes.Buffer
-	if err := applyWithProviderAndStore(context.Background(), v1Provider, "stub", specs, nil, nil, &w, "test"); err != nil {
+	if err := applyWithProviderAndStore(context.Background(), v1Provider, "stub", specs, nil, nil, &w, "test", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 	if !v1Provider.applyCalled.Load() {
@@ -180,7 +180,7 @@ func TestApplyWithProviderAndStore_V2PrintsDriftReport(t *testing.T) {
 	specs := []interfaces.ResourceSpec{{Name: "vpc", Type: "infra.vpc"}}
 
 	var w bytes.Buffer
-	if err := applyWithProviderAndStore(context.Background(), v2Provider, "stub", specs, nil, nil, &w, "test"); err != nil {
+	if err := applyWithProviderAndStore(context.Background(), v2Provider, "stub", specs, nil, nil, &w, "test", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 	if !strings.Contains(w.String(), "BUCKET_NAME") {
@@ -225,7 +225,7 @@ func TestApplyWithProviderAndStore_V2PrintsDriftReportOnPartialFailure(t *testin
 	specs := []interfaces.ResourceSpec{{Name: "vpc", Type: "infra.vpc"}}
 
 	var w bytes.Buffer
-	err := applyWithProviderAndStore(context.Background(), v2Provider, "stub", specs, nil, nil, &w, "test")
+	err := applyWithProviderAndStore(context.Background(), v2Provider, "stub", specs, nil, nil, &w, "test", "", nil)
 	if err == nil {
 		t.Fatal("expected error from ApplyPlan to propagate, got nil")
 	}
@@ -270,7 +270,7 @@ func TestApplyWithProviderAndStore_V1Path_DeclarerReturnsEmpty(t *testing.T) {
 	specs := []interfaces.ResourceSpec{{Name: "vpc", Type: "infra.vpc"}}
 
 	var w bytes.Buffer
-	if err := applyWithProviderAndStore(context.Background(), v1Provider, "stub", specs, nil, nil, &w, "test"); err != nil {
+	if err := applyWithProviderAndStore(context.Background(), v1Provider, "stub", specs, nil, nil, &w, "test", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 	if v2Called.Load() {

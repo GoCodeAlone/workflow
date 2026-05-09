@@ -118,7 +118,13 @@ func writeRecoveryRecord(rec recoveryRecord) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("rotate-and-prune: create state dir %s: %w", dir, err)
 	}
-	data, err := json.MarshalIndent(rec, "", "  ")
+	// gosec G117 false-positive: AccessKey here is the public DO Spaces
+	// access-key identifier (analogous to an AWS access key ID), NOT the
+	// credential secret-key, which is stored separately per ADR 0017
+	// split-storage. The recovery file persists the access_key intentionally
+	// so operators can recover from partial-failure prune via the
+	// --recovery-from-last-rotation flag. File perms are 0600 + parent 0700.
+	data, err := json.MarshalIndent(rec, "", "  ") //nolint:gosec // G117: access_key is a public identifier; secret_key is stored separately (ADR 0017)
 	if err != nil {
 		return fmt.Errorf("rotate-and-prune: marshal recovery record: %w", err)
 	}

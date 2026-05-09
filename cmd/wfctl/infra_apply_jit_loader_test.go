@@ -95,7 +95,7 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = origLoader })
 
-	if err := applyInfraModules(t.Context(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(t.Context(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 

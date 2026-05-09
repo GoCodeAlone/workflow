@@ -97,6 +97,8 @@ graph TD
     infra --> infra-state["state"]
     infra --> infra-outputs["outputs"]
     infra --> infra-refresh-outputs["refresh-outputs"]
+    infra --> infra-audit-secrets["audit-secrets"]
+    infra --> infra-audit-state-secrets["audit-state-secrets"]
 
     infra-state --> infra-state-list["list"]
     infra-state --> infra-state-export["export"]
@@ -2616,3 +2618,39 @@ env:
 ```
 
 Files: `.github/workflows/ci.yml`, `benchmark.yml`, `pre-release.yml`, `release.yml`, `dependency-update.yml`. New workflow files that invoke `go test` or `wfctl` should add the same env var.
+
+## `infra audit-state-secrets`
+
+Audit `state.Outputs` against the configured `secrets.Provider` for orphan
+secrets, missing routed values, legacy plaintext, and mistaken
+config-references in state.
+
+```
+wfctl infra audit-state-secrets [--config infra.yaml] [--prune]
+```
+
+**Findings:**
+
+- **orphan secret** — provider has `<resource>_<key>` but no state
+  resource named `<resource>` exists.
+- **missing routed value** — state has `secret_ref://...` placeholder
+  but provider does not have the secret.
+- **legacy plaintext** — state has plaintext value at a key matching
+  `secrets.DefaultSensitiveKeys()` (e.g., `secret_key`, `password`).
+- **config-reference in state** — state contains `secret://...` (user
+  config syntax leaked into a persisted state field).
+
+**Exit codes:** 0 = no findings; 1 = findings; 2 = audit error.
+
+**`--prune`:** delete confirmed orphan secrets from the provider.
+Idempotent; safe to rerun.
+
+**Write-only providers** (e.g., GitHub Actions, where `Get` returns
+`ErrUnsupported`): emits structured ADVISORY lines for placeholders it
+cannot verify, but does not exit non-zero on those alone. Orphan-secret
+detection is also skipped on write-only providers (List unsupported).
+
+Distinct from `audit-secrets` which audits the `secrets.generate` config
+block for anti-patterns. Run both as part of regular hygiene. See
+`DOCUMENTATION.md#sensitive-output-routing-v0270` for the full
+sensitive-output routing model.

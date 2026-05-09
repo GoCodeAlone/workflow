@@ -119,7 +119,7 @@ modules:
 	//      observe NeedsReplace=true, emit "replace" action.
 	//   4. wfctlhelpers.ApplyPlan decomposes replace into
 	//      driver.Delete + driver.Create, populating ReplaceIDMap.
-	if err := applyInfraModules(t.Context(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(t.Context(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
@@ -213,7 +213,8 @@ modules:
 	// Reuses the package-level captureStderr helper from
 	// infra_outputs_test.go (panic-safe stderr capture).
 	out, fnErr := captureStderr(t, func() error {
-		return applyInfraModules(t.Context(), cfgPath, "")
+		_, err := applyInfraModules(t.Context(), cfgPath, "")
+		return err
 	})
 	if fnErr != nil {
 		t.Fatalf("applyInfraModules: %v", fnErr)

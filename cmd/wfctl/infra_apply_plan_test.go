@@ -337,7 +337,7 @@ func TestInfraApplyPrecomputedPlan_PersistsState(t *testing.T) {
 		},
 	}
 
-	err := applyPrecomputedPlanWithStore(context.Background(), plan, provider, "fake-cloud", store, io.Discard, "")
+	err := applyPrecomputedPlanWithStore(context.Background(), plan, provider, "fake-cloud", store, io.Discard, "", "", nil)
 	if err != nil {
 		t.Fatalf("applyPrecomputedPlanWithStore: %v", err)
 	}
@@ -448,7 +448,7 @@ modules:
 	// sides hash nil/empty spec slices the same way.
 	// The key assertion: applyFromPrecomputedPlan must NOT error on the delete action.
 	_ = specs
-	err = applyFromPrecomputedPlan(context.Background(), plan, cfgPath, "")
+	_, err = applyFromPrecomputedPlan(context.Background(), plan, cfgPath, "")
 	// The apply itself won't error even if the config has my-db (hash mismatch
 	// would catch that) — we just want to confirm no "missing provider" error.
 	// With the delete action resolved via Current.ProviderRef, provider.Apply is called.

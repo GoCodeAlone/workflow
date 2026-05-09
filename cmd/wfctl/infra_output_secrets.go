@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/sensitive"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -34,7 +35,14 @@ func buildStateOutputsMap(states []interfaces.ResourceState) map[string]map[stri
 // wfCfg may be nil (e.g. tests that only care about base-name resolution).
 // When envName is empty no resolution is performed and the source module name
 // is used verbatim.
-func resolveInfraOutput(wfCfg *config.WorkflowConfig, source, envName string, stateOutputs map[string]map[string]any) (string, error) {
+//
+// hydrated is the in-memory routed-secret map from the same-process apply
+// (may be nil). When the state field is a sensitive.PlaceholderPrefix
+// string, resolveInfraOutput rehydrates from hydrated FIRST; if the
+// secret is not in hydrated, it returns a documented error explaining
+// the cold-start constraint (write-only providers cannot rehydrate
+// without same-process hand-off).
+func resolveInfraOutput(wfCfg *config.WorkflowConfig, source, envName string, stateOutputs map[string]map[string]any, hydrated map[string]string) (string, error) {
 	if source == "" {
 		return "", fmt.Errorf("infra_output: source is required (format: \"module.field\")")
 	}
@@ -74,6 +82,18 @@ func resolveInfraOutput(wfCfg *config.WorkflowConfig, source, envName string, st
 	if !ok {
 		return "", fmt.Errorf("infra_output: field %q not found in outputs of module %q", field, moduleName)
 	}
+	// If state has a routed-secret placeholder, prefer the hydrated map.
+	if sensitive.IsPlaceholder(val) {
+		secretName := strings.TrimPrefix(val.(string), sensitive.PlaceholderPrefix)
+		if hv, hok := hydrated[secretName]; hok {
+			return hv, nil
+		}
+		return "", fmt.Errorf(
+			"infra_output: field %q of module %q is a routed-secret placeholder %q; not in same-process hydrated map "+
+				"(write-only providers like GitHub Actions cannot rehydrate cold; rerun apply or reference the secret directly via secret://%s)",
+			field, moduleName, val, secretName,
+		)
+	}
 	s, ok := val.(string)
 	if !ok {
 		return "", fmt.Errorf("infra_output: output field %q of module %q is %T, expected string", field, moduleName, val)
@@ -97,7 +117,15 @@ func stateKeys(m map[string]map[string]any) []string {
 // wfCfg and envName are used to resolve source module names through per-env
 // overrides so that "bmw-database.uri" finds "bmw-staging-db" in state when
 // --env staging renames the module.
-func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string) error {
+//
+// hydrated is the in-memory map of routed-secret values from the
+// just-completed apply (populated by sensitive.Route). When a state output
+// field is a sensitive.PlaceholderPrefix string, resolveInfraOutput
+// rehydrates from this map so the generator can read the real value
+// without going through provider.Get (which is unsupported on write-only
+// providers like GitHub Actions). May be nil for callers that don't
+// have a same-process apply hand-off (e.g., wfctl infra outputs CLI).
+func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string, hydrated map[string]string) error {
 	if secretsCfg == nil {
 		return nil
 	}
@@ -160,7 +188,7 @@ func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, prov
 			continue
 		}
 
-		value, err := resolveInfraOutput(wfCfg, gen.Source, envName, stateOutputs)
+		value, err := resolveInfraOutput(wfCfg, gen.Source, envName, stateOutputs, hydrated)
 		if err != nil {
 			return fmt.Errorf("generate infra_output secret %q: %w", gen.Key, err)
 		}

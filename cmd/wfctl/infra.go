@@ -96,6 +96,11 @@ func runInfra(args []string) error {
 		return runInfraPruneCmd(args[1:])
 	case "rotate-and-prune":
 		return runInfraRotateAndPruneCmd(args[1:])
+	case "audit-state-secrets":
+		if rc := runInfraAuditStateSecrets(args[1:], os.Stdout); rc != 0 {
+			return fmt.Errorf("audit-state-secrets exited with code %d", rc)
+		}
+		return nil
 	default:
 		return infraUsage()
 	}
@@ -123,6 +128,7 @@ Actions:
   audit-keys     List cloud-side resources of --type via the provider's EnumeratorAll
   prune          Destructively delete cloud resources by --created-before / --exclude-access-key (two-key opt-in)
   rotate-and-prune  All-in-one: rotate canonical credential, then prune older keys with the new key as exclusion target
+  audit-state-secrets  Audit state.Outputs vs. secrets.Provider for orphans, legacy, missing
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
@@ -1119,6 +1125,13 @@ func platformNow() time.Time {
 }
 
 func runInfraApply(args []string) error {
+	// runHydrated carries routed-secret values from the same-process apply
+	// (sensitive.Route's hydrated map) to syncInfraOutputSecrets below.
+	// Empty when no driver emitted sensitive outputs; nil for the
+	// precomputed-plan branch unless threaded through. Required for
+	// rehydration on write-only providers (GitHub Actions secrets are
+	// write-only after Set).
+	var runHydrated map[string]string
 	fs := flag.NewFlagSet("infra apply", flag.ContinueOnError)
 	var configFlag string
 	fs.StringVar(&configFlag, "config", "", "Config file")
@@ -1388,9 +1401,11 @@ func runInfraApply(args []string) error {
 		if plan.DesiredHash != currentHash {
 			return fmt.Errorf("plan stale: config hash mismatch (run wfctl infra plan again)")
 		}
-		if err := applyFromPrecomputedPlan(ctx, plan, cfgFile, envName); err != nil {
+		h, err := applyFromPrecomputedPlan(ctx, plan, cfgFile, envName)
+		if err != nil {
 			return err
 		}
+		runHydrated = h
 		// Fall through to post-apply infra_output secrets sync below —
 		// same as the live-diff path so STAGING_DATABASE_URL and similar
 		// infra_output secrets are always refreshed after a successful apply.
@@ -1407,9 +1422,11 @@ func runInfraApply(args []string) error {
 			)
 		}
 		if hasInfraModules(cfgFile) {
-			if err := applyInfraModules(ctx, cfgFile, envName); err != nil {
+			h, err := applyInfraModules(ctx, cfgFile, envName)
+			if err != nil {
 				return err
 			}
+			runHydrated = h
 		} else {
 			pipelineCfg := cfgFile
 			if envName != "" {
@@ -1456,7 +1473,7 @@ func runInfraApply(args []string) error {
 			}
 		}
 	}
-	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName)
+	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated)
 }
 
 func runInfraStatus(args []string) error {
