@@ -121,7 +121,11 @@ func runInfraBootstrap(args []string) error {
 			}()
 		}
 
-		generated, err := bootstrapSecrets(ctx, provider, secretsCfg, forceRotate, revoker)
+		// runInfraBootstrap discards the rotations slice — the CLI surface
+		// for `wfctl infra bootstrap` doesn't consume rotation metadata
+		// directly. `wfctl infra rotate-and-prune` (Task 21) is the only
+		// caller that uses it.
+		generated, _, err := bootstrapSecrets(ctx, provider, secretsCfg, forceRotate, revoker)
 		if err != nil {
 			return err
 		}
@@ -412,6 +416,22 @@ func writeBucketBackToConfig(cfgFile, bucket string) error {
 	return os.WriteFile(cfgFile, []byte(strings.Join(lines, "\n")), 0o600)
 }
 
+// RotationResult captures rotation metadata in-process during a bootstrap run.
+// It is returned alongside the storage map so callers (e.g. rotate-and-prune)
+// can identify the newly-minted credential without re-running bootstrap as a
+// subprocess and parsing stderr. Per ADR 0020 + review #2 closeout.
+//
+// AccessKey and CreatedAt come from the provider_credential generator output:
+// AccessKey is stored as a GH Secret (it's in providerCredentialSubKeys);
+// CreatedAt is filtered out by the storage-filter and surfaced here +
+// emitted to stderr as a sidecar.
+type RotationResult struct {
+	Key       string // canonical generator key, e.g. "SPACES"
+	Source    string // generator source, e.g. "digitalocean.spaces"
+	AccessKey string // newly-minted credential identifier
+	CreatedAt string // ISO8601 timestamp from provider API
+}
+
 // providerCredentialSubKeys lists the sub-key names produced by each
 // provider_credential source. Existence checks must verify ALL of them so a
 // partial prior write (e.g. one sub-key manually deleted) triggers a full
@@ -458,9 +478,13 @@ func expectedStoredKeys(gen SecretGen) []string {
 }
 
 // bootstrapSecrets generates and stores secrets that don't already exist.
-// It returns a map of every key-value pair that was newly generated in this
-// run (skipped/pre-existing keys are NOT included). The caller can export
-// these to the process environment for downstream steps.
+// It returns the storage map, a RotationResult slice (non-empty only when
+// --force-rotate triggered new credential creation; nil for idempotent
+// skip-if-exists runs), and an error.
+//
+// The function is declared as a package-level var (not a plain func) so tests
+// can override it without going through the real provider/network path. Same
+// pattern as the `var generateSecret` hook above.
 //
 // forceRotate is an optional set of secret keys to regenerate even when the
 // secret already exists. The function deletes the existing value before
@@ -473,12 +497,20 @@ func expectedStoredKeys(gen SecretGen) []string {
 // the upstream provider AFTER the new credential has been minted and stored
 // (mint-new-then-revoke-old; see ADR 0012). If revoker is nil, the old
 // credential is not explicitly revoked (operator must revoke manually).
-func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *SecretsConfig, forceRotate map[string]bool, revoker ...interfaces.ProviderCredentialRevoker) (map[string]string, error) {
+//
+// Storage-filter (ADR 0020): for provider_credential generators, only the
+// sub-keys listed in providerCredentialSubKeys[gen.Source] are persisted as
+// GH Secrets. Sidecar metadata (e.g. created_at) is captured into the
+// RotationResult AND emitted to stderr as `WFCTL_NEW_KEY_<UPPER>=<v>` lines
+// for operator observability + audit logs, but never stored in the secrets
+// provider.
+var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg *SecretsConfig, forceRotate map[string]bool, revoker ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
 	var credRevoker interfaces.ProviderCredentialRevoker
 	if len(revoker) > 0 {
 		credRevoker = revoker[0]
 	}
 	generated := map[string]string{}
+	var rotations []RotationResult
 
 	// Cache List() as a set so repeated probes in a bootstrap run only hit
 	// the provider once and subsequent lookups are O(1). Resolved lazily on
@@ -597,7 +629,7 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 			for _, key := range expected {
 				present, err := secretExists(key)
 				if err != nil {
-					return generated, err
+					return generated, rotations, err
 				}
 				if !present {
 					allExist = false
@@ -613,17 +645,49 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 		// Generate the secret value.
 		value, err := generateSecret(ctx, gen.Type, genConfig)
 		if err != nil {
-			return generated, fmt.Errorf("generate secret %q: %w", gen.Key, err)
+			return generated, rotations, fmt.Errorf("generate secret %q: %w", gen.Key, err)
 		}
 
-		// For provider_credential results (JSON map), store each sub-key.
+		// For provider_credential results (JSON map), apply the storage-filter:
+		// only persist keys listed in providerCredentialSubKeys[gen.Source].
+		// Sidecar metadata (e.g. created_at) is captured into RotationResult
+		// AND emitted to stderr as `WFCTL_NEW_KEY_<UPPER>=<v>` lines so
+		// operators / log scrapers can observe it, but is NOT stored as a GH
+		// Secret. Per ADR 0020 storage-filter constraint.
 		if gen.Type == "provider_credential" {
 			var subKeyMap map[string]string
 			if jsonErr := json.Unmarshal([]byte(value), &subKeyMap); jsonErr == nil {
+				allowedSubKeys, ok := providerCredentialSubKeys[gen.Source]
+				if !ok {
+					return generated, rotations, fmt.Errorf("unknown provider_credential source %q (no subkey mapping)", gen.Source)
+				}
+				allowed := make(map[string]bool, len(allowedSubKeys))
+				for _, k := range allowedSubKeys {
+					allowed[k] = true
+				}
+
+				// Capture access_key + created_at independently of storage so
+				// RotationResult always reports them on a force-rotate, even
+				// though access_key IS in the allowed set and created_at is
+				// NOT (per review #2 C5: stderr emission alone would skip
+				// access_key).
+				var newAccessKey, newCreatedAt string
 				for subKey, subVal := range subKeyMap {
+					if subKey == "access_key" {
+						newAccessKey = subVal
+					}
+					if subKey == "created_at" {
+						newCreatedAt = subVal
+					}
+					if !allowed[subKey] {
+						// Sidecar field — emit to stderr in machine-parseable form
+						// for operator observability + audit logs.
+						fmt.Fprintf(os.Stderr, "WFCTL_NEW_KEY_%s=%s\n", strings.ToUpper(subKey), subVal)
+						continue
+					}
 					fullKey := gen.Key + "_" + subKey
 					if setErr := provider.Set(ctx, fullKey, subVal); setErr != nil {
-						return generated, fmt.Errorf("store secret %q: %w", fullKey, setErr)
+						return generated, rotations, fmt.Errorf("store secret %q: %w", fullKey, setErr)
 					}
 					generated[fullKey] = subVal
 					if forceRotate[gen.Key] {
@@ -634,6 +698,16 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 				}
 				if forceRotate[gen.Key] {
 					fmt.Fprintf(os.Stderr, "wfctl: rotated provider_credential %s (replaced existing value at %s)\n", gen.Key, time.Now().UTC().Format(time.RFC3339))
+					// Record the rotation in-process so callers (rotate-and-prune)
+					// have the new credential id without re-running bootstrap.
+					if newAccessKey != "" {
+						rotations = append(rotations, RotationResult{
+							Key:       gen.Key,
+							Source:    gen.Source,
+							AccessKey: newAccessKey,
+							CreatedAt: newCreatedAt,
+						})
+					}
 					// Revoke the OLD credential at the upstream provider AFTER storing
 					// the new one. Failure is non-fatal: the new credential is valid and
 					// must not be rolled back. Log warning + continue (see ADR 0012).
@@ -652,7 +726,7 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 		}
 
 		if err := provider.Set(ctx, gen.Key, value); err != nil {
-			return generated, fmt.Errorf("store secret %q: %w", gen.Key, err)
+			return generated, rotations, fmt.Errorf("store secret %q: %w", gen.Key, err)
 		}
 		generated[gen.Key] = value
 
@@ -663,5 +737,5 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 			fmt.Printf("  secret %q: created\n", gen.Key)
 		}
 	}
-	return generated, nil
+	return generated, rotations, nil
 }

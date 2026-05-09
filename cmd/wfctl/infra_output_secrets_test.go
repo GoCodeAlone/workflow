@@ -270,7 +270,7 @@ func TestBootstrapSecrets_SkipsInfraOutputGens(t *testing.T) {
 			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if generatorCalled {
