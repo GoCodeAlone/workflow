@@ -63,7 +63,7 @@ Before starting Task 1, the implementer:
 
 ---
 
-## Task 1: New `iac/sensitive` package — Route, Revoke, IsPlaceholder, MaskSensitiveForDiff
+### Task 1: New `iac/sensitive` package — Route, Revoke, IsPlaceholder, MaskSensitiveForDiff
 
 **Files:**
 - Create: `iac/sensitive/route.go`
@@ -685,7 +685,7 @@ EOF
 
 ---
 
-## Task 2: `persistResourceWithSecretRouting` helper + Apply call-site rewires (sites 1 & 2)
+### Task 2: `persistResourceWithSecretRouting` helper + Apply call-site rewires (sites 1 & 2)
 
 **Files:**
 - Modify: `cmd/wfctl/infra_apply.go` (add helper + rewire two state-write sites at :550-557 and :1032-1040)
@@ -1440,7 +1440,7 @@ EOF
 
 ---
 
-## Task 3: Read/Adoption/Refresh sanitize-only at sites 3, 4, 5
+### Task 3: Read/Adoption/Refresh sanitize-only at sites 3, 4, 5
 
 **Files:**
 - Modify: `cmd/wfctl/infra_apply.go` (`adoptExistingResources` site at :637, `resourceStateFromLiveOutput` builder at :689-705)
@@ -1629,7 +1629,7 @@ EOF
 
 ---
 
-## Task 4: `wfctl infra audit-state-secrets` command
+### Task 4: `wfctl infra audit-state-secrets` command
 
 **Files:**
 - Create: `cmd/wfctl/infra_audit_state_secrets.go`
@@ -2060,7 +2060,7 @@ EOF
 
 ---
 
-## Task 5: Drift masking enumeration + wiring (or documented no-op)
+### Task 5: Drift masking enumeration + wiring (or documented no-op)
 
 **Files:**
 - Modify: `cmd/wfctl/infra_apply_refresh.go` (if Diff call sites exist)
@@ -2148,7 +2148,7 @@ EOF
 
 ---
 
-## Task 6: Documentation update + DOCUMENTATION.md / WFCTL.md / CHANGELOG
+### Task 6: Documentation update + DOCUMENTATION.md / WFCTL.md / CHANGELOG
 
 **Files:**
 - Modify: `DOCUMENTATION.md`
