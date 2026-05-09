@@ -69,9 +69,21 @@ func runInfraAuditKeys(args []string, enumerator interfaces.EnumeratorAll, w io.
 	fmt.Fprintf(w, "Found %d %s resource(s):\n\n", len(outs), resourceType)
 	fmt.Fprintf(w, "%-30s %-30s %s\n", "NAME", "ACCESS_KEY", "CREATED_AT")
 	for _, o := range outs {
-		name, _ := o.Outputs["name"].(string)
-		ak, _ := o.Outputs["access_key"].(string)
-		ca, _ := o.Outputs["created_at"].(string)
+		// Prefer typed fields — the EnumeratorAll contract guarantees
+		// ProviderID + Name. Outputs is for additional metadata
+		// (created_at). Fall back to Outputs[*] for backward compat with
+		// providers that populate both, but typed fields take priority so
+		// audit-keys renders correctly even for providers that follow the
+		// strict contract without redundant Outputs writes.
+		name := o.Name
+		if name == "" {
+			name, _ = o.Outputs["name"].(string)
+		}
+		ak := o.ProviderID
+		if ak == "" {
+			ak, _ = o.Outputs["access_key"].(string)
+		}
+		ca, _ := o.Outputs["created_at"].(string) // metadata; legitimately Outputs-only
 		fmt.Fprintf(w, "%-30s %-30s %s\n", name, ak, ca)
 	}
 	return 0

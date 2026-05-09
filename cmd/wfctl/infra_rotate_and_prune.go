@@ -50,7 +50,7 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	fs.StringVar(&envName, "env", "", "Environment name for config resolution")
 	_ = fs.String("type", "", "Resource type")
 	_ = fs.String("name", "", "Canonical credential name")
-	_ = fs.String("allowlist", "", "Regex of names to skip during prune")
+	_ = fs.String("preserve-names", "", "Regex of names to preserve during prune")
 	_ = fs.Bool("confirm", false, "Confirmation flag")
 	_ = fs.Bool("non-interactive", false, "Skip y/N prompt")
 	if err := fs.Parse(args); err != nil {
@@ -161,7 +161,7 @@ func writeRecoveryRecord(rec recoveryRecord) error {
 func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) int {
 	fs := flag.NewFlagSet("infra rotate-and-prune", flag.ContinueOnError)
 	fs.SetOutput(w)
-	var resourceType, name, configFile, allowlist string
+	var resourceType, name, configFile, preserveNames string
 	var confirm, nonInteractive bool
 	fs.StringVar(&resourceType, "type", "", "Resource type (required, e.g. infra.spaces_key)")
 	fs.StringVar(&name, "name", "", "Canonical credential name to rotate (required)")
@@ -172,7 +172,7 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	// erroring on unknown-flag. The dispatcher already uses --env to scope
 	// provider loading; secrets-config resolution happens via --config alone.
 	_ = fs.String("env", "", "Environment name (consumed by dispatcher; ignored here)")
-	fs.StringVar(&allowlist, "allowlist", "", "Regex matching names to skip during prune")
+	fs.StringVar(&preserveNames, "preserve-names", "", "Regex of resource names to preserve during prune")
 	fs.BoolVar(&confirm, "confirm", false, "Required: explicit confirmation flag")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Skip the prune y/N prompt")
 	if err := fs.Parse(args); err != nil {
@@ -262,8 +262,8 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	if nonInteractive {
 		pruneArgs = append(pruneArgs, "--non-interactive")
 	}
-	if allowlist != "" {
-		pruneArgs = append(pruneArgs, "--allowlist", allowlist)
+	if preserveNames != "" {
+		pruneArgs = append(pruneArgs, "--preserve-names", preserveNames)
 	}
 	code := runInfraPrune(pruneArgs, provider, w)
 	if code != 0 {

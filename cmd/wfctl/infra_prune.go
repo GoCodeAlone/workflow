@@ -104,18 +104,20 @@ func readRecoveryFile() (*recoveryFile, error) {
 //     deletes failed
 //   - 2: argument parse error or missing required --type
 //
-// move opt-in checks further from --confirm parsing.
-//
-//nolint:cyclop // the validation gauntlet is intentional; splitting it would
+//nolint:cyclop // intentional validation gauntlet — splitting it moves opt-in checks further from --confirm parsing
 func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 	fs := flag.NewFlagSet("infra prune", flag.ContinueOnError)
 	fs.SetOutput(w)
-	var resourceType, createdBefore, excludeAK, allowlist string
+	var resourceType, createdBefore, excludeAK, preserveNames string
 	var confirm, nonInteractive, recoveryFromLastRotation bool
 	fs.StringVar(&resourceType, "type", "", "Resource type (required, e.g. infra.spaces_key)")
 	fs.StringVar(&createdBefore, "created-before", "", "RFC3339 timestamp; only resources older than this are eligible")
 	fs.StringVar(&excludeAK, "exclude-access-key", "", "Access key to preserve (required: paranoia rail)")
-	fs.StringVar(&allowlist, "allowlist", "", "Regex matching names to skip (orthogonal to time filter)")
+	// --preserve-names is the unambiguous semantic: names matching this regex
+	// are PRESERVED (skipped during delete), not "operated on". Renamed from
+	// --allowlist per code-reviewer to remove the operator-error-trap where
+	// "allowlist" reads as "list of resources allowed to be deleted".
+	fs.StringVar(&preserveNames, "preserve-names", "", "Regex of resource names to preserve (skip during delete; orthogonal to time filter)")
 	fs.BoolVar(&confirm, "confirm", false, "Required: explicit confirmation flag")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Skip the y/N prompt (CI-friendly)")
 	fs.BoolVar(&recoveryFromLastRotation, "recovery-from-last-rotation", false, "Read recovery file for filter args (rotate-and-prune writes it)")
@@ -160,14 +162,14 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 		return 1
 	}
 
-	var allowlistRe *regexp.Regexp
-	if allowlist != "" {
-		re, reErr := regexp.Compile(allowlist)
+	var preserveRe *regexp.Regexp
+	if preserveNames != "" {
+		re, reErr := regexp.Compile(preserveNames)
 		if reErr != nil {
-			fmt.Fprintf(w, "prune: invalid --allowlist regex: %v\n", reErr)
+			fmt.Fprintf(w, "prune: invalid --preserve-names regex: %v\n", reErr)
 			return 1
 		}
-		allowlistRe = re
+		preserveRe = re
 	}
 
 	ctx := context.Background()
@@ -179,13 +181,29 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 
 	var toDelete []*interfaces.ResourceOutput
 	for _, out := range outs {
-		ak, _ := out.Outputs["access_key"].(string)
-		ca, _ := out.Outputs["created_at"].(string)
-		name, _ := out.Outputs["name"].(string)
+		// Use typed fields for the load-bearing identifiers — the provider
+		// contract guarantees ProviderID + Name on EnumerateAll results.
+		// Outputs is for additional metadata (created_at). Falling back to
+		// Outputs[*] for name / access_key keeps the older provider behavior
+		// working but the typed fields take priority — defensive against any
+		// future provider that follows the contract strictly and doesn't
+		// duplicate ProviderID into Outputs["access_key"]. Without this
+		// fallback-but-prefer-typed pattern, a strict-contract provider would
+		// silently delete the active credential because the excludeAK check
+		// would compare against an empty string.
+		ak := out.ProviderID
+		if ak == "" {
+			ak, _ = out.Outputs["access_key"].(string)
+		}
+		name := out.Name
+		if name == "" {
+			name, _ = out.Outputs["name"].(string)
+		}
+		ca, _ := out.Outputs["created_at"].(string) // metadata; legitimately Outputs-only
 		if ak == excludeAK {
 			continue
 		}
-		if allowlistRe != nil && allowlistRe.MatchString(name) {
+		if preserveRe != nil && preserveRe.MatchString(name) {
 			continue
 		}
 		t, parseErr := time.Parse(time.RFC3339, ca)
@@ -197,8 +215,14 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 
 	fmt.Fprintf(w, "Dry-run: %d resource(s) to prune:\n\n", len(toDelete))
 	for _, o := range toDelete {
-		name, _ := o.Outputs["name"].(string)
-		ak, _ := o.Outputs["access_key"].(string)
+		name := o.Name
+		if name == "" {
+			name, _ = o.Outputs["name"].(string)
+		}
+		ak := o.ProviderID
+		if ak == "" {
+			ak, _ = o.Outputs["access_key"].(string)
+		}
 		ca, _ := o.Outputs["created_at"].(string)
 		fmt.Fprintf(w, "  - %s (access_key=%s, created=%s)\n", name, ak, ca)
 	}
@@ -228,11 +252,26 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 		fmt.Fprintf(w, "  ✓ deleted %s\n", o.Name)
 	}
 	if failed > 0 {
-		fmt.Fprintf(w, "\n%d delete(s) failed; recovery file retained at %s\n", failed, recoveryFilePath())
+		// Only mention the recovery file when one actually exists — when
+		// --recovery-from-last-rotation was set OR rotate-and-prune wrote
+		// it before this invocation. Plain prune invocations don't have
+		// one; pointing operators at a non-existent path would mislead
+		// them into a wild goose chase.
+		if recoveryFromLastRotation {
+			fmt.Fprintf(w, "\n%d delete(s) failed; recovery file retained at %s\n", failed, recoveryFilePath())
+		} else {
+			fmt.Fprintf(w, "\n%d delete(s) failed\n", failed)
+		}
 		return 1
 	}
 	if recoveryFromLastRotation {
-		_ = os.Remove(recoveryFilePath())
+		// Cleanup is best-effort but non-silent: if perms changed or the
+		// file is locked, the next --recovery-from-last-rotation invocation
+		// would re-read stale data, so warn loud enough that the operator
+		// can hand-clean.
+		if rmErr := os.Remove(recoveryFilePath()); rmErr != nil && !os.IsNotExist(rmErr) {
+			fmt.Fprintf(w, "warning: failed to clean up recovery file %s: %v\n", recoveryFilePath(), rmErr)
+		}
 	}
 	fmt.Fprintf(w, "\n%d resource(s) pruned successfully.\n", len(toDelete))
 	return 0
@@ -289,7 +328,7 @@ func runInfraPruneCmd(args []string) error {
 	fs := flag.NewFlagSet("infra prune", flag.ContinueOnError)
 	fs.SetOutput(pruneStderr)
 	var configFile, envName string
-	var resourceType, createdBefore, excludeAK, allowlist string
+	var resourceType, createdBefore, excludeAK, preserveNames string
 	var confirm, nonInteractive, recoveryFromLastRotation bool
 	fs.StringVar(&configFile, "config", "", "Config file (default: infra.yaml or config/infra.yaml)")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
@@ -297,7 +336,7 @@ func runInfraPruneCmd(args []string) error {
 	fs.StringVar(&resourceType, "type", "", "Resource type")
 	fs.StringVar(&createdBefore, "created-before", "", "RFC3339 timestamp")
 	fs.StringVar(&excludeAK, "exclude-access-key", "", "Access key to preserve")
-	fs.StringVar(&allowlist, "allowlist", "", "Regex of names to skip")
+	fs.StringVar(&preserveNames, "preserve-names", "", "Regex of resource names to preserve (skip during delete)")
 	fs.BoolVar(&confirm, "confirm", false, "Confirmation flag")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Skip y/N prompt")
 	fs.BoolVar(&recoveryFromLastRotation, "recovery-from-last-rotation", false, "Read recovery file")
@@ -332,8 +371,8 @@ func runInfraPruneCmd(args []string) error {
 	if excludeAK != "" {
 		inner = append(inner, "--exclude-access-key", excludeAK)
 	}
-	if allowlist != "" {
-		inner = append(inner, "--allowlist", allowlist)
+	if preserveNames != "" {
+		inner = append(inner, "--preserve-names", preserveNames)
 	}
 	if confirm {
 		inner = append(inner, "--confirm")
