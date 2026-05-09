@@ -620,6 +620,20 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 		currentByName[current[i].Name] = struct{}{}
 	}
 
+	// Precompute prior-state lookup once per adoption pass. persistReadMode
+	// inherits routed-secret placeholders from prior state for sensitive
+	// keys. Without the cache, each Read would re-ListResources + linear
+	// scan — O(n²) on filesystem-backed stores. priorByName remains stable
+	// for the duration of this loop (newly-adopted records are appended to
+	// store and to current[] but the placeholder-inheritance lookup only
+	// needs the pre-loop snapshot).
+	priorByName := make(map[string]*interfaces.ResourceState)
+	if all, listErr := store.ListResources(ctx); listErr == nil {
+		for i := range all {
+			priorByName[all[i].Name] = &all[i]
+		}
+	}
+
 	drivers := make(map[string]interfaces.ResourceDriver)
 	for _, spec := range specs {
 		if _, exists := currentByName[spec.Name]; exists {
@@ -669,7 +683,9 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 		// drivers may declare Sensitive on Read but we MUST NOT call
 		// provider.Set from a Read path (cache-pollution risk per design §4.4).
 		// Provider passed nil; helper is nil-safe in read mode.
-		if _, err := persistResourceWithSecretRouting(ctx, store, nil, driver, state, *live, persistModeRead); err != nil {
+		// Cached-prior variant: avoids per-resource ListResources scans
+		// when adoption pass touches many resources.
+		if _, err := persistResourceWithSecretRoutingCachedPrior(ctx, store, nil, driver, state, *live, persistModeRead, priorByName); err != nil {
 			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, err)
 		}
 		fmt.Printf("  Adopted existing %s %q (id=%s)\n", spec.Type, spec.Name, state.ProviderID)
@@ -824,9 +840,37 @@ func persistResourceWithSecretRouting(
 	case persistModeApply:
 		return persistApplyMode(ctx, store, provider, driver, rs, out)
 	case persistModeRead:
-		return nil, persistReadMode(ctx, store, rs, out)
+		return nil, persistReadMode(ctx, store, rs, out, nil)
 	default:
 		return nil, fmt.Errorf("persistResourceWithSecretRouting: unknown mode %d", mode)
+	}
+}
+
+// persistResourceWithSecretRoutingCachedPrior is the loop-friendly variant for
+// callers that drive multiple Reads in a tight loop (refresh, adoption). It
+// accepts a precomputed prior-state lookup map so persistReadMode does not
+// have to ListResources + linear-scan per call (O(n²) on filesystem-backed
+// stores). When mode != persistModeRead the priorByName map is ignored.
+//
+// Pass priorByName=nil to fall back to per-call ListResources behaviour
+// (equivalent to persistResourceWithSecretRouting).
+func persistResourceWithSecretRoutingCachedPrior(
+	ctx context.Context,
+	store infraStateStore,
+	provider secrets.Provider,
+	driver interfaces.ResourceDriver,
+	rs interfaces.ResourceState,
+	out interfaces.ResourceOutput,
+	mode persistMode,
+	priorByName map[string]*interfaces.ResourceState,
+) (map[string]string, error) {
+	switch mode {
+	case persistModeApply:
+		return persistApplyMode(ctx, store, provider, driver, rs, out)
+	case persistModeRead:
+		return nil, persistReadMode(ctx, store, rs, out, priorByName)
+	default:
+		return nil, fmt.Errorf("persistResourceWithSecretRoutingCachedPrior: unknown mode %d", mode)
 	}
 }
 
@@ -864,12 +908,20 @@ func persistReadMode(
 	store infraStateStore,
 	rs interfaces.ResourceState,
 	out interfaces.ResourceOutput,
+	priorByName map[string]*interfaces.ResourceState,
 ) error {
 	// Sanitize-only: inherit placeholders from prior state for sensitive
 	// keys; drop newly-declared sensitive keys. Do NOT call provider.Set.
-	// Uses ListResources + filter (infraStateStore has no GetResource).
+	//
+	// Prior state lookup: prefer the caller-supplied map (precomputed once
+	// per refresh/adoption pass) to avoid O(n²) ListResources scans. Fall
+	// back to ListResources + filter when the cache is nil — keeps the
+	// helper safe for ad-hoc one-shot callers (infraStateStore has no
+	// GetResource).
 	var prior *interfaces.ResourceState
-	if all, listErr := store.ListResources(ctx); listErr == nil {
+	if priorByName != nil {
+		prior = priorByName[rs.Name]
+	} else if all, listErr := store.ListResources(ctx); listErr == nil {
 		for i := range all {
 			if all[i].Name == rs.Name {
 				prior = &all[i]
@@ -1052,11 +1104,24 @@ func loadPlanFromFile(path string) (interfaces.IaCPlan, error) {
 // ComputePlan. It loads IaCProvider plugins from cfgFile, groups plan actions
 // by iac.provider module, and calls provider.Apply for each group. State is
 // persisted exactly as in the live-diff path.
-func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgFile, envName string) error { //nolint:cyclop
+//
+// The same-process hydrated routed-secret map (sensitive.Route output) is
+// accumulated across provider groups and returned to the caller so the
+// post-apply syncInfraOutputSecrets step can rehydrate placeholders without
+// having to re-Get from a write-only secrets provider (e.g. GitHub Actions
+// secrets, where Set succeeds but Get returns ErrUnsupported). Returns an
+// empty (non-nil) map when no driver emitted sensitive outputs.
+func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgFile, envName string) (map[string]string, error) { //nolint:cyclop
+	// runHydrated accumulates routed-secret values across all provider groups
+	// in this plan. Returned to the caller so the post-apply
+	// syncInfraOutputSecrets step can rehydrate placeholders without re-Get
+	// from write-only secrets providers. Mirrors applyInfraModules's pattern.
+	runHydrated := make(map[string]string)
+
 	// Load full config to resolve iac.provider module definitions.
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return runHydrated, fmt.Errorf("load config: %w", err)
 	}
 
 	// Build provider lookup (mirrors applyInfraModules).
@@ -1087,7 +1152,7 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 	// Resolve state store (noop when no iac.state module is configured).
 	store, storeErr := resolveStateStore(cfgFile, envName)
 	if storeErr != nil {
-		return fmt.Errorf("open state store: %w", storeErr)
+		return runHydrated, fmt.Errorf("open state store: %w", storeErr)
 	}
 
 	// Group plan actions by iac.provider module, preserving action order.
@@ -1111,12 +1176,12 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 			}
 		}
 		if moduleRef == "" {
-			return fmt.Errorf("plan action for %q: missing 'provider' field in resource config (delete actions require a current state record)", action.Resource.Name)
+			return runHydrated, fmt.Errorf("plan action for %q: missing 'provider' field in resource config (delete actions require a current state record)", action.Resource.Name)
 		}
 		if _, exists := groups[moduleRef]; !exists {
 			def, ok := providerDefs[moduleRef]
 			if !ok {
-				return fmt.Errorf("plan action for %q references provider %q which is not declared as an iac.provider module", action.Resource.Name, moduleRef)
+				return runHydrated, fmt.Errorf("plan action for %q references provider %q which is not declared as an iac.provider module", action.Resource.Name, moduleRef)
 			}
 			groups[moduleRef] = &actionGroup{provType: def.provType, provCfg: def.provCfg}
 			groupOrder = append(groupOrder, moduleRef)
@@ -1135,16 +1200,16 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 		fmt.Printf("Applying %d resource(s) via provider %q (%s) from plan...\n", len(g.actions), moduleRef, g.provType)
 		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
 		if err != nil {
-			return fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
+			return runHydrated, fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
 		}
-		applyErr := applyPrecomputedPlanWithStore(ctx, groupPlan, provider, g.provType, store, os.Stderr, envName, cfgFile, nil)
+		applyErr := applyPrecomputedPlanWithStore(ctx, groupPlan, provider, g.provType, store, os.Stderr, envName, cfgFile, runHydrated)
 		if closer != nil {
 			if cerr := closer.Close(); cerr != nil {
 				fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
 			}
 		}
 		if applyErr != nil {
-			return fmt.Errorf("provider %q: %w", moduleRef, applyErr)
+			return runHydrated, fmt.Errorf("provider %q: %w", moduleRef, applyErr)
 		}
 	}
 
@@ -1154,7 +1219,7 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 	} else {
 		fmt.Printf("applied %d actions from plan\n", n)
 	}
-	return nil
+	return runHydrated, nil
 }
 
 // applyPrecomputedPlanWithStore executes a pre-computed plan group via

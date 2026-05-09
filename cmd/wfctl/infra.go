@@ -1401,9 +1401,11 @@ func runInfraApply(args []string) error {
 		if plan.DesiredHash != currentHash {
 			return fmt.Errorf("plan stale: config hash mismatch (run wfctl infra plan again)")
 		}
-		if err := applyFromPrecomputedPlan(ctx, plan, cfgFile, envName); err != nil {
+		h, err := applyFromPrecomputedPlan(ctx, plan, cfgFile, envName)
+		if err != nil {
 			return err
 		}
+		runHydrated = h
 		// Fall through to post-apply infra_output secrets sync below —
 		// same as the live-diff path so STAGING_DATABASE_URL and similar
 		// infra_output secrets are always refreshed after a successful apply.

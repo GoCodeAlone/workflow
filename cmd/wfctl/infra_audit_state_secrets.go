@@ -63,8 +63,17 @@ func runInfraAuditStateSecrets(args []string, w io.Writer) int {
 		fmt.Fprintf(w, "audit-state-secrets: open state store: %v\n", err)
 		return 2
 	}
-	// noop store contributes no state; allow audit to proceed (provider
-	// may still surface orphan findings).
+	// noop store contributes no state; allow read-only audit to proceed
+	// (provider may still surface orphan findings) but REFUSE --prune:
+	// without an authoritative iac.state backend, every listed secret
+	// would appear orphan and be eligible for deletion. That risks
+	// catastrophic data loss when iac.state config is missing/incorrect.
+	if prune && isNoopStateStore(store) {
+		fmt.Fprintln(w, "audit-state-secrets: --prune requires an iac.state backend; "+
+			"no orphans can be authoritatively determined without one. "+
+			"Configure an iac.state module (filesystem, spaces, or postgres) and rerun.")
+		return 2
+	}
 
 	return runAuditStateSecretsWithPrune(context.Background(), w, store, prov, prune)
 }
@@ -94,6 +103,27 @@ func runAuditStateSecretsWithPrune(ctx context.Context, w io.Writer, store infra
 		defaultSensitive[k] = struct{}{}
 	}
 
+	// Collect the union of sensitive-output key names actually observed in
+	// state records (any Outputs[k] whose value is a secret_ref://
+	// placeholder). Drivers may declare sensitive keys that aren't in
+	// secrets.DefaultSensitiveKeys() — without harvesting these, orphan
+	// detection's stripKnownSensitiveSuffix would fail to recover the
+	// resource-name prefix and misflag valid routed secrets as orphans
+	// (and --prune would delete them). Defaults remain in the suffix set
+	// as a fallback for first-run scenarios where state hasn't recorded
+	// any placeholders yet.
+	observedSensitive := map[string]struct{}{}
+	for k := range defaultSensitive {
+		observedSensitive[k] = struct{}{}
+	}
+	for i := range states {
+		for k, v := range states[i].Outputs {
+			if sensitive.IsPlaceholder(v) {
+				observedSensitive[k] = struct{}{}
+			}
+		}
+	}
+
 	// Walk state for placeholder/plaintext/config-ref findings.
 	// Sort states by name for stable output.
 	sort.SliceStable(states, func(i, j int) bool { return states[i].Name < states[j].Name })
@@ -116,15 +146,21 @@ func runAuditStateSecretsWithPrune(ctx context.Context, w io.Writer, store infra
 			case sensitive.IsPlaceholder(v):
 				secretName := strings.TrimPrefix(s, sensitive.PlaceholderPrefix)
 				_, getErr := prov.Get(ctx, secretName)
-				if getErr == nil {
+				switch {
+				case getErr == nil:
 					continue
-				}
-				if errors.Is(getErr, secrets.ErrUnsupported) {
+				case errors.Is(getErr, secrets.ErrUnsupported):
 					fmt.Fprintf(w, "ADVISORY (Get unsupported): cannot verify routed value for %s/%s -> %q on this provider\n", st.Name, k, secretName)
 					continue
-				}
-				if errors.Is(getErr, secrets.ErrNotFound) {
+				case errors.Is(getErr, secrets.ErrNotFound):
 					fmt.Fprintf(w, "FINDING (missing routed value): %s/%s expects routed secret %q but provider does not have it\n", st.Name, k, secretName)
+					findings++
+				default:
+					// Provider faulted (network, auth, transient). Don't
+					// silently swallow — surface as a finding so the audit
+					// exits non-zero and operator gets actionable signal,
+					// rather than a false "no findings".
+					fmt.Fprintf(w, "FINDING (provider error): %s/%s -> %q: %v\n", st.Name, k, secretName, getErr)
 					findings++
 				}
 			case strings.HasPrefix(s, secrets.SecretPrefix):
@@ -145,7 +181,7 @@ func runAuditStateSecretsWithPrune(ctx context.Context, w io.Writer, store infra
 	case err == nil:
 		sort.Strings(names)
 		for _, name := range names {
-			res := stripKnownSensitiveSuffix(name)
+			res := stripSensitiveSuffix(name, observedSensitive)
 			if _, ok := stateNames[res]; ok {
 				continue
 			}
@@ -176,16 +212,38 @@ func runAuditStateSecretsWithPrune(ctx context.Context, w io.Writer, store infra
 	return 0
 }
 
-// stripKnownSensitiveSuffix returns the resource-name prefix of a
-// routed-secret name. Tries DefaultSensitiveKeys suffixes; falls back
-// to the original name (which then fails the state-name lookup and is
-// flagged as an orphan).
-func stripKnownSensitiveSuffix(name string) string {
-	for _, k := range secrets.DefaultSensitiveKeys() {
-		suf := "_" + k
-		if strings.HasSuffix(name, suf) {
-			return name[:len(name)-len(suf)]
+// stripSensitiveSuffix returns the resource-name prefix of a routed-secret
+// name. The caller supplies the suffix universe (typically the union of
+// secrets.DefaultSensitiveKeys() and any sensitive keys actually observed
+// in state-record placeholders, so driver-declared non-default sensitive
+// keys are not misclassified as orphans).
+//
+// When the suffix set is nil/empty, falls back to defaults so the helper
+// remains safe for ad-hoc callers.
+//
+// Prefers the longest matching suffix to avoid mis-stripping nested
+// patterns (e.g. a name ending in "_admin_password" should strip the
+// 17-char "_admin_password" not the 9-char "_password" when both are
+// declared sensitive).
+func stripSensitiveSuffix(name string, suffixes map[string]struct{}) string {
+	if len(suffixes) == 0 {
+		for _, k := range secrets.DefaultSensitiveKeys() {
+			suf := "_" + k
+			if strings.HasSuffix(name, suf) {
+				return name[:len(name)-len(suf)]
+			}
 		}
+		return name
+	}
+	bestLen := 0
+	for k := range suffixes {
+		suf := "_" + k
+		if strings.HasSuffix(name, suf) && len(suf) > bestLen {
+			bestLen = len(suf)
+		}
+	}
+	if bestLen > 0 {
+		return name[:len(name)-bestLen]
 	}
 	return name
 }
