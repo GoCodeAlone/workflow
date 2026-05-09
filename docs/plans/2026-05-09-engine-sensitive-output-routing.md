@@ -35,7 +35,7 @@
 |------|-------|-------|--------|
 | 1 | feat(iac): engine-side sensitive-output routing through secrets.Provider | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6 | `feat/engine-sensitive-output-routing` |
 
-**Status:** Draft
+**Status:** Locked 2026-05-09T08:11:07Z
 
 ## Public API contract (locked at Task 1)
 
