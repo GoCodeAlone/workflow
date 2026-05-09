@@ -165,7 +165,14 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 	payload := map[string]any{"name": name, "grants": []map[string]any{grant}}
 	body, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.digitalocean.com/v2/spaces/keys", bytes.NewReader(body))
+	// DIGITALOCEAN_API_URL is a test-only hook so unit tests can redirect
+	// generateDOSpacesKey at a httptest.Server. In production the env var is
+	// unset and we fall through to the canonical DO endpoint.
+	apiURL := "https://api.digitalocean.com"
+	if v := os.Getenv("DIGITALOCEAN_API_URL"); v != "" {
+		apiURL = v
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL+"/v2/spaces/keys", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -187,6 +194,7 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 		Key struct {
 			AccessKey string `json:"access_key"`
 			SecretKey string `json:"secret_key"`
+			CreatedAt string `json:"created_at"`
 		} `json:"key"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -196,6 +204,7 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 	out, err := json.Marshal(map[string]string{
 		"access_key": result.Key.AccessKey,
 		"secret_key": result.Key.SecretKey,
+		"created_at": result.Key.CreatedAt,
 	})
 	if err != nil {
 		return "", err
