@@ -165,14 +165,15 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 	payload := map[string]any{"name": name, "grants": []map[string]any{grant}}
 	body, _ := json.Marshal(payload)
 
-	// DIGITALOCEAN_API_URL is a test-only hook so unit tests can redirect
-	// generateDOSpacesKey at a httptest.Server. In production the env var is
-	// unset and we fall through to the canonical DO endpoint.
-	apiURL := "https://api.digitalocean.com"
-	if v := os.Getenv("DIGITALOCEAN_API_URL"); v != "" {
-		apiURL = v
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL+"/v2/spaces/keys", bytes.NewReader(body))
+	// The DO Spaces Keys endpoint is hardcoded. Tests stub it via the package's
+	// rewriteTransport helper (see generators_test.go) — a hermetic mechanism
+	// that requires explicit code in the test to take effect. Earlier drafts
+	// of this file honored a DIGITALOCEAN_API_URL env var, but that override
+	// was removed: an attacker who could set the env var (malicious .env,
+	// hostile CI step, multi-tenant runner) would redirect the
+	// `Authorization: Bearer <DIGITALOCEAN_TOKEN>` POST to their own server,
+	// exfiltrating production credentials. See ADR 0021.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.digitalocean.com/v2/spaces/keys", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
