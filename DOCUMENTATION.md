@@ -1830,6 +1830,77 @@ The plugin is auto-registered via `init()` in `plugin/admincore/plugin.go`. No Y
 
 ---
 
+## Sensitive output routing (v0.27.0+)
+
+When a `ResourceDriver.Create` or `Update` returns a `*ResourceOutput` with
+`Sensitive: {key: true}`, the engine routes those output values through the
+configured `secrets.Provider` instead of writing them plaintext to state.
+Plugins remain platform-agnostic: a plugin compiled into a wfctl-from-CI
+run, a wfctl-from-CLI run, or a workflow-cloud server transparently gets
+sensitive-output handling without each host writing its own routing.
+
+**Routed secret naming:** `<resource_name>_<output_key>` (e.g., a resource
+named `coredump-deploy-key` with `secret_key` output is stored under
+`coredump-deploy-key_secret_key`).
+
+**State placeholder:** Routed fields appear in `state.Outputs` as
+`secret_ref://<resource>_<key>` strings. Distinct from the user-supplied
+`secret://<key>` config-reference convention.
+
+**Required configuration:** A `secrets:` block in your workflow config.
+For local/ad-hoc runs, environment variables are the simplest option:
+
+```yaml
+secrets:
+  provider: env
+  config:
+    prefix: WORKFLOW_
+```
+
+If a plugin emits sensitive outputs but no `secrets.Provider` is configured,
+apply hard-fails BEFORE the per-resource persistence loop with a named
+resource and remediation. This prevents partial-apply mid-stream.
+
+**Failure modes:**
+
+- `secrets.Provider.Set` fails: apply errors; rerun is idempotent.
+- `state.SaveResource` fails after `Set` succeeded: the engine compensates
+  by calling `driver.Delete` + `provider.Delete` (with a fresh 30s
+  context, so compensation runs even on Ctrl-C cancel) and surfaces a
+  combined error naming the compensation outcome.
+
+**Read paths (refresh, adoption):** never call `provider.Set`. Placeholders
+are inherited from prior state to avoid cache pollution. Newly-declared
+sensitive keys on Read paths are dropped.
+
+**Drift detection:** `iac/sensitive.MaskSensitiveForDiff` masks sensitive
+keys from both desired and current sides before `driver.Diff`, preventing
+false-positive drift on keys that the cloud refuses to re-emit (e.g., DO
+Spaces `secret_key`). As of v0.27.0, no in-tree call site dispatches
+`driver.Diff` against state.Outputs that may contain placeholders; the
+helper is exported for future consumers.
+
+**Cold-start consumers:** `secret_ref://` placeholders cannot be rehydrated
+cross-process on write-only providers (GitHub Actions). Same-process
+consumers (e.g., `infra_output:` generators in the same `wfctl infra apply`
+invocation) get the routed value via in-memory hand-off. Cross-process
+consumers reference the routed secret by name via `secret://<resource>_<key>`
+directly.
+
+**Limitation (v0.27.0):** only string-typed sensitive output values are
+supported. Non-string sensitive outputs (e.g., `[]byte`, `int`) yield an
+error from `Route`. Future expansion via a `MarshalSensitive` interface
+is out of scope.
+
+**Recovery:** `wfctl infra audit-state-secrets` audits state for orphan
+secrets, missing routed values, legacy plaintext fields, and mistaken
+config-references in state. Distinct from `audit-secrets` which audits
+the `secrets.generate` config block. Run both as part of regular hygiene:
+
+```sh
+wfctl infra audit-state-secrets --config infra.yaml [--prune]
+```
+
 ## IaC Provider Plugin Interfaces
 
 Cloud-provider plugins implement the core `interfaces.IaCProvider` Go

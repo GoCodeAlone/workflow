@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Engine-side sensitive-output routing** (v0.27.0): `ResourceDriver` outputs flagged with
+  `Sensitive: {key: true}` on Create/Update are routed through the configured `secrets.Provider`
+  and replaced in state with `secret_ref://<resource>_<key>` placeholders. Plugins remain
+  platform-agnostic: a plugin compiled into a wfctl-from-CI run, a wfctl-from-CLI run, or a
+  workflow-cloud server transparently gets sensitive-output handling without each host writing
+  its own routing. Read paths (adoption, refresh) are sanitize-only — no `provider.Set` calls
+  from a Read path (prevents cache pollution). On `SaveResource` failure after `provider.Set`
+  succeeded, the engine compensates with `driver.Delete` + `provider.Delete` to prevent orphan
+  cloud resources + routed secrets. See `docs/plans/2026-05-09-engine-sensitive-output-routing-design.md`.
+- **`iac/sensitive` package**: `Route(ctx, provider, resourceName, *out) (sanitized, hydrated, error)`,
+  `Revoke(ctx, provider, resourceName, mergedKeys) error`, `IsPlaceholder(v any) bool`,
+  `MaskSensitiveForDiff(driverKeys, desired, current) (map, map)`, `Placeholder(resource, key) string`,
+  `PlaceholderPrefix string` (`"secret_ref://"`), `SecretKey(resource, key) string`. Routing
+  trigger is exclusively per-call `out.Sensitive[k]==true`; `ResourceDriver.SensitiveKeys()`
+  remains a display-masking-only signal. Limitation: only string-typed sensitive output values
+  are supported in v0.27.0.
+- **`wfctl infra audit-state-secrets`** (with `--prune`): walks state.Outputs vs.
+  `secrets.Provider` to detect orphans, missing routed values, legacy plaintext, and mistaken
+  `secret://...` config-references in state. Distinct from `audit-secrets` which audits the
+  `secrets.generate` config block. Exit codes: 0 = no findings, 1 = findings, 2 = audit error.
+  For write-only providers (GitHub Actions Get returns ErrUnsupported), emits structured
+  ADVISORY lines for each placeholder it cannot verify, but does not exit non-zero on those alone.
+
 - **`interfaces.ResourceReplacer`**: optional driver interface for resources requiring
   orchestration beyond naive Delete-then-Create (e.g., Droplets with attached Block Storage
   Volumes). Drivers implementing `Replace(ctx, oldRef, spec) → (*ResourceOutput, error)` take
@@ -53,6 +76,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`applyWithProviderAndStore` and `applyPrecomputedPlanWithStore` signatures**: each gains
+  trailing `cfgFile string` and `hydratedOut map[string]string` parameters. Existing tests can
+  pass empty string and nil. The cfgFile is used to load the configured `secrets.Provider`
+  for sensitive-output routing; the hydratedOut map is filled by the helper so post-apply
+  consumers can rehydrate `secret_ref://` placeholders without going through `provider.Get`
+  (works on write-only providers like GitHub Actions).
+- **`applyInfraModules` return signature**: now returns `(map[string]string, error)` where the
+  map is the hydrated routed-secret values. Callers update from `if err := applyInfraModules(...)`
+  to `if _, err := applyInfraModules(...)` (or capture the map for hand-off to
+  `syncInfraOutputSecrets`).
+- **`syncInfraOutputSecrets` and `resolveInfraOutput` signatures**: each gains a trailing
+  `hydrated map[string]string` parameter for in-process routed-secret hand-off. Callers without
+  same-process apply context pass `nil`; sensitive placeholders then surface a documented
+  cold-start constraint error explaining the fallback path (`secret://<resource>_<key>` direct
+  reference).
+- **`adoptExistingResources` and `runInfraRefreshOutputs`**: now route state writes through
+  `persistResourceWithSecretRouting` in read-mode (sanitize-only). Pre-existing
+  `secret_ref://...` placeholders are preserved across re-applies; newly-declared sensitive
+  keys on Read paths are dropped (not routed) to prevent cache pollution.
+
 - **BREAKING (`wfctl infra plan`)**: configs declaring at least one `iac.provider` module now
   require the plugin process to load successfully — `plan` invokes the same loader that `apply`
   uses so `platform.ComputePlan` can dispatch `ResourceDriver.Diff` for honest Replace-action
@@ -76,6 +119,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DriftResult.Expected`, `DriftResult.Actual`, and `DriftResult.Fields` now carry `omitempty`
   tags (additive — previously these fields serialised as `null` / `[]` in JSON; they are now
   omitted entirely when empty, which is what most consumers expect).
+
+### Migration (engine-side sensitive-output routing, v0.27.0)
+
+- **Greenfield envs**: no action required. Plugins that opt into routing add
+  `Sensitive: {key: true}` to their `ResourceOutput` returns on Create/Update. Operators add a
+  `secrets:` block to their workflow config (recommend `provider: env` with a prefix for
+  local runs).
+- **Pre-existing state with plaintext secrets**: run `wfctl infra audit-state-secrets` to
+  enumerate. Rotate via `wfctl infra bootstrap --force-rotate <name>` running v0.27.0 (the
+  rotation regenerates with engine-side routing).
+- **Apply runs against plugins that newly emit `Sensitive` outputs without a `secrets:` block**:
+  the engine now hard-fails BEFORE the per-resource persistence loop with a named-resource
+  diagnostic. Add `secrets:` to your config to proceed.
+
+### Rollback (engine-side sensitive-output routing, v0.27.0)
+
+**Validation status:** mechanical analysis only. v0.26.0 source (verified at
+git tag v0.26.0) has no awareness of `secret_ref://` prefix; the legacy
+`Outputs: r.Outputs` path writes whatever the driver returned and reads
+state values verbatim. So a v0.26.0 binary running against state written
+by v0.27.0 will treat `secret_ref://...` strings as literal values
+(documented in step 3 below). Live runtime smoke against a v0.26.0
+binary is deferred to first-rollback-event; the test path is well-defined
+and a stop-the-line gate.
+
+To pin to v0.26.x:
+
+1. Pin `setup-wfctl@v0.26.x` and rebuild.
+2. State records written under v0.27.0 contain `secret_ref://...` placeholders. v0.26.x
+   consumers do not understand these and treat them as literal strings (e.g.,
+   `infra_output` generators copy the literal placeholder into a downstream secret).
+3. Recovery: rotate the affected secrets via `wfctl infra bootstrap --force-rotate <name>`
+   running v0.27.0 first to regenerate plaintext state, OR manually edit the state record
+   (filesystem JSON) to inline the value from `secrets.Provider`.
+4. The new package `iac/sensitive`, helper `persistResourceWithSecretRouting`, and
+   `audit-state-secrets` command are additive; reverting the call sites to v0.26.x literal
+   `Outputs: r.Outputs` shape is a one-commit revert of `infra_apply.go` +
+   `infra_refresh_outputs.go`.
 
 ## [0.18.11.1] - 2026-04-25
 
