@@ -90,6 +90,11 @@ func runInfra(args []string) error {
 			return fmt.Errorf("audit-secrets exited with code %d", rc)
 		}
 		return nil
+	case "audit-state-secrets":
+		if rc := runInfraAuditStateSecrets(args[1:], os.Stdout); rc != 0 {
+			return fmt.Errorf("audit-state-secrets exited with code %d", rc)
+		}
+		return nil
 	default:
 		return infraUsage()
 	}
@@ -114,6 +119,7 @@ Actions:
   security-check Scan plan.json for security policy violations
   cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
   audit-secrets  Report provider_credential anti-patterns in secrets.generate
+  audit-state-secrets  Audit state.Outputs vs. secrets.Provider for orphans, legacy, missing
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
