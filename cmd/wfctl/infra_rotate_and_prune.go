@@ -85,15 +85,24 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	// and no automated path to clean up.
 	//
 	// To prevent that, we run a pre-flight probe of EnumerateAll on each
-	// candidate provider BEFORE delegating to runInfraRotateAndPrune. If the
-	// probe fails Unimplemented, we surface a loud error (no rotation
-	// occurs, no state mutated). If the probe fails for any other reason
-	// (auth, network), surface that too — the operator should fix it before
-	// rotating.
+	// candidate provider BEFORE delegating to runInfraRotateAndPrune. The
+	// probe is also the multi-provider sieve (PR #589 Copilot Thread 1):
+	// because the bridge makes every remote provider satisfy
+	// interfaces.EnumeratorAll at the Go-type level, a naive
+	// type-assert-then-break would fail the whole run on the first
+	// provider whose plugin doesn't support EnumerateAll, never reaching
+	// later providers that DO. Treat ErrProviderMethodUnimplemented as
+	// "this plugin doesn't support it, try next provider"; any other
+	// probe error is loud (auth, network, malformed input) and aborts
+	// rotation before any state is mutated. Only fail if NO provider
+	// can serve the resource type.
+	var lastUnimpl error
+	var anyEnumerator bool
 	for _, p := range providers {
 		if _, ok := p.(interfaces.EnumeratorAll); !ok {
 			continue
 		}
+		anyEnumerator = true
 		// Pre-flight: probe EnumerateAll BEFORE Step 1 rotation. The probe
 		// uses the resourceType extracted from the dispatcher flag scan
 		// above so it exercises the same RPC the prune step will issue.
@@ -104,8 +113,12 @@ func runInfraRotateAndPruneCmd(args []string) error {
 		if resourceType != "" {
 			if _, probeErr := adapter.EnumerateAll(ctx, resourceType); probeErr != nil {
 				if errors.Is(probeErr, interfaces.ErrProviderMethodUnimplemented) {
-					return fmt.Errorf("rotate-and-prune pre-flight: provider %q does not implement IaCProvider.EnumerateAll bridge wiring (rotation aborted; no state mutated): %w",
-						p.Name(), probeErr)
+					// This plugin doesn't support EnumerateAll behind
+					// the bridge — try the next provider rather than
+					// aborting the whole run. No rotation has occurred
+					// yet (pre-flight is BEFORE Step 1).
+					lastUnimpl = fmt.Errorf("%s: %w", p.Name(), probeErr)
+					continue
 				}
 				return fmt.Errorf("rotate-and-prune pre-flight: provider %q EnumerateAll(%q) failed (rotation aborted; no state mutated): %w",
 					p.Name(), resourceType, probeErr)
@@ -116,6 +129,9 @@ func runInfraRotateAndPruneCmd(args []string) error {
 			return fmt.Errorf("rotate-and-prune exited with code %d", rc)
 		}
 		return nil
+	}
+	if anyEnumerator && lastUnimpl != nil {
+		return fmt.Errorf("rotate-and-prune pre-flight: no loaded provider implements IaCProvider.EnumerateAll bridge wiring for %q (rotation aborted; no state mutated; last probed: %w)", resourceType, lastUnimpl)
 	}
 	return fmt.Errorf("rotate-and-prune: no loaded provider implements EnumeratorAll")
 }
