@@ -25,10 +25,13 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 	cfgPath := fs.String("config", "", "Config file")
 	dryRun := fs.Bool("dry-run", false, "Print planned actions without executing")
 	tagOverride := fs.String("tag", "", "Override image tag for all containers")
+	only := fs.String("only", "", "Build only containers matching this name (comma-separated)")
+	skip := fs.String("skip", "", "Skip containers matching this name (comma-separated)")
 	pushImages := fs.Bool("push", false, "Push images directly via buildx (hardened mode: adds --push to buildx; non-hardened: no effect, separate push step handles it)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	filter := buildOpts{only: splitCSV(*only), skip: splitCSV(*skip)}
 
 	if os.Getenv("WFCTL_BUILD_DRY_RUN") == "1" {
 		*dryRun = true
@@ -57,6 +60,9 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 
 	for i := range cfg.CI.Build.Containers {
 		ctr := cfg.CI.Build.Containers[i]
+		if !shouldInclude(ctr.Name, filter) {
+			continue
+		}
 		tag := *tagOverride
 		if tag == "" {
 			tag = "latest"

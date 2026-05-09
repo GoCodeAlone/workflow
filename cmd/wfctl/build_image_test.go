@@ -35,6 +35,65 @@ func TestRunBuildImage_DockerfileDryRun(t *testing.T) {
 	}
 }
 
+func TestRunBuildImage_OnlySkipsUnmatchedContainers(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+      - name: worker
+        method: dockerfile
+        dockerfile: Dockerfile.worker
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath, "--only", "worker"}, &buf); err != nil {
+		t.Fatalf("dockerfile dry-run: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, " app:") || strings.Contains(out, "Dockerfile ") {
+		t.Fatalf("--only worker should skip app container, output:\n%s", out)
+	}
+	if !strings.Contains(out, "Dockerfile.worker") {
+		t.Fatalf("--only worker should include worker container, output:\n%s", out)
+	}
+}
+
+func TestRunBuildImage_SkipCSVSkipsMatchedContainers(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+      - name: worker
+        method: dockerfile
+        dockerfile: Dockerfile.worker
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath, "--skip", "app,worker"}, &buf); err != nil {
+		t.Fatalf("dockerfile dry-run: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "docker build") || strings.Contains(out, "Dockerfile") {
+		t.Fatalf("--skip app,worker should skip all container builds, output:\n%s", out)
+	}
+}
+
 func TestRunBuildImage_KoDryRun(t *testing.T) {
 	dir := t.TempDir()
 	cfg := `ci:

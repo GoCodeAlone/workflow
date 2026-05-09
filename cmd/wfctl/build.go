@@ -168,6 +168,12 @@ func runBuildOrchestrate(cfg *config.WorkflowConfig, opts buildOpts) error {
 		if opts.tag != "" {
 			imgArgs = append(imgArgs, "--tag", opts.tag)
 		}
+		if len(opts.only) > 0 {
+			imgArgs = append(imgArgs, "--only", strings.Join(opts.only, ","))
+		}
+		if len(opts.skip) > 0 {
+			imgArgs = append(imgArgs, "--skip", strings.Join(opts.skip, ","))
+		}
 		// For hardened builds (docker buildx with docker-container driver), pass
 		// --push so buildx pushes directly from the buildkit cache. Without this,
 		// buildx would silently cache the result and the subsequent docker push
@@ -189,6 +195,12 @@ func runBuildOrchestrate(cfg *config.WorkflowConfig, opts buildOpts) error {
 		}
 		if opts.tag != "" {
 			pushArgs = append(pushArgs, "--tag", opts.tag)
+		}
+		if len(opts.only) > 0 {
+			pushArgs = append(pushArgs, "--only", strings.Join(opts.only, ","))
+		}
+		if len(opts.skip) > 0 {
+			pushArgs = append(pushArgs, "--skip", strings.Join(opts.skip, ","))
 		}
 		if err := runBuildPush(pushArgs); err != nil {
 			return fmt.Errorf("push: %w", err)

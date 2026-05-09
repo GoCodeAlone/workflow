@@ -98,6 +98,41 @@ ci:
 	}
 }
 
+func TestRunBuildPush_OnlySkipsUnmatchedContainers(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeBuildPushFixture(t, dir)
+
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	out, err := captureStdout(t, func() error {
+		return runBuildPush([]string{"--config", cfgPath, "--only", "worker"})
+	})
+	if err != nil {
+		t.Fatalf("runBuildPush --only dry-run: %v", err)
+	}
+	if strings.Contains(out, "/api:") {
+		t.Fatalf("--only worker should skip api pushes, output:\n%s", out)
+	}
+	if !strings.Contains(out, "/worker:") {
+		t.Fatalf("--only worker should include worker push, output:\n%s", out)
+	}
+}
+
+func TestRunBuildPush_SkipCSVSkipsMatchedContainers(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeBuildPushFixture(t, dir)
+
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	out, err := captureStdout(t, func() error {
+		return runBuildPush([]string{"--config", cfgPath, "--skip", "api,worker"})
+	})
+	if err != nil {
+		t.Fatalf("runBuildPush --skip dry-run: %v", err)
+	}
+	if strings.Contains(out, "push ") {
+		t.Fatalf("--skip api,worker should skip all pushes, output:\n%s", out)
+	}
+}
+
 func TestRunBuildPush_UnknownRegistry(t *testing.T) {
 	dir := t.TempDir()
 	content := `
