@@ -745,6 +745,188 @@ secrets:
 	}
 }
 
+func TestLoadFromFile_ImportCIMerge(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+ci:
+  build:
+    targets:
+      - name: imported-bin
+        type: go
+        path: ./cmd/imported
+      - name: shared-bin
+        type: go
+        path: ./cmd/imported-shared
+    containers:
+      - name: imported-image
+        dockerfile: Dockerfile.imported
+    assets:
+      - name: imported-ui
+        build: npm run build
+        path: dist
+    security:
+      hardened: true
+      sbom: true
+      provenance: slsa-3
+      non_root: true
+      base_image_policy:
+        deny_prefixes:
+          - docker.io/library
+  test:
+    unit:
+      command: go test ./...
+  deploy:
+    environments:
+      staging:
+        provider: digitalocean
+  registries:
+    - name: shared
+      type: digitalocean
+      path: registry.digitalocean.com/shared/app
+  migrations:
+    - name: app
+      source_dir: migrations
+      database:
+        env: DATABASE_URL
+`
+	if err := os.WriteFile(filepath.Join(dir, "ci.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - ci.yaml
+ci:
+  build:
+    targets:
+      - name: shared-bin
+        type: go
+        path: ./cmd/local-shared
+    assets:
+      - name: local-ui
+        build: npm run local
+        path: local-dist
+    security:
+      sign: true
+  test:
+    integration:
+      command: go test ./integration
+  deploy:
+    environments:
+      production:
+        provider: digitalocean
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CI == nil {
+		t.Fatal("expected merged CI config")
+	}
+	if cfg.CI.Build == nil {
+		t.Fatal("expected main ci.build to survive merge")
+	}
+	if len(cfg.CI.Build.Targets) != 2 {
+		t.Fatalf("expected imported and main build targets, got %#v", cfg.CI.Build.Targets)
+	}
+	targetsByName := map[string]CITarget{}
+	for _, target := range cfg.CI.Build.Targets {
+		targetsByName[target.Name] = target
+	}
+	if targetsByName["shared-bin"].Path != "./cmd/local-shared" {
+		t.Fatalf("expected main target to win shared-bin conflict, got %#v", targetsByName["shared-bin"])
+	}
+	if targetsByName["imported-bin"].Path != "./cmd/imported" {
+		t.Fatalf("expected imported target to be appended, got %#v", targetsByName["imported-bin"])
+	}
+	if len(cfg.CI.Build.Containers) != 1 || cfg.CI.Build.Containers[0].Name != "imported-image" {
+		t.Fatalf("expected imported container, got %#v", cfg.CI.Build.Containers)
+	}
+	if len(cfg.CI.Build.Assets) != 2 {
+		t.Fatalf("expected imported and main assets, got %#v", cfg.CI.Build.Assets)
+	}
+	if cfg.CI.Build.Security == nil {
+		t.Fatal("expected merged build security")
+	}
+	if !cfg.CI.Build.Security.Sign {
+		t.Fatal("expected main build security sign=true to survive merge")
+	}
+	if !cfg.CI.Build.Security.Hardened || !cfg.CI.Build.Security.SBOM || !cfg.CI.Build.Security.NonRoot {
+		t.Fatalf("expected imported bool security fields to fill missing main fields, got %#v", cfg.CI.Build.Security)
+	}
+	if cfg.CI.Build.Security.BaseImagePolicy == nil ||
+		len(cfg.CI.Build.Security.BaseImagePolicy.DenyPrefixes) != 1 ||
+		cfg.CI.Build.Security.BaseImagePolicy.DenyPrefixes[0] != "docker.io/library" {
+		t.Fatalf("expected imported base image policy, got %#v", cfg.CI.Build.Security.BaseImagePolicy)
+	}
+	if cfg.CI.Test == nil || cfg.CI.Test.Unit == nil || cfg.CI.Test.Integration == nil {
+		t.Fatalf("expected imported unit and main integration test phases, got %#v", cfg.CI.Test)
+	}
+	if cfg.CI.Test.Unit.Command != "go test ./..." {
+		t.Errorf("unit command: got %q", cfg.CI.Test.Unit.Command)
+	}
+	if cfg.CI.Test.Integration.Command != "go test ./integration" {
+		t.Errorf("integration command: got %q", cfg.CI.Test.Integration.Command)
+	}
+	if cfg.CI.Deploy == nil || len(cfg.CI.Deploy.Environments) != 2 {
+		t.Fatalf("expected imported and main deploy envs, got %#v", cfg.CI.Deploy)
+	}
+	if len(cfg.CI.Registries) != 1 || cfg.CI.Registries[0].Name != "shared" {
+		t.Fatalf("expected imported registry, got %#v", cfg.CI.Registries)
+	}
+	if len(cfg.CI.Migrations) != 1 || cfg.CI.Migrations[0].Name != "app" {
+		t.Fatalf("expected imported migration, got %#v", cfg.CI.Migrations)
+	}
+}
+
+func TestLoadFromFile_ImportCIMergeParentBaseImagePolicyWins(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+ci:
+  build:
+    security:
+      base_image_policy:
+        deny_prefixes:
+          - docker.io/library
+`
+	if err := os.WriteFile(filepath.Join(dir, "ci.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - ci.yaml
+ci:
+  build:
+    security:
+      base_image_policy:
+        allow_prefixes: []
+        deny_prefixes: []
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CI == nil || cfg.CI.Build == nil || cfg.CI.Build.Security == nil || cfg.CI.Build.Security.BaseImagePolicy == nil {
+		t.Fatalf("expected main base image policy to survive, got %#v", cfg.CI)
+	}
+	if len(cfg.CI.Build.Security.BaseImagePolicy.DenyPrefixes) != 0 {
+		t.Fatalf("expected explicit empty parent deny_prefixes to win, got %#v", cfg.CI.Build.Security.BaseImagePolicy.DenyPrefixes)
+	}
+}
+
 // TestLoadFromFile_ImportSecretsOnlyInImport covers the case the original
 // PR-1 fix missed: top-level `secrets:` appears only in an imported file,
 // not in main. Without the merge, cfg.Secrets is nil after LoadFromFile.

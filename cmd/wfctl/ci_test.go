@@ -51,16 +51,10 @@ func TestGenerateGitHubActions(t *testing.T) {
 	if !strings.Contains(buildYML, "GoCodeAlone/setup-wfctl@v1") {
 		t.Error("build.yml missing setup-wfctl action")
 	}
-	if !strings.Contains(buildYML, "awk '/^[^[:space:]#][^:]*:/") {
-		t.Error("build.yml missing top-level ci section check")
-	}
-	if !strings.Contains(buildYML, "wfctl ci run --config 'infra.yaml' --phase test") {
+	if !strings.Contains(buildYML, "wfctl ci run --config \"$INFRA_CONFIG\" --phase test") {
 		t.Error("build.yml missing wfctl ci run test phase")
 	}
-	if !strings.Contains(buildYML, "go test ./...") {
-		t.Error("build.yml missing fallback go test command")
-	}
-	if !strings.Contains(buildYML, "wfctl build --config 'infra.yaml' --no-push --tag ci") {
+	if !strings.Contains(buildYML, "wfctl build --config \"$INFRA_CONFIG\" --no-push --tag ci") {
 		t.Error("build.yml missing wfctl build")
 	}
 	if strings.Contains(buildYML, "go build ./...") {
@@ -88,10 +82,11 @@ func TestGenerateGitLabCI(t *testing.T) {
 		"rules:",
 		"needs:",
 		"before_script:",
+		"WFCTL_VERSION: \"latest\"",
+		"go install \"github.com/GoCodeAlone/workflow/cmd/wfctl@${WFCTL_VERSION}\"",
 		"export PATH=\"$(go env GOPATH)/bin:$PATH\"",
 		"wfctl infra plan",
 		"wfctl ci run --config \"$INFRA_CONFIG\" --phase test",
-		"go test ./...",
 		"wfctl build --config \"$INFRA_CONFIG\" --no-push --tag ci",
 		"environment:",
 	}
@@ -104,6 +99,53 @@ func TestGenerateGitLabCI(t *testing.T) {
 	// Ensure deprecated only: syntax is NOT used
 	if strings.Contains(content, "\nonly:") {
 		t.Error(".gitlab-ci.yml uses deprecated 'only:' syntax")
+	}
+}
+
+func TestCIGeneratePinsCurrentWfctlVersionWhenReleased(t *testing.T) {
+	origVersion := version
+	version = "v9.9.9"
+	defer func() { version = origVersion }()
+
+	ghaFiles, err := generateCIFiles(ciOptions{
+		Platform:    "github_actions",
+		InfraConfig: "infra.yaml",
+		Runner:      "ubuntu-latest",
+	})
+	if err != nil {
+		t.Fatalf("generate GitHub Actions: %v", err)
+	}
+	if !strings.Contains(ghaFiles[".github/workflows/build.yml"], "version: 'v9.9.9'") {
+		t.Fatal("GitHub Actions build workflow should pin the generated wfctl version")
+	}
+
+	gitlabFiles, err := generateCIFiles(ciOptions{
+		Platform:    "gitlab_ci",
+		InfraConfig: "infra.yaml",
+	})
+	if err != nil {
+		t.Fatalf("generate GitLab CI: %v", err)
+	}
+	if !strings.Contains(gitlabFiles[".gitlab-ci.yml"], `WFCTL_VERSION: "v9.9.9"`) {
+		t.Fatal("GitLab CI workflow should pin the generated wfctl version")
+	}
+}
+
+func TestCIGenerateUsesLatestForUnreleasedWfctlVersions(t *testing.T) {
+	origVersion := version
+	defer func() { version = origVersion }()
+
+	for _, candidate := range []string{
+		"",
+		"dev",
+		"v0.22.8-0.20260507211020-3f920f7ff2f6",
+		"v0.22.8-0.20260507211020-3f920f7ff2f6+dirty",
+		"v9.9.9+dirty",
+	} {
+		version = candidate
+		if got := ciGeneratedWfctlVersion(); got != "latest" {
+			t.Fatalf("ciGeneratedWfctlVersion(%q) = %q, want latest", candidate, got)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -176,16 +177,18 @@ func generateCIFiles(opts ciOptions) (map[string]string, error) {
 // ── GitHub Actions ────────────────────────────────────────────────────────────
 
 type ghaTemplateData struct {
-	InfraConfig string
-	Runner      string
-	Branch      string
+	InfraConfig  string
+	Runner       string
+	Branch       string
+	WfctlVersion string
 }
 
 func generateGitHubActions(opts ciOptions) (map[string]string, error) {
 	data := ghaTemplateData{
-		InfraConfig: opts.InfraConfig,
-		Runner:      opts.Runner,
-		Branch:      "main",
+		InfraConfig:  opts.InfraConfig,
+		Runner:       opts.Runner,
+		Branch:       "main",
+		WfctlVersion: ciGeneratedWfctlVersion(),
 	}
 
 	infraYAML, err := renderCITemplate("gha-infra", ghaInfraTemplate, data)
@@ -231,6 +234,8 @@ jobs:
           cache: true
       - name: Install wfctl
         uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: '{{.WfctlVersion}}'
       - name: Plan infrastructure
         run: wfctl infra plan --config '{{.InfraConfig}}' --format markdown > plan.md
       - name: Post plan comment
@@ -256,6 +261,8 @@ jobs:
           cache: true
       - name: Install wfctl
         uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: '{{.WfctlVersion}}'
       - name: Apply infrastructure
         run: wfctl infra apply --config '{{.InfraConfig}}' --auto-approve
 `
@@ -282,28 +289,31 @@ jobs:
           cache: true
       - name: Install wfctl
         uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: '{{.WfctlVersion}}'
       - name: Run tests
-        run: |
-          if awk '/^[^[:space:]#][^:]*:/ { if ($0 ~ /^ci:/) found=1 } END { exit found ? 0 : 1 }' '{{.InfraConfig}}'; then
-            wfctl ci run --config '{{.InfraConfig}}' --phase test
-          else
-            go test ./...
-          fi
+        env:
+          INFRA_CONFIG: '{{.InfraConfig}}'
+        run: wfctl ci run --config "$INFRA_CONFIG" --phase test
       - name: Build without push
-        run: wfctl build --config '{{.InfraConfig}}' --no-push --tag ci
+        env:
+          INFRA_CONFIG: '{{.InfraConfig}}'
+        run: wfctl build --config "$INFRA_CONFIG" --no-push --tag ci
 `
 
 // ── GitLab CI ─────────────────────────────────────────────────────────────────
 
 type gitlabTemplateData struct {
-	InfraConfig string
-	Branch      string
+	InfraConfig  string
+	Branch       string
+	WfctlVersion string
 }
 
 func generateGitLabCI(opts ciOptions) (map[string]string, error) {
 	data := gitlabTemplateData{
-		InfraConfig: opts.InfraConfig,
-		Branch:      "main",
+		InfraConfig:  opts.InfraConfig,
+		Branch:       "main",
+		WfctlVersion: ciGeneratedWfctlVersion(),
 	}
 
 	content, err := renderCITemplate("gitlab-ci", gitlabCITemplate, data)
@@ -323,9 +333,10 @@ const gitlabCITemplate = `stages:
 
 variables:
   INFRA_CONFIG: "{{.InfraConfig}}"
+  WFCTL_VERSION: "{{.WfctlVersion}}"
 
 before_script:
-  - go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+  - go install "github.com/GoCodeAlone/workflow/cmd/wfctl@${WFCTL_VERSION}"
   - export PATH="$(go env GOPATH)/bin:$PATH"
 
 infra-plan:
@@ -361,12 +372,7 @@ build:
   stage: build
   needs: []
   script:
-    - |
-      if awk '/^[^[:space:]#][^:]*:/ { if ($0 ~ /^ci:/) found=1 } END { exit found ? 0 : 1 }' "$INFRA_CONFIG"; then
-        wfctl ci run --config "$INFRA_CONFIG" --phase test
-      else
-        go test ./...
-      fi
+    - wfctl ci run --config "$INFRA_CONFIG" --phase test
     - wfctl build --config "$INFRA_CONFIG" --no-push --tag ci
   rules:
     - if: $CI_COMMIT_BRANCH == "{{.Branch}}"
@@ -384,4 +390,13 @@ func renderCITemplate(name, tmplStr string, data any) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+var cleanReleaseTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+func ciGeneratedWfctlVersion() string {
+	if !cleanReleaseTagPattern.MatchString(version) {
+		return "latest"
+	}
+	return version
 }

@@ -168,3 +168,99 @@ func TestRunTestPhase_EmptyTest(t *testing.T) {
 		t.Fatalf("empty test config should not error: %v", err)
 	}
 }
+
+func TestRunCIRunTestFallsBackToGoTestWhenNoConfiguredTests(t *testing.T) {
+	dir := t.TempDir()
+	writeGoModule(t, dir, `package pkg
+
+import "testing"
+
+func TestFallbackRuns(t *testing.T) {
+	t.Fatal("default go test fallback ran")
+}
+`)
+	cfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+version: 1
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
+
+	err = runCIRun([]string{"--config", cfgPath, "--phase", "test"})
+	if err == nil {
+		t.Fatal("expected fallback go test failure")
+	}
+	if !strings.Contains(err.Error(), "test phase failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunCIRunLoadsImportedCIConfigForTests(t *testing.T) {
+	dir := t.TempDir()
+	writeGoModule(t, dir, `package pkg
+
+import "testing"
+
+func TestImportedConfig(t *testing.T) {}
+`)
+	if err := os.WriteFile(filepath.Join(dir, "ci.yaml"), []byte(`
+ci:
+  test:
+    unit:
+      command: go test ./pkg
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+version: 1
+imports:
+  - ci.yaml
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
+
+	if err := runCIRun([]string{"--config", cfgPath, "--phase", "test"}); err != nil {
+		t.Fatalf("imported ci.test should run: %v", err)
+	}
+}
+
+func writeGoModule(t *testing.T, dir, testFile string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test/wfctl-ci\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pkgDir := filepath.Join(dir, "pkg")
+	if err := os.Mkdir(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "pkg_test.go"), []byte(testFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
