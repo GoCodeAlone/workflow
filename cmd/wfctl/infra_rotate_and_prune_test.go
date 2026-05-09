@@ -52,6 +52,31 @@ func rotateAndPruneContains(haystack []string, needle string) bool {
 	return false
 }
 
+// writeMinimalRotationConfig writes a minimal infra.yaml fixture sufficient
+// for runInfraRotateAndPrune to load without erroring before reaching the
+// stubbed `bootstrapSecrets` hook. The config provides a `secrets:` block
+// (so parseSecretsConfig returns non-nil) with provider=env so
+// resolveSecretsProvider builds without external dependencies. Returns the
+// fixture's full path for use as `--config` arg.
+func writeMinimalRotationConfig(t *testing.T, tmpDir string) string {
+	t.Helper()
+	cfgPath := filepath.Join(tmpDir, "infra.yaml")
+	body := `secrets:
+  provider: env
+  config:
+    prefix: WFCTL_TEST_
+  generate:
+    - key: test-key
+      type: provider_credential
+      source: digitalocean.spaces
+      name: test-key
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0600); err != nil {
+		t.Fatalf("write fixture infra.yaml: %v", err)
+	}
+	return cfgPath
+}
+
 // TestInfraRotateAndPrune_HappyPath verifies the all-in-one flow:
 //
 //  1. The rotate primitive (`bootstrapSecrets` package-level test hook —
@@ -71,6 +96,7 @@ func TestInfraRotateAndPrune_HappyPath(t *testing.T) {
 	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
 	tmpDir := t.TempDir()
 	t.Setenv("WFCTL_STATE_DIR", tmpDir)
+	cfgPath := writeMinimalRotationConfig(t, tmpDir)
 
 	// Stub bootstrapSecrets — the package-level test hook (defined in
 	// infra_bootstrap.go:507 as `var bootstrapSecrets = func(...)`).
@@ -111,6 +137,7 @@ func TestInfraRotateAndPrune_HappyPath(t *testing.T) {
 	code := runInfraRotateAndPrune([]string{
 		"--type", "infra.spaces_key",
 		"--name", "test-key",
+		"--config", cfgPath,
 		"--confirm", "--non-interactive",
 	}, fakeProv, &out)
 	if code != 0 {
@@ -153,6 +180,7 @@ func TestInfraRotateAndPrune_RecoveryFileWrittenWithCorrectPerms(t *testing.T) {
 	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
 	tmpDir := t.TempDir()
 	t.Setenv("WFCTL_STATE_DIR", tmpDir)
+	cfgPath := writeMinimalRotationConfig(t, tmpDir)
 
 	origBoot := bootstrapSecrets
 	defer func() { bootstrapSecrets = origBoot }()
@@ -183,6 +211,7 @@ func TestInfraRotateAndPrune_RecoveryFileWrittenWithCorrectPerms(t *testing.T) {
 	_ = runInfraRotateAndPrune([]string{
 		"--type", "infra.spaces_key",
 		"--name", "test-key",
+		"--config", cfgPath,
 		"--confirm", "--non-interactive",
 	}, fakeProv, io.Discard)
 
