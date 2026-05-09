@@ -15,8 +15,8 @@
 ## Scope Manifest
 
 **PR Count:** 1
-**Tasks:** 5
-**Estimated Lines of Change:** ~1.6k (informational; not enforced)
+**Tasks:** 6
+**Estimated Lines of Change:** ~1.7k (informational; not enforced)
 
 **Out of scope:**
 - DO plugin update to set `Sensitive: {"secret_key": true}` on `SpacesKeyDriver.Create` — separate PR after v0.27.0 tag.
@@ -26,14 +26,28 @@
 - UI display of `secret_ref://...` placeholders.
 - Per-provider `DetectDrift` masking updates (per-plugin follow-up).
 - Schema change to `interfaces.ResourceState` to add explicit `RoutedSecrets` map (deferred per design §10 doubt 3).
+- Wiring `MaskSensitiveForDiff` into engine-side Diff call sites (helper ships in Task 1; in-tree consumers ride a follow-up PR if needed — currently no `cmd/wfctl` site sees state.Outputs flow into `driver.Diff`; per-provider Diffs receive desired/current via gRPC and are out of scope).
+- Import path (`infra.go:1101` `Outputs: cloneMap(imported.Outputs)`) — accepted as legacy-plaintext on import; operator runs `wfctl infra audit-state-secrets` post-import to triage. Routing imported state requires a behavioural decision (ad-hoc rotate vs. preserve-as-is) that is out of scope here.
 
 **PR Grouping:**
 
 | PR # | Title | Tasks | Branch |
 |------|-------|-------|--------|
-| 1 | feat(iac): engine-side sensitive-output routing through secrets.Provider | Task 1, Task 2, Task 3, Task 4, Task 5 | `feat/engine-sensitive-output-routing` |
+| 1 | feat(iac): engine-side sensitive-output routing through secrets.Provider | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6 | `feat/engine-sensitive-output-routing` |
 
 **Status:** Draft
+
+## Public API contract (locked at Task 1)
+
+After Task 1 lands, the `iac/sensitive` package exports the following names. Tasks 2-6 depend on these being **exported** (capital initial). Implementer MUST NOT lowercase any of these:
+
+- `Route(ctx, provider, resourceName, out) (sanitized, hydrated, error)`
+- `Revoke(ctx, provider, resourceName, mergedKeys) error`
+- `IsPlaceholder(v any) bool`
+- `MaskSensitiveForDiff(driverKeys, desired, current) (map, map)`
+- `Placeholder(resourceName, outputKey string) string`
+- `PlaceholderPrefix string` (constant)
+- `SecretKey(resourceName, outputKey string) string`
 
 ---
 
@@ -941,9 +955,18 @@ const (
 //
 // Returns nil hydrated map in read mode (consumers don't need post-apply
 // hand-off for a Read).
+//
+// Note: store is the wfctl-internal infraStateStore interface (defined in
+// cmd/wfctl/infra_state_store.go) — NOT interfaces.IaCStateStore. The
+// helper lives in the cmd/wfctl package; using the package-private
+// interface keeps the boundary clean and matches existing callers
+// (applyWithProviderAndStore, adoptExistingResources). The fakes in
+// _test.go implement infraStateStore (a smaller surface than the engine
+// IaCStateStore: SaveResource / GetResource / ListResources /
+// DeleteResource / Close).
 func persistResourceWithSecretRouting(
 	ctx context.Context,
-	store interfaces.IaCStateStore,
+	store infraStateStore,
 	provider secrets.Provider,
 	driver interfaces.ResourceDriver,
 	rs interfaces.ResourceState,
@@ -962,7 +985,7 @@ func persistResourceWithSecretRouting(
 
 func persistApplyMode(
 	ctx context.Context,
-	store interfaces.IaCStateStore,
+	store infraStateStore,
 	provider secrets.Provider,
 	driver interfaces.ResourceDriver,
 	rs interfaces.ResourceState,
@@ -991,7 +1014,7 @@ func persistApplyMode(
 
 func persistReadMode(
 	ctx context.Context,
-	store interfaces.IaCStateStore,
+	store infraStateStore,
 	rs interfaces.ResourceState,
 	out interfaces.ResourceOutput,
 ) error {
@@ -1123,46 +1146,164 @@ Replace with:
 
 Site 2 — In-process apply path at lines 1022-1040. Same replacement pattern; identical helper invocation.
 
-`secretsProvider` and `hydratedAll` are new function-scope locals introduced at the top of `applyWithProviderAndStore`:
+**Required signature changes** (apply both functions):
+
+1. `applyWithProviderAndStore` (`cmd/wfctl/infra_apply.go:360`) — add `cfgFile string` parameter, change return to `(map[string]string, error)`:
 
 ```go
-func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, w io.Writer, envName string) (map[string]string, error) {
-	hydratedAll := make(map[string]string)
-	secretsProvider, secretsCfgErr := loadSecretsProviderForApply(envName)
-	if secretsCfgErr != nil {
-		return nil, secretsCfgErr
-	}
-	// ... existing body ...
-	return hydratedAll, nil // single trailing return; see below
+func applyWithProviderAndStore(
+    ctx context.Context,
+    provider interfaces.IaCProvider,
+    providerType string,
+    cfgFile string, // NEW
+    specs []interfaces.ResourceSpec,
+    current []interfaces.ResourceState,
+    store infraStateStore,
+    w io.Writer,
+    envName string,
+) (map[string]string, error) {
+    hydratedAll := make(map[string]string)
+    secretsProvider, err := loadSecretsProviderForRouting(cfgFile)
+    if err != nil {
+        return nil, err
+    }
+    // ... existing body ...
+    return hydratedAll, nil // single trailing return at every existing return-nil site
 }
 ```
 
-Loader helper (also in `infra_apply.go`):
+2. `applyPrecomputedPlanWithStore` (`cmd/wfctl/infra_apply.go:910`) — same parameter + return changes:
 
 ```go
-// loadSecretsProviderForApply returns the configured secrets.Provider for
-// this apply run, or (nil, nil) when secretsCfg is absent (caller's
-// downstream Route will hard-fail if any driver emits sensitive outputs).
-func loadSecretsProviderForApply(envName string) (secrets.Provider, error) {
-	cfg, err := parseSecretsConfig(currentInfraConfigFile())
-	if err != nil {
-		return nil, fmt.Errorf("parse secrets config for sensitive routing: %w", err)
-	}
-	if cfg == nil {
-		return nil, nil
-	}
-	return resolveSecretsProvider(cfg)
+func applyPrecomputedPlanWithStore(
+    ctx context.Context,
+    plan interfaces.IaCPlan,
+    provider interfaces.IaCProvider,
+    providerType string,
+    cfgFile string, // NEW
+    store infraStateStore,
+    w io.Writer,
+    envName string,
+) (map[string]string, error)
+```
+
+Loader helper (in `infra_apply.go`, near the bottom):
+
+```go
+// loadSecretsProviderForRouting returns the configured secrets.Provider for
+// this apply run, or (nil, nil) when secretsCfg is absent. The caller's
+// downstream sensitive.Route will hard-fail if any driver emits sensitive
+// outputs and provider is nil. cfgFile is the same resolved infra.yaml path
+// the rest of the apply pipeline uses.
+func loadSecretsProviderForRouting(cfgFile string) (secrets.Provider, error) {
+    cfg, err := parseSecretsConfig(cfgFile)
+    if err != nil {
+        return nil, fmt.Errorf("parse secrets config for sensitive routing: %w", err)
+    }
+    if cfg == nil {
+        return nil, nil
+    }
+    return resolveSecretsProvider(cfg)
 }
 ```
 
-`currentInfraConfigFile()` is a helper that returns the resolved config path. Implementer: search for an existing equivalent (`resolveInfraConfig` is already in `infra.go`); if a per-call hook is needed, thread `cfgFile` through `applyWithProviderAndStore`'s signature instead. The minimum change: take `cfgFile string` as a new parameter to `applyWithProviderAndStore`, and load `secretsCfg` from there.
+3. Update the **caller** at `cmd/wfctl/infra_apply.go:267` (and the precomputed-plan caller at `:886`) to pass `cfgFile`:
 
-Update the signature:
 ```go
-func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, cfgFile string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, w io.Writer, envName string) (map[string]string, error)
+// Was:
+return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, scopedCurrent, store, os.Stderr, envName)
+// Becomes:
+hyd, err := applyWithProviderAndStore(ctx, provider, g.provType, cfgFile, g.specs, scopedCurrent, store, os.Stderr, envName)
+if err != nil {
+    return err
+}
+for k, v := range hyd {
+    runHydrated[k] = v
+}
+return nil
 ```
 
-And update its caller(s) in `infra.go` to pass `cfgFile`.
+`runHydrated` is a function-scope `map[string]string` declared at the top of `applyInfraModules` (or the equivalent caller). After the dispatch loop completes, `runHydrated` is passed into `syncInfraOutputSecrets` (Step 2.5).
+
+`cfgFile` is already in scope at `infra_apply.go:244` (passed as parameter to `applyInfraModules`).
+
+4. Update existing tests at `cmd/wfctl/infra_apply_allow_replace_test.go:223,267` (and any other test calling `applyWithProviderAndStore`) to:
+   - pass empty string for the new `cfgFile` parameter.
+   - update return-value handling: `_, err := applyWithProviderAndStore(...)`.
+
+Pre-flight grep to enumerate every call site that must update:
+
+```
+grep -rn "applyWithProviderAndStore(\|applyPrecomputedPlanWithStore(" cmd/wfctl/
+```
+
+5. **Preserve existing pre-save validation.** The original code at `infra_apply.go:520-524` calls `validateOutputProviderID(provider, providerType, &r)` BEFORE state save. The replacement MUST keep this call unchanged, BEFORE invoking `persistResourceWithSecretRouting`:
+
+```go
+// Hard-fail when the driver returns a malformed ProviderID for a strict format.
+if err := validateOutputProviderID(provider, providerType, &r); err != nil {
+    return nil, fmt.Errorf("state write rejected: %w", err)
+}
+// THEN call persistResourceWithSecretRouting (replaces the old SaveResource call)
+```
+
+Same preservation requirement at the in-process apply path (`:1004` `validateOutputProviderID` call).
+
+6. **Pre-flight check: detect sensitive-emitting drivers before the persistence loop.** When `secretsProvider == nil` AND `result.Resources` contains any `*ResourceOutput` with non-empty `Sensitive` map, surface a single clear error BEFORE entering the per-resource persistence loop. This prevents partial apply (one resource erroring mid-loop while previous ones already persisted plaintext-but-sanitized state).
+
+```go
+if secretsProvider == nil {
+    for i := range result.Resources {
+        if hasSensitiveOutputs(&result.Resources[i]) {
+            return nil, fmt.Errorf(
+                "secrets.Provider not configured but driver emitted sensitive outputs (resource %q has Sensitive map %v); add `secrets:` block to your config or use `secrets: { provider: env }`",
+                result.Resources[i].Name, sensitiveKeysFor(&result.Resources[i]))
+        }
+    }
+}
+// ... persistence loop unchanged ...
+
+func hasSensitiveOutputs(r *interfaces.ResourceOutput) bool {
+    for _, v := range r.Sensitive {
+        if v {
+            return true
+        }
+    }
+    return false
+}
+
+func sensitiveKeysFor(r *interfaces.ResourceOutput) []string {
+    var keys []string
+    for k, v := range r.Sensitive {
+        if v {
+            keys = append(keys, k)
+        }
+    }
+    sort.Strings(keys)
+    return keys
+}
+```
+
+Same pre-flight in `applyPrecomputedPlanWithStore`.
+
+7. **Compensation context isolation.** The `compensateAfterSaveFailure` helper inherits the apply ctx; if the apply was canceled, Delete may also fail. Use a fresh 30-second timeout context for compensation specifically:
+
+```go
+func compensateAfterSaveFailure(
+    parentCtx context.Context, /* logging only */
+    provider secrets.Provider,
+    driver interfaces.ResourceDriver,
+    rs interfaces.ResourceState,
+    hydrated map[string]string,
+) error {
+    // Fresh context — compensation must run even on parent ctx cancel.
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    // ... existing body uses ctx, not parentCtx ...
+}
+```
+
+8. **String-only sensitive values (v0.27.0 limitation).** `stringifyOutput` errors on non-string values. Document this as the v0.27.0 limitation in `iac/sensitive/route.go`'s package comment AND in DOCUMENTATION.md (Task 6 §6.1 "Sensitive output routing" section). Future expansion (e.g., `MarshalSensitive` interface) is out of scope.
 
 **Step 2.5: Rewire `runInfraApply` to thread `hydratedAll` to `syncInfraOutputSecrets`**
 
@@ -1215,6 +1356,24 @@ func resolveInfraOutput(wfCfg *config.WorkflowConfig, source, envName string, st
 
 Update all call sites of `resolveInfraOutput` (currently at `infra_output_secrets.go:163` and `infra_resolve_state.go:123`) to pass the `hydrated` map. For the `infra_resolve_state.go` site (drift detection / state preview), pass `nil` — that path doesn't have a hydrated map. The error path on placeholder + nil hydrated is the documented constraint.
 
+**Step 2.5.1: Update existing tests for the new `hydrated` parameter**
+
+Update every test file that calls `syncInfraOutputSecrets` or `resolveInfraOutput` to pass `nil` (or appropriate map) for the new parameter:
+
+```
+grep -rn "syncInfraOutputSecrets(\|resolveInfraOutput(" cmd/wfctl/
+```
+
+Expected hits include:
+- `cmd/wfctl/infra_output_secrets_test.go:108-146` — multiple `syncInfraOutputSecrets` calls; add `nil` as the trailing argument.
+- Any other test at the same call sites.
+
+For each existing call, append `nil` (or the appropriate map for tests that exercise the hydrated path).
+
+**Step 2.5.2: Add `nil`-hydrated-map fallback test in `infra_output_secrets_test.go`**
+
+Add a test that verifies: state has placeholder, hydrated is nil, provider has the value via Get → resolveInfraOutput succeeds. Plus the inverse: state has placeholder, hydrated is nil, provider returns ErrUnsupported → resolveInfraOutput returns the documented "write-only providers cannot rehydrate cold" error.
+
 **Step 2.6: Run tests, confirm pass**
 
 Run: `cd cmd/wfctl && go test -run TestPersistResourceWithSecretRouting -v`
@@ -1231,6 +1390,26 @@ Run:
 - `go test -race ./cmd/wfctl/... ./iac/sensitive/...` → PASS
 - `go vet ./...` → no output
 - `golangci-lint run ./cmd/wfctl/... ./iac/sensitive/...` → no findings
+
+**Step 2.7.bis: Runtime-launch-validation smoke**
+
+Task 2 modifies the apply runtime path. Per `superpowers:runtime-launch-validation`, build the artifact and exercise it under realistic conditions:
+
+```sh
+go build -o wfctl ./cmd/wfctl
+mkdir -p /tmp/wfctl-routing-smoke && cd /tmp/wfctl-routing-smoke
+```
+
+Create `infra-no-secrets.yaml` (no `secrets:` block) and `infra-with-env.yaml` (with `secrets: { provider: env, config: { prefix: WFCTL_TEST_ } }`). Each declares an iac.state file backend + at least one stub-provider resource. (Implementer borrows from `cmd/wfctl/testdata/` if a sample exists; otherwise constructs minimally.)
+
+Run two scenarios — capture transcripts in PR body:
+
+1. **No-secrets-cfg + sensitive-emitting driver** → expected: hard fail with the documented error message naming the resource and sensitive keys.
+2. **env-provider configured + sensitive-emitting driver** → expected: apply succeeds; `env | grep WFCTL_TEST_` shows the routed value; `cat <state-file>.json` shows `secret_ref://...` placeholders, no plaintext.
+
+If a stub provider is not readily available, this validation runs against `mock` provider + an additional unit test that asserts both behaviours via the helper directly. Document the substitution in the PR body.
+
+**Rollback note for Task 2:** revert this commit; helper + call-site rewires are additive. Existing state files written under v0.27.0 retain `secret_ref://` placeholders; v0.26.x consumers see them as literal strings (rotate affected secrets via `wfctl infra bootstrap --force-rotate <name>` before downgrading).
 
 **Step 2.8: Commit**
 
@@ -1412,6 +1591,22 @@ Run:
 - `go vet ./...` → no output
 - `golangci-lint run ./cmd/wfctl/...` → no findings
 
+**Step 3.7.bis: Runtime-launch-validation smoke for refresh path**
+
+Task 3 modifies the refresh + adoption runtime paths. Build wfctl and exercise:
+
+```sh
+go build -o wfctl ./cmd/wfctl
+# Using the same fixture from Step 2.7.bis:
+cd /tmp/wfctl-routing-smoke
+# After Task 2's apply ran successfully (placeholders in state):
+./wfctl infra refresh-outputs -c infra-with-env.yaml 2>&1 | tee refresh.log
+```
+
+Expected: refresh completes; state file's `secret_ref://...` placeholder for `secret_key` is preserved (verified via `cat <state-file>.json | grep secret_ref`); env vars (the routed-secret store) are NOT modified by the Read path (verify by snapshotting `env | grep WFCTL_TEST_` before and after — should be identical).
+
+**Rollback note for Task 3:** revert this commit; sites revert to direct `store.SaveResource(ctx, fresh)`. State written under Task 3 has the same shape as Task 2 — same downgrade considerations apply.
+
 **Step 3.8: Commit**
 
 ```bash
@@ -1434,17 +1629,16 @@ EOF
 
 ---
 
-## Task 4: Drift masking + `wfctl infra audit-state-secrets` command
+## Task 4: `wfctl infra audit-state-secrets` command
 
 **Files:**
 - Create: `cmd/wfctl/infra_audit_state_secrets.go`
 - Create: `cmd/wfctl/infra_audit_state_secrets_test.go`
 - Modify: `cmd/wfctl/infra.go` (subcommand wiring)
-- Modify: `cmd/wfctl/infra_apply_refresh.go` (drift masking)
 
-**Change class:** New CLI command + drift logic. Verification: unit tests + `wfctl infra audit-state-secrets --help` + representative invocation.
+**Change class:** New CLI command. Verification: unit tests + `wfctl infra audit-state-secrets --help` + representative invocation (CLI command class).
 
-**Rollback:** Revert this commit; command and helper are additive.
+**Rollback:** Revert this commit; command is additive.
 
 **Step 4.1: Write failing tests for `audit-state-secrets`**
 
@@ -1810,20 +2004,6 @@ Update help text at line 116:
   audit-state-secrets  Audit state.Outputs vs. secrets.Provider for orphans, legacy, missing
 ```
 
-**Step 4.4: Implement drift masking in `cmd/wfctl/infra_apply_refresh.go`**
-
-Find the drift-comparison call site. Replace its naive Diff with `sensitive.MaskSensitiveForDiff` first:
-
-```go
-import "github.com/GoCodeAlone/workflow/iac/sensitive"
-
-// At the Diff call site (search for "driver.Diff" or current/desired comparison):
-maskedDesired, maskedCurrent := sensitive.MaskSensitiveForDiff(driver.SensitiveKeys(), desiredCfg, currentOutputs)
-result, err := driver.Diff(ctx, interfaces.ResourceSpec{Config: maskedDesired}, &interfaces.ResourceOutput{Outputs: maskedCurrent})
-```
-
-Implementer: search `cmd/wfctl/infra_apply_refresh.go` for the actual Diff call sites; if none present today (the file mostly handles refresh, not Diff), defer this masking to per-provider Diff implementations and document in the file's package comment that placeholder-bearing state should not be passed to driver.Diff without masking. Add a unit test that verifies `MaskSensitiveForDiff` is called wherever the refresh logic does compare.
-
 **Step 4.5: Run tests, confirm pass**
 
 Run: `cd cmd/wfctl && go test -run TestAuditStateSecrets -v`
@@ -1857,9 +2037,9 @@ Run:
 
 ```bash
 git add cmd/wfctl/infra_audit_state_secrets.go cmd/wfctl/infra_audit_state_secrets_test.go \
-        cmd/wfctl/infra.go cmd/wfctl/infra_apply_refresh.go
+        cmd/wfctl/infra.go
 git commit -m "$(cat <<'EOF'
-feat(wfctl): infra audit-state-secrets command + drift masking
+feat(wfctl): infra audit-state-secrets command
 
 Adds wfctl infra audit-state-secrets command per design §4.7:
   - placeholder-without-routed-value findings
@@ -1868,11 +2048,10 @@ Adds wfctl infra audit-state-secrets command per design §4.7:
   - orphan secret findings (provider has it; no matching state)
   - --prune to delete confirmed orphans
 
-Adds drift-masking via sensitive.MaskSensitiveForDiff so state
-placeholders + missing-on-Read cloud values never produce false-positive
-drift.
+Distinct from existing audit-secrets which audits secrets.generate
+config block for anti-patterns.
 
-Rollback: revert this commit; command + masking call are additive.
+Rollback: revert this commit; command is additive.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -1881,16 +2060,104 @@ EOF
 
 ---
 
-## Task 5: Documentation update + DOCUMENTATION.md / WFCTL.md / CHANGELOG
+## Task 5: Drift masking enumeration + wiring (or documented no-op)
+
+**Files:**
+- Modify: `cmd/wfctl/infra_apply_refresh.go` (if Diff call sites exist)
+- Possibly modify: any other `cmd/wfctl/*.go` that calls `driver.Diff` against state-Outputs
+
+**Change class:** Internal logic; conditional on enumeration result. Verification: unit tests OR documented enumeration that no in-tree call sites exist.
+
+**Rollback:** Revert this commit (if any code change); enumeration is documentation-only and harmless to keep.
+
+**Step 5.1: Enumerate every in-tree Diff call site that sees state-Outputs**
+
+Run:
+```sh
+grep -rn "driver\.Diff(\|d\.Diff(\|\.Diff(ctx," --include="*.go" cmd/wfctl/ iac/
+```
+
+For each match, classify:
+- (a) Receives state.Outputs (potentially with placeholders) as `current` → MUST mask before Diff.
+- (b) Receives only fresh cloud Outputs (live Read result) → no masking needed (Read paths are sanitize-only post-Task 3 anyway).
+- (c) Test files → skip; tests pass synthetic data.
+
+**Step 5.2a: If (a)-class sites exist, wire `sensitive.MaskSensitiveForDiff`**
+
+For each (a)-class site:
+
+```go
+import "github.com/GoCodeAlone/workflow/iac/sensitive"
+
+// Replace:
+result, err := driver.Diff(ctx, desiredSpec, currentOutput)
+// With:
+maskedDesired, maskedCurrent := sensitive.MaskSensitiveForDiff(driver.SensitiveKeys(), desiredSpec.Config, currentOutput.Outputs)
+maskedSpec := desiredSpec
+maskedSpec.Config = maskedDesired
+maskedOut := *currentOutput
+maskedOut.Outputs = maskedCurrent
+result, err := driver.Diff(ctx, maskedSpec, &maskedOut)
+```
+
+Add a unit test per call site that verifies the masking is in effect (state has placeholder; Diff receives a map without the sensitive key).
+
+**Step 5.2b: If NO (a)-class sites exist, document the no-op**
+
+Add a comment to `cmd/wfctl/infra_apply_refresh.go` (top-of-file or above the refresh logic):
+
+```go
+// Note: as of v0.27.0, no in-tree call site dispatches driver.Diff against
+// state.Outputs that may contain sensitive.PlaceholderPrefix entries.
+// Per-provider Diff implementations receive desired/current via gRPC and
+// are out of scope for engine-side masking. iac/sensitive.MaskSensitiveForDiff
+// is exported for future in-tree consumers.
+```
+
+Add `iac/sensitive/route_test.go` test `TestMaskSensitiveForDiff_*` (already in Task 1) is the validation surface.
+
+**Step 5.3: Run tests + lint**
+
+Run:
+- `go test ./cmd/wfctl/... ./iac/sensitive/...` → PASS
+- `go vet ./...` → no output
+- `golangci-lint run ./cmd/wfctl/...` → no findings
+
+**Step 5.4: Commit**
+
+```bash
+# If 5.2a path:
+git add cmd/wfctl/infra_apply_refresh.go cmd/wfctl/<other-modified>.go
+# If 5.2b path:
+git add cmd/wfctl/infra_apply_refresh.go
+
+git commit -m "$(cat <<'EOF'
+feat(wfctl): drift-masking wiring for sensitive state outputs
+
+[For 5.2a: cite specific files] OR
+[For 5.2b: documents that no in-tree Diff call site sees state.Outputs
+with placeholders; iac/sensitive.MaskSensitiveForDiff stays exported
+for future consumers.]
+
+Rollback: revert this commit; masking is additive.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 6: Documentation update + DOCUMENTATION.md / WFCTL.md / CHANGELOG
 
 **Files:**
 - Modify: `DOCUMENTATION.md`
 - Modify: `docs/WFCTL.md`
 - Modify: `CHANGELOG.md`
 
-**Change class:** Documentation. Verification: spell-check + render preview.
+**Change class:** Documentation. Verification: spell-check + render preview + rollback validation (Step 6.4).
 
-**Step 5.1: Add a section to `DOCUMENTATION.md` titled "Sensitive output routing"**
+**Step 6.1: Add a section to `DOCUMENTATION.md` titled "Sensitive output routing"**
 
 Append (or insert in an appropriate place near existing IaC sections):
 
@@ -1953,7 +2220,7 @@ hand-off. Cross-process consumers reference the routed secret by name
 via `secret://<resource>_<key>` directly.
 ```
 
-**Step 5.2: Add `audit-state-secrets` to `docs/WFCTL.md`**
+**Step 6.2: Add `audit-state-secrets` to `docs/WFCTL.md`**
 
 In the `wfctl infra` section, add after `audit-secrets`:
 
@@ -1988,7 +2255,7 @@ Distinct from `audit-secrets` which audits the `secrets.generate` config
 block for anti-patterns. Run both as part of regular hygiene.
 ```
 
-**Step 5.3: Add CHANGELOG entry**
+**Step 6.3: Add CHANGELOG entry**
 
 In `CHANGELOG.md`, under the next-version section (v0.27.0):
 
@@ -2043,7 +2310,32 @@ understand; rotate affected secrets first or manually edit state to
 inline the value from `secrets.Provider`.
 ```
 
-**Step 5.4: Spell-check + verify cross-references**
+**Step 6.4: Validate rollback claim**
+
+The CHANGELOG / design §8 claims rollback path: "pin `setup-wfctl@v0.26.x` and rebuild; rotate affected secrets first." Validate the claim manually:
+
+1. Build the v0.27.0 wfctl (current branch) and apply the env-provider fixture from Step 2.7.bis. Confirm state file contains `secret_ref://...` placeholder strings.
+2. Inspect what a v0.26.x consumer would do with the placeholder. Build a v0.26.x wfctl from the prior tagged release:
+
+```sh
+cd /tmp && git clone --branch v0.26.x https://github.com/GoCodeAlone/workflow.git wfctl-026 || true
+cd wfctl-026 && go build -o /tmp/wfctl-026 ./cmd/wfctl
+```
+
+(If `v0.26.x` tag doesn't yet exist — workflow's most recent release is the prior tag — substitute the most recent stable release tag and document the substitution.)
+
+3. Run the v0.26.x wfctl against the v0.27.0-written state:
+
+```sh
+cd /tmp/wfctl-routing-smoke
+/tmp/wfctl-026 infra outputs -c infra-with-env.yaml 2>&1 | tee rollback.log
+```
+
+Expected: outputs literally include `secret_ref://...` strings (not crashes; not hangs). Document the actual behaviour in CHANGELOG §Rollback. If a downstream consumer (e.g., infra_output secret generator) processes the placeholder as a literal value, document the manual recovery step (rotate via `wfctl infra bootstrap --force-rotate <name>` running v0.27.0 first).
+
+If a v0.26.x build is not feasible (older Go module dependencies, tag missing), document this in CHANGELOG with a one-line note: "Rollback validation deferred — see PR <N> for explicit verification once a v0.26.x branch is available."
+
+**Step 6.5: Spell-check + verify cross-references**
 
 Run:
 - `grep -n "secret_ref://" docs/ DOCUMENTATION.md CHANGELOG.md` → all references consistent.
@@ -2051,7 +2343,7 @@ Run:
 
 Expected: cross-references resolve; no broken anchors.
 
-**Step 5.5: Commit**
+**Step 6.6: Commit**
 
 ```bash
 git add DOCUMENTATION.md docs/WFCTL.md CHANGELOG.md
@@ -2074,7 +2366,7 @@ EOF
 
 ## Final verification (before PR)
 
-After Task 5, the implementer runs the **full local CI gate**:
+After Task 6, the implementer runs the **full local CI gate**:
 
 ```sh
 cd /Users/jon/workspace/workflow/_worktrees/engine-sensitive-output-routing
@@ -2095,11 +2387,15 @@ golangci-lint run ./...
 go build -o wfctl ./cmd/wfctl
 ./wfctl infra audit-state-secrets --help
 
-# 6. Verify no missed Outputs:r.Outputs literals (regression guard)
-grep -rn "Outputs:.*r\.Outputs\|Outputs:.*live\.Outputs" cmd/wfctl/*.go
-# Expected output: only line 318+341 of infra_state_store.go (display layer)
-# OR additional sites that the implementer has triaged and either rewired
-# or documented as "OK because read from a sanitized source"
+# 6. Verify no missed Outputs literal regressions (regression guard)
+grep -rn "Outputs:.*r\.Outputs\|Outputs:.*live\.Outputs\|Outputs:.*imported\.Outputs" cmd/wfctl/*.go
+# Expected output:
+#   infra_state_store.go:318+341 — display layer, OK
+#   infra.go:1101 — Import path, OUT OF SCOPE per Scope Manifest (operator runs
+#                   audit-state-secrets post-import to triage; routing imported
+#                   state requires a behavioural decision out of scope here)
+# Anything else: must be triaged + either rewired through
+# persistResourceWithSecretRouting or documented as out-of-scope.
 ```
 
 All five steps must pass. If a regression appears, fix it before opening the PR.
