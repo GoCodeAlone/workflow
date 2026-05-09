@@ -176,6 +176,65 @@ func TestBootstrapSecrets_ProviderCredentialPartialRegenerates(t *testing.T) {
 	}
 }
 
+// TestBootstrapSecrets_StorageFilter_OnlyPersistsSubKeys verifies that
+// provider_credential JSON is filtered to the canonical sub-keys defined in
+// providerCredentialSubKeys before being persisted as GH Secrets. Without
+// this filter, sidecar metadata that the generator now emits alongside the
+// canonical creds (e.g. created_at after Task 8) would leak into the GH
+// Secrets store as phantom keys like SPACES_created_at — breaking the
+// audit-keys/prune contract that "every GH Secret matches an upstream key"
+// (ADR 0020 same-commit constraint with Task 8).
+//
+// This is the failing test for Task 9 of the spaces-key-iac-resource plan.
+// Until Task 10 implements the sub-key allow-list filter in bootstrapSecrets,
+// this test fails at the SPACES_created_at assertion.
+func TestBootstrapSecrets_StorageFilter_OnlyPersistsSubKeys(t *testing.T) {
+	// Stub generateSecret to mimic the post-Task-8 generateDOSpacesKey shape:
+	// access_key + secret_key (canonical) plus created_at (sidecar metadata).
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "AK",
+			"secret_key": "SK",
+			"created_at": "2026-05-08T10:00:00Z",
+		})
+		return string(out), nil
+	})
+
+	// Empty existing → bootstrap will generate.
+	p := &writeOnlyProvider{
+		existing: nil,
+		listOK:   true,
+	}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{
+				Key:    "SPACES",
+				Type:   "provider_credential",
+				Source: "digitalocean.spaces",
+				Name:   "test-key",
+			},
+		},
+	}
+
+	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+
+	// Storage MUST contain the two canonical sub-keys.
+	if _, ok := p.stored["SPACES_access_key"]; !ok {
+		t.Errorf("SPACES_access_key should be stored; stored=%v", p.stored)
+	}
+	if _, ok := p.stored["SPACES_secret_key"]; !ok {
+		t.Errorf("SPACES_secret_key should be stored; stored=%v", p.stored)
+	}
+
+	// Storage MUST NOT contain sidecar metadata fields like created_at:
+	// these are not real GH Secrets and would pollute audit-keys/prune output.
+	if _, ok := p.stored["SPACES_created_at"]; ok {
+		t.Errorf("SPACES_created_at MUST NOT be stored as a GH Secret (storage-filter regression); stored=%v", p.stored)
+	}
+}
+
 // TestBootstrapSecrets_ProviderCredentialProbeIgnoresBareKey verifies that a
 // plain secret named the same as the provider_credential key (without the
 // _access_key / _secret_key suffixes) does not cause a false skip.
