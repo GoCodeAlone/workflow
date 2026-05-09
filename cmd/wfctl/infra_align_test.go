@@ -1004,14 +1004,14 @@ secrets:
 	}
 }
 
-// TestRA9_CanonicalSingleEntry_Passes is the positive happy-path fixture for
+// TestInfraAlign_RA9_CanonicalSingleEntry_Passes is the positive happy-path fixture for
 // the R-A9 severity flip (rev3): the canonical single-entry SPACES key with
 // no doubled-create anti-pattern must pass `wfctl infra align --strict` with
 // exit code 0 and produce zero R-A9 findings.
 //
 // This is the inverse of TestInfraAlign_RA9_SuspiciousKey_Fires: it locks in
 // that the rule does not regress into false positives once it fires as ERROR.
-func TestRA9_CanonicalSingleEntry_Passes(t *testing.T) {
+func TestInfraAlign_RA9_CanonicalSingleEntry_Passes(t *testing.T) {
 	yaml := `
 secrets:
   generate:
