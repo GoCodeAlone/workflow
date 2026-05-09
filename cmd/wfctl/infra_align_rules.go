@@ -724,7 +724,7 @@ func checkRA9(ctx *alignContext) []AlignFinding {
 					Severity: "ERROR",
 					Resource: gen.Key,
 					Message: fmt.Sprintf(
-						"provider_credential key %q ends in %q; use canonical %q (auto-derives sub-keys via providerCredentialSubKeys[%q])",
+						"provider_credential key %q ends in %q; use canonical key %q — bootstrap auto-derives the sub-keys for source %q",
 						gen.Key, suffix, strings.TrimSuffix(gen.Key, suffix), gen.Source,
 					),
 				})

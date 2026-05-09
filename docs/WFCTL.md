@@ -1437,8 +1437,14 @@ WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve --skip-refresh -c infra
 #### `infra align`
 
 Run a battery of static alignment checks against a config (and optionally a
-plan). Each rule (`R-A1` … `R-A10`) emits findings as a `FAIL` (always
-non-zero exit) or `WARN` (non-zero only with `--strict`).
+plan). Each rule (`R-A1` … `R-A10`) emits findings at one of three severity
+tiers:
+
+- `FAIL` — deterministic failure; always non-zero exit (e.g. unresolved env var).
+- `ERROR` — hard rule violation; always non-zero exit, equivalent to `FAIL`
+  for exit-code purposes. Used by rules that pair the violation with a
+  fix-suggestion in the message (e.g. `R-A9`).
+- `WARN` — advisory; non-zero exit only with `--strict`.
 
 ```
 wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict] [--strict-health] [--strict-cidr] [--max-changes N]
@@ -1449,7 +1455,7 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 | `--config`, `-c` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
 | `--env` | `` | Environment name for per-env config resolution |
 | `--plan` | `` | Path to a plan JSON file. Enables `R-A7` (plan-output sanity) and `R-A10` (provider `ValidatePlan` dispatch). |
-| `--strict` | `false` | Treat all `WARN` findings as `FAIL` (exit 1) |
+| `--strict` | `false` | Treat all `WARN` findings as failing (exit 1). `FAIL` and `ERROR` always block regardless of this flag. |
 | `--strict-health` | `false` | Treat `R-A2` health-check `WARN`s as `FAIL` |
 | `--strict-cidr` | `false` | Enable strict CIDR overlap checks (reserved) |
 | `--max-changes` | `50` | Warn when the plan has more than N actions |

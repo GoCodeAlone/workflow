@@ -1011,6 +1011,14 @@ modules:
 	if !findingsHaveRuleAndSeverity(findings, "R-A9", "ERROR") {
 		t.Errorf("expected R-A9 ERROR, got: %v", findings)
 	}
+	// End-to-end: ERROR severity must produce a non-zero exit code regardless
+	// of --strict (the user-visible CI gate, not just the severity label).
+	if code := alignExitCode(findings, false); code != 1 {
+		t.Errorf("alignExitCode(strict=false) = %d, want 1 — R-A9 ERROR must block without --strict", code)
+	}
+	if code := alignExitCode(findings, true); code != 1 {
+		t.Errorf("alignExitCode(strict=true) = %d, want 1", code)
+	}
 }
 
 // TestInfraAlign_RA9_CleanKey_DoesNotFire verifies the canonical SPACES key
