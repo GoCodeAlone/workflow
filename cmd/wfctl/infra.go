@@ -92,6 +92,8 @@ func runInfra(args []string) error {
 		return nil
 	case "audit-keys":
 		return runInfraAuditKeysCmd(args[1:])
+	case "prune":
+		return runInfraPruneCmd(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -117,6 +119,7 @@ Actions:
   cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
   audit-secrets  Report provider_credential anti-patterns in secrets.generate
   audit-keys     List cloud-side resources of --type via the provider's EnumeratorAll
+  prune          Destructively delete cloud resources by --created-before / --exclude-access-key (two-key opt-in)
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
