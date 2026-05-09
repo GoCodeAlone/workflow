@@ -96,6 +96,11 @@ func runInfra(args []string) error {
 		return runInfraPruneCmd(args[1:])
 	case "rotate-and-prune":
 		return runInfraRotateAndPruneCmd(args[1:])
+	case "audit-state-secrets":
+		if rc := runInfraAuditStateSecrets(args[1:], os.Stdout); rc != 0 {
+			return fmt.Errorf("audit-state-secrets exited with code %d", rc)
+		}
+		return nil
 	default:
 		return infraUsage()
 	}
@@ -123,6 +128,7 @@ Actions:
   audit-keys     List cloud-side resources of --type via the provider's EnumeratorAll
   prune          Destructively delete cloud resources by --created-before / --exclude-access-key (two-key opt-in)
   rotate-and-prune  All-in-one: rotate canonical credential, then prune older keys with the new key as exclusion target
+  audit-state-secrets  Audit state.Outputs vs. secrets.Provider for orphans, legacy, missing
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
