@@ -86,17 +86,20 @@ func runInfraAuditKeys(args []string, enumerator interfaces.EnumeratorAll, w io.
 // Splitting the dispatcher from runInfraAuditKeys keeps the testable
 // function pure (no config / plugin I/O) while still presenting a single
 // CLI surface to operators.
+//
+// Args-passing contract: this dispatcher captures EVERY flag it parses
+// (including --type) and synthesizes a clean inner-args slice with only
+// the flags runInfraAuditKeys understands. Forwarding the raw args slice
+// would error inside runInfraAuditKeys with "flag provided but not
+// defined: -config" because its inner FlagSet only declares --type.
 func runInfraAuditKeysCmd(args []string) error {
-	// Pre-parse just --config / --env so we can resolve providers; --type
-	// is reparsed inside runInfraAuditKeys against the same args slice.
 	fs := flag.NewFlagSet("infra audit-keys", flag.ContinueOnError)
 	fs.SetOutput(auditKeysStderr)
-	var configFile, envName string
+	var configFile, envName, resourceType string
 	fs.StringVar(&configFile, "config", "", "Config file (default: infra.yaml or config/infra.yaml)")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	fs.StringVar(&envName, "env", "", "Environment name for config resolution")
-	// Declared so flag.Parse doesn't error on --type; runInfraAuditKeys reparses.
-	_ = fs.String("type", "", "Resource type to enumerate (e.g. infra.spaces_key)")
+	fs.StringVar(&resourceType, "type", "", "Resource type to enumerate (e.g. infra.spaces_key)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -117,9 +120,13 @@ func runInfraAuditKeysCmd(args []string) error {
 		}
 	}()
 
+	// Synthesize a clean inner-args slice — only flags runInfraAuditKeys
+	// declares. resourceType may be empty; runInfraAuditKeys handles the
+	// "--type required" error itself with its own structured message.
+	inner := []string{"--type", resourceType}
 	for _, p := range providers {
 		if enum, ok := p.(interfaces.EnumeratorAll); ok {
-			if rc := runInfraAuditKeys(args, enum, auditKeysStdout); rc != 0 {
+			if rc := runInfraAuditKeys(inner, enum, auditKeysStdout); rc != 0 {
 				return fmt.Errorf("audit-keys exited with code %d", rc)
 			}
 			return nil

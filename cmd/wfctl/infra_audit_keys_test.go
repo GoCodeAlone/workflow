@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"flag"
+	"io"
 	"strings"
 	"testing"
 
@@ -23,6 +25,101 @@ type fakeProviderEnumeratorAll struct {
 func (f *fakeProviderEnumeratorAll) EnumerateAll(_ context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
 	f.lastType = resourceType
 	return f.keys, nil
+}
+
+// fakeIaCProviderForAuditKeys is the minimal IaCProvider implementation
+// required to exercise runInfraAuditKeysCmd's dispatcher path. It
+// implements interfaces.EnumeratorAll (so the dispatcher's type-assert
+// succeeds) plus stubs of every other IaCProvider method (returning nil/
+// zero values) so go's type system is satisfied. Real cloud calls are
+// never reached because audit-keys only invokes EnumerateAll.
+type fakeIaCProviderForAuditKeys struct {
+	keys []*interfaces.ResourceOutput
+}
+
+func (f *fakeIaCProviderForAuditKeys) Name() string    { return "fake-do" }
+func (f *fakeIaCProviderForAuditKeys) Version() string { return "0.0.0-test" }
+func (f *fakeIaCProviderForAuditKeys) Initialize(_ context.Context, _ map[string]any) error {
+	return nil
+}
+func (f *fakeIaCProviderForAuditKeys) Capabilities() []interfaces.IaCCapabilityDeclaration {
+	return nil
+}
+func (f *fakeIaCProviderForAuditKeys) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) Import(_ context.Context, _, _ string) (*interfaces.ResourceState, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) SupportedCanonicalKeys() []string { return nil }
+func (f *fakeIaCProviderForAuditKeys) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForAuditKeys) Close() error { return nil }
+func (f *fakeIaCProviderForAuditKeys) EnumerateAll(_ context.Context, _ string) ([]*interfaces.ResourceOutput, error) {
+	return f.keys, nil
+}
+
+// TestInfraAuditKeysCmd_AcceptsConfigFlag is the smoke-test sentinel for
+// the args-passing contract documented on runInfraAuditKeysCmd: the
+// dispatcher MUST synthesize a clean inner-args slice with only flags
+// runInfraAuditKeys understands. Forwarding the raw args slice (which
+// includes --config / --env) would error inside runInfraAuditKeys with
+// "flag provided but not defined: -config".
+//
+// Regression guard for the bug where unit tests of runInfraAuditKeys
+// passed only synthetic []string{"--type", ...} and never exercised the
+// dispatcher's args-passing path — real CLI invocations would error.
+func TestInfraAuditKeysCmd_AcceptsConfigFlag(t *testing.T) {
+	// Stub the provider loader so we don't need a real iac.provider in a
+	// real infra.yaml — any path is fine since the seam returns our fake.
+	origLoad := auditKeysLoadProviders
+	t.Cleanup(func() { auditKeysLoadProviders = origLoad })
+	auditKeysLoadProviders = func(_ context.Context, _ *flag.FlagSet, _, _ string) ([]interfaces.IaCProvider, []io.Closer, error) {
+		return []interfaces.IaCProvider{&fakeIaCProviderForAuditKeys{
+			keys: []*interfaces.ResourceOutput{
+				{Name: "k", Type: "infra.spaces_key", ProviderID: "AK", Outputs: map[string]any{"name": "k", "access_key": "AK"}},
+			},
+		}}, nil, nil
+	}
+
+	// Capture stdout via the seam so we can assert the CLI rendered output.
+	origStdout := auditKeysStdout
+	t.Cleanup(func() { auditKeysStdout = origStdout })
+	var out bytes.Buffer
+	auditKeysStdout = &out
+
+	// The fix-under-test: --config + --env are in args. Pre-fix behavior
+	// errored with "flag provided but not defined: -config" because the
+	// inner FlagSet only declared --type.
+	if err := runInfraAuditKeysCmd([]string{
+		"--type", "infra.spaces_key",
+		"--config", "/tmp/some-infra.yaml",
+		"--env", "staging",
+	}); err != nil {
+		t.Fatalf("runInfraAuditKeysCmd failed; --config / --env should be accepted by the dispatcher: %v", err)
+	}
+	if !strings.Contains(out.String(), "AK") {
+		t.Errorf("expected dispatcher to reach EnumerateAll + render output; got: %s", out.String())
+	}
 }
 
 // TestInfraAuditKeys_ListsAll verifies that `wfctl infra audit-keys --type

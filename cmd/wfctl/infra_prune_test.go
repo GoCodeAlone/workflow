@@ -3,11 +3,127 @@ package main
 import (
 	"bytes"
 	"context"
+	"flag"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+// fakeIaCProviderForPrune is the minimal IaCProvider needed to exercise
+// runInfraPruneCmd's dispatcher path (smoke test for the args-passing
+// fix). Implements interfaces.EnumeratorAll so the type-assert in the
+// dispatcher succeeds; ResourceDriver returns a fake driver that no-ops
+// Delete so the prune step succeeds without touching cloud APIs.
+type fakeIaCProviderForPrune struct {
+	keys []*interfaces.ResourceOutput
+}
+
+func (f *fakeIaCProviderForPrune) Name() string                                         { return "fake-do" }
+func (f *fakeIaCProviderForPrune) Version() string                                      { return "0.0.0-test" }
+func (f *fakeIaCProviderForPrune) Initialize(_ context.Context, _ map[string]any) error { return nil }
+func (f *fakeIaCProviderForPrune) Capabilities() []interfaces.IaCCapabilityDeclaration  { return nil }
+func (f *fakeIaCProviderForPrune) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForPrune) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForPrune) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForPrune) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForPrune) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForPrune) Import(_ context.Context, _, _ string) (*interfaces.ResourceState, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForPrune) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForPrune) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return &fakeNoopDriver{}, nil
+}
+func (f *fakeIaCProviderForPrune) SupportedCanonicalKeys() []string { return nil }
+func (f *fakeIaCProviderForPrune) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (f *fakeIaCProviderForPrune) Close() error { return nil }
+func (f *fakeIaCProviderForPrune) EnumerateAll(_ context.Context, _ string) ([]*interfaces.ResourceOutput, error) {
+	return f.keys, nil
+}
+
+// fakeNoopDriver implements interfaces.ResourceDriver as no-ops so the
+// prune-dispatcher smoke test can exercise the full path without touching
+// cloud APIs. Delete records nothing — the test asserts on the dispatcher
+// running cleanly, not on side effects.
+type fakeNoopDriver struct{}
+
+func (d *fakeNoopDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+func (d *fakeNoopDriver) Read(_ context.Context, _ interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+func (d *fakeNoopDriver) Update(_ context.Context, _ interfaces.ResourceRef, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+func (d *fakeNoopDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	return &interfaces.DiffResult{}, nil
+}
+func (d *fakeNoopDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+func (d *fakeNoopDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	return nil, nil
+}
+func (d *fakeNoopDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+func (d *fakeNoopDriver) SensitiveKeys() []string { return nil }
+
+// TestInfraPruneCmd_AcceptsConfigFlag is the smoke-test sentinel for the
+// args-passing contract on runInfraPruneCmd: the dispatcher MUST
+// synthesize a clean inner-args slice so runInfraPrune's narrow FlagSet
+// doesn't error on --config / --env (which only the dispatcher itself
+// understands). Regression guard for the same bug class team-lead caught
+// in audit-keys (Copilot 3212662894).
+func TestInfraPruneCmd_AcceptsConfigFlag(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+
+	origLoad := pruneLoadProviders
+	t.Cleanup(func() { pruneLoadProviders = origLoad })
+	pruneLoadProviders = func(_ context.Context, _ *flag.FlagSet, _, _ string) ([]interfaces.IaCProvider, []io.Closer, error) {
+		return []interfaces.IaCProvider{&fakeIaCProviderForPrune{
+			// One eligible old key; --created-before will catch it; --exclude-access-key
+			// preserves "AK_NEW" (which isn't in this list, so all listed keys are eligible).
+			keys: []*interfaces.ResourceOutput{
+				{Name: "k", Type: "infra.spaces_key", ProviderID: "AK_OLD", Outputs: map[string]any{
+					"access_key": "AK_OLD", "created_at": "2026-05-01T00:00:00Z", "name": "k",
+				}},
+			},
+		}}, nil, nil
+	}
+
+	origStdout := pruneStdout
+	t.Cleanup(func() { pruneStdout = origStdout })
+	var out bytes.Buffer
+	pruneStdout = &out
+
+	if err := runInfraPruneCmd([]string{
+		"--type", "infra.spaces_key",
+		"--config", "/tmp/some-infra.yaml",
+		"--env", "staging",
+		"--created-before", "2026-05-08T00:00:00Z",
+		"--exclude-access-key", "AK_NEW",
+		"--confirm",
+		"--non-interactive",
+	}); err != nil {
+		t.Fatalf("runInfraPruneCmd failed; --config / --env should be accepted by the dispatcher: %v", err)
+	}
+}
 
 // fakeProviderWithDelete is a test double implementing the narrow
 // pruneProvider interface (EnumerateAll + DeleteResource). Tracks deleted

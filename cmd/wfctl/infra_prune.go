@@ -277,21 +277,30 @@ var pruneLoadProviders = defaultCleanupLoadProviders
 // Loads iac.provider modules from infra.yaml, finds the first one that
 // implements interfaces.EnumeratorAll, wraps it in pruneProviderAdapter,
 // and dispatches to runInfraPrune.
+//
+// Args-passing contract: this dispatcher captures EVERY flag it parses
+// (including all of runInfraPrune's flags) and synthesizes a clean inner-
+// args slice with only the flags runInfraPrune understands. Forwarding
+// the raw args slice would error inside runInfraPrune with "flag provided
+// but not defined: -config" because its inner FlagSet doesn't declare
+// --config / --env (those belong to the dispatcher's provider-loading
+// concern).
 func runInfraPruneCmd(args []string) error {
 	fs := flag.NewFlagSet("infra prune", flag.ContinueOnError)
 	fs.SetOutput(pruneStderr)
 	var configFile, envName string
+	var resourceType, createdBefore, excludeAK, allowlist string
+	var confirm, nonInteractive, recoveryFromLastRotation bool
 	fs.StringVar(&configFile, "config", "", "Config file (default: infra.yaml or config/infra.yaml)")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	fs.StringVar(&envName, "env", "", "Environment name for config resolution")
-	// Declared so flag.Parse doesn't error; runInfraPrune reparses against the same args slice.
-	_ = fs.String("type", "", "")
-	_ = fs.String("created-before", "", "")
-	_ = fs.String("exclude-access-key", "", "")
-	_ = fs.String("allowlist", "", "")
-	_ = fs.Bool("confirm", false, "")
-	_ = fs.Bool("non-interactive", false, "")
-	_ = fs.Bool("recovery-from-last-rotation", false, "")
+	fs.StringVar(&resourceType, "type", "", "Resource type")
+	fs.StringVar(&createdBefore, "created-before", "", "RFC3339 timestamp")
+	fs.StringVar(&excludeAK, "exclude-access-key", "", "Access key to preserve")
+	fs.StringVar(&allowlist, "allowlist", "", "Regex of names to skip")
+	fs.BoolVar(&confirm, "confirm", false, "Confirmation flag")
+	fs.BoolVar(&nonInteractive, "non-interactive", false, "Skip y/N prompt")
+	fs.BoolVar(&recoveryFromLastRotation, "recovery-from-last-rotation", false, "Read recovery file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -312,10 +321,34 @@ func runInfraPruneCmd(args []string) error {
 		}
 	}()
 
+	// Synthesize a clean inner-args slice with only flags runInfraPrune
+	// declares. Empty strings / false bools are omitted so they don't
+	// override runInfraPrune's defaults (and so the inner validation
+	// surfaces the same "X is required" messages the user expects).
+	inner := []string{"--type", resourceType}
+	if createdBefore != "" {
+		inner = append(inner, "--created-before", createdBefore)
+	}
+	if excludeAK != "" {
+		inner = append(inner, "--exclude-access-key", excludeAK)
+	}
+	if allowlist != "" {
+		inner = append(inner, "--allowlist", allowlist)
+	}
+	if confirm {
+		inner = append(inner, "--confirm")
+	}
+	if nonInteractive {
+		inner = append(inner, "--non-interactive")
+	}
+	if recoveryFromLastRotation {
+		inner = append(inner, "--recovery-from-last-rotation")
+	}
+
 	for _, p := range providers {
 		if _, ok := p.(interfaces.EnumeratorAll); ok {
 			adapter := &pruneProviderAdapter{p: p}
-			if rc := runInfraPrune(args, adapter, pruneStdout); rc != 0 {
+			if rc := runInfraPrune(inner, adapter, pruneStdout); rc != 0 {
 				return fmt.Errorf("prune exited with code %d", rc)
 			}
 			return nil

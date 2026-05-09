@@ -9,7 +9,81 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+// rotateAndPruneStdout / rotateAndPruneStderr seam variables mirror the
+// auditKeysStdout / pruneStdout pattern so rotate-and-prune dispatcher
+// tests don't race on global os.Stdout.
+var (
+	rotateAndPruneStdout io.Writer = os.Stdout
+	rotateAndPruneStderr io.Writer = os.Stderr
+)
+
+// rotateAndPruneLoadProviders is the seam tests override to inject fakes.
+// Defaults to defaultCleanupLoadProviders so rotate-and-prune inherits the
+// same env-resolution + plugin-discovery contract as cleanup / audit-keys
+// / prune.
+var rotateAndPruneLoadProviders = defaultCleanupLoadProviders
+
+// runInfraRotateAndPruneCmd is the production entry point for `wfctl infra
+// rotate-and-prune`. Loads iac.provider modules from infra.yaml, finds the
+// first one that implements interfaces.EnumeratorAll, wraps it in
+// pruneProviderAdapter, and dispatches to runInfraRotateAndPrune.
+//
+// runInfraRotateAndPrune already declares --config / --env (it needs them
+// for parseSecretsConfig in Step 1 of the rotate flow), so the dispatcher
+// forwards args verbatim — no synthesize-clean-inner-args dance required.
+// We still pre-parse here to extract --config / --env for the provider
+// loader, but we don't reformat the args slice.
+func runInfraRotateAndPruneCmd(args []string) error {
+	fs := flag.NewFlagSet("infra rotate-and-prune (dispatch)", flag.ContinueOnError)
+	fs.SetOutput(rotateAndPruneStderr)
+	var configFile, envName string
+	// Declare every flag runInfraRotateAndPrune accepts so flag.Parse
+	// doesn't error here. Only --config / --env are captured (used by the
+	// provider loader); the rest are re-parsed inside runInfraRotateAndPrune
+	// against the same args slice (Go's flag package is idempotent).
+	fs.StringVar(&configFile, "config", "", "Config file (default: infra.yaml or config/infra.yaml)")
+	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
+	fs.StringVar(&envName, "env", "", "Environment name for config resolution")
+	_ = fs.String("type", "", "Resource type")
+	_ = fs.String("name", "", "Canonical credential name")
+	_ = fs.String("allowlist", "", "Regex of names to skip during prune")
+	_ = fs.Bool("confirm", false, "Confirmation flag")
+	_ = fs.Bool("non-interactive", false, "Skip y/N prompt")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	providers, closers, err := rotateAndPruneLoadProviders(ctx, fs, configFile, envName)
+	if err != nil {
+		return fmt.Errorf("load providers: %w", err)
+	}
+	defer func() {
+		for _, c := range closers {
+			if c == nil {
+				continue
+			}
+			if cerr := c.Close(); cerr != nil {
+				fmt.Fprintf(rotateAndPruneStderr, "warning: provider shutdown: %v\n", cerr)
+			}
+		}
+	}()
+
+	for _, p := range providers {
+		if _, ok := p.(interfaces.EnumeratorAll); ok {
+			adapter := &pruneProviderAdapter{p: p}
+			if rc := runInfraRotateAndPrune(args, adapter, rotateAndPruneStdout); rc != 0 {
+				return fmt.Errorf("rotate-and-prune exited with code %d", rc)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("rotate-and-prune: no loaded provider implements EnumeratorAll")
+}
 
 // recoveryRecord is persisted to ${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json
 // after a successful rotate step, BEFORE the prune step. Used by the
