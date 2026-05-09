@@ -574,11 +574,32 @@ func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.S
 // Why string fallbacks: per workspace memory feedback_workflow_plugin_structpb_boundary,
 // errors crossing the gRPC plugin boundary lose sentinel identity (structpb
 // roundtrip), so message-string matching is the cross-process robust check.
-// The string-set is conservative: "unimplemented", "not implemented", and
-// the two `does not implement (Service|ServiceContext)Invoker` literals that
-// plugin/external/sdk/grpc_server.go emits for missing-handler cases. The
-// helper does NOT match "no service handler" — that string is not produced
-// by any current plugin sdk path.
+//
+// Matched message strings (verified against plugin/external/sdk/grpc_server.go
+// at grpcServer.InvokeService):
+//
+//   - "unimplemented" — substring match for gRPC codes.Unimplemented status
+//     messages whose .Error() lowercases to include the literal.
+//   - "not implemented" — generic catch for older plugin sdks.
+//   - "does not implement serviceinvoker" — emitted at line 527 when a module
+//     handle dispatches an untyped call but does not satisfy ServiceInvoker
+//     after the ServiceContextInvoker assertion also failed.
+//   - "does not implement servicecontextinvoker" — defensive forward-compat
+//     match. The current grpc_server.go does NOT emit this literal (its
+//     untyped path silently falls through from the optional
+//     ServiceContextInvoker check at line 509 to the ServiceInvoker check at
+//     line 524), so this arm is never hit in production today. Retained so
+//     a future grpc_server change that surfaces an explicit
+//     ServiceContextInvoker-missing error continues to translate cleanly.
+//
+// Not matched (intentional):
+//
+//   - "does not implement typedserviceinvoker" (grpc_server line 498) —
+//     emitted only on the typed-input path. IaCProvider RPCs use the
+//     untyped args path, so this literal is unreachable for the proxy
+//     this helper serves. Keeping the matcher narrow avoids accidentally
+//     marking unrelated typed-call failures as Unimplemented.
+//   - "no service handler" — never produced by any current plugin sdk path.
 //
 // Strict-mode role (v0.27.1): this helper exists ONLY to translate transport
 // errors into interfaces.ErrProviderMethodUnimplemented at the proxy

@@ -110,8 +110,20 @@ func runInfraRotateAndPruneCmd(args []string) error {
 		// runInfraRotateAndPrune validates that itself and exits 2 before
 		// reaching rotation, so we don't duplicate the check here.
 		adapter := &pruneProviderAdapter{p: p}
+		// `provider` is what we hand to runInfraRotateAndPrune. By default
+		// it's the raw adapter; when we successfully probed EnumerateAll
+		// on the probe's resourceType, we wrap in cachedPruneProvider so
+		// runInfraPrune (invoked by runInfraRotateAndPrune after rotation)
+		// serves the cached slice instead of re-issuing the cloud
+		// enumeration. This avoids the double-billed EnumerateAll on the
+		// successful path. The cache is keyed by resourceType — the
+		// freshly-rotated key is excluded by --exclude-access-key in the
+		// prune step regardless of whether enumerate sees it, so serving
+		// the pre-rotation snapshot is safe.
+		var provider pruneProvider = adapter
 		if resourceType != "" {
-			if _, probeErr := adapter.EnumerateAll(ctx, resourceType); probeErr != nil {
+			outs, probeErr := adapter.EnumerateAll(ctx, resourceType)
+			if probeErr != nil {
 				if errors.Is(probeErr, interfaces.ErrProviderMethodUnimplemented) {
 					// This plugin doesn't support EnumerateAll behind
 					// the bridge — try the next provider rather than
@@ -123,8 +135,9 @@ func runInfraRotateAndPruneCmd(args []string) error {
 				return fmt.Errorf("rotate-and-prune pre-flight: provider %q EnumerateAll(%q) failed (rotation aborted; no state mutated): %w",
 					p.Name(), resourceType, probeErr)
 			}
+			provider = &cachedPruneProvider{cached: outs, inner: adapter, resourceType: resourceType}
 		}
-		rc := runInfraRotateAndPrune(args, adapter, rotateAndPruneStdout)
+		rc := runInfraRotateAndPrune(args, provider, rotateAndPruneStdout)
 		if rc != 0 {
 			return fmt.Errorf("rotate-and-prune exited with code %d", rc)
 		}

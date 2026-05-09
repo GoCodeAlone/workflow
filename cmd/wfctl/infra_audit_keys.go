@@ -101,19 +101,21 @@ func renderAuditKeys(outs []*interfaces.ResourceOutput, resourceType string, w i
 
 // runInfraAuditKeysCmd is the production entry point for `wfctl infra
 // audit-keys`. It loads iac.provider modules from the config (honoring
-// --config / --env), finds the first one that implements
-// interfaces.EnumeratorAll for the requested --type, and dispatches to
-// runInfraAuditKeys.
+// --config / --env), iterates each that implements
+// interfaces.EnumeratorAll, and renders the first successful result.
 //
-// Splitting the dispatcher from runInfraAuditKeys keeps the testable
-// function pure (no config / plugin I/O) while still presenting a single
-// CLI surface to operators.
+// Splitting the dispatcher from runInfraAuditKeys keeps the underlying
+// pure function (no config / plugin I/O) available for unit tests while
+// still presenting a single CLI surface to operators.
 //
-// Args-passing contract: this dispatcher captures EVERY flag it parses
-// (including --type) and synthesizes a clean inner-args slice with only
-// the flags runInfraAuditKeys understands. Forwarding the raw args slice
-// would error inside runInfraAuditKeys with "flag provided but not
-// defined: -config" because its inner FlagSet only declares --type.
+// Dispatch shape: this function does NOT delegate to runInfraAuditKeys.
+// runInfraAuditKeys is single-provider and would re-issue the
+// EnumerateAll call we already made for the multi-provider sieve below,
+// so the dispatcher invokes EnumerateAll directly and renders via
+// renderAuditKeys to keep the cloud-API call count to one per
+// successful provider. The standalone runInfraAuditKeys remains for
+// unit tests that exercise the rendering + arg-parsing surface against
+// a single fake EnumeratorAll.
 //
 // Strict-mode policy (v0.27.1, per user mandate "remove the fallback and
 // force strict mode"): if every loaded provider's EnumerateAll returns
