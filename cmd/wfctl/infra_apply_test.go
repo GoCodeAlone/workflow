@@ -202,7 +202,7 @@ modules:
 	}
 	defer func() { resolveIaCProvider = orig }()
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
@@ -309,7 +309,7 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
@@ -401,7 +401,7 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
@@ -446,7 +446,7 @@ modules:
 		t.Fatalf("write config: %v", err)
 	}
 
-	err := applyInfraModules(context.Background(), cfgPath, "")
+	_, err := applyInfraModules(context.Background(), cfgPath, "")
 	if err == nil {
 		t.Fatal("expected duplicate resource name error, got nil")
 	}
@@ -510,7 +510,7 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
@@ -662,7 +662,7 @@ func TestApplyWithProvider_NoChanges(t *testing.T) {
 	}}
 
 	fake := &applyCapture{}
-	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", []interfaces.ResourceSpec{spec}, current, nil, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", []interfaces.ResourceSpec{spec}, current, nil, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -704,7 +704,7 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 	provider := &readBackedProvider{driver: driver}
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -794,7 +794,7 @@ func TestApplyWithProvider_DNSAdoptionFailedUpdateKeepsLiveAppliedConfig(t *test
 	}
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected apply failure, got nil")
 	}
@@ -833,7 +833,7 @@ func TestApplyWithProvider_DNSAdoptionFallsBackToNameWhenDomainOmitted(t *testin
 	}
 	provider := &readBackedProvider{driver: driver}
 
-	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 	if len(driver.reads) != 1 {
@@ -862,7 +862,7 @@ func TestApplyWithProvider_DNSAdoptionSaveFailureFailsBeforeApply(t *testing.T) 
 	provider := &readBackedProvider{driver: driver}
 	store := &fakeStateStore{saveErr: errors.New("disk full")}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected adoption save failure, got nil")
 	}
@@ -894,7 +894,7 @@ func TestApplyWithProvider_DNSAdoptionRequiresWritableStateStore(t *testing.T) {
 	}
 	provider := &readBackedProvider{driver: driver}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected adoption to fail with noop state store")
 	}
@@ -927,7 +927,7 @@ func TestApplyWithProvider_AdoptsResourceThroughDriverLocator(t *testing.T) {
 	provider := &readBackedProvider{driver: driver}
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
@@ -963,7 +963,7 @@ func TestApplyWithProvider_SkipsAdoptionWhenAppDriverHasNoLocator(t *testing.T) 
 	}
 	provider := &noDriverApplyProvider{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
 	if err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
@@ -996,7 +996,7 @@ func TestApplyWithProvider_DNSAdoptionRejectsMalformedProviderID(t *testing.T) {
 	provider := &readBackedProvider{driver: driver}
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected malformed ProviderID error")
 	}
@@ -1026,7 +1026,7 @@ func TestApplyWithProvider_DNSReadNotFoundKeepsCreateBehavior(t *testing.T) {
 	provider := &readBackedProvider{driver: driver}
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -1055,7 +1055,7 @@ func TestApplyWithProvider_DNSReadErrorFailsBeforeApply(t *testing.T) {
 	driver := &readDriver{readErr: errors.New("provider API unavailable")}
 	provider := &readBackedProvider{driver: driver}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected read error, got nil")
 	}
@@ -1078,7 +1078,7 @@ func TestApplyWithProvider_DNSReadNilLiveOutputFailsBeforeApply(t *testing.T) {
 	driver := &readDriver{}
 	provider := &readBackedProvider{driver: driver}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected nil live output adoption error")
 	}
@@ -1108,7 +1108,7 @@ func TestApplyWithProvider_DNSReadEmptyProviderIDFailsBeforeApply(t *testing.T) 
 	provider := &readBackedProvider{driver: driver}
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error when adopted live output has empty ProviderID")
 	}
@@ -1146,7 +1146,7 @@ func TestApplyWithProvider_DeletesRemovedResource(t *testing.T) {
 
 	fake := &applyCapture{}
 	store := &fakeStateStore{}
-	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", specs, current, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", specs, current, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -1246,7 +1246,7 @@ func TestApplyWithProvider_SavesStateForSuccessfulResources(t *testing.T) {
 	}
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -1302,7 +1302,7 @@ func TestApplyWithProvider_SavesStateOnPartialFailure(t *testing.T) {
 	}
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error on partial failure, got nil")
 	}
@@ -1328,7 +1328,7 @@ func TestApplyWithProvider_StoreSaveFailureFails(t *testing.T) {
 	}
 	store := &fakeStateStore{saveErr: fmt.Errorf("disk full")}
 
-	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected save failure after apply, got nil")
 	}
@@ -1362,7 +1362,7 @@ modules:
 		t.Fatalf("write config: %v", err)
 	}
 
-	err := applyInfraModules(context.Background(), cfgPath, "staging")
+	_, err := applyInfraModules(context.Background(), cfgPath, "staging")
 	if err == nil {
 		t.Fatal("expected error for disabled provider, got nil")
 	}
@@ -1388,7 +1388,7 @@ modules:
 		t.Fatalf("write config: %v", err)
 	}
 
-	err := applyInfraModules(context.Background(), cfgPath, "")
+	_, err := applyInfraModules(context.Background(), cfgPath, "")
 	if err == nil {
 		t.Fatal("expected error for missing provider, got nil")
 	}
@@ -1448,7 +1448,7 @@ func TestApplyInfraModules_CallsResolveSizing_ForEachSpec(t *testing.T) {
 		},
 	}
 
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, nil, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, nil, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -1571,7 +1571,7 @@ modules:
 		_ = r.Close()
 	})
 
-	err := applyInfraModules(context.Background(), cfgPath, "")
+	_, err := applyInfraModules(context.Background(), cfgPath, "")
 
 	w.Close()
 	os.Stderr = oldStderr
@@ -1612,7 +1612,7 @@ func TestApply_StateRecordsAppliedConfigSourceApply(t *testing.T) {
 	}
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), fake, "test", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), fake, "test", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -1647,7 +1647,7 @@ func TestAdoption_StateRecordsAppliedConfigSourceAdoption(t *testing.T) {
 	provider := &readBackedProvider{driver: driver}
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
 

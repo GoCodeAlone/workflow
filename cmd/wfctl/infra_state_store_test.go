@@ -211,7 +211,7 @@ modules:
 		t.Fatalf("write config: %v", err)
 	}
 
-	err := applyInfraModules(context.Background(), cfgPath, "")
+	_, err := applyInfraModules(context.Background(), cfgPath, "")
 	if err == nil {
 		t.Fatal("expected corrupt state error, got nil")
 	}
@@ -266,7 +266,7 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 

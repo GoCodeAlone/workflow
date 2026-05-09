@@ -268,7 +268,7 @@ modules:
 		return interfaces.IaCPlan{}, nil // empty plan → applyWithProviderAndStore returns immediately
 	}
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
