@@ -161,14 +161,17 @@ func writeRecoveryRecord(rec recoveryRecord) error {
 func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) int {
 	fs := flag.NewFlagSet("infra rotate-and-prune", flag.ContinueOnError)
 	fs.SetOutput(w)
-	var resourceType, name, configFile, envName, allowlist string
+	var resourceType, name, configFile, allowlist string
 	var confirm, nonInteractive bool
 	fs.StringVar(&resourceType, "type", "", "Resource type (required, e.g. infra.spaces_key)")
 	fs.StringVar(&name, "name", "", "Canonical credential name to rotate (required)")
 	fs.StringVar(&configFile, "config", "infra.yaml", "Config file")
 	fs.StringVar(&configFile, "c", "infra.yaml", "Config file (short)")
-	fs.StringVar(&envName, "env", "", "Environment name")
-	_ = envName // currently unused; reserved for future per-env config selection
+	// --env is accepted-and-ignored here so the dispatcher (runInfraRotateAndPruneCmd)
+	// can forward args verbatim including --env without the inner FlagSet
+	// erroring on unknown-flag. The dispatcher already uses --env to scope
+	// provider loading; secrets-config resolution happens via --config alone.
+	_ = fs.String("env", "", "Environment name (consumed by dispatcher; ignored here)")
 	fs.StringVar(&allowlist, "allowlist", "", "Regex matching names to skip during prune")
 	fs.BoolVar(&confirm, "confirm", false, "Required: explicit confirmation flag")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Skip the prune y/N prompt")
@@ -228,7 +231,9 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	rotated := rotations[0]
 	fmt.Fprintf(w, "  new access_key=%s, created_at=%s\n", rotated.AccessKey, rotated.CreatedAt)
 
-	// Step 2: persist recovery record BEFORE the prune step.
+	// Persist recovery record BEFORE the prune step. Treated as a sub-step
+	// of Step 1 (rotate) — operationally invisible from the user's vantage
+	// (no Fprintf header), only the resulting path is surfaced for ops use.
 	rec := recoveryRecord{
 		Type:      resourceType,
 		Name:      name,
@@ -243,7 +248,10 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	}
 	fmt.Fprintf(w, "  recovery file written to %s\n", recoveryFilePath())
 
-	// Step 3: delegate to prune with the new key as the exclusion target.
+	// Step 2 (user-visible): delegate to prune with the new key as the
+	// exclusion target. Step numbering matches the two banners the user
+	// sees: Step 1 is the rotate (above), Step 2 is the prune (here).
+	// The recovery-write between them is a sub-step of Step 1.
 	fmt.Fprintf(w, "\nStep 2: pruning older %s resources...\n", resourceType)
 	pruneArgs := []string{
 		"--type", resourceType,
@@ -268,11 +276,14 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	// cleanup on its own happy path. (runInfraPrune only deletes the file
 	// when invoked with --recovery-from-last-rotation, which we don't pass
 	// because we already have the rotation result in-process.)
-	if err := os.Remove(recoveryFilePath()); err != nil && !os.IsNotExist(err) {
-		// Non-fatal: recovery file already lacked-perms-removed or
-		// surprise concurrent operator. Surface so the operator can
-		// hand-clean if needed.
-		fmt.Fprintf(w, "rotate-and-prune: warning: failed to remove recovery file %s: %v\n", recoveryFilePath(), err)
+	recPath := recoveryFilePath()
+	if err := os.Remove(recPath); err != nil && !os.IsNotExist(err) {
+		// Non-fatal: a concurrent operator may have removed it, or perms
+		// changed under us. Surface with an explicit cleanup hint so the
+		// operator knows the rotation+prune itself succeeded and only the
+		// stale state file needs hand-clearing.
+		fmt.Fprintf(w, "rotate-and-prune: warning: rotation+prune succeeded but failed to remove stale recovery file at %s: %v\n", recPath, err)
+		fmt.Fprintf(w, "rotate-and-prune: hint: this file is no longer needed; remove with `rm %s` once safe.\n", recPath)
 	}
 	return 0
 }
