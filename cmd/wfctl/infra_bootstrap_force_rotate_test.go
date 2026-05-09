@@ -84,7 +84,7 @@ func TestInfraBootstrap_ForceRotate_DeletesAndRegenerates(t *testing.T) {
 	}
 	forceRotate := map[string]bool{"FOO": true}
 
-	result, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
+	result, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
 	if err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestInfraBootstrap_ForceRotate_ProviderCredential_MintsAndRevokes(t *testin
 		},
 	}
 
-	result, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	result, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
 	if err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestInfraBootstrap_ForceRotate_ProviderCredential_RevokeFailNonFatal(t *tes
 		},
 	}
 
-	result, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	result, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
 	if err != nil {
 		t.Fatalf("bootstrapSecrets should not fail on revoke error; got: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestInfraBootstrap_ForceRotate_ProviderCredential_WriteOnlyStore(t *testing
 		},
 	}
 
-	result, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	result, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
 	if err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestInfraBootstrap_ForceRotate_BestEffortDeleteOnMissing(t *testing.T) {
 	}
 	forceRotate := map[string]bool{"FOO": true}
 
-	_, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
+	_, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
 	if err != nil {
 		t.Fatalf("bootstrapSecrets returned error on missing key: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestInfraBootstrap_ForceRotate_BestEffortDeleteNotFound(t *testing.T) {
 	}
 	forceRotate := map[string]bool{"FOO": true}
 
-	_, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
+	_, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
 	if err != nil {
 		t.Fatalf("expected no error on best-effort delete; got: %v", err)
 	}
@@ -431,7 +431,7 @@ func TestInfraBootstrap_ForceRotate_CommaSeparated(t *testing.T) {
 		t.Fatalf("buildForceRotateSet: %v", err)
 	}
 
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 
@@ -477,7 +477,7 @@ func TestInfraBootstrap_ForceRotate_Repeatable(t *testing.T) {
 		t.Fatalf("buildForceRotateSet: %v", err)
 	}
 
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 

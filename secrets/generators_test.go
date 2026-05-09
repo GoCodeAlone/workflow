@@ -257,6 +257,65 @@ func TestGenerateSecret_ProviderCredential_MissingToken(t *testing.T) {
 	}
 }
 
+// TestGenerateDOSpacesKey_IncludesCreatedAt asserts that generateDOSpacesKey
+// surfaces the DO API's `created_at` timestamp alongside access_key+secret_key
+// in its JSON output. This is required by the upcoming SpacesKeyDriver IaC
+// resource (PR4b), which keys observed-key adoption on creation timestamps.
+//
+// Test isolation: redirects http.DefaultClient via the package's
+// rewriteTransport helper (defined in github_provider_test.go), matching the
+// sibling DOSpaces tests above. We deliberately do NOT use a process env
+// override (e.g. DIGITALOCEAN_API_URL) — that would be a credential-
+// exfiltration vector in production. Per ADR 0021.
+func TestGenerateDOSpacesKey_IncludesCreatedAt(t *testing.T) {
+	// Stub the DO API server.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/spaces/keys" || r.Method != http.MethodPost {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{
+			"key": map[string]any{
+				"access_key": "AK1234567890",
+				"secret_key": "SK_full_secret_value_here",
+				"name":       "test-key",
+				"created_at": "2026-05-08T10:30:00Z",
+				"grants":     []any{map[string]any{"permission": "fullaccess"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("DIGITALOCEAN_TOKEN", "stub")
+
+	// Inject the test server URL by monkey-patching http.DefaultClient
+	// transport — same hermetic pattern as the existing
+	// TestGenerateSecret_ProviderCredential_DOSpaces tests above.
+	orig := http.DefaultClient.Transport
+	http.DefaultClient.Transport = rewriteTransport{base: srv.URL}
+	defer func() { http.DefaultClient.Transport = orig }()
+
+	raw, err := generateDOSpacesKey(context.Background(), map[string]any{"name": "test-key"})
+	if err != nil {
+		t.Fatalf("generateDOSpacesKey: %v", err)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got["access_key"] != "AK1234567890" {
+		t.Errorf("access_key: want AK1234567890, got %q", got["access_key"])
+	}
+	if got["secret_key"] != "SK_full_secret_value_here" {
+		t.Errorf("secret_key: want SK_full..., got %q", got["secret_key"])
+	}
+	if got["created_at"] != "2026-05-08T10:30:00Z" {
+		t.Errorf("created_at: want 2026-05-08T10:30:00Z, got %q", got["created_at"])
+	}
+}
+
 // ── infra_output generator ────────────────────────────────────────────────────
 
 func sampleStateOutputs() map[string]map[string]any {

@@ -165,6 +165,14 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 	payload := map[string]any{"name": name, "grants": []map[string]any{grant}}
 	body, _ := json.Marshal(payload)
 
+	// The DO Spaces Keys endpoint is hardcoded. Tests stub it via the package's
+	// rewriteTransport helper (see generators_test.go) — a hermetic mechanism
+	// that requires explicit code in the test to take effect. Earlier drafts
+	// of this file honored a DIGITALOCEAN_API_URL env var, but that override
+	// was removed: an attacker who could set the env var (malicious .env,
+	// hostile CI step, multi-tenant runner) would redirect the
+	// `Authorization: Bearer <DIGITALOCEAN_TOKEN>` POST to their own server,
+	// exfiltrating production credentials. See ADR 0021.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.digitalocean.com/v2/spaces/keys", bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -187,6 +195,7 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 		Key struct {
 			AccessKey string `json:"access_key"`
 			SecretKey string `json:"secret_key"`
+			CreatedAt string `json:"created_at"`
 		} `json:"key"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -196,6 +205,7 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 	out, err := json.Marshal(map[string]string{
 		"access_key": result.Key.AccessKey,
 		"secret_key": result.Key.SecretKey,
+		"created_at": result.Key.CreatedAt,
 	})
 	if err != nil {
 		return "", err

@@ -245,3 +245,19 @@ type capableIaCProvider struct{ nonValidatingProvider }
 func (*capableIaCProvider) DetectDriftWithSpecs(context.Context, []interfaces.ResourceRef, map[string]interfaces.ResourceSpec) ([]interfaces.DriftResult, error) {
 	return nil, nil
 }
+
+// TestEnumeratorAll_InterfaceShape pins the EnumeratorAll signature so
+// downstream plugins (e.g. workflow-plugin-digitalocean) can rely on it.
+// Per ADR 0016: providers whose resource types do not support tagging
+// (e.g. DO Spaces keys) implement EnumeratorAll instead of Enumerator.
+func TestEnumeratorAll_InterfaceShape(t *testing.T) {
+	// Compile-time assertion: any type implementing this interface
+	// must have the exact method signature.
+	var _ interfaces.EnumeratorAll = (*fakeEnumeratorAll)(nil)
+}
+
+type fakeEnumeratorAll struct{}
+
+func (f *fakeEnumeratorAll) EnumerateAll(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
+	return nil, nil
+}

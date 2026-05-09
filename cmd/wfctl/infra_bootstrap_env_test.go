@@ -250,7 +250,7 @@ func TestBootstrap_RepeatedRunIdempotent(t *testing.T) {
 	}
 
 	// First run: generates the secret.
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("first bootstrapSecrets: %v", err)
 	}
 	if callCount != 1 {
@@ -261,7 +261,7 @@ func TestBootstrap_RepeatedRunIdempotent(t *testing.T) {
 	}
 
 	// Second run: secret already exists — generator must NOT be called again.
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("second bootstrapSecrets: %v", err)
 	}
 	if callCount != 1 {
