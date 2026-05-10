@@ -637,16 +637,22 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 		if _, exists := currentByName[spec.Name]; exists {
 			continue
 		}
-		builtinAdoptable := hasBuiltInAdoptionRef(spec.Type)
+		explicitAdoptable := hasBuiltInAdoptionRef(spec.Type) || boolFromAny(spec.Config["adopt_existing"])
 		driver, ok := drivers[spec.Type]
 		if !ok {
 			var err error
 			driver, err = provider.ResourceDriver(spec.Type)
 			if err != nil {
-				if !builtinAdoptable {
+				if !explicitAdoptable {
 					continue
 				}
 				return nil, fmt.Errorf("%s/%s: resolve resource driver: %w", spec.Type, spec.Name, err)
+			}
+			if driver == nil {
+				if !explicitAdoptable {
+					continue
+				}
+				return nil, fmt.Errorf("%s/%s: resolve resource driver: driver returned nil", spec.Type, spec.Name)
 			}
 			drivers[spec.Type] = driver
 		}
@@ -700,9 +706,6 @@ func adoptionRefForSpec(driver interfaces.ResourceDriver, spec interfaces.Resour
 	if locator, ok := driver.(interfaces.ResourceAdoptionLocator); ok {
 		return locator.AdoptionRef(spec)
 	}
-	if !hasBuiltInAdoptionRef(spec.Type) {
-		return interfaces.ResourceRef{}, false, nil
-	}
 	if spec.Type == "infra.dns" {
 		ref := interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}
 		if domain, _ := spec.Config["domain"].(string); domain != "" {
@@ -711,6 +714,15 @@ func adoptionRefForSpec(driver interfaces.ResourceDriver, spec interfaces.Resour
 			ref.ProviderID = spec.Name
 		}
 		return ref, true, nil
+	}
+	if boolFromAny(spec.Config["adopt_existing"]) {
+		if spec.Name == "" {
+			return interfaces.ResourceRef{}, false, fmt.Errorf("%s adoption requires resource name", spec.Type)
+		}
+		if !driverSupportsConfigAdoption(driver) {
+			return interfaces.ResourceRef{}, false, fmt.Errorf("%s/%s: adopt_existing requires a driver that supports name-based adoption", spec.Type, spec.Name)
+		}
+		return interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}, true, nil
 	}
 	return interfaces.ResourceRef{}, false, nil
 }
@@ -722,6 +734,20 @@ func hasBuiltInAdoptionRef(resourceType string) bool {
 	default:
 		return false
 	}
+}
+
+type configAdoptionSupporter interface {
+	SupportsConfigAdoption() bool
+}
+
+func driverSupportsConfigAdoption(driver interfaces.ResourceDriver) bool {
+	if supporter, ok := driver.(configAdoptionSupporter); ok {
+		return supporter.SupportsConfigAdoption()
+	}
+	if supporter, ok := driver.(interfaces.UpsertSupporter); ok {
+		return supporter.SupportsUpsert()
+	}
+	return false
 }
 
 func isIaCNotFound(err error) bool {
