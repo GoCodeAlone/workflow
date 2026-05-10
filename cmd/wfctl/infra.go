@@ -373,6 +373,10 @@ func runInfraPlan(args []string) error {
 		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
 		// can detect stale plans when the config changes after plan generation.
 		plan.DesiredHash = desiredStateHash(desired)
+		// Stamp generator metadata (wfctl version + IaC plugin versions) so
+		// operators can inspect what toolchain version produced this plan.
+		meta := buildGeneratorMetadata()
+		plan.GeneratorMetadata = &meta
 		if err := writePlanJSON(plan, *output); err != nil {
 			return fmt.Errorf("write plan: %w", err)
 		}
@@ -1457,6 +1461,22 @@ func runInfraApply(args []string) error {
 			}
 			if err := runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"}); err != nil {
 				return err
+			}
+		}
+	}
+
+	// Post-apply: persist generator metadata (wfctl version + plugin versions)
+	// to the state directory so it is available for future audit without
+	// requiring the original plan.json.  Best-effort: failures here are logged
+	// as warnings and do not roll back the apply.
+	{
+		metaStore, metaErr := resolveStateStore(cfgFile, envName)
+		if metaErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: open state store for metadata: %v\n", metaErr)
+		} else if mp, ok := metaStore.(metadataPersister); ok {
+			meta := buildGeneratorMetadata()
+			if saveErr := mp.SaveMetadata(ctx, meta); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: save generator metadata: %v\n", saveErr)
 			}
 		}
 	}
