@@ -1,3 +1,9 @@
+---
+status: superseded
+area: plugins
+owner: jon
+---
+
 # Supersession Notice — 2026-04-26 Strict-Contracts Plan (IaC Scope)
 
 **Date:** 2026-05-10
