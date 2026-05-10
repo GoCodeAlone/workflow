@@ -123,6 +123,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	// External plugins run as separate processes communicating over gRPC.
 	// Failures are non-fatal — the engine works fine with only builtin plugins.
 	extMgr := pluginexternal.NewExternalPluginManager(extPluginDir, log.Default())
+	extMgr.SetCallbackServer(newExternalCallbackServer(engine))
 	discovered, discoverErr := extMgr.DiscoverPlugins()
 	if discoverErr != nil {
 		logger.Warn("Failed to discover external plugins", "error", discoverErr)
@@ -168,6 +169,16 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	}
 
 	return engine, loader, registry, nil
+}
+
+func newExternalCallbackServer(engine *workflow.StdEngine) *pluginexternal.CallbackServer {
+	return pluginexternal.NewCallbackServer(
+		func(triggerType, action string, data map[string]any) error {
+			return engine.TriggerWorkflow(context.Background(), triggerType, action, data)
+		},
+		nil,
+		log.Default(),
+	)
 }
 
 // loadConfig loads a workflow configuration from the configured file path,
@@ -824,6 +835,7 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 
 	extPluginDir2 := filepath.Join(*dataDir, "plugins")
 	extPluginMgr := pluginexternal.NewExternalPluginManager(extPluginDir2, log.Default())
+	extPluginMgr.SetCallbackServer(newExternalCallbackServer(engine))
 	extPluginHandler := pluginexternal.NewPluginHandler(extPluginMgr)
 	extPluginMux := http.NewServeMux()
 	extPluginHandler.RegisterRoutes(extPluginMux)

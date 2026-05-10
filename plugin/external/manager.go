@@ -21,6 +21,8 @@ type ExternalPluginManager struct {
 
 	mu      sync.RWMutex
 	clients map[string]*goplugin.Client
+
+	callbackServer *CallbackServer
 }
 
 // NewExternalPluginManager creates a new manager that scans the given directory for plugins.
@@ -33,6 +35,14 @@ func NewExternalPluginManager(pluginsDir string, logger *log.Logger) *ExternalPl
 		logger:     logger,
 		clients:    make(map[string]*goplugin.Client),
 	}
+}
+
+// SetCallbackServer configures the host callback server used by plugins that
+// expose triggers or host callback features.
+func (m *ExternalPluginManager) SetCallbackServer(server *CallbackServer) {
+	m.mu.Lock()
+	m.callbackServer = server
+	m.mu.Unlock()
 }
 
 // DiscoverPlugins scans the plugins directory for subdirectories that contain
@@ -131,7 +141,7 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 
 	client := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig:  Handshake,
-		Plugins:          goplugin.PluginSet{"plugin": &GRPCPlugin{}},
+		Plugins:          goplugin.PluginSet{"plugin": &GRPCPlugin{CallbackServer: m.callbackServer}},
 		Cmd:              cmd,
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 	})

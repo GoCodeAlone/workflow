@@ -37,6 +37,7 @@ type ExternalPluginAdapter struct {
 	contractTypes       *protoregistry.Types
 	configFragment      []byte
 	pluginDir           string
+	triggerSetupErr     error
 }
 
 type contractDescriptorCache struct {
@@ -86,10 +87,30 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 	if err != nil {
 		return nil, fmt.Errorf("get manifest from plugin %s: %w", name, err)
 	}
+	var triggerSetupErr error
+	triggerTypes, triggerErr := client.client.GetTriggerTypes(ctx, &emptypb.Empty{})
+	if triggerErr != nil && status.Code(triggerErr) != codes.Unimplemented {
+		triggerSetupErr = fmt.Errorf("get trigger types from plugin %s before callback setup: %w", name, triggerErr)
+	}
+	if triggerTypes != nil && len(triggerTypes.Types) > 0 {
+		if client.callbackBrokerID == 0 {
+			triggerSetupErr = fmt.Errorf("configure callback for plugin %s: callback broker unavailable", name)
+		} else {
+			resp, callbackErr := client.client.ConfigureCallback(ctx, &pb.ConfigureCallbackRequest{
+				BrokerId: client.callbackBrokerID,
+			})
+			if callbackErr != nil {
+				triggerSetupErr = fmt.Errorf("configure callback for plugin %s: %w", name, callbackErr)
+			} else if resp.Error != "" {
+				triggerSetupErr = fmt.Errorf("configure callback for plugin %s: %s", name, resp.Error)
+			}
+		}
+	}
 	a := &ExternalPluginAdapter{
-		name:     name,
-		client:   client,
-		manifest: manifest,
+		name:            name,
+		client:          client,
+		manifest:        manifest,
+		triggerSetupErr: triggerSetupErr,
 	}
 	if registry, registryErr := client.client.GetContractRegistry(ctx, &emptypb.Empty{}); registryErr == nil {
 		a.contractRegistry = registry
@@ -414,6 +435,9 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 }
 
 func (a *ExternalPluginAdapter) TriggerFactories() map[string]plugin.TriggerFactory {
+	if a.triggerSetupErr != nil {
+		return nil
+	}
 	ctx := context.Background()
 	resp, err := a.client.client.GetTriggerTypes(ctx, &emptypb.Empty{})
 	if err != nil || resp == nil || len(resp.Types) == 0 {
@@ -423,15 +447,7 @@ func (a *ExternalPluginAdapter) TriggerFactories() map[string]plugin.TriggerFact
 	for _, typeName := range resp.Types {
 		tn := typeName // capture
 		factories[tn] = func() any {
-			createResp, createErr := a.client.client.CreateModule(ctx, &pb.CreateModuleRequest{
-				Type:   tn,
-				Name:   tn,
-				Config: nil,
-			})
-			if createErr != nil || createResp.Error != "" {
-				return nil
-			}
-			return NewRemoteTrigger(tn, tn, createResp.HandleId, a.client.client, nil)
+			return NewRemoteTrigger(tn, tn, a.client.client)
 		}
 	}
 	return factories
