@@ -318,7 +318,7 @@ func (s *grpcServer) CreateTrigger(_ context.Context, req *pb.CreateTriggerReque
 
 	inst, err := tp.CreateTrigger(req.Type, structToMap(req.Config), s.triggerCallback(req.Type))
 	if err != nil {
-		return &pb.HandleResponse{Error: err.Error()}, nil
+		return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
 
 	handle := uuid.New().String()
