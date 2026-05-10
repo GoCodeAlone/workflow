@@ -10,49 +10,35 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// ── fakes for refresh tests ────────────────────────────────────────────────────
+// ── fixtures for refresh tests ──────────────────────────────────────────────────
 
-// refreshFakeProvider stubs DetectDrift to return caller-supplied results.
-// All other IaCProvider methods are no-ops — refresh tests only exercise
-// the DetectDrift → state-mutation path.
-type refreshFakeProvider struct {
-	driftResults []interfaces.DriftResult
-	driftErr     error
+// newRefreshDriftFixture builds a *typedIaCAdapter that registers the typed
+// IaCProviderDriftDetector service so the apply-refresh dispatch site
+// (cmd/wfctl/infra_apply_refresh.go, dispatch site §Task 17) reaches the
+// adapter's interfaces.IaCProvider.DetectDrift method via the typed RPC.
+//
+// Per ADR-0028 (Task 17 / PR 618 strict-contracts force-cutover): wfctl
+// dispatch sites are pure typed-pb. The dispatch type-asserts
+// `provider.(*typedIaCAdapter)` first; legacy fakes that satisfied
+// interfaces.IaCProvider directly no longer reach the dispatch path. The
+// migrated fixture wraps a recordingDriftDetectorServer in a real adapter
+// so the test exercises the same wire shape production sees.
+//
+// Note: DriftConfigDetector is intentionally NOT registered. Tests pass
+// either nil states (no AppliedConfig present → buildAppliedSpecMap returns
+// nil) or states with no AppliedConfigSource ("apply") provenance (also
+// returns nil). The dispatcher therefore falls back to the required-side
+// DetectDrift path which the IaCProviderDriftDetector service backs.
+func newRefreshDriftFixture(t *testing.T, driftResults []interfaces.DriftResult, driftErr error) interfaces.IaCProvider {
+	t.Helper()
+	return fixtureTypedAdapter{
+		Required: &fixtureRequiredServer{name: "fake-refresh", version: "0.0.0"},
+		DriftDetector: &recordingDriftDetectorServer{
+			driftResults: driftResults,
+			driftErr:     driftErr,
+		},
+	}.build(t)
 }
-
-func (f *refreshFakeProvider) Name() string                                         { return "fake-refresh" }
-func (f *refreshFakeProvider) Version() string                                      { return "0.0.0" }
-func (f *refreshFakeProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
-func (f *refreshFakeProvider) Capabilities() []interfaces.IaCCapabilityDeclaration  { return nil }
-func (f *refreshFakeProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
-	return &interfaces.IaCPlan{}, nil
-}
-func (f *refreshFakeProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	return &interfaces.ApplyResult{}, nil
-}
-func (f *refreshFakeProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
-	return nil, nil
-}
-func (f *refreshFakeProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
-	return nil, nil
-}
-func (f *refreshFakeProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
-	return f.driftResults, f.driftErr
-}
-func (f *refreshFakeProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
-	return nil, nil
-}
-func (f *refreshFakeProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
-	return nil, nil
-}
-func (f *refreshFakeProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
-	return nil, nil
-}
-func (f *refreshFakeProvider) SupportedCanonicalKeys() []string { return nil }
-func (f *refreshFakeProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
-	return nil, nil
-}
-func (f *refreshFakeProvider) Close() error { return nil }
 
 // countingStore is an infraStateStore that counts DeleteResource calls and
 // records the deleted names.
@@ -94,7 +80,7 @@ func TestApplyRefresh_DryRunPrintsPrunesWithoutMutating(t *testing.T) {
 		Drifted: true,
 		Class:   interfaces.DriftClassGhost,
 	}
-	provider := &refreshFakeProvider{driftResults: []interfaces.DriftResult{ghost}}
+	provider := newRefreshDriftFixture(t, []interfaces.DriftResult{ghost}, nil)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{{Name: "test-vpc", Type: "infra.vpc"}}
 
@@ -123,7 +109,7 @@ func TestApplyRefresh_AutoApprovePrunesAndApplies(t *testing.T) {
 		Drifted: true,
 		Class:   interfaces.DriftClassGhost,
 	}
-	provider := &refreshFakeProvider{driftResults: []interfaces.DriftResult{ghost}}
+	provider := newRefreshDriftFixture(t, []interfaces.DriftResult{ghost}, nil)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{{Name: "test-vpc", Type: "infra.vpc"}}
 
@@ -156,7 +142,7 @@ func TestApplyRefresh_ProtectedResourceBlockedWithoutFlag(t *testing.T) {
 		Drifted: true,
 		Class:   interfaces.DriftClassGhost,
 	}
-	provider := &refreshFakeProvider{driftResults: []interfaces.DriftResult{ghost}}
+	provider := newRefreshDriftFixture(t, []interfaces.DriftResult{ghost}, nil)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{{Name: "protected-vpc", Type: "infra.vpc"}}
 	states := stateWithProtected("protected-vpc")
@@ -183,7 +169,7 @@ func TestApplyRefresh_ProtectedResourcePrunedWithFlag(t *testing.T) {
 		Drifted: true,
 		Class:   interfaces.DriftClassGhost,
 	}
-	provider := &refreshFakeProvider{driftResults: []interfaces.DriftResult{ghost}}
+	provider := newRefreshDriftFixture(t, []interfaces.DriftResult{ghost}, nil)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{{Name: "protected-vpc", Type: "infra.vpc"}}
 	states := stateWithProtected("protected-vpc")
@@ -206,7 +192,7 @@ func TestApplyRefresh_ProtectedResourcePrunedWithFlag(t *testing.T) {
 
 func TestApplyRefresh_TransientErrorDoesNotPrune(t *testing.T) {
 	transientErr := errors.New("DO API rate limit exceeded")
-	provider := &refreshFakeProvider{driftErr: transientErr}
+	provider := newRefreshDriftFixture(t, nil, transientErr)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{{Name: "test-vpc", Type: "infra.vpc"}}
 
@@ -217,8 +203,15 @@ func TestApplyRefresh_TransientErrorDoesNotPrune(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected transient error to propagate, got nil")
 	}
-	if !errors.Is(err, transientErr) {
-		t.Errorf("expected wrapped transient error, got: %v", err)
+	// The transient error string must propagate through the gRPC wire +
+	// translateRPCErr. Since translateRPCErr only converts gRPC
+	// codes.Unimplemented (the fake here returns a plain non-gRPC error
+	// which gRPC will wrap with codes.Unknown), the original message text
+	// is preserved in the wrapped error chain — we assert against the
+	// substring rather than errors.Is on the local sentinel because the
+	// gRPC wire boundary doesn't preserve identity across processes.
+	if !strings.Contains(err.Error(), "DO API rate limit exceeded") {
+		t.Errorf("expected wrapped transient error (substring match across gRPC wire); got: %v", err)
 	}
 	if store.deleteCount != 0 {
 		t.Errorf("transient error: expected 0 deletes, got %d", store.deleteCount)
@@ -232,7 +225,7 @@ func TestApplyRefresh_InSyncResourceSkipped(t *testing.T) {
 		Drifted: false,
 		Class:   interfaces.DriftClassInSync,
 	}
-	provider := &refreshFakeProvider{driftResults: []interfaces.DriftResult{inSync}}
+	provider := newRefreshDriftFixture(t, []interfaces.DriftResult{inSync}, nil)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{{Name: "test-vpc", Type: "infra.vpc"}}
 
@@ -264,7 +257,7 @@ func TestApplyRefresh_MultipleGhostsAllOrNothing(t *testing.T) {
 		{ID: "protected-db", Name: "protected-db", Type: "infra.database", Outputs: map[string]any{"protected": true}},
 		{ID: "protected-cache", Name: "protected-cache", Type: "infra.cache", Outputs: map[string]any{"protected": true}},
 	}
-	provider := &refreshFakeProvider{driftResults: ghosts}
+	provider := newRefreshDriftFixture(t, ghosts, nil)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{
 		{Name: "unprotected-vpc", Type: "infra.vpc"},
@@ -307,7 +300,7 @@ func TestApplyRefresh_UnprotectedThenProtected_NoPartialPrune(t *testing.T) {
 	states := []interfaces.ResourceState{
 		{ID: "db-staging", Name: "db-staging", Type: "infra.database", Outputs: map[string]any{"protected": true}},
 	}
-	provider := &refreshFakeProvider{driftResults: ghosts}
+	provider := newRefreshDriftFixture(t, ghosts, nil)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{
 		{Name: "vpc-a", Type: "infra.vpc"},
@@ -338,7 +331,7 @@ func TestApplyRefresh_AllGhostsUnprotectedPrunesAll(t *testing.T) {
 		{Name: "ghost-1", Type: "infra.vpc", Drifted: true, Class: interfaces.DriftClassGhost},
 		{Name: "ghost-2", Type: "infra.database", Drifted: true, Class: interfaces.DriftClassGhost},
 	}
-	provider := &refreshFakeProvider{driftResults: ghosts}
+	provider := newRefreshDriftFixture(t, ghosts, nil)
 	store := &countingStore{}
 	refs := []interfaces.ResourceRef{
 		{Name: "ghost-1", Type: "infra.vpc"},

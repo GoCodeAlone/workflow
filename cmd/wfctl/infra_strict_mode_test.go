@@ -423,12 +423,20 @@ func TestInfraRotateAndPruneCmd_MultiProvider_ContinuesPastUnimplemented(t *test
 }
 
 // TestInfraCleanup_MultiProvider_ContinuesPastUnimplemented asserts the
-// existing infra_cleanup.go pattern (try-each + skip-on-Unimplemented)
+// existing infra_cleanup.go pattern (try-each + skip-on-non-registration)
 // remains correct in the presence of a heterogeneous loaded-providers
 // list. Cleanup's design predates PR #589 but the same architectural
-// concern applies — the bridge means every gRPC-loaded provider satisfies
-// interfaces.Enumerator, so the loop must distinguish "plugin doesn't
-// support EnumerateByTag" from "real enumerate failure".
+// concern applies — the dispatcher must distinguish "plugin doesn't
+// register the Enumerator service" from "real enumerate failure".
+//
+// Per Task 17 / PR 618 (ADR-0028), the strict-typed dispatch surfaces
+// "plugin didn't advertise the optional service" via adapter.Enumerator()
+// returning nil — the typed analogue of the legacy
+// `errors.Is(err, ErrProviderMethodUnimplemented)` skip path. Provider A
+// here is built without an Enumerator service registered (the bufconn
+// server only registers IaCProviderRequired); the dispatch site logs
+// `skipped fake-a: provider does not implement Enumerator` and proceeds
+// to provider B.
 func TestInfraCleanup_MultiProvider_ContinuesPastUnimplemented(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "infra.yaml")
@@ -436,22 +444,19 @@ func TestInfraCleanup_MultiProvider_ContinuesPastUnimplemented(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	// Provider A: EnumerateByTag returns ErrProviderMethodUnimplemented.
-	a := &fakeEnumeratingProvider{
-		stubIaCProvider: stubIaCProvider{name: "fake-a"},
-		enumerateErr:    interfaces.ErrProviderMethodUnimplemented,
-	}
-	// Provider B: implements Enumerator and returns a canned ref.
-	b := &fakeEnumeratingProvider{
-		stubIaCProvider: stubIaCProvider{name: "fake-b"},
-		resources: []interfaces.ResourceRef{
+	// Provider A: does NOT register IaCProviderEnumerator, so the typed
+	// adapter's Enumerator() accessor returns nil → cleanup skips with the
+	// "provider does not implement Enumerator" log line.
+	a := newCleanupNonEnumFixture(t, "fake-a")
+	// Provider B: registers Enumerator with a canned ref.
+	b := newCleanupEnumFixture(t, "fake-b",
+		[]interfaces.ResourceRef{
 			{Name: "r-from-b", Type: "infra.spaces_key", ProviderID: "AK_B"},
-		},
-	}
+		}, nil, nil)
 	origLoad := cleanupLoadProviders
 	t.Cleanup(func() { cleanupLoadProviders = origLoad })
 	cleanupLoadProviders = func(_ context.Context, _ *flag.FlagSet, _, _ string) ([]interfaces.IaCProvider, []io.Closer, error) {
-		return []interfaces.IaCProvider{a, b}, nil, nil
+		return []interfaces.IaCProvider{a, b.adapter}, nil, nil
 	}
 
 	origStdout := cleanupStdout
@@ -464,11 +469,11 @@ func TestInfraCleanup_MultiProvider_ContinuesPastUnimplemented(t *testing.T) {
 		"--tag", "test",
 	})
 	if err != nil {
-		t.Fatalf("cleanup must skip Unimplemented and continue; err=%v stdout=%s", err, out.String())
+		t.Fatalf("cleanup must skip non-registered Enumerator and continue; err=%v stdout=%s", err, out.String())
 	}
 	// Provider A must surface a structured "skipped" log line.
 	if !strings.Contains(out.String(), "skipped fake-a") {
-		t.Errorf("expected 'skipped fake-a' log line for Unimplemented provider; stdout=%s", out.String())
+		t.Errorf("expected 'skipped fake-a' log line for non-registered Enumerator; stdout=%s", out.String())
 	}
 	// Provider B must reach the dry-run / list path with its ref.
 	if !strings.Contains(out.String(), "r-from-b") {

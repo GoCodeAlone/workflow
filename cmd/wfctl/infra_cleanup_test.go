@@ -12,67 +12,58 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// fakeEnumeratingProvider is an IaCProvider that ALSO implements Enumerator.
-// EnumerateByTag returns a canned slice; ResourceDriver returns a fake driver
-// that records Delete calls (and may return an error per index).
-type fakeEnumeratingProvider struct {
-	stubIaCProvider
-	resources       []interfaces.ResourceRef
-	deleteCallCount int
-	deleteErrors    map[int]error
-	enumerateErr    error
+// cleanupEnumFixture wires the bufconn-backed *typedIaCAdapter the cleanup
+// dispatcher (infra_cleanup.go, dispatch site §Task 17) expects, alongside
+// references to the recording mock servers so each test can assert delete
+// counts, deleted refs, and per-call error injection after the run.
+//
+// Per ADR-0028 (Task 17 / PR 618 strict-contracts force-cutover): wfctl
+// dispatch sites are pure typed-pb. Test fixtures must construct a real
+// *typedIaCAdapter rather than injecting a custom interfaces.IaCProvider —
+// the latter no longer satisfies the type-assert at the dispatch site.
+type cleanupEnumFixture struct {
+	adapter *typedIaCAdapter
+
+	// Embedded mock servers — tests assert against these after a run.
+	enumerator *recordingEnumeratorServer
+	driver     *recordingResourceDriverServer
 }
 
-func (f *fakeEnumeratingProvider) EnumerateByTag(_ context.Context, _ string) ([]interfaces.ResourceRef, error) {
-	if f.enumerateErr != nil {
-		return nil, f.enumerateErr
+// newCleanupEnumFixture builds a *typedIaCAdapter that registers
+// IaCProviderEnumerator (canned EnumerateByTag) + ResourceDriver
+// (recording Delete) services. Mirrors the legacy fakeEnumeratingProvider
+// that implemented interfaces.Enumerator + interfaces.ResourceDriver inline.
+func newCleanupEnumFixture(t *testing.T, name string, resources []interfaces.ResourceRef, enumerateErr error, deleteErrors map[int]error) *cleanupEnumFixture {
+	t.Helper()
+	enum := &recordingEnumeratorServer{
+		tagRefs:         resources,
+		enumerateTagErr: enumerateErr,
 	}
-	return f.resources, nil
-}
-
-func (f *fakeEnumeratingProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
-	return &fakeDeleteDriver{owner: f}, nil
-}
-
-// fakeDeleteDriver implements just enough of interfaces.ResourceDriver for
-// the cleanup dispatch path: Delete is the only method exercised. Other
-// methods are no-op stubs to satisfy the interface.
-type fakeDeleteDriver struct{ owner *fakeEnumeratingProvider }
-
-func (d *fakeDeleteDriver) Create(context.Context, interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	return nil, nil
-}
-func (d *fakeDeleteDriver) Read(context.Context, interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
-	return nil, nil
-}
-func (d *fakeDeleteDriver) Update(context.Context, interfaces.ResourceRef, interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	return nil, nil
-}
-func (d *fakeDeleteDriver) Diff(context.Context, interfaces.ResourceSpec, *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
-	return nil, nil
-}
-func (d *fakeDeleteDriver) HealthCheck(context.Context, interfaces.ResourceRef) (*interfaces.HealthResult, error) {
-	return nil, nil
-}
-func (d *fakeDeleteDriver) Scale(context.Context, interfaces.ResourceRef, int) (*interfaces.ResourceOutput, error) {
-	return nil, nil
-}
-func (d *fakeDeleteDriver) SensitiveKeys() []string { return nil }
-func (d *fakeDeleteDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
-	idx := d.owner.deleteCallCount
-	d.owner.deleteCallCount++
-	if d.owner.deleteErrors != nil {
-		if err, ok := d.owner.deleteErrors[idx]; ok {
-			return err
-		}
+	drv := &recordingResourceDriverServer{
+		deleteErrors: deleteErrors,
 	}
-	return nil
+	adapter := fixtureTypedAdapter{
+		Required:       &fixtureRequiredServer{name: name, version: "0.0.0"},
+		Enumerator:     enum,
+		ResourceDriver: drv,
+	}.build(t)
+	return &cleanupEnumFixture{
+		adapter:    adapter,
+		enumerator: enum,
+		driver:     drv,
+	}
 }
 
-// fakeNonEnumeratingProvider is an IaCProvider that does NOT implement
-// Enumerator (uses the bare stubIaCProvider). The cleanup dispatcher must
-// skip it with a structured stdout log line rather than failing.
-type fakeNonEnumeratingProvider struct{ stubIaCProvider }
+// newCleanupNonEnumFixture builds a *typedIaCAdapter that registers ONLY the
+// IaCProviderRequired service — no Enumerator. The cleanup dispatcher must
+// skip such providers with a structured stdout log (the
+// `provider does not implement Enumerator` branch).
+func newCleanupNonEnumFixture(t *testing.T, name string) *typedIaCAdapter {
+	t.Helper()
+	return fixtureTypedAdapter{
+		Required: &fixtureRequiredServer{name: name, version: "0.0.0"},
+	}.build(t)
+}
 
 // runInfraCleanupForTest invokes runInfraCleanup with a fake provider list
 // and captures stdout/stderr. It overrides the cleanupLoadProviders seam so
@@ -96,15 +87,13 @@ func runInfraCleanupForTest(t *testing.T, providers []interfaces.IaCProvider, ar
 }
 
 func TestInfraCleanup_DryRunByDefault_ListsResourcesWithoutDeleting(t *testing.T) {
-	fp := &fakeEnumeratingProvider{
-		stubIaCProvider: stubIaCProvider{name: "do-fake"},
-		resources: []interfaces.ResourceRef{
+	fp := newCleanupEnumFixture(t, "do-fake",
+		[]interfaces.ResourceRef{
 			{Name: "vpc-1", Type: "infra.vpc"},
 			{Name: "db-1", Type: "infra.database"},
-		},
-	}
+		}, nil, nil)
 
-	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp}, "--tag", "test-tag")
+	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp.adapter}, "--tag", "test-tag")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,26 +106,24 @@ func TestInfraCleanup_DryRunByDefault_ListsResourcesWithoutDeleting(t *testing.T
 	if !strings.Contains(out, "[dry-run]") {
 		t.Errorf("expected [dry-run] marker in output: %s", out)
 	}
-	if fp.deleteCallCount != 0 {
-		t.Errorf("dry-run should not invoke Delete; got %d calls", fp.deleteCallCount)
+	if got := fp.driver.callCount(); got != 0 {
+		t.Errorf("dry-run should not invoke Delete; got %d calls", got)
 	}
 }
 
 func TestInfraCleanup_FixMode_DeletesResources(t *testing.T) {
-	fp := &fakeEnumeratingProvider{
-		stubIaCProvider: stubIaCProvider{name: "do-fake"},
-		resources: []interfaces.ResourceRef{
+	fp := newCleanupEnumFixture(t, "do-fake",
+		[]interfaces.ResourceRef{
 			{Name: "vpc-1", Type: "infra.vpc"},
 			{Name: "db-1", Type: "infra.database"},
-		},
-	}
+		}, nil, nil)
 
-	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp}, "--tag", "test-tag", "--fix")
+	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp.adapter}, "--tag", "test-tag", "--fix")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fp.deleteCallCount != 2 {
-		t.Errorf("expected 2 Delete calls, got %d", fp.deleteCallCount)
+	if got := fp.driver.callCount(); got != 2 {
+		t.Errorf("expected 2 Delete calls, got %d", got)
 	}
 	if !strings.Contains(out, "deleted") {
 		t.Errorf("expected 'deleted' in output: %s", out)
@@ -147,7 +134,7 @@ func TestInfraCleanup_FixMode_DeletesResources(t *testing.T) {
 }
 
 func TestInfraCleanup_NonEnumeratorProvider_SkipsWithStructuredLog(t *testing.T) {
-	fp := &fakeNonEnumeratingProvider{stubIaCProvider: stubIaCProvider{name: "non-enum"}}
+	fp := newCleanupNonEnumFixture(t, "non-enum")
 
 	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp}, "--tag", "test-tag")
 	if err != nil {
@@ -159,36 +146,31 @@ func TestInfraCleanup_NonEnumeratorProvider_SkipsWithStructuredLog(t *testing.T)
 }
 
 func TestInfraCleanup_PartialFailure_ReturnsError(t *testing.T) {
-	fp := &fakeEnumeratingProvider{
-		stubIaCProvider: stubIaCProvider{name: "do-fake"},
-		resources: []interfaces.ResourceRef{
+	fp := newCleanupEnumFixture(t, "do-fake",
+		[]interfaces.ResourceRef{
 			{Name: "vpc-1", Type: "infra.vpc"},
 			{Name: "db-1", Type: "infra.database"},
 		},
+		nil,
 		// Second Delete fails (idx 1).
-		deleteErrors: map[int]error{1: errors.New("simulated failure")},
-	}
+		map[int]error{1: errors.New("simulated failure")})
 
-	_, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp}, "--tag", "test-tag", "--fix")
+	_, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp.adapter}, "--tag", "test-tag", "--fix")
 	if err == nil {
 		t.Errorf("expected non-nil error on partial failure")
 	}
-	if fp.deleteCallCount != 2 {
-		t.Errorf("expected dispatcher to attempt all 2 deletes despite mid-run failure; got %d", fp.deleteCallCount)
+	if got := fp.driver.callCount(); got != 2 {
+		t.Errorf("expected dispatcher to attempt all 2 deletes despite mid-run failure; got %d", got)
 	}
 }
 
 func TestInfraCleanup_EnumerateError_ReturnsErrorAndContinuesOtherProviders(t *testing.T) {
-	failing := &fakeEnumeratingProvider{
-		stubIaCProvider: stubIaCProvider{name: "fail"},
-		enumerateErr:    errors.New("simulated enumerate fail"),
-	}
-	working := &fakeEnumeratingProvider{
-		stubIaCProvider: stubIaCProvider{name: "ok"},
-		resources:       []interfaces.ResourceRef{{Name: "ok-1", Type: "infra.compute"}},
-	}
+	failing := newCleanupEnumFixture(t, "fail", nil, errors.New("simulated enumerate fail"), nil)
+	working := newCleanupEnumFixture(t, "ok",
+		[]interfaces.ResourceRef{{Name: "ok-1", Type: "infra.compute"}},
+		nil, nil)
 
-	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{failing, working}, "--tag", "test-tag")
+	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{failing.adapter, working.adapter}, "--tag", "test-tag")
 	if err == nil {
 		t.Errorf("expected non-nil error from failing enumerator")
 	}
@@ -214,20 +196,18 @@ func TestInfraCleanup_TagRequired(t *testing.T) {
 // accidentally honors --dry-run=false alone would silently start deleting
 // production resources from a flag a user thought was a preview toggle.
 func TestInfraCleanup_SafeDefault_DryRunFalseWithoutFixStillSkipsDelete(t *testing.T) {
-	fp := &fakeEnumeratingProvider{
-		stubIaCProvider: stubIaCProvider{name: "do-fake"},
-		resources: []interfaces.ResourceRef{
+	fp := newCleanupEnumFixture(t, "do-fake",
+		[]interfaces.ResourceRef{
 			{Name: "vpc-1", Type: "infra.vpc"},
-		},
-	}
+		}, nil, nil)
 
-	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp},
+	out, _, err := runInfraCleanupForTest(t, []interfaces.IaCProvider{fp.adapter},
 		"--tag", "test-tag", "--dry-run=false")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fp.deleteCallCount != 0 {
-		t.Errorf("safe-default invariant violated: --dry-run=false without --fix invoked Delete %d times; expected 0", fp.deleteCallCount)
+	if got := fp.driver.callCount(); got != 0 {
+		t.Errorf("safe-default invariant violated: --dry-run=false without --fix invoked Delete %d times; expected 0", got)
 	}
 	if !strings.Contains(out, "[dry-run]") {
 		t.Errorf("expected [dry-run] marker even with --dry-run=false (because --fix is absent); got: %s", out)
