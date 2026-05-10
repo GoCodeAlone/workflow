@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
 
 // reservedCLICommands is the set of static wfctl command names that plugins
@@ -58,6 +61,18 @@ type CLIRegistryEntry struct {
 // CLIRegistry maps command names to their registry entries.
 type CLIRegistry map[string]*CLIRegistryEntry
 
+// pluginDirEntry pairs a plugin's on-disk directory name with its parsed
+// manifest. Both pieces are needed to resolve the binary path: setup-plugins
+// + `wfctl plugin install` extract tarballs to short directory names (e.g.
+// `data/plugins/payments`), while the binary inside is named after the
+// manifest (e.g. `workflow-plugin-payments`). Earlier code used
+// `manifest.Name` for both directory and binary, which only worked when
+// the two happened to match.
+type pluginDirEntry struct {
+	dirName  string
+	manifest *config.PluginManifestFile
+}
+
 // BuildCLIRegistry scans pluginsDir for installed plugin.json manifests and
 // builds a command-name → entry map.
 //
@@ -65,23 +80,46 @@ type CLIRegistry map[string]*CLIRegistryEntry
 //   - A plugin declares a reserved command name.
 //   - Two plugins declare the same command name (conflict).
 func BuildCLIRegistry(pluginsDir string) (CLIRegistry, error) {
-	manifests, err := LoadPluginManifests(pluginsDir)
-	if err != nil {
-		return nil, fmt.Errorf("load plugin manifests: %w", err)
-	}
-
 	registry := make(CLIRegistry)
 
-	// Sort plugin names for deterministic conflict reporting.
-	names := make([]string, 0, len(manifests))
-	for n := range manifests {
-		names = append(names, n)
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return registry, nil
+		}
+		return nil, fmt.Errorf("read plugins dir %q: %w", pluginsDir, err)
 	}
-	sort.Strings(names)
 
-	for _, pluginName := range names {
-		manifest := manifests[pluginName]
-		for _, cmd := range manifest.Capabilities.CLICommands {
+	// Walk subdirs once, capturing both the dir name and the parsed manifest
+	// per plugin. Iterating LoadPluginManifests's keyed map would lose the
+	// dir name (the map key collapses on manifest.Name) and we need both to
+	// build a correct binary path.
+	plugins := make([]pluginDirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(pluginsDir, entry.Name(), "plugin.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue // plugin dir without manifest — skip
+		}
+		var manifest config.PluginManifestFile
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			continue // malformed manifest — skip
+		}
+		plugins = append(plugins, pluginDirEntry{dirName: entry.Name(), manifest: &manifest})
+	}
+
+	// Sort by dir name for deterministic conflict reporting.
+	sort.Slice(plugins, func(i, j int) bool { return plugins[i].dirName < plugins[j].dirName })
+
+	for _, p := range plugins {
+		manifestName := p.manifest.Name
+		if manifestName == "" {
+			manifestName = p.dirName
+		}
+		for _, cmd := range p.manifest.Capabilities.CLICommands {
 			name := cmd.Name
 			if name == "" {
 				continue
@@ -90,20 +128,23 @@ func BuildCLIRegistry(pluginsDir string) (CLIRegistry, error) {
 				return nil, fmt.Errorf(
 					"plugin %q declares CLI command %q which is a reserved wfctl command name; "+
 						"rename the command in the plugin manifest",
-					pluginName, name,
+					manifestName, name,
 				)
 			}
 			if existing, ok := registry[name]; ok {
 				return nil, fmt.Errorf(
 					"CLI command conflict: both plugin %q and plugin %q declare command %q; "+
 						"uninstall one of them or rename the command in one plugin manifest",
-					existing.PluginName, pluginName, name,
+					existing.PluginName, manifestName, name,
 				)
 			}
-			binaryPath := filepath.Join(pluginsDir, pluginName, pluginName)
+			// Binary path uses the actual on-disk directory (which `wfctl
+			// plugin install` controls) plus the manifest-declared binary
+			// name (which the tarball ships).
+			binaryPath := filepath.Join(pluginsDir, p.dirName, manifestName)
 			registry[name] = &CLIRegistryEntry{
 				Command:     name,
-				PluginName:  pluginName,
+				PluginName:  manifestName,
 				BinaryPath:  binaryPath,
 				Description: cmd.Description,
 			}
