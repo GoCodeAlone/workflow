@@ -1198,6 +1198,17 @@ type installedPluginCapabilities struct {
 	StepTypes    []string             `json:"stepTypes,omitempty"`
 	TriggerTypes []string             `json:"triggerTypes,omitempty"`
 	IaCProvider  *RegistryIaCProvider `json:"iacProvider,omitempty"`
+	// CLICommands flow through to plugin.json so BuildCLIRegistry can
+	// discover plugin-provided wfctl subcommands after install. Earlier
+	// versions of writeInstalledManifest dropped this field, leaving
+	// the installed manifest stripped of cliCommands even when the
+	// registry manifest declared them — `wfctl <plugin-cmd>` then
+	// reported `unknown command` post-install.
+	CLICommands []RegistryCLICommand `json:"cliCommands,omitempty"`
+	// BuildHooks flow through for the same reason: the build-hook
+	// dispatcher reads them from the installed plugin.json, not the
+	// registry manifest.
+	BuildHooks []RegistryBuildHook `json:"buildHooks,omitempty"`
 }
 
 // writeInstalledManifest writes a full plugin.json compatible with the engine's
@@ -1220,6 +1231,8 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 			StepTypes:    m.Capabilities.StepTypes,
 			TriggerTypes: m.Capabilities.TriggerTypes,
 			IaCProvider:  m.Capabilities.IaCProvider,
+			CLICommands:  m.Capabilities.CLICommands,
+			BuildHooks:   m.Capabilities.BuildHooks,
 		}
 	}
 	data, err := json.MarshalIndent(pj, "", "  ")

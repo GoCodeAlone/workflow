@@ -14,16 +14,24 @@ import (
 )
 
 func init() {
-	registry.Register(New())
+	registry.Register(&GHCRProvider{name: "github"})
+	registry.Register(&GHCRProvider{name: "ghcr"})
 }
 
 // GHCRProvider implements registry.RegistryProvider for GitHub Container Registry.
-type GHCRProvider struct{}
+type GHCRProvider struct {
+	name string
+}
 
 // New returns a new GHCRProvider.
-func New() registry.RegistryProvider { return &GHCRProvider{} }
+func New() registry.RegistryProvider { return &GHCRProvider{name: "github"} }
 
-func (g *GHCRProvider) Name() string { return "github" }
+func (g *GHCRProvider) Name() string {
+	if g.name == "" {
+		return "github"
+	}
+	return g.name
+}
 
 func (g *GHCRProvider) Login(ctx registry.Context, cfg registry.ProviderConfig) error {
 	token, err := resolveToken(cfg)

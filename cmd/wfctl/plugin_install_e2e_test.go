@@ -423,6 +423,61 @@ func TestSafeJoin(t *testing.T) {
 	}
 }
 
+// TestInstalledManifestPreservesCLICommandsAndBuildHooks is the regression
+// test for the post-install dispatch bug: writeInstalledManifest used to drop
+// capabilities.cliCommands and capabilities.buildHooks, so even when a
+// registry manifest declared them, BuildCLIRegistry / build-hook discovery
+// reading the on-disk plugin.json saw an empty list. `wfctl <plugin-cmd>`
+// then reported `unknown command` and build hooks silently no-oped.
+func TestInstalledManifestPreservesCLICommandsAndBuildHooks(t *testing.T) {
+	rm := &RegistryManifest{
+		Name:        "workflow-plugin-payments",
+		Version:     "0.3.1",
+		Author:      "tester",
+		Description: "regression: cliCommands + buildHooks preserved post-install",
+		Type:        "external",
+		Tier:        "core",
+		License:     "Apache-2.0",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"payments.provider"},
+			StepTypes:   []string{"step.payment_charge"},
+			CLICommands: []RegistryCLICommand{
+				{Name: "payments", Description: "Payment provider operations"},
+			},
+			// Use a canonical event identifier (underscore-separated) per
+			// interfaces.HookEvent* convention; using a hyphen-separated
+			// placeholder would mask future validation drift.
+			BuildHooks: []RegistryBuildHook{
+				{Event: "pre_build", Priority: 10},
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := writeInstalledManifest(path, rm); err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read installed plugin.json: %v", err)
+	}
+	var got installedPluginJSON
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal installed plugin.json: %v", err)
+	}
+	if got.Capabilities == nil {
+		t.Fatal("expected non-nil Capabilities")
+	}
+	if len(got.Capabilities.CLICommands) != 1 || got.Capabilities.CLICommands[0].Name != "payments" {
+		t.Errorf("CLICommands = %+v, want [{Name: payments, …}]", got.Capabilities.CLICommands)
+	}
+	if len(got.Capabilities.BuildHooks) != 1 || got.Capabilities.BuildHooks[0].Event != "pre_build" {
+		t.Errorf("BuildHooks = %+v, want [{Event: pre_build, …}]", got.Capabilities.BuildHooks)
+	}
+}
+
 // TestInstalledManifestEngineValidation verifies that the plugin.json written by
 // writeInstalledManifest passes the engine's plugin.LoadManifest and Validate.
 func TestInstalledManifestEngineValidation(t *testing.T) {

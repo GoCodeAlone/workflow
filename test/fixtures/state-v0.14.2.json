@@ -1,0 +1,28 @@
+{
+  "_fixture_metadata": {
+    "captured_from": "synthetic — replace with real coredump-staging/iac-state/<resource>.json snapshot during PR 4 prep per Task 31 §Step 1",
+    "wfctl_writer_version": "v0.14.2",
+    "schema_revision": "iacStateRecord pre-cutover (snake_case keys, Status field, no SchemaVersion)",
+    "captured_at": "2026-04-15T10:30:00Z"
+  },
+  "resource_id": "iac-state-spaces-key",
+  "resource_type": "infra.spaces_key",
+  "provider": "digitalocean",
+  "provider_ref": "iac-state-spaces-key",
+  "provider_id": "DO00FIXTURE1234567890",
+  "config_hash": "sha256:fab9d2c1e0b7e4f5a3d8c6b2e1a0f9d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8",
+  "status": "active",
+  "config": {
+    "name": "iac-state-spaces-key",
+    "purpose": "iac-state-backend",
+    "scope": "fullaccess"
+  },
+  "outputs": {
+    "access_key": "DO00FIXTURE1234567890",
+    "endpoint": "https://nyc3.digitaloceanspaces.com",
+    "region": "nyc3"
+  },
+  "dependencies": [],
+  "created_at": "2026-04-15T10:30:00Z",
+  "updated_at": "2026-04-15T10:30:00Z"
+}
