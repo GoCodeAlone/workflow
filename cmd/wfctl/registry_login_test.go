@@ -62,6 +62,28 @@ ci:
 	}
 }
 
+func TestRunRegistryLogin_GHCRAlias(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+ci:
+  registries:
+    - name: ghcr
+      type: ghcr
+      path: ghcr.io/myorg
+      auth:
+        env: GITHUB_TOKEN
+`
+	cfgPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("GITHUB_TOKEN", "test-token")
+
+	if err := runRegistryLogin([]string{"--config", cfgPath, "--registry", "ghcr", "--dry-run"}); err != nil {
+		t.Fatalf("runRegistryLogin ghcr alias: %v", err)
+	}
+}
+
 func TestRunRegistryLogin_UnknownRegistry(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeRegistryLoginFixture(t, dir)
