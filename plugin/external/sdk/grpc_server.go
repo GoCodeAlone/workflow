@@ -10,6 +10,7 @@ import (
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -27,6 +28,7 @@ type grpcServer struct {
 	messageHandlers map[string]func(payload []byte, metadata map[string]string) error
 
 	callbackClient pb.EngineCallbackServiceClient
+	callbackConn   *grpc.ClientConn
 	broker         *goplugin.GRPCBroker
 }
 
@@ -48,9 +50,14 @@ func (s *grpcServer) setBroker(broker *goplugin.GRPCBroker) {
 }
 
 // SetCallbackClient stores the host callback gRPC client so that modules can
-// publish messages and manage subscriptions via the host.
+// publish messages and manage subscriptions via the host. It is intended for
+// startup/test wiring before live callbacks begin.
 func (s *grpcServer) SetCallbackClient(client pb.EngineCallbackServiceClient) {
 	s.mu.Lock()
+	if s.callbackConn != nil {
+		_ = s.callbackConn.Close()
+	}
+	s.callbackConn = nil
 	s.callbackClient = client
 	s.mu.Unlock()
 }
@@ -275,6 +282,109 @@ func (s *grpcServer) CreateModule(_ context.Context, req *pb.CreateModuleRequest
 	s.registerModuleInstance(handle, inst)
 
 	return &pb.HandleResponse{HandleId: handle}, nil
+}
+
+func (s *grpcServer) ConfigureCallback(_ context.Context, req *pb.ConfigureCallbackRequest) (*pb.ErrorResponse, error) {
+	if req.BrokerId == 0 {
+		return &pb.ErrorResponse{Error: "callback broker id is required"}, nil
+	}
+	s.mu.RLock()
+	broker := s.broker
+	s.mu.RUnlock()
+	if broker == nil {
+		return &pb.ErrorResponse{Error: "callback broker is not configured"}, nil
+	}
+
+	conn, err := broker.Dial(req.BrokerId)
+	if err != nil {
+		return &pb.ErrorResponse{Error: fmt.Sprintf("dial callback broker: %v", err)}, nil
+	}
+
+	s.mu.Lock()
+	if s.callbackConn != nil {
+		_ = s.callbackConn.Close()
+	}
+	s.callbackConn = conn
+	s.callbackClient = pb.NewEngineCallbackServiceClient(conn)
+	s.mu.Unlock()
+
+	return &pb.ErrorResponse{}, nil
+}
+
+func (s *grpcServer) CreateTrigger(_ context.Context, req *pb.CreateTriggerRequest) (*pb.HandleResponse, error) {
+	tp, ok := s.provider.(TriggerProvider)
+	if !ok {
+		return &pb.HandleResponse{Error: "plugin does not provide triggers"}, nil
+	}
+	if !containsString(tp.TriggerTypes(), req.Type) {
+		return &pb.HandleResponse{Error: fmt.Sprintf("unknown trigger type %q", req.Type)}, nil
+	}
+
+	callbackWorkflowType := req.Name
+	if callbackWorkflowType == "" {
+		callbackWorkflowType = req.Type
+	}
+	inst, err := tp.CreateTrigger(req.Type, structToMap(req.Config), s.triggerCallback(callbackWorkflowType))
+	if err != nil {
+		return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
+	}
+
+	handle := uuid.New().String()
+	s.registerModuleInstance(handle, triggerModuleAdapter{trigger: inst})
+	return &pb.HandleResponse{HandleId: handle}, nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *grpcServer) triggerCallback(triggerType string) TriggerCallback {
+	return func(action string, data map[string]any) error {
+		s.mu.RLock()
+		cb := s.callbackClient
+		s.mu.RUnlock()
+		if cb == nil {
+			return errors.New("trigger callback client is not configured")
+		}
+
+		payload, err := mapToStruct(data)
+		if err != nil {
+			return fmt.Errorf("trigger callback data: %w", err)
+		}
+		resp, err := cb.TriggerWorkflow(context.Background(), &pb.TriggerWorkflowRequest{
+			TriggerType: triggerType,
+			Action:      action,
+			Data:        payload,
+		})
+		if err != nil {
+			return fmt.Errorf("trigger workflow callback: %w", err)
+		}
+		if resp != nil && resp.Error != "" {
+			return fmt.Errorf("trigger workflow callback: %s", resp.Error)
+		}
+		return nil
+	}
+}
+
+type triggerModuleAdapter struct {
+	trigger TriggerInstance
+}
+
+func (m triggerModuleAdapter) Init() error {
+	return nil
+}
+
+func (m triggerModuleAdapter) Start(ctx context.Context) error {
+	return m.trigger.Start(ctx)
+}
+
+func (m triggerModuleAdapter) Stop(ctx context.Context) error {
+	return m.trigger.Stop(ctx)
 }
 
 func (s *grpcServer) registerModuleInstance(handle string, inst ModuleInstance) {
