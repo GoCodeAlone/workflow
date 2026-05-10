@@ -8,82 +8,99 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
-// stubIaCProvider is a no-op IaCProvider used by R-A10 tests. By default it
-// does NOT implement ProviderValidator. Embed this in a struct that adds
-// ValidatePlan to opt in.
-type stubIaCProvider struct{ name string }
-
-func (s stubIaCProvider) Name() string                                      { return s.name }
-func (stubIaCProvider) Version() string                                     { return "0.0.0" }
-func (stubIaCProvider) Initialize(context.Context, map[string]any) error    { return nil }
-func (stubIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration { return nil }
-func (stubIaCProvider) Plan(context.Context, []interfaces.ResourceSpec, []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
-	return nil, nil
-}
-func (stubIaCProvider) Apply(context.Context, *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	return nil, nil
-}
-func (stubIaCProvider) Destroy(context.Context, []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
-	return nil, nil
-}
-func (stubIaCProvider) Status(context.Context, []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
-	return nil, nil
-}
-func (stubIaCProvider) DetectDrift(context.Context, []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
-	return nil, nil
-}
-func (stubIaCProvider) Import(context.Context, string, string) (*interfaces.ResourceState, error) {
-	return nil, nil
-}
-func (stubIaCProvider) ResolveSizing(string, interfaces.Size, *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
-	return nil, nil
-}
-func (stubIaCProvider) ResourceDriver(string) (interfaces.ResourceDriver, error) {
-	return nil, nil
-}
-func (stubIaCProvider) SupportedCanonicalKeys() []string { return nil }
-func (stubIaCProvider) BootstrapStateBackend(context.Context, map[string]any) (*interfaces.BootstrapResult, error) {
-	return nil, nil
-}
-func (stubIaCProvider) Close() error { return nil }
-
-// validatingStubProvider opts into ProviderValidator with canned diagnostics.
-type validatingStubProvider struct {
-	stubIaCProvider
-	diags []interfaces.PlanDiagnostic
+// stubIaCProvider returns a *typedIaCAdapter (interfaces.IaCProvider) backed
+// by a bufconn-served pb.IaCProviderRequired-only server. Used by R-A10
+// tests as a non-validator baseline — adapter.Validator() returns nil so the
+// align rule's dispatch site treats it as a provider that does NOT implement
+// ProviderValidator.
+//
+// Per ADR-0028 (Task 17 / PR 618 strict-contracts force-cutover): wfctl
+// dispatch sites are pure typed-pb. Test fixtures must construct a real
+// *typedIaCAdapter rather than injecting a custom interfaces.IaCProvider —
+// the latter no longer satisfies the type-assert at the dispatch site.
+func stubIaCProvider(t *testing.T, name string) interfaces.IaCProvider {
+	t.Helper()
+	return fixtureTypedAdapter{
+		Required: &fixtureRequiredServer{name: name, version: "0.0.0"},
+	}.build(t)
 }
 
-func (v validatingStubProvider) ValidatePlan(*interfaces.IaCPlan) []interfaces.PlanDiagnostic {
-	return v.diags
+// validatingStubProvider returns a *typedIaCAdapter whose ProviderValidator
+// service emits the supplied diagnostics on every ValidatePlan call. The
+// pb-shape diagnostic is converted from the engine-side
+// []interfaces.PlanDiagnostic so callers can keep declaring fixtures in the
+// engine's types.
+func validatingStubProvider(t *testing.T, name string, diags []interfaces.PlanDiagnostic) interfaces.IaCProvider {
+	t.Helper()
+	return fixtureTypedAdapter{
+		Required:  &fixtureRequiredServer{name: name, version: "0.0.0"},
+		Validator: &cannedValidatorServer{diagnostics: diags},
+	}.build(t)
+}
+
+// cannedValidatorServer returns a fixed set of PlanDiagnostics on every
+// ValidatePlan RPC. Fixture analogue of the legacy validatingStubProvider's
+// inline ValidatePlan(plan) []PlanDiagnostic — diagnostics come back as the
+// proto shape so the typed adapter's planDiagnosticSeverityFromPB conversion
+// roundtrips identically to the production wire path.
+type cannedValidatorServer struct {
+	pb.UnimplementedIaCProviderValidatorServer
+	diagnostics []interfaces.PlanDiagnostic
+}
+
+func (s *cannedValidatorServer) ValidatePlan(_ context.Context, _ *pb.ValidatePlanRequest) (*pb.ValidatePlanResponse, error) {
+	out := make([]*pb.PlanDiagnostic, 0, len(s.diagnostics))
+	for _, d := range s.diagnostics {
+		out = append(out, &pb.PlanDiagnostic{
+			Severity: planDiagnosticSeverityToPB(d.Severity),
+			Resource: d.Resource,
+			Field:    d.Field,
+			Message:  d.Message,
+		})
+	}
+	return &pb.ValidatePlanResponse{Diagnostics: out}, nil
+}
+
+// planDiagnosticSeverityToPB is the inverse of planDiagnosticSeverityFromPB
+// in iac_typed_adapter.go — extracted here as a test helper so fixtures can
+// declare engine-side severities and have the canned server emit the right
+// proto enum.
+func planDiagnosticSeverityToPB(s interfaces.PlanDiagnosticSeverity) pb.PlanDiagnosticSeverity {
+	switch s {
+	case interfaces.PlanDiagnosticWarning:
+		return pb.PlanDiagnosticSeverity_PLAN_DIAGNOSTIC_WARNING
+	case interfaces.PlanDiagnosticError:
+		return pb.PlanDiagnosticSeverity_PLAN_DIAGNOSTIC_ERROR
+	default:
+		return pb.PlanDiagnosticSeverity_PLAN_DIAGNOSTIC_INFO
+	}
 }
 
 // ── Unit tests for checkRA10_provider_validate_plan ──────────────────────────
 
 func TestCheckRA10_NilPlan(t *testing.T) {
 	providers := []interfaces.IaCProvider{
-		validatingStubProvider{
-			stubIaCProvider: stubIaCProvider{name: "p"},
-			diags: []interfaces.PlanDiagnostic{
-				{Severity: interfaces.PlanDiagnosticError, Message: "boom"},
-			},
-		},
+		validatingStubProvider(t, "p", []interfaces.PlanDiagnostic{
+			{Severity: interfaces.PlanDiagnosticError, Message: "boom"},
+		}),
 	}
-	if got := checkRA10_provider_validate_plan(providers, nil); len(got) != 0 {
+	if got := checkRA10_provider_validate_plan(context.Background(), providers, nil); len(got) != 0 {
 		t.Errorf("expected no findings when plan is nil, got: %+v", got)
 	}
 }
 
 func TestCheckRA10_NoProviders(t *testing.T) {
-	if got := checkRA10_provider_validate_plan(nil, &interfaces.IaCPlan{}); len(got) != 0 {
+	if got := checkRA10_provider_validate_plan(context.Background(), nil, &interfaces.IaCPlan{}); len(got) != 0 {
 		t.Errorf("expected no findings when providers empty, got: %+v", got)
 	}
 }
 
 func TestCheckRA10_NonValidatingProviderSkipped(t *testing.T) {
-	providers := []interfaces.IaCProvider{stubIaCProvider{name: "plain"}}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	providers := []interfaces.IaCProvider{stubIaCProvider(t, "plain")}
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 0 {
 		t.Errorf("expected no findings when provider does not implement ProviderValidator, got: %+v", got)
 	}
@@ -91,19 +108,16 @@ func TestCheckRA10_NonValidatingProviderSkipped(t *testing.T) {
 
 func TestCheckRA10_ErrorDiagnostic_BecomesFAIL(t *testing.T) {
 	providers := []interfaces.IaCProvider{
-		validatingStubProvider{
-			stubIaCProvider: stubIaCProvider{name: "do"},
-			diags: []interfaces.PlanDiagnostic{
-				{
-					Severity: interfaces.PlanDiagnosticError,
-					Resource: "db-staging",
-					Field:    "vpc_ref",
-					Message:  "vpc_ref points to unknown resource",
-				},
+		validatingStubProvider(t, "do", []interfaces.PlanDiagnostic{
+			{
+				Severity: interfaces.PlanDiagnosticError,
+				Resource: "db-staging",
+				Field:    "vpc_ref",
+				Message:  "vpc_ref points to unknown resource",
 			},
-		},
+		}),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d: %+v", len(got), got)
 	}
@@ -127,14 +141,11 @@ func TestCheckRA10_ErrorDiagnostic_BecomesFAIL(t *testing.T) {
 
 func TestCheckRA10_WarningDiagnostic_BecomesWARN(t *testing.T) {
 	providers := []interfaces.IaCProvider{
-		validatingStubProvider{
-			stubIaCProvider: stubIaCProvider{name: "do"},
-			diags: []interfaces.PlanDiagnostic{
-				{Severity: interfaces.PlanDiagnosticWarning, Resource: "vpc-prod", Message: "deprecated region"},
-			},
-		},
+		validatingStubProvider(t, "do", []interfaces.PlanDiagnostic{
+			{Severity: interfaces.PlanDiagnosticWarning, Resource: "vpc-prod", Message: "deprecated region"},
+		}),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(got))
 	}
@@ -156,14 +167,11 @@ func TestCheckRA10_InfoDiagnostic_LogsAndEmitsNoFinding(t *testing.T) {
 	}
 
 	providers := []interfaces.IaCProvider{
-		validatingStubProvider{
-			stubIaCProvider: stubIaCProvider{name: "do"},
-			diags: []interfaces.PlanDiagnostic{
-				{Severity: interfaces.PlanDiagnosticInfo, Resource: "lb", Field: "tier", Message: "hint about tier"},
-			},
-		},
+		validatingStubProvider(t, "do", []interfaces.PlanDiagnostic{
+			{Severity: interfaces.PlanDiagnosticInfo, Resource: "lb", Field: "tier", Message: "hint about tier"},
+		}),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 0 {
 		t.Fatalf("expected 0 findings for Info diagnostic, got %d: %+v", len(got), got)
 	}
@@ -196,14 +204,11 @@ func TestCheckRA10_PlanLevelDiagnostic_UsesProviderName(t *testing.T) {
 	// When Resource is empty (plan-level finding), the AlignFinding.Resource
 	// falls back to "<provider-name>:plan" so renderers stay deterministic.
 	providers := []interfaces.IaCProvider{
-		validatingStubProvider{
-			stubIaCProvider: stubIaCProvider{name: "do"},
-			diags: []interfaces.PlanDiagnostic{
-				{Severity: interfaces.PlanDiagnosticError, Message: "plan-level constraint"},
-			},
-		},
+		validatingStubProvider(t, "do", []interfaces.PlanDiagnostic{
+			{Severity: interfaces.PlanDiagnosticError, Message: "plan-level constraint"},
+		}),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(got))
 	}
@@ -225,14 +230,11 @@ func TestCheckRA10_PlanLevelInfoDiagnostic_LogsAsProviderSlashPlan(t *testing.T)
 	}
 
 	providers := []interfaces.IaCProvider{
-		validatingStubProvider{
-			stubIaCProvider: stubIaCProvider{name: "do"},
-			diags: []interfaces.PlanDiagnostic{
-				{Severity: interfaces.PlanDiagnosticInfo, Message: "plan-level hint"},
-			},
-		},
+		validatingStubProvider(t, "do", []interfaces.PlanDiagnostic{
+			{Severity: interfaces.PlanDiagnosticInfo, Message: "plan-level hint"},
+		}),
 	}
-	_ = checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	_ = checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	logged := buf.String()
 	if !strings.Contains(logged, "do/plan") {
 		t.Errorf("log: expected `do/plan` for plan-level Info, got %q", logged)
@@ -244,20 +246,16 @@ func TestCheckRA10_PlanLevelInfoDiagnostic_LogsAsProviderSlashPlan(t *testing.T)
 
 func TestCheckRA10_MultipleProviders_OnlyValidatorsContribute(t *testing.T) {
 	providers := []interfaces.IaCProvider{
-		stubIaCProvider{name: "plain"},
-		validatingStubProvider{
-			stubIaCProvider: stubIaCProvider{name: "do"},
-			diags: []interfaces.PlanDiagnostic{
-				{Severity: interfaces.PlanDiagnosticError, Resource: "db", Message: "X"},
-			},
-		},
-		validatingStubProvider{
-			stubIaCProvider: stubIaCProvider{name: "aws"},
-			// No diagnostics — provider implements ProviderValidator but
-			// returns nil; verifies the rule handles empty slices.
-		},
+		stubIaCProvider(t, "plain"),
+		validatingStubProvider(t, "do", []interfaces.PlanDiagnostic{
+			{Severity: interfaces.PlanDiagnosticError, Resource: "db", Message: "X"},
+		}),
+		// validator with no diagnostics — provider implements ProviderValidator
+		// (Validator service is registered) but returns an empty slice; verifies
+		// the rule handles empty slices.
+		validatingStubProvider(t, "aws", nil),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding (from 'do' only), got %d: %+v", len(got), got)
 	}
@@ -277,17 +275,14 @@ func TestInfraAlign_RA10_FixtureProvider_Fires(t *testing.T) {
 	t.Cleanup(func() { alignLoadProviders = orig })
 	alignLoadProviders = func(_ *alignContext, _ string, _ *interfaces.IaCPlan) ([]interfaces.IaCProvider, []io.Closer, error) {
 		return []interfaces.IaCProvider{
-			validatingStubProvider{
-				stubIaCProvider: stubIaCProvider{name: "fixture"},
-				diags: []interfaces.PlanDiagnostic{
-					{
-						Severity: interfaces.PlanDiagnosticError,
-						Resource: "db-staging",
-						Field:    "vpc_ref",
-						Message:  "vpc_ref points to unknown resource",
-					},
+			validatingStubProvider(t, "fixture", []interfaces.PlanDiagnostic{
+				{
+					Severity: interfaces.PlanDiagnosticError,
+					Resource: "db-staging",
+					Field:    "vpc_ref",
+					Message:  "vpc_ref points to unknown resource",
 				},
-			},
+			}),
 		}, nil, nil
 	}
 
@@ -307,7 +302,7 @@ modules:
 	planFile := writeAlignPlanJSON(t, plan)
 
 	opts := alignOptions{configFile: cfgFile, planFile: planFile}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("runInfraAlignChecks: %v", err)
 	}
@@ -342,7 +337,7 @@ modules:
 	cfgFile := writeAlignYAML(t, yaml)
 
 	opts := alignOptions{configFile: cfgFile}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("runInfraAlignChecks: %v", err)
 	}

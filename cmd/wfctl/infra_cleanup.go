@@ -10,6 +10,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
 // cleanupStdout / cleanupStderr are seam variables tests override to capture
@@ -94,27 +95,39 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 
 	var totalErrs []error
 	for _, p := range providers {
-		enum, ok := p.(interfaces.Enumerator)
+		// Per Task 17 of the strict-contracts force-cutover (ADR-0028):
+		// pure typed-pb dispatch — no interfaces.X fallback. Production
+		// always yields *typedIaCAdapter via discoverAndLoadIaCProvider
+		// (PR #609); test fixtures must construct one via the same
+		// bufconn-backed pattern (PR #603 precedent + this PR's own
+		// fixture rewrites in Task 17 deliverable).
+		adapter, ok := p.(*typedIaCAdapter)
 		if !ok {
+			err := fmt.Errorf("%s: provider %T is not a typed IaC adapter — re-load via discoverAndLoadIaCProvider", p.Name(), p)
+			fmt.Fprintln(cleanupStderr, err)
+			totalErrs = append(totalErrs, err)
+			continue
+		}
+		enumCli := adapter.Enumerator()
+		if enumCli == nil {
 			fmt.Fprintf(cleanupStdout, "skipped %s: provider does not implement Enumerator\n", p.Name())
 			continue
 		}
-		refs, enumErr := enum.EnumerateByTag(ctx, *tag)
-		if enumErr != nil {
-			// v0.27.1: every gRPC-loaded provider satisfies interfaces.Enumerator
-			// after the proxy bridge, so plugins that don't actually implement
-			// EnumerateByTag now reach this point with a translated
-			// interfaces.ErrProviderMethodUnimplemented. Treat that identically
-			// to the negative type-assert above so the structured "skipped"
-			// log line is preserved for plugins that don't support tag queries.
-			if errors.Is(enumErr, interfaces.ErrProviderMethodUnimplemented) {
-				fmt.Fprintf(cleanupStdout, "skipped %s: provider does not implement Enumerator\n", p.Name())
-				continue
-			}
-			fmt.Fprintf(cleanupStderr, "%s: enumerate by tag %q: %v\n", p.Name(), *tag, enumErr)
-			totalErrs = append(totalErrs, fmt.Errorf("%s: enumerate: %w", p.Name(), enumErr))
+		resp, err := enumCli.EnumerateByTag(ctx, &pb.EnumerateByTagRequest{Tag: *tag})
+		if err != nil {
+			// Per code-review IMPORTANT-1 (PR 618 round 4): translate
+			// codes.Unimplemented at the wire boundary to
+			// interfaces.ErrProviderMethodUnimplemented so callers using
+			// errors.Is downstream of the join keep the sentinel signal.
+			// The error still propagates loud (cleanup is single-shot per
+			// ADR-0028 §Per-site dispatch UX) — the translation just
+			// preserves classification for any retry / wrapper logic.
+			err = translateRPCErr(err)
+			fmt.Fprintf(cleanupStderr, "%s: enumerate by tag %q: %v\n", p.Name(), *tag, err)
+			totalErrs = append(totalErrs, fmt.Errorf("%s: enumerate: %w", p.Name(), err))
 			continue
 		}
+		refs := refsFromPB(resp.GetRefs())
 		if len(refs) == 0 {
 			fmt.Fprintf(cleanupStdout, "%s: no resources matched tag %q\n", p.Name(), *tag)
 			continue

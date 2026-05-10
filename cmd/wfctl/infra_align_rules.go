@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -768,17 +769,29 @@ var ra10LogInfo = func(format string, args ...any) {
 // Naming follows the plan T4.2 spec literally; existing rule helpers use the
 // shorter checkRA<N> form, but the descriptive suffix here documents the
 // rule's intent at the call site in infra_align.go.
-func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *interfaces.IaCPlan) []AlignFinding {
+// checkRA10_provider_validate_plan dispatches the R-A10 ValidatePlan rule
+// across all loaded providers. Per code-review IMPORTANT-2 (PR 618 round 4):
+// takes ctx so the typed-RPC ValidatePlan call honors caller cancellation /
+// deadline rather than dropping it via context.Background().
+func checkRA10_provider_validate_plan(ctx context.Context, providers []interfaces.IaCProvider, plan *interfaces.IaCPlan) []AlignFinding {
 	if plan == nil || len(providers) == 0 {
 		return nil
 	}
 	var findings []AlignFinding
 	for _, p := range providers {
-		v, ok := p.(interfaces.ProviderValidator)
+		// Per Task 17 (ADR-0028): pure typed-pb dispatch — no
+		// interfaces.X fallback. Non-typed providers are silently
+		// skipped (R-A10's "treat unimplemented as not-applicable"
+		// behavior is preserved at the typed-adapter accessor level).
+		adapter, ok := p.(*typedIaCAdapter)
 		if !ok {
 			continue
 		}
-		diags := v.ValidatePlan(plan)
+		cli := adapter.Validator()
+		if cli == nil {
+			continue
+		}
+		diags := validatePlanTyped(ctx, cli, plan)
 		for _, d := range diags {
 			// resource: rendered table label (provider-qualified for plan-
 			// level findings so the table always identifies the source).

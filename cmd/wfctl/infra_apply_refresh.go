@@ -61,15 +61,21 @@ func runInfraApplyRefreshPhase(
 		return nil
 	}
 
-	// Use DriftConfigDetector when the provider supports it (optional interface).
-	// Short-circuits to legacy DetectDrift when specsMap is nil (no "apply"-
-	// provenance entries available) to avoid unnecessary RPC round-trips.
+	// Per Task 17 of the strict-contracts force-cutover (ADR-0028):
+	// pure typed-pb dispatch — no interfaces.X fallback. Production
+	// always yields *typedIaCAdapter via discoverAndLoadIaCProvider;
+	// test fixtures must construct one via the same bufconn-backed
+	// pattern. Hard-fail (typed error) if provider isn't a typed adapter.
+	adapter, ok := provider.(*typedIaCAdapter)
+	if !ok {
+		return fmt.Errorf("detect drift: provider %T is not a typed IaC adapter — re-load via discoverAndLoadIaCProvider", provider)
+	}
 	var results []interfaces.DriftResult
 	var err error
-	if d, ok := provider.(interfaces.DriftConfigDetector); ok {
+	if cli := adapter.DriftConfigDetector(); cli != nil {
 		specsMap := buildAppliedSpecMap(states, refs)
 		if specsMap != nil {
-			results, err = d.DetectDriftWithSpecs(ctx, refs, specsMap)
+			results, err = detectDriftConfigTyped(ctx, cli, refs, specsMap)
 		} else {
 			results, err = provider.DetectDrift(ctx, refs)
 		}

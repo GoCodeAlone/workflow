@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,7 +78,7 @@ modules:
 
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

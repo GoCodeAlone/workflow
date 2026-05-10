@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	iofs "io/fs"
@@ -85,7 +86,7 @@ modules:
 	// ci.build exists but has no container named "myapp" → orphaned reference
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +112,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,7 +148,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -180,7 +181,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -215,7 +216,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -249,7 +250,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -281,7 +282,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -306,7 +307,7 @@ modules:
 	// No container_service named redis-cache
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -334,7 +335,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -362,7 +363,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -388,7 +389,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -411,7 +412,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -440,7 +441,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -469,7 +470,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -497,7 +498,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -550,7 +551,7 @@ modules:
 	}
 
 	opts := alignOptions{configFile: mainPath}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -582,7 +583,7 @@ modules:
 	// No infra.database module — FAIL
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -618,7 +619,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -641,7 +642,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -661,7 +662,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -681,7 +682,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -719,7 +720,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg, planFile: planFile}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -755,7 +756,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg, planFile: planFile}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -785,7 +786,7 @@ func TestInfraAlign_RA7_TooManyChanges_Warns(t *testing.T) {
 	planFile := writeAlignPlanJSON(t, plan)
 	cfg := writeAlignYAML(t, `modules: []`)
 	opts := alignOptions{configFile: cfg, planFile: planFile, maxChanges: 50}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -810,7 +811,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -833,7 +834,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -858,7 +859,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1006,7 +1007,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1040,7 +1041,7 @@ secrets:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1067,7 +1068,7 @@ secrets:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg, strict: true}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
