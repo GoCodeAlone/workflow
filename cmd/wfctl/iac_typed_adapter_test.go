@@ -25,6 +25,8 @@ import (
 	"net"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -228,6 +230,134 @@ func TestTypedAdapter_EndToEnd_NameVersionEnumerateAll(t *testing.T) {
 
 // ─── In-process gRPC test fixture ───────────────────────────────────────────
 
+// ─── ADR-0029 capability-extension tests ─────────────────────────────────
+
+// TestTypedAdapter_SupportedCanonicalKeys_PluginOverride exercises the
+// regression closure: plugin declares a strict subset of canonical keys
+// in CapabilitiesResponse, adapter returns those (not the wfctl-side
+// default).
+func TestTypedAdapter_SupportedCanonicalKeys_PluginOverride(t *testing.T) {
+	provider := &fullStubProvider{
+		name:          "do",
+		version:       "v1.0.0",
+		canonicalKeys: []string{"infra.spaces", "infra.spaces_key", "infra.droplet"},
+	}
+	srv, conn := startTestServer(t, provider, false)
+	t.Cleanup(srv.Stop)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	adapter := newTypedIaCAdapter(conn, nil)
+	got := adapter.SupportedCanonicalKeys()
+	want := []string{"infra.spaces", "infra.spaces_key", "infra.droplet"}
+	if len(got) != len(want) {
+		t.Fatalf("SupportedCanonicalKeys returned %d keys; want %d (got=%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("SupportedCanonicalKeys[%d] = %q; want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestTypedAdapter_SupportedCanonicalKeys_FallbackToDefault exercises
+// the empty-canonical-keys path: adapter falls back to
+// interfaces.CanonicalKeys() so plugins without an override work as
+// before. Comparison is set-based since the underlying default's
+// iteration order isn't guaranteed.
+func TestTypedAdapter_SupportedCanonicalKeys_FallbackToDefault(t *testing.T) {
+	provider := &fullStubProvider{name: "stub", version: "v0"} // no canonical_keys
+	srv, conn := startTestServer(t, provider, false)
+	t.Cleanup(srv.Stop)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	adapter := newTypedIaCAdapter(conn, nil)
+	got := adapter.SupportedCanonicalKeys()
+	want := interfaces.CanonicalKeys()
+	if len(got) != len(want) {
+		t.Fatalf("SupportedCanonicalKeys returned %d keys; want %d (default fallback)", len(got), len(want))
+	}
+	wantSet := make(map[string]bool, len(want))
+	for _, k := range want {
+		wantSet[k] = true
+	}
+	for _, k := range got {
+		if !wantSet[k] {
+			t.Errorf("returned key %q not in interfaces.CanonicalKeys() default set", k)
+		}
+	}
+}
+
+// TestTypedAdapter_ComputePlanVersion_PluginDeclares verifies
+// CapabilitiesResponse.compute_plan_version surfaces through the adapter
+// for ComputePlanVersionDeclarer dispatch.
+func TestTypedAdapter_ComputePlanVersion_PluginDeclares(t *testing.T) {
+	provider := &fullStubProvider{name: "do", version: "v1.0.0", computePlanVersion: "v2"}
+	srv, conn := startTestServer(t, provider, false)
+	t.Cleanup(srv.Stop)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	adapter := newTypedIaCAdapter(conn, nil)
+	if got := adapter.ComputePlanVersion(); got != "v2" {
+		t.Errorf("ComputePlanVersion = %q; want %q", got, "v2")
+	}
+
+	// DispatchVersionFor honors the declaration.
+	if got := wfctlhelpers.DispatchVersionFor(adapter); got != "v2" {
+		t.Errorf("DispatchVersionFor = %q; want %q", got, "v2")
+	}
+}
+
+// TestTypedAdapter_ComputePlanVersion_EmptyMeansV1 verifies plugins that
+// don't declare compute_plan_version get the legacy "v1" dispatch path
+// via DispatchVersionFor's default-on-empty rule.
+func TestTypedAdapter_ComputePlanVersion_EmptyMeansV1(t *testing.T) {
+	provider := &fullStubProvider{name: "stub", version: "v0"} // no compute_plan_version
+	srv, conn := startTestServer(t, provider, false)
+	t.Cleanup(srv.Stop)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	adapter := newTypedIaCAdapter(conn, nil)
+	if got := adapter.ComputePlanVersion(); got != "" {
+		t.Errorf("ComputePlanVersion = %q; want empty (no declaration)", got)
+	}
+	if got := wfctlhelpers.DispatchVersionFor(adapter); got != "v1" {
+		t.Errorf("DispatchVersionFor = %q; want %q (empty → v1)", got, "v1")
+	}
+}
+
+// TestTypedAdapter_CapabilitiesCacheReusedAcrossCalls verifies the
+// CapabilitiesResponse is fetched at most once across repeated accessor
+// calls (avoids RPC thrash on the dispatch hot path).
+func TestTypedAdapter_CapabilitiesCacheReusedAcrossCalls(t *testing.T) {
+	provider := &countingCapabilitiesProvider{computePlanVersion: "v2"}
+	srv, conn := startTestServer(t, provider, false)
+	t.Cleanup(srv.Stop)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	adapter := newTypedIaCAdapter(conn, nil)
+	for i := 0; i < 5; i++ {
+		_ = adapter.ComputePlanVersion()
+		_ = adapter.SupportedCanonicalKeys()
+		_ = adapter.Capabilities()
+	}
+	if provider.calls != 1 {
+		t.Errorf("Capabilities RPC called %d times; want 1 (cache miss after first call)", provider.calls)
+	}
+}
+
+// countingCapabilitiesProvider counts Capabilities() RPC invocations to
+// verify caching behavior.
+type countingCapabilitiesProvider struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	computePlanVersion string
+	calls              int
+}
+
+func (p *countingCapabilitiesProvider) Capabilities(_ context.Context, _ *pb.CapabilitiesRequest) (*pb.CapabilitiesResponse, error) {
+	p.calls++
+	return &pb.CapabilitiesResponse{ComputePlanVersion: p.computePlanVersion}, nil
+}
+
 // startTestServer spins up an in-process gRPC server registered with
 // the supplied IaCProviderRequiredServer (and optionally the matching
 // enumerator) on a localhost ephemeral port. Returns the server and a
@@ -267,9 +397,18 @@ type fullStubProvider struct {
 	pb.UnimplementedIaCProviderRequiredServer
 	pb.UnimplementedIaCProviderEnumeratorServer
 
-	name       string
-	version    string
-	enumerated []*pb.ResourceOutput
+	name               string
+	version            string
+	enumerated         []*pb.ResourceOutput
+	canonicalKeys      []string // ADR-0029: empty = adapter falls back to interfaces.CanonicalKeys()
+	computePlanVersion string   // ADR-0029: empty = adapter returns "" (DispatchVersionFor → "v1")
+}
+
+func (s *fullStubProvider) Capabilities(_ context.Context, _ *pb.CapabilitiesRequest) (*pb.CapabilitiesResponse, error) {
+	return &pb.CapabilitiesResponse{
+		CanonicalKeys:      s.canonicalKeys,
+		ComputePlanVersion: s.computePlanVersion,
+	}, nil
 }
 
 func (s *fullStubProvider) Name(_ context.Context, _ *pb.NameRequest) (*pb.NameResponse, error) {

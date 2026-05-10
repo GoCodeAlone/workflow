@@ -2193,10 +2193,24 @@ func (*CapabilitiesRequest) Descriptor() ([]byte, []int) {
 }
 
 type CapabilitiesResponse struct {
-	state         protoimpl.MessageState      `protogen:"open.v1"`
-	Capabilities  []*IaCCapabilityDeclaration `protobuf:"bytes,1,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState      `protogen:"open.v1"`
+	Capabilities []*IaCCapabilityDeclaration `protobuf:"bytes,1,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	// canonical_keys: provider-level override of interfaces.CanonicalKeys()
+	// wfctl-side default. Empty list = use default; non-empty = filter to
+	// exactly these keys (e.g. DO plugin removes loadbalancer/vpc/k8s).
+	// Closes the SupportedCanonicalKeys regression introduced by the typed
+	// cutover (typedIaCAdapter previously couldn't ask the plugin for its
+	// canonical-keys override). See ADR-0029.
+	CanonicalKeys []string `protobuf:"bytes,2,rep,name=canonical_keys,json=canonicalKeys,proto3" json:"canonical_keys,omitempty"`
+	// compute_plan_version: provider-level apply-time dispatch version.
+	// "" or unrecognized = "v1" (legacy provider.Apply path); "v2" routes
+	// through wfctlhelpers.ApplyPlan. Mirrors the
+	// ComputePlanVersionDeclarer optional Go interface so plugin authors
+	// can declare apply-version via gRPC instead of a separate type-assert
+	// probe. See ADR-0029.
+	ComputePlanVersion string `protobuf:"bytes,3,opt,name=compute_plan_version,json=computePlanVersion,proto3" json:"compute_plan_version,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CapabilitiesResponse) Reset() {
@@ -2234,6 +2248,20 @@ func (x *CapabilitiesResponse) GetCapabilities() []*IaCCapabilityDeclaration {
 		return x.Capabilities
 	}
 	return nil
+}
+
+func (x *CapabilitiesResponse) GetCanonicalKeys() []string {
+	if x != nil {
+		return x.CanonicalKeys
+	}
+	return nil
+}
+
+func (x *CapabilitiesResponse) GetComputePlanVersion() string {
+	if x != nil {
+		return x.ComputePlanVersion
+	}
+	return ""
 }
 
 type PlanRequest struct {
@@ -4705,9 +4733,11 @@ const file_iac_proto_rawDesc = "" +
 	"\x0eVersionRequest\"+\n" +
 	"\x0fVersionResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\"\x15\n" +
-	"\x13CapabilitiesRequest\"r\n" +
+	"\x13CapabilitiesRequest\"\xcb\x01\n" +
 	"\x14CapabilitiesResponse\x12Z\n" +
-	"\fcapabilities\x18\x01 \x03(\v26.workflow.plugin.external.iac.IaCCapabilityDeclarationR\fcapabilities\"\x9a\x01\n" +
+	"\fcapabilities\x18\x01 \x03(\v26.workflow.plugin.external.iac.IaCCapabilityDeclarationR\fcapabilities\x12%\n" +
+	"\x0ecanonical_keys\x18\x02 \x03(\tR\rcanonicalKeys\x120\n" +
+	"\x14compute_plan_version\x18\x03 \x01(\tR\x12computePlanVersion\"\x9a\x01\n" +
 	"\vPlanRequest\x12D\n" +
 	"\adesired\x18\x01 \x03(\v2*.workflow.plugin.external.iac.ResourceSpecR\adesired\x12E\n" +
 	"\acurrent\x18\x02 \x03(\v2+.workflow.plugin.external.iac.ResourceStateR\acurrent\"I\n" +
