@@ -86,6 +86,8 @@ var resolveIaCProvider = discoverAndLoadIaCProvider
 // double parse — and either may be empty without affecting the
 // other.
 type iacPluginManifest struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 	Capabilities struct {
 		IaCProvider struct {
 			Name string `json:"name"`

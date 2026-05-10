@@ -23,6 +23,14 @@ type infraStateStore interface {
 	DeleteResource(ctx context.Context, name string) error
 }
 
+// metadataPersister is an optional extension of infraStateStore implemented
+// by backends that can persist GeneratorMetadata alongside resource state.
+// Call-sites use a type assertion so implementations that do not support
+// metadata (noopStateStore, remote backends) are silently skipped.
+type metadataPersister interface {
+	SaveMetadata(ctx context.Context, meta interfaces.GeneratorMetadata) error
+}
+
 // noopStateStore is an infraStateStore that silently discards all writes.
 // It is used when no iac.state backend is configured or when an optional
 // store is passed as nil.
@@ -138,7 +146,7 @@ func (s *fsWfctlStateStore) ListResources(_ context.Context) ([]interfaces.Resou
 	}
 	var states []interfaces.ResourceState
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".lock.json") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".lock.json") || e.Name() == "metadata.json" {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
@@ -191,6 +199,25 @@ func (s *fsWfctlStateStore) DeleteResource(_ context.Context, name string) error
 			return nil // idempotent
 		}
 		return fmt.Errorf("delete state %q: %w", name, err)
+	}
+	return nil
+}
+
+// SaveMetadata implements metadataPersister by writing a metadata.json file
+// into the state directory alongside the per-resource state files.  The file
+// is overwritten on every apply/plan so it always reflects the most-recent
+// operation.
+func (s *fsWfctlStateStore) SaveMetadata(_ context.Context, meta interfaces.GeneratorMetadata) error {
+	if err := os.MkdirAll(s.dir, 0o750); err != nil {
+		return fmt.Errorf("save metadata: mkdir: %w", err)
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("save metadata: marshal: %w", err)
+	}
+	fname := filepath.Join(s.dir, "metadata.json")
+	if err := os.WriteFile(fname, data, 0o600); err != nil {
+		return fmt.Errorf("save metadata: write: %w", err)
 	}
 	return nil
 }

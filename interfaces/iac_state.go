@@ -52,6 +52,23 @@ type ResourceState struct {
 	LastDriftCheck      time.Time      `json:"last_drift_check,omitempty"`
 }
 
+// PluginVersionInfo captures the name and version of a plugin that was loaded
+// during IaC plan or apply generation.
+type PluginVersionInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
+// GeneratorMetadata records the wfctl version and loaded plugin versions that
+// were active when an IaC plan or state operation was produced. Storing this
+// information makes it possible to reason about compatibility between recorded
+// state and the current toolchain, and to identify upgrades that may be
+// required when behavior has changed between versions.
+type GeneratorMetadata struct {
+	WfctlVersion string              `json:"wfctl_version"`
+	Plugins      []PluginVersionInfo `json:"plugins,omitempty"`
+}
+
 // IaCPlan is the complete execution plan for a set of infrastructure changes.
 type IaCPlan struct {
 	ID        string       `json:"id"`
@@ -78,6 +95,13 @@ type IaCPlan struct {
 	// top-level envVars default may therefore be absent from the snapshot;
 	// closing this gap is tracked as a follow-up to W-1.
 	InputSnapshot map[string]string `json:"input_snapshot,omitempty"`
+
+	// GeneratorMetadata records the wfctl version and loaded plugin versions
+	// that were active when this plan was produced. Populated when the plan
+	// is serialised to disk (wfctl infra plan -o / wfctl infra apply).
+	// Consumers can inspect this to assess whether upgrades are needed before
+	// re-applying a stored plan.
+	GeneratorMetadata *GeneratorMetadata `json:"generator_metadata,omitempty"`
 }
 
 // PlanAction is a single planned change within an IaCPlan.
