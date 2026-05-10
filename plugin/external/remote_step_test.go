@@ -27,6 +27,10 @@ type stubPluginServiceClient struct {
 	lastInvokeRequest *pb.InvokeServiceRequest
 	invokeResponse    *pb.InvokeServiceResponse
 	invokeErr         error
+
+	lastCreateTriggerReq *pb.CreateTriggerRequest
+	createTriggerResp    *pb.HandleResponse
+	configureCallbackReq *pb.ConfigureCallbackRequest
 }
 
 // ExecuteStep records the request and returns the configured response.
@@ -96,6 +100,17 @@ func (c *stubPluginServiceClient) GetConfigFragment(_ context.Context, _ *emptyp
 }
 func (c *stubPluginServiceClient) GetAsset(_ context.Context, _ *pb.GetAssetRequest, _ ...grpc.CallOption) (*pb.GetAssetResponse, error) {
 	return &pb.GetAssetResponse{}, nil
+}
+func (c *stubPluginServiceClient) ConfigureCallback(_ context.Context, req *pb.ConfigureCallbackRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.configureCallbackReq = req
+	return &pb.ErrorResponse{}, nil
+}
+func (c *stubPluginServiceClient) CreateTrigger(_ context.Context, req *pb.CreateTriggerRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
+	c.lastCreateTriggerReq = req
+	if c.createTriggerResp != nil {
+		return c.createTriggerResp, nil
+	}
+	return &pb.HandleResponse{HandleId: "trigger-handle"}, nil
 }
 
 // TestRemoteStep_Execute_ResolvesTemplatesInConfig verifies that template

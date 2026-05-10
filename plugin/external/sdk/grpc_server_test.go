@@ -89,6 +89,90 @@ func (p *contractProvider) ContractRegistry() *pb.ContractRegistry {
 	}
 }
 
+type triggerOnlyProvider struct {
+	minimalProvider
+	created *recordingTrigger
+}
+
+func (p *triggerOnlyProvider) TriggerTypes() []string {
+	return []string{"trigger.test"}
+}
+
+func (p *triggerOnlyProvider) CreateTrigger(typeName string, config map[string]any, cb TriggerCallback) (TriggerInstance, error) {
+	if typeName != "trigger.test" {
+		return nil, errors.New("unexpected trigger type: " + typeName)
+	}
+	p.created = &recordingTrigger{
+		config: config,
+		cb:     cb,
+	}
+	return p.created, nil
+}
+
+type recordingTrigger struct {
+	config map[string]any
+	cb     TriggerCallback
+	starts int
+	stops  int
+}
+
+func (t *recordingTrigger) Start(context.Context) error {
+	t.starts++
+	return nil
+}
+
+func (t *recordingTrigger) Stop(context.Context) error {
+	t.stops++
+	return nil
+}
+
+type recordingCallbackClient struct {
+	req *pb.TriggerWorkflowRequest
+}
+
+func (c *recordingCallbackClient) TriggerWorkflow(_ context.Context, req *pb.TriggerWorkflowRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.req = req
+	return &pb.ErrorResponse{}, nil
+}
+
+func (c *recordingCallbackClient) GetService(context.Context, *pb.GetServiceRequest, ...grpc.CallOption) (*pb.GetServiceResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingCallbackClient) Log(context.Context, *pb.LogRequest, ...grpc.CallOption) (*emptypb.Empty, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingCallbackClient) PublishMessage(context.Context, *pb.PublishMessageRequest, ...grpc.CallOption) (*pb.PublishMessageResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingCallbackClient) Subscribe(context.Context, *pb.SubscribeRequest, ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingCallbackClient) Unsubscribe(context.Context, *pb.UnsubscribeRequest, ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+type moduleAndTriggerProvider struct {
+	triggerOnlyProvider
+	module        ModuleInstance
+	moduleCreated int
+}
+
+func (p *moduleAndTriggerProvider) ModuleTypes() []string {
+	return []string{"trigger.test"}
+}
+
+func (p *moduleAndTriggerProvider) CreateModule(typeName, name string, config map[string]any) (ModuleInstance, error) {
+	if typeName != "trigger.test" {
+		return nil, errors.New("unexpected module type: " + typeName)
+	}
+	p.moduleCreated++
+	return p.module, nil
+}
+
 type typedServiceProvider struct {
 	minimalProvider
 	module ModuleInstance
@@ -192,6 +276,112 @@ func TestGetAsset_WithAssetProvider(t *testing.T) {
 	}
 	if resp.ContentType != "text/html" {
 		t.Errorf("expected text/html content type, got %q", resp.ContentType)
+	}
+}
+
+func TestTriggerProviderCreatesTriggerThroughLifecycle(t *testing.T) {
+	provider := &triggerOnlyProvider{}
+	srv := newGRPCServer(provider)
+	callback := &recordingCallbackClient{}
+	srv.SetCallbackClient(callback)
+
+	types, err := srv.GetTriggerTypes(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetTriggerTypes returned rpc error: %v", err)
+	}
+	if len(types.Types) != 1 || types.Types[0] != "trigger.test" {
+		t.Fatalf("expected trigger.test type, got %#v", types.Types)
+	}
+
+	createResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
+		Type:   "trigger.test",
+		Name:   "test-trigger",
+		Config: mustMapToStruct(t, map[string]any{"pool": "private"}),
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateTrigger application error: %s", createResp.Error)
+	}
+	if createResp.HandleId == "" {
+		t.Fatal("CreateTrigger returned empty HandleId")
+	}
+	if provider.created == nil {
+		t.Fatal("expected CreateTrigger to be called")
+	}
+	if got := provider.created.config["pool"]; got != "private" {
+		t.Fatalf("expected trigger config to be forwarded, got %#v", provider.created.config)
+	}
+
+	if resp, err := srv.InitModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil || resp.Error != "" {
+		t.Fatalf("InitModule = (%v, %v), want no error", resp, err)
+	}
+	if resp, err := srv.StartModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil || resp.Error != "" {
+		t.Fatalf("StartModule = (%v, %v), want no error", resp, err)
+	}
+	if provider.created.starts != 1 {
+		t.Fatalf("expected one trigger start, got %d", provider.created.starts)
+	}
+
+	if err := provider.created.cb("completed", map[string]any{"task_id": "task-1"}); err != nil {
+		t.Fatalf("trigger callback returned error: %v", err)
+	}
+	if callback.req == nil {
+		t.Fatal("expected callback request")
+	}
+	if callback.req.TriggerType != "trigger.test" || callback.req.Action != "completed" {
+		t.Fatalf("unexpected callback request: %#v", callback.req)
+	}
+	if got := callback.req.Data.AsMap()["task_id"]; got != "task-1" {
+		t.Fatalf("expected callback task_id, got %#v", callback.req.Data.AsMap())
+	}
+
+	if resp, err := srv.StopModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil || resp.Error != "" {
+		t.Fatalf("StopModule = (%v, %v), want no error", resp, err)
+	}
+	if provider.created.stops != 1 {
+		t.Fatalf("expected one trigger stop, got %d", provider.created.stops)
+	}
+}
+
+func TestCreateModulePrefersModuleProviderWhenTypeAlsoTrigger(t *testing.T) {
+	module := &typedServiceModule{}
+	provider := &moduleAndTriggerProvider{
+		triggerOnlyProvider: triggerOnlyProvider{},
+		module:              module,
+	}
+	srv := newGRPCServer(provider)
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "trigger.test",
+		Name: "module-with-trigger-name",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateModule application error: %s", createResp.Error)
+	}
+	if provider.moduleCreated != 1 {
+		t.Fatalf("expected module provider to handle CreateModule, got %d", provider.moduleCreated)
+	}
+	if provider.created != nil {
+		t.Fatal("CreateModule should not route to TriggerProvider")
+	}
+
+	triggerResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
+		Type: "trigger.test",
+		Name: "trigger",
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger returned rpc error: %v", err)
+	}
+	if triggerResp.Error != "" {
+		t.Fatalf("unexpected CreateTrigger application error: %s", triggerResp.Error)
+	}
+	if provider.created == nil {
+		t.Fatal("expected CreateTrigger to route to TriggerProvider")
 	}
 }
 
@@ -577,9 +767,9 @@ func TestInvokeService_PropagatesOutputEncodingError(t *testing.T) {
 // badOutputModule returns a map with a chan value which structpb cannot encode.
 type badOutputModule struct{}
 
-func (badOutputModule) Init() error                  { return nil }
-func (badOutputModule) Start(context.Context) error  { return nil }
-func (badOutputModule) Stop(context.Context) error   { return nil }
+func (badOutputModule) Init() error                 { return nil }
+func (badOutputModule) Start(context.Context) error { return nil }
+func (badOutputModule) Stop(context.Context) error  { return nil }
 func (badOutputModule) InvokeMethod(_ string, _ map[string]any) (map[string]any, error) {
 	return map[string]any{"bad": make(chan int)}, nil
 }

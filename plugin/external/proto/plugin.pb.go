@@ -964,6 +964,112 @@ func (x *CreateStepRequest) GetTypedConfig() *anypb.Any {
 	return nil
 }
 
+// CreateTriggerRequest asks the plugin to instantiate a trigger.
+type CreateTriggerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Config        *structpb.Struct       `protobuf:"bytes,3,opt,name=config,proto3" json:"config,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTriggerRequest) Reset() {
+	*x = CreateTriggerRequest{}
+	mi := &file_plugin_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTriggerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTriggerRequest) ProtoMessage() {}
+
+func (x *CreateTriggerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTriggerRequest.ProtoReflect.Descriptor instead.
+func (*CreateTriggerRequest) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CreateTriggerRequest) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *CreateTriggerRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateTriggerRequest) GetConfig() *structpb.Struct {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+// ConfigureCallbackRequest carries the go-plugin broker ID for callbacks.
+type ConfigureCallbackRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BrokerId      uint32                 `protobuf:"varint,1,opt,name=broker_id,json=brokerId,proto3" json:"broker_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfigureCallbackRequest) Reset() {
+	*x = ConfigureCallbackRequest{}
+	mi := &file_plugin_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigureCallbackRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigureCallbackRequest) ProtoMessage() {}
+
+func (x *ConfigureCallbackRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigureCallbackRequest.ProtoReflect.Descriptor instead.
+func (*ConfigureCallbackRequest) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ConfigureCallbackRequest) GetBrokerId() uint32 {
+	if x != nil {
+		return x.BrokerId
+	}
+	return 0
+}
+
 // HandleResponse returns a handle ID for a created resource.
 type HandleResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -975,7 +1081,7 @@ type HandleResponse struct {
 
 func (x *HandleResponse) Reset() {
 	*x = HandleResponse{}
-	mi := &file_plugin_proto_msgTypes[12]
+	mi := &file_plugin_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -987,7 +1093,7 @@ func (x *HandleResponse) String() string {
 func (*HandleResponse) ProtoMessage() {}
 
 func (x *HandleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[12]
+	mi := &file_plugin_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1000,7 +1106,7 @@ func (x *HandleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandleResponse.ProtoReflect.Descriptor instead.
 func (*HandleResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{12}
+	return file_plugin_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *HandleResponse) GetHandleId() string {
@@ -1027,7 +1133,7 @@ type HandleRequest struct {
 
 func (x *HandleRequest) Reset() {
 	*x = HandleRequest{}
-	mi := &file_plugin_proto_msgTypes[13]
+	mi := &file_plugin_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1039,7 +1145,7 @@ func (x *HandleRequest) String() string {
 func (*HandleRequest) ProtoMessage() {}
 
 func (x *HandleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[13]
+	mi := &file_plugin_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1052,7 +1158,7 @@ func (x *HandleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandleRequest.ProtoReflect.Descriptor instead.
 func (*HandleRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{13}
+	return file_plugin_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HandleRequest) GetHandleId() string {
@@ -1072,7 +1178,7 @@ type ErrorResponse struct {
 
 func (x *ErrorResponse) Reset() {
 	*x = ErrorResponse{}
-	mi := &file_plugin_proto_msgTypes[14]
+	mi := &file_plugin_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1084,7 +1190,7 @@ func (x *ErrorResponse) String() string {
 func (*ErrorResponse) ProtoMessage() {}
 
 func (x *ErrorResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[14]
+	mi := &file_plugin_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1097,7 +1203,7 @@ func (x *ErrorResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorResponse.ProtoReflect.Descriptor instead.
 func (*ErrorResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{14}
+	return file_plugin_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ErrorResponse) GetError() string {
@@ -1127,7 +1233,7 @@ type ExecuteStepRequest struct {
 
 func (x *ExecuteStepRequest) Reset() {
 	*x = ExecuteStepRequest{}
-	mi := &file_plugin_proto_msgTypes[15]
+	mi := &file_plugin_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1139,7 +1245,7 @@ func (x *ExecuteStepRequest) String() string {
 func (*ExecuteStepRequest) ProtoMessage() {}
 
 func (x *ExecuteStepRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[15]
+	mi := &file_plugin_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1152,7 +1258,7 @@ func (x *ExecuteStepRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteStepRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteStepRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{15}
+	return file_plugin_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ExecuteStepRequest) GetHandleId() string {
@@ -1224,7 +1330,7 @@ type ExecuteStepResponse struct {
 
 func (x *ExecuteStepResponse) Reset() {
 	*x = ExecuteStepResponse{}
-	mi := &file_plugin_proto_msgTypes[16]
+	mi := &file_plugin_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1236,7 +1342,7 @@ func (x *ExecuteStepResponse) String() string {
 func (*ExecuteStepResponse) ProtoMessage() {}
 
 func (x *ExecuteStepResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[16]
+	mi := &file_plugin_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1249,7 +1355,7 @@ func (x *ExecuteStepResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteStepResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteStepResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{16}
+	return file_plugin_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ExecuteStepResponse) GetOutput() *structpb.Struct {
@@ -1293,7 +1399,7 @@ type InvokeServiceRequest struct {
 
 func (x *InvokeServiceRequest) Reset() {
 	*x = InvokeServiceRequest{}
-	mi := &file_plugin_proto_msgTypes[17]
+	mi := &file_plugin_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1305,7 +1411,7 @@ func (x *InvokeServiceRequest) String() string {
 func (*InvokeServiceRequest) ProtoMessage() {}
 
 func (x *InvokeServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[17]
+	mi := &file_plugin_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1318,7 +1424,7 @@ func (x *InvokeServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeServiceRequest.ProtoReflect.Descriptor instead.
 func (*InvokeServiceRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{17}
+	return file_plugin_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *InvokeServiceRequest) GetHandleId() string {
@@ -1361,7 +1467,7 @@ type InvokeServiceResponse struct {
 
 func (x *InvokeServiceResponse) Reset() {
 	*x = InvokeServiceResponse{}
-	mi := &file_plugin_proto_msgTypes[18]
+	mi := &file_plugin_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1373,7 +1479,7 @@ func (x *InvokeServiceResponse) String() string {
 func (*InvokeServiceResponse) ProtoMessage() {}
 
 func (x *InvokeServiceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[18]
+	mi := &file_plugin_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1386,7 +1492,7 @@ func (x *InvokeServiceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeServiceResponse.ProtoReflect.Descriptor instead.
 func (*InvokeServiceResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{18}
+	return file_plugin_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *InvokeServiceResponse) GetResult() *structpb.Struct {
@@ -1423,7 +1529,7 @@ type TriggerWorkflowRequest struct {
 
 func (x *TriggerWorkflowRequest) Reset() {
 	*x = TriggerWorkflowRequest{}
-	mi := &file_plugin_proto_msgTypes[19]
+	mi := &file_plugin_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1435,7 +1541,7 @@ func (x *TriggerWorkflowRequest) String() string {
 func (*TriggerWorkflowRequest) ProtoMessage() {}
 
 func (x *TriggerWorkflowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[19]
+	mi := &file_plugin_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1448,7 +1554,7 @@ func (x *TriggerWorkflowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerWorkflowRequest.ProtoReflect.Descriptor instead.
 func (*TriggerWorkflowRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{19}
+	return file_plugin_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TriggerWorkflowRequest) GetTriggerType() string {
@@ -1489,7 +1595,7 @@ type GetServiceRequest struct {
 
 func (x *GetServiceRequest) Reset() {
 	*x = GetServiceRequest{}
-	mi := &file_plugin_proto_msgTypes[20]
+	mi := &file_plugin_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1501,7 +1607,7 @@ func (x *GetServiceRequest) String() string {
 func (*GetServiceRequest) ProtoMessage() {}
 
 func (x *GetServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[20]
+	mi := &file_plugin_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1514,7 +1620,7 @@ func (x *GetServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServiceRequest.ProtoReflect.Descriptor instead.
 func (*GetServiceRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{20}
+	return file_plugin_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GetServiceRequest) GetName() string {
@@ -1534,7 +1640,7 @@ type GetServiceResponse struct {
 
 func (x *GetServiceResponse) Reset() {
 	*x = GetServiceResponse{}
-	mi := &file_plugin_proto_msgTypes[21]
+	mi := &file_plugin_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1546,7 +1652,7 @@ func (x *GetServiceResponse) String() string {
 func (*GetServiceResponse) ProtoMessage() {}
 
 func (x *GetServiceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[21]
+	mi := &file_plugin_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1559,7 +1665,7 @@ func (x *GetServiceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServiceResponse.ProtoReflect.Descriptor instead.
 func (*GetServiceResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{21}
+	return file_plugin_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *GetServiceResponse) GetFound() bool {
@@ -1581,7 +1687,7 @@ type LogRequest struct {
 
 func (x *LogRequest) Reset() {
 	*x = LogRequest{}
-	mi := &file_plugin_proto_msgTypes[22]
+	mi := &file_plugin_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1593,7 +1699,7 @@ func (x *LogRequest) String() string {
 func (*LogRequest) ProtoMessage() {}
 
 func (x *LogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[22]
+	mi := &file_plugin_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1606,7 +1712,7 @@ func (x *LogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogRequest.ProtoReflect.Descriptor instead.
 func (*LogRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{22}
+	return file_plugin_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *LogRequest) GetLevel() string {
@@ -1643,7 +1749,7 @@ type PublishMessageRequest struct {
 
 func (x *PublishMessageRequest) Reset() {
 	*x = PublishMessageRequest{}
-	mi := &file_plugin_proto_msgTypes[23]
+	mi := &file_plugin_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1655,7 +1761,7 @@ func (x *PublishMessageRequest) String() string {
 func (*PublishMessageRequest) ProtoMessage() {}
 
 func (x *PublishMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[23]
+	mi := &file_plugin_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1668,7 +1774,7 @@ func (x *PublishMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishMessageRequest.ProtoReflect.Descriptor instead.
 func (*PublishMessageRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{23}
+	return file_plugin_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *PublishMessageRequest) GetHandleId() string {
@@ -1710,7 +1816,7 @@ type PublishMessageResponse struct {
 
 func (x *PublishMessageResponse) Reset() {
 	*x = PublishMessageResponse{}
-	mi := &file_plugin_proto_msgTypes[24]
+	mi := &file_plugin_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1722,7 +1828,7 @@ func (x *PublishMessageResponse) String() string {
 func (*PublishMessageResponse) ProtoMessage() {}
 
 func (x *PublishMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[24]
+	mi := &file_plugin_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1735,7 +1841,7 @@ func (x *PublishMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishMessageResponse.ProtoReflect.Descriptor instead.
 func (*PublishMessageResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{24}
+	return file_plugin_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PublishMessageResponse) GetError() string {
@@ -1764,7 +1870,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_plugin_proto_msgTypes[25]
+	mi := &file_plugin_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1776,7 +1882,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[25]
+	mi := &file_plugin_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1789,7 +1895,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{25}
+	return file_plugin_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *SubscribeRequest) GetHandleId() string {
@@ -1824,7 +1930,7 @@ type UnsubscribeRequest struct {
 
 func (x *UnsubscribeRequest) Reset() {
 	*x = UnsubscribeRequest{}
-	mi := &file_plugin_proto_msgTypes[26]
+	mi := &file_plugin_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1836,7 +1942,7 @@ func (x *UnsubscribeRequest) String() string {
 func (*UnsubscribeRequest) ProtoMessage() {}
 
 func (x *UnsubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[26]
+	mi := &file_plugin_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1849,7 +1955,7 @@ func (x *UnsubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeRequest.ProtoReflect.Descriptor instead.
 func (*UnsubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{26}
+	return file_plugin_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *UnsubscribeRequest) GetHandleId() string {
@@ -1880,7 +1986,7 @@ type DeliverMessageRequest struct {
 
 func (x *DeliverMessageRequest) Reset() {
 	*x = DeliverMessageRequest{}
-	mi := &file_plugin_proto_msgTypes[27]
+	mi := &file_plugin_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1892,7 +1998,7 @@ func (x *DeliverMessageRequest) String() string {
 func (*DeliverMessageRequest) ProtoMessage() {}
 
 func (x *DeliverMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[27]
+	mi := &file_plugin_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1905,7 +2011,7 @@ func (x *DeliverMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverMessageRequest.ProtoReflect.Descriptor instead.
 func (*DeliverMessageRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{27}
+	return file_plugin_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DeliverMessageRequest) GetHandleId() string {
@@ -1954,7 +2060,7 @@ type DeliverMessageResponse struct {
 
 func (x *DeliverMessageResponse) Reset() {
 	*x = DeliverMessageResponse{}
-	mi := &file_plugin_proto_msgTypes[28]
+	mi := &file_plugin_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1966,7 +2072,7 @@ func (x *DeliverMessageResponse) String() string {
 func (*DeliverMessageResponse) ProtoMessage() {}
 
 func (x *DeliverMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[28]
+	mi := &file_plugin_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1979,7 +2085,7 @@ func (x *DeliverMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverMessageResponse.ProtoReflect.Descriptor instead.
 func (*DeliverMessageResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{28}
+	return file_plugin_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *DeliverMessageResponse) GetError() string {
@@ -2007,7 +2113,7 @@ type ConfigFragmentResponse struct {
 
 func (x *ConfigFragmentResponse) Reset() {
 	*x = ConfigFragmentResponse{}
-	mi := &file_plugin_proto_msgTypes[29]
+	mi := &file_plugin_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2019,7 +2125,7 @@ func (x *ConfigFragmentResponse) String() string {
 func (*ConfigFragmentResponse) ProtoMessage() {}
 
 func (x *ConfigFragmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_proto_msgTypes[29]
+	mi := &file_plugin_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2032,7 +2138,7 @@ func (x *ConfigFragmentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigFragmentResponse.ProtoReflect.Descriptor instead.
 func (*ConfigFragmentResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_proto_rawDescGZIP(), []int{29}
+	return file_plugin_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ConfigFragmentResponse) GetYamlConfig() []byte {
@@ -2115,7 +2221,13 @@ const file_plugin_proto_rawDesc = "" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12/\n" +
 	"\x06config\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06config\x127\n" +
-	"\ftyped_config\x18\x04 \x01(\v2\x14.google.protobuf.AnyR\vtypedConfig\"C\n" +
+	"\ftyped_config\x18\x04 \x01(\v2\x14.google.protobuf.AnyR\vtypedConfig\"o\n" +
+	"\x14CreateTriggerRequest\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12/\n" +
+	"\x06config\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06config\"7\n" +
+	"\x18ConfigureCallbackRequest\x12\x1b\n" +
+	"\tbroker_id\x18\x01 \x01(\rR\bbrokerId\"C\n" +
 	"\x0eHandleResponse\x12\x1b\n" +
 	"\thandle_id\x18\x01 \x01(\tR\bhandleId\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\",\n" +
@@ -2214,7 +2326,7 @@ const file_plugin_proto_rawDesc = "" +
 	"\x19CONTRACT_MODE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCONTRACT_MODE_LEGACY_STRUCT\x10\x01\x12*\n" +
 	"&CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT\x10\x02\x12\x1e\n" +
-	"\x1aCONTRACT_MODE_STRICT_PROTO\x10\x032\x90\f\n" +
+	"\x1aCONTRACT_MODE_STRICT_PROTO\x10\x032\xd5\r\n" +
 	"\rPluginService\x12C\n" +
 	"\vGetManifest\x12\x16.google.protobuf.Empty\x1a\x1c.workflow.plugin.v1.Manifest\x12F\n" +
 	"\x0eGetModuleTypes\x12\x16.google.protobuf.Empty\x1a\x1c.workflow.plugin.v1.TypeList\x12D\n" +
@@ -2236,7 +2348,9 @@ const file_plugin_proto_rawDesc = "" +
 	"\rInvokeService\x12(.workflow.plugin.v1.InvokeServiceRequest\x1a).workflow.plugin.v1.InvokeServiceResponse\x12g\n" +
 	"\x0eDeliverMessage\x12).workflow.plugin.v1.DeliverMessageRequest\x1a*.workflow.plugin.v1.DeliverMessageResponse\x12W\n" +
 	"\x11GetConfigFragment\x12\x16.google.protobuf.Empty\x1a*.workflow.plugin.v1.ConfigFragmentResponse\x12U\n" +
-	"\bGetAsset\x12#.workflow.plugin.v1.GetAssetRequest\x1a$.workflow.plugin.v1.GetAssetResponse2\xae\x04\n" +
+	"\bGetAsset\x12#.workflow.plugin.v1.GetAssetRequest\x1a$.workflow.plugin.v1.GetAssetResponse\x12d\n" +
+	"\x11ConfigureCallback\x12,.workflow.plugin.v1.ConfigureCallbackRequest\x1a!.workflow.plugin.v1.ErrorResponse\x12]\n" +
+	"\rCreateTrigger\x12(.workflow.plugin.v1.CreateTriggerRequest\x1a\".workflow.plugin.v1.HandleResponse2\xae\x04\n" +
 	"\x15EngineCallbackService\x12`\n" +
 	"\x0fTriggerWorkflow\x12*.workflow.plugin.v1.TriggerWorkflowRequest\x1a!.workflow.plugin.v1.ErrorResponse\x12[\n" +
 	"\n" +
@@ -2259,7 +2373,7 @@ func file_plugin_proto_rawDescGZIP() []byte {
 }
 
 var file_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_plugin_proto_goTypes = []any{
 	(ContractKind)(0),                      // 0: workflow.plugin.v1.ContractKind
 	(ContractMode)(0),                      // 1: workflow.plugin.v1.ContractMode
@@ -2275,117 +2389,124 @@ var file_plugin_proto_goTypes = []any{
 	(*ConfigFieldDef)(nil),                 // 11: workflow.plugin.v1.ConfigFieldDef
 	(*CreateModuleRequest)(nil),            // 12: workflow.plugin.v1.CreateModuleRequest
 	(*CreateStepRequest)(nil),              // 13: workflow.plugin.v1.CreateStepRequest
-	(*HandleResponse)(nil),                 // 14: workflow.plugin.v1.HandleResponse
-	(*HandleRequest)(nil),                  // 15: workflow.plugin.v1.HandleRequest
-	(*ErrorResponse)(nil),                  // 16: workflow.plugin.v1.ErrorResponse
-	(*ExecuteStepRequest)(nil),             // 17: workflow.plugin.v1.ExecuteStepRequest
-	(*ExecuteStepResponse)(nil),            // 18: workflow.plugin.v1.ExecuteStepResponse
-	(*InvokeServiceRequest)(nil),           // 19: workflow.plugin.v1.InvokeServiceRequest
-	(*InvokeServiceResponse)(nil),          // 20: workflow.plugin.v1.InvokeServiceResponse
-	(*TriggerWorkflowRequest)(nil),         // 21: workflow.plugin.v1.TriggerWorkflowRequest
-	(*GetServiceRequest)(nil),              // 22: workflow.plugin.v1.GetServiceRequest
-	(*GetServiceResponse)(nil),             // 23: workflow.plugin.v1.GetServiceResponse
-	(*LogRequest)(nil),                     // 24: workflow.plugin.v1.LogRequest
-	(*PublishMessageRequest)(nil),          // 25: workflow.plugin.v1.PublishMessageRequest
-	(*PublishMessageResponse)(nil),         // 26: workflow.plugin.v1.PublishMessageResponse
-	(*SubscribeRequest)(nil),               // 27: workflow.plugin.v1.SubscribeRequest
-	(*UnsubscribeRequest)(nil),             // 28: workflow.plugin.v1.UnsubscribeRequest
-	(*DeliverMessageRequest)(nil),          // 29: workflow.plugin.v1.DeliverMessageRequest
-	(*DeliverMessageResponse)(nil),         // 30: workflow.plugin.v1.DeliverMessageResponse
-	(*ConfigFragmentResponse)(nil),         // 31: workflow.plugin.v1.ConfigFragmentResponse
-	nil,                                    // 32: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
-	nil,                                    // 33: workflow.plugin.v1.PublishMessageRequest.MetadataEntry
-	nil,                                    // 34: workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
-	(*descriptorpb.FileDescriptorSet)(nil), // 35: google.protobuf.FileDescriptorSet
-	(*structpb.Struct)(nil),                // 36: google.protobuf.Struct
-	(*anypb.Any)(nil),                      // 37: google.protobuf.Any
-	(*emptypb.Empty)(nil),                  // 38: google.protobuf.Empty
+	(*CreateTriggerRequest)(nil),           // 14: workflow.plugin.v1.CreateTriggerRequest
+	(*ConfigureCallbackRequest)(nil),       // 15: workflow.plugin.v1.ConfigureCallbackRequest
+	(*HandleResponse)(nil),                 // 16: workflow.plugin.v1.HandleResponse
+	(*HandleRequest)(nil),                  // 17: workflow.plugin.v1.HandleRequest
+	(*ErrorResponse)(nil),                  // 18: workflow.plugin.v1.ErrorResponse
+	(*ExecuteStepRequest)(nil),             // 19: workflow.plugin.v1.ExecuteStepRequest
+	(*ExecuteStepResponse)(nil),            // 20: workflow.plugin.v1.ExecuteStepResponse
+	(*InvokeServiceRequest)(nil),           // 21: workflow.plugin.v1.InvokeServiceRequest
+	(*InvokeServiceResponse)(nil),          // 22: workflow.plugin.v1.InvokeServiceResponse
+	(*TriggerWorkflowRequest)(nil),         // 23: workflow.plugin.v1.TriggerWorkflowRequest
+	(*GetServiceRequest)(nil),              // 24: workflow.plugin.v1.GetServiceRequest
+	(*GetServiceResponse)(nil),             // 25: workflow.plugin.v1.GetServiceResponse
+	(*LogRequest)(nil),                     // 26: workflow.plugin.v1.LogRequest
+	(*PublishMessageRequest)(nil),          // 27: workflow.plugin.v1.PublishMessageRequest
+	(*PublishMessageResponse)(nil),         // 28: workflow.plugin.v1.PublishMessageResponse
+	(*SubscribeRequest)(nil),               // 29: workflow.plugin.v1.SubscribeRequest
+	(*UnsubscribeRequest)(nil),             // 30: workflow.plugin.v1.UnsubscribeRequest
+	(*DeliverMessageRequest)(nil),          // 31: workflow.plugin.v1.DeliverMessageRequest
+	(*DeliverMessageResponse)(nil),         // 32: workflow.plugin.v1.DeliverMessageResponse
+	(*ConfigFragmentResponse)(nil),         // 33: workflow.plugin.v1.ConfigFragmentResponse
+	nil,                                    // 34: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
+	nil,                                    // 35: workflow.plugin.v1.PublishMessageRequest.MetadataEntry
+	nil,                                    // 36: workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
+	(*descriptorpb.FileDescriptorSet)(nil), // 37: google.protobuf.FileDescriptorSet
+	(*structpb.Struct)(nil),                // 38: google.protobuf.Struct
+	(*anypb.Any)(nil),                      // 39: google.protobuf.Any
+	(*emptypb.Empty)(nil),                  // 40: google.protobuf.Empty
 }
 var file_plugin_proto_depIdxs = []int32{
 	4,  // 0: workflow.plugin.v1.ContractRegistry.contracts:type_name -> workflow.plugin.v1.ContractDescriptor
-	35, // 1: workflow.plugin.v1.ContractRegistry.file_descriptor_set:type_name -> google.protobuf.FileDescriptorSet
+	37, // 1: workflow.plugin.v1.ContractRegistry.file_descriptor_set:type_name -> google.protobuf.FileDescriptorSet
 	0,  // 2: workflow.plugin.v1.ContractDescriptor.kind:type_name -> workflow.plugin.v1.ContractKind
 	1,  // 3: workflow.plugin.v1.ContractDescriptor.mode:type_name -> workflow.plugin.v1.ContractMode
 	9,  // 4: workflow.plugin.v1.ModuleSchemaList.schemas:type_name -> workflow.plugin.v1.ModuleSchema
 	10, // 5: workflow.plugin.v1.ModuleSchema.inputs:type_name -> workflow.plugin.v1.ServiceIODef
 	10, // 6: workflow.plugin.v1.ModuleSchema.outputs:type_name -> workflow.plugin.v1.ServiceIODef
 	11, // 7: workflow.plugin.v1.ModuleSchema.config_fields:type_name -> workflow.plugin.v1.ConfigFieldDef
-	36, // 8: workflow.plugin.v1.CreateModuleRequest.config:type_name -> google.protobuf.Struct
-	37, // 9: workflow.plugin.v1.CreateModuleRequest.typed_config:type_name -> google.protobuf.Any
-	36, // 10: workflow.plugin.v1.CreateStepRequest.config:type_name -> google.protobuf.Struct
-	37, // 11: workflow.plugin.v1.CreateStepRequest.typed_config:type_name -> google.protobuf.Any
-	36, // 12: workflow.plugin.v1.ExecuteStepRequest.trigger_data:type_name -> google.protobuf.Struct
-	32, // 13: workflow.plugin.v1.ExecuteStepRequest.step_outputs:type_name -> workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
-	36, // 14: workflow.plugin.v1.ExecuteStepRequest.current:type_name -> google.protobuf.Struct
-	36, // 15: workflow.plugin.v1.ExecuteStepRequest.metadata:type_name -> google.protobuf.Struct
-	36, // 16: workflow.plugin.v1.ExecuteStepRequest.config:type_name -> google.protobuf.Struct
-	37, // 17: workflow.plugin.v1.ExecuteStepRequest.typed_config:type_name -> google.protobuf.Any
-	37, // 18: workflow.plugin.v1.ExecuteStepRequest.typed_input:type_name -> google.protobuf.Any
-	36, // 19: workflow.plugin.v1.ExecuteStepResponse.output:type_name -> google.protobuf.Struct
-	37, // 20: workflow.plugin.v1.ExecuteStepResponse.typed_output:type_name -> google.protobuf.Any
-	36, // 21: workflow.plugin.v1.InvokeServiceRequest.args:type_name -> google.protobuf.Struct
-	37, // 22: workflow.plugin.v1.InvokeServiceRequest.typed_input:type_name -> google.protobuf.Any
-	36, // 23: workflow.plugin.v1.InvokeServiceResponse.result:type_name -> google.protobuf.Struct
-	37, // 24: workflow.plugin.v1.InvokeServiceResponse.typed_output:type_name -> google.protobuf.Any
-	36, // 25: workflow.plugin.v1.TriggerWorkflowRequest.data:type_name -> google.protobuf.Struct
-	37, // 26: workflow.plugin.v1.TriggerWorkflowRequest.typed_data:type_name -> google.protobuf.Any
-	36, // 27: workflow.plugin.v1.LogRequest.fields:type_name -> google.protobuf.Struct
-	33, // 28: workflow.plugin.v1.PublishMessageRequest.metadata:type_name -> workflow.plugin.v1.PublishMessageRequest.MetadataEntry
-	34, // 29: workflow.plugin.v1.DeliverMessageRequest.metadata:type_name -> workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
-	36, // 30: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry.value:type_name -> google.protobuf.Struct
-	38, // 31: workflow.plugin.v1.PluginService.GetManifest:input_type -> google.protobuf.Empty
-	38, // 32: workflow.plugin.v1.PluginService.GetModuleTypes:input_type -> google.protobuf.Empty
-	38, // 33: workflow.plugin.v1.PluginService.GetStepTypes:input_type -> google.protobuf.Empty
-	38, // 34: workflow.plugin.v1.PluginService.GetTriggerTypes:input_type -> google.protobuf.Empty
-	38, // 35: workflow.plugin.v1.PluginService.GetModuleSchemas:input_type -> google.protobuf.Empty
-	38, // 36: workflow.plugin.v1.PluginService.GetContractRegistry:input_type -> google.protobuf.Empty
-	12, // 37: workflow.plugin.v1.PluginService.CreateModule:input_type -> workflow.plugin.v1.CreateModuleRequest
-	15, // 38: workflow.plugin.v1.PluginService.InitModule:input_type -> workflow.plugin.v1.HandleRequest
-	15, // 39: workflow.plugin.v1.PluginService.StartModule:input_type -> workflow.plugin.v1.HandleRequest
-	15, // 40: workflow.plugin.v1.PluginService.StopModule:input_type -> workflow.plugin.v1.HandleRequest
-	15, // 41: workflow.plugin.v1.PluginService.DestroyModule:input_type -> workflow.plugin.v1.HandleRequest
-	13, // 42: workflow.plugin.v1.PluginService.CreateStep:input_type -> workflow.plugin.v1.CreateStepRequest
-	17, // 43: workflow.plugin.v1.PluginService.ExecuteStep:input_type -> workflow.plugin.v1.ExecuteStepRequest
-	15, // 44: workflow.plugin.v1.PluginService.DestroyStep:input_type -> workflow.plugin.v1.HandleRequest
-	19, // 45: workflow.plugin.v1.PluginService.InvokeService:input_type -> workflow.plugin.v1.InvokeServiceRequest
-	29, // 46: workflow.plugin.v1.PluginService.DeliverMessage:input_type -> workflow.plugin.v1.DeliverMessageRequest
-	38, // 47: workflow.plugin.v1.PluginService.GetConfigFragment:input_type -> google.protobuf.Empty
-	5,  // 48: workflow.plugin.v1.PluginService.GetAsset:input_type -> workflow.plugin.v1.GetAssetRequest
-	21, // 49: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:input_type -> workflow.plugin.v1.TriggerWorkflowRequest
-	22, // 50: workflow.plugin.v1.EngineCallbackService.GetService:input_type -> workflow.plugin.v1.GetServiceRequest
-	24, // 51: workflow.plugin.v1.EngineCallbackService.Log:input_type -> workflow.plugin.v1.LogRequest
-	25, // 52: workflow.plugin.v1.EngineCallbackService.PublishMessage:input_type -> workflow.plugin.v1.PublishMessageRequest
-	27, // 53: workflow.plugin.v1.EngineCallbackService.Subscribe:input_type -> workflow.plugin.v1.SubscribeRequest
-	28, // 54: workflow.plugin.v1.EngineCallbackService.Unsubscribe:input_type -> workflow.plugin.v1.UnsubscribeRequest
-	2,  // 55: workflow.plugin.v1.PluginService.GetManifest:output_type -> workflow.plugin.v1.Manifest
-	7,  // 56: workflow.plugin.v1.PluginService.GetModuleTypes:output_type -> workflow.plugin.v1.TypeList
-	7,  // 57: workflow.plugin.v1.PluginService.GetStepTypes:output_type -> workflow.plugin.v1.TypeList
-	7,  // 58: workflow.plugin.v1.PluginService.GetTriggerTypes:output_type -> workflow.plugin.v1.TypeList
-	8,  // 59: workflow.plugin.v1.PluginService.GetModuleSchemas:output_type -> workflow.plugin.v1.ModuleSchemaList
-	3,  // 60: workflow.plugin.v1.PluginService.GetContractRegistry:output_type -> workflow.plugin.v1.ContractRegistry
-	14, // 61: workflow.plugin.v1.PluginService.CreateModule:output_type -> workflow.plugin.v1.HandleResponse
-	16, // 62: workflow.plugin.v1.PluginService.InitModule:output_type -> workflow.plugin.v1.ErrorResponse
-	16, // 63: workflow.plugin.v1.PluginService.StartModule:output_type -> workflow.plugin.v1.ErrorResponse
-	16, // 64: workflow.plugin.v1.PluginService.StopModule:output_type -> workflow.plugin.v1.ErrorResponse
-	16, // 65: workflow.plugin.v1.PluginService.DestroyModule:output_type -> workflow.plugin.v1.ErrorResponse
-	14, // 66: workflow.plugin.v1.PluginService.CreateStep:output_type -> workflow.plugin.v1.HandleResponse
-	18, // 67: workflow.plugin.v1.PluginService.ExecuteStep:output_type -> workflow.plugin.v1.ExecuteStepResponse
-	16, // 68: workflow.plugin.v1.PluginService.DestroyStep:output_type -> workflow.plugin.v1.ErrorResponse
-	20, // 69: workflow.plugin.v1.PluginService.InvokeService:output_type -> workflow.plugin.v1.InvokeServiceResponse
-	30, // 70: workflow.plugin.v1.PluginService.DeliverMessage:output_type -> workflow.plugin.v1.DeliverMessageResponse
-	31, // 71: workflow.plugin.v1.PluginService.GetConfigFragment:output_type -> workflow.plugin.v1.ConfigFragmentResponse
-	6,  // 72: workflow.plugin.v1.PluginService.GetAsset:output_type -> workflow.plugin.v1.GetAssetResponse
-	16, // 73: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:output_type -> workflow.plugin.v1.ErrorResponse
-	23, // 74: workflow.plugin.v1.EngineCallbackService.GetService:output_type -> workflow.plugin.v1.GetServiceResponse
-	38, // 75: workflow.plugin.v1.EngineCallbackService.Log:output_type -> google.protobuf.Empty
-	26, // 76: workflow.plugin.v1.EngineCallbackService.PublishMessage:output_type -> workflow.plugin.v1.PublishMessageResponse
-	16, // 77: workflow.plugin.v1.EngineCallbackService.Subscribe:output_type -> workflow.plugin.v1.ErrorResponse
-	16, // 78: workflow.plugin.v1.EngineCallbackService.Unsubscribe:output_type -> workflow.plugin.v1.ErrorResponse
-	55, // [55:79] is the sub-list for method output_type
-	31, // [31:55] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	38, // 8: workflow.plugin.v1.CreateModuleRequest.config:type_name -> google.protobuf.Struct
+	39, // 9: workflow.plugin.v1.CreateModuleRequest.typed_config:type_name -> google.protobuf.Any
+	38, // 10: workflow.plugin.v1.CreateStepRequest.config:type_name -> google.protobuf.Struct
+	39, // 11: workflow.plugin.v1.CreateStepRequest.typed_config:type_name -> google.protobuf.Any
+	38, // 12: workflow.plugin.v1.CreateTriggerRequest.config:type_name -> google.protobuf.Struct
+	38, // 13: workflow.plugin.v1.ExecuteStepRequest.trigger_data:type_name -> google.protobuf.Struct
+	34, // 14: workflow.plugin.v1.ExecuteStepRequest.step_outputs:type_name -> workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
+	38, // 15: workflow.plugin.v1.ExecuteStepRequest.current:type_name -> google.protobuf.Struct
+	38, // 16: workflow.plugin.v1.ExecuteStepRequest.metadata:type_name -> google.protobuf.Struct
+	38, // 17: workflow.plugin.v1.ExecuteStepRequest.config:type_name -> google.protobuf.Struct
+	39, // 18: workflow.plugin.v1.ExecuteStepRequest.typed_config:type_name -> google.protobuf.Any
+	39, // 19: workflow.plugin.v1.ExecuteStepRequest.typed_input:type_name -> google.protobuf.Any
+	38, // 20: workflow.plugin.v1.ExecuteStepResponse.output:type_name -> google.protobuf.Struct
+	39, // 21: workflow.plugin.v1.ExecuteStepResponse.typed_output:type_name -> google.protobuf.Any
+	38, // 22: workflow.plugin.v1.InvokeServiceRequest.args:type_name -> google.protobuf.Struct
+	39, // 23: workflow.plugin.v1.InvokeServiceRequest.typed_input:type_name -> google.protobuf.Any
+	38, // 24: workflow.plugin.v1.InvokeServiceResponse.result:type_name -> google.protobuf.Struct
+	39, // 25: workflow.plugin.v1.InvokeServiceResponse.typed_output:type_name -> google.protobuf.Any
+	38, // 26: workflow.plugin.v1.TriggerWorkflowRequest.data:type_name -> google.protobuf.Struct
+	39, // 27: workflow.plugin.v1.TriggerWorkflowRequest.typed_data:type_name -> google.protobuf.Any
+	38, // 28: workflow.plugin.v1.LogRequest.fields:type_name -> google.protobuf.Struct
+	35, // 29: workflow.plugin.v1.PublishMessageRequest.metadata:type_name -> workflow.plugin.v1.PublishMessageRequest.MetadataEntry
+	36, // 30: workflow.plugin.v1.DeliverMessageRequest.metadata:type_name -> workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
+	38, // 31: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry.value:type_name -> google.protobuf.Struct
+	40, // 32: workflow.plugin.v1.PluginService.GetManifest:input_type -> google.protobuf.Empty
+	40, // 33: workflow.plugin.v1.PluginService.GetModuleTypes:input_type -> google.protobuf.Empty
+	40, // 34: workflow.plugin.v1.PluginService.GetStepTypes:input_type -> google.protobuf.Empty
+	40, // 35: workflow.plugin.v1.PluginService.GetTriggerTypes:input_type -> google.protobuf.Empty
+	40, // 36: workflow.plugin.v1.PluginService.GetModuleSchemas:input_type -> google.protobuf.Empty
+	40, // 37: workflow.plugin.v1.PluginService.GetContractRegistry:input_type -> google.protobuf.Empty
+	12, // 38: workflow.plugin.v1.PluginService.CreateModule:input_type -> workflow.plugin.v1.CreateModuleRequest
+	17, // 39: workflow.plugin.v1.PluginService.InitModule:input_type -> workflow.plugin.v1.HandleRequest
+	17, // 40: workflow.plugin.v1.PluginService.StartModule:input_type -> workflow.plugin.v1.HandleRequest
+	17, // 41: workflow.plugin.v1.PluginService.StopModule:input_type -> workflow.plugin.v1.HandleRequest
+	17, // 42: workflow.plugin.v1.PluginService.DestroyModule:input_type -> workflow.plugin.v1.HandleRequest
+	13, // 43: workflow.plugin.v1.PluginService.CreateStep:input_type -> workflow.plugin.v1.CreateStepRequest
+	19, // 44: workflow.plugin.v1.PluginService.ExecuteStep:input_type -> workflow.plugin.v1.ExecuteStepRequest
+	17, // 45: workflow.plugin.v1.PluginService.DestroyStep:input_type -> workflow.plugin.v1.HandleRequest
+	21, // 46: workflow.plugin.v1.PluginService.InvokeService:input_type -> workflow.plugin.v1.InvokeServiceRequest
+	31, // 47: workflow.plugin.v1.PluginService.DeliverMessage:input_type -> workflow.plugin.v1.DeliverMessageRequest
+	40, // 48: workflow.plugin.v1.PluginService.GetConfigFragment:input_type -> google.protobuf.Empty
+	5,  // 49: workflow.plugin.v1.PluginService.GetAsset:input_type -> workflow.plugin.v1.GetAssetRequest
+	15, // 50: workflow.plugin.v1.PluginService.ConfigureCallback:input_type -> workflow.plugin.v1.ConfigureCallbackRequest
+	14, // 51: workflow.plugin.v1.PluginService.CreateTrigger:input_type -> workflow.plugin.v1.CreateTriggerRequest
+	23, // 52: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:input_type -> workflow.plugin.v1.TriggerWorkflowRequest
+	24, // 53: workflow.plugin.v1.EngineCallbackService.GetService:input_type -> workflow.plugin.v1.GetServiceRequest
+	26, // 54: workflow.plugin.v1.EngineCallbackService.Log:input_type -> workflow.plugin.v1.LogRequest
+	27, // 55: workflow.plugin.v1.EngineCallbackService.PublishMessage:input_type -> workflow.plugin.v1.PublishMessageRequest
+	29, // 56: workflow.plugin.v1.EngineCallbackService.Subscribe:input_type -> workflow.plugin.v1.SubscribeRequest
+	30, // 57: workflow.plugin.v1.EngineCallbackService.Unsubscribe:input_type -> workflow.plugin.v1.UnsubscribeRequest
+	2,  // 58: workflow.plugin.v1.PluginService.GetManifest:output_type -> workflow.plugin.v1.Manifest
+	7,  // 59: workflow.plugin.v1.PluginService.GetModuleTypes:output_type -> workflow.plugin.v1.TypeList
+	7,  // 60: workflow.plugin.v1.PluginService.GetStepTypes:output_type -> workflow.plugin.v1.TypeList
+	7,  // 61: workflow.plugin.v1.PluginService.GetTriggerTypes:output_type -> workflow.plugin.v1.TypeList
+	8,  // 62: workflow.plugin.v1.PluginService.GetModuleSchemas:output_type -> workflow.plugin.v1.ModuleSchemaList
+	3,  // 63: workflow.plugin.v1.PluginService.GetContractRegistry:output_type -> workflow.plugin.v1.ContractRegistry
+	16, // 64: workflow.plugin.v1.PluginService.CreateModule:output_type -> workflow.plugin.v1.HandleResponse
+	18, // 65: workflow.plugin.v1.PluginService.InitModule:output_type -> workflow.plugin.v1.ErrorResponse
+	18, // 66: workflow.plugin.v1.PluginService.StartModule:output_type -> workflow.plugin.v1.ErrorResponse
+	18, // 67: workflow.plugin.v1.PluginService.StopModule:output_type -> workflow.plugin.v1.ErrorResponse
+	18, // 68: workflow.plugin.v1.PluginService.DestroyModule:output_type -> workflow.plugin.v1.ErrorResponse
+	16, // 69: workflow.plugin.v1.PluginService.CreateStep:output_type -> workflow.plugin.v1.HandleResponse
+	20, // 70: workflow.plugin.v1.PluginService.ExecuteStep:output_type -> workflow.plugin.v1.ExecuteStepResponse
+	18, // 71: workflow.plugin.v1.PluginService.DestroyStep:output_type -> workflow.plugin.v1.ErrorResponse
+	22, // 72: workflow.plugin.v1.PluginService.InvokeService:output_type -> workflow.plugin.v1.InvokeServiceResponse
+	32, // 73: workflow.plugin.v1.PluginService.DeliverMessage:output_type -> workflow.plugin.v1.DeliverMessageResponse
+	33, // 74: workflow.plugin.v1.PluginService.GetConfigFragment:output_type -> workflow.plugin.v1.ConfigFragmentResponse
+	6,  // 75: workflow.plugin.v1.PluginService.GetAsset:output_type -> workflow.plugin.v1.GetAssetResponse
+	18, // 76: workflow.plugin.v1.PluginService.ConfigureCallback:output_type -> workflow.plugin.v1.ErrorResponse
+	16, // 77: workflow.plugin.v1.PluginService.CreateTrigger:output_type -> workflow.plugin.v1.HandleResponse
+	18, // 78: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:output_type -> workflow.plugin.v1.ErrorResponse
+	25, // 79: workflow.plugin.v1.EngineCallbackService.GetService:output_type -> workflow.plugin.v1.GetServiceResponse
+	40, // 80: workflow.plugin.v1.EngineCallbackService.Log:output_type -> google.protobuf.Empty
+	28, // 81: workflow.plugin.v1.EngineCallbackService.PublishMessage:output_type -> workflow.plugin.v1.PublishMessageResponse
+	18, // 82: workflow.plugin.v1.EngineCallbackService.Subscribe:output_type -> workflow.plugin.v1.ErrorResponse
+	18, // 83: workflow.plugin.v1.EngineCallbackService.Unsubscribe:output_type -> workflow.plugin.v1.ErrorResponse
+	58, // [58:84] is the sub-list for method output_type
+	32, // [32:58] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_plugin_proto_init() }
@@ -2399,7 +2520,7 @@ func file_plugin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plugin_proto_rawDesc), len(file_plugin_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   33,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

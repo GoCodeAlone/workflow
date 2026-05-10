@@ -35,6 +35,7 @@ type adapterTestPluginServiceClient struct {
 	registryErr       error
 	moduleTypes       []string
 	stepTypes         []string
+	triggerTypes      []string
 	lastCreateModReq  *pb.CreateModuleRequest
 	lastCreateStepReq *pb.CreateStepRequest
 }
@@ -52,6 +53,10 @@ func (c *adapterTestPluginServiceClient) GetContractRegistry(_ context.Context, 
 
 func (c *adapterTestPluginServiceClient) GetStepTypes(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.TypeList, error) {
 	return &pb.TypeList{Types: c.stepTypes}, nil
+}
+
+func (c *adapterTestPluginServiceClient) GetTriggerTypes(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.TypeList, error) {
+	return &pb.TypeList{Types: c.triggerTypes}, nil
 }
 
 func (c *adapterTestPluginServiceClient) GetModuleTypes(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.TypeList, error) {
@@ -212,6 +217,119 @@ func TestContractRegistry_UnimplementedUsesEmptyRegistry(t *testing.T) {
 	}
 }
 
+func TestNewExternalPluginAdapterConfiguresCallbackBroker(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:     &pb.Manifest{Name: "callback-plugin"},
+		registry:     &pb.ContractRegistry{},
+		triggerTypes: []string{"trigger.test"},
+	}
+	_, err := NewExternalPluginAdapter("callback-plugin", &PluginClient{
+		client:           client,
+		callbackBrokerID: 42,
+	})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	if client.configureCallbackReq == nil {
+		t.Fatal("expected ConfigureCallback request")
+	}
+	if client.configureCallbackReq.BrokerId != 42 {
+		t.Fatalf("expected broker id 42, got %d", client.configureCallbackReq.BrokerId)
+	}
+}
+
+func TestNewExternalPluginAdapterSkipsCallbackForLegacyPluginWithoutTriggers(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest: &pb.Manifest{Name: "legacy-plugin"},
+		registry: &pb.ContractRegistry{},
+	}
+	_, err := NewExternalPluginAdapter("legacy-plugin", &PluginClient{
+		client:           client,
+		callbackBrokerID: 42,
+	})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	if client.configureCallbackReq != nil {
+		t.Fatal("did not expect ConfigureCallback request for plugin without triggers")
+	}
+}
+
+func TestNewExternalPluginAdapterDisablesTriggersWhenCallbackUnsupported(t *testing.T) {
+	client := &unimplementedConfigureCallbackClient{
+		adapterTestPluginServiceClient: adapterTestPluginServiceClient{
+			manifest:     &pb.Manifest{Name: "legacy-trigger-plugin"},
+			registry:     &pb.ContractRegistry{},
+			triggerTypes: []string{"trigger.test"},
+		},
+	}
+	adapter, err := NewExternalPluginAdapter("legacy-trigger-plugin", &PluginClient{
+		client:           client,
+		callbackBrokerID: 42,
+	})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter should preserve module/step compatibility: %v", err)
+	}
+	if factories := adapter.TriggerFactories(); factories != nil {
+		t.Fatalf("expected trigger factories disabled when callback setup is unsupported, got %#v", factories)
+	}
+}
+
+func TestNewExternalPluginAdapterDisablesTriggersWithoutCallbackBroker(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:     &pb.Manifest{Name: "trigger-plugin"},
+		registry:     &pb.ContractRegistry{},
+		triggerTypes: []string{"trigger.test"},
+	}
+	adapter, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	if factories := adapter.TriggerFactories(); factories != nil {
+		t.Fatalf("expected trigger factories disabled without callback broker, got %#v", factories)
+	}
+}
+
+func TestTriggerFactoryDefersCreateUntilConfigure(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:     &pb.Manifest{Name: "trigger-plugin"},
+		registry:     &pb.ContractRegistry{},
+		triggerTypes: []string{"trigger.test"},
+	}
+	adapter, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{
+		client:           client,
+		callbackBrokerID: 42,
+	})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+
+	factories := adapter.TriggerFactories()
+	factory := factories["trigger.test"]
+	if factory == nil {
+		t.Fatal("expected trigger.test factory")
+	}
+	instance := factory()
+	trigger, ok := instance.(*RemoteTrigger)
+	if !ok {
+		t.Fatalf("expected *RemoteTrigger, got %T", instance)
+	}
+	if client.lastCreateTriggerReq != nil {
+		t.Fatal("trigger factory should not create remote trigger before Configure")
+	}
+
+	err = trigger.Configure(nil, map[string]any{"pool": "private"})
+	if err != nil {
+		t.Fatalf("Configure returned error: %v", err)
+	}
+	if client.lastCreateTriggerReq == nil {
+		t.Fatal("expected CreateTrigger request during Configure")
+	}
+	if client.lastCreateTriggerReq.Config.AsMap()["pool"] != "private" {
+		t.Fatalf("expected trigger config to be forwarded, got %#v", client.lastCreateTriggerReq.Config.AsMap())
+	}
+}
+
 // errorOnCreateModuleClient overrides CreateModule to return a plugin-reported
 // error in the response Error field (not as a gRPC error).
 type errorOnCreateModuleClient struct {
@@ -222,6 +340,14 @@ type errorOnCreateModuleClient struct {
 func (c *errorOnCreateModuleClient) CreateModule(_ context.Context, req *pb.CreateModuleRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
 	c.lastCreateModReq = req
 	return &pb.HandleResponse{Error: c.createModuleError}, nil
+}
+
+type unimplementedConfigureCallbackClient struct {
+	adapterTestPluginServiceClient
+}
+
+func (c *unimplementedConfigureCallbackClient) ConfigureCallback(context.Context, *pb.ConfigureCallbackRequest, ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConfigureCallback not implemented")
 }
 
 // TestModuleFactoriesPropagatesPluginError is a regression gate for the class

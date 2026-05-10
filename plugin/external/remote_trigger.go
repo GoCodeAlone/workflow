@@ -20,14 +20,12 @@ type RemoteTrigger struct {
 }
 
 // NewRemoteTrigger creates a remote trigger proxy.
-// The handleID is allocated by the plugin when the trigger module is created.
-func NewRemoteTrigger(typeName, name, handleID string, client pb.PluginServiceClient, config map[string]any) *RemoteTrigger {
+// The plugin handle is allocated after Configure receives YAML trigger config.
+func NewRemoteTrigger(typeName, name string, client pb.PluginServiceClient) *RemoteTrigger {
 	return &RemoteTrigger{
 		typeName: typeName,
 		name:     name,
-		handleID: handleID,
 		client:   client,
-		config:   config,
 	}
 }
 
@@ -38,6 +36,9 @@ func (t *RemoteTrigger) Name() string {
 }
 
 func (t *RemoteTrigger) Init(_ modular.Application) error {
+	if t.handleID == "" {
+		return fmt.Errorf("remote trigger init: trigger %q is not configured", t.name)
+	}
 	resp, err := t.client.InitModule(context.Background(), &pb.HandleRequest{
 		HandleId: t.handleID,
 	})
@@ -53,6 +54,9 @@ func (t *RemoteTrigger) Init(_ modular.Application) error {
 // --- modular.Startable ---
 
 func (t *RemoteTrigger) Start(ctx context.Context) error {
+	if t.handleID == "" {
+		return fmt.Errorf("remote trigger start: trigger %q is not configured", t.name)
+	}
 	resp, err := t.client.StartModule(ctx, &pb.HandleRequest{
 		HandleId: t.handleID,
 	})
@@ -68,6 +72,9 @@ func (t *RemoteTrigger) Start(ctx context.Context) error {
 // --- modular.Stoppable ---
 
 func (t *RemoteTrigger) Stop(ctx context.Context) error {
+	if t.handleID == "" {
+		return nil
+	}
 	resp, err := t.client.StopModule(ctx, &pb.HandleRequest{
 		HandleId: t.handleID,
 	})
@@ -82,15 +89,40 @@ func (t *RemoteTrigger) Stop(ctx context.Context) error {
 
 // --- module.Trigger ---
 
-// Configure applies the trigger configuration. The config was already applied at
-// creation time (CreateModule); this is a no-op for remote triggers unless the
-// plugin exposes a dedicated configure step.
-func (t *RemoteTrigger) Configure(_ modular.Application, _ any) error {
+// Configure applies YAML trigger config and creates the remote trigger handle.
+func (t *RemoteTrigger) Configure(_ modular.Application, triggerConfig any) error {
+	if t.handleID != "" {
+		return fmt.Errorf("remote trigger configure %s: already configured", t.name)
+	}
+	cfg, err := triggerConfigMap(triggerConfig)
+	if err != nil {
+		return fmt.Errorf("remote trigger configure %s: %w", t.name, err)
+	}
+	pbConfig, err := mapToStruct(cfg)
+	if err != nil {
+		return fmt.Errorf("remote trigger configure %s: %w", t.name, err)
+	}
+	resp, err := t.client.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
+		Type:   t.typeName,
+		Name:   t.name,
+		Config: pbConfig,
+	})
+	if err != nil {
+		return fmt.Errorf("remote trigger configure %s: %w", t.name, err)
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("remote trigger configure %s: %s", t.name, resp.Error)
+	}
+	t.handleID = resp.HandleId
+	t.config = cfg
 	return nil
 }
 
 // Destroy releases the remote trigger resources in the plugin process.
 func (t *RemoteTrigger) Destroy() error {
+	if t.handleID == "" {
+		return nil
+	}
 	resp, err := t.client.DestroyModule(context.Background(), &pb.HandleRequest{
 		HandleId: t.handleID,
 	})
@@ -101,4 +133,15 @@ func (t *RemoteTrigger) Destroy() error {
 		return fmt.Errorf("remote trigger destroy: %s", resp.Error)
 	}
 	return nil
+}
+
+func triggerConfigMap(config any) (map[string]any, error) {
+	if config == nil {
+		return nil, nil
+	}
+	cfg, ok := config.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("config must be map[string]any, got %T", config)
+	}
+	return cfg, nil
 }
