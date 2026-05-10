@@ -1,0 +1,1141 @@
+package main
+
+// iac_typed_adapter.go — Task 30 of the strict-contracts force-cutover plan
+// (docs/plans/2026-05-10-strict-contracts-force-cutover.md, rev5).
+//
+// Adapter that wraps the typed pb.IaC* gRPC clients (Task 3) and satisfies
+// the existing interfaces.IaCProvider Go interface. Engine consumers
+// (module/infra_module.go, iac/wfctlhelpers/apply.go, etc.) keep calling
+// interfaces.IaCProvider methods unchanged; the adapter translates each
+// call to a typed RPC on the underlying pb.IaCProviderRequiredClient (or
+// the matching optional client). No string dispatch, no map[string]any
+// crossing the wire — everything goes through generated typed messages.
+// Free-form provider-config / output payloads carry as JSON bytes (per
+// proto §config_json / outputs_json) so the engine boundary stays
+// strongly typed without ossifying provider-specific shapes.
+//
+// Per ADR-0026 (Task 14): this is NOT a hand-written marshalling proxy
+// of the kind the legacy remoteIaCProvider was. Each Go-interface method
+// maps 1:1 to a typed RPC; optional sub-interfaces (Enumerator,
+// EnumeratorAll, ProviderValidator, etc.) are always satisfied at the Go
+// type level (so v0.27.1 behaviour is preserved — type-assert sites
+// continue to compile) but return interfaces.ErrProviderMethodUnimplemented
+// at call time when the underlying optional service was never registered
+// by the plugin. Callers use errors.Is to skip those providers, matching
+// the legacy proxy semantics.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+)
+
+// Fully-qualified gRPC service names — the wfctl loader gates optional
+// client construction on whether the plugin's ContractRegistry advertises
+// each name (Task 5). Constants are declared at package scope so callers
+// (e.g. the loader) can reference the same strings without duplication.
+const (
+	iacServiceRequired          = "workflow.plugin.external.iac.IaCProviderRequired"
+	iacServiceEnumerator        = "workflow.plugin.external.iac.IaCProviderEnumerator"
+	iacServiceDriftDetector     = "workflow.plugin.external.iac.IaCProviderDriftDetector"
+	iacServiceCredentialRevoker = "workflow.plugin.external.iac.IaCProviderCredentialRevoker"
+	iacServiceMigrationRepairer = "workflow.plugin.external.iac.IaCProviderMigrationRepairer"
+	iacServiceValidator         = "workflow.plugin.external.iac.IaCProviderValidator"
+	iacServiceDriftConfigDetect = "workflow.plugin.external.iac.IaCProviderDriftConfigDetector"
+	iacServiceResourceDriver    = "workflow.plugin.external.iac.ResourceDriver"
+)
+
+// typedIaCAdapter implements interfaces.IaCProvider on top of the typed
+// pb.IaC* gRPC clients. Optional clients are nil when the plugin did not
+// register the corresponding service — call paths gated on those clients
+// return interfaces.ErrProviderMethodUnimplemented.
+type typedIaCAdapter struct {
+	conn *grpc.ClientConn
+
+	required     pb.IaCProviderRequiredClient
+	enumerator   pb.IaCProviderEnumeratorClient
+	drift        pb.IaCProviderDriftDetectorClient
+	revoker      pb.IaCProviderCredentialRevokerClient
+	repairer     pb.IaCProviderMigrationRepairerClient
+	validator    pb.IaCProviderValidatorClient
+	driftCfg     pb.IaCProviderDriftConfigDetectorClient
+	resourceDriv pb.ResourceDriverClient
+}
+
+// newTypedIaCAdapter builds an adapter from a live gRPC connection plus a
+// set of fully-qualified service names the plugin advertised through its
+// ContractRegistry RPC (Task 5). The required client is always
+// constructed; optional clients are constructed only when the matching
+// service name appears in `registered`. Passing a nil/empty `registered`
+// is valid — the adapter exposes only the required surface in that case.
+func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *typedIaCAdapter {
+	a := &typedIaCAdapter{
+		conn:     conn,
+		required: pb.NewIaCProviderRequiredClient(conn),
+	}
+	if registered[iacServiceEnumerator] {
+		a.enumerator = pb.NewIaCProviderEnumeratorClient(conn)
+	}
+	if registered[iacServiceDriftDetector] {
+		a.drift = pb.NewIaCProviderDriftDetectorClient(conn)
+	}
+	if registered[iacServiceCredentialRevoker] {
+		a.revoker = pb.NewIaCProviderCredentialRevokerClient(conn)
+	}
+	if registered[iacServiceMigrationRepairer] {
+		a.repairer = pb.NewIaCProviderMigrationRepairerClient(conn)
+	}
+	if registered[iacServiceValidator] {
+		a.validator = pb.NewIaCProviderValidatorClient(conn)
+	}
+	if registered[iacServiceDriftConfigDetect] {
+		a.driftCfg = pb.NewIaCProviderDriftConfigDetectorClient(conn)
+	}
+	if registered[iacServiceResourceDriver] {
+		a.resourceDriv = pb.NewResourceDriverClient(conn)
+	}
+	return a
+}
+
+// translateRPCErr converts a gRPC Unimplemented status (the wire signal a
+// plugin emits when an optional method is not supported) into the stable
+// interfaces.ErrProviderMethodUnimplemented sentinel callers iterate on
+// via errors.Is. Other errors pass through unchanged so the underlying
+// gRPC status code remains observable to callers that wrap typed
+// retry / classification logic around the call.
+func translateRPCErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if status.Code(err) == codes.Unimplemented {
+		return fmt.Errorf("%w: %s", interfaces.ErrProviderMethodUnimplemented, err.Error())
+	}
+	return err
+}
+
+// unimplementedOptional builds the sentinel error returned when the plugin
+// did not register the optional service backing this method. Callers use
+// errors.Is(err, interfaces.ErrProviderMethodUnimplemented) to skip the
+// provider — matching the legacy remoteIaCProvider semantics that
+// dispatch sites (cmd/wfctl/infra_audit_keys.go, infra_cleanup.go,
+// infra_prune.go) already handle.
+func unimplementedOptional(serviceName string) error {
+	return fmt.Errorf("%w: optional service %q not registered by plugin",
+		interfaces.ErrProviderMethodUnimplemented, serviceName)
+}
+
+// ─── Required IaCProvider methods ───────────────────────────────────────────
+
+func (a *typedIaCAdapter) Name() string {
+	resp, err := a.required.Name(context.Background(), &pb.NameRequest{})
+	if err != nil {
+		return ""
+	}
+	return resp.GetName()
+}
+
+func (a *typedIaCAdapter) Version() string {
+	resp, err := a.required.Version(context.Background(), &pb.VersionRequest{})
+	if err != nil {
+		return ""
+	}
+	return resp.GetVersion()
+}
+
+func (a *typedIaCAdapter) Initialize(ctx context.Context, config map[string]any) error {
+	cfgJSON, err := marshalJSONMap(config)
+	if err != nil {
+		return fmt.Errorf("typed adapter: marshal Initialize config: %w", err)
+	}
+	_, err = a.required.Initialize(ctx, &pb.InitializeRequest{ConfigJson: cfgJSON})
+	return err
+}
+
+func (a *typedIaCAdapter) Capabilities() []interfaces.IaCCapabilityDeclaration {
+	resp, err := a.required.Capabilities(context.Background(), &pb.CapabilitiesRequest{})
+	if err != nil {
+		return nil
+	}
+	out := make([]interfaces.IaCCapabilityDeclaration, 0, len(resp.GetCapabilities()))
+	for _, c := range resp.GetCapabilities() {
+		out = append(out, interfaces.IaCCapabilityDeclaration{
+			ResourceType: c.GetResourceType(),
+			Tier:         int(c.GetTier()),
+			Operations:   append([]string(nil), c.GetOperations()...),
+		})
+	}
+	return out
+}
+
+func (a *typedIaCAdapter) Plan(ctx context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	pbDesired, err := specsToPB(desired)
+	if err != nil {
+		return nil, fmt.Errorf("typed adapter: encode Plan desired: %w", err)
+	}
+	pbCurrent, err := statesToPB(current)
+	if err != nil {
+		return nil, fmt.Errorf("typed adapter: encode Plan current: %w", err)
+	}
+	resp, err := a.required.Plan(ctx, &pb.PlanRequest{Desired: pbDesired, Current: pbCurrent})
+	if err != nil {
+		return nil, err
+	}
+	return planFromPB(resp.GetPlan())
+}
+
+func (a *typedIaCAdapter) Apply(ctx context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	pbPlan, err := planToPB(plan)
+	if err != nil {
+		return nil, fmt.Errorf("typed adapter: encode Apply plan: %w", err)
+	}
+	resp, err := a.required.Apply(ctx, &pb.ApplyRequest{Plan: pbPlan})
+	if err != nil {
+		return nil, err
+	}
+	return applyResultFromPB(resp.GetResult())
+}
+
+func (a *typedIaCAdapter) Destroy(ctx context.Context, resources []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	resp, err := a.required.Destroy(ctx, &pb.DestroyRequest{Refs: refsToPB(resources)})
+	if err != nil {
+		return nil, err
+	}
+	return destroyResultFromPB(resp.GetResult()), nil
+}
+
+func (a *typedIaCAdapter) Status(ctx context.Context, resources []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	resp, err := a.required.Status(ctx, &pb.StatusRequest{Refs: refsToPB(resources)})
+	if err != nil {
+		return nil, err
+	}
+	return statusesFromPB(resp.GetStatuses())
+}
+
+func (a *typedIaCAdapter) DetectDrift(ctx context.Context, resources []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	if a.drift == nil {
+		return nil, unimplementedOptional(iacServiceDriftDetector)
+	}
+	resp, err := a.drift.DetectDrift(ctx, &pb.DetectDriftRequest{Refs: refsToPB(resources)})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	return driftsFromPB(resp.GetDrifts())
+}
+
+func (a *typedIaCAdapter) Import(ctx context.Context, cloudID string, resourceType string) (*interfaces.ResourceState, error) {
+	resp, err := a.required.Import(ctx, &pb.ImportRequest{ProviderId: cloudID, ResourceType: resourceType})
+	if err != nil {
+		return nil, err
+	}
+	return stateFromPB(resp.GetState())
+}
+
+func (a *typedIaCAdapter) ResolveSizing(resourceType string, size interfaces.Size, hints *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	resp, err := a.required.ResolveSizing(context.Background(), &pb.ResolveSizingRequest{
+		ResourceType: resourceType,
+		Size:         string(size),
+		Hints:        hintsToPB(hints),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sizingFromPB(resp.GetSizing())
+}
+
+func (a *typedIaCAdapter) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
+	if a.resourceDriv == nil {
+		return nil, unimplementedOptional(iacServiceResourceDriver)
+	}
+	return &typedResourceDriver{client: a.resourceDriv, resourceType: resourceType}, nil
+}
+
+func (a *typedIaCAdapter) SupportedCanonicalKeys() []string {
+	// SupportedCanonicalKeys is intentionally absent from the typed proto
+	// surface — providers declare their canonical-key support through the
+	// existing ContractRegistry capability flow (Task 5) rather than a
+	// dedicated RPC. Returning the canonical-keys default keeps engine
+	// consumers unchanged; provider-level overrides will land via the
+	// capability registry follow-up.
+	return interfaces.CanonicalKeys()
+}
+
+func (a *typedIaCAdapter) BootstrapStateBackend(ctx context.Context, cfg map[string]any) (*interfaces.BootstrapResult, error) {
+	cfgJSON, err := marshalJSONMap(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("typed adapter: marshal BootstrapStateBackend cfg: %w", err)
+	}
+	resp, err := a.required.BootstrapStateBackend(ctx, &pb.BootstrapStateBackendRequest{ConfigJson: cfgJSON})
+	if err != nil {
+		return nil, err
+	}
+	r := resp.GetResult()
+	if r == nil {
+		return nil, nil
+	}
+	return &interfaces.BootstrapResult{
+		Bucket:   r.GetBucket(),
+		Region:   r.GetRegion(),
+		Endpoint: r.GetEndpoint(),
+		EnvVars:  r.GetEnvVars(),
+	}, nil
+}
+
+func (a *typedIaCAdapter) Close() error {
+	if a.conn == nil {
+		return nil
+	}
+	return a.conn.Close()
+}
+
+// ─── Optional sub-interface methods ─────────────────────────────────────────
+//
+// Each method below is declared on *typedIaCAdapter so type-assertion
+// `p.(interfaces.X)` always succeeds (matching the legacy proxy
+// behaviour). When the underlying optional client was never wired (plugin
+// did not register the service), the method returns
+// interfaces.ErrProviderMethodUnimplemented so callers can errors.Is and
+// skip — preserving the v0.27.1 iterate-and-skip semantics.
+
+// EnumerateAll satisfies interfaces.EnumeratorAll.
+func (a *typedIaCAdapter) EnumerateAll(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
+	if a.enumerator == nil {
+		return nil, unimplementedOptional(iacServiceEnumerator)
+	}
+	resp, err := a.enumerator.EnumerateAll(ctx, &pb.EnumerateAllRequest{ResourceType: resourceType})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	out := make([]*interfaces.ResourceOutput, 0, len(resp.GetOutputs()))
+	for _, o := range resp.GetOutputs() {
+		ro, err := outputFromPB(o)
+		if err != nil {
+			return nil, fmt.Errorf("typed adapter: decode EnumerateAll output: %w", err)
+		}
+		out = append(out, ro)
+	}
+	return out, nil
+}
+
+// EnumerateByTag satisfies interfaces.Enumerator.
+func (a *typedIaCAdapter) EnumerateByTag(ctx context.Context, tag string) ([]interfaces.ResourceRef, error) {
+	if a.enumerator == nil {
+		return nil, unimplementedOptional(iacServiceEnumerator)
+	}
+	resp, err := a.enumerator.EnumerateByTag(ctx, &pb.EnumerateByTagRequest{Tag: tag})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	return refsFromPB(resp.GetRefs()), nil
+}
+
+// DetectDriftWithSpecs satisfies interfaces.DriftConfigDetector. Routed
+// through the typed IaCProviderDriftConfigDetector service when the
+// plugin advertises it.
+func (a *typedIaCAdapter) DetectDriftWithSpecs(ctx context.Context, resources []interfaces.ResourceRef, specs map[string]interfaces.ResourceSpec) ([]interfaces.DriftResult, error) {
+	if a.driftCfg == nil {
+		return nil, unimplementedOptional(iacServiceDriftConfigDetect)
+	}
+	pbSpecs := make(map[string]*pb.ResourceSpec, len(specs))
+	for k, s := range specs {
+		ps, err := specToPB(s)
+		if err != nil {
+			return nil, fmt.Errorf("typed adapter: encode DetectDriftWithSpecs specs[%s]: %w", k, err)
+		}
+		pbSpecs[k] = ps
+	}
+	resp, err := a.driftCfg.DetectDriftConfig(ctx, &pb.DetectDriftConfigRequest{
+		Refs:  refsToPB(resources),
+		Specs: pbSpecs,
+	})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	return driftsFromPB(resp.GetDrifts())
+}
+
+// ValidatePlan satisfies interfaces.ProviderValidator. Note signature
+// difference from the proto: the Go interface returns []PlanDiagnostic
+// only (no error); we therefore swallow gRPC errors and return nil
+// diagnostics on RPC failure — matching the existing remoteIaCProvider
+// behaviour and the legacy semantics consumers depend on.
+func (a *typedIaCAdapter) ValidatePlan(plan *interfaces.IaCPlan) []interfaces.PlanDiagnostic {
+	if a.validator == nil {
+		return nil
+	}
+	pbPlan, err := planToPB(plan)
+	if err != nil {
+		return nil
+	}
+	resp, err := a.validator.ValidatePlan(context.Background(), &pb.ValidatePlanRequest{Plan: pbPlan})
+	if err != nil {
+		return nil
+	}
+	out := make([]interfaces.PlanDiagnostic, 0, len(resp.GetDiagnostics()))
+	for _, d := range resp.GetDiagnostics() {
+		out = append(out, interfaces.PlanDiagnostic{
+			Severity: planDiagnosticSeverityFromPB(d.GetSeverity()),
+			Resource: d.GetResource(),
+			Field:    d.GetField(),
+			Message:  d.GetMessage(),
+		})
+	}
+	return out
+}
+
+// RevokeProviderCredential satisfies interfaces.ProviderCredentialRevoker.
+func (a *typedIaCAdapter) RevokeProviderCredential(ctx context.Context, source string, credentialID string) error {
+	if a.revoker == nil {
+		return unimplementedOptional(iacServiceCredentialRevoker)
+	}
+	_, err := a.revoker.RevokeProviderCredential(ctx, &pb.RevokeProviderCredentialRequest{
+		Source:       source,
+		CredentialId: credentialID,
+	})
+	return translateRPCErr(err)
+}
+
+// RepairDirtyMigration satisfies interfaces.ProviderMigrationRepairer.
+func (a *typedIaCAdapter) RepairDirtyMigration(ctx context.Context, req interfaces.MigrationRepairRequest) (*interfaces.MigrationRepairResult, error) {
+	if a.repairer == nil {
+		return nil, unimplementedOptional(iacServiceMigrationRepairer)
+	}
+	resp, err := a.repairer.RepairDirtyMigration(ctx, &pb.RepairDirtyMigrationRequest{
+		Request: migrationRepairRequestToPB(req),
+	})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	return migrationRepairResultFromPB(resp.GetResult()), nil
+}
+
+// ─── typedResourceDriver (per-type ResourceDriver wrapper) ──────────────────
+
+// typedResourceDriver implements interfaces.ResourceDriver on top of the
+// pb.ResourceDriverClient + a fixed resource_type. Each RPC carries the
+// resource_type so a single server-side ResourceDriver can dispatch to
+// the per-type driver implementation (DO plugin's 14-driver router in
+// Task 11).
+type typedResourceDriver struct {
+	client       pb.ResourceDriverClient
+	resourceType string
+}
+
+func (d *typedResourceDriver) Create(ctx context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	pbSpec, err := specToPB(spec)
+	if err != nil {
+		return nil, fmt.Errorf("typed driver %s: encode Create spec: %w", d.resourceType, err)
+	}
+	resp, err := d.client.Create(ctx, &pb.ResourceCreateRequest{ResourceType: d.resourceType, Spec: pbSpec})
+	if err != nil {
+		return nil, err
+	}
+	return outputFromPB(resp.GetOutput())
+}
+
+func (d *typedResourceDriver) Read(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	resp, err := d.client.Read(ctx, &pb.ResourceReadRequest{ResourceType: d.resourceType, Ref: refToPB(ref)})
+	if err != nil {
+		return nil, err
+	}
+	return outputFromPB(resp.GetOutput())
+}
+
+func (d *typedResourceDriver) Update(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	pbSpec, err := specToPB(spec)
+	if err != nil {
+		return nil, fmt.Errorf("typed driver %s: encode Update spec: %w", d.resourceType, err)
+	}
+	resp, err := d.client.Update(ctx, &pb.ResourceUpdateRequest{ResourceType: d.resourceType, Ref: refToPB(ref), Spec: pbSpec})
+	if err != nil {
+		return nil, err
+	}
+	return outputFromPB(resp.GetOutput())
+}
+
+func (d *typedResourceDriver) Delete(ctx context.Context, ref interfaces.ResourceRef) error {
+	_, err := d.client.Delete(ctx, &pb.ResourceDeleteRequest{ResourceType: d.resourceType, Ref: refToPB(ref)})
+	return err
+}
+
+func (d *typedResourceDriver) Diff(ctx context.Context, desired interfaces.ResourceSpec, current *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	pbSpec, err := specToPB(desired)
+	if err != nil {
+		return nil, fmt.Errorf("typed driver %s: encode Diff desired: %w", d.resourceType, err)
+	}
+	pbCurrent, err := outputToPB(current)
+	if err != nil {
+		return nil, fmt.Errorf("typed driver %s: encode Diff current: %w", d.resourceType, err)
+	}
+	resp, err := d.client.Diff(ctx, &pb.ResourceDiffRequest{ResourceType: d.resourceType, Desired: pbSpec, Current: pbCurrent})
+	if err != nil {
+		return nil, err
+	}
+	return diffResultFromPB(resp.GetResult())
+}
+
+func (d *typedResourceDriver) HealthCheck(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	resp, err := d.client.HealthCheck(ctx, &pb.ResourceHealthCheckRequest{ResourceType: d.resourceType, Ref: refToPB(ref)})
+	if err != nil {
+		return nil, err
+	}
+	r := resp.GetResult()
+	if r == nil {
+		return nil, nil
+	}
+	return &interfaces.HealthResult{Healthy: r.GetHealthy(), Message: r.GetMessage()}, nil
+}
+
+func (d *typedResourceDriver) Scale(ctx context.Context, ref interfaces.ResourceRef, replicas int) (*interfaces.ResourceOutput, error) {
+	resp, err := d.client.Scale(ctx, &pb.ResourceScaleRequest{ResourceType: d.resourceType, Ref: refToPB(ref), Replicas: int32(replicas)})
+	if err != nil {
+		return nil, err
+	}
+	return outputFromPB(resp.GetOutput())
+}
+
+func (d *typedResourceDriver) SensitiveKeys() []string {
+	resp, err := d.client.SensitiveKeys(context.Background(), &pb.SensitiveKeysRequest{ResourceType: d.resourceType})
+	if err != nil {
+		return nil
+	}
+	return append([]string(nil), resp.GetKeys()...)
+}
+
+// Troubleshoot satisfies interfaces.Troubleshooter (optional). gRPC
+// Unimplemented (the legitimate negative signal when the plugin's
+// driver does not implement Troubleshoot) is translated to
+// interfaces.ErrProviderMethodUnimplemented so callers can errors.Is
+// and fall back to the original failure message.
+func (d *typedResourceDriver) Troubleshoot(ctx context.Context, ref interfaces.ResourceRef, failureMsg string) ([]interfaces.Diagnostic, error) {
+	resp, err := d.client.Troubleshoot(ctx, &pb.TroubleshootRequest{
+		ResourceType: d.resourceType,
+		Ref:          refToPB(ref),
+		FailureMsg:   failureMsg,
+	})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	out := make([]interfaces.Diagnostic, 0, len(resp.GetDiagnostics()))
+	for _, d := range resp.GetDiagnostics() {
+		out = append(out, interfaces.Diagnostic{
+			ID:     d.GetId(),
+			Phase:  d.GetPhase(),
+			Cause:  d.GetCause(),
+			At:     timeFromPB(d.GetAt()),
+			Detail: d.GetDetail(),
+		})
+	}
+	return out, nil
+}
+
+// ─── Marshalling helpers ────────────────────────────────────────────────────
+
+func marshalJSONMap(m map[string]any) ([]byte, error) {
+	if m == nil {
+		return nil, nil
+	}
+	return json.Marshal(m)
+}
+
+func unmarshalJSONMap(b []byte) (map[string]any, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func marshalJSONAny(v any) ([]byte, error) {
+	if v == nil {
+		return nil, nil
+	}
+	return json.Marshal(v)
+}
+
+func unmarshalJSONAny(b []byte) (any, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func refToPB(r interfaces.ResourceRef) *pb.ResourceRef {
+	return &pb.ResourceRef{Name: r.Name, Type: r.Type, ProviderId: r.ProviderID}
+}
+
+func refFromPB(r *pb.ResourceRef) interfaces.ResourceRef {
+	if r == nil {
+		return interfaces.ResourceRef{}
+	}
+	return interfaces.ResourceRef{Name: r.GetName(), Type: r.GetType(), ProviderID: r.GetProviderId()}
+}
+
+func refsToPB(refs []interfaces.ResourceRef) []*pb.ResourceRef {
+	out := make([]*pb.ResourceRef, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, refToPB(r))
+	}
+	return out
+}
+
+func refsFromPB(refs []*pb.ResourceRef) []interfaces.ResourceRef {
+	out := make([]interfaces.ResourceRef, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, refFromPB(r))
+	}
+	return out
+}
+
+func hintsToPB(h *interfaces.ResourceHints) *pb.ResourceHints {
+	if h == nil {
+		return nil
+	}
+	return &pb.ResourceHints{Cpu: h.CPU, Memory: h.Memory, Storage: h.Storage}
+}
+
+func hintsFromPB(h *pb.ResourceHints) *interfaces.ResourceHints {
+	if h == nil {
+		return nil
+	}
+	return &interfaces.ResourceHints{CPU: h.GetCpu(), Memory: h.GetMemory(), Storage: h.GetStorage()}
+}
+
+func specToPB(s interfaces.ResourceSpec) (*pb.ResourceSpec, error) {
+	cfgJSON, err := marshalJSONMap(s.Config)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ResourceSpec{
+		Name:       s.Name,
+		Type:       s.Type,
+		ConfigJson: cfgJSON,
+		Size:       string(s.Size),
+		Hints:      hintsToPB(s.Hints),
+		DependsOn:  append([]string(nil), s.DependsOn...),
+	}, nil
+}
+
+func specsToPB(specs []interfaces.ResourceSpec) ([]*pb.ResourceSpec, error) {
+	out := make([]*pb.ResourceSpec, 0, len(specs))
+	for _, s := range specs {
+		ps, err := specToPB(s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ps)
+	}
+	return out, nil
+}
+
+func specFromPB(s *pb.ResourceSpec) (interfaces.ResourceSpec, error) {
+	if s == nil {
+		return interfaces.ResourceSpec{}, nil
+	}
+	cfg, err := unmarshalJSONMap(s.GetConfigJson())
+	if err != nil {
+		return interfaces.ResourceSpec{}, err
+	}
+	return interfaces.ResourceSpec{
+		Name:      s.GetName(),
+		Type:      s.GetType(),
+		Config:    cfg,
+		Size:      interfaces.Size(s.GetSize()),
+		Hints:     hintsFromPB(s.GetHints()),
+		DependsOn: append([]string(nil), s.GetDependsOn()...),
+	}, nil
+}
+
+func stateToPB(st interfaces.ResourceState) (*pb.ResourceState, error) {
+	appliedJSON, err := marshalJSONMap(st.AppliedConfig)
+	if err != nil {
+		return nil, err
+	}
+	outputsJSON, err := marshalJSONMap(st.Outputs)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ResourceState{
+		Id:                  st.ID,
+		Name:                st.Name,
+		Type:                st.Type,
+		Provider:            st.Provider,
+		ProviderRef:         st.ProviderRef,
+		ProviderId:          st.ProviderID,
+		ConfigHash:          st.ConfigHash,
+		AppliedConfigJson:   appliedJSON,
+		AppliedConfigSource: st.AppliedConfigSource,
+		OutputsJson:         outputsJSON,
+		Dependencies:        append([]string(nil), st.Dependencies...),
+		CreatedAt:           timeToPB(st.CreatedAt),
+		UpdatedAt:           timeToPB(st.UpdatedAt),
+		LastDriftCheck:      timeToPB(st.LastDriftCheck),
+	}, nil
+}
+
+func stateFromPB(s *pb.ResourceState) (*interfaces.ResourceState, error) {
+	if s == nil {
+		return nil, nil
+	}
+	applied, err := unmarshalJSONMap(s.GetAppliedConfigJson())
+	if err != nil {
+		return nil, err
+	}
+	outputs, err := unmarshalJSONMap(s.GetOutputsJson())
+	if err != nil {
+		return nil, err
+	}
+	return &interfaces.ResourceState{
+		ID:                  s.GetId(),
+		Name:                s.GetName(),
+		Type:                s.GetType(),
+		Provider:            s.GetProvider(),
+		ProviderRef:         s.GetProviderRef(),
+		ProviderID:          s.GetProviderId(),
+		ConfigHash:          s.GetConfigHash(),
+		AppliedConfig:       applied,
+		AppliedConfigSource: s.GetAppliedConfigSource(),
+		Outputs:             outputs,
+		Dependencies:        append([]string(nil), s.GetDependencies()...),
+		CreatedAt:           timeFromPB(s.GetCreatedAt()),
+		UpdatedAt:           timeFromPB(s.GetUpdatedAt()),
+		LastDriftCheck:      timeFromPB(s.GetLastDriftCheck()),
+	}, nil
+}
+
+func statesToPB(states []interfaces.ResourceState) ([]*pb.ResourceState, error) {
+	out := make([]*pb.ResourceState, 0, len(states))
+	for _, st := range states {
+		ps, err := stateToPB(st)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ps)
+	}
+	return out, nil
+}
+
+func outputToPB(o *interfaces.ResourceOutput) (*pb.ResourceOutput, error) {
+	if o == nil {
+		return nil, nil
+	}
+	outputsJSON, err := marshalJSONMap(o.Outputs)
+	if err != nil {
+		return nil, err
+	}
+	sensitive := make(map[string]bool, len(o.Sensitive))
+	for k, v := range o.Sensitive {
+		sensitive[k] = v
+	}
+	return &pb.ResourceOutput{
+		Name:        o.Name,
+		Type:        o.Type,
+		ProviderId:  o.ProviderID,
+		OutputsJson: outputsJSON,
+		Sensitive:   sensitive,
+		Status:      o.Status,
+	}, nil
+}
+
+func outputFromPB(o *pb.ResourceOutput) (*interfaces.ResourceOutput, error) {
+	if o == nil {
+		return nil, nil
+	}
+	outputs, err := unmarshalJSONMap(o.GetOutputsJson())
+	if err != nil {
+		return nil, err
+	}
+	sensitive := make(map[string]bool, len(o.GetSensitive()))
+	for k, v := range o.GetSensitive() {
+		sensitive[k] = v
+	}
+	return &interfaces.ResourceOutput{
+		Name:       o.GetName(),
+		Type:       o.GetType(),
+		ProviderID: o.GetProviderId(),
+		Outputs:    outputs,
+		Sensitive:  sensitive,
+		Status:     o.GetStatus(),
+	}, nil
+}
+
+func statusesFromPB(ss []*pb.ResourceStatus) ([]interfaces.ResourceStatus, error) {
+	out := make([]interfaces.ResourceStatus, 0, len(ss))
+	for _, s := range ss {
+		o, err := unmarshalJSONMap(s.GetOutputsJson())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, interfaces.ResourceStatus{
+			Name:       s.GetName(),
+			Type:       s.GetType(),
+			ProviderID: s.GetProviderId(),
+			Status:     s.GetStatus(),
+			Outputs:    o,
+		})
+	}
+	return out, nil
+}
+
+func driftClassToPB(c interfaces.DriftClass) pb.DriftClass {
+	switch c {
+	case interfaces.DriftClassInSync:
+		return pb.DriftClass_DRIFT_CLASS_IN_SYNC
+	case interfaces.DriftClassGhost:
+		return pb.DriftClass_DRIFT_CLASS_GHOST
+	case interfaces.DriftClassConfig:
+		return pb.DriftClass_DRIFT_CLASS_CONFIG
+	default:
+		return pb.DriftClass_DRIFT_CLASS_UNKNOWN
+	}
+}
+
+func driftClassFromPB(c pb.DriftClass) interfaces.DriftClass {
+	switch c {
+	case pb.DriftClass_DRIFT_CLASS_IN_SYNC:
+		return interfaces.DriftClassInSync
+	case pb.DriftClass_DRIFT_CLASS_GHOST:
+		return interfaces.DriftClassGhost
+	case pb.DriftClass_DRIFT_CLASS_CONFIG:
+		return interfaces.DriftClassConfig
+	default:
+		return interfaces.DriftClassUnknown
+	}
+}
+
+func driftsFromPB(drifts []*pb.DriftResult) ([]interfaces.DriftResult, error) {
+	out := make([]interfaces.DriftResult, 0, len(drifts))
+	for _, d := range drifts {
+		expected, err := unmarshalJSONMap(d.GetExpectedJson())
+		if err != nil {
+			return nil, err
+		}
+		actual, err := unmarshalJSONMap(d.GetActualJson())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, interfaces.DriftResult{
+			Name:     d.GetName(),
+			Type:     d.GetType(),
+			Drifted:  d.GetDrifted(),
+			Class:    driftClassFromPB(d.GetClass()),
+			Expected: expected,
+			Actual:   actual,
+			Fields:   append([]string(nil), d.GetFields()...),
+		})
+	}
+	return out, nil
+}
+
+func planActionToPB(a interfaces.PlanAction) (*pb.PlanAction, error) {
+	pbSpec, err := specToPB(a.Resource)
+	if err != nil {
+		return nil, err
+	}
+	var pbCurrent *pb.ResourceState
+	if a.Current != nil {
+		pbCurrent, err = stateToPB(*a.Current)
+		if err != nil {
+			return nil, err
+		}
+	}
+	pbChanges, err := changesToPB(a.Changes)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PlanAction{
+		Action:             a.Action,
+		Resource:           pbSpec,
+		Current:            pbCurrent,
+		Changes:            pbChanges,
+		ResolvedConfigHash: a.ResolvedConfigHash,
+	}, nil
+}
+
+func planActionFromPB(a *pb.PlanAction) (interfaces.PlanAction, error) {
+	if a == nil {
+		return interfaces.PlanAction{}, nil
+	}
+	spec, err := specFromPB(a.GetResource())
+	if err != nil {
+		return interfaces.PlanAction{}, err
+	}
+	var current *interfaces.ResourceState
+	if a.GetCurrent() != nil {
+		current, err = stateFromPB(a.GetCurrent())
+		if err != nil {
+			return interfaces.PlanAction{}, err
+		}
+	}
+	changes, err := changesFromPB(a.GetChanges())
+	if err != nil {
+		return interfaces.PlanAction{}, err
+	}
+	return interfaces.PlanAction{
+		Action:             a.GetAction(),
+		Resource:           spec,
+		Current:            current,
+		Changes:            changes,
+		ResolvedConfigHash: a.GetResolvedConfigHash(),
+	}, nil
+}
+
+func changesToPB(changes []interfaces.FieldChange) ([]*pb.FieldChange, error) {
+	out := make([]*pb.FieldChange, 0, len(changes))
+	for _, c := range changes {
+		oldJSON, err := marshalJSONAny(c.Old)
+		if err != nil {
+			return nil, err
+		}
+		newJSON, err := marshalJSONAny(c.New)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &pb.FieldChange{
+			Path:     c.Path,
+			OldJson:  oldJSON,
+			NewJson:  newJSON,
+			ForceNew: c.ForceNew,
+		})
+	}
+	return out, nil
+}
+
+func changesFromPB(changes []*pb.FieldChange) ([]interfaces.FieldChange, error) {
+	out := make([]interfaces.FieldChange, 0, len(changes))
+	for _, c := range changes {
+		oldVal, err := unmarshalJSONAny(c.GetOldJson())
+		if err != nil {
+			return nil, err
+		}
+		newVal, err := unmarshalJSONAny(c.GetNewJson())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, interfaces.FieldChange{
+			Path:     c.GetPath(),
+			Old:      oldVal,
+			New:      newVal,
+			ForceNew: c.GetForceNew(),
+		})
+	}
+	return out, nil
+}
+
+func planToPB(p *interfaces.IaCPlan) (*pb.IaCPlan, error) {
+	if p == nil {
+		return nil, nil
+	}
+	pbActions := make([]*pb.PlanAction, 0, len(p.Actions))
+	for _, a := range p.Actions {
+		pa, err := planActionToPB(a)
+		if err != nil {
+			return nil, err
+		}
+		pbActions = append(pbActions, pa)
+	}
+	return &pb.IaCPlan{
+		Id:            p.ID,
+		Actions:       pbActions,
+		CreatedAt:     timeToPB(p.CreatedAt),
+		DesiredHash:   p.DesiredHash,
+		SchemaVersion: int32(p.SchemaVersion),
+		InputSnapshot: copyStringMap(p.InputSnapshot),
+	}, nil
+}
+
+func planFromPB(p *pb.IaCPlan) (*interfaces.IaCPlan, error) {
+	if p == nil {
+		return nil, nil
+	}
+	actions := make([]interfaces.PlanAction, 0, len(p.GetActions()))
+	for _, a := range p.GetActions() {
+		pa, err := planActionFromPB(a)
+		if err != nil {
+			return nil, err
+		}
+		actions = append(actions, pa)
+	}
+	return &interfaces.IaCPlan{
+		ID:            p.GetId(),
+		Actions:       actions,
+		CreatedAt:     timeFromPB(p.GetCreatedAt()),
+		DesiredHash:   p.GetDesiredHash(),
+		SchemaVersion: int(p.GetSchemaVersion()),
+		InputSnapshot: copyStringMap(p.GetInputSnapshot()),
+	}, nil
+}
+
+func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
+	if r == nil {
+		return nil, nil
+	}
+	resources := make([]interfaces.ResourceOutput, 0, len(r.GetResources()))
+	for _, o := range r.GetResources() {
+		ro, err := outputFromPB(o)
+		if err != nil {
+			return nil, err
+		}
+		if ro != nil {
+			resources = append(resources, *ro)
+		}
+	}
+	errs := make([]interfaces.ActionError, 0, len(r.GetErrors()))
+	for _, e := range r.GetErrors() {
+		errs = append(errs, interfaces.ActionError{Resource: e.GetResource(), Action: e.GetAction(), Error: e.GetError()})
+	}
+	driftReport := make([]interfaces.DriftEntry, 0, len(r.GetInputDriftReport()))
+	for _, d := range r.GetInputDriftReport() {
+		driftReport = append(driftReport, interfaces.DriftEntry{
+			Name:             d.GetName(),
+			PlanFingerprint:  d.GetPlanFingerprint(),
+			ApplyFingerprint: d.GetApplyFingerprint(),
+		})
+	}
+	return &interfaces.ApplyResult{
+		PlanID:               r.GetPlanId(),
+		Resources:            resources,
+		Errors:               errs,
+		InitialInputSnapshot: copyStringMap(r.GetInitialInputSnapshot()),
+		InputDriftReport:     driftReport,
+		ReplaceIDMap:         copyStringMap(r.GetReplaceIdMap()),
+	}, nil
+}
+
+func destroyResultFromPB(r *pb.DestroyResult) *interfaces.DestroyResult {
+	if r == nil {
+		return nil
+	}
+	errs := make([]interfaces.ActionError, 0, len(r.GetErrors()))
+	for _, e := range r.GetErrors() {
+		errs = append(errs, interfaces.ActionError{Resource: e.GetResource(), Action: e.GetAction(), Error: e.GetError()})
+	}
+	return &interfaces.DestroyResult{Destroyed: append([]string(nil), r.GetDestroyed()...), Errors: errs}
+}
+
+func sizingFromPB(s *pb.ProviderSizing) (*interfaces.ProviderSizing, error) {
+	if s == nil {
+		return nil, nil
+	}
+	specs, err := unmarshalJSONMap(s.GetSpecsJson())
+	if err != nil {
+		return nil, err
+	}
+	return &interfaces.ProviderSizing{InstanceType: s.GetInstanceType(), Specs: specs}, nil
+}
+
+func diffResultFromPB(r *pb.DiffResult) (*interfaces.DiffResult, error) {
+	if r == nil {
+		return nil, nil
+	}
+	changes, err := changesFromPB(r.GetChanges())
+	if err != nil {
+		return nil, err
+	}
+	return &interfaces.DiffResult{NeedsUpdate: r.GetNeedsUpdate(), NeedsReplace: r.GetNeedsReplace(), Changes: changes}, nil
+}
+
+func planDiagnosticSeverityFromPB(s pb.PlanDiagnosticSeverity) interfaces.PlanDiagnosticSeverity {
+	switch s {
+	case pb.PlanDiagnosticSeverity_PLAN_DIAGNOSTIC_WARNING:
+		return interfaces.PlanDiagnosticWarning
+	case pb.PlanDiagnosticSeverity_PLAN_DIAGNOSTIC_ERROR:
+		return interfaces.PlanDiagnosticError
+	default:
+		return interfaces.PlanDiagnosticInfo
+	}
+}
+
+func migrationRepairRequestToPB(r interfaces.MigrationRepairRequest) *pb.MigrationRepairRequest {
+	return &pb.MigrationRepairRequest{
+		AppResourceName:      r.AppResourceName,
+		DatabaseResourceName: r.DatabaseResourceName,
+		JobImage:             r.JobImage,
+		SourceDir:            r.SourceDir,
+		ExpectedDirtyVersion: r.ExpectedDirtyVersion,
+		ForceVersion:         r.ForceVersion,
+		ThenUp:               r.ThenUp,
+		UpIfClean:            r.UpIfClean,
+		ConfirmForce:         r.ConfirmForce,
+		Env:                  copyStringMap(r.Env),
+		TimeoutSeconds:       int32(r.TimeoutSeconds),
+	}
+}
+
+func migrationRepairResultFromPB(r *pb.MigrationRepairResult) *interfaces.MigrationRepairResult {
+	if r == nil {
+		return nil
+	}
+	diags := make([]interfaces.Diagnostic, 0, len(r.GetDiagnostics()))
+	for _, d := range r.GetDiagnostics() {
+		diags = append(diags, interfaces.Diagnostic{
+			ID:     d.GetId(),
+			Phase:  d.GetPhase(),
+			Cause:  d.GetCause(),
+			At:     timeFromPB(d.GetAt()),
+			Detail: d.GetDetail(),
+		})
+	}
+	return &interfaces.MigrationRepairResult{
+		ProviderJobID: r.GetProviderJobId(),
+		Status:        r.GetStatus(),
+		Applied:       append([]string(nil), r.GetApplied()...),
+		Logs:          r.GetLogs(),
+		Diagnostics:   diags,
+	}
+}
+
+func timeToPB(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t)
+}
+
+func timeFromPB(t *timestamppb.Timestamp) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.AsTime()
+}
+
+func copyStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// Compile-time guards: every relevant interface MUST be satisfied. A
+// signature drift on any of these will fail the build at this file
+// rather than at the call site.
+var (
+	_ interfaces.IaCProvider               = (*typedIaCAdapter)(nil)
+	_ interfaces.Enumerator                = (*typedIaCAdapter)(nil)
+	_ interfaces.EnumeratorAll             = (*typedIaCAdapter)(nil)
+	_ interfaces.DriftConfigDetector       = (*typedIaCAdapter)(nil)
+	_ interfaces.ProviderValidator         = (*typedIaCAdapter)(nil)
+	_ interfaces.ProviderCredentialRevoker = (*typedIaCAdapter)(nil)
+	_ interfaces.ProviderMigrationRepairer = (*typedIaCAdapter)(nil)
+	_ interfaces.ResourceDriver            = (*typedResourceDriver)(nil)
+	_ interfaces.Troubleshooter            = (*typedResourceDriver)(nil)
+)
