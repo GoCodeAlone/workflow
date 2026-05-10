@@ -13,6 +13,7 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -355,6 +356,34 @@ func (a *ExternalPluginAdapter) ContractRegistry() *pb.ContractRegistry {
 
 func (a *ExternalPluginAdapter) ContractRegistryError() error {
 	return a.contractRegistryErr
+}
+
+// Conn returns the underlying gRPC client connection used to talk to
+// the plugin process. Callers (notably wfctl's typed-IaC cutover in
+// plan Task 16) construct additional typed gRPC service clients
+// against this conn — for example
+// `pb.NewIaCProviderRequiredClient(adapter.Conn())`.
+//
+// Returns nil in two cases:
+//  1. The adapter was constructed without a backing PluginClient
+//     (e.g. `newExternalPluginAdapterWithContractRegistry` test
+//     fixtures populate manifest + registry directly without a
+//     gRPC subprocess).
+//  2. The adapter has a non-nil PluginClient but its underlying
+//     PluginClient.Conn() is itself nil (in-process test plumbing
+//     that wires only the PluginServiceClient interface without a
+//     real *grpc.ClientConn).
+//
+// Callers MUST nil-check before constructing typed clients.
+//
+// The connection lifecycle is owned by the host's plugin manager —
+// callers MUST NOT call Close() on the returned conn. The plugin
+// shutdown path tears it down via the registered Closer.
+func (a *ExternalPluginAdapter) Conn() *grpc.ClientConn {
+	if a.client == nil {
+		return nil
+	}
+	return a.client.Conn()
 }
 
 func (a *ExternalPluginAdapter) Capabilities() []capability.Contract {
