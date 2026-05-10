@@ -126,7 +126,7 @@ func groupSpecsByProviderRef(specs []interfaces.ResourceSpec, defs map[string]pr
 				if _, isDisabled := disabled[moduleRef]; isDisabled {
 					return nil, nil, fmt.Errorf("infra module %q references iac.provider %q which is disabled for environment %q", spec.Name, moduleRef, envName)
 				}
-				return nil, nil, fmt.Errorf("infra module %q references iac.provider module %q (resolved from iac_provider/provider) which is not declared in modules", spec.Name, moduleRef)
+				return nil, nil, fmt.Errorf("infra module %q references iac.provider module %q (resolved from iac_provider/provider field) which is not declared as an iac.provider module", spec.Name, moduleRef)
 			}
 			if def.provType == "" {
 				return nil, nil, fmt.Errorf("provider module %q has no 'provider' type configured", moduleRef)

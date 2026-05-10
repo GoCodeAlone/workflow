@@ -1179,7 +1179,7 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 		if _, exists := groups[moduleRef]; !exists {
 			def, ok := providerDefs[moduleRef]
 			if !ok {
-				return runHydrated, fmt.Errorf("plan action for %q references iac.provider module %q (resolved from iac_provider/provider) which is not declared in modules", action.Resource.Name, moduleRef)
+				return runHydrated, fmt.Errorf("plan action for %q references iac.provider module %q (resolved from iac_provider/provider field) which is not declared as an iac.provider module", action.Resource.Name, moduleRef)
 			}
 			groups[moduleRef] = &actionGroup{provType: def.provType, provCfg: def.provCfg}
 			groupOrder = append(groupOrder, moduleRef)
