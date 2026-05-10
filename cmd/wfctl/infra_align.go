@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"os"
 	"strings"
 
@@ -221,9 +223,22 @@ func defaultAlignLoadProviders(alignCtx *alignContext, envName string, _ *interf
 }
 
 // loadPlanJSON reads and decodes a plan JSON file.
+//
+// When the file does not exist the returned error includes an actionable
+// hint: a missing plan file at align time almost always means the upstream
+// `wfctl infra plan --output <path>` step failed silently — for example
+// because of a state-backend credential error in CI where shell pipefail is
+// off and the non-zero exit was masked by `| tee $GITHUB_STEP_SUMMARY`.
+// Surfacing the hint here saves operators a triage hop.
 func loadPlanJSON(path string) (*interfaces.IaCPlan, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, iofs.ErrNotExist) {
+			// Wrap (don't replace) so errors.Is(..., iofs.ErrNotExist) still
+			// matches and the underlying *PathError is preserved for callers
+			// that want to introspect the cause.
+			return nil, fmt.Errorf("plan file %q does not exist — did the upstream `wfctl infra plan --output %q` step succeed? Check its stderr for state-backend errors (e.g. InvalidAccessKeyId, SignatureDoesNotMatch). In CI, ensure the plan step uses `set -o pipefail` so wfctl's non-zero exit is not masked by a downstream pipe (e.g. `| tee`): %w", path, path, err)
+		}
 		return nil, err
 	}
 	defer f.Close()

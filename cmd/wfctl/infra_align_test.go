@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1097,5 +1099,43 @@ func TestInfraAlign_RenderMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 WARN") {
 		t.Error("expected WARN count in summary")
+	}
+}
+
+func TestLoadPlanJSON_MissingFileEmitsActionableHint(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "plan-does-not-exist.json")
+	_, err := loadPlanJSON(missing)
+	if err == nil {
+		t.Fatal("expected error for missing plan file, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"does not exist",
+		"wfctl infra plan",
+		"state-backend",
+		"pipefail",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q hint: %s", want, msg)
+		}
+	}
+	// The hint must wrap (not replace) the underlying error so callers can
+	// still match with errors.Is(..., iofs.ErrNotExist).
+	if !errors.Is(err, iofs.ErrNotExist) {
+		t.Errorf("expected errors.Is(err, iofs.ErrNotExist) to match wrapped error; got: %v", err)
+	}
+}
+
+func TestLoadPlanJSON_DecodeErrorPropagatesVerbatim(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "plan-malformed.json")
+	if err := os.WriteFile(bad, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadPlanJSON(bad)
+	if err == nil {
+		t.Fatal("expected decode error, got nil")
+	}
+	if strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("decode error should not mention does-not-exist hint: %s", err.Error())
 	}
 }
