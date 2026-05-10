@@ -352,6 +352,9 @@ func TestSecretKey(t *testing.T) {
 	if ok, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_]*$`, got); !ok {
 		t.Fatalf("SecretKey = %q, want provider-safe name", got)
 	}
+	if len(got) > secretKeyMaxLength {
+		t.Fatalf("SecretKey len = %d, want <= %d", len(got), secretKeyMaxLength)
+	}
 	if !strings.HasPrefix(got, "myres__secret_key_") {
 		t.Errorf("SecretKey = %q, want sanitized parts plus hash suffix", got)
 	}
@@ -359,7 +362,7 @@ func TestSecretKey(t *testing.T) {
 		{"a", "b_c"},
 		{"a_b", "c"},
 		{"a-b", "c"},
-		{"a_b", "c"},
+		{"9resource", "secret-key"},
 		{"github", "token"},
 	} {
 		if key := SecretKey(pair[0], pair[1]); !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(key) {
@@ -374,6 +377,19 @@ func TestSecretKey(t *testing.T) {
 	}
 	if key := SecretKey("github", "token"); regexp.MustCompile(`(?i)^github_`).MatchString(key) {
 		t.Fatalf("SecretKey = %q, must not use GitHub-reserved prefix", key)
+	}
+	longA := SecretKey(strings.Repeat("resource", 20), strings.Repeat("output", 20))
+	longB := SecretKey(strings.Repeat("resource", 20)+"x", strings.Repeat("output", 20))
+	for _, key := range []string{longA, longB} {
+		if len(key) > secretKeyMaxLength {
+			t.Fatalf("long SecretKey len = %d, want <= %d: %q", len(key), secretKeyMaxLength, key)
+		}
+		if ok, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_]*$`, key); !ok {
+			t.Fatalf("long SecretKey = %q, want provider-safe name", key)
+		}
+	}
+	if longA == longB {
+		t.Fatal("truncated SecretKey values must retain hash collision resistance")
 	}
 }
 

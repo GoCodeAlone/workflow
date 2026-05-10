@@ -63,10 +63,6 @@ func (c *adapterTestPluginServiceClient) GetModuleTypes(_ context.Context, _ *em
 	return &pb.TypeList{Types: c.moduleTypes}, nil
 }
 
-func (c *adapterTestPluginServiceClient) GetTriggerTypes(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.TypeList, error) {
-	return &pb.TypeList{Types: c.triggerTypes}, nil
-}
-
 func (c *adapterTestPluginServiceClient) CreateModule(_ context.Context, req *pb.CreateModuleRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
 	c.lastCreateModReq = req
 	return &pb.HandleResponse{HandleId: "module-handle"}, nil
@@ -642,7 +638,10 @@ func TestExternalPluginAdapter_RemoteTriggerDelaysCreateUntilConfigure(t *testin
 		manifest:     &pb.Manifest{Name: "trigger-plugin"},
 		triggerTypes: []string{"compute.completed"},
 	}
-	a, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{
+		client:           client,
+		callbackBrokerID: 42,
+	})
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -650,24 +649,25 @@ func TestExternalPluginAdapter_RemoteTriggerDelaysCreateUntilConfigure(t *testin
 	if factory == nil {
 		t.Fatal("missing trigger factory")
 	}
-	trigger, ok := factory().(*RemoteTrigger)
+	instance := factory()
+	trigger, ok := instance.(*RemoteTrigger)
 	if !ok {
-		t.Fatalf("factory type = %T, want *RemoteTrigger", factory())
+		t.Fatalf("factory type = %T, want *RemoteTrigger", instance)
 	}
-	if client.lastCreateModReq != nil {
+	if client.lastCreateTriggerReq != nil {
 		t.Fatal("trigger factory should not create remote handle before config is available")
 	}
 	if err := trigger.Configure(nil, map[string]any{"task_status": "succeeded"}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
-	if client.lastCreateModReq == nil {
+	if client.lastCreateTriggerReq == nil {
 		t.Fatal("Configure did not create remote trigger handle")
 	}
-	if client.lastCreateModReq.Type != "compute.completed" {
-		t.Fatalf("CreateModule type = %q", client.lastCreateModReq.Type)
+	if client.lastCreateTriggerReq.Type != "compute.completed" {
+		t.Fatalf("CreateTrigger type = %q", client.lastCreateTriggerReq.Type)
 	}
-	if got := client.lastCreateModReq.Config.AsMap()["task_status"]; got != "succeeded" {
-		t.Fatalf("trigger config did not reach CreateModule: %#v", client.lastCreateModReq.Config.AsMap())
+	if got := client.lastCreateTriggerReq.Config.AsMap()["task_status"]; got != "succeeded" {
+		t.Fatalf("trigger config did not reach CreateTrigger: %#v", client.lastCreateTriggerReq.Config.AsMap())
 	}
 }
 

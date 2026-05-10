@@ -31,27 +31,40 @@ import (
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
-// PlaceholderPrefix is the URI scheme used in state.Outputs values to
-// reference a routed secret stored in the configured secrets.Provider.
-// Distinct from secrets.SecretPrefix ("secret://") which is for
-// user-supplied config references.
-const PlaceholderPrefix = "secret_ref://"
+const (
+	// PlaceholderPrefix is the URI scheme used in state.Outputs values to
+	// reference a routed secret stored in the configured secrets.Provider.
+	// Distinct from secrets.SecretPrefix ("secret://") which is for
+	// user-supplied config references.
+	PlaceholderPrefix = "secret_ref://"
+
+	// secretKeyMaxLength follows the lowest common provider limit currently
+	// targeted by routed output secrets: GitHub Actions secret names.
+	secretKeyMaxLength = 100
+	secretKeyHashBytes = 16
+)
 
 // SecretKey returns the canonical secrets.Provider key for a resource's
 // output. The key is provider-safe and collision-resistant for distinct
 // (resourceName, outputKey) pairs. Exported so audit-state-secrets and other
-// consumers can reverse-engineer routed-secret names.
+// consumers can recompute routed-secret names from known resource/output pairs.
 func SecretKey(resourceName, outputKey string) string {
 	raw := resourceName + "\x00" + outputKey
-	key := sanitizeSecretKeyPart(resourceName) + "__" + sanitizeSecretKeyPart(outputKey) + "_" + shortHash(raw)
-	if strings.HasPrefix(strings.ToUpper(key), "GITHUB_") {
-		key = "WF_" + key
+	resourcePart := sanitizeSecretKeyPart(resourceName)
+	outputPart := sanitizeSecretKeyPart(outputKey)
+	hash := shortHash(raw)
+
+	prefix := ""
+	if strings.HasPrefix(strings.ToUpper(resourcePart+"__"+outputPart), "GITHUB_") {
+		prefix = "WF_"
 	}
-	return key
+	maxPartsLength := secretKeyMaxLength - len(prefix) - len(hash) - len("__") - len("_")
+	resourcePart, outputPart = truncateSecretKeyParts(resourcePart, outputPart, maxPartsLength)
+	return prefix + resourcePart + "__" + outputPart + "_" + hash
 }
 
-// Placeholder returns the canonical "secret_ref://<resourceName>_<outputKey>"
-// string that replaces a routed value in state.Outputs.
+// Placeholder returns PlaceholderPrefix + SecretKey(resourceName, outputKey),
+// replacing a routed value in state.Outputs.
 func Placeholder(resourceName, outputKey string) string {
 	return PlaceholderPrefix + SecretKey(resourceName, outputKey)
 }
@@ -67,7 +80,7 @@ func IsPlaceholder(v any) bool {
 }
 
 // Route routes sensitive fields from out through provider, keying each
-// secret as "<resourceName>_<outputKey>". Returns:
+// secret via SecretKey(resourceName, outputKey). Returns:
 //
 //   - sanitized: a copy of out.Outputs with sensitive values replaced by
 //     PlaceholderPrefix + SecretKey(resourceName, k). Suitable for
@@ -191,7 +204,30 @@ func sanitizeSecretKeyPart(part string) string {
 
 func shortHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
-	return strings.ToUpper(hex.EncodeToString(sum[:4]))
+	return strings.ToUpper(hex.EncodeToString(sum[:secretKeyHashBytes]))
+}
+
+func truncateSecretKeyParts(resourcePart, outputPart string, maxLength int) (string, string) {
+	if len(resourcePart)+len(outputPart) <= maxLength {
+		return resourcePart, outputPart
+	}
+	resourceBudget := maxLength / 2
+	outputBudget := maxLength - resourceBudget
+	if len(resourcePart) < resourceBudget {
+		outputBudget += resourceBudget - len(resourcePart)
+		resourceBudget = len(resourcePart)
+	}
+	if len(outputPart) < outputBudget {
+		resourceBudget += outputBudget - len(outputPart)
+		outputBudget = len(outputPart)
+	}
+	if len(resourcePart) > resourceBudget {
+		resourcePart = resourcePart[:resourceBudget]
+	}
+	if len(outputPart) > outputBudget {
+		outputPart = outputPart[:outputBudget]
+	}
+	return resourcePart, outputPart
 }
 
 // Revoke deletes routed secrets for resourceName. mergedKeys is the union

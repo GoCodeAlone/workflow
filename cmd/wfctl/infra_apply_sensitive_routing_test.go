@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/sensitive"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -121,20 +122,25 @@ func TestPersistResourceWithSecretRouting_RoutesSensitiveAndSanitizesState(t *te
 		t.Fatalf("expected 1 saved, got %d", len(store.saved))
 	}
 	state := store.saved[0]
-	if state.Outputs["secret_key"] != "secret_ref://myres_secret_key" {
+	secretKey := sensitive.SecretKey("myres", "secret_key")
+	accessKey := sensitive.SecretKey("myres", "access_key")
+	if state.Outputs["secret_key"] != sensitive.Placeholder("myres", "secret_key") {
 		t.Errorf("state secret_key not sanitized: %v", state.Outputs["secret_key"])
 	}
-	if state.Outputs["access_key"] != "secret_ref://myres_access_key" {
+	if state.Outputs["access_key"] != sensitive.Placeholder("myres", "access_key") {
 		t.Errorf("state access_key not sanitized: %v", state.Outputs["access_key"])
 	}
 	if state.Outputs["bucket"] != "b" {
 		t.Errorf("state bucket lost: %v", state.Outputs["bucket"])
 	}
-	if prov.values["myres_secret_key"] != "SK" {
+	if prov.values[secretKey] != "SK" {
 		t.Errorf("provider missing secret_key value")
 	}
-	if hydrated["myres_secret_key"] != "SK" {
+	if hydrated[secretKey] != "SK" {
 		t.Errorf("hydrated missing secret_key: %v", hydrated)
+	}
+	if prov.values[accessKey] != "AK" {
+		t.Errorf("provider missing access_key value")
 	}
 }
 
@@ -181,7 +187,7 @@ func TestPersistResourceWithSecretRouting_SaveFailureCompensatesWithDelete(t *te
 	if drv.deleteCalls[0].ProviderID != "AKIA" {
 		t.Errorf("compensating Delete used wrong ProviderID: %v", drv.deleteCalls[0])
 	}
-	if _, ok := prov.values["myres_secret_key"]; ok {
+	if _, ok := prov.values[sensitive.SecretKey("myres", "secret_key")]; ok {
 		t.Errorf("compensating Delete should have removed routed secret; got %v", prov.values)
 	}
 }
@@ -223,7 +229,7 @@ func TestPersistResourceWithSecretRouting_Idempotent(t *testing.T) {
 			t.Fatalf("persist iter %d: %v", i, err)
 		}
 	}
-	if prov.values["myres_secret_key"] != "SK" {
+	if prov.values[sensitive.SecretKey("myres", "secret_key")] != "SK" {
 		t.Errorf("provider value lost on re-Apply: %v", prov.values)
 	}
 	if len(store.saved) != 2 {
@@ -264,7 +270,7 @@ func TestPersistResourceWithSecretRouting_ReadModeSanitizeOnly_PreservesPriorPla
 	// Pre-existing state has a placeholder
 	store := &stubInfraStore{
 		saved: []interfaces.ResourceState{
-			{Name: "myres", Outputs: map[string]any{"secret_key": "secret_ref://myres_secret_key", "bucket": "b"}},
+			{Name: "myres", Outputs: map[string]any{"secret_key": sensitive.Placeholder("myres", "secret_key"), "bucket": "b"}},
 		},
 	}
 	out := interfaces.ResourceOutput{
@@ -283,7 +289,7 @@ func TestPersistResourceWithSecretRouting_ReadModeSanitizeOnly_PreservesPriorPla
 		t.Fatalf("expected 2 saves (initial + this), got %d", len(store.saved))
 	}
 	latest := store.saved[1]
-	if latest.Outputs["secret_key"] != "secret_ref://myres_secret_key" {
+	if latest.Outputs["secret_key"] != sensitive.Placeholder("myres", "secret_key") {
 		t.Errorf("Read mode lost prior placeholder: %v", latest.Outputs["secret_key"])
 	}
 	if latest.Outputs["bucket"] != "b" {

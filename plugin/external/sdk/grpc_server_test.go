@@ -616,17 +616,17 @@ func TestInvokeService_WithTypedInvoker(t *testing.T) {
 	}
 }
 
-func TestCreateModule_DispatchesTriggerProviderTypes(t *testing.T) {
+func TestCreateTrigger_DispatchesTriggerProviderTypes(t *testing.T) {
 	provider := &triggerProviderForTest{}
 	srv := newGRPCServer(provider)
 
-	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+	createResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
 		Type:   "compute.completed",
 		Name:   "compute.completed",
 		Config: mustMapToStruct(t, map[string]any{"task_status": "succeeded"}),
 	})
 	if err != nil {
-		t.Fatalf("CreateModule returned rpc error: %v", err)
+		t.Fatalf("CreateTrigger returned rpc error: %v", err)
 	}
 	if createResp.Error != "" {
 		t.Fatalf("unexpected create error: %s", createResp.Error)
