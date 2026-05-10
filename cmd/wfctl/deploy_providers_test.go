@@ -9,21 +9,19 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 )
 
-// noopCloser is an io.Closer that does nothing — used in test stubs.
-type noopCloser struct{}
-
-func (noopCloser) Close() error { return nil }
-
 // ── discoverAndLoadIaCProvider — error propagation ────────────────────────────
 //
 // Per plan §Task 16 (strict-contracts force-cutover), the legacy
 // `loadIaCPlugin` factory-based load path is removed; discoverAndLoadIaCProvider
 // now constructs typedIaCAdapter directly from the gRPC ClientConn +
 // ContractRegistry. Plugin-error propagation is exercised end-to-end by the
-// typed-RPC integration tests in iac_typed_adapter_test.go (Task 30) and
-// the cross-plugin-build matrix in .github/workflows/cross-plugin-build-test.yml
-// (Task 6). The legacy TestResolveIaCProviderSurfacesPluginError test is
-// removed alongside the loadIaCPlugin var it depended on.
+// typed-RPC integration tests in iac_typed_adapter_test.go (PR #605, on
+// main) and the cross-plugin-build matrix in
+// .github/workflows/cross-plugin-build-test.yml (Task 6, on main). The
+// boundary-level typed-return assertion lives in this file as
+// TestDiscoverAndLoadIaCProvider_ReturnsTypedClient (per spec Step 1).
+// The legacy TestResolveIaCProviderSurfacesPluginError test was removed
+// alongside the loadIaCPlugin var it depended on.
 
 // ── newDeployProvider ─────────────────────────────────────────────────────────
 

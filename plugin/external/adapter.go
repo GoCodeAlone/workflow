@@ -364,9 +364,17 @@ func (a *ExternalPluginAdapter) ContractRegistryError() error {
 // against this conn — for example
 // `pb.NewIaCProviderRequiredClient(adapter.Conn())`.
 //
-// Returns nil for adapters constructed without a backing client (e.g.
-// `newExternalPluginAdapterWithContractRegistry` test fixtures); callers
-// MUST nil-check before constructing typed clients.
+// Returns nil in two cases:
+//  1. The adapter was constructed without a backing PluginClient
+//     (e.g. `newExternalPluginAdapterWithContractRegistry` test
+//     fixtures populate manifest + registry directly without a
+//     gRPC subprocess).
+//  2. The adapter has a non-nil PluginClient but its underlying
+//     PluginClient.Conn() is itself nil (in-process test plumbing
+//     that wires only the PluginServiceClient interface without a
+//     real *grpc.ClientConn).
+//
+// Callers MUST nil-check before constructing typed clients.
 //
 // The connection lifecycle is owned by the host's plugin manager —
 // callers MUST NOT call Close() on the returned conn. The plugin

@@ -21,6 +21,7 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/plugin/external"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/grpc"
 )
 
 // DeployConfig holds all parameters needed to execute a deployment.
@@ -102,17 +103,21 @@ type iacPluginManifest struct {
 // the executable is present).
 //
 // The computePlanVersion return is the RAW value from the SDK manifest's
-// iacProvider.computePlanVersion field. This loader path performs only
-// minimal json.Unmarshal — no schema validation — so callers must NOT
-// assume the returned string is constrained to {"", "v1", "v2"}. Use
-// the wfctlhelpers.DispatchVersionV2 constant for the v2-equality check
-// (anything else, including unknown values and empty, defaults to v1):
+// iacProvider.computePlanVersion field. Currently UNUSED by
+// discoverAndLoadIaCProvider after the strict-contracts force-cutover
+// (the old caller `readIaCPluginComputePlanVersion` was deleted with
+// remoteIaCProvider). Reserved for the follow-up
+// CapabilitiesResponse.IaCCapabilityDeclaration.compute_plan_version
+// capability-extension PR (option (d) per team-lead ruling, batched with
+// canonical_keys between Task 17 and Task 20). Removing the return now
+// would force a signature churn round when the follow-up wires it back
+// in via a different reader (typed proto Capabilities RPC instead of
+// plugin.json scan); kept in place to avoid that churn.
 //
-//	if computePlanVersion == wfctlhelpers.DispatchVersionV2 { ... v2 path ... }
-//
-// (wfctlhelpers.DispatchVersionFor takes a provider value, not a raw
-// string, so it does not apply at this loader-level seam where only
-// the string is in hand.)
+// Until the follow-up: callers receive the value but discard it. The raw
+// string is unconstrained — schema-validated values are {"", "v1", "v2"}
+// per wfctlhelpers.DispatchVersionV2, but this loader path performs only
+// minimal json.Unmarshal so MUST NOT assume.
 func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion string, hasBinary bool, err error) {
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
@@ -183,24 +188,58 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 	}
 	closer := closerFunc(func() error { mgr.Shutdown(); return nil })
 
+	typed, err := buildTypedIaCAdapterFrom(ctx, providerName, pName, cfg, adapter)
+	if err != nil {
+		_ = closer.Close()
+		return nil, nil, err
+	}
+	return typed, closer, nil
+}
+
+// iacAdapterAccessor is the slice of *external.ExternalPluginAdapter the
+// typed-IaC loader needs after a successful LoadPlugin. Extracted as an
+// interface so buildTypedIaCAdapterFrom is unit-testable against an
+// in-process gRPC server without spawning a real plugin subprocess —
+// the spec Step 1 boundary test (TestDiscoverAndLoadIaCProvider_ReturnsTypedClient)
+// constructs a stub adapter satisfying this interface and verifies the
+// returned interfaces.IaCProvider is *typedIaCAdapter.
+type iacAdapterAccessor interface {
+	Conn() *grpc.ClientConn
+	ContractRegistry() *pb.ContractRegistry
+	ContractRegistryError() error
+}
+
+// buildTypedIaCAdapterFrom is the post-LoadPlugin half of
+// discoverAndLoadIaCProvider, factored out so it's unit-testable in
+// isolation against an in-process gRPC server. Returns the typed
+// IaCProvider on success, a typed error otherwise. Caller is
+// responsible for closing the plugin manager on error.
+func buildTypedIaCAdapterFrom(ctx context.Context, providerName, pName string, cfg map[string]any, adapter iacAdapterAccessor) (interfaces.IaCProvider, error) {
 	conn := adapter.Conn()
 	if conn == nil {
-		_ = closer.Close()
-		return nil, nil, fmt.Errorf("plugin %q does not expose a gRPC connection (host adapter missing PluginClient.Conn) — upgrade with: wfctl plugin update %s", pName, pName)
+		return nil, fmt.Errorf("plugin %q does not expose a gRPC connection (host adapter missing PluginClient.Conn) — upgrade with: wfctl plugin update %s", pName, pName)
+	}
+
+	// Surface a ContractRegistry RPC failure FIRST. Without this guard,
+	// a transport / Unimplemented error against GetContractRegistry
+	// silently degrades to an empty registry, and the next
+	// `if !registered[iacServiceRequired]` branch fires the misleading
+	// "does not register the required service" message — masking the
+	// real cause. Per Copilot finding on PR #609.
+	if regErr := adapter.ContractRegistryError(); regErr != nil {
+		return nil, fmt.Errorf("plugin %q ContractRegistry RPC failed: %w — upgrade with: wfctl plugin update %s", pName, regErr, pName)
 	}
 
 	registered := registeredIaCServices(adapter.ContractRegistry())
 	if !registered[iacServiceRequired] {
-		_ = closer.Close()
-		return nil, nil, fmt.Errorf("plugin %q does not register the required %q gRPC service — upgrade with: wfctl plugin update %s", pName, iacServiceRequired, pName)
+		return nil, fmt.Errorf("plugin %q does not register the required %q gRPC service — upgrade with: wfctl plugin update %s", pName, iacServiceRequired, pName)
 	}
 
 	typed := newTypedIaCAdapter(conn, registered)
 	if initErr := typed.Initialize(ctx, cfg); initErr != nil {
-		_ = closer.Close()
-		return nil, nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
+		return nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
 	}
-	return typed, closer, nil
+	return typed, nil
 }
 
 // registeredIaCServices walks a plugin's ContractRegistry response and
