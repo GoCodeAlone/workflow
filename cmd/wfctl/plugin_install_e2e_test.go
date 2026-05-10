@@ -423,6 +423,57 @@ func TestSafeJoin(t *testing.T) {
 	}
 }
 
+// TestInstalledManifestPreservesCLICommands is the regression test for the
+// post-install plugin-CLI dispatch bug: writeInstalledManifest used to drop
+// capabilities.cliCommands, so even when a registry manifest declared them,
+// `wfctl <plugin-cmd>` reported `unknown command` because BuildCLIRegistry
+// reads from the on-disk plugin.json (not the registry manifest).
+func TestInstalledManifestPreservesCLICommands(t *testing.T) {
+	rm := &RegistryManifest{
+		Name:        "workflow-plugin-payments",
+		Version:     "0.3.1",
+		Author:      "tester",
+		Description: "regression: cliCommands preserved post-install",
+		Type:        "external",
+		Tier:        "core",
+		License:     "Apache-2.0",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"payments.provider"},
+			StepTypes:   []string{"step.payment_charge"},
+			CLICommands: []RegistryCLICommand{
+				{Name: "payments", Description: "Payment provider operations"},
+			},
+			BuildHooks: []RegistryBuildHook{
+				{Event: "pre-build", Priority: 10},
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := writeInstalledManifest(path, rm); err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read installed plugin.json: %v", err)
+	}
+	var got installedPluginJSON
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal installed plugin.json: %v", err)
+	}
+	if got.Capabilities == nil {
+		t.Fatal("expected non-nil Capabilities")
+	}
+	if len(got.Capabilities.CLICommands) != 1 || got.Capabilities.CLICommands[0].Name != "payments" {
+		t.Errorf("CLICommands = %+v, want [{Name: payments, …}]", got.Capabilities.CLICommands)
+	}
+	if len(got.Capabilities.BuildHooks) != 1 || got.Capabilities.BuildHooks[0].Event != "pre-build" {
+		t.Errorf("BuildHooks = %+v, want [{Event: pre-build, …}]", got.Capabilities.BuildHooks)
+	}
+}
+
 // TestInstalledManifestEngineValidation verifies that the plugin.json written by
 // writeInstalledManifest passes the engine's plugin.LoadManifest and Validate.
 func TestInstalledManifestEngineValidation(t *testing.T) {
