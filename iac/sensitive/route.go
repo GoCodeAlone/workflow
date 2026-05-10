@@ -6,8 +6,9 @@
 //   - Route is invoked on Create/Update only. Read/Adoption/Refresh paths
 //     use Sanitize-only logic (not in this package — see
 //     cmd/wfctl/infra_apply.go) to prevent cache pollution.
-//   - The placeholder format "secret_ref://<resource>_<key>" is distinct
-//     from the user-supplied "secret://<key>" config-reference convention.
+//   - The placeholder format "secret_ref://<SecretKey(resource,key)>" is
+//     distinct from the user-supplied "secret://<key>" config-reference
+//     convention.
 //   - Routing trigger is exclusively out.Sensitive[k]==true (per-call
 //     dynamic). ResourceDriver.SensitiveKeys() is NOT consulted here;
 //     it remains a display-masking signal.
@@ -20,6 +21,8 @@ package sensitive
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -29,21 +32,40 @@ import (
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
-// PlaceholderPrefix is the URI scheme used in state.Outputs values to
-// reference a routed secret stored in the configured secrets.Provider.
-// Distinct from secrets.SecretPrefix ("secret://") which is for
-// user-supplied config references.
-const PlaceholderPrefix = "secret_ref://"
+const (
+	// PlaceholderPrefix is the URI scheme used in state.Outputs values to
+	// reference a routed secret stored in the configured secrets.Provider.
+	// Distinct from secrets.SecretPrefix ("secret://") which is for
+	// user-supplied config references.
+	PlaceholderPrefix = "secret_ref://"
+
+	// secretKeyMaxLength follows the lowest common provider limit currently
+	// targeted by routed output secrets: GitHub Actions secret names.
+	secretKeyMaxLength = 100
+	secretKeyHashBytes = 16
+)
 
 // SecretKey returns the canonical secrets.Provider key for a resource's
-// output: "<resourceName>_<outputKey>". Exported so audit-state-secrets
-// and other consumers can reverse-engineer routed-secret names.
+// output. The key is provider-safe and collision-resistant for distinct
+// (resourceName, outputKey) pairs. Exported so audit-state-secrets and other
+// consumers can recompute routed-secret names from known resource/output pairs.
 func SecretKey(resourceName, outputKey string) string {
-	return resourceName + "_" + outputKey
+	raw := resourceName + "\x00" + outputKey
+	resourcePart := sanitizeSecretKeyPart(resourceName)
+	outputPart := sanitizeSecretKeyPart(outputKey)
+	hash := shortHash(raw)
+
+	prefix := ""
+	if strings.HasPrefix(strings.ToUpper(resourcePart+"__"+outputPart), "GITHUB_") {
+		prefix = "WF_"
+	}
+	maxPartsLength := secretKeyMaxLength - len(prefix) - len(hash) - len("__") - len("_")
+	resourcePart, outputPart = truncateSecretKeyParts(resourcePart, outputPart, maxPartsLength)
+	return prefix + resourcePart + "__" + outputPart + "_" + hash
 }
 
-// Placeholder returns the canonical "secret_ref://<resourceName>_<outputKey>"
-// string that replaces a routed value in state.Outputs.
+// Placeholder returns PlaceholderPrefix + SecretKey(resourceName, outputKey),
+// replacing a routed value in state.Outputs.
 func Placeholder(resourceName, outputKey string) string {
 	return PlaceholderPrefix + SecretKey(resourceName, outputKey)
 }
@@ -59,7 +81,7 @@ func IsPlaceholder(v any) bool {
 }
 
 // Route routes sensitive fields from out through provider, keying each
-// secret as "<resourceName>_<outputKey>". Returns:
+// secret via SecretKey(resourceName, outputKey). Returns:
 //
 //   - sanitized: a copy of out.Outputs with sensitive values replaced by
 //     PlaceholderPrefix + SecretKey(resourceName, k). Suitable for
@@ -152,6 +174,61 @@ func stringifyOutput(v any) (string, error) {
 	default:
 		return "", fmt.Errorf("sensitive output value type %T not supported (must be string)", v)
 	}
+}
+
+func sanitizeSecretKeyPart(part string) string {
+	var b strings.Builder
+	b.Grow(len(part))
+	for _, r := range part {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if out == "" {
+		out = "SECRET"
+	}
+	if out[0] >= '0' && out[0] <= '9' {
+		out = "_" + out
+	}
+	return out
+}
+
+func shortHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return strings.ToUpper(hex.EncodeToString(sum[:secretKeyHashBytes]))
+}
+
+func truncateSecretKeyParts(resourcePart, outputPart string, maxLength int) (string, string) {
+	if len(resourcePart)+len(outputPart) <= maxLength {
+		return resourcePart, outputPart
+	}
+	resourceBudget := maxLength / 2
+	outputBudget := maxLength - resourceBudget
+	if len(resourcePart) < resourceBudget {
+		outputBudget += resourceBudget - len(resourcePart)
+		resourceBudget = len(resourcePart)
+	}
+	if len(outputPart) < outputBudget {
+		resourceBudget += outputBudget - len(outputPart)
+		outputBudget = len(outputPart)
+	}
+	if len(resourcePart) > resourceBudget {
+		resourcePart = resourcePart[:resourceBudget]
+	}
+	if len(outputPart) > outputBudget {
+		outputPart = outputPart[:outputBudget]
+	}
+	return resourcePart, outputPart
 }
 
 // Revoke deletes routed secrets for resourceName. mergedKeys is the union

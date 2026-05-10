@@ -21,9 +21,10 @@ import (
 //   - a plaintext value matching secrets.DefaultSensitiveKeys() → flag legacy.
 //   - a "secret://<key>" string → flag mistaken config-reference in state.
 //
-// Then walks secrets.Provider.List() (when supported) for any
-// "<resource>_<key>" name whose <resource> is NOT in IaCStateStore →
-// orphan, candidate for prune.
+// Then walks secrets.Provider.List() (when supported) for any name that is
+// neither directly referenced by a state placeholder nor recoverable as a
+// legacy "<resource>_<key>" routed secret for a state resource → orphan,
+// candidate for prune.
 //
 // Exit codes:
 //
@@ -103,15 +104,12 @@ func runAuditStateSecretsWithPrune(ctx context.Context, w io.Writer, store infra
 		defaultSensitive[k] = struct{}{}
 	}
 
-	// Collect the union of sensitive-output key names actually observed in
-	// state records (any Outputs[k] whose value is a secret_ref://
-	// placeholder). Drivers may declare sensitive keys that aren't in
-	// secrets.DefaultSensitiveKeys() — without harvesting these, orphan
-	// detection's stripKnownSensitiveSuffix would fail to recover the
-	// resource-name prefix and misflag valid routed secrets as orphans
-	// (and --prune would delete them). Defaults remain in the suffix set
-	// as a fallback for first-run scenarios where state hasn't recorded
-	// any placeholders yet.
+	// Collect live placeholder keys plus the union of sensitive-output key
+	// names observed in state records. New routed secrets are authoritative by
+	// placeholder value because SecretKey(resource,key) may include hashing and
+	// truncation. The suffix set remains only as a legacy fallback for older
+	// "<resource>_<key>" routed-secret names.
+	liveSecretNames := map[string]struct{}{}
 	observedSensitive := map[string]struct{}{}
 	for k := range defaultSensitive {
 		observedSensitive[k] = struct{}{}
@@ -120,6 +118,7 @@ func runAuditStateSecretsWithPrune(ctx context.Context, w io.Writer, store infra
 		for k, v := range states[i].Outputs {
 			if sensitive.IsPlaceholder(v) {
 				observedSensitive[k] = struct{}{}
+				liveSecretNames[strings.TrimPrefix(v.(string), sensitive.PlaceholderPrefix)] = struct{}{}
 			}
 		}
 	}
@@ -181,6 +180,9 @@ func runAuditStateSecretsWithPrune(ctx context.Context, w io.Writer, store infra
 	case err == nil:
 		sort.Strings(names)
 		for _, name := range names {
+			if _, ok := liveSecretNames[name]; ok {
+				continue
+			}
 			res := stripSensitiveSuffix(name, observedSensitive)
 			if _, ok := stateNames[res]; ok {
 				continue

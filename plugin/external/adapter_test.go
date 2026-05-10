@@ -73,6 +73,10 @@ func (c *adapterTestPluginServiceClient) CreateStep(_ context.Context, req *pb.C
 	return &pb.HandleResponse{HandleId: "step-handle"}, nil
 }
 
+func (c *adapterTestPluginServiceClient) InitModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	return &pb.ErrorResponse{}, nil
+}
+
 func TestIsSamplePlugin_True(t *testing.T) {
 	a := newTestAdapter(&pb.Manifest{
 		Name:           "my-sample",
@@ -626,6 +630,44 @@ func TestExternalPluginAdapter_MalformedDescriptorSetRecordsError(t *testing.T) 
 	}
 	if !strings.Contains(a.ContractRegistryError().Error(), "parse contract registry descriptors") {
 		t.Fatalf("expected descriptor parse context, got %v", a.ContractRegistryError())
+	}
+}
+
+func TestExternalPluginAdapter_RemoteTriggerDelaysCreateUntilConfigure(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:     &pb.Manifest{Name: "trigger-plugin"},
+		triggerTypes: []string{"compute.completed"},
+	}
+	a, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{
+		client:           client,
+		callbackBrokerID: 42,
+	})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	factory := a.TriggerFactories()["compute.completed"]
+	if factory == nil {
+		t.Fatal("missing trigger factory")
+	}
+	instance := factory()
+	trigger, ok := instance.(*RemoteTrigger)
+	if !ok {
+		t.Fatalf("factory type = %T, want *RemoteTrigger", instance)
+	}
+	if client.lastCreateTriggerReq != nil {
+		t.Fatal("trigger factory should not create remote handle before config is available")
+	}
+	if err := trigger.Configure(nil, map[string]any{"task_status": "succeeded"}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if client.lastCreateTriggerReq == nil {
+		t.Fatal("Configure did not create remote trigger handle")
+	}
+	if client.lastCreateTriggerReq.Type != "compute.completed" {
+		t.Fatalf("CreateTrigger type = %q", client.lastCreateTriggerReq.Type)
+	}
+	if got := client.lastCreateTriggerReq.Config.AsMap()["task_status"]; got != "succeeded" {
+		t.Fatalf("trigger config did not reach CreateTrigger: %#v", client.lastCreateTriggerReq.Config.AsMap())
 	}
 }
 
