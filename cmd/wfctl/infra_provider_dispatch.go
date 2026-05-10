@@ -115,18 +115,18 @@ func groupSpecsByProviderRef(specs []interfaces.ResourceSpec, defs map[string]pr
 	for _, spec := range specs {
 		var moduleRef string
 		if spec.Config != nil {
-			moduleRef, _ = spec.Config["provider"].(string)
+			moduleRef = resolveIaCProviderRef(spec.Config)
 		}
 		if moduleRef == "" {
-			return nil, nil, fmt.Errorf("infra module %q (%s): missing required 'provider' field", spec.Name, spec.Type)
+			return nil, nil, fmt.Errorf("infra module %q (%s): missing required 'iac_provider' or 'provider' field", spec.Name, spec.Type)
 		}
 		if _, exists := groups[moduleRef]; !exists {
 			def, ok := defs[moduleRef]
 			if !ok {
 				if _, isDisabled := disabled[moduleRef]; isDisabled {
-					return nil, nil, fmt.Errorf("infra module %q references provider %q which is disabled for environment %q", spec.Name, moduleRef, envName)
+					return nil, nil, fmt.Errorf("infra module %q references iac.provider %q which is disabled for environment %q", spec.Name, moduleRef, envName)
 				}
-				return nil, nil, fmt.Errorf("infra module %q references provider %q which is not declared as an iac.provider module", spec.Name, moduleRef)
+				return nil, nil, fmt.Errorf("infra module %q references iac.provider module %q (resolved from iac_provider/provider) which is not declared in modules", spec.Name, moduleRef)
 			}
 			if def.provType == "" {
 				return nil, nil, fmt.Errorf("provider module %q has no 'provider' type configured", moduleRef)

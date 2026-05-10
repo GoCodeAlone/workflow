@@ -66,7 +66,7 @@ func destroyInfraModules(ctx context.Context, cfgFile, envName string) error { /
 		moduleRef := resourceStateProviderRef(*st)
 		if spec, ok := specByName[st.Name]; ok {
 			if moduleRef == "" {
-				moduleRef, _ = spec.Config["provider"].(string)
+				moduleRef = resolveIaCProviderRef(spec.Config)
 			}
 		}
 

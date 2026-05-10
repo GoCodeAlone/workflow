@@ -1030,10 +1030,28 @@ func findInfraSpecByName(cfgFile, envName, name string) (interfaces.ResourceSpec
 	return interfaces.ResourceSpec{}, fmt.Errorf("infra resource %q not found in %s", name, cfgFile)
 }
 
+// resolveIaCProviderRef returns the iac.provider module name to dispatch to
+// for a resource. Reads "iac_provider" first (canonical, disambiguates
+// implementation from IaC routing), falls back to "provider" for backward
+// compatibility. Resources whose plugin schema uses "provider" as the
+// implementation identifier (e.g. infra.eventbus's provider="nats" |
+// "kafka") should declare iac_provider explicitly. Resources where
+// "provider" is itself the iac.provider module name (e.g. infra.database's
+// provider="do-provider") continue to work via the fallback.
+func resolveIaCProviderRef(cfg map[string]any) string {
+	if v, ok := cfg["iac_provider"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := cfg["provider"].(string); ok {
+		return v
+	}
+	return ""
+}
+
 func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpec) (string, map[string]any, error) {
-	moduleRef, _ := spec.Config["provider"].(string)
+	moduleRef := resolveIaCProviderRef(spec.Config)
 	if moduleRef == "" {
-		return "", nil, fmt.Errorf("infra module %q (%s): missing required 'provider' field", spec.Name, spec.Type)
+		return "", nil, fmt.Errorf("infra module %q (%s): missing required 'iac_provider' or 'provider' field", spec.Name, spec.Type)
 	}
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
@@ -1060,7 +1078,7 @@ func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpe
 		}
 		return providerType, modCfg, nil
 	}
-	return "", nil, fmt.Errorf("infra module %q references provider %q which is not declared as an iac.provider module", spec.Name, moduleRef)
+	return "", nil, fmt.Errorf("infra module %q references iac.provider module %q (resolved from iac_provider/provider) which is not declared in modules", spec.Name, moduleRef)
 }
 
 func isNoopStateStore(store infraStateStore) bool {
