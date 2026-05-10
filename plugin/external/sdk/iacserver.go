@@ -1,11 +1,14 @@
 package sdk
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
+	goplugin "github.com/GoCodeAlone/go-plugin"
 	"google.golang.org/grpc"
 
+	ext "github.com/GoCodeAlone/workflow/plugin/external"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
@@ -93,4 +96,136 @@ func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
 		pb.RegisterResourceDriverServer(s, v)
 	}
 	return nil
+}
+
+// IaCServeOptions configures the IaC plugin gRPC server entrypoint.
+//
+// Plugin authors typically zero-value this; ServeIaCPlugin then uses the
+// canonical host<->plugin handshake (ext.Handshake). The struct exists as
+// a forward-extension point so future metadata fields (PluginInfo) can be
+// added without breaking the API.
+type IaCServeOptions struct {
+	// PluginInfo overrides the default handshake/metadata. When nil,
+	// ServeIaCPlugin uses ext.Handshake (the canonical wfctl<->plugin
+	// handshake — required for compatibility with the workflow host).
+	PluginInfo *PluginInfo
+}
+
+// PluginInfo carries the metadata that go-plugin needs to serve an IaC
+// plugin. Currently only HandshakeConfig is meaningful; reserved as the
+// extension point for future Name/Version metadata fields without
+// breaking the IaCServeOptions API.
+type PluginInfo struct {
+	// HandshakeConfig is the go-plugin handshake. Plugin authors should
+	// leave this zero-valued to inherit ext.Handshake — the host (wfctl)
+	// and plugin MUST agree on the cookie + protocol version, so override
+	// only when implementing a non-workflow host.
+	HandshakeConfig goplugin.HandshakeConfig
+}
+
+// iacGRPCPlugin implements goplugin's Plugin interface for the typed IaC
+// contract. Service registration happens INSIDE GRPCServer per go-plugin
+// v1.7.0 architecture — the framework owns the *grpc.Server lifecycle, so
+// plugin authors cannot pre-create the server and forget to register a
+// service on it.
+//
+// Note: the GoCodeAlone fork of go-plugin (v1.7.0) is gRPC-only and does
+// not expose hashicorp/go-plugin's NetRPCUnsupportedPlugin embed or a
+// GRPCPlugin convenience alias; the canonical Plugin interface (just
+// GRPCServer + GRPCClient) is sufficient and matches the existing
+// servePlugin pattern in serve.go.
+type iacGRPCPlugin struct {
+	provider any
+}
+
+// GRPCServer is invoked by go-plugin once it has constructed the
+// *grpc.Server. Delegates to RegisterAllIaCProviderServices so every
+// typed IaC service the provider satisfies gets registered in one call.
+//
+// Returning an error here causes go-plugin to abort plugin startup —
+// surfacing missing required methods as a plugin-startup error rather
+// than a generic "unimplemented" status at the first RPC dispatch.
+func (p *iacGRPCPlugin) GRPCServer(_ *goplugin.GRPCBroker, s *grpc.Server) error {
+	return RegisterAllIaCProviderServices(s, p.provider)
+}
+
+// GRPCClient is unused on the plugin side. The workflow host (wfctl)
+// builds its own typed pb.IaCProviderRequiredClient + per-optional
+// clients directly from the gRPC connection; the iacGRPCPlugin's
+// client-side adapter is therefore a no-op.
+func (p *iacGRPCPlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *grpc.ClientConn) (any, error) {
+	return nil, nil
+}
+
+// ServeIaCPlugin starts a typed IaC plugin gRPC server with auto
+// registration of every IaC service the provider satisfies. Plugin
+// authors call this once in main.go:
+//
+//	func main() {
+//	    sdk.ServeIaCPlugin(&doProvider{}, sdk.IaCServeOptions{})
+//	}
+//
+// Per cycle 3 I-1 of the strict-contracts force-cutover design, the
+// service registration happens INSIDE go-plugin's GRPCServer callback
+// (see iacGRPCPlugin.GRPCServer), so plugin authors cannot pre-create
+// a *grpc.Server and forget to register a typed service on it.
+//
+// Blocks until the host process terminates the connection. Panics on
+// invalid IaCServeOptions (e.g., partial handshake override missing
+// MagicCookieKey or MagicCookieValue) — see resolveServeHandshake.
+// Plugin authors fix the misconfig at the call site; the panic is
+// preferable to a silent fallback that produces a broken handshake at
+// dial time.
+func ServeIaCPlugin(provider any, opts IaCServeOptions) {
+	hs, err := resolveServeHandshake(opts)
+	if err != nil {
+		panic(fmt.Errorf("ServeIaCPlugin: %w", err))
+	}
+	goplugin.Serve(&goplugin.ServeConfig{
+		HandshakeConfig: hs,
+		Plugins: goplugin.PluginSet{
+			"iac": &iacGRPCPlugin{provider: provider},
+		},
+		GRPCServer: goplugin.DefaultGRPCServer,
+	})
+}
+
+// resolveServeHandshake returns the goplugin handshake to use for an IaC
+// plugin. Defaults to ext.Handshake (the canonical wfctl<->plugin
+// handshake) when the caller did not supply a PluginInfo OR supplied
+// the zero-valued HandshakeConfig. Returns an error when the caller
+// supplied a PARTIAL override (any non-zero field but missing
+// MagicCookieKey or MagicCookieValue) — partial overrides produce a
+// broken handshake at dial time, so the misconfig is rejected early
+// rather than silently coerced to defaults.
+//
+// Per cycle 4 PR 600 IMPORTANT review (Copilot finding): the previous
+// guard only checked MagicCookieKey != "", which silently accepted a
+// caller setting ProtocolVersion or MagicCookieValue alone — fields
+// that look intentional but cannot produce a valid handshake.
+//
+// Extracted from ServeIaCPlugin so the resolution rule is unit-testable
+// without invoking goplugin.Serve's blocking loop.
+func resolveServeHandshake(opts IaCServeOptions) (goplugin.HandshakeConfig, error) {
+	if opts.PluginInfo == nil {
+		return ext.Handshake, nil
+	}
+	hs := opts.PluginInfo.HandshakeConfig
+	if hs == (goplugin.HandshakeConfig{}) {
+		// Zero value: caller supplied PluginInfo{} but no handshake
+		// override. Treat identically to opts.PluginInfo == nil.
+		return ext.Handshake, nil
+	}
+	if hs.MagicCookieKey == "" || hs.MagicCookieValue == "" {
+		return goplugin.HandshakeConfig{}, fmt.Errorf(
+			"IaCServeOptions.PluginInfo.HandshakeConfig is a partial "+
+				"override (MagicCookieKey=%q MagicCookieValue=%q "+
+				"ProtocolVersion=%d): both MagicCookieKey AND "+
+				"MagicCookieValue MUST be set when overriding the default "+
+				"ext.Handshake — leave the whole struct zero-valued to "+
+				"inherit the canonical wfctl<->plugin handshake",
+			hs.MagicCookieKey, hs.MagicCookieValue, hs.ProtocolVersion,
+		)
+	}
+	return hs, nil
 }
