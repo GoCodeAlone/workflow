@@ -7,11 +7,15 @@ import (
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
-// iacRequiredServiceName is the fully-qualified name of the typed
+// iacServiceRequired is the fully-qualified name of the typed
 // IaCProviderRequired gRPC service emitted by iac.proto. The pre-flight
 // gate looks for exactly this string in the plugin's GetContractRegistry
 // response.
-const iacRequiredServiceName = "workflow.plugin.external.iac.IaCProviderRequired"
+//
+// Naming convention matches the iac_typed_adapter.go const family
+// (PR #605/#609 — iacServiceEnumerator, iacServiceDriftDetector, …)
+// so the wfctl-side typed-client code shares a single naming style.
+const iacServiceRequired = "workflow.plugin.external.iac.IaCProviderRequired"
 
 // errLegacyIaCPlugin is the typed sentinel returned when a pinned IaC
 // plugin does not advertise IaCProviderRequired in its
@@ -75,7 +79,7 @@ func registryAdvertisesIaCRequired(registry *pb.ContractRegistry) bool {
 		if c == nil {
 			continue
 		}
-		if c.Kind == pb.ContractKind_CONTRACT_KIND_SERVICE && c.ServiceName == iacRequiredServiceName {
+		if c.Kind == pb.ContractKind_CONTRACT_KIND_SERVICE && c.ServiceName == iacServiceRequired {
 			return true
 		}
 	}

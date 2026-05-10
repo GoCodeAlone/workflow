@@ -20,7 +20,7 @@ func TestAssertIaCPluginAdvertisesRequiredService_TypedRegistryAccepts(t *testin
 		Contracts: []*pb.ContractDescriptor{
 			{
 				Kind:        pb.ContractKind_CONTRACT_KIND_SERVICE,
-				ServiceName: iacRequiredServiceName,
+				ServiceName: iacServiceRequired,
 				Mode:        pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
 			},
 		},
@@ -103,7 +103,7 @@ func TestAssertIaCPluginAdvertisesRequiredService_WrongKindRejects(t *testing.T)
 		Contracts: []*pb.ContractDescriptor{
 			{
 				Kind:        pb.ContractKind_CONTRACT_KIND_MODULE,
-				ServiceName: iacRequiredServiceName, // wrong kind
+				ServiceName: iacServiceRequired, // wrong kind
 				Mode:        pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
 			},
 		},
