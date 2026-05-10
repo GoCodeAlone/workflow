@@ -200,9 +200,15 @@ message DiffResult {
   repeated FieldChange changes = 3;
 }
 
-// DriftClass mirrors interfaces.DriftClass. Wire-stable string-equivalent
-// enum: zero value is UNKNOWN (matches Go's "" zero value), with explicit
-// IN_SYNC / GHOST / CONFIG variants.
+// DriftClass mirrors interfaces.DriftClass.
+//
+// Wire-stable enum (int32). Translation table to interfaces.DriftClass (string):
+//   DRIFT_CLASS_UNKNOWN ↔ ""        (DriftClassUnknown zero value)
+//   DRIFT_CLASS_IN_SYNC ↔ "in-sync"
+//   DRIFT_CLASS_GHOST   ↔ "ghost"
+//   DRIFT_CLASS_CONFIG  ↔ "config"
+// Plugin/host MUST translate at the marshal boundary; missed translation
+// silently coerces all values to UNKNOWN.
 enum DriftClass {
   DRIFT_CLASS_UNKNOWN = 0;
   DRIFT_CLASS_IN_SYNC = 1;
