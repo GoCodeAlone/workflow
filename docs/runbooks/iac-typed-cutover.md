@@ -1,7 +1,8 @@
 # IaC Typed-Contract Cutover Runbook
 
-This runbook walks operators through upgrading wfctl + IaC plugins across
-the strict-contracts force-cutover (workflow `v1.0.0`, DO plugin `v1.0.0`).
+This runbook walks operators through upgrading wfctl + IaC plugins
+across the strict-contracts force-cutover (workflow `v1.0.0`, DO plugin
+`v1.0.0`).
 
 The cutover replaces the legacy `InvokeService` / `*structpb.Struct`
 dispatch path for `IaCProvider` and `ResourceDriver` interfaces with
@@ -12,35 +13,55 @@ typed services + `pb.ResourceDriverServer`). See ADRs
 and [0026](../../decisions/0026-iac-direct-grpc-client-no-wrapper.md)
 for the design decisions.
 
+This is a **hard cutover**. There is no plugin-side compat shim and no
+build-tag dual-path (per ADR 0024 and `feedback_force_strict_contracts_no_compat`).
+The wfctl rc1 window is **wfctl-side additive only**: rc1 ships a
+typed-client adapter alongside the existing `remoteIaCProvider` so an
+operator can install rc1 against their existing `v0.14.x` plugin set
+and exercise the new path before forcing a plugin cutover. The plugin
+side is typed-only at `v1.0.0`.
+
 ## Compatibility matrix
 
-| wfctl version    | DO plugin version    | Outcome                                                    |
-|------------------|----------------------|------------------------------------------------------------|
-| v0.27.x          | v0.14.x              | Legacy InvokeService dispatch (pre-cutover, supported)     |
-| v1.0.0-rc1       | v0.14.x              | Pre-flight gate fails — wfctl refuses to start the deploy  |
-| v1.0.0-rc1       | v1.0.0               | Typed gRPC, advisory checks, cutover-ready                 |
-| **v1.0.0** final | **v1.0.0**           | Typed gRPC, strict; legacy paths deleted from wfctl        |
-| v1.0.0           | v0.14.x              | wfctl refuses with actionable error pointing here          |
+| wfctl version    | DO plugin version | Outcome                                                                   |
+|------------------|-------------------|---------------------------------------------------------------------------|
+| v0.27.x          | v0.14.x           | Legacy InvokeService dispatch (pre-cutover, supported)                    |
+| **v1.0.0-rc1**   | v0.14.x           | wfctl-side legacy path (`remoteIaCProvider`) — supported transition state |
+| v1.0.0-rc1       | v1.0.0            | Typed gRPC, advisory checks, cutover-ready                                |
+| **v0.27.x**      | **v1.0.0**        | **BROKEN by design** — legacy wfctl cannot dispatch typed-only plugin     |
+| v1.0.0 final     | v1.0.0            | Typed gRPC, strict; legacy paths deleted from wfctl                       |
+| v1.0.0 final     | v0.14.x           | wfctl refuses with actionable error pointing here                         |
 
-Operators MUST upgrade plugins before wfctl. The pre-flight gate
-(`cmd/wfctl/iac_loader_gate.go`) reads `GetContractRegistry` from each
-loaded IaC plugin and refuses to proceed when a plugin doesn't
-advertise `workflow.plugin.external.iac.IaCProviderRequired`. The
-error message names the offending plugin + version and points back to
-this runbook.
+The pre-flight gate (`cmd/wfctl/iac_loader_gate.go`) reads
+`GetContractRegistry` from each loaded IaC plugin and refuses to
+proceed when a plugin doesn't advertise
+`workflow.plugin.external.iac.IaCProviderRequired`. The error message
+names the offending plugin + version and points back to this runbook.
 
 ## Upgrade order
 
-The order is **plugins first, then wfctl** — never the other way
-around. Upgrading wfctl while plugins are stale leaves the operator
-with a wfctl that refuses to load the existing plugins. Upgrading
-plugins while wfctl is stale is harmless: legacy wfctl can still
-dispatch through the typed plugins because v1.0.0 plugins also expose
-the legacy InvokeService surface during the rc1 window for backward
-compatibility (the legacy surface is removed when wfctl ships
-v1.0.0 final).
+The order is **wfctl rc1 first → plugin v1.0.0 second → wfctl v1.0.0
+final third**. Operators MUST run wfctl rc1+ to consume DO `v1.0.0`
+because the legacy wfctl binary cannot dispatch through a typed-only
+plugin.
 
-### Step 1 — pin DO plugin v1.0.0 in `.wfctl-lock.yaml`
+### Step 1 — install wfctl `v1.0.0-rc1`
+
+The rc1 binary keeps the wfctl-SIDE legacy `remoteIaCProvider` path
+alongside the new typed-client adapter. Existing `v0.14.x` plugins
+continue to work unchanged; the new typed adapter is exercised only
+when a typed-aware plugin is loaded.
+
+```sh
+brew install wfctl@1.0.0-rc1   # or your preferred installer
+wfctl --version                # verify
+wfctl infra plan -c infra.yaml -e prod   # smoke-test against current plugin set
+```
+
+A successful `infra plan` against the existing `v0.14.x` plugin set
+confirms rc1 doesn't regress the legacy path.
+
+### Step 2 — pin DO plugin `v1.0.0` in `.wfctl-lock.yaml`
 
 ```yaml
 # .wfctl-lock.yaml (edit by hand, then re-resolve)
@@ -58,9 +79,12 @@ wfctl plugin install
 ```
 
 This downloads the v1.0.0 plugin binary, verifies the checksum, and
-writes the resolved digest back into `.wfctl-lock.yaml`.
+writes the resolved digest back into `.wfctl-lock.yaml`. The DO `v1.0.0`
+plugin deletes its legacy `internal/module_instance.go` switch
+dispatcher entirely (per Task 9 of the cutover plan); only the typed
+gRPC services remain.
 
-### Step 2 — verify the typed contract surface is advertised
+### Step 3 — verify the typed contract surface is advertised
 
 ```sh
 wfctl plugin contracts --plugin digitalocean
@@ -73,24 +97,31 @@ workflow.plugin.external.iac.IaCProviderRequired
 ```
 
 If `IaCProviderRequired` is missing, the plugin you installed is not a
-v1.0.0 build (likely a stale cache). Clear `~/.wfctl/cache/plugins`
+`v1.0.0` build (likely a stale cache). Clear `~/.wfctl/cache/plugins`
 and re-run `wfctl plugin install`.
 
-### Step 3 — upgrade wfctl
-
-Once every IaC plugin in the lockfile advertises
-`IaCProviderRequired`, upgrade wfctl itself. The pre-flight gate runs
-on every IaC-touching command (`wfctl infra plan`, `wfctl infra
-apply`, `wfctl deploy`) and surfaces an error at the boundary if any
-pinned plugin is still legacy.
+### Step 4 — exercise the typed path under wfctl rc1
 
 ```sh
-brew upgrade wfctl   # or your preferred installer
+wfctl infra plan -c infra.yaml -e prod
+wfctl infra apply -c infra.yaml -e prod --dry-run
+```
+
+A successful plan + dry-run apply confirms the typed adapter dispatches
+the DO `v1.0.0` plugin correctly. If the pre-flight gate fires here,
+the plugin install in Step 2 didn't pick up `v1.0.0` — re-check Step 3.
+
+### Step 5 — upgrade wfctl to `v1.0.0` final (deletes legacy path)
+
+```sh
+brew upgrade wfctl   # or your preferred installer; targets v1.0.0
 wfctl infra plan -c infra.yaml -e prod
 ```
 
-A successful `infra plan` against your existing config confirms the
-cutover landed.
+Workflow `v1.0.0` final removes the wfctl-side legacy `remoteIaCProvider`
+(Task 20 of the cutover plan). The typed adapter is the only IaC
+dispatch path. A successful `infra plan` against the DO `v1.0.0`
+plugin confirms the cutover landed.
 
 ## `.wfctl-lock.yaml` migration
 
@@ -100,21 +131,37 @@ state-file schemas are invariant. See PR #608's pre-flight test
 (`cmd/wfctl/state_compat_test.go`) for the schema-stability guard.
 
 Existing lockfiles continue to work. The only required edit is the
-plugin version pin (Step 1 above).
+plugin version pin (Step 2 above).
 
 ## Troubleshooting
 
 ### "plugin X uses legacy InvokeService dispatch removed in workflow v1.0.0"
 
 The pre-flight gate fired. The plugin pinned in `.wfctl-lock.yaml` is
-older than the v1.0.0 release. Re-run Step 1.
+older than the `v1.0.0` release. Re-run Step 2.
 
-If the lockfile already pins v1.0.0+ but the error persists, the
+If the lockfile already pins `v1.0.0+` but the error persists, the
 plugin cache may have a stale binary:
 
 ```sh
 rm -rf ~/.wfctl/cache/plugins/digitalocean*
 wfctl plugin install
+```
+
+### Operator skipped Step 1 (wfctl rc1) and went directly to plugin v1.0.0
+
+The `v0.27.x × v1.0.0` matrix row is **broken by design**. The legacy
+wfctl binary's `remoteIaCProvider` proxy issues `InvokeService` RPCs
+against method names like `"IaCProvider.EnumerateAll"`; the typed-only
+DO `v1.0.0` plugin returns `codes.Unimplemented` for every one of
+those. Symptom: every IaC command fails with "method not found" or
+"unimplemented" errors.
+
+Recover by:
+
+```sh
+brew install wfctl@1.0.0-rc1   # back to a wfctl that has the typed adapter
+wfctl infra plan -c infra.yaml -e prod   # confirm the typed path works
 ```
 
 ### "no loaded provider implements EnumeratorAll" (or similar)
@@ -147,20 +194,36 @@ cannot validate that the implementation is correct. The
 
 ## Backout plan
 
-If a regression surfaces after the cutover:
+The cutover is hard: there is no plugin-side compat shim. A regression
+post-cutover requires rolling back BOTH the wfctl binary AND the DO
+plugin to pre-cutover versions. Single-side rollback (only wfctl, only
+plugin) is broken — the wfctl `v1.0.0` final binary cannot dispatch
+through a `v0.14.x` plugin (legacy `remoteIaCProvider` was deleted in
+Task 20), and the legacy `v0.27.x` wfctl cannot dispatch through a DO
+`v1.0.0` plugin (typed-only).
 
-1. Re-pin DO plugin to the latest v0.14.x in `.wfctl-lock.yaml`.
-2. Re-pin wfctl to v0.27.x via your distribution's install path
+Steps:
+
+1. Re-pin DO plugin to the latest `v0.14.x` in `.wfctl-lock.yaml`.
+2. Re-install wfctl `v0.27.x` via your distribution's install path
    (`brew install wfctl@0.27` or equivalent).
 3. Re-run `wfctl plugin install` to refresh the lockfile.
-4. File a bug against the workflow repo with the failing
-   `wfctl infra plan` output.
+4. Verify rollback:
+   ```sh
+   wfctl --version            # must show v0.27.x
+   wfctl infra plan -c infra.yaml -e prod
+   ```
+5. File a bug against the workflow repo with the failing `wfctl infra
+   plan` output from the cutover state.
 
-The backout is **fully supported** through the rc1 window (workflow
-v1.0.0-rc1 + DO plugin v1.0.0). After workflow v1.0.0 final ships and
-the legacy InvokeService dispatch is deleted from wfctl, the backout
-requires reverting to a v0.27.x wfctl binary — the v1.0.0 binary
-cannot dispatch through legacy plugins.
+If rolled-back state holds for >24h, file the bug as `priority:high`
+(operators are stuck on the pre-cutover line).
+
+The rc1 window provides a partial-rollback option: while wfctl is on
+`v1.0.0-rc1`, falling back to `v0.14.x` plugin is supported (rc1
+retains the wfctl-side legacy adapter for exactly this purpose). After
+wfctl `v1.0.0` final ships, the both-sides rollback is the only
+supported recovery.
 
 ## See also
 
