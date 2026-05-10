@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"google.golang.org/grpc"
@@ -112,12 +113,19 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 // via errors.Is. Other errors pass through unchanged so the underlying
 // gRPC status code remains observable to callers that wrap typed
 // retry / classification logic around the call.
+//
+// Wraps with %w/%w (not %w/%s) so callers can recover BOTH the
+// interfaces sentinel via errors.Is AND the underlying gRPC status via
+// status.FromError walking the unwrap chain. Without the second %w the
+// status code/details get demoted to a flat string and consumers that
+// classify by code (rate-limit retry, transient backoff, etc.) lose the
+// signal.
 func translateRPCErr(err error) error {
 	if err == nil {
 		return nil
 	}
 	if status.Code(err) == codes.Unimplemented {
-		return fmt.Errorf("%w: %s", interfaces.ErrProviderMethodUnimplemented, err.Error())
+		return fmt.Errorf("%w: %w", interfaces.ErrProviderMethodUnimplemented, err)
 	}
 	return err
 }
@@ -135,9 +143,18 @@ func unimplementedOptional(serviceName string) error {
 
 // ─── Required IaCProvider methods ───────────────────────────────────────────
 
+// Name and Version below intentionally swallow RPC errors and return ""
+// — the Go interface signatures `Name() string` and `Version() string`
+// permit no error return, so any transport failure is indistinguishable
+// from an empty plugin response. We log at the standard logger so
+// operators have a trail when troubleshooting "why is my provider
+// nameless"; the contract itself can't change without a wfctlhelpers
+// signature break (out of Task 30 scope).
+
 func (a *typedIaCAdapter) Name() string {
 	resp, err := a.required.Name(context.Background(), &pb.NameRequest{})
 	if err != nil {
+		log.Printf("typed adapter: Name() RPC failed: %v", err)
 		return ""
 	}
 	return resp.GetName()
@@ -146,6 +163,7 @@ func (a *typedIaCAdapter) Name() string {
 func (a *typedIaCAdapter) Version() string {
 	resp, err := a.required.Version(context.Background(), &pb.VersionRequest{})
 	if err != nil {
+		log.Printf("typed adapter: Version() RPC failed: %v", err)
 		return ""
 	}
 	return resp.GetVersion()

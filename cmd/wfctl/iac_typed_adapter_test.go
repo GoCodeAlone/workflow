@@ -26,7 +26,9 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
@@ -171,8 +173,17 @@ func TestTypedAdapter_TranslateRPCErrSurfacesUnimplemented(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected Unimplemented from server with no Required service; got nil")
 	}
-	if !errors.Is(translateRPCErr(err), interfaces.ErrProviderMethodUnimplemented) {
+	translated := translateRPCErr(err)
+	if !errors.Is(translated, interfaces.ErrProviderMethodUnimplemented) {
 		t.Fatalf("Unimplemented status not translated; got %v", err)
+	}
+	// Per Copilot MINOR-1 on PR #605: the translation must wrap with
+	// `%w/%w` so callers can recover the original gRPC status from the
+	// unwrap chain via status.FromError. Without this, retry-classifier
+	// callsites that distinguish codes.Unimplemented vs
+	// codes.Unavailable lose the signal.
+	if st, ok := status.FromError(translated); !ok || st.Code() != codes.Unimplemented {
+		t.Fatalf("status.FromError must recover codes.Unimplemented from the unwrap chain; got ok=%v code=%v", ok, st.Code())
 	}
 }
 
