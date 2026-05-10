@@ -57,8 +57,15 @@ func rotateAndPruneContains(haystack []string, needle string) bool {
 // for runInfraRotateAndPrune to load without erroring before reaching the
 // stubbed `bootstrapSecrets` hook. The config provides a `secrets:` block
 // (so parseSecretsConfig returns non-nil) with provider=env so
-// resolveSecretsProvider builds without external dependencies. Returns the
-// fixture's full path for use as `--config` arg.
+// resolveSecretsProvider builds without external dependencies.
+//
+// Two generate entries are declared so callers can use either --name
+// "test-key" (key + name both) or --name "canonical-name" (cloud-side
+// name; key="canonical-key") — the latter exercises the name→key
+// translation in buildRotateAndPruneForceRotateSet introduced to fix
+// the staging-dispatch false-negative (run 25616807427, 2026-05-09).
+//
+// Returns the fixture's full path for use as `--config` arg.
 func writeMinimalRotationConfig(t *testing.T, tmpDir string) string {
 	t.Helper()
 	cfgPath := filepath.Join(tmpDir, "infra.yaml")
@@ -71,6 +78,10 @@ func writeMinimalRotationConfig(t *testing.T, tmpDir string) string {
       type: provider_credential
       source: digitalocean.spaces
       name: test-key
+    - key: canonical-key
+      type: provider_credential
+      source: digitalocean.spaces
+      name: canonical-name
 `
 	if err := os.WriteFile(cfgPath, []byte(body), 0600); err != nil {
 		t.Fatalf("write fixture infra.yaml: %v", err)
