@@ -25,7 +25,9 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
@@ -156,8 +158,16 @@ func TestIaC_EndToEnd_OptionalNotRegistered_ClientFailsTyped(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	enumClient := pb.NewIaCProviderEnumeratorClient(conn)
-	if _, err := enumClient.EnumerateAll(context.Background(), &pb.EnumerateAllRequest{ResourceType: "x"}); err == nil {
+	_, err = enumClient.EnumerateAll(context.Background(), &pb.EnumerateAllRequest{ResourceType: "x"})
+	if err == nil {
 		t.Fatalf("expected typed gRPC error for unregistered Enumerator service; got nil")
+	}
+	// Per cycle 4 review MINOR-1: pin the failure to codes.Unimplemented
+	// specifically so a future bufconn/transport behavior change can't
+	// silently mask the absence-of-registration signal under a different
+	// status code.
+	if got := status.Code(err); got != codes.Unimplemented {
+		t.Fatalf("expected codes.Unimplemented for unregistered service; got %v (err=%v)", got, err)
 	}
 }
 
