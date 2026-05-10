@@ -366,6 +366,20 @@ message VersionResponse {
 message CapabilitiesRequest {}
 message CapabilitiesResponse {
   repeated IaCCapabilityDeclaration capabilities = 1;
+  // canonical_keys: provider-level override of interfaces.CanonicalKeys()
+  // wfctl-side default. Empty list = use default; non-empty = filter to
+  // exactly these keys (e.g. DO plugin removes loadbalancer/vpc/k8s).
+  // Closes the SupportedCanonicalKeys regression introduced by the typed
+  // cutover (typedIaCAdapter previously couldn't ask the plugin for its
+  // canonical-keys override). See ADR-0029.
+  repeated string canonical_keys = 2;
+  // compute_plan_version: provider-level apply-time dispatch version.
+  // "" or unrecognized = "v1" (legacy provider.Apply path); "v2" routes
+  // through wfctlhelpers.ApplyPlan. Mirrors the
+  // ComputePlanVersionDeclarer optional Go interface so plugin authors
+  // can declare apply-version via gRPC instead of a separate type-assert
+  // probe. See ADR-0029.
+  string compute_plan_version = 3;
 }
 
 message PlanRequest {

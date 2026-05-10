@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
@@ -60,6 +61,13 @@ const (
 // pb.IaC* gRPC clients. Optional clients are nil when the plugin did not
 // register the corresponding service — call paths gated on those clients
 // return interfaces.ErrProviderMethodUnimplemented.
+//
+// Capability cache (cachedCaps): the plugin's CapabilitiesResponse is
+// fetched lazily on the first call to Capabilities() / SupportedCanonicalKeys()
+// / ComputePlanVersion() and reused for the adapter's lifetime. Capabilities
+// are advertised once at plugin startup and don't change during a wfctl
+// invocation; caching lets per-call accessors (notably the apply-time
+// dispatch decision) avoid an RPC round-trip per access. Per ADR-0029.
 type typedIaCAdapter struct {
 	conn *grpc.ClientConn
 
@@ -71,6 +79,12 @@ type typedIaCAdapter struct {
 	validator    pb.IaCProviderValidatorClient
 	driftCfg     pb.IaCProviderDriftConfigDetectorClient
 	resourceDriv pb.ResourceDriverClient
+
+	// cachedCaps memoizes the plugin's CapabilitiesResponse. Access via
+	// fetchCapabilities — never read this field directly.
+	cachedCaps *pb.CapabilitiesResponse
+	capsErr    error
+	capsFetch  bool // true once first fetch attempt completed (success OR error)
 }
 
 // newTypedIaCAdapter builds an adapter from a live gRPC connection plus a
@@ -277,8 +291,27 @@ func (a *typedIaCAdapter) Initialize(ctx context.Context, config map[string]any)
 	return err
 }
 
-func (a *typedIaCAdapter) Capabilities() []interfaces.IaCCapabilityDeclaration {
+// fetchCapabilities returns the plugin's CapabilitiesResponse, caching the
+// first result for the adapter's lifetime. RPC errors are also cached so
+// repeated accesses don't repeatedly fail against an unreachable plugin.
+// Capabilities are advertised at plugin startup and don't change during
+// a wfctl invocation; caching is correct + cheap.
+func (a *typedIaCAdapter) fetchCapabilities() (*pb.CapabilitiesResponse, error) {
+	if a.capsFetch {
+		return a.cachedCaps, a.capsErr
+	}
+	a.capsFetch = true
 	resp, err := a.required.Capabilities(context.Background(), &pb.CapabilitiesRequest{})
+	if err != nil {
+		a.capsErr = err
+		return nil, err
+	}
+	a.cachedCaps = resp
+	return resp, nil
+}
+
+func (a *typedIaCAdapter) Capabilities() []interfaces.IaCCapabilityDeclaration {
+	resp, err := a.fetchCapabilities()
 	if err != nil {
 		return nil
 	}
@@ -375,14 +408,40 @@ func (a *typedIaCAdapter) ResourceDriver(resourceType string) (interfaces.Resour
 	return &typedResourceDriver{client: a.resourceDriv, resourceType: resourceType}, nil
 }
 
+// SupportedCanonicalKeys returns the canonical IaC config keys this
+// plugin supports. Reads from the cached CapabilitiesResponse:
+//   - non-empty CapabilitiesResponse.canonical_keys → use those (provider
+//     declared a strict subset, e.g. DO plugin removing loadbalancer/vpc/k8s)
+//   - empty list OR Capabilities RPC failure → fall back to
+//     interfaces.CanonicalKeys() wfctl-side default
+//
+// Per ADR-0029. Closes the regression where the typed cutover lost the
+// per-provider override path that legacy remoteIaCProvider routed via
+// InvokeService("SupportedCanonicalKeys", ...).
 func (a *typedIaCAdapter) SupportedCanonicalKeys() []string {
-	// SupportedCanonicalKeys is intentionally absent from the typed proto
-	// surface — providers declare their canonical-key support through the
-	// existing ContractRegistry capability flow (Task 5) rather than a
-	// dedicated RPC. Returning the canonical-keys default keeps engine
-	// consumers unchanged; provider-level overrides will land via the
-	// capability registry follow-up.
+	resp, err := a.fetchCapabilities()
+	if err == nil && resp != nil {
+		if keys := resp.GetCanonicalKeys(); len(keys) > 0 {
+			return append([]string(nil), keys...)
+		}
+	}
 	return interfaces.CanonicalKeys()
+}
+
+// ComputePlanVersion returns the apply-time dispatch version the plugin
+// declared in CapabilitiesResponse. Empty string (or RPC failure) means
+// "v1" by ComputePlanVersionDeclarer convention — DispatchVersionFor
+// treats unknown values as v1, so unset cleanly degrades to legacy path.
+//
+// The presence of this method on *typedIaCAdapter means it satisfies
+// wfctlhelpers.ComputePlanVersionDeclarer at compile time, restoring the
+// type-assert dispatch parity with legacy remoteIaCProvider. Per ADR-0029.
+func (a *typedIaCAdapter) ComputePlanVersion() string {
+	resp, err := a.fetchCapabilities()
+	if err != nil || resp == nil {
+		return ""
+	}
+	return resp.GetComputePlanVersion()
 }
 
 func (a *typedIaCAdapter) BootstrapStateBackend(ctx context.Context, cfg map[string]any) (*interfaces.BootstrapResult, error) {
@@ -1277,4 +1336,10 @@ var (
 	_ interfaces.ProviderMigrationRepairer = (*typedIaCAdapter)(nil)
 	_ interfaces.ResourceDriver            = (*typedResourceDriver)(nil)
 	_ interfaces.Troubleshooter            = (*typedResourceDriver)(nil)
+	// ADR-0029 capability extension: typedIaCAdapter satisfies
+	// ComputePlanVersionDeclarer so wfctlhelpers.DispatchVersionFor's
+	// type-assert dispatch picks up the plugin's declared apply-version
+	// from the cached CapabilitiesResponse instead of silently falling
+	// back to "v1".
+	_ wfctlhelpers.ComputePlanVersionDeclarer = (*typedIaCAdapter)(nil)
 )
