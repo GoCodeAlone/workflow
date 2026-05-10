@@ -256,6 +256,29 @@ jobs:
         name: admin-ui
         path: dist
 
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26'
+        cache: true
+
+    - name: Generate grpc-versions.txt
+      # Cross-repo dep-sync foundation per
+      # docs/plans/2026-05-10-strict-contracts-force-cutover.md Task 2.
+      # Downstream plugins (e.g. workflow-plugin-digitalocean) gate their
+      # protoc / proto-gen toolchain pins against this artifact so they
+      # link against gRPC/protobuf versions ABI-compatible with this
+      # workflow release.
+      run: |
+        set -euo pipefail
+        {
+          echo "grpc=$(go list -m -json google.golang.org/grpc | jq -r .Version)"
+          echo "protobuf=$(go list -m -json google.golang.org/protobuf | jq -r .Version)"
+          echo "protoc-gen-go=$(go list -m -json google.golang.org/protobuf | jq -r .Version)"
+          echo "protoc-gen-go-grpc=$(go list -m -json google.golang.org/grpc/cmd/protoc-gen-go-grpc | jq -r .Version)"
+        } > dist/grpc-versions.txt
+        cat dist/grpc-versions.txt
+
     - name: Create checksums
       run: |
         cd dist
