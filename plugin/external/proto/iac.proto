@@ -33,7 +33,6 @@ service IaCProviderRequired {
   rpc Plan(PlanRequest) returns (PlanResponse);
   rpc Apply(ApplyRequest) returns (ApplyResponse);
   rpc Destroy(DestroyRequest) returns (DestroyResponse);
-  rpc Status(StatusRequest) returns (StatusResponse);
   rpc Import(ImportRequest) returns (ImportResponse);
   rpc ResolveSizing(ResolveSizingRequest) returns (ResolveSizingResponse);
   rpc BootstrapStateBackend(BootstrapStateBackendRequest) returns (BootstrapStateBackendResponse);
