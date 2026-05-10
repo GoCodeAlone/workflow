@@ -29,13 +29,23 @@ import (
 // nil) or states with no AppliedConfigSource ("apply") provenance (also
 // returns nil). The dispatcher therefore falls back to the required-side
 // DetectDrift path which the IaCProviderDriftDetector service backs.
+//
+// driftResults is pre-marshalled to the pb wire shape at fixture-build
+// time (driftsToPB). Per code-review round 5 finding #3: a fixture that
+// supplies an un-marshallable Expected/Actual map fails fast here via
+// t.Fatalf rather than silently emitting an empty ExpectedJson at RPC
+// time.
 func newRefreshDriftFixture(t *testing.T, driftResults []interfaces.DriftResult, driftErr error) interfaces.IaCProvider {
 	t.Helper()
+	pbDrifts, err := driftsToPB(driftResults)
+	if err != nil {
+		t.Fatalf("newRefreshDriftFixture: pre-marshal driftResults: %v", err)
+	}
 	return fixtureTypedAdapter{
 		Required: &fixtureRequiredServer{name: "fake-refresh", version: "0.0.0"},
 		DriftDetector: &recordingDriftDetectorServer{
-			driftResults: driftResults,
-			driftErr:     driftErr,
+			pbDrifts: pbDrifts,
+			driftErr: driftErr,
 		},
 	}.build(t)
 }

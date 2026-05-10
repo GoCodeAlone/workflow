@@ -101,9 +101,13 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 		}
 
 		// Per Task 17 of the strict-contracts force-cutover (ADR-0028):
-		// pure typed-pb dispatch — no interfaces.X fallback. Hard-fail
-		// when provider isn't a typed adapter so test-fixture leaks
-		// don't silently mask production-shape regressions.
+		// pure typed-pb dispatch — no interfaces.X fallback. Soft-skip
+		// per ADR-0028 §Per-site dispatch UX: status-drift iterates per
+		// provider, so halting the whole status command on the first
+		// non-typed provider would lose visibility into the others'
+		// drift. Warn + return-no-drift is the iteration-friendly
+		// degradation; the warning log is the auditable signal of the
+		// fixture-leak / loader-gate gap.
 		adapter, ok := provider.(*typedIaCAdapter)
 		if !ok {
 			fmt.Printf("WARNING: provider %q (%T) is not a typed IaC adapter — re-load via discoverAndLoadIaCProvider\n", moduleRef, provider)

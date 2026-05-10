@@ -9,7 +9,9 @@ import (
 	"io"
 	iofs "io/fs"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -69,7 +71,23 @@ func runInfraAlign(args []string) error {
 		return fmt.Errorf("no config file specified and no infra.yaml found")
 	}
 
-	findings, err := runInfraAlignChecks(context.Background(), opts)
+	// Per code-review round 5 IMPORTANT-2 follow-up: bind a
+	// signal.NotifyContext so operator Ctrl-C / SIGTERM cancels
+	// in-flight typed-RPC calls (R-A10 ValidatePlan, plus any
+	// downstream typed dispatch that honors ctx). Without this,
+	// the ctx threaded through runInfraAlignChecks is a bare
+	// context.Background() that no signal can interrupt — defeating
+	// IMPORTANT-2's intent (cancellation propagation, not just
+	// the function-signature shape). Other wfctl runInfra*
+	// entrypoints (status, drift, apply, etc.) currently use
+	// context.Background() directly and do not honor signals; the
+	// signal-aware pattern landing here is the operator-tooling
+	// shape we want, and a follow-up sweep can wire it into the
+	// other entrypoints once this PR lands.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	findings, err := runInfraAlignChecks(ctx, opts)
 	if err != nil {
 		return err
 	}

@@ -41,6 +41,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -181,10 +182,10 @@ type recordingEnumeratorServer struct {
 	mu sync.Mutex
 
 	// Canned responses (write once before run, read after).
-	tagRefs           []interfaces.ResourceRef
-	allOutputs        []*pb.ResourceOutput
-	enumerateTagErr   error
-	enumerateAllErr   error
+	tagRefs         []interfaces.ResourceRef
+	allOutputs      []*pb.ResourceOutput
+	enumerateTagErr error
+	enumerateAllErr error
 
 	// Recorded inputs (read after run, optional assertion).
 	enumerateAllType string
@@ -254,13 +255,20 @@ func (s *recordingResourceDriverServer) callCount() int {
 // recordingDriftDetectorServer returns canned DetectDrift responses. Used by
 // infra apply-refresh fixtures that previously injected a fake
 // interfaces.IaCProvider whose DetectDrift returned canned []DriftResult.
+//
+// pbDrifts stores the pre-marshalled proto-wire shape so the gRPC handler
+// emits the canned response without any encode-time failure mode at RPC
+// time. Construction-time marshalling (driftsToPB → t.Fatalf at fixture
+// build) means a fixture author that supplies un-marshallable
+// Expected/Actual maps sees the failure deterministically at test setup
+// rather than via a silently-empty ExpectedJson on the wire.
 type recordingDriftDetectorServer struct {
 	pb.UnimplementedIaCProviderDriftDetectorServer
 
 	mu sync.Mutex
 
-	driftResults []interfaces.DriftResult
-	driftErr     error
+	pbDrifts []*pb.DriftResult
+	driftErr error
 }
 
 func (s *recordingDriftDetectorServer) DetectDrift(_ context.Context, _ *pb.DetectDriftRequest) (*pb.DetectDriftResponse, error) {
@@ -269,22 +277,28 @@ func (s *recordingDriftDetectorServer) DetectDrift(_ context.Context, _ *pb.Dete
 	if s.driftErr != nil {
 		return nil, s.driftErr
 	}
-	return &pb.DetectDriftResponse{Drifts: driftsToPBOrEmpty(s.driftResults)}, nil
+	return &pb.DetectDriftResponse{Drifts: append([]*pb.DriftResult(nil), s.pbDrifts...)}, nil
 }
 
-// driftsToPBOrEmpty converts a slice of engine-side DriftResults to the
-// proto wire shape, mirroring the inverse driftsFromPB helper in
-// iac_typed_adapter.go. Extracted here so test fixtures can declare
-// engine-side drift results and have the canned server emit them on the
-// wire identically to how a real plugin would.
-func driftsToPBOrEmpty(drifts []interfaces.DriftResult) []*pb.DriftResult {
+// driftsToPB converts a slice of engine-side DriftResults to the proto wire
+// shape, mirroring the inverse driftsFromPB helper in iac_typed_adapter.go.
+// Returns an error if any DriftResult's Expected or Actual map fails to
+// marshal to JSON so callers (fixture builders) can fail-fast at test setup
+// rather than emitting a silently-truncated response on the wire.
+func driftsToPB(drifts []interfaces.DriftResult) ([]*pb.DriftResult, error) {
 	if len(drifts) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]*pb.DriftResult, 0, len(drifts))
-	for _, d := range drifts {
-		expectedJSON, _ := marshalJSONMap(d.Expected) // marshalJSONMap nil-safe
-		actualJSON, _ := marshalJSONMap(d.Actual)
+	for i, d := range drifts {
+		expectedJSON, err := marshalJSONMap(d.Expected)
+		if err != nil {
+			return nil, fmt.Errorf("drifts[%d].Expected (resource %q): %w", i, d.Name, err)
+		}
+		actualJSON, err := marshalJSONMap(d.Actual)
+		if err != nil {
+			return nil, fmt.Errorf("drifts[%d].Actual (resource %q): %w", i, d.Name, err)
+		}
 		out = append(out, &pb.DriftResult{
 			Name:         d.Name,
 			Type:         d.Type,
@@ -295,5 +309,5 @@ func driftsToPBOrEmpty(drifts []interfaces.DriftResult) []*pb.DriftResult {
 			Fields:       append([]string(nil), d.Fields...),
 		})
 	}
-	return out
+	return out, nil
 }
