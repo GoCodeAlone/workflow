@@ -10,6 +10,15 @@ on:
       - 'iac/**'
       - 'platform/**'
       - 'plugin/sdk/**'
+      # Strict-contracts cutover Task 6 — typed IaC contract + adapters live
+      # under plugin/external/{proto,sdk}; downstream IaC dispatch + remote-
+      # plugin orchestration code lives elsewhere under plugin/external/.
+      # Both surfaces affect the iac-typed-e2e job (cross-plugin gRPC wire
+      # behavior + handshake/loader changes); use the broad gate on
+      # plugin/external/** so any structural change to the external-plugin
+      # boundary triggers the cross-plugin smoke. CI cost is bounded —
+      # changes outside this dir already skip via the rest of the filter.
+      - 'plugin/external/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/cross-plugin-build-test.yml'
@@ -61,3 +70,31 @@ jobs:
           go mod tidy
           go build ./...
           # NOTE: not `go test` — those plugins have their own CI; we just verify compile-compat
+
+  # Strict-contracts force-cutover Task 6: typed-IaC E2E integration test.
+  #
+  # The cross-plugin-build job above only verifies `go build` against AWS/GCP/
+  # Azure plugins. For the typed IaC contract introduced by the strict-
+  # contracts cutover (PR 2 of the plan), `go build` is necessary but not
+  # sufficient — wire incompat between workflow and plugin grpc-go versions
+  # would slip through (per cycle 1 I-2 + cycle 2 I-1-NEW).
+  #
+  # This job runs the workflow-side in-process E2E test built with
+  # -tags=integration. The same test exercises the typed gRPC services
+  # registered via sdk.RegisterAllIaCProviderServices through a real bufconn
+  # gRPC channel, asserting the typed roundtrip preserves shape (including
+  # the map<string,bool> sensitive field that the legacy structpb path
+  # silently dropped).
+  #
+  # The subprocess wire-test variant against the real DO plugin v1.0.0 binary
+  # is added once that plugin ships — see plan §PR 3 (Task 7+).
+  iac-typed-e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - name: Typed-IaC E2E test (in-process gRPC roundtrip)
+        run: GOWORK=off go test -tags=integration ./plugin/external/sdk/... -run TestIaC_EndToEnd -count=1 -v
