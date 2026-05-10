@@ -25,9 +25,9 @@ import (
 // maintenance surface into a compile-time-discoverable test failure
 // rather than a silent test-passing regression.
 func TestIaCServiceChecks_CoversEveryProtoService(t *testing.T) {
-	fd := pb.File_plugin_external_proto_iac_proto
+	fd := pb.File_iac_proto
 	if fd == nil {
-		t.Fatalf("pb.File_plugin_external_proto_iac_proto is nil — proto bindings not loaded")
+		t.Fatalf("pb.File_iac_proto is nil — proto bindings not loaded")
 	}
 	services := fd.Services()
 	if services.Len() == 0 {
