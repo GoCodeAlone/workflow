@@ -156,6 +156,98 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	return fmt.Errorf("rotate-and-prune: no loaded provider implements EnumeratorAll")
 }
 
+// buildRotateAndPruneForceRotateSet translates the cloud-side resource name
+// passed via `wfctl infra rotate-and-prune --name <NAME>` into the canonical
+// secrets.generate[].Key values that bootstrapSecrets keys its forceRotate
+// map by.
+//
+// Per ADR 0023 + docs/runbooks/spaces-key-prune.md, `--name` is the
+// cloud-side resource Name (e.g. "coredump-deploy-key"), matching the
+// `secrets.generate[].name` field. bootstrapSecrets keys forceRotate by
+// `gen.Key` (e.g. "SPACES"), so the CLI must translate or the force-rotate
+// path is silently skipped — the false-negative that surfaced as staging
+// run 25616807427 ("rotate-and-prune: expected 1 rotation result, got 0"
+// AFTER side effects committed).
+//
+// Match precedence:
+//  1. secrets.generate[].name == name → take that gen's Key
+//  2. secrets.generate[].key == name → fallback for configs that omit Name
+//
+// Returns an error when no entry matches (typo guard, mirrors the
+// buildForceRotateSet validation in infra_bootstrap.go) so the operator
+// gets a fast-fail before bootstrap touches the store.
+//
+// Strict-contract enforcement (per Copilot review on PR 594):
+//   - Exactly ONE matching gen entry. Zero or two-plus matches reject.
+//   - Match MUST be type=provider_credential. Other rotatable types
+//     (random_hex, random_base64, random_alphanumeric) are intentionally
+//     rejected here because rotate-and-prune's downstream invariants
+//     (len(rotations)==1, prune step expects an old credential to revoke)
+//     are coherent only for provider_credential. Operators rotating
+//     non-provider_credential generators must use `wfctl infra bootstrap
+//     --force-rotate` directly.
+//
+// Without these guards a multi-Name config or a non-provider_credential
+// --name target would either rotate multiple keys then fail count check
+// (side effects committed but errored) OR rotate without appending a
+// RotationResult (the false-negative class this PR was opened to fix).
+func buildRotateAndPruneForceRotateSet(name string, cfg *SecretsConfig) (map[string]bool, error) {
+	if name == "" {
+		return nil, fmt.Errorf("--name is required")
+	}
+	if cfg == nil || len(cfg.Generate) == 0 {
+		return nil, fmt.Errorf("config has no secrets.generate entries; nothing to rotate for --name %q", name)
+	}
+	// Match precedence: secrets.generate[].name first (canonical per ADR 0023),
+	// then .key fallback for older configs / unit-test fixtures.
+	var matched []SecretGen
+	for _, gen := range cfg.Generate {
+		if gen.Name == name {
+			matched = append(matched, gen)
+		}
+	}
+	if len(matched) == 0 {
+		for _, gen := range cfg.Generate {
+			if gen.Key == name {
+				matched = append(matched, gen)
+			}
+		}
+	}
+	if len(matched) == 0 {
+		return nil, fmt.Errorf("no secrets.generate entry matches --name %q (matched neither .name nor .key)", name)
+	}
+	if len(matched) > 1 {
+		keys := make([]string, len(matched))
+		for i, g := range matched {
+			keys[i] = g.Key
+		}
+		return nil, fmt.Errorf("--name %q matches multiple secrets.generate entries (keys: %v); rotate-and-prune supports exactly one provider_credential per dispatch — use `wfctl infra bootstrap --force-rotate` for multi-entry rotation", name, keys)
+	}
+	if matched[0].Type != "provider_credential" {
+		return nil, fmt.Errorf("--name %q matches secrets.generate entry of type %q; rotate-and-prune only operates on provider_credential entries (use `wfctl infra bootstrap --force-rotate` for other rotatable types)", name, matched[0].Type)
+	}
+	// Defense-in-depth: ensure the matched Key is unique across all
+	// secrets.generate[] entries. Without this, a config with two gens
+	// sharing the same Key (different Names) would set forceRotate[key]=true
+	// → bootstrapSecrets rotates BOTH → fails len(rotations)==1 after side
+	// effects committed (the same false-negative class this PR was opened
+	// to fix, just via Key collision instead of Name collision).
+	keyCount := 0
+	var keyCollisionNames []string
+	for _, gen := range cfg.Generate {
+		if gen.Key == matched[0].Key {
+			keyCount++
+			if gen.Name != "" {
+				keyCollisionNames = append(keyCollisionNames, gen.Name)
+			}
+		}
+	}
+	if keyCount > 1 {
+		return nil, fmt.Errorf("secrets.generate has %d entries with .key=%q (names: %v); rotate-and-prune requires Key uniqueness so the rotation count invariant holds", keyCount, matched[0].Key, keyCollisionNames)
+	}
+	return map[string]bool{matched[0].Key: true}, nil
+}
+
 // recoveryRecord is persisted to ${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json
 // after a successful rotate step, BEFORE the prune step. Used by the
 // `wfctl infra prune --recovery-from-last-rotation` flow (Task 19) to recover
@@ -316,7 +408,18 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 		fmt.Fprintf(w, "rotate-and-prune: resolve secrets provider: %v\n", err)
 		return 1
 	}
-	forceRotate := map[string]bool{name: true}
+	// Translate the cloud-side resource name (--name; per ADR 0023 +
+	// docs/runbooks/spaces-key-prune.md) into the canonical secrets.generate[].Key
+	// values that bootstrapSecrets keys forceRotate by. Without this translation
+	// forceRotate[gen.Key] is false for every generator and bootstrapSecrets
+	// silently bypasses the force-rotate code path (rotations slice stays empty
+	// even when the underlying generator + Set side effects committed) — the
+	// staging-dispatch false-negative surfaced 2026-05-09 (run 25616807427).
+	forceRotate, err := buildRotateAndPruneForceRotateSet(name, cfg)
+	if err != nil {
+		fmt.Fprintf(w, "rotate-and-prune: %v\n", err)
+		return 1
+	}
 	revoker, closer := resolveCredentialRevoker(ctx, configFile, cfg, forceRotate)
 	if closer != nil {
 		defer closer.Close()
