@@ -55,6 +55,66 @@ The `interfaces.IaCProvider` + sub-interface definitions remain in
 `interfaces/` for engine-side consumers (per ADR 0024); only wfctl's
 dispatch sites are pure typed.
 
+## Per-site dispatch UX
+
+The pure-typed code-shape mandate is uniform across all 5 sites:
+`provider.(*typedIaCAdapter)` is the only valid input shape; no
+`interfaces.X` fallback. **Severity** of the non-typed-input branch,
+however, is per-site UX based on iteration semantics. A halt-on-bad-
+provider response at an iteration site would lose visibility into the
+other providers' results — a regression vs the legacy
+iterate-and-skip semantics. The 5 sites split as follows:
+
+| Site | Severity | Per-site rationale |
+|---|---|---|
+| `cmd/wfctl/infra_cleanup.go:104` (Enumerator) | **Hard-error** (return + collect) | Single-shot operation against a bounded provider list. Surfacing fixture-leak loudly is correct; halting one bad provider while continuing others is captured by the existing `totalErrs = append(...)` + `continue` pattern. Operator sees the problem, batch result still distinguishes successes from failures. |
+| `cmd/wfctl/infra_apply_refresh.go:69` (DriftConfigDetector) | **Hard-error** (return) | Single-shot drift detection feeding the prune decision. Apply-refresh prunes ghosts; a fixture-leak that silently returned "no drift" would suppress prunes operators expected — same anti-pattern the dispatch is designed to prevent. Hard-error is operationally correct. |
+| `cmd/wfctl/infra_status_drift.go:107` (DriftConfigDetector) | **Soft-skip** (warn + return false) | Per-provider iteration in `driftGroup`. Halting on one bad provider would suppress drift visibility for every other provider in the loop — strictly worse for operators triaging multi-provider drift state. The warning log is the auditable signal; "no drift reported" for a single provider is the graceful-degradation behavior. |
+| `cmd/wfctl/infra_align_rules.go:782` (Validator, R-A10) | **Silent-skip** (`continue`) | R-A10's contract is "treat unimplemented validator as not-applicable" (rule iterates over align providers and only emits findings from those that opt in). A non-typed provider that reaches this loop would not produce diagnostics under the legacy `interfaces.ProviderValidator` type-assert either; the silent-skip preserves that contract. Hard-error here would abort the align batch on a fixture-leak, masking other rules' findings. |
+| `cmd/wfctl/infra_bootstrap.go:348` (CredentialRevoker) | **Soft-skip** (warn + skip revocation) | Bootstrap completes secret minting; the typed-adapter capability gate decides whether old credentials get auto-revoked. A non-typed provider reaching this site means revocation is unavailable; the bootstrap itself remains correct, the operator sees a stderr warning advising manual revocation. Halting bootstrap on revoker absence would block secret rotation entirely on a fixture-leak — a strictly worse failure mode. |
+
+### Canonical rule
+
+> Pure typed-pb dispatch at all sites; non-typed input rejection
+> severity is per-site UX based on iteration semantics. New dispatch
+> sites default to hard-error unless graceful-degradation is
+> operationally required.
+
+The "graceful-degradation is operationally required" bar is met when
+the dispatch site iterates over a heterogeneous provider list (or
+sub-rules) where halting on one bad input would lose visibility into
+the others' results, **and** the soft-skip path emits an auditable
+warn-log so operators can recognize + act on the gap. Both conditions
+must hold; soft-skip without auditability collapses back into the
+"silent fallback" failure mode the cutover exists to prevent.
+
+### Why this is not the rejected silent-fallback shape
+
+The original Round-1 rejection (commit 63e1cdf8 → CHANGES REQUESTED)
+was at code-shape: `interfaces.X` fallback dispatch was invisible to
+operators (no log line), invoked the legacy proxy's behavior, and
+masked the loader-gate's pre-flight contract. The current per-site
+soft-skip pattern differs in three observable ways:
+
+1. **The fallback path no longer exists.** All 5 sites first do
+   `adapter, ok := p.(*typedIaCAdapter)`; the only branch is "use
+   typed-pb" or "skip with warn-log". There is no second dispatch
+   shape that takes the call.
+2. **Soft-skip is auditable.** Each soft-skip site emits a stderr
+   warn-log identifying the provider + the reason (`provider %T is
+   not a typed IaC adapter — re-load via discoverAndLoadIaCProvider`
+   or analogous). Operators see fixture leaks and loader-gate
+   regressions in the same shape as any other operator-facing
+   diagnostic.
+3. **Continue-semantics, not equivalent-behavior.** The legacy
+   fallback returned a real result via the interfaces.X path —
+   indistinguishable from a typed-pb success at the call site. The
+   soft-skip path returns the no-op result for the operation
+   (false / nil-skip / empty diagnostics), which is observably
+   distinct: status-drift reports no-drift, R-A10 emits no findings,
+   bootstrap leaves old credentials in place. Operators reading the
+   output see the gap.
+
 ## Rationale
 
 The user mandate `feedback_force_strict_contracts_no_compat` is framed
