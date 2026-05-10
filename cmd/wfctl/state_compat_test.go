@@ -1,11 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -72,14 +72,28 @@ func TestStateFileCompat_v0_14_2_to_v1_0_0(t *testing.T) {
 	if state.Provider != record.Provider {
 		t.Errorf("Provider = %q; want %q", state.Provider, record.Provider)
 	}
-	if state.ProviderID == "" {
-		t.Errorf("ProviderID is empty after decode (must default to ResourceID when source is empty)")
+	// MINOR-1: strict-equality on ProviderID rather than non-empty.
+	// Non-empty would pass silently if `provider_id` stops decoding,
+	// because iacRecordToResourceState falls back to ResourceID.
+	// The fixture provider_id is DO00FIXTURE1234567890; pin it.
+	if state.ProviderID != record.ProviderID {
+		t.Errorf("ProviderID = %q; want %q (silent fallback to ResourceID indicates "+
+			"provider_id decode regression)", state.ProviderID, record.ProviderID)
 	}
+	// MINOR-2: nil-checks on AppliedConfig / Outputs would pass when
+	// the maps decoded as empty {} (silent map-content drop). Pin to
+	// at least one known fixture key per map.
 	if state.AppliedConfig == nil {
 		t.Errorf("AppliedConfig is nil after decode (config map dropped during conversion)")
+	} else if got, ok := state.AppliedConfig["name"].(string); !ok || got != "iac-state-spaces-key" {
+		t.Errorf("AppliedConfig[\"name\"] = %v; want %q (config-map content drop?)",
+			state.AppliedConfig["name"], "iac-state-spaces-key")
 	}
 	if state.Outputs == nil {
 		t.Errorf("Outputs is nil after decode (outputs map dropped during conversion)")
+	} else if got, ok := state.Outputs["access_key"].(string); !ok || got == "" {
+		t.Errorf("Outputs[\"access_key\"] = %v; want non-empty (outputs-map content drop?)",
+			state.Outputs["access_key"])
 	}
 }
 
@@ -112,7 +126,7 @@ func TestStateFileCompat_v0_14_2_NoUnknownFieldsLost(t *testing.T) {
 		t.Fatalf("re-marshal stripped: %v", err)
 	}
 
-	dec := json.NewDecoder(strings.NewReader(string(stripped)))
+	dec := json.NewDecoder(bytes.NewReader(stripped))
 	dec.DisallowUnknownFields()
 	var record iacStateRecord
 	if err := dec.Decode(&record); err != nil {
