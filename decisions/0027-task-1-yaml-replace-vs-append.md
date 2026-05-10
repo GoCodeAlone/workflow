@@ -6,7 +6,7 @@
 
 ## Context
 
-Plan §Task 1 step 1 instructed prepending `status: superseded_partial` and `superseded_by: [...]` to two existing plan-doc frontmatter blocks (`2026-04-26-strict-grpc-plugin-contracts-design.md` and `…contracts.md`). The instruction did not account for these files already containing `status:` and `superseded_by:` keys at other lines (line 1 + line 57 respectively).
+Plan §Task 1 step 1 instructed prepending a new supersession status line and a populated `superseded_by: [...]` to two existing plan-doc frontmatter blocks (`2026-04-26-strict-grpc-plugin-contracts-design.md` and `…contracts.md`). The instruction did not account for these files already containing `status:` and `superseded_by:` keys at other lines (line 1 + line 57 respectively).
 
 Faithful execution of the plan introduced YAML duplicate keys, which `wfctl audit plans` (gopkg.in/yaml.v3 in `cmd/wfctl/plan_audit.go`) rejects with `mapping key already defined at line N` errors. Code-reviewer + Copilot independently flagged this on PR #596.
 

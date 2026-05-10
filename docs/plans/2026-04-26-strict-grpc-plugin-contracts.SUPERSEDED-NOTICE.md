@@ -17,4 +17,4 @@ Per `feedback_force_strict_contracts_no_compat`: the 2026-04-26 additive approac
 
 The Module/Step/Trigger migration tracker entries (workflow-plugin-{audit, sso, ws-auth, authz, security, etc.}) in the 2026-04-26 plan REMAIN LIVE — they're not superseded.
 
-This notice exists as a separate file because the 2026-04-26 plan itself is scope-lock-protected per `feedback_plan_files_lead_owned` and cannot be edited in-place.
+This notice exists as a separate file per `feedback_plan_files_lead_owned`: the 2026-04-26 plan body is scope-locked (immutable until alignment-check + scope-lock-skill unlock); frontmatter is lead-gated and may be edited for status/supersession bookkeeping, but the body and migration-tracker tables remain frozen.
