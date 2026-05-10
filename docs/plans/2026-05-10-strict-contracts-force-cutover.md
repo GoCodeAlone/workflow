@@ -1,3 +1,10 @@
+---
+status: approved
+area: ecosystem
+owner: jon
+supersedes: [docs/plans/2026-04-26-strict-grpc-plugin-contracts.md]
+---
+
 # Strict-Contracts Force-Cutover Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

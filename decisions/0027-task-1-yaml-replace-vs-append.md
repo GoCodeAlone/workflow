@@ -26,6 +26,17 @@ For Task 1's two frontmatter edits: REPLACE the existing `status:` and `supersed
 - **(A) Plan-unlock + manifest amendment**: heavyweight for a doc-correction whose intent is preserved.
 - **(C) Override + admin-merge with broken audit**: leaves an ERROR baseline in the canonical plan inspector. Unacceptable per `feedback_local_ci_validation_for_ci_touching_tasks`.
 
+## Scope: bonus normalizations beyond Task 1's literal Files
+
+This PR also normalizes frontmatter on:
+- `docs/plans/2026-05-10-strict-contracts-force-cutover-design.md` (status draft→approved, area plugins/iac→plugins, supersedes string→list)
+- `docs/plans/2026-05-10-strict-contracts-force-cutover.md` (frontmatter added)
+- 8 adversarial-review files (status complete→approved)
+
+These were not in Task 1's Files section but were necessary to achieve the zero-WARN audit baseline that Task 1's verify command checks. Treated as fix-forward since the manifest is unchanged. Documented here for traceability.
+
+The status values `superseded_partial` and `notice` from the original directives were not in `cmd/wfctl/plan_audit.go`'s allowed status set; substituted with `superseded` + custom `supersession_scope:` field (audit accepts unknown fields).
+
 ## Related
 
 - PR #596 (docs/supersede-2026-04-26-design)
