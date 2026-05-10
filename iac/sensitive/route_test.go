@@ -349,7 +349,8 @@ func TestPlaceholder(t *testing.T) {
 
 func TestSecretKey(t *testing.T) {
 	got := SecretKey("myres", "secret_key")
-	if ok, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_]*$`, got); !ok {
+	providerSafeName := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	if !providerSafeName.MatchString(got) {
 		t.Fatalf("SecretKey = %q, want provider-safe name", got)
 	}
 	if len(got) > secretKeyMaxLength {
@@ -365,7 +366,7 @@ func TestSecretKey(t *testing.T) {
 		{"9resource", "secret-key"},
 		{"github", "token"},
 	} {
-		if key := SecretKey(pair[0], pair[1]); !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(key) {
+		if key := SecretKey(pair[0], pair[1]); !providerSafeName.MatchString(key) {
 			t.Fatalf("SecretKey(%q,%q) = %q, want provider-safe name", pair[0], pair[1], key)
 		}
 	}
@@ -384,7 +385,7 @@ func TestSecretKey(t *testing.T) {
 		if len(key) > secretKeyMaxLength {
 			t.Fatalf("long SecretKey len = %d, want <= %d: %q", len(key), secretKeyMaxLength, key)
 		}
-		if ok, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_]*$`, key); !ok {
+		if !providerSafeName.MatchString(key) {
 			t.Fatalf("long SecretKey = %q, want provider-safe name", key)
 		}
 	}
