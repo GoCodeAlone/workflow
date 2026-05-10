@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -31,9 +32,13 @@ type stubPluginServiceClient struct {
 	lastCreateTriggerReq *pb.CreateTriggerRequest
 	createTriggerResp    *pb.HandleResponse
 	createTriggerNilResp bool
+	createTriggerCalls   int
 	configureCallbackReq *pb.ConfigureCallbackRequest
 	initModuleCalls      int
 	startModuleCalls     int
+	stopModuleCalls      int
+	destroyModuleCalls   int
+	startErrorOnCall     int
 }
 
 // ExecuteStep records the request and returns the configured response.
@@ -73,12 +78,17 @@ func (c *stubPluginServiceClient) InitModule(_ context.Context, _ *pb.HandleRequ
 }
 func (c *stubPluginServiceClient) StartModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
 	c.startModuleCalls++
+	if c.startErrorOnCall > 0 && c.startModuleCalls == c.startErrorOnCall {
+		return &pb.ErrorResponse{Error: "start failed"}, nil
+	}
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) StopModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.stopModuleCalls++
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) DestroyModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.destroyModuleCalls++
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) CreateStep(_ context.Context, _ *pb.CreateStepRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
@@ -112,13 +122,14 @@ func (c *stubPluginServiceClient) ConfigureCallback(_ context.Context, req *pb.C
 }
 func (c *stubPluginServiceClient) CreateTrigger(_ context.Context, req *pb.CreateTriggerRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
 	c.lastCreateTriggerReq = req
+	c.createTriggerCalls++
 	if c.createTriggerNilResp {
 		return nil, nil
 	}
 	if c.createTriggerResp != nil {
 		return c.createTriggerResp, nil
 	}
-	return &pb.HandleResponse{HandleId: "trigger-handle"}, nil
+	return &pb.HandleResponse{HandleId: fmt.Sprintf("trigger-handle-%d", c.createTriggerCalls)}, nil
 }
 
 // TestRemoteStep_Execute_ResolvesTemplatesInConfig verifies that template

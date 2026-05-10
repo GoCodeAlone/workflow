@@ -296,7 +296,7 @@ func TestTriggerProviderCreatesTriggerThroughLifecycle(t *testing.T) {
 
 	createResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
 		Type:   "trigger.test",
-		Name:   "test-trigger",
+		Name:   "pipeline:test-trigger",
 		Config: mustMapToStruct(t, map[string]any{"pool": "private"}),
 	})
 	if err != nil {
@@ -331,7 +331,7 @@ func TestTriggerProviderCreatesTriggerThroughLifecycle(t *testing.T) {
 	if callback.req == nil {
 		t.Fatal("expected callback request")
 	}
-	if callback.req.TriggerType != "trigger.test" || callback.req.Action != "completed" {
+	if callback.req.TriggerType != "pipeline:test-trigger" || callback.req.Action != "completed" {
 		t.Fatalf("unexpected callback request: %#v", callback.req)
 	}
 	if got := callback.req.Data.AsMap()["task_id"]; got != "task-1" {
@@ -343,6 +343,32 @@ func TestTriggerProviderCreatesTriggerThroughLifecycle(t *testing.T) {
 	}
 	if provider.created.stops != 1 {
 		t.Fatalf("expected one trigger stop, got %d", provider.created.stops)
+	}
+}
+
+func TestTriggerProviderCallbackFallsBackToTriggerType(t *testing.T) {
+	provider := &triggerOnlyProvider{}
+	srv := newGRPCServer(provider)
+	callback := &recordingCallbackClient{}
+	srv.SetCallbackClient(callback)
+
+	createResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
+		Type: "trigger.test",
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateTrigger application error: %s", createResp.Error)
+	}
+	if err := provider.created.cb("completed", map[string]any{"task_id": "task-1"}); err != nil {
+		t.Fatalf("trigger callback returned error: %v", err)
+	}
+	if callback.req == nil {
+		t.Fatal("expected callback request")
+	}
+	if callback.req.TriggerType != "trigger.test" {
+		t.Fatalf("expected callback fallback trigger type, got %#v", callback.req)
 	}
 }
 

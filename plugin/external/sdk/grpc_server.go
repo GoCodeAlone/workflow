@@ -320,7 +320,11 @@ func (s *grpcServer) CreateTrigger(_ context.Context, req *pb.CreateTriggerReque
 		return &pb.HandleResponse{Error: fmt.Sprintf("unknown trigger type %q", req.Type)}, nil
 	}
 
-	inst, err := tp.CreateTrigger(req.Type, structToMap(req.Config), s.triggerCallback(req.Type))
+	callbackWorkflowType := req.Name
+	if callbackWorkflowType == "" {
+		callbackWorkflowType = req.Type
+	}
+	inst, err := tp.CreateTrigger(req.Type, structToMap(req.Config), s.triggerCallback(callbackWorkflowType))
 	if err != nil {
 		return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
