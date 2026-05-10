@@ -226,6 +226,25 @@ func buildRotateAndPruneForceRotateSet(name string, cfg *SecretsConfig) (map[str
 	if matched[0].Type != "provider_credential" {
 		return nil, fmt.Errorf("--name %q matches secrets.generate entry of type %q; rotate-and-prune only operates on provider_credential entries (use `wfctl infra bootstrap --force-rotate` for other rotatable types)", name, matched[0].Type)
 	}
+	// Defense-in-depth: ensure the matched Key is unique across all
+	// secrets.generate[] entries. Without this, a config with two gens
+	// sharing the same Key (different Names) would set forceRotate[key]=true
+	// → bootstrapSecrets rotates BOTH → fails len(rotations)==1 after side
+	// effects committed (the same false-negative class this PR was opened
+	// to fix, just via Key collision instead of Name collision).
+	keyCount := 0
+	var keyCollisionNames []string
+	for _, gen := range cfg.Generate {
+		if gen.Key == matched[0].Key {
+			keyCount++
+			if gen.Name != "" {
+				keyCollisionNames = append(keyCollisionNames, gen.Name)
+			}
+		}
+	}
+	if keyCount > 1 {
+		return nil, fmt.Errorf("secrets.generate has %d entries with .key=%q (names: %v); rotate-and-prune requires Key uniqueness so the rotation count invariant holds", keyCount, matched[0].Key, keyCollisionNames)
+	}
 	return map[string]bool{matched[0].Key: true}, nil
 }
 

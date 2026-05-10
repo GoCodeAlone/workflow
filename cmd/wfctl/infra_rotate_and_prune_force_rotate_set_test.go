@@ -82,6 +82,18 @@ func TestBuildRotateAndPruneForceRotateSet(t *testing.T) {
 			},
 			wantKeys: []string{"OTHER"},
 		},
+		{
+			// Defense-in-depth: even when --name picks a single gen, if the
+			// matched gen's Key is shared with another gen, forceRotate[key]
+			// would rotate both → fails len(rotations)==1. Reject up-front.
+			name:    "matched_key_shared_with_another_gen_rejected",
+			argName: "primary-key",
+			gens: []SecretGen{
+				{Key: "SHARED_KEY", Type: "provider_credential", Name: "primary-key"},   // matched
+				{Key: "SHARED_KEY", Type: "provider_credential", Name: "secondary-key"}, // collides on Key
+			},
+			wantErrFrag: "rotate-and-prune requires Key uniqueness",
+		},
 	}
 
 	for _, tc := range cases {

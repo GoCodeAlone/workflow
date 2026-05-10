@@ -11,7 +11,7 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// TestBootstrapSecrets_ForceRotate_AppendsRotationResult_NameKeyMismatch
+// TestRotateAndPrune_KeyNameMismatch_ReturnsRotationResult
 // pins the contract that surfaced as a real-world bug on 2026-05-09 in
 // core-dump rotate-spaces-key staging dispatch run 25616807427:
 //
@@ -35,8 +35,9 @@ import (
 // failing run. Without the fix, runInfraRotateAndPrune returns code=1 with
 // "expected 1 rotation result, got 0" even though bootstrapSecrets minted
 // the new credential. With the fix, the CLI translates --name→gen.Key
-// (or bootstrapSecrets accepts both keying forms) and the rotation result
-// surfaces correctly.
+// at the buildRotateAndPruneForceRotateSet boundary; bootstrapSecrets
+// strictly requires forceRotate keyed by gen.Key and rejects unknown
+// entries (no name-fallback on the bootstrap side).
 func TestRotateAndPrune_KeyNameMismatch_ReturnsRotationResult(t *testing.T) {
 	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
 	tmpDir := t.TempDir()
