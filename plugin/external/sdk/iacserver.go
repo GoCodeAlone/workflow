@@ -57,7 +57,7 @@ func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
 	// RegisterAll(s, p)) wraps as a non-nil interface value but
 	// dereferences to nil at first method call → panic. Reject early
 	// with the same pattern the user-visible nil-check uses.
-	if rv := reflect.ValueOf(provider); rv.Kind() == reflect.Ptr && rv.IsNil() {
+	if rv := reflect.ValueOf(provider); rv.Kind() == reflect.Pointer && rv.IsNil() {
 		return fmt.Errorf("RegisterAllIaCProviderServices: provider is a typed-nil %T pointer", provider)
 	}
 	required, ok := provider.(pb.IaCProviderRequiredServer)
