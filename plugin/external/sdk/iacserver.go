@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"fmt"
+	"reflect"
 
 	"google.golang.org/grpc"
 
@@ -51,6 +52,13 @@ func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
 	}
 	if provider == nil {
 		return fmt.Errorf("RegisterAllIaCProviderServices: provider is nil")
+	}
+	// Typed-nil hardening: a typed-nil pointer (e.g., var p *MyProvider;
+	// RegisterAll(s, p)) wraps as a non-nil interface value but
+	// dereferences to nil at first method call → panic. Reject early
+	// with the same pattern the user-visible nil-check uses.
+	if rv := reflect.ValueOf(provider); rv.Kind() == reflect.Ptr && rv.IsNil() {
+		return fmt.Errorf("RegisterAllIaCProviderServices: provider is a typed-nil %T pointer", provider)
 	}
 	required, ok := provider.(pb.IaCProviderRequiredServer)
 	if !ok {
