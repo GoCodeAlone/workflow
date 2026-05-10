@@ -109,7 +109,7 @@ func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
 	// Guard: skip registration if PluginService is already on the server
 	// (e.g. a mixed plugin that called sdk.Serve AND RegisterAllIaC).
 	// gRPC panics on double-registration; the guard prevents that.
-	if _, alreadyRegistered := s.GetServiceInfo()["workflow.plugin.v1.PluginService"]; !alreadyRegistered {
+	if _, alreadyRegistered := s.GetServiceInfo()[pb.PluginService_ServiceDesc.ServiceName]; !alreadyRegistered {
 		pb.RegisterPluginServiceServer(s, &iacPluginServiceBridge{grpcSrv: s})
 	}
 	return nil

@@ -224,7 +224,10 @@ func TestRegisterAllIaCProviderServices_PluginServiceBridgeAnswersGetContractReg
 func TestRegisterAllIaCProviderServices_PluginServiceAlreadyRegistered_NoPanic(t *testing.T) {
 	grpcSrv := grpc.NewServer()
 	// Pre-register PluginService (simulates a mixed sdk.Serve + IaC plugin).
-	pb.RegisterPluginServiceServer(grpcSrv, &pb.UnimplementedPluginServiceServer{})
+	// Use an embedded-by-value stub so the pattern is idiomatic Go and not
+	// a pointer-to-unimplemented (which the generated gRPC code warns against).
+	type minimalPluginSvc struct{ pb.UnimplementedPluginServiceServer }
+	pb.RegisterPluginServiceServer(grpcSrv, &minimalPluginSvc{})
 	// RegisterAllIaCProviderServices must not panic on double-registration.
 	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, &fullProviderStub{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
