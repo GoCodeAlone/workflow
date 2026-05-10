@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"google.golang.org/grpc"
@@ -299,11 +300,14 @@ func (a *typedIaCAdapter) BootstrapStateBackend(ctx context.Context, cfg map[str
 	if r == nil {
 		return nil, nil
 	}
+	// Defensive copy of EnvVars: r.GetEnvVars() returns the proto's
+	// underlying map; handing the same reference to callers exposes
+	// proto-internal state to mutation. copyStringMap already nil-safe.
 	return &interfaces.BootstrapResult{
 		Bucket:   r.GetBucket(),
 		Region:   r.GetRegion(),
 		Endpoint: r.GetEndpoint(),
-		EnvVars:  r.GetEnvVars(),
+		EnvVars:  copyStringMap(r.GetEnvVars()),
 	}, nil
 }
 
@@ -513,7 +517,10 @@ func (d *typedResourceDriver) HealthCheck(ctx context.Context, ref interfaces.Re
 }
 
 func (d *typedResourceDriver) Scale(ctx context.Context, ref interfaces.ResourceRef, replicas int) (*interfaces.ResourceOutput, error) {
-	resp, err := d.client.Scale(ctx, &pb.ResourceScaleRequest{ResourceType: d.resourceType, Ref: refToPB(ref), Replicas: int32(replicas)})
+	if replicas < math.MinInt32 || replicas > math.MaxInt32 {
+		return nil, fmt.Errorf("typed driver %s: scale replicas %d out of int32 range", d.resourceType, replicas)
+	}
+	resp, err := d.client.Scale(ctx, &pb.ResourceScaleRequest{ResourceType: d.resourceType, Ref: refToPB(ref), Replicas: int32(replicas)}) //nolint:gosec // G115: range-checked above
 	if err != nil {
 		return nil, err
 	}
@@ -679,7 +686,7 @@ func specFromPB(s *pb.ResourceSpec) (interfaces.ResourceSpec, error) {
 	}, nil
 }
 
-func stateToPB(st interfaces.ResourceState) (*pb.ResourceState, error) {
+func stateToPB(st *interfaces.ResourceState) (*pb.ResourceState, error) {
 	appliedJSON, err := marshalJSONMap(st.AppliedConfig)
 	if err != nil {
 		return nil, err
@@ -738,8 +745,10 @@ func stateFromPB(s *pb.ResourceState) (*interfaces.ResourceState, error) {
 
 func statesToPB(states []interfaces.ResourceState) ([]*pb.ResourceState, error) {
 	out := make([]*pb.ResourceState, 0, len(states))
-	for _, st := range states {
-		ps, err := stateToPB(st)
+	// Index iteration: interfaces.ResourceState is ~240 bytes;
+	// per-iteration value-copy cost flagged by gocritic rangeValCopy.
+	for i := range states {
+		ps, err := stateToPB(&states[i])
 		if err != nil {
 			return nil, err
 		}
@@ -860,14 +869,14 @@ func driftsFromPB(drifts []*pb.DriftResult) ([]interfaces.DriftResult, error) {
 	return out, nil
 }
 
-func planActionToPB(a interfaces.PlanAction) (*pb.PlanAction, error) {
+func planActionToPB(a *interfaces.PlanAction) (*pb.PlanAction, error) {
 	pbSpec, err := specToPB(a.Resource)
 	if err != nil {
 		return nil, err
 	}
 	var pbCurrent *pb.ResourceState
 	if a.Current != nil {
-		pbCurrent, err = stateToPB(*a.Current)
+		pbCurrent, err = stateToPB(a.Current)
 		if err != nil {
 			return nil, err
 		}
@@ -960,19 +969,24 @@ func planToPB(p *interfaces.IaCPlan) (*pb.IaCPlan, error) {
 		return nil, nil
 	}
 	pbActions := make([]*pb.PlanAction, 0, len(p.Actions))
-	for _, a := range p.Actions {
-		pa, err := planActionToPB(a)
+	// Index iteration: interfaces.PlanAction is ~152 bytes;
+	// per-iteration value-copy cost flagged by gocritic rangeValCopy.
+	for i := range p.Actions {
+		pa, err := planActionToPB(&p.Actions[i])
 		if err != nil {
 			return nil, err
 		}
 		pbActions = append(pbActions, pa)
+	}
+	if p.SchemaVersion < math.MinInt32 || p.SchemaVersion > math.MaxInt32 {
+		return nil, fmt.Errorf("typed adapter: plan SchemaVersion %d out of int32 range", p.SchemaVersion)
 	}
 	return &pb.IaCPlan{
 		Id:            p.ID,
 		Actions:       pbActions,
 		CreatedAt:     timeToPB(p.CreatedAt),
 		DesiredHash:   p.DesiredHash,
-		SchemaVersion: int32(p.SchemaVersion),
+		SchemaVersion: int32(p.SchemaVersion), //nolint:gosec // G115: range-checked above
 		InputSnapshot: copyStringMap(p.InputSnapshot),
 	}, nil
 }
@@ -1080,6 +1094,15 @@ func planDiagnosticSeverityFromPB(s pb.PlanDiagnosticSeverity) interfaces.PlanDi
 }
 
 func migrationRepairRequestToPB(r interfaces.MigrationRepairRequest) *pb.MigrationRepairRequest {
+	// TimeoutSeconds is operator-supplied (CLI flag); clamp to int32 range
+	// to avoid silent overflow. Real-world values are seconds-scale (≤ a few
+	// hours), well within int32 bounds; the clamp is defensive.
+	timeout := r.TimeoutSeconds
+	if timeout > math.MaxInt32 {
+		timeout = math.MaxInt32
+	} else if timeout < 0 {
+		timeout = 0
+	}
 	return &pb.MigrationRepairRequest{
 		AppResourceName:      r.AppResourceName,
 		DatabaseResourceName: r.DatabaseResourceName,
@@ -1091,7 +1114,7 @@ func migrationRepairRequestToPB(r interfaces.MigrationRepairRequest) *pb.Migrati
 		UpIfClean:            r.UpIfClean,
 		ConfirmForce:         r.ConfirmForce,
 		Env:                  copyStringMap(r.Env),
-		TimeoutSeconds:       int32(r.TimeoutSeconds),
+		TimeoutSeconds:       int32(timeout), //nolint:gosec // G115: clamped above
 	}
 }
 
