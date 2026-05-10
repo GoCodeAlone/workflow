@@ -7,15 +7,9 @@ import (
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
-// iacServiceRequired is the fully-qualified name of the typed
-// IaCProviderRequired gRPC service emitted by iac.proto. The pre-flight
-// gate looks for exactly this string in the plugin's GetContractRegistry
-// response.
-//
-// Naming convention matches the iac_typed_adapter.go const family
-// (PR #605/#609 — iacServiceEnumerator, iacServiceDriftDetector, …)
-// so the wfctl-side typed-client code shares a single naming style.
-const iacServiceRequired = "workflow.plugin.external.iac.IaCProviderRequired"
+// iacServiceRequired declared in iac_typed_adapter.go (PR #605, merged on
+// main). This file uses the canonical const directly — the pre-flight gate
+// looks for exactly that string in the plugin's GetContractRegistry response.
 
 // errLegacyIaCPlugin is the typed sentinel returned when a pinned IaC
 // plugin does not advertise IaCProviderRequired in its
