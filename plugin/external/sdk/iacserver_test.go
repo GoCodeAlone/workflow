@@ -1,10 +1,14 @@
 package sdk_test
 
 import (
+	"context"
+	"net"
 	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
@@ -147,3 +151,85 @@ type allCapabilitiesStub struct {
 
 // emptyStub satisfies no IaC interface; the helper must reject it.
 type emptyStub struct{}
+
+// TestRegisterAllIaCProviderServices_PluginServiceBridgeRegistered asserts
+// that after calling RegisterAllIaCProviderServices, the server also exposes
+// "workflow.plugin.v1.PluginService" so the wfctl host can call
+// GetContractRegistry without getting "unknown service". This is the fix for
+// the DO plugin v1.0.0 incompatibility where ServeIaCPlugin (which calls
+// RegisterAllIaCProviderServices) didn't register PluginService, causing
+// wfctl's NewExternalPluginAdapter to fail.
+func TestRegisterAllIaCProviderServices_PluginServiceBridgeRegistered(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, &fullProviderStub{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := grpcSrv.GetServiceInfo()["workflow.plugin.v1.PluginService"]; !ok {
+		t.Fatalf("PluginService bridge not registered; have: %v", serviceNames(grpcSrv.GetServiceInfo()))
+	}
+}
+
+// TestRegisterAllIaCProviderServices_PluginServiceBridgeAnswersGetContractRegistry
+// verifies the bridge returns a ContractRegistry containing the registered
+// IaC services when GetContractRegistry is called via a live gRPC client.
+// This exercises the end-to-end path that wfctl's NewExternalPluginAdapter
+// takes when loading a DO v1.0.0-style plugin via discoverAndLoadIaCProvider.
+func TestRegisterAllIaCProviderServices_PluginServiceBridgeAnswersGetContractRegistry(t *testing.T) {
+	t.Parallel()
+
+	// Spin up an in-process gRPC server with the IaC services + bridge.
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	grpcSrv := grpc.NewServer()
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, &allCapabilitiesStub{}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	go func() { _ = grpcSrv.Serve(lis) }()
+	t.Cleanup(func() { grpcSrv.Stop() })
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	// Call GetContractRegistry via the PluginServiceClient — exactly what
+	// wfctl's NewExternalPluginAdapter does via pb.NewPluginServiceClient.
+	client := pb.NewPluginServiceClient(conn)
+	registry, err := client.GetContractRegistry(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetContractRegistry: %v — PluginService bridge did not answer (DO v1.0.0 incompatibility fix is broken)", err)
+	}
+
+	services := map[string]bool{}
+	for _, c := range registry.GetContracts() {
+		if c.GetKind() == pb.ContractKind_CONTRACT_KIND_SERVICE {
+			services[c.GetServiceName()] = true
+		}
+	}
+
+	// The IaCProviderRequired service MUST appear — this is what wfctl's
+	// buildTypedIaCAdapterFrom checks via registeredIaCServices().
+	if !services["workflow.plugin.external.iac.IaCProviderRequired"] {
+		t.Errorf("GetContractRegistry did not include IaCProviderRequired; got services: %v", services)
+	}
+}
+
+// TestRegisterAllIaCProviderServices_PluginServiceAlreadyRegistered_NoPanic
+// asserts that calling RegisterAllIaCProviderServices on a server that already
+// has PluginService registered (e.g. a mixed plugin using both sdk.Serve and
+// RegisterAllIaCProviderServices) does NOT panic from double-registration.
+func TestRegisterAllIaCProviderServices_PluginServiceAlreadyRegistered_NoPanic(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	// Pre-register PluginService (simulates a mixed sdk.Serve + IaC plugin).
+	// Use an embedded-by-value stub so the pattern is idiomatic Go and not
+	// a pointer-to-unimplemented (which the generated gRPC code warns against).
+	type minimalPluginSvc struct{ pb.UnimplementedPluginServiceServer }
+	pb.RegisterPluginServiceServer(grpcSrv, &minimalPluginSvc{})
+	// RegisterAllIaCProviderServices must not panic on double-registration.
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, &fullProviderStub{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
