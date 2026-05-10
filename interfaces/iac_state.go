@@ -52,18 +52,23 @@ type ResourceState struct {
 	LastDriftCheck      time.Time      `json:"last_drift_check,omitempty"`
 }
 
-// PluginVersionInfo captures the name and version of a plugin that was loaded
-// during IaC plan or apply generation.
+// PluginVersionInfo captures the name and version of an installed IaC provider
+// plugin found in the plugin directory at the time an IaC plan or apply was run.
 type PluginVersionInfo struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 }
 
-// GeneratorMetadata records the wfctl version and loaded plugin versions that
-// were active when an IaC plan or state operation was produced. Storing this
-// information makes it possible to reason about compatibility between recorded
-// state and the current toolchain, and to identify upgrades that may be
-// required when behavior has changed between versions.
+// GeneratorMetadata records the wfctl version and installed IaC plugin versions
+// that were present when an IaC plan or state operation was produced. Storing
+// this information makes it possible to reason about compatibility between
+// recorded state and the current toolchain, and to identify upgrades that may
+// be required when behavior has changed between versions.
+//
+// Note: Plugins lists all IaC provider plugins installed in WFCTL_PLUGIN_DIR at
+// generation time. In single-run invocations this is equivalent to the loaded
+// set, but operators should be aware that extra installed-but-not-used plugins
+// may appear.
 type GeneratorMetadata struct {
 	WfctlVersion string              `json:"wfctl_version"`
 	Plugins      []PluginVersionInfo `json:"plugins,omitempty"`
@@ -96,11 +101,11 @@ type IaCPlan struct {
 	// closing this gap is tracked as a follow-up to W-1.
 	InputSnapshot map[string]string `json:"input_snapshot,omitempty"`
 
-	// GeneratorMetadata records the wfctl version and loaded plugin versions
-	// that were active when this plan was produced. Populated when the plan
-	// is serialised to disk (wfctl infra plan -o / wfctl infra apply).
-	// Consumers can inspect this to assess whether upgrades are needed before
-	// re-applying a stored plan.
+	// GeneratorMetadata records the wfctl version and installed IaC plugin
+	// versions present when this plan was produced. Populated when the plan
+	// is serialised to disk (wfctl infra plan -o). Consumers can inspect
+	// this to assess whether upgrades are needed before re-applying a stored
+	// plan.
 	GeneratorMetadata *GeneratorMetadata `json:"generator_metadata,omitempty"`
 }
 

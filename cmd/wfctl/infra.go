@@ -1467,16 +1467,16 @@ func runInfraApply(args []string) error {
 
 	// Post-apply: persist generator metadata (wfctl version + plugin versions)
 	// to the state directory so it is available for future audit without
-	// requiring the original plan.json.  Best-effort: a failure here is logged
-	// as a warning and does not roll back the apply.
+	// requiring the original plan.json.  Best-effort: failures here are logged
+	// as warnings and do not roll back the apply.
 	{
 		metaStore, metaErr := resolveStateStore(cfgFile, envName)
-		if metaErr == nil {
-			if mp, ok := metaStore.(metadataPersister); ok {
-				meta := buildGeneratorMetadata()
-				if saveErr := mp.SaveMetadata(ctx, meta); saveErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: save generator metadata: %v\n", saveErr)
-				}
+		if metaErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: open state store for metadata: %v\n", metaErr)
+		} else if mp, ok := metaStore.(metadataPersister); ok {
+			meta := buildGeneratorMetadata()
+			if saveErr := mp.SaveMetadata(ctx, meta); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: save generator metadata: %v\n", saveErr)
 			}
 		}
 	}

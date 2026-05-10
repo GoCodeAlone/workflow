@@ -10,19 +10,19 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// TestCollectIaCPluginVersions_EmptyDir verifies that an absent or empty
-// plugin directory returns a nil (not empty) slice without error.
-func TestCollectIaCPluginVersions_EmptyDir(t *testing.T) {
+// TestCollectInstalledIaCPluginVersions_EmptyDir verifies that an absent or
+// empty plugin directory returns a nil (not empty) slice without error.
+func TestCollectInstalledIaCPluginVersions_EmptyDir(t *testing.T) {
 	t.Setenv("WFCTL_PLUGIN_DIR", t.TempDir())
-	infos := collectIaCPluginVersions()
+	infos := collectInstalledIaCPluginVersions()
 	if len(infos) != 0 {
 		t.Errorf("expected no plugins, got %v", infos)
 	}
 }
 
-// TestCollectIaCPluginVersions_NoIaCProvider verifies that plugins without an
-// iacProvider capability are excluded from the result.
-func TestCollectIaCPluginVersions_NoIaCProvider(t *testing.T) {
+// TestCollectInstalledIaCPluginVersions_NoIaCProvider verifies that plugins
+// without an iacProvider capability are excluded from the result.
+func TestCollectInstalledIaCPluginVersions_NoIaCProvider(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("WFCTL_PLUGIN_DIR", dir)
 
@@ -35,16 +35,16 @@ func TestCollectIaCPluginVersions_NoIaCProvider(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	infos := collectIaCPluginVersions()
+	infos := collectInstalledIaCPluginVersions()
 	if len(infos) != 0 {
 		t.Errorf("expected no IaC plugins, got %v", infos)
 	}
 }
 
-// TestCollectIaCPluginVersions_WithIaCProvider verifies that a plugin
+// TestCollectInstalledIaCPluginVersions_WithIaCProvider verifies that a plugin
 // declaring an iacProvider capability is included in the result with its
 // correct name and version.
-func TestCollectIaCPluginVersions_WithIaCProvider(t *testing.T) {
+func TestCollectInstalledIaCPluginVersions_WithIaCProvider(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("WFCTL_PLUGIN_DIR", dir)
 
@@ -63,7 +63,7 @@ func TestCollectIaCPluginVersions_WithIaCProvider(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	infos := collectIaCPluginVersions()
+	infos := collectInstalledIaCPluginVersions()
 	if len(infos) != 1 {
 		t.Fatalf("expected 1 plugin, got %d: %v", len(infos), infos)
 	}
@@ -75,9 +75,9 @@ func TestCollectIaCPluginVersions_WithIaCProvider(t *testing.T) {
 	}
 }
 
-// TestCollectIaCPluginVersions_MixedPlugins verifies that only IaC-provider
-// plugins are included when multiple plugin types are installed side by side.
-func TestCollectIaCPluginVersions_MixedPlugins(t *testing.T) {
+// TestCollectInstalledIaCPluginVersions_MixedPlugins verifies that only
+// IaC-provider plugins are included when multiple plugin types are installed.
+func TestCollectInstalledIaCPluginVersions_MixedPlugins(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("WFCTL_PLUGIN_DIR", dir)
 
@@ -101,7 +101,7 @@ func TestCollectIaCPluginVersions_MixedPlugins(t *testing.T) {
 	writePlugin("plugin-auth", "workflow-plugin-auth", "0.5.0", "")
 	writePlugin("plugin-gcp", "workflow-plugin-gcp", "3.1.0", "gcp")
 
-	infos := collectIaCPluginVersions()
+	infos := collectInstalledIaCPluginVersions()
 	if len(infos) != 2 {
 		t.Fatalf("expected 2 IaC plugins, got %d: %v", len(infos), infos)
 	}
@@ -132,8 +132,8 @@ func TestBuildGeneratorMetadata_WfctlVersion(t *testing.T) {
 }
 
 // TestFsWfctlStateStore_SaveAndReadMetadata verifies that SaveMetadata writes
-// a metadata.json file and that ListResources does not mistake it for a
-// resource state record.
+// a metadata.json file wrapped under "generator_metadata" and that
+// ListResources does not mistake it for a resource state record.
 func TestFsWfctlStateStore_SaveAndReadMetadata(t *testing.T) {
 	dir := t.TempDir()
 	store := &fsWfctlStateStore{dir: dir}
@@ -148,20 +148,32 @@ func TestFsWfctlStateStore_SaveAndReadMetadata(t *testing.T) {
 		t.Fatalf("SaveMetadata: %v", err)
 	}
 
-	// Verify the file was written.
+	// Verify the file was written with the "generator_metadata" wrapper.
 	data, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
 	if err != nil {
 		t.Fatalf("read metadata.json: %v", err)
 	}
-	var got interfaces.GeneratorMetadata
-	if err := json.Unmarshal(data, &got); err != nil {
+	var wrapper struct {
+		GeneratorMetadata interfaces.GeneratorMetadata `json:"generator_metadata"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
 		t.Fatalf("unmarshal metadata.json: %v", err)
 	}
+	got := wrapper.GeneratorMetadata
 	if got.WfctlVersion != "v1.2.3" {
 		t.Errorf("WfctlVersion: got %q, want %q", got.WfctlVersion, "v1.2.3")
 	}
 	if len(got.Plugins) != 1 || got.Plugins[0].Name != "workflow-plugin-aws" {
 		t.Errorf("unexpected Plugins: %v", got.Plugins)
+	}
+
+	// The "generator_metadata" key must be present at the top level.
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	if _, ok := raw["generator_metadata"]; !ok {
+		t.Error("metadata.json must have a top-level generator_metadata key")
 	}
 
 	// ListResources must not return the metadata file as a resource.
@@ -193,12 +205,14 @@ func TestFsWfctlStateStore_MetadataOverwritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read metadata.json: %v", err)
 	}
-	var got interfaces.GeneratorMetadata
-	if err := json.Unmarshal(data, &got); err != nil {
+	var wrapper struct {
+		GeneratorMetadata interfaces.GeneratorMetadata `json:"generator_metadata"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.WfctlVersion != "v2.0.0" {
-		t.Errorf("expected v2.0.0 (most-recent), got %q", got.WfctlVersion)
+	if wrapper.GeneratorMetadata.WfctlVersion != "v2.0.0" {
+		t.Errorf("expected v2.0.0 (most-recent), got %q", wrapper.GeneratorMetadata.WfctlVersion)
 	}
 }
 

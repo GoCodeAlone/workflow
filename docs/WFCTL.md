@@ -1385,7 +1385,25 @@ wfctl infra apply --auto-approve -c infra.yaml --env prod \
 
 #### Generator metadata
 
-Every plan file (`plan.json`) and filesystem state directory (`metadata.json`) produced by `wfctl infra plan` or `wfctl infra apply` includes a `generator_metadata` block that records the exact toolchain versions in use at the time of generation:
+Every plan file (`plan.json`) produced by `wfctl infra plan -o` and the `metadata.json` sidecar written by `wfctl infra apply` (filesystem state backend) record the exact toolchain versions in use at generation time.
+
+**`plan.json`** — the `generator_metadata` field is nested inside the plan object:
+
+```json
+{
+  "id": "plan-1234567890",
+  "actions": [...],
+  "generator_metadata": {
+    "wfctl_version": "v0.42.0",
+    "plugins": [
+      { "name": "workflow-plugin-aws", "version": "2.3.1" },
+      { "name": "workflow-plugin-gcp", "version": "1.0.5" }
+    ]
+  }
+}
+```
+
+**`<state-dir>/metadata.json`** — the file contains only the `generator_metadata` wrapper (no surrounding plan object):
 
 ```json
 {
@@ -1404,6 +1422,8 @@ Every plan file (`plan.json`) and filesystem state directory (`metadata.json`) p
 | `wfctl_version` | The wfctl binary version (from `debug.ReadBuildInfo`; `"dev"` for local builds) |
 | `plugins[].name` | Plugin name from the plugin's `plugin.json` manifest |
 | `plugins[].version` | Plugin version from the plugin's `plugin.json` manifest |
+
+> **Note:** `plugins` lists all IaC provider plugins *installed* in `WFCTL_PLUGIN_DIR` at generation time (those whose `plugin.json` declares `capabilities.iacProvider`). In normal usage this is equivalent to the set that was loaded for the run; extra installed-but-not-used plugins may appear if the directory contains multiple providers.
 
 **Where it is stored:**
 

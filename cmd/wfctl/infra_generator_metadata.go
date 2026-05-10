@@ -16,21 +16,27 @@ import (
 //
 // Plugin discovery is best-effort: unreadable or malformed plugin.json files
 // are silently skipped rather than causing plan/apply to fail.  The wfctl
-// version always appears even when no plugins are found.
+// version always appears even when no plugins are installed.
 func buildGeneratorMetadata() interfaces.GeneratorMetadata {
 	return interfaces.GeneratorMetadata{
 		WfctlVersion: version,
-		Plugins:      collectIaCPluginVersions(),
+		Plugins:      collectInstalledIaCPluginVersions(),
 	}
 }
 
-// collectIaCPluginVersions scans the plugin directory for subdirectories that
-// contain a plugin.json declaring an iacProvider capability, and returns the
-// name and version of each such plugin.
+// collectInstalledIaCPluginVersions scans the plugin directory for
+// subdirectories that contain a plugin.json declaring an iacProvider
+// capability, and returns the name and version of each such installed plugin.
+//
+// Note: this reflects the set of *installed* IaC plugins (those present on
+// disk in WFCTL_PLUGIN_DIR), not strictly the subset that was loaded for the
+// current plan/apply. In practice these are identical for single-run wfctl
+// invocations, but operators should be aware that extra installed-but-not-used
+// plugins may appear in the list.
 //
 // The plugin directory is resolved using the same WFCTL_PLUGIN_DIR env var
 // that discoverAndLoadIaCProvider uses, defaulting to ./data/plugins.
-func collectIaCPluginVersions() []interfaces.PluginVersionInfo {
+func collectInstalledIaCPluginVersions() []interfaces.PluginVersionInfo {
 	pluginDir := os.Getenv("WFCTL_PLUGIN_DIR")
 	if pluginDir == "" {
 		pluginDir = "./data/plugins"

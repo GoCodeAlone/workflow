@@ -204,14 +204,18 @@ func (s *fsWfctlStateStore) DeleteResource(_ context.Context, name string) error
 }
 
 // SaveMetadata implements metadataPersister by writing a metadata.json file
-// into the state directory alongside the per-resource state files.  The file
-// is overwritten on every apply/plan so it always reflects the most-recent
-// operation.
+// into the state directory alongside the per-resource state files. The file
+// is overwritten on every apply so it always reflects the most-recent
+// operation. The JSON content wraps the GeneratorMetadata under a
+// "generator_metadata" key for consistency with the plan.json format.
 func (s *fsWfctlStateStore) SaveMetadata(_ context.Context, meta interfaces.GeneratorMetadata) error {
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return fmt.Errorf("save metadata: mkdir: %w", err)
 	}
-	data, err := json.MarshalIndent(meta, "", "  ")
+	wrapper := struct {
+		GeneratorMetadata interfaces.GeneratorMetadata `json:"generator_metadata"`
+	}{GeneratorMetadata: meta}
+	data, err := json.MarshalIndent(wrapper, "", "  ")
 	if err != nil {
 		return fmt.Errorf("save metadata: marshal: %w", err)
 	}
