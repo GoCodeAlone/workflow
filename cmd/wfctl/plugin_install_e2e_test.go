@@ -423,17 +423,18 @@ func TestSafeJoin(t *testing.T) {
 	}
 }
 
-// TestInstalledManifestPreservesCLICommands is the regression test for the
-// post-install plugin-CLI dispatch bug: writeInstalledManifest used to drop
-// capabilities.cliCommands, so even when a registry manifest declared them,
-// `wfctl <plugin-cmd>` reported `unknown command` because BuildCLIRegistry
-// reads from the on-disk plugin.json (not the registry manifest).
-func TestInstalledManifestPreservesCLICommands(t *testing.T) {
+// TestInstalledManifestPreservesCLICommandsAndBuildHooks is the regression
+// test for the post-install dispatch bug: writeInstalledManifest used to drop
+// capabilities.cliCommands and capabilities.buildHooks, so even when a
+// registry manifest declared them, BuildCLIRegistry / build-hook discovery
+// reading the on-disk plugin.json saw an empty list. `wfctl <plugin-cmd>`
+// then reported `unknown command` and build hooks silently no-oped.
+func TestInstalledManifestPreservesCLICommandsAndBuildHooks(t *testing.T) {
 	rm := &RegistryManifest{
 		Name:        "workflow-plugin-payments",
 		Version:     "0.3.1",
 		Author:      "tester",
-		Description: "regression: cliCommands preserved post-install",
+		Description: "regression: cliCommands + buildHooks preserved post-install",
 		Type:        "external",
 		Tier:        "core",
 		License:     "Apache-2.0",
@@ -443,8 +444,11 @@ func TestInstalledManifestPreservesCLICommands(t *testing.T) {
 			CLICommands: []RegistryCLICommand{
 				{Name: "payments", Description: "Payment provider operations"},
 			},
+			// Use a canonical event identifier (underscore-separated) per
+			// interfaces.HookEvent* convention; using a hyphen-separated
+			// placeholder would mask future validation drift.
 			BuildHooks: []RegistryBuildHook{
-				{Event: "pre-build", Priority: 10},
+				{Event: "pre_build", Priority: 10},
 			},
 		},
 	}
@@ -469,8 +473,8 @@ func TestInstalledManifestPreservesCLICommands(t *testing.T) {
 	if len(got.Capabilities.CLICommands) != 1 || got.Capabilities.CLICommands[0].Name != "payments" {
 		t.Errorf("CLICommands = %+v, want [{Name: payments, …}]", got.Capabilities.CLICommands)
 	}
-	if len(got.Capabilities.BuildHooks) != 1 || got.Capabilities.BuildHooks[0].Event != "pre-build" {
-		t.Errorf("BuildHooks = %+v, want [{Event: pre-build, …}]", got.Capabilities.BuildHooks)
+	if len(got.Capabilities.BuildHooks) != 1 || got.Capabilities.BuildHooks[0].Event != "pre_build" {
+		t.Errorf("BuildHooks = %+v, want [{Event: pre_build, …}]", got.Capabilities.BuildHooks)
 	}
 }
 
