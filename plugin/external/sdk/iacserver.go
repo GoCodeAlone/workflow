@@ -7,6 +7,7 @@ import (
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	ext "github.com/GoCodeAlone/workflow/plugin/external"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
@@ -95,7 +96,44 @@ func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
 	if v, ok := provider.(pb.ResourceDriverServer); ok {
 		pb.RegisterResourceDriverServer(s, v)
 	}
+
+	// Register a minimal PluginService so the wfctl host can call
+	// GetContractRegistry to discover the typed IaC services registered
+	// above. Strict-cutover IaC plugins (e.g. DO v1.0.0) that use
+	// ServeIaCPlugin do NOT register the SDK grpcServer (which normally
+	// handles GetContractRegistry for non-IaC plugins). Without this
+	// bridge, wfctl's NewExternalPluginAdapter fails with
+	// "unknown service workflow.plugin.v1.PluginService" when it calls
+	// GetContractRegistry, blocking the typedIaCAdapter load path.
+	//
+	// Guard: skip registration if PluginService is already on the server
+	// (e.g. a mixed plugin that called sdk.Serve AND RegisterAllIaC).
+	// gRPC panics on double-registration; the guard prevents that.
+	if _, alreadyRegistered := s.GetServiceInfo()["workflow.plugin.v1.PluginService"]; !alreadyRegistered {
+		pb.RegisterPluginServiceServer(s, &iacPluginServiceBridge{grpcSrv: s})
+	}
 	return nil
+}
+
+// iacPluginServiceBridge is a minimal pb.PluginServiceServer registered on
+// the gRPC server by RegisterAllIaCProviderServices. It implements only
+// GetContractRegistry, delegating to BuildContractRegistry so the wfctl
+// host can discover which typed IaC services the plugin registered.
+//
+// All other PluginService methods (InvokeService, GetManifest, etc.) remain
+// unimplemented (via UnimplementedPluginServiceServer) — strict-cutover IaC
+// plugins do not support string-dispatch or module/step/trigger contracts.
+type iacPluginServiceBridge struct {
+	pb.UnimplementedPluginServiceServer
+	grpcSrv *grpc.Server
+}
+
+// GetContractRegistry returns the set of gRPC services registered on
+// grpcSrv at call time, encoded as a *pb.ContractRegistry. wfctl uses
+// this to gate optional typed-client construction (Enumerator, DriftDetector,
+// etc.) after loading an IaC plugin via discoverAndLoadIaCProvider.
+func (b *iacPluginServiceBridge) GetContractRegistry(_ context.Context, _ *emptypb.Empty) (*pb.ContractRegistry, error) {
+	return BuildContractRegistry(b.grpcSrv), nil
 }
 
 // IaCServeOptions configures the IaC plugin gRPC server entrypoint.
