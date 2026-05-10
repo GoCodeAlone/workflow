@@ -40,7 +40,10 @@ var reservedCLICommands = map[string]struct{}{
 
 // isReservedCLICommand reports whether name is a reserved static wfctl command.
 func isReservedCLICommand(name string) bool {
-	_, ok := reservedCLICommands[name]
+	if _, ok := reservedCLICommands[name]; ok {
+		return true
+	}
+	_, ok := commands[name]
 	return ok
 }
 

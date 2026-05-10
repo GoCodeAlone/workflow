@@ -186,6 +186,27 @@ func main() {
 		updateNoticeDone = checkForUpdateNotice()
 	}
 
+	if _, isStatic := commands[cmd]; !isStatic {
+		registry, err := BuildCLIRegistry(defaultPluginCommandDir())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: load plugin CLI commands: %v\n", err) //nolint:gosec // G705
+			os.Exit(1)
+		}
+		if entry := registry.LookupCLICommand(cmd); entry != nil {
+			if err := DispatchCLICommand(entry, os.Args[1:]); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705
+				os.Exit(1)
+			}
+			if updateNoticeDone != nil {
+				select {
+				case <-updateNoticeDone:
+				case <-time.After(time.Second):
+				}
+			}
+			return
+		}
+	}
+
 	// Set up a context that is cancelled on SIGINT/SIGTERM so that long-running
 	// commands (e.g. wfctl mcp, wfctl run) can be interrupted cleanly.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -221,4 +242,11 @@ func main() {
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+func defaultPluginCommandDir() string {
+	if pluginDir := strings.TrimSpace(os.Getenv("WFCTL_PLUGIN_DIR")); pluginDir != "" {
+		return pluginDir
+	}
+	return defaultDataDir
 }

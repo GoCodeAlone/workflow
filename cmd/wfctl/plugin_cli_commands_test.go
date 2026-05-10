@@ -30,7 +30,7 @@ func writeCLIPlugin(t *testing.T, pluginsDir, name string, commands []string) {
 func TestPluginCLIRegistry_TwoPluginsTwoCommands(t *testing.T) {
 	dir := t.TempDir()
 	writeCLIPlugin(t, dir, "supply-chain", []string{"supply-chain"})
-	writeCLIPlugin(t, dir, "migrate", []string{"migrate"})
+	writeCLIPlugin(t, dir, "data-migrate", []string{"data-migrate"})
 
 	reg, err := BuildCLIRegistry(dir)
 	if err != nil {
@@ -39,8 +39,8 @@ func TestPluginCLIRegistry_TwoPluginsTwoCommands(t *testing.T) {
 	if _, ok := reg["supply-chain"]; !ok {
 		t.Error("supply-chain command should be registered")
 	}
-	if _, ok := reg["migrate"]; !ok {
-		t.Error("migrate command should be registered")
+	if _, ok := reg["data-migrate"]; !ok {
+		t.Error("data-migrate command should be registered")
 	}
 }
 
@@ -86,5 +86,13 @@ func TestStaticCommandWins(t *testing.T) {
 	// "validate" is a static command — it should be in the reserved list.
 	if !isReservedCLICommand("validate") {
 		t.Error("validate should be in the reserved list")
+	}
+}
+
+func TestPluginCLIRegistry_AllStaticCommandsReserved(t *testing.T) {
+	for name := range commands {
+		if !isReservedCLICommand(name) {
+			t.Fatalf("static command %q should be reserved", name)
+		}
 	}
 }
