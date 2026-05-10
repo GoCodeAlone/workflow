@@ -271,6 +271,10 @@ jobs:
       # workflow release.
       run: |
         set -euo pipefail
+        # protoc-gen-go ships from the google.golang.org/protobuf module
+        # (path google.golang.org/protobuf/cmd/protoc-gen-go is NOT a
+        # standalone module), so its version line resolves against the
+        # parent module — same Version, intentional dedup, not a copy-paste.
         {
           echo "grpc=$(go list -m -json google.golang.org/grpc | jq -r .Version)"
           echo "protobuf=$(go list -m -json google.golang.org/protobuf | jq -r .Version)"
