@@ -3,6 +3,7 @@ package sensitive
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -86,22 +87,24 @@ func TestRoute_SensitiveValuePresent_RoutesAndSanitizes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	if p.values["myres_secret_key"] != "SECRET" {
+	secretKey := SecretKey("myres", "secret_key")
+	accessKey := SecretKey("myres", "access_key")
+	if p.values[secretKey] != "SECRET" {
 		t.Errorf("provider did not receive secret_key; got %v", p.values)
 	}
-	if p.values["myres_access_key"] != "AK" {
+	if p.values[accessKey] != "AK" {
 		t.Errorf("provider did not receive access_key; got %v", p.values)
 	}
-	if sanitized["secret_key"] != "secret_ref://myres_secret_key" {
+	if sanitized["secret_key"] != Placeholder("myres", "secret_key") {
 		t.Errorf("sanitized[secret_key] = %v, want placeholder", sanitized["secret_key"])
 	}
-	if sanitized["access_key"] != "secret_ref://myres_access_key" {
+	if sanitized["access_key"] != Placeholder("myres", "access_key") {
 		t.Errorf("sanitized[access_key] = %v, want placeholder", sanitized["access_key"])
 	}
 	if sanitized["bucket"] != "b" {
 		t.Errorf("non-sensitive bucket lost: %v", sanitized["bucket"])
 	}
-	if hydrated["myres_secret_key"] != "SECRET" {
+	if hydrated[secretKey] != "SECRET" {
 		t.Errorf("hydrated missing secret_key: %v", hydrated)
 	}
 }
@@ -119,14 +122,14 @@ func TestRoute_SensitiveKeyAbsentFromOutputs_Skipped(t *testing.T) {
 	if _, ok := sanitized["secret_key"]; ok {
 		t.Errorf("absent sensitive key should NOT yield placeholder, got %v", sanitized["secret_key"])
 	}
-	if _, ok := p.values["myres_secret_key"]; ok {
+	if _, ok := p.values[SecretKey("myres", "secret_key")]; ok {
 		t.Errorf("provider should not have received secret_key (absent value)")
 	}
-	if hydrated["myres_secret_key"] != "" {
+	if hydrated[SecretKey("myres", "secret_key")] != "" {
 		t.Errorf("hydrated should not contain absent key")
 	}
 	// access_key was present, should be routed
-	if sanitized["access_key"] != "secret_ref://myres_access_key" {
+	if sanitized["access_key"] != Placeholder("myres", "access_key") {
 		t.Errorf("access_key routing failed: %v", sanitized["access_key"])
 	}
 }
@@ -151,7 +154,7 @@ func TestRoute_SensitiveFalseValue_NotRouted(t *testing.T) {
 
 func TestRoute_ProviderSetError_ReturnsError(t *testing.T) {
 	p := newFakeProvider()
-	p.setErr["myres_secret_key"] = errors.New("boom")
+	p.setErr[SecretKey("myres", "secret_key")] = errors.New("boom")
 	out := &interfaces.ResourceOutput{
 		Outputs:   map[string]any{"secret_key": "S"},
 		Sensitive: map[string]bool{"secret_key": true},
@@ -215,7 +218,7 @@ func TestRoute_DeterministicSetOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
-	want := []string{"r_a_key", "r_b_key", "r_c_key"}
+	want := []string{SecretKey("r", "a_key"), SecretKey("r", "b_key"), SecretKey("r", "c_key")}
 	if len(p.setLog) != len(want) {
 		t.Fatalf("setLog len: got %v want %v", p.setLog, want)
 	}
@@ -250,25 +253,25 @@ func TestRoute_NilOut_Errors(t *testing.T) {
 
 func TestRevoke_DeletesAllKeys(t *testing.T) {
 	p := newFakeProvider()
-	p.values["r_secret_key"] = "S"
-	p.values["r_access_key"] = "A"
+	p.values[SecretKey("r", "secret_key")] = "S"
+	p.values[SecretKey("r", "access_key")] = "A"
 	if err := Revoke(context.Background(), p, "r", []string{"secret_key", "access_key"}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	if _, ok := p.values["r_secret_key"]; ok {
+	if _, ok := p.values[SecretKey("r", "secret_key")]; ok {
 		t.Errorf("secret_key not deleted")
 	}
-	if _, ok := p.values["r_access_key"]; ok {
+	if _, ok := p.values[SecretKey("r", "access_key")]; ok {
 		t.Errorf("access_key not deleted")
 	}
 }
 
 func TestRevoke_AggregatesErrors(t *testing.T) {
 	p := newFakeProvider()
-	p.values["r_secret_key"] = "S"
-	p.values["r_access_key"] = "A"
-	p.delErr["r_secret_key"] = errors.New("boom1")
-	p.delErr["r_access_key"] = errors.New("boom2")
+	p.values[SecretKey("r", "secret_key")] = "S"
+	p.values[SecretKey("r", "access_key")] = "A"
+	p.delErr[SecretKey("r", "secret_key")] = errors.New("boom1")
+	p.delErr[SecretKey("r", "access_key")] = errors.New("boom2")
 	err := Revoke(context.Background(), p, "r", []string{"secret_key", "access_key"})
 	if err == nil {
 		t.Fatal("expected aggregated error")
@@ -282,11 +285,11 @@ func TestRevoke_AggregatesErrors(t *testing.T) {
 func TestRevoke_ContinuesAfterError(t *testing.T) {
 	// First key errors; second key should still be Deleted.
 	p := newFakeProvider()
-	p.values["r_secret_key"] = "S"
-	p.values["r_access_key"] = "A"
-	p.delErr["r_secret_key"] = errors.New("boom")
+	p.values[SecretKey("r", "secret_key")] = "S"
+	p.values[SecretKey("r", "access_key")] = "A"
+	p.delErr[SecretKey("r", "secret_key")] = errors.New("boom")
 	_ = Revoke(context.Background(), p, "r", []string{"secret_key", "access_key"})
-	if _, ok := p.values["r_access_key"]; ok {
+	if _, ok := p.values[SecretKey("r", "access_key")]; ok {
 		t.Error("access_key not deleted (Revoke should continue past first error)")
 	}
 }
@@ -294,8 +297,8 @@ func TestRevoke_ContinuesAfterError(t *testing.T) {
 func TestRevoke_NotFoundIsSuccess(t *testing.T) {
 	p := newFakeProvider()
 	// Pre-populate one key; Delete on a missing one returns ErrNotFound.
-	p.values["r_secret_key"] = "S"
-	p.delErr["r_access_key"] = secrets.ErrNotFound
+	p.values[SecretKey("r", "secret_key")] = "S"
+	p.delErr[SecretKey("r", "access_key")] = secrets.ErrNotFound
 	if err := Revoke(context.Background(), p, "r", []string{"secret_key", "access_key"}); err != nil {
 		t.Fatalf("Revoke should swallow ErrNotFound, got %v", err)
 	}
@@ -338,7 +341,7 @@ func TestIsPlaceholder(t *testing.T) {
 
 func TestPlaceholder(t *testing.T) {
 	got := Placeholder("myres", "secret_key")
-	want := "secret_ref://myres_secret_key"
+	want := PlaceholderPrefix + SecretKey("myres", "secret_key")
 	if got != want {
 		t.Errorf("Placeholder = %q, want %q", got, want)
 	}
@@ -346,9 +349,31 @@ func TestPlaceholder(t *testing.T) {
 
 func TestSecretKey(t *testing.T) {
 	got := SecretKey("myres", "secret_key")
-	want := "myres_secret_key"
-	if got != want {
-		t.Errorf("SecretKey = %q, want %q", got, want)
+	if ok, _ := regexp.MatchString(`^[A-Za-z_][A-Za-z0-9_]*$`, got); !ok {
+		t.Fatalf("SecretKey = %q, want provider-safe name", got)
+	}
+	if !strings.HasPrefix(got, "myres__secret_key_") {
+		t.Errorf("SecretKey = %q, want sanitized parts plus hash suffix", got)
+	}
+	for _, pair := range [][2]string{
+		{"a", "b_c"},
+		{"a_b", "c"},
+		{"a-b", "c"},
+		{"a_b", "c"},
+		{"github", "token"},
+	} {
+		if key := SecretKey(pair[0], pair[1]); !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(key) {
+			t.Fatalf("SecretKey(%q,%q) = %q, want provider-safe name", pair[0], pair[1], key)
+		}
+	}
+	if SecretKey("a", "b_c") == SecretKey("a_b", "c") {
+		t.Fatal("SecretKey must not collide for underscore-ambiguous pairs")
+	}
+	if SecretKey("a-b", "c") == SecretKey("a_b", "c") {
+		t.Fatal("SecretKey must not collide for sanitized-equivalent resource names")
+	}
+	if key := SecretKey("github", "token"); regexp.MustCompile(`(?i)^github_`).MatchString(key) {
+		t.Fatalf("SecretKey = %q, must not use GitHub-reserved prefix", key)
 	}
 }
 

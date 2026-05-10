@@ -20,6 +20,8 @@ package sensitive
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -36,10 +38,16 @@ import (
 const PlaceholderPrefix = "secret_ref://"
 
 // SecretKey returns the canonical secrets.Provider key for a resource's
-// output: "<resourceName>_<outputKey>". Exported so audit-state-secrets
-// and other consumers can reverse-engineer routed-secret names.
+// output. The key is provider-safe and collision-resistant for distinct
+// (resourceName, outputKey) pairs. Exported so audit-state-secrets and other
+// consumers can reverse-engineer routed-secret names.
 func SecretKey(resourceName, outputKey string) string {
-	return resourceName + "_" + outputKey
+	raw := resourceName + "\x00" + outputKey
+	key := sanitizeSecretKeyPart(resourceName) + "__" + sanitizeSecretKeyPart(outputKey) + "_" + shortHash(raw)
+	if strings.HasPrefix(strings.ToUpper(key), "GITHUB_") {
+		key = "WF_" + key
+	}
+	return key
 }
 
 // Placeholder returns the canonical "secret_ref://<resourceName>_<outputKey>"
@@ -152,6 +160,38 @@ func stringifyOutput(v any) (string, error) {
 	default:
 		return "", fmt.Errorf("sensitive output value type %T not supported (must be string)", v)
 	}
+}
+
+func sanitizeSecretKeyPart(part string) string {
+	var b strings.Builder
+	b.Grow(len(part))
+	for _, r := range part {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if out == "" {
+		out = "SECRET"
+	}
+	if out[0] >= '0' && out[0] <= '9' {
+		out = "_" + out
+	}
+	return out
+}
+
+func shortHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return strings.ToUpper(hex.EncodeToString(sum[:4]))
 }
 
 // Revoke deletes routed secrets for resourceName. mergedKeys is the union
