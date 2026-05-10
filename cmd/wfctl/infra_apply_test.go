@@ -127,6 +127,50 @@ func (d *readDriver) AdoptionRef(spec interfaces.ResourceSpec) (interfaces.Resou
 	return interfaces.ResourceRef{Name: spec.Name, Type: spec.Type, ProviderID: providerID}, true, nil
 }
 
+type configAdoptDriver struct {
+	readOut                *interfaces.ResourceOutput
+	readErr                error
+	reads                  []interfaces.ResourceRef
+	expectedProviderID     string
+	supportsConfigAdoption bool
+}
+
+func (d *configAdoptDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type}, nil
+}
+
+func (d *configAdoptDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	d.reads = append(d.reads, ref)
+	if d.expectedProviderID != "" && ref.ProviderID != d.expectedProviderID {
+		return nil, interfaces.ErrResourceNotFound
+	}
+	return d.readOut, d.readErr
+}
+
+func (d *configAdoptDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID}, nil
+}
+
+func (d *configAdoptDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+
+func (d *configAdoptDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	return &interfaces.DiffResult{NeedsUpdate: true}, nil
+}
+
+func (d *configAdoptDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	return nil, nil
+}
+
+func (d *configAdoptDriver) Scale(_ context.Context, ref interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: ref.Name, Type: ref.Type, ProviderID: ref.ProviderID}, nil
+}
+
+func (d *configAdoptDriver) SensitiveKeys() []string { return nil }
+
+func (d *configAdoptDriver) SupportsConfigAdoption() bool {
+	return d.supportsConfigAdoption
+}
+
 type readBackedProvider struct {
 	applyCapture
 	driver interfaces.ResourceDriver
@@ -952,6 +996,133 @@ func TestApplyWithProvider_AdoptsResourceThroughDriverLocator(t *testing.T) {
 	}
 	if appliedPlan == nil || len(appliedPlan.Actions) != 1 || appliedPlan.Actions[0].Current == nil || appliedPlan.Actions[0].Current.ProviderID != "app-123" {
 		t.Fatalf("applied plan = %#v, want update using adopted current state", appliedPlan)
+	}
+}
+
+func TestApplyWithProvider_AdoptsResourceWhenConfigAdoptExistingTrue(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "wfcompute-stg-db",
+		Type: "infra.database",
+		Config: map[string]any{
+			"adopt_existing": true,
+			"engine":         "pg",
+			"version":        "18",
+		},
+	}
+	driver := &configAdoptDriver{
+		supportsConfigAdoption: true,
+		readOut: &interfaces.ResourceOutput{
+			Name:       "wfcompute-stg-db",
+			Type:       "infra.database",
+			ProviderID: "db-123",
+			Outputs: map[string]any{
+				"name":   "wfcompute-stg-db",
+				"engine": "pg",
+			},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	store := &fakeStateStore{}
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	if len(driver.reads) != 1 {
+		t.Fatalf("driver reads = %d, want 1", len(driver.reads))
+	}
+	if driver.reads[0] != (interfaces.ResourceRef{Name: "wfcompute-stg-db", Type: "infra.database"}) {
+		t.Fatalf("read ref = %+v, want name/type only", driver.reads[0])
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 1 || store.saved[0].ProviderID != "db-123" {
+		t.Fatalf("saved states = %+v, want adopted db-123", store.saved)
+	}
+	provider.mu.Lock()
+	appliedPlan := provider.appliedPlan
+	provider.mu.Unlock()
+	if appliedPlan == nil || len(appliedPlan.Actions) != 1 || appliedPlan.Actions[0].Action != "update" {
+		t.Fatalf("applied plan = %#v, want update after adoption", appliedPlan)
+	}
+}
+
+func TestApplyWithProvider_ConfigAdoptionRejectsUnsupportedDriver(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "wfcompute-stg-db",
+		Type: "infra.database",
+		Config: map[string]any{
+			"adopt_existing": true,
+		},
+	}
+	driver := &configAdoptDriver{}
+	provider := &readBackedProvider{driver: driver}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected unsupported config adoption error")
+	}
+	if !strings.Contains(err.Error(), "adopt_existing requires a driver that supports name-based adoption") {
+		t.Fatalf("error = %v, want unsupported config adoption failure", err)
+	}
+	if len(driver.reads) != 0 {
+		t.Fatalf("driver reads = %d, want 0", len(driver.reads))
+	}
+}
+
+func TestApplyWithProvider_ConfigAdoptionRejectsNilDriver(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "wfcompute-stg-db",
+		Type: "infra.database",
+		Config: map[string]any{
+			"adopt_existing": true,
+		},
+	}
+	provider := &readBackedProvider{}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected nil driver resolution error")
+	}
+	if !strings.Contains(err.Error(), "resolve resource driver: driver returned nil") {
+		t.Fatalf("error = %v, want nil driver resolution failure", err)
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if provider.applyCalled {
+		t.Fatal("Apply should not be called when explicit adoption driver resolution fails")
+	}
+}
+
+func TestApplyWithProvider_DNSAdoptionPreservesBuiltInRefWithAdoptExisting(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "site-dns",
+		Type: "infra.dns",
+		Config: map[string]any{
+			"adopt_existing": true,
+			"domain":         "example.com",
+		},
+	}
+	driver := &configAdoptDriver{
+		expectedProviderID: "example.com",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "do-domain-123",
+			Outputs: map[string]any{
+				"domain": "example.com",
+			},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	if len(driver.reads) != 1 {
+		t.Fatalf("driver reads = %d, want 1", len(driver.reads))
+	}
+	if driver.reads[0] != (interfaces.ResourceRef{Name: "site-dns", Type: "infra.dns", ProviderID: "example.com"}) {
+		t.Fatalf("read ref = %+v, want built-in DNS domain ref", driver.reads[0])
 	}
 }
 

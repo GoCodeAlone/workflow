@@ -692,6 +692,10 @@ func (d *typedResourceDriver) SensitiveKeys() []string {
 	return append([]string(nil), resp.GetKeys()...)
 }
 
+func (d *typedResourceDriver) SupportsConfigAdoption() bool {
+	return true
+}
+
 // Troubleshoot satisfies interfaces.Troubleshooter (optional). gRPC
 // Unimplemented (the legitimate negative signal when the plugin's
 // driver does not implement Troubleshoot) is translated to
