@@ -345,16 +345,14 @@ func resourceStateProviderRef(st interfaces.ResourceState) string {
 	if st.AppliedConfig == nil {
 		return ""
 	}
-	providerRef, _ := st.AppliedConfig["provider"].(string)
-	return providerRef
+	return resolveIaCProviderRef(st.AppliedConfig)
 }
 
 func resourceSpecProviderRef(spec interfaces.ResourceSpec) string {
 	if spec.Config == nil {
 		return ""
 	}
-	providerRef, _ := spec.Config["provider"].(string)
-	return providerRef
+	return resolveIaCProviderRef(spec.Config)
 }
 
 // applyWithProviderAndStore computes a diff plan for the given specs against
@@ -554,7 +552,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 			for i := range specs {
 				if specs[i].Name == r.Name {
 					appliedCfg = specs[i].Config
-					providerRef, _ = specs[i].Config["provider"].(string)
+					providerRef = resolveIaCProviderRef(specs[i].Config)
 					dependencies = append([]string(nil), specs[i].DependsOn...)
 					break
 				}
@@ -1166,22 +1164,22 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 
 	for i := range plan.Actions {
 		action := &plan.Actions[i]
-		moduleRef, _ := action.Resource.Config["provider"].(string)
+		moduleRef := resolveIaCProviderRef(action.Resource.Config)
 		// delete actions from ComputePlan carry an empty Resource.Config — the
 		// provider ref must be recovered from the recorded current state instead.
 		if moduleRef == "" && action.Current != nil {
 			moduleRef = action.Current.ProviderRef
 			if moduleRef == "" {
-				moduleRef, _ = action.Current.AppliedConfig["provider"].(string)
+				moduleRef = resolveIaCProviderRef(action.Current.AppliedConfig)
 			}
 		}
 		if moduleRef == "" {
-			return runHydrated, fmt.Errorf("plan action for %q: missing 'provider' field in resource config (delete actions require a current state record)", action.Resource.Name)
+			return runHydrated, fmt.Errorf("plan action for %q: missing 'iac_provider' or 'provider' field in resource config (delete actions require a current state record)", action.Resource.Name)
 		}
 		if _, exists := groups[moduleRef]; !exists {
 			def, ok := providerDefs[moduleRef]
 			if !ok {
-				return runHydrated, fmt.Errorf("plan action for %q references provider %q which is not declared as an iac.provider module", action.Resource.Name, moduleRef)
+				return runHydrated, fmt.Errorf("plan action for %q references iac.provider module %q (resolved from iac_provider/provider field) which is not declared as an iac.provider module", action.Resource.Name, moduleRef)
 			}
 			groups[moduleRef] = &actionGroup{provType: def.provType, provCfg: def.provCfg}
 			groupOrder = append(groupOrder, moduleRef)
@@ -1339,7 +1337,7 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 			for i := range plan.Actions {
 				if plan.Actions[i].Resource.Name == r.Name {
 					appliedCfg = plan.Actions[i].Resource.Config
-					providerRef, _ = plan.Actions[i].Resource.Config["provider"].(string)
+					providerRef = resolveIaCProviderRef(plan.Actions[i].Resource.Config)
 					dependencies = append([]string(nil), plan.Actions[i].Resource.DependsOn...)
 					break
 				}

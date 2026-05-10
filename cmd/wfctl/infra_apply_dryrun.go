@@ -153,7 +153,7 @@ func printDryRunJSON(cfgFile, envName string, plan interfaces.IaCPlan, providerG
 	actions := make([]DryRunAction, 0, len(plan.Actions))
 	for i := range plan.Actions {
 		a := &plan.Actions[i]
-		provRef, _ := a.Resource.Config["provider"].(string)
+		provRef := resolveIaCProviderRef(a.Resource.Config)
 		actions = append(actions, DryRunAction{
 			Action:       a.Action,
 			ResourceName: a.Resource.Name,
@@ -223,7 +223,7 @@ func collectProviderGroups(cfgFile, envName string, specs []interfaces.ResourceS
 		if !strings.HasPrefix(spec.Type, "infra.") {
 			continue
 		}
-		moduleRef, _ := spec.Config["provider"].(string)
+		moduleRef := resolveIaCProviderRef(spec.Config)
 		if moduleRef == "" {
 			continue
 		}

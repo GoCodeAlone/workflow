@@ -210,7 +210,7 @@ func groupStatesByProvider(states []interfaces.ResourceState, cfgFile, envName s
 		moduleRef := resourceStateProviderRef(*st)
 		if spec, ok := specByName[st.Name]; ok {
 			if moduleRef == "" {
-				moduleRef, _ = spec.Config["provider"].(string)
+				moduleRef = resolveIaCProviderRef(spec.Config)
 			}
 		}
 		if moduleRef == "" {
