@@ -7,7 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
+	iofs "io/fs"
 	"os"
 	"strings"
 
@@ -233,8 +233,11 @@ func defaultAlignLoadProviders(alignCtx *alignContext, envName string, _ *interf
 func loadPlanJSON(path string) (*interfaces.IaCPlan, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("plan file %q does not exist — did the upstream `wfctl infra plan --output %s` step succeed? Check its stderr for state-backend errors (e.g. InvalidAccessKeyId, SignatureDoesNotMatch). In CI, ensure the plan step uses `set -o pipefail` so wfctl's non-zero exit is not masked by a downstream pipe (e.g. `| tee`)", path, path)
+		if errors.Is(err, iofs.ErrNotExist) {
+			// Wrap (don't replace) so errors.Is(..., iofs.ErrNotExist) still
+			// matches and the underlying *PathError is preserved for callers
+			// that want to introspect the cause.
+			return nil, fmt.Errorf("plan file %q does not exist — did the upstream `wfctl infra plan --output %q` step succeed? Check its stderr for state-backend errors (e.g. InvalidAccessKeyId, SignatureDoesNotMatch). In CI, ensure the plan step uses `set -o pipefail` so wfctl's non-zero exit is not masked by a downstream pipe (e.g. `| tee`): %w", path, path, err)
 		}
 		return nil, err
 	}

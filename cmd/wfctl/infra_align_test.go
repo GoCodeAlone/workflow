@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1116,6 +1118,11 @@ func TestLoadPlanJSON_MissingFileEmitsActionableHint(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message missing %q hint: %s", want, msg)
 		}
+	}
+	// The hint must wrap (not replace) the underlying error so callers can
+	// still match with errors.Is(..., iofs.ErrNotExist).
+	if !errors.Is(err, iofs.ErrNotExist) {
+		t.Errorf("expected errors.Is(err, iofs.ErrNotExist) to match wrapped error; got: %v", err)
 	}
 }
 
