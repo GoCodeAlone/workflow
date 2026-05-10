@@ -6,8 +6,9 @@
 //   - Route is invoked on Create/Update only. Read/Adoption/Refresh paths
 //     use Sanitize-only logic (not in this package — see
 //     cmd/wfctl/infra_apply.go) to prevent cache pollution.
-//   - The placeholder format "secret_ref://<resource>_<key>" is distinct
-//     from the user-supplied "secret://<key>" config-reference convention.
+//   - The placeholder format "secret_ref://<SecretKey(resource,key)>" is
+//     distinct from the user-supplied "secret://<key>" config-reference
+//     convention.
 //   - Routing trigger is exclusively out.Sensitive[k]==true (per-call
 //     dynamic). ResourceDriver.SensitiveKeys() is NOT consulted here;
 //     it remains a display-masking signal.

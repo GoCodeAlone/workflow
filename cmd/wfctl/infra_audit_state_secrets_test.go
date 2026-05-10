@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/sensitive"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -157,5 +158,31 @@ func TestAuditStateSecrets_ValidPlaceholderWithMatchingProvider_NoFinding(t *tes
 	rc := runAuditStateSecrets(context.Background(), w, store, prov)
 	if rc != 0 {
 		t.Errorf("rc = %d, want 0 (placeholder + matching provider value); output:\n%s", rc, w.String())
+	}
+}
+
+func TestAuditStateSecrets_NewSecretKeyPlaceholderNotPruned(t *testing.T) {
+	liveKey := sensitive.SecretKey("live", "secret_key")
+	store := &stubInfraStore{
+		saved: []interfaces.ResourceState{
+			{Name: "live", Outputs: map[string]any{"secret_key": sensitive.Placeholder("live", "secret_key")}},
+		},
+	}
+	prov := newEnvTestProvider()
+	prov.values[liveKey] = "VALID"
+	prov.values["ghost_secret_key"] = "ORPHAN"
+	w := &bytes.Buffer{}
+	rc := runAuditStateSecretsWithPrune(context.Background(), w, store, prov, true)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0 after pruning only orphan; output:\n%s", rc, w.String())
+	}
+	if _, ok := prov.values[liveKey]; !ok {
+		t.Fatalf("live routed secret %q was pruned; remaining values: %v", liveKey, prov.values)
+	}
+	if _, ok := prov.values["ghost_secret_key"]; ok {
+		t.Fatalf("orphan secret was not pruned; remaining values: %v", prov.values)
+	}
+	if strings.Contains(w.String(), liveKey) {
+		t.Errorf("live routed secret should not be reported as orphan; output:\n%s", w.String())
 	}
 }
