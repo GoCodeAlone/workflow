@@ -138,10 +138,14 @@ func BuildCLIRegistry(pluginsDir string) (CLIRegistry, error) {
 					existing.PluginName, manifestName, name,
 				)
 			}
-			// Binary path uses the actual on-disk directory (which `wfctl
-			// plugin install` controls) plus the manifest-declared binary
-			// name (which the tarball ships).
-			binaryPath := filepath.Join(pluginsDir, p.dirName, manifestName)
+			// Binary path uses the on-disk directory name TWICE because
+			// `wfctl plugin install` calls ensurePluginBinary(destDir,
+			// pluginName) which RENAMES the largest executable in destDir
+			// to match the (short) plugin name. After install the binary
+			// lives at destDir/{shortName}/{shortName}. Earlier code joined
+			// destDir+manifestName, which only works in the rare case
+			// where the dir name and manifest name happen to coincide.
+			binaryPath := filepath.Join(pluginsDir, p.dirName, p.dirName)
 			registry[name] = &CLIRegistryEntry{
 				Command:     name,
 				PluginName:  manifestName,

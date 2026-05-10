@@ -18,7 +18,11 @@ func writeCLIPlugin(t *testing.T, pluginsDir, name string, commands []string) {
 // writeCLIPluginNamed builds a plugin where the on-disk directory name and
 // the manifest name can differ — matches the real-world install convention
 // (short dir name like "payments" + full manifest name like
-// "workflow-plugin-payments"). The stub binary is named after the manifest.
+// "workflow-plugin-payments").
+//
+// `wfctl plugin install` runs ensurePluginBinary post-extract which renames
+// the executable to match the (short) install dir name, so the stub binary
+// here is named after dirName rather than manifestName.
 func writeCLIPluginNamed(t *testing.T, pluginsDir, dirName, manifestName string, commands []string) {
 	t.Helper()
 	dir := filepath.Join(pluginsDir, dirName)
@@ -34,7 +38,7 @@ func writeCLIPluginNamed(t *testing.T, pluginsDir, dirName, manifestName string,
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write plugin.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, manifestName), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, dirName), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write stub binary: %v", err)
 	}
 }
@@ -110,13 +114,20 @@ func TestPluginCLIRegistry_AllStaticCommandsReserved(t *testing.T) {
 }
 
 // TestPluginCLIRegistry_DirVsManifestNameMismatch is the regression test for
-// the binary-path bug introduced in workflow#591. setup-plugins (and `wfctl
-// plugin install`) extract tarballs to short directory names like
-// `data/plugins/payments` while the binary inside is named after the
-// manifest (`workflow-plugin-payments`). The earlier path computation
-// joined `manifest.Name` twice — the binary path resolved to
-// `data/plugins/workflow-plugin-payments/workflow-plugin-payments`, which
-// only existed when dirName == manifestName.
+// the binary-path bug. setup-plugins (and `wfctl plugin install`) extract
+// tarballs to short directory names like `data/plugins/payments`. After
+// extraction `ensurePluginBinary` renames the largest executable to match
+// the (short) install dir name. So the binary post-install lives at
+// `<dir>/<shortName>/<shortName>` regardless of what the tarball or the
+// manifest call it.
+//
+// The earlier path computation went through two iterations:
+//  1. workflow#591 joined manifest.Name twice → broke for short dirs.
+//  2. workflow#595 joined dirName + manifest.Name → broke because
+//     ensurePluginBinary renames the binary AWAY from manifest.Name.
+//
+// This test pins both sides: dir name + binary file name = the install
+// dir name; manifest name flows into PluginName for log/audit purposes.
 func TestPluginCLIRegistry_DirVsManifestNameMismatch(t *testing.T) {
 	dir := t.TempDir()
 	writeCLIPluginNamed(t, dir, "payments", "workflow-plugin-payments", []string{"payments"})
@@ -129,7 +140,7 @@ func TestPluginCLIRegistry_DirVsManifestNameMismatch(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected `payments` command registered, got %v", reg)
 	}
-	wantBin := filepath.Join(dir, "payments", "workflow-plugin-payments")
+	wantBin := filepath.Join(dir, "payments", "payments")
 	if entry.BinaryPath != wantBin {
 		t.Errorf("BinaryPath = %q, want %q", entry.BinaryPath, wantBin)
 	}
