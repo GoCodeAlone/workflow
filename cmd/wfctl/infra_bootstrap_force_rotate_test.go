@@ -242,6 +242,11 @@ func TestInfraBootstrap_ForceRotate_ProviderCredential_RevokeFailNonFatal(t *tes
 }
 
 // stubProviderRevoker is a test double for interfaces.ProviderCredentialRevoker.
+// (Task 17 keeps the Go-interface signature for caller stability +
+// test-fixture compatibility; capability discovery in
+// resolveCredentialRevoker uses the typed adapter's CredentialRevoker()
+// accessor before returning the interface, so unregistered services no
+// longer reach the dispatch path.)
 type stubProviderRevoker struct {
 	fn func(ctx context.Context, source, credentialID string) error
 }

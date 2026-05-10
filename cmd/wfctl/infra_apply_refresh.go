@@ -61,20 +61,40 @@ func runInfraApplyRefreshPhase(
 		return nil
 	}
 
-	// Use DriftConfigDetector when the provider supports it (optional interface).
-	// Short-circuits to legacy DetectDrift when specsMap is nil (no "apply"-
-	// provenance entries available) to avoid unnecessary RPC round-trips.
+	// Per Task 17 of the strict-contracts force-cutover: replace the
+	// legacy `provider.(interfaces.DriftConfigDetector)` type-assert
+	// with a typed pb.IaCProviderDriftConfigDetectorClient lookup via
+	// the typed adapter's capability accessor. When the plugin's
+	// ContractRegistry didn't advertise IaCProviderDriftConfigDetector,
+	// the accessor returns nil and we short-circuit to the required
+	// IaCProvider.DetectDrift path — preserving the v0.27.1 behavior
+	// without the wasted RPC + sentinel-error round-trip.
 	var results []interfaces.DriftResult
 	var err error
-	if d, ok := provider.(interfaces.DriftConfigDetector); ok {
-		specsMap := buildAppliedSpecMap(states, refs)
-		if specsMap != nil {
-			results, err = d.DetectDriftWithSpecs(ctx, refs, specsMap)
+	if adapter, ok := provider.(*typedIaCAdapter); ok {
+		if cli := adapter.DriftConfigDetector(); cli != nil {
+			specsMap := buildAppliedSpecMap(states, refs)
+			if specsMap != nil {
+				results, err = detectDriftConfigTyped(ctx, cli, refs, specsMap)
+			} else {
+				results, err = provider.DetectDrift(ctx, refs)
+			}
 		} else {
 			results, err = provider.DetectDrift(ctx, refs)
 		}
 	} else {
-		results, err = provider.DetectDrift(ctx, refs)
+		// Provider isn't a typedIaCAdapter (e.g., test fake). Fall back
+		// to the Go-interface path the test provides directly.
+		if d, ok := provider.(interfaces.DriftConfigDetector); ok {
+			specsMap := buildAppliedSpecMap(states, refs)
+			if specsMap != nil {
+				results, err = d.DetectDriftWithSpecs(ctx, refs, specsMap)
+			} else {
+				results, err = provider.DetectDrift(ctx, refs)
+			}
+		} else {
+			results, err = provider.DetectDrift(ctx, refs)
+		}
 	}
 	if err != nil {
 		// Transient or auth error — propagate; do NOT prune anything.

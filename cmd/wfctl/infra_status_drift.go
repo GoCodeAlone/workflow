@@ -100,19 +100,36 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 			}()
 		}
 
-		// Use DriftConfigDetector when the provider supports it (optional interface).
-		// Short-circuits to legacy DetectDrift when specsMap is nil (no "apply"-
-		// provenance entries available) to avoid unnecessary RPC round-trips.
+		// Per Task 17 of the strict-contracts force-cutover: prefer the
+		// typed pb.IaCProviderDriftConfigDetectorClient via the typed
+		// adapter's capability accessor. Falls back to required
+		// IaCProvider.DetectDrift when the optional service isn't
+		// registered or when the caller has no specsMap to send.
 		var results []interfaces.DriftResult
-		if d, ok := provider.(interfaces.DriftConfigDetector); ok {
-			specsMap := buildAppliedSpecMap(states, g.refs)
-			if specsMap != nil {
-				results, err = d.DetectDriftWithSpecs(ctx, g.refs, specsMap)
+		if adapter, ok := provider.(*typedIaCAdapter); ok {
+			if cli := adapter.DriftConfigDetector(); cli != nil {
+				specsMap := buildAppliedSpecMap(states, g.refs)
+				if specsMap != nil {
+					results, err = detectDriftConfigTyped(ctx, cli, g.refs, specsMap)
+				} else {
+					results, err = provider.DetectDrift(ctx, g.refs)
+				}
 			} else {
 				results, err = provider.DetectDrift(ctx, g.refs)
 			}
 		} else {
-			results, err = provider.DetectDrift(ctx, g.refs)
+			// Provider isn't a typedIaCAdapter (e.g., test fake).
+			// Fall back to the Go-interface path the test provides.
+			if d, ok := provider.(interfaces.DriftConfigDetector); ok {
+				specsMap := buildAppliedSpecMap(states, g.refs)
+				if specsMap != nil {
+					results, err = d.DetectDriftWithSpecs(ctx, g.refs, specsMap)
+				} else {
+					results, err = provider.DetectDrift(ctx, g.refs)
+				}
+			} else {
+				results, err = provider.DetectDrift(ctx, g.refs)
+			}
 		}
 		if err != nil {
 			fmt.Printf("WARNING: drift detection for provider %q: %v\n", moduleRef, err)

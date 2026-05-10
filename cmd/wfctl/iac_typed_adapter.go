@@ -108,6 +108,93 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 	return a
 }
 
+// ─── Typed-client accessors (Task 17 capability discovery) ──────────────────
+//
+// Each accessor returns the underlying typed pb client for the named
+// optional service, or nil if the plugin's ContractRegistry didn't
+// advertise it. wfctl dispatch sites that previously did
+// `if x, ok := provider.(interfaces.X); ok { x.Method(...) }` now
+// type-assert to *typedIaCAdapter and use these accessors:
+//
+//	adapter, ok := provider.(*typedIaCAdapter)
+//	if !ok { /* legacy path no longer exists */ }
+//	if cli := adapter.Enumerator(); cli != nil {
+//	    resp, err := cli.EnumerateByTag(ctx, &pb.EnumerateByTagRequest{Tag: t})
+//	    // ...
+//	}
+//
+// This eliminates the residual interfaces.X type-assertion shape per
+// the strict-contracts force-cutover (no string dispatch, no Go-
+// interface indirection at the wfctl boundary). The interfaces.X
+// definitions remain in `interfaces/` for engine-side / module-factory
+// consumers — wfctl call sites are pure typed-pb.
+
+// RequiredClient returns the typed pb.IaCProviderRequiredClient. Always
+// non-nil (the loader rejects plugins that don't register the required
+// service via the AssertIaCPluginAdvertisesRequiredService gate in
+// PR #610). Exposed for symmetry with the optional accessors and for
+// dispatch sites that want to call required RPCs directly without going
+// through the interfaces.IaCProvider Go-interface methods.
+func (a *typedIaCAdapter) RequiredClient() pb.IaCProviderRequiredClient {
+	return a.required
+}
+
+// Enumerator returns the typed pb.IaCProviderEnumeratorClient or nil
+// when the plugin did not register IaCProviderEnumerator. Used by
+// `wfctl infra cleanup --tag` (EnumerateByTag) and
+// `wfctl infra audit-keys` / `wfctl infra prune` (EnumerateAll).
+func (a *typedIaCAdapter) Enumerator() pb.IaCProviderEnumeratorClient {
+	return a.enumerator
+}
+
+// DriftDetector returns the typed pb.IaCProviderDriftDetectorClient or
+// nil when the plugin did not register IaCProviderDriftDetector.
+func (a *typedIaCAdapter) DriftDetector() pb.IaCProviderDriftDetectorClient {
+	return a.drift
+}
+
+// DriftConfigDetector returns the typed
+// pb.IaCProviderDriftConfigDetectorClient or nil when the plugin did
+// not register IaCProviderDriftConfigDetector. Used by
+// `wfctl infra status drift` and `wfctl infra apply --refresh`
+// to short-circuit between DetectDriftWithSpecs (config-aware) and
+// the required IaCProvider.DetectDrift (existence-only) per ADR 0016.
+func (a *typedIaCAdapter) DriftConfigDetector() pb.IaCProviderDriftConfigDetectorClient {
+	return a.driftCfg
+}
+
+// CredentialRevoker returns the typed
+// pb.IaCProviderCredentialRevokerClient or nil when the plugin did not
+// register IaCProviderCredentialRevoker. Used by
+// `wfctl infra bootstrap --force-rotate` to invalidate the OLD
+// provider credential after the new one is minted (ADR 0012).
+func (a *typedIaCAdapter) CredentialRevoker() pb.IaCProviderCredentialRevokerClient {
+	return a.revoker
+}
+
+// MigrationRepairer returns the typed
+// pb.IaCProviderMigrationRepairerClient or nil when the plugin did not
+// register IaCProviderMigrationRepairer.
+func (a *typedIaCAdapter) MigrationRepairer() pb.IaCProviderMigrationRepairerClient {
+	return a.repairer
+}
+
+// Validator returns the typed pb.IaCProviderValidatorClient or nil
+// when the plugin did not register IaCProviderValidator. Used by R-A10
+// (`wfctl infra align --strict`) to surface provider-side cross-
+// resource constraint diagnostics at plan time.
+func (a *typedIaCAdapter) Validator() pb.IaCProviderValidatorClient {
+	return a.validator
+}
+
+// ResourceDriverClient returns the typed pb.ResourceDriverClient or
+// nil when the plugin did not register ResourceDriver. Each per-type
+// dispatch carries the resource_type on every RPC, matching the DO
+// plugin's 14-driver type-routing pattern in Task 11.
+func (a *typedIaCAdapter) ResourceDriverClient() pb.ResourceDriverClient {
+	return a.resourceDriv
+}
+
 // translateRPCErr converts a gRPC Unimplemented status (the wire signal a
 // plugin emits when an optional method is not supported) into the stable
 // interfaces.ErrProviderMethodUnimplemented sentinel callers iterate on
