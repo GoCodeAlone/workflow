@@ -775,28 +775,19 @@ func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *
 	}
 	var findings []AlignFinding
 	for _, p := range providers {
-		// Per Task 17: prefer typed pb.IaCProviderValidatorClient via
-		// the typed adapter's capability accessor; falls back to the
-		// interfaces.ProviderValidator type-assert for non-typed
-		// providers (test fixtures + non-wfctl consumers). typedIaCAdapter
-		// satisfies interfaces.ProviderValidator too, so the legacy
-		// branch path is functionally equivalent when used against the
-		// real adapter — the typed branch is preferred for clarity +
-		// to avoid wasted RPC against unregistered services.
-		var diags []interfaces.PlanDiagnostic
-		if adapter, ok := p.(*typedIaCAdapter); ok {
-			cli := adapter.Validator()
-			if cli == nil {
-				continue
-			}
-			diags = validatePlanTyped(context.Background(), cli, plan)
-		} else {
-			v, ok := p.(interfaces.ProviderValidator)
-			if !ok {
-				continue
-			}
-			diags = v.ValidatePlan(plan)
+		// Per Task 17 (ADR-0028): pure typed-pb dispatch — no
+		// interfaces.X fallback. Non-typed providers are silently
+		// skipped (R-A10's "treat unimplemented as not-applicable"
+		// behavior is preserved at the typed-adapter accessor level).
+		adapter, ok := p.(*typedIaCAdapter)
+		if !ok {
+			continue
 		}
+		cli := adapter.Validator()
+		if cli == nil {
+			continue
+		}
+		diags := validatePlanTyped(context.Background(), cli, plan)
 		for _, d := range diags {
 			// resource: rendered table label (provider-qualified for plan-
 			// level findings so the table always identifies the source).

@@ -95,47 +95,31 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 
 	var totalErrs []error
 	for _, p := range providers {
-		// Per Task 17 of the strict-contracts force-cutover: prefer the
-		// typed pb.IaCProviderEnumeratorClient via the typed adapter's
-		// capability accessor (avoids the wasted RPC + sentinel-error
-		// round-trip the legacy interfaces.X dispatch incurred). Falls
-		// back to the interfaces.Enumerator type-assert for non-typed
-		// providers (test fixtures + non-wfctl providers); the legacy
-		// branch is retained as a stable seam for those consumers and
-		// is functionally equivalent when the typed adapter is used,
-		// since typedIaCAdapter satisfies interfaces.Enumerator too.
-		var refs []interfaces.ResourceRef
-		var enumErr error
-		if adapter, ok := p.(*typedIaCAdapter); ok {
-			enumCli := adapter.Enumerator()
-			if enumCli == nil {
-				fmt.Fprintf(cleanupStdout, "skipped %s: provider does not implement Enumerator\n", p.Name())
-				continue
-			}
-			resp, err := enumCli.EnumerateByTag(ctx, &pb.EnumerateByTagRequest{Tag: *tag})
-			if err != nil {
-				fmt.Fprintf(cleanupStderr, "%s: enumerate by tag %q: %v\n", p.Name(), *tag, err)
-				totalErrs = append(totalErrs, fmt.Errorf("%s: enumerate: %w", p.Name(), err))
-				continue
-			}
-			refs = refsFromPB(resp.GetRefs())
-		} else {
-			enum, ok := p.(interfaces.Enumerator)
-			if !ok {
-				fmt.Fprintf(cleanupStdout, "skipped %s: provider does not implement Enumerator\n", p.Name())
-				continue
-			}
-			refs, enumErr = enum.EnumerateByTag(ctx, *tag)
-			if enumErr != nil {
-				if errors.Is(enumErr, interfaces.ErrProviderMethodUnimplemented) {
-					fmt.Fprintf(cleanupStdout, "skipped %s: provider does not implement Enumerator\n", p.Name())
-					continue
-				}
-				fmt.Fprintf(cleanupStderr, "%s: enumerate by tag %q: %v\n", p.Name(), *tag, enumErr)
-				totalErrs = append(totalErrs, fmt.Errorf("%s: enumerate: %w", p.Name(), enumErr))
-				continue
-			}
+		// Per Task 17 of the strict-contracts force-cutover (ADR-0028):
+		// pure typed-pb dispatch — no interfaces.X fallback. Production
+		// always yields *typedIaCAdapter via discoverAndLoadIaCProvider
+		// (PR #609); test fixtures must construct one via the same
+		// bufconn-backed pattern (PR #603 precedent + this PR's own
+		// fixture rewrites in Task 17 deliverable).
+		adapter, ok := p.(*typedIaCAdapter)
+		if !ok {
+			err := fmt.Errorf("%s: provider %T is not a typed IaC adapter — re-load via discoverAndLoadIaCProvider", p.Name(), p)
+			fmt.Fprintln(cleanupStderr, err)
+			totalErrs = append(totalErrs, err)
+			continue
 		}
+		enumCli := adapter.Enumerator()
+		if enumCli == nil {
+			fmt.Fprintf(cleanupStdout, "skipped %s: provider does not implement Enumerator\n", p.Name())
+			continue
+		}
+		resp, err := enumCli.EnumerateByTag(ctx, &pb.EnumerateByTagRequest{Tag: *tag})
+		if err != nil {
+			fmt.Fprintf(cleanupStderr, "%s: enumerate by tag %q: %v\n", p.Name(), *tag, err)
+			totalErrs = append(totalErrs, fmt.Errorf("%s: enumerate: %w", p.Name(), err))
+			continue
+		}
+		refs := refsFromPB(resp.GetRefs())
 		if len(refs) == 0 {
 			fmt.Fprintf(cleanupStdout, "%s: no resources matched tag %q\n", p.Name(), *tag)
 			continue

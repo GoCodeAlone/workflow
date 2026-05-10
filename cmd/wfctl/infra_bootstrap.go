@@ -340,19 +340,26 @@ func resolveCredentialRevoker(ctx context.Context, cfgFile string, secretsCfg *S
 		fmt.Fprintf(os.Stderr, "warn: no iac.provider module in config — old provider credential will NOT be revoked automatically\n")
 		return nil, nil
 	}
-	// Typed-adapter capability discovery: short-circuit when the
-	// plugin didn't register IaCProviderCredentialRevoker rather than
-	// returning a revoker that always errors at call time.
-	if adapter, ok := iacProv.(*typedIaCAdapter); ok && adapter.CredentialRevoker() == nil {
+	// Per Task 17 (ADR-0028): pure typed-pb dispatch — no
+	// interfaces.X fallback. Production providers are always
+	// *typedIaCAdapter via discoverAndLoadIaCProvider; if the
+	// resolved provider isn't, a test fixture is leaking past
+	// the loader gate — surface as a warning + skip revocation.
+	adapter, ok := iacProv.(*typedIaCAdapter)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "warn: IaC provider %T is not a typed adapter — old credential will NOT be revoked automatically\n", iacProv)
+		return nil, iacCloser
+	}
+	if adapter.CredentialRevoker() == nil {
 		fmt.Fprintf(os.Stderr, "warn: IaC provider does not register IaCProviderCredentialRevoker — old credential will NOT be revoked automatically\n")
 		return nil, iacCloser
 	}
-	r, ok := iacProv.(interfaces.ProviderCredentialRevoker)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "warn: IaC provider does not implement ProviderCredentialRevoker — old credential will NOT be revoked automatically\n")
-		return nil, iacCloser
-	}
-	return r, iacCloser
+	// typedIaCAdapter satisfies interfaces.ProviderCredentialRevoker
+	// (its method translates to a typed pb.RevokeProviderCredential
+	// RPC under the hood — no string dispatch). Returning the
+	// interface keeps the bootstrapSecrets caller signature stable;
+	// the typed dispatch happens inside the adapter method.
+	return adapter, iacCloser
 }
 
 // loadIaCProviderFromConfig finds the first iac.provider module in cfgFile,

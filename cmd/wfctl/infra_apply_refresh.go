@@ -61,40 +61,26 @@ func runInfraApplyRefreshPhase(
 		return nil
 	}
 
-	// Per Task 17 of the strict-contracts force-cutover: replace the
-	// legacy `provider.(interfaces.DriftConfigDetector)` type-assert
-	// with a typed pb.IaCProviderDriftConfigDetectorClient lookup via
-	// the typed adapter's capability accessor. When the plugin's
-	// ContractRegistry didn't advertise IaCProviderDriftConfigDetector,
-	// the accessor returns nil and we short-circuit to the required
-	// IaCProvider.DetectDrift path — preserving the v0.27.1 behavior
-	// without the wasted RPC + sentinel-error round-trip.
+	// Per Task 17 of the strict-contracts force-cutover (ADR-0028):
+	// pure typed-pb dispatch — no interfaces.X fallback. Production
+	// always yields *typedIaCAdapter via discoverAndLoadIaCProvider;
+	// test fixtures must construct one via the same bufconn-backed
+	// pattern. Hard-fail (typed error) if provider isn't a typed adapter.
+	adapter, ok := provider.(*typedIaCAdapter)
+	if !ok {
+		return fmt.Errorf("detect drift: provider %T is not a typed IaC adapter — re-load via discoverAndLoadIaCProvider", provider)
+	}
 	var results []interfaces.DriftResult
 	var err error
-	if adapter, ok := provider.(*typedIaCAdapter); ok {
-		if cli := adapter.DriftConfigDetector(); cli != nil {
-			specsMap := buildAppliedSpecMap(states, refs)
-			if specsMap != nil {
-				results, err = detectDriftConfigTyped(ctx, cli, refs, specsMap)
-			} else {
-				results, err = provider.DetectDrift(ctx, refs)
-			}
+	if cli := adapter.DriftConfigDetector(); cli != nil {
+		specsMap := buildAppliedSpecMap(states, refs)
+		if specsMap != nil {
+			results, err = detectDriftConfigTyped(ctx, cli, refs, specsMap)
 		} else {
 			results, err = provider.DetectDrift(ctx, refs)
 		}
 	} else {
-		// Provider isn't a typedIaCAdapter (e.g., test fake). Fall back
-		// to the Go-interface path the test provides directly.
-		if d, ok := provider.(interfaces.DriftConfigDetector); ok {
-			specsMap := buildAppliedSpecMap(states, refs)
-			if specsMap != nil {
-				results, err = d.DetectDriftWithSpecs(ctx, refs, specsMap)
-			} else {
-				results, err = provider.DetectDrift(ctx, refs)
-			}
-		} else {
-			results, err = provider.DetectDrift(ctx, refs)
-		}
+		results, err = provider.DetectDrift(ctx, refs)
 	}
 	if err != nil {
 		// Transient or auth error — propagate; do NOT prune anything.

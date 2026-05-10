@@ -100,36 +100,25 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 			}()
 		}
 
-		// Per Task 17 of the strict-contracts force-cutover: prefer the
-		// typed pb.IaCProviderDriftConfigDetectorClient via the typed
-		// adapter's capability accessor. Falls back to required
-		// IaCProvider.DetectDrift when the optional service isn't
-		// registered or when the caller has no specsMap to send.
+		// Per Task 17 of the strict-contracts force-cutover (ADR-0028):
+		// pure typed-pb dispatch — no interfaces.X fallback. Hard-fail
+		// when provider isn't a typed adapter so test-fixture leaks
+		// don't silently mask production-shape regressions.
+		adapter, ok := provider.(*typedIaCAdapter)
+		if !ok {
+			fmt.Printf("WARNING: provider %q (%T) is not a typed IaC adapter — re-load via discoverAndLoadIaCProvider\n", moduleRef, provider)
+			return false
+		}
 		var results []interfaces.DriftResult
-		if adapter, ok := provider.(*typedIaCAdapter); ok {
-			if cli := adapter.DriftConfigDetector(); cli != nil {
-				specsMap := buildAppliedSpecMap(states, g.refs)
-				if specsMap != nil {
-					results, err = detectDriftConfigTyped(ctx, cli, g.refs, specsMap)
-				} else {
-					results, err = provider.DetectDrift(ctx, g.refs)
-				}
+		if cli := adapter.DriftConfigDetector(); cli != nil {
+			specsMap := buildAppliedSpecMap(states, g.refs)
+			if specsMap != nil {
+				results, err = detectDriftConfigTyped(ctx, cli, g.refs, specsMap)
 			} else {
 				results, err = provider.DetectDrift(ctx, g.refs)
 			}
 		} else {
-			// Provider isn't a typedIaCAdapter (e.g., test fake).
-			// Fall back to the Go-interface path the test provides.
-			if d, ok := provider.(interfaces.DriftConfigDetector); ok {
-				specsMap := buildAppliedSpecMap(states, g.refs)
-				if specsMap != nil {
-					results, err = d.DetectDriftWithSpecs(ctx, g.refs, specsMap)
-				} else {
-					results, err = provider.DetectDrift(ctx, g.refs)
-				}
-			} else {
-				results, err = provider.DetectDrift(ctx, g.refs)
-			}
+			results, err = provider.DetectDrift(ctx, g.refs)
 		}
 		if err != nil {
 			fmt.Printf("WARNING: drift detection for provider %q: %v\n", moduleRef, err)
