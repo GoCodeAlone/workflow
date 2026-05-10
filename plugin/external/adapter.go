@@ -86,7 +86,15 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 	ctx := context.Background()
 	manifest, err := client.client.GetManifest(ctx, &emptypb.Empty{})
 	if err != nil {
-		return nil, fmt.Errorf("get manifest from plugin %s: %w", name, err)
+		if status.Code(err) != codes.Unimplemented {
+			return nil, fmt.Errorf("get manifest from plugin %s: %w", name, err)
+		}
+		// Strict-cutover IaC plugins (e.g. workflow-plugin-digitalocean v1.0.0+)
+		// register only PluginService.GetContractRegistry via the iacPluginServiceBridge
+		// and leave GetManifest unimplemented. Synthesize a minimal manifest from the
+		// plugin name so adapter.Name() / Version() / Description() accessors return
+		// sensible values; downstream code keys off the param-passed name anyway.
+		manifest = &pb.Manifest{Name: name}
 	}
 	var triggerSetupErr error
 	triggerTypes, triggerErr := client.client.GetTriggerTypes(ctx, &emptypb.Empty{})
