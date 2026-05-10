@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -55,6 +56,12 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	_ = fs.String("preserve-names", "", "Regex of names to preserve during prune")
 	_ = fs.Bool("confirm", false, "Confirmation flag")
 	_ = fs.Bool("non-interactive", false, "Skip y/N prompt")
+	// --prune-first declared here so flag.Parse doesn't error on the dispatcher
+	// pre-scan; the inner runInfraRotateAndPrune re-parses against the same
+	// args slice (Go's flag package is idempotent) and reads the value there.
+	// Default is true (per ADR 0023): the safer behavior IS the new default;
+	// the legacy quota-fragile behavior is opt-out via --prune-first=false.
+	_ = fs.Bool("prune-first", true, "Prune orphans before rotating (default true; safer at quota — see ADR 0023)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -232,7 +239,7 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	fs := flag.NewFlagSet("infra rotate-and-prune", flag.ContinueOnError)
 	fs.SetOutput(w)
 	var resourceType, name, configFile, preserveNames string
-	var confirm, nonInteractive bool
+	var confirm, nonInteractive, pruneFirst bool
 	fs.StringVar(&resourceType, "type", "", "Resource type (required, e.g. infra.spaces_key)")
 	fs.StringVar(&name, "name", "", "Canonical credential name to rotate (required)")
 	fs.StringVar(&configFile, "config", "infra.yaml", "Config file")
@@ -245,6 +252,15 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	fs.StringVar(&preserveNames, "preserve-names", "", "Regex of resource names to preserve during prune")
 	fs.BoolVar(&confirm, "confirm", false, "Required: explicit confirmation flag")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Skip the prune y/N prompt")
+	// --prune-first defaults TRUE (per ADR 0023): the safer behavior is the
+	// new default. When the cloud account is at quota (e.g., DO Spaces 200-key
+	// limit), Step 1 (rotate = mint new key) fails before Step 2 (prune) gets
+	// a chance to free quota — the chicken-and-egg the operator needs the
+	// tool for. Pre-pruning orphans first frees quota, then rotation can mint,
+	// then a defensive sweep cleans up any old canonical-name remnant. The
+	// legacy "rotate-then-prune" order remains available via --prune-first=false
+	// for callers that need to preserve the v0.27.1 ordering exactly.
+	fs.BoolVar(&pruneFirst, "prune-first", true, "Prune orphans before rotating (default true; safer at quota — see ADR 0023)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -263,11 +279,28 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 
 	ctx := context.Background()
 
+	// Pre-prune (Step 0, when --prune-first=true / ADR 0023 default): delete
+	// orphans BEFORE rotation so the cloud account has free quota for the
+	// `Create` call that mints the new canonical key. Skips the canonical
+	// `--name` (it might still be valid; if it's old we replace it in the
+	// rotate step below) and any name matching `--preserve-names`. This
+	// closes the at-quota chicken-and-egg: when the cloud is at quota,
+	// rotation alone fails because Create returns "quota exceeded", and
+	// the operator can't get to the post-rotation prune step that would
+	// have freed the quota.
+	if pruneFirst {
+		fmt.Fprintf(w, "Step 0 (--prune-first): pruning orphan %s resources before rotation...\n", resourceType)
+		if code := runPreRotationPrune(ctx, provider, resourceType, name, preserveNames, nonInteractive, w); code != 0 {
+			fmt.Fprintf(w, "\nrotate-and-prune: pre-rotation prune failed (code=%d). No rotation attempted; no state mutated.\n", code)
+			return code
+		}
+	}
+
 	// Step 1: rotate the canonical credential via bootstrapSecrets's
 	// force-rotate path. parseSecretsConfig + resolveSecretsProvider +
 	// resolveCredentialRevoker are the existing helpers from
 	// cmd/wfctl/infra_secrets.go and infra_bootstrap.go.
-	fmt.Fprintf(w, "Step 1: rotating credential %q (type %s)...\n", name, resourceType)
+	fmt.Fprintf(w, "\nStep 1: rotating credential %q (type %s)...\n", name, resourceType)
 
 	cfg, err := parseSecretsConfig(configFile)
 	if err != nil {
@@ -319,10 +352,19 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	fmt.Fprintf(w, "  recovery file written to %s\n", recoveryFilePath())
 
 	// Step 2 (user-visible): delegate to prune with the new key as the
-	// exclusion target. Step numbering matches the two banners the user
-	// sees: Step 1 is the rotate (above), Step 2 is the prune (here).
-	// The recovery-write between them is a sub-step of Step 1.
-	fmt.Fprintf(w, "\nStep 2: pruning older %s resources...\n", resourceType)
+	// exclusion target. Step numbering matches the banners the user sees:
+	// Step 0 (when --prune-first=true) was the pre-rotation orphan sweep;
+	// Step 1 is the rotate; Step 2 is the post-rotation prune. When
+	// --prune-first=true this is a defensive sweep — should be a no-op if
+	// Step 0 was complete, but covers the case where the canonical name's
+	// OLD value (now replaced in GH Secrets) is still present in the cloud
+	// and should be deleted. When --prune-first=false (legacy ordering),
+	// this is the only prune pass and does the full cleanup itself.
+	if pruneFirst {
+		fmt.Fprintf(w, "\nStep 2: defensive sweep — pruning older %s resources after rotation...\n", resourceType)
+	} else {
+		fmt.Fprintf(w, "\nStep 2: pruning older %s resources...\n", resourceType)
+	}
 	pruneArgs := []string{
 		"--type", resourceType,
 		"--created-before", rotated.CreatedAt,
@@ -355,5 +397,120 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 		fmt.Fprintf(w, "rotate-and-prune: warning: rotation+prune succeeded but failed to remove stale recovery file at %s: %v\n", recPath, err)
 		fmt.Fprintf(w, "rotate-and-prune: hint: this file is no longer needed; remove with `rm %s` once safe.\n", recPath)
 	}
+	return 0
+}
+
+// runPreRotationPrune deletes orphan resources of `resourceType` BEFORE the
+// rotate step runs. Used by --prune-first (default true; ADR 0023) to free
+// cloud quota so the subsequent rotate's Create call doesn't fail with
+// "quota exceeded" — the at-quota chicken-and-egg the rotate-and-prune tool
+// is supposed to recover from.
+//
+// Filter semantics (NAME-based, not time/access-key based — runInfraPrune's
+// time + access-key filter requires a successful rotation result we don't
+// have yet at this point):
+//
+//   - Skip the canonical `name` (it might still be the active credential;
+//     if it's stale, the rotate step below will replace it via mint-new-
+//     then-revoke-old per ADR 0012).
+//   - Skip any resource whose `Name` matches the `preserveNames` regex
+//     (same operator-supplied allowlist used by post-rotation prune).
+//   - Delete everything else of `resourceType`.
+//
+// Refuses to run without WFCTL_CONFIRM_PRUNE=1 — the caller
+// (runInfraRotateAndPrune) already validated this for the post-rotation
+// prune; we re-check defensively so this helper is safe if reused.
+//
+// Returns 0 on success (zero or more deletions); non-zero on enumerate
+// failure, regex compile failure, or any individual delete failure.
+//
+//nolint:cyclop // intentional: deletion-loop + filter logic + interactive prompt are tightly coupled
+func runPreRotationPrune(ctx context.Context, provider pruneProvider, resourceType, name, preserveNames string, nonInteractive bool, w io.Writer) int {
+	if os.Getenv("WFCTL_CONFIRM_PRUNE") != "1" {
+		fmt.Fprintln(w, "rotate-and-prune: pre-rotation prune requires WFCTL_CONFIRM_PRUNE=1 (defensive re-check)")
+		return 1
+	}
+
+	var preserveRe *regexp.Regexp
+	if preserveNames != "" {
+		re, reErr := regexp.Compile(preserveNames)
+		if reErr != nil {
+			fmt.Fprintf(w, "rotate-and-prune: invalid --preserve-names regex: %v\n", reErr)
+			return 1
+		}
+		preserveRe = re
+	}
+
+	outs, err := provider.EnumerateAll(ctx, resourceType)
+	if err != nil {
+		fmt.Fprintf(w, "rotate-and-prune: pre-rotation enumerate: %v\n", err)
+		return 1
+	}
+
+	var toDelete []*interfaces.ResourceOutput
+	for _, out := range outs {
+		// Use typed Name (provider contract guarantees ProviderID + Name on
+		// EnumerateAll results). Fall back to Outputs["name"] for older
+		// providers — same fallback-but-prefer-typed pattern as runInfraPrune.
+		resName := out.Name
+		if resName == "" {
+			resName, _ = out.Outputs["name"].(string)
+		}
+		if resName == name {
+			// Skip the canonical name. The rotate step replaces it in-place
+			// via mint-new-then-revoke-old (ADR 0012), so deleting it here
+			// would leave the cloud account without the active credential
+			// for the brief window between Step 0 and Step 1.
+			continue
+		}
+		if preserveRe != nil && preserveRe.MatchString(resName) {
+			continue
+		}
+		toDelete = append(toDelete, out)
+	}
+
+	fmt.Fprintf(w, "Pre-rotation dry-run: %d orphan %s resource(s) to prune (canonical name %q + preserve-names regex are skipped):\n\n", len(toDelete), resourceType, name)
+	for _, o := range toDelete {
+		resName := o.Name
+		if resName == "" {
+			resName, _ = o.Outputs["name"].(string)
+		}
+		ak := o.ProviderID
+		if ak == "" {
+			ak, _ = o.Outputs["access_key"].(string)
+		}
+		ca, _ := o.Outputs["created_at"].(string)
+		fmt.Fprintf(w, "  - %s (access_key=%s, created=%s)\n", resName, ak, ca)
+	}
+
+	if len(toDelete) == 0 {
+		return 0
+	}
+
+	if !nonInteractive {
+		fmt.Fprintf(w, "\nProceed with pre-rotation prune? (y/N): ")
+		var ans string
+		_, _ = fmt.Scanln(&ans)
+		if ans != "y" && ans != "Y" {
+			fmt.Fprintln(w, "Aborted (no rotation attempted; no state mutated).")
+			return 1
+		}
+	}
+
+	var failed int
+	for _, o := range toDelete {
+		ref := interfaces.ResourceRef{Type: o.Type, Name: o.Name, ProviderID: o.ProviderID}
+		if delErr := provider.DeleteResource(ctx, ref); delErr != nil {
+			fmt.Fprintf(w, "rotate-and-prune: pre-rotation delete %s: %v\n", o.Name, delErr)
+			failed++
+			continue
+		}
+		fmt.Fprintf(w, "  ✓ deleted %s\n", o.Name)
+	}
+	if failed > 0 {
+		fmt.Fprintf(w, "\n%d pre-rotation delete(s) failed; aborting before rotation to avoid minting on a partially-cleaned account\n", failed)
+		return 1
+	}
+	fmt.Fprintf(w, "\n%d orphan resource(s) pre-pruned successfully.\n", len(toDelete))
 	return 0
 }
