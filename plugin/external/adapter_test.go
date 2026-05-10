@@ -795,3 +795,61 @@ func malformedContractFileDescriptorSet() *descriptorpb.FileDescriptorSet {
 
 func stringPtr(v string) *string { return &v }
 func int32Ptr(v int32) *int32    { return &v }
+
+// unimplementedManifestClient simulates a strict-cutover IaC plugin whose
+// PluginService bridge implements GetContractRegistry but leaves GetManifest
+// unimplemented (workflow-plugin-digitalocean v1.0.0+ behavior).
+type unimplementedManifestClient struct {
+	adapterTestPluginServiceClient
+}
+
+func (c *unimplementedManifestClient) GetManifest(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.Manifest, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetManifest not implemented")
+}
+
+// TestNewExternalPluginAdapter_GetManifestUnimplemented_SynthesizesFromName
+// asserts that NewExternalPluginAdapter tolerates GetManifest returning
+// codes.Unimplemented and synthesizes a minimal manifest from the param name.
+// Regression coverage for strict-cutover IaC plugins (DO v1.0.0+) whose
+// iacPluginServiceBridge only wires GetContractRegistry.
+func TestNewExternalPluginAdapter_GetManifestUnimplemented_SynthesizesFromName(t *testing.T) {
+	client := &unimplementedManifestClient{
+		adapterTestPluginServiceClient: adapterTestPluginServiceClient{
+			registry: &pb.ContractRegistry{},
+		},
+	}
+	a, err := NewExternalPluginAdapter("digitalocean", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter must tolerate Unimplemented GetManifest: %v", err)
+	}
+	if a.Name() != "digitalocean" {
+		t.Fatalf("expected synthesized manifest Name=digitalocean, got %q", a.Name())
+	}
+	if a.Version() != "" {
+		t.Fatalf("expected empty synthesized manifest Version, got %q", a.Version())
+	}
+}
+
+// TestNewExternalPluginAdapter_GetManifestNonUnimplementedError_Fails asserts
+// that non-Unimplemented errors from GetManifest still surface — only
+// Unimplemented is tolerated.
+func TestNewExternalPluginAdapter_GetManifestNonUnimplementedError_Fails(t *testing.T) {
+	client := &adapterTestPluginServiceClient{}
+	// Override GetManifest to return Internal.
+	failingClient := &failingManifestClient{adapterTestPluginServiceClient: *client}
+	_, err := NewExternalPluginAdapter("broken-plugin", &PluginClient{client: failingClient})
+	if err == nil {
+		t.Fatal("expected error from non-Unimplemented GetManifest failure")
+	}
+	if !strings.Contains(err.Error(), "get manifest from plugin broken-plugin") {
+		t.Fatalf("expected wrapped error mentioning plugin name, got: %v", err)
+	}
+}
+
+type failingManifestClient struct {
+	adapterTestPluginServiceClient
+}
+
+func (c *failingManifestClient) GetManifest(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.Manifest, error) {
+	return nil, status.Error(codes.Internal, "boom")
+}
