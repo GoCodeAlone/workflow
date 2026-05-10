@@ -23,6 +23,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -34,7 +35,10 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
 )
 
-const e2eBufSize = 1024 * 1024
+const (
+	e2eBufSize     = 1024 * 1024
+	e2eRPCDeadline = 5 * time.Second
+)
 
 // TestIaC_EndToEnd_RequiredAndOptional_TypedDispatch starts an
 // in-process gRPC server with the typed IaCProviderRequired +
@@ -49,6 +53,7 @@ const e2eBufSize = 1024 * 1024
 // requiring the DO plugin to be cross-built first.
 func TestIaC_EndToEnd_RequiredAndOptional_TypedDispatch(t *testing.T) {
 	listener := bufconn.Listen(e2eBufSize)
+	t.Cleanup(func() { _ = listener.Close() })
 	server := grpc.NewServer()
 
 	provider := &e2eProvider{
@@ -83,7 +88,11 @@ func TestIaC_EndToEnd_RequiredAndOptional_TypedDispatch(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
-	ctx := context.Background()
+	// Per cycle 4 review PR 603: bound RPC deadline so a transport-
+	// level hang doesn't pin the CI worker until the suite-wide
+	// timeout. Same instance covers all 3 RPCs in this test.
+	ctx, cancel := context.WithTimeout(context.Background(), e2eRPCDeadline)
+	t.Cleanup(cancel)
 
 	// Required service: Name + Version typed RPCs.
 	requiredClient := pb.NewIaCProviderRequiredClient(conn)
@@ -135,6 +144,7 @@ func TestIaC_EndToEnd_RequiredAndOptional_TypedDispatch(t *testing.T) {
 // gRPC layer rather than via a NotSupported flag in the response body.
 func TestIaC_EndToEnd_OptionalNotRegistered_ClientFailsTyped(t *testing.T) {
 	listener := bufconn.Listen(e2eBufSize)
+	t.Cleanup(func() { _ = listener.Close() })
 	server := grpc.NewServer()
 	provider := &requiredOnlyProvider{}
 	// requiredOnlyProvider does NOT embed UnimplementedIaCProviderEnumeratorServer,
@@ -157,8 +167,14 @@ func TestIaC_EndToEnd_OptionalNotRegistered_ClientFailsTyped(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
+	// Per cycle 4 review PR 603: bound RPC deadline so a transport-
+	// level hang doesn't pin the CI worker until the suite-wide
+	// timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), e2eRPCDeadline)
+	t.Cleanup(cancel)
+
 	enumClient := pb.NewIaCProviderEnumeratorClient(conn)
-	_, err = enumClient.EnumerateAll(context.Background(), &pb.EnumerateAllRequest{ResourceType: "x"})
+	_, err = enumClient.EnumerateAll(ctx, &pb.EnumerateAllRequest{ResourceType: "x"})
 	if err == nil {
 		t.Fatalf("expected typed gRPC error for unregistered Enumerator service; got nil")
 	}

@@ -10,9 +10,14 @@ on:
       - 'iac/**'
       - 'platform/**'
       - 'plugin/sdk/**'
-      # Strict-contracts cutover Task 6 — typed IaC contract + sdk helpers
-      # live under plugin/external/sdk; gate this workflow on changes there
-      # so the iac-typed-e2e job catches typed-RPC drift.
+      # Strict-contracts cutover Task 6 — typed IaC contract + adapters live
+      # under plugin/external/{proto,sdk}; downstream IaC dispatch + remote-
+      # plugin orchestration code lives elsewhere under plugin/external/.
+      # Both surfaces affect the iac-typed-e2e job (cross-plugin gRPC wire
+      # behavior + handshake/loader changes); use the broad gate on
+      # plugin/external/** so any structural change to the external-plugin
+      # boundary triggers the cross-plugin smoke. CI cost is bounded —
+      # changes outside this dir already skip via the rest of the filter.
       - 'plugin/external/**'
       - 'go.mod'
       - 'go.sum'
