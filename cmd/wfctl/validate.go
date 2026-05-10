@@ -52,6 +52,7 @@ Options:
 		if err := schema.LoadPluginTypesFromDir(*pluginDir); err != nil {
 			return fmt.Errorf("failed to load plugins from %s: %w", *pluginDir, err)
 		}
+		schema.LoadPluginStepSchemasFromDir(*pluginDir)
 	}
 
 	// Collect files to validate

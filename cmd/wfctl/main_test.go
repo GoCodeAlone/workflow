@@ -389,3 +389,49 @@ func TestRunValidatePluginDirCapabilities(t *testing.T) {
 		schema.UnregisterModuleType("step.caps_validate_testonly")
 	})
 }
+
+func TestRunValidatePluginDirLoadsStepSchemas(t *testing.T) {
+	pluginsDir := t.TempDir()
+	pluginSubdir := filepath.Join(pluginsDir, "my-ext-plugin-step-schema")
+	if err := os.MkdirAll(pluginSubdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name": "my-ext-plugin-step-schema",
+		"version": "1.0.0",
+		"moduleTypes": ["custom.step_schema_validate_testonly"],
+		"stepSchemas": [
+			{
+				"type": "step.schema_validate_testonly",
+				"description": "test-only plugin step schema",
+				"configFields": [
+					{"key": "target", "type": "string", "required": true}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(pluginSubdir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := schema.GetStepSchemaRegistry()
+	if reg.Get("step.schema_validate_testonly") != nil {
+		t.Fatal("step.schema_validate_testonly should not exist before loading")
+	}
+
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, "workflow.yaml", `
+modules:
+  - name: ext-mod
+    type: custom.step_schema_validate_testonly
+`)
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
+		t.Fatalf("expected valid config with --plugin-dir, got: %v", err)
+	}
+	if got := reg.Get("step.schema_validate_testonly"); got == nil {
+		t.Fatal("expected runValidate --plugin-dir to load plugin step schema")
+	}
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("custom.step_schema_validate_testonly")
+		reg.Unregister("step.schema_validate_testonly")
+	})
+}
