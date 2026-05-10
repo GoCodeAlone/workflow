@@ -93,7 +93,10 @@ func TestIaCGRPCPlugin_SatisfiesGoPluginPlugin(t *testing.T) {
 // resolveServeHandshake helper extracted from ServeIaCPlugin so the
 // blocking goplugin.Serve loop is not invoked in tests.
 func TestServeIaCPlugin_DefaultsToWorkflowHandshake_WhenPluginInfoNil(t *testing.T) {
-	got := resolveServeHandshake(IaCServeOptions{})
+	got, err := resolveServeHandshake(IaCServeOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got.MagicCookieKey != ext.Handshake.MagicCookieKey {
 		t.Fatalf("expected default ext.Handshake; got cookie key %q", got.MagicCookieKey)
 	}
@@ -106,20 +109,93 @@ func TestServeIaCPlugin_DefaultsToWorkflowHandshake_WhenPluginInfoNil(t *testing
 	}
 }
 
+// TestServeIaCPlugin_DefaultsToWorkflowHandshake_WhenPluginInfoZeroValue
+// asserts that a PluginInfo with the zero-valued HandshakeConfig is
+// treated identically to a nil PluginInfo — caller passed an empty
+// PluginInfo{} for forward-extensibility, not as a partial override.
+func TestServeIaCPlugin_DefaultsToWorkflowHandshake_WhenPluginInfoZeroValue(t *testing.T) {
+	got, err := resolveServeHandshake(IaCServeOptions{PluginInfo: &PluginInfo{}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != ext.Handshake {
+		t.Fatalf("expected ext.Handshake; got %+v", got)
+	}
+}
+
 // TestServeIaCPlugin_HonorsOverrideHandshake_WhenProvided asserts that
 // callers can supply a non-zero handshake (e.g., for non-workflow hosts)
-// via IaCServeOptions.PluginInfo.HandshakeConfig.
+// via IaCServeOptions.PluginInfo.HandshakeConfig — both MagicCookieKey
+// AND MagicCookieValue must be set for the override to be valid.
 func TestServeIaCPlugin_HonorsOverrideHandshake_WhenProvided(t *testing.T) {
 	custom := goplugin.HandshakeConfig{
 		ProtocolVersion:  42,
 		MagicCookieKey:   "CUSTOM_COOKIE",
 		MagicCookieValue: "v",
 	}
-	got := resolveServeHandshake(IaCServeOptions{
+	got, err := resolveServeHandshake(IaCServeOptions{
 		PluginInfo: &PluginInfo{HandshakeConfig: custom},
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != custom {
 		t.Fatalf("expected custom handshake; got %+v", got)
+	}
+}
+
+// TestServeIaCPlugin_PartialHandshakeOverride_ReturnsError asserts that
+// a partial handshake override (any non-zero field but missing
+// MagicCookieKey or MagicCookieValue) is rejected with a typed error
+// rather than silently coerced to ext.Handshake. Per cycle 4 PR 600
+// IMPORTANT review (Copilot finding): partial overrides look
+// intentional but cannot produce a valid handshake; falling back to
+// defaults silently swallows the misconfig until dial-time when the
+// host rejects the cookie.
+func TestServeIaCPlugin_PartialHandshakeOverride_ReturnsError(t *testing.T) {
+	cases := []struct {
+		name string
+		hs   goplugin.HandshakeConfig
+	}{
+		{
+			name: "only_protocol_version_set",
+			hs:   goplugin.HandshakeConfig{ProtocolVersion: 7},
+		},
+		{
+			name: "only_magic_cookie_key_set",
+			hs:   goplugin.HandshakeConfig{MagicCookieKey: "X"},
+		},
+		{
+			name: "only_magic_cookie_value_set",
+			hs:   goplugin.HandshakeConfig{MagicCookieValue: "Y"},
+		},
+		{
+			name: "key_set_value_empty",
+			hs: goplugin.HandshakeConfig{
+				ProtocolVersion: 7,
+				MagicCookieKey:  "X",
+			},
+		},
+		{
+			name: "value_set_key_empty",
+			hs: goplugin.HandshakeConfig{
+				ProtocolVersion:  7,
+				MagicCookieValue: "Y",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := resolveServeHandshake(IaCServeOptions{
+				PluginInfo: &PluginInfo{HandshakeConfig: tc.hs},
+			})
+			if err == nil {
+				t.Fatalf("expected error for partial override %+v; got nil", tc.hs)
+			}
+			if !strings.Contains(err.Error(), "partial") {
+				t.Errorf("error must name 'partial'; got %q", err.Error())
+			}
+		})
 	}
 }
 

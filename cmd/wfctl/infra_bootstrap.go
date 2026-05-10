@@ -509,6 +509,26 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 	if len(revoker) > 0 {
 		credRevoker = revoker[0]
 	}
+	// Strict-contract guard: every forceRotate entry MUST match exactly one
+	// secrets.generate[].Key. A mismatch (e.g. caller passed a cloud-side
+	// resource Name without translating to gen.Key) means the force-rotate
+	// code path will be silently bypassed for that entry — the loop below
+	// keys forceRotate[gen.Key], so the rotation never runs and the rotations
+	// slice stays empty. This produced the staging-dispatch false-negative
+	// "expected 1 rotation result, got 0" surfaced 2026-05-09 (run 25616807427).
+	// Caller MUST translate name→key (see buildForceRotateSet in this file
+	// and buildRotateAndPruneForceRotateSet in infra_rotate_and_prune.go).
+	if len(forceRotate) > 0 && cfg != nil {
+		known := make(map[string]bool, len(cfg.Generate))
+		for _, gen := range cfg.Generate {
+			known[gen.Key] = true
+		}
+		for k := range forceRotate {
+			if !known[k] {
+				return nil, nil, fmt.Errorf("forceRotate entry %q does not match any secrets.generate[].key — caller must translate cloud-side names to canonical keys before calling bootstrapSecrets", k)
+			}
+		}
+	}
 	generated := map[string]string{}
 	var rotations []RotationResult
 

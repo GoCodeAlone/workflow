@@ -396,8 +396,58 @@ func advertisedPluginContracts(manifest map[string]any) pluginAdvertisedContract
 	advertised.Modules = uniqueSortedStrings(advertised.Modules)
 	advertised.Steps = uniqueSortedStrings(advertised.Steps)
 	advertised.Triggers = uniqueSortedStrings(advertised.Triggers)
-	advertised.ServiceMethods = uniqueSortedStrings(advertised.ServiceMethods)
+	advertised.ServiceMethods = filterOutIaCServiceMethods(uniqueSortedStrings(advertised.ServiceMethods))
 	return advertised
+}
+
+// filterOutIaCServiceMethods removes IaCProvider.* and ResourceDriver.*
+// entries (plus their typed-proto package-qualified equivalents) from
+// the advertised service-method list. Per Task 19 of the strict-
+// contracts force-cutover plan: those interfaces are now compile-time
+// enforced via Go interface satisfaction in
+// sdk.RegisterAllIaCProviderServices; the manifest-side strict-
+// contract advertisement is redundant for IaC, so the audit MUST NOT
+// flag missing descriptors for them.
+//
+// The filter is intentionally narrow — Module / Step / Trigger /
+// non-IaC service methods (SecurityScanner, ad-hoc plugin services)
+// remain subject to the strict-contract coverage requirement so the
+// 14-plugin Module/Step/Trigger migration tracker is unaffected.
+func filterOutIaCServiceMethods(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, m := range in {
+		if isIaCServiceMethod(m) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// isIaCServiceMethod reports whether m names an IaCProvider or
+// ResourceDriver method. Matches both the legacy InvokeService
+// dispatch shape (e.g., "IaCProvider.EnumerateAll",
+// "ResourceDriver.Create") and the typed-proto package-qualified
+// shape emitted by iac.proto's go_package option (e.g.,
+// "workflow.plugin.external.iac.IaCProviderRequired/Plan",
+// "workflow.plugin.external.iac.ResourceDriver/Create").
+//
+// New optional services added to iac.proto match automatically as
+// long as the typed package prefix is present.
+func isIaCServiceMethod(m string) bool {
+	if m == "" {
+		return false
+	}
+	if strings.HasPrefix(m, "IaCProvider.") {
+		return true
+	}
+	if strings.HasPrefix(m, "ResourceDriver.") {
+		return true
+	}
+	if strings.HasPrefix(m, "workflow.plugin.external.iac.") {
+		return true
+	}
+	return false
 }
 
 func strictContractFindingLevel(opts pluginAuditOptions) string {
