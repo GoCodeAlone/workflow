@@ -3,6 +3,7 @@ package sdk
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	"google.golang.org/grpc"
@@ -54,6 +55,13 @@ func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
 	}
 	if provider == nil {
 		return fmt.Errorf("RegisterAllIaCProviderServices: provider is nil")
+	}
+	// Typed-nil hardening: a typed-nil pointer (e.g., var p *MyProvider;
+	// RegisterAll(s, p)) wraps as a non-nil interface value but
+	// dereferences to nil at first method call → panic. Reject early
+	// with the same pattern the user-visible nil-check uses.
+	if rv := reflect.ValueOf(provider); rv.Kind() == reflect.Pointer && rv.IsNil() {
+		return fmt.Errorf("RegisterAllIaCProviderServices: provider is a typed-nil %T pointer", provider)
 	}
 	required, ok := provider.(pb.IaCProviderRequiredServer)
 	if !ok {
@@ -162,10 +170,19 @@ func (p *iacGRPCPlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ 
 // (see iacGRPCPlugin.GRPCServer), so plugin authors cannot pre-create
 // a *grpc.Server and forget to register a typed service on it.
 //
-// Blocks until the host process terminates the connection.
+// Blocks until the host process terminates the connection. Panics on
+// invalid IaCServeOptions (e.g., partial handshake override missing
+// MagicCookieKey or MagicCookieValue) — see resolveServeHandshake.
+// Plugin authors fix the misconfig at the call site; the panic is
+// preferable to a silent fallback that produces a broken handshake at
+// dial time.
 func ServeIaCPlugin(provider any, opts IaCServeOptions) {
+	hs, err := resolveServeHandshake(opts)
+	if err != nil {
+		panic(fmt.Errorf("ServeIaCPlugin: %w", err))
+	}
 	goplugin.Serve(&goplugin.ServeConfig{
-		HandshakeConfig: resolveServeHandshake(opts),
+		HandshakeConfig: hs,
 		Plugins: goplugin.PluginSet{
 			"iac": &iacGRPCPlugin{provider: provider},
 		},
@@ -174,13 +191,41 @@ func ServeIaCPlugin(provider any, opts IaCServeOptions) {
 }
 
 // resolveServeHandshake returns the goplugin handshake to use for an IaC
-// plugin. Defaults to ext.Handshake (the canonical wfctl<->plugin handshake)
-// when the caller did not supply a non-zero PluginInfo.HandshakeConfig.
+// plugin. Defaults to ext.Handshake (the canonical wfctl<->plugin
+// handshake) when the caller did not supply a PluginInfo OR supplied
+// the zero-valued HandshakeConfig. Returns an error when the caller
+// supplied a PARTIAL override (any non-zero field but missing
+// MagicCookieKey or MagicCookieValue) — partial overrides produce a
+// broken handshake at dial time, so the misconfig is rejected early
+// rather than silently coerced to defaults.
+//
+// Per cycle 4 PR 600 IMPORTANT review (Copilot finding): the previous
+// guard only checked MagicCookieKey != "", which silently accepted a
+// caller setting ProtocolVersion or MagicCookieValue alone — fields
+// that look intentional but cannot produce a valid handshake.
+//
 // Extracted from ServeIaCPlugin so the resolution rule is unit-testable
 // without invoking goplugin.Serve's blocking loop.
-func resolveServeHandshake(opts IaCServeOptions) goplugin.HandshakeConfig {
-	if opts.PluginInfo != nil && opts.PluginInfo.HandshakeConfig.MagicCookieKey != "" {
-		return opts.PluginInfo.HandshakeConfig
+func resolveServeHandshake(opts IaCServeOptions) (goplugin.HandshakeConfig, error) {
+	if opts.PluginInfo == nil {
+		return ext.Handshake, nil
 	}
-	return ext.Handshake
+	hs := opts.PluginInfo.HandshakeConfig
+	if hs == (goplugin.HandshakeConfig{}) {
+		// Zero value: caller supplied PluginInfo{} but no handshake
+		// override. Treat identically to opts.PluginInfo == nil.
+		return ext.Handshake, nil
+	}
+	if hs.MagicCookieKey == "" || hs.MagicCookieValue == "" {
+		return goplugin.HandshakeConfig{}, fmt.Errorf(
+			"IaCServeOptions.PluginInfo.HandshakeConfig is a partial "+
+				"override (MagicCookieKey=%q MagicCookieValue=%q "+
+				"ProtocolVersion=%d): both MagicCookieKey AND "+
+				"MagicCookieValue MUST be set when overriding the default "+
+				"ext.Handshake — leave the whole struct zero-valued to "+
+				"inherit the canonical wfctl<->plugin handshake",
+			hs.MagicCookieKey, hs.MagicCookieValue, hs.ProtocolVersion,
+		)
+	}
+	return hs, nil
 }

@@ -59,6 +59,29 @@ func TestRegisterAllIaCProviderServices_RequiredMissing_ReturnsError(t *testing.
 	}
 }
 
+// TestRegisterAllIaCProviderServices_TypedNilPointer_ReturnsError
+// asserts the typed-nil-pointer hardening: a (*T)(nil) wrapped in an
+// `any` interface is non-nil at the interface layer (interface header
+// has a type), but dereferences to nil at first method call. Previous
+// `provider == nil` check missed it; reflect-based check catches it
+// and rejects with a typed error before any registration happens.
+//
+// Per cycle 4 code-review PR 611 typed-nil hardening (Copilot finding).
+func TestRegisterAllIaCProviderServices_TypedNilPointer_ReturnsError(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	var provider *fullProviderStub // typed-nil pointer
+	err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider)
+	if err == nil {
+		t.Fatalf("expected error for typed-nil pointer; got nil")
+	}
+	if !strings.Contains(err.Error(), "typed-nil") {
+		t.Errorf("error must name typed-nil; got %q", err.Error())
+	}
+	if got := len(grpcSrv.GetServiceInfo()); got != 0 {
+		t.Errorf("no services should be registered on rejection; got %d", got)
+	}
+}
+
 // TestRegisterAllIaCProviderServices_AllOptionals_AllRegistered
 // asserts that a provider satisfying every optional + required interface
 // triggers registration of all 7 typed services (Required + 6 optional)

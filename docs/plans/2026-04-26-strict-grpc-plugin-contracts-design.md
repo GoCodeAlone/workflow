@@ -1,5 +1,6 @@
 ---
-status: in_progress
+status: superseded
+supersession_scope: IaCProvider, ResourceDriver (Module/Step/Trigger work remains live)
 area: plugins
 owner: workflow
 implementation_refs:
@@ -52,7 +53,9 @@ verification:
     - Set WORKSPACE to the local checkout root that contains the workflow repo and sibling plugin/application repositories.
   result: partial
 supersedes: []
-superseded_by: []
+superseded_by:
+  - docs/plans/2026-05-10-strict-contracts-force-cutover-design.md
+  - docs/plans/2026-05-10-strict-contracts-force-cutover.md
 ---
 
 # Strict gRPC Plugin Contracts Design

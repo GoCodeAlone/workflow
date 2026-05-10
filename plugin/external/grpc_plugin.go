@@ -44,6 +44,7 @@ func (p *GRPCPlugin) GRPCClient(_ context.Context, broker *goplugin.GRPCBroker, 
 		// We pass the broker ID via the initial GetManifest metadata or
 		// a dedicated setup call. For simplicity, we embed it in the client wrapper.
 		return &PluginClient{
+			conn:             c,
 			client:           client,
 			broker:           broker,
 			callbackBrokerID: brokerID,
@@ -51,14 +52,36 @@ func (p *GRPCPlugin) GRPCClient(_ context.Context, broker *goplugin.GRPCBroker, 
 	}
 
 	return &PluginClient{
+		conn:   c,
 		client: client,
 		broker: broker,
 	}, nil
 }
 
 // PluginClient wraps the gRPC client for the plugin service.
+//
+// The underlying *grpc.ClientConn is retained so callers that need to
+// instantiate additional typed gRPC clients (e.g. the typed
+// pb.IaCProviderRequiredClient that wfctl's typedIaCAdapter wraps in
+// the strict-contracts cutover, plan Task 16) can do so without going
+// through the legacy pb.PluginServiceClient string-dispatch path.
+// Exposed via Conn() rather than as a public field so the rest of the
+// PluginClient surface stays opaque.
 type PluginClient struct {
+	conn             *grpc.ClientConn
 	client           pb.PluginServiceClient
 	broker           *goplugin.GRPCBroker
 	callbackBrokerID uint32
+}
+
+// Conn returns the underlying gRPC client connection to the plugin
+// process. Callers MAY use it to construct additional typed gRPC
+// service clients (for example pb.NewIaCProviderRequiredClient).
+//
+// The connection lifecycle is owned by the host's plugin manager —
+// callers MUST NOT call Close() on it. The connection is shared across
+// every typed-client constructed against it; closing it would tear
+// down every other consumer too.
+func (p *PluginClient) Conn() *grpc.ClientConn {
+	return p.conn
 }
