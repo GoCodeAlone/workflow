@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
@@ -36,7 +37,11 @@ func detectDriftConfigTyped(ctx context.Context, cli pb.IaCProviderDriftConfigDe
 	for k, s := range specs {
 		ps, err := specToPB(s)
 		if err != nil {
-			return nil, err
+			// Per code-review MINOR-2 (PR 618 round 4): name the offending
+			// spec key so post-mortem debugging doesn't require crashing
+			// through the marshalling helpers to find which entry in the
+			// per-resource map blew up.
+			return nil, fmt.Errorf("specToPB %q: %w", k, err)
 		}
 		pbSpecs[k] = ps
 	}
@@ -45,7 +50,18 @@ func detectDriftConfigTyped(ctx context.Context, cli pb.IaCProviderDriftConfigDe
 		Specs: pbSpecs,
 	})
 	if err != nil {
-		return nil, err
+		// Per code-review IMPORTANT-1 (PR 618 round 4): translate
+		// codes.Unimplemented at the wire boundary to
+		// interfaces.ErrProviderMethodUnimplemented so callers using
+		// errors.Is to detect "optional capability absent at runtime"
+		// keep the signal. Without this, a plugin that registered the
+		// IaCProviderDriftConfigDetector service but returns Unimplemented
+		// at the RPC level (e.g., a provider whose DriftConfigDetector
+		// is wired but the underlying driver doesn't support the
+		// resource type) would surface as a generic gRPC error rather
+		// than the iterate-and-skip sentinel. ADR-0028 §Migration's
+		// "Strict-mode invariant translation" depends on this.
+		return nil, translateRPCErr(err)
 	}
 	return driftsFromPB(resp.GetDrifts())
 }

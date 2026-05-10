@@ -114,20 +114,31 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 // optional service, or nil if the plugin's ContractRegistry didn't
 // advertise it. wfctl dispatch sites that previously did
 // `if x, ok := provider.(interfaces.X); ok { x.Method(...) }` now
-// type-assert to *typedIaCAdapter and use these accessors:
+// type-assert to *typedIaCAdapter and use these accessors. The
+// non-typed branch is per-site UX (ADR-0028 §Per-site dispatch UX) —
+// hard-error at single-shot sites, soft-skip at iteration sites, e.g.:
 //
+//	// Hard-error (single-shot — cleanup, apply-refresh):
 //	adapter, ok := provider.(*typedIaCAdapter)
-//	if !ok { /* legacy path no longer exists */ }
+//	if !ok {
+//	    return fmt.Errorf("provider %T is not a typed IaC adapter", provider)
+//	}
 //	if cli := adapter.Enumerator(); cli != nil {
 //	    resp, err := cli.EnumerateByTag(ctx, &pb.EnumerateByTagRequest{Tag: t})
 //	    // ...
 //	}
 //
-// This eliminates the residual interfaces.X type-assertion shape per
-// the strict-contracts force-cutover (no string dispatch, no Go-
-// interface indirection at the wfctl boundary). The interfaces.X
+//	// Soft-skip (iteration — status-drift, R-A10, bootstrap revoker):
+//	adapter, ok := provider.(*typedIaCAdapter)
+//	if !ok {
+//	    fmt.Printf("WARNING: provider %q is not a typed adapter\n", name)
+//	    continue // or return false / nil-skip per site
+//	}
+//
+// Either way the legacy interfaces.X fallback is gone. The interfaces.X
 // definitions remain in `interfaces/` for engine-side / module-factory
-// consumers — wfctl call sites are pure typed-pb.
+// consumers — wfctl call sites are pure typed-pb (no string dispatch,
+// no Go-interface indirection at the wfctl boundary).
 
 // RequiredClient returns the typed pb.IaCProviderRequiredClient. Always
 // non-nil (the loader rejects plugins that don't register the required

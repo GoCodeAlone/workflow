@@ -69,7 +69,7 @@ func runInfraAlign(args []string) error {
 		return fmt.Errorf("no config file specified and no infra.yaml found")
 	}
 
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		return err
 	}
@@ -99,8 +99,14 @@ func runInfraAlign(args []string) error {
 
 // runInfraAlignChecks runs all alignment rule families and returns findings.
 // This is separated from runInfraAlign to make it testable.
-func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
-	ctx, err := buildAlignContext(opts.configFile)
+//
+// Per code-review IMPORTANT-2 (PR 618 round 4): takes a context.Context so
+// the R-A10 typed-RPC ValidatePlan dispatch honors operator Ctrl-C / parent
+// cancellation / RPC deadline propagation. The legacy interfaces.X dispatch
+// inherited the calling-goroutine's context implicitly via the Go method's
+// signature; the typed-pb path requires explicit ctx threading.
+func runInfraAlignChecks(ctx context.Context, opts alignOptions) ([]AlignFinding, error) {
+	alignCtx, err := buildAlignContext(opts.configFile)
 	if err != nil {
 		return nil, err
 	}
@@ -108,22 +114,22 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 	var findings []AlignFinding
 
 	// R-A1: container/runtime alignment
-	findings = append(findings, checkRA1(ctx)...)
+	findings = append(findings, checkRA1(alignCtx)...)
 
 	// R-A2: health-check alignment
-	findings = append(findings, checkRA2(ctx, opts.strictHealth)...)
+	findings = append(findings, checkRA2(alignCtx, opts.strictHealth)...)
 
 	// R-A3: service-to-service DNS alignment
-	findings = append(findings, checkRA3(ctx)...)
+	findings = append(findings, checkRA3(alignCtx)...)
 
 	// R-A4: env-var resolution
-	findings = append(findings, checkRA4(ctx)...)
+	findings = append(findings, checkRA4(alignCtx)...)
 
 	// R-A5: migrations alignment
-	findings = append(findings, checkRA5(ctx)...)
+	findings = append(findings, checkRA5(alignCtx)...)
 
 	// R-A6: network/exposure alignment
-	findings = append(findings, checkRA6(ctx)...)
+	findings = append(findings, checkRA6(alignCtx)...)
 
 	// Load plan once if --plan provided; reused by R-A7 and R-A10 to avoid
 	// duplicate file I/O + JSON parsing (and to keep the two rules consistent
@@ -143,18 +149,18 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 	}
 
 	// R-A8: WebAuthn alignment
-	findings = append(findings, checkRA8(ctx)...)
+	findings = append(findings, checkRA8(alignCtx)...)
 
 	// R-A9: suspicious provider_credential key suffix
-	findings = append(findings, checkRA9(ctx)...)
+	findings = append(findings, checkRA9(alignCtx)...)
 
 	// R-A10: provider.ValidatePlan dispatch — only when --plan is provided.
 	// alignLoadProviders is a test seam; the default loader enumerates
-	// iac.provider modules in ctx.Config (already parsed) and loads each via
-	// the existing resolveIaCProvider plugin path. Closers (if any) are
+	// iac.provider modules in alignCtx.modules (already parsed) and loads each
+	// via the existing resolveIaCProvider plugin path. Closers (if any) are
 	// released after the rule runs.
 	if plan != nil {
-		providers, closers, err := alignLoadProviders(ctx, opts.envName, plan)
+		providers, closers, err := alignLoadProviders(alignCtx, opts.envName, plan)
 		if err != nil {
 			return nil, fmt.Errorf("load providers for R-A10: %w", err)
 		}
@@ -168,7 +174,7 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 				}
 			}
 		}()
-		findings = append(findings, checkRA10_provider_validate_plan(providers, plan)...)
+		findings = append(findings, checkRA10_provider_validate_plan(ctx, providers, plan)...)
 	}
 
 	return findings, nil

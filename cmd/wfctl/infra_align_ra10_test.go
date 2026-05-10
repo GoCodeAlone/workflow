@@ -87,20 +87,20 @@ func TestCheckRA10_NilPlan(t *testing.T) {
 			{Severity: interfaces.PlanDiagnosticError, Message: "boom"},
 		}),
 	}
-	if got := checkRA10_provider_validate_plan(providers, nil); len(got) != 0 {
+	if got := checkRA10_provider_validate_plan(context.Background(), providers, nil); len(got) != 0 {
 		t.Errorf("expected no findings when plan is nil, got: %+v", got)
 	}
 }
 
 func TestCheckRA10_NoProviders(t *testing.T) {
-	if got := checkRA10_provider_validate_plan(nil, &interfaces.IaCPlan{}); len(got) != 0 {
+	if got := checkRA10_provider_validate_plan(context.Background(), nil, &interfaces.IaCPlan{}); len(got) != 0 {
 		t.Errorf("expected no findings when providers empty, got: %+v", got)
 	}
 }
 
 func TestCheckRA10_NonValidatingProviderSkipped(t *testing.T) {
 	providers := []interfaces.IaCProvider{stubIaCProvider(t, "plain")}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 0 {
 		t.Errorf("expected no findings when provider does not implement ProviderValidator, got: %+v", got)
 	}
@@ -117,7 +117,7 @@ func TestCheckRA10_ErrorDiagnostic_BecomesFAIL(t *testing.T) {
 			},
 		}),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d: %+v", len(got), got)
 	}
@@ -145,7 +145,7 @@ func TestCheckRA10_WarningDiagnostic_BecomesWARN(t *testing.T) {
 			{Severity: interfaces.PlanDiagnosticWarning, Resource: "vpc-prod", Message: "deprecated region"},
 		}),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(got))
 	}
@@ -171,7 +171,7 @@ func TestCheckRA10_InfoDiagnostic_LogsAndEmitsNoFinding(t *testing.T) {
 			{Severity: interfaces.PlanDiagnosticInfo, Resource: "lb", Field: "tier", Message: "hint about tier"},
 		}),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 0 {
 		t.Fatalf("expected 0 findings for Info diagnostic, got %d: %+v", len(got), got)
 	}
@@ -208,7 +208,7 @@ func TestCheckRA10_PlanLevelDiagnostic_UsesProviderName(t *testing.T) {
 			{Severity: interfaces.PlanDiagnosticError, Message: "plan-level constraint"},
 		}),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(got))
 	}
@@ -234,7 +234,7 @@ func TestCheckRA10_PlanLevelInfoDiagnostic_LogsAsProviderSlashPlan(t *testing.T)
 			{Severity: interfaces.PlanDiagnosticInfo, Message: "plan-level hint"},
 		}),
 	}
-	_ = checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	_ = checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	logged := buf.String()
 	if !strings.Contains(logged, "do/plan") {
 		t.Errorf("log: expected `do/plan` for plan-level Info, got %q", logged)
@@ -255,7 +255,7 @@ func TestCheckRA10_MultipleProviders_OnlyValidatorsContribute(t *testing.T) {
 		// the rule handles empty slices.
 		validatingStubProvider(t, "aws", nil),
 	}
-	got := checkRA10_provider_validate_plan(providers, &interfaces.IaCPlan{})
+	got := checkRA10_provider_validate_plan(context.Background(), providers, &interfaces.IaCPlan{})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding (from 'do' only), got %d: %+v", len(got), got)
 	}
@@ -302,7 +302,7 @@ modules:
 	planFile := writeAlignPlanJSON(t, plan)
 
 	opts := alignOptions{configFile: cfgFile, planFile: planFile}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("runInfraAlignChecks: %v", err)
 	}
@@ -337,7 +337,7 @@ modules:
 	cfgFile := writeAlignYAML(t, yaml)
 
 	opts := alignOptions{configFile: cfgFile}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("runInfraAlignChecks: %v", err)
 	}

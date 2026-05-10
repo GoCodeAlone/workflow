@@ -115,6 +115,14 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 		}
 		resp, err := enumCli.EnumerateByTag(ctx, &pb.EnumerateByTagRequest{Tag: *tag})
 		if err != nil {
+			// Per code-review IMPORTANT-1 (PR 618 round 4): translate
+			// codes.Unimplemented at the wire boundary to
+			// interfaces.ErrProviderMethodUnimplemented so callers using
+			// errors.Is downstream of the join keep the sentinel signal.
+			// The error still propagates loud (cleanup is single-shot per
+			// ADR-0028 §Per-site dispatch UX) — the translation just
+			// preserves classification for any retry / wrapper logic.
+			err = translateRPCErr(err)
 			fmt.Fprintf(cleanupStderr, "%s: enumerate by tag %q: %v\n", p.Name(), *tag, err)
 			totalErrs = append(totalErrs, fmt.Errorf("%s: enumerate: %w", p.Name(), err))
 			continue

@@ -769,7 +769,11 @@ var ra10LogInfo = func(format string, args ...any) {
 // Naming follows the plan T4.2 spec literally; existing rule helpers use the
 // shorter checkRA<N> form, but the descriptive suffix here documents the
 // rule's intent at the call site in infra_align.go.
-func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *interfaces.IaCPlan) []AlignFinding {
+// checkRA10_provider_validate_plan dispatches the R-A10 ValidatePlan rule
+// across all loaded providers. Per code-review IMPORTANT-2 (PR 618 round 4):
+// takes ctx so the typed-RPC ValidatePlan call honors caller cancellation /
+// deadline rather than dropping it via context.Background().
+func checkRA10_provider_validate_plan(ctx context.Context, providers []interfaces.IaCProvider, plan *interfaces.IaCPlan) []AlignFinding {
 	if plan == nil || len(providers) == 0 {
 		return nil
 	}
@@ -787,7 +791,7 @@ func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *
 		if cli == nil {
 			continue
 		}
-		diags := validatePlanTyped(context.Background(), cli, plan)
+		diags := validatePlanTyped(ctx, cli, plan)
 		for _, d := range diags {
 			// resource: rendered table label (provider-qualified for plan-
 			// level findings so the table always identifies the source).
