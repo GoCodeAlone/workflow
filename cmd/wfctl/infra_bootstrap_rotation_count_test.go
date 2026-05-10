@@ -127,17 +127,23 @@ func TestRotateAndPrune_KeyNameMismatch_ReturnsRotationResult(t *testing.T) {
 
 // TestBootstrapSecrets_ForceRotate_NameOnlyMatch_StillRotatesAndAppends
 // is the unit-level lock for the keying contract: when force-rotate
-// contains an entry that matches secrets.generate[].name (NOT .key),
-// rotation must still run and rotations must be appended. Without this,
-// the rotate-and-prune integration is fragile to internal CLI changes.
+// is keyed by secrets.generate[].Key for a successful provider_credential
+// force-rotate that hits an empty store, rotation must run and a
+// RotationResult must be appended. Without this, the rotate-and-prune
+// integration is fragile to internal CLI changes.
 //
-// This test is the architecturally-correct contract for the bug. It can
-// be satisfied by either:
-//   - bootstrapSecrets accepting forceRotate keyed by name OR key, OR
-//   - runInfraRotateAndPrune translating name→key before the call.
+// Strict contract enforced by this PR:
+//   - forceRotate MUST be keyed by secrets.generate[].Key (canonical key).
+//   - bootstrapSecrets ignores entries that don't match a known generator
+//     Key (it does NOT accept generator .Name as a fallback key).
+//   - Name→Key translation is the CLI layer's responsibility — see
+//     buildRotateAndPruneForceRotateSet in infra_rotate_and_prune.go,
+//     which also enforces single-match + provider_credential constraints
+//     so this contract is unviolable from the operator side.
 //
-// Whichever fix lands, this test pins the invariant: a successful
-// force-rotate where Set committed must produce a RotationResult.
+// Invariant pinned by this test: a successful force-rotate where Set
+// committed MUST produce a RotationResult (not the false-negative the
+// staging run hit on 2026-05-09).
 func TestBootstrapSecrets_ForceRotate_AppendsRotationResultEvenWhenStoreEmpty(t *testing.T) {
 	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
 		return `{"access_key":"AK_NEW","secret_key":"SK_NEW","created_at":"2026-05-10T01:41:58Z"}`, nil

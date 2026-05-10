@@ -177,11 +177,20 @@ func runInfraRotateAndPruneCmd(args []string) error {
 // buildForceRotateSet validation in infra_bootstrap.go) so the operator
 // gets a fast-fail before bootstrap touches the store.
 //
-// Multiple gens sharing the same Name (legitimate when a single cloud
-// resource produces multiple secret entries — the misconfigured form
-// caught by R-A9 — or when an operator intentionally splits sub-keys
-// across entries) all rotate together. The order is the YAML declaration
-// order of secrets.generate[].
+// Strict-contract enforcement (per Copilot review on PR 594):
+//   - Exactly ONE matching gen entry. Zero or two-plus matches reject.
+//   - Match MUST be type=provider_credential. Other rotatable types
+//     (random_hex, random_base64, random_alphanumeric) are intentionally
+//     rejected here because rotate-and-prune's downstream invariants
+//     (len(rotations)==1, prune step expects an old credential to revoke)
+//     are coherent only for provider_credential. Operators rotating
+//     non-provider_credential generators must use `wfctl infra bootstrap
+//     --force-rotate` directly.
+//
+// Without these guards a multi-Name config or a non-provider_credential
+// --name target would either rotate multiple keys then fail count check
+// (side effects committed but errored) OR rotate without appending a
+// RotationResult (the false-negative class this PR was opened to fix).
 func buildRotateAndPruneForceRotateSet(name string, cfg *SecretsConfig) (map[string]bool, error) {
 	if name == "" {
 		return nil, fmt.Errorf("--name is required")
@@ -189,28 +198,35 @@ func buildRotateAndPruneForceRotateSet(name string, cfg *SecretsConfig) (map[str
 	if cfg == nil || len(cfg.Generate) == 0 {
 		return nil, fmt.Errorf("config has no secrets.generate entries; nothing to rotate for --name %q", name)
 	}
-	out := map[string]bool{}
-	// Pass 1: match by Name field (canonical form per ADR 0023).
+	// Match precedence: secrets.generate[].name first (canonical per ADR 0023),
+	// then .key fallback for older configs / unit-test fixtures.
+	var matched []SecretGen
 	for _, gen := range cfg.Generate {
 		if gen.Name == name {
-			out[gen.Key] = true
+			matched = append(matched, gen)
 		}
 	}
-	if len(out) > 0 {
-		return out, nil
-	}
-	// Pass 2: fallback to Key match for configs that don't set Name.
-	// Common in older configs and in unit-test fixtures where Name is
-	// elided when it would equal Key.
-	for _, gen := range cfg.Generate {
-		if gen.Key == name {
-			out[gen.Key] = true
+	if len(matched) == 0 {
+		for _, gen := range cfg.Generate {
+			if gen.Key == name {
+				matched = append(matched, gen)
+			}
 		}
 	}
-	if len(out) == 0 {
+	if len(matched) == 0 {
 		return nil, fmt.Errorf("no secrets.generate entry matches --name %q (matched neither .name nor .key)", name)
 	}
-	return out, nil
+	if len(matched) > 1 {
+		keys := make([]string, len(matched))
+		for i, g := range matched {
+			keys[i] = g.Key
+		}
+		return nil, fmt.Errorf("--name %q matches multiple secrets.generate entries (keys: %v); rotate-and-prune supports exactly one provider_credential per dispatch — use `wfctl infra bootstrap --force-rotate` for multi-entry rotation", name, keys)
+	}
+	if matched[0].Type != "provider_credential" {
+		return nil, fmt.Errorf("--name %q matches secrets.generate entry of type %q; rotate-and-prune only operates on provider_credential entries (use `wfctl infra bootstrap --force-rotate` for other rotatable types)", name, matched[0].Type)
+	}
+	return map[string]bool{matched[0].Key: true}, nil
 }
 
 // recoveryRecord is persisted to ${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json
