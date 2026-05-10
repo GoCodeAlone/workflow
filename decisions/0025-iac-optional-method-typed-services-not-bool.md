@@ -107,7 +107,7 @@ call (`sdk.RegisterAllIaCProviderServices`). wfctl detects
 on any response and the typed contract NEVER returns
 `codes.Unimplemented` as a "supported by intent" signal.
 
-`ResourceDriver` ships as a separate gRPC service (10 RPCs), also
+`ResourceDriver` ships as a separate gRPC service (9 RPCs), also
 auto-registered, also discovered via the same `ContractRegistry`
 mechanism.
 

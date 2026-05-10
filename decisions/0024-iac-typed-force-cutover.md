@@ -112,7 +112,7 @@ Negative:
   bug-class surfaces in the IaC contract require a typed-side fix,
   not a structpb-side workaround.
 
-Wire-format: PR-A workflow ships rc1 first (additive); operators can
+Wire-format: PR 2 workflow ships rc1 first (additive); operators can
 test plugins against rc1 before final v1.0.0 lands. State-file format
 (JSON-serialized `interfaces.ResourceState`) is invariant across the
 cutover — only the wfctl <-> plugin gRPC envelope changes.
