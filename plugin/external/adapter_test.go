@@ -63,6 +63,10 @@ func (c *adapterTestPluginServiceClient) GetModuleTypes(_ context.Context, _ *em
 	return &pb.TypeList{Types: c.moduleTypes}, nil
 }
 
+func (c *adapterTestPluginServiceClient) GetTriggerTypes(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.TypeList, error) {
+	return &pb.TypeList{Types: c.triggerTypes}, nil
+}
+
 func (c *adapterTestPluginServiceClient) CreateModule(_ context.Context, req *pb.CreateModuleRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
 	c.lastCreateModReq = req
 	return &pb.HandleResponse{HandleId: "module-handle"}, nil
@@ -71,6 +75,10 @@ func (c *adapterTestPluginServiceClient) CreateModule(_ context.Context, req *pb
 func (c *adapterTestPluginServiceClient) CreateStep(_ context.Context, req *pb.CreateStepRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
 	c.lastCreateStepReq = req
 	return &pb.HandleResponse{HandleId: "step-handle"}, nil
+}
+
+func (c *adapterTestPluginServiceClient) InitModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	return &pb.ErrorResponse{}, nil
 }
 
 func TestIsSamplePlugin_True(t *testing.T) {
@@ -626,6 +634,40 @@ func TestExternalPluginAdapter_MalformedDescriptorSetRecordsError(t *testing.T) 
 	}
 	if !strings.Contains(a.ContractRegistryError().Error(), "parse contract registry descriptors") {
 		t.Fatalf("expected descriptor parse context, got %v", a.ContractRegistryError())
+	}
+}
+
+func TestExternalPluginAdapter_RemoteTriggerDelaysCreateUntilConfigure(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:     &pb.Manifest{Name: "trigger-plugin"},
+		triggerTypes: []string{"compute.completed"},
+	}
+	a, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{client: client})
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	factory := a.TriggerFactories()["compute.completed"]
+	if factory == nil {
+		t.Fatal("missing trigger factory")
+	}
+	trigger, ok := factory().(*RemoteTrigger)
+	if !ok {
+		t.Fatalf("factory type = %T, want *RemoteTrigger", factory())
+	}
+	if client.lastCreateModReq != nil {
+		t.Fatal("trigger factory should not create remote handle before config is available")
+	}
+	if err := trigger.Configure(nil, map[string]any{"task_status": "succeeded"}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if client.lastCreateModReq == nil {
+		t.Fatal("Configure did not create remote trigger handle")
+	}
+	if client.lastCreateModReq.Type != "compute.completed" {
+		t.Fatalf("CreateModule type = %q", client.lastCreateModReq.Type)
+	}
+	if got := client.lastCreateModReq.Config.AsMap()["task_status"]; got != "succeeded" {
+		t.Fatalf("trigger config did not reach CreateModule: %#v", client.lastCreateModReq.Config.AsMap())
 	}
 }
 

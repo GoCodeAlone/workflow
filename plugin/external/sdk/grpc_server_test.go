@@ -192,6 +192,41 @@ type typedServiceFactoryProvider struct {
 	TypedModuleProvider
 }
 
+type triggerProviderForTest struct {
+	minimalProvider
+	lastType   string
+	lastConfig map[string]any
+	lastCB     TriggerCallback
+	trigger    *triggerInstanceForTest
+}
+
+func (p *triggerProviderForTest) TriggerTypes() []string {
+	return []string{"compute.completed"}
+}
+
+func (p *triggerProviderForTest) CreateTrigger(typeName string, config map[string]any, cb TriggerCallback) (TriggerInstance, error) {
+	p.lastType = typeName
+	p.lastConfig = config
+	p.lastCB = cb
+	p.trigger = &triggerInstanceForTest{}
+	return p.trigger, nil
+}
+
+type triggerInstanceForTest struct {
+	started bool
+	stopped bool
+}
+
+func (t *triggerInstanceForTest) Start(context.Context) error {
+	t.started = true
+	return nil
+}
+
+func (t *triggerInstanceForTest) Stop(context.Context) error {
+	t.stopped = true
+	return nil
+}
+
 type typedServiceModule struct {
 	lastMethod string
 	lastInput  *anypb.Any
@@ -578,6 +613,42 @@ func TestInvokeService_WithTypedInvoker(t *testing.T) {
 	}
 	if output.Value != "typed-output" {
 		t.Fatalf("expected typed output value, got %q", output.Value)
+	}
+}
+
+func TestCreateModule_DispatchesTriggerProviderTypes(t *testing.T) {
+	provider := &triggerProviderForTest{}
+	srv := newGRPCServer(provider)
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type:   "compute.completed",
+		Name:   "compute.completed",
+		Config: mustMapToStruct(t, map[string]any{"task_status": "succeeded"}),
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected create error: %s", createResp.Error)
+	}
+	if provider.lastType != "compute.completed" {
+		t.Fatalf("CreateTrigger type = %q", provider.lastType)
+	}
+	if provider.lastConfig["task_status"] != "succeeded" {
+		t.Fatalf("CreateTrigger config = %#v", provider.lastConfig)
+	}
+
+	if _, err := srv.StartModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil {
+		t.Fatalf("StartModule: %v", err)
+	}
+	if provider.trigger == nil || !provider.trigger.started {
+		t.Fatal("trigger instance was not started through module lifecycle")
+	}
+	if _, err := srv.StopModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil {
+		t.Fatalf("StopModule: %v", err)
+	}
+	if !provider.trigger.stopped {
+		t.Fatal("trigger instance was not stopped through module lifecycle")
 	}
 }
 
