@@ -1,5 +1,8 @@
 ---
 status: in_progress
+superseded_by: docs/plans/2026-05-10-strict-contracts-force-cutover-design.md
+supersession_scope: IaCProvider, ResourceDriver (Module/Step/Trigger work remains live)
+status: superseded_partial
 area: plugins
 owner: workflow
 implementation_refs:
