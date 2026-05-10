@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/GoCodeAlone/modular"
@@ -12,11 +13,12 @@ import (
 // Trigger lifecycle (Start/Stop) is managed through the plugin's module RPCs,
 // treating trigger handles as module handles.
 type RemoteTrigger struct {
-	typeName string
-	name     string
-	handleID string
-	client   pb.PluginServiceClient
-	config   map[string]any
+	typeName     string
+	name         string
+	handleID     string
+	client       pb.PluginServiceClient
+	config       map[string]any
+	configureErr error
 }
 
 // NewRemoteTrigger creates a remote trigger proxy.
@@ -37,7 +39,10 @@ func (t *RemoteTrigger) Name() string {
 
 func (t *RemoteTrigger) Init(_ modular.Application) error {
 	if t.handleID == "" {
-		return fmt.Errorf("remote trigger init: trigger %q is not configured", t.name)
+		if t.configureErr != nil {
+			return fmt.Errorf("remote trigger init: trigger %q configure failed: %w", t.name, t.configureErr)
+		}
+		return nil
 	}
 	resp, err := t.client.InitModule(context.Background(), &pb.HandleRequest{
 		HandleId: t.handleID,
@@ -55,7 +60,10 @@ func (t *RemoteTrigger) Init(_ modular.Application) error {
 
 func (t *RemoteTrigger) Start(ctx context.Context) error {
 	if t.handleID == "" {
-		return fmt.Errorf("remote trigger start: trigger %q is not configured", t.name)
+		if t.configureErr != nil {
+			return fmt.Errorf("remote trigger start: trigger %q configure failed: %w", t.name, t.configureErr)
+		}
+		return nil
 	}
 	resp, err := t.client.StartModule(ctx, &pb.HandleRequest{
 		HandleId: t.handleID,
@@ -96,10 +104,12 @@ func (t *RemoteTrigger) Configure(_ modular.Application, triggerConfig any) erro
 	}
 	cfg, err := triggerConfigMap(triggerConfig)
 	if err != nil {
+		t.configureErr = err
 		return fmt.Errorf("remote trigger configure %s: %w", t.name, err)
 	}
 	pbConfig, err := mapToStruct(cfg)
 	if err != nil {
+		t.configureErr = err
 		return fmt.Errorf("remote trigger configure %s: %w", t.name, err)
 	}
 	resp, err := t.client.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
@@ -108,12 +118,23 @@ func (t *RemoteTrigger) Configure(_ modular.Application, triggerConfig any) erro
 		Config: pbConfig,
 	})
 	if err != nil {
+		t.configureErr = err
 		return fmt.Errorf("remote trigger configure %s: %w", t.name, err)
 	}
+	if resp == nil {
+		t.configureErr = errors.New("empty create trigger response")
+		return fmt.Errorf("remote trigger configure %s: %w", t.name, t.configureErr)
+	}
 	if resp.Error != "" {
+		t.configureErr = fmt.Errorf("%s", resp.Error)
 		return fmt.Errorf("remote trigger configure %s: %s", t.name, resp.Error)
 	}
+	if resp.HandleId == "" {
+		t.configureErr = errors.New("empty create trigger handle")
+		return fmt.Errorf("remote trigger configure %s: %w", t.name, t.configureErr)
+	}
 	t.handleID = resp.HandleId
+	t.configureErr = nil
 	t.config = cfg
 	return nil
 }

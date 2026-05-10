@@ -45,11 +45,18 @@ func TestRemoteTriggerConfigureCreatesTriggerWithConfig(t *testing.T) {
 	}
 }
 
-func TestRemoteTriggerInitFailsBeforeConfigure(t *testing.T) {
-	trigger := NewRemoteTrigger("trigger.test", "test-trigger", &stubPluginServiceClient{})
+func TestRemoteTriggerLifecycleNoopsBeforeConfigure(t *testing.T) {
+	stub := &stubPluginServiceClient{}
+	trigger := NewRemoteTrigger("trigger.test", "test-trigger", stub)
 
-	if err := trigger.Init(nil); err == nil {
-		t.Fatal("expected Init to fail before Configure")
+	if err := trigger.Init(nil); err != nil {
+		t.Fatalf("Init returned error before Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error before Configure: %v", err)
+	}
+	if stub.initModuleCalls != 0 || stub.startModuleCalls != 0 {
+		t.Fatalf("unexpected remote lifecycle calls before Configure: init=%d start=%d", stub.initModuleCalls, stub.startModuleCalls)
 	}
 }
 
@@ -80,5 +87,83 @@ func TestRemoteTriggerConfigurePropagatesPluginError(t *testing.T) {
 
 	if err := trigger.Configure(nil, map[string]any{"pool": "private"}); err == nil {
 		t.Fatal("expected Configure to return plugin error")
+	}
+}
+
+func TestRemoteTriggerConfigureRejectsNilCreateResponse(t *testing.T) {
+	stub := &stubPluginServiceClient{createTriggerNilResp: true}
+	trigger := NewRemoteTrigger("trigger.test", "test-trigger", stub)
+
+	if err := trigger.Configure(nil, map[string]any{"pool": "private"}); err == nil {
+		t.Fatal("expected Configure to reject nil CreateTrigger response")
+	}
+	if err := trigger.Init(nil); err == nil {
+		t.Fatal("expected Init to fail after nil CreateTrigger response")
+	}
+	if err := trigger.Start(context.Background()); err == nil {
+		t.Fatal("expected Start to fail after nil CreateTrigger response")
+	}
+	if stub.initModuleCalls != 0 || stub.startModuleCalls != 0 {
+		t.Fatalf("unexpected remote lifecycle calls after nil CreateTrigger response: init=%d start=%d", stub.initModuleCalls, stub.startModuleCalls)
+	}
+}
+
+func TestRemoteTriggerConfigureRejectsEmptyHandle(t *testing.T) {
+	stub := &stubPluginServiceClient{createTriggerResp: &pb.HandleResponse{}}
+	trigger := NewRemoteTrigger("trigger.test", "test-trigger", stub)
+
+	if err := trigger.Configure(nil, map[string]any{"pool": "private"}); err == nil {
+		t.Fatal("expected Configure to reject empty CreateTrigger handle")
+	}
+	if err := trigger.Init(nil); err == nil {
+		t.Fatal("expected Init to fail after empty CreateTrigger handle")
+	}
+	if err := trigger.Start(context.Background()); err == nil {
+		t.Fatal("expected Start to fail after empty CreateTrigger handle")
+	}
+	if stub.initModuleCalls != 0 || stub.startModuleCalls != 0 {
+		t.Fatalf("unexpected remote lifecycle calls after empty CreateTrigger handle: init=%d start=%d", stub.initModuleCalls, stub.startModuleCalls)
+	}
+}
+
+func TestRemoteTriggerLifecycleFailsAfterConfigureError(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		createTriggerResp: &pb.HandleResponse{Error: "bad trigger config"},
+	}
+	trigger := NewRemoteTrigger("trigger.test", "test-trigger", stub)
+
+	if err := trigger.Configure(nil, map[string]any{"pool": "private"}); err == nil {
+		t.Fatal("expected Configure to return plugin error")
+	}
+	if err := trigger.Init(nil); err == nil {
+		t.Fatal("expected Init to fail after Configure error")
+	}
+	if err := trigger.Start(context.Background()); err == nil {
+		t.Fatal("expected Start to fail after Configure error")
+	}
+	if stub.initModuleCalls != 0 || stub.startModuleCalls != 0 {
+		t.Fatalf("unexpected remote lifecycle calls after Configure error: init=%d start=%d", stub.initModuleCalls, stub.startModuleCalls)
+	}
+}
+
+func TestRemoteTriggerConfigureCanRetryAfterError(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		createTriggerResp: &pb.HandleResponse{Error: "bad trigger config"},
+	}
+	trigger := NewRemoteTrigger("trigger.test", "test-trigger", stub)
+
+	if err := trigger.Configure(nil, map[string]any{"pool": "bad"}); err == nil {
+		t.Fatal("expected first Configure to return plugin error")
+	}
+
+	stub.createTriggerResp = nil
+	if err := trigger.Configure(nil, map[string]any{"pool": "private"}); err != nil {
+		t.Fatalf("second Configure returned error: %v", err)
+	}
+	if trigger.handleID == "" {
+		t.Fatal("expected retry Configure to create trigger handle")
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start after retry Configure returned error: %v", err)
 	}
 }

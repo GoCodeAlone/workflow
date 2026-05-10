@@ -30,7 +30,10 @@ type stubPluginServiceClient struct {
 
 	lastCreateTriggerReq *pb.CreateTriggerRequest
 	createTriggerResp    *pb.HandleResponse
+	createTriggerNilResp bool
 	configureCallbackReq *pb.ConfigureCallbackRequest
+	initModuleCalls      int
+	startModuleCalls     int
 }
 
 // ExecuteStep records the request and returns the configured response.
@@ -65,9 +68,11 @@ func (c *stubPluginServiceClient) CreateModule(_ context.Context, _ *pb.CreateMo
 	return &pb.HandleResponse{}, nil
 }
 func (c *stubPluginServiceClient) InitModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.initModuleCalls++
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) StartModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.startModuleCalls++
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) StopModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
@@ -107,6 +112,9 @@ func (c *stubPluginServiceClient) ConfigureCallback(_ context.Context, req *pb.C
 }
 func (c *stubPluginServiceClient) CreateTrigger(_ context.Context, req *pb.CreateTriggerRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
 	c.lastCreateTriggerReq = req
+	if c.createTriggerNilResp {
+		return nil, nil
+	}
 	if c.createTriggerResp != nil {
 		return c.createTriggerResp, nil
 	}

@@ -50,9 +50,13 @@ func (s *grpcServer) setBroker(broker *goplugin.GRPCBroker) {
 }
 
 // SetCallbackClient stores the host callback gRPC client so that modules can
-// publish messages and manage subscriptions via the host.
+// publish messages and manage subscriptions via the host. It is intended for
+// startup/test wiring before live callbacks begin.
 func (s *grpcServer) SetCallbackClient(client pb.EngineCallbackServiceClient) {
 	s.mu.Lock()
+	if s.callbackConn != nil {
+		_ = s.callbackConn.Close()
+	}
 	s.callbackConn = nil
 	s.callbackClient = client
 	s.mu.Unlock()

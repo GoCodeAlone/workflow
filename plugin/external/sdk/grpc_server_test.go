@@ -9,6 +9,7 @@ import (
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
@@ -342,6 +343,24 @@ func TestTriggerProviderCreatesTriggerThroughLifecycle(t *testing.T) {
 	}
 	if provider.created.stops != 1 {
 		t.Fatalf("expected one trigger stop, got %d", provider.created.stops)
+	}
+}
+
+func TestSetCallbackClientClosesExistingBrokerConnection(t *testing.T) {
+	conn, err := grpc.NewClient("passthrough:///unused", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+
+	srv := newGRPCServer(&triggerOnlyProvider{})
+	srv.callbackConn = conn
+	srv.SetCallbackClient(&recordingCallbackClient{})
+
+	if srv.callbackConn != nil {
+		t.Fatal("expected callbackConn to be cleared")
+	}
+	if got := conn.GetState(); got != connectivity.Shutdown {
+		t.Fatalf("expected previous callback connection to be closed, state=%s", got)
 	}
 }
 
