@@ -314,7 +314,7 @@ First-scope producer path:
 4. Release CI or a maintainer-run registry job checks out `workflow-registry` and runs:
 
    ```sh
-   wfctl registry compatibility update \
+   wfctl plugin-registry compatibility update \
      --registry-dir . \
      --plugin workflow-plugin-digitalocean \
      --version v0.14.4 \
@@ -345,7 +345,7 @@ Engine matrix policy:
 - A range is derived only when min and latest both pass, no fail evidence exists inside that closed range, and the registry update command can enumerate Workflow releases in the range.
 - If any intermediate engine has explicit fail evidence, no range crosses that version.
 - `WORKFLOW_CURRENT_VERSION` may pin latest during release incidents.
-- `wfctl registry compatibility update` marks index stale when latest Workflow release is newer than newest evidence for that plugin.
+- `wfctl plugin-registry compatibility update` marks index stale when latest Workflow release is newer than newest evidence for that plugin.
 - In required first-party mode, stale evidence blocks install/update/lock for the newer engine. In transitional/advisory mode, stale evidence warns.
 
 Engine version source of truth:
@@ -500,7 +500,7 @@ Runtime validation:
 - Build local `wfctl`.
 - Run `wfctl plugin conformance --mode typed-iac` against a fixture plugin.
 - Run `wfctl plugin conformance --mode typed-iac --artifact <fixture.tar.gz>` and verify archive/binary hashes in JSON.
-- Run `wfctl registry compatibility update` against a temp registry checkout and verify stable index diff.
+- Run `wfctl plugin-registry compatibility update` against a temp registry checkout and verify stable index diff.
 - Run `wfctl plugin conformance --mode typed-iac` against the DigitalOcean plugin in CI after the plugin adopts the command.
 
 ## Rollback

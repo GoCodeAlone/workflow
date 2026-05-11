@@ -211,14 +211,14 @@ Rollback: revert this commit; plugin loading runtime falls back to existing `Ext
 ## Task 4: Registry Compatibility Update Command
 
 **Files:**
-- Modify: `cmd/wfctl/registry_container.go`
+- Modify: `cmd/wfctl/registry_cmd.go`
 - Create: `cmd/wfctl/registry_compatibility.go`
 - Create: `cmd/wfctl/registry_compatibility_test.go`
 
 **Step 1: Write failing tests**
 
 Add tests for:
-- `wfctl registry compatibility update --help`
+- `wfctl plugin-registry compatibility update --help`
 - update reads `plugins/<plugin>/manifest.json`
 - update validates evidence plugin/version/mode/status/os/arch/engine
 - update rejects evidence whose `archiveSHA256` does not match a manifest download
@@ -233,7 +233,7 @@ Expected: FAIL with unknown subcommand.
 
 **Step 2: Implement command**
 
-Add `compatibility update` under `wfctl registry` because this command edits registry files, not plugin install config.
+Add `compatibility update` under `wfctl plugin-registry` because this command edits the plugin catalog registry. Do not add it under `wfctl registry`; that surface now owns container registry login/push/prune/logout.
 
 Implement flags:
 - `--registry-dir`
@@ -258,7 +258,7 @@ Expected: index file contains one version record with validated evidence.
 **Step 4: Commit**
 
 ```bash
-git add cmd/wfctl/registry_container.go cmd/wfctl/registry_compatibility.go cmd/wfctl/registry_compatibility_test.go
+git add cmd/wfctl/registry_cmd.go cmd/wfctl/registry_compatibility.go cmd/wfctl/registry_compatibility_test.go
 git commit -m "feat(wfctl): update registry compat indexes"
 ```
 
@@ -391,7 +391,7 @@ Rollback: revert this commit; generated lockfiles can be regenerated without com
 
 Add concise docs for:
 - `wfctl plugin conformance`
-- `wfctl registry compatibility update`
+- `wfctl plugin-registry compatibility update`
 - registry `compatibilityEvidence.trust`
 - install/update/lock `--compat-mode`
 - `WFCTL_PLUGIN_COMPAT_MODE`
@@ -426,7 +426,7 @@ Run:
 GOWORK=off go build -o /tmp/wfctl-compat ./cmd/wfctl
 /tmp/wfctl-compat plugin conformance --mode typed-iac --format json ./cmd/wfctl/testdata/conformance/iac-pass
 /tmp/wfctl-compat plugin conformance --mode typed-iac --artifact /tmp/wfctl-iac-pass.tar.gz --format json
-/tmp/wfctl-compat registry compatibility update --registry-dir /tmp/wfctl-test-registry --plugin workflow-plugin-test --version v0.1.0 --evidence /tmp/wfctl-evidence.json
+/tmp/wfctl-compat plugin-registry compatibility update --registry-dir /tmp/wfctl-test-registry --plugin workflow-plugin-test --version v0.1.0 --evidence /tmp/wfctl-evidence.json
 ```
 
 Expected:
