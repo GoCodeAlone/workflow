@@ -164,7 +164,11 @@ Add tests for:
 - `wfctl plugin conformance --help` lists `--artifact`, `--mode`, `--engine-version`, `--timeout`
 - exactly one of `<plugin-dir>` or `--artifact` is required
 - fake typed-IaC plugin passes and emits JSON with `status:"pass"`, `mode:"typed-iac"`, `binarySHA256`, `pluginManifestSHA256`, `evidenceDigest`
+- `--output <path>` writes the JSON evidence file and stdout stays concise
+- `--format text` emits human-readable pass/fail without JSON
 - archive mode emits `archiveSHA256` matching the tarball and uses extracted contents, not source dir
+- local-dir mode emits no `archiveSHA256` and is marked advisory for registry enforcement
+- provider fixture implementing `SupportedCanonicalKeys` is called, but resource `Read`, `Plan`, `Apply`, `Destroy`, bootstrap, and credential methods are not called
 - fake plugin with no typed-IaC service fails
 - hanging plugin is killed on timeout and emits bounded stderr/stdout tails
 - no provider credential/env data appears in JSON output
@@ -232,6 +236,7 @@ Add tests for:
 - update sorts versions descending and evidence by engine/mode/os/arch
 - update leaves existing index untouched on validation failure
 - range derivation only occurs when min/latest pass and no explicit fail exists inside enumerated range
+- stale marker is set when `--latest-engine` is newer than the newest evidence for that plugin
 
 Run: `GOWORK=off go test ./cmd/wfctl -run 'TestRegistryCompatibilityUpdate' -count=1`
 
