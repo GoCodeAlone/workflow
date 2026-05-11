@@ -53,12 +53,12 @@ var infraApplyTroubleshootTimeout = 30 * time.Second
 // (mirroring resolveIaCProvider/loadIaCPlugin in deploy_providers.go).
 var computeInfraPlan = platform.ComputePlan
 
-// applyV2ApplyPlanFn is the indirection seam through which apply
-// dispatches the v2 path (wfctlhelpers.ApplyPlan). Defaults to the
-// production helper; tests override it to assert routing decisions
-// without standing up a real plugin or executing real driver calls.
-// Same var-seam pattern as computeInfraPlan / resolveIaCProvider.
-var applyV2ApplyPlanFn = wfctlhelpers.ApplyPlan
+// applyV2ApplyPlanWithHooksFn is the indirection seam through which apply
+// dispatches the v2 path. Defaults to the production helper; tests override
+// it to assert routing decisions without standing up a real plugin or
+// executing real driver calls. Same var-seam pattern as computeInfraPlan /
+// resolveIaCProvider.
+var applyV2ApplyPlanWithHooksFn = wfctlhelpers.ApplyPlanWithHooks
 
 // applyAllowReplaceSet is the per-invocation allow-list of resource
 // names whose `protected: true` annotation is overridden for this
@@ -463,11 +463,14 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// load time and surfaced via the optional
 	// wfctlhelpers.ComputePlanVersionDeclarer interface.
 	var result *interfaces.ApplyResult
+	var usedV2Dispatch bool
 	// DispatchVersionFor centralises the type-assertion + default; pass the
 	// raw provider rather than re-asserting ComputePlanVersionDeclarer at the
 	// call site (per dispatch.go contract).
 	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
-		result, err = applyV2ApplyPlanFn(ctx, provider, &plan)
+		usedV2Dispatch = true
+		hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, hydratedOut)
+		result, err = applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
 		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
 		// v2 dispatch is the production caller that surfaces input
 		// drift to the operator. Run on success OR partial failure
@@ -529,56 +532,33 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {
-		// Pre-flight: if any driver emitted sensitive outputs but no
-		// secrets.Provider is configured, fail fast with a complete
-		// diagnostic before per-resource persistence kicks off.
-		if err := requireSecretsProviderForSensitiveOutputs(secretsProvider, result); err != nil {
-			return fmt.Errorf("state write rejected: %w", err)
+		if usedV2Dispatch {
+			if len(result.Errors) > 0 {
+				msgs := make([]string, 0, len(result.Errors))
+				for _, ae := range result.Errors {
+					msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
+				}
+				finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
+				emitImageNotInRegistryHint(os.Stderr, finalErr)
+				return finalErr
+			}
+			return nil
+		}
+		if err := rejectSensitiveOutputsWithoutProvider(ctx, secretsProvider, result, plan.Actions, provider); err != nil {
+			return err
 		}
 		// Persist state for every successfully provisioned resource.
 		for _, r := range result.Resources {
-			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
-
-			// Hard-fail when the driver returns a malformed ProviderID for a strict
-			// format. This prevents corrupt state from reaching the store.
-			if err := validateOutputProviderID(provider, providerType, &r); err != nil {
-				return fmt.Errorf("state write rejected: %w", err)
+			action, ok := planActionForOutput(plan.Actions, result.Resources, r)
+			if !ok {
+				action = interfaces.PlanAction{Resource: interfaces.ResourceSpec{Name: r.Name, Type: r.Type}}
 			}
-
-			// Find the matching spec to get the applied config.
-			var appliedCfg map[string]any
-			var providerRef string
-			var dependencies []string
-			for i := range specs {
-				if specs[i].Name == r.Name {
-					appliedCfg = specs[i].Config
-					providerRef = resolveIaCProviderRef(specs[i].Config)
-					dependencies = append([]string(nil), specs[i].DependsOn...)
-					break
-				}
-			}
-
-			now := time.Now().UTC()
-			rs := interfaces.ResourceState{
-				ID:                  r.Name,
-				Name:                r.Name,
-				Type:                r.Type,
-				Provider:            providerType,
-				ProviderRef:         providerRef,
-				ProviderID:          r.ProviderID,
-				ConfigHash:          configHashMap(appliedCfg),
-				AppliedConfig:       appliedCfg,
-				AppliedConfigSource: "apply",
-				// Outputs is set by persistResourceWithSecretRouting after Route.
-				Dependencies: dependencies,
-				CreatedAt:    now,
-				UpdatedAt:    now,
-			}
-			driver, _ := provider.ResourceDriver(r.Type) // best-effort for compensating Delete; nil-safe
-			hyd, persistErr := persistResourceWithSecretRouting(ctx, store, secretsProvider, driver, rs, r, persistModeApply)
+			driver, _ := provider.ResourceDriver(action.Resource.Type) // best-effort for compensating Delete; nil-safe
+			hyd, persistErr := persistAppliedResourceOutput(ctx, store, secretsProvider, provider, providerType, driver, action, r)
 			if persistErr != nil {
 				return persistErr
 			}
+			fmt.Printf("  ✓ %s (%s)\n", action.Resource.Name, action.Resource.Type)
 			if hydratedOut != nil {
 				for k, v := range hyd {
 					hydratedOut[k] = v
@@ -587,8 +567,8 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 
 		// Delete state records for resources that were destroyed.
-		for name := range deleteNames {
-			if delErr := store.DeleteResource(ctx, name); delErr != nil {
+		for name := range successfulDeleteNames(deleteNames, result) {
+			if delErr := deleteStateAfterCloudDelete(store, name); delErr != nil {
 				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
 			}
 		}
@@ -607,6 +587,185 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 	}
 	return nil
+}
+
+func statePersistenceHooks(
+	store infraStateStore,
+	secretsProvider secrets.Provider,
+	provider interfaces.IaCProvider,
+	providerType string,
+	hydratedOut map[string]string,
+) wfctlhelpers.ApplyPlanHooks {
+	return wfctlhelpers.ApplyPlanHooks{
+		OnResourceApplied: func(ctx context.Context, driver interfaces.ResourceDriver, action interfaces.PlanAction, out interfaces.ResourceOutput) error {
+			hyd, persistErr := persistAppliedResourceOutput(ctx, store, secretsProvider, provider, providerType, driver, action, out)
+			if persistErr != nil {
+				return persistErr
+			}
+			fmt.Printf("  ✓ %s (%s)\n", action.Resource.Name, action.Resource.Type)
+			if hydratedOut != nil {
+				for k, v := range hyd {
+					hydratedOut[k] = v
+				}
+			}
+			return nil
+		},
+		OnResourceDeleted: func(ctx context.Context, action interfaces.PlanAction) error {
+			return deleteStateAfterCloudDelete(store, action.Resource.Name)
+		},
+	}
+}
+
+func deleteStateAfterCloudDelete(store infraStateStore, name string) error {
+	stateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return store.DeleteResource(stateCtx, name)
+}
+
+func persistAppliedResourceOutput(
+	ctx context.Context,
+	store infraStateStore,
+	secretsProvider secrets.Provider,
+	provider interfaces.IaCProvider,
+	providerType string,
+	driver interfaces.ResourceDriver,
+	action interfaces.PlanAction,
+	out interfaces.ResourceOutput,
+) (map[string]string, error) {
+	spec := action.Resource
+	compensate := actionCreatesReplacementResource(action)
+	normalized, err := normalizeAppliedOutputIdentity(spec, out)
+	if err != nil {
+		if !compensate {
+			return nil, fmt.Errorf("state write rejected: %w", err)
+		}
+		compErr := compensateAfterIdentityValidationFailure(driver, spec, out)
+		if compErr != nil {
+			return nil, fmt.Errorf("state write rejected: %w (compensating delete failed: %v)", err, compErr)
+		}
+		return nil, fmt.Errorf("state write rejected: %w (compensating delete succeeded)", err)
+	}
+	out = normalized
+	if err := validateOutputProviderIDWithDriver(providerType, driver, &out); err != nil {
+		if !compensate {
+			return nil, fmt.Errorf("state write rejected: %w", err)
+		}
+		rs := interfaces.ResourceState{Name: spec.Name, Type: spec.Type, ProviderID: out.ProviderID}
+		compErr := compensateAfterValidationFailure(driver, rs)
+		if compErr != nil {
+			return nil, fmt.Errorf("state write rejected: %w (compensating delete failed: %v)", err, compErr)
+		}
+		return nil, fmt.Errorf("state write rejected: %w (compensating delete succeeded)", err)
+	}
+	now := time.Now().UTC()
+	rs := interfaces.ResourceState{
+		ID:                  spec.Name,
+		Name:                spec.Name,
+		Type:                spec.Type,
+		Provider:            providerType,
+		ProviderRef:         resolveIaCProviderRef(spec.Config),
+		ProviderID:          out.ProviderID,
+		ConfigHash:          configHashMap(spec.Config),
+		AppliedConfig:       spec.Config,
+		AppliedConfigSource: "apply",
+		// Outputs is set by persistResourceWithSecretRouting after Route.
+		Dependencies: append([]string(nil), spec.DependsOn...),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	mode := persistModeApplyNoCompensate
+	if compensate {
+		mode = persistModeApply
+	}
+	return persistResourceWithSecretRouting(ctx, store, secretsProvider, driver, rs, out, mode)
+}
+
+func actionCreatesReplacementResource(action interfaces.PlanAction) bool {
+	return action.Action == "create" || action.Action == "replace"
+}
+
+func planActionForOutput(actions []interfaces.PlanAction, outputs []interfaces.ResourceOutput, out interfaces.ResourceOutput) (interfaces.PlanAction, bool) {
+	if out.Name != "" {
+		for i := range actions {
+			if actions[i].Resource.Name == out.Name {
+				return actions[i], true
+			}
+		}
+	}
+	if len(outputs) != 1 {
+		return interfaces.PlanAction{}, false
+	}
+	for i := range actions {
+		if actions[i].Action != "delete" {
+			return actions[i], true
+		}
+	}
+	return interfaces.PlanAction{}, false
+}
+
+func successfulDeleteNames(deleteNames map[string]struct{}, result *interfaces.ApplyResult) map[string]struct{} {
+	out := make(map[string]struct{}, len(deleteNames))
+	for name := range deleteNames {
+		out[name] = struct{}{}
+	}
+	if result == nil {
+		return out
+	}
+	if len(result.Errors) > 0 {
+		return map[string]struct{}{}
+	}
+	return out
+}
+
+func rejectSensitiveOutputsWithoutProvider(ctx context.Context, secretsProvider secrets.Provider, result *interfaces.ApplyResult, actions []interfaces.PlanAction, provider interfaces.IaCProvider) error {
+	if secretsProvider != nil || result == nil {
+		return nil
+	}
+	var errs []error
+	for i := range result.Resources {
+		r := result.Resources[i]
+		if !hasSensitiveOutputs(&r) {
+			continue
+		}
+		action, ok := planActionForOutput(actions, result.Resources, r)
+		resourceName := r.Name
+		if resourceName == "" && ok {
+			resourceName = action.Resource.Name
+		}
+		routeErr := fmt.Errorf(
+			"secrets.Provider not configured but driver emitted sensitive outputs (resource %q has Sensitive keys %v); add `secrets:` block to your config or use `secrets: { provider: env }`",
+			resourceName, sensitiveKeysFor(&r))
+		if !ok || !actionCreatesReplacementResource(action) {
+			errs = append(errs, fmt.Errorf("state write rejected: %w", routeErr))
+			continue
+		}
+		driver, _ := provider.ResourceDriver(action.Resource.Type)
+		rs := interfaces.ResourceState{Name: action.Resource.Name, Type: action.Resource.Type, ProviderID: r.ProviderID}
+		compErr := compensateAfterSaveFailure(nil, driver, rs, nil)
+		if compErr != nil {
+			errs = append(errs, fmt.Errorf("state write rejected: %w (compensating delete failed: %v)", routeErr, compErr))
+		} else {
+			errs = append(errs, fmt.Errorf("state write rejected: %w (compensating delete succeeded)", routeErr))
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+func normalizeAppliedOutputIdentity(spec interfaces.ResourceSpec, out interfaces.ResourceOutput) (interfaces.ResourceOutput, error) {
+	if out.Name == "" {
+		out.Name = spec.Name
+	} else if out.Name != spec.Name {
+		return out, fmt.Errorf("driver returned output name %q for resource %q", out.Name, spec.Name)
+	}
+	if out.Type == "" {
+		out.Type = spec.Type
+	} else if out.Type != spec.Type {
+		return out, fmt.Errorf("driver returned output type %q for resource %q (expected %q)", out.Type, spec.Name, spec.Type)
+	}
+	return out, nil
 }
 
 func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) ([]interfaces.ResourceState, error) {
@@ -828,16 +987,16 @@ type persistMode int
 const (
 	persistModeApply persistMode = iota
 	persistModeRead
+	persistModeApplyNoCompensate
 )
 
 // persistResourceWithSecretRouting builds rs.Outputs from out (routing
 // sensitive fields through provider in apply mode), calls
 // store.SaveResource, and returns the hydrated routed-secret map for
-// in-process hand-off. On SaveResource failure after provider.Set
-// succeeded (apply mode only), invokes driver.Delete + provider.Delete
+// in-process hand-off. On sensitive-route or SaveResource failure after
+// cloud mutation (apply mode only), invokes driver.Delete + provider.Delete
 // to compensate the partial cloud-resource creation. Returns a wrapped
-// error naming both the original SaveResource failure and the
-// compensating-Delete outcome.
+// error naming both the original failure and the compensating-Delete outcome.
 //
 // In read mode, the helper does NOT call provider.Set; instead it consults
 // the prior state via store.GetResource and inherits any
@@ -862,7 +1021,9 @@ func persistResourceWithSecretRouting(
 ) (map[string]string, error) {
 	switch mode {
 	case persistModeApply:
-		return persistApplyMode(ctx, store, provider, driver, rs, out)
+		return persistApplyMode(ctx, store, provider, driver, rs, out, true)
+	case persistModeApplyNoCompensate:
+		return persistApplyMode(ctx, store, provider, driver, rs, out, false)
 	case persistModeRead:
 		return nil, persistReadMode(ctx, store, rs, out, nil)
 	default:
@@ -890,7 +1051,9 @@ func persistResourceWithSecretRoutingCachedPrior(
 ) (map[string]string, error) {
 	switch mode {
 	case persistModeApply:
-		return persistApplyMode(ctx, store, provider, driver, rs, out)
+		return persistApplyMode(ctx, store, provider, driver, rs, out, true)
+	case persistModeApplyNoCompensate:
+		return persistApplyMode(ctx, store, provider, driver, rs, out, false)
 	case persistModeRead:
 		return nil, persistReadMode(ctx, store, rs, out, priorByName)
 	default:
@@ -905,24 +1068,32 @@ func persistApplyMode(
 	driver interfaces.ResourceDriver,
 	rs interfaces.ResourceState,
 	out interfaces.ResourceOutput,
+	compensate bool,
 ) (map[string]string, error) {
 	sanitized, hydrated, err := sensitive.Route(ctx, provider, rs.Name, &out)
 	if err != nil {
-		return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w", rs.Type, rs.Name, err)
+		if !compensate {
+			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w", rs.Type, rs.Name, err)
+		}
+		compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
+		if compErr != nil {
+			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (compensating delete failed: %v)", rs.Type, rs.Name, err, compErr)
+		}
+		return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (compensating delete succeeded)", rs.Type, rs.Name, err)
 	}
 	rs.Outputs = sanitized
 	if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
-		// Compensating Delete: if we routed secrets, the matching cloud
-		// resource is real but the state record didn't land. Roll back so
-		// a re-Apply doesn't double-create.
-		if len(hydrated) > 0 {
-			compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
-			if compErr != nil {
-				return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete failed: %v)", rs.Type, rs.Name, saveErr, compErr)
-			}
-			return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete succeeded)", rs.Type, rs.Name, saveErr)
+		if !compensate {
+			return nil, fmt.Errorf("%s/%s: persist state after apply: %w", rs.Type, rs.Name, saveErr)
 		}
-		return nil, fmt.Errorf("%s/%s: persist state after apply: %w", rs.Type, rs.Name, saveErr)
+		// Compensating Delete: the matching cloud resource is real but
+		// the state record didn't land. Roll back so a re-Apply doesn't
+		// double-create.
+		compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
+		if compErr != nil {
+			return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete failed: %v)", rs.Type, rs.Name, saveErr, compErr)
+		}
+		return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete succeeded)", rs.Type, rs.Name, saveErr)
 	}
 	return hydrated, nil
 }
@@ -981,10 +1152,11 @@ func persistReadMode(
 }
 
 // compensateAfterSaveFailure rolls back routed secrets and the underlying
-// cloud resource when SaveResource fails after provider.Set succeeded.
-// Uses a fresh 30-second context: the apply context may already be
-// canceled (operator Ctrl-C) but compensation must proceed to avoid
-// orphaning cloud resources + routed secrets.
+// cloud resource after an apply-mode failure where the just-mutated resource is
+// known to be newly created or replacement-created. Uses a fresh 30-second
+// context: the apply context may already be canceled (operator Ctrl-C), but
+// compensation must proceed to avoid orphaning cloud resources + routed
+// secrets.
 func compensateAfterSaveFailure(
 	provider secrets.Provider,
 	driver interfaces.ResourceDriver,
@@ -994,20 +1166,90 @@ func compensateAfterSaveFailure(
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var errs []error
-	if driver != nil {
+	if driver == nil {
+		errs = append(errs, errors.New("driver.Delete unavailable"))
+	} else {
 		ref := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type, ProviderID: rs.ProviderID}
 		if delErr := driver.Delete(ctx, ref); delErr != nil {
-			errs = append(errs, fmt.Errorf("driver.Delete: %w", delErr))
+			if rs.ProviderID == "" {
+				errs = append(errs, fmt.Errorf("driver.Delete: %w", delErr))
+			} else {
+				nameRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type}
+				if nameDelErr := driver.Delete(ctx, nameRef); nameDelErr != nil {
+					errs = append(errs, fmt.Errorf("driver.Delete: %w", errors.Join(delErr, nameDelErr)))
+				}
+			}
 		}
 	}
 	if provider != nil {
-		// Reverse-engineer the original output keys from the secret names.
-		// Format: "<rs.Name>_<output_key>"; strip the prefix.
+		// Delete each routed secret by its full provider key.
 		for secretName := range hydrated {
 			if delErr := provider.Delete(ctx, secretName); delErr != nil && !errors.Is(delErr, secrets.ErrNotFound) {
 				errs = append(errs, fmt.Errorf("provider.Delete(%s): %w", secretName, delErr))
 			}
 		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+// compensateAfterValidationFailure rolls back a resource whose output failed
+// identity or ProviderID validation. The ProviderID may be malformed, so a
+// name-only delete is used only when the ProviderID delete does not
+// conclusively succeed.
+func compensateAfterValidationFailure(driver interfaces.ResourceDriver, rs interfaces.ResourceState) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if driver == nil {
+		return errors.New("driver.Delete unavailable")
+	}
+	var errs []error
+	if rs.ProviderID != "" {
+		idRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type, ProviderID: rs.ProviderID}
+		if delErr := driver.Delete(ctx, idRef); delErr != nil {
+			if !errors.Is(delErr, interfaces.ErrResourceNotFound) {
+				errs = append(errs, fmt.Errorf("driver.Delete(%s): %w", rs.ProviderID, delErr))
+			}
+		} else {
+			return nil
+		}
+	}
+	nameRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type}
+	if delErr := driver.Delete(ctx, nameRef); delErr != nil {
+		if !errors.Is(delErr, interfaces.ErrResourceNotFound) {
+			errs = append(errs, fmt.Errorf("driver.Delete(name-only): %w", delErr))
+		}
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+func compensateAfterIdentityValidationFailure(driver interfaces.ResourceDriver, spec interfaces.ResourceSpec, out interfaces.ResourceOutput) error {
+	var errs []error
+	var succeeded bool
+	seen := map[string]struct{}{}
+	add := func(name, typ string) {
+		if name == "" && typ == "" {
+			return
+		}
+		key := name + "\x00" + typ
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		rs := interfaces.ResourceState{Name: name, Type: typ, ProviderID: out.ProviderID}
+		if err := compensateAfterValidationFailure(driver, rs); err != nil {
+			errs = append(errs, err)
+		} else {
+			succeeded = true
+		}
+	}
+	add(out.Name, out.Type)
+	add(spec.Name, spec.Type)
+	if succeeded {
+		return nil
 	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
@@ -1306,7 +1548,19 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 
 	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
-	result, err := provider.Apply(ctx, &plan)
+	var result *interfaces.ApplyResult
+	var err error
+	var usedV2Dispatch bool
+	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
+		usedV2Dispatch = true
+		hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, hydratedOut)
+		result, err = applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
+		if result != nil {
+			printDriftReportIfAny(w, result)
+		}
+	} else {
+		result, err = provider.Apply(ctx, &plan)
+	}
 	if err != nil {
 		ref := interfaces.ResourceRef{}
 		if len(plan.Actions) == 1 {
@@ -1345,51 +1599,32 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	}
 
 	if result != nil {
-		// Pre-flight: same hard-fail as live-diff path.
-		if err := requireSecretsProviderForSensitiveOutputs(secretsProvider, result); err != nil {
-			return fmt.Errorf("state write rejected: %w", err)
+		if usedV2Dispatch {
+			if len(result.Errors) > 0 {
+				msgs := make([]string, 0, len(result.Errors))
+				for _, ae := range result.Errors {
+					msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
+				}
+				finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
+				emitImageNotInRegistryHint(os.Stderr, finalErr)
+				return finalErr
+			}
+			return nil
+		}
+		if err := rejectSensitiveOutputsWithoutProvider(ctx, secretsProvider, result, plan.Actions, provider); err != nil {
+			return err
 		}
 		for _, r := range result.Resources {
-			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
-
-			if err := validateOutputProviderID(provider, providerType, &r); err != nil {
-				return fmt.Errorf("state write rejected: %w", err)
+			action, ok := planActionForOutput(plan.Actions, result.Resources, r)
+			if !ok {
+				action = interfaces.PlanAction{Resource: interfaces.ResourceSpec{Name: r.Name, Type: r.Type}}
 			}
-
-			// Retrieve spec metadata from the plan action for state persistence.
-			var appliedCfg map[string]any
-			var providerRef string
-			var dependencies []string
-			for i := range plan.Actions {
-				if plan.Actions[i].Resource.Name == r.Name {
-					appliedCfg = plan.Actions[i].Resource.Config
-					providerRef = resolveIaCProviderRef(plan.Actions[i].Resource.Config)
-					dependencies = append([]string(nil), plan.Actions[i].Resource.DependsOn...)
-					break
-				}
-			}
-
-			now := time.Now().UTC()
-			rs := interfaces.ResourceState{
-				ID:                  r.Name,
-				Name:                r.Name,
-				Type:                r.Type,
-				Provider:            providerType,
-				ProviderRef:         providerRef,
-				ProviderID:          r.ProviderID,
-				ConfigHash:          configHashMap(appliedCfg),
-				AppliedConfig:       appliedCfg,
-				AppliedConfigSource: "apply",
-				// Outputs is set by persistResourceWithSecretRouting after Route.
-				Dependencies: dependencies,
-				CreatedAt:    now,
-				UpdatedAt:    now,
-			}
-			driver, _ := provider.ResourceDriver(r.Type)
-			hyd, persistErr := persistResourceWithSecretRouting(ctx, store, secretsProvider, driver, rs, r, persistModeApply)
+			driver, _ := provider.ResourceDriver(action.Resource.Type)
+			hyd, persistErr := persistAppliedResourceOutput(ctx, store, secretsProvider, provider, providerType, driver, action, r)
 			if persistErr != nil {
 				return persistErr
 			}
+			fmt.Printf("  ✓ %s (%s)\n", action.Resource.Name, action.Resource.Type)
 			if hydratedOut != nil {
 				for k, v := range hyd {
 					hydratedOut[k] = v
@@ -1397,8 +1632,8 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 			}
 		}
 
-		for name := range deleteNames {
-			if delErr := store.DeleteResource(ctx, name); delErr != nil {
+		for name := range successfulDeleteNames(deleteNames, result) {
+			if delErr := deleteStateAfterCloudDelete(store, name); delErr != nil {
 				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
 			}
 		}

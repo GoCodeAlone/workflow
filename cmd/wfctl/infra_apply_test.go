@@ -1399,6 +1399,23 @@ func (p *stateReturningProvider) BootstrapStateBackend(_ context.Context, _ map[
 }
 func (p *stateReturningProvider) Close() error { return nil }
 
+type stateReturningProviderWithDriver struct {
+	stateReturningProvider
+	driver interfaces.ResourceDriver
+	cancel context.CancelFunc
+}
+
+func (p *stateReturningProviderWithDriver) Apply(ctx context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	if p.cancel != nil {
+		p.cancel()
+	}
+	return p.stateReturningProvider.Apply(ctx, plan)
+}
+
+func (p *stateReturningProviderWithDriver) ResourceDriver(string) (interfaces.ResourceDriver, error) {
+	return p.driver, nil
+}
+
 // TestApplyWithProvider_SavesStateForSuccessfulResources asserts that
 // applyWithProviderAndStore calls store.SaveResource for each resource in
 // the Apply result.
@@ -1505,6 +1522,298 @@ func TestApplyWithProvider_StoreSaveFailureFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "persist state") || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("error = %v, want hard state persistence failure", err)
+	}
+}
+
+func TestApplyWithProvider_UpdateSaveFailureDoesNotDelete(t *testing.T) {
+	desiredCfg := map[string]any{"version": 2}
+	current := interfaces.ResourceState{
+		Name:       "r1",
+		Type:       "infra.test",
+		ProviderID: "id-existing",
+	}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+			Action:   "update",
+			Resource: specs[0],
+			Current:  &current[0],
+		}}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	driver := &v2UpdateFailureDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{
+					Name:       "r1",
+					Type:       "infra.test",
+					ProviderID: "id-existing",
+				}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}, saveErr: fmt.Errorf("disk full")}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: desiredCfg}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected save failure after update, got nil")
+	}
+	if strings.Contains(err.Error(), "compensating delete") {
+		t.Fatalf("error = %v, update path must not compensate with delete", err)
+	}
+	if driver.deleteCount != 0 {
+		t.Fatalf("driver delete count = %d, want 0 for update save failure", driver.deleteCount)
+	}
+}
+
+func TestApplyWithProvider_UpdateProviderIDFailureDoesNotDelete(t *testing.T) {
+	desiredCfg := map[string]any{"version": 2}
+	current := interfaces.ResourceState{
+		Name:       "r1",
+		Type:       "infra.test",
+		ProviderID: "id-existing",
+	}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+			Action:   "update",
+			Resource: specs[0],
+			Current:  &current[0],
+		}}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	driver := &v2UpdateInvalidProviderIDDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{
+					Name:       "r1",
+					Type:       "infra.test",
+					ProviderID: "not-a-uuid",
+				}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: desiredCfg}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected ProviderID validation failure after update, got nil")
+	}
+	if strings.Contains(err.Error(), "compensating delete") {
+		t.Fatalf("error = %v, update path must not compensate with delete", err)
+	}
+	if driver.deleteCount != 0 {
+		t.Fatalf("driver delete count = %d, want 0 for update ProviderID failure", driver.deleteCount)
+	}
+}
+
+func TestApplyWithProvider_UpdateSensitiveRoutingFailureDoesNotDelete(t *testing.T) {
+	desiredCfg := map[string]any{"version": 2}
+	current := interfaces.ResourceState{
+		Name:       "r1",
+		Type:       "infra.test",
+		ProviderID: "id-existing",
+	}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+			Action:   "update",
+			Resource: specs[0],
+			Current:  &current[0],
+		}}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	driver := &v2UpdateFailureDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{
+					Name:       "r1",
+					Type:       "infra.test",
+					ProviderID: "id-existing",
+					Outputs:    map[string]any{"token": "secret"},
+					Sensitive:  map[string]bool{"token": true},
+				}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: desiredCfg}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected sensitive routing failure after update, got nil")
+	}
+	if strings.Contains(err.Error(), "compensating delete") {
+		t.Fatalf("error = %v, update path must not compensate with delete", err)
+	}
+	if driver.deleteCount != 0 {
+		t.Fatalf("driver delete count = %d, want 0 for update sensitive-routing failure", driver.deleteCount)
+	}
+}
+
+func TestApplyWithProvider_FailedDeleteKeepsState(t *testing.T) {
+	current := interfaces.ResourceState{Name: "old", Type: "infra.test", ProviderID: "id-old"}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
+	fake := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Errors: []interfaces.ActionError{{Action: "delete", Resource: "old", Error: "delete failed"}},
+		},
+	}
+
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", nil, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil); err == nil {
+		t.Fatal("expected delete failure, got nil")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.deleted) != 0 {
+		t.Fatalf("deleted state entries = %v, want none after failed delete", store.deleted)
+	}
+}
+
+func TestApplyWithProvider_PartialFailureDoesNotInferDeleteSuccess(t *testing.T) {
+	desired := interfaces.ResourceSpec{Name: "new", Type: "infra.test", Config: map[string]any{"version": 1}}
+	current := interfaces.ResourceState{Name: "old", Type: "infra.test", ProviderID: "id-old"}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(context.Context, interfaces.IaCProvider, []interfaces.ResourceSpec, []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: desired},
+			{Action: "delete", Resource: interfaces.ResourceSpec{Name: "old", Type: "infra.test"}, Current: &current},
+		}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+	fake := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Errors: []interfaces.ActionError{{Action: "create", Resource: "new", Error: "create failed before delete"}},
+		},
+	}
+
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", []interfaces.ResourceSpec{desired}, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil); err == nil {
+		t.Fatal("expected partial failure, got nil")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.deleted) != 0 {
+		t.Fatalf("deleted state entries = %v, want none when legacy result has errors", store.deleted)
+	}
+}
+
+func TestApplyWithProvider_CreateMissingIdentitySaveFailureCompensates(t *testing.T) {
+	driver := &v2SensitiveCreateDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{ProviderID: "id-created"}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{saveErr: fmt.Errorf("disk full")}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: map[string]any{"version": 1}}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected save failure after create, got nil")
+	}
+	if !strings.Contains(err.Error(), "compensating delete succeeded") {
+		t.Fatalf("error = %v, want create compensation", err)
+	}
+	if driver.deleteCount == 0 {
+		t.Fatal("expected compensating delete for create output with missing identity")
+	}
+}
+
+func TestApplyWithProvider_CreateSensitiveOutputWithoutSecretsCompensates(t *testing.T) {
+	driver := &v2SensitiveCreateDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{
+					Name:       "r1",
+					Type:       "infra.test",
+					ProviderID: "id-created",
+					Outputs:    map[string]any{"token": "secret"},
+					Sensitive:  map[string]bool{"token": true},
+				}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: map[string]any{"version": 1}}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected sensitive routing failure after create, got nil")
+	}
+	if !strings.Contains(err.Error(), "compensating delete succeeded") {
+		t.Fatalf("error = %v, want create compensation", err)
+	}
+	if driver.deleteCount == 0 {
+		t.Fatal("expected compensating delete for create with sensitive outputs and no provider")
+	}
+}
+
+func TestApplyWithProvider_SensitivePreflightDoesNotPartiallySave(t *testing.T) {
+	driver := &v2SensitiveCreateDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{
+					{Name: "plain", Type: "infra.test", ProviderID: "id-plain", Outputs: map[string]any{"url": "https://example.test"}},
+					{Name: "secret", Type: "infra.test", ProviderID: "id-secret", Outputs: map[string]any{"token": "secret"}, Sensitive: map[string]bool{"token": true}},
+				},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{}
+	specs := []interfaces.ResourceSpec{
+		{Name: "plain", Type: "infra.test", Config: map[string]any{"version": 1}},
+		{Name: "secret", Type: "infra.test", Config: map[string]any{"version": 1}},
+	}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected sensitive routing failure, got nil")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 0 {
+		t.Fatalf("saved state = %+v, want no partial state before sensitive preflight failure", store.saved)
+	}
+	if driver.deleteCount == 0 {
+		t.Fatal("expected compensating delete for sensitive create")
+	}
+}
+
+func TestApplyWithProvider_DeletePrunesStateAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	current := interfaces.ResourceState{Name: "old", Type: "infra.test", ProviderID: "id-old"}
+	store := &cancelAwareStateStore{fakeStateStore: fakeStateStore{saved: []interfaces.ResourceState{current}}}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{applyResult: &interfaces.ApplyResult{}},
+		cancel:                 cancel,
+	}
+
+	if err := applyWithProviderAndStore(ctx, fake, "fake-cloud", nil, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.deleted) != 1 || store.deleted[0] != "old" {
+		t.Fatalf("deleted state entries = %v, want [old]", store.deleted)
 	}
 }
 

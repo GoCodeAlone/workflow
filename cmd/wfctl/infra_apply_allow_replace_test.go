@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/iactest"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -25,7 +26,7 @@ import (
 // drive the gate.
 //
 // Read-only inside the apply path (validateAllowReplaceProtected); the
-// pkg-level pattern matches computeInfraPlan / applyV2ApplyPlanFn.
+// pkg-level pattern matches computeInfraPlan / applyV2ApplyPlanWithHooksFn.
 //
 // The test interface promises:
 //   - validateAllowReplaceProtected(plan, allow) returns nil when no
@@ -233,7 +234,7 @@ func TestApplyWithProviderAndStore_ProtectedReplace_WithoutAllowReplace_Errors(t
 // confirms the override path: with applyAllowReplaceSet listing the
 // protected resource, the gate is bypassed and the apply continues
 // past the gate. We route through the v2 dispatch (sentinel return
-// via applyV2ApplyPlanFn) so a sentinel error proves the call site
+// via applyV2ApplyPlanWithHooksFn) so a sentinel error proves the call site
 // reached dispatch — i.e. the gate did not short-circuit.
 func TestApplyWithProviderAndStore_ProtectedReplace_WithAllowReplace_Proceeds(t *testing.T) {
 	provider := &iactest.NoopProvider{ProviderName: "allow-replace-stub", DispatchVersion: "v2"}
@@ -249,11 +250,11 @@ func TestApplyWithProviderAndStore_ProtectedReplace_WithAllowReplace_Proceeds(t 
 	t.Cleanup(func() { computeInfraPlan = origCompute })
 
 	dispatched := errors.New("v2 ApplyPlan reached")
-	origApply := applyV2ApplyPlanFn
-	applyV2ApplyPlanFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	origApply := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
 		return nil, dispatched
 	}
-	t.Cleanup(func() { applyV2ApplyPlanFn = origApply })
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = origApply })
 
 	origAllow := applyAllowReplaceSet
 	applyAllowReplaceSet = map[string]struct{}{"prod-db": {}}

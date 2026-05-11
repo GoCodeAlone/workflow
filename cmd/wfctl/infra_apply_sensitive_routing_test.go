@@ -162,6 +162,9 @@ func TestPersistResourceWithSecretRouting_NoProviderHardFails(t *testing.T) {
 	if len(store.saved) != 0 {
 		t.Error("state should NOT be saved when routing fails")
 	}
+	if len(drv.deleteCalls) != 1 {
+		t.Fatalf("expected compensating Delete after routing failure, got %d", len(drv.deleteCalls))
+	}
 }
 
 func TestPersistResourceWithSecretRouting_SaveFailureCompensatesWithDelete(t *testing.T) {
@@ -189,6 +192,30 @@ func TestPersistResourceWithSecretRouting_SaveFailureCompensatesWithDelete(t *te
 	}
 	if _, ok := prov.values[sensitive.SecretKey("myres", "secret_key")]; ok {
 		t.Errorf("compensating Delete should have removed routed secret; got %v", prov.values)
+	}
+}
+
+func TestPersistResourceWithSecretRouting_SaveFailureWithoutSecretsCompensatesWithDelete(t *testing.T) {
+	store := &stubInfraStore{saveErr: errors.New("disk full")}
+	drv := &stubSensitiveDriver{}
+	out := interfaces.ResourceOutput{
+		Name:       "myres",
+		ProviderID: "plain-id",
+		Outputs:    map[string]any{"bucket": "b"},
+	}
+	rs := interfaces.ResourceState{Name: "myres", Type: "infra.bucket", ProviderID: "plain-id"}
+	_, err := persistResourceWithSecretRouting(context.Background(), store, nil, drv, rs, out, persistModeApply)
+	if err == nil {
+		t.Fatal("expected error from SaveResource")
+	}
+	if !strings.Contains(err.Error(), "compensating delete succeeded") {
+		t.Fatalf("error = %v, want compensating delete success", err)
+	}
+	if len(drv.deleteCalls) != 1 {
+		t.Fatalf("expected 1 compensating Delete call, got %d", len(drv.deleteCalls))
+	}
+	if drv.deleteCalls[0].ProviderID != "plain-id" {
+		t.Errorf("compensating Delete used wrong ProviderID: %v", drv.deleteCalls[0])
 	}
 }
 
