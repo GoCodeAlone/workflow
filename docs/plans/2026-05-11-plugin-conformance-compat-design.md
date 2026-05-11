@@ -12,7 +12,8 @@ The first implementation should:
 
 1. Add `wfctl plugin conformance` for strict typed IaC host/plugin checks.
 2. Add registry-native version indexes with compatibility evidence.
-3. Teach install/update/lock resolution to sort compatible versions using the index, reject known-incompatible versions by default, and allow explicit `--force`.
+3. Add an index update command so CI can publish evidence without hand-editing JSON.
+4. Teach install/update/lock resolution to sort compatible versions using the index, reject known-incompatible versions by default, and allow explicit `--force`.
 
 See `decisions/0030-plugin-conformance-evidence-index.md`.
 
@@ -97,6 +98,7 @@ Initial options:
 - `--mode typed-iac`
 - `--engine-version <version>` for report metadata
 - `--format text|json`
+- `--output <path>` when `--format json`
 - `--timeout <duration>`
 
 Initial mode:
@@ -154,6 +156,11 @@ Proposed version index shape:
 {
   "plugin": "workflow-plugin-digitalocean",
   "generatedAt": "2026-05-11T00:00:00Z",
+  "evidencePolicy": {
+    "firstParty": "required",
+    "community": "advisory",
+    "requiredFromEngine": "v0.52.0"
+  },
   "versions": [
     {
       "version": "v0.14.4",
@@ -172,6 +179,7 @@ Proposed version index shape:
           "wfctlVersion": "v0.51.2",
           "mode": "typed-iac",
           "status": "pass",
+          "evidenceDigest": "sha256:...",
           "os": "linux",
           "arch": "amd64",
           "artifactSHA256": "...",
@@ -212,12 +220,15 @@ Evidence must bind to the artifact digest that install will fetch. A pass record
 
 Unsigned evidence from untrusted/community registries is advisory only. It may warn or help humans choose, but it must not override `minEngineVersion` or block/allow installs by itself. The first implementation can accept trusted first-party registry evidence without signature, but the schema reserves `signature` so public/community trust can be tightened later.
 
+`evidenceDigest` is `sha256:<hex>` over canonical JSON for the exact evidence record with `evidenceDigest` and `signature` omitted, object keys sorted lexicographically, and UTF-8 encoding. The resolver uses it as an audit handle in lockfiles; artifact integrity still comes from download SHA-256.
+
 Failure precedence:
 
 1. Exact matching trusted `fail` for artifact + engine + mode + platform blocks by default.
 2. Exact matching trusted `pass` allows the candidate if `minEngineVersion` is also compatible.
-3. Missing exact evidence falls back to `minEngineVersion` with a warning.
-4. Evidence for a different OS/arch, mode, artifact digest, or engine version does not match.
+3. Missing exact evidence for first-party registries with `evidencePolicy.firstParty=required` blocks when current engine ≥ `requiredFromEngine`.
+4. Missing exact evidence for transitional or advisory registries falls back to `minEngineVersion` with a warning.
+5. Evidence for a different OS/arch, mode, artifact digest, or engine version does not match.
 
 Version grammar:
 
@@ -282,6 +293,52 @@ Existing sources may synthesize a single-version index from `FetchManifest` so o
 
 `MultiRegistry` must resolve manifests and indexes from the same source. It should try original name then normalized name using the same source-priority order as `FetchManifest`. Once a source resolves a plugin, its version index must come from that same source unless the manifest explicitly points to a cross-source index and that target is trusted.
 
+### Evidence Production And Publishing
+
+First-scope producer path:
+
+1. Plugin CI builds release artifacts and checksums as it does today.
+2. Plugin CI runs `wfctl plugin conformance --mode typed-iac --engine-version <engine> --format json --output compatibility/<engine>-<os>-<arch>.json .` for each engine/platform matrix cell.
+3. Plugin CI uploads those JSON files as workflow artifacts for PRs.
+4. Release CI or a maintainer-run registry job checks out `workflow-registry` and runs:
+
+   ```sh
+   wfctl registry compatibility update \
+     --registry-dir . \
+     --plugin workflow-plugin-digitalocean \
+     --version v0.14.4 \
+     --evidence compatibility/*.json
+   ```
+
+5. The update command reads `plugins/<plugin>/manifest.json`, reads or creates `compatibility/<plugin>/index.json`, validates evidence against manifest/download checksums, upserts exact records, sorts versions descending by semver, sorts evidence by engine/mode/os/arch, writes a temp file, fsyncs where supported, then atomically renames into place.
+6. CI opens or updates a registry PR containing only manifest/index/checksum changes. No pass/fail claim should be hand-authored.
+
+`wfctl plugin conformance --format json` output is one evidence record, not the whole index. It includes:
+
+- plugin name/version
+- engine version and `wfctl` version
+- mode/status
+- os/arch
+- artifact SHA-256
+- plugin manifest SHA-256
+- repo/ref/commit/workflow URL when CI env provides them
+- stderr/stdout tails only on failure
+- `evidenceDigest`
+
+Engine matrix policy:
+
+- For each plugin release, test declared `minEngineVersion` and latest Workflow release.
+- If they are equal, one matrix row is enough.
+- `WORKFLOW_CURRENT_VERSION` may pin latest during release incidents.
+- `wfctl registry compatibility update` marks index stale when latest Workflow release is newer than newest evidence for that plugin.
+- In required first-party mode, stale evidence blocks install/update/lock for the newer engine. In transitional/advisory mode, stale evidence warns.
+
+Engine version source of truth:
+
+- `wfctl plugin conformance --engine-version` wins.
+- Install/update/lock use the compiled `wfctl version` when it is a release semver.
+- If local `wfctl version` is a pseudo-version or `v0.0.0-*`, users may set `WFCTL_ENGINE_VERSION` or `--engine-version`; otherwise resolver treats evidence as advisory and prints that local engine version is not comparable.
+
 ### Install, Update, And Lock Resolution
 
 Shared resolver behavior:
@@ -303,13 +360,13 @@ This keeps `minEngineVersion` as a lower-bound hint while allowing real conforma
 - Uses the shared resolver with no requested version.
 - Installs the newest highest-ranked candidate.
 - If the user passes `<name>@<version>`, the resolver evaluates only that version and fails by default on exact trusted fail evidence.
-- `--force` bypasses compatibility blocking but still verifies checksums unless `--skip-checksum` is separately supplied.
+- `--force` bypasses compatibility blocking but still verifies checksums unless `--skip-checksum` is separately supplied. Lockfile reason: `force-install`.
 
 `wfctl plugin update <name>`:
 
 - Uses the shared resolver with installed version as lower bound.
 - Does not update to a newer version with exact trusted fail evidence unless `--force`.
-- If the installed version later becomes known-fail, `update` reports it and suggests either an available compatible version or `--force`.
+- If the installed version later becomes known-fail, `update` reports it and suggests either an available compatible version or `--force`. Lockfile reason for forced update: `force-update`.
 
 `wfctl plugin lock`:
 
@@ -325,14 +382,18 @@ Lockfile additive fields:
 plugins:
   digitalocean:
     version: v0.14.4
-    sha256: ...
-    compatibility:
-      engineVersion: v0.51.2
-      mode: typed-iac
-      status: pass
-      evidenceDigest: ...
-      forced: false
-      reason: ""
+    platforms:
+      linux-amd64:
+        url: https://...
+        sha256: ...
+        compatibility:
+          engineVersion: v0.51.2
+          mode: typed-iac
+          status: pass
+          artifactSHA256: ...
+          evidenceDigest: sha256:...
+          forced: false
+          reason: ""
 ```
 
 Older clients should ignore the additive `compatibility` mapping. New clients should preserve unknown lockfile fields when rewriting if practical; if not practical in the first pass, the plan must include a regression test that documents current behavior and a follow-up issue.
@@ -344,7 +405,7 @@ Enforcement controls:
 3. Registry/project config fallback: `plugin.compatibilityEnforcement: enforce|warn`.
 4. Default: `enforce`.
 
-Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidence never blocks install/update/lock, but the command must print the warning and record `compatibility.status: fail` with `forced: true` and `reason: compat-mode=warn`.
+Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidence never blocks install/update/lock, but the command must print the warning and record platform compatibility with `status: fail`, `forced: true`, and `reason: compat-mode=warn`. Explicit `--force` in enforce mode records `forced: true` and `reason: force-install`, `force-update`, or `force-lock`.
 
 ## Failure Handling
 
@@ -353,6 +414,7 @@ Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidenc
 - Unsupported conformance mode: fail with available mode suggestions from manifest capabilities.
 - Engine version not found: fail unless the caller supplied `--engine-version local`.
 - Compatibility index unavailable: warn for installs, fail for explicit evidence publishing when added later.
+- Compatibility update fails validation: leave existing index untouched; write no partial file.
 - Fork PR without `RELEASES_TOKEN`: CI may fall back to public release lookup; private-release checks should skip or fail with a token-specific message.
 - Conformance timeout: kill the plugin subprocess, unload it, and report timeout as failure.
 - Mismatched evidence digest: ignore the evidence and warn; never use digest-mismatched evidence to allow or block.
@@ -366,6 +428,7 @@ Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidenc
 - JSON output must not include environment variables, secret values, or full process command lines containing tokens.
 - Install-time `--force` should be visible in lockfiles so reviewers can detect intentionally bypassed compatibility checks.
 - Compatibility evidence that lacks a matching artifact digest or trusted provenance is advisory only.
+- Secret-bearing release/registry jobs should run only on tags, protected branches, or maintainer-triggered workflows. Fork PRs may run fixture conformance and build checks, but must not execute arbitrary released plugin binaries while organization tokens are available.
 
 ## Testing
 
@@ -375,6 +438,11 @@ Unit tests:
 - Registry source single-manifest fallback to synthetic version index.
 - Install resolver behavior for compatible, incompatible, missing-evidence, and forced installs.
 - Lockfile compatibility metadata write/read and old-client additive-field tolerance where supported.
+- Platform-scoped lockfile compatibility metadata for mixed pass/fail platforms.
+- Evidence digest canonicalization.
+- Registry compatibility update validation, sort order, and atomic no-partial-write behavior.
+- Engine version source precedence and pseudo-version advisory behavior.
+- Evidence-required policy for first-party registries after `requiredFromEngine`.
 - Update resolver behavior for newer compatible, newer known-fail, and installed known-fail versions.
 - `--compat-mode`, `WFCTL_PLUGIN_COMPAT_MODE`, and config precedence.
 - Same-source manifest/index resolution in `MultiRegistry`.
@@ -387,10 +455,12 @@ Integration tests:
 - Fake digest mismatch where evidence is ignored.
 - Fake conformance plugin that hangs during handshake and is killed on timeout.
 - Fake local plugin directory staged into installed layout with expected binary name.
+- Fake registry compatibility update from two conformance JSON files.
 
 Runtime validation:
 - Build local `wfctl`.
 - Run `wfctl plugin conformance --mode typed-iac` against a fixture plugin.
+- Run `wfctl registry compatibility update` against a temp registry checkout and verify stable index diff.
 - Run `wfctl plugin conformance --mode typed-iac` against the DigitalOcean plugin in CI after the plugin adopts the command.
 
 ## Rollback
@@ -407,7 +477,7 @@ Runtime-affecting rollback path:
 
 - Workflow engine releases remain tagged and fetchable from GitHub.
 - Plugin CI has access to `RELEASES_TOKEN` for private Workflow release metadata and assets when required.
-- Compatibility evidence can initially be generated per released engine version rather than per engine commit.
+- Compatibility evidence can initially be generated for plugin `minEngineVersion` and latest released engine rather than every engine release in between.
 - Plugin manifests can grow additive optional fields without breaking older `wfctl` versions.
 - The first compatibility consumers are Go external IaC plugins; UI-only and non-IaC plugin compatibility can be modeled later.
 - First-party registry evidence can be treated as trusted when served from GoCodeAlone-controlled registries; community evidence needs signatures before it can enforce install decisions.
