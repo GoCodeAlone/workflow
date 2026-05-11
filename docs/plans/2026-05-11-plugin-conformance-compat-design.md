@@ -91,7 +91,10 @@ Add:
 
 ```sh
 wfctl plugin conformance [options] <plugin-dir>
+wfctl plugin conformance --artifact <tar.gz> [options]
 ```
+
+Exactly one of `<plugin-dir>` or `--artifact <tar.gz>` is required.
 
 Initial options:
 
@@ -198,8 +201,7 @@ Proposed version index shape:
           "ref": "refs/tags/v0.14.4",
           "commit": "abc123",
           "workflowRunURL": "https://github.com/GoCodeAlone/workflow-plugin-digitalocean/actions/runs/123",
-          "generatedBy": "wfctl plugin conformance",
-          "signature": null
+          "generatedBy": "wfctl plugin conformance"
         }
       ]
     }
@@ -228,9 +230,9 @@ Evidence must bind to the archive digest that install will fetch. A pass record 
 4. `mode` satisfies the capability being installed. For IaC providers, this is `typed-iac`.
 5. The evidence comes from a trusted first-party registry source. Signed third-party enforcement is deferred.
 
-Unsigned evidence from untrusted/community registries is advisory only. It may warn or help humans choose, but it must not override `minEngineVersion` or block/allow installs by itself. The first implementation accepts trusted first-party registry evidence without signatures. Signed third-party enforcement is deferred; `signature` remains `null` and non-enforcing until an ADR defines envelope, key IDs, algorithm, and canonical signed bytes.
+Unsigned evidence from untrusted/community registries is advisory only. It may warn or help humans choose, but it must not override `minEngineVersion` or block/allow installs by itself. The first implementation accepts trusted first-party registry evidence without signatures. Signed third-party enforcement is deferred; the first-scope schema does not include a signature field, and any future signature support needs an ADR defining envelope, key IDs, algorithm, and canonical signed bytes.
 
-`evidenceDigest` is `sha256:<hex>` over canonical JSON for the exact evidence record with `evidenceDigest` and `signature` omitted, object keys sorted lexicographically, and UTF-8 encoding. The resolver uses it as an audit handle in lockfiles; artifact integrity still comes from download SHA-256.
+`evidenceDigest` is `sha256:<hex>` over canonical JSON for the exact evidence record with `evidenceDigest` omitted, object keys sorted lexicographically, and UTF-8 encoding. The resolver uses it as an audit handle in lockfiles; artifact integrity still comes from download SHA-256.
 
 Failure precedence:
 
@@ -355,7 +357,9 @@ Engine version source of truth:
 Configuration ownership:
 
 - `--compat-mode` belongs to `plugin install`, `plugin update`, and `plugin lock`.
+- `--engine-version` belongs to `plugin install`, `plugin update`, and `plugin lock` for local pseudo-version and test scenarios.
 - `WFCTL_PLUGIN_COMPAT_MODE` is process-wide fallback.
+- `WFCTL_ENGINE_VERSION` is process-wide fallback for resolver engine comparison.
 - Project config fallback lives in `wfctl.yaml`:
 
   ```yaml
@@ -432,7 +436,7 @@ Enforcement controls:
 
 1. CLI flag on install/update/lock: `--compat-mode enforce|warn`.
 2. Environment fallback: `WFCTL_PLUGIN_COMPAT_MODE=enforce|warn`.
-3. Registry/project config fallback: `plugin.compatibilityEnforcement: enforce|warn`.
+3. Project/global config fallback: `plugin.compatibilityEnforcement: enforce|warn`.
 4. Default: `enforce`.
 
 Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidence never blocks install/update/lock, but the command must print the warning and record platform compatibility with `status: fail`, `forced: true`, and `reason: compat-mode=warn`. Explicit `--force` in enforce mode records `forced: true` and `reason: force-install`, `force-update`, or `force-lock`.
@@ -443,7 +447,7 @@ Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidenc
 - Handshake failure: fail and include plugin stderr tail when available.
 - Unsupported conformance mode: fail with available mode suggestions from manifest capabilities.
 - Engine version not found: fail unless the caller supplied `--engine-version local`.
-- Compatibility index unavailable: warn for installs, fail for explicit evidence publishing when added later.
+- Compatibility index unavailable: enforce/warn according to evidence policy and compatibility mode. Required first-party evidence blocks in enforce mode; advisory/transitional evidence warns.
 - Compatibility update fails validation: leave existing index untouched; write no partial file.
 - Fork PR without `RELEASES_TOKEN`: CI may fall back to public release lookup; private-release checks should skip or fail with a token-specific message.
 - Conformance timeout: kill the plugin subprocess, unload it, and report timeout as failure.
