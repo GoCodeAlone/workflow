@@ -65,7 +65,7 @@ Pros:
 
 Cons:
 - Registry source APIs must grow beyond one-manifest lookup.
-- `wfctl` must match evidence to artifact digests and platforms.
+- `wfctl` must match evidence to archive digests and platforms.
 
 Accepted.
 
@@ -96,6 +96,7 @@ wfctl plugin conformance [options] <plugin-dir>
 Initial options:
 
 - `--mode typed-iac`
+- `--artifact <tar.gz>` for release-archive conformance
 - `--engine-version <version>` for report metadata
 - `--format text|json`
 - `--output <path>` when `--format json`
@@ -103,7 +104,7 @@ Initial options:
 
 Initial mode:
 
-- `typed-iac`: build or find the plugin binary, launch it through `plugin/external.ExternalPluginManager`, verify typed IaC service registration, call only allowed local metadata methods, and unload.
+- `typed-iac`: stage a release archive or local plugin dir, launch via conformance-specific external-plugin launcher using the same gRPC protocol/adapter checks as production, verify typed IaC service registration, call only allowed local metadata methods, and unload.
 
 There is no `--strict=false` in the initial command. IaC install compatibility is strict typed-only, matching the hard-cutover direction in `decisions/0024-iac-typed-force-cutover.md`. Future Module/Step/Trigger conformance modes may be added, but their evidence must not satisfy IaC compatibility decisions.
 
@@ -122,22 +123,25 @@ The conformance command should use a conformance-specific launcher instead of ch
 
 Staging contract:
 
-1. Read `<plugin-dir>/plugin.json`.
-2. Resolve plugin install name from `plugin.json.name`, normalized the same way `wfctl plugin install` normalizes names.
-3. Create a temp installed layout:
+1. If `--artifact` is set, hash archive bytes as `archiveSHA256`, extract archive into temp source dir, and use extracted contents as sole test input.
+2. If `--artifact` is absent, read `<plugin-dir>/plugin.json` and treat run as local/advisory unless caller later binds it to an archive through the registry update command.
+3. Resolve plugin install name from staged `plugin.json.name`, normalized the same way `wfctl plugin install` normalizes names.
+4. Create a temp installed layout:
 
    ```text
    <tmp>/plugins/<install-name>/plugin.json
    <tmp>/plugins/<install-name>/<install-name>
    ```
 
-4. If `<plugin-dir>/<install-name>` exists and is executable, copy it into the staged binary path.
-5. Otherwise run `go build -o <tmp>/plugins/<install-name>/<install-name> .` with working directory `<plugin-dir>`.
-6. Copy `plugin.contracts.json` and other metadata files only when a conformance mode needs them. Do not copy provider credentials or local `.env` files.
-7. Compute SHA-256 over the staged binary and plugin manifest. These become `artifactSHA256` and `pluginManifestSHA256` for local evidence output.
-8. Launch the staged binary with working directory `<tmp>/plugins/<install-name>`.
-9. Capture stderr/stdout into bounded ring buffers and include only tails in failure output.
-10. Remove the temp directory after unload unless `--keep-temp` is added in a later debugging task.
+5. If staged source contains `<install-name>` and it is executable, copy it into staged binary path.
+6. Otherwise run `go build -o <tmp>/plugins/<install-name>/<install-name> .` with working directory staged source dir.
+7. Copy `plugin.contracts.json` and other metadata files only when a conformance mode needs them. Do not copy provider credentials or local `.env` files.
+8. Compute SHA-256 over staged binary as `binarySHA256` and staged plugin manifest as `pluginManifestSHA256`.
+9. For `--artifact`, evidence includes both `archiveSHA256` and `binarySHA256`; resolver matches downloads on `archiveSHA256`.
+10. For local-dir runs, evidence includes `binarySHA256` but no `archiveSHA256`; registry update treats such evidence as advisory unless paired with an archive checksum matching a manifest download.
+11. Launch staged binary with working directory `<tmp>/plugins/<install-name>`.
+12. Capture stderr/stdout into bounded ring buffers and include only tails in failure output.
+13. Remove temp directory after unload unless `--keep-temp` is added in a later debugging task.
 
 Timeout contract:
 
@@ -182,14 +186,20 @@ Proposed version index shape:
           "evidenceDigest": "sha256:...",
           "os": "linux",
           "arch": "amd64",
-          "artifactSHA256": "...",
+          "archiveSHA256": "...",
+          "binarySHA256": "...",
           "pluginManifestSHA256": "...",
+          "compatibleEngineRange": {
+            "min": "v0.51.2",
+            "max": "v0.53.0",
+            "derivation": "min-and-latest-pass"
+          },
           "repository": "GoCodeAlone/workflow-plugin-digitalocean",
           "ref": "refs/tags/v0.14.4",
           "commit": "abc123",
           "workflowRunURL": "https://github.com/GoCodeAlone/workflow-plugin-digitalocean/actions/runs/123",
           "generatedBy": "wfctl plugin conformance",
-          "signature": ""
+          "signature": null
         }
       ]
     }
@@ -210,15 +220,15 @@ Manifest summary:
 }
 ```
 
-Evidence must bind to the artifact digest that install will fetch. A pass record is authoritative only when:
+Evidence must bind to the archive digest that install will fetch. A pass record is authoritative only when:
 
 1. `plugin`, `version`, `os`, and `arch` match the candidate install.
-2. `artifactSHA256` matches the candidate download SHA-256.
-3. `engineVersion` equals the current engine version, or a later explicit range rule says the current engine is compatible.
+2. `archiveSHA256` matches the candidate download SHA-256.
+3. `engineVersion` equals the current engine version, or `compatibleEngineRange` covers current engine and its derivation is trusted.
 4. `mode` satisfies the capability being installed. For IaC providers, this is `typed-iac`.
-5. The evidence comes from a trusted registry source, or is signed by a configured trusted key.
+5. The evidence comes from a trusted first-party registry source. Signed third-party enforcement is deferred.
 
-Unsigned evidence from untrusted/community registries is advisory only. It may warn or help humans choose, but it must not override `minEngineVersion` or block/allow installs by itself. The first implementation can accept trusted first-party registry evidence without signature, but the schema reserves `signature` so public/community trust can be tightened later.
+Unsigned evidence from untrusted/community registries is advisory only. It may warn or help humans choose, but it must not override `minEngineVersion` or block/allow installs by itself. The first implementation accepts trusted first-party registry evidence without signatures. Signed third-party enforcement is deferred; `signature` remains `null` and non-enforcing until an ADR defines envelope, key IDs, algorithm, and canonical signed bytes.
 
 `evidenceDigest` is `sha256:<hex>` over canonical JSON for the exact evidence record with `evidenceDigest` and `signature` omitted, object keys sorted lexicographically, and UTF-8 encoding. The resolver uses it as an audit handle in lockfiles; artifact integrity still comes from download SHA-256.
 
@@ -226,9 +236,10 @@ Failure precedence:
 
 1. Exact matching trusted `fail` for artifact + engine + mode + platform blocks by default.
 2. Exact matching trusted `pass` allows the candidate if `minEngineVersion` is also compatible.
-3. Missing exact evidence for first-party registries with `evidencePolicy.firstParty=required` blocks when current engine ≥ `requiredFromEngine`.
-4. Missing exact evidence for transitional or advisory registries falls back to `minEngineVersion` with a warning.
-5. Evidence for a different OS/arch, mode, artifact digest, or engine version does not match.
+3. Trusted pass range allows the candidate only if current engine is within `compatibleEngineRange`.
+4. Missing exact or ranged evidence for first-party registries with `evidencePolicy.firstParty=required` blocks when current engine ≥ `requiredFromEngine`.
+5. Missing exact/ranged evidence for transitional or advisory registries falls back to `minEngineVersion` with a warning.
+6. Evidence for a different OS/arch, mode, archive digest, or engine version/range does not match.
 
 Version grammar:
 
@@ -256,9 +267,7 @@ registries:
     url: https://example.com/workflow-registry
     priority: 10
     compatibilityEvidence:
-      trust: signed
-      keys:
-        - "SHA256:..."
+      trust: advisory
   - name: community
     type: static
     url: https://example.net/workflow-registry
@@ -272,7 +281,7 @@ Default rules:
 - Built-in `GoCodeAlone/workflow-registry` on `main` is `first_party`.
 - Static mirror `https://gocodealone.github.io/workflow-registry/v1` is `first_party` only when it is the built-in default entry.
 - User-configured registries default to `advisory`.
-- `signed` evidence requires a matching configured key before it can enforce install decisions.
+- Signed third-party evidence is out of first scope. `signed` trust mode must be rejected until a signature ADR lands.
 - `advisory` evidence can produce warnings and ranking notes, but cannot block or allow an install beyond `minEngineVersion`.
 
 ### Registry API
@@ -298,7 +307,7 @@ Existing sources may synthesize a single-version index from `FetchManifest` so o
 First-scope producer path:
 
 1. Plugin CI builds release artifacts and checksums as it does today.
-2. Plugin CI runs `wfctl plugin conformance --mode typed-iac --engine-version <engine> --format json --output compatibility/<engine>-<os>-<arch>.json .` for each engine/platform matrix cell.
+2. Plugin CI runs `wfctl plugin conformance --mode typed-iac --artifact dist/<archive>.tar.gz --engine-version <engine> --format json --output compatibility/<engine>-<os>-<arch>.json` for each engine/platform matrix cell.
 3. Plugin CI uploads those JSON files as workflow artifacts for PRs.
 4. Release CI or a maintainer-run registry job checks out `workflow-registry` and runs:
 
@@ -310,7 +319,7 @@ First-scope producer path:
      --evidence compatibility/*.json
    ```
 
-5. The update command reads `plugins/<plugin>/manifest.json`, reads or creates `compatibility/<plugin>/index.json`, validates evidence against manifest/download checksums, upserts exact records, sorts versions descending by semver, sorts evidence by engine/mode/os/arch, writes a temp file, fsyncs where supported, then atomically renames into place.
+5. The update command reads `plugins/<plugin>/manifest.json`, reads or creates `compatibility/<plugin>/index.json`, validates evidence `archiveSHA256` against manifest/download checksums, validates `binarySHA256` format, upserts exact records, derives range records when policy allows, sorts versions descending by semver, sorts evidence by engine/mode/os/arch, writes a temp file, fsyncs where supported, then atomically renames into place.
 6. CI opens or updates a registry PR containing only manifest/index/checksum changes. No pass/fail claim should be hand-authored.
 
 `wfctl plugin conformance --format json` output is one evidence record, not the whole index. It includes:
@@ -319,7 +328,8 @@ First-scope producer path:
 - engine version and `wfctl` version
 - mode/status
 - os/arch
-- artifact SHA-256
+- archive SHA-256 when `--artifact` provided
+- binary SHA-256
 - plugin manifest SHA-256
 - repo/ref/commit/workflow URL when CI env provides them
 - stderr/stdout tails only on failure
@@ -329,6 +339,9 @@ Engine matrix policy:
 
 - For each plugin release, test declared `minEngineVersion` and latest Workflow release.
 - If they are equal, one matrix row is enough.
+- Exact evidence is always recorded.
+- A range is derived only when min and latest both pass, no fail evidence exists inside that closed range, and the registry update command can enumerate Workflow releases in the range.
+- If any intermediate engine has explicit fail evidence, no range crosses that version.
 - `WORKFLOW_CURRENT_VERSION` may pin latest during release incidents.
 - `wfctl registry compatibility update` marks index stale when latest Workflow release is newer than newest evidence for that plugin.
 - In required first-party mode, stale evidence blocks install/update/lock for the newer engine. In transitional/advisory mode, stale evidence warns.
@@ -339,6 +352,21 @@ Engine version source of truth:
 - Install/update/lock use the compiled `wfctl version` when it is a release semver.
 - If local `wfctl version` is a pseudo-version or `v0.0.0-*`, users may set `WFCTL_ENGINE_VERSION` or `--engine-version`; otherwise resolver treats evidence as advisory and prints that local engine version is not comparable.
 
+Configuration ownership:
+
+- `--compat-mode` belongs to `plugin install`, `plugin update`, and `plugin lock`.
+- `WFCTL_PLUGIN_COMPAT_MODE` is process-wide fallback.
+- Project config fallback lives in `wfctl.yaml`:
+
+  ```yaml
+  version: 1
+  plugin:
+    compatibilityEnforcement: enforce
+  ```
+
+- User/global fallback may live in `~/.config/wfctl/config.yaml` under the same `plugin.compatibilityEnforcement` key.
+- Registry config owns registry trust only, not enforcement mode.
+
 ### Install, Update, And Lock Resolution
 
 Shared resolver behavior:
@@ -346,7 +374,8 @@ Shared resolver behavior:
 1. Resolve candidate plugin versions from the registry version index.
 2. Filter out versions with `minEngineVersion` greater than the current engine.
 3. For the current OS/arch, rank candidates:
-   - exact trusted pass evidence for current engine + required mode + artifact digest
+   - exact trusted pass evidence for current engine + required mode + archive digest
+   - trusted range pass covering current engine + required mode + archive digest
    - compatible `minEngineVersion` but missing evidence
    - exact trusted fail evidence is excluded
 4. Install the newest highest-ranked compatible candidate.
@@ -390,7 +419,8 @@ plugins:
           engineVersion: v0.51.2
           mode: typed-iac
           status: pass
-          artifactSHA256: ...
+          archiveSHA256: ...
+          binarySHA256: ...
           evidenceDigest: sha256:...
           forced: false
           reason: ""
@@ -419,6 +449,7 @@ Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidenc
 - Conformance timeout: kill the plugin subprocess, unload it, and report timeout as failure.
 - Mismatched evidence digest: ignore the evidence and warn; never use digest-mismatched evidence to allow or block.
 - Registry/index source mismatch: ignore the index unless the manifest's cross-source pointer is trusted.
+- Conformance evidence without `archiveSHA256`: advisory only for registry enforcement.
 
 ## Security
 
@@ -427,7 +458,7 @@ Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidenc
 - Initial typed-IaC checks must call only local metadata methods and must not call resource or credential operations.
 - JSON output must not include environment variables, secret values, or full process command lines containing tokens.
 - Install-time `--force` should be visible in lockfiles so reviewers can detect intentionally bypassed compatibility checks.
-- Compatibility evidence that lacks a matching artifact digest or trusted provenance is advisory only.
+- Compatibility evidence that lacks a matching archive digest or trusted provenance is advisory only.
 - Secret-bearing release/registry jobs should run only on tags, protected branches, or maintainer-triggered workflows. Fork PRs may run fixture conformance and build checks, but must not execute arbitrary released plugin binaries while organization tokens are available.
 
 ## Testing
@@ -447,6 +478,9 @@ Unit tests:
 - `--compat-mode`, `WFCTL_PLUGIN_COMPAT_MODE`, and config precedence.
 - Same-source manifest/index resolution in `MultiRegistry`.
 - Version canonicalization for `v0.51.2` and `0.51.2`.
+- Archive SHA vs binary SHA validation and matching.
+- Range derivation from min/latest pass and explicit intermediate fail.
+- `wfctl.yaml` and global config loading for `plugin.compatibilityEnforcement`.
 
 Integration tests:
 - Fake typed-IaC plugin passing `typed-iac`.
@@ -456,10 +490,12 @@ Integration tests:
 - Fake conformance plugin that hangs during handshake and is killed on timeout.
 - Fake local plugin directory staged into installed layout with expected binary name.
 - Fake registry compatibility update from two conformance JSON files.
+- Fake archive conformance proving extracted release artifact, not source dir.
 
 Runtime validation:
 - Build local `wfctl`.
 - Run `wfctl plugin conformance --mode typed-iac` against a fixture plugin.
+- Run `wfctl plugin conformance --mode typed-iac --artifact <fixture.tar.gz>` and verify archive/binary hashes in JSON.
 - Run `wfctl registry compatibility update` against a temp registry checkout and verify stable index diff.
 - Run `wfctl plugin conformance --mode typed-iac` against the DigitalOcean plugin in CI after the plugin adopts the command.
 
@@ -477,16 +513,16 @@ Runtime-affecting rollback path:
 
 - Workflow engine releases remain tagged and fetchable from GitHub.
 - Plugin CI has access to `RELEASES_TOKEN` for private Workflow release metadata and assets when required.
-- Compatibility evidence can initially be generated for plugin `minEngineVersion` and latest released engine rather than every engine release in between.
+- Compatibility evidence can initially be generated for plugin `minEngineVersion` and latest released engine, with explicit derived ranges only when registry update can enumerate releases and sees no fail inside range.
 - Plugin manifests can grow additive optional fields without breaking older `wfctl` versions.
 - The first compatibility consumers are Go external IaC plugins; UI-only and non-IaC plugin compatibility can be modeled later.
-- First-party registry evidence can be treated as trusted when served from GoCodeAlone-controlled registries; community evidence needs signatures before it can enforce install decisions.
+- First-party registry evidence can be treated as trusted when served from GoCodeAlone-controlled registries; community evidence remains advisory until a signature ADR lands.
 - The first conformance launcher can duplicate a small amount of production plugin launch behavior to obtain timeout and staging semantics without destabilizing runtime plugin loading.
 
 ## Self-Challenge
 
 1. The laziest plausible solution is to keep one shared shell script copied into each plugin. That would solve CI drift for a few repos but would not let `wfctl plugin install` reason about compatibility, so it fails the install-resolution goal.
-2. The most fragile assumption is that evidence can safely influence installs. The design binds evidence to artifact digests and treats unsigned/untrusted evidence as advisory only.
+2. The most fragile assumption is that evidence can safely influence installs. The design binds evidence to archive digests and treats unsigned/untrusted evidence as advisory only.
 3. The design risks adding too much generality through many modes. The first implementation keeps only `typed-iac`; other plugin families can add modes after the evidence path is proven.
 
 ## Open Questions
