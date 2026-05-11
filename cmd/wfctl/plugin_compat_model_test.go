@@ -18,7 +18,6 @@ func TestPluginCompatVersionCanonicalization(t *testing.T) {
 			t.Fatalf("CanonicalEngineVersion(%q) = %q, want v0.51.2", input, got)
 		}
 	}
-
 	got, err := CanonicalPluginVersion("1.2.3")
 	if err != nil {
 		t.Fatalf("CanonicalPluginVersion: %v", err)
@@ -33,6 +32,38 @@ func TestPluginCompatVersionRejectsInvalid(t *testing.T) {
 		if _, err := CanonicalEngineVersion(input); err == nil {
 			t.Fatalf("CanonicalEngineVersion(%q) succeeded, want error", input)
 		}
+	}
+	if _, err := CanonicalPluginVersion("v1.2.3-0.20260511085732-8246535de8bd"); err == nil {
+		t.Fatalf("CanonicalPluginVersion accepted pseudo-version")
+	}
+}
+
+func TestPluginCompatEvidenceEngineVersionCanonicalization(t *testing.T) {
+	for _, input := range []string{
+		"0.51.2",
+		"v0.51.2",
+		"0.0.0-20260511085732-8246535de8bd",
+		"v0.0.0-20260511085732-8246535de8bd",
+		"v0.51.3-0.20260511085732-8246535de8bd",
+		"v0.51.3-pre.0.20260511085732-8246535de8bd",
+	} {
+		got, err := CanonicalEvidenceEngineVersion(input)
+		if err != nil {
+			t.Fatalf("CanonicalEvidenceEngineVersion(%q): %v", input, err)
+		}
+		if !strings.HasPrefix(got, "v") {
+			t.Fatalf("CanonicalEvidenceEngineVersion(%q) = %q, want leading v", input, got)
+		}
+	}
+}
+
+func TestPluginCompatResolverEngineVersionStaysReleaseComparable(t *testing.T) {
+	got, comparable := resolvePluginCompatEngineVersion("v0.51.3-0.20260511085732-8246535de8bd")
+	if comparable {
+		t.Fatalf("pseudo engine version comparable = true, got %q", got)
+	}
+	if got != "v0.0.0" {
+		t.Fatalf("pseudo engine fallback = %q, want v0.0.0", got)
 	}
 }
 
