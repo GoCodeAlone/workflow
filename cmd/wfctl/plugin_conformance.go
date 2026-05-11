@@ -25,6 +25,7 @@ func runPluginConformance(args []string) error {
 	fs := flag.NewFlagSet("plugin conformance", flag.ContinueOnError)
 	mode := fs.String("mode", PluginCompatibilityModeTypedIaC, "Conformance mode (typed-iac)")
 	artifact := fs.String("artifact", "", "Release artifact tar.gz to test")
+	buildPackage := fs.String("build-package", ".", "Go package to build when testing a source directory")
 	engineVersion := fs.String("engine-version", "", "Workflow engine version for evidence metadata")
 	format := fs.String("format", "text", "Output format: text or json")
 	output := fs.String("output", "", "Write JSON evidence to this path")
@@ -35,14 +36,28 @@ func runPluginConformance(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	buildPackageSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "build-package" {
+			buildPackageSet = true
+		}
+	})
 	if *mode != PluginCompatibilityModeTypedIaC {
 		return fmt.Errorf("unsupported conformance mode %q", *mode)
 	}
 	if *format != "text" && *format != "json" {
 		return fmt.Errorf("--format must be text or json")
 	}
+	normalizedBuildPackage, err := normalizeConformanceBuildPackage(*buildPackage)
+	if err != nil {
+		return err
+	}
+	*buildPackage = normalizedBuildPackage
 	if *artifact != "" && fs.NArg() > 0 {
 		return fmt.Errorf("specify exactly one of <plugin-dir> or --artifact")
+	}
+	if *artifact != "" && buildPackageSet {
+		return fmt.Errorf("--build-package is only supported with <plugin-dir>")
 	}
 	if *artifact == "" && fs.NArg() != 1 {
 		fs.Usage()
@@ -62,6 +77,7 @@ func runPluginConformance(args []string) error {
 		Mode:          *mode,
 		SourceDir:     source,
 		ArtifactPath:  *artifact,
+		BuildPackage:  *buildPackage,
 		EngineVersion: *engineVersion,
 		Timeout:       *timeout,
 	})
@@ -97,7 +113,7 @@ func runPluginConformance(args []string) error {
 }
 
 func printPluginConformanceUsage(w io.Writer, fs *flag.FlagSet) {
-	fmt.Fprintf(w, "Usage: wfctl plugin conformance [options] <plugin-dir>\n       wfctl plugin conformance --artifact <tar.gz> [options]\n\nRun executable plugin/host conformance checks. This executes plugin code; run only on trusted local sources or CI artifacts.\n\nFlags: --artifact --mode --engine-version --format --output --timeout\n\nOptions:\n")
+	fmt.Fprintf(w, "Usage: wfctl plugin conformance [options] <plugin-dir>\n       wfctl plugin conformance --artifact <tar.gz> [options]\n\nRun executable plugin/host conformance checks. This executes plugin code; run only on trusted local sources or CI artifacts.\n\nFlags: --artifact --build-package --mode --engine-version --format --output --timeout\n\nOptions:\n")
 	fs.PrintDefaults()
 }
 
@@ -113,10 +129,45 @@ func resolveConformanceEngineVersion() string {
 	return "v0.0.0"
 }
 
+func normalizeConformanceBuildPackage(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("--build-package must not be empty")
+	}
+	if strings.HasPrefix(value, "-") {
+		return "", fmt.Errorf("--build-package must be a package path, not a go build flag")
+	}
+	if filepath.IsAbs(value) {
+		return "", fmt.Errorf("--build-package must stay inside the plugin directory")
+	}
+	if strings.Contains(value, "...") {
+		return "", fmt.Errorf("--build-package must name one package, not a package pattern")
+	}
+	if strings.Contains(value, "\\") {
+		return "", fmt.Errorf("--build-package must use slash-separated Go package paths")
+	}
+	if value == "." {
+		return ".", nil
+	}
+	if !strings.HasPrefix(value, "./") {
+		return "", fmt.Errorf("--build-package must be . or a ./ path inside the plugin directory")
+	}
+	rel := strings.TrimPrefix(value, "./")
+	if rel == "" {
+		return "", fmt.Errorf("--build-package must name a package")
+	}
+	clean := filepath.Clean(rel)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("--build-package must stay inside the plugin directory")
+	}
+	return "./" + filepath.ToSlash(clean), nil
+}
+
 type pluginConformanceOptions struct {
 	Mode          string
 	SourceDir     string
 	ArtifactPath  string
+	BuildPackage  string
 	EngineVersion string
 	Timeout       time.Duration
 }
@@ -175,12 +226,16 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		return PluginCompatibilityEvidence{}, err
 	}
 	binaryPath := filepath.Join(installDir, installName)
-	if info, statErr := os.Stat(filepath.Join(sourceDir, installName)); statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+	if info, statErr := os.Stat(filepath.Join(sourceDir, installName)); opts.ArtifactPath != "" && statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
 		if err := copyFile(filepath.Join(sourceDir, installName), binaryPath, info.Mode()); err != nil {
 			return PluginCompatibilityEvidence{}, err
 		}
 	} else {
-		cmd := exec.Command("go", "build", "-mod=mod", "-o", binaryPath, ".") //nolint:gosec // command args are fixed; dir is staged source.
+		buildPackage := opts.BuildPackage
+		if buildPackage == "" {
+			buildPackage = "."
+		}
+		cmd := exec.Command("go", "build", "-mod=mod", "-o", binaryPath, buildPackage) //nolint:gosec // command args are fixed; dir is staged source.
 		cmd.Dir = sourceDir
 		cmd.Env = append(os.Environ(), "GOWORK=off")
 		out, err := cmd.CombinedOutput()

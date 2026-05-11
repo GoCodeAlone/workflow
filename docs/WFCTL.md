@@ -558,6 +558,7 @@ wfctl plugin conformance --artifact <tar.gz> [options]
 |------|---------|-------------|
 | `--mode` | `typed-iac` | Conformance mode. Currently checks strict typed IaC plugin launch/contract compatibility |
 | `--artifact` | _(none)_ | Release artifact tar.gz to test instead of a local plugin directory |
+| `--build-package` | `.` | Go package to build when testing a source directory, for example `./cmd/plugin` |
 | `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version recorded in evidence |
 | `--format` | `text` | Output format: `text` or `json` |
 | `--output` | _(none)_ | Write JSON evidence to a file |
@@ -567,6 +568,7 @@ Local directory evidence is useful during development. Registry enforcement shou
 
 ```bash
 wfctl plugin conformance --mode typed-iac --format json ./workflow-plugin-digitalocean
+wfctl plugin conformance --mode typed-iac --build-package ./cmd/plugin --format json ./workflow-plugin-digitalocean
 wfctl plugin conformance --artifact dist/workflow-plugin-digitalocean.tar.gz --engine-version v0.51.2 --output evidence.json
 ```
 
