@@ -139,11 +139,12 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 			return PluginCompatibilityEvidence{}, fmt.Errorf("hash artifact: %w", err)
 		}
 		archiveSHA = sha
-		data, err := os.ReadFile(opts.ArtifactPath)
+		file, err := os.Open(opts.ArtifactPath) //nolint:gosec // user-supplied local artifact path.
 		if err != nil {
-			return PluginCompatibilityEvidence{}, fmt.Errorf("read artifact: %w", err)
+			return PluginCompatibilityEvidence{}, fmt.Errorf("open artifact: %w", err)
 		}
-		if err := extractTarGz(data, sourceDir); err != nil {
+		defer file.Close()
+		if err := extractTarGzReader(file, sourceDir); err != nil {
 			return PluginCompatibilityEvidence{}, fmt.Errorf("extract artifact: %w", err)
 		}
 	} else {

@@ -515,7 +515,7 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
-		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, false)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, *skipChecksum)
 	}
 
 	return registryErr
@@ -1181,7 +1181,11 @@ func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.
 // It guards against path traversal (zip-slip) attacks.
 func extractTarGz(data []byte, destDir string) error {
-	gzr, err := gzip.NewReader(bytes.NewReader(data))
+	return extractTarGzReader(bytes.NewReader(data), destDir)
+}
+
+func extractTarGzReader(r io.Reader, destDir string) error {
+	gzr, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("open gzip: %w", err)
 	}
