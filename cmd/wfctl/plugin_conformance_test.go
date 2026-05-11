@@ -76,6 +76,9 @@ func TestPluginConformanceLocalJSONPass(t *testing.T) {
 	if ev.Plugin != "iac-pass" || ev.Version != "v0.1.0" || ev.EngineVersion != "v0.51.2" {
 		t.Fatalf("unexpected evidence identity: %#v", ev)
 	}
+	if ev.WfctlVersion != buildVersion() {
+		t.Fatalf("wfctlVersion = %q, want actual build version %q", ev.WfctlVersion, buildVersion())
+	}
 	if ev.BinarySHA256 == "" || ev.PluginManifestSHA256 == "" || ev.EvidenceDigest == "" {
 		t.Fatalf("missing hashes/digest: %#v", ev)
 	}

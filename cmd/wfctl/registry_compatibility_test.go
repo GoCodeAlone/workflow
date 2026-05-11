@@ -117,6 +117,68 @@ func TestRegistryCompatibilityUpdateRejectsArchiveMismatchAndLeavesIndex(t *test
 	}
 }
 
+func TestRegistryCompatibilityUpdateRejectsMissingArchiveHash(t *testing.T) {
+	registryDir := prepareCompatibilityRegistry(t, "workflow-plugin-test", "v0.1.0", testArchiveSHA256)
+	evPath := writeCompatibilityEvidence(t, registryDir, PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-test",
+		Version:       "v0.1.0",
+		EngineVersion: "v0.51.2",
+		Mode:          PluginCompatibilityModeTypedIaC,
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "darwin",
+		Arch:          "arm64",
+	})
+
+	err := runPluginRegistry([]string{
+		"compatibility", "update",
+		"--registry-dir", registryDir,
+		"--plugin", "workflow-plugin-test",
+		"--version", "v0.1.0",
+		"--evidence", evPath,
+	})
+	if err == nil {
+		t.Fatal("expected missing archiveSHA256 error")
+	}
+	if !strings.Contains(err.Error(), "archiveSHA256 is required") {
+		t.Fatalf("error = %v, want archiveSHA256 required context", err)
+	}
+}
+
+func TestRegistryCompatibilityUpdateChecksAllPlatformDownloads(t *testing.T) {
+	registryDir := t.TempDir()
+	writeManifestWithDownloads(t, registryDir, "workflow-plugin-test", "v0.1.0", []PluginDownload{{
+		OS:     "darwin",
+		Arch:   "arm64",
+		URL:    "https://example.invalid/plugin-first.tar.gz",
+		SHA256: testOtherArchiveSHA256,
+	}, {
+		OS:     "darwin",
+		Arch:   "arm64",
+		URL:    "https://example.invalid/plugin-second.tar.gz",
+		SHA256: testArchiveSHA256,
+	}})
+	evPath := writeCompatibilityEvidence(t, registryDir, PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-test",
+		Version:       "v0.1.0",
+		EngineVersion: "v0.51.2",
+		Mode:          PluginCompatibilityModeTypedIaC,
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "darwin",
+		Arch:          "arm64",
+		ArchiveSHA256: testArchiveSHA256,
+	})
+
+	if err := runPluginRegistry([]string{
+		"compatibility", "update",
+		"--registry-dir", registryDir,
+		"--plugin", "workflow-plugin-test",
+		"--version", "v0.1.0",
+		"--evidence", evPath,
+	}); err != nil {
+		t.Fatalf("compatibility update: %v", err)
+	}
+}
+
 func TestRegistryCompatibilityUpdateSortsVersionsEvidenceAndMarksStale(t *testing.T) {
 	registryDir := prepareCompatibilityRegistry(t, "workflow-plugin-test", "v0.2.0", testArchiveSHA256)
 	writeInitialCompatibilityIndex(t, registryDir, PluginVersionIndex{
@@ -236,6 +298,21 @@ func prepareCompatibilityRegistry(t *testing.T, plugin, version, archiveSHA stri
 
 func writeManifest(t *testing.T, registryDir, plugin, version, archiveSHA string) {
 	t.Helper()
+	writeManifestWithDownloads(t, registryDir, plugin, version, []PluginDownload{{
+		OS:     "darwin",
+		Arch:   "arm64",
+		URL:    "https://example.invalid/plugin.tar.gz",
+		SHA256: archiveSHA,
+	}, {
+		OS:     "linux",
+		Arch:   "amd64",
+		URL:    "https://example.invalid/plugin-linux.tar.gz",
+		SHA256: archiveSHA,
+	}})
+}
+
+func writeManifestWithDownloads(t *testing.T, registryDir, plugin, version string, downloads []PluginDownload) {
+	t.Helper()
 	manifest := RegistryManifest{
 		Name:             plugin,
 		Version:          version,
@@ -244,17 +321,7 @@ func writeManifest(t *testing.T, registryDir, plugin, version, archiveSHA string
 		Type:             "external",
 		Tier:             "community",
 		MinEngineVersion: "v0.50.0",
-		Downloads: []PluginDownload{{
-			OS:     "darwin",
-			Arch:   "arm64",
-			URL:    "https://example.invalid/plugin.tar.gz",
-			SHA256: archiveSHA,
-		}, {
-			OS:     "linux",
-			Arch:   "amd64",
-			URL:    "https://example.invalid/plugin-linux.tar.gz",
-			SHA256: archiveSHA,
-		}},
+		Downloads:        downloads,
 	}
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

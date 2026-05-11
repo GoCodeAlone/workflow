@@ -16,6 +16,7 @@ const (
 
 	PluginCompatForceInstall = "force-install"
 	PluginCompatForceUpdate  = "force-update"
+	PluginCompatForceLock    = "force-lock"
 	PluginCompatWarnReason   = "compat-mode=warn"
 )
 

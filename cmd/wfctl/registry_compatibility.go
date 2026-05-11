@@ -246,12 +246,14 @@ func normalizeCompatibilityDownloads(downloads []PluginDownload) []PluginDownloa
 
 func validateEvidenceArchiveMatchesDownload(ev PluginCompatibilityEvidence, manifest *RegistryManifest) error {
 	if ev.ArchiveSHA256 == "" {
-		return nil
+		return fmt.Errorf("evidence archiveSHA256 is required for registry compatibility updates")
 	}
+	matchedPlatform := false
 	for _, download := range manifest.Downloads {
 		if download.OS != ev.OS || download.Arch != ev.Arch || download.SHA256 == "" {
 			continue
 		}
+		matchedPlatform = true
 		sha, err := NormalizeSHA256Hex(download.SHA256)
 		if err != nil {
 			return fmt.Errorf("manifest download sha256 for %s/%s: %w", download.OS, download.Arch, err)
@@ -259,7 +261,9 @@ func validateEvidenceArchiveMatchesDownload(ev PluginCompatibilityEvidence, mani
 		if sha == ev.ArchiveSHA256 {
 			return nil
 		}
-		return fmt.Errorf("evidence archiveSHA256 %s does not match manifest download sha256 %s for %s/%s", ev.ArchiveSHA256, sha, ev.OS, ev.Arch)
+	}
+	if matchedPlatform {
+		return fmt.Errorf("evidence archiveSHA256 %s does not match any manifest download sha256 for %s/%s", ev.ArchiveSHA256, ev.OS, ev.Arch)
 	}
 	return fmt.Errorf("evidence archiveSHA256 %s has no matching manifest download for %s/%s", ev.ArchiveSHA256, ev.OS, ev.Arch)
 }

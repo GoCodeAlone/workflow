@@ -96,6 +96,25 @@ func TestPluginCompatSHA256Normalization(t *testing.T) {
 	}
 }
 
+func TestPluginCompatEvidenceAllowsDevWfctlVersion(t *testing.T) {
+	got, err := ValidateCompatibilityEvidence(PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-test",
+		Version:       "v0.1.0",
+		EngineVersion: "v0.51.2",
+		WfctlVersion:  "dev",
+		Mode:          PluginCompatibilityModeTypedIaC,
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "linux",
+		Arch:          "amd64",
+	})
+	if err != nil {
+		t.Fatalf("ValidateCompatibilityEvidence: %v", err)
+	}
+	if got.WfctlVersion != "dev" {
+		t.Fatalf("wfctlVersion = %q, want dev", got.WfctlVersion)
+	}
+}
+
 func TestPluginCompatTrustParsing(t *testing.T) {
 	var cfg RegistryConfig
 	data := []byte(`

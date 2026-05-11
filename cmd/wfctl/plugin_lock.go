@@ -165,7 +165,7 @@ func lockPlatformsFromRegistry(registries *MultiRegistry, registryConfig *Regist
 		EngineVersion:    compatOpts.EngineVersion,
 		CompatMode:       resolvedCompatMode,
 		Force:            compatOpts.Force,
-		ForceReason:      PluginCompatForceInstall,
+		ForceReason:      PluginCompatForceLock,
 		Trust:            registryTrustMode(registryConfig, sourceName),
 	})
 	if err != nil {

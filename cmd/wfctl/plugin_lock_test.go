@@ -388,6 +388,19 @@ plugins:
 	if compat == nil || !compat.Forced || compat.Reason != PluginCompatWarnReason || compat.Status != PluginCompatibilityStatusFail {
 		t.Fatalf("forced known-fail metadata missing/incomplete: %#v", compat)
 	}
+
+	forceLockPath := filepath.Join(dir, ".wfctl-force-lock.yaml")
+	if err := runPluginLockFromManifestWithOptions(manifestPath, forceLockPath, pluginLockCompatibilityOptions{EngineVersion: "v0.51.2", Force: true}); err != nil {
+		t.Fatalf("runPluginLockFromManifestWithOptions force: %v", err)
+	}
+	forcedLF, err := config.LoadWfctlLockfile(forceLockPath)
+	if err != nil {
+		t.Fatalf("load forced lockfile: %v", err)
+	}
+	forcedCompat := forcedLF.Plugins["workflow-plugin-foo"].Platforms[currentPlatformKey()].Compatibility
+	if forcedCompat == nil || !forcedCompat.Forced || forcedCompat.Reason != PluginCompatForceLock {
+		t.Fatalf("force-lock metadata missing/incomplete: %#v", forcedCompat)
+	}
 }
 
 func TestPluginLock_FromManifest_RefreshesExistingPlatformSHA256FromRegistry(t *testing.T) {

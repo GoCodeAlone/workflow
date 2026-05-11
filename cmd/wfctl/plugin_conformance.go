@@ -202,7 +202,7 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		Plugin:               manifest.Name,
 		Version:              manifest.Version,
 		EngineVersion:        opts.EngineVersion,
-		WfctlVersion:         opts.EngineVersion,
+		WfctlVersion:         buildVersion(),
 		Mode:                 opts.Mode,
 		Status:               PluginCompatibilityStatusPass,
 		OS:                   runtime.GOOS,

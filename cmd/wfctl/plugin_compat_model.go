@@ -214,8 +214,9 @@ func ValidateCompatibilityEvidence(ev PluginCompatibilityEvidence) (PluginCompat
 		return ev, err
 	}
 	if ev.WfctlVersion != "" {
-		if ev.WfctlVersion, err = CanonicalEngineVersion(ev.WfctlVersion); err != nil {
-			return ev, fmt.Errorf("wfctl version: %w", err)
+		ev.WfctlVersion = strings.TrimSpace(ev.WfctlVersion)
+		if canonical, err := CanonicalEngineVersion(ev.WfctlVersion); err == nil {
+			ev.WfctlVersion = canonical
 		}
 	}
 	if ev.Mode != PluginCompatibilityModeTypedIaC {
