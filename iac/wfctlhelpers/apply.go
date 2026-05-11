@@ -79,6 +79,20 @@ func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.I
 	return applyPlanWithEnvProvider(ctx, p, plan, nil)
 }
 
+// ApplyPlanHooks are optional callbacks invoked immediately after a plan action
+// successfully mutates cloud-side state. Hooks let wfctl persist state at the
+// action boundary instead of waiting for the whole plan to finish.
+type ApplyPlanHooks struct {
+	OnResourceApplied func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error
+	OnResourceDeleted func(context.Context, interfaces.PlanAction) error
+}
+
+// ApplyPlanWithHooks is ApplyPlan plus action-boundary hooks for callers that
+// need durable side effects as each cloud mutation succeeds.
+func ApplyPlanWithHooks(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+	return applyPlanWithEnvProviderAndHooks(ctx, p, plan, nil, hooks)
+}
+
 // applyPlanWithEnvProvider is the same-package test seam used by
 // apply_postcondition_test.go to inject a custom apply-time env provider
 // into the deferred drift postcondition (e.g., a panicky closure that
@@ -92,6 +106,17 @@ func applyPlanWithEnvProvider(
 	plan *interfaces.IaCPlan,
 	applyTimeEnv func(string) (string, bool),
 ) (*interfaces.ApplyResult, error) {
+	return applyPlanWithEnvProviderAndHooks(ctx, p, plan, applyTimeEnv, ApplyPlanHooks{})
+}
+
+func applyPlanWithEnvProviderAndHooks(
+	ctx context.Context,
+	p interfaces.IaCProvider,
+	plan *interfaces.IaCPlan,
+	applyTimeEnv func(string) (string, bool),
+	hooks ApplyPlanHooks,
+) (*interfaces.ApplyResult, error) {
+	deleteHookActive := hooks.OnResourceDeleted != nil
 	inputNames := snapshotKeys(plan.InputSnapshot)
 	result := &interfaces.ApplyResult{
 		PlanID:               plan.ID,
@@ -136,6 +161,12 @@ func applyPlanWithEnvProvider(
 	// new outputs are written per-resource on success and become visible
 	// to later actions in the same plan).
 	syncedOutputs := buildInitialSyncedOutputs(plan.Actions)
+
+	if deleteHookActive {
+		if err := preflightProviderOwnedReplaceWithDeleteHooks(p, plan); err != nil {
+			return result, err
+		}
+	}
 
 	for i := range plan.Actions {
 		action := plan.Actions[i]
@@ -182,19 +213,63 @@ func applyPlanWithEnvProvider(
 		// outputs into syncedOutputs for subsequent actions. doCreate /
 		// doUpdate / doReplace each append on success; doDelete does not.
 		preLen := len(result.Resources)
-		if err := dispatchAction(ctx, d, action, result); err != nil {
+		actionHooks := hooks
+		actionHooks.OnResourceDeleted = func(ctx context.Context, action interfaces.PlanAction) error {
+			if hooks.OnResourceDeleted != nil {
+				if err := hooks.OnResourceDeleted(ctx, action); err != nil {
+					return err
+				}
+			}
+			delete(syncedOutputs, action.Resource.Name)
+			return nil
+		}
+		if err := dispatchAction(ctx, d, action, result, actionHooks, deleteHookActive); err != nil {
+			var hookErr hookDispatchError
+			if errors.As(err, &hookErr) {
+				return result, fmt.Errorf("%s/%s: %w", action.Resource.Type, action.Resource.Name, hookErr.err)
+			}
 			result.Errors = append(result.Errors, interfaces.ActionError{
 				Resource: action.Resource.Name,
 				Action:   action.Action,
 				Error:    err.Error(),
 			})
+			continue
+		}
+		if action.Action == "delete" {
+			if err := actionHooks.OnResourceDeleted(ctx, action); err != nil {
+				return result, fmt.Errorf("%s/%s: post-delete hook: %w", action.Resource.Type, action.Resource.Name, err)
+			}
 		}
 		if len(result.Resources) > preLen {
 			out := result.Resources[len(result.Resources)-1]
+			out = fillMissingOutputIdentity(action.Resource, out)
+			result.Resources[len(result.Resources)-1] = out
+			if hooks.OnResourceApplied != nil {
+				if err := hooks.OnResourceApplied(ctx, d, action, out); err != nil {
+					return result, fmt.Errorf("%s/%s: post-apply hook: %w", action.Resource.Type, action.Resource.Name, err)
+				}
+			}
 			syncedOutputs[out.Name] = flattenOutputs(out)
 		}
 	}
 	return result, nil
+}
+
+func preflightProviderOwnedReplaceWithDeleteHooks(p interfaces.IaCProvider, plan *interfaces.IaCPlan) error {
+	for i := range plan.Actions {
+		action := plan.Actions[i]
+		if action.Action != "replace" {
+			continue
+		}
+		d, err := p.ResourceDriver(action.Resource.Type)
+		if err != nil {
+			return fmt.Errorf("%s/%s: replace preflight resolve driver: %w", action.Resource.Type, action.Resource.Name, err)
+		}
+		if _, ok := d.(interfaces.ResourceReplacer); ok {
+			return fmt.Errorf("%s/%s: replace: driver-owned ResourceReplacer is disabled while delete state hooks are active; state hooks require engine-owned delete-step visibility", action.Resource.Type, action.Resource.Name)
+		}
+	}
+	return nil
 }
 
 // buildInitialSyncedOutputs walks plan.Actions once and returns a map of
@@ -245,6 +320,16 @@ func flattenOutputs(o interfaces.ResourceOutput) map[string]any {
 	return m
 }
 
+func fillMissingOutputIdentity(spec interfaces.ResourceSpec, out interfaces.ResourceOutput) interfaces.ResourceOutput {
+	if out.Name == "" {
+		out.Name = spec.Name
+	}
+	if out.Type == "" {
+		out.Type = spec.Type
+	}
+	return out
+}
+
 // snapshotKeys returns the keys of m as an unordered slice. ComputeDrift
 // sorts its output, and Snapshot iterates in any order, so no key sort
 // is needed at this stage. Inlined helper to keep the dependency
@@ -265,14 +350,14 @@ func snapshotKeys(m map[string]string) []string {
 // An unknown action kind returns an error which ApplyPlan records on
 // result.Errors so an operator running a malformed plan sees a per-action
 // diagnostic rather than a silent skip.
-func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks, deleteHookActive bool) error {
 	switch action.Action {
 	case "create":
 		return doCreate(ctx, d, action, result)
 	case "update":
 		return doUpdate(ctx, d, action, result)
 	case "replace":
-		return doReplace(ctx, d, action, result)
+		return doReplace(ctx, d, action, result, hooks, deleteHookActive)
 	case "delete":
 		return doDelete(ctx, d, action)
 	default:
@@ -411,8 +496,17 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 // Other sub-functions (doCreate non-recovery path, doUpdate, doDelete)
 // pass driver errors through unchanged.
 func DefaultReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+	return defaultReplaceWithHooks(ctx, d, action, result, ApplyPlanHooks{})
+}
+
+func defaultReplaceWithHooks(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks) error {
 	if err := d.Delete(ctx, refFromAction(action)); err != nil {
 		return fmt.Errorf("replace: delete: %w", err)
+	}
+	if hooks.OnResourceDeleted != nil {
+		if err := hooks.OnResourceDeleted(ctx, action); err != nil {
+			return hookDispatchError{err: fmt.Errorf("replace: delete hook: %w", err)}
+		}
 	}
 	// Honor cancellation between Delete and Create. Without this guard
 	// a Ctrl-C / SIGTERM that arrives mid-Replace would still trigger
@@ -442,11 +536,28 @@ func DefaultReplace(ctx context.Context, d interfaces.ResourceDriver, action int
 	return nil
 }
 
+type hookDispatchError struct {
+	err error
+}
+
+func (e hookDispatchError) Error() string {
+	return e.err.Error()
+}
+
+func (e hookDispatchError) Unwrap() error {
+	return e.err
+}
+
 // doReplace is the dispatch entry point for Replace actions. It probes
 // the driver for the optional ResourceReplacer interface and routes to
 // the driver's Replace implementation when present. Drivers that do not
 // implement ResourceReplacer fall back to DefaultReplace.
-func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks, deleteHookActive bool) error {
+	if deleteHookActive {
+		if _, ok := d.(interfaces.ResourceReplacer); ok {
+			return hookDispatchError{err: fmt.Errorf("replace: driver-owned ResourceReplacer is disabled while delete state hooks are active; state hooks require engine-owned delete-step visibility")}
+		}
+	}
 	if r, ok := d.(interfaces.ResourceReplacer); ok {
 		out, err := r.Replace(ctx, refFromAction(action), action.Resource)
 		if err != nil {
@@ -454,7 +565,7 @@ func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfac
 		}
 		return finalizeReplace(out, action.Resource.Name, result)
 	}
-	return DefaultReplace(ctx, d, action, result)
+	return defaultReplaceWithHooks(ctx, d, action, result, hooks)
 }
 
 // finalizeReplace runs the post-Replace bookkeeping that DefaultReplace's

@@ -145,6 +145,17 @@ modules:
 	if len(stub.driver.createSpecs) != 1 || stub.driver.createSpecs[0].Config["region"] != "nyc1" {
 		t.Errorf("create spec = %+v, want region=nyc1 (the new desired)", stub.driver.createSpecs)
 	}
+	store := &fsWfctlStateStore{dir: stateDir}
+	states, err := store.ListResources(t.Context())
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("states = %d, want 1", len(states))
+	}
+	if states[0].ProviderID != "stub-created-loader" {
+		t.Fatalf("state ProviderID = %q, want stub-created-loader", states[0].ProviderID)
+	}
 }
 
 // TestApply_V2_LoaderSeam_DriftReportPrinted complements the
@@ -154,7 +165,7 @@ modules:
 // InputDriftReport. T3.7 wired the helper into the v2 dispatch but
 // only T3.7's mock-seam test pins the assertion; this loader-seam
 // variant proves the wiring works end-to-end without the
-// applyV2ApplyPlanFn substitution.
+// applyV2ApplyPlanWithHooksFn substitution.
 //
 // The test substitutes the wfctlhelpers.ApplyPlan dispatch only —
 // ComputePlan and the rest of the pipeline run unmodified — so the
@@ -201,11 +212,11 @@ modules:
 	driftEntries := []interfaces.DriftEntry{
 		{Name: "EXAMPLE_VAR", PlanFingerprint: "plan-fp", ApplyFingerprint: "apply-fp"},
 	}
-	origApply := applyV2ApplyPlanFn
-	applyV2ApplyPlanFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	origApply := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
 		return &interfaces.ApplyResult{InputDriftReport: driftEntries}, nil
 	}
-	t.Cleanup(func() { applyV2ApplyPlanFn = origApply })
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = origApply })
 
 	// Capture stderr to assert printDriftReportIfAny output reached
 	// the operator. applyInfraModules writes the drift report to

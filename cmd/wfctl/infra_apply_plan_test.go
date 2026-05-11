@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/iactest"
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -371,6 +374,84 @@ func TestInfraApplyPrecomputedPlan_PersistsState(t *testing.T) {
 	}
 	if saved.ConfigHash == "" {
 		t.Error("ConfigHash: want non-empty, got empty")
+	}
+}
+
+func TestInfraApplyPrecomputedPlan_V2PersistsStateThroughHooks(t *testing.T) {
+	store := &fakeStateStore{}
+	spec := interfaces.ResourceSpec{
+		Name:   "first",
+		Type:   "infra.test",
+		Config: map[string]any{"provider": "test-provider"},
+	}
+	plan := interfaces.IaCPlan{
+		ID:      "v2-persist-test",
+		Actions: []interfaces.PlanAction{{Action: "create", Resource: spec}},
+	}
+	provider := &v2DriverProvider{driver: &v2ImmediatePersistDriver{store: store}}
+
+	err := applyPrecomputedPlanWithStore(t.Context(), plan, provider, "fake-cloud", store, io.Discard, "", "", nil)
+	if err != nil {
+		t.Fatalf("applyPrecomputedPlanWithStore: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 1 {
+		t.Fatalf("saved state count = %d, want 1; saved=%+v", len(store.saved), store.saved)
+	}
+	if store.saved[0].ProviderID != "id-first" {
+		t.Fatalf("ProviderID = %q, want id-first", store.saved[0].ProviderID)
+	}
+}
+
+func TestInfraApplyPrecomputedPlan_V2PrintsDriftReport(t *testing.T) {
+	plan := interfaces.IaCPlan{
+		ID:      "v2-drift-test",
+		Actions: []interfaces.PlanAction{{Action: "create", Resource: interfaces.ResourceSpec{Name: "x", Type: "infra.test"}}},
+	}
+	provider := &iactest.NoopProvider{ProviderName: "v2-stub", DispatchVersion: "v2"}
+	driftEntries := []interfaces.DriftEntry{
+		{Name: "EXAMPLE_VAR", PlanFingerprint: "plan-fp", ApplyFingerprint: "apply-fp"},
+	}
+
+	origApply := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		return &interfaces.ApplyResult{InputDriftReport: driftEntries}, nil
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = origApply })
+
+	var w bytes.Buffer
+	err := applyPrecomputedPlanWithStore(t.Context(), plan, provider, "fake-cloud", &fakeStateStore{}, &w, "test", "", nil)
+	if err != nil {
+		t.Fatalf("applyPrecomputedPlanWithStore: %v", err)
+	}
+	if !strings.Contains(w.String(), "EXAMPLE_VAR") {
+		t.Fatalf("drift report missing EXAMPLE_VAR; got:\n%s", w.String())
+	}
+}
+
+func TestInfraApplyPrecomputedPlan_FailedDeleteKeepsState(t *testing.T) {
+	current := interfaces.ResourceState{Name: "old", Type: "infra.test", ProviderID: "id-old"}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
+	plan := interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+		Action:   "delete",
+		Resource: interfaces.ResourceSpec{Name: "old", Type: "infra.test"},
+		Current:  &current,
+	}}}
+	provider := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Errors: []interfaces.ActionError{{Action: "delete", Resource: "old", Error: "delete failed"}},
+		},
+	}
+
+	err := applyPrecomputedPlanWithStore(t.Context(), plan, provider, "fake-cloud", store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected delete failure, got nil")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.deleted) != 0 {
+		t.Fatalf("deleted state entries = %v, want none after failed delete", store.deleted)
 	}
 }
 

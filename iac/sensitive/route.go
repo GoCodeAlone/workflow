@@ -104,8 +104,8 @@ func IsPlaceholder(v any) bool {
 //     present in out.Outputs → error naming the resource and keys.
 //   - provider.Set returns an error → error wrapping the failed key. Set
 //     is invoked in sorted order by key for determinism; on first error
-//     the loop stops and previously-Set values are NOT cleaned up
-//     (idempotent overwrite on Apply rerun is the recovery path).
+//     the loop stops and hydrated contains values already routed so the
+//     caller can compensate partial writes.
 //
 // Out is not mutated.
 func Route(
@@ -152,11 +152,11 @@ func Route(
 	for _, k := range routableKeys {
 		val, sErr := stringifyOutput(out.Outputs[k])
 		if sErr != nil {
-			return nil, nil, fmt.Errorf("sensitive.Route: resource %q key %q: %w", resourceName, k, sErr)
+			return nil, hydrated, fmt.Errorf("sensitive.Route: resource %q key %q: %w", resourceName, k, sErr)
 		}
 		secretName := SecretKey(resourceName, k)
 		if setErr := provider.Set(ctx, secretName, val); setErr != nil {
-			return nil, nil, fmt.Errorf("sensitive.Route: provider.Set(%q): %w", secretName, setErr)
+			return nil, hydrated, fmt.Errorf("sensitive.Route: provider.Set(%q): %w", secretName, setErr)
 		}
 		sanitized[k] = Placeholder(resourceName, k)
 		hydrated[secretName] = val
