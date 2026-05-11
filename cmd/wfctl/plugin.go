@@ -35,6 +35,8 @@ func runPlugin(args []string) error {
 		return runPluginRemove(args[1:])
 	case "validate":
 		return runPluginValidate(args[1:])
+	case "conformance":
+		return runPluginConformance(args[1:])
 	case "info":
 		return runPluginInfo(args[1:])
 	case "deps":
@@ -59,6 +61,7 @@ Subcommands:
   update   Update an installed plugin to its latest version
   remove   Uninstall a plugin (also removes from manifest + lockfile)
   validate Validate a plugin manifest from the registry or a local file
+  conformance Run executable plugin/host conformance checks
   info     Show details about an installed plugin
   deps     List dependencies for a plugin
 

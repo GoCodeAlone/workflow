@@ -1,0 +1,6 @@
+{
+  "name": "no-iac",
+  "version": "0.1.0",
+  "author": "workflow",
+  "description": "Plugin fixture without typed IaC service"
+}
