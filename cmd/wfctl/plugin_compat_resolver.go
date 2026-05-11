@@ -254,10 +254,10 @@ func registryTrustMode(cfg *RegistryConfig, sourceName string) CompatibilityTrus
 	if cfg == nil {
 		return CompatibilityTrustAdvisory
 	}
-	for _, source := range cfg.Registries {
-		if source.Name == sourceName {
-			if source.CompatibilityEvidence.Trust != "" {
-				return source.CompatibilityEvidence.Trust
+	for i := range cfg.Registries {
+		if cfg.Registries[i].Name == sourceName {
+			if cfg.Registries[i].CompatibilityEvidence.Trust != "" {
+				return cfg.Registries[i].CompatibilityEvidence.Trust
 			}
 			return CompatibilityTrustAdvisory
 		}

@@ -149,9 +149,9 @@ func runPluginInstall(args []string) error {
 	if *registryName != "" {
 		// Filter config to only the requested registry
 		filtered := &RegistryConfig{}
-		for _, r := range cfg.Registries {
-			if r.Name == *registryName {
-				filtered.Registries = append(filtered.Registries, r)
+		for i := range cfg.Registries {
+			if cfg.Registries[i].Name == *registryName {
+				filtered.Registries = append(filtered.Registries, cfg.Registries[i])
 				break
 			}
 		}

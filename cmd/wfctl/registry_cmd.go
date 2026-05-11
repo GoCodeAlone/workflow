@@ -67,7 +67,8 @@ func runRegistryList(args []string) error {
 
 	fmt.Printf("%-15s %-10s %-25s %-25s %s\n", "NAME", "TYPE", "OWNER", "REPO", "PRIORITY")
 	fmt.Printf("%-15s %-10s %-25s %-25s %s\n", "----", "----", "-----", "----", "--------")
-	for _, r := range cfg.Registries {
+	for i := range cfg.Registries {
+		r := &cfg.Registries[i]
 		fmt.Printf("%-15s %-10s %-25s %-25s %d\n", r.Name, r.Type, r.Owner, r.Repo, r.Priority)
 	}
 	return nil
@@ -106,8 +107,8 @@ func runRegistryAdd(args []string) error {
 	}
 
 	// Check for duplicate
-	for _, r := range cfg.Registries {
-		if r.Name == name {
+	for i := range cfg.Registries {
+		if cfg.Registries[i].Name == name {
 			return fmt.Errorf("registry %q already exists", name)
 		}
 	}
@@ -168,12 +169,12 @@ func runRegistryRemove(args []string) error {
 
 	found := false
 	filtered := make([]RegistrySourceConfig, 0, len(cfg.Registries))
-	for _, r := range cfg.Registries {
-		if r.Name == name {
+	for i := range cfg.Registries {
+		if cfg.Registries[i].Name == name {
 			found = true
 			continue
 		}
-		filtered = append(filtered, r)
+		filtered = append(filtered, cfg.Registries[i])
 	}
 	if !found {
 		return fmt.Errorf("registry %q not found", name)

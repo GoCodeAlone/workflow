@@ -24,12 +24,12 @@ func NewMultiRegistry(cfg *RegistryConfig) *MultiRegistry {
 	})
 
 	sources := make([]RegistrySource, 0, len(sorted))
-	for _, sc := range sorted {
-		switch sc.Type {
+	for i := range sorted {
+		switch sorted[i].Type {
 		case "github":
-			sources = append(sources, NewGitHubRegistrySource(sc))
+			sources = append(sources, NewGitHubRegistrySource(sorted[i]))
 		case "static":
-			src, err := NewStaticRegistrySource(sc)
+			src, err := NewStaticRegistrySource(sorted[i])
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: %v, skipping\n", err)
 				continue
@@ -37,7 +37,7 @@ func NewMultiRegistry(cfg *RegistryConfig) *MultiRegistry {
 			sources = append(sources, src)
 		default:
 			// Skip unknown types
-			fmt.Fprintf(os.Stderr, "warning: unknown registry type %q for %q, skipping\n", sc.Type, sc.Name)
+			fmt.Fprintf(os.Stderr, "warning: unknown registry type %q for %q, skipping\n", sorted[i].Type, sorted[i].Name)
 		}
 	}
 

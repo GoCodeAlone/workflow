@@ -300,7 +300,8 @@ func sortCompatibilityEvidence(evidence []PluginCompatibilityEvidence) {
 func dedupeCompatibilityEvidence(evidence []PluginCompatibilityEvidence) []PluginCompatibilityEvidence {
 	out := make([]PluginCompatibilityEvidence, 0, len(evidence))
 	seen := map[string]bool{}
-	for _, ev := range evidence {
+	for i := range evidence {
+		ev := &evidence[i]
 		key := strings.Join([]string{
 			ev.Plugin, ev.Version, ev.EngineVersion, ev.Mode, ev.Status, ev.OS, ev.Arch, ev.ArchiveSHA256,
 		}, "\x00")
@@ -308,7 +309,7 @@ func dedupeCompatibilityEvidence(evidence []PluginCompatibilityEvidence) []Plugi
 			continue
 		}
 		seen[key] = true
-		out = append(out, ev)
+		out = append(out, *ev)
 	}
 	return out
 }
@@ -318,7 +319,8 @@ func deriveCompatibilityRanges(index *PluginVersionIndex) {
 		rec := &index.Versions[recIdx]
 		byKey := map[string][]PluginCompatibilityEvidence{}
 		hasFail := map[string]bool{}
-		for _, ev := range rec.Compatibility {
+		for i := range rec.Compatibility {
+			ev := &rec.Compatibility[i]
 			if ev.CompatibleEngineRange != nil {
 				continue
 			}
@@ -328,7 +330,7 @@ func deriveCompatibilityRanges(index *PluginVersionIndex) {
 				continue
 			}
 			if ev.Status == PluginCompatibilityStatusPass {
-				byKey[key] = append(byKey[key], ev)
+				byKey[key] = append(byKey[key], *ev)
 			}
 		}
 		for key, passes := range byKey {
@@ -356,8 +358,10 @@ func deriveCompatibilityRanges(index *PluginVersionIndex) {
 
 func compatibilityIndexIsStale(index *PluginVersionIndex, latestEngine string) bool {
 	newest := ""
-	for _, rec := range index.Versions {
-		for _, ev := range rec.Compatibility {
+	for recIdx := range index.Versions {
+		rec := &index.Versions[recIdx]
+		for evIdx := range rec.Compatibility {
+			ev := &rec.Compatibility[evIdx]
 			if newest == "" || semver.Compare(ev.EngineVersion, newest) > 0 {
 				newest = ev.EngineVersion
 			}
