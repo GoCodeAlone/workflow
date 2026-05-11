@@ -456,6 +456,27 @@ git commit -m "docs(wfctl): document plugin compat conformance"
 
 Rollback: docs-only revert.
 
+**Verification log:**
+
+```text
+2026-05-11 T7:
+- docs/WFCTL.md updated: plugin conformance, plugin-registry compatibility update, registry trust, compat mode env/flags, setup-wfctl CI sketch.
+- PASS: GOWORK=off go build -o /tmp/wfctl-compat ./cmd/wfctl
+- PASS: /tmp/wfctl-compat plugin conformance --mode typed-iac --format json --engine-version v0.51.2 ./cmd/wfctl/testdata/conformance/iac-pass
+  got: status=pass plugin=iac-pass version=v0.1.0 os=darwin arch=arm64
+- PASS: /tmp/wfctl-compat plugin conformance --mode typed-iac --artifact /tmp/wfctl-iac-pass.tar.gz --format json --engine-version v0.51.2 --output /tmp/wfctl-evidence.json
+  got: status=pass archiveSHA256=c02a688b26161848785db015780b6d87fe028d85d8fd5a1a3b93e17537adbb47
+- PASS: /tmp/wfctl-compat plugin-registry compatibility update --registry-dir /tmp/wfctl-test-registry --plugin iac-pass --version v0.1.0 --evidence /tmp/wfctl-evidence.json --latest-engine v0.51.2
+  wrote: /tmp/wfctl-test-registry/compatibility/iac-pass/index.json
+- KNOWN-FAIL: GOWORK=off go test ./cmd/wfctl ./config ./plugin/external ./plugin/external/sdk -count=1
+  fail-pkg: ./cmd/wfctl
+  fail-tests: TestConfigMigrate_DefaultWriterIsStderr; TestInfraMultiEnv_E2E/staging_plan_excludes_dns; TestInfraMultiEnv_E2E/prod_plan_includes_dns_with_large_db
+  note: same cmd/wfctl drift observed before T7; TestRunCIRunTestFallsBackToGoTestWhenNoConfiguredTests prints an intentional failing fixture but did not fail itself.
+- KNOWN-FAIL: GOWORK=off go test ./... -count=1
+  fail-pkg: ./cmd/wfctl with same failures as focused run.
+  note: dynamic panic-recovery test printed expected panic text without package failure.
+```
+
 ## Final PR Checklist
 
 - Run `git status --short`.
