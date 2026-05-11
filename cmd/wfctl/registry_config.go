@@ -16,14 +16,15 @@ type RegistryConfig struct {
 
 // RegistrySourceConfig defines a single registry source.
 type RegistrySourceConfig struct {
-	Name     string `yaml:"name" json:"name"`         // e.g. "default", "my-org"
-	Type     string `yaml:"type" json:"type"`         // "github" or "static"
-	Owner    string `yaml:"owner" json:"owner"`       // GitHub owner/org (type: github)
-	Repo     string `yaml:"repo" json:"repo"`         // GitHub repo name (type: github)
-	Branch   string `yaml:"branch" json:"branch"`     // Git branch, default "main" (type: github)
-	Priority int    `yaml:"priority" json:"priority"` // Lower = higher priority
-	URL      string `yaml:"url" json:"url"`           // Base URL (type: static)
-	Token    string `yaml:"token" json:"token"`       // Auth token (optional)
+	Name                  string                              `yaml:"name" json:"name"`         // e.g. "default", "my-org"
+	Type                  string                              `yaml:"type" json:"type"`         // "github" or "static"
+	Owner                 string                              `yaml:"owner" json:"owner"`       // GitHub owner/org (type: github)
+	Repo                  string                              `yaml:"repo" json:"repo"`         // GitHub repo name (type: github)
+	Branch                string                              `yaml:"branch" json:"branch"`     // Git branch, default "main" (type: github)
+	Priority              int                                 `yaml:"priority" json:"priority"` // Lower = higher priority
+	URL                   string                              `yaml:"url" json:"url"`           // Base URL (type: static)
+	Token                 string                              `yaml:"token" json:"token"`       // Auth token (optional)
+	CompatibilityEvidence RegistryCompatibilityEvidenceConfig `yaml:"compatibilityEvidence,omitempty" json:"compatibilityEvidence,omitempty"`
 }
 
 // DefaultRegistryConfig returns the built-in registry config.
