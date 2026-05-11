@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"time"
 )
+
+var errRegistryNotFound = errors.New("registry resource not found")
 
 // RegistrySource is the interface for a plugin registry backend.
 type RegistrySource interface {
@@ -150,7 +153,11 @@ func (g *GitHubRegistrySource) FetchVersionIndex(name string) (*PluginVersionInd
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return nil, fmt.Errorf("parse compatibility index for %q from %s: %w", name, g.name, err)
 	}
-	return &idx, nil
+	normalized, err := NormalizePluginVersionIndex(&idx, name)
+	if err != nil {
+		return nil, fmt.Errorf("normalize compatibility index for %q from %s: %w", name, g.name, err)
+	}
+	return normalized, nil
 }
 
 func (g *GitHubRegistrySource) SearchPlugins(query string) ([]PluginSearchResult, error) {
@@ -218,7 +225,7 @@ func (s *StaticRegistrySource) FetchVersionIndex(name string) (*PluginVersionInd
 	url := fmt.Sprintf("%s/compatibility/%s/index.json", s.baseURL, name)
 	data, err := s.fetch(url)
 	if err != nil {
-		if strings.Contains(err.Error(), "HTTP 404") || strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, errRegistryNotFound) {
 			manifest, manifestErr := s.FetchManifest(name)
 			if manifestErr != nil {
 				return nil, manifestErr
@@ -231,7 +238,11 @@ func (s *StaticRegistrySource) FetchVersionIndex(name string) (*PluginVersionInd
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return nil, fmt.Errorf("parse compatibility index for %q from %s: %w", name, s.name, err)
 	}
-	return &idx, nil
+	normalized, err := NormalizePluginVersionIndex(&idx, name)
+	if err != nil {
+		return nil, fmt.Errorf("normalize compatibility index for %q from %s: %w", name, s.name, err)
+	}
+	return normalized, nil
 }
 
 // staticIndexEntry is a single entry in the registry index.json file.
@@ -311,7 +322,7 @@ func (s *StaticRegistrySource) fetch(url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("not found (HTTP 404) at %s", url)
+		return nil, fmt.Errorf("%w: HTTP 404 at %s", errRegistryNotFound, url)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
@@ -333,7 +344,7 @@ func synthesizeVersionIndexFromManifest(manifest *RegistryManifest) *PluginVersi
 			minEngineVersion = canonical
 		}
 	}
-	return &PluginVersionIndex{
+	index := &PluginVersionIndex{
 		Plugin: manifest.Name,
 		Versions: []PluginVersionRecord{{
 			Version:          version,
@@ -341,6 +352,11 @@ func synthesizeVersionIndexFromManifest(manifest *RegistryManifest) *PluginVersi
 			Downloads:        manifest.Downloads,
 		}},
 	}
+	normalized, err := NormalizePluginVersionIndex(index, manifest.Name)
+	if err != nil {
+		return index
+	}
+	return normalized
 }
 
 // matchesRegistryQuery checks if a manifest matches a search query.

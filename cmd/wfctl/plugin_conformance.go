@@ -245,6 +245,9 @@ func checkTypedIaCPlugin(timeout time.Duration, pluginsDir, name string) (string
 		Plugins:          goplugin.PluginSet{"plugin": &external.GRPCPlugin{}},
 		Cmd:              cmd,
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
+		Stderr:           &stderr,
+		SyncStdout:       &stdout,
+		SyncStderr:       &stderr,
 		Logger:           hclog.NewNullLogger(),
 	})
 	defer client.Kill()

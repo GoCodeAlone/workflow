@@ -56,6 +56,9 @@ func TestPluginConformanceLocalJSONPass(t *testing.T) {
 	if strings.Contains(stdout, "{") {
 		t.Fatalf("stdout should stay concise when --output is used, got %q", stdout)
 	}
+	if strings.Contains(stdout, "iac-pass stderr marker") {
+		t.Fatalf("plugin output leaked to wfctl stdout: %q", stdout)
+	}
 	raw, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatalf("read evidence: %v", err)
@@ -78,6 +81,9 @@ func TestPluginConformanceLocalJSONPass(t *testing.T) {
 	}
 	if ev.ArchiveSHA256 != "" {
 		t.Fatalf("local-dir evidence should not include archiveSHA256: %#v", ev)
+	}
+	if !strings.Contains(ev.StderrTail, "iac-pass stderr marker") {
+		t.Fatalf("stderr tail missing plugin output: %#v", ev)
 	}
 }
 

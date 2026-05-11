@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
@@ -24,5 +26,6 @@ func (p *provider) Capabilities(context.Context, *pb.CapabilitiesRequest) (*pb.C
 }
 
 func main() {
+	fmt.Fprintln(os.Stderr, "iac-pass stderr marker")
 	sdk.ServeIaCPlugin(&provider{}, sdk.IaCServeOptions{})
 }

@@ -151,8 +151,6 @@ func loadPluginLockRegistryConfig(manifestPath, lockPath string) (*RegistryConfi
 	return nil, nil
 }
 
-var errInvalidRegistrySHA256 = errors.New("invalid sha256")
-
 func lockPlatformsFromRegistry(registries *MultiRegistry, registryConfig *RegistryConfig, pluginName, version string, compatOpts pluginLockCompatibilityOptions) (map[string]config.WfctlLockPlatform, string, error) {
 	manifest, index, sourceName, err := registries.FetchManifestAndVersionIndex(pluginName)
 	if err != nil {

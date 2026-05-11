@@ -42,6 +42,11 @@ func ResolvePluginCompatibility(index *PluginVersionIndex, manifest *RegistryMan
 	if index == nil {
 		return PluginCompatDecision{}, fmt.Errorf("compatibility index is required")
 	}
+	normalizedIndex, err := NormalizePluginVersionIndex(index, index.Plugin)
+	if err != nil {
+		return PluginCompatDecision{}, err
+	}
+	index = normalizedIndex
 	engine, comparable := resolvePluginCompatEngineVersion(opts.EngineVersion)
 	mode, err := parsePluginCompatMode(opts.CompatMode)
 	if err != nil {
@@ -111,7 +116,8 @@ func evaluatePluginCompatRecord(rec PluginVersionRecord, policy CompatibilityEvi
 		}
 	}
 	archiveSHA := platformArchiveSHA(rec.Downloads, manifest, opts.OS, opts.Arch)
-	ev, ok := findCompatibilityEvidence(rec.Compatibility, engine, comparable, opts.OS, opts.Arch, archiveSHA)
+	requireEvidence := shouldRequireCompatibilityEvidence(policy, engine, comparable, opts.Trust)
+	ev, ok := findCompatibilityEvidence(rec.Compatibility, engine, comparable, opts.OS, opts.Arch, archiveSHA, requireEvidence)
 	if ok {
 		if ev.Status == PluginCompatibilityStatusPass {
 			return PluginCompatDecision{Version: version, Evidence: &ev}, nil
@@ -124,7 +130,7 @@ func evaluatePluginCompatRecord(rec PluginVersionRecord, policy CompatibilityEvi
 		}
 		return PluginCompatDecision{}, knownFailCompatError{version: version, engine: engine}
 	}
-	if shouldRequireCompatibilityEvidence(policy, engine, comparable, opts.Trust) {
+	if requireEvidence {
 		if opts.Force {
 			return PluginCompatDecision{Version: version, Forced: true, Reason: forceReason, Warning: "missing required compatibility evidence; continuing because --force is set"}, nil
 		}
@@ -200,14 +206,20 @@ func platformArchiveSHA(recordDownloads []PluginDownload, manifest *RegistryMani
 	return ""
 }
 
-func findCompatibilityEvidence(evidence []PluginCompatibilityEvidence, engine string, comparable bool, goos, goarch, archiveSHA string) (PluginCompatibilityEvidence, bool) {
+func findCompatibilityEvidence(evidence []PluginCompatibilityEvidence, engine string, comparable bool, goos, goarch, archiveSHA string, requireArchive bool) (PluginCompatibilityEvidence, bool) {
 	var rangeMatch *PluginCompatibilityEvidence
 	for i := range evidence {
 		ev := evidence[i]
 		if ev.Mode != PluginCompatibilityModeTypedIaC || ev.OS != goos || ev.Arch != goarch {
 			continue
 		}
-		if archiveSHA != "" && ev.ArchiveSHA256 != "" && ev.ArchiveSHA256 != archiveSHA {
+		if requireArchive && (archiveSHA == "" || ev.ArchiveSHA256 == "") {
+			continue
+		}
+		if archiveSHA == "" && ev.ArchiveSHA256 != "" {
+			continue
+		}
+		if archiveSHA != "" && ev.ArchiveSHA256 != archiveSHA {
 			continue
 		}
 		if comparable && ev.EngineVersion == engine {

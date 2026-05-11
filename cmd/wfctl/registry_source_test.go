@@ -180,8 +180,8 @@ func TestStaticRegistrySource_FetchVersionIndex_Native(t *testing.T) {
 	index := &PluginVersionIndex{
 		Plugin: "alpha",
 		Versions: []PluginVersionRecord{{
-			Version:          "v1.0.0",
-			MinEngineVersion: "v0.51.2",
+			Version:          "1.0.0",
+			MinEngineVersion: "0.51.2",
 		}},
 	}
 	srv := buildStaticRegistryServerWithCompat(t, nil, map[string]*RegistryManifest{"alpha": manifest}, map[string]*PluginVersionIndex{"alpha": index})

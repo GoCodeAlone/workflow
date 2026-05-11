@@ -19,6 +19,20 @@ func TestPluginCompatResolverNewestExactTrustedPassWins(t *testing.T) {
 	}
 }
 
+func TestPluginCompatResolverCanonicalizesIndexVersionsBeforeSorting(t *testing.T) {
+	idx := resolverIndex(
+		resolverRecord("0.9.0", passEvidence("0.9.0", "v0.51.2")),
+		resolverRecord("0.10.0", passEvidence("0.10.0", "v0.51.2")),
+	)
+	decision, err := ResolvePluginCompatibility(idx, nil, resolverOptions())
+	if err != nil {
+		t.Fatalf("ResolvePluginCompatibility: %v", err)
+	}
+	if decision.Version != "v0.10.0" {
+		t.Fatalf("version = %s, want v0.10.0", decision.Version)
+	}
+}
+
 func TestPluginCompatResolverNewerFailSkipsOlderPass(t *testing.T) {
 	idx := resolverIndex(
 		resolverRecord("v0.1.0", passEvidence("v0.1.0", "v0.51.2")),
@@ -30,6 +44,26 @@ func TestPluginCompatResolverNewerFailSkipsOlderPass(t *testing.T) {
 	}
 	if decision.Version != "v0.1.0" {
 		t.Fatalf("version = %s, want v0.1.0", decision.Version)
+	}
+}
+
+func TestPluginCompatResolverRequiredEvidenceMustBindArchive(t *testing.T) {
+	ev := passEvidence("v0.2.0", "v0.51.2")
+	ev.ArchiveSHA256 = strings.Repeat("a", 64)
+	ev, err := ValidateCompatibilityEvidence(ev)
+	if err != nil {
+		t.Fatalf("ValidateCompatibilityEvidence: %v", err)
+	}
+	rec := resolverRecord("v0.2.0", ev)
+	rec.Downloads = nil
+	idx := resolverIndex(rec)
+	idx.EvidencePolicy.RequiredFromEngine = "v0.51.0"
+	_, err = ResolvePluginCompatibility(idx, &RegistryManifest{Version: "v0.2.0"}, resolverOptions())
+	if err == nil {
+		t.Fatal("expected missing required evidence when archive digest cannot be matched")
+	}
+	if !strings.Contains(err.Error(), "missing required compatibility evidence") {
+		t.Fatalf("error = %v, want missing evidence context", err)
 	}
 }
 

@@ -208,7 +208,11 @@ func loadRegistryCompatibilityIndex(path, plugin string) (*PluginVersionIndex, e
 		return nil, fmt.Errorf("compatibility index plugin %q does not match %q", index.Plugin, plugin)
 	}
 	index.Plugin = plugin
-	return &index, nil
+	normalized, err := NormalizePluginVersionIndex(&index, plugin)
+	if err != nil {
+		return nil, fmt.Errorf("normalize compatibility index: %w", err)
+	}
+	return normalized, nil
 }
 
 func buildCompatibilityVersionRecord(version string, manifest *RegistryManifest, evidence []PluginCompatibilityEvidence) PluginVersionRecord {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -12,6 +13,8 @@ import (
 
 	"golang.org/x/mod/semver"
 )
+
+var errInvalidRegistrySHA256 = errors.New("invalid sha256")
 
 const (
 	PluginCompatibilityModeTypedIaC = "typed-iac"
@@ -108,6 +111,61 @@ type PluginCompatibilityEvidence struct {
 	GeneratedBy           string                    `json:"generatedBy,omitempty"`
 	StdoutTail            string                    `json:"stdoutTail,omitempty"`
 	StderrTail            string                    `json:"stderrTail,omitempty"`
+}
+
+func NormalizePluginVersionIndex(index *PluginVersionIndex, defaultPlugin string) (*PluginVersionIndex, error) {
+	if index == nil {
+		return nil, fmt.Errorf("compatibility index is required")
+	}
+	out := *index
+	if strings.TrimSpace(out.Plugin) == "" {
+		out.Plugin = defaultPlugin
+	}
+	if strings.TrimSpace(out.Plugin) == "" {
+		return nil, fmt.Errorf("compatibility index plugin is required")
+	}
+	out.Versions = slices.Clone(index.Versions)
+	for i := range out.Versions {
+		version, err := CanonicalPluginVersion(out.Versions[i].Version)
+		if err != nil {
+			return nil, fmt.Errorf("compatibility index %s version: %w", out.Plugin, err)
+		}
+		out.Versions[i].Version = version
+		if out.Versions[i].MinEngineVersion != "" {
+			minEngine, err := CanonicalEngineVersion(out.Versions[i].MinEngineVersion)
+			if err != nil {
+				return nil, fmt.Errorf("compatibility index %s minEngineVersion: %w", version, err)
+			}
+			out.Versions[i].MinEngineVersion = minEngine
+		}
+		out.Versions[i].Downloads = slices.Clone(index.Versions[i].Downloads)
+		for j := range out.Versions[i].Downloads {
+			if out.Versions[i].Downloads[j].SHA256 == "" {
+				continue
+			}
+			sha, err := NormalizeSHA256Hex(out.Versions[i].Downloads[j].SHA256)
+			if err != nil {
+				return nil, fmt.Errorf("%w: compatibility index %s download %s/%s sha256: %w", errInvalidRegistrySHA256, version, out.Versions[i].Downloads[j].OS, out.Versions[i].Downloads[j].Arch, err)
+			}
+			out.Versions[i].Downloads[j].SHA256 = sha
+		}
+		out.Versions[i].Compatibility = slices.Clone(index.Versions[i].Compatibility)
+		for j := range out.Versions[i].Compatibility {
+			ev, err := ValidateCompatibilityEvidence(out.Versions[i].Compatibility[j])
+			if err != nil {
+				return nil, fmt.Errorf("compatibility index %s evidence[%d]: %w", version, j, err)
+			}
+			if ev.Plugin != out.Plugin && normalizePluginName(ev.Plugin) != normalizePluginName(out.Plugin) {
+				return nil, fmt.Errorf("compatibility index evidence plugin %q does not match %q", ev.Plugin, out.Plugin)
+			}
+			if ev.Version != version {
+				return nil, fmt.Errorf("compatibility index evidence version %q does not match %q", ev.Version, version)
+			}
+			out.Versions[i].Compatibility[j] = ev
+		}
+	}
+	sortCompatibilityIndex(&out)
+	return &out, nil
 }
 
 func CanonicalPluginVersion(version string) (string, error) {
