@@ -714,11 +714,6 @@ func successfulDeleteNames(deleteNames map[string]struct{}, result *interfaces.A
 	if len(result.Errors) > 0 {
 		return map[string]struct{}{}
 	}
-	for _, ae := range result.Errors {
-		if ae.Action == "delete" {
-			delete(out, ae.Resource)
-		}
-	}
 	return out
 }
 
