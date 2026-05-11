@@ -169,6 +169,12 @@ Add tests for:
 - hanging plugin is killed on timeout and emits bounded stderr/stdout tails
 - no provider credential/env data appears in JSON output
 
+Fixture `go.mod` files must use:
+
+```go
+replace github.com/GoCodeAlone/workflow => ../../../../..
+```
+
 Run: `GOWORK=off go test ./cmd/wfctl -run 'TestPluginConformance' -count=1`
 
 Expected: FAIL with unknown subcommand.
@@ -425,6 +431,7 @@ Run:
 ```bash
 GOWORK=off go build -o /tmp/wfctl-compat ./cmd/wfctl
 /tmp/wfctl-compat plugin conformance --mode typed-iac --format json ./cmd/wfctl/testdata/conformance/iac-pass
+tar -czf /tmp/wfctl-iac-pass.tar.gz -C ./cmd/wfctl/testdata/conformance/iac-pass .
 /tmp/wfctl-compat plugin conformance --mode typed-iac --artifact /tmp/wfctl-iac-pass.tar.gz --format json
 /tmp/wfctl-compat plugin-registry compatibility update --registry-dir /tmp/wfctl-test-registry --plugin workflow-plugin-test --version v0.1.0 --evidence /tmp/wfctl-evidence.json
 ```
