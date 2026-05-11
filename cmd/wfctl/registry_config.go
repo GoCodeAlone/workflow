@@ -11,7 +11,12 @@ import (
 
 // RegistryConfig defines wfctl plugin registry configuration.
 type RegistryConfig struct {
-	Registries []RegistrySourceConfig `yaml:"registries" json:"registries"`
+	Registries    []RegistrySourceConfig      `yaml:"registries" json:"registries"`
+	Compatibility RegistryCompatibilityConfig `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+}
+
+type RegistryCompatibilityConfig struct {
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 // RegistrySourceConfig defines a single registry source.

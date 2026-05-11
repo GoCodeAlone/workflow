@@ -190,6 +190,39 @@ func (m *MultiRegistry) FetchVersionIndex(name string) (*PluginVersionIndex, str
 	return nil, "", fmt.Errorf("plugin %q compatibility index not found in any configured registry", name)
 }
 
+func (m *MultiRegistry) FetchManifestAndVersionIndex(name string) (*RegistryManifest, *PluginVersionIndex, string, error) {
+	if len(m.sources) == 0 {
+		return nil, nil, "", fmt.Errorf("plugin %q not found: no registry sources configured"+
+			" (missing .wfctl.yaml? run `wfctl registry list` or set WFCTL_DEBUG=1)", name)
+	}
+	normalized := normalizePluginName(name)
+	var lastErr error
+	for _, candidate := range []string{name, normalized} {
+		if candidate == "" {
+			continue
+		}
+		for _, src := range m.sources {
+			manifest, err := src.FetchManifest(candidate)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			index, idxErr := src.FetchVersionIndex(candidate)
+			if idxErr != nil {
+				return manifest, nil, src.Name(), idxErr
+			}
+			return manifest, index, src.Name(), nil
+		}
+		if candidate == normalized {
+			break
+		}
+	}
+	if lastErr != nil {
+		return nil, nil, "", lastErr
+	}
+	return nil, nil, "", fmt.Errorf("plugin %q not found in any configured registry", name)
+}
+
 // SearchPlugins searches all sources and returns deduplicated results.
 // When the same plugin appears in multiple registries, the higher-priority source wins.
 // The query is normalized (stripping "workflow-plugin-" prefix) before searching.
