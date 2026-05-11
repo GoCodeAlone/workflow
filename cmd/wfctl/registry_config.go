@@ -42,12 +42,18 @@ func DefaultRegistryConfig() *RegistryConfig {
 				Repo:     registryRepo,
 				Branch:   registryBranch,
 				Priority: 0,
+				CompatibilityEvidence: RegistryCompatibilityEvidenceConfig{
+					Trust: CompatibilityTrustFirstParty,
+				},
 			},
 			{
 				Name:     "static-mirror",
 				Type:     "static",
 				URL:      "https://gocodealone.github.io/workflow-registry/v1",
 				Priority: 100,
+				CompatibilityEvidence: RegistryCompatibilityEvidenceConfig{
+					Trust: CompatibilityTrustFirstParty,
+				},
 			},
 		},
 	}
@@ -103,7 +109,14 @@ func loadRegistryConfigFile(path string) (*RegistryConfig, bool, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, false, fmt.Errorf("parse registry config %s: %w", path, err)
 	}
-	// Ensure defaults.
+	applyRegistryConfigDefaults(&cfg)
+	return &cfg, true, nil
+}
+
+func applyRegistryConfigDefaults(cfg *RegistryConfig) {
+	if cfg == nil {
+		return
+	}
 	for i := range cfg.Registries {
 		if cfg.Registries[i].Branch == "" {
 			cfg.Registries[i].Branch = "main"
@@ -111,8 +124,10 @@ func loadRegistryConfigFile(path string) (*RegistryConfig, bool, error) {
 		if cfg.Registries[i].Type == "" {
 			cfg.Registries[i].Type = "github"
 		}
+		if cfg.Registries[i].CompatibilityEvidence.Trust == "" {
+			cfg.Registries[i].CompatibilityEvidence.Trust = CompatibilityTrustAdvisory
+		}
 	}
-	return &cfg, true, nil
 }
 
 // SaveRegistryConfig writes a registry config to a YAML file.

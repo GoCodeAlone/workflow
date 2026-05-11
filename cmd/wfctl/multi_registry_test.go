@@ -15,10 +15,11 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockRegistrySource struct {
-	name      string
-	manifests map[string]*RegistryManifest
-	listErr   error
-	fetchErr  map[string]error
+	name           string
+	manifests      map[string]*RegistryManifest
+	versionIndexes map[string]*PluginVersionIndex
+	listErr        error
+	fetchErr       map[string]error
 }
 
 func (m *mockRegistrySource) Name() string { return m.name }
@@ -46,6 +47,19 @@ func (m *mockRegistrySource) FetchManifest(name string) (*RegistryManifest, erro
 		return nil, fmt.Errorf("plugin %q not found in registry %s", name, m.name)
 	}
 	return manifest, nil
+}
+
+func (m *mockRegistrySource) FetchVersionIndex(name string) (*PluginVersionIndex, error) {
+	if m.versionIndexes != nil {
+		if index, ok := m.versionIndexes[name]; ok {
+			return index, nil
+		}
+	}
+	manifest, err := m.FetchManifest(name)
+	if err != nil {
+		return nil, err
+	}
+	return synthesizeVersionIndexFromManifest(manifest), nil
 }
 
 func (m *mockRegistrySource) SearchPlugins(query string) ([]PluginSearchResult, error) {
@@ -127,6 +141,9 @@ func TestDefaultRegistryConfig(t *testing.T) {
 	if r.Priority != 0 {
 		t.Errorf("priority: got %d, want 0", r.Priority)
 	}
+	if r.CompatibilityEvidence.Trust != CompatibilityTrustFirstParty {
+		t.Errorf("default trust: got %q, want %q", r.CompatibilityEvidence.Trust, CompatibilityTrustFirstParty)
+	}
 	// Secondary fallback: static mirror (GitHub Pages CDN — lower priority).
 	fb := cfg.Registries[1]
 	if fb.Name != "static-mirror" {
@@ -140,6 +157,21 @@ func TestDefaultRegistryConfig(t *testing.T) {
 	}
 	if fb.Priority != 100 {
 		t.Errorf("fallback priority: got %d, want 100", fb.Priority)
+	}
+	if fb.CompatibilityEvidence.Trust != CompatibilityTrustFirstParty {
+		t.Errorf("static mirror trust: got %q, want %q", fb.CompatibilityEvidence.Trust, CompatibilityTrustFirstParty)
+	}
+}
+
+func TestRegistryCompatibilityTrustDefaults(t *testing.T) {
+	cfg := &RegistryConfig{Registries: []RegistrySourceConfig{{
+		Name: "community",
+		Type: "static",
+		URL:  "https://example.test",
+	}}}
+	applyRegistryConfigDefaults(cfg)
+	if got := cfg.Registries[0].CompatibilityEvidence.Trust; got != CompatibilityTrustAdvisory {
+		t.Fatalf("user registry trust = %q, want %q", got, CompatibilityTrustAdvisory)
 	}
 }
 
@@ -400,6 +432,69 @@ func TestMultiRegistryFetchOriginalNameFirst(t *testing.T) {
 	}
 	if manifest.Name != "workflow-plugin-auth" {
 		t.Errorf("name: got %q, want %q", manifest.Name, "workflow-plugin-auth")
+	}
+}
+
+func TestMultiRegistryFetchVersionIndex_UsesSameSourceAsManifest(t *testing.T) {
+	srcA := &mockRegistrySource{
+		name: "primary",
+		manifests: map[string]*RegistryManifest{
+			"shared-plugin": {Name: "shared-plugin", Version: "1.0.0"},
+		},
+		versionIndexes: map[string]*PluginVersionIndex{
+			"shared-plugin": {
+				Plugin:   "shared-plugin",
+				Versions: []PluginVersionRecord{{Version: "v1.0.0"}},
+			},
+		},
+	}
+	srcB := &mockRegistrySource{
+		name: "secondary",
+		manifests: map[string]*RegistryManifest{
+			"shared-plugin": {Name: "shared-plugin", Version: "2.0.0"},
+		},
+		versionIndexes: map[string]*PluginVersionIndex{
+			"shared-plugin": {
+				Plugin:   "shared-plugin",
+				Versions: []PluginVersionRecord{{Version: "v2.0.0"}},
+			},
+		},
+	}
+
+	mr := NewMultiRegistryFromSources(srcA, srcB)
+	index, source, err := mr.FetchVersionIndex("shared-plugin")
+	if err != nil {
+		t.Fatalf("FetchVersionIndex: %v", err)
+	}
+	if source != "primary" {
+		t.Fatalf("source = %q, want primary", source)
+	}
+	if got := index.Versions[0].Version; got != "v1.0.0" {
+		t.Fatalf("version index came from wrong source: got %q", got)
+	}
+}
+
+func TestMultiRegistryFetchVersionIndex_NormalizedFallback(t *testing.T) {
+	srcA := &mockRegistrySource{
+		name: "registry",
+		manifests: map[string]*RegistryManifest{
+			"auth": {Name: "auth", Version: "1.0.0"},
+		},
+		versionIndexes: map[string]*PluginVersionIndex{
+			"auth": {
+				Plugin:   "auth",
+				Versions: []PluginVersionRecord{{Version: "v1.0.0"}},
+			},
+		},
+	}
+
+	mr := NewMultiRegistryFromSources(srcA)
+	index, _, err := mr.FetchVersionIndex("workflow-plugin-auth")
+	if err != nil {
+		t.Fatalf("FetchVersionIndex: %v", err)
+	}
+	if index.Plugin != "auth" {
+		t.Fatalf("plugin = %q, want auth", index.Plugin)
 	}
 }
 

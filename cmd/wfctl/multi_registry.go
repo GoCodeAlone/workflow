@@ -135,6 +135,61 @@ func (m *MultiRegistry) FetchManifest(name string) (*RegistryManifest, string, e
 	return nil, "", fmt.Errorf("plugin %q not found in any configured registry", name)
 }
 
+// FetchVersionIndex tries each source in priority order, using the same
+// original-name then normalized-name lookup order as FetchManifest.
+func (m *MultiRegistry) FetchVersionIndex(name string) (*PluginVersionIndex, string, error) {
+	if len(m.sources) == 0 {
+		return nil, "", fmt.Errorf("plugin %q not found: no registry sources configured"+
+			" (missing .wfctl.yaml? run `wfctl registry list` or set WFCTL_DEBUG=1)", name)
+	}
+
+	normalized := normalizePluginName(name)
+	if debugRegistryLog {
+		fmt.Fprintf(os.Stderr, "[wfctl debug] FetchVersionIndex %q: %d source(s), normalized=%q\n",
+			name, len(m.sources), normalized)
+	}
+
+	var lastErr error
+	for _, src := range m.sources {
+		index, err := src.FetchVersionIndex(name)
+		if debugRegistryLog {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (original %q index): %v\n", src.Name(), name, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (original %q index): found %d version(s)\n",
+					src.Name(), name, len(index.Versions))
+			}
+		}
+		if err == nil {
+			return index, src.Name(), nil
+		}
+		lastErr = err
+	}
+
+	if normalized != name {
+		for _, src := range m.sources {
+			index, err := src.FetchVersionIndex(normalized)
+			if debugRegistryLog {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (normalized %q index): %v\n", src.Name(), normalized, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (normalized %q index): found %d version(s)\n",
+						src.Name(), normalized, len(index.Versions))
+				}
+			}
+			if err == nil {
+				return index, src.Name(), nil
+			}
+			lastErr = err
+		}
+	}
+
+	if lastErr != nil {
+		return nil, "", lastErr
+	}
+	return nil, "", fmt.Errorf("plugin %q compatibility index not found in any configured registry", name)
+}
+
 // SearchPlugins searches all sources and returns deduplicated results.
 // When the same plugin appears in multiple registries, the higher-priority source wins.
 // The query is normalized (stripping "workflow-plugin-" prefix) before searching.
