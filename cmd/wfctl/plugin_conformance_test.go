@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,7 +31,7 @@ func TestPluginConformanceHelpListsFlags(t *testing.T) {
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("runPluginConformance --help error = %v, want flag.ErrHelp", err)
 	}
-	for _, want := range []string{"--artifact", "--mode", "--engine-version", "--timeout", "executes plugin code"} {
+	for _, want := range []string{"--artifact", "--build-package", "--mode", "--engine-version", "--timeout", "executes plugin code"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q:\n%s", want, output)
 		}
@@ -87,6 +88,142 @@ func TestPluginConformanceLocalJSONPass(t *testing.T) {
 	}
 	if !strings.Contains(ev.StderrTail, "iac-pass stderr marker") {
 		t.Fatalf("stderr tail missing plugin output: %#v", ev)
+	}
+}
+
+func TestPluginConformanceBuildsRequestedPackage(t *testing.T) {
+	fixture := prepareIACPassFixture(t)
+	cmdDir := filepath.Join(fixture, "cmd", "plugin")
+	if err := os.MkdirAll(cmdDir, 0o750); err != nil {
+		t.Fatalf("mkdir cmd/plugin: %v", err)
+	}
+	if err := os.Rename(filepath.Join(fixture, "main.go"), filepath.Join(cmdDir, "main.go")); err != nil {
+		t.Fatalf("move main.go: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "evidence.json")
+	if err := runPluginConformance([]string{
+		"--mode", "typed-iac",
+		"--engine-version", "v0.51.2",
+		"--build-package", "./cmd/plugin",
+		"--format", "json",
+		"--output", out,
+		fixture,
+	}); err != nil {
+		t.Fatalf("runPluginConformance with build package: %v", err)
+	}
+	ev := readEvidence(t, out)
+	if ev.Status != PluginCompatibilityStatusPass {
+		t.Fatalf("status = %q, want pass", ev.Status)
+	}
+}
+
+func TestPluginConformanceSourceBuildPackageIgnoresRootBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell executable fixture is Unix-specific")
+	}
+	fixture := prepareIACPassFixture(t)
+	cmdDir := filepath.Join(fixture, "cmd", "plugin")
+	if err := os.MkdirAll(cmdDir, 0o750); err != nil {
+		t.Fatalf("mkdir cmd/plugin: %v", err)
+	}
+	if err := os.Rename(filepath.Join(fixture, "main.go"), filepath.Join(cmdDir, "main.go")); err != nil {
+		t.Fatalf("move main.go: %v", err)
+	}
+	staleBinary := filepath.Join(fixture, "iac-pass")
+	if err := os.WriteFile(staleBinary, []byte("#!/bin/sh\necho stale-root-binary >&2\nexit 9\n"), 0o755); err != nil {
+		t.Fatalf("write stale root binary: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "evidence.json")
+	if err := runPluginConformance([]string{
+		"--mode", "typed-iac",
+		"--engine-version", "v0.51.2",
+		"--build-package", "./cmd/plugin",
+		"--format", "json",
+		"--output", out,
+		fixture,
+	}); err != nil {
+		t.Fatalf("runPluginConformance with stale root binary: %v", err)
+	}
+	ev := readEvidence(t, out)
+	if strings.Contains(ev.StderrTail, "stale-root-binary") {
+		t.Fatalf("source conformance used stale root binary: %#v", ev)
+	}
+}
+
+func TestPluginConformanceRejectsUnsafeBuildPackage(t *testing.T) {
+	fixture := prepareIACPassFixture(t)
+	for _, buildPackage := range []string{
+		"-toolexec=/tmp/evil",
+		"example.com/other/plugin",
+		"../other",
+		"./../other",
+		"/tmp/plugin",
+		"./...",
+		"./cmd/...",
+	} {
+		t.Run(buildPackage, func(t *testing.T) {
+			err := runPluginConformance([]string{
+				"--mode", "typed-iac",
+				"--engine-version", "v0.51.2",
+				"--build-package", buildPackage,
+				fixture,
+			})
+			if err == nil {
+				t.Fatal("expected unsafe build package to be rejected")
+			}
+			if !strings.Contains(err.Error(), "build-package") {
+				t.Fatalf("error = %v, want build-package context", err)
+			}
+		})
+	}
+}
+
+func TestPluginConformanceRejectsExplicitBuildPackageWithArtifact(t *testing.T) {
+	fixture := prepareIACPassFixture(t)
+	archive := filepath.Join(t.TempDir(), "iac-pass.tar.gz")
+	writeTarGzFromDir(t, fixture, archive)
+	err := runPluginConformance([]string{
+		"--mode", "typed-iac",
+		"--artifact", archive,
+		"--build-package", ".",
+	})
+	if err == nil {
+		t.Fatal("expected explicit build package with artifact to fail")
+	}
+	if !strings.Contains(err.Error(), "--build-package") {
+		t.Fatalf("error = %v, want --build-package context", err)
+	}
+}
+
+func TestNormalizeConformanceBuildPackage(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{name: "root", in: ".", want: "."},
+		{name: "trim", in: " ./cmd/plugin ", want: "./cmd/plugin"},
+		{name: "clean", in: "./cmd/../plugin", want: "./plugin"},
+		{name: "empty", in: "", wantErr: true},
+		{name: "slash root", in: "./", wantErr: true},
+		{name: "backslash", in: `.\cmd\plugin`, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeConformanceBuildPackage(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeConformanceBuildPackage(%q) succeeded, want error", tc.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeConformanceBuildPackage(%q): %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeConformanceBuildPackage(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
