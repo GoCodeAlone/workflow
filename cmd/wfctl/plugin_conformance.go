@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
@@ -412,11 +413,14 @@ func pathBaseSlash(path string) string {
 }
 
 type tailBuffer struct {
+	mu  sync.Mutex
 	buf []byte
 }
 
 func (b *tailBuffer) Write(p []byte) (int, error) {
 	const maxTail = 4096
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.buf = append(b.buf, p...)
 	if len(b.buf) > maxTail {
 		b.buf = b.buf[len(b.buf)-maxTail:]
@@ -425,5 +429,7 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return string(b.buf)
 }
