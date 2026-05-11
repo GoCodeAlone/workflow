@@ -6,9 +6,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -219,6 +221,188 @@ plugins:
 	}
 }
 
+func TestPluginLock_FromManifest_UsesCompatibilityResolverAndWritesMetadata(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	archiveSHA := sha256Hex([]byte("foo archive"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/workflow-plugin-foo/manifest.json":
+			manifest := RegistryManifest{
+				Name:    "workflow-plugin-foo",
+				Version: "v0.2.0",
+				Downloads: []PluginDownload{{
+					OS:     runtime.GOOS,
+					Arch:   runtime.GOARCH,
+					URL:    "https://example.test/foo-v0.2.0.tar.gz",
+					SHA256: archiveSHA,
+				}},
+			}
+			data, _ := json.Marshal(manifest)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(data) //nolint:errcheck
+		case "/compatibility/workflow-plugin-foo/index.json":
+			pass := lockTestEvidence(t, "workflow-plugin-foo", "v0.1.0", PluginCompatibilityStatusPass, archiveSHA)
+			fail := lockTestEvidence(t, "workflow-plugin-foo", "v0.2.0", PluginCompatibilityStatusFail, archiveSHA)
+			idx := PluginVersionIndex{
+				Plugin: "workflow-plugin-foo",
+				EvidencePolicy: CompatibilityEvidencePolicy{
+					RequiredFromEngine: "v0.51.0",
+				},
+				Versions: []PluginVersionRecord{
+					{
+						Version: "v0.2.0",
+						Downloads: []PluginDownload{{
+							OS:     runtime.GOOS,
+							Arch:   runtime.GOARCH,
+							URL:    "https://example.test/foo-v0.2.0.tar.gz",
+							SHA256: archiveSHA,
+						}},
+						Compatibility: []PluginCompatibilityEvidence{fail},
+					},
+					{
+						Version: "v0.1.0",
+						Downloads: []PluginDownload{{
+							OS:     runtime.GOOS,
+							Arch:   runtime.GOARCH,
+							URL:    "https://example.test/foo-v0.1.0.tar.gz",
+							SHA256: archiveSHA,
+						}},
+						Compatibility: []PluginCompatibilityEvidence{pass},
+					},
+				},
+			}
+			data, _ := json.Marshal(idx)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(data) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	registryConfig := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n    compatibilityEvidence:\n      trust: first_party\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(registryConfig), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+	manifest := `version: 1
+plugins:
+  - name: workflow-plugin-foo
+    source: github.com/GoCodeAlone/workflow-plugin-foo
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := runPluginLockFromManifestWithOptions(manifestPath, lockPath, pluginLockCompatibilityOptions{EngineVersion: "v0.51.2"}); err != nil {
+		t.Fatalf("runPluginLockFromManifestWithOptions: %v", err)
+	}
+	lf, err := config.LoadWfctlLockfile(lockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	entry := lf.Plugins["workflow-plugin-foo"]
+	if entry.Version != "v0.1.0" {
+		t.Fatalf("locked version = %q, want v0.1.0", entry.Version)
+	}
+	platform := entry.Platforms[currentPlatformKey()]
+	if platform.URL != "https://example.test/foo-v0.1.0.tar.gz" {
+		t.Fatalf("platform URL = %q, want v0.1.0 URL", platform.URL)
+	}
+	if platform.Compatibility == nil || platform.Compatibility.Status != PluginCompatibilityStatusPass || platform.Compatibility.EvidenceDigest == "" {
+		t.Fatalf("compatibility metadata missing/incomplete: %#v", platform.Compatibility)
+	}
+}
+
+func TestPluginLock_FromManifest_WarnModeRecordsForcedKnownFail(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	archiveSHA := sha256Hex([]byte("foo archive"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/workflow-plugin-foo/manifest.json":
+			manifest := RegistryManifest{
+				Name:    "workflow-plugin-foo",
+				Version: "v0.2.0",
+				Downloads: []PluginDownload{{
+					OS:     runtime.GOOS,
+					Arch:   runtime.GOARCH,
+					URL:    "https://example.test/foo-v0.2.0.tar.gz",
+					SHA256: archiveSHA,
+				}},
+			}
+			data, _ := json.Marshal(manifest)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(data) //nolint:errcheck
+		case "/compatibility/workflow-plugin-foo/index.json":
+			fail := lockTestEvidence(t, "workflow-plugin-foo", "v0.2.0", PluginCompatibilityStatusFail, archiveSHA)
+			idx := PluginVersionIndex{
+				Plugin: "workflow-plugin-foo",
+				EvidencePolicy: CompatibilityEvidencePolicy{
+					RequiredFromEngine: "v0.51.0",
+				},
+				Versions: []PluginVersionRecord{{
+					Version: "v0.2.0",
+					Downloads: []PluginDownload{{
+						OS:     runtime.GOOS,
+						Arch:   runtime.GOARCH,
+						URL:    "https://example.test/foo-v0.2.0.tar.gz",
+						SHA256: archiveSHA,
+					}},
+					Compatibility: []PluginCompatibilityEvidence{fail},
+				}},
+			}
+			data, _ := json.Marshal(idx)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(data) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	registryConfig := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n    compatibilityEvidence:\n      trust: first_party\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(registryConfig), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+	manifest := `version: 1
+plugins:
+  - name: workflow-plugin-foo
+    version: v0.2.0
+    source: github.com/GoCodeAlone/workflow-plugin-foo
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := runPluginLockFromManifestWithOptions(manifestPath, lockPath, pluginLockCompatibilityOptions{EngineVersion: "v0.51.2", CompatMode: PluginCompatModeWarn}); err != nil {
+		t.Fatalf("runPluginLockFromManifestWithOptions: %v", err)
+	}
+	lf, err := config.LoadWfctlLockfile(lockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	compat := lf.Plugins["workflow-plugin-foo"].Platforms[currentPlatformKey()].Compatibility
+	if compat == nil || !compat.Forced || compat.Reason != PluginCompatWarnReason || compat.Status != PluginCompatibilityStatusFail {
+		t.Fatalf("forced known-fail metadata missing/incomplete: %#v", compat)
+	}
+
+	forceLockPath := filepath.Join(dir, ".wfctl-force-lock.yaml")
+	if err := runPluginLockFromManifestWithOptions(manifestPath, forceLockPath, pluginLockCompatibilityOptions{EngineVersion: "v0.51.2", Force: true}); err != nil {
+		t.Fatalf("runPluginLockFromManifestWithOptions force: %v", err)
+	}
+	forcedLF, err := config.LoadWfctlLockfile(forceLockPath)
+	if err != nil {
+		t.Fatalf("load forced lockfile: %v", err)
+	}
+	forcedCompat := forcedLF.Plugins["workflow-plugin-foo"].Platforms[currentPlatformKey()].Compatibility
+	if forcedCompat == nil || !forcedCompat.Forced || forcedCompat.Reason != PluginCompatForceLock {
+		t.Fatalf("force-lock metadata missing/incomplete: %#v", forcedCompat)
+	}
+}
+
 func TestPluginLock_FromManifest_RefreshesExistingPlatformSHA256FromRegistry(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "wfctl.yaml")
@@ -304,6 +488,24 @@ plugins:
 	if want := sha256Hex([]byte("fresh foo linux amd64 archive")); platform.SHA256 != want {
 		t.Fatalf("platform SHA256 = %q, want fresh registry archive checksum", platform.SHA256)
 	}
+}
+
+func lockTestEvidence(t *testing.T, plugin, version, status, archiveSHA string) PluginCompatibilityEvidence {
+	t.Helper()
+	ev, err := ValidateCompatibilityEvidence(PluginCompatibilityEvidence{
+		Plugin:        plugin,
+		Version:       version,
+		EngineVersion: "v0.51.2",
+		Mode:          PluginCompatibilityModeTypedIaC,
+		Status:        status,
+		OS:            runtime.GOOS,
+		Arch:          runtime.GOARCH,
+		ArchiveSHA256: archiveSHA,
+	})
+	if err != nil {
+		t.Fatalf("validate evidence: %v", err)
+	}
+	return ev
 }
 
 func TestPluginLock_FromManifest_FailsWhenExistingPlatformsCannotBeRefreshed(t *testing.T) {

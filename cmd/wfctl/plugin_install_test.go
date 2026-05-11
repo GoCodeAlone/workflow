@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -671,4 +672,173 @@ func TestRunPluginInstall_SkipChecksumAndSHA256Contradiction_Errors(t *testing.T
 	if !strings.Contains(err.Error(), "--skip-checksum") || !strings.Contains(err.Error(), "--sha256") {
 		t.Errorf("expected error to mention both flags, got: %v", err)
 	}
+}
+
+func TestRunPluginInstallCompatSkipsNewerKnownFail(t *testing.T) {
+	reg := newCompatInstallRegistry(t, "test", "v0.2.0", []compatInstallVersion{
+		{Version: "v0.1.0", Status: PluginCompatibilityStatusPass},
+		{Version: "v0.2.0", Status: PluginCompatibilityStatusFail},
+	})
+	pluginDir := t.TempDir()
+	if err := runPluginInstall([]string{
+		"--config", reg.ConfigPath,
+		"--plugin-dir", pluginDir,
+		"--engine-version", "v0.51.2",
+		"test",
+	}); err != nil {
+		t.Fatalf("runPluginInstall: %v", err)
+	}
+	if got := readInstalledVersion(filepath.Join(pluginDir, "test")); got != "v0.1.0" {
+		t.Fatalf("installed version = %q, want v0.1.0", got)
+	}
+}
+
+func TestRunPluginInstallCompatRequestedFailErrorsAndWarnPermits(t *testing.T) {
+	reg := newCompatInstallRegistry(t, "test", "v0.2.0", []compatInstallVersion{
+		{Version: "v0.2.0", Status: PluginCompatibilityStatusFail},
+	})
+	err := runPluginInstall([]string{
+		"--config", reg.ConfigPath,
+		"--plugin-dir", t.TempDir(),
+		"--engine-version", "v0.51.2",
+		"test@v0.2.0",
+	})
+	if err == nil {
+		t.Fatal("expected requested known-fail error")
+	}
+	if !strings.Contains(err.Error(), "failed") {
+		t.Fatalf("error = %v, want failed context", err)
+	}
+
+	pluginDir := t.TempDir()
+	if err := runPluginInstall([]string{
+		"--config", reg.ConfigPath,
+		"--plugin-dir", pluginDir,
+		"--engine-version", "v0.51.2",
+		"--compat-mode", "warn",
+		"test@v0.2.0",
+	}); err != nil {
+		t.Fatalf("runPluginInstall warn: %v", err)
+	}
+	if got := readInstalledVersion(filepath.Join(pluginDir, "test")); got != "v0.2.0" {
+		t.Fatalf("installed version = %q, want v0.2.0", got)
+	}
+}
+
+func TestRunPluginUpdateCompatUsesOlderPassingVersion(t *testing.T) {
+	reg := newCompatInstallRegistry(t, "test", "v0.2.0", []compatInstallVersion{
+		{Version: "v0.1.0", Status: PluginCompatibilityStatusPass},
+		{Version: "v0.2.0", Status: PluginCompatibilityStatusFail},
+	})
+	pluginDir := t.TempDir()
+	installed := filepath.Join(pluginDir, "test")
+	if err := os.MkdirAll(installed, 0o750); err != nil {
+		t.Fatalf("mkdir installed plugin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "plugin.json"), []byte(`{"name":"test","version":"v0.0.1","author":"test","description":"old"}`), 0o600); err != nil {
+		t.Fatalf("write installed plugin.json: %v", err)
+	}
+	if err := runPluginUpdate([]string{
+		"--config", reg.ConfigPath,
+		"--plugin-dir", pluginDir,
+		"--engine-version", "v0.51.2",
+		"test",
+	}); err != nil {
+		t.Fatalf("runPluginUpdate: %v", err)
+	}
+	if got := readInstalledVersion(installed); got != "v0.1.0" {
+		t.Fatalf("installed version = %q, want v0.1.0", got)
+	}
+}
+
+type compatInstallRegistry struct {
+	ConfigPath string
+}
+
+type compatInstallVersion struct {
+	Version string
+	Status  string
+}
+
+func newCompatInstallRegistry(t *testing.T, plugin, manifestVersion string, versions []compatInstallVersion) compatInstallRegistry {
+	t.Helper()
+	archiveData := makeTestTarGz(t, plugin)
+	sum := sha256.Sum256(archiveData)
+	archiveSHA := hex.EncodeToString(sum[:])
+	var serverURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/downloads/"):
+			_, _ = w.Write(archiveData)
+		case r.URL.Path == "/plugins/"+plugin+"/manifest.json":
+			writeCompatRegistryManifest(t, w, plugin, manifestVersion, serverURL, archiveSHA)
+		case r.URL.Path == "/compatibility/"+plugin+"/index.json":
+			writeCompatRegistryIndex(t, w, plugin, serverURL, archiveSHA, versions)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	serverURL = srv.URL
+	cfgPath := filepath.Join(t.TempDir(), "wfctl-registry.yaml")
+	cfg := "registries:\n" +
+		"  - name: local\n" +
+		"    type: static\n" +
+		"    url: " + srv.URL + "\n" +
+		"    compatibilityEvidence:\n" +
+		"      trust: first_party\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+	return compatInstallRegistry{ConfigPath: cfgPath}
+}
+
+func writeCompatRegistryManifest(t *testing.T, w http.ResponseWriter, plugin, version, baseURL, archiveSHA string) {
+	t.Helper()
+	manifest := makeTestManifest(plugin, baseURL+"/downloads/"+plugin+"-"+version+".tar.gz", archiveSHA)
+	manifest.Version = version
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
+}
+
+func writeCompatRegistryIndex(t *testing.T, w http.ResponseWriter, plugin, baseURL, archiveSHA string, versions []compatInstallVersion) {
+	t.Helper()
+	idx := PluginVersionIndex{
+		Plugin: plugin,
+		EvidencePolicy: CompatibilityEvidencePolicy{
+			RequiredFromEngine: "v0.51.0",
+		},
+	}
+	for _, v := range versions {
+		ev := resolverEvidence(v.Version, "v0.51.2", v.Status)
+		ev.Plugin = plugin
+		ev.OS = runtime.GOOS
+		ev.Arch = runtime.GOARCH
+		ev.ArchiveSHA256 = archiveSHA
+		ev, err := ValidateCompatibilityEvidence(ev)
+		if err != nil {
+			t.Fatalf("validate evidence: %v", err)
+		}
+		idx.Versions = append(idx.Versions, PluginVersionRecord{
+			Version:          v.Version,
+			MinEngineVersion: "v0.50.0",
+			Downloads: []PluginDownload{{
+				OS:     runtime.GOOS,
+				Arch:   runtime.GOARCH,
+				URL:    baseURL + "/downloads/" + plugin + "-" + v.Version + ".tar.gz",
+				SHA256: archiveSHA,
+			}},
+			Compatibility: []PluginCompatibilityEvidence{ev},
+		})
+	}
+	data, err := json.MarshalIndent(idx, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal index: %v", err)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
 }

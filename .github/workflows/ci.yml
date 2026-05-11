@@ -65,10 +65,23 @@ jobs:
       run: |
         go test -v -race -coverprofile=coverage.out ./...
 
+    - name: Check Codecov token
+      id: codecov-token
+      if: always()
+      run: |
+        if [ -n "$CODECOV_TOKEN" ]; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=false" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
     - name: Upload coverage reports
       uses: codecov/codecov-action@v5
-      if: always()
+      if: always() && steps.codecov-token.outputs.available == 'true'
       with:
+        token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.out
         fail_ci_if_error: false
 

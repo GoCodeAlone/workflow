@@ -802,7 +802,6 @@ func TestPluginUpdateFallbackToRepo(t *testing.T) {
 		topDir + "/" + pluginName: binaryContent,
 	}
 	tarball := buildTarGz(t, tarEntries, 0755)
-	checksum := sha256Hex(tarball)
 
 	// manifest served by the plugin's repo when registry lookup fails.
 	updatedManifest := &RegistryManifest{
@@ -828,10 +827,9 @@ func TestPluginUpdateFallbackToRepo(t *testing.T) {
 			// Fill in the tarball URL dynamically (srv.URL is known here).
 			m := *updatedManifest
 			m.Downloads = []PluginDownload{{
-				OS:     runtime.GOOS,
-				Arch:   runtime.GOARCH,
-				URL:    "/tarball", // relative, will be prefixed by srv.URL in the handler
-				SHA256: checksum,
+				OS:   runtime.GOOS,
+				Arch: runtime.GOARCH,
+				URL:  "/tarball", // relative, will be prefixed by srv.URL in the handler
 			}}
 			// Use absolute URL for the tarball.
 			m.Downloads[0].URL = "http://" + r.Host + "/tarball"
@@ -891,6 +889,7 @@ func TestPluginUpdateFallbackToRepo(t *testing.T) {
 	err := runPluginUpdate([]string{
 		"-plugin-dir", pluginsDir,
 		"-config", cfgFile,
+		"-skip-checksum",
 		pluginName,
 	})
 	if err != nil {

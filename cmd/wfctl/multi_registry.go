@@ -24,12 +24,12 @@ func NewMultiRegistry(cfg *RegistryConfig) *MultiRegistry {
 	})
 
 	sources := make([]RegistrySource, 0, len(sorted))
-	for _, sc := range sorted {
-		switch sc.Type {
+	for i := range sorted {
+		switch sorted[i].Type {
 		case "github":
-			sources = append(sources, NewGitHubRegistrySource(sc))
+			sources = append(sources, NewGitHubRegistrySource(sorted[i]))
 		case "static":
-			src, err := NewStaticRegistrySource(sc)
+			src, err := NewStaticRegistrySource(sorted[i])
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: %v, skipping\n", err)
 				continue
@@ -37,7 +37,7 @@ func NewMultiRegistry(cfg *RegistryConfig) *MultiRegistry {
 			sources = append(sources, src)
 		default:
 			// Skip unknown types
-			fmt.Fprintf(os.Stderr, "warning: unknown registry type %q for %q, skipping\n", sc.Type, sc.Name)
+			fmt.Fprintf(os.Stderr, "warning: unknown registry type %q for %q, skipping\n", sorted[i].Type, sorted[i].Name)
 		}
 	}
 
@@ -133,6 +133,94 @@ func (m *MultiRegistry) FetchManifest(name string) (*RegistryManifest, string, e
 		return nil, "", lastErr
 	}
 	return nil, "", fmt.Errorf("plugin %q not found in any configured registry", name)
+}
+
+// FetchVersionIndex tries each source in priority order, using the same
+// original-name then normalized-name lookup order as FetchManifest.
+func (m *MultiRegistry) FetchVersionIndex(name string) (*PluginVersionIndex, string, error) {
+	if len(m.sources) == 0 {
+		return nil, "", fmt.Errorf("plugin %q not found: no registry sources configured"+
+			" (missing .wfctl.yaml? run `wfctl registry list` or set WFCTL_DEBUG=1)", name)
+	}
+
+	normalized := normalizePluginName(name)
+	if debugRegistryLog {
+		fmt.Fprintf(os.Stderr, "[wfctl debug] FetchVersionIndex %q: %d source(s), normalized=%q\n",
+			name, len(m.sources), normalized)
+	}
+
+	var lastErr error
+	for _, src := range m.sources {
+		index, err := src.FetchVersionIndex(name)
+		if debugRegistryLog {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (original %q index): %v\n", src.Name(), name, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (original %q index): found %d version(s)\n",
+					src.Name(), name, len(index.Versions))
+			}
+		}
+		if err == nil {
+			return index, src.Name(), nil
+		}
+		lastErr = err
+	}
+
+	if normalized != name {
+		for _, src := range m.sources {
+			index, err := src.FetchVersionIndex(normalized)
+			if debugRegistryLog {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (normalized %q index): %v\n", src.Name(), normalized, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[wfctl debug]   %s (normalized %q index): found %d version(s)\n",
+						src.Name(), normalized, len(index.Versions))
+				}
+			}
+			if err == nil {
+				return index, src.Name(), nil
+			}
+			lastErr = err
+		}
+	}
+
+	if lastErr != nil {
+		return nil, "", lastErr
+	}
+	return nil, "", fmt.Errorf("plugin %q compatibility index not found in any configured registry", name)
+}
+
+func (m *MultiRegistry) FetchManifestAndVersionIndex(name string) (*RegistryManifest, *PluginVersionIndex, string, error) {
+	if len(m.sources) == 0 {
+		return nil, nil, "", fmt.Errorf("plugin %q not found: no registry sources configured"+
+			" (missing .wfctl.yaml? run `wfctl registry list` or set WFCTL_DEBUG=1)", name)
+	}
+	normalized := normalizePluginName(name)
+	var lastErr error
+	for _, candidate := range []string{name, normalized} {
+		if candidate == "" {
+			continue
+		}
+		for _, src := range m.sources {
+			manifest, err := src.FetchManifest(candidate)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			index, idxErr := src.FetchVersionIndex(candidate)
+			if idxErr != nil {
+				return manifest, nil, src.Name(), idxErr
+			}
+			return manifest, index, src.Name(), nil
+		}
+		if candidate == normalized {
+			break
+		}
+	}
+	if lastErr != nil {
+		return nil, nil, "", lastErr
+	}
+	return nil, nil, "", fmt.Errorf("plugin %q not found in any configured registry", name)
 }
 
 // SearchPlugins searches all sources and returns deduplicated results.

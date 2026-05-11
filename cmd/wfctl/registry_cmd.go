@@ -30,27 +30,30 @@ func runRegistryPluginCatalog(args []string) error {
 		return runRegistryAdd(args[1:])
 	case "remove":
 		return runRegistryRemove(args[1:])
+	case "compatibility":
+		return runRegistryCompatibility(args[1:])
 	default:
 		return registryUsage()
 	}
 }
 
 func registryUsage() error {
-	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl registry <subcommand> [options]
+	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl plugin-registry <subcommand> [options]
 
 Subcommands:
-  list     Show configured plugin registries
-  add      Add a plugin registry source
-  remove   Remove a plugin registry source
+  list           Show configured plugin registries
+  add            Add a plugin registry source
+  remove         Remove a plugin registry source
+  compatibility  Manage generated plugin compatibility indexes
 `)
 	return fmt.Errorf("registry subcommand is required")
 }
 
 func runRegistryList(args []string) error {
-	fs := flag.NewFlagSet("registry list", flag.ContinueOnError)
+	fs := flag.NewFlagSet("plugin-registry list", flag.ContinueOnError)
 	cfgPath := fs.String("config", "", "Registry config file path")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl registry list [options]\n\nShow configured plugin registries.\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin-registry list [options]\n\nShow configured plugin registries.\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -64,7 +67,8 @@ func runRegistryList(args []string) error {
 
 	fmt.Printf("%-15s %-10s %-25s %-25s %s\n", "NAME", "TYPE", "OWNER", "REPO", "PRIORITY")
 	fmt.Printf("%-15s %-10s %-25s %-25s %s\n", "----", "----", "-----", "----", "--------")
-	for _, r := range cfg.Registries {
+	for i := range cfg.Registries {
+		r := &cfg.Registries[i]
 		fmt.Printf("%-15s %-10s %-25s %-25s %d\n", r.Name, r.Type, r.Owner, r.Repo, r.Priority)
 	}
 	return nil
@@ -74,7 +78,7 @@ func runRegistryAdd(args []string) error {
 	if err := checkTrailingFlags(args); err != nil {
 		return err
 	}
-	fs := flag.NewFlagSet("registry add", flag.ContinueOnError)
+	fs := flag.NewFlagSet("plugin-registry add", flag.ContinueOnError)
 	cfgPath := fs.String("config", "", "Registry config file path (default: ~/.config/wfctl/config.yaml)")
 	regType := fs.String("type", "github", "Registry type (github)")
 	owner := fs.String("owner", "", "GitHub owner/org (required)")
@@ -82,7 +86,7 @@ func runRegistryAdd(args []string) error {
 	branch := fs.String("branch", "main", "Git branch")
 	priority := fs.Int("priority", 10, "Priority (lower = higher priority)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl registry add [options] <name>\n\nAdd a plugin registry source.\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin-registry add [options] <name>\n\nAdd a plugin registry source.\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -103,8 +107,8 @@ func runRegistryAdd(args []string) error {
 	}
 
 	// Check for duplicate
-	for _, r := range cfg.Registries {
-		if r.Name == name {
+	for i := range cfg.Registries {
+		if cfg.Registries[i].Name == name {
 			return fmt.Errorf("registry %q already exists", name)
 		}
 	}
@@ -139,10 +143,10 @@ func runRegistryRemove(args []string) error {
 	if err := checkTrailingFlags(args); err != nil {
 		return err
 	}
-	fs := flag.NewFlagSet("registry remove", flag.ContinueOnError)
+	fs := flag.NewFlagSet("plugin-registry remove", flag.ContinueOnError)
 	cfgPath := fs.String("config", "", "Registry config file path (default: ~/.config/wfctl/config.yaml)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl registry remove [options] <name>\n\nRemove a plugin registry source.\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin-registry remove [options] <name>\n\nRemove a plugin registry source.\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -165,12 +169,12 @@ func runRegistryRemove(args []string) error {
 
 	found := false
 	filtered := make([]RegistrySourceConfig, 0, len(cfg.Registries))
-	for _, r := range cfg.Registries {
-		if r.Name == name {
+	for i := range cfg.Registries {
+		if cfg.Registries[i].Name == name {
 			found = true
 			continue
 		}
-		filtered = append(filtered, r)
+		filtered = append(filtered, cfg.Registries[i])
 	}
 	if !found {
 		return fmt.Errorf("registry %q not found", name)

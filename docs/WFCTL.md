@@ -64,6 +64,7 @@ graph TD
     wfctl --> ci
     wfctl --> git
     wfctl --> registry
+    wfctl --> plugin-registry["plugin-registry"]
     wfctl --> update
     wfctl --> mcp
     wfctl --> editor-schemas["editor-schemas"]
@@ -109,8 +110,10 @@ graph TD
     plugin --> plugin-init["init"]
     plugin --> plugin-docs["docs"]
     plugin --> plugin-test["test"]
+    plugin --> plugin-conformance["conformance"]
     plugin --> plugin-search["search"]
     plugin --> plugin-install["install"]
+    plugin --> plugin-lock["lock"]
     plugin --> plugin-list["list"]
     plugin --> plugin-update["update"]
     plugin --> plugin-remove["remove"]
@@ -149,6 +152,12 @@ graph TD
     registry --> registry-list["list"]
     registry --> registry-add["add"]
     registry --> registry-remove["remove"]
+
+    plugin-registry --> plugin-registry-list["list"]
+    plugin-registry --> plugin-registry-add["add"]
+    plugin-registry --> plugin-registry-remove["remove"]
+    plugin-registry --> plugin-registry-compat["compatibility"]
+    plugin-registry-compat --> plugin-registry-compat-update["update"]
 ```
 
 ---
@@ -165,7 +174,7 @@ graph TD
 | **Infrastructure** | `infra plan/apply/destroy/status/drift/import/bootstrap/outputs`, `infra state list/export/import` |
 | **CI/CD** | `ci generate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
-| **Plugin Management** | `plugin`, `registry`, `publish` |
+| **Plugin Management** | `plugin`, `plugin-registry`, `registry`, `publish` |
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
@@ -536,6 +545,31 @@ Run a plugin through its full lifecycle in a test harness.
 wfctl plugin test [options]
 ```
 
+#### `plugin conformance`
+
+Run executable plugin/host compatibility checks and emit strict evidence for registry compatibility indexes. This executes plugin code, so use trusted source trees or CI-built release artifacts.
+
+```
+wfctl plugin conformance [options] <plugin-dir>
+wfctl plugin conformance --artifact <tar.gz> [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | `typed-iac` | Conformance mode. Currently checks strict typed IaC plugin launch/contract compatibility |
+| `--artifact` | _(none)_ | Release artifact tar.gz to test instead of a local plugin directory |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version recorded in evidence |
+| `--format` | `text` | Output format: `text` or `json` |
+| `--output` | _(none)_ | Write JSON evidence to a file |
+| `--timeout` | `30s` | Plugin launch/check timeout |
+
+Local directory evidence is useful during development. Registry enforcement should use artifact evidence so `archiveSHA256` can be matched against the registry manifest download checksum.
+
+```bash
+wfctl plugin conformance --mode typed-iac --format json ./workflow-plugin-digitalocean
+wfctl plugin conformance --artifact dist/workflow-plugin-digitalocean.tar.gz --engine-version v0.51.2 --output evidence.json
+```
+
 #### `plugin search`
 
 Search the plugin registry by name, description, or keyword.
@@ -563,15 +597,39 @@ wfctl plugin install [options] <name>[@<version>]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-data-dir` | `data/plugins` | Plugin data directory |
+| `--plugin-dir` | `data/plugins` | Plugin directory |
+| `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
 | `-config` | _(default registry)_ | Registry config file path |
 | `-registry` | _(all registries)_ | Use a specific registry by name |
+| `--compat-mode` | `enforce` | Compatibility mode for registry installs: `enforce` or `warn` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
+| `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
+| `--skip-checksum` | `false` | Skip archive integrity verification. Use only for trusted internal URLs |
 
 ```bash
 wfctl plugin install my-plugin
 wfctl plugin install my-plugin@1.2.0
 wfctl plugin install --data-dir /opt/plugins my-plugin
 ```
+
+Registry installs resolve compatibility before selecting a version. Direct URL installs, local installs, GitHub repository fallback, and lockfile installs do not use registry evidence unless they are backed by registry metadata.
+
+#### `plugin lock`
+
+Regenerate `.wfctl-lock.yaml` from `wfctl.yaml` or legacy `requires.plugins[]`.
+
+```
+wfctl plugin lock [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `workflow.yaml` | Legacy workflow config path |
+| `--manifest` | `wfctl.yaml` | wfctl project manifest path |
+| `--lock-file` | `.wfctl-lock.yaml` | Lockfile path to write |
+| `--compat-mode` | `enforce` | Compatibility mode for registry lock resolution: `enforce` or `warn` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
+| `--force` | `false` | Permit known-failing or missing required compatibility evidence and record forced metadata in the lockfile |
 
 #### `plugin list`
 
@@ -595,7 +653,16 @@ wfctl plugin update [options] <name>
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-data-dir` | `data/plugins` | Plugin data directory |
+| `--plugin-dir` | `data/plugins` | Plugin directory |
+| `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--config` | _(default registry)_ | Registry config file path |
+| `--manifest` | `wfctl.yaml` | wfctl project manifest path |
+| `--lock-file` | `.wfctl-lock.yaml` | Lockfile path |
+| `--version` | _(none)_ | Pin this exact version in `wfctl.yaml` instead of installing |
+| `--compat-mode` | `enforce` | Compatibility mode for registry updates: `enforce` or `warn` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
+| `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
+| `--skip-checksum` | `false` | Skip archive integrity verification. Use only for trusted internal URLs |
 
 #### `plugin remove`
 
@@ -2183,12 +2250,16 @@ wfctl git push -config-only
 
 ---
 
-### `registry list`
+### `plugin-registry`
+
+Plugin catalog registry management. `wfctl registry` remains a compatibility alias for this plugin catalog surface until the container registry dispatcher replaces it.
+
+#### `plugin-registry list`
 
 Show configured plugin registries.
 
 ```
-wfctl registry list [options]
+wfctl plugin-registry list [options]
 ```
 
 | Flag | Default | Description |
@@ -2197,12 +2268,12 @@ wfctl registry list [options]
 
 ---
 
-### `registry add`
+#### `plugin-registry add`
 
 Add a plugin registry source.
 
 ```
-wfctl registry add [options] <name>
+wfctl plugin-registry add [options] <name>
 ```
 
 | Flag | Default | Description |
@@ -2215,17 +2286,17 @@ wfctl registry add [options] <name>
 | `--priority` | `10` | Priority (lower = higher priority) |
 
 ```bash
-wfctl registry add --owner myorg --repo my-registry my-registry
+wfctl plugin-registry add --owner myorg --repo my-registry my-registry
 ```
 
 ---
 
-### `registry remove`
+#### `plugin-registry remove`
 
 Remove a plugin registry source. Cannot remove the `default` registry.
 
 ```
-wfctl registry remove [options] <name>
+wfctl plugin-registry remove [options] <name>
 ```
 
 | Flag | Default | Description |
@@ -2233,7 +2304,69 @@ wfctl registry remove [options] <name>
 | `--config` | `~/.config/wfctl/config.yaml` | Registry config file path |
 
 ```bash
-wfctl registry remove my-registry
+wfctl plugin-registry remove my-registry
+```
+
+#### `plugin-registry compatibility update`
+
+Update `compatibility/<plugin>/index.json` in a local plugin registry checkout from one or more conformance evidence files.
+
+```
+wfctl plugin-registry compatibility update --registry-dir <dir> --plugin <name> --version <version> --evidence <file> [--evidence <file>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--registry-dir` | _(required)_ | Local plugin registry checkout |
+| `--plugin` | _(required)_ | Plugin name |
+| `--version` | _(required)_ | Plugin version |
+| `--evidence` | _(required)_ | Compatibility evidence JSON path. Repeat for multiple platforms or engines |
+| `--derive-ranges` | `false` | Derive pass ranges from enumerated evidence |
+| `--latest-engine` | _(none)_ | Latest engine version used to mark stale evidence metadata |
+
+The updater validates that evidence matches the requested plugin/version, the registry manifest version, current platform fields, and artifact checksum. It writes the compatibility index atomically.
+
+```bash
+wfctl plugin-registry compatibility update \
+  --registry-dir ../workflow-registry \
+  --plugin workflow-plugin-digitalocean \
+  --version v1.0.1 \
+  --evidence evidence/linux-amd64-v0.51.2.json \
+  --latest-engine v0.51.2
+```
+
+Registry config can mark whether compatibility evidence is enforceable:
+
+```yaml
+compatibility:
+  mode: enforce
+registries:
+  - name: internal
+    type: static
+    url: https://registry.example.com/workflow/v1
+    compatibilityEvidence:
+      trust: first_party
+```
+
+`compatibilityEvidence.trust: first_party` allows enforcement. User-added registries default to advisory evidence unless trust is set explicitly. `signed` is reserved for a future signature-backed mode and is rejected today. `compatibility.mode` may be `enforce` or `warn`; CLI flags override the environment, which overrides this config.
+
+Compatibility environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `WFCTL_PLUGIN_COMPAT_MODE` | Default plugin compatibility mode: `enforce` or `warn` |
+| `WFCTL_ENGINE_VERSION` | Workflow engine version used for conformance evidence and resolver decisions |
+
+Plugin CI should generate evidence with the released artifact, then update the registry index:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: GoCodeAlone/workflow/.github/actions/setup-wfctl@main
+    with:
+      version: v0.51.2
+  - run: wfctl plugin conformance --mode typed-iac --artifact dist/plugin.tar.gz --engine-version v0.51.2 --format json --output evidence.json
+  - run: wfctl plugin-registry compatibility update --registry-dir ../workflow-registry --plugin workflow-plugin-example --version "$PLUGIN_VERSION" --evidence evidence.json --latest-engine v0.51.2
 ```
 
 ---

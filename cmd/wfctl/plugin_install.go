@@ -80,6 +80,9 @@ func runPluginInstall(args []string) error {
 	fromConfig := fs.String("from-config", "", "Install all requires.plugins[] from a workflow config file")
 	sha256Flag := fs.String("sha256", "", "Expected SHA256 hex digest of the downloaded archive (for --url installs)")
 	skipChecksum := fs.Bool("skip-checksum", false, "Skip integrity verification (WARNING: disables supply-chain protection)")
+	compatMode := fs.String("compat-mode", "", "Compatibility mode for registry installs: enforce or warn")
+	engineVersion := fs.String("engine-version", "", "Workflow engine version for compatibility resolution")
+	forceCompat := fs.Bool("force", false, "Permit known-failing compatibility evidence while still enforcing checksums")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl-lock.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -146,9 +149,9 @@ func runPluginInstall(args []string) error {
 	if *registryName != "" {
 		// Filter config to only the requested registry
 		filtered := &RegistryConfig{}
-		for _, r := range cfg.Registries {
-			if r.Name == *registryName {
-				filtered.Registries = append(filtered.Registries, r)
+		for i := range cfg.Registries {
+			if cfg.Registries[i].Name == *registryName {
+				filtered.Registries = append(filtered.Registries, cfg.Registries[i])
 				break
 			}
 		}
@@ -165,7 +168,7 @@ func runPluginInstall(args []string) error {
 	// to the normalized short name "auth". pluginName (normalized) is used only
 	// for the on-disk install directory path.
 	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", rawName)
-	manifest, sourceName, registryErr := mr.FetchManifest(rawName)
+	manifest, index, sourceName, registryErr := mr.FetchManifestAndVersionIndex(rawName)
 
 	if registryErr != nil {
 		// Registry lookup failed. Try GitHub direct install if input looks like owner/repo[@version].
@@ -186,13 +189,34 @@ func runPluginInstall(args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
+	resolvedCompatMode, err := resolvePluginCompatMode(*compatMode, cfg)
+	if err != nil {
+		return err
+	}
+	decision, err := ResolvePluginCompatibility(index, manifest, PluginCompatResolverOptions{
+		RequestedVersion: requestedVersion,
+		EngineVersion:    *engineVersion,
+		CompatMode:       resolvedCompatMode,
+		Force:            *forceCompat,
+		ForceReason:      PluginCompatForceInstall,
+		Trust:            registryTrustMode(cfg, sourceName),
+	})
+	if err != nil {
+		return err
+	}
+	if decision.Warning != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", decision.Warning)
+	}
+	if decision.Forced {
+		fmt.Fprintf(os.Stderr, "warning: forcing compatibility decision (%s)\n", decision.Reason)
+	}
 
 	// Pin the manifest to the requested version when it differs from what the registry has.
 	// The registry manifest may be stale (e.g. v0.1.0) while the user requests v0.2.1.
 	// pinManifestToVersion rewrites download URLs in-place so the right release is fetched.
 	registryVersion := manifest.Version
-	if requestedVersion != "" && requestedVersion != manifest.Version {
-		pinManifestToVersion(manifest, requestedVersion)
+	if decision.Version != "" && decision.Version != manifest.Version {
+		manifest = manifestForCompatibilityVersion(manifest, index, decision.Version)
 	}
 
 	// Resolve and install dependencies before installing the plugin itself.
@@ -387,6 +411,10 @@ func runPluginUpdate(args []string) error {
 	pinVersion := fs.String("version", "", "Pin to this specific version in wfctl.yaml (skips registry lookup)")
 	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
 	lockPath := fs.String("lock-file", wfctlLockPath, "Path to lockfile")
+	compatMode := fs.String("compat-mode", "", "Compatibility mode for registry updates: enforce or warn")
+	engineVersion := fs.String("engine-version", "", "Workflow engine version for compatibility resolution")
+	forceCompat := fs.Bool("force", false, "Permit known-failing compatibility evidence while still enforcing checksums")
+	skipChecksum := fs.Bool("skip-checksum", false, "Skip integrity verification (WARNING: disables supply-chain protection)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin update [options] <name>\n\nUpdate an installed plugin to its latest version.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -434,16 +462,39 @@ func runPluginUpdate(args []string) error {
 	mr := NewMultiRegistry(cfg)
 
 	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", pluginName)
-	manifest, sourceName, registryErr := mr.FetchManifest(pluginName)
+	manifest, index, sourceName, registryErr := mr.FetchManifestAndVersionIndex(pluginName)
 	if registryErr == nil {
 		fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
+		resolvedCompatMode, err := resolvePluginCompatMode(*compatMode, cfg)
+		if err != nil {
+			return err
+		}
+		decision, err := ResolvePluginCompatibility(index, manifest, PluginCompatResolverOptions{
+			EngineVersion: *engineVersion,
+			CompatMode:    resolvedCompatMode,
+			Force:         *forceCompat,
+			ForceReason:   PluginCompatForceUpdate,
+			Trust:         registryTrustMode(cfg, sourceName),
+		})
+		if err != nil {
+			return err
+		}
+		if decision.Warning != "" {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", decision.Warning)
+		}
+		if decision.Forced {
+			fmt.Fprintf(os.Stderr, "warning: forcing compatibility decision (%s)\n", decision.Reason)
+		}
+		if decision.Version != "" && decision.Version != manifest.Version {
+			manifest = manifestForCompatibilityVersion(manifest, index, decision.Version)
+		}
 		installedVer := readInstalledVersion(pluginDir)
 		if installedVer == manifest.Version {
 			fmt.Printf("already at latest version (%s)\n", manifest.Version)
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
-		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, false)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, *skipChecksum)
 	}
 
 	// Registry lookup failed. If the plugin's manifest declares a repository
@@ -464,7 +515,7 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
-		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, false)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, *skipChecksum)
 	}
 
 	return registryErr
@@ -832,6 +883,33 @@ func pinManifestToVersion(manifest *RegistryManifest, requestedVersion string) {
 	}
 }
 
+func manifestForCompatibilityVersion(manifest *RegistryManifest, index *PluginVersionIndex, version string) *RegistryManifest {
+	if manifest == nil {
+		return nil
+	}
+	out := *manifest
+	out.Downloads = append([]PluginDownload(nil), manifest.Downloads...)
+	out.Dependencies = append([]PluginDependency(nil), manifest.Dependencies...)
+	out.Keywords = append([]string(nil), manifest.Keywords...)
+	out.Contracts = append([]pluginContractDescriptor(nil), manifest.Contracts...)
+	if index != nil {
+		for _, rec := range index.Versions {
+			if rec.Version == version {
+				out.Version = version
+				if len(rec.Downloads) > 0 {
+					out.Downloads = append([]PluginDownload(nil), rec.Downloads...)
+				}
+				if rec.MinEngineVersion != "" {
+					out.MinEngineVersion = rec.MinEngineVersion
+				}
+				return &out
+			}
+		}
+	}
+	pinManifestToVersion(&out, version)
+	return &out
+}
+
 func rewriteArchiveFilenameVersion(rawURL, oldVersion, newVersion string) string {
 	if oldVersion == "" || oldVersion == newVersion {
 		return rawURL
@@ -1103,7 +1181,11 @@ func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.
 // It guards against path traversal (zip-slip) attacks.
 func extractTarGz(data []byte, destDir string) error {
-	gzr, err := gzip.NewReader(bytes.NewReader(data))
+	return extractTarGzReader(bytes.NewReader(data), destDir)
+}
+
+func extractTarGzReader(r io.Reader, destDir string) error {
+	gzr, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("open gzip: %w", err)
 	}
