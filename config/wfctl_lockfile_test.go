@@ -21,6 +21,12 @@ func TestWfctlLockfile_RoundTrip(t *testing.T) {
 					"linux-amd64": {
 						URL:    "https://github.com/GoCodeAlone/workflow-plugin-digitalocean/releases/download/v0.7.6/plugin-linux-amd64.tar.gz",
 						SHA256: "archive-sha",
+						Compatibility: &WfctlLockCompatibility{
+							Mode:           "typed-iac",
+							Status:         "pass",
+							EngineVersion:  "v0.51.2",
+							EvidenceDigest: "sha256:abc",
+						},
 					},
 				},
 			},
@@ -55,6 +61,9 @@ func TestWfctlLockfile_RoundTrip(t *testing.T) {
 	}
 	if plat.SHA256 != "archive-sha" {
 		t.Errorf("platform sha256 = %q, want archive-sha", plat.SHA256)
+	}
+	if plat.Compatibility == nil || plat.Compatibility.EvidenceDigest != "sha256:abc" {
+		t.Fatalf("compatibility metadata not round-tripped: %#v", plat.Compatibility)
 	}
 }
 
@@ -91,6 +100,46 @@ func TestWfctlLockfile_SaveOmitsTopLevelSHA256WhenPlatformsExist(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "sha256: archive-sha-linux") {
 		t.Fatalf("lockfile should preserve platform archive sha256:\n%s", data)
+	}
+}
+
+func TestWfctlLockfile_WritesCompatibilityMetadata(t *testing.T) {
+	lf := WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC),
+		Plugins: map[string]WfctlLockPluginEntry{
+			"workflow-plugin-auth": {
+				Version: "v1.2.3",
+				Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				Platforms: map[string]WfctlLockPlatform{
+					"linux-amd64": {
+						URL:    "https://example.test/auth-linux-amd64.tar.gz",
+						SHA256: "archive-sha-linux",
+						Compatibility: &WfctlLockCompatibility{
+							Mode:           "typed-iac",
+							Status:         "fail",
+							EngineVersion:  "v0.51.2",
+							EvidenceDigest: "sha256:def",
+							Forced:         true,
+							Reason:         "compat-mode=warn",
+						},
+					},
+				},
+			},
+		},
+	}
+	path := filepath.Join(t.TempDir(), ".wfctl-lock.yaml")
+	if err := SaveWfctlLockfile(path, &lf); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, want := range []string{"compatibility:", "mode: typed-iac", "status: fail", "forced: true", "reason: compat-mode=warn"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("lockfile missing %q:\n%s", want, data)
+		}
 	}
 }
 
