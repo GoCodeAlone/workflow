@@ -114,6 +114,36 @@ Allowed typed-IaC calls in the first command:
 
 Any live provider/API exercise belongs in a future `acceptance` mode or command with explicit credentials and cost-bearing opt-in.
 
+### Conformance Staging And Timeout
+
+The conformance command should use a conformance-specific launcher instead of changing production `ExternalPluginManager` first.
+
+Staging contract:
+
+1. Read `<plugin-dir>/plugin.json`.
+2. Resolve plugin install name from `plugin.json.name`, normalized the same way `wfctl plugin install` normalizes names.
+3. Create a temp installed layout:
+
+   ```text
+   <tmp>/plugins/<install-name>/plugin.json
+   <tmp>/plugins/<install-name>/<install-name>
+   ```
+
+4. If `<plugin-dir>/<install-name>` exists and is executable, copy it into the staged binary path.
+5. Otherwise run `go build -o <tmp>/plugins/<install-name>/<install-name> .` with working directory `<plugin-dir>`.
+6. Copy `plugin.contracts.json` and other metadata files only when a conformance mode needs them. Do not copy provider credentials or local `.env` files.
+7. Compute SHA-256 over the staged binary and plugin manifest. These become `artifactSHA256` and `pluginManifestSHA256` for local evidence output.
+8. Launch the staged binary with working directory `<tmp>/plugins/<install-name>`.
+9. Capture stderr/stdout into bounded ring buffers and include only tails in failure output.
+10. Remove the temp directory after unload unless `--keep-temp` is added in a later debugging task.
+
+Timeout contract:
+
+- The launcher owns process creation and uses `context.WithTimeout`.
+- On timeout, kill the process group, wait for exit, report timeout as failure, and include stderr/stdout tails.
+- The first implementation should not rely on `ExternalPluginManager.LoadPlugin` for timeout enforcement because it has no context-aware handshake path today.
+- A later refactor may share launcher internals with `ExternalPluginManager` after the conformance path proves the semantics.
+
 ### Version Index And Evidence
 
 Add generated compatibility evidence as a registry-native version index, with a short current-manifest summary.
@@ -163,7 +193,7 @@ Manifest summary:
 
 ```json
 {
-  "minEngineVersion": "0.51.2",
+  "minEngineVersion": "v0.51.2",
   "compatibility": {
     "index": "compatibility/workflow-plugin-digitalocean/index.json",
     "latestKnownGoodEngine": "v0.51.2",
@@ -189,6 +219,51 @@ Failure precedence:
 3. Missing exact evidence falls back to `minEngineVersion` with a warning.
 4. Evidence for a different OS/arch, mode, artifact digest, or engine version does not match.
 
+Version grammar:
+
+- Inputs may include or omit a leading `v`.
+- Internal comparison canonicalizes by stripping leading `v` and parsing semver.
+- JSON output and indexes emit leading `v` for engine and plugin versions.
+- Schema validation should reject non-semver strings after optional `v` stripping.
+
+### Registry Trust
+
+Add explicit trust metadata to registry config:
+
+```yaml
+registries:
+  - name: default
+    type: github
+    owner: GoCodeAlone
+    repo: workflow-registry
+    branch: main
+    priority: 0
+    compatibilityEvidence:
+      trust: first_party
+  - name: internal
+    type: static
+    url: https://example.com/workflow-registry
+    priority: 10
+    compatibilityEvidence:
+      trust: signed
+      keys:
+        - "SHA256:..."
+  - name: community
+    type: static
+    url: https://example.net/workflow-registry
+    priority: 20
+    compatibilityEvidence:
+      trust: advisory
+```
+
+Default rules:
+
+- Built-in `GoCodeAlone/workflow-registry` on `main` is `first_party`.
+- Static mirror `https://gocodealone.github.io/workflow-registry/v1` is `first_party` only when it is the built-in default entry.
+- User-configured registries default to `advisory`.
+- `signed` evidence requires a matching configured key before it can enforce install decisions.
+- `advisory` evidence can produce warnings and ranking notes, but cannot block or allow an install beyond `minEngineVersion`.
+
 ### Registry API
 
 Add a registry source API for version indexes in the first implementation:
@@ -205,9 +280,11 @@ type RegistrySource interface {
 
 Existing sources may synthesize a single-version index from `FetchManifest` so older/static registries keep working. GitHub/static registry sources can then add native `compatibility/<plugin>/index.json` lookup without breaking callers.
 
-### Install Resolution
+`MultiRegistry` must resolve manifests and indexes from the same source. It should try original name then normalized name using the same source-priority order as `FetchManifest`. Once a source resolves a plugin, its version index must come from that same source unless the manifest explicitly points to a cross-source index and that target is trusted.
 
-Default install behavior:
+### Install, Update, And Lock Resolution
+
+Shared resolver behavior:
 
 1. Resolve candidate plugin versions from the registry version index.
 2. Filter out versions with `minEngineVersion` greater than the current engine.
@@ -220,6 +297,27 @@ Default install behavior:
 6. `--force` allows explicit incompatible install and records that choice in the lockfile.
 
 This keeps `minEngineVersion` as a lower-bound hint while allowing real conformance results to override stale optimism.
+
+`wfctl plugin install <name>`:
+
+- Uses the shared resolver with no requested version.
+- Installs the newest highest-ranked candidate.
+- If the user passes `<name>@<version>`, the resolver evaluates only that version and fails by default on exact trusted fail evidence.
+- `--force` bypasses compatibility blocking but still verifies checksums unless `--skip-checksum` is separately supplied.
+
+`wfctl plugin update <name>`:
+
+- Uses the shared resolver with installed version as lower bound.
+- Does not update to a newer version with exact trusted fail evidence unless `--force`.
+- If the installed version later becomes known-fail, `update` reports it and suggests either an available compatible version or `--force`.
+
+`wfctl plugin lock`:
+
+- Reads `wfctl.yaml` requested plugins.
+- For entries with an explicit version, evaluates that exact version and records compatibility metadata.
+- For entries without an explicit version, selects the newest highest-ranked compatible candidate and writes that version into `.wfctl-lock.yaml`.
+- Preserves existing compatibility metadata when the selected plugin version, platform digest, engine version, and evidence digest are unchanged.
+- If a previously locked version becomes known-fail, lock regeneration fails by default and can be run with warn mode to keep the lock while recording `status: fail`.
 
 Lockfile additive fields:
 
@@ -239,6 +337,15 @@ plugins:
 
 Older clients should ignore the additive `compatibility` mapping. New clients should preserve unknown lockfile fields when rewriting if practical; if not practical in the first pass, the plan must include a regression test that documents current behavior and a follow-up issue.
 
+Enforcement controls:
+
+1. CLI flag on install/update/lock: `--compat-mode enforce|warn`.
+2. Environment fallback: `WFCTL_PLUGIN_COMPAT_MODE=enforce|warn`.
+3. Registry/project config fallback: `plugin.compatibilityEnforcement: enforce|warn`.
+4. Default: `enforce`.
+
+Precedence is CLI > env > config > default. In `warn` mode, trusted fail evidence never blocks install/update/lock, but the command must print the warning and record `compatibility.status: fail` with `forced: true` and `reason: compat-mode=warn`.
+
 ## Failure Handling
 
 - Missing plugin binary: fail with packaging guidance.
@@ -249,6 +356,7 @@ Older clients should ignore the additive `compatibility` mapping. New clients sh
 - Fork PR without `RELEASES_TOKEN`: CI may fall back to public release lookup; private-release checks should skip or fail with a token-specific message.
 - Conformance timeout: kill the plugin subprocess, unload it, and report timeout as failure.
 - Mismatched evidence digest: ignore the evidence and warn; never use digest-mismatched evidence to allow or block.
+- Registry/index source mismatch: ignore the index unless the manifest's cross-source pointer is trusted.
 
 ## Security
 
@@ -267,12 +375,18 @@ Unit tests:
 - Registry source single-manifest fallback to synthetic version index.
 - Install resolver behavior for compatible, incompatible, missing-evidence, and forced installs.
 - Lockfile compatibility metadata write/read and old-client additive-field tolerance where supported.
+- Update resolver behavior for newer compatible, newer known-fail, and installed known-fail versions.
+- `--compat-mode`, `WFCTL_PLUGIN_COMPAT_MODE`, and config precedence.
+- Same-source manifest/index resolution in `MultiRegistry`.
+- Version canonicalization for `v0.51.2` and `0.51.2`.
 
 Integration tests:
 - Fake typed-IaC plugin passing `typed-iac`.
 - Fake plugin that lacks `GetManifest` still passes when strict typed service evidence is sufficient.
 - Fake version index with two plugin versions where the latest is incompatible and the older version is selected.
 - Fake digest mismatch where evidence is ignored.
+- Fake conformance plugin that hangs during handshake and is killed on timeout.
+- Fake local plugin directory staged into installed layout with expected binary name.
 
 Runtime validation:
 - Build local `wfctl`.
@@ -285,7 +399,7 @@ Runtime-affecting rollback path:
 
 1. Revert the `wfctl plugin conformance` command and resolver commits.
 2. Leave plugin-local conformance scripts in place until the central command is proven.
-3. If install resolution blocks legitimate users, set `WFCTL_PLUGIN_COMPAT_MODE=warn` to make trusted fail evidence warn instead of block while keeping `minEngineVersion` enforcement. Default remains `enforce`.
+3. If install/update/lock resolution blocks legitimate users, set `WFCTL_PLUGIN_COMPAT_MODE=warn` or `plugin.compatibilityEnforcement: warn` to make trusted fail evidence warn instead of block while keeping `minEngineVersion` enforcement. Default remains `enforce`.
 4. Registry compatibility fields are additive and can remain ignored by older `wfctl` versions.
 5. If lockfile compatibility metadata causes trouble, old clients can ignore the additive mapping; new clients can remove only the `compatibility` mapping and rerun `wfctl plugin lock`.
 
@@ -297,6 +411,7 @@ Runtime-affecting rollback path:
 - Plugin manifests can grow additive optional fields without breaking older `wfctl` versions.
 - The first compatibility consumers are Go external IaC plugins; UI-only and non-IaC plugin compatibility can be modeled later.
 - First-party registry evidence can be treated as trusted when served from GoCodeAlone-controlled registries; community evidence needs signatures before it can enforce install decisions.
+- The first conformance launcher can duplicate a small amount of production plugin launch behavior to obtain timeout and staging semantics without destabilizing runtime plugin loading.
 
 ## Self-Challenge
 
