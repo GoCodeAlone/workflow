@@ -31,7 +31,7 @@
 |------|-------|-------|--------|
 | 1 | Add wfctl plugin conformance compatibility | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6, Task 7 | codex/plugin-conformance-compat |
 
-**Status:** Draft
+**Status:** Locked 2026-05-11T04:43:54Z
 
 ## Task 1: Evidence Model And Semver Utilities
 
