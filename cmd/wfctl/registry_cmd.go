@@ -30,18 +30,21 @@ func runRegistryPluginCatalog(args []string) error {
 		return runRegistryAdd(args[1:])
 	case "remove":
 		return runRegistryRemove(args[1:])
+	case "compatibility":
+		return runRegistryCompatibility(args[1:])
 	default:
 		return registryUsage()
 	}
 }
 
 func registryUsage() error {
-	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl registry <subcommand> [options]
+	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl plugin-registry <subcommand> [options]
 
 Subcommands:
-  list     Show configured plugin registries
-  add      Add a plugin registry source
-  remove   Remove a plugin registry source
+  list           Show configured plugin registries
+  add            Add a plugin registry source
+  remove         Remove a plugin registry source
+  compatibility  Manage generated plugin compatibility indexes
 `)
 	return fmt.Errorf("registry subcommand is required")
 }

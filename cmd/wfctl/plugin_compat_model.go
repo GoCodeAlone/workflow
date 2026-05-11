@@ -63,6 +63,8 @@ type CompatibilityEvidencePolicy struct {
 	FirstParty         string `json:"firstParty,omitempty"`
 	Community          string `json:"community,omitempty"`
 	RequiredFromEngine string `json:"requiredFromEngine,omitempty"`
+	LatestEngine       string `json:"latestEngine,omitempty"`
+	Stale              bool   `json:"stale,omitempty"`
 }
 
 type PluginVersionIndex struct {
