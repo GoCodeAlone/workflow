@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 )
 
@@ -190,6 +191,20 @@ func canonicalStrictSemver(version, label string) (string, error) {
 	return version, nil
 }
 
+func CanonicalEvidenceEngineVersion(version string) (string, error) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return "", fmt.Errorf("engine version is required")
+	}
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+	if (!strictSemverRe.MatchString(version) && !module.IsPseudoVersion(version)) || !semver.IsValid(version) {
+		return "", fmt.Errorf("engine version %q must be semver MAJOR.MINOR.PATCH or a Go pseudo-version, with optional leading v", strings.TrimPrefix(version, "v"))
+	}
+	return version, nil
+}
+
 func NormalizeSHA256Hex(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if len(value) != sha256.Size*2 {
@@ -210,12 +225,12 @@ func ValidateCompatibilityEvidence(ev PluginCompatibilityEvidence) (PluginCompat
 	if ev.Version, err = CanonicalPluginVersion(ev.Version); err != nil {
 		return ev, err
 	}
-	if ev.EngineVersion, err = CanonicalEngineVersion(ev.EngineVersion); err != nil {
+	if ev.EngineVersion, err = CanonicalEvidenceEngineVersion(ev.EngineVersion); err != nil {
 		return ev, err
 	}
 	if ev.WfctlVersion != "" {
 		ev.WfctlVersion = strings.TrimSpace(ev.WfctlVersion)
-		if canonical, err := CanonicalEngineVersion(ev.WfctlVersion); err == nil {
+		if canonical, err := CanonicalEvidenceEngineVersion(ev.WfctlVersion); err == nil {
 			ev.WfctlVersion = canonical
 		}
 	}
