@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-12
 **Author:** Claude (autonomous, per user mandate)
-**Status:** Revised after R1 adversarial review (2 Critical + 3 Important + 2 Minor addressed) — primary Bug 1 fix moved to engine-side, SDK helper made forward-looking
+**Status:** Approved after R1 + R2 adversarial reviews (R2 PASS); all findings absorbed
 **Driver:** BMW v0.51.2 smoke gate caught 3 upstream bugs blocking deploy. This design addresses bugs 1 + 2 (engine + SDK). Bug 3 (payments TypedModuleProvider without ContractProvider) ships as a separate plugin-side fix.
 
 ## Goal
@@ -72,13 +72,17 @@ In `EngineManifest()` (currently `plugin/external/adapter.go:274`), when `a.mani
 func manifestFromDisk(m *plugin.PluginManifest) *pb.Manifest {
     if m == nil { return nil }
     return &pb.Manifest{
-        Name:        m.Name,
-        Version:     m.Version,
-        Author:      m.Author,
-        Description: m.Description,
+        Name:           m.Name,
+        Version:        m.Version,
+        Author:         m.Author,
+        Description:    m.Description,
+        ConfigMutable:  m.ConfigMutable,
+        SampleCategory: m.SampleCategory,
     }
 }
 ```
+
+(All 6 `pb.Manifest` scalar fields mapped — per R2 Minor finding, ensures `ConfigMutable` and `SampleCategory` aren't zeroed when the disk fallback populates `a.manifest`.)
 
 Use this in both `NewExternalPluginAdapter` (when `client.GetManifest` returns Unimplemented or empty-version) AND in `EngineManifest()` (as a post-hoc fallback for older plugins that bypassed the constructor path).
 
@@ -185,46 +189,7 @@ func stripInternalKeys(cfg map[string]any) map[string]any {
 }
 ```
 
-**Clarification per R1 Important:** the strip produces a **fresh `cleaned` copy** — the engine's original `modCfg.Config` map is NOT mutated and retains `_config_dir` for the legacy `*structpb.Struct` path (which is what legacy modules consume). The strip is copy-on-clean, not in-place sanitization.
-
-### Change 2 — Engine strips internal keys before STRICT_PROTO encoding
-
-In `plugin/external/adapter.go`, modify `createTypedConfigRequest` (line ~221) to strip `_`-prefix keys from `cfg` before calling `mapToTypedAny`:
-
-```go
-func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]any, resolver protoregistry.MessageTypeResolver) (*structpb.Struct, *anypb.Any, error) {
-    // ... existing code building legacy *structpb.Struct from cfg (unchanged) ...
-
-    // Strip engine-internal keys (prefix "_") from STRICT_PROTO module configs.
-    // Internal keys like "_config_dir" are injected by the engine for legacy
-    // modules; STRICT_PROTO modules declare their schema explicitly and don't
-    // accept engine internals. If a STRICT_PROTO module needs filesystem
-    // context (e.g., relative path resolution), it must declare a field for
-    // it in its proto schema.
-    cleaned := stripInternalKeys(cfg)
-    typed, err := mapToTypedAny(descriptor.ConfigMessage, cleaned, resolver)
-    if err != nil {
-        return nil, nil, err
-    }
-    return legacyStruct, typed, nil
-}
-
-func stripInternalKeys(cfg map[string]any) map[string]any {
-    if cfg == nil {
-        return nil
-    }
-    cleaned := make(map[string]any, len(cfg))
-    for k, v := range cfg {
-        if strings.HasPrefix(k, "_") {
-            continue
-        }
-        cleaned[k] = v
-    }
-    return cleaned
-}
-```
-
-The legacy `*structpb.Struct` path remains unchanged (legacy modules still read `_config_dir`).
+**Clarification per R1 Important:** the strip produces a **fresh `cleaned` copy** — the engine's original `modCfg.Config` map is NOT mutated and retains `_config_dir` for the legacy `*structpb.Struct` path (which is what legacy modules consume). The strip is copy-on-clean, not in-place sanitization. The legacy `*structpb.Struct` path remains unchanged (legacy modules still read `_config_dir`).
 
 ## Components
 
@@ -293,6 +258,7 @@ plugin gRPC server.CreateModule receives TypedConfig → unpacks ProviderConfig{
 5. **A5 — Workflow v0.51.3 ships these fixes.** No bundling with other workflow changes; minimal-scope point release. Branch off `origin/main`.
 6. **A6 — Engine's `_config_dir` injection (engine.go:499) continues unchanged.** Legacy modules still receive it; STRICT_PROTO modules see it stripped.
 7. **A7 — `pb.Manifest` proto schema unchanged.** Helper parses existing fields; no proto change needed.
+8. **A8 — Disk manifest fallback presupposes disk manifest passed `Validate()` at `manager.go:112` before adapter construction** (per R2 finding). The engine fallback is safe because the disk manifest has already been validated before the adapter receives it. If `manager.go` order-of-operations ever changes to skip early-validate, the fallback could propagate a partial disk manifest that fails `Validate()` at registration time.
 
 ## Rollback
 
