@@ -12,23 +12,6 @@
 
 ---
 
-## R1 absorption notes (2026-05-12)
-
-R1 adversarial review FAIL → revised:
-
-- **F1 Critical:** missed caller `cmd/wfctl/plugin_conformance.go:327`. **Fix:** Task 1 Files list updated; pass `nil` (conformance probe doesn't load plugin.json from disk — tests plugin's own gRPC manifest, which is the intent of the verifier).
-- **F2 Important:** Task 2's defensive `EngineManifest` overlay was redundant with Task 1's constructor overlay AND used inconsistent per-field merge precedence. **Fix:** Task 2 retained as **regression test only** (no code; asserts Task 1's overlay covers the empty-Version-but-no-error case). Single precedence rule: Task 1's constructor overlay replaces `a.manifest` wholesale when gRPC returns empty Version. Documented in adapter.go comment.
-- **F3 Important:** Task 7 grep pattern had false positives + scope gap. **Fix:** Task 7 grep tightened to proto3 field-declaration shape only; audit scope expanded to include workflow's own `plugin/external/proto/`.
-- **F4 Important:** `plugin.PluginManifest.Validate()` requires Name+Version+Author+Description (verified at `plugin/manifest.go:183-201`). **Fix:** `EmbedManifest` docstring documents all 4 required fields; Task 4 happy-path test includes all 4; Task 4 added explicit test for missing Author + missing Description.
-- **F5 Important:** Task 3 step-level STRICT_PROTO coverage. **Fix:** Task 3 Step 6 expanded with explicit step-level descriptor test path.
-- **F6 Important:** `MustEmbedManifest` panic semantics undocumented for rollback story. **Fix:** docstring expanded; ADR-0031 Consequences section notes plugin authors should use `EmbedManifest` with explicit error handling for production paths.
-- **F7 Minor (over-decomposition):** acknowledged; tasks 1, 5, 6 each touch 3-4 files. Splitting further fragments the change set and increases reviewer context-switching. Kept as single tasks; each implementer can subdivide commits at their discretion.
-- **F8 Minor (test package):** Task 6 tests use `package sdk` (internal access) — explicit in Files list.
-- **F9 Minor (name mismatch):** added pre-flight check in Task 1; for all 6 wave plugins, `plugin.json:name` matches install directory name (verified per workspace audit; wave plugins use directory names equal to plugin.json:name).
-- **F10 Minor (gRPC-wins precedence test):** added to Task 1 as third unit test.
-- **F11 Minor (manager Validate ordering invariant):** noted in adapter.go comment + ADR.
-- **F12 Minor (wfctl plugin install load-bearing):** noted in ADR-0031 Consequences.
-
 ## Scope Manifest
 
 **PR Count:** 1
@@ -105,6 +88,29 @@ func TestNewExternalPluginAdapterDiskManifestNilStillWorks(t *testing.T) {
     }
     if got := a.Version(); got != "" {
         t.Fatalf("Version() = %q, want empty (no disk, no gRPC)", got)
+    }
+}
+
+// R2-1 — empty-Version-but-no-error overlay path.
+// Exercises the `else if manifest != nil && manifest.Version == ""` branch:
+// gRPC returns a valid pb.Manifest with empty Version (defensive case, e.g.
+// a misconfigured plugin), disk-manifest overlay must populate.
+func TestNewExternalPluginAdapterDiskOverlayWhenGRPCReturnsEmptyVersion(t *testing.T) {
+    disk := &plugin.PluginManifest{
+        Name: "x", Version: "1.0.11", Author: "GoCodeAlone", Description: "DO IaC",
+    }
+    a, err := NewExternalPluginAdapter("x", &PluginClient{client: &adapterTestPluginServiceClient{
+        manifestResp: &pb.Manifest{Name: "x", Version: ""},
+    }}, disk)
+    if err != nil {
+        t.Fatalf("NewExternalPluginAdapter: %v", err)
+    }
+    if got := a.Version(); got != "1.0.11" {
+        t.Fatalf("Version() = %q, want 1.0.11 (disk overlay when gRPC Version empty)", got)
+    }
+    em := a.EngineManifest()
+    if em.Author != "GoCodeAlone" {
+        t.Fatalf("EngineManifest().Author = %q, want GoCodeAlone (disk overlay)", em.Author)
     }
 }
 
@@ -662,6 +668,21 @@ func TestEmbedManifestRejectsMissingDescription(t *testing.T) {
     }
 }
 
+// R2-2 — Validate also enforces semver shape on Version and regex shape on Name.
+func TestEmbedManifestRejectsInvalidSemver(t *testing.T) {
+    _, err := EmbedManifest([]byte(`{"name": "x", "version": "abc", "author": "a", "description": "d"}`))
+    if err == nil {
+        t.Fatalf("EmbedManifest with non-semver version: want error, got nil")
+    }
+}
+
+func TestEmbedManifestRejectsInvalidNameShape(t *testing.T) {
+    _, err := EmbedManifest([]byte(`{"name": "BadName", "version": "1.0.0", "author": "a", "description": "d"}`))
+    if err == nil {
+        t.Fatalf("EmbedManifest with uppercase name: want error, got nil")
+    }
+}
+
 func TestMustEmbedManifestPanicsOnError(t *testing.T) {
     defer func() {
         if r := recover(); r == nil {
@@ -955,13 +976,28 @@ Rollback: `git revert <commit>` — `Serve`/`ServePluginFull` revert to non-vari
 **Change class:** Plugin / extension (SDK). Verification: unit tests + e2e in Task 8.
 
 **Files:**
-- Modify: `plugin/external/sdk/iacserver.go` (add `ManifestProvider` field to `IaCServeOptions`; modify `iacPluginServiceBridge` to consume it; add `GetManifest` override)
-- Modify: `plugin/external/sdk/iacserver.go` (`RegisterAllIaCProviderServices` signature unchanged but bridge construction must thread provider; refactor: bridge construction needs the provider)
-- Test: `plugin/external/sdk/iacserver_test.go` or new (`TestIaCBridgeGetManifestUsesProvider`)
+- Modify: `plugin/external/sdk/iacserver.go` (add `ManifestProvider` field to `IaCServeOptions`; add `diskManifest` field to `iacPluginServiceBridge`; add `GetManifest` override; refactor extraction)
+- **Add: `plugin/external/sdk/iacserver_internal_test.go`** (new file — **`package sdk`** internal-test package, NOT `sdk_test`, so tests can construct unexported `iacPluginServiceBridge` directly). This is per R2-4 absorption — existing `iacserver_test.go` is `package sdk_test` and cannot access unexported fields.
 
 **Step 1: Write failing test**
 
+In `plugin/external/sdk/iacserver_internal_test.go` (NEW FILE, `package sdk`):
+
 ```go
+package sdk
+
+import (
+    "context"
+    "testing"
+
+    pluginpkg "github.com/GoCodeAlone/workflow/plugin"
+    pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/codes"
+    "google.golang.org/grpc/status"
+    "google.golang.org/protobuf/types/known/emptypb"
+)
+
 func TestIaCBridgeGetManifestUsesProvider(t *testing.T) {
     disk := &pluginpkg.PluginManifest{Name: "do", Version: "1.0.12", Description: "DO IaC"}
     bridge := &iacPluginServiceBridge{
@@ -1051,6 +1087,8 @@ The bridge is constructed inside `RegisterAllIaCProviderServices` at line 113. T
 
 **Path A (preferred — minimal API change):** Add internal helper `registerAllIaCProviderServicesWithOpts` that takes the options. `RegisterAllIaCProviderServices` keeps its current 2-arg signature for backward compat with anyone calling it directly; internal IaC plugin path uses the new helper.
 
+**R2-3 absorption:** the extraction MUST preserve all current nil + typed-nil hardening (currently at lines 54-66 of `iacserver.go`). Extract the ENTIRE body of `RegisterAllIaCProviderServices` (lines 54-114 inclusive — both nil checks AND the service-registration block) into `registerIaCServicesOnly` EXCEPT the bridge-registration block at lines 112-114 (which moves to `registerAllIaCProviderServicesWithOpts`). The public 2-arg form becomes a 1-line delegate.
+
 In `iacserver.go`:
 
 ```go
@@ -1061,6 +1099,8 @@ func registerAllIaCProviderServicesWithOpts(s *grpc.Server, provider any, opts I
     if err := registerIaCServicesOnly(s, provider); err != nil {
         return err
     }
+    // Bridge registration with optional ManifestProvider (was lines 112-114 of
+    // the original RegisterAllIaCProviderServices).
     if _, alreadyRegistered := s.GetServiceInfo()[pb.PluginService_ServiceDesc.ServiceName]; !alreadyRegistered {
         pb.RegisterPluginServiceServer(s, &iacPluginServiceBridge{
             grpcSrv:      s,
@@ -1070,12 +1110,58 @@ func registerAllIaCProviderServicesWithOpts(s *grpc.Server, provider any, opts I
     return nil
 }
 
+// registerIaCServicesOnly extracts the entire body of the original
+// RegisterAllIaCProviderServices (nil checks + typed-nil hardening +
+// IaCProviderRequired assertion + all optional-service auto-registration +
+// ResourceDriver auto-registration), EXCLUDING the PluginService bridge
+// registration. Keeps the typed-nil hardening (R2-3 — would silently drop
+// the panic-vs-graceful-error distinction if only the registration block
+// were extracted).
 func registerIaCServicesOnly(s *grpc.Server, provider any) error {
-    // ... extracted body of current RegisterAllIaCProviderServices minus the
-    // bridge-registration step. (Move lines 67-99 here verbatim.)
+    if s == nil {
+        return fmt.Errorf("RegisterAllIaCProviderServices: grpc server is nil")
+    }
+    if provider == nil {
+        return fmt.Errorf("RegisterAllIaCProviderServices: provider is nil")
+    }
+    if rv := reflect.ValueOf(provider); rv.Kind() == reflect.Pointer && rv.IsNil() {
+        return fmt.Errorf("RegisterAllIaCProviderServices: provider is a typed-nil %T pointer", provider)
+    }
+    required, ok := provider.(pb.IaCProviderRequiredServer)
+    if !ok {
+        return fmt.Errorf(
+            "RegisterAllIaCProviderServices: provider %T does not satisfy "+
+                "pb.IaCProviderRequiredServer (missing methods); see "+
+                "docs/plans/2026-05-10-strict-contracts-force-cutover-design.md",
+            provider,
+        )
+    }
+    pb.RegisterIaCProviderRequiredServer(s, required)
+    if v, ok := provider.(pb.IaCProviderEnumeratorServer); ok {
+        pb.RegisterIaCProviderEnumeratorServer(s, v)
+    }
+    if v, ok := provider.(pb.IaCProviderDriftDetectorServer); ok {
+        pb.RegisterIaCProviderDriftDetectorServer(s, v)
+    }
+    if v, ok := provider.(pb.IaCProviderCredentialRevokerServer); ok {
+        pb.RegisterIaCProviderCredentialRevokerServer(s, v)
+    }
+    if v, ok := provider.(pb.IaCProviderMigrationRepairerServer); ok {
+        pb.RegisterIaCProviderMigrationRepairerServer(s, v)
+    }
+    if v, ok := provider.(pb.IaCProviderValidatorServer); ok {
+        pb.RegisterIaCProviderValidatorServer(s, v)
+    }
+    if v, ok := provider.(pb.IaCProviderDriftConfigDetectorServer); ok {
+        pb.RegisterIaCProviderDriftConfigDetectorServer(s, v)
+    }
+    if v, ok := provider.(pb.ResourceDriverServer); ok {
+        pb.RegisterResourceDriverServer(s, v)
+    }
+    return nil
 }
 
-// RegisterAllIaCProviderServices: public 2-arg form unchanged.
+// RegisterAllIaCProviderServices: public 2-arg form unchanged. 1-line delegate.
 func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
     return registerAllIaCProviderServicesWithOpts(s, provider, IaCServeOptions{})
 }
@@ -1292,4 +1378,49 @@ Rollback (post-release): ship v0.51.4 with `git revert` of v0.51.3 commits. BMW 
 | 7 | Documentation / audit | `cat docs/audit/2026-05-12-underscore-prefix-audit.md` | verdict line says PASS |
 | 8 | Plugin / extension (e2e) | `go test ./... && go test -race ./... && golangci-lint run` | all clean |
 
-Full PR-level verification before merge: `go test ./... -race && golangci-lint run && go build ./...`. Plus: runtime-launch-validation by building `cmd/server` + smoke-loading the DO plugin (already shipped at v1.0.11) — must register cleanly via disk fallback without re-releasing DO.
+Full PR-level verification before merge: `go test ./... -race && golangci-lint run && go build ./...`.
+
+### Runtime-launch-validation (R2-6 absorption — numbered Task 8 step)
+
+Task 8 final step — explicit numbered runtime-launch-validation per `superpowers:runtime-launch-validation`:
+
+**Step N: Smoke-load DO v1.0.11 against the rebuilt `cmd/server`**
+
+```bash
+go build -o /tmp/wf-server ./cmd/server
+# Stage a DO plugin install dir (binary + plugin.json) — use the artifact
+# the wave already produces or copy from a locally-cached install path.
+mkdir -p /tmp/wf-plugins-test/digitalocean
+cp <path-to-do-v1.0.11-binary> /tmp/wf-plugins-test/digitalocean/digitalocean
+cp <path-to-do-v1.0.11-plugin.json> /tmp/wf-plugins-test/digitalocean/plugin.json
+/tmp/wf-server -config example/iac-do-basic-config.yaml -plugins-dir /tmp/wf-plugins-test 2>&1 | tee /tmp/smoke.log &
+sleep 5
+grep -E "plugin .*loaded successfully" /tmp/smoke.log
+```
+
+Expected output: log line `plugin "digitalocean" loaded successfully` AND no `validate manifest` errors AND no `proto: unknown field "_config_dir"` errors. Capture transcript at `docs/audit/2026-05-12-v0.51.3-smoke-transcript.txt`.
+
+Rollback: kill `/tmp/wf-server` process. Transcript is artifact-only; no state changes.
+
+---
+
+## Appendix A — R1/R2 adversarial review absorption notes
+
+### R1 (FAIL → Critical F1 + 5 Important + 6 Minor)
+
+- **F1 Critical:** missed caller `cmd/wfctl/plugin_conformance.go:327`. **Fix:** Task 1 Files list + Step 4 + Step 8 commit pass `nil` (conformance probe deliberately isolates plugin's own gRPC manifest).
+- **F2 Important:** Task 2 overlay redundancy + precedence ambiguity. **Fix:** Task 2 reduced to regression test only; constructor overlay is single source of truth; comment added to adapter.go.
+- **F3 Important:** Task 7 grep false positives + scope gap. **Fix:** tightened proto3 field-declaration regex; workflow's own `plugin/external/proto/` added to scope.
+- **F4 Important:** `plugin.PluginManifest.Validate()` requires Name+Version+Author+Description. **Fix:** docstring documents all 4; Task 4 tests cover all 4 missing-field cases.
+- **F5 Important:** step-level STRICT_PROTO coverage. **Fix:** Task 3 Step 6 has module + step + legacy tests.
+- **F6 Important:** `MustEmbedManifest` panic semantics. **Fix:** docstring WARNING + migration guidance; ADR Consequences note.
+- **F7-F12 Minor:** acknowledged; over-decomposition deferred to implementer commit subdivision; F9 verified across wave plugins.
+
+### R2 (FAIL → 0 Critical + 1 Important + 5 Minor)
+
+- **R2-1 Important:** empty-Version-but-no-error overlay branch had zero test coverage. **Fix:** added `TestNewExternalPluginAdapterDiskOverlayWhenGRPCReturnsEmptyVersion` to Task 1.
+- **R2-2 Minor:** Validate semver + name regex untested. **Fix:** added `TestEmbedManifestRejectsInvalidSemver` + `TestEmbedManifestRejectsInvalidNameShape`.
+- **R2-3 Minor:** Task 6 extraction ambiguity. **Fix:** clarified extract lines 54-99 inclusive (preserving nil + typed-nil hardening); full extracted body inlined in plan.
+- **R2-4 Minor:** Task 6 test package ambiguous. **Fix:** explicit new file `plugin/external/sdk/iacserver_internal_test.go` with `package sdk` declaration.
+- **R2-5 Minor (format):** R1-absorption-notes block violated Scope-Manifest-immediately-after-header rule. **Fix:** moved to Appendix A.
+- **R2-6 Minor:** runtime-launch-validation not numbered task step. **Fix:** added explicit numbered Task 8 final step.
