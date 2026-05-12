@@ -17,19 +17,25 @@ Per workspace mandate `feedback_force_strict_contracts_no_compat`: strict-cutove
 
 ## Decision
 
-Two surgical changes shipped in workflow v0.51.3 (minimal-scope point release):
+Three surgical changes shipped in workflow v0.51.3 (minimal-scope point release; revised after R1 adversarial review):
 
-1. **SDK manifest-embedding helper.** Add `sdk.ManifestProvider` interface + `sdk.EmbedManifest([]byte) ManifestProvider` + `sdk.MustEmbedManifest([]byte) ManifestProvider`. Helpers parse `plugin.json` byte slice (typically via `//go:embed`). All `Serve*` helpers (`Serve`, `ServePluginFull`, `ServeIaCPlugin`) accept a `ManifestProvider` option; gRPC `GetManifest` handler returns the provider's manifest when set. Existing tolerance (workflow PR #627) remains as safety net for plugins not yet adopting the helper.
+1. **Engine-side disk-manifest fallback (PRIMARY Bug 1 fix).** `manager.go:108` already loads `*plugin.PluginManifest` via `pluginpkg.LoadManifest` + `Validate` before subprocess launch. Thread that manifest into `NewExternalPluginAdapter` as a fallback. When gRPC `GetManifest` returns empty `Version`, `EngineManifest()` returns disk-manifest fields (field-mapped via `manifestFromDisk(*plugin.PluginManifest) *pb.Manifest`). **Zero plugin-side change required to unblock plugin registration.**
 
-2. **Engine strips internal keys before STRICT_PROTO encoding.** `createTypedConfigRequest` (in `plugin/external/adapter.go`) filters `_`-prefix keys from `cfg` before `mapToTypedAny`. Legacy `*structpb.Struct` config path is unchanged. Establishes `_`-prefix as the reserved namespace for engine internals; STRICT_PROTO module proto schemas must not declare `_`-prefix fields. STRICT_PROTO modules that need filesystem context must declare it explicitly in their proto schema.
+2. **SDK manifest-embedding helper (FORWARD-LOOKING Bug 1 fix).** `sdk.EmbedManifest([]byte) (*plugin.PluginManifest, error)` + `sdk.MustEmbedManifest`. **Parses via canonical `*plugin.PluginManifest`** (camelCase JSON tags matching `plugin.json` authoring convention), NOT directly into `*pb.Manifest` (which has snake_case proto JSON tags — would silently drop `configMutable` etc.). Wired into:
+   - `sdk.Serve` + `sdk.ServePluginFull`: via `grpcServer.GetManifest` handler.
+   - `sdk.ServeIaCPlugin`: via `IaCServeOptions.ManifestProvider` field; `iacPluginServiceBridge.GetManifest` override returns mapped manifest (the bridge embeds `pb.UnimplementedPluginServiceServer`, so this MUST be on the bridge, NOT on `grpcServer`).
+   No new `ManifestProvider` interface — concrete `*plugin.PluginManifest` is the type. Existing tolerance (workflow PR #627) remains as safety net.
+
+3. **Engine strips internal keys before STRICT_PROTO encoding.** `createTypedConfigRequest` (in `plugin/external/adapter.go`) filters `_`-prefix keys from `cfg` before `mapToTypedAny`. Copy-on-clean (fresh map; engine's original `modCfg.Config` retains `_config_dir` for the legacy `*structpb.Struct` path). Establishes `_`-prefix as the reserved namespace for engine internals; STRICT_PROTO module proto schemas must not declare `_`-prefix fields. STRICT_PROTO modules that need filesystem context must declare it explicitly in their proto schema.
 
 ## Alternatives considered
 
-**Bug 1 alternatives:**
-- **Engine reads disk plugin.json fallback:** couples engine to filesystem layout; fights strict-cutover discipline of explicit declaration.
-- **Per-plugin custom GetManifest:** each plugin author writes boilerplate; missed by `ServeIaCPlugin` users today.
+**Bug 1 alternatives (revised after R1 review):**
+- ~~**Engine reads disk plugin.json fallback:** couples engine to filesystem layout; fights strict-cutover discipline.~~ **R1 reviewer Option 3 corrected this:** the engine ALREADY loads + validates `plugin.json` from disk at `manager.go:108` before subprocess launch. The "coupling" already exists; reusing the loaded manifest as a fallback adds zero new coupling. **Accepted as the PRIMARY fix** because it requires zero plugin-side change and unblocks BMW deploy the moment v0.51.3 ships.
+- **SDK helper alone (without engine fallback):** would require every plugin to ship a new version adopting the helper before BMW could deploy. Multi-PR cascade. Rejected as primary fix; kept as forward-looking secondary fix.
+- **Per-plugin custom GetManifest:** each plugin author writes boilerplate; missed by `ServeIaCPlugin` users today. Rejected.
 
-Rejected: SDK helper is more aligned with strict-cutover spirit (explicit, compile-time-verified, single source of truth from disk plugin.json).
+Final decision: **both** engine fallback + SDK helper. Engine fallback is the immediate unblock (zero plugin churn). SDK helper is forward-looking (defense-in-depth + portability).
 
 **Bug 2 alternatives:**
 - **Add `_config_dir` to every proto schema:** pollutes API surface; doesn't scale to future internals like `_module_name`, `_workflow_id`, etc.
