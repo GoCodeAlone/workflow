@@ -303,7 +303,14 @@ func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]
 		}
 		return s, nil, nil
 	}
-	typed, err := mapToTypedAny(descriptor.ConfigMessage, cfg, resolver)
+	// Strip engine-internal "_"-prefix keys before proto decode. STRICT_PROTO
+	// and PROTO_WITH_LEGACY_STRUCT modules use protojson with DiscardUnknown
+	// = false (convert.go:62), which rejects engine internals like
+	// "_config_dir" as unknown fields. Strip is copy-on-clean — the caller's
+	// original cfg map retains all keys for the legacy *structpb.Struct
+	// path below.
+	cleaned := stripInternalKeys(cfg)
+	typed, err := mapToTypedAny(descriptor.ConfigMessage, cleaned, resolver)
 	if err != nil {
 		if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, nil, fmt.Errorf("STRICT_PROTO contract for config message %q cannot use legacy Struct fallback: %w", descriptor.ConfigMessage, err)

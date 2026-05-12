@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -33,6 +34,32 @@ func structToMap(s *structpb.Struct) map[string]any {
 		return nil
 	}
 	return s.AsMap()
+}
+
+// stripInternalKeys returns a fresh copy of m with all keys having the "_"
+// prefix removed. The engine injects internal keys (e.g., "_config_dir") into
+// every module config to support legacy modules that resolve filesystem-
+// relative paths. STRICT_PROTO modules declare their schema explicitly via
+// protobuf and reject unknown fields at protojson decode time — so engine
+// internals must be stripped before mapToTypedAny is called.
+//
+// Returns nil if m is nil. Copy-on-clean: the caller's original map is not
+// mutated; legacy *structpb.Struct paths continue to receive "_config_dir".
+//
+// The "_" prefix is the reserved namespace for engine internals; STRICT_PROTO
+// module proto schemas must not declare fields with this prefix.
+func stripInternalKeys(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	cleaned := make(map[string]any, len(m))
+	for k, v := range m {
+		if strings.HasPrefix(k, "_") {
+			continue
+		}
+		cleaned[k] = v
+	}
+	return cleaned
 }
 
 func mapToTypedAny(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver) (*anypb.Any, error) {

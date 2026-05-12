@@ -956,6 +956,94 @@ func TestNewExternalPluginAdapterPrefersGRPCWhenVersionPresent(t *testing.T) {
 	}
 }
 
+// testDynamicTypeResolver builds a protoregistry.Types resolver from the
+// shared dynamicContractFileDescriptorSet() — used by the createTypedConfigRequest
+// _-prefix-strip tests so the typed encode path resolves DynamicConfig without
+// a full *ExternalPluginAdapter.
+func testDynamicTypeResolver(t *testing.T) *protoregistry.Types {
+	t.Helper()
+	types, err := buildContractTypeResolver(&pb.ContractRegistry{
+		FileDescriptorSet: dynamicContractFileDescriptorSet(),
+	})
+	if err != nil {
+		t.Fatalf("buildContractTypeResolver: %v", err)
+	}
+	return types
+}
+
+// TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoModule (Bug 2)
+// is the module-path coverage for the engine `_`-prefix strip. Without the
+// strip, mapToTypedAny → protojson (DiscardUnknown=false) rejects "_config_dir"
+// as an unknown field on DynamicConfig (which declares only platform +
+// output_dir), forcing STRICT_PROTO modules to fail config decode.
+func TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoModule(t *testing.T) {
+	descriptor := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_MODULE,
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+		ConfigMessage: "workflow.plugins.test.v1.DynamicConfig",
+	}
+	cfg := map[string]any{
+		"_config_dir": "/etc/wf",
+		"platform":    "github_actions",
+	}
+	_, typed, err := createTypedConfigRequest(descriptor, cfg, testDynamicTypeResolver(t))
+	if err != nil {
+		t.Fatalf("createTypedConfigRequest (module) with _config_dir: %v", err)
+	}
+	if typed == nil {
+		t.Fatalf("expected typed *anypb.Any; got nil")
+	}
+	if _, ok := cfg["_config_dir"]; !ok {
+		t.Fatalf("cfg mutated — _config_dir removed from input map (copy-on-clean broken)")
+	}
+}
+
+// TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoStep (Bug 2 — F5)
+// is the step-path coverage. Both module and step factories funnel through
+// createTypedConfigRequest, but engine.go injects _config_dir into BOTH module
+// configs (engine.go:495-499) AND step configs (engine.go:1104-1105), so the
+// symmetric path needs explicit coverage.
+func TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoStep(t *testing.T) {
+	descriptor := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+		ConfigMessage: "workflow.plugins.test.v1.DynamicConfig",
+	}
+	cfg := map[string]any{
+		"_config_dir": "/etc/wf",
+		"platform":    "github_actions",
+	}
+	_, typed, err := createTypedConfigRequest(descriptor, cfg, testDynamicTypeResolver(t))
+	if err != nil {
+		t.Fatalf("createTypedConfigRequest (step) with _config_dir: %v", err)
+	}
+	if typed == nil {
+		t.Fatalf("expected typed *anypb.Any; got nil")
+	}
+}
+
+// TestCreateTypedConfigRequestRetainsInternalKeysInLegacyStruct asserts the
+// legacy-struct path keeps "_"-prefix keys on its *structpb.Struct payload.
+// Legacy modules consume "_config_dir" at the plugin side to resolve filesystem-
+// relative paths; the strip applies only to the typed-encode path.
+func TestCreateTypedConfigRequestRetainsInternalKeysInLegacyStruct(t *testing.T) {
+	descriptor := &pb.ContractDescriptor{
+		Kind: pb.ContractKind_CONTRACT_KIND_MODULE,
+		Mode: pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT,
+	}
+	cfg := map[string]any{"_config_dir": "/etc/wf", "name": "test"}
+	legacy, typed, err := createTypedConfigRequest(descriptor, cfg, nil)
+	if err != nil {
+		t.Fatalf("createTypedConfigRequest (legacy): %v", err)
+	}
+	if typed != nil {
+		t.Fatalf("expected nil typed for LEGACY_STRUCT mode")
+	}
+	if legacy == nil || legacy.Fields["_config_dir"] == nil {
+		t.Fatalf("legacy *structpb.Struct must retain _config_dir for legacy modules")
+	}
+}
+
 // TestEngineManifestValidatesAfterDiskOverlay is regression coverage for the
 // contract that Task 1's constructor disk-overlay flows through to
 // EngineManifest().Validate(). Locks in the F2 single-source-of-truth decision:
