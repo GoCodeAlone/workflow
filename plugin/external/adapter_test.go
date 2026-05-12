@@ -955,3 +955,30 @@ func TestNewExternalPluginAdapterPrefersGRPCWhenVersionPresent(t *testing.T) {
 		t.Fatalf("Description() = %q, want grpc desc (gRPC wins)", got)
 	}
 }
+
+// TestEngineManifestValidatesAfterDiskOverlay is regression coverage for the
+// contract that Task 1's constructor disk-overlay flows through to
+// EngineManifest().Validate(). Locks in the F2 single-source-of-truth decision:
+// a.manifest is overlaid once in the constructor; EngineManifest() reads it
+// directly with no second-layer merge. If the overlay regresses, Validate()
+// will fail because Version (and the other required Validate fields) would
+// be empty on the synthesized pb.Manifest.
+func TestEngineManifestValidatesAfterDiskOverlay(t *testing.T) {
+	disk := &plugin.PluginManifest{
+		Name: "iac-plugin", Version: "1.0.11", Author: "GoCodeAlone", Description: "DO IaC",
+	}
+	a, err := NewExternalPluginAdapter("iac-plugin", &PluginClient{client: &adapterTestPluginServiceClient{
+		// gRPC returns Unimplemented (strict-cutover IaC plugin path).
+		manifestErr: status.Error(codes.Unimplemented, "GetManifest not implemented"),
+	}}, disk)
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	em := a.EngineManifest()
+	if em.Version != "1.0.11" {
+		t.Fatalf("EngineManifest().Version = %q, want 1.0.11", em.Version)
+	}
+	if err := em.Validate(); err != nil {
+		t.Fatalf("EngineManifest().Validate(): %v", err)
+	}
+}

@@ -109,6 +109,11 @@ func manifestFromDisk(m *plugin.PluginManifest) *pb.Manifest {
 // path; production callers must pass the manager-loaded manifest.
 func NewExternalPluginAdapter(name string, client *PluginClient, diskManifest *plugin.PluginManifest) (*ExternalPluginAdapter, error) {
 	ctx := context.Background()
+	// Precedence rule (load-bearing): gRPC GetManifest is authoritative when it
+	// returns a non-empty Version. Disk-manifest fallback fires only when gRPC
+	// returns Unimplemented (strict-cutover IaC plugins) OR returns an empty
+	// Version. EngineManifest() reads a.manifest directly — no second-layer
+	// overlay, to avoid precedence ambiguity (see workflow ADR-0031 + plan F2).
 	manifest, err := client.client.GetManifest(ctx, &emptypb.Empty{})
 	if err != nil {
 		if status.Code(err) != codes.Unimplemented {
