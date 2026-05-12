@@ -12,11 +12,28 @@
 
 ---
 
+## R1 absorption notes (2026-05-12)
+
+R1 adversarial review FAIL → revised:
+
+- **F1 Critical:** missed caller `cmd/wfctl/plugin_conformance.go:327`. **Fix:** Task 1 Files list updated; pass `nil` (conformance probe doesn't load plugin.json from disk — tests plugin's own gRPC manifest, which is the intent of the verifier).
+- **F2 Important:** Task 2's defensive `EngineManifest` overlay was redundant with Task 1's constructor overlay AND used inconsistent per-field merge precedence. **Fix:** Task 2 retained as **regression test only** (no code; asserts Task 1's overlay covers the empty-Version-but-no-error case). Single precedence rule: Task 1's constructor overlay replaces `a.manifest` wholesale when gRPC returns empty Version. Documented in adapter.go comment.
+- **F3 Important:** Task 7 grep pattern had false positives + scope gap. **Fix:** Task 7 grep tightened to proto3 field-declaration shape only; audit scope expanded to include workflow's own `plugin/external/proto/`.
+- **F4 Important:** `plugin.PluginManifest.Validate()` requires Name+Version+Author+Description (verified at `plugin/manifest.go:183-201`). **Fix:** `EmbedManifest` docstring documents all 4 required fields; Task 4 happy-path test includes all 4; Task 4 added explicit test for missing Author + missing Description.
+- **F5 Important:** Task 3 step-level STRICT_PROTO coverage. **Fix:** Task 3 Step 6 expanded with explicit step-level descriptor test path.
+- **F6 Important:** `MustEmbedManifest` panic semantics undocumented for rollback story. **Fix:** docstring expanded; ADR-0031 Consequences section notes plugin authors should use `EmbedManifest` with explicit error handling for production paths.
+- **F7 Minor (over-decomposition):** acknowledged; tasks 1, 5, 6 each touch 3-4 files. Splitting further fragments the change set and increases reviewer context-switching. Kept as single tasks; each implementer can subdivide commits at their discretion.
+- **F8 Minor (test package):** Task 6 tests use `package sdk` (internal access) — explicit in Files list.
+- **F9 Minor (name mismatch):** added pre-flight check in Task 1; for all 6 wave plugins, `plugin.json:name` matches install directory name (verified per workspace audit; wave plugins use directory names equal to plugin.json:name).
+- **F10 Minor (gRPC-wins precedence test):** added to Task 1 as third unit test.
+- **F11 Minor (manager Validate ordering invariant):** noted in adapter.go comment + ADR.
+- **F12 Minor (wfctl plugin install load-bearing):** noted in ADR-0031 Consequences.
+
 ## Scope Manifest
 
 **PR Count:** 1
 **Tasks:** 8
-**Estimated Lines of Change:** ~450 (engine ~120, SDK ~80, tests ~250)
+**Estimated Lines of Change:** ~500 (engine ~140, SDK ~90, tests ~270)
 
 **Out of scope:**
 
@@ -46,9 +63,11 @@
 - Modify: `plugin/external/adapter.go:31-42` (add `diskManifest *plugin.PluginManifest` field to `ExternalPluginAdapter` struct)
 - Add: `plugin/external/adapter.go` — `manifestFromDisk(*plugin.PluginManifest) *pb.Manifest` helper (place before `NewExternalPluginAdapter`)
 - Modify: `plugin/external/manager.go:169` (pass `manifest` as 3rd arg to `NewExternalPluginAdapter`)
-- Test: `plugin/external/adapter_test.go` (add `TestNewExternalPluginAdapterDiskManifestFallback`)
+- **Modify: `cmd/wfctl/plugin_conformance.go:327`** (pass `nil` as 3rd arg — F1; the conformance probe deliberately tests the plugin's own gRPC manifest in isolation; disk-fallback is not its concern)
+- Test: `plugin/external/adapter_test.go` (add 3 tests: `TestNewExternalPluginAdapterDiskManifestFallback`, `TestNewExternalPluginAdapterDiskManifestNilStillWorks`, `TestNewExternalPluginAdapterPrefersGRPCWhenVersionPresent`)
+- Update: every other existing call to `NewExternalPluginAdapter` in `plugin/external/adapter_test.go` (append `, nil` to the 2-arg form)
 
-**Step 1: Write failing test** in `plugin/external/adapter_test.go`:
+**Step 1: Write failing tests** in `plugin/external/adapter_test.go`:
 
 ```go
 func TestNewExternalPluginAdapterDiskManifestFallback(t *testing.T) {
@@ -86,6 +105,26 @@ func TestNewExternalPluginAdapterDiskManifestNilStillWorks(t *testing.T) {
     }
     if got := a.Version(); got != "" {
         t.Fatalf("Version() = %q, want empty (no disk, no gRPC)", got)
+    }
+}
+
+// F10 regression — gRPC value WINS when both gRPC and disk are non-empty.
+// Locks in the precedence rule: disk is fallback for missing-or-empty gRPC fields only.
+func TestNewExternalPluginAdapterPrefersGRPCWhenVersionPresent(t *testing.T) {
+    disk := &plugin.PluginManifest{
+        Name: "x", Version: "9.9.9", Author: "disk", Description: "disk desc",
+    }
+    a, err := NewExternalPluginAdapter("x", &PluginClient{client: &adapterTestPluginServiceClient{
+        manifestResp: &pb.Manifest{Name: "x", Version: "1.0.0", Author: "grpc", Description: "grpc desc"},
+    }}, disk)
+    if err != nil {
+        t.Fatalf("NewExternalPluginAdapter: %v", err)
+    }
+    if got := a.Version(); got != "1.0.0" {
+        t.Fatalf("Version() = %q, want 1.0.0 (gRPC wins over disk)", got)
+    }
+    if got := a.Description(); got != "grpc desc" {
+        t.Fatalf("Description() = %q, want grpc desc (gRPC wins)", got)
     }
 }
 ```
@@ -184,13 +223,23 @@ Store `diskManifest` on the adapter:
     }
 ```
 
-**Step 4: Update caller** at `plugin/external/manager.go:169`:
+**Step 4: Update production callers**
+
+`plugin/external/manager.go:169`:
 
 ```go
 adapter, err := NewExternalPluginAdapter(name, pluginClient, manifest)
 ```
 
 (The `manifest` var here is the `*plugin.PluginManifest` already loaded at line 108.)
+
+`cmd/wfctl/plugin_conformance.go:327` (F1 fix):
+
+```go
+adapter, err := external.NewExternalPluginAdapter(name, pluginClient, nil)
+```
+
+(Conformance probe deliberately tests the plugin's own gRPC manifest in isolation. Disk fallback is the manager's concern, not the conformance verifier's. Passing `nil` preserves the conformance contract: a plugin that doesn't implement gRPC `GetManifest` fails conformance, which is the intent.)
 
 **Step 5: Update existing test call sites** in `plugin/external/adapter_test.go` (every existing `NewExternalPluginAdapter("foo", &PluginClient{...})` call). Pass `nil` as 3rd arg — they exercise the no-disk path:
 
@@ -201,15 +250,16 @@ grep -n "NewExternalPluginAdapter(" plugin/external/adapter_test.go
 
 Update each (add `, nil` before closing paren).
 
-**Step 6: Run tests to verify pass**
+**Step 6: Run tests + build to verify pass**
 
 Run: `go test ./plugin/external/ -run TestNewExternalPluginAdapter -v`
 Expected: PASS. Specifically:
 - `TestNewExternalPluginAdapterDiskManifestFallback` returns `Version() = "1.0.11"`.
 - `TestNewExternalPluginAdapterDiskManifestNilStillWorks` returns `Name() = "legacy-plugin"` + `Version() = ""`.
+- `TestNewExternalPluginAdapterPrefersGRPCWhenVersionPresent` returns `Version() = "1.0.0"`.
 
 Run: `go build ./...`
-Expected: exits 0 (no other callers).
+Expected: exits 0. **Verify `cmd/wfctl` builds** specifically: `go build ./cmd/wfctl` — must exit 0. If this fails, the conformance caller was missed (F1 regression).
 
 **Step 7: Rollback note**
 
@@ -218,42 +268,38 @@ Rollback: `git revert <commit>` — restores 2-arg signature; manager.go reverts
 **Step 8: Commit**
 
 ```bash
-git add plugin/external/adapter.go plugin/external/adapter_test.go plugin/external/manager.go
+git add plugin/external/adapter.go plugin/external/adapter_test.go plugin/external/manager.go cmd/wfctl/plugin_conformance.go
 git commit -m "fix(plugin/external): thread disk manifest into adapter as gRPC GetManifest fallback"
 ```
 
 ---
 
-## Task 2: `EngineManifest()` post-hoc disk fallback for fields beyond Version
+## Task 2: Regression test — `EngineManifest()` validates after Task 1 overlay
 
-**Change class:** Internal logic refactor; runtime-affecting (plugin registration).
+**Change class:** Internal logic refactor (test-only).
 
 **Files:**
-- Modify: `plugin/external/adapter.go:304-327` (`EngineManifest` method)
-- Test: `plugin/external/adapter_test.go` (add `TestEngineManifestUsesDiskWhenAdapterManifestEmpty`)
+- Test: `plugin/external/adapter_test.go` (add `TestEngineManifestValidatesAfterDiskOverlay`)
 
-**Background:** Task 1 covers the constructor path. If a plugin returned a partial gRPC `pb.Manifest{Name: "x"}` without going through the Unimplemented branch (older defensive path), `EngineManifest` would still produce a `*plugin.PluginManifest` with empty Version → `Validate()` rejects. Fix: when adapter.manifest Version is empty AND diskManifest is non-nil, prefer disk-manifest fields in `EngineManifest()`.
+**Background (F2 absorption):** R1 review correctly flagged that a second per-field merge in `EngineManifest()` introduces precedence ambiguity vs Task 1's wholesale-replace overlay. **Decision: single source of truth = Task 1's constructor overlay.** `EngineManifest()` reads `a.manifest` (already overlaid). This task is regression coverage only — locks in the contract that the overlay flows through to `Validate()`.
 
-**Step 1: Write failing test**
+**Step 1: Write the test**
 
 ```go
-func TestEngineManifestUsesDiskWhenAdapterManifestEmpty(t *testing.T) {
+func TestEngineManifestValidatesAfterDiskOverlay(t *testing.T) {
     disk := &plugin.PluginManifest{
-        Name:        "iac-plugin",
-        Version:     "1.0.11",
-        Author:      "GoCodeAlone",
-        Description: "DO IaC",
+        Name: "iac-plugin", Version: "1.0.11", Author: "GoCodeAlone", Description: "DO IaC",
     }
     a, err := NewExternalPluginAdapter("iac-plugin", &PluginClient{client: &adapterTestPluginServiceClient{
-        // gRPC returns valid manifest but Version is empty (defensive case).
-        manifestResp: &pb.Manifest{Name: "iac-plugin"},
+        // gRPC returns Unimplemented (strict-cutover IaC plugin path).
+        manifestErr: status.Error(codes.Unimplemented, "GetManifest not implemented"),
     }}, disk)
     if err != nil {
         t.Fatalf("NewExternalPluginAdapter: %v", err)
     }
     em := a.EngineManifest()
     if em.Version != "1.0.11" {
-        t.Fatalf("EngineManifest().Version = %q, want 1.0.11 (disk fallback)", em.Version)
+        t.Fatalf("EngineManifest().Version = %q, want 1.0.11", em.Version)
     }
     if err := em.Validate(); err != nil {
         t.Fatalf("EngineManifest().Validate(): %v", err)
@@ -261,72 +307,31 @@ func TestEngineManifestUsesDiskWhenAdapterManifestEmpty(t *testing.T) {
 }
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run test to verify pass**
 
-Run: `go test ./plugin/external/ -run TestEngineManifestUsesDiskWhenAdapterManifestEmpty -v`
-Expected: FAIL — `Version = ""` because Task 1's overlay only fires when `manifest != nil && Version == ""` path was already added; verify the path covers this. If Task 1's else-if branch was implemented as written, this test should PASS after Task 1. If it fails, the overlay needs to happen in `EngineManifest` too.
+Run: `go test ./plugin/external/ -run TestEngineManifestValidatesAfterDiskOverlay -v`
+Expected: PASS — Task 1's constructor overlay populated `a.manifest` from disk; `EngineManifest()` reads it; `Validate()` returns nil.
 
-**Step 3: Re-read Task 1 implementation.** If the constructor overlay (`else if manifest != nil && manifest.Version == ""`) already populates `a.manifest` from disk, this case is covered there. Mark this task complete with the regression test as-is. If the overlay logic was placed differently, add an `EngineManifest` post-hoc fallback:
+**Step 3: Add precedence-rule comment to adapter.go**
+
+In `plugin/external/adapter.go` near the constructor's overlay branch, add a comment:
 
 ```go
-func (a *ExternalPluginAdapter) EngineManifest() *plugin.PluginManifest {
-    ctx := context.Background()
-    modTypes, _ := a.client.client.GetModuleTypes(ctx, &emptypb.Empty{})
-    stepTypes, _ := a.client.client.GetStepTypes(ctx, &emptypb.Empty{})
-    triggerTypes, _ := a.client.client.GetTriggerTypes(ctx, &emptypb.Empty{})
-
-    // Prefer adapter.manifest (cached at construction time). Fall back to
-    // diskManifest fields if adapter.manifest.Version is empty — defensive
-    // belt-and-suspenders even though Task 1's constructor already overlays.
-    name := a.manifest.Name
-    version := a.manifest.Version
-    author := a.manifest.Author
-    description := a.manifest.Description
-    if version == "" && a.diskManifest != nil {
-        if name == "" {
-            name = a.diskManifest.Name
-        }
-        version = a.diskManifest.Version
-        if author == "" {
-            author = a.diskManifest.Author
-        }
-        if description == "" {
-            description = a.diskManifest.Description
-        }
-    }
-
-    m := &plugin.PluginManifest{
-        Name:        name,
-        Version:     version,
-        Author:      author,
-        Description: description,
-    }
-    if modTypes != nil {
-        m.ModuleTypes = modTypes.Types
-    }
-    if stepTypes != nil {
-        m.StepTypes = stepTypes.Types
-    }
-    if triggerTypes != nil {
-        m.TriggerTypes = triggerTypes.Types
-    }
-    return m
-}
+// Precedence rule (load-bearing): gRPC GetManifest is authoritative when it
+// returns a non-empty Version. Disk-manifest fallback fires only when gRPC
+// returns Unimplemented (strict-cutover IaC plugins) OR returns an empty
+// Version. EngineManifest() reads a.manifest directly — no second-layer
+// overlay, to avoid precedence ambiguity (see workflow ADR-0031 + plan F2).
 ```
 
-**Step 4: Run test to verify pass**
-
-Run: `go test ./plugin/external/ -run TestEngineManifestUsesDiskWhenAdapterManifestEmpty -v`
-Expected: PASS — `EngineManifest().Version = "1.0.11"`; `Validate()` returns nil.
-
-**Step 5: Commit**
+**Step 4: Commit**
 
 ```bash
 git add plugin/external/adapter.go plugin/external/adapter_test.go
-git commit -m "fix(plugin/external): post-hoc EngineManifest disk fallback for empty fields"
+git commit -m "test(plugin/external): regression — EngineManifest validates after disk overlay"
 ```
 
-Rollback: `git revert <commit>` — `EngineManifest` reverts to direct `a.manifest` field copy.
+Rollback: revert removes test + comment; no functional impact (Task 1's overlay carries the change).
 
 ---
 
@@ -469,20 +474,19 @@ func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]
 
 Note: the legacy `*structpb.Struct` path (PROTO_WITH_LEGACY_STRUCT branch) keeps `cfg` (with `_config_dir`) — only `cleaned` feeds `mapToTypedAny`.
 
-**Step 6: Integration test for STRICT_PROTO + `_config_dir`**
+**Step 6: Integration tests — STRICT_PROTO `_config_dir` strip (module AND step paths)**
+
+`createTypedConfigRequest` is called from BOTH `CreateModule` (line ~411) AND `CreateStep` (line ~452) factory paths in `adapter.go`. F5 absorption: both paths must be covered, because `engine.go:495-499` injects `_config_dir` for modules and `engine.go:1104-1105` injects it for steps. The strip applies symmetrically because both paths funnel through `createTypedConfigRequest`, but the test must prove it.
 
 In `plugin/external/adapter_test.go`:
 
 ```go
-func TestCreateTypedConfigRequestStripsInternalKeysForStrictProto(t *testing.T) {
-    // Use an existing STRICT_PROTO test descriptor (one is registered in
-    // adapter_test.go for the typed contract tests — see TestCreateTypedConfigRequest_StrictProto).
-    // If no STRICT_PROTO descriptor is available in the test file yet, define
-    // a minimal one inline that maps to an existing proto message available
-    // in plugin/external/proto/ or contract_test fixtures.
+// Module path coverage.
+func TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoModule(t *testing.T) {
     descriptor := &pb.ContractDescriptor{
+        Kind:          pb.ContractKind_CONTRACT_KIND_MODULE,
         Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
-        ConfigMessage: "workflow.test.SimpleConfig", // adjust to a registered test message
+        ConfigMessage: "<existing-registered-test-message>", // see adapter_test.go for the typed test fixture
     }
     cfg := map[string]any{
         "_config_dir": "/etc/wf",
@@ -490,19 +494,57 @@ func TestCreateTypedConfigRequestStripsInternalKeysForStrictProto(t *testing.T) 
     }
     _, typed, err := createTypedConfigRequest(descriptor, cfg, testTypeResolver())
     if err != nil {
-        t.Fatalf("createTypedConfigRequest with _config_dir: %v", err)
+        t.Fatalf("createTypedConfigRequest (module) with _config_dir: %v", err)
     }
     if typed == nil {
         t.Fatalf("expected typed *anypb.Any; got nil")
     }
-    // Verify cfg is not mutated.
     if _, ok := cfg["_config_dir"]; !ok {
-        t.Fatalf("cfg was mutated — _config_dir removed from input")
+        t.Fatalf("cfg mutated — _config_dir removed from input map")
+    }
+}
+
+// Step path coverage (F5 — symmetric with module path).
+func TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoStep(t *testing.T) {
+    descriptor := &pb.ContractDescriptor{
+        Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+        Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+        ConfigMessage: "<existing-registered-test-message>",
+    }
+    cfg := map[string]any{
+        "_config_dir": "/etc/wf",
+        "operation":   "do-thing",
+    }
+    _, typed, err := createTypedConfigRequest(descriptor, cfg, testTypeResolver())
+    if err != nil {
+        t.Fatalf("createTypedConfigRequest (step) with _config_dir: %v", err)
+    }
+    if typed == nil {
+        t.Fatalf("expected typed *anypb.Any; got nil")
+    }
+}
+
+// Legacy-struct payload retains _config_dir (engine consumes it for relative paths).
+func TestCreateTypedConfigRequestRetainsInternalKeysInLegacyStruct(t *testing.T) {
+    descriptor := &pb.ContractDescriptor{
+        Kind: pb.ContractKind_CONTRACT_KIND_MODULE,
+        Mode: pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT,
+    }
+    cfg := map[string]any{"_config_dir": "/etc/wf", "name": "test"}
+    legacy, typed, err := createTypedConfigRequest(descriptor, cfg, nil)
+    if err != nil {
+        t.Fatalf("createTypedConfigRequest (legacy): %v", err)
+    }
+    if typed != nil {
+        t.Fatalf("expected nil typed for LEGACY_STRUCT mode")
+    }
+    if legacy == nil || legacy.Fields["_config_dir"] == nil {
+        t.Fatalf("legacy *structpb.Struct must retain _config_dir for legacy modules")
     }
 }
 ```
 
-If no suitable STRICT_PROTO test message exists, fall back to unit-testing `stripInternalKeys` end-to-end and have integration test rely on Task 8's plugin-level e2e.
+If no suitable STRICT_PROTO test message exists in `plugin/external/proto/` for direct test use, define one in `plugin/external/testdata/` or reuse the fixture from `TestCreateTypedConfigRequest_StrictProto` (locate via `grep -n "STRICT_PROTO" plugin/external/adapter_test.go`).
 
 **Step 7: Run tests to verify pass**
 
@@ -588,7 +630,7 @@ func TestEmbedManifestRejectsMalformedJSON(t *testing.T) {
 }
 
 func TestEmbedManifestRejectsMissingName(t *testing.T) {
-    _, err := EmbedManifest([]byte(`{"version": "1.0.0"}`))
+    _, err := EmbedManifest([]byte(`{"version": "1.0.0", "author": "x", "description": "x"}`))
     if err == nil {
         t.Fatalf("EmbedManifest without name: want error, got nil")
     }
@@ -598,9 +640,25 @@ func TestEmbedManifestRejectsMissingName(t *testing.T) {
 }
 
 func TestEmbedManifestRejectsMissingVersion(t *testing.T) {
-    _, err := EmbedManifest([]byte(`{"name": "x"}`))
+    _, err := EmbedManifest([]byte(`{"name": "x", "author": "x", "description": "x"}`))
     if err == nil {
         t.Fatalf("EmbedManifest without version: want error, got nil")
+    }
+}
+
+// F4 — Validate() also requires Author + Description. EmbedManifest must
+// surface these as actionable errors, not silent acceptance.
+func TestEmbedManifestRejectsMissingAuthor(t *testing.T) {
+    _, err := EmbedManifest([]byte(`{"name": "x", "version": "1.0.0", "description": "x"}`))
+    if err == nil {
+        t.Fatalf("EmbedManifest without author: want error, got nil")
+    }
+}
+
+func TestEmbedManifestRejectsMissingDescription(t *testing.T) {
+    _, err := EmbedManifest([]byte(`{"name": "x", "version": "1.0.0", "author": "x"}`))
+    if err == nil {
+        t.Fatalf("EmbedManifest without description: want error, got nil")
     }
 }
 
@@ -632,7 +690,15 @@ import (
 )
 
 // EmbedManifest parses plugin.json content (typically loaded via go:embed) into
-// the canonical *plugin.PluginManifest type. Plugin authors write:
+// the canonical *plugin.PluginManifest type and runs the canonical Validate().
+//
+// Validate() requires ALL of: Name, Version, Author, Description (verified at
+// plugin/manifest.go:183-201). A plugin.json missing any of these is rejected.
+// This matches the same contract enforced by the engine's manager.go on disk
+// load — there is no "minimal" path. If you cannot supply Author or
+// Description at build time, the plugin should not ship a release.
+//
+// Plugin authors write:
 //
 //   //go:embed plugin.json
 //   var manifestJSON []byte
@@ -646,6 +712,12 @@ import (
 // Parses via the canonical *plugin.PluginManifest (camelCase JSON tags matching
 // the plugin.json authoring convention), NOT directly into *pb.Manifest (which
 // has snake_case proto JSON tags and would silently drop configMutable etc.).
+//
+// For production code paths that need to recover from a missing/malformed
+// plugin.json (e.g., plugins that ship with multiple manifest candidates),
+// prefer EmbedManifest with explicit error handling over MustEmbedManifest.
+// MustEmbedManifest panics at process startup, which surfaces misconfiguration
+// loudly but is unrecoverable.
 func EmbedManifest(content []byte) (*pluginpkg.PluginManifest, error) {
     if len(content) == 0 {
         return nil, fmt.Errorf("parse embedded plugin.json: empty content")
@@ -663,6 +735,11 @@ func EmbedManifest(content []byte) (*pluginpkg.PluginManifest, error) {
 // MustEmbedManifest panics on parse or validation error. Intended for
 // package-level var initialization in plugin main packages — failure indicates
 // a build-time misconfiguration that must be fixed before the binary ships.
+//
+// WARNING: panic semantics make this a process-startup canary. Plugin
+// authors who need graceful degradation (e.g., to recover from a
+// missing/malformed plugin.json in tooling-only code paths) should use
+// EmbedManifest with explicit error handling instead.
 func MustEmbedManifest(content []byte) *pluginpkg.PluginManifest {
     p, err := EmbedManifest(content)
     if err != nil {
@@ -1057,21 +1134,26 @@ Rollback: `git revert <commit>` — bridge reverts to `UnimplementedPluginServic
 **Files:**
 - Add: `docs/audit/2026-05-12-underscore-prefix-audit.md`
 
-**Step 1: Run audit grep across all known plugin repos**
+**Step 1: Run audit grep across all wave plugin repos AND workflow's own proto/**
+
+F3 absorption: the previous pattern produced false positives on snake_case fields. Tight pattern matches only proto3 field declarations whose **field name** starts with `_`. Audit scope expanded to include `workflow/plugin/external/proto/` (engine-defined messages that STRICT_PROTO plugins reference).
 
 ```bash
 cd /Users/jon/workspace
-for repo in workflow-plugin-digitalocean workflow-plugin-eventbus workflow-plugin-audit-chain workflow-plugin-payments workflow-plugin-auth workflow-plugin-twilio; do
+PATTERN='^[[:space:]]+(repeated[[:space:]]+|optional[[:space:]]+)?[a-zA-Z_][a-zA-Z0-9_.]*[[:space:]]+_[a-z][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*[0-9]'
+for repo in workflow workflow-plugin-digitalocean workflow-plugin-eventbus workflow-plugin-audit-chain workflow-plugin-payments workflow-plugin-auth workflow-plugin-twilio; do
     echo "=== $repo ==="
     if [ -d "$repo" ]; then
-        grep -rn '"\?_[a-z]' "$repo"/proto/ 2>/dev/null || echo "(no proto/ dir or no matches)"
-        # Also check field declarations in *.proto files
-        find "$repo" -name "*.proto" -exec grep -Hn 'optional .* _[a-z]\|required .* _[a-z]\| _[a-z][a-z_]* = [0-9]' {} \; 2>/dev/null
+        # Find all .proto files (most plugins put them at proto/ or plugin/proto/; workflow has plugin/external/proto/)
+        find "$repo" -name "*.proto" -not -path "*/node_modules/*" -not -path "*/_worktrees/*" -print0 \
+            | xargs -0 grep -HnE "$PATTERN" 2>/dev/null || echo "(no underscore-prefix field declarations found)"
     else
         echo "(repo not present locally)"
     fi
 done
 ```
+
+Sanity-check pattern by running against a known-good corpus to confirm it does NOT match snake_case field declarations like `string my_field = 1;`. Expected: pattern only matches lines like `string _internal_field = 1;`.
 
 **Step 2: Record findings**
 
