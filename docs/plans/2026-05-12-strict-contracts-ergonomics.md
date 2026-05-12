@@ -37,7 +37,7 @@
 
 ---
 
-## Task 1: Engine disk-manifest fallback — `manifestFromDisk` helper + adapter signature change
+### Task 1: Engine disk-manifest fallback — `manifestFromDisk` helper + adapter signature change
 
 **Change class:** Internal logic refactor (engine adapter), but **runtime-affecting** per `finishing-a-development-branch` Step 1b (plugin loading path). Include rollback note.
 
@@ -280,7 +280,7 @@ git commit -m "fix(plugin/external): thread disk manifest into adapter as gRPC G
 
 ---
 
-## Task 2: Regression test — `EngineManifest()` validates after Task 1 overlay
+### Task 2: Regression test — `EngineManifest()` validates after Task 1 overlay
 
 **Change class:** Internal logic refactor (test-only).
 
@@ -341,7 +341,7 @@ Rollback: revert removes test + comment; no functional impact (Task 1's overlay 
 
 ---
 
-## Task 3: Engine `_`-prefix strip in `createTypedConfigRequest` (Bug 2)
+### Task 3: Engine `_`-prefix strip in `createTypedConfigRequest` (Bug 2)
 
 **Change class:** Internal logic refactor; runtime-affecting (STRICT_PROTO config decode path).
 
@@ -568,7 +568,7 @@ Rollback: `git revert <commit>` — `createTypedConfigRequest` reverts to passin
 
 ---
 
-## Task 4: SDK `EmbedManifest` helper (forward-looking Bug 1 fix)
+### Task 4: SDK `EmbedManifest` helper (forward-looking Bug 1 fix)
 
 **Change class:** Plugin / extension (SDK). Verification: unit tests + integration test in Task 8.
 
@@ -786,7 +786,7 @@ Rollback: revert removes helper; no callers depend on it (Tasks 5+6 add the wiri
 
 ---
 
-## Task 5: Wire `EmbedManifest` into `sdk.Serve` + `sdk.ServePluginFull` via `WithManifestProvider`
+### Task 5: Wire `EmbedManifest` into `sdk.Serve` + `sdk.ServePluginFull` via `WithManifestProvider`
 
 **Change class:** Plugin / extension (SDK). Verification: unit tests.
 
@@ -971,7 +971,7 @@ Rollback: `git revert <commit>` — `Serve`/`ServePluginFull` revert to non-vari
 
 ---
 
-## Task 6: `IaCServeOptions.ManifestProvider` + bridge `GetManifest` override
+### Task 6: `IaCServeOptions.ManifestProvider` + bridge `GetManifest` override
 
 **Change class:** Plugin / extension (SDK). Verification: unit tests + e2e in Task 8.
 
@@ -1213,7 +1213,7 @@ Rollback: `git revert <commit>` — bridge reverts to `UnimplementedPluginServic
 
 ---
 
-## Task 7: Audit `_`-prefix collision in plugin proto schemas (A2 verification)
+### Task 7: Audit `_`-prefix collision in plugin proto schemas (A2 verification)
 
 **Change class:** Documentation / audit. Verification: grep transcript captured.
 
@@ -1279,7 +1279,7 @@ Rollback: revert deletes audit doc; no code impact.
 
 ---
 
-## Task 8: E2E integration test — disk-fallback registration without SDK helper
+### Task 8: E2E integration test — disk-fallback registration without SDK helper
 
 **Change class:** Plugin / extension. Verification: `go test ./...` exercises a test plugin binary that does NOT use `sdk.EmbedManifest` and validates the engine disk-fallback path end-to-end.
 
