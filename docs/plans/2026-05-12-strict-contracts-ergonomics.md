@@ -33,7 +33,7 @@
 |------|-------|-------|--------|
 | 1 | fix(plugin/external): engine disk-manifest fallback + SDK embed helper + STRICT_PROTO `_`-prefix strip | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6, Task 7, Task 8 | fix/strict-contracts-ergonomics-v0.51.3 |
 
-**Status:** Draft
+**Status:** Locked 2026-05-12T18:00:00Z
 
 ---
 
