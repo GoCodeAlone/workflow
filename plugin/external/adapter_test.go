@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -31,6 +32,8 @@ func newTestAdapter(manifest *pb.Manifest, configFragment []byte) *ExternalPlugi
 type adapterTestPluginServiceClient struct {
 	stubPluginServiceClient
 	manifest          *pb.Manifest
+	manifestResp      *pb.Manifest // alternative to manifest; takes precedence when set
+	manifestErr       error        // when non-nil, GetManifest returns (nil, err)
 	registry          *pb.ContractRegistry
 	registryErr       error
 	moduleTypes       []string
@@ -41,6 +44,12 @@ type adapterTestPluginServiceClient struct {
 }
 
 func (c *adapterTestPluginServiceClient) GetManifest(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.Manifest, error) {
+	if c.manifestErr != nil {
+		return nil, c.manifestErr
+	}
+	if c.manifestResp != nil {
+		return c.manifestResp, nil
+	}
 	return c.manifest, nil
 }
 
@@ -152,7 +161,7 @@ func TestContractRegistry(t *testing.T) {
 	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: &adapterTestPluginServiceClient{
 		manifest: &pb.Manifest{Name: "contract-plugin"},
 		registry: registry,
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -190,7 +199,7 @@ func TestContractRegistry_FetchErrorIsRecordedWithoutFailingAdapter(t *testing.T
 	a, err := NewExternalPluginAdapter("legacy-plugin", &PluginClient{client: &adapterTestPluginServiceClient{
 		manifest:    &pb.Manifest{Name: "legacy-plugin"},
 		registryErr: errBoom,
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter should not fail on optional registry fetch: %v", err)
 	}
@@ -206,7 +215,7 @@ func TestContractRegistry_UnimplementedUsesEmptyRegistry(t *testing.T) {
 	a, err := NewExternalPluginAdapter("legacy-plugin", &PluginClient{client: &adapterTestPluginServiceClient{
 		manifest:    &pb.Manifest{Name: "legacy-plugin"},
 		registryErr: status.Error(codes.Unimplemented, "method GetContractRegistry not implemented"),
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter should not fail on unimplemented registry: %v", err)
 	}
@@ -230,7 +239,7 @@ func TestNewExternalPluginAdapterConfiguresCallbackBroker(t *testing.T) {
 	_, err := NewExternalPluginAdapter("callback-plugin", &PluginClient{
 		client:           client,
 		callbackBrokerID: 42,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -250,7 +259,7 @@ func TestNewExternalPluginAdapterSkipsCallbackForLegacyPluginWithoutTriggers(t *
 	_, err := NewExternalPluginAdapter("legacy-plugin", &PluginClient{
 		client:           client,
 		callbackBrokerID: 42,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -270,7 +279,7 @@ func TestNewExternalPluginAdapterDisablesTriggersWhenCallbackUnsupported(t *test
 	adapter, err := NewExternalPluginAdapter("legacy-trigger-plugin", &PluginClient{
 		client:           client,
 		callbackBrokerID: 42,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter should preserve module/step compatibility: %v", err)
 	}
@@ -285,7 +294,7 @@ func TestNewExternalPluginAdapterDisablesTriggersWithoutCallbackBroker(t *testin
 		registry:     &pb.ContractRegistry{},
 		triggerTypes: []string{"trigger.test"},
 	}
-	adapter, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{client: client})
+	adapter, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -303,7 +312,7 @@ func TestTriggerFactoryDefersCreateUntilConfigure(t *testing.T) {
 	adapter, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{
 		client:           client,
 		callbackBrokerID: 42,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -368,7 +377,7 @@ func TestModuleFactoriesPropagatesPluginError(t *testing.T) {
 		},
 		createModuleError: pluginErrMsg,
 	}
-	a, err := NewExternalPluginAdapter("test-plugin", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("test-plugin", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -454,7 +463,7 @@ func TestExternalPluginAdapter_ContractModuleFactoryPropagatesTypedConfigErrors(
 			},
 		}},
 	}
-	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -494,7 +503,7 @@ func TestExternalPluginAdapter_ContractStepFactorySendsTypedConfig(t *testing.T)
 			},
 		}},
 	}
-	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -537,7 +546,7 @@ func TestExternalPluginAdapter_ContractStepFactoryProtoWithLegacySendsBothConfig
 			},
 		}},
 	}
-	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -577,7 +586,7 @@ func TestExternalPluginAdapter_ContractStepFactoryUsesPluginOwnedDescriptors(t *
 			},
 		},
 	}
-	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -618,7 +627,7 @@ func TestExternalPluginAdapter_MalformedDescriptorSetRecordsError(t *testing.T) 
 			FileDescriptorSet: malformedContractFileDescriptorSet(),
 		},
 	}
-	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -641,7 +650,7 @@ func TestExternalPluginAdapter_RemoteTriggerDelaysCreateUntilConfigure(t *testin
 	a, err := NewExternalPluginAdapter("trigger-plugin", &PluginClient{
 		client:           client,
 		callbackBrokerID: 42,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -730,7 +739,7 @@ func TestExternalPluginAdapter_ContractStepFactoryFailsClosedWithoutCodec(t *tes
 			},
 		}},
 	}
-	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("contract-plugin", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter: %v", err)
 	}
@@ -818,7 +827,7 @@ func TestNewExternalPluginAdapter_GetManifestUnimplemented_SynthesizesFromName(t
 			registry: &pb.ContractRegistry{},
 		},
 	}
-	a, err := NewExternalPluginAdapter("digitalocean", &PluginClient{client: client})
+	a, err := NewExternalPluginAdapter("digitalocean", &PluginClient{client: client}, nil)
 	if err != nil {
 		t.Fatalf("NewExternalPluginAdapter must tolerate Unimplemented GetManifest: %v", err)
 	}
@@ -837,7 +846,7 @@ func TestNewExternalPluginAdapter_GetManifestNonUnimplementedError_Fails(t *test
 	client := &adapterTestPluginServiceClient{}
 	// Override GetManifest to return Internal.
 	failingClient := &failingManifestClient{adapterTestPluginServiceClient: *client}
-	_, err := NewExternalPluginAdapter("broken-plugin", &PluginClient{client: failingClient})
+	_, err := NewExternalPluginAdapter("broken-plugin", &PluginClient{client: failingClient}, nil)
 	if err == nil {
 		t.Fatal("expected error from non-Unimplemented GetManifest failure")
 	}
@@ -852,4 +861,212 @@ type failingManifestClient struct {
 
 func (c *failingManifestClient) GetManifest(_ context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*pb.Manifest, error) {
 	return nil, status.Error(codes.Internal, "boom")
+}
+
+// TestNewExternalPluginAdapterDiskManifestFallback verifies that when the
+// plugin's gRPC GetManifest RPC returns codes.Unimplemented (strict-cutover IaC
+// plugins served via sdk.ServeIaCPlugin), the disk-loaded *plugin.PluginManifest
+// is field-mapped into the adapter's cached *pb.Manifest so accessors like
+// Version() / Description() return the canonical disk values rather than empty.
+func TestNewExternalPluginAdapterDiskManifestFallback(t *testing.T) {
+	disk := &plugin.PluginManifest{
+		Name:           "iac-plugin",
+		Version:        "1.0.11",
+		Author:         "GoCodeAlone",
+		Description:    "DigitalOcean IaC provider",
+		ConfigMutable:  true,
+		SampleCategory: "iac",
+	}
+	a, err := NewExternalPluginAdapter("iac-plugin", &PluginClient{client: &adapterTestPluginServiceClient{
+		manifestErr: status.Error(codes.Unimplemented, "GetManifest not implemented"),
+	}}, disk)
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	if got := a.Version(); got != "1.0.11" {
+		t.Fatalf("Version() = %q, want 1.0.11 (disk fallback)", got)
+	}
+	if got := a.Description(); got != "DigitalOcean IaC provider" {
+		t.Fatalf("Description() = %q, want disk value", got)
+	}
+}
+
+// TestNewExternalPluginAdapterDiskManifestNilStillWorks verifies that when the
+// plugin's gRPC GetManifest returns Unimplemented AND no disk manifest is
+// provided (nil), the adapter still constructs successfully by synthesizing a
+// minimal *pb.Manifest from the param name — preserving PR #627 tolerance.
+func TestNewExternalPluginAdapterDiskManifestNilStillWorks(t *testing.T) {
+	a, err := NewExternalPluginAdapter("legacy-plugin", &PluginClient{client: &adapterTestPluginServiceClient{
+		manifestErr: status.Error(codes.Unimplemented, "GetManifest not implemented"),
+	}}, nil)
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter with nil disk: %v", err)
+	}
+	if got := a.Name(); got != "legacy-plugin" {
+		t.Fatalf("Name() = %q, want legacy-plugin (constructor name fallback)", got)
+	}
+	if got := a.Version(); got != "" {
+		t.Fatalf("Version() = %q, want empty (no disk, no gRPC)", got)
+	}
+}
+
+// TestNewExternalPluginAdapterDiskOverlayWhenGRPCReturnsEmptyVersion exercises
+// the empty-Version-but-no-error overlay path (R2-1): gRPC returns a valid
+// pb.Manifest with empty Version (defensive case, e.g. a misconfigured plugin),
+// and the disk-manifest overlay must populate the cached manifest so
+// EngineManifest()/Validate() can succeed downstream.
+func TestNewExternalPluginAdapterDiskOverlayWhenGRPCReturnsEmptyVersion(t *testing.T) {
+	disk := &plugin.PluginManifest{
+		Name: "x", Version: "1.0.11", Author: "GoCodeAlone", Description: "DO IaC",
+	}
+	a, err := NewExternalPluginAdapter("x", &PluginClient{client: &adapterTestPluginServiceClient{
+		manifestResp: &pb.Manifest{Name: "x", Version: ""},
+	}}, disk)
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	if got := a.Version(); got != "1.0.11" {
+		t.Fatalf("Version() = %q, want 1.0.11 (disk overlay when gRPC Version empty)", got)
+	}
+	em := a.EngineManifest()
+	if em.Author != "GoCodeAlone" {
+		t.Fatalf("EngineManifest().Author = %q, want GoCodeAlone (disk overlay)", em.Author)
+	}
+}
+
+// TestNewExternalPluginAdapterPrefersGRPCWhenVersionPresent (F10 regression)
+// locks in the precedence rule: when both gRPC and disk manifests contain
+// non-empty Version, gRPC WINS. Disk is fallback for missing-or-empty gRPC
+// fields only — never an override.
+func TestNewExternalPluginAdapterPrefersGRPCWhenVersionPresent(t *testing.T) {
+	disk := &plugin.PluginManifest{
+		Name: "x", Version: "9.9.9", Author: "disk", Description: "disk desc",
+	}
+	a, err := NewExternalPluginAdapter("x", &PluginClient{client: &adapterTestPluginServiceClient{
+		manifestResp: &pb.Manifest{Name: "x", Version: "1.0.0", Author: "grpc", Description: "grpc desc"},
+	}}, disk)
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	if got := a.Version(); got != "1.0.0" {
+		t.Fatalf("Version() = %q, want 1.0.0 (gRPC wins over disk)", got)
+	}
+	if got := a.Description(); got != "grpc desc" {
+		t.Fatalf("Description() = %q, want grpc desc (gRPC wins)", got)
+	}
+}
+
+// testDynamicTypeResolver builds a protoregistry.Types resolver from the
+// shared dynamicContractFileDescriptorSet() — used by the createTypedConfigRequest
+// _-prefix-strip tests so the typed encode path resolves DynamicConfig without
+// a full *ExternalPluginAdapter.
+func testDynamicTypeResolver(t *testing.T) *protoregistry.Types {
+	t.Helper()
+	types, err := buildContractTypeResolver(&pb.ContractRegistry{
+		FileDescriptorSet: dynamicContractFileDescriptorSet(),
+	})
+	if err != nil {
+		t.Fatalf("buildContractTypeResolver: %v", err)
+	}
+	return types
+}
+
+// TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoModule (Bug 2)
+// is the module-path coverage for the engine `_`-prefix strip. Without the
+// strip, mapToTypedAny → protojson (DiscardUnknown=false) rejects "_config_dir"
+// as an unknown field on DynamicConfig (which declares only platform +
+// output_dir), forcing STRICT_PROTO modules to fail config decode.
+func TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoModule(t *testing.T) {
+	descriptor := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_MODULE,
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+		ConfigMessage: "workflow.plugins.test.v1.DynamicConfig",
+	}
+	cfg := map[string]any{
+		"_config_dir": "/etc/wf",
+		"platform":    "github_actions",
+	}
+	_, typed, err := createTypedConfigRequest(descriptor, cfg, testDynamicTypeResolver(t))
+	if err != nil {
+		t.Fatalf("createTypedConfigRequest (module) with _config_dir: %v", err)
+	}
+	if typed == nil {
+		t.Fatalf("expected typed *anypb.Any; got nil")
+	}
+	if _, ok := cfg["_config_dir"]; !ok {
+		t.Fatalf("cfg mutated — _config_dir removed from input map (copy-on-clean broken)")
+	}
+}
+
+// TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoStep (Bug 2 — F5)
+// is the step-path coverage. Both module and step factories funnel through
+// createTypedConfigRequest, but engine.go injects _config_dir into BOTH module
+// configs (engine.go:495-499) AND step configs (engine.go:1104-1105), so the
+// symmetric path needs explicit coverage.
+func TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoStep(t *testing.T) {
+	descriptor := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+		ConfigMessage: "workflow.plugins.test.v1.DynamicConfig",
+	}
+	cfg := map[string]any{
+		"_config_dir": "/etc/wf",
+		"platform":    "github_actions",
+	}
+	_, typed, err := createTypedConfigRequest(descriptor, cfg, testDynamicTypeResolver(t))
+	if err != nil {
+		t.Fatalf("createTypedConfigRequest (step) with _config_dir: %v", err)
+	}
+	if typed == nil {
+		t.Fatalf("expected typed *anypb.Any; got nil")
+	}
+}
+
+// TestCreateTypedConfigRequestRetainsInternalKeysInLegacyStruct asserts the
+// legacy-struct path keeps "_"-prefix keys on its *structpb.Struct payload.
+// Legacy modules consume "_config_dir" at the plugin side to resolve filesystem-
+// relative paths; the strip applies only to the typed-encode path.
+func TestCreateTypedConfigRequestRetainsInternalKeysInLegacyStruct(t *testing.T) {
+	descriptor := &pb.ContractDescriptor{
+		Kind: pb.ContractKind_CONTRACT_KIND_MODULE,
+		Mode: pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT,
+	}
+	cfg := map[string]any{"_config_dir": "/etc/wf", "name": "test"}
+	legacy, typed, err := createTypedConfigRequest(descriptor, cfg, nil)
+	if err != nil {
+		t.Fatalf("createTypedConfigRequest (legacy): %v", err)
+	}
+	if typed != nil {
+		t.Fatalf("expected nil typed for LEGACY_STRUCT mode")
+	}
+	if legacy == nil || legacy.Fields["_config_dir"] == nil {
+		t.Fatalf("legacy *structpb.Struct must retain _config_dir for legacy modules")
+	}
+}
+
+// TestEngineManifestValidatesAfterDiskOverlay is regression coverage for the
+// contract that Task 1's constructor disk-overlay flows through to
+// EngineManifest().Validate(). Locks in the F2 single-source-of-truth decision:
+// a.manifest is overlaid once in the constructor; EngineManifest() reads it
+// directly with no second-layer merge. If the overlay regresses, Validate()
+// will fail because Version (and the other required Validate fields) would
+// be empty on the synthesized pb.Manifest.
+func TestEngineManifestValidatesAfterDiskOverlay(t *testing.T) {
+	disk := &plugin.PluginManifest{
+		Name: "iac-plugin", Version: "1.0.11", Author: "GoCodeAlone", Description: "DO IaC",
+	}
+	a, err := NewExternalPluginAdapter("iac-plugin", &PluginClient{client: &adapterTestPluginServiceClient{
+		// gRPC returns Unimplemented (strict-cutover IaC plugin path).
+		manifestErr: status.Error(codes.Unimplemented, "GetManifest not implemented"),
+	}}, disk)
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+	em := a.EngineManifest()
+	if em.Version != "1.0.11" {
+		t.Fatalf("EngineManifest().Version = %q, want 1.0.11", em.Version)
+	}
+	if err := em.Validate(); err != nil {
+		t.Fatalf("EngineManifest().Validate(): %v", err)
+	}
 }

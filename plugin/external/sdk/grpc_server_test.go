@@ -6,6 +6,7 @@ import (
 	"net"
 	"testing"
 
+	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -897,6 +898,55 @@ func mustPackGRPCTestMessage(t *testing.T, msg proto.Message) *anypb.Any {
 		t.Fatalf("pack typed message: %v", err)
 	}
 	return typed
+}
+
+// stubProvider is a minimal PluginProvider returning a caller-supplied manifest.
+// Used by the WithManifestProvider tests to control provider-side fallback
+// without dragging in goplugin.Serve machinery.
+type stubProvider struct {
+	manifest PluginManifest
+}
+
+func (p *stubProvider) Manifest() PluginManifest { return p.manifest }
+
+// TestGetManifestPrefersDiskManifest locks in the precedence rule: when
+// WithManifestProvider wired a non-nil *plugin.PluginManifest, GetManifest
+// returns its fields, ignoring the PluginProvider.Manifest() fallback.
+func TestGetManifestPrefersDiskManifest(t *testing.T) {
+	disk := &pluginpkg.PluginManifest{
+		Name:           "embedded-plugin",
+		Version:        "1.2.3",
+		Author:         "GoCodeAlone",
+		Description:    "embedded test",
+		ConfigMutable:  true,
+		SampleCategory: "iac",
+	}
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "fallback", Version: ""}})
+	s.diskManifest = disk
+	got, err := s.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Version != "1.2.3" {
+		t.Fatalf("Version = %q, want 1.2.3 (disk override)", got.Version)
+	}
+	if got.SampleCategory != "iac" {
+		t.Fatalf("SampleCategory = %q, want iac", got.SampleCategory)
+	}
+}
+
+// TestGetManifestFallsBackToProviderWhenNoDisk covers the provider-only path:
+// without a disk manifest, GetManifest falls through to provider.Manifest()
+// so existing callers without WithManifestProvider continue to work.
+func TestGetManifestFallsBackToProviderWhenNoDisk(t *testing.T) {
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "p", Version: "0.1.0"}})
+	got, err := s.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Version != "0.1.0" {
+		t.Fatalf("Version = %q, want 0.1.0 (provider fallback)", got.Version)
+	}
 }
 
 // detectContentType maps common extensions to MIME types.

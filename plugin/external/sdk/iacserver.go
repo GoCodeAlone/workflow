@@ -7,8 +7,11 @@ import (
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
 	ext "github.com/GoCodeAlone/workflow/plugin/external"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
@@ -51,6 +54,48 @@ import (
 // implement those methods at the Go level — there is no half-implemented
 // stub-and-forget-to-register failure mode.
 func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
+	return registerAllIaCProviderServicesWithOpts(s, provider, IaCServeOptions{})
+}
+
+// registerAllIaCProviderServicesWithOpts is the internal variant of
+// RegisterAllIaCProviderServices that threads IaCServeOptions through to the
+// PluginService bridge so disk-embedded manifests (via
+// IaCServeOptions.ManifestProvider) flow into the bridge's GetManifest RPC.
+// Public 2-arg callers go through RegisterAllIaCProviderServices, which
+// delegates here with a zero-valued IaCServeOptions.
+func registerAllIaCProviderServicesWithOpts(s *grpc.Server, provider any, opts IaCServeOptions) error {
+	if err := registerIaCServicesOnly(s, provider); err != nil {
+		return err
+	}
+	// Register a minimal PluginService so the wfctl host can call
+	// GetContractRegistry to discover the typed IaC services registered
+	// above. Strict-cutover IaC plugins (e.g. DO v1.0.0) that use
+	// ServeIaCPlugin do NOT register the SDK grpcServer (which normally
+	// handles GetContractRegistry for non-IaC plugins). Without this
+	// bridge, wfctl's NewExternalPluginAdapter fails with
+	// "unknown service workflow.plugin.v1.PluginService" when it calls
+	// GetContractRegistry, blocking the typedIaCAdapter load path.
+	//
+	// Guard: skip registration if PluginService is already on the server
+	// (e.g. a mixed plugin that called sdk.Serve AND RegisterAllIaC).
+	// gRPC panics on double-registration; the guard prevents that.
+	if _, alreadyRegistered := s.GetServiceInfo()[pb.PluginService_ServiceDesc.ServiceName]; !alreadyRegistered {
+		pb.RegisterPluginServiceServer(s, &iacPluginServiceBridge{
+			grpcSrv:      s,
+			diskManifest: opts.ManifestProvider,
+		})
+	}
+	return nil
+}
+
+// registerIaCServicesOnly extracts the body of the original
+// RegisterAllIaCProviderServices (nil checks + typed-nil hardening +
+// IaCProviderRequired assertion + all optional-service auto-registration +
+// ResourceDriver auto-registration), EXCLUDING the PluginService bridge
+// registration. Kept as a separate helper so the typed-nil + nil-provider
+// hardening (R2-3) survives the extraction — moving the registration block
+// alone would have split the hardening across two call sites.
+func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	if s == nil {
 		return fmt.Errorf("RegisterAllIaCProviderServices: grpc server is nil")
 	}
@@ -96,36 +141,21 @@ func RegisterAllIaCProviderServices(s *grpc.Server, provider any) error {
 	if v, ok := provider.(pb.ResourceDriverServer); ok {
 		pb.RegisterResourceDriverServer(s, v)
 	}
-
-	// Register a minimal PluginService so the wfctl host can call
-	// GetContractRegistry to discover the typed IaC services registered
-	// above. Strict-cutover IaC plugins (e.g. DO v1.0.0) that use
-	// ServeIaCPlugin do NOT register the SDK grpcServer (which normally
-	// handles GetContractRegistry for non-IaC plugins). Without this
-	// bridge, wfctl's NewExternalPluginAdapter fails with
-	// "unknown service workflow.plugin.v1.PluginService" when it calls
-	// GetContractRegistry, blocking the typedIaCAdapter load path.
-	//
-	// Guard: skip registration if PluginService is already on the server
-	// (e.g. a mixed plugin that called sdk.Serve AND RegisterAllIaC).
-	// gRPC panics on double-registration; the guard prevents that.
-	if _, alreadyRegistered := s.GetServiceInfo()[pb.PluginService_ServiceDesc.ServiceName]; !alreadyRegistered {
-		pb.RegisterPluginServiceServer(s, &iacPluginServiceBridge{grpcSrv: s})
-	}
 	return nil
 }
 
 // iacPluginServiceBridge is a minimal pb.PluginServiceServer registered on
-// the gRPC server by RegisterAllIaCProviderServices. It implements only
-// GetContractRegistry, delegating to BuildContractRegistry so the wfctl
-// host can discover which typed IaC services the plugin registered.
+// the gRPC server by RegisterAllIaCProviderServices. It implements
+// GetContractRegistry (always) plus GetManifest (when diskManifest is wired
+// via IaCServeOptions.ManifestProvider).
 //
-// All other PluginService methods (InvokeService, GetManifest, etc.) remain
+// Other PluginService methods (InvokeService, GetModuleTypes, etc.) remain
 // unimplemented (via UnimplementedPluginServiceServer) — strict-cutover IaC
 // plugins do not support string-dispatch or module/step/trigger contracts.
 type iacPluginServiceBridge struct {
 	pb.UnimplementedPluginServiceServer
-	grpcSrv *grpc.Server
+	grpcSrv      *grpc.Server
+	diskManifest *pluginpkg.PluginManifest
 }
 
 // GetContractRegistry returns the set of gRPC services registered on
@@ -134,6 +164,26 @@ type iacPluginServiceBridge struct {
 // etc.) after loading an IaC plugin via discoverAndLoadIaCProvider.
 func (b *iacPluginServiceBridge) GetContractRegistry(_ context.Context, _ *emptypb.Empty) (*pb.ContractRegistry, error) {
 	return BuildContractRegistry(b.grpcSrv), nil
+}
+
+// GetManifest returns the disk-embedded *plugin.PluginManifest as a
+// *pb.Manifest when set via IaCServeOptions.ManifestProvider. Returns
+// codes.Unimplemented when no manifest is wired, which triggers the engine's
+// disk-fallback path (workflow plan Task 1) — so even IaC plugins that
+// haven't adopted sdk.EmbedManifest still get clean registration via the
+// engine's manager.go-loaded plugin.json.
+func (b *iacPluginServiceBridge) GetManifest(_ context.Context, _ *emptypb.Empty) (*pb.Manifest, error) {
+	if b.diskManifest == nil {
+		return nil, status.Error(codes.Unimplemented, "manifest not embedded; engine falls back to disk plugin.json")
+	}
+	return &pb.Manifest{
+		Name:           b.diskManifest.Name,
+		Version:        b.diskManifest.Version,
+		Author:         b.diskManifest.Author,
+		Description:    b.diskManifest.Description,
+		ConfigMutable:  b.diskManifest.ConfigMutable,
+		SampleCategory: b.diskManifest.SampleCategory,
+	}, nil
 }
 
 // IaCServeOptions configures the IaC plugin gRPC server entrypoint.
@@ -147,6 +197,13 @@ type IaCServeOptions struct {
 	// ServeIaCPlugin uses ext.Handshake (the canonical wfctl<->plugin
 	// handshake — required for compatibility with the workflow host).
 	PluginInfo *PluginInfo
+
+	// ManifestProvider, when set, is returned by the bridge's GetManifest
+	// RPC. Typically populated via sdk.MustEmbedManifest from a go:embed-ed
+	// plugin.json. When nil, GetManifest returns codes.Unimplemented and the
+	// engine falls back to its manager.go-loaded plugin.json (workflow plan
+	// Task 1).
+	ManifestProvider *pluginpkg.PluginManifest
 }
 
 // PluginInfo carries the metadata that go-plugin needs to serve an IaC
@@ -174,17 +231,20 @@ type PluginInfo struct {
 // servePlugin pattern in serve.go.
 type iacGRPCPlugin struct {
 	provider any
+	opts     IaCServeOptions
 }
 
 // GRPCServer is invoked by go-plugin once it has constructed the
-// *grpc.Server. Delegates to RegisterAllIaCProviderServices so every
-// typed IaC service the provider satisfies gets registered in one call.
+// *grpc.Server. Delegates to registerAllIaCProviderServicesWithOpts so every
+// typed IaC service the provider satisfies gets registered in one call AND
+// the bridge picks up IaCServeOptions.ManifestProvider for the GetManifest
+// RPC.
 //
 // Returning an error here causes go-plugin to abort plugin startup —
 // surfacing missing required methods as a plugin-startup error rather
 // than a generic "unimplemented" status at the first RPC dispatch.
 func (p *iacGRPCPlugin) GRPCServer(_ *goplugin.GRPCBroker, s *grpc.Server) error {
-	return RegisterAllIaCProviderServices(s, p.provider)
+	return registerAllIaCProviderServicesWithOpts(s, p.provider, p.opts)
 }
 
 // GRPCClient is unused on the plugin side. The workflow host (wfctl)
@@ -222,7 +282,7 @@ func ServeIaCPlugin(provider any, opts IaCServeOptions) {
 	goplugin.Serve(&goplugin.ServeConfig{
 		HandshakeConfig: hs,
 		Plugins: goplugin.PluginSet{
-			"iac": &iacGRPCPlugin{provider: provider},
+			"iac": &iacGRPCPlugin{provider: provider, opts: opts},
 		},
 		GRPCServer: goplugin.DefaultGRPCServer,
 	})

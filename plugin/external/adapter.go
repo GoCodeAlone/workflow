@@ -32,6 +32,7 @@ type ExternalPluginAdapter struct {
 	name                string
 	client              *PluginClient
 	manifest            *pb.Manifest
+	diskManifest        *plugin.PluginManifest // fallback when gRPC GetManifest is Unimplemented or returns empty Version
 	contractRegistry    *pb.ContractRegistry
 	contractRegistryErr error
 	contracts           contractDescriptorCache
@@ -81,9 +82,38 @@ func NewErrorModule(name string, err error) modular.Module {
 	return &errorModule{name: name, err: err}
 }
 
+// manifestFromDisk field-maps a canonical *plugin.PluginManifest into the
+// *pb.Manifest the adapter caches. Used as the disk-manifest fallback when
+// the plugin's gRPC GetManifest RPC returns codes.Unimplemented or an empty
+// Version. Maps all 6 scalar fields of pb.Manifest.
+func manifestFromDisk(m *plugin.PluginManifest) *pb.Manifest {
+	if m == nil {
+		return nil
+	}
+	return &pb.Manifest{
+		Name:           m.Name,
+		Version:        m.Version,
+		Author:         m.Author,
+		Description:    m.Description,
+		ConfigMutable:  m.ConfigMutable,
+		SampleCategory: m.SampleCategory,
+	}
+}
+
 // NewExternalPluginAdapter creates an adapter from a connected plugin client.
-func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPluginAdapter, error) {
+// diskManifest is the *plugin.PluginManifest loaded by the manager at
+// manager.go:108 via pluginpkg.LoadManifest + Validate. It is used as the
+// canonical fallback when the plugin's gRPC GetManifest RPC returns
+// codes.Unimplemented (strict-cutover IaC plugins) or an empty Version
+// (defensive). Pass nil only in tests that exercise the no-disk fallback
+// path; production callers must pass the manager-loaded manifest.
+func NewExternalPluginAdapter(name string, client *PluginClient, diskManifest *plugin.PluginManifest) (*ExternalPluginAdapter, error) {
 	ctx := context.Background()
+	// Precedence rule (load-bearing): gRPC GetManifest is authoritative when it
+	// returns a non-empty Version. Disk-manifest fallback fires only when gRPC
+	// returns Unimplemented (strict-cutover IaC plugins) OR returns an empty
+	// Version. EngineManifest() reads a.manifest directly — no second-layer
+	// overlay, to avoid precedence ambiguity (see workflow ADR-0031 + plan F2).
 	manifest, err := client.client.GetManifest(ctx, &emptypb.Empty{})
 	if err != nil {
 		if status.Code(err) != codes.Unimplemented {
@@ -91,10 +121,19 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 		}
 		// Strict-cutover IaC plugins (e.g. workflow-plugin-digitalocean v1.0.0+)
 		// register only PluginService.GetContractRegistry via the iacPluginServiceBridge
-		// and leave GetManifest unimplemented. Synthesize a minimal manifest from the
-		// plugin name so adapter.Name() / Version() / Description() accessors return
-		// sensible values; downstream code keys off the param-passed name anyway.
-		manifest = &pb.Manifest{Name: name}
+		// and leave GetManifest unimplemented. Prefer disk-loaded plugin.json fields;
+		// fall back to a name-only synthesized manifest to preserve PR #627 tolerance.
+		if dm := manifestFromDisk(diskManifest); dm != nil {
+			manifest = dm
+		} else {
+			manifest = &pb.Manifest{Name: name}
+		}
+	} else if manifest != nil && manifest.Version == "" {
+		// gRPC returned a manifest but Version is empty (auto-synthesized or
+		// misconfigured plugin). Overlay missing fields from disk if available.
+		if dm := manifestFromDisk(diskManifest); dm != nil {
+			manifest = dm
+		}
 	}
 	var triggerSetupErr error
 	triggerTypes, triggerErr := client.client.GetTriggerTypes(ctx, &emptypb.Empty{})
@@ -119,6 +158,7 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 		name:            name,
 		client:          client,
 		manifest:        manifest,
+		diskManifest:    diskManifest,
 		triggerSetupErr: triggerSetupErr,
 	}
 	if registry, registryErr := client.client.GetContractRegistry(ctx, &emptypb.Empty{}); registryErr == nil {
@@ -263,7 +303,14 @@ func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]
 		}
 		return s, nil, nil
 	}
-	typed, err := mapToTypedAny(descriptor.ConfigMessage, cfg, resolver)
+	// Strip engine-internal "_"-prefix keys before proto decode. STRICT_PROTO
+	// and PROTO_WITH_LEGACY_STRUCT modules use protojson with DiscardUnknown
+	// = false (convert.go:62), which rejects engine internals like
+	// "_config_dir" as unknown fields. Strip is copy-on-clean — the caller's
+	// original cfg map retains all keys for the legacy *structpb.Struct
+	// path below.
+	cleaned := stripInternalKeys(cfg)
+	typed, err := mapToTypedAny(descriptor.ConfigMessage, cleaned, resolver)
 	if err != nil {
 		if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, nil, fmt.Errorf("STRICT_PROTO contract for config message %q cannot use legacy Struct fallback: %w", descriptor.ConfigMessage, err)

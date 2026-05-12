@@ -324,7 +324,7 @@ func checkTypedIaCPlugin(timeout time.Duration, pluginsDir, name string) (string
 	if !ok {
 		return stdout.String(), stderr.String(), fmt.Errorf("dispensed object is %T, want *external.PluginClient", raw)
 	}
-	adapter, err := external.NewExternalPluginAdapter(name, pluginClient)
+	adapter, err := external.NewExternalPluginAdapter(name, pluginClient, nil)
 	if err != nil {
 		return stdout.String(), stderr.String(), err
 	}

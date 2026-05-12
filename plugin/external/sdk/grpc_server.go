@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
+	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
@@ -30,6 +31,12 @@ type grpcServer struct {
 	callbackClient pb.EngineCallbackServiceClient
 	callbackConn   *grpc.ClientConn
 	broker         *goplugin.GRPCBroker
+
+	// diskManifest, when non-nil, takes precedence over provider.Manifest()
+	// in GetManifest. Set via sdk.WithManifestProvider — lets plugins
+	// compile-time embed plugin.json without re-declaring fields in the
+	// PluginProvider implementation. Per workflow ADR-0031.
+	diskManifest *pluginpkg.PluginManifest
 }
 
 // newGRPCServer creates a gRPC server implementation wrapping the given provider.
@@ -133,6 +140,16 @@ func (s *grpcSubscriber) Unsubscribe(topic string) error {
 // --- Metadata RPCs ---
 
 func (s *grpcServer) GetManifest(_ context.Context, _ *emptypb.Empty) (*pb.Manifest, error) {
+	if s.diskManifest != nil {
+		return &pb.Manifest{
+			Name:           s.diskManifest.Name,
+			Version:        s.diskManifest.Version,
+			Author:         s.diskManifest.Author,
+			Description:    s.diskManifest.Description,
+			ConfigMutable:  s.diskManifest.ConfigMutable,
+			SampleCategory: s.diskManifest.SampleCategory,
+		}, nil
+	}
 	m := s.provider.Manifest()
 	return &pb.Manifest{
 		Name:           m.Name,

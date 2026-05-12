@@ -166,7 +166,7 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 		return nil, fmt.Errorf("plugin %q: dispensed object is not *PluginClient (got %T)", name, raw)
 	}
 
-	adapter, err := NewExternalPluginAdapter(name, pluginClient)
+	adapter, err := NewExternalPluginAdapter(name, pluginClient, manifest)
 	if err != nil {
 		client.Kill()
 		return nil, fmt.Errorf("create adapter for plugin %q: %w", name, err)
