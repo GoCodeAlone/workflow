@@ -303,6 +303,18 @@ func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]
 		}
 		return s, nil, nil
 	}
+	// Steps with STRICT_PROTO mode but no ConfigMessage are input-only
+	// (eventbus.ack, eventbus.publish, etc.) — they declare InputMessage +
+	// OutputMessage but no per-instance config schema. Encode cfg as legacy
+	// struct only; typed payload is nil. The plugin's typed factory reads
+	// data from the input message, not from the config.
+	if descriptor.ConfigMessage == "" {
+		s, err := mapToStruct(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode config as Struct (input-only typed contract): %w", err)
+		}
+		return s, nil, nil
+	}
 	// Strip engine-internal "_"-prefix keys before proto decode. STRICT_PROTO
 	// and PROTO_WITH_LEGACY_STRUCT modules use protojson with DiscardUnknown
 	// = false (convert.go:62), which rejects engine internals like

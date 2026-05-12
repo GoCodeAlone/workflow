@@ -1022,6 +1022,33 @@ func TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoStep(t *testing
 	}
 }
 
+// TestCreateTypedConfigRequestEmptyConfigMessageStrictProto covers step
+// contracts that declare STRICT_PROTO with InputMessage + OutputMessage but
+// no ConfigMessage (input-only steps like step.eventbus.ack /
+// step.eventbus.publish). The engine must encode cfg as a legacy
+// *structpb.Struct, NOT attempt to encode an unnamed typed proto.
+func TestCreateTypedConfigRequestEmptyConfigMessageStrictProto(t *testing.T) {
+	descriptor := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		StepType:      "step.eventbus.ack",
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+		InputMessage:  "workflow.plugin.eventbus.v1.AckRequest",
+		OutputMessage: "workflow.plugin.eventbus.v1.AckResponse",
+		// ConfigMessage intentionally empty — step has no per-instance
+		// config schema; data flows via the input message.
+	}
+	legacy, typed, err := createTypedConfigRequest(descriptor, nil, nil)
+	if err != nil {
+		t.Fatalf("createTypedConfigRequest with empty ConfigMessage: %v", err)
+	}
+	if typed != nil {
+		t.Fatalf("expected nil typed *anypb.Any for input-only step contract; got %v", typed)
+	}
+	if legacy != nil && len(legacy.Fields) != 0 {
+		t.Fatalf("expected empty legacy struct for nil cfg; got %v", legacy.Fields)
+	}
+}
+
 // TestCreateTypedConfigRequestRetainsInternalKeysInLegacyStruct asserts the
 // legacy-struct path keeps "_"-prefix keys on its *structpb.Struct payload.
 // Legacy modules consume "_config_dir" at the plugin side to resolve filesystem-
