@@ -6,7 +6,7 @@
 
 **Architecture:** Engine threads disk-loaded `*plugin.PluginManifest` (already loaded at `manager.go:108`) into `NewExternalPluginAdapter` as a fallback when gRPC `GetManifest` is Unimplemented or returns empty `Version`. New SDK helper `sdk.EmbedManifest([]byte) (*plugin.PluginManifest, error)` lets plugins compile-time-embed `plugin.json`. Engine strips `_`-prefix keys from cfg before `mapToTypedAny` (copy-on-clean; legacy `*structpb.Struct` path keeps `_config_dir`).
 
-**Tech Stack:** Go 1.23, gRPC, hashicorp/go-plugin (GoCodeAlone fork v1.7.0), protobuf/protojson.
+**Tech Stack:** Go 1.26.0 (per repo `go.mod`), gRPC, hashicorp/go-plugin (GoCodeAlone fork v1.7.0), protobuf/protojson.
 
 **Base branch:** `fix/strict-contracts-ergonomics-v0.51.3` (off origin/main); design + ADR already committed.
 
