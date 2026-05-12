@@ -303,15 +303,18 @@ func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]
 		}
 		return s, nil, nil
 	}
-	// Steps with STRICT_PROTO mode but no ConfigMessage are input-only
-	// (eventbus.ack, eventbus.publish, etc.) — they declare InputMessage +
-	// OutputMessage but no per-instance config schema. Encode cfg as legacy
-	// struct only; typed payload is nil. The plugin's typed factory reads
-	// data from the input message, not from the config.
+	// Contracts that declare a typed Mode (STRICT_PROTO or
+	// PROTO_WITH_LEGACY_STRUCT) but leave ConfigMessage empty have no
+	// per-instance config schema — primarily input-only steps like
+	// step.eventbus.ack/publish/consume where data flows through the
+	// InputMessage proto, but also applies to any contract Kind that
+	// legitimately omits a config schema. Encode cfg as legacy struct
+	// only; typed payload is nil. The plugin's typed factory reads data
+	// from the input message (or other typed payload), not from config.
 	if descriptor.ConfigMessage == "" {
 		s, err := mapToStruct(cfg)
 		if err != nil {
-			return nil, nil, fmt.Errorf("encode config as Struct (input-only typed contract): %w", err)
+			return nil, nil, fmt.Errorf("encode config as Struct (no typed config schema): %w", err)
 		}
 		return s, nil, nil
 	}

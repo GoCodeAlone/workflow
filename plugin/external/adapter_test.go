@@ -1022,11 +1022,13 @@ func TestCreateTypedConfigRequestStripsInternalKeysForStrictProtoStep(t *testing
 	}
 }
 
-// TestCreateTypedConfigRequestEmptyConfigMessageStrictProto covers step
+// TestCreateTypedConfigRequestEmptyConfigMessageStrictProto covers
 // contracts that declare STRICT_PROTO with InputMessage + OutputMessage but
 // no ConfigMessage (input-only steps like step.eventbus.ack /
-// step.eventbus.publish). The engine must encode cfg as a legacy
-// *structpb.Struct, NOT attempt to encode an unnamed typed proto.
+// step.eventbus.publish). The engine must NOT attempt to encode an
+// unnamed typed proto; typed payload is nil, legacy struct mirrors cfg
+// (nil cfg → nil legacy via mapToStruct(nil); non-nil cfg → populated
+// struct).
 func TestCreateTypedConfigRequestEmptyConfigMessageStrictProto(t *testing.T) {
 	descriptor := &pb.ContractDescriptor{
 		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
@@ -1037,15 +1039,28 @@ func TestCreateTypedConfigRequestEmptyConfigMessageStrictProto(t *testing.T) {
 		// ConfigMessage intentionally empty — step has no per-instance
 		// config schema; data flows via the input message.
 	}
+	// nil cfg — mapToStruct(nil) returns nil; legacy is permitted to be nil.
 	legacy, typed, err := createTypedConfigRequest(descriptor, nil, nil)
 	if err != nil {
-		t.Fatalf("createTypedConfigRequest with empty ConfigMessage: %v", err)
+		t.Fatalf("createTypedConfigRequest with nil cfg + empty ConfigMessage: %v", err)
 	}
 	if typed != nil {
 		t.Fatalf("expected nil typed *anypb.Any for input-only step contract; got %v", typed)
 	}
-	if legacy != nil && len(legacy.Fields) != 0 {
-		t.Fatalf("expected empty legacy struct for nil cfg; got %v", legacy.Fields)
+	if legacy != nil {
+		t.Fatalf("expected nil legacy struct for nil cfg; got %v", legacy.Fields)
+	}
+	// Non-nil cfg — fields populated into legacy struct; typed still nil.
+	cfg := map[string]any{"timeout_ms": float64(5000)}
+	legacy2, typed2, err := createTypedConfigRequest(descriptor, cfg, nil)
+	if err != nil {
+		t.Fatalf("createTypedConfigRequest with cfg + empty ConfigMessage: %v", err)
+	}
+	if typed2 != nil {
+		t.Fatalf("expected nil typed *anypb.Any for input-only step contract; got %v", typed2)
+	}
+	if legacy2 == nil || legacy2.Fields["timeout_ms"] == nil {
+		t.Fatalf("expected legacy struct with timeout_ms populated; got %v", legacy2)
 	}
 }
 
