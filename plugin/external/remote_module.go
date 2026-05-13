@@ -70,9 +70,11 @@ func (m *RemoteModule) Dependencies() []string {
 // module so modular's Init() walker can honour them. Called by the engine
 // from BuildFromConfig immediately after the factory returns and before
 // app.RegisterModule, but only when the module's `modCfg.DependsOn` is
-// non-empty AND the module satisfies `interface{ SetDependencies([]string) }`
-// — modules with no declared dependsOn are skipped so a constructor-time
-// default isn't clobbered with a SetDependencies(nil) call. See workflow#663.
+// **non-empty after filtering** (filterResolvableDeps drops empty strings
+// + names not present in cfg.Modules) AND the module satisfies
+// `interface{ SetDependencies([]string) }` — modules with no resolvable
+// dependsOn are skipped so a constructor-time default isn't clobbered with
+// a SetDependencies(nil) call. See workflow#663.
 //
 // Defensive copy: although the engine already copies before calling, the
 // setter is exported and Dependencies() exposes the same backing array to

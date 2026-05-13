@@ -71,12 +71,14 @@ func (m *fakePlainModule) ProvidesServices() []modular.ServiceProvider   { retur
 func (m *fakePlainModule) RequiresServices() []modular.ServiceDependency { return nil }
 
 // TestEngine_BuildFromConfig_PlumbsDependsOnIntoModule pins the production
-// path that closes workflow#663: BuildFromConfig must call SetDependencies
-// on each module that implements it, with a defensive copy of
-// modCfg.DependsOn, before app.RegisterModule. Without this end-to-end
-// test, a future refactor that moves the structural type assertion out
-// of the registration loop (or changes the contract) would silently
-// regress the BMW PR #279/280 fix and only image-launch CI would catch it.
+// path that closes workflow#663: for a module that implements the
+// SetDependencies setter AND has at least one resolvable dependsOn entry
+// (after filterResolvableDeps drops empties + unknown names),
+// BuildFromConfig must call SetDependencies with a defensive copy of the
+// filtered slice before app.RegisterModule. Without this end-to-end test,
+// a future refactor that moves the structural type assertion out of the
+// registration loop (or changes the contract) would silently regress the
+// BMW PR #279/280 fix and only image-launch CI would catch it.
 func TestEngine_BuildFromConfig_PlumbsDependsOnIntoModule(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())

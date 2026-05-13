@@ -48,9 +48,12 @@ func TestRemoteModule_SetDependencies_EmptySliceIsEmpty(t *testing.T) {
 
 // TestRemoteModule_SetDependencies_Overwrites pins that a second call
 // replaces the previous slice rather than appending. The engine calls
-// SetDependencies exactly once per module per BuildFromConfig, but
-// pinning the contract guards against future engine-side double-calls
-// (e.g., a config-transform hook that mutates dependsOn post-registration).
+// SetDependencies at most once per BuildFromConfig — only on modules
+// that implement the setter AND have at least one resolvable dependsOn
+// entry after filterResolvableDeps drops empties + unknown names. But
+// pinning the overwrite contract guards against future engine-side
+// double-calls (e.g., a config-transform hook that mutates dependsOn
+// post-registration and re-fires the plumb).
 func TestRemoteModule_SetDependencies_Overwrites(t *testing.T) {
 	m := &RemoteModule{name: "x"}
 	m.SetDependencies([]string{"a", "b"})
