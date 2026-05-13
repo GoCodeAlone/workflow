@@ -259,20 +259,31 @@ git commit -m "feat(#653): T1 — delete legacy AWS IaC module files + regressio
 **Files:**
 - Replace: `module/platform_dns_backends.go` (full rewrite — delete route53Backend, add awsRoute53ErrorBackend)
 - Modify: `module/platform_dns.go` (update init() — replace route53Backend with awsRoute53ErrorBackend)
-- Modify: `module/platform_dns_test.go` (add test for provider: aws migration error)
+- Modify: `module/platform_dns_test.go` (remove TestPlatformDNS_Route53_PlanReturnsStub and TestPlatformDNS_Route53_ApplyNotImplemented; add TestPlatformDNS_AWSBackendMigrationError)
 
 **Step 1: Write the failing test for the AWS provider migration error**
 
-Add to `module/platform_dns_test.go`:
+Add to `module/platform_dns_test.go`, and remove the two existing Route53 stub tests
+(`TestPlatformDNS_Route53_PlanReturnsStub` and `TestPlatformDNS_Route53_ApplyNotImplemented`)
+that test the backend being deleted.
+
+New test (note: `Init()` succeeds because the `awsRoute53ErrorBackend` factory returns a struct,
+not an error; the migration error fires at operation time via `Plan()`):
 
 ```go
 func TestPlatformDNS_AWSBackendMigrationError(t *testing.T) {
-    cfg := map[string]any{"provider": "aws", "zone": map[string]any{"name": "example.com"}}
-    m := NewPlatformDNS("test-dns", cfg)
-    app := mock.NewMockApplication()
-    err := m.Init(app)
+    app := module.NewMockApplication()
+    m := module.NewPlatformDNS("test-dns", map[string]any{
+        "provider": "aws",
+        "zone":     map[string]any{"name": "example.com"},
+    })
+    if err := m.Init(app); err != nil {
+        t.Fatalf("Init should succeed (backend registered): %v", err)
+    }
+    // Migration error fires at operation time, not Init time.
+    _, err := m.Plan()
     if err == nil {
-        t.Fatal("expected migration error for provider: aws, got nil")
+        t.Fatal("expected migration error from Plan() for provider: aws, got nil")
     }
     errStr := err.Error()
     if !strings.Contains(errStr, "infra.dns") {
@@ -285,7 +296,7 @@ func TestPlatformDNS_AWSBackendMigrationError(t *testing.T) {
 ```
 
 Run: `cd /Users/jon/workspace/workflow && go test ./module/ -run TestPlatformDNS_AWSBackendMigrationError -v 2>&1`
-Expected: compile error (awsRoute53ErrorBackend doesn't exist yet) or test FAIL (mock backend registered under "aws" currently would not return an error).
+Expected: test FAIL — route53Backend.Plan() currently returns a stub (not a migration error).
 
 **Step 2: Replace module/platform_dns_backends.go**
 
@@ -610,38 +621,86 @@ git commit -m "feat(#653): T3 — strip registration sites, add infra.autoscalin
 
 **Step 1: Write the failing tests first (TDD)**
 
-Add to engine tests (create `engine_legacyaws_test.go`):
+Create `engine_legacyaws_test.go`. Use package `workflow` (same as `engine_legacy_do_migration_test.go`)
+and `newIsolatedEngine(t)` (defined in that file — visible at compile time since both are in package `workflow`).
+Do NOT use `workflow_test` package or `minimalConfigWithModule()` (that helper does not exist).
 
 ```go
-package workflow_test
+package workflow
 
 import (
     "strings"
     "testing"
+
+    "github.com/GoCodeAlone/workflow/config"
 )
 
-func TestBuildFromConfig_LegacyAWSModuleError(t *testing.T) {
-    legacyTypes := []string{"platform.ecs", "platform.apigateway", "platform.autoscaling", "platform.networking"}
-    for _, typ := range legacyTypes {
-        t.Run(typ, func(t *testing.T) {
-            cfg := minimalConfigWithModule(typ, "my-module") // helper from engine_test.go
-            _, err := BuildFromConfig(cfg)
+func TestLegacyAWSModuleError_PluginNotLoaded(t *testing.T) {
+    cases := []struct{ legacyType, hint string }{
+        {"platform.ecs", "infra.container_service"},
+        {"platform.apigateway", "infra.api_gateway"},
+        {"platform.autoscaling", "infra.autoscaling_group"},
+        {"platform.networking", "infra.vpc"},
+    }
+    for _, tc := range cases {
+        t.Run(tc.legacyType, func(t *testing.T) {
+            e := newIsolatedEngine(t)
+            cfg := &config.WorkflowConfig{
+                Modules: []config.ModuleConfig{
+                    {Name: "x", Type: tc.legacyType, Config: map[string]any{}},
+                },
+            }
+            err := e.BuildFromConfig(cfg)
             if err == nil {
-                t.Fatalf("expected migration error for %q, got nil", typ)
+                t.Fatalf("expected error for legacy type %q", tc.legacyType)
             }
-            errStr := err.Error()
-            if !strings.Contains(errStr, "v0.53.0") {
-                t.Errorf("error for %q missing version, got: %s", typ, errStr)
-            }
-            if !strings.Contains(errStr, "workflow-plugin-aws") {
-                t.Errorf("error for %q missing plugin hint, got: %s", typ, errStr)
+            msg := err.Error()
+            for _, want := range []string{
+                "removed from workflow core",
+                "workflow-plugin-aws",
+                "Install workflow-plugin-aws",
+                tc.hint,
+            } {
+                if !strings.Contains(msg, want) {
+                    t.Errorf("error for %q missing %q; got: %s", tc.legacyType, want, msg)
+                }
             }
         })
     }
 }
+
+func TestLegacyAWSModuleError_PluginLoaded(t *testing.T) {
+    e := newIsolatedEngine(t)
+    // Register stub iac.provider factory to simulate workflow-plugin-aws being loaded.
+    e.AddModuleType("iac.provider", func(name string, cfg map[string]any) modular.Module { return nil })
+
+    cfg := &config.WorkflowConfig{
+        Modules: []config.ModuleConfig{
+            {Name: "x", Type: "platform.ecs", Config: map[string]any{}},
+        },
+    }
+    err := e.BuildFromConfig(cfg)
+    if err == nil {
+        t.Fatal("expected error")
+    }
+    msg := err.Error()
+    if !strings.Contains(msg, "already loaded") {
+        t.Errorf("plugin-loaded branch must say 'already loaded'; got: %s", msg)
+    }
+    if strings.Contains(msg, "Install workflow-plugin-aws") {
+        t.Errorf("plugin-loaded branch must NOT instruct install; got: %s", msg)
+    }
+}
 ```
 
-Add to pipeline step registry tests:
+Note: `modular` must be imported — check engine_legacy_do_migration_test.go for the exact import path.
+Mirror that file exactly (it imports `"github.com/GoCodeAlone/modular"` for `modular.Module` in `AddModuleType`).
+
+Add to pipeline step registry tests (in `module/pipeline_step_registry_test.go`):
+
+Add to pipeline step registry tests (package `module`, in `module/pipeline_step_registry_test.go`).
+`Create()` signature: `(stepType, name string, config map[string]any, app any) (PipelineStep, error)`.
+
 ```go
 func TestStepRegistry_LegacyAWSStepError(t *testing.T) {
     legacySteps := []string{
@@ -650,15 +709,18 @@ func TestStepRegistry_LegacyAWSStepError(t *testing.T) {
         "step.scaling_plan", "step.scaling_apply", "step.scaling_status", "step.scaling_destroy",
         "step.network_plan", "step.network_apply", "step.network_status",
     }
-    r := NewStepRegistry() // read actual constructor from pipeline_step_registry.go
+    r := NewStepRegistry()
     for _, st := range legacySteps {
         t.Run(st, func(t *testing.T) {
-            _, err := r.Create(st, nil, nil)
+            _, err := r.Create(st, "test", nil, nil)
             if err == nil {
                 t.Fatalf("expected migration error for %q, got nil", st)
             }
             if !strings.Contains(err.Error(), "v0.53.0") {
                 t.Errorf("error for %q missing version: %s", st, err)
+            }
+            if !strings.Contains(err.Error(), "workflow-plugin-aws") {
+                t.Errorf("error for %q missing plugin hint: %s", st, err)
             }
         })
     }
