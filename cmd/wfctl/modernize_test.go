@@ -553,6 +553,7 @@ func TestModernizeAllRulesRegistered(t *testing.T) {
 		"camelcase-config",
 		"request-parse-config",
 		"legacy-do-types",
+		"legacy-aws-types",
 	}
 	if len(rules) != len(expectedIDs) {
 		t.Errorf("expected %d rules, got %d", len(expectedIDs), len(rules))
