@@ -31,7 +31,7 @@
 |------|-------|-------|--------|
 | 1 | feat(#653): Phase 3 — tombstone platform/providers/aws/ + promote eks CI gate | Task 1, Task 2, Task 3, Task 4 | feat/issue-653-phase3-aws-drivers |
 
-**Status:** Draft
+**Status:** Locked 2026-05-13T18:30:00Z
 
 ---
 
