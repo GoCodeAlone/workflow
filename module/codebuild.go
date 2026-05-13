@@ -1,15 +1,12 @@
 package module
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/codebuild"
-	cbtypes "github.com/aws/aws-sdk-go-v2/service/codebuild/types"
+	"github.com/GoCodeAlone/workflow/internal/legacyaws"
 )
 
 // CodeBuildProjectState holds the current state of a managed CodeBuild project.
@@ -141,7 +138,7 @@ func (m *CodeBuildModule) Init(app modular.Application) error {
 		providerType = "mock"
 	}
 	if providerType == "aws" {
-		m.backend = &codebuildAWSBackend{}
+		m.backend = &codebuildAWSErrorBackend{}
 	} else {
 		m.backend = &codebuildMockBackend{}
 	}
@@ -366,224 +363,43 @@ func (b *codebuildMockBackend) listBuilds(m *CodeBuildModule) ([]*CodeBuildBuild
 	return result, nil
 }
 
-// ─── AWS CodeBuild backend ────────────────────────────────────────────────────
+// ─── AWS CodeBuild migration error backend ────────────────────────────────────
 
-// codebuildAWSBackend manages AWS CodeBuild projects and builds using
-// aws-sdk-go-v2/service/codebuild. Selected via provider: aws config.
-type codebuildAWSBackend struct{}
+// codebuildAWSErrorBackend is registered when provider: aws is set, after the
+// real AWS CodeBuild backend was removed from workflow core in v0.53.0 (issue #653).
+// All methods return an actionable migration error directing the operator to
+// workflow-plugin-aws. The mock backend (provider: mock) remains fully functional.
+type codebuildAWSErrorBackend struct{}
 
-func (b *codebuildAWSBackend) awsClient(m *CodeBuildModule) (*codebuild.Client, error) {
-	awsProv, ok := awsProviderFrom(m.provider)
-	if !ok {
-		return nil, fmt.Errorf("codebuild aws: no AWS cloud account configured")
-	}
-	cfg, err := awsProv.AWSConfig(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("codebuild aws: AWS config: %w", err)
-	}
-	return codebuild.NewFromConfig(cfg), nil
+func (b *codebuildAWSErrorBackend) createProject(m *CodeBuildModule) error {
+	return b.err(m)
 }
 
-func (b *codebuildAWSBackend) createProject(m *CodeBuildModule) error {
-	client, err := b.awsClient(m)
-	if err != nil {
-		return err
-	}
-
-	// Check if project already exists so we can update instead of create.
-	batchOut, getErr := client.BatchGetProjects(context.Background(), &codebuild.BatchGetProjectsInput{
-		Names: []string{m.state.Name},
-	})
-	projectExists := getErr == nil && len(batchOut.Projects) > 0
-
-	env := &cbtypes.ProjectEnvironment{
-		Type:           cbtypes.EnvironmentTypeLinuxContainer,
-		ComputeType:    cbtypes.ComputeType(m.state.ComputeType),
-		Image:          aws.String(m.state.Image),
-		PrivilegedMode: aws.Bool(false),
-	}
-	src := &cbtypes.ProjectSource{Type: cbtypes.SourceType(m.state.SourceType)}
-	artifacts := &cbtypes.ProjectArtifacts{Type: cbtypes.ArtifactsTypeNoArtifacts}
-
-	if projectExists {
-		if _, updateErr := client.UpdateProject(context.Background(), &codebuild.UpdateProjectInput{
-			Name:        aws.String(m.state.Name),
-			ServiceRole: aws.String(m.state.ServiceRole),
-			Environment: env,
-			Source:      src,
-			Artifacts:   artifacts,
-		}); updateErr != nil {
-			return fmt.Errorf("codebuild aws: UpdateProject: %w", updateErr)
-		}
-		m.state.Status = "ready"
-		return nil
-	}
-
-	out, err := client.CreateProject(context.Background(), &codebuild.CreateProjectInput{
-		Name:        aws.String(m.state.Name),
-		ServiceRole: aws.String(m.state.ServiceRole),
-		Environment: env,
-		Source:      src,
-		Artifacts:   artifacts,
-	})
-	if err != nil {
-		return fmt.Errorf("codebuild aws: CreateProject: %w", err)
-	}
-
-	if out.Project != nil {
-		if out.Project.Arn != nil {
-			m.state.ARN = aws.ToString(out.Project.Arn)
-		}
-		if out.Project.Created != nil {
-			m.state.CreatedAt = *out.Project.Created
-		}
-	}
-	m.state.Status = "ready"
-	return nil
+func (b *codebuildAWSErrorBackend) deleteProject(m *CodeBuildModule) error {
+	return b.err(m)
 }
 
-func (b *codebuildAWSBackend) deleteProject(m *CodeBuildModule) error {
-	client, err := b.awsClient(m)
-	if err != nil {
-		return err
-	}
-	if _, err := client.DeleteProject(context.Background(), &codebuild.DeleteProjectInput{
-		Name: aws.String(m.state.Name),
-	}); err != nil {
-		return fmt.Errorf("codebuild aws: DeleteProject: %w", err)
-	}
-	m.state.Status = "deleted"
-	return nil
+func (b *codebuildAWSErrorBackend) startBuild(m *CodeBuildModule, _ map[string]string) (*CodeBuildBuild, error) {
+	return nil, b.err(m)
 }
 
-func (b *codebuildAWSBackend) startBuild(m *CodeBuildModule, envOverrides map[string]string) (*CodeBuildBuild, error) {
-	client, err := b.awsClient(m)
-	if err != nil {
-		return nil, err
-	}
-
-	input := &codebuild.StartBuildInput{
-		ProjectName: aws.String(m.state.Name),
-	}
-	if len(envOverrides) > 0 {
-		envVars := make([]cbtypes.EnvironmentVariable, 0, len(envOverrides))
-		for k, v := range envOverrides {
-			k, v := k, v
-			envVars = append(envVars, cbtypes.EnvironmentVariable{
-				Name:  aws.String(k),
-				Value: aws.String(v),
-				Type:  cbtypes.EnvironmentVariableTypePlaintext,
-			})
-		}
-		input.EnvironmentVariablesOverride = envVars
-	}
-
-	out, err := client.StartBuild(context.Background(), input)
-	if err != nil {
-		return nil, fmt.Errorf("codebuild aws: StartBuild: %w", err)
-	}
-	if out.Build == nil {
-		return nil, fmt.Errorf("codebuild aws: StartBuild returned nil build")
-	}
-
-	build := awsCodeBuildToInternal(out.Build, envOverrides)
-	m.builds[build.ID] = build
-	return build, nil
+func (b *codebuildAWSErrorBackend) getBuildStatus(m *CodeBuildModule, _ string) (*CodeBuildBuild, error) {
+	return nil, b.err(m)
 }
 
-func (b *codebuildAWSBackend) getBuildStatus(m *CodeBuildModule, buildID string) (*CodeBuildBuild, error) {
-	client, err := b.awsClient(m)
-	if err != nil {
-		return nil, err
-	}
-	out, err := client.BatchGetBuilds(context.Background(), &codebuild.BatchGetBuildsInput{
-		Ids: []string{buildID},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("codebuild aws: BatchGetBuilds: %w", err)
-	}
-	if len(out.Builds) == 0 {
-		return nil, fmt.Errorf("codebuild: build %q not found", buildID)
-	}
-	build := awsCodeBuildToInternal(&out.Builds[0], nil)
-	m.builds[buildID] = build
-	return build, nil
+func (b *codebuildAWSErrorBackend) getBuildLogs(m *CodeBuildModule, _ string) ([]string, error) {
+	return nil, b.err(m)
 }
 
-func (b *codebuildAWSBackend) getBuildLogs(m *CodeBuildModule, buildID string) ([]string, error) {
-	build, err := b.getBuildStatus(m, buildID)
-	if err != nil {
-		return nil, err
-	}
-	return build.Logs, nil
+func (b *codebuildAWSErrorBackend) listBuilds(m *CodeBuildModule) ([]*CodeBuildBuild, error) {
+	return nil, b.err(m)
 }
 
-func (b *codebuildAWSBackend) listBuilds(m *CodeBuildModule) ([]*CodeBuildBuild, error) {
-	client, err := b.awsClient(m)
-	if err != nil {
-		return nil, err
-	}
-
-	listOut, err := client.ListBuildsForProject(context.Background(), &codebuild.ListBuildsForProjectInput{
-		ProjectName: aws.String(m.state.Name),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("codebuild aws: ListBuildsForProject: %w", err)
-	}
-	if len(listOut.Ids) == 0 {
-		return nil, nil
-	}
-
-	batchOut, err := client.BatchGetBuilds(context.Background(), &codebuild.BatchGetBuildsInput{
-		Ids: listOut.Ids,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("codebuild aws: BatchGetBuilds: %w", err)
-	}
-
-	builds := make([]*CodeBuildBuild, 0, len(batchOut.Builds))
-	for i := range batchOut.Builds {
-		build := awsCodeBuildToInternal(&batchOut.Builds[i], nil)
-		m.builds[build.ID] = build
-		builds = append(builds, build)
-	}
-	return builds, nil
-}
-
-// awsCodeBuildToInternal converts an AWS SDK Build to the internal CodeBuildBuild type.
-func awsCodeBuildToInternal(b *cbtypes.Build, envOverrides map[string]string) *CodeBuildBuild {
-	build := &CodeBuildBuild{EnvVars: envOverrides}
-	if b.Id != nil {
-		build.ID = aws.ToString(b.Id)
-	}
-	if b.ProjectName != nil {
-		build.ProjectName = aws.ToString(b.ProjectName)
-	}
-	if b.BuildStatus != "" {
-		build.Status = string(b.BuildStatus)
-	}
-	if b.CurrentPhase != nil {
-		build.Phase = aws.ToString(b.CurrentPhase)
-	}
-	if b.StartTime != nil {
-		build.StartTime = *b.StartTime
-	}
-	if b.EndTime != nil {
-		build.EndTime = b.EndTime
-	}
-	if b.BuildNumber != nil {
-		build.BuildNumber = *b.BuildNumber
-	}
-	if b.Logs != nil {
-		if b.Logs.GroupName != nil {
-			build.Logs = append(build.Logs, fmt.Sprintf("log group: %s", aws.ToString(b.Logs.GroupName)))
-		}
-		if b.Logs.StreamName != nil {
-			build.Logs = append(build.Logs, fmt.Sprintf("log stream: %s", aws.ToString(b.Logs.StreamName)))
-		}
-		if b.Logs.DeepLink != nil {
-			build.Logs = append(build.Logs, fmt.Sprintf("deep link: %s", aws.ToString(b.Logs.DeepLink)))
-		}
-	}
-	return build
+func (b *codebuildAWSErrorBackend) err(m *CodeBuildModule) error {
+	return fmt.Errorf(
+		"aws.codebuild %q: AWS CodeBuild backend removed from workflow core in %s (issue #653).\n"+
+			"Set provider: mock to continue using the in-memory mock backend.\n"+
+			"Install workflow-plugin-aws to use the real AWS backend: https://github.com/GoCodeAlone/workflow-plugin-aws",
+		m.name, legacyaws.RemovedInVersion,
+	)
 }
