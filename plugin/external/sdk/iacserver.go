@@ -40,6 +40,16 @@ import (
 //	pb.ResourceDriverServer — separate gRPC service, also auto-registered
 //	when the provider satisfies it.
 //
+// PluginService (optional step/module extension):
+//
+//	pb.PluginServiceServer — when the provider also implements pipeline
+//	steps or module types, implement this interface to handle GetStepTypes,
+//	CreateStep, ExecuteStep, DestroyStep (and/or module equivalents). The
+//	implementation MUST call sdk.BuildContractRegistry(grpcSrv) in its
+//	GetContractRegistry to ensure typed-IaC discovery still works. When the
+//	provider satisfies this interface, the minimal iacPluginServiceBridge
+//	stub is NOT registered — the provider's implementation is used directly.
+//
 // Per cycle 3 I-1 of the strict-contracts force-cutover design: plugin
 // authors write ONE call; they cannot omit registration for a capability
 // they implemented. That eliminates the registration-omission bug class
@@ -140,6 +150,16 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	}
 	if v, ok := provider.(pb.ResourceDriverServer); ok {
 		pb.RegisterResourceDriverServer(s, v)
+	}
+	// PluginService: if the provider implements pb.PluginServiceServer (e.g.
+	// to serve step types or modules alongside the IaC contract) register it
+	// directly. The registerAllIaCProviderServicesWithOpts bridge guard will
+	// then detect PluginService as already registered and skip the minimal
+	// iacPluginServiceBridge stub. Provider implementations MUST override
+	// GetContractRegistry to call BuildContractRegistry(grpcSrv) to keep
+	// contract-discovery working, since they own the full PluginService surface.
+	if v, ok := provider.(pb.PluginServiceServer); ok {
+		pb.RegisterPluginServiceServer(s, v)
 	}
 	return nil
 }
