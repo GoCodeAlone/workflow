@@ -32,7 +32,7 @@
 |------|-------|-------|--------|
 | 1 | feat(#653): remove legacy AWS IaC modules from workflow core | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6 | feat/issue-653-aws-iac-cutover-v2 |
 
-**Status:** Draft
+**Status:** Locked 2026-05-13T00:00:00Z
 
 ---
 
