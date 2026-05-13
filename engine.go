@@ -487,8 +487,31 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		}
 	}
 
-	// Compute config hash after transform hooks so the hash reflects the effective
-	// runtime config (hooks may mutate cfg before modules are registered).
+	// Reorder cfg.Modules so each module's RegisterModule call follows every
+	// module it lists in DependsOn. Resolves the init-order race that bit
+	// external-plugin consumers in BMW PR #279 (workflow#663): the modular
+	// app.Init() pass walks modules in registration order, and external-plugin
+	// module factories do not implement DependencyAware, so without this sort
+	// a consumer module's Init() can call into a broker registry that its
+	// dependency module has not populated yet.
+	//
+	// Ordering applies AFTER ConfigTransformHooks (which can inject modules) and
+	// BEFORE configHash so the hash reflects the order the engine actually
+	// builds from. topoSortModules tolerates a missing dependency target as a
+	// defensive no-op edge — schema.ValidateConfig rejects missing-target
+	// references for the *declared* modules, and a transform-injected module
+	// with an unresolvable dep simply gets placed as if the edge didn't exist
+	// (the runtime error, if any, surfaces when the dependent module fails to
+	// look up its parent in the plugin-local registry).
+	orderedModules, err := topoSortModules(cfg.Modules)
+	if err != nil {
+		return fmt.Errorf("module dependency ordering failed: %w", err)
+	}
+	cfg.Modules = orderedModules
+
+	// Compute config hash after transform hooks + dependency ordering so the
+	// hash reflects the effective runtime config (hooks may mutate cfg, and
+	// topoSortModules may reorder cfg.Modules, before modules are registered).
 	// Reset first so a marshal failure never leaves a stale hash from a previous build.
 	e.configHash = ""
 	if configBytes, err := yaml.Marshal(cfg); err == nil {

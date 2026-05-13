@@ -23,6 +23,10 @@ Configs that still reference the legacy types now fail to load with an actionabl
 
 ## [Unreleased]
 
+### Fixed (issue #663)
+
+- **`StdEngine.BuildFromConfig` now topologically sorts `cfg.Modules` by yaml `dependsOn:` before module registration.** Previously the engine walked `cfg.Modules` in slice order and the modular framework's `app.Init()` then walked in registration order. For external-plugin modules (which do not implement `DependencyAware`), yaml-level `dependsOn:` was validated by the schema but ignored at init time — a child module's `Init()` could fire before its parent's `Init()` had registered runtime state in a plugin-local registry (broker, factory table, etc.), causing startup races like the "broker not registered within 10s" failure that bit BMW PR #279. The new `topoSortModules` (in `engine_module_order.go`) uses Kahn's algorithm with a stable tie-break on declared index, tolerates missing dependency targets (schema validation catches those separately), and returns an error listing every module that could not be ordered (cycle members and their downstream dependents — Kahn cannot distinguish them by inDegree alone) if dependencies form a loop. 12 unit tests cover the BMW shape, parallel chains, cycles + their downstream dependents, and edge cases. Operators who used the alphabetical-prefix workaround (renaming a dependency to `aaa-…`) can now revert to canonical names and rely on `dependsOn:` to drive the order.
+
 ### Added
 
 - **Engine-side sensitive-output routing** (v0.27.0): `ResourceDriver` outputs flagged with
