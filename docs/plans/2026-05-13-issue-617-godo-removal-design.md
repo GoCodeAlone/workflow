@@ -43,9 +43,10 @@ AWS SDK usage is **explicitly out of scope** for this issue — `iam/`, `plugin/
 | `module/platform_do_networking.go` | 370 | VPC + firewall module |
 | `module/platform_do_networking_test.go` | 264 | tests |
 | `module/platform_doks.go` | 329 | DOKS Kubernetes module |
+| `module/platform_doks_test.go` | 164 | tests |
 | `module/cloud_account_do.go` | 74 | DO credential resolvers + `doClient()` |
 | `module/pipeline_step_do.go` | 220 | 5 DO App Platform pipeline steps |
-| **Total** | **~3042** | |
+| **Total (12 files)** | **~3206** | |
 
 ### Registration / schema sites
 
@@ -160,7 +161,7 @@ The engine already has a `modernize` command (`mcp__workflow__modernize` tool + 
 - `step/type: step.do_deploy/status/destroy` → `step.iac_apply/status/destroy` with `module` field re-bound to the migrated module name
 - `step/type: step.do_logs/scale` → emit a `wfctl: cannot rewrite — see migration guide` annotation; do not delete the step (operator must address manually)
 
-This reduces migration friction from manual-rewrite to one command + manual review of the two annotated step types. Folds into T5.
+This reduces migration friction from manual-rewrite to one `wfctl modernize --apply <config.yaml>` invocation + manual review of the two annotated step types. (Flag is `--apply`, verified against `cmd/wfctl/modernize.go`.) Folds into T5.
 
 ## Assumptions (load-bearing)
 
@@ -218,16 +219,28 @@ If any cell of this matrix is wrong, the implementer files an issue against `wor
 
 Single PR, ~5 tasks:
 
-1. **T1 — Delete legacy module + step files (11 files).** Pure deletion; tests assert removal.
+1. **T1 — Delete legacy module + step files (12 files).** Pure deletion (all 12 rows in the "Module files" table above, including `module/platform_doks_test.go`); a new test asserts removal of registry entries.
 2. **T2 — Strip registration sites (9 files).** Edits to `plugins/platform/plugin.go`, `schema/schema.go`, `schema/module_schema.go`, `schema/step_schema_builtins.go`, `cmd/wfctl/type_registry.go`, `cmd/wfctl/infra.go`, `cmd/wfctl/deploy_providers.go`, `cmd/wfctl/ci_run_dryrun.go`, `plugins/platform/plugin_test.go`, `module/multi_region.go`. Implementer also reviews `cmd/wfctl/infra_apply_test.go` line 1990 (negative-test fixture using `type: platform.do_app`) — replace with a synthetic non-existent type or remove if the negative case is redundant.
 3. **T3 — Add load-time migration error + tests.** Engine fails-closed on legacy DO types with actionable message; new test fixtures cover all 5 legacy types.
-4. **T4 — `go mod tidy` + grep gate.** Confirm zero `digitalocean/godo` imports remain; update go.sum; add CI gate. Exact grep invocation:
+4. **T4 — `go mod tidy` + grep gate.** Confirm zero `digitalocean/godo` imports remain in code AND in module files; update go.sum; add CI gate.
+
+   Tidy steps:
+   ```sh
+   go mod tidy            # root module
+   (cd example && go mod tidy)   # standalone example/ sub-module also pins godo as indirect
+   ```
+
+   Grep gate (exact invocation):
    ```sh
    grep -rn --include="*.go" \
      --exclude-dir=_worktrees \
      --exclude-dir=.worktrees \
      --exclude-dir=.claude \
      "digitalocean/godo" .
+   ```
+   Plus a second grep over `go.mod` files (root + `example/go.mod`) to ensure neither still lists godo:
+   ```sh
+   grep -nH "digitalocean/godo" go.mod example/go.mod || true   # fails build if any hit
    ```
    Gate lives in `.github/workflows/ci.yml` (or wherever `golangci-lint` already runs) as a fail-on-match step. Same grep also runs as a pre-commit step locally documented in CONTRIBUTING (no install required, repo-relative).
 5. **T5 — Docs + CHANGELOG + migration guide + modernize rules.** Update `DOCUMENTATION.md`, prepend CHANGELOG breaking-change entry, add `docs/migrations/v<NEXT>-godo-removal.md` (5 module + 5 step mappings, plus explicit GAP callout for `step.do_logs` / `step.do_scale` with workaround YAML examples), implement the seven `wfctl modernize` rewrite rules above + test fixtures, file the two follow-up issues in `workflow-plugin-digitalocean` (`step.iac_logs`, `step.iac_scale`) and wire their issue numbers back into the migration error messages.
@@ -249,6 +262,13 @@ This change affects build, package version, and runtime config loading. Rollback
 - Should `cloud_account_do.go` deletion include removing the registered resolver names (`digitalocean/static`, `digitalocean/env`, `digitalocean/api_token`) from any global registry to prevent dead config keys? **Decision (autonomous):** yes — the registry is purely additive via init(); deleting the file removes the init(). Add a test that the credential registry has zero `digitalocean/*` entries post-deletion.
 
 ## Adversarial review history
+
+### Cycle 2 (FAIL) — 2026-05-13
+
+- **I-1** (new) `module/platform_doks_test.go` (164 LOC) missing from deletion inventory → **fixed**: row added; total bumped to 12 files / ~3206 LOC; T1 scope updated.
+- **m-1** (new) wfctl flag was `--write`, actual flag is `--apply` → **fixed**.
+- **m-2** (new) `example/go.mod` carries `godo` as indirect dependency; T4 grep only covered `*.go` → **fixed**: `(cd example && go mod tidy)` added; second grep over `go.mod` files added.
+- **Cycle-1 fixes verified to hold** — no regressions introduced by cycle-1 changes.
 
 ### Cycle 1 (FAIL) — 2026-05-13
 
