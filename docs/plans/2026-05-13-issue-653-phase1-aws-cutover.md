@@ -696,8 +696,6 @@ func TestLegacyAWSModuleError_PluginLoaded(t *testing.T) {
 Note: `modular` must be imported — check engine_legacy_do_migration_test.go for the exact import path.
 Mirror that file exactly (it imports `"github.com/GoCodeAlone/modular"` for `modular.Module` in `AddModuleType`).
 
-Add to pipeline step registry tests (in `module/pipeline_step_registry_test.go`):
-
 Add to pipeline step registry tests (package `module`, in `module/pipeline_step_registry_test.go`).
 `Create()` signature: `(stepType, name string, config map[string]any, app any) (PipelineStep, error)`.
 
@@ -954,50 +952,56 @@ git commit -m "feat(#653): T4 — add internal/legacyaws + wire migration errors
 
 **Step 1: Write the failing tests for the modernize rule**
 
-Create `modernize/legacy_aws_rule_test.go`:
+Create `modernize/legacy_aws_rule_test.go`. Use package `modernize` (NOT `modernize_test`) and call
+`legacyAWSRule()` directly — same pattern as `modernize/legacy_do_rule_test.go`, which does NOT have
+`findRule`/`check`/`fix` helpers; it calls the rule constructor directly and uses `yaml.Unmarshal`.
 
 ```go
-package modernize_test
+package modernize
 
 import (
     "strings"
     "testing"
 
-    "github.com/GoCodeAlone/workflow/modernize"
+    "gopkg.in/yaml.v3"
 )
 
 func TestLegacyAWSRule_Check(t *testing.T) {
-    rule := findRule("legacy-aws-types") // read AllRules, find by ID
+    rule := legacyAWSRule()
     tests := []struct {
         name    string
-        yaml    string
+        yamlIn  string
         wantMsg string
         fixable bool
     }{
         {
-            name: "platform.ecs detected",
-            yaml: "modules:\n  - name: my-ecs\n    type: platform.ecs\n",
+            name:    "platform.ecs detected",
+            yamlIn:  "modules:\n  - name: my-ecs\n    type: platform.ecs\n",
             wantMsg: "infra.container_service",
             fixable: true,
         },
         {
-            name: "platform.networking not auto-fixable",
-            yaml: "modules:\n  - name: my-net\n    type: platform.networking\n",
+            name:    "platform.networking not auto-fixable",
+            yamlIn:  "modules:\n  - name: my-net\n    type: platform.networking\n",
             wantMsg: "infra.vpc",
             fixable: false,
         },
         {
-            name: "step.ecs_apply not auto-fixable",
-            yaml: "pipelines:\n  deploy:\n    steps:\n      - type: step.ecs_apply\n",
+            name:    "step.ecs_apply not auto-fixable",
+            yamlIn:  "pipelines:\n  deploy:\n    steps:\n      - type: step.ecs_apply\n",
             wantMsg: "step.iac_apply",
             fixable: false,
         },
     }
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            findings := check(rule, tt.yaml)
+            var root yaml.Node
+            if err := yaml.Unmarshal([]byte(tt.yamlIn), &root); err != nil {
+                t.Fatalf("unmarshal: %v", err)
+            }
+            findings := rule.Check(&root, []byte(tt.yamlIn))
             if len(findings) == 0 {
-                t.Fatal("expected findings, got none")
+                t.Fatalf("expected findings, got 0")
             }
             if !strings.Contains(findings[0].Message, tt.wantMsg) {
                 t.Errorf("message %q doesn't contain %q", findings[0].Message, tt.wantMsg)
@@ -1010,26 +1014,40 @@ func TestLegacyAWSRule_Check(t *testing.T) {
 }
 
 func TestLegacyAWSRule_Fix(t *testing.T) {
-    rule := findRule("legacy-aws-types")
+    rule := legacyAWSRule()
     // Auto-fixable: platform.ecs → infra.container_service
     input := "modules:\n  - name: my-ecs\n    type: platform.ecs\n"
-    result, changes := fix(rule, input)
+    var root yaml.Node
+    if err := yaml.Unmarshal([]byte(input), &root); err != nil {
+        t.Fatalf("unmarshal: %v", err)
+    }
+    changes := rule.Fix(&root)
     if len(changes) == 0 {
         t.Fatal("expected changes, got none")
     }
-    if !strings.Contains(result, "infra.container_service") {
-        t.Errorf("result %q doesn't contain infra.container_service", result)
+    out, err := yaml.Marshal(&root)
+    if err != nil {
+        t.Fatalf("marshal: %v", err)
     }
-    // platform.networking NOT auto-fixed
+    if !strings.Contains(string(out), "infra.container_service") {
+        t.Errorf("fixed YAML missing infra.container_service; got:\n%s", out)
+    }
+    if strings.Contains(string(out), "platform.ecs") {
+        t.Errorf("fixed YAML still has platform.ecs; got:\n%s", out)
+    }
+
+    // platform.networking NOT auto-fixed (1→2 split)
     input2 := "modules:\n  - name: my-net\n    type: platform.networking\n"
-    _, changes2 := fix(rule, input2)
+    var root2 yaml.Node
+    if err := yaml.Unmarshal([]byte(input2), &root2); err != nil {
+        t.Fatalf("unmarshal: %v", err)
+    }
+    changes2 := rule.Fix(&root2)
     if len(changes2) != 0 {
-        t.Error("platform.networking should not be auto-fixed")
+        t.Error("platform.networking should not be auto-fixed (1→2 split requires manual rewrite)")
     }
 }
 ```
-
-Read `modernize/legacy_do_rule_test.go` to find the `findRule`, `check`, `fix` helpers and mirror them.
 
 Run: `go test ./modernize/ -run TestLegacyAWSRule -v 2>&1`
 Expected: compile error (rule doesn't exist yet).
