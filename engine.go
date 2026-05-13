@@ -555,6 +555,23 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			return fmt.Errorf("factory for module type %q returned nil for module %q", modCfg.Type, modCfg.Name)
 		}
 
+		// Plumb yaml-level `dependsOn:` into the module so modular's Init()
+		// walker honours it (workflow#663). Without this, external-plugin
+		// modules — which all return nil from Dependencies() by default —
+		// looked like roots to modular and got initialised in alphabetical
+		// order, which broke any plugin where module A's Init() registered
+		// runtime state that module B's Init() needed. The topoSortModules
+		// pass above already reordered cfg.Modules; this hands the same
+		// information to modular so its own initialisation graph agrees
+		// with engine-level ordering.
+		if len(modCfg.DependsOn) > 0 {
+			if depTarget, ok := mod.(interface{ SetDependencies([]string) }); ok {
+				deps := make([]string, len(modCfg.DependsOn))
+				copy(deps, modCfg.DependsOn)
+				depTarget.SetDependencies(deps)
+			}
+		}
+
 		e.app.RegisterModule(mod)
 	}
 

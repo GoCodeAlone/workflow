@@ -18,6 +18,16 @@ type RemoteModule struct {
 	contract         *pb.ContractDescriptor
 	serviceContracts map[string]*pb.ContractDescriptor
 	types            protoregistry.MessageTypeResolver
+
+	// dependencies holds the yaml-level `dependsOn:` keys for this module.
+	// Populated by the engine after the factory returns via SetDependencies
+	// — see workflow#663. Returned from Dependencies() so modular's Init()
+	// walker honours them when computing module init order. Without this,
+	// every external-plugin module appeared as a root and modular sorted
+	// them alphabetically, which broke any plugin where module A's Init()
+	// registered runtime state in a plugin-local registry that module B's
+	// Init() looked up.
+	dependencies []string
 }
 
 type remoteModuleContracts struct {
@@ -53,7 +63,15 @@ func (m *RemoteModule) Name() string {
 }
 
 func (m *RemoteModule) Dependencies() []string {
-	return nil
+	return m.dependencies
+}
+
+// SetDependencies records the yaml-level `dependsOn:` keys declared for this
+// module so modular's Init() walker can honour them. Called by the engine
+// from BuildFromConfig once per module, immediately after the factory
+// returns and before app.RegisterModule. See workflow#663.
+func (m *RemoteModule) SetDependencies(deps []string) {
+	m.dependencies = deps
 }
 
 func (m *RemoteModule) ProvidesServices() []string {
