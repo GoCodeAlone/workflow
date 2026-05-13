@@ -120,7 +120,7 @@ func (m *MultiRegionModule) Init(app modular.Application) error {
 	case "azure":
 		return fmt.Errorf("platform.region %q: provider %q is not yet supported; use AKS modules with Azure Traffic Manager for multi-region routing", m.name, providerType)
 	case "digitalocean":
-		return fmt.Errorf("platform.region %q: provider %q is not yet supported; use platform.doks modules per region for DigitalOcean multi-region deployments", m.name, providerType)
+		return fmt.Errorf("platform.region %q: provider %q is not yet supported; for DigitalOcean multi-region, use infra.k8s_cluster modules per region with provider: digitalocean (requires workflow-plugin-digitalocean)", m.name, providerType)
 	default:
 		return fmt.Errorf("platform.region %q: unsupported provider %q (supported: mock)", m.name, providerType)
 	}

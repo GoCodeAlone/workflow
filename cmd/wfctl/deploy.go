@@ -778,7 +778,7 @@ func runDeployCloud(args []string) error {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl deploy cloud [options]
 
 Deploy infrastructure defined in a workflow config to a cloud environment.
-Discovers cloud.account and platform.* modules, validates credentials,
+Discovers cloud.account, platform.*, and infra.* modules, validates credentials,
 shows a deployment plan, and applies changes.
 
 Options:
@@ -829,15 +829,15 @@ Options:
 		return fmt.Errorf("parse config %s: %w", cfg, yamlErr)
 	}
 
-	// Discover cloud accounts and platform modules
+	// Discover cloud accounts and deploy-target modules (platform.* or infra.*)
 	var cloudAccounts []moduleEntry
-	var platformModules []moduleEntry
+	var deployTargetModules []moduleEntry
 	for _, m := range parsed.Modules {
 		if m.Type == "cloud.account" {
 			cloudAccounts = append(cloudAccounts, m)
 		}
-		if strings.HasPrefix(m.Type, "platform.") {
-			platformModules = append(platformModules, m)
+		if strings.HasPrefix(m.Type, "platform.") || strings.HasPrefix(m.Type, "infra.") {
+			deployTargetModules = append(deployTargetModules, m)
 		}
 	}
 
@@ -896,13 +896,13 @@ Options:
 		fmt.Println()
 	}
 
-	// Report platform modules (deployment plan)
-	if len(platformModules) == 0 {
-		return fmt.Errorf("no platform.* modules found in config — nothing to deploy")
+	// Report deploy-target modules (deployment plan)
+	if len(deployTargetModules) == 0 {
+		return fmt.Errorf("no platform.* or infra.* modules found in config — nothing to deploy")
 	}
 
-	fmt.Printf("Infrastructure Modules (%d):\n", len(platformModules))
-	for _, pm := range platformModules {
+	fmt.Printf("Infrastructure Modules (%d):\n", len(deployTargetModules))
+	for _, pm := range deployTargetModules {
 		account, _ := pm.Config["account"].(string)
 		detail := pm.Type
 		if account != "" {

@@ -2685,95 +2685,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
-	// ---- Platform DigitalOcean App ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.do_app",
-		Label:       "DigitalOcean App Platform",
-		Category:    "infrastructure",
-		Description: "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
-		Outputs:     []ServiceIODef{{Name: "app", Type: "JSON", Description: "Deployed app endpoint and status on DigitalOcean App Platform"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
-			{Key: "name", Label: "App Name", Type: FieldTypeString, Description: "App Platform application name"},
-			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug (e.g. nyc)"},
-			{Key: "image", Label: "Container Image", Type: FieldTypeString, Description: "Container image reference"},
-			{Key: "instances", Label: "Instances", Type: FieldTypeNumber, Description: "Number of instances"},
-			{Key: "http_port", Label: "HTTP Port", Type: FieldTypeNumber, Description: "Container HTTP port"},
-			{Key: "envs", Label: "Environment Variables", Type: FieldTypeMap, Description: "Environment variables for the app"},
-		},
-	})
-
-	// ---- Platform DigitalOcean Database ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.do_database",
-		Label:       "DigitalOcean Managed Database",
-		Category:    "infrastructure",
-		Description: "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
-		Outputs:     []ServiceIODef{{Name: "database", Type: "sql.DB", Description: "Managed database connection for DigitalOcean database cluster"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
-			{Key: "engine", Label: "Engine", Type: FieldTypeString, Description: "Database engine: pg | mysql | redis | mongodb | kafka"},
-			{Key: "version", Label: "Version", Type: FieldTypeString, Description: "Engine version"},
-			{Key: "size", Label: "Size", Type: FieldTypeString, Description: "Droplet size slug"},
-			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug"},
-			{Key: "num_nodes", Label: "Node Count", Type: FieldTypeNumber, Description: "Number of nodes"},
-			{Key: "name", Label: "Cluster Name", Type: FieldTypeString, Description: "Database cluster name"},
-		},
-	})
-
-	// ---- Platform DigitalOcean DNS ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.do_dns",
-		Label:       "DigitalOcean DNS",
-		Category:    "infrastructure",
-		Description: "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
-		Outputs:     []ServiceIODef{{Name: "zone", Type: "JSON", Description: "Provisioned DigitalOcean DNS zone and records"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
-			{Key: "domain", Label: "Domain", Type: FieldTypeString, Required: true, Description: "Domain name (e.g. example.com)"},
-			{Key: "records", Label: "Records", Type: FieldTypeArray, Description: "List of DNS record definitions"},
-		},
-	})
-
-	// ---- Platform DigitalOcean Networking ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.do_networking",
-		Label:       "DigitalOcean VPC & Firewalls",
-		Category:    "infrastructure",
-		Description: "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
-		Outputs:     []ServiceIODef{{Name: "vpc", Type: "JSON", Description: "Provisioned DigitalOcean VPC and firewall configuration"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
-			{Key: "vpc", Label: "VPC Config", Type: FieldTypeMap, Required: true, Description: "VPC configuration (name, region, ip_range)"},
-			{Key: "firewalls", Label: "Firewalls", Type: FieldTypeArray, Description: "List of firewall definitions"},
-		},
-	})
-
-	// ---- Platform DOKS ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.doks",
-		Label:       "DigitalOcean Kubernetes (DOKS)",
-		Category:    "infrastructure",
-		Description: "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
-		Outputs:     []ServiceIODef{{Name: "cluster", Type: "JSON", Description: "Provisioned DOKS cluster endpoint and kubeconfig"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "cluster_name", Label: "Cluster Name", Type: FieldTypeString, Description: "DOKS cluster name"},
-			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug (e.g. nyc3)"},
-			{Key: "version", Label: "Kubernetes Version", Type: FieldTypeString, Description: "Kubernetes version slug"},
-			{Key: "node_pool", Label: "Node Pool", Type: FieldTypeMap, Description: "Node pool config"},
-		},
-	})
-
 	// ---- Platform ECS ----
 
 	r.Register(&ModuleSchema{
@@ -3002,11 +2913,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		{"step.dns_apply", "DNS Apply", "Applies DNS zone and record changes"},
 		{"step.dns_plan", "DNS Plan", "Plans DNS changes without applying them"},
 		{"step.dns_status", "DNS Status", "Gets the current status of a DNS zone"},
-		{"step.do_deploy", "DO Deploy", "Deploys to DigitalOcean App Platform"},
-		{"step.do_destroy", "DO Destroy", "Destroys a DigitalOcean App Platform application"},
-		{"step.do_logs", "DO Logs", "Retrieves logs from DigitalOcean App Platform"},
-		{"step.do_scale", "DO Scale", "Scales a DigitalOcean App Platform application"},
-		{"step.do_status", "DO Status", "Gets the status of a DigitalOcean App Platform application"},
 		{"step.ecs_apply", "ECS Apply", "Applies ECS Fargate service deployment"},
 		{"step.ecs_destroy", "ECS Destroy", "Destroys an ECS Fargate service"},
 		{"step.ecs_plan", "ECS Plan", "Plans ECS service deployment changes"},

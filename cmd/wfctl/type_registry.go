@@ -506,42 +506,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"format"},
 		},
 
-		// platform plugin (region router + DigitalOcean)
+		// platform plugin (region router)
 		"platform.region_router": {
 			Type:       "platform.region_router",
 			Plugin:     "platform",
 			Stateful:   false,
 			ConfigKeys: []string{"module", "mode"},
-		},
-		"platform.doks": {
-			Type:       "platform.doks",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "cluster_name", "region", "version", "node_pool"},
-		},
-		"platform.do_networking": {
-			Type:       "platform.do_networking",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "vpc", "firewalls"},
-		},
-		"platform.do_dns": {
-			Type:       "platform.do_dns",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "domain", "records"},
-		},
-		"platform.do_app": {
-			Type:       "platform.do_app",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "name", "region", "image", "instances", "http_port", "envs"},
-		},
-		"platform.do_database": {
-			Type:       "platform.do_database",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "engine", "size", "region", "nodes"},
 		},
 		"platform.kubernetes": {
 			Type:       "platform.kubernetes",
@@ -1425,33 +1395,6 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.argo_list",
 			Plugin:     "platform",
 			ConfigKeys: []string{"service", "label_selector"},
-		},
-
-		// platform plugin steps (DigitalOcean)
-		"step.do_deploy": {
-			Type:       "step.do_deploy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app", "image"},
-		},
-		"step.do_status": {
-			Type:       "step.do_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app"},
-		},
-		"step.do_logs": {
-			Type:       "step.do_logs",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app"},
-		},
-		"step.do_scale": {
-			Type:       "step.do_scale",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app", "instances"},
-		},
-		"step.do_destroy": {
-			Type:       "step.do_destroy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app"},
 		},
 
 		// platform plugin steps (platform template)

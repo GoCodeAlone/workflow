@@ -574,7 +574,7 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 }
 
 func isContainerType(t string) bool {
-	return t == "infra.container_service" || t == "platform.do_app"
+	return t == "infra.container_service"
 }
 
 // loadCurrentState loads ResourceStates from the configured iac.state backend.

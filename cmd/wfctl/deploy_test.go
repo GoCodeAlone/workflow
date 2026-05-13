@@ -92,7 +92,7 @@ func TestRunDeployCloudValidTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no platform modules found")
 	}
-	if !strings.Contains(err.Error(), "no platform.* modules found") {
+	if !strings.Contains(err.Error(), "no platform.* or infra.* modules found") {
 		t.Errorf("expected no platform modules error, got: %v", err)
 	}
 }
