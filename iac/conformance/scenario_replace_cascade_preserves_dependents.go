@@ -95,6 +95,7 @@ func scenarioReplaceCascadePreservesDependents(t *testing.T, cfg Config) {
 	}
 	if result == nil {
 		t.Fatal("ApplyPlan returned nil result")
+		return
 	}
 	if len(result.Errors) != 0 {
 		t.Errorf("expected no per-action errors (cascade JIT must resolve "+

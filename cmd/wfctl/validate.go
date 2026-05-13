@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/schema"
 	"gopkg.in/yaml.v3"
 )
@@ -142,8 +143,38 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 		opts = append(opts, schema.WithAllowNoEntryPoints())
 	}
 
+	// Pass legacy DO module types through schema validation so the actionable
+	// migration error fires below instead of a generic "unknown module type".
+	for t := range legacydo.ModuleTypes {
+		opts = append(opts, schema.WithExtraModuleTypes(t))
+	}
+
 	if err := schema.ValidateConfig(cfg, opts...); err != nil {
 		return err
+	}
+
+	// Post-validate sweep: reject legacy DO module/step types with actionable
+	// migration errors (issue #617). wfctl validate has no engine, so the
+	// iacProviderLoaded flag is always false here.
+	for _, m := range cfg.Modules {
+		if legacydo.IsModuleType(m.Type) {
+			return legacydo.FormatModuleError(m.Type, m.Name, false)
+		}
+	}
+	for _, rawPipeline := range cfg.Pipelines {
+		yamlBytes, err := yaml.Marshal(rawPipeline)
+		if err != nil {
+			continue
+		}
+		var pipeCfg config.PipelineConfig
+		if err := yaml.Unmarshal(yamlBytes, &pipeCfg); err != nil {
+			continue
+		}
+		for _, s := range pipeCfg.Steps {
+			if legacydo.IsStepType(s.Type) {
+				return legacydo.FormatStepError(s.Type, false)
+			}
+		}
 	}
 
 	// Validate ci:, environments:, and secrets: sections when present.

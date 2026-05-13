@@ -102,6 +102,7 @@ func scenarioDiffSurvivesGRPCRoundTrip(t *testing.T, cfg Config) {
 	}
 	if res == nil {
 		t.Fatal("roundtripDriver.Diff returned nil DiffResult after structpb roundtrip; the response decode must yield a non-nil value")
+		return
 	}
 
 	// Each Change that survived the response-side roundtrip must

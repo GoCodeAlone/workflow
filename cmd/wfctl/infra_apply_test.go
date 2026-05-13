@@ -1987,7 +1987,7 @@ modules:
 	if err := os.WriteFile(legacyOnly, []byte(`
 modules:
   - name: app
-    type: platform.do_app
+    type: example.legacy_unknown
     config: {}
 `), 0o600); err != nil {
 		t.Fatal(err)

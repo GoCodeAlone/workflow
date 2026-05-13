@@ -73,11 +73,6 @@ func TestStepFactories(t *testing.T) {
 		"step.argo_logs",
 		"step.argo_delete",
 		"step.argo_list",
-		"step.do_deploy",
-		"step.do_status",
-		"step.do_logs",
-		"step.do_scale",
-		"step.do_destroy",
 	}
 
 	for _, stepType := range expectedSteps {
@@ -109,11 +104,6 @@ func TestModuleFactories(t *testing.T) {
 		"app.container",
 		"platform.region",
 		"argo.workflows",
-		"platform.doks",
-		"platform.do_networking",
-		"platform.do_dns",
-		"platform.do_app",
-		"platform.do_database",
 		"platform.region_router",
 	}
 

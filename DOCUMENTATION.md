@@ -322,11 +322,11 @@ flowchart TD
 | `step.argo_logs` | Retrieves logs from an Argo Workflow | platform |
 | `step.argo_delete` | Deletes an Argo Workflow | platform |
 | `step.argo_list` | Lists Argo Workflows for a namespace | platform |
-| `step.do_deploy` | Deploys to DigitalOcean App Platform | platform |
-| `step.do_status` | Retrieves DigitalOcean App Platform deployment status | platform |
-| `step.do_logs` | Fetches DigitalOcean App Platform runtime logs | platform |
-| `step.do_scale` | Scales a DigitalOcean App Platform component | platform |
-| `step.do_destroy` | Destroys a DigitalOcean App Platform deployment | platform |
+
+**DigitalOcean IaC steps** were removed from workflow core in v0.52.0 and moved to the
+[workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
+external plugin. After loading the plugin, use the generic `step.iac_*` pipeline steps.
+See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
 
 ### Expression Syntax
 
@@ -510,11 +510,12 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 | `platform.autoscaling` | Auto-scaling policy and target management | platform |
 | `platform.region` | Multi-region deployment configuration | platform |
 | `platform.region_router` | Routes traffic across regions by weight, latency, or failover | platform |
-| `platform.doks` | DigitalOcean Kubernetes Service (DOKS) deployment | platform |
-| `platform.do_app` | DigitalOcean App Platform deployment (deploy, scale, logs, destroy) | platform |
-| `platform.do_networking` | DigitalOcean VPC and firewall management | platform |
-| `platform.do_dns` | DigitalOcean domain and DNS record management | platform |
-| `platform.do_database` | DigitalOcean Managed Database (PostgreSQL, MySQL, Redis) | platform |
+
+**DigitalOcean IaC modules** were removed from workflow core in v0.52.0 and moved to the
+[workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
+external plugin. After loading the plugin, use the generic `infra.*` module
+types with `provider: digitalocean` and the generic `step.iac_*` pipeline
+steps. See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
 | `iac.provider` | Cloud provider configuration (aws, gcp, azure, digitalocean) for IaC operations | platform |
 | `iac.state` | IaC state persistence (memory, filesystem, spaces, gcs, azure_blob, postgres) | platform |
 | `infra.vpc` | Virtual Private Cloud and subnet management | platform |

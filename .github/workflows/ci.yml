@@ -376,3 +376,20 @@ jobs:
 
         echo ""
         echo "Results: $total configs, $passed passed, $warned warnings"
+
+  godo-banned:
+    name: Verify godo is not imported (issue #617)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Grep gate — *.go files must not import godo
+        run: |
+          ! grep -rn --include="*.go" \
+              --exclude-dir=_worktrees \
+              --exclude-dir=.worktrees \
+              --exclude-dir=.claude \
+              --exclude="godo_absent_test.go" \
+              "digitalocean/godo" .
+      - name: Grep gate — go.mod files must not list godo
+        run: |
+          ! grep -qH "digitalocean/godo" go.mod example/go.mod

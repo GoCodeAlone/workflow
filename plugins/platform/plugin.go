@@ -31,8 +31,8 @@ func New() *Plugin {
 				Author:        "GoCodeAlone",
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
-				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.ecs", "platform.dns", "platform.networking", "platform.apigateway", "platform.autoscaling", "platform.region", "platform.region_router", "platform.doks", "platform.do_networking", "platform.do_dns", "platform.do_app", "platform.do_database", "iac.state", "app.container", "argo.workflows"},
-				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.ecs_plan", "step.ecs_apply", "step.ecs_status", "step.ecs_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.network_plan", "step.network_apply", "step.network_status", "step.apigw_plan", "step.apigw_apply", "step.apigw_status", "step.apigw_destroy", "step.scaling_plan", "step.scaling_apply", "step.scaling_status", "step.scaling_destroy", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list", "step.do_deploy", "step.do_status", "step.do_logs", "step.do_scale", "step.do_destroy"},
+				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.ecs", "platform.dns", "platform.networking", "platform.apigateway", "platform.autoscaling", "platform.region", "platform.region_router", "iac.state", "app.container", "argo.workflows"},
+				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.ecs_plan", "step.ecs_apply", "step.ecs_status", "step.ecs_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.network_plan", "step.network_apply", "step.network_status", "step.apigw_plan", "step.apigw_apply", "step.apigw_status", "step.apigw_destroy", "step.scaling_plan", "step.scaling_apply", "step.scaling_status", "step.scaling_destroy", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
 			},
@@ -93,21 +93,6 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		},
 		"argo.workflows": func(name string, cfg map[string]any) modular.Module {
 			return module.NewArgoWorkflowsModule(name, cfg)
-		},
-		"platform.doks": func(name string, cfg map[string]any) modular.Module {
-			return module.NewPlatformDOKS(name, cfg)
-		},
-		"platform.do_networking": func(name string, cfg map[string]any) modular.Module {
-			return module.NewPlatformDONetworking(name, cfg)
-		},
-		"platform.do_dns": func(name string, cfg map[string]any) modular.Module {
-			return module.NewPlatformDODNS(name, cfg)
-		},
-		"platform.do_app": func(name string, cfg map[string]any) modular.Module {
-			return module.NewPlatformDOApp(name, cfg)
-		},
-		"platform.do_database": func(name string, cfg map[string]any) modular.Module {
-			return module.NewPlatformDODatabase(name, cfg)
 		},
 		"platform.region_router": func(name string, cfg map[string]any) modular.Module {
 			return module.NewMultiRegionRoutingModule(name, cfg)
@@ -243,21 +228,6 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		},
 		"step.argo_list": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewArgoListStepFactory()(name, cfg, app)
-		},
-		"step.do_deploy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
-			return module.NewDODeployStepFactory()(name, cfg, app)
-		},
-		"step.do_status": func(name string, cfg map[string]any, app modular.Application) (any, error) {
-			return module.NewDOStatusStepFactory()(name, cfg, app)
-		},
-		"step.do_logs": func(name string, cfg map[string]any, app modular.Application) (any, error) {
-			return module.NewDOLogsStepFactory()(name, cfg, app)
-		},
-		"step.do_scale": func(name string, cfg map[string]any, app modular.Application) (any, error) {
-			return module.NewDOScaleStepFactory()(name, cfg, app)
-		},
-		"step.do_destroy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
-			return module.NewDODestroyStepFactory()(name, cfg, app)
 		},
 	}
 }
@@ -423,75 +393,6 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock (default)"},
 				{Key: "regions", Label: "Regions", Type: schema.FieldTypeArray, Required: true, Description: "List of region definitions (name, provider, endpoint, priority, health_check)"},
-			},
-		},
-		{
-			Type:        "platform.doks",
-			Label:       "DigitalOcean Kubernetes (DOKS)",
-			Category:    "infrastructure",
-			Description: "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
-			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
-				{Key: "cluster_name", Label: "Cluster Name", Type: schema.FieldTypeString, Description: "DOKS cluster name"},
-				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "DO region slug (e.g. nyc3)"},
-				{Key: "version", Label: "Kubernetes Version", Type: schema.FieldTypeString, Description: "Kubernetes version slug (e.g. 1.29.1-do.0)"},
-				{Key: "node_pool", Label: "Node Pool", Type: schema.FieldTypeMap, Description: "Node pool config (size, count, auto_scale, min_nodes, max_nodes)"},
-			},
-		},
-		{
-			Type:        "platform.do_networking",
-			Label:       "DigitalOcean VPC & Firewalls",
-			Category:    "infrastructure",
-			Description: "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
-			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
-				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
-				{Key: "vpc", Label: "VPC Config", Type: schema.FieldTypeMap, Required: true, Description: "VPC configuration (name, region, ip_range)"},
-				{Key: "firewalls", Label: "Firewalls", Type: schema.FieldTypeArray, Description: "List of firewall definitions"},
-			},
-		},
-		{
-			Type:        "platform.do_dns",
-			Label:       "DigitalOcean DNS",
-			Category:    "infrastructure",
-			Description: "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
-			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
-				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
-				{Key: "domain", Label: "Domain", Type: schema.FieldTypeString, Required: true, Description: "Domain name (e.g. example.com)"},
-				{Key: "records", Label: "Records", Type: schema.FieldTypeArray, Description: "List of DNS record definitions (name, type, data, ttl)"},
-			},
-		},
-		{
-			Type:        "platform.do_app",
-			Label:       "DigitalOcean App Platform",
-			Category:    "application",
-			Description: "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
-			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
-				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
-				{Key: "name", Label: "App Name", Type: schema.FieldTypeString, Description: "App Platform application name"},
-				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "DO region slug (e.g. nyc)"},
-				{Key: "image", Label: "Container Image", Type: schema.FieldTypeString, Description: "Container image reference"},
-				{Key: "instances", Label: "Instances", Type: schema.FieldTypeNumber, Description: "Number of instances (default: 1)"},
-				{Key: "http_port", Label: "HTTP Port", Type: schema.FieldTypeNumber, Description: "Container HTTP port (default: 8080)"},
-				{Key: "envs", Label: "Environment Variables", Type: schema.FieldTypeMap, Description: "Environment variables for the app"},
-			},
-		},
-		{
-			Type:        "platform.do_database",
-			Label:       "DigitalOcean Managed Database",
-			Category:    "infrastructure",
-			Description: "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
-			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
-				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
-				{Key: "engine", Label: "Engine", Type: schema.FieldTypeString, Description: "Database engine: pg | mysql | redis | mongodb | kafka"},
-				{Key: "version", Label: "Version", Type: schema.FieldTypeString, Description: "Engine version (e.g. 16 for PostgreSQL)"},
-				{Key: "size", Label: "Size", Type: schema.FieldTypeString, Description: "Droplet size slug (e.g. db-s-1vcpu-1gb)"},
-				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "DO region slug (e.g. nyc1)"},
-				{Key: "num_nodes", Label: "Node Count", Type: schema.FieldTypeNumber, Description: "Number of nodes (default: 1)"},
-				{Key: "name", Label: "Cluster Name", Type: schema.FieldTypeString, Description: "Database cluster name"},
 			},
 		},
 	}

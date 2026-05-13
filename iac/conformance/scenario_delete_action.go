@@ -77,6 +77,7 @@ func scenarioDeleteActionInApplyInvokesDriverDelete(t *testing.T, cfg Config) {
 	}
 	if result == nil {
 		t.Fatal("ApplyPlan returned nil result")
+		return
 	}
 	if len(result.Errors) != 0 {
 		// Most likely failure mode: provider's dispatch lacks a

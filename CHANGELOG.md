@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.52.0 (2026-05-13) — BREAKING
+
+### Removed (issue #617)
+
+- All legacy DigitalOcean IaC modules (`platform.do_app`, `platform.do_database`, `platform.do_dns`, `platform.do_networking`, `platform.doks`) and the DO credential resolver `cloud_account_do.go`.
+- All legacy DigitalOcean pipeline steps (`step.do_deploy`, `step.do_status`, `step.do_logs`, `step.do_scale`, `step.do_destroy`).
+- The `github.com/digitalocean/godo` dependency from `go.mod` (root and `example/`).
+
+### Migration
+
+DigitalOcean IaC moved to [`workflow-plugin-digitalocean`](https://github.com/GoCodeAlone/workflow-plugin-digitalocean) v0.12.0+. After loading the plugin, replace legacy module types with `infra.*` types and `provider: digitalocean`. Run `wfctl modernize --apply <config.yaml>` to auto-rewrite supported types — **then manually add `provider: digitalocean` to each rewritten module's `config:` block** (the modernize rule does not inject the provider key; see the [migration guide](docs/migrations/v0.52.0-godo-removal.md) for the exact recipe). Two step types (`step.do_logs`, `step.do_scale`) have no 1:1 pipeline successor — workarounds documented in the migration guide.
+
+Configs that still reference the legacy types now fail to load with an actionable error pointing to the plugin and the relevant `infra.*` successor.
+
+---
+
 ## [Unreleased]
 
 ### Added
