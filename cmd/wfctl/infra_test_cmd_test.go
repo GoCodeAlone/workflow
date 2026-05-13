@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 )
 
@@ -112,6 +113,92 @@ expect:
 	}
 	if !strings.Contains(err.Error(), "plan action count for create") {
 		t.Fatalf("error = %v, want action count mismatch", err)
+	}
+}
+
+// TestAssertInfraPlan_UsedTrackingPreventsDoubleClaim verifies that two
+// expected actions with identical action/name/type cannot both match the same
+// actual action — the second must fail if there is no distinct actual action.
+func TestAssertInfraPlan_UsedTrackingPreventsDoubleClaim(t *testing.T) {
+	plan := interfaces.IaCPlan{
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "db", Type: "infra.database"}},
+		},
+	}
+	exp := infraPlanExpect{
+		Actions: []infraPlanActionExpect{
+			{Action: "create", Resource: infraResourceExpect{Name: "db"}},
+			{Action: "create", Resource: infraResourceExpect{Name: "db"}},
+		},
+	}
+	if err := assertInfraPlan(exp, plan); err == nil {
+		t.Fatal("expected error: two expected entries must not match same actual action")
+	}
+}
+
+// TestAssertInfraPlan_TypeFilterPreventsWrongMatch verifies that an expected
+// action specifying a type is NOT satisfied by an actual action with a
+// different type even when action and name match.
+func TestAssertInfraPlan_TypeFilterPreventsWrongMatch(t *testing.T) {
+	plan := interfaces.IaCPlan{
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "store", Type: "infra.storage"}},
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "cache", Type: "infra.cache"}},
+		},
+	}
+	exp := infraPlanExpect{
+		Actions: []infraPlanActionExpect{
+			{Action: "create", Resource: infraResourceExpect{Name: "store", Type: "infra.database"}},
+		},
+	}
+	if err := assertInfraPlan(exp, plan); err == nil {
+		t.Fatal("expected error: type filter must prevent wrong-type match")
+	}
+}
+
+// TestAssertInfraPlan_ConfigSubsetFilterPreventsWrongMatch verifies that an
+// expected action's config subset must match; a mismatching config causes the
+// action to be skipped and the assertion to fail.
+func TestAssertInfraPlan_ConfigSubsetFilterPreventsWrongMatch(t *testing.T) {
+	plan := interfaces.IaCPlan{
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{
+				Name: "db", Type: "infra.database",
+				Config: map[string]any{"engine": "postgres"},
+			}},
+		},
+	}
+	exp := infraPlanExpect{
+		Actions: []infraPlanActionExpect{
+			{Action: "create", Resource: infraResourceExpect{
+				Name:   "db",
+				Config: map[string]any{"engine": "mysql"},
+			}},
+		},
+	}
+	if err := assertInfraPlan(exp, plan); err == nil {
+		t.Fatal("expected error: config subset must match actual config")
+	}
+}
+
+// TestAssertInfraPlan_OrderIndependent verifies that expected actions are
+// satisfied regardless of their order in the expected slice relative to the
+// actual actions.
+func TestAssertInfraPlan_OrderIndependent(t *testing.T) {
+	plan := interfaces.IaCPlan{
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "subnet-a", Type: "infra.subnet"}},
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "network", Type: "infra.vpc"}},
+		},
+	}
+	exp := infraPlanExpect{
+		Actions: []infraPlanActionExpect{
+			{Action: "create", Resource: infraResourceExpect{Name: "network", Type: "infra.vpc"}},
+			{Action: "create", Resource: infraResourceExpect{Name: "subnet-a", Type: "infra.subnet"}},
+		},
+	}
+	if err := assertInfraPlan(exp, plan); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

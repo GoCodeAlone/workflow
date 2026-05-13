@@ -215,28 +215,35 @@ func assertInfraPlan(expected infraPlanExpect, actual interfaces.IaCPlan) error 
 			}
 		}
 	}
+	// used tracks which actual action indices have already been matched so that
+	// two distinct expected entries cannot both claim the same actual action.
+	used := make([]bool, len(actual.Actions))
 	for _, exp := range expected.Actions {
-		var match *interfaces.PlanAction
+		matchIdx := -1
 		for i := range actual.Actions {
-			action := &actual.Actions[i]
-			if exp.Action != "" && action.Action != exp.Action {
+			if used[i] {
 				continue
 			}
-			if exp.Resource.Name != "" && action.Resource.Name != exp.Resource.Name {
+			a := &actual.Actions[i]
+			if exp.Action != "" && a.Action != exp.Action {
 				continue
 			}
-			match = action
+			if exp.Resource.Name != "" && a.Resource.Name != exp.Resource.Name {
+				continue
+			}
+			if exp.Resource.Type != "" && a.Resource.Type != exp.Resource.Type {
+				continue
+			}
+			if assertMapSubset(exp.Resource.Config, a.Resource.Config) != nil {
+				continue
+			}
+			matchIdx = i
 			break
 		}
-		if match == nil {
-			return fmt.Errorf("plan action not found: action=%q resource=%q", exp.Action, exp.Resource.Name)
+		if matchIdx == -1 {
+			return fmt.Errorf("plan action not found: action=%q resource=%q type=%q", exp.Action, exp.Resource.Name, exp.Resource.Type)
 		}
-		if exp.Resource.Type != "" && match.Resource.Type != exp.Resource.Type {
-			return fmt.Errorf("plan action %s resource %s type: got %q, want %q", exp.Action, exp.Resource.Name, match.Resource.Type, exp.Resource.Type)
-		}
-		if err := assertMapSubset(exp.Resource.Config, match.Resource.Config); err != nil {
-			return fmt.Errorf("plan action %s resource %s config: %w", exp.Action, exp.Resource.Name, err)
-		}
+		used[matchIdx] = true
 	}
 	return nil
 }
