@@ -107,9 +107,8 @@ This is live, tested, and wired. It serves a completely different purpose (ECS/E
    - `platform.Provider` (in-core, used by `platform.*` module system and pipeline steps)
    - `interfaces.IaCProvider` (gRPC plugin boundary, used by wfctl `infra.*` command suite)
    - `provider.CloudProvider` (deploy pipeline, used by `step.deploy_rolling`)
-3. Extend the `aws-sdk-banned` CI gate in `.github/workflows/ci.yml` to exclude `platform/providers/aws/` from its exclusion list (the gate currently bans specific service packages; the whole subtree deletion removes them naturally)
-4. Write an ADR explaining the tombstone decision and the layer boundary
-5. Add `platform/providers/aws` to the `legacyaws` package's migration message catalog (or note it is inaccessible, not a migration path)
+3. Promote `service/eks` from the lenient CI step ("must only appear in platform/ and provider/") into the strict ban step AND the `go.mod` gate — the Phase 2 comment at `.github/workflows/ci.yml:417–418` explicitly delegates this to Phase 3. Additionally, add the AWS SDK packages that are exclusive to `platform/providers/aws/` (ec2, dynamodb, elasticloadbalancingv2, rds, sqs, iam) to the banned packages list. `service/eks` stays in go.mod because `provider/aws/` legitimately uses it.
+4. Write an ADR `decisions/0032-platform-provider-aws-tombstone.md` explaining the tombstone decision and the layer boundary
 
 **What does NOT change:** `provider/aws/` (unchanged), `platform.Provider` interface (unchanged), `DockerComposeProvider`, `MockProvider`, pipeline steps, reconciliation trigger.
 
@@ -145,9 +144,9 @@ This is architectural cleanup, not force-cutover. The `platform.Provider` interf
 ### In Scope (Phase 3)
 - Delete `platform/providers/aws/` directory (24 files)
 - Add architectural layer-boundary doc comment to `platform/provider.go`
-- Add ADR `decisions/0020-platform-provider-aws-tombstone.md`
-- Extend CI gate `aws-sdk-banned` to note that `platform/providers/aws` no longer exists
-- Add entry in `DOCUMENTATION.md` clarifying the three-layer provider hierarchy
+- Add ADR `decisions/0032-platform-provider-aws-tombstone.md`
+- Promote `service/eks` CI gate: move from lenient-allowed-in-platform step to strict ban step + go.mod gate (Phase 2 CI comment at ci.yml:417–418 hands this off to Phase 3)
+- Add banned packages exclusive to the deleted tree: `service/ec2`, `service/dynamodb`, `service/elasticloadbalancingv2`, `service/rds`, `service/sqs`, `service/iam` — these are not present in `provider/aws/` or anywhere else
 
 ### Out of Scope (Phase 3)
 - `provider/aws/` — no changes
@@ -163,8 +162,8 @@ This is architectural cleanup, not force-cutover. The `platform.Provider` interf
 1. **No user builds with `-tags aws`** — confirmed by: no CI job uses this tag, no example config, no documentation mentions it. If this assumption is false, the tombstone would break a hidden build path. Mitigation: the ADR records the rationale so future maintainers understand why it was removed.
 2. **`workflow-plugin-aws` is the canonical AWS IaC path** — confirmed by Phase 1 design doc and issue #653 mandate.
 3. **`platform.Provider` interface is preserved** — confirmed: `DockerComposeProvider` and the pipeline step consumers remain.
-4. **AWS SDK packages used only by this tree** — to verify: `ec2`, `dynamodb`, `s3/v2` (via `platform/providers/aws/state_store.go`), `elasticloadbalancingv2`, `rds`. Since all files are build-tag-gated, they are not in `go.sum` and can be removed without `go mod tidy` breakage.
-5. **`go.mod` does not list these packages** — confirmed: `//go:build aws` prevents `go mod tidy` from pulling them in for normal builds.
+4. **AWS SDK packages exclusive to this tree are not in go.mod/go.sum** — `ec2`, `dynamodb`, `elasticloadbalancingv2`, `rds`, `sqs`, `iam` are only used by the build-tag-gated `platform/providers/aws/` tree. `service/eks` IS in go.mod because `provider/aws/plugin.go` (no build tag) uses it; it must not be removed from go.mod in Phase 3 since `provider/aws/` is kept. `service/s3` also needs verification: check if it appears outside this tree.
+5. **`service/eks` promotion is safe** — after `platform/providers/aws/drivers/eks_cluster.go` and `eks_nodegroup.go` are deleted, the only remaining callers of `service/eks` are in `provider/aws/` (deploy pipeline). The Phase 2 CI gate correctly anticipates this: the lenient step (`--exclude-dir=platform`) can be tightened to remove the `--exclude-dir=platform` exclusion, because the only remaining legitimate `eks` caller (`provider/aws/`) is still excluded by `--exclude-dir=provider`.
 
 ---
 
