@@ -35,7 +35,7 @@
 
 ---
 
-## Task 1: Delete legacy DO module + step files
+### Task 1: Delete legacy DO module + step files
 
 **Files:**
 - Delete: `module/platform_do_app.go`
@@ -141,7 +141,7 @@ EOF
 
 ---
 
-## Task 2: Strip registration sites and remap detection hooks
+### Task 2: Strip registration sites and remap detection hooks
 
 **Files:**
 - Modify: `plugins/platform/plugin.go` (drop 5 module factories + 5 step factories + 10 strings from `ModuleTypes` / `StepTypes` slices)
@@ -252,7 +252,7 @@ EOF
 
 ---
 
-## Task 3: Add load-time migration error guards (module + step)
+### Task 3: Add load-time migration error guards (module + step)
 
 **Files:**
 - Modify: `engine.go:508` — replace the single `unknown module type` error with a legacy-DO-aware branch (see Step 3).
@@ -784,7 +784,7 @@ EOF
 
 ---
 
-## Task 4: `go mod tidy` (root + example) + CI grep gate
+### Task 4: `go mod tidy` (root + example) + CI grep gate
 
 **Files:**
 - Modify: `go.mod` (drop `github.com/digitalocean/godo` direct require + transitive bumps via `go mod tidy`)
@@ -874,7 +874,7 @@ EOF
 
 ---
 
-## Task 5: Docs, CHANGELOG, migration guide, `wfctl modernize` rules + file follow-up issues
+### Task 5: Docs, CHANGELOG, migration guide, `wfctl modernize` rules + file follow-up issues
 
 **Files:**
 - Modify: `DOCUMENTATION.md` (replace the 5 module rows + 5 step rows in the platform tables with a single paragraph pointing at the DO plugin)
