@@ -161,6 +161,17 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	if v, ok := provider.(pb.PluginServiceServer); ok {
 		pb.RegisterPluginServiceServer(s, v)
 	}
+	// GRPCServerSetter: if the provider needs the *grpc.Server reference
+	// (e.g. to implement GetContractRegistry by calling BuildContractRegistry),
+	// call its setter now, after all services are registered. This avoids
+	// any circular dependency — the server is fully wired before the provider
+	// receives the reference.
+	type grpcServerSetter interface {
+		SetGRPCServer(*grpc.Server)
+	}
+	if v, ok := provider.(grpcServerSetter); ok {
+		v.SetGRPCServer(s)
+	}
 	return nil
 }
 
