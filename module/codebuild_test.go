@@ -764,10 +764,11 @@ func TestCodeBuildAWSBackendMigrationError(t *testing.T) {
 		t.Fatalf("Init should succeed (backend registered): %v", err)
 	}
 	// Migration error fires at operation time, not Init time.
-	if err := m.CreateProject(); err == nil {
+	err := m.CreateProject()
+	if err == nil {
 		t.Fatal("expected migration error from CreateProject() for provider: aws, got nil")
 	}
-	errStr := m.CreateProject().Error()
+	errStr := err.Error()
 	for _, want := range []string{"workflow-plugin-aws", "v0.53.0", "provider: mock"} {
 		if !strings.Contains(errStr, want) {
 			t.Errorf("error should mention %q, got: %s", want, errStr)

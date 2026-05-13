@@ -410,6 +410,10 @@ jobs:
               -e "aws-sdk-go-v2/service/eks" \
               module/
       - name: Grep gate — go.mod files must not list removed AWS SDK packages
+        # service/eks is intentionally omitted from this go.mod gate: platform/ and provider/
+        # have legitimate callers that still import it (EKS cluster-type wiring that was not
+        # part of issue #653 Phase 2).  Once those callers are migrated, add service/eks here.
+        # The module/ grep gate above already blocks any new service/eks imports in module/.
         run: |
           ! grep -qH \
               -e "aws-sdk-go-v2/service/apigatewayv2" \
