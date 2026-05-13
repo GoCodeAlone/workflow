@@ -122,6 +122,19 @@ func updateRegistryCompatibilityIndex(opts registryCompatibilityUpdateOptions) e
 		if ev.Version != version {
 			return fmt.Errorf("evidence version %s does not match --version %s", ev.Version, version)
 		}
+		// IaC provider manifests require typed-iac conformance evidence only.
+		// legacy-host-load evidence is advisory/legacy and cannot satisfy
+		// typed-IaC registry readiness; reject it at index-update time so that
+		// the registry index never contains evidence that looks valid but would
+		// be silently ignored by the resolver.
+		if manifestAdvertisesIaCProvider(manifest) && ev.Mode != PluginCompatibilityModeTypedIaC {
+			return fmt.Errorf(
+				"plugin %q advertises iacProvider capability: only typed-iac conformance evidence satisfies IaC registry readiness; "+
+					"evidence %q has mode=%q (advisory/legacy only). "+
+					"Run: wfctl plugin conformance --mode typed-iac --artifact <archive> to generate valid evidence",
+				pluginName, path, ev.Mode,
+			)
+		}
 		if err := validateEvidenceArchiveMatchesDownload(ev, manifest); err != nil {
 			return err
 		}
@@ -376,6 +389,17 @@ func compatibilityIndexIsStale(index *PluginVersionIndex, latestEngine string) b
 		}
 	}
 	return newest == "" || semver.Compare(newest, latestEngine) < 0
+}
+
+// manifestAdvertisesIaCProvider returns true when a registry manifest declares
+// an iacProvider capability with a non-empty provider name. These plugins must
+// supply typed-iac conformance evidence; legacy-host-load evidence is rejected
+// at index-update time for such manifests.
+func manifestAdvertisesIaCProvider(m *RegistryManifest) bool {
+	return m != nil &&
+		m.Capabilities != nil &&
+		m.Capabilities.IaCProvider != nil &&
+		m.Capabilities.IaCProvider.Name != ""
 }
 
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {

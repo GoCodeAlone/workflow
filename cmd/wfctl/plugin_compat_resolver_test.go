@@ -185,6 +185,37 @@ func TestPluginCompatResolverPseudoLocalVersionIsAdvisory(t *testing.T) {
 	}
 }
 
+func TestPluginCompatResolverLegacyHostLoadEvidenceNeverSatisfiesIaC(t *testing.T) {
+	// An index containing only legacy-host-load evidence must behave as if no
+	// compatible evidence exists. The resolver already filters by typed-iac mode
+	// inside findCompatibilityEvidence; this test confirms legacy-host-load does
+	// not sneak through for a first-party registry with RequiredFromEngine set.
+	legacyEv, err := ValidateCompatibilityEvidence(PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-test",
+		Version:       "v0.2.0",
+		EngineVersion: "v0.51.2",
+		Mode:          PluginCompatibilityModeLegacyHostLoad,
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "darwin",
+		Arch:          "arm64",
+		ArchiveSHA256: testArchiveSHA256,
+	})
+	if err != nil {
+		t.Fatalf("ValidateCompatibilityEvidence(legacy-host-load): %v", err)
+	}
+
+	idx := resolverIndex(resolverRecord("v0.2.0", legacyEv))
+	idx.EvidencePolicy.RequiredFromEngine = "v0.51.0"
+
+	_, resolveErr := ResolvePluginCompatibility(idx, nil, resolverOptions())
+	if resolveErr == nil {
+		t.Fatal("expected missing required evidence error when only legacy-host-load evidence is present")
+	}
+	if !strings.Contains(resolveErr.Error(), "missing required compatibility evidence") {
+		t.Fatalf("error = %v, want missing evidence context", resolveErr)
+	}
+}
+
 func resolverOptions() PluginCompatResolverOptions {
 	return PluginCompatResolverOptions{
 		EngineVersion: "v0.51.2",

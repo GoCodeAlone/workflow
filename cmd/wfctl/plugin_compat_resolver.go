@@ -211,6 +211,9 @@ func findCompatibilityEvidence(evidence []PluginCompatibilityEvidence, engine st
 	var rangeMatch *PluginCompatibilityEvidence
 	for i := range evidence {
 		ev := evidence[i]
+		// Only typed-iac evidence satisfies registry readiness checks.
+		// legacy-host-load evidence is advisory only and is intentionally
+		// excluded here — it must never satisfy IaC compatibility decisions.
 		if ev.Mode != PluginCompatibilityModeTypedIaC || ev.OS != goos || ev.Arch != goarch {
 			continue
 		}

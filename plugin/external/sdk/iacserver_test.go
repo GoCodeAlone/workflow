@@ -226,7 +226,9 @@ func TestRegisterAllIaCProviderServices_PluginServiceAlreadyRegistered_NoPanic(t
 	// Pre-register PluginService (simulates a mixed sdk.Serve + IaC plugin).
 	// Use an embedded-by-value stub so the pattern is idiomatic Go and not
 	// a pointer-to-unimplemented (which the generated gRPC code warns against).
-	type minimalPluginSvc struct{ pb.UnimplementedPluginServiceServer }
+	type minimalPluginSvc struct {
+		pb.UnimplementedPluginServiceServer
+	}
 	pb.RegisterPluginServiceServer(grpcSrv, &minimalPluginSvc{})
 	// RegisterAllIaCProviderServices must not panic on double-registration.
 	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, &fullProviderStub{}); err != nil {

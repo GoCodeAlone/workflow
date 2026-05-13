@@ -289,11 +289,187 @@ func TestRegistryCompatibilityUpdateDerivesPassRange(t *testing.T) {
 	}
 }
 
+func TestRegistryCompatibilityUpdateRejectsLegacyHostLoadForIaCManifest(t *testing.T) {
+	// An IaC provider manifest must reject legacy-host-load evidence at index
+	// update time because legacy-host-load is advisory only and cannot satisfy
+	// typed-IaC registry readiness.
+	registryDir := prepareIaCCompatibilityRegistry(t, "workflow-plugin-testcloud", "v0.1.0", testArchiveSHA256)
+	evPath := writeCompatibilityEvidence(t, registryDir, PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-testcloud",
+		Version:       "v0.1.0",
+		EngineVersion: "v0.51.2",
+		Mode:          PluginCompatibilityModeLegacyHostLoad,
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "darwin",
+		Arch:          "arm64",
+		ArchiveSHA256: testArchiveSHA256,
+	})
+
+	err := runPluginRegistry([]string{
+		"compatibility", "update",
+		"--registry-dir", registryDir,
+		"--plugin", "workflow-plugin-testcloud",
+		"--version", "v0.1.0",
+		"--evidence", evPath,
+	})
+	if err == nil {
+		t.Fatal("expected legacy-host-load rejection for IaC manifest")
+	}
+	if !strings.Contains(err.Error(), "iacProvider") {
+		t.Fatalf("error = %v, want iacProvider context", err)
+	}
+	if !strings.Contains(err.Error(), "typed-iac") {
+		t.Fatalf("error = %v, want typed-iac context", err)
+	}
+	if !strings.Contains(err.Error(), "legacy-host-load") || !strings.Contains(err.Error(), "advisory") {
+		t.Fatalf("error = %v, want legacy-host-load advisory context", err)
+	}
+}
+
+func TestRegistryCompatibilityUpdateAcceptsTypedIaCForIaCManifest(t *testing.T) {
+	// An IaC provider manifest must accept typed-iac evidence — the only mode
+	// that satisfies IaC registry readiness.
+	registryDir := prepareIaCCompatibilityRegistry(t, "workflow-plugin-testcloud", "v0.1.0", testArchiveSHA256)
+	evPath := writeCompatibilityEvidence(t, registryDir, PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-testcloud",
+		Version:       "v0.1.0",
+		EngineVersion: "v0.51.2",
+		Mode:          PluginCompatibilityModeTypedIaC,
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "darwin",
+		Arch:          "arm64",
+		ArchiveSHA256: testArchiveSHA256,
+	})
+
+	if err := runPluginRegistry([]string{
+		"compatibility", "update",
+		"--registry-dir", registryDir,
+		"--plugin", "workflow-plugin-testcloud",
+		"--version", "v0.1.0",
+		"--evidence", evPath,
+	}); err != nil {
+		t.Fatalf("compatibility update with typed-iac for IaC manifest: %v", err)
+	}
+	idx := readCompatibilityIndex(t, registryDir, "workflow-plugin-testcloud")
+	if len(idx.Versions) != 1 || len(idx.Versions[0].Compatibility) != 1 {
+		t.Fatalf("unexpected index: %#v", idx)
+	}
+	if idx.Versions[0].Compatibility[0].Mode != PluginCompatibilityModeTypedIaC {
+		t.Fatalf("evidence mode = %q, want typed-iac", idx.Versions[0].Compatibility[0].Mode)
+	}
+}
+
+func TestRegistryCompatibilityUpdateAcceptsLegacyHostLoadForNonIaCManifest(t *testing.T) {
+	// A non-IaC manifest (no iacProvider capability) must accept legacy-host-load
+	// evidence — this mode is valid for advisory/legacy checks on module plugins.
+	registryDir := prepareCompatibilityRegistry(t, "workflow-plugin-test", "v0.1.0", testArchiveSHA256)
+	evPath := writeCompatibilityEvidence(t, registryDir, PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-test",
+		Version:       "v0.1.0",
+		EngineVersion: "v0.51.2",
+		Mode:          PluginCompatibilityModeLegacyHostLoad,
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "darwin",
+		Arch:          "arm64",
+		ArchiveSHA256: testArchiveSHA256,
+	})
+
+	if err := runPluginRegistry([]string{
+		"compatibility", "update",
+		"--registry-dir", registryDir,
+		"--plugin", "workflow-plugin-test",
+		"--version", "v0.1.0",
+		"--evidence", evPath,
+	}); err != nil {
+		t.Fatalf("compatibility update with legacy-host-load for non-IaC manifest: %v", err)
+	}
+	idx := readCompatibilityIndex(t, registryDir, "workflow-plugin-test")
+	if len(idx.Versions) != 1 || len(idx.Versions[0].Compatibility) != 1 {
+		t.Fatalf("unexpected index: %#v", idx)
+	}
+	if idx.Versions[0].Compatibility[0].Mode != PluginCompatibilityModeLegacyHostLoad {
+		t.Fatalf("evidence mode = %q, want legacy-host-load", idx.Versions[0].Compatibility[0].Mode)
+	}
+}
+
+func TestManifestAdvertisesIaCProvider(t *testing.T) {
+	cases := []struct {
+		name string
+		m    *RegistryManifest
+		want bool
+	}{
+		{name: "nil", m: nil, want: false},
+		{name: "no capabilities", m: &RegistryManifest{}, want: false},
+		{name: "nil iacProvider", m: &RegistryManifest{Capabilities: &RegistryCapabilities{}}, want: false},
+		{name: "empty iacProvider name", m: &RegistryManifest{Capabilities: &RegistryCapabilities{IaCProvider: &RegistryIaCProvider{}}}, want: false},
+		{name: "with iacProvider name", m: &RegistryManifest{Capabilities: &RegistryCapabilities{IaCProvider: &RegistryIaCProvider{Name: "testcloud"}}}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := manifestAdvertisesIaCProvider(tc.m)
+			if got != tc.want {
+				t.Fatalf("manifestAdvertisesIaCProvider = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func prepareCompatibilityRegistry(t *testing.T, plugin, version, archiveSHA string) string {
 	t.Helper()
 	dir := t.TempDir()
 	writeManifest(t, dir, plugin, version, archiveSHA)
 	return dir
+}
+
+// prepareIaCCompatibilityRegistry creates a registry directory with a manifest
+// that advertises iacProvider capability. Used to test the enforcement that
+// only typed-iac evidence is accepted for IaC provider plugins.
+func prepareIaCCompatibilityRegistry(t *testing.T, plugin, version, archiveSHA string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeIaCManifest(t, dir, plugin, version, archiveSHA)
+	return dir
+}
+
+func writeIaCManifest(t *testing.T, registryDir, plugin, version, archiveSHA string) {
+	t.Helper()
+	manifest := RegistryManifest{
+		Name:             plugin,
+		Version:          version,
+		Author:           "workflow",
+		Description:      "test IaC provider plugin",
+		Type:             "external",
+		Tier:             "first_party",
+		MinEngineVersion: "v0.50.0",
+		Downloads: []PluginDownload{{
+			OS:     "darwin",
+			Arch:   "arm64",
+			URL:    "https://example.invalid/plugin.tar.gz",
+			SHA256: archiveSHA,
+		}, {
+			OS:     "linux",
+			Arch:   "amd64",
+			URL:    "https://example.invalid/plugin-linux.tar.gz",
+			SHA256: archiveSHA,
+		}},
+		Capabilities: &RegistryCapabilities{
+			IaCProvider: &RegistryIaCProvider{
+				Name:          "testcloud",
+				ResourceTypes: []string{"testcloud.instance"},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal IaC manifest: %v", err)
+	}
+	path := filepath.Join(registryDir, "plugins", plugin, "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("write IaC manifest: %v", err)
+	}
 }
 
 func writeManifest(t *testing.T, registryDir, plugin, version, archiveSHA string) {
