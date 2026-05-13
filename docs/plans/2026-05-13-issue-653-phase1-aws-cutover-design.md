@@ -83,11 +83,12 @@ This design proposes a **single-PR force-cutover** that deletes the legacy AWS I
 | `plugins/platform/plugin_test.go` | Drop the 4 module type + **15** step type string assertions. |
 | `plugins/infra/plugin.go` | **ADD** `"infra.autoscaling_group"` to `infraTypes` slice (new 14th infra type). Required so that configs migrated from `platform.autoscaling` validate correctly. |
 | `schema/schema.go` | Drop `platform.ecs`, `platform.apigateway`, `platform.autoscaling`, `platform.networking` from module type list. |
-| `schema/module_schema.go` | Drop 4 module schemas. **Update** `platform.dns` ConfigFieldDef for `provider` to `Description: "mock (aws Route53 backend removed; use infra.dns with workflow-plugin-aws)"`. **ADD** `infra.autoscaling_group` ModuleSchema (mirrors other infra.* schemas: label, category: infrastructure, description, configFields for provider + resource). |
+| `schema/module_schema.go` | Drop 4 module schemas (`platform.ecs`, `platform.apigateway`, `platform.autoscaling`, `platform.networking`). **Update** `platform.dns` ConfigFieldDef for `provider` to `Description: "mock (aws Route53 backend removed; use infra.dns with workflow-plugin-aws)"`. **Note:** `infra.autoscaling_group` schema is auto-generated from `infraTypes` in `plugins/infra/plugin.go`'s `ModuleSchemas()` — no manual schema entry needed in `module_schema.go`. |
 | `schema/step_schema_builtins.go` | Drop **15** step schema `Register` calls (ecs, apigw, scaling, network steps). |
 | `cmd/wfctl/type_registry.go` | Drop `platform.ecs`, `platform.apigateway`, `platform.autoscaling`, `platform.networking` entries. **ADD** `"infra.autoscaling_group"` entry (mirrors other infra.* entries). |
 | `schema/testdata/editor-schemas.golden.json` | Update golden file via `UPDATE_GOLDEN=1 go test ./schema/ -run TestEditorSchemasGoldenFile`. |
 | `module/multi_region.go:117` | Update error message that references `platform.ecs` to use `infra.container_service`. |
+| `module/app_container.go` comment lines | Update doc comment (line 14) to remove `platform.ecs` mention; update logger.Warn hint (line 147) to remove `platform.ecs` mention. These are string-only changes covered in T1 alongside the code edits. |
 | `DOCUMENTATION.md` | Remove 4 module rows + **15** step rows; keep `platform.dns` and `step.dns_*` rows; add paragraph pointing at `workflow-plugin-aws`. |
 | `go.mod` / `go.sum` | `go mod tidy` after deletion drops freed service packages. |
 
@@ -325,7 +326,7 @@ Edit these files:
 - `plugins/platform/plugin_test.go`: drop 4 module + 15 step type assertions
 - `plugins/infra/plugin.go`: ADD `"infra.autoscaling_group"` to infraTypes slice
 - `schema/schema.go`: drop 4 platform.* module type strings
-- `schema/module_schema.go`: drop 4 platform.* schemas; UPDATE platform.dns provider description; ADD infra.autoscaling_group schema
+- `schema/module_schema.go`: drop 4 platform.* schemas; UPDATE platform.dns provider description. (`infra.autoscaling_group` schema auto-generated from infraTypes — no manual schema entry needed here.)
 - `schema/step_schema_builtins.go`: drop 15 step schema Register calls
 - `cmd/wfctl/type_registry.go`: drop 4 platform.* entries; ADD infra.autoscaling_group entry
 - `module/multi_region.go:117`: update error message (platform.ecs → infra.container_service)
@@ -387,4 +388,27 @@ Add CI grep gate (two parts — mirrors #617's godo-banned gate):
 
 - **C-3** `module/app_container.go` has `case *PlatformECS:` type switch (line 130) and uses `ECSContainer` struct (lines 88, 639) which is defined in `platform_ecs.go`. Deleting `platform_ecs.go` causes compile failure in `app_container.go`. This file was not in the original modification list. Additionally, after removing the `case *PlatformECS:` branch, `ECSAppManifests`, `ECSAppTaskDef`, `ECSAppServiceCfg`, `ecsAppBackend`, and `buildECSManifests()` all become dead code in `app_container.go`. → **Fixed**: T1 now includes `module/app_container.go` as a partial edit: remove ALL ECS-specific declarations (structs + methods + `buildECSManifests()`), remove `case *PlatformECS:` branch, update default error message. Result: `app_container.go` supports platform.kubernetes only; compiles cleanly; zero AWS SDK imports.
 
-### Cycle 3 — pending
+### Cycle 3 (PASS) — 2026-05-13
+
+Bug-class scan:
+
+| Class | Result | Note |
+|---|---|---|
+| Unstated assumptions | Clean | Assumption 1 (infra.autoscaling_group parity) verified: workflow-plugin-aws v0.2.0 release notes confirm driver shipped. |
+| Repo-precedent conflicts | Clean | Mirrors #617 godo pattern throughout. |
+| YAGNI violations | Clean | awsRoute53ErrorBackend justified over simple unregister (actionable error message). |
+| Missing failure modes | Clean | example/go.mod confirmed has the 3 freed packages as indirect; go mod tidy will drop them. |
+| Security / privacy | Clean | Deletion removes SDK surface; no new auth boundaries introduced. |
+| Rollback story | Clean | Pre/post-merge rollback documented. |
+| Simpler alternative | Clean | Build-tag alternative considered and correctly rejected. |
+| User-intent drift | Clean | Design solves exactly what #653 requests. |
+| Over/under-decomposition | Clean | 6 tasks match complexity; each is ~5-30 min scope. |
+| Verification-class mismatch | Clean | go build, go test, grep gate, golden regeneration all match their change classes. |
+| Hidden serial deps | Clean | T1→T3 dep (delete before registration edit), T6 last (go mod tidy). All explicit. |
+| Missing rollback wiring | Clean | Rollback section present and actionable. |
+
+Additional refinements applied in cycle 3 (not findings, just precision):
+- `schema/module_schema.go` entry for `infra.autoscaling_group` correctly noted as NOT needed — schema auto-generated from `infraTypes` in `plugins/infra/plugin.go:ModuleSchemas()`.
+- `module/app_container.go` comment lines 14 and 147 added to string-update list.
+
+**PASS — zero Critical findings. Design approved for writing-plans.**
