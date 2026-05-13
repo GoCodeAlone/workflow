@@ -443,3 +443,155 @@ func TestApply_RefreshOutputsFlag_EnvVarAndFlagBothSet_RunsOnce(t *testing.T) {
 		t.Errorf("refresh should have populated 'id'; got outputs=%v", got.Outputs)
 	}
 }
+
+// ── End-to-end: --refresh-outputs updates existing infra_output secrets ────────
+
+// writeRefreshFlagTestConfigWithSecrets writes an infra YAML config with:
+//   - auto_bootstrap disabled
+//   - filesystem state backend
+//   - iac.provider + infra.vpc modules
+//   - secrets block (provider: env) with one infra_output generator whose
+//     source is "vpc-resource.runner_url"
+//
+// The generated secret key is RUNNER_URL (no prefix, env provider key ==
+// env var name). Returns the config path.
+func writeRefreshFlagTestConfigWithSecrets(t *testing.T, dir string) string {
+	t.Helper()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	cfg := `infra:
+  auto_bootstrap: false
+secrets:
+  provider: env
+  generate:
+    - key: RUNNER_URL
+      type: infra_output
+      source: vpc-resource.runner_url
+modules:
+  - name: cloud-provider
+    type: iac.provider
+    config:
+      provider: fake-provider
+  - name: state-store
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: ` + stateDir + `
+  - name: vpc-resource
+    type: infra.vpc
+    config:
+      provider: cloud-provider
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return cfgPath
+}
+
+// seedVPCStateWithRunnerURL seeds a vpc-resource state entry whose Outputs
+// include a runner_url field, simulating a provider whose URL changed.
+func seedVPCStateWithRunnerURL(t *testing.T, cfgPath, url string) {
+	t.Helper()
+	store, err := resolveStateStore(cfgPath, "")
+	if err != nil {
+		t.Fatalf("resolveStateStore: %v", err)
+	}
+	entry := interfaces.ResourceState{
+		ID:         "vpc-resource",
+		Name:       "vpc-resource",
+		Type:       "infra.vpc",
+		Provider:   "fake-provider",
+		ProviderID: "pid-runner",
+		Outputs:    map[string]any{"runner_url": url},
+	}
+	if err := store.SaveResource(context.Background(), entry); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+}
+
+// TestApply_RefreshOutputsFlag_UpdatesExistingInfraOutputSecret is the
+// end-to-end regression test for the original bug:
+//
+// Given:
+//   - RUNNER_URL env-secret already exists with a stale value
+//   - State contains vpc-resource.runner_url with the new (live) value
+//
+// When:
+//   - wfctl infra apply --refresh-outputs --auto-approve is run
+//
+// Then:
+//   - RUNNER_URL is updated to the new value (not skipped as "already exists")
+//
+// This exercises the infra.go:1514 call site — if refreshOutputsFlag were not
+// passed through, the secret would be skipped and the assertion would fail.
+func TestApply_RefreshOutputsFlag_UpdatesExistingInfraOutputSecret(t *testing.T) {
+	t.Setenv("WFCTL_REFRESH_OUTPUTS", "") // ensure env-var pre-step does not fire
+	os.Unsetenv("WFCTL_REFRESH_OUTPUTS")
+
+	dir := t.TempDir()
+	cfgPath := writeRefreshFlagTestConfigWithSecrets(t, dir)
+
+	// Seed state with the new URL already in place (simulates provider URL change
+	// having been captured by a previous refresh or initial apply).
+	const newURL = "https://runner-new.example.com"
+	const staleURL = "https://runner-old.example.com"
+	seedVPCStateWithRunnerURL(t, cfgPath, newURL)
+
+	// Pre-populate the secret with the stale value — this is what would happen
+	// after the initial apply before the provider was re-created.
+	t.Setenv("RUNNER_URL", staleURL)
+
+	// The fake provider's plan/apply is a no-op; state remains as seeded above.
+	cleanup := installFakeRefreshProvider(t, map[string]map[string]any{
+		"pid-runner": {"runner_url": newURL},
+	})
+	defer cleanup()
+
+	if _, err := captureStdout(t, func() error {
+		return runInfraApply([]string{"--auto-approve", "--refresh-outputs", "-c", cfgPath})
+	}); err != nil {
+		t.Fatalf("runInfraApply --refresh-outputs: %v", err)
+	}
+
+	// RUNNER_URL must have been updated to the new value.
+	if got := os.Getenv("RUNNER_URL"); got != newURL {
+		t.Errorf("RUNNER_URL: got %q, want %q — secret was not updated by --refresh-outputs", got, newURL)
+	}
+}
+
+// TestApply_NoRefreshOutputsFlag_DoesNotOverwriteExistingSecret verifies that
+// without --refresh-outputs, a pre-existing infra_output secret is NOT
+// overwritten by a normal apply (the "already exists — skipped" invariant).
+func TestApply_NoRefreshOutputsFlag_DoesNotOverwriteExistingSecret(t *testing.T) {
+	t.Setenv("WFCTL_REFRESH_OUTPUTS", "")
+	os.Unsetenv("WFCTL_REFRESH_OUTPUTS")
+
+	dir := t.TempDir()
+	cfgPath := writeRefreshFlagTestConfigWithSecrets(t, dir)
+
+	const newURL = "https://runner-new.example.com"
+	const userManagedURL = "https://user-managed.example.com"
+	seedVPCStateWithRunnerURL(t, cfgPath, newURL)
+
+	// User-managed value that must survive the apply.
+	t.Setenv("RUNNER_URL", userManagedURL)
+
+	cleanup := installFakeRefreshProvider(t, map[string]map[string]any{
+		"pid-runner": {"runner_url": newURL},
+	})
+	defer cleanup()
+
+	if _, err := captureStdout(t, func() error {
+		return runInfraApply([]string{"--auto-approve", "-c", cfgPath})
+	}); err != nil {
+		t.Fatalf("runInfraApply: %v", err)
+	}
+
+	// Without --refresh-outputs, the existing secret must not be overwritten.
+	if got := os.Getenv("RUNNER_URL"); got != userManagedURL {
+		t.Errorf("RUNNER_URL: got %q, want %q — normal apply must not overwrite existing secret", got, userManagedURL)
+	}
+}

@@ -16,6 +16,19 @@ type simpleProvider struct {
 	data map[string]string
 }
 
+// setCountProvider wraps simpleProvider and records every Set call. Use it
+// when a test needs to assert that Set was or was not called a specific
+// number of times (e.g. the "unchanged" optimisation path).
+type setCountProvider struct {
+	simpleProvider
+	setCalls int
+}
+
+func (p *setCountProvider) Set(ctx context.Context, key, val string) error {
+	p.setCalls++
+	return p.simpleProvider.Set(ctx, key, val)
+}
+
 func newSimpleProvider() *simpleProvider {
 	return &simpleProvider{data: map[string]string{}}
 }
@@ -277,11 +290,13 @@ func TestSyncInfraOutputSecrets_RefreshOutputs_UpdatesStaleSecret(t *testing.T) 
 
 // TestSyncInfraOutputSecrets_RefreshOutputs_UnchangedSkipsSet verifies that
 // when refreshOutputs=true and the existing secret already matches the infra
-// output, the value is left unchanged.
+// output, provider.Set is NOT called — the "unchanged" optimisation must not
+// be masked by a write of the same value.
 func TestSyncInfraOutputSecrets_RefreshOutputs_UnchangedSkipsSet(t *testing.T) {
 	current := "postgres://user:pass@db.example.com:5432/app"
-	p := newSimpleProvider()
-	p.data["DATABASE_URL"] = current
+	// setCountProvider records how many times Set is called. If the
+	// "unchanged" path fires, the count must be 0.
+	p := &setCountProvider{simpleProvider: simpleProvider{data: map[string]string{"DATABASE_URL": current}}}
 	cfg := &SecretsConfig{
 		Generate: []SecretGen{
 			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
@@ -291,8 +306,11 @@ func TestSyncInfraOutputSecrets_RefreshOutputs_UnchangedSkipsSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
+	if p.setCalls != 0 {
+		t.Errorf("Set must not be called when value is unchanged; called %d time(s)", p.setCalls)
+	}
 	if p.data["DATABASE_URL"] != current {
-		t.Errorf("unchanged secret should not be modified: got %q", p.data["DATABASE_URL"])
+		t.Errorf("value must remain unchanged: got %q", p.data["DATABASE_URL"])
 	}
 }
 
