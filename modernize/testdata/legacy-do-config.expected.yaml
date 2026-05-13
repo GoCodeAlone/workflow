@@ -27,13 +27,13 @@ modules:
 pipelines:
   deploy:
     steps:
-      - type: step.iac_apply
+      - type: step.do_deploy
         config:
           app: api
-      - type: step.iac_status
+      - type: step.do_status
         config:
           app: api
-      - type: step.iac_destroy
+      - type: step.do_destroy
         config:
           app: api
       - type: step.do_logs

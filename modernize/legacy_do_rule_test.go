@@ -38,12 +38,6 @@ func TestLegacyDORule_Rewrites(t *testing.T) {
 			wantNew:  "infra.k8s_cluster",
 			wantDrop: "platform.doks",
 		},
-		{
-			name:     "step.do_deploy → step.iac_apply",
-			yamlIn:   "pipelines:\n  - steps:\n      - type: step.do_deploy\n",
-			wantNew:  "step.iac_apply",
-			wantDrop: "step.do_deploy",
-		},
 	}
 	rule := legacyDORule()
 	for _, tc := range cases {
@@ -73,10 +67,15 @@ func TestLegacyDORule_Rewrites(t *testing.T) {
 }
 
 func TestLegacyDORule_GapTypesFlaggedNotRewritten(t *testing.T) {
-	// step.do_logs, step.do_scale, and platform.do_networking have NO 1:1
-	// auto-fixable successor. Rule must:
-	//  - flag them as findings,
-	//  - NOT modify the YAML (no silent loss).
+	// Non-fixable types: the rule must flag them as findings (Fixable: false)
+	// and must NOT modify the YAML after Fix() runs.
+	//
+	// Includes:
+	//   - step.do_logs/scale: no 1:1 pipeline-step successor (GAP types).
+	//   - platform.do_networking: splits 1→2, manual rewrite required.
+	//   - step.do_deploy/status/destroy: step.iac_apply/status/destroy require
+	//     different config keys (platform + state_store vs legacy app:), so
+	//     auto-rewriting the type alone produces an invalid config.
 	cases := []struct {
 		name   string
 		legacy string
@@ -85,6 +84,9 @@ func TestLegacyDORule_GapTypesFlaggedNotRewritten(t *testing.T) {
 		{"step.do_logs", "step.do_logs", "pipelines:\n  - steps:\n      - type: step.do_logs\n"},
 		{"step.do_scale", "step.do_scale", "pipelines:\n  - steps:\n      - type: step.do_scale\n"},
 		{"platform.do_networking", "platform.do_networking", "modules:\n  - name: net\n    type: platform.do_networking\n    config: {}\n"},
+		{"step.do_deploy", "step.do_deploy", "pipelines:\n  - steps:\n      - type: step.do_deploy\n        config:\n          app: api\n"},
+		{"step.do_status", "step.do_status", "pipelines:\n  - steps:\n      - type: step.do_status\n        config:\n          app: api\n"},
+		{"step.do_destroy", "step.do_destroy", "pipelines:\n  - steps:\n      - type: step.do_destroy\n        config:\n          app: api\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

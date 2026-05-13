@@ -13,23 +13,29 @@ import (
 // Shared constants live in `internal/legacydo`, a leaf package that imports
 // only stdlib and is safe for both `module` and `modernize` to consume.
 
-// legacyDORule rewrites legacy DigitalOcean module + step types to their
-// infra.* IaC successors (issue #617).
+// legacyDORule flags legacy DigitalOcean module + step types and rewrites
+// module types to their infra.* IaC successors (issue #617).
 //
-// IMPORTANT: The Fix function ONLY renames the `type:` key — it does NOT
-// inject the required `config.provider: digitalocean` setting, because that
-// requires modifying a sibling mapping that may already contain unrelated
-// keys the operator must review. The rule's Check Message and the migration
-// guide both instruct the operator to add the provider key manually after
-// running modernize. The committed `testdata/legacy-do-config.expected.yaml`
-// fixture asserts the post-modernize shape: types renamed, provider NOT
-// auto-added. Adding provider injection in a future iteration is tracked as
-// a follow-up (see migration guide).
+// IMPORTANT: The Fix function ONLY renames the `type:` key for module types
+// — it does NOT inject the required `config.provider: digitalocean` setting,
+// because that requires modifying a sibling mapping that may already contain
+// unrelated keys the operator must review. The rule's Check Message and the
+// migration guide both instruct the operator to add the provider key manually
+// after running modernize. The `testdata/legacy-do-config.expected.yaml`
+// fixture documents the post-modernize shape: module types renamed, provider NOT
+// auto-added, step types unchanged (non-fixable). Adding provider injection in
+// a future iteration is tracked as a follow-up (see migration guide).
 //
-// Auto-fixable for 4 of 5 modules (platform.do_app/database/dns/doks) and
-// 3 of 5 steps (step.do_deploy/status/destroy). The GAP types (do_networking
-// splits 1→2; step.do_logs/scale have no pipeline-step successor) are flagged
-// but not modified.
+// Step types (step.do_deploy/status/destroy) are flagged but NOT auto-rewritten
+// because step.iac_apply/status/destroy require different config keys
+// (platform + state_store) rather than the legacy app: key. Auto-rewriting
+// the type alone produces an invalid config. The operator must rewrite step
+// config manually per the migration guide (docs/migrations/v0.52.0-godo-removal.md).
+//
+// Auto-fixable: 4 of 5 modules (platform.do_app/database/dns/doks).
+// Not auto-fixable: platform.do_networking (1→2 split), all 5 step types
+// (step.do_deploy/status/destroy config shape mismatch; step.do_logs/scale
+// have no pipeline-step successor).
 func legacyDORule() Rule {
 	moduleMap := map[string]string{
 		"platform.do_app":      "infra.container_service",
@@ -40,6 +46,10 @@ func legacyDORule() Rule {
 		// 1→2 (infra.vpc + infra.firewall), which requires structural
 		// rewrite the operator must review.
 	}
+	// stepMap holds the successor type name for the migration error message only.
+	// These findings are NOT auto-fixable: step.iac_apply/status/destroy require
+	// different config keys (platform + state_store) vs the legacy app: key, so
+	// rewriting type alone would produce an invalid config.
 	stepMap := map[string]string{
 		"step.do_deploy":  "step.iac_apply",
 		"step.do_status":  "step.iac_status",
@@ -68,10 +78,14 @@ func legacyDORule() Rule {
 				}
 				if successor, ok := stepMap[typeVal.Value]; ok {
 					out = append(out, Finding{
-						RuleID:  "legacy-do-types",
-						Line:    typeVal.Line,
-						Message: fmt.Sprintf("%s removed in %s; rewrite to %s — requires workflow-plugin-digitalocean", typeVal.Value, legacydo.RemovedInVersion, successor),
-						Fixable: true,
+						RuleID: "legacy-do-types",
+						Line:   typeVal.Line,
+						// Fixable is false: step.iac_apply/status/destroy require
+						// different config keys (platform + state_store) compared
+						// to the legacy app: key. Rewriting the type alone would
+						// produce an invalid config. Operator must rewrite manually.
+						Message: fmt.Sprintf("%s removed in %s; manually rewrite to %s with config keys platform + state_store (see docs/migrations/v0.52.0-godo-removal.md) — requires workflow-plugin-digitalocean", typeVal.Value, legacydo.RemovedInVersion, successor),
+						Fixable: false,
 					})
 				}
 				if reason, ok := gapTypes[typeVal.Value]; ok {
@@ -97,16 +111,11 @@ func legacyDORule() Rule {
 						Description: fmt.Sprintf("rewrote %s → %s", old, successor),
 					})
 				}
-				if successor, ok := stepMap[typeVal.Value]; ok {
-					old := typeVal.Value
-					typeVal.Value = successor
-					out = append(out, Change{
-						RuleID:      "legacy-do-types",
-						Line:        typeVal.Line,
-						Description: fmt.Sprintf("rewrote %s → %s", old, successor),
-					})
-				}
-				// gapTypes are intentionally not modified.
+				// stepMap types are intentionally NOT rewritten: step.iac_apply/
+				// status/destroy require different config keys (platform +
+				// state_store) vs the legacy app: key. Auto-rewriting the type
+				// alone produces an invalid config; operator must rewrite manually.
+				// gapTypes are also intentionally not modified.
 			})
 			return out
 		},

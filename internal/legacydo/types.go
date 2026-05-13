@@ -30,9 +30,9 @@ var ModuleTypes = map[string]string{
 // StepTypes maps each removed legacy DigitalOcean step type to its
 // successor or to a workaround when no 1:1 successor exists.
 var StepTypes = map[string]string{
-	"step.do_deploy":  "step.iac_apply (against an infra.container_service module)",
-	"step.do_status":  "step.iac_status (against an infra.container_service module)",
-	"step.do_destroy": "step.iac_destroy (against an infra.container_service module)",
+	"step.do_deploy":  "step.iac_apply (against an infra.container_service module); required config keys: platform (iac.provider service name) + state_store (IaC state backend module name)",
+	"step.do_status":  "step.iac_status (against an infra.container_service module); required config keys: platform (iac.provider service name) + state_store (IaC state backend module name)",
+	"step.do_destroy": "step.iac_destroy (against an infra.container_service module); required config keys: platform (iac.provider service name) + state_store (IaC state backend module name)",
 	"step.do_logs":    "no direct pipeline-step equivalent; use `wfctl infra logs` ad-hoc, or rely on the DO plugin's Troubleshoot hook on step.iac_apply failure",
 	"step.do_scale":   "no direct pipeline-step equivalent; update instance_count in the infra.container_service module config and re-run step.iac_apply",
 }
