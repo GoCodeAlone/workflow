@@ -226,11 +226,87 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		return PluginCompatibilityEvidence{}, err
 	}
 	binaryPath := filepath.Join(installDir, installName)
-	if info, statErr := os.Stat(filepath.Join(sourceDir, installName)); opts.ArtifactPath != "" && statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-		if err := copyFile(filepath.Join(sourceDir, installName), binaryPath, info.Mode()); err != nil {
-			return PluginCompatibilityEvidence{}, err
+	var conformanceChecked bool
+	var conformanceStdout, conformanceStderr string
+
+	if opts.ArtifactPath != "" {
+		candidates := discoverArtifactBinaryCandidates(sourceDir, manifest.Name, installName)
+		if len(candidates) > 0 {
+			var diagLines []string
+			diagLines = append(diagLines, fmt.Sprintf("artifact binary discovery: install=%q manifest=%q candidates=[%s]",
+				installName, manifest.Name, strings.Join(candidates, ", ")))
+
+			var lastCheckErr error
+			for _, cand := range candidates {
+				srcPath := filepath.Join(sourceDir, cand)
+				srcInfo, statErr := os.Stat(srcPath)
+				if statErr != nil {
+					diagLines = append(diagLines, fmt.Sprintf("  [skip] %q: %v", cand, statErr))
+					continue
+				}
+				if copyErr := copyFile(srcPath, binaryPath, srcInfo.Mode()); copyErr != nil {
+					diagLines = append(diagLines, fmt.Sprintf("  [fail] %q: copy error: %v", cand, copyErr))
+					lastCheckErr = copyErr
+					continue
+				}
+				cstdout, cstderr, checkErr := checkTypedIaCPlugin(opts.Timeout, filepath.Join(tmp, "plugins"), installName)
+				conformanceStdout = cstdout
+				conformanceStderr = cstderr
+				if checkErr == nil {
+					diagLines = append(diagLines, fmt.Sprintf("  [pass] %q selected", cand))
+					conformanceChecked = true
+					lastCheckErr = nil
+					break
+				}
+				lastCheckErr = checkErr
+				diagLines = append(diagLines, fmt.Sprintf("  [fail] %q: %v", cand, checkErr))
+			}
+
+			diagMsg := strings.Join(diagLines, "\n")
+			if conformanceStderr != "" {
+				conformanceStderr = diagMsg + "\n" + conformanceStderr
+			} else {
+				conformanceStderr = diagMsg
+			}
+
+			if !conformanceChecked {
+				// All candidates failed; build and return fail evidence with diagnostics.
+				if lastCheckErr == nil {
+					lastCheckErr = fmt.Errorf("no executable artifact candidate could be staged from archive (candidates: %s)", strings.Join(candidates, ", "))
+				}
+				manifestSHA, _ := hashFileSHA256(filepath.Join(installDir, "plugin.json"))
+				binarySHA := ""
+				if _, statErr := os.Stat(binaryPath); statErr == nil {
+					binarySHA, _ = hashFileSHA256(binaryPath)
+				}
+				ev := PluginCompatibilityEvidence{
+					Plugin:               manifest.Name,
+					Version:              manifest.Version,
+					EngineVersion:        opts.EngineVersion,
+					WfctlVersion:         buildVersion(),
+					Mode:                 opts.Mode,
+					Status:               PluginCompatibilityStatusFail,
+					OS:                   runtime.GOOS,
+					Arch:                 runtime.GOARCH,
+					ArchiveSHA256:        archiveSHA,
+					BinarySHA256:         binarySHA,
+					PluginManifestSHA256: manifestSHA,
+					GeneratedBy:          "wfctl plugin conformance",
+					StdoutTail:           conformanceStdout,
+					StderrTail:           conformanceStderr,
+				}
+				if normalized, normErr := ValidateCompatibilityEvidence(ev); normErr == nil {
+					ev = normalized
+				}
+				return ev, lastCheckErr
+			}
+			// conformanceChecked=true: a candidate passed; binary is at binaryPath.
 		}
-	} else {
+		// len(candidates)==0: no executables found in archive root; fall through to go build
+		// below (supports source-in-archive tarballs that include Go source).
+	}
+
+	if !conformanceChecked {
 		buildPackage := opts.BuildPackage
 		if buildPackage == "" {
 			buildPackage = "."
@@ -253,7 +329,13 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		return PluginCompatibilityEvidence{}, err
 	}
 
-	stdout, stderr, err := checkTypedIaCPlugin(opts.Timeout, filepath.Join(tmp, "plugins"), installName)
+	var stdout, stderr string
+	if conformanceChecked {
+		stdout = conformanceStdout
+		stderr = conformanceStderr
+	} else {
+		stdout, stderr, err = checkTypedIaCPlugin(opts.Timeout, filepath.Join(tmp, "plugins"), installName)
+	}
 	ev := PluginCompatibilityEvidence{
 		Plugin:               manifest.Name,
 		Version:              manifest.Version,
@@ -282,6 +364,76 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		return ev, err
 	}
 	return ev, nil
+}
+
+// discoverArtifactBinaryCandidates returns an ordered list of file names in sourceDir
+// that are executable and should be tried as the plugin binary. Candidates are
+// prioritised as follows:
+//
+//  1. installName (the normalised plugin name, e.g. "digitalocean")
+//  2. manifestName when it differs from installName (e.g. "workflow-plugin-digitalocean")
+//  3. On Windows: the above names with a ".exe" suffix
+//  4. Any other executable file found in the archive root (excluding well-known text extensions)
+//
+// This allows artifact mode to discover plugin binaries that are named after the
+// full project name in GoReleaser archives rather than the normalised install name.
+func discoverArtifactBinaryCandidates(sourceDir, manifestName, installName string) []string {
+	seen := make(map[string]bool)
+	var out []string
+
+	addIfExecutable := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		info, err := os.Stat(filepath.Join(sourceDir, name))
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+			return
+		}
+		out = append(out, name)
+	}
+
+	addIfExecutable(installName)
+	if manifestName != installName {
+		addIfExecutable(manifestName)
+	}
+	if runtime.GOOS == "windows" {
+		addIfExecutable(installName + ".exe")
+		if manifestName != installName {
+			addIfExecutable(manifestName + ".exe")
+		}
+	}
+
+	// Scan the archive root for any additional executables not already considered.
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return out
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		info, statErr := entry.Info()
+		if statErr != nil {
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			continue
+		}
+		// Skip files with well-known non-binary extensions.
+		switch strings.ToLower(filepath.Ext(name)) {
+		case ".json", ".yaml", ".yml", ".md", ".txt", ".sh", ".bat", ".ps1",
+			".go", ".sum", ".mod", ".toml", ".lock", ".html", ".xml":
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 func checkTypedIaCPlugin(timeout time.Duration, pluginsDir, name string) (string, string, error) {
