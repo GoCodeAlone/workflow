@@ -15,6 +15,7 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/infra"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/internal/legacyaws"
 	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
@@ -391,7 +392,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		schema.WithSkipWorkflowTypeCheck(),
 		schema.WithSkipTriggerTypeCheck(),
 	}
-	extra := make([]string, 0, len(e.moduleFactories)+len(legacydo.ModuleTypes))
+	extra := make([]string, 0, len(e.moduleFactories)+len(legacydo.ModuleTypes)+len(legacyaws.ModuleTypes))
 	for t := range e.moduleFactories {
 		extra = append(extra, t)
 	}
@@ -400,6 +401,10 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	// schema rejection produces a generic error and would mask the
 	// actionable migration message (issue #617).
 	for t := range legacydo.ModuleTypes {
+		extra = append(extra, t)
+	}
+	// Same pattern for legacy AWS module types removed in issue #653.
+	for t := range legacyaws.ModuleTypes {
 		extra = append(extra, t)
 	}
 	valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
@@ -514,6 +519,10 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			if legacydo.IsModuleType(modCfg.Type) {
 				_, iacLoaded := e.moduleFactories["iac.provider"]
 				return legacydo.FormatModuleError(modCfg.Type, modCfg.Name, iacLoaded)
+			}
+			if legacyaws.IsModuleType(modCfg.Type) {
+				_, iacLoaded := e.moduleFactories["iac.provider"]
+				return legacyaws.FormatModuleError(modCfg.Type, modCfg.Name, iacLoaded)
 			}
 			return fmt.Errorf("unknown module type %q for module %q — ensure the required plugin is loaded", modCfg.Type, modCfg.Name)
 		}

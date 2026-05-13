@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/internal/legacyaws"
 	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/schema"
 	"gopkg.in/yaml.v3"
@@ -148,17 +149,24 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 	for t := range legacydo.ModuleTypes {
 		opts = append(opts, schema.WithExtraModuleTypes(t))
 	}
+	// Same for legacy AWS module types removed in issue #653.
+	for t := range legacyaws.ModuleTypes {
+		opts = append(opts, schema.WithExtraModuleTypes(t))
+	}
 
 	if err := schema.ValidateConfig(cfg, opts...); err != nil {
 		return err
 	}
 
-	// Post-validate sweep: reject legacy DO module/step types with actionable
-	// migration errors (issue #617). wfctl validate has no engine, so the
-	// iacProviderLoaded flag is always false here.
+	// Post-validate sweep: reject legacy DO and AWS module/step types with
+	// actionable migration errors (issues #617, #653). wfctl validate has no
+	// engine, so the iacProviderLoaded flag is always false here.
 	for _, m := range cfg.Modules {
 		if legacydo.IsModuleType(m.Type) {
 			return legacydo.FormatModuleError(m.Type, m.Name, false)
+		}
+		if legacyaws.IsModuleType(m.Type) {
+			return legacyaws.FormatModuleError(m.Type, m.Name, false)
 		}
 	}
 	for _, rawPipeline := range cfg.Pipelines {
@@ -173,6 +181,9 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 		for _, s := range pipeCfg.Steps {
 			if legacydo.IsStepType(s.Type) {
 				return legacydo.FormatStepError(s.Type, false)
+			}
+			if legacyaws.IsStepType(s.Type) {
+				return legacyaws.FormatStepError(s.Type, false)
 			}
 		}
 	}

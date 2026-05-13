@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/internal/legacyaws"
 	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/GoCodeAlone/workflow/validation"
@@ -138,14 +139,22 @@ func ciValidateFile(cfgPath string, strict, immutableConfig bool, immutableSecti
 	for t := range legacydo.ModuleTypes {
 		opts = append(opts, schema.WithExtraModuleTypes(t))
 	}
+	// Same for legacy AWS module types removed in issue #653.
+	for t := range legacyaws.ModuleTypes {
+		opts = append(opts, schema.WithExtraModuleTypes(t))
+	}
 	if err := schema.ValidateConfig(cfg, opts...); err != nil {
 		errs = append(errs, fmt.Errorf("schema: %w", err))
 	}
 
-	// Post-validate sweep: accumulate legacy DO module/step errors (issue #617).
+	// Post-validate sweep: accumulate legacy DO and AWS module/step errors
+	// (issues #617, #653).
 	for _, m := range cfg.Modules {
 		if legacydo.IsModuleType(m.Type) {
 			errs = append(errs, legacydo.FormatModuleError(m.Type, m.Name, false))
+		}
+		if legacyaws.IsModuleType(m.Type) {
+			errs = append(errs, legacyaws.FormatModuleError(m.Type, m.Name, false))
 		}
 	}
 	for _, rawPipeline := range cfg.Pipelines {
@@ -160,6 +169,9 @@ func ciValidateFile(cfgPath string, strict, immutableConfig bool, immutableSecti
 		for _, s := range pipeCfg.Steps {
 			if legacydo.IsStepType(s.Type) {
 				errs = append(errs, legacydo.FormatStepError(s.Type, false))
+			}
+			if legacyaws.IsStepType(s.Type) {
+				errs = append(errs, legacyaws.FormatStepError(s.Type, false))
 			}
 		}
 	}

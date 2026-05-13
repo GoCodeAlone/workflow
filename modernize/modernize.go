@@ -44,6 +44,7 @@ func AllRules() []Rule {
 		camelCaseConfigRule(),
 		requestParseConfigRule(),
 		legacyDORule(),
+		legacyAWSRule(),
 	}
 }
 

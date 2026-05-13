@@ -1455,65 +1455,6 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		},
 	})
 
-	// ---- API Gateway Apply ----
-
-	r.Register(&StepSchema{
-		Type:        "step.apigw_apply",
-		Plugin:      "platform",
-		Description: "Applies (provisions or updates) an API gateway configuration.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "gateway", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "id", Type: "string", Description: "API gateway ID"},
-			{Key: "endpoint", Type: "string", Description: "Gateway endpoint URL"},
-		},
-	})
-
-	// ---- API Gateway Destroy ----
-
-	r.Register(&StepSchema{
-		Type:        "step.apigw_destroy",
-		Plugin:      "platform",
-		Description: "Destroys a provisioned API gateway.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "gateway", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "destroyed", Type: "boolean", Description: "Whether the gateway was destroyed"},
-		},
-	})
-
-	// ---- API Gateway Plan ----
-
-	r.Register(&StepSchema{
-		Type:        "step.apigw_plan",
-		Plugin:      "platform",
-		Description: "Plans API gateway changes without applying them.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "gateway", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
-			{Key: "changes", Type: "number", Description: "Number of changes planned"},
-		},
-	})
-
-	// ---- API Gateway Status ----
-
-	r.Register(&StepSchema{
-		Type:        "step.apigw_status",
-		Plugin:      "platform",
-		Description: "Gets the current status of an API gateway.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "gateway", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "status", Type: "string", Description: "Current gateway status"},
-			{Key: "endpoint", Type: "string", Description: "Gateway endpoint URL"},
-		},
-	})
-
 	// ---- App Deploy ----
 
 	r.Register(&StepSchema{
@@ -1893,67 +1834,6 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Outputs: []StepOutputDef{
 			{Key: "status", Type: "string", Description: "Zone status"},
 			{Key: "zone_id", Type: "string", Description: "DNS zone ID"},
-		},
-	})
-
-	// ---- ECS Apply ----
-
-	r.Register(&StepSchema{
-		Type:        "step.ecs_apply",
-		Plugin:      "platform",
-		Description: "Applies (deploys) an ECS Fargate service.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "service", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
-			{Key: "image", Type: FieldTypeString, Description: "Container image to deploy"},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "service_arn", Type: "string", Description: "ECS service ARN"},
-			{Key: "status", Type: "string", Description: "Service status"},
-		},
-	})
-
-	// ---- ECS Destroy ----
-
-	r.Register(&StepSchema{
-		Type:        "step.ecs_destroy",
-		Plugin:      "platform",
-		Description: "Destroys an ECS Fargate service.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "service", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "destroyed", Type: "boolean", Description: "Whether the service was destroyed"},
-		},
-	})
-
-	// ---- ECS Plan ----
-
-	r.Register(&StepSchema{
-		Type:        "step.ecs_plan",
-		Plugin:      "platform",
-		Description: "Plans ECS service deployment changes without applying them.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "service", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
-			{Key: "image", Type: FieldTypeString, Description: "Container image to plan for"},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
-			{Key: "changes", Type: "number", Description: "Number of changes planned"},
-		},
-	})
-
-	// ---- ECS Status ----
-
-	r.Register(&StepSchema{
-		Type:        "step.ecs_status",
-		Plugin:      "platform",
-		Description: "Gets the status of an ECS Fargate service.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "service", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "status", Type: "string", Description: "Service status"},
-			{Key: "running_count", Type: "number", Description: "Number of running tasks"},
 		},
 	})
 
@@ -2377,51 +2257,6 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		},
 	})
 
-	// ---- Network Apply ----
-
-	r.Register(&StepSchema{
-		Type:        "step.network_apply",
-		Plugin:      "platform",
-		Description: "Applies VPC networking changes.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "network", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "vpc_id", Type: "string", Description: "VPC ID"},
-			{Key: "subnet_ids", Type: "[]string", Description: "Created subnet IDs"},
-		},
-	})
-
-	// ---- Network Plan ----
-
-	r.Register(&StepSchema{
-		Type:        "step.network_plan",
-		Plugin:      "platform",
-		Description: "Plans VPC networking changes without applying them.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "network", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
-			{Key: "changes", Type: "number", Description: "Number of changes planned"},
-		},
-	})
-
-	// ---- Network Status ----
-
-	r.Register(&StepSchema{
-		Type:        "step.network_status",
-		Plugin:      "platform",
-		Description: "Gets the status of VPC networking resources.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "network", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "status", Type: "string", Description: "Network status"},
-			{Key: "vpc_id", Type: "string", Description: "VPC ID"},
-		},
-	})
-
 	// ---- NoSQL Delete ----
 
 	r.Register(&StepSchema{
@@ -2592,64 +2427,6 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		},
 		Outputs: []StepOutputDef{
 			{Key: "weight", Type: "number", Description: "Applied weight"},
-		},
-	})
-
-	// ---- Scaling Apply ----
-
-	r.Register(&StepSchema{
-		Type:        "step.scaling_apply",
-		Plugin:      "platform",
-		Description: "Applies autoscaling policy changes.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "scaling", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "applied", Type: "boolean", Description: "Whether scaling policies were applied"},
-		},
-	})
-
-	// ---- Scaling Destroy ----
-
-	r.Register(&StepSchema{
-		Type:        "step.scaling_destroy",
-		Plugin:      "platform",
-		Description: "Removes autoscaling policies.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "scaling", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "destroyed", Type: "boolean", Description: "Whether policies were removed"},
-		},
-	})
-
-	// ---- Scaling Plan ----
-
-	r.Register(&StepSchema{
-		Type:        "step.scaling_plan",
-		Plugin:      "platform",
-		Description: "Plans autoscaling policy changes without applying them.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "scaling", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
-			{Key: "changes", Type: "number", Description: "Number of changes planned"},
-		},
-	})
-
-	// ---- Scaling Status ----
-
-	r.Register(&StepSchema{
-		Type:        "step.scaling_status",
-		Plugin:      "platform",
-		Description: "Gets the status of autoscaling policies.",
-		ConfigFields: []ConfigFieldDef{
-			{Key: "scaling", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
-		},
-		Outputs: []StepOutputDef{
-			{Key: "status", Type: "string", Description: "Scaling status"},
-			{Key: "policies", Type: "[]any", Description: "Active scaling policy details"},
 		},
 	})
 

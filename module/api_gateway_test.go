@@ -457,49 +457,6 @@ func TestGatewayTimeout(t *testing.T) {
 	}
 }
 
-func TestAWSAPIGateway_Basic(t *testing.T) {
-	aws := NewAWSAPIGateway("aws-gw")
-	if aws.Name() != "aws-gw" {
-		t.Errorf("expected name %q, got %q", "aws-gw", aws.Name())
-	}
-
-	aws.SetConfig("us-east-1", "abc123", "prod")
-	if aws.Region() != "us-east-1" {
-		t.Errorf("expected region %q, got %q", "us-east-1", aws.Region())
-	}
-	if aws.APIID() != "abc123" {
-		t.Errorf("expected api_id %q, got %q", "abc123", aws.APIID())
-	}
-	if aws.Stage() != "prod" {
-		t.Errorf("expected stage %q, got %q", "prod", aws.Stage())
-	}
-}
-
-func TestAWSAPIGateway_SyncRoutesStub(t *testing.T) {
-	t.Skip("requires real AWS credentials and API Gateway")
-	aws := NewAWSAPIGateway("aws-gw")
-	aws.SetConfig("us-east-1", "abc123", "prod")
-
-	err := aws.SyncRoutes([]GatewayRoute{
-		{PathPrefix: "/api", Backend: "http://localhost:8080", Methods: []string{"GET"}},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestAWSAPIGateway_SyncRoutesRequiresAPIID(t *testing.T) {
-	aws := NewAWSAPIGateway("aws-gw")
-	// Don't set api_id
-
-	err := aws.SyncRoutes([]GatewayRoute{
-		{PathPrefix: "/api", Backend: "http://localhost:8080"},
-	})
-	if err == nil {
-		t.Fatal("expected error when api_id is empty")
-	}
-}
-
 func TestGatewayRateLimiter_BucketEviction(t *testing.T) {
 	rl := newGatewayRateLimiter(60, 5)
 

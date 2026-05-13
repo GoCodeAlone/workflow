@@ -2,6 +2,7 @@ package module_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -235,37 +236,28 @@ func TestPlatformDNS_ValidRecordTypes(t *testing.T) {
 	}
 }
 
-// ─── Route53 stub ─────────────────────────────────────────────────────────────
+// ─── AWS Route53 migration error (issue #653) ─────────────────────────────────
 
-func TestPlatformDNS_Route53_PlanReturnsStub(t *testing.T) {
+func TestPlatformDNS_AWSBackendMigrationError(t *testing.T) {
 	app := module.NewMockApplication()
-	m := module.NewPlatformDNS("r53-dns", map[string]any{
+	m := module.NewPlatformDNS("test-dns", map[string]any{
 		"provider": "aws",
-		"zone":     map[string]any{"name": "aws.example.com"},
+		"zone":     map[string]any{"name": "example.com"},
 	})
 	if err := m.Init(app); err != nil {
-		t.Fatalf("Init: %v", err)
+		t.Fatalf("Init should succeed (backend registered): %v", err)
 	}
-	plan, err := m.Plan()
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
+	// Migration error fires at operation time, not Init time.
+	_, err := m.Plan()
+	if err == nil {
+		t.Fatal("expected migration error from Plan() for provider: aws, got nil")
 	}
-	if len(plan.Changes) == 0 {
-		t.Fatal("expected at least one change from route53 stub")
+	errStr := err.Error()
+	if !strings.Contains(errStr, "infra.dns") {
+		t.Errorf("error should mention infra.dns, got: %s", errStr)
 	}
-}
-
-func TestPlatformDNS_Route53_ApplyNotImplemented(t *testing.T) {
-	app := module.NewMockApplication()
-	m := module.NewPlatformDNS("r53-dns", map[string]any{
-		"provider": "aws",
-		"zone":     map[string]any{"name": "aws.example.com"},
-	})
-	if err := m.Init(app); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-	if _, err := m.Apply(); err == nil {
-		t.Error("expected error from route53 Apply stub, got nil")
+	if !strings.Contains(errStr, "workflow-plugin-aws") {
+		t.Errorf("error should mention workflow-plugin-aws, got: %s", errStr)
 	}
 }
 

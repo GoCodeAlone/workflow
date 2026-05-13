@@ -68,7 +68,7 @@ func init() {
 		return &mockDNSBackend{}, nil
 	})
 	RegisterDNSBackend("aws", func(_ map[string]any) (dnsBackend, error) {
-		return &route53Backend{}, nil
+		return &awsRoute53ErrorBackend{}, nil
 	})
 }
 
