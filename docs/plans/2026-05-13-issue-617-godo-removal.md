@@ -31,7 +31,7 @@
 |------|-------|-------|--------|
 | 1 | feat: remove godo from core (issue #617) | Task 1, Task 2, Task 3, Task 4, Task 5 | `feat/issue-617-godo-removal` |
 
-**Status:** Draft
+**Status:** Locked 2026-05-13T00:00:00Z
 
 ---
 
