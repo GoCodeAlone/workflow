@@ -19,6 +19,12 @@ func TestAWSServicePackagesAbsent(t *testing.T) {
 		"aws-sdk-go-v2/service/route53",
 		"aws-sdk-go-v2/service/codebuild",
 		"aws-sdk-go-v2/service/eks",
+		// Phase 3 (#653): packages exclusive to platform/providers/aws/ (now deleted)
+		"aws-sdk-go-v2/service/ec2",
+		"aws-sdk-go-v2/service/dynamodb",
+		"aws-sdk-go-v2/service/elasticloadbalancingv2",
+		"aws-sdk-go-v2/service/rds",
+		"aws-sdk-go-v2/service/sqs",
 	}
 
 	fset := token.NewFileSet()
