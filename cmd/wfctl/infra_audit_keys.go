@@ -143,12 +143,16 @@ func runInfraAuditKeysCmd(args []string) error {
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	fs.StringVar(&envName, "env", "", "Environment name for config resolution")
 	fs.StringVar(&resourceType, "type", "", "Resource type to enumerate (e.g. infra.spaces_key)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if resourceType == "" {
 		return fmt.Errorf("audit-keys: --type is required")
 	}
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = "" }()
 
 	ctx := context.Background()
 	providers, closers, err := auditKeysLoadProviders(ctx, fs, configFile, envName)

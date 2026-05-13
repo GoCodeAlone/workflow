@@ -75,6 +75,13 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig, envName st
 // they may return nil for the closer.
 var resolveIaCProvider = discoverAndLoadIaCProvider
 
+// currentInfraPluginDir is the per-invocation plugin directory override set by
+// infra commands that accept -plugin-dir. It takes precedence over the
+// WFCTL_PLUGIN_DIR environment variable and the default "./data/plugins" path.
+// Set at the top of each runInfra* function and reset via defer, matching the
+// same seam pattern used by currentApplyIncludeFlag and applyAllowReplaceSet.
+var currentInfraPluginDir string
+
 // iacPluginManifest is the minimal shape needed to read both:
 //   - capabilities.iacProvider.name — used by findIaCPluginDir to
 //     match a plugin to a desired provider name; AND
@@ -166,7 +173,10 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 // that do not register the typed IaCProviderRequired service are
 // rejected at load time with an actionable upgrade message.
 func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-	pluginDir := os.Getenv("WFCTL_PLUGIN_DIR")
+	pluginDir := currentInfraPluginDir
+	if pluginDir == "" {
+		pluginDir = os.Getenv("WFCTL_PLUGIN_DIR")
+	}
 	if pluginDir == "" {
 		pluginDir = "./data/plugins"
 	}
