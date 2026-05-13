@@ -523,7 +523,7 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Type:       "platform.dns",
 			Plugin:     "platform",
 			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "domain"},
+			ConfigKeys: []string{"account", "provider", "zone", "records"},
 		},
 		"platform.region": {
 			Type:       "platform.region",
