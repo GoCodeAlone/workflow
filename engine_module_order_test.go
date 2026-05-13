@@ -254,6 +254,40 @@ func TestTopoSortModules_DuplicateNames_FirstWins(t *testing.T) {
 	}
 }
 
+func TestFilterResolvableDeps_DropsEmptyAndUnknown(t *testing.T) {
+	names := map[string]struct{}{"a": {}, "b": {}, "c": {}}
+	got := filterResolvableDeps([]string{"a", "", "ghost", "b", "phantom", "c"}, names)
+	want := []string{"a", "b", "c"}
+	if !equalSlice(got, want) {
+		t.Errorf("filterResolvableDeps = %v, want %v", got, want)
+	}
+}
+
+func TestFilterResolvableDeps_AllUnknownReturnsEmpty(t *testing.T) {
+	names := map[string]struct{}{"only-this": {}}
+	got := filterResolvableDeps([]string{"x", "y", "z", ""}, names)
+	if len(got) != 0 {
+		t.Errorf("filterResolvableDeps all-unknown = %v, want empty", got)
+	}
+}
+
+func TestFilterResolvableDeps_EmptyInputEmptyOutput(t *testing.T) {
+	got := filterResolvableDeps(nil, map[string]struct{}{"a": {}})
+	if len(got) != 0 {
+		t.Errorf("filterResolvableDeps(nil) = %v, want empty", got)
+	}
+}
+
+func TestFilterResolvableDeps_PreservesOrder(t *testing.T) {
+	// Order in input must be preserved in output.
+	names := map[string]struct{}{"a": {}, "b": {}, "c": {}}
+	got := filterResolvableDeps([]string{"c", "a", "b"}, names)
+	want := []string{"c", "a", "b"}
+	if !equalSlice(got, want) {
+		t.Errorf("filterResolvableDeps = %v, want %v (order preserved)", got, want)
+	}
+}
+
 func TestTopoSortModules_EmptyDependencyStringIgnored(t *testing.T) {
 	// Schema validation rejects "" entries, but defensively the sort should
 	// not blow up if one slips through (e.g., from a hand-built ModuleConfig

@@ -127,3 +127,27 @@ func (h *intHeap) Pop() any {
 	*h = old[:n-1]
 	return x
 }
+
+// filterResolvableDeps returns a new slice containing only entries from deps
+// that are present in the moduleNames set, in the same order. Empty strings
+// and names not in moduleNames are dropped. Used by engine BuildFromConfig
+// before calling SetDependencies on a module, so modular's DependencyAware
+// sort sees the same edge set that topoSortModules used when ordering
+// cfg.Modules (both ignore unresolvable + empty entries).
+//
+// Schema validation rejects empty + unknown dependsOn entries for declared
+// modules, but ConfigTransformHooks can inject modules whose dependsOn was
+// never validated. This is the engine's defensive boundary against that.
+func filterResolvableDeps(deps []string, moduleNames map[string]struct{}) []string {
+	out := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		if dep == "" {
+			continue
+		}
+		if _, exists := moduleNames[dep]; !exists {
+			continue
+		}
+		out = append(out, dep)
+	}
+	return out
+}
