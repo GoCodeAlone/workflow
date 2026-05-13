@@ -1408,28 +1408,6 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			ConfigKeys: []string{"cluster"},
 		},
 
-		// platform plugin steps (scaling)
-		"step.scaling_plan": {
-			Type:       "step.scaling_plan",
-			Plugin:     "platform",
-			ConfigKeys: []string{"scaling"},
-		},
-		"step.scaling_apply": {
-			Type:       "step.scaling_apply",
-			Plugin:     "platform",
-			ConfigKeys: []string{"scaling"},
-		},
-		"step.scaling_status": {
-			Type:       "step.scaling_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"scaling"},
-		},
-		"step.scaling_destroy": {
-			Type:       "step.scaling_destroy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"scaling"},
-		},
-
 		// platform plugin steps (iac)
 		"step.iac_plan": {
 			Type:       "step.iac_plan",
@@ -1472,67 +1450,6 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.dns_status",
 			Plugin:     "platform",
 			ConfigKeys: []string{"zone"},
-		},
-
-		// platform plugin steps (networking)
-		"step.network_plan": {
-			Type:       "step.network_plan",
-			Plugin:     "platform",
-			ConfigKeys: []string{"network"},
-		},
-		"step.network_apply": {
-			Type:       "step.network_apply",
-			Plugin:     "platform",
-			ConfigKeys: []string{"network"},
-		},
-		"step.network_status": {
-			Type:       "step.network_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"network"},
-		},
-
-		// platform plugin steps (api gateway)
-		"step.apigw_plan": {
-			Type:       "step.apigw_plan",
-			Plugin:     "platform",
-			ConfigKeys: []string{"gateway"},
-		},
-		"step.apigw_apply": {
-			Type:       "step.apigw_apply",
-			Plugin:     "platform",
-			ConfigKeys: []string{"gateway"},
-		},
-		"step.apigw_status": {
-			Type:       "step.apigw_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"gateway"},
-		},
-		"step.apigw_destroy": {
-			Type:       "step.apigw_destroy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"gateway"},
-		},
-
-		// platform plugin steps (ecs)
-		"step.ecs_plan": {
-			Type:       "step.ecs_plan",
-			Plugin:     "platform",
-			ConfigKeys: []string{"service"},
-		},
-		"step.ecs_apply": {
-			Type:       "step.ecs_apply",
-			Plugin:     "platform",
-			ConfigKeys: []string{"service"},
-		},
-		"step.ecs_status": {
-			Type:       "step.ecs_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"service"},
-		},
-		"step.ecs_destroy": {
-			Type:       "step.ecs_destroy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"service"},
 		},
 
 		// platform plugin steps (app container)
