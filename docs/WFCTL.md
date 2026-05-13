@@ -98,6 +98,7 @@ graph TD
     infra --> infra-state["state"]
     infra --> infra-outputs["outputs"]
     infra --> infra-refresh-outputs["refresh-outputs"]
+    infra --> infra-test["test"]
     infra --> infra-audit-secrets["audit-secrets"]
     infra --> infra-audit-state-secrets["audit-state-secrets"]
 
@@ -171,7 +172,7 @@ graph TD
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
-| **Infrastructure** | `infra plan/apply/destroy/status/drift/import/bootstrap/outputs`, `infra state list/export/import` |
+| **Infrastructure** | `infra plan/apply/destroy/status/drift/import/bootstrap/outputs/test`, `infra state list/export/import` |
 | **CI/CD** | `ci generate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
 | **Plugin Management** | `plugin`, `plugin-registry`, `registry`, `publish` |
@@ -1290,6 +1291,7 @@ wfctl infra <action> [options] [config.yaml]
 | `state` | Manage state storage (list/export/import) |
 | `outputs` | Print resource outputs from state (yaml/json/env formats) |
 | `refresh-outputs` | Read live outputs from each provider and reconcile state (no cloud writes) |
+| `test` | Hermetically validate expected infra config, resolved provider inputs, and plan actions |
 | `cleanup` | Tag-based force-cleanup across providers that implement `interfaces.Enumerator` |
 | `audit-secrets` | Report `provider_credential` anti-patterns in `secrets.generate` |
 | `audit-keys` | List cloud-side resources of `--type` via the provider's `interfaces.EnumeratorAll` |
@@ -1326,6 +1328,7 @@ wfctl infra plan infra.yaml
 wfctl infra apply --auto-approve infra.yaml
 wfctl infra status --config infra.yaml
 wfctl infra drift infra.yaml
+wfctl infra test tests/infra_test.yaml
 wfctl infra destroy --auto-approve infra.yaml
 wfctl infra import --config infra.yaml --env staging --name site-dns --id do-domain-123
 wfctl infra import --config infra.yaml --name site-dns
@@ -1339,6 +1342,56 @@ wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN,DATABASE_URL
 wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
 ```
+
+#### `infra test`
+
+`wfctl infra test` validates infrastructure expectations without contacting live
+providers or reading cloud credentials. Test mode renders the Workflow config,
+resolves environment/JIT references against the fixture state, and computes the
+plan with the hermetic config-hash differ. It never calls provider `Apply` or
+`Destroy`; provider/plugin contracts remain strict for normal `infra plan` and
+`infra apply` paths.
+
+```bash
+wfctl infra test tests/infra_test.yaml
+```
+
+Smallest useful test file:
+
+```yaml
+config: ../infra.yaml
+env: staging
+current_state:
+  - name: existing-db
+    type: infra.database
+    config_hash: 8f2c...
+expect:
+  resources_count: 3
+  resources:
+    - name: network
+      type: infra.vpc
+      config:
+        cidr: 10.10.0.0/16
+  provider_inputs:
+    resources:
+      - name: api
+        config:
+          image: ghcr.io/acme/api:sha
+  plan:
+    action_counts:
+      create: 2
+      update: 1
+    actions:
+      - action: create
+        resource:
+          name: network
+          type: infra.vpc
+```
+
+Assertions are partial: listed resources/actions must be present, but configs
+may include additional provider-specific keys. Use `resources_count` and
+`plan.action_counts` for generated collections such as N subnets or multiple app
+components, and use `current_state` fixtures to cover update/delete plan shapes.
 
 #### `infra cleanup`
 

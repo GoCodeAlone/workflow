@@ -81,6 +81,8 @@ func runInfra(args []string) error {
 		return runInfraRefreshOutputs(args[1:])
 	case "align":
 		return runInfraAlign(args[1:])
+	case "test":
+		return runInfraTest(args[1:])
 	case "security-check":
 		return runInfraSecurityCheck(args[1:])
 	case "cleanup":
@@ -122,6 +124,7 @@ Actions:
   outputs        Print captured resource outputs from state
   refresh-outputs Read live outputs and reconcile state (no cloud writes)
   align          Validate IaC config + plan alignment (8 rule families)
+  test           Hermetically validate expected infra config and plan outcomes
   security-check Scan plan.json for security policy violations
   cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
   audit-secrets  Report provider_credential anti-patterns in secrets.generate
