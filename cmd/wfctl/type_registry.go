@@ -519,35 +519,11 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"account", "cluster", "namespace", "kubeconfig"},
 		},
-		"platform.ecs": {
-			Type:       "platform.ecs",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "cluster", "region"},
-		},
 		"platform.dns": {
 			Type:       "platform.dns",
 			Plugin:     "platform",
 			Stateful:   false,
 			ConfigKeys: []string{"account", "provider", "domain"},
-		},
-		"platform.networking": {
-			Type:       "platform.networking",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "vpc"},
-		},
-		"platform.apigateway": {
-			Type:       "platform.apigateway",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "name", "region"},
-		},
-		"platform.autoscaling": {
-			Type:       "platform.autoscaling",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "resource"},
 		},
 		"platform.region": {
 			Type:       "platform.region",
@@ -649,6 +625,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 		},
 		"infra.certificate": {
 			Type:       "infra.certificate",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.autoscaling_group": {
+			Type:       "infra.autoscaling_group",
 			Plugin:     "infra",
 			Stateful:   false,
 			ConfigKeys: []string{"provider", "size", "resources"},
