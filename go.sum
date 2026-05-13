@@ -108,10 +108,6 @@ github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.22 h1:dY4kWZiSaXIzxnKlj1
 github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.22/go.mod h1:KIpEUx0JuRZLO7U6cbV204cWAEco2iC3l061IxlwLtI=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.23 h1:FPXsW9+gMuIeKmz7j6ENWcWtBGTe1kH8r9thNt5Uxx4=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.23/go.mod h1:7J8iGMdRKk6lw2C+cMIphgAnT8uTwBwNOsGkyOCm80U=
-github.com/aws/aws-sdk-go-v2/service/apigatewayv2 v1.33.8 h1:I0AMtyv5tqQ/VNDDalbbujALCWl64TP3F61bBw4U8Qs=
-github.com/aws/aws-sdk-go-v2/service/apigatewayv2 v1.33.8/go.mod h1:qnrKR+Jzg9NbZqy+YusE7frSZUaYQ7EPJvki4+SwS3U=
-github.com/aws/aws-sdk-go-v2/service/applicationautoscaling v1.41.13 h1:juPaAcploym78WhVwleVHNLPmgURO6gkObC442Hal1s=
-github.com/aws/aws-sdk-go-v2/service/applicationautoscaling v1.41.13/go.mod h1:HjgDVqI6lGR0azGz1GKmZTzGHkXuzhKzRUfG/p5Ug8s=
 github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.55.2 h1:mleWBVIxwceEzyItUVoqMFiv6TmOP6ECPoN6WB/VWXc=
 github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.55.2/go.mod h1:cMApt548kNgu87UsBTNWVv+fpzjbUTFRSFjD1688SBs=
 github.com/aws/aws-sdk-go-v2/service/codebuild v1.68.12 h1:lQTVEv/YAk8Rw1Yf4XZS/jNNxF9klCN10WcSR3xlMtU=
@@ -142,8 +138,6 @@ github.com/aws/aws-sdk-go-v2/service/kinesis v1.43.4 h1:3m9iJtMtLq75jKRAfw0kapoH
 github.com/aws/aws-sdk-go-v2/service/kinesis v1.43.4/go.mod h1:O2L6vGm4xacEuN2otHFMgn7yXXlgzFKzxrba0fy/yk8=
 github.com/aws/aws-sdk-go-v2/service/rds v1.115.0 h1:oNl6YghOtxu3MiFk1tQ86QlrYMIEJazGUDbBCg9nxLA=
 github.com/aws/aws-sdk-go-v2/service/rds v1.115.0/go.mod h1:JBRYWpz5oXQtHgQC+X8LX9lh0FBCwRHJlWEIT+TTLaE=
-github.com/aws/aws-sdk-go-v2/service/route53 v1.62.5 h1:Z+/OLsb85Kpq7TVLCspskqePaf68Tdv6GfmJP4kH6i0=
-github.com/aws/aws-sdk-go-v2/service/route53 v1.62.5/go.mod h1:TmxGowuBYwjmHFOsEDxaZdsQE62JJzOmtiWafTi/czg=
 github.com/aws/aws-sdk-go-v2/service/s3 v1.97.2 h1:MRNiP6nqa20aEl8fQ6PJpEq11b2d40b16sm4WD7QgMU=
 github.com/aws/aws-sdk-go-v2/service/s3 v1.97.2/go.mod h1:FrNA56srbsr3WShiaelyWYEo70x80mXnVZ17ZZfbeqg=
 github.com/aws/aws-sdk-go-v2/service/signin v1.0.10 h1:a1Fq/KXn75wSzoJaPQTgZO0wHGqE9mjFnylnqEPTchA=
