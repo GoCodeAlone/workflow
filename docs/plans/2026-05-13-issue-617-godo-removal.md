@@ -170,22 +170,30 @@ import "testing"
 // cmd/wfctl/type_registry.go for issue #617. If any legacy type leaks back in,
 // this test fires and the CI gate fires.
 func TestLegacyDOTypesAbsent_FromTypeRegistry(t *testing.T) {
-	r := buildTypeRegistry()
-	legacy := []string{
+	modules := KnownModuleTypes()
+	steps := KnownStepTypes()
+	legacyModules := []string{
 		"platform.do_app", "platform.do_database", "platform.do_dns",
 		"platform.do_networking", "platform.doks",
+	}
+	legacySteps := []string{
 		"step.do_deploy", "step.do_status", "step.do_logs",
 		"step.do_scale", "step.do_destroy",
 	}
-	for _, tname := range legacy {
-		if _, ok := r[tname]; ok {
-			t.Errorf("type registry still contains legacy DO type %q (issue #617)", tname)
+	for _, tname := range legacyModules {
+		if _, ok := modules[tname]; ok {
+			t.Errorf("module type registry still contains legacy DO type %q (issue #617)", tname)
+		}
+	}
+	for _, tname := range legacySteps {
+		if _, ok := steps[tname]; ok {
+			t.Errorf("step type registry still contains legacy DO type %q (issue #617)", tname)
 		}
 	}
 }
 ```
 
-(If the existing `buildTypeRegistry` symbol differs, use the actual constructor. Verify by grep before writing the assertion target.)
+(API confirmed against `cmd/wfctl/type_registry.go:25` `KnownModuleTypes()` and `:727` `KnownStepTypes()`.)
 
 **Step 2: Run test to verify it fails**
 
@@ -252,18 +260,28 @@ EOF
 
 **Step 1: Write the failing tests**
 
-Create `engine_legacy_do_migration_test.go` at repo root:
+Create `engine_legacy_do_migration_test.go` at repo root (in-package — same package convention as `engine_test.go`):
 
 ```go
-package workflow_test
+package workflow
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/GoCodeAlone/workflow"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
 )
+
+// newTestEngine builds an isolated StdEngine — same pattern as engine_test.go.
+func newTestEngine(t *testing.T) *StdEngine {
+	t.Helper()
+	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), nil)
+	if err := app.Init(); err != nil {
+		t.Fatalf("app.Init: %v", err)
+	}
+	return NewStdEngine(app, app.Logger())
+}
 
 func TestLegacyDOModuleError_PluginNotLoaded(t *testing.T) {
 	cases := []struct{ legacyType, hint string }{
@@ -275,7 +293,7 @@ func TestLegacyDOModuleError_PluginNotLoaded(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.legacyType, func(t *testing.T) {
-			e := workflow.NewEngine()
+			e := newTestEngine(t)
 			cfg := &config.WorkflowConfig{Modules: []config.ModuleConfig{{Name: "x", Type: tc.legacyType, Config: map[string]any{}}}}
 			err := e.BuildFromConfig(cfg)
 			if err == nil {
@@ -297,9 +315,10 @@ func TestLegacyDOModuleError_PluginNotLoaded(t *testing.T) {
 }
 
 func TestLegacyDOModuleError_PluginLoaded(t *testing.T) {
-	e := workflow.NewEngine()
-	// Register a stub iac.provider factory to simulate workflow-plugin-digitalocean being loaded.
-	e.RegisterModuleFactory("iac.provider", func(name string, cfg map[string]any) interface{} { return nil })
+	e := newTestEngine(t)
+	// Register a stub iac.provider factory to simulate workflow-plugin-digitalocean
+	// being loaded. ModuleFactory signature: func(name string, config map[string]any) modular.Module.
+	e.AddModuleType("iac.provider", func(name string, cfg map[string]any) modular.Module { return nil })
 
 	cfg := &config.WorkflowConfig{Modules: []config.ModuleConfig{{Name: "x", Type: "platform.do_app", Config: map[string]any{}}}}
 	err := e.BuildFromConfig(cfg)
@@ -315,6 +334,8 @@ func TestLegacyDOModuleError_PluginLoaded(t *testing.T) {
 	}
 }
 ```
+
+(APIs verified: `NewStdEngine(app modular.Application, logger modular.Logger)` at `engine.go:146`; `AddModuleType(moduleType string, factory ModuleFactory)` at `engine.go:210`; `ModuleFactory` is `func(name string, config map[string]any) modular.Module`. Test package convention matches `engine_test.go:1` — `package workflow`.)
 
 Create `module/pipeline_step_legacy_do_migration_test.go`:
 
@@ -339,7 +360,8 @@ func TestLegacyDOStepError_PluginNotLoaded(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.step, func(t *testing.T) {
-			_, err := module.CreateStep(tc.step, "x", map[string]any{}, nil)
+			r := module.NewStepRegistry()
+			_, err := r.Create(tc.step, "x", map[string]any{}, nil)
 			if err == nil {
 				t.Fatalf("expected error for %q", tc.step)
 			}
@@ -359,7 +381,7 @@ func TestLegacyDOStepError_PluginNotLoaded(t *testing.T) {
 }
 ```
 
-(Confirm the `module.CreateStep` symbol — if the actual constructor name differs, use it.)
+(API verified: `module.NewStepRegistry()` at `module/pipeline_step_registry.go:18`; `(*StepRegistry).Create(stepType, name string, config map[string]any, app any)` at `:32`. Empty registry exercises the unknown-type fallback path where the legacy guard fires.)
 
 **Step 2: Run tests to verify they fail**
 
@@ -378,6 +400,12 @@ import (
 	"sort"
 	"strings"
 )
+
+// RemovedInVersion is the workflow tag that ships issue #617's force-cutover.
+// Used in every legacy-DO migration error and in the wfctl modernize rule.
+// Update both this constant and the docs/migrations/v<X>-godo-removal.md
+// filename when the release tag is finalised.
+const RemovedInVersion = "v0.52.0"
 
 // LegacyDOModuleTypes maps each removed legacy DigitalOcean module type to its
 // infra.* IaC successor (issue #617).
@@ -419,7 +447,7 @@ func FormatLegacyDOModuleError(legacyType, moduleName string, iacProviderLoaded 
 		pluginLine = "workflow-plugin-digitalocean is already loaded; your config still references the legacy module name."
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "unsupported legacy module type %q (module %q): this type was removed from workflow core in v0.52.0 — DigitalOcean IaC moved to workflow-plugin-digitalocean.\n\n", legacyType, moduleName)
+	fmt.Fprintf(&b, "unsupported legacy module type %q (module %q): this type was removed from workflow core in %s — DigitalOcean IaC moved to workflow-plugin-digitalocean.\n\n", legacyType, moduleName, RemovedInVersion)
 	b.WriteString(pluginLine)
 	b.WriteString("\n\nMigrate this module to: ")
 	b.WriteString(successor)
@@ -448,7 +476,7 @@ func FormatLegacyDOStepError(legacyType string, iacProviderLoaded bool) error {
 		pluginLine = "workflow-plugin-digitalocean is already loaded; your config still references the legacy step name."
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "unsupported legacy step type %q: this step was removed from workflow core in v0.52.0 — DigitalOcean IaC moved to workflow-plugin-digitalocean.\n\n", legacyType)
+	fmt.Fprintf(&b, "unsupported legacy step type %q: this step was removed from workflow core in %s — DigitalOcean IaC moved to workflow-plugin-digitalocean.\n\n", legacyType, RemovedInVersion)
 	b.WriteString(pluginLine)
 	b.WriteString("\n\nMigrate this step to: ")
 	b.WriteString(successor)
@@ -479,22 +507,30 @@ if !exists {
 
 (Add `"github.com/GoCodeAlone/workflow/module"` to engine.go imports if not already present.)
 
-Modify `module/pipeline_step_registry.go:35`. Since this is in the `module` package itself, the helper is callable directly. Step-registry needs to know whether the iac.provider module factory is loaded — pass a detection callback in or expose a package-level setter. Simplest implementation: a package-level boolean updated by the engine at `BuildFromConfig` time before step construction. New file `module/iac_provider_loaded.go`:
+Modify `module/pipeline_step_registry.go:35`. Since this is in the `module` package itself, the helper is callable directly. Step-registry needs to know whether the iac.provider module factory is loaded — the engine sets a goroutine-safe flag before step construction. New file `module/iac_provider_loaded.go`:
 
 ```go
 package module
 
+import "sync/atomic"
+
 // iacProviderLoaded tracks whether the engine's module factory map currently
 // contains "iac.provider". Set by the engine before invoking step factories so
-// that legacy DO step migration errors can branch on it.
-var iacProviderLoaded bool
+// that legacy DO step migration errors can branch on it. atomic.Bool is used
+// because parallel tests in the module package access this concurrently
+// (race-checked via `go test -race ./...`).
+var iacProviderLoaded atomic.Bool
 
 // SetIaCProviderLoaded is called by the engine after module factory registration
 // is complete but before step factories run.
-func SetIaCProviderLoaded(loaded bool) { iacProviderLoaded = loaded }
+func SetIaCProviderLoaded(loaded bool) { iacProviderLoaded.Store(loaded) }
+
+// IsIaCProviderLoaded reports whether the iac.provider factory has been
+// observed in the engine's factory map.
+func IsIaCProviderLoaded() bool { return iacProviderLoaded.Load() }
 ```
 
-Wire it in `engine.go` BuildFromConfig just before step construction:
+Wire it in `engine.go` `BuildFromConfig` just before step construction:
 
 ```go
 _, iacLoaded := e.moduleFactories["iac.provider"]
@@ -509,7 +545,7 @@ return nil, fmt.Errorf("unknown step type: %s", stepType)
 
 // After:
 if IsLegacyDOStepType(stepType) {
-    return nil, FormatLegacyDOStepError(stepType, iacProviderLoaded)
+    return nil, FormatLegacyDOStepError(stepType, IsIaCProviderLoaded())
 }
 return nil, fmt.Errorf("unknown step type: %s", stepType)
 ```
@@ -650,7 +686,9 @@ EOF
 - Create: `docs/migrations/v0.52.0-godo-removal.md` (full migration guide — 5 module mappings + 5 step mappings + GAP callouts + before/after YAML examples + step-by-step migration recipe + ADR-style "why this was done")
 - Create: `modernize/legacy_do_rule.go` (new modernize rules — see Step 3)
 - Modify: `modernize/modernize.go` `AllRules()` to append the new rule
-- Test: `modernize/legacy_do_rule_test.go` (new — covers Check + Fix for each of the 5 module + 5 step rewrites)
+- Test: `modernize/legacy_do_rule_test.go` (new — covers Check + Fix for each of the 5 module + 5 step rewrites + 3 gap types)
+- Create: `modernize/testdata/legacy-do-config.yaml` (committed smoke-test fixture exercising every legacy type)
+- Create: `modernize/testdata/legacy-do-config.expected.yaml` (the post-`modernize --apply` output, used as a golden file for the smoke test in step 9 below)
 
 **Step 1: Write the failing test**
 
@@ -732,27 +770,38 @@ func TestLegacyDORule_Rewrites(t *testing.T) {
 	}
 }
 
-func TestLegacyDORule_LogsScaleAnnotatedNotDropped(t *testing.T) {
-	// step.do_logs and step.do_scale have NO 1:1 successor. Rule must:
+func TestLegacyDORule_GapTypesFlaggedNotRewritten(t *testing.T) {
+	// step.do_logs, step.do_scale, and platform.do_networking have NO 1:1
+	// auto-fixable successor. Rule must:
 	//  - flag them as findings,
 	//  - NOT modify the YAML (no silent loss).
-	for _, stepType := range []string{"step.do_logs", "step.do_scale"} {
-		t.Run(stepType, func(t *testing.T) {
-			in := "pipelines:\n  - steps:\n      - type: " + stepType + "\n"
+	cases := []struct {
+		name    string
+		legacy  string
+		yamlIn  string
+	}{
+		{"step.do_logs", "step.do_logs", "pipelines:\n  - steps:\n      - type: step.do_logs\n"},
+		{"step.do_scale", "step.do_scale", "pipelines:\n  - steps:\n      - type: step.do_scale\n"},
+		{"platform.do_networking", "platform.do_networking", "modules:\n  - name: net\n    type: platform.do_networking\n    config: {}\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			var root yaml.Node
-			yaml.Unmarshal([]byte(in), &root)
+			if err := yaml.Unmarshal([]byte(tc.yamlIn), &root); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
 			rule := modernize.LegacyDORule()
-			findings := rule.Check(&root, []byte(in))
+			findings := rule.Check(&root, []byte(tc.yamlIn))
 			if len(findings) == 0 {
-				t.Fatalf("expected a finding for %q", stepType)
+				t.Fatalf("expected a finding for %q", tc.legacy)
 			}
 			if findings[0].Fixable {
-				t.Errorf("%q must be marked Fixable: false (no auto-rewrite); got Fixable: true", stepType)
+				t.Errorf("%q must be marked Fixable: false (no auto-rewrite); got Fixable: true", tc.legacy)
 			}
 			rule.Fix(&root)
 			out, _ := yaml.Marshal(&root)
-			if !strings.Contains(string(out), stepType) {
-				t.Errorf("Fix MUST NOT remove legacy %q; got:\n%s", stepType, out)
+			if !strings.Contains(string(out), tc.legacy) {
+				t.Errorf("Fix MUST NOT remove legacy %q; got:\n%s", tc.legacy, out)
 			}
 		})
 	}
@@ -865,7 +914,11 @@ func LegacyDORule() Rule {
 }
 
 // walkTypeNodes traverses a YAML AST and invokes visit on every value node
-// whose parent mapping key is "type".
+// whose parent mapping key is "type". This differs from the package's existing
+// walkNodes helper which visits every node — extracted as a separate helper
+// because the type-key constraint produces tighter visitor code at call sites.
+// If a future refactor unifies the two, prefer adding a key-filter parameter
+// to walkNodes over keeping the duplication.
 func walkTypeNodes(n *yaml.Node, visit func(*yaml.Node)) {
 	if n == nil {
 		return
@@ -1194,17 +1247,32 @@ T4 is the only task with the runtime-launch-validation trigger (version-pin upda
 ## End-of-PR checklist (run before opening PR)
 
 1. `go test ./...` — all green.
+1a. `go test -race ./...` — all green (mandatory because T3 introduces a package-level atomic and the module package has parallel tests).
 2. `! grep -rn --include="*.go" --exclude-dir=_worktrees --exclude-dir=.worktrees --exclude-dir=.claude "digitalocean/godo" .` exits 0.
 3. `! grep -qH "digitalocean/godo" go.mod example/go.mod` exits 0.
-4. `wfctl modernize --apply <example-config-with-legacy-types>` rewrites correctly (manual smoke).
-5. `go build ./cmd/wfctl && ./wfctl validate <a-config-that-still-uses-platform.do_app>` produces the actionable migration error and exits non-zero.
-6. `go build ./cmd/server && ./server -config <a-config-that-still-uses-platform.do_app>` produces the same error and exits non-zero.
+4. `wfctl modernize --apply modernize/testdata/legacy-do-config.yaml` (fixture committed in T5) rewrites legacy types — verify against `modernize/testdata/legacy-do-config.expected.yaml`.
+5. `go build ./cmd/wfctl && ./wfctl validate modernize/testdata/legacy-do-config.yaml` produces the actionable migration error and exits non-zero.
+6. `go build ./cmd/server && ./server -config modernize/testdata/legacy-do-config.yaml` produces the same error and exits non-zero.
 7. CHANGELOG.md has the v0.52.0 BREAKING entry at the top.
 8. Two follow-up issues filed in `workflow-plugin-digitalocean`; URLs wired into the migration guide.
 9. One follow-up issue filed in `workflow` for the AWS audit (no URL wiring needed — independent stream).
 10. PR description references issue #617 and lists the breaking-change impact.
 
 ---
+
+## Adversarial review history (plan phase)
+
+### Cycle 1 (FAIL) — 2026-05-13
+
+- **C-1** T3 engine test invented `workflow.NewEngine()` + `e.RegisterModuleFactory()` → **fixed**: use `NewStdEngine(app, app.Logger())` and `AddModuleType()` per `engine.go:146,210`; `package workflow`.
+- **C-2** T3 step test invented `module.CreateStep()` → **fixed**: use `module.NewStepRegistry().Create()` per `module/pipeline_step_registry.go:18,32`.
+- **I-1** T2 test invented `buildTypeRegistry()` → **fixed**: call `KnownModuleTypes()` + `KnownStepTypes()` directly.
+- **I-2** Global `iacProviderLoaded` raced with parallel tests → **fixed**: `sync/atomic.Bool` + `IsIaCProviderLoaded()` accessor.
+- **I-3** Missing test for `platform.do_networking` gap behaviour → **fixed**: gap-type test renamed and broadened to all three gap types.
+- **m-1** New `walkTypeNodes` duplicates existing `walkNodes` → **acknowledged**: note added recommending unification in a future refactor; kept separate for now to preserve tight call-site code.
+- **m-2** Version `v0.52.0` hardcoded in 7+ places → **fixed**: `module.RemovedInVersion` constant.
+- **m-3** Smoke fixture not committed → **fixed**: `modernize/testdata/legacy-do-config.yaml` + `.expected.yaml` added to T5.
+- End-of-PR checklist: added `go test -race ./...` and pointed checklist items 4-6 at the committed fixture.
 
 ## References
 
