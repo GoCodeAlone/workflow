@@ -338,9 +338,12 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 	// Write plugin.json from the registry manifest. This keeps the installed
 	// version metadata in sync with the manifest. If the tarball already
 	// extracted a plugin.json, this overwrites it with the registry version.
+	// Failure is a hard error: continuing with an archive-supplied plugin.json
+	// could silently drop registry-only metadata (capabilities, CLI commands,
+	// build hooks) and would let the archive version bypass verifyInstalledVersion.
 	pluginJSONPath := filepath.Join(stagingDir, "plugin.json")
 	if writeErr := writeInstalledManifest(pluginJSONPath, manifest); writeErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not write plugin.json: %v\n", writeErr)
+		return fmt.Errorf("write plugin.json: %w", writeErr)
 	}
 
 	// Verify the staged plugin.json is valid for ExternalPluginManager.
@@ -1423,17 +1426,46 @@ func preparePluginStagingDir(destDir string) (stagingDir string, cleanup func(),
 	return stagingDir, func() { os.RemoveAll(stagingDir) }, nil //nolint:errcheck
 }
 
-// commitPluginStagingDir atomically replaces destDir with stagingDir. It
-// removes the previous destDir content and renames the staging directory into
-// its place. On success stagingDir no longer exists on disk; the deferred
-// cleanup returned by preparePluginStagingDir becomes a harmless no-op.
+// commitPluginStagingDir replaces destDir with stagingDir. To preserve the
+// existing installation if the final rename fails, the old destDir is first
+// renamed to a trash location on the same filesystem. Only after the new
+// directory is successfully renamed into place is the trash removed.
+//
+//   1. Rename destDir → destDir+".uninstalling"  (no-op if destDir absent)
+//   2. Rename stagingDir → destDir
+//   3. On step-2 failure: restore destDir+".uninstalling" → destDir
+//   4. On step-2 success: remove destDir+".uninstalling"
+//
+// On success stagingDir no longer exists on disk; the deferred cleanup
+// returned by preparePluginStagingDir becomes a harmless no-op.
 func commitPluginStagingDir(stagingDir, destDir string) error {
-	if err := os.RemoveAll(destDir); err != nil {
-		return fmt.Errorf("remove existing plugin dir %s: %w", destDir, err)
+	trashDir := destDir + ".uninstalling"
+	// Remove any leftover trash from a previous interrupted commit.
+	if err := os.RemoveAll(trashDir); err != nil {
+		return fmt.Errorf("clean trash dir %s: %w", trashDir, err)
 	}
+
+	// Move the existing install out of the way before installing the new one.
+	// If destDir does not exist yet (first install) we skip this step.
+	hasExisting := false
+	if _, statErr := os.Stat(destDir); statErr == nil {
+		hasExisting = true
+		if err := os.Rename(destDir, trashDir); err != nil {
+			return fmt.Errorf("preserve existing plugin dir %s: %w", destDir, err)
+		}
+	}
+
+	// Move staging into the final location.
 	if err := os.Rename(stagingDir, destDir); err != nil {
+		// Best-effort restore: move the old install back if we preserved it.
+		if hasExisting {
+			_ = os.Rename(trashDir, destDir) //nolint:errcheck
+		}
 		return fmt.Errorf("install plugin dir %s: %w", destDir, err)
 	}
+
+	// New install is in place — remove the old one (best effort).
+	_ = os.RemoveAll(trashDir) //nolint:errcheck
 	return nil
 }
 

@@ -584,6 +584,10 @@ func TestInstallPluginFromManifest_UpgradeReplacesStaleBinary(t *testing.T) {
 func TestInstallFromURL_UpgradeReplacesStaleBinary(t *testing.T) {
 	const pluginName = "urlplugin"
 
+	// Change cwd to a temp dir so updateLockfileWithChecksum writes
+	// .wfctl-lock.yaml there instead of the package checkout.
+	t.Chdir(t.TempDir())
+
 	oldBinary := []byte("#!/bin/sh\necho old-url\n")
 	newBinary := []byte("#!/bin/sh\necho new-url\n")
 
@@ -633,6 +637,10 @@ func TestInstallFromURL_UpgradeReplacesStaleBinary(t *testing.T) {
 // for the --local install path.
 func TestInstallFromLocal_UpgradeReplacesStaleBinary(t *testing.T) {
 	const pluginName = "localplugin"
+
+	// Change cwd to a temp dir so updateLockfileWithChecksum writes
+	// .wfctl-lock.yaml there instead of the package checkout.
+	t.Chdir(t.TempDir())
 
 	pluginDir := t.TempDir()
 
@@ -715,7 +723,9 @@ func TestInstallPluginFromManifest_StagingCleanedUpOnFailure(t *testing.T) {
 
 	// Attempt upgrade with a failing URL.
 	badManifest := makeTestManifest(pluginName, srv.URL+"/nonexistent.tar.gz", strings.Repeat("0", 64))
-	_ = installPluginFromManifest(pluginDir, pluginName, badManifest, nil, false) // expected to fail
+	if err := installPluginFromManifest(pluginDir, pluginName, badManifest, nil, false); err == nil {
+		t.Fatal("expected upgrade with non-existent URL to fail, but it succeeded")
+	}
 
 	// Staging directory must be cleaned up.
 	stagingDir := filepath.Join(pluginDir, pluginName+".installing")
@@ -862,6 +872,10 @@ func TestInstallFromURL_NonGitHubNoSHAFails(t *testing.T) {
 }
 
 func TestInstallFromURL_WithExpectedSHA256_Correct(t *testing.T) {
+	// Change cwd to a temp dir so updateLockfileWithChecksum writes
+	// .wfctl-lock.yaml there instead of the package checkout.
+	t.Chdir(t.TempDir())
+
 	archiveData := makeTestTarGz(t, "myplugin")
 	h := sha256.Sum256(archiveData)
 	sha := hex.EncodeToString(h[:])
@@ -895,6 +909,10 @@ func TestInstallFromURL_WithExpectedSHA256_Wrong(t *testing.T) {
 }
 
 func TestInstallFromURL_SkipChecksum_NonGitHub(t *testing.T) {
+	// Change cwd to a temp dir so updateLockfileWithChecksum writes
+	// .wfctl-lock.yaml there instead of the package checkout.
+	t.Chdir(t.TempDir())
+
 	archiveData := makeTestTarGz(t, "myplugin")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(archiveData)
