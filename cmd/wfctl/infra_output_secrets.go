@@ -112,8 +112,13 @@ func stateKeys(m map[string]map[string]any) []string {
 }
 
 // syncInfraOutputSecrets writes infra_output-typed secrets after a successful
-// apply. It skips secrets that already exist in the provider so idempotent
-// re-runs never overwrite live values.
+// apply. In normal mode (refreshOutputs=false) it skips secrets that already
+// exist in the provider so idempotent re-runs never overwrite live values.
+// When refreshOutputs=true (operator-opt-in via --refresh-outputs), existing
+// secrets are reconciled: updated if the value changed, logged as "unchanged"
+// if the value is the same (readable providers only), or always overwritten for
+// write-only providers (e.g. GitHub Actions) where comparison is impossible.
+//
 // wfCfg and envName are used to resolve source module names through per-env
 // overrides so that "bmw-database.uri" finds "bmw-staging-db" in state when
 // --env staging renames the module.
@@ -125,7 +130,7 @@ func stateKeys(m map[string]map[string]any) []string {
 // without going through provider.Get (which is unsupported on write-only
 // providers like GitHub Actions). May be nil for callers that don't
 // have a same-process apply hand-off (e.g., wfctl infra outputs CLI).
-func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string, hydrated map[string]string) error {
+func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string, hydrated map[string]string, refreshOutputs bool) error {
 	if secretsCfg == nil {
 		return nil
 	}
@@ -162,40 +167,61 @@ func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, prov
 		_, ok := listSet[key]
 		return ok, nil
 	}
-	secretExists := func(key string) (bool, error) {
-		_, err := provider.Get(ctx, key)
-		switch {
-		case err == nil:
-			return true, nil
-		case errors.Is(err, secrets.ErrNotFound):
-			return false, nil
-		case errors.Is(err, secrets.ErrUnsupported):
-			return lookupViaList(key)
-		default:
-			return false, fmt.Errorf("check secret %q: %w", key, err)
-		}
-	}
 
 	stateOutputs := buildStateOutputsMap(states)
 
 	for _, gen := range gens {
-		exists, err := secretExists(gen.Key)
-		if err != nil {
-			return err
+		// Attempt to read the current value. This serves two purposes:
+		//   1. Existence check for readable providers.
+		//   2. Value comparison in refresh mode to avoid spurious updates.
+		currentVal, getErr := provider.Get(ctx, gen.Key)
+
+		var exists bool
+		var isReadable bool
+		switch {
+		case getErr == nil:
+			exists = true
+			isReadable = true
+		case errors.Is(getErr, secrets.ErrNotFound):
+			exists = false
+		case errors.Is(getErr, secrets.ErrUnsupported):
+			// Write-only provider (e.g. GitHub Actions): fall back to List.
+			var listLookupErr error
+			exists, listLookupErr = lookupViaList(gen.Key)
+			if listLookupErr != nil {
+				return listLookupErr
+			}
+		default:
+			return fmt.Errorf("check secret %q: %w", gen.Key, getErr)
 		}
-		if exists {
+
+		if exists && !refreshOutputs {
 			fmt.Printf("  secret %q: already exists — skipped\n", gen.Key)
 			continue
 		}
 
-		value, err := resolveInfraOutput(wfCfg, gen.Source, envName, stateOutputs, hydrated)
-		if err != nil {
-			return fmt.Errorf("generate infra_output secret %q: %w", gen.Key, err)
+		newValue, resolveErr := resolveInfraOutput(wfCfg, gen.Source, envName, stateOutputs, hydrated)
+		if resolveErr != nil {
+			return fmt.Errorf("generate infra_output secret %q: %w", gen.Key, resolveErr)
 		}
-		if err := provider.Set(ctx, gen.Key, value); err != nil {
-			return fmt.Errorf("store secret %q: %w", gen.Key, err)
+
+		if exists {
+			// refreshOutputs is true here (guarded by the continue above).
+			// For readable providers skip the Set when the value is unchanged.
+			if isReadable && currentVal == newValue {
+				fmt.Printf("  secret %q: unchanged\n", gen.Key)
+				continue
+			}
+			if err := provider.Set(ctx, gen.Key, newValue); err != nil {
+				return fmt.Errorf("store secret %q: %w", gen.Key, err)
+			}
+			fmt.Printf("  secret %q: updated from infra output\n", gen.Key)
+		} else {
+			if err := provider.Set(ctx, gen.Key, newValue); err != nil {
+				return fmt.Errorf("store secret %q: %w", gen.Key, err)
+			}
+			fmt.Printf("  secret %q: created from infra output\n", gen.Key)
 		}
-		fmt.Printf("  secret %q: created from infra output\n", gen.Key)
 	}
 	return nil
 }

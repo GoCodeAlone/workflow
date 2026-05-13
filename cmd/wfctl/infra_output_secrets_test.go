@@ -16,6 +16,19 @@ type simpleProvider struct {
 	data map[string]string
 }
 
+// setCountProvider wraps simpleProvider and records every Set call. Use it
+// when a test needs to assert that Set was or was not called a specific
+// number of times (e.g. the "unchanged" optimisation path).
+type setCountProvider struct {
+	simpleProvider
+	setCalls int
+}
+
+func (p *setCountProvider) Set(ctx context.Context, key, val string) error {
+	p.setCalls++
+	return p.simpleProvider.Set(ctx, key, val)
+}
+
 func newSimpleProvider() *simpleProvider {
 	return &simpleProvider{data: map[string]string{}}
 }
@@ -109,7 +122,7 @@ func TestBuildStateOutputsMap_Empty(t *testing.T) {
 
 func TestSyncInfraOutputSecrets_NilConfig(t *testing.T) {
 	p := newSimpleProvider()
-	err := syncInfraOutputSecrets(context.Background(), nil, p, sampleStates(), nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), nil, p, sampleStates(), nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("nil config should be no-op: %v", err)
 	}
@@ -125,7 +138,7 @@ func TestSyncInfraOutputSecrets_NoInfraOutputGens(t *testing.T) {
 			{Key: "JWT_SECRET", Type: "random_hex", Length: 32},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("no infra_output generators should be no-op: %v", err)
 	}
@@ -141,7 +154,7 @@ func TestSyncInfraOutputSecrets_WritesSecret(t *testing.T) {
 			{Key: "STAGING_DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -158,7 +171,7 @@ func TestSyncInfraOutputSecrets_WritesMultiple(t *testing.T) {
 			{Key: "REDIS_URL", Type: "infra_output", Source: "bmw-cache.url"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -178,7 +191,7 @@ func TestSyncInfraOutputSecrets_SkipsExisting(t *testing.T) {
 			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -198,7 +211,7 @@ func TestSyncInfraOutputSecrets_WriteOnlyProviderSkips(t *testing.T) {
 			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -217,7 +230,7 @@ func TestSyncInfraOutputSecrets_WriteOnlyProviderWrites(t *testing.T) {
 			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, false)
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -233,7 +246,7 @@ func TestSyncInfraOutputSecrets_MissingModule(t *testing.T) {
 			{Key: "X", Type: "infra_output", Source: "nonexistent.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, false)
 	if err == nil {
 		t.Fatal("expected error for missing module in state")
 	}
@@ -246,9 +259,120 @@ func TestSyncInfraOutputSecrets_EmptyStates(t *testing.T) {
 			{Key: "X", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, nil, nil, "", nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, nil, nil, "", nil, false)
 	if err == nil {
 		t.Fatal("expected error when state has no matching module")
+	}
+}
+
+// ── syncInfraOutputSecrets --refresh-outputs mode ─────────────────────────────
+
+// TestSyncInfraOutputSecrets_RefreshOutputs_UpdatesStaleSecret verifies that
+// when refreshOutputs=true and the existing secret value differs from the
+// current infra output, the secret is updated (not skipped).
+func TestSyncInfraOutputSecrets_RefreshOutputs_UpdatesStaleSecret(t *testing.T) {
+	p := newSimpleProvider()
+	p.data["DATABASE_URL"] = "postgres://old-host:5432/app" // stale value
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
+		},
+	}
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, true)
+	if err != nil {
+		t.Fatalf("syncInfraOutputSecrets: %v", err)
+	}
+	// Must overwrite stale value with the current infra output.
+	if p.data["DATABASE_URL"] != "postgres://user:pass@db.example.com:5432/app" {
+		t.Errorf("DATABASE_URL: got %q, want current infra output", p.data["DATABASE_URL"])
+	}
+}
+
+// TestSyncInfraOutputSecrets_RefreshOutputs_UnchangedSkipsSet verifies that
+// when refreshOutputs=true and the existing secret already matches the infra
+// output, provider.Set is NOT called — the "unchanged" optimisation must not
+// be masked by a write of the same value.
+func TestSyncInfraOutputSecrets_RefreshOutputs_UnchangedSkipsSet(t *testing.T) {
+	current := "postgres://user:pass@db.example.com:5432/app"
+	// setCountProvider records how many times Set is called. If the
+	// "unchanged" path fires, the count must be 0.
+	p := &setCountProvider{simpleProvider: simpleProvider{data: map[string]string{"DATABASE_URL": current}}}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
+		},
+	}
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, true)
+	if err != nil {
+		t.Fatalf("syncInfraOutputSecrets: %v", err)
+	}
+	if p.setCalls != 0 {
+		t.Errorf("Set must not be called when value is unchanged; called %d time(s)", p.setCalls)
+	}
+	if p.data["DATABASE_URL"] != current {
+		t.Errorf("value must remain unchanged: got %q", p.data["DATABASE_URL"])
+	}
+}
+
+// TestSyncInfraOutputSecrets_RefreshOutputs_CreatesNew verifies that when
+// refreshOutputs=true and the secret does not yet exist, it is created (same
+// as normal mode).
+func TestSyncInfraOutputSecrets_RefreshOutputs_CreatesNew(t *testing.T) {
+	p := newSimpleProvider()
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
+		},
+	}
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, true)
+	if err != nil {
+		t.Fatalf("syncInfraOutputSecrets: %v", err)
+	}
+	if p.data["DATABASE_URL"] != "postgres://user:pass@db.example.com:5432/app" {
+		t.Errorf("DATABASE_URL: got %q", p.data["DATABASE_URL"])
+	}
+}
+
+// TestSyncInfraOutputSecrets_RefreshOutputs_WriteOnlyProviderUpdates verifies
+// that for write-only providers (GitHub Actions style), --refresh-outputs
+// always overwrites an existing secret because comparison is not possible.
+func TestSyncInfraOutputSecrets_RefreshOutputs_WriteOnlyProviderUpdates(t *testing.T) {
+	p := &writeOnlyProvider{
+		existing: []string{"DATABASE_URL"},
+		listOK:   true,
+	}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
+		},
+	}
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, true)
+	if err != nil {
+		t.Fatalf("syncInfraOutputSecrets: %v", err)
+	}
+	// Write-only provider cannot compare, so Set must have been called.
+	if p.stored["DATABASE_URL"] != "postgres://user:pass@db.example.com:5432/app" {
+		t.Errorf("DATABASE_URL: got %q, want infra output value", p.stored["DATABASE_URL"])
+	}
+}
+
+// TestSyncInfraOutputSecrets_NormalMode_DoesNotOverwrite verifies the
+// invariant that normal apply (refreshOutputs=false) never overwrites a
+// user-managed secret, even when the infra output value has changed.
+func TestSyncInfraOutputSecrets_NormalMode_DoesNotOverwrite(t *testing.T) {
+	p := newSimpleProvider()
+	p.data["DATABASE_URL"] = "user-managed-value"
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
+		},
+	}
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "", nil, false)
+	if err != nil {
+		t.Fatalf("syncInfraOutputSecrets: %v", err)
+	}
+	if p.data["DATABASE_URL"] != "user-managed-value" {
+		t.Errorf("normal apply must not overwrite existing secret: got %q", p.data["DATABASE_URL"])
 	}
 }
 

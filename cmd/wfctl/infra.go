@@ -1514,7 +1514,7 @@ func runInfraApply(args []string) error {
 			}
 		}
 	}
-	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated)
+	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag)
 }
 
 func runInfraStatus(args []string) error {
