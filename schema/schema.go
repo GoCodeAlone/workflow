@@ -328,7 +328,6 @@ var coreModuleTypes = []string{
 	"step.marketplace_search",
 	"step.marketplace_uninstall",
 	"step.marketplace_update",
-
 	"step.nosql_delete",
 	"step.nosql_get",
 	"step.nosql_put",
@@ -360,7 +359,6 @@ var coreModuleTypes = []string{
 	"step.retry_with_backoff",
 	"step.s3_upload",
 	"step.sandbox_exec",
-
 	"step.scan_container",
 	"step.scan_deps",
 	"step.scan_sast",

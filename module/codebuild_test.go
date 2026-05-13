@@ -751,3 +751,27 @@ func TestCodeBuildStepName(t *testing.T) {
 		t.Errorf("expected name=my-create-step, got %q", step.Name())
 	}
 }
+
+// ─── AWS CodeBuild migration error (issue #653 Phase 2) ──────────────────────
+
+func TestCodeBuildAWSBackendMigrationError(t *testing.T) {
+	app := module.NewMockApplication()
+	m := module.NewCodeBuildModule("test-build", map[string]any{
+		"provider": "aws",
+		"region":   "us-east-1",
+	})
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init should succeed (backend registered): %v", err)
+	}
+	// Migration error fires at operation time, not Init time.
+	err := m.CreateProject()
+	if err == nil {
+		t.Fatal("expected migration error from CreateProject() for provider: aws, got nil")
+	}
+	errStr := err.Error()
+	for _, want := range []string{"workflow-plugin-aws", "v0.53.0", "provider: mock"} {
+		if !strings.Contains(errStr, want) {
+			t.Errorf("error should mention %q, got: %s", want, errStr)
+		}
+	}
+}

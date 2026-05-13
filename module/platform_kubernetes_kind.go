@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,9 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/eks"
-	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/GoCodeAlone/workflow/internal/legacyaws"
 	container "google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
 )
@@ -87,227 +84,34 @@ func (b *kindBackend) destroy(k *PlatformKubernetes) error {
 
 // ─── EKS backend ─────────────────────────────────────────────────────────────
 
-// eksBackend manages Amazon EKS clusters using aws-sdk-go-v2/service/eks.
-// When no AWSConfigProvider is available (e.g., tests without a cloud account),
-// plan() returns a synthetic create action and apply()/destroy() return errors.
-type eksBackend struct{}
+// eksErrorBackend replaces the former eksBackend. The real EKS backend has been
+// removed from workflow core in issue #653; install workflow-plugin-aws for EKS
+// cluster management.
+type eksErrorBackend struct{}
 
-func (b *eksBackend) plan(k *PlatformKubernetes) (*PlatformPlan, error) {
-	awsProv, ok := awsProviderFrom(k.provider)
-	if !ok {
-		return &PlatformPlan{
-			Provider: "eks",
-			Resource: k.clusterName(),
-			Actions:  []PlatformAction{{Type: "create", Resource: k.clusterName(), Detail: fmt.Sprintf("create EKS cluster %q", k.clusterName())}},
-		}, nil
-	}
-
-	cfg, err := awsProv.AWSConfig(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("eks plan: AWS config: %w", err)
-	}
-	client := eks.NewFromConfig(cfg)
-
-	out, err := client.DescribeCluster(context.Background(), &eks.DescribeClusterInput{
-		Name: aws.String(k.clusterName()),
-	})
-	if err != nil {
-		var notFound *ekstypes.ResourceNotFoundException
-		if errors.As(err, &notFound) {
-			return &PlatformPlan{
-				Provider: "eks",
-				Resource: k.clusterName(),
-				Actions:  []PlatformAction{{Type: "create", Resource: k.clusterName(), Detail: fmt.Sprintf("create EKS cluster %q (version %s)", k.clusterName(), k.state.Version)}},
-			}, nil
-		}
-		return nil, fmt.Errorf("eks plan: DescribeCluster: %w", err)
-	}
-
-	clusterStatus := "unknown"
-	if out.Cluster != nil {
-		clusterStatus = string(out.Cluster.Status)
-	}
-	return &PlatformPlan{
-		Provider: "eks",
-		Resource: k.clusterName(),
-		Actions:  []PlatformAction{{Type: "noop", Resource: k.clusterName(), Detail: fmt.Sprintf("EKS cluster %q exists (status: %s)", k.clusterName(), clusterStatus)}},
-	}, nil
+func (b *eksErrorBackend) err(k *PlatformKubernetes) error {
+	return fmt.Errorf(
+		"platform.kubernetes %q: EKS cluster backend removed from workflow core in %s (issue #653).\n"+
+			"Use cluster_type: kind for local development.\n"+
+			"Install workflow-plugin-aws to manage EKS clusters: https://github.com/GoCodeAlone/workflow-plugin-aws",
+		k.name, legacyaws.RemovedInVersion,
+	)
 }
 
-func (b *eksBackend) apply(k *PlatformKubernetes) (*PlatformResult, error) {
-	awsProv, ok := awsProviderFrom(k.provider)
-	if !ok {
-		return nil, fmt.Errorf("eks apply: no AWS cloud account configured")
-	}
-
-	cfg, err := awsProv.AWSConfig(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("eks apply: AWS config: %w", err)
-	}
-
-	roleARN, _ := k.config["role_arn"].(string)
-	if roleARN == "" {
-		return nil, fmt.Errorf("eks apply: 'role_arn' is required in module config")
-	}
-
-	subnetIDs := parseStringSlice(k.config["subnet_ids"])
-	version := k.state.Version
-	if version == "" {
-		version = "1.29"
-	}
-
-	client := eks.NewFromConfig(cfg)
-	createOut, err := client.CreateCluster(context.Background(), &eks.CreateClusterInput{
-		Name:    aws.String(k.clusterName()),
-		Version: aws.String(version),
-		RoleArn: aws.String(roleARN),
-		ResourcesVpcConfig: &ekstypes.VpcConfigRequest{
-			SubnetIds: subnetIDs,
-		},
-	})
-	if err != nil {
-		var alreadyExists *ekstypes.ResourceInUseException
-		if errors.As(err, &alreadyExists) {
-			return &PlatformResult{
-				Success: true,
-				Message: fmt.Sprintf("EKS cluster %q already exists", k.clusterName()),
-				State:   k.state,
-			}, nil
-		}
-		return nil, fmt.Errorf("eks apply: CreateCluster: %w", err)
-	}
-
-	k.state.Status = "creating"
-	k.state.NodeGroups = k.nodeGroups()
-	k.state.CreatedAt = time.Now()
-	if createOut.Cluster != nil && createOut.Cluster.Endpoint != nil {
-		k.state.Endpoint = *createOut.Cluster.Endpoint
-	}
-
-	// Create node groups
-	for _, ng := range k.nodeGroups() {
-		ngRoleARN, _ := k.config["node_role_arn"].(string)
-		if ngRoleARN == "" {
-			ngRoleARN = roleARN
-		}
-		ngMin := safeIntToInt32(ng.Min)
-		ngMax := safeIntToInt32(ng.Max)
-		ngCurrent := safeIntToInt32(ng.Current)
-		_, ngErr := client.CreateNodegroup(context.Background(), &eks.CreateNodegroupInput{
-			ClusterName:   aws.String(k.clusterName()),
-			NodegroupName: aws.String(ng.Name),
-			NodeRole:      aws.String(ngRoleARN),
-			InstanceTypes: []string{ng.InstanceType},
-			Subnets:       subnetIDs,
-			ScalingConfig: &ekstypes.NodegroupScalingConfig{
-				MinSize:     aws.Int32(ngMin),
-				MaxSize:     aws.Int32(ngMax),
-				DesiredSize: aws.Int32(ngCurrent),
-			},
-		})
-		if ngErr != nil {
-			return nil, fmt.Errorf("eks apply: CreateNodegroup %q: %w", ng.Name, ngErr)
-		}
-	}
-
-	k.state.Status = "creating" // EKS cluster takes time to become ACTIVE
-	return &PlatformResult{
-		Success: true,
-		Message: fmt.Sprintf("EKS cluster %q creation initiated", k.clusterName()),
-		State:   k.state,
-	}, nil
+func (b *eksErrorBackend) plan(k *PlatformKubernetes) (*PlatformPlan, error) {
+	return nil, b.err(k)
 }
 
-func (b *eksBackend) status(k *PlatformKubernetes) (*KubernetesClusterState, error) {
-	awsProv, ok := awsProviderFrom(k.provider)
-	if !ok {
-		return k.state, nil
-	}
-
-	cfg, err := awsProv.AWSConfig(context.Background())
-	if err != nil {
-		return k.state, fmt.Errorf("eks status: AWS config: %w", err)
-	}
-	client := eks.NewFromConfig(cfg)
-
-	out, err := client.DescribeCluster(context.Background(), &eks.DescribeClusterInput{
-		Name: aws.String(k.clusterName()),
-	})
-	if err != nil {
-		var notFound *ekstypes.ResourceNotFoundException
-		if errors.As(err, &notFound) {
-			k.state.Status = "deleted"
-			return k.state, nil
-		}
-		return k.state, fmt.Errorf("eks status: DescribeCluster: %w", err)
-	}
-
-	if out.Cluster != nil {
-		k.state.Status = strings.ToLower(string(out.Cluster.Status))
-		if out.Cluster.Endpoint != nil {
-			k.state.Endpoint = *out.Cluster.Endpoint
-		}
-		if out.Cluster.Version != nil {
-			k.state.Version = *out.Cluster.Version
-		}
-	}
-
-	// Fetch node groups
-	ngOut, err := client.ListNodegroups(context.Background(), &eks.ListNodegroupsInput{
-		ClusterName: aws.String(k.clusterName()),
-	})
-	if err == nil && ngOut != nil {
-		var groups []NodeGroupState
-		for _, ngName := range ngOut.Nodegroups {
-			groups = append(groups, NodeGroupState{Name: ngName})
-		}
-		k.state.NodeGroups = groups
-	}
-
-	return k.state, nil
+func (b *eksErrorBackend) apply(k *PlatformKubernetes) (*PlatformResult, error) {
+	return nil, b.err(k)
 }
 
-func (b *eksBackend) destroy(k *PlatformKubernetes) error {
-	awsProv, ok := awsProviderFrom(k.provider)
-	if !ok {
-		return fmt.Errorf("eks destroy: no AWS cloud account configured")
-	}
+func (b *eksErrorBackend) status(k *PlatformKubernetes) (*KubernetesClusterState, error) {
+	return nil, b.err(k)
+}
 
-	cfg, err := awsProv.AWSConfig(context.Background())
-	if err != nil {
-		return fmt.Errorf("eks destroy: AWS config: %w", err)
-	}
-	client := eks.NewFromConfig(cfg)
-
-	// Delete node groups first
-	ngOut, _ := client.ListNodegroups(context.Background(), &eks.ListNodegroupsInput{
-		ClusterName: aws.String(k.clusterName()),
-	})
-	if ngOut != nil {
-		for _, ngName := range ngOut.Nodegroups {
-			if _, err := client.DeleteNodegroup(context.Background(), &eks.DeleteNodegroupInput{
-				ClusterName:   aws.String(k.clusterName()),
-				NodegroupName: aws.String(ngName),
-			}); err != nil {
-				return fmt.Errorf("eks destroy: DeleteNodegroup %q: %w", ngName, err)
-			}
-		}
-	}
-
-	_, err = client.DeleteCluster(context.Background(), &eks.DeleteClusterInput{
-		Name: aws.String(k.clusterName()),
-	})
-	if err != nil {
-		var notFound *ekstypes.ResourceNotFoundException
-		if errors.As(err, &notFound) {
-			k.state.Status = "deleted"
-			return nil
-		}
-		return fmt.Errorf("eks destroy: DeleteCluster: %w", err)
-	}
-
-	k.state.Status = "deleting"
-	return nil
+func (b *eksErrorBackend) destroy(k *PlatformKubernetes) error {
+	return b.err(k)
 }
 
 // ─── GKE backend ──────────────────────────────────────────────────────────────
@@ -834,7 +638,7 @@ func init() {
 		return &kindBackend{}, nil
 	})
 	RegisterKubernetesBackend("eks", func(_ map[string]any) (kubernetesBackend, error) {
-		return &eksBackend{}, nil
+		return &eksErrorBackend{}, nil
 	})
 	RegisterKubernetesBackend("gke", func(_ map[string]any) (kubernetesBackend, error) {
 		return &gkeBackend{}, nil

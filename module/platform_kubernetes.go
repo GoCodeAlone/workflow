@@ -2,7 +2,6 @@ package module
 
 import (
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
@@ -182,17 +181,6 @@ func (m *PlatformKubernetes) nodeGroups() []NodeGroupState {
 		})
 	}
 	return groups
-}
-
-// safeIntToInt32 converts an int to int32 with proper bounds clamping.
-func safeIntToInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v)
 }
 
 func intFromAny(v any) (int, bool) {
