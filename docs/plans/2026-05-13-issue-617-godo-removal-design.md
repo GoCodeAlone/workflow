@@ -89,8 +89,10 @@ See docs/migrations/v<NEXT>-godo-removal.md.
 
 The middle `%s` line branches on plugin-loaded detection (closes adversarial finding I-2):
 
-- If `iac.provider` factory is registered in the application's factory map AND a `provider: digitalocean` infra.* binding exists somewhere in the loaded plugins → emit `"workflow-plugin-digitalocean is already loaded; your config still references the legacy module name."`
+- If the `iac.provider` factory is registered in the engine's module factory map (`_, iacLoaded := e.moduleFactories["iac.provider"]`) → emit `"workflow-plugin-digitalocean is already loaded; your config still references the legacy module name."`
 - Otherwise → emit `"Install workflow-plugin-digitalocean: https://github.com/GoCodeAlone/workflow-plugin-digitalocean"`
+
+(The single-factory-map check is sufficient because the DO plugin is the only known publisher of `iac.provider` in the GoCodeAlone ecosystem. An ANDed check on `provider: digitalocean` infra.* bindings would have no clean implementation path at the engine layer and would not add discriminating signal — see cycle-3 review m-2.)
 
 **Step guard** — in `module/pipeline_step_registry.go` (or `engine.go buildPipelineSteps`'s unknown-step-type branch), for the five legacy step types. Per-step messages because the mapping is NOT one-to-one (closes finding I-1):
 
@@ -167,7 +169,7 @@ This reduces migration friction from manual-rewrite to one `wfctl modernize --ap
 
 1. **Plugin parity assumption:** `workflow-plugin-digitalocean` v0.12.0 covers every resource served by the deleted core modules. *Test:* the parity matrix below maps each legacy module to its plugin replacement; the matrix MUST be re-validated before merge.
 
-2. **No internal consumers downstream:** No downstream repo's YAML still relies on `platform.do_*` / `step.do_*` types post-IaC migration. *Test:* the implementer greps `buymywishlist`, `core-dump`, `workflow-cloud`, `workflow-scenarios`, `ratchet`, `ratchet-cli` config trees for the legacy names before opening the PR. Any hit becomes either a migration PR in that repo (Option A still ships) or a blocker (revisit).
+2. **No internal consumers downstream:** No downstream repo's YAML still relies on `platform.do_*` / `step.do_*` types post-IaC migration. *Test:* the implementer greps `buymywishlist`, `core-dump`, `workflow-cloud`, `workflow-scenarios`, `ratchet`, `ratchet-cli` config trees for the legacy names before opening the PR. Any hit becomes either a migration PR in that repo (Option A still ships) or a blocker (revisit). **Sequencing constraint:** any `workflow-scenarios` migration PRs must merge before — or in the same batch as — the engine cutover tag is consumed by scenario-CI, otherwise scenario CI will fail with the (correctly) actionable migration errors.
 
 3. **Schema allow-lists are advisory, not authoritative:** Removing entries from `schema/schema.go` does not silently re-allow them elsewhere — the registry is the only enforcement point and we're removing them there too. *Test:* `go test ./schema/...` after deletion.
 
@@ -220,7 +222,7 @@ If any cell of this matrix is wrong, the implementer files an issue against `wor
 Single PR, ~5 tasks:
 
 1. **T1 — Delete legacy module + step files (12 files).** Pure deletion (all 12 rows in the "Module files" table above, including `module/platform_doks_test.go`); a new test asserts removal of registry entries.
-2. **T2 — Strip registration sites (9 files).** Edits to `plugins/platform/plugin.go`, `schema/schema.go`, `schema/module_schema.go`, `schema/step_schema_builtins.go`, `cmd/wfctl/type_registry.go`, `cmd/wfctl/infra.go`, `cmd/wfctl/deploy_providers.go`, `cmd/wfctl/ci_run_dryrun.go`, `plugins/platform/plugin_test.go`, `module/multi_region.go`. Implementer also reviews `cmd/wfctl/infra_apply_test.go` line 1990 (negative-test fixture using `type: platform.do_app`) — replace with a synthetic non-existent type or remove if the negative case is redundant.
+2. **T2 — Strip registration sites (10 files).** Edits to `plugins/platform/plugin.go`, `schema/schema.go`, `schema/module_schema.go`, `schema/step_schema_builtins.go`, `cmd/wfctl/type_registry.go`, `cmd/wfctl/infra.go`, `cmd/wfctl/deploy_providers.go`, `cmd/wfctl/ci_run_dryrun.go`, `plugins/platform/plugin_test.go`, `module/multi_region.go`. Implementer also reviews `cmd/wfctl/infra_apply_test.go` line 1990 (negative-test fixture using `type: platform.do_app`) — replace with a synthetic non-existent type or remove if the negative case is redundant.
 3. **T3 — Add load-time migration error + tests.** Engine fails-closed on legacy DO types with actionable message; new test fixtures cover all 5 legacy types.
 4. **T4 — `go mod tidy` + grep gate.** Confirm zero `digitalocean/godo` imports remain in code AND in module files; update go.sum; add CI gate.
 
@@ -230,17 +232,17 @@ Single PR, ~5 tasks:
    (cd example && go mod tidy)   # standalone example/ sub-module also pins godo as indirect
    ```
 
-   Grep gate (exact invocation):
+   Grep gate (fail-on-match, exact invocation — both gates use `!` to invert grep's exit code so a match becomes a failing CI step):
    ```sh
-   grep -rn --include="*.go" \
-     --exclude-dir=_worktrees \
-     --exclude-dir=.worktrees \
-     --exclude-dir=.claude \
-     "digitalocean/godo" .
-   ```
-   Plus a second grep over `go.mod` files (root + `example/go.mod`) to ensure neither still lists godo:
-   ```sh
-   grep -nH "digitalocean/godo" go.mod example/go.mod || true   # fails build if any hit
+   # *.go gate:
+   ! grep -rn --include="*.go" \
+       --exclude-dir=_worktrees \
+       --exclude-dir=.worktrees \
+       --exclude-dir=.claude \
+       "digitalocean/godo" .
+
+   # go.mod gate (root + example/):
+   ! grep -qH "digitalocean/godo" go.mod example/go.mod
    ```
    Gate lives in `.github/workflows/ci.yml` (or wherever `golangci-lint` already runs) as a fail-on-match step. Same grep also runs as a pre-commit step locally documented in CONTRIBUTING (no install required, repo-relative).
 5. **T5 — Docs + CHANGELOG + migration guide + modernize rules.** Update `DOCUMENTATION.md`, prepend CHANGELOG breaking-change entry, add `docs/migrations/v<NEXT>-godo-removal.md` (5 module + 5 step mappings, plus explicit GAP callout for `step.do_logs` / `step.do_scale` with workaround YAML examples), implement the seven `wfctl modernize` rewrite rules above + test fixtures, file the two follow-up issues in `workflow-plugin-digitalocean` (`step.iac_logs`, `step.iac_scale`) and wire their issue numbers back into the migration error messages.
@@ -262,6 +264,16 @@ This change affects build, package version, and runtime config loading. Rollback
 - Should `cloud_account_do.go` deletion include removing the registered resolver names (`digitalocean/static`, `digitalocean/env`, `digitalocean/api_token`) from any global registry to prevent dead config keys? **Decision (autonomous):** yes — the registry is purely additive via init(); deleting the file removes the init(). Add a test that the credential registry has zero `digitalocean/*` entries post-deletion.
 
 ## Adversarial review history
+
+### Cycle 3 (PASS — 0 Critical / 0 Important; 3 Minor incorporated) — 2026-05-13
+
+- **m-1** Grep gates lacked `!`-prefix; `|| true` silently suppressed exit code → **fixed**: both gates now use `!` prefix to fail CI on match.
+- **m-2** Plugin-loaded detection over-specified (AND of factory map + provider binding) → **fixed**: simplified to `_, iacLoaded := e.moduleFactories["iac.provider"]` with rationale.
+- **m-3** Missing sequencing constraint for `workflow-scenarios` migration → **fixed**: explicit constraint added to Assumption #2.
+- **t-1** T2 file count was 9; actual list contained 10 → **fixed**.
+- **Cycle-1 and Cycle-2 fixes verified to hold.**
+
+Verdict: PASS. Pipeline advances to writing-plans.
 
 ### Cycle 2 (FAIL) — 2026-05-13
 
