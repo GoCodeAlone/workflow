@@ -153,6 +153,7 @@ EOF
 - Modify: `cmd/wfctl/infra.go:577` — change `return t == "infra.container_service" || t == "platform.do_app"` to `return t == "infra.container_service"`.
 - Modify: `cmd/wfctl/deploy_providers.go:419-424` — drop the `"platform.do_app"` line from the `deployTargetTypes` slice.
 - Modify: `cmd/wfctl/ci_run_dryrun.go:178-183` — drop the `"platform.do_app"` line from the `deployTargetTypes` slice.
+- Modify: `cmd/wfctl/deploy.go:839,901` — the `wfctl deploy cloud` subcommand collects modules via `strings.HasPrefix(m.Type, "platform.")` and errors with `"no platform.* modules found"` when none match. Post-cutover the user's modern config uses `infra.*` types; both call sites must include `infra.*` as well. Replace the prefix check with `strings.HasPrefix(m.Type, "platform.") || strings.HasPrefix(m.Type, "infra.")` and update the error message to `"no platform.* or infra.* modules found in config — nothing to deploy"`. Header comment on line 781 updated to reference both prefixes.
 - Modify: `module/multi_region.go:123` — replace the error message text (see Step 3).
 - Modify: `cmd/wfctl/infra_apply_test.go:1990` — the negative-test YAML fixture uses `type: platform.do_app`. Replace with `type: example.legacy_unknown` (a synthetic type that will never be registered) so the test's intent (negative coverage for unknown types) is preserved without referencing a removed type.
 - Test: `cmd/wfctl/legacy_do_types_removed_test.go` (new — asserts the type registry no longer contains the legacy keys)
@@ -273,15 +274,31 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 )
 
-// newTestEngine builds an isolated StdEngine — same pattern as engine_test.go.
+// newTestEngine builds an isolated StdEngine with no plugins loaded — required
+// so that the iac.provider factory-map lookup is deterministically false in
+// the "plugin not loaded" test, and so that the manual AddModuleType stub in
+// the "plugin loaded" test is the only factory in the map. This intentionally
+// differs from setupEngineTest (engine_test.go), which calls loadAllPlugins.
+// Uses mock.Logger to match the existing test infrastructure.
 func newTestEngine(t *testing.T) *StdEngine {
 	t.Helper()
-	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), nil)
+	logger := &mockLogger{}
+	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	if err := app.Init(); err != nil {
 		t.Fatalf("app.Init: %v", err)
 	}
-	return NewStdEngine(app, app.Logger())
+	return NewStdEngine(app, logger)
 }
+
+// mockLogger is a no-op modular.Logger satisfying the interface needed for
+// engine construction. Mirrors the test mock used elsewhere in this package
+// (search for `mockLogger` in engine_test.go for the canonical shape).
+type mockLogger struct{}
+
+func (mockLogger) Debug(string, ...any) {}
+func (mockLogger) Info(string, ...any)  {}
+func (mockLogger) Warn(string, ...any)  {}
+func (mockLogger) Error(string, ...any) {}
 
 func TestLegacyDOModuleError_PluginNotLoaded(t *testing.T) {
 	cases := []struct{ legacyType, hint string }{
@@ -689,6 +706,7 @@ EOF
 - Test: `modernize/legacy_do_rule_test.go` (new — covers Check + Fix for each of the 5 module + 5 step rewrites + 3 gap types)
 - Create: `modernize/testdata/legacy-do-config.yaml` (committed smoke-test fixture exercising every legacy type)
 - Create: `modernize/testdata/legacy-do-config.expected.yaml` (the post-`modernize --apply` output, used as a golden file for the smoke test in step 9 below)
+- Modify: `cmd/wfctl/infra_apply.go:130-131` + `cmd/wfctl/infra.go:460` — comment hygiene: drop the "legacy DigitalOcean" phrasing in `hasPlatformModules` / `isInfraType` rationale comments. Both functions remain correct for the surviving `platform.*` types (e.g., `platform.kubernetes`, `platform.ecs`); only the DO-specific framing is stale.
 
 **Step 1: Write the failing test**
 
@@ -713,7 +731,7 @@ func TestLegacyDORule_Rewrites(t *testing.T) {
 		wantDrop string   // must NOT appear in fixed YAML (the legacy type)
 	}{
 		{
-			name:     "platform.do_app → infra.container_service",
+			name:     "platform.do_app → infra.container_service (provider NOT auto-injected)",
 			yamlIn:   "modules:\n  - name: api\n    type: platform.do_app\n    config:\n      region: nyc\n",
 			wantNew:  "infra.container_service",
 			wantDrop: "platform.do_app",
@@ -826,10 +844,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// legacyDORemovedInVersion intentionally duplicates module.RemovedInVersion
+// because importing the module package from modernize would create an import
+// cycle (modernize is a peer to module, and module-side tests can already
+// transitively pull modernize via the wfctl command). Keep the two constants
+// in sync when bumping the release tag.
+const legacyDORemovedInVersion = "v0.52.0"
+
 // LegacyDORule rewrites legacy DigitalOcean module + step types to their
-// infra.* IaC successors (issue #617). Auto-fixable for 5 modules and 3 of 5
-// steps; the two GAP steps (step.do_logs, step.do_scale) are flagged but not
-// modified, because they have no 1:1 pipeline-step successor.
+// infra.* IaC successors (issue #617).
+//
+// IMPORTANT: The Fix function ONLY renames the `type:` key — it does NOT
+// inject the required `config.provider: digitalocean` setting, because that
+// requires modifying a sibling mapping that may already contain unrelated
+// keys the operator must review. The rule's Check Message and the migration
+// guide both instruct the operator to add the provider key manually after
+// running modernize. The committed `testdata/legacy-do-config.expected.yaml`
+// fixture asserts the post-modernize shape: types renamed, provider NOT
+// auto-added. Adding provider injection in a future iteration is tracked as
+// a follow-up (see migration guide).
+//
+// Auto-fixable for 4 of 5 modules (platform.do_app/database/dns/doks) and
+// 3 of 5 steps (step.do_deploy/status/destroy). The GAP types (do_networking
+// splits 1→2; step.do_logs/scale have no pipeline-step successor) are flagged
+// but not modified.
 func LegacyDORule() Rule {
 	moduleMap := map[string]string{
 		"platform.do_app":        "infra.container_service",
@@ -862,7 +900,7 @@ func LegacyDORule() Rule {
 					out = append(out, Finding{
 						RuleID:  "legacy-do-types",
 						Line:    typeVal.Line,
-						Message: fmt.Sprintf("%s removed in v0.52.0; rewrite to %s (provider: digitalocean) — requires workflow-plugin-digitalocean", typeVal.Value, successor),
+						Message: fmt.Sprintf("%s removed in %s; rewrite to %s (provider: digitalocean) — requires workflow-plugin-digitalocean", typeVal.Value, legacyDORemovedInVersion, successor),
 						Fixable: true,
 					})
 				}
@@ -870,7 +908,7 @@ func LegacyDORule() Rule {
 					out = append(out, Finding{
 						RuleID:  "legacy-do-types",
 						Line:    typeVal.Line,
-						Message: fmt.Sprintf("%s removed in v0.52.0; rewrite to %s — requires workflow-plugin-digitalocean", typeVal.Value, successor),
+						Message: fmt.Sprintf("%s removed in %s; rewrite to %s — requires workflow-plugin-digitalocean", typeVal.Value, legacyDORemovedInVersion, successor),
 						Fixable: true,
 					})
 				}
@@ -878,7 +916,7 @@ func LegacyDORule() Rule {
 					out = append(out, Finding{
 						RuleID:  "legacy-do-types",
 						Line:    typeVal.Line,
-						Message: fmt.Sprintf("%s removed in v0.52.0 — %s", typeVal.Value, reason),
+						Message: fmt.Sprintf("%s removed in %s — %s", typeVal.Value, legacyDORemovedInVersion, reason),
 						Fixable: false,
 					})
 				}
@@ -989,7 +1027,7 @@ Prepend to `CHANGELOG.md`:
 
 ### Migration
 
-DigitalOcean IaC moved to [`workflow-plugin-digitalocean`](https://github.com/GoCodeAlone/workflow-plugin-digitalocean) v0.12.0+. After loading the plugin, replace legacy module types with `infra.*` types and `provider: digitalocean`. Run `wfctl modernize --apply <config.yaml>` to auto-rewrite supported types. Two step types (`step.do_logs`, `step.do_scale`) have no 1:1 pipeline successor — workarounds documented in the [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
+DigitalOcean IaC moved to [`workflow-plugin-digitalocean`](https://github.com/GoCodeAlone/workflow-plugin-digitalocean) v0.12.0+. After loading the plugin, replace legacy module types with `infra.*` types and `provider: digitalocean`. Run `wfctl modernize --apply <config.yaml>` to auto-rewrite supported types — **then manually add `provider: digitalocean` to each rewritten module's `config:` block** (the modernize rule does not inject the provider key; see the [migration guide](docs/migrations/v0.52.0-godo-removal.md) for the exact recipe). Two step types (`step.do_logs`, `step.do_scale`) have no 1:1 pipeline successor — workarounds documented in the migration guide.
 
 Configs that still reference the legacy types now fail to load with an actionable error pointing to the plugin and the relevant `infra.*` successor.
 ```
@@ -1031,13 +1069,39 @@ the design doc at `docs/plans/2026-05-13-issue-617-godo-removal-design.md`.
    ```sh
    wfctl modernize --apply ./config/*.yaml
    ```
-   This rewrites the 5 module types and 3 step types automatically. Two step
-   types (`step.do_logs`, `step.do_scale`) and one module type
-   (`platform.do_networking`) are flagged but not auto-rewritten — see below.
+   This **renames the type field** for 4 module types and 3 step types
+   automatically. Two step types (`step.do_logs`, `step.do_scale`) and one
+   module type (`platform.do_networking`) are flagged but not auto-rewritten
+   — see below.
 
-3. Manually address the GAP types listed below.
+3. **Add `provider: digitalocean` to each rewritten module's `config:`
+   block.** The modernize rule does NOT auto-inject this key, because the
+   `config:` block typically contains operator-authored settings that
+   shouldn't be silently modified. Example:
 
-4. Re-run `wfctl validate` and `wfctl infra plan` to confirm the rewritten
+   ```yaml
+   # After modernize (type renamed, provider absent):
+   modules:
+     - name: api
+       type: infra.container_service
+       config:
+         region: nyc        # <-- modernize left this alone
+
+   # Operator adds provider key manually:
+   modules:
+     - name: api
+       type: infra.container_service
+       config:
+         provider: digitalocean     # <-- ADD THIS
+         region: nyc
+   ```
+
+   Forgetting this produces a load-time error:
+   `infra module "api" (infra.container_service): 'provider' config is required`.
+
+4. Manually address the GAP types listed below.
+
+5. Re-run `wfctl validate` and `wfctl infra plan` to confirm the rewritten
    config loads and produces the same plan.
 
 ## Module type mapping
@@ -1185,31 +1249,38 @@ EOF
 
 **Step 9: File the AWS audit follow-up issue in `GoCodeAlone/workflow`**
 
+**Before writing the issue body, regenerate the in-scope file list from the current tree** rather than copying speculative names from the design:
+
+```sh
+# Discover actual aws-sdk-go-v2 importers in module/:
+grep -rln "github.com/aws/aws-sdk-go-v2" --include="*.go" module/ | sort
+# Also list drivers:
+ls platform/providers/aws/drivers/*.go 2>/dev/null
+# RBAC + non-IaC stays:
+ls iam/aws*.go plugin/rbac/aws*.go artifact/s3*.go module/iac_state_spaces.go provider/aws/deploy.go 2>/dev/null
+```
+
+Then write the issue body. Template (replace the `<...>` placeholders with the actual grep output):
+
 ```bash
 AWS_BODY=$(cat <<'EOF'
 Continuation of #617. The DO half of the SDK audit shipped in v0.52.0 (godo
-gone from core). This issue tracks the AWS half:
+gone from core). This issue tracks the AWS half.
 
-In scope:
-- `module/platform_ecs.go`, `module/cloud_account_aws*.go`,
-  `module/platform_apigateway.go`, `module/codebuild.go`,
-  `module/nosql_dynamodb.go`, `module/platform_kubernetes_kind.go`,
-  `module/platform_networking.go`, `module/platform_autoscaling.go`,
-  `module/platform_dns_backends.go`, `module/aws_api_gateway.go`,
-  `module/s3_storage.go`, `module/storage_artifact_s3.go`,
-  `module/pipeline_step_s3_upload.go` and the IaC drivers under
-  `platform/providers/aws/` — review for move to workflow-plugin-aws
-  using the same Option A force-cutover pattern.
+In scope (move to workflow-plugin-aws via the same Option A force-cutover
+pattern used for #617):
+<list of actual aws-sdk-go-v2 importers under module/ and IaC drivers under
+platform/providers/aws/ from the grep above; one file per line>
 
 Out of scope (justified non-IaC core surfaces; STAY in core):
-- `iam/aws.go` — RBAC integration.
-- `plugin/rbac/aws.go` — RBAC plugin glue.
-- `artifact/s3.go` — generic artifact storage backend (S3-compat).
-- `provider/aws/deploy.go` — IaC adapter (revisit if it's a thin wrapper).
-- `module/iac_state_spaces.go` — S3-compat state backend (DO Spaces too).
+- `iam/aws.go` — RBAC integration
+- `plugin/rbac/aws.go` — RBAC plugin glue
+- `artifact/s3.go` — generic S3-compat artifact storage
+- `provider/aws/deploy.go` — IaC adapter (revisit if thin wrapper)
+- `module/iac_state_spaces.go` — S3-compat state backend (also used by DO Spaces)
 
 Goal: same as #617 — Dependabot bumps for AWS SDKs target the provider
-plugin repo, not core, except for the non-IaC surfaces above.
+plugin repo, not core, except for the surfaces above.
 EOF
 )
 gh issue create --repo GoCodeAlone/workflow \
@@ -1261,6 +1332,17 @@ T4 is the only task with the runtime-launch-validation trigger (version-pin upda
 ---
 
 ## Adversarial review history (plan phase)
+
+### Cycle 2 (FAIL) — 2026-05-13
+
+- **C-1** `wfctl modernize` Fix renamed `type:` but did not inject `config.provider: digitalocean` → produced YAML that fails to load → **fixed by scope-limit (Option 2)**: rule explicitly does not inject the provider key; the migration guide adds a manual step with example YAML and the error string the user will hit; rule docstring + test names + expected fixture all assert the scope-limited behaviour.
+- **C-2** `cmd/wfctl/deploy.go:839,901` had its own `strings.HasPrefix(m.Type, "platform.")` collector + "no platform.* modules found" error — missed in T2 scope → **fixed**: file added to T2's edit list; both call sites updated to include `infra.*` prefix.
+- **I-1** `newTestEngine` differs from `setupEngineTest` (no `loadAllPlugins`) — intentional but not documented → **fixed**: comment added explaining the intentional divergence.
+- **I-2** `hasPlatformModules` + `isInfraType` rationale comments still cite DigitalOcean → **fixed**: comment-hygiene edit added to T5.
+- **m-1** `newTestEngine` passed `nil` logger to `NewStdApplication`; deviated from existing test pattern → **fixed**: use `mockLogger{}` matching the canonical shape in engine_test.go.
+- **m-2** `RemovedInVersion` declared in `module/` but hardcoded again in `modernize/` (import cycle prevents reuse) → **fixed**: explicit duplicate `legacyDORemovedInVersion` in modernize with a documented "keep in sync" comment.
+- **m-3** AWS audit issue body invented speculative file names → **fixed**: T5 Step 9 now runs the grep BEFORE writing the body and uses the grep output to populate the in-scope list.
+- **Cycle 1 fixes verified to hold** — no regressions introduced.
 
 ### Cycle 1 (FAIL) — 2026-05-13
 
