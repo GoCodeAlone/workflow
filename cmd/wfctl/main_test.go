@@ -48,18 +48,34 @@ func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
 }
 
 func TestBuildVersionStripsDirtyMarker(t *testing.T) {
-	// buildVersion() is driven by debug.ReadBuildInfo at process start, so we
-	// cannot inject a dirty version at test runtime.  Instead, verify that the
-	// helper strips the suffix when the raw string contains it, by calling
-	// strings.TrimSuffix the same way buildVersion does.
-	raw := "v0.22.8-0.20260510180701-a851625d3bf0+dirty"
-	got := strings.TrimSuffix(raw, "+dirty")
-	if strings.HasSuffix(got, "+dirty") {
-		t.Fatalf("TrimSuffix did not strip +dirty from %q", raw)
-	}
-	want := "v0.22.8-0.20260510180701-a851625d3bf0"
-	if got != want {
-		t.Fatalf("stripped version = %q, want %q", got, want)
+	// cleanBuildVersion must strip +dirty from both release tags and pseudo-versions.
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{
+			in:   "v0.22.8-0.20260510180701-a851625d3bf0+dirty",
+			want: "v0.22.8-0.20260510180701-a851625d3bf0",
+		},
+		{
+			in:   "v0.51.2+dirty",
+			want: "v0.51.2",
+		},
+		{
+			in:   "v0.51.2",
+			want: "v0.51.2",
+		},
+		{
+			in:   "v0.22.8-0.20260510180701-a851625d3bf0",
+			want: "v0.22.8-0.20260510180701-a851625d3bf0",
+		},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			got := cleanBuildVersion(tc.in)
+			if got != tc.want {
+				t.Fatalf("cleanBuildVersion(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 
 	// buildVersion() itself must never return a value ending in +dirty.
