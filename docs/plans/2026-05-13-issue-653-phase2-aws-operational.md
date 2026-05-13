@@ -32,7 +32,7 @@
 |------|-------|-------|--------|
 | 1 | feat(#653): Phase 2 — strip AWS SDK from codebuild + EKS backends | Task 1, Task 2, Task 3, Task 4 | feat/issue-653-phase2-aws-operational |
 
-**Status:** Draft
+**Status:** Locked 2026-05-13T00:00:00Z
 
 ---
 
