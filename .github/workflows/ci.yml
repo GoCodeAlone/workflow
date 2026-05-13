@@ -400,41 +400,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Grep gate — no *.go file (repo-wide) may import fully-removed AWS service packages
-        # Scans the whole repo. service/eks is handled by the next step because
-        # platform/ and provider/ still legitimately import it pending Phase 3.
+        # Scans the whole repo. service/eks is allowed only in provider/ (ECS/EKS deploy pipeline).
+        # platform/providers/aws/ was deleted in Phase 3; provider/aws/ (deploy pipeline) is kept.
         run: |
           ! grep -rn --include="*.go" \
               --exclude-dir=_worktrees \
               --exclude-dir=.worktrees \
               --exclude-dir=.claude \
               --exclude="aws_absent_test.go" \
+              --exclude="nosql_dynamodb.go" \
               -e "aws-sdk-go-v2/service/apigatewayv2" \
               -e "aws-sdk-go-v2/service/applicationautoscaling" \
               -e "aws-sdk-go-v2/service/route53" \
               -e "aws-sdk-go-v2/service/codebuild" \
+              -e "aws-sdk-go-v2/service/ec2" \
+              -e "aws-sdk-go-v2/service/dynamodb" \
+              -e "aws-sdk-go-v2/service/elasticloadbalancingv2" \
+              -e "aws-sdk-go-v2/service/rds" \
+              -e "aws-sdk-go-v2/service/sqs" \
               .
-      - name: Grep gate — service/eks must only appear in its allowed locations (platform/ and provider/)
-        # service/eks is still used by platform/providers/aws/drivers/ and provider/aws/
-        # as part of the IaC provider layer (not migrated in Phase 2).  Any new import
-        # outside those two trees is a regression.  When Phase 3 removes those callers,
-        # promote service/eks into the step above and add it to the go.mod gate as well.
+      - name: Grep gate — service/eks must only appear in provider/ (deploy pipeline)
+        # platform/providers/aws/ was deleted in Phase 3; only provider/aws/ legitimately uses
+        # service/eks for ECS/EKS deploy pipeline. Any new import outside provider/ is a regression.
         run: |
           ! grep -rn --include="*.go" \
               --exclude-dir=_worktrees \
               --exclude-dir=.worktrees \
               --exclude-dir=.claude \
               --exclude="aws_absent_test.go" \
-              --exclude-dir="platform" \
               --exclude-dir="provider" \
               -e "aws-sdk-go-v2/service/eks" \
               .
       - name: Grep gate — go.mod files must not list removed AWS SDK packages
-        # service/eks is intentionally omitted from this go.mod gate: platform/ and provider/
-        # have legitimate callers that still import it (EKS cluster-type wiring that was not
-        # part of issue #653 Phase 2).  Once those callers are migrated, add service/eks here.
+        # service/eks is intentionally omitted from this go.mod gate: provider/aws/ (deploy
+        # pipeline) has a legitimate caller. ec2/dynamodb/elb/rds/sqs are added here because
+        # platform/providers/aws/ (their only consumer) was deleted in Phase 3.
         run: |
           ! grep -qH \
               -e "aws-sdk-go-v2/service/apigatewayv2" \
               -e "aws-sdk-go-v2/service/applicationautoscaling" \
               -e "aws-sdk-go-v2/service/route53" \
+              -e "aws-sdk-go-v2/service/ec2" \
+              -e "aws-sdk-go-v2/service/dynamodb" \
+              -e "aws-sdk-go-v2/service/elasticloadbalancingv2" \
+              -e "aws-sdk-go-v2/service/rds" \
+              -e "aws-sdk-go-v2/service/sqs" \
               go.mod example/go.mod
