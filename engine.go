@@ -496,6 +496,22 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		e.configHash = fmt.Sprintf("sha256:%x", h)
 	}
 
+	// Reorder cfg.Modules so each module's RegisterModule call follows every
+	// module it lists in DependsOn. Resolves the init-order race that bit
+	// external-plugin consumers in BMW PR #279 (workflow#663): the modular
+	// app.Init() pass walks modules in registration order, and external-plugin
+	// module factories do not implement DependencyAware, so without this sort
+	// a consumer module's Init() can call into a broker registry that its
+	// dependency module has not populated yet. Schema.ValidateConfig has
+	// already verified that every dependsOn target exists and that there are
+	// no empty-string entries; topoSortModules tolerates a missing target as
+	// a defensive no-op edge.
+	orderedModules, err := topoSortModules(cfg.Modules)
+	if err != nil {
+		return fmt.Errorf("module dependency ordering failed: %w", err)
+	}
+	cfg.Modules = orderedModules
+
 	// Register all modules from config
 	for _, modCfg := range cfg.Modules {
 		// Expand secret references in all string config values before module instantiation.
