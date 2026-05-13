@@ -15,6 +15,7 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/infra"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -390,13 +391,18 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		schema.WithSkipWorkflowTypeCheck(),
 		schema.WithSkipTriggerTypeCheck(),
 	}
-	if len(e.moduleFactories) > 0 {
-		extra := make([]string, 0, len(e.moduleFactories))
-		for t := range e.moduleFactories {
-			extra = append(extra, t)
-		}
-		valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
+	extra := make([]string, 0, len(e.moduleFactories)+len(legacydo.ModuleTypes))
+	for t := range e.moduleFactories {
+		extra = append(extra, t)
 	}
+	// Pass legacy DO module types through schema so the factory-loop guard
+	// (which emits legacydo.FormatModuleError) is the rejection point —
+	// schema rejection produces a generic error and would mask the
+	// actionable migration message (issue #617).
+	for t := range legacydo.ModuleTypes {
+		extra = append(extra, t)
+	}
+	valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
 	if err := schema.ValidateConfig(cfg, valOpts...); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
@@ -505,6 +511,10 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		// Look up the module factory from the registry (populated by LoadPlugin)
 		factory, exists := e.moduleFactories[modCfg.Type]
 		if !exists {
+			if legacydo.IsModuleType(modCfg.Type) {
+				_, iacLoaded := e.moduleFactories["iac.provider"]
+				return legacydo.FormatModuleError(modCfg.Type, modCfg.Name, iacLoaded)
+			}
 			return fmt.Errorf("unknown module type %q for module %q — ensure the required plugin is loaded", modCfg.Type, modCfg.Name)
 		}
 		e.logger.Debug("Using factory for module type: " + modCfg.Type)
@@ -560,6 +570,14 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	// Configure triggers (new section)
 	if err := e.configureTriggers(cfg.Triggers); err != nil {
 		return fmt.Errorf("failed to configure triggers: %w", err)
+	}
+
+	// Inform the step registry whether the iac.provider module factory is loaded.
+	// This lets StepRegistry.Create emit an actionable migration error for legacy
+	// DO step types instead of the generic "unknown step type" message (issue #617).
+	_, iacLoaded := e.moduleFactories["iac.provider"]
+	if r, ok := e.stepRegistry.(*module.StepRegistry); ok {
+		r.SetIaCProviderLoaded(iacLoaded)
 	}
 
 	// Configure pipelines (composable step-based workflows)
