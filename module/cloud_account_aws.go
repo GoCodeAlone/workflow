@@ -11,33 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
-// awsProviderFrom attempts to extract an AWSConfigProvider from a CloudCredentialProvider.
-// Returns (provider, true) if the provider implements AWSConfigProvider, or (nil, false) otherwise.
-func awsProviderFrom(p CloudCredentialProvider) (AWSConfigProvider, bool) {
-	if p == nil {
-		return nil, false
-	}
-	ap, ok := p.(AWSConfigProvider)
-	return ap, ok
-}
-
-// parseStringSlice parses a []string from any config value that may be []any or []string.
-func parseStringSlice(v any) []string {
-	switch s := v.(type) {
-	case []string:
-		return s
-	case []any:
-		result := make([]string, 0, len(s))
-		for _, item := range s {
-			if str, ok := item.(string); ok {
-				result = append(result, str)
-			}
-		}
-		return result
-	}
-	return nil
-}
-
 // AWSConfigProvider extends CloudCredentialProvider with AWS SDK config loading.
 // Platform modules that need to call AWS APIs type-assert their CloudCredentialProvider
 // to this interface to obtain a properly configured aws.Config.
