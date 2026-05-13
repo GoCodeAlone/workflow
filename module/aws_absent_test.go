@@ -30,8 +30,8 @@ func TestAWSServicePackagesAbsent(t *testing.T) {
 		if strings.HasSuffix(path, "aws_absent_test.go") {
 			return nil // skip self
 		}
-		f, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-		if parseErr != nil {
+		f, _ := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if f == nil {
 			return nil // skip unparseable files
 		}
 		for _, imp := range f.Imports {
