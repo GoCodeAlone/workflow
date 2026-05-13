@@ -127,8 +127,8 @@ func hasInfraModules(cfgFile string) bool {
 	return false
 }
 
-// hasPlatformModules reports whether cfgFile contains any modules with the legacy
-// platform.* type prefix.
+// hasPlatformModules reports whether cfgFile contains any modules with the
+// platform.* type prefix (e.g., platform.kubernetes, platform.ecs).
 func hasPlatformModules(cfgFile string) bool {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {

@@ -457,7 +457,7 @@ func secretGenKeys(cfg *config.WorkflowConfig) []string {
 }
 
 // parseInfraResourceSpecs reads an infra config (resolving imports:) and
-// returns ResourceSpecs for all infra.* and platform.* modules.
+// returns ResourceSpecs for all infra.* and platform.* (e.g., platform.kubernetes, platform.ecs) modules.
 func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
