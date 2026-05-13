@@ -151,8 +151,9 @@ func runInfraAuditKeysCmd(args []string) error {
 	if resourceType == "" {
 		return fmt.Errorf("audit-keys: --type is required")
 	}
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	ctx := context.Background()
 	providers, closers, err := auditKeysLoadProviders(ctx, fs, configFile, envName)

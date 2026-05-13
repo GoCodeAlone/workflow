@@ -67,8 +67,9 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	ctx := context.Background()
 	providers, closers, err := rotateAndPruneLoadProviders(ctx, fs, configFile, envName)

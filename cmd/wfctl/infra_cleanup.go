@@ -79,8 +79,9 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 	// default invariant (cleanup is destructive: never delete without --fix).
 	*dryRun = !*fix
 
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	ctx := context.Background()
 	providers, closers, err := cleanupLoadProviders(ctx, fs, configFile, envName)

@@ -248,8 +248,9 @@ func runInfraPlan(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 	format := &formatVal
 	output := &outputVal
 	showSensitive := showSensitiveVal
@@ -945,8 +946,9 @@ func runInfraImport(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
 		return err
@@ -1237,8 +1239,9 @@ func runInfraApply(args []string) error {
 
 	// Publish the --plugin-dir override so discoverAndLoadIaCProvider picks it
 	// up for this invocation. Reset after the command exits.
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {
@@ -1278,6 +1281,9 @@ func runInfraApply(args []string) error {
 		bootstrapArgs := []string{"--config", cfgFile}
 		if envName != "" {
 			bootstrapArgs = append(bootstrapArgs, "--env", envName)
+		}
+		if pluginDirFlag != "" {
+			bootstrapArgs = append(bootstrapArgs, "--plugin-dir", pluginDirFlag)
 		}
 		if err := runInfraBootstrap(bootstrapArgs); err != nil {
 			return fmt.Errorf("bootstrap: %w", err)
@@ -1541,8 +1547,9 @@ func runInfraStatus(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
@@ -1580,8 +1587,9 @@ func runInfraDrift(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
@@ -1623,8 +1631,9 @@ func runInfraDestroy(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {

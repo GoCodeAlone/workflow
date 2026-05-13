@@ -45,8 +45,9 @@ func runInfraAlign(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
 	currentInfraPluginDir = pluginDirFlag
-	defer func() { currentInfraPluginDir = "" }()
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	// Resolve config file
 	if opts.configFile == "" {

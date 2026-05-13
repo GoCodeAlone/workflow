@@ -153,8 +153,112 @@ func TestInfraPluginDirResetsAfterCommand(t *testing.T) {
 	}
 }
 
-// TestDiscoverAndLoadIaCProvider_UsesCurrentInfraPluginDir verifies that
-// discoverAndLoadIaCProvider reads currentInfraPluginDir before WFCTL_PLUGIN_DIR.
+// TestInfraRefreshOutputsAcceptsPluginDirFlag verifies -plugin-dir is accepted
+// by runInfraRefreshOutputs and sets currentInfraPluginDir before provider loading.
+func TestInfraRefreshOutputsAcceptsPluginDirFlag(t *testing.T) {
+	// refresh-outputs needs a state with at least one entry to reach
+	// provider loading. Build a config with an iac.provider + filesystem state
+	// backend and seed one resource entry via resolveStateStore/SaveResource so
+	// the refresh path actually dispatches to resolveIaCProvider.
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	cfgYAML := `name: test-app
+modules:
+  - name: myprovider
+    type: iac.provider
+    config:
+      provider: testprovider
+  - name: mystate
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: ` + stateDir + `
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write cfg: %v", err)
+	}
+	// Seed the state backend using the canonical store API so the record is
+	// in the format the filesystem backend actually reads.
+	store, err := resolveStateStore(cfgPath, "")
+	if err != nil {
+		t.Fatalf("resolveStateStore: %v", err)
+	}
+	if err := store.SaveResource(context.Background(), interfaces.ResourceState{
+		ID: "myvpc", Name: "myvpc", Type: "infra.vpc",
+		Provider: "testprovider", ProviderRef: "myprovider",
+		ProviderID: "vpc-123", ConfigHash: "abc",
+		AppliedConfig: map[string]any{}, Outputs: map[string]any{},
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	var got string
+	defer capturePluginDirAndFail(&got)()
+
+	err = runInfraRefreshOutputs([]string{"--config", cfgPath, "--plugin-dir", pluginDirSentinel})
+	if err == nil {
+		t.Fatal("expected error (sentinel provider load), got nil")
+	}
+	if strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("-plugin-dir not accepted by runInfraRefreshOutputs: %v", err)
+	}
+	if got != pluginDirSentinel {
+		t.Errorf("currentInfraPluginDir inside resolveIaCProvider = %q; want %q", got, pluginDirSentinel)
+	}
+}
+
+// TestInfraBootstrapAcceptsPluginDirFlag verifies -plugin-dir is accepted by
+// runInfraBootstrap. Bootstrap only reaches resolveIaCProvider when there are
+// provider_credential secrets to force-rotate; for flag-acceptance we just need
+// the parse to succeed (no "flag provided but not defined" error).
+func TestInfraBootstrapAcceptsPluginDirFlag(t *testing.T) {
+	cfgPath := minimalInfraYAMLWithState(t)
+
+	err := runInfraBootstrap([]string{"--config", cfgPath, "--plugin-dir", pluginDirSentinel})
+	// Bootstrap may succeed (no secrets to generate) or fail for config reasons,
+	// but must NOT fail with "flag provided but not defined".
+	if err != nil && strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("-plugin-dir not accepted by runInfraBootstrap: %v", err)
+	}
+}
+
+// minimalInfraYAMLWithState is like minimalInfraYAML but also adds an iac.state
+// module backed by a temp filesystem directory so commands like bootstrap that
+// require a state backend can proceed past config validation.
+func minimalInfraYAMLWithState(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o750); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	yaml := `name: test-app
+modules:
+  - name: myprovider
+    type: iac.provider
+    config:
+      provider: testprovider
+  - name: mystate
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: ` + stateDir + `
+  - name: myvpc
+    type: infra.vpc
+    config:
+      provider: myprovider
+      region: us-east-1
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write infra.yaml: %v", err)
+	}
+	return cfgPath
+}
 func TestDiscoverAndLoadIaCProvider_UsesCurrentInfraPluginDir(t *testing.T) {
 	// Set a custom sentinel dir (no plugins in it → specific error message).
 	customDir := t.TempDir()
