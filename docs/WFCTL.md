@@ -566,6 +566,8 @@ wfctl plugin conformance --artifact <tar.gz> [options]
 
 Local directory evidence is useful during development. Registry enforcement should use artifact evidence so `archiveSHA256` can be matched against the registry manifest download checksum.
 
+In artifact mode, `wfctl` discovers the plugin binary from the extracted archive automatically. It first tries the normalised install name (e.g. `digitalocean`), then the full manifest name (e.g. `workflow-plugin-digitalocean`), and finally scans the archive root for any other executable. This supports GoReleaser archives where the binary retains the full project name. Discovery runs the go-plugin handshake on each candidate; a candidate that does not perform the typed-IaC handshake is skipped with a diagnostic logged in the evidence `stderrTail`.
+
 ```bash
 wfctl plugin conformance --mode typed-iac --format json ./workflow-plugin-digitalocean
 wfctl plugin conformance --mode typed-iac --build-package ./cmd/plugin --format json ./workflow-plugin-digitalocean
