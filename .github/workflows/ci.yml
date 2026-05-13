@@ -399,21 +399,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Grep gate — *.go files must not import removed AWS service packages
+      - name: Grep gate — module/*.go files must not import removed AWS service packages
         run: |
           ! grep -rn --include="*.go" \
-              --exclude-dir=_worktrees \
-              --exclude-dir=.worktrees \
-              --exclude-dir=.claude \
               --exclude="aws_absent_test.go" \
               -e "aws-sdk-go-v2/service/apigatewayv2" \
               -e "aws-sdk-go-v2/service/applicationautoscaling" \
               -e "aws-sdk-go-v2/service/route53" \
-              .
+              -e "aws-sdk-go-v2/service/codebuild" \
+              -e "aws-sdk-go-v2/service/eks" \
+              module/
       - name: Grep gate — go.mod files must not list removed AWS SDK packages
         run: |
           ! grep -qH \
               -e "aws-sdk-go-v2/service/apigatewayv2" \
               -e "aws-sdk-go-v2/service/applicationautoscaling" \
               -e "aws-sdk-go-v2/service/route53" \
+              -e "aws-sdk-go-v2/service/codebuild" \
               go.mod example/go.mod

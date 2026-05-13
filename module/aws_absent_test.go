@@ -17,6 +17,8 @@ func TestAWSServicePackagesAbsent(t *testing.T) {
 		"aws-sdk-go-v2/service/apigatewayv2",
 		"aws-sdk-go-v2/service/applicationautoscaling",
 		"aws-sdk-go-v2/service/route53",
+		"aws-sdk-go-v2/service/codebuild",
+		"aws-sdk-go-v2/service/eks",
 	}
 
 	fset := token.NewFileSet()
