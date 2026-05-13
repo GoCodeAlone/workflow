@@ -67,7 +67,7 @@ This design proposes a **single-PR force-cutover** that deletes the legacy AWS I
 |------|------|
 | `module/api_gateway_test.go` | Remove 3 `TestAWSAPIGateway_*` test functions only; keep all 19 generic HTTP gateway tests |
 | `module/platform_dns_backends.go` | **Replace entire file**: delete route53Backend implementation; keep mockDNSBackend + add AWS route removed error stub |
-| `module/app_container.go` | **C-3 fix**: Move `ECSContainer` struct in from `platform_ecs.go` (3 plain fields, no SDK imports); remove `case *PlatformECS:` type switch branch; update default-case error message to reference `infra.container_service`. The `ecsAppBackend` struct + `buildECSManifests()` (pure Go, no SDK imports) stay in `app_container.go`. |
+| `module/app_container.go` | **C-3 fix**: Remove all ECS-specific code (`ECSAppManifests`, `ECSAppTaskDef`, `ECSAppServiceCfg`, `ecsAppBackend` + methods, `buildECSManifests()`); remove `case *PlatformECS:` type switch branch; update default-case error message. After edit: supports platform.kubernetes only; zero AWS SDK imports; compiles cleanly. |
 
 **New file (split from platform_dns_backends.go):**
 
@@ -308,10 +308,11 @@ Delete (14 full deletions):
 
 Partial edits (NOT deleted):
 - module/api_gateway_test.go: remove `TestAWSAPIGateway_Basic`, `TestAWSAPIGateway_SyncRoutesStub`, `TestAWSAPIGateway_SyncRoutesRequiresAPIID`; keep all 19 generic HTTP gateway tests.
-- **module/app_container.go** (C-3 fix): `app_container.go` references both `PlatformECS` (type switch at line 130) and `ECSContainer` (used in `ECSAppTaskDef.Containers` at lines 88, 639). `ECSContainer` is defined in `platform_ecs.go` (line 39) — deleting that file causes a compile failure.
-  - Move `ECSContainer` struct definition (3 plain fields, no SDK imports) from `platform_ecs.go` into `app_container.go`.
-  - Remove `case *PlatformECS: m.backend = &ecsAppBackend{}; m.platformType = "ecs"` from the `Init()` type switch (line 130). The `ecsAppBackend` struct + `buildECSManifests()` function in `app_container.go` have zero AWS SDK imports and can stay — they are pure Go struct manifest generators that work for any container runtime. The `platformType = "ecs"` value is still valid even without the real ECS module backing it.
-  - Update the default-case error message at line 134 to remove the `platform.ecs` reference: `"environment %q is not a platform.kubernetes module (got %T); platform.ecs was removed — see infra.container_service (workflow-plugin-aws)"`.
+- **module/app_container.go** (C-3 fix): `app_container.go` references both `PlatformECS` (type switch at line 130) and `ECSContainer` (used in `ECSAppTaskDef.Containers` at lines 88, 639). `ECSContainer` is defined in `platform_ecs.go` (line 39) — deleting that file causes a compile failure. Additionally, after removing `case *PlatformECS:`, these ECS-specific declarations in `app_container.go` become dead code: `ECSAppManifests`, `ECSAppTaskDef`, `ECSAppServiceCfg`, `ecsAppBackend`, `buildECSManifests()`, `ECSContainer` (if moved in). Dead code should be removed, not left in place.
+  - Remove all ECS-specific declarations from `app_container.go`: `ECSAppManifests`, `ECSAppTaskDef`, `ECSAppServiceCfg` (struct types at lines 77-97), `ecsAppBackend` struct + all its methods (lines 590-648), `buildECSManifests()` function (lines 628-648). `ECSContainer` is NOT moved in — it becomes dead along with the above and is deleted.
+  - Remove `case *PlatformECS: m.backend = &ecsAppBackend{}; m.platformType = "ecs"` from the `Init()` type switch (line 130).
+  - Update the default-case error message at line 134 to remove the `platform.ecs` reference: `"environment %q is not a platform.kubernetes module (got %T); platform.ecs was removed — use infra.container_service with workflow-plugin-aws"`.
+  - **Result**: `app_container.go` supports only `platform.kubernetes` backends post-deletion; ECS manifest generation is completely removed. No AWS SDK imports are introduced. `app_container.go` compiles cleanly.
 
 New: module/aws_absent_test.go (regression gate using filepath.WalkDir for the 3 freed service packages).
 
@@ -384,6 +385,6 @@ Add CI grep gate (two parts — mirrors #617's godo-banned gate):
 
 ### Cycle 2 (FAIL → revised) — 2026-05-13
 
-- **C-3** `module/app_container.go` has `case *PlatformECS:` type switch (line 130) and uses `ECSContainer` struct (lines 88, 639) which is defined in `platform_ecs.go`. Deleting `platform_ecs.go` causes compile failure in `app_container.go`. This file was not in the original modification list. → **Fixed**: T1 now includes `module/app_container.go` as a partial edit: move `ECSContainer` struct into `app_container.go`, remove `case *PlatformECS:` branch, update default error message. The `ecsAppBackend` + `buildECSManifests()` in `app_container.go` have zero SDK imports and are retained as manifest-generation helpers.
+- **C-3** `module/app_container.go` has `case *PlatformECS:` type switch (line 130) and uses `ECSContainer` struct (lines 88, 639) which is defined in `platform_ecs.go`. Deleting `platform_ecs.go` causes compile failure in `app_container.go`. This file was not in the original modification list. Additionally, after removing the `case *PlatformECS:` branch, `ECSAppManifests`, `ECSAppTaskDef`, `ECSAppServiceCfg`, `ecsAppBackend`, and `buildECSManifests()` all become dead code in `app_container.go`. → **Fixed**: T1 now includes `module/app_container.go` as a partial edit: remove ALL ECS-specific declarations (structs + methods + `buildECSManifests()`), remove `case *PlatformECS:` branch, update default error message. Result: `app_container.go` supports platform.kubernetes only; compiles cleanly; zero AWS SDK imports.
 
 ### Cycle 3 — pending
