@@ -261,7 +261,7 @@ This change affects build, package version, and runtime config loading. Rollback
 ## Open questions (none blocking — autonomous pipeline proceeds)
 
 - Should the migration error be a hard error or a warning + skip? **Decision (autonomous):** hard error. A silently-skipped module is worse than a failed load; goal #3 mandates actionable errors. Re-open if adversarial review pushes back.
-- Should `cloud_account_do.go` deletion include removing the registered resolver names (`digitalocean/static`, `digitalocean/env`, `digitalocean/api_token`) from any global registry to prevent dead config keys? **Decision (autonomous):** yes — the registry is purely additive via init(); deleting the file removes the init(). Add a test that the credential registry has zero `digitalocean/*` entries post-deletion.
+- Should `cloud_account_do.go` deletion include removing the registered resolver names (`digitalocean/static`, `digitalocean/env`, `digitalocean/api_token`) from any global registry to prevent dead config keys? **Decision (autonomous):** the registry is purely additive via `init()`; deleting the file removes the `init()` call, which is itself the evidence that no DO resolver is registered. No separate test is added — `credentialResolvers` is unexported (`module/cloud_credential_resolver.go:14`) and adding an exported accessor solely for a one-shot self-evidencing assertion is API-surface-for-test-only. Verified instead by the build (no godo importer remains) and by the migration error path (which fires when a `cloud.account` with `provider: digitalocean` is loaded but no DO resolver is registered).
 
 ## Adversarial review history
 
