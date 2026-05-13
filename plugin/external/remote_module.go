@@ -68,8 +68,11 @@ func (m *RemoteModule) Dependencies() []string {
 
 // SetDependencies records the yaml-level `dependsOn:` keys declared for this
 // module so modular's Init() walker can honour them. Called by the engine
-// from BuildFromConfig once per module, immediately after the factory
-// returns and before app.RegisterModule. See workflow#663.
+// from BuildFromConfig immediately after the factory returns and before
+// app.RegisterModule, but only when the module's `modCfg.DependsOn` is
+// non-empty AND the module satisfies `interface{ SetDependencies([]string) }`
+// — modules with no declared dependsOn are skipped so a constructor-time
+// default isn't clobbered with a SetDependencies(nil) call. See workflow#663.
 //
 // Defensive copy: although the engine already copies before calling, the
 // setter is exported and Dependencies() exposes the same backing array to
