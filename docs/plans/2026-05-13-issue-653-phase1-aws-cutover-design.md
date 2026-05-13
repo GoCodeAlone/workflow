@@ -67,6 +67,7 @@ This design proposes a **single-PR force-cutover** that deletes the legacy AWS I
 |------|------|
 | `module/api_gateway_test.go` | Remove 3 `TestAWSAPIGateway_*` test functions only; keep all 19 generic HTTP gateway tests |
 | `module/platform_dns_backends.go` | **Replace entire file**: delete route53Backend implementation; keep mockDNSBackend + add AWS route removed error stub |
+| `module/app_container.go` | **C-3 fix**: Move `ECSContainer` struct in from `platform_ecs.go` (3 plain fields, no SDK imports); remove `case *PlatformECS:` type switch branch; update default-case error message to reference `infra.container_service`. The `ecsAppBackend` struct + `buildECSManifests()` (pure Go, no SDK imports) stay in `app_container.go`. |
 
 **New file (split from platform_dns_backends.go):**
 
@@ -296,7 +297,7 @@ Keep Route53 backend file but have it panic/error at call time.
 
 Single PR, 6 tasks:
 
-**T1 — Delete 14 files; partially edit api_gateway_test.go; add regression gate**
+**T1 — Delete 14 files; partially edit api_gateway_test.go and app_container.go; add regression gate**
 Delete (14 full deletions):
 - module/platform_ecs.go, module/platform_ecs_test.go, module/pipeline_step_ecs.go
 - module/platform_apigateway.go, module/platform_apigateway_test.go, module/pipeline_step_apigateway.go
@@ -305,8 +306,12 @@ Delete (14 full deletions):
 - module/platform_networking.go, module/platform_networking_test.go, module/pipeline_step_networking.go
 - module/platform_aws_integration_test.go
 
-Partial edit (NOT deleted — keep 19 generic HTTP gateway tests, remove 3):
-- module/api_gateway_test.go: remove `TestAWSAPIGateway_Basic`, `TestAWSAPIGateway_SyncRoutesStub`, `TestAWSAPIGateway_SyncRoutesRequiresAPIID`
+Partial edits (NOT deleted):
+- module/api_gateway_test.go: remove `TestAWSAPIGateway_Basic`, `TestAWSAPIGateway_SyncRoutesStub`, `TestAWSAPIGateway_SyncRoutesRequiresAPIID`; keep all 19 generic HTTP gateway tests.
+- **module/app_container.go** (C-3 fix): `app_container.go` references both `PlatformECS` (type switch at line 130) and `ECSContainer` (used in `ECSAppTaskDef.Containers` at lines 88, 639). `ECSContainer` is defined in `platform_ecs.go` (line 39) — deleting that file causes a compile failure.
+  - Move `ECSContainer` struct definition (3 plain fields, no SDK imports) from `platform_ecs.go` into `app_container.go`.
+  - Remove `case *PlatformECS: m.backend = &ecsAppBackend{}; m.platformType = "ecs"` from the `Init()` type switch (line 130). The `ecsAppBackend` struct + `buildECSManifests()` function in `app_container.go` have zero AWS SDK imports and can stay — they are pure Go struct manifest generators that work for any container runtime. The `platformType = "ecs"` value is still valid even without the real ECS module backing it.
+  - Update the default-case error message at line 134 to remove the `platform.ecs` reference: `"environment %q is not a platform.kubernetes module (got %T); platform.ecs was removed — see infra.container_service (workflow-plugin-aws)"`.
 
 New: module/aws_absent_test.go (regression gate using filepath.WalkDir for the 3 freed service packages).
 
@@ -377,4 +382,8 @@ Add CI grep gate (two parts — mirrors #617's godo-banned gate):
 - **m-2** awsRoute53ErrorBackend vs simple unregister not justified → **fixed**: T2 now documents the rejected alternative and justification.
 - **m-3** DOCUMENTATION.md DNS step rows not called out as staying → **fixed**: T3 explicitly says keep platform.dns row + step.dns_* rows.
 
-### Cycle 2 — pending
+### Cycle 2 (FAIL → revised) — 2026-05-13
+
+- **C-3** `module/app_container.go` has `case *PlatformECS:` type switch (line 130) and uses `ECSContainer` struct (lines 88, 639) which is defined in `platform_ecs.go`. Deleting `platform_ecs.go` causes compile failure in `app_container.go`. This file was not in the original modification list. → **Fixed**: T1 now includes `module/app_container.go` as a partial edit: move `ECSContainer` struct into `app_container.go`, remove `case *PlatformECS:` branch, update default error message. The `ecsAppBackend` + `buildECSManifests()` in `app_container.go` have zero SDK imports and are retained as manifest-generation helpers.
+
+### Cycle 3 — pending
