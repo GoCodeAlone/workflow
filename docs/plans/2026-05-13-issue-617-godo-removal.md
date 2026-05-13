@@ -537,6 +537,28 @@ if !exists {
 }
 ```
 
+**Schema-validation ordering caveat (critical):** `schema.ValidateConfig(cfg, valOpts...)` at `engine.go:400` runs BEFORE the factory loop at `:506`. After T2 removes the five legacy DO types from `schema/schema.go`'s allow-list, schema validation will reject the config with the generic `"unknown module type"` schema error before the factory guard ever runs — making `legacydo.FormatModuleError` unreachable for module types. To fix, **add the five legacy DO module types to the `WithExtraModuleTypes` call** so schema validation passes them through and the factory-lookup guard becomes the rejection point:
+
+```go
+// Modify engine.go around line 393-398:
+if len(e.moduleFactories) > 0 || true {  // always add extras for legacy DO types
+    extra := make([]string, 0, len(e.moduleFactories)+len(legacydo.ModuleTypes))
+    for t := range e.moduleFactories {
+        extra = append(extra, t)
+    }
+    // Pass legacy DO module types through schema so the factory-loop guard
+    // (which emits legacydo.FormatModuleError) is the rejection point —
+    // schema rejection produces a generic error and would mask the
+    // actionable migration message (issue #617).
+    for t := range legacydo.ModuleTypes {
+        extra = append(extra, t)
+    }
+    valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
+}
+```
+
+The same applies to step types — schema validation runs `WithExtraStepTypes` too. Inspect the existing wiring around `engine.go:380-400` and add an equivalent loop appending `legacydo.StepTypes` keys to the step-types extras. The exact placement depends on whether `WithExtraStepTypes` is already called; if not, add the call.
+
 (Add `"github.com/GoCodeAlone/workflow/internal/legacydo"` to engine.go imports.)
 
 For the step path, **avoid the package-level global** that cycle 4 reviewer flagged as a logic-race risk: instead, attach the `iacProviderLoaded` boolean to the `StepRegistry` as a field set by the engine before pipeline construction. Modify `module/pipeline_step_registry.go`:
@@ -570,14 +592,18 @@ func (r *StepRegistry) Create(stepType, name string, config map[string]any, app 
 }
 ```
 
-Wire it in `engine.go` `BuildFromConfig` just before step construction. The engine already has a `stepRegistry *module.StepRegistry` field (verify; if it constructs a fresh one each call, this hook moves to that constructor). Pattern:
+Wire it in `engine.go` `BuildFromConfig` just before step construction. The engine field is `stepRegistry interfaces.StepRegistrar` at `engine.go:73`; `SetIaCProviderLoaded` is a method on `*module.StepRegistry`, NOT on the `StepRegistrar` interface. Use the same type-assertion pattern already used elsewhere in `engine.go:163,216`:
 
 ```go
 _, iacLoaded := e.moduleFactories["iac.provider"]
-e.stepRegistry.SetIaCProviderLoaded(iacLoaded)
+if r, ok := e.stepRegistry.(*module.StepRegistry); ok {
+    r.SetIaCProviderLoaded(iacLoaded)
+}
 ```
 
-If the engine does not already retain a `stepRegistry` field, add one to `StdEngine` and route step creation through it. **No package-level global, no atomic.Bool.**
+(Do NOT extend the `StepRegistrar` interface — the method is private wiring between engine and the concrete registry; widening the interface adds a method burden to every alternate `StepRegistrar` implementor downstream for no benefit. The type-assertion pattern matches the precedent.)
+
+**No package-level global, no atomic.Bool.**
 
 (Add `"github.com/GoCodeAlone/workflow/internal/legacydo"` to pipeline_step_registry.go imports.)
 
@@ -729,13 +755,12 @@ EOF
 Create `modernize/legacy_do_rule_test.go`:
 
 ```go
-package modernize_test
+package modernize
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/GoCodeAlone/workflow/modernize"
 	"gopkg.in/yaml.v3"
 )
 
@@ -777,7 +802,7 @@ func TestLegacyDORule_Rewrites(t *testing.T) {
 			wantDrop: "step.do_deploy",
 		},
 	}
-	rule := modernize.LegacyDORule()
+	rule := legacyDORule()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var root yaml.Node
@@ -824,7 +849,7 @@ func TestLegacyDORule_GapTypesFlaggedNotRewritten(t *testing.T) {
 			if err := yaml.Unmarshal([]byte(tc.yamlIn), &root); err != nil {
 				t.Fatalf("unmarshal: %v", err)
 			}
-			rule := modernize.LegacyDORule()
+			rule := legacyDORule()
 			findings := rule.Check(&root, []byte(tc.yamlIn))
 			if len(findings) == 0 {
 				t.Fatalf("expected a finding for %q", tc.legacy)
@@ -845,7 +870,7 @@ func TestLegacyDORule_GapTypesFlaggedNotRewritten(t *testing.T) {
 **Step 2: Run tests to verify they fail**
 
 Run: `go test ./modernize/... -run TestLegacyDORule -v`
-Expected: FAIL with "undefined: modernize.LegacyDORule".
+Expected: FAIL with "undefined: legacyDORule".
 
 **Step 3: Implement the rule**
 
@@ -884,7 +909,7 @@ import (
 // 3 of 5 steps (step.do_deploy/status/destroy). The GAP types (do_networking
 // splits 1→2; step.do_logs/scale have no pipeline-step successor) are flagged
 // but not modified.
-func LegacyDORule() Rule {
+func legacyDORule() Rule {
 	moduleMap := map[string]string{
 		"platform.do_app":        "infra.container_service",
 		"platform.do_database":   "infra.database",
@@ -1005,7 +1030,7 @@ return []Rule{
     emptyRoutesRule(),
     camelCaseConfigRule(),
     requestParseConfigRule(),
-    LegacyDORule(),     // <-- ADD
+    legacyDORule(),     // <-- ADD
 }
 ```
 
@@ -1334,7 +1359,7 @@ T4 is the only task with the runtime-launch-validation trigger (version-pin upda
 ## End-of-PR checklist (run before opening PR)
 
 1. `go test ./...` — all green.
-1a. `go test -race ./...` — all green (mandatory because T3 introduces a package-level atomic and the module package has parallel tests).
+1a. `go test -race ./...` — all green (the `module` package has parallel tests; while T3's per-registry instance field eliminates the global, `-race` is still mandatory to catch any future regression and to verify the engine→stepRegistry hook is goroutine-safe).
 2. `! grep -rn --include="*.go" --exclude-dir=_worktrees --exclude-dir=.worktrees --exclude-dir=.claude "digitalocean/godo" .` exits 0.
 3. `! grep -qH "digitalocean/godo" go.mod example/go.mod` exits 0.
 4. `wfctl modernize --apply modernize/testdata/legacy-do-config.yaml` (fixture committed in T5) rewrites legacy types — verify against `modernize/testdata/legacy-do-config.expected.yaml`.
@@ -1348,6 +1373,14 @@ T4 is the only task with the runtime-launch-validation trigger (version-pin upda
 ---
 
 ## Adversarial review history (plan phase)
+
+### Cycle 5 (FAIL) — 2026-05-13
+
+- **C-1** `schema.ValidateConfig` at `engine.go:400` fires BEFORE the factory loop at `:506` — removing the 5 legacy module types from `schema/schema.go`'s allow-list (T2) would cause the generic schema error to be returned ahead of the actionable `legacydo.FormatModuleError`, making the migration message unreachable → **fixed**: T3 wiring now adds the 5 legacy DO module types (and 5 step types) to `schema.WithExtraModuleTypes` / `WithExtraStepTypes` so schema passes them through to the factory guard, which is the real rejection point.
+- **I-1** Plan wrote `e.stepRegistry.SetIaCProviderLoaded(iacLoaded)` but `e.stepRegistry` is `interfaces.StepRegistrar` (no such method on the interface) → would not compile → **fixed**: type-assertion pattern from `engine.go:163,216`: `if r, ok := e.stepRegistry.(*module.StepRegistry); ok { r.SetIaCProviderLoaded(iacLoaded) }`. Interface deliberately NOT widened — that would add a method burden to every downstream `StepRegistrar` for zero benefit.
+- **I-2** End-of-PR checklist 1a still cited "T3 introduces a package-level atomic" — stale from cycle-3's pre-instance-field design → **fixed**.
+- **m-1** `LegacyDORule()` was exported but all peer rule constructors (`hyphenStepsRule`, `dbQueryModeRule`, …) are unexported, and existing tests use `package modernize` (not `_test`) → **fixed**: renamed to `legacyDORule`; test file now uses internal `package modernize`; external `modernize` import dropped from the test.
+- **Cycle 1/2/3/4 plan-phase fixes verified to hold.**
 
 ### Cycle 4 (FAIL) — 2026-05-13
 
