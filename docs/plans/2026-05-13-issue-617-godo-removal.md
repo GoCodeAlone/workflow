@@ -1,0 +1,1215 @@
+# Remove godo from workflow core (issue #617) Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+**Goal:** Force-cutover delete the six godo-importing legacy DigitalOcean IaC modules + five legacy pipeline steps from workflow core, remove `github.com/digitalocean/godo` from `go.mod` (root + `example/`), and add actionable load-time migration errors so user configs that still reference the legacy types get a clear pointer to `workflow-plugin-digitalocean` v0.12.0+ and the `infra.*` IaC type system.
+
+**Architecture:** Single PR. Pure deletion of 12 files + edits to 10 registration sites + new migration-error guards in `engine.go` (module path) and `module/pipeline_step_registry.go` (step path). Plugin-loaded detection via a single `_, ok := e.moduleFactories["iac.provider"]` lookup. CI gate: `!`-prefixed grep over `*.go` and `go.mod` files (root + `example/`) to prevent regression. `wfctl modernize` rules auto-rewrite legacy YAML.
+
+**Tech Stack:** Go 1.26, `github.com/GoCodeAlone/workflow` engine, `cmd/wfctl`, `modernize/` package, GitHub Actions CI.
+
+**Base branch:** `main`
+
+---
+
+## Scope Manifest
+
+**PR Count:** 1
+**Tasks:** 5
+**Estimated Lines of Change:** ~3206 deleted + ~400 added + ~80 edited = net ~−2700 (informational; not enforced)
+
+**Out of scope:**
+- AWS SDK audit (separate follow-up issue filed at end of T5, addresses `iam/`, `plugin/rbac/aws.go`, `artifact/s3.go`, `platform/providers/aws/` IaC drivers).
+- New plugin-side step types (`step.iac_logs`, `step.iac_scale`) — tracked as follow-up issues in `workflow-plugin-digitalocean` (filed in T5; out of scope for this plan).
+- Changes to `module/iac_state_spaces.go` — it uses `aws-sdk-go-v2` (not godo) for S3-compat blob access.
+- Downstream consumer migration PRs (`buymywishlist-phase3`, `workflow-scenarios` scenarios 42/51) — tracked as follow-ups; the engine cutover PR ships independently with migration errors as the user-facing path.
+- Compatibility shim, build tag fence, deprecation period — explicitly rejected in design.
+
+**PR Grouping:**
+
+| PR # | Title | Tasks | Branch |
+|------|-------|-------|--------|
+| 1 | feat: remove godo from core (issue #617) | Task 1, Task 2, Task 3, Task 4, Task 5 | `feat/issue-617-godo-removal` |
+
+**Status:** Draft
+
+---
+
+## Task 1: Delete legacy DO module + step files
+
+**Files:**
+- Delete: `module/platform_do_app.go`
+- Delete: `module/platform_do_app_test.go`
+- Delete: `module/platform_do_database.go`
+- Delete: `module/platform_do_database_test.go`
+- Delete: `module/platform_do_dns.go`
+- Delete: `module/platform_do_dns_test.go`
+- Delete: `module/platform_do_networking.go`
+- Delete: `module/platform_do_networking_test.go`
+- Delete: `module/platform_doks.go`
+- Delete: `module/platform_doks_test.go`
+- Delete: `module/cloud_account_do.go`
+- Delete: `module/pipeline_step_do.go`
+- Test: `module/godo_absent_test.go` (new — asserts the godo import is gone from the package)
+
+**Step 1: Write the failing test**
+
+Create `module/godo_absent_test.go`:
+
+```go
+package module_test
+
+import (
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// TestGodoNotImported_InModulePackage asserts no file under module/ imports
+// github.com/digitalocean/godo. This is the regression gate for issue #617.
+func TestGodoNotImported_InModulePackage(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	fset := token.NewFileSet()
+	for _, f := range files {
+		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", f, err)
+		}
+		for _, imp := range af.Imports {
+			if strings.Trim(imp.Path.Value, `"`) == "github.com/digitalocean/godo" {
+				t.Errorf("%s imports github.com/digitalocean/godo (issue #617 — moved to workflow-plugin-digitalocean)", f)
+			}
+		}
+	}
+}
+```
+
+**Step 2: Run test to verify it fails (godo files still present)**
+
+Run: `go test ./module -run TestGodoNotImported_InModulePackage -v`
+Expected: FAIL with 6 lines naming each godo-importing file.
+
+**Step 3: Delete the 12 legacy files**
+
+```bash
+rm module/platform_do_app.go module/platform_do_app_test.go \
+   module/platform_do_database.go module/platform_do_database_test.go \
+   module/platform_do_dns.go module/platform_do_dns_test.go \
+   module/platform_do_networking.go module/platform_do_networking_test.go \
+   module/platform_doks.go module/platform_doks_test.go \
+   module/cloud_account_do.go module/pipeline_step_do.go
+```
+
+**Step 4: Verify package still parses (will fail at link time due to registrations — that is T2's problem)**
+
+Run: `go vet ./module/...`
+Expected: clean (or fails only on undefined symbols *outside* the `module` package, e.g., in `plugins/platform/`). If anything inside `module/` fails to compile, the deletion missed a sibling file — investigate.
+
+**Step 5: Run T1 regression test**
+
+Run: `go test ./module -run TestGodoNotImported_InModulePackage -v`
+Expected: PASS.
+
+**Step 6: Commit**
+
+```bash
+git add module/godo_absent_test.go module/
+git commit -m "$(cat <<'EOF'
+feat(#617): delete legacy DO modules (godo importers)
+
+Removes 12 files / ~3206 LOC. Registration sites cleaned in T2.
+
+* platform_do_app.go + test
+* platform_do_database.go + test
+* platform_do_dns.go + test
+* platform_do_networking.go + test
+* platform_doks.go + test
+* cloud_account_do.go (DO credential resolvers + doClient())
+* pipeline_step_do.go (5 DO App Platform step types)
+
+Adds godo_absent_test.go as a regression gate inside module/.
+EOF
+)"
+```
+
+**Rollback:** `git revert <T1-commit-sha>` restores the 12 files; combined with T2/T3 revert restores all registrations and migration errors.
+
+---
+
+## Task 2: Strip registration sites and remap detection hooks
+
+**Files:**
+- Modify: `plugins/platform/plugin.go` (drop 5 module factories + 5 step factories + 10 strings from `ModuleTypes` / `StepTypes` slices)
+- Modify: `plugins/platform/plugin_test.go` (drop 10 string-presence assertions)
+- Modify: `schema/schema.go` (drop 5 module-type entries + 5 step-type entries from the registry slices)
+- Modify: `schema/module_schema.go` (drop 5 module schemas + 5 step descriptions)
+- Modify: `schema/step_schema_builtins.go` (drop 5 `Register(&StepSchema{Type: "step.do_*"})` calls)
+- Modify: `cmd/wfctl/type_registry.go` (drop 5 module entries + 5 step entries from the type-registry map)
+- Modify: `cmd/wfctl/infra.go:577` — change `return t == "infra.container_service" || t == "platform.do_app"` to `return t == "infra.container_service"`.
+- Modify: `cmd/wfctl/deploy_providers.go:419-424` — drop the `"platform.do_app"` line from the `deployTargetTypes` slice.
+- Modify: `cmd/wfctl/ci_run_dryrun.go:178-183` — drop the `"platform.do_app"` line from the `deployTargetTypes` slice.
+- Modify: `module/multi_region.go:123` — replace the error message text (see Step 3).
+- Modify: `cmd/wfctl/infra_apply_test.go:1990` — the negative-test YAML fixture uses `type: platform.do_app`. Replace with `type: example.legacy_unknown` (a synthetic type that will never be registered) so the test's intent (negative coverage for unknown types) is preserved without referencing a removed type.
+- Test: `cmd/wfctl/legacy_do_types_removed_test.go` (new — asserts the type registry no longer contains the legacy keys)
+
+**Step 1: Write the failing test**
+
+Create `cmd/wfctl/legacy_do_types_removed_test.go`:
+
+```go
+package main
+
+import "testing"
+
+// TestLegacyDOTypesAbsent_FromTypeRegistry locks the post-cutover state of
+// cmd/wfctl/type_registry.go for issue #617. If any legacy type leaks back in,
+// this test fires and the CI gate fires.
+func TestLegacyDOTypesAbsent_FromTypeRegistry(t *testing.T) {
+	r := buildTypeRegistry()
+	legacy := []string{
+		"platform.do_app", "platform.do_database", "platform.do_dns",
+		"platform.do_networking", "platform.doks",
+		"step.do_deploy", "step.do_status", "step.do_logs",
+		"step.do_scale", "step.do_destroy",
+	}
+	for _, tname := range legacy {
+		if _, ok := r[tname]; ok {
+			t.Errorf("type registry still contains legacy DO type %q (issue #617)", tname)
+		}
+	}
+}
+```
+
+(If the existing `buildTypeRegistry` symbol differs, use the actual constructor. Verify by grep before writing the assertion target.)
+
+**Step 2: Run test to verify it fails**
+
+Run: `go test ./cmd/wfctl -run TestLegacyDOTypesAbsent_FromTypeRegistry -v`
+Expected: FAIL with 10 lines naming each legacy type still in the registry.
+
+**Step 3: Apply the registration deletions and detection-hook remappings**
+
+For each file in the Files list, perform the listed deletion. The `module/multi_region.go:123` rewrite:
+
+```go
+// Before:
+return fmt.Errorf("platform.region %q: provider %q is not yet supported; use platform.doks modules per region for DigitalOcean multi-region deployments", m.name, providerType)
+
+// After:
+return fmt.Errorf("platform.region %q: provider %q is not yet supported; for DigitalOcean multi-region, use infra.k8s_cluster modules per region with provider: digitalocean (requires workflow-plugin-digitalocean)", m.name, providerType)
+```
+
+**Step 4: Run tests**
+
+Run: `go test ./cmd/wfctl -run TestLegacyDOTypesAbsent_FromTypeRegistry -v`
+Expected: PASS.
+
+Run: `go build ./...`
+Expected: clean.
+
+Run: `go test ./plugins/platform/... ./schema/... ./module/... ./cmd/wfctl/...`
+Expected: PASS — any test that asserted the presence of a legacy `platform.do_*` or `step.do_*` was updated in this task to assert its absence.
+
+**Step 5: Commit**
+
+```bash
+git add plugins/ schema/ cmd/wfctl/ module/multi_region.go cmd/wfctl/legacy_do_types_removed_test.go
+git commit -m "$(cat <<'EOF'
+feat(#617): strip DO registration sites + remap wfctl detection hooks
+
+* plugins/platform: drop 5 module + 5 step factories.
+* schema/*: drop 10 entries from registries and schema descriptions.
+* cmd/wfctl/type_registry.go: drop 10 type entries.
+* cmd/wfctl/{infra.go,deploy_providers.go,ci_run_dryrun.go}: remap
+  isContainerType and deployTargetTypes to infra.container_service only.
+* module/multi_region.go: rewrite DOKS multi-region hint to point at
+  infra.k8s_cluster + workflow-plugin-digitalocean.
+* cmd/wfctl/infra_apply_test.go: replace platform.do_app negative-test
+  fixture with example.legacy_unknown synthetic type.
+
+Adds legacy_do_types_removed_test.go as a registry-absence regression gate.
+EOF
+)"
+```
+
+**Rollback:** `git revert <T2-commit-sha>` restores all 10 registration sites; the package will fail to compile until T1 is also reverted (the factories reference deleted symbols).
+
+---
+
+## Task 3: Add load-time migration error guards (module + step)
+
+**Files:**
+- Modify: `engine.go:508` — replace the single `unknown module type` error with a legacy-DO-aware branch (see Step 3).
+- Modify: `module/pipeline_step_registry.go:35` — replace the single `unknown step type` error with the same legacy-DO-aware branch for step types.
+- Create: `module/legacy_do_migration.go` — small package-internal helper holding the legacy-type lookup table and the formatted message builders. Shared between the engine module-path and the step-registry step-path.
+- Test: `engine_legacy_do_migration_test.go` (new — covers all 5 module types × {plugin loaded, plugin not loaded})
+- Test: `module/pipeline_step_legacy_do_migration_test.go` (new — covers all 5 step types × {plugin loaded, plugin not loaded})
+
+**Step 1: Write the failing tests**
+
+Create `engine_legacy_do_migration_test.go` at repo root:
+
+```go
+package workflow_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/GoCodeAlone/workflow"
+	"github.com/GoCodeAlone/workflow/config"
+)
+
+func TestLegacyDOModuleError_PluginNotLoaded(t *testing.T) {
+	cases := []struct{ legacyType, hint string }{
+		{"platform.do_app", "infra.container_service"},
+		{"platform.do_database", "infra.database"},
+		{"platform.do_dns", "infra.dns"},
+		{"platform.do_networking", "infra.vpc"},
+		{"platform.doks", "infra.k8s_cluster"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.legacyType, func(t *testing.T) {
+			e := workflow.NewEngine()
+			cfg := &config.WorkflowConfig{Modules: []config.ModuleConfig{{Name: "x", Type: tc.legacyType, Config: map[string]any{}}}}
+			err := e.BuildFromConfig(cfg)
+			if err == nil {
+				t.Fatalf("expected error for legacy type %q", tc.legacyType)
+			}
+			msg := err.Error()
+			for _, want := range []string{
+				"removed from workflow core",
+				"workflow-plugin-digitalocean",
+				"Install workflow-plugin-digitalocean",
+				tc.hint,
+			} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error for %q missing %q; got: %s", tc.legacyType, want, msg)
+				}
+			}
+		})
+	}
+}
+
+func TestLegacyDOModuleError_PluginLoaded(t *testing.T) {
+	e := workflow.NewEngine()
+	// Register a stub iac.provider factory to simulate workflow-plugin-digitalocean being loaded.
+	e.RegisterModuleFactory("iac.provider", func(name string, cfg map[string]any) interface{} { return nil })
+
+	cfg := &config.WorkflowConfig{Modules: []config.ModuleConfig{{Name: "x", Type: "platform.do_app", Config: map[string]any{}}}}
+	err := e.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "already loaded") {
+		t.Errorf("plugin-loaded branch must say 'already loaded'; got: %s", msg)
+	}
+	if strings.Contains(msg, "Install workflow-plugin-digitalocean") {
+		t.Errorf("plugin-loaded branch must NOT instruct install; got: %s", msg)
+	}
+}
+```
+
+Create `module/pipeline_step_legacy_do_migration_test.go`:
+
+```go
+package module_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/GoCodeAlone/workflow/module"
+)
+
+func TestLegacyDOStepError_PluginNotLoaded(t *testing.T) {
+	// step.do_logs / step.do_scale have GAP messages; the others map 1:1 to step.iac_*.
+	cases := []struct{ step, mustContain string }{
+		{"step.do_deploy", "step.iac_apply"},
+		{"step.do_status", "step.iac_status"},
+		{"step.do_destroy", "step.iac_destroy"},
+		{"step.do_logs", "wfctl infra logs"},
+		{"step.do_scale", "instance_count"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.step, func(t *testing.T) {
+			_, err := module.CreateStep(tc.step, "x", map[string]any{}, nil)
+			if err == nil {
+				t.Fatalf("expected error for %q", tc.step)
+			}
+			msg := err.Error()
+			for _, want := range []string{
+				"removed from workflow core",
+				"workflow-plugin-digitalocean",
+				"Install workflow-plugin-digitalocean",
+				tc.mustContain,
+			} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error for %q missing %q; got: %s", tc.step, want, msg)
+				}
+			}
+		})
+	}
+}
+```
+
+(Confirm the `module.CreateStep` symbol — if the actual constructor name differs, use it.)
+
+**Step 2: Run tests to verify they fail**
+
+Run: `go test ./... -run 'TestLegacyDO(Module|Step)Error' -v`
+Expected: FAIL — the engine currently emits the generic `"unknown module type %q for module %q"` and `"unknown step type: %s"` messages; neither mentions godo / workflow-plugin-digitalocean / infra.*.
+
+**Step 3: Implement the migration helper and wire it into both error paths**
+
+Create `module/legacy_do_migration.go`:
+
+```go
+package module
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// LegacyDOModuleTypes maps each removed legacy DigitalOcean module type to its
+// infra.* IaC successor (issue #617).
+var LegacyDOModuleTypes = map[string]string{
+	"platform.do_app":        "infra.container_service",
+	"platform.do_database":   "infra.database",
+	"platform.do_dns":        "infra.dns",
+	"platform.do_networking": "infra.vpc + infra.firewall",
+	"platform.doks":          "infra.k8s_cluster",
+}
+
+// LegacyDOStepTypes maps each removed legacy DigitalOcean step type to its
+// successor or to a workaround when no 1:1 successor exists.
+var LegacyDOStepTypes = map[string]string{
+	"step.do_deploy":  "step.iac_apply (against an infra.container_service module)",
+	"step.do_status":  "step.iac_status (against an infra.container_service module)",
+	"step.do_destroy": "step.iac_destroy (against an infra.container_service module)",
+	"step.do_logs":    "no direct pipeline-step equivalent; use `wfctl infra logs` ad-hoc, or rely on the DO plugin's Troubleshoot hook on step.iac_apply failure",
+	"step.do_scale":   "no direct pipeline-step equivalent; update instance_count in the infra.container_service module config and re-run step.iac_apply",
+}
+
+// IsLegacyDOModuleType reports whether t is a removed legacy DO module type.
+func IsLegacyDOModuleType(t string) bool { _, ok := LegacyDOModuleTypes[t]; return ok }
+
+// IsLegacyDOStepType reports whether t is a removed legacy DO step type.
+func IsLegacyDOStepType(t string) bool { _, ok := LegacyDOStepTypes[t]; return ok }
+
+// FormatLegacyDOModuleError builds the actionable migration error for a legacy
+// DO module type. iacProviderLoaded indicates whether the iac.provider factory
+// is registered in the engine — used to branch between the "install plugin"
+// and "config-only issue" messages.
+func FormatLegacyDOModuleError(legacyType, moduleName string, iacProviderLoaded bool) error {
+	successor, ok := LegacyDOModuleTypes[legacyType]
+	if !ok {
+		return nil
+	}
+	pluginLine := "Install workflow-plugin-digitalocean: https://github.com/GoCodeAlone/workflow-plugin-digitalocean"
+	if iacProviderLoaded {
+		pluginLine = "workflow-plugin-digitalocean is already loaded; your config still references the legacy module name."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "unsupported legacy module type %q (module %q): this type was removed from workflow core in v0.52.0 — DigitalOcean IaC moved to workflow-plugin-digitalocean.\n\n", legacyType, moduleName)
+	b.WriteString(pluginLine)
+	b.WriteString("\n\nMigrate this module to: ")
+	b.WriteString(successor)
+	b.WriteString(" (provider: digitalocean)\n\nFull mapping:\n")
+	keys := make([]string, 0, len(LegacyDOModuleTypes))
+	for k := range LegacyDOModuleTypes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fmt.Fprintf(&b, "  %s → %s\n", k, LegacyDOModuleTypes[k])
+	}
+	b.WriteString("\nSee docs/migrations/v0.52.0-godo-removal.md")
+	return fmt.Errorf("%s", b.String())
+}
+
+// FormatLegacyDOStepError builds the actionable migration error for a legacy
+// DO step type.
+func FormatLegacyDOStepError(legacyType string, iacProviderLoaded bool) error {
+	successor, ok := LegacyDOStepTypes[legacyType]
+	if !ok {
+		return nil
+	}
+	pluginLine := "Install workflow-plugin-digitalocean: https://github.com/GoCodeAlone/workflow-plugin-digitalocean"
+	if iacProviderLoaded {
+		pluginLine = "workflow-plugin-digitalocean is already loaded; your config still references the legacy step name."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "unsupported legacy step type %q: this step was removed from workflow core in v0.52.0 — DigitalOcean IaC moved to workflow-plugin-digitalocean.\n\n", legacyType)
+	b.WriteString(pluginLine)
+	b.WriteString("\n\nMigrate this step to: ")
+	b.WriteString(successor)
+	b.WriteString("\n\nSee docs/migrations/v0.52.0-godo-removal.md")
+	return fmt.Errorf("%s", b.String())
+}
+```
+
+Modify `engine.go:508`:
+
+```go
+// Before:
+factory, exists := e.moduleFactories[modCfg.Type]
+if !exists {
+    return fmt.Errorf("unknown module type %q for module %q — ensure the required plugin is loaded", modCfg.Type, modCfg.Name)
+}
+
+// After:
+factory, exists := e.moduleFactories[modCfg.Type]
+if !exists {
+    if module.IsLegacyDOModuleType(modCfg.Type) {
+        _, iacLoaded := e.moduleFactories["iac.provider"]
+        return module.FormatLegacyDOModuleError(modCfg.Type, modCfg.Name, iacLoaded)
+    }
+    return fmt.Errorf("unknown module type %q for module %q — ensure the required plugin is loaded", modCfg.Type, modCfg.Name)
+}
+```
+
+(Add `"github.com/GoCodeAlone/workflow/module"` to engine.go imports if not already present.)
+
+Modify `module/pipeline_step_registry.go:35`. Since this is in the `module` package itself, the helper is callable directly. Step-registry needs to know whether the iac.provider module factory is loaded — pass a detection callback in or expose a package-level setter. Simplest implementation: a package-level boolean updated by the engine at `BuildFromConfig` time before step construction. New file `module/iac_provider_loaded.go`:
+
+```go
+package module
+
+// iacProviderLoaded tracks whether the engine's module factory map currently
+// contains "iac.provider". Set by the engine before invoking step factories so
+// that legacy DO step migration errors can branch on it.
+var iacProviderLoaded bool
+
+// SetIaCProviderLoaded is called by the engine after module factory registration
+// is complete but before step factories run.
+func SetIaCProviderLoaded(loaded bool) { iacProviderLoaded = loaded }
+```
+
+Wire it in `engine.go` BuildFromConfig just before step construction:
+
+```go
+_, iacLoaded := e.moduleFactories["iac.provider"]
+module.SetIaCProviderLoaded(iacLoaded)
+```
+
+And use it in `module/pipeline_step_registry.go:35`:
+
+```go
+// Before:
+return nil, fmt.Errorf("unknown step type: %s", stepType)
+
+// After:
+if IsLegacyDOStepType(stepType) {
+    return nil, FormatLegacyDOStepError(stepType, iacProviderLoaded)
+}
+return nil, fmt.Errorf("unknown step type: %s", stepType)
+```
+
+**Step 4: Run tests to verify they pass**
+
+Run: `go test ./... -run 'TestLegacyDO(Module|Step)Error' -v`
+Expected: PASS (all 12 sub-cases — 5 modules × 1 not-loaded + 1 module loaded; 5 steps × 1 not-loaded).
+
+Run: `go test ./...`
+Expected: PASS overall (the existing tests untouched by T1/T2/T3 should still pass).
+
+**Step 5: Commit**
+
+```bash
+git add module/legacy_do_migration.go module/iac_provider_loaded.go \
+        engine.go module/pipeline_step_registry.go \
+        engine_legacy_do_migration_test.go module/pipeline_step_legacy_do_migration_test.go
+git commit -m "$(cat <<'EOF'
+feat(#617): actionable migration errors for legacy DO types
+
+Adds module.LegacyDOModuleTypes + LegacyDOStepTypes lookup tables and two
+formatters (FormatLegacyDOModuleError, FormatLegacyDOStepError). Both branch
+on whether iac.provider is registered in the engine's factory map:
+  - not loaded → "Install workflow-plugin-digitalocean: <URL>"
+  - loaded     → "already loaded; your config still references the legacy name"
+
+Wired into engine.go:508 (module path) and pipeline_step_registry.go:35
+(step path). SetIaCProviderLoaded bridges the boolean from engine to module
+package.
+
+Each step type gets a per-step message; step.do_logs and step.do_scale have
+GAP messages with workarounds because no 1:1 pipeline-step successor exists
+yet (tracked as follow-up issues in T5).
+EOF
+)"
+```
+
+**Rollback:** `git revert <T3-commit-sha>` restores generic unknown-type errors. Combined with T1/T2 revert, repository returns to pre-cutover state.
+
+---
+
+## Task 4: `go mod tidy` (root + example) + CI grep gate
+
+**Files:**
+- Modify: `go.mod` (drop `github.com/digitalocean/godo` direct require + transitive bumps via `go mod tidy`)
+- Modify: `go.sum` (regenerated)
+- Modify: `example/go.mod` (drop indirect godo)
+- Modify: `example/go.sum` (regenerated)
+- Modify: `.github/workflows/ci.yml` — add a `godo-banned` job that runs the `!`-prefixed greps.
+- Test: this task's verification IS the CI gate itself; no new unit test.
+
+**Step 1: Run the tidies and verify godo is gone**
+
+```bash
+go mod tidy
+(cd example && go mod tidy)
+```
+
+**Step 2: Verify**
+
+Run:
+```bash
+! grep -rn --include="*.go" \
+    --exclude-dir=_worktrees \
+    --exclude-dir=.worktrees \
+    --exclude-dir=.claude \
+    "digitalocean/godo" .
+! grep -qH "digitalocean/godo" go.mod example/go.mod
+```
+Expected: BOTH commands exit 0 (no match → grep exits 1 → `!` inverts to 0 → success).
+
+If either fails (i.e., grep finds godo), inspect: a transitive dependency may still pull it. Identify with `go mod why github.com/digitalocean/godo` and investigate.
+
+**Step 3: Add the CI gate**
+
+Modify `.github/workflows/ci.yml` to add a job (placed near `golangci-lint`):
+
+```yaml
+  godo-banned:
+    name: Verify godo is not imported (issue #617)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Grep gate — *.go files must not import godo
+        run: |
+          ! grep -rn --include="*.go" \
+              --exclude-dir=_worktrees \
+              --exclude-dir=.worktrees \
+              --exclude-dir=.claude \
+              "digitalocean/godo" .
+      - name: Grep gate — go.mod files must not list godo
+        run: |
+          ! grep -qH "digitalocean/godo" go.mod example/go.mod
+```
+
+(If `.github/workflows/ci.yml` does not exist or has a different name, locate the existing Go-build workflow file via `ls .github/workflows/` and add the job there. Adapt the runner/checkout action versions to match the rest of the file.)
+
+**Step 4: Verify locally one more time, including the gate's exact commands**
+
+```bash
+bash -c '! grep -rn --include="*.go" --exclude-dir=_worktrees --exclude-dir=.worktrees --exclude-dir=.claude "digitalocean/godo" .'
+echo "exit: $?"
+# Expected: exit: 0
+bash -c '! grep -qH "digitalocean/godo" go.mod example/go.mod'
+echo "exit: $?"
+# Expected: exit: 0
+```
+
+**Step 5: Commit**
+
+```bash
+git add go.mod go.sum example/go.mod example/go.sum .github/workflows/
+git commit -m "$(cat <<'EOF'
+feat(#617): drop godo from go.mod + add CI grep gate
+
+* go mod tidy on root and example/ drops github.com/digitalocean/godo
+  (direct from root, indirect from example/).
+* New CI job 'godo-banned' fails the build on any *.go import of godo OR
+  any mention of godo in go.mod files. Excludes _worktrees, .worktrees,
+  and .claude (local agent state, not committed source).
+
+This satisfies acceptance criterion #4 (dependabot bumps target the
+provider repo, not workflow core).
+EOF
+)"
+```
+
+**Rollback:** `git revert <T4-commit-sha>` restores godo to go.mod and removes the CI gate. Combined with T1/T2/T3 revert returns to pre-cutover state.
+
+---
+
+## Task 5: Docs, CHANGELOG, migration guide, `wfctl modernize` rules + file follow-up issues
+
+**Files:**
+- Modify: `DOCUMENTATION.md` (replace the 5 module rows + 5 step rows in the platform tables with a single paragraph pointing at the DO plugin)
+- Modify: `CHANGELOG.md` (prepend a `## v0.52.0` section with the breaking-change entry)
+- Create: `docs/migrations/v0.52.0-godo-removal.md` (full migration guide — 5 module mappings + 5 step mappings + GAP callouts + before/after YAML examples + step-by-step migration recipe + ADR-style "why this was done")
+- Create: `modernize/legacy_do_rule.go` (new modernize rules — see Step 3)
+- Modify: `modernize/modernize.go` `AllRules()` to append the new rule
+- Test: `modernize/legacy_do_rule_test.go` (new — covers Check + Fix for each of the 5 module + 5 step rewrites)
+
+**Step 1: Write the failing test**
+
+Create `modernize/legacy_do_rule_test.go`:
+
+```go
+package modernize_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/GoCodeAlone/workflow/modernize"
+	"gopkg.in/yaml.v3"
+)
+
+func TestLegacyDORule_Rewrites(t *testing.T) {
+	cases := []struct {
+		name     string
+		yamlIn   string
+		wantNew  string   // must appear in fixed YAML
+		wantDrop string   // must NOT appear in fixed YAML (the legacy type)
+	}{
+		{
+			name:     "platform.do_app → infra.container_service",
+			yamlIn:   "modules:\n  - name: api\n    type: platform.do_app\n    config:\n      region: nyc\n",
+			wantNew:  "infra.container_service",
+			wantDrop: "platform.do_app",
+		},
+		{
+			name:     "platform.do_database → infra.database",
+			yamlIn:   "modules:\n  - name: db\n    type: platform.do_database\n    config: {}\n",
+			wantNew:  "infra.database",
+			wantDrop: "platform.do_database",
+		},
+		{
+			name:     "platform.do_dns → infra.dns",
+			yamlIn:   "modules:\n  - name: dns\n    type: platform.do_dns\n    config: {}\n",
+			wantNew:  "infra.dns",
+			wantDrop: "platform.do_dns",
+		},
+		{
+			name:     "platform.doks → infra.k8s_cluster",
+			yamlIn:   "modules:\n  - name: k8s\n    type: platform.doks\n    config: {}\n",
+			wantNew:  "infra.k8s_cluster",
+			wantDrop: "platform.doks",
+		},
+		{
+			name:     "step.do_deploy → step.iac_apply",
+			yamlIn:   "pipelines:\n  - steps:\n      - type: step.do_deploy\n",
+			wantNew:  "step.iac_apply",
+			wantDrop: "step.do_deploy",
+		},
+	}
+	rule := modernize.LegacyDORule()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var root yaml.Node
+			if err := yaml.Unmarshal([]byte(tc.yamlIn), &root); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			findings := rule.Check(&root, []byte(tc.yamlIn))
+			if len(findings) == 0 {
+				t.Fatalf("expected a finding, got 0")
+			}
+			rule.Fix(&root)
+			out, err := yaml.Marshal(&root)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			s := string(out)
+			if !strings.Contains(s, tc.wantNew) {
+				t.Errorf("fixed YAML missing %q; got:\n%s", tc.wantNew, s)
+			}
+			if strings.Contains(s, tc.wantDrop) {
+				t.Errorf("fixed YAML still contains legacy %q; got:\n%s", tc.wantDrop, s)
+			}
+		})
+	}
+}
+
+func TestLegacyDORule_LogsScaleAnnotatedNotDropped(t *testing.T) {
+	// step.do_logs and step.do_scale have NO 1:1 successor. Rule must:
+	//  - flag them as findings,
+	//  - NOT modify the YAML (no silent loss).
+	for _, stepType := range []string{"step.do_logs", "step.do_scale"} {
+		t.Run(stepType, func(t *testing.T) {
+			in := "pipelines:\n  - steps:\n      - type: " + stepType + "\n"
+			var root yaml.Node
+			yaml.Unmarshal([]byte(in), &root)
+			rule := modernize.LegacyDORule()
+			findings := rule.Check(&root, []byte(in))
+			if len(findings) == 0 {
+				t.Fatalf("expected a finding for %q", stepType)
+			}
+			if findings[0].Fixable {
+				t.Errorf("%q must be marked Fixable: false (no auto-rewrite); got Fixable: true", stepType)
+			}
+			rule.Fix(&root)
+			out, _ := yaml.Marshal(&root)
+			if !strings.Contains(string(out), stepType) {
+				t.Errorf("Fix MUST NOT remove legacy %q; got:\n%s", stepType, out)
+			}
+		})
+	}
+}
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `go test ./modernize/... -run TestLegacyDORule -v`
+Expected: FAIL with "undefined: modernize.LegacyDORule".
+
+**Step 3: Implement the rule**
+
+Create `modernize/legacy_do_rule.go`:
+
+```go
+package modernize
+
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
+// LegacyDORule rewrites legacy DigitalOcean module + step types to their
+// infra.* IaC successors (issue #617). Auto-fixable for 5 modules and 3 of 5
+// steps; the two GAP steps (step.do_logs, step.do_scale) are flagged but not
+// modified, because they have no 1:1 pipeline-step successor.
+func LegacyDORule() Rule {
+	moduleMap := map[string]string{
+		"platform.do_app":        "infra.container_service",
+		"platform.do_database":   "infra.database",
+		"platform.do_dns":        "infra.dns",
+		"platform.doks":          "infra.k8s_cluster",
+		// platform.do_networking is intentionally NOT auto-fixed: it splits
+		// 1→2 (infra.vpc + infra.firewall), which requires structural
+		// rewrite the operator must review.
+	}
+	stepMap := map[string]string{
+		"step.do_deploy":  "step.iac_apply",
+		"step.do_status":  "step.iac_status",
+		"step.do_destroy": "step.iac_destroy",
+	}
+	gapTypes := map[string]string{
+		"platform.do_networking": "splits into infra.vpc + infra.firewall — manual rewrite required",
+		"step.do_logs":           "no pipeline-step successor; use `wfctl infra logs` or rely on DO plugin Troubleshoot",
+		"step.do_scale":          "no pipeline-step successor; edit instance_count and re-run step.iac_apply",
+	}
+
+	return Rule{
+		ID:          "legacy-do-types",
+		Description: "Rewrite legacy DigitalOcean module/step types to infra.* IaC successors (issue #617).",
+		Severity:    "error",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var out []Finding
+			walkTypeNodes(root, func(typeVal *yaml.Node) {
+				if successor, ok := moduleMap[typeVal.Value]; ok {
+					out = append(out, Finding{
+						RuleID:  "legacy-do-types",
+						Line:    typeVal.Line,
+						Message: fmt.Sprintf("%s removed in v0.52.0; rewrite to %s (provider: digitalocean) — requires workflow-plugin-digitalocean", typeVal.Value, successor),
+						Fixable: true,
+					})
+				}
+				if successor, ok := stepMap[typeVal.Value]; ok {
+					out = append(out, Finding{
+						RuleID:  "legacy-do-types",
+						Line:    typeVal.Line,
+						Message: fmt.Sprintf("%s removed in v0.52.0; rewrite to %s — requires workflow-plugin-digitalocean", typeVal.Value, successor),
+						Fixable: true,
+					})
+				}
+				if reason, ok := gapTypes[typeVal.Value]; ok {
+					out = append(out, Finding{
+						RuleID:  "legacy-do-types",
+						Line:    typeVal.Line,
+						Message: fmt.Sprintf("%s removed in v0.52.0 — %s", typeVal.Value, reason),
+						Fixable: false,
+					})
+				}
+			})
+			return out
+		},
+		Fix: func(root *yaml.Node) []Change {
+			var out []Change
+			walkTypeNodes(root, func(typeVal *yaml.Node) {
+				if successor, ok := moduleMap[typeVal.Value]; ok {
+					old := typeVal.Value
+					typeVal.Value = successor
+					out = append(out, Change{
+						RuleID:      "legacy-do-types",
+						Line:        typeVal.Line,
+						Description: fmt.Sprintf("rewrote %s → %s", old, successor),
+					})
+				}
+				if successor, ok := stepMap[typeVal.Value]; ok {
+					old := typeVal.Value
+					typeVal.Value = successor
+					out = append(out, Change{
+						RuleID:      "legacy-do-types",
+						Line:        typeVal.Line,
+						Description: fmt.Sprintf("rewrote %s → %s", old, successor),
+					})
+				}
+				// gapTypes are intentionally not modified.
+			})
+			return out
+		},
+	}
+}
+
+// walkTypeNodes traverses a YAML AST and invokes visit on every value node
+// whose parent mapping key is "type".
+func walkTypeNodes(n *yaml.Node, visit func(*yaml.Node)) {
+	if n == nil {
+		return
+	}
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			if k.Value == "type" && v.Kind == yaml.ScalarNode {
+				visit(v)
+			}
+			walkTypeNodes(v, visit)
+		}
+		return
+	}
+	for _, c := range n.Content {
+		walkTypeNodes(c, visit)
+	}
+}
+```
+
+Append to `modernize/modernize.go` `AllRules()`:
+
+```go
+return []Rule{
+    hyphenStepsRule(),
+    conditionalFieldRule(),
+    dbQueryModeRule(),
+    dbQueryIndexRule(),
+    absoluteDbPathRule(),
+    emptyRoutesRule(),
+    camelCaseConfigRule(),
+    requestParseConfigRule(),
+    LegacyDORule(),     // <-- ADD
+}
+```
+
+**Step 4: Run rule tests to verify they pass**
+
+Run: `go test ./modernize/... -run TestLegacyDORule -v`
+Expected: PASS.
+
+Run: `go test ./modernize/...`
+Expected: PASS overall.
+
+**Step 5: Write the docs + migration guide + CHANGELOG**
+
+Modify `DOCUMENTATION.md`: locate the "Platform Modules" table containing the 5 `platform.do_*` rows and the "Platform Steps" table containing the 5 `step.do_*` rows. Replace each row block with:
+
+```markdown
+**DigitalOcean IaC modules and steps** were removed from workflow core in
+v0.52.0 and moved to the
+[workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
+external plugin. After loading the plugin, use the generic `infra.*` module
+types with `provider: digitalocean` and the generic `step.iac_*` pipeline
+steps. See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
+```
+
+Prepend to `CHANGELOG.md`:
+
+```markdown
+## v0.52.0 (2026-05-13) — BREAKING
+
+### Removed (issue #617)
+
+- All legacy DigitalOcean IaC modules (`platform.do_app`, `platform.do_database`, `platform.do_dns`, `platform.do_networking`, `platform.doks`) and the DO credential resolver `cloud_account_do.go`.
+- All legacy DigitalOcean pipeline steps (`step.do_deploy`, `step.do_status`, `step.do_logs`, `step.do_scale`, `step.do_destroy`).
+- The `github.com/digitalocean/godo` dependency from `go.mod` (root and `example/`).
+
+### Migration
+
+DigitalOcean IaC moved to [`workflow-plugin-digitalocean`](https://github.com/GoCodeAlone/workflow-plugin-digitalocean) v0.12.0+. After loading the plugin, replace legacy module types with `infra.*` types and `provider: digitalocean`. Run `wfctl modernize --apply <config.yaml>` to auto-rewrite supported types. Two step types (`step.do_logs`, `step.do_scale`) have no 1:1 pipeline successor — workarounds documented in the [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
+
+Configs that still reference the legacy types now fail to load with an actionable error pointing to the plugin and the relevant `infra.*` successor.
+```
+
+Create `docs/migrations/v0.52.0-godo-removal.md`:
+
+```markdown
+# v0.52.0 — Removing godo from workflow core (issue #617)
+
+## What changed
+
+The five legacy `platform.do_*` modules, the `cloud.account` DO credential
+resolver, and the five legacy `step.do_*` pipeline steps were removed from
+workflow core. The `github.com/digitalocean/godo` dependency is no longer
+pulled by the workflow module.
+
+DigitalOcean IaC functionality moved entirely to
+[`workflow-plugin-digitalocean`](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
+v0.12.0+, which exposes the same resources through the generic `infra.*` IaC
+type system with `provider: digitalocean`.
+
+## Why
+
+Workflow core should own IaC interfaces and orchestration, not provider SDKs.
+Dependabot bumps to godo now target the DO plugin repo, not core. See ADR or
+the design doc at `docs/plans/2026-05-13-issue-617-godo-removal-design.md`.
+
+## Migration recipe
+
+1. Install the DO plugin (v0.12.0+):
+   ```yaml
+   plugins:
+     - name: digitalocean
+       source: github.com/GoCodeAlone/workflow-plugin-digitalocean
+       version: ">=0.12.0"
+   ```
+
+2. Run the modernizer over each affected YAML config:
+   ```sh
+   wfctl modernize --apply ./config/*.yaml
+   ```
+   This rewrites the 5 module types and 3 step types automatically. Two step
+   types (`step.do_logs`, `step.do_scale`) and one module type
+   (`platform.do_networking`) are flagged but not auto-rewritten — see below.
+
+3. Manually address the GAP types listed below.
+
+4. Re-run `wfctl validate` and `wfctl infra plan` to confirm the rewritten
+   config loads and produces the same plan.
+
+## Module type mapping
+
+| Legacy type              | Successor                          | Auto-fix |
+|--------------------------|-----------------------------------|----------|
+| `platform.do_app`        | `infra.container_service`         | Yes      |
+| `platform.do_database`   | `infra.database`                  | Yes      |
+| `platform.do_dns`        | `infra.dns`                       | Yes      |
+| `platform.do_networking` | `infra.vpc` + `infra.firewall`    | **No** — splits 1→2, manual review required |
+| `platform.doks`          | `infra.k8s_cluster`               | Yes      |
+
+All successors require `config.provider: digitalocean`.
+
+## Step type mapping
+
+| Legacy type        | Successor                                                          | Auto-fix |
+|--------------------|--------------------------------------------------------------------|----------|
+| `step.do_deploy`   | `step.iac_apply` (against an `infra.container_service` module)     | Yes      |
+| `step.do_status`   | `step.iac_status` (against an `infra.container_service` module)    | Yes      |
+| `step.do_destroy`  | `step.iac_destroy` (against an `infra.container_service` module)   | Yes      |
+| `step.do_logs`     | **GAP** — no pipeline step successor; use `wfctl infra logs` ad-hoc, or rely on the DO plugin's Troubleshoot hook on `step.iac_apply` failure. Tracked: workflow-plugin-digitalocean issue <ISSUE-N> | **No** |
+| `step.do_scale`    | **GAP** — no pipeline step successor; update `instance_count` in the `infra.container_service` module config and re-run `step.iac_apply`. Tracked: workflow-plugin-digitalocean issue <ISSUE-M> | **No** |
+
+## Before / after examples
+
+### App Platform
+
+Before:
+```yaml
+modules:
+  - name: api
+    type: platform.do_app
+    config:
+      region: nyc
+      services:
+        - name: web
+          image: registry.digitalocean.com/myorg/api:latest
+```
+
+After:
+```yaml
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      provider: digitalocean
+      region: nyc
+      services:
+        - name: web
+          image: registry.digitalocean.com/myorg/api:latest
+```
+
+### Pipeline step
+
+Before:
+```yaml
+pipelines:
+  - id: deploy
+    steps:
+      - type: step.do_deploy
+        config: { app: api }
+```
+
+After:
+```yaml
+pipelines:
+  - id: deploy
+    steps:
+      - type: step.iac_apply
+        config: { module: api }
+```
+
+## Errors you may see
+
+* `unsupported legacy module type "platform.do_app" (module "api"): this type was removed from workflow core in v0.52.0 — DigitalOcean IaC moved to workflow-plugin-digitalocean.` — fix the config per the table above; install the plugin if not already loaded.
+* `unsupported legacy step type "step.do_logs": ...` — see GAP entry above; remove the step and use `wfctl infra logs` ad-hoc, or wait for `step.iac_logs` (tracked).
+
+## Rollback
+
+If your environment cannot upgrade in this cycle, pin to the previous workflow
+core tag (`go get github.com/GoCodeAlone/workflow@v0.51.3`). The legacy modules
+remain available there.
+```
+
+**Step 6: File two follow-up issues in `workflow-plugin-digitalocean` and wire their numbers into the migration error**
+
+Using `gh`:
+
+```bash
+LOGS_ISSUE_BODY=$(cat <<'EOF'
+Legacy step.do_logs in workflow core was removed in workflow v0.52.0 (issue
+GoCodeAlone/workflow#617). There is no 1:1 pipeline-step successor in the
+generic step.iac_* family yet. Current workaround for users: `wfctl infra logs`
+ad-hoc, or rely on the DO plugin's Troubleshoot hook on step.iac_apply
+failure. This issue tracks adding a first-class step.iac_logs (in core) or
+step.app_logs (in the DO plugin's exposed step set).
+EOF
+)
+SCALE_ISSUE_BODY=$(cat <<'EOF'
+Legacy step.do_scale in workflow core was removed in workflow v0.52.0 (issue
+GoCodeAlone/workflow#617). Current workaround: update instance_count in the
+infra.container_service module config and re-run step.iac_apply. This issue
+tracks adding a first-class step.iac_scale (config-less runtime scale).
+EOF
+)
+gh issue create --repo GoCodeAlone/workflow-plugin-digitalocean \
+  --title "Add step.iac_logs (or step.app_logs) — closes step.do_logs migration GAP from workflow#617" \
+  --body "$LOGS_ISSUE_BODY"
+gh issue create --repo GoCodeAlone/workflow-plugin-digitalocean \
+  --title "Add step.iac_scale — closes step.do_scale migration GAP from workflow#617" \
+  --body "$SCALE_ISSUE_BODY"
+```
+
+Capture the two issue URLs / numbers and patch the migration guide's two `<ISSUE-N> / <ISSUE-M>` placeholders + the migration error help message templates in `module/legacy_do_migration.go` if they contained placeholders. (The actual text in T3's helper does not contain URL placeholders — only the migration guide does — so this step is doc-only.)
+
+**Step 7: Verify the docs build / render**
+
+Run: `find docs -name "*.md" -exec grep -l "TODO\|<ISSUE-" {} \;` — expected: no output (all placeholders resolved).
+
+Run: `grep -n "platform.do_app\|step.do_deploy" DOCUMENTATION.md` — expected: no output (rows replaced).
+
+**Step 8: Commit**
+
+```bash
+git add modernize/legacy_do_rule.go modernize/legacy_do_rule_test.go modernize/modernize.go \
+        DOCUMENTATION.md CHANGELOG.md docs/migrations/v0.52.0-godo-removal.md
+git commit -m "$(cat <<'EOF'
+feat(#617): wfctl modernize rule + migration guide + CHANGELOG
+
+* New modernize rule "legacy-do-types": auto-rewrites 5 module types and 3
+  of 5 step types to infra.*; flags but does not modify the two GAP step
+  types and the 1→2 platform.do_networking split.
+* CHANGELOG: v0.52.0 BREAKING entry.
+* docs/migrations/v0.52.0-godo-removal.md: full migration guide with
+  mapping tables, before/after YAML, error reference, rollback note.
+* DOCUMENTATION.md: replace 10 legacy rows with a pointer to the plugin
+  and the migration guide.
+
+Plus filed two follow-up issues in workflow-plugin-digitalocean for the
+step.do_logs and step.do_scale GAPs.
+EOF
+)"
+```
+
+**Step 9: File the AWS audit follow-up issue in `GoCodeAlone/workflow`**
+
+```bash
+AWS_BODY=$(cat <<'EOF'
+Continuation of #617. The DO half of the SDK audit shipped in v0.52.0 (godo
+gone from core). This issue tracks the AWS half:
+
+In scope:
+- `module/platform_ecs.go`, `module/cloud_account_aws*.go`,
+  `module/platform_apigateway.go`, `module/codebuild.go`,
+  `module/nosql_dynamodb.go`, `module/platform_kubernetes_kind.go`,
+  `module/platform_networking.go`, `module/platform_autoscaling.go`,
+  `module/platform_dns_backends.go`, `module/aws_api_gateway.go`,
+  `module/s3_storage.go`, `module/storage_artifact_s3.go`,
+  `module/pipeline_step_s3_upload.go` and the IaC drivers under
+  `platform/providers/aws/` — review for move to workflow-plugin-aws
+  using the same Option A force-cutover pattern.
+
+Out of scope (justified non-IaC core surfaces; STAY in core):
+- `iam/aws.go` — RBAC integration.
+- `plugin/rbac/aws.go` — RBAC plugin glue.
+- `artifact/s3.go` — generic artifact storage backend (S3-compat).
+- `provider/aws/deploy.go` — IaC adapter (revisit if it's a thin wrapper).
+- `module/iac_state_spaces.go` — S3-compat state backend (DO Spaces too).
+
+Goal: same as #617 — Dependabot bumps for AWS SDKs target the provider
+plugin repo, not core, except for the non-IaC surfaces above.
+EOF
+)
+gh issue create --repo GoCodeAlone/workflow \
+  --title "Audit AWS SDK usage in workflow core (RBAC/secrets/artifact stay; IaC drivers reviewed for plugin move)" \
+  --body "$AWS_BODY"
+```
+
+**Step 10: Final commit (issue URLs back into the migration guide)**
+
+After the two plugin issues are filed in Step 6, patch their numbers/URLs into `docs/migrations/v0.52.0-godo-removal.md`. The AWS follow-up issue from Step 9 does not need to be referenced in this PR — it lives independently. Commit the patched URLs:
+
+```bash
+git add docs/migrations/v0.52.0-godo-removal.md
+git commit -m "docs(#617): wire workflow-plugin-digitalocean follow-up issue URLs into migration guide"
+```
+
+**Rollback:** `git revert <T5-commits>` removes the modernize rule, migration guide, CHANGELOG entry. Combined with T1/T2/T3/T4 revert returns to pre-cutover state. Plugin follow-up issues remain filed (they describe genuine gaps regardless of whether this PR ships).
+
+---
+
+## Verification per change class (summary)
+
+| Task | Class | Verification |
+|------|-------|--------------|
+| T1 | Internal-logic refactor (pure deletion + import test) | `go test ./module -run TestGodoNotImported_InModulePackage` PASS |
+| T2 | Internal-logic refactor (registry edits) | `go test ./cmd/wfctl -run TestLegacyDOTypesAbsent_FromTypeRegistry` PASS + `go build ./...` clean |
+| T3 | Internal-logic refactor (new error path + helper) | `go test -run 'TestLegacyDO(Module|Step)Error'` PASS |
+| T4 | **Version pin update** | `go mod tidy` clean + CI `godo-banned` job PASS + `! grep ...` locally exits 0. **Rollback:** revert T4 commit; godo returns to go.mod (no runtime effect because no code uses it after T1-T3 either). |
+| T5 | Documentation + new CLI rule | `go test ./modernize -run TestLegacyDORule` PASS + `grep -n "platform.do_app" DOCUMENTATION.md` returns nothing + two plugin issues filed + AWS audit issue filed |
+
+T4 is the only task with the runtime-launch-validation trigger (version-pin update), and the rollback note is included.
+
+---
+
+## End-of-PR checklist (run before opening PR)
+
+1. `go test ./...` — all green.
+2. `! grep -rn --include="*.go" --exclude-dir=_worktrees --exclude-dir=.worktrees --exclude-dir=.claude "digitalocean/godo" .` exits 0.
+3. `! grep -qH "digitalocean/godo" go.mod example/go.mod` exits 0.
+4. `wfctl modernize --apply <example-config-with-legacy-types>` rewrites correctly (manual smoke).
+5. `go build ./cmd/wfctl && ./wfctl validate <a-config-that-still-uses-platform.do_app>` produces the actionable migration error and exits non-zero.
+6. `go build ./cmd/server && ./server -config <a-config-that-still-uses-platform.do_app>` produces the same error and exits non-zero.
+7. CHANGELOG.md has the v0.52.0 BREAKING entry at the top.
+8. Two follow-up issues filed in `workflow-plugin-digitalocean`; URLs wired into the migration guide.
+9. One follow-up issue filed in `workflow` for the AWS audit (no URL wiring needed — independent stream).
+10. PR description references issue #617 and lists the breaking-change impact.
+
+---
+
+## References
+
+- Design doc: `docs/plans/2026-05-13-issue-617-godo-removal-design.md`
+- Issue: [GoCodeAlone/workflow#617](https://github.com/GoCodeAlone/workflow/issues/617)
+- Trigger PR (Dependabot bump): [PR #421](https://github.com/GoCodeAlone/workflow/pull/421)
+- Plugin: [`workflow-plugin-digitalocean`](https://github.com/GoCodeAlone/workflow-plugin-digitalocean) v0.12.0+
+- Precedent: `feedback_force_strict_contracts_no_compat.md` (force-cutover pattern); `project_strict_contracts_cutover_complete.md` (typed-gRPC cutover, DO plugin v1.0.1)
