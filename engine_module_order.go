@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"container/heap"
 	"fmt"
 	"sort"
 	"strings"
@@ -19,9 +20,12 @@ import (
 // in the ready frontier at the same iteration. Returns an error if a
 // dependency cycle is detected.
 //
-// Missing dependency targets are tolerated here and reported via the existing
-// schema.ValidateConfig pass (schema/validate.go:191); this function only
-// orders the modules that *are* declared.
+// Missing dependency targets are tolerated as no-op edges. Schema.ValidateConfig
+// rejects unresolvable targets for the *declared* modules, but ConfigTransformHooks
+// can inject modules after validation runs, and those transform-injected modules'
+// dependsOn was never schema-checked. Silently ignoring the edge keeps this
+// function side-effect-free; the actual runtime failure (if any) surfaces when
+// the dependent looks up its parent in a plugin-local registry.
 func topoSortModules(modules []config.ModuleConfig) ([]config.ModuleConfig, error) {
 	n := len(modules)
 	if n <= 1 {
@@ -58,26 +62,25 @@ func topoSortModules(modules []config.ModuleConfig) ([]config.ModuleConfig, erro
 		}
 	}
 
-	// Initial frontier: every module with no remaining declared deps,
-	// in declared order.
-	ready := make([]int, 0, n)
+	// Initial frontier: every module with no remaining declared deps. Ordered
+	// by declared index via a min-heap so Pop is O(log n) per step instead of
+	// O(n log n) from re-sorting a slice every iteration.
+	ready := &intHeap{}
+	heap.Init(ready)
 	for i := 0; i < n; i++ {
 		if inDegree[i] == 0 {
-			ready = append(ready, i)
+			heap.Push(ready, i)
 		}
 	}
 
 	out := make([]config.ModuleConfig, 0, n)
-	for len(ready) > 0 {
-		// Stable tie-break: pop the lowest declared index first.
-		sort.Ints(ready)
-		i := ready[0]
-		ready = ready[1:]
+	for ready.Len() > 0 {
+		i := heap.Pop(ready).(int)
 		out = append(out, modules[i])
 		for _, j := range dependents[i] {
 			inDegree[j]--
 			if inDegree[j] == 0 {
-				ready = append(ready, j)
+				heap.Push(ready, j)
 			}
 		}
 	}
@@ -105,4 +108,22 @@ func topoSortModules(modules []config.ModuleConfig) ([]config.ModuleConfig, erro
 	}
 
 	return out, nil
+}
+
+// intHeap is a min-heap of declared-module indices used as the Kahn-frontier
+// in topoSortModules. Implementing container/heap.Interface keeps Pop O(log n)
+// per step, which matters when configs grow into the hundreds of modules.
+type intHeap []int
+
+func (h intHeap) Len() int           { return len(h) }
+func (h intHeap) Less(i, j int) bool { return h[i] < h[j] }
+func (h intHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *intHeap) Push(x any) { *h = append(*h, x.(int)) }
+func (h *intHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[:n-1]
+	return x
 }
