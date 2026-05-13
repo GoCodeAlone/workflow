@@ -8,10 +8,16 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 )
 
-// topoSortModules reorders modules so each module appears after every module it
-// lists in DependsOn. Sibling modules (modules with no inter-dependency) keep
-// their declared order — Kahn's algorithm with a stable tie-break on the
-// original index. Returns an error if a dependency cycle is detected.
+// topoSortModules reorders modules so each module appears after every module
+// it lists in DependsOn. Kahn's algorithm with a stable tie-break on the
+// original declared index: among the modules in the ready frontier at any
+// point, the one with the lowest declared index is dequeued first. This means
+// a module's final position can shift relative to its declared siblings if a
+// sibling becomes ready earlier (e.g., a root pops first and unblocks its
+// dependent, which now sits in the ready queue alongside other declared-later
+// roots). What is preserved is the relative order of modules that are *both*
+// in the ready frontier at the same iteration. Returns an error if a
+// dependency cycle is detected.
 //
 // Missing dependency targets are tolerated here and reported via the existing
 // schema.ValidateConfig pass (schema/validate.go:191); this function only
@@ -77,18 +83,24 @@ func topoSortModules(modules []config.ModuleConfig) ([]config.ModuleConfig, erro
 	}
 
 	if len(out) != n {
-		// Cycle: collect the names of all modules with remaining in-degree
-		// so the error message is actionable.
-		remaining := make([]string, 0, n-len(out))
+		// Cycle detected. Kahn's algorithm cannot distinguish strict cycle
+		// members from their downstream dependents using inDegree alone — both
+		// retain non-zero inDegree after the frontier drains — so the error
+		// names every module that could not be ordered. The cycle members are
+		// the SCC root(s) somewhere in this set; the rest are modules that
+		// transitively depend on them. Listing all of them is the
+		// actionable surface: operators have to break a cycle somewhere in
+		// this set to make the graph schedulable.
+		unordered := make([]string, 0, n-len(out))
 		for i := 0; i < n; i++ {
 			if inDegree[i] > 0 {
-				remaining = append(remaining, modules[i].Name)
+				unordered = append(unordered, modules[i].Name)
 			}
 		}
-		sort.Strings(remaining)
+		sort.Strings(unordered)
 		return nil, fmt.Errorf(
-			"module dependsOn forms a cycle among: %s",
-			strings.Join(remaining, ", "),
+			"module dependsOn cycle (or dependents of one) among: %s",
+			strings.Join(unordered, ", "),
 		)
 	}
 

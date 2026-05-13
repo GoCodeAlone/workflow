@@ -164,7 +164,32 @@ func TestTopoSortModules_DirectCycleDetected(t *testing.T) {
 		t.Errorf("error %q does not mention cycle", err.Error())
 	}
 	if !strings.Contains(err.Error(), "a") || !strings.Contains(err.Error(), "b") {
-		t.Errorf("error %q does not include cycle members", err.Error())
+		t.Errorf("error %q does not include unordered modules", err.Error())
+	}
+}
+
+func TestTopoSortModules_CycleErrorListsDependentsToo(t *testing.T) {
+	// a→b, b→a forms a 2-cycle; c depends on a (so c is a downstream dependent
+	// of the cycle, not itself a member). Kahn's algorithm cannot distinguish
+	// strict cycle members from dependents using inDegree alone, so the error
+	// names everything that could not be ordered — and the docstring + commit
+	// message both flag this. Pin the behaviour so a future "tighten to true
+	// cycle members" refactor (e.g., Tarjan SCC) is a conscious decision and
+	// not a silent regression.
+	in := []config.ModuleConfig{
+		withDeps(config.ModuleConfig{Name: "a", Type: "x"}, "b"),
+		withDeps(config.ModuleConfig{Name: "b", Type: "x"}, "a"),
+		withDeps(config.ModuleConfig{Name: "c", Type: "x"}, "a"),
+	}
+	_, err := topoSortModules(in)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	msg := err.Error()
+	for _, name := range []string{"a", "b", "c"} {
+		if !strings.Contains(msg, name) {
+			t.Errorf("error %q missing unordered module %q", msg, name)
+		}
 	}
 }
 
