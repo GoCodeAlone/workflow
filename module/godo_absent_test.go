@@ -3,17 +3,28 @@ package module_test
 import (
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// TestGodoNotImported_InModulePackage asserts no file under module/ imports
-// github.com/digitalocean/godo. This is the regression gate for issue #617.
+// TestGodoNotImported_InModulePackage asserts no file under module/ (including
+// subdirectories) imports github.com/digitalocean/godo. This is the regression
+// gate for issue #617.
 func TestGodoNotImported_InModulePackage(t *testing.T) {
-	files, err := filepath.Glob("*.go")
+	var files []string
+	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".go") {
+			files = append(files, path)
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("glob: %v", err)
+		t.Fatalf("walk: %v", err)
 	}
 	fset := token.NewFileSet()
 	for _, f := range files {
