@@ -154,6 +154,8 @@ EOF
 - Modify: `cmd/wfctl/deploy_providers.go:419-424` — drop the `"platform.do_app"` line from the `deployTargetTypes` slice.
 - Modify: `cmd/wfctl/ci_run_dryrun.go:178-183` — drop the `"platform.do_app"` line from the `deployTargetTypes` slice.
 - Modify: `cmd/wfctl/deploy.go:839,901` — the `wfctl deploy cloud` subcommand collects modules via `strings.HasPrefix(m.Type, "platform.")` and errors with `"no platform.* modules found"` when none match. Post-cutover the user's modern config uses `infra.*` types; both call sites must include `infra.*` as well. Replace the prefix check with `strings.HasPrefix(m.Type, "platform.") || strings.HasPrefix(m.Type, "infra.")` and update the error message to `"no platform.* or infra.* modules found in config — nothing to deploy"`. Header comment on line 781 updated to reference both prefixes. **Rename the local slice variable `platformModules` to `deployTargetModules`** in the same edit so the name reflects what it now contains.
+- Modify: `cmd/wfctl/validate.go:145` — inject `legacydo.ModuleTypes` keys into the local `opts` slice via `schema.WithExtraModuleTypes(...)` before calling `schema.ValidateConfig`, then add a post-`ValidateConfig` legacy-type sweep that emits `legacydo.FormatModuleError` / `legacydo.FormatStepError` if any module / step type is legacy. Without this, schema rejects legacy types with the generic `"unknown module type"` message before the migration error can fire (cycle-6 C-1).
+- Modify: `cmd/wfctl/ci_validate.go:134` — same edit pattern as `validate.go`.
 - Modify: `module/multi_region.go:123` — replace the error message text (see Step 3).
 - Modify: `cmd/wfctl/infra_apply_test.go:1990` — the negative-test YAML fixture uses `type: platform.do_app`. Replace with `type: example.legacy_unknown` (a synthetic type that will never be registered) so the test's intent (negative coverage for unknown types) is preserved without referencing a removed type.
 - Test: `cmd/wfctl/legacy_do_types_removed_test.go` (new — asserts the type registry no longer contains the legacy keys)
@@ -537,29 +539,64 @@ if !exists {
 }
 ```
 
-**Schema-validation ordering caveat (critical):** `schema.ValidateConfig(cfg, valOpts...)` at `engine.go:400` runs BEFORE the factory loop at `:506`. After T2 removes the five legacy DO types from `schema/schema.go`'s allow-list, schema validation will reject the config with the generic `"unknown module type"` schema error before the factory guard ever runs — making `legacydo.FormatModuleError` unreachable for module types. To fix, **add the five legacy DO module types to the `WithExtraModuleTypes` call** so schema validation passes them through and the factory-lookup guard becomes the rejection point:
+**Schema-validation ordering caveat (critical):** `schema.ValidateConfig(cfg, valOpts...)` at `engine.go:400` runs BEFORE the factory loop at `:506`. After T2 removes the five legacy DO types from `schema/schema.go`'s allow-list, schema validation will reject the config with the generic `"unknown module type"` schema error before the factory guard ever runs — making `legacydo.FormatModuleError` unreachable for module types. To fix, **add the five legacy DO module types to the `WithExtraModuleTypes` call** so schema validation passes them through and the factory-lookup guard becomes the rejection point. Restructure the existing guarded block (`engine.go:393-398`) into unconditional code (eliminates a `staticcheck SA4010` always-true-condition lint failure):
 
 ```go
-// Modify engine.go around line 393-398:
-if len(e.moduleFactories) > 0 || true {  // always add extras for legacy DO types
-    extra := make([]string, 0, len(e.moduleFactories)+len(legacydo.ModuleTypes))
-    for t := range e.moduleFactories {
-        extra = append(extra, t)
+// Replace engine.go:393-398 with:
+extra := make([]string, 0, len(e.moduleFactories)+len(legacydo.ModuleTypes))
+for t := range e.moduleFactories {
+    extra = append(extra, t)
+}
+// Pass legacy DO module types through schema so the factory-loop guard
+// (which emits legacydo.FormatModuleError) is the rejection point —
+// schema rejection produces a generic error and would mask the
+// actionable migration message (issue #617).
+for t := range legacydo.ModuleTypes {
+    extra = append(extra, t)
+}
+valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
+```
+
+**Step types do NOT need a schema-level injection:** `schema.ValidateConfig` does not validate `pipelines[*].steps[*].type` (no `WithExtraStepTypes` function exists; verified). The step migration guard at the `StepRegistry.Create` rejection point is therefore the only gate for legacy step types, which is exactly what we want.
+
+(Add `"github.com/GoCodeAlone/workflow/internal/legacydo"` to engine.go imports.)
+
+**`wfctl validate` and `wfctl ci validate` (acceptance criterion #3):** these two commands call `schema.ValidateConfig` directly (`cmd/wfctl/validate.go:145`, `cmd/wfctl/ci_validate.go:134`) WITHOUT going through `engine.BuildFromConfig`. Without injecting `legacydo.ModuleTypes` into their local `opts` slices, they would emit the generic schema error instead of routing to the migration message. To satisfy AC3 on the validate paths, mirror the same injection in both wfctl commands. Add to **T2** (since these are wfctl-side registration / validation hooks alongside the other T2 wfctl edits):
+
+```go
+// In cmd/wfctl/validate.go validateFile() — before line 145 schema.ValidateConfig call,
+// after the existing opts slice is assembled:
+for t := range legacydo.ModuleTypes {
+    opts = append(opts, schema.WithExtraModuleTypes(t))
+}
+// Same edit in cmd/wfctl/ci_validate.go ciValidateFile() before line 134.
+```
+
+After these edits, `wfctl validate` will skip schema rejection for legacy DO module types — but it does not call `BuildFromConfig`, so the factory-loop migration error won't fire either. The validate command needs to ALSO emit the migration error directly. Pattern:
+
+```go
+// After schema.ValidateConfig succeeds, add a post-pass that explicitly
+// rejects legacy DO module types with the actionable message — wfctl
+// validate's contract is "config is valid", and a legacy DO module type
+// is NOT valid post-cutover even though we let schema pass it through.
+for _, m := range cfg.Modules {
+    if legacydo.IsModuleType(m.Type) {
+        // wfctl validate has no engine, so the plugin-loaded flag is always
+        // false (validate doesn't know what plugins will be loaded at runtime).
+        return legacydo.FormatModuleError(m.Type, m.Name, false)
     }
-    // Pass legacy DO module types through schema so the factory-loop guard
-    // (which emits legacydo.FormatModuleError) is the rejection point —
-    // schema rejection produces a generic error and would mask the
-    // actionable migration message (issue #617).
-    for t := range legacydo.ModuleTypes {
-        extra = append(extra, t)
+}
+// Same pattern in pipeline steps:
+for _, p := range cfg.Pipelines {
+    for _, s := range p.Steps {
+        if legacydo.IsStepType(s.Type) {
+            return legacydo.FormatStepError(s.Type, false)
+        }
     }
-    valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
 }
 ```
 
-The same applies to step types — schema validation runs `WithExtraStepTypes` too. Inspect the existing wiring around `engine.go:380-400` and add an equivalent loop appending `legacydo.StepTypes` keys to the step-types extras. The exact placement depends on whether `WithExtraStepTypes` is already called; if not, add the call.
-
-(Add `"github.com/GoCodeAlone/workflow/internal/legacydo"` to engine.go imports.)
+Add `cmd/wfctl/validate.go` and `cmd/wfctl/ci_validate.go` to T2's Files list.
 
 For the step path, **avoid the package-level global** that cycle 4 reviewer flagged as a logic-race risk: instead, attach the `iacProviderLoaded` boolean to the `StepRegistry` as a field set by the engine before pipeline construction. Modify `module/pipeline_step_registry.go`:
 
@@ -1373,6 +1410,14 @@ T4 is the only task with the runtime-launch-validation trigger (version-pin upda
 ---
 
 ## Adversarial review history (plan phase)
+
+### Cycle 6 (FAIL) — 2026-05-13
+
+- **C-1** Plan referenced a phantom `schema.WithExtraStepTypes` (no such function exists; `schema.ValidateConfig` only validates module types, not step types) → **fixed**: step-types schema injection removed; step migration guard at the `StepRegistry.Create` rejection point is the sole gate for legacy step types, which is correct because schema never validated them.
+- **C-1 second part** `wfctl validate` (`cmd/wfctl/validate.go:145`) and `wfctl ci validate` (`cmd/wfctl/ci_validate.go:134`) call `schema.ValidateConfig` directly without going through `engine.BuildFromConfig`, so the migration error path is unreachable from validate → **fixed**: added both files to T2; pattern is (a) inject `legacydo.ModuleTypes` into local opts so schema passes legacy types through, (b) post-`ValidateConfig` sweep emits `legacydo.FormatModuleError` / `FormatStepError` for any legacy type found in modules / pipeline steps. AC3 now satisfied on the validate path.
+- **I-1** `if len(e.moduleFactories) > 0 || true { ... }` triggers `staticcheck SA4010` always-true-condition → CI lint fails → **fixed**: replaced with unconditional code.
+- **m-1** Cycle-5 history checklist line mentioned `WithExtraStepTypes` (which doesn't exist) → **fixed implicitly** by deleting the step-types schema injection from T3.
+- **Cycle 1-5 plan-phase fixes verified to hold.**
 
 ### Cycle 5 (FAIL) — 2026-05-13
 
