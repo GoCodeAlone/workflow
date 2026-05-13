@@ -404,6 +404,9 @@ jobs:
         # platform/ and provider/ still legitimately import it pending Phase 3.
         run: |
           ! grep -rn --include="*.go" \
+              --exclude-dir=_worktrees \
+              --exclude-dir=.worktrees \
+              --exclude-dir=.claude \
               --exclude="aws_absent_test.go" \
               -e "aws-sdk-go-v2/service/apigatewayv2" \
               -e "aws-sdk-go-v2/service/applicationautoscaling" \
@@ -417,6 +420,9 @@ jobs:
         # promote service/eks into the step above and add it to the go.mod gate as well.
         run: |
           ! grep -rn --include="*.go" \
+              --exclude-dir=_worktrees \
+              --exclude-dir=.worktrees \
+              --exclude-dir=.claude \
               --exclude="aws_absent_test.go" \
               --exclude-dir="platform" \
               --exclude-dir="provider" \
@@ -431,5 +437,4 @@ jobs:
               -e "aws-sdk-go-v2/service/apigatewayv2" \
               -e "aws-sdk-go-v2/service/applicationautoscaling" \
               -e "aws-sdk-go-v2/service/route53" \
-              -e "aws-sdk-go-v2/service/codebuild" \
               go.mod example/go.mod
