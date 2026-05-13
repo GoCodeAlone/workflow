@@ -204,6 +204,31 @@ func TestTopoSortModules_EmptyAndSingleton(t *testing.T) {
 	}
 }
 
+func TestTopoSortModules_DuplicateNames_FirstWins(t *testing.T) {
+	// Schema rejects duplicates, but ConfigTransformHooks may merge fragments
+	// that re-declare a name. The dependent should resolve against the first
+	// declared instance (index 0) — not silently shadow to the last (which
+	// would compute a different inDegree for the duplicate and could mis-order
+	// downstream modules).
+	in := []config.ModuleConfig{
+		{Name: "a", Type: "x"},
+		withDeps(config.ModuleConfig{Name: "b", Type: "x"}, "a"),
+		{Name: "a", Type: "x"}, // duplicate; should be treated as already-resolved root
+	}
+	out, err := topoSortModules(in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := order(out)
+	// Both 'a' entries are roots (inDegree 0). 'b' depends on the *first*
+	// occurrence of 'a'. Output should preserve the declared order of roots
+	// + put 'b' after the first 'a'.
+	want := []string{"a", "b", "a"}
+	if !equalSlice(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
 func TestTopoSortModules_EmptyDependencyStringIgnored(t *testing.T) {
 	// Schema validation rejects "" entries, but defensively the sort should
 	// not blow up if one slips through (e.g., from a hand-built ModuleConfig

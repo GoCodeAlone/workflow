@@ -22,9 +22,15 @@ func topoSortModules(modules []config.ModuleConfig) ([]config.ModuleConfig, erro
 		return modules, nil
 	}
 
+	// Record the first declared index for each name so duplicates (which the
+	// schema rejects, but which can in theory slip in via ConfigTransformHooks
+	// merging fragments) resolve their dependents against the original entry
+	// rather than silently shadowing it.
 	index := make(map[string]int, n)
 	for i, m := range modules {
-		index[m.Name] = i
+		if _, exists := index[m.Name]; !exists {
+			index[m.Name] = i
+		}
 	}
 
 	// inDegree[i] = number of declared dependencies of modules[i] that
