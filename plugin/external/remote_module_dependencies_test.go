@@ -2,6 +2,8 @@ package external
 
 import (
 	"testing"
+
+	"github.com/GoCodeAlone/modular"
 )
 
 // TestRemoteModule_Dependencies_DefaultsToNil pins that a freshly-constructed
@@ -59,15 +61,35 @@ func TestRemoteModule_SetDependencies_Overwrites(t *testing.T) {
 	}
 }
 
+// TestRemoteModule_SetDependencies_DefensivelyCopies pins the setter-side
+// defensive copy: mutating the caller's slice after SetDependencies must
+// not change what Dependencies() returns. Without the copy, the engine
+// stores its own pre-copied slice safely, but other callers (tests,
+// future integration paths) hold a live reference to the module's
+// dependency graph. Aliasing through that reference would silently
+// corrupt modular's init order.
+func TestRemoteModule_SetDependencies_DefensivelyCopies(t *testing.T) {
+	m := &RemoteModule{name: "x"}
+	src := []string{"a", "b"}
+	m.SetDependencies(src)
+
+	// Mutate the source slice. The module must not see the mutation.
+	src[0] = "MUTATED"
+
+	got := m.Dependencies()
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("Dependencies() = %v after caller-side mutation; want [a b] — SetDependencies did NOT defensively copy", got)
+	}
+}
+
 // TestRemoteModule_ImplementsDependencyAware pins that *RemoteModule
-// satisfies a structurally-typed interface matching modular.DependencyAware.
-// We can't import modular's interface here without a circular dep, but
-// the structural check is sufficient — modular itself does the same
-// type assertion at init time.
+// satisfies modular.DependencyAware (the actual interface modular's
+// Init() walker type-asserts against). A regression that broke this
+// satisfaction would silently drop external-plugin modules out of
+// modular's dependency-aware sort and re-introduce the workflow#663
+// alphabetical-init race.
 func TestRemoteModule_ImplementsDependencyAware(t *testing.T) {
-	var _ interface {
-		Dependencies() []string
-	} = (*RemoteModule)(nil)
+	var _ modular.DependencyAware = (*RemoteModule)(nil)
 }
 
 // TestRemoteModule_ImplementsDependencyTargetInterface pins the structural
