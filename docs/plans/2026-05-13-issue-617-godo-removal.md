@@ -279,7 +279,9 @@ import (
 // the "plugin not loaded" test, and so that the manual AddModuleType stub in
 // the "plugin loaded" test is the only factory in the map. This intentionally
 // differs from setupEngineTest (engine_test.go), which calls loadAllPlugins.
-// Uses mock.Logger to match the existing test infrastructure.
+// Reuses the `mockLogger` type already defined in engine_test.go — both files
+// are in package workflow so the type is visible at compile time. DO NOT
+// redeclare it here.
 func newTestEngine(t *testing.T) *StdEngine {
 	t.Helper()
 	logger := &mockLogger{}
@@ -289,16 +291,6 @@ func newTestEngine(t *testing.T) *StdEngine {
 	}
 	return NewStdEngine(app, logger)
 }
-
-// mockLogger is a no-op modular.Logger satisfying the interface needed for
-// engine construction. Mirrors the test mock used elsewhere in this package
-// (search for `mockLogger` in engine_test.go for the canonical shape).
-type mockLogger struct{}
-
-func (mockLogger) Debug(string, ...any) {}
-func (mockLogger) Info(string, ...any)  {}
-func (mockLogger) Warn(string, ...any)  {}
-func (mockLogger) Error(string, ...any) {}
 
 func TestLegacyDOModuleError_PluginNotLoaded(t *testing.T) {
 	cases := []struct{ legacyType, hint string }{
@@ -377,6 +369,8 @@ func TestLegacyDOStepError_PluginNotLoaded(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.step, func(t *testing.T) {
+			module.SetIaCProviderLoaded(false)
+			defer module.SetIaCProviderLoaded(false)
 			r := module.NewStepRegistry()
 			_, err := r.Create(tc.step, "x", map[string]any{}, nil)
 			if err == nil {
@@ -394,6 +388,25 @@ func TestLegacyDOStepError_PluginNotLoaded(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLegacyDOStepError_PluginLoaded(t *testing.T) {
+	// Symmetric to TestLegacyDOModuleError_PluginLoaded — flips the global flag
+	// and confirms the step guard's "already loaded" branch fires.
+	module.SetIaCProviderLoaded(true)
+	defer module.SetIaCProviderLoaded(false)
+	r := module.NewStepRegistry()
+	_, err := r.Create("step.do_deploy", "x", map[string]any{}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "already loaded") {
+		t.Errorf("plugin-loaded branch must say 'already loaded'; got: %s", msg)
+	}
+	if strings.Contains(msg, "Install workflow-plugin-digitalocean") {
+		t.Errorf("plugin-loaded branch must NOT instruct install; got: %s", msg)
 	}
 }
 ```
@@ -646,7 +659,7 @@ Modify `.github/workflows/ci.yml` to add a job (placed near `golangci-lint`):
     name: Verify godo is not imported (issue #617)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - name: Grep gate — *.go files must not import godo
         run: |
           ! grep -rn --include="*.go" \
@@ -841,15 +854,13 @@ package modernize
 import (
 	"fmt"
 
+	"github.com/GoCodeAlone/workflow/module"
 	"gopkg.in/yaml.v3"
 )
 
-// legacyDORemovedInVersion intentionally duplicates module.RemovedInVersion
-// because importing the module package from modernize would create an import
-// cycle (modernize is a peer to module, and module-side tests can already
-// transitively pull modernize via the wfctl command). Keep the two constants
-// in sync when bumping the release tag.
-const legacyDORemovedInVersion = "v0.52.0"
+// (Import cycle check: `modernize` imports schema + yaml; `module` does NOT
+// transitively pull `modernize`. Confirmed by `go list -f '{{ join .Imports
+// "\n" }}'` on both packages.)
 
 // LegacyDORule rewrites legacy DigitalOcean module + step types to their
 // infra.* IaC successors (issue #617).
@@ -900,7 +911,7 @@ func LegacyDORule() Rule {
 					out = append(out, Finding{
 						RuleID:  "legacy-do-types",
 						Line:    typeVal.Line,
-						Message: fmt.Sprintf("%s removed in %s; rewrite to %s (provider: digitalocean) — requires workflow-plugin-digitalocean", typeVal.Value, legacyDORemovedInVersion, successor),
+						Message: fmt.Sprintf("%s removed in %s; rewrite to %s (provider: digitalocean) — requires workflow-plugin-digitalocean", typeVal.Value, module.RemovedInVersion, successor),
 						Fixable: true,
 					})
 				}
@@ -908,7 +919,7 @@ func LegacyDORule() Rule {
 					out = append(out, Finding{
 						RuleID:  "legacy-do-types",
 						Line:    typeVal.Line,
-						Message: fmt.Sprintf("%s removed in %s; rewrite to %s — requires workflow-plugin-digitalocean", typeVal.Value, legacyDORemovedInVersion, successor),
+						Message: fmt.Sprintf("%s removed in %s; rewrite to %s — requires workflow-plugin-digitalocean", typeVal.Value, module.RemovedInVersion, successor),
 						Fixable: true,
 					})
 				}
@@ -916,7 +927,7 @@ func LegacyDORule() Rule {
 					out = append(out, Finding{
 						RuleID:  "legacy-do-types",
 						Line:    typeVal.Line,
-						Message: fmt.Sprintf("%s removed in %s — %s", typeVal.Value, legacyDORemovedInVersion, reason),
+						Message: fmt.Sprintf("%s removed in %s — %s", typeVal.Value, module.RemovedInVersion, reason),
 						Fixable: false,
 					})
 				}
@@ -1333,6 +1344,14 @@ T4 is the only task with the runtime-launch-validation trigger (version-pin upda
 
 ## Adversarial review history (plan phase)
 
+### Cycle 3 (FAIL) — 2026-05-13
+
+- **C-1** Plan declared `type mockLogger struct{}` in `engine_legacy_do_migration_test.go` (same package as `engine_test.go:482` which already declares it) → compile error → **fixed**: redeclaration removed; helper reuses the existing in-package type.
+- **C-2** `legacyDORemovedInVersion` duplicate was justified by a falsely claimed import cycle (`go list -f '{{ join .Imports "\n" }}'` confirmed no cycle) → **fixed**: dropped the duplicate; modernize/legacy_do_rule.go now imports `module` and references `module.RemovedInVersion` directly. Single source of truth.
+- **I-1** Step "already loaded" branch had no test → **fixed**: added `TestLegacyDOStepError_PluginLoaded` symmetric to the engine equivalent.
+- **m-1** CI snippet pinned `actions/checkout@v5` which doesn't exist (repo uses `@v4` everywhere) → **fixed**.
+- **Cycle 1 and Cycle 2 plan-phase fixes verified to hold.**
+
 ### Cycle 2 (FAIL) — 2026-05-13
 
 - **C-1** `wfctl modernize` Fix renamed `type:` but did not inject `config.provider: digitalocean` → produced YAML that fails to load → **fixed by scope-limit (Option 2)**: rule explicitly does not inject the provider key; the migration guide adds a manual step with example YAML and the error string the user will hit; rule docstring + test names + expected fixture all assert the scope-limited behaviour.
@@ -1340,7 +1359,7 @@ T4 is the only task with the runtime-launch-validation trigger (version-pin upda
 - **I-1** `newTestEngine` differs from `setupEngineTest` (no `loadAllPlugins`) — intentional but not documented → **fixed**: comment added explaining the intentional divergence.
 - **I-2** `hasPlatformModules` + `isInfraType` rationale comments still cite DigitalOcean → **fixed**: comment-hygiene edit added to T5.
 - **m-1** `newTestEngine` passed `nil` logger to `NewStdApplication`; deviated from existing test pattern → **fixed**: use `mockLogger{}` matching the canonical shape in engine_test.go.
-- **m-2** `RemovedInVersion` declared in `module/` but hardcoded again in `modernize/` (import cycle prevents reuse) → **fixed**: explicit duplicate `legacyDORemovedInVersion` in modernize with a documented "keep in sync" comment.
+- **m-2** `RemovedInVersion` declared in `module/` but hardcoded again in `modernize/` (import cycle prevents reuse) → **fixed**: explicit duplicate `module.RemovedInVersion` in modernize with a documented "keep in sync" comment.
 - **m-3** AWS audit issue body invented speculative file names → **fixed**: T5 Step 9 now runs the grep BEFORE writing the body and uses the grep output to populate the in-scope list.
 - **Cycle 1 fixes verified to hold** — no regressions introduced.
 
