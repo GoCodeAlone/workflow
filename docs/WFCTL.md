@@ -556,13 +556,28 @@ wfctl plugin conformance --artifact <tar.gz> [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--mode` | `typed-iac` | Conformance mode. Currently checks strict typed IaC plugin launch/contract compatibility |
+| `--mode` | `typed-iac` | Conformance mode. `typed-iac` checks strict typed IaC plugin launch/contract compatibility and is the only mode that satisfies typed-IaC registry readiness for manifests advertising `iacProvider` capability. |
 | `--artifact` | _(none)_ | Release artifact tar.gz to test instead of a local plugin directory |
 | `--build-package` | `.` | Go package to build when testing a source directory, for example `./cmd/plugin` |
 | `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version recorded in evidence |
 | `--format` | `text` | Output format: `text` or `json` |
 | `--output` | _(none)_ | Write JSON evidence to a file |
 | `--timeout` | `30s` | Plugin launch/check timeout |
+
+**Conformance modes and compatibility evidence:**
+
+| Mode | Description | Satisfies IaC readiness? |
+|------|-------------|--------------------------|
+| `typed-iac` | Verifies the plugin binary completes the Workflow go-plugin handshake and registers `pb.IaCProviderRequired` and typed services. | **Yes** — required for manifests with `iacProvider` capability in first-party registries. |
+| `legacy-host-load` | Advisory-only smoke evidence for legacy `sdk.Serve` module plugins that can load and expose metadata/contracts but have not migrated to `sdk.ServeIaCPlugin`. | **No** — never satisfies typed-IaC registry readiness; rejected at index-update time for IaC provider manifests. |
+
+A plugin can pass legacy host-load and still fail `wfctl plugin conformance --mode typed-iac` with:
+
+```
+error: iac: plugin uses legacy InvokeService dispatch removed in workflow v1.0.0
+```
+
+`plugin-registry compatibility update` for a manifest advertising `iacProvider` capability will reject `legacy-host-load` evidence with an actionable error.
 
 Local directory evidence is useful during development. Registry enforcement should use artifact evidence so `archiveSHA256` can be matched against the registry manifest download checksum.
 

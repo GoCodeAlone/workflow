@@ -218,3 +218,51 @@ func TestPluginCompatEvidenceValidation(t *testing.T) {
 		t.Fatalf("marshal normalized evidence: %v", err)
 	}
 }
+
+// TestPluginCompatLegacyHostLoadModeIsValidButAdvisory verifies that evidence
+// with mode=legacy-host-load is accepted by ValidateCompatibilityEvidence
+// (so it can be stored/named) but that its mode constant is distinct from
+// typed-iac. The resolver must never select legacy-host-load evidence for IaC
+// readiness checks; this test confirms it round-trips correctly.
+func TestPluginCompatLegacyHostLoadModeIsValidButAdvisory(t *testing.T) {
+	ev := PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-test",
+		Version:       "v0.1.0",
+		EngineVersion: "v0.51.2",
+		Mode:          PluginCompatibilityModeLegacyHostLoad,
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "linux",
+		Arch:          "amd64",
+	}
+	got, err := ValidateCompatibilityEvidence(ev)
+	if err != nil {
+		t.Fatalf("ValidateCompatibilityEvidence(legacy-host-load): %v", err)
+	}
+	if got.Mode != PluginCompatibilityModeLegacyHostLoad {
+		t.Fatalf("mode = %q, want legacy-host-load", got.Mode)
+	}
+	if got.EvidenceDigest == "" {
+		t.Fatalf("legacy-host-load evidence missing digest: %#v", got)
+	}
+	// Confirm legacy-host-load and typed-iac are distinct constants.
+	if PluginCompatibilityModeLegacyHostLoad == PluginCompatibilityModeTypedIaC {
+		t.Fatal("legacy-host-load and typed-iac must be distinct mode constants")
+	}
+}
+
+// TestPluginCompatLegacyHostLoadRejectsUnknownMode verifies that unknown
+// mode strings are still rejected.
+func TestPluginCompatLegacyHostLoadRejectsUnknownMode(t *testing.T) {
+	ev := PluginCompatibilityEvidence{
+		Plugin:        "workflow-plugin-test",
+		Version:       "v0.1.0",
+		EngineVersion: "v0.51.2",
+		Mode:          "host-smoke",
+		Status:        PluginCompatibilityStatusPass,
+		OS:            "linux",
+		Arch:          "amd64",
+	}
+	if _, err := ValidateCompatibilityEvidence(ev); err == nil {
+		t.Fatal("ValidateCompatibilityEvidence(unknown mode) succeeded, want error")
+	}
+}
