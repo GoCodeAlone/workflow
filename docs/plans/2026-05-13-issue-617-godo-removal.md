@@ -579,6 +579,8 @@ After these edits, `wfctl validate` will skip schema rejection for legacy DO mod
 // rejects legacy DO module types with the actionable message — wfctl
 // validate's contract is "config is valid", and a legacy DO module type
 // is NOT valid post-cutover even though we let schema pass it through.
+//
+// For validate.go (return error directly):
 for _, m := range cfg.Modules {
     if legacydo.IsModuleType(m.Type) {
         // wfctl validate has no engine, so the plugin-loaded flag is always
@@ -586,9 +588,21 @@ for _, m := range cfg.Modules {
         return legacydo.FormatModuleError(m.Type, m.Name, false)
     }
 }
-// Same pattern in pipeline steps:
-for _, p := range cfg.Pipelines {
-    for _, s := range p.Steps {
+
+// cfg.Pipelines is map[string]any (verified at config/config.go:149) — NOT a
+// typed slice. Mirror the engine's existing pattern (engine.go configurePipelines):
+// marshal each entry to YAML then unmarshal into config.PipelineConfig before
+// accessing .Steps. The naive `p.Steps` access does not compile.
+for _, rawPipeline := range cfg.Pipelines {
+    yamlBytes, err := yaml.Marshal(rawPipeline)
+    if err != nil {
+        continue
+    }
+    var pipeCfg config.PipelineConfig
+    if err := yaml.Unmarshal(yamlBytes, &pipeCfg); err != nil {
+        continue
+    }
+    for _, s := range pipeCfg.Steps {
         if legacydo.IsStepType(s.Type) {
             return legacydo.FormatStepError(s.Type, false)
         }
@@ -596,7 +610,93 @@ for _, p := range cfg.Pipelines {
 }
 ```
 
-Add `cmd/wfctl/validate.go` and `cmd/wfctl/ci_validate.go` to T2's Files list.
+For `ciValidateFile` (which returns `[]error`, accumulating), use `errs = append(errs, ...)` instead of `return`:
+
+```go
+// In ci_validate.go ciValidateFile() — same post-pass, but accumulate:
+for _, m := range cfg.Modules {
+    if legacydo.IsModuleType(m.Type) {
+        errs = append(errs, legacydo.FormatModuleError(m.Type, m.Name, false))
+    }
+}
+for _, rawPipeline := range cfg.Pipelines {
+    yamlBytes, err := yaml.Marshal(rawPipeline)
+    if err != nil {
+        continue
+    }
+    var pipeCfg config.PipelineConfig
+    if err := yaml.Unmarshal(yamlBytes, &pipeCfg); err != nil {
+        continue
+    }
+    for _, s := range pipeCfg.Steps {
+        if legacydo.IsStepType(s.Type) {
+            errs = append(errs, legacydo.FormatStepError(s.Type, false))
+        }
+    }
+}
+```
+
+Add `cmd/wfctl/validate.go` and `cmd/wfctl/ci_validate.go` to T2's Files list (already listed above).
+
+**Automated test for the validate-path migration error** (T2):
+
+Add to `cmd/wfctl/legacy_do_types_removed_test.go`:
+
+```go
+// TestValidateFile_LegacyDOModule_ReturnsActionableError verifies that
+// wfctl validate emits the actionable migration error when the config
+// references a removed legacy DO module type (issue #617). Covers AC3
+// on the validate path (the engine path is covered by
+// TestLegacyDOModuleError_PluginNotLoaded in the workflow package).
+func TestValidateFile_LegacyDOModule_ReturnsActionableError(t *testing.T) {
+    dir := t.TempDir()
+    cfgPath := filepath.Join(dir, "legacy.yaml")
+    yaml := []byte("modules:\n  - name: api\n    type: platform.do_app\n    config: {}\n")
+    if err := os.WriteFile(cfgPath, yaml, 0o600); err != nil {
+        t.Fatal(err)
+    }
+    err := validateFile(cfgPath)   // direct call into the validate.go entry point
+    if err == nil {
+        t.Fatal("expected error for legacy DO module type")
+    }
+    msg := err.Error()
+    for _, want := range []string{
+        "removed from workflow core",
+        "workflow-plugin-digitalocean",
+        "infra.container_service",
+    } {
+        if !strings.Contains(msg, want) {
+            t.Errorf("error missing %q; got: %s", want, msg)
+        }
+    }
+}
+
+// Step variant covering ciValidateFile's accumulating return.
+func TestCIValidateFile_LegacyDOStep_ReturnsActionableError(t *testing.T) {
+    dir := t.TempDir()
+    cfgPath := filepath.Join(dir, "legacy.yaml")
+    yaml := []byte("pipelines:\n  deploy:\n    steps:\n      - type: step.do_deploy\n")
+    if err := os.WriteFile(cfgPath, yaml, 0o600); err != nil {
+        t.Fatal(err)
+    }
+    errs := ciValidateFile(cfgPath)
+    if len(errs) == 0 {
+        t.Fatal("expected error for legacy DO step type")
+    }
+    found := false
+    for _, e := range errs {
+        if strings.Contains(e.Error(), "step.iac_apply") && strings.Contains(e.Error(), "removed from workflow core") {
+            found = true
+            break
+        }
+    }
+    if !found {
+        t.Errorf("expected actionable migration error in errs; got: %v", errs)
+    }
+}
+```
+
+(Confirm `validateFile` and `ciValidateFile` function signatures match — adapt argument list if the actual signatures take `*FileSystem` / context / different shape; the test bodies should compile against whatever the real signatures are.)
 
 For the step path, **avoid the package-level global** that cycle 4 reviewer flagged as a logic-race risk: instead, attach the `iacProviderLoaded` boolean to the `StepRegistry` as a field set by the engine before pipeline construction. Modify `module/pipeline_step_registry.go`:
 
@@ -1410,6 +1510,12 @@ T4 is the only task with the runtime-launch-validation trigger (version-pin upda
 ---
 
 ## Adversarial review history (plan phase)
+
+### Cycle 7 (FAIL) — 2026-05-13
+
+- **C-1** validate/ci_validate post-pass step sweep used naive `for _, p := range cfg.Pipelines { for _, s := range p.Steps {` but `cfg.Pipelines` is `map[string]any` (verified at `config/config.go:149`), not `[]PipelineConfig` — won't compile → **fixed**: T2 now uses yaml.Marshal/Unmarshal pattern matching `engine.go configurePipelines`. Also split out the `ciValidateFile` accumulating variant (`errs = append`) from the `validateFile` early-return variant.
+- **I-1** No automated test for the validate-path migration error (only checklist item 5 covered it manually) → **fixed**: added `TestValidateFile_LegacyDOModule_ReturnsActionableError` and `TestCIValidateFile_LegacyDOStep_ReturnsActionableError` to T2.
+- **Cycle 1-6 plan-phase fixes verified to hold.**
 
 ### Cycle 6 (FAIL) — 2026-05-13
 
