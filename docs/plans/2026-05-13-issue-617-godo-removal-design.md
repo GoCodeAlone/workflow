@@ -64,24 +64,53 @@ AWS SDK usage is **explicitly out of scope** for this issue — `iam/`, `plugin/
 | `DOCUMENTATION.md` | Replace the 5 module rows + 5 step rows with a paragraph pointing at the DO plugin. |
 | `go.mod` / `go.sum` | `go mod tidy` after deletion drops `github.com/digitalocean/godo` + transitive deps. |
 
-### Migration error
+### Migration error — modules + steps (both paths covered)
 
-Add a thin guard in the engine's module-loader that, when it encounters a config module of type `platform.doks` / `platform.do_app` / `platform.do_dns` / `platform.do_database` / `platform.do_networking` and the type is not registered by any loaded plugin, emits:
+Two guards, one per registry. Both fire in the unknown-type fallback path so they are unreachable when the type is registered by a loaded plugin.
+
+**Module guard** — in `engine.go BuildFromConfig` (unknown-module-type branch):
 
 ```
 unsupported legacy module type %q: this type was removed from workflow core in v<NEXT>.
-Use workflow-plugin-digitalocean (https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
-and migrate to the equivalent infra.* IaC type:
+
+DigitalOcean IaC moved to workflow-plugin-digitalocean.
+%s
+
+Migrate this module to the equivalent infra.* IaC type:
   platform.do_app        → infra.container_service (provider: digitalocean)
   platform.do_database   → infra.database (provider: digitalocean)
   platform.do_dns        → infra.dns (provider: digitalocean)
   platform.do_networking → infra.vpc + infra.firewall (provider: digitalocean)
   platform.doks          → infra.k8s_cluster (provider: digitalocean)
+
+See docs/migrations/v<NEXT>-godo-removal.md.
 ```
 
-Implementation: add `legacyDOTypes` set + lookup in `engine.go BuildFromConfig` (or wherever unknown-module-type currently errors) producing the message above. The lookup is in the **unknown-type fallback path** — when the plugin IS loaded and registers the same names, that path is unreachable. (Plugin v0.12.0 does NOT register legacy names — it registers `iac.provider`. Therefore the error fires whenever a user with the new core + old config tries to load.)
+The middle `%s` line branches on plugin-loaded detection (closes adversarial finding I-2):
 
-This satisfies acceptance criterion #3.
+- If `iac.provider` factory is registered in the application's factory map AND a `provider: digitalocean` infra.* binding exists somewhere in the loaded plugins → emit `"workflow-plugin-digitalocean is already loaded; your config still references the legacy module name."`
+- Otherwise → emit `"Install workflow-plugin-digitalocean: https://github.com/GoCodeAlone/workflow-plugin-digitalocean"`
+
+**Step guard** — in `module/pipeline_step_registry.go` (or `engine.go buildPipelineSteps`'s unknown-step-type branch), for the five legacy step types. Per-step messages because the mapping is NOT one-to-one (closes finding I-1):
+
+```
+step.do_deploy   → step.iac_apply (against an infra.container_service module)
+step.do_destroy  → step.iac_destroy (against an infra.container_service module)
+step.do_status   → step.iac_status (against an infra.container_service module)
+step.do_logs     → no direct equivalent. The DO plugin attaches deploy logs
+                   internally via its Troubleshoot hook on step.iac_apply
+                   failure. For ad-hoc log fetch, use `wfctl infra logs`.
+                   A pipeline-step replacement is tracked in
+                   workflow-plugin-digitalocean issue <TBD>.
+step.do_scale    → no direct equivalent. Update instance_count in the
+                   infra.container_service module config and re-run
+                   step.iac_apply. A first-class step.iac_scale is tracked
+                   in workflow-plugin-digitalocean issue <TBD>.
+```
+
+The same plugin-loaded detection branches the step-guard prefix (`Install ... / already loaded ...`).
+
+This satisfies acceptance criterion #3 for both modules and pipeline steps.
 
 ## Considered approaches
 
@@ -99,6 +128,13 @@ Mark legacy modules deprecated, gate behind a `LEGACY_DO_MODULES=1` env var, rem
 **Pros:** Soft landing.
 **Cons:** Fights force-cutover precedent; perpetuates duplication; Dependabot still nags core during the window; doubles the work (two PRs, deprecation warnings, retest matrix); a "later release" reliably becomes "never."
 
+### Option B′ — Go build tag fence (REJECTED)
+
+Add `//go:build !workflow_strict` (or similar) to the six godo-importing files so the production binary excludes them while tests stay.
+
+**Pros:** No deletion; tests keep running; "reversible."
+**Cons:** Fails goal #1 — `godo` remains in `go.mod` because the build-tagged code still parses. Fails goal #4 — Dependabot still nags. Perpetuates ambiguity about "supported." Adds a build matrix for zero net benefit over Option A.
+
 ### Option C — Move-then-delete (REJECTED for DO; matches the AWS audit follow-up)
 
 Audit DO plugin parity, file gap issues against `workflow-plugin-digitalocean`, fix gaps, then delete from core.
@@ -111,6 +147,20 @@ The "move-then-delete" model fits the AWS audit better because parts of AWS legi
 ## Recommendation
 
 **Option A**, one PR `feat: remove godo from core (issue #617)`.
+
+### Companion: `wfctl modernize` rule (in scope of T5)
+
+The engine already has a `modernize` command (`mcp__workflow__modernize` tool + wfctl subcommand) that auto-rewrites legacy YAML anti-patterns. Add five rewrite rules so user YAML migrates with one `wfctl modernize --write` invocation:
+
+- `module/type: platform.do_app` → `module/type: infra.container_service` + inject `config.provider: digitalocean`
+- `module/type: platform.do_database` → `module/type: infra.database` + provider
+- `module/type: platform.do_dns` → `module/type: infra.dns` + provider
+- `module/type: platform.do_networking` → split into `infra.vpc` + `infra.firewall` modules (lossy — emit a comment-prefixed warning when source has both `vpc` and `firewalls` keys with non-overlapping shapes)
+- `module/type: platform.doks` → `module/type: infra.k8s_cluster` + provider
+- `step/type: step.do_deploy/status/destroy` → `step.iac_apply/status/destroy` with `module` field re-bound to the migrated module name
+- `step/type: step.do_logs/scale` → emit a `wfctl: cannot rewrite — see migration guide` annotation; do not delete the step (operator must address manually)
+
+This reduces migration friction from manual-rewrite to one command + manual review of the two annotated step types. Folds into T5.
 
 ## Assumptions (load-bearing)
 
@@ -132,11 +182,15 @@ The "move-then-delete" model fits the AWS audit better because parts of AWS legi
 |------------------|-------------------------------------------------------------|-------|
 | `platform.do_app` | `infra.container_service` + provider `digitalocean` → driver `internal/drivers/app_platform.go` | App Platform spec maps, region routing, build spec, migration repair, image presence — all present in plugin. |
 | `platform.do_database` | `infra.database` + provider `digitalocean` → driver `internal/drivers/database.go` | Managed PG / MySQL / Redis. |
-| `platform.do_dns` | `infra.dns` + provider `digitalocean` → `internal/drivers/dns_*.go` (declared in plugin docs) | DNS zone + records. |
+| `platform.do_dns` | `infra.dns` + provider `digitalocean` → `internal/drivers/dns.go` | DNS zone + records. |
 | `platform.do_networking` | `infra.vpc` + `infra.firewall` + provider `digitalocean` → `internal/drivers/vpc.go`, `internal/drivers/firewall.go` (per plugin manifest) | VPC + firewall split per IaC model. |
 | `platform.doks` | `infra.k8s_cluster` + provider `digitalocean` (plugin manifest) | DOKS cluster + node pool. |
 | `cloud.account` (DO resolver) | DO plugin manages its own DO API token via `iac.provider` credential broker | Plugin doesn't need the legacy resolver chain. |
-| `step.do_deploy/status/logs/scale/destroy` | `step.iac_plan/apply/status/destroy` (generic IaC steps) + plugin drivers | Generic steps drive any IaC provider; DO is no longer special-cased. |
+| `step.do_deploy` | `step.iac_apply` against `infra.container_service` | 1:1 mapping; provider drives apply. |
+| `step.do_status` | `step.iac_status` against `infra.container_service` | 1:1 mapping. |
+| `step.do_destroy` | `step.iac_destroy` against `infra.container_service` | 1:1 mapping. |
+| `step.do_logs` | **GAP** — no pipeline-step equivalent | DO plugin attaches logs via `Troubleshoot` hook internally on apply failure; ad-hoc fetch via `wfctl infra logs`. Tracked in plugin issue (filed pre-merge). Documented in migration guide. |
+| `step.do_scale` | **GAP** — config-driven re-apply only | Update `instance_count` in `infra.container_service` config + re-run `step.iac_apply`. First-class `step.iac_scale` tracked in plugin issue (filed pre-merge). Documented in migration guide. |
 
 If any cell of this matrix is wrong, the implementer files an issue against `workflow-plugin-digitalocean` BEFORE submitting the cutover PR, and the cutover PR blocks on that issue's fix.
 
@@ -165,10 +219,18 @@ If any cell of this matrix is wrong, the implementer files an issue against `wor
 Single PR, ~5 tasks:
 
 1. **T1 — Delete legacy module + step files (11 files).** Pure deletion; tests assert removal.
-2. **T2 — Strip registration sites (8 files).** Edits to `plugins/platform/plugin.go`, `schema/*.go`, `cmd/wfctl/type_registry.go`, `cmd/wfctl/infra.go`, `cmd/wfctl/deploy_providers.go`, `cmd/wfctl/ci_run_dryrun.go`, `plugins/platform/plugin_test.go`, `module/multi_region.go`.
+2. **T2 — Strip registration sites (9 files).** Edits to `plugins/platform/plugin.go`, `schema/schema.go`, `schema/module_schema.go`, `schema/step_schema_builtins.go`, `cmd/wfctl/type_registry.go`, `cmd/wfctl/infra.go`, `cmd/wfctl/deploy_providers.go`, `cmd/wfctl/ci_run_dryrun.go`, `plugins/platform/plugin_test.go`, `module/multi_region.go`. Implementer also reviews `cmd/wfctl/infra_apply_test.go` line 1990 (negative-test fixture using `type: platform.do_app`) — replace with a synthetic non-existent type or remove if the negative case is redundant.
 3. **T3 — Add load-time migration error + tests.** Engine fails-closed on legacy DO types with actionable message; new test fixtures cover all 5 legacy types.
-4. **T4 — `go mod tidy` + grep gate.** Confirm zero `digitalocean/godo` imports remain (excluding worktrees); update go.sum; CI gate added in CI workflow that re-greps on every PR to prevent regression.
-5. **T5 — Docs + CHANGELOG + migration guide stub.** Update `DOCUMENTATION.md`, prepend a CHANGELOG breaking-change entry, add `docs/migrations/v<NEXT>-godo-removal.md` with the 5 legacy → `infra.*` mappings.
+4. **T4 — `go mod tidy` + grep gate.** Confirm zero `digitalocean/godo` imports remain; update go.sum; add CI gate. Exact grep invocation:
+   ```sh
+   grep -rn --include="*.go" \
+     --exclude-dir=_worktrees \
+     --exclude-dir=.worktrees \
+     --exclude-dir=.claude \
+     "digitalocean/godo" .
+   ```
+   Gate lives in `.github/workflows/ci.yml` (or wherever `golangci-lint` already runs) as a fail-on-match step. Same grep also runs as a pre-commit step locally documented in CONTRIBUTING (no install required, repo-relative).
+5. **T5 — Docs + CHANGELOG + migration guide + modernize rules.** Update `DOCUMENTATION.md`, prepend CHANGELOG breaking-change entry, add `docs/migrations/v<NEXT>-godo-removal.md` (5 module + 5 step mappings, plus explicit GAP callout for `step.do_logs` / `step.do_scale` with workaround YAML examples), implement the seven `wfctl modernize` rewrite rules above + test fixtures, file the two follow-up issues in `workflow-plugin-digitalocean` (`step.iac_logs`, `step.iac_scale`) and wire their issue numbers back into the migration error messages.
 
 Post-merge: file follow-up issue **"#NEXT — Audit AWS SDK usage in workflow core (RBAC/secrets/artifact stay; IaC drivers reviewed for plugin move)"** so the AWS half of the issue's audit-points note is tracked.
 
@@ -185,6 +247,19 @@ This change affects build, package version, and runtime config loading. Rollback
 
 - Should the migration error be a hard error or a warning + skip? **Decision (autonomous):** hard error. A silently-skipped module is worse than a failed load; goal #3 mandates actionable errors. Re-open if adversarial review pushes back.
 - Should `cloud_account_do.go` deletion include removing the registered resolver names (`digitalocean/static`, `digitalocean/env`, `digitalocean/api_token`) from any global registry to prevent dead config keys? **Decision (autonomous):** yes — the registry is purely additive via init(); deleting the file removes the init(). Add a test that the credential registry has zero `digitalocean/*` entries post-deletion.
+
+## Adversarial review history
+
+### Cycle 1 (FAIL) — 2026-05-13
+
+- **C-1** Migration error covered modules but not `step.do_*` steps → **fixed**: added per-step guard + per-step migration message (modules/steps both branched on plugin-loaded detection).
+- **I-1** Parity matrix collapsed 5 step types into 4 generic ones, hiding `step.do_logs` + `step.do_scale` capability gap → **fixed**: parity matrix now lists each step row separately, GAPs called out, two follow-up issues to be filed pre-merge in `workflow-plugin-digitalocean`.
+- **I-2** Migration error misleads users who already have plugin loaded → **fixed**: migration error branches on plugin-loaded detection (different prefix for "install" vs "already loaded — config issue").
+- **m-1** Grep gate worktree exclusion underspecified → **fixed**: exact `grep -rn ... --exclude-dir=...` invocation in T4.
+- **m-2** `dns_*.go` → `dns.go` typo → **fixed**.
+- **m-3** `cmd/wfctl/infra_apply_test.go:1990` fixture missing from T2 → **fixed**: explicitly called out for review.
+- **Option B′ (build tag fence)** added to Considered approaches per reviewer suggestion (rejected with stated reason).
+- **`wfctl modernize` companion** added per reviewer suggestion (in scope of T5).
 
 ## References
 
