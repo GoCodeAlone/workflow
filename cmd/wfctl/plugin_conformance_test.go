@@ -89,6 +89,14 @@ func TestPluginConformanceLocalJSONPass(t *testing.T) {
 	if !strings.Contains(ev.StderrTail, "iac-pass stderr marker") {
 		t.Fatalf("stderr tail missing plugin output: %#v", ev)
 	}
+	// Passing evidence must not include a failureReason.
+	if ev.FailureReason != "" {
+		t.Fatalf("passing evidence should not have failureReason, got %q", ev.FailureReason)
+	}
+	// WfctlVersion must never end in +dirty.
+	if strings.HasSuffix(ev.WfctlVersion, "+dirty") {
+		t.Fatalf("wfctlVersion %q must not contain +dirty marker", ev.WfctlVersion)
+	}
 }
 
 func TestPluginConformanceBuildsRequestedPackage(t *testing.T) {
@@ -300,6 +308,14 @@ func TestPluginConformanceNoTypedIaCServiceFails(t *testing.T) {
 	}
 	if ev.EvidenceDigest == "" {
 		t.Fatalf("failure evidence missing digest: %#v", ev)
+	}
+	// Failure evidence must include a human-readable reason so maintainers
+	// can diagnose the failure without local reproduction.
+	if ev.FailureReason == "" {
+		t.Fatalf("failure evidence missing failureReason: %#v", ev)
+	}
+	if !strings.Contains(ev.FailureReason, "typed") && !strings.Contains(ev.FailureReason, "IaC") && !strings.Contains(ev.FailureReason, "legacy") {
+		t.Fatalf("failureReason = %q, want typed-IaC context", ev.FailureReason)
 	}
 }
 

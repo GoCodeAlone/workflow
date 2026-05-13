@@ -272,6 +272,7 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 	}
 	if err != nil {
 		ev.Status = PluginCompatibilityStatusFail
+		ev.FailureReason = err.Error()
 		if normalized, normErr := ValidateCompatibilityEvidence(ev); normErr == nil {
 			ev = normalized
 		}

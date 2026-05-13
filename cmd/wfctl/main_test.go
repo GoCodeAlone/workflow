@@ -47,6 +47,44 @@ func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
 	}
 }
 
+func TestBuildVersionStripsDirtyMarker(t *testing.T) {
+	// cleanBuildVersion must strip +dirty from both release tags and pseudo-versions.
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{
+			in:   "v0.22.8-0.20260510180701-a851625d3bf0+dirty",
+			want: "v0.22.8-0.20260510180701-a851625d3bf0",
+		},
+		{
+			in:   "v0.51.2+dirty",
+			want: "v0.51.2",
+		},
+		{
+			in:   "v0.51.2",
+			want: "v0.51.2",
+		},
+		{
+			in:   "v0.22.8-0.20260510180701-a851625d3bf0",
+			want: "v0.22.8-0.20260510180701-a851625d3bf0",
+		},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			got := cleanBuildVersion(tc.in)
+			if got != tc.want {
+				t.Fatalf("cleanBuildVersion(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// buildVersion() itself must never return a value ending in +dirty.
+	v := buildVersion()
+	if strings.HasSuffix(v, "+dirty") {
+		t.Fatalf("buildVersion() = %q, must not end in +dirty", v)
+	}
+}
+
 func writeTestConfig(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
