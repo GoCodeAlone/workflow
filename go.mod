@@ -37,7 +37,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.21
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.0
 	github.com/cucumber/godog v0.15.1
-	github.com/digitalocean/godo v1.178.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.9.0
@@ -183,7 +182,6 @@ require (
 	github.com/golobby/cast v1.3.3 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
-	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
