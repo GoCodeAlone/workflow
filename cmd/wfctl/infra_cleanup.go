@@ -65,6 +65,8 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 	tag := fs.String("tag", "", "tag to match resources for cleanup (required)")
 	dryRun := fs.Bool("dry-run", true, "preview only; do not delete resources (default: true)")
 	fix := fs.Bool("fix", false, "actually delete resources (overrides --dry-run)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -76,6 +78,10 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 	// true regardless of any explicit --dry-run=false. This keeps the safe-
 	// default invariant (cleanup is destructive: never delete without --fix).
 	*dryRun = !*fix
+
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	ctx := context.Background()
 	providers, closers, err := cleanupLoadProviders(ctx, fs, configFile, envName)

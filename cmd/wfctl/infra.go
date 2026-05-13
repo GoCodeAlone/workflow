@@ -246,9 +246,14 @@ func runInfraPlan(args []string) error {
 	var planIncludeFlag string
 	fs.StringVar(&planIncludeFlag, "include", "",
 		"Comma-separated list of resource names to scope this command to (filters both desired specs and current state)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 	format := &formatVal
 	output := &outputVal
 	showSensitive := showSensitiveVal
@@ -939,9 +944,14 @@ func runInfraImport(args []string) error {
 	fs.StringVar(&envName, "env", "", "Environment name")
 	fs.StringVar(&nameVal, "name", "", "Desired resource name from config")
 	fs.StringVar(&cloudIDVal, "id", "", "Cloud-provider resource ID")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
 		return err
@@ -1190,6 +1200,8 @@ func runInfraApply(args []string) error {
 	var includeFlag string
 	fs.StringVar(&includeFlag, "include", "",
 		"Comma-separated list of resource names to scope this command to (filters both desired specs and current state)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -1227,6 +1239,12 @@ func runInfraApply(args []string) error {
 	// planner can see the same include scope.
 	currentApplyIncludeFlag = includeFlag
 	defer func() { currentApplyIncludeFlag = "" }()
+
+	// Publish the --plugin-dir override so discoverAndLoadIaCProvider picks it
+	// up for this invocation. Reset after the command exits.
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {
@@ -1266,6 +1284,9 @@ func runInfraApply(args []string) error {
 		bootstrapArgs := []string{"--config", cfgFile}
 		if envName != "" {
 			bootstrapArgs = append(bootstrapArgs, "--env", envName)
+		}
+		if pluginDirFlag != "" {
+			bootstrapArgs = append(bootstrapArgs, "--plugin-dir", pluginDirFlag)
 		}
 		if err := runInfraBootstrap(bootstrapArgs); err != nil {
 			return fmt.Errorf("bootstrap: %w", err)
@@ -1524,9 +1545,14 @@ func runInfraStatus(args []string) error {
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
@@ -1559,9 +1585,14 @@ func runInfraDrift(args []string) error {
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
@@ -1597,10 +1628,15 @@ func runInfraDestroy(args []string) error {
 	fs.BoolVar(&autoApproveVal, "y", false, "Skip confirmation (short for --auto-approve)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	autoApprove := &autoApproveVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {

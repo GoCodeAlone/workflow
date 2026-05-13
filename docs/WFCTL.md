@@ -1308,6 +1308,7 @@ wfctl infra <action> [options] [config.yaml]
 | `--parallelism` | `10` | Number of parallel operations |
 | `--lock-timeout` | `0s` | Timeout for state lock acquisition |
 | `--force-rotate` | `` | (`bootstrap` only) Comma-separated list of secret names to regenerate, replacing existing values. Repeatable. Use to recover from known-bad secrets (empty value, leaked, dead key). Refuses `provider_credential` types. |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for plugin-loading commands (plan, apply, status, drift, destroy, import, bootstrap, refresh-outputs, cleanup, align, audit-keys, prune, rotate-and-prune). Useful for isolated CI smoke tests. |
 
 **State Subcommands:**
 
@@ -1341,6 +1342,10 @@ wfctl infra state import --source state.json
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN,DATABASE_URL
 wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
+
+# Use an isolated plugin directory for CI smoke tests:
+wfctl infra apply --dry-run --plugin-dir /tmp/ci-plugins -c infra.yaml
+wfctl infra plan --plugin-dir /tmp/ci-plugins -c infra.yaml
 ```
 
 #### `infra test`
@@ -1410,6 +1415,7 @@ wfctl infra cleanup --tag NAME [-c CONFIG] [--env ENV] [--dry-run | --fix]
 | `--env` | `` | Environment name for config and state resolution |
 | `--dry-run` | `true` | Preview only — list matched resources without deleting. |
 | `--fix` | `false` | Opt into deletion. Overrides `--dry-run`. |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 
 **Behaviour:**
 
@@ -1461,6 +1467,7 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
 | `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
 | `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 
 **Protected-resource gate:**
 
@@ -1639,6 +1646,7 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 | `--strict-health` | `false` | Treat `R-A2` health-check `WARN`s as `FAIL` |
 | `--strict-cidr` | `false` | Enable strict CIDR overlap checks (reserved) |
 | `--max-changes` | `50` | Warn when the plan has more than N actions |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 
 | Rule | Name | Severity |
 |------|------|----------|
@@ -1697,6 +1705,7 @@ wfctl infra audit-keys --type <T> [-c CONFIG] [--env ENV]
 | `--type` | _(required)_ | Resource type to enumerate (e.g. `infra.spaces_key`) |
 | `--config`, `-c` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
 | `--env` | `` | Environment name for config resolution |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. |
 
 `audit-keys` requires the loaded `iac.provider` to implement the optional
 `interfaces.EnumeratorAll` interface (per ADR 0016). Providers that don't
@@ -1731,6 +1740,7 @@ wfctl infra prune --type <T> --created-before <RFC3339> --exclude-access-key <AK
 | `--confirm` | `false` | Required: explicit confirmation flag (paired with `WFCTL_CONFIRM_PRUNE=1` env var) |
 | `--non-interactive` | `false` | Skip the y/N prompt (CI-friendly) |
 | `--recovery-from-last-rotation` | `false` | Read filter args from `${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json` (written by `infra rotate-and-prune` for recovery from partial-failure rotations without re-rotating) |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. |
 
 Exit codes:
 
@@ -1781,6 +1791,7 @@ wfctl infra rotate-and-prune --type <T> --name <name> --confirm [--non-interacti
 | `--preserve-names` | `` | Regex of resource names to preserve during the prune step (forwarded as `--preserve-names` to `infra prune`) |
 | `--confirm` | `false` | Required: paired with `WFCTL_CONFIRM_PRUNE=1` env var |
 | `--non-interactive` | `false` | Skip the y/N prompt (forwarded to the prune step) |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. |
 
 ```bash
 WFCTL_CONFIRM_PRUNE=1 wfctl infra rotate-and-prune \

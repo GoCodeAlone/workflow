@@ -41,9 +41,14 @@ func runInfraRefreshOutputs(args []string) error {
 	// values < 1 as "use default" so callers passing an explicit 0 (or
 	// negative) keep working; this default just makes `--help` honest.
 	fs.IntVar(&concurrency, "concurrency", 8, "Maximum concurrent Read calls")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {

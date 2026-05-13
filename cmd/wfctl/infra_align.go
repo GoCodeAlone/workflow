@@ -40,9 +40,14 @@ func runInfraAlign(args []string) error {
 	fs.BoolVar(&opts.strictHealth, "strict-health", false, "Treat R-A2 health-check WARNs as FAILs")
 	fs.BoolVar(&opts.strictCIDR, "strict-cidr", false, "Enable strict CIDR overlap checks (reserved for future use)")
 	fs.IntVar(&opts.maxChanges, "max-changes", 50, "Warn when plan has more than N changes")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	// Resolve config file
 	if opts.configFile == "" {

@@ -56,9 +56,14 @@ func runInfraBootstrap(args []string) error {
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	var rotateNames multiStringFlag
 	fs.Var(&rotateNames, "force-rotate", "Comma-separated list of secret names to regenerate, replacing existing values. Repeatable. Use for recovery from known-bad secrets (empty value, leak, etc).")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
