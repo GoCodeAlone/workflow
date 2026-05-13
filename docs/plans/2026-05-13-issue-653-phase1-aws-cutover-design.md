@@ -78,27 +78,30 @@ This design proposes a **single-PR force-cutover** that deletes the legacy AWS I
 
 | File | Edit |
 |------|------|
-| `plugins/platform/plugin.go` | Drop `platform.ecs`, `platform.apigateway`, `platform.autoscaling`, `platform.networking` from `ModuleTypes`; drop 4 module factories; drop `step.ecs_*`, `step.apigw_*`, `step.scaling_*`, `step.network_*` from `StepTypes`; drop 16 step factories. Keep `platform.dns`, `step.dns_*`, and all other types. |
-| `plugins/platform/plugin_test.go` | Drop the 4 module type + 16 step type string assertions. |
+| `plugins/platform/plugin.go` | Drop `platform.ecs`, `platform.apigateway`, `platform.autoscaling`, `platform.networking` from `ModuleTypes`; drop 4 module factories; drop `step.ecs_*`, `step.apigw_*`, `step.scaling_*`, `step.network_*` from `StepTypes`; drop **15** step factories. Keep `platform.dns`, `step.dns_*`, and all other types. |
+| `plugins/platform/plugin_test.go` | Drop the 4 module type + **15** step type string assertions. |
+| `plugins/infra/plugin.go` | **ADD** `"infra.autoscaling_group"` to `infraTypes` slice (new 14th infra type). Required so that configs migrated from `platform.autoscaling` validate correctly. |
 | `schema/schema.go` | Drop `platform.ecs`, `platform.apigateway`, `platform.autoscaling`, `platform.networking` from module type list. |
-| `schema/module_schema.go` | Drop 4 module schemas. |
-| `schema/step_schema_builtins.go` | Drop 16 step schema `Register` calls (ecs, apigw, scaling, network steps). |
-| `cmd/wfctl/type_registry.go` | Drop `platform.ecs`, `platform.apigateway`, `platform.autoscaling`, `platform.networking` entries. |
-| `schema/testdata/editor-schemas.golden.json` | Update golden file (regenerate via `go generate ./schema/...` or `-update` flag). |
+| `schema/module_schema.go` | Drop 4 module schemas. **Update** `platform.dns` ConfigFieldDef for `provider` to `Description: "mock (aws Route53 backend removed; use infra.dns with workflow-plugin-aws)"`. **ADD** `infra.autoscaling_group` ModuleSchema (mirrors other infra.* schemas: label, category: infrastructure, description, configFields for provider + resource). |
+| `schema/step_schema_builtins.go` | Drop **15** step schema `Register` calls (ecs, apigw, scaling, network steps). |
+| `cmd/wfctl/type_registry.go` | Drop `platform.ecs`, `platform.apigateway`, `platform.autoscaling`, `platform.networking` entries. **ADD** `"infra.autoscaling_group"` entry (mirrors other infra.* entries). |
+| `schema/testdata/editor-schemas.golden.json` | Update golden file via `UPDATE_GOLDEN=1 go test ./schema/ -run TestEditorSchemasGoldenFile`. |
 | `module/multi_region.go:117` | Update error message that references `platform.ecs` to use `infra.container_service`. |
-| `DOCUMENTATION.md` | Remove 4 module rows + 16 step rows; add paragraph pointing at `workflow-plugin-aws`. |
+| `DOCUMENTATION.md` | Remove 4 module rows + **15** step rows; keep `platform.dns` and `step.dns_*` rows; add paragraph pointing at `workflow-plugin-aws`. |
 | `go.mod` / `go.sum` | `go mod tidy` after deletion drops freed service packages. |
 
-### Step types removed (16 total)
+### Step types removed (15 total)
 
 | Module | Steps removed |
 |--------|---------------|
 | `platform.ecs` | `step.ecs_plan`, `step.ecs_apply`, `step.ecs_status`, `step.ecs_destroy` |
 | `platform.apigateway` | `step.apigw_plan`, `step.apigw_apply`, `step.apigw_status`, `step.apigw_destroy` |
 | `platform.autoscaling` | `step.scaling_plan`, `step.scaling_apply`, `step.scaling_status`, `step.scaling_destroy` |
-| `platform.networking` | `step.network_plan`, `step.network_apply`, `step.network_status` (no destroy step) |
+| `platform.networking` | `step.network_plan`, `step.network_apply`, `step.network_status` (**no `step.network_destroy` exists**) |
 
 **Remaining (stays):** `step.dns_plan`, `step.dns_apply`, `step.dns_status` — these back the generic `platform.dns` module which stays.
+
+Count: 4 (ecs) + 4 (apigw) + 4 (scaling) + 3 (networking) = **15 step types**. Verified: `schema/step_schema_builtins.go` and `plugins/platform/plugin.go` StepFactories both have exactly 15 entries for these step types.
 
 ---
 
@@ -126,23 +129,25 @@ See docs/migrations/v<NEXT>-aws-iac-removal.md.
 The `%s` line branches on plugin-loaded detection (mirrors #617 pattern):
 - `_, iacLoaded := e.moduleFactories["iac.provider"]` → if true: `"workflow-plugin-aws is already loaded; your config still references the legacy module name."` else: `"Install workflow-plugin-aws: https://github.com/GoCodeAlone/workflow-plugin-aws"`
 
-### Step guard (16 types)
+### Step guard (15 types)
 
 In `module/pipeline_step_registry.go Create()` (unknown-step-type branch, after legacydo check):
 
 ```
-step.ecs_plan/apply/status/destroy   → step.iac_plan/apply/status/destroy (against an infra.container_service module)
-step.apigw_plan/apply/status/destroy → step.iac_plan/apply/status/destroy (against an infra.api_gateway module)
+step.ecs_plan/apply/status/destroy     → step.iac_plan/apply/status/destroy (against an infra.container_service module)
+step.apigw_plan/apply/status/destroy   → step.iac_plan/apply/status/destroy (against an infra.api_gateway module)
 step.scaling_plan/apply/status/destroy → step.iac_plan/apply/status/destroy (against an infra.autoscaling_group module)
-step.network_plan/apply/status → step.iac_plan/apply/status (against an infra.vpc + infra.firewall module)
+step.network_plan/apply/status         → step.iac_plan/apply/status (against an infra.vpc + infra.firewall module)
+  (note: step.network_destroy never existed; no mapping needed)
 ```
 
 Same plugin-loaded detection branching as #617.
 
 ### platform.dns provider: aws guard
 
-In the `platform.dns` Init() when `provider: aws` is configured but Route53 backend was removed:
+The Route53 backend removal is implemented in two places:
 
+**Runtime guard** (in `platform.dns` Init(), via the `awsRoute53ErrorBackend` registered for provider `"aws"`):
 ```
 platform.dns %q: AWS Route53 backend removed from workflow core in v<NEXT>.
 Migrate to: infra.dns (provider: aws) with workflow-plugin-aws v0.2.0+.
@@ -150,7 +155,9 @@ Install: https://github.com/GoCodeAlone/workflow-plugin-aws
 See docs/migrations/v<NEXT>-aws-iac-removal.md.
 ```
 
-This is a runtime error in `platform.dns` Init(), not an engine-level unknown-type error. The `platform.dns` module type still loads; only the Route53 backend is unavailable.
+**Validate-path guard** (in `cmd/wfctl/validate.go` and `cmd/wfctl/ci_validate.go` post-ValidateConfig sweep): For any module with `type: platform.dns` and `config.provider: aws`, emit the same migration error string. This is required for goal #3 (actionable `wfctl` errors) — the runtime Init() error fires too late for `wfctl validate`.
+
+Implementation: the post-ValidateConfig loop in `validate.go:161` (already exists for legacydo types) is extended to also check for `type: platform.dns` + `provider: aws` config key. The same extension applies to `ci_validate.go:148`.
 
 ---
 
@@ -183,8 +190,9 @@ Following the `internal/legacydo` precedent (plan cycle-4 finding from #617 retr
 `internal/legacyaws/types.go`:
 - `RemovedInVersion = "v0.53.0"` (next minor after v0.52.0)
 - `ModuleTypes` — 4 legacy module types + successors
-- `StepTypes` — 16 legacy step types + successors
-- `IsModuleType()`, `IsStepType()`, `FormatModuleError()`, `FormatStepError()`
+- `StepTypes` — **15** legacy step types + successors (note: `step.network_destroy` never existed)
+- `DNSProviderAWSError` — migration error string for `platform.dns` provider: aws
+- `IsModuleType()`, `IsStepType()`, `FormatModuleError()`, `FormatStepError()`, `FormatDNSProviderAWSError()`
 
 ---
 
@@ -201,7 +209,10 @@ Not auto-fixable (1→2 split, operator must review):
 - `platform.networking` → splits into `infra.vpc` + `infra.firewall`
 
 Not auto-fixable (step config-shape mismatch, per #617 retro lesson):
-- All 16 step types → flagged with message; NOT auto-rewritten (step.iac_* require different config keys: `platform` + `state_store` instead of the legacy `service`/`cluster` keys). Operator must rewrite manually per migration guide.
+- All **15** step types → flagged with message; NOT auto-rewritten (step.iac_* require different config keys: `platform` + `state_store` instead of the legacy `service`/`cluster` keys). Operator must rewrite manually per migration guide.
+
+Not auto-fixable (provider sub-key, not a type rename):
+- `platform.dns` with `provider: aws` → flagged in the DNS-backend check pass; modernize emits a comment-style finding (not a type rewrite) pointing at `infra.dns` + `workflow-plugin-aws`.
 
 ---
 
@@ -219,7 +230,7 @@ Not auto-fixable (step config-shape mismatch, per #617 retro lesson):
 | `step.ecs_*` (4 steps) | `step.iac_plan/apply/status/destroy` against infra.container_service | Config key change: `service:` → `platform:` + `state_store:` |
 | `step.apigw_*` (4 steps) | `step.iac_plan/apply/status/destroy` against infra.api_gateway | Config key change |
 | `step.scaling_*` (4 steps) | `step.iac_plan/apply/status/destroy` against infra.autoscaling_group | Config key change |
-| `step.network_*` (3 steps) | `step.iac_plan/apply/status` against infra.vpc / infra.firewall | Config key change; networking gap: no `step.iac_destroy` available for multi-resource split |
+| `step.network_*` (3 steps) | `step.iac_plan/apply/status` against infra.vpc / infra.firewall | Config key change; networking gap: no `step.iac_destroy` available for multi-resource split; `step.network_destroy` never existed so no 4th mapping needed |
 
 ---
 
@@ -248,7 +259,7 @@ Keep Route53 backend file but have it panic/error at call time.
 
 ## Assumptions (load-bearing)
 
-1. **Plugin parity:** `workflow-plugin-aws` v0.2.0 covers all 6 deleted module types via their `infra.*` successors. `infra.autoscaling_group` was added in workflow-plugin-aws#9 per task context. *Test:* parity matrix above; implementer verifies plugin manifest before PR.
+1. **Plugin parity:** `workflow-plugin-aws` v0.2.0 covers all 6 deleted module types via their `infra.*` successors. `infra.autoscaling_group` was added in workflow-plugin-aws#9 per task context. *Test:* parity matrix above; implementer verifies plugin manifest before PR. Note: `infra.autoscaling_group` is also added to workflow core's infra plugin in T3 so `wfctl validate` accepts it post-migration.
 
 2. **No downstream consumer uses platform.ecs/apigateway/autoscaling/networking directly:** Grep `buymywishlist`, `core-dump`, `workflow-cloud`, `workflow-scenarios` before opening PR.
 
@@ -285,25 +296,63 @@ Keep Route53 backend file but have it panic/error at call time.
 
 Single PR, 6 tasks:
 
-**T1 — Delete 15 files, partially edit api_gateway_test.go**
-Delete: platform_ecs.go, platform_ecs_test.go, pipeline_step_ecs.go, platform_apigateway.go, platform_apigateway_test.go, pipeline_step_apigateway.go, aws_api_gateway.go, platform_autoscaling.go, platform_autoscaling_test.go, pipeline_step_autoscaling.go, platform_networking.go, platform_networking_test.go, pipeline_step_networking.go, platform_aws_integration_test.go.
-Edit: api_gateway_test.go (remove 3 TestAWSAPIGateway_* functions, keep 19 others).
-New: module/aws_absent_test.go (regression gate using filepath.WalkDir).
+**T1 — Delete 14 files; partially edit api_gateway_test.go; add regression gate**
+Delete (14 full deletions):
+- module/platform_ecs.go, module/platform_ecs_test.go, module/pipeline_step_ecs.go
+- module/platform_apigateway.go, module/platform_apigateway_test.go, module/pipeline_step_apigateway.go
+- module/aws_api_gateway.go
+- module/platform_autoscaling.go, module/platform_autoscaling_test.go, module/pipeline_step_autoscaling.go
+- module/platform_networking.go, module/platform_networking_test.go, module/pipeline_step_networking.go
+- module/platform_aws_integration_test.go
+
+Partial edit (NOT deleted — keep 19 generic HTTP gateway tests, remove 3):
+- module/api_gateway_test.go: remove `TestAWSAPIGateway_Basic`, `TestAWSAPIGateway_SyncRoutesStub`, `TestAWSAPIGateway_SyncRoutesRequiresAPIID`
+
+New: module/aws_absent_test.go (regression gate using filepath.WalkDir for the 3 freed service packages).
 
 **T2 — Replace platform_dns_backends.go with mock-only version + error stub**
-New file content: keep mockDNSBackend; delete route53Backend; add awsRoute53ErrorBackend that returns migration error when provider: aws is configured. Update platform_dns.go init() to use awsRoute53ErrorBackend instead of route53Backend. New: platform_dns_test.go assertion that provider: aws returns migration error.
+New file content: keep mockDNSBackend; delete route53Backend; add `awsRoute53ErrorBackend` (a struct implementing `dnsBackend`) that returns the migration error from all methods. Alternative considered: simply unregister "aws" from dnsBackendRegistry — rejected because the existing `"unsupported provider"` generic error is not actionable; the migration error must name `infra.dns` + `workflow-plugin-aws`. Update `platform_dns.go`'s `init()`: replace `return &route53Backend{}, nil` with `return &awsRoute53ErrorBackend{}, nil` (no import change needed — types stay in the same package). Update `schema/module_schema.go` platform.dns ConfigFieldDef for provider description (see T3). Add test in `module/platform_dns_test.go`: assert `provider: aws` returns error containing "infra.dns" and "workflow-plugin-aws".
 
-**T3 — Strip registration sites (9 files)**
-plugins/platform/plugin.go, plugins/platform/plugin_test.go, schema/schema.go, schema/module_schema.go, schema/step_schema_builtins.go, cmd/wfctl/type_registry.go, module/multi_region.go:117, DOCUMENTATION.md, schema/testdata/editor-schemas.golden.json (regenerate).
+**T3 — Strip registration sites, add infra.autoscaling_group, regenerate golden**
+Edit these files:
+- `plugins/platform/plugin.go`: drop 4 module + 15 step factories/type strings
+- `plugins/platform/plugin_test.go`: drop 4 module + 15 step type assertions
+- `plugins/infra/plugin.go`: ADD `"infra.autoscaling_group"` to infraTypes slice
+- `schema/schema.go`: drop 4 platform.* module type strings
+- `schema/module_schema.go`: drop 4 platform.* schemas; UPDATE platform.dns provider description; ADD infra.autoscaling_group schema
+- `schema/step_schema_builtins.go`: drop 15 step schema Register calls
+- `cmd/wfctl/type_registry.go`: drop 4 platform.* entries; ADD infra.autoscaling_group entry
+- `module/multi_region.go:117`: update error message (platform.ecs → infra.container_service)
+- `DOCUMENTATION.md`: remove 4 module rows + 15 step rows; **keep** platform.dns row and step.dns_* rows (3 rows); add paragraph pointing at workflow-plugin-aws; add infra.autoscaling_group row
+- Regenerate `schema/testdata/editor-schemas.golden.json` via `UPDATE_GOLDEN=1 go test ./schema/ -run TestEditorSchemasGoldenFile`
 
 **T4 — Add internal/legacyaws + migration errors**
-New internal/legacyaws/types.go. Wire into engine.go (module guard), module/pipeline_step_registry.go (step guard), cmd/wfctl/validate.go, cmd/wfctl/ci_validate.go. Test: engine and validate paths for all 4 module types + 16 step types.
+New `internal/legacyaws/types.go` (4 module types, 15 step types, DNS provider error). Wire into:
+- `engine.go` (module guard — existing legacydo pattern, add legacyaws check)
+- `module/pipeline_step_registry.go` (step guard — add legacyaws check after legacydo check)
+- `cmd/wfctl/validate.go` (module guard + step guard + DNS provider: aws sweep)
+- `cmd/wfctl/ci_validate.go` (same additions)
+Tests: engine path for all 4 module types; step path for all 15 step types; validate path for 4 module types; DNS provider: aws guard for both validate.go and ci_validate.go.
 
 **T5 — wfctl modernize rule + migration doc**
 New modernize/legacy_aws_rule.go. New docs/migrations/v0.53.0-aws-iac-removal.md. Register rule in modernize/rules.go.
 
 **T6 — go mod tidy + CI grep gate**
-Run go mod tidy (root + example/ if needed). Verify service/apigatewayv2, service/applicationautoscaling, service/route53 drop from go.mod. Add CI grep gate: `! grep -rn --include="*.go" --exclude-dir=_worktrees --exclude-dir=.worktrees --exclude-dir=.claude "aws-sdk-go-v2/service/apigatewayv2\|aws-sdk-go-v2/service/applicationautoscaling\|aws-sdk-go-v2/service/route53" .`
+Run `go mod tidy` on root AND `(cd example && go mod tidy)` (example/go.mod lists service/apigatewayv2 + service/applicationautoscaling as indirect; they must drop). Verify service/apigatewayv2, service/applicationautoscaling, service/route53 drop from BOTH go.mod and example/go.mod.
+
+Add CI grep gate (two parts — mirrors #617's godo-banned gate):
+```sh
+# *.go files must not import the freed service packages:
+! grep -rn --include="*.go" \
+    --exclude-dir=_worktrees \
+    --exclude-dir=.worktrees \
+    --exclude-dir=.claude \
+    --exclude="aws_absent_test.go" \
+    "aws-sdk-go-v2/service/apigatewayv2\|aws-sdk-go-v2/service/applicationautoscaling\|aws-sdk-go-v2/service/route53" .
+
+# go.mod files must not list the freed service packages:
+! grep -qH "aws-sdk-go-v2/service/apigatewayv2\|aws-sdk-go-v2/service/applicationautoscaling\|aws-sdk-go-v2/service/route53" go.mod example/go.mod
+```
 
 ---
 
@@ -317,4 +366,15 @@ Run go mod tidy (root + example/ if needed). Verify service/apigatewayv2, servic
 
 ## Adversarial review history
 
-*(To be filled in by adversarial-design-review cycles)*
+### Cycle 1 (FAIL → revised) — 2026-05-13
+
+- **C-1** `infra.autoscaling_group` missing from core infra type registry (plugins/infra/plugin.go, schema/module_schema.go, cmd/wfctl/type_registry.go) → **fixed**: T3 now adds it to all three sites.
+- **C-2** `platform.dns` provider: aws guard only fires at runtime (Init()), bypassing `wfctl validate` → **fixed**: validate-path guard added to validate.go + ci_validate.go in T4; FormatDNSProviderAWSError added to internal/legacyaws.
+- **I-1** Step count 15 not 16 (step.network_destroy never existed) → **fixed**: all "16" corrected to "15" throughout.
+- **I-2** example/go.mod tidy + go.mod grep gate missing → **fixed**: T6 now explicitly runs `(cd example && go mod tidy)` and adds a second grep gate checking go.mod + example/go.mod.
+- **I-3** platform.dns schema description not updated after Route53 backend removal → **fixed**: T3 now updates provider ConfigFieldDef description.
+- **m-1** T1 file count ambiguous → **fixed**: explicit 14-deletion + 1-partial-edit list.
+- **m-2** awsRoute53ErrorBackend vs simple unregister not justified → **fixed**: T2 now documents the rejected alternative and justification.
+- **m-3** DOCUMENTATION.md DNS step rows not called out as staying → **fixed**: T3 explicitly says keep platform.dns row + step.dns_* rows.
+
+### Cycle 2 — pending
