@@ -47,6 +47,28 @@ func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
 	}
 }
 
+func TestBuildVersionStripsDirtyMarker(t *testing.T) {
+	// buildVersion() is driven by debug.ReadBuildInfo at process start, so we
+	// cannot inject a dirty version at test runtime.  Instead, verify that the
+	// helper strips the suffix when the raw string contains it, by calling
+	// strings.TrimSuffix the same way buildVersion does.
+	raw := "v0.22.8-0.20260510180701-a851625d3bf0+dirty"
+	got := strings.TrimSuffix(raw, "+dirty")
+	if strings.HasSuffix(got, "+dirty") {
+		t.Fatalf("TrimSuffix did not strip +dirty from %q", raw)
+	}
+	want := "v0.22.8-0.20260510180701-a851625d3bf0"
+	if got != want {
+		t.Fatalf("stripped version = %q, want %q", got, want)
+	}
+
+	// buildVersion() itself must never return a value ending in +dirty.
+	v := buildVersion()
+	if strings.HasSuffix(v, "+dirty") {
+		t.Fatalf("buildVersion() = %q, must not end in +dirty", v)
+	}
+}
+
 func writeTestConfig(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)

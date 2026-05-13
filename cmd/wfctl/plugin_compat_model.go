@@ -112,6 +112,7 @@ type PluginCompatibilityEvidence struct {
 	GeneratedBy           string                    `json:"generatedBy,omitempty"`
 	StdoutTail            string                    `json:"stdoutTail,omitempty"`
 	StderrTail            string                    `json:"stderrTail,omitempty"`
+	FailureReason         string                    `json:"failureReason,omitempty"`
 }
 
 func NormalizePluginVersionIndex(index *PluginVersionIndex, defaultPlugin string) (*PluginVersionIndex, error) {
