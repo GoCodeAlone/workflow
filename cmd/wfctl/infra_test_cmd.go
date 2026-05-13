@@ -160,7 +160,8 @@ func runInfraTestFile(path string) (infraTestResult, error) {
 
 func infraTestStates(in []infraTestResourceState) []interfaces.ResourceState {
 	out := make([]interfaces.ResourceState, 0, len(in))
-	for _, s := range in {
+	for i := range in {
+		s := &in[i]
 		out = append(out, interfaces.ResourceState{
 			Name:                s.Name,
 			Type:                s.Type,
@@ -205,8 +206,8 @@ func assertInfraResources(label string, expected []infraResourceExpect, actual [
 func assertInfraPlan(expected infraPlanExpect, actual interfaces.IaCPlan) error {
 	if len(expected.ActionCounts) > 0 {
 		counts := map[string]int{}
-		for _, action := range actual.Actions {
-			counts[action.Action]++
+		for i := range actual.Actions {
+			counts[actual.Actions[i].Action]++
 		}
 		for action, want := range expected.ActionCounts {
 			if got := counts[action]; got != want {
