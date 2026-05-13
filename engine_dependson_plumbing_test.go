@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/GoCodeAlone/modular"
@@ -177,6 +179,105 @@ func TestEngine_BuildFromConfig_PlumbsDefensiveCopy(t *testing.T) {
 	if capturedChild.rawRecorded[0] != "root-a" {
 		t.Errorf("engine did NOT defensively copy DependsOn — mutating the yaml slice from %q to %q changed the recorded value (now %q)",
 			"root-a", deps[0], capturedChild.rawRecorded[0])
+	}
+}
+
+// initOrderRecorderModule appends its name to a shared slice during Init().
+// Used by TestEngine_BuildFromConfig_RealModularHonoursDependsOn to assert
+// the order modular's real Init walker fires modules in — proving that
+// SetDependencies plumbed by BuildFromConfig actually drives modular's
+// dependency-aware sort, not just that the recorded values look right.
+type initOrderRecorderModule struct {
+	name      string
+	deps      []string
+	initOrder *[]string // shared pointer; appended to on Init
+}
+
+func (m *initOrderRecorderModule) Name() string { return m.name }
+func (m *initOrderRecorderModule) Init(_ modular.Application) error {
+	*m.initOrder = append(*m.initOrder, m.name)
+	return nil
+}
+func (m *initOrderRecorderModule) RegisterConfig(_ modular.Application) error    { return nil }
+func (m *initOrderRecorderModule) Dependencies() []string                        { return m.deps }
+func (m *initOrderRecorderModule) ProvidesServices() []modular.ServiceProvider   { return nil }
+func (m *initOrderRecorderModule) RequiresServices() []modular.ServiceDependency { return nil }
+func (m *initOrderRecorderModule) SetDependencies(deps []string) {
+	cp := make([]string, len(deps))
+	copy(cp, deps)
+	m.deps = cp
+}
+
+// stubConfigProvider is a minimal modular.ConfigProvider for NewStdApplication.
+type stubConfigProvider struct{}
+
+func (stubConfigProvider) GetConfig() any { return nil }
+
+// TestEngine_BuildFromConfig_RealModularHonoursDependsOn proves the
+// fix end-to-end against the *real* modular framework — not the test
+// mockApplication whose Init() is a no-op. A consumer module declared
+// FIRST in cfg.Modules with dependsOn:[broker] must initialise AFTER
+// the broker, even though the broker is declared SECOND. This pins
+// the actual production behaviour the BMW PR #279/#280 race depends on.
+func TestEngine_BuildFromConfig_RealModularHonoursDependsOn(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	app := modular.NewStdApplication(stubConfigProvider{}, logger)
+	engine := NewStdEngine(app, logger)
+
+	var initOrder []string
+	engine.AddModuleType("test.depinit", func(name string, _ map[string]any) modular.Module {
+		return &initOrderRecorderModule{name: name, initOrder: &initOrder}
+	})
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			// Consumer declared FIRST, depends on broker.
+			{Name: "consumer", Type: "test.depinit", DependsOn: []string{"broker"}},
+			// Broker declared SECOND.
+			{Name: "broker", Type: "test.depinit"},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("BuildFromConfig: %v", err)
+	}
+
+	// Without the SetDependencies plumbing, modular's Init walker would
+	// see Dependencies()=nil for both modules and fall back to alphabetical
+	// (broker before consumer) — which would actually pass this assertion
+	// by coincidence. To prove the plumbing matters, declare the broker
+	// with a name that sorts AFTER the consumer alphabetically. With
+	// SetDependencies wired, modular still inits broker first (because
+	// consumer.Dependencies() now returns ["broker"]). Without it, modular
+	// would init "consumer" then "z-broker" (alphabetical) and the
+	// assertion would fail.
+	//
+	// Reset + re-run with that shape.
+	initOrder = initOrder[:0]
+	app2 := modular.NewStdApplication(stubConfigProvider{}, logger)
+	engine2 := NewStdEngine(app2, logger)
+	engine2.AddModuleType("test.depinit", func(name string, _ map[string]any) modular.Module {
+		return &initOrderRecorderModule{name: name, initOrder: &initOrder}
+	})
+	cfg2 := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "consumer", Type: "test.depinit", DependsOn: []string{"z-broker"}},
+			{Name: "z-broker", Type: "test.depinit"},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+	if err := engine2.BuildFromConfig(cfg2); err != nil {
+		t.Fatalf("BuildFromConfig (z-broker shape): %v", err)
+	}
+	if len(initOrder) != 2 {
+		t.Fatalf("initOrder = %v, want 2 entries", initOrder)
+	}
+	if initOrder[0] != "z-broker" || initOrder[1] != "consumer" {
+		t.Errorf("modular Init order = %v, want [z-broker consumer] (broker must precede dependent even when alphabetically later)",
+			initOrder)
 	}
 }
 

@@ -70,8 +70,16 @@ func (m *RemoteModule) Dependencies() []string {
 // module so modular's Init() walker can honour them. Called by the engine
 // from BuildFromConfig once per module, immediately after the factory
 // returns and before app.RegisterModule. See workflow#663.
+//
+// Defensive copy: although the engine already copies before calling, the
+// setter is exported and Dependencies() exposes the same backing array to
+// modular. Copying here too means any caller (engine, tests, future
+// integration paths) can mutate its source slice after calling without
+// silently corrupting this module's init graph.
 func (m *RemoteModule) SetDependencies(deps []string) {
-	m.dependencies = deps
+	cp := make([]string, len(deps))
+	copy(cp, deps)
+	m.dependencies = cp
 }
 
 func (m *RemoteModule) ProvidesServices() []string {
