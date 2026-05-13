@@ -31,6 +31,29 @@ func (m *fakeDepAwareModule) SetDependencies(deps []string) {
 	m.setCalls = append(m.setCalls, cp)
 }
 
+// rawSliceRecorderModule retains the EXACT slice reference passed to
+// SetDependencies — no defensive copy on the recording side. Used by
+// TestEngine_BuildFromConfig_PlumbsDefensiveCopy to prove the engine
+// itself copies; if the engine just passed modCfg.DependsOn through,
+// mutating the original yaml-derived slice would mutate this recorded
+// reference too, and the test would fail.
+type rawSliceRecorderModule struct {
+	name        string
+	rawRecorded []string // nil until SetDependencies fires; then the exact slice ref
+	callCount   int
+}
+
+func (m *rawSliceRecorderModule) Name() string                                  { return m.name }
+func (m *rawSliceRecorderModule) Init(_ modular.Application) error              { return nil }
+func (m *rawSliceRecorderModule) RegisterConfig(_ modular.Application) error    { return nil }
+func (m *rawSliceRecorderModule) Dependencies() []string                        { return nil }
+func (m *rawSliceRecorderModule) ProvidesServices() []modular.ServiceProvider   { return nil }
+func (m *rawSliceRecorderModule) RequiresServices() []modular.ServiceDependency { return nil }
+func (m *rawSliceRecorderModule) SetDependencies(deps []string) {
+	m.rawRecorded = deps // INTENTIONAL: no copy. Asserts engine-side copy.
+	m.callCount++
+}
+
 // fakePlainModule deliberately does NOT implement SetDependencies. The
 // engine plumbing must skip it without panicking, regardless of whether
 // modCfg.DependsOn is set.
@@ -104,22 +127,31 @@ func TestEngine_BuildFromConfig_PlumbsDependsOnIntoModule(t *testing.T) {
 // affect the slice the module recorded. Without the copy, downstream
 // code that re-uses ModuleConfig structs across builds (or mutates them
 // for any reason) could silently corrupt the engine-side dependency graph.
+//
+// The fake here records the EXACT slice reference passed to
+// SetDependencies (no defensive copy on the recording side) so a
+// regression where the engine passes modCfg.DependsOn through verbatim
+// would let a post-build mutation appear in the recorded value and fail
+// the assertion.
 func TestEngine_BuildFromConfig_PlumbsDefensiveCopy(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
 
-	var captured *fakeDepAwareModule
-	engine.AddModuleType("test.depmod", func(name string, _ map[string]any) modular.Module {
-		captured = &fakeDepAwareModule{name: name}
-		return captured
+	var capturedChild *rawSliceRecorderModule
+	engine.AddModuleType("test.rawmod", func(name string, _ map[string]any) modular.Module {
+		m := &rawSliceRecorderModule{name: name}
+		if name == "child" {
+			capturedChild = m
+		}
+		return m
 	})
 
 	deps := []string{"root-a", "root-b"}
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "root-a", Type: "test.depmod"},
-			{Name: "root-b", Type: "test.depmod"},
-			{Name: "child", Type: "test.depmod", DependsOn: deps},
+			{Name: "root-a", Type: "test.rawmod"},
+			{Name: "root-b", Type: "test.rawmod"},
+			{Name: "child", Type: "test.rawmod", DependsOn: deps},
 		},
 		Workflows: map[string]any{},
 		Triggers:  map[string]any{},
@@ -129,17 +161,22 @@ func TestEngine_BuildFromConfig_PlumbsDefensiveCopy(t *testing.T) {
 		t.Fatalf("BuildFromConfig: %v", err)
 	}
 
-	// Mutate the original yaml-derived slice. Because we registered three
-	// modules using the same factory, `captured` is the LAST one — the
-	// "child" module with the dependsOn slice. Its recorded SetDependencies
-	// arg should NOT change after we mutate `deps`.
-	if len(captured.setCalls) != 1 {
-		t.Fatalf("child SetDependencies calls = %d, want 1", len(captured.setCalls))
+	if capturedChild == nil {
+		t.Fatal("child factory was not invoked")
 	}
-	deps[0] = "root-b" // valid mutation — duplicate of root-b, doesn't matter for the assertion
-	got := captured.setCalls[0]
-	if got[0] != "root-a" {
-		t.Errorf("engine did NOT defensively copy DependsOn — mutating the yaml slice changed the recorded value from root-a to %q", got[0])
+	if capturedChild.callCount != 1 {
+		t.Fatalf("child SetDependencies call count = %d, want 1", capturedChild.callCount)
+	}
+
+	// Mutate the original yaml-derived slice. The child's recorded
+	// reference must NOT see this change, because the engine should have
+	// passed a defensive copy. If the engine passed `deps` directly, this
+	// mutation would change capturedChild.rawRecorded[0] too and the
+	// assertion below would fail.
+	deps[0] = "MUTATED"
+	if capturedChild.rawRecorded[0] != "root-a" {
+		t.Errorf("engine did NOT defensively copy DependsOn — mutating the yaml slice from %q to %q changed the recorded value (now %q)",
+			"root-a", deps[0], capturedChild.rawRecorded[0])
 	}
 }
 
