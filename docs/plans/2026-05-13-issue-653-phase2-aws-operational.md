@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go, `go mod tidy`, `filepath.WalkDir` (for regression test), `golangci-lint`.
 
-**Base branch:** origin/feat/issue-653-aws-iac-cutover-v2 (Phase 1 merged)
+**Base branch:** origin/main (Phase 1 merged as PR #657 sha 950a0f0a)
 
 ---
 
@@ -121,13 +121,16 @@ func TestCodeBuildAWSBackendMigrationError(t *testing.T) {
 }
 ```
 
-**Step 2: Run the test to verify it fails (expected: compile error on `codebuildAWSBackend` type after edit, or test fails)**
+**Step 2: Run the test to verify it fails with the WRONG error (not the migration error)**
 
 ```bash
 cd /Users/jon/workspace/workflow/.claude/worktrees/feat-phase2-aws-operational
 go test ./module/... -run TestCodeBuildAWSBackendMigrationError -v
 ```
-Expected: test fails with `expected migration error ... got nil` (the AWS backend currently succeeds on CreateProject in mock-mode even with provider:aws — we need to add the error stub).
+Expected: FAIL — the test assertion `strings.Contains(errStr, "provider: mock")` fails.
+The current `codebuildAWSBackend.createProject()` makes a real AWS API call and returns a
+credential error (e.g., "no EC2 IMDS role found"), NOT the migration error with "provider: mock".
+This confirms the test correctly distinguishes the migration error from the real AWS error.
 
 **Step 3: Replace `codebuildAWSBackend` with `codebuildAWSErrorBackend` in `module/codebuild.go`**
 
@@ -218,6 +221,8 @@ golangci-lint run ./module/... 2>&1 | head -30
 Expected: No output (or only pre-existing warnings, none in `codebuild.go`).
 
 **Step 7: Commit**
+
+Rollback: `git revert <sha>` restores `codebuildAWSBackend`; run `go mod tidy` to restore `service/codebuild` in `go.mod`.
 
 ```bash
 cd /Users/jon/workspace/workflow/.claude/worktrees/feat-phase2-aws-operational
@@ -332,13 +337,7 @@ RegisterKubernetesBackend("eks", func(_ map[string]any) (kubernetesBackend, erro
 
 3d. Update imports: Remove `"github.com/aws/aws-sdk-go-v2/aws"`, `"github.com/aws/aws-sdk-go-v2/service/eks"`, and `ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"`. Add `"github.com/GoCodeAlone/workflow/internal/legacyaws"`.
 
-Also remove `"errors"` and `"strings"` imports from the file if they were only used by `eksBackend` — check whether `gkeBackend` or `aksBackend` uses them:
-- `errors` — check: `aksBackend` uses `strings.Contains` and `gkeBackend` uses `strings.Contains`, but does any remaining code use `errors.As`? If only `eksBackend` used `errors.As(err, &notFound)`, remove `"errors"` too.
-- `strings` — `gkeBackend` and `aksBackend` use `strings.Contains`, keep it.
-
-```bash
-grep -n '"errors"' /Users/jon/workspace/workflow/.claude/worktrees/feat-phase2-aws-operational/module/platform_kubernetes_kind.go
-```
+Also remove `"errors"` import — **confirmed**: `"errors"` is used only by `eksBackend` for `errors.As(err, &notFound)` and `errors.As(err, &alreadyExists)`. `gkeBackend` and `aksBackend` use `strings.Contains` only, not `errors.As`. Remove `"errors"`. Keep `"strings"` (used by `gkeBackend` and `aksBackend`).
 
 **Step 4: Run the test to verify it passes**
 
@@ -366,6 +365,8 @@ Expected: No output.
 
 **Step 7: Commit**
 
+Rollback: `git revert <sha>` restores `eksBackend`; run `go mod tidy` to restore `service/eks` in `go.mod`.
+
 ```bash
 cd /Users/jon/workspace/workflow/.claude/worktrees/feat-phase2-aws-operational
 git add module/platform_kubernetes_kind.go module/platform_kubernetes_test.go
@@ -381,13 +382,15 @@ git commit -m "feat(#653/p2): replace eksBackend with migration error stub"
 - Modify: `.github/workflows/ci.yml` (extend `aws-sdk-banned` gate)
 - Modify: `module/aws_absent_test.go` (add `service/codebuild` and `service/eks` to `freed` slice)
 
-**Step 1: Verify no remaining imports of `service/codebuild` or `service/eks`**
+**SERIAL DEPENDENCY:** Task 3 MUST run after Tasks 1 and 2 are fully committed. Step 1 below verifies this before proceeding.
+
+**Step 1: Verify Tasks 1 and 2 are complete — no remaining imports of `service/codebuild` or `service/eks`**
 
 ```bash
 cd /Users/jon/workspace/workflow/.claude/worktrees/feat-phase2-aws-operational
 grep -rn "service/codebuild\|service/eks" --include="*.go" .
 ```
-Expected: Zero output (only the `aws_absent_test.go` exclusion pattern and the new error files should appear — but those won't import the packages).
+Expected: Zero output. If any output appears, STOP — Task 1 or Task 2 is incomplete. Do not proceed to Step 2 until the imports are removed.
 
 **Step 2: Run `go mod tidy` to drop freed packages**
 
@@ -497,7 +500,7 @@ git commit -m "chore(#653/p2): go mod tidy + extend aws-sdk-banned CI gate (T3)"
 **Step 1: Push branch**
 
 ```bash
-cd /Users/jon/workspace/workflow/.claire/worktrees/feat-phase2-aws-operational
+cd /Users/jon/workspace/workflow/.claude/worktrees/feat-phase2-aws-operational
 git push -u origin feat/issue-653-phase2-aws-operational
 ```
 Expected: Branch pushed to remote. `git push` exits 0.
@@ -512,9 +515,11 @@ Expected: 3 commits (T1, T2, T3) visible.
 
 **Step 3: Create the PR**
 
+Note: Target `main` — Phase 1 branch (`feat/issue-653-aws-iac-cutover-v2`) was merged to main as PR #657 (sha `950a0f0a`).
+
 ```bash
 gh pr create \
-  --base feat/issue-653-aws-iac-cutover-v2 \
+  --base main \
   --head feat/issue-653-phase2-aws-operational \
   --title "feat(#653): Phase 2 — strip AWS SDK from codebuild + EKS backends" \
   --body "$(cat <<'EOF'
