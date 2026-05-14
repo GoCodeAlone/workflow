@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/GoCodeAlone/modular"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // IaCModule registers an IaCStateStore in the service registry.
@@ -95,6 +97,14 @@ func (m *IaCModule) Init(app modular.Application) error {
 		if client, ok := iacStateBackendRegistryInstance.resolve(m.backend); ok {
 			store := newGRPCIaCStateStore(client)
 			if err := store.Configure(context.Background(), m.backend, m.config); err != nil {
+				// codes.Unimplemented means the loaded plugin is an older build
+				// without the Configure RPC — co-deploy requirement of
+				// decisions/0036. Give the operator an actionable upgrade hint.
+				if status.Code(err) == codes.Unimplemented {
+					return fmt.Errorf("iac.state %q: backend %q: the loaded plugin does not implement the "+
+						"Configure RPC — upgrade the backend plugin to a version that supports Configure "+
+						"(see decisions/0036): %w", m.name, m.backend, err)
+				}
 				return fmt.Errorf("iac.state %q: backend %q: configure plugin backend: %w", m.name, m.backend, err)
 			}
 			m.store = store

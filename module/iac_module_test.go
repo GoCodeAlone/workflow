@@ -9,6 +9,8 @@ import (
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // configureStateBackendClient is a pb.IaCStateBackendClient stub for the
@@ -112,6 +114,41 @@ func TestIaCModuleConfigureError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "iac-plugin") || !strings.Contains(err.Error(), backend) {
 		t.Fatalf("Init error must name the module and backend, got: %v", err)
+	}
+	if m.store != nil {
+		t.Fatalf("m.store must stay nil when Configure fails, got %T", m.store)
+	}
+}
+
+// TestIaCModuleConfigureUnimplemented asserts that when the backend plugin is an
+// older build whose Configure RPC returns gRPC codes.Unimplemented, Init() fails
+// with an actionable error telling the operator to upgrade the plugin.
+func TestIaCModuleConfigureUnimplemented(t *testing.T) {
+	const backend = "azure_blob_configure_unimplemented_test"
+	unimpl := status.Error(codes.Unimplemented, "method Configure not implemented")
+	fake := &configureStateBackendClient{configureErr: unimpl}
+	if err := iacStateBackendRegistryInstance.register(backend, fake); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	defer func() {
+		iacStateBackendRegistryInstance.mu.Lock()
+		delete(iacStateBackendRegistryInstance.clients, backend)
+		iacStateBackendRegistryInstance.mu.Unlock()
+	}()
+
+	m := NewIaCModule("iac-plugin", map[string]any{"backend": backend})
+	err := m.Init(NewMockApplication())
+	if err == nil {
+		t.Fatal("Init must fail when the backend's Configure RPC is Unimplemented")
+	}
+	if !errors.Is(err, unimpl) {
+		t.Fatalf("Init error must wrap the Unimplemented error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "iac-plugin") || !strings.Contains(err.Error(), backend) {
+		t.Fatalf("Init error must name the module and backend, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "upgrade") {
+		t.Fatalf("Unimplemented error must tell the operator to upgrade the plugin, got: %v", err)
 	}
 	if m.store != nil {
 		t.Fatalf("m.store must stay nil when Configure fails, got %T", m.store)
