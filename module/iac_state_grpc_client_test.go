@@ -11,6 +11,62 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
+// captureStateBackendClient is a pb.IaCStateBackendClient stub that records the
+// last Configure request it received. Only Configure is exercised; the other
+// methods exist solely to satisfy the interface.
+type captureStateBackendClient struct {
+	gotConfigure *pb.ConfigureRequest
+}
+
+func (*captureStateBackendClient) GetState(context.Context, *pb.GetStateRequest, ...grpc.CallOption) (*pb.GetStateResponse, error) {
+	return nil, nil
+}
+func (*captureStateBackendClient) SaveState(context.Context, *pb.SaveStateRequest, ...grpc.CallOption) (*pb.SaveStateResponse, error) {
+	return nil, nil
+}
+func (*captureStateBackendClient) ListStates(context.Context, *pb.ListStatesRequest, ...grpc.CallOption) (*pb.ListStatesResponse, error) {
+	return nil, nil
+}
+func (*captureStateBackendClient) DeleteState(context.Context, *pb.DeleteStateRequest, ...grpc.CallOption) (*pb.DeleteStateResponse, error) {
+	return nil, nil
+}
+func (*captureStateBackendClient) Lock(context.Context, *pb.LockRequest, ...grpc.CallOption) (*pb.LockResponse, error) {
+	return nil, nil
+}
+func (*captureStateBackendClient) Unlock(context.Context, *pb.UnlockRequest, ...grpc.CallOption) (*pb.UnlockResponse, error) {
+	return nil, nil
+}
+func (*captureStateBackendClient) ListBackendNames(context.Context, *pb.ListBackendNamesRequest, ...grpc.CallOption) (*pb.ListBackendNamesResponse, error) {
+	return nil, nil
+}
+func (c *captureStateBackendClient) Configure(_ context.Context, r *pb.ConfigureRequest, _ ...grpc.CallOption) (*pb.ConfigureResponse, error) {
+	c.gotConfigure = r
+	return &pb.ConfigureResponse{}, nil
+}
+
+func TestGRPCIaCStateStoreConfigure(t *testing.T) {
+	fake := &captureStateBackendClient{}
+	store := newGRPCIaCStateStore(fake)
+
+	cfg := map[string]any{"container": "tfstate", "account": "wf"}
+	if err := store.Configure(context.Background(), "azure_blob", cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if fake.gotConfigure == nil {
+		t.Fatal("Configure did not call the client")
+	}
+	if fake.gotConfigure.BackendName != "azure_blob" {
+		t.Fatalf("BackendName = %q, want azure_blob", fake.gotConfigure.BackendName)
+	}
+	got, err := jsonBytesToMap(fake.gotConfigure.ConfigJson)
+	if err != nil {
+		t.Fatalf("ConfigJson not valid JSON: %v", err)
+	}
+	if got["container"] != "tfstate" || got["account"] != "wf" {
+		t.Fatalf("ConfigJson round-trip mismatch: %+v", got)
+	}
+}
+
 func TestGRPCIaCStateStoreRoundTrip(t *testing.T) {
 	lis := bufconn.Listen(4 << 20)
 	t.Cleanup(func() { _ = lis.Close() })

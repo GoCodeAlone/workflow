@@ -1649,6 +1649,7 @@ var ResourceDriver_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	IaCStateBackend_Configure_FullMethodName        = "/workflow.plugin.external.iac.IaCStateBackend/Configure"
 	IaCStateBackend_GetState_FullMethodName         = "/workflow.plugin.external.iac.IaCStateBackend/GetState"
 	IaCStateBackend_SaveState_FullMethodName        = "/workflow.plugin.external.iac.IaCStateBackend/SaveState"
 	IaCStateBackend_ListStates_FullMethodName       = "/workflow.plugin.external.iac.IaCStateBackend/ListStates"
@@ -1670,6 +1671,7 @@ const (
 // plugin backend implements honored expiry with a conformance test.
 // ─────────────────────────────────────────────────────────────────────────────
 type IaCStateBackendClient interface {
+	Configure(ctx context.Context, in *ConfigureRequest, opts ...grpc.CallOption) (*ConfigureResponse, error)
 	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error)
 	SaveState(ctx context.Context, in *SaveStateRequest, opts ...grpc.CallOption) (*SaveStateResponse, error)
 	ListStates(ctx context.Context, in *ListStatesRequest, opts ...grpc.CallOption) (*ListStatesResponse, error)
@@ -1685,6 +1687,16 @@ type iaCStateBackendClient struct {
 
 func NewIaCStateBackendClient(cc grpc.ClientConnInterface) IaCStateBackendClient {
 	return &iaCStateBackendClient{cc}
+}
+
+func (c *iaCStateBackendClient) Configure(ctx context.Context, in *ConfigureRequest, opts ...grpc.CallOption) (*ConfigureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigureResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_Configure_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *iaCStateBackendClient) GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error) {
@@ -1769,6 +1781,7 @@ func (c *iaCStateBackendClient) ListBackendNames(ctx context.Context, in *ListBa
 // plugin backend implements honored expiry with a conformance test.
 // ─────────────────────────────────────────────────────────────────────────────
 type IaCStateBackendServer interface {
+	Configure(context.Context, *ConfigureRequest) (*ConfigureResponse, error)
 	GetState(context.Context, *GetStateRequest) (*GetStateResponse, error)
 	SaveState(context.Context, *SaveStateRequest) (*SaveStateResponse, error)
 	ListStates(context.Context, *ListStatesRequest) (*ListStatesResponse, error)
@@ -1786,6 +1799,9 @@ type IaCStateBackendServer interface {
 // pointer dereference when methods are called.
 type UnimplementedIaCStateBackendServer struct{}
 
+func (UnimplementedIaCStateBackendServer) Configure(context.Context, *ConfigureRequest) (*ConfigureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Configure not implemented")
+}
 func (UnimplementedIaCStateBackendServer) GetState(context.Context, *GetStateRequest) (*GetStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetState not implemented")
 }
@@ -1826,6 +1842,24 @@ func RegisterIaCStateBackendServer(s grpc.ServiceRegistrar, srv IaCStateBackendS
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&IaCStateBackend_ServiceDesc, srv)
+}
+
+func _IaCStateBackend_Configure_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).Configure(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_Configure_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).Configure(ctx, req.(*ConfigureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _IaCStateBackend_GetState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -1961,6 +1995,10 @@ var IaCStateBackend_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "workflow.plugin.external.iac.IaCStateBackend",
 	HandlerType: (*IaCStateBackendServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Configure",
+			Handler:    _IaCStateBackend_Configure_Handler,
+		},
 		{
 			MethodName: "GetState",
 			Handler:    _IaCStateBackend_GetState_Handler,

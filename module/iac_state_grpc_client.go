@@ -107,6 +107,19 @@ func newGRPCIaCStateStore(c pb.IaCStateBackendClient) *grpcIaCStateStore {
 	return &grpcIaCStateStore{client: c}
 }
 
+// Configure delivers the iac.state module's YAML config to the plugin-served
+// backend so it can construct its SDK-backed store. cfg is JSON-encoded — the
+// iac.proto hard invariant — and backendName selects which backend the config
+// targets. See decisions/0036.
+func (s *grpcIaCStateStore) Configure(ctx context.Context, backendName string, cfg map[string]any) error {
+	cfgJSON, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	_, err = s.client.Configure(ctx, &pb.ConfigureRequest{BackendName: backendName, ConfigJson: cfgJSON})
+	return err
+}
+
 // GetState retrieves a state record by resource ID. Returns nil, nil when the
 // backend reports the record does not exist.
 func (s *grpcIaCStateStore) GetState(ctx context.Context, resourceID string) (*IaCState, error) {

@@ -10,6 +10,8 @@ import (
 func TestIaCStateBackendGeneratedTypesExist(t *testing.T) {
 	var _ IaCStateBackendServer // service interface generated
 	var _ IaCStateBackendClient // client interface generated
+	_ = &ConfigureRequest{BackendName: "x", ConfigJson: []byte("{}")}
+	_ = ConfigureResponse{}
 	_ = &GetStateRequest{ResourceId: "r"}
 	_ = &GetStateResponse{Exists: true, State: &IaCState{}}
 	_ = &SaveStateRequest{State: &IaCState{}}
