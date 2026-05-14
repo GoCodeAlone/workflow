@@ -37,8 +37,8 @@ import_block() {
   awk '/^import \(/{f=1} f{print} /^\)/{if(f)exit}' "$1"
 }
 
-real_import() {  # file, sdk → 0 if sdk appears in the import block
-  import_block "$1" | grep -q "$2"
+real_import() {  # file, sdk → 0 if sdk appears in a real import (block OR single-line)
+  { import_block "$1"; grep -E '^import "' "$1" 2>/dev/null; } | grep -q "$2"
 }
 
 CHECK=0
