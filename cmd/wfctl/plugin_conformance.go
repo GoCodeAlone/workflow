@@ -270,35 +270,46 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 			}
 
 			if !conformanceChecked {
-				// All candidates failed; build and return fail evidence with diagnostics.
-				if lastCheckErr == nil {
-					lastCheckErr = fmt.Errorf("no executable artifact candidate could be staged from archive (candidates: %s)", strings.Join(candidates, ", "))
+				// All named candidates failed the handshake.
+				// If Go sources are present (go.mod exists in the archive), fall back to
+				// go build rather than declaring failure immediately. This supports
+				// source-in-archive tarballs that happen to contain a pre-built or
+				// unrelated executable alongside the Go sources.
+				if _, modErr := os.Stat(filepath.Join(sourceDir, "go.mod")); modErr != nil {
+					// No go.mod → binary-only artifact; emit fail evidence with diagnostics.
+					if lastCheckErr == nil {
+						lastCheckErr = fmt.Errorf("no executable artifact candidate could be staged from archive (candidates: %s)", strings.Join(candidates, ", "))
+					}
+					manifestSHA, _ := hashFileSHA256(filepath.Join(installDir, "plugin.json"))
+					binarySHA := ""
+					if _, statErr := os.Stat(binaryPath); statErr == nil {
+						binarySHA, _ = hashFileSHA256(binaryPath)
+					}
+					ev := PluginCompatibilityEvidence{
+						Plugin:               manifest.Name,
+						Version:              manifest.Version,
+						EngineVersion:        opts.EngineVersion,
+						WfctlVersion:         buildVersion(),
+						Mode:                 opts.Mode,
+						Status:               PluginCompatibilityStatusFail,
+						OS:                   runtime.GOOS,
+						Arch:                 runtime.GOARCH,
+						ArchiveSHA256:        archiveSHA,
+						BinarySHA256:         binarySHA,
+						PluginManifestSHA256: manifestSHA,
+						GeneratedBy:          "wfctl plugin conformance",
+						StdoutTail:           conformanceStdout,
+						StderrTail:           conformanceStderr,
+					}
+					if normalized, normErr := ValidateCompatibilityEvidence(ev); normErr == nil {
+						ev = normalized
+					}
+					return ev, lastCheckErr
 				}
-				manifestSHA, _ := hashFileSHA256(filepath.Join(installDir, "plugin.json"))
-				binarySHA := ""
-				if _, statErr := os.Stat(binaryPath); statErr == nil {
-					binarySHA, _ = hashFileSHA256(binaryPath)
-				}
-				ev := PluginCompatibilityEvidence{
-					Plugin:               manifest.Name,
-					Version:              manifest.Version,
-					EngineVersion:        opts.EngineVersion,
-					WfctlVersion:         buildVersion(),
-					Mode:                 opts.Mode,
-					Status:               PluginCompatibilityStatusFail,
-					OS:                   runtime.GOOS,
-					Arch:                 runtime.GOARCH,
-					ArchiveSHA256:        archiveSHA,
-					BinarySHA256:         binarySHA,
-					PluginManifestSHA256: manifestSHA,
-					GeneratedBy:          "wfctl plugin conformance",
-					StdoutTail:           conformanceStdout,
-					StderrTail:           conformanceStderr,
-				}
-				if normalized, normErr := ValidateCompatibilityEvidence(ev); normErr == nil {
-					ev = normalized
-				}
-				return ev, lastCheckErr
+				// go.mod found → fall through to go build below.
+				// Clear stdout/stderr from failed candidate attempts so the final
+				// evidence reflects the build result rather than handshake noise.
+				conformanceStdout, conformanceStderr = "", ""
 			}
 			// conformanceChecked=true: a candidate passed; binary is at binaryPath.
 		}
@@ -311,6 +322,10 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		if buildPackage == "" {
 			buildPackage = "."
 		}
+		// Remove any pre-existing file at binaryPath (e.g. a failed candidate that was
+		// copied there) so go build can write the output without refusing to overwrite
+		// a non-object file.
+		_ = os.Remove(binaryPath)
 		cmd := exec.Command("go", "build", "-mod=mod", "-o", binaryPath, buildPackage) //nolint:gosec // command args are fixed; dir is staged source.
 		cmd.Dir = sourceDir
 		cmd.Env = append(os.Environ(), "GOWORK=off")
@@ -373,10 +388,10 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 //  1. installName (the normalised plugin name, e.g. "digitalocean")
 //  2. manifestName when it differs from installName (e.g. "workflow-plugin-digitalocean")
 //  3. On Windows: the above names with a ".exe" suffix
-//  4. Any other executable file found in the archive root (excluding well-known text extensions)
-//
-// This allows artifact mode to discover plugin binaries that are named after the
-// full project name in GoReleaser archives rather than the normalised install name.
+//  4. Any other executable in the archive root whose name starts with installName or
+//     manifestName (case-insensitive), e.g. "digitalocean_linux_amd64".
+//     This covers platform-suffixed GoReleaser binaries while avoiding the execution
+//     of arbitrary unrelated executables bundled in the archive.
 func discoverArtifactBinaryCandidates(sourceDir, manifestName, installName string) []string {
 	seen := make(map[string]bool)
 	var out []string
@@ -404,7 +419,10 @@ func discoverArtifactBinaryCandidates(sourceDir, manifestName, installName strin
 		}
 	}
 
-	// Scan the archive root for any additional executables not already considered.
+	// Scan the archive root for additional executables matching known plugin naming patterns.
+	// Only include names that start with installName or manifestName (case-insensitive) so
+	// that platform-suffixed GoReleaser binaries (e.g. "digitalocean_linux_amd64") are
+	// found without executing arbitrary unrelated executables from the archive.
 	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
 		return out
@@ -425,10 +443,13 @@ func discoverArtifactBinaryCandidates(sourceDir, manifestName, installName strin
 		if info.Mode()&0o111 == 0 {
 			continue
 		}
-		// Skip files with well-known non-binary extensions.
-		switch strings.ToLower(filepath.Ext(name)) {
-		case ".json", ".yaml", ".yml", ".md", ".txt", ".sh", ".bat", ".ps1",
-			".go", ".sum", ".mod", ".toml", ".lock", ".html", ".xml":
+		// Restrict fallback to names that start with installName or manifestName to
+		// avoid executing arbitrary binaries (e.g. helper scripts, CLI tools) that
+		// happen to be bundled in the archive.
+		nameLower := strings.ToLower(name)
+		installLower := strings.ToLower(installName)
+		manifestLower := strings.ToLower(manifestName)
+		if !strings.HasPrefix(nameLower, installLower) && !strings.HasPrefix(nameLower, manifestLower) {
 			continue
 		}
 		out = append(out, name)
