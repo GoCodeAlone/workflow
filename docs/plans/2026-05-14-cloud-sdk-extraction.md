@@ -16,9 +16,11 @@
 
 ## Scope Manifest
 
-**PR Count:** 5
-**Tasks:** 14
-**Estimated Lines of Change:** ~1800 (informational; not enforced)
+**PR Count:** 6
+**Tasks:** 15
+**Estimated Lines of Change:** ~1950 (informational; not enforced)
+
+**Amendment (2026-05-14):** PR 6 / Task 15 added by operator-approved scope amendment — `ctx context.Context` on `module.IaCStateStore` — see `decisions/0033-add-ctx-to-module-iac-state-store.md`. PR 4 de-gated from "HUMAN-GATE" to autonomous cross-repo per `decisions/0034-cross-repo-agent-operation-for-plugin-prs.md`. Original lock: 5 PRs / 14 tasks; manifest re-aligned + re-locked after amendment.
 
 **Out of scope:**
 - **Phases B (AWS), C (GCP), D (DigitalOcean)** — deferred to a follow-on plan authored *after* Phase A merges. Their concrete tasks genuinely depend on Phase A's outputs: the benchmark-validated `IaCStateBackend` proto shape, the host-side gRPC-client resolution pattern, and the plugin-side state-backend serve path. Planning them now would be fiction. The design (`docs/plans/2026-05-14-cloud-sdk-extraction-design.md`) is the authoritative spec for B/C/D; this plan delivers Phase 0 + Phase A, which the design explicitly designates as the "validates the contract end-to-end" increment.
@@ -35,10 +37,13 @@
 | 1 | Phase 0: split platform_kubernetes_kind.go + wire audit script into CI | Task 1, Task 2, Task 3 | feat/cloud-sdk-extraction-p0 |
 | 2 | Phase A: IaCStateBackend proto + benchmark harness + proto lock | Task 4, Task 5, Task 6 | feat/cloud-sdk-extraction-pa-proto |
 | 3 | Phase A: host-side IaCStateBackend resolution + secret-redaction + gRPC-logging guard | Task 7, Task 8, Task 9, Task 10 | feat/cloud-sdk-extraction-pa-host |
-| 4 | **[HUMAN-GATE — cross-repo]** Phase A: workflow-plugin-azure implements azure_blob IaCStateBackend | Task 11, Task 12 | (cross-repo: `workflow-plugin-azure` repo, branch `feat/azure-blob-state-backend`) |
+| 4 | Phase A: workflow-plugin-azure implements azure_blob IaCStateBackend (cross-repo) | Task 11, Task 12 | cross-repo: `workflow-plugin-azure` repo, branch `feat/azure-blob-state-backend` |
 | 5 | Phase A: core deletes iac_state_azure.go + strips azure_blob case → drops azure-sdk from go.mod | Task 13, Task 14 | feat/cloud-sdk-extraction-pa-core |
+| 6 | Amendment: add `ctx context.Context` to `module.IaCStateStore` | Task 15 | feat/cloud-sdk-extraction-iacstore-ctx |
 
-**PR 4 is a declared human-action gate.** It lands in a *different git repository* (`/Users/jon/workspace/workflow-plugin-azure`), which the autonomous worktree-scoped execution pipeline cannot branch/PR/tag. When execution reaches PR 4, the pipeline must **pause and surface PR 4 to a human operator** (with Tasks 11–12 as the checklist) — this is the expected, designed handoff, not an execution failure. PR 5 is **blocked on PR 4's plugin tag** existing and being installable (Task 13 Step 8 + Task 14 Step 4 runtime-launch validation load the tagged plugin binary). PRs 1–3 are fully autonomous-executable in the worktree; PR 5 resumes autonomously once the operator confirms PR 4 merged + tagged.
+**Execution order:** PR 1 → PR 2 → PR 3 (Tasks 7–8) → **PR 6** → PR 3 (Tasks 9–10) → PR 4 → PR 5. PR 6 (the `ctx` amendment) executes right after PR 3's Task 7/8 land — it amends `grpcIaCStateStore` (Task 7's file) and `IaCModule` dispatch (Task 8's wiring) in place, so it must run before PR 3 is finalized. All work lands on the single `feat/cloud-sdk-extraction` branch; `finishing-a-development-branch` splits it into the 6 PR branches per this table (PR 6 stacks on PR 3).
+
+**PR 4 is autonomous cross-repo work** (de-gated 2026-05-14, `decisions/0034-...md`). It lands in a *different git repository* — `/Users/jon/workspace/workflow-plugin-azure`. A dispatched agent operates in that repo directly; **every cross-repo agent dispatch MUST state, explicitly in its prompt, the absolute path of the repo it works in and that it is a *different* repo than the worktree** (see "Notes for the executor"). Push + PR-creation follow normal review discipline (feature branch, PR — never direct-to-default-branch). PR 5 is **blocked on PR 4's plugin release tag** existing and being installable (Task 13 Step 8 + Task 14 Step 4 runtime-launch validation load the tagged plugin binary); the release tag (Task 12) is an explicit, deliberate step but not a human gate.
 
 **Status:** Draft
 
@@ -46,7 +51,7 @@
 
 ## Cross-repo note
 
-PR 4 lands in a **different repository** (`/Users/jon/workspace/workflow-plugin-azure`), not the `workflow` worktree. The executing pipeline must create a branch + PR there separately. PR 4's plugin release (a tagged version implementing the published proto) **must merge and tag before PR 5** — PR 5's core deletion makes `backend: azure_blob` fail to build unless the plugin version implementing `IaCStateBackend` is loadable. PRs 2 and 3 can land in either order relative to each other but both precede PR 4 (the plugin needs the published proto) and PR 5.
+PR 4 lands in a **different repository** (`/Users/jon/workspace/workflow-plugin-azure`), not the `workflow` worktree. This is **autonomous cross-repo agent work, not a human gate** (`decisions/0034-cross-repo-agent-operation-for-plugin-prs.md`) — a dispatched agent branches/commits/pushes/PRs/tags in that repo directly. The hard requirement: **every cross-repo agent dispatch must state, explicitly and up front in its prompt, the absolute path of the repository it operates in and that it is a *different* repo than the `workflow` worktree** — an agent operating in the wrong repo is the live failure mode this requirement guards against. Push + PR-creation follow normal review discipline (feature branch, PR — never direct-to-default-branch). PR 4's plugin release (a tagged version implementing the published proto) **must merge and tag before PR 5** — PR 5's core deletion makes `backend: azure_blob` fail to build unless the plugin version implementing `IaCStateBackend` is loadable. The release tag (Task 12) is an explicit, deliberate step. PRs 2 and 3 precede PR 4 (the plugin needs the published proto); PR 6 (the `ctx` amendment) precedes PR 4 too, so the plugin's `IaCStateBackendServer` is written against the ctx-ful `module.IaCStateStore` from the start.
 
 ---
 
@@ -972,7 +977,7 @@ Rollback: `git revert` — test-only.
 
 ## PR 4 — Phase A: `workflow-plugin-azure` implements `azure_blob` `IaCStateBackend` (cross-repo)
 
-**Repository:** `/Users/jon/workspace/workflow-plugin-azure` (NOT the workflow worktree). Branch: `feat/azure-blob-state-backend`. This PR depends on PRs 2 (published proto) and is a prerequisite for PR 5.
+**Repository:** `/Users/jon/workspace/workflow-plugin-azure` — a **different git repository** than the `workflow` worktree the rest of this plan runs in. Branch: `feat/azure-blob-state-backend`. Autonomous cross-repo work, not a human gate (`decisions/0034-...md`). **The agent dispatched for Tasks 11–12 MUST be told, explicitly and up front, that it operates in `/Users/jon/workspace/workflow-plugin-azure` — a different repo — and every file path in Tasks 11–12 is relative to that repo, not the worktree.** This PR depends on PR 2 (published proto) + PR 6 (ctx-ful `module.IaCStateStore`, so the plugin's `IaCStateBackendServer` is written ctx-ful); it is a prerequisite for PR 5.
 
 ### Task 11: Port `AzureBlobIaCStateStore` into workflow-plugin-azure + serve it as `IaCStateBackend`
 
@@ -1225,10 +1230,100 @@ Rollback: revert the commit; the registry + dispatch plumbing (Task 8) survive, 
 
 ---
 
+## PR 6 — Amendment: add `ctx context.Context` to `module.IaCStateStore`
+
+Operator-approved scope amendment (`decisions/0033-add-ctx-to-module-iac-state-store.md`). Widens the `module.IaCStateStore` interface's 6 methods to take `ctx context.Context` as the first parameter, so the gRPC contract plumbs real caller context instead of `context.Background()`, and Phase B/C/D plugin backends inherit a ctx-ful interface. **Executes after PR 3's Task 7/8 (which created the files it amends) and before PR 3 is finalized / before PR 4.** Bounded blast radius — entirely within `module/`. The separate `interfaces.IaCStateStore` already has `ctx` and is **not** touched.
+
+### Task 15: Widen `module.IaCStateStore` with `ctx context.Context`
+
+**Files:**
+- Modify: `module/iac_state.go` — the `IaCStateStore` interface (6 method signatures)
+- Modify: `module/iac_state_memory.go`, `module/iac_state_fs.go`, `module/iac_state_postgres.go`, `module/iac_state_spaces.go`, `module/iac_state_gcs.go`, `module/iac_state_azure.go` — the 6 in-process implementations
+- Modify: `module/iac_state_grpc_client.go` — `grpcIaCStateStore` (the 6 methods gain `ctx`, pass it to `s.client.X(ctx, …)` instead of `context.Background()`; delete the "context.Background()" doc-comment paragraph added in Task 7) and `iacStateBackendServer` (its 6 RPC methods already receive `ctx` from gRPC — forward it: `s.store.X(rpcCtx, …)`)
+- Modify: `module/pipeline_step_iac.go` — every `store.GetState(…)` / `store.SaveState(…)` / etc. call site gains the `ctx` the step already holds
+- Modify: `module/iac_module.go` — only if it calls `m.store` methods (it has a type-assertion at ~`:147`; check whether `Start()`/`Stop()` invoke store methods and thread `ctx` if so)
+- Modify (tests): `module/iac_state_grpc_client_test.go`, `module/benchmark_iac_state_backend_test.go`, `module/iac_state_plugin_registry_test.go`, and the `*_test.go` files of the 6 in-process impls — every store-method call site gains a `ctx` argument (`context.Background()` or `context.TODO()` is fine in tests)
+
+**Step 1: Widen the interface — this is the "failing test".**
+
+In `module/iac_state.go`, add `ctx context.Context` as the first parameter to all 6 `IaCStateStore` methods:
+```go
+type IaCStateStore interface {
+	GetState(ctx context.Context, resourceID string) (*IaCState, error)
+	SaveState(ctx context.Context, state *IaCState) error
+	ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error)
+	DeleteState(ctx context.Context, resourceID string) error
+	Lock(ctx context.Context, resourceID string) error
+	Unlock(ctx context.Context, resourceID string) error
+}
+```
+Add the `context` import if not present. (Keep the existing per-method doc comments.)
+
+**Step 2: Run the build to verify it fails everywhere.**
+
+Run: `GOWORK=off go build ./...`
+Expected: FAIL — every `IaCStateStore` implementation no longer satisfies the interface, and every call site has the wrong arity. The compiler error list IS the worklist for Steps 3–5.
+
+**Step 3: Update the 6 in-process implementations + the gRPC adapter/server.**
+
+For each of `iac_state_memory.go`, `iac_state_fs.go`, `iac_state_postgres.go`, `iac_state_spaces.go`, `iac_state_gcs.go`, `iac_state_azure.go`: add `ctx context.Context` as the first parameter of each of the 6 methods. The `memory`/`fs` backends don't *use* ctx (they're synchronous in-memory/disk) — accept it, name it `ctx`, and it's fine for it to be unused at the leaf (Go permits an unused function parameter; do NOT add `_ = ctx`). `postgres`/`spaces`/`gcs`/`azure` backends that already build a `context.Background()` internally for their SDK/DB calls should use the passed `ctx` instead.
+
+In `module/iac_state_grpc_client.go`:
+- `grpcIaCStateStore`'s 6 methods gain `ctx context.Context` and pass it straight through: `s.client.GetState(ctx, …)` etc. — replacing `context.Background()`. Delete the "All six methods call the backend with context.Background()…" doc-comment paragraph on the `grpcIaCStateStore` type (it is now false).
+- `iacStateBackendServer`'s 6 RPC methods already receive a `ctx context.Context` from the gRPC framework — forward THAT ctx into the `s.store.X(ctx, …)` calls instead of dropping it.
+
+**Step 4: Update the caller in `module/pipeline_step_iac.go`.**
+
+Every `resolveIaCStore(...)` result is used to call store methods (`store.GetState(s.resourceID)` etc.). Each call site gains the step's context as the first arg. Read the file to find the `context.Context` the step already holds — IaC pipeline steps run with a `PipelineContext`; use its context (e.g. `pc.Ctx` / `pc.Context()` — use whatever the real field/method is). If a particular call site genuinely has no context in scope, `context.Background()` is an acceptable last resort, but prefer the real one. Check `module/iac_module.go` too — if `Start()`/`Stop()` call `m.store` methods, thread a context (`context.Background()` is acceptable for lifecycle hooks that have none).
+
+**Step 5: Update all test call sites.**
+
+`GOWORK=off go build ./...` will still fail on `*_test.go` files. Fix every store-method call in: `iac_state_grpc_client_test.go`, `benchmark_iac_state_backend_test.go`, `iac_state_plugin_registry_test.go`, and the `*_test.go` files for the 6 in-process backends. In tests, `context.Background()` for the new first arg is fine. (The `fakeStateBackendClient` in `iac_state_plugin_registry_test.go` implements `pb.IaCStateBackendClient` — a gRPC interface that is *already* ctx-ful — so it needs no change; only the `IaCStateStore`-method call sites change.)
+
+**Step 6: Build + vet + test — all green.**
+
+Run: `GOWORK=off go build ./... && GOWORK=off go vet ./module/... && GOWORK=off go test ./module/ -run 'IaCState|IaCModule|GRPCIaCStateStore' -count=1`
+Expected: exit 0, all PASS. Also run `GOWORK=off go test ./module/ -bench BenchmarkIaCStateBackend -benchmem -run '^$' -count=1` — both benchmarks still run cleanly.
+
+**Step 7: gofmt.**
+
+Run: `GOWORK=off gofmt -l module/` — must print nothing for any file you touched.
+
+**Step 8: Commit.**
+
+```bash
+git add module/iac_state.go module/iac_state_memory.go module/iac_state_fs.go module/iac_state_postgres.go module/iac_state_spaces.go module/iac_state_gcs.go module/iac_state_azure.go module/iac_state_grpc_client.go module/pipeline_step_iac.go module/iac_module.go module/iac_state_grpc_client_test.go module/benchmark_iac_state_backend_test.go module/iac_state_plugin_registry_test.go
+# plus any in-process-backend *_test.go files you touched
+git commit -m "$(cat <<'EOF'
+feat(module)!: add ctx context.Context to IaCStateStore (operator amendment)
+
+Widens module.IaCStateStore's 6 methods with a leading ctx parameter so
+grpcIaCStateStore plumbs the caller's real context (was
+context.Background()) and iacStateBackendServer forwards its gRPC ctx
+into the store. The 6 in-process backends accept ctx; postgres/spaces/
+gcs/azure use it for their SDK/DB calls. pipeline_step_iac.go callers
+pass the step context.
+
+Operator-approved scope amendment — see decisions/0033. The separate
+interfaces.IaCStateStore already had ctx and is untouched. Phase B/C/D
+plugin backends now inherit a ctx-ful interface.
+
+BREAKING (internal): module.IaCStateStore is an internal interface; the
+IaCStateBackend gRPC wire contract is unchanged (gRPC was always ctx-ful).
+Rollback: revert this commit — mechanical signature-only revert.
+EOF
+)"
+```
+
+Rollback: revert the commit — a mechanical signature-only widening, no data-format or wire-contract change. (Runtime-affecting? No — no go.mod / build-config / migration / plugin-loading-path change; this is an internal interface signature change verified by `go build` + `go test`.)
+
+---
+
 ## Notes for the executor
 
-- **TDD discipline:** every task above follows write-test → see-it-fail → implement → see-it-pass → commit. Do not skip the "see it fail" step — it proves the test exercises the new behavior.
-- **Cross-repo PR 4:** create the branch + PR in `/Users/jon/workspace/workflow-plugin-azure` separately. It must merge + tag before PR 5. If the pipeline cannot operate cross-repo autonomously, surface PR 4 as a blocker for human action rather than skipping it.
-- **PR ordering:** PR 1 → (PR 2, PR 3 in either order) → PR 4 → PR 5. PR 5 is the only breaking change and the only one that touches `go.mod`.
-- **Benchmark gate (Task 6):** if the benchmark fails the 5 ms bar, STOP and redesign the proto for streaming before continuing — this is a design-mandated gate, not a formality.
-- **Follow-on plan:** once PR 5 merges, author the Phase B/C/D plan. Phase B (AWS) reuses Task 7's converters + Task 8's registry + Task 11's plugin pattern; Phase C (GCP) additionally runs the `kubernetesBackend` interface-audit spike for the `gke` contract decision (design Architecture §2); Phase D (DigitalOcean `spaces`) rides Phase B's `iac_state_spaces.go` deletion.
+- **TDD discipline:** every task above follows write-test → see-it-fail → implement → see-it-pass → commit. Do not skip the "see it fail" step — it proves the test exercises the new behavior. (Task 15 is a mechanical interface widening — there the *compiler* is the failing test: Step 1 widens the interface, Step 2 confirms the build breaks everywhere, Steps 3–5 fix it.)
+- **Cross-repo PR 4 (autonomous, NOT a human gate):** Tasks 11–12 run in `/Users/jon/workspace/workflow-plugin-azure` — a *different repo*. The dispatched agent operates there directly; its prompt MUST state the absolute repo path and that it is a different repo than the worktree (`decisions/0034-...md`). Push + PR follow normal review discipline (feature branch, never direct-to-default). PR 4 must merge + the release tag (Task 12) must exist before PR 5.
+- **Every cross-repo agent dispatch** (PR 4 here, and all plugin PRs in the deferred B/C/D plan) carries a fixed prompt obligation: state the absolute path of the repo it works in + that it differs from the worktree + which repo each file path belongs to. The orchestrator verifies `git -C <repo> log` after cross-repo commits.
+- **PR ordering:** PR 1 → PR 2 → PR 3 (Tasks 7–8) → PR 6 → PR 3 (Tasks 9–10) → PR 4 → PR 5. PR 5 is the only `go.mod`-touching breaking change. PR 6 stacks on PR 3; `finishing-a-development-branch` splits the single working branch into the 6 PR branches.
+- **Benchmark gate (Task 6) — RESOLVED:** the benchmark measured 6.51 ms (1 MB state); root-cause analysis showed the cost is JSON serialization (inherent to the `bytes *_json` wire format), not gRPC transport, so the plan's streaming-redesign contingency was mis-targeted. Operator confirmed unary is acceptable. **Unary is LOCKED** — see `docs/plans/2026-05-14-iac-state-backend-benchmark.md`. No streaming redesign.
+- **Follow-on plan:** once PR 5 merges, author the Phase B/C/D plan. Phase B (AWS) reuses Task 7's converters + Task 8's registry + Task 11's plugin pattern + the now-ctx-ful interface from PR 6; Phase C (GCP) additionally runs the `kubernetesBackend` interface-audit spike for the `gke` contract decision (design Architecture §2); Phase D (DigitalOcean `spaces`) rides Phase B's `iac_state_spaces.go` deletion. The IaC state at-rest format follow-up (`docs/plans/2026-05-14-iac-state-backend-benchmark.md` §"Logged follow-up") is a separate post-extraction item.
