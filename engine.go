@@ -509,6 +509,20 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	}
 	cfg.Modules = orderedModules
 
+	// Build the resolvable-dependency name set so the SetDependencies plumbing
+	// below can filter raw modCfg.DependsOn the same way topoSortModules
+	// filters its internal edges. Without this filter, the engine would forward
+	// empty-string entries and unknown names — both intentionally ignored by
+	// topoSortModules — straight into modular's DependencyAware sort, which
+	// would then either misorder (unknown names treated as future deps that
+	// never resolve) or panic (depending on the modular framework version).
+	moduleNameSet := make(map[string]struct{}, len(cfg.Modules))
+	for _, m := range cfg.Modules {
+		if m.Name != "" {
+			moduleNameSet[m.Name] = struct{}{}
+		}
+	}
+
 	// Compute config hash after transform hooks + dependency ordering so the
 	// hash reflects the effective runtime config (hooks may mutate cfg, and
 	// topoSortModules may reorder cfg.Modules, before modules are registered).
@@ -553,6 +567,24 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		mod = factory(modCfg.Name, modCfg.Config)
 		if mod == nil {
 			return fmt.Errorf("factory for module type %q returned nil for module %q", modCfg.Type, modCfg.Name)
+		}
+
+		// Plumb yaml-level `dependsOn:` into the module so modular's Init()
+		// walker honours it (workflow#663). Without this, external-plugin
+		// modules — which all return nil from Dependencies() by default —
+		// looked like roots to modular and got initialised in alphabetical
+		// order, which broke any plugin where module A's Init() registered
+		// runtime state that module B's Init() needed. The topoSortModules
+		// pass above already reordered cfg.Modules; this hands the same
+		// information to modular so its own initialisation graph agrees
+		// with engine-level ordering. filterResolvableDeps drops empty
+		// entries + unknown names so the slice modular sees matches the
+		// edge set topoSortModules used.
+		if depTarget, ok := mod.(interface{ SetDependencies([]string) }); ok {
+			filtered := filterResolvableDeps(modCfg.DependsOn, moduleNameSet, modCfg.Name)
+			if len(filtered) > 0 {
+				depTarget.SetDependencies(filtered)
+			}
 		}
 
 		e.app.RegisterModule(mod)
