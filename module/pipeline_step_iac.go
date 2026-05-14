@@ -11,6 +11,19 @@ import (
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+// lookupExistingState fetches the current state record for a step's resource.
+// A nil record (not found) is reported as (nil, nil); any store error —
+// including a context cancellation / deadline now that IaCStateStore carries
+// the caller's ctx — is returned so the step aborts rather than proceeding with
+// a stale notion of "existing".
+func lookupExistingState(ctx context.Context, store IaCStateStore, resourceID string) (*IaCState, error) {
+	existing, err := store.GetState(ctx, resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing iac.state for %q: %w", resourceID, err)
+	}
+	return existing, nil
+}
+
 // resolveIaCStore looks up an IaCStateStore from the service registry.
 func resolveIaCStore(app modular.Application, storeName, stepName string) (IaCStateStore, error) {
 	if app == nil {
@@ -116,7 +129,10 @@ func (s *IaCPlanStep) Execute(ctx context.Context, _ *PipelineContext) (*StepRes
 	}
 
 	// Persist planned state.
-	existing, _ := store.GetState(ctx, s.resourceID)
+	existing, err := lookupExistingState(ctx, store, s.resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("iac_plan step %q: %w", s.name, err)
+	}
 	now := nowUTC()
 	st := &IaCState{
 		ResourceID:   s.resourceID,
@@ -198,7 +214,10 @@ func (s *IaCApplyStep) Execute(ctx context.Context, _ *PipelineContext) (*StepRe
 	now := nowUTC()
 
 	// Transition state to provisioning before calling Apply.
-	existing, _ := store.GetState(ctx, s.resourceID)
+	existing, err := lookupExistingState(ctx, store, s.resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("iac_apply step %q: %w", s.name, err)
+	}
 	if existing != nil {
 		existing.Status = "provisioning"
 		existing.UpdatedAt = now
@@ -391,7 +410,10 @@ func (s *IaCDestroyStep) Execute(ctx context.Context, _ *PipelineContext) (*Step
 
 	now := nowUTC()
 
-	existing, _ := store.GetState(ctx, s.resourceID)
+	existing, err := lookupExistingState(ctx, store, s.resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("iac_destroy step %q: %w", s.name, err)
+	}
 	if existing != nil {
 		existing.Status = "destroying"
 		existing.UpdatedAt = now

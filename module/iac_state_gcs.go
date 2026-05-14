@@ -123,6 +123,12 @@ func (s *GCSIaCStateStore) ListStates(ctx context.Context, filter map[string]str
 		}
 		data, _, err := s.client.ReadObject(ctx, key)
 		if err != nil {
+			// A canceled / deadlined context must abort the listing rather
+			// than silently return partial results; only genuinely unreadable
+			// objects are skipped.
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("iac gcs state: ListStates: %w", err)
+			}
 			continue
 		}
 		var st IaCState

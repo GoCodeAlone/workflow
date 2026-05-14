@@ -28,7 +28,8 @@ type IaCStateStore interface {
 	SaveState(ctx context.Context, state *IaCState) error
 
 	// ListStates returns all state records matching the provided key=value filter.
-	// Pass an empty map to return all records.
+	// Pass a nil or empty map to return all records — both are treated as "no
+	// filter" (ranging over a nil map is valid Go, and most call sites pass nil).
 	ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error)
 
 	// DeleteState removes a state record by resource ID.

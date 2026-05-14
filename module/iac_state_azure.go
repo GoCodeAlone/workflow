@@ -127,6 +127,12 @@ func (s *AzureBlobIaCStateStore) ListStates(ctx context.Context, filter map[stri
 		}
 		data, err := s.client.DownloadBlob(ctx, name)
 		if err != nil {
+			// A canceled / deadlined context must abort the listing rather
+			// than silently return partial results; only genuinely unreadable
+			// blobs are skipped.
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("iac azure state: ListStates: %w", err)
+			}
 			continue
 		}
 		var st IaCState
