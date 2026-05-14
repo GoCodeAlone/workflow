@@ -437,6 +437,9 @@ wfctl validate --skip-unknown-types example/*.yaml
 wfctl validate --plugin-dir data/plugins config.yaml
 ```
 
+Use `wfctl config validate` for `wfctl.yaml` and `.wfctl-lock.yaml`; this
+command validates runtime Workflow configs such as `workflow.yaml`.
+
 When validating multiple files, a summary is printed:
 ```
   PASS example/api-server-config.yaml (5 modules, 3 workflows, 2 triggers)
@@ -943,6 +946,47 @@ wfctl manifest [options] <config.yaml>
 wfctl manifest config.yaml
 wfctl manifest -format yaml config.yaml
 wfctl manifest -name my-service config.yaml
+```
+
+---
+
+### `config`
+
+Manage wfctl project configuration.
+
+```
+wfctl config <subcommand> [options]
+```
+
+#### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `validate` | Validate `wfctl.yaml` and `.wfctl-lock.yaml` project config files |
+| `migrate` | Manage engine config database schema migrations |
+
+#### `config validate`
+
+Validate the human-edited `wfctl.yaml` plugin manifest and, unless skipped, the
+machine-generated `.wfctl-lock.yaml` plugin lockfile.
+
+```
+wfctl config validate [options] [wfctl.yaml]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--manifest` | `wfctl.yaml` | Path to the wfctl project manifest |
+| `--lock-file` | `.wfctl-lock.yaml` | Path to the plugin lockfile |
+| `--skip-lock` | `false` | Skip lockfile validation |
+
+**Examples:**
+
+```bash
+wfctl config validate
+wfctl config validate wfctl.yaml
+wfctl config validate --manifest wfctl.yaml --lock-file .wfctl-lock.yaml
+wfctl config validate --skip-lock
 ```
 
 ---
