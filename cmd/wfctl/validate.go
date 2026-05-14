@@ -112,14 +112,28 @@ Options:
 	}
 
 	if failed > 0 {
+		if total == 1 && len(errors) == 1 {
+			return fmt.Errorf("%d config(s) failed validation: %s", failed, indentErrorMessage(errors[0]))
+		}
 		return fmt.Errorf("%d config(s) failed validation", failed)
 	}
 	return nil
 }
 
+func indentErrorMessage(message string) string {
+	lines := strings.Split(message, "\n")
+	if len(lines) == 0 {
+		return message
+	}
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
 func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints bool) error {
 	// Read raw YAML to extract imports list for verbose feedback.
 	imports := extractImports(cfgPath)
+	if isLikelyWfctlProjectManifest(cfgPath) {
+		return fmt.Errorf("%s is a wfctl project manifest; use 'wfctl config validate %s' instead", cfgPath, cfgPath)
+	}
 
 	cfg, err := config.LoadFromFile(cfgPath)
 	if err != nil {
@@ -320,6 +334,8 @@ func reorderFlags(args []string) []string {
 	// flags that take a value argument (not self-contained with "=")
 	valueFlagNames := map[string]bool{
 		"dir":        true,
+		"lock-file":  true,
+		"manifest":   true,
 		"plugin-dir": true,
 	}
 	for i := 0; i < len(args); i++ {

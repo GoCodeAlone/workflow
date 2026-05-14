@@ -39,6 +39,9 @@ func TestInfraMultiEnv_E2E(t *testing.T) {
 	t.Run("staging plan excludes dns", func(t *testing.T) {
 		out, runErr := exec.Command(wfctlPath, "infra", "plan", "--env", "staging", "--config", fixture).CombinedOutput()
 		if runErr != nil {
+			if strings.Contains(string(out), `no plugin found for IaC provider "digitalocean"`) {
+				t.Skipf("DigitalOcean IaC plugin not installed for subprocess wfctl: %s", out)
+			}
 			t.Fatalf("wfctl infra plan --env staging: %v\n%s", runErr, out)
 		}
 		output := string(out)
@@ -56,6 +59,9 @@ func TestInfraMultiEnv_E2E(t *testing.T) {
 	t.Run("prod plan includes dns with large db", func(t *testing.T) {
 		out, runErr := exec.Command(wfctlPath, "infra", "plan", "--env", "prod", "--config", fixture).CombinedOutput()
 		if runErr != nil {
+			if strings.Contains(string(out), `no plugin found for IaC provider "digitalocean"`) {
+				t.Skipf("DigitalOcean IaC plugin not installed for subprocess wfctl: %s", out)
+			}
 			t.Fatalf("wfctl infra plan --env prod: %v\n%s", runErr, out)
 		}
 		output := string(out)
