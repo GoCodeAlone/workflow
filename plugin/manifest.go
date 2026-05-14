@@ -46,6 +46,15 @@ type PluginManifest struct {
 	WorkflowTypes []string         `json:"workflowTypes,omitempty" yaml:"workflowTypes,omitempty"`
 	WiringHooks   []string         `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
 
+	// IaCStateBackends lists the iac.state backend names this plugin serves
+	// (e.g. "azure_blob"). Authored in plugin.json either as a top-level
+	// "iacStateBackends" key or nested under the legacy capabilities object
+	// as capabilities.iacStateBackends (UnmarshalJSON's object branch promotes
+	// the nested form here, same as ModuleTypes/StepTypes/etc.). The engine
+	// cross-checks these against the plugin's ListBackendNames RPC. Amendment
+	// A2 (decisions/0035).
+	IaCStateBackends []string `json:"iacStateBackends,omitempty" yaml:"iacStateBackends,omitempty"`
+
 	// StepSchemas provides schema definitions for step types registered by this plugin.
 	// Used by MCP/LSP for hover docs, completions, and output documentation.
 	StepSchemas []*schema.StepSchema `json:"stepSchemas,omitempty" yaml:"stepSchemas,omitempty"`
@@ -134,10 +143,11 @@ func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 		// Legacy format: object with configProvider, moduleTypes, stepTypes, triggerTypes.
 		// Merge type lists into the top-level fields so callers see them consistently.
 		var legacyCaps struct {
-			ModuleTypes   []string `json:"moduleTypes"`
-			StepTypes     []string `json:"stepTypes"`
-			TriggerTypes  []string `json:"triggerTypes"`
-			WorkflowTypes []string `json:"workflowTypes"`
+			ModuleTypes      []string `json:"moduleTypes"`
+			StepTypes        []string `json:"stepTypes"`
+			TriggerTypes     []string `json:"triggerTypes"`
+			WorkflowTypes    []string `json:"workflowTypes"`
+			IaCStateBackends []string `json:"iacStateBackends"`
 		}
 		if err := json.Unmarshal(raw.Capabilities, &legacyCaps); err != nil {
 			return fmt.Errorf("invalid capabilities object: %w", err)
@@ -146,6 +156,7 @@ func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 		m.StepTypes = appendUnique(m.StepTypes, legacyCaps.StepTypes...)
 		m.TriggerTypes = appendUnique(m.TriggerTypes, legacyCaps.TriggerTypes...)
 		m.WorkflowTypes = appendUnique(m.WorkflowTypes, legacyCaps.WorkflowTypes...)
+		m.IaCStateBackends = appendUnique(m.IaCStateBackends, legacyCaps.IaCStateBackends...)
 
 	default:
 		return fmt.Errorf("capabilities: unsupported JSON type (expected array or object, got %q)", string(raw.Capabilities))

@@ -114,6 +114,30 @@ func TestRegisterAllIaCProviderServices_AllOptionals_AllRegistered(t *testing.T)
 	}
 }
 
+// TestRegisterAll_RegistersIaCStateBackend asserts that a provider whose type
+// also satisfies pb.IaCStateBackendServer gets the IaCStateBackend service
+// auto-registered — exactly like the IaCProvider* optionals. Amendment A2
+// (decisions/0035).
+func TestRegisterAll_RegistersIaCStateBackend(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &stateBackendProviderStub{}
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info := grpcSrv.GetServiceInfo()
+	if _, ok := info["workflow.plugin.external.iac.IaCStateBackend"]; !ok {
+		t.Fatalf("IaCStateBackend service NOT registered despite provider satisfying interface; have: %v", serviceNames(info))
+	}
+}
+
+// stateBackendProviderStub satisfies IaCProviderRequired (the required minimum
+// for ServeIaCPlugin) AND IaCStateBackend — representative of an IaC plugin
+// whose provider type also serves state storage.
+type stateBackendProviderStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedIaCStateBackendServer
+}
+
 func serviceNames(info map[string]grpc.ServiceInfo) []string {
 	out := make([]string, 0, len(info))
 	for k := range info {
