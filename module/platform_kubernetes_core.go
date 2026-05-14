@@ -117,8 +117,10 @@ func (b *eksErrorBackend) destroy(k *PlatformKubernetes) error {
 
 // ─── AKS backend ──────────────────────────────────────────────────────────────
 
-// aksBackend manages Azure Kubernetes Service clusters.
-// Requires the Azure SDK (github.com/Azure/azure-sdk-for-go) to be available.
+// aksBackend manages Azure Kubernetes Service clusters via the Azure Resource
+// Manager REST API. It authenticates with a net/http OAuth2 client-credentials
+// flow against login.microsoftonline.com — it does NOT import
+// github.com/Azure/azure-sdk-for-go, so it stays in workflow core.
 // When Azure credentials are not configured, returns clear errors.
 type aksBackend struct{}
 
