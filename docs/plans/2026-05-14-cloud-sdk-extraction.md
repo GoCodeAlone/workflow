@@ -877,7 +877,7 @@ Place this immediately after the existing `_display`-suffix early-return. Do **n
 **Step 4: Run the test to verify it passes**
 
 Run: `go test ./module/ -run 'Redact' -v`
-Expected: PASS — the new test + all existing redaction tests still green (the `_ref` exemption is narrow; no existing sensitive field name ends in `_ref`).
+Expected: PASS — the new test + all existing redaction tests still green. The `_ref` exemption is narrow: `SensitiveFieldPatterns` has no `_ref` entry, and the only `*_ref` config field in the repo, `bearer_token_ref` (`module/http_client.go`), is itself a `SecretRef` *reference* struct — a provider+key name pair, not a raw secret value — so exempting it is correct, not a leak. (`RedactStepOutput` is invoked on step *output* maps, not module config, narrowing the blast radius further.)
 
 **Step 5: Commit**
 
@@ -1148,12 +1148,12 @@ Rollback: revert the commit + `go mod tidy` (restores `iac_state_azure.go`, the 
 
 ### Task 14: Migration doc + wire engine plugin-load → `iac.state` backend registry
 
-**Integration seam (resolved at plan time — `engine.go:305-327` was read).** `loadPluginInternal` deliberately never references concrete plugin types; it injects engine capabilities into plugins via **optional-interface type-asserts** — the `stepRegistrySetter` and `slogLoggerSetter` pattern at `engine.go:316-325` (`type X interface {...}; if v, ok := p.(X); ok { ... }`). Task 14 follows that exact precedent **in reverse** (reading *from* the plugin, not injecting *into* it): define an optional interface the external-plugin adapter satisfies, type-assert `p` against it, and populate the registry. This keeps `engine.go` free of a `plugin/external` import + concrete type-assert.
+**Integration seam (resolved at plan time — `engine.go:311-326` was read).** `loadPluginInternal` deliberately never references concrete plugin types; it injects engine capabilities into plugins via **optional-interface type-asserts** — the `stepRegistrySetter` and `slogLoggerSetter` pattern at `engine.go:316-325` (`type X interface {...}; if v, ok := p.(X); ok { ... }`). Task 14 follows that exact precedent **in reverse** (reading *from* the plugin, not injecting *into* it): define an optional interface the external-plugin adapter satisfies, type-assert `p` against it, and populate the registry. This keeps `engine.go` free of a `plugin/external` import + concrete type-assert.
 
 **Files:**
 - Create: `docs/migrations/2026-05-14-cloud-sdk-extraction.md`
 - Create: `plugin/iac_state_backend_provider.go` — the `IaCStateBackendProvider` optional interface (in the `plugin` package, which `engine.go` already imports)
-- Modify: `engine.go` — add the optional-interface type-assert in `loadPluginInternal` (beside `stepRegistrySetter` / `slogLoggerSetter`, ~`engine.go:316`)
+- Modify: `engine.go` — add the optional-interface type-assert in `loadPluginInternal` (beside `stepRegistrySetter` / `slogLoggerSetter`, `engine.go:311-326`)
 - Modify: `plugin/external/adapter.go` — `*ExternalPluginAdapter` implements `IaCStateBackendClients()` (it has the gRPC `ClientConn` + `ContractRegistry`; this is in-repo, not cross-repo)
 - Modify: `module/iac_state_plugin_registry.go` — add an exported `module.RegisterIaCStateBackend(name string, client pb.IaCStateBackendClient) error` wrapper (the registry struct itself stays unexported)
 - Test: `plugin/external/adapter_test.go` (extend) + `module/iac_state_plugin_registry_test.go` (extend) + a launch check
@@ -1180,7 +1180,7 @@ In `plugin/external/adapter.go`, make `*ExternalPluginAdapter` implement `IaCSta
 
 **Step 3: Wire the type-assert into `loadPluginInternal`**
 
-In `engine.go` `loadPluginInternal`, beside the existing `stepRegistrySetter` / `slogLoggerSetter` asserts (~line 316), add:
+In `engine.go` `loadPluginInternal`, beside the existing `stepRegistrySetter` / `slogLoggerSetter` asserts (`engine.go:311-326`), add:
 
 ```go
 if provider, ok := p.(plugin.IaCStateBackendProvider); ok {
