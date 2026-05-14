@@ -12,6 +12,9 @@ import (
 // tests only need it to satisfy the interface; no method is ever called.
 type fakeStateBackendClient struct{}
 
+func (*fakeStateBackendClient) Configure(context.Context, *pb.ConfigureRequest, ...grpc.CallOption) (*pb.ConfigureResponse, error) {
+	return nil, nil
+}
 func (*fakeStateBackendClient) GetState(context.Context, *pb.GetStateRequest, ...grpc.CallOption) (*pb.GetStateResponse, error) {
 	return nil, nil
 }
