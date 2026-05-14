@@ -25,9 +25,17 @@ const RedactionPlaceholder = "[REDACTED]"
 const safeFieldSuffix = "_display"
 
 // refFieldSuffix marks a field as a reference (a module/resource name, not a
-// secret value) — exempt from redaction even if its name contains a sensitive
-// substring (e.g. "credentials_ref" contains "credential").
+// secret value). A "_ref" key is exempt from redaction ONLY when its sensitive
+// match comes from a structural-reference word ("credential"). A key like
+// "bearer_token_ref" still redacts, because "token" is a value-bearing secret
+// pattern, not a structural reference — the "_ref" suffix must not be a blanket
+// bypass for every sensitive pattern.
 const refFieldSuffix = "_ref"
+
+// refExemptPatterns are the sensitive patterns that a "_ref" suffix is allowed
+// to exempt: words that describe a *reference to* a credential-holding module
+// (e.g. "credentials_ref"), not words that name a secret value itself.
+var refExemptPatterns = []string{"credential"}
 
 // RedactStepOutput recursively scans output and replaces values of sensitive
 // fields with RedactionPlaceholder. Field names are matched case-insensitively
@@ -63,21 +71,44 @@ func redactMap(m map[string]any, patterns []string) map[string]any {
 }
 
 // isSensitiveField returns true when the lowercased field name contains any of
-// the patterns and does not have the safe suffix.
+// the patterns and is not exempted by a safe/reference suffix.
 func isSensitiveField(name string, patterns []string) bool {
 	lower := strings.ToLower(name)
 	if strings.HasSuffix(lower, safeFieldSuffix) {
 		return false
 	}
-	// Reference keys hold module/resource NAMES, not secrets — never redact them,
-	// even though "credentials_ref" contains the "credential" substring.
-	if strings.HasSuffix(lower, refFieldSuffix) {
-		return false
-	}
+	var matched []string
 	for _, p := range patterns {
 		if strings.Contains(lower, p) {
-			return true
+			matched = append(matched, p)
 		}
 	}
-	return false
+	if len(matched) == 0 {
+		return false
+	}
+	// A "_ref" key is exempt ONLY when every sensitive pattern it matched is a
+	// structural-reference word (e.g. "credentials_ref" → "credential"). A key
+	// like "bearer_token_ref" still redacts because "token" names a secret
+	// value, so "_ref" must not blanket-bypass it.
+	if strings.HasSuffix(lower, refFieldSuffix) && allRefExempt(matched) {
+		return false
+	}
+	return true
+}
+
+// allRefExempt reports whether every matched pattern is in refExemptPatterns.
+func allRefExempt(matched []string) bool {
+	for _, m := range matched {
+		exempt := false
+		for _, e := range refExemptPatterns {
+			if m == e {
+				exempt = true
+				break
+			}
+		}
+		if !exempt {
+			return false
+		}
+	}
+	return true
 }
