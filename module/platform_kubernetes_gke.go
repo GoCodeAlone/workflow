@@ -1,3 +1,7 @@
+// platform_kubernetes_gke.go holds the GKE Kubernetes backend — the only
+// platform.kubernetes backend that imports a cloud SDK (google.golang.org/api).
+// Isolated here so the cloud-SDK extraction can delete it cleanly; the SDK-free
+// backends stay in platform_kubernetes_core.go.
 package module
 
 import (

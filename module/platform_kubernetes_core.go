@@ -1,3 +1,6 @@
+// platform_kubernetes_core.go holds the SDK-free Kubernetes backends
+// (kind/k3s/eks/aks) and registers them. The lone SDK-bearing backend, gke,
+// lives in platform_kubernetes_gke.go — see the cloud-SDK-extraction design.
 package module
 
 import (
