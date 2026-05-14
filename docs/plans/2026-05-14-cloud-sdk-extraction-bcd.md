@@ -56,7 +56,7 @@
 - Parallel streams (Options 1/2): `{PR1→PR2}`, `{PR1→PR3→PR4}`, `{PR1→PR5}`, `{PR7→PR8}`, `{PR7→PR9}` run largely in parallel after PR 1; PR 6 joins after PR4+PR5; PR 10 joins after PR8+PR9.
 - No PR stacking — every `workflow` PR branches off `origin/main` directly.
 
-**Status:** Draft
+**Status:** Locked 2026-05-14T21:59:08Z
 
 ---
 
