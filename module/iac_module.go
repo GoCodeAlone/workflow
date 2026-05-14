@@ -93,7 +93,11 @@ func (m *IaCModule) Init(app modular.Application) error {
 		// The engine populates iacStateBackendRegistryInstance at plugin-load
 		// time; a resolved backend is served over gRPC via grpcIaCStateStore.
 		if client, ok := iacStateBackendRegistryInstance.resolve(m.backend); ok {
-			m.store = newGRPCIaCStateStore(client)
+			store := newGRPCIaCStateStore(client)
+			if err := store.Configure(context.Background(), m.backend, m.config); err != nil {
+				return fmt.Errorf("iac.state %q: backend %q: configure plugin backend: %w", m.name, m.backend, err)
+			}
+			m.store = store
 			break
 		}
 		return fmt.Errorf("iac.state %q: backend %q is not built into workflow core "+
