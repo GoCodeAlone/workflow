@@ -10,7 +10,9 @@ import (
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -58,9 +60,20 @@ func (s *benchStateBackendServer) GetState(_ context.Context, r *pb.GetStateRequ
 	return &pb.GetStateResponse{Exists: true, State: benchStateToProto(st)}, nil
 }
 func (s *benchStateBackendServer) SaveState(_ context.Context, r *pb.SaveStateRequest) (*pb.SaveStateResponse, error) {
+	if r.State == nil {
+		return nil, status.Error(codes.InvalidArgument, "SaveState: request State is nil")
+	}
 	var outputs, config map[string]any
-	_ = json.Unmarshal(r.State.OutputsJson, &outputs)
-	_ = json.Unmarshal(r.State.ConfigJson, &config)
+	if len(r.State.OutputsJson) > 0 {
+		if err := json.Unmarshal(r.State.OutputsJson, &outputs); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "SaveState: invalid OutputsJson: %v", err)
+		}
+	}
+	if len(r.State.ConfigJson) > 0 {
+		if err := json.Unmarshal(r.State.ConfigJson, &config); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "SaveState: invalid ConfigJson: %v", err)
+		}
+	}
 	return &pb.SaveStateResponse{}, s.store.SaveState(&IaCState{
 		ResourceID: r.State.ResourceId, ResourceType: r.State.ResourceType,
 		Provider: r.State.Provider, Status: r.State.Status, Outputs: outputs, Config: config,
@@ -103,7 +116,10 @@ func BenchmarkIaCStateBackend_InProcess(b *testing.B) {
 // BenchmarkIaCStateBackend_GRPC is the post-extraction path: same store, same
 // cycle, but every call crosses a real (in-memory bufconn) gRPC boundary.
 func BenchmarkIaCStateBackend_GRPC(b *testing.B) {
-	lis := bufconn.Listen(4 << 20) // 4 MiB — gRPC default message cap
+	// 4 MiB in-memory listener buffer. Note: this sizes the bufconn pipe only;
+	// gRPC's own max message size is configured separately via dial/server options.
+	lis := bufconn.Listen(4 << 20)
+	defer lis.Close()
 	srv := grpc.NewServer()
 	pb.RegisterIaCStateBackendServer(srv, &benchStateBackendServer{store: NewMemoryIaCStateStore()})
 	go func() { _ = srv.Serve(lis) }()
