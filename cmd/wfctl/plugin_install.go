@@ -87,7 +87,11 @@ func runPluginInstall(args []string) error {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl-lock.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
+	parsedArgs, err := interspersedPluginInstallArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	if err := fs.Parse(parsedArgs); err != nil {
 		return err
 	}
 	// Validate flag combinations before doing anything else.
@@ -249,6 +253,49 @@ func runPluginInstall(args []string) error {
 	}
 
 	return nil
+}
+
+type boolFlag interface {
+	IsBoolFlag() bool
+}
+
+func interspersedPluginInstallArgs(fs *flag.FlagSet, args []string) ([]string, error) {
+	if len(args) == 0 {
+		return args, nil
+	}
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positionals = append(positionals, args[i:]...)
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positionals = append(positionals, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		name := strings.TrimLeft(arg, "-")
+		if idx := strings.IndexByte(name, '='); idx >= 0 {
+			name = name[:idx]
+		}
+		f := fs.Lookup(name)
+		if f == nil || strings.Contains(arg, "=") {
+			continue
+		}
+		if bf, ok := f.Value.(boolFlag); ok && bf.IsBoolFlag() {
+			continue
+		}
+		remaining := args[i+1:]
+		if len(remaining) == 0 {
+			return nil, fmt.Errorf("flag needs an argument: -%s", name)
+		}
+		value := remaining[0]
+		i++
+		flags = append(flags, value)
+	}
+	return append(flags, positionals...), nil
 }
 
 // installPluginFromManifest downloads, extracts, and installs a plugin using the
@@ -1431,10 +1478,10 @@ func preparePluginStagingDir(destDir string) (stagingDir string, cleanup func(),
 // renamed to a trash location on the same filesystem. Only after the new
 // directory is successfully renamed into place is the trash removed.
 //
-//   1. Rename destDir → destDir+".uninstalling"  (no-op if destDir absent)
-//   2. Rename stagingDir → destDir
-//   3. On step-2 failure: restore destDir+".uninstalling" → destDir
-//   4. On step-2 success: remove destDir+".uninstalling"
+//  1. Rename destDir → destDir+".uninstalling"  (no-op if destDir absent)
+//  2. Rename stagingDir → destDir
+//  3. On step-2 failure: restore destDir+".uninstalling" → destDir
+//  4. On step-2 success: remove destDir+".uninstalling"
 //
 // On success stagingDir no longer exists on disk; the deferred cleanup
 // returned by preparePluginStagingDir becomes a harmless no-op.

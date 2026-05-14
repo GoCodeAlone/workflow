@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/sensitive"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -70,6 +71,7 @@ type readDriver struct {
 	readOut            *interfaces.ResourceOutput
 	readErr            error
 	reads              []interfaces.ResourceRef
+	deletes            []interfaces.ResourceRef
 	expectedProviderID string
 	format             interfaces.ProviderIDFormat
 }
@@ -90,7 +92,10 @@ func (d *readDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec 
 	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID}, nil
 }
 
-func (d *readDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+func (d *readDriver) Delete(_ context.Context, ref interfaces.ResourceRef) error {
+	d.deletes = append(d.deletes, ref)
+	return nil
+}
 
 func (d *readDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
 	// W-3b ComputePlan dispatches Diff per resource. The adoption tests
@@ -801,6 +806,94 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 	}
 	if adopted.ConfigHash == configHashMap(desiredConfig) {
 		t.Fatalf("adopted ConfigHash matched desired hash; ComputePlan would skip required update")
+	}
+}
+
+func TestApplyWithProvider_AdoptionRoutesNewSensitiveOutputs(t *testing.T) {
+	const rawURI = "postgres://doadmin:secret@example.com:25060/defaultdb"
+	spec := interfaces.ResourceSpec{
+		Name:   "adopted-db",
+		Type:   "infra.database",
+		Config: map[string]any{"adopt_existing": true},
+	}
+	driver := &readDriver{
+		readOut: &interfaces.ResourceOutput{
+			Name:       "adopted-db",
+			Type:       "infra.database",
+			ProviderID: "db-123",
+			Outputs: map[string]any{
+				"uri": rawURI,
+				"config": map[string]any{
+					"engine": "pg",
+				},
+			},
+			Sensitive: map[string]bool{"uri": true},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	store := &fakeStateStore{}
+	cfgPath := filepath.Join(t.TempDir(), "workflow.yaml")
+	if err := os.WriteFile(cfgPath, []byte("secrets:\n  provider: env\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	secretName := sensitive.SecretKey("adopted-db", "uri")
+	t.Setenv(secretName, "")
+	hydrated := map[string]string{}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(context.Context, interfaces.IaCProvider, []interfaces.ResourceSpec, []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", cfgPath, hydrated); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 1 {
+		t.Fatalf("saved states = %d, want adopted state", len(store.saved))
+	}
+	if got := store.saved[0].Outputs["uri"]; got != sensitive.Placeholder("adopted-db", "uri") {
+		t.Fatalf("adopted uri output = %#v, want routed placeholder", got)
+	}
+	if got := os.Getenv(strings.ToUpper(secretName)); got != rawURI {
+		t.Fatalf("routed env secret = %q, want raw URI", got)
+	}
+	if got := hydrated[secretName]; got != rawURI {
+		t.Fatalf("hydrated handoff = %q, want raw URI", got)
+	}
+}
+
+func TestAdoptExistingResources_AdoptionRoutingSaveFailureCleansSecretsOnly(t *testing.T) {
+	const rawURI = "postgres://doadmin:secret@example.com:25060/defaultdb"
+	spec := interfaces.ResourceSpec{
+		Name:   "adopted-db",
+		Type:   "infra.database",
+		Config: map[string]any{"adopt_existing": true},
+	}
+	driver := &readDriver{
+		readOut: &interfaces.ResourceOutput{
+			Name:       "adopted-db",
+			Type:       "infra.database",
+			ProviderID: "db-123",
+			Outputs:    map[string]any{"uri": rawURI},
+			Sensitive:  map[string]bool{"uri": true},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	store := &fakeStateStore{saveErr: errors.New("state unavailable")}
+	secretsProvider := newEnvTestProvider()
+
+	_, err := adoptExistingResources(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, secretsProvider, map[string]string{})
+	if err == nil {
+		t.Fatalf("adoptExistingResources succeeded, want state persistence error")
+	}
+	if len(secretsProvider.values) != 0 {
+		t.Fatalf("routed secrets after failed adoption = %#v, want cleanup", secretsProvider.values)
+	}
+	if len(driver.deletes) != 0 {
+		t.Fatalf("driver deletes = %#v, want no cloud resource delete for adoption", driver.deletes)
 	}
 }
 

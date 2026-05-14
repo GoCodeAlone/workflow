@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -749,8 +750,6 @@ func sha256sum(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-
-
 func TestVerifyChecksum_MismatchFormat(t *testing.T) {
 	err := verifyChecksum([]byte("data"), strings.Repeat("0", 64))
 	if err == nil {
@@ -973,6 +972,64 @@ func TestRunPluginInstallCompatSkipsNewerKnownFail(t *testing.T) {
 	}
 	if got := readInstalledVersion(filepath.Join(pluginDir, "test")); got != "v0.1.0" {
 		t.Fatalf("installed version = %q, want v0.1.0", got)
+	}
+}
+
+func TestRunPluginInstallHonorsTrailingPluginDirFlag(t *testing.T) {
+	reg := newCompatInstallRegistry(t, "test", "v0.2.0", []compatInstallVersion{
+		{Version: "v0.2.0", Status: PluginCompatibilityStatusPass},
+	})
+	pluginDir := t.TempDir()
+	if err := runPluginInstall([]string{
+		"test",
+		"--config", reg.ConfigPath,
+		"--plugin-dir", pluginDir,
+		"--engine-version", "v0.51.2",
+	}); err != nil {
+		t.Fatalf("runPluginInstall: %v", err)
+	}
+	if got := readInstalledVersion(filepath.Join(pluginDir, "test")); got != "v0.2.0" {
+		t.Fatalf("installed version in trailing --plugin-dir = %q, want v0.2.0", got)
+	}
+}
+
+func TestRunPluginInstallTrailingFlagMissingValueErrors(t *testing.T) {
+	err := runPluginInstall([]string{"test", "--config"})
+	if err == nil {
+		t.Fatal("expected missing trailing --config value to error")
+	}
+	if !strings.Contains(err.Error(), "flag needs an argument") || !strings.Contains(err.Error(), "config") {
+		t.Fatalf("error = %v, want missing --config value", err)
+	}
+}
+
+func TestInterspersedPluginInstallArgsReordersSupportedForms(t *testing.T) {
+	fs := flag.NewFlagSet("plugin install", flag.ContinueOnError)
+	fs.String("config", "", "")
+	fs.String("plugin-dir", "", "")
+	fs.Bool("skip-checksum", false, "")
+
+	got, err := interspersedPluginInstallArgs(fs, []string{
+		"test",
+		"--config=registry.yaml",
+		"--skip-checksum",
+		"--plugin-dir", "plugins",
+		"--",
+		"--not-a-flag",
+	})
+	if err != nil {
+		t.Fatalf("interspersedPluginInstallArgs: %v", err)
+	}
+	want := []string{
+		"--config=registry.yaml",
+		"--skip-checksum",
+		"--plugin-dir", "plugins",
+		"test",
+		"--",
+		"--not-a-flag",
+	}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("args = %#v, want %#v", got, want)
 	}
 }
 
