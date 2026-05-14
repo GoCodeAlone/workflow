@@ -47,10 +47,12 @@ type PluginManifest struct {
 	WiringHooks   []string         `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
 
 	// IaCStateBackends lists the iac.state backend names this plugin serves
-	// (e.g. "azure_blob"). Authored in plugin.json under the capabilities
-	// object as capabilities.iacStateBackends and promoted here by
-	// UnmarshalJSON (legacy object branch). The engine cross-checks these
-	// against the plugin's ListBackendNames RPC. Amendment A2 (decisions/0035).
+	// (e.g. "azure_blob"). Authored in plugin.json either as a top-level
+	// "iacStateBackends" key or nested under the legacy capabilities object
+	// as capabilities.iacStateBackends (UnmarshalJSON's object branch promotes
+	// the nested form here, same as ModuleTypes/StepTypes/etc.). The engine
+	// cross-checks these against the plugin's ListBackendNames RPC. Amendment
+	// A2 (decisions/0035).
 	IaCStateBackends []string `json:"iacStateBackends,omitempty" yaml:"iacStateBackends,omitempty"`
 
 	// StepSchemas provides schema definitions for step types registered by this plugin.
