@@ -40,7 +40,7 @@
 
 **PR 4 is a declared human-action gate.** It lands in a *different git repository* (`/Users/jon/workspace/workflow-plugin-azure`), which the autonomous worktree-scoped execution pipeline cannot branch/PR/tag. When execution reaches PR 4, the pipeline must **pause and surface PR 4 to a human operator** (with Tasks 11–12 as the checklist) — this is the expected, designed handoff, not an execution failure. PR 5 is **blocked on PR 4's plugin tag** existing and being installable (Task 13 Step 8 + Task 14 Step 4 runtime-launch validation load the tagged plugin binary). PRs 1–3 are fully autonomous-executable in the worktree; PR 5 resumes autonomously once the operator confirms PR 4 merged + tagged.
 
-**Status:** Locked 2026-05-14T06:33:23Z
+**Status:** Draft
 
 ---
 
