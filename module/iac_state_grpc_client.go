@@ -98,6 +98,11 @@ func jsonBytesToMap(b []byte) (map[string]any, error) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // grpcIaCStateStore adapts a pb.IaCStateBackendClient to module.IaCStateStore.
+//
+// All six methods call the backend with context.Background(): the
+// module.IaCStateStore interface has no ctx parameter, so there is no caller
+// context to plumb today. Threading a real context through IaCStateStore is a
+// known follow-up, out of scope for this extraction.
 type grpcIaCStateStore struct {
 	client pb.IaCStateBackendClient
 }
