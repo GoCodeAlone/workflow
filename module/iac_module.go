@@ -4,19 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/GoCodeAlone/modular"
 )
 
-// newAzureSharedKeyCredential is a thin wrapper so iac_module.go doesn't import azblob directly
-// in multiple places and can be easily replaced with other credential types.
-func newAzureSharedKeyCredential(name, key string) (*azblob.SharedKeyCredential, error) {
-	return azblob.NewSharedKeyCredential(name, key)
-}
-
 // IaCModule registers an IaCStateStore in the service registry.
-// Supported backends: "memory" (default), "filesystem", and "spaces"
-// (DigitalOcean Spaces / S3-compatible).
+// Supported in-core backends: "memory" (default), "filesystem", "spaces"
+// (DigitalOcean Spaces / S3-compatible), "gcs", and "postgres" — plus any
+// backend provided by a loaded plugin (e.g. "azure_blob" via
+// workflow-plugin-azure).
 //
 // Config example:
 //
@@ -83,27 +78,6 @@ func (m *IaCModule) Init(app modular.Application) error {
 			return fmt.Errorf("iac.state %q: gcs backend: %w", m.name, err)
 		}
 		m.store = store
-	case "azure_blob":
-		container, _ := m.config["container"].(string)
-		prefix, _ := m.config["prefix"].(string)
-		accountURL, _ := m.config["account_url"].(string)
-		accountName, _ := m.config["account_name"].(string)
-		accountKey, _ := m.config["account_key"].(string)
-		if container == "" {
-			return fmt.Errorf("iac.state %q: azure_blob backend requires 'container' config", m.name)
-		}
-		if accountURL == "" || accountName == "" || accountKey == "" {
-			return fmt.Errorf("iac.state %q: azure_blob backend requires 'account_url', 'account_name', and 'account_key' config", m.name)
-		}
-		cred, err := newAzureSharedKeyCredential(accountName, accountKey)
-		if err != nil {
-			return fmt.Errorf("iac.state %q: azure_blob backend: credential: %w", m.name, err)
-		}
-		store, err := NewAzureBlobIaCStateStore(accountURL, container, prefix, *cred)
-		if err != nil {
-			return fmt.Errorf("iac.state %q: azure_blob backend: %w", m.name, err)
-		}
-		m.store = store
 	case "postgres":
 		dsn, _ := m.config["dsn"].(string)
 		if dsn == "" {
@@ -122,7 +96,10 @@ func (m *IaCModule) Init(app modular.Application) error {
 			m.store = newGRPCIaCStateStore(client)
 			break
 		}
-		return fmt.Errorf("iac.state %q: unsupported backend %q (use 'memory', 'filesystem', 'spaces', 'gcs', 'azure_blob', or 'postgres', or load the plugin that provides it)", m.name, m.backend)
+		return fmt.Errorf("iac.state %q: backend %q is not built into workflow core "+
+			"(in-core backends: 'memory', 'filesystem', 'spaces', 'gcs', 'postgres'). "+
+			"If %q is a plugin-provided backend (e.g. 'azure_blob' via workflow-plugin-azure), "+
+			"install and load that plugin", m.name, m.backend, m.backend)
 	}
 
 	return app.RegisterService(m.name, m.store)

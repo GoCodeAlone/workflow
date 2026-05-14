@@ -18,9 +18,6 @@ require (
 	cloud.google.com/go/iam v1.8.0 // indirect
 	cloud.google.com/go/monitoring v1.26.0 // indirect
 	cloud.google.com/go/storage v1.62.1 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.8.3 // indirect
 	github.com/GoCodeAlone/modular/modules/auth v1.15.0 // indirect
