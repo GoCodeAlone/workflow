@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -283,5 +284,30 @@ func TestIaCModule_InvalidBackend(t *testing.T) {
 	m := module.NewIaCModule("bad", map[string]any{"backend": "s3"})
 	if err := m.Init(module.NewMockApplication()); err == nil {
 		t.Error("expected error for unsupported backend, got nil")
+	}
+}
+
+// TestIaCModuleAzureBlobRequiresPlugin asserts that backend: azure_blob with no
+// plugin registered returns the plugin-guidance error — the in-core azure_blob
+// backend has been removed; it is now served by workflow-plugin-azure.
+func TestIaCModuleAzureBlobRequiresPlugin(t *testing.T) {
+	m := module.NewIaCModule("st", map[string]any{
+		"backend":      "azure_blob",
+		"container":    "c",
+		"account_url":  "https://x",
+		"account_name": "n",
+		"account_key":  "k",
+	})
+	err := m.Init(module.NewMockApplication())
+	if err == nil {
+		t.Fatal("azure_blob with no plugin loaded must error — in-core backend is gone")
+	}
+	if !strings.Contains(err.Error(), "azure_blob") {
+		t.Fatalf("error should name the missing backend: %v", err)
+	}
+	// The error must be the plugin-guidance error, NOT an in-core construction
+	// failure — the in-core azure_blob backend has been deleted.
+	if !strings.Contains(err.Error(), "plugin") {
+		t.Fatalf("error should be the plugin-guidance error (mention loading a plugin), got: %v", err)
 	}
 }
