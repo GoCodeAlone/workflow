@@ -256,7 +256,7 @@ func TestTopoSortModules_DuplicateNames_FirstWins(t *testing.T) {
 
 func TestFilterResolvableDeps_DropsEmptyAndUnknown(t *testing.T) {
 	names := map[string]struct{}{"a": {}, "b": {}, "c": {}}
-	got := filterResolvableDeps([]string{"a", "", "ghost", "b", "phantom", "c"}, names)
+	got := filterResolvableDeps([]string{"a", "", "ghost", "b", "phantom", "c"}, names, "_test_self_")
 	want := []string{"a", "b", "c"}
 	if !equalSlice(got, want) {
 		t.Errorf("filterResolvableDeps = %v, want %v", got, want)
@@ -265,14 +265,14 @@ func TestFilterResolvableDeps_DropsEmptyAndUnknown(t *testing.T) {
 
 func TestFilterResolvableDeps_AllUnknownReturnsEmpty(t *testing.T) {
 	names := map[string]struct{}{"only-this": {}}
-	got := filterResolvableDeps([]string{"x", "y", "z", ""}, names)
+	got := filterResolvableDeps([]string{"x", "y", "z", ""}, names, "_test_self_")
 	if len(got) != 0 {
 		t.Errorf("filterResolvableDeps all-unknown = %v, want empty", got)
 	}
 }
 
 func TestFilterResolvableDeps_EmptyInputEmptyOutput(t *testing.T) {
-	got := filterResolvableDeps(nil, map[string]struct{}{"a": {}})
+	got := filterResolvableDeps(nil, map[string]struct{}{"a": {}}, "_test_self_")
 	if len(got) != 0 {
 		t.Errorf("filterResolvableDeps(nil) = %v, want empty", got)
 	}
@@ -281,10 +281,61 @@ func TestFilterResolvableDeps_EmptyInputEmptyOutput(t *testing.T) {
 func TestFilterResolvableDeps_PreservesOrder(t *testing.T) {
 	// Order in input must be preserved in output.
 	names := map[string]struct{}{"a": {}, "b": {}, "c": {}}
-	got := filterResolvableDeps([]string{"c", "a", "b"}, names)
+	got := filterResolvableDeps([]string{"c", "a", "b"}, names, "_test_self_")
 	want := []string{"c", "a", "b"}
 	if !equalSlice(got, want) {
 		t.Errorf("filterResolvableDeps = %v, want %v (order preserved)", got, want)
+	}
+}
+
+func TestFilterResolvableDeps_DropsSelfReference(t *testing.T) {
+	// Schema validation does NOT reject a module declaring itself in
+	// dependsOn — and modular's DependencyAware sort would treat it as
+	// a 1-cycle (or stall, depending on framework version). Filter it.
+	names := map[string]struct{}{"me": {}, "you": {}}
+	got := filterResolvableDeps([]string{"me", "you"}, names, "me")
+	want := []string{"you"}
+	if !equalSlice(got, want) {
+		t.Errorf("filterResolvableDeps with self-reference = %v, want %v", got, want)
+	}
+}
+
+func TestFilterResolvableDeps_OnlySelfReferenceReturnsEmpty(t *testing.T) {
+	// Module declaring only itself → engine should skip SetDependencies
+	// entirely (filtered slice is empty).
+	names := map[string]struct{}{"me": {}}
+	got := filterResolvableDeps([]string{"me", "me", "me"}, names, "me")
+	if len(got) != 0 {
+		t.Errorf("filterResolvableDeps only-self = %v, want empty", got)
+	}
+}
+
+func TestTopoSortModules_SingleModuleSelfDepIsCycle(t *testing.T) {
+	// n==1 path used to short-circuit before cycle detection. A single
+	// module declaring itself in dependsOn IS a 1-cycle and must error.
+	in := []config.ModuleConfig{
+		withDeps(config.ModuleConfig{Name: "self", Type: "x"}, "self"),
+	}
+	_, err := topoSortModules(in)
+	if err == nil {
+		t.Fatalf("expected cycle error for single-module self-dep, got nil")
+	}
+	if !strings.Contains(err.Error(), "cycle") || !strings.Contains(err.Error(), "self") {
+		t.Errorf("error %q should mention cycle + module name 'self'", err.Error())
+	}
+}
+
+func TestTopoSortModules_SingleModuleNoSelfDepIsClean(t *testing.T) {
+	// Sanity: n==1 with no self-dep still passes through cleanly.
+	in := []config.ModuleConfig{
+		{Name: "lonely", Type: "x"},
+	}
+	out, err := topoSortModules(in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 1 || out[0].Name != "lonely" {
+		t.Errorf("singleton-no-self order = %v, want [lonely]", order(out))
 	}
 }
 

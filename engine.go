@@ -581,7 +581,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		// entries + unknown names so the slice modular sees matches the
 		// edge set topoSortModules used.
 		if depTarget, ok := mod.(interface{ SetDependencies([]string) }); ok {
-			filtered := filterResolvableDeps(modCfg.DependsOn, moduleNameSet)
+			filtered := filterResolvableDeps(modCfg.DependsOn, moduleNameSet, modCfg.Name)
 			if len(filtered) > 0 {
 				depTarget.SetDependencies(filtered)
 			}

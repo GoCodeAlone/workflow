@@ -28,7 +28,20 @@ import (
 // the dependent looks up its parent in a plugin-local registry.
 func topoSortModules(modules []config.ModuleConfig) ([]config.ModuleConfig, error) {
 	n := len(modules)
-	if n <= 1 {
+	if n == 0 {
+		return modules, nil
+	}
+	if n == 1 {
+		// Single module can still self-reference, which the n>=2 path
+		// catches via Kahn's cycle detection. Detect it explicitly here.
+		for _, dep := range modules[0].DependsOn {
+			if dep == modules[0].Name {
+				return nil, fmt.Errorf(
+					"module dependsOn cycle (or dependents of one) among: %s",
+					modules[0].Name,
+				)
+			}
+		}
 		return modules, nil
 	}
 
@@ -129,19 +142,25 @@ func (h *intHeap) Pop() any {
 }
 
 // filterResolvableDeps returns a new slice containing only entries from deps
-// that are present in the moduleNames set, in the same order. Empty strings
-// and names not in moduleNames are dropped. Used by engine BuildFromConfig
-// before calling SetDependencies on a module, so modular's DependencyAware
-// sort sees the same edge set that topoSortModules used when ordering
-// cfg.Modules (both ignore unresolvable + empty entries).
+// that are present in the moduleNames set AND are not equal to selfName, in
+// the same order. Empty strings, names not in moduleNames, and self-references
+// are dropped. Used by engine BuildFromConfig before calling SetDependencies
+// on a module, so modular's DependencyAware sort sees the same edge set that
+// topoSortModules used when ordering cfg.Modules.
 //
 // Schema validation rejects empty + unknown dependsOn entries for declared
-// modules, but ConfigTransformHooks can inject modules whose dependsOn was
-// never validated. This is the engine's defensive boundary against that.
-func filterResolvableDeps(deps []string, moduleNames map[string]struct{}) []string {
+// modules, but does not reject a module declaring itself in dependsOn — and
+// ConfigTransformHooks can inject modules whose dependsOn was never validated.
+// This is the engine's defensive boundary against both: stripping the
+// self-reference here means modular can't either treat it as a 1-cycle or
+// stall waiting for the module to initialise itself before itself.
+func filterResolvableDeps(deps []string, moduleNames map[string]struct{}, selfName string) []string {
 	out := make([]string, 0, len(deps))
 	for _, dep := range deps {
 		if dep == "" {
+			continue
+		}
+		if dep == selfName {
 			continue
 		}
 		if _, exists := moduleNames[dep]; !exists {
