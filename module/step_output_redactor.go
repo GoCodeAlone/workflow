@@ -64,6 +64,11 @@ func isSensitiveField(name string, patterns []string) bool {
 	if strings.HasSuffix(lower, safeFieldSuffix) {
 		return false
 	}
+	// Reference keys hold module/resource NAMES, not secrets — never redact them,
+	// even though "credentials_ref" contains the "credential" substring.
+	if strings.HasSuffix(lower, "_ref") {
+		return false
+	}
 	for _, p := range patterns {
 		if strings.Contains(lower, p) {
 			return true
