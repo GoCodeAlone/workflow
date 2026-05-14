@@ -9,10 +9,12 @@ import (
 // The plugin SDK must NOT install a gRPC interceptor that logs request bodies —
 // CreateModule requests carry inline credentials: blocks. This test fails if
 // grpc.NewServer / grpc.NewClient anywhere in plugin/external/ is constructed
-// with a *UnaryInterceptor option, forcing a reviewer to look. See the
-// cloud-sdk-extraction design, Security section.
+// with an *Interceptor option, forcing a reviewer to look. Covers Unary AND
+// Stream interceptors — CreateModule is unary today, but a future streaming
+// RPC carrying credentials must not slip a stream interceptor past this guard.
+// See the cloud-sdk-extraction design, Security section.
 func TestNoBodyLoggingInterceptor(t *testing.T) {
-	interceptorOpt := regexp.MustCompile(`(Chain)?Unary(Server|Client)?Interceptor`)
+	interceptorOpt := regexp.MustCompile(`(Chain)?(Unary|Stream)(Server|Client)?Interceptor`)
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
