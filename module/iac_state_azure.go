@@ -81,8 +81,8 @@ func (s *AzureBlobIaCStateStore) lockBlobName(resourceID string) string {
 }
 
 // GetState retrieves a state record by resource ID. Returns nil, nil when not found.
-func (s *AzureBlobIaCStateStore) GetState(resourceID string) (*IaCState, error) {
-	data, err := s.client.DownloadBlob(context.Background(), s.blobName(resourceID))
+func (s *AzureBlobIaCStateStore) GetState(ctx context.Context, resourceID string) (*IaCState, error) {
+	data, err := s.client.DownloadBlob(ctx, s.blobName(resourceID))
 	if err != nil {
 		if errors.Is(err, ErrAzureBlobNotFound) {
 			return nil, nil
@@ -97,7 +97,7 @@ func (s *AzureBlobIaCStateStore) GetState(resourceID string) (*IaCState, error) 
 }
 
 // SaveState writes the state record as a JSON blob.
-func (s *AzureBlobIaCStateStore) SaveState(state *IaCState) error {
+func (s *AzureBlobIaCStateStore) SaveState(ctx context.Context, state *IaCState) error {
 	if state == nil {
 		return fmt.Errorf("iac azure state: SaveState: state must not be nil")
 	}
@@ -108,15 +108,15 @@ func (s *AzureBlobIaCStateStore) SaveState(state *IaCState) error {
 	if err != nil {
 		return fmt.Errorf("iac azure state: SaveState %q: marshal: %w", state.ResourceID, err)
 	}
-	if err := s.client.UploadBlob(context.Background(), s.blobName(state.ResourceID), data, "application/json"); err != nil {
+	if err := s.client.UploadBlob(ctx, s.blobName(state.ResourceID), data, "application/json"); err != nil {
 		return fmt.Errorf("iac azure state: SaveState %q: upload: %w", state.ResourceID, err)
 	}
 	return nil
 }
 
 // ListStates lists all state blobs and returns those matching the filter.
-func (s *AzureBlobIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, error) {
-	names, err := s.client.ListBlobs(context.Background(), s.prefix)
+func (s *AzureBlobIaCStateStore) ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error) {
+	names, err := s.client.ListBlobs(ctx, s.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("iac azure state: ListStates: %w", err)
 	}
@@ -125,8 +125,14 @@ func (s *AzureBlobIaCStateStore) ListStates(filter map[string]string) ([]*IaCSta
 		if !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		data, err := s.client.DownloadBlob(context.Background(), name)
+		data, err := s.client.DownloadBlob(ctx, name)
 		if err != nil {
+			// A canceled / deadlined context must abort the listing rather
+			// than silently return partial results; only genuinely unreadable
+			// blobs are skipped.
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("iac azure state: ListStates: %w", err)
+			}
 			continue
 		}
 		var st IaCState
@@ -141,8 +147,8 @@ func (s *AzureBlobIaCStateStore) ListStates(filter map[string]string) ([]*IaCSta
 }
 
 // DeleteState removes the state blob for resourceID.
-func (s *AzureBlobIaCStateStore) DeleteState(resourceID string) error {
-	if err := s.client.DeleteBlob(context.Background(), s.blobName(resourceID)); err != nil {
+func (s *AzureBlobIaCStateStore) DeleteState(ctx context.Context, resourceID string) error {
+	if err := s.client.DeleteBlob(ctx, s.blobName(resourceID)); err != nil {
 		if errors.Is(err, ErrAzureBlobNotFound) {
 			return fmt.Errorf("iac azure state: DeleteState %q: not found", resourceID)
 		}
@@ -152,12 +158,12 @@ func (s *AzureBlobIaCStateStore) DeleteState(resourceID string) error {
 }
 
 // Lock acquires a blob lease on the lock blob for resourceID (60-second duration).
-func (s *AzureBlobIaCStateStore) Lock(resourceID string) error {
+func (s *AzureBlobIaCStateStore) Lock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	lockBlob := s.lockBlobName(resourceID)
-	leaseID, err := s.client.AcquireLease(context.Background(), lockBlob, 60)
+	leaseID, err := s.client.AcquireLease(ctx, lockBlob, 60)
 	if err != nil {
 		if strings.Contains(err.Error(), "already leased") || strings.Contains(err.Error(), "leased") {
 			return fmt.Errorf("iac azure state: Lock %q: resource is already locked", resourceID)
@@ -169,7 +175,7 @@ func (s *AzureBlobIaCStateStore) Lock(resourceID string) error {
 }
 
 // Unlock releases the lease on the lock blob for resourceID.
-func (s *AzureBlobIaCStateStore) Unlock(resourceID string) error {
+func (s *AzureBlobIaCStateStore) Unlock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -178,7 +184,7 @@ func (s *AzureBlobIaCStateStore) Unlock(resourceID string) error {
 		return fmt.Errorf("iac azure state: Unlock %q: not locked", resourceID)
 	}
 	lockBlob := s.lockBlobName(resourceID)
-	if err := s.client.ReleaseLease(context.Background(), lockBlob, leaseID); err != nil {
+	if err := s.client.ReleaseLease(ctx, lockBlob, leaseID); err != nil {
 		return fmt.Errorf("iac azure state: Unlock %q: %w", resourceID, err)
 	}
 	delete(s.leaseIDs, resourceID)

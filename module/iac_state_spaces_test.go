@@ -98,7 +98,7 @@ func newTestSpacesStore(client *mockS3Client) *module.SpacesIaCStateStore {
 func TestSpacesIaCStateStore_GetState_NotFound(t *testing.T) {
 	store := newTestSpacesStore(newMockS3Client())
 
-	st, err := store.GetState("nonexistent")
+	st, err := store.GetState(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -122,11 +122,11 @@ func TestSpacesIaCStateStore_SaveAndGetState(t *testing.T) {
 		UpdatedAt:    "2026-03-09T00:00:00Z",
 	}
 
-	if err := store.SaveState(state); err != nil {
+	if err := store.SaveState(context.Background(), state); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
-	got, err := store.GetState("cluster-1")
+	got, err := store.GetState(context.Background(), "cluster-1")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestSpacesIaCStateStore_SaveAndGetState(t *testing.T) {
 func TestSpacesIaCStateStore_SaveState_Nil(t *testing.T) {
 	store := newTestSpacesStore(newMockS3Client())
 
-	err := store.SaveState(nil)
+	err := store.SaveState(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error for nil state")
 	}
@@ -159,7 +159,7 @@ func TestSpacesIaCStateStore_SaveState_Nil(t *testing.T) {
 func TestSpacesIaCStateStore_SaveState_EmptyID(t *testing.T) {
 	store := newTestSpacesStore(newMockS3Client())
 
-	err := store.SaveState(&module.IaCState{})
+	err := store.SaveState(context.Background(), &module.IaCState{})
 	if err == nil {
 		t.Fatal("expected error for empty resource_id")
 	}
@@ -175,13 +175,13 @@ func TestSpacesIaCStateStore_ListStates(t *testing.T) {
 		{ResourceID: "r3", ResourceType: "kubernetes", Provider: "aws", Status: "destroyed"},
 	}
 	for _, st := range states {
-		if err := store.SaveState(st); err != nil {
+		if err := store.SaveState(context.Background(), st); err != nil {
 			t.Fatalf("SaveState %q: %v", st.ResourceID, err)
 		}
 	}
 
 	// No filter — returns all.
-	all, err := store.ListStates(nil)
+	all, err := store.ListStates(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListStates(nil): %v", err)
 	}
@@ -190,7 +190,7 @@ func TestSpacesIaCStateStore_ListStates(t *testing.T) {
 	}
 
 	// Filter by provider.
-	filtered, err := store.ListStates(map[string]string{"provider": "aws"})
+	filtered, err := store.ListStates(context.Background(), map[string]string{"provider": "aws"})
 	if err != nil {
 		t.Fatalf("ListStates(provider=aws): %v", err)
 	}
@@ -199,7 +199,7 @@ func TestSpacesIaCStateStore_ListStates(t *testing.T) {
 	}
 
 	// Filter by status.
-	active, err := store.ListStates(map[string]string{"status": "active"})
+	active, err := store.ListStates(context.Background(), map[string]string{"status": "active"})
 	if err != nil {
 		t.Fatalf("ListStates(status=active): %v", err)
 	}
@@ -213,14 +213,14 @@ func TestSpacesIaCStateStore_ListStates_SkipsLockFiles(t *testing.T) {
 	store := newTestSpacesStore(client)
 
 	// Save a state and lock it — lock file should be skipped in list.
-	if err := store.SaveState(&module.IaCState{ResourceID: "r1", Status: "active"}); err != nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{ResourceID: "r1", Status: "active"}); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	if err := store.Lock("r1"); err != nil {
+	if err := store.Lock(context.Background(), "r1"); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	results, err := store.ListStates(nil)
+	results, err := store.ListStates(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListStates: %v", err)
 	}
@@ -232,16 +232,16 @@ func TestSpacesIaCStateStore_ListStates_SkipsLockFiles(t *testing.T) {
 func TestSpacesIaCStateStore_DeleteState(t *testing.T) {
 	store := newTestSpacesStore(newMockS3Client())
 
-	if err := store.SaveState(&module.IaCState{ResourceID: "del-me", Status: "active"}); err != nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{ResourceID: "del-me", Status: "active"}); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
-	if err := store.DeleteState("del-me"); err != nil {
+	if err := store.DeleteState(context.Background(), "del-me"); err != nil {
 		t.Fatalf("DeleteState: %v", err)
 	}
 
 	// Should be gone.
-	st, err := store.GetState("del-me")
+	st, err := store.GetState(context.Background(), "del-me")
 	if err != nil {
 		t.Fatalf("GetState after delete: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestSpacesIaCStateStore_DeleteState(t *testing.T) {
 func TestSpacesIaCStateStore_DeleteState_NotFound(t *testing.T) {
 	store := newTestSpacesStore(newMockS3Client())
 
-	err := store.DeleteState("nonexistent")
+	err := store.DeleteState(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error deleting nonexistent state")
 	}
@@ -266,22 +266,22 @@ func TestSpacesIaCStateStore_LockUnlock(t *testing.T) {
 	store := newTestSpacesStore(newMockS3Client())
 
 	// Lock should succeed.
-	if err := store.Lock("res-1"); err != nil {
+	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 
 	// Double-lock should fail.
-	if err := store.Lock("res-1"); err == nil {
+	if err := store.Lock(context.Background(), "res-1"); err == nil {
 		t.Fatal("expected error on double lock")
 	}
 
 	// Unlock should succeed.
-	if err := store.Unlock("res-1"); err != nil {
+	if err := store.Unlock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Unlock: %v", err)
 	}
 
 	// Re-lock after unlock should succeed.
-	if err := store.Lock("res-1"); err != nil {
+	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock after unlock: %v", err)
 	}
 }
@@ -289,7 +289,7 @@ func TestSpacesIaCStateStore_LockUnlock(t *testing.T) {
 func TestSpacesIaCStateStore_Unlock_NotLocked(t *testing.T) {
 	store := newTestSpacesStore(newMockS3Client())
 
-	err := store.Unlock("not-locked")
+	err := store.Unlock(context.Background(), "not-locked")
 	if err == nil {
 		t.Fatal("expected error unlocking a resource that is not locked")
 	}
@@ -302,16 +302,16 @@ func TestSpacesIaCStateStore_SaveState_Overwrite(t *testing.T) {
 	store := newTestSpacesStore(newMockS3Client())
 
 	original := &module.IaCState{ResourceID: "r1", Status: "planned"}
-	if err := store.SaveState(original); err != nil {
+	if err := store.SaveState(context.Background(), original); err != nil {
 		t.Fatalf("SaveState (original): %v", err)
 	}
 
 	updated := &module.IaCState{ResourceID: "r1", Status: "active"}
-	if err := store.SaveState(updated); err != nil {
+	if err := store.SaveState(context.Background(), updated); err != nil {
 		t.Fatalf("SaveState (updated): %v", err)
 	}
 
-	got, err := store.GetState("r1")
+	got, err := store.GetState(context.Background(), "r1")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestSpacesIaCStateStore_SanitizesResourceID(t *testing.T) {
 	store := newTestSpacesStore(client)
 
 	state := &module.IaCState{ResourceID: "ns/cluster\\1", Status: "active"}
-	if err := store.SaveState(state); err != nil {
+	if err := store.SaveState(context.Background(), state); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
@@ -338,7 +338,7 @@ func TestSpacesIaCStateStore_SanitizesResourceID(t *testing.T) {
 	}
 
 	// Retrieve by original ID.
-	got, err := store.GetState("ns/cluster\\1")
+	got, err := store.GetState(context.Background(), "ns/cluster\\1")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestSpacesIaCStateStore_GetState_BadJSON(t *testing.T) {
 	client.objects["iac-state/bad.json"] = []byte("{invalid json")
 	client.mu.Unlock()
 
-	_, err := store.GetState("bad")
+	_, err := store.GetState(context.Background(), "bad")
 	if err == nil {
 		t.Fatal("expected unmarshal error for bad JSON")
 	}
@@ -384,11 +384,11 @@ func TestSpacesIaCStateStore_JSONRoundTrip(t *testing.T) {
 		Error:        "timeout waiting for stabilization",
 	}
 
-	if err := store.SaveState(state); err != nil {
+	if err := store.SaveState(context.Background(), state); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
-	got, err := store.GetState("rt-1")
+	got, err := store.GetState(context.Background(), "rt-1")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -424,37 +424,37 @@ func TestSpacesIaCStateStore_ErrorPropagation(t *testing.T) {
 	store := module.NewSpacesIaCStateStoreWithClient(&errS3Client{}, "test-bucket", "iac-state/")
 
 	// GetState error.
-	_, err := store.GetState("x")
+	_, err := store.GetState(context.Background(), "x")
 	if err == nil || !strings.Contains(err.Error(), "simulated") {
 		t.Errorf("GetState error = %v, want simulated error", err)
 	}
 
 	// SaveState error.
-	err = store.SaveState(&module.IaCState{ResourceID: "x"})
+	err = store.SaveState(context.Background(), &module.IaCState{ResourceID: "x"})
 	if err == nil || !strings.Contains(err.Error(), "simulated") {
 		t.Errorf("SaveState error = %v, want simulated error", err)
 	}
 
 	// ListStates error.
-	_, err = store.ListStates(nil)
+	_, err = store.ListStates(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "simulated") {
 		t.Errorf("ListStates error = %v, want simulated error", err)
 	}
 
 	// DeleteState error (HeadObject fails).
-	err = store.DeleteState("x")
+	err = store.DeleteState(context.Background(), "x")
 	if err == nil || !strings.Contains(err.Error(), "simulated") {
 		t.Errorf("DeleteState error = %v, want simulated error", err)
 	}
 
 	// Lock error (HeadObject fails with non-NotFound).
-	err = store.Lock("x")
+	err = store.Lock(context.Background(), "x")
 	if err == nil || !strings.Contains(err.Error(), "simulated") {
 		t.Errorf("Lock error = %v, want simulated error", err)
 	}
 
 	// Unlock error (HeadObject fails with non-NotFound).
-	err = store.Unlock("x")
+	err = store.Unlock(context.Background(), "x")
 	if err == nil || !strings.Contains(err.Error(), "simulated") {
 		t.Errorf("Unlock error = %v, want simulated error", err)
 	}

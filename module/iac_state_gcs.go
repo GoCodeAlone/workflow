@@ -77,8 +77,8 @@ func (s *GCSIaCStateStore) lockKey(resourceID string) string {
 }
 
 // GetState retrieves a state record by resource ID. Returns nil, nil when not found.
-func (s *GCSIaCStateStore) GetState(resourceID string) (*IaCState, error) {
-	data, _, err := s.client.ReadObject(context.Background(), s.stateKey(resourceID))
+func (s *GCSIaCStateStore) GetState(ctx context.Context, resourceID string) (*IaCState, error) {
+	data, _, err := s.client.ReadObject(ctx, s.stateKey(resourceID))
 	if err != nil {
 		if errors.Is(err, ErrGCSNotFound) {
 			return nil, nil
@@ -93,7 +93,7 @@ func (s *GCSIaCStateStore) GetState(resourceID string) (*IaCState, error) {
 }
 
 // SaveState writes the state record as a JSON object to GCS.
-func (s *GCSIaCStateStore) SaveState(state *IaCState) error {
+func (s *GCSIaCStateStore) SaveState(ctx context.Context, state *IaCState) error {
 	if state == nil {
 		return fmt.Errorf("iac gcs state: SaveState: state must not be nil")
 	}
@@ -104,15 +104,15 @@ func (s *GCSIaCStateStore) SaveState(state *IaCState) error {
 	if err != nil {
 		return fmt.Errorf("iac gcs state: SaveState %q: marshal: %w", state.ResourceID, err)
 	}
-	if _, err := s.client.WriteObject(context.Background(), s.stateKey(state.ResourceID), data, "application/json"); err != nil {
+	if _, err := s.client.WriteObject(ctx, s.stateKey(state.ResourceID), data, "application/json"); err != nil {
 		return fmt.Errorf("iac gcs state: SaveState %q: write: %w", state.ResourceID, err)
 	}
 	return nil
 }
 
 // ListStates lists all state objects and returns those matching the filter.
-func (s *GCSIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, error) {
-	keys, err := s.client.ListObjects(context.Background(), s.prefix)
+func (s *GCSIaCStateStore) ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error) {
+	keys, err := s.client.ListObjects(ctx, s.prefix)
 	if err != nil {
 		return nil, fmt.Errorf("iac gcs state: ListStates: %w", err)
 	}
@@ -121,8 +121,14 @@ func (s *GCSIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, er
 		if !strings.HasSuffix(key, ".json") {
 			continue
 		}
-		data, _, err := s.client.ReadObject(context.Background(), key)
+		data, _, err := s.client.ReadObject(ctx, key)
 		if err != nil {
+			// A canceled / deadlined context must abort the listing rather
+			// than silently return partial results; only genuinely unreadable
+			// objects are skipped.
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("iac gcs state: ListStates: %w", err)
+			}
 			continue
 		}
 		var st IaCState
@@ -137,8 +143,8 @@ func (s *GCSIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, er
 }
 
 // DeleteState removes the state object for resourceID.
-func (s *GCSIaCStateStore) DeleteState(resourceID string) error {
-	if err := s.client.DeleteObject(context.Background(), s.stateKey(resourceID)); err != nil {
+func (s *GCSIaCStateStore) DeleteState(ctx context.Context, resourceID string) error {
+	if err := s.client.DeleteObject(ctx, s.stateKey(resourceID)); err != nil {
 		if errors.Is(err, ErrGCSNotFound) {
 			return fmt.Errorf("iac gcs state: DeleteState %q: not found", resourceID)
 		}
@@ -149,10 +155,10 @@ func (s *GCSIaCStateStore) DeleteState(resourceID string) error {
 
 // Lock acquires an advisory lock using GCS generation-match preconditions.
 // The lock object is written with If-None-Match (generation 0), which is atomic.
-func (s *GCSIaCStateStore) Lock(resourceID string) error {
+func (s *GCSIaCStateStore) Lock(ctx context.Context, resourceID string) error {
 	key := s.lockKey(resourceID)
 	body := []byte("locked")
-	gen, err := s.client.WriteObjectIfGenerationMatch(context.Background(), key, body, "text/plain", 0)
+	gen, err := s.client.WriteObjectIfGenerationMatch(ctx, key, body, "text/plain", 0)
 	if err != nil {
 		if strings.Contains(err.Error(), "precondition failed") || strings.Contains(err.Error(), "exists") {
 			return fmt.Errorf("iac gcs state: Lock %q: resource is already locked", resourceID)
@@ -164,9 +170,9 @@ func (s *GCSIaCStateStore) Lock(resourceID string) error {
 }
 
 // Unlock removes the lock object for resourceID.
-func (s *GCSIaCStateStore) Unlock(resourceID string) error {
+func (s *GCSIaCStateStore) Unlock(ctx context.Context, resourceID string) error {
 	key := s.lockKey(resourceID)
-	if err := s.client.DeleteObject(context.Background(), key); err != nil {
+	if err := s.client.DeleteObject(ctx, key); err != nil {
 		if errors.Is(err, ErrGCSNotFound) {
 			return fmt.Errorf("iac gcs state: Unlock %q: not locked", resourceID)
 		}

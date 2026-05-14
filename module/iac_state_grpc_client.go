@@ -98,11 +98,6 @@ func jsonBytesToMap(b []byte) (map[string]any, error) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // grpcIaCStateStore adapts a pb.IaCStateBackendClient to module.IaCStateStore.
-//
-// All six methods call the backend with context.Background(): the
-// module.IaCStateStore interface has no ctx parameter, so there is no caller
-// context to plumb today. Threading a real context through IaCStateStore is a
-// known follow-up, out of scope for this extraction.
 type grpcIaCStateStore struct {
 	client pb.IaCStateBackendClient
 }
@@ -114,8 +109,8 @@ func newGRPCIaCStateStore(c pb.IaCStateBackendClient) *grpcIaCStateStore {
 
 // GetState retrieves a state record by resource ID. Returns nil, nil when the
 // backend reports the record does not exist.
-func (s *grpcIaCStateStore) GetState(resourceID string) (*IaCState, error) {
-	resp, err := s.client.GetState(context.Background(), &pb.GetStateRequest{ResourceId: resourceID})
+func (s *grpcIaCStateStore) GetState(ctx context.Context, resourceID string) (*IaCState, error) {
+	resp, err := s.client.GetState(ctx, &pb.GetStateRequest{ResourceId: resourceID})
 	if err != nil {
 		return nil, err
 	}
@@ -126,18 +121,18 @@ func (s *grpcIaCStateStore) GetState(resourceID string) (*IaCState, error) {
 }
 
 // SaveState inserts or replaces a state record.
-func (s *grpcIaCStateStore) SaveState(state *IaCState) error {
+func (s *grpcIaCStateStore) SaveState(ctx context.Context, state *IaCState) error {
 	pbState, err := iacStateToProto(state)
 	if err != nil {
 		return err
 	}
-	_, err = s.client.SaveState(context.Background(), &pb.SaveStateRequest{State: pbState})
+	_, err = s.client.SaveState(ctx, &pb.SaveStateRequest{State: pbState})
 	return err
 }
 
 // ListStates returns all state records matching the provided key=value filter.
-func (s *grpcIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, error) {
-	resp, err := s.client.ListStates(context.Background(), &pb.ListStatesRequest{Filter: filter})
+func (s *grpcIaCStateStore) ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error) {
+	resp, err := s.client.ListStates(ctx, &pb.ListStatesRequest{Filter: filter})
 	if err != nil {
 		return nil, err
 	}
@@ -153,20 +148,20 @@ func (s *grpcIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, e
 }
 
 // DeleteState removes a state record by resource ID.
-func (s *grpcIaCStateStore) DeleteState(resourceID string) error {
-	_, err := s.client.DeleteState(context.Background(), &pb.DeleteStateRequest{ResourceId: resourceID})
+func (s *grpcIaCStateStore) DeleteState(ctx context.Context, resourceID string) error {
+	_, err := s.client.DeleteState(ctx, &pb.DeleteStateRequest{ResourceId: resourceID})
 	return err
 }
 
 // Lock acquires an exclusive lock for the given resource ID.
-func (s *grpcIaCStateStore) Lock(resourceID string) error {
-	_, err := s.client.Lock(context.Background(), &pb.LockRequest{ResourceId: resourceID})
+func (s *grpcIaCStateStore) Lock(ctx context.Context, resourceID string) error {
+	_, err := s.client.Lock(ctx, &pb.LockRequest{ResourceId: resourceID})
 	return err
 }
 
 // Unlock releases the lock for the given resource ID.
-func (s *grpcIaCStateStore) Unlock(resourceID string) error {
-	_, err := s.client.Unlock(context.Background(), &pb.UnlockRequest{ResourceId: resourceID})
+func (s *grpcIaCStateStore) Unlock(ctx context.Context, resourceID string) error {
+	_, err := s.client.Unlock(ctx, &pb.UnlockRequest{ResourceId: resourceID})
 	return err
 }
 
@@ -184,8 +179,8 @@ type iacStateBackendServer struct {
 
 // GetState delegates to the backing store, mapping a not-found (nil) result to
 // GetStateResponse{Exists: false}.
-func (s *iacStateBackendServer) GetState(_ context.Context, r *pb.GetStateRequest) (*pb.GetStateResponse, error) {
-	st, err := s.store.GetState(r.ResourceId)
+func (s *iacStateBackendServer) GetState(ctx context.Context, r *pb.GetStateRequest) (*pb.GetStateResponse, error) {
+	st, err := s.store.GetState(ctx, r.ResourceId)
 	if err != nil {
 		return nil, err
 	}
@@ -200,20 +195,20 @@ func (s *iacStateBackendServer) GetState(_ context.Context, r *pb.GetStateReques
 }
 
 // SaveState delegates a full-state replace to the backing store.
-func (s *iacStateBackendServer) SaveState(_ context.Context, r *pb.SaveStateRequest) (*pb.SaveStateResponse, error) {
+func (s *iacStateBackendServer) SaveState(ctx context.Context, r *pb.SaveStateRequest) (*pb.SaveStateResponse, error) {
 	st, err := iacStateFromProto(r.State)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.store.SaveState(st); err != nil {
+	if err := s.store.SaveState(ctx, st); err != nil {
 		return nil, err
 	}
 	return &pb.SaveStateResponse{}, nil
 }
 
 // ListStates delegates a filtered listing to the backing store.
-func (s *iacStateBackendServer) ListStates(_ context.Context, r *pb.ListStatesRequest) (*pb.ListStatesResponse, error) {
-	states, err := s.store.ListStates(r.Filter)
+func (s *iacStateBackendServer) ListStates(ctx context.Context, r *pb.ListStatesRequest) (*pb.ListStatesResponse, error) {
+	states, err := s.store.ListStates(ctx, r.Filter)
 	if err != nil {
 		return nil, err
 	}
@@ -229,24 +224,24 @@ func (s *iacStateBackendServer) ListStates(_ context.Context, r *pb.ListStatesRe
 }
 
 // DeleteState delegates a delete-by-ID to the backing store.
-func (s *iacStateBackendServer) DeleteState(_ context.Context, r *pb.DeleteStateRequest) (*pb.DeleteStateResponse, error) {
-	if err := s.store.DeleteState(r.ResourceId); err != nil {
+func (s *iacStateBackendServer) DeleteState(ctx context.Context, r *pb.DeleteStateRequest) (*pb.DeleteStateResponse, error) {
+	if err := s.store.DeleteState(ctx, r.ResourceId); err != nil {
 		return nil, err
 	}
 	return &pb.DeleteStateResponse{}, nil
 }
 
 // Lock delegates lock acquisition to the backing store.
-func (s *iacStateBackendServer) Lock(_ context.Context, r *pb.LockRequest) (*pb.LockResponse, error) {
-	if err := s.store.Lock(r.ResourceId); err != nil {
+func (s *iacStateBackendServer) Lock(ctx context.Context, r *pb.LockRequest) (*pb.LockResponse, error) {
+	if err := s.store.Lock(ctx, r.ResourceId); err != nil {
 		return nil, err
 	}
 	return &pb.LockResponse{}, nil
 }
 
 // Unlock delegates lock release to the backing store.
-func (s *iacStateBackendServer) Unlock(_ context.Context, r *pb.UnlockRequest) (*pb.UnlockResponse, error) {
-	if err := s.store.Unlock(r.ResourceId); err != nil {
+func (s *iacStateBackendServer) Unlock(ctx context.Context, r *pb.UnlockRequest) (*pb.UnlockResponse, error) {
+	if err := s.store.Unlock(ctx, r.ResourceId); err != nil {
 		return nil, err
 	}
 	return &pb.UnlockResponse{}, nil

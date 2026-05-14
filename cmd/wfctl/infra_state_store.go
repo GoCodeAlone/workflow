@@ -260,8 +260,8 @@ type spacesWfctlStateStore struct {
 	inner *module.SpacesIaCStateStore
 }
 
-func (s *spacesWfctlStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
-	records, err := s.inner.ListStates(nil)
+func (s *spacesWfctlStateStore) ListResources(ctx context.Context) ([]interfaces.ResourceState, error) {
+	records, err := s.inner.ListStates(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list spaces state: %w", err)
 	}
@@ -272,12 +272,12 @@ func (s *spacesWfctlStateStore) ListResources(_ context.Context) ([]interfaces.R
 	return states, nil
 }
 
-func (s *spacesWfctlStateStore) SaveResource(_ context.Context, state interfaces.ResourceState) error {
-	return s.inner.SaveState(resourceStateToIaCState(state))
+func (s *spacesWfctlStateStore) SaveResource(ctx context.Context, state interfaces.ResourceState) error {
+	return s.inner.SaveState(ctx, resourceStateToIaCState(state))
 }
 
-func (s *spacesWfctlStateStore) DeleteResource(_ context.Context, name string) error {
-	return s.inner.DeleteState(name)
+func (s *spacesWfctlStateStore) DeleteResource(ctx context.Context, name string) error {
+	return s.inner.DeleteState(ctx, name)
 }
 
 // ── Postgres backend ───────────────────────────────────────────────────────────
@@ -306,8 +306,8 @@ type postgresWfctlStateStore struct {
 	inner *module.PostgresIaCStateStore
 }
 
-func (s *postgresWfctlStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
-	records, err := s.inner.ListStates(nil)
+func (s *postgresWfctlStateStore) ListResources(ctx context.Context) ([]interfaces.ResourceState, error) {
+	records, err := s.inner.ListStates(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list postgres state: %w", err)
 	}
@@ -318,12 +318,12 @@ func (s *postgresWfctlStateStore) ListResources(_ context.Context) ([]interfaces
 	return states, nil
 }
 
-func (s *postgresWfctlStateStore) SaveResource(_ context.Context, state interfaces.ResourceState) error {
-	return s.inner.SaveState(resourceStateToIaCState(state))
+func (s *postgresWfctlStateStore) SaveResource(ctx context.Context, state interfaces.ResourceState) error {
+	return s.inner.SaveState(ctx, resourceStateToIaCState(state))
 }
 
-func (s *postgresWfctlStateStore) DeleteResource(_ context.Context, name string) error {
-	return s.inner.DeleteState(name)
+func (s *postgresWfctlStateStore) DeleteResource(ctx context.Context, name string) error {
+	return s.inner.DeleteState(ctx, name)
 }
 
 // ── Conversion helpers ─────────────────────────────────────────────────────────

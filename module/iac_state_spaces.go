@@ -118,9 +118,9 @@ func (s *SpacesIaCStateStore) lockKey(resourceID string) string {
 }
 
 // GetState retrieves a state record by resource ID. Returns nil, nil when not found.
-func (s *SpacesIaCStateStore) GetState(resourceID string) (*IaCState, error) {
+func (s *SpacesIaCStateStore) GetState(ctx context.Context, resourceID string) (*IaCState, error) {
 	key := s.stateKey(resourceID)
-	out, err := s.client.GetObject(context.Background(), &s3.GetObjectInput{
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
 	})
@@ -145,7 +145,7 @@ func (s *SpacesIaCStateStore) GetState(resourceID string) (*IaCState, error) {
 }
 
 // SaveState writes the state record as a JSON object to Spaces.
-func (s *SpacesIaCStateStore) SaveState(state *IaCState) error {
+func (s *SpacesIaCStateStore) SaveState(ctx context.Context, state *IaCState) error {
 	if state == nil {
 		return fmt.Errorf("iac spaces state: SaveState: state must not be nil")
 	}
@@ -160,7 +160,7 @@ func (s *SpacesIaCStateStore) SaveState(state *IaCState) error {
 
 	key := s.stateKey(state.ResourceID)
 	contentType := "application/json"
-	_, err = s.client.PutObject(context.Background(), &s3.PutObjectInput{
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &s.bucket,
 		Key:         &key,
 		Body:        bytes.NewReader(data),
@@ -174,12 +174,12 @@ func (s *SpacesIaCStateStore) SaveState(state *IaCState) error {
 
 // ListStates lists all state objects under the prefix and returns those matching filter.
 // Supported filter keys: "resource_type", "provider", "status".
-func (s *SpacesIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, error) {
+func (s *SpacesIaCStateStore) ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error) {
 	var results []*IaCState
 	var continuationToken *string
 
 	for {
-		out, err := s.client.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{
+		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket:            &s.bucket,
 			Prefix:            &s.prefix,
 			ContinuationToken: continuationToken,
@@ -195,7 +195,7 @@ func (s *SpacesIaCStateStore) ListStates(filter map[string]string) ([]*IaCState,
 				continue
 			}
 
-			getOut, err := s.client.GetObject(context.Background(), &s3.GetObjectInput{
+			getOut, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 				Bucket: &s.bucket,
 				Key:    obj.Key,
 			})
@@ -227,10 +227,10 @@ func (s *SpacesIaCStateStore) ListStates(filter map[string]string) ([]*IaCState,
 }
 
 // DeleteState removes the state object for resourceID.
-func (s *SpacesIaCStateStore) DeleteState(resourceID string) error {
+func (s *SpacesIaCStateStore) DeleteState(ctx context.Context, resourceID string) error {
 	// Verify existence first to return a meaningful error.
 	key := s.stateKey(resourceID)
-	_, err := s.client.HeadObject(context.Background(), &s3.HeadObjectInput{
+	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
 	})
@@ -241,7 +241,7 @@ func (s *SpacesIaCStateStore) DeleteState(resourceID string) error {
 		return fmt.Errorf("iac spaces state: DeleteState %q: head: %w", resourceID, err)
 	}
 
-	_, err = s.client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
+	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
 	})
@@ -253,7 +253,7 @@ func (s *SpacesIaCStateStore) DeleteState(resourceID string) error {
 
 // Lock creates a lock object for resourceID using S3 conditional writes (If-None-Match: *)
 // for atomic, race-free lock acquisition. Fails if the lock already exists.
-func (s *SpacesIaCStateStore) Lock(resourceID string) error {
+func (s *SpacesIaCStateStore) Lock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -261,7 +261,7 @@ func (s *SpacesIaCStateStore) Lock(resourceID string) error {
 	body := []byte(time.Now().UTC().Format(time.RFC3339))
 	ifNoneMatch := "*"
 
-	_, err := s.client.PutObject(context.Background(), &s3.PutObjectInput{
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &s.bucket,
 		Key:         &key,
 		Body:        bytes.NewReader(body),
@@ -278,14 +278,14 @@ func (s *SpacesIaCStateStore) Lock(resourceID string) error {
 }
 
 // Unlock removes the lock object for resourceID.
-func (s *SpacesIaCStateStore) Unlock(resourceID string) error {
+func (s *SpacesIaCStateStore) Unlock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	key := s.lockKey(resourceID)
 
 	// Verify lock exists.
-	_, err := s.client.HeadObject(context.Background(), &s3.HeadObjectInput{
+	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
 	})
@@ -296,7 +296,7 @@ func (s *SpacesIaCStateStore) Unlock(resourceID string) error {
 		return fmt.Errorf("iac spaces state: Unlock %q: head: %w", resourceID, err)
 	}
 
-	_, err = s.client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
+	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
 	})

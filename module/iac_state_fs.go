@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -46,7 +47,7 @@ func (s *FSIaCStateStore) ensureDir() error {
 }
 
 // GetState reads the JSON state file for resourceID. Returns nil, nil when not found.
-func (s *FSIaCStateStore) GetState(resourceID string) (*IaCState, error) {
+func (s *FSIaCStateStore) GetState(ctx context.Context, resourceID string) (*IaCState, error) {
 	if err := s.ensureDir(); err != nil {
 		return nil, fmt.Errorf("iac fs state: GetState %q: %w", resourceID, err)
 	}
@@ -65,7 +66,7 @@ func (s *FSIaCStateStore) GetState(resourceID string) (*IaCState, error) {
 }
 
 // SaveState writes the state record as a JSON file, creating the directory as needed.
-func (s *FSIaCStateStore) SaveState(state *IaCState) error {
+func (s *FSIaCStateStore) SaveState(ctx context.Context, state *IaCState) error {
 	if state == nil {
 		return fmt.Errorf("iac fs state: SaveState: state must not be nil")
 	}
@@ -87,7 +88,7 @@ func (s *FSIaCStateStore) SaveState(state *IaCState) error {
 
 // ListStates reads all JSON files from the directory and returns those matching filter.
 // Supported filter keys: "resource_type", "provider", "status".
-func (s *FSIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, error) {
+func (s *FSIaCStateStore) ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error) {
 	if err := s.ensureDir(); err != nil {
 		return nil, fmt.Errorf("iac fs state: ListStates: %w", err)
 	}
@@ -116,7 +117,7 @@ func (s *FSIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, err
 }
 
 // DeleteState removes the JSON state file for resourceID.
-func (s *FSIaCStateStore) DeleteState(resourceID string) error {
+func (s *FSIaCStateStore) DeleteState(ctx context.Context, resourceID string) error {
 	path := s.statePath(resourceID)
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
@@ -128,7 +129,7 @@ func (s *FSIaCStateStore) DeleteState(resourceID string) error {
 }
 
 // Lock creates a lock file for resourceID. Fails if the lock file already exists.
-func (s *FSIaCStateStore) Lock(resourceID string) error {
+func (s *FSIaCStateStore) Lock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.ensureDir(); err != nil {
@@ -150,7 +151,7 @@ func (s *FSIaCStateStore) Lock(resourceID string) error {
 }
 
 // Unlock removes the lock file for resourceID.
-func (s *FSIaCStateStore) Unlock(resourceID string) error {
+func (s *FSIaCStateStore) Unlock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lp := s.lockPath(resourceID)

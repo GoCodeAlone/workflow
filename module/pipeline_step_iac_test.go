@@ -104,7 +104,7 @@ func TestIaCPlanStep_BasicPlan(t *testing.T) {
 	}
 
 	// State should be persisted.
-	st, _ := store.GetState("my-cluster")
+	st, _ := store.GetState(context.Background(), "my-cluster")
 	if st == nil {
 		t.Fatal("expected state to be persisted after plan")
 	}
@@ -178,7 +178,7 @@ func TestIaCApplyStep_BasicApply(t *testing.T) {
 	}
 
 	// State should be active.
-	st, _ := store.GetState("my-cluster")
+	st, _ := store.GetState(context.Background(), "my-cluster")
 	if st == nil || st.Status != "active" {
 		t.Errorf("expected stored status=active, got %v", st)
 	}
@@ -189,7 +189,7 @@ func TestIaCApplyStep_ApplyError(t *testing.T) {
 	provider.applyErr = errors.New("apply failed: insufficient resources")
 
 	// Seed a planned state.
-	_ = store.SaveState(makeState("my-cluster", "kubernetes", "local", "planned"))
+	_ = store.SaveState(context.Background(), makeState("my-cluster", "kubernetes", "local", "planned"))
 
 	factory := module.NewIaCApplyStepFactory()
 	step, _ := factory("apply", baseIaCCfg(), app)
@@ -199,7 +199,7 @@ func TestIaCApplyStep_ApplyError(t *testing.T) {
 	}
 
 	// State should be error.
-	st, _ := store.GetState("my-cluster")
+	st, _ := store.GetState(context.Background(), "my-cluster")
 	if st == nil || st.Status != "error" {
 		t.Errorf("expected stored status=error after apply failure, got %v", st)
 	}
@@ -217,7 +217,7 @@ func TestIaCApplyStep_MissingPlatform(t *testing.T) {
 
 func TestIaCStatusStep_BasicStatus(t *testing.T) {
 	app, store, _ := setupIaCApp(t)
-	_ = store.SaveState(makeState("my-cluster", "kubernetes", "local", "active"))
+	_ = store.SaveState(context.Background(), makeState("my-cluster", "kubernetes", "local", "active"))
 
 	factory := module.NewIaCStatusStepFactory()
 	step, err := factory("status", baseIaCCfg(), app)
@@ -263,7 +263,7 @@ func TestIaCStatusStep_ProviderStatusError(t *testing.T) {
 
 func TestIaCDestroyStep_BasicDestroy(t *testing.T) {
 	app, store, provider := setupIaCApp(t)
-	_ = store.SaveState(makeState("my-cluster", "kubernetes", "local", "active"))
+	_ = store.SaveState(context.Background(), makeState("my-cluster", "kubernetes", "local", "active"))
 
 	factory := module.NewIaCDestroyStepFactory()
 	step, err := factory("destroy", baseIaCCfg(), app)
@@ -285,7 +285,7 @@ func TestIaCDestroyStep_BasicDestroy(t *testing.T) {
 	}
 
 	// State should be destroyed.
-	st, _ := store.GetState("my-cluster")
+	st, _ := store.GetState(context.Background(), "my-cluster")
 	if st == nil || st.Status != "destroyed" {
 		t.Errorf("expected stored status=destroyed, got %v", st)
 	}
@@ -294,7 +294,7 @@ func TestIaCDestroyStep_BasicDestroy(t *testing.T) {
 func TestIaCDestroyStep_DestroyError(t *testing.T) {
 	app, store, provider := setupIaCApp(t)
 	provider.destroyErr = errors.New("cannot delete: cluster in use")
-	_ = store.SaveState(makeState("my-cluster", "kubernetes", "local", "active"))
+	_ = store.SaveState(context.Background(), makeState("my-cluster", "kubernetes", "local", "active"))
 
 	factory := module.NewIaCDestroyStepFactory()
 	step, _ := factory("destroy", baseIaCCfg(), app)
@@ -303,7 +303,7 @@ func TestIaCDestroyStep_DestroyError(t *testing.T) {
 		t.Error("expected error from Destroy, got nil")
 	}
 
-	st, _ := store.GetState("my-cluster")
+	st, _ := store.GetState(context.Background(), "my-cluster")
 	if st == nil || st.Status != "error" {
 		t.Errorf("expected stored status=error after destroy failure, got %v", st)
 	}
@@ -325,7 +325,7 @@ func TestIaCDriftDetect_NoDrift(t *testing.T) {
 	// Store state with a config snapshot.
 	st := makeState("my-cluster", "kubernetes", "local", "active")
 	st.Config = map[string]any{"version": "1.29", "nodeCount": 3}
-	_ = store.SaveState(st)
+	_ = store.SaveState(context.Background(), st)
 
 	cfg := map[string]any{
 		"platform":    "test-platform",
@@ -358,7 +358,7 @@ func TestIaCDriftDetect_WithDrift(t *testing.T) {
 	// Store state with original config.
 	st := makeState("my-cluster", "kubernetes", "local", "active")
 	st.Config = map[string]any{"version": "1.29", "nodeCount": 3}
-	_ = store.SaveState(st)
+	_ = store.SaveState(context.Background(), st)
 
 	// Current config has modified nodeCount and a new key.
 	cfg := map[string]any{
@@ -406,7 +406,7 @@ func TestIaCDriftDetect_RemovedKey(t *testing.T) {
 
 	st := makeState("my-cluster", "kubernetes", "local", "active")
 	st.Config = map[string]any{"version": "1.29", "tags": "prod"}
-	_ = store.SaveState(st)
+	_ = store.SaveState(context.Background(), st)
 
 	// Current config is missing the "tags" key.
 	cfg := map[string]any{
@@ -463,7 +463,7 @@ func TestIaCLifecycle_PlanApplyStatusDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	st, _ := store.GetState("my-cluster")
+	st, _ := store.GetState(context.Background(), "my-cluster")
 	if st.Status != "planned" {
 		t.Fatalf("expected planned, got %q", st.Status)
 	}
@@ -474,7 +474,7 @@ func TestIaCLifecycle_PlanApplyStatusDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	st, _ = store.GetState("my-cluster")
+	st, _ = store.GetState(context.Background(), "my-cluster")
 	if st.Status != "active" {
 		t.Fatalf("expected active, got %q", st.Status)
 	}
@@ -495,7 +495,7 @@ func TestIaCLifecycle_PlanApplyStatusDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
-	st, _ = store.GetState("my-cluster")
+	st, _ = store.GetState(context.Background(), "my-cluster")
 	if st.Status != "destroyed" {
 		t.Fatalf("expected destroyed, got %q", st.Status)
 	}

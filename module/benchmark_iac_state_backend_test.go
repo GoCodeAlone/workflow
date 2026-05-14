@@ -31,18 +31,19 @@ func oneMBState() *IaCState {
 func BenchmarkIaCStateBackend_InProcess(b *testing.B) {
 	store := NewMemoryIaCStateStore()
 	st := oneMBState()
+	ctx := context.Background()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := store.Lock(st.ResourceID); err != nil {
+		if err := store.Lock(ctx, st.ResourceID); err != nil {
 			b.Fatal(err)
 		}
-		if _, err := store.GetState(st.ResourceID); err != nil {
+		if _, err := store.GetState(ctx, st.ResourceID); err != nil {
 			b.Fatal(err)
 		}
-		if err := store.SaveState(st); err != nil {
+		if err := store.SaveState(ctx, st); err != nil {
 			b.Fatal(err)
 		}
-		if err := store.Unlock(st.ResourceID); err != nil {
+		if err := store.Unlock(ctx, st.ResourceID); err != nil {
 			b.Fatal(err)
 		}
 	}

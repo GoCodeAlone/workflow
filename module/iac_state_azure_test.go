@@ -97,7 +97,7 @@ func newTestAzureStore(client module.AzureBlobClient) *module.AzureBlobIaCStateS
 
 func TestAzureBlobIaCStateStore_GetState_NotFound(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
-	st, err := store.GetState("nonexistent")
+	st, err := store.GetState(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,11 +115,11 @@ func TestAzureBlobIaCStateStore_SaveAndGetState(t *testing.T) {
 		Provider:     "azure",
 		Status:       "active",
 	}
-	if err := store.SaveState(state); err != nil {
+	if err := store.SaveState(context.Background(), state); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
-	got, err := store.GetState("az-cluster")
+	got, err := store.GetState(context.Background(), "az-cluster")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -133,14 +133,14 @@ func TestAzureBlobIaCStateStore_SaveAndGetState(t *testing.T) {
 
 func TestAzureBlobIaCStateStore_SaveState_Nil(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
-	if err := store.SaveState(nil); err == nil {
+	if err := store.SaveState(context.Background(), nil); err == nil {
 		t.Fatal("expected error for nil state")
 	}
 }
 
 func TestAzureBlobIaCStateStore_SaveState_EmptyID(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
-	if err := store.SaveState(&module.IaCState{}); err == nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{}); err == nil {
 		t.Fatal("expected error for empty resource_id")
 	}
 }
@@ -153,12 +153,12 @@ func TestAzureBlobIaCStateStore_ListStates(t *testing.T) {
 		{ResourceID: "r2", ResourceType: "db", Provider: "azure", Status: "active"},
 		{ResourceID: "r3", ResourceType: "k8s", Provider: "gcp", Status: "destroyed"},
 	} {
-		if err := store.SaveState(st); err != nil {
+		if err := store.SaveState(context.Background(), st); err != nil {
 			t.Fatalf("SaveState %q: %v", st.ResourceID, err)
 		}
 	}
 
-	all, err := store.ListStates(nil)
+	all, err := store.ListStates(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListStates(nil): %v", err)
 	}
@@ -166,7 +166,7 @@ func TestAzureBlobIaCStateStore_ListStates(t *testing.T) {
 		t.Errorf("ListStates = %d, want 3", len(all))
 	}
 
-	filtered, err := store.ListStates(map[string]string{"provider": "azure"})
+	filtered, err := store.ListStates(context.Background(), map[string]string{"provider": "azure"})
 	if err != nil {
 		t.Fatalf("ListStates(provider=azure): %v", err)
 	}
@@ -178,14 +178,14 @@ func TestAzureBlobIaCStateStore_ListStates(t *testing.T) {
 func TestAzureBlobIaCStateStore_ListStates_SkipsLockBlobs(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
 
-	if err := store.SaveState(&module.IaCState{ResourceID: "r1", Status: "active"}); err != nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{ResourceID: "r1", Status: "active"}); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	if err := store.Lock("r1"); err != nil {
+	if err := store.Lock(context.Background(), "r1"); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	results, err := store.ListStates(nil)
+	results, err := store.ListStates(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListStates: %v", err)
 	}
@@ -197,13 +197,13 @@ func TestAzureBlobIaCStateStore_ListStates_SkipsLockBlobs(t *testing.T) {
 func TestAzureBlobIaCStateStore_DeleteState(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
 
-	if err := store.SaveState(&module.IaCState{ResourceID: "del-me", Status: "active"}); err != nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{ResourceID: "del-me", Status: "active"}); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	if err := store.DeleteState("del-me"); err != nil {
+	if err := store.DeleteState(context.Background(), "del-me"); err != nil {
 		t.Fatalf("DeleteState: %v", err)
 	}
-	st, err := store.GetState("del-me")
+	st, err := store.GetState(context.Background(), "del-me")
 	if err != nil {
 		t.Fatalf("GetState after delete: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestAzureBlobIaCStateStore_DeleteState(t *testing.T) {
 
 func TestAzureBlobIaCStateStore_DeleteState_NotFound(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
-	if err := store.DeleteState("nonexistent"); err == nil {
+	if err := store.DeleteState(context.Background(), "nonexistent"); err == nil {
 		t.Fatal("expected error deleting nonexistent state")
 	}
 }
@@ -222,23 +222,23 @@ func TestAzureBlobIaCStateStore_DeleteState_NotFound(t *testing.T) {
 func TestAzureBlobIaCStateStore_LockUnlock(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
 
-	if err := store.Lock("res-1"); err != nil {
+	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
-	if err := store.Lock("res-1"); err == nil {
+	if err := store.Lock(context.Background(), "res-1"); err == nil {
 		t.Fatal("expected error on double lock")
 	}
-	if err := store.Unlock("res-1"); err != nil {
+	if err := store.Unlock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Unlock: %v", err)
 	}
-	if err := store.Lock("res-1"); err != nil {
+	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock after unlock: %v", err)
 	}
 }
 
 func TestAzureBlobIaCStateStore_Unlock_NotLocked(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
-	if err := store.Unlock("not-locked"); err == nil {
+	if err := store.Unlock(context.Background(), "not-locked"); err == nil {
 		t.Fatal("expected error unlocking non-locked resource")
 	}
 }
@@ -250,15 +250,15 @@ func TestAzureBlobIaCStateStore_Unlock_PassesLeaseID(t *testing.T) {
 	client := newMockAzureClient()
 	store := newTestAzureStore(client)
 
-	if err := store.Lock("res-lease"); err != nil {
+	if err := store.Lock(context.Background(), "res-lease"); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 	// Unlock must pass the correct leaseID — mock rejects wrong/empty leaseIDs.
-	if err := store.Unlock("res-lease"); err != nil {
+	if err := store.Unlock(context.Background(), "res-lease"); err != nil {
 		t.Fatalf("Unlock with leaseID: %v", err)
 	}
 	// After unlock, should be able to re-lock.
-	if err := store.Lock("res-lease"); err != nil {
+	if err := store.Lock(context.Background(), "res-lease"); err != nil {
 		t.Fatalf("Lock after Unlock: %v", err)
 	}
 }
@@ -272,10 +272,10 @@ func TestAzureBlobIaCStateStore_JSONRoundTrip(t *testing.T) {
 		Status:     "active",
 		Outputs:    map[string]any{"fqdn": "myapp.azurewebsites.net"},
 	}
-	if err := store.SaveState(state); err != nil {
+	if err := store.SaveState(context.Background(), state); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	got, err := store.GetState("az-rt")
+	got, err := store.GetState(context.Background(), "az-rt")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}

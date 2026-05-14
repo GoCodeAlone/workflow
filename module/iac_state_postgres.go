@@ -61,8 +61,8 @@ func NewPostgresIaCStateStoreWithConn(conn PostgresConn) *PostgresIaCStateStore 
 }
 
 // GetState retrieves a state record by resource ID. Returns nil, nil when not found.
-func (s *PostgresIaCStateStore) GetState(resourceID string) (*IaCState, error) {
-	st, err := s.conn.GetState(context.Background(), resourceID)
+func (s *PostgresIaCStateStore) GetState(ctx context.Context, resourceID string) (*IaCState, error) {
+	st, err := s.conn.GetState(ctx, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("iac postgres state: GetState %q: %w", resourceID, err)
 	}
@@ -70,22 +70,22 @@ func (s *PostgresIaCStateStore) GetState(resourceID string) (*IaCState, error) {
 }
 
 // SaveState inserts or replaces a state record.
-func (s *PostgresIaCStateStore) SaveState(state *IaCState) error {
+func (s *PostgresIaCStateStore) SaveState(ctx context.Context, state *IaCState) error {
 	if state == nil {
 		return fmt.Errorf("iac postgres state: SaveState: state must not be nil")
 	}
 	if state.ResourceID == "" {
 		return fmt.Errorf("iac postgres state: SaveState: resource_id must not be empty")
 	}
-	if err := s.conn.UpsertState(context.Background(), state); err != nil {
+	if err := s.conn.UpsertState(ctx, state); err != nil {
 		return fmt.Errorf("iac postgres state: SaveState %q: %w", state.ResourceID, err)
 	}
 	return nil
 }
 
 // ListStates returns all state records matching the provided key=value filter.
-func (s *PostgresIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, error) {
-	rows, err := s.conn.ListRows(context.Background())
+func (s *PostgresIaCStateStore) ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error) {
+	rows, err := s.conn.ListRows(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("iac postgres state: ListStates: %w", err)
 	}
@@ -99,8 +99,8 @@ func (s *PostgresIaCStateStore) ListStates(filter map[string]string) ([]*IaCStat
 }
 
 // DeleteState removes a state record by resource ID.
-func (s *PostgresIaCStateStore) DeleteState(resourceID string) error {
-	deleted, err := s.conn.DeleteRow(context.Background(), resourceID)
+func (s *PostgresIaCStateStore) DeleteState(ctx context.Context, resourceID string) error {
+	deleted, err := s.conn.DeleteRow(ctx, resourceID)
 	if err != nil {
 		return fmt.Errorf("iac postgres state: DeleteState %q: %w", resourceID, err)
 	}
@@ -111,7 +111,7 @@ func (s *PostgresIaCStateStore) DeleteState(resourceID string) error {
 }
 
 // Lock acquires a PostgreSQL advisory lock for the resource.
-func (s *PostgresIaCStateStore) Lock(resourceID string) error {
+func (s *PostgresIaCStateStore) Lock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -119,7 +119,7 @@ func (s *PostgresIaCStateStore) Lock(resourceID string) error {
 		return fmt.Errorf("iac postgres state: Lock %q: already locked", resourceID)
 	}
 	key := advisoryKey(resourceID)
-	if err := s.conn.AcquireAdvisoryLock(context.Background(), key); err != nil {
+	if err := s.conn.AcquireAdvisoryLock(ctx, key); err != nil {
 		return fmt.Errorf("iac postgres state: Lock %q: %w", resourceID, err)
 	}
 	s.held[resourceID] = key
@@ -127,7 +127,7 @@ func (s *PostgresIaCStateStore) Lock(resourceID string) error {
 }
 
 // Unlock releases the PostgreSQL advisory lock for the resource.
-func (s *PostgresIaCStateStore) Unlock(resourceID string) error {
+func (s *PostgresIaCStateStore) Unlock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -135,7 +135,7 @@ func (s *PostgresIaCStateStore) Unlock(resourceID string) error {
 	if !held {
 		return fmt.Errorf("iac postgres state: Unlock %q: not locked", resourceID)
 	}
-	if _, err := s.conn.ReleaseAdvisoryLock(context.Background(), key); err != nil {
+	if _, err := s.conn.ReleaseAdvisoryLock(ctx, key); err != nil {
 		return fmt.Errorf("iac postgres state: Unlock %q: %w", resourceID, err)
 	}
 	delete(s.held, resourceID)

@@ -28,27 +28,28 @@ func TestGRPCIaCStateStoreRoundTrip(t *testing.T) {
 	defer conn.Close()
 
 	var store IaCStateStore = newGRPCIaCStateStore(pb.NewIaCStateBackendClient(conn))
+	ctx := context.Background()
 
 	want := &IaCState{ResourceID: "r1", ResourceType: "kubernetes", Provider: "azure", Status: "active",
 		Outputs: map[string]any{"endpoint": "https://x"}, Config: map[string]any{"size": "L"}}
-	if err := store.SaveState(want); err != nil {
+	if err := store.SaveState(ctx, want); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	got, err := store.GetState("r1")
+	got, err := store.GetState(ctx, "r1")
 	if err != nil || got == nil {
 		t.Fatalf("GetState: %v (got=%v)", err, got)
 	}
 	if got.ResourceID != "r1" || got.Status != "active" || got.Outputs["endpoint"] != "https://x" {
 		t.Fatalf("round-trip mismatch: %+v", got)
 	}
-	if err := store.Lock("r1"); err != nil {
+	if err := store.Lock(ctx, "r1"); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
-	missing, err := store.GetState("nope")
+	missing, err := store.GetState(ctx, "nope")
 	if err != nil || missing != nil {
 		t.Fatalf("GetState(missing) should be nil,nil — got %v,%v", missing, err)
 	}
-	if err := store.Unlock("r1"); err != nil {
+	if err := store.Unlock(ctx, "r1"); err != nil {
 		t.Fatalf("Unlock: %v", err)
 	}
 }
