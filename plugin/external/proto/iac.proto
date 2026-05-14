@@ -596,3 +596,51 @@ message TroubleshootRequest {
 message TroubleshootResponse {
   repeated Diagnostic diagnostics = 1;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCStateBackend — strict contract for IaC state storage backends served by a
+// plugin sidecar. Maps 1:1 onto module.IaCStateStore (6 methods). Unary RPCs:
+// the PR 2 benchmark validated unary transport for 1 MB state blobs against the
+// in-process baseline. No lock-lease/TTL field — added additively only once a
+// plugin backend implements honored expiry with a conformance test.
+// ─────────────────────────────────────────────────────────────────────────────
+service IaCStateBackend {
+  rpc GetState   (GetStateRequest)    returns (GetStateResponse);
+  rpc SaveState  (SaveStateRequest)   returns (SaveStateResponse);
+  rpc ListStates (ListStatesRequest)  returns (ListStatesResponse);
+  rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
+  rpc Lock       (LockRequest)        returns (LockResponse);
+  rpc Unlock     (UnlockRequest)      returns (UnlockResponse);
+}
+
+// IaCState mirrors module.IaCState (module/iac_state.go:4-18). The free-form
+// Outputs / Config map[string]any fields cross the wire as JSON bytes per the
+// iac.proto hard invariant — same pattern as ResourceState.outputs_json.
+message IaCState {
+  string resource_id   = 1;
+  string resource_type = 2;
+  string provider      = 3;
+  string provider_ref  = 4;
+  string provider_id   = 5;
+  string config_hash   = 6;
+  string status        = 7;
+  bytes  outputs_json  = 8;  // JSON-encoded map[string]any (module.IaCState.Outputs)
+  bytes  config_json   = 9;  // JSON-encoded map[string]any (module.IaCState.Config)
+  repeated string dependencies = 10;
+  string created_at = 11;
+  string updated_at = 12;
+  string error      = 13;
+}
+
+message GetStateRequest    { string resource_id = 1; }
+message GetStateResponse   { IaCState state = 1; bool exists = 2; }
+message SaveStateRequest   { IaCState state = 1; }   // idempotent: full-state replace, last-writer-wins
+message SaveStateResponse  {}
+message ListStatesRequest  { map<string, string> filter = 1; }
+message ListStatesResponse { repeated IaCState states = 1; }
+message DeleteStateRequest  { string resource_id = 1; }
+message DeleteStateResponse {}
+message LockRequest    { string resource_id = 1; }
+message LockResponse   {}
+message UnlockRequest  { string resource_id = 1; }
+message UnlockResponse {}
