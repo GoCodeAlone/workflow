@@ -30,9 +30,10 @@ An `iac.state` module with `backend: azure_blob` now **requires
 module fails to initialize with an actionable error:
 
 ```
-iac.state "<name>": unsupported backend "azure_blob"
-(use 'memory', 'filesystem', 'spaces', 'gcs', 'azure_blob', or 'postgres',
- or load the plugin that provides it)
+iac.state "<name>": backend "azure_blob" is not built into workflow core
+(in-core backends: 'memory', 'filesystem', 'spaces', 'gcs', 'postgres').
+If "azure_blob" is a plugin-provided backend (e.g. 'azure_blob' via
+workflow-plugin-azure), install and load that plugin
 ```
 
 The yaml `backend: azure_blob` value itself is **unchanged** — no config
@@ -65,7 +66,7 @@ remain in workflow core and are **not** affected by this change. Only
    ```yaml
    requires:
      plugins:
-       - workflow-plugin-azure
+       - name: workflow-plugin-azure
    ```
 
 2. No config rewrite is required. The `iac.state` module keeps its

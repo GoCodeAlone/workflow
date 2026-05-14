@@ -96,7 +96,10 @@ func (m *IaCModule) Init(app modular.Application) error {
 			m.store = newGRPCIaCStateStore(client)
 			break
 		}
-		return fmt.Errorf("iac.state %q: unsupported backend %q (use 'memory', 'filesystem', 'spaces', 'gcs', 'azure_blob', or 'postgres', or load the plugin that provides it)", m.name, m.backend)
+		return fmt.Errorf("iac.state %q: backend %q is not built into workflow core "+
+			"(in-core backends: 'memory', 'filesystem', 'spaces', 'gcs', 'postgres'). "+
+			"If %q is a plugin-provided backend (e.g. 'azure_blob' via workflow-plugin-azure), "+
+			"install and load that plugin", m.name, m.backend, m.backend)
 	}
 
 	return app.RegisterService(m.name, m.store)
