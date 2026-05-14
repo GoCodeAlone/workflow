@@ -30,6 +30,9 @@ func (*fakeStateBackendClient) Lock(context.Context, *pb.LockRequest, ...grpc.Ca
 func (*fakeStateBackendClient) Unlock(context.Context, *pb.UnlockRequest, ...grpc.CallOption) (*pb.UnlockResponse, error) {
 	return nil, nil
 }
+func (*fakeStateBackendClient) ListBackendNames(context.Context, *pb.ListBackendNamesRequest, ...grpc.CallOption) (*pb.ListBackendNamesResponse, error) {
+	return nil, nil
+}
 
 func TestIaCStateBackendRegistry(t *testing.T) {
 	reg := newIaCStateBackendRegistry()
