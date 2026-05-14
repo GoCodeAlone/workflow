@@ -611,6 +611,7 @@ service IaCStateBackend {
   rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
   rpc Lock       (LockRequest)        returns (LockResponse);
   rpc Unlock     (UnlockRequest)      returns (UnlockResponse);
+  rpc ListBackendNames(ListBackendNamesRequest) returns (ListBackendNamesResponse);
 }
 
 // IaCState mirrors module.IaCState (module/iac_state.go:4-18). The free-form
@@ -644,3 +645,9 @@ message LockRequest    { string resource_id = 1; }
 message LockResponse   {}
 message UnlockRequest  { string resource_id = 1; }
 message UnlockResponse {}
+
+// ListBackendNames lets the engine ask a loaded plugin which iac.state backend
+// NAMES it serves (e.g. "azure_blob"). The plugin answers from its
+// plugin.json capabilities.iacStateBackends (PluginManifest.IaCStateBackends).
+message ListBackendNamesRequest  {}
+message ListBackendNamesResponse { repeated string backend_names = 1; }

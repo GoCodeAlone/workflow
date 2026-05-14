@@ -1649,12 +1649,13 @@ var ResourceDriver_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	IaCStateBackend_GetState_FullMethodName    = "/workflow.plugin.external.iac.IaCStateBackend/GetState"
-	IaCStateBackend_SaveState_FullMethodName   = "/workflow.plugin.external.iac.IaCStateBackend/SaveState"
-	IaCStateBackend_ListStates_FullMethodName  = "/workflow.plugin.external.iac.IaCStateBackend/ListStates"
-	IaCStateBackend_DeleteState_FullMethodName = "/workflow.plugin.external.iac.IaCStateBackend/DeleteState"
-	IaCStateBackend_Lock_FullMethodName        = "/workflow.plugin.external.iac.IaCStateBackend/Lock"
-	IaCStateBackend_Unlock_FullMethodName      = "/workflow.plugin.external.iac.IaCStateBackend/Unlock"
+	IaCStateBackend_GetState_FullMethodName         = "/workflow.plugin.external.iac.IaCStateBackend/GetState"
+	IaCStateBackend_SaveState_FullMethodName        = "/workflow.plugin.external.iac.IaCStateBackend/SaveState"
+	IaCStateBackend_ListStates_FullMethodName       = "/workflow.plugin.external.iac.IaCStateBackend/ListStates"
+	IaCStateBackend_DeleteState_FullMethodName      = "/workflow.plugin.external.iac.IaCStateBackend/DeleteState"
+	IaCStateBackend_Lock_FullMethodName             = "/workflow.plugin.external.iac.IaCStateBackend/Lock"
+	IaCStateBackend_Unlock_FullMethodName           = "/workflow.plugin.external.iac.IaCStateBackend/Unlock"
+	IaCStateBackend_ListBackendNames_FullMethodName = "/workflow.plugin.external.iac.IaCStateBackend/ListBackendNames"
 )
 
 // IaCStateBackendClient is the client API for IaCStateBackend service.
@@ -1675,6 +1676,7 @@ type IaCStateBackendClient interface {
 	DeleteState(ctx context.Context, in *DeleteStateRequest, opts ...grpc.CallOption) (*DeleteStateResponse, error)
 	Lock(ctx context.Context, in *LockRequest, opts ...grpc.CallOption) (*LockResponse, error)
 	Unlock(ctx context.Context, in *UnlockRequest, opts ...grpc.CallOption) (*UnlockResponse, error)
+	ListBackendNames(ctx context.Context, in *ListBackendNamesRequest, opts ...grpc.CallOption) (*ListBackendNamesResponse, error)
 }
 
 type iaCStateBackendClient struct {
@@ -1745,6 +1747,16 @@ func (c *iaCStateBackendClient) Unlock(ctx context.Context, in *UnlockRequest, o
 	return out, nil
 }
 
+func (c *iaCStateBackendClient) ListBackendNames(ctx context.Context, in *ListBackendNamesRequest, opts ...grpc.CallOption) (*ListBackendNamesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBackendNamesResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_ListBackendNames_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // IaCStateBackendServer is the server API for IaCStateBackend service.
 // All implementations must embed UnimplementedIaCStateBackendServer
 // for forward compatibility.
@@ -1763,6 +1775,7 @@ type IaCStateBackendServer interface {
 	DeleteState(context.Context, *DeleteStateRequest) (*DeleteStateResponse, error)
 	Lock(context.Context, *LockRequest) (*LockResponse, error)
 	Unlock(context.Context, *UnlockRequest) (*UnlockResponse, error)
+	ListBackendNames(context.Context, *ListBackendNamesRequest) (*ListBackendNamesResponse, error)
 	mustEmbedUnimplementedIaCStateBackendServer()
 }
 
@@ -1790,6 +1803,9 @@ func (UnimplementedIaCStateBackendServer) Lock(context.Context, *LockRequest) (*
 }
 func (UnimplementedIaCStateBackendServer) Unlock(context.Context, *UnlockRequest) (*UnlockResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unlock not implemented")
+}
+func (UnimplementedIaCStateBackendServer) ListBackendNames(context.Context, *ListBackendNamesRequest) (*ListBackendNamesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListBackendNames not implemented")
 }
 func (UnimplementedIaCStateBackendServer) mustEmbedUnimplementedIaCStateBackendServer() {}
 func (UnimplementedIaCStateBackendServer) testEmbeddedByValue()                         {}
@@ -1920,6 +1936,24 @@ func _IaCStateBackend_Unlock_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IaCStateBackend_ListBackendNames_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBackendNamesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).ListBackendNames(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_ListBackendNames_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).ListBackendNames(ctx, req.(*ListBackendNamesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // IaCStateBackend_ServiceDesc is the grpc.ServiceDesc for IaCStateBackend service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1950,6 +1984,10 @@ var IaCStateBackend_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Unlock",
 			Handler:    _IaCStateBackend_Unlock_Handler,
+		},
+		{
+			MethodName: "ListBackendNames",
+			Handler:    _IaCStateBackend_ListBackendNames_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

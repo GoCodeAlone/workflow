@@ -1,6 +1,9 @@
 package proto
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // Compile-level guard: the IaCStateBackend service + its messages must exist
 // in the generated package with the IaCStateStore-mirroring shape.
@@ -20,4 +23,16 @@ func TestIaCStateBackendGeneratedTypesExist(t *testing.T) {
 	if s.GetResourceId() != "r" {
 		t.Fatalf("IaCState.ResourceId accessor missing")
 	}
+}
+
+func TestIaCStateBackendListBackendNamesGenerated(t *testing.T) {
+	_ = &ListBackendNamesRequest{}
+	resp := &ListBackendNamesResponse{BackendNames: []string{"azure_blob"}}
+	if resp.GetBackendNames()[0] != "azure_blob" {
+		t.Fatalf("ListBackendNamesResponse.BackendNames accessor missing")
+	}
+	// the RPC must be on the IaCStateBackend service interfaces:
+	var _ interface {
+		ListBackendNames(context.Context, *ListBackendNamesRequest) (*ListBackendNamesResponse, error)
+	} = (IaCStateBackendServer)(nil)
 }
