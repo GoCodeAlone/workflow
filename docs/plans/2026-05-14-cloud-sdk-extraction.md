@@ -35,8 +35,10 @@
 | 1 | Phase 0: split platform_kubernetes_kind.go + wire audit script into CI | Task 1, Task 2, Task 3 | feat/cloud-sdk-extraction-p0 |
 | 2 | Phase A: IaCStateBackend proto + benchmark harness + proto lock | Task 4, Task 5, Task 6 | feat/cloud-sdk-extraction-pa-proto |
 | 3 | Phase A: host-side IaCStateBackend resolution + secret-redaction + gRPC-logging guard | Task 7, Task 8, Task 9, Task 10 | feat/cloud-sdk-extraction-pa-host |
-| 4 | Phase A: workflow-plugin-azure implements azure_blob IaCStateBackend | Task 11, Task 12 | (cross-repo: workflow-plugin-azure `feat/azure-blob-state-backend`) |
+| 4 | **[HUMAN-GATE — cross-repo]** Phase A: workflow-plugin-azure implements azure_blob IaCStateBackend | Task 11, Task 12 | (cross-repo: `workflow-plugin-azure` repo, branch `feat/azure-blob-state-backend`) |
 | 5 | Phase A: core deletes iac_state_azure.go + strips azure_blob case → drops azure-sdk from go.mod | Task 13, Task 14 | feat/cloud-sdk-extraction-pa-core |
+
+**PR 4 is a declared human-action gate.** It lands in a *different git repository* (`/Users/jon/workspace/workflow-plugin-azure`), which the autonomous worktree-scoped execution pipeline cannot branch/PR/tag. When execution reaches PR 4, the pipeline must **pause and surface PR 4 to a human operator** (with Tasks 11–12 as the checklist) — this is the expected, designed handoff, not an execution failure. PR 5 is **blocked on PR 4's plugin tag** existing and being installable (Task 13 Step 8 + Task 14 Step 4 runtime-launch validation load the tagged plugin binary). PRs 1–3 are fully autonomous-executable in the worktree; PR 5 resumes autonomously once the operator confirms PR 4 merged + tagged.
 
 **Status:** Draft
 
@@ -196,15 +198,10 @@ Rollback: `git revert` — comment-only.
 
 **Files:**
 - Modify: `scripts/audit-cloud-symbols.sh`
-- Modify: `.github/workflows/ci.yml` (or the repo's primary CI workflow — confirm the exact filename with `ls .github/workflows/`)
+- Modify: `.github/workflows/ci.yml` (verified — the repo's primary build/test workflow; it already hosts grep-gate jobs `godo-banned` and `aws-sdk-banned`, the natural neighbours for this audit step)
 - Test: `scripts/audit-cloud-symbols.sh --check` (the script self-verifies)
 
-**Step 1: Identify the CI workflow file**
-
-Run: `ls .github/workflows/`
-Expected: a primary build/test workflow (e.g. `ci.yml`, `test.yml`, `go.yml`). Note its name for Step 4.
-
-**Step 2: Add the `init()`-partition assertion to the script**
+**Step 1: Add the `init()`-partition assertion to the script**
 
 In `scripts/audit-cloud-symbols.sh`, extend the `--check` path so it fails if any post-Phase-0 file registers both a core-staying and a plugin-bound Kubernetes backend in one `init()`. Add, after the existing `platform_kubernetes_kind.go` advisory block (which becomes moot once the file is gone — guard it with a file-existence check):
 
@@ -231,26 +228,31 @@ fi
 
 Also guard the existing `platform_kubernetes_kind.go` advisory block with `[[ -f module/platform_kubernetes_kind.go ]]` so it silently skips post-Phase-0 (the file is gone).
 
-**Step 3: Run the script's check mode locally**
+**Step 2: Run the script's check mode locally**
 
 Run: `bash scripts/audit-cloud-symbols.sh --check`
 Expected: prints the real-import map, the new "init() partition clean" line shows `OK`, final line `audit-cloud-symbols: OK`, exit 0.
 
-**Step 4: Wire it into CI**
+**Step 3: Wire it into CI**
 
-Add a step to the CI workflow identified in Step 1, in the existing build/test job, after checkout + Go setup:
+Add a new job to `.github/workflows/ci.yml` alongside the existing `godo-banned` / `aws-sdk-banned` grep-gate jobs (same shape — `runs-on: ubuntu-latest`, checkout, run the script):
 
 ```yaml
-      - name: Cloud-SDK inventory + partition audit
+  cloud-sdk-audit:
+    name: Cloud-SDK inventory + k8s-backend init() partition audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit cloud-SDK imports + init() partition
         run: bash scripts/audit-cloud-symbols.sh --check
 ```
 
-**Step 5: Verify the workflow YAML is valid**
+**Step 4: Verify the workflow YAML is valid**
 
-Run: `bash -n scripts/audit-cloud-symbols.sh` (script syntax) and visually confirm the YAML indentation matches the surrounding steps in the workflow file.
-Expected: script syntax OK; YAML step nested at the same level as sibling steps.
+Run: `bash -n scripts/audit-cloud-symbols.sh` (script syntax) and visually confirm the new job's indentation matches the sibling `godo-banned` / `aws-sdk-banned` jobs in `ci.yml`.
+Expected: script syntax OK; the `cloud-sdk-audit` job nested at the same level as `godo-banned`.
 
-**Step 6: Commit**
+**Step 5: Commit**
 
 ```bash
 git add scripts/audit-cloud-symbols.sh .github/workflows/
@@ -297,8 +299,10 @@ func TestIaCStateBackendGeneratedTypesExist(t *testing.T) {
 	_ = &ListStatesRequest{Filter: map[string]string{"k": "v"}}
 	_ = &LockRequest{ResourceId: "r"}
 	_ = &UnlockRequest{ResourceId: "r"}
-	// IaCState mirrors module.IaCState's JSON-serialisable fields.
-	s := &IaCState{ResourceId: "r", ResourceType: "kubernetes", Provider: "azure", Status: "active"}
+	// IaCState mirrors module.IaCState; free-form Outputs/Config cross the wire
+	// as JSON bytes per the iac.proto hard invariant (NO google.protobuf.Struct).
+	s := &IaCState{ResourceId: "r", ResourceType: "kubernetes", Provider: "azure",
+		Status: "active", OutputsJson: []byte(`{}`), ConfigJson: []byte(`{}`)}
 	if s.GetResourceId() != "r" {
 		t.Fatalf("IaCState.ResourceId accessor missing")
 	}
@@ -312,7 +316,7 @@ Expected: FAIL — build error, `IaCStateBackendServer` / `GetStateRequest` etc.
 
 **Step 3: Add the service + messages to `iac.proto`**
 
-Append to `plugin/external/proto/iac.proto` (after the `ResourceDriver` service, before EOF). Mirror `module.IaCState` field-for-field (see `module/iac_state.go:4-18`):
+Append to `plugin/external/proto/iac.proto` (after the `ResourceDriver` service, before EOF). Mirror `module.IaCState` field-for-field (see `module/iac_state.go:4-18`). **Hard invariant — `iac.proto:6-10`: NO `google.protobuf.Struct`, NO `google.protobuf.Any`.** Free-form `Outputs` / `Config` maps cross the wire as `bytes <name>_json`, JSON-encoded by host/plugin — exactly the established `ResourceState` pattern (`iac.proto:144`, fields `applied_config_json` / `outputs_json`). Do **not** add a `struct.proto` import; `iac.proto` imports only `timestamp.proto` and that must not change.
 
 ```proto
 // IaCStateBackend — strict contract for IaC state storage backends served by a
@@ -329,8 +333,9 @@ service IaCStateBackend {
   rpc Unlock     (UnlockRequest)      returns (UnlockResponse);
 }
 
-// IaCState mirrors module.IaCState (module/iac_state.go). Maps used there
-// (Outputs, Config) carry arbitrary JSON — represented here as google.protobuf.Struct.
+// IaCState mirrors module.IaCState (module/iac_state.go:4-18). The free-form
+// Outputs / Config map[string]any fields cross the wire as JSON bytes per the
+// iac.proto hard invariant — same pattern as ResourceState.outputs_json.
 message IaCState {
   string resource_id   = 1;
   string resource_type = 2;
@@ -339,9 +344,9 @@ message IaCState {
   string provider_id   = 5;
   string config_hash   = 6;
   string status        = 7;
-  google.protobuf.Struct outputs = 8;
-  google.protobuf.Struct config  = 9;
-  repeated string dependencies   = 10;
+  bytes  outputs_json  = 8;  // JSON-encoded map[string]any (module.IaCState.Outputs)
+  bytes  config_json   = 9;  // JSON-encoded map[string]any (module.IaCState.Config)
+  repeated string dependencies = 10;
   string created_at = 11;
   string updated_at = 12;
   string error      = 13;
@@ -361,12 +366,10 @@ message UnlockRequest  { string resource_id = 1; }
 message UnlockResponse {}
 ```
 
-Confirm `iac.proto` already imports `google/protobuf/struct.proto` (it uses `Struct` elsewhere); if not, add `import "google/protobuf/struct.proto";` near the top with the other imports.
-
 **Step 4: Regenerate the Go bindings**
 
-Run: `cd plugin/external/proto && buf generate` (per `plugin/external/proto/README.md`)
-Expected: `iac.pb.go` + `iac_grpc.pb.go` regenerated, now containing `IaCStateBackendServer`, `IaCStateBackendClient`, and the message types. `git diff --stat` shows only the two `*.pb.go` files changed plus `iac.proto`.
+Run: `buf generate` **from the worktree root** (per `plugin/external/proto/README.md` — `buf.yaml` / `buf.gen.yaml` live at repo root; running from inside `plugin/external/proto/` will not find them).
+Expected: `plugin/external/proto/iac.pb.go` + `iac_grpc.pb.go` regenerated, now containing `IaCStateBackendServer`, `IaCStateBackendClient`, and the message types. `git diff --stat` shows only the two `*.pb.go` files changed plus `iac.proto`.
 
 **Step 5: Run the test to verify it passes**
 
@@ -402,14 +405,18 @@ Rollback: `git revert` — proto + generated code only, no runtime wiring yet; r
 
 **Step 1: Write the benchmark**
 
-Create `module/benchmark_iac_state_backend_test.go`. It drives a synthetic ~1 MB `IaCState` through a full `Lock → GetState → SaveState → Unlock` cycle two ways: (a) directly against an in-process `IaCStateStore` (the `memory` backend — the baseline this design replaces), (b) against the same store wrapped behind a real in-memory gRPC `IaCStateBackend` server+client pair (the post-extraction path). It reports `b.ReportMetric` for added latency.
+Create `module/benchmark_iac_state_backend_test.go`. It drives a synthetic ~1 MB `IaCState` through a full `Lock → GetState → SaveState → Unlock` cycle two ways: (a) directly against an in-process `IaCStateStore` (the `memory` backend — the baseline this design replaces), (b) against the same store wrapped behind a real in-memory gRPC `IaCStateBackend` server+client pair (the post-extraction path).
+
+This task's file is **fully self-contained** — it defines its own local `benchStateToProto` converter and `benchStateBackendServer`. Task 7 introduces the *production* converters + server type; once those exist, this file is simplified (Task 7 Step 3) to reuse them. Per the `iac.proto` hard invariant, the free-form `Outputs`/`Config` maps convert via `encoding/json`, **not** `structpb`.
 
 ```go
 package module
 
 import (
 	"context"
+	"encoding/json"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -424,7 +431,7 @@ func oneMBState() *IaCState {
 	big := strings.Repeat("x", 1024)
 	outputs := make(map[string]any, 1024)
 	for i := 0; i < 1024; i++ {
-		outputs["k"+strings.Repeat("0", 3)+itoa(i)] = big
+		outputs["k"+strconv.Itoa(i)] = big
 	}
 	return &IaCState{
 		ResourceID: "bench-resource", ResourceType: "kubernetes", Provider: "azure",
@@ -433,16 +440,55 @@ func oneMBState() *IaCState {
 	}
 }
 
-func itoa(i int) string { // tiny local helper; avoid strconv import noise in bench file
-	if i == 0 {
-		return "0"
+// benchStateToProto — local, self-contained IaCState -> pb.IaCState converter.
+// Task 7 replaces this with the production iacStateToProto.
+func benchStateToProto(s *IaCState) *pb.IaCState {
+	outJSON, _ := json.Marshal(s.Outputs)
+	cfgJSON, _ := json.Marshal(s.Config)
+	return &pb.IaCState{
+		ResourceId: s.ResourceID, ResourceType: s.ResourceType, Provider: s.Provider,
+		Status: s.Status, OutputsJson: outJSON, ConfigJson: cfgJSON,
+		CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
-	var b []byte
-	for i > 0 {
-		b = append([]byte{byte('0' + i%10)}, b...)
-		i /= 10
+}
+
+// benchStateBackendServer wraps an IaCStateStore behind pb.IaCStateBackendServer.
+// Task 7 promotes this to the production iacStateBackendServer.
+type benchStateBackendServer struct {
+	pb.UnimplementedIaCStateBackendServer
+	store IaCStateStore
+}
+
+func (s *benchStateBackendServer) GetState(_ context.Context, r *pb.GetStateRequest) (*pb.GetStateResponse, error) {
+	st, err := s.store.GetState(r.ResourceId)
+	if err != nil {
+		return nil, err
 	}
-	return string(b)
+	if st == nil {
+		return &pb.GetStateResponse{Exists: false}, nil
+	}
+	return &pb.GetStateResponse{Exists: true, State: benchStateToProto(st)}, nil
+}
+func (s *benchStateBackendServer) SaveState(_ context.Context, r *pb.SaveStateRequest) (*pb.SaveStateResponse, error) {
+	var outputs, config map[string]any
+	_ = json.Unmarshal(r.State.OutputsJson, &outputs)
+	_ = json.Unmarshal(r.State.ConfigJson, &config)
+	return &pb.SaveStateResponse{}, s.store.SaveState(&IaCState{
+		ResourceID: r.State.ResourceId, ResourceType: r.State.ResourceType,
+		Provider: r.State.Provider, Status: r.State.Status, Outputs: outputs, Config: config,
+	})
+}
+func (s *benchStateBackendServer) Lock(_ context.Context, r *pb.LockRequest) (*pb.LockResponse, error) {
+	return &pb.LockResponse{}, s.store.Lock(r.ResourceId)
+}
+func (s *benchStateBackendServer) Unlock(_ context.Context, r *pb.UnlockRequest) (*pb.UnlockResponse, error) {
+	return &pb.UnlockResponse{}, s.store.Unlock(r.ResourceId)
+}
+func (s *benchStateBackendServer) ListStates(_ context.Context, _ *pb.ListStatesRequest) (*pb.ListStatesResponse, error) {
+	return &pb.ListStatesResponse{}, nil
+}
+func (s *benchStateBackendServer) DeleteState(_ context.Context, r *pb.DeleteStateRequest) (*pb.DeleteStateResponse, error) {
+	return &pb.DeleteStateResponse{}, s.store.DeleteState(r.ResourceId)
 }
 
 // BenchmarkIaCStateBackend_InProcess is the baseline: direct IaCStateStore calls.
@@ -471,7 +517,7 @@ func BenchmarkIaCStateBackend_InProcess(b *testing.B) {
 func BenchmarkIaCStateBackend_GRPC(b *testing.B) {
 	lis := bufconn.Listen(4 << 20) // 4 MiB — gRPC default message cap
 	srv := grpc.NewServer()
-	pb.RegisterIaCStateBackendServer(srv, newBenchStateBackendServer(NewMemoryIaCStateStore()))
+	pb.RegisterIaCStateBackendServer(srv, &benchStateBackendServer{store: NewMemoryIaCStateStore()})
 	go func() { _ = srv.Serve(lis) }()
 	defer srv.Stop()
 
@@ -484,7 +530,7 @@ func BenchmarkIaCStateBackend_GRPC(b *testing.B) {
 	defer conn.Close()
 	client := pb.NewIaCStateBackendClient(conn)
 	st := oneMBState()
-	pbState := iacStateToProto(st) // helper introduced in Task 7; for the bench, inline a minimal conversion
+	pbState := benchStateToProto(st)
 	ctx := context.Background()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -503,10 +549,6 @@ func BenchmarkIaCStateBackend_GRPC(b *testing.B) {
 	}
 }
 ```
-
-> **Note for the executor:** `newBenchStateBackendServer` and `iacStateToProto` do not exist yet — Task 5 introduces a minimal local `newBenchStateBackendServer` in this same `_test.go` file (a thin adapter wrapping an `IaCStateStore` behind the generated `IaCStateBackendServer` interface, plus inline proto⇄struct conversion). Task 7 promotes the *production* converters into non-test code; the benchmark file may then be simplified to reuse them. Keep the bench file self-contained for this task.
-
-Add to the same file a minimal `newBenchStateBackendServer` implementing `pb.IaCStateBackendServer` by delegating to an `IaCStateStore`, with inline `IaCState`⇄`pb.IaCState` conversion (use `structpb.NewStruct` for the `Outputs`/`Config` maps).
 
 **Step 2: Run the benchmark to verify it builds + runs**
 
@@ -535,6 +577,8 @@ Rollback: `git revert` — test-only file.
 - Create: `docs/plans/2026-05-14-iac-state-backend-benchmark.md` (the recorded result + decision)
 - Modify: `plugin/external/proto/iac.proto` (only if the benchmark forces a streaming redesign — expected: no change)
 
+**Note on CI:** the repo already has `.github/workflows/benchmark.yml` running `make bench-baseline` / `make bench-compare` (which use `-bench=.`). The new `BenchmarkIaCStateBackend_*` functions are picked up by that workflow automatically — no new harness or workflow is needed. This task is a one-time *decision gate* (lock unary vs. streaming), not a recurring CI check; the recurring `benchmark.yml` regression-tracking is sufficient ongoing coverage.
+
 **Step 1: Run the benchmark with statistical rigor**
 
 Run: `go test ./module/ -bench BenchmarkIaCStateBackend -benchmem -run '^$' -count=10 | tee /tmp/iac-state-bench.txt`
@@ -542,7 +586,8 @@ Expected: 10 samples each for `_InProcess` and `_GRPC`.
 
 **Step 2: Compute the added latency**
 
-Run: `go run golang.org/x/perf/cmd/benchstat /tmp/iac-state-bench.txt` (or `benchstat` if already on PATH per the Makefile's `bench-compare` target)
+Install + run benchstat (the Makefile's `bench-compare` target assumes it on PATH):
+Run: `go install golang.org/x/perf/cmd/benchstat@latest && benchstat /tmp/iac-state-bench.txt`
 Expected: a side-by-side of `_InProcess` vs `_GRPC` ns/op with variance.
 
 **Step 3: Evaluate against the acceptance bar**
@@ -604,7 +649,7 @@ import (
 func TestGRPCIaCStateStoreRoundTrip(t *testing.T) {
 	lis := bufconn.Listen(4 << 20)
 	srv := grpc.NewServer()
-	pb.RegisterIaCStateBackendServer(srv, newBenchStateBackendServer(NewMemoryIaCStateStore()))
+	pb.RegisterIaCStateBackendServer(srv, &iacStateBackendServer{store: NewMemoryIaCStateStore()})
 	go func() { _ = srv.Serve(lis) }()
 	defer srv.Stop()
 
@@ -650,9 +695,12 @@ Expected: FAIL — `newGRPCIaCStateStore` undefined.
 
 **Step 3: Implement the converters + adapter**
 
-Create `module/iac_state_grpc_client.go` with: `iacStateToProto(*IaCState) (*pb.IaCState, error)` and `iacStateFromProto(*pb.IaCState) (*IaCState, error)` (using `structpb.NewStruct` / `.AsMap()` for the `Outputs`/`Config` maps), and `grpcIaCStateStore` — a struct holding a `pb.IaCStateBackendClient` that implements all six `IaCStateStore` methods by delegating over gRPC. `GetState` maps a `GetStateResponse{Exists:false}` to `(nil, nil)` per the interface contract ("Returns nil, nil when not found"). Constructor: `newGRPCIaCStateStore(c pb.IaCStateBackendClient) *grpcIaCStateStore`. Use `context.Background()` for now (a context-plumbing follow-up can thread a real ctx later — out of scope here).
+Create `module/iac_state_grpc_client.go` with:
+- `iacStateToProto(*IaCState) (*pb.IaCState, error)` and `iacStateFromProto(*pb.IaCState) (*IaCState, error)` — converting the free-form `Outputs`/`Config` maps via `encoding/json` `Marshal`/`Unmarshal` into/out of the `OutputsJson`/`ConfigJson` `[]byte` proto fields. **No `structpb`** — that violates the `iac.proto:6-10` hard invariant; the established pattern is JSON bytes (matches `ResourceState.outputs_json`). A `nil` map marshals to `[]byte("null")` — `iacStateFromProto` treats empty/`null`/`{}` bytes as a `nil` map.
+- `grpcIaCStateStore` — a struct holding a `pb.IaCStateBackendClient` that implements all six `IaCStateStore` methods by delegating over gRPC. `GetState` maps a `GetStateResponse{Exists:false}` to `(nil, nil)` per the interface contract ("Returns nil, nil when not found"). Constructor: `newGRPCIaCStateStore(c pb.IaCStateBackendClient) *grpcIaCStateStore`. Use `context.Background()` for now (a context-plumbing follow-up can thread a real ctx later — out of scope here).
+- `iacStateBackendServer` — the *production* server type: wraps an `IaCStateStore` behind `pb.IaCStateBackendServer`, delegating each RPC, using the same `iacStateToProto`/`iacStateFromProto` converters. Core does not yet *serve* this anywhere, but the Azure plugin's Task 11 needs the exact same delegation shape — keeping one canonical copy in core (which the plugin imports) avoids drift.
 
-Also: move the `newBenchStateBackendServer` helper out of the Task 5 `_test.go` file into this file as `iacStateBackendServer` (a production type — it is the *server* half core needs nowhere yet, but the Azure plugin's Task 11 needs the exact same delegation shape; keeping one canonical copy avoids drift). Update `module/benchmark_iac_state_backend_test.go` to use the promoted `iacStateToProto` + `iacStateBackendServer` and delete its inline copies.
+Then update `module/benchmark_iac_state_backend_test.go`: delete its local `benchStateToProto` + `benchStateBackendServer` and use the promoted `iacStateToProto` + `iacStateBackendServer` instead.
 
 **Step 4: Run the test to verify it passes**
 
@@ -683,16 +731,14 @@ Rollback: `git revert` — new file + test; no engine wiring yet, core builds un
 
 ### Task 8: Engine-side plugin backend registry — resolve `iac.state` backends from loaded plugins
 
+**Integration approach (resolved at plan time — `engine.go` was read; no open spike).** `engine.go` exposes no per-module handle to the external-plugin set reachable from `IaCModule.Init(app modular.Application)` — external plugins are loaded via `StdEngine.loadPluginInternal` (`engine.go:257`) through a `plugin.PluginLoader`, not a manager a module can query. Therefore the integration is the design's Architecture §1 fallback (which the design explicitly sanctions): **a package-level `module.iacStateBackendRegistry`**, populated by `engine.go`'s plugin-load path (Task 14 wires the population), consulted by `IaCModule.Init()` (this task). This task builds + tests the registry and the `IaCModule` dispatch; Task 14 wires `engine.go` → registry population.
+
 **Files:**
 - Modify: `module/iac_module.go`
 - Create: `module/iac_state_plugin_registry.go`
 - Test: `module/iac_state_plugin_registry_test.go`
 
-**Step 1: Spike — confirm the engine's external-plugin-manager handle (≤15 min, no code)**
-
-Read `engine.go` (`BuildFromConfig`) and `plugin/external/` to confirm how the engine loads external plugins at startup and where a module's `Init(app modular.Application)` can reach the set of loaded `ExternalPluginAdapter`s. The deploy path (`cmd/wfctl/deploy_providers.go`) scans `./data/plugins` directly; the engine likely already has an `ExternalPluginManager` in `BuildFromConfig`. Record the handle path in a one-paragraph comment at the top of `iac_state_plugin_registry.go`. **If the engine has no such handle reachable from module Init**, the fallback (design Architecture §1) is a package-level registry that the engine populates at plugin-load time — implement that instead. Pick whichever the spike confirms; both satisfy the design.
-
-**Step 2: Write the failing test**
+**Step 1: Write the failing test**
 
 Create `module/iac_state_plugin_registry_test.go`. Test the registry: registering a backend name → `pb.IaCStateBackendClient` factory, and looking it up. Use a fake client. Assert: an unknown backend name returns `(nil, false)`; a registered name returns the client; registering a **reserved** name (`memory`/`filesystem`/`postgres`) returns an error (design Failure-modes "reserved-name collision").
 
@@ -724,32 +770,32 @@ func TestIaCStateBackendRegistry(t *testing.T) {
 
 (Define a minimal `fakeStateBackendClient` satisfying `pb.IaCStateBackendClient` in the test file.)
 
-**Step 3: Run the test to verify it fails**
+**Step 2: Run the test to verify it fails**
 
 Run: `go test ./module/ -run TestIaCStateBackendRegistry -v`
 Expected: FAIL — `newIaCStateBackendRegistry` undefined.
 
-**Step 4: Implement the registry**
+**Step 3: Implement the registry**
 
 Create `module/iac_state_plugin_registry.go`: an `iacStateBackendRegistry` struct wrapping a `map[string]pb.IaCStateBackendClient` + a mutex. `register(name, client)` rejects the reserved names `memory`/`filesystem`/`postgres` with a clear error (`"plugin registered reserved iac.state backend name %q"`). `resolve(name)` returns `(client, ok)`. Provide a package-level default registry instance the engine populates at plugin-load time, plus `newIaCStateBackendRegistry()` for tests.
 
-**Step 5: Run the test to verify it passes**
+**Step 4: Run the test to verify it passes**
 
 Run: `go test ./module/ -run TestIaCStateBackendRegistry -v`
 Expected: PASS.
 
-**Step 6: Wire `IaCModule.Init()` to consult the registry**
+**Step 5: Wire `IaCModule.Init()` to consult the registry**
 
-Modify `module/iac_module.go` `Init()`: in the backend `switch`, for any backend name **not** in the core set (`memory`/`filesystem`/`postgres` — and, until later phases, still `spaces`/`gcs`/`azure_blob` keep their in-process cases for now), add a `default:` arm that consults the plugin registry: if `reg.resolve(m.backend)` succeeds, `m.store = newGRPCIaCStateStore(client)`; if not, return the existing `"unsupported backend"` error **extended** with `" (or load the plugin that provides it)"`. Crucially: the `default` arm must run *before* the final error return. The in-process `azure_blob` case stays untouched in this PR — PR 5 deletes it. The point of this task is the *plumbing* exists and is tested; PR 5 flips `azure_blob` to use it.
+Modify `module/iac_module.go` `Init()`: in the backend `switch`, for any backend name **not** in the core set (`memory`/`filesystem`/`postgres` — and, until later phases, still `spaces`/`gcs`/`azure_blob` keep their in-process cases for now), add a `default:` arm that consults the package-level plugin registry: if `iacStateBackendRegistry.resolve(m.backend)` succeeds, `m.store = newGRPCIaCStateStore(client)`; if not, return the existing `"unsupported backend"` error **extended** with `" (or load the plugin that provides it)"`. Crucially: the `default` arm must run *before* the final error return. The in-process `azure_blob` case stays untouched in this PR — PR 5 deletes it. The point of this task is the *plumbing* exists and is tested; PR 5 flips `azure_blob` to use it.
 
-Add a focused test in `iac_state_plugin_registry_test.go` constructing an `IaCModule` with `backend: "azure_blob_test_only"`, a registry pre-populated with a fake client for that name, and asserting `Init()` sets `m.store` to a `*grpcIaCStateStore`.
+Add a focused test in `iac_state_plugin_registry_test.go` constructing an `IaCModule` with `backend: "azure_blob_test_only"`, the package-level registry pre-populated with a fake client for that name (clean it up with a `defer`), and asserting `Init()` sets `m.store` to a `*grpcIaCStateStore`.
 
-**Step 7: Build + test**
+**Step 6: Build + test**
 
 Run: `go build ./... && go test ./module/ -run 'IaCStateBackend|IaCModule' -v`
 Expected: exit 0, PASS.
 
-**Step 8: Commit**
+**Step 7: Commit**
 
 ```bash
 git add module/iac_module.go module/iac_state_plugin_registry.go module/iac_state_plugin_registry_test.go
@@ -804,7 +850,7 @@ func TestRedactCredentialsBlock(t *testing.T) {
 **Step 2: Run the test to verify it fails**
 
 Run: `go test ./module/ -run TestRedactCredentialsBlock -v`
-Expected: FAIL — `accessKey` already matches `access_key`? Check: `SensitiveFieldPatterns` has `access_key` (underscore) but the key here is `accessKey` (camelCase). The existing substring match is case-insensitive but `accessKey` does not contain `access_key`. So `accessKey`/`secretKey` are **not** currently redacted → test fails.
+Expected: FAIL. Verified against `module/step_output_redactor.go:7-19`: `SensitiveFieldPatterns` contains `"access_key"` (underscore) but **not** `"accesskey"` / `"secretkey"`. Matching is case-insensitive substring, and `accessKey` (camelCase, no underscore) does not contain the substring `access_key` — so the `credentials:` block's `accessKey`/`secretKey` keys are not currently redacted, and the test fails as written.
 
 **Step 3: Implement**
 
@@ -933,11 +979,11 @@ Expected: PASS — the store's logic is unchanged, only its home moved.
 
 **Step 4: Write the `IaCStateBackendServer` impl**
 
-Create `internal/statebackend/server.go` implementing `proto.IaCStateBackendServer` (from `github.com/GoCodeAlone/workflow/plugin/external/proto`) by delegating each RPC to an `AzureBlobIaCStateStore`, with the same `IaCState`⇄`pb.IaCState` conversion shape promoted in workflow Task 7. Mirror that converter exactly (the plugin imports the same `proto` package, so the wire types are identical).
+Create `internal/statebackend/server.go` implementing `proto.IaCStateBackendServer` (from `github.com/GoCodeAlone/workflow/plugin/external/proto`) by delegating each RPC to an `AzureBlobIaCStateStore`. Use **JSON `Marshal`/`Unmarshal`** for the `Outputs`/`Config` ⇄ `OutputsJson`/`ConfigJson` `[]byte` fields — mirror the workflow-core converters from Task 7 (`iacStateToProto`/`iacStateFromProto`) exactly; the plugin imports the same `proto` package so the wire types are identical. **No `structpb`** — the `iac.proto:6-10` hard invariant forbids it.
 
 **Step 5: Wire it into the plugin's serve path + manifest**
 
-Register the `IaCStateBackend` service on the plugin's gRPC server alongside its existing `IaCProviderRequired` service, and add `azure_blob` to the plugin's advertised state-backend capabilities in `plugin.json` (mirror how the existing `iacProvider` capability is declared — the host's registry-population step in workflow Task 8 reads this).
+Register the `IaCStateBackend` service on the plugin's gRPC server alongside its existing `IaCProviderRequired` service, and add `azure_blob` to the plugin's advertised state-backend capabilities in `plugin.json` (mirror how the existing `iacProvider` capability is declared — the engine's registry-population step in workflow Task 14 reads this).
 
 **Step 6: Build + load-test the plugin**
 
@@ -1085,7 +1131,7 @@ Rollback: revert the commit + `go mod tidy` (restores `iac_state_azure.go`, the 
 
 **Files:**
 - Create: `docs/migrations/2026-05-14-cloud-sdk-extraction.md`
-- Modify: the engine plugin-load wiring confirmed in Task 8's spike (where plugins are loaded → populate `iacStateBackendRegistry`)
+- Modify: `engine.go` — the `StdEngine.loadPluginInternal` path (per Task 8's resolved integration approach: external plugins load here; populate `module.iacStateBackendRegistry` after a successful external-plugin load)
 - Test: `module/iac_state_plugin_registry_test.go` (extend) + a launch check
 
 **Step 1: Write the migration doc**
@@ -1094,7 +1140,7 @@ Create `docs/migrations/2026-05-14-cloud-sdk-extraction.md` covering (per the de
 
 **Step 2: Wire plugin-load → registry population**
 
-In the engine plugin-load path (from Task 8's spike), after each external plugin is loaded, read its advertised `IaCStateBackend` capabilities from `plugin.json` / its `ContractRegistry` and call `iacStateBackendRegistry.register(name, client)` for each — building the `pb.IaCStateBackendClient` from the loaded plugin's gRPC connection (mirror the `typedIaCAdapter` construction in `cmd/wfctl/iac_typed_adapter.go`, but for the engine context and the `IaCStateBackend` service name `workflow.plugin.external.iac.IaCStateBackend`).
+In `engine.go`'s `StdEngine.loadPluginInternal` (per Task 8's resolved integration approach), after a successful external-plugin load, read the plugin's advertised `IaCStateBackend` capabilities from `plugin.json` / its `ContractRegistry` and call `module.iacStateBackendRegistry.register(name, client)` for each — building the `pb.IaCStateBackendClient` from the loaded plugin's gRPC connection (mirror the `typedIaCAdapter` construction in `cmd/wfctl/iac_typed_adapter.go`, but for the engine context and the `IaCStateBackend` service name `workflow.plugin.external.iac.IaCStateBackend`). The registry must be exported from `module` for `engine.go` to populate it — add a `module.RegisterIaCStateBackend(name string, client pb.IaCStateBackendClient) error` wrapper if the registry itself stays unexported.
 
 **Step 3: Write/extend the test**
 
