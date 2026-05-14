@@ -13,6 +13,7 @@ import (
 
 func TestGRPCIaCStateStoreRoundTrip(t *testing.T) {
 	lis := bufconn.Listen(4 << 20)
+	t.Cleanup(func() { _ = lis.Close() })
 	srv := grpc.NewServer()
 	pb.RegisterIaCStateBackendServer(srv, &iacStateBackendServer{store: NewMemoryIaCStateStore()})
 	go func() { _ = srv.Serve(lis) }()

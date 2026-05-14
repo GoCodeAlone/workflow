@@ -40,7 +40,9 @@ import_block() {
 real_import() {  # file, sdk → 0 if sdk appears in a real import (block OR single-line)
   # `|| true` on the inner grep: a no-match exit 1 must not poison the pipe
   # under `set -o pipefail`.
-  { import_block "$1"; grep -E '^import "' "$1" 2>/dev/null || true; } | grep -q "$2"
+  # Single-line form matches plain, aliased, dot, and blank imports:
+  #   import "pkg" / import foo "pkg" / import . "pkg" / import _ "pkg"
+  { import_block "$1"; grep -E '^import +([A-Za-z_.][A-Za-z0-9_]* +)?"' "$1" 2>/dev/null || true; } | grep -q "$2"
 }
 
 CHECK=0

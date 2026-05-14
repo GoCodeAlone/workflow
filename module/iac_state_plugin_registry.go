@@ -2,6 +2,7 @@ package module
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
@@ -36,10 +37,18 @@ func newIaCStateBackendRegistry() *iacStateBackendRegistry {
 	return &iacStateBackendRegistry{clients: make(map[string]pb.IaCStateBackendClient)}
 }
 
-// register associates a backend name with a plugin client. Reserved core
+// register associates a backend name with a plugin client. The name must be
+// non-empty (after trimming) and the client must be non-nil. Reserved core
 // backend names are rejected. Re-registering a non-reserved name overwrites the
 // previous client (last plugin loaded wins).
 func (r *iacStateBackendRegistry) register(name string, client pb.IaCStateBackendClient) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("iac.state backend registration: name must not be empty")
+	}
+	if client == nil {
+		return fmt.Errorf("iac.state backend registration %q: client must not be nil", name)
+	}
 	if _, reserved := reservedIaCStateBackends[name]; reserved {
 		return fmt.Errorf("plugin registered reserved iac.state backend name %q", name)
 	}

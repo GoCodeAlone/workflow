@@ -52,7 +52,10 @@ func BenchmarkIaCStateBackend_InProcess(b *testing.B) {
 // BenchmarkIaCStateBackend_GRPC is the post-extraction path: same store, same
 // cycle, but every call crosses a real (in-memory bufconn) gRPC boundary.
 func BenchmarkIaCStateBackend_GRPC(b *testing.B) {
-	lis := bufconn.Listen(4 << 20) // 4 MiB — gRPC default message cap
+	// 4 MiB in-memory listener buffer. Note: this sizes the bufconn pipe only;
+	// gRPC's own max message size is configured separately via dial/server options.
+	lis := bufconn.Listen(4 << 20)
+	b.Cleanup(func() { _ = lis.Close() })
 	srv := grpc.NewServer()
 	pb.RegisterIaCStateBackendServer(srv, &iacStateBackendServer{store: NewMemoryIaCStateStore()})
 	go func() { _ = srv.Serve(lis) }()

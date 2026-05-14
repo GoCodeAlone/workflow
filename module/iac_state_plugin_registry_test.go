@@ -49,6 +49,23 @@ func TestIaCStateBackendRegistry(t *testing.T) {
 			t.Fatalf("register(%q) must fail — reserved core backend name", reserved)
 		}
 	}
+	// Empty / whitespace-only name must be rejected.
+	for _, bad := range []string{"", "   "} {
+		if err := reg.register(bad, fake); err == nil {
+			t.Fatalf("register(%q) must fail — empty backend name", bad)
+		}
+	}
+	// Nil client must be rejected.
+	if err := reg.register("nilclient_backend", nil); err == nil {
+		t.Fatal("register with nil client must fail")
+	}
+	// A name surrounded by whitespace is trimmed and registers under the trimmed key.
+	if err := reg.register("  spaced_backend  ", fake); err != nil {
+		t.Fatalf("register trimmed name: %v", err)
+	}
+	if _, ok := reg.resolve("spaced_backend"); !ok {
+		t.Fatal("trimmed name must resolve under its trimmed key")
+	}
 }
 
 // TestIaCModule_PluginBackendDispatch exercises the real IaCModule.Init() path:

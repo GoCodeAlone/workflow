@@ -193,3 +193,25 @@ func TestRedactCredentialsBlock(t *testing.T) {
 		t.Fatalf("non-sensitive field wrongly redacted")
 	}
 }
+
+// TestRedactRefSuffixDoesNotBypassValueSecrets locks in that the "_ref" suffix
+// exempts ONLY structural-reference words (credentials_ref) — it must NOT be a
+// blanket bypass for value-bearing secret patterns. A key like
+// "bearer_token_ref" still matches "token" and must redact.
+func TestRedactRefSuffixDoesNotBypassValueSecrets(t *testing.T) {
+	in := map[string]any{
+		"credentials_ref":  "aws-creds-module", // structural ref → preserved
+		"bearer_token_ref": "tok-abc123",       // matches "token" → must redact
+		"api_key_ref":      "ak-secret",        // matches "api_key" → must redact
+		"secret_ref":       "shhh",             // matches "secret" → must redact
+	}
+	out := RedactStepOutput(in)
+	if out["credentials_ref"] != "aws-creds-module" {
+		t.Errorf("credentials_ref must be preserved, got %#v", out["credentials_ref"])
+	}
+	for _, k := range []string{"bearer_token_ref", "api_key_ref", "secret_ref"} {
+		if out[k] != RedactionPlaceholder {
+			t.Errorf("%s matches a value-bearing secret pattern — _ref must not bypass redaction, got %#v", k, out[k])
+		}
+	}
+}
