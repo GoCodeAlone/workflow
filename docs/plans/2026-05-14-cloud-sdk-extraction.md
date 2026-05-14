@@ -368,7 +368,7 @@ message UnlockResponse {}
 
 **Step 4: Regenerate the Go bindings**
 
-Run: `buf generate` **from the worktree root** (per `plugin/external/proto/README.md` — `buf.yaml` / `buf.gen.yaml` live at repo root; running from inside `plugin/external/proto/` will not find them).
+Run: `buf generate` **from the worktree root** — `buf.yaml` / `buf.gen.yaml` live at repo root and `buf.yaml` globs the whole `plugin/external/proto` directory (so `iac.proto` is covered). Note: `plugin/external/proto/README.md`'s wording is stale (it references `plugin.proto` specifically) — trust the root `buf.yaml`, not the README prose. Running `buf` from inside `plugin/external/proto/` will not find the config files.
 Expected: `plugin/external/proto/iac.pb.go` + `iac_grpc.pb.go` regenerated, now containing `IaCStateBackendServer`, `IaCStateBackendClient`, and the message types. `git diff --stat` shows only the two `*.pb.go` files changed plus `iac.proto`.
 
 **Step 5: Run the test to verify it passes**
@@ -577,7 +577,7 @@ Rollback: `git revert` — test-only file.
 - Create: `docs/plans/2026-05-14-iac-state-backend-benchmark.md` (the recorded result + decision)
 - Modify: `plugin/external/proto/iac.proto` (only if the benchmark forces a streaming redesign — expected: no change)
 
-**Note on CI:** the repo already has `.github/workflows/benchmark.yml` running `make bench-baseline` / `make bench-compare` (which use `-bench=.`). The new `BenchmarkIaCStateBackend_*` functions are picked up by that workflow automatically — no new harness or workflow is needed. This task is a one-time *decision gate* (lock unary vs. streaming), not a recurring CI check; the recurring `benchmark.yml` regression-tracking is sufficient ongoing coverage.
+**Note on CI:** the repo already has `.github/workflows/benchmark.yml`, which runs `go test -bench=. -benchmem -count=6 -run=^$` over `./...` inline. The new `BenchmarkIaCStateBackend_*` functions are picked up by that `-bench=.` automatically — no new harness or workflow is needed. This task is a one-time *decision gate* (lock unary vs. streaming), not a recurring CI check; the recurring `benchmark.yml` run is sufficient ongoing coverage.
 
 **Step 1: Run the benchmark with statistical rigor**
 
@@ -812,11 +812,17 @@ Rollback: `git revert` — the registry is additive and the `azure_blob` in-proc
 
 ---
 
-### Task 9: Extend secret redaction to recognise `credentials:` / `credentials_ref:` keys
+### Task 9: Confirm `credentials:` redaction + exempt `credentials_ref:` from over-redaction
+
+**Verified redactor behavior (read `module/step_output_redactor.go` in full):** `redactMap` (lines 44-58) — if a key matches a `SensitiveFieldPatterns` substring (`isSensitiveField`, case-insensitive), the *whole value* is replaced with the `RedactionPlaceholder` **string** and the loop `continue`s — **it does not recurse into a sensitive-keyed map.** The pattern list already contains `"credential"` (line 11). Therefore:
+- A key literally named `credentials` (matches substring `credential`) → its entire sub-tree is *already* replaced with `"[REDACTED]"`. **The `credentials:` block is already fully redacted** — the design's Security section explicitly allows "confirm the existing redaction already covers" as the resolution, and it does.
+- A key named `credentials_ref` *also* matches `credential` → it is *also* redacted. But `credentials_ref` is a **module name, not a secret** — the design says it should be preserved (it's a reference for DRY). The existing behavior **over-redacts** it, costing trace debuggability.
+
+So Task 9 is **not** "add camelCase leaf patterns" (the `credentials:` block is caught wholesale already, before any recursion — leaf patterns would never be consulted). Task 9 is: lock in the `credentials:`-block redaction with a regression test, and add a narrow exemption so `credentials_ref` (a reference, not a secret) is preserved.
 
 **Files:**
 - Modify: `module/step_output_redactor.go`
-- Test: `module/step_output_redactor_test.go` (existing — add cases)
+- Test: `module/step_output_redactor_test.go` (existing — add a case)
 
 **Step 1: Write the failing test**
 
@@ -833,13 +839,15 @@ func TestRedactCredentialsBlock(t *testing.T) {
 		"bucket":          "public-bucket-name",
 	}
 	out := RedactStepOutput(in)
-	creds := out["credentials"].(map[string]any)
-	if creds["accessKey"] != RedactionPlaceholder || creds["secretKey"] != RedactionPlaceholder {
-		t.Fatalf("credentials block not redacted: %+v", creds)
+	// The credentials: block is redacted WHOLESALE — the existing "credential"
+	// pattern replaces the whole sub-tree with the placeholder STRING (no
+	// recursion). That is safe and is the design-sanctioned "already covered".
+	if out["credentials"] != RedactionPlaceholder {
+		t.Fatalf("credentials block must be wholesale-redacted, got: %#v", out["credentials"])
 	}
-	// credentials_ref is a module NAME, not a secret — must NOT be redacted.
+	// credentials_ref is a module NAME, not a secret — must be PRESERVED.
 	if out["credentials_ref"] != "aws-creds-module" {
-		t.Fatalf("credentials_ref should not be redacted (it is a module reference)")
+		t.Fatalf("credentials_ref must NOT be redacted (it is a module reference): %#v", out["credentials_ref"])
 	}
 	if out["bucket"] != "public-bucket-name" {
 		t.Fatalf("non-sensitive field wrongly redacted")
@@ -850,28 +858,39 @@ func TestRedactCredentialsBlock(t *testing.T) {
 **Step 2: Run the test to verify it fails**
 
 Run: `go test ./module/ -run TestRedactCredentialsBlock -v`
-Expected: FAIL. Verified against `module/step_output_redactor.go:7-19`: `SensitiveFieldPatterns` contains `"access_key"` (underscore) but **not** `"accesskey"` / `"secretkey"`. Matching is case-insensitive substring, and `accessKey` (camelCase, no underscore) does not contain the substring `access_key` — so the `credentials:` block's `accessKey`/`secretKey` keys are not currently redacted, and the test fails as written.
+Expected: FAIL — `out["credentials_ref"]` is `"[REDACTED]"` (the key matches the existing `credential` substring pattern), not the preserved module name. (`out["credentials"]` already passes — it is correctly wholesale-redacted today.)
 
-**Step 3: Implement**
+**Step 3: Implement the `credentials_ref` exemption**
 
-In `module/step_output_redactor.go`, add to `SensitiveFieldPatterns` the camelCase / bare forms that a `credentials:` block uses: `"accesskey"`, `"secretkey"`, `"sessiontoken"`, `"account_key"`, `"accountkey"`, `"clientsecret"`, `"client_secret"`. Because matching is case-insensitive substring, `"accesskey"` matches `accessKey`. Also ensure a key literally named `credentials` whose value is a map gets its children recursively redacted — the existing `redactMap` recursion already covers nested maps, so adding the leaf patterns is sufficient. Do **not** add `credentials_ref` to the patterns — it is a module reference, not a secret (the test guards this).
+In `module/step_output_redactor.go`, `isSensitiveField` already has an exemption mechanism (the `_display` suffix at line 64). Add a sibling exemption for reference keys: an exact-name exemption set so `credentials_ref` (and the general principle: a `*_ref` key is a name, not a secret) is never redacted. Minimal form — extend `isSensitiveField`:
+
+```go
+// Reference keys hold module/resource NAMES, not secrets — never redact them,
+// even though "credentials_ref" contains the "credential" substring.
+if strings.HasSuffix(lower, "_ref") {
+	return false
+}
+```
+
+Place this immediately after the existing `_display`-suffix early-return. Do **not** add camelCase leaf patterns — they are dead code given the `credentials:` block is redacted wholesale before any recursion reaches the leaves.
 
 **Step 4: Run the test to verify it passes**
 
 Run: `go test ./module/ -run 'Redact' -v`
-Expected: PASS (the new test + all existing redaction tests still green).
+Expected: PASS — the new test + all existing redaction tests still green (the `_ref` exemption is narrow; no existing sensitive field name ends in `_ref`).
 
 **Step 5: Commit**
 
 ```bash
 git add module/step_output_redactor.go module/step_output_redactor_test.go
-git commit -m "feat(module): redact inline credentials: block keys (accessKey/secretKey/etc.)
+git commit -m "feat(module): exempt *_ref keys from redaction; lock in credentials: redaction
 
 Option-1 credentials move raw cloud secrets inline into plugin-native
-module config. Extends SensitiveFieldPatterns with the camelCase forms a
-credentials: block uses so the config-version store + execution tracing
-redact them. credentials_ref: (a module reference, not a secret) is
-deliberately left un-redacted."
+module config under a credentials: key — already redacted wholesale by
+the existing 'credential' pattern (regression test added). But that same
+pattern over-redacts credentials_ref:, which holds a module NAME, not a
+secret. Adds a narrow *_ref-suffix exemption to isSensitiveField so
+reference keys are preserved for trace debuggability."
 ```
 
 Rollback: `git revert` — redaction is additive; reverting only narrows what's redacted (no functional break, but re-widening is the forward fix).
@@ -1127,35 +1146,69 @@ Rollback: revert the commit + `go mod tidy` (restores `iac_state_azure.go`, the 
 
 ---
 
-### Task 14: Migration doc + pin the engine's plugin-registry population to advertise `azure_blob`
+### Task 14: Migration doc + wire engine plugin-load → `iac.state` backend registry
+
+**Integration seam (resolved at plan time — `engine.go:305-327` was read).** `loadPluginInternal` deliberately never references concrete plugin types; it injects engine capabilities into plugins via **optional-interface type-asserts** — the `stepRegistrySetter` and `slogLoggerSetter` pattern at `engine.go:316-325` (`type X interface {...}; if v, ok := p.(X); ok { ... }`). Task 14 follows that exact precedent **in reverse** (reading *from* the plugin, not injecting *into* it): define an optional interface the external-plugin adapter satisfies, type-assert `p` against it, and populate the registry. This keeps `engine.go` free of a `plugin/external` import + concrete type-assert.
 
 **Files:**
 - Create: `docs/migrations/2026-05-14-cloud-sdk-extraction.md`
-- Modify: `engine.go` — the `StdEngine.loadPluginInternal` path (per Task 8's resolved integration approach: external plugins load here; populate `module.iacStateBackendRegistry` after a successful external-plugin load)
-- Test: `module/iac_state_plugin_registry_test.go` (extend) + a launch check
+- Create: `plugin/iac_state_backend_provider.go` — the `IaCStateBackendProvider` optional interface (in the `plugin` package, which `engine.go` already imports)
+- Modify: `engine.go` — add the optional-interface type-assert in `loadPluginInternal` (beside `stepRegistrySetter` / `slogLoggerSetter`, ~`engine.go:316`)
+- Modify: `plugin/external/adapter.go` — `*ExternalPluginAdapter` implements `IaCStateBackendClients()` (it has the gRPC `ClientConn` + `ContractRegistry`; this is in-repo, not cross-repo)
+- Modify: `module/iac_state_plugin_registry.go` — add an exported `module.RegisterIaCStateBackend(name string, client pb.IaCStateBackendClient) error` wrapper (the registry struct itself stays unexported)
+- Test: `plugin/external/adapter_test.go` (extend) + `module/iac_state_plugin_registry_test.go` (extend) + a launch check
 
 **Step 1: Write the migration doc**
 
-Create `docs/migrations/2026-05-14-cloud-sdk-extraction.md` covering (per the design's Migration section, Phase A scope only): `iac.state` with `backend: azure_blob` now requires `wfctl plugin install workflow-plugin-azure` (≥ the Task 12 tag); the yaml `backend: azure_blob` value is unchanged; `memory`/`filesystem`/`postgres` are unaffected. Note that Phases B/C/D (AWS/GCP/DO) will follow the same pattern in subsequent releases.
+Create `docs/migrations/2026-05-14-cloud-sdk-extraction.md` covering (per the design's Migration section, Phase A scope only): `iac.state` with `backend: azure_blob` now requires `wfctl plugin install workflow-plugin-azure` (≥ the Task 12 tag); the yaml `backend: azure_blob` value is unchanged; `memory`/`filesystem`/`postgres` are unaffected. Note that Phases B/C/D (AWS/GCP/DO) follow the same pattern in subsequent releases.
 
-**Step 2: Wire plugin-load → registry population**
+**Step 2: Define the optional interface + `ExternalPluginAdapter` impl**
 
-In `engine.go`'s `StdEngine.loadPluginInternal` (per Task 8's resolved integration approach), after a successful external-plugin load, read the plugin's advertised `IaCStateBackend` capabilities from `plugin.json` / its `ContractRegistry` and call `module.iacStateBackendRegistry.register(name, client)` for each — building the `pb.IaCStateBackendClient` from the loaded plugin's gRPC connection (mirror the `typedIaCAdapter` construction in `cmd/wfctl/iac_typed_adapter.go`, but for the engine context and the `IaCStateBackend` service name `workflow.plugin.external.iac.IaCStateBackend`). The registry must be exported from `module` for `engine.go` to populate it — add a `module.RegisterIaCStateBackend(name string, client pb.IaCStateBackendClient) error` wrapper if the registry itself stays unexported.
+In a shared location both `engine.go` and `plugin/external` can see the type (e.g. `plugin/iac_state_backend_provider.go` in the `plugin` package, which `engine.go` already imports — `engine.go:21`):
 
-**Step 3: Write/extend the test**
+```go
+// IaCStateBackendProvider is the optional interface an external plugin adapter
+// implements when it serves one or more iac.state backends. The engine
+// type-asserts loaded plugins against it (same pattern as stepRegistrySetter)
+// and populates module's iac.state backend registry from the result.
+type IaCStateBackendProvider interface {
+	IaCStateBackendClients() map[string]proto.IaCStateBackendClient
+}
+```
 
-Add a test that loads a fake plugin advertising `azure_blob` and asserts the engine's registry has it resolvable after load. If a full plugin-load test is too heavy for a unit test, assert the *population function* in isolation: given a fake `ExternalPluginAdapter` advertising `azure_blob`, the population step calls `registry.register("azure_blob", <client>)`.
+In `plugin/external/adapter.go`, make `*ExternalPluginAdapter` implement `IaCStateBackendClients()`: it reads its own `ContractRegistry` for services advertising `workflow.plugin.external.iac.IaCStateBackend`, builds a `proto.IaCStateBackendClient` per advertised backend name off the adapter's existing gRPC `ClientConn` (mirror `typedIaCAdapter` construction in `cmd/wfctl/iac_typed_adapter.go`), and returns `name → client`. If the plugin advertises no state backend, return `nil` — the type-assert still succeeds, the map is just empty.
 
-**Step 4: Build + test + launch validation**
+**Step 3: Wire the type-assert into `loadPluginInternal`**
 
-Run: `go build ./... && go test ./module/ -run 'IaCStateBackend|IaCModule' -v`
+In `engine.go` `loadPluginInternal`, beside the existing `stepRegistrySetter` / `slogLoggerSetter` asserts (~line 316), add:
+
+```go
+if provider, ok := p.(plugin.IaCStateBackendProvider); ok {
+	for name, client := range provider.IaCStateBackendClients() {
+		if err := module.RegisterIaCStateBackend(name, client); err != nil {
+			return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
+		}
+	}
+}
+```
+
+`module.RegisterIaCStateBackend` (new exported wrapper, this task) delegates to the unexported `iacStateBackendRegistry.register` from Task 8 — which already rejects reserved names, so a plugin advertising `memory`/`filesystem`/`postgres` fails plugin-load with a clear error (design Failure-modes "reserved-name collision", now actually wired).
+
+**Step 4: Write/extend the tests**
+
+- `plugin/external/adapter_test.go`: a fake adapter with a `ContractRegistry` advertising `azure_blob` → `IaCStateBackendClients()` returns a one-entry map keyed `azure_blob`.
+- `module/iac_state_plugin_registry_test.go`: `module.RegisterIaCStateBackend("azure_blob", fakeClient)` then `resolve("azure_blob")` succeeds; `module.RegisterIaCStateBackend("memory", fakeClient)` returns the reserved-name error.
+
+**Step 5: Build + test + launch validation**
+
+Run: `go build ./... && go test ./module/ -run 'IaCStateBackend|IaCModule' ./plugin/external/ -v`
 Expected: exit 0, PASS.
-Then the end-to-end launch check from Task 13 Step 8 should now work *without manual registry seeding* — the engine auto-populates from the loaded plugin. Re-run that launch with the Task 11 plugin in `./data/plugins/` and confirm `azure_blob` resolves with zero manual wiring. Capture the transcript.
+Then the end-to-end launch check from Task 13 Step 8 should now work *without manual registry seeding* — the engine auto-populates from the loaded plugin. Re-run that launch with the Task 11 plugin in `./data/plugins/` and confirm `azure_blob` resolves with zero manual wiring. Capture the transcript. **Rollback note (runtime-affecting — plugin loading path):** revert the commit; the registry + dispatch plumbing from Task 8 survive, only the engine auto-population is removed; relaunch with a `memory`-backend config to confirm core backends unaffected.
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
-git add docs/migrations/2026-05-14-cloud-sdk-extraction.md module/ engine.go
+git add docs/migrations/2026-05-14-cloud-sdk-extraction.md module/ engine.go plugin/
 git commit -m "feat(engine): auto-populate iac.state backend registry from loaded plugins
 
 At plugin-load time the engine reads each plugin's advertised
