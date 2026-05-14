@@ -410,7 +410,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// group; applyInfraModules does that before invoking this helper.
 
 	var err error
-	current, err = adoptExistingResources(ctx, provider, providerType, specs, current, store)
+	current, err = adoptExistingResources(ctx, provider, providerType, specs, current, store, secretsProvider, hydratedOut)
 	if err != nil {
 		return err
 	}
@@ -768,7 +768,7 @@ func normalizeAppliedOutputIdentity(spec interfaces.ResourceSpec, out interfaces
 	return out, nil
 }
 
-func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) ([]interfaces.ResourceState, error) {
+func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, secretsProvider secrets.Provider, hydratedOut map[string]string) ([]interfaces.ResourceState, error) {
 	if len(specs) == 0 {
 		return current, nil
 	}
@@ -842,14 +842,24 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 		if err := validateStateProviderID(provider, providerType, state); err != nil {
 			return nil, err
 		}
-		// Sanitize-only via persistResourceWithSecretRouting in read mode:
-		// drivers may declare Sensitive on Read but we MUST NOT call
-		// provider.Set from a Read path (cache-pollution risk per design §4.4).
-		// Provider passed nil; helper is nil-safe in read mode.
-		// Cached-prior variant: avoids per-resource ListResources scans
-		// when adoption pass touches many resources.
-		if _, err := persistResourceWithSecretRoutingCachedPrior(ctx, store, nil, driver, state, *live, persistModeRead, priorByName); err != nil {
+		mode := persistModeRead
+		routeProvider := secrets.Provider(nil)
+		if secretsProvider != nil && hasSensitiveOutputs(live) {
+			// Adoption is a live cloud read, but when a secrets provider is
+			// configured the same apply process must route newly discovered
+			// sensitive outputs. Otherwise infra_output generators cannot
+			// consume write-only stores like GitHub Actions secrets.
+			mode = persistModeAdoptRoute
+			routeProvider = secretsProvider
+		}
+		hydrated, err := persistResourceWithSecretRoutingCachedPrior(ctx, store, routeProvider, driver, state, *live, mode, priorByName)
+		if err != nil {
 			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, err)
+		}
+		if hydratedOut != nil {
+			for k, v := range hydrated {
+				hydratedOut[k] = v
+			}
 		}
 		fmt.Printf("  Adopted existing %s %q (id=%s)\n", spec.Type, spec.Name, state.ProviderID)
 		current = append(current, state)
@@ -988,6 +998,7 @@ const (
 	persistModeApply persistMode = iota
 	persistModeRead
 	persistModeApplyNoCompensate
+	persistModeAdoptRoute
 )
 
 // persistResourceWithSecretRouting builds rs.Outputs from out (routing
@@ -1024,6 +1035,8 @@ func persistResourceWithSecretRouting(
 		return persistApplyMode(ctx, store, provider, driver, rs, out, true)
 	case persistModeApplyNoCompensate:
 		return persistApplyMode(ctx, store, provider, driver, rs, out, false)
+	case persistModeAdoptRoute:
+		return persistAdoptRouteMode(ctx, store, provider, rs, out)
 	case persistModeRead:
 		return nil, persistReadMode(ctx, store, rs, out, nil)
 	default:
@@ -1054,6 +1067,8 @@ func persistResourceWithSecretRoutingCachedPrior(
 		return persistApplyMode(ctx, store, provider, driver, rs, out, true)
 	case persistModeApplyNoCompensate:
 		return persistApplyMode(ctx, store, provider, driver, rs, out, false)
+	case persistModeAdoptRoute:
+		return persistAdoptRouteMode(ctx, store, provider, rs, out)
 	case persistModeRead:
 		return nil, persistReadMode(ctx, store, rs, out, priorByName)
 	default:
@@ -1094,6 +1109,30 @@ func persistApplyMode(
 			return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete failed: %v)", rs.Type, rs.Name, saveErr, compErr)
 		}
 		return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete succeeded)", rs.Type, rs.Name, saveErr)
+	}
+	return hydrated, nil
+}
+
+func persistAdoptRouteMode(
+	ctx context.Context,
+	store infraStateStore,
+	provider secrets.Provider,
+	rs interfaces.ResourceState,
+	out interfaces.ResourceOutput,
+) (map[string]string, error) {
+	sanitized, hydrated, err := sensitive.Route(ctx, provider, rs.Name, &out)
+	if err != nil {
+		if compErr := cleanupRoutedSecrets(provider, hydrated); compErr != nil {
+			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (routed-secret cleanup failed: %v)", rs.Type, rs.Name, err, compErr)
+		}
+		return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w", rs.Type, rs.Name, err)
+	}
+	rs.Outputs = sanitized
+	if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
+		if compErr := cleanupRoutedSecrets(provider, hydrated); compErr != nil {
+			return nil, fmt.Errorf("%s/%s: persist adopted state: %w (routed-secret cleanup failed: %v)", rs.Type, rs.Name, saveErr, compErr)
+		}
+		return nil, fmt.Errorf("%s/%s: persist adopted state: %w", rs.Type, rs.Name, saveErr)
 	}
 	return hydrated, nil
 }
@@ -1151,6 +1190,21 @@ func persistReadMode(
 	return nil
 }
 
+func cleanupRoutedSecrets(provider secrets.Provider, hydrated map[string]string) error {
+	if provider == nil || len(hydrated) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var errs []error
+	for secretName := range hydrated {
+		if delErr := provider.Delete(ctx, secretName); delErr != nil && !errors.Is(delErr, secrets.ErrNotFound) {
+			errs = append(errs, fmt.Errorf("provider.Delete(%s): %w", secretName, delErr))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // compensateAfterSaveFailure rolls back routed secrets and the underlying
 // cloud resource after an apply-mode failure where the just-mutated resource is
 // known to be newly created or replacement-created. Uses a fresh 30-second
@@ -1182,7 +1236,6 @@ func compensateAfterSaveFailure(
 		}
 	}
 	if provider != nil {
-		// Delete each routed secret by its full provider key.
 		for secretName := range hydrated {
 			if delErr := provider.Delete(ctx, secretName); delErr != nil && !errors.Is(delErr, secrets.ErrNotFound) {
 				errs = append(errs, fmt.Errorf("provider.Delete(%s): %w", secretName, delErr))
