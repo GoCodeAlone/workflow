@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
@@ -22,7 +23,7 @@ func NewMemoryIaCStateStore() *MemoryIaCStateStore {
 }
 
 // GetState retrieves a state record by resource ID. Returns nil, nil when not found.
-func (s *MemoryIaCStateStore) GetState(resourceID string) (*IaCState, error) {
+func (s *MemoryIaCStateStore) GetState(ctx context.Context, resourceID string) (*IaCState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	st, ok := s.states[resourceID]
@@ -35,7 +36,7 @@ func (s *MemoryIaCStateStore) GetState(resourceID string) (*IaCState, error) {
 }
 
 // SaveState inserts or replaces a state record.
-func (s *MemoryIaCStateStore) SaveState(state *IaCState) error {
+func (s *MemoryIaCStateStore) SaveState(ctx context.Context, state *IaCState) error {
 	if state == nil {
 		return fmt.Errorf("iac state store: SaveState: state must not be nil")
 	}
@@ -51,7 +52,7 @@ func (s *MemoryIaCStateStore) SaveState(state *IaCState) error {
 
 // ListStates returns all state records matching the provided key=value filter.
 // Supported filter keys: "resource_type", "provider", "status".
-func (s *MemoryIaCStateStore) ListStates(filter map[string]string) ([]*IaCState, error) {
+func (s *MemoryIaCStateStore) ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var results []*IaCState
@@ -65,7 +66,7 @@ func (s *MemoryIaCStateStore) ListStates(filter map[string]string) ([]*IaCState,
 }
 
 // DeleteState removes a state record by resource ID.
-func (s *MemoryIaCStateStore) DeleteState(resourceID string) error {
+func (s *MemoryIaCStateStore) DeleteState(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.states[resourceID]; !ok {
@@ -76,7 +77,7 @@ func (s *MemoryIaCStateStore) DeleteState(resourceID string) error {
 }
 
 // Lock acquires an exclusive advisory lock for the given resource ID.
-func (s *MemoryIaCStateStore) Lock(resourceID string) error {
+func (s *MemoryIaCStateStore) Lock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.locks[resourceID] {
@@ -87,7 +88,7 @@ func (s *MemoryIaCStateStore) Lock(resourceID string) error {
 }
 
 // Unlock releases the advisory lock for the given resource ID.
-func (s *MemoryIaCStateStore) Unlock(resourceID string) error {
+func (s *MemoryIaCStateStore) Unlock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.locks[resourceID] {

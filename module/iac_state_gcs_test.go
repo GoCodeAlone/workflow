@@ -95,7 +95,7 @@ func newTestGCSStore(client module.GCSObjectClient) *module.GCSIaCStateStore {
 func TestGCSIaCStateStore_GetState_NotFound(t *testing.T) {
 	store := newTestGCSStore(newMockGCSClient())
 
-	st, err := store.GetState("nonexistent")
+	st, err := store.GetState(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,11 +113,11 @@ func TestGCSIaCStateStore_SaveAndGetState(t *testing.T) {
 		Provider:     "gcp",
 		Status:       "active",
 	}
-	if err := store.SaveState(state); err != nil {
+	if err := store.SaveState(context.Background(), state); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
-	got, err := store.GetState("gcs-cluster")
+	got, err := store.GetState(context.Background(), "gcs-cluster")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -131,14 +131,14 @@ func TestGCSIaCStateStore_SaveAndGetState(t *testing.T) {
 
 func TestGCSIaCStateStore_SaveState_Nil(t *testing.T) {
 	store := newTestGCSStore(newMockGCSClient())
-	if err := store.SaveState(nil); err == nil {
+	if err := store.SaveState(context.Background(), nil); err == nil {
 		t.Fatal("expected error for nil state")
 	}
 }
 
 func TestGCSIaCStateStore_SaveState_EmptyID(t *testing.T) {
 	store := newTestGCSStore(newMockGCSClient())
-	if err := store.SaveState(&module.IaCState{}); err == nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{}); err == nil {
 		t.Fatal("expected error for empty resource_id")
 	}
 }
@@ -151,12 +151,12 @@ func TestGCSIaCStateStore_ListStates(t *testing.T) {
 		{ResourceID: "r2", ResourceType: "db", Provider: "gcp", Status: "active"},
 		{ResourceID: "r3", ResourceType: "k8s", Provider: "aws", Status: "destroyed"},
 	} {
-		if err := store.SaveState(st); err != nil {
+		if err := store.SaveState(context.Background(), st); err != nil {
 			t.Fatalf("SaveState %q: %v", st.ResourceID, err)
 		}
 	}
 
-	all, err := store.ListStates(nil)
+	all, err := store.ListStates(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListStates(nil): %v", err)
 	}
@@ -164,7 +164,7 @@ func TestGCSIaCStateStore_ListStates(t *testing.T) {
 		t.Errorf("ListStates = %d, want 3", len(all))
 	}
 
-	filtered, err := store.ListStates(map[string]string{"provider": "gcp"})
+	filtered, err := store.ListStates(context.Background(), map[string]string{"provider": "gcp"})
 	if err != nil {
 		t.Fatalf("ListStates(provider=gcp): %v", err)
 	}
@@ -176,13 +176,13 @@ func TestGCSIaCStateStore_ListStates(t *testing.T) {
 func TestGCSIaCStateStore_DeleteState(t *testing.T) {
 	store := newTestGCSStore(newMockGCSClient())
 
-	if err := store.SaveState(&module.IaCState{ResourceID: "del-me", Status: "active"}); err != nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{ResourceID: "del-me", Status: "active"}); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	if err := store.DeleteState("del-me"); err != nil {
+	if err := store.DeleteState(context.Background(), "del-me"); err != nil {
 		t.Fatalf("DeleteState: %v", err)
 	}
-	st, err := store.GetState("del-me")
+	st, err := store.GetState(context.Background(), "del-me")
 	if err != nil {
 		t.Fatalf("GetState after delete: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestGCSIaCStateStore_DeleteState(t *testing.T) {
 
 func TestGCSIaCStateStore_DeleteState_NotFound(t *testing.T) {
 	store := newTestGCSStore(newMockGCSClient())
-	if err := store.DeleteState("nonexistent"); err == nil {
+	if err := store.DeleteState(context.Background(), "nonexistent"); err == nil {
 		t.Fatal("expected error deleting nonexistent state")
 	}
 }
@@ -201,25 +201,25 @@ func TestGCSIaCStateStore_DeleteState_NotFound(t *testing.T) {
 func TestGCSIaCStateStore_LockUnlock(t *testing.T) {
 	store := newTestGCSStore(newMockGCSClient())
 
-	if err := store.Lock("res-1"); err != nil {
+	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
 	// Double lock must fail.
-	if err := store.Lock("res-1"); err == nil {
+	if err := store.Lock(context.Background(), "res-1"); err == nil {
 		t.Fatal("expected error on double lock")
 	}
-	if err := store.Unlock("res-1"); err != nil {
+	if err := store.Unlock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Unlock: %v", err)
 	}
 	// Re-lock should succeed after unlock.
-	if err := store.Lock("res-1"); err != nil {
+	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock after unlock: %v", err)
 	}
 }
 
 func TestGCSIaCStateStore_Unlock_NotLocked(t *testing.T) {
 	store := newTestGCSStore(newMockGCSClient())
-	if err := store.Unlock("not-locked"); err == nil {
+	if err := store.Unlock(context.Background(), "not-locked"); err == nil {
 		t.Fatal("expected error unlocking non-locked resource")
 	}
 }
@@ -233,10 +233,10 @@ func TestGCSIaCStateStore_JSONRoundTrip(t *testing.T) {
 		Status:     "active",
 		Outputs:    map[string]any{"endpoint": "https://gcs.example.com"},
 	}
-	if err := store.SaveState(state); err != nil {
+	if err := store.SaveState(context.Background(), state); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	got, err := store.GetState("rt-gcs")
+	got, err := store.GetState(context.Background(), "rt-gcs")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}

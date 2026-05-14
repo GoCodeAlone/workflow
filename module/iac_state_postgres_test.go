@@ -168,7 +168,7 @@ func newTestPostgresStore(conn module.PostgresConn) *module.PostgresIaCStateStor
 
 func TestPostgresIaCStateStore_GetState_NotFound(t *testing.T) {
 	store := newTestPostgresStore(newMockPGConn())
-	st, err := store.GetState("nonexistent")
+	st, err := store.GetState(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,11 +192,11 @@ func TestPostgresIaCStateStore_SaveAndGetState(t *testing.T) {
 		Outputs:      map[string]any{"endpoint": "https://k8s.example.com"},
 		Dependencies: []string{"network"},
 	}
-	if err := store.SaveState(state); err != nil {
+	if err := store.SaveState(context.Background(), state); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
-	got, err := store.GetState("pg-cluster")
+	got, err := store.GetState(context.Background(), "pg-cluster")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -225,14 +225,14 @@ func TestPostgresIaCStateStore_SaveAndGetState(t *testing.T) {
 
 func TestPostgresIaCStateStore_SaveState_Nil(t *testing.T) {
 	store := newTestPostgresStore(newMockPGConn())
-	if err := store.SaveState(nil); err == nil {
+	if err := store.SaveState(context.Background(), nil); err == nil {
 		t.Fatal("expected error for nil state")
 	}
 }
 
 func TestPostgresIaCStateStore_SaveState_EmptyID(t *testing.T) {
 	store := newTestPostgresStore(newMockPGConn())
-	if err := store.SaveState(&module.IaCState{}); err == nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{}); err == nil {
 		t.Fatal("expected error for empty resource_id")
 	}
 }
@@ -247,12 +247,12 @@ func TestPostgresIaCStateStore_ListStates(t *testing.T) {
 		{ResourceID: "r3", ResourceType: "k8s", Provider: "aws", ProviderRef: "aws-west", Status: "destroyed"},
 	}
 	for _, st := range states {
-		if err := store.SaveState(st); err != nil {
+		if err := store.SaveState(context.Background(), st); err != nil {
 			t.Fatalf("SaveState %q: %v", st.ResourceID, err)
 		}
 	}
 
-	all, err := store.ListStates(nil)
+	all, err := store.ListStates(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListStates(nil): %v", err)
 	}
@@ -260,7 +260,7 @@ func TestPostgresIaCStateStore_ListStates(t *testing.T) {
 		t.Errorf("ListStates = %d, want 3", len(all))
 	}
 
-	filtered, err := store.ListStates(map[string]string{"provider": "aws"})
+	filtered, err := store.ListStates(context.Background(), map[string]string{"provider": "aws"})
 	if err != nil {
 		t.Fatalf("ListStates(provider=aws): %v", err)
 	}
@@ -331,13 +331,13 @@ func TestScanIaCStateRows_ReturnsOutputsDecodeError(t *testing.T) {
 func TestPostgresIaCStateStore_DeleteState(t *testing.T) {
 	store := newTestPostgresStore(newMockPGConn())
 
-	if err := store.SaveState(&module.IaCState{ResourceID: "del-me", Status: "active"}); err != nil {
+	if err := store.SaveState(context.Background(), &module.IaCState{ResourceID: "del-me", Status: "active"}); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	if err := store.DeleteState("del-me"); err != nil {
+	if err := store.DeleteState(context.Background(), "del-me"); err != nil {
 		t.Fatalf("DeleteState: %v", err)
 	}
-	st, err := store.GetState("del-me")
+	st, err := store.GetState(context.Background(), "del-me")
 	if err != nil {
 		t.Fatalf("GetState after delete: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestPostgresIaCStateStore_DeleteState(t *testing.T) {
 
 func TestPostgresIaCStateStore_DeleteState_NotFound(t *testing.T) {
 	store := newTestPostgresStore(newMockPGConn())
-	if err := store.DeleteState("nonexistent"); err == nil {
+	if err := store.DeleteState(context.Background(), "nonexistent"); err == nil {
 		t.Fatal("expected error deleting nonexistent state")
 	}
 }
@@ -356,23 +356,23 @@ func TestPostgresIaCStateStore_DeleteState_NotFound(t *testing.T) {
 func TestPostgresIaCStateStore_LockUnlock(t *testing.T) {
 	store := newTestPostgresStore(newMockPGConn())
 
-	if err := store.Lock("res-1"); err != nil {
+	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock: %v", err)
 	}
-	if err := store.Lock("res-1"); err == nil {
+	if err := store.Lock(context.Background(), "res-1"); err == nil {
 		t.Fatal("expected error on double lock")
 	}
-	if err := store.Unlock("res-1"); err != nil {
+	if err := store.Unlock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Unlock: %v", err)
 	}
-	if err := store.Lock("res-1"); err != nil {
+	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock after unlock: %v", err)
 	}
 }
 
 func TestPostgresIaCStateStore_Unlock_NotLocked(t *testing.T) {
 	store := newTestPostgresStore(newMockPGConn())
-	if err := store.Unlock("not-locked"); err == nil {
+	if err := store.Unlock(context.Background(), "not-locked"); err == nil {
 		t.Fatal("expected error unlocking non-locked resource")
 	}
 }

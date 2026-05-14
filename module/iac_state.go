@@ -1,5 +1,7 @@
 package module
 
+import "context"
+
 // IaCState tracks the state of an infrastructure resource.
 type IaCState struct {
 	ResourceID   string         `json:"resource_id"`
@@ -20,22 +22,22 @@ type IaCState struct {
 // IaCStateStore is the interface for IaC state persistence backends.
 type IaCStateStore interface {
 	// GetState retrieves a state record by resource ID. Returns nil, nil when not found.
-	GetState(resourceID string) (*IaCState, error)
+	GetState(ctx context.Context, resourceID string) (*IaCState, error)
 
 	// SaveState inserts or replaces a state record.
-	SaveState(state *IaCState) error
+	SaveState(ctx context.Context, state *IaCState) error
 
 	// ListStates returns all state records matching the provided key=value filter.
 	// Pass an empty map to return all records.
-	ListStates(filter map[string]string) ([]*IaCState, error)
+	ListStates(ctx context.Context, filter map[string]string) ([]*IaCState, error)
 
 	// DeleteState removes a state record by resource ID.
-	DeleteState(resourceID string) error
+	DeleteState(ctx context.Context, resourceID string) error
 
 	// Lock acquires an exclusive lock for the given resource ID.
 	// Returns an error if the resource is already locked.
-	Lock(resourceID string) error
+	Lock(ctx context.Context, resourceID string) error
 
 	// Unlock releases the lock for the given resource ID.
-	Unlock(resourceID string) error
+	Unlock(ctx context.Context, resourceID string) error
 }
