@@ -394,6 +394,14 @@ jobs:
         run: |
           ! grep -qH "digitalocean/godo" go.mod example/go.mod
 
+  cloud-sdk-audit:
+    name: Cloud-SDK inventory + k8s-backend init() partition audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit cloud-SDK imports + init() partition
+        run: bash scripts/audit-cloud-symbols.sh --check
+
   aws-sdk-banned:
     name: Verify removed AWS SDK packages are not imported (issue #653)
     runs-on: ubuntu-latest

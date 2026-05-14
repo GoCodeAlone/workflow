@@ -1,0 +1,288 @@
+# Cloud-SDK Extraction: workflow core → strict-contract plugins
+
+**Date:** 2026-05-14
+**Status:** Design — re-baselined after adversarial review cycle 10 (inventory regenerated whole-repo by `scripts/audit-cloud-symbols.sh`; AWS scope boundary made explicit)
+**Owner:** autonomous pipeline (workflow#TBD)
+
+## Relationship to issue #653 (predecessor — read this first)
+
+Issue **#653** ("Audit AWS SDK usage in workflow core") closed 2026-05-13. Its three merged PRs already did a large slice of AWS-side extraction:
+
+- **PR #657** — removed the AWS *IaC modules* from workflow core.
+- **PR #659** — stripped the AWS SDK from the `codebuild` and `EKS` backends (replaced `codebuildAWSBackend` and `eksBackend` with SDK-free migration-error stubs).
+- **PR #662** — tombstoned `platform/providers/aws/` and promoted the EKS absent-package CI gate.
+
+Consequence: files this design's *earlier drafts* (cycles 1–7) enumerated — `aws_api_gateway.go`, `codebuild.go`, `platform_apigateway.go`, `platform_autoscaling.go`, `platform_ecs.go`, `platform_networking.go`, the `awsProviderFrom` helper, the `platform_*_aws` backends — **no longer exist in `module/`**. #653 explicitly scoped *out* "RBAC/secrets/artifact" AWS usage. **This design is #653's successor: it extracts the AWS SDK surface #653 deliberately left, plus the entirely-untouched Azure and GCP surfaces.**
+
+## Inventory provenance — `scripts/audit-cloud-symbols.sh`
+
+Cycles 2–10 each found a hand-maintained file/symbol claim wrong. Two distinct defect classes recurred: (a) *grep matching an SDK name inside a doc comment, not a real import* (cycle 9: `platform_kubernetes_kind.go` + `nosql_dynamodb.go`); (b) *a survey scoped too narrowly* — cycle 10 found the cycle-9 fix only scanned `module/` and missed five `aws-sdk-go-v2` importers under `provider/`, `plugin/rbac/`, `iam/`, `artifact/`. The fix is structural: `scripts/audit-cloud-symbols.sh` (committed alongside this design, formalized in Phase 0) parses the Go `import (...)` block of every `*.go` file **repo-wide** (`*_test.go` excluded) and emits the comment-immune, scope-complete real-import map, split by directory. **Every file claim below is that script's output, not a prose assertion.** Current output:
+
+| SDK tree | In `module/` (this design's scope) | Elsewhere (OUT of scope — see Non-Goals) | comment-only (false positives) |
+|----------|------------------------------------|------------------------------------------|--------------------------------|
+| `github.com/aws/aws-sdk-go-v2/*` | **5** — `cloud_account_aws.go`, `cloud_account_aws_creds.go`, `iac_state_spaces.go`, `pipeline_step_s3_upload.go`, `s3_storage.go` | **6** — `artifact/s3.go`, `iam/aws.go`, `plugin/rbac/aws.go`, `provider/aws/{clients,deploy,plugin}.go` | `module/nosql_dynamodb.go`, `module/storage_artifact_s3.go` |
+| `github.com/Azure/azure-sdk-for-go/sdk/*` | **2** — `iac_module.go`, `iac_state_azure.go` | **0** — Azure SDK is entirely `module/`-resident | `module/cloud_account_azure.go`, `module/platform_kubernetes_kind.go` |
+| `cloud.google.com/go/storage` + `google.golang.org/api/*` | **3** — `iac_state_gcs.go`, `storage_gcs.go`, `platform_kubernetes_kind.go` (`gkeBackend`) | **0** — GCP SDK is entirely `module/`-resident | — |
+
+**The AWS surface is split; Azure and GCP are not.** This drives the asymmetric Goal below: extracting the `module/` surface drops `Azure/azure-sdk-for-go` and the GCP trees from `go.mod` **entirely**, but `aws-sdk-go-v2` **remains** in `go.mod` after Phase B because `provider/aws/`, `plugin/rbac/aws.go`, `iam/aws.go`, and `artifact/s3.go` still import it — that surface is the deliberately-retained "RBAC/secrets/artifact stay" scope from #653 (plus the `provider/aws` deploy provider), and this design scopes it **out**, parallel to `godo`. See Non-Goals.
+
+Other key facts this regenerated inventory establishes (all verified against `origin/main` HEAD; the worktree is 0 commits behind `origin/main`):
+- **`aksBackend` is SDK-free.** `platform_kubernetes_kind.go`'s azure-sdk match is a *stale doc comment* (line 332); `aksBackend.azureToken()` is a plain `net/http` OAuth2 client-credentials POST against `login.microsoftonline.com`. No `azure-sdk-for-go` import. It stays in core, exactly like `kindBackend` and `eksErrorBackend`.
+- **The only SDK-bearing `platform.*` backend is `gkeBackend`** (`google.golang.org/api/container/v1`). `kind`/`k3s`/`eks`/`aks` are all SDK-free. (`platform_kubernetes_kind.go` also imports `internal/legacyaws` — a #653 stdlib-only artifact backing the `eks` stub; not a cloud SDK, not in scope.)
+- **`nosql_dynamodb.go` and `storage_artifact_s3.go` are comment-only stubs** (in-memory / filesystem fallbacks; the SDK names appear only in "Full implementation would use…" comments). They carry no cloud SDK and stay in core untouched.
+- `cloud_account_azure.go` / `cloud_account_gcp.go` are already SDK-free declare-don't-resolve resolver files. Only the AWS credential resolvers carry SDK.
+
+## Problem
+
+Every dependabot bump of a cloud SDK churns workflow core's `go.sum`, inflates the binary, and couples core release cadence to vendor SDK release cadence. The `workflow-plugin-{aws,azure,gcp,digitalocean}` plugins already exist and already carry these SDKs for their IaC *resource provider* role — core's direct usage is redundant surface. workflow#617 removed the DO IaC *resource* path + `godo`; #653 removed the AWS IaC *resource* modules + `platform/providers/aws/`. This design extends the same principle to the *remaining* cloud functionality neither extraction touched: IaC **state backends**, the one managed-Kubernetes **platform** backend that still carries an SDK (`gke`), and two standalone S3/GCS modules + one step.
+
+**A fourth tree — `github.com/digitalocean/godo` — is still in core but out of scope here.** `module/cloud_account_do.go` + the `module/platform_do_*.go` files still import `godo`. The user's ask scoped this work to three SDK trees (aws/azure/gcp); `godo` extraction is a structurally-identical follow-up. The final-phase CI gate is therefore scoped (see Goals for the AWS asymmetry): it asserts whole-graph zero for `azure-sdk-for-go` / `cloud.google.com` / `google.golang.org/api`, and `module/`-scoped zero for `aws-sdk-go-v2` — it does *not* assert "zero cloud SDKs" while `godo` and the out-of-scope AWS surface remain.
+
+## Goals
+
+The Goal is **asymmetric** by SDK tree, because the inventory above shows AWS SDK usage straddles `module/` and out-of-scope packages while Azure and GCP are `module/`-only:
+
+- **Azure + GCP — full removal.** workflow core `go.mod` drops `Azure/azure-sdk-for-go/*`, `cloud.google.com/go/*`, and `google.golang.org/api/*` **entirely**. Verified by a `go list -deps ./...` gate in the final phase's CI asserting zero packages from those trees anywhere in core's build graph.
+- **AWS — `module/` surface removal.** Phase B removes every `aws-sdk-go-v2` import from `module/` (the IaC-state store + the S3 modules/step + the dead `cloud_account_aws.go` + the resolver SDK tails). `aws-sdk-go-v2` **remains a `go.mod` entry** afterward because `provider/aws/`, `plugin/rbac/aws.go`, `iam/aws.go`, `artifact/s3.go` still import it — that surface is scoped out (see Non-Goals). The Phase C gate therefore asserts, for AWS, **zero `aws-sdk-go-v2` imports under `module/`**, not zero in the whole graph. (This `module/`-scoped AWS-zero assertion is *added to* `scripts/audit-cloud-symbols.sh --check` in Phase C — the script as committed with this design only enforces the `cloud_account_aws_creds.go` post-Phase-B invariant; the broader inventory-drift gate is deferred-implementation, parallel to how Phase 0 adds the `init()`-partition assertion.) This still delivers the user's "external libs out of the workflow module" intent for the `module/` package and removes `service/s3` as a *direct* `go.mod` require once the S3 modules leave.
+- Cloud functionality remains available, loaded via strict-contract gRPC plugins (the existing sidecar model).
+- The SDK-free Kubernetes backends — `kind`, `k3s`, `eks` (a #653 migration-error stub), **and `aks`** (a `net/http` OAuth2 client) — stay in core unchanged. Local-dev/test paths must not require a plugin.
+
+## Non-Goals
+
+- **The out-of-`module/` AWS SDK surface — `provider/aws/`, `plugin/rbac/aws.go`, `iam/aws.go`, `artifact/s3.go`.** These six files import `aws-sdk-go-v2` (cloudwatch/ecs/eks/iam/config/credentials/sts) and are **explicitly out of scope**, parallel to `godo`. Rationale: `plugin/rbac/aws.go` + `iam/aws.go` + `artifact/s3.go` are precisely the "RBAC/secrets/artifact stay" surface issue **#653 deliberately retained in core**; `provider/aws/` is the AWS deploy provider (referenced by `cmd/server/main.go`, `api/router.go`). Overriding #653's recent, documented scope decision is not something this design should do unilaterally. Consequence: `aws-sdk-go-v2` stays in `go.mod` after all four phases. **Recommended follow-up** (logged, not actioned here): a separate successor issue — like this design is #653's successor — to extract the AWS RBAC/IAM/artifact/deploy-provider surface into `workflow-plugin-aws` / a security plugin, at which point `aws-sdk-go-v2` can leave `go.mod` entirely.
+- Re-homing the IaC *resource provider* contract (`IaCProviderRequired`) — already extracted (#617, #653).
+- Changing how plugins are discovered/installed (`wfctl plugin install` flow unchanged).
+- Backwards-compatible yaml — this is a **clean break** with a migration guide (per #617 / #653 precedent).
+- **Removing `aws-sdk-go-v2/service/kinesis`** — a transitive dependency of `modular`, not a direct workflow import. An upstream `modular` concern.
+- **Touching the comment-only stubs.** `nosql_dynamodb.go` and `storage_artifact_s3.go` carry no SDK — they are not part of an SDK-extraction effort. (That their "real" implementations are unbuilt stubs is a separate concern, not this design's.)
+- **Re-doing #653's work** — the AWS IaC modules, `platform/providers/aws/`, and the codebuild/EKS backends are already gone.
+
+## Architecture
+
+Two extension surfaces drive new work; a third is the existing plugin-native path.
+
+### 1. IaC state backends → new `IaCStateBackend` strict proto contract
+
+`iac.state` **stays a core module type**. The state store is engine infrastructure — the orchestrator reads/writes it during every plan/apply cycle — so it keeps a stable core seam. What changes: `config.backend` no longer dispatches a hardcoded `switch` in `module/iac_module.go` (current cases: `memory`, `filesystem`, `spaces`, `gcs`, `azure_blob`, `postgres`); instead core resolves an `IaCStateBackend` gRPC client from whichever loaded plugin registered that backend name.
+
+The contract maps **1:1 onto the existing `module.IaCStateStore` interface** (`module/iac_state.go`) — six methods, no speculative surface:
+
+```proto
+// Added as a new service INSIDE plugin/external/proto/iac.proto — matches the
+// established precedent (iac.proto already holds multiple services).
+service IaCStateBackend {
+  rpc GetState   (GetStateRequest)    returns (GetStateResponse);   // → IaCStateStore.GetState
+  rpc SaveState  (SaveStateRequest)   returns (SaveStateResponse);  // → IaCStateStore.SaveState
+  rpc ListStates (ListStatesRequest)  returns (ListStatesResponse); // → IaCStateStore.ListStates(filter)
+  rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);// → IaCStateStore.DeleteState
+  rpc Lock       (LockRequest)        returns (LockResponse);       // → IaCStateStore.Lock
+  rpc Unlock     (UnlockRequest)      returns (UnlockResponse);     // → IaCStateStore.Unlock
+}
+message GetStateResponse  { IaCState state = 1; bool exists = 2; }
+message SaveStateRequest  { IaCState state = 1; }  // idempotent: full-state replace, last-writer-wins
+message ListStatesRequest { map<string,string> filter = 1; }
+message LockRequest       { string resource_id = 1; }  // 1:1 with IaCStateStore.Lock — no TTL field (see Failure modes)
+```
+
+Backend ownership:
+
+| backend name | plugin | storage | core file deleted |
+|--------------|--------|---------|-------------------|
+| `s3`         | workflow-plugin-aws | AWS S3 | `iac_state_spaces.go` (the `SpacesIaCStateStore` — an S3-compatible store backing *both* `s3` and `spaces`) |
+| `azure_blob` | workflow-plugin-azure | Azure Blob | `iac_state_azure.go` |
+| `gcs`        | workflow-plugin-gcp | Google Cloud Storage | `iac_state_gcs.go` |
+| `spaces`     | workflow-plugin-digitalocean | DO Spaces (S3-compatible) | (shares `iac_state_spaces.go` deletion — see Phase D) |
+
+`memory`, `filesystem`, `postgres` backends stay **in core** — no cloud SDK.
+
+**Unary GET+SAVE vs streaming:** decided by benchmark, not assumption. The writing-plans phase includes a task that drives a 1 MB synthetic state blob through a full plan→apply cycle over unary RPC, measures p50/p99 added latency vs the in-process baseline, and only adopts chunked streaming if unary clears no acceptable bar. Default build target: **unary** (gRPC's 4 MB default cap covers typical state files; the in-process baseline this replaces was itself a single blob read/write). Ordered **before** the Phase A proto is locked.
+
+### 2. The `gke` Kubernetes backend → gRPC extraction (contract shape gated on a spike)
+
+**Post-#653 and post-cycle-9-re-baseline, this surface is one backend.** `platform_kubernetes_kind.go` holds four `kubernetesBackend` implementations behind one shared `init()`:
+
+| backend | SDK | disposition |
+|---------|-----|-------------|
+| `kindBackend` (serves `kind` *and* `k3s`) | none | **stays in core** |
+| `eksErrorBackend` (serves `eks`) | none (#653 migration-error stub) | **stays in core** unchanged |
+| `aksBackend` (serves `aks`) | **none** — `net/http` OAuth2, not azure-sdk | **stays in core** |
+| `gkeBackend` (serves `gke`) | `google.golang.org/api/container/v1` | → workflow-plugin-gcp |
+
+So **exactly one** `platform.*` backend carries a cloud SDK: `gkeBackend`. `platform.kubernetes` keeps its module type **and its `provider:` config key** in core — no yaml UX break — and the `kubernetesBackend` interface + the `kind`/`k3s`/`eks`/`aks` impls all stay in core. Only `gke`'s SDK-bearing implementation moves to a plugin.
+
+**A *new* `PlatformBackend` gRPC contract for a single backend is a YAGNI risk, and the design does not pre-commit to one.** Instead, the cross-process mechanism for `gke` is **gated on an interface-audit spike** (a writing-plans task, ordered before Phase C). The spike audits the 4-method `kubernetesBackend` interface (`plan`/`apply`/`status`/`destroy`) against the existing contracts and picks, in preference order:
+
+1. **Fold `gke` into the existing `IaCProviderRequired` / `ResourceDriver` contract.** A GKE cluster is a managed resource with create/plan/apply/destroy/status — exactly what `ResourceDriver` already models (battle-tested, multiple ADRs through the strict-contracts cutover). *Preferred* — reuses a proven contract, adds zero new proto surface.
+2. **Make `gke` a plugin-native `kubernetesBackend`** via the existing `ModuleFactories`/`RemoteModule` plugin SDK, the same path §3 uses — if `ResourceDriver`'s lifecycle shape doesn't fit the continuous-reconciliation behavior of `platform.kubernetes`.
+3. **A minimal new `PlatformBackend` service** (3–4 RPCs) — *only* if neither (1) nor (2) fits cleanly. With one backend this is the least likely outcome; the design records it as the fallback, not the plan.
+
+Whatever the spike picks, `platform.kubernetes` core dispatches on `provider:` exactly as today; when `provider == gke` it resolves a gRPC client of the chosen contract from workflow-plugin-gcp; for `kind`/`k3s`/`eks`/`aks` it uses the in-core backend unchanged.
+
+**Credential flow.** `gkeBackend` reaches credentials via `module.CloudCredentials` (`module/cloud_account.go`) — a plain-field struct (`Provider/Region/AccessKey/SecretKey/.../ProjectID/...` + `Extra map[string]string`), cleanly proto-serialisable as-is, **no struct change needed**. The chosen contract's request carries a serialised `CloudCredentials`; the plugin performs any SDK-bearing resolution in-process. The gcp credential resolvers (`cloud_account_gcp.go`) are already SDK-free.
+
+### 3. Standalone S3/GCS modules + step → plugin-native types (existing SDK surface, no new contract)
+
+These are user-facing pipeline functionality, not engine infrastructure. They become **plugin-native module/step types** via the existing `ModuleFactories` / `StepFactories` plugin SDK — already a gRPC sidecar path (`RemoteModule`). No new contract. **Current registration site:** these types are registered today by *built-in in-process engine plugins* under `plugins/` (which import `module.*` directly), not by `engine.go`. Extracting each one means the built-in plugin's factory map drops that entry and the impl moves to the external gRPC plugin.
+
+| core file | current built-in registration | becomes | plugin |
+|-----------|-------------------------------|---------|--------|
+| `pipeline_step_s3_upload.go` (`S3UploadStep`) | `plugins/pipelinesteps/plugin.go` `"step.s3_upload"` (:183) | `step.s3_upload` | aws |
+| `s3_storage.go` (`S3Storage`) | `plugins/storage/plugin.go` `"storage.s3"` (:89) | `storage.s3` module | aws |
+| `storage_gcs.go` (`GCSStorage`) | `plugins/storage/plugin.go` `"storage.gcs"` (:109) | `storage.gcs` module | gcp |
+
+(`nosql_dynamodb.go` and `storage_artifact_s3.go` are **not** in this table — they carry no SDK, see Inventory provenance. They stay in core.)
+
+**Credential handling (Option 1, approved):** each plugin-native module carries its own `credentials:` config block and resolves it in-process via a shared in-plugin `buildAWSConfig` (resp. gcp) helper — exactly the workflow-plugin-digitalocean model. To avoid yaml redundancy when a config declares many such modules, each plugin offers an optional in-plugin `aws.credentials` / `gcp.credentials` module + a `credentials_ref:` key — DRY handled entirely inside the plugin, no core contract.
+
+### Credential resolvers — in-core resolvers *declare*, the plugin *resolves*
+
+The AWS credential resolvers (`cloud_account_aws_creds.go`) split two ways. `awsStaticResolver` / `awsEnvResolver` are **already SDK-free**. `awsProfileResolver` and `awsRoleARNResolver` (verified) have an **SDK-bearing block** (`config.LoadDefaultConfig(WithSharedConfigProfile)`, `sts.AssumeRole`) that resolves the profile/role into `AccessKey/SecretKey` *in-core*. The azure/gcp resolvers are already SDK-free.
+
+The model: make **every** in-core resolver uniformly *declare, don't resolve*. Phase B **rewrites** the two SDK-bearing AWS resolver bodies — a deliberate `Resolve()` body rewrite, **not** a one-line "snip the tail":
+- `awsProfileResolver.Resolve` — its SDK calls are a clean contiguous tail after the marker-record (`m.creds.Extra["profile"] = profile`); the rewrite ends the method right after the marker-record.
+- `awsRoleARNResolver.Resolve` — the SDK block (base-config build + `sts.NewFromConfig` + `AssumeRole` + result-record) is the **larger half** of the method. It is *not* perfectly contiguous after the declared-input recording: between the recording (`m.creds.RoleARN`, `Extra["external_id"]`) and the SDK block sit two non-SDK statements — the `roleARN == ""` required-check (`return fmt.Errorf(...)`) and the `sessionName` extraction. The rewrite **keeps the required-check, drops the `sessionName` extraction** (only the SDK `AssumeRole` consumed it), **deletes the SDK block**, and ends the method after the declared-input recording + a `credential_source` marker. Writing-plans spells out the exact line dispositions.
+
+After both rewrites, `cloud_account_aws_creds.go` imports **no** `aws-sdk-go-v2` package (the 4 SDK imports — `aws`, `config`, `credentials`, `sts` — are used *only* by those two resolver bodies) and **stays in core**. **Phase B CI invariant:** `scripts/audit-cloud-symbols.sh --check` (with the Phase-B marker present) asserts `cloud_account_aws_creds.go` has zero `aws-sdk-go-v2` imports post-rewrite.
+
+`cloud_account_aws.go` — `AWSConfigProvider` interface + `AWSConfig()` method + `ValidateCredentials()` method, all pure SDK — is **dead code**: a repo-wide grep for `AWSConfigProvider` / `awsProviderFrom` / `.AWSConfig(` returns **zero non-test consumers** (the `awsProviderFrom` helper and every consumer were removed by #653). It is **deleted outright by Phase B with no consumer rewrite and no core replacement.**
+
+**Resolvers emit *markers*, not always plain values.** For `static` / `env`, the in-core resolver records concrete declared values. For `profile` / `role_arn` (AWS) and the azure/gcp deferred types, the resolver records the *declared inputs* + an `Extra["credential_source"]` marker — it does **not** resolve to concrete keys. The plugin reads the marker and performs the SDK-bearing resolution. The plugin **must** implement marker handling for every deferred type.
+
+## Security
+
+Option 1 moves raw cloud secrets inline into every plugin-native module's `credentials:` config block — multiplying the config sites holding plaintext secrets versus today's single `cloud.account` module. Not unprecedented (`iac_module.go`'s `spaces` case already inlines `accessKey`/`secretKey`), but needs explicit handling:
+
+- **Config-version store + execution tracing.** Workflow's config-version store (SHA-256 content-addressed) and execution-tracing layer marshal module config. Plugin-native module config carrying inline credentials MUST be redacted before persistence/tracing. Writing-plans task: extend the existing PII/secret redaction (already per-tenant-toggleable per `workflow-cloud`) to recognise `credentials:` / `credentials_ref:` keys, OR confirm the existing redaction already covers any key matching a secret-pattern. **Blocking** — ships in the same phase as the first plugin-native module.
+- **gRPC sidecar request logging.** `IaCStateBackend` requests (and the `gke` contract's requests) cross the engine↔plugin gRPC boundary; `credentials:` blocks ride in `CreateModule` requests. **Verified at design time:** `plugin/external/grpc_plugin.go:39` constructs the server as `grpc.NewServer(opts...)` with `opts` passed straight through — no body-logging interceptor. The only request-body logging in `plugin/external/` is `callback_server.go:85,118` (plugin→host callback path) — neither touches module config. `CreateModule` is dispatched at `adapter.go:477` with no logging. **Conclusion: no redacting interceptor needed today.** Writing-plans adds a guard test asserting no interceptor logs `CreateModule` bodies.
+- **`credentials_ref:` blast radius.** A `credentials_ref` resolves to an in-plugin `aws.credentials` module within the *same plugin process* — it does not broaden which process can read the secret. Strictly *narrower* than today's `cloud.account` (which builds `aws.Config` in the engine process).
+
+## Failure modes
+
+Moving the IaC state store behind a gRPC sidecar introduces a partial-failure surface on the engine's hottest path (every plan/apply does `Lock` → `GetState` → ... → `SaveState` → `Unlock`):
+
+- **Plugin crashes between `Lock` and `Unlock` → orphaned lock.** An in-process lock dies with the process; a gRPC-plugin lock can outlive a crash if persisted (S3/Blob lock objects persist). **Initial scope:** documented limitation. The contract ships as exactly the 6-method `IaCStateStore` interface — no TTL field — because no Phase A–D backend implements honored expiry yet, and a no-op TTL field implies an unenforced guarantee. Recovery: operator deletes the backend's lock object directly (a plain object/blob in the user's own bucket; lock key format documented per backend). **Planned additive follow-up:** once a backend implements honored expiry, `LockRequest` gains an optional `lease_ttl_seconds` field *paired with a conformance test*. Tracked as an open item.
+- **`Lock` contention against a still-held lock.** Core's `iac.state` dispatch returns an immediate error — it does not block. Matches today's in-process `IaCStateStore.Lock`. Orphaned-lock recovery is the operator-side delete above.
+- **`SaveState` succeeds plugin-side but the gRPC response is lost → engine retries → double-write.** `SaveState` MUST be idempotent: full-state replace keyed by `resource_id` (existing `IaCStateStore.SaveState` is already insert-or-replace). Plugin implementations use unconditional PUT (overwrite), not append. Last-writer-wins by design.
+- **Plugin unreachable at plan/apply start.** Core's `iac.state` dispatch returns a clear `"iac.state backend %q: plugin unreachable"` error and the plan/apply aborts *before* mutating anything. Matches today's behavior when a misconfigured backend fails to construct in `IaCModule.Init()`.
+- **`gke` plugin crash mid-`apply`.** A `platform.kubernetes` apply (provider `gke`) crashing mid-flight leaves a real cloud cluster in an indeterminate state — **identical to today's in-process risk** (an in-process `gkeBackend.apply()` panic leaves the same state). The next `plan` reconciles against live cloud state as today. Unchanged.
+- **A plugin registers a backend/provider name colliding with a core-reserved one.** Core-registered names (`iac.state`: `memory`/`filesystem`/`postgres`; `platform.kubernetes`: `kind`/`k3s`/`eks`/`aks`; the `mock` backends) are **reserved**. A colliding plugin registration is a **load-time error** — core fails to start with `"plugin %q registered reserved backend name %q"` rather than silently shadowing.
+
+## Cross-file coupling: the symbol-ownership map is a build artifact, not a design-doc claim
+
+Cycles 2–9 each found a hand-maintained ownership claim wrong — cycle 8 (whole inventory predated #653), cycle 9 (comment-only false positives). The lesson is structural: **a precise symbol map is derived data; it rots on every upstream merge and on every comment.** `scripts/audit-cloud-symbols.sh` (committed with this design, formalized in Phase 0) is now the source of truth — it parses `import (...)` blocks, never comments, and runs in CI on every phase PR.
+
+**Invariants (load-bearing; the script verifies them, it doesn't discover them):**
+- `module/cloud_account.go` (`CloudCredentials` / `CloudCredentialProvider` / `CloudAccount`) is the provider-agnostic *declared-config* holder — **it stays in core, is never deleted by any phase**, and is the credential symbol-home all cloud platform code binds to.
+- `module/platform_kubernetes_kind.go` holds **four** `kubernetesBackend` impls behind **one shared `init()`** registering `kind`/`k3s`/`eks`/`gke`/`aks` (verified). Of the four impls, only `gkeBackend` carries a cloud SDK. Phase 0 splits this file; the `init()` must be partitioned so no `init()` registers both a core-staying and a plugin-bound factory.
+- `cloud_account_aws.go` is **dead code, deleted outright by Phase B** — `AWSConfig()` / `AWSConfigProvider` / `ValidateCredentials`, all pure SDK, with **zero non-test consumers verified**. No consumer rewrite. `parseStringSlice` and `safeIntToInt32` (referenced by earlier drafts) **no longer exist anywhere in `module/`** — there is no shared-helper-relocation work in this design.
+
+**The script's checks:** (a) the comment-immune, **whole-repo** real-import map per SDK tree, split into `module/` (in-scope) vs. elsewhere (out-of-scope — `provider/`, `plugin/rbac/`, `iam/`, `artifact/`); (b) `cloud_account_aws_creds.go` has zero `aws-sdk-go-v2` imports post-Phase-B (gated on a `.phase-b-complete` marker); (c) advisory readout of `platform_kubernetes_kind.go`'s backend-type count and shared-`init()` count for the Phase 0 split. Phase 0 extends it with the full `init()`-partition assertion.
+
+## Phase 0 — precursor: split the one remaining mixed cloud-backend file
+
+Post-#653 and post-cycle-9, Phase 0 is small: a mechanical, behavior-equivalent split of the **single** `module/` file that co-locates a plugin-bound cloud backend with core-staying ones.
+
+**1. Split `platform_kubernetes_kind.go`** into:
+- `platform_kubernetes_core.go` — holds `kindBackend` (serves `kind` + `k3s`), `eksErrorBackend` (serves `eks`), **`aksBackend` (serves `aks` — SDK-free `net/http` OAuth2)**, and an `init()` registering **only** those four core-staying names.
+- `platform_kubernetes_gke.go` — holds `gkeBackend` + its `google.golang.org/api/container` + `option` imports + an `init()` registering only `gke`.
+
+After the split, no `init()` registers both a core-staying and a plugin-bound factory, and only `platform_kubernetes_gke.go` holds a plugin-bound backend. `platform_kubernetes.go` (the `PlatformKubernetes` shell, `kubernetesBackend` interface, `RegisterKubernetesBackend`, `intFromAny` helper) is untouched.
+
+**2. Fix the stale doc comment** at `platform_kubernetes_kind.go:332` ("Requires the Azure SDK…") — it describes an implementation that doesn't exist (`azureToken` is pure `net/http`) and is the exact thing that fooled cycle-8's re-baseline. Phase 0 is already touching this file; correct the comment so neither the audit script's future readers nor a human reviewer is misled again.
+
+**3. Formalize `scripts/audit-cloud-symbols.sh`** — already drafted and committed with this design; Phase 0 extends it with the full `init()`-partition assertion and wires it into CI (run on every subsequent phase PR). No shared-helper-relocation step — there are no shared helpers to relocate (verified).
+
+This is **not** "zero logic change" — partitioning a shared `init()` distributes registration calls across files. It is *behavior-equivalent*: the same five backend names are registered after the split as before.
+
+**Phase 0 acceptance criteria:** `go build ./... && go vet ./... && go test ./module/...` green; `scripts/audit-cloud-symbols.sh` output shows no `init()` mixing core-staying + plugin-bound registrations; `git diff` is pure code movement + mechanical `init()` partition + the one comment fix, no logic edits.
+
+**Phase 0 rollback:** a file-split + `init()` partition + comment fix with no behavior diff — revert is a single `git revert`, no contract, no go.mod, no runtime impact.
+
+## Phases
+
+Each phase is one workflow-core PR (deleting/editing files + wiring the contract dispatch) plus one PR per affected plugin. Within a phase, the plugin PR may merge ahead of the core PR — core keeps the old in-process path until the contract dispatch is wired in the core PR. **Atomicity rule:** within a core PR, a deleted file and every file referencing its symbols are removed in the *same commit* (the build gate enforces this).
+
+**Phase A — Azure** (smallest; validates the `IaCStateBackend` contract end-to-end):
+- Run the state-backend benchmark task; lock the `IaCStateBackend` proto shape.
+- Add the `IaCStateBackend` service to `plugin/external/proto/iac.proto`.
+- Add the secret-redaction task + the gRPC-interceptor guard test (blocking).
+- workflow-plugin-azure implements `azure_blob` `IaCStateBackend`.
+- Core PR: delete `iac_state_azure.go`; strip the `azure_blob` case + `newAzureSharedKeyCredential` wrapper from `iac_module.go`; while editing `iac_module.go`, also correct its stale line-18 doc comment ("Supported backends: 'memory' … 'filesystem' … 'spaces'" — the switch actually handles six). **The deletion + the `iac_module.go` edit — the only two real azure-sdk importers — is what drops `Azure/azure-sdk-for-go` from `go.mod` entirely.** Phase A touches **no `platform.*` file** — `aksBackend` is SDK-free and stays in core.
+
+**Phase B — AWS.** Inventory + destination (authoritative list = `audit-cloud-symbols.sh` output):
+
+| core file | disposition | atomicity note |
+|-----------|-------------|----------------|
+| `iac_state_spaces.go` | DELETE → aws plugin `s3` `IaCStateBackend` | shared with `spaces` — see Phase D |
+| `cloud_account_aws.go` | DELETE outright — dead code, **zero non-test consumers verified** | no consumer rewrite; trivial deletion |
+| `cloud_account_aws_creds.go` | **EDIT** — rewrite `awsProfileResolver`/`awsRoleARNResolver` bodies SDK-free; file stays in core | resolver `init()` registrations stay — `provider: aws` credential resolution still works in-core, now declare-only |
+| `pipeline_step_s3_upload.go` | DELETE → aws plugin `step.s3_upload`; drop the entry from `plugins/pipelinesteps/plugin.go` | same commit as the built-in-plugin factory-map edit |
+| `s3_storage.go` | DELETE → aws plugin `storage.s3`; drop from `plugins/storage/plugin.go` | same commit |
+
+- Core PR also: **strip the `spaces` case from `iac_module.go`** (it calls `NewSpacesIaCStateStore` from the deleted `iac_state_spaces.go`). Drop `aws-sdk-go-v2` from `go.mod`; set the `.phase-b-complete` marker so `audit-cloud-symbols.sh --check` enforces the `cloud_account_aws_creds.go` zero-import invariant.
+- **No AWS `platform.*` work** — #653 already stubbed `eks`, and `aks` is SDK-free.
+- `nosql_dynamodb.go` and `storage_artifact_s3.go` stay in core (comment-only — see Inventory provenance).
+
+**Phase C — GCP** (includes the one platform-backend extraction):
+- Run the `kubernetesBackend` interface-audit spike (Architecture §2) — picks the `gke` cross-process contract: `ResourceDriver` fold (preferred), plugin-native `kubernetesBackend`, or a minimal new contract (fallback). Locks that decision *before* the gcp plugin work.
+- workflow-plugin-gcp implements `IaCStateBackend` (`gcs`), the chosen `gke` contract, and plugin-native `storage.gcs`.
+- Core PR: delete `iac_state_gcs.go`; delete `storage_gcs.go` (drop the entry from `plugins/storage/plugin.go`); delete `platform_kubernetes_gke.go` (the Phase-0 split file) and wire its `gke` dispatch; strip the `gcs` case from `iac_module.go`; drop `cloud.google.com/go` + `google.golang.org/api`.
+- **Permanent CI gate added here, asymmetric per the Goals section:** (a) `go list -deps ./...` asserts **zero** `Azure/azure-sdk-for-go` and **zero** `cloud.google.com/go` / `google.golang.org/api` packages anywhere in core's build graph — Azure and GCP are fully gone; (b) `scripts/audit-cloud-symbols.sh --check` asserts **zero** `aws-sdk-go-v2` imports under `module/` — AWS is gone from the `module/` package, but `aws-sdk-go-v2` remains a `go.mod` entry for the out-of-scope `provider/aws/` / `plugin/rbac/` / `iam/` / `artifact/` surface (Non-Goals). `godo` remains — out of scope.
+
+**Phase D — DigitalOcean (`spaces` clean-break):**
+- workflow-plugin-digitalocean implements `IaCStateBackend` for `spaces` (S3-compatible — pulls `aws-sdk-go-v2/service/s3`, the one service package, not the whole tree).
+- **Clean break, not soft-compat.** `iac_state_spaces.go` + the `spaces` case in `iac_module.go` are deleted by **Phase B's core PR** (`iac_state_spaces.go` is the one S3-compatible store backing *both* `s3` and `spaces`). After Phase B's core PR merges, `iac.state` with `backend: spaces` fails to build unless the DO plugin version implementing `IaCStateBackend` is loaded.
+- **Minor version bump** on workflow-plugin-digitalocean (compatibility-break marker) + `minEngineVersion` set to the core version that drops the in-core `spaces` case + migration doc.
+- **Sequencing:** the DO plugin PR MUST merge + release **before** Phase B's core PR merges — otherwise `backend: spaces` has no implementation anywhere. Writing-plans orders the DO plugin PR as a Phase-B blocker.
+
+## Migration (user-facing)
+
+Published in each plugin's CHANGELOG + a consolidated `docs/migrations/2026-05-14-cloud-sdk-extraction.md`:
+
+- `iac.state` with `backend: s3|azure_blob|gcs|spaces` → load the matching plugin (`wfctl plugin install workflow-plugin-{aws,azure,gcp,digitalocean}`). yaml `backend:` value unchanged. **Hard requirement after the relevant phase merges.**
+- `platform.kubernetes` with `provider: gke` → load workflow-plugin-gcp. yaml `provider:` value unchanged. **`provider: kind|k3s|eks|aks` are unchanged — still core, no plugin needed.**
+- `step.s3_upload`, `storage.s3`, `storage.gcs` → load the matching plugin. Step/module type names unchanged; `credentials:` block moves inline (or `credentials_ref:` an in-plugin `aws.credentials`/`gcp.credentials` module). **This inline-credentials move is the only yaml-shape change.**
+- `memory` / `filesystem` / `postgres` state backends, `kind`/`k3s`/`eks`/`aks` k8s backends, `nosql.dynamodb`, `storage.artifact` → no change, still core.
+
+## Assumptions
+
+1. **gRPC's 4 MB default message cap covers real-world IaC state files.** If a deployment's state exceeds 4 MB the unary `IaCStateBackend` contract needs streaming — the benchmark validates the typical case; `SaveState` returns a clear "state exceeds transport limit" error for the hostile-large case. Benchmark runs before the proto is locked.
+2. **`kubernetesBackend` is cleanly provider-separable.** The interface must be segregated such that `kind`/`k3s`/`eks`/`aks` impls stay while `gke` extracts. Post-cycle-9 this is **low-risk** — three SDK-free impls (`kindBackend`, `eksErrorBackend`, `aksBackend`) already coexist behind the interface, proving it doesn't leak SDK types into the core module shell. The interface-audit spike (Phase C precursor) confirms formally.
+3. **Plugins may ship ahead of core.** A plugin implementing `IaCStateBackend` against the published proto is harmless to load on a core version that doesn't yet dispatch to it — the contract is additive.
+4. **`aws-sdk-go-v2/service/s3` in workflow-plugin-digitalocean is acceptable.** DO Spaces is S3-API; there is no godo-native Spaces client. One AWS service package is the minimal cost of self-contained `spaces` state support.
+5. **The credential resolvers can all be made SDK-free in-core.** `cloud_account_azure.go` / `cloud_account_gcp.go` are *already* SDK-free (verified); `awsStaticResolver`/`awsEnvResolver` are already SDK-free; `awsProfileResolver`/`awsRoleARNResolver` become SDK-free once their SDK blocks are rewritten out (Phase B). Load-bearing claim: a resolver does not *need* to resolve in-core — for deferred types it records declared inputs + an `Extra["credential_source"]` marker, and the plugin honors the marker.
+6. **Azure and GCP SDK usage is `module/`-resident; AWS is not.** Verified whole-repo by `scripts/audit-cloud-symbols.sh`: `Azure/azure-sdk-for-go`, `cloud.google.com/go`, and `google.golang.org/api` real imports appear **only** under `module/` — so extracting the `module/` surface drops them from `go.mod` entirely. `aws-sdk-go-v2`, by contrast, is *also* imported by `provider/aws/`, `plugin/rbac/aws.go`, `iam/aws.go`, `artifact/s3.go` — the #653-retained surface this design scopes out (Non-Goals). The load-bearing consequence: the Phase C `go list -deps` gate can assert *whole-graph* zero for Azure/GCP but only *`module/`-scoped* zero for AWS. (An earlier draft of this design asserted "no core code outside `module/` imports these SDKs" — cycle 10 proved that false for AWS; this assumption now states the verified truth.)
+7. **#653 is final and merged, and its "RBAC/secrets/artifact stay" scope decision is respected.** This design builds on `origin/main` post-#653 (issue closed, all three PRs merged) and does **not** override #653's decision to keep the AWS RBAC/IAM/artifact surface in core — it scopes that surface out and logs a successor follow-up (Non-Goals). A stable foundation; no contested scope.
+
+## Rollback
+
+This design changes **plugin loading paths** and **go.mod dependency trees** — runtime-affecting per the `runtime-launch-validation` trigger list.
+
+- **Per-phase revert:** each phase is an isolated core PR + plugin PR(s). Reverting the **core PR** restores the in-process backend `switch` / `gke` backend and re-adds the SDK to `go.mod` — deleted files recoverable from git. Plugin PRs are additive and can stay merged harmlessly even if core reverts. **Phase D has no separate core PR** — its core deletion *is* Phase B's core PR — so a Phase D rollback means reverting Phase B's core PR + the DO plugin PR together.
+- **Forward-fix preferred over revert:** because core keeps the old in-process path until the contract dispatch is wired *in the same core PR*, a broken phase fails at PR CI (image-launch / strict-contracts gates), not in production. The revert path exists but the gate is the primary safety.
+- **`spaces` clean-break (Phase B core PR + Phase D plugin PR):** the only change with an external-user-visible compat break. Rollback = revert Phase B's core PR + the DO plugin minor bump, together — a matched pair. The migration doc + the DO plugin's `minEngineVersion` bump is the forward guard.
+
+## Alternatives Considered
+
+1. **Fold the `gke` provisioner into `ResourceDriver` instead of inventing `PlatformBackend`.** This is no longer an "alternative" — post-cycle-9 it is the **preferred path** inside Architecture §2 (the spike's option 1). A GKE cluster is structurally a managed resource; with only one SDK-bearing platform backend, a dedicated new contract is YAGNI. Retained here only to record that the dedicated-contract option was considered and demoted to a gated fallback.
+2. **Leave `iac_state_spaces.go` in core, accept one `aws-sdk-go-v2/service/s3` dependency.** Downgrades the AWS Goal from "zero `aws-sdk-go-v2` under `module/`" to "keeps one S3 client in `module/`" — and would defeat the Phase C `module/`-scoped audit-script gate. **Rejected** — leaves an S3 client in the `module/` package the design is explicitly clearing, and `iac_state_spaces.go` is the one store backing both `s3` and `spaces` so it has to move for Phase D anyway. The cost (both aws + DO plugins carry an S3 client) is real but bounded.
+3. **A shared `s3compat` Go module consumed by both the aws and DO plugins.** **Deferred, not rejected:** a *plugin-side* optimisation that doesn't affect the core contract or any phase boundary — lands as a follow-up after the extraction is proven.
+4. **In-process Go-module plugin loading (build-tag imports) instead of gRPC sidecars.** Rejected in brainstorm by explicit user decision — strict gRPC sidecar model only.
+5. **Wait for / extend #653 to also extract state backends + `gke`.** #653's issue is closed with an explicit scope boundary. Extending a closed issue rather than opening a clearly-scoped successor would muddy the audit trail. **Rejected** — this design is the named successor.
+
+## Self-challenge — top doubts surfaced (carried forward, with mitigations wired into phases)
+
+1. **A new `PlatformBackend` contract would be over-general for one backend.** Settled: Architecture §2 does **not** propose a new contract — it gates `gke`'s cross-process mechanism on an interface-audit spike whose *preferred* outcome is folding into the existing `ResourceDriver`. The dedicated-contract option is the explicit fallback, not the plan.
+2. **Clean provider-separability (Assumption 2) could be fragile.** Low-risk post-cycle-9: three SDK-free `kubernetesBackend` impls already coexist behind the interface. The spike confirms formally before the Phase C `gke` work.
+3. **The state-backend benchmark could come back "streaming required"** and reshape the `IaCStateBackend` proto. Mitigation: benchmark is a Phase A task ordered *before* the proto lock.
+4. **The inventory could be stale, comment-fooled, or scope-clipped again** — cycles 8, 9, and 10 each hit a variant (cycle 8: predated #653; cycle 9: comment-only false positives; cycle 10: a `module/`-only survey missed `aws-sdk-go-v2` importers in `provider/`, `plugin/rbac/`, `iam/`, `artifact/`). Mitigation: `scripts/audit-cloud-symbols.sh` is committed *with this design*, parses `import (...)` blocks (never comments), scans **the whole repo** (not just `module/`), and splits results by directory so the in-scope/out-of-scope boundary is mechanical. Its output — not prose — populates every file table above. From Phase 0 it runs in CI on every phase PR. All three defect-class variants are now structurally closed: comment-immune (parser), scope-complete (whole-repo), and rot-proof (CI-enforced).
+
+## Open items deferred to writing-plans
+
+- Exact proto field layouts for `IaCStateBackend` (sketch above is directional; field-level layout follows the benchmark).
+- The `gke` cross-process contract decision (`ResourceDriver` fold / plugin-native / minimal new contract) — gated on the `kubernetesBackend` interface-audit spike, a Phase C precursor task.
+- Benchmark harness location + the concrete acceptance threshold (p99 added latency bar).
+- Exact wording of the secret-redaction extension + whether existing redaction already covers `credentials:` keys.
+- The `s3compat` shared-module cleanup (Alternatives Considered #3) — logged as a post-extraction follow-up candidate.
+- Per-plugin CHANGELOG entries + the consolidated migration doc wording.
+- **IaC state at-rest format (operator-raised, 2026-05-14; post-extraction follow-up).** Every `IaCStateStore` backend currently persists `module.IaCState` as JSON. A typed/compact binary at-rest format (protobuf / msgpack / CBOR) would be better for processing, type-correctness, and large-state scaling — with JSON kept as an *export* option and content-detection on read so existing JSON state files keep working. Distinct from the `IaCStateBackend` *wire* contract (the proto carries opaque `bytes`; at-rest format is each backend's concern). Cross-cutting across all `IaCStateStore` impls (core + 4 plugins); needs its own brainstorming pass. See `docs/plans/2026-05-14-iac-state-backend-benchmark.md` §"Logged follow-up". Not in this design's scope.
