@@ -51,7 +51,7 @@
 
 **PR 4 is autonomous cross-repo work** (de-gated, `decisions/0034`). It lands in a *different git repository* — `/Users/jon/workspace/workflow-plugin-azure`. A dispatched agent operates in that repo directly; **every cross-repo agent dispatch MUST state, explicitly in its prompt, the absolute path of the repo it works in and that it is a *different* repo than the worktree** (see "Notes for the executor"). Push + PR-creation follow normal review discipline (feature branch, PR — never direct-to-default-branch). PR 4 depends on **PR 7** being merged + a `workflow` version (a `main` pseudo-version or release) carrying the `ListBackendNames` RPC + the SDK serve hook. PR 5 is **blocked on PR 4's plugin release tag** existing and being installable; the release tag (Task 12) is an explicit, deliberate step but not a human gate.
 
-**Status:** Draft (unlock for amendment — ADR 0035)
+**Status:** Locked 2026-05-14T18:43:55Z
 
 ---
 
