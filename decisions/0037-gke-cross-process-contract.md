@@ -16,8 +16,12 @@ this interface-audit spike, ordered before any Phase C plugin work.
 
 ### The in-core interface
 
-`platform.kubernetes` dispatches on its `provider:` config key to a `kubernetesBackend`
-(`module/platform_kubernetes.go:46-51`) — a **4-method** interface:
+`platform.kubernetes` dispatches on its `type:` config key (`module/platform_kubernetes.go:87`
+reads `config["type"]`; schema `schema/module_schema.go:2665` exposes it as `type`, one of
+`eks | gke | aks | kind | k3s`) to a `kubernetesBackend` (`module/platform_kubernetes.go:46-51`)
+— a **4-method** interface. (The design §2's `provider:` wording is imprecise and is superseded
+here: the dispatch config key is `type:`. The string `gke` is *also* recorded into the
+`KubernetesClusterState.Provider` field, which is the likely source of the design's slip.)
 
 | method | signature | gke implementation (`platform_kubernetes_gke.go`) |
 |---|---|---|
@@ -108,11 +112,11 @@ hardening pass over the existing `infra.k8s_cluster` `GKEDriver`:
 
 **Tasks 25/26 (workflow core — `gke` dispatch + adapter).** Add a host-side `kubernetesBackend`
 implementation that dispatches to a `ResourceDriver` gRPC client for `infra.k8s_cluster`,
-resolved from `workflow-plugin-gcp` when `provider == gke`. It builds `ResourceSpec`/`ResourceRef`
+resolved from `workflow-plugin-gcp` when `type == gke`. It builds `ResourceSpec`/`ResourceRef`
 from `PlatformKubernetes` config, serializes `CloudCredentials` into the request, and performs
 the method mapping + the `outputs_json`→`KubernetesClusterState` projection above. Precedent: the
 Phase A `grpcIaCStateStore` adapter (`module/iac_state_grpc_client.go`). `platform.kubernetes`
-keeps its module type and its `provider:` config key in core; `kind`/`k3s`/`eks`/`aks` stay
+keeps its module type and its `type:` config key in core; `kind`/`k3s`/`eks`/`aks` stay
 fully in-core and unchanged.
 
 **Proto-surface cost: ZERO.** `iac.proto`'s `ResourceDriver` service and its messages are
@@ -128,4 +132,6 @@ had picked Option 3.
 reserved by PR 1 (the `IaCStateBackend.Configure` RPC), which is in flight on a parallel branch
 and not yet merged. PR 7 is independent of PR 1, so the spike's `tail -1` free-number check shows
 `0035` rather than the plan's anticipated `0036` — expected for parallel work. `0037` is the
-scope-locked number for this ADR; once both PRs merge the sequence is gap-free.
+scope-locked number for this ADR; it follows `0036` once PR 1 merges. (No claim is made about
+the wider `decisions/` sequence, which already has pre-existing gaps and duplicates — e.g. a
+missing `0019` and two `0014` entries.)
