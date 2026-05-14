@@ -68,6 +68,16 @@ func (r *iacStateBackendRegistry) resolve(name string) (pb.IaCStateBackendClient
 }
 
 // iacStateBackendRegistryInstance is the package-level singleton the engine
-// populates and IaCModule.Init consults. Task 14 adds an exported
-// RegisterIaCStateBackend wrapper around it.
+// populates and IaCModule.Init consults.
 var iacStateBackendRegistryInstance = newIaCStateBackendRegistry()
+
+// RegisterIaCStateBackend associates an iac.state backend name with a
+// plugin-served gRPC client in the package-level registry. The engine calls
+// this at plugin-load for each backend name a loaded plugin advertises;
+// IaCModule.Init then resolves `backend: <name>` configs against it. Reserved
+// core backend names (memory/filesystem/postgres) and empty names / nil clients
+// are rejected — see iacStateBackendRegistry.register. Amendment A2
+// (decisions/0035).
+func RegisterIaCStateBackend(name string, client pb.IaCStateBackendClient) error {
+	return iacStateBackendRegistryInstance.register(name, client)
+}
