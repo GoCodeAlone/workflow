@@ -71,6 +71,28 @@ func TestIaCStateBackendRegistry(t *testing.T) {
 	}
 }
 
+// TestRegisterIaCStateBackend exercises the exported wrapper the engine calls at
+// plugin-load: a non-reserved name registers into the package-level singleton and
+// resolves; a reserved core name is rejected.
+func TestRegisterIaCStateBackend(t *testing.T) {
+	const backend = "azure_blob_wrapper_test"
+	fake := &fakeStateBackendClient{}
+	if err := RegisterIaCStateBackend(backend, fake); err != nil {
+		t.Fatalf("RegisterIaCStateBackend(%q): %v", backend, err)
+	}
+	defer func() {
+		iacStateBackendRegistryInstance.mu.Lock()
+		delete(iacStateBackendRegistryInstance.clients, backend)
+		iacStateBackendRegistryInstance.mu.Unlock()
+	}()
+	if got, ok := iacStateBackendRegistryInstance.resolve(backend); !ok || got != fake {
+		t.Fatalf("resolve(%q): ok=%v got=%v", backend, ok, got)
+	}
+	if err := RegisterIaCStateBackend("memory", fake); err == nil {
+		t.Fatal("RegisterIaCStateBackend(\"memory\") must fail — reserved core backend name")
+	}
+}
+
 // TestIaCModule_PluginBackendDispatch exercises the real IaCModule.Init() path:
 // a backend name no in-process switch case matches is resolved from the
 // package-level iacStateBackendRegistryInstance, yielding a *grpcIaCStateStore.

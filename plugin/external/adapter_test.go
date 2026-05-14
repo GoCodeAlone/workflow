@@ -3,6 +3,7 @@ package external
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 
@@ -10,7 +11,9 @@ import (
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -1110,5 +1113,106 @@ func TestEngineManifestValidatesAfterDiskOverlay(t *testing.T) {
 	}
 	if err := em.Validate(); err != nil {
 		t.Fatalf("EngineManifest().Validate(): %v", err)
+	}
+}
+
+// fakeIaCStateBackendServer serves a fixed ListBackendNames result for the
+// IaCStateBackendClients() adapter tests.
+type fakeIaCStateBackendServer struct {
+	pb.UnimplementedIaCStateBackendServer
+	names []string
+}
+
+func (s *fakeIaCStateBackendServer) ListBackendNames(context.Context, *pb.ListBackendNamesRequest) (*pb.ListBackendNamesResponse, error) {
+	return &pb.ListBackendNamesResponse{BackendNames: s.names}, nil
+}
+
+// newIaCStateBackendTestAdapter stands up an in-process gRPC server serving
+// IaCStateBackend with the given backend names, and returns an
+// ExternalPluginAdapter wired to it. The adapter's ContractRegistry advertises
+// the IaCStateBackend service iff advertise is true; diskManifest carries the
+// declared backend names (nil = silent manifest).
+func newIaCStateBackendTestAdapter(t *testing.T, advertise bool, served []string, diskBackends []string) *ExternalPluginAdapter {
+	t.Helper()
+	lis := bufconn.Listen(4 << 20)
+	t.Cleanup(func() { _ = lis.Close() })
+	srv := grpc.NewServer()
+	pb.RegisterIaCStateBackendServer(srv, &fakeIaCStateBackendServer{names: served})
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	registry := &pb.ContractRegistry{}
+	if advertise {
+		registry.Contracts = []*pb.ContractDescriptor{
+			{Kind: pb.ContractKind_CONTRACT_KIND_SERVICE, ServiceName: iacStateBackendServiceName, Method: "ListBackendNames"},
+		}
+	}
+	var dm *plugin.PluginManifest
+	if diskBackends != nil {
+		dm = &plugin.PluginManifest{Name: "iac-state-plugin", IaCStateBackends: diskBackends}
+	}
+	return &ExternalPluginAdapter{
+		name:             "iac-state-plugin",
+		manifest:         &pb.Manifest{Name: "iac-state-plugin"},
+		diskManifest:     dm,
+		contractRegistry: registry,
+		client:           &PluginClient{conn: conn},
+	}
+}
+
+func TestIaCStateBackendClients_AdvertisedAndManifestAgree(t *testing.T) {
+	a := newIaCStateBackendTestAdapter(t, true, []string{"azure_blob"}, []string{"azure_blob"})
+	clients, err := a.IaCStateBackendClients()
+	if err != nil {
+		t.Fatalf("IaCStateBackendClients: %v", err)
+	}
+	if len(clients) != 1 {
+		t.Fatalf("len(clients) = %d, want 1 (%v)", len(clients), clients)
+	}
+	if clients["azure_blob"] == nil {
+		t.Fatalf("clients[azure_blob] is nil; got map %v", clients)
+	}
+}
+
+func TestIaCStateBackendClients_SilentManifestAcceptsRPC(t *testing.T) {
+	// diskManifest nil → manifest is silent → RPC result accepted on its own.
+	a := newIaCStateBackendTestAdapter(t, true, []string{"azure_blob"}, nil)
+	clients, err := a.IaCStateBackendClients()
+	if err != nil {
+		t.Fatalf("IaCStateBackendClients: %v", err)
+	}
+	if len(clients) != 1 || clients["azure_blob"] == nil {
+		t.Fatalf("clients = %v, want one azure_blob entry", clients)
+	}
+}
+
+func TestIaCStateBackendClients_RPCAndManifestDisagree(t *testing.T) {
+	a := newIaCStateBackendTestAdapter(t, true, []string{"azure_blob"}, []string{"gcs"})
+	_, err := a.IaCStateBackendClients()
+	if err == nil {
+		t.Fatal("IaCStateBackendClients must error when RPC and manifest disagree")
+	}
+	if !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("error %q should mention the mismatch", err)
+	}
+}
+
+func TestIaCStateBackendClients_NoServiceAdvertised(t *testing.T) {
+	// Plugin advertises no IaCStateBackend service → (nil, nil), no RPC made.
+	a := newIaCStateBackendTestAdapter(t, false, []string{"azure_blob"}, nil)
+	clients, err := a.IaCStateBackendClients()
+	if err != nil {
+		t.Fatalf("IaCStateBackendClients: %v", err)
+	}
+	if clients != nil {
+		t.Fatalf("clients = %v, want nil when no IaCStateBackend service is advertised", clients)
 	}
 }

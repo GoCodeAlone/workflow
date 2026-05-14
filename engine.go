@@ -324,6 +324,21 @@ func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool
 			setter.SetLogger(sl)
 		}
 	}
+	// Register any iac.state backends the plugin serves into module's
+	// package-level registry, so `iac.state` configs with
+	// `backend: <name>` dispatch to the plugin-served gRPC backend.
+	// Amendment A2 (decisions/0035).
+	if sb, ok := p.(plugin.IaCStateBackendProvider); ok {
+		clients, err := sb.IaCStateBackendClients()
+		if err != nil {
+			return fmt.Errorf("load plugin %q: iac.state backends: %w", p.EngineManifest().Name, err)
+		}
+		for name, client := range clients {
+			if err := module.RegisterIaCStateBackend(name, client); err != nil {
+				return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
+			}
+		}
+	}
 	e.enginePlugins = append(e.enginePlugins, p)
 	return nil
 }
