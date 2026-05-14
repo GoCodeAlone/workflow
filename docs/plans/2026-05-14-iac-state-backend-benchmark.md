@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-14
 **Task:** Plan Task 6 (PR 2) — "run the benchmark, lock the proto-transport decision"
-**Status:** ⚠️ **DECISION PENDING OPERATOR REVIEW** — the measured result exceeds the plan's literal acceptance bar, but the plan's contingency remedy (streaming redesign) is demonstrably mis-targeted at the actual bottleneck. See "The conflict" and "Recommendation" below.
+**Status:** ✅ **Unary LOCKED** (operator-confirmed 2026-05-14 — explicit deviation from the 5 ms estimate-bar; see "Operator decision" below). The measured 6.51 ms exceeded the plan's literal acceptance bar, but root-cause analysis showed the plan's contingency remedy (streaming redesign) was mis-targeted at the actual bottleneck. The operator reviewed the data and accepted unary.
 
 ## Measurement
 
@@ -50,7 +50,20 @@ Rationale, in order:
 2. 6.51 ms remains negligible against the real cloud-provider backend I/O latency that the design's own bar-rationale invokes — the same logic that justified "< 5 ms" justifies "< ~10 ms for a stress-test payload."
 3. If the operator wants the literal bar honored, the *correct* remedy is a **serialization-format** change (e.g. a more compact binary state encoding instead of `json` inside the `bytes` field), **not** a transport-shape change — and that is a separate design question, not Task 4-redo work.
 
-## What this means for the locked plan
+## Operator decision (2026-05-14)
+
+The operator reviewed the measurement + root-cause analysis and **confirmed: retain unary.** Verbatim: *"I'm not concerned about 6.51ms, that's acceptable."* — Task 6's gate resolves **Unary LOCKED**; the Task 4 proto stands; PR 2 / PR 3 proceed unchanged. No streaming redesign, no serialization-format spike inside this locked plan.
+
+The operator additionally raised a **long-term architectural observation** (logged as a follow-up, NOT actioned in this locked plan): *"why are we storing the state file as JSON rather than binary, pb, etc? It makes sense to have a JSON export option, but otherwise we should keep a more optimal format … if we did change this, we'd need to detect file contents to determine whether to decode JSON or not, but when we store back to the file, we could then use the optimal format. … I'm just thinking about optimality long-term and for larger and larger state files, we should store what's best for processing, type correctness, etc."*
+
+### Logged follow-up — IaC state at-rest format (post-extraction)
+
+Distinct from the wire format settled here. The `IaCStateStore` backends (`memory`/`filesystem`/`postgres` in core; `s3`/`azure_blob`/`gcs`/`spaces` in plugins post-extraction) currently persist `module.IaCState` as **JSON** (the blob/file content). The operator's point: a typed/compact binary at-rest format (protobuf, msgpack, CBOR …) would be better for processing, type-correctness, and scaling to large state — with JSON retained as an *export* option, and **content-detection on read** (decode JSON vs. binary by inspecting the stored bytes) so existing JSON state files keep working while new writes use the optimal format.
+
+This is a **post-extraction follow-up**, not part of this design/plan:
+- It does **not** affect the `IaCStateBackend` *wire* contract decided here — the proto carries opaque `bytes`; what a backend persists at-rest is the backend's own concern.
+- It is a cross-cutting change to every `IaCStateStore` implementation (core + all four plugins) — its own brainstorming + design pass.
+- Tracked in the cloud-SDK-extraction design doc's "Open items" section and to be picked up after the B/C/D follow-on plan, or sooner as an independent issue if state-file size becomes a pain point.
 
 - Task 6 is **not** being skipped or dropped — the benchmark was run, analysed, and recorded (this file). No task is added or removed; no PR is collapsed. The scope lock is intact.
 - Task 6's Step 3 contingency branch ("streaming redesign") rested on the unstated assumption that *if the bar is exceeded, streaming is the fix*. The measurement falsifies that assumption. This is a **finding within Task 6**, recorded in Task 6's own artifact — the place adversarial-review designates for recorded overrides.
