@@ -24,6 +24,11 @@ const RedactionPlaceholder = "[REDACTED]"
 // safeFieldSuffix marks a field as explicitly safe and exempt from redaction.
 const safeFieldSuffix = "_display"
 
+// refFieldSuffix marks a field as a reference (a module/resource name, not a
+// secret value) — exempt from redaction even if its name contains a sensitive
+// substring (e.g. "credentials_ref" contains "credential").
+const refFieldSuffix = "_ref"
+
 // RedactStepOutput recursively scans output and replaces values of sensitive
 // fields with RedactionPlaceholder. Field names are matched case-insensitively
 // against SensitiveFieldPatterns. Fields ending with "_display" are never
@@ -66,7 +71,7 @@ func isSensitiveField(name string, patterns []string) bool {
 	}
 	// Reference keys hold module/resource NAMES, not secrets — never redact them,
 	// even though "credentials_ref" contains the "credential" substring.
-	if strings.HasSuffix(lower, "_ref") {
+	if strings.HasSuffix(lower, refFieldSuffix) {
 		return false
 	}
 	for _, p := range patterns {
