@@ -112,6 +112,16 @@ func TestGRPCKubernetesBackend_Plan(t *testing.T) {
 	})
 }
 
+// fakeCredProvider is a minimal CloudCredentialProvider for exercising the
+// credential-injection path of buildResourceSpec.
+type fakeCredProvider struct{ creds *CloudCredentials }
+
+func (f *fakeCredProvider) Provider() string { return "gcp" }
+func (f *fakeCredProvider) Region() string   { return "us-central1" }
+func (f *fakeCredProvider) GetCredentials(context.Context) (*CloudCredentials, error) {
+	return f.creds, nil
+}
+
 func TestGRPCKubernetesBackend_Apply(t *testing.T) {
 	t.Run("create success", func(t *testing.T) {
 		fake := &fakeResourceDriverClient{createResp: &pb.ResourceCreateResponse{
@@ -134,6 +144,41 @@ func TestGRPCKubernetesBackend_Apply(t *testing.T) {
 		}
 		if len(spec.GetConfigJson()) == 0 {
 			t.Fatal("Create spec config_json must carry the platform.kubernetes config")
+		}
+	})
+
+	t.Run("resolved credentials use the pinned snake_case config keys", func(t *testing.T) {
+		fake := &fakeResourceDriverClient{createResp: &pb.ResourceCreateResponse{
+			Output: &pb.ResourceOutput{Name: "my-cluster", Type: gkeResourceType, Status: "creating"},
+		}}
+		b := newGRPCKubernetesBackend(fake)
+		m := newGKETestModule()
+		m.provider = &fakeCredProvider{creds: &CloudCredentials{
+			Provider:           "gcp",
+			ProjectID:          "my-gcp-project",
+			ServiceAccountJSON: []byte(`{"type":"service_account"}`),
+		}}
+		if _, err := b.apply(m); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		cfg, err := jsonBytesToMap(fake.createReq.GetSpec().GetConfigJson())
+		if err != nil {
+			t.Fatalf("config_json decode: %v", err)
+		}
+		// The host-adapter-owned credential keys are snake_case — the contract
+		// workflow-plugin-gcp's GKEDriver (Task 22) reads.
+		if cfg[k8sConfigKeyProjectID] != "my-gcp-project" {
+			t.Errorf("config_json[%q] = %v, want my-gcp-project", k8sConfigKeyProjectID, cfg[k8sConfigKeyProjectID])
+		}
+		if cfg[k8sConfigKeyServiceAccountJSON] != `{"type":"service_account"}` {
+			t.Errorf("config_json[%q] = %v, want the service-account JSON", k8sConfigKeyServiceAccountJSON, cfg[k8sConfigKeyServiceAccountJSON])
+		}
+		// Guard against a camelCase regression — the GKEDriver reads snake_case.
+		if _, bad := cfg["projectId"]; bad {
+			t.Error("config_json must not use camelCase 'projectId' — the GKEDriver reads snake_case 'project_id'")
+		}
+		if _, bad := cfg["serviceAccountJSON"]; bad {
+			t.Error("config_json must not use camelCase 'serviceAccountJSON' — the GKEDriver reads snake_case 'service_account_json'")
 		}
 	})
 

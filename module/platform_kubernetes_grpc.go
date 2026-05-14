@@ -30,15 +30,29 @@ import (
 // Option 1 dispatches the in-core `gke` kubernetesBackend to this driver.
 const gkeResourceType = "infra.k8s_cluster"
 
-// KubernetesClusterState outputs_json key contract. ADR 0037 makes the host
-// adapter the owner of these key names; workflow-plugin-gcp's GKEDriver.Read
-// (Task 22) conforms its output to them. Keys mirror the KubernetesClusterState
-// JSON field tags so the projection is a direct re-marshal.
+// KubernetesClusterState outputs_json key contract — the READ side. ADR 0037
+// makes the host adapter the owner of these key names; workflow-plugin-gcp's
+// GKEDriver.Read (Task 22) conforms its output to them. Keys mirror the
+// KubernetesClusterState JSON field tags so the projection is a direct
+// re-marshal.
 const (
 	k8sOutputKeyStatus     = "status"
 	k8sOutputKeyEndpoint   = "endpoint"
 	k8sOutputKeyVersion    = "version"
 	k8sOutputKeyNodeGroups = "nodeGroups"
+)
+
+// ResourceSpec.config_json key contract — the WRITE side. These are the keys
+// buildResourceSpec injects into the spec config_json that workflow-plugin-gcp's
+// GKEDriver (Task 22) reads to resolve project + credentials. snake_case to
+// match the deleted in-core gkeBackend's config keys (it read
+// k.config["project_id"]) — see ADR 0037: "the host adapter define the key
+// contract and Task 22 conform." The user-supplied platform.kubernetes config
+// (e.g. `version`, `zone`, `nodeGroups`) is copied through verbatim; only these
+// resolved-credential keys are host-adapter-owned.
+const (
+	k8sConfigKeyProjectID          = "project_id"
+	k8sConfigKeyServiceAccountJSON = "service_account_json" //nolint:gosec // G101: config map key name, not a credential
 )
 
 // grpcKubernetesBackend adapts a pb.ResourceDriverClient (resource type
@@ -176,17 +190,18 @@ func (b *grpcKubernetesBackend) buildResourceRef(k *PlatformKubernetes) *pb.Reso
 	}
 }
 
-// buildResourceSpec builds the ResourceSpec for a Create RPC: the
-// platform.kubernetes module config carried through as config_json (the plugin
-// GKEDriver reads project_id/location/zone/version/nodeGroups from it), plus
-// resolved cloud credentials serialized in when a cloud account is wired.
+// buildResourceSpec builds the ResourceSpec for a Create RPC. The user-supplied
+// platform.kubernetes module config is carried through as config_json verbatim
+// (the plugin GKEDriver reads location/zone/version/nodeGroups from it — those
+// keys stay exactly as the user authored them); buildResourceSpec then folds in
+// the host-adapter-owned resolved-credential keys (k8sConfigKeyProjectID /
+// k8sConfigKeyServiceAccountJSON) when a cloud account is wired. No GKE-version
+// default is injected here — version defaulting is GKE-domain knowledge that
+// belongs in the plugin's GKEDriver, not this generic host adapter.
 func (b *grpcKubernetesBackend) buildResourceSpec(k *PlatformKubernetes) (*pb.ResourceSpec, error) {
 	cfg := make(map[string]any, len(k.config)+2)
 	for key, val := range k.config {
 		cfg[key] = val
-	}
-	if v, _ := cfg["version"].(string); v == "" {
-		cfg["version"] = "1.29"
 	}
 	if err := b.injectCredentials(k, cfg); err != nil {
 		return nil, err
@@ -203,9 +218,11 @@ func (b *grpcKubernetesBackend) buildResourceSpec(k *PlatformKubernetes) (*pb.Re
 }
 
 // injectCredentials resolves the cloud account (when one is wired) and folds the
-// GCP project ID + service-account JSON into the spec config — the cross-process
-// equivalent of the in-core containerService building the SDK client from
-// CloudCredentials.ServiceAccountJSON.
+// GCP project ID + service-account JSON into the spec config under the pinned
+// k8sConfigKey* names — the cross-process equivalent of the in-core
+// containerService building the SDK client from CloudCredentials. The key names
+// (snake_case) match the deleted in-core gkeBackend's config keys and are the
+// contract workflow-plugin-gcp's GKEDriver (Task 22) reads.
 func (b *grpcKubernetesBackend) injectCredentials(k *PlatformKubernetes, cfg map[string]any) error {
 	if k.provider == nil {
 		return nil
@@ -218,10 +235,10 @@ func (b *grpcKubernetesBackend) injectCredentials(k *PlatformKubernetes, cfg map
 		return nil
 	}
 	if creds.ProjectID != "" {
-		cfg["projectId"] = creds.ProjectID
+		cfg[k8sConfigKeyProjectID] = creds.ProjectID
 	}
 	if len(creds.ServiceAccountJSON) > 0 {
-		cfg["serviceAccountJSON"] = string(creds.ServiceAccountJSON)
+		cfg[k8sConfigKeyServiceAccountJSON] = string(creds.ServiceAccountJSON)
 	}
 	return nil
 }
