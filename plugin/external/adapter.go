@@ -618,8 +618,9 @@ func (a *ExternalPluginAdapter) ConfigTransformHooks() []plugin.ConfigTransformH
 
 // iacStateBackendServiceName is the fully-qualified gRPC service the plugin's
 // ContractRegistry must advertise for the adapter to be treated as an
-// iac.state backend provider. Mirrors pb.IaCStateBackend_ServiceDesc.ServiceName.
-const iacStateBackendServiceName = "workflow.plugin.external.iac.IaCStateBackend"
+// iac.state backend provider. Sourced from the generated proto's ServiceDesc
+// so it cannot drift if the proto package path/service name ever changes.
+var iacStateBackendServiceName = pb.IaCStateBackend_ServiceDesc.ServiceName
 
 // advertisesIaCStateBackendService reports whether the adapter's ContractRegistry
 // carries a CONTRACT_KIND_SERVICE descriptor for the IaCStateBackend service.
@@ -645,8 +646,12 @@ func (a *ExternalPluginAdapter) advertisesIaCStateBackendService() bool {
 //
 // Behaviour:
 //   - If the plugin's ContractRegistry does not advertise the IaCStateBackend
-//     service, the plugin serves no state backend — return (nil, nil). The
-//     engine type-assert still succeeds; it just registers nothing.
+//     service: when the disk manifest declares a non-empty IaCStateBackends
+//     list, that is a silent misconfiguration (the plugin claims backends but
+//     the host would register none) — return an error so plugin-load fails
+//     loudly. When the manifest is also silent, the plugin genuinely serves no
+//     state backend — return (nil, nil); the engine type-assert still succeeds
+//     and just registers nothing.
 //   - Otherwise call the live ListBackendNames RPC for the authoritative
 //     backend-name list and cross-check it against the plugin's declared
 //     PluginManifest.IaCStateBackends.
@@ -661,6 +666,11 @@ func (a *ExternalPluginAdapter) advertisesIaCStateBackendService() bool {
 // accepted on its own.
 func (a *ExternalPluginAdapter) IaCStateBackendClients() (map[string]pb.IaCStateBackendClient, error) {
 	if !a.advertisesIaCStateBackendService() {
+		if a.diskManifest != nil && len(a.diskManifest.IaCStateBackends) > 0 {
+			return nil, fmt.Errorf(
+				"plugin %s: manifest declares iac.state backends %v but the plugin does not advertise the IaCStateBackend service",
+				a.name, a.diskManifest.IaCStateBackends)
+		}
 		return nil, nil
 	}
 	conn := a.Conn()

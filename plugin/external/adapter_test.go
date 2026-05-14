@@ -1206,7 +1206,8 @@ func TestIaCStateBackendClients_RPCAndManifestDisagree(t *testing.T) {
 }
 
 func TestIaCStateBackendClients_NoServiceAdvertised(t *testing.T) {
-	// Plugin advertises no IaCStateBackend service → (nil, nil), no RPC made.
+	// Plugin advertises no IaCStateBackend service AND its manifest is silent →
+	// (nil, nil), no RPC made.
 	a := newIaCStateBackendTestAdapter(t, false, []string{"azure_blob"}, nil)
 	clients, err := a.IaCStateBackendClients()
 	if err != nil {
@@ -1214,5 +1215,18 @@ func TestIaCStateBackendClients_NoServiceAdvertised(t *testing.T) {
 	}
 	if clients != nil {
 		t.Fatalf("clients = %v, want nil when no IaCStateBackend service is advertised", clients)
+	}
+}
+
+func TestIaCStateBackendClients_ManifestDeclaresButServiceNotAdvertised(t *testing.T) {
+	// Manifest declares backends but the plugin advertises no IaCStateBackend
+	// service → silent misconfiguration → plugin-load must fail loudly.
+	a := newIaCStateBackendTestAdapter(t, false, nil, []string{"azure_blob"})
+	_, err := a.IaCStateBackendClients()
+	if err == nil {
+		t.Fatal("IaCStateBackendClients must error when the manifest declares backends but the service is not advertised")
+	}
+	if !strings.Contains(err.Error(), "does not advertise") {
+		t.Fatalf("error %q should explain the service is not advertised", err)
 	}
 }
