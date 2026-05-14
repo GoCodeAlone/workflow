@@ -115,7 +115,14 @@ func (m *IaCModule) Init(app modular.Application) error {
 		}
 		m.store = store
 	default:
-		return fmt.Errorf("iac.state %q: unsupported backend %q (use 'memory', 'filesystem', 'spaces', 'gcs', 'azure_blob', or 'postgres')", m.name, m.backend)
+		// Not a core in-process backend — consult the plugin-backend registry.
+		// The engine populates iacStateBackendRegistryInstance at plugin-load
+		// time; a resolved backend is served over gRPC via grpcIaCStateStore.
+		if client, ok := iacStateBackendRegistryInstance.resolve(m.backend); ok {
+			m.store = newGRPCIaCStateStore(client)
+			break
+		}
+		return fmt.Errorf("iac.state %q: unsupported backend %q (use 'memory', 'filesystem', 'spaces', 'gcs', 'azure_blob', or 'postgres', or load the plugin that provides it)", m.name, m.backend)
 	}
 
 	return app.RegisterService(m.name, m.store)
