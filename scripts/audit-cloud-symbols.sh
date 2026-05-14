@@ -38,7 +38,9 @@ import_block() {
 }
 
 real_import() {  # file, sdk → 0 if sdk appears in a real import (block OR single-line)
-  { import_block "$1"; grep -E '^import "' "$1" 2>/dev/null; } | grep -q "$2"
+  # `|| true` on the inner grep: a no-match exit 1 must not poison the pipe
+  # under `set -o pipefail`.
+  { import_block "$1"; grep -E '^import "' "$1" 2>/dev/null || true; } | grep -q "$2"
 }
 
 CHECK=0
