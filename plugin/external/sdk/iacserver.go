@@ -34,6 +34,7 @@ import (
 //	pb.IaCProviderMigrationRepairerServer
 //	pb.IaCProviderValidatorServer
 //	pb.IaCProviderDriftConfigDetectorServer
+//	pb.IaCStateBackendServer
 //
 // ResourceDriver:
 //
@@ -91,10 +92,11 @@ func registerAllIaCProviderServicesWithOpts(s *grpc.Server, provider any, opts I
 // registerIaCServicesOnly extracts the body of the original
 // RegisterAllIaCProviderServices (nil checks + typed-nil hardening +
 // IaCProviderRequired assertion + all optional-service auto-registration +
-// ResourceDriver auto-registration), EXCLUDING the PluginService bridge
-// registration. Kept as a separate helper so the typed-nil + nil-provider
-// hardening (R2-3) survives the extraction — moving the registration block
-// alone would have split the hardening across two call sites.
+// ResourceDriver + IaCStateBackend auto-registration), EXCLUDING the
+// PluginService bridge registration. Kept as a separate helper so the
+// typed-nil + nil-provider hardening (R2-3) survives the extraction — moving
+// the registration block alone would have split the hardening across two
+// call sites.
 func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	if s == nil {
 		return fmt.Errorf("RegisterAllIaCProviderServices: grpc server is nil")
@@ -140,6 +142,15 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	}
 	if v, ok := provider.(pb.ResourceDriverServer); ok {
 		pb.RegisterResourceDriverServer(s, v)
+	}
+	// Per decisions/0035 (Amendment A2): IaCStateBackend is an optional
+	// service auto-detected exactly like the IaCProvider* optionals — a
+	// plugin whose provider type also implements pb.IaCStateBackendServer
+	// serves it with no extra wiring. Note: a pure-storage plugin (one that
+	// does NOT satisfy IaCProviderRequired) cannot use ServeIaCPlugin today
+	// — a deferred limitation, not addressed here.
+	if v, ok := provider.(pb.IaCStateBackendServer); ok {
+		pb.RegisterIaCStateBackendServer(s, v)
 	}
 	return nil
 }
