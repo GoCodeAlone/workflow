@@ -85,13 +85,32 @@ fi
 echo
 echo "== Advisory: platform_kubernetes_kind.go backend split readiness =="
 KIND=module/platform_kubernetes_kind.go
-if [[ -f "$KIND" ]]; then
+if [[ -f module/platform_kubernetes_kind.go ]]; then
   echo "  backend types: $(grep -cE '^type .*[Bb]ackend struct' "$KIND") (expect kind/eksError/gke/aks pre-Phase-0)"
   echo "  shared init(): $(grep -c '^func init()' "$KIND") (expect 1 pre-Phase-0; 0 here post-split — each _provider.go gets its own)"
   echo "  real SDK imports here:"
   for sdk in "${SDK_TREES[@]}"; do
     real_import "$KIND" "$sdk" && echo "    REAL: $sdk"
   done
+fi
+
+echo
+echo "== Invariant: no init() mixes core-staying + plugin-bound k8s backends =="
+# Post-Phase-0, platform_kubernetes_core.go must register ONLY kind/k3s/eks/aks
+# and platform_kubernetes_gke.go must register ONLY gke. A file registering a
+# name from the other set is a partition violation.
+CORE_K8S=module/platform_kubernetes_core.go
+GKE_K8S=module/platform_kubernetes_gke.go
+if [[ -f "$CORE_K8S" && -f "$GKE_K8S" ]]; then
+  if grep -qE 'RegisterKubernetesBackend\("gke"' "$CORE_K8S"; then
+    echo "  VIOLATION: $CORE_K8S registers the plugin-bound 'gke' backend"; FAIL=1
+  fi
+  for n in kind k3s eks aks; do
+    if grep -qE "RegisterKubernetesBackend\\(\"$n\"" "$GKE_K8S"; then
+      echo "  VIOLATION: $GKE_K8S registers the core-staying '$n' backend"; FAIL=1
+    fi
+  done
+  [[ $FAIL -eq 0 ]] && echo "  OK — init() partition clean"
 fi
 
 echo
