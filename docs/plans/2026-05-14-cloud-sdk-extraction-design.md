@@ -1,7 +1,7 @@
 # Cloud-SDK Extraction: workflow core → strict-contract plugins
 
 **Date:** 2026-05-14
-**Status:** Design — revised after adversarial review cycle 2
+**Status:** Design — revised after adversarial review cycle 4
 **Owner:** autonomous pipeline (workflow#TBD)
 
 ## Problem
@@ -16,11 +16,13 @@ Workflow core's `module/` package imports three cloud SDK trees directly. File c
 
 Every dependabot bump of a cloud SDK (PRs #400/#419/#421/#635 as of this writing) churns workflow core's `go.sum`, inflates the binary, and couples core release cadence to vendor SDK release cadence. The `workflow-plugin-{aws,azure,gcp,digitalocean}` plugins already exist and already carry these SDKs for their IaC *resource provider* role — core's direct usage is redundant surface.
 
-Precedent: workflow#617 removed the legacy DigitalOcean IaC modules + `godo` from core; IaC resource provisioning moved entirely to `workflow-plugin-digitalocean`. This design extends the same principle to the *remaining* cloud functionality that never went through that extraction: IaC **state backends**, managed-service **platform** provisioners, and a handful of standalone modules/steps.
+Precedent: workflow#617 removed the legacy DigitalOcean IaC *resource* modules + `godo` from those; IaC resource provisioning moved to `workflow-plugin-digitalocean`. This design extends the same principle to the *remaining* cloud functionality that never went through that extraction: IaC **state backends**, managed-service **platform** provisioners, and a handful of standalone modules/steps.
+
+**A fourth tree — `github.com/digitalocean/godo` — is still in core but out of scope here.** `module/cloud_account_do.go` + five `module/platform_do_*.go` files (`platform_do_app.go`, `platform_do_dns.go`, `platform_do_networking.go`, `platform_doks.go`, `platform_do_database.go`) still import `godo` — workflow#617 removed the DO *IaC resource* path but these `platform.do_*` modules survived it. The user's ask scoped this work to three SDK trees (aws/azure/gcp); `godo` extraction is a structurally-identical follow-up (the `platform.do_*` modules would extract via the same `PlatformBackend` contract this design introduces) but is **not** in this design's scope. Consequence: the `go list -deps` CI gate added in the final phase asserts **zero `aws-sdk-go-v2` / `azure-sdk-for-go` / `cloud.google.com` / `google.golang.org/api` packages** — it does *not* assert "zero cloud SDKs" while `godo` remains. The design's phrasing is corrected throughout to "the three in-scope SDK trees," not "all cloud SDKs."
 
 ## Goals
 
-- workflow core `go.mod` drops `aws-sdk-go-v2/*`, `Azure/azure-sdk-for-go/*`, `cloud.google.com/go/*`, `google.golang.org/api/*` **entirely** — verified by a `go list -deps` gate in the final phase's CI.
+- workflow core `go.mod` drops `aws-sdk-go-v2/*`, `Azure/azure-sdk-for-go/*`, `cloud.google.com/go/*`, `google.golang.org/api/*` (the three in-scope trees) **entirely** — verified by a `go list -deps` gate in the final phase's CI asserting zero packages from those three trees. `godo` is out of scope (see Problem).
 - Cloud functionality remains available, loaded via strict-contract gRPC plugins (the existing sidecar model).
 - `kind` Kubernetes backend (no SDK) stays in core — local-dev/test path must not require a plugin.
 
@@ -88,12 +90,15 @@ service PlatformBackend {
   rpc Apply  (PlatformApplyRequest)   returns (PlatformApplyResponse);
   rpc Destroy(PlatformDestroyRequest) returns (PlatformDestroyResponse);
 }
-// Request carries: platform_type (kubernetes|ecs|...), provider (eks|gke|aks|...),
-//   desired-state struct, current-state struct.
+// Each request carries: platform_type (kubernetes|ecs|...), provider (eks|gke|aks|...),
+//   desired-state struct, current-state struct, AND a CloudCredentials message.
 // Response carries: plan actions / applied state / errors.
+// (remaining request/response message field layouts: deferred to writing-plans.)
 ```
 
-When `provider != kind` (or any other in-core backend), core's `platform.*` module resolves a `PlatformBackend` client from the plugin that registered `(platform_type, provider)`.
+**Credential flow across the boundary.** Every cloud `platform.*` backend today reaches credentials via `k.provider.GetCredentials()` returning a `module.CloudCredentials` struct (`module/cloud_account.go:18`) — `eksBackend`, `gkeBackend`, and `aksBackend` all bind to it; `aksBackend.azureToken` even takes `*CloudCredentials` directly. `cloud_account.go` (`CloudCredentials` / `CloudCredentialProvider` / `CloudAccount`) **stays in core** — it is the provider-agnostic credential abstraction, not cloud-SDK code. When a backend moves to a plugin, the engine resolves `k.provider.GetCredentials()` *in-core* (no SDK needed — it's config-map parsing) and serialises the resulting `CloudCredentials` into a proto `CloudCredentials` message carried on every `PlatformBackend` request. The plugin builds its cloud SDK client from that message. **This is the same shape as the §Architecture-3 `credentials:` story** — one `CloudCredentials` proto message serves both the `PlatformBackend` contract and the plugin-native module path, so the secret-redaction task (§Security) has exactly one shape to redact, not two.
+
+When `provider != kind` (and `!= k3s` — `k3s` also maps to the in-core `kindBackend`), core's `platform.*` module resolves a `PlatformBackend` client from the plugin that registered `(platform_type, provider)`.
 
 **The `PlatformBackend` shape is gated** — see Alternatives Considered #1 and self-challenge doubt #1. The first writing-plans task for Phase B is an interface-audit spike that validates one unified `Plan/Apply/Destroy` contract against all five `platform.*` backend interfaces *before* the proto is locked. If they don't unify cleanly, the fallback is folding the cloud platform provisioners into the existing `IaCProviderRequired` / `ResourceDriver` model instead of inventing `PlatformBackend`.
 
@@ -133,43 +138,35 @@ Moving the IaC state store behind a gRPC sidecar introduces a partial-failure su
 - **Plugin unreachable at plan/apply start.** Core's `iac.state` dispatch returns a clear `"iac.state backend %q: plugin unreachable"` error and the plan/apply aborts *before* mutating anything — no partial state. This matches today's behavior when a misconfigured backend fails to construct in `IaCModule.Init()`.
 - **`PlatformBackend` plugin crash mid-`Apply`.** A `platform.*` apply that crashes mid-flight leaves real cloud resources in an indeterminate state — but this is **identical to today's in-process risk** (an in-process `eksBackend.apply()` panic leaves the same indeterminate cloud state). The gRPC boundary does not worsen it; the next `Plan` reconciles against live cloud state as it does today. No new mitigation needed — documented as unchanged.
 
-## Per-file import + symbol ownership (intended post-split — verified by the Phase 0 build gate)
+## Cross-file coupling: the symbol-ownership audit is a Phase 0 deliverable, not a design-doc table
 
-`module/platform_kubernetes_kind.go` is the one file shared across phases. Verified import ownership (`grep` per SDK symbol against the single import block at lines 3-19):
+Three prior review cycles each found a hand-maintained per-file ownership table in this design *wrong* — the design doc is the wrong place for a precise symbol map, because the map is derived data that rots on every edit. **The map is therefore a Phase 0 build artifact, not a design claim.** What the design commits to is the *method* and the *known shape*:
 
-**Intended post-split layout** (asserted as the Phase 0 target — *verified* by the Phase 0 PR's `go build` gate, not by this design doc; the current file is one unsplit block, so per-file ownership cannot be a present-tense verified fact):
+**Known shape (the parts that survive any audit):**
+- `module/platform_kubernetes_kind.go` currently holds **four** backends (`kindBackend`, `eksBackend`, `gkeBackend`, `aksBackend`) plus one shared `func init()` registering five names — `kind`, `k3s`, `eks`, `gke`, `aks` (`k3s` reuses `kindBackend`). `module/platform_kubernetes.go` is a **separate, already-existing** file holding the `PlatformKubernetes` module shell + the `kubernetesBackend` interface — untouched by the split.
+- **All three cloud backends bind to `module/cloud_account.go`** via `k.provider.GetCredentials() → CloudCredentials`. `cloud_account.go` (`CloudCredentials` / `CloudCredentialProvider` / `CloudAccount`) is the provider-agnostic credential abstraction — **it stays in core**, is never deleted by any phase, and is the symbol home all cloud platform code binds to. The `PlatformBackend` contract carries `CloudCredentials` across the boundary (§Architecture-2).
+- `eksBackend` *additionally* binds to `cloud_account_aws.go` (`awsProviderFrom`, `AWSConfig`, `parseStringSlice`) — and `cloud_account_aws.go` is **deleted by Phase B**. `eksBackend` and `cloud_account_aws.go` therefore leave core in the same Phase B commit.
+- `aksBackend` imports **no cloud SDK** — raw `net/http` REST against the Azure management API (the stale file-header comment "Requires the Azure SDK" notwithstanding). Its extraction is code-organisation, not a dependency change; the Azure go.mod drop comes entirely from `iac_state_azure.go` deletion + `iac_module.go` edit.
 
-| backend | cloud SDK it will own | cross-file symbol deps (the trap) | extracted in |
-|---------|----------------------|-----------------------------------|--------------|
-| `kindBackend` | none (in-memory) | none | — stays in core |
-| `eksBackend` | `aws-sdk-go-v2/aws`, `service/eks`, `eks/types` | calls `awsProviderFrom` + `AWSConfig()` (in `cloud_account_aws.go`); `parseStringSlice` (in `cloud_account_aws.go`); `safeIntToInt32` (in `platform_kubernetes.go`) | Phase B |
-| `gkeBackend` | `google.golang.org/api/container/v1`, `google.golang.org/api/option` | `safeIntToInt32` (in `platform_kubernetes.go`) | Phase C |
-| `aksBackend` | **none** — raw `net/http` REST against the Azure management API (the file header comment "Requires the Azure SDK" is stale; verified no `azure-sdk-for-go` symbol in the `aksBackend` region) | none | Phase A |
+**The method — `scripts/audit-cloud-symbols.sh`, produced as Phase 0 task 1:** a script that, for each backend region and each plugin-bound `module/*.go` file, greps every cross-file function/type reference and emits the authoritative ownership map. Its output is committed alongside Phase 0 and re-run in CI on every subsequent phase PR. The design does not transcribe its output — the script *is* the source of truth, eliminating the recurring transcription defect. Two helper funcs are already known to need relocation (below); the script catches any the eye missed.
 
-Three consequences this corrects from earlier drafts:
-- **`aksBackend` extraction does NOT drop the Azure SDK** — `aksBackend` never imported it. The Azure go.mod drop is achieved entirely by deleting `iac_state_azure.go` + editing `iac_module.go`. Moving `aksBackend` to the plugin is still done (cloud-platform code belongs in the plugin, and `PlatformBackend` needs an Azure impl) but it is a *code-organisation* change, not a *dependency* change.
-- **`eksBackend` has a hard call-graph edge to `cloud_account_aws.go`** — they MUST be removed in the same Phase B commit.
-- **Symbol-level coupling, not just import-level.** The extracted backends call two pure helper funcs that live in core files: `parseStringSlice` (in `cloud_account_aws.go`, which Phase B *deletes*) and `safeIntToInt32` (in `platform_kubernetes.go`, which *stays* in core). An import-block audit misses these — a file can be "import-clean" and still fail to compile standalone. Phase 0 must relocate them (below).
+## Phase 0 — precursor: split `platform_kubernetes_kind.go`, partition `init()`, relocate shared helpers
 
-## Phase 0 — precursor: split `platform_kubernetes_kind.go` + relocate shared helpers
+A mechanical, behavior-equivalent refactor landed **before** Phase A. Three moves:
 
-A pure mechanical refactor, no behavior change, landed **before** Phase A. Two moves:
+**1. Split the one shared backend file into four.** `platform_kubernetes_kind.go` (currently all four backends) → `platform_kubernetes_kind.go` (`kindBackend` only), `platform_kubernetes_eks.go`, `platform_kubernetes_gke.go`, `platform_kubernetes_aks.go`. Each new file owns its own import block.
 
-**1. Split the one shared backend file into four** (note: `platform_kubernetes.go` is a *separate, already-existing* file holding the `PlatformKubernetes` module shell + the `kubernetesBackend` interface + `safeIntToInt32` — it is **not** touched by the split; only `platform_kubernetes_kind.go`, which currently holds all four backends, is split):
-- `platform_kubernetes_kind.go` — `kindBackend` only. No cloud SDK, no cross-file helper deps.
-- `platform_kubernetes_eks.go` — `eksBackend` only; owns the `aws-sdk-go-v2` imports.
-- `platform_kubernetes_gke.go` — `gkeBackend` only; owns the `google.golang.org/api` imports.
-- `platform_kubernetes_aks.go` — `aksBackend` only; owns `net/http` (no cloud SDK).
+**2. Partition the shared `func init()` per-file.** The one `init()` registering `kind`/`k3s`/`eks`/`gke`/`aks` **cannot** be split untouched — each new file gets its own `init()` registering only its backend(s) (`kind` *and* `k3s` both register from `platform_kubernetes_kind.go`, since `k3s` reuses `kindBackend`). This is a *distribution* of the registration, not a behavior change — the same five names are registered after the split — but it is **not** "zero logic change," and the design says so plainly. The payoff: when Phase A deletes `platform_kubernetes_aks.go`, the `aks` registration goes with it; no dangling `RegisterKubernetesBackend("aks", …)` is left behind for the build gate to catch as a late surprise.
 
-**2. Relocate the two shared pure helpers into a new SDK-free core file** `module/cloud_helpers.go`:
-- `parseStringSlice` moves out of `cloud_account_aws.go` (which Phase B deletes) — otherwise its plugin-bound consumers (`platform_ecs.go`, `platform_kubernetes_eks.go`) lose it.
-- `safeIntToInt32` moves out of `platform_kubernetes.go` — it is used by `platform_autoscaling.go`, `platform_ecs.go`, `platform_networking.go`, `platform_kubernetes_eks.go`, `platform_kubernetes_gke.go` (all plugin-bound) *and* by `platform_kubernetes.go` itself (core-resident). A neutral home means both sides keep working.
+**3. Relocate the two shared pure helpers into a new SDK-free core file** `module/cloud_helpers.go`:
+- `parseStringSlice` moves out of `cloud_account_aws.go` (Phase B deletes that file) — its plugin-bound consumers (`platform_ecs.go`, `platform_kubernetes_eks.go`) would otherwise lose it.
+- `safeIntToInt32` moves out of `platform_kubernetes.go` — used by `platform_autoscaling.go`, `platform_ecs.go`, `platform_networking.go`, `platform_kubernetes_eks.go` (all plugin-bound) *and* by core-resident `platform_kubernetes.go`. A neutral home keeps both sides compiling.
 
-Both helpers are tiny pure functions (no SDK, no state). `cloud_helpers.go` stays in core permanently. When a plugin-bound file moves to its plugin in Phases A–D, that plugin gets its own copy of whichever helpers it uses (≤15 lines each — duplication of a pure stdlib-only helper across process boundaries is correct, not a smell; a shared plugin-side util module is the Alternatives-Considered-#3 follow-up).
+Both helpers are tiny pure functions (no SDK, no state). `cloud_helpers.go` stays in core permanently. When a plugin-bound file moves to its plugin, that plugin gets its own copy of whichever helpers it uses (≤15 lines each — duplicating a pure stdlib-only helper across a process boundary is correct, not a smell; the shared plugin-side util module is the Alternatives-Considered-#3 follow-up).
 
-After Phase 0, each subsequent phase deletes *its own backend file* — self-contained at both the import-block AND symbol level. **Phase 0 acceptance criteria:** `go build ./... && go vet ./... && go test ./module/...` green; `git diff` shows pure code movement (zero logic change); a grep confirms no remaining core file references `parseStringSlice`/`safeIntToInt32` from their old homes. This is the single cheapest de-risking move in the plan — it converts the fragile "extract-from-shared-file-in-place" path into trivially-reviewable deletions.
+**Phase 0 acceptance criteria:** `go build ./... && go vet ./... && go test ./module/...` green; `scripts/audit-cloud-symbols.sh` committed and its output shows zero cross-file symbol dep from any plugin-bound file into a to-be-deleted file *except* the known `eksBackend → cloud_account_aws.go` edge (which Phase B handles atomically); `git diff` is pure code movement + the mechanical `init()` partition, no logic edits. After Phase 0, each subsequent phase deletes *its own* backend file — self-contained at import-block AND symbol level.
 
-**Phase 0 rollback:** a pure file-split + helper-relocation with zero behavior diff — revert is a single `git revert` with no contract, no go.mod, and no runtime impact. It is the one phase with a trivial rollback story.
+**Phase 0 rollback:** a file-split + `init()` partition + helper-relocation with no behavior diff — revert is a single `git revert`, no contract, no go.mod, no runtime impact. The one phase with a trivial rollback story.
 
 ## Phases
 
@@ -242,8 +239,8 @@ This design changes **plugin loading paths** and **go.mod dependency trees** —
 ## Alternatives Considered
 
 1. **Fold cloud platform provisioners into the existing `IaCProviderRequired` / `ResourceDriver` contracts instead of inventing `PlatformBackend`.** An EKS/GKE/AKS cluster — and arguably an ECS service, a Route53 zone, an EC2 VPC — is structurally a managed resource with create/plan/apply/destroy/status, which is exactly what the battle-tested `ResourceDriver` contract already models (8 services in `iac.proto`, multiple ADRs through the strict-contracts cutover). Inventing `PlatformBackend` risks the lowest-common-denominator problem (self-challenge doubt #1). **Rejected as the default** because the `platform.*` modules have a distinct plan/apply *lifecycle surface* (they sync against live cloud state continuously, not just declaratively reconcile) and a distinct `provider:` UX the user explicitly asked to preserve — but **retained as the gated fallback**: the Phase 0/A interface-audit spike decides. If the five `platform.*` backend interfaces don't unify behind one `Plan/Apply/Destroy`, the implementation folds them into `ResourceDriver` rather than shipping a bad `PlatformBackend`.
-2. **Leave `iac_state_spaces.go` in core, accept one `aws-sdk-go-v2/service/s3` dependency.** Downgrades the Goal from "core drops `aws-sdk-go-v2/*` entirely" to "drops the AWS *service-provider* tree, keeps one S3 client." The S3 client is small and stable; DO Spaces + AWS S3 are the same API; keeping one shared S3-compatible store in core avoids forcing *both* the AWS and DO plugins to each carry an S3 client and avoids a clean-break for existing `spaces` users. **Rejected** because it leaves dependabot churning one AWS package indefinitely and weakens the "core has zero cloud SDKs" invariant the `go list -deps` gate is meant to enforce — a partial extraction is a maintenance trap. The cost (both aws + DO plugins carry an S3 client) is real but bounded: it's one service package, and each plugin is independently versioned anyway.
-3. **A shared `s3compat` Go module consumed by both the aws and DO plugins** (instead of each independently re-implementing the S3-compatible state store + `buildAWSConfig`). Keeps "core has zero cloud SDKs" intact while eliminating the cross-plugin duplication Alternative #2 dismisses as "bounded." **Deferred, not rejected:** it is a *plugin-side* optimisation that doesn't affect the core contract or any phase boundary, so it can land as a follow-up after the extraction is proven. Forcing it into the critical path now couples the aws and DO plugin release cadences; the duplication is a small, well-understood `buildAWSConfig` + thin S3 wrapper. Writing-plans logs it as a post-extraction cleanup candidate.
+2. **Leave `iac_state_spaces.go` in core, accept one `aws-sdk-go-v2/service/s3` dependency.** Downgrades the Goal from "core drops `aws-sdk-go-v2/*` entirely" to "drops the AWS *service-provider* tree, keeps one S3 client." The S3 client is small and stable; DO Spaces + AWS S3 are the same API; keeping one shared S3-compatible store in core avoids forcing *both* the AWS and DO plugins to each carry an S3 client and avoids a clean-break for existing `spaces` users. **Rejected** because it leaves dependabot churning one AWS package indefinitely and weakens the "core drops the three in-scope SDK trees" invariant the `go list -deps` gate enforces — a partial extraction is a maintenance trap. The cost (both aws + DO plugins carry an S3 client) is real but bounded: it's one service package, and each plugin is independently versioned anyway.
+3. **A shared `s3compat` Go module consumed by both the aws and DO plugins** (instead of each independently re-implementing the S3-compatible state store + `buildAWSConfig`). Keeps the three-in-scope-trees invariant intact while eliminating the cross-plugin duplication Alternative #2 dismisses as "bounded." **Deferred, not rejected:** it is a *plugin-side* optimisation that doesn't affect the core contract or any phase boundary, so it can land as a follow-up after the extraction is proven. Forcing it into the critical path now couples the aws and DO plugin release cadences; the duplication is a small, well-understood `buildAWSConfig` + thin S3 wrapper. Writing-plans logs it as a post-extraction cleanup candidate.
 4. **In-process Go-module plugin loading (build-tag imports) instead of gRPC sidecars.** Rejected in brainstorm by explicit user decision — strict gRPC sidecar model only.
 
 ## Self-challenge — top doubts surfaced (carried forward, with mitigations now wired into phases)
