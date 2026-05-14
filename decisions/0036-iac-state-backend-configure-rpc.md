@@ -23,6 +23,7 @@ Alternatives rejected:
 - **Config in every State request** — bloats every `GetState`/`SaveState` call with static config; the benchmark (decisions in `2026-05-14-iac-state-backend-benchmark.md`) already showed per-call payload size is the cost driver. Rejected.
 - **A separate `IaCStateBackendConfig` service** — a second service for one RPC; `Configure` belongs on the same service the config configures. Rejected.
 - **Keep deferring it ("follow-up PR")** — Phase A's choice. Rejected: B/C/D's `spaces` clean-break converts the deferral into a user-visible regression; `decisions/0035` already established that assumed-seam gaps get fixed in-plan, not filed.
+- **Soft-fail `Configure` on un-retrofitted plugins** — the host could treat `codes.Unimplemented` from `Configure` as a warn-and-continue rather than an `Init()` failure, eliminating the PR-1→PR-2 gap window. Rejected: a loud startup failure catches a broken plugin/engine version pairing immediately; soft-fail hides a misconfiguration that would otherwise surface as a confusing `FailedPrecondition` at the first state RPC. The co-deploy requirement is documented in the migration doc instead.
 
 ## Consequences
 

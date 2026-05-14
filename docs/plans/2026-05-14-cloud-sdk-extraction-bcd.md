@@ -119,7 +119,7 @@ And the messages (next to the other `IaCStateBackend` messages):
 message ConfigureRequest  { string backend_name = 1; bytes config_json = 2; }
 message ConfigureResponse {}
 ```
-Regenerate the protobuf Go (the repo's existing codegen command — check `Makefile` / `buf.gen.yaml` / a `//go:generate` directive in `plugin/external/proto/`). Add `grpcIaCStateStore.Configure(ctx, backendName string, cfg map[string]any) error` — `json.Marshal(cfg)` → `client.Configure(ctx, &pb.ConfigureRequest{...})`. If `iacStateBackendServer` (the host-side server delegate) needs a non-Unimplemented `Configure`, make it a no-op returning `&pb.ConfigureResponse{}` (the core-served path has its store already constructed). Fix every in-repo fake/stub so it satisfies the regenerated `pb.IaCStateBackendClient`/`Server` interface.
+Regenerate the protobuf Go (the repo's existing codegen command — check `Makefile` / `buf.gen.yaml` / a `//go:generate` directive in `plugin/external/proto/`). Add `grpcIaCStateStore.Configure(ctx, backendName string, cfg map[string]any) error` — `json.Marshal(cfg)` → `client.Configure(ctx, &pb.ConfigureRequest{...})`. If `iacStateBackendServer` (the host-side server delegate) needs a non-Unimplemented `Configure`, make it a no-op returning `&pb.ConfigureResponse{}` (the core-served path has its store already constructed). Fix every in-repo fake/stub so it satisfies the regenerated `pb.IaCStateBackendClient`/`Server` interface — the manually-implemented `fakeStateBackendClient` (in `module/iac_state_plugin_registry_test.go`) needs a `Configure` method; fakes embedding `pb.Unimplemented*` get it for free. Add one line to the proto compile-guard test (`plugin/external/proto/iac_statebackend_test.go` if present): `_ = &ConfigureRequest{BackendName: "x", ConfigJson: []byte("{}")}; _ = ConfigureResponse{}` to lock the new message shape.
 
 **Step 4: Run tests to verify they pass**
 
@@ -223,7 +223,7 @@ git commit -m "feat: Configure RPC handler — construct azure_blob store from h
 
 **Change class:** Version pin update. **Rollback: additive patch release; on a defect cut another patch — do not delete the tag.**
 
-**Step 1:** Bump `plugin.json` `version` → `1.1.1`; CHANGELOG entry: "implement `IaCStateBackend.Configure` — `azure_blob` backend now constructs its store from host-supplied config (closes the Phase-A config-plumbing gap)."
+**Step 1:** Bump `plugin.json` `version` → `1.1.1`; CHANGELOG entry: "implement `IaCStateBackend.Configure` — `azure_blob` backend now constructs its store from host-supplied config (closes the Phase-A config-plumbing gap). **Must be co-deployed with `workflow` core that includes PR 1** — a post-PR-1 engine calls `IaCStateBackend.Configure` during `IaCModule.Init()`; `v1.1.0` returns `Unimplemented` and causes a loud startup failure (better than the prior silent `FailedPrecondition`, but a co-deploy requirement)."
 
 **Step 2:** Commit on the PR 2 branch:
 ```bash
@@ -399,7 +399,7 @@ git commit -m "feat: plugin-native step.s3_upload + capability parity assertion"
 
 **Change class:** Version pin update. **Rollback: additive plugin release; on a defect cut a patch — do not delete the tag.**
 
-**Step 1:** Bump `plugin.json` `version` (minor). CHANGELOG entry naming the new backend + module/step types + the inline-`credentials:` shape.
+**Step 1:** Bump `plugin.json` `version` `v1.0.0` → `v1.1.0` (minor). CHANGELOG entry naming the new backend + module/step types + the inline-`credentials:` shape.
 
 **Step 2:** Commit on the PR 4 branch:
 ```bash
@@ -564,7 +564,7 @@ git commit -m "refactor: delete dead cloud_account_aws.go (zero consumers, remov
 	return nil
 }
 ```
-(delete the `sessionName` extraction and the entire SDK block.) Add a small `logCredentialSourceMarker(provider, source string)` helper (use the package's existing logger pattern, or a stdlib `log` call if there is none — keep it minimal). Update the import block to `"fmt"` + `"os"` + whatever the logger needs (drop `context`, `aws`, `config`, `credentials`, `sts`).
+(delete the `sessionName` extraction and the entire SDK block.) Add a small `logCredentialSourceMarker(provider, source string)` helper. The resolver call-site is a pure resolver with no module-scoped logger, so a stdlib `log.Printf` is the intentional pragmatic choice here — add a `// TODO: plumb a structured logger when the resolver gains module context` comment so it isn't mistaken for an oversight. Update the import block to `"fmt"` + `"log"` + `"os"` (drop `context`, `aws`, `config`, `credentials`, `sts`).
 
 **Step 4: Run tests to verify they pass** — `GOWORK=off go build ./... && GOWORK=off go test ./module/ -run 'AwsProfile|AwsRoleARN|CredentialResolver' -v` → PASS.
 
@@ -650,6 +650,7 @@ git commit -m "refactor: delete in-core storage.s3 + step.s3_upload — now plug
 - `iac.state backend: s3` → load `workflow-plugin-aws >= <release>`. (`s3` was never a first-class in-core backend; this is *new* first-class plugin support.)
 - `storage.s3` / `step.s3_upload` → load `workflow-plugin-aws`; `credentials:` moves inline (or `credentials_ref:` an `aws.credentials` module).
 - **`provider: aws` with `credentialType: profile` or `role_arn`** — credential resolution is now performed in-plugin. **Core and `workflow-plugin-aws` must be upgraded together**: a new core against a pre-extraction aws plugin will emit a `credential_source` marker the old plugin ignores, producing empty credentials (core logs a warning). State this prominently.
+- **`azure_blob` backend** — upgrade `workflow-plugin-azure` to `v1.1.1` simultaneously with any `workflow` core upgrade that includes PR 1 (the `Configure` RPC). A post-PR-1 engine calls `IaCStateBackend.Configure` during `IaCModule.Init()`; `workflow-plugin-azure v1.1.0` returns `Unimplemented` → loud startup failure. (`v1.1.1` closes a real Phase-A gap — `azure_blob` was non-functional end-to-end before it.)
 - yaml `backend:`/`provider:`/step-type names unchanged.
 
 **Step 5: Commit**
