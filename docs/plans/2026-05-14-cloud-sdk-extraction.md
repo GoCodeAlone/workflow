@@ -16,11 +16,15 @@
 
 ## Scope Manifest
 
-**PR Count:** 6
-**Tasks:** 15
-**Estimated Lines of Change:** ~1950 (informational; not enforced)
+**PR Count:** 8
+**Tasks:** 19
+**Estimated Lines of Change:** ~2300 (informational; not enforced)
 
-**Amendment (2026-05-14):** PR 6 / Task 15 added by operator-approved scope amendment — `ctx context.Context` on `module.IaCStateStore` — see `decisions/0033-add-ctx-to-module-iac-state-store.md`. PR 4 de-gated from "HUMAN-GATE" to autonomous cross-repo per `decisions/0034-cross-repo-agent-operation-for-plugin-prs.md`. Original lock: 5 PRs / 14 tasks; manifest re-aligned + re-locked after amendment.
+**Amendment history:**
+- **A1 (2026-05-14):** PR 6 / Task 15 added — `ctx context.Context` on `module.IaCStateStore` — `decisions/0033`. PR 4 de-gated to autonomous cross-repo — `decisions/0034`. (Original lock: 5 PRs / 14 tasks.)
+- **A2 (2026-05-14):** Post-merge of PRs 1/2/3/6, an integration-surface investigation found the plugin-serve and host-resolve seams the design assumed did not exist in `plugin/external/sdk` / `engine.go`. Added **PR 7** (SDK serve hook + `ListBackendNames` RPC + manifest field — Tasks 16/17/18) and **PR 8** (engine host-wiring — Task 19); Task 14 trimmed to migration-doc-only (its engine-wiring moved to Task 19). PR 4 depends on PR 7; PR 5 depends on PR 4 + PR 8. See `decisions/0035-iac-state-backend-plugin-integration-surface.md`. (Pre-A2: 6 PRs / 15 tasks.)
+
+**Merge status (as of A2):** PRs 1, 2, 3, 6 are **MERGED** to `workflow` main (#668/#669/#670/#671). PRs 4, 5, 7, 8 remain.
 
 **Out of scope:**
 - **Phases B (AWS), C (GCP), D (DigitalOcean)** — deferred to a follow-on plan authored *after* Phase A merges. Their concrete tasks genuinely depend on Phase A's outputs: the benchmark-validated `IaCStateBackend` proto shape, the host-side gRPC-client resolution pattern, and the plugin-side state-backend serve path. Planning them now would be fiction. The design (`docs/plans/2026-05-14-cloud-sdk-extraction-design.md`) is the authoritative spec for B/C/D; this plan delivers Phase 0 + Phase A, which the design explicitly designates as the "validates the contract end-to-end" increment.
@@ -34,18 +38,20 @@
 
 | PR # | Title | Tasks | Branch |
 |------|-------|-------|--------|
-| 1 | Phase 0: split platform_kubernetes_kind.go + wire audit script into CI | Task 1, Task 2, Task 3 | feat/cloud-sdk-extraction-p0 |
-| 2 | Phase A: IaCStateBackend proto + benchmark harness + proto lock | Task 4, Task 5, Task 6 | feat/cloud-sdk-extraction-pa-proto |
-| 3 | Phase A: host-side IaCStateBackend resolution + secret-redaction + gRPC-logging guard | Task 7, Task 8, Task 9, Task 10 | feat/cloud-sdk-extraction-pa-host |
+| 1 | Phase 0: split platform_kubernetes_kind.go + wire audit script into CI | Task 1, Task 2, Task 3 | feat/cloud-sdk-extraction-p0 *(MERGED #668)* |
+| 2 | Phase A: IaCStateBackend proto + benchmark harness + proto lock | Task 4, Task 5, Task 6 | feat/cloud-sdk-extraction-pa-proto *(MERGED #669)* |
+| 3 | Phase A: host-side IaCStateBackend resolution + secret-redaction + gRPC-logging guard | Task 7, Task 8, Task 9, Task 10 | feat/cloud-sdk-extraction-pa-host *(MERGED #670)* |
 | 4 | Phase A: workflow-plugin-azure implements azure_blob IaCStateBackend (cross-repo) | Task 11, Task 12 | cross-repo: `workflow-plugin-azure` repo, branch `feat/azure-blob-state-backend` |
-| 5 | Phase A: core deletes iac_state_azure.go + strips azure_blob case → drops azure-sdk from go.mod | Task 13, Task 14 | feat/cloud-sdk-extraction-pa-core |
-| 6 | Amendment: add `ctx context.Context` to `module.IaCStateStore` | Task 15 | feat/cloud-sdk-extraction-iacstore-ctx |
+| 5 | Phase A: core deletes iac_state_azure.go + strips azure_blob case → drops azure-sdk from go.mod | Task 13, Task 14 | feat/cloud-sdk-extraction-p5-core |
+| 6 | Amendment A1: add `ctx context.Context` to `module.IaCStateStore` | Task 15 | feat/cloud-sdk-extraction-iacstore-ctx *(MERGED #671)* |
+| 7 | Amendment A2: SDK serve hook + `ListBackendNames` RPC + `iacStateBackends` manifest field | Task 16, Task 17, Task 18 | feat/cloud-sdk-extraction-p7-serve |
+| 8 | Amendment A2: engine host-wiring for `iac.state` plugin backends | Task 19 | feat/cloud-sdk-extraction-p8-hostwire |
 
-**Execution order:** PR 1 → PR 2 → PR 3 (Tasks 7–8) → **PR 6** → PR 3 (Tasks 9–10) → PR 4 → PR 5. PR 6 (the `ctx` amendment) executes right after PR 3's Task 7/8 land — it amends `grpcIaCStateStore` (Task 7's file) and `IaCModule` dispatch (Task 8's wiring) in place, so it must run before PR 3 is finalized. All work lands on the single `feat/cloud-sdk-extraction` branch; `finishing-a-development-branch` splits it into the 6 PR branches per this table (PR 6 stacks on PR 3).
+**Execution order (remaining work, post-A2):** **PR 7** → **PR 4** (cross-repo, depends on PR 7) → **PR 8** (workflow, may run in parallel with PR 4) → **PR 5** (depends on PR 4's plugin tag + PR 8). PRs 1/2/3/6 are already merged to `workflow` main. PR 7 + PR 8 each branch off current `origin/main`; PR 4 is cross-repo; PR 5 branches off `origin/main` after PR 8 merges. No stacking among the remaining PRs — each branches off `main` directly (the earlier stack is merged).
 
-**PR 4 is autonomous cross-repo work** (de-gated 2026-05-14, `decisions/0034-...md`). It lands in a *different git repository* — `/Users/jon/workspace/workflow-plugin-azure`. A dispatched agent operates in that repo directly; **every cross-repo agent dispatch MUST state, explicitly in its prompt, the absolute path of the repo it works in and that it is a *different* repo than the worktree** (see "Notes for the executor"). Push + PR-creation follow normal review discipline (feature branch, PR — never direct-to-default-branch). PR 5 is **blocked on PR 4's plugin release tag** existing and being installable (Task 13 Step 8 + Task 14 Step 4 runtime-launch validation load the tagged plugin binary); the release tag (Task 12) is an explicit, deliberate step but not a human gate.
+**PR 4 is autonomous cross-repo work** (de-gated, `decisions/0034`). It lands in a *different git repository* — `/Users/jon/workspace/workflow-plugin-azure`. A dispatched agent operates in that repo directly; **every cross-repo agent dispatch MUST state, explicitly in its prompt, the absolute path of the repo it works in and that it is a *different* repo than the worktree** (see "Notes for the executor"). Push + PR-creation follow normal review discipline (feature branch, PR — never direct-to-default-branch). PR 4 depends on **PR 7** being merged + a `workflow` version (a `main` pseudo-version or release) carrying the `ListBackendNames` RPC + the SDK serve hook. PR 5 is **blocked on PR 4's plugin release tag** existing and being installable; the release tag (Task 12) is an explicit, deliberate step but not a human gate.
 
-**Status:** Locked 2026-05-14T10:37:04Z
+**Status:** Draft (unlock for amendment — ADR 0035)
 
 ---
 
@@ -977,54 +983,58 @@ Rollback: `git revert` — test-only.
 
 ## PR 4 — Phase A: `workflow-plugin-azure` implements `azure_blob` `IaCStateBackend` (cross-repo)
 
-**Repository:** `/Users/jon/workspace/workflow-plugin-azure` — a **different git repository** than the `workflow` worktree the rest of this plan runs in. Branch: `feat/azure-blob-state-backend`. Autonomous cross-repo work, not a human gate (`decisions/0034-...md`). **The agent dispatched for Tasks 11–12 MUST be told, explicitly and up front, that it operates in `/Users/jon/workspace/workflow-plugin-azure` — a different repo — and every file path in Tasks 11–12 is relative to that repo, not the worktree.** This PR depends on PR 2 (published proto) + PR 6 (ctx-ful `module.IaCStateStore`, so the plugin's `IaCStateBackendServer` is written ctx-ful); it is a prerequisite for PR 5.
+**Repository:** `/Users/jon/workspace/workflow-plugin-azure` — a **different git repository** than the `workflow` worktree the rest of this plan runs in. Branch: `feat/azure-blob-state-backend`. Autonomous cross-repo work, not a human gate (`decisions/0034`). **The agent dispatched for Tasks 11–12 MUST be told, explicitly and up front, that it operates in `/Users/jon/workspace/workflow-plugin-azure` — a different repo — and every file path in Tasks 11–12 is relative to that repo, not the worktree.**
+
+**Depends on PR 7** (Amendment A2, `decisions/0035`): the plugin needs a `workflow` version that carries (a) the SDK serve hook so `ServeIaCPlugin` auto-registers `pb.IaCStateBackendServer`, (b) the `ListBackendNames` RPC on the `IaCStateBackend` service, and (c) the `plugin.PluginManifest.iacStateBackends` field. PRs 2 (proto) and 6 (ctx) are already on `workflow` main; PR 7 must be merged and a `workflow` `main`-pseudo-version (or release) available before this PR can `go get` it. Prerequisite for PR 5.
 
 ### Task 11: Port `AzureBlobIaCStateStore` into workflow-plugin-azure + serve it as `IaCStateBackend`
 
 **Files (in `/Users/jon/workspace/workflow-plugin-azure`):**
-- Create: `internal/statebackend/azure_blob.go` (the ported store — copy from workflow's `module/iac_state_azure.go`)
-- Create: `internal/statebackend/server.go` (the `IaCStateBackendServer` gRPC impl delegating to the store)
-- Modify: the plugin's main entrypoint + `plugin.json` to advertise the `azure_blob` `IaCStateBackend`
-- Test: `internal/statebackend/azure_blob_test.go` (port the existing tests from workflow's `module/iac_state_azure_test.go` if present; otherwise test against the `AzureBlobClient` interface with a fake)
+- Modify: `go.mod` / `go.sum` (bump the `github.com/GoCodeAlone/workflow` pin to a version carrying PR 7)
+- Create: `internal/statebackend/azure_blob.go` (the ported store — copy from `workflow` `origin/main`'s `module/iac_state_azure.go`)
+- Modify: `internal/iacserver.go` (`azureIaCServer` gains the 6 `IaCStateBackendServer` RPCs + `ListBackendNames`, delegating to an `*AzureBlobIaCStateStore`) — possibly a new `internal/statebackend_server.go` for the delegation methods + local JSON converters if `iacserver.go` gets crowded
+- Modify: `plugin.json` (`capabilities.iacStateBackends: ["azure_blob"]`)
+- Test: `internal/statebackend/azure_blob_test.go` (port from `workflow` `origin/main`'s `module/iac_state_azure_test.go` if present; otherwise test against the `AzureBlobClient` interface with a fake) + a test that `azureIaCServer` satisfies `pb.IaCStateBackendServer`
 
 **Step 1: Inspect the current plugin structure**
 
 Run: `ls -R /Users/jon/workspace/workflow-plugin-azure/{cmd,internal,provider,drivers} 2>/dev/null; cat /Users/jon/workspace/workflow-plugin-azure/plugin.json`
 Expected: understand where `sdk.ServeIaCPlugin` is called and how `plugin.json` declares capabilities.
 
-**Step 2: Port the store**
+**Step 2: Bump the `workflow` dependency + port the store**
 
-Copy `module/iac_state_azure.go` from the workflow worktree into `internal/statebackend/azure_blob.go` in the plugin repo. It already carries its own `AzureBlobClient` interface + `azureRealClient` (azblob-backed) impl — it is self-contained. Adjust the package name. The plugin repo *gains* the `Azure/azure-sdk-for-go/sdk/storage/azblob` dependency (it likely already has it for its IaC resource-provider role — confirm with `grep azblob go.mod`).
+In the plugin's `go.mod`, bump `github.com/GoCodeAlone/workflow` to a version that carries PR 7 (`go get github.com/GoCodeAlone/workflow@main` for the `main`-pseudo-version, or the PR-7 merge SHA — confirm it resolves `pb.IaCStateBackend_ListBackendNames` + the SDK serve hook + `plugin.PluginManifest.IaCStateBackends`). Then copy `module/iac_state_azure.go` from `workflow` `origin/main` into `internal/statebackend/azure_blob.go` in the plugin repo — it carries its own `AzureBlobClient` interface + `azureRealClient` (azblob-backed) impl, self-contained; its methods are already ctx-ful (PR 6/#671 widened them). Adjust the package name. The plugin already depends on `Azure/azure-sdk-for-go/sdk/storage/azblob` (confirmed — `go.mod` lists `azblob v1.6.4`) — no new dependency.
 
 **Step 3: Port the tests, run them**
 
-Copy `module/iac_state_azure_test.go` (if it exists in the worktree) into `internal/statebackend/azure_blob_test.go`. Run: `go test ./internal/statebackend/ -v`
+Copy `module/iac_state_azure_test.go` from `workflow` `origin/main` into `internal/statebackend/azure_blob_test.go`. Run: `go test ./internal/statebackend/ -v`
 Expected: PASS — the store's logic is unchanged, only its home moved.
 
-**Step 4: Write the `IaCStateBackendServer` impl**
+**Step 4: Implement `pb.IaCStateBackendServer` on `azureIaCServer`**
 
-Create `internal/statebackend/server.go` implementing `proto.IaCStateBackendServer` (from `github.com/GoCodeAlone/workflow/plugin/external/proto`) by delegating each RPC to an `AzureBlobIaCStateStore`. Use **JSON `Marshal`/`Unmarshal`** for the `Outputs`/`Config` ⇄ `OutputsJson`/`ConfigJson` `[]byte` fields — mirror the workflow-core converters from Task 7 (`iacStateToProto`/`iacStateFromProto`) exactly; the plugin imports the same `proto` package so the wire types are identical. **No `structpb`** — the `iac.proto:6-10` hard invariant forbids it.
+Per `decisions/0035` (operator decision: one type carries both concerns), make the plugin's existing `azureIaCServer` (`internal/iacserver.go` — already implements `pb.IaCProviderRequiredServer` etc.) **also** implement `pb.IaCStateBackendServer`: embed `pb.UnimplementedIaCStateBackendServer`, add the 6 RPC methods delegating to an `*AzureBlobIaCStateStore` field, plus the `ListBackendNames` RPC returning `["azure_blob"]`. Use **JSON `Marshal`/`Unmarshal`** for the `Outputs`/`Config` ⇄ `OutputsJson`/`ConfigJson` `[]byte` fields — re-implement the trivial converters locally (the workflow-core `iacStateToProto`/`iacStateFromProto` are unexported in `package module`; ~40 LOC of plain JSON, do not try to import them). **No `structpb`** — `iac.proto`'s hard invariant forbids it.
 
-**Step 5: Wire it into the plugin's serve path + manifest**
+**Step 5: Advertise the backend name; serve registration is automatic**
 
-Register the `IaCStateBackend` service on the plugin's gRPC server alongside its existing `IaCProviderRequired` service, and add `azure_blob` to the plugin's advertised state-backend capabilities in `plugin.json` (mirror how the existing `iacProvider` capability is declared — the engine's registry-population step in workflow Task 14 reads this).
+The SDK serve hook from PR 7 makes `ServeIaCPlugin` auto-register `pb.IaCStateBackendServer` via type-assertion — since `azureIaCServer` now satisfies it (Step 4), **no manual registration is needed**; `cmd/workflow-plugin-azure/main.go` is unchanged. Add `"capabilities": { "iacStateBackends": ["azure_blob"] }` to `plugin.json` (the manifest field PR 7 added to `plugin.PluginManifest`) — the engine's host-wiring (PR 8 / Task 19) reads this to know the plugin serves the `azure_blob` backend name.
 
 **Step 6: Build + load-test the plugin**
 
 Run: `go build ./... && go test ./...` in the plugin repo.
 Expected: exit 0, PASS.
-Then load-test: build the plugin binary, point a minimal workflow config with `iac.state` `backend: azure_blob` at it (using the workflow worktree's `server` binary built from PR 3's branch), and confirm the engine resolves the plugin-served backend. **Verification (plugin change class — load into host + exercise):** the engine logs the `iac.state` module constructing a `grpcIaCStateStore` for `azure_blob`, and a `SaveState`/`GetState` round-trips. Capture the transcript.
+Then load-test: build the plugin binary, point a minimal `workflow` config with `iac.state` `backend: azure_blob` at it (using a `workflow` `server` binary built from `origin/main` *with PR 7 + PR 8 merged* — if PR 8 isn't merged yet, this load-test is deferred to after PR 8 and noted as such). **Verification (plugin change class — load into host + exercise):** the engine logs the `iac.state` module constructing a `grpcIaCStateStore` for `azure_blob`, and a `SaveState`/`GetState` round-trips. Capture the transcript.
 
 **Step 7: Commit (in the plugin repo)**
 
 ```bash
-git add internal/statebackend/ plugin.json cmd/
+git add go.mod go.sum internal/ plugin.json
 git commit -m "feat: serve azure_blob IaCStateBackend
 
-Ports AzureBlobIaCStateStore from workflow core and serves it behind the
-new proto.IaCStateBackend gRPC contract. Advertises azure_blob in
-plugin.json so the workflow engine resolves it at plugin-load time. This
-plugin version is the prerequisite for workflow dropping its in-core
+Ports AzureBlobIaCStateStore from workflow core; azureIaCServer now also
+implements pb.IaCStateBackendServer (+ ListBackendNames) — the SDK serve
+hook auto-registers it. Advertises azure_blob in plugin.json's
+capabilities.iacStateBackends so the workflow engine resolves it at
+plugin-load time. Prerequisite for workflow dropping its in-core
 azure_blob backend."
 ```
 
@@ -1151,82 +1161,26 @@ Rollback: revert the commit + `go mod tidy` (restores `iac_state_azure.go`, the 
 
 ---
 
-### Task 14: Migration doc + wire engine plugin-load → `iac.state` backend registry
+### Task 14: Migration doc
 
-**Integration seam (resolved at plan time — `engine.go:311-326` was read).** `loadPluginInternal` deliberately never references concrete plugin types; it injects engine capabilities into plugins via **optional-interface type-asserts** — the `stepRegistrySetter` and `slogLoggerSetter` pattern at `engine.go:316-325` (`type X interface {...}; if v, ok := p.(X); ok { ... }`). Task 14 follows that exact precedent **in reverse** (reading *from* the plugin, not injecting *into* it): define an optional interface the external-plugin adapter satisfies, type-assert `p` against it, and populate the registry. This keeps `engine.go` free of a `plugin/external` import + concrete type-assert.
+**Note (Amendment A2):** this task was *trimmed* — its original engine-wiring half moved to **Task 19 (PR 8)**, because the integration-surface investigation (`decisions/0035`) showed that wiring is larger than "one optional-interface type-assert" and depends on PR 7's `ListBackendNames` RPC + manifest field. Task 14 is now the migration doc only.
 
 **Files:**
 - Create: `docs/migrations/2026-05-14-cloud-sdk-extraction.md`
-- Create: `plugin/iac_state_backend_provider.go` — the `IaCStateBackendProvider` optional interface (in the `plugin` package, which `engine.go` already imports)
-- Modify: `engine.go` — add the optional-interface type-assert in `loadPluginInternal` (beside `stepRegistrySetter` / `slogLoggerSetter`, `engine.go:311-326`)
-- Modify: `plugin/external/adapter.go` — `*ExternalPluginAdapter` implements `IaCStateBackendClients()` (it has the gRPC `ClientConn` + `ContractRegistry`; this is in-repo, not cross-repo)
-- Modify: `module/iac_state_plugin_registry.go` — add an exported `module.RegisterIaCStateBackend(name string, client pb.IaCStateBackendClient) error` wrapper (the registry struct itself stays unexported)
-- Test: `plugin/external/adapter_test.go` (extend) + `module/iac_state_plugin_registry_test.go` (extend) + a launch check
 
 **Step 1: Write the migration doc**
 
-Create `docs/migrations/2026-05-14-cloud-sdk-extraction.md` covering (per the design's Migration section, Phase A scope only): `iac.state` with `backend: azure_blob` now requires `wfctl plugin install workflow-plugin-azure` (≥ the Task 12 tag); the yaml `backend: azure_blob` value is unchanged; `memory`/`filesystem`/`postgres` are unaffected. Note that Phases B/C/D (AWS/GCP/DO) follow the same pattern in subsequent releases.
+Create `docs/migrations/2026-05-14-cloud-sdk-extraction.md` covering (per the design's Migration section, Phase A scope only): `iac.state` with `backend: azure_blob` now requires `wfctl plugin install workflow-plugin-azure` (≥ the Task 12 release tag); the yaml `backend: azure_blob` value is unchanged; `memory`/`filesystem`/`postgres` are unaffected. Note that Phases B/C/D (AWS/GCP/DO) follow the same pattern in subsequent releases.
 
-**Step 2: Define the optional interface + `ExternalPluginAdapter` impl**
+**Step 2: Verify + commit**
 
-In a shared location both `engine.go` and `plugin/external` can see the type (e.g. `plugin/iac_state_backend_provider.go` in the `plugin` package, which `engine.go` already imports — `engine.go:21`):
-
-```go
-// IaCStateBackendProvider is the optional interface an external plugin adapter
-// implements when it serves one or more iac.state backends. The engine
-// type-asserts loaded plugins against it (same pattern as stepRegistrySetter)
-// and populates module's iac.state backend registry from the result.
-type IaCStateBackendProvider interface {
-	IaCStateBackendClients() map[string]proto.IaCStateBackendClient
-}
-```
-
-In `plugin/external/adapter.go`, make `*ExternalPluginAdapter` implement `IaCStateBackendClients()`: it reads its own `ContractRegistry` for services advertising `workflow.plugin.external.iac.IaCStateBackend`, builds a `proto.IaCStateBackendClient` per advertised backend name off the adapter's existing gRPC `ClientConn` (mirror `typedIaCAdapter` construction in `cmd/wfctl/iac_typed_adapter.go`), and returns `name → client`. If the plugin advertises no state backend, return `nil` — the type-assert still succeeds, the map is just empty.
-
-**Step 3: Wire the type-assert into `loadPluginInternal`**
-
-In `engine.go` `loadPluginInternal`, beside the existing `stepRegistrySetter` / `slogLoggerSetter` asserts (`engine.go:311-326`), add:
-
-```go
-if provider, ok := p.(plugin.IaCStateBackendProvider); ok {
-	for name, client := range provider.IaCStateBackendClients() {
-		if err := module.RegisterIaCStateBackend(name, client); err != nil {
-			return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
-		}
-	}
-}
-```
-
-`module.RegisterIaCStateBackend` (new exported wrapper, this task) delegates to the unexported `iacStateBackendRegistry.register` from Task 8 — which already rejects reserved names, so a plugin advertising `memory`/`filesystem`/`postgres` fails plugin-load with a clear error (design Failure-modes "reserved-name collision", now actually wired).
-
-**Step 4: Write/extend the tests**
-
-- `plugin/external/adapter_test.go`: a fake adapter with a `ContractRegistry` advertising `azure_blob` → `IaCStateBackendClients()` returns a one-entry map keyed `azure_blob`.
-- `module/iac_state_plugin_registry_test.go`: `module.RegisterIaCStateBackend("azure_blob", fakeClient)` then `resolve("azure_blob")` succeeds; `module.RegisterIaCStateBackend("memory", fakeClient)` returns the reserved-name error.
-
-**Step 5: Build + test + launch validation**
-
-Run: `go build ./... && go test ./module/ -run 'IaCStateBackend|IaCModule' ./plugin/external/ -v`
-Expected: exit 0, PASS.
-Then the end-to-end launch check from Task 13 Step 8 should now work *without manual registry seeding* — the engine auto-populates from the loaded plugin. Re-run that launch with the Task 11 plugin in `./data/plugins/` and confirm `azure_blob` resolves with zero manual wiring. Capture the transcript. **Rollback note (runtime-affecting — plugin loading path):** revert the commit; the registry + dispatch plumbing from Task 8 survive, only the engine auto-population is removed; relaunch with a `memory`-backend config to confirm core backends unaffected.
-
-**Step 6: Commit**
-
+Run: spell-check / render-preview the doc (documentation change class — no broken anchors).
 ```bash
-git add docs/migrations/2026-05-14-cloud-sdk-extraction.md module/ engine.go plugin/
-git commit -m "feat(engine): auto-populate iac.state backend registry from loaded plugins
-
-At plugin-load time the engine reads each plugin's advertised
-IaCStateBackend capabilities and registers a gRPC client into the
-iac.state backend registry, so iac.state backend: azure_blob resolves
-with zero manual wiring. Adds the user-facing migration doc.
-
-Rollback: revert this commit — iac.state plugin backends then require
-manual registry seeding (the registry + dispatch from Task 8 remain);
-core in-process backends (memory/filesystem/postgres) are unaffected."
+git add docs/migrations/2026-05-14-cloud-sdk-extraction.md
+git commit -m "docs(migrations): cloud-SDK extraction — azure_blob backend migration guide"
 ```
 
-Rollback: revert the commit; the registry + dispatch plumbing (Task 8) survive, only the auto-population is removed. Core backends unaffected. Relaunch with a `memory` backend config to confirm.
+Rollback: `git revert` — documentation-only.
 
 ---
 
@@ -1319,11 +1273,213 @@ Rollback: revert the commit — a mechanical signature-only widening, no data-fo
 
 ---
 
+## PR 7 — Amendment A2: SDK serve hook + `ListBackendNames` RPC + `iacStateBackends` manifest field
+
+Operator-approved scope amendment (`decisions/0035`). Closes the **plugin-serve** gap the integration investigation found: `plugin/external/sdk`'s `ServeIaCPlugin` had zero `IaCStateBackend` awareness, so a plugin author had no hook to serve one. This PR adds the SDK serve hook, the `ListBackendNames` RPC (the runtime backend-name advertisement decided in `decisions/0035`), and the `plugin.PluginManifest` field (the authoring point). **Must merge before PR 4.** Branch `feat/cloud-sdk-extraction-p7-serve`, off current `origin/main` (PRs 1/2/3/6 already merged there).
+
+### Task 16: Add the `ListBackendNames` RPC to the `IaCStateBackend` service
+
+**Files:**
+- Modify: `plugin/external/proto/iac.proto`
+- Modify (generated): `plugin/external/proto/iac.pb.go`, `plugin/external/proto/iac_grpc.pb.go` (regenerate via `buf`)
+- Test: `plugin/external/proto/iac_statebackend_test.go` (extend)
+
+**Step 1: Write the failing test.** Add to `plugin/external/proto/iac_statebackend_test.go`:
+```go
+func TestIaCStateBackendListBackendNamesGenerated(t *testing.T) {
+	_ = &ListBackendNamesRequest{}
+	resp := &ListBackendNamesResponse{BackendNames: []string{"azure_blob"}}
+	if resp.GetBackendNames()[0] != "azure_blob" {
+		t.Fatalf("ListBackendNamesResponse.BackendNames accessor missing")
+	}
+	// the RPC must be on the IaCStateBackend service interfaces:
+	var _ interface {
+		ListBackendNames(context.Context, *ListBackendNamesRequest) (*ListBackendNamesResponse, error)
+	} = (IaCStateBackendServer)(nil)
+}
+```
+(add `"context"` to the test imports if needed)
+
+**Step 2: Run it — verify it FAILS.** `GOWORK=off go test ./plugin/external/proto/ -run TestIaCStateBackendListBackendNamesGenerated` → FAIL (`ListBackendNamesRequest` etc. undefined).
+
+**Step 3: Add the RPC to `iac.proto`.** In the `service IaCStateBackend` block in `plugin/external/proto/iac.proto`, add a 7th RPC; and add the two messages alongside the existing `IaCStateBackend` messages:
+```proto
+service IaCStateBackend {
+  // ... existing 6 RPCs ...
+  rpc ListBackendNames(ListBackendNamesRequest) returns (ListBackendNamesResponse);
+}
+
+// ListBackendNames lets the engine ask a loaded plugin which iac.state backend
+// NAMES it serves (e.g. "azure_blob"). The plugin answers from its
+// plugin.json capabilities.iacStateBackends (PluginManifest.IaCStateBackends).
+message ListBackendNamesRequest  {}
+message ListBackendNamesResponse { repeated string backend_names = 1; }
+```
+Honors the `iac.proto:6-10` hard invariant (no structpb/Any — these are plain scalar/repeated-string messages).
+
+**Step 4: Regenerate.** `buf generate` from the worktree root. `git diff --stat` shows only `iac.proto` + the 2 `*.pb.go` files.
+
+**Step 5: Run the test — verify it PASSES.** `GOWORK=off go test ./plugin/external/proto/ -run TestIaCStateBackend -v` → PASS (the new test + the existing `TestIaCStateBackendGeneratedTypesExist`).
+
+**Step 6: Build + commit.** `GOWORK=off go build ./...` exit 0. (No `wftest/bdd` change — `iacServiceChecks` is per-*service*; `IaCStateBackend` is already in that table from PR 2. Adding an RPC to an existing service does not change service-coverage.)
+```bash
+git add plugin/external/proto/iac.proto plugin/external/proto/iac.pb.go plugin/external/proto/iac_grpc.pb.go plugin/external/proto/iac_statebackend_test.go
+git commit -m "feat(proto): add ListBackendNames RPC to IaCStateBackend service
+
+Lets the engine ask a loaded plugin which iac.state backend NAMES it
+serves. Additive; honors the iac.proto no-structpb invariant. Part of
+Amendment A2 (decisions/0035)."
+```
+Rollback: `git revert` — additive proto + generated code, no runtime wiring yet.
+
+### Task 17: SDK serve hook — auto-register `pb.IaCStateBackendServer`
+
+**Files:**
+- Modify: `plugin/external/sdk/iacserver.go`
+- Test: `plugin/external/sdk/iacserver_test.go` (extend)
+
+**Step 1: Write the failing test.** Add a test in `plugin/external/sdk/iacserver_test.go`: construct a fake provider that satisfies BOTH `pb.IaCProviderRequiredServer` (the required minimum) AND `pb.IaCStateBackendServer` (embed both `pb.Unimplemented*` types); call `RegisterAllIaCProviderServices(grpc.NewServer(), fake)`; assert the server's `GetServiceInfo()` includes `"workflow.plugin.external.iac.IaCStateBackend"`. Mirror the existing `iacserver_test.go` registration tests' shape (read them first).
+
+**Step 2: Run it — verify it FAILS.** `GOWORK=off go test ./plugin/external/sdk/ -run <new-test-name>` → FAIL (the service is never registered).
+
+**Step 3: Add the type-assertion block.** In `registerIaCServicesOnly` (`plugin/external/sdk/iacserver.go`, after the existing `ResourceDriver` block, before the function returns), add:
+```go
+if v, ok := provider.(pb.IaCStateBackendServer); ok {
+	pb.RegisterIaCStateBackendServer(s, v)
+}
+```
+Update the `RegisterAllIaCProviderServices` doc-comment header to list `IaCStateBackend` among the optional services it auto-detects. Note in a code comment: per `decisions/0035`, `IaCStateBackend` is an *optional* service auto-detected by type-assertion exactly like the `IaCProvider*` optionals — a pure-storage plugin (no `IaCProviderRequired`) is a deferred limitation, not addressed here.
+
+**Step 4: Run the test — verify it PASSES.** `GOWORK=off go test ./plugin/external/sdk/ -v` → PASS (new test + all existing sdk tests).
+
+**Step 5: Build + commit.** `GOWORK=off go build ./... && GOWORK=off go vet ./plugin/external/...` exit 0.
+```bash
+git add plugin/external/sdk/iacserver.go plugin/external/sdk/iacserver_test.go
+git commit -m "feat(sdk): ServeIaCPlugin auto-registers pb.IaCStateBackendServer
+
+registerIaCServicesOnly now type-asserts pb.IaCStateBackendServer and
+registers it, alongside the IaCProvider* optionals — so a plugin whose
+provider type also implements the state-backend interface serves it with
+no extra wiring. Amendment A2 (decisions/0035)."
+```
+Rollback: `git revert` — additive type-assertion; plugins that don't implement `IaCStateBackendServer` are unaffected.
+
+### Task 18: `plugin.PluginManifest.IaCStateBackends` field + engine manifest-read path
+
+**Files:**
+- Modify: `plugin/manifest.go` (add the field to `PluginManifest`)
+- Modify: the engine's `plugin.json`→`PluginManifest` decode path (confirm via Step 1)
+- Test: `plugin/manifest_test.go` (extend) or the engine manifest-load test
+
+**Step 1: Investigate the manifest shape + read path (≤15 min).** Read `plugin/manifest.go` — the `PluginManifest` struct + how `capabilities` is modeled (the investigation noted `CapabilityDecl` has only `Name`/`Role`/`Priority`, and the disk `plugin.json` `capabilities` is an object — there may be a separate decode shape). Find where the engine decodes a plugin's `plugin.json` into `PluginManifest` (grep `PluginManifest` + `json.Unmarshal` + `plugin.json` across `plugin/`). Record the exact decode path in a one-line comment on the new field. **Decide the field's home** based on what you find: most likely a new `IaCStateBackends []string \`json:"iacStateBackends,omitempty"\`` on `PluginManifest` (or on whatever struct decodes the `capabilities` object). The plugin's `plugin.json` will carry `"capabilities": { ..., "iacStateBackends": ["azure_blob"] }` — match the JSON path to that.
+
+**Step 2: Write the failing test.** A test that decodes a `plugin.json` fixture containing `capabilities.iacStateBackends: ["azure_blob"]` and asserts the decoded `PluginManifest` exposes `["azure_blob"]` via the new field.
+
+**Step 3: Run it — verify it FAILS.** Field doesn't exist yet → compile error or empty field.
+
+**Step 4: Add the field + decode wiring.** Add the `IaCStateBackends []string` field per Step 1's decision; ensure the `plugin.json` decode path populates it. Keep it `omitempty` — the vast majority of plugins serve no state backend.
+
+**Step 5: Run the test — verify it PASSES.** Plus `GOWORK=off go build ./... && GOWORK=off go test ./plugin/... -run Manifest`.
+
+**Step 6: Commit.**
+```bash
+git add plugin/manifest.go plugin/manifest_test.go
+# + any other file in the decode path
+git commit -m "feat(plugin): PluginManifest.IaCStateBackends — plugin.json backend-name advertisement
+
+A plugin declares the iac.state backend names it serves via
+plugin.json capabilities.iacStateBackends; this adds the field to
+PluginManifest + the decode path. The engine (PR 8 / Task 19) reads it
+and cross-checks against the ListBackendNames RPC. Amendment A2."
+```
+Rollback: `git revert` — additive optional field; absent → empty slice, no behavior change.
+
+---
+
+## PR 8 — Amendment A2: engine host-wiring for `iac.state` plugin backends
+
+Operator-approved scope amendment (`decisions/0035`). Closes the **host-resolve** gap: `module.iacStateBackendRegistry` has no exported populator, `ExternalPluginAdapter` exposes no state-backend accessor, and `engine.go`'s `loadPluginInternal` has no seam to populate the registry from loaded plugins. This is the expanded form of the original Task 14's engine half. Branch `feat/cloud-sdk-extraction-p8-hostwire`, off current `origin/main`. May run in parallel with PR 4; **must merge before PR 5** (PR 5's launch validation needs the engine to actually resolve a plugin-served `azure_blob`). Depends on PR 7 being merged (uses the `ListBackendNames` RPC + `PluginManifest.IaCStateBackends`).
+
+### Task 19: Wire engine plugin-load → `iacStateBackendRegistry`
+
+**Integration seam (`decisions/0035`):** the engine, at plugin-load, for each loaded external plugin: (1) confirms the plugin's `ContractRegistry` advertises the `IaCStateBackend` service, (2) calls the `ListBackendNames` RPC for the live backend-name list, (3) builds one `pb.IaCStateBackendClient` off the adapter's gRPC conn, (4) registers each name → that client. The RPC call + cross-check live in `ExternalPluginAdapter` (it has the conn + `ContractRegistry()`); `engine.go` stays a thin optional-interface type-assert (the `stepRegistrySetter`/`slogLoggerSetter` pattern at `engine.go:311-326`).
+
+**Files:**
+- Modify: `module/iac_state_plugin_registry.go` — exported `RegisterIaCStateBackend(name string, client pb.IaCStateBackendClient) error` wrapper around the unexported `iacStateBackendRegistryInstance.register`
+- Create: `plugin/iac_state_backend_provider.go` — the `IaCStateBackendProvider` optional interface (package `plugin`, which `engine.go` already imports)
+- Modify: `plugin/external/adapter.go` — `*ExternalPluginAdapter` implements `IaCStateBackendClients()`
+- Modify: `engine.go` — the optional-interface type-assert in `loadPluginInternal`
+- Test: `module/iac_state_plugin_registry_test.go`, `plugin/external/adapter_test.go` (extend) + a launch check
+
+**Step 1: Exported registry wrapper.** In `module/iac_state_plugin_registry.go` add:
+```go
+// RegisterIaCStateBackend registers a plugin-served iac.state backend client
+// under name. Exported so engine.go (package workflow) can populate the
+// registry at plugin-load time. Rejects reserved core names.
+func RegisterIaCStateBackend(name string, client pb.IaCStateBackendClient) error {
+	return iacStateBackendRegistryInstance.register(name, client)
+}
+```
+Test in `module/iac_state_plugin_registry_test.go`: `RegisterIaCStateBackend("azure_blob", fake)` then `resolve("azure_blob")` succeeds; `RegisterIaCStateBackend("memory", fake)` returns the reserved-name error.
+
+**Step 2: The optional interface.** Create `plugin/iac_state_backend_provider.go` (package `plugin`):
+```go
+// IaCStateBackendProvider is the optional interface an external-plugin adapter
+// implements when its plugin serves one or more iac.state backends. The engine
+// type-asserts loaded plugins against it (same pattern as stepRegistrySetter)
+// and populates module's iac.state backend registry.
+type IaCStateBackendProvider interface {
+	IaCStateBackendClients() (map[string]proto.IaCStateBackendClient, error)
+}
+```
+
+**Step 3: `ExternalPluginAdapter.IaCStateBackendClients()`.** In `plugin/external/adapter.go`, implement the method on `*ExternalPluginAdapter`:
+- If `ContractRegistry()` does NOT advertise `workflow.plugin.external.iac.IaCStateBackend` → return `(nil, nil)` (plugin serves no state backend; harmless).
+- Else: build `client := proto.NewIaCStateBackendClient(a.Conn())`; call `client.ListBackendNames(ctx, &proto.ListBackendNamesRequest{})` for the names; **cross-check** against the plugin's `PluginManifest.IaCStateBackends` (from PR 7) — if the RPC and the manifest disagree, return an error naming the discrepancy (a plugin whose live RPC contradicts its manifest is misconfigured). Return `map[name]client` (every name → the same client; the client is per-plugin-connection, not per-backend).
+- Use a bounded context (`context.Background()` with a timeout) for the `ListBackendNames` call.
+
+**Step 4: Wire `loadPluginInternal`.** In `engine.go`, beside the existing `stepRegistrySetter`/`slogLoggerSetter` type-asserts (`engine.go:311-326`):
+```go
+if sb, ok := p.(plugin.IaCStateBackendProvider); ok {
+	clients, err := sb.IaCStateBackendClients()
+	if err != nil {
+		return fmt.Errorf("load plugin %q: iac.state backends: %w", p.EngineManifest().Name, err)
+	}
+	for name, client := range clients {
+		if err := module.RegisterIaCStateBackend(name, client); err != nil {
+			return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
+		}
+	}
+}
+```
+
+**Step 5: Tests.** `plugin/external/adapter_test.go`: a fake adapter whose `ContractRegistry` advertises `IaCStateBackend` and whose `ListBackendNames` returns `["azure_blob"]` → `IaCStateBackendClients()` returns a one-entry map; a fake where RPC and manifest disagree → error. Build + `GOWORK=off go test ./module/ ./plugin/... -run 'IaCStateBackend|Manifest'`.
+
+**Step 6: Launch validation (runtime-affecting — plugin loading path).** Build the `server` binary; with the Task 11 plugin (PR 4) installed in `./data/plugins/`, launch with an `iac.state` `backend: azure_blob` config; confirm the engine populates the registry + `IaCModule.Init` resolves a `grpcIaCStateStore`. If PR 4 isn't merged/tagged yet, this launch check is deferred until it is, and noted as such in the PR body. **Rollback note:** revert the commit — the registry + `IaCModule.Init` dispatch (from the merged PR 3) survive; only the engine auto-population is removed; core `memory`/`filesystem`/`postgres` backends are unaffected.
+
+**Step 7: Commit.**
+```bash
+git add module/iac_state_plugin_registry.go module/iac_state_plugin_registry_test.go plugin/iac_state_backend_provider.go plugin/external/adapter.go plugin/external/adapter_test.go engine.go
+git commit -m "feat(engine): populate iac.state backend registry from loaded plugins
+
+At plugin-load, the engine type-asserts plugins for IaCStateBackendProvider,
+calls the plugin's ListBackendNames RPC (cross-checked against its
+PluginManifest.IaCStateBackends), and registers each backend name. So
+iac.state backend: azure_blob resolves to a plugin-served gRPC backend
+with zero manual wiring. Amendment A2 (decisions/0035).
+
+Rollback: revert — registry + IaCModule.Init dispatch survive; only the
+engine auto-population is removed; core backends unaffected."
+```
+
+---
+
 ## Notes for the executor
 
 - **TDD discipline:** every task above follows write-test → see-it-fail → implement → see-it-pass → commit. Do not skip the "see it fail" step — it proves the test exercises the new behavior. (Task 15 is a mechanical interface widening — there the *compiler* is the failing test: Step 1 widens the interface, Step 2 confirms the build breaks everywhere, Steps 3–5 fix it.)
 - **Cross-repo PR 4 (autonomous, NOT a human gate):** Tasks 11–12 run in `/Users/jon/workspace/workflow-plugin-azure` — a *different repo*. The dispatched agent operates there directly; its prompt MUST state the absolute repo path and that it is a different repo than the worktree (`decisions/0034-...md`). Push + PR follow normal review discipline (feature branch, never direct-to-default). PR 4 must merge + the release tag (Task 12) must exist before PR 5.
 - **Every cross-repo agent dispatch** (PR 4 here, and all plugin PRs in the deferred B/C/D plan) carries a fixed prompt obligation: state the absolute path of the repo it works in + that it differs from the worktree + which repo each file path belongs to. The orchestrator verifies `git -C <repo> log` after cross-repo commits.
-- **PR ordering:** PR 1 → PR 2 → PR 3 (Tasks 7–8) → PR 6 → PR 3 (Tasks 9–10) → PR 4 → PR 5. PR 5 is the only `go.mod`-touching breaking change. PR 6 stacks on PR 3; `finishing-a-development-branch` splits the single working branch into the 6 PR branches.
+- **PR ordering:** PRs 1/2/3/6 are **MERGED** (#668/#669/#670/#671). Remaining: **PR 7 → PR 4 → PR 8 → PR 5** (PR 8 may run in parallel with PR 4; both must merge before PR 5). PR 7 + PR 8 + PR 5 each branch off current `origin/main` (no stacking — the earlier stack is merged). PR 4 is cross-repo. PR 5 is the only `go.mod`-touching breaking change. Each remaining PR: branch off latest `origin/main`, execute its task(s), push, PR, monitor, admin-merge on green.
+- **Amendment A2 dependency chain:** PR 4 cannot `go get` what it needs until PR 7 is merged AND a `workflow` `main`-pseudo-version (or release) carrying it exists. PR 5's launch validation needs PR 8 merged (so the engine actually resolves a plugin-served backend) AND PR 4's plugin tag. So: merge PR 7 → (PR 4 plugin work + PR 8 in parallel) → merge both → PR 5.
 - **Benchmark gate (Task 6) — RESOLVED:** the benchmark measured 6.51 ms (1 MB state); root-cause analysis showed the cost is JSON serialization (inherent to the `bytes *_json` wire format), not gRPC transport, so the plan's streaming-redesign contingency was mis-targeted. Operator confirmed unary is acceptable. **Unary is LOCKED** — see `docs/plans/2026-05-14-iac-state-backend-benchmark.md`. No streaming redesign.
 - **Follow-on plan:** once PR 5 merges, author the Phase B/C/D plan. Phase B (AWS) reuses Task 7's converters + Task 8's registry + Task 11's plugin pattern + the now-ctx-ful interface from PR 6; Phase C (GCP) additionally runs the `kubernetesBackend` interface-audit spike for the `gke` contract decision (design Architecture §2); Phase D (DigitalOcean `spaces`) rides Phase B's `iac_state_spaces.go` deletion. The IaC state at-rest format follow-up (`docs/plans/2026-05-14-iac-state-backend-benchmark.md` §"Logged follow-up") is a separate post-extraction item.
