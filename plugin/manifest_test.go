@@ -528,6 +528,35 @@ func TestManifestLegacyCapabilitiesObjectFile(t *testing.T) {
 	}
 }
 
+// TestManifestCapabilitiesIaCStateBackends verifies that a plugin.json whose
+// legacy "capabilities" object declares "iacStateBackends" has those backend
+// names promoted to the manifest's top-level IaCStateBackends field. This is
+// how a plugin advertises which iac.state backend names it serves
+// (Amendment A2, decisions/0035).
+func TestManifestCapabilitiesIaCStateBackends(t *testing.T) {
+	const manifestJSON = `{
+		"name": "workflow-plugin-azure",
+		"version": "1.0.0",
+		"description": "Azure IaC provider plugin",
+		"author": "GoCodeAlone",
+		"capabilities": {
+			"moduleTypes": ["infra.azure"],
+			"stepTypes": [],
+			"triggerTypes": [],
+			"iacStateBackends": ["azure_blob"]
+		}
+	}`
+
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(manifestJSON), &m); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if len(m.IaCStateBackends) != 1 || m.IaCStateBackends[0] != "azure_blob" {
+		t.Errorf("IaCStateBackends = %v, want [azure_blob]", m.IaCStateBackends)
+	}
+}
+
 // TestManifestCapabilitiesInvalidFormat verifies that a plugin.json whose
 // "capabilities" field is neither an array nor an object (e.g. a bare string)
 // is rejected with a descriptive error.
