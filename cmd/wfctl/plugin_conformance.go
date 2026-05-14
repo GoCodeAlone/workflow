@@ -226,15 +226,106 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		return PluginCompatibilityEvidence{}, err
 	}
 	binaryPath := filepath.Join(installDir, installName)
-	if info, statErr := os.Stat(filepath.Join(sourceDir, installName)); opts.ArtifactPath != "" && statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-		if err := copyFile(filepath.Join(sourceDir, installName), binaryPath, info.Mode()); err != nil {
-			return PluginCompatibilityEvidence{}, err
+	var conformanceChecked bool
+	var conformanceStdout, conformanceStderr string
+
+	if opts.ArtifactPath != "" {
+		candidates := discoverArtifactBinaryCandidates(sourceDir, manifest.Name, installName)
+		if len(candidates) > 0 {
+			var diagLines []string
+			diagLines = append(diagLines, fmt.Sprintf("artifact binary discovery: install=%q manifest=%q candidates=[%s]",
+				installName, manifest.Name, strings.Join(candidates, ", ")))
+
+			var lastCheckErr error
+			for _, cand := range candidates {
+				srcPath := filepath.Join(sourceDir, cand)
+				srcInfo, statErr := os.Stat(srcPath)
+				if statErr != nil {
+					diagLines = append(diagLines, fmt.Sprintf("  [skip] %q: %v", cand, statErr))
+					continue
+				}
+				if copyErr := copyFile(srcPath, binaryPath, srcInfo.Mode()); copyErr != nil {
+					diagLines = append(diagLines, fmt.Sprintf("  [fail] %q: copy error: %v", cand, copyErr))
+					lastCheckErr = copyErr
+					continue
+				}
+				cstdout, cstderr, checkErr := checkTypedIaCPlugin(opts.Timeout, filepath.Join(tmp, "plugins"), installName)
+				conformanceStdout = cstdout
+				conformanceStderr = cstderr
+				if checkErr == nil {
+					diagLines = append(diagLines, fmt.Sprintf("  [pass] %q selected", cand))
+					conformanceChecked = true
+					lastCheckErr = nil
+					break
+				}
+				lastCheckErr = checkErr
+				diagLines = append(diagLines, fmt.Sprintf("  [fail] %q: %v", cand, checkErr))
+			}
+
+			diagMsg := strings.Join(diagLines, "\n")
+			if conformanceStderr != "" {
+				conformanceStderr = diagMsg + "\n" + conformanceStderr
+			} else {
+				conformanceStderr = diagMsg
+			}
+
+			if !conformanceChecked {
+				// All named candidates failed the handshake.
+				// If Go sources are present (go.mod exists in the archive), fall back to
+				// go build rather than declaring failure immediately. This supports
+				// source-in-archive tarballs that happen to contain a pre-built or
+				// unrelated executable alongside the Go sources.
+				if _, modErr := os.Stat(filepath.Join(sourceDir, "go.mod")); modErr != nil {
+					// No go.mod → binary-only artifact; emit fail evidence with diagnostics.
+					if lastCheckErr == nil {
+						lastCheckErr = fmt.Errorf("no executable artifact candidate could be staged from archive (candidates: %s)", strings.Join(candidates, ", "))
+					}
+					manifestSHA, _ := hashFileSHA256(filepath.Join(installDir, "plugin.json"))
+					binarySHA := ""
+					if _, statErr := os.Stat(binaryPath); statErr == nil {
+						binarySHA, _ = hashFileSHA256(binaryPath)
+					}
+					ev := PluginCompatibilityEvidence{
+						Plugin:               manifest.Name,
+						Version:              manifest.Version,
+						EngineVersion:        opts.EngineVersion,
+						WfctlVersion:         buildVersion(),
+						Mode:                 opts.Mode,
+						Status:               PluginCompatibilityStatusFail,
+						OS:                   runtime.GOOS,
+						Arch:                 runtime.GOARCH,
+						ArchiveSHA256:        archiveSHA,
+						BinarySHA256:         binarySHA,
+						PluginManifestSHA256: manifestSHA,
+						GeneratedBy:          "wfctl plugin conformance",
+						StdoutTail:           conformanceStdout,
+						StderrTail:           conformanceStderr,
+					}
+					if normalized, normErr := ValidateCompatibilityEvidence(ev); normErr == nil {
+						ev = normalized
+					}
+					return ev, lastCheckErr
+				}
+				// go.mod found → fall through to go build below.
+				// Clear stdout/stderr from failed candidate attempts so the final
+				// evidence reflects the build result rather than handshake noise.
+				conformanceStdout, conformanceStderr = "", ""
+			}
+			// conformanceChecked=true: a candidate passed; binary is at binaryPath.
 		}
-	} else {
+		// len(candidates)==0: no executables found in archive root; fall through to go build
+		// below (supports source-in-archive tarballs that include Go source).
+	}
+
+	if !conformanceChecked {
 		buildPackage := opts.BuildPackage
 		if buildPackage == "" {
 			buildPackage = "."
 		}
+		// Remove any pre-existing file at binaryPath (e.g. a failed candidate that was
+		// copied there) so go build can write the output without refusing to overwrite
+		// a non-object file.
+		_ = os.Remove(binaryPath)
 		cmd := exec.Command("go", "build", "-mod=mod", "-o", binaryPath, buildPackage) //nolint:gosec // command args are fixed; dir is staged source.
 		cmd.Dir = sourceDir
 		cmd.Env = append(os.Environ(), "GOWORK=off")
@@ -253,7 +344,13 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		return PluginCompatibilityEvidence{}, err
 	}
 
-	stdout, stderr, err := checkTypedIaCPlugin(opts.Timeout, filepath.Join(tmp, "plugins"), installName)
+	var stdout, stderr string
+	if conformanceChecked {
+		stdout = conformanceStdout
+		stderr = conformanceStderr
+	} else {
+		stdout, stderr, err = checkTypedIaCPlugin(opts.Timeout, filepath.Join(tmp, "plugins"), installName)
+	}
 	ev := PluginCompatibilityEvidence{
 		Plugin:               manifest.Name,
 		Version:              manifest.Version,
@@ -283,6 +380,82 @@ func runPluginConformanceCheck(opts pluginConformanceOptions) (PluginCompatibili
 		return ev, err
 	}
 	return ev, nil
+}
+
+// discoverArtifactBinaryCandidates returns an ordered list of file names in sourceDir
+// that are executable and should be tried as the plugin binary. Candidates are
+// prioritised as follows:
+//
+//  1. installName (the normalised plugin name, e.g. "digitalocean")
+//  2. manifestName when it differs from installName (e.g. "workflow-plugin-digitalocean")
+//  3. On Windows: the above names with a ".exe" suffix
+//  4. Any other executable in the archive root whose name starts with installName or
+//     manifestName (case-insensitive), e.g. "digitalocean_linux_amd64".
+//     This covers platform-suffixed GoReleaser binaries while avoiding the execution
+//     of arbitrary unrelated executables bundled in the archive.
+func discoverArtifactBinaryCandidates(sourceDir, manifestName, installName string) []string {
+	seen := make(map[string]bool)
+	var out []string
+
+	addIfExecutable := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		info, err := os.Stat(filepath.Join(sourceDir, name))
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+			return
+		}
+		out = append(out, name)
+	}
+
+	addIfExecutable(installName)
+	if manifestName != installName {
+		addIfExecutable(manifestName)
+	}
+	if runtime.GOOS == "windows" {
+		addIfExecutable(installName + ".exe")
+		if manifestName != installName {
+			addIfExecutable(manifestName + ".exe")
+		}
+	}
+
+	// Scan the archive root for additional executables matching known plugin naming patterns.
+	// Only include names that start with installName or manifestName (case-insensitive) so
+	// that platform-suffixed GoReleaser binaries (e.g. "digitalocean_linux_amd64") are
+	// found without executing arbitrary unrelated executables from the archive.
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return out
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		info, statErr := entry.Info()
+		if statErr != nil {
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			continue
+		}
+		// Restrict fallback to names that start with installName or manifestName to
+		// avoid executing arbitrary binaries (e.g. helper scripts, CLI tools) that
+		// happen to be bundled in the archive.
+		nameLower := strings.ToLower(name)
+		installLower := strings.ToLower(installName)
+		manifestLower := strings.ToLower(manifestName)
+		if !strings.HasPrefix(nameLower, installLower) && !strings.HasPrefix(nameLower, manifestLower) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 func checkTypedIaCPlugin(timeout time.Duration, pluginsDir, name string) (string, string, error) {
