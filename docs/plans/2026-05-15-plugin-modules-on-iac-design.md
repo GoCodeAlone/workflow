@@ -19,6 +19,8 @@ The locked B/C/D plan stays as-is for what's already shipped and in-flight (PRs 
 
 ## Problem
 
+Per the operator direction dated 2026-05-15: *"autonomously brainstorm the best way to approach this holistically to ensure module factories are supported. complete that functionality and then resume the rest of the tasks. maybe do this as a new design/implementation and connect the remaining tasks to the new design so we don't have to deal with design locks and whatnot."*
+
 Two related problems, both surfaced by mid-execution implementation:
 
 1. **No path for a single plugin process to serve both IaC services and module/step factories.** A plugin can call `sdk.Serve` (legacy — the `pb.PluginServiceServer` in `grpc_server.go` with full Module/Step lifecycle RPCs + handle state) OR `sdk.ServeIaCPlugin` (typed-IaC services + a minimal bridge with only `GetContractRegistry` + `GetManifest`). They're separate top-level entrypoints; the bridge has a "skip if already registered" guard hinting at the mixed-plugin scenario, but nothing wires it together cleanly. Plugin authors who want both face an architectural fork the SDK doesn't resolve.
@@ -31,10 +33,10 @@ Per `decisions/0035` (assumed-seam-must-be-grep-verified), every claim below is 
 
 - `plugin/external/sdk/iacserver.go:71-83` — `registerAllIaCProviderServicesWithOpts` registers the IaC services THEN registers `iacPluginServiceBridge` as `pb.PluginServiceServer`. The bridge's guard (`if _, alreadyRegistered := s.GetServiceInfo()[pb.PluginService_ServiceDesc.ServiceName]`) acknowledges the mixed-plugin scenario but punts on it.
 - `plugin/external/sdk/iacserver.go:155-200` — `iacPluginServiceBridge` implements `GetContractRegistry` + `GetManifest`. Embeds `pb.UnimplementedPluginServiceServer` for everything else (ModuleType/Step/Trigger lifecycle).
-- `plugin/external/sdk/iacserver.go:195-208` — `IaCServeOptions` has only `PluginInfo` + `ManifestProvider`. Comment line 196: "exists as a forward-extension point so future metadata fields (PluginInfo) can be added without breaking the API." — the precedent for adding fields is established.
+- `plugin/external/sdk/iacserver.go:206-218` — `IaCServeOptions` struct (declaration starts at line 206) has only `PluginInfo` + `ManifestProvider`. The forward-extension-point comment lives at lines 200–205 (immediately preceding the struct): *"exists as a forward-extension point so future metadata fields (PluginInfo) can be added without breaking the API"* — the precedent for adding fields without breaking the API is established.
 - `plugin/external/sdk/grpc_server.go` (22KB) — the legacy `sdk.Serve` PluginService implementation: full Module/Step/Trigger lifecycle RPCs + handle-ID state management. Real, mature code; the hard part (handle state, lifecycle errors, factory dispatch) is already written.
 - `plugin/external/sdk/serve.go` + `serve_full.go` — the legacy `sdk.Serve` entrypoint that wires `grpc_server.go`'s impl onto a gRPC server.
-- `plugin/external/adapter.go:463-540` — `ExternalPluginAdapter.ModuleFactories()` calls `GetModuleTypes` then `CreateModule` per type; `.StepFactories()` calls `GetStepTypes` then `CreateStep` per type. Both use the typed `CreateModuleRequest`/`CreateStepRequest` (no `structpb`); `RemoteModule` wraps the resulting handle for engine-side lifecycle.
+- `plugin/external/adapter.go:463-540` — `ExternalPluginAdapter.ModuleFactories()` (line 464) calls `GetModuleTypes` then `CreateModule` per type; `.StepFactories()` (line 504) calls `GetStepTypes` then `CreateStep` per type. Both use the established `CreateModuleRequest` / `CreateStepRequest` shape; **no NEW `structpb` surface is introduced at the design boundary** (the request's existing `Config` field remains a `google.protobuf.Struct` for the legacy path, and `typed_config` (`google.protobuf.Any`) carries STRICT_PROTO contracts when descriptors are present — that surface is unchanged by this design). No IaC-vs-non-IaC branching in the adapter — dispatch is purely on `pb.PluginServiceClient`. `RemoteModule` wraps the resulting handle for engine-side lifecycle.
 - `plugin/external/proto/plugin.proto:13-78` — `PluginService` is the canonical surface; the relevant RPCs for module-factory hosting are: `GetModuleTypes`, `CreateModule`, `InitModule`, `StartModule`, `StopModule`, `DestroyModule`, `GetModuleSchemas` (optional UI), `GetStepTypes`, `CreateStep`, `ExecuteStep`, `DestroyStep`. Triggers are out of scope here; `InvokeService` was deprecated by the strict-contracts cutover and stays unimplemented.
 
 ## Goals
@@ -50,6 +52,8 @@ Per `decisions/0035` (assumed-seam-must-be-grep-verified), every claim below is 
 - **Reviving `InvokeService`** — out. Strict-contracts cutover removed it deliberately; the new bridge does not surface it.
 - **Refactoring `grpc_server.go`** — out. We extend, not refactor. Any cleanup is a follow-up.
 - **Schemas / UI metadata for the new modules** — `GetModuleSchemas` stays unwired in v1 of this design unless an in-flight UI requirement surfaces; `storage.s3`/`storage.gcs`/`step.s3_upload` work without it (matching their in-core ancestors).
+- **`MessagePublisher` / `MessageSubscriber` (`MessageAwareModule`) capability for IaC-bridge-served modules** — out. `iacGRPCPlugin.GRPCServer` discards the `*goplugin.GRPCBroker` parameter; modules registered via `IaCServeOptions.Modules` would find `callbackClient == nil` and lose pub/sub. The `storage.s3` / `storage.gcs` / `step.s3_upload` / `aws.credentials` / `gcp.credentials` modules in this plan **do not need pub/sub**, so the limitation is acceptable for v1. Lifting it requires plumbing the broker through `iacGRPCPlugin` — a follow-up SDK change, not blocking here.
+- **`TypedModuleProvider` (STRICT_PROTO contracts) for IaC-bridge-served modules** — out for v1. The bridge's Module path uses the legacy `sdk.ModuleProvider` (config-Struct) interface only. The blocked plan tasks do not need typed contracts (plain config-Struct round-trip is sufficient for `storage.s3` / `storage.gcs` / `step.s3_upload` / the credentials modules). Adding `TypedModuleProvider` support is a follow-up.
 - **`godo` extraction, out-of-`module/` AWS surface, IaC state at-rest format** — same Non-Goals as the B/C/D design, inherited.
 
 ## Approaches considered
@@ -98,23 +102,34 @@ type IaCServeOptions struct {
     PluginInfo       *PluginInfo
     ManifestProvider *pluginpkg.PluginManifest
 
-    // Modules supplies plugin-native module factories. When non-nil, the
+    // Modules supplies plugin-native module providers. When non-nil, the
     // bridge's GetModuleTypes / CreateModule / InitModule / StartModule /
-    // StopModule / DestroyModule are wired to a delegate that reuses the
-    // legacy grpc_server.go PluginService implementation. Zero-value =
-    // current behavior (Unimplemented for those RPCs).
-    Modules map[string]pluginpkg.ModuleFactory
+    // StopModule / DestroyModule are wired to delegate to grpc_server.go's
+    // existing PluginService implementation, parameterized over this map.
+    // Zero-value = current behavior (Unimplemented for those RPCs).
+    //
+    // The map's value type is sdk.ModuleProvider — the SAME interface
+    // grpc_server.go's legacy sdk.Serve path already consumes — so no
+    // adapter shim sits between the IaC bridge and the existing handle-
+    // state / lifecycle code. Plugin authors wrap their factory functions
+    // in a thin sdk.ModuleProvider struct (the same wrapper non-IaC
+    // plugins already use); the SDK does not introduce a parallel
+    // factory-map shape.
+    Modules map[string]sdk.ModuleProvider
 
-    // Steps supplies plugin-native step factories. When non-nil, the
-    // bridge's GetStepTypes / CreateStep / ExecuteStep / DestroyStep are
-    // wired similarly.
-    Steps map[string]pluginpkg.StepFactory
+    // Steps supplies plugin-native step providers. Same shape rationale
+    // as Modules; values are sdk.StepProvider — the existing interface
+    // grpc_server.go's CreateStep/ExecuteStep/DestroyStep already
+    // consume.
+    Steps map[string]sdk.StepProvider
 }
 ```
 
-`iacPluginServiceBridge` gains an embedded `*moduleStepDelegate` (the extracted-from-`grpc_server.go` PluginService Module/Step implementation). When the delegate is set, the bridge's Module/Step methods forward; when it is nil, they fall through to `pb.UnimplementedPluginServiceServer`.
+`iacPluginServiceBridge` gains an embedded `*moduleStepDelegate` (a small wrapper around `grpc_server.go`'s existing PluginService Module/Step implementation). When the delegate is wired, the bridge's `GetModuleTypes` / `CreateModule` / `InitModule` / `StartModule` / `StopModule` / `DestroyModule` / `GetStepTypes` / `CreateStep` / `ExecuteStep` / `DestroyStep` methods forward to it; when it is nil (zero-value `IaCServeOptions`), they fall through to `pb.UnimplementedPluginServiceServer`.
 
-The legacy `grpc_server.go`'s Module/Step implementation is **extracted** into a small public-or-internal helper struct/constructor (e.g. `func newModuleStepHandler(modules map[string]ModuleFactory, steps map[string]StepFactory) *moduleStepHandler`). The legacy `sdk.Serve` continues to use it via the existing wrapper. The new IaC path uses it via the bridge. **Single source of truth for handle state + lifecycle dispatch**.
+`grpc_server.go`'s Module/Step lifecycle (handle state, error wrapping, factory dispatch — `CreateModule` at line 269, `InitModule` 424, `StartModule` 437, `StopModule` 450, `DestroyModule` 463, `CreateStep` 478, `ExecuteStep` 543, `DestroyStep` 576; all mutex-guarded via `sync.RWMutex`) is **reused via constructor injection** — both `sdk.Serve` and the new bridge construct it from a `map[string]sdk.ModuleProvider` + `map[string]sdk.StepProvider`. **Single source of truth for handle state + lifecycle dispatch**, no duplicated logic.
+
+The plan-writing step reads `grpc_server.go` end-to-end and confirms the constructor-injection point is clean — the design's load-bearing assumption (Assumption 1).
 
 ### Engine-side: zero change
 
@@ -126,18 +141,20 @@ The legacy `grpc_server.go`'s Module/Step implementation is **extracted** into a
 func main() {
     sdk.ServeIaCPlugin(provider, sdk.IaCServeOptions{
         ManifestProvider: sdk.MustEmbedManifest(manifestJSON),
-        Modules: map[string]plugin.ModuleFactory{
-            "storage.s3":      modules.NewS3StorageFactory(),
-            "aws.credentials": modules.NewAWSCredentialsFactory(),
+        Modules: map[string]sdk.ModuleProvider{
+            "storage.s3":      &modules.S3StorageProvider{},
+            "aws.credentials": &modules.AWSCredentialsProvider{},
         },
-        Steps: map[string]plugin.StepFactory{
-            "step.s3_upload": steps.NewS3UploadFactory(),
+        Steps: map[string]sdk.StepProvider{
+            "step.s3_upload": &steps.S3UploadProvider{},
         },
     })
 }
 ```
 
-Zero new entrypoints; one call; explicit declaration of what the plugin serves.
+Zero new entrypoints; one call; explicit declaration of what the plugin serves. The Provider types are the same interfaces non-IaC plugins already implement — no parallel factory shape.
+
+**plugin.json ↔ runtime parity**: the plugin's `plugin.json capabilities.moduleTypes` / `capabilities.stepTypes` arrays MUST list every key in `IaCServeOptions.Modules` / `.Steps`. A host-conformance test in each plugin asserts: for every entry in `plugin.json capabilities.moduleTypes`, `GetModuleTypes` RPC returns it; and vice-versa. (The locked B/C/D plan's Tasks 7/20/24 already established this parity-test pattern for `iacStateBackends` — extend to `moduleTypes`/`stepTypes`.)
 
 ### Re-homed work — what this plan absorbs from B/C/D
 
@@ -152,7 +169,7 @@ Zero new entrypoints; one call; explicit declaration of what the plugin serves.
 | B/C/D Tasks 14–18 (PR 6 — Phase B workflow-core deletion: `cloud_account_aws.go` + resolvers rewrite + `iac_state_spaces.go` + `s3_storage.go` + `pipeline_step_s3_upload.go` + go.mod tidy + `.phase-b-complete` + migration doc) | Absorbed wholesale into the new plan — the deletions become unblocked once the aws plugin release ships. |
 | B/C/D Tasks 27–29 (PR 10 — Phase C workflow-core deletion: GCS files + `platform_kubernetes_gke.go` + `gcs` switch case + GCP SDK go.mod drop + permanent CI gate + Phase C migration doc) | Absorbed wholesale — depends on gcp plugin release + workflow PR 9 (gke wiring) merged. |
 
-The new plan's PR count is therefore: **1 SDK extension PR (workflow core) + plugin PRs (aws, gcp) + 2 workflow-core deletion PRs (Phase B + Phase C)**. Roughly 5 PRs / ~15 tasks. Concrete decomposition is `writing-plans`'s job.
+The new plan's PR count is therefore: **1 SDK extension PR (workflow core) + plugin PRs (aws, gcp — sequential within each repo) + 2 workflow-core deletion PRs (Phase B + Phase C) + the cross-repo release tag steps**. Estimated **5+ PRs across 3 repos / 15–20 tasks** — the range reflects ADR-0035's lesson that initial counts under-estimate; concrete decomposition is `writing-plans`'s job (which reads `grpc_server.go` end-to-end before specifying the SDK extension task and confirms the constructor-injection point).
 
 ## Assumptions (load-bearing)
 
