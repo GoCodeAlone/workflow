@@ -85,6 +85,78 @@ if [[ -f "$CREDS" ]]; then
 fi
 
 echo
+echo "== Invariant: module/ zero real imports of cloud.google.com/go / google.golang.org/api / Azure/azure-sdk-for-go =="
+# Phase C (plan 2026-05-15-plugin-modules-on-iac.md Task 18) asserts module/
+# stays free of gcp/azure SDK imports. Real-import (not comment) only. Only
+# enforced once .phase-c-complete is armed.
+MOD_FORBIDDEN=()
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  for sdk in 'cloud.google.com/go' 'google.golang.org/api' 'github.com/Azure/azure-sdk-for-go'; do
+    if real_import "$f" "$sdk"; then
+      MOD_FORBIDDEN+=("$f -> $sdk")
+    fi
+  done
+done < <(grep -rl 'cloud\.google\.com/go\|google\.golang\.org/api\|github\.com/Azure/azure-sdk-for-go' module/ --include='*.go' 2>/dev/null | grep -v '_test\.go' | sort)
+if [[ ${#MOD_FORBIDDEN[@]} -eq 0 ]]; then
+  echo "  module/: 0 real imports — clean"
+else
+  printf '  module/ REAL IMPORT: %s\n' "${MOD_FORBIDDEN[@]}"
+  if [[ $CHECK -eq 1 && -f .phase-c-complete ]]; then
+    echo "  INVARIANT VIOLATED: module/ has gcp/azure SDK imports post-Phase-C"
+    FAIL=1
+  fi
+fi
+
+echo
+echo "== Invariant: build graph has no unexpected gcp/azure/api transitive deps =="
+# Phase C permanent asymmetric gate (plan Task 18). Reads `go list -deps ./...`
+# and asserts:
+#   - github.com/Azure/azure-sdk-for-go : zero (catch-all)
+#   - google.golang.org/api             : zero (catch-all)
+#   - cloud.google.com/go               : only `compute/metadata` allowed
+#       (OAuth2 ADC helper pulled by golang.org/x/oauth2/google in
+#       provider/gcp's service-account auth path — see decisions/0034 +
+#       2026-05-15 migration doc; legitimate transitive, not a GCP SDK
+#       client).
+# Asymmetric vs aws-sdk-go-v2 (Phase B): aws-sdk-go-v2 STAYS for out-of-scope
+# provider/aws/ + plugin/rbac/aws.go + iam/aws.go + artifact/s3.go.
+if [[ $CHECK -eq 1 && -f .phase-c-complete ]]; then
+  DEPS=$(GOWORK=off go list -deps ./... 2>/dev/null || true)
+  AZURE_UNEXPECTED=$(echo "$DEPS" | grep -F 'github.com/Azure/azure-sdk-for-go' || true)
+  API_UNEXPECTED=$(echo "$DEPS" | grep '^google\.golang\.org/api' || true)
+  GCP_UNEXPECTED=$(echo "$DEPS" \
+    | grep '^cloud\.google\.com/go' \
+    | grep -v '^cloud\.google\.com/go/compute/metadata$' \
+    || true)
+  if [[ -n "$AZURE_UNEXPECTED" ]]; then
+    echo "  FAIL: azure-sdk-for-go transitive deps in core build graph:"
+    printf '    %s\n' $AZURE_UNEXPECTED
+    FAIL=1
+  fi
+  if [[ -n "$API_UNEXPECTED" ]]; then
+    echo "  FAIL: google.golang.org/api transitive deps in core build graph:"
+    printf '    %s\n' $API_UNEXPECTED
+    FAIL=1
+  fi
+  if [[ -n "$GCP_UNEXPECTED" ]]; then
+    echo "  FAIL: unexpected cloud.google.com/go transitive deps in core build graph:"
+    printf '    %s\n' $GCP_UNEXPECTED
+    echo
+    echo "  Only cloud.google.com/go/compute/metadata is allowlisted (OAuth2 ADC helper"
+    echo "  pulled by provider/gcp's service-account auth). If you need a new GCP SDK"
+    echo "  package, factor it into a plugin instead — workflow core is gcp-SDK-free"
+    echo "  per Phase C (plan 2026-05-15-plugin-modules-on-iac.md Task 18)."
+    FAIL=1
+  fi
+  if [[ -z "$AZURE_UNEXPECTED$API_UNEXPECTED$GCP_UNEXPECTED" ]]; then
+    echo "  build graph: clean (compute/metadata allowlisted)"
+  fi
+else
+  echo "  build-graph gate skipped (.phase-c-complete not armed or --check absent)"
+fi
+
+echo
 echo "== Advisory: platform_kubernetes_kind.go backend split readiness =="
 KIND=module/platform_kubernetes_kind.go
 if [[ -f module/platform_kubernetes_kind.go ]]; then

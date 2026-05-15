@@ -94,9 +94,8 @@ func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 			"install and load the plugin to use the S3 backend (wfctl direct-path commands no longer support in-tree s3)", backend)
 
 	case "gcs":
-		return nil, fmt.Errorf("gcs state store backend not yet supported by wfctl direct-path commands; " +
-			"create the bucket manually and reference it in iac.state.bucket. " +
-			"Contribute a resolveGCSStateStore helper to unblock this")
+		return nil, fmt.Errorf("iac.state backend %q is now plugin-served by workflow-plugin-gcp v1.1.0; "+
+			"install and load the plugin to use the GCS backend (wfctl direct-path commands no longer support in-tree gcs)", backend)
 
 	case "azure":
 		return nil, fmt.Errorf("azure state store backend not yet supported by wfctl direct-path commands; " +
