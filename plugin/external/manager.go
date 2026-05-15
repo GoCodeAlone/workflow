@@ -262,6 +262,9 @@ func validatePluginLaunch(name string, launch *pluginLaunch) error {
 	if launch.client == nil {
 		return fmt.Errorf("plugin %q launch returned nil client", name)
 	}
+	if launch.adapter == nil {
+		return fmt.Errorf("plugin %q launch returned nil adapter", name)
+	}
 	return nil
 }
 
