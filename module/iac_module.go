@@ -10,10 +10,10 @@ import (
 )
 
 // IaCModule registers an IaCStateStore in the service registry.
-// Supported in-core backends: "memory" (default), "filesystem", "gcs", and
-// "postgres" — plus any backend provided by a loaded plugin (e.g. "azure_blob"
-// via workflow-plugin-azure, "spaces" via workflow-plugin-digitalocean, "s3"
-// via workflow-plugin-aws).
+// Supported in-core backends: "memory" (default), "filesystem", and "postgres"
+// — plus any backend provided by a loaded plugin (e.g. "azure_blob" via
+// workflow-plugin-azure, "spaces" via workflow-plugin-digitalocean, "s3" via
+// workflow-plugin-aws, "gcs" via workflow-plugin-gcp).
 //
 // Config example:
 //
@@ -54,17 +54,6 @@ func (m *IaCModule) Init(app modular.Application) error {
 			dir = "/var/lib/workflow/iac-state"
 		}
 		m.store = NewFSIaCStateStore(dir)
-	case "gcs":
-		bucket, _ := m.config["bucket"].(string)
-		prefix, _ := m.config["prefix"].(string)
-		if bucket == "" {
-			return fmt.Errorf("iac.state %q: gcs backend requires 'bucket' config", m.name)
-		}
-		store, err := NewGCSIaCStateStore(context.Background(), bucket, prefix)
-		if err != nil {
-			return fmt.Errorf("iac.state %q: gcs backend: %w", m.name, err)
-		}
-		m.store = store
 	case "postgres":
 		dsn, _ := m.config["dsn"].(string)
 		if dsn == "" {
@@ -96,10 +85,10 @@ func (m *IaCModule) Init(app modular.Application) error {
 			break
 		}
 		return fmt.Errorf("iac.state %q: backend %q is not built into workflow core "+
-			"(in-core backends: 'memory', 'filesystem', 'gcs', 'postgres'). "+
+			"(in-core backends: 'memory', 'filesystem', 'postgres'). "+
 			"If %q is a plugin-provided backend (e.g. 'azure_blob' via workflow-plugin-azure, "+
-			"'spaces' via workflow-plugin-digitalocean, 's3' via workflow-plugin-aws), "+
-			"install and load that plugin", m.name, m.backend, m.backend)
+			"'spaces' via workflow-plugin-digitalocean, 's3' via workflow-plugin-aws, "+
+			"'gcs' via workflow-plugin-gcp), install and load that plugin", m.name, m.backend, m.backend)
 	}
 
 	return app.RegisterService(m.name, m.store)

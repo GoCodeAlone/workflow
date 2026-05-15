@@ -536,7 +536,6 @@ See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 ### Storage
 | Type | Description | Plugin |
 |------|-------------|--------|
-| `storage.gcs` | Google Cloud Storage | storage |
 | `storage.local` | Local filesystem storage | storage |
 | `storage.sqlite` | SQLite storage | storage |
 | `storage.artifact` | Artifact store for build artifacts shared across pipeline steps | storage |
