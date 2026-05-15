@@ -1,7 +1,7 @@
 # Plugin Modules on IaC — extending `ServeIaCPlugin` to also serve module + step factories
 
 **Date:** 2026-05-15
-**Status:** Design — pre adversarial-design-review
+**Status:** Design — adversarial-design-review cycle-2 PASS-with-acceptance (both phases); plan locked 2026-05-15T05:19:00Z
 **Owner:** autonomous pipeline (workflow#TBD)
 
 ## Relationship to the locked B/C/D plan
