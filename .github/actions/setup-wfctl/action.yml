@@ -61,6 +61,10 @@ runs:
             exit 1
             ;;
         esac
+        if [ "${GOOS}" = "windows" ] && [ "${GOARCH}" = "arm64" ]; then
+          echo "Unsupported platform: Windows ARM64 wfctl release assets are not published" >&2
+          exit 1
+        fi
 
         ASSET="wfctl-${GOOS}-${GOARCH}"
         if [ "${GOOS}" = "windows" ]; then
