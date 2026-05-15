@@ -1789,6 +1789,13 @@ func TestStdEngine_RegisteredStepTypes(t *testing.T) {
 	}
 }
 
+func TestStdEngine_RegisteredStepTypes_NilRegistry(t *testing.T) {
+	engine := &StdEngine{}
+	if types := engine.RegisteredStepTypes(); types != nil {
+		t.Fatalf("expected nil step types for nil registry, got %v", types)
+	}
+}
+
 func TestStdEngine_RegisteredTriggerTypes(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())

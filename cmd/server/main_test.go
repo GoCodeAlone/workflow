@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -987,6 +989,131 @@ func TestReloadEngine_SuccessReplacesEngine(t *testing.T) {
 	}
 	if app.engine == nil {
 		t.Error("expected non-nil engine after successful reload")
+	}
+}
+
+// TestReloadEngine_StartFailureRollsBackToPriorConfig verifies that a candidate
+// engine start failure restores the prior config and active engine.
+func TestReloadEngine_StartFailureRollsBackToPriorConfig(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	initialCfg := config.NewEmptyWorkflowConfig()
+
+	app, err := setup(logger, initialCfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	originalConfig := app.currentConfig
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on test port: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	conflictingCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "conflicting-server",
+				Type:   "http.server",
+				Config: map[string]any{"address": listener.Addr().String()},
+			},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+
+	reloadErr := app.reloadEngine(conflictingCfg)
+	if reloadErr == nil {
+		t.Fatal("expected reloadEngine to fail when candidate cannot bind its port")
+	}
+	if app.currentConfig != originalConfig {
+		t.Error("expected rollback to restore previous config pointer")
+	}
+	if app.engine == nil {
+		t.Fatal("expected rollback to leave an active engine")
+	}
+}
+
+func TestReloadEngine_StartFailureReportsRollbackBuildFailure(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	app, err := setup(logger, config.NewEmptyWorkflowConfig())
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	app.currentConfig = &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "bad", Type: "nonexistent.module.type.for.rollback"},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on test port: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	reloadErr := app.reloadEngine(configWithHTTPServerOn(listener.Addr().String()))
+	if reloadErr == nil {
+		t.Fatal("expected reloadEngine to report rollback build failure")
+	}
+	if !strings.Contains(reloadErr.Error(), "rollback build failed") {
+		t.Fatalf("expected rollback build failure, got %v", reloadErr)
+	}
+}
+
+func TestReloadEngine_StartFailureReportsRollbackStartFailure(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	app, err := setup(logger, config.NewEmptyWorkflowConfig())
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on test port: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	conflictingCfg := configWithHTTPServerOn(listener.Addr().String())
+	app.currentConfig = conflictingCfg
+
+	reloadErr := app.reloadEngine(conflictingCfg)
+	if reloadErr == nil {
+		t.Fatal("expected reloadEngine to report rollback start failure")
+	}
+	if !strings.Contains(reloadErr.Error(), "rollback start failed") {
+		t.Fatalf("expected rollback start failure, got %v", reloadErr)
+	}
+}
+
+func configWithHTTPServerOn(address string) *config.WorkflowConfig {
+	return &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "conflicting-server",
+				Type:   "http.server",
+				Config: map[string]any{"address": address},
+			},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 }
 

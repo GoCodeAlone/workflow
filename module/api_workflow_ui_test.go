@@ -711,6 +711,23 @@ func TestWorkflowUIHandler_TryActivate_Failure(t *testing.T) {
 	}
 }
 
+func TestWorkflowUIHandler_TryActivate_InvalidJSON(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	h.SetTryActivateFunc(func(cfg *config.WorkflowConfig) (*TryActivateResult, error) {
+		t.Fatal("tryActivateFn should not be called for invalid JSON")
+		return nil, nil
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/try-activate", strings.NewReader("{"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleTryActivate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestWorkflowUIHandler_TryActivate_ServeHTTP verifies the ServeHTTP dispatch
 // includes the try-activate path.
 func TestWorkflowUIHandler_TryActivate_ServeHTTP(t *testing.T) {
