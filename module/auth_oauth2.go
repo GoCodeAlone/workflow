@@ -32,8 +32,8 @@ import (
 //
 //	https://developers.google.com/identity/protocols/oauth2/web-server
 var googleOAuth2Endpoint = oauth2.Endpoint{
-	AuthURL:  "https://accounts.google.com/o/oauth2/auth",
-	TokenURL: "https://oauth2.googleapis.com/token", //nolint:gosec // G101: public OAuth2 token endpoint URL, not a credential
+	AuthURL:  "https://accounts.google.com/o/oauth2/auth", //nolint:gosec // G101: public OAuth2 auth endpoint URL, not a credential
+	TokenURL: "https://oauth2.googleapis.com/token",       //nolint:gosec // G101: public OAuth2 token endpoint URL, not a credential
 }
 
 // OAuth2ProviderConfig holds configuration for a single OAuth2 provider.

@@ -42,7 +42,9 @@ real_import() {  # file, sdk → 0 if sdk appears in a real import (block OR sin
   # under `set -o pipefail`.
   # Single-line form matches plain, aliased, dot, and blank imports:
   #   import "pkg" / import foo "pkg" / import . "pkg" / import _ "pkg"
-  { import_block "$1"; grep -E '^import +([A-Za-z_.][A-Za-z0-9_]* +)?"' "$1" 2>/dev/null || true; } | grep -q "$2"
+  # Match the SDK string with `-F` (fixed string): SDK prefixes contain `.`
+  # which would otherwise be regex metachars matching any character.
+  { import_block "$1"; grep -E '^import +([A-Za-z_.][A-Za-z0-9_]* +)?"' "$1" 2>/dev/null || true; } | grep -qF "$2"
 }
 
 CHECK=0
@@ -136,10 +138,13 @@ if [[ $CHECK -eq 1 && -f .phase-c-complete ]]; then
   fi
   # `|| true` on each grep is fine: grep returning 1 means "no matches" =
   # success case. Only the outer `go list` exit code matters for gate sanity.
-  AZURE_UNEXPECTED=$(echo "$DEPS" | grep -F 'github.com/Azure/azure-sdk-for-go' || true)
-  API_UNEXPECTED=$(echo "$DEPS" | grep '^google\.golang\.org/api' || true)
+  # Anchor every prefix to `^`: `go list` may emit `go: downloading …` lines
+  # on stderr that get captured into $DEPS during transient module fetches —
+  # matching unanchored would false-fail on those informational lines.
+  AZURE_UNEXPECTED=$(echo "$DEPS" | grep -E '^github\.com/Azure/azure-sdk-for-go' || true)
+  API_UNEXPECTED=$(echo "$DEPS" | grep -E '^google\.golang\.org/api' || true)
   GCP_UNEXPECTED=$(echo "$DEPS" \
-    | grep '^cloud\.google\.com/go' \
+    | grep -E '^cloud\.google\.com/go' \
     | grep -v '^cloud\.google\.com/go/compute/metadata$' \
     || true)
   if [[ -n "$AZURE_UNEXPECTED" ]]; then
