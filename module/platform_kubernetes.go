@@ -89,15 +89,33 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 		clusterType = "kind"
 	}
 
-	factory, ok := kubernetesBackendRegistry[clusterType]
-	if !ok {
-		return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)
+	if _, isCore := reservedKubernetesBackendTypes[clusterType]; isCore {
+		// SDK-free in-core backend (kind/k3s/eks/aks) — use the in-process
+		// factory map unchanged.
+		factory, ok := kubernetesBackendRegistry[clusterType]
+		if !ok {
+			return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)
+		}
+		backend, err := factory(m.config)
+		if err != nil {
+			return fmt.Errorf("platform.kubernetes %q: creating backend: %w", m.name, err)
+		}
+		m.backend = backend
+	} else {
+		// Not an in-core cluster type — consult the plugin-backend registry.
+		// The engine populates kubernetesBackendClientRegistryInstance at
+		// plugin-load time; a resolved type (e.g. gke) is served over gRPC via
+		// the ResourceDriver contract, wrapped in grpcKubernetesBackend. Per
+		// ADR 0037.
+		client, ok := kubernetesBackendClientRegistryInstance.resolve(clusterType)
+		if !ok {
+			return fmt.Errorf("platform.kubernetes %q: cluster type %q is not built into workflow core "+
+				"(in-core types: 'kind', 'k3s', 'eks', 'aks'). If %q is a plugin-provided backend "+
+				"(e.g. 'gke' via workflow-plugin-gcp), install and load that plugin",
+				m.name, clusterType, clusterType)
+		}
+		m.backend = newGRPCKubernetesBackend(client)
 	}
-	backend, err := factory(m.config)
-	if err != nil {
-		return fmt.Errorf("platform.kubernetes %q: creating backend: %w", m.name, err)
-	}
-	m.backend = backend
 
 	version, _ := m.config["version"].(string)
 	m.state = &KubernetesClusterState{

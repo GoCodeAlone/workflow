@@ -339,6 +339,22 @@ func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool
 			}
 		}
 	}
+	// Register any platform.kubernetes backends the plugin serves into module's
+	// package-level registry, so `platform.kubernetes` configs with a
+	// plugin-provided `type:` (e.g. gke) dispatch to the plugin-served
+	// ResourceDriver-backed backend. Per ADR 0037 — folds into the existing
+	// ResourceDriver contract, no new proto surface.
+	if kb, ok := p.(plugin.KubernetesBackendProvider); ok {
+		clients, err := kb.KubernetesBackendClients()
+		if err != nil {
+			return fmt.Errorf("load plugin %q: kubernetes backends: %w", p.EngineManifest().Name, err)
+		}
+		for name, client := range clients {
+			if err := module.RegisterKubernetesBackendClient(name, client); err != nil {
+				return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
+			}
+		}
+	}
 	e.enginePlugins = append(e.enginePlugins, p)
 	return nil
 }
