@@ -424,7 +424,10 @@ After PR 1 merges, the team-lead cuts workflow `v0.53.0` from `origin/main` HEAD
 
 **Step 2: Verify it fails** — `cd /Users/jon/workspace/workflow-plugin-aws && go test ./internal/awscreds/ -v` → FAIL `undefined`.
 
-**Step 3: Implement** — `internal/awscreds/awscreds.go`:
+**Step 3: Implement** — `internal/awscreds/awscreds.go`. **IMPORTANT path-routing note:** `CredInput.Source` is populated DIFFERENTLY depending on which call-site is constructing the input:
+- **Standalone-module path (`storage.s3`/`step.s3_upload`/`aws.credentials` Providers in Tasks 4-6 of this plan):** the Provider's `CreateModule`/`CreateStep` reads `config["credentials"]["type"]` (the YAML field — `"static"`/`"env"`/`"profile"`/`"role_arn"`) directly from the supplied config map and assigns it to `CredInput.Source`. The plugin SUBPROCESS receives that raw config; `CloudCredentials.Extra` is never serialized into the standalone-module config path.
+- **IaC-provider path (the existing aws plugin's `IaCProviderRequired.Initialize`):** the IaC provider also receives the raw YAML config (not `CloudCredentials.Extra`), so populate `CredInput.Source` from `config["credentials"]["type"]` THERE TOO. Task 13's `credential_source` marker on `CloudAccount.Extra` is consumed only by in-core code paths that THIS plan's PR 4 deletes; it never crosses the gRPC boundary into the plugin subprocess.
+
 ```go
 type CredInput struct {
     AccessKey    string
@@ -434,7 +437,7 @@ type CredInput struct {
     RoleARN      string
     ExternalID   string
     Profile      string
-    Source       string  // "static"|"env"|"profile"|"role_arn"|"" — the marker from CloudAccount.Extra["credential_source"]
+    Source       string  // "static"|"env"|"profile"|"role_arn"|"" — populated by the call-site from config["credentials"]["type"] (the YAML field). NOT from CloudAccount.Extra (which never crosses the plugin boundary).
 }
 
 func BuildAWSConfig(ctx context.Context, c CredInput) (aws.Config, error) {
