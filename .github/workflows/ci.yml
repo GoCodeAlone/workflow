@@ -420,7 +420,17 @@ jobs:
         env:
           GOWORK: "off"
         run: |
-          UNEXPECTED=$(go list -deps ./... \
+          set +e
+          DEPS=$(go list -deps ./... 2>&1)
+          LIST_EXIT=$?
+          set -e
+          if [ $LIST_EXIT -ne 0 ]; then
+            echo "FAIL: \`go list -deps ./...\` exited $LIST_EXIT (gate cannot enforce):"
+            echo "$DEPS" | head -10 | sed 's/^/  /'
+            exit 1
+          fi
+          # `|| true` on grep is fine: exit 1 from grep means "no matches" = success.
+          UNEXPECTED=$(echo "$DEPS" \
             | grep -E '^(cloud\.google\.com/go|google\.golang\.org/api|github\.com/Azure/azure-sdk-for-go)' \
             | grep -v '^cloud\.google\.com/go/compute/metadata$' \
             || true)

@@ -122,7 +122,20 @@ echo "== Invariant: build graph has no unexpected gcp/azure/api transitive deps 
 # Asymmetric vs aws-sdk-go-v2 (Phase B): aws-sdk-go-v2 STAYS for out-of-scope
 # provider/aws/ + plugin/rbac/aws.go + iam/aws.go + artifact/s3.go.
 if [[ $CHECK -eq 1 && -f .phase-c-complete ]]; then
-  DEPS=$(GOWORK=off go list -deps ./... 2>/dev/null || true)
+  # Capture exit code separately so a failed `go list` cannot be swallowed
+  # by `|| true` (which would also mask legitimate gate violations).
+  set +e
+  DEPS=$(GOWORK=off go list -deps ./... 2>&1)
+  LIST_EXIT=$?
+  set -e
+  if [[ $LIST_EXIT -ne 0 ]]; then
+    echo "  FAIL: \`go list -deps ./...\` exited $LIST_EXIT (gate cannot enforce):"
+    echo "$DEPS" | head -10 | sed 's/^/    /'
+    FAIL=1
+    DEPS=""
+  fi
+  # `|| true` on each grep is fine: grep returning 1 means "no matches" =
+  # success case. Only the outer `go list` exit code matters for gate sanity.
   AZURE_UNEXPECTED=$(echo "$DEPS" | grep -F 'github.com/Azure/azure-sdk-for-go' || true)
   API_UNEXPECTED=$(echo "$DEPS" | grep '^google\.golang\.org/api' || true)
   GCP_UNEXPECTED=$(echo "$DEPS" \

@@ -20,9 +20,14 @@ import (
 // googleOAuth2Endpoint hard-codes Google's static IdP OAuth2 endpoints (RFC 6749).
 // We avoid importing `golang.org/x/oauth2/google` because its package init
 // transitively pulls `cloud.google.com/go/compute/metadata` (an ADC helper
-// for GCE/GKE workload identity) — and Phase C's permanent asymmetric CI
-// gate (decisions/0034 + plan 2026-05-15-plugin-modules-on-iac.md Task 18)
-// asserts zero `cloud.google.com/go/*` packages in core's build graph.
+// for GCE/GKE workload identity). The Phase C asymmetric CI gate
+// (decisions/0034 + plan 2026-05-15-plugin-modules-on-iac.md Task 18) asserts
+// no UNEXPECTED `cloud.google.com/go/*` packages in core's build graph;
+// `cloud.google.com/go/compute/metadata` is allowlisted as the OAuth2 ADC
+// helper transitively pulled by provider/gcp's service-account auth. Keeping
+// this auth handler off `oauth2/google` keeps that allowlist single-purpose
+// (provider/gcp only) — adding a second importer would entrench the
+// transitive dep in a surface that doesn't need it.
 // These URLs are static published Google OAuth2 endpoints:
 //
 //	https://developers.google.com/identity/protocols/oauth2/web-server
