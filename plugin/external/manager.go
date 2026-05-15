@@ -23,6 +23,13 @@ type ExternalPluginManager struct {
 	clients map[string]*goplugin.Client
 
 	callbackServer *CallbackServer
+
+	startPlugin func(name string) (*pluginLaunch, error)
+}
+
+type pluginLaunch struct {
+	client  *goplugin.Client
+	adapter *ExternalPluginAdapter
 }
 
 // NewExternalPluginManager creates a new manager that scans the given directory for plugins.
@@ -89,6 +96,25 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 
 	if _, exists := m.clients[name]; exists {
 		return nil, fmt.Errorf("plugin %q is already loaded", name)
+	}
+
+	launch, err := m.startPluginLocked(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := validatePluginLaunch(name, launch); err != nil {
+		return nil, err
+	}
+
+	m.clients[name] = launch.client
+	m.logger.Printf("plugin %q loaded successfully", name)
+
+	return launch.adapter, nil
+}
+
+func (m *ExternalPluginManager) startPluginLocked(name string) (*pluginLaunch, error) {
+	if m.startPlugin != nil {
+		return m.startPlugin(name)
 	}
 
 	pluginDir := filepath.Join(m.pluginsDir, name)
@@ -172,10 +198,7 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 		return nil, fmt.Errorf("create adapter for plugin %q: %w", name, err)
 	}
 
-	m.clients[name] = client
-	m.logger.Printf("plugin %q loaded successfully", name)
-
-	return adapter, nil
+	return &pluginLaunch{client: client, adapter: adapter}, nil
 }
 
 // UnloadPlugin stops the named plugin subprocess and removes it from the internal map.
@@ -196,12 +219,50 @@ func (m *ExternalPluginManager) UnloadPlugin(name string) error {
 	return nil
 }
 
-// ReloadPlugin unloads and then loads the named plugin.
+// ReloadPlugin starts and validates the replacement before stopping the
+// currently loaded plugin. Candidate failure leaves the old process registered.
 func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapter, error) {
-	// Unload first (ignore error if not loaded)
-	_ = m.UnloadPlugin(name)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	return m.LoadPlugin(name)
+	oldClient, wasLoaded := m.clients[name]
+	if !wasLoaded {
+		launch, err := m.startPluginLocked(name)
+		if err != nil {
+			return nil, err
+		}
+		if err := validatePluginLaunch(name, launch); err != nil {
+			return nil, err
+		}
+		m.clients[name] = launch.client
+		m.logger.Printf("plugin %q loaded successfully", name)
+		return launch.adapter, nil
+	}
+
+	launch, err := m.startPluginLocked(name)
+	if err != nil {
+		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
+		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
+	}
+	if err := validatePluginLaunch(name, launch); err != nil {
+		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
+		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
+	}
+
+	m.clients[name] = launch.client
+	oldClient.Kill()
+	m.logger.Printf("plugin %q reloaded successfully", name)
+	return launch.adapter, nil
+}
+
+func validatePluginLaunch(name string, launch *pluginLaunch) error {
+	if launch == nil {
+		return fmt.Errorf("plugin %q launch returned nil result", name)
+	}
+	if launch.client == nil {
+		return fmt.Errorf("plugin %q launch returned nil client", name)
+	}
+	return nil
 }
 
 // LoadedPlugins returns the names of all currently loaded plugins.
