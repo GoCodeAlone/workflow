@@ -48,7 +48,7 @@
 
 **Cross-plan boundary:** The locked B/C/D plan stays as-is. That plan's PR 6 (workflow #TBD — Phase B core deletion) and PR 10 (workflow #TBD — Phase C core deletion) **are not opened** — their work ships under THIS plan's PR 4 + PR 5. The locked plan's PR 8 (workflow-plugin-gcp Tasks 20-24 + release) is **partially absorbed**: Tasks 20/21/22 commits already exist on `feat/gcs-gke-storage`; Tasks 23/24 + release ship under THIS plan's PR 3 (which reuses that same branch). The locked plan's manifest does not need to be unlocked — the work gets done; it just ships under different PR numbers, recorded in `decisions/0038`.
 
-**Status:** Draft
+**Status:** Locked 2026-05-15T05:19:00Z
 
 ---
 
