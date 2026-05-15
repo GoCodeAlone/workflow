@@ -10,10 +10,10 @@ import (
 )
 
 // IaCModule registers an IaCStateStore in the service registry.
-// Supported in-core backends: "memory" (default), "filesystem", "spaces"
-// (DigitalOcean Spaces / S3-compatible), "gcs", and "postgres" — plus any
-// backend provided by a loaded plugin (e.g. "azure_blob" via
-// workflow-plugin-azure).
+// Supported in-core backends: "memory" (default), "filesystem", "gcs", and
+// "postgres" — plus any backend provided by a loaded plugin (e.g. "azure_blob"
+// via workflow-plugin-azure, "spaces" via workflow-plugin-digitalocean, "s3"
+// via workflow-plugin-aws).
 //
 // Config example:
 //
@@ -54,21 +54,6 @@ func (m *IaCModule) Init(app modular.Application) error {
 			dir = "/var/lib/workflow/iac-state"
 		}
 		m.store = NewFSIaCStateStore(dir)
-	case "spaces":
-		region, _ := m.config["region"].(string)
-		bucket, _ := m.config["bucket"].(string)
-		prefix, _ := m.config["prefix"].(string)
-		accessKey, _ := m.config["accessKey"].(string)
-		secretKey, _ := m.config["secretKey"].(string)
-		endpoint, _ := m.config["endpoint"].(string)
-		if bucket == "" {
-			return fmt.Errorf("iac.state %q: spaces backend requires 'bucket' config", m.name)
-		}
-		store, err := NewSpacesIaCStateStore(region, bucket, prefix, accessKey, secretKey, endpoint)
-		if err != nil {
-			return fmt.Errorf("iac.state %q: spaces backend: %w", m.name, err)
-		}
-		m.store = store
 	case "gcs":
 		bucket, _ := m.config["bucket"].(string)
 		prefix, _ := m.config["prefix"].(string)
@@ -111,8 +96,9 @@ func (m *IaCModule) Init(app modular.Application) error {
 			break
 		}
 		return fmt.Errorf("iac.state %q: backend %q is not built into workflow core "+
-			"(in-core backends: 'memory', 'filesystem', 'spaces', 'gcs', 'postgres'). "+
-			"If %q is a plugin-provided backend (e.g. 'azure_blob' via workflow-plugin-azure), "+
+			"(in-core backends: 'memory', 'filesystem', 'gcs', 'postgres'). "+
+			"If %q is a plugin-provided backend (e.g. 'azure_blob' via workflow-plugin-azure, "+
+			"'spaces' via workflow-plugin-digitalocean, 's3' via workflow-plugin-aws), "+
 			"install and load that plugin", m.name, m.backend, m.backend)
 	}
 

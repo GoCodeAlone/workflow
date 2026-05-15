@@ -27,9 +27,9 @@ import (
 //     the real-world fidelity check.
 //
 //   - The test reads the fixture via the v1.0.0 wfctl iacStateRecord
-//     decoder (the same path loadFSState / spacesWfctlStateStore.
-//     ListResources use), then converts it via iacRecordToResourceState
-//     and asserts every load-bearing field survived.
+//     decoder (the same path loadFSState / fsWfctlStateStore.ListResources
+//     use), then converts it via iacRecordToResourceState and asserts every
+//     load-bearing field survived.
 //
 // If this test FAILS in CI: PR 5 cascade-block surfaces. Plan response
 // (per Task 31 §If FAIL):
