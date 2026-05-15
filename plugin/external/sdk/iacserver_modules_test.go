@@ -91,7 +91,7 @@ func dialBridge(t *testing.T, s *grpc.Server) pb.PluginServiceClient {
 	lis := bufconn.Listen(1 << 20)
 	go func() { _ = s.Serve(lis) }()
 	t.Cleanup(s.Stop)
-	conn, err := grpc.NewClient("passthrough://bufnet",
+	conn, err := grpc.NewClient("passthrough:///bufnet",
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return lis.DialContext(ctx)
 		}),
@@ -141,6 +141,67 @@ func TestIaCBridge_ModulesAndSteps_Delegate(t *testing.T) {
 	if len(stepTypes.GetTypes()) != 1 || stepTypes.GetTypes()[0] != "step.test" {
 		t.Errorf("GetStepTypes = %v, want [step.test]", stepTypes.GetTypes())
 	}
+}
+
+// TestIaCBridge_ModuleStepTypes_Deterministic locks the lexicographic-order
+// contract: Go map iteration is randomized, so without sorting the
+// GetModuleTypes / GetStepTypes responses would differ run-to-run, breaking
+// cache keys + any caller that compares the list as an ordered sequence.
+// Three entries inserted in a non-alphabetical order; expect alphabetical back.
+func TestIaCBridge_ModuleStepTypes_Deterministic(t *testing.T) {
+	opts := IaCServeOptions{
+		Modules: map[string]ModuleProvider{
+			"storage.zeta":  &fakeModuleProvider{types: []string{"storage.zeta"}},
+			"storage.alpha": &fakeModuleProvider{types: []string{"storage.alpha"}},
+			"storage.beta":  &fakeModuleProvider{types: []string{"storage.beta"}},
+		},
+		Steps: map[string]StepProvider{
+			"step.zeta":  &fakeStepProvider{types: []string{"step.zeta"}},
+			"step.alpha": &fakeStepProvider{types: []string{"step.alpha"}},
+			"step.beta":  &fakeStepProvider{types: []string{"step.beta"}},
+		},
+	}
+	s := grpc.NewServer()
+	if err := registerAllIaCProviderServicesWithOpts(s, &fakeIaCRequiredProvider{}, opts); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	client := dialBridge(t, s)
+	ctx := context.Background()
+
+	wantMods := []string{"storage.alpha", "storage.beta", "storage.zeta"}
+	wantSteps := []string{"step.alpha", "step.beta", "step.zeta"}
+
+	// Multiple iterations guard against an unsorted impl happening to win the
+	// race on the first call; a non-sorted slice WILL eventually differ across
+	// runs given Go's randomized map iteration.
+	for i := 0; i < 5; i++ {
+		modTypes, err := client.GetModuleTypes(ctx, &emptypb.Empty{})
+		if err != nil {
+			t.Fatalf("GetModuleTypes iter %d: %v", i, err)
+		}
+		if got := modTypes.GetTypes(); !stringSliceEqual(got, wantMods) {
+			t.Fatalf("GetModuleTypes iter %d = %v, want %v (must be lexicographic)", i, got, wantMods)
+		}
+		stepTypes, err := client.GetStepTypes(ctx, &emptypb.Empty{})
+		if err != nil {
+			t.Fatalf("GetStepTypes iter %d: %v", i, err)
+		}
+		if got := stepTypes.GetTypes(); !stringSliceEqual(got, wantSteps) {
+			t.Fatalf("GetStepTypes iter %d = %v, want %v (must be lexicographic)", i, got, wantSteps)
+		}
+	}
+}
+
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestIaCBridge_ZeroValueOptions_ModulesUnimplemented is the backwards-compat

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	"google.golang.org/grpc"
@@ -351,12 +352,17 @@ type mapBackedProvider struct {
 // PluginProvider parameter type-checks at compile time.
 func (p *mapBackedProvider) Manifest() PluginManifest { return PluginManifest{} }
 
-// ModuleTypes returns the keys of the modules map.
+// ModuleTypes returns the keys of the modules map in deterministic
+// (lexicographic) order. Sorting matters because Go map iteration is
+// randomized — without it, GetModuleTypes responses would differ run-to-run,
+// breaking cache keys, golden files, and any caller that compares the list as
+// an ordered sequence.
 func (p *mapBackedProvider) ModuleTypes() []string {
 	out := make([]string, 0, len(p.modules))
 	for name := range p.modules {
 		out = append(out, name)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -369,12 +375,14 @@ func (p *mapBackedProvider) CreateModule(typeName, name string, config map[strin
 	return mp.CreateModule(typeName, name, config)
 }
 
-// StepTypes returns the keys of the steps map.
+// StepTypes returns the keys of the steps map in deterministic
+// (lexicographic) order — same rationale as ModuleTypes.
 func (p *mapBackedProvider) StepTypes() []string {
 	out := make([]string, 0, len(p.steps))
 	for name := range p.steps {
 		out = append(out, name)
 	}
+	sort.Strings(out)
 	return out
 }
 
