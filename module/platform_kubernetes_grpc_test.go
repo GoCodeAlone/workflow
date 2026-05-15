@@ -70,6 +70,78 @@ func newGKETestModule() *PlatformKubernetes {
 	})
 }
 
+// TestGRPCKubernetesBackend_BuildResourceRef_FullyQualifiedProviderID locks the
+// fully-qualified GKE resource path the adapter must put in ResourceRef.ProviderId
+// (GKE cluster names alone are not globally unique).
+func TestGRPCKubernetesBackend_BuildResourceRef_FullyQualifiedProviderID(t *testing.T) {
+	b := newGRPCKubernetesBackend(&fakeResourceDriverClient{})
+
+	t.Run("project + zone from module config", func(t *testing.T) {
+		m := NewPlatformKubernetes("mod-name", map[string]any{
+			"type":        "gke",
+			"clusterName": "my-cluster",
+			"project_id":  "p",
+			"zone":        "us-central1-a",
+		})
+		ref := b.buildResourceRef(m)
+		want := "projects/p/locations/us-central1-a/clusters/my-cluster"
+		if ref.GetProviderId() != want {
+			t.Errorf("ProviderId = %q, want %q", ref.GetProviderId(), want)
+		}
+		if ref.GetName() != "my-cluster" || ref.GetType() != gkeResourceType {
+			t.Errorf("ref name/type mismatch: name=%q type=%q", ref.GetName(), ref.GetType())
+		}
+	})
+
+	t.Run("project + location from cloud account fallback", func(t *testing.T) {
+		m := NewPlatformKubernetes("mod-name", map[string]any{
+			"type": "gke", "clusterName": "my-cluster",
+		})
+		// fakeCredProvider.Region() returns "us-central1" — the cloud account
+		// is the fallback when module config omits both zone and location.
+		m.provider = &fakeCredProvider{creds: &CloudCredentials{
+			Provider: "gcp", ProjectID: "creds-project",
+		}}
+		ref := b.buildResourceRef(m)
+		want := "projects/creds-project/locations/us-central1/clusters/my-cluster"
+		if ref.GetProviderId() != want {
+			t.Errorf("ProviderId = %q, want %q", ref.GetProviderId(), want)
+		}
+	})
+
+	t.Run("no project or location → empty ProviderId", func(t *testing.T) {
+		m := NewPlatformKubernetes("mod-name", map[string]any{
+			"type": "gke", "clusterName": "my-cluster",
+		})
+		ref := b.buildResourceRef(m)
+		if ref.GetProviderId() != "" {
+			t.Errorf("ProviderId = %q, want empty when project/location unresolvable", ref.GetProviderId())
+		}
+	})
+}
+
+// TestGRPCKubernetesBackend_Status_StateNameIsModuleName locks the in-core
+// PlatformKubernetes.Init semantics: KubernetesClusterState.Name is the
+// module name, NOT the `clusterName` config override.
+func TestGRPCKubernetesBackend_Status_StateNameIsModuleName(t *testing.T) {
+	fake := &fakeResourceDriverClient{readResp: &pb.ResourceReadResponse{
+		Output: &pb.ResourceOutput{Name: "cluster-x", Type: gkeResourceType, Status: "running"},
+	}}
+	b := newGRPCKubernetesBackend(fake)
+	// module name "iac-gke" intentionally differs from clusterName "cluster-x".
+	m := NewPlatformKubernetes("iac-gke", map[string]any{
+		"type":        "gke",
+		"clusterName": "cluster-x",
+	})
+	st, err := b.status(m)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if st.Name != "iac-gke" {
+		t.Errorf("state.Name = %q, want module name %q (per PlatformKubernetes.Init semantics)", st.Name, "iac-gke")
+	}
+}
+
 func TestGRPCKubernetesBackend_Plan(t *testing.T) {
 	t.Run("not found → create action", func(t *testing.T) {
 		fake := &fakeResourceDriverClient{readErr: status.Error(codes.NotFound, "no such cluster")}
@@ -144,6 +216,39 @@ func TestGRPCKubernetesBackend_Apply(t *testing.T) {
 		}
 		if len(spec.GetConfigJson()) == 0 {
 			t.Fatal("Create spec config_json must carry the platform.kubernetes config")
+		}
+	})
+
+	t.Run("module config takes precedence over cloud account credentials", func(t *testing.T) {
+		// In-core gkeBackend honored explicit module-config keys over the
+		// cloud-account fallback; the adapter must preserve that precedence.
+		fake := &fakeResourceDriverClient{createResp: &pb.ResourceCreateResponse{
+			Output: &pb.ResourceOutput{Name: "my-cluster", Type: gkeResourceType, Status: "creating"},
+		}}
+		b := newGRPCKubernetesBackend(fake)
+		m := NewPlatformKubernetes("my-cluster", map[string]any{
+			"type":                 "gke",
+			"clusterName":          "my-cluster",
+			"project_id":           "config-project",
+			"service_account_json": `{"type":"from-config"}`,
+		})
+		m.provider = &fakeCredProvider{creds: &CloudCredentials{
+			Provider:           "gcp",
+			ProjectID:          "creds-project",
+			ServiceAccountJSON: []byte(`{"type":"from-creds"}`),
+		}}
+		if _, err := b.apply(m); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		cfg, err := jsonBytesToMap(fake.createReq.GetSpec().GetConfigJson())
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if cfg[k8sConfigKeyProjectID] != "config-project" {
+			t.Errorf("project_id = %v, want config-project (module config must win over cloud account)", cfg[k8sConfigKeyProjectID])
+		}
+		if cfg[k8sConfigKeyServiceAccountJSON] != `{"type":"from-config"}` {
+			t.Errorf("service_account_json = %v, want from-config (module config must win over cloud account)", cfg[k8sConfigKeyServiceAccountJSON])
 		}
 	})
 

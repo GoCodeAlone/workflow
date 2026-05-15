@@ -98,9 +98,25 @@ func TestPlatformKubernetes_GKEDispatchToPluginClient(t *testing.T) {
 // no plugin client registered fails Init with a clean error pointing the
 // operator at workflow-plugin-gcp.
 func TestPlatformKubernetes_GKEWithoutPluginErrors(t *testing.T) {
-	if _, ok := kubernetesBackendClientRegistryInstance.resolve("gke"); ok {
-		t.Skip("a gke client is registered by a concurrent test; skipping the negative case")
-	}
+	const clusterType = "gke"
+	// Clear any registration left by a sibling test (Go test order within a
+	// package is not guaranteed across files), then restore on cleanup. Doing
+	// this under the registry mutex keeps the test deterministic instead of
+	// skipping when a concurrent registration is present.
+	kubernetesBackendClientRegistryInstance.mu.Lock()
+	prev, hadPrev := kubernetesBackendClientRegistryInstance.clients[clusterType]
+	delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+	kubernetesBackendClientRegistryInstance.mu.Unlock()
+	defer func() {
+		kubernetesBackendClientRegistryInstance.mu.Lock()
+		if hadPrev {
+			kubernetesBackendClientRegistryInstance.clients[clusterType] = prev
+		} else {
+			delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+		}
+		kubernetesBackendClientRegistryInstance.mu.Unlock()
+	}()
+
 	m := NewPlatformKubernetes("gke-cluster", map[string]any{"type": "gke"})
 	err := m.Init(NewMockApplication())
 	if err == nil {

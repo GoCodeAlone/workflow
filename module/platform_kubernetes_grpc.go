@@ -131,7 +131,7 @@ func (b *grpcKubernetesBackend) apply(k *PlatformKubernetes) (*PlatformResult, e
 		}
 		return nil, fmt.Errorf("gke apply: Create %q: %w", k.clusterName(), err)
 	}
-	clusterState, err := kubernetesClusterStateFromOutput(k.clusterName(), resp.GetOutput())
+	clusterState, err := kubernetesClusterStateFromOutput(k.name, resp.GetOutput())
 	if err != nil {
 		return nil, fmt.Errorf("gke apply: %w", err)
 	}
@@ -153,11 +153,11 @@ func (b *grpcKubernetesBackend) status(k *PlatformKubernetes) (*KubernetesCluste
 	})
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			return &KubernetesClusterState{Name: k.clusterName(), Provider: "gke", Status: "not-found"}, nil
+			return &KubernetesClusterState{Name: k.name, Provider: "gke", Status: "not-found"}, nil
 		}
 		return nil, fmt.Errorf("gke status: Read %q: %w", k.clusterName(), err)
 	}
-	st, err := kubernetesClusterStateFromOutput(k.clusterName(), resp.GetOutput())
+	st, err := kubernetesClusterStateFromOutput(k.name, resp.GetOutput())
 	if err != nil {
 		return nil, fmt.Errorf("gke status: %w", err)
 	}
@@ -182,12 +182,53 @@ func (b *grpcKubernetesBackend) destroy(k *PlatformKubernetes) error {
 }
 
 // buildResourceRef builds the ResourceRef the ResourceDriver RPCs address the
-// cluster by — keyed on the cluster name and the infra.k8s_cluster type.
+// cluster by. ProviderID is the fully-qualified GKE resource path
+// `projects/<project>/locations/<location>/clusters/<name>` when both project
+// and location are resolvable — GKE cluster names alone are not globally
+// unique, and the in-core gkeBackend addressed clusters by this same FQN.
+// When project or location is unresolvable (e.g. a plan probe before any
+// cloud-account wiring), ProviderID is left empty.
 func (b *grpcKubernetesBackend) buildResourceRef(k *PlatformKubernetes) *pb.ResourceRef {
-	return &pb.ResourceRef{
+	ref := &pb.ResourceRef{
 		Name: k.clusterName(),
 		Type: gkeResourceType,
 	}
+	project, location := b.gkeProject(k), b.gkeLocation(k)
+	if project != "" && location != "" {
+		ref.ProviderId = fmt.Sprintf("projects/%s/locations/%s/clusters/%s", project, location, k.clusterName())
+	}
+	return ref
+}
+
+// gkeProject resolves the GCP project ID with module-config-first precedence:
+// k.config["project_id"] wins; falls back to the cloud account's ProjectID.
+// Mirrors the in-core gkeBackend.gkeProject helper.
+func (b *grpcKubernetesBackend) gkeProject(k *PlatformKubernetes) string {
+	if p, ok := k.config[k8sConfigKeyProjectID].(string); ok && p != "" {
+		return p
+	}
+	if k.provider != nil {
+		if creds, err := k.provider.GetCredentials(context.Background()); err == nil && creds != nil && creds.ProjectID != "" {
+			return creds.ProjectID
+		}
+	}
+	return ""
+}
+
+// gkeLocation resolves the GKE location (zone preferred, then region) with
+// module-config-first precedence. Mirrors the in-core gkeBackend.gkeLocation
+// helper.
+func (b *grpcKubernetesBackend) gkeLocation(k *PlatformKubernetes) string {
+	if z, ok := k.config["zone"].(string); ok && z != "" {
+		return z
+	}
+	if l, ok := k.config["location"].(string); ok && l != "" {
+		return l
+	}
+	if k.provider != nil {
+		return k.provider.Region()
+	}
+	return ""
 }
 
 // buildResourceSpec builds the ResourceSpec for a Create RPC. The user-supplied
@@ -217,12 +258,15 @@ func (b *grpcKubernetesBackend) buildResourceSpec(k *PlatformKubernetes) (*pb.Re
 	}, nil
 }
 
-// injectCredentials resolves the cloud account (when one is wired) and folds the
-// GCP project ID + service-account JSON into the spec config under the pinned
-// k8sConfigKey* names — the cross-process equivalent of the in-core
-// containerService building the SDK client from CloudCredentials. The key names
-// (snake_case) match the deleted in-core gkeBackend's config keys and are the
-// contract workflow-plugin-gcp's GKEDriver (Task 22) reads.
+// injectCredentials resolves the cloud account (when one is wired) and folds
+// the GCP project ID + service-account JSON into the spec config under the
+// pinned k8sConfigKey* names — the cross-process equivalent of the in-core
+// containerService building the SDK client from CloudCredentials.
+//
+// Precedence is module-config-first, mirroring the in-core gkeBackend:
+// explicit project_id / service_account_json in k.config win, and the cloud
+// account only fills the gaps. This keeps the user's escape hatch (e.g.
+// per-module credential overrides) functional.
 func (b *grpcKubernetesBackend) injectCredentials(k *PlatformKubernetes, cfg map[string]any) error {
 	if k.provider == nil {
 		return nil
@@ -234,22 +278,25 @@ func (b *grpcKubernetesBackend) injectCredentials(k *PlatformKubernetes, cfg map
 	if creds == nil {
 		return nil
 	}
-	if creds.ProjectID != "" {
+	if _, present := cfg[k8sConfigKeyProjectID]; !present && creds.ProjectID != "" {
 		cfg[k8sConfigKeyProjectID] = creds.ProjectID
 	}
-	if len(creds.ServiceAccountJSON) > 0 {
+	if _, present := cfg[k8sConfigKeyServiceAccountJSON]; !present && len(creds.ServiceAccountJSON) > 0 {
 		cfg[k8sConfigKeyServiceAccountJSON] = string(creds.ServiceAccountJSON)
 	}
 	return nil
 }
 
-// kubernetesClusterStateFromOutput projects a ResourceDriver ResourceOutput onto
-// the typed KubernetesClusterState. The free-form outputs_json map crosses the
-// wire as JSON bytes (the iac.proto invariant); this is the host-owned
-// map→struct projection ADR 0037 assigns to Tasks 25/26. The adapter sets
-// Provider="gke" itself and tolerates a missing/empty outputs_json.
-func kubernetesClusterStateFromOutput(name string, out *pb.ResourceOutput) (*KubernetesClusterState, error) {
-	st := &KubernetesClusterState{Name: name, Provider: "gke", Status: "not-found"}
+// kubernetesClusterStateFromOutput projects a ResourceDriver ResourceOutput
+// onto the typed KubernetesClusterState. The free-form outputs_json map
+// crosses the wire as JSON bytes (the iac.proto invariant); this is the
+// host-owned map→struct projection ADR 0037 assigns to Tasks 25/26. The
+// adapter sets Provider="gke" itself and tolerates a missing/empty
+// outputs_json. `moduleName` is the platform.kubernetes module name (NOT the
+// `clusterName` config override) — it matches the in-core
+// PlatformKubernetes.Init semantics where `state.Name = m.name`.
+func kubernetesClusterStateFromOutput(moduleName string, out *pb.ResourceOutput) (*KubernetesClusterState, error) {
+	st := &KubernetesClusterState{Name: moduleName, Provider: "gke", Status: "not-found"}
 	if out == nil {
 		return st, nil
 	}
