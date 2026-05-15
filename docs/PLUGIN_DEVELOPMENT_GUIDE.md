@@ -654,7 +654,13 @@ Gracefully stops the plugin subprocess and removes its types from the engine. An
 POST /api/v1/plugins/external/{name}/reload
 ```
 
-Equivalent to unload followed by load. Useful after updating the plugin binary on disk.
+Starts the replacement plugin subprocess, performs the handshake and contract
+validation, then swaps it into the active slot. If the candidate fails to load,
+the previously active plugin process stays registered and running.
+
+This API is a local activation primitive only: it consumes the plugin binary and
+manifest already staged on disk. Package trust, artifact download, signature
+verification, and fleet rollout policy belong to the caller or update manager.
 
 **Response (success):**
 ```json
