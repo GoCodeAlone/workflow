@@ -1,0 +1,96 @@
+name: Setup wfctl
+description: Download and install a specific version of wfctl from GitHub Releases.
+
+inputs:
+  version:
+    description: >
+      wfctl version to install (e.g. v0.52.0). Use "latest" to install the
+      most recent stable release.
+    required: false
+    default: latest
+
+outputs:
+  version:
+    description: The resolved wfctl version that was installed.
+    value: ${{ steps.resolve.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve version
+      id: resolve
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        if [ "${VERSION}" = "latest" ]; then
+          VERSION=$(curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/GoCodeAlone/workflow/releases/latest" \
+            | jq -r .tag_name)
+        fi
+        if [ -z "${VERSION}" ] || [ "${VERSION}" = "null" ]; then
+          echo "error: could not resolve wfctl version" >&2
+          exit 1
+        fi
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+    - name: Download wfctl
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ steps.resolve.outputs.version }}"
+        OS="${{ runner.os }}"
+        ARCH="${{ runner.arch }}"
+
+        # Map GitHub Actions runner values to Go GOOS/GOARCH naming
+        case "${OS}" in
+          Linux)   GOOS=linux   ;;
+          macOS)   GOOS=darwin  ;;
+          Windows) GOOS=windows ;;
+          *)
+            echo "Unsupported OS: ${OS}" >&2
+            exit 1
+            ;;
+        esac
+        case "${ARCH}" in
+          X64)   GOARCH=amd64 ;;
+          ARM64) GOARCH=arm64 ;;
+          *)
+            echo "Unsupported architecture: ${ARCH}" >&2
+            exit 1
+            ;;
+        esac
+
+        ASSET="wfctl-${GOOS}-${GOARCH}"
+        if [ "${GOOS}" = "windows" ]; then
+          ASSET="${ASSET}.exe"
+        fi
+
+        DOWNLOAD_URL="https://github.com/GoCodeAlone/workflow/releases/download/${VERSION}/${ASSET}"
+        echo "Downloading wfctl ${VERSION} from ${DOWNLOAD_URL}"
+
+        # Install into a directory that is (or will be) on PATH.
+        # Use RUNNER_TOOL_CACHE when available (hosted runners); fall back to
+        # a per-run temp dir so the binary is always reachable.
+        INSTALL_DIR="${RUNNER_TOOL_CACHE:-${RUNNER_TEMP}}/wfctl/${VERSION}"
+        mkdir -p "${INSTALL_DIR}"
+
+        DEST="${INSTALL_DIR}/wfctl"
+        if [ "${GOOS}" = "windows" ]; then
+          DEST="${DEST}.exe"
+        fi
+
+        curl -fsSL "${DOWNLOAD_URL}" -o "${DEST}" || {
+          echo "error: failed to download wfctl ${VERSION} for ${GOOS}/${GOARCH}" >&2
+          echo "  URL: ${DOWNLOAD_URL}" >&2
+          echo "  Verify the release exists: https://github.com/GoCodeAlone/workflow/releases/tag/${VERSION}" >&2
+          exit 1
+        }
+        chmod +x "${DEST}"
+        echo "${INSTALL_DIR}" >> "$GITHUB_PATH"
+        echo "Installed wfctl ${VERSION} to ${DEST}"
+
+    - name: Verify installation
+      shell: bash
+      run: wfctl --version
