@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	"google.golang.org/grpc"
@@ -81,10 +82,22 @@ func registerAllIaCProviderServicesWithOpts(s *grpc.Server, provider any, opts I
 	// (e.g. a mixed plugin that called sdk.Serve AND RegisterAllIaC).
 	// gRPC panics on double-registration; the guard prevents that.
 	if _, alreadyRegistered := s.GetServiceInfo()[pb.PluginService_ServiceDesc.ServiceName]; !alreadyRegistered {
-		pb.RegisterPluginServiceServer(s, &iacPluginServiceBridge{
+		bridge := &iacPluginServiceBridge{
 			grpcSrv:      s,
 			diskManifest: opts.ManifestProvider,
-		})
+		}
+		// Wire the optional grpc_server.go delegate when the caller supplied
+		// module or step providers. Zero-value Modules/Steps ⇒ delegate stays
+		// nil ⇒ module/step RPCs continue returning Unimplemented (current
+		// behavior preserved for strict-cutover IaC plugins). Per
+		// decisions/0038.
+		if opts.Modules != nil || opts.Steps != nil {
+			bridge.delegate = newGRPCServer(&mapBackedProvider{
+				modules: opts.Modules,
+				steps:   opts.Steps,
+			})
+		}
+		pb.RegisterPluginServiceServer(s, bridge)
 	}
 	return nil
 }
@@ -167,6 +180,87 @@ type iacPluginServiceBridge struct {
 	pb.UnimplementedPluginServiceServer
 	grpcSrv      *grpc.Server
 	diskManifest *pluginpkg.PluginManifest
+
+	// delegate, when non-nil, handles GetModuleTypes / CreateModule /
+	// InitModule / StartModule / StopModule / DestroyModule / GetStepTypes /
+	// CreateStep / ExecuteStep / DestroyStep by forwarding to grpc_server.go's
+	// existing implementation. Constructed by
+	// registerAllIaCProviderServicesWithOpts when IaCServeOptions.Modules or
+	// .Steps is non-nil. Zero-value ⇒ those RPCs continue returning
+	// Unimplemented via UnimplementedPluginServiceServer. See decisions/0038.
+	delegate *grpcServer
+}
+
+// GetModuleTypes forwards to the delegate when wired, else falls back to the
+// Unimplemented default. Same pattern for the 9 sibling forwarding methods.
+func (b *iacPluginServiceBridge) GetModuleTypes(ctx context.Context, req *emptypb.Empty) (*pb.TypeList, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.GetModuleTypes(ctx, req)
+	}
+	return b.delegate.GetModuleTypes(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) CreateModule(ctx context.Context, req *pb.CreateModuleRequest) (*pb.HandleResponse, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.CreateModule(ctx, req)
+	}
+	return b.delegate.CreateModule(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) InitModule(ctx context.Context, req *pb.HandleRequest) (*pb.ErrorResponse, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.InitModule(ctx, req)
+	}
+	return b.delegate.InitModule(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) StartModule(ctx context.Context, req *pb.HandleRequest) (*pb.ErrorResponse, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.StartModule(ctx, req)
+	}
+	return b.delegate.StartModule(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) StopModule(ctx context.Context, req *pb.HandleRequest) (*pb.ErrorResponse, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.StopModule(ctx, req)
+	}
+	return b.delegate.StopModule(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) DestroyModule(ctx context.Context, req *pb.HandleRequest) (*pb.ErrorResponse, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.DestroyModule(ctx, req)
+	}
+	return b.delegate.DestroyModule(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) GetStepTypes(ctx context.Context, req *emptypb.Empty) (*pb.TypeList, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.GetStepTypes(ctx, req)
+	}
+	return b.delegate.GetStepTypes(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) CreateStep(ctx context.Context, req *pb.CreateStepRequest) (*pb.HandleResponse, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.CreateStep(ctx, req)
+	}
+	return b.delegate.CreateStep(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) ExecuteStep(ctx context.Context, req *pb.ExecuteStepRequest) (*pb.ExecuteStepResponse, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.ExecuteStep(ctx, req)
+	}
+	return b.delegate.ExecuteStep(ctx, req)
+}
+
+func (b *iacPluginServiceBridge) DestroyStep(ctx context.Context, req *pb.HandleRequest) (*pb.ErrorResponse, error) {
+	if b.delegate == nil {
+		return b.UnimplementedPluginServiceServer.DestroyStep(ctx, req)
+	}
+	return b.delegate.DestroyStep(ctx, req)
 }
 
 // GetContractRegistry returns the set of gRPC services registered on
@@ -215,6 +309,90 @@ type IaCServeOptions struct {
 	// engine falls back to its manager.go-loaded plugin.json (workflow plan
 	// Task 1).
 	ManifestProvider *pluginpkg.PluginManifest
+
+	// Modules supplies plugin-native module providers. When non-nil, the
+	// bridge wires GetModuleTypes / CreateModule / InitModule / StartModule /
+	// StopModule / DestroyModule to delegate to grpc_server.go's existing
+	// PluginService implementation via a thin mapBackedProvider adapter.
+	// Zero-value = current behavior (Unimplemented for those RPCs).
+	// See decisions/0038.
+	Modules map[string]ModuleProvider
+
+	// Steps supplies plugin-native step providers. Same wiring rationale as
+	// Modules; values are sdk.StepProvider — the same interface non-IaC
+	// plugins consume via sdk.Serve.
+	Steps map[string]StepProvider
+}
+
+// mapBackedProvider adapts user-supplied module/step provider maps to the
+// sdk.PluginProvider + sdk.ModuleProvider + sdk.StepProvider interfaces that
+// grpc_server.go's existing PluginService implementation expects. Per
+// decisions/0038, this is the smallest viable extraction path that lets the
+// IaC bridge reuse newGRPCServer's handle-state + lifecycle code without
+// refactoring grpc_server.go.
+//
+// The adapter is intentionally thin: ModuleTypes/StepTypes return map keys;
+// CreateModule/CreateStep look up the named provider in the map and delegate.
+// Manifest returns a zero-valued PluginManifest — the iacPluginServiceBridge
+// implements GetManifest directly (using IaCServeOptions.ManifestProvider)
+// and never calls back through this adapter, so Manifest's return value is
+// never observed; it exists solely to satisfy the PluginProvider interface
+// contract that newGRPCServer requires. ContractRegistry is intentionally NOT
+// implemented — the iacPluginServiceBridge implements GetContractRegistry
+// directly (walks the gRPC server's registered services) and never calls
+// back through the delegate.
+type mapBackedProvider struct {
+	modules map[string]ModuleProvider
+	steps   map[string]StepProvider
+}
+
+// Manifest satisfies sdk.PluginProvider. Return value is unobserved (the
+// bridge handles GetManifest directly via IaCServeOptions.ManifestProvider)
+// — the method exists only to satisfy the interface so newGRPCServer's
+// PluginProvider parameter type-checks at compile time.
+func (p *mapBackedProvider) Manifest() PluginManifest { return PluginManifest{} }
+
+// ModuleTypes returns the keys of the modules map in deterministic
+// (lexicographic) order. Sorting matters because Go map iteration is
+// randomized — without it, GetModuleTypes responses would differ run-to-run,
+// breaking cache keys, golden files, and any caller that compares the list as
+// an ordered sequence.
+func (p *mapBackedProvider) ModuleTypes() []string {
+	out := make([]string, 0, len(p.modules))
+	for name := range p.modules {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CreateModule looks up the named module provider and delegates to it.
+func (p *mapBackedProvider) CreateModule(typeName, name string, config map[string]any) (ModuleInstance, error) {
+	mp, ok := p.modules[typeName]
+	if !ok {
+		return nil, fmt.Errorf("mapBackedProvider: unknown module type %q", typeName)
+	}
+	return mp.CreateModule(typeName, name, config)
+}
+
+// StepTypes returns the keys of the steps map in deterministic
+// (lexicographic) order — same rationale as ModuleTypes.
+func (p *mapBackedProvider) StepTypes() []string {
+	out := make([]string, 0, len(p.steps))
+	for name := range p.steps {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CreateStep looks up the named step provider and delegates to it.
+func (p *mapBackedProvider) CreateStep(typeName, name string, config map[string]any) (StepInstance, error) {
+	sp, ok := p.steps[typeName]
+	if !ok {
+		return nil, fmt.Errorf("mapBackedProvider: unknown step type %q", typeName)
+	}
+	return sp.CreateStep(typeName, name, config)
 }
 
 // PluginInfo carries the metadata that go-plugin needs to serve an IaC
