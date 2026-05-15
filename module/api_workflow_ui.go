@@ -483,6 +483,12 @@ func (h *WorkflowUIHandler) handleTryActivate(w http.ResponseWriter, r *http.Req
 	}
 
 	result, err := h.tryActivateFn(&cfg)
+	if result == nil && err != nil {
+		result = &TryActivateResult{
+			Status: "build_failed",
+			Error:  err.Error(),
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		w.WriteHeader(http.StatusUnprocessableEntity)

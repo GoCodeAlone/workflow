@@ -711,6 +711,34 @@ func TestWorkflowUIHandler_TryActivate_Failure(t *testing.T) {
 	}
 }
 
+func TestWorkflowUIHandler_TryActivate_NilResultWithError(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	h.SetTryActivateFunc(func(cfg *config.WorkflowConfig) (*TryActivateResult, error) {
+		return nil, fmt.Errorf("probe failed")
+	})
+
+	body, _ := json.Marshal(&config.WorkflowConfig{})
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/try-activate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleTryActivate(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result TryActivateResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Status != "build_failed" {
+		t.Errorf("expected status %q, got %q", "build_failed", result.Status)
+	}
+	if !strings.Contains(result.Error, "probe failed") {
+		t.Errorf("expected error to contain probe failure, got %q", result.Error)
+	}
+}
+
 func TestWorkflowUIHandler_TryActivate_InvalidJSON(t *testing.T) {
 	h := NewWorkflowUIHandler(nil)
 	h.SetTryActivateFunc(func(cfg *config.WorkflowConfig) (*TryActivateResult, error) {

@@ -1088,6 +1088,9 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 	// Stage 3: Activate candidate.
 	if startErr := newEngine.Start(context.Background()); startErr != nil {
 		logger.Error("Candidate engine failed to start; attempting rollback to previous config", "error", startErr)
+		if stopErr := newEngine.Stop(context.Background()); stopErr != nil {
+			logger.Warn("Failed to stop candidate engine after failed reload start", "error", stopErr)
+		}
 
 		// Rollback: rebuild from previous config and restart.
 		rollbackEngine, _, _, rollbackBuildErr := buildEngine(oldConfig, logger)

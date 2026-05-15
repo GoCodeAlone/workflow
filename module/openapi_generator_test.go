@@ -727,7 +727,7 @@ func TestRegisterAdminSchemas_Integration(t *testing.T) {
 	// Spot-check a few key schemas
 	expectedSchemas := []string{
 		"LoginRequest", "AuthResponse", "UserProfile", "SetupStatusResponse",
-		"WorkflowConfig", "EngineStatus", "ModuleSchema",
+		"WorkflowConfig", "EngineStatus", "TryActivateResult", "ModuleSchema",
 		"AIGenerateRequest", "AIGenerateResponse",
 		"Company", "Organization", "Project", "Workflow", "Execution",
 		"ComponentInfo", "IAMProvider", "DashboardData", "AuditEntry",
@@ -762,6 +762,20 @@ func TestRegisterAdminSchemas_Integration(t *testing.T) {
 	loginResp := login.Post.Responses["200"].Content["application/json"].Schema
 	if loginResp.Ref != "#/components/schemas/AuthResponse" {
 		t.Errorf("expected $ref to AuthResponse, got %q", loginResp.Ref)
+	}
+
+	// POST /api/v1/admin/engine/try-activate should reference TryActivateResult.
+	tryActivate := spec.Paths["/api/v1/admin/engine/try-activate"]
+	if tryActivate == nil || tryActivate.Post == nil {
+		t.Fatal("expected try-activate path")
+	}
+	tryActivateReq := tryActivate.Post.RequestBody.Content["application/json"].Schema
+	if tryActivateReq.Ref != "#/components/schemas/WorkflowConfig" {
+		t.Errorf("expected $ref to WorkflowConfig, got %q", tryActivateReq.Ref)
+	}
+	tryActivateResp := tryActivate.Post.Responses["200"].Content["application/json"].Schema
+	if tryActivateResp.Ref != "#/components/schemas/TryActivateResult" {
+		t.Errorf("expected $ref to TryActivateResult, got %q", tryActivateResp.Ref)
 	}
 
 	// GET /api/v1/admin/companies should return array of Company
