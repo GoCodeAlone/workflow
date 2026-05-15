@@ -176,15 +176,25 @@ In `plugin/external/sdk/iacserver.go`, add:
 //
 // The adapter is intentionally thin: ModuleTypes/StepTypes return map
 // keys; CreateModule/CreateStep look up the named provider in the map and
-// delegate. ContractRegistry returns nil — the iacPluginServiceBridge
-// implements GetContractRegistry directly (walks the gRPC server's
-// registered services) and never calls back through this adapter.
+// delegate. Manifest returns a zero-valued PluginManifest — the
+// iacPluginServiceBridge implements GetManifest directly (using
+// IaCServeOptions.ManifestProvider) and never calls back through this
+// adapter, so Manifest's return value is never observed; it exists solely
+// to satisfy the PluginProvider interface contract that newGRPCServer
+// requires. ContractRegistry is intentionally NOT implemented — the
+// iacPluginServiceBridge implements GetContractRegistry directly (walks
+// the gRPC server's registered services) and never calls back through
+// the delegate.
 type mapBackedProvider struct {
     modules map[string]ModuleProvider
     steps   map[string]StepProvider
 }
 
-func (p *mapBackedProvider) ContractRegistry() *pb.ContractRegistry { return nil }
+// Manifest satisfies sdk.PluginProvider. Return value is unobserved (the
+// bridge handles GetManifest directly via IaCServeOptions.ManifestProvider)
+// — the method exists only to satisfy the interface so newGRPCServer's
+// PluginProvider parameter type-checks at compile time.
+func (p *mapBackedProvider) Manifest() PluginManifest { return PluginManifest{} }
 
 func (p *mapBackedProvider) ModuleTypes() []string {
     out := make([]string, 0, len(p.modules))
@@ -379,14 +389,11 @@ Expected: FAIL until Task 1's wiring is in place. (Task 1 should already make it
 Run: `GOWORK=off go test ./plugin/external/sdk/ -run EndToEnd -v`
 Expected: PASS.
 
-**Step 4: Runtime-launch validation (full module loading test)**
+**Step 4: Runtime-launch validation — bufconn end-to-end (the canonical evidence for the workflow-side path)**
 
-Build a small test program that:
-1. Spawns a sample IaC plugin binary that uses `IaCServeOptions{Modules: {...}, Steps: {...}}` as its main.
-2. Loads it via the engine's plugin loader.
-3. Confirms `ExternalPluginAdapter.ModuleFactories()` returns the expected types.
+The Step 1 bufconn test already exercises the IaC bridge through a real `pb.PluginServiceClient` — same gRPC dispatch the production engine uses. **Bufconn is the canonical runtime-launch evidence for the workflow-side change** because: (a) the IaC bridge code is identical regardless of the transport (bufconn vs unix-domain socket vs go-plugin subprocess); (b) the engine adapter's `ModuleFactories()`/`StepFactories()` calls are the same gRPC interface methods invoked from a bufconn client; (c) no HTTP/2 escape hatches or test-only shortcuts exist in the bridge dispatch path. A subprocess-binary load adds plumbing-level coverage (go-plugin handshake) but tests no additional bridge logic — and that subprocess coverage IS exercised by Tasks 7 and 11 in the plugin repos against real plugin binaries.
 
-Use the existing `iac_e2e_test.go` as the template if it spawns a real plugin. If a smaller test fixture suffices (in-process bufconn), the Step 1 test already covers it; the runtime-launch step then becomes documenting that the bufconn integration test mirrors the production gRPC dispatch (no HTTP/2 escape hatches, no special test shortcuts).
+So for THIS task: the Step 1 test IS the runtime-launch validation. Capture the test transcript as `runtime-launch-validation` evidence. Tasks 7/11 cover the subprocess-handshake side in the plugin repos.
 
 Run: `GOWORK=off go test ./... -run 'IaC|Engine' -count=1`
 Expected: green across all suites.
@@ -469,8 +476,8 @@ git commit -m "feat: in-plugin AWS credential resolution with credential_source 
 **Context:** `aws.credentials` is the optional in-plugin DRY module that lets a config declare credentials once and have many `storage.s3`/`step.s3_upload` modules `credentials_ref:` it. The locked B/C/D plan's design §3 spec; re-implemented here per `decisions/0038`'s scope absorption.
 
 **Step 1: Write failing tests**
-`credref/registry_test.go`: `Register("name", credInput)` succeeds first time; second `Register("name", ...)` returns error (duplicate); `Resolve("name")` returns the input + true; `Resolve("missing")` returns zero + false; concurrent Register/Resolve safe under `-race`.
-`aws_credentials_test.go`: `aws.credentials` Provider's `CreateModule` parses a config with a `credentials:` sub-block, builds a `CredInput`, registers it under the module name; the module's `Init` is a no-op; `Start`/`Stop` no-op.
+`credref/registry_test.go`: `Register("name", credInput)` succeeds first time; second `Register("name", ...)` returns error (duplicate); `Resolve("name")` returns the input + true; `Resolve("missing")` returns zero + false; concurrent Register/Resolve safe under `-race`. **Each test MUST `t.Cleanup(credref.Reset)` to clear the package-level global** so tests don't pollute each other (the registry is process-global on purpose to support `credentials_ref:` resolution from sibling modules; isolation is a test-only concern).
+`aws_credentials_test.go`: `aws.credentials` Provider's `CreateModule` parses a config with a `credentials:` sub-block, builds a `CredInput`, registers it under the module name; the module's `Init` is a no-op; `Start`/`Stop` no-op. Same `t.Cleanup(credref.Reset)` pattern.
 
 **Step 2: Verify they fail** — `cd /Users/jon/workspace/workflow-plugin-aws && go test ./internal/credref/ ./internal/modules/ -v` → FAIL.
 
@@ -504,6 +511,15 @@ func Resolve(name string) (awscreds.CredInput, bool) {
     defer mu.RUnlock()
     c, ok := registry[name]
     return c, ok
+}
+
+// Reset clears the registry. Test-only — production code never calls this.
+// Tests that call Register MUST `t.Cleanup(credref.Reset)` to avoid
+// polluting other tests in the same package.
+func Reset() {
+    mu.Lock()
+    defer mu.Unlock()
+    registry = map[string]awscreds.CredInput{}
 }
 ```
 
@@ -630,23 +646,39 @@ func TestPluginJSONCapabilities_ModuleStep_Parity(t *testing.T) {
 }
 ```
 
-**Step 5: Verify everything green** — `cd /Users/jon/workspace/workflow-plugin-aws && go build ./... && go test ./...` → PASS.
+**Step 5: Verify build + tests green** — `cd /Users/jon/workspace/workflow-plugin-aws && go build ./... && go test ./...` → PASS.
 
-**Step 6: Commit (release prep)** — stage `cmd/`, `plugin.json`, `go.mod`, `go.sum`, `internal/host_conformance_test.go`, `CHANGELOG.md`:
+**Step 6: Runtime-launch validation (subprocess plugin load)** — build the plugin binary; load it via `wfctl` against a minimal workflow config that lists the new module + step types; confirm `wfctl plugin install ./dist/<binary>` succeeds + `wfctl plugin list` shows `aws.credentials`/`storage.s3` in `moduleTypes` and `step.s3_upload` in `stepTypes`. Capture the full transcript. If the plugin binary's standard go-plugin handshake fails or the host can't dispatch `GetModuleTypes` to the subprocess, the in-process bufconn tests of Task 1/2 (workflow side) won't catch it — this subprocess load is the canonical evidence per the runtime-launch-validation class. **If `wfctl` can't be exercised against this plugin in CI** (e.g. the plugin repo's CI lacks `wfctl`), document why a SHELL-level go-plugin handshake test is sufficient and capture THAT transcript instead — no silent skip.
+
+**Step 7: Commit (release prep)** — stage every modified file (`cmd/`, `plugin.json`, `go.mod`, `go.sum`, `internal/host_conformance_test.go`, `CHANGELOG.md`, plus the runtime-launch validation transcript path/file):
 ```bash
-git add cmd/ plugin.json go.mod go.sum internal/host_conformance_test.go CHANGELOG.md
+git add -A   # then verify with git status; never silently leave files unstaged
 git commit -m "chore: release workflow-plugin-aws v<minor> — storage.s3 + step.s3_upload + aws.credentials via IaC bridge"
 ```
 
-**Step 7: Open PR 2 + tag (after merge)**
-- Open PR with the standard body (summary + test plan).
+**Step 8: Open PR 2 + tag (after merge)**
+- Open PR with the standard body (summary + test plan + the runtime-launch transcript reference).
 - After PR 2 is admin-merged to the aws plugin default branch: `git checkout main && git pull && git tag v<version> && git push origin v<version>`. Verify `gh release view v<version> --repo GoCodeAlone/workflow-plugin-aws` shows assets; GoReleaser run `success`.
+
+---
+
+### Task 8 PRE-STEP (MANDATORY before dispatching Task 8): coordinate the in-progress locked-plan Task 23 (#22)
+
+The locked B/C/D plan's TaskList shows task #22 ("Implement Task 23: workflow-plugin-gcp storage.gcs + gcp.credentials + release") as **`in_progress`** — that scope OVERLAPS exactly with this plan's Tasks 9-11. Same branch (`feat/gcs-gke-storage`), same files. Dispatching this plan's Tasks 8-11 while another agent is mid-flight on #22 will produce commit-collision, ownership conflicts, and merge-loss (per `feedback_per_agent_worktree_per_task_pr` and `feedback_worktree_agents_must_ff_before_commit`).
+
+**Team-lead MUST execute this pre-step (NOT an implementer task) before dispatching Task 8:**
+1. Probe locked-plan #22 owner liveness (per `feedback_check_tmux_when_agent_silent`): `TaskGet 22` for the owner; `SendMessage` a status-request to that owner; check tmux pane via shell if no response.
+2. If alive: send `shutdown_request` to the owner; wait for `shutdown_response`.
+3. TaskUpdate #22 → status `completed` with a comment "abandoned — superseded by 2026-05-15-plugin-modules-on-iac plan Tasks 8-11; the WORK is the same, the new plan's Task spec accommodates the SDK extension this plan adds." (Per scope-lock semantics, locked-plan Task 23's WORK is delivered by this new plan; the TaskList entry can close as completed-via-supersession.)
+4. Verify `feat/gcs-gke-storage` branch state: `git -C /Users/jon/workspace/workflow-plugin-gcp fetch origin && git -C /Users/jon/workspace/workflow-plugin-gcp log --oneline origin/feat/gcs-gke-storage | head -10`. Identify which commits are on the branch (locked-plan Tasks 20/21/22 SHAs already there). If any partial Task-23-equivalent commits exist (from the in-progress agent's work), surface to user before proceeding — do NOT silently overwrite.
+
+Only AFTER this pre-step is complete may the team-lead dispatch Task 8 to implementer-3 (or whichever fresh implementer takes the gcp stream).
 
 ---
 
 ### Task 8: workflow-plugin-gcp — `gcpcreds.BuildGCPOptions`
 
-**Repo:** `/Users/jon/workspace/workflow-plugin-gcp` (PR 3, REUSES branch `feat/gcs-gke-storage` — already has the locked B/C/D plan's Tasks 20+21+22 commits on it).
+**Repo:** `/Users/jon/workspace/workflow-plugin-gcp` (PR 3, REUSES branch `feat/gcs-gke-storage` — already has the locked B/C/D plan's Tasks 20+21+22 commits on it; pre-step above coordinates with the in-progress locked-plan agent).
 
 **Files:**
 - Create: `internal/gcpcreds/gcpcreds.go`, `internal/gcpcreds/gcpcreds_test.go`
@@ -693,7 +725,7 @@ git commit -m "feat: in-plugin GCP credential helper (BuildGCPOptions)"
 
 **Context:** Mirror Task 4 structurally for gcp.
 
-**Step 1-5:** Mirror Task 4's pattern exactly. Provider type returns `[]string{"gcp.credentials"}` from `ModuleTypes()`; `CreateModule` parses the config + calls `credref.Register(name, gcpCredInput)`; instance has no-op lifecycle. Tests assert duplicate-register error, Resolve round-trip, Init/Start/Stop no-op, race-clean concurrent access.
+**Step 1-5:** Mirror Task 4's pattern exactly. Provider type returns `[]string{"gcp.credentials"}` from `ModuleTypes()`; `CreateModule` parses the config + calls `credref.Register(name, gcpCredInput)`; instance has no-op lifecycle. Include the `Reset()` test-only helper in `internal/credref/registry.go`; every test that calls `Register` MUST `t.Cleanup(credref.Reset)`. Tests assert duplicate-register error, Resolve round-trip, Init/Start/Stop no-op, race-clean concurrent access.
 
 Commit:
 ```bash
@@ -732,7 +764,7 @@ git commit -m "feat: plugin-native storage.gcs module"
 **Change class:** Plugin-loading path + version pin → runtime-launch-validation required.
 **Rollback:** plugin release additive; on defect cut patch; PR 5 (Phase C core deletion) is blocked on this release tag.
 
-**Steps:** Mirror Task 7. `cmd/workflow-plugin-gcp/main.go` populates `IaCServeOptions.Modules` (`"storage.gcs"` + `"gcp.credentials"`); no `.Steps` (gcp has none in scope). `plugin.json` adds the capability entries; bumps `version` (minor); sets `minEngineVersion: "0.53.0"`. `go.mod` pinned to `v0.53.0`. Parity test extended for `moduleTypes ↔ GetModuleTypes` (and `stepTypes ↔ GetStepTypes` if applicable). Open PR; admin-merge; tag.
+**Steps:** Mirror Task 7 — including the explicit runtime-launch-validation Step 6 (subprocess plugin binary load via `wfctl plugin install` against a minimal workflow config; verify `wfctl plugin list` shows the new types; capture transcript). `cmd/workflow-plugin-gcp/main.go` populates `IaCServeOptions.Modules` (`"storage.gcs"` + `"gcp.credentials"`); no `.Steps` (gcp has none in scope). `plugin.json` adds the capability entries; bumps `version` (minor); sets `minEngineVersion: "0.53.0"`. `go.mod` pinned to `v0.53.0`. Parity test extended for `moduleTypes ↔ GetModuleTypes`. Open PR; admin-merge; tag.
 
 The branch already has the locked B/C/D plan's `gcs` IaCStateBackend + `gke` ResourceDriver work — those + the new `storage.gcs` + `gcp.credentials` ship together as PR 3 of THIS plan.
 
@@ -745,13 +777,30 @@ After PR 3 admin-merges: `git tag v<version> && git push origin v<version>`. Ver
 
 ---
 
+### Task 12 PRE-STEP (MANDATORY before any commit on PR 4's branch): verify cross-plan release tags exist
+
+PR 4 (Phase B core deletion) is **hard-blocked** on:
+1. **PR 2 of THIS plan released** (workflow-plugin-aws minor bump tag — Task 7)
+2. **Locked-plan PR 5 (#118) released as `v1.1.0`** (workflow-plugin-digitalocean — Task 13 of the locked B/C/D plan)
+
+Both must be installable BEFORE PR 4 starts deleting in-core paths. There is no CI gate enforcing this; the executor must check explicitly.
+
+**Team-lead MUST execute this pre-step before dispatching Task 12 (or any later Phase B task):**
+```bash
+gh release view v<aws-version> --repo GoCodeAlone/workflow-plugin-aws --json assets --jq '.assets|length'   # expect ≥4 (linux/darwin × amd64/arm64)
+gh release view v1.1.0 --repo GoCodeAlone/workflow-plugin-digitalocean --json assets --jq '.assets|length'   # expect ≥4
+```
+Both must succeed and report assets. If EITHER is missing, do NOT start PR 4 — surface to user (the missing release is the blocker; chase that first). Re-running this check at PR-4-merge time is also required (covered in Task 16 Step 4).
+
+---
+
 ### Task 12: workflow core — delete dead `cloud_account_aws.go`
 
 **Repo:** planning worktree (PR 4, branch `feat/phase-b-core-deletion` off `origin/main`) — `GOWORK=off`.
 
 **Files:** Delete `module/cloud_account_aws.go`.
 
-**Context:** `cloud_account_aws.go` holds `AWSConfigProvider` + `CloudAccount.AWSConfig()` + `CloudAccount.ValidateCredentials()` — verified dead code (#653 removed `awsProviderFrom` and every consumer; locked B/C/D plan's Task 14 already verified zero non-test consumers).
+**Context:** `cloud_account_aws.go` holds `AWSConfigProvider` + `CloudAccount.AWSConfig()` + `CloudAccount.ValidateCredentials()` — verified dead code (#653 removed `awsProviderFrom` and every consumer; locked B/C/D plan's Task 14 already verified zero non-test consumers). Pre-step above must be complete before this task starts.
 
 **Step 1: Verify zero non-test consumers** — `grep -rn 'AWSConfigProvider\|\.AWSConfig(\|\.ValidateCredentials(' --include='*.go' . | grep -v '_test.go' | grep -v 'cloud_account_aws.go'` → expected no output.
 
@@ -862,11 +911,18 @@ git commit -m "refactor: delete in-core storage.s3 + step.s3_upload — now plug
 
 **Step 3: Build + full test + image-launch validation** — `GOWORK=off go build ./... && GOWORK=off go test ./...`; runtime-launch-validation: build + launch the server against a representative `iac.state` config; confirm clean startup; capture transcript.
 
-**Step 4: Migration doc** — `docs/migrations/2026-05-15-plugin-modules-on-iac.md` Phase B section: `iac.state backend: spaces` → load `workflow-plugin-digitalocean >= v1.1.0`; `iac.state backend: s3` → load `workflow-plugin-aws >= v<release>`; `storage.s3` / `step.s3_upload` → load aws plugin (creds inline or `credentials_ref:` an `aws.credentials` module); `provider: aws` with `credentialType: profile|role_arn` co-deploy requirement (core+aws-plugin together); workflow `>= v0.53.0` engine floor.
-
-**Step 5: Commit**
+**Step 4: Re-verify cross-plan releases STILL exist** (defensive check at PR-4 merge time, in case anything was rolled back since Task 12's pre-step) —
 ```bash
-git add go.mod go.sum .phase-b-complete docs/migrations/2026-05-15-plugin-modules-on-iac.md
+gh release view v<aws-version> --repo GoCodeAlone/workflow-plugin-aws --json assets --jq '.assets|length'   # expect ≥4
+gh release view v1.1.0 --repo GoCodeAlone/workflow-plugin-digitalocean --json assets --jq '.assets|length'   # expect ≥4
+```
+Both must still report assets. Abort the merge otherwise.
+
+**Step 5: Migration doc** — `docs/migrations/2026-05-15-plugin-modules-on-iac.md` Phase B section: `iac.state backend: spaces` → load `workflow-plugin-digitalocean >= v1.1.0`; `iac.state backend: s3` → load `workflow-plugin-aws >= v<release>`; `storage.s3` / `step.s3_upload` → load aws plugin (creds inline or `credentials_ref:` an `aws.credentials` module); `provider: aws` with `credentialType: profile|role_arn` co-deploy requirement (core+aws-plugin together); workflow `>= v0.53.0` engine floor.
+
+**Step 6: Commit**
+```bash
+git add -A   # then verify git status; never silently leave files unstaged (covers go.mod, go.sum, .phase-b-complete, docs/migrations/, runtime-launch transcript file if applicable)
 git commit -m "build: drop unused aws-sdk-go-v2 IaC modules + arm Phase B audit invariant"
 ```
 
