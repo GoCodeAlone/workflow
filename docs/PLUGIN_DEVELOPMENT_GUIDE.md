@@ -559,10 +559,21 @@ Unload a running plugin (graceful shutdown of the subprocess):
 curl -X POST http://localhost:8081/api/v1/plugins/external/my-plugin/unload
 ```
 
-Reload a plugin (unload + load, useful after updating the binary):
+Reload a plugin using the safe try-activate contract (candidate subprocess is
+validated before the active process is killed):
 ```bash
 curl -X POST http://localhost:8081/api/v1/plugins/external/my-plugin/reload
 ```
+
+> **Legacy vs. safe reload semantics**
+>
+> *Legacy (unsafe, pre-v1.0):* kill old → start new. If the new start fails, the
+> slot is empty and the plugin surface is dark.
+>
+> *Safe (current):* start candidate → validate handshake/contract → kill old only
+> after candidate is healthy. If the candidate fails to start or validate, the old
+> process stays registered and serving. The `/reload` endpoint uses the safe
+> contract exclusively.
 
 ## API Endpoints
 

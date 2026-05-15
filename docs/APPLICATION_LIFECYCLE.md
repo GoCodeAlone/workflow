@@ -139,42 +139,85 @@ changes only when adding new module types.
 
 ### What Happens When You Change the YAML?
 
-The current system supports two reload mechanisms:
+The current system supports three reload mechanisms:
 
-#### 1. Full Engine Restart (Config Changes)
+#### 1. Safe Try-Activate Reload (Default — Config Changes)
 
-When the YAML config is updated (via the UI handler or file change):
+When the YAML config is updated (via the admin API, V1 API, or file watcher),
+the engine uses a **try-activate, health-probe, rollback** sequence:
 
 ```
 Time ──────────────────────────────────────────────────>
 
-  Old Engine Running          New Engine Running
-  ├── handling requests ──┤   ├── handling requests ──>
-                          │   │
-                     stop │   │ start
-                          │   │
-                     ┌────┴───┴────┐
-                     │   Reload    │
-                     │  (200-500ms)│
-                     └─────────────┘
+  Old Engine Running (unchanged during build)   New Engine
+  ├── handling requests ──────────────────┤     ├── handling requests ──>
+                                          │     │
+                                  Stage 1 │     │ Stage 3: start
+                              buildEngine │     │
+                                (no stop) │     │
+                                          │     │
+                                  Stage 2 │     │
+                                     stop │     │
+                                          │     │
+                                   ┌──────┴─────┴──────┐
+                                   │  Safe Reload Cycle │
+                                   │  (200-500ms total) │
+                                   └────────────────────┘
 ```
 
-1. `engine.Stop()` -- stops all triggers, waits for module shutdown
-2. `buildEngine(newConfig)` -- creates fresh engine from new YAML
-3. `engine.Start()` -- starts all modules and triggers
+**Stages:**
 
-**Impact on in-flight requests:**
-- Requests currently being processed will fail (connection reset)
-- No graceful draining -- this is a hard stop/start
-- Typical reload time: 200-500ms for the e-commerce example (24 modules)
+1. **Build candidate** — `buildEngine(newConfig)` constructs a fresh engine from
+   the candidate YAML. The current engine is completely untouched at this point.
+   If the build fails (unknown module type, invalid config, etc.) the error is
+   returned immediately and the current engine keeps serving.
 
-**What this means for production:**
-- Brief downtime during config updates
-- Behind a load balancer, you can do rolling updates (stop instance A, update,
-  start A, stop instance B, update, start B)
-- For zero-downtime, use the multi-instance model with rolling deploys
+2. **Stop current** — `engine.Stop()` stops all triggers and modules of the old
+   engine. Only reached when the candidate was built successfully.
 
-#### 2. Dynamic Component Hot-Reload (No Downtime)
+3. **Activate candidate** — `engine.Start()` starts all modules and triggers of
+   the new engine. On failure, the engine is rebuilt from the previous config and
+   restarted (**rollback**).
+
+**Rollback contract:** a build failure at Stage 1 guarantees the current engine
+is untouched. A start failure at Stage 3 triggers an automatic rollback to the
+previous config, restoring service.
+
+**What this means for operators:**
+- Malformed YAML or unknown module types are caught before any disruption.
+- Brief downtime still occurs between Stage 2 and Stage 3.
+- Use the `try-activate` probe endpoint for zero-impact pre-flight validation.
+
+#### 2. Legacy External Plugin Reload (Deprecated semantics — pre-v1.0)
+
+> **Do not use this pattern in new code.** It is documented here only for
+> historical reference. The current `ReloadPlugin` API (below) already uses the
+> safe try-activate contract, not this legacy path.
+
+**Legacy (unsafe) unload-then-load sequence:**
+
+```
+1. Kill old subprocess
+2. Start new subprocess  ← failure here leaves the slot empty
+```
+
+If Step 2 fails, no plugin is registered and the slot is dark. This was the
+original behaviour before the safe try-activate contract was introduced.
+
+**Safe (current) ReloadPlugin sequence:**
+
+```
+1. Start candidate subprocess and perform handshake/contract validation
+   ← failure here: kill candidate, keep old process registered
+2. Kill old subprocess only after candidate is validated
+3. Register candidate as the new active plugin
+```
+
+The `/api/v1/plugins/external/{name}/reload` API endpoint uses this safe
+contract. See [Plugin Try-Activate Probe](#plugin-try-activate-probe) below
+for the equivalent probe-only path.
+
+#### 3. Dynamic Component Hot-Reload (No Downtime)
 
 Dynamic components (`.go` files loaded via Yaegi) support true hot-reload:
 
@@ -251,6 +294,50 @@ Developer edits components/payment_processor.go
 │  Other modules unaffected        │
 └──────────────────────────────────┘
 ```
+
+---
+
+### Plugin Try-Activate Probe
+
+Before committing a plugin or config reload, callers can issue a dry-run probe
+that builds the candidate without swapping any active pointers:
+
+**Config try-activate:**
+
+```bash
+curl -X POST http://localhost:8081/api/v1/admin/engine/try-activate \
+  -H "Content-Type: application/json" \
+  --data-binary @candidate-workflow.json
+```
+
+Response:
+```json
+{
+  "status": "build_ok",
+  "moduleTypes": ["http.server", "http.router", "messaging.kafka"],
+  "stepTypes": ["step.set", "step.http_call"],
+  "triggerTypes": ["http", "schedule"]
+}
+```
+
+On failure:
+```json
+{
+  "status": "build_failed",
+  "error": "module type \"nonexistent.type\" not found"
+}
+```
+
+The probe:
+- builds a full candidate engine in isolation
+- returns the module/step/trigger types the candidate would expose
+- **never touches the running engine** — no stop, no swap
+- is suitable for pre-flight checks in automated update campaigns
+
+**Plugin try-activate:** the `/api/v1/plugins/external/{name}/reload` endpoint
+already implements try-activate semantics: the candidate subprocess is started
+and validated before the old process is killed. A failure returns an error and
+leaves the current plugin process registered.
 
 ---
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -223,6 +224,39 @@ func (e *StdEngine) AddStepType(stepType string, factory module.StepFactory) {
 // GetStepRegistry returns the engine's pipeline step registry.
 func (e *StdEngine) GetStepRegistry() interfaces.StepRegistrar {
 	return e.stepRegistry
+}
+
+// RegisteredModuleTypes returns the sorted list of module type names registered
+// with this engine (via AddModuleType or LoadPlugin).
+func (e *StdEngine) RegisteredModuleTypes() []string {
+	types := make([]string, 0, len(e.moduleFactories))
+	for t := range e.moduleFactories {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
+}
+
+// RegisteredStepTypes returns the sorted list of pipeline step type names
+// registered with this engine (via AddStepType or LoadPlugin).
+func (e *StdEngine) RegisteredStepTypes() []string {
+	if e.stepRegistry == nil {
+		return nil
+	}
+	types := e.stepRegistry.Types()
+	sort.Strings(types)
+	return types
+}
+
+// RegisteredTriggerTypes returns the sorted list of trigger type keys registered
+// with this engine (via RegisterTriggerType or LoadPlugin).
+func (e *StdEngine) RegisteredTriggerTypes() []string {
+	types := make([]string, 0, len(e.triggerTypeMap))
+	for t := range e.triggerTypeMap {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
 }
 
 // PluginLoader returns the engine's plugin loader, creating it lazily if needed.

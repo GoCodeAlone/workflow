@@ -573,6 +573,7 @@ func registerEngineOperationSchemas(gen *OpenAPIGenerator) {
 	gen.SetOperationSchema("GET", "/api/v1/admin/engine/modules", nil, SchemaArray(SchemaRef("ModuleTypeInfo")))
 	gen.SetOperationSchema("POST", "/api/v1/admin/engine/validate", SchemaRef("WorkflowConfig"), SchemaRef("ValidationResult"))
 	gen.SetOperationSchema("POST", "/api/v1/admin/engine/reload", nil, SchemaRef("SuccessResponse"))
+	gen.SetOperationSchema("POST", "/api/v1/admin/engine/try-activate", SchemaRef("WorkflowConfig"), SchemaRef("TryActivateResult"))
 }
 
 func registerSchemaOperationSchemas(gen *OpenAPIGenerator) {

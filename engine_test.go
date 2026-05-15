@@ -1739,3 +1739,72 @@ func TestEngine_BuildFromConfig_InvalidTemplateRefsMode(t *testing.T) {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
+
+func TestStdEngine_RegisteredModuleTypes(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	// Add a custom type and verify it appears in the result.
+	engine.AddModuleType("test.custom.module", func(name string, cfg map[string]any) modular.Module {
+		return nil
+	})
+
+	types := engine.RegisteredModuleTypes()
+	found := false
+	for _, tp := range types {
+		if tp == "test.custom.module" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("RegisteredModuleTypes did not include %q; got %v", "test.custom.module", types)
+	}
+
+	// Result must be sorted.
+	for i := 1; i < len(types); i++ {
+		if types[i] < types[i-1] {
+			t.Errorf("RegisteredModuleTypes is not sorted: %v", types)
+			break
+		}
+	}
+}
+
+func TestStdEngine_RegisteredStepTypes(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	types := engine.RegisteredStepTypes()
+	if len(types) == 0 {
+		t.Fatal("expected non-empty step types after loading plugins")
+	}
+
+	// Result must be sorted.
+	for i := 1; i < len(types); i++ {
+		if types[i] < types[i-1] {
+			t.Errorf("RegisteredStepTypes is not sorted: %v", types)
+			break
+		}
+	}
+}
+
+func TestStdEngine_RegisteredTriggerTypes(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	types := engine.RegisteredTriggerTypes()
+	// With plugins loaded there should be at least one trigger type (e.g. "http").
+	if len(types) == 0 {
+		t.Fatal("expected non-empty trigger types after loading plugins")
+	}
+
+	// Result must be sorted.
+	for i := 1; i < len(types); i++ {
+		if types[i] < types[i-1] {
+			t.Errorf("RegisteredTriggerTypes is not sorted: %v", types)
+			break
+		}
+	}
+}
