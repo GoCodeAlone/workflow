@@ -85,10 +85,13 @@ func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 	case "postgres":
 		return resolvePostgresStateStore(cfg)
 
+	case "spaces":
+		return nil, fmt.Errorf("iac.state backend %q is now plugin-served by workflow-plugin-digitalocean v1.1.0; "+
+			"install and load the plugin to use the Spaces backend (wfctl direct-path commands no longer support in-tree spaces)", backend)
+
 	case "s3":
-		return nil, fmt.Errorf("s3 state store backend not yet supported by wfctl direct-path commands; " +
-			"create the bucket manually and reference it in iac.state.bucket. " +
-			"Contribute a resolveS3StateStore helper to unblock this")
+		return nil, fmt.Errorf("iac.state backend %q is now plugin-served by workflow-plugin-aws v1.1.0; "+
+			"install and load the plugin to use the S3 backend (wfctl direct-path commands no longer support in-tree s3)", backend)
 
 	case "gcs":
 		return nil, fmt.Errorf("gcs state store backend not yet supported by wfctl direct-path commands; " +

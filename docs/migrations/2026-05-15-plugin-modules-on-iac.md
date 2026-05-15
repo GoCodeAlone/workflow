@@ -24,7 +24,7 @@ gRPC contract (Phase A, decisions/0036), the `Configure` RPC that delivers the
 | `iac.state` `backend: s3` | (already moved in v0.53.0; no in-core impl since then) | plugin-served by [`workflow-plugin-aws`](https://github.com/GoCodeAlone/workflow-plugin-aws) `>= v1.1.0` |
 | `storage.s3` module | in-core `module.S3Storage` (registered by `plugins/storage`) | plugin-native in `workflow-plugin-aws >= v1.1.0` |
 | `step.s3_upload` pipeline step | in-core `module.S3UploadStep` (registered by `plugins/pipelinesteps`) | plugin-native in `workflow-plugin-aws >= v1.1.0` |
-| `cloud.account` `provider: aws` + `credentialType: profile` or `role_arn` | SDK-bearing resolver loaded the profile / called `sts:AssumeRole` in-core | core records a `credential_source` marker only; the aws plugin performs SDK resolution via `awscreds.BuildAWSConfig` (decisions/0036 + 0038) |
+| `cloud.account` `provider: aws` + `credentials.type: profile` or `role_arn` | SDK-bearing resolver loaded the profile / called `sts:AssumeRole` in-core | core records a `credential_source` marker only; the aws plugin performs SDK resolution via `awscreds.BuildAWSConfig` (decisions/0036 + 0038) |
 
 The YAML field names and `backend:` values are **unchanged**. The break is
 strictly about *which binary* serves them.
@@ -70,7 +70,24 @@ the module/step config, or referenced via `credentials_ref:` pointing at an
 module type / step type is unknown at engine boot — load the plugin in the
 deployment's plugin manifest.
 
-### `cloud.account provider: aws` with `credentialType: profile` or `role_arn`
+### `cloud.account provider: aws` with `credentials.type: profile` or `role_arn`
+
+The credential config sits under the nested `credentials:` map on the
+`cloud.account` module (the key is `credentials.type`, not a flat
+`credentialType:`). The affected shape:
+
+```yaml
+modules:
+  - name: aws-account
+    type: cloud.account
+    config:
+      provider: aws
+      region: us-east-1
+      credentials:
+        type: profile        # or role_arn
+        profile: team-prod   # for type=profile
+        # roleArn / externalId / sessionName for type=role_arn
+```
 
 Core no longer resolves the profile or calls `sts:AssumeRole`. Instead the
 resolver records `Extra["credential_source"] = "profile"` or `"role_arn"`
@@ -84,8 +101,8 @@ need and performs the SDK-bearing resolution in-plugin. This is a
 results in a `credential_source` marker the plugin can't interpret — the core
 warning is what tells operators which side to upgrade.
 
-`credentialType: static` and `credentialType: env` are unaffected — those
-have always been SDK-free.
+`credentials.type: static` and `credentials.type: env` are unaffected — those
+paths have always been SDK-free and resolve in-core.
 
 ## Rollback
 

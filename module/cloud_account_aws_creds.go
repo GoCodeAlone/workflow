@@ -113,10 +113,15 @@ func (r *awsRoleARNResolver) Resolve(m *CloudAccount) error {
 	return nil
 }
 
-// logCredentialSourceMarker emits a single warning line when a deferred
-// credential_source marker is recorded. The warning matters during the gap
-// window where an old plugin version may see a marker it doesn't yet
-// understand — the message tells operators where the resolution moved.
+// logCredentialSourceMarker emits via the stdlib `log` package (not the app
+// logger). The resolver path runs before module Init / app-logger plumbing,
+// so it has no handle on `app.Logger()`. Future migration to the structured
+// logger would require storing the logger on `CloudAccount` at construction
+// time; that's out of scope for the credential_source marker rollout.
+//
+// The warning matters during the gap window where an old plugin version may
+// see a marker it doesn't yet understand — the message tells operators where
+// the resolution moved.
 func logCredentialSourceMarker(provider, source string) {
 	log.Printf("workflow: %s credential_source=%q recorded; resolution deferred to plugin (decisions/0036+0038)", provider, source)
 }
