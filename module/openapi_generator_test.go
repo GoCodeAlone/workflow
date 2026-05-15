@@ -704,6 +704,7 @@ func TestRegisterAdminSchemas_Integration(t *testing.T) {
 		{Method: "GET", Path: "/api/v1/auth/setup-status", Handler: "auth"},
 		{Method: "POST", Path: "/api/v1/auth/login", Handler: "auth"},
 		{Method: "GET", Path: "/api/v1/admin/engine/config", Handler: "engine"},
+		{Method: "POST", Path: "/api/v1/admin/engine/try-activate", Handler: "engine"},
 		{Method: "GET", Path: "/api/v1/admin/companies", Handler: "v1"},
 		{Method: "POST", Path: "/api/v1/admin/companies", Handler: "v1"},
 		{Method: "GET", Path: "/api/v1/admin/workflows", Handler: "v1"},
