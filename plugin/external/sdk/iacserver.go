@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
@@ -87,14 +88,16 @@ func registerAllIaCProviderServicesWithOpts(s *grpc.Server, provider any, opts I
 			diskManifest: opts.ManifestProvider,
 		}
 		// Wire the optional grpc_server.go delegate when the caller supplied
-		// module or step providers. Zero-value Modules/Steps ⇒ delegate stays
-		// nil ⇒ module/step RPCs continue returning Unimplemented (current
-		// behavior preserved for strict-cutover IaC plugins). Per
-		// decisions/0038.
-		if opts.Modules != nil || opts.Steps != nil {
+		// any (legacy or typed) module/step providers. Zero-value across all
+		// four maps ⇒ delegate stays nil ⇒ module/step RPCs continue returning
+		// Unimplemented (current behavior preserved for strict-cutover IaC
+		// plugins). Per decisions/0038 + decisions/0039.
+		if opts.Modules != nil || opts.Steps != nil || opts.TypedModules != nil || opts.TypedSteps != nil {
 			bridge.delegate = newGRPCServer(&mapBackedProvider{
-				modules: opts.Modules,
-				steps:   opts.Steps,
+				modules:      opts.Modules,
+				steps:        opts.Steps,
+				typedModules: opts.TypedModules,
+				typedSteps:   opts.TypedSteps,
 			})
 		}
 		pb.RegisterPluginServiceServer(s, bridge)
@@ -322,6 +325,21 @@ type IaCServeOptions struct {
 	// Modules; values are sdk.StepProvider — the same interface non-IaC
 	// plugins consume via sdk.Serve.
 	Steps map[string]StepProvider
+
+	// TypedModules supplies plugin-native module providers that implement the
+	// strict-proto TypedModuleProvider surface (sdk.TypedModuleFactory or a
+	// custom implementor). When non-nil, mapBackedProvider implements
+	// TypedModuleProvider and grpc_server.go's CreateModule path dispatches
+	// CreateTypedModule on the looked-up entry — passing the host-supplied
+	// *anypb.Any TypedConfig directly to the typed factory's proto-message
+	// unpack. The legacy Modules map remains supported alongside (the
+	// dispatch is Typed-first, then legacy-fallback). See decisions/0039.
+	TypedModules map[string]TypedModuleProvider
+
+	// TypedSteps supplies plugin-native step providers that implement
+	// TypedStepProvider. Same wiring rationale as TypedModules. See
+	// decisions/0039.
+	TypedSteps map[string]TypedStepProvider
 }
 
 // mapBackedProvider adapts user-supplied module/step provider maps to the
@@ -342,8 +360,10 @@ type IaCServeOptions struct {
 // directly (walks the gRPC server's registered services) and never calls
 // back through the delegate.
 type mapBackedProvider struct {
-	modules map[string]ModuleProvider
-	steps   map[string]StepProvider
+	modules      map[string]ModuleProvider
+	steps        map[string]StepProvider
+	typedModules map[string]TypedModuleProvider
+	typedSteps   map[string]TypedStepProvider
 }
 
 // Manifest satisfies sdk.PluginProvider. Return value is unobserved (the
@@ -352,11 +372,16 @@ type mapBackedProvider struct {
 // PluginProvider parameter type-checks at compile time.
 func (p *mapBackedProvider) Manifest() PluginManifest { return PluginManifest{} }
 
-// ModuleTypes returns the keys of the modules map in deterministic
+// ModuleTypes returns the keys of the legacy modules map in deterministic
 // (lexicographic) order. Sorting matters because Go map iteration is
 // randomized — without it, GetModuleTypes responses would differ run-to-run,
-// breaking cache keys, golden files, and any caller that compares the list as
-// an ordered sequence.
+// breaking cache keys, golden files, and any caller that compares the list
+// as an ordered sequence.
+//
+// The typed-module names are surfaced separately via TypedModuleTypes().
+// grpc_server.go's GetModuleTypes calls both methods and merges the lists
+// when the provider implements TypedModuleProvider (Typed-primary-first,
+// then legacy-only extras, with duplicates skipped). See decisions/0039.
 func (p *mapBackedProvider) ModuleTypes() []string {
 	out := make([]string, 0, len(p.modules))
 	for name := range p.modules {
@@ -366,7 +391,13 @@ func (p *mapBackedProvider) ModuleTypes() []string {
 	return out
 }
 
-// CreateModule looks up the named module provider and delegates to it.
+// CreateModule looks up the named module provider in the legacy map and
+// delegates to it. The typed map is checked separately via
+// CreateTypedModule (the gRPC dispatcher tries the typed path first); a
+// type registered ONLY in typedModules will surface here as "unknown" so the
+// host can distinguish "not in legacy" from "not at all" — but in practice
+// grpc_server.CreateModule short-circuits on the typed path and never reaches
+// this code for a typed-only type.
 func (p *mapBackedProvider) CreateModule(typeName, name string, config map[string]any) (ModuleInstance, error) {
 	mp, ok := p.modules[typeName]
 	if !ok {
@@ -375,8 +406,32 @@ func (p *mapBackedProvider) CreateModule(typeName, name string, config map[strin
 	return mp.CreateModule(typeName, name, config)
 }
 
-// StepTypes returns the keys of the steps map in deterministic
-// (lexicographic) order — same rationale as ModuleTypes.
+// TypedModuleTypes returns the keys of the typed-module map in deterministic
+// (lexicographic) order. Required by TypedModuleProvider; consumed by
+// grpc_server.go's GetModuleTypes when it merges typed + legacy names.
+func (p *mapBackedProvider) TypedModuleTypes() []string {
+	out := make([]string, 0, len(p.typedModules))
+	for name := range p.typedModules {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CreateTypedModule looks up the named typed-module provider and delegates
+// the strict-proto factory call to it. Returns ErrTypedContractNotHandled
+// when the type is not in the typed map — the gRPC dispatcher then falls
+// back to the legacy CreateModule path. See decisions/0039.
+func (p *mapBackedProvider) CreateTypedModule(typeName, name string, config *anypb.Any) (ModuleInstance, error) {
+	mp, ok := p.typedModules[typeName]
+	if !ok {
+		return nil, fmt.Errorf("%w: module type %q", ErrTypedContractNotHandled, typeName)
+	}
+	return mp.CreateTypedModule(typeName, name, config)
+}
+
+// StepTypes returns the keys of the legacy steps map in deterministic
+// (lexicographic) order. Same rationale + merge contract as ModuleTypes.
 func (p *mapBackedProvider) StepTypes() []string {
 	out := make([]string, 0, len(p.steps))
 	for name := range p.steps {
@@ -386,13 +441,38 @@ func (p *mapBackedProvider) StepTypes() []string {
 	return out
 }
 
-// CreateStep looks up the named step provider and delegates to it.
+// CreateStep looks up the named step provider in the legacy map and
+// delegates to it. Same Typed-first dispatch semantics as CreateModule.
 func (p *mapBackedProvider) CreateStep(typeName, name string, config map[string]any) (StepInstance, error) {
 	sp, ok := p.steps[typeName]
 	if !ok {
 		return nil, fmt.Errorf("mapBackedProvider: unknown step type %q", typeName)
 	}
 	return sp.CreateStep(typeName, name, config)
+}
+
+// TypedStepTypes returns the keys of the typed-step map in deterministic
+// (lexicographic) order. Required by TypedStepProvider; consumed by
+// grpc_server.go's GetStepTypes when it merges typed + legacy names.
+func (p *mapBackedProvider) TypedStepTypes() []string {
+	out := make([]string, 0, len(p.typedSteps))
+	for name := range p.typedSteps {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CreateTypedStep looks up the named typed-step provider and delegates the
+// strict-proto factory call to it. Returns ErrTypedContractNotHandled when
+// the type is not in the typed map — the gRPC dispatcher then falls back to
+// the legacy CreateStep path.
+func (p *mapBackedProvider) CreateTypedStep(typeName, name string, config *anypb.Any) (StepInstance, error) {
+	sp, ok := p.typedSteps[typeName]
+	if !ok {
+		return nil, fmt.Errorf("%w: step type %q", ErrTypedContractNotHandled, typeName)
+	}
+	return sp.CreateTypedStep(typeName, name, config)
 }
 
 // PluginInfo carries the metadata that go-plugin needs to serve an IaC

@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -204,6 +205,29 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
+// stringSetEqual reports whether a and b contain the same elements
+// regardless of order or duplicates. Used to assert union-merge results
+// where the merge order is contract-irrelevant.
+func stringSetEqual(a, b []string) bool {
+	set := func(xs []string) map[string]struct{} {
+		m := make(map[string]struct{}, len(xs))
+		for _, x := range xs {
+			m[x] = struct{}{}
+		}
+		return m
+	}
+	sa, sb := set(a), set(b)
+	if len(sa) != len(sb) {
+		return false
+	}
+	for k := range sa {
+		if _, ok := sb[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // TestIaCBridge_ZeroValueOptions_ModulesUnimplemented is the backwards-compat
 // invariant: zero-value IaCServeOptions {} keeps the bridge's pre-PR
 // behavior — module/step RPCs return Unimplemented (via
@@ -262,4 +286,259 @@ func TestIaCBridge_NilBroker_NoMessagePublisherCall(t *testing.T) {
 	if mam.SetMessageSubscriberCalled {
 		t.Error("SetMessageSubscriber MUST NOT be called via the IaC bridge path")
 	}
+}
+
+// ── Typed-module / Typed-step dispatch ───────────────────────────────────────
+//
+// The TypedModules / TypedSteps surface added per decisions/0039 lets a
+// plugin register strict-proto providers (sdk.NewTypedModuleFactory /
+// sdk.NewTypedStepFactory) alongside or in place of the legacy ModuleProvider
+// / StepProvider maps. grpc_server.CreateModule / CreateStep dispatch typed-
+// first; mapBackedProvider's CreateTypedModule / CreateTypedStep delegate to
+// the named entry in the typed map (returning ErrTypedContractNotHandled to
+// fall through to the legacy path when not found).
+
+// TestIaCBridge_TypedModules_GetModuleTypes_Union locks the contract that
+// GetModuleTypes returns the union of typed + legacy module-type keys (so
+// the host's discovery surface sees every advertised type).
+func TestIaCBridge_TypedModules_GetModuleTypes_Union(t *testing.T) {
+	opts := IaCServeOptions{
+		Modules: map[string]ModuleProvider{
+			"storage.legacy": &fakeModuleProvider{types: []string{"storage.legacy"}},
+		},
+		TypedModules: map[string]TypedModuleProvider{
+			"storage.typed": NewTypedModuleFactory(
+				"storage.typed",
+				&emptypb.Empty{},
+				func(_ string, _ *emptypb.Empty) (ModuleInstance, error) {
+					return &fakeModuleInstance{}, nil
+				},
+			),
+		},
+	}
+	s := grpc.NewServer()
+	if err := registerAllIaCProviderServicesWithOpts(s, &fakeIaCRequiredProvider{}, opts); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	client := dialBridge(t, s)
+	resp, err := client.GetModuleTypes(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetModuleTypes: %v", err)
+	}
+	// grpc_server.GetModuleTypes merges TypedModuleTypes + ModuleTypes via
+	// mergeTypeLists (typed-primary-first, legacy-only-extras, no
+	// re-sort). The contract is set-equality, not ordered equality — the
+	// host treats GetModuleTypes as a set lookup. So assert as a set.
+	if got := resp.GetTypes(); !stringSetEqual(got, []string{"storage.legacy", "storage.typed"}) {
+		t.Errorf("GetModuleTypes set = %v, want set {storage.legacy, storage.typed}", got)
+	}
+}
+
+// TestIaCBridge_TypedModules_CreateModule_DispatchesTypedFirst verifies that
+// when a module type is in TypedModules, CreateModule hits the typed factory
+// (using the host-supplied TypedConfig *anypb.Any), not the legacy path.
+func TestIaCBridge_TypedModules_CreateModule_DispatchesTypedFirst(t *testing.T) {
+	var typedCalled bool
+	opts := IaCServeOptions{
+		TypedModules: map[string]TypedModuleProvider{
+			"storage.typed": NewTypedModuleFactory(
+				"storage.typed",
+				&emptypb.Empty{},
+				func(_ string, _ *emptypb.Empty) (ModuleInstance, error) {
+					typedCalled = true
+					return &fakeModuleInstance{}, nil
+				},
+			),
+		},
+	}
+	s := grpc.NewServer()
+	if err := registerAllIaCProviderServicesWithOpts(s, &fakeIaCRequiredProvider{}, opts); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	client := dialBridge(t, s)
+
+	cfgAny, err := anypb.New(&emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	resp, err := client.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type:        "storage.typed",
+		Name:        "instance-1",
+		TypedConfig: cfgAny,
+	})
+	if err != nil {
+		t.Fatalf("CreateModule: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("CreateModule plugin-side error: %s", resp.GetError())
+	}
+	if !typedCalled {
+		t.Error("typed factory was not called — dispatch did not route through TypedModules")
+	}
+}
+
+// TestIaCBridge_TypedModules_LegacyFallback_WhenNotInTypedMap verifies the
+// Typed-first → legacy-fallback contract: a type registered ONLY in Modules
+// still works because mapBackedProvider.CreateTypedModule returns
+// ErrTypedContractNotHandled, and grpc_server.CreateModule falls through to
+// the legacy CreateModule path.
+func TestIaCBridge_TypedModules_LegacyFallback_WhenNotInTypedMap(t *testing.T) {
+	var legacyCalled bool
+	legacyProvider := &fakeModuleProviderWithFlag{
+		fakeModuleProvider: fakeModuleProvider{types: []string{"storage.legacy"}},
+		called:             &legacyCalled,
+	}
+	opts := IaCServeOptions{
+		Modules: map[string]ModuleProvider{
+			"storage.legacy": legacyProvider,
+		},
+		TypedModules: map[string]TypedModuleProvider{
+			"storage.typed": NewTypedModuleFactory(
+				"storage.typed",
+				&emptypb.Empty{},
+				func(_ string, _ *emptypb.Empty) (ModuleInstance, error) {
+					return &fakeModuleInstance{}, nil
+				},
+			),
+		},
+	}
+	s := grpc.NewServer()
+	if err := registerAllIaCProviderServicesWithOpts(s, &fakeIaCRequiredProvider{}, opts); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	client := dialBridge(t, s)
+
+	resp, err := client.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "storage.legacy",
+		Name: "instance-legacy",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("CreateModule plugin-side error: %s", resp.GetError())
+	}
+	if !legacyCalled {
+		t.Error("legacy CreateModule was not called — fallback did not engage for non-typed type")
+	}
+}
+
+// TestIaCBridge_TypedSteps_GetStepTypes_Union mirrors the module union test
+// for steps.
+func TestIaCBridge_TypedSteps_GetStepTypes_Union(t *testing.T) {
+	opts := IaCServeOptions{
+		Steps: map[string]StepProvider{
+			"step.legacy": &fakeStepProvider{types: []string{"step.legacy"}},
+		},
+		TypedSteps: map[string]TypedStepProvider{
+			"step.typed": NewTypedStepFactory(
+				"step.typed",
+				&emptypb.Empty{},
+				&emptypb.Empty{},
+				func(_ context.Context, _ TypedStepRequest[*emptypb.Empty, *emptypb.Empty]) (*TypedStepResult[*emptypb.Empty], error) {
+					return &TypedStepResult[*emptypb.Empty]{Output: &emptypb.Empty{}}, nil
+				},
+			),
+		},
+	}
+	s := grpc.NewServer()
+	if err := registerAllIaCProviderServicesWithOpts(s, &fakeIaCRequiredProvider{}, opts); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	client := dialBridge(t, s)
+	resp, err := client.GetStepTypes(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetStepTypes: %v", err)
+	}
+	// Same set-equality rationale as GetModuleTypes_Union.
+	if got := resp.GetTypes(); !stringSetEqual(got, []string{"step.legacy", "step.typed"}) {
+		t.Errorf("GetStepTypes set = %v, want set {step.legacy, step.typed}", got)
+	}
+}
+
+// TestIaCBridge_TypedSteps_CreateStep_DispatchesTypedFirst — same shape as
+// the module-side test, for steps.
+func TestIaCBridge_TypedSteps_CreateStep_DispatchesTypedFirst(t *testing.T) {
+	var typedCalled bool
+	opts := IaCServeOptions{
+		TypedSteps: map[string]TypedStepProvider{
+			"step.typed": NewTypedStepFactory(
+				"step.typed",
+				&emptypb.Empty{},
+				&emptypb.Empty{},
+				func(_ context.Context, _ TypedStepRequest[*emptypb.Empty, *emptypb.Empty]) (*TypedStepResult[*emptypb.Empty], error) {
+					typedCalled = true
+					return &TypedStepResult[*emptypb.Empty]{Output: &emptypb.Empty{}}, nil
+				},
+			),
+		},
+	}
+	s := grpc.NewServer()
+	if err := registerAllIaCProviderServicesWithOpts(s, &fakeIaCRequiredProvider{}, opts); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	client := dialBridge(t, s)
+
+	cfgAny, err := anypb.New(&emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	resp, err := client.CreateStep(context.Background(), &pb.CreateStepRequest{
+		Type:        "step.typed",
+		Name:        "step-1",
+		TypedConfig: cfgAny,
+	})
+	if err != nil {
+		t.Fatalf("CreateStep: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("CreateStep plugin-side error: %s", resp.GetError())
+	}
+	// CreateTypedStep is called during create; the factory's callback
+	// (which sets typedCalled) only fires on Execute, but the CreateStep
+	// success itself confirms TypedStepProvider.CreateTypedStep was used
+	// (the legacy path would have errored because no Steps entry exists).
+	_ = typedCalled
+}
+
+// TestIaCBridge_TypedOnly_GetModuleTypes_NoLegacyMapPresent confirms that
+// TypedModules alone (no Modules map at all) wires the bridge and surfaces
+// typed module types — i.e. opting fully in to strict-proto providers does
+// not require also setting Modules.
+func TestIaCBridge_TypedOnly_GetModuleTypes_NoLegacyMapPresent(t *testing.T) {
+	opts := IaCServeOptions{
+		TypedModules: map[string]TypedModuleProvider{
+			"storage.typed-only": NewTypedModuleFactory(
+				"storage.typed-only",
+				&emptypb.Empty{},
+				func(_ string, _ *emptypb.Empty) (ModuleInstance, error) {
+					return &fakeModuleInstance{}, nil
+				},
+			),
+		},
+	}
+	s := grpc.NewServer()
+	if err := registerAllIaCProviderServicesWithOpts(s, &fakeIaCRequiredProvider{}, opts); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	client := dialBridge(t, s)
+	resp, err := client.GetModuleTypes(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetModuleTypes (typed-only): %v", err)
+	}
+	if got := resp.GetTypes(); len(got) != 1 || got[0] != "storage.typed-only" {
+		t.Errorf("GetModuleTypes (typed-only) = %v, want [storage.typed-only]", got)
+	}
+}
+
+// fakeModuleProviderWithFlag tracks whether the legacy CreateModule path
+// was hit, for the typed-first fallback test.
+type fakeModuleProviderWithFlag struct {
+	fakeModuleProvider
+	called *bool
+}
+
+func (f *fakeModuleProviderWithFlag) CreateModule(t, n string, c map[string]any) (ModuleInstance, error) {
+	*f.called = true
+	return f.fakeModuleProvider.CreateModule(t, n, c)
 }
