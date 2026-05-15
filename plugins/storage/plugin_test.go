@@ -21,8 +21,8 @@ func TestPluginManifest(t *testing.T) {
 	if m.Name != "storage" {
 		t.Errorf("expected name %q, got %q", "storage", m.Name)
 	}
-	if len(m.ModuleTypes) != 9 {
-		t.Errorf("expected 9 module types, got %d", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 8 {
+		t.Errorf("expected 8 module types, got %d", len(m.ModuleTypes))
 	}
 	if len(m.StepTypes) != 4 {
 		t.Errorf("expected 4 step types, got %d", len(m.StepTypes))
@@ -51,7 +51,7 @@ func TestModuleFactories(t *testing.T) {
 	factories := p.ModuleFactories()
 
 	expectedTypes := []string{
-		"storage.s3", "storage.local", "storage.gcs",
+		"storage.local", "storage.gcs",
 		"storage.sqlite", "database.workflow", "persistence.store",
 		"cache.redis",
 	}
@@ -72,18 +72,8 @@ func TestModuleFactoryWithConfig(t *testing.T) {
 	p := New()
 	factories := p.ModuleFactories()
 
-	// storage.s3 with config
-	mod := factories["storage.s3"]("s3-test", map[string]any{
-		"bucket":   "test-bucket",
-		"region":   "eu-west-1",
-		"endpoint": "http://localhost:9000",
-	})
-	if mod == nil {
-		t.Fatal("storage.s3 factory returned nil with config")
-	}
-
 	// storage.sqlite with config
-	mod = factories["storage.sqlite"]("sqlite-test", map[string]any{
+	mod := factories["storage.sqlite"]("sqlite-test", map[string]any{
 		"dbPath":         "test.db",
 		"maxConnections": float64(10),
 		"walMode":        false,
@@ -134,8 +124,8 @@ func TestStepFactories(t *testing.T) {
 func TestModuleSchemas(t *testing.T) {
 	p := New()
 	schemas := p.ModuleSchemas()
-	if len(schemas) != 9 {
-		t.Fatalf("expected 9 module schemas, got %d", len(schemas))
+	if len(schemas) != 8 {
+		t.Fatalf("expected 8 module schemas, got %d", len(schemas))
 	}
 
 	types := map[string]bool{}
@@ -143,7 +133,7 @@ func TestModuleSchemas(t *testing.T) {
 		types[s.Type] = true
 	}
 	expectedTypes := []string{
-		"storage.s3", "storage.local", "storage.gcs",
+		"storage.local", "storage.gcs",
 		"storage.sqlite", "database.workflow", "database.partitioned",
 		"persistence.store", "cache.redis",
 	}

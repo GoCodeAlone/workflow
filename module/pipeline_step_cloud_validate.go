@@ -102,7 +102,22 @@ func (s *CloudValidateStep) validateCreds(provider string, creds *CloudCredentia
 	}
 	switch provider {
 	case "aws":
-		return creds.AccessKey != "" && creds.SecretKey != ""
+		// static/env: AccessKey + SecretKey populated directly.
+		if creds.AccessKey != "" && creds.SecretKey != "" {
+			return true
+		}
+		// profile/role_arn (post-Task 13 rewrite): resolver records a
+		// credential_source marker; the aws plugin performs the SDK-bearing
+		// resolution at the point of use.
+		if src, ok := creds.Extra["credential_source"]; ok && src != "" {
+			return true
+		}
+		// role_arn marker also records RoleARN on creds — accept it as a
+		// signal that the resolver ran successfully.
+		if creds.RoleARN != "" {
+			return true
+		}
+		return false
 	case "gcp":
 		return creds.ProjectID != "" || len(creds.ServiceAccountJSON) > 0
 	case "azure":

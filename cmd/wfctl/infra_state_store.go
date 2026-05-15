@@ -82,16 +82,16 @@ func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 		}
 		return &fsWfctlStateStore{dir: dir}, nil
 
-	case "spaces":
-		return resolveSpacesStateStore(cfg)
-
 	case "postgres":
 		return resolvePostgresStateStore(cfg)
 
+	case "spaces":
+		return nil, fmt.Errorf("iac.state backend %q is now plugin-served by workflow-plugin-digitalocean v1.1.0; "+
+			"install and load the plugin to use the Spaces backend (wfctl direct-path commands no longer support in-tree spaces)", backend)
+
 	case "s3":
-		return nil, fmt.Errorf("s3 state store backend not yet supported by wfctl direct-path commands; " +
-			"create the bucket manually and reference it in iac.state.bucket. " +
-			"Contribute a resolveS3StateStore helper to unblock this")
+		return nil, fmt.Errorf("iac.state backend %q is now plugin-served by workflow-plugin-aws v1.1.0; "+
+			"install and load the plugin to use the S3 backend (wfctl direct-path commands no longer support in-tree s3)", backend)
 
 	case "gcs":
 		return nil, fmt.Errorf("gcs state store backend not yet supported by wfctl direct-path commands; " +
@@ -117,10 +117,9 @@ type fsWfctlStateStore struct {
 	dir string
 }
 
-// iacStateRecord mirrors the JSON schema used by the filesystem and Spaces
-// backends. The field names must stay stable to remain compatible with the
-// existing loadFSState reader and the importFromTFState / importFromPulumi
-// writers.
+// iacStateRecord mirrors the JSON schema used by the filesystem backend. The
+// field names must stay stable to remain compatible with the existing
+// loadFSState reader and the importFromTFState / importFromPulumi writers.
 type iacStateRecord struct {
 	ResourceID   string         `json:"resource_id"`
 	ResourceType string         `json:"resource_type"`
@@ -224,60 +223,6 @@ func (s *fsWfctlStateStore) SaveMetadata(_ context.Context, meta interfaces.Gene
 		return fmt.Errorf("save metadata: write: %w", err)
 	}
 	return nil
-}
-
-// ── Spaces backend ─────────────────────────────────────────────────────────────
-
-// resolveSpacesStateStore builds a Spaces-backed state store from the expanded
-// iac.state module config. Credentials fall back to DO_SPACES_ACCESS_KEY /
-// DO_SPACES_SECRET_KEY environment variables via module.NewSpacesIaCStateStore.
-func resolveSpacesStateStore(cfg map[string]any) (infraStateStore, error) {
-	bucket, _ := cfg["bucket"].(string)
-	region, _ := cfg["region"].(string)
-	prefix, _ := cfg["prefix"].(string)
-
-	accessKey, _ := cfg["accessKey"].(string)
-	if accessKey == "" {
-		accessKey, _ = cfg["access_key"].(string)
-	}
-	secretKey, _ := cfg["secretKey"].(string)
-	if secretKey == "" {
-		secretKey, _ = cfg["secret_key"].(string)
-	}
-	if bucket == "" {
-		return nil, fmt.Errorf("iac.state backend=spaces requires 'bucket' in config")
-	}
-	inner, err := module.NewSpacesIaCStateStore(region, bucket, prefix, accessKey, secretKey, "")
-	if err != nil {
-		return nil, fmt.Errorf("init spaces state store: %w", err)
-	}
-	return &spacesWfctlStateStore{inner: inner}, nil
-}
-
-// spacesWfctlStateStore wraps module.SpacesIaCStateStore to implement
-// infraStateStore, bridging module.IaCState ↔ interfaces.ResourceState.
-type spacesWfctlStateStore struct {
-	inner *module.SpacesIaCStateStore
-}
-
-func (s *spacesWfctlStateStore) ListResources(ctx context.Context) ([]interfaces.ResourceState, error) {
-	records, err := s.inner.ListStates(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("list spaces state: %w", err)
-	}
-	states := make([]interfaces.ResourceState, 0, len(records))
-	for _, r := range records {
-		states = append(states, iacStateToResourceState(r))
-	}
-	return states, nil
-}
-
-func (s *spacesWfctlStateStore) SaveResource(ctx context.Context, state interfaces.ResourceState) error {
-	return s.inner.SaveState(ctx, resourceStateToIaCState(state))
-}
-
-func (s *spacesWfctlStateStore) DeleteResource(ctx context.Context, name string) error {
-	return s.inner.DeleteState(ctx, name)
 }
 
 // ── Postgres backend ───────────────────────────────────────────────────────────

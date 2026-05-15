@@ -179,7 +179,6 @@ flowchart TD
 | `step.dlq_replay` | Replays messages from the dead-letter queue | pipelinesteps |
 | `step.retry_with_backoff` | Retries a sub-pipeline with exponential backoff | pipelinesteps |
 | `step.resilient_circuit_breaker` | Wraps a sub-pipeline with a circuit breaker | pipelinesteps |
-| `step.s3_upload` | Uploads a file or data to an S3-compatible bucket | pipelinesteps |
 | `step.auth_validate` | Validates an authentication token and populates claims | pipelinesteps |
 | `step.token_revoke` | Revokes an auth token | pipelinesteps |
 | `step.field_reencrypt` | Re-encrypts a field with a new key | pipelinesteps |
@@ -537,7 +536,6 @@ See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 ### Storage
 | Type | Description | Plugin |
 |------|-------------|--------|
-| `storage.s3` | Amazon S3 storage | storage |
 | `storage.gcs` | Google Cloud Storage | storage |
 | `storage.local` | Local filesystem storage | storage |
 | `storage.sqlite` | SQLite storage | storage |
