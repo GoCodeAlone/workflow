@@ -1,14 +1,9 @@
 package module
 
 import (
-	"context"
 	"fmt"
+	"log"
 	"os"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 func init() {
@@ -55,8 +50,9 @@ func (r *awsEnvResolver) Resolve(m *CloudAccount) error {
 	return nil
 }
 
-// awsProfileResolver resolves AWS credentials from a named shared-config profile
-// using aws-sdk-go-v2/config.LoadDefaultConfig with WithSharedConfigProfile.
+// awsProfileResolver records a profile credential_source marker; SDK-bearing
+// resolution happens in the aws plugin (decisions/0036 + 0038). Core no longer
+// imports aws-sdk-go-v2/config — keeping the workflow binary SDK-free.
 type awsProfileResolver struct{}
 
 func (r *awsProfileResolver) Provider() string       { return "aws" }
@@ -80,26 +76,13 @@ func (r *awsProfileResolver) Resolve(m *CloudAccount) error {
 	}
 	m.creds.Extra["profile"] = profile
 
-	// Load credentials from the named profile using the AWS SDK.
-	// A missing local profile file is normal in CI/prod — don't hard-fail.
-	ctx := context.Background()
-	cfg, loadErr := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(profile))
-	if loadErr != nil {
-		return nil //nolint:nilerr // missing profile is normal in CI
-	}
-	creds, credErr := cfg.Credentials.Retrieve(ctx)
-	if credErr != nil {
-		return nil //nolint:nilerr // credential retrieval failure is non-fatal
-	}
-	m.creds.AccessKey = creds.AccessKeyID
-	m.creds.SecretKey = creds.SecretAccessKey
-	m.creds.SessionToken = creds.SessionToken
+	m.creds.Extra["credential_source"] = "profile"
+	logCredentialSourceMarker("aws", "profile")
 	return nil
 }
 
-// awsRoleARNResolver resolves AWS credentials via STS AssumeRole.
-// It loads base credentials (from the environment or inline config), then calls
-// sts:AssumeRole to obtain temporary credentials for the target role.
+// awsRoleARNResolver records a role_arn credential_source marker; the actual
+// sts:AssumeRole call is performed by the aws plugin (decisions/0036 + 0038).
 type awsRoleARNResolver struct{}
 
 func (r *awsRoleARNResolver) Provider() string       { return "aws" }
@@ -114,7 +97,7 @@ func (r *awsRoleARNResolver) Resolve(m *CloudAccount) error {
 	roleARN, _ := credsMap["roleArn"].(string)
 	externalID, _ := credsMap["externalId"].(string)
 
-	// Always record the role ARN so AWSConfig() can use stscreds.AssumeRoleProvider.
+	// Always record the role ARN so the plugin can use stscreds.AssumeRoleProvider.
 	m.creds.RoleARN = roleARN
 	if m.creds.Extra == nil {
 		m.creds.Extra = map[string]string{}
@@ -125,53 +108,15 @@ func (r *awsRoleARNResolver) Resolve(m *CloudAccount) error {
 		return fmt.Errorf("awsRoleARNResolver: roleArn is required")
 	}
 
-	sessionName, _ := credsMap["sessionName"].(string)
-	if sessionName == "" {
-		sessionName = "workflow-session"
-	}
-
-	// Build base credentials. Inline accessKey/secretKey take priority over the
-	// default credential chain.
-	ctx := context.Background()
-	var baseCfgOpts []func(*config.LoadOptions) error
-	if region := m.region; region != "" {
-		baseCfgOpts = append(baseCfgOpts, config.WithRegion(region))
-	}
-	accessKey, _ := credsMap["accessKey"].(string)
-	secretKey, _ := credsMap["secretKey"].(string)
-	if accessKey != "" && secretKey != "" {
-		sessionToken, _ := credsMap["sessionToken"].(string)
-		baseCfgOpts = append(baseCfgOpts, config.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(accessKey, secretKey, sessionToken),
-		))
-	}
-
-	baseCfg, loadErr := config.LoadDefaultConfig(ctx, baseCfgOpts...)
-	if loadErr != nil {
-		// AWSConfig() will retry via stscreds.AssumeRoleProvider at call time.
-		return nil //nolint:nilerr // config load failure is non-fatal
-	}
-
-	stsClient := sts.NewFromConfig(baseCfg)
-	input := &sts.AssumeRoleInput{
-		RoleArn:         aws.String(roleARN),
-		RoleSessionName: aws.String(sessionName),
-	}
-	if externalID != "" {
-		input.ExternalId = aws.String(externalID)
-	}
-
-	out, assumeErr := stsClient.AssumeRole(ctx, input)
-	if assumeErr != nil {
-		// AssumeRole may fail at config-load time without real credentials;
-		// AWSConfig() handles deferred token refresh via stscreds.
-		return nil //nolint:nilerr // AssumeRole failure handled by deferred refresh
-	}
-
-	if out.Credentials != nil {
-		m.creds.AccessKey = aws.ToString(out.Credentials.AccessKeyId)
-		m.creds.SecretKey = aws.ToString(out.Credentials.SecretAccessKey)
-		m.creds.SessionToken = aws.ToString(out.Credentials.SessionToken)
-	}
+	m.creds.Extra["credential_source"] = "role_arn"
+	logCredentialSourceMarker("aws", "role_arn")
 	return nil
+}
+
+// logCredentialSourceMarker emits a single warning line when a deferred
+// credential_source marker is recorded. The warning matters during the gap
+// window where an old plugin version may see a marker it doesn't yet
+// understand — the message tells operators where the resolution moved.
+func logCredentialSourceMarker(provider, source string) {
+	log.Printf("workflow: %s credential_source=%q recorded; resolution deferred to plugin (decisions/0036+0038)", provider, source)
 }
