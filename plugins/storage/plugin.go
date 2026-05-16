@@ -12,8 +12,8 @@ import (
 )
 
 // Plugin provides storage and database capabilities: storage.local,
-// storage.gcs, storage.sqlite, storage.artifact, database.workflow,
-// persistence.store, cache.redis modules, and artifact pipeline step factories.
+// storage.sqlite, storage.artifact, database.workflow, persistence.store,
+// cache.redis modules, and artifact pipeline step factories.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 }
@@ -35,7 +35,6 @@ func New() *Plugin {
 				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
 					"storage.local",
-					"storage.gcs",
 					"storage.sqlite",
 					"storage.artifact",
 					"database.workflow",
@@ -91,19 +90,6 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				rootDir = rd
 			}
 			return module.NewLocalStorageModule(name, rootDir)
-		},
-		"storage.gcs": func(name string, cfg map[string]any) modular.Module {
-			gcsMod := module.NewGCSStorage(name)
-			if bucket, ok := cfg["bucket"].(string); ok {
-				gcsMod.SetBucket(bucket)
-			}
-			if project, ok := cfg["project"].(string); ok {
-				gcsMod.SetProject(project)
-			}
-			if creds, ok := cfg["credentialsFile"].(string); ok {
-				gcsMod.SetCredentialsFile(creds)
-			}
-			return gcsMod
 		},
 		"storage.sqlite": func(name string, cfg map[string]any) modular.Module {
 			dbPath := "data/workflow.db"
@@ -319,19 +305,6 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "rootDir", Label: "Root Directory", Type: schema.FieldTypeString, Required: true, Description: "Filesystem path for the storage root", Placeholder: "./data/storage"},
 			},
 			DefaultConfig: map[string]any{"rootDir": "./data/storage"},
-		},
-		{
-			Type:        "storage.gcs",
-			Label:       "GCS Storage",
-			Category:    "integration",
-			Description: "Google Cloud Storage integration",
-			Inputs:      []schema.ServiceIODef{{Name: "object", Type: "[]byte", Description: "Object data to store or retrieve"}},
-			Outputs:     []schema.ServiceIODef{{Name: "storage", Type: "ObjectStore", Description: "GCS-compatible object storage service"}},
-			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "bucket", Label: "Bucket", Type: schema.FieldTypeString, Required: true, Description: "GCS bucket name", Placeholder: "my-bucket"},
-				{Key: "project", Label: "GCP Project", Type: schema.FieldTypeString, Description: "Google Cloud project ID", Placeholder: "my-project"},
-				{Key: "credentialsFile", Label: "Credentials File", Type: schema.FieldTypeFilePath, Description: "Path to service account JSON key file", Placeholder: "credentials/gcs-key.json", Sensitive: true},
-			},
 		},
 		{
 			Type:        "storage.sqlite",

@@ -15,8 +15,28 @@ import (
 	"github.com/GoCodeAlone/modular"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/github"
-	"golang.org/x/oauth2/google"
 )
+
+// googleOAuth2Endpoint hard-codes Google's static IdP OAuth2 endpoints (RFC 6749).
+// We avoid importing `golang.org/x/oauth2/google` because its package init
+// transitively pulls `cloud.google.com/go/compute/metadata` (an ADC helper
+// for GCE/GKE workload identity). The Phase C asymmetric CI gate
+// (decisions/0034 + plan 2026-05-15-plugin-modules-on-iac.md Task 18) asserts
+// no UNEXPECTED `cloud.google.com/go/*` packages in core's build graph;
+// `cloud.google.com/go/compute/metadata` is allowlisted as the OAuth2 ADC
+// helper transitively pulled by provider/gcp's service-account auth. Keeping
+// this auth handler off `oauth2/google` keeps that allowlist single-purpose
+// (provider/gcp only) — adding a second importer would entrench the
+// transitive dep in a surface that doesn't need it.
+// These URLs are static published Google OAuth2 endpoints:
+//
+//	https://developers.google.com/identity/protocols/oauth2/web-server
+//
+//nolint:gosec // G101: public OAuth2 IdP endpoint URLs (auth + token), not credentials
+var googleOAuth2Endpoint = oauth2.Endpoint{
+	AuthURL:  "https://accounts.google.com/o/oauth2/auth",
+	TokenURL: "https://oauth2.googleapis.com/token",
+}
 
 // OAuth2ProviderConfig holds configuration for a single OAuth2 provider.
 type OAuth2ProviderConfig struct {
@@ -83,7 +103,7 @@ func buildProviderEntry(pc *OAuth2ProviderConfig) *oauth2ProviderEntry {
 
 	switch pc.Name {
 	case "google":
-		endpoint = google.Endpoint
+		endpoint = googleOAuth2Endpoint
 		userInfoURL = "https://www.googleapis.com/oauth2/v2/userinfo"
 		if len(pc.Scopes) == 0 {
 			pc.Scopes = []string{"openid", "email", "profile"}

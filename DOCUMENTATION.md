@@ -502,7 +502,7 @@ steps. See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
 Use the generic `infra.*` module types with `provider: aws` and `step.iac_*` pipeline steps.
 See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 | `iac.provider` | Cloud provider configuration (aws, gcp, azure, digitalocean) for IaC operations | platform |
-| `iac.state` | IaC state persistence (memory, filesystem, spaces, gcs, azure_blob, postgres) | platform |
+| `iac.state` | IaC state persistence (memory + filesystem + postgres in-core; spaces / s3 / gcs / azure_blob via plugins) | platform |
 | `infra.vpc` | Virtual Private Cloud and subnet management | platform |
 | `infra.database` | Managed database instance provisioning and configuration | platform |
 | `infra.cache` | In-memory cache cluster provisioning (Redis, Memcached) | platform |
@@ -536,7 +536,6 @@ See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 ### Storage
 | Type | Description | Plugin |
 |------|-------------|--------|
-| `storage.gcs` | Google Cloud Storage | storage |
 | `storage.local` | Local filesystem storage | storage |
 | `storage.sqlite` | SQLite storage | storage |
 | `storage.artifact` | Artifact store for build artifacts shared across pipeline steps | storage |

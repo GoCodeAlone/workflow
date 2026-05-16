@@ -395,12 +395,54 @@ jobs:
           ! grep -qH "digitalocean/godo" go.mod example/go.mod
 
   cloud-sdk-audit:
-    name: Cloud-SDK inventory + k8s-backend init() partition audit
+    name: Cloud-SDK inventory + k8s-backend init() partition + asymmetric graph audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Audit cloud-SDK imports + init() partition
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download module deps (needed for `go list -deps`)
+        env:
+          GOWORK: "off"
+        run: go mod download
+      - name: Audit cloud-SDK imports + init() partition + Phase C asymmetric gate
+        # The script enforces (once .phase-c-complete is armed):
+        #   - module/ zero gcp/azure SDK real imports
+        #   - build graph: zero Azure/azure-sdk-for-go, zero google.golang.org/api,
+        #     zero cloud.google.com/go except compute/metadata (OAuth2 ADC helper
+        #     legitimately pulled by provider/gcp's service-account auth).
         run: bash scripts/audit-cloud-symbols.sh --check
+      - name: Standalone asymmetric gate — `go list -deps` (mirrors audit script)
+        # Independent assertion of the same invariant for clarity in CI failure logs.
+        # Any cloud.google.com/go path other than compute/metadata fails the build.
+        env:
+          GOWORK: "off"
+        run: |
+          set +e
+          DEPS=$(go list -deps ./... 2>&1)
+          LIST_EXIT=$?
+          set -e
+          if [ $LIST_EXIT -ne 0 ]; then
+            echo "FAIL: \`go list -deps ./...\` exited $LIST_EXIT (gate cannot enforce):"
+            echo "$DEPS" | head -10 | sed 's/^/  /'
+            exit 1
+          fi
+          # `|| true` on grep is fine: exit 1 from grep means "no matches" = success.
+          UNEXPECTED=$(echo "$DEPS" \
+            | grep -E '^(cloud\.google\.com/go|google\.golang\.org/api|github\.com/Azure/azure-sdk-for-go)' \
+            | grep -v '^cloud\.google\.com/go/compute/metadata$' \
+            || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "FAIL: unexpected gcp/azure/api transitive deps in workflow-core build graph:"
+            printf '  %s\n' $UNEXPECTED
+            echo
+            echo "Only cloud.google.com/go/compute/metadata is allowlisted (OAuth2 ADC helper)."
+            echo "Other gcp/azure SDK packages belong in a plugin, not workflow core."
+            echo "See docs/migrations/2026-05-15-plugin-modules-on-iac.md (Phase C)."
+            exit 1
+          fi
 
   aws-sdk-banned:
     name: Verify removed AWS SDK packages are not imported (issue #653)
