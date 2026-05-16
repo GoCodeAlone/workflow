@@ -74,7 +74,7 @@ func TestApply_InProcess_PlanStaleDiagnostic_NamesChangedKeys(t *testing.T) {
 	plan := &interfaces.IaCPlan{
 		InputSnapshot: map[string]string{varName: planFP},
 	}
-	result, err := wfctlhelpers.ApplyPlan(context.Background(), inProcessFakeProvider{}, plan)
+	result, err := wfctlhelpers.ApplyPlanWithHooks(context.Background(), inProcessFakeProvider{}, plan, wfctlhelpers.ApplyPlanHooks{})
 	if err != nil {
 		t.Fatalf("ApplyPlan returned top-level error: %v", err)
 	}
