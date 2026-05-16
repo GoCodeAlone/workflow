@@ -6,6 +6,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 // iacRequiredMethodsCheck is a locally-enumerated method-signature interface
@@ -93,5 +94,62 @@ func TestMigrationRepairConfirmationStringMatchesProtoComment(t *testing.T) {
 	if interfaces.MigrationRepairConfirmation != "FORCE_MIGRATION_METADATA" {
 		t.Fatalf("interfaces.MigrationRepairConfirmation drifted from proto comment in iac.proto:322-324; got %q want %q",
 			interfaces.MigrationRepairConfirmation, "FORCE_MIGRATION_METADATA")
+	}
+}
+
+// TestApplyResultActionsRoundTrip verifies the Phase 2 ActionResult+
+// ActionStatus additions to ApplyResult survive a proto marshal/unmarshal
+// round trip with identical field values. Per ADR 0040 invariants 1-2 and
+// the v2-lifecycle-phase2 plan T1. Guards against accidental field-tag
+// drift and against re-ordering action_index / status / error.
+func TestApplyResultActionsRoundTrip(t *testing.T) {
+	original := &pb.ApplyResult{
+		PlanId: "plan-phase2-roundtrip",
+		Actions: []*pb.ActionResult{
+			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_SUCCESS, Error: ""},
+			{ActionIndex: 1, Status: pb.ActionStatus_ACTION_STATUS_ERROR, Error: "boom"},
+			{ActionIndex: 2, Status: pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, Error: "still in use"},
+		},
+	}
+	wire, err := proto.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	decoded := &pb.ApplyResult{}
+	if err := proto.Unmarshal(wire, decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got, want := len(decoded.GetActions()), len(original.GetActions()); got != want {
+		t.Fatalf("Actions len: got %d, want %d", got, want)
+	}
+	for i, want := range original.GetActions() {
+		got := decoded.GetActions()[i]
+		if got.GetActionIndex() != want.GetActionIndex() ||
+			got.GetStatus() != want.GetStatus() ||
+			got.GetError() != want.GetError() {
+			t.Fatalf("Actions[%d]: got %+v, want %+v", i, got, want)
+		}
+	}
+}
+
+// TestActionStatusEnumValues pins the wire-tag → constant mapping for
+// ActionStatus. Per plan T1: 0=UNSPECIFIED (rejected by wfctl), 1=SUCCESS,
+// 2=ERROR, 3=DELETE_FAILED. Tags 4-5 reserved for Phase 2.3 compensation;
+// this test fails loudly if any tag is reassigned.
+func TestActionStatusEnumValues(t *testing.T) {
+	cases := []struct {
+		name string
+		val  pb.ActionStatus
+		tag  int32
+	}{
+		{"UNSPECIFIED", pb.ActionStatus_ACTION_STATUS_UNSPECIFIED, 0},
+		{"SUCCESS", pb.ActionStatus_ACTION_STATUS_SUCCESS, 1},
+		{"ERROR", pb.ActionStatus_ACTION_STATUS_ERROR, 2},
+		{"DELETE_FAILED", pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, 3},
+	}
+	for _, c := range cases {
+		if int32(c.val) != c.tag {
+			t.Errorf("ActionStatus_%s = %d, want %d", c.name, int32(c.val), c.tag)
+		}
 	}
 }
