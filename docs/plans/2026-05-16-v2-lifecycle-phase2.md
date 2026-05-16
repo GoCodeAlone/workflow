@@ -15,7 +15,7 @@
 ## Scope Manifest
 
 **PR Count:** 5
-**Tasks:** 13
+**Tasks:** 11
 **Estimated Lines of Change:** ~500 (workflow ~400 incl proto+pb.go regen; per-plugin ~5-10 LOC × 4 plugins; smoke + memory ~50)
 
 **Out of scope:**
@@ -30,13 +30,13 @@
 
 | PR # | Title | Tasks | Branch |
 |------|-------|-------|--------|
-| 1 | feat: workflow v0.54.0 — ApplyResult.Actions + ActionStatus enum + engine population | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6, Task 7 | `feat/v2-phase2-grpc-contract` (in workflow) |
-| 2 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 8 | `feat/v2-capabilities-v2` (in workflow-plugin-aws) |
-| 3 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 9 | `feat/v2-capabilities-v2` (in workflow-plugin-gcp) |
-| 4 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 10 | `feat/v2-capabilities-v2` (in workflow-plugin-azure) |
-| 5 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 11 | `feat/v2-capabilities-v2` (in workflow-plugin-digitalocean) |
+| 1 | feat: workflow v0.54.0 — ApplyResult.Actions + ActionStatus enum + engine population | Task 1, Task 2, Task 3, Task 4, Task 5 | `feat/v2-phase2-grpc-contract` (in workflow) |
+| 2 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 6 | `feat/v2-capabilities-v2` (in workflow-plugin-aws) |
+| 3 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 7 | `feat/v2-capabilities-v2` (in workflow-plugin-gcp) |
+| 4 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 8 | `feat/v2-capabilities-v2` (in workflow-plugin-azure) |
+| 5 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 9 | `feat/v2-capabilities-v2` (in workflow-plugin-digitalocean) |
 
-**Tasks 12 + 13 are non-PR coordination steps** (cross-plugin smoke verification + memory update) executed by team-lead after all 5 PRs ship — they don't create their own PR; they're operational close-out.
+**Tasks 10 + 11 are non-PR coordination steps** (cross-plugin smoke verification + memory update) executed by team-lead after all 5 PRs ship — they don't create their own PR; they're operational close-out.
 
 **Status:** Draft
 
@@ -47,13 +47,13 @@
 Per the cloud-SDK plugin sweep precedent — team-lead actions BEFORE dispatching implementers:
 
 1. Verify ADR 0024 + 0040 are still binding (read decisions/0024 + decisions/0040; confirm no override in flight).
-2. File `workflow#640-phase-2.1` follow-up tracking issue (NOT this PR's work; just file the tracking placeholder for the deferred manifest-validation gate per design deliverable #6). Issue body: "Phase 2.1 follow-up to #640 Phase 2 — add manifest validation gate at cmd/wfctl/deploy_providers.go::findIaCPluginDir per Phase 1 Assumption 8. Three implementation options recorded in Phase 2 design doc (full pluginmanifest package; reuse existing schema/; lightweight computePlanVersion enum check). Pick at design time."
+2. **File `workflow#640-phase-2.1` follow-up tracking issue** (moved from Task 6 per cycle-1 plan-review I-2 — this is a team-lead action, not an implementer task; the tracking issue body references the Phase 2 PR which doesn't exist yet at implementer-time). Issue body: "Phase 2.1 follow-up to #640 Phase 2 (PRs land via Phase 2 cascade) — add manifest validation gate at cmd/wfctl/deploy_providers.go::findIaCPluginDir per Phase 1 Assumption 8. Three implementation options recorded in Phase 2 design doc (full pluginmanifest package; reuse existing schema/; lightweight computePlanVersion enum check). Pick at design time."
 
 ---
 
-## Universal per-plugin pattern (PR 2-5 — applies to Tasks 8, 9, 10, 11)
+## Universal per-plugin pattern (PR 2-5 — applies to Tasks 6, 7, 8, 9)
 
-For tasks 8-11, each follows the same 5-step pattern. Repo-specific details inline per task.
+For tasks 6-9, each follows the same 5-step pattern. Repo-specific details inline per task.
 
 **Files per plugin PR:**
 - Modify: `go.mod` (workflow pin v0.53.1 → v0.54.0)
@@ -81,16 +81,26 @@ require (
 )
 ```
 
-Find the Capabilities RPC handler (grep `func.*Capabilities.*emptypb\|CapabilitiesResponse{`). Add `ComputePlanVersion: "v2"` field:
+Edit **`internal/iacserver.go`** (verified file location across all 4 plugins via cycle-1 plan-review). The Capabilities method signature is identical across all 4 plugins:
 
 ```go
-func (s *Server) Capabilities(ctx context.Context, _ *emptypb.Empty) (*pb.CapabilitiesResponse, error) {
-    return &pb.CapabilitiesResponse{
-        // ... existing fields ...
-        ComputePlanVersion: "v2",  // NEW Phase 2: declare v2 dispatch per ADR 0040
-    }, nil
+// Existing pattern (verified per-plugin — receiver varies: awsIaCServer / gcpIaCServer / azureIaCServer / doIaCServer):
+func (s *<plugin>IaCServer) Capabilities(_ context.Context, _ *pb.CapabilitiesRequest) (*pb.CapabilitiesResponse, error) {
+    // ... existing IaCCapabilityDeclaration build into `out` ...
+    return &pb.CapabilitiesResponse{Capabilities: out}, nil  // CURRENT
 }
 ```
+
+**Change ONLY the return-statement struct literal** to add ComputePlanVersion field:
+
+```go
+return &pb.CapabilitiesResponse{
+    Capabilities:       out,
+    ComputePlanVersion: "v2",  // NEW Phase 2: declare v2 dispatch per ADR 0040
+}, nil
+```
+
+Do NOT rewrite the function body, receiver type, parameter types, or parameter names.
 
 **Step 3: Tidy + build + test**
 
@@ -115,7 +125,7 @@ Expected: all green.
 **Step 5: Commit + PR + admin-merge + tag v1.2.0 + verify release**
 
 ```bash
-git add go.mod go.sum plugin.json internal/server.go
+git add go.mod go.sum plugin.json internal/iacserver.go
 git commit -m "feat: declare ComputePlanVersion v2 + bump workflow v0.53.1 → v0.54.0; release v1.2.0"
 git push -u origin feat/v2-capabilities-v2
 gh pr create --base main --head feat/v2-capabilities-v2 \
@@ -143,11 +153,11 @@ Defensive draft-edit if drafted: `gh release edit v1.2.0 --repo GoCodeAlone/<plu
 
 ## Tasks
 
-### Task 1: workflow — extend iac.proto ApplyResult with ActionResult message + ActionStatus enum
+### Task 1: workflow — extend iac.proto + REGENERATE iac.pb.go in same commit (cycle-1 I-1 bundled)
 
 **Files:**
-- Modify: `plugin/external/proto/iac.proto:295` (add `repeated ActionResult actions = 7;` to ApplyResult message)
-- Modify: `plugin/external/proto/iac.proto:300` (add new enum + message above ApplyResult)
+- Modify: `plugin/external/proto/iac.proto` (add ActionStatus enum + ActionResult message; add `repeated ActionResult actions = 7;` to ApplyResult)
+- Modify: `plugin/external/proto/iac.pb.go` (regenerated; bundled in same commit per cycle-1 plan-review I-1 — splitting proto+regen creates broken intermediate commit that fails CI)
 
 **Step 1: Edit iac.proto — add ActionStatus enum + ActionResult message**
 
@@ -196,71 +206,37 @@ message ApplyResult {
 Run: `protoc --proto_path=plugin/external/proto --descriptor_set_out=/dev/null plugin/external/proto/iac.proto`
 Expected: exit 0, no syntax errors.
 
-**Step 3: Commit**
+**Step 3: Regenerate iac.pb.go (bundled in same commit per cycle-1 I-1)**
 
 ```bash
-git add plugin/external/proto/iac.proto
-git commit -m "feat(proto): extend ApplyResult with Actions field + ActionStatus enum (Phase 2)"
-```
-
-**Verification (proto change, no behavior yet — covered by Task 2 regen + Task 3-5 wiring):**
-- protoc syntax check passes
-- Other ApplyResult tags 1-6 unmodified (no breaking change to existing fields)
-
-**Rollback:** revert commit (no runtime effect yet; tags 1-6 untouched).
-
----
-
-### Task 2: workflow — regenerate iac.pb.go from updated proto
-
-**Files:**
-- Modify: `plugin/external/proto/iac.pb.go` (regenerated)
-
-**Step 1: Find proto regen command**
-
-```bash
-cd /Users/jon/workspace/workflow/_worktrees/v2-phase2-grpc-contract
 grep -rn 'protoc.*iac.proto\|//go:generate.*proto' Makefile scripts/ plugin/external/proto/ 2>&1 | head -5
+# Run whichever regen command the repo uses (make proto / go generate / etc.)
+make proto  # OR go generate ./plugin/external/proto/...
 ```
 
-If `//go:generate` directive present, run `go generate ./plugin/external/proto/...`. Else find Makefile target (e.g., `make proto` or `make gen`).
-
-**Step 2: Regenerate**
-
-```bash
-make proto  # OR go generate ./plugin/external/proto/...  OR whatever the repo's convention is
-```
-
-**Step 3: Verify generated file includes new types**
+**Step 4: Verify generated symbols + build**
 
 ```bash
 grep -n 'ActionStatus\|ActionResult\|GetActions' plugin/external/proto/iac.pb.go | head -10
-```
-
-Expected: lines matching `type ActionResult struct`, `type ApplyResult struct { ... Actions []*ActionResult ...`, `func (x *ApplyResult) GetActions() []*ActionResult`, and enum constants for ActionStatus.
-
-**Step 4: Build verify**
-
-```bash
 GOWORK=off go build ./plugin/external/proto/...
 ```
 
-Expected: exit 0.
+Expected: lines matching `type ActionResult struct`, `type ApplyResult struct { ... Actions []*ActionResult ...`, `func (x *ApplyResult) GetActions() []*ActionResult`, enum constants for ActionStatus; build exit 0.
 
-**Step 5: Commit**
+**Step 5: Commit (BUNDLED — proto + regen atomic)**
 
 ```bash
-git add plugin/external/proto/iac.pb.go
-git commit -m "chore(proto): regenerate iac.pb.go with ActionResult + ActionStatus"
+git add plugin/external/proto/iac.proto plugin/external/proto/iac.pb.go
+git commit -m "feat(proto): extend ApplyResult with Actions field + ActionStatus enum; regenerate iac.pb.go (Phase 2)"
 ```
 
-**Verification:** build clean; grep confirms new symbol presence.
+**Verification (internal-logic refactor + proto regen):** protoc clean; build clean; grep confirms new symbol presence.
 
-**Rollback:** revert commit (regeneration is deterministic).
+**Rollback:** revert commit (regen + proto edit roll back together).
 
 ---
 
-### Task 3: workflow — extend interfaces.ApplyResult + ActionOutcome + ActionStatus Go types
+### Task 2: workflow — extend interfaces.ApplyResult + ActionOutcome + ActionStatus Go types
 
 **Files:**
 - Modify: `interfaces/iac.go` (add ActionStatus enum + ActionOutcome struct; extend ApplyResult.Actions field)
@@ -322,7 +298,7 @@ git commit -m "feat(interfaces): add ActionStatus + ActionOutcome; extend ApplyR
 
 ---
 
-### Task 4: workflow — extend applyResultFromPB to decode + reject UNSPECIFIED
+### Task 3: workflow — extend applyResultFromPB to decode + reject UNSPECIFIED
 
 **Files:**
 - Modify: `cmd/wfctl/iac_typed_adapter.go:1177` (extend applyResultFromPB)
@@ -426,23 +402,19 @@ git commit -m "feat(wfctl): applyResultFromPB decodes ActionResult; rejects UNSP
 
 ---
 
-### Task 5: workflow — engine-side ApplyPlanWithHooks populates result.Actions + length-validation assert
+### Task 4: workflow — engine-side ApplyPlanWithHooks populates result.Actions + length-validation assert
 
 **Files:**
 - Modify: `iac/wfctlhelpers/apply.go:118` (applyPlanWithEnvProviderAndHooks — add Actions append per dispatch + post-loop length assert)
 - Modify: `iac/wfctlhelpers/apply_hooks_test.go` (add test verifying Actions populated)
 
-**Step 1: Write failing test**
+**Step 1: Write failing tests**
 
-Add to `iac/wfctlhelpers/apply_hooks_test.go`:
+Add to `iac/wfctlhelpers/apply_hooks_test.go` — use the REAL fakeProvider API (verified via grep in cycle-1 plan-review C-2: `type fakeProvider struct { driver *fakeDriver; driverErr error }`; `newFakeProvider() *fakeProvider`; single driver, NOT drivers map):
 
 ```go
-func TestApplyPlanWithHooks_PopulatesActions(t *testing.T) {
-    p := &fakeProvider{
-        drivers: map[string]interfaces.ResourceDriver{
-            "test.resource": &fakeDriver{outputs: map[string]any{"id": "abc"}},
-        },
-    }
+func TestApplyPlanWithHooks_PopulatesActions_CleanSuccess(t *testing.T) {
+    p := newFakeProvider()  // single-driver fakeProvider from apply_test.go
     plan := &interfaces.IaCPlan{
         ID: "plan-1",
         Actions: []interfaces.PlanAction{
@@ -458,6 +430,27 @@ func TestApplyPlanWithHooks_PopulatesActions(t *testing.T) {
         if a.Status != interfaces.ActionStatusSuccess { t.Errorf("action %d status: %v", i, a.Status) }
     }
 }
+
+// CRITICAL test per cycle-1 plan-review C-1: pre-dispatch continue paths
+// (driver-resolve error at apply.go:234) MUST still produce ActionOutcome
+// entries so the post-loop length assert doesn't false-fail.
+func TestApplyPlanWithHooks_PopulatesActions_PreDispatchDriverError(t *testing.T) {
+    p := &fakeProvider{driverErr: errors.New("driver resolution failed")}
+    plan := &interfaces.IaCPlan{
+        ID: "plan-1",
+        Actions: []interfaces.PlanAction{
+            {Resource: interfaces.ResourceRef{Type: "unknown.resource", Name: "r1"}, Action: "create"},
+        },
+    }
+    result, err := ApplyPlanWithHooks(context.Background(), p, plan, ApplyPlanHooks{})
+    // Expect best-effort: no top-level error; result.Actions has 1 entry with
+    // Status==Error (since driver resolution failed pre-dispatch).
+    if err != nil { t.Fatalf("expected no top-level err on driver-resolve failure, got: %v", err) }
+    if len(result.Actions) != 1 { t.Fatalf("expected 1 ActionOutcome (length-assert invariant), got %d", len(result.Actions)) }
+    if result.Actions[0].Status != interfaces.ActionStatusError {
+        t.Errorf("driver-resolve-error action status: want Error, got %v", result.Actions[0].Status)
+    }
+}
 ```
 
 **Step 2: Run → expected FAIL**
@@ -466,23 +459,66 @@ func TestApplyPlanWithHooks_PopulatesActions(t *testing.T) {
 GOWORK=off go test ./iac/wfctlhelpers/ -run 'TestApplyPlanWithHooks_PopulatesActions' -v
 ```
 
-Expected: FAIL — `result.Actions` empty.
+Expected: FAIL — `result.Actions` empty (both tests fail).
 
-**Step 3: Implement engine-side population in applyPlanWithEnvProviderAndHooks**
+**Step 3: Implement engine-side population in applyPlanWithEnvProviderAndHooks (covers ALL continue paths per cycle-1 plan-review C-1)**
 
-In `iac/wfctlhelpers/apply.go`, find the dispatch loop (around line 171, `for i := range plan.Actions`). After each iteration (success OR error), append an ActionOutcome to `result.Actions`:
+In `iac/wfctlhelpers/apply.go`, the dispatch loop has multiple `continue` exits (verified: lines 224 jit-error, 234 driver-resolve-error, 261 dispatchAction-error, 287, 313). **EVERY continue path must append an ActionOutcome** OR the post-loop length-assert false-fails on legitimate plans with errors.
+
+Cleanest implementation: deferred closure inside the loop body that records the ActionOutcome on every exit path:
 
 ```go
-// After dispatchAction returns (success or error):
-status := mapDispatchErrToStatus(dispatchErr, action.Action)
-errStr := ""
-if dispatchErr != nil { errStr = dispatchErr.Error() }
-result.Actions = append(result.Actions, interfaces.ActionOutcome{
-    ActionIndex: uint32(i),
-    Status:      status,
-    Error:       errStr,
-})
+for i := range plan.Actions {
+    action := plan.Actions[i]
+    var dispatchErr error
+    var loopErr error // captures the actual error of this iteration
+
+    // Deferred closure: runs on EVERY exit from this iteration (continue or fall-through).
+    // Guarantees 1-to-1 correspondence between plan.Actions and result.Actions
+    // regardless of which continue/branch the code took.
+    func() {
+        defer func() {
+            status := mapDispatchErrToStatus(loopErr, action.Action)
+            errStr := ""
+            if loopErr != nil { errStr = loopErr.Error() }
+            result.Actions = append(result.Actions, interfaces.ActionOutcome{
+                ActionIndex: uint32(i),
+                Status:      status,
+                Error:       errStr,
+            })
+        }()
+
+        // ctx cancellation check
+        if err := ctx.Err(); err != nil { loopErr = err; return }
+
+        // Existing JIT substitution at apply.go:217
+        resolved, err := jitsubst.ResolveSpec(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv)
+        if err != nil {
+            // ... existing result.Errors append for JIT error ...
+            loopErr = fmt.Errorf("jit substitution: %w", err)
+            return
+        }
+
+        // Existing driver resolution at apply.go:228
+        d, err := p.ResourceDriver(action.Resource.Type)
+        if err != nil {
+            // ... existing result.Errors append for driver-resolve error ...
+            loopErr = err
+            return
+        }
+
+        // Existing dispatchAction call at apply.go:251
+        if err := dispatchAction(ctx, d, resolved, result, actionHooks, deleteHookActive); err != nil {
+            // ... existing result.Errors handling ...
+            loopErr = err
+            return
+        }
+        // Success path — loopErr stays nil; deferred closure records ActionStatusSuccess.
+    }()
+}
 ```
+
+The implementer should RESTRUCTURE the existing loop body to fit this shape — the deferred closure pattern preserves the existing best-effort continue-on-error semantics while guaranteeing the ActionOutcome append on every path.
 
 Add helper at file end:
 
@@ -532,54 +568,7 @@ git commit -m "feat(engine): applyPlanWithEnvProviderAndHooks populates result.A
 
 ---
 
-### Task 6: workflow — file Phase 2.1 follow-up tracking issue (manifest validation gate)
-
-**Files:** none (GitHub issue, no source change)
-
-**Step 1: File the tracking issue**
-
-```bash
-gh issue create --repo GoCodeAlone/workflow \
-  --title "Phase 2.1 follow-up to #640 — manifest validation gate at cmd/wfctl/deploy_providers.go::findIaCPluginDir" \
-  --body "Followup to workflow#640 Phase 2 (PR #692 design + PR <Phase 2 PR number TBD> implementation).
-
-## Background
-
-Phase 1 design (ADR 0040) Assumption 8 surfaced: cmd/wfctl/deploy_providers.go::findIaCPluginDir uses json.Unmarshal without schema validation. A typo in plugin.json's \`computePlanVersion\` field SILENTLY falls to v1 dispatch path. Per dispatch.go's own warning: 'DO NOT rely on the manifest-validation guarantee in callers'.
-
-Phase 2 design deferred this to Phase 2.1 (separate workflow-side PR) because the 5-repo HARD-CUTOVER was already substantial; adding net-new pluginmanifest package + JSON-schema dependency expanded blast radius.
-
-## Three implementation options (pick at design time)
-
-(a) **Implement \`plugin/external/manifest\` package** with ValidateBytes(bytes []byte) error + create schema/plugin_manifest.json schema file. ~200 LOC. Adds real-time JSON-schema-validation dependency (e.g., github.com/santhosh-tekuri/jsonschema).
-
-(b) **Reuse existing schema/ package's JSON schema infrastructure** if it covers plugin.json. Probe required.
-
-(c) **Lightweight check only**: verify computePlanVersion field value is one of {\"v1\", \"v2\"} OR empty. ~10 LOC. No new dependency. Closes the typo-silent-fallback risk without full JSON-schema infrastructure.
-
-## Recommendation
-
-(c) is the smallest viable closure. Operator can decide whether the broader (a)/(b) infrastructure is worth its weight separately.
-
-## References
-- ADR 0040 (Phase 1) Assumption 8
-- ADR 0041 (Phase 2 — will land via PR #692's implementation PR)
-- Phase 2 design doc Architecture > Manifest validation gate section"
-```
-
-**Step 2: Capture issue number for reference**
-
-```bash
-# Issue number will be returned by gh issue create; capture it and reference in Task 13 memory update.
-```
-
-**Verification (documentation class):** issue created + visible at https://github.com/GoCodeAlone/workflow/issues/<N>.
-
-**Rollback:** close the issue if Phase 2 itself reverts.
-
----
-
-### Task 7: workflow — cut v0.54.0 tag from main HEAD (team-lead action post-PR1 merge)
+### Task 5: workflow — cut v0.54.0 tag from main HEAD (team-lead action post-PR1 merge)
 
 **Files:** none (git tag only)
 
@@ -618,7 +607,7 @@ Expected: v0.54.0 in list. Defensive draft-edit if drafted: `gh release edit v0.
 
 ---
 
-### Task 8: workflow-plugin-aws — declare ComputePlanVersion v2; release v1.2.0
+### Task 6: workflow-plugin-aws — declare ComputePlanVersion v2; release v1.2.0
 
 **Repo:** `/Users/jon/workspace/workflow-plugin-aws`
 
@@ -635,7 +624,7 @@ Apply the **Universal per-plugin pattern** at top of plan.
 
 ---
 
-### Task 9: workflow-plugin-gcp — declare ComputePlanVersion v2; release v1.2.0
+### Task 7: workflow-plugin-gcp — declare ComputePlanVersion v2; release v1.2.0
 
 **Repo:** `/Users/jon/workspace/workflow-plugin-gcp`
 
@@ -645,7 +634,7 @@ Apply the **Universal per-plugin pattern**. Same as Task 8. Tag v1.2.0.
 
 ---
 
-### Task 10: workflow-plugin-azure — declare ComputePlanVersion v2; release v1.2.0
+### Task 8: workflow-plugin-azure — declare ComputePlanVersion v2; release v1.2.0
 
 **Repo:** `/Users/jon/workspace/workflow-plugin-azure`
 
@@ -657,7 +646,7 @@ Apply the **Universal per-plugin pattern**. Same as Task 8. Tag v1.2.0.
 
 ---
 
-### Task 11: workflow-plugin-digitalocean — declare ComputePlanVersion v2; release v1.2.0
+### Task 9: workflow-plugin-digitalocean — declare ComputePlanVersion v2; release v1.2.0
 
 **Repo:** `/Users/jon/workspace/workflow-plugin-digitalocean`
 
@@ -669,7 +658,7 @@ Apply the **Universal per-plugin pattern**. Same as Task 8. Tag v1.2.0.
 
 ---
 
-### Task 12: cross-plugin smoke verification (team-lead, post all 5 PRs merged)
+### Task 10: cross-plugin smoke verification (team-lead, post all 5 PRs merged)
 
 **Files:** none (operational verification)
 
@@ -710,7 +699,7 @@ git commit -m "docs: Phase 2 cross-plugin smoke validation transcript"
 
 ---
 
-### Task 13: memory update + close Phase 2 + flag followups (team-lead)
+### Task 11: memory update + close Phase 2 + flag followups (team-lead)
 
 **Files:**
 - Modify: `/Users/jon/.claude/projects/-Users-jon-workspace/memory/project_cloud_sdk_extraction_complete.md`
