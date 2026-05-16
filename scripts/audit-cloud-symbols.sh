@@ -42,9 +42,15 @@ real_import() {  # file, sdk → 0 if sdk appears in a real import (block OR sin
   # under `set -o pipefail`.
   # Single-line form matches plain, aliased, dot, and blank imports:
   #   import "pkg" / import foo "pkg" / import . "pkg" / import _ "pkg"
+  # Strip `//` line comments before matching — `import_block` returns every
+  # line in `import (...)` including comments, so a comment that names the
+  # SDK (e.g. `// TODO: re-add cloud.google.com/go/storage`) would otherwise
+  # false-positive as a real import.
   # Match the SDK string with `-F` (fixed string): SDK prefixes contain `.`
   # which would otherwise be regex metachars matching any character.
-  { import_block "$1"; grep -E '^import +([A-Za-z_.][A-Za-z0-9_]* +)?"' "$1" 2>/dev/null || true; } | grep -qF "$2"
+  { import_block "$1"; grep -E '^import +([A-Za-z_.][A-Za-z0-9_]* +)?"' "$1" 2>/dev/null || true; } \
+    | sed 's|//.*||' \
+    | grep -qF "$2"
 }
 
 CHECK=0
@@ -99,7 +105,7 @@ while IFS= read -r f; do
       MOD_FORBIDDEN+=("$f -> $sdk")
     fi
   done
-done < <(grep -rl 'cloud\.google\.com/go\|google\.golang\.org/api\|github\.com/Azure/azure-sdk-for-go' module/ --include='*.go' 2>/dev/null | grep -v '_test\.go' | sort)
+done < <(grep -rlE 'cloud\.google\.com/go|google\.golang\.org/api|github\.com/Azure/azure-sdk-for-go' module/ --include='*.go' 2>/dev/null | grep -v '_test\.go' | sort)
 if [[ ${#MOD_FORBIDDEN[@]} -eq 0 ]]; then
   echo "  module/: 0 real imports — clean"
 else
