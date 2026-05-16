@@ -13,29 +13,31 @@ Phase 1 of #640. Produces an analysis-and-deprecation-signal deliverable:
 2. Classifies each caller as MIGRATE-NEEDED (must adopt v2 hooks for #640's invariants) or LEAVE-AS-IS (no semantic difference; trivial empty-hooks rename suffices).
 3. Defines provider compatibility expectations for v2 — what plugins must do at the gRPC IaCProvider.Apply boundary so wfctl-side hooks fire correctly.
 4. Lands ADR 0040 recording the per-caller classification, the provider-side expectation contract, **and the consequence that Phase 2 is a coordinated hard-cutover per ADR 0024 (no compat-shim path).**
-5. **Adds `// Deprecated: use ApplyPlanWithHooks` godoc marker to `ApplyPlan` in `iac/wfctlhelpers/apply.go`** — surfaced by `gopls`/`staticcheck` to every caller; mechanically delivers #640's "Add deprecation warnings" milestone.
-6. **Updates `iac-codemod`'s `applyCanonicalCallExpr` constant from `wfctlhelpers.ApplyPlan(ctx, p, plan)` to `wfctlhelpers.ApplyPlanWithHooks(ctx, p, plan, wfctlhelpers.ApplyPlanHooks{})`** — codemod becomes the migration driver for Phase 3 plugin AST rewrites.
+5. **Adds `// Deprecated: use ApplyPlanWithHooks` godoc marker to `ApplyPlan` in `iac/wfctlhelpers/apply.go:78`** — surfaced by `gopls`/`staticcheck` to every caller; mechanically delivers #640's "Add deprecation warnings" milestone.
 
 **Explicitly out of scope for Phase 1** (deferred to Phase 2-5 design passes):
 - Phase 2: design + ship the v2-hooks-over-gRPC contract — must be a HARD-CUTOVER coordinated PR cascade across workflow + 4 plugin repos per ADR 0024 (no compat shim, no graceful fallback)
-- Phase 3: migrate plugins to emit hooks-aware Apply responses (per-repo PRs); Phase 1's iac-codemod canonical-form bump is the lever
+- Phase 3: migrate plugins to emit hooks-aware Apply responses (per-repo PRs). **Phase 3 also bumps `iac-codemod`'s `applyCanonicalCallExpr` constant + updates `rewriteApplyBody` + `isAlreadyDelegatedApplyBody` + `runAssertApplyDelegatesToHelper` AST functions in lockstep** so the codemod becomes the migration driver. (Cycle-2 review correctly flagged that bumping ONLY the constant in Phase 1 is theatre — constant is `//nolint:unused`, not consumed by rewriter; risks leaving codemod internally inconsistent.)
 - Phase 4: migrate the 3 conformance scenarios from `ApplyPlan(...)` to `ApplyPlanWithHooks(..., ApplyPlanHooks{})` (trivial mechanical rename; HARD PREREQUISITE for Phase 5 since Phase 5 removes ApplyPlan)
 - Phase 5: remove `wfctlhelpers.ApplyPlan` entirely (after Phase 4 + plugin canonical-form propagation)
 
-Phase 1 ships engine docs + the deprecation marker + the codemod canonical-form bump. Light mechanical changes; no runtime behavior change.
+Phase 1 ships engine docs + the deprecation marker. Light mechanical changes; no runtime behavior change.
+
+## Phase 2 constraint reference
+
+ADR 0040 (landed by this Phase 1 PR) explicitly records that Phase 2 ships as a coordinated PR cascade — same shape as the original strict-contracts cutover. The Phase 2 design pass MUST cite ADR 0040 as a constraint and reject any compat-shim or graceful-fallback approach. Phase 2 writing-plans agent should read ADR 0040 first.
 
 ## Architecture
 
-Single-repo (workflow), 1-PR deliverable. Five artifacts:
+Single-repo (workflow), 1-PR deliverable. Four artifacts:
 - `docs/migrations/2026-05-16-v2-lifecycle-phase1-inventory.md` — the inventory document (per-caller table + classification rationale)
 - `decisions/0040-v2-action-lifecycle-provider-compatibility.md` — ADR recording: (a) the provider-side compatibility contract; (b) the explicit consequence that Phase 2 is a coordinated hard-cutover per ADR 0024
 - `iac/wfctlhelpers/doc.go` — Go doc.go file embedding a SHORT version of the inventory + provider-expectation pointer to the migration doc
-- **`iac/wfctlhelpers/apply.go` — add `// Deprecated: use ApplyPlanWithHooks` godoc to `ApplyPlan` (line 78); add same to `applyPlanWithEnvProvider` (line 103, internal but exported-styled) only if accessible**
-- **`cmd/iac-codemod/refactor_apply.go:29` — bump `applyCanonicalCallExpr` constant from `"wfctlhelpers.ApplyPlan(ctx, p, plan)"` to `"wfctlhelpers.ApplyPlanWithHooks(ctx, p, plan, wfctlhelpers.ApplyPlanHooks{})"`. Plus matching update in `cmd/iac-codemod/lint.go:54` lint matcher.**
+- **`iac/wfctlhelpers/apply.go:78` — add `// Deprecated: use ApplyPlanWithHooks` godoc to the EXPORTED `ApplyPlan` function only** (the `applyPlanWithEnvProvider` and `applyPlanWithEnvProviderAndHooks` helpers are unexported — `gopls`/`staticcheck` ignore Deprecated markers on unexported identifiers, so they get NO marker)
 
-Production code changes are minimal: 1 godoc comment + 1 constant string + 1 lint matcher string + same-file doc.go. Build clean + iac-codemod tests verify the canonical-form change doesn't break the AST rewriter.
+Production code changes are MINIMAL: 1 godoc comment line in `apply.go`. Build clean. No iac-codemod changes in Phase 1 — those move to Phase 3 in lockstep with the AST-rewriter updates that actually consume the constant.
 
-No runtime behavior change. The deprecation marker surfaces through static analysis; the codemod constant bump only affects future codemod-driven rewrites (operator-triggered).
+No runtime behavior change. The deprecation marker surfaces through static analysis to every caller of `wfctlhelpers.ApplyPlan` (including the 3 conformance scenarios + plugin canonical delegations), giving early visibility before Phase 4 mechanical migration.
 
 ## Inventory (preliminary — verified during Task 1)
 
@@ -43,9 +45,9 @@ No runtime behavior change. The deprecation marker surfaces through static analy
 
 | # | File:Line | Classification | Rationale |
 |---|-----------|----------------|-----------|
-| 1 | `cmd/iac-codemod/refactor_apply.go:29` (`applyCanonicalCallExpr` constant) | TOOL — not a runtime caller | iac-codemod's canonical-form constant for AST-rewriting providers' IaCProvider.Apply method bodies. Phase 1 decision: KEEP for now; Phase 2 design decides if canonical form switches to ApplyPlanWithHooks |
-| 2 | `cmd/iac-codemod/refactor_apply.go:1208` (doc comment) | DOC | Same |
-| 3 | `cmd/iac-codemod/lint.go:54, 641` (lint matchers) | TOOL — lint matcher | Same — Phase 2 decision |
+| 1 | `cmd/iac-codemod/refactor_apply.go:29` (`applyCanonicalCallExpr` constant, `//nolint:unused`) | TOOL — Phase 3 lockstep update | Documentation-only constant; not consumed by AST rewriter. Phase 3 bumps it together with `rewriteApplyBody` (line 1231 hardcoded `ast.NewIdent("ApplyPlan")`) + `isAlreadyDelegatedApplyBody` (line 630 hardcoded `sel.Sel.Name != "ApplyPlan"`) + `runAssertApplyDelegatesToHelper` + test assertions (`refactor_apply_test.go:593`). Phase 1 does NOT touch this — bumping just the constant would create internal inconsistency. |
+| 2 | `cmd/iac-codemod/refactor_apply.go:1208` (doc comment) | DOC | Same Phase 3 lockstep update |
+| 3 | `cmd/iac-codemod/lint.go:54+641` (comment + matcher) | TOOL — Phase 3 lockstep | Same |
 | 4 | `iac/conformance/scenario_upsert_on_already_exists.go:88` | MIGRATE-NEEDED (Phase 4) — TRIVIAL | Calls `wfctlhelpers.ApplyPlan(ctx, p, plan)`. ApplyPlan is `ApplyPlanWithHooks(ctx, p, plan, ApplyPlanHooks{})` — empty-hooks rename has zero semantic difference. **HARD PREREQUISITE for Phase 5 (Phase 5 removes ApplyPlan; if scenarios still call it, build breaks).** Phase 4 mechanical work: rename 3 call sites. |
 | 5 | `iac/conformance/scenario_delete_action.go:74` | MIGRATE-NEEDED (Phase 4) — TRIVIAL | Same |
 | 6 | `iac/conformance/scenario_replace_cascade_preserves_dependents.go:92` | MIGRATE-NEEDED (Phase 4) — TRIVIAL | Same |
