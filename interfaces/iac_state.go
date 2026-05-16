@@ -206,11 +206,12 @@ type ApplyResult struct {
 	ReplaceIDMap map[string]string `json:"replace_id_map,omitempty"`
 
 	// Actions surfaces per-PlanAction outcomes for v2 hook dispatch in
-	// wfctl. Engine populates one entry per IaCPlan.Actions index (T4) so
-	// the length-validation assert can pair them 1:1. Empty/nil on plugins
-	// using the v1 capability shim (downstream pre-v1.2.0 cascade) —
-	// wfctl tolerates absence and skips v2-hook dispatch in that case.
-	// Per workflow#640 Phase 2 + ADR 0040 invariants 1-2.
+	// wfctl. Always populated (one entry per IaCPlan.Actions index) when
+	// an IaC plugin declares ComputePlanVersion="v2" in
+	// CapabilitiesResponse. Per ADR 0024 + ADR 0040, plugins NOT
+	// declaring v2 are permanently incompatible with workflow v0.54.0+;
+	// there is no compat shim. Per workflow#640 Phase 2 + ADR 0040
+	// invariants 1-2.
 	Actions []ActionOutcome `json:"actions,omitempty"`
 }
 

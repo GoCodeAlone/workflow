@@ -1219,7 +1219,7 @@ func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
 		}
 		mapped, ok := mapPBActionStatusToInterface(a.GetStatus())
 		if !ok {
-			return nil, fmt.Errorf("plugin returned unknown ActionStatus=%d at action_index=%d (wfctl version too old for this plugin? Phase 2 contract violation per ADR 0040)", int32(a.GetStatus()), a.GetActionIndex())
+			return nil, fmt.Errorf("plugin returned unknown ActionStatus=%d at action_index=%d (Phase 2 contract violation per ADR 0040; either upgrade wfctl or downgrade the plugin)", int32(a.GetStatus()), a.GetActionIndex())
 		}
 		actions = append(actions, interfaces.ActionOutcome{
 			ActionIndex: a.GetActionIndex(),
