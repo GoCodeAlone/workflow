@@ -38,7 +38,7 @@
 
 **Post-cascade closeout** (cross-plugin smoke verification + memory update) is a team-lead operational step described after the task list — NOT a separate plan-task; it doesn't create a PR.
 
-**Status:** Draft
+**Status:** Locked 2026-05-16T12:23:06Z
 
 ---
 
