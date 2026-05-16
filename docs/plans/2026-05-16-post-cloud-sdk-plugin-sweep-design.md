@@ -7,19 +7,24 @@
 
 ## Goal
 
-Bump 8 lagging plugin repos from workflow `v0.51.6/v0.51.7/pseudo-version` pins → `v0.53.1` so the entire plugin ecosystem is current with the post-cloud-SDK-extraction workflow tag. Mechanical sweep — no API redesign, no SDK extension. Closes #656's `engine pin sweep` half. Defers the `host conformance` half (gcp #6 + azure #4) and the `v2 action lifecycle migration` (#640) to separate design passes.
+Bump 13 lagging plugin repos from workflow `v0.51.6/v0.51.7/pseudo-version` pins → `v0.53.1` so the entire plugin ecosystem is current with the post-cloud-SDK-extraction workflow tag. Mechanical sweep — no API redesign, no SDK extension. Closes #656's `engine pin sweep` half. Defers the `host conformance` half (gcp #6 + azure #4) and the `v2 action lifecycle migration` (#640) to separate design passes.
 
 ## Architecture
 
-Per-plugin parallel PRs across 8 repos. Each PR is single-task: bump `go.mod` workflow pin → `v0.53.1` + `go mod tidy` + verify build + verify tests + bump `plugin.json minEngineVersion` to `"0.53.0"` (or add if missing) + cut new patch/minor tag + release.
+Per-plugin parallel PRs across 13 repos. Each PR is single-task: bump `go.mod` workflow pin → `v0.53.1` + `GOWORK=off go mod tidy` + verify build + verify tests + bump `plugin.json minEngineVersion` to `"0.53.0"` (tested-floor semantic — see Assumptions #4) + cut new patch/minor tag + release.
 
-8-PR cluster, one PR per plugin repo. No cross-repo dependency ordering — each repo is independently shippable. Implementer-1/-2/-3 from existing `cloud-sdk-bcd` team can claim across repos in parallel; verification gate per-plugin keeps blast radius bounded.
+13-PR cluster, one PR per plugin repo. **One ordering constraint**: `workflow-plugin-authz` MUST tag + release BEFORE `workflow-plugin-agent` PR runs because `agent`'s `go.mod` directly imports `workflow-plugin-authz v0.2.2`; bumping agent's workflow pin to v0.53.1 forces MVS resolution of authz against v0.53.1's API surface, which fails unless authz also has a v0.53.1-compatible release. Mitigation: authz PR runs in the first wave; agent waits for authz tag.
 
 ```
-parallel: PR1 (payments)  PR2 (audit-chain)  PR3 (tofu — first release)
-          PR4 (ci-generator)  PR5 (agent)  PR6 (github)
-          PR7 (gitlab)  PR8 (azure — pseudo-version → clean tag)
+wave 1 (parallel — no deps):  PR1 payments  PR2 audit-chain  PR3 tofu
+                              PR4 ci-generator  PR5 github  PR6 gitlab
+                              PR7 azure  PR8 admin  PR9 bento  PR10 authz-ui
+                              PR11 authz  PR12 eventbus
+
+wave 2 (after authz tag in wave 1):  PR13 agent
 ```
+
+Cloud-sdk-bcd team has 3 implementers; 13 PRs ÷ 3 ≈ 4-5 PRs per implementer. Each PR is single-commit + tag (small per-PR scope), so total team session load is bounded by review throughput rather than per-PR complexity.
 
 ## Components
 
@@ -33,18 +38,40 @@ parallel: PR1 (payments)  PR2 (audit-chain)  PR3 (tofu — first release)
 
 ### Per-repo specifics
 
-| # | Plugin | Old pin | Old tag | New pin | New tag | minEng action |
-|---|--------|---------|---------|---------|---------|---------------|
-| 1 | workflow-plugin-payments | v0.51.6 | v0.4.5 | v0.53.1 | v0.4.6 | confirm `0.51.2` → `0.53.0` |
-| 2 | workflow-plugin-audit-chain | v0.51.6 | v0.2.3 | v0.53.1 | v0.2.4 | confirm `0.51.5` → `0.53.0` |
-| 3 | workflow-plugin-tofu | v0.51.7 | (none) | v0.53.1 | v0.1.0 (first release) | confirm `0.51.7` → `0.53.0` |
-| 4 | workflow-plugin-ci-generator | v0.51.7 | v0.1.3 | v0.53.1 | v0.1.4 | confirm `0.51.7` → `0.53.0` |
-| 5 | workflow-plugin-agent | v0.51.7 | v0.9.2 | v0.53.1 | v0.9.3 | confirm `0.51.7` → `0.53.0` |
-| 6 | workflow-plugin-github | v0.51.7 | v1.0.3 | v0.53.1 | v1.0.4 | confirm `0.51.7` → `0.53.0` |
-| 7 | workflow-plugin-gitlab | v0.51.7 | v1.0.2 | v0.53.1 | v1.0.3 | confirm `0.51.7` → `0.53.0` |
-| 8 | workflow-plugin-azure | v0.51.11-pseudo | v1.1.1 | v0.53.1 | v1.1.2 | confirm `0.52.0` → `0.53.0` |
+| # | Plugin | Old pin | Old tag | New pin | New tag | minEng action | Notes |
+|---|--------|---------|---------|---------|---------|---------------|-------|
+| 1 | workflow-plugin-payments | v0.51.6 | v0.4.5 | v0.53.1 | v0.4.6 | `0.51.2` → `0.53.0` | |
+| 2 | workflow-plugin-audit-chain | v0.51.6 | v0.2.3 | v0.53.1 | v0.2.4 | `0.51.5` → `0.53.0` | |
+| 3 | workflow-plugin-tofu | v0.51.7 | v0.1.2 | v0.53.1 | v0.1.3 | `0.51.7` → `0.53.0` | git tags exist (v0.1.0/v0.1.1/v0.1.2) but no GitHub releases; this PR is the first release-with-binaries — verify GoReleaser config + release.yml ahead of tag push |
+| 4 | workflow-plugin-ci-generator | v0.51.7 | v0.1.3 | v0.53.1 | v0.1.4 | `0.51.7` → `0.53.0` | |
+| 5 | workflow-plugin-agent | v0.51.7 | v0.9.2 | v0.53.1 | v0.9.3 | `0.51.7` → `0.53.0` | **DEPENDS ON #11** — directly imports workflow-plugin-authz v0.2.2; must wait for authz v0.5.4 tag before bumping (or update authz pin in same PR) |
+| 6 | workflow-plugin-github | v0.51.7 | v1.0.3 | v0.53.1 | v1.0.4 | `0.51.7` → `0.53.0` | |
+| 7 | workflow-plugin-gitlab | v0.51.7 | v1.0.2 | v0.53.1 | v1.0.3 | `0.51.7` → `0.53.0` | |
+| 8 | workflow-plugin-azure | v0.51.11-pseudo | v1.1.1 | v0.53.1 | v1.1.2 | confirm `0.52.0` → `0.53.0` | replace pseudo-version pin with clean v0.53.1 tag |
+| 9 | workflow-plugin-admin | v0.51.7 | v1.0.0 | v0.53.1 | v1.0.1 | `0.51.7` → `0.53.0` | |
+| 10 | workflow-plugin-bento | v0.51.7 | v1.1.2 | v0.53.1 | v1.1.3 | `0.51.7` → `0.53.0` | |
+| 11 | workflow-plugin-authz | v0.51.7 | v0.5.3 | v0.53.1 | v0.5.4 | `0.51.7` → `0.53.0` | **First wave** — agent (#5) blocks on this tag |
+| 12 | workflow-plugin-authz-ui | v0.51.7 | v1.0.0 | v0.53.1 | v1.0.1 | `0.51.7` → `0.53.0` | |
+| 13 | workflow-plugin-eventbus | v0.51.6 | v0.3.4 | v0.53.1 | v0.3.5 | confirm current → `0.53.0` | |
 
 (`workflow-plugin-aws v1.1.0`, `workflow-plugin-gcp v1.1.0`, `workflow-plugin-digitalocean v1.1.0` already on v0.52.0+/v0.53.0 pins — out of scope.)
+
+### Out of scope (verified separate cadence — DEFER to dedicated future sweep)
+
+These 4 plugins pin workflow `v0.3.56` or have no releases at all — they're so far behind the current ecosystem (50+ minor versions) that bumping mechanically is unsafe:
+
+| Plugin | Current pin | Latest tag | Reason |
+|--------|-------------|------------|--------|
+| workflow-plugin-waf | v0.3.56 | v0.2.1 | 50+ minor versions behind; security-cadence cluster; needs dedicated assessment |
+| workflow-plugin-sandbox | v0.3.56 | v0.2.1 | Same; security-cadence cluster |
+| workflow-plugin-data-protection | v0.3.56 | v0.2.1 | Same; security-cadence cluster |
+| workflow-plugin-cloud-ui | (no go.mod) | (no release) | Likely React-only / not a Go plugin; needs structural verification |
+
+These get a separate dedicated design pass — see Out-of-Scope section.
+
+### Mid-tier (newer security plugins on v0.51.x — INCLUDED in scope)
+
+`workflow-plugin-security` (v2.0.0, pin v0.51.7) and `workflow-plugin-supply-chain` (v0.4.0, pin v0.51.7) appear to have continued shipping past the original v0.3.56 security-cadence cluster baseline. They pin v0.51.7 same as the other 13 in scope, so they MAY belong in this sweep. **Action**: verify in Task 0 (cadence-classification verification step) — if they share the same release infrastructure as the other 13 and aren't gated by a separate plan, ADD to scope as PRs #14 + #15. If gated by separate plan, document deferral.
 
 ## Data flow
 
@@ -66,47 +93,74 @@ upstream workflow v0.53.1 (already tagged)
 - Captures the breakage signature (function name + signature delta).
 - Files an upstream issue against `GoCodeAlone/workflow` documenting the API drift.
 - DOES NOT silently work around the breakage (would mask the upstream regression).
-- Reports back to team-lead; that plugin's PR pauses; the other 7 PRs continue.
+- Reports back to team-lead; that plugin's PR pauses; the other 12 PRs continue.
+
+**Transitive dep compile breakage** — `workflow-plugin-agent` directly imports `workflow-plugin-authz v0.2.2`. When agent bumps workflow → v0.53.1, Go's MVS resolves the entire module graph against v0.53.1, INCLUDING authz v0.2.2 source compiled against v0.53.1's API. If authz v0.2.2 references any workflow API that drifted, agent build fails in a transitive — not in agent's own code.
+
+Two-part mitigation:
+- **Sequencing**: PR #11 (authz v0.5.4 release) lands BEFORE PR #5 (agent) starts. Agent's go.mod gets BOTH `workflow v0.53.1` AND `workflow-plugin-authz v0.5.4` bumps in the same commit (so MVS resolves to fresh authz code, not stale v0.2.2).
+- **Defensive**: if any other plugin also has cross-plugin deps (probe via Task 0), apply the same wave-2 sequencing.
 
 **Per-plugin test failure on bump** — same handling: capture, file upstream, pause that plugin.
 
 **GoReleaser failure** (azure pattern from prior session — release published as draft) — handled in-line via `gh release edit vX.Y.Z --draft=false --latest`.
 
-**No release infrastructure** (workflow-plugin-tofu — no prior release tag) — verify `.github/workflows/release.yml` exists; if missing, file as scope-extension to add release workflow before tag.
+**No release-with-binary infrastructure** (workflow-plugin-tofu — git tags v0.1.0/v0.1.1/v0.1.2 exist but no GoReleaser-published releases) — verify `.github/workflows/release.yml` + `.goreleaser.yml` configs exist; if either is missing, scope-extend the tofu PR to add them before tag push. Tag conflict at v0.1.0/v0.1.1/v0.1.2 already exists, so tofu's new tag is **v0.1.3** (next sequential).
+
+**Cadence-classification surprise** — Task 0 (pre-dispatch verification) probes the security plugins (security/supply-chain) to determine if they belong in this sweep. If included, scope grows from 13 → 15 PRs. If deferred (separate-cadence governance), document the deferral inline.
 
 ## Testing
 
 - **Per-plugin build verification** — `GOWORK=off go build ./...` clean (workflow-side test target uses GOWORK=off; plugins should NOT need it but defensive).
 - **Per-plugin test run** — `go test ./... -race` PASS.
-- **Per-plugin GoReleaser dry-run** — `goreleaser release --snapshot --skip=publish --clean` (per-plugin) for tofu's first-release case.
-- **Cross-plugin smoke** — after all 8 ship, `wfctl plugin list` against a representative consumer (e.g. BMW or core-dump) confirms all show `latest tag` matching the new releases.
+- **Per-plugin GoReleaser dry-run** — `goreleaser release --snapshot --skip=publish --clean` (per-plugin) for tofu's first-release-with-binaries case + any plugin where `release.yml` is being touched.
+- **Operator-run post-deploy verification (NOT a CI gate)** — after all 13 ship + a representative consumer (BMW, core-dump, ratchet) bumps, the operator manually runs `wfctl plugin list` against that consumer to confirm all updated plugins resolve to the new tag. This is intentionally NOT a CI gate because it requires live infrastructure that's neither reproducible nor reliable across the per-PR CI.
 
 ## Out of scope (intentional non-goals — separate future design passes)
 
-- **gcp #6 + azure #4 host conformance** — requires conformance test infrastructure (Plug + ExternalPluginManager subprocess invocation + RPC verification); not a pin-bump concern.
-- **#640 v2 action lifecycle migration** — substantive scope (5 invariants in issue body), needs its own brainstorm.
-- **Catalog manifest-derivation** — schema/manifest/wfctl/UI/MCP refactor; high blast radius.
-- **TypedProvider migration for the 5 plan-2 types** — SDK scaffolding ready (PR #686), waits for first consumer.
-- **MessagePublisher/MessageSubscriber for IaC-bridge modules** — decisions/0038 Non-Goal; requires SDK extension.
+- **gcp #6 + azure #4 host conformance** — requires conformance test infrastructure (subprocess invocation via ExternalPluginManager + RPC verification); not a pin-bump concern.
+- **#640 v2 action lifecycle migration** — substantive scope (5 invariants in issue body), needs its own brainstorm. User direction 2026-05-16: "worth tracking as well" → memory-track in `MEMORY.md` + `project_cloud_sdk_extraction_complete.md`'s Deferred section.
+- **Catalog manifest-derivation** — schema/manifest/wfctl/UI/MCP refactor (172+ hardcoded type strings in `schema/schema.go`); high blast radius.
+- **TypedProvider migration for the 5 plan-2 types** — SDK scaffolding ready (workflow PR #686), waits for first consumer.
+- **MessagePublisher/MessageSubscriber for IaC-bridge modules** — `decisions/0038-plugin-modules-on-iac-serve-bridge.md` Non-Goal; requires SDK extension.
 - **aws-sdk-go-v2 extraction from `provider/aws/`/`plugin/rbac/aws.go`/`iam/aws.go`/`artifact/s3.go`** — too large for this cycle.
 - **godo extraction** — already verified absent from workflow core go.mod; no work needed.
 - **Phase B RLV doc** — non-blocking nicety, separate.
+- **Security-cadence cluster (waf v0.2.1 / sandbox v0.2.1 / data-protection v0.2.1, all pinned v0.3.56)** — 50+ minor versions behind; bumping mechanically is unsafe. Needs dedicated cadence-governance assessment.
+- **workflow-plugin-cloud-ui** — no Go go.mod; React-only structural shape; doesn't fit the "Go plugin pin sweep" pattern. Separate.
 
 ## Assumptions
 
 1. **`sdk.Serve` + `sdk.ServePluginFull` surfaces still present in workflow v0.53.1.** Verified by inspection of `plugin/external/sdk/serve.go` + `serve_full.go` on `origin/main`. If false, bumps break catastrophically.
-2. **No silent strict-contracts requirement for non-IaC plugins.** Strict-contracts cutover (force) targeted IaC plugin contracts; non-IaC ServePluginFull surface untouched. Verified by ADR 0024 + observation that azure/aws/gcp/DO already shipped via the IaC path. If false, every non-IaC plugin needs a typed-Provider migration before this sweep ships.
-3. **Per-plugin GitHub Actions release workflow exists** for 7 of 8 plugins (tofu unverified — flag for confirmation in Task 3).
-4. **`minEngineVersion: "0.53.0"` is the right floor** — workflow v0.53.0 was tagged 2026-05-15 carrying the SDK extension; v0.53.1 is a patch on top. Plugins that don't use the SDK extension can stay on `"0.53.0"`. (We are NOT bumping minEng to v0.53.1 since these plugins don't need the v0.53.1 patch behavior; semver minimum-floor convention.)
-5. **GoReleaser configurations match prior pattern** — all 8 plugins ship via `goreleaser release --clean` triggered by tag push (see ADR 0034); azure uses `runs-on: ubuntu-latest` post fix; if any plugin still uses `[self-hosted, Linux, X64]` on a public repo, that's surfaced + fixed in-line.
-6. **`workflow-plugin-tofu` has no release tag yet** — first-release semantics use `v0.1.0` per repo convention; if the repo has uncommitted work-in-progress preventing release, that surfaces in Task 3 verification.
+2. **No silent strict-contracts requirement for non-IaC plugins.** Strict-contracts cutover (force) targeted IaC plugin contracts (per `decisions/0024-iac-typed-force-cutover.md`); non-IaC ServePluginFull surface untouched. Verified by inspection of payments + agent source (both use `sdk.ServePluginFull` / `sdk.Serve` patterns + typed_contracts that are still supported in v0.53.1). If false, every non-IaC plugin needs a typed-Provider migration before this sweep ships.
+3. **Per-plugin GitHub Actions release workflow exists** for 12 of 13 plugins. Tofu has the directory but never published a release; Task 3 verifies `release.yml` + `.goreleaser.yml` configs are present + valid before tag push.
+4. **`minEngineVersion: "0.53.0"` is the tested-floor semantic, not a feature-floor semantic.** This is honest disclosure: "this plugin tag has been tested + verified against workflow v0.53.x". Operators running older workflow tags (v0.51.x, v0.52.x) are not blocked from installing — wfctl warns but allows — but support is on a best-effort basis. The reviewer's YAGNI flag is acknowledged: a feature-floor analysis (e.g., payments uses no v0.53.x APIs, true minEng = v0.51.7) would be more precise but adds per-plugin overhead. We pick tested-floor as the universal rule for sweep efficiency. (NOT bumping to v0.53.1 since no plugin uses v0.53.1-specific features; semver minimum convention says we declare the FLOOR not the ceiling.)
+5. **GoReleaser configurations match prior pattern** — all 13 plugins ship via `goreleaser release --clean` triggered by tag push (see `decisions/0034-cross-repo-agent-operation-for-plugin-prs.md`); azure uses `runs-on: ubuntu-latest` post the prior session fix; if any plugin still uses `[self-hosted, Linux, X64]` on a public repo, that's surfaced + fixed in-line.
+6. **Tag conflict for tofu — v0.1.3 is correct.** Verified: tofu has git tags v0.1.0/v0.1.1/v0.1.2 but NO GitHub releases (no GoReleaser binaries). The next semantic tag is v0.1.3. Pushing v0.1.0/v0.1.1/v0.1.2 would conflict with the existing tag in the Go proxy.
 7. **Pseudo-version pin replacement is mechanical** for azure — `replace` directive replaced + `go mod tidy` resolves to clean v0.53.1 tag. If azure has divergent commits beyond the pseudo-version's base, additional work surfaces.
+8. **Cross-plugin transitive deps are limited to agent → authz v0.2.2.** Probed via inspection of go.mod files. If Task 0 surfaces additional cross-plugin direct imports, those PRs also gain wave-2 sequencing.
+9. **Targeting v0.53.1 (not v0.53.0)** — v0.53.1 is the released head; targeting it avoids a follow-up bump when the next consumer needs a v0.53.1-specific patch. v0.53.0 would be equally valid for these 13 plugins (none use v0.53.1's TypedModules SDK additions or try-activate rollback). Picked v0.53.1 for ecosystem-recency hygiene.
+10. **Security plugins (waf/sandbox/data-protection) on v0.3.56 are intentionally excluded** — 50+ minor versions behind suggests a genuinely separate cadence (likely paused / unmaintained). Sweeping them in this design would mask the separate governance question. They get a dedicated future design pass.
+11. **`workflow-plugin-cloud-ui` has no Go go.mod** — likely React-only or different structural shape; verified by API probe returning 404 on go.mod content. Out of scope by category, not by deferral.
+12. **`workflow-plugin-security` (v2.0.0) + `workflow-plugin-supply-chain` (v0.4.0)** were on the original v0.3.56 security cluster but have shipped newer versions individually; their pin v0.51.7 matches the in-scope plugins' baseline, suggesting they may belong in this sweep. Task 0 verifies cadence governance before final scope decision.
 
-## Self-challenge round (top 3 doubts surfaced)
+## Self-challenge round (top doubts surfaced + adversarial-review feedback incorporated)
 
 1. **Hidden API drift in non-IaC plugins.** 35 commits / 210 files changed between v0.51.6 + v0.53.1. Even if `sdk.Serve*` signatures are stable, peripheral surface (e.g., handler types, plugin registration helpers) may have shifted. Per-plugin verification CATCHES this; risk is per-plugin pause + upstream-issue overhead, not silent breakage.
-2. **`workflow-plugin-tofu` first-release scope creep.** Tofu has no prior release, so cutting `v0.1.0` requires verifying the repo has a buildable + testable + release-workflow-ready state. May surface as multi-task scope extension. Mitigation: Task 3 has explicit "verify release.yml present + buildable" pre-step; if fails, scope-pause + file as separate followup.
-3. **Operator availability during 8-PR-parallel-execution.** Cloud-SDK-bcd team has 3 implementers; 8 PRs in parallel = each implementer owns 2-3. Compaction across 8 PRs in one team session is heavy. Mitigation: per-PR is small (single commit + tag), low review surface, code-reviewer can sweep approvals fast.
+2. **Operator availability during 13-PR-parallel-execution.** Cloud-SDK-bcd team has 3 implementers; 13 PRs in parallel = each implementer owns 4-5. Compaction across 13 PRs in one team session is heavy. Mitigation: per-PR is single-commit + tag (small per-PR scope), low review surface, code-reviewer can sweep approvals fast. If team session compacts mid-sweep, restart points are per-PR (which plugin still needs work).
+3. **Transitive dep surprise (caught by adversarial review).** Agent → authz creates ordering dependency. If MORE cross-plugin direct deps exist (Task 0 probes), more wave-2 sequencing required.
+4. **Cadence-classification accuracy (caught by adversarial review).** Initial scope missed admin/bento/authz/authz-ui/eventbus + security/supply-chain. Revised scope now includes them. Risk: security-cadence governance may say "not in this sweep" — Task 0 verifies before the security/supply-chain PRs dispatch.
+
+## Adversarial-design-review findings (cycle 1) — addressed in this revision
+
+- **Critical 1 (tofu first-release factual error)** — FIXED. Tofu has tags v0.1.0/v0.1.1/v0.1.2 but no GoReleaser releases. Next tag = v0.1.3.
+- **Critical 2 (admin/bento/authz silent exclusion)** — FIXED. Scope expanded to 13 plugins (added admin, bento, authz, authz-ui, eventbus). security/supply-chain flagged for Task 0 verification.
+- **Important 1 (transitive dep risk for agent→authz v0.2.2)** — FIXED. PR sequencing — authz v0.5.4 in wave 1, agent in wave 2 with dual-bump (workflow + authz).
+- **Important 2 (uniform minEng = YAGNI for non-IaC)** — ACKNOWLEDGED. Assumption #4 reframes as "tested-floor semantic" rather than "feature-floor". Universal rule for sweep efficiency; per-plugin feature-floor analysis would be more precise but adds overhead.
+- **Important 3 (incomplete inventory audit)** — FIXED. Verified 16 plugins total: 13 in-scope + 4 verified-out-of-scope (security cluster v0.3.56-era + cloud-ui Go-less).
+- **Minor 1 (ADR 0024 reference unverifiable)** — FIXED. Citation now specifies path `decisions/0024-iac-typed-force-cutover.md`.
+- **Minor 2 (cross-plugin smoke test not automatable)** — FIXED. Reclassified as operator-run post-deploy verification, not CI gate.
+- **Minor 3 (v0.53.1 vs v0.53.0 unjustified)** — FIXED. Assumption #9 explains.
 
 ## Rollback
 
