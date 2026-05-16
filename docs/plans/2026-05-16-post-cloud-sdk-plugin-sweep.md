@@ -53,6 +53,28 @@
 
 ---
 
+## Pre-dispatch setup (team-lead, ONCE before any task starts)
+
+Two setup steps — done once by the team-lead, NOT inside any per-task PR:
+
+**1. Post #656 supersession comment:**
+
+```bash
+gh issue comment 656 --repo GoCodeAlone/workflow --body "Superseded by post-cloud-SDK plugin sweep landing at workflow v0.53.1; tracking 15 plugin PRs per docs/plans/2026-05-16-post-cloud-sdk-plugin-sweep.md. Original v0.52.x inventory in this issue is stale; the sweep picks up the actual current state. Closing-via-supersession when wave 1 + wave 2 complete."
+```
+
+**2. Self-hosted runner pre-flight (ONCE for all 4 self-hosted plugins: tofu, authz-ui, security, supply-chain):**
+
+```bash
+gh api /orgs/GoCodeAlone/actions/runners --jq '.runners | map(select(.status=="online")) | length'
+```
+
+Expected: ≥1 online runner. If 0, PAUSE all 4 self-hosted plugin tasks until runners return; the other 11 PRs continue.
+
+(Per-task pre-checks for self-hosted plugins below repeat this verification defensively in case runners go offline mid-sweep.)
+
+---
+
 ## Universal per-task pattern
 
 For tasks 1, 2, 4-14 (the 13 standard PRs — wave 1 minus tofu PR3, plus all of wave 1 except agent PR15), each task follows the **5-step pattern**. Tasks 3 (tofu) and 15 (agent) extend it.
@@ -121,12 +143,14 @@ Re-run `go test ./... -race` if your plugin reads this field at startup (defensi
 
 **Step 5: Commit + push + tag + monitor release**
 
+(Substitute `vOLD` and `vNEW` per the PR Grouping table — they are placeholder tokens, not real tag patterns.)
+
 ```bash
 git add go.mod go.sum plugin.json
-git commit -m "chore: bump workflow pin v0.51.x → v0.53.1; release vNEW"
+git commit -m "chore: bump workflow pin vOLD → v0.53.1; release vNEW"
 git push -u origin chore/workflow-v0.53.1-pin-bump
 gh pr create --base main --head chore/workflow-v0.53.1-pin-bump \
-  --title "chore: bump workflow pin v0.51.x → v0.53.1; release vNEW" \
+  --title "chore: bump workflow pin vOLD → v0.53.1; release vNEW" \
   --body "Pin sweep per https://github.com/GoCodeAlone/workflow/blob/main/docs/plans/2026-05-16-post-cloud-sdk-plugin-sweep-design.md.
 
 Closes part of GoCodeAlone/workflow#656.
@@ -176,18 +200,12 @@ If `draft=true` (azure-pattern): `gh release edit vNEW --draft=false --latest`.
 
 Apply the **standard 5-step pattern** above.
 
-**Verification (build pipeline + version pin update class — runtime-launch-validation triggered):**
+**Verification (build-class verification + asset-existence check; operator-run wfctl install is advisory post-deploy gate, NOT a CI gate):**
 - `go build ./... && go test ./... -race` PASS
 - Post-release: `gh release view v0.4.6 --repo GoCodeAlone/workflow-plugin-payments --json assets,isDraft --jq '"draft=\(.isDraft) assets=\(.assets|length)"'` → `draft=false assets≥4`
-- Smoke: `wfctl plugin install github.com/GoCodeAlone/workflow-plugin-payments@v0.4.6` resolves successfully (operator-run, NOT CI gate per design)
+- Operator advisory (NOT CI): `wfctl plugin install github.com/GoCodeAlone/workflow-plugin-payments@v0.4.6` resolves successfully
 
-**Special:** This is the FIRST PR of the sweep. The PR description MUST include a comment-back to workflow#656 noting supersession of its stale v0.52.x inventory:
-
-```bash
-gh issue comment 656 --repo GoCodeAlone/workflow --body "Superseded by post-cloud-SDK plugin sweep landing at workflow v0.53.1; tracking 15 plugin PRs per docs/plans/2026-05-16-post-cloud-sdk-plugin-sweep.md. Original v0.52.x inventory in this issue is stale; the sweep picks up the actual current state. Closing-via-supersession when wave 1 + wave 2 complete."
-```
-
-**Rollback:** cut v0.4.7 re-pinning workflow → v0.51.6 if consumers break.
+**Rollback:** cut v0.4.7 re-pinning workflow → v0.51.6 if consumers break: `go get github.com/GoCodeAlone/workflow@v0.51.6 && go mod tidy && git tag v0.4.7 && git push origin v0.4.7`.
 
 ---
 
@@ -211,9 +229,9 @@ Apply the **standard 5-step pattern**.
 **Files:** `go.mod`, `go.sum`, `plugin.json` (minEng `0.51.7` → `0.53.0`), `.goreleaser.yaml` (release.draft `true` → `false`)
 **Tag:** `v0.1.3` (NOT `v0.1.0` — git tags v0.1.0/v0.1.1/v0.1.2 already exist as bare git tags without GoReleaser releases)
 
-**EXTENDED 6-step pattern** (5 standard steps + draft pre-check):
+**EXTENDED 6-step pattern** (5 standard steps + draft pre-check). Step 0 includes BOTH the branch-create AND the draft inspection — when the standard pattern is referenced for steps 1-5, **SKIP the standard Step 1 (branch creation already done in Step 0; do not re-run `git checkout -b`).**
 
-**Step 0 (PRE-CHECK — MANDATORY before any other step):** Inspect `.goreleaser.yaml` for `release: draft: true`:
+**Step 0 (PRE-CHECK — MANDATORY; INCLUDES branch creation, replaces standard Step 1):** Inspect `.goreleaser.yaml` for `release: draft: true`:
 
 ```bash
 cd /Users/jon/workspace/workflow-plugin-tofu
@@ -237,7 +255,7 @@ gh api /orgs/GoCodeAlone/actions/runners --jq '.runners | map(select(.status=="o
 
 Expected: ≥1 (currently AM5GamingRig + AM5GamingRig-2 + Jonathans-MBP).
 
-**Steps 1-5: standard 5-step pattern** (branch already created in Step 0; commit includes the `.goreleaser.yaml` patch).
+**Steps 2-5: standard pattern, but SKIP standard Step 1 (branch was created in Step 0).** Apply standard Steps 2-5 (bump pin → tidy/build/test → minEng → commit/push/admin-merge/tag/monitor). The Step 5 commit includes the `.goreleaser.yaml` patch from Step 0.
 
 Commit message:
 
@@ -566,3 +584,4 @@ After all 15 tasks complete:
 - Append to `project_cloud_sdk_extraction_complete.md`'s "Deferred / out-of-scope" section: mark "Plugin ecosystem v0.53.1 sweep" COMPLETE; flag remaining followups (#640, gcp#6, azure#4, catalog manifest-derivation, security-cadence cluster).
 - Update MEMORY.md: change "Cloud-SDK Extraction COMPLETE 2026-05-16" entry to also reference the sweep completion.
 - Track #640 explicitly in MEMORY.md as standalone next-pass candidate.
+- Close umbrella tracking issue: `gh issue close 656 --repo GoCodeAlone/workflow --comment "Sweep complete. All 15 plugins on workflow v0.53.1 as of <date>. Tracking issue closed via supersession; remaining followups (gcp#6 + azure#4 host conformance, #640 v2 lifecycle, catalog manifest-derivation, security-cadence cluster waf/sandbox/data-protection on v0.3.56) tracked separately."`
