@@ -85,7 +85,7 @@ func scenarioUpsertOnAlreadyExists(t *testing.T, cfg Config) {
 		},
 	}
 
-	result, err := wfctlhelpers.ApplyPlan(context.Background(), p, plan)
+	result, err := wfctlhelpers.ApplyPlanWithHooks(context.Background(), p, plan, wfctlhelpers.ApplyPlanHooks{})
 	if err != nil {
 		t.Fatalf("ApplyPlan returned top-level error: %v", err)
 	}

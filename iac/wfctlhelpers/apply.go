@@ -1,9 +1,25 @@
 // Package wfctlhelpers hosts the wfctl-side dispatch helper for v2 IaC
-// plugins. wfctl calls [ApplyPlan] when a plugin manifest declares
-// iacProvider.computePlanVersion: v2 (see plugin/sdk.IaCProvider). The
-// helper iterates plan.Actions, fetches the matching ResourceDriver from
-// the provider, and dispatches each action to a per-action sub-function
-// (doCreate, doUpdate, doReplace, doDelete).
+// plugins. wfctl calls [ApplyPlanWithHooks] (or the legacy [ApplyPlan]) when
+// a plugin manifest declares iacProvider.computePlanVersion: v2 (see
+// plugin/sdk.IaCProvider). The helper iterates plan.Actions, fetches the
+// matching ResourceDriver from the provider, and dispatches each action to
+// a per-action sub-function (doCreate, doUpdate, doReplace, doDelete).
+//
+// # Action lifecycle versions (workflow#640 migration)
+//
+// Two callers can drive plan execution:
+//
+//   - [ApplyPlan] (legacy, marked Deprecated) — empty-hooks equivalent
+//     of [ApplyPlanWithHooks]. State persistence happens at whole-plan
+//     completion only.
+//
+//   - [ApplyPlanWithHooks] (v2, recommended) — caller-supplied per-action
+//     OnResourceApplied / OnResourceDeleted hooks fire at each successful
+//     cloud-mutation boundary. Required for #640's invariants.
+//
+// See docs/migrations/2026-05-16-v2-lifecycle-phase1-inventory.md and
+// decisions/0040-v2-action-lifecycle-provider-compatibility.md for the
+// migration contract; ApplyPlan will be removed in Phase 5.
 //
 // Lifecycle inside W-3a:
 //
