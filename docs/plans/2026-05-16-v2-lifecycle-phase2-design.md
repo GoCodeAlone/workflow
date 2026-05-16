@@ -45,37 +45,49 @@ The cycle-1 review correctly identified that "Pattern B (custom-loop)" is archit
 // plugin/external/proto/iac.proto (additions)
 
 // ActionStatus categorizes per-action outcomes for wfctl-side hook dispatch.
-// Per ADR 0040 invariants 1-3.
+// Per ADR 0040 invariants 1-2. (Compensation invariants 3 deferred to Phase
+// 2.3 when engine-side compensation logic actually exists — cycle-2 review
+// correctly flagged that defining COMPENSATED + COMPENSATION_FAILED enum
+// values in Phase 2 with no reachable emission path creates dead values +
+// linter exhaustiveness violations. Phase 2 scope ships only the 3 statuses
+// that have engine-side emission paths today.)
 enum ActionStatus {
   // Default; must NEVER be emitted by plugins. wfctl rejects ApplyResponse
   // with any action_index whose status == UNSPECIFIED (catches plugin bugs
   // where action result was forgotten).
   ACTION_STATUS_UNSPECIFIED = 0;
 
-  // Action succeeded; wfctl fires OnResourceApplied (or no hook for delete).
+  // Action succeeded; wfctl fires OnResourceApplied (or OnResourceDeleted
+  // for successful delete actions per ADR 0040 invariant 1).
   ACTION_STATUS_SUCCESS = 1;
 
-  // Action failed; for create/update, no resource exists; wfctl skips hook.
-  // ApplyResult.errors carries the human-readable error (existing field).
+  // Action failed (non-delete: create/update/replace). For create/update, no
+  // resource exists; wfctl skips OnResourceApplied. ApplyResult.errors carries
+  // the human-readable error (existing field).
   ACTION_STATUS_ERROR = 2;
 
   // Delete action failed (resource still exists in cloud); wfctl MUST NOT
   // fire OnResourceDeleted (state preserved). Distinct from ACTION_STATUS_ERROR
-  // because wfctl-side downstream behavior differs.
+  // because wfctl-side downstream behavior differs per ADR 0040 invariant 2.
   ACTION_STATUS_DELETE_FAILED = 3;
 
-  // Create/replace failed mid-flight; plugin compensated (rolled back) the
-  // cloud-side resource cleanly; no state leak. wfctl skips OnResourceApplied.
-  ACTION_STATUS_COMPENSATED = 4;
-
-  // Create/replace failed mid-flight; plugin TRIED to compensate but
-  // compensation itself failed — resource may have leaked. wfctl skips
-  // OnResourceApplied + logs at error severity for operator alert.
-  ACTION_STATUS_COMPENSATION_FAILED = 5;
+  // FUTURE: ACTION_STATUS_COMPENSATED + ACTION_STATUS_COMPENSATION_FAILED
+  // reserve tags 4 + 5 for Phase 2.3 when engine-side compensation lands.
+  // NOT defined in Phase 2; defining-without-emitting creates dead enum
+  // values per cycle-2 review.
 }
 
 // ActionResult is the per-action outcome surfacing for Phase 2 v2 hooks.
 // Per ADR 0040 invariant 1.
+//
+// REVISED per cycle-2 review: output_keys field DROPPED. Hook firing
+// (OnResourceApplied / OnResourceDeleted) requires only action_index +
+// status. Per-resource outputs already live in ApplyResult.resources
+// (existing aggregated field; engine-side populated). Adding a parallel
+// map<string,string> with map[string]any→string conversion ambiguity
+// expands proto surface without delivering new capability for hooks.
+// Phase 2.2 may add a per-action outputs field if a future caller actually
+// needs per-action output correlation; today no such caller exists.
 message ActionResult {
   // 0-indexed position in the input plan.actions array.
   uint32 action_index = 1;
@@ -83,15 +95,11 @@ message ActionResult {
   // Per ActionStatus enum semantics above.
   ActionStatus status = 2;
 
-  // Flat outputs map for the resource targeted by this action.
-  // Mirrors interfaces.ResourceOutput.Outputs; empty for delete actions.
-  map<string, string> output_keys = 3;
-
-  // Per-action error message. Empty unless status is ERROR / DELETE_FAILED /
-  // COMPENSATION_FAILED. Mirrors interfaces.ActionError.Error for backwards
-  // compat with the existing ApplyResult.errors aggregation path (engine-side
-  // reconciles when populating both fields).
-  string error = 4;
+  // Per-action error message. Empty unless status is ERROR / DELETE_FAILED.
+  // Mirrors interfaces.ActionError.Error for backwards compat with the
+  // existing ApplyResult.errors aggregation path (engine-side reconciles
+  // when populating both fields).
+  string error = 3;
 }
 
 // Extend existing ApplyResult message with the new field at tag 7 (non-conflicting
@@ -129,10 +137,10 @@ const (
 )
 
 // ActionOutcome mirrors pb.ActionResult.
+// REVISED per cycle-2: Outputs field dropped (see ActionResult proto comment).
 type ActionOutcome struct {
     ActionIndex uint32
     Status      ActionStatus
-    Outputs     map[string]string
     Error       string
 }
 
@@ -174,28 +182,52 @@ func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
     return result, nil
 }
 
-// At the caller (typedIaCAdapter.Apply, iac_typed_adapter.go:350):
+// At the caller (typedIaCAdapter.Apply, iac_typed_adapter.go:350) — V1 PATH ONLY:
 result, err := applyResultFromPB(resp.GetResult())
 if err != nil { return nil, err }
-// Length validation: caller has plan; verify len(result.Actions) == len(plan.Actions)
-if uint32(len(result.Actions)) != uint32(len(plan.GetActions())) {
-    return nil, fmt.Errorf("plugin returned ApplyResult with %d ActionResults but plan had %d actions (Phase 2 contract violation per ADR 0041)", len(result.Actions), len(plan.GetActions()))
+// NOTE: Phase 2 length validation does NOT live here. typedIaCAdapter.Apply
+// is reached only on the V1 DISPATCH PATH (provider.Apply direct). On the
+// v2 path (wfctlhelpers.ApplyPlanWithHooks), this function is never called;
+// engine populates Actions per dispatch loop iteration.
+//
+// V1-plugin compatibility: future plugins that stay on v1 (declare empty
+// computePlanVersion) will return ApplyResult with len(actions) == 0. The
+// Phase 2 contract length validation MUST happen on the V2 ENGINE PATH
+// only — see next subsection.
+```
+
+### Engine-side length validation (cycle-2 fix for I-2)
+
+```go
+// In iac/wfctlhelpers/apply.go::applyPlanWithEnvProviderAndHooks AFTER the
+// dispatchAction loop completes:
+if len(result.Actions) != len(plan.Actions) {
+    // ASSERT, not return: this is an engine-internal invariant violation
+    // (engine just iterated len(plan.Actions) times; if Actions count
+    // differs, engine has a bug). Log + return error rather than panic.
+    return result, fmt.Errorf("internal: ApplyPlanWithHooks produced %d ActionOutcomes for %d plan actions (engine invariant violation)", len(result.Actions), len(plan.Actions))
 }
 ```
+
+This places the validation where the engine actually iterates the plan + can guarantee 1:1 correspondence. V1-plugin path (`typedIaCAdapter.Apply` → `provider.Apply`) does NOT enforce this check because v1 plugins legitimately return empty Actions field; that's the v1 dispatch contract.
 
 ### Engine-side population (iac/wfctlhelpers/apply.go::applyPlanWithEnvProviderAndHooks)
 
 ```go
-// In the dispatchAction loop, after each successful action:
+// In the dispatchAction loop, after each action (success OR error):
 result.Actions = append(result.Actions, interfaces.ActionOutcome{
     ActionIndex: uint32(i),
     Status:      mapErrToStatus(dispatchErr, action.Type),
-    Outputs:     extractOutputs(syncedOutputs[action.Resource.Name]),
     Error:       errOrEmpty(dispatchErr),
 })
 ```
 
-`mapErrToStatus(err, actionType)` returns `ActionStatusSuccess` if `err == nil`; `ActionStatusDeleteFailed` if `err != nil && actionType == "delete"`; `ActionStatusError` otherwise. Compensation paths (`ActionStatusCompensated` / `ActionStatusCompensationFailed`) wired in `doCreate` / `doReplace` after compensation outcome resolves.
+`mapErrToStatus(err, actionType)` returns:
+- `ActionStatusSuccess` if `err == nil`
+- `ActionStatusDeleteFailed` if `err != nil && actionType == "delete"`
+- `ActionStatusError` otherwise
+
+Compensation status values (COMPENSATED + COMPENSATION_FAILED) are RESERVED for Phase 2.3 — cycle-2 review correctly identified that no engine path currently emits them (doCreate's upsert recovery is name-conflict workaround, not cloud-side compensation; defaultReplaceWithHooks documents no rollback attempted). Phase 2 ships only the 3 reachable statuses.
 
 ### Per-plugin implementation pattern (REVISED — single uniform pattern)
 
@@ -282,11 +314,11 @@ T+180m+:       Memory update + close Phase 2 + flag Phase 2.1 + Phase 3 followup
 
 ## Approaches considered
 
-**Approach A (CHOSEN): additive proto field + engine-side default population for canonical plugins + custom-loop population for non-canonical plugins.** Pro: minimal proto change (1 message + 1 enum); engine-side populating means DO needs no code change; clean separation of canonical-vs-custom paths. Con: 3 plugins need manual code change.
+**Approach A (CHOSEN — REVISED PER CYCLE-1): additive proto field + ALL 4 PLUGINS DECLARE compute_plan_version="v2" → uniform engine-side population.** wfctl routes via wfctlhelpers.ApplyPlanWithHooks for all 4; engine populates ApplyResult.Actions per dispatch loop iteration. Pro: single dispatch path; engine has 1:1 plan→outcome iteration so length-validation invariant is natural; no per-plugin custom-loop code. Con: aws/gcp/azure's existing IaCProvider.Apply method becomes unreachable post-cutover (dead code; kept in-tree for Phase 2 minimization, deletable in Phase 2.5).
 
-**Approach B (REJECTED): require all plugins delegate to wfctlhelpers.ApplyPlan (canonical) first.** Pro: single migration path; engine populates everything. Con: requires Phase 3 (canonical-form bump) BEFORE Phase 2; defeats hard-cutover (Phase 3 is per-plugin manual for 3 plugins anyway).
+**Approach B (REJECTED — was previously "custom-loop population for non-canonical plugins"): plugins' own Apply loops populate Actions field via gRPC wire.** Cycle-1 review correctly killed this: hooks fire only on v2 dispatch path; custom-loop plugins take v1 path; wfctl never reads Actions even if populated. Pattern was architecturally broken.
 
-**Approach C (REJECTED): inject per-action hooks via callback bridge over gRPC streaming.** Pro: real-time hook firing during apply (not after). Con: massively more complex; streaming RPC requires bidirectional client/server state; out of scope for Phase 2; violates ADR 0024 (would be a new dispatch path = compat shim by another name).
+**Approach C (REJECTED): inject per-action hooks via callback bridge over gRPC streaming.** Pro: real-time hook firing during apply. Con: massively more complex; streaming RPC requires bidirectional client/server state; out of scope; violates ADR 0024 (new dispatch path = compat shim by another name).
 
 ## Assumptions
 
@@ -338,7 +370,7 @@ ADR 0041 — "V2 ApplyResponse Actions contract":
 - Status: Accepted
 - Context: Phase 1 (ADR 0040) declared 5 provider compatibility expectations; Phase 2 implements
 - Decision: extend ApplyResult proto with `repeated ActionResult actions` + new `enum ActionStatus`; wfctl decoder rejects ApplyResponse with len(actions) != len(plan.actions) OR any UNSPECIFIED status; coordinated 5-repo cutover per ADR 0024
-- Consequences: workflow v0.54.0 + 4 plugin v1.2.0 release window; plugins MUST upgrade simultaneously; old plugin tags permanently incompatible with v0.54.0+; manifest validation gate added to deploy_providers; canonical-form plugins (DO) get engine-side population; custom-loop plugins (aws/gcp/azure) populate explicitly
+- Consequences: workflow v0.54.0 + 4 plugin v1.2.0 release window; plugins MUST upgrade simultaneously; old plugin tags permanently incompatible with v0.54.0+; manifest validation DEFERRED to Phase 2.1 (separate workflow-side PR); ALL 4 plugins uniformly declare compute_plan_version="v2" → engine-side population (single dispatch path, no Pattern A/B bifurcation per cycle-1 collapse); aws/gcp/azure existing IaCProvider.Apply impls become dead code (kept for Phase 2; deletable in Phase 2.5); ACTION_STATUS_COMPENSATED + COMPENSATION_FAILED enum values RESERVED but not defined in Phase 2 (no engine emission path; Phase 2.3 when compensation logic lands)
 
 ## Pipeline next step
 
