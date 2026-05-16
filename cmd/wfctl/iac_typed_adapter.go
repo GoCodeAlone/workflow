@@ -1200,18 +1200,30 @@ func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
 			ApplyFingerprint: d.GetApplyFingerprint(),
 		})
 	}
-	// Phase 2: decode per-action outcomes (workflow#640). Reject
-	// ACTION_STATUS_UNSPECIFIED at the wire boundary so a plugin that
-	// forgets to populate a status never reaches v2 hook dispatch. Per
-	// ADR 0040 invariant 2 (strict cutover, no graceful fallback).
+	// Phase 2: decode per-action outcomes (workflow#640). Two rejection
+	// paths, both enforcing ADR 0040 invariant 2 (strict cutover, no
+	// graceful fallback):
+	//   1. UNSPECIFIED-sent — a plugin that forgets to populate a status.
+	//   2. Unknown-received — a Phase 2.3+ plugin emits a tag (e.g. the
+	//      reserved 4/5 for COMPENSATED / COMPENSATION_FAILED) that this
+	//      wfctl doesn't understand. proto3 preserves unknown enum
+	//      integer values, so `reserved 4, 5;` in iac.proto only prevents
+	//      tag-reuse at compile time — it does NOT block a newer plugin
+	//      from sending them over the wire to an older wfctl.
+	// Silently degrading either case to ActionStatusUnspecified would be
+	// the graceful fallback the ADR forbids.
 	actions := make([]interfaces.ActionOutcome, 0, len(r.GetActions()))
 	for _, a := range r.GetActions() {
 		if a.GetStatus() == pb.ActionStatus_ACTION_STATUS_UNSPECIFIED {
 			return nil, fmt.Errorf("plugin returned ActionResult with UNSPECIFIED status at action_index=%d (Phase 2 contract violation per ADR 0040)", a.GetActionIndex())
 		}
+		mapped, ok := mapPBActionStatusToInterface(a.GetStatus())
+		if !ok {
+			return nil, fmt.Errorf("plugin returned unknown ActionStatus=%d at action_index=%d (wfctl version too old for this plugin? Phase 2 contract violation per ADR 0040)", int32(a.GetStatus()), a.GetActionIndex())
+		}
 		actions = append(actions, interfaces.ActionOutcome{
 			ActionIndex: a.GetActionIndex(),
-			Status:      mapPBActionStatusToInterface(a.GetStatus()),
+			Status:      mapped,
 			Error:       a.GetError(),
 		})
 	}
@@ -1227,20 +1239,26 @@ func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
 }
 
 // mapPBActionStatusToInterface translates the proto-side ActionStatus
-// enum to its interfaces.ActionStatus mirror. UNSPECIFIED is filtered
-// upstream by applyResultFromPB; the default branch returning
-// ActionStatusUnspecified is defensive (unreachable in practice) and
-// matches the zero-value convention.
-func mapPBActionStatusToInterface(s pb.ActionStatus) interfaces.ActionStatus {
+// enum to its interfaces.ActionStatus mirror. Returns (mapped, true) for
+// the four declared tags 0-3; returns (ActionStatusUnspecified, false)
+// for any unknown wire value (tags 4+ — proto3 preserves unknown enum
+// integers as-is). applyResultFromPB converts the `!ok` signal into an
+// explicit error per ADR 0040 invariant 2: a Phase 2.3+ plugin emitting
+// COMPENSATED/COMPENSATION_FAILED against an older wfctl must fail
+// loud, not silently degrade. UNSPECIFIED-sent is filtered upstream so
+// it never reaches the mapper.
+func mapPBActionStatusToInterface(s pb.ActionStatus) (interfaces.ActionStatus, bool) {
 	switch s {
+	case pb.ActionStatus_ACTION_STATUS_UNSPECIFIED:
+		return interfaces.ActionStatusUnspecified, true
 	case pb.ActionStatus_ACTION_STATUS_SUCCESS:
-		return interfaces.ActionStatusSuccess
+		return interfaces.ActionStatusSuccess, true
 	case pb.ActionStatus_ACTION_STATUS_ERROR:
-		return interfaces.ActionStatusError
+		return interfaces.ActionStatusError, true
 	case pb.ActionStatus_ACTION_STATUS_DELETE_FAILED:
-		return interfaces.ActionStatusDeleteFailed
+		return interfaces.ActionStatusDeleteFailed, true
 	default:
-		return interfaces.ActionStatusUnspecified
+		return interfaces.ActionStatusUnspecified, false
 	}
 }
 
