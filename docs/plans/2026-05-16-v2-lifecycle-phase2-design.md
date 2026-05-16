@@ -12,17 +12,22 @@
 
 Phase 2 of #640. Extend the `IaCProviderRequiredServer.Apply` gRPC contract with per-action outcome evidence so wfctl-side `OnResourceApplied` + `OnResourceDeleted` hooks fire correctly. Ship as a coordinated HARD-CUTOVER PR cascade across 5 repos per ADR 0024 (no compat shim, no graceful proto fallback).
 
-**Phase 2 scope (10 deliverables):**
+**Phase 2 scope (REVISED per cycle-1 adversarial review: Pattern B collapsed — 8 deliverables, not 10):**
+
+The cycle-1 review correctly identified that "Pattern B (custom-loop)" is architecturally broken: aws/gcp/azure don't declare `compute_plan_version="v2"` in their CapabilitiesResponse, so wfctl takes the v1 dispatch path (`provider.Apply(ctx, &plan)` direct call). Even if those plugins populate the new `Actions` wire field, wfctl never reads it on the v1 path. The intended OnResourceApplied / OnResourceDeleted hook firing CANNOT happen via Pattern B.
+
+**Correct architecture**: have ALL 4 plugins DECLARE `compute_plan_version="v2"` in their CapabilitiesResponse. wfctl then routes through `wfctlhelpers.ApplyPlanWithHooks` for all 4 — engine-side population handles Actions UNIFORMLY (Pattern A becomes the ONLY pattern). The plugins' existing `IaCProvider.Apply` impls become unused dead code (engine dispatches via `provider.ResourceDriver(action.Resource.Type)` per action instead).
+
+**8 deliverables:**
+
 1. Extend `plugin/external/proto/iac.proto` `ApplyResult` message with `repeated ActionResult actions` field + new `enum ActionStatus` (workflow PR)
 2. Regenerate `iac.pb.go` from updated proto (workflow PR)
 3. Extend `interfaces.ApplyResult` Go struct with `Actions []ActionOutcome` field (workflow PR)
-4. Update `cmd/wfctl/iac_typed_adapter.go::applyResultFromPB` to decode the new field (workflow PR)
-5. Update `iac/wfctlhelpers/apply.go::applyPlanWithEnvProviderAndHooks` to populate `result.Actions` during dispatch (workflow PR)
-6. Add manifest validation gate at `cmd/wfctl/deploy_providers.go::findIaCPluginDir` (`json.Unmarshal` → validated `jsonschema.Validate` against `plugin.json` schema) (workflow PR)
-7. workflow-plugin-aws: rewrite `AWSProvider.Apply` to emit `ApplyResult.Actions` per action (PR)
-8. workflow-plugin-gcp: same shape (PR)
-9. workflow-plugin-azure: same shape (PR)
-10. workflow-plugin-digitalocean: `DOProvider.Apply` already delegates to `wfctlhelpers.ApplyPlan` — engine-side population suffices; DO PR is just a workflow-pin + minEng bump (PR)
+4. Update `cmd/wfctl/iac_typed_adapter.go::applyResultFromPB` to decode the new field. **REVISED per cycle-1 C-2**: function signature must thread plan-action-count for length validation. Either (a) add `expectedActionCount uint32` parameter to applyResultFromPB OR (b) move length validation to caller after applyResultFromPB returns.
+5. Update `iac/wfctlhelpers/apply.go::applyPlanWithEnvProviderAndHooks` to populate `result.Actions` during dispatch (workflow PR) — the engine ALREADY iterates plan.Actions via `dispatchAction`; Phase 2 just appends ActionOutcome per iteration
+6. **REVISED per cycle-1 C-3**: manifest validation gate scope. Two options: (a) implement new `plugin/external/manifest` package with `ValidateBytes(bytes []byte) error` + create `schema/plugin_manifest.json` (hidden scope, ~200 LOC). (b) Use existing `schema/` package's JSON schema infrastructure if it covers plugin.json (probe required at writing-plans). (c) DEFER manifest validation to Phase 2.1 separate PR. Decision needed at writing-plans phase. Phase 2 design now LISTS this explicitly as deliverable #6 with scope-decision sub-task.
+7. **All 4 plugins (aws/gcp/azure/DO): declare `compute_plan_version="v2"` in CapabilitiesResponse** + bump workflow pin + bump minEngineVersion. ~5-line change per plugin. PRs in parallel. Plugins' existing `IaCProvider.Apply` impls become dead-code; they could be deleted in a Phase 2.5 cleanup but kept for Phase 2 to avoid blast radius.
+8. Cross-plugin smoke: install each plugin into wfctl + run sample apply + verify ActionResults populated AND that v2 dispatch path was taken (not v1 fallback).
 
 **Coordinated cutover:** workflow PR + 4 plugin PRs land in same release window. Workflow tag (v0.54.0 candidate) carries the engine change. 4 plugin tags (aws v1.2.0 / gcp v1.2.0 / azure v1.2.0 / DO v1.2.0) carry the per-plugin Apply impls. All 5 ship in lockstep.
 
@@ -143,28 +148,39 @@ type ApplyResult struct {
 }
 ```
 
-### wfctl-side decoder (cmd/wfctl/iac_typed_adapter.go:1177 applyResultFromPB)
+### wfctl-side decoder (REVISED per cycle-1 C-2)
+
+**Cycle-1 finding:** `applyResultFromPB(r *pb.ApplyResult)` does NOT receive `plan`; the design's pseudo-code `plan.GetActions()` was a compile error.
+
+**Fix:** length validation lives at the CALLER (which has both plan + result). applyResultFromPB only decodes + rejects UNSPECIFIED. The two-phase responsibility split:
 
 ```go
-// Add to applyResultFromPB after existing fields:
-actions := make([]interfaces.ActionOutcome, 0, len(r.GetActions()))
-for _, a := range r.GetActions() {
-    if a.GetStatus() == pb.ActionStatus_ACTION_STATUS_UNSPECIFIED {
-        return nil, fmt.Errorf("plugin returned ActionResult with UNSPECIFIED status at action_index=%d (Phase 2 contract violation per ADR 0041)", a.GetActionIndex())
+// applyResultFromPB (no signature change): just decode the new field
+func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
+    // ... existing decoding ...
+    actions := make([]interfaces.ActionOutcome, 0, len(r.GetActions()))
+    for _, a := range r.GetActions() {
+        if a.GetStatus() == pb.ActionStatus_ACTION_STATUS_UNSPECIFIED {
+            return nil, fmt.Errorf("plugin returned ActionResult with UNSPECIFIED status at action_index=%d (Phase 2 contract violation per ADR 0041)", a.GetActionIndex())
+        }
+        actions = append(actions, interfaces.ActionOutcome{
+            ActionIndex: a.GetActionIndex(),
+            Status:      mapPBStatusToInterface(a.GetStatus()),
+            Outputs:     a.GetOutputKeys(),
+            Error:       a.GetError(),
+        })
     }
-    actions = append(actions, interfaces.ActionOutcome{
-        ActionIndex: a.GetActionIndex(),
-        Status:      mapPBStatusToInterface(a.GetStatus()),
-        Outputs:     a.GetOutputKeys(),
-        Error:       a.GetError(),
-    })
+    result.Actions = actions
+    return result, nil
 }
-// CRITICAL: per ADR 0041 invariant, wfctl rejects ApplyResponse with
-// len(actions) != len(plan.actions). This is the silent-success regression guard.
-if len(actions) != len(plan.GetActions()) {
-    return nil, fmt.Errorf("plugin returned ApplyResult with %d ActionResults but plan had %d actions (Phase 2 contract violation per ADR 0041)", len(actions), len(plan.GetActions()))
+
+// At the caller (typedIaCAdapter.Apply, iac_typed_adapter.go:350):
+result, err := applyResultFromPB(resp.GetResult())
+if err != nil { return nil, err }
+// Length validation: caller has plan; verify len(result.Actions) == len(plan.Actions)
+if uint32(len(result.Actions)) != uint32(len(plan.GetActions())) {
+    return nil, fmt.Errorf("plugin returned ApplyResult with %d ActionResults but plan had %d actions (Phase 2 contract violation per ADR 0041)", len(result.Actions), len(plan.GetActions()))
 }
-result.Actions = actions
 ```
 
 ### Engine-side population (iac/wfctlhelpers/apply.go::applyPlanWithEnvProviderAndHooks)
@@ -181,55 +197,41 @@ result.Actions = append(result.Actions, interfaces.ActionOutcome{
 
 `mapErrToStatus(err, actionType)` returns `ActionStatusSuccess` if `err == nil`; `ActionStatusDeleteFailed` if `err != nil && actionType == "delete"`; `ActionStatusError` otherwise. Compensation paths (`ActionStatusCompensated` / `ActionStatusCompensationFailed`) wired in `doCreate` / `doReplace` after compensation outcome resolves.
 
-### Per-plugin implementation patterns
+### Per-plugin implementation pattern (REVISED — single uniform pattern)
 
-**Pattern A (canonical delegate — DO only):** `DOProvider.Apply` already calls `wfctlhelpers.ApplyPlan(ctx, p, plan)`. Engine-side population (above) means DO gets the new field automatically — no plugin code change beyond workflow-pin + minEng bump.
+**All 4 plugins (aws/gcp/azure/DO): declare `compute_plan_version="v2"` in CapabilitiesResponse.** wfctl then routes through `wfctlhelpers.ApplyPlanWithHooks` for all 4. Engine-side dispatch via `provider.ResourceDriver(action.Resource.Type)` per action; engine-side population of `result.Actions` per dispatch.
 
-**Pattern B (custom loop — aws/gcp/azure):** Each plugin's own `for _, action := range plan.Actions` loop must populate `result.Actions []ActionOutcome` per action. Template:
+Plugin-side change template (~5 LOC per plugin):
 
 ```go
-// aws/provider/provider.go (and gcp/provider/provider.go + azure/internal/provider.go)
-result := &interfaces.ApplyResult{
-    PlanID:  plan.ID,
-    Actions: make([]interfaces.ActionOutcome, 0, len(plan.Actions)),
-}
-for i, action := range plan.Actions {
-    drv, err := p.ResourceDriver(action.Resource.Type)
-    if err != nil {
-        result.Actions = append(result.Actions, interfaces.ActionOutcome{
-            ActionIndex: uint32(i),
-            Status:      interfaces.ActionStatusError,
-            Error:       err.Error(),
-        })
-        result.Errors = append(result.Errors, interfaces.ActionError{...})
-        continue
-    }
-    // ... dispatch + outcome handling ...
-    result.Actions = append(result.Actions, interfaces.ActionOutcome{
-        ActionIndex: uint32(i),
-        Status:      statusForOutcome(dispatchErr, action.Type),
-        Outputs:     extractOutputs(...),
-        Error:       errOrEmpty(dispatchErr),
-    })
+// internal/server.go OR equivalent: where Capabilities RPC handler lives
+func (s *Server) Capabilities(ctx context.Context, _ *emptypb.Empty) (*pb.CapabilitiesResponse, error) {
+    return &pb.CapabilitiesResponse{
+        // ... existing CapabilityDeclarations field ...
+        ComputePlanVersion: "v2",  // NEW Phase 2: declare v2 dispatch
+    }, nil
 }
 ```
 
-### Manifest validation gate (Phase 1 Assumption 8 addition)
+This is the IaCCapabilityDeclaration array stays unchanged; the addition is the `compute_plan_version` STRING field on CapabilitiesResponse (proto path `plugin/external/proto/iac.proto:382`).
 
-`cmd/wfctl/deploy_providers.go::findIaCPluginDir` currently `json.Unmarshal`s `plugin.json` without schema validation. Per Phase 1 design, Phase 2 adds:
+**Existing `IaCProvider.Apply` impls on aws/gcp/azure become dead code post-cutover** — wfctl no longer calls them on the v2 path. Phase 2 keeps them in-tree to minimize blast radius; Phase 2.5 follow-up may delete.
 
-```go
-// New: schema-validated load.
-manifestBytes, err := os.ReadFile(manifestPath)
-if err != nil { ... }
-if err := pluginmanifest.ValidateBytes(manifestBytes); err != nil {
-    return nil, fmt.Errorf("plugin manifest %s schema-invalid: %w", manifestPath, err)
-}
-var m PluginManifest
-if err := json.Unmarshal(manifestBytes, &m); err != nil { ... }
-```
+### Manifest validation gate (REVISED per cycle-1 C-3)
 
-`pluginmanifest.ValidateBytes` calls the JSON schema check (existing `schema/plugin_manifest.json` or similar) so a typo in `computePlanVersion` field fails LOUDLY at load time, not silently falls to v1.
+**Cycle-1 finding:** `pluginmanifest.ValidateBytes` doesn't exist; design referenced a non-existent package. ~200 LOC hidden scope.
+
+**Resolution:** scope-decision at writing-plans phase. Three options recorded for writing-plans evaluation:
+
+(a) **Implement `plugin/external/manifest` package** with `ValidateBytes(bytes []byte) error` + create `schema/plugin_manifest.json` schema file. ~200 LOC of new code; adds a real-time JSON-schema-validation dependency (e.g., `github.com/santhosh-tekuri/jsonschema`).
+
+(b) **Reuse existing `schema/` package's JSON schema infrastructure** IF it covers plugin.json — writing-plans probes this; if `schema/` already has a plugin manifest schema generator, validation hook can ride on top.
+
+(c) **DEFER manifest validation to a Phase 2.1 follow-up PR.** Phase 2 ships without the gate; Phase 1 Assumption 8 risk remains (silent v1 fallback on manifest typos) until 2.1 closes it. Acceptable trade-off if the schema-validation library + schema-file scope is too big to fold into Phase 2's 5-repo cutover.
+
+**Phase 2 design RECOMMENDS option (c)** — defer manifest validation to Phase 2.1. Reason: the 5-repo HARD-CUTOVER is already substantial; adding net-new package + dependency expands blast radius. Phase 2.1 is a single workflow-side PR that adds the validation gate WITHOUT cross-repo cutover risk. Phase 2.1 can also handle the typo-silent-fallback risk via a simpler check (verify computePlanVersion field value is one of {"v1", "v2"} OR empty) without requiring full JSON-schema infrastructure.
+
+This shifts deliverable #6 from "implement manifest validation gate" to "file workflow#640-followup tracking issue for Phase 2.1 manifest validation gate."
 
 ### ResourceReplacer manifest declaration (ADR 0040 invariant 5)
 
@@ -249,18 +251,23 @@ Plugins declaring `ResourceReplacer` interface usage at the resource-type level 
 
 wfctl-side `deploy_providers.go` reads `resourceReplacer: true` PER resource type; pre-mutation gating in `preflightProviderOwnedReplaceWithDeleteHooks` (`iac/wfctlhelpers/apply.go:166`) uses this declaration instead of runtime ResourceReplacer detection.
 
-## Coordinated cutover sequence
+## Coordinated cutover sequence (REVISED per cycle-1 timing critique)
 
-**Atomic 5-PR release window** — all 5 PRs in CI parallel, admin-merged + tagged within 30-min window to minimize ecosystem-split risk.
+**Realistic 2-3 hour release window** — cycle-1 reviewer correctly flagged that the original "30-min atomic window" claim ignored CI + Copilot review cycles + GoReleaser windows + draft-edit defensive fixes (azure-pattern recurring). Empirical baseline from this session's plugin sweep: 15-20 min per plugin PR (CI ~10min + Copilot settle ~10min + admin-merge + tag-push + GoReleaser ~5-15min + defensive edit ~30s). 5 repos parallel = bounded by slowest path ≈ 30-45 min IF all goes clean, 1-2 hours with any per-repo retry/Copilot finding, 2-3 hours with multi-round Copilot iteration.
 
 ```
-T-0:   workflow PR merged (proto + decoder + engine + manifest validation) → v0.54.0 tagged
-T+1:   aws + gcp + azure + DO plugin PRs all admin-merged in parallel
-T+2:   aws v1.2.0 / gcp v1.2.0 / azure v1.2.0 / DO v1.2.0 tags pushed
-T+3:   All 4 plugin GoReleaser runs verified (defensive draft=false edit if needed)
-T+4:   Cross-plugin smoke: load each plugin into wfctl v0.54.0 + run sample apply + verify ActionResults populated
-T+5:   Memory update + close #640 Phase 2 sub-issue + flag Phase 3 (codemod canonical-form bump) + Phase 5 (ApplyPlan removal)
+T-0:           workflow PR opened (proto + decoder + engine + Phase 2.1 followup-issue-file)
+T+10-20m:      workflow PR CI + Copilot settle; admin-merge; v0.54.0 tag pushed
+T+20-30m:      v0.54.0 GoReleaser verifies (defensive draft=false if needed)
+T+30m:         All 4 plugin PRs opened in parallel (each with workflow pin bumped to v0.54.0 + Capabilities computePlanVersion="v2" + minEng bumped to "0.54.0")
+T+45-90m:      Plugin PRs CI + Copilot review cycles (Copilot may surface findings; per-plugin iterate)
+T+90-120m:     All 4 plugin PRs merged; tags pushed (aws v1.2.0 + gcp v1.2.0 + azure v1.2.0 + DO v1.2.0)
+T+120-150m:    All 4 plugin GoReleaser runs verified; defensive draft=false per plugin
+T+150-180m:   Cross-plugin smoke: install each plugin + run sample apply + verify v2 dispatch + Actions populated
+T+180m+:       Memory update + close Phase 2 + flag Phase 2.1 + Phase 3 followups
 ```
+
+**Plugin v1.2.0 semver decision (cycle-1 reviewer flagged):** plugins move from v1.1.x to v1.2.0 (MINOR bump). Decision rationale: per ADR 0040 + 0024, old plugin tags become permanently incompatible with workflow v0.54.0+ (hard-cutover). Semver convention treats this as "compatibility ratcheting via minEngineVersion" rather than "API break of the plugin's own API" — the PLUGIN's exported API (Go module + plugin.json schema) is unchanged; what changes is which workflow version the plugin requires. MINOR is the established convention for "minEngineVersion floor moved" per prior sweep (v1.1.0 from v0.51.x → v0.53.x pin was also a minor bump). Operator who wants MAJOR (v2.0.0) should override before Phase 2 ships.
 
 **Failure modes + rollback:**
 
