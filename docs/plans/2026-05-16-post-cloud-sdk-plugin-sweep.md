@@ -49,7 +49,7 @@
 | 14 | chore: bump workflow pin v0.51.7 → v0.53.1; release v0.4.1 | Task 14 | `chore/workflow-v0.53.1-pin-bump` (in workflow-plugin-supply-chain) |
 | 15 | chore: dual-bump workflow v0.51.7 → v0.53.1 + authz v0.2.2 → v0.5.4; release v0.9.3 | Task 15 | `chore/workflow-v0.53.1-pin-bump` (in workflow-plugin-agent) |
 
-**Status:** Draft
+**Status:** Locked 2026-05-16T01:45:19Z
 
 ---
 
