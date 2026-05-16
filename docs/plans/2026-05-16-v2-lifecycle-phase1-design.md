@@ -13,12 +13,14 @@ Phase 1 of #640. Produces an analysis-and-deprecation-signal deliverable:
 2. Classifies each caller as MIGRATE-NEEDED (must adopt v2 hooks for #640's invariants) or LEAVE-AS-IS (no semantic difference; trivial empty-hooks rename suffices).
 3. Defines provider compatibility expectations for v2 — what plugins must do at the gRPC IaCProvider.Apply boundary so wfctl-side hooks fire correctly.
 4. Lands ADR 0040 recording the per-caller classification, the provider-side expectation contract, **and the consequence that Phase 2 is a coordinated hard-cutover per ADR 0024 (no compat-shim path).**
-5. **Adds `// Deprecated: use ApplyPlanWithHooks` godoc marker to `ApplyPlan` in `iac/wfctlhelpers/apply.go:78`** — surfaced by `gopls`/`staticcheck` to every caller; mechanically delivers #640's "Add deprecation warnings" milestone.
+5. **Adds `// Deprecated: use ApplyPlanWithHooks` godoc marker to the `iac/wfctlhelpers.ApplyPlan` symbol** (grep `^func ApplyPlan` in `iac/wfctlhelpers/apply.go`) — surfaced by `gopls`/`staticcheck` to every caller; mechanically delivers #640's "Add deprecation warnings" milestone.
+
+**Phase 4 (3 conformance scenarios + 1 test file) FOLDED INTO THIS PR** — staticcheck SA1019 fired on 4 callers when the godoc marker landed; rather than ship a separate trivial-rename PR, the 4 single-line `ApplyPlan(...)` → `ApplyPlanWithHooks(..., ApplyPlanHooks{})` migrations are committed here.
 
 **Explicitly out of scope for Phase 1** (deferred to Phase 2-5 design passes):
 - Phase 2: design + ship the v2-hooks-over-gRPC contract — must be a HARD-CUTOVER coordinated PR cascade across workflow + 4 plugin repos per ADR 0024 (no compat shim, no graceful fallback)
 - Phase 3: migrate plugins to emit hooks-aware Apply responses (per-repo PRs). **Phase 3 also bumps `iac-codemod`'s `applyCanonicalCallExpr` constant + updates `rewriteApplyBody` + `isAlreadyDelegatedApplyBody` + `runAssertApplyDelegatesToHelper` AST functions in lockstep** so the codemod becomes the migration driver. (Cycle-2 review correctly flagged that bumping ONLY the constant in Phase 1 is theatre — constant is `//nolint:unused`, not consumed by rewriter; risks leaving codemod internally inconsistent.)
-- Phase 4: migrate the 3 conformance scenarios from `ApplyPlan(...)` to `ApplyPlanWithHooks(..., ApplyPlanHooks{})` (trivial mechanical rename; HARD PREREQUISITE for Phase 5 since Phase 5 removes ApplyPlan)
+- ~~Phase 4~~: SHIPPED in this PR — see Phase 1 scope item 5 above (staticcheck SA1019 forced the migration when the godoc marker landed; folded in to avoid a trivial separate PR)
 - Phase 5: remove `wfctlhelpers.ApplyPlan` entirely (after Phase 4 + plugin canonical-form propagation)
 
 Phase 1 ships engine docs + the deprecation marker. Light mechanical changes; no runtime behavior change.

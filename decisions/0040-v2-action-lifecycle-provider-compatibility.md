@@ -45,9 +45,9 @@ PR #639 landed `wfctlhelpers.ApplyPlanWithHooks` — the v2 action lifecycle hoo
 
 - **Cost of the per-action ActionResult proto field** is small (additive proto change) but the COORDINATION cost (5 repos simultaneous release) is large. Prior cloud-SDK extraction + plugin sweep precedents (this session) show the team can execute coordinated multi-repo cascades in a single autonomous pipeline run.
 
-- **Phase 4 conformance scenario migration is a trivial 6-line PR** (rename 3 call sites). HARD prerequisite for Phase 5.
+- **Phase 4 conformance scenario migration SHIPPED in the same PR as this ADR** (4 call sites total: 3 conformance scenarios + 1 test file in cmd/wfctl). Folded into Phase 1 because staticcheck SA1019 (from the new godoc Deprecated marker) required immediate migration. Removes the Phase 5 prerequisite gating.
 
-- **Phase 5 ApplyPlan removal** gates on Phase 4 + plugin canonical-form propagation (DO already canonical; aws/gcp/azure must migrate to either canonical OR Phase-2-direct path).
+- **Phase 5 ApplyPlan removal** now gates ONLY on Phase 2 + Phase 3 (since Phase 4 shipped with this PR). Plugin canonical-form propagation is the remaining blocker: DO already canonical; aws/gcp/azure must migrate to either canonical OR Phase-2-direct path.
 
 ## Alternatives rejected
 

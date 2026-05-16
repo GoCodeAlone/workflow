@@ -10,11 +10,11 @@
 PR #639 landed the v2 action lifecycle hook path (`wfctlhelpers.ApplyPlanWithHooks`) — wfctl can persist state at each successful cloud-mutation boundary instead of waiting for whole-plan completion. The pre-existing `wfctlhelpers.ApplyPlan` is preserved for backwards compatibility but is now legacy debt.
 
 #640 tracks the multi-phase migration:
-- **Phase 1 (this document)**: inventory + provider-compatibility ADR + Deprecated marker
-- **Phase 2**: design + ship v2-hooks-over-gRPC contract (HARD-CUTOVER per ADR 0024)
-- **Phase 3**: migrate plugins to v2 contract (per-plugin manual + codemod for canonical-form plugins)
-- **Phase 4**: migrate 3 conformance scenarios from `ApplyPlan` to `ApplyPlanWithHooks`
-- **Phase 5**: remove `wfctlhelpers.ApplyPlan` entirely
+- **Phase 1 (this document) — SHIPPED**: inventory + provider-compatibility ADR + Deprecated marker
+- **Phase 2 — pending**: design + ship v2-hooks-over-gRPC contract (HARD-CUTOVER per ADR 0024)
+- **Phase 3 — pending**: migrate plugins to v2 contract (per-plugin manual + codemod for canonical-form plugins)
+- ~~Phase 4~~ — **SHIPPED in this PR**: migrated 3 conformance scenarios + 1 test file from `ApplyPlan` to `ApplyPlanWithHooks(..., ApplyPlanHooks{})`. Folded into Phase 1 because staticcheck SA1019 (from the new godoc marker) required it
+- **Phase 5 — pending**: remove `wfctlhelpers.ApplyPlan` entirely (after Phase 2 + Phase 3 land)
 
 ## Workflow-side caller inventory
 
@@ -22,9 +22,10 @@ PR #639 landed the v2 action lifecycle hook path (`wfctlhelpers.ApplyPlanWithHoo
 
 | File:Line | Classification | Notes |
 |-----------|----------------|-------|
-| `iac/conformance/scenario_upsert_on_already_exists.go:88` | MIGRATE-NEEDED (Phase 4) — TRIVIAL | Conformance scenario; `ApplyPlanWithHooks(..., ApplyPlanHooks{})` rename suffices. **Phase 5 prerequisite** — Phase 5 removes ApplyPlan, so Phase 4 must precede. |
-| `iac/conformance/scenario_delete_action.go:74` | MIGRATE-NEEDED (Phase 4) — TRIVIAL | Same |
-| `iac/conformance/scenario_replace_cascade_preserves_dependents.go:92` | MIGRATE-NEEDED (Phase 4) — TRIVIAL | Same |
+| `iac/conformance/scenario_upsert_on_already_exists.go:88` | MIGRATED in this PR (Phase 4 folded) | Renamed to `ApplyPlanWithHooks(..., ApplyPlanHooks{})`. Empty-hooks form has zero semantic difference. |
+| `iac/conformance/scenario_delete_action.go:74` | MIGRATED in this PR | Same |
+| `iac/conformance/scenario_replace_cascade_preserves_dependents.go:92` | MIGRATED in this PR | Same |
+| `cmd/wfctl/infra_apply_in_process_test.go:77` | MIGRATED in this PR (was missing from initial inventory; surfaced by staticcheck SA1019) | Same |
 
 ### iac-codemod tool references (NOT runtime callers)
 
@@ -84,6 +85,5 @@ Per `decisions/0040-v2-action-lifecycle-provider-compatibility.md`, plugins MUST
 - ADR 0024 (`decisions/0024-iac-typed-force-cutover.md`) — strict-contracts cutover precedent (no compat shim)
 - ADR 0040 (`decisions/0040-v2-action-lifecycle-provider-compatibility.md`) — provider-side compatibility contract
 - PR #639 — v2 hooks engine landing
-- `iac/wfctlhelpers/apply.go` — engine source (with `// Deprecated:` marker on `ApplyPlan` per Phase 1)
-- `iac/wfctlhelpers/doc.go` — in-package contract pointer
+- `iac/wfctlhelpers/apply.go` — engine source; package-level doc comment now embeds the v1/v2 contract pointer; `ApplyPlan` symbol carries `// Deprecated:` marker per Phase 1
 - Prior product design: `docs/plans/2026-04-25-wfctl-lifecycle-product-design.md`
