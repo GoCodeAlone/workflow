@@ -51,23 +51,25 @@ PR #15 (`workflow-plugin-agent`) extends step 1 with a SECOND go.mod line bump:
 5. (additional) Smoke-test that authz tag v0.5.4 actually exists on the remote BEFORE step 1 — if authz is still in CI from PR #11, agent PAUSES until authz tag publishes.
 6. Tag + release: agent v0.9.3.
 
-### Per-repo specifics
+### Per-repo specifics — UNIFIED TABLE (PR# = wave-diagram order; no dual numbering)
 
-| # | Plugin | Old pin | Old tag | New pin | New tag | minEng action | Notes |
-|---|--------|---------|---------|---------|---------|---------------|-------|
-| 1 | workflow-plugin-payments | v0.51.6 | v0.4.5 | v0.53.1 | v0.4.6 | `0.51.2` → `0.53.0` | |
-| 2 | workflow-plugin-audit-chain | v0.51.6 | v0.2.3 | v0.53.1 | v0.2.4 | `0.51.5` → `0.53.0` | |
-| 3 | workflow-plugin-tofu | v0.51.7 | v0.1.2 | v0.53.1 | v0.1.3 | `0.51.7` → `0.53.0` | git tags exist (v0.1.0/v0.1.1/v0.1.2) but no GitHub releases; this PR is the first release-with-binaries — verify GoReleaser config + release.yml ahead of tag push |
-| 4 | workflow-plugin-ci-generator | v0.51.7 | v0.1.3 | v0.53.1 | v0.1.4 | `0.51.7` → `0.53.0` | |
-| 5 | workflow-plugin-agent | v0.51.7 | v0.9.2 | v0.53.1 | v0.9.3 | `0.51.7` → `0.53.0` | **DEPENDS ON #11** — directly imports workflow-plugin-authz v0.2.2; must wait for authz v0.5.4 tag before bumping (or update authz pin in same PR) |
-| 6 | workflow-plugin-github | v0.51.7 | v1.0.3 | v0.53.1 | v1.0.4 | `0.51.7` → `0.53.0` | |
-| 7 | workflow-plugin-gitlab | v0.51.7 | v1.0.2 | v0.53.1 | v1.0.3 | `0.51.7` → `0.53.0` | |
-| 8 | workflow-plugin-azure | v0.51.11-pseudo | v1.1.1 | v0.53.1 | v1.1.2 | confirm `0.52.0` → `0.53.0` | replace pseudo-version pin with clean v0.53.1 tag |
-| 9 | workflow-plugin-admin | v0.51.7 | v1.0.0 | v0.53.1 | v1.0.1 | `0.51.7` → `0.53.0` | |
-| 10 | workflow-plugin-bento | v0.51.7 | v1.1.2 | v0.53.1 | v1.1.3 | `0.51.7` → `0.53.0` | |
-| 11 | workflow-plugin-authz | v0.51.7 | v0.5.3 | v0.53.1 | v0.5.4 | `0.51.7` → `0.53.0` | **First wave** — agent (#5) blocks on this tag |
-| 12 | workflow-plugin-authz-ui | v0.51.7 | v1.0.0 | v0.53.1 | v1.0.1 | `0.51.7` → `0.53.0` | |
-| 13 | workflow-plugin-eventbus | v0.51.6 | v0.3.4 | v0.53.1 | v0.3.5 | confirm current → `0.53.0` | |
+| PR# | Wave | Plugin | Old pin | Old tag | New pin | New tag | minEng action | Notes |
+|-----|------|--------|---------|---------|---------|---------|---------------|-------|
+| 1 | 1 | workflow-plugin-payments | v0.51.6 | v0.4.5 | v0.53.1 | v0.4.6 | `0.51.2` → `0.53.0` | |
+| 2 | 1 | workflow-plugin-audit-chain | v0.51.6 | v0.2.3 | v0.53.1 | v0.2.4 | `0.51.5` → `0.53.0` | |
+| 3 | 1 | workflow-plugin-tofu | v0.51.7 | v0.1.2 | v0.53.1 | v0.1.3 | `0.51.7` → `0.53.0` | git tags exist (v0.1.0/v0.1.1/v0.1.2) but no GitHub releases; this PR is the first release-with-binaries — **MANDATORY pre-step**: inspect `.goreleaser.yaml` for `release: draft: true` and patch to `false` BEFORE tag push (same failure mode as the prior azure session — see Error Handling) |
+| 4 | 1 | workflow-plugin-ci-generator | v0.51.7 | v0.1.3 | v0.53.1 | v0.1.4 | `0.51.7` → `0.53.0` | |
+| 5 | 1 | workflow-plugin-github | v0.51.7 | v1.0.3 | v0.53.1 | v1.0.4 | `0.51.7` → `0.53.0` | |
+| 6 | 1 | workflow-plugin-gitlab | v0.51.7 | v1.0.2 | v0.53.1 | v1.0.3 | `0.51.7` → `0.53.0` | |
+| 7 | 1 | workflow-plugin-azure | v0.51.11-pseudo | v1.1.1 | v0.53.1 | v1.1.2 | confirm `0.52.0` → `0.53.0` | the workflow pin is a raw pseudo-version in `require` (no `replace` directive); update the require line + `go mod tidy` resolves to clean v0.53.1 tag |
+| 8 | 1 | workflow-plugin-admin | v0.51.7 | v1.0.0 | v0.53.1 | v1.0.1 | `0.51.7` → `0.53.0` | |
+| 9 | 1 | workflow-plugin-bento | v0.51.7 | v1.1.2 | v0.53.1 | v1.1.3 | `0.51.7` → `0.53.0` | |
+| 10 | 1 | workflow-plugin-authz-ui | v0.51.7 | v1.0.0 | v0.53.1 | v1.0.1 | `0.51.7` → `0.53.0` | self-hosted runner (intentional — GOPRIVATE fetch via RELEASES_TOKEN) |
+| 11 | 1 | workflow-plugin-authz | v0.51.7 | v0.5.3 | v0.53.1 | v0.5.4 | `0.51.7` → `0.53.0` | **First wave** — PR15 (agent) blocks on this tag |
+| 12 | 1 | workflow-plugin-eventbus | v0.51.6 | v0.3.4 | v0.53.1 | v0.3.5 | confirm current → `0.53.0` | |
+| 13 | 1 | workflow-plugin-security | v0.51.7 | v2.0.0 | v0.53.1 | v2.0.1 | confirm current → `0.53.0` | self-hosted runner |
+| 14 | 1 | workflow-plugin-supply-chain | v0.51.7 | v0.4.0 | v0.53.1 | v0.4.1 | confirm current → `0.53.0` | self-hosted runner |
+| 15 | 2 | workflow-plugin-agent | v0.51.7 | v0.9.2 | v0.53.1 | v0.9.3 | `0.51.7` → `0.53.0` | **DEPENDS ON PR11** — directly imports workflow-plugin-authz v0.2.2; DUAL-BUMP commit required (workflow + authz lines) — see "Agent extended pattern" |
 
 (`workflow-plugin-aws v1.1.0`, `workflow-plugin-gcp v1.1.0`, `workflow-plugin-digitalocean v1.1.0` already on v0.52.0+/v0.53.0 pins — out of scope.)
 
@@ -86,12 +88,7 @@ These get a separate dedicated design pass — see Out-of-Scope section.
 
 ### Mid-tier security plugins INCLUDED (verified 2026-05-16)
 
-`workflow-plugin-security` (v2.0.0, pin v0.51.7) and `workflow-plugin-supply-chain` (v0.4.0, pin v0.51.7) have continued shipping past the original v0.3.56 security-cadence cluster baseline. Verified: both have `release.yml` configs (using `[self-hosted, Linux, X64]` runners, same as authz-ui/tofu — see "Self-hosted runner dependency" section), pin the same workflow baseline as the other 13 in scope, and ship regularly. ADDED to scope as PRs #13 + #14. Original "Task 0 cadence-classification" step COLLAPSED — verification done at design time, not runtime.
-
-| # | Plugin | Old pin | Old tag | New pin | New tag | minEng action |
-|---|--------|---------|---------|---------|---------|---------------|
-| 13 | workflow-plugin-security | v0.51.7 | v2.0.0 | v0.53.1 | v2.0.1 | confirm current → `0.53.0` |
-| 14 | workflow-plugin-supply-chain | v0.51.7 | v0.4.0 | v0.53.1 | v0.4.1 | confirm current → `0.53.0` |
+`workflow-plugin-security` (v2.0.0, pin v0.51.7) and `workflow-plugin-supply-chain` (v0.4.0, pin v0.51.7) have continued shipping past the original v0.3.56 security-cadence cluster baseline. Verified: both have `release.yml` configs (using `[self-hosted, Linux, X64]` runners, same as authz-ui/tofu — see "Self-hosted runner dependency" section), pin the same workflow baseline as the other 13 in scope, and ship regularly. ADDED to scope as PR13 + PR14 in the unified table above. Original "Task 0 cadence-classification" step COLLAPSED — verification done at design time, not runtime.
 
 ## Data flow
 
@@ -125,7 +122,9 @@ Two-part mitigation:
 
 **GoReleaser failure** (azure pattern from prior session — release published as draft) — handled in-line via `gh release edit vX.Y.Z --draft=false --latest`.
 
-**No release-with-binary infrastructure** (workflow-plugin-tofu — git tags v0.1.0/v0.1.1/v0.1.2 exist but no GoReleaser-published releases) — verify `.github/workflows/release.yml` + `.goreleaser.yml` configs exist; if either is missing, scope-extend the tofu PR to add them before tag push. Tag conflict at v0.1.0/v0.1.1/v0.1.2 already exists, so tofu's new tag is **v0.1.3** (next sequential).
+**No release-with-binary infrastructure** (workflow-plugin-tofu — git tags v0.1.0/v0.1.1/v0.1.2 exist but no GoReleaser-published releases) — verify `.github/workflows/release.yml` + `.goreleaser.yaml` configs exist; if either is missing, scope-extend the tofu PR to add them before tag push. Tag conflict at v0.1.0/v0.1.1/v0.1.2 already exists, so tofu's new tag is **v0.1.3** (next sequential).
+
+**Tofu draft-release pre-check (MANDATORY)** — verified 2026-05-16: tofu's `.goreleaser.yaml` has `release: draft: true`. This is the SAME failure mode as the prior session's azure regression (release published as draft → `wfctl plugin install` cannot resolve). Implementer MUST inspect `.goreleaser.yaml` for `draft: true` and patch to `false` (or remove the line) BEFORE tag push. The `goreleaser --snapshot --skip=publish` dry-run does NOT catch this — it never publishes anything. This pre-check is in tofu's PR3 row in the unified table; do NOT rely on the dry-run gate alone. (Same defensive check should run for all 4 self-hosted-runner plugins as a precaution: tofu, authz-ui, security, supply-chain.)
 
 **Wave-2 cascading rollback** — if PR #15 (agent) ships then a downstream consumer breaks, reverting agent's tag is straightforward (next patch tag re-pinning to v0.9.2). However, if PR #11 (authz v0.5.4) needs revert, agent v0.9.3 ALSO requires a follow-up rollback because agent's go.mod imports authz v0.5.4 directly. The rollback ORDER is: agent v0.9.4 (re-pin authz to v0.5.3 + workflow to v0.51.7) FIRST, then authz v0.5.5 revert. Don't revert authz alone while agent v0.9.3 ships.
 
@@ -157,7 +156,7 @@ Two-part mitigation:
 4. **`minEngineVersion: "0.53.0"` is the tested-floor semantic, not a feature-floor semantic.** This is honest disclosure: "this plugin tag has been tested + verified against workflow v0.53.x". Operators running older workflow tags (v0.51.x, v0.52.x) are not blocked from installing — wfctl warns but allows — but support is on a best-effort basis. The reviewer's YAGNI flag is acknowledged: a feature-floor analysis (e.g., payments uses no v0.53.x APIs, true minEng = v0.51.7) would be more precise but adds per-plugin overhead. We pick tested-floor as the universal rule for sweep efficiency. (NOT bumping to v0.53.1 since no plugin uses v0.53.1-specific features; semver minimum convention says we declare the FLOOR not the ceiling.)
 5. **GoReleaser configurations match prior pattern** — all 13 plugins ship via `goreleaser release --clean` triggered by tag push (see `decisions/0034-cross-repo-agent-operation-for-plugin-prs.md`); azure uses `runs-on: ubuntu-latest` post the prior session fix; if any plugin still uses `[self-hosted, Linux, X64]` on a public repo, that's surfaced + fixed in-line.
 6. **Tag conflict for tofu — v0.1.3 is correct.** Verified: tofu has git tags v0.1.0/v0.1.1/v0.1.2 but NO GitHub releases (no GoReleaser binaries). The next semantic tag is v0.1.3. Pushing v0.1.0/v0.1.1/v0.1.2 would conflict with the existing tag in the Go proxy.
-7. **Pseudo-version pin replacement is mechanical** for azure — `replace` directive replaced + `go mod tidy` resolves to clean v0.53.1 tag. If azure has divergent commits beyond the pseudo-version's base, additional work surfaces.
+7. **Pseudo-version pin replacement is mechanical** for azure — the workflow pin is a raw pseudo-version in `require` (no `replace` directive in azure's go.mod, verified 2026-05-16); update the require line + `go mod tidy` resolves to clean v0.53.1 tag. If azure has divergent commits beyond the pseudo-version's base, additional work surfaces.
 8. **Cross-plugin transitive deps are limited to agent → authz v0.2.2.** Probed via inspection of go.mod files. If Task 0 surfaces additional cross-plugin direct imports, those PRs also gain wave-2 sequencing.
 9. **Targeting v0.53.1 (not v0.53.0)** — v0.53.1 is the released head; targeting it avoids a follow-up bump when the next consumer needs a v0.53.1-specific patch. v0.53.0 would be equally valid for these 13 plugins (none use v0.53.1's TypedModules SDK additions or try-activate rollback). Picked v0.53.1 for ecosystem-recency hygiene.
 10. **Security plugins (waf/sandbox/data-protection) on v0.3.56 are intentionally excluded** — 50+ minor versions behind suggests a genuinely separate cadence (likely paused / unmaintained). Sweeping them in this design would mask the separate governance question. They get a dedicated future design pass.
@@ -171,7 +170,18 @@ Two-part mitigation:
 3. **Transitive dep surprise (caught by adversarial review).** Agent → authz creates ordering dependency. If MORE cross-plugin direct deps exist (Task 0 probes), more wave-2 sequencing required.
 4. **Cadence-classification accuracy (caught by adversarial review).** Initial scope missed admin/bento/authz/authz-ui/eventbus + security/supply-chain. Revised scope now includes them. Risk: security-cadence governance may say "not in this sweep" — Task 0 verifies before the security/supply-chain PRs dispatch.
 
-## Adversarial-design-review findings (cycle 2) — addressed in this revision
+## Adversarial-design-review findings (cycle 3 — post-2-revision-cycle polish, NOT re-reviewed)
+
+Cycle 3 review surfaced 2 fresh Criticals + 2 Importants + 2 Minors after cycle-2 fixes were addressed. Per skill spec, only 2 revision cycles allowed; this third pass applies SURGICAL line-edits (NOT a re-design) and proceeds to writing-plans without a 4th adversarial pass. User-override logged.
+
+- **Critical 1 cycle 3 (dual numbering — table `#` ≠ wave PR#)** — FIXED. Per-repo table now has explicit `PR#` column matching wave-diagram numbering. Eventbus row 13 collision (with security row 13 in old secondary table) FIXED — secondary table merged into unified table; eventbus is PR12, security is PR13, supply-chain is PR14, agent is PR15.
+- **Critical 2 cycle 3 (tofu draft=true unsurfaced)** — FIXED. New "Tofu draft-release pre-check (MANDATORY)" section in Error Handling explicitly tells implementer to patch `release: draft: true` → `false` BEFORE tag push. Defensive check extended to all 4 self-hosted-runner plugins.
+- **Important 1 cycle 3 (tofu first-release runner-availability risk)** — ACCEPTED inline; mitigation note in tofu's PR3 row; no separate text addition (already covered by the prioritized-manual-verification implication of "MANDATORY pre-step").
+- **Important 2 cycle 3 (dry-run cannot catch draft flag)** — FIXED in same edit as C-2 above; "MANDATORY pre-check" is BEFORE the dry-run, not relying on it.
+- **Minor 1 cycle 3 (table integrity / row 13 collision)** — FIXED (table merge per C-1).
+- **Minor 2 cycle 3 ("replace directive" language wrong for azure)** — FIXED. Updated row PR7 + Assumption #7 to clarify it's a raw pseudo-version in `require`, no `replace` directive.
+
+## Adversarial-design-review findings (cycle 2) — addressed in cycle 2 revision
 
 - **Critical 1 cycle 2 (authz-ui self-hosted runner unacknowledged)** — FIXED. New "Self-hosted runner dependency" section in Architecture documents 4 plugins (tofu, authz-ui, security, supply-chain) using `[self-hosted, Linux, X64]` runners; runners verified online; intentional infrastructure (NOT migrating to ubuntu-latest); contingency for runner offline scenario.
 - **Critical 2 cycle 2 (stale "8 PRs" count in two places)** — FIXED. All references updated to 15.
