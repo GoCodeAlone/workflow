@@ -162,7 +162,7 @@ const (
 	ActionStatus_ACTION_STATUS_UNSPECIFIED   ActionStatus = 0 // wfctl REJECTS this on receipt
 	ActionStatus_ACTION_STATUS_SUCCESS       ActionStatus = 1
 	ActionStatus_ACTION_STATUS_ERROR         ActionStatus = 2
-	ActionStatus_ACTION_STATUS_DELETE_FAILED ActionStatus = 3 // 4 + 5 reserved (Phase 2.3 compensation)
+	ActionStatus_ACTION_STATUS_DELETE_FAILED ActionStatus = 3
 )
 
 // Enum value maps for ActionStatus.
@@ -5883,12 +5883,12 @@ const file_iac_proto_rawDesc = "" +
 	"\x16PlanDiagnosticSeverity\x12\x18\n" +
 	"\x14PLAN_DIAGNOSTIC_INFO\x10\x00\x12\x1b\n" +
 	"\x17PLAN_DIAGNOSTIC_WARNING\x10\x01\x12\x19\n" +
-	"\x15PLAN_DIAGNOSTIC_ERROR\x10\x02*\x82\x01\n" +
+	"\x15PLAN_DIAGNOSTIC_ERROR\x10\x02*\x8e\x01\n" +
 	"\fActionStatus\x12\x1d\n" +
 	"\x19ACTION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ACTION_STATUS_SUCCESS\x10\x01\x12\x17\n" +
 	"\x13ACTION_STATUS_ERROR\x10\x02\x12\x1f\n" +
-	"\x1bACTION_STATUS_DELETE_FAILED\x10\x032\xc4\t\n" +
+	"\x1bACTION_STATUS_DELETE_FAILED\x10\x03\"\x04\b\x04\x10\x04\"\x04\b\x05\x10\x052\xc4\t\n" +
 	"\x13IaCProviderRequired\x12o\n" +
 	"\n" +
 	"Initialize\x12/.workflow.plugin.external.iac.InitializeRequest\x1a0.workflow.plugin.external.iac.InitializeResponse\x12]\n" +

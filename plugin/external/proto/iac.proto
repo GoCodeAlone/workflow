@@ -300,7 +300,7 @@ enum ActionStatus {
   ACTION_STATUS_SUCCESS = 1;
   ACTION_STATUS_ERROR = 2;
   ACTION_STATUS_DELETE_FAILED = 3;
-  // 4 + 5 reserved (Phase 2.3 compensation)
+  reserved 4, 5;  // Phase 2.3 compensation (ACTION_STATUS_COMPENSATED / COMPENSATION_FAILED)
 }
 
 // ActionResult is the per-action outcome surfacing for Phase 2 v2 hooks.

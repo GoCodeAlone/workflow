@@ -102,33 +102,46 @@ func TestMigrationRepairConfirmationStringMatchesProtoComment(t *testing.T) {
 // round trip with identical field values. Per ADR 0040 invariants 1-2 and
 // the v2-lifecycle-phase2 plan T1. Guards against accidental field-tag
 // drift and against re-ordering action_index / status / error.
+//
+// Uses proto.Equal for canonical comparison so adding a field to
+// ActionResult later still gets checked without changing this test.
+// Subcases include UNSPECIFIED (which T3 will REJECT on decode — wire
+// layer must still encode/decode it losslessly) and nil/empty Actions
+// (the dominant case for plugins on v1 capability shim).
 func TestApplyResultActionsRoundTrip(t *testing.T) {
-	original := &pb.ApplyResult{
-		PlanId: "plan-phase2-roundtrip",
-		Actions: []*pb.ActionResult{
+	cases := []struct {
+		name    string
+		actions []*pb.ActionResult
+	}{
+		{"nil_actions", nil},
+		{"empty_actions", []*pb.ActionResult{}},
+		{"unspecified_status", []*pb.ActionResult{
+			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_UNSPECIFIED, Error: ""},
+		}},
+		{"mixed_statuses", []*pb.ActionResult{
 			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_SUCCESS, Error: ""},
 			{ActionIndex: 1, Status: pb.ActionStatus_ACTION_STATUS_ERROR, Error: "boom"},
 			{ActionIndex: 2, Status: pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, Error: "still in use"},
-		},
+		}},
 	}
-	wire, err := proto.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	decoded := &pb.ApplyResult{}
-	if err := proto.Unmarshal(wire, decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if got, want := len(decoded.GetActions()), len(original.GetActions()); got != want {
-		t.Fatalf("Actions len: got %d, want %d", got, want)
-	}
-	for i, want := range original.GetActions() {
-		got := decoded.GetActions()[i]
-		if got.GetActionIndex() != want.GetActionIndex() ||
-			got.GetStatus() != want.GetStatus() ||
-			got.GetError() != want.GetError() {
-			t.Fatalf("Actions[%d]: got %+v, want %+v", i, got, want)
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			original := &pb.ApplyResult{
+				PlanId:  "plan-phase2-roundtrip",
+				Actions: c.actions,
+			}
+			wire, err := proto.Marshal(original)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			decoded := &pb.ApplyResult{}
+			if err := proto.Unmarshal(wire, decoded); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if !proto.Equal(decoded, original) {
+				t.Fatalf("round-trip mismatch:\n got: %v\nwant: %v", decoded, original)
+			}
+		})
 	}
 }
 
