@@ -15,7 +15,7 @@
 ## Scope Manifest
 
 **PR Count:** 5
-**Tasks:** 11
+**Tasks:** 9
 **Estimated Lines of Change:** ~500 (workflow ~400 incl proto+pb.go regen; per-plugin ~5-10 LOC × 4 plugins; smoke + memory ~50)
 
 **Out of scope:**
@@ -36,7 +36,7 @@
 | 4 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 8 | `feat/v2-capabilities-v2` (in workflow-plugin-azure) |
 | 5 | feat: declare ComputePlanVersion v2 + bump workflow v0.54.0 pin; release v1.2.0 | Task 9 | `feat/v2-capabilities-v2` (in workflow-plugin-digitalocean) |
 
-**Tasks 10 + 11 are non-PR coordination steps** (cross-plugin smoke verification + memory update) executed by team-lead after all 5 PRs ship — they don't create their own PR; they're operational close-out.
+**Post-cascade closeout** (cross-plugin smoke verification + memory update) is a team-lead operational step described after the task list — NOT a separate plan-task; it doesn't create a PR.
 
 **Status:** Draft
 
@@ -658,68 +658,31 @@ Apply the **Universal per-plugin pattern**. Same as Task 8. Tag v1.2.0.
 
 ---
 
-### Task 10: cross-plugin smoke verification (team-lead, post all 5 PRs merged)
+## Post-cascade closeout (team-lead, AFTER all 5 PRs ship)
 
-**Files:** none (operational verification)
+These are team-lead operational actions — not separate plan-tasks. They run after the 5-PR cascade lands + before this plan is marked complete.
 
-**Step 1: install each v1.2.0 plugin against wfctl v0.54.0**
+**Cross-plugin smoke verification (operator-run; NOT a CI gate per design Testing section):**
 
 For each of aws/gcp/azure/DO:
-
 ```bash
 wfctl plugin install github.com/GoCodeAlone/workflow-plugin-<name>@v1.2.0
 ```
 
-Expected: each install succeeds; binary cached locally.
-
-**Step 2: verify v2 dispatch path taken**
-
-Run a representative apply for each plugin against a known IaC config. Verify via debug logging or wfctl flag that:
+Run a representative apply against a known IaC config; verify:
 - wfctl chose v2 dispatch (calls `applyV2ApplyPlanWithHooksFn`, NOT `provider.Apply(ctx, &plan)`)
 - ApplyResult.Actions populated with len == len(plan.Actions)
-- For successful applies, all ActionOutcomes have Status == ActionStatusSuccess
-- For applies with delete actions that fail, the failed delete shows Status == ActionStatusDeleteFailed (test fixture if real apply doesn't exercise this)
+- For successful applies, ActionOutcomes have Status == ActionStatusSuccess
+- For applies with delete actions that fail, status == ActionStatusDeleteFailed (use test fixture if real apply doesn't exercise this)
 
-**Step 3: capture transcript**
+If desired, capture transcript at `docs/runtime-validation/2026-05-16-phase2-cross-plugin-smoke.md` (optional — operator decides if audit-trail commit is wanted).
 
-Save dispatch decision + Actions array per plugin to `docs/runtime-validation/2026-05-16-phase2-cross-plugin-smoke.md`:
+**Rollback if smoke fails:** cut plugin X v1.2.1 hotfix OR cut workflow v0.54.1 reverting whichever commit broke. Per ADR 0040 matched-pair rollback.
 
-```bash
-mkdir -p docs/runtime-validation
-# Capture commands + output per plugin into the file
-git add docs/runtime-validation/2026-05-16-phase2-cross-plugin-smoke.md
-git commit -m "docs: Phase 2 cross-plugin smoke validation transcript"
-```
+**Memory + close + followup tracking:**
 
-**Verification (operator-run; NOT a CI gate per design Testing section):**
-- 4 plugins all show v2 dispatch + populated Actions
-- Smoke doc committed for audit trail
-
-**Rollback (if smoke fails for plugin X):** cut plugin X v1.2.1 hotfix; OR if workflow-side bug, cut workflow v0.54.1 reverting whichever commit broke. Per ADR 0040 matched-pair rollback.
-
----
-
-### Task 11: memory update + close Phase 2 + flag followups (team-lead)
-
-**Files:**
-- Modify: `/Users/jon/.claude/projects/-Users-jon-workspace/memory/project_cloud_sdk_extraction_complete.md`
-- Modify: `/Users/jon/.claude/projects/-Users-jon-workspace/memory/MEMORY.md`
-
-**Step 1: Update completion file**
-
-Append to `project_cloud_sdk_extraction_complete.md`'s #640 entry: "Phase 2 SHIPPED 2026-05-16/17 — workflow v0.54.0 + aws v1.2.0 + gcp v1.2.0 + azure v1.2.0 + DO v1.2.0 coordinated cascade per ADR 0024 + 0040. All 4 plugins declare ComputePlanVersion='v2'; wfctl routes through v2 dispatch path; ApplyResult.Actions populated per dispatch + length-validation assert engine-side. Followups: Phase 2.1 (manifest validation gate — tracking issue filed in Task 6); Phase 2.3 (compensation enum values + engine logic); Phase 2.5 (delete dead-code IaCProvider.Apply impls on aws/gcp/azure); Phase 5 (remove wfctlhelpers.ApplyPlan — gates only on Phase 2 now that Phase 3 collapsed in Phase 2 cycle-1)."
-
-**Step 2: Update MEMORY.md index entry**
-
-Update the Cloud-SDK Extraction completion line to include Phase 2 ✓.
-
-**Step 3: Commit memory updates**
-
-(Memory files are operator-side, not in git; just save the edits.)
-
-**Verification (documentation class):** memory files updated; followup tracking issue (Task 6) referenced from completion entry.
-
-**Rollback:** revert memory edits if Phase 2 itself reverts.
+- Append to `/Users/jon/.claude/projects/-Users-jon-workspace/memory/project_cloud_sdk_extraction_complete.md` #640 entry: "Phase 2 SHIPPED — workflow v0.54.0 + aws/gcp/azure/DO v1.2.0 coordinated cascade per ADR 0024 + 0040. ApplyResult.Actions populated; v2 dispatch path. Followups: Phase 2.1 (manifest validation — tracking issue filed in Pre-dispatch setup step 2); Phase 2.3 (compensation); Phase 2.5 (dead-code cleanup); Phase 5 (remove ApplyPlan)."
+- Update `MEMORY.md` index entry to include "Phase 2 ✓".
 
 ---
 
