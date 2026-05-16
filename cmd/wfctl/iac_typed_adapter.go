@@ -1239,18 +1239,19 @@ func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
 }
 
 // mapPBActionStatusToInterface translates the proto-side ActionStatus
-// enum to its interfaces.ActionStatus mirror. Returns (mapped, true) for
-// the four declared tags 0-3; returns (ActionStatusUnspecified, false)
-// for any unknown wire value (tags 4+ — proto3 preserves unknown enum
-// integers as-is). applyResultFromPB converts the `!ok` signal into an
-// explicit error per ADR 0040 invariant 2: a Phase 2.3+ plugin emitting
-// COMPENSATED/COMPENSATION_FAILED against an older wfctl must fail
-// loud, not silently degrade. UNSPECIFIED-sent is filtered upstream so
-// it never reaches the mapper.
+// enum to its interfaces.ActionStatus mirror. Returns (mapped, true)
+// for the three actionable tags SUCCESS / ERROR / DELETE_FAILED;
+// returns (ActionStatusUnspecified, false) for both UNSPECIFIED (a
+// plugin contract violation) AND any unknown wire value (tags 4+ —
+// proto3 preserves unknown enum integers as-is). The mapper is itself
+// fail-closed so its strict-cutover invariant doesn't rely on
+// caller-side filtering. applyResultFromPB converts the `!ok` signal
+// into an explicit error per ADR 0040 invariant 2 — a Phase 2.3+
+// plugin emitting reserved tags COMPENSATED / COMPENSATION_FAILED
+// against an older wfctl, or any plugin emitting UNSPECIFIED, must
+// fail loud and never silently degrade.
 func mapPBActionStatusToInterface(s pb.ActionStatus) (interfaces.ActionStatus, bool) {
 	switch s {
-	case pb.ActionStatus_ACTION_STATUS_UNSPECIFIED:
-		return interfaces.ActionStatusUnspecified, true
 	case pb.ActionStatus_ACTION_STATUS_SUCCESS:
 		return interfaces.ActionStatusSuccess, true
 	case pb.ActionStatus_ACTION_STATUS_ERROR:
@@ -1258,6 +1259,8 @@ func mapPBActionStatusToInterface(s pb.ActionStatus) (interfaces.ActionStatus, b
 	case pb.ActionStatus_ACTION_STATUS_DELETE_FAILED:
 		return interfaces.ActionStatusDeleteFailed, true
 	default:
+		// UNSPECIFIED (tag 0) and any unknown wire value (tags 4+)
+		// fall here. Caller surfaces the !ok as an explicit error.
 		return interfaces.ActionStatusUnspecified, false
 	}
 }

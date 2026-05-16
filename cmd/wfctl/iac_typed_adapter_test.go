@@ -536,15 +536,15 @@ func TestApplyResultFromPB_RejectsUnknownStatus(t *testing.T) {
 	}
 }
 
-// TestMapPBActionStatusToInterface_KnownValues pins the four declared
-// tags 0-3 to their interfaces.ActionStatus mirrors, ok=true.
-func TestMapPBActionStatusToInterface_KnownValues(t *testing.T) {
+// TestMapPBActionStatusToInterface_ActionableValues pins the three
+// actionable tags SUCCESS / ERROR / DELETE_FAILED to their
+// interfaces.ActionStatus mirrors with ok=true.
+func TestMapPBActionStatusToInterface_ActionableValues(t *testing.T) {
 	cases := []struct {
 		name string
 		in   pb.ActionStatus
 		want interfaces.ActionStatus
 	}{
-		{"UNSPECIFIED", pb.ActionStatus_ACTION_STATUS_UNSPECIFIED, interfaces.ActionStatusUnspecified},
 		{"SUCCESS", pb.ActionStatus_ACTION_STATUS_SUCCESS, interfaces.ActionStatusSuccess},
 		{"ERROR", pb.ActionStatus_ACTION_STATUS_ERROR, interfaces.ActionStatusError},
 		{"DELETE_FAILED", pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, interfaces.ActionStatusDeleteFailed},
@@ -557,6 +557,23 @@ func TestMapPBActionStatusToInterface_KnownValues(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+// TestMapPBActionStatusToInterface_UnspecifiedFailsClosed pins the
+// strict-cutover invariant at the mapper itself: UNSPECIFIED is a
+// declared enum tag, but per ADR 0040 invariant 2 it must never
+// translate to a valid Go-side outcome — the mapper returns
+// (Unspecified, false) and the caller surfaces the !ok as an explicit
+// contract-violation error. Discipline lives in the mapper rather
+// than relying on caller-side pre-filtering.
+func TestMapPBActionStatusToInterface_UnspecifiedFailsClosed(t *testing.T) {
+	got, ok := mapPBActionStatusToInterface(pb.ActionStatus_ACTION_STATUS_UNSPECIFIED)
+	if ok {
+		t.Errorf("ok=true for UNSPECIFIED, want false")
+	}
+	if got != interfaces.ActionStatusUnspecified {
+		t.Errorf("UNSPECIFIED mapped to %d, want ActionStatusUnspecified (0)", got)
 	}
 }
 

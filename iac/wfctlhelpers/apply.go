@@ -215,6 +215,7 @@ func applyPlanWithEnvProviderAndHooks(
 					errStr = iterErr.Error()
 				}
 				result.Actions = append(result.Actions, interfaces.ActionOutcome{
+					//nolint:gosec // ActionIndex is loop counter bound by len(plan.Actions); G115 false positive.
 					ActionIndex: uint32(i),
 					Status:      status,
 					Error:       errStr,
