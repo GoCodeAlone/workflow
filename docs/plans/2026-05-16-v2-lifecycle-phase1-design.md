@@ -62,16 +62,21 @@ No runtime behavior change. The deprecation marker surfaces through static analy
 
 **v1 callers in IaC plugin repos (per ADR 0034 cross-repo inventory):**
 
-**Task 0 (PRE-PLAN-AUTHORING)**: actually grep the 4 plugin repos via `gh api repos/GoCodeAlone/<plugin>/contents/...` or local clone to populate this table with REAL file:line. The cycle 1 reviewer correctly flagged the bootstrap problem: design + ADR should not commit speculative entries. Task 0 result template:
+**Task 0 (COMPLETED 2026-05-16 inline during design — actual gh api results):**
 
 | # | Plugin | File:Line | Caller pattern | Classification |
 |---|--------|-----------|----------------|----------------|
-| 10 | workflow-plugin-aws | (Task 0 result) | Canonical via iac-codemod | LEAVE-AS-IS until Phase 3 codemod-driven rewrite |
-| 11 | workflow-plugin-gcp | (Task 0 result) | Same | Same |
-| 12 | workflow-plugin-azure | (Task 0 result) | Same | Same |
-| 13 | workflow-plugin-digitalocean | (Task 0 result) | Same | Same |
+| 10 | workflow-plugin-aws | `provider/provider.go:237` `AWSProvider.Apply` | **NON-CANONICAL** — implements own loop with `p.mu.RLock`, init check, custom dispatch | **MIGRATE-NEEDED (Phase 3 MANUAL)** — codemod cannot rewrite; needs hand migration to v2 hooks contract |
+| 11 | workflow-plugin-gcp | `provider/provider.go:226` `GCPProvider.Apply` | **NON-CANONICAL** — own `for _, action := range plan.Actions` loop with `p.ResourceDriver(action.Resource.Type)` per-action | **MIGRATE-NEEDED (Phase 3 MANUAL)** — codemod cannot rewrite; needs hand migration |
+| 12 | workflow-plugin-azure | `internal/provider.go:138` `AzureProvider.Apply` | **NON-CANONICAL** — own loop with `p.mu.RLock` + custom dispatch | **MIGRATE-NEEDED (Phase 3 MANUAL)** — codemod cannot rewrite; needs hand migration |
+| 13 | workflow-plugin-digitalocean | `internal/provider.go:274-275` `DOProvider.Apply` | **CANONICAL** — `result, err := wfctlhelpers.ApplyPlan(ctx, p, plan)` delegate (with custom post-flush wrapper) | LEAVE-AS-IS for Phase 1; Phase 3 codemod CAN rewrite (after AST functions updated in lockstep with constant) |
 
-If Task 0 finds a plugin with a NON-canonical Apply implementation (e.g., custom logic that doesn't delegate to wfctlhelpers), that plugin's row gets `MIGRATE-NEEDED (Phase 3 manual)` and the plan grows by 1 task. Otherwise Phase 3 is a single iac-codemod-fix-it run across all 4 plugins after Phase 2 ships.
+**Major architectural finding:** **3 of 4 plugins do NOT use the canonical pattern.** iac-codemod's `applyCanonicalCallExpr` constant is aspirational, not reality. Phase 3 scope expands significantly:
+- Phase 3 cannot be a single codemod-fix-it run across all 4 plugins
+- 3 plugins need MANUAL migration to either canonical form OR (preferred) directly to v2 hooks contract
+- Phase 2 v2 contract design must accommodate two implementation paths per provider: (a) delegating to `wfctlhelpers.ApplyPlanWithHooks` (DO pattern), (b) per-plugin custom loop with its own action-boundary surfacing (aws/gcp/azure pattern)
+
+This finding gets recorded in the inventory doc + ADR 0040 as a Phase 2 / Phase 3 input. It does NOT change Phase 1's deliverable shape — Phase 1 still ships 4 artifacts (inventory + ADR + doc.go + godoc marker). It DOES change the signaling: the inventory doc + ADR need to call out the 3 non-canonical plugins so future Phase 2/3 design passes don't assume codemod-driven uniform migration.
 
 ## Provider compatibility expectations (Phase 1 ADR scope)
 

@@ -75,6 +75,15 @@ import (
 //
 // T3.1 ships the dispatch skeleton; T3.1.5 added the postcondition above;
 // T3.2/T3.3/T3.4 fill the per-action sub-functions with their full bodies.
+//
+// Deprecated: use [ApplyPlanWithHooks] instead. ApplyPlan is the empty-hooks
+// equivalent of ApplyPlanWithHooks and is preserved only for backwards
+// compatibility during the workflow#640 v2 action lifecycle migration. New
+// callers MUST use ApplyPlanWithHooks so per-action state-persistence hooks
+// can fire at each cloud-mutation boundary. See
+// docs/migrations/2026-05-16-v2-lifecycle-phase1-inventory.md and
+// decisions/0040-v2-action-lifecycle-provider-compatibility.md for the
+// migration contract; ApplyPlan will be removed in Phase 5.
 func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
 	return applyPlanWithEnvProvider(ctx, p, plan, nil)
 }
