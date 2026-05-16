@@ -1200,6 +1200,21 @@ func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
 			ApplyFingerprint: d.GetApplyFingerprint(),
 		})
 	}
+	// Phase 2: decode per-action outcomes (workflow#640). Reject
+	// ACTION_STATUS_UNSPECIFIED at the wire boundary so a plugin that
+	// forgets to populate a status never reaches v2 hook dispatch. Per
+	// ADR 0040 invariant 2 (strict cutover, no graceful fallback).
+	actions := make([]interfaces.ActionOutcome, 0, len(r.GetActions()))
+	for _, a := range r.GetActions() {
+		if a.GetStatus() == pb.ActionStatus_ACTION_STATUS_UNSPECIFIED {
+			return nil, fmt.Errorf("plugin returned ActionResult with UNSPECIFIED status at action_index=%d (Phase 2 contract violation per ADR 0040)", a.GetActionIndex())
+		}
+		actions = append(actions, interfaces.ActionOutcome{
+			ActionIndex: a.GetActionIndex(),
+			Status:      mapPBActionStatusToInterface(a.GetStatus()),
+			Error:       a.GetError(),
+		})
+	}
 	return &interfaces.ApplyResult{
 		PlanID:               r.GetPlanId(),
 		Resources:            resources,
@@ -1207,7 +1222,26 @@ func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
 		InitialInputSnapshot: copyStringMap(r.GetInitialInputSnapshot()),
 		InputDriftReport:     driftReport,
 		ReplaceIDMap:         copyStringMap(r.GetReplaceIdMap()),
+		Actions:              actions,
 	}, nil
+}
+
+// mapPBActionStatusToInterface translates the proto-side ActionStatus
+// enum to its interfaces.ActionStatus mirror. UNSPECIFIED is filtered
+// upstream by applyResultFromPB; the default branch returning
+// ActionStatusUnspecified is defensive (unreachable in practice) and
+// matches the zero-value convention.
+func mapPBActionStatusToInterface(s pb.ActionStatus) interfaces.ActionStatus {
+	switch s {
+	case pb.ActionStatus_ACTION_STATUS_SUCCESS:
+		return interfaces.ActionStatusSuccess
+	case pb.ActionStatus_ACTION_STATUS_ERROR:
+		return interfaces.ActionStatusError
+	case pb.ActionStatus_ACTION_STATUS_DELETE_FAILED:
+		return interfaces.ActionStatusDeleteFailed
+	default:
+		return interfaces.ActionStatusUnspecified
+	}
 }
 
 func destroyResultFromPB(r *pb.DestroyResult) *interfaces.DestroyResult {

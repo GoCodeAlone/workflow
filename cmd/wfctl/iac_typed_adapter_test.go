@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
@@ -433,4 +434,75 @@ type enumeratorOnlyStub struct {
 
 func (s *enumeratorOnlyStub) EnumerateAll(_ context.Context, _ *pb.EnumerateAllRequest) (*pb.EnumerateAllResponse, error) {
 	return &pb.EnumerateAllResponse{}, nil
+}
+
+// TestApplyResultFromPB_DecodesActions verifies applyResultFromPB
+// translates pb.ActionResult entries into interfaces.ActionOutcome with
+// the correct ActionStatus mapping and Error pass-through. Per workflow#640
+// Phase 2 + ADR 0040; T3 of v2-lifecycle-phase2 plan.
+func TestApplyResultFromPB_DecodesActions(t *testing.T) {
+	pbResult := &pb.ApplyResult{
+		PlanId: "plan-1",
+		Actions: []*pb.ActionResult{
+			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_SUCCESS},
+			{ActionIndex: 1, Status: pb.ActionStatus_ACTION_STATUS_ERROR, Error: "create failed"},
+			{ActionIndex: 2, Status: pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, Error: "AWS API error"},
+		},
+	}
+	got, err := applyResultFromPB(pbResult)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got.Actions) != 3 {
+		t.Fatalf("expected 3 actions, got %d", len(got.Actions))
+	}
+	if got.Actions[0].ActionIndex != 0 || got.Actions[0].Status != interfaces.ActionStatusSuccess {
+		t.Errorf("action 0: got %+v, want {0, Success}", got.Actions[0])
+	}
+	if got.Actions[1].Status != interfaces.ActionStatusError || got.Actions[1].Error != "create failed" {
+		t.Errorf("action 1: got %+v, want {1, Error, \"create failed\"}", got.Actions[1])
+	}
+	if got.Actions[2].Status != interfaces.ActionStatusDeleteFailed || got.Actions[2].Error != "AWS API error" {
+		t.Errorf("action 2: got %+v, want {2, DeleteFailed, \"AWS API error\"}", got.Actions[2])
+	}
+}
+
+// TestApplyResultFromPB_RejectsUNSPECIFIED ensures a plugin sending
+// ACTION_STATUS_UNSPECIFIED gets rejected at the decode boundary so
+// wfctl never tries to dispatch a v2 hook on a forgotten-populate
+// outcome. Per ADR 0040 invariant 2: strict cutover, no graceful
+// fallback. Error message MUST mention "UNSPECIFIED" + action_index.
+func TestApplyResultFromPB_RejectsUNSPECIFIED(t *testing.T) {
+	pbResult := &pb.ApplyResult{
+		Actions: []*pb.ActionResult{
+			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_SUCCESS},
+			{ActionIndex: 7, Status: pb.ActionStatus_ACTION_STATUS_UNSPECIFIED},
+		},
+	}
+	_, err := applyResultFromPB(pbResult)
+	if err == nil {
+		t.Fatal("expected error on UNSPECIFIED status, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "UNSPECIFIED") {
+		t.Errorf("error should mention UNSPECIFIED: %v", err)
+	}
+	if !strings.Contains(msg, "7") {
+		t.Errorf("error should mention offending action_index=7: %v", err)
+	}
+}
+
+// TestApplyResultFromPB_EmptyActionsRoundTrip confirms plugins on the
+// v1 capability shim (no Actions emitted) decode cleanly without
+// error and surface an empty/nil Actions slice — wfctl skips v2 hook
+// dispatch in that case.
+func TestApplyResultFromPB_EmptyActionsRoundTrip(t *testing.T) {
+	pbResult := &pb.ApplyResult{PlanId: "plan-empty"}
+	got, err := applyResultFromPB(pbResult)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got.Actions) != 0 {
+		t.Errorf("expected 0 actions for empty pb.Actions, got %d: %+v", len(got.Actions), got.Actions)
+	}
 }
