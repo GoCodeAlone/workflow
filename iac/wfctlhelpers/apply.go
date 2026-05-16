@@ -195,89 +195,162 @@ func applyPlanWithEnvProviderAndHooks(
 
 	for i := range plan.Actions {
 		action := plan.Actions[i]
-		// Honor cancellation at the loop boundary. Drivers should also
-		// check ctx internally for in-flight work, but the loop check
-		// guarantees apply stops between actions even if a driver
-		// happens to ignore ctx. The deferred postcondition still runs
-		// on early return so InputDriftReport is populated even on a
-		// canceled apply.
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		// Per-action JIT substitution — resolve ${VAR} / ${MODULE.field}
-		// / ${MODULE.id} in action.Resource.Config against
-		// result.ReplaceIDMap (this-apply Replace ProviderIDs) and
-		// syncedOutputs (state + this-apply prior outputs). On error,
-		// record a per-action diagnostic with the canonical "jit
-		// substitution:" prefix and SKIP dispatch — the unresolved spec
-		// must not reach the driver. The loop continues to the next
-		// action (best-effort apply contract). os.LookupEnv is the
-		// production env source; nil-safe inside ResolveSpec — refs that
-		// only need replaceIDMap / syncedOutputs still resolve.
-		resolved, err := jitsubst.ResolveSpec(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv)
-		if err != nil {
-			result.Errors = append(result.Errors, interfaces.ActionError{
-				Resource: action.Resource.Name,
-				Action:   action.Action,
-				Error:    fmt.Sprintf("jit substitution: %v", err),
-			})
-			continue
-		}
-		action.Resource = resolved
-		d, err := p.ResourceDriver(action.Resource.Type)
-		if err != nil {
-			result.Errors = append(result.Errors, interfaces.ActionError{
-				Resource: action.Resource.Name,
-				Action:   action.Action,
-				Error:    fmt.Sprintf("resolve driver: %v", err),
-			})
-			continue
-		}
-		// Capture result.Resources length pre-dispatch so we can identify
-		// the entry (if any) that this action appended and propagate its
-		// outputs into syncedOutputs for subsequent actions. doCreate /
-		// doUpdate / doReplace each append on success; doDelete does not.
-		preLen := len(result.Resources)
-		actionHooks := hooks
-		actionHooks.OnResourceDeleted = func(ctx context.Context, action interfaces.PlanAction) error {
-			if hooks.OnResourceDeleted != nil {
-				if err := hooks.OnResourceDeleted(ctx, action); err != nil {
-					return err
+		// Phase 2 (workflow#640 + ADR 0040 invariant 1): per-PlanAction
+		// ActionOutcome MUST be appended to result.Actions exactly once,
+		// regardless of which continue / fatal-return branch the iteration
+		// took. Cycle-1 plan-review C-1 caught the false-positive where
+		// jit-error / driver-resolve-error continue paths skip the append
+		// and the post-loop length-assert mis-fires. The deferred-closure
+		// pattern below records the outcome unconditionally on every exit
+		// from the inner func; the surrounding for loop then bubbles
+		// fatalErr (hook failures, ctx cancellation) to the caller.
+		var iterErr error  // best-effort error: action failed, continue
+		var fatalErr error // hook/ctx error: stop the whole apply
+
+		func() {
+			defer func() {
+				status := mapDispatchErrToStatus(iterErr, action.Action)
+				errStr := ""
+				if iterErr != nil {
+					errStr = iterErr.Error()
+				}
+				result.Actions = append(result.Actions, interfaces.ActionOutcome{
+					//nolint:gosec // ActionIndex is loop counter bound by len(plan.Actions); G115 false positive.
+					ActionIndex: uint32(i),
+					Status:      status,
+					Error:       errStr,
+				})
+			}()
+
+			// Honor cancellation at the loop boundary. Drivers should also
+			// check ctx internally for in-flight work, but the loop check
+			// guarantees apply stops between actions even if a driver
+			// happens to ignore ctx. The deferred postcondition still runs
+			// on early return so InputDriftReport is populated even on a
+			// canceled apply.
+			if err := ctx.Err(); err != nil {
+				iterErr = err
+				fatalErr = err
+				return
+			}
+			// Per-action JIT substitution — resolve ${VAR} / ${MODULE.field}
+			// / ${MODULE.id} in action.Resource.Config against
+			// result.ReplaceIDMap (this-apply Replace ProviderIDs) and
+			// syncedOutputs (state + this-apply prior outputs). On error,
+			// record a per-action diagnostic with the canonical "jit
+			// substitution:" prefix and SKIP dispatch — the unresolved spec
+			// must not reach the driver. The loop continues to the next
+			// action (best-effort apply contract). os.LookupEnv is the
+			// production env source; nil-safe inside ResolveSpec — refs that
+			// only need replaceIDMap / syncedOutputs still resolve.
+			resolved, err := jitsubst.ResolveSpec(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv)
+			if err != nil {
+				result.Errors = append(result.Errors, interfaces.ActionError{
+					Resource: action.Resource.Name,
+					Action:   action.Action,
+					Error:    fmt.Sprintf("jit substitution: %v", err),
+				})
+				iterErr = fmt.Errorf("jit substitution: %v", err)
+				return
+			}
+			action.Resource = resolved
+			d, err := p.ResourceDriver(action.Resource.Type)
+			if err != nil {
+				result.Errors = append(result.Errors, interfaces.ActionError{
+					Resource: action.Resource.Name,
+					Action:   action.Action,
+					Error:    fmt.Sprintf("resolve driver: %v", err),
+				})
+				iterErr = fmt.Errorf("resolve driver: %v", err)
+				return
+			}
+			// Capture result.Resources length pre-dispatch so we can identify
+			// the entry (if any) that this action appended and propagate its
+			// outputs into syncedOutputs for subsequent actions. doCreate /
+			// doUpdate / doReplace each append on success; doDelete does not.
+			preLen := len(result.Resources)
+			actionHooks := hooks
+			actionHooks.OnResourceDeleted = func(ctx context.Context, action interfaces.PlanAction) error {
+				if hooks.OnResourceDeleted != nil {
+					if err := hooks.OnResourceDeleted(ctx, action); err != nil {
+						return err
+					}
+				}
+				delete(syncedOutputs, action.Resource.Name)
+				return nil
+			}
+			if err := dispatchAction(ctx, d, action, result, actionHooks, deleteHookActive); err != nil {
+				var hookErr hookDispatchError
+				if errors.As(err, &hookErr) {
+					fatalErr = fmt.Errorf("%s/%s: %w", action.Resource.Type, action.Resource.Name, hookErr.err)
+					iterErr = hookErr.err
+					return
+				}
+				result.Errors = append(result.Errors, interfaces.ActionError{
+					Resource: action.Resource.Name,
+					Action:   action.Action,
+					Error:    err.Error(),
+				})
+				iterErr = err
+				return
+			}
+			if action.Action == "delete" {
+				if err := actionHooks.OnResourceDeleted(ctx, action); err != nil {
+					fatalErr = fmt.Errorf("%s/%s: post-delete hook: %w", action.Resource.Type, action.Resource.Name, err)
+					iterErr = err
+					return
 				}
 			}
-			delete(syncedOutputs, action.Resource.Name)
-			return nil
-		}
-		if err := dispatchAction(ctx, d, action, result, actionHooks, deleteHookActive); err != nil {
-			var hookErr hookDispatchError
-			if errors.As(err, &hookErr) {
-				return result, fmt.Errorf("%s/%s: %w", action.Resource.Type, action.Resource.Name, hookErr.err)
-			}
-			result.Errors = append(result.Errors, interfaces.ActionError{
-				Resource: action.Resource.Name,
-				Action:   action.Action,
-				Error:    err.Error(),
-			})
-			continue
-		}
-		if action.Action == "delete" {
-			if err := actionHooks.OnResourceDeleted(ctx, action); err != nil {
-				return result, fmt.Errorf("%s/%s: post-delete hook: %w", action.Resource.Type, action.Resource.Name, err)
-			}
-		}
-		if len(result.Resources) > preLen {
-			out := result.Resources[len(result.Resources)-1]
-			out = fillMissingOutputIdentity(action.Resource, out)
-			result.Resources[len(result.Resources)-1] = out
-			if hooks.OnResourceApplied != nil {
-				if err := hooks.OnResourceApplied(ctx, d, action, out); err != nil {
-					return result, fmt.Errorf("%s/%s: post-apply hook: %w", action.Resource.Type, action.Resource.Name, err)
+			if len(result.Resources) > preLen {
+				out := result.Resources[len(result.Resources)-1]
+				out = fillMissingOutputIdentity(action.Resource, out)
+				result.Resources[len(result.Resources)-1] = out
+				if hooks.OnResourceApplied != nil {
+					if err := hooks.OnResourceApplied(ctx, d, action, out); err != nil {
+						fatalErr = fmt.Errorf("%s/%s: post-apply hook: %w", action.Resource.Type, action.Resource.Name, err)
+						iterErr = err
+						return
+					}
 				}
+				syncedOutputs[out.Name] = flattenOutputs(out)
 			}
-			syncedOutputs[out.Name] = flattenOutputs(out)
+		}()
+
+		if fatalErr != nil {
+			// Early-return path: ActionOutcome for the offending action
+			// has already been appended by the deferred closure; the
+			// post-loop length-assert is skipped on fatal exits (length
+			// will be < len(plan.Actions), correctly so).
+			return result, fatalErr
 		}
 	}
+
+	// Phase 2 engine invariant (workflow#640 + ADR 0040 invariant 1): on
+	// a normally-completed loop, len(result.Actions) MUST equal
+	// len(plan.Actions). Length validation lives engine-side here, not in
+	// applyResultFromPB (which is on the v1 plugin-dispatch path).
+	if len(result.Actions) != len(plan.Actions) {
+		return result, fmt.Errorf("internal: ApplyPlanWithHooks produced %d ActionOutcomes for %d plan actions (engine invariant violation per ADR 0040)", len(result.Actions), len(plan.Actions))
+	}
+
 	return result, nil
+}
+
+// mapDispatchErrToStatus translates a per-action dispatch error into the
+// Phase 2 ActionStatus value (workflow#640). delete actions that fail map
+// to ActionStatusDeleteFailed so wfctl downstream can drop the
+// state-removal optimistic-update; all other failures map to
+// ActionStatusError. Compensation paths (Phase 2.3 — COMPENSATED /
+// COMPENSATION_FAILED) are reserved in iac.proto but not yet emitted
+// here. nil err means the dispatch (and any post-hooks) succeeded.
+func mapDispatchErrToStatus(err error, actionType string) interfaces.ActionStatus {
+	if err == nil {
+		return interfaces.ActionStatusSuccess
+	}
+	if actionType == "delete" {
+		return interfaces.ActionStatusDeleteFailed
+	}
+	return interfaces.ActionStatusError
 }
 
 func preflightProviderOwnedReplaceWithDeleteHooks(p interfaces.IaCProvider, plan *interfaces.IaCPlan) error {

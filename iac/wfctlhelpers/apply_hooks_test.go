@@ -230,3 +230,73 @@ func (d *deleteThenDependentDriver) Create(_ context.Context, spec interfaces.Re
 	}
 	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: "id-" + spec.Name}, nil
 }
+
+// TestApplyPlanWithHooks_PopulatesActions_CleanSuccess verifies the
+// Phase 2 engine-side ActionOutcome population — every successful
+// PlanAction gets a corresponding result.Actions entry with
+// ActionStatusSuccess and ActionIndex matching loop position. Per
+// workflow#640 Phase 2 + ADR 0040 invariant 1.
+func TestApplyPlanWithHooks_PopulatesActions_CleanSuccess(t *testing.T) {
+	p := newFakeProvider()
+	plan := &interfaces.IaCPlan{
+		ID: "plan-1",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "r1", Type: "infra.test"}},
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "r2", Type: "infra.test"}},
+		},
+	}
+	result, err := ApplyPlanWithHooks(t.Context(), p, plan, ApplyPlanHooks{})
+	if err != nil {
+		t.Fatalf("top-level err: %v", err)
+	}
+	if len(result.Actions) != 2 {
+		t.Fatalf("expected 2 ActionOutcomes, got %d: %+v", len(result.Actions), result.Actions)
+	}
+	for i, a := range result.Actions {
+		if a.ActionIndex != uint32(i) {
+			t.Errorf("action %d: ActionIndex=%d, want %d", i, a.ActionIndex, i)
+		}
+		if a.Status != interfaces.ActionStatusSuccess {
+			t.Errorf("action %d: Status=%v, want Success", i, a.Status)
+		}
+		if a.Error != "" {
+			t.Errorf("action %d: Error=%q, want empty", i, a.Error)
+		}
+	}
+}
+
+// TestApplyPlanWithHooks_PopulatesActions_PreDispatchDriverError covers
+// the CRITICAL cycle-1 plan-review C-1 invariant: every continue exit
+// path (here, the driver-resolve error at apply.go:228-234) must still
+// append an ActionOutcome so the post-loop length-validation assert
+// never false-fires. Per ADR 0040.
+func TestApplyPlanWithHooks_PopulatesActions_PreDispatchDriverError(t *testing.T) {
+	p := &fakeProvider{driverErr: errors.New("driver resolution failed")}
+	plan := &interfaces.IaCPlan{
+		ID: "plan-1",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "r1", Type: "unknown.resource"}},
+		},
+	}
+	result, err := ApplyPlanWithHooks(t.Context(), p, plan, ApplyPlanHooks{})
+	if err != nil {
+		t.Fatalf("expected no top-level err on driver-resolve failure (best-effort continue), got: %v", err)
+	}
+	if len(result.Actions) != 1 {
+		t.Fatalf("expected 1 ActionOutcome (length-assert invariant), got %d: %+v", len(result.Actions), result.Actions)
+	}
+	if result.Actions[0].Status != interfaces.ActionStatusError {
+		t.Errorf("driver-resolve-error status: want Error, got %v", result.Actions[0].Status)
+	}
+	if result.Actions[0].ActionIndex != 0 {
+		t.Errorf("ActionIndex: want 0, got %d", result.Actions[0].ActionIndex)
+	}
+	if result.Actions[0].Error == "" {
+		t.Errorf("Error: want non-empty, got empty")
+	}
+	// Cross-check: existing result.Errors path also populated so the
+	// pre-Phase-2 contract is preserved.
+	if len(result.Errors) != 1 {
+		t.Errorf("expected 1 result.Errors entry (legacy contract), got %d", len(result.Errors))
+	}
+}

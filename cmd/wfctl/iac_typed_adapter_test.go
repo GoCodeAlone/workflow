@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
@@ -433,4 +434,158 @@ type enumeratorOnlyStub struct {
 
 func (s *enumeratorOnlyStub) EnumerateAll(_ context.Context, _ *pb.EnumerateAllRequest) (*pb.EnumerateAllResponse, error) {
 	return &pb.EnumerateAllResponse{}, nil
+}
+
+// TestApplyResultFromPB_DecodesActions verifies applyResultFromPB
+// translates pb.ActionResult entries into interfaces.ActionOutcome with
+// the correct ActionStatus mapping and Error pass-through. Per workflow#640
+// Phase 2 + ADR 0040; T3 of v2-lifecycle-phase2 plan.
+func TestApplyResultFromPB_DecodesActions(t *testing.T) {
+	pbResult := &pb.ApplyResult{
+		PlanId: "plan-1",
+		Actions: []*pb.ActionResult{
+			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_SUCCESS},
+			{ActionIndex: 1, Status: pb.ActionStatus_ACTION_STATUS_ERROR, Error: "create failed"},
+			{ActionIndex: 2, Status: pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, Error: "AWS API error"},
+		},
+	}
+	got, err := applyResultFromPB(pbResult)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got.Actions) != 3 {
+		t.Fatalf("expected 3 actions, got %d", len(got.Actions))
+	}
+	if got.Actions[0].ActionIndex != 0 || got.Actions[0].Status != interfaces.ActionStatusSuccess {
+		t.Errorf("action 0: got %+v, want {0, Success}", got.Actions[0])
+	}
+	if got.Actions[1].Status != interfaces.ActionStatusError || got.Actions[1].Error != "create failed" {
+		t.Errorf("action 1: got %+v, want {1, Error, \"create failed\"}", got.Actions[1])
+	}
+	if got.Actions[2].Status != interfaces.ActionStatusDeleteFailed || got.Actions[2].Error != "AWS API error" {
+		t.Errorf("action 2: got %+v, want {2, DeleteFailed, \"AWS API error\"}", got.Actions[2])
+	}
+}
+
+// TestApplyResultFromPB_RejectsUNSPECIFIED ensures a plugin sending
+// ACTION_STATUS_UNSPECIFIED gets rejected at the decode boundary so
+// wfctl never tries to dispatch a v2 hook on a forgotten-populate
+// outcome. Per ADR 0040 invariant 2: strict cutover, no graceful
+// fallback. Error message MUST mention "UNSPECIFIED" + action_index.
+func TestApplyResultFromPB_RejectsUNSPECIFIED(t *testing.T) {
+	pbResult := &pb.ApplyResult{
+		Actions: []*pb.ActionResult{
+			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_SUCCESS},
+			{ActionIndex: 7, Status: pb.ActionStatus_ACTION_STATUS_UNSPECIFIED},
+		},
+	}
+	_, err := applyResultFromPB(pbResult)
+	if err == nil {
+		t.Fatal("expected error on UNSPECIFIED status, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "UNSPECIFIED") {
+		t.Errorf("error should mention UNSPECIFIED: %v", err)
+	}
+	if !strings.Contains(msg, "7") {
+		t.Errorf("error should mention offending action_index=7: %v", err)
+	}
+}
+
+// TestApplyResultFromPB_EmptyActionsRoundTrip confirms plugins on the
+// v1 capability shim (no Actions emitted) decode cleanly without
+// error. Pins the slice contract explicitly: applyResultFromPB always
+// returns a non-nil empty slice (via make([]T, 0, ...)) to match the
+// sibling Resources/Errors fields' convention. A refactor that returns
+// nil would change downstream nil-check semantics and fails this test.
+func TestApplyResultFromPB_EmptyActionsRoundTrip(t *testing.T) {
+	pbResult := &pb.ApplyResult{PlanId: "plan-empty"}
+	got, err := applyResultFromPB(pbResult)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got.Actions == nil {
+		t.Errorf("expected non-nil empty Actions slice, got nil")
+	}
+	if len(got.Actions) != 0 {
+		t.Errorf("expected 0 actions for empty pb.Actions, got %d: %+v", len(got.Actions), got.Actions)
+	}
+}
+
+// TestApplyResultFromPB_RejectsUnknownStatus exercises the wire-drift
+// defense: a Phase 2.3+ plugin emitting a reserved tag (4 or 5) against
+// an older wfctl must fail loud at decode rather than silently degrade
+// to ActionStatusUnspecified. Per ADR 0040 invariant 2.
+func TestApplyResultFromPB_RejectsUnknownStatus(t *testing.T) {
+	pbResult := &pb.ApplyResult{
+		Actions: []*pb.ActionResult{
+			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_SUCCESS},
+			{ActionIndex: 3, Status: pb.ActionStatus(99)},
+		},
+	}
+	_, err := applyResultFromPB(pbResult)
+	if err == nil {
+		t.Fatal("expected error on unknown ActionStatus, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "unknown ActionStatus=99") {
+		t.Errorf("error should name the wire value: %v", err)
+	}
+	if !strings.Contains(msg, "action_index=3") {
+		t.Errorf("error should name the offending action_index: %v", err)
+	}
+}
+
+// TestMapPBActionStatusToInterface_ActionableValues pins the three
+// actionable tags SUCCESS / ERROR / DELETE_FAILED to their
+// interfaces.ActionStatus mirrors with ok=true.
+func TestMapPBActionStatusToInterface_ActionableValues(t *testing.T) {
+	cases := []struct {
+		name string
+		in   pb.ActionStatus
+		want interfaces.ActionStatus
+	}{
+		{"SUCCESS", pb.ActionStatus_ACTION_STATUS_SUCCESS, interfaces.ActionStatusSuccess},
+		{"ERROR", pb.ActionStatus_ACTION_STATUS_ERROR, interfaces.ActionStatusError},
+		{"DELETE_FAILED", pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, interfaces.ActionStatusDeleteFailed},
+	}
+	for _, c := range cases {
+		got, ok := mapPBActionStatusToInterface(c.in)
+		if !ok {
+			t.Errorf("%s: ok=false, want true", c.name)
+		}
+		if got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestMapPBActionStatusToInterface_UnspecifiedFailsClosed pins the
+// strict-cutover invariant at the mapper itself: UNSPECIFIED is a
+// declared enum tag, but per ADR 0040 invariant 2 it must never
+// translate to a valid Go-side outcome — the mapper returns
+// (Unspecified, false) and the caller surfaces the !ok as an explicit
+// contract-violation error. Discipline lives in the mapper rather
+// than relying on caller-side pre-filtering.
+func TestMapPBActionStatusToInterface_UnspecifiedFailsClosed(t *testing.T) {
+	got, ok := mapPBActionStatusToInterface(pb.ActionStatus_ACTION_STATUS_UNSPECIFIED)
+	if ok {
+		t.Errorf("ok=true for UNSPECIFIED, want false")
+	}
+	if got != interfaces.ActionStatusUnspecified {
+		t.Errorf("UNSPECIFIED mapped to %d, want ActionStatusUnspecified (0)", got)
+	}
+}
+
+// TestMapPBActionStatusToInterface_UnknownValueFailsClosed pins the
+// fail-closed wire-drift defense at the helper level: any tag outside
+// 0-3 returns (Unspecified, false). Per ADR 0040 invariant 2.
+func TestMapPBActionStatusToInterface_UnknownValueFailsClosed(t *testing.T) {
+	got, ok := mapPBActionStatusToInterface(pb.ActionStatus(99))
+	if ok {
+		t.Errorf("ok=true for unknown tag, want false")
+	}
+	if got != interfaces.ActionStatusUnspecified {
+		t.Errorf("unknown tag mapped to %d, want ActionStatusUnspecified (0)", got)
+	}
 }

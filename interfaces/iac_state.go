@@ -141,6 +141,33 @@ type DriftEntry struct {
 	ApplyFingerprint string `json:"apply_fingerprint"`
 }
 
+// ActionStatus categorizes per-action outcomes for wfctl-side hook dispatch.
+// Mirrors pb.ActionStatus (plugin/external/proto/iac.proto) for type-safe Go
+// boundary use; constant tags 0/1/2/3 MUST stay in lockstep with the proto.
+// Per workflow#640 Phase 2 + ADR 0040 invariants 1-2. Tags 4-5 are reserved
+// in the proto for Phase 2.3 compensation (ActionStatusCompensated +
+// ActionStatusCompensationFailed) and intentionally not declared here yet.
+type ActionStatus uint8
+
+const (
+	// ActionStatusUnspecified is the zero-value; T3's applyResultFromPB
+	// REJECTS this on decode so forgotten populates surface as errors
+	// rather than silent SUCCESS misreads.
+	ActionStatusUnspecified ActionStatus = iota
+	ActionStatusSuccess
+	ActionStatusError
+	ActionStatusDeleteFailed
+)
+
+// ActionOutcome mirrors pb.ActionResult. Engine populates one entry per
+// PlanAction in ApplyResult.Actions; wfctl dispatches v2 hooks (Created /
+// Deleted) by matching ActionIndex back to the planned action slice.
+type ActionOutcome struct {
+	ActionIndex uint32       `json:"action_index"`
+	Status      ActionStatus `json:"status"`
+	Error       string       `json:"error,omitempty"`
+}
+
 // ApplyResult summarises the outcome of applying a plan.
 type ApplyResult struct {
 	PlanID    string           `json:"plan_id"`
@@ -177,6 +204,15 @@ type ApplyResult struct {
 	// the replaced resource by name in their config, so JIT substitution
 	// in W-5 translates "name → new ProviderID" via this map.
 	ReplaceIDMap map[string]string `json:"replace_id_map,omitempty"`
+
+	// Actions surfaces per-PlanAction outcomes for v2 hook dispatch in
+	// wfctl. Always populated (one entry per IaCPlan.Actions index) when
+	// an IaC plugin declares ComputePlanVersion="v2" in
+	// CapabilitiesResponse. Per ADR 0024 + ADR 0040, plugins NOT
+	// declaring v2 are permanently incompatible with workflow v0.54.0+;
+	// there is no compat shim. Per workflow#640 Phase 2 + ADR 0040
+	// invariants 1-2.
+	Actions []ActionOutcome `json:"actions,omitempty"`
 }
 
 // DestroyResult summarises the outcome of a destroy operation.

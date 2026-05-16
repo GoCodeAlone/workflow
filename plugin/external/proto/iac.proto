@@ -291,6 +291,28 @@ message ActionError {
   string error = 3;
 }
 
+// ActionStatus categorizes per-action outcomes for wfctl-side hook dispatch.
+// Per workflow#640 Phase 2 + ADR 0040 invariants 1-2. Tags 4+5 reserved
+// for Phase 2.3 ACTION_STATUS_COMPENSATED + ACTION_STATUS_COMPENSATION_FAILED
+// when engine-side compensation lands.
+enum ActionStatus {
+  ACTION_STATUS_UNSPECIFIED = 0;  // wfctl REJECTS this on receipt
+  ACTION_STATUS_SUCCESS = 1;
+  ACTION_STATUS_ERROR = 2;
+  ACTION_STATUS_DELETE_FAILED = 3;
+  reserved 4, 5;  // Phase 2.3 compensation (ACTION_STATUS_COMPENSATED / COMPENSATION_FAILED)
+}
+
+// ActionResult is the per-action outcome surfacing for Phase 2 v2 hooks.
+// Per ADR 0040 invariant 1. output_keys field DROPPED per cycle-2 review
+// (hook firing only needs action_index + status; per-resource outputs
+// already in ApplyResult.resources).
+message ActionResult {
+  uint32 action_index = 1;
+  ActionStatus status = 2;
+  string error = 3;
+}
+
 // ApplyResult mirrors interfaces.ApplyResult.
 message ApplyResult {
   string plan_id = 1;
@@ -299,6 +321,7 @@ message ApplyResult {
   map<string, string> initial_input_snapshot = 4;
   repeated DriftEntry input_drift_report = 5;
   map<string, string> replace_id_map = 6;
+  repeated ActionResult actions = 7;  // NEW Phase 2 (workflow#640)
 }
 
 // DestroyResult mirrors interfaces.DestroyResult.
