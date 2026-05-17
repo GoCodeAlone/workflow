@@ -300,3 +300,171 @@ func TestApplyPlanWithHooks_PopulatesActions_PreDispatchDriverError(t *testing.T
 		t.Errorf("expected 1 result.Errors entry (legacy contract), got %d", len(result.Errors))
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OnPlanComplete tests (workflow#695 Phase 2.5). Per plan task 2 +
+// cycle-1 plan-review C-3 v1 semantic preservation: OnPlanComplete fires
+// ONLY on outer-success exits (apply.go:336), matching the DOProvider.Apply
+// v1 wrapper's "return without flushing on top-level err" behavior at
+// internal/provider.go:276-282. Outer errors at preflight (192),
+// per-action fatalErr (324), and post-loop length-invariant (333) ALL
+// skip finalize.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestApplyPlanWithHooks_OnPlanComplete_FiresOnCleanSuccess verifies that
+// OnPlanComplete fires after a normally-completed apply loop.
+func TestApplyPlanWithHooks_OnPlanComplete_FiresOnCleanSuccess(t *testing.T) {
+	p := newFakeProvider()
+	plan := &interfaces.IaCPlan{
+		ID: "plan-1",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "r1", Type: "infra.test"}},
+		},
+	}
+	var fired bool
+	hooks := ApplyPlanHooks{
+		OnPlanComplete: func(_ context.Context) error {
+			fired = true
+			return nil
+		},
+	}
+	_, err := ApplyPlanWithHooks(t.Context(), p, plan, hooks)
+	if err != nil {
+		t.Fatalf("top-level err: %v", err)
+	}
+	if !fired {
+		t.Error("OnPlanComplete did not fire on clean success")
+	}
+}
+
+// TestApplyPlanWithHooks_OnPlanComplete_FiresOnEmptyPlan verifies that
+// OnPlanComplete fires even when plan.Actions is empty — loopReached is
+// set BEFORE the for-loop opens so a zero-iteration plan still finalizes.
+// Regression guard: the v1 DOProvider.Apply wrapper flushes stale-queued
+// state even for empty plans (no per-action work needed); the v2 hook
+// must preserve that semantic.
+func TestApplyPlanWithHooks_OnPlanComplete_FiresOnEmptyPlan(t *testing.T) {
+	p := newFakeProvider()
+	plan := &interfaces.IaCPlan{ID: "plan-empty", Actions: nil}
+	var fired bool
+	hooks := ApplyPlanHooks{OnPlanComplete: func(_ context.Context) error {
+		fired = true
+		return nil
+	}}
+	_, err := ApplyPlanWithHooks(t.Context(), p, plan, hooks)
+	if err != nil {
+		t.Fatalf("top-level err: %v", err)
+	}
+	if !fired {
+		t.Error("OnPlanComplete did not fire on empty plan (regression: v1 wrapper flushes stale-queued state even for empty plans)")
+	}
+}
+
+// TestApplyPlanWithHooks_OnPlanComplete_SurfacesErrorToCaller verifies that
+// a finalize-side hook error surfaces to the caller (outer err wraps the
+// sentinel) AND appends an ActionError with Resource="<plan-finalize>" to
+// result.Errors so per-driver attribution is preserved alongside the
+// finalize-attributed failure.
+func TestApplyPlanWithHooks_OnPlanComplete_SurfacesErrorToCaller(t *testing.T) {
+	p := newFakeProvider()
+	plan := &interfaces.IaCPlan{
+		ID: "plan-2",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "r1", Type: "infra.test"}},
+		},
+	}
+	sentinel := errors.New("plugin finalize failed")
+	hooks := ApplyPlanHooks{OnPlanComplete: func(_ context.Context) error { return sentinel }}
+	result, err := ApplyPlanWithHooks(t.Context(), p, plan, hooks)
+	if err == nil {
+		t.Fatal("expected finalize error to surface to caller")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected outer err to wrap sentinel; got: %v", err)
+	}
+	if len(result.Errors) == 0 || result.Errors[len(result.Errors)-1].Resource != "<plan-finalize>" {
+		t.Errorf("expected last result.Errors entry to have Resource=\"<plan-finalize>\"; got: %+v", result.Errors)
+	}
+	if last := result.Errors[len(result.Errors)-1]; last.Action != "finalize" {
+		t.Errorf("expected last result.Errors entry to have Action=\"finalize\"; got: %q", last.Action)
+	}
+}
+
+// TestApplyPlanWithHooks_OnPlanComplete_SkippedOnOuterError verifies the v1
+// semantic-preservation gate (cycle-1 plan-review C-3): when a per-action
+// hook returns an error, fatalErr bubbles to outer return at apply.go:324
+// with non-nil err. OnPlanComplete MUST NOT fire on that exit, matching
+// DOProvider.Apply's "return without flushing on top-level err" behavior
+// at internal/provider.go:276-282.
+func TestApplyPlanWithHooks_OnPlanComplete_SkippedOnOuterError(t *testing.T) {
+	p := newFakeProvider()
+	plan := &interfaces.IaCPlan{
+		ID: "plan-fatal",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "r1", Type: "infra.test"}},
+		},
+	}
+	hookSentinel := errors.New("post-apply hook failure")
+	var finalizeFired bool
+	hooks := ApplyPlanHooks{
+		// OnResourceApplied returning err sets fatalErr → outer err != nil
+		// (apply.go:308-314 → 319-324). True outer-error path.
+		OnResourceApplied: func(_ context.Context, _ interfaces.ResourceDriver, _ interfaces.PlanAction, _ interfaces.ResourceOutput) error {
+			return hookSentinel
+		},
+		OnPlanComplete: func(_ context.Context) error {
+			finalizeFired = true
+			return nil
+		},
+	}
+	_, err := ApplyPlanWithHooks(t.Context(), p, plan, hooks)
+	if err == nil {
+		t.Fatal("expected outer err from per-action hook fatalErr path")
+	}
+	if !errors.Is(err, hookSentinel) {
+		t.Errorf("expected outer err to wrap hookSentinel; got: %v", err)
+	}
+	if finalizeFired {
+		t.Error("OnPlanComplete fired on outer-error exit — v1 semantic preservation (C-3) violated")
+	}
+}
+
+// TestApplyPlanWithHooks_OnPlanComplete_DoesNotFireOnPreloopError verifies
+// that pre-loop preflight failures (apply.go:192) skip OnPlanComplete —
+// loopReached is still false when preflight returns early, so the deferred
+// closure's first short-circuit triggers and finalize never runs.
+// Regression guard: no cloud work happened, so no finalize work should
+// happen either.
+func TestApplyPlanWithHooks_OnPlanComplete_DoesNotFireOnPreloopError(t *testing.T) {
+	// fakeReplacerDriver implements interfaces.ResourceReplacer (defined in
+	// apply_replacer_dispatch_test.go); combined with deleteHookActive
+	// (OnResourceDeleted set), preflightProviderOwnedReplaceWithDeleteHooks
+	// returns the engine-side rejection error at apply.go:367.
+	provider := &hookProvider{driver: &fakeReplacerDriver{}}
+	plan := &interfaces.IaCPlan{
+		ID: "plan-preflight-fail",
+		Actions: []interfaces.PlanAction{{
+			Action:   "replace",
+			Resource: interfaces.ResourceSpec{Name: "r1", Type: "infra.test"},
+			Current:  &interfaces.ResourceState{Name: "r1", Type: "infra.test", ProviderID: "old-id"},
+		}},
+	}
+	var finalizeFired bool
+	hooks := ApplyPlanHooks{
+		OnResourceDeleted: func(_ context.Context, _ interfaces.PlanAction) error { return nil },
+		OnPlanComplete: func(_ context.Context) error {
+			finalizeFired = true
+			return nil
+		},
+	}
+	_, err := ApplyPlanWithHooks(t.Context(), provider, plan, hooks)
+	if err == nil {
+		t.Fatal("expected preflight error (replace + delete-hook active + ResourceReplacer driver)")
+	}
+	if !strings.Contains(err.Error(), "driver-owned ResourceReplacer is disabled") {
+		t.Errorf("expected preflight rejection error; got: %v", err)
+	}
+	if finalizeFired {
+		t.Error("OnPlanComplete fired on pre-loop preflight error — should not fire when loopReached=false")
+	}
+}

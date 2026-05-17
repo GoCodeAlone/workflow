@@ -110,6 +110,31 @@ func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.I
 type ApplyPlanHooks struct {
 	OnResourceApplied func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error
 	OnResourceDeleted func(context.Context, interfaces.PlanAction) error
+	// OnPlanComplete fires once after the per-action loop reaches its
+	// natural success completion (apply.go:336), i.e., when the outer
+	// function is about to return (result, nil). Used by the DO plugin's
+	// deferred-flush integration via IaCProviderFinalizer.FinalizeApply RPC.
+	//
+	// Does NOT fire on:
+	//   - Pre-loop preflight error early-return (apply.go:192) —
+	//     loopReached=false, no cloud work happened.
+	//   - Per-action hook fatalErr bubbling to outer return
+	//     (apply.go:319-324) — outer err != nil. v1 semantic preservation
+	//     per cycle-1 plan-review C-3: DOProvider.Apply skips deferred-
+	//     flush when wfctlhelpers.ApplyPlan returns a top-level err
+	//     (internal/provider.go:276-282).
+	//   - Post-loop length-invariant violation (apply.go:333) —
+	//     outer err != nil.
+	//
+	// DOES fire on per-action driver-error paths (best-effort; driver
+	// errors append to result.Errors but do NOT set fatalErr; the loop
+	// continues and reaches the success exit at 336). Mirrors v1
+	// DOProvider.Apply behavior where the deferred-flush ran whenever
+	// the wrapped Apply returned nil err, regardless of per-action
+	// result.Errors entries.
+	//
+	// Per workflow#695 Phase 2.5 / ADR 0024 / ADR 0040.
+	OnPlanComplete func(context.Context) error
 }
 
 // ApplyPlanWithHooks is ApplyPlan plus action-boundary hooks for callers that
@@ -140,10 +165,46 @@ func applyPlanWithEnvProviderAndHooks(
 	plan *interfaces.IaCPlan,
 	applyTimeEnv func(string) (string, bool),
 	hooks ApplyPlanHooks,
-) (*interfaces.ApplyResult, error) {
+) (result *interfaces.ApplyResult, err error) {
+	// loopReached is set to true immediately before the per-action loop
+	// opens (below). The deferred OnPlanComplete closure short-circuits
+	// when loopReached=false so pre-loop preflight failures skip finalize
+	// (no cloud work happened). On loop-reached exits, the closure
+	// additionally gates on err == nil per cycle-1 plan-review C-3 v1
+	// semantic preservation — see the ApplyPlanHooks.OnPlanComplete
+	// godoc above.
+	var loopReached bool
+	defer func() {
+		if !loopReached || hooks.OnPlanComplete == nil {
+			return
+		}
+		if err != nil {
+			// v1 semantic preservation: outer-error exits (per-action
+			// hook fatalErr at apply.go:319-324, post-loop length-
+			// invariant at 333) skip finalize, matching DOProvider.Apply's
+			// "return without flushing on top-level err" at
+			// internal/provider.go:276-282.
+			return
+		}
+		if hookErr := hooks.OnPlanComplete(ctx); hookErr != nil {
+			// Append to result.Errors so callers see per-driver
+			// attribution alongside the finalize-attributed failure.
+			// Surface to outer err so the caller observes the failure
+			// at the function boundary (outer err was nil; finalize
+			// failure now becomes the outer err).
+			finalizeErr := fmt.Errorf("plan finalize: %w", hookErr)
+			result.Errors = append(result.Errors, interfaces.ActionError{
+				Resource: "<plan-finalize>",
+				Action:   "finalize",
+				Error:    finalizeErr.Error(),
+			})
+			err = finalizeErr
+		}
+	}()
+
 	deleteHookActive := hooks.OnResourceDeleted != nil
 	inputNames := snapshotKeys(plan.InputSnapshot)
-	result := &interfaces.ApplyResult{
+	result = &interfaces.ApplyResult{
 		PlanID:               plan.ID,
 		InitialInputSnapshot: inputsnapshot.Snapshot(inputNames, inputsnapshot.OSEnvProvider),
 	}
@@ -192,6 +253,14 @@ func applyPlanWithEnvProviderAndHooks(
 			return result, err
 		}
 	}
+
+	// loopReached gates the deferred OnPlanComplete invocation. Set
+	// BEFORE the loop opens so a zero-iteration (empty Actions) plan
+	// still triggers finalize — matches v1 DOProvider.Apply behavior
+	// where the deferred-flush fires regardless of plan length (stale
+	// queued state from prior runs is flushed even when the current
+	// plan has no actions).
+	loopReached = true
 
 	for i := range plan.Actions {
 		action := plan.Actions[i]
