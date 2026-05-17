@@ -40,7 +40,6 @@ const (
 	IaCProviderRequired_Version_FullMethodName               = "/workflow.plugin.external.iac.IaCProviderRequired/Version"
 	IaCProviderRequired_Capabilities_FullMethodName          = "/workflow.plugin.external.iac.IaCProviderRequired/Capabilities"
 	IaCProviderRequired_Plan_FullMethodName                  = "/workflow.plugin.external.iac.IaCProviderRequired/Plan"
-	IaCProviderRequired_Apply_FullMethodName                 = "/workflow.plugin.external.iac.IaCProviderRequired/Apply"
 	IaCProviderRequired_Destroy_FullMethodName               = "/workflow.plugin.external.iac.IaCProviderRequired/Destroy"
 	IaCProviderRequired_Status_FullMethodName                = "/workflow.plugin.external.iac.IaCProviderRequired/Status"
 	IaCProviderRequired_Import_FullMethodName                = "/workflow.plugin.external.iac.IaCProviderRequired/Import"
@@ -62,7 +61,6 @@ type IaCProviderRequiredClient interface {
 	Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error)
 	Capabilities(ctx context.Context, in *CapabilitiesRequest, opts ...grpc.CallOption) (*CapabilitiesResponse, error)
 	Plan(ctx context.Context, in *PlanRequest, opts ...grpc.CallOption) (*PlanResponse, error)
-	Apply(ctx context.Context, in *ApplyRequest, opts ...grpc.CallOption) (*ApplyResponse, error)
 	Destroy(ctx context.Context, in *DestroyRequest, opts ...grpc.CallOption) (*DestroyResponse, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	Import(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportResponse, error)
@@ -122,16 +120,6 @@ func (c *iaCProviderRequiredClient) Plan(ctx context.Context, in *PlanRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PlanResponse)
 	err := c.cc.Invoke(ctx, IaCProviderRequired_Plan_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *iaCProviderRequiredClient) Apply(ctx context.Context, in *ApplyRequest, opts ...grpc.CallOption) (*ApplyResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ApplyResponse)
-	err := c.cc.Invoke(ctx, IaCProviderRequired_Apply_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +190,6 @@ type IaCProviderRequiredServer interface {
 	Version(context.Context, *VersionRequest) (*VersionResponse, error)
 	Capabilities(context.Context, *CapabilitiesRequest) (*CapabilitiesResponse, error)
 	Plan(context.Context, *PlanRequest) (*PlanResponse, error)
-	Apply(context.Context, *ApplyRequest) (*ApplyResponse, error)
 	Destroy(context.Context, *DestroyRequest) (*DestroyResponse, error)
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Import(context.Context, *ImportRequest) (*ImportResponse, error)
@@ -232,9 +219,6 @@ func (UnimplementedIaCProviderRequiredServer) Capabilities(context.Context, *Cap
 }
 func (UnimplementedIaCProviderRequiredServer) Plan(context.Context, *PlanRequest) (*PlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Plan not implemented")
-}
-func (UnimplementedIaCProviderRequiredServer) Apply(context.Context, *ApplyRequest) (*ApplyResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Apply not implemented")
 }
 func (UnimplementedIaCProviderRequiredServer) Destroy(context.Context, *DestroyRequest) (*DestroyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Destroy not implemented")
@@ -362,24 +346,6 @@ func _IaCProviderRequired_Plan_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IaCProviderRequired_Apply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ApplyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IaCProviderRequiredServer).Apply(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IaCProviderRequired_Apply_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IaCProviderRequiredServer).Apply(ctx, req.(*ApplyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _IaCProviderRequired_Destroy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DestroyRequest)
 	if err := dec(in); err != nil {
@@ -496,10 +462,6 @@ var IaCProviderRequired_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Plan",
 			Handler:    _IaCProviderRequired_Plan_Handler,
-		},
-		{
-			MethodName: "Apply",
-			Handler:    _IaCProviderRequired_Apply_Handler,
 		},
 		{
 			MethodName: "Destroy",

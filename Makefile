@@ -40,9 +40,17 @@ bench-compare:
 	go test $(BENCH_FLAGS) -count=6 ./... | tee current-bench.txt
 	benchstat baseline-bench.txt current-bench.txt
 
-# Run golangci-lint
+# Run golangci-lint + workflow#699 proto guard (re-introduction of rpc
+# Apply on the IaCProviderRequired service is a regression — guarded by
+# CI so a future PR can't silently restore the deleted dispatch path).
 lint:
 	golangci-lint run --timeout=5m
+	@if grep -qE '^\s*rpc Apply\s*\(' plugin/external/proto/iac.proto; then \
+		echo "workflow#699: rpc Apply re-introduced in iac.proto; see decisions/0024-iac-typed-force-cutover.md"; \
+		exit 1; \
+	else \
+		echo "workflow#699 guard: rpc Apply correctly absent"; \
+	fi
 
 # Format code
 fmt:
