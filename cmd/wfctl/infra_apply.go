@@ -19,6 +19,7 @@ import (
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
@@ -469,7 +470,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// call site (per dispatch.go contract).
 	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
 		usedV2Dispatch = true
-		hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, hydratedOut)
+		hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
 		result, err = applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
 		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
 		// v2 dispatch is the production caller that surfaces input
@@ -594,6 +595,7 @@ func statePersistenceHooks(
 	secretsProvider secrets.Provider,
 	provider interfaces.IaCProvider,
 	providerType string,
+	planID string,
 	hydratedOut map[string]string,
 ) wfctlhelpers.ApplyPlanHooks {
 	return wfctlhelpers.ApplyPlanHooks{
@@ -612,6 +614,51 @@ func statePersistenceHooks(
 		},
 		OnResourceDeleted: func(ctx context.Context, action interfaces.PlanAction) error {
 			return deleteStateAfterCloudDelete(store, action.Resource.Name)
+		},
+		// OnPlanComplete is the workflow#695 Phase 2.5 hook that bridges
+		// the v2 apply path to the plugin's optional IaCProviderFinalizer
+		// service. Fires exactly once on the natural success-exit return
+		// of applyPlanWithEnvProviderAndHooks (v1 semantic preservation
+		// per cycle-1 plan-review C-3 — see ApplyPlanHooks.OnPlanComplete
+		// godoc for fire/no-fire enumeration).
+		//
+		// No-op paths (preserve pre-Phase-2.5 behavior):
+		//   - provider is not a *typedIaCAdapter (in-process fakes,
+		//     legacy provider shapes): no Finalizer() accessor available;
+		//     skip silently.
+		//   - adapter.Finalizer() returns nil (plugin did not register
+		//     IaCProviderFinalizer per ADR 0024): skip silently. Plugins
+		//     opt in via service registration; absence = no firing.
+		//
+		// Fire path: invoke FinalizeApply RPC; on gRPC transport error
+		// surface wrapped; on per-driver errors in response, aggregate
+		// the per-driver attribution into a single err message that
+		// preserves the Resource/Action/Error shape from the v1 wrapper
+		// (per ADR 0040 invariant on per-driver attribution). The engine
+		// closure in apply.go's deferred OnPlanComplete handler appends
+		// the returned err to result.Errors as the "<plan-finalize>"
+		// entry and surfaces wrapped to outer caller err.
+		OnPlanComplete: func(ctx context.Context) error {
+			adapter, ok := provider.(*typedIaCAdapter)
+			if !ok {
+				return nil
+			}
+			fin := adapter.Finalizer()
+			if fin == nil {
+				return nil
+			}
+			resp, callErr := fin.FinalizeApply(ctx, &pb.FinalizeApplyRequest{PlanId: planID})
+			if callErr != nil {
+				return fmt.Errorf("FinalizeApply gRPC: %w", callErr)
+			}
+			if len(resp.GetErrors()) > 0 {
+				msgs := make([]string, 0, len(resp.GetErrors()))
+				for _, e := range resp.GetErrors() {
+					msgs = append(msgs, fmt.Sprintf("%s/%s: %s", e.GetResource(), e.GetAction(), e.GetError()))
+				}
+				return fmt.Errorf("plugin finalize: %d driver(s) failed: %s", len(resp.GetErrors()), strings.Join(msgs, "; "))
+			}
+			return nil
 		},
 	}
 }
@@ -1606,7 +1653,7 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	var usedV2Dispatch bool
 	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
 		usedV2Dispatch = true
-		hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, hydratedOut)
+		hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
 		result, err = applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
 		if result != nil {
 			printDriftReportIfAny(w, result)
