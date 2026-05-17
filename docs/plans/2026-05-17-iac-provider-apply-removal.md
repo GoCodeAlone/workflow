@@ -40,7 +40,7 @@
 | 9 | workflow-plugin-gcp: final v2.0.0 + registry manifest | Task 32, Task 33, Task 34 | feat/699-final |
 | 10 | workflow-plugin-azure: final v2.0.0 + registry manifest | Task 35, Task 36 | feat/699-final |
 
-**Status:** Draft
+**Status:** Locked 2026-05-17T18:32:19Z
 
 ---
 
