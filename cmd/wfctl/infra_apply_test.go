@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/sensitive"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -38,12 +39,111 @@ func (f *applyCapture) Plan(_ context.Context, desired []interfaces.ResourceSpec
 	f.planSpecs = append(f.planSpecs, desired...)
 	return nil, nil
 }
+
+// Apply is no longer on the interfaces.IaCProvider surface (workflow#699
+// removed it); kept as a concrete method so tests' applyCapture-based
+// assertions (applyCalled / appliedPlan) survive. installAsV2Dispatch
+// wires the method into the global v2 dispatch seam — call it at the
+// top of every test that depends on the pre-v2 applyCalled semantics.
 func (f *applyCapture) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.applyCalled = true
 	f.appliedPlan = plan
 	return &interfaces.ApplyResult{}, nil
+}
+
+// installAsV2Dispatch substitutes the global applyV2ApplyPlanWithHooksFn
+// seam so the test's call to applyInfraModules / applyWithProviderAndStore /
+// applyPrecomputedPlanWithStore routes through this stub's Apply method
+// instead of the real wfctlhelpers.ApplyPlanWithHooks (which would
+// dispatch per-action via ResourceDriver, a layer most v1-era tests don't
+// stub). Also fires the appropriate OnResourceApplied / OnResourceDeleted
+// hooks for each plan action so state-persistence assertions still pass
+// without the per-action driver layer. Auto-restored on test cleanup.
+// Per workflow#699 fixup.
+func (f *applyCapture) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := f.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, p, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
+}
+
+// fireSyntheticHooks invokes the v2 ApplyPlanHooks lifecycle for each
+// plan action based on the recorded ApplyResult — bridging the
+// per-action hook semantics of the production wfctlhelpers.ApplyPlanWithHooks
+// path with the all-at-once shape of the test stub's Apply method.
+// Successful per-resource entries in result.Resources fire
+// OnResourceApplied (matching by name); delete actions absent from
+// result.Errors fire OnResourceDeleted. OnPlanComplete fires once at
+// the end. Returns the first non-nil error from the hooks so callers
+// can surface state-persistence failures the way the production helper
+// does.
+func fireSyntheticHooks(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks, result *interfaces.ApplyResult) error {
+	// Build a per-name error index so we don't fire successful-path
+	// hooks for actions that errored.
+	errored := map[string]bool{}
+	if result != nil {
+		for _, e := range result.Errors {
+			errored[e.Resource] = true
+		}
+	}
+	for i := range plan.Actions {
+		action := plan.Actions[i]
+		if errored[action.Resource.Name] {
+			continue
+		}
+		switch action.Action {
+		case "create", "update", "replace":
+			if hooks.OnResourceApplied == nil {
+				continue
+			}
+			// Only fire OnResourceApplied for actions whose output is
+			// explicitly listed in result.Resources. The v1 contract
+			// was that an empty result.Resources meant "nothing
+			// persisted by the driver"; mirroring it here keeps the
+			// v1-era tests' single-save assertions intact while the
+			// real v2 production path persists via the same hook on
+			// real driver outputs.
+			var out interfaces.ResourceOutput
+			var matched bool
+			if result != nil {
+				for _, r := range result.Resources {
+					if r.Name == action.Resource.Name {
+						out = r
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				continue
+			}
+			driver, _ := p.ResourceDriver(action.Resource.Type)
+			if err := hooks.OnResourceApplied(ctx, driver, action, out); err != nil {
+				return err
+			}
+		case "delete":
+			if hooks.OnResourceDeleted == nil {
+				continue
+			}
+			if err := hooks.OnResourceDeleted(ctx, action); err != nil {
+				return err
+			}
+		}
+	}
+	if hooks.OnPlanComplete != nil {
+		if err := hooks.OnPlanComplete(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (f *applyCapture) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
 	return nil, nil
@@ -198,6 +298,25 @@ func (p *readBackedFailingApplyProvider) Apply(_ context.Context, plan *interfac
 	return nil, p.applyErr
 }
 
+// installAsV2Dispatch shadows applyCapture's promoted method so the
+// failing-apply variant's Apply (which returns p.applyErr) is the one
+// the v2 seam invokes. Promotion would otherwise capture
+// applyCapture.Apply, which returns a clean ApplyResult and never
+// surfaces applyErr. Fires synthetic v2 hooks for state-persistence
+// assertions.
+func (p *readBackedFailingApplyProvider) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := p.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
+}
+
 type noDriverApplyProvider struct {
 	applyCapture
 }
@@ -242,6 +361,7 @@ modules:
 	}
 
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	orig := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 		if providerType != "fake-cloud" {
@@ -258,9 +378,9 @@ modules:
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 
-	// Apply must have been called.
+	// Dispatch (v2 seam) must have been called.
 	if !fake.applyCalled {
-		t.Fatal("provider.Apply was not called")
+		t.Fatal("v2 dispatch was not called")
 	}
 
 	// Plan must contain exactly 2 create actions (no current state → all creates).
@@ -550,6 +670,7 @@ modules:
 	}
 
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	orig := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 		if providerType != "fake-cloud" {
@@ -711,6 +832,7 @@ func TestApplyWithProvider_NoChanges(t *testing.T) {
 	}}
 
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", []interfaces.ResourceSpec{spec}, current, nil, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
@@ -751,6 +873,7 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
@@ -831,6 +954,7 @@ func TestApplyWithProvider_AdoptionRoutesNewSensitiveOutputs(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 	cfgPath := filepath.Join(t.TempDir(), "workflow.yaml")
 	if err := os.WriteFile(cfgPath, []byte("secrets:\n  provider: env\n"), 0o600); err != nil {
@@ -882,6 +1006,7 @@ func TestAdoptExistingResources_AdoptionRoutingSaveFailureCleansSecretsOnly(t *t
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{saveErr: errors.New("state unavailable")}
 	secretsProvider := newEnvTestProvider()
 
@@ -929,6 +1054,7 @@ func TestApplyWithProvider_DNSAdoptionFailedUpdateKeepsLiveAppliedConfig(t *test
 		readBackedProvider: readBackedProvider{driver: driver},
 		applyErr:           errors.New("provider update failed"),
 	}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
@@ -969,6 +1095,7 @@ func TestApplyWithProvider_DNSAdoptionFallsBackToNameWhenDomainOmitted(t *testin
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
 	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
@@ -997,6 +1124,7 @@ func TestApplyWithProvider_DNSAdoptionSaveFailureFailsBeforeApply(t *testing.T) 
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{saveErr: errors.New("disk full")}
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
@@ -1030,6 +1158,7 @@ func TestApplyWithProvider_DNSAdoptionRequiresWritableStateStore(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "", "", nil)
 	if err == nil {
@@ -1062,6 +1191,7 @@ func TestApplyWithProvider_AdoptsResourceThroughDriverLocator(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
@@ -1115,6 +1245,7 @@ func TestApplyWithProvider_AdoptsResourceWhenConfigAdoptExistingTrue(t *testing.
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
@@ -1149,6 +1280,7 @@ func TestApplyWithProvider_ConfigAdoptionRejectsUnsupportedDriver(t *testing.T) 
 	}
 	driver := &configAdoptDriver{}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
 	if err == nil {
@@ -1207,6 +1339,7 @@ func TestApplyWithProvider_DNSAdoptionPreservesBuiltInRefWithAdoptExisting(t *te
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
 	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
@@ -1226,6 +1359,7 @@ func TestApplyWithProvider_SkipsAdoptionWhenAppDriverHasNoLocator(t *testing.T) 
 		Config: map[string]any{"image": "example/app:latest"},
 	}
 	provider := &noDriverApplyProvider{}
+	provider.installAsV2Dispatch(t)
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
 	if err != nil {
@@ -1234,7 +1368,7 @@ func TestApplyWithProvider_SkipsAdoptionWhenAppDriverHasNoLocator(t *testing.T) 
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 	if !provider.applyCalled {
-		t.Fatal("Apply should be called for normal create when app driver lacks adoption locator")
+		t.Fatal("v2 dispatch should be invoked for normal create when app driver lacks adoption locator")
 	}
 	if provider.appliedPlan == nil || len(provider.appliedPlan.Actions) != 1 || provider.appliedPlan.Actions[0].Action != "create" {
 		t.Fatalf("applied plan = %#v, want one create", provider.appliedPlan)
@@ -1258,6 +1392,7 @@ func TestApplyWithProvider_DNSAdoptionRejectsMalformedProviderID(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
@@ -1288,6 +1423,7 @@ func TestApplyWithProvider_DNSReadNotFoundKeepsCreateBehavior(t *testing.T) {
 	}
 	driver := &readDriver{readErr: interfaces.ErrResourceNotFound}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
@@ -1318,6 +1454,7 @@ func TestApplyWithProvider_DNSReadErrorFailsBeforeApply(t *testing.T) {
 	}
 	driver := &readDriver{readErr: errors.New("provider API unavailable")}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "", "", nil)
 	if err == nil {
@@ -1341,6 +1478,7 @@ func TestApplyWithProvider_DNSReadNilLiveOutputFailsBeforeApply(t *testing.T) {
 	}
 	driver := &readDriver{}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
 	if err == nil {
@@ -1370,6 +1508,7 @@ func TestApplyWithProvider_DNSReadEmptyProviderIDFailsBeforeApply(t *testing.T) 
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
@@ -1409,6 +1548,7 @@ func TestApplyWithProvider_DeletesRemovedResource(t *testing.T) {
 	}
 
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", specs, current, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
@@ -1465,8 +1605,31 @@ func (p *stateReturningProvider) Capabilities() []interfaces.IaCCapabilityDeclar
 func (p *stateReturningProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
 	return nil, nil
 }
+
+// Apply is no longer on the interfaces.IaCProvider surface (workflow#699
+// removed it); kept as a concrete method so tests can preset applyResult /
+// applyErr and observe the dispatch outcome. installAsV2Dispatch wires
+// this concrete method into the global v2 dispatch seam.
 func (p *stateReturningProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
 	return p.applyResult, p.applyErr
+}
+
+// installAsV2Dispatch substitutes the global applyV2ApplyPlanWithHooksFn
+// seam so tests that preset applyResult / applyErr observe the dispatch
+// outcome without crossing into the per-driver layer. Also fires the v2
+// ApplyPlanHooks lifecycle so state-persistence assertions still pass.
+// Auto-restored on test cleanup. Per workflow#699 fixup.
+func (p *stateReturningProvider) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := p.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
 }
 func (p *stateReturningProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
 	return nil, nil
@@ -1525,6 +1688,7 @@ func TestApplyWithProvider_SavesStateForSuccessfulResources(t *testing.T) {
 			},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil); err != nil {
@@ -1581,6 +1745,7 @@ func TestApplyWithProvider_SavesStateOnPartialFailure(t *testing.T) {
 			},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
@@ -1607,6 +1772,7 @@ func TestApplyWithProvider_StoreSaveFailureFails(t *testing.T) {
 			Resources: []interfaces.ResourceOutput{{Name: "r1", ProviderID: "vpc-1"}},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{saveErr: fmt.Errorf("disk full")}
 
 	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
@@ -1740,6 +1906,7 @@ func TestApplyWithProvider_UpdateSensitiveRoutingFailureDoesNotDelete(t *testing
 		},
 		driver: driver,
 	}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
 	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: desiredCfg}}
 
@@ -1763,6 +1930,7 @@ func TestApplyWithProvider_FailedDeleteKeepsState(t *testing.T) {
 			Errors: []interfaces.ActionError{{Action: "delete", Resource: "old", Error: "delete failed"}},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 
 	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", nil, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil); err == nil {
 		t.Fatal("expected delete failure, got nil")
@@ -1774,33 +1942,14 @@ func TestApplyWithProvider_FailedDeleteKeepsState(t *testing.T) {
 	}
 }
 
-func TestApplyWithProvider_PartialFailureDoesNotInferDeleteSuccess(t *testing.T) {
-	desired := interfaces.ResourceSpec{Name: "new", Type: "infra.test", Config: map[string]any{"version": 1}}
-	current := interfaces.ResourceState{Name: "old", Type: "infra.test", ProviderID: "id-old"}
-	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
-	origCompute := computeInfraPlan
-	computeInfraPlan = func(context.Context, interfaces.IaCProvider, []interfaces.ResourceSpec, []interfaces.ResourceState) (interfaces.IaCPlan, error) {
-		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{
-			{Action: "create", Resource: desired},
-			{Action: "delete", Resource: interfaces.ResourceSpec{Name: "old", Type: "infra.test"}, Current: &current},
-		}}, nil
-	}
-	t.Cleanup(func() { computeInfraPlan = origCompute })
-	fake := &stateReturningProvider{
-		applyResult: &interfaces.ApplyResult{
-			Errors: []interfaces.ActionError{{Action: "create", Resource: "new", Error: "create failed before delete"}},
-		},
-	}
-
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", []interfaces.ResourceSpec{desired}, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil); err == nil {
-		t.Fatal("expected partial failure, got nil")
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if len(store.deleted) != 0 {
-		t.Fatalf("deleted state entries = %v, want none when legacy result has errors", store.deleted)
-	}
-}
+// TestApplyWithProvider_PartialFailureDoesNotInferDeleteSuccess was
+// deleted per workflow#699. The test pinned the v1 conservative
+// "any error → no delete-state cleanup" short-circuit
+// (successfulDeleteNames returning empty when result.Errors was
+// non-empty). Post-v2 the dispatch fires per-action OnResourceDeleted
+// hooks independently of other actions' outcomes; the v2 equivalent
+// (TestApplyWithProviderAndStore_V2FailedDeleteKeepsState) asserts the
+// correct per-action behavior.
 
 func TestApplyWithProvider_CreateMissingIdentitySaveFailureCompensates(t *testing.T) {
 	driver := &v2SensitiveCreateDriver{}
@@ -1899,6 +2048,7 @@ func TestApplyWithProvider_DeletePrunesStateAfterCancellation(t *testing.T) {
 		stateReturningProvider: stateReturningProvider{applyResult: &interfaces.ApplyResult{}},
 		cancel:                 cancel,
 	}
+	fake.installAsV2Dispatch(t)
 
 	if err := applyWithProviderAndStore(ctx, fake, "fake-cloud", nil, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
@@ -2003,6 +2153,22 @@ func (s *sizingCapture) Apply(_ context.Context, plan *interfaces.IaCPlan) (*int
 	return &interfaces.ApplyResult{}, nil
 }
 
+// installAsV2Dispatch shadows applyCapture's promoted method so the
+// sizing-specific Apply (which records appliedSpecs) is the one the v2
+// seam invokes.
+func (s *sizingCapture) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := s.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
+}
+
 // TestApplyInfraModules_CallsResolveSizing_ForEachSpec verifies that
 // applyWithProviderAndStore invokes provider.ResolveSizing for each spec
 // that has a non-empty Size field, and that the resolved InstanceType and
@@ -2020,6 +2186,7 @@ func TestApplyInfraModules_CallsResolveSizing_ForEachSpec(t *testing.T) {
 			Specs:        map[string]any{"memory_mb": 2048},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 
 	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, nil, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
@@ -2125,6 +2292,7 @@ modules:
 	// Override resolveIaCProvider to return a provider + error-producing closer.
 	orig := resolveIaCProvider
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	closerErr := "shutdown-sentinel-error"
 	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 		return fake, &errCloser{msg: closerErr}, nil
@@ -2183,6 +2351,7 @@ func TestApply_StateRecordsAppliedConfigSourceApply(t *testing.T) {
 			},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	if err := applyWithProviderAndStore(t.Context(), fake, "test", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
@@ -2218,6 +2387,7 @@ func TestAdoption_StateRecordsAppliedConfigSourceAdoption(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
 	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {

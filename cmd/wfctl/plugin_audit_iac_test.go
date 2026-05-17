@@ -26,7 +26,6 @@ func TestAuditPluginStrictContracts_IaCServiceMethodsAreNotRequired(t *testing.T
     "serviceMethods": [
       "IaCProvider.Initialize",
       "IaCProvider.Plan",
-      "IaCProvider.Apply",
       "IaCProvider.EnumerateAll",
       "ResourceDriver.Create",
       "ResourceDriver.Read"
@@ -98,10 +97,12 @@ func TestAuditPluginStrictContracts_NonIaCServiceMethodsStillRequire(t *testing.
 // methods added in iac.proto should be covered by this matcher.
 func TestIsIaCServiceMethod_Cases(t *testing.T) {
 	cases := map[string]bool{
-		// IaCProvider methods (legacy InvokeService dispatch shape).
+		// IaCProvider methods (legacy InvokeService dispatch shape;
+		// "IaCProvider.Apply" was retired per workflow#699 — no
+		// post-cutover plugin can advertise it, so the classifier no
+		// longer tests it explicitly).
 		"IaCProvider.Initialize":           true,
 		"IaCProvider.Plan":                 true,
-		"IaCProvider.Apply":                true,
 		"IaCProvider.EnumerateAll":         true,
 		"IaCProvider.RepairDirtyMigration": true,
 		// ResourceDriver methods (legacy InvokeService dispatch shape).

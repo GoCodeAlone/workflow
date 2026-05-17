@@ -127,6 +127,13 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	if rv := reflect.ValueOf(provider); rv.Kind() == reflect.Pointer && rv.IsNil() {
 		return fmt.Errorf("RegisterAllIaCProviderServices: provider is a typed-nil %T pointer", provider)
 	}
+	// Per workflow#699 (Task 5): pb.IaCProviderRequiredServer no longer
+	// declares Apply, so this type-assertion auto-tightens to the trimmed
+	// required surface. Plugins that retain a Go-level Apply method still
+	// satisfy the interface (extra methods are permitted); plugins missing
+	// any of the still-required methods (Initialize/Name/Version/
+	// Capabilities/Plan/Destroy/Status/Import/ResolveSizing/
+	// BootstrapStateBackend) fail-loud here as before.
 	required, ok := provider.(pb.IaCProviderRequiredServer)
 	if !ok {
 		return fmt.Errorf(

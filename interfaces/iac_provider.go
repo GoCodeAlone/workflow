@@ -14,7 +14,12 @@ type IaCProvider interface {
 
 	// Lifecycle
 	Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error)
-	Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error)
+	// Apply was removed per workflow#699 (2026-05-17). v2 dispatch
+	// routes through wfctlhelpers.ApplyPlanWithHooks (ResourceDriver
+	// per-action + IaCProviderFinalizer.FinalizeApply post-loop). The
+	// load-time Capabilities-RPC gate in cmd/wfctl/deploy_providers.go
+	// rejects plugins whose CapabilitiesResponse.compute_plan_version
+	// is not "v2".
 	Destroy(ctx context.Context, resources []ResourceRef) (*DestroyResult, error)
 
 	// Observability

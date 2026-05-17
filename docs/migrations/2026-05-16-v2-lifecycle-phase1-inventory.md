@@ -27,13 +27,20 @@ PR #639 landed the v2 action lifecycle hook path (`wfctlhelpers.ApplyPlanWithHoo
 | `iac/conformance/scenario_replace_cascade_preserves_dependents.go:92` | MIGRATED in this PR | Same |
 | `cmd/wfctl/infra_apply_in_process_test.go:77` | MIGRATED in this PR (was missing from initial inventory; surfaced by staticcheck SA1019) | Same |
 
-### iac-codemod tool references (NOT runtime callers)
+### ~~iac-codemod tool references (NOT runtime callers)~~ — superseded by workflow#699
+
+> **Update 2026-05-17 (workflow#699):** `cmd/iac-codemod/` was deleted in PR 1
+> of the IaCProvider.Apply hard-removal cascade. The codemod's reason-to-exist
+> (migrate v1 `Apply` impls to v2 `wfctlhelpers.ApplyPlan` delegation)
+> evaporated when `IaCProvider.Apply` itself was removed from the interface +
+> proto. The original references below are kept for historical context but
+> are no longer actionable.
 
 | File:Line | Notes |
 |-----------|-------|
-| `cmd/iac-codemod/refactor_apply.go:29` (`applyCanonicalCallExpr` constant, `//nolint:unused`) | **Documentation-only constant; NOT consumed by AST rewriter.** Phase 3 lockstep update bumps this constant TOGETHER with `rewriteApplyBody` (line 1231 hardcoded `ast.NewIdent("ApplyPlan")`) + `isAlreadyDelegatedApplyBody` (line 630 hardcoded `sel.Sel.Name != "ApplyPlan"`) + `runAssertApplyDelegatesToHelper` + `refactor_apply_test.go:593`. Phase 1 does NOT touch this — bumping just the constant would create internal inconsistency. |
-| `cmd/iac-codemod/refactor_apply.go:1208` (doc comment) | Same Phase 3 lockstep update |
-| `cmd/iac-codemod/lint.go:54` (comment) + `lint.go:641` (matcher consumer) | Same |
+| `cmd/iac-codemod/refactor_apply.go:29` (`applyCanonicalCallExpr` constant, `//nolint:unused`) | ~~Phase 3 lockstep update bumps this constant.~~ DELETED per workflow#699. |
+| `cmd/iac-codemod/refactor_apply.go:1208` (doc comment) | ~~Same Phase 3 lockstep update.~~ DELETED per workflow#699. |
+| `cmd/iac-codemod/lint.go:54` (comment) + `lint.go:641` (matcher consumer) | ~~Same.~~ DELETED per workflow#699. |
 
 ### v1 `provider.Apply(ctx, &plan)` direct callers (workflow side, NOT through wfctlhelpers)
 

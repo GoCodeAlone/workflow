@@ -23,6 +23,17 @@ Configs that still reference the legacy types now fail to load with an actionabl
 
 ## [Unreleased]
 
+### Breaking changes (workflow#699 — IaCProvider.Apply hard-removal)
+
+- `interfaces.IaCProvider.Apply` removed. Plugins must implement v2 dispatch (declare `CapabilitiesResponse.compute_plan_version="v2"` via the typed RPC) and drop their `Apply` Go method.
+- `pb.IaCProviderRequired.Apply` RPC removed; `ApplyRequest`/`ApplyResponse`/`ApplyResult`/`ActionResult` proto messages deleted (`ActionStatus` enum survives — surfaced through engine-side `interfaces.ActionOutcome`).
+- `iac/wfctlhelpers/dispatch.go` package deleted (`ComputePlanVersionDeclarer`, `DispatchVersionFor`, `DispatchVersionV2`); v2 is the only supported dispatch path.
+- `cmd/iac-codemod` deleted (the v1→v2 migration tool no longer has a target).
+- `plugin/sdk.IaCProvider.EffectiveComputePlanVersion()` accessor deleted (post-cutover, "v1" is not a valid runtime value); the manifest field remains as a parse-time validation surface.
+- Load-time enforcement: `cmd/wfctl/deploy_providers.go`'s `discoverAndLoadIaCProvider` now calls the typed `Capabilities` RPC at plugin handshake (with a 10s bounded context that bypasses the adapter's lifetime cache) and rejects providers whose `compute_plan_version != "v2"`.
+- Makefile lint guard added: `grep -qE '^\s*rpc Apply\s*\(' plugin/external/proto/iac.proto` runs as part of the `lint` target so a future PR cannot silently re-introduce the deleted RPC.
+- Minimum plugin versions: aws v2.0.0+, gcp v2.0.0+, azure v2.0.0+, digitalocean v2.0.0+.
+
 ### Fixed (issue #663 — follow-up)
 
 - **`*external.RemoteModule.Dependencies()` now returns the yaml-level `dependsOn:` keys** instead of always returning `nil`. The v0.51.8 fix (PR #664) only reordered the `cfg.Modules` slice — but modular's `app.Init()` then runs its own `DependencyAware`-driven sort over the registered modules, and `RemoteModule` (the wrapper used for every external-plugin module) returned `nil` from `Dependencies()`, so modular saw every external-plugin module as a root and sorted alphabetically. BMW PR #280 image-launch surfaced this as the same `bmw-eventbus`/`bmw-stream` ordering race that v0.51.8 was supposed to close. Engine `BuildFromConfig` now filters `modCfg.DependsOn` through `filterResolvableDeps` (drops empty strings + names not present in `cfg.Modules` — the same edge-set topoSortModules used for ordering) and calls `SetDependencies(filtered)` on each module that **implements** `interface{ SetDependencies([]string) }`, but **only when the filtered slice is non-empty**, immediately after the factory returns and before `app.RegisterModule`. (Modules with no resolvable dependsOn — empty yaml + transform-injected modules whose dependsOn is all empty/ghost — are skipped, so a constructor-time default isn't clobbered with `SetDependencies(nil)`.) `RemoteModule` implements that setter, defensively copies the slice, and modular's Init() walker then reads it via the existing `Dependencies()` contract. 7 unit tests cover the `RemoteModule` contract (default-nil, plumb, empty-slice, overwrite, defensive-copy aliasing, plus two type-assertion pins for `modular.DependencyAware` and the engine's `SetDependencies` interface) plus 4 engine-level `BuildFromConfig` tests covering the production path (basic plumb + defensive copy via raw-slice recorder + back-compat skip + real-modular Init order). Built-in modules can opt in by implementing the same setter; existing behaviour is unchanged for modules that don't.

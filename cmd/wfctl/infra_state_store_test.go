@@ -259,6 +259,7 @@ modules:
 		},
 	}
 	fake := &stateReturningProvider{applyResult: fakeResult}
+	fake.installAsV2Dispatch(t)
 
 	orig := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {

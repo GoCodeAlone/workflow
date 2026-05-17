@@ -31,12 +31,14 @@ service IaCProviderRequired {
   rpc Version(VersionRequest) returns (VersionResponse);
   rpc Capabilities(CapabilitiesRequest) returns (CapabilitiesResponse);
   rpc Plan(PlanRequest) returns (PlanResponse);
-  rpc Apply(ApplyRequest) returns (ApplyResponse);
   rpc Destroy(DestroyRequest) returns (DestroyResponse);
   rpc Status(StatusRequest) returns (StatusResponse);
   rpc Import(ImportRequest) returns (ImportResponse);
   rpc ResolveSizing(ResolveSizingRequest) returns (ResolveSizingResponse);
   rpc BootstrapStateBackend(BootstrapStateBackendRequest) returns (BootstrapStateBackendResponse);
+  // Method "Apply" was removed per workflow#699 (2026-05-17); v2 dispatch
+  // routes through ResourceDriver per-action + IaCProviderFinalizer.
+  // Do not re-introduce. CI lint guards re-appearance (see Makefile).
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,27 +323,6 @@ enum ActionStatus {
   ACTION_STATUS_SKIPPED = 6;              // action never attempted at driver (ctx-cancel pre-dispatch, JIT-substitution-fail, driver-resolve-fail); cloud-side state unchanged
 }
 
-// ActionResult is the per-action outcome surfacing for Phase 2 v2 hooks.
-// Per ADR 0040 invariant 1. output_keys field DROPPED per cycle-2 review
-// (hook firing only needs action_index + status; per-resource outputs
-// already in ApplyResult.resources).
-message ActionResult {
-  uint32 action_index = 1;
-  ActionStatus status = 2;
-  string error = 3;
-}
-
-// ApplyResult mirrors interfaces.ApplyResult.
-message ApplyResult {
-  string plan_id = 1;
-  repeated ResourceOutput resources = 2;
-  repeated ActionError errors = 3;
-  map<string, string> initial_input_snapshot = 4;
-  repeated DriftEntry input_drift_report = 5;
-  map<string, string> replace_id_map = 6;
-  repeated ActionResult actions = 7;  // NEW Phase 2 (workflow#640)
-}
-
 // DestroyResult mirrors interfaces.DestroyResult.
 message DestroyResult {
   repeated string destroyed = 1;
@@ -429,13 +410,6 @@ message PlanRequest {
 }
 message PlanResponse {
   IaCPlan plan = 1;
-}
-
-message ApplyRequest {
-  IaCPlan plan = 1;
-}
-message ApplyResponse {
-  ApplyResult result = 1;
 }
 
 message DestroyRequest {

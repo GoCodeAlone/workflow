@@ -237,7 +237,7 @@ func TestApplyWithProviderAndStore_ProtectedReplace_WithoutAllowReplace_Errors(t
 // via applyV2ApplyPlanWithHooksFn) so a sentinel error proves the call site
 // reached dispatch — i.e. the gate did not short-circuit.
 func TestApplyWithProviderAndStore_ProtectedReplace_WithAllowReplace_Proceeds(t *testing.T) {
-	provider := &iactest.NoopProvider{ProviderName: "allow-replace-stub", DispatchVersion: "v2"}
+	provider := &iactest.NoopProvider{ProviderName: "allow-replace-stub"}
 
 	origCompute := computeInfraPlan
 	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {

@@ -28,12 +28,10 @@ import (
 // nil or InputDriftReport is empty/nil — both yield a no-op so callers
 // don't need to defensively check the field before calling.
 //
-// Wired in by W-3a/T3.1.5 as a standalone helper; the actual call site in
-// applyWithProviderAndStore (or its successor) lands when W-3b/T3.7
-// switches the in-process apply path through wfctlhelpers.ApplyPlan for
-// v2 plugins. Until then this helper is exercised solely by the
-// in-process drift test, NOT yet by any production caller — preserving
-// the W-3a "zero runtime change for v1 plugins" invariant.
+// Production drift-surfacing path on the v2 (only) apply dispatch — per
+// workflow#699, v2 via wfctlhelpers.ApplyPlanWithHooks is the sole code
+// path, so this helper now runs unconditionally after every apply
+// invocation in both applyWithProviderAndStore and applyPrecomputedPlanWithStore.
 func printDriftReportIfAny(w io.Writer, result *interfaces.ApplyResult) {
 	if result == nil || len(result.InputDriftReport) == 0 {
 		return
@@ -357,11 +355,13 @@ func resourceSpecProviderRef(spec interfaces.ResourceSpec) string {
 }
 
 // applyWithProviderAndStore computes a diff plan for the given specs against
-// the current state and executes it via provider.Apply. On success, each
-// provisioned resource is persisted to store. Save failures abort the command
-// so callers cannot miss a successful cloud mutation whose state was not
-// recorded. Deleted resources are removed from store after a successful destroy
-// action.
+// the current state and executes it via wfctlhelpers.ApplyPlanWithHooks (the
+// v2-only dispatch per workflow#699; routed through the
+// applyV2ApplyPlanWithHooksFn seam for test injection). On success, each
+// provisioned resource is persisted to store via the OnResourceApplied hook.
+// Save failures abort the command so callers cannot miss a successful cloud
+// mutation whose state was not recorded. Deleted resources are removed from
+// store via the OnResourceDeleted hook after a successful destroy action.
 //
 // providerType is used only as a label when constructing ResourceState records.
 // Callers pass a nil store (or noopStateStore) when state persistence is not
@@ -433,20 +433,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 
 	// W-6/T6.1: gate replace and delete actions on `protected: true`
 	// resources behind --allow-replace. Without an explicit per-resource
-	// opt-in, the apply errors before any provider Apply / wfctlhelpers
+	// opt-in, the apply errors before the wfctlhelpers.ApplyPlanWithHooks
 	// dispatch — destructive actions on protected infrastructure must
 	// be intentional. T6.2 swaps this fail-fast for an aggregated
 	// multi-blocker report.
 	if err := validateAllowReplaceProtected(plan, applyAllowReplaceSet); err != nil {
 		return err
-	}
-
-	// Collect delete-action resource names so we can clean up state afterward.
-	deleteNames := make(map[string]struct{})
-	for i := range plan.Actions {
-		if plan.Actions[i].Action == "delete" {
-			deleteNames[plan.Actions[i].Resource.Name] = struct{}{}
-		}
 	}
 
 	// Soft-warn if any update/delete action targets a resource whose ProviderID
@@ -455,36 +447,16 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 
-	// W-3b T3.7: branch on the loaded plugin's manifest. Providers
-	// declaring iacProvider.computePlanVersion: v2 in plugin.json route
-	// through wfctlhelpers.ApplyPlan (Replace + drift postcondition);
-	// everything else takes the legacy provider.Apply path. NO env-var
-	// gate (rev2/rev3 fix per cycle-2 — there is no transitional
-	// WFCTL_USE_V2_APPLY); the choice is plugin-author-controlled at
-	// load time and surfaced via the optional
-	// wfctlhelpers.ComputePlanVersionDeclarer interface.
-	var result *interfaces.ApplyResult
-	var usedV2Dispatch bool
-	// DispatchVersionFor centralises the type-assertion + default; pass the
-	// raw provider rather than re-asserting ComputePlanVersionDeclarer at the
-	// call site (per dispatch.go contract).
-	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
-		usedV2Dispatch = true
-		hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
-		result, err = applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
-		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
-		// v2 dispatch is the production caller that surfaces input
-		// drift to the operator. Run on success OR partial failure
-		// (the operator most needs the drift diagnostic when an apply
-		// fails — "which input went stale during the failed apply?"
-		// — so we print whenever a result was produced rather than
-		// gating on err == nil). Silently no-ops when the report is
-		// empty, so unconditional-on-result-non-nil is safe.
-		if result != nil {
-			printDriftReportIfAny(w, result)
-		}
-	} else {
-		result, err = provider.Apply(ctx, &plan)
+	// v2 is the only supported dispatch per ADR 0024 + workflow#699.
+	// IaCProvider.Apply was hard-deleted from the interface; all routing
+	// goes through wfctlhelpers.ApplyPlanWithHooks (Replace + drift
+	// postcondition + IaCProviderFinalizer fan-out).
+	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
+	// printDriftReportIfAny surfaces input-drift to the operator on
+	// success OR partial failure — silently no-ops on empty reports.
+	if result != nil {
+		printDriftReportIfAny(w, result)
 	}
 	if err != nil {
 		// Derive the most specific resource ref we can for troubleshooting.
@@ -524,8 +496,10 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
-		// Provider.Apply can surface a top-level error (vs. populating
-		// result.Errors[]). Emit the actionable hint here too if the
+		// applyV2ApplyPlanWithHooksFn can surface a top-level error
+		// (gRPC transport failure, plugin-side sentinel bubble, or
+		// local pre-Replace failure) distinct from per-resource entries
+		// in result.Errors[]. Emit the actionable hint here too if the
 		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
 		// otherwise plugin paths that bubble the sentinel via err escape
 		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
@@ -533,56 +507,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {
-		if usedV2Dispatch {
-			if len(result.Errors) > 0 {
-				msgs := make([]string, 0, len(result.Errors))
-				for _, ae := range result.Errors {
-					msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
-				}
-				finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
-				emitImageNotInRegistryHint(os.Stderr, finalErr)
-				return finalErr
-			}
-			return nil
-		}
-		if err := rejectSensitiveOutputsWithoutProvider(ctx, secretsProvider, result, plan.Actions, provider); err != nil {
-			return err
-		}
-		// Persist state for every successfully provisioned resource.
-		for _, r := range result.Resources {
-			action, ok := planActionForOutput(plan.Actions, result.Resources, r)
-			if !ok {
-				action = interfaces.PlanAction{Resource: interfaces.ResourceSpec{Name: r.Name, Type: r.Type}}
-			}
-			driver, _ := provider.ResourceDriver(action.Resource.Type) // best-effort for compensating Delete; nil-safe
-			hyd, persistErr := persistAppliedResourceOutput(ctx, store, secretsProvider, provider, providerType, driver, action, r)
-			if persistErr != nil {
-				return persistErr
-			}
-			fmt.Printf("  ✓ %s (%s)\n", action.Resource.Name, action.Resource.Type)
-			if hydratedOut != nil {
-				for k, v := range hyd {
-					hydratedOut[k] = v
-				}
-			}
-		}
-
-		// Delete state records for resources that were destroyed.
-		for name := range successfulDeleteNames(deleteNames, result) {
-			if delErr := deleteStateAfterCloudDelete(store, name); delErr != nil {
-				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
-			}
-		}
-
 		if len(result.Errors) > 0 {
 			msgs := make([]string, 0, len(result.Errors))
 			for _, ae := range result.Errors {
 				msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
 			}
 			finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
-			// Emit an actionable hint to stderr if any per-resource error
-			// matches interfaces.ErrImageNotInRegistry (typed in-process or
-			// string-match across gRPC boundary). See infra_image_presence_hint.go.
 			emitImageNotInRegistryHint(os.Stderr, finalErr)
 			return finalErr
 		}
@@ -738,76 +668,6 @@ func persistAppliedResourceOutput(
 
 func actionCreatesReplacementResource(action interfaces.PlanAction) bool {
 	return action.Action == "create" || action.Action == "replace"
-}
-
-func planActionForOutput(actions []interfaces.PlanAction, outputs []interfaces.ResourceOutput, out interfaces.ResourceOutput) (interfaces.PlanAction, bool) {
-	if out.Name != "" {
-		for i := range actions {
-			if actions[i].Resource.Name == out.Name {
-				return actions[i], true
-			}
-		}
-	}
-	if len(outputs) != 1 {
-		return interfaces.PlanAction{}, false
-	}
-	for i := range actions {
-		if actions[i].Action != "delete" {
-			return actions[i], true
-		}
-	}
-	return interfaces.PlanAction{}, false
-}
-
-func successfulDeleteNames(deleteNames map[string]struct{}, result *interfaces.ApplyResult) map[string]struct{} {
-	out := make(map[string]struct{}, len(deleteNames))
-	for name := range deleteNames {
-		out[name] = struct{}{}
-	}
-	if result == nil {
-		return out
-	}
-	if len(result.Errors) > 0 {
-		return map[string]struct{}{}
-	}
-	return out
-}
-
-func rejectSensitiveOutputsWithoutProvider(ctx context.Context, secretsProvider secrets.Provider, result *interfaces.ApplyResult, actions []interfaces.PlanAction, provider interfaces.IaCProvider) error {
-	if secretsProvider != nil || result == nil {
-		return nil
-	}
-	var errs []error
-	for i := range result.Resources {
-		r := result.Resources[i]
-		if !hasSensitiveOutputs(&r) {
-			continue
-		}
-		action, ok := planActionForOutput(actions, result.Resources, r)
-		resourceName := r.Name
-		if resourceName == "" && ok {
-			resourceName = action.Resource.Name
-		}
-		routeErr := fmt.Errorf(
-			"secrets.Provider not configured but driver emitted sensitive outputs (resource %q has Sensitive keys %v); add `secrets:` block to your config or use `secrets: { provider: env }`",
-			resourceName, sensitiveKeysFor(&r))
-		if !ok || !actionCreatesReplacementResource(action) {
-			errs = append(errs, fmt.Errorf("state write rejected: %w", routeErr))
-			continue
-		}
-		driver, _ := provider.ResourceDriver(action.Resource.Type)
-		rs := interfaces.ResourceState{Name: action.Resource.Name, Type: action.Resource.Type, ProviderID: r.ProviderID}
-		compErr := compensateAfterSaveFailure(nil, driver, rs, nil)
-		if compErr != nil {
-			errs = append(errs, fmt.Errorf("state write rejected: %w (compensating delete failed: %v)", routeErr, compErr))
-		} else {
-			errs = append(errs, fmt.Errorf("state write rejected: %w (compensating delete succeeded)", routeErr))
-		}
-	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
 }
 
 func normalizeAppliedOutputIdentity(spec interfaces.ResourceSpec, out interfaces.ResourceOutput) (interfaces.ResourceOutput, error) {
@@ -1477,8 +1337,9 @@ func loadPlanFromFile(path string) (interfaces.IaCPlan, error) {
 
 // applyFromPrecomputedPlan dispatches a pre-computed plan without calling
 // ComputePlan. It loads IaCProvider plugins from cfgFile, groups plan actions
-// by iac.provider module, and calls provider.Apply for each group. State is
-// persisted exactly as in the live-diff path.
+// by iac.provider module, and invokes applyPrecomputedPlanWithStore (which
+// routes through wfctlhelpers.ApplyPlanWithHooks per workflow#699) for each
+// group. State is persisted exactly as in the live-diff path.
 //
 // The same-process hydrated routed-secret map (sensitive.Route output) is
 // accumulated across provider groups and returned to the caller so the
@@ -1598,9 +1459,11 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 }
 
 // applyPrecomputedPlanWithStore executes a pre-computed plan group via
-// provider.Apply and persists state for each provisioned resource. It is the
-// precomputed-plan counterpart of applyWithProviderAndStore, skipping
-// ComputePlan / adoptExistingResources entirely.
+// wfctlhelpers.ApplyPlanWithHooks (the v2-only dispatch per workflow#699)
+// and persists state through the same OnResourceApplied / OnResourceDeleted
+// hooks as applyWithProviderAndStore. It is the precomputed-plan counterpart
+// of applyWithProviderAndStore, skipping ComputePlan / adoptExistingResources
+// entirely.
 func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan, provider interfaces.IaCProvider, providerType string, store infraStateStore, w io.Writer, envName string, cfgFile string, hydratedOut map[string]string) error {
 	if store == nil {
 		store = &noopStateStore{}
@@ -1619,14 +1482,6 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	// must hold regardless of how the plan was produced.
 	if err := validateAllowReplaceProtected(plan, applyAllowReplaceSet); err != nil {
 		return err
-	}
-
-	// Collect delete-action resource names for post-apply state cleanup.
-	deleteNames := make(map[string]struct{})
-	for i := range plan.Actions {
-		if plan.Actions[i].Action == "delete" {
-			deleteNames[plan.Actions[i].Resource.Name] = struct{}{}
-		}
 	}
 
 	// Resolve abstract sizing tiers into concrete provider-specific values,
@@ -1657,18 +1512,11 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 
 	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
-	var result *interfaces.ApplyResult
-	var err error
-	var usedV2Dispatch bool
-	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
-		usedV2Dispatch = true
-		hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
-		result, err = applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
-		if result != nil {
-			printDriftReportIfAny(w, result)
-		}
-	} else {
-		result, err = provider.Apply(ctx, &plan)
+	// v2 is the only supported dispatch per ADR 0024 + workflow#699.
+	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
+	if result != nil {
+		printDriftReportIfAny(w, result)
 	}
 	if err != nil {
 		ref := interfaces.ResourceRef{}
@@ -1698,8 +1546,10 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
-		// Provider.Apply can surface a top-level error (vs. populating
-		// result.Errors[]). Emit the actionable hint here too if the
+		// applyV2ApplyPlanWithHooksFn can surface a top-level error
+		// (gRPC transport failure, plugin-side sentinel bubble, or
+		// local pre-Replace failure) distinct from per-resource entries
+		// in result.Errors[]. Emit the actionable hint here too if the
 		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
 		// otherwise plugin paths that bubble the sentinel via err escape
 		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
@@ -1708,54 +1558,12 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	}
 
 	if result != nil {
-		if usedV2Dispatch {
-			if len(result.Errors) > 0 {
-				msgs := make([]string, 0, len(result.Errors))
-				for _, ae := range result.Errors {
-					msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
-				}
-				finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
-				emitImageNotInRegistryHint(os.Stderr, finalErr)
-				return finalErr
-			}
-			return nil
-		}
-		if err := rejectSensitiveOutputsWithoutProvider(ctx, secretsProvider, result, plan.Actions, provider); err != nil {
-			return err
-		}
-		for _, r := range result.Resources {
-			action, ok := planActionForOutput(plan.Actions, result.Resources, r)
-			if !ok {
-				action = interfaces.PlanAction{Resource: interfaces.ResourceSpec{Name: r.Name, Type: r.Type}}
-			}
-			driver, _ := provider.ResourceDriver(action.Resource.Type)
-			hyd, persistErr := persistAppliedResourceOutput(ctx, store, secretsProvider, provider, providerType, driver, action, r)
-			if persistErr != nil {
-				return persistErr
-			}
-			fmt.Printf("  ✓ %s (%s)\n", action.Resource.Name, action.Resource.Type)
-			if hydratedOut != nil {
-				for k, v := range hyd {
-					hydratedOut[k] = v
-				}
-			}
-		}
-
-		for name := range successfulDeleteNames(deleteNames, result) {
-			if delErr := deleteStateAfterCloudDelete(store, name); delErr != nil {
-				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
-			}
-		}
-
 		if len(result.Errors) > 0 {
 			msgs := make([]string, 0, len(result.Errors))
 			for _, ae := range result.Errors {
 				msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
 			}
 			finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
-			// Emit an actionable hint to stderr if any per-resource error
-			// matches interfaces.ErrImageNotInRegistry (typed in-process or
-			// string-match across gRPC boundary). See infra_image_presence_hint.go.
 			emitImageNotInRegistryHint(os.Stderr, finalErr)
 			return finalErr
 		}

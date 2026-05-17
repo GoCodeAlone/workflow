@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,8 +30,14 @@ func fingerprintForTest(value string) string {
 
 // TestInfraApplyConsumesPlan verifies that wfctl infra apply --plan <file>:
 //  1. Reads actions from the plan file without calling ComputePlan.
-//  2. Calls provider.Apply with exactly the plan from the file (identified by plan ID).
+//  2. Dispatches via wfctlhelpers.ApplyPlanWithHooks (v2-only post
+//     workflow#699) with exactly the plan from the file (identified by
+//     plan ID).
 //  3. Does NOT recompute a fresh plan from the config diff.
+//
+// Captures the plan via the applyV2ApplyPlanWithHooksFn seam — the
+// stubbed dispatch records the plan reference without invoking the
+// per-action driver layer.
 func TestInfraApplyConsumesPlan(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "infra.yaml")
@@ -81,7 +88,8 @@ modules:
 		t.Fatalf("write plan: %v", err)
 	}
 
-	// Mock provider: records the plan passed to Apply.
+	// Mock provider: satisfies the interface; the v2 seam captures the plan
+	// before per-action dispatch reaches any driver.
 	fake := &applyCapture{}
 	origResolve := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
@@ -89,33 +97,50 @@ modules:
 	}
 	defer func() { resolveIaCProvider = origResolve }()
 
+	// Capture the plan via the v2 dispatch seam (post workflow#699 — there
+	// is no longer a provider.Apply to assert against).
+	var (
+		mu          sync.Mutex
+		applyCalled bool
+		appliedPlan *interfaces.IaCPlan
+	)
+	origApply := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, p *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		applyCalled = true
+		appliedPlan = p
+		return &interfaces.ApplyResult{PlanID: p.ID}, nil
+	}
+	defer func() { applyV2ApplyPlanWithHooksFn = origApply }()
+
 	// Run apply with --plan flag.
 	if err := runInfraApply([]string{"--auto-approve", "--config", cfgPath, "--plan", planPath}); err != nil {
 		t.Fatalf("runInfraApply: %v", err)
 	}
 
-	fake.mu.Lock()
-	defer fake.mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
-	// Apply must have been called.
-	if !fake.applyCalled {
-		t.Fatal("provider.Apply was not called")
+	// Dispatch must have been invoked.
+	if !applyCalled {
+		t.Fatal("v2 dispatch (applyV2ApplyPlanWithHooksFn) was not called")
 	}
-	if fake.appliedPlan == nil {
+	if appliedPlan == nil {
 		t.Fatal("appliedPlan is nil")
 	}
 
 	// Verify the plan came from the file (not recomputed).
 	// ComputePlan generates a fresh ID ("plan-<timestamp>"); our file has a fixed ID.
-	if fake.appliedPlan.ID != planID {
-		t.Errorf("plan ID: want %q (from file), got %q (recomputed?)", planID, fake.appliedPlan.ID)
+	if appliedPlan.ID != planID {
+		t.Errorf("plan ID: want %q (from file), got %q (recomputed?)", planID, appliedPlan.ID)
 	}
 
 	// Exactly one create action for my-db.
-	if got := len(fake.appliedPlan.Actions); got != 1 {
+	if got := len(appliedPlan.Actions); got != 1 {
 		t.Fatalf("plan actions: want 1, got %d", got)
 	}
-	a := fake.appliedPlan.Actions[0]
+	a := appliedPlan.Actions[0]
 	if a.Action != "create" {
 		t.Errorf("action: want create, got %q", a.Action)
 	}
@@ -298,84 +323,11 @@ modules:
 	}
 }
 
-// applyCaptureFull is a mock provider that returns a real ApplyResult with
-// provisioned resources, enabling state-persistence path testing.
-type applyCaptureFull struct {
-	applyCapture
-	resources []interfaces.ResourceOutput
-}
-
-func (f *applyCaptureFull) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.applyCalled = true
-	f.appliedPlan = plan
-	return &interfaces.ApplyResult{Resources: f.resources}, nil
-}
-
-// TestInfraApplyPrecomputedPlan_PersistsState verifies that applyPrecomputedPlanWithStore
-// writes ResourceState records to the store after a successful apply, with correct
-// metadata fields (ProviderID, ProviderRef, ConfigHash, Dependencies).
-func TestInfraApplyPrecomputedPlan_PersistsState(t *testing.T) {
-	stateDir := t.TempDir()
-	store := &fsWfctlStateStore{dir: stateDir}
-
-	spec := interfaces.ResourceSpec{
-		Name: "my-db",
-		Type: "infra.database",
-		Config: map[string]any{
-			"provider": "test-provider",
-			"engine":   "postgres",
-		},
-		DependsOn: []string{"some-vpc"},
-	}
-	plan := interfaces.IaCPlan{
-		ID:      "persist-test",
-		Actions: []interfaces.PlanAction{{Action: "create", Resource: spec}},
-	}
-
-	provider := &applyCaptureFull{
-		resources: []interfaces.ResourceOutput{
-			{Name: "my-db", Type: "infra.database", ProviderID: "db-abc123"},
-		},
-	}
-
-	err := applyPrecomputedPlanWithStore(context.Background(), plan, provider, "fake-cloud", store, io.Discard, "", "", nil)
-	if err != nil {
-		t.Fatalf("applyPrecomputedPlanWithStore: %v", err)
-	}
-
-	// Verify the state was persisted.
-	all, err := store.ListResources(context.Background())
-	if err != nil {
-		t.Fatalf("ListResources: %v", err)
-	}
-	var saved *interfaces.ResourceState
-	for i := range all {
-		if all[i].Name == "my-db" {
-			saved = &all[i]
-			break
-		}
-	}
-	if saved == nil {
-		t.Fatal("ResourceState for my-db not found in store")
-	}
-	if saved.ProviderID != "db-abc123" {
-		t.Errorf("ProviderID: want db-abc123, got %q", saved.ProviderID)
-	}
-	if saved.ProviderRef != "test-provider" {
-		t.Errorf("ProviderRef: want test-provider, got %q", saved.ProviderRef)
-	}
-	if saved.Provider != "fake-cloud" {
-		t.Errorf("Provider: want fake-cloud, got %q", saved.Provider)
-	}
-	if len(saved.Dependencies) != 1 || saved.Dependencies[0] != "some-vpc" {
-		t.Errorf("Dependencies: want [some-vpc], got %v", saved.Dependencies)
-	}
-	if saved.ConfigHash == "" {
-		t.Error("ConfigHash: want non-empty, got empty")
-	}
-}
+// TestInfraApplyPrecomputedPlan_PersistsState + applyCaptureFull were
+// deleted per workflow#699: the v1 dispatch path
+// (provider.Apply → caller persists state) is gone. State persistence
+// now happens via the v2 OnResourceApplied hook, exercised by
+// TestInfraApplyPrecomputedPlan_V2PersistsStateThroughHooks below.
 
 func TestInfraApplyPrecomputedPlan_V2PersistsStateThroughHooks(t *testing.T) {
 	store := &fakeStateStore{}
@@ -409,7 +361,7 @@ func TestInfraApplyPrecomputedPlan_V2PrintsDriftReport(t *testing.T) {
 		ID:      "v2-drift-test",
 		Actions: []interfaces.PlanAction{{Action: "create", Resource: interfaces.ResourceSpec{Name: "x", Type: "infra.test"}}},
 	}
-	provider := &iactest.NoopProvider{ProviderName: "v2-stub", DispatchVersion: "v2"}
+	provider := &iactest.NoopProvider{ProviderName: "v2-stub"}
 	driftEntries := []interfaces.DriftEntry{
 		{Name: "EXAMPLE_VAR", PlanFingerprint: "plan-fp", ApplyFingerprint: "apply-fp"},
 	}
@@ -430,30 +382,12 @@ func TestInfraApplyPrecomputedPlan_V2PrintsDriftReport(t *testing.T) {
 	}
 }
 
-func TestInfraApplyPrecomputedPlan_FailedDeleteKeepsState(t *testing.T) {
-	current := interfaces.ResourceState{Name: "old", Type: "infra.test", ProviderID: "id-old"}
-	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
-	plan := interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
-		Action:   "delete",
-		Resource: interfaces.ResourceSpec{Name: "old", Type: "infra.test"},
-		Current:  &current,
-	}}}
-	provider := &stateReturningProvider{
-		applyResult: &interfaces.ApplyResult{
-			Errors: []interfaces.ActionError{{Action: "delete", Resource: "old", Error: "delete failed"}},
-		},
-	}
-
-	err := applyPrecomputedPlanWithStore(t.Context(), plan, provider, "fake-cloud", store, io.Discard, "", "", nil)
-	if err == nil {
-		t.Fatal("expected delete failure, got nil")
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if len(store.deleted) != 0 {
-		t.Fatalf("deleted state entries = %v, want none after failed delete", store.deleted)
-	}
-}
+// TestInfraApplyPrecomputedPlan_FailedDeleteKeepsState was deleted per
+// workflow#699 — the test relied on the v1 provider.Apply path returning
+// a preset ApplyResult with delete errors. Post-v2 cutover the
+// equivalent assertion lives in TestInfraApplyPrecomputedPlan_V2PersistsStateThroughHooks
+// (state-write through OnResourceApplied/OnResourceDeleted hooks) and in
+// the per-driver delete-error coverage in iac/wfctlhelpers/apply_test.go.
 
 // TestApplyFromPrecomputedPlan_DeleteActionResolvesProvider verifies that delete
 // actions (which carry no Resource.Config from ComputePlan) correctly resolve
@@ -525,6 +459,16 @@ modules:
 	}
 	defer func() { resolveIaCProvider = origResolve }()
 
+	// Stub the v2 dispatch seam — the test is asserting the provider-
+	// resolution stage (action.Current.ProviderRef → loaded provider) and
+	// MUST NOT cross into the per-driver dispatch layer (which the bare
+	// applyCapture lacks). Per workflow#699 v2 is the only dispatch.
+	origApply := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		return &interfaces.ApplyResult{}, nil
+	}
+	defer func() { applyV2ApplyPlanWithHooksFn = origApply }()
+
 	// With an empty config (delete-all scenario), hash matches because both
 	// sides hash nil/empty spec slices the same way.
 	// The key assertion: applyFromPrecomputedPlan must NOT error on the delete action.
@@ -532,7 +476,8 @@ modules:
 	_, err = applyFromPrecomputedPlan(context.Background(), plan, cfgPath, "")
 	// The apply itself won't error even if the config has my-db (hash mismatch
 	// would catch that) — we just want to confirm no "missing provider" error.
-	// With the delete action resolved via Current.ProviderRef, provider.Apply is called.
+	// With the delete action resolved via Current.ProviderRef, dispatch reaches
+	// the v2 seam.
 	if err != nil && strings.Contains(err.Error(), "missing 'provider' field") {
 		t.Errorf("delete action should resolve provider from Current, got: %v", err)
 	}

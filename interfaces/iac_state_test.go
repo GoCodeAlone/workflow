@@ -239,8 +239,9 @@ func TestResourceState_NewReaderTolerates_OldWriter(t *testing.T) {
 
 // TestActionStatus_ZeroValueIsUnspecified pins the zero-value semantics of
 // ActionStatus: an uninitialized status MUST be ActionStatusUnspecified so
-// T3's applyResultFromPB reject path catches forgotten populates. Per
-// workflow#640 Phase 2 + ADR 0040 invariant 2.
+// the engine-side populate path catches forgotten populates. Per
+// workflow#640 Phase 2 + ADR 0040 invariant 2. (The proto-side
+// applyResultFromPB decode path was deleted per workflow#699.)
 func TestActionStatus_ZeroValueIsUnspecified(t *testing.T) {
 	var s ActionStatus
 	if s != ActionStatusUnspecified {
@@ -249,8 +250,9 @@ func TestActionStatus_ZeroValueIsUnspecified(t *testing.T) {
 }
 
 // TestActionStatus_ConstantValues pins the wire tags 0/1/2/3 to the four
-// declared constants. Mirrors pb.ActionStatus values; drift here would
-// cause applyResultFromPB decode (T3) to silently mis-categorize.
+// declared constants. Mirrors pb.ActionStatus values; drift would cause
+// the engine-side populate to mis-categorize outcomes. (The proto-side
+// applyResultFromPB decode path was deleted per workflow#699.)
 func TestActionStatus_ConstantValues(t *testing.T) {
 	cases := []struct {
 		name string
