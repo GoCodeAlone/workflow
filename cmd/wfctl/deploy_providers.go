@@ -151,6 +151,23 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 		if m.Capabilities.IaCProvider.Name != providerName {
 			continue
 		}
+		// Per workflow#693 (Phase 2.1 follow-up to #640): validate
+		// iacProvider.computePlanVersion ∈ {"", "v1", "v2"} on the
+		// matching plugin manifest. A typo (e.g. "V2", "v2.0", "two")
+		// would silently route through the v1 dispatch path via
+		// wfctlhelpers.DispatchVersionFor's empty/unknown default,
+		// breaking the Phase 2 hard-cutover contract per ADR 0024 +
+		// ADR 0040. Hard-fail so operators see the misconfiguration
+		// loudly instead of silently dispatching to the wrong path.
+		switch m.IaCProvider.ComputePlanVersion {
+		case "", "v1", "v2":
+			// valid
+		default:
+			return "", "", false, fmt.Errorf(
+				"plugin %q manifest has invalid iacProvider.computePlanVersion %q (must be \"\", \"v1\", or \"v2\")",
+				pluginName, m.IaCProvider.ComputePlanVersion,
+			)
+		}
 		binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
 		_, statErr := os.Stat(binaryPath)
 		return pluginName, m.IaCProvider.ComputePlanVersion, statErr == nil, nil
