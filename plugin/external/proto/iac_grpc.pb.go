@@ -925,6 +925,124 @@ var IaCProviderCredentialRevoker_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	IaCProviderFinalizer_FinalizeApply_FullMethodName = "/workflow.plugin.external.iac.IaCProviderFinalizer/FinalizeApply"
+)
+
+// IaCProviderFinalizerClient is the client API for IaCProviderFinalizer service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// IaCProviderFinalizer is the optional service plugins implement when
+// they need a post-apply-loop finalizer hook under v2 dispatch.
+// Use case: DigitalOcean plugin's database trusted_sources deferred-flush
+// (see workflow-plugin-digitalocean/internal/provider.go:295-307) which
+// runs after the per-action loop completes. Under v2 dispatch wfctl
+// bypasses IaCProvider.Apply entirely, so plugins needing post-loop
+// work must opt in via this service. Phase 2.5 of workflow#640.
+type IaCProviderFinalizerClient interface {
+	FinalizeApply(ctx context.Context, in *FinalizeApplyRequest, opts ...grpc.CallOption) (*FinalizeApplyResponse, error)
+}
+
+type iaCProviderFinalizerClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCProviderFinalizerClient(cc grpc.ClientConnInterface) IaCProviderFinalizerClient {
+	return &iaCProviderFinalizerClient{cc}
+}
+
+func (c *iaCProviderFinalizerClient) FinalizeApply(ctx context.Context, in *FinalizeApplyRequest, opts ...grpc.CallOption) (*FinalizeApplyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FinalizeApplyResponse)
+	err := c.cc.Invoke(ctx, IaCProviderFinalizer_FinalizeApply_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IaCProviderFinalizerServer is the server API for IaCProviderFinalizer service.
+// All implementations must embed UnimplementedIaCProviderFinalizerServer
+// for forward compatibility.
+//
+// IaCProviderFinalizer is the optional service plugins implement when
+// they need a post-apply-loop finalizer hook under v2 dispatch.
+// Use case: DigitalOcean plugin's database trusted_sources deferred-flush
+// (see workflow-plugin-digitalocean/internal/provider.go:295-307) which
+// runs after the per-action loop completes. Under v2 dispatch wfctl
+// bypasses IaCProvider.Apply entirely, so plugins needing post-loop
+// work must opt in via this service. Phase 2.5 of workflow#640.
+type IaCProviderFinalizerServer interface {
+	FinalizeApply(context.Context, *FinalizeApplyRequest) (*FinalizeApplyResponse, error)
+	mustEmbedUnimplementedIaCProviderFinalizerServer()
+}
+
+// UnimplementedIaCProviderFinalizerServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCProviderFinalizerServer struct{}
+
+func (UnimplementedIaCProviderFinalizerServer) FinalizeApply(context.Context, *FinalizeApplyRequest) (*FinalizeApplyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FinalizeApply not implemented")
+}
+func (UnimplementedIaCProviderFinalizerServer) mustEmbedUnimplementedIaCProviderFinalizerServer() {}
+func (UnimplementedIaCProviderFinalizerServer) testEmbeddedByValue()                              {}
+
+// UnsafeIaCProviderFinalizerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCProviderFinalizerServer will
+// result in compilation errors.
+type UnsafeIaCProviderFinalizerServer interface {
+	mustEmbedUnimplementedIaCProviderFinalizerServer()
+}
+
+func RegisterIaCProviderFinalizerServer(s grpc.ServiceRegistrar, srv IaCProviderFinalizerServer) {
+	// If the following call panics, it indicates UnimplementedIaCProviderFinalizerServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCProviderFinalizer_ServiceDesc, srv)
+}
+
+func _IaCProviderFinalizer_FinalizeApply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FinalizeApplyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderFinalizerServer).FinalizeApply(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderFinalizer_FinalizeApply_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderFinalizerServer).FinalizeApply(ctx, req.(*FinalizeApplyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// IaCProviderFinalizer_ServiceDesc is the grpc.ServiceDesc for IaCProviderFinalizer service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCProviderFinalizer_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCProviderFinalizer",
+	HandlerType: (*IaCProviderFinalizerServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "FinalizeApply",
+			Handler:    _IaCProviderFinalizer_FinalizeApply_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "iac.proto",
+}
+
+const (
 	IaCProviderMigrationRepairer_RepairDirtyMigration_FullMethodName = "/workflow.plugin.external.iac.IaCProviderMigrationRepairer/RepairDirtyMigration"
 )
 
