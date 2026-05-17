@@ -88,7 +88,7 @@ func TestRegisterAllIaCProviderServices_TypedNilPointer_ReturnsError(t *testing.
 
 // TestRegisterAllIaCProviderServices_AllOptionals_AllRegistered
 // asserts that a provider satisfying every optional + required interface
-// triggers registration of all 7 typed services (Required + 6 optional)
+// triggers registration of all 8 typed services (Required + 7 optional)
 // plus the ResourceDriver.
 func TestRegisterAllIaCProviderServices_AllOptionals_AllRegistered(t *testing.T) {
 	grpcSrv := grpc.NewServer()
@@ -105,6 +105,7 @@ func TestRegisterAllIaCProviderServices_AllOptionals_AllRegistered(t *testing.T)
 		"workflow.plugin.external.iac.IaCProviderMigrationRepairer",
 		"workflow.plugin.external.iac.IaCProviderValidator",
 		"workflow.plugin.external.iac.IaCProviderDriftConfigDetector",
+		"workflow.plugin.external.iac.IaCProviderFinalizer",
 		"workflow.plugin.external.iac.ResourceDriver",
 	}
 	for _, name := range wantServices {
@@ -171,14 +172,6 @@ func TestRegisterAll_SkipsIaCProviderFinalizerWhenNotImplemented(t *testing.T) {
 	}
 }
 
-// finalizerProviderStub satisfies IaCProviderRequired (the required minimum
-// for ServeIaCPlugin) AND IaCProviderFinalizer — representative of the DO
-// plugin shape under workflow#695 Phase 2.5.
-type finalizerProviderStub struct {
-	pb.UnimplementedIaCProviderRequiredServer
-	pb.UnimplementedIaCProviderFinalizerServer
-}
-
 func serviceNames(info map[string]grpc.ServiceInfo) []string {
 	out := make([]string, 0, len(info))
 	for k := range info {
@@ -201,6 +194,14 @@ type enumeratorOnlyStub struct {
 	pb.UnimplementedIaCProviderEnumeratorServer
 }
 
+// finalizerProviderStub satisfies IaCProviderRequired (the required minimum
+// for ServeIaCPlugin) AND IaCProviderFinalizer — representative of the DO
+// plugin shape under workflow#695 Phase 2.5.
+type finalizerProviderStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedIaCProviderFinalizerServer
+}
+
 // allCapabilitiesStub satisfies every required + optional IaC service plus
 // ResourceDriver — used to assert auto-registration covers the full surface.
 type allCapabilitiesStub struct {
@@ -211,6 +212,7 @@ type allCapabilitiesStub struct {
 	pb.UnimplementedIaCProviderMigrationRepairerServer
 	pb.UnimplementedIaCProviderValidatorServer
 	pb.UnimplementedIaCProviderDriftConfigDetectorServer
+	pb.UnimplementedIaCProviderFinalizerServer
 	pb.UnimplementedResourceDriverServer
 }
 
