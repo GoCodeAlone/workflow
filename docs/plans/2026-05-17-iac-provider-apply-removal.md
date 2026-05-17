@@ -132,7 +132,7 @@ go test -run TestInfraApply_V2OnlyDispatch_NoV1Branch ./cmd/wfctl/
 
 Expected: compile error — `*stubV2OnlyProvider does not implement interfaces.IaCProvider (missing method Apply)`. This proves the interface still declares Apply.
 
-**Step 4: Edit runInfraApply (lines 465-540) — collapse v1/v2 branch**
+**Step 4: Edit runInfraApply (lines 465-589) — collapse v1/v2 branch + delete v1 else-block (cycle-2 N2 fix)**
 
 In `cmd/wfctl/infra_apply.go`, replace the block at lines 465-487 (the `if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 { ... } else { result, err = provider.Apply(ctx, &plan) }` block) with:
 
@@ -145,11 +145,19 @@ if result != nil {
 }
 ```
 
-Remove the `usedV2Dispatch` variable declaration and any references in the surrounding error/result handling at line 536 (replace `if usedV2Dispatch { ... }` with the body unconditionally).
+ALSO delete the v1 post-processing else-block at lines ~547-589 (the `if usedV2Dispatch { ... } else { rejectSensitiveOutputsWithoutProvider + persist loop + result.Errors handler }` shape — verify exact lines via `grep -n 'if usedV2Dispatch' cmd/wfctl/infra_apply.go`). Collapse to the v2-only body unconditionally.
 
-**Step 5: Edit applyPrecomputedPlanWithStore (lines 1660-1730) — same collapse**
+**Sub-step: after collapsing, identify newly-orphaned helpers:**
 
-Apply the identical collapse pattern to the block at lines 1660-1722. Remove `usedV2Dispatch` variable at `:1662`, conditional at `:1711`.
+```bash
+grep -rn 'rejectSensitiveOutputsWithoutProvider\|successfulDeleteNames\|planActionForOutput' --include='*.go' cmd/wfctl/ | grep -v _test.go | grep -v _worktrees
+```
+
+For each helper with zero non-test callers post-collapse: delete it. Add to Task 1's commit.
+
+**Step 5: Edit applyPrecomputedPlanWithStore (lines 1660-~1750) — same collapse + v1 else-block delete**
+
+Apply the identical collapse pattern to the block at lines 1660-1722. Remove `usedV2Dispatch` variable at `:1662`, conditional at `:1711`. ALSO delete the v1 else-block at lines ~1723-1750 (the parallel v1 post-processing that mirrors the runInfraApply pattern; verify via `grep -n 'if usedV2Dispatch' cmd/wfctl/infra_apply.go`).
 
 **Step 6: Verify both collapses removed all 5 `usedV2Dispatch` references**
 
@@ -315,7 +323,7 @@ go test -run TestDiscoverAndLoadIaCProvider_LoadGate ./cmd/wfctl/
 
 Expected: FAIL — `undefined: verifyComputePlanVersionV2`.
 
-**Step 3: Implement `verifyComputePlanVersionV2` helper + wire into `discoverAndLoadIaCProvider`**
+**Step 3: Implement `verifyComputePlanVersionV2` helper + add CapabilitiesWithContext + wire gate (cycle-2 N4 fix — actual field paths)**
 
 Append to `cmd/wfctl/deploy_providers.go`:
 
@@ -337,17 +345,27 @@ func verifyComputePlanVersionV2(cpv, pluginName string) error {
 }
 ```
 
-Modify `discoverAndLoadIaCProvider` (locate the line right after `typedIaCAdapter` is constructed and before it is returned). Add:
+Add a method on `typedIaCAdapter` in `cmd/wfctl/iac_typed_adapter.go` (the `required` field is unexported per `iac_typed_adapter.go:169`; the load gate must go through the adapter, not reach into its internals):
 
 ```go
-// Per workflow#699: gate provider load on the typed
-// CapabilitiesResponse.compute_plan_version field. The 10s timeout
-// bounds a hung plugin handshake; the call is NOT shared with the
-// long-lived fetchCapabilities cache (transient failures must not
-// poison the adapter for the entire invocation).
+// CapabilitiesWithContext returns CapabilitiesResponse with caller-supplied
+// context. Bypasses fetchCapabilities's adapter-lifetime cache — used by
+// the load-time workflow#699 gate which must not poison the cache on
+// transient failure.
+func (a *typedIaCAdapter) CapabilitiesWithContext(ctx context.Context) (*pb.CapabilitiesResponse, error) {
+	return a.required.Capabilities(ctx, &pb.CapabilitiesRequest{})
+}
+```
+
+In `discoverAndLoadIaCProvider`, after `typed` (`*typedIaCAdapter`) is constructed and before returning it:
+
+```go
+// Per workflow#699: gate provider load on typed CapabilitiesResponse.compute_plan_version.
+// 10s timeout bounds hung handshake; bypasses the lifetime-cached fetchCapabilities so
+// transient errors don't poison the adapter.
 capsCtx, capsCancel := context.WithTimeout(ctx, 10*time.Second)
 defer capsCancel()
-capsResp, capsErr := adapter.required.Capabilities(capsCtx, &pb.CapabilitiesRequest{})
+capsResp, capsErr := typed.CapabilitiesWithContext(capsCtx)
 if capsErr != nil {
 	return nil, nil, fmt.Errorf("plugin %q: Capabilities RPC failed: %w (see workflow#699)", pluginName, capsErr)
 }
@@ -369,13 +387,30 @@ case "v1":
 }
 ```
 
-**Step 4: Run test**
+**Step 4: Run unit test + add integration test for wiring (cycle-2 N5 fix)**
 
 ```bash
 go test -run TestDiscoverAndLoadIaCProvider_LoadGate ./cmd/wfctl/ -v
 ```
 
 Expected: PASS on all 3 sub-tests.
+
+Add an integration test that wires a fake adapter through `discoverAndLoadIaCProvider` (use existing `iacAdapterAccessor` seam at `deploy_providers.go:235`):
+
+```go
+// TestDiscoverAndLoadIaCProvider_LoadGate_WiredIntoDiscovery asserts the
+// helper is actually called by discoverAndLoadIaCProvider — not just
+// independently tested. Regression-gates against future refactor that
+// removes the gate from the discovery code-path.
+func TestDiscoverAndLoadIaCProvider_LoadGate_WiredIntoDiscovery(t *testing.T) {
+	// fake adapter whose CapabilitiesWithContext returns compute_plan_version="v1"
+	// MUST trigger the workflow#699 error from discoverAndLoadIaCProvider, not
+	// from verifyComputePlanVersionV2 in isolation.
+	// ... (use existing test scaffolding patterns from iac_loader_gate_test.go)
+}
+```
+
+Run: `go test -run TestDiscoverAndLoadIaCProvider_LoadGate_WiredIntoDiscovery ./cmd/wfctl/ -v` → PASS.
 
 **Step 5: Commit**
 
@@ -435,7 +470,7 @@ In `Makefile`, locate the existing `lint:` target (single-line `golangci-lint ru
 ```makefile
 lint:
 	golangci-lint run --timeout=5m
-	@if grep -q 'rpc Apply' plugin/external/proto/iac.proto; then \
+	@if grep -qE '^\s*rpc Apply\s*\(' plugin/external/proto/iac.proto; then \
 		echo "workflow#699: rpc Apply re-introduced in iac.proto; see decisions/0024-iac-typed-force-cutover.md"; \
 		exit 1; \
 	else \
@@ -536,14 +571,29 @@ git commit -m "feat(sdk): align iacserver type-assert with trimmed pb.IaCProvide
 
 ### Task 8: Tighten wftest/bdd + iactest fakeprovider + delete obsolete test coverage
 
-**Files:**
-- Modify: `iac/iactest/fakeprovider.go:42-46` (delete `DispatchVersion` field) + `:69-72` (delete `ComputePlanVersion()` method) — cycle-2 plan-review C2 fix; this stub is consumed by 8+ `cmd/wfctl/*_test.go` files and will break `go build ./...` in Task 9 if not cleaned up here.
+**Files (per cycle-2 plan-review N1 fanout):**
+- Modify: `iac/iactest/fakeprovider.go:42-46` (delete `DispatchVersion` field) + `:69-72` (delete `ComputePlanVersion()` method)
 - Modify: `wftest/bdd/strict_iac.go` (drop `Apply` row from `iacServiceChecks`)
 - Modify: `cmd/wfctl/iac_loader_gate_test.go` (drop v1 dispatch coverage)
 - Modify: `cmd/wfctl/plugin_audit_iac_test.go` (drop v1 dispatch coverage)
 - Modify: `cmd/wfctl/plugin_audit.go` (drop v1 dispatch coverage)
 - Modify: `plugin/external/proto/iac_proto_test.go` (delete `pb.ApplyResult`-using tests)
-- Modify: `iac/iactest/fakeprovider_test.go` (if it exists; verify with `ls iac/iactest/`) — drop any `DispatchVersion`/`ComputePlanVersion` coverage. Update consumer tests in `cmd/wfctl/` that set `iactest.NoopProvider{DispatchVersion: "v2"}` — remove the field.
+- Modify: `cmd/wfctl/infra_apply_allow_replace_test.go:240` — drop `DispatchVersion: "v2"` field literal (default OK post-cleanup)
+- Modify: `cmd/wfctl/infra_apply_plan_test.go:412` — same
+- Modify: `cmd/wfctl/infra_apply_v2_test.go:71,157,201,582` — drop `DispatchVersion:` literals; DELETE the v1-empty-decl test at `:582` (path eliminated)
+- Modify: `cmd/wfctl/infra_apply_v2_loader_test.go:249` — delete `_ wfctlhelpers.ComputePlanVersionDeclarer = ...` interface assertion (package gone)
+- Modify: `cmd/wfctl/infra_apply_jit_loader_test.go:138` — same interface assertion deletion
+- Modify: `iac/conformance/scenarios_test.go:494` — drop `DispatchVersion: "v2"` literal
+- Modify: `iac/iactest/fakeprovider_test.go` (if exists; `ls iac/iactest/` to verify)
+- Modify: `plugin/sdk/manifest.go:60-72` — remove `EffectiveComputePlanVersion` helper OR change default from "v1" to "v2" (cycle-2 N7: post-cutover, "v1" is no longer a valid runtime value)
+
+**Step 1 audit grep (expanded per N1):**
+
+```bash
+grep -rn 'DispatchVersion:\|iactest.NoopProvider{\|wfctlhelpers.ComputePlanVersionDeclarer\|EffectiveComputePlanVersion' --include='*.go' . | grep -v _worktrees | grep -v .claude/worktrees
+```
+
+Expected: only files listed above. Any extra match → halt and add to the list.
 
 **Step 1: Audit test files**
 
@@ -1104,10 +1154,12 @@ cd workflow-plugin-digitalocean
 go build -o ../do-plugin ./cmd/...
 cd ../workflow
 go build -o wfctl ./cmd/wfctl
-./wfctl plugin info digitalocean --plugin-dir /tmp/699-smoke
+./wfctl infra plan example/minimal-do-plan.yaml --plugin-dir /tmp/699-smoke 2>&1 | tee smoke.log
 ```
 
-Expected: plugin loads, `ComputePlanVersion=v2` accepted, no v1 dispatch warnings.
+(`plugin info` does NOT load via gRPC; `infra plan` exercises `discoverAndLoadIaCProvider` and thus the workflow#699 gate — cycle-2 N3 fix.)
+
+Expected: smoke.log shows plugin loads via gRPC, `ComputePlanVersion=v2` accepted, plan computation completes without v1 dispatch warnings.
 
 **Step 2:** No commit — record transcript at `docs/runtime-validation/2026-05-17-do-v2-smoke.md` in the workflow repo (separate housekeeping commit).
 
@@ -1163,7 +1215,9 @@ git clone --depth 1 --branch v0.56.0 https://github.com/GoCodeAlone/workflow.git
 git clone --depth 1 --branch v2.0.0 https://github.com/GoCodeAlone/workflow-plugin-azure.git
 cd workflow-plugin-azure && go build -o ../azure-plugin ./cmd/... && cd ..
 cd workflow && go build -o wfctl ./cmd/wfctl
-./wfctl plugin info azure --plugin-dir /tmp/699-smoke-azure
+./wfctl infra plan example/minimal-azure-plan.yaml --plugin-dir /tmp/699-smoke-azure 2>&1 | tee smoke.log
 ```
 
-Expected: plugin loads; `ComputePlanVersion=v2` accepted; no v1 dispatch warnings.
+(Per cycle-2 N3 fix: `infra plan` exercises `discoverAndLoadIaCProvider` and thus the workflow#699 gate; `plugin info` does not.)
+
+Expected: smoke.log shows plugin loads via gRPC; `ComputePlanVersion=v2` accepted; plan computation completes without v1 dispatch warnings.
