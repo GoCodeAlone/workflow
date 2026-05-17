@@ -226,11 +226,11 @@ func (a *typedIaCAdapter) ResourceDriverClient() pb.ResourceDriverClient {
 }
 
 // Finalizer returns the typed pb.IaCProviderFinalizerClient or nil when
-// the plugin did not register IaCProviderFinalizer. Intended for use by
-// the v2 apply path's statePersistenceHooks helper (cmd/wfctl/infra_apply.go)
-// to gate the ApplyPlanHooks.OnPlanComplete wiring on service-presence —
-// a nil return means no FinalizeApply RPC is invoked. Per ADR 0024 the
-// absence of the registration is the negative signal (no compat shim, no
+// the plugin did not register IaCProviderFinalizer. Used by the v2 apply
+// path's statePersistenceHooks helper (cmd/wfctl/infra_apply.go) to gate
+// the ApplyPlanHooks.OnPlanComplete wiring on service-presence — a nil
+// return means no FinalizeApply RPC is invoked. Per ADR 0024 the absence
+// of the registration is the negative signal (no compat shim, no
 // NotSupported flag). Per workflow#695 Phase 2.5.
 func (a *typedIaCAdapter) Finalizer() pb.IaCProviderFinalizerClient {
 	return a.finalizer

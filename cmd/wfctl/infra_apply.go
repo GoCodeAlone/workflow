@@ -654,6 +654,15 @@ func statePersistenceHooks(
 			if len(resp.GetErrors()) > 0 {
 				msgs := make([]string, 0, len(resp.GetErrors()))
 				for _, e := range resp.GetErrors() {
+					// Field order is Resource/Action (matches proto field
+					// declaration order in ActionError + apply.go's
+					// ActionError construction). NOTE: applyWithProviderAndStore's
+					// existing per-resource aggregator above uses the inverse
+					// Action/Resource order — pre-existing file-level
+					// inconsistency, not introduced here. Reconciliation
+					// (flipping the older site to Resource/Action canonical
+					// order) is tracked separately; do NOT "fix" this site
+					// back to Action/Resource without flipping the other too.
 					msgs = append(msgs, fmt.Sprintf("%s/%s: %s", e.GetResource(), e.GetAction(), e.GetError()))
 				}
 				return fmt.Errorf("plugin finalize: %d driver(s) failed: %s", len(resp.GetErrors()), strings.Join(msgs, "; "))
