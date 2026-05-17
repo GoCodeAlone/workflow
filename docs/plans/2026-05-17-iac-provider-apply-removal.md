@@ -73,14 +73,14 @@ Before PR 1 starts, the executing agent MUST:
 grep -n usedV2Dispatch cmd/wfctl/infra_apply.go
 ```
 
-Expected: 5 lines (467, 472, 536, 1662, 1664, 1711) — both functions have the v1/v2 dispatch fork.
+Expected: 6 lines (467, 472, 536, 1662, 1664, 1711) — both functions have the v1/v2 dispatch fork.
 
 **Step 2: Write the failing test for runInfraApply collapsed path**
 
 `cmd/wfctl/infra_apply_v2_only_test.go` (new file):
 
 ```go
-package wfctl
+package main
 
 import (
 	"context"
@@ -267,7 +267,7 @@ git commit -m "feat(iac): delete wfctlhelpers/dispatch.go — v2 is sole dispatc
 `cmd/wfctl/deploy_providers_load_gate_test.go`:
 
 ```go
-package wfctl
+package main
 
 import (
 	"strings"
@@ -356,17 +356,17 @@ if err := verifyComputePlanVersionV2(capsResp.GetComputePlanVersion(), pluginNam
 }
 ```
 
-Modify `findIaCPluginDir` switch at `:162-170` — leave the `case "", "v1", "v2"` accept clause unchanged. Add inside the `case "", "v1":` arm (split it from `v2`):
+Leave `findIaCPluginDir`'s switch at `:162-170` UNCHANGED (it already accepts `"", "v1", "v2"`). Move the deprecation log emission to `discoverAndLoadIaCProvider` (cycle-2 plan-review Finding #7 fix — `findIaCPluginDir` may be called multiple times per wfctl invocation, but `discoverAndLoadIaCProvider` is called exactly once per resolve):
 
 ```go
+// Inside discoverAndLoadIaCProvider, AFTER findIaCPluginDir returns + BEFORE the Capabilities gate.
+// computePlanVersion is the value findIaCPluginDir returned.
+switch computePlanVersion {
 case "":
 	log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion is empty; declare \"v2\" explicitly (workflow#699)", pluginName)
 case "v1":
 	log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion=\"v1\"; load-time gate will reject this (workflow#699)", pluginName)
-case "v2":
-	// accept
-default:
-	return "", "", false, fmt.Errorf(...)  // unchanged
+}
 ```
 
 **Step 4: Run test**
@@ -397,13 +397,14 @@ git commit -m "feat(wfctl): load-time Capabilities-RPC gate enforces ComputePlan
 - Modify: `plugin/external/proto/iac_grpc.pb.go` (regenerated)
 - Modify: `Makefile` (add lint step)
 
-**Step 1: Inspect the proto messages slated for deletion**
+**Step 1: Inspect the proto messages slated for deletion + verify ActionResult has zero external consumers (cycle-2 plan-review Finding #6 fix)**
 
 ```bash
 grep -n 'message ApplyRequest\|message ApplyResponse\|message ApplyResult\|message ActionResult\|rpc Apply' plugin/external/proto/iac.proto
+grep -n 'ActionResult\b' plugin/external/proto/iac.proto
 ```
 
-Expected: 5 line matches.
+Expected: first grep returns ≥5 line matches. Second grep MUST show `ActionResult` referenced ONLY inside `message ActionResult { ... }` block AND inside `message ApplyResult.actions = 7` field. If any OTHER reference exists (e.g., from FinalizeApply or hook telemetry), HALT and re-design — ActionResult cannot be deleted.
 
 **Step 2: Edit iac.proto**
 
@@ -429,11 +430,20 @@ Expected: `iac.pb.go` and `iac_grpc.pb.go` shrink (no `ApplyRequest`/`Response`/
 
 **Step 4: Add Makefile lint step**
 
-In `Makefile`, find the `lint:` (or `ci:`) target and append:
+In `Makefile`, locate the existing `lint:` target (single-line `golangci-lint run --timeout=5m` per cycle-2 plan-review I-NEW finding). Convert it to a multi-line recipe and append the proto guard:
 
 ```makefile
-	@grep -q 'rpc Apply' plugin/external/proto/iac.proto && (echo "workflow#699: rpc Apply re-introduced in iac.proto; see decisions/0024-iac-typed-force-cutover.md" && exit 1) || echo "workflow#699 guard: rpc Apply correctly absent"
+lint:
+	golangci-lint run --timeout=5m
+	@if grep -q 'rpc Apply' plugin/external/proto/iac.proto; then \
+		echo "workflow#699: rpc Apply re-introduced in iac.proto; see decisions/0024-iac-typed-force-cutover.md"; \
+		exit 1; \
+	else \
+		echo "workflow#699 guard: rpc Apply correctly absent"; \
+	fi
 ```
+
+If `buf` is not installed in the environment running this PR: install via `go install github.com/bufbuild/buf/cmd/buf@latest`. The repo's `buf.gen.yaml` is the generation config; no separate `proto-gen` Makefile target exists today.
 
 **Step 5: Run build (expect FAIL — interface still has Apply, plugins haven't dropped their handlers yet)**
 
@@ -524,14 +534,16 @@ git commit -m "feat(sdk): align iacserver type-assert with trimmed pb.IaCProvide
 
 ---
 
-### Task 8: Tighten wftest/bdd + delete obsolete test coverage
+### Task 8: Tighten wftest/bdd + iactest fakeprovider + delete obsolete test coverage
 
 **Files:**
+- Modify: `iac/iactest/fakeprovider.go:42-46` (delete `DispatchVersion` field) + `:69-72` (delete `ComputePlanVersion()` method) — cycle-2 plan-review C2 fix; this stub is consumed by 8+ `cmd/wfctl/*_test.go` files and will break `go build ./...` in Task 9 if not cleaned up here.
 - Modify: `wftest/bdd/strict_iac.go` (drop `Apply` row from `iacServiceChecks`)
 - Modify: `cmd/wfctl/iac_loader_gate_test.go` (drop v1 dispatch coverage)
 - Modify: `cmd/wfctl/plugin_audit_iac_test.go` (drop v1 dispatch coverage)
 - Modify: `cmd/wfctl/plugin_audit.go` (drop v1 dispatch coverage)
 - Modify: `plugin/external/proto/iac_proto_test.go` (delete `pb.ApplyResult`-using tests)
+- Modify: `iac/iactest/fakeprovider_test.go` (if it exists; verify with `ls iac/iactest/`) — drop any `DispatchVersion`/`ComputePlanVersion` coverage. Update consumer tests in `cmd/wfctl/` that set `iactest.NoopProvider{DispatchVersion: "v2"}` — remove the field.
 
 **Step 1: Audit test files**
 
@@ -564,10 +576,12 @@ git commit -m "test: drop v1 Apply coverage + iacServiceChecks row (workflow#699
 
 ---
 
-### Task 9: Delete cmd/iac-codemod + run full build/vet + tag rc1
+### Task 9: Delete cmd/iac-codemod + Makefile cleanup + run full build/vet + tag rc1
 
 **Files:**
 - Delete: `cmd/iac-codemod/` (entire directory)
+- Modify: `Makefile` — delete `.PHONY` entries `build-iac-codemod` and `migrate-providers` (line 1); delete `build-iac-codemod:` target block (~lines 86-91); delete `migrate-providers:` target block (~lines 113-125); remove `iac-codemod` from any `clean:` rule (~line 131). Verify with `grep -c iac-codemod Makefile` → 0 after edit.
+- Modify: `docs/migrations/2026-05-16-v2-lifecycle-phase1-inventory.md` (if it exists and references iac-codemod) — strike codemod section as completed-and-removed.
 - Modify: `CHANGELOG.md`
 
 **Step 1: Verify codemod usage**
@@ -799,9 +813,17 @@ After merge: tag `v2.0.0-rc1`.
 
 ### Task 14: Delete awsIaCServer.Apply RPC handler + applyResultToPB
 
-**Files:**
-- Modify: `internal/iacserver.go:148-...` (delete `awsIaCServer.Apply`)
-- Modify: `internal/iacserver.go:679-...` (delete `applyResultToPB` + helpers)
+**Step 1: Verify symbol locations (cycle-2 plan-review Finding #8 fix)**
+
+```bash
+grep -n 'func (s \*awsIaCServer) Apply\b\|func applyResultToPB\|func actionsToPB\|func actionToPB' internal/iacserver.go
+```
+
+Capture line numbers from output; use those (not the plan's approximate values).
+
+**Files (line numbers verified in Step 1):**
+- Modify: `internal/iacserver.go` (delete `awsIaCServer.Apply`)
+- Modify: `internal/iacserver.go` (delete `applyResultToPB` + helpers)
 
 **Steps:** mirror PR 2 Task 11.
 
@@ -859,7 +881,7 @@ Mirror PR 2 Task 10, swap `DOProvider` → `GCPProvider`. File path: `provider/p
 
 ### Task 18: Delete gcpIaCServer.Apply RPC handler + applyResultToPB
 
-Mirror PR 3 Task 14. File: `internal/iacserver.go:148-...` + `:682-...`.
+Mirror PR 3 Task 14 — including the Step 1 grep verification of symbol locations. Do NOT assume line numbers; verify per-plugin.
 
 **Commit:** `feat: delete gcpIaCServer.Apply RPC handler + applyResultToPB (workflow#699 PR 4 task 18)`
 
@@ -889,7 +911,7 @@ Mirror PR 2 Task 10. File path: `internal/provider.go:138-...`.
 
 ### Task 21: Delete azureIaCServer.Apply RPC handler + applyResultToPB
 
-Mirror PR 3 Task 14. File: `internal/iacserver.go:149-...` + `:680-...`.
+Mirror PR 3 Task 14 — including the Step 1 grep verification of symbol locations. Do NOT assume line numbers; verify per-plugin.
 
 **Commit:** `feat: delete azureIaCServer.Apply RPC handler + applyResultToPB (workflow#699 PR 5 task 21)`
 
@@ -911,8 +933,17 @@ After merge: tag `v2.0.0-rc1`.
 
 ### Task 23: Add plugin-conformance matrix to CI
 
+**Pre-flight gate (run BEFORE opening PR 6):**
+
+```bash
+for p in aws gcp azure digitalocean; do
+  gh release view v2.0.0-rc1 -R GoCodeAlone/workflow-plugin-$p > /dev/null || { echo "MISSING: workflow-plugin-$p v2.0.0-rc1"; exit 1; }
+done
+echo "All 4 plugin v2.0.0-rc1 tags present."
+```
+
 **Files:**
-- Modify: `.github/workflows/ci.yaml` (or equivalent) — add matrix step
+- Modify: `.github/workflows/ci.yml` (verified path; the repo uses `.yml` not `.yaml`) — add matrix step
 
 **Step 1: Add CI step**
 
@@ -1124,4 +1155,15 @@ Mirror PR 7 Task 26. **Rollback floor:** azure v1.2.1.
 
 Mirror PR 7 Task 27. File: `workflow-registry/v1/plugins/azure/manifest.json`. Pin currently `0.1.2` → bump to `2.0.0`.
 
-(Smoke-validate azure v2.0.0 is rolled into Task 36 to reduce task count without losing the validation step — same procedure as PR 7 Task 28.)
+**Explicit smoke-validate step (cycle-2 plan-review Finding #12 fix):**
+
+```bash
+mkdir -p /tmp/699-smoke-azure && cd /tmp/699-smoke-azure
+git clone --depth 1 --branch v0.56.0 https://github.com/GoCodeAlone/workflow.git
+git clone --depth 1 --branch v2.0.0 https://github.com/GoCodeAlone/workflow-plugin-azure.git
+cd workflow-plugin-azure && go build -o ../azure-plugin ./cmd/... && cd ..
+cd workflow && go build -o wfctl ./cmd/wfctl
+./wfctl plugin info azure --plugin-dir /tmp/699-smoke-azure
+```
+
+Expected: plugin loads; `ComputePlanVersion=v2` accepted; no v1 dispatch warnings.
