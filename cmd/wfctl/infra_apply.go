@@ -28,12 +28,10 @@ import (
 // nil or InputDriftReport is empty/nil — both yield a no-op so callers
 // don't need to defensively check the field before calling.
 //
-// Wired in by W-3a/T3.1.5 as a standalone helper; the actual call site in
-// applyWithProviderAndStore (or its successor) lands when W-3b/T3.7
-// switches the in-process apply path through wfctlhelpers.ApplyPlan for
-// v2 plugins. Until then this helper is exercised solely by the
-// in-process drift test, NOT yet by any production caller — preserving
-// the W-3a "zero runtime change for v1 plugins" invariant.
+// Production drift-surfacing path on the v2 (only) apply dispatch — per
+// workflow#699, v2 via wfctlhelpers.ApplyPlanWithHooks is the sole code
+// path, so this helper now runs unconditionally after every apply
+// invocation in both applyWithProviderAndStore and applyPrecomputedPlanWithStore.
 func printDriftReportIfAny(w io.Writer, result *interfaces.ApplyResult) {
 	if result == nil || len(result.InputDriftReport) == 0 {
 		return
@@ -357,11 +355,13 @@ func resourceSpecProviderRef(spec interfaces.ResourceSpec) string {
 }
 
 // applyWithProviderAndStore computes a diff plan for the given specs against
-// the current state and executes it via provider.Apply. On success, each
-// provisioned resource is persisted to store. Save failures abort the command
-// so callers cannot miss a successful cloud mutation whose state was not
-// recorded. Deleted resources are removed from store after a successful destroy
-// action.
+// the current state and executes it via wfctlhelpers.ApplyPlanWithHooks (the
+// v2-only dispatch per workflow#699; routed through the
+// applyV2ApplyPlanWithHooksFn seam for test injection). On success, each
+// provisioned resource is persisted to store via the OnResourceApplied hook.
+// Save failures abort the command so callers cannot miss a successful cloud
+// mutation whose state was not recorded. Deleted resources are removed from
+// store via the OnResourceDeleted hook after a successful destroy action.
 //
 // providerType is used only as a label when constructing ResourceState records.
 // Callers pass a nil store (or noopStateStore) when state persistence is not
@@ -433,7 +433,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 
 	// W-6/T6.1: gate replace and delete actions on `protected: true`
 	// resources behind --allow-replace. Without an explicit per-resource
-	// opt-in, the apply errors before any provider Apply / wfctlhelpers
+	// opt-in, the apply errors before the wfctlhelpers.ApplyPlanWithHooks
 	// dispatch — destructive actions on protected infrastructure must
 	// be intentional. T6.2 swaps this fail-fast for an aggregated
 	// multi-blocker report.
@@ -496,8 +496,10 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
-		// Provider.Apply can surface a top-level error (vs. populating
-		// result.Errors[]). Emit the actionable hint here too if the
+		// applyV2ApplyPlanWithHooksFn can surface a top-level error
+		// (gRPC transport failure, plugin-side sentinel bubble, or
+		// local pre-Replace failure) distinct from per-resource entries
+		// in result.Errors[]. Emit the actionable hint here too if the
 		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
 		// otherwise plugin paths that bubble the sentinel via err escape
 		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
@@ -1335,8 +1337,9 @@ func loadPlanFromFile(path string) (interfaces.IaCPlan, error) {
 
 // applyFromPrecomputedPlan dispatches a pre-computed plan without calling
 // ComputePlan. It loads IaCProvider plugins from cfgFile, groups plan actions
-// by iac.provider module, and calls provider.Apply for each group. State is
-// persisted exactly as in the live-diff path.
+// by iac.provider module, and invokes applyPrecomputedPlanWithStore (which
+// routes through wfctlhelpers.ApplyPlanWithHooks per workflow#699) for each
+// group. State is persisted exactly as in the live-diff path.
 //
 // The same-process hydrated routed-secret map (sensitive.Route output) is
 // accumulated across provider groups and returned to the caller so the
@@ -1456,9 +1459,11 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 }
 
 // applyPrecomputedPlanWithStore executes a pre-computed plan group via
-// provider.Apply and persists state for each provisioned resource. It is the
-// precomputed-plan counterpart of applyWithProviderAndStore, skipping
-// ComputePlan / adoptExistingResources entirely.
+// wfctlhelpers.ApplyPlanWithHooks (the v2-only dispatch per workflow#699)
+// and persists state through the same OnResourceApplied / OnResourceDeleted
+// hooks as applyWithProviderAndStore. It is the precomputed-plan counterpart
+// of applyWithProviderAndStore, skipping ComputePlan / adoptExistingResources
+// entirely.
 func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan, provider interfaces.IaCProvider, providerType string, store infraStateStore, w io.Writer, envName string, cfgFile string, hydratedOut map[string]string) error {
 	if store == nil {
 		store = &noopStateStore{}
@@ -1541,8 +1546,10 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
-		// Provider.Apply can surface a top-level error (vs. populating
-		// result.Errors[]). Emit the actionable hint here too if the
+		// applyV2ApplyPlanWithHooksFn can surface a top-level error
+		// (gRPC transport failure, plugin-side sentinel bubble, or
+		// local pre-Replace failure) distinct from per-resource entries
+		// in result.Errors[]. Emit the actionable hint here too if the
 		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
 		// otherwise plugin paths that bubble the sentinel via err escape
 		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
