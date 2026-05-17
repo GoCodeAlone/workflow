@@ -359,6 +359,57 @@ func (p *countingCapabilitiesProvider) Capabilities(_ context.Context, _ *pb.Cap
 	return &pb.CapabilitiesResponse{ComputePlanVersion: p.computePlanVersion}, nil
 }
 
+// ─── IaCProviderFinalizer accessor tests (workflow#695 Phase 2.5) ──────────
+
+// TestTypedAdapter_Finalizer_PopulatedWhenRegistered verifies that
+// newTypedIaCAdapter wires the pb.IaCProviderFinalizerClient when the
+// plugin's ContractRegistry advertised the IaCProviderFinalizer service.
+// Per workflow#695 Phase 2.5 / ADR 0024 (service-presence is the opt-in
+// signal — no NotSupported flag, no compat shim).
+func TestTypedAdapter_Finalizer_PopulatedWhenRegistered(t *testing.T) {
+	conn := dialLazyConn(t)
+	adapter := newTypedIaCAdapter(conn, map[string]bool{
+		iacServiceFinalizer: true,
+	})
+	if adapter.Finalizer() == nil {
+		t.Error("Finalizer() returned nil when IaCProviderFinalizer is in registered set")
+	}
+}
+
+// TestTypedAdapter_Finalizer_NilWhenNotRegistered verifies the negative
+// signal — when the plugin did not advertise IaCProviderFinalizer, the
+// accessor returns nil so the wfctl-side OnPlanComplete wiring (Task 5)
+// stays unset and no finalize RPC is invoked. Locks the contract that
+// downstream consumers gate on.
+func TestTypedAdapter_Finalizer_NilWhenNotRegistered(t *testing.T) {
+	conn := dialLazyConn(t)
+	adapter := newTypedIaCAdapter(conn, map[string]bool{
+		iacServiceEnumerator: true, // arbitrary other service, no Finalizer
+	})
+	if adapter.Finalizer() != nil {
+		t.Error("Finalizer() returned non-nil when IaCProviderFinalizer not registered")
+	}
+}
+
+// dialLazyConn returns a real *grpc.ClientConn that has NOT performed any
+// I/O. grpc.NewClient defers the connection-establish handshake to the
+// first RPC, so dialing a non-listening loopback port returns a valid
+// (lazy) conn without error — sufficient for tests that only assert
+// adapter field-wiring (no actual RPC). Caller schedules Close via
+// t.Cleanup so the dial pool drains between tests.
+func dialLazyConn(t *testing.T) *grpc.ClientConn {
+	t.Helper()
+	conn, err := grpc.NewClient(
+		"127.0.0.1:1", // unreachable port; we never RPC, so no dial happens
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
 // startTestServer spins up an in-process gRPC server registered with
 // the supplied IaCProviderRequiredServer (and optionally the matching
 // enumerator) on a localhost ephemeral port. Returns the server and a
