@@ -45,7 +45,7 @@ bench-compare:
 # CI so a future PR can't silently restore the deleted dispatch path).
 lint:
 	golangci-lint run --timeout=5m
-	@if grep -qE '^\s*rpc Apply\s*\(' plugin/external/proto/iac.proto; then \
+	@if grep -qE '^[[:space:]]*rpc Apply[[:space:]]*\(' plugin/external/proto/iac.proto; then \
 		echo "workflow#699: rpc Apply re-introduced in iac.proto; see decisions/0024-iac-typed-force-cutover.md"; \
 		exit 1; \
 	else \

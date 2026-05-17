@@ -7,21 +7,27 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// TestInfraApply_V2OnlyDispatch_NoV1Branch asserts runInfraApply collapses
-// to a single v2-only dispatch after workflow#699 removes provider.Apply.
-// The presence of any conditional branch on a v1-vs-v2 selector is a
-// regression: per ADR 0024, v2 is the only supported dispatch.
+// TestInfraApply_V2OnlyDispatch_NoV1Branch is a compile-time tripwire +
+// runtime tripwire: post-workflow#699 the IaCProvider interface no longer
+// declares Apply. If any implementation accidentally re-adds an Apply
+// method that satisfies the legacy v1 dispatch signature, this test
+// fires.
+//
+// This is a structural assertion, not a full apply-path exercise — the
+// apply-path coverage lives in TestApplyWithProviderAndStore_V2RoutesThroughWfctlhelpers
+// (which spies on applyV2ApplyPlanWithHooksFn to prove the v2 helper
+// is invoked). Both tests together cover:
+//   - structural: provider type cannot satisfy v1 Apply signature (this test)
+//   - runtime: applyWithProviderAndStore routes through wfctlhelpers (sibling)
+//
+// Per ADR 0024 + workflow#699: v2 is the only supported dispatch.
 func TestInfraApply_V2OnlyDispatch_NoV1Branch(t *testing.T) {
-	t.Run("collapses dispatch when typedIaCAdapter declares no ComputePlanVersion method", func(t *testing.T) {
-		// stub provider satisfies the trimmed interfaces.IaCProvider
-		// (no Apply method) and has no ComputePlanVersion declarer.
-		// runInfraApply MUST route through wfctlhelpers.ApplyPlanWithHooks
-		// and MUST NOT type-assert against a v1 dispatch.
+	t.Run("trimmed IaCProvider interface does not satisfy legacy Apply signature", func(t *testing.T) {
 		var p interfaces.IaCProvider = &stubV2OnlyProvider{}
 		if _, ok := p.(interface {
 			Apply(context.Context, *interfaces.IaCPlan) (*interfaces.ApplyResult, error)
 		}); ok {
-			t.Fatalf("provider unexpectedly satisfies legacy Apply interface")
+			t.Fatalf("provider unexpectedly satisfies legacy Apply interface — workflow#699 regression")
 		}
 	})
 }

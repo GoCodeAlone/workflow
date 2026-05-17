@@ -56,15 +56,16 @@ func TestApplyWithProviderAndStore_PassesLiveProviderToComputePlan(t *testing.T)
 }
 
 // TestApplyWithProviderAndStore_V2RoutesThroughWfctlhelpers verifies
-// T3.7's manifest-driven dispatch: a provider whose
-// ComputePlanVersion() returns "v2" routes through
-// wfctlhelpers.ApplyPlan instead of provider.Apply. The seam is
-// applyV2ApplyPlanWithHooksFn (var-indirected wfctlhelpers.ApplyPlan).
+// the v2 dispatch path: applyWithProviderAndStore routes through
+// wfctlhelpers.ApplyPlan (the only supported path post-workflow#699).
+// The seam is applyV2ApplyPlanWithHooksFn (var-indirected
+// wfctlhelpers.ApplyPlan).
 //
-// rev2/rev3-locked: there is NO env-var. The branch is purely
-// plugin-author-controlled via plugin.json's
-// iacProvider.computePlanVersion (read at provider load time and
-// surfaced via the optional ComputePlanVersionDeclarer interface).
+// Post-workflow#699: there is no v1 fallback; provider.Apply,
+// ComputePlanVersion(), ComputePlanVersionDeclarer, and the manifest's
+// iacProvider.computePlanVersion v1/v2 dispatch decision are all gone.
+// Load-time enforcement at discoverAndLoadIaCProvider rejects providers
+// whose typed CapabilitiesResponse.compute_plan_version != "v2".
 func TestApplyWithProviderAndStore_V2RoutesThroughWfctlhelpers(t *testing.T) {
 	v2Provider := &iactest.NoopProvider{
 		ProviderName: "v2-stub",

@@ -227,9 +227,9 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 	// may be called multiple times per invocation).
 	switch manifestCPV {
 	case "":
-		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion is empty; declare \"v2\" explicitly (workflow#699)", pName)
+		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion is empty; declare \"v2\" explicitly (workflow#699). Note: runtime enforcement reads the typed CapabilitiesResponse.compute_plan_version, not this manifest field; an out-of-date manifest with v2 in Capabilities will still load.", pName)
 	case "v1":
-		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion=\"v1\"; load-time gate will reject this (workflow#699)", pName)
+		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion=\"v1\"; update to \"v2\" (workflow#699). Note: runtime enforcement reads the typed CapabilitiesResponse.compute_plan_version, not this manifest field; an out-of-date manifest with v2 in Capabilities will still load.", pName)
 	}
 
 	mgr := external.NewExternalPluginManager(pluginDir, nil)
