@@ -61,6 +61,10 @@ var iacServiceChecks = []iacServiceCheck{
 		_, ok := p.(pb.IaCProviderValidatorServer)
 		return ok
 	}},
+	{"workflow.plugin.external.iac.IaCProviderFinalizer", func(p any) bool {
+		_, ok := p.(pb.IaCProviderFinalizerServer)
+		return ok
+	}},
 	{"workflow.plugin.external.iac.IaCProviderDriftConfigDetector", func(p any) bool {
 		_, ok := p.(pb.IaCProviderDriftConfigDetectorServer)
 		return ok
