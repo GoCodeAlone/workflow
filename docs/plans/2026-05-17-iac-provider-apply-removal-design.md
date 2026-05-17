@@ -88,9 +88,9 @@ PRs sequenced per Phase 2 / Phase 2.5 precedent (rc workflow tag first so plugin
    - `iac/wfctlhelpers/dispatch.go` — delete entire file (`ComputePlanVersionDeclarer`, `DispatchVersionFor`, `DispatchVersionV2`); v2 is the only dispatch path now.
 3. **Then move the loader gate from parse-time to load-time** (architectural pivot — see A4):
    - `cmd/wfctl/deploy_providers.go` — modify `discoverAndLoadIaCProvider`:
-     - After typedIaCAdapter is constructed and the plugin handshake completes, immediately call `Capabilities` (or read the cached response from `fetchCapabilities`) and gate on `CapabilitiesResponse.compute_plan_version`.
-     - Reject with: `plugin %q declares CapabilitiesResponse.compute_plan_version = %q; v0.56.0+ requires "v2" (see workflow#699 — upgrade plugin to v2.0.0 or higher)`.
-     - `findIaCPluginDir`'s inline switch (`:162-170`) RELAXED back to `case "", "v1", "v2"` (since parse-time enforcement is no longer the gate) — but emit a deprecation log line for `"v1"` / `""` to nudge plugin authors.
+     - After typedIaCAdapter is constructed and the plugin handshake completes, immediately call `Capabilities` with a bounded timeout context (`context.WithTimeout(ctx, 10*time.Second)`) — do NOT use `context.Background()` and do NOT share the load-gate caps fetch with the long-lived `fetchCapabilities` cache (transient failures must not poison the adapter for the entire wfctl invocation; cycle-3 I-NEW-6).
+     - Gate on `CapabilitiesResponse.compute_plan_version`. Reject with: `plugin %q declares CapabilitiesResponse.compute_plan_version = %q; v0.56.0+ requires "v2" (see workflow#699 — upgrade plugin to v2.0.0 or higher)`.
+     - `findIaCPluginDir`'s inline switch (`:162-170`) ALREADY accepts `case "", "v1", "v2"`; no change there. Add a deprecation log line emission when the matched manifest declares `"v1"` or empty to nudge plugin authors toward declaring `"v2"` explicitly in plugin.json (defense-in-depth; the gRPC gate is the enforcement).
    - Reason: aws/gcp/azure plugin.json files do not carry `iacProvider.computePlanVersion`; only their typed gRPC response does. Gating at parse time would reject every aws/gcp/azure plugin. The typed RPC is the source-of-truth.
 4. **Then loosen the SDK schema** (the inverse of the original plan — schema stays permissive since the load-time gate now does the enforcement):
    - `plugin/sdk/manifest.go` schema — leave `iacProvider.computePlanVersion` as `enum: ["v1","v2"]` (no change). Add a docstring note that the SDK schema is the manifest-validation surface only; runtime enforcement is at `discoverAndLoadIaCProvider`.
@@ -106,11 +106,18 @@ PRs sequenced per Phase 2 / Phase 2.5 precedent (rc workflow tag first so plugin
    - `wftest/bdd/strict_iac.go` `iacServiceChecks` — drop the `Apply` row from the IaCProviderRequired check.
    - `cmd/wfctl/iac_loader_gate_test.go`, `cmd/wfctl/plugin_audit_iac_test.go`, `cmd/wfctl/plugin_audit.go`, `plugin/external/proto/iac_proto_test.go` — delete the v1 dispatch coverage; add a new load-gate test asserting the new error message on `compute_plan_version = "v1"` and `""`.
    - `CHANGELOG.md` — entry noting the breaking change + plugin minimum versions.
+9. **Then delete the migration codemod** (its reason-to-exist evaporates the moment Apply is removed):
+   - `cmd/iac-codemod/` — delete entire directory (`add_validate_plan.go`, `lint.go`, `main.go`, `refactor_apply.go`, `refactor_plan.go` + tests). The `AssertApplyDelegatesToHelper` analyzer + `refactor-apply` rewriter exist solely to migrate v1 `Apply` impls to v2 `wfctlhelpers.ApplyPlan` delegation; with Apply removed, both are dead tools.
+
+**Edit-list correction (per cycle-3 C-NEW-5):** the two `usedV2Dispatch` collapse sites in `cmd/wfctl/infra_apply.go` live in TWO different functions: the primary `runInfraApply` (~`:465-540`) and `applyPrecomputedPlanWithStore` (~`:1600-1730`, function declared at `:1604`). Both must be edited with the same collapse pattern; do NOT assume a single edit suffices. Verify via `grep -n usedV2Dispatch cmd/wfctl/infra_apply.go` BEFORE and AFTER the edit — the count must go from 5 (467, 472, 536, 1662, 1664, 1711) to 0.
 
 **Pre-PR-1 verification step:**
 
-- `grep -rln 'wfctlhelpers.DispatchVersionV2\|wfctlhelpers.ComputePlanVersionDeclarer\|pb.ApplyResult\|pb.ApplyRequest\|pb.ApplyResponse\|applyResultFromPB' --include='*.go' .` MUST return only files this PR modifies. Particularly: clean up `_worktrees/refresh-outputs-tolerate-ghosts/` shadow (stale worktree from older work; either rebase it or delete the worktree before PR 1 lands) — otherwise the worktree's compile breaks.
+- `grep -rln 'wfctlhelpers.DispatchVersionV2\|wfctlhelpers.ComputePlanVersionDeclarer\|pb.ApplyResult\|pb.ApplyRequest\|pb.ApplyResponse\|applyResultFromPB' --include='*.go' .` MUST return only files this PR modifies. Particularly: clean up any stale `_worktrees/*` worktrees that still reference deleted symbols (cycle-3 reviewer found `_worktrees/wf663-topo`, `_worktrees/phase-b-core-deletion`, `_worktrees/phase2.5-cleanup` had old Apply references; rebase or delete each before PR 1 lands — otherwise the worktree's compile breaks).
 - `go test ./module/...` to verify `module.PlatformProvider.Apply()` (different interface, A3) is not accidentally affected by proto regen.
+- `go build ./... && go vet ./...` pre-merge gate (covers `interfaces.IaCProvider` interface change + every consumer; the targeted `./module/...` test alone is insufficient because the interface change ripples across `cmd/wfctl/`, `iac/wfctlhelpers/`, `plugin/external/sdk/`, `wftest/bdd/`).
+- `grep -L 'rpc Apply' plugin/external/proto/iac.proto || exit 1` lint check added to CI (workflow#699 re-introduction guard).
+- For each `workflow-plugin-{aws,gcp,azure,digitalocean}`: `grep -l 'applyResultToPB\|applyResultFromPB' internal/iacserver.go` — confirm helpers are dead and delete them in PRs 2-5 along with `iacserver.Apply` handler.
 
 **Tests added (PR 1):**
 
@@ -188,7 +195,7 @@ This change cascades through workflow + 4 plugins + 4 registry manifest bumps (c
 3. **RC tag handling** — RC tags (PRs 1-5 rc1) don't need active revert; operators don't pin to rc. RC tags can be left in place or yanked at maintainer discretion.
 4. **State-file format invariant** across the cutover — `interfaces.ResourceState` JSON shape unchanged. Operators do not need to migrate state.
 5. **Half-rolled-back state window** — between registry-manifest revert (step 1) and operators actually re-pulling via `wfctl plugin install`, some operators may already have v2.0.0 plugin binaries on disk. These continue to work against v0.56.0 wfctl; the issue is only for operators who downgraded wfctl to v0.55.x in the same window. Document in rollback runbook: "If you've already pulled v2.0.0 plugins, either keep v0.56.0 wfctl OR `wfctl plugin install --force` after registry revert."
-6. **Rollback floor (DO)** — DO registry manifest currently pins `1.0.12` (4 minors behind live `v1.4.0`). PR 7 explicitly bumps DO registry from `1.0.12` to `2.0.0`, which means rollback floor is `2.0.0` (revert) OR `1.0.12` (delete the bump). Recommend: rollback restores `1.4.0` (the actual live tag), NOT `1.0.12`. PR 7 description must document this floor.
+6. **Rollback floor (all 4 plugins)** — registry manifests are stale relative to live tags across the board (per cycle-3 I-NEW-7 inspection 2026-05-17): aws `0.1.2`, gcp `0.1.3`, azure `0.1.2`, DO `1.0.12`. PRs 7-10 each bump from these stale pins straight to `2.0.0` — an aggressive jump for aws/gcp/azure (`0.1.x` → `2.0.0`). Rollback restores LIVE tags, not registry pins: aws → `v1.2.1`, gcp → `v1.2.0`, azure → `v1.2.1`, DO → `v1.4.0`. Each PR (7-10) description must document its specific rollback floor. The pre-existing manifest-derivation lag is tracked under the "catalog manifest-derivation refactor" followup queue item but cannot be cleanly separated from this cascade because the same registry PRs need to land regardless.
 7. **Soft-add-back option (Approach B)** — if the rollback is driven by a third-party plugin surfacing post-cutover, the architectural re-introduction path is Approach B (optional `IaCProviderLegacyApplier` service per ADR 0025), NOT restoring `rpc Apply` on `IaCProviderRequired`. Approach B preserves the compile-time-safety guarantee while letting the third-party plugin opt in.
 
 The change is runtime-affecting (proto change, plugin gRPC service surface change), so `runtime-launch-validation` applies: each plugin PR must run iacserver_test (the per-plugin runtime smoke) before merge. PR 6 adds the cross-repo conformance gate.
@@ -218,13 +225,31 @@ The change is runtime-affecting (proto change, plugin gRPC service surface chang
 | m-NEW-1: gcp sync-plugin-version gap | 2 M | Minor | PR 4 files followup issue inline. |
 | m-NEW-2: A3 PlatformProvider regression risk | 2 M | Minor | PR 1 verification step adds `go test ./module/...` |
 
+## Cycle-3 adversarial-review findings (surgically fixed, max-cycles reached)
+
+Per `adversarial-design-review` skill, 2 revision cycles is the cap. Cycle 3 surfaced 3 narrowly-scoped Critical findings + 5 Important; all 3 Critical fixes are typo-class edits applied directly in this revision (cycle-3 reviewer's own recommendation: "These are surgical: add `cmd/iac-codemod` deletion to PR 1 step 9, name `applyPrecomputedPlanWithStore` explicitly in PR 1 step 1, add `go build ./... && go vet ./...` to pre-PR-1 gate. These are typo-class edits to the design doc; they do not require another full cycle."). Operator escalation summary:
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| C-NEW-4: `cmd/iac-codemod` graveyard | Critical | PR 1 step 9 added: delete entire directory. |
+| C-NEW-5: `applyPrecomputedPlanWithStore` not explicit in PR 1 step 1 | Critical | PR 1 step 1 edit-list correction names both call sites + grep predicate (5→0 `usedV2Dispatch` count). |
+| C-NEW-6: missing `go build` + `go vet` pre-merge gate | Critical | Pre-PR-1 verification step now requires `go build ./... && go vet ./...`. |
+| I-NEW-6: Capabilities-RPC timeout / cache poisoning | Important | PR 1 step 3 mandates `context.WithTimeout(ctx, 10s)` + separate cache for load-gate path. |
+| I-NEW-7: aws/gcp/azure registry floors (not just DO) | Important | Rollback step 6 covers all 4 plugins with per-plugin live-tag floors. |
+| I-NEW-8: misleading "RELAXED back" language | Important | Rewritten: `findIaCPluginDir` ALREADY accepts `"", "v1", "v2"`; design adds deprecation log only. |
+| I-NEW-9: `applyResultToPB` in plugin iacservers | Important | Pre-PR-1 grep predicate added; PRs 2-5 must delete the helpers. |
+| I-NEW-10: bare `#TBD` for gcp followup | Important | Will file the gcp sync-plugin-version followup issue BEFORE PR 1 lands, then patch the number. |
+
+Operator acceptance request (per `adversarial-design-review` skill): all 3 Critical findings have surgical fixes incorporated above (typo-class). 5 Important findings have concrete fixes incorporated. The design is committed; no further adversarial cycles are budgeted.
+
 ## References
 
 - Issue: https://github.com/GoCodeAlone/workflow/issues/699
 - ADR 0024 (force-cutover precedent): `decisions/0024-iac-typed-force-cutover.md`
 - ADR 0025 (optional services as typed services, not flags): `decisions/0025-iac-optional-method-typed-services-not-bool.md`
+- ADR 0029 (capability extension — canonical_keys + compute_plan_version): `decisions/0029-capability-extension-canonical-keys-and-compute-plan-version.md`
 - Phase 2 (workflow#640): `docs/plans/2026-05-10-strict-contracts-force-cutover.md` + memory `project_v2_lifecycle_phase2_shipped.md`
 - Phase 2.5 (workflow#695): merged main commit `aac519da` (IaCProviderFinalizer + OnPlanComplete hook)
 - Phase 2.3 (workflow#698): merged main commit `7a855934` (ActionStatus compensation enums)
 - Phase 2.5+ Cleanup Bundle adversarial-design-review cycle-1 C-5 finding (originating context for this issue)
-- Cycle-1 + Cycle-2 adversarial review of this design (2026-05-17, addressed above)
+- Cycle-1 + Cycle-2 + Cycle-3 adversarial review of this design (2026-05-17, all addressed above; Cycle-3 was the final allowed cycle per skill bound)
