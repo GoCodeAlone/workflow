@@ -62,10 +62,12 @@ service IaCProviderCredentialRevoker {
 // IaCProviderFinalizer is the optional service plugins implement when
 // they need a post-apply-loop finalizer hook under v2 dispatch.
 // Use case: DigitalOcean plugin's database trusted_sources deferred-flush
-// (see workflow-plugin-digitalocean/internal/provider.go:295-307) which
-// runs after the per-action loop completes. Under v2 dispatch wfctl
-// bypasses IaCProvider.Apply entirely, so plugins needing post-loop
-// work must opt in via this service. Phase 2.5 of workflow#640.
+// (see DOProvider.Apply post-loop block in workflow-plugin-digitalocean
+// internal/provider.go, iterating drivers that implement deferredUpdater
+// and calling FlushDeferredUpdates) which runs after the per-action loop
+// completes. Under v2 dispatch wfctl bypasses IaCProvider.Apply entirely,
+// so plugins needing post-loop work must opt in via this service.
+// Phase 2.5 of workflow#640.
 service IaCProviderFinalizer {
   rpc FinalizeApply(FinalizeApplyRequest) returns (FinalizeApplyResponse);
 }
@@ -528,15 +530,24 @@ message FinalizeApplyRequest {
 }
 
 message FinalizeApplyResponse {
+  reserved 2;  // Phase 2.3 compensation evidence (ACTION_STATUS_COMPENSATED outcomes)
+
   // errors is the per-driver finalize-side error array. Each entry
-  // preserves the v1 wrapper's per-driver attribution shape
-  // (workflow-plugin-digitalocean/internal/provider.go:301-306 uses
-  // ActionError{Resource: resourceType, Action: "deferred_update", Error: ...}).
-  // Empty array = success. Non-empty = each error is surfaced to wfctl's
-  // result.Errors as-is (preserving per-driver attribution), AND the
-  // outer finalize call returns a wrapped error to the caller.
+  // preserves the v1 wrapper's per-driver attribution shape (DOProvider.Apply
+  // post-loop block appends interfaces.ActionError{Resource: resourceType,
+  // Action: "deferred_update", Error: flushErr.Error()} for each driver
+  // whose FlushDeferredUpdates fails). Empty array = success. Non-empty =
+  // each error is surfaced to wfctl's result.Errors as-is (preserving
+  // per-driver attribution), AND the outer finalize call returns a
+  // wrapped error to the caller.
   //
-  // Tag 2 reserved for Phase 2.3 compensation evidence.
+  // Wire-status invariant (mirrors ADR 0040 invariant 2): the gRPC status
+  // MUST be OK whenever the plugin populates errors[] (including the
+  // empty-success case). A non-OK gRPC status (e.g., codes.Internal from
+  // a server panic) signals transport-level failure; errors[] is IGNORED
+  // by wfctl in that case and the gRPC error is surfaced directly. This
+  // prevents ambiguity between "finalize ran and reported per-driver
+  // errors" (OK + errors[]) and "finalize call itself failed" (non-OK).
   repeated ActionError errors = 1;
 }
 

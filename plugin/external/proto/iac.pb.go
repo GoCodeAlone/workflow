@@ -3554,14 +3554,21 @@ func (x *FinalizeApplyRequest) GetPlanId() string {
 type FinalizeApplyResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// errors is the per-driver finalize-side error array. Each entry
-	// preserves the v1 wrapper's per-driver attribution shape
-	// (workflow-plugin-digitalocean/internal/provider.go:301-306 uses
-	// ActionError{Resource: resourceType, Action: "deferred_update", Error: ...}).
-	// Empty array = success. Non-empty = each error is surfaced to wfctl's
-	// result.Errors as-is (preserving per-driver attribution), AND the
-	// outer finalize call returns a wrapped error to the caller.
+	// preserves the v1 wrapper's per-driver attribution shape (DOProvider.Apply
+	// post-loop block appends interfaces.ActionError{Resource: resourceType,
+	// Action: "deferred_update", Error: flushErr.Error()} for each driver
+	// whose FlushDeferredUpdates fails). Empty array = success. Non-empty =
+	// each error is surfaced to wfctl's result.Errors as-is (preserving
+	// per-driver attribution), AND the outer finalize call returns a
+	// wrapped error to the caller.
 	//
-	// Tag 2 reserved for Phase 2.3 compensation evidence.
+	// Wire-status invariant (mirrors ADR 0040 invariant 2): the gRPC status
+	// MUST be OK whenever the plugin populates errors[] (including the
+	// empty-success case). A non-OK gRPC status (e.g., codes.Internal from
+	// a server panic) signals transport-level failure; errors[] is IGNORED
+	// by wfctl in that case and the gRPC error is surfaced directly. This
+	// prevents ambiguity between "finalize ran and reported per-driver
+	// errors" (OK + errors[]) and "finalize call itself failed" (non-OK).
 	Errors        []*ActionError `protobuf:"bytes,1,rep,name=errors,proto3" json:"errors,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5855,9 +5862,9 @@ const file_iac_proto_rawDesc = "" +
 	"\rcredential_id\x18\x02 \x01(\tR\fcredentialId\"\"\n" +
 	" RevokeProviderCredentialResponse\"/\n" +
 	"\x14FinalizeApplyRequest\x12\x17\n" +
-	"\aplan_id\x18\x01 \x01(\tR\x06planId\"Z\n" +
+	"\aplan_id\x18\x01 \x01(\tR\x06planId\"`\n" +
 	"\x15FinalizeApplyResponse\x12A\n" +
-	"\x06errors\x18\x01 \x03(\v2).workflow.plugin.external.iac.ActionErrorR\x06errors\"m\n" +
+	"\x06errors\x18\x01 \x03(\v2).workflow.plugin.external.iac.ActionErrorR\x06errorsJ\x04\b\x02\x10\x03\"m\n" +
 	"\x1bRepairDirtyMigrationRequest\x12N\n" +
 	"\arequest\x18\x01 \x01(\v24.workflow.plugin.external.iac.MigrationRepairRequestR\arequest\"k\n" +
 	"\x1cRepairDirtyMigrationResponse\x12K\n" +

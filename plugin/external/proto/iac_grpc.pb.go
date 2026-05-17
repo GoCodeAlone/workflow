@@ -935,10 +935,12 @@ const (
 // IaCProviderFinalizer is the optional service plugins implement when
 // they need a post-apply-loop finalizer hook under v2 dispatch.
 // Use case: DigitalOcean plugin's database trusted_sources deferred-flush
-// (see workflow-plugin-digitalocean/internal/provider.go:295-307) which
-// runs after the per-action loop completes. Under v2 dispatch wfctl
-// bypasses IaCProvider.Apply entirely, so plugins needing post-loop
-// work must opt in via this service. Phase 2.5 of workflow#640.
+// (see DOProvider.Apply post-loop block in workflow-plugin-digitalocean
+// internal/provider.go, iterating drivers that implement deferredUpdater
+// and calling FlushDeferredUpdates) which runs after the per-action loop
+// completes. Under v2 dispatch wfctl bypasses IaCProvider.Apply entirely,
+// so plugins needing post-loop work must opt in via this service.
+// Phase 2.5 of workflow#640.
 type IaCProviderFinalizerClient interface {
 	FinalizeApply(ctx context.Context, in *FinalizeApplyRequest, opts ...grpc.CallOption) (*FinalizeApplyResponse, error)
 }
@@ -968,10 +970,12 @@ func (c *iaCProviderFinalizerClient) FinalizeApply(ctx context.Context, in *Fina
 // IaCProviderFinalizer is the optional service plugins implement when
 // they need a post-apply-loop finalizer hook under v2 dispatch.
 // Use case: DigitalOcean plugin's database trusted_sources deferred-flush
-// (see workflow-plugin-digitalocean/internal/provider.go:295-307) which
-// runs after the per-action loop completes. Under v2 dispatch wfctl
-// bypasses IaCProvider.Apply entirely, so plugins needing post-loop
-// work must opt in via this service. Phase 2.5 of workflow#640.
+// (see DOProvider.Apply post-loop block in workflow-plugin-digitalocean
+// internal/provider.go, iterating drivers that implement deferredUpdater
+// and calling FlushDeferredUpdates) which runs after the per-action loop
+// completes. Under v2 dispatch wfctl bypasses IaCProvider.Apply entirely,
+// so plugins needing post-loop work must opt in via this service.
+// Phase 2.5 of workflow#640.
 type IaCProviderFinalizerServer interface {
 	FinalizeApply(context.Context, *FinalizeApplyRequest) (*FinalizeApplyResponse, error)
 	mustEmbedUnimplementedIaCProviderFinalizerServer()
