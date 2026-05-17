@@ -143,10 +143,14 @@ type DriftEntry struct {
 
 // ActionStatus categorizes per-action outcomes for wfctl-side hook dispatch.
 // Mirrors pb.ActionStatus (plugin/external/proto/iac.proto) for type-safe Go
-// boundary use; constant tags 0/1/2/3 MUST stay in lockstep with the proto.
-// Per workflow#640 Phase 2 + ADR 0040 invariants 1-2. Tags 4-5 are reserved
-// in the proto for Phase 2.3 compensation (ActionStatusCompensated +
-// ActionStatusCompensationFailed) and intentionally not declared here yet.
+// boundary use; constant tags 0-6 MUST stay in lockstep with the proto.
+// Per workflow#640 Phase 2 + workflow#698 Phase 2.3 + ADR 0040 invariants 1-2.
+//
+// Phase 2.3 reclassification: the engine now distinguishes pre-dispatch
+// (Skipped), dispatch (Error/DeleteFailed), and post-hook (CompensationFailed)
+// failures. Consumers that previously checked ActionStatusError alone for
+// "action did not produce desired end-state" should now check
+// {Error, DeleteFailed, CompensationFailed, Skipped}.
 type ActionStatus uint8
 
 const (
@@ -157,6 +161,10 @@ const (
 	ActionStatusSuccess
 	ActionStatusError
 	ActionStatusDeleteFailed
+	// Phase 2.3 (workflow#698):
+	ActionStatusCompensated        // reserved-for-future-emission; engine v0.56.0 does NOT emit (no auto-compensation); plugins may emit if they implement own compensation
+	ActionStatusCompensationFailed // post-driver-success hook failed; cloud-side work IS done; operator must verify state; manual compensation may be required
+	ActionStatusSkipped            // action never attempted at driver (ctx-cancel pre-dispatch, JIT-substitution-fail, driver-resolve-fail); cloud-side state unchanged
 )
 
 // ActionOutcome mirrors pb.ActionResult. Engine populates one entry per
