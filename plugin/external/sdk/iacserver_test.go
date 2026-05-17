@@ -138,6 +138,47 @@ type stateBackendProviderStub struct {
 	pb.UnimplementedIaCStateBackendServer
 }
 
+// TestRegisterAll_RegistersIaCProviderFinalizer asserts that a provider whose
+// type also satisfies pb.IaCProviderFinalizerServer gets the
+// IaCProviderFinalizer service auto-registered — same opt-in posture as the
+// other IaCProvider* optionals. Per workflow#695 Phase 2.5 / ADR 0024
+// (absence of registration IS the negative signal; no compat shim).
+func TestRegisterAll_RegistersIaCProviderFinalizer(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &finalizerProviderStub{}
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info := grpcSrv.GetServiceInfo()
+	if _, ok := info["workflow.plugin.external.iac.IaCProviderFinalizer"]; !ok {
+		t.Fatalf("IaCProviderFinalizer service NOT registered despite provider satisfying interface; have: %v", serviceNames(info))
+	}
+}
+
+// TestRegisterAll_SkipsIaCProviderFinalizerWhenNotImplemented locks the
+// negative signal contract: a provider that does NOT satisfy
+// pb.IaCProviderFinalizerServer MUST NOT have the service registered.
+// Per ADR 0024 + ADR 0040 invariant on optional services.
+func TestRegisterAll_SkipsIaCProviderFinalizerWhenNotImplemented(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &fullProviderStub{} // no finalizer embed
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info := grpcSrv.GetServiceInfo()
+	if _, ok := info["workflow.plugin.external.iac.IaCProviderFinalizer"]; ok {
+		t.Fatalf("IaCProviderFinalizer service WAS registered despite provider not satisfying interface; have: %v", serviceNames(info))
+	}
+}
+
+// finalizerProviderStub satisfies IaCProviderRequired (the required minimum
+// for ServeIaCPlugin) AND IaCProviderFinalizer — representative of the DO
+// plugin shape under workflow#695 Phase 2.5.
+type finalizerProviderStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedIaCProviderFinalizerServer
+}
+
 func serviceNames(info map[string]grpc.ServiceInfo) []string {
 	out := make([]string, 0, len(info))
 	for k := range info {
