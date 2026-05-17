@@ -156,6 +156,16 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	if v, ok := provider.(pb.IaCProviderDriftConfigDetectorServer); ok {
 		pb.RegisterIaCProviderDriftConfigDetectorServer(s, v)
 	}
+	// IaCProviderFinalizer is the workflow#695 Phase 2.5 optional service
+	// for plugins needing a post-apply-loop finalizer hook under v2
+	// dispatch. Per ADR 0024 the absence of this registration IS the
+	// negative signal (no compat shim, no NotSupported flag) — the
+	// wfctl-side typed adapter (cmd/wfctl/iac_typed_adapter.go)
+	// service-presence-probes via its Finalizer() accessor and gates
+	// the ApplyPlanHooks.OnPlanComplete wiring on a non-nil return.
+	if v, ok := provider.(pb.IaCProviderFinalizerServer); ok {
+		pb.RegisterIaCProviderFinalizerServer(s, v)
+	}
 	if v, ok := provider.(pb.ResourceDriverServer); ok {
 		pb.RegisterResourceDriverServer(s, v)
 	}

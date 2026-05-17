@@ -110,6 +110,34 @@ func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.I
 type ApplyPlanHooks struct {
 	OnResourceApplied func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error
 	OnResourceDeleted func(context.Context, interfaces.PlanAction) error
+	// OnPlanComplete fires once after the per-action loop reaches its
+	// natural success-exit return at the end of
+	// applyPlanWithEnvProviderAndHooks, i.e., when the outer function is
+	// about to return (result, nil). Used by the DO plugin's deferred-
+	// flush integration via IaCProviderFinalizer.FinalizeApply RPC.
+	//
+	// Does NOT fire on:
+	//   - The preflightProviderOwnedReplaceWithDeleteHooks early-return —
+	//     loopReached=false, no cloud work happened.
+	//   - The per-action loop's `if fatalErr != nil { return ... }`
+	//     early-return — outer err != nil. v1 semantic preservation per
+	//     cycle-1 plan-review C-3: DOProvider.Apply skips deferred-flush
+	//     when wfctlhelpers.ApplyPlan returns a top-level err (the
+	//     `if err != nil { return ... }` guard in DOProvider.Apply
+	//     immediately after the ApplyPlan call in
+	//     workflow-plugin-digitalocean internal/provider.go).
+	//   - The post-loop length-invariant check that compares
+	//     len(result.Actions) against len(plan.Actions) — outer err != nil.
+	//
+	// DOES fire on per-action driver-error paths (best-effort; driver
+	// errors append to result.Errors but do NOT set fatalErr; the loop
+	// continues and reaches the natural success-exit return). Mirrors v1
+	// DOProvider.Apply behavior where the deferred-flush ran whenever
+	// the wrapped Apply returned nil err, regardless of per-action
+	// result.Errors entries.
+	//
+	// Per workflow#695 Phase 2.5 / ADR 0024 / ADR 0040.
+	OnPlanComplete func(context.Context) error
 }
 
 // ApplyPlanWithHooks is ApplyPlan plus action-boundary hooks for callers that
@@ -140,10 +168,67 @@ func applyPlanWithEnvProviderAndHooks(
 	plan *interfaces.IaCPlan,
 	applyTimeEnv func(string) (string, bool),
 	hooks ApplyPlanHooks,
-) (*interfaces.ApplyResult, error) {
+) (result *interfaces.ApplyResult, err error) {
+	// loopReached is set to true immediately before the per-action loop
+	// opens (below). The deferred OnPlanComplete closure short-circuits
+	// when loopReached=false so pre-loop preflight failures skip finalize
+	// (no cloud work happened). On loop-reached exits, the closure
+	// additionally gates on err == nil per cycle-1 plan-review C-3 v1
+	// semantic preservation — see the ApplyPlanHooks.OnPlanComplete
+	// godoc above.
+	var loopReached bool
+	defer func() {
+		if !loopReached || hooks.OnPlanComplete == nil {
+			return
+		}
+		if err != nil {
+			// v1 semantic preservation: outer-error exits (the per-action
+			// loop's `if fatalErr != nil { return ... }` early-return and
+			// the post-loop length-invariant check) skip finalize,
+			// matching DOProvider.Apply's "return without flushing on
+			// top-level err" behavior (the `if err != nil { return ... }`
+			// guard immediately after the wrapped ApplyPlan call in
+			// workflow-plugin-digitalocean internal/provider.go).
+			return
+		}
+		// Symmetry with the drift defer below: OnPlanComplete is a
+		// caller-provided closure (wired by wfctl in Task 5). A panic
+		// inside it would propagate past the defer chain and prevent
+		// the caller from observing result/err, so wrap with recover()
+		// and convert the panic into a finalize-attributed err entry.
+		var hookErr error
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					hookErr = fmt.Errorf("OnPlanComplete panicked: %v", r)
+				}
+			}()
+			hookErr = hooks.OnPlanComplete(ctx)
+		}()
+		if hookErr != nil {
+			// Append per-driver-attribution entry so callers iterating
+			// result.Errors see the finalize-attributed failure
+			// distinctly from per-action driver errors. Pass the raw
+			// hookErr.Error() — the structured Resource="<plan-finalize>"
+			// + Action="finalize" fields already carry the attribution;
+			// a "plan finalize:" string prefix here would double-attribute
+			// when callers format as "<Resource>/<Action>: <Error>".
+			result.Errors = append(result.Errors, interfaces.ActionError{
+				Resource: "<plan-finalize>",
+				Action:   "finalize",
+				Error:    hookErr.Error(),
+			})
+			// Outer err carries the "plan finalize:" prefix because the
+			// outer-err caller path lacks the structured Resource/Action
+			// fields — the prefix supplies that missing attribution
+			// inline. errors.Is round-trips on the wrapped hookErr.
+			err = fmt.Errorf("plan finalize: %w", hookErr)
+		}
+	}()
+
 	deleteHookActive := hooks.OnResourceDeleted != nil
 	inputNames := snapshotKeys(plan.InputSnapshot)
-	result := &interfaces.ApplyResult{
+	result = &interfaces.ApplyResult{
 		PlanID:               plan.ID,
 		InitialInputSnapshot: inputsnapshot.Snapshot(inputNames, inputsnapshot.OSEnvProvider),
 	}
@@ -192,6 +277,14 @@ func applyPlanWithEnvProviderAndHooks(
 			return result, err
 		}
 	}
+
+	// loopReached gates the deferred OnPlanComplete invocation. Set
+	// BEFORE the loop opens so a zero-iteration (empty Actions) plan
+	// still triggers finalize — matches v1 DOProvider.Apply behavior
+	// where the deferred-flush fires regardless of plan length (stale
+	// queued state from prior runs is flushed even when the current
+	// plan has no actions).
+	loopReached = true
 
 	for i := range plan.Actions {
 		action := plan.Actions[i]

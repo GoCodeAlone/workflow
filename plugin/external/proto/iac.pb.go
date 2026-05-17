@@ -3503,6 +3503,115 @@ func (*RevokeProviderCredentialResponse) Descriptor() ([]byte, []int) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderFinalizer messages.
+// ─────────────────────────────────────────────────────────────────────────────
+type FinalizeApplyRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// plan_id is the IaCPlan.ID being finalized (for plugin-side logging /
+	// correlation; not load-bearing for dispatch).
+	PlanId        string `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinalizeApplyRequest) Reset() {
+	*x = FinalizeApplyRequest{}
+	mi := &file_iac_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinalizeApplyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinalizeApplyRequest) ProtoMessage() {}
+
+func (x *FinalizeApplyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinalizeApplyRequest.ProtoReflect.Descriptor instead.
+func (*FinalizeApplyRequest) Descriptor() ([]byte, []int) {
+	return file_iac_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *FinalizeApplyRequest) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
+type FinalizeApplyResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// errors is the per-driver finalize-side error array. Each entry
+	// preserves the v1 wrapper's per-driver attribution shape (DOProvider.Apply
+	// post-loop block appends interfaces.ActionError{Resource: resourceType,
+	// Action: "deferred_update", Error: flushErr.Error()} for each driver
+	// whose FlushDeferredUpdates fails). Empty array = success. Non-empty =
+	// each error is surfaced to wfctl's result.Errors as-is (preserving
+	// per-driver attribution), AND the outer finalize call returns a
+	// wrapped error to the caller.
+	//
+	// Wire-status invariant (mirrors ADR 0040 invariant 2): the gRPC status
+	// MUST be OK whenever the plugin populates errors[] (including the
+	// empty-success case). A non-OK gRPC status (e.g., codes.Internal from
+	// a server panic) signals transport-level failure; errors[] is IGNORED
+	// by wfctl in that case and the gRPC error is surfaced directly. This
+	// prevents ambiguity between "finalize ran and reported per-driver
+	// errors" (OK + errors[]) and "finalize call itself failed" (non-OK).
+	Errors        []*ActionError `protobuf:"bytes,1,rep,name=errors,proto3" json:"errors,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FinalizeApplyResponse) Reset() {
+	*x = FinalizeApplyResponse{}
+	mi := &file_iac_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinalizeApplyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinalizeApplyResponse) ProtoMessage() {}
+
+func (x *FinalizeApplyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinalizeApplyResponse.ProtoReflect.Descriptor instead.
+func (*FinalizeApplyResponse) Descriptor() ([]byte, []int) {
+	return file_iac_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *FinalizeApplyResponse) GetErrors() []*ActionError {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // IaCProviderMigrationRepairer messages.
 // ─────────────────────────────────────────────────────────────────────────────
 type RepairDirtyMigrationRequest struct {
@@ -3514,7 +3623,7 @@ type RepairDirtyMigrationRequest struct {
 
 func (x *RepairDirtyMigrationRequest) Reset() {
 	*x = RepairDirtyMigrationRequest{}
-	mi := &file_iac_proto_msgTypes[56]
+	mi := &file_iac_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3526,7 +3635,7 @@ func (x *RepairDirtyMigrationRequest) String() string {
 func (*RepairDirtyMigrationRequest) ProtoMessage() {}
 
 func (x *RepairDirtyMigrationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[56]
+	mi := &file_iac_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3539,7 +3648,7 @@ func (x *RepairDirtyMigrationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RepairDirtyMigrationRequest.ProtoReflect.Descriptor instead.
 func (*RepairDirtyMigrationRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{56}
+	return file_iac_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *RepairDirtyMigrationRequest) GetRequest() *MigrationRepairRequest {
@@ -3558,7 +3667,7 @@ type RepairDirtyMigrationResponse struct {
 
 func (x *RepairDirtyMigrationResponse) Reset() {
 	*x = RepairDirtyMigrationResponse{}
-	mi := &file_iac_proto_msgTypes[57]
+	mi := &file_iac_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3570,7 +3679,7 @@ func (x *RepairDirtyMigrationResponse) String() string {
 func (*RepairDirtyMigrationResponse) ProtoMessage() {}
 
 func (x *RepairDirtyMigrationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[57]
+	mi := &file_iac_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3583,7 +3692,7 @@ func (x *RepairDirtyMigrationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RepairDirtyMigrationResponse.ProtoReflect.Descriptor instead.
 func (*RepairDirtyMigrationResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{57}
+	return file_iac_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *RepairDirtyMigrationResponse) GetResult() *MigrationRepairResult {
@@ -3605,7 +3714,7 @@ type ValidatePlanRequest struct {
 
 func (x *ValidatePlanRequest) Reset() {
 	*x = ValidatePlanRequest{}
-	mi := &file_iac_proto_msgTypes[58]
+	mi := &file_iac_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3617,7 +3726,7 @@ func (x *ValidatePlanRequest) String() string {
 func (*ValidatePlanRequest) ProtoMessage() {}
 
 func (x *ValidatePlanRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[58]
+	mi := &file_iac_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3630,7 +3739,7 @@ func (x *ValidatePlanRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidatePlanRequest.ProtoReflect.Descriptor instead.
 func (*ValidatePlanRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{58}
+	return file_iac_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *ValidatePlanRequest) GetPlan() *IaCPlan {
@@ -3649,7 +3758,7 @@ type ValidatePlanResponse struct {
 
 func (x *ValidatePlanResponse) Reset() {
 	*x = ValidatePlanResponse{}
-	mi := &file_iac_proto_msgTypes[59]
+	mi := &file_iac_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3661,7 +3770,7 @@ func (x *ValidatePlanResponse) String() string {
 func (*ValidatePlanResponse) ProtoMessage() {}
 
 func (x *ValidatePlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[59]
+	mi := &file_iac_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3674,7 +3783,7 @@ func (x *ValidatePlanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidatePlanResponse.ProtoReflect.Descriptor instead.
 func (*ValidatePlanResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{59}
+	return file_iac_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *ValidatePlanResponse) GetDiagnostics() []*PlanDiagnostic {
@@ -3700,7 +3809,7 @@ type DetectDriftConfigRequest struct {
 
 func (x *DetectDriftConfigRequest) Reset() {
 	*x = DetectDriftConfigRequest{}
-	mi := &file_iac_proto_msgTypes[60]
+	mi := &file_iac_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3712,7 +3821,7 @@ func (x *DetectDriftConfigRequest) String() string {
 func (*DetectDriftConfigRequest) ProtoMessage() {}
 
 func (x *DetectDriftConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[60]
+	mi := &file_iac_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3725,7 +3834,7 @@ func (x *DetectDriftConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetectDriftConfigRequest.ProtoReflect.Descriptor instead.
 func (*DetectDriftConfigRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{60}
+	return file_iac_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *DetectDriftConfigRequest) GetRefs() []*ResourceRef {
@@ -3751,7 +3860,7 @@ type DetectDriftConfigResponse struct {
 
 func (x *DetectDriftConfigResponse) Reset() {
 	*x = DetectDriftConfigResponse{}
-	mi := &file_iac_proto_msgTypes[61]
+	mi := &file_iac_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3763,7 +3872,7 @@ func (x *DetectDriftConfigResponse) String() string {
 func (*DetectDriftConfigResponse) ProtoMessage() {}
 
 func (x *DetectDriftConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[61]
+	mi := &file_iac_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3776,7 +3885,7 @@ func (x *DetectDriftConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetectDriftConfigResponse.ProtoReflect.Descriptor instead.
 func (*DetectDriftConfigResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{61}
+	return file_iac_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *DetectDriftConfigResponse) GetDrifts() []*DriftResult {
@@ -3802,7 +3911,7 @@ type ResourceCreateRequest struct {
 
 func (x *ResourceCreateRequest) Reset() {
 	*x = ResourceCreateRequest{}
-	mi := &file_iac_proto_msgTypes[62]
+	mi := &file_iac_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3814,7 +3923,7 @@ func (x *ResourceCreateRequest) String() string {
 func (*ResourceCreateRequest) ProtoMessage() {}
 
 func (x *ResourceCreateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[62]
+	mi := &file_iac_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3827,7 +3936,7 @@ func (x *ResourceCreateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceCreateRequest.ProtoReflect.Descriptor instead.
 func (*ResourceCreateRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{62}
+	return file_iac_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *ResourceCreateRequest) GetResourceType() string {
@@ -3853,7 +3962,7 @@ type ResourceCreateResponse struct {
 
 func (x *ResourceCreateResponse) Reset() {
 	*x = ResourceCreateResponse{}
-	mi := &file_iac_proto_msgTypes[63]
+	mi := &file_iac_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3865,7 +3974,7 @@ func (x *ResourceCreateResponse) String() string {
 func (*ResourceCreateResponse) ProtoMessage() {}
 
 func (x *ResourceCreateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[63]
+	mi := &file_iac_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3878,7 +3987,7 @@ func (x *ResourceCreateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceCreateResponse.ProtoReflect.Descriptor instead.
 func (*ResourceCreateResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{63}
+	return file_iac_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *ResourceCreateResponse) GetOutput() *ResourceOutput {
@@ -3898,7 +4007,7 @@ type ResourceReadRequest struct {
 
 func (x *ResourceReadRequest) Reset() {
 	*x = ResourceReadRequest{}
-	mi := &file_iac_proto_msgTypes[64]
+	mi := &file_iac_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3910,7 +4019,7 @@ func (x *ResourceReadRequest) String() string {
 func (*ResourceReadRequest) ProtoMessage() {}
 
 func (x *ResourceReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[64]
+	mi := &file_iac_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3923,7 +4032,7 @@ func (x *ResourceReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceReadRequest.ProtoReflect.Descriptor instead.
 func (*ResourceReadRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{64}
+	return file_iac_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *ResourceReadRequest) GetResourceType() string {
@@ -3949,7 +4058,7 @@ type ResourceReadResponse struct {
 
 func (x *ResourceReadResponse) Reset() {
 	*x = ResourceReadResponse{}
-	mi := &file_iac_proto_msgTypes[65]
+	mi := &file_iac_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3961,7 +4070,7 @@ func (x *ResourceReadResponse) String() string {
 func (*ResourceReadResponse) ProtoMessage() {}
 
 func (x *ResourceReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[65]
+	mi := &file_iac_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3974,7 +4083,7 @@ func (x *ResourceReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceReadResponse.ProtoReflect.Descriptor instead.
 func (*ResourceReadResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{65}
+	return file_iac_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *ResourceReadResponse) GetOutput() *ResourceOutput {
@@ -3995,7 +4104,7 @@ type ResourceUpdateRequest struct {
 
 func (x *ResourceUpdateRequest) Reset() {
 	*x = ResourceUpdateRequest{}
-	mi := &file_iac_proto_msgTypes[66]
+	mi := &file_iac_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4007,7 +4116,7 @@ func (x *ResourceUpdateRequest) String() string {
 func (*ResourceUpdateRequest) ProtoMessage() {}
 
 func (x *ResourceUpdateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[66]
+	mi := &file_iac_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4020,7 +4129,7 @@ func (x *ResourceUpdateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUpdateRequest.ProtoReflect.Descriptor instead.
 func (*ResourceUpdateRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{66}
+	return file_iac_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *ResourceUpdateRequest) GetResourceType() string {
@@ -4053,7 +4162,7 @@ type ResourceUpdateResponse struct {
 
 func (x *ResourceUpdateResponse) Reset() {
 	*x = ResourceUpdateResponse{}
-	mi := &file_iac_proto_msgTypes[67]
+	mi := &file_iac_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4065,7 +4174,7 @@ func (x *ResourceUpdateResponse) String() string {
 func (*ResourceUpdateResponse) ProtoMessage() {}
 
 func (x *ResourceUpdateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[67]
+	mi := &file_iac_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4078,7 +4187,7 @@ func (x *ResourceUpdateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUpdateResponse.ProtoReflect.Descriptor instead.
 func (*ResourceUpdateResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{67}
+	return file_iac_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *ResourceUpdateResponse) GetOutput() *ResourceOutput {
@@ -4098,7 +4207,7 @@ type ResourceDeleteRequest struct {
 
 func (x *ResourceDeleteRequest) Reset() {
 	*x = ResourceDeleteRequest{}
-	mi := &file_iac_proto_msgTypes[68]
+	mi := &file_iac_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4110,7 +4219,7 @@ func (x *ResourceDeleteRequest) String() string {
 func (*ResourceDeleteRequest) ProtoMessage() {}
 
 func (x *ResourceDeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[68]
+	mi := &file_iac_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4123,7 +4232,7 @@ func (x *ResourceDeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceDeleteRequest.ProtoReflect.Descriptor instead.
 func (*ResourceDeleteRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{68}
+	return file_iac_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *ResourceDeleteRequest) GetResourceType() string {
@@ -4148,7 +4257,7 @@ type ResourceDeleteResponse struct {
 
 func (x *ResourceDeleteResponse) Reset() {
 	*x = ResourceDeleteResponse{}
-	mi := &file_iac_proto_msgTypes[69]
+	mi := &file_iac_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4160,7 +4269,7 @@ func (x *ResourceDeleteResponse) String() string {
 func (*ResourceDeleteResponse) ProtoMessage() {}
 
 func (x *ResourceDeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[69]
+	mi := &file_iac_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4173,7 +4282,7 @@ func (x *ResourceDeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceDeleteResponse.ProtoReflect.Descriptor instead.
 func (*ResourceDeleteResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{69}
+	return file_iac_proto_rawDescGZIP(), []int{71}
 }
 
 type ResourceDiffRequest struct {
@@ -4187,7 +4296,7 @@ type ResourceDiffRequest struct {
 
 func (x *ResourceDiffRequest) Reset() {
 	*x = ResourceDiffRequest{}
-	mi := &file_iac_proto_msgTypes[70]
+	mi := &file_iac_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4199,7 +4308,7 @@ func (x *ResourceDiffRequest) String() string {
 func (*ResourceDiffRequest) ProtoMessage() {}
 
 func (x *ResourceDiffRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[70]
+	mi := &file_iac_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4212,7 +4321,7 @@ func (x *ResourceDiffRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceDiffRequest.ProtoReflect.Descriptor instead.
 func (*ResourceDiffRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{70}
+	return file_iac_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *ResourceDiffRequest) GetResourceType() string {
@@ -4245,7 +4354,7 @@ type ResourceDiffResponse struct {
 
 func (x *ResourceDiffResponse) Reset() {
 	*x = ResourceDiffResponse{}
-	mi := &file_iac_proto_msgTypes[71]
+	mi := &file_iac_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4257,7 +4366,7 @@ func (x *ResourceDiffResponse) String() string {
 func (*ResourceDiffResponse) ProtoMessage() {}
 
 func (x *ResourceDiffResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[71]
+	mi := &file_iac_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4270,7 +4379,7 @@ func (x *ResourceDiffResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceDiffResponse.ProtoReflect.Descriptor instead.
 func (*ResourceDiffResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{71}
+	return file_iac_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *ResourceDiffResponse) GetResult() *DiffResult {
@@ -4291,7 +4400,7 @@ type ResourceScaleRequest struct {
 
 func (x *ResourceScaleRequest) Reset() {
 	*x = ResourceScaleRequest{}
-	mi := &file_iac_proto_msgTypes[72]
+	mi := &file_iac_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4303,7 +4412,7 @@ func (x *ResourceScaleRequest) String() string {
 func (*ResourceScaleRequest) ProtoMessage() {}
 
 func (x *ResourceScaleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[72]
+	mi := &file_iac_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4316,7 +4425,7 @@ func (x *ResourceScaleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceScaleRequest.ProtoReflect.Descriptor instead.
 func (*ResourceScaleRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{72}
+	return file_iac_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *ResourceScaleRequest) GetResourceType() string {
@@ -4349,7 +4458,7 @@ type ResourceScaleResponse struct {
 
 func (x *ResourceScaleResponse) Reset() {
 	*x = ResourceScaleResponse{}
-	mi := &file_iac_proto_msgTypes[73]
+	mi := &file_iac_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4361,7 +4470,7 @@ func (x *ResourceScaleResponse) String() string {
 func (*ResourceScaleResponse) ProtoMessage() {}
 
 func (x *ResourceScaleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[73]
+	mi := &file_iac_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4374,7 +4483,7 @@ func (x *ResourceScaleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceScaleResponse.ProtoReflect.Descriptor instead.
 func (*ResourceScaleResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{73}
+	return file_iac_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *ResourceScaleResponse) GetOutput() *ResourceOutput {
@@ -4394,7 +4503,7 @@ type ResourceHealthCheckRequest struct {
 
 func (x *ResourceHealthCheckRequest) Reset() {
 	*x = ResourceHealthCheckRequest{}
-	mi := &file_iac_proto_msgTypes[74]
+	mi := &file_iac_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4406,7 +4515,7 @@ func (x *ResourceHealthCheckRequest) String() string {
 func (*ResourceHealthCheckRequest) ProtoMessage() {}
 
 func (x *ResourceHealthCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[74]
+	mi := &file_iac_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4419,7 +4528,7 @@ func (x *ResourceHealthCheckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceHealthCheckRequest.ProtoReflect.Descriptor instead.
 func (*ResourceHealthCheckRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{74}
+	return file_iac_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *ResourceHealthCheckRequest) GetResourceType() string {
@@ -4445,7 +4554,7 @@ type ResourceHealthCheckResponse struct {
 
 func (x *ResourceHealthCheckResponse) Reset() {
 	*x = ResourceHealthCheckResponse{}
-	mi := &file_iac_proto_msgTypes[75]
+	mi := &file_iac_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4457,7 +4566,7 @@ func (x *ResourceHealthCheckResponse) String() string {
 func (*ResourceHealthCheckResponse) ProtoMessage() {}
 
 func (x *ResourceHealthCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[75]
+	mi := &file_iac_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4470,7 +4579,7 @@ func (x *ResourceHealthCheckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceHealthCheckResponse.ProtoReflect.Descriptor instead.
 func (*ResourceHealthCheckResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{75}
+	return file_iac_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *ResourceHealthCheckResponse) GetResult() *HealthResult {
@@ -4489,7 +4598,7 @@ type SensitiveKeysRequest struct {
 
 func (x *SensitiveKeysRequest) Reset() {
 	*x = SensitiveKeysRequest{}
-	mi := &file_iac_proto_msgTypes[76]
+	mi := &file_iac_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4501,7 +4610,7 @@ func (x *SensitiveKeysRequest) String() string {
 func (*SensitiveKeysRequest) ProtoMessage() {}
 
 func (x *SensitiveKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[76]
+	mi := &file_iac_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4514,7 +4623,7 @@ func (x *SensitiveKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SensitiveKeysRequest.ProtoReflect.Descriptor instead.
 func (*SensitiveKeysRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{76}
+	return file_iac_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *SensitiveKeysRequest) GetResourceType() string {
@@ -4533,7 +4642,7 @@ type SensitiveKeysResponse struct {
 
 func (x *SensitiveKeysResponse) Reset() {
 	*x = SensitiveKeysResponse{}
-	mi := &file_iac_proto_msgTypes[77]
+	mi := &file_iac_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4545,7 +4654,7 @@ func (x *SensitiveKeysResponse) String() string {
 func (*SensitiveKeysResponse) ProtoMessage() {}
 
 func (x *SensitiveKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[77]
+	mi := &file_iac_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4558,7 +4667,7 @@ func (x *SensitiveKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SensitiveKeysResponse.ProtoReflect.Descriptor instead.
 func (*SensitiveKeysResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{77}
+	return file_iac_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *SensitiveKeysResponse) GetKeys() []string {
@@ -4579,7 +4688,7 @@ type TroubleshootRequest struct {
 
 func (x *TroubleshootRequest) Reset() {
 	*x = TroubleshootRequest{}
-	mi := &file_iac_proto_msgTypes[78]
+	mi := &file_iac_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4591,7 +4700,7 @@ func (x *TroubleshootRequest) String() string {
 func (*TroubleshootRequest) ProtoMessage() {}
 
 func (x *TroubleshootRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[78]
+	mi := &file_iac_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4604,7 +4713,7 @@ func (x *TroubleshootRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TroubleshootRequest.ProtoReflect.Descriptor instead.
 func (*TroubleshootRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{78}
+	return file_iac_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *TroubleshootRequest) GetResourceType() string {
@@ -4637,7 +4746,7 @@ type TroubleshootResponse struct {
 
 func (x *TroubleshootResponse) Reset() {
 	*x = TroubleshootResponse{}
-	mi := &file_iac_proto_msgTypes[79]
+	mi := &file_iac_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4649,7 +4758,7 @@ func (x *TroubleshootResponse) String() string {
 func (*TroubleshootResponse) ProtoMessage() {}
 
 func (x *TroubleshootResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[79]
+	mi := &file_iac_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4662,7 +4771,7 @@ func (x *TroubleshootResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TroubleshootResponse.ProtoReflect.Descriptor instead.
 func (*TroubleshootResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{79}
+	return file_iac_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *TroubleshootResponse) GetDiagnostics() []*Diagnostic {
@@ -4696,7 +4805,7 @@ type IaCState struct {
 
 func (x *IaCState) Reset() {
 	*x = IaCState{}
-	mi := &file_iac_proto_msgTypes[80]
+	mi := &file_iac_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4708,7 +4817,7 @@ func (x *IaCState) String() string {
 func (*IaCState) ProtoMessage() {}
 
 func (x *IaCState) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[80]
+	mi := &file_iac_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4721,7 +4830,7 @@ func (x *IaCState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IaCState.ProtoReflect.Descriptor instead.
 func (*IaCState) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{80}
+	return file_iac_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *IaCState) GetResourceId() string {
@@ -4829,7 +4938,7 @@ type ConfigureRequest struct {
 
 func (x *ConfigureRequest) Reset() {
 	*x = ConfigureRequest{}
-	mi := &file_iac_proto_msgTypes[81]
+	mi := &file_iac_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4841,7 +4950,7 @@ func (x *ConfigureRequest) String() string {
 func (*ConfigureRequest) ProtoMessage() {}
 
 func (x *ConfigureRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[81]
+	mi := &file_iac_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4854,7 +4963,7 @@ func (x *ConfigureRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigureRequest.ProtoReflect.Descriptor instead.
 func (*ConfigureRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{81}
+	return file_iac_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *ConfigureRequest) GetBackendName() string {
@@ -4879,7 +4988,7 @@ type ConfigureResponse struct {
 
 func (x *ConfigureResponse) Reset() {
 	*x = ConfigureResponse{}
-	mi := &file_iac_proto_msgTypes[82]
+	mi := &file_iac_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4891,7 +5000,7 @@ func (x *ConfigureResponse) String() string {
 func (*ConfigureResponse) ProtoMessage() {}
 
 func (x *ConfigureResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[82]
+	mi := &file_iac_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4904,7 +5013,7 @@ func (x *ConfigureResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigureResponse.ProtoReflect.Descriptor instead.
 func (*ConfigureResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{82}
+	return file_iac_proto_rawDescGZIP(), []int{84}
 }
 
 type GetStateRequest struct {
@@ -4916,7 +5025,7 @@ type GetStateRequest struct {
 
 func (x *GetStateRequest) Reset() {
 	*x = GetStateRequest{}
-	mi := &file_iac_proto_msgTypes[83]
+	mi := &file_iac_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4928,7 +5037,7 @@ func (x *GetStateRequest) String() string {
 func (*GetStateRequest) ProtoMessage() {}
 
 func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[83]
+	mi := &file_iac_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4941,7 +5050,7 @@ func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateRequest.ProtoReflect.Descriptor instead.
 func (*GetStateRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{83}
+	return file_iac_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *GetStateRequest) GetResourceId() string {
@@ -4961,7 +5070,7 @@ type GetStateResponse struct {
 
 func (x *GetStateResponse) Reset() {
 	*x = GetStateResponse{}
-	mi := &file_iac_proto_msgTypes[84]
+	mi := &file_iac_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4973,7 +5082,7 @@ func (x *GetStateResponse) String() string {
 func (*GetStateResponse) ProtoMessage() {}
 
 func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[84]
+	mi := &file_iac_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4986,7 +5095,7 @@ func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateResponse.ProtoReflect.Descriptor instead.
 func (*GetStateResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{84}
+	return file_iac_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *GetStateResponse) GetState() *IaCState {
@@ -5012,7 +5121,7 @@ type SaveStateRequest struct {
 
 func (x *SaveStateRequest) Reset() {
 	*x = SaveStateRequest{}
-	mi := &file_iac_proto_msgTypes[85]
+	mi := &file_iac_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5024,7 +5133,7 @@ func (x *SaveStateRequest) String() string {
 func (*SaveStateRequest) ProtoMessage() {}
 
 func (x *SaveStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[85]
+	mi := &file_iac_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5037,7 +5146,7 @@ func (x *SaveStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveStateRequest.ProtoReflect.Descriptor instead.
 func (*SaveStateRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{85}
+	return file_iac_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *SaveStateRequest) GetState() *IaCState {
@@ -5055,7 +5164,7 @@ type SaveStateResponse struct {
 
 func (x *SaveStateResponse) Reset() {
 	*x = SaveStateResponse{}
-	mi := &file_iac_proto_msgTypes[86]
+	mi := &file_iac_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5067,7 +5176,7 @@ func (x *SaveStateResponse) String() string {
 func (*SaveStateResponse) ProtoMessage() {}
 
 func (x *SaveStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[86]
+	mi := &file_iac_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5080,7 +5189,7 @@ func (x *SaveStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveStateResponse.ProtoReflect.Descriptor instead.
 func (*SaveStateResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{86}
+	return file_iac_proto_rawDescGZIP(), []int{88}
 }
 
 type ListStatesRequest struct {
@@ -5092,7 +5201,7 @@ type ListStatesRequest struct {
 
 func (x *ListStatesRequest) Reset() {
 	*x = ListStatesRequest{}
-	mi := &file_iac_proto_msgTypes[87]
+	mi := &file_iac_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5104,7 +5213,7 @@ func (x *ListStatesRequest) String() string {
 func (*ListStatesRequest) ProtoMessage() {}
 
 func (x *ListStatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[87]
+	mi := &file_iac_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5117,7 +5226,7 @@ func (x *ListStatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListStatesRequest.ProtoReflect.Descriptor instead.
 func (*ListStatesRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{87}
+	return file_iac_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *ListStatesRequest) GetFilter() map[string]string {
@@ -5136,7 +5245,7 @@ type ListStatesResponse struct {
 
 func (x *ListStatesResponse) Reset() {
 	*x = ListStatesResponse{}
-	mi := &file_iac_proto_msgTypes[88]
+	mi := &file_iac_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5148,7 +5257,7 @@ func (x *ListStatesResponse) String() string {
 func (*ListStatesResponse) ProtoMessage() {}
 
 func (x *ListStatesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[88]
+	mi := &file_iac_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5161,7 +5270,7 @@ func (x *ListStatesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListStatesResponse.ProtoReflect.Descriptor instead.
 func (*ListStatesResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{88}
+	return file_iac_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *ListStatesResponse) GetStates() []*IaCState {
@@ -5180,7 +5289,7 @@ type DeleteStateRequest struct {
 
 func (x *DeleteStateRequest) Reset() {
 	*x = DeleteStateRequest{}
-	mi := &file_iac_proto_msgTypes[89]
+	mi := &file_iac_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5192,7 +5301,7 @@ func (x *DeleteStateRequest) String() string {
 func (*DeleteStateRequest) ProtoMessage() {}
 
 func (x *DeleteStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[89]
+	mi := &file_iac_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5205,7 +5314,7 @@ func (x *DeleteStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteStateRequest.ProtoReflect.Descriptor instead.
 func (*DeleteStateRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{89}
+	return file_iac_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *DeleteStateRequest) GetResourceId() string {
@@ -5223,7 +5332,7 @@ type DeleteStateResponse struct {
 
 func (x *DeleteStateResponse) Reset() {
 	*x = DeleteStateResponse{}
-	mi := &file_iac_proto_msgTypes[90]
+	mi := &file_iac_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5235,7 +5344,7 @@ func (x *DeleteStateResponse) String() string {
 func (*DeleteStateResponse) ProtoMessage() {}
 
 func (x *DeleteStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[90]
+	mi := &file_iac_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5248,7 +5357,7 @@ func (x *DeleteStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteStateResponse.ProtoReflect.Descriptor instead.
 func (*DeleteStateResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{90}
+	return file_iac_proto_rawDescGZIP(), []int{92}
 }
 
 type LockRequest struct {
@@ -5260,7 +5369,7 @@ type LockRequest struct {
 
 func (x *LockRequest) Reset() {
 	*x = LockRequest{}
-	mi := &file_iac_proto_msgTypes[91]
+	mi := &file_iac_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5272,7 +5381,7 @@ func (x *LockRequest) String() string {
 func (*LockRequest) ProtoMessage() {}
 
 func (x *LockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[91]
+	mi := &file_iac_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5285,7 +5394,7 @@ func (x *LockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockRequest.ProtoReflect.Descriptor instead.
 func (*LockRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{91}
+	return file_iac_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *LockRequest) GetResourceId() string {
@@ -5303,7 +5412,7 @@ type LockResponse struct {
 
 func (x *LockResponse) Reset() {
 	*x = LockResponse{}
-	mi := &file_iac_proto_msgTypes[92]
+	mi := &file_iac_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5315,7 +5424,7 @@ func (x *LockResponse) String() string {
 func (*LockResponse) ProtoMessage() {}
 
 func (x *LockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[92]
+	mi := &file_iac_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5328,7 +5437,7 @@ func (x *LockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockResponse.ProtoReflect.Descriptor instead.
 func (*LockResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{92}
+	return file_iac_proto_rawDescGZIP(), []int{94}
 }
 
 type UnlockRequest struct {
@@ -5340,7 +5449,7 @@ type UnlockRequest struct {
 
 func (x *UnlockRequest) Reset() {
 	*x = UnlockRequest{}
-	mi := &file_iac_proto_msgTypes[93]
+	mi := &file_iac_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5352,7 +5461,7 @@ func (x *UnlockRequest) String() string {
 func (*UnlockRequest) ProtoMessage() {}
 
 func (x *UnlockRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[93]
+	mi := &file_iac_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5365,7 +5474,7 @@ func (x *UnlockRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockRequest.ProtoReflect.Descriptor instead.
 func (*UnlockRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{93}
+	return file_iac_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *UnlockRequest) GetResourceId() string {
@@ -5383,7 +5492,7 @@ type UnlockResponse struct {
 
 func (x *UnlockResponse) Reset() {
 	*x = UnlockResponse{}
-	mi := &file_iac_proto_msgTypes[94]
+	mi := &file_iac_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5395,7 +5504,7 @@ func (x *UnlockResponse) String() string {
 func (*UnlockResponse) ProtoMessage() {}
 
 func (x *UnlockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[94]
+	mi := &file_iac_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5408,7 +5517,7 @@ func (x *UnlockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlockResponse.ProtoReflect.Descriptor instead.
 func (*UnlockResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{94}
+	return file_iac_proto_rawDescGZIP(), []int{96}
 }
 
 // ListBackendNames lets the engine ask a loaded plugin which iac.state backend
@@ -5422,7 +5531,7 @@ type ListBackendNamesRequest struct {
 
 func (x *ListBackendNamesRequest) Reset() {
 	*x = ListBackendNamesRequest{}
-	mi := &file_iac_proto_msgTypes[95]
+	mi := &file_iac_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5434,7 +5543,7 @@ func (x *ListBackendNamesRequest) String() string {
 func (*ListBackendNamesRequest) ProtoMessage() {}
 
 func (x *ListBackendNamesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[95]
+	mi := &file_iac_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5447,7 +5556,7 @@ func (x *ListBackendNamesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBackendNamesRequest.ProtoReflect.Descriptor instead.
 func (*ListBackendNamesRequest) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{95}
+	return file_iac_proto_rawDescGZIP(), []int{97}
 }
 
 type ListBackendNamesResponse struct {
@@ -5459,7 +5568,7 @@ type ListBackendNamesResponse struct {
 
 func (x *ListBackendNamesResponse) Reset() {
 	*x = ListBackendNamesResponse{}
-	mi := &file_iac_proto_msgTypes[96]
+	mi := &file_iac_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5471,7 +5580,7 @@ func (x *ListBackendNamesResponse) String() string {
 func (*ListBackendNamesResponse) ProtoMessage() {}
 
 func (x *ListBackendNamesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_iac_proto_msgTypes[96]
+	mi := &file_iac_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5484,7 +5593,7 @@ func (x *ListBackendNamesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBackendNamesResponse.ProtoReflect.Descriptor instead.
 func (*ListBackendNamesResponse) Descriptor() ([]byte, []int) {
-	return file_iac_proto_rawDescGZIP(), []int{96}
+	return file_iac_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *ListBackendNamesResponse) GetBackendNames() []string {
@@ -5751,7 +5860,11 @@ const file_iac_proto_rawDesc = "" +
 	"\x1fRevokeProviderCredentialRequest\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12#\n" +
 	"\rcredential_id\x18\x02 \x01(\tR\fcredentialId\"\"\n" +
-	" RevokeProviderCredentialResponse\"m\n" +
+	" RevokeProviderCredentialResponse\"/\n" +
+	"\x14FinalizeApplyRequest\x12\x17\n" +
+	"\aplan_id\x18\x01 \x01(\tR\x06planId\"`\n" +
+	"\x15FinalizeApplyResponse\x12A\n" +
+	"\x06errors\x18\x01 \x03(\v2).workflow.plugin.external.iac.ActionErrorR\x06errorsJ\x04\b\x02\x10\x03\"m\n" +
 	"\x1bRepairDirtyMigrationRequest\x12N\n" +
 	"\arequest\x18\x01 \x01(\v24.workflow.plugin.external.iac.MigrationRepairRequestR\arequest\"k\n" +
 	"\x1cRepairDirtyMigrationResponse\x12K\n" +
@@ -5909,7 +6022,9 @@ const file_iac_proto_rawDesc = "" +
 	"\vDetectDrift\x120.workflow.plugin.external.iac.DetectDriftRequest\x1a1.workflow.plugin.external.iac.DetectDriftResponse\x12\x8d\x01\n" +
 	"\x14DetectDriftWithSpecs\x129.workflow.plugin.external.iac.DetectDriftWithSpecsRequest\x1a:.workflow.plugin.external.iac.DetectDriftWithSpecsResponse2\xba\x01\n" +
 	"\x1cIaCProviderCredentialRevoker\x12\x99\x01\n" +
-	"\x18RevokeProviderCredential\x12=.workflow.plugin.external.iac.RevokeProviderCredentialRequest\x1a>.workflow.plugin.external.iac.RevokeProviderCredentialResponse2\xae\x01\n" +
+	"\x18RevokeProviderCredential\x12=.workflow.plugin.external.iac.RevokeProviderCredentialRequest\x1a>.workflow.plugin.external.iac.RevokeProviderCredentialResponse2\x90\x01\n" +
+	"\x14IaCProviderFinalizer\x12x\n" +
+	"\rFinalizeApply\x122.workflow.plugin.external.iac.FinalizeApplyRequest\x1a3.workflow.plugin.external.iac.FinalizeApplyResponse2\xae\x01\n" +
 	"\x1cIaCProviderMigrationRepairer\x12\x8d\x01\n" +
 	"\x14RepairDirtyMigration\x129.workflow.plugin.external.iac.RepairDirtyMigrationRequest\x1a:.workflow.plugin.external.iac.RepairDirtyMigrationResponse2\x8d\x01\n" +
 	"\x14IaCProviderValidator\x12u\n" +
@@ -5950,7 +6065,7 @@ func file_iac_proto_rawDescGZIP() []byte {
 }
 
 var file_iac_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_iac_proto_msgTypes = make([]protoimpl.MessageInfo, 106)
+var file_iac_proto_msgTypes = make([]protoimpl.MessageInfo, 108)
 var file_iac_proto_goTypes = []any{
 	(DriftClass)(0),                          // 0: workflow.plugin.external.iac.DriftClass
 	(PlanDiagnosticSeverity)(0),              // 1: workflow.plugin.external.iac.PlanDiagnosticSeverity
@@ -6011,84 +6126,86 @@ var file_iac_proto_goTypes = []any{
 	(*DetectDriftWithSpecsResponse)(nil),     // 56: workflow.plugin.external.iac.DetectDriftWithSpecsResponse
 	(*RevokeProviderCredentialRequest)(nil),  // 57: workflow.plugin.external.iac.RevokeProviderCredentialRequest
 	(*RevokeProviderCredentialResponse)(nil), // 58: workflow.plugin.external.iac.RevokeProviderCredentialResponse
-	(*RepairDirtyMigrationRequest)(nil),      // 59: workflow.plugin.external.iac.RepairDirtyMigrationRequest
-	(*RepairDirtyMigrationResponse)(nil),     // 60: workflow.plugin.external.iac.RepairDirtyMigrationResponse
-	(*ValidatePlanRequest)(nil),              // 61: workflow.plugin.external.iac.ValidatePlanRequest
-	(*ValidatePlanResponse)(nil),             // 62: workflow.plugin.external.iac.ValidatePlanResponse
-	(*DetectDriftConfigRequest)(nil),         // 63: workflow.plugin.external.iac.DetectDriftConfigRequest
-	(*DetectDriftConfigResponse)(nil),        // 64: workflow.plugin.external.iac.DetectDriftConfigResponse
-	(*ResourceCreateRequest)(nil),            // 65: workflow.plugin.external.iac.ResourceCreateRequest
-	(*ResourceCreateResponse)(nil),           // 66: workflow.plugin.external.iac.ResourceCreateResponse
-	(*ResourceReadRequest)(nil),              // 67: workflow.plugin.external.iac.ResourceReadRequest
-	(*ResourceReadResponse)(nil),             // 68: workflow.plugin.external.iac.ResourceReadResponse
-	(*ResourceUpdateRequest)(nil),            // 69: workflow.plugin.external.iac.ResourceUpdateRequest
-	(*ResourceUpdateResponse)(nil),           // 70: workflow.plugin.external.iac.ResourceUpdateResponse
-	(*ResourceDeleteRequest)(nil),            // 71: workflow.plugin.external.iac.ResourceDeleteRequest
-	(*ResourceDeleteResponse)(nil),           // 72: workflow.plugin.external.iac.ResourceDeleteResponse
-	(*ResourceDiffRequest)(nil),              // 73: workflow.plugin.external.iac.ResourceDiffRequest
-	(*ResourceDiffResponse)(nil),             // 74: workflow.plugin.external.iac.ResourceDiffResponse
-	(*ResourceScaleRequest)(nil),             // 75: workflow.plugin.external.iac.ResourceScaleRequest
-	(*ResourceScaleResponse)(nil),            // 76: workflow.plugin.external.iac.ResourceScaleResponse
-	(*ResourceHealthCheckRequest)(nil),       // 77: workflow.plugin.external.iac.ResourceHealthCheckRequest
-	(*ResourceHealthCheckResponse)(nil),      // 78: workflow.plugin.external.iac.ResourceHealthCheckResponse
-	(*SensitiveKeysRequest)(nil),             // 79: workflow.plugin.external.iac.SensitiveKeysRequest
-	(*SensitiveKeysResponse)(nil),            // 80: workflow.plugin.external.iac.SensitiveKeysResponse
-	(*TroubleshootRequest)(nil),              // 81: workflow.plugin.external.iac.TroubleshootRequest
-	(*TroubleshootResponse)(nil),             // 82: workflow.plugin.external.iac.TroubleshootResponse
-	(*IaCState)(nil),                         // 83: workflow.plugin.external.iac.IaCState
-	(*ConfigureRequest)(nil),                 // 84: workflow.plugin.external.iac.ConfigureRequest
-	(*ConfigureResponse)(nil),                // 85: workflow.plugin.external.iac.ConfigureResponse
-	(*GetStateRequest)(nil),                  // 86: workflow.plugin.external.iac.GetStateRequest
-	(*GetStateResponse)(nil),                 // 87: workflow.plugin.external.iac.GetStateResponse
-	(*SaveStateRequest)(nil),                 // 88: workflow.plugin.external.iac.SaveStateRequest
-	(*SaveStateResponse)(nil),                // 89: workflow.plugin.external.iac.SaveStateResponse
-	(*ListStatesRequest)(nil),                // 90: workflow.plugin.external.iac.ListStatesRequest
-	(*ListStatesResponse)(nil),               // 91: workflow.plugin.external.iac.ListStatesResponse
-	(*DeleteStateRequest)(nil),               // 92: workflow.plugin.external.iac.DeleteStateRequest
-	(*DeleteStateResponse)(nil),              // 93: workflow.plugin.external.iac.DeleteStateResponse
-	(*LockRequest)(nil),                      // 94: workflow.plugin.external.iac.LockRequest
-	(*LockResponse)(nil),                     // 95: workflow.plugin.external.iac.LockResponse
-	(*UnlockRequest)(nil),                    // 96: workflow.plugin.external.iac.UnlockRequest
-	(*UnlockResponse)(nil),                   // 97: workflow.plugin.external.iac.UnlockResponse
-	(*ListBackendNamesRequest)(nil),          // 98: workflow.plugin.external.iac.ListBackendNamesRequest
-	(*ListBackendNamesResponse)(nil),         // 99: workflow.plugin.external.iac.ListBackendNamesResponse
-	nil,                                      // 100: workflow.plugin.external.iac.ResourceOutput.SensitiveEntry
-	nil,                                      // 101: workflow.plugin.external.iac.IaCPlan.InputSnapshotEntry
-	nil,                                      // 102: workflow.plugin.external.iac.ApplyResult.InitialInputSnapshotEntry
-	nil,                                      // 103: workflow.plugin.external.iac.ApplyResult.ReplaceIdMapEntry
-	nil,                                      // 104: workflow.plugin.external.iac.BootstrapResult.EnvVarsEntry
-	nil,                                      // 105: workflow.plugin.external.iac.MigrationRepairRequest.EnvEntry
-	nil,                                      // 106: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.SpecsEntry
-	nil,                                      // 107: workflow.plugin.external.iac.DetectDriftConfigRequest.SpecsEntry
-	nil,                                      // 108: workflow.plugin.external.iac.ListStatesRequest.FilterEntry
-	(*timestamppb.Timestamp)(nil),            // 109: google.protobuf.Timestamp
+	(*FinalizeApplyRequest)(nil),             // 59: workflow.plugin.external.iac.FinalizeApplyRequest
+	(*FinalizeApplyResponse)(nil),            // 60: workflow.plugin.external.iac.FinalizeApplyResponse
+	(*RepairDirtyMigrationRequest)(nil),      // 61: workflow.plugin.external.iac.RepairDirtyMigrationRequest
+	(*RepairDirtyMigrationResponse)(nil),     // 62: workflow.plugin.external.iac.RepairDirtyMigrationResponse
+	(*ValidatePlanRequest)(nil),              // 63: workflow.plugin.external.iac.ValidatePlanRequest
+	(*ValidatePlanResponse)(nil),             // 64: workflow.plugin.external.iac.ValidatePlanResponse
+	(*DetectDriftConfigRequest)(nil),         // 65: workflow.plugin.external.iac.DetectDriftConfigRequest
+	(*DetectDriftConfigResponse)(nil),        // 66: workflow.plugin.external.iac.DetectDriftConfigResponse
+	(*ResourceCreateRequest)(nil),            // 67: workflow.plugin.external.iac.ResourceCreateRequest
+	(*ResourceCreateResponse)(nil),           // 68: workflow.plugin.external.iac.ResourceCreateResponse
+	(*ResourceReadRequest)(nil),              // 69: workflow.plugin.external.iac.ResourceReadRequest
+	(*ResourceReadResponse)(nil),             // 70: workflow.plugin.external.iac.ResourceReadResponse
+	(*ResourceUpdateRequest)(nil),            // 71: workflow.plugin.external.iac.ResourceUpdateRequest
+	(*ResourceUpdateResponse)(nil),           // 72: workflow.plugin.external.iac.ResourceUpdateResponse
+	(*ResourceDeleteRequest)(nil),            // 73: workflow.plugin.external.iac.ResourceDeleteRequest
+	(*ResourceDeleteResponse)(nil),           // 74: workflow.plugin.external.iac.ResourceDeleteResponse
+	(*ResourceDiffRequest)(nil),              // 75: workflow.plugin.external.iac.ResourceDiffRequest
+	(*ResourceDiffResponse)(nil),             // 76: workflow.plugin.external.iac.ResourceDiffResponse
+	(*ResourceScaleRequest)(nil),             // 77: workflow.plugin.external.iac.ResourceScaleRequest
+	(*ResourceScaleResponse)(nil),            // 78: workflow.plugin.external.iac.ResourceScaleResponse
+	(*ResourceHealthCheckRequest)(nil),       // 79: workflow.plugin.external.iac.ResourceHealthCheckRequest
+	(*ResourceHealthCheckResponse)(nil),      // 80: workflow.plugin.external.iac.ResourceHealthCheckResponse
+	(*SensitiveKeysRequest)(nil),             // 81: workflow.plugin.external.iac.SensitiveKeysRequest
+	(*SensitiveKeysResponse)(nil),            // 82: workflow.plugin.external.iac.SensitiveKeysResponse
+	(*TroubleshootRequest)(nil),              // 83: workflow.plugin.external.iac.TroubleshootRequest
+	(*TroubleshootResponse)(nil),             // 84: workflow.plugin.external.iac.TroubleshootResponse
+	(*IaCState)(nil),                         // 85: workflow.plugin.external.iac.IaCState
+	(*ConfigureRequest)(nil),                 // 86: workflow.plugin.external.iac.ConfigureRequest
+	(*ConfigureResponse)(nil),                // 87: workflow.plugin.external.iac.ConfigureResponse
+	(*GetStateRequest)(nil),                  // 88: workflow.plugin.external.iac.GetStateRequest
+	(*GetStateResponse)(nil),                 // 89: workflow.plugin.external.iac.GetStateResponse
+	(*SaveStateRequest)(nil),                 // 90: workflow.plugin.external.iac.SaveStateRequest
+	(*SaveStateResponse)(nil),                // 91: workflow.plugin.external.iac.SaveStateResponse
+	(*ListStatesRequest)(nil),                // 92: workflow.plugin.external.iac.ListStatesRequest
+	(*ListStatesResponse)(nil),               // 93: workflow.plugin.external.iac.ListStatesResponse
+	(*DeleteStateRequest)(nil),               // 94: workflow.plugin.external.iac.DeleteStateRequest
+	(*DeleteStateResponse)(nil),              // 95: workflow.plugin.external.iac.DeleteStateResponse
+	(*LockRequest)(nil),                      // 96: workflow.plugin.external.iac.LockRequest
+	(*LockResponse)(nil),                     // 97: workflow.plugin.external.iac.LockResponse
+	(*UnlockRequest)(nil),                    // 98: workflow.plugin.external.iac.UnlockRequest
+	(*UnlockResponse)(nil),                   // 99: workflow.plugin.external.iac.UnlockResponse
+	(*ListBackendNamesRequest)(nil),          // 100: workflow.plugin.external.iac.ListBackendNamesRequest
+	(*ListBackendNamesResponse)(nil),         // 101: workflow.plugin.external.iac.ListBackendNamesResponse
+	nil,                                      // 102: workflow.plugin.external.iac.ResourceOutput.SensitiveEntry
+	nil,                                      // 103: workflow.plugin.external.iac.IaCPlan.InputSnapshotEntry
+	nil,                                      // 104: workflow.plugin.external.iac.ApplyResult.InitialInputSnapshotEntry
+	nil,                                      // 105: workflow.plugin.external.iac.ApplyResult.ReplaceIdMapEntry
+	nil,                                      // 106: workflow.plugin.external.iac.BootstrapResult.EnvVarsEntry
+	nil,                                      // 107: workflow.plugin.external.iac.MigrationRepairRequest.EnvEntry
+	nil,                                      // 108: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.SpecsEntry
+	nil,                                      // 109: workflow.plugin.external.iac.DetectDriftConfigRequest.SpecsEntry
+	nil,                                      // 110: workflow.plugin.external.iac.ListStatesRequest.FilterEntry
+	(*timestamppb.Timestamp)(nil),            // 111: google.protobuf.Timestamp
 }
 var file_iac_proto_depIdxs = []int32{
 	5,   // 0: workflow.plugin.external.iac.ResourceSpec.hints:type_name -> workflow.plugin.external.iac.ResourceHints
-	109, // 1: workflow.plugin.external.iac.ResourceState.created_at:type_name -> google.protobuf.Timestamp
-	109, // 2: workflow.plugin.external.iac.ResourceState.updated_at:type_name -> google.protobuf.Timestamp
-	109, // 3: workflow.plugin.external.iac.ResourceState.last_drift_check:type_name -> google.protobuf.Timestamp
-	100, // 4: workflow.plugin.external.iac.ResourceOutput.sensitive:type_name -> workflow.plugin.external.iac.ResourceOutput.SensitiveEntry
+	111, // 1: workflow.plugin.external.iac.ResourceState.created_at:type_name -> google.protobuf.Timestamp
+	111, // 2: workflow.plugin.external.iac.ResourceState.updated_at:type_name -> google.protobuf.Timestamp
+	111, // 3: workflow.plugin.external.iac.ResourceState.last_drift_check:type_name -> google.protobuf.Timestamp
+	102, // 4: workflow.plugin.external.iac.ResourceOutput.sensitive:type_name -> workflow.plugin.external.iac.ResourceOutput.SensitiveEntry
 	11,  // 5: workflow.plugin.external.iac.DiffResult.changes:type_name -> workflow.plugin.external.iac.FieldChange
 	0,   // 6: workflow.plugin.external.iac.DriftResult.class:type_name -> workflow.plugin.external.iac.DriftClass
-	109, // 7: workflow.plugin.external.iac.Diagnostic.at:type_name -> google.protobuf.Timestamp
+	111, // 7: workflow.plugin.external.iac.Diagnostic.at:type_name -> google.protobuf.Timestamp
 	1,   // 8: workflow.plugin.external.iac.PlanDiagnostic.severity:type_name -> workflow.plugin.external.iac.PlanDiagnosticSeverity
 	3,   // 9: workflow.plugin.external.iac.PlanAction.resource:type_name -> workflow.plugin.external.iac.ResourceSpec
 	8,   // 10: workflow.plugin.external.iac.PlanAction.current:type_name -> workflow.plugin.external.iac.ResourceState
 	11,  // 11: workflow.plugin.external.iac.PlanAction.changes:type_name -> workflow.plugin.external.iac.FieldChange
 	18,  // 12: workflow.plugin.external.iac.IaCPlan.actions:type_name -> workflow.plugin.external.iac.PlanAction
-	109, // 13: workflow.plugin.external.iac.IaCPlan.created_at:type_name -> google.protobuf.Timestamp
-	101, // 14: workflow.plugin.external.iac.IaCPlan.input_snapshot:type_name -> workflow.plugin.external.iac.IaCPlan.InputSnapshotEntry
+	111, // 13: workflow.plugin.external.iac.IaCPlan.created_at:type_name -> google.protobuf.Timestamp
+	103, // 14: workflow.plugin.external.iac.IaCPlan.input_snapshot:type_name -> workflow.plugin.external.iac.IaCPlan.InputSnapshotEntry
 	2,   // 15: workflow.plugin.external.iac.ActionResult.status:type_name -> workflow.plugin.external.iac.ActionStatus
 	9,   // 16: workflow.plugin.external.iac.ApplyResult.resources:type_name -> workflow.plugin.external.iac.ResourceOutput
 	20,  // 17: workflow.plugin.external.iac.ApplyResult.errors:type_name -> workflow.plugin.external.iac.ActionError
-	102, // 18: workflow.plugin.external.iac.ApplyResult.initial_input_snapshot:type_name -> workflow.plugin.external.iac.ApplyResult.InitialInputSnapshotEntry
+	104, // 18: workflow.plugin.external.iac.ApplyResult.initial_input_snapshot:type_name -> workflow.plugin.external.iac.ApplyResult.InitialInputSnapshotEntry
 	14,  // 19: workflow.plugin.external.iac.ApplyResult.input_drift_report:type_name -> workflow.plugin.external.iac.DriftEntry
-	103, // 20: workflow.plugin.external.iac.ApplyResult.replace_id_map:type_name -> workflow.plugin.external.iac.ApplyResult.ReplaceIdMapEntry
+	105, // 20: workflow.plugin.external.iac.ApplyResult.replace_id_map:type_name -> workflow.plugin.external.iac.ApplyResult.ReplaceIdMapEntry
 	21,  // 21: workflow.plugin.external.iac.ApplyResult.actions:type_name -> workflow.plugin.external.iac.ActionResult
 	20,  // 22: workflow.plugin.external.iac.DestroyResult.errors:type_name -> workflow.plugin.external.iac.ActionError
-	104, // 23: workflow.plugin.external.iac.BootstrapResult.env_vars:type_name -> workflow.plugin.external.iac.BootstrapResult.EnvVarsEntry
-	105, // 24: workflow.plugin.external.iac.MigrationRepairRequest.env:type_name -> workflow.plugin.external.iac.MigrationRepairRequest.EnvEntry
+	106, // 23: workflow.plugin.external.iac.BootstrapResult.env_vars:type_name -> workflow.plugin.external.iac.BootstrapResult.EnvVarsEntry
+	107, // 24: workflow.plugin.external.iac.MigrationRepairRequest.env:type_name -> workflow.plugin.external.iac.MigrationRepairRequest.EnvEntry
 	16,  // 25: workflow.plugin.external.iac.MigrationRepairResult.diagnostics:type_name -> workflow.plugin.external.iac.Diagnostic
 	7,   // 26: workflow.plugin.external.iac.CapabilitiesResponse.capabilities:type_name -> workflow.plugin.external.iac.IaCCapabilityDeclaration
 	3,   // 27: workflow.plugin.external.iac.PlanRequest.desired:type_name -> workflow.plugin.external.iac.ResourceSpec
@@ -6109,115 +6226,118 @@ var file_iac_proto_depIdxs = []int32{
 	4,   // 42: workflow.plugin.external.iac.DetectDriftRequest.refs:type_name -> workflow.plugin.external.iac.ResourceRef
 	13,  // 43: workflow.plugin.external.iac.DetectDriftResponse.drifts:type_name -> workflow.plugin.external.iac.DriftResult
 	4,   // 44: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.refs:type_name -> workflow.plugin.external.iac.ResourceRef
-	106, // 45: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.specs:type_name -> workflow.plugin.external.iac.DetectDriftWithSpecsRequest.SpecsEntry
+	108, // 45: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.specs:type_name -> workflow.plugin.external.iac.DetectDriftWithSpecsRequest.SpecsEntry
 	13,  // 46: workflow.plugin.external.iac.DetectDriftWithSpecsResponse.drifts:type_name -> workflow.plugin.external.iac.DriftResult
-	25,  // 47: workflow.plugin.external.iac.RepairDirtyMigrationRequest.request:type_name -> workflow.plugin.external.iac.MigrationRepairRequest
-	26,  // 48: workflow.plugin.external.iac.RepairDirtyMigrationResponse.result:type_name -> workflow.plugin.external.iac.MigrationRepairResult
-	19,  // 49: workflow.plugin.external.iac.ValidatePlanRequest.plan:type_name -> workflow.plugin.external.iac.IaCPlan
-	17,  // 50: workflow.plugin.external.iac.ValidatePlanResponse.diagnostics:type_name -> workflow.plugin.external.iac.PlanDiagnostic
-	4,   // 51: workflow.plugin.external.iac.DetectDriftConfigRequest.refs:type_name -> workflow.plugin.external.iac.ResourceRef
-	107, // 52: workflow.plugin.external.iac.DetectDriftConfigRequest.specs:type_name -> workflow.plugin.external.iac.DetectDriftConfigRequest.SpecsEntry
-	13,  // 53: workflow.plugin.external.iac.DetectDriftConfigResponse.drifts:type_name -> workflow.plugin.external.iac.DriftResult
-	3,   // 54: workflow.plugin.external.iac.ResourceCreateRequest.spec:type_name -> workflow.plugin.external.iac.ResourceSpec
-	9,   // 55: workflow.plugin.external.iac.ResourceCreateResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
-	4,   // 56: workflow.plugin.external.iac.ResourceReadRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	9,   // 57: workflow.plugin.external.iac.ResourceReadResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
-	4,   // 58: workflow.plugin.external.iac.ResourceUpdateRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	3,   // 59: workflow.plugin.external.iac.ResourceUpdateRequest.spec:type_name -> workflow.plugin.external.iac.ResourceSpec
-	9,   // 60: workflow.plugin.external.iac.ResourceUpdateResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
-	4,   // 61: workflow.plugin.external.iac.ResourceDeleteRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	3,   // 62: workflow.plugin.external.iac.ResourceDiffRequest.desired:type_name -> workflow.plugin.external.iac.ResourceSpec
-	9,   // 63: workflow.plugin.external.iac.ResourceDiffRequest.current:type_name -> workflow.plugin.external.iac.ResourceOutput
-	12,  // 64: workflow.plugin.external.iac.ResourceDiffResponse.result:type_name -> workflow.plugin.external.iac.DiffResult
-	4,   // 65: workflow.plugin.external.iac.ResourceScaleRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	9,   // 66: workflow.plugin.external.iac.ResourceScaleResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
-	4,   // 67: workflow.plugin.external.iac.ResourceHealthCheckRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	15,  // 68: workflow.plugin.external.iac.ResourceHealthCheckResponse.result:type_name -> workflow.plugin.external.iac.HealthResult
-	4,   // 69: workflow.plugin.external.iac.TroubleshootRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	16,  // 70: workflow.plugin.external.iac.TroubleshootResponse.diagnostics:type_name -> workflow.plugin.external.iac.Diagnostic
-	83,  // 71: workflow.plugin.external.iac.GetStateResponse.state:type_name -> workflow.plugin.external.iac.IaCState
-	83,  // 72: workflow.plugin.external.iac.SaveStateRequest.state:type_name -> workflow.plugin.external.iac.IaCState
-	108, // 73: workflow.plugin.external.iac.ListStatesRequest.filter:type_name -> workflow.plugin.external.iac.ListStatesRequest.FilterEntry
-	83,  // 74: workflow.plugin.external.iac.ListStatesResponse.states:type_name -> workflow.plugin.external.iac.IaCState
-	3,   // 75: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.SpecsEntry.value:type_name -> workflow.plugin.external.iac.ResourceSpec
-	3,   // 76: workflow.plugin.external.iac.DetectDriftConfigRequest.SpecsEntry.value:type_name -> workflow.plugin.external.iac.ResourceSpec
-	27,  // 77: workflow.plugin.external.iac.IaCProviderRequired.Initialize:input_type -> workflow.plugin.external.iac.InitializeRequest
-	29,  // 78: workflow.plugin.external.iac.IaCProviderRequired.Name:input_type -> workflow.plugin.external.iac.NameRequest
-	31,  // 79: workflow.plugin.external.iac.IaCProviderRequired.Version:input_type -> workflow.plugin.external.iac.VersionRequest
-	33,  // 80: workflow.plugin.external.iac.IaCProviderRequired.Capabilities:input_type -> workflow.plugin.external.iac.CapabilitiesRequest
-	35,  // 81: workflow.plugin.external.iac.IaCProviderRequired.Plan:input_type -> workflow.plugin.external.iac.PlanRequest
-	37,  // 82: workflow.plugin.external.iac.IaCProviderRequired.Apply:input_type -> workflow.plugin.external.iac.ApplyRequest
-	39,  // 83: workflow.plugin.external.iac.IaCProviderRequired.Destroy:input_type -> workflow.plugin.external.iac.DestroyRequest
-	41,  // 84: workflow.plugin.external.iac.IaCProviderRequired.Status:input_type -> workflow.plugin.external.iac.StatusRequest
-	43,  // 85: workflow.plugin.external.iac.IaCProviderRequired.Import:input_type -> workflow.plugin.external.iac.ImportRequest
-	45,  // 86: workflow.plugin.external.iac.IaCProviderRequired.ResolveSizing:input_type -> workflow.plugin.external.iac.ResolveSizingRequest
-	47,  // 87: workflow.plugin.external.iac.IaCProviderRequired.BootstrapStateBackend:input_type -> workflow.plugin.external.iac.BootstrapStateBackendRequest
-	49,  // 88: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateAll:input_type -> workflow.plugin.external.iac.EnumerateAllRequest
-	51,  // 89: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateByTag:input_type -> workflow.plugin.external.iac.EnumerateByTagRequest
-	53,  // 90: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDrift:input_type -> workflow.plugin.external.iac.DetectDriftRequest
-	55,  // 91: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDriftWithSpecs:input_type -> workflow.plugin.external.iac.DetectDriftWithSpecsRequest
-	57,  // 92: workflow.plugin.external.iac.IaCProviderCredentialRevoker.RevokeProviderCredential:input_type -> workflow.plugin.external.iac.RevokeProviderCredentialRequest
-	59,  // 93: workflow.plugin.external.iac.IaCProviderMigrationRepairer.RepairDirtyMigration:input_type -> workflow.plugin.external.iac.RepairDirtyMigrationRequest
-	61,  // 94: workflow.plugin.external.iac.IaCProviderValidator.ValidatePlan:input_type -> workflow.plugin.external.iac.ValidatePlanRequest
-	63,  // 95: workflow.plugin.external.iac.IaCProviderDriftConfigDetector.DetectDriftConfig:input_type -> workflow.plugin.external.iac.DetectDriftConfigRequest
-	65,  // 96: workflow.plugin.external.iac.ResourceDriver.Create:input_type -> workflow.plugin.external.iac.ResourceCreateRequest
-	67,  // 97: workflow.plugin.external.iac.ResourceDriver.Read:input_type -> workflow.plugin.external.iac.ResourceReadRequest
-	69,  // 98: workflow.plugin.external.iac.ResourceDriver.Update:input_type -> workflow.plugin.external.iac.ResourceUpdateRequest
-	71,  // 99: workflow.plugin.external.iac.ResourceDriver.Delete:input_type -> workflow.plugin.external.iac.ResourceDeleteRequest
-	73,  // 100: workflow.plugin.external.iac.ResourceDriver.Diff:input_type -> workflow.plugin.external.iac.ResourceDiffRequest
-	75,  // 101: workflow.plugin.external.iac.ResourceDriver.Scale:input_type -> workflow.plugin.external.iac.ResourceScaleRequest
-	77,  // 102: workflow.plugin.external.iac.ResourceDriver.HealthCheck:input_type -> workflow.plugin.external.iac.ResourceHealthCheckRequest
-	79,  // 103: workflow.plugin.external.iac.ResourceDriver.SensitiveKeys:input_type -> workflow.plugin.external.iac.SensitiveKeysRequest
-	81,  // 104: workflow.plugin.external.iac.ResourceDriver.Troubleshoot:input_type -> workflow.plugin.external.iac.TroubleshootRequest
-	84,  // 105: workflow.plugin.external.iac.IaCStateBackend.Configure:input_type -> workflow.plugin.external.iac.ConfigureRequest
-	86,  // 106: workflow.plugin.external.iac.IaCStateBackend.GetState:input_type -> workflow.plugin.external.iac.GetStateRequest
-	88,  // 107: workflow.plugin.external.iac.IaCStateBackend.SaveState:input_type -> workflow.plugin.external.iac.SaveStateRequest
-	90,  // 108: workflow.plugin.external.iac.IaCStateBackend.ListStates:input_type -> workflow.plugin.external.iac.ListStatesRequest
-	92,  // 109: workflow.plugin.external.iac.IaCStateBackend.DeleteState:input_type -> workflow.plugin.external.iac.DeleteStateRequest
-	94,  // 110: workflow.plugin.external.iac.IaCStateBackend.Lock:input_type -> workflow.plugin.external.iac.LockRequest
-	96,  // 111: workflow.plugin.external.iac.IaCStateBackend.Unlock:input_type -> workflow.plugin.external.iac.UnlockRequest
-	98,  // 112: workflow.plugin.external.iac.IaCStateBackend.ListBackendNames:input_type -> workflow.plugin.external.iac.ListBackendNamesRequest
-	28,  // 113: workflow.plugin.external.iac.IaCProviderRequired.Initialize:output_type -> workflow.plugin.external.iac.InitializeResponse
-	30,  // 114: workflow.plugin.external.iac.IaCProviderRequired.Name:output_type -> workflow.plugin.external.iac.NameResponse
-	32,  // 115: workflow.plugin.external.iac.IaCProviderRequired.Version:output_type -> workflow.plugin.external.iac.VersionResponse
-	34,  // 116: workflow.plugin.external.iac.IaCProviderRequired.Capabilities:output_type -> workflow.plugin.external.iac.CapabilitiesResponse
-	36,  // 117: workflow.plugin.external.iac.IaCProviderRequired.Plan:output_type -> workflow.plugin.external.iac.PlanResponse
-	38,  // 118: workflow.plugin.external.iac.IaCProviderRequired.Apply:output_type -> workflow.plugin.external.iac.ApplyResponse
-	40,  // 119: workflow.plugin.external.iac.IaCProviderRequired.Destroy:output_type -> workflow.plugin.external.iac.DestroyResponse
-	42,  // 120: workflow.plugin.external.iac.IaCProviderRequired.Status:output_type -> workflow.plugin.external.iac.StatusResponse
-	44,  // 121: workflow.plugin.external.iac.IaCProviderRequired.Import:output_type -> workflow.plugin.external.iac.ImportResponse
-	46,  // 122: workflow.plugin.external.iac.IaCProviderRequired.ResolveSizing:output_type -> workflow.plugin.external.iac.ResolveSizingResponse
-	48,  // 123: workflow.plugin.external.iac.IaCProviderRequired.BootstrapStateBackend:output_type -> workflow.plugin.external.iac.BootstrapStateBackendResponse
-	50,  // 124: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateAll:output_type -> workflow.plugin.external.iac.EnumerateAllResponse
-	52,  // 125: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateByTag:output_type -> workflow.plugin.external.iac.EnumerateByTagResponse
-	54,  // 126: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDrift:output_type -> workflow.plugin.external.iac.DetectDriftResponse
-	56,  // 127: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDriftWithSpecs:output_type -> workflow.plugin.external.iac.DetectDriftWithSpecsResponse
-	58,  // 128: workflow.plugin.external.iac.IaCProviderCredentialRevoker.RevokeProviderCredential:output_type -> workflow.plugin.external.iac.RevokeProviderCredentialResponse
-	60,  // 129: workflow.plugin.external.iac.IaCProviderMigrationRepairer.RepairDirtyMigration:output_type -> workflow.plugin.external.iac.RepairDirtyMigrationResponse
-	62,  // 130: workflow.plugin.external.iac.IaCProviderValidator.ValidatePlan:output_type -> workflow.plugin.external.iac.ValidatePlanResponse
-	64,  // 131: workflow.plugin.external.iac.IaCProviderDriftConfigDetector.DetectDriftConfig:output_type -> workflow.plugin.external.iac.DetectDriftConfigResponse
-	66,  // 132: workflow.plugin.external.iac.ResourceDriver.Create:output_type -> workflow.plugin.external.iac.ResourceCreateResponse
-	68,  // 133: workflow.plugin.external.iac.ResourceDriver.Read:output_type -> workflow.plugin.external.iac.ResourceReadResponse
-	70,  // 134: workflow.plugin.external.iac.ResourceDriver.Update:output_type -> workflow.plugin.external.iac.ResourceUpdateResponse
-	72,  // 135: workflow.plugin.external.iac.ResourceDriver.Delete:output_type -> workflow.plugin.external.iac.ResourceDeleteResponse
-	74,  // 136: workflow.plugin.external.iac.ResourceDriver.Diff:output_type -> workflow.plugin.external.iac.ResourceDiffResponse
-	76,  // 137: workflow.plugin.external.iac.ResourceDriver.Scale:output_type -> workflow.plugin.external.iac.ResourceScaleResponse
-	78,  // 138: workflow.plugin.external.iac.ResourceDriver.HealthCheck:output_type -> workflow.plugin.external.iac.ResourceHealthCheckResponse
-	80,  // 139: workflow.plugin.external.iac.ResourceDriver.SensitiveKeys:output_type -> workflow.plugin.external.iac.SensitiveKeysResponse
-	82,  // 140: workflow.plugin.external.iac.ResourceDriver.Troubleshoot:output_type -> workflow.plugin.external.iac.TroubleshootResponse
-	85,  // 141: workflow.plugin.external.iac.IaCStateBackend.Configure:output_type -> workflow.plugin.external.iac.ConfigureResponse
-	87,  // 142: workflow.plugin.external.iac.IaCStateBackend.GetState:output_type -> workflow.plugin.external.iac.GetStateResponse
-	89,  // 143: workflow.plugin.external.iac.IaCStateBackend.SaveState:output_type -> workflow.plugin.external.iac.SaveStateResponse
-	91,  // 144: workflow.plugin.external.iac.IaCStateBackend.ListStates:output_type -> workflow.plugin.external.iac.ListStatesResponse
-	93,  // 145: workflow.plugin.external.iac.IaCStateBackend.DeleteState:output_type -> workflow.plugin.external.iac.DeleteStateResponse
-	95,  // 146: workflow.plugin.external.iac.IaCStateBackend.Lock:output_type -> workflow.plugin.external.iac.LockResponse
-	97,  // 147: workflow.plugin.external.iac.IaCStateBackend.Unlock:output_type -> workflow.plugin.external.iac.UnlockResponse
-	99,  // 148: workflow.plugin.external.iac.IaCStateBackend.ListBackendNames:output_type -> workflow.plugin.external.iac.ListBackendNamesResponse
-	113, // [113:149] is the sub-list for method output_type
-	77,  // [77:113] is the sub-list for method input_type
-	77,  // [77:77] is the sub-list for extension type_name
-	77,  // [77:77] is the sub-list for extension extendee
-	0,   // [0:77] is the sub-list for field type_name
+	20,  // 47: workflow.plugin.external.iac.FinalizeApplyResponse.errors:type_name -> workflow.plugin.external.iac.ActionError
+	25,  // 48: workflow.plugin.external.iac.RepairDirtyMigrationRequest.request:type_name -> workflow.plugin.external.iac.MigrationRepairRequest
+	26,  // 49: workflow.plugin.external.iac.RepairDirtyMigrationResponse.result:type_name -> workflow.plugin.external.iac.MigrationRepairResult
+	19,  // 50: workflow.plugin.external.iac.ValidatePlanRequest.plan:type_name -> workflow.plugin.external.iac.IaCPlan
+	17,  // 51: workflow.plugin.external.iac.ValidatePlanResponse.diagnostics:type_name -> workflow.plugin.external.iac.PlanDiagnostic
+	4,   // 52: workflow.plugin.external.iac.DetectDriftConfigRequest.refs:type_name -> workflow.plugin.external.iac.ResourceRef
+	109, // 53: workflow.plugin.external.iac.DetectDriftConfigRequest.specs:type_name -> workflow.plugin.external.iac.DetectDriftConfigRequest.SpecsEntry
+	13,  // 54: workflow.plugin.external.iac.DetectDriftConfigResponse.drifts:type_name -> workflow.plugin.external.iac.DriftResult
+	3,   // 55: workflow.plugin.external.iac.ResourceCreateRequest.spec:type_name -> workflow.plugin.external.iac.ResourceSpec
+	9,   // 56: workflow.plugin.external.iac.ResourceCreateResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
+	4,   // 57: workflow.plugin.external.iac.ResourceReadRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	9,   // 58: workflow.plugin.external.iac.ResourceReadResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
+	4,   // 59: workflow.plugin.external.iac.ResourceUpdateRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	3,   // 60: workflow.plugin.external.iac.ResourceUpdateRequest.spec:type_name -> workflow.plugin.external.iac.ResourceSpec
+	9,   // 61: workflow.plugin.external.iac.ResourceUpdateResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
+	4,   // 62: workflow.plugin.external.iac.ResourceDeleteRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	3,   // 63: workflow.plugin.external.iac.ResourceDiffRequest.desired:type_name -> workflow.plugin.external.iac.ResourceSpec
+	9,   // 64: workflow.plugin.external.iac.ResourceDiffRequest.current:type_name -> workflow.plugin.external.iac.ResourceOutput
+	12,  // 65: workflow.plugin.external.iac.ResourceDiffResponse.result:type_name -> workflow.plugin.external.iac.DiffResult
+	4,   // 66: workflow.plugin.external.iac.ResourceScaleRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	9,   // 67: workflow.plugin.external.iac.ResourceScaleResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
+	4,   // 68: workflow.plugin.external.iac.ResourceHealthCheckRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	15,  // 69: workflow.plugin.external.iac.ResourceHealthCheckResponse.result:type_name -> workflow.plugin.external.iac.HealthResult
+	4,   // 70: workflow.plugin.external.iac.TroubleshootRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	16,  // 71: workflow.plugin.external.iac.TroubleshootResponse.diagnostics:type_name -> workflow.plugin.external.iac.Diagnostic
+	85,  // 72: workflow.plugin.external.iac.GetStateResponse.state:type_name -> workflow.plugin.external.iac.IaCState
+	85,  // 73: workflow.plugin.external.iac.SaveStateRequest.state:type_name -> workflow.plugin.external.iac.IaCState
+	110, // 74: workflow.plugin.external.iac.ListStatesRequest.filter:type_name -> workflow.plugin.external.iac.ListStatesRequest.FilterEntry
+	85,  // 75: workflow.plugin.external.iac.ListStatesResponse.states:type_name -> workflow.plugin.external.iac.IaCState
+	3,   // 76: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.SpecsEntry.value:type_name -> workflow.plugin.external.iac.ResourceSpec
+	3,   // 77: workflow.plugin.external.iac.DetectDriftConfigRequest.SpecsEntry.value:type_name -> workflow.plugin.external.iac.ResourceSpec
+	27,  // 78: workflow.plugin.external.iac.IaCProviderRequired.Initialize:input_type -> workflow.plugin.external.iac.InitializeRequest
+	29,  // 79: workflow.plugin.external.iac.IaCProviderRequired.Name:input_type -> workflow.plugin.external.iac.NameRequest
+	31,  // 80: workflow.plugin.external.iac.IaCProviderRequired.Version:input_type -> workflow.plugin.external.iac.VersionRequest
+	33,  // 81: workflow.plugin.external.iac.IaCProviderRequired.Capabilities:input_type -> workflow.plugin.external.iac.CapabilitiesRequest
+	35,  // 82: workflow.plugin.external.iac.IaCProviderRequired.Plan:input_type -> workflow.plugin.external.iac.PlanRequest
+	37,  // 83: workflow.plugin.external.iac.IaCProviderRequired.Apply:input_type -> workflow.plugin.external.iac.ApplyRequest
+	39,  // 84: workflow.plugin.external.iac.IaCProviderRequired.Destroy:input_type -> workflow.plugin.external.iac.DestroyRequest
+	41,  // 85: workflow.plugin.external.iac.IaCProviderRequired.Status:input_type -> workflow.plugin.external.iac.StatusRequest
+	43,  // 86: workflow.plugin.external.iac.IaCProviderRequired.Import:input_type -> workflow.plugin.external.iac.ImportRequest
+	45,  // 87: workflow.plugin.external.iac.IaCProviderRequired.ResolveSizing:input_type -> workflow.plugin.external.iac.ResolveSizingRequest
+	47,  // 88: workflow.plugin.external.iac.IaCProviderRequired.BootstrapStateBackend:input_type -> workflow.plugin.external.iac.BootstrapStateBackendRequest
+	49,  // 89: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateAll:input_type -> workflow.plugin.external.iac.EnumerateAllRequest
+	51,  // 90: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateByTag:input_type -> workflow.plugin.external.iac.EnumerateByTagRequest
+	53,  // 91: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDrift:input_type -> workflow.plugin.external.iac.DetectDriftRequest
+	55,  // 92: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDriftWithSpecs:input_type -> workflow.plugin.external.iac.DetectDriftWithSpecsRequest
+	57,  // 93: workflow.plugin.external.iac.IaCProviderCredentialRevoker.RevokeProviderCredential:input_type -> workflow.plugin.external.iac.RevokeProviderCredentialRequest
+	59,  // 94: workflow.plugin.external.iac.IaCProviderFinalizer.FinalizeApply:input_type -> workflow.plugin.external.iac.FinalizeApplyRequest
+	61,  // 95: workflow.plugin.external.iac.IaCProviderMigrationRepairer.RepairDirtyMigration:input_type -> workflow.plugin.external.iac.RepairDirtyMigrationRequest
+	63,  // 96: workflow.plugin.external.iac.IaCProviderValidator.ValidatePlan:input_type -> workflow.plugin.external.iac.ValidatePlanRequest
+	65,  // 97: workflow.plugin.external.iac.IaCProviderDriftConfigDetector.DetectDriftConfig:input_type -> workflow.plugin.external.iac.DetectDriftConfigRequest
+	67,  // 98: workflow.plugin.external.iac.ResourceDriver.Create:input_type -> workflow.plugin.external.iac.ResourceCreateRequest
+	69,  // 99: workflow.plugin.external.iac.ResourceDriver.Read:input_type -> workflow.plugin.external.iac.ResourceReadRequest
+	71,  // 100: workflow.plugin.external.iac.ResourceDriver.Update:input_type -> workflow.plugin.external.iac.ResourceUpdateRequest
+	73,  // 101: workflow.plugin.external.iac.ResourceDriver.Delete:input_type -> workflow.plugin.external.iac.ResourceDeleteRequest
+	75,  // 102: workflow.plugin.external.iac.ResourceDriver.Diff:input_type -> workflow.plugin.external.iac.ResourceDiffRequest
+	77,  // 103: workflow.plugin.external.iac.ResourceDriver.Scale:input_type -> workflow.plugin.external.iac.ResourceScaleRequest
+	79,  // 104: workflow.plugin.external.iac.ResourceDriver.HealthCheck:input_type -> workflow.plugin.external.iac.ResourceHealthCheckRequest
+	81,  // 105: workflow.plugin.external.iac.ResourceDriver.SensitiveKeys:input_type -> workflow.plugin.external.iac.SensitiveKeysRequest
+	83,  // 106: workflow.plugin.external.iac.ResourceDriver.Troubleshoot:input_type -> workflow.plugin.external.iac.TroubleshootRequest
+	86,  // 107: workflow.plugin.external.iac.IaCStateBackend.Configure:input_type -> workflow.plugin.external.iac.ConfigureRequest
+	88,  // 108: workflow.plugin.external.iac.IaCStateBackend.GetState:input_type -> workflow.plugin.external.iac.GetStateRequest
+	90,  // 109: workflow.plugin.external.iac.IaCStateBackend.SaveState:input_type -> workflow.plugin.external.iac.SaveStateRequest
+	92,  // 110: workflow.plugin.external.iac.IaCStateBackend.ListStates:input_type -> workflow.plugin.external.iac.ListStatesRequest
+	94,  // 111: workflow.plugin.external.iac.IaCStateBackend.DeleteState:input_type -> workflow.plugin.external.iac.DeleteStateRequest
+	96,  // 112: workflow.plugin.external.iac.IaCStateBackend.Lock:input_type -> workflow.plugin.external.iac.LockRequest
+	98,  // 113: workflow.plugin.external.iac.IaCStateBackend.Unlock:input_type -> workflow.plugin.external.iac.UnlockRequest
+	100, // 114: workflow.plugin.external.iac.IaCStateBackend.ListBackendNames:input_type -> workflow.plugin.external.iac.ListBackendNamesRequest
+	28,  // 115: workflow.plugin.external.iac.IaCProviderRequired.Initialize:output_type -> workflow.plugin.external.iac.InitializeResponse
+	30,  // 116: workflow.plugin.external.iac.IaCProviderRequired.Name:output_type -> workflow.plugin.external.iac.NameResponse
+	32,  // 117: workflow.plugin.external.iac.IaCProviderRequired.Version:output_type -> workflow.plugin.external.iac.VersionResponse
+	34,  // 118: workflow.plugin.external.iac.IaCProviderRequired.Capabilities:output_type -> workflow.plugin.external.iac.CapabilitiesResponse
+	36,  // 119: workflow.plugin.external.iac.IaCProviderRequired.Plan:output_type -> workflow.plugin.external.iac.PlanResponse
+	38,  // 120: workflow.plugin.external.iac.IaCProviderRequired.Apply:output_type -> workflow.plugin.external.iac.ApplyResponse
+	40,  // 121: workflow.plugin.external.iac.IaCProviderRequired.Destroy:output_type -> workflow.plugin.external.iac.DestroyResponse
+	42,  // 122: workflow.plugin.external.iac.IaCProviderRequired.Status:output_type -> workflow.plugin.external.iac.StatusResponse
+	44,  // 123: workflow.plugin.external.iac.IaCProviderRequired.Import:output_type -> workflow.plugin.external.iac.ImportResponse
+	46,  // 124: workflow.plugin.external.iac.IaCProviderRequired.ResolveSizing:output_type -> workflow.plugin.external.iac.ResolveSizingResponse
+	48,  // 125: workflow.plugin.external.iac.IaCProviderRequired.BootstrapStateBackend:output_type -> workflow.plugin.external.iac.BootstrapStateBackendResponse
+	50,  // 126: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateAll:output_type -> workflow.plugin.external.iac.EnumerateAllResponse
+	52,  // 127: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateByTag:output_type -> workflow.plugin.external.iac.EnumerateByTagResponse
+	54,  // 128: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDrift:output_type -> workflow.plugin.external.iac.DetectDriftResponse
+	56,  // 129: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDriftWithSpecs:output_type -> workflow.plugin.external.iac.DetectDriftWithSpecsResponse
+	58,  // 130: workflow.plugin.external.iac.IaCProviderCredentialRevoker.RevokeProviderCredential:output_type -> workflow.plugin.external.iac.RevokeProviderCredentialResponse
+	60,  // 131: workflow.plugin.external.iac.IaCProviderFinalizer.FinalizeApply:output_type -> workflow.plugin.external.iac.FinalizeApplyResponse
+	62,  // 132: workflow.plugin.external.iac.IaCProviderMigrationRepairer.RepairDirtyMigration:output_type -> workflow.plugin.external.iac.RepairDirtyMigrationResponse
+	64,  // 133: workflow.plugin.external.iac.IaCProviderValidator.ValidatePlan:output_type -> workflow.plugin.external.iac.ValidatePlanResponse
+	66,  // 134: workflow.plugin.external.iac.IaCProviderDriftConfigDetector.DetectDriftConfig:output_type -> workflow.plugin.external.iac.DetectDriftConfigResponse
+	68,  // 135: workflow.plugin.external.iac.ResourceDriver.Create:output_type -> workflow.plugin.external.iac.ResourceCreateResponse
+	70,  // 136: workflow.plugin.external.iac.ResourceDriver.Read:output_type -> workflow.plugin.external.iac.ResourceReadResponse
+	72,  // 137: workflow.plugin.external.iac.ResourceDriver.Update:output_type -> workflow.plugin.external.iac.ResourceUpdateResponse
+	74,  // 138: workflow.plugin.external.iac.ResourceDriver.Delete:output_type -> workflow.plugin.external.iac.ResourceDeleteResponse
+	76,  // 139: workflow.plugin.external.iac.ResourceDriver.Diff:output_type -> workflow.plugin.external.iac.ResourceDiffResponse
+	78,  // 140: workflow.plugin.external.iac.ResourceDriver.Scale:output_type -> workflow.plugin.external.iac.ResourceScaleResponse
+	80,  // 141: workflow.plugin.external.iac.ResourceDriver.HealthCheck:output_type -> workflow.plugin.external.iac.ResourceHealthCheckResponse
+	82,  // 142: workflow.plugin.external.iac.ResourceDriver.SensitiveKeys:output_type -> workflow.plugin.external.iac.SensitiveKeysResponse
+	84,  // 143: workflow.plugin.external.iac.ResourceDriver.Troubleshoot:output_type -> workflow.plugin.external.iac.TroubleshootResponse
+	87,  // 144: workflow.plugin.external.iac.IaCStateBackend.Configure:output_type -> workflow.plugin.external.iac.ConfigureResponse
+	89,  // 145: workflow.plugin.external.iac.IaCStateBackend.GetState:output_type -> workflow.plugin.external.iac.GetStateResponse
+	91,  // 146: workflow.plugin.external.iac.IaCStateBackend.SaveState:output_type -> workflow.plugin.external.iac.SaveStateResponse
+	93,  // 147: workflow.plugin.external.iac.IaCStateBackend.ListStates:output_type -> workflow.plugin.external.iac.ListStatesResponse
+	95,  // 148: workflow.plugin.external.iac.IaCStateBackend.DeleteState:output_type -> workflow.plugin.external.iac.DeleteStateResponse
+	97,  // 149: workflow.plugin.external.iac.IaCStateBackend.Lock:output_type -> workflow.plugin.external.iac.LockResponse
+	99,  // 150: workflow.plugin.external.iac.IaCStateBackend.Unlock:output_type -> workflow.plugin.external.iac.UnlockResponse
+	101, // 151: workflow.plugin.external.iac.IaCStateBackend.ListBackendNames:output_type -> workflow.plugin.external.iac.ListBackendNamesResponse
+	115, // [115:152] is the sub-list for method output_type
+	78,  // [78:115] is the sub-list for method input_type
+	78,  // [78:78] is the sub-list for extension type_name
+	78,  // [78:78] is the sub-list for extension extendee
+	0,   // [0:78] is the sub-list for field type_name
 }
 
 func init() { file_iac_proto_init() }
@@ -6231,9 +6351,9 @@ func file_iac_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_iac_proto_rawDesc), len(file_iac_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   106,
+			NumMessages:   108,
 			NumExtensions: 0,
-			NumServices:   9,
+			NumServices:   10,
 		},
 		GoTypes:           file_iac_proto_goTypes,
 		DependencyIndexes: file_iac_proto_depIdxs,

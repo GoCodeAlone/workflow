@@ -54,6 +54,7 @@ const (
 	iacServiceMigrationRepairer = "workflow.plugin.external.iac.IaCProviderMigrationRepairer"
 	iacServiceValidator         = "workflow.plugin.external.iac.IaCProviderValidator"
 	iacServiceDriftConfigDetect = "workflow.plugin.external.iac.IaCProviderDriftConfigDetector"
+	iacServiceFinalizer         = "workflow.plugin.external.iac.IaCProviderFinalizer"
 	iacServiceResourceDriver    = "workflow.plugin.external.iac.ResourceDriver"
 )
 
@@ -78,6 +79,7 @@ type typedIaCAdapter struct {
 	repairer     pb.IaCProviderMigrationRepairerClient
 	validator    pb.IaCProviderValidatorClient
 	driftCfg     pb.IaCProviderDriftConfigDetectorClient
+	finalizer    pb.IaCProviderFinalizerClient
 	resourceDriv pb.ResourceDriverClient
 
 	// cachedCaps memoizes the plugin's CapabilitiesResponse. Access via
@@ -115,6 +117,9 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 	}
 	if registered[iacServiceDriftConfigDetect] {
 		a.driftCfg = pb.NewIaCProviderDriftConfigDetectorClient(conn)
+	}
+	if registered[iacServiceFinalizer] {
+		a.finalizer = pb.NewIaCProviderFinalizerClient(conn)
 	}
 	if registered[iacServiceResourceDriver] {
 		a.resourceDriv = pb.NewResourceDriverClient(conn)
@@ -218,6 +223,17 @@ func (a *typedIaCAdapter) Validator() pb.IaCProviderValidatorClient {
 // plugin's 14-driver type-routing pattern in Task 11.
 func (a *typedIaCAdapter) ResourceDriverClient() pb.ResourceDriverClient {
 	return a.resourceDriv
+}
+
+// Finalizer returns the typed pb.IaCProviderFinalizerClient or nil when
+// the plugin did not register IaCProviderFinalizer. Used by the v2 apply
+// path's statePersistenceHooks helper (cmd/wfctl/infra_apply.go) to gate
+// the ApplyPlanHooks.OnPlanComplete wiring on service-presence — a nil
+// return means no FinalizeApply RPC is invoked. Per ADR 0024 the absence
+// of the registration is the negative signal (no compat shim, no
+// NotSupported flag). Per workflow#695 Phase 2.5.
+func (a *typedIaCAdapter) Finalizer() pb.IaCProviderFinalizerClient {
+	return a.finalizer
 }
 
 // translateRPCErr converts a gRPC Unimplemented status (the wire signal a
