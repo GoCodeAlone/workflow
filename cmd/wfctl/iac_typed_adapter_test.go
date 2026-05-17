@@ -378,9 +378,10 @@ func TestTypedAdapter_Finalizer_PopulatedWhenRegistered(t *testing.T) {
 
 // TestTypedAdapter_Finalizer_NilWhenNotRegistered verifies the negative
 // signal — when the plugin did not advertise IaCProviderFinalizer, the
-// accessor returns nil so the wfctl-side OnPlanComplete wiring (Task 5)
-// stays unset and no finalize RPC is invoked. Locks the contract that
-// downstream consumers gate on.
+// accessor returns nil so the wfctl-side OnPlanComplete wiring in
+// statePersistenceHooks (cmd/wfctl/infra_apply.go) stays unset and no
+// finalize RPC is invoked. Locks the contract that downstream consumers
+// gate on.
 func TestTypedAdapter_Finalizer_NilWhenNotRegistered(t *testing.T) {
 	conn := dialLazyConn(t)
 	adapter := newTypedIaCAdapter(conn, map[string]bool{
@@ -391,22 +392,36 @@ func TestTypedAdapter_Finalizer_NilWhenNotRegistered(t *testing.T) {
 	}
 }
 
-// dialLazyConn returns a real *grpc.ClientConn that has NOT performed any
-// I/O. grpc.NewClient defers the connection-establish handshake to the
-// first RPC, so dialing a non-listening loopback port returns a valid
-// (lazy) conn without error — sufficient for tests that only assert
-// adapter field-wiring (no actual RPC). Caller schedules Close via
-// t.Cleanup so the dial pool drains between tests.
+// dialLazyConn returns a real *grpc.ClientConn pointing at an in-process
+// gRPC server with zero services registered. Used by adapter field-wiring
+// tests that need newTypedIaCAdapter's `pb.NewXxxClient(conn)` calls to
+// succeed without invoking any RPC. Spinning up a real listener (vs
+// relying on grpc-go's NewClient-defers-dial behavior) keeps the helper
+// robust against future grpc-go releases that might switch to eager
+// dialing — the conn dials a live but service-empty server, so the
+// field-wiring assertion always represents what we mean to test (a real
+// dial-back conn) rather than a happens-to-be-deferred sentinel.
+// t.Cleanup drains both server + conn so test isolation is preserved.
 func dialLazyConn(t *testing.T) *grpc.ClientConn {
 	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	srv := grpc.NewServer()
+	go func() { _ = srv.Serve(lis) }()
 	conn, err := grpc.NewClient(
-		"127.0.0.1:1", // unreachable port; we never RPC, so no dial happens
+		lis.Addr().String(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
+		srv.Stop()
 		t.Fatalf("grpc.NewClient: %v", err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() {
+		_ = conn.Close()
+		srv.Stop()
+	})
 	return conn
 }
 
