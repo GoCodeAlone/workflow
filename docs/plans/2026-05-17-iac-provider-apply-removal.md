@@ -29,16 +29,16 @@
 
 | PR # | Title | Tasks | Branch |
 |------|-------|-------|--------|
-| 1 | workflow: IaCProvider.Apply removal + Capabilities-RPC load gate (rc1) | 1, 2, 3, 4, 5, 6, 7, 8, 9 | feat/699-iac-apply-removal-rc |
-| 2 | workflow-plugin-digitalocean: drop Apply (v2.0.0-rc1) | 10, 11, 12 | feat/699-drop-apply |
-| 3 | workflow-plugin-aws: drop Apply (v2.0.0-rc1) | 13, 14, 15 | feat/699-drop-apply |
-| 4 | workflow-plugin-gcp: drop Apply (v2.0.0-rc1) | 16, 17, 18, 19 | feat/699-drop-apply |
-| 5 | workflow-plugin-azure: drop Apply (v2.0.0-rc1) | 20, 21, 22 | feat/699-drop-apply |
-| 6 | workflow: plugin conformance matrix + final v0.56.0 tag | 23, 24, 25 | feat/699-conformance-final |
-| 7 | workflow-plugin-digitalocean: final v2.0.0 + registry manifest | 26, 27, 28 | feat/699-final |
-| 8 | workflow-plugin-aws: final v2.0.0 + registry manifest | 29, 30, 31 | feat/699-final |
-| 9 | workflow-plugin-gcp: final v2.0.0 + registry manifest | 32, 33, 34 | feat/699-final |
-| 10 | workflow-plugin-azure: final v2.0.0 + registry manifest | 35, 36 | feat/699-final |
+| 1 | workflow: IaCProvider.Apply removal + Capabilities-RPC load gate (rc1) | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6, Task 7, Task 8, Task 9 | feat/699-iac-apply-removal-rc |
+| 2 | workflow-plugin-digitalocean: drop Apply (v2.0.0-rc1) | Task 10, Task 11, Task 12 | feat/699-drop-apply |
+| 3 | workflow-plugin-aws: drop Apply (v2.0.0-rc1) | Task 13, Task 14, Task 15 | feat/699-drop-apply |
+| 4 | workflow-plugin-gcp: drop Apply (v2.0.0-rc1) | Task 16, Task 17, Task 18, Task 19 | feat/699-drop-apply |
+| 5 | workflow-plugin-azure: drop Apply (v2.0.0-rc1) | Task 20, Task 21, Task 22 | feat/699-drop-apply |
+| 6 | workflow: plugin conformance matrix + final v0.56.0 tag | Task 23, Task 24, Task 25 | feat/699-conformance-final |
+| 7 | workflow-plugin-digitalocean: final v2.0.0 + registry manifest | Task 26, Task 27, Task 28 | feat/699-final |
+| 8 | workflow-plugin-aws: final v2.0.0 + registry manifest | Task 29, Task 30, Task 31 | feat/699-final |
+| 9 | workflow-plugin-gcp: final v2.0.0 + registry manifest | Task 32, Task 33, Task 34 | feat/699-final |
+| 10 | workflow-plugin-azure: final v2.0.0 + registry manifest | Task 35, Task 36 | feat/699-final |
 
 **Status:** Draft
 
