@@ -154,9 +154,12 @@ type DriftEntry struct {
 type ActionStatus uint8
 
 const (
-	// ActionStatusUnspecified is the zero-value; T3's applyResultFromPB
-	// REJECTS this on decode so forgotten populates surface as errors
-	// rather than silent SUCCESS misreads.
+	// ActionStatusUnspecified is the zero-value. Engine-side population
+	// in wfctlhelpers.ApplyPlanWithHooks must replace this before
+	// returning; wfctl rejects ActionOutcome entries left at
+	// Unspecified per ADR 0040 invariant 2. Per workflow#699 the
+	// proto-side decode path (formerly applyResultFromPB) is gone —
+	// the only producer is now the engine's per-action populate.
 	ActionStatusUnspecified ActionStatus = iota
 	ActionStatusSuccess
 	ActionStatusError
@@ -167,9 +170,12 @@ const (
 	ActionStatusSkipped            // action never attempted at driver (ctx-cancel pre-dispatch, JIT-substitution-fail, driver-resolve-fail); cloud-side state unchanged
 )
 
-// ActionOutcome mirrors pb.ActionResult. Engine populates one entry per
-// PlanAction in ApplyResult.Actions; wfctl dispatches v2 hooks (Created /
-// Deleted) by matching ActionIndex back to the planned action slice.
+// ActionOutcome is the wfctl-side per-action surfacing for v2 hook
+// dispatch. Engine populates one entry per PlanAction in
+// ApplyResult.Actions; wfctl dispatches v2 hooks (Created / Deleted) by
+// matching ActionIndex back to the planned action slice. Per
+// workflow#699 the proto-side pb.ActionResult mirror was deleted —
+// ActionOutcome is now the sole representation of per-action outcome.
 type ActionOutcome struct {
 	ActionIndex uint32       `json:"action_index"`
 	Status      ActionStatus `json:"status"`

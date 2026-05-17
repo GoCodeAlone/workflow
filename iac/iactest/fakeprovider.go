@@ -38,12 +38,6 @@ type NoopProvider struct {
 	// ProviderVersion overrides the Version() return value. Defaults
 	// to "0.0.0-iactest" when empty.
 	ProviderVersion string
-
-	// DispatchVersion is the value returned from ComputePlanVersion(),
-	// satisfying iac/wfctlhelpers.ComputePlanVersionDeclarer. Tests
-	// driving the v2 apply path set this to "v2"; leaving it empty
-	// (the default) routes through the legacy v1 dispatch.
-	DispatchVersion string
 }
 
 // Compile-time interface conformance check — fails the build if
@@ -65,11 +59,6 @@ func (p *NoopProvider) Version() string {
 	}
 	return "0.0.0-iactest"
 }
-
-// ComputePlanVersion satisfies iac/wfctlhelpers.ComputePlanVersionDeclarer.
-// Returns DispatchVersion (which defaults to "" — treated as v1 by
-// the dispatcher).
-func (p *NoopProvider) ComputePlanVersion() string { return p.DispatchVersion }
 
 // Initialize is a no-op.
 func (p *NoopProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }

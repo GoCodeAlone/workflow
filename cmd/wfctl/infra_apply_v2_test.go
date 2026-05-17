@@ -67,8 +67,7 @@ func TestApplyWithProviderAndStore_PassesLiveProviderToComputePlan(t *testing.T)
 // surfaced via the optional ComputePlanVersionDeclarer interface).
 func TestApplyWithProviderAndStore_V2RoutesThroughWfctlhelpers(t *testing.T) {
 	v2Provider := &iactest.NoopProvider{
-		ProviderName:    "v2-stub",
-		DispatchVersion: "v2",
+		ProviderName: "v2-stub",
 	}
 
 	var v2Called atomic.Bool
@@ -108,44 +107,12 @@ func TestApplyWithProviderAndStore_V2RoutesThroughWfctlhelpers(t *testing.T) {
 	}
 }
 
-// TestApplyWithProviderAndStore_V1FallsThroughToProviderApply
-// verifies that a provider that does NOT declare v2 (via the optional
-// interface) routes through the legacy provider.Apply path, not
-// wfctlhelpers.ApplyPlan. Default behaviour for un-migrated plugins.
-func TestApplyWithProviderAndStore_V1FallsThroughToProviderApply(t *testing.T) {
-	v1Provider := &v1RecordingProvider{}
-
-	var v2Called atomic.Bool
-	origApply := applyV2ApplyPlanWithHooksFn
-	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
-		v2Called.Store(true)
-		return nil, errors.New("v2 must not be invoked for v1 manifest")
-	}
-	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = origApply })
-
-	origCompute := computeInfraPlan
-	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {
-		actions := make([]interfaces.PlanAction, len(specs))
-		for i, s := range specs {
-			actions[i] = interfaces.PlanAction{Action: "create", Resource: s}
-		}
-		return interfaces.IaCPlan{Actions: actions}, nil
-	}
-	t.Cleanup(func() { computeInfraPlan = origCompute })
-
-	specs := []interfaces.ResourceSpec{{Name: "vpc", Type: "infra.vpc"}}
-
-	var w bytes.Buffer
-	if err := applyWithProviderAndStore(context.Background(), v1Provider, "stub", specs, nil, nil, &w, "test", "", nil); err != nil {
-		t.Fatalf("applyWithProviderAndStore: %v", err)
-	}
-	if !v1Provider.applyCalled.Load() {
-		t.Error("legacy provider.Apply was not invoked for v1 manifest")
-	}
-	if v2Called.Load() {
-		t.Error("v2 ApplyPlan was invoked for a v1 manifest — dispatch routed to wrong path")
-	}
-}
+// TestApplyWithProviderAndStore_V1FallsThroughToProviderApply +
+// TestApplyWithProviderAndStore_V1Path_DeclarerReturnsEmpty +
+// v1RecordingProvider stub were deleted per workflow#699 — v1 dispatch
+// has no remaining surface to exercise; the runtime gate in
+// discoverAndLoadIaCProvider rejects v1 plugins at load time and
+// IaCProvider.Apply is gone from the interface.
 
 // TestApplyWithProviderAndStore_V2PrintsDriftReport verifies the
 // drift-report wiring: when wfctlhelpers.ApplyPlan returns a result
@@ -154,7 +121,7 @@ func TestApplyWithProviderAndStore_V1FallsThroughToProviderApply(t *testing.T) {
 // production). Pre-T3.7 the helper existed but wasn't called from
 // any production path.
 func TestApplyWithProviderAndStore_V2PrintsDriftReport(t *testing.T) {
-	v2Provider := &iactest.NoopProvider{ProviderName: "drift-stub", DispatchVersion: "v2"}
+	v2Provider := &iactest.NoopProvider{ProviderName: "drift-stub"}
 
 	driftResult := &interfaces.ApplyResult{
 		InputDriftReport: []interfaces.DriftEntry{
@@ -198,7 +165,7 @@ func TestApplyWithProviderAndStore_V2PrintsDriftReport(t *testing.T) {
 // disconnected. Pre-fix the gate was `if err == nil`, which dropped
 // drift on partial failure.
 func TestApplyWithProviderAndStore_V2PrintsDriftReportOnPartialFailure(t *testing.T) {
-	v2Provider := &iactest.NoopProvider{ProviderName: "drift-stub", DispatchVersion: "v2"}
+	v2Provider := &iactest.NoopProvider{ProviderName: "drift-stub"}
 
 	driftResult := &interfaces.ApplyResult{
 		InputDriftReport: []interfaces.DriftEntry{
@@ -566,104 +533,10 @@ func TestApplyWithProviderAndStore_V2MismatchedOutputIdentityRollsBack(t *testin
 	}
 }
 
-// TestApplyWithProviderAndStore_V1Path_DeclarerReturnsEmpty pins the
-// "Path B" v1 fallback (rev3 fix for T3.7 review IMPORTANT #3): a
-// provider that DOES implement ComputePlanVersionDeclarer but
-// returns "" (or any non-"v2" value) routes through the legacy
-// provider.Apply path, not wfctlhelpers.ApplyPlan. This is the
-// expected mid-transition state for v1 plugins after the SDK update
-// lands but before they explicitly migrate. iactest.NoopProvider
-// always implements the interface (the method exists on the type);
-// leaving DispatchVersion empty exercises Path B specifically. Path
-// A (provider doesn't implement the interface at all) is covered by
-// TestApplyWithProviderAndStore_V1FallsThroughToProviderApply via
-// v1RecordingProvider, which omits the method.
-func TestApplyWithProviderAndStore_V1Path_DeclarerReturnsEmpty(t *testing.T) {
-	v1Provider := &iactest.NoopProvider{ProviderName: "v1-empty-decl", DispatchVersion: ""}
-
-	var v2Called atomic.Bool
-	origApply := applyV2ApplyPlanWithHooksFn
-	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
-		v2Called.Store(true)
-		return nil, errors.New("v2 must not be invoked when DispatchVersion is empty")
-	}
-	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = origApply })
-
-	origCompute := computeInfraPlan
-	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, _ []interfaces.ResourceState) (interfaces.IaCPlan, error) {
-		actions := make([]interfaces.PlanAction, len(specs))
-		for i, s := range specs {
-			actions[i] = interfaces.PlanAction{Action: "create", Resource: s}
-		}
-		return interfaces.IaCPlan{Actions: actions}, nil
-	}
-	t.Cleanup(func() { computeInfraPlan = origCompute })
-
-	specs := []interfaces.ResourceSpec{{Name: "vpc", Type: "infra.vpc"}}
-
-	var w bytes.Buffer
-	if err := applyWithProviderAndStore(context.Background(), v1Provider, "stub", specs, nil, nil, &w, "test", "", nil); err != nil {
-		t.Fatalf("applyWithProviderAndStore: %v", err)
-	}
-	if v2Called.Load() {
-		t.Error("v2 ApplyPlan was invoked when ComputePlanVersion() returned empty — dispatch routed to wrong path")
-	}
-}
-
-// v1RecordingProvider is a minimal interfaces.IaCProvider that does
-// NOT implement ComputePlanVersionDeclarer (the entire point of this
-// fixture: prove the dispatch defaults to v1 for un-declared
-// providers). Tracks Apply invocations so the v1-routing test can
-// assert legacy dispatch fired.
-type v1RecordingProvider struct {
-	applyCalled atomic.Bool
-}
-
-var _ interfaces.IaCProvider = (*v1RecordingProvider)(nil)
-
-func (p *v1RecordingProvider) Name() string                                         { return "v1-stub" }
-func (p *v1RecordingProvider) Version() string                                      { return "0.0.0" }
-func (p *v1RecordingProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
-func (p *v1RecordingProvider) Capabilities() []interfaces.IaCCapabilityDeclaration {
-	return nil
-}
-func (p *v1RecordingProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
-	return nil, nil
-}
-func (p *v1RecordingProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	p.applyCalled.Store(true)
-	return &interfaces.ApplyResult{}, nil
-}
-func (p *v1RecordingProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
-	return nil, nil
-}
-func (p *v1RecordingProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
-	return nil, nil
-}
-func (p *v1RecordingProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
-	return nil, nil
-}
-func (p *v1RecordingProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
-	return nil, nil
-}
-func (p *v1RecordingProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
-	return nil, nil
-}
-func (p *v1RecordingProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
-	return nil, nil
-}
-func (p *v1RecordingProvider) SupportedCanonicalKeys() []string { return nil }
-func (p *v1RecordingProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
-	return nil, nil
-}
-func (p *v1RecordingProvider) Close() error { return nil }
-
 type v2DriverProvider struct {
 	iactest.NoopProvider
 	driver interfaces.ResourceDriver
 }
-
-func (p *v2DriverProvider) ComputePlanVersion() string { return "v2" }
 
 func (p *v2DriverProvider) ResourceDriver(string) (interfaces.ResourceDriver, error) {
 	return p.driver, nil

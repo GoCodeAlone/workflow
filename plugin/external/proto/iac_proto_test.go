@@ -6,7 +6,6 @@ import (
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
-	"google.golang.org/protobuf/proto"
 )
 
 // iacRequiredMethodsCheck is a locally-enumerated method-signature interface
@@ -17,13 +16,15 @@ import (
 // and surfaces the drop loudly. The previous (`var _ pb.X = stub{}`) form
 // would still compile because the regenerated stub would also lose the
 // method — that test silently followed the proto rather than guarding it.
+//
+// Apply was removed from iac.proto per workflow#699 (2026-05-17); the
+// list below tracks the post-cutover required surface.
 type iacRequiredMethodsCheck interface {
 	Initialize(context.Context, *pb.InitializeRequest) (*pb.InitializeResponse, error)
 	Name(context.Context, *pb.NameRequest) (*pb.NameResponse, error)
 	Version(context.Context, *pb.VersionRequest) (*pb.VersionResponse, error)
 	Capabilities(context.Context, *pb.CapabilitiesRequest) (*pb.CapabilitiesResponse, error)
 	Plan(context.Context, *pb.PlanRequest) (*pb.PlanResponse, error)
-	Apply(context.Context, *pb.ApplyRequest) (*pb.ApplyResponse, error)
 	Destroy(context.Context, *pb.DestroyRequest) (*pb.DestroyResponse, error)
 	Status(context.Context, *pb.StatusRequest) (*pb.StatusResponse, error)
 	Import(context.Context, *pb.ImportRequest) (*pb.ImportResponse, error)
@@ -97,53 +98,11 @@ func TestMigrationRepairConfirmationStringMatchesProtoComment(t *testing.T) {
 	}
 }
 
-// TestApplyResultActionsRoundTrip verifies the Phase 2 ActionResult+
-// ActionStatus additions to ApplyResult survive a proto marshal/unmarshal
-// round trip with identical field values. Per ADR 0040 invariants 1-2 and
-// the v2-lifecycle-phase2 plan T1. Guards against accidental field-tag
-// drift and against re-ordering action_index / status / error.
-//
-// Uses proto.Equal for canonical comparison so adding a field to
-// ActionResult later still gets checked without changing this test.
-// Subcases include UNSPECIFIED (which T3 will REJECT on decode — wire
-// layer must still encode/decode it losslessly) and nil/empty Actions
-// (the dominant case for plugins on v1 capability shim).
-func TestApplyResultActionsRoundTrip(t *testing.T) {
-	cases := []struct {
-		name    string
-		actions []*pb.ActionResult
-	}{
-		{"nil_actions", nil},
-		{"empty_actions", []*pb.ActionResult{}},
-		{"unspecified_status", []*pb.ActionResult{
-			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_UNSPECIFIED, Error: ""},
-		}},
-		{"mixed_statuses", []*pb.ActionResult{
-			{ActionIndex: 0, Status: pb.ActionStatus_ACTION_STATUS_SUCCESS, Error: ""},
-			{ActionIndex: 1, Status: pb.ActionStatus_ACTION_STATUS_ERROR, Error: "boom"},
-			{ActionIndex: 2, Status: pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, Error: "still in use"},
-		}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			original := &pb.ApplyResult{
-				PlanId:  "plan-phase2-roundtrip",
-				Actions: c.actions,
-			}
-			wire, err := proto.Marshal(original)
-			if err != nil {
-				t.Fatalf("Marshal: %v", err)
-			}
-			decoded := &pb.ApplyResult{}
-			if err := proto.Unmarshal(wire, decoded); err != nil {
-				t.Fatalf("Unmarshal: %v", err)
-			}
-			if !proto.Equal(decoded, original) {
-				t.Fatalf("round-trip mismatch:\n got: %v\nwant: %v", decoded, original)
-			}
-		})
-	}
-}
+// TestApplyResultActionsRoundTrip was deleted per workflow#699:
+// pb.ApplyResult + pb.ActionResult are gone from iac.proto (the
+// per-action outcome surfacing now flows through engine-side hooks,
+// not the Apply RPC's response). pb.ActionStatus enum survives —
+// covered by TestActionStatusEnumValues below.
 
 // TestActionStatusEnumValues pins the wire-tag → constant mapping for
 // ActionStatus. Per plan T1: 0=UNSPECIFIED (rejected by wfctl), 1=SUCCESS,

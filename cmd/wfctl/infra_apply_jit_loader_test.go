@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
-	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -134,20 +132,15 @@ type jitLoaderStubProvider struct {
 }
 
 var (
-	_ interfaces.IaCProvider                  = (*jitLoaderStubProvider)(nil)
-	_ wfctlhelpers.ComputePlanVersionDeclarer = (*jitLoaderStubProvider)(nil)
+	_ interfaces.IaCProvider = (*jitLoaderStubProvider)(nil)
 )
 
 func (p *jitLoaderStubProvider) Name() string                                         { return "stub" }
 func (p *jitLoaderStubProvider) Version() string                                      { return "0.0.1-jit-loader-seam" }
-func (p *jitLoaderStubProvider) ComputePlanVersion() string                           { return "v2" }
 func (p *jitLoaderStubProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
 func (p *jitLoaderStubProvider) Capabilities() []interfaces.IaCCapabilityDeclaration  { return nil }
 func (p *jitLoaderStubProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
 	return nil, nil
-}
-func (p *jitLoaderStubProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	return nil, errors.New("v2 path must route through wfctlhelpers.ApplyPlan, not provider.Apply")
 }
 func (p *jitLoaderStubProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
 	return nil, nil

@@ -452,8 +452,10 @@ func applyPlanWithEnvProviderAndHooks(
 
 	// Phase 2 engine invariant (workflow#640 + ADR 0040 invariant 1): on
 	// a normally-completed loop, len(result.Actions) MUST equal
-	// len(plan.Actions). Length validation lives engine-side here, not in
-	// applyResultFromPB (which is on the v1 plugin-dispatch path).
+	// len(plan.Actions). Length validation lives engine-side here, where
+	// it always has — the previous reference to a wfctl-side
+	// applyResultFromPB decoder is moot post-workflow#699 (the v1
+	// plugin-Apply dispatch path is gone).
 	if len(result.Actions) != len(plan.Actions) {
 		return result, fmt.Errorf("internal: ApplyPlanWithHooks produced %d ActionOutcomes for %d plan actions (engine invariant violation per ADR 0040)", len(result.Actions), len(plan.Actions))
 	}

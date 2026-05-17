@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -51,6 +52,22 @@ func (p *applyFailProvider) ResourceDriver(_ string) (interfaces.ResourceDriver,
 	return nil, nil
 }
 
+// installAsV2Dispatch shadows applyCapture's promoted method so the
+// failing-apply variant's Apply (which returns p.applyErr) is the one
+// the v2 seam invokes.
+func (p *applyFailProvider) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := p.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
+}
+
 // plainFailProvider fails Apply and returns a ResourceDriver with no Troubleshoot.
 type plainFailProvider struct {
 	applyCapture
@@ -65,6 +82,21 @@ func (p *plainFailProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (
 	return nil, p.applyErr
 }
 
+// installAsV2Dispatch shadows applyCapture's promoted method so the
+// plain-failing-apply variant's Apply is the one the v2 seam invokes.
+func (p *plainFailProvider) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := p.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
+}
+
 func TestInfraApply_EmitsDiagnosticsOnFailure(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 
@@ -76,6 +108,7 @@ func TestInfraApply_EmitsDiagnosticsOnFailure(t *testing.T) {
 		applyErr: errors.New("API error"),
 		tsDriver: &troubleshootingRD{diags: diags, tsCalls: &tsCalls},
 	}
+	provider.installAsV2Dispatch(t)
 
 	infraApplyTroubleshootTimeout = 5 * time.Second
 	defer func() { infraApplyTroubleshootTimeout = 30 * time.Second }()
@@ -105,6 +138,7 @@ func TestInfraApply_EmitsDiagnosticsOnFailure(t *testing.T) {
 func TestInfraApply_NonTroubleshooterNocrash(t *testing.T) {
 	// plainFailProvider.ResourceDriver returns (nil, nil); nil driver → no-op.
 	provider := &plainFailProvider{applyErr: errors.New("boom")}
+	provider.installAsV2Dispatch(t)
 	var diagBuf bytes.Buffer
 	specs := []interfaces.ResourceSpec{{Name: "x", Type: "app_platform"}}
 	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf, "", "", nil)
@@ -132,6 +166,7 @@ func TestInfraApply_WritesStepSummaryOnFailure(t *testing.T) {
 	// This exercises the important branch where diagnostics are empty but the
 	// summary is still written with the failure header and root cause.
 	provider := &plainFailProvider{applyErr: errors.New("apply: resource quota exceeded")}
+	provider.installAsV2Dispatch(t)
 
 	specs := []interfaces.ResourceSpec{{Name: "bmw-staging", Type: "app_platform"}}
 	var diagBuf bytes.Buffer

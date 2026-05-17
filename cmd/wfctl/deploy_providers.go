@@ -124,9 +124,10 @@ type iacPluginManifest struct {
 // plugin.json scan); kept in place to avoid that churn.
 //
 // Until the follow-up: callers receive the value but discard it. The raw
-// string is unconstrained — schema-validated values are {"", "v1", "v2"}
-// per wfctlhelpers.DispatchVersionV2, but this loader path performs only
-// minimal json.Unmarshal so MUST NOT assume.
+// string is unconstrained — SDK schema-validated values are {"", "v1",
+// "v2"}, but this loader path performs only minimal json.Unmarshal so
+// MUST NOT assume. Per workflow#699, the authoritative gate is the
+// typed CapabilitiesResponse check in discoverAndLoadIaCProvider.
 func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion string, hasBinary bool, err error) {
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
@@ -154,11 +155,12 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 		// Per workflow#693 (Phase 2.1 follow-up to #640): validate
 		// iacProvider.computePlanVersion ∈ {"", "v1", "v2"} on the
 		// matching plugin manifest. A typo (e.g. "V2", "v2.0", "two")
-		// would silently route through the v1 dispatch path via
-		// wfctlhelpers.DispatchVersionFor's empty/unknown default,
-		// breaking the Phase 2 hard-cutover contract per ADR 0024 +
-		// ADR 0040. Hard-fail so operators see the misconfiguration
-		// loudly instead of silently dispatching to the wrong path.
+		// would surface as the empty/unknown-bucket default, masking
+		// operator intent — hard-fail so the misconfiguration shows
+		// up loudly. Per workflow#699 the authoritative enforcement
+		// is the typed CapabilitiesResponse gate in
+		// discoverAndLoadIaCProvider; this parse-time check is the
+		// pre-load schema sanity (defense-in-depth).
 		switch m.IaCProvider.ComputePlanVersion {
 		case "", "v1", "v2":
 			// valid
