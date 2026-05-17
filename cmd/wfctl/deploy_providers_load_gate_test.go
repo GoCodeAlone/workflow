@@ -53,16 +53,14 @@ func (f *fakeCapabilitiesWithContext) CapabilitiesWithContext(_ context.Context)
 	return f.resp, f.err
 }
 
-// TestDiscoverAndLoadIaCProvider_LoadGate_WiredIntoDiscovery asserts the
-// helper is actually called by the discovery code-path — not just
-// independently tested. Regression-gates against future refactor that
-// removes the gate from the discovery code-path. Per plan cycle-2 N5 fix.
-//
-// Exercises the enforceCapabilitiesV2Gate var-seam (which is what
-// buildTypedIaCAdapterFrom calls after the typed adapter is constructed).
-// A real-RPC integration test would need an in-process gRPC server —
-// covered separately by the conformance matrix in PR 6.
-func TestDiscoverAndLoadIaCProvider_LoadGate_WiredIntoDiscovery(t *testing.T) {
+// TestEnforceCapabilitiesV2Gate_HelperBehavior unit-tests the
+// enforceCapabilitiesV2Gate var-seam: 10s-timeout RPC + status-check
+// + error-wrapping. Pairs with TestBuildTypedIaCAdapterFrom_LoadGate_RejectsV1Plugin
+// in discover_typed_loader_test.go — that test proves the gate is
+// actually wired into buildTypedIaCAdapterFrom; THIS test proves the
+// gate's three sub-paths (accept / reject-v1 / RPC-failure-wrap)
+// behave correctly when invoked.
+func TestEnforceCapabilitiesV2Gate_HelperBehavior(t *testing.T) {
 	t.Run("v1 plugin → workflow#699 error", func(t *testing.T) {
 		stub := &fakeCapabilitiesWithContext{
 			resp: &pb.CapabilitiesResponse{ComputePlanVersion: "v1"},
