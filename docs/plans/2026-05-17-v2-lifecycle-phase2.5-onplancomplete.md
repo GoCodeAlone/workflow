@@ -15,8 +15,8 @@
 ## Scope Manifest
 
 **PR Count:** 2
-**Tasks:** 10
-**Estimated Lines of Change:** ~400 (workflow ~300 incl proto+pb.go regen + adapter plumbing + tests; DO ~100 incl FinalizeApply impl + regression test + version bumps)
+**Tasks:** 9
+**Estimated Lines of Change:** ~700 (workflow ~600 incl proto + iac.pb.go + iac_grpc.pb.go regen + adapter plumbing + tests; DO ~100 incl FinalizeApply impl + regression test + version bumps; revised upward from cycle-1 plan-review M-4 — gRPC service regen adds ~200 LOC, 2 new messages add ~100 LOC)
 
 **Out of scope:**
 - Phase 2.3: ACTION_STATUS_COMPENSATED / COMPENSATION_FAILED / SKIPPED enum value additions (tags 4+5 reserved in Phase 2 PR #694 b09bced1; tag 6 candidate for SKIPPED). Separate cascade.
@@ -29,8 +29,8 @@
 
 | PR # | Title | Tasks | Branch |
 |------|-------|-------|--------|
-| 1 | feat: workflow v0.55.0 — IaCProviderFinalizer optional service + ApplyPlanHooks.OnPlanComplete hook + engine plumbing | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6, Task 7 | `feat/695-onplancomplete-impl` (in workflow) |
-| 2 | feat: declare ComputePlanVersion v2 + IaCProviderFinalizer.FinalizeApply impl + bump workflow v0.55.0 pin; release v1.3.0 | Task 8, Task 9, Task 10 | `feat/695-do-finalize` (in workflow-plugin-digitalocean) |
+| 1 | feat(iac): IaCProviderFinalizer + OnPlanComplete hook (#695 Phase 2.5) | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6 | `feat/695-onplancomplete-impl` (in workflow) |
+| 2 | feat: declare ComputePlanVersion v2 + IaCProviderFinalizer.FinalizeApply impl + bump workflow v0.55.0 pin; release v1.3.0 | Task 7, Task 8, Task 9 | `feat/695-do-finalize` (in workflow-plugin-digitalocean) |
 
 **Post-cascade closeout** (cross-plugin smoke verification + memory update + issue closure) is a team-lead operational step described after the task list — NOT a separate plan-task; it doesn't create a PR. Matches Phase 2 plan precedent.
 
@@ -108,27 +108,34 @@ protoc --proto_path=plugin/external/proto --descriptor_set_out=/dev/null plugin/
 ```
 Expected: exit 0, no syntax errors.
 
-**Step 3: Regenerate iac.pb.go (bundled in same commit per cycle-1 I-1 precedent)**
+**Step 3: Regenerate iac.pb.go AND iac_grpc.pb.go (bundled in same commit per cycle-1 I-1 precedent)**
+
+The repo uses **buf**, not make/go-generate. The `buf.yaml` + `buf.gen.yaml` config files live at the **repo root**, not in `plugin/external/proto/`. Run from worktree root:
 
 ```bash
-grep -rn 'protoc.*iac.proto\|//go:generate.*proto' Makefile scripts/ plugin/external/proto/ 2>&1 | head -5
-# Run whichever regen command the repo uses (likely `make proto` or `go generate`)
-make proto  # OR go generate ./plugin/external/proto/...
+cd /Users/jon/workspace/workflow/_worktrees/695-impl
+buf generate
 ```
+
+The repo splits message-codegen (`iac.pb.go`) from gRPC-service-codegen (`iac_grpc.pb.go`). A new service definition lands in `iac_grpc.pb.go` (`RegisterXxxServer`, `NewXxxClient`, `ServerInterface`, `UnimplementedXxxServer`); the new messages land in `iac.pb.go`. **Both files must be staged.**
 
 **Step 4: Verify generated symbols + build**
 
 ```bash
-grep -n 'IaCProviderFinalizer\|FinalizeApply\|RegisterIaCProviderFinalizerServer' plugin/external/proto/iac.pb.go | head -10
+grep -n 'IaCProviderFinalizer\|FinalizeApply' plugin/external/proto/iac_grpc.pb.go | head -10
+grep -n 'FinalizeApplyRequest\|FinalizeApplyResponse' plugin/external/proto/iac.pb.go | head -10
 GOWORK=off go build ./plugin/external/proto/...
 ```
 
-Expected: lines matching `type IaCProviderFinalizerServer interface`, `type IaCProviderFinalizerClient interface`, `func NewIaCProviderFinalizerClient`, `func RegisterIaCProviderFinalizerServer`, `type UnimplementedIaCProviderFinalizerServer struct`, `type FinalizeApplyRequest struct`, `type FinalizeApplyResponse struct`; build exit 0.
+Expected:
+- `iac_grpc.pb.go`: lines matching `type IaCProviderFinalizerServer interface`, `type IaCProviderFinalizerClient interface`, `func NewIaCProviderFinalizerClient`, `func RegisterIaCProviderFinalizerServer`, `type UnimplementedIaCProviderFinalizerServer struct`
+- `iac.pb.go`: lines matching `type FinalizeApplyRequest struct`, `type FinalizeApplyResponse struct`
+- Build exit 0
 
-**Step 5: Commit (BUNDLED — proto + regen atomic)**
+**Step 5: Commit (BUNDLED — proto + BOTH regen files atomic)**
 
 ```bash
-git add plugin/external/proto/iac.proto plugin/external/proto/iac.pb.go
+git add plugin/external/proto/iac.proto plugin/external/proto/iac.pb.go plugin/external/proto/iac_grpc.pb.go
 git commit -m "feat(proto): add IaCProviderFinalizer optional service + FinalizeApply RPC (Phase 2.5)"
 ```
 
@@ -140,10 +147,18 @@ git commit -m "feat(proto): add IaCProviderFinalizer optional service + Finalize
 
 ### Task 2: workflow — change apply.go signature to named returns + add OnPlanComplete + deferred-closure invocation
 
-**Files:**
-- Modify: `iac/wfctlhelpers/apply.go:112-118` (change `applyPlanWithEnvProviderAndHooks` signature to named returns per design §A.0)
-- Modify: `iac/wfctlhelpers/apply.go:84-89` (add `OnPlanComplete` field to `ApplyPlanHooks` struct)
-- Modify: `iac/wfctlhelpers/apply.go:138-256` (add `loopReached` flag + deferred-closure invocation pattern per design §D)
+**Files (line numbers re-verified against current apply.go HEAD per cycle-1 plan-review I-1):**
+- Modify: `iac/wfctlhelpers/apply.go:137` (change `applyPlanWithEnvProviderAndHooks` signature to named returns per design §A.0)
+- Modify: `iac/wfctlhelpers/apply.go:110` (add `OnPlanComplete` field to `ApplyPlanHooks` struct)
+- Modify: `iac/wfctlhelpers/apply.go:138-196` (add `loopReached` flag + deferred-closure invocation pattern per design §D; set flag immediately before `for i := range plan.Actions {` at line 196)
+
+**Outer-function exit paths (re-verified):**
+- Line 192 (preflight error from `preflightProviderOwnedReplaceWithDeleteHooks`) → loopReached=false → defer NO-OPS (no cloud work happened)
+- Line 324 (per-action fatalErr from inside inner closure → bubbles to outer return) → loopReached=true → defer FIRES on success (see semantic-gating below)
+- Line 333 (post-loop length-invariant violation) → loopReached=true → defer FIRES on success (see semantic-gating below)
+- Line 336 (success) → loopReached=true + err==nil → defer FIRES finalize
+
+**v1 semantic preservation (cycle-1 plan-review C-3 fix):** the v1 DOProvider.Apply wrapper at `internal/provider.go:276-282` SKIPS deferred-flush when wfctlhelpers.ApplyPlan returns a top-level err. The defer must gate on `err == nil` so OnPlanComplete only fires on outer-success exits (line 336), matching v1 behavior. Outer errors at 324 + 333 skip finalize.
 
 **Step 1: Write failing test (TDD)**
 
@@ -180,6 +195,8 @@ func TestApplyPlanWithHooks_OnPlanComplete_FiresOnEmptyPlan(t *testing.T) {
     if !fired { t.Error("OnPlanComplete did not fire on empty plan (regression: v1 wrapper flushes stale-queued state even for empty plans)") }
 }
 
+// Per v1 semantic preservation (cycle-1 C-3 fix): OnPlanComplete must fire
+// successfully on clean success; finalize-side errors surface to caller's err.
 func TestApplyPlanWithHooks_OnPlanComplete_SurfacesErrorToCaller(t *testing.T) {
     p := newFakeProvider()
     plan := &interfaces.IaCPlan{
@@ -196,10 +213,32 @@ func TestApplyPlanWithHooks_OnPlanComplete_SurfacesErrorToCaller(t *testing.T) {
     }
 }
 
+// v1 semantic preservation: OnPlanComplete does NOT fire when the outer
+// function would return a non-nil err. Matches DOProvider.Apply's
+// "return without flushing" early-exit at internal/provider.go:276-282.
+func TestApplyPlanWithHooks_OnPlanComplete_SkippedOnOuterError(t *testing.T) {
+    // fakeProvider with driverErr set returns an error from outer apply path.
+    p := &fakeProvider{driverErr: errors.New("driver resolution failed")}
+    plan := &interfaces.IaCPlan{
+        ID: "plan-driver-err",
+        Actions: []interfaces.PlanAction{{Resource: interfaces.ResourceRef{Type: "unknown", Name: "r1"}, Action: "create"}},
+    }
+    var fired bool
+    hooks := ApplyPlanHooks{OnPlanComplete: func(_ context.Context) error { fired = true; return nil }}
+    _, _ = ApplyPlanWithHooks(context.Background(), p, plan, hooks)
+    // Per Phase 2 plan-review C-1: driver-resolve error doesn't abort outer
+    // apply (best-effort); result.Errors gets the diagnostic. So outer err
+    // may be nil for this case. UPDATE test fixture to actually trigger
+    // outer err: use hook-error that returns from inner closure to outer
+    // function at apply.go:324 (fatalErr path), which IS a true outer err.
+    // (See test scaffolding pattern in apply_hooks_test.go for hook-error wiring.)
+    _ = fired // assertion deferred to test rewrite per implementer
+}
+
 func TestApplyPlanWithHooks_OnPlanComplete_DoesNotFireOnPreloopError(t *testing.T) {
-    // Trigger pre-loop early-exit (preflightProviderOwnedReplaceWithDeleteHooks error
-    // at apply.go:180): plan with a replace action + delete-state-hook active should
-    // fail preflight before loopReached=true is set.
+    // Trigger pre-loop early-exit at apply.go:192 (preflightProviderOwnedReplace
+    // WithDeleteHooks error): plan with a replace action + delete-state-hook
+    // active should fail preflight before loopReached=true is set.
     p := newFakeProvider()
     plan := &interfaces.IaCPlan{
         ID: "plan-preflight-fail",
@@ -265,12 +304,20 @@ func applyPlanWithEnvProviderAndHooks(
 
 All existing `return result, ...` statements continue to work unchanged with named returns.
 
-(3c) Add `loopReached` flag + deferred-closure invocation. Inside `applyPlanWithEnvProviderAndHooks` after the named-return signature but BEFORE any existing logic:
+(3c) Add `loopReached` flag + deferred-closure invocation. Inside `applyPlanWithEnvProviderAndHooks` after the named-return signature but BEFORE any existing logic. **Cycle-1 plan-review C-3 fix: gate on `err == nil` to match v1 wrapper semantic preservation** (DOProvider.Apply skips deferred-flush when ApplyPlan returns top-level err per provider.go:276-282).
 
 ```go
 var loopReached bool
 defer func() {
     if !loopReached || hooks.OnPlanComplete == nil {
+        return
+    }
+    // v1 semantic preservation: only fire OnPlanComplete on outer
+    // success exit (apply.go:336). Outer errors at 192/324/333 skip
+    // finalize to match DOProvider.Apply v1 wrapper's
+    // "return without flushing on top-level err" behavior at
+    // internal/provider.go:276-282.
+    if err != nil {
         return
     }
     if hookErr := hooks.OnPlanComplete(ctx); hookErr != nil {
@@ -283,18 +330,14 @@ defer func() {
             Action:   "finalize",
             Error:    fmt.Errorf("plan finalize: %w", hookErr).Error(),
         })
-        // Surface finalize error to caller's err if no prior error
-        // already exists. If err is already non-nil (per-action driver
-        // error or hook error from inside the loop), the existing err
-        // wins so the original failure cause is preserved.
-        if err == nil {
-            err = fmt.Errorf("plan finalize: %w", hookErr)
-        }
+        // Surface finalize error to caller's err. Outer err was nil
+        // (gated above); finalize failure now becomes the outer err.
+        err = fmt.Errorf("plan finalize: %w", hookErr)
     }
 }()
 ```
 
-(3d) Set `loopReached = true` immediately before the `for i := range plan.Actions` loop opens. This is around line 195 in current file (find the line `for i := range plan.Actions {` and add `loopReached = true` on the preceding line).
+(3d) Set `loopReached = true` immediately before the `for i := range plan.Actions` loop opens at apply.go:196. Insert the assignment on the preceding line (so it sets right before the for-statement begins iterating).
 
 **Step 4: Run tests to verify they pass**
 
@@ -482,62 +525,70 @@ git commit -m "feat(wfctl): typedIaCAdapter Finalizer() accessor for IaCProvider
 
 ---
 
-### Task 5: workflow — wire OnPlanComplete in v2 dispatch call sites (cmd/wfctl/infra_apply.go)
+### Task 5: workflow — wire OnPlanComplete into shared statePersistenceHooks helper + PR cut
 
 **Files:**
-- Modify: `cmd/wfctl/infra_apply.go:~460-473` (first v2 dispatch site — hooks construction passed to `applyV2ApplyPlanWithHooksFn`)
-- Modify: `cmd/wfctl/infra_apply.go:~1600-1610` (second v2 dispatch site — same wiring pattern)
+- Modify: `cmd/wfctl/infra_apply.go:592` (the SHARED `statePersistenceHooks` helper — single edit covers BOTH v2 dispatch sites at line 472 + line 1609 which both invoke this helper per cycle-1 plan-review I-2). Add `planID string` parameter to helper signature; both call sites pass `plan.ID`.
+- Modify: `cmd/wfctl/infra_apply.go:472,1609` (both call sites — add `plan.ID` arg in the helper invocation)
 
-**Step 1: Read existing hooks construction at both sites**
+**Step 1: Read shared helper + call sites**
 
 ```bash
-sed -n '450,490p' cmd/wfctl/infra_apply.go
-sed -n '1590,1630p' cmd/wfctl/infra_apply.go
+sed -n '588,650p' cmd/wfctl/infra_apply.go  # helper definition
+sed -n '470,475p' cmd/wfctl/infra_apply.go  # call site 1
+sed -n '1607,1612p' cmd/wfctl/infra_apply.go # call site 2
 ```
 
-Find the `wfctlhelpers.ApplyPlanHooks{...}` literal construction at each site. Both sites build the `hooks` struct with `OnResourceApplied` + `OnResourceDeleted` closures.
+Confirm the helper builds `ApplyPlanHooks` with `OnResourceApplied` + `OnResourceDeleted` closures, and that both call sites invoke `statePersistenceHooks(store, secretsProvider, provider, providerType, hydratedOut)`.
 
-**Step 2: Add OnPlanComplete closure at both sites**
+**Step 2: Extend helper signature + add OnPlanComplete closure**
 
-Insert the OnPlanComplete field into each hooks struct construction. The closure should:
-- Type-assert `provider` to access `*typedIaCAdapter` (or use a sentinel interface check)
-- Call `adapter.Finalizer().FinalizeApply(ctx, &pb.FinalizeApplyRequest{PlanId: plan.ID})`
-- Append `resp.Errors` to `result.Errors` (the closure captures `result` from outer scope)
-- Return a wrapped error if any errors returned
+(2a) Add `planID string` parameter to `statePersistenceHooks` (between `providerType` and `hydratedOut` to minimize re-ordering).
 
-Pattern (insert into BOTH hooks constructions in `infra_apply.go`):
+(2b) Inside the helper, add `OnPlanComplete` to the returned `ApplyPlanHooks` struct:
 
 ```go
 OnPlanComplete: func(ctx context.Context) error {
     // Type-assert to *typedIaCAdapter to access Finalizer() accessor.
-    // If the provider is the in-process fake or some other shape, no-op.
+    // In-process fake or other provider shapes no-op gracefully.
     adapter, ok := provider.(*typedIaCAdapter)
     if !ok {
         return nil
     }
     fin := adapter.Finalizer()
     if fin == nil {
-        // Plugin did not register IaCProviderFinalizer; no-op.
+        // Plugin did not register IaCProviderFinalizer; no-op (preserves
+        // pre-Phase-2.5 behavior for plugins that don't opt in).
         return nil
     }
-    resp, callErr := fin.FinalizeApply(ctx, &pb.FinalizeApplyRequest{PlanId: plan.ID})
+    resp, callErr := fin.FinalizeApply(ctx, &pb.FinalizeApplyRequest{PlanId: planID})
     if callErr != nil {
         return fmt.Errorf("FinalizeApply gRPC: %w", callErr)
     }
-    // Append per-driver errors to result.Errors preserving v1 wrapper
-    // attribution shape (per design §wfctl-side adapter sample).
-    for _, e := range resp.GetErrors() {
-        result.Errors = append(result.Errors, interfaces.ActionError{
-            Resource: e.GetResource(),
-            Action:   e.GetAction(),
-            Error:    e.GetError(),
-        })
-    }
+    // Append per-driver errors preserving v1 wrapper attribution
+    // shape (per design §wfctl-side adapter sample). NOTE: this
+    // closure does NOT have direct access to result — the engine
+    // closure in apply.go's defer handles result.Errors append for
+    // the <plan-finalize> entry. The per-driver attribution from
+    // resp.GetErrors() flows through the engine-side closure via
+    // the returned wrapped err message + plugin-side fmt detail.
     if len(resp.GetErrors()) > 0 {
-        return fmt.Errorf("plugin finalize: %d driver(s) failed", len(resp.GetErrors()))
+        // Build aggregated err message preserving per-driver details
+        // so the engine-side defer can wrap it into result.Errors.
+        msgs := make([]string, 0, len(resp.GetErrors()))
+        for _, e := range resp.GetErrors() {
+            msgs = append(msgs, fmt.Sprintf("%s/%s: %s", e.GetResource(), e.GetAction(), e.GetError()))
+        }
+        return fmt.Errorf("plugin finalize: %d driver(s) failed: %s", len(resp.GetErrors()), strings.Join(msgs, "; "))
     }
     return nil
 },
+```
+
+(2c) Update both call sites at line 472 + 1609 to pass `plan.ID` as the new arg:
+
+```go
+hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
 ```
 
 **Step 3: Verify build + existing tests still pass**
@@ -548,53 +599,21 @@ GOWORK=off go test ./cmd/wfctl/ -run 'TestInfraApply' -v -count=1
 ```
 Expected: build clean; existing tests PASS.
 
-**Step 4: Commit**
+**Step 4: Commit + push branch + create PR**
 
 ```bash
 git add cmd/wfctl/infra_apply.go
-git commit -m "feat(wfctl): wire OnPlanComplete hook to IaCProviderFinalizer at v2 dispatch sites (Phase 2.5)"
-```
+git commit -m "feat(wfctl): wire OnPlanComplete hook to IaCProviderFinalizer via shared statePersistenceHooks helper (Phase 2.5)"
 
-**Verification (CLI command class):** build clean; existing infra-apply tests PASS. The new wiring is exercised by the DO regression test in Task 9 + post-cascade smoke.
-
-**Rollback:** revert commit.
-
----
-
-### Task 6: workflow — adapter scope-bleed check + production cite verification
-
-**Files:** none new (verification-only task ensuring Task 1-5 are coherent before PR creation)
-
-**Step 1: Verify all 5 prior tasks have shipped clean local state**
-
-```bash
-cd /Users/jon/workspace/workflow/_worktrees/695-impl
-git log --oneline origin/main..HEAD
-```
-Expected: 5 commits on top of origin/main (Task 1 proto+regen, Task 2 engine, Task 3 SDK, Task 4 adapter, Task 5 dispatch wiring).
-
-**Step 2: Full workflow build + test sweep**
-
-```bash
+# Pre-PR verification sweep:
 GOWORK=off go build ./...
 GOWORK=off go test ./iac/wfctlhelpers/ ./plugin/external/sdk/ ./cmd/wfctl/ -race -count=1
-```
-Expected: build clean; all 3 packages PASS race-clean.
-
-**Step 3: golangci-lint clean check**
-
-```bash
 GOWORK=off golangci-lint run --timeout=10m ./iac/wfctlhelpers/... ./plugin/external/sdk/... ./cmd/wfctl/...
-```
-Expected: 0 issues (in particular: no G115 gosec warnings; no unused imports from proto regen drift).
 
-**Step 4: Push branch + create PR**
-
-```bash
 git push -u origin feat/695-onplancomplete-impl
 gh pr create --base main --head feat/695-onplancomplete-impl \
   --reviewer "@copilot" \
-  --title "feat: workflow#695 Phase 2.5 — IaCProviderFinalizer optional service + OnPlanComplete hook" \
+  --title "feat(iac): IaCProviderFinalizer + OnPlanComplete hook (#695 Phase 2.5)" \
   --body "$(cat <<'EOF'
 ## Summary
 
@@ -638,13 +657,13 @@ EOF
 )"
 ```
 
-**Verification (verification-only task):** PR opened; CI triggers; team-lead monitors.
+**Verification (CLI command class + PR cut):** build clean; race-clean tests; lint clean; PR opened; CI triggers; team-lead monitors per `feedback_active_pr_monitoring`.
 
-**Rollback:** close PR; revert local commits.
+**Rollback:** close PR; revert local commits in reverse order (Task 5 closure body MUST revert BEFORE Task 2 engine struct field, per cycle-1 plan-review I-6).
 
 ---
 
-### Task 7: workflow — cut v0.55.0 tag from main HEAD (team-lead action post-PR1 merge)
+### Task 6: workflow — cut v0.55.0 tag from main HEAD (team-lead action post-PR1 merge)
 
 **Files:** none (operational verification + git operation)
 
@@ -683,7 +702,7 @@ Expected: `draft=false`, `prerelease=false`, `n_assets >= 18` (matching v0.54.0 
 
 If `is_latest:null`, apply defensive `gh release edit v0.54.0 --repo GoCodeAlone/workflow --latest` (matches Phase 2 closeout pattern).
 
-**Verification (version pin update class + runtime-launch-validation per finishing-a-development-branch Step 1b):**
+**Verification (version pin update class — release artifact validation per finishing-a-development-branch Step 1a; runtime-launch-validation deferred to Task 9 post-cascade smoke per cycle-1 plan-review I-5):**
 - Release published, not draft, all assets uploaded
 - Defensive `--latest` flag applied if needed
 - Tag visible via `git ls-remote --tags origin v0.55.0`
@@ -692,7 +711,7 @@ If `is_latest:null`, apply defensive `gh release edit v0.54.0 --repo GoCodeAlone
 
 ---
 
-### Task 8: workflow-plugin-digitalocean — implement IaCProviderFinalizer + flip v2 + bump pins; release v1.3.0
+### Task 7: workflow-plugin-digitalocean — implement IaCProviderFinalizer + flip v2 + bump pins; release v1.3.0
 
 **Files (worktree at /Users/jon/workspace/workflow-plugin-digitalocean/_worktrees/695-do):**
 - Modify: `go.mod` (workflow pin v0.54.0 → v0.55.0)
@@ -819,7 +838,7 @@ gh pr merge <N> --squash --admin --delete-branch
 
 ---
 
-### Task 9: workflow-plugin-digitalocean — regression test for deferred-flush under v2 dispatch
+### Task 8: workflow-plugin-digitalocean — regression test for deferred-flush under v2 dispatch
 
 **Files:**
 - Create: `internal/iacserver_finalize_test.go`
@@ -876,9 +895,15 @@ func TestDOIaCServer_FinalizeApply_PreservesPerDriverErrorAttribution(t *testing
 }
 ```
 
-**Step 2: Add test fixture helpers if not already present**
+**Step 2: Build test fixtures (NEW test infra ~60-80 LOC per cycle-1 plan-review I-3)**
 
-If `setupProviderWithQueuedDBDeferredUpdate` / `setupProviderWithFailingDBDeferredUpdate` don't exist, factor them out of the existing `provider_deferred_test.go` setup logic (the test fixture at provider_deferred_test.go:155+ has the same shape — extract into reusable helpers in the test file).
+The helpers `setupProviderWithQueuedDBDeferredUpdate` and `setupProviderWithFailingDBDeferredUpdate` do NOT exist today. Build them in the new test file:
+
+**(2a) `setupProviderWithQueuedDBDeferredUpdate`** — extract the seed pattern from `provider_deferred_test.go`'s `TestDOProvider_Apply_FlushesDeferred_WhenTypeAbsentFromPlan` test body (lines 155+). The test inline-seeds a queued deferred update via `dbDriver.Create(...)` with a `trusted_sources` config; refactor that into a reusable helper signature: `func setupProviderWithQueuedDBDeferredUpdate(t *testing.T) (*DOProvider, *minimalDBMock)`. Returns provider with database driver registered + mock with seeded state. (~30 LOC)
+
+**(2b) `setupProviderWithFailingDBDeferredUpdate`** — NEW infrastructure. The existing `minimalDBMock.UpdateFirewallRules` (at `provider_deferred_test.go:~70`) returns nil; the failing variant needs a new mock type or a `failOnFlush bool` field on the existing mock. Recommended: add a `flushErr error` field to `minimalDBMock` that gets returned from UpdateFirewallRules when set. Helper signature: `func setupProviderWithFailingDBDeferredUpdate(t *testing.T) (*DOProvider, *minimalDBMock)` — seeds mock with `flushErr = errors.New("update firewall rules failed")`. (~30-40 LOC)
+
+Reuse `fakeAppForDeferred` + `minimalDBMock` types from `provider_deferred_test.go` — don't duplicate the mock structs.
 
 **Step 3: Run tests**
 
@@ -902,7 +927,7 @@ git push
 
 ---
 
-### Task 10: workflow-plugin-digitalocean — cut v1.3.0 tag from main HEAD (team-lead action post-PR2 merge)
+### Task 9: workflow-plugin-digitalocean — cut v1.3.0 tag from main HEAD (team-lead action post-PR2 merge)
 
 **Files:** none (operational verification + git operation)
 
@@ -951,9 +976,10 @@ gh pr list --repo GoCodeAlone/workflow-plugin-digitalocean --search "in:title sy
 gh pr merge <N> --repo GoCodeAlone/workflow-plugin-digitalocean --squash --admin --delete-branch
 ```
 
-**Verification (version pin update class + plugin loading paths → runtime-launch-validation triggered per finishing-a-development-branch Step 1b):**
+**Verification (version pin update class + plugin loading paths → runtime-launch-validation REQUIRED per finishing-a-development-branch Step 1b; cycle-1 plan-review I-5 fix — make smoke MANDATORY here, not optional in closeout):**
 - Release published, not draft, marked latest, 5+ assets
 - Defensive edit applied if needed
+- **MANDATORY smoke**: install DO v1.3.0 against wfctl v0.55.0 (`wfctl plugin install github.com/GoCodeAlone/workflow-plugin-digitalocean@v1.3.0`); run representative DB + app plan against a DO project; verify database `trusted_sources` firewall rules applied post-app-create (= deferred-flush ran under v2 dispatch via FinalizeApply RPC). Save transcript to `docs/runtime-validation/2026-05-17-phase2.5-do-finalize-smoke.md` and commit.
 
 **Rollback (per design §Rollback):** `git push --delete origin v1.3.0` + `gh release delete v1.3.0 --repo GoCodeAlone/workflow-plugin-digitalocean --yes` + cut DO v1.3.1 restoring v1.2.0 state. DO consumers continue on workflow v0.54.0 + DO v1.2.0 (v1-dispatched).
 
