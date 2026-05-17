@@ -304,11 +304,14 @@ func TestApplyPlanWithHooks_PopulatesActions_PreDispatchDriverError(t *testing.T
 // ─────────────────────────────────────────────────────────────────────────────
 // OnPlanComplete tests (workflow#695 Phase 2.5). Per plan task 2 +
 // cycle-1 plan-review C-3 v1 semantic preservation: OnPlanComplete fires
-// ONLY on outer-success exits (apply.go:336), matching the DOProvider.Apply
-// v1 wrapper's "return without flushing on top-level err" behavior at
-// internal/provider.go:276-282. Outer errors at preflight (192),
-// per-action fatalErr (324), and post-loop length-invariant (333) ALL
-// skip finalize.
+// ONLY on the natural success-exit return at the end of
+// applyPlanWithEnvProviderAndHooks, matching the DOProvider.Apply v1
+// wrapper's "return without flushing on top-level err" behavior (the
+// `if err != nil { return ... }` guard immediately after the wrapped
+// ApplyPlan call in workflow-plugin-digitalocean internal/provider.go).
+// Outer errors at the preflightProviderOwnedReplaceWithDeleteHooks
+// early-return, the per-action loop's fatalErr early-return, and the
+// post-loop length-invariant check ALL skip finalize.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // TestApplyPlanWithHooks_OnPlanComplete_FiresOnCleanSuccess verifies that
@@ -392,10 +395,12 @@ func TestApplyPlanWithHooks_OnPlanComplete_SurfacesErrorToCaller(t *testing.T) {
 
 // TestApplyPlanWithHooks_OnPlanComplete_SkippedOnOuterError verifies the v1
 // semantic-preservation gate (cycle-1 plan-review C-3): when a per-action
-// hook returns an error, fatalErr bubbles to outer return at apply.go:324
-// with non-nil err. OnPlanComplete MUST NOT fire on that exit, matching
-// DOProvider.Apply's "return without flushing on top-level err" behavior
-// at internal/provider.go:276-282.
+// hook returns an error, fatalErr bubbles to the per-action loop's
+// `if fatalErr != nil { return ... }` early-return with non-nil outer err.
+// OnPlanComplete MUST NOT fire on that exit, matching DOProvider.Apply's
+// "return without flushing on top-level err" behavior (the
+// `if err != nil { return ... }` guard immediately after the wrapped
+// ApplyPlan call in workflow-plugin-digitalocean internal/provider.go).
 func TestApplyPlanWithHooks_OnPlanComplete_SkippedOnOuterError(t *testing.T) {
 	p := newFakeProvider()
 	plan := &interfaces.IaCPlan{
@@ -407,8 +412,10 @@ func TestApplyPlanWithHooks_OnPlanComplete_SkippedOnOuterError(t *testing.T) {
 	hookSentinel := errors.New("post-apply hook failure")
 	var finalizeFired bool
 	hooks := ApplyPlanHooks{
-		// OnResourceApplied returning err sets fatalErr → outer err != nil
-		// (apply.go:308-314 → 319-324). True outer-error path.
+		// OnResourceApplied returning err sets fatalErr inside the per-
+		// action loop's deferred dispatch closure → bubbles to the loop's
+		// `if fatalErr != nil { return ... }` early-return with non-nil
+		// outer err. True outer-error path.
 		OnResourceApplied: func(_ context.Context, _ interfaces.ResourceDriver, _ interfaces.PlanAction, _ interfaces.ResourceOutput) error {
 			return hookSentinel
 		},
@@ -430,16 +437,17 @@ func TestApplyPlanWithHooks_OnPlanComplete_SkippedOnOuterError(t *testing.T) {
 }
 
 // TestApplyPlanWithHooks_OnPlanComplete_DoesNotFireOnPreloopError verifies
-// that pre-loop preflight failures (apply.go:192) skip OnPlanComplete —
-// loopReached is still false when preflight returns early, so the deferred
-// closure's first short-circuit triggers and finalize never runs.
-// Regression guard: no cloud work happened, so no finalize work should
-// happen either.
+// that pre-loop preflight failures (the
+// preflightProviderOwnedReplaceWithDeleteHooks early-return) skip
+// OnPlanComplete — loopReached is still false when preflight returns
+// early, so the deferred closure's first short-circuit triggers and
+// finalize never runs. Regression guard: no cloud work happened, so no
+// finalize work should happen either.
 func TestApplyPlanWithHooks_OnPlanComplete_DoesNotFireOnPreloopError(t *testing.T) {
 	// fakeReplacerDriver implements interfaces.ResourceReplacer (defined in
 	// apply_replacer_dispatch_test.go); combined with deleteHookActive
 	// (OnResourceDeleted set), preflightProviderOwnedReplaceWithDeleteHooks
-	// returns the engine-side rejection error at apply.go:367.
+	// returns its engine-side ResourceReplacer rejection error.
 	provider := &hookProvider{driver: &fakeReplacerDriver{}}
 	plan := &interfaces.IaCPlan{
 		ID: "plan-preflight-fail",
@@ -466,5 +474,40 @@ func TestApplyPlanWithHooks_OnPlanComplete_DoesNotFireOnPreloopError(t *testing.
 	}
 	if finalizeFired {
 		t.Error("OnPlanComplete fired on pre-loop preflight error — should not fire when loopReached=false")
+	}
+}
+
+// TestApplyPlanWithHooks_OnPlanComplete_RecoversFromPanic verifies that a
+// panic inside the caller-provided OnPlanComplete closure does NOT
+// propagate past the deferred closure — it's caught by recover() and
+// surfaced as a finalize-attributed err entry on result.Errors plus an
+// outer err. Symmetry with the drift defer's recover() (apply.go's
+// post-loop input-drift postcondition) which has the same posture for
+// caller-provided env-provider closures.
+func TestApplyPlanWithHooks_OnPlanComplete_RecoversFromPanic(t *testing.T) {
+	p := newFakeProvider()
+	plan := &interfaces.IaCPlan{
+		ID: "plan-panic",
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "r1", Type: "infra.test"}},
+		},
+	}
+	hooks := ApplyPlanHooks{
+		OnPlanComplete: func(_ context.Context) error {
+			panic("finalize impl bug")
+		},
+	}
+	result, err := ApplyPlanWithHooks(t.Context(), p, plan, hooks)
+	if err == nil {
+		t.Fatal("expected outer err from recovered OnPlanComplete panic")
+	}
+	if !strings.Contains(err.Error(), "OnPlanComplete panicked") {
+		t.Errorf("expected err to mention panic recovery; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "finalize impl bug") {
+		t.Errorf("expected err to carry panic value; got: %v", err)
+	}
+	if len(result.Errors) == 0 || result.Errors[len(result.Errors)-1].Resource != "<plan-finalize>" {
+		t.Errorf("expected last result.Errors entry to have Resource=\"<plan-finalize>\"; got: %+v", result.Errors)
 	}
 }
