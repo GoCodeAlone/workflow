@@ -602,9 +602,10 @@ func TestApplyResultFromPB_RejectsUnknownStatus(t *testing.T) {
 	}
 }
 
-// TestMapPBActionStatusToInterface_ActionableValues pins the three
-// actionable tags SUCCESS / ERROR / DELETE_FAILED to their
-// interfaces.ActionStatus mirrors with ok=true.
+// TestMapPBActionStatusToInterface_ActionableValues pins the six
+// actionable tags (Phase 2: SUCCESS/ERROR/DELETE_FAILED + Phase 2.3 workflow#698:
+// COMPENSATED/COMPENSATION_FAILED/SKIPPED) to their interfaces.ActionStatus
+// mirrors with ok=true.
 func TestMapPBActionStatusToInterface_ActionableValues(t *testing.T) {
 	cases := []struct {
 		name string
@@ -614,6 +615,10 @@ func TestMapPBActionStatusToInterface_ActionableValues(t *testing.T) {
 		{"SUCCESS", pb.ActionStatus_ACTION_STATUS_SUCCESS, interfaces.ActionStatusSuccess},
 		{"ERROR", pb.ActionStatus_ACTION_STATUS_ERROR, interfaces.ActionStatusError},
 		{"DELETE_FAILED", pb.ActionStatus_ACTION_STATUS_DELETE_FAILED, interfaces.ActionStatusDeleteFailed},
+		// Phase 2.3 (workflow#698) — new actionable enum values:
+		{"COMPENSATED", pb.ActionStatus_ACTION_STATUS_COMPENSATED, interfaces.ActionStatusCompensated},
+		{"COMPENSATION_FAILED", pb.ActionStatus_ACTION_STATUS_COMPENSATION_FAILED, interfaces.ActionStatusCompensationFailed},
+		{"SKIPPED", pb.ActionStatus_ACTION_STATUS_SKIPPED, interfaces.ActionStatusSkipped},
 	}
 	for _, c := range cases {
 		got, ok := mapPBActionStatusToInterface(c.in)

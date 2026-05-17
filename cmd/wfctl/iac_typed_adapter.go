@@ -1274,8 +1274,16 @@ func mapPBActionStatusToInterface(s pb.ActionStatus) (interfaces.ActionStatus, b
 		return interfaces.ActionStatusError, true
 	case pb.ActionStatus_ACTION_STATUS_DELETE_FAILED:
 		return interfaces.ActionStatusDeleteFailed, true
+	// Phase 2.3 (workflow#698) — engine populates COMPENSATION_FAILED + SKIPPED
+	// server-side; plugins may emit COMPENSATED if they implement own compensation.
+	case pb.ActionStatus_ACTION_STATUS_COMPENSATED:
+		return interfaces.ActionStatusCompensated, true
+	case pb.ActionStatus_ACTION_STATUS_COMPENSATION_FAILED:
+		return interfaces.ActionStatusCompensationFailed, true
+	case pb.ActionStatus_ACTION_STATUS_SKIPPED:
+		return interfaces.ActionStatusSkipped, true
 	default:
-		// UNSPECIFIED (tag 0) and any unknown wire value (tags 4+)
+		// UNSPECIFIED (tag 0) and any unknown wire value (tags 7+)
 		// fall here. Caller surfaces the !ok as an explicit error.
 		return interfaces.ActionStatusUnspecified, false
 	}
