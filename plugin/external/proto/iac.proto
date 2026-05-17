@@ -313,7 +313,12 @@ enum ActionStatus {
   ACTION_STATUS_SUCCESS = 1;
   ACTION_STATUS_ERROR = 2;
   ACTION_STATUS_DELETE_FAILED = 3;
-  reserved 4, 5;  // Phase 2.3 compensation (ACTION_STATUS_COMPENSATED / COMPENSATION_FAILED)
+  // Phase 2.3 (workflow#698): reserved tags 4+5 from Phase 2 now defined +
+  // tag 6 for "skipped" — replaces misclassification of pre-dispatch
+  // ctx-cancel/JIT-fail/driver-resolve-fail as Error/DeleteFailed.
+  ACTION_STATUS_COMPENSATED = 4;          // reserved-for-future-emission; engine v0.56.0 does NOT emit (no auto-compensation); plugins may emit if they implement own compensation
+  ACTION_STATUS_COMPENSATION_FAILED = 5;  // post-driver-success hook failed; cloud-side work IS done; operator must verify state; manual compensation may be required
+  ACTION_STATUS_SKIPPED = 6;              // action never attempted at driver (ctx-cancel pre-dispatch, JIT-substitution-fail, driver-resolve-fail); cloud-side state unchanged
 }
 
 // ActionResult is the per-action outcome surfacing for Phase 2 v2 hooks.

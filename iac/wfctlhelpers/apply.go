@@ -297,12 +297,20 @@ func applyPlanWithEnvProviderAndHooks(
 		// pattern below records the outcome unconditionally on every exit
 		// from the inner func; the surrounding for loop then bubbles
 		// fatalErr (hook failures, ctx cancellation) to the caller.
-		var iterErr error  // best-effort error: action failed, continue
-		var fatalErr error // hook/ctx error: stop the whole apply
+		var iterErr error                      // best-effort error: action failed, continue
+		var iterStatus interfaces.ActionStatus // Phase 2.3 (workflow#698): assigned at each error site
+		var fatalErr error                     // hook/ctx error: stop the whole apply
 
 		func() {
 			defer func() {
-				status := mapDispatchErrToStatus(iterErr, action.Action)
+				// Phase 2.3 (workflow#698): success-path default — if no
+				// error site assigned a phase-specific status, the action
+				// completed cleanly. Otherwise iterStatus was set by the
+				// path that raised iterErr to the correct phase-specific
+				// value (SKIPPED / Error / DeleteFailed / CompensationFailed).
+				if iterErr == nil {
+					iterStatus = interfaces.ActionStatusSuccess
+				}
 				errStr := ""
 				if iterErr != nil {
 					errStr = iterErr.Error()
@@ -310,7 +318,7 @@ func applyPlanWithEnvProviderAndHooks(
 				result.Actions = append(result.Actions, interfaces.ActionOutcome{
 					//nolint:gosec // ActionIndex is loop counter bound by len(plan.Actions); G115 false positive.
 					ActionIndex: uint32(i),
-					Status:      status,
+					Status:      iterStatus,
 					Error:       errStr,
 				})
 			}()
@@ -320,9 +328,11 @@ func applyPlanWithEnvProviderAndHooks(
 			// guarantees apply stops between actions even if a driver
 			// happens to ignore ctx. The deferred postcondition still runs
 			// on early return so InputDriftReport is populated even on a
-			// canceled apply.
+			// canceled apply. Phase 2.3 (#698): ctx-cancel is pre-dispatch
+			// — action was never attempted; cloud-side state unchanged.
 			if err := ctx.Err(); err != nil {
 				iterErr = err
+				iterStatus = statusForPreDispatchSkip()
 				fatalErr = err
 				return
 			}
@@ -335,7 +345,8 @@ func applyPlanWithEnvProviderAndHooks(
 			// must not reach the driver. The loop continues to the next
 			// action (best-effort apply contract). os.LookupEnv is the
 			// production env source; nil-safe inside ResolveSpec — refs that
-			// only need replaceIDMap / syncedOutputs still resolve.
+			// only need replaceIDMap / syncedOutputs still resolve. Phase 2.3
+			// (#698): JIT-fail is pre-dispatch — no driver call yet.
 			resolved, err := jitsubst.ResolveSpec(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv)
 			if err != nil {
 				result.Errors = append(result.Errors, interfaces.ActionError{
@@ -344,9 +355,12 @@ func applyPlanWithEnvProviderAndHooks(
 					Error:    fmt.Sprintf("jit substitution: %v", err),
 				})
 				iterErr = fmt.Errorf("jit substitution: %v", err)
+				iterStatus = statusForPreDispatchSkip()
 				return
 			}
 			action.Resource = resolved
+			// Phase 2.3 (#698): driver-resolve-fail is pre-dispatch — no
+			// driver method has been called yet.
 			d, err := p.ResourceDriver(action.Resource.Type)
 			if err != nil {
 				result.Errors = append(result.Errors, interfaces.ActionError{
@@ -355,6 +369,7 @@ func applyPlanWithEnvProviderAndHooks(
 					Error:    fmt.Sprintf("resolve driver: %v", err),
 				})
 				iterErr = fmt.Errorf("resolve driver: %v", err)
+				iterStatus = statusForPreDispatchSkip()
 				return
 			}
 			// Capture result.Resources length pre-dispatch so we can identify
@@ -375,22 +390,35 @@ func applyPlanWithEnvProviderAndHooks(
 			if err := dispatchAction(ctx, d, action, result, actionHooks, deleteHookActive); err != nil {
 				var hookErr hookDispatchError
 				if errors.As(err, &hookErr) {
+					// Phase 2.3 (#698): hookDispatchError wraps a hook
+					// (typically driver-layer Delete hook) that ran AFTER
+					// the cloud-side action — cloud-side work IS done;
+					// hook failure is post-hook semantically.
 					fatalErr = fmt.Errorf("%s/%s: %w", action.Resource.Type, action.Resource.Name, hookErr.err)
 					iterErr = hookErr.err
+					iterStatus = statusForPostHookFailure()
 					return
 				}
+				// Phase 2.3 (#698): generic dispatch error — driver's
+				// Create/Update/Delete RPC returned err. Action attempted;
+				// cloud-side state may be partially mutated.
 				result.Errors = append(result.Errors, interfaces.ActionError{
 					Resource: action.Resource.Name,
 					Action:   action.Action,
 					Error:    err.Error(),
 				})
 				iterErr = err
+				iterStatus = statusForDispatchError(action.Action)
 				return
 			}
 			if action.Action == "delete" {
+				// Phase 2.3 (#698): post-delete-hook ran AFTER cloud-side
+				// delete succeeded — cloud-side work IS done; hook failure
+				// is post-hook semantically.
 				if err := actionHooks.OnResourceDeleted(ctx, action); err != nil {
 					fatalErr = fmt.Errorf("%s/%s: post-delete hook: %w", action.Resource.Type, action.Resource.Name, err)
 					iterErr = err
+					iterStatus = statusForPostHookFailure()
 					return
 				}
 			}
@@ -399,9 +427,13 @@ func applyPlanWithEnvProviderAndHooks(
 				out = fillMissingOutputIdentity(action.Resource, out)
 				result.Resources[len(result.Resources)-1] = out
 				if hooks.OnResourceApplied != nil {
+					// Phase 2.3 (#698): post-apply-hook ran AFTER cloud-side
+					// create/update succeeded — cloud-side work IS done;
+					// hook failure is post-hook semantically.
 					if err := hooks.OnResourceApplied(ctx, d, action, out); err != nil {
 						fatalErr = fmt.Errorf("%s/%s: post-apply hook: %w", action.Resource.Type, action.Resource.Name, err)
 						iterErr = err
+						iterStatus = statusForPostHookFailure()
 						return
 					}
 				}
@@ -429,21 +461,44 @@ func applyPlanWithEnvProviderAndHooks(
 	return result, nil
 }
 
-// mapDispatchErrToStatus translates a per-action dispatch error into the
-// Phase 2 ActionStatus value (workflow#640). delete actions that fail map
-// to ActionStatusDeleteFailed so wfctl downstream can drop the
-// state-removal optimistic-update; all other failures map to
-// ActionStatusError. Compensation paths (Phase 2.3 — COMPENSATED /
-// COMPENSATION_FAILED) are reserved in iac.proto but not yet emitted
-// here. nil err means the dispatch (and any post-hooks) succeeded.
-func mapDispatchErrToStatus(err error, actionType string) interfaces.ActionStatus {
-	if err == nil {
-		return interfaces.ActionStatusSuccess
-	}
+// Phase 2.3 (workflow#698): replaced single mapDispatchErrToStatus with
+// 3 phase-specific helpers — each per-action exit path now assigns its
+// status directly from the call site (clearer than late-mapping in defer).
+// The single-helper version conflated pre-dispatch failures (ctx-cancel /
+// JIT-fail / driver-resolve-fail) and post-hook failures with
+// dispatch-level errors, breaking ADR 0040 invariant 2 (failed-delete
+// preservation requires distinguishing "delete dispatch failed" from
+// "delete never attempted").
+
+// statusForPreDispatchSkip returns SKIPPED — action was never attempted
+// at the driver. Used for ctx-cancel, JIT-substitution-fail, and
+// driver-resolve-fail paths. Cloud-side state unchanged from pre-apply.
+// Per workflow#698 Phase 2.3.
+func statusForPreDispatchSkip() interfaces.ActionStatus {
+	return interfaces.ActionStatusSkipped
+}
+
+// statusForDispatchError returns Error (non-delete) or DeleteFailed (delete).
+// Used when driver's Create/Update/Delete RPC returned an error. Action was
+// attempted; cloud-side state may be partially mutated. For delete actions,
+// DELETE_FAILED instructs wfctl to preserve state.
+// Per workflow#698 Phase 2.3 (extracted from prior mapDispatchErrToStatus).
+func statusForDispatchError(actionType string) interfaces.ActionStatus {
 	if actionType == "delete" {
 		return interfaces.ActionStatusDeleteFailed
 	}
 	return interfaces.ActionStatusError
+}
+
+// statusForPostHookFailure returns COMPENSATION_FAILED — driver succeeded
+// but wfctl-side hook (OnResourceApplied / OnResourceDeleted) failed (or
+// the driver's own hook layer returned hookDispatchError after touching
+// cloud-side state). Cloud-side work IS done; operator must verify state;
+// may need manual compensation. State preservation required regardless of
+// action type.
+// Per workflow#698 Phase 2.3.
+func statusForPostHookFailure() interfaces.ActionStatus {
+	return interfaces.ActionStatusCompensationFailed
 }
 
 func preflightProviderOwnedReplaceWithDeleteHooks(p interfaces.IaCProvider, plan *interfaces.IaCPlan) error {

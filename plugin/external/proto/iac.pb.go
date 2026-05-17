@@ -163,6 +163,12 @@ const (
 	ActionStatus_ACTION_STATUS_SUCCESS       ActionStatus = 1
 	ActionStatus_ACTION_STATUS_ERROR         ActionStatus = 2
 	ActionStatus_ACTION_STATUS_DELETE_FAILED ActionStatus = 3
+	// Phase 2.3 (workflow#698): reserved tags 4+5 from Phase 2 now defined +
+	// tag 6 for "skipped" — replaces misclassification of pre-dispatch
+	// ctx-cancel/JIT-fail/driver-resolve-fail as Error/DeleteFailed.
+	ActionStatus_ACTION_STATUS_COMPENSATED         ActionStatus = 4 // reserved-for-future-emission; engine v0.56.0 does NOT emit (no auto-compensation); plugins may emit if they implement own compensation
+	ActionStatus_ACTION_STATUS_COMPENSATION_FAILED ActionStatus = 5 // post-driver-success hook failed; cloud-side work IS done; operator must verify state; manual compensation may be required
+	ActionStatus_ACTION_STATUS_SKIPPED             ActionStatus = 6 // action never attempted at driver (ctx-cancel pre-dispatch, JIT-substitution-fail, driver-resolve-fail); cloud-side state unchanged
 )
 
 // Enum value maps for ActionStatus.
@@ -172,12 +178,18 @@ var (
 		1: "ACTION_STATUS_SUCCESS",
 		2: "ACTION_STATUS_ERROR",
 		3: "ACTION_STATUS_DELETE_FAILED",
+		4: "ACTION_STATUS_COMPENSATED",
+		5: "ACTION_STATUS_COMPENSATION_FAILED",
+		6: "ACTION_STATUS_SKIPPED",
 	}
 	ActionStatus_value = map[string]int32{
-		"ACTION_STATUS_UNSPECIFIED":   0,
-		"ACTION_STATUS_SUCCESS":       1,
-		"ACTION_STATUS_ERROR":         2,
-		"ACTION_STATUS_DELETE_FAILED": 3,
+		"ACTION_STATUS_UNSPECIFIED":         0,
+		"ACTION_STATUS_SUCCESS":             1,
+		"ACTION_STATUS_ERROR":               2,
+		"ACTION_STATUS_DELETE_FAILED":       3,
+		"ACTION_STATUS_COMPENSATED":         4,
+		"ACTION_STATUS_COMPENSATION_FAILED": 5,
+		"ACTION_STATUS_SKIPPED":             6,
 	}
 )
 
@@ -5996,12 +6008,15 @@ const file_iac_proto_rawDesc = "" +
 	"\x16PlanDiagnosticSeverity\x12\x18\n" +
 	"\x14PLAN_DIAGNOSTIC_INFO\x10\x00\x12\x1b\n" +
 	"\x17PLAN_DIAGNOSTIC_WARNING\x10\x01\x12\x19\n" +
-	"\x15PLAN_DIAGNOSTIC_ERROR\x10\x02*\x8e\x01\n" +
+	"\x15PLAN_DIAGNOSTIC_ERROR\x10\x02*\xe3\x01\n" +
 	"\fActionStatus\x12\x1d\n" +
 	"\x19ACTION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ACTION_STATUS_SUCCESS\x10\x01\x12\x17\n" +
 	"\x13ACTION_STATUS_ERROR\x10\x02\x12\x1f\n" +
-	"\x1bACTION_STATUS_DELETE_FAILED\x10\x03\"\x04\b\x04\x10\x04\"\x04\b\x05\x10\x052\xc4\t\n" +
+	"\x1bACTION_STATUS_DELETE_FAILED\x10\x03\x12\x1d\n" +
+	"\x19ACTION_STATUS_COMPENSATED\x10\x04\x12%\n" +
+	"!ACTION_STATUS_COMPENSATION_FAILED\x10\x05\x12\x19\n" +
+	"\x15ACTION_STATUS_SKIPPED\x10\x062\xc4\t\n" +
 	"\x13IaCProviderRequired\x12o\n" +
 	"\n" +
 	"Initialize\x12/.workflow.plugin.external.iac.InitializeRequest\x1a0.workflow.plugin.external.iac.InitializeResponse\x12]\n" +

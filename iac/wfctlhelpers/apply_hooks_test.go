@@ -285,8 +285,12 @@ func TestApplyPlanWithHooks_PopulatesActions_PreDispatchDriverError(t *testing.T
 	if len(result.Actions) != 1 {
 		t.Fatalf("expected 1 ActionOutcome (length-assert invariant), got %d: %+v", len(result.Actions), result.Actions)
 	}
-	if result.Actions[0].Status != interfaces.ActionStatusError {
-		t.Errorf("driver-resolve-error status: want Error, got %v", result.Actions[0].Status)
+	// Phase 2.3 (workflow#698) reclassification: driver-resolve-error is
+	// PRE-DISPATCH — driver's Create/Update/Delete RPC never called; cloud
+	// state unchanged. Status maps to SKIPPED. Phase 2 mapped this to Error
+	// which conflated pre-dispatch skip with dispatch-level failure.
+	if result.Actions[0].Status != interfaces.ActionStatusSkipped {
+		t.Errorf("driver-resolve-error status: want Skipped (Phase 2.3 pre-dispatch reclassification), got %v", result.Actions[0].Status)
 	}
 	if result.Actions[0].ActionIndex != 0 {
 		t.Errorf("ActionIndex: want 0, got %d", result.Actions[0].ActionIndex)
@@ -509,5 +513,25 @@ func TestApplyPlanWithHooks_OnPlanComplete_RecoversFromPanic(t *testing.T) {
 	}
 	if len(result.Errors) == 0 || result.Errors[len(result.Errors)-1].Resource != "<plan-finalize>" {
 		t.Errorf("expected last result.Errors entry to have Resource=\"<plan-finalize>\"; got: %+v", result.Errors)
+	}
+}
+
+// TestStatusHelpers_Phase23 pins the 3 phase-specific helper functions
+// per workflow#698 Phase 2.3 to their plan-spec'd return values.
+func TestStatusHelpers_Phase23(t *testing.T) {
+	if got := statusForPreDispatchSkip(); got != interfaces.ActionStatusSkipped {
+		t.Errorf("statusForPreDispatchSkip() = %v; want ActionStatusSkipped", got)
+	}
+	if got := statusForDispatchError("create"); got != interfaces.ActionStatusError {
+		t.Errorf("statusForDispatchError(\"create\") = %v; want ActionStatusError", got)
+	}
+	if got := statusForDispatchError("update"); got != interfaces.ActionStatusError {
+		t.Errorf("statusForDispatchError(\"update\") = %v; want ActionStatusError", got)
+	}
+	if got := statusForDispatchError("delete"); got != interfaces.ActionStatusDeleteFailed {
+		t.Errorf("statusForDispatchError(\"delete\") = %v; want ActionStatusDeleteFailed", got)
+	}
+	if got := statusForPostHookFailure(); got != interfaces.ActionStatusCompensationFailed {
+		t.Errorf("statusForPostHookFailure() = %v; want ActionStatusCompensationFailed", got)
 	}
 }
