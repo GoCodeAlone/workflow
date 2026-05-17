@@ -235,6 +235,14 @@ func (a *typedIaCAdapter) Finalizer() pb.IaCProviderFinalizerClient {
 	return a.finalizer
 }
 
+// CapabilitiesWithContext returns CapabilitiesResponse with caller-supplied
+// context. Bypasses fetchCapabilities's adapter-lifetime cache — used by
+// the load-time workflow#699 gate which must not poison the cache on
+// transient failure (cycle-3 I-NEW-6).
+func (a *typedIaCAdapter) CapabilitiesWithContext(ctx context.Context) (*pb.CapabilitiesResponse, error) {
+	return a.required.Capabilities(ctx, &pb.CapabilitiesRequest{})
+}
+
 // translateRPCErr converts a gRPC Unimplemented status (the wire signal a
 // plugin emits when an optional method is not supported) into the stable
 // interfaces.ErrProviderMethodUnimplemented sentinel callers iterate on
