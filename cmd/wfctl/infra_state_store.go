@@ -13,6 +13,7 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin/external"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
 // infraStateStore is the minimal state persistence interface used by wfctl
@@ -154,15 +155,10 @@ func resolvePluginStateStore(ctx context.Context, backend string, cfg map[string
 
 	mgr := external.NewExternalPluginManager(pluginDir, nil)
 	for _, pluginName := range stateBackendPluginCandidates(backend, entries) {
-		adapter, loadErr := mgr.LoadPlugin(pluginName)
-		if loadErr != nil {
-			mgr.Shutdown()
-			return nil, fmt.Errorf("load plugin %q for iac.state backend %q: %w", pluginName, backend, loadErr)
-		}
-		clients, clientsErr := adapter.IaCStateBackendClients()
+		clients, clientsErr := loadPluginStateBackendClients(mgr, pluginName, backend)
 		if clientsErr != nil {
 			mgr.Shutdown()
-			return nil, fmt.Errorf("plugin %q iac.state backends: %w", pluginName, clientsErr)
+			return nil, clientsErr
 		}
 		client, ok := clients[backend]
 		if !ok {
@@ -178,6 +174,18 @@ func resolvePluginStateStore(ctx context.Context, backend string, cfg map[string
 
 	mgr.Shutdown()
 	return nil, fmt.Errorf("iac.state backend %q is plugin-served but no installed plugin in %s advertises it", backend, pluginDir)
+}
+
+var loadPluginStateBackendClients = func(mgr *external.ExternalPluginManager, pluginName, backend string) (map[string]pb.IaCStateBackendClient, error) {
+	adapter, loadErr := mgr.LoadPlugin(pluginName)
+	if loadErr != nil {
+		return nil, fmt.Errorf("load plugin %q for iac.state backend %q: %w", pluginName, backend, loadErr)
+	}
+	clients, clientsErr := adapter.IaCStateBackendClients()
+	if clientsErr != nil {
+		return nil, fmt.Errorf("plugin %q iac.state backends: %w", pluginName, clientsErr)
+	}
+	return clients, nil
 }
 
 func stateBackendPluginCandidates(backend string, entries []os.DirEntry) []string {

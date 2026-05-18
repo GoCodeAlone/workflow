@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin/external"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/grpc"
 )
 
 // ── TestResolveStateStore_NoEnv_FallsBackToBase ────────────────────────────────
@@ -90,6 +94,78 @@ modules:
 	}
 	if !strings.Contains(err.Error(), `no installed plugin`) || !strings.Contains(err.Error(), pluginDir) {
 		t.Fatalf("error = %v, want plugin-loader context", err)
+	}
+}
+
+func TestResolvePluginStateStore_ConfiguresAdvertisedBackend(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	for _, name := range []string{"auth", "digitalocean"} {
+		if err := os.MkdirAll(filepath.Join(pluginDir, name), 0o750); err != nil {
+			t.Fatalf("mkdir plugin %s: %v", name, err)
+		}
+	}
+	currentInfraPluginDir = pluginDir
+	t.Cleanup(func() { currentInfraPluginDir = "" })
+
+	client := &testIaCStateBackendClient{
+		states: []*pb.IaCState{{
+			ResourceId:   "site-vpc",
+			ResourceType: "infra.vpc",
+			Provider:     "digitalocean",
+			ProviderId:   "vpc-123",
+			ConfigJson:   []byte(`{"region":"nyc3"}`),
+			OutputsJson:  []byte(`{"id":"vpc-123"}`),
+		}},
+	}
+	var loaded []string
+	orig := loadPluginStateBackendClients
+	loadPluginStateBackendClients = func(_ *external.ExternalPluginManager, pluginName, backend string) (map[string]pb.IaCStateBackendClient, error) {
+		loaded = append(loaded, pluginName)
+		if pluginName != "digitalocean" {
+			return map[string]pb.IaCStateBackendClient{}, nil
+		}
+		return map[string]pb.IaCStateBackendClient{backend: client}, nil
+	}
+	t.Cleanup(func() { loadPluginStateBackendClients = orig })
+
+	store, err := resolvePluginStateStore(t.Context(), "spaces", map[string]any{
+		"backend": "spaces",
+		"bucket":  "bmw-iac-state",
+	})
+	if err != nil {
+		t.Fatalf("resolvePluginStateStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if closer, ok := store.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+	})
+	if len(loaded) == 0 || loaded[0] != "digitalocean" {
+		t.Fatalf("loaded plugins = %#v, want digitalocean first", loaded)
+	}
+	if client.configureBackend != "spaces" || !strings.Contains(string(client.configureJSON), "bmw-iac-state") {
+		t.Fatalf("Configure backend/json = %q %s, want spaces bucket config", client.configureBackend, client.configureJSON)
+	}
+	states, err := store.ListResources(t.Context())
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if len(states) != 1 || states[0].ProviderID != "vpc-123" {
+		t.Fatalf("states = %#v, want vpc-123 resource from plugin backend", states)
+	}
+}
+
+func TestLoadPluginStateBackendClients_ReturnsLoadContext(t *testing.T) {
+	mgr := external.NewExternalPluginManager(t.TempDir(), nil)
+	defer mgr.Shutdown()
+
+	_, err := loadPluginStateBackendClients(mgr, "missing-plugin", "spaces")
+	if err == nil {
+		t.Fatal("expected load error")
+	}
+	if !strings.Contains(err.Error(), `load plugin "missing-plugin"`) || !strings.Contains(err.Error(), `backend "spaces"`) {
+		t.Fatalf("error = %v, want plugin/backend context", err)
 	}
 }
 
@@ -183,6 +259,18 @@ func TestStateBackendPluginCandidates_PrioritizesKnownProviders(t *testing.T) {
 				seen[name] = true
 			}
 		})
+	}
+}
+
+func TestStateBackendPluginCandidates_SkipsBlankAndNonDirectories(t *testing.T) {
+	entries := []os.DirEntry{
+		testDirEntry{name: " ", dir: true},
+		testDirEntry{name: "notes.txt", dir: false},
+		testDirEntry{name: "custom", dir: true},
+	}
+	got := stateBackendPluginCandidates("custom", entries)
+	if len(got) != 1 || got[0] != "custom" {
+		t.Fatalf("candidates = %#v, want [custom]", got)
 	}
 }
 
@@ -495,4 +583,54 @@ func TestFSStateStore_RoundTripsDependencies(t *testing.T) {
 	if len(states[0].Dependencies) != 2 || states[0].Dependencies[0] != "site-db" || states[0].Dependencies[1] != "site-dns" {
 		t.Fatalf("Dependencies = %#v, want [site-db site-dns]", states[0].Dependencies)
 	}
+}
+
+type testDirEntry struct {
+	name string
+	dir  bool
+}
+
+func (e testDirEntry) Name() string               { return e.name }
+func (e testDirEntry) IsDir() bool                { return e.dir }
+func (e testDirEntry) Type() fs.FileMode          { return 0 }
+func (e testDirEntry) Info() (fs.FileInfo, error) { return nil, nil }
+
+type testIaCStateBackendClient struct {
+	configureBackend string
+	configureJSON    []byte
+	states           []*pb.IaCState
+}
+
+func (c *testIaCStateBackendClient) Configure(_ context.Context, req *pb.ConfigureRequest, _ ...grpc.CallOption) (*pb.ConfigureResponse, error) {
+	c.configureBackend = req.BackendName
+	c.configureJSON = req.ConfigJson
+	return &pb.ConfigureResponse{}, nil
+}
+
+func (c *testIaCStateBackendClient) GetState(_ context.Context, _ *pb.GetStateRequest, _ ...grpc.CallOption) (*pb.GetStateResponse, error) {
+	return &pb.GetStateResponse{}, nil
+}
+
+func (c *testIaCStateBackendClient) SaveState(_ context.Context, _ *pb.SaveStateRequest, _ ...grpc.CallOption) (*pb.SaveStateResponse, error) {
+	return &pb.SaveStateResponse{}, nil
+}
+
+func (c *testIaCStateBackendClient) ListStates(_ context.Context, _ *pb.ListStatesRequest, _ ...grpc.CallOption) (*pb.ListStatesResponse, error) {
+	return &pb.ListStatesResponse{States: c.states}, nil
+}
+
+func (c *testIaCStateBackendClient) DeleteState(_ context.Context, _ *pb.DeleteStateRequest, _ ...grpc.CallOption) (*pb.DeleteStateResponse, error) {
+	return &pb.DeleteStateResponse{}, nil
+}
+
+func (c *testIaCStateBackendClient) Lock(_ context.Context, _ *pb.LockRequest, _ ...grpc.CallOption) (*pb.LockResponse, error) {
+	return &pb.LockResponse{}, nil
+}
+
+func (c *testIaCStateBackendClient) Unlock(_ context.Context, _ *pb.UnlockRequest, _ ...grpc.CallOption) (*pb.UnlockResponse, error) {
+	return &pb.UnlockResponse{}, nil
+}
+
+func (c *testIaCStateBackendClient) ListBackendNames(_ context.Context, _ *pb.ListBackendNamesRequest, _ ...grpc.CallOption) (*pb.ListBackendNamesResponse, error) {
+	return &pb.ListBackendNamesResponse{BackendNames: []string{"spaces"}}, nil
 }
