@@ -525,3 +525,60 @@ modules:
 		reg.Unregister("step.schema_validate_testonly")
 	})
 }
+
+func TestRunValidatePluginDirUsesStepSchemasForPipelineRefs(t *testing.T) {
+	pluginsDir := t.TempDir()
+	pluginSubdir := filepath.Join(pluginsDir, "my-ext-plugin-output-schema")
+	if err := os.MkdirAll(pluginSubdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name": "my-ext-plugin-output-schema",
+		"version": "1.0.0",
+		"stepTypes": ["step.output_schema_validate_testonly"],
+		"stepSchemas": [
+			{
+				"type": "step.output_schema_validate_testonly",
+				"description": "test-only plugin step output schema",
+				"outputs": [
+					{"key": "known_output", "type": "string"}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(pluginSubdir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := schema.GetStepSchemaRegistry()
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("step.output_schema_validate_testonly")
+		reg.Unregister("step.output_schema_validate_testonly")
+	})
+
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, "workflow.yaml", `
+modules:
+  - name: server
+    type: http.server
+    config:
+      address: ":8080"
+pipelines:
+  test:
+    steps:
+      - name: plugin-step
+        type: step.output_schema_validate_testonly
+      - name: consume
+        type: step.set
+        config:
+          values:
+            result: '{{ step "plugin-step" "missing_output" }}'
+`)
+
+	err := runValidate([]string{"--plugin-dir", pluginsDir, "--allow-no-entry-points", path})
+	if err == nil {
+		t.Fatal("expected strict validation to reject plugin step output field not declared by plugin schema")
+	}
+	if !strings.Contains(err.Error(), "missing_output") {
+		t.Fatalf("expected error to mention missing plugin output field, got: %v", err)
+	}
+}

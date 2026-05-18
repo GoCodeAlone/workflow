@@ -241,15 +241,13 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 	}
 
 	if cfg.Pipelines != nil {
-		if refs := validation.ValidatePipelineTemplateRefs(cfg.Pipelines); refs.HasIssues() {
-			var findings, blocking []string
+		if refs := validation.ValidatePipelineTemplateRefs(cfg.Pipelines, schema.GetStepSchemaRegistry()); refs.HasIssues() {
+			var findings []string
+			blocking := refs.BlockingWarningMessages()
 			for _, w := range refs.Warnings {
 				msg := "pipeline-refs warning: " + w
 				findings = append(findings, msg)
-				if isBlockingPipelineRefWarning(w) {
-					blocking = append(blocking, msg)
-				}
-				if !strict || !isBlockingPipelineRefWarning(w) {
+				if !strict || !containsString(blocking, w) {
 					fmt.Fprintf(os.Stderr, "  WARN %s: %s\n", cfgPath, msg)
 				}
 			}
@@ -260,6 +258,9 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 				return fmt.Errorf("%s", strings.Join(findings, "\n"))
 			}
 			if strict && len(blocking) > 0 {
+				for i, w := range blocking {
+					blocking[i] = "pipeline-refs warning: " + w
+				}
 				return fmt.Errorf("%s", strings.Join(blocking, "\n"))
 			}
 		}
@@ -268,17 +269,6 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 	fmt.Printf("  PASS %s (%d modules, %d workflows, %d triggers)\n",
 		cfgPath, len(cfg.Modules), len(cfg.Workflows), len(cfg.Triggers))
 	return nil
-}
-
-func isBlockingPipelineRefWarning(warning string) bool {
-	if strings.Contains(warning, "hyphenated dot-access") {
-		return false
-	}
-	return strings.Contains(warning, "does not exist in this pipeline") ||
-		strings.Contains(warning, "has not executed yet") ||
-		strings.Contains(warning, "references itself") ||
-		strings.Contains(warning, "not a known output") ||
-		strings.Contains(warning, "declares outputs")
 }
 
 // skipDirs are directory names that should be excluded from recursive scanning.
