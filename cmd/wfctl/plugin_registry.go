@@ -37,6 +37,7 @@ type RegistryManifest struct {
 	Keywords         []string                   `json:"keywords,omitempty"`
 	Homepage         string                     `json:"homepage,omitempty"`
 	Capabilities     *RegistryCapabilities      `json:"capabilities,omitempty"`
+	IaCProvider      *RegistryIaCProvider       `json:"iacProvider,omitempty"`
 	Contracts        []pluginContractDescriptor `json:"contracts,omitempty"`
 	Downloads        []PluginDownload           `json:"downloads,omitempty"`
 	Assets           *PluginAssets              `json:"assets,omitempty"`
@@ -75,8 +76,9 @@ type RegistryCLICommand struct {
 // installed plugin.json to match a requested provider name (e.g. "digitalocean")
 // to a plugin directory.
 type RegistryIaCProvider struct {
-	Name          string   `json:"name"`
-	ResourceTypes []string `json:"resourceTypes,omitempty"`
+	Name               string   `json:"name,omitempty"`
+	ResourceTypes      []string `json:"resourceTypes,omitempty"`
+	ComputePlanVersion string   `json:"computePlanVersion,omitempty"`
 }
 
 // PluginDownload describes a platform-specific binary download for a plugin.
