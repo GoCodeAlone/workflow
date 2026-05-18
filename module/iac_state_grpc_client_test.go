@@ -67,6 +67,14 @@ func TestGRPCIaCStateStoreConfigure(t *testing.T) {
 	}
 }
 
+func TestNewGRPCIaCStateStoreWrapsClient(t *testing.T) {
+	fake := &captureStateBackendClient{}
+	store := NewGRPCIaCStateStore(fake)
+	if store.client != fake {
+		t.Fatalf("client = %p, want %p", store.client, fake)
+	}
+}
+
 func TestGRPCIaCStateStoreRoundTrip(t *testing.T) {
 	lis := bufconn.Listen(4 << 20)
 	t.Cleanup(func() { _ = lis.Close() })

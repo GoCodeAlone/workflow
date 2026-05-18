@@ -102,6 +102,13 @@ type grpcIaCStateStore struct {
 	client pb.IaCStateBackendClient
 }
 
+// NewGRPCIaCStateStore wraps an IaCStateBackendClient as an IaCStateStore.
+// It is exported for wfctl direct-path commands, which load plugin-served
+// state backends without constructing a full engine.
+func NewGRPCIaCStateStore(c pb.IaCStateBackendClient) *grpcIaCStateStore {
+	return newGRPCIaCStateStore(c)
+}
+
 // newGRPCIaCStateStore wraps an IaCStateBackendClient as an IaCStateStore.
 func newGRPCIaCStateStore(c pb.IaCStateBackendClient) *grpcIaCStateStore {
 	return &grpcIaCStateStore{client: c}
