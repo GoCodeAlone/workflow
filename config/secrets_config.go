@@ -15,6 +15,7 @@ type SecretGen struct {
 	Length int    `json:"length,omitempty" yaml:"length,omitempty"` // for random generators
 	Source string `json:"source,omitempty" yaml:"source,omitempty"` // for provider_credential
 	Name   string `json:"name,omitempty" yaml:"name,omitempty"`     // optional human-readable label
+	Store  string `json:"store,omitempty" yaml:"store,omitempty"`   // optional named store for infra_output sync
 }
 
 // SecretsConfig defines secret management for the application.
