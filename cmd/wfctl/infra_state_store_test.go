@@ -93,6 +93,99 @@ modules:
 	}
 }
 
+func TestPluginWfctlStateStore_RoundTripsResourceState(t *testing.T) {
+	store := &pluginWfctlStateStore{inner: module.NewMemoryIaCStateStore()}
+	state := interfaces.ResourceState{
+		ID:            "site-vpc",
+		Name:          "site-vpc",
+		Type:          "infra.vpc",
+		Provider:      "digitalocean",
+		ProviderRef:   "do-provider",
+		ProviderID:    "vpc-123",
+		ConfigHash:    "config-hash",
+		AppliedConfig: map[string]any{"region": "nyc3"},
+		Outputs:       map[string]any{"id": "vpc-123"},
+		Dependencies:  []string{"site-project"},
+	}
+
+	if err := store.SaveResource(t.Context(), state); err != nil {
+		t.Fatalf("SaveResource: %v", err)
+	}
+	states, err := store.ListResources(t.Context())
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("states = %d, want 1", len(states))
+	}
+	got := states[0]
+	if got.ID != state.ID || got.ProviderID != state.ProviderID || got.ConfigHash != state.ConfigHash {
+		t.Fatalf("state = %#v, want ID %q ProviderID %q ConfigHash %q", got, state.ID, state.ProviderID, state.ConfigHash)
+	}
+	if len(got.Dependencies) != 1 || got.Dependencies[0] != "site-project" {
+		t.Fatalf("Dependencies = %#v, want [site-project]", got.Dependencies)
+	}
+	if got.AppliedConfig["region"] != "nyc3" || got.Outputs["id"] != "vpc-123" {
+		t.Fatalf("state config/output = %#v %#v, want region/output preserved", got.AppliedConfig, got.Outputs)
+	}
+
+	if err := store.DeleteResource(t.Context(), state.ID); err != nil {
+		t.Fatalf("DeleteResource: %v", err)
+	}
+	states, err = store.ListResources(t.Context())
+	if err != nil {
+		t.Fatalf("ListResources after delete: %v", err)
+	}
+	if len(states) != 0 {
+		t.Fatalf("states after delete = %d, want 0", len(states))
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close without manager: %v", err)
+	}
+}
+
+func TestStateBackendPluginCandidates_PrioritizesKnownProviders(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"auth", "digitalocean", "aws", "gcp"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0o750); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("not a plugin"), 0o600); err != nil {
+		t.Fatalf("write file entry: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+
+	for _, tt := range []struct {
+		backend string
+		first   string
+	}{
+		{backend: "spaces", first: "digitalocean"},
+		{backend: "s3", first: "aws"},
+		{backend: "gcs", first: "gcp"},
+	} {
+		t.Run(tt.backend, func(t *testing.T) {
+			got := stateBackendPluginCandidates(tt.backend, entries)
+			if len(got) == 0 || got[0] != tt.first {
+				t.Fatalf("candidates = %#v, want first %q", got, tt.first)
+			}
+			seen := map[string]bool{}
+			for _, name := range got {
+				if name == "README.md" {
+					t.Fatalf("candidates included file entry: %#v", got)
+				}
+				if seen[name] {
+					t.Fatalf("candidates include duplicate %q: %#v", name, got)
+				}
+				seen[name] = true
+			}
+		})
+	}
+}
+
 // ── TestResolveStateStore_EnvOverride_UsesEnvConfig ───────────────────────────
 
 // TestResolveStateStore_EnvOverride_UsesEnvConfig verifies that when envName
