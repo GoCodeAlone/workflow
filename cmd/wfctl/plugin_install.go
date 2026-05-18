@@ -1362,6 +1362,7 @@ type installedPluginJSON struct {
 	Tags         []string                     `json:"tags,omitempty"`
 	Type         string                       `json:"type,omitempty"`
 	Capabilities *installedPluginCapabilities `json:"capabilities,omitempty"`
+	IaCProvider  *RegistryIaCProvider         `json:"iacProvider,omitempty"`
 }
 
 type installedPluginCapabilities struct {
@@ -1395,6 +1396,7 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 		Tier:        m.Tier,
 		Tags:        m.Keywords,
 		Type:        m.Type,
+		IaCProvider: m.IaCProvider,
 	}
 	if m.Capabilities != nil {
 		pj.Capabilities = &installedPluginCapabilities{
