@@ -356,7 +356,7 @@ func runInfraPlan(args []string) error {
 		fmt.Println()
 		fmt.Println("Pending JIT resolution (apply-time):")
 		for _, d := range resolutionDiags {
-			fmt.Printf("  %s: ${%s}\n", d.ResourceName, d.Ref)
+			fmt.Printf("  %s: %s\n", d.ResourceName, formatResolutionDiagnosticRef(d.Ref))
 		}
 	}
 
@@ -686,6 +686,34 @@ func formatPlanMarkdown(plan interfaces.IaCPlan, showSensitive bool) string {
 	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to replace, %d to destroy.**\n",
 		creates, updates, replaces, deletes)
 	return sb.String()
+}
+
+func formatResolutionDiagnosticRef(ref string) string {
+	if isSensitiveResolutionRef(ref) {
+		return "<redacted sensitive ref>"
+	}
+	return "${" + ref + "}"
+}
+
+func isSensitiveResolutionRef(ref string) bool {
+	ref = strings.ToLower(ref)
+	if ref == "" {
+		return false
+	}
+	parts := strings.Split(ref, ".")
+	last := parts[len(parts)-1]
+	for _, sensitiveKey := range secrets.DefaultSensitiveKeys() {
+		k := strings.ToLower(sensitiveKey)
+		if ref == k || last == k {
+			return true
+		}
+	}
+	for _, token := range []string{"secret", "token", "password", "passwd", "pwd", "private", "credential", "dsn", "uri", "url"} {
+		if strings.Contains(ref, token) {
+			return true
+		}
+	}
+	return false
 }
 
 // resourceSummaryKeys returns the most relevant key-value pairs to display for

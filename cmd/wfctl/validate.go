@@ -12,12 +12,15 @@ import (
 	"github.com/GoCodeAlone/workflow/internal/legacyaws"
 	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/schema"
+	"github.com/GoCodeAlone/workflow/validation"
 	"gopkg.in/yaml.v3"
 )
 
 func runValidate(args []string) error {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
-	strict := fs.Bool("strict", false, "Enable strict validation (no empty modules allowed)")
+	strict := fs.Bool("strict", true, "Enable strict validation (default; retained for compatibility)")
+	loose := fs.Bool("loose", false, "Allow legacy loose validation for transitional configs (planned for removal in v1.0)")
+	nonStrict := fs.Bool("non-strict", false, "Alias for --loose")
 	skipUnknownTypes := fs.Bool("skip-unknown-types", false, "Skip unknown module/workflow/trigger type checks")
 	allowNoEntryPoints := fs.Bool("allow-no-entry-points", false, "Allow configs with no entry points (triggers, routes, subscriptions, jobs)")
 	dir := fs.String("dir", "", "Validate all .yaml/.yml files in a directory (recursive)")
@@ -31,7 +34,7 @@ Examples:
   wfctl validate config.yaml
   wfctl validate example/*.yaml
   wfctl validate --dir ./example/
-  wfctl validate --strict admin/config.yaml
+  wfctl validate --loose legacy/config.yaml
   wfctl validate --skip-unknown-types example/*.yaml
   wfctl validate --plugin-dir data/plugins config.yaml
 
@@ -46,6 +49,9 @@ Options:
 	args = reorderFlags(args)
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *loose || *nonStrict {
+		*strict = false
 	}
 
 	// Load external plugin types before validation so their module/trigger/workflow
@@ -232,6 +238,32 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 	}
 	for _, warn := range config.CrossValidate(cfg) {
 		fmt.Fprintf(os.Stderr, "  WARN %s: %s\n", cfgPath, warn)
+	}
+
+	if cfg.Pipelines != nil {
+		if refs := validation.ValidatePipelineTemplateRefs(cfg.Pipelines, schema.GetStepSchemaRegistry()); refs.HasIssues() {
+			var findings []string
+			blocking := refs.BlockingWarningMessages()
+			for _, w := range refs.Warnings {
+				msg := "pipeline-refs warning: " + w
+				findings = append(findings, msg)
+				if !strict || !containsString(blocking, w) {
+					fmt.Fprintf(os.Stderr, "  WARN %s: %s\n", cfgPath, msg)
+				}
+			}
+			for _, e := range refs.Errors {
+				findings = append(findings, "pipeline-refs error: "+e)
+			}
+			if len(refs.Errors) > 0 {
+				return fmt.Errorf("%s", strings.Join(findings, "\n"))
+			}
+			if strict && len(blocking) > 0 {
+				for i, w := range blocking {
+					blocking[i] = "pipeline-refs warning: " + w
+				}
+				return fmt.Errorf("%s", strings.Join(blocking, "\n"))
+			}
+		}
 	}
 
 	fmt.Printf("  PASS %s (%d modules, %d workflows, %d triggers)\n",
