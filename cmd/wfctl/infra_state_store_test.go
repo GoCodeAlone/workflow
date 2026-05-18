@@ -59,6 +59,40 @@ func TestResolveStateStore_ReturnsDiscoverErrors(t *testing.T) {
 	}
 }
 
+func TestResolveStateStore_SpacesUsesPluginLoader(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: spaces
+      bucket: bmw-iac-state
+      region: nyc3
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.Mkdir(pluginDir, 0o750); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	currentInfraPluginDir = pluginDir
+	defer func() { currentInfraPluginDir = "" }()
+
+	_, err := resolveStateStore(cfgPath, "")
+	if err == nil {
+		t.Fatal("expected missing plugin error, got nil")
+	}
+	if strings.Contains(err.Error(), "direct-path commands no longer support in-tree spaces") {
+		t.Fatalf("resolveStateStore returned legacy hard-coded spaces error: %v", err)
+	}
+	if !strings.Contains(err.Error(), `no installed plugin`) || !strings.Contains(err.Error(), pluginDir) {
+		t.Fatalf("error = %v, want plugin-loader context", err)
+	}
+}
+
 // ── TestResolveStateStore_EnvOverride_UsesEnvConfig ───────────────────────────
 
 // TestResolveStateStore_EnvOverride_UsesEnvConfig verifies that when envName
