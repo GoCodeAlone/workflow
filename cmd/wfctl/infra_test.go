@@ -311,6 +311,21 @@ func TestFormatPlanTable_MasksSensitiveInDefaultMode(t *testing.T) {
 	}
 }
 
+func TestFormatResolutionDiagnosticRefRedactsSensitiveRefs(t *testing.T) {
+	for _, ref := range []string{"JWT_SECRET", "STRIPE_SECRET_KEY", "DATABASE_URL", "bmw-database.uri"} {
+		got := formatResolutionDiagnosticRef(ref)
+		if strings.Contains(got, ref) || strings.Contains(got, "${") {
+			t.Fatalf("formatResolutionDiagnosticRef(%q) = %q, want redacted", ref, got)
+		}
+	}
+	for _, ref := range []string{"IMAGE_SHA", "bmw-database.id"} {
+		got := formatResolutionDiagnosticRef(ref)
+		if got != "${"+ref+"}" {
+			t.Fatalf("formatResolutionDiagnosticRef(%q) = %q, want literal ref", ref, got)
+		}
+	}
+}
+
 // --- helpers ---
 
 func writeTempYAML(t *testing.T, content string) (string, error) {

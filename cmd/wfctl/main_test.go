@@ -144,13 +144,65 @@ func TestRunValidateInvalid(t *testing.T) {
 	}
 }
 
-func TestRunValidateStrict(t *testing.T) {
+func TestRunValidateStrictByDefault(t *testing.T) {
 	dir := t.TempDir()
 	emptyConfig := "modules: []\n"
 	path := writeTestConfig(t, dir, "empty.yaml", emptyConfig)
-	err := runValidate([]string{"-strict", path})
+	err := runValidate([]string{path})
 	if err == nil {
-		t.Fatal("expected error in strict mode with empty modules")
+		t.Fatal("expected error by default with empty modules")
+	}
+}
+
+func TestRunValidateLooseAllowsEmptyModules(t *testing.T) {
+	dir := t.TempDir()
+	emptyConfig := "modules: []\n"
+	path := writeTestConfig(t, dir, "empty.yaml", emptyConfig)
+	if err := runValidate([]string{"--loose", path}); err != nil {
+		t.Fatalf("expected --loose to allow empty modules, got: %v", err)
+	}
+	if err := runValidate([]string{"--non-strict", path}); err != nil {
+		t.Fatalf("expected --non-strict to allow empty modules, got: %v", err)
+	}
+}
+
+func TestRunValidateCatchesDBQueryCachedRowWrapperByDefault(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+modules:
+  - name: router
+    type: http.router
+pipelines:
+  payment-create-intent:
+    trigger:
+      type: http
+      config:
+        path: /api/v1/payments/intents
+        method: POST
+    steps:
+      - name: check_mock_mode
+        type: step.db_query_cached
+        config:
+          database: db
+          query: "SELECT COALESCE((SELECT settings->>'mock_payments' FROM tenants WHERE id = $1), 'false') AS mock_payments"
+          mode: single
+          cache_key: tenant:test:mock_payments
+      - name: set_mock_flag
+        type: step.set
+        config:
+          values:
+            is_mock: '{{ index .steps "check_mock_mode" "row" "mock_payments" | default "false" }}'
+`
+	path := writeTestConfig(t, dir, "payment.yaml", cfg)
+	err := runValidate([]string{path})
+	if err == nil {
+		t.Fatal("expected validate to fail on stale db_query_cached row wrapper")
+	}
+	if !strings.Contains(err.Error(), "pipeline-refs warning") || !strings.Contains(err.Error(), "check_mock_mode.row") {
+		t.Fatalf("validate error should mention pipeline refs and check_mock_mode.row, got: %v", err)
+	}
+	if err := runValidate([]string{"--loose", path}); err != nil {
+		t.Fatalf("--loose should allow transitional pipeline reference warnings, got: %v", err)
 	}
 }
 
@@ -252,12 +304,12 @@ modules:
 `
 	path := writeTestConfig(t, dir, "custom.yaml", unknownTypeConfig)
 	// Should fail without the flag
-	err := runValidate([]string{path})
+	err := runValidate([]string{"--allow-no-entry-points", path})
 	if err == nil {
 		t.Fatal("expected error for unknown type")
 	}
 	// Should pass with the flag
-	if err := runValidate([]string{"--skip-unknown-types", path}); err != nil {
+	if err := runValidate([]string{"--skip-unknown-types", "--allow-no-entry-points", path}); err != nil {
 		t.Fatalf("expected pass with --skip-unknown-types, got: %v", err)
 	}
 }
@@ -382,12 +434,12 @@ modules:
 	path := writeTestConfig(t, dir, "workflow.yaml", configContent)
 
 	// Without --plugin-dir: should fail (unknown type)
-	if err := runValidate([]string{path}); err == nil {
+	if err := runValidate([]string{"--allow-no-entry-points", path}); err == nil {
 		t.Fatal("expected error for unknown external module type without --plugin-dir")
 	}
 
 	// With --plugin-dir: should pass
-	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, "--allow-no-entry-points", path}); err != nil {
 		t.Errorf("expected valid config with --plugin-dir, got: %v", err)
 	}
 	t.Cleanup(func() {
@@ -414,12 +466,12 @@ func TestRunValidatePluginDirCapabilities(t *testing.T) {
 	path := writeTestConfig(t, dir, "workflow.yaml", configContent)
 
 	// Without --plugin-dir: should fail (unknown type)
-	if err := runValidate([]string{path}); err == nil {
+	if err := runValidate([]string{"--allow-no-entry-points", path}); err == nil {
 		t.Fatal("expected error for unknown external module type without --plugin-dir")
 	}
 
 	// With --plugin-dir: should pass (types from capabilities object are recognized)
-	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, "--allow-no-entry-points", path}); err != nil {
 		t.Errorf("expected valid config with --plugin-dir (capabilities format), got: %v", err)
 	}
 	t.Cleanup(func() {
@@ -462,7 +514,7 @@ modules:
   - name: ext-mod
     type: custom.step_schema_validate_testonly
 `)
-	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, "--allow-no-entry-points", path}); err != nil {
 		t.Fatalf("expected valid config with --plugin-dir, got: %v", err)
 	}
 	if got := reg.Get("step.schema_validate_testonly"); got == nil {

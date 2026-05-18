@@ -37,6 +37,9 @@ var stepFieldDotRe = regexp.MustCompile(`\.steps\.([a-zA-Z_][a-zA-Z0-9_-]*)\.([a
 // stepRefIndexRe matches index .steps "STEP_NAME" patterns.
 var stepRefIndexRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"`)
 
+// stepIndexFieldRe matches index .steps "STEP_NAME" "FIELD_NAME" patterns.
+var stepIndexFieldRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"\s+"([^"]+)"`)
+
 // stepRefFuncRe matches step "STEP_NAME" function calls at the start of an
 // action, after a pipe, or after an opening parenthesis.
 var stepRefFuncRe = regexp.MustCompile(`(?:^|\||\()\s*step\s+"([^"]+)"`)
@@ -194,7 +197,15 @@ func validatePipelineTemplateRefs(pipelineName string, stepsRaw []any, reg *sche
 					}
 				}
 
-				// Check for step name references via index (no field path resolvable)
+				// Check for step output field references via index
+				// (index .steps "STEP_NAME" "FIELD_NAME" ...)
+				indexFieldMatches := stepIndexFieldRe.FindAllStringSubmatch(actionContent, -1)
+				for _, m := range indexFieldMatches {
+					refStepName, refField := m[1], m[2]
+					validateStepOutputField(pipelineName, stepName, refStepName, refField, stepMeta, reg, result)
+				}
+
+				// Check for step name references via index.
 				indexMatches := stepRefIndexRe.FindAllStringSubmatch(actionContent, -1)
 				for _, m := range indexMatches {
 					refName := m[1]
@@ -390,7 +401,10 @@ func collectTemplateStrings(data any) []string {
 			results = append(results, v)
 		}
 	case map[string]any:
-		for _, val := range v {
+		for key, val := range v {
+			if key == "step" || key == "steps" {
+				continue
+			}
 			results = append(results, collectTemplateStrings(val)...)
 		}
 	case []any:
@@ -441,12 +455,16 @@ func ExtractSQLColumns(query string) []string {
 	// Find SELECT ... FROM
 	upper := strings.ToUpper(query)
 	selectIdx := strings.Index(upper, "SELECT ")
-	fromIdx := strings.Index(upper, " FROM ")
-	if selectIdx < 0 || fromIdx < 0 || fromIdx <= selectIdx {
+	if selectIdx < 0 {
 		return nil
 	}
 
-	selectClause := query[selectIdx+7 : fromIdx]
+	selectStart := selectIdx + len("SELECT ")
+	fromIdx := topLevelSQLKeywordIndex(query, selectStart, " FROM ")
+	selectClause := query[selectStart:]
+	if fromIdx > selectStart {
+		selectClause = query[selectStart:fromIdx]
+	}
 
 	// Handle DISTINCT
 	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(selectClause)), "DISTINCT ") {
@@ -482,6 +500,36 @@ func ExtractSQLColumns(query string) []string {
 		columns = append(columns, col)
 	}
 	return columns
+}
+
+func topLevelSQLKeywordIndex(query string, start int, keyword string) int {
+	upper := strings.ToUpper(query)
+	depth := 0
+	var quote byte
+	for i := start; i <= len(query)-len(keyword); i++ {
+		ch := query[i]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && strings.HasPrefix(upper[i:], keyword) {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // extractColumnName extracts the effective column name from a SELECT expression.

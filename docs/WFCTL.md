@@ -421,7 +421,9 @@ wfctl validate [options] <config.yaml> [config2.yaml ...]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-strict` | `false` | Enable strict validation (no empty modules allowed) |
+| `-strict` | `true` | Enable strict validation (default; retained for compatibility) |
+| `-loose` | `false` | Allow legacy loose validation for transitional configs (planned for removal in v1.0) |
+| `-non-strict` | `false` | Alias for `--loose` |
 | `-skip-unknown-types` | `false` | Skip unknown module/workflow/trigger type checks |
 | `-allow-no-entry-points` | `false` | Allow configs with no triggers, routes, subscriptions, or jobs |
 | `-dir` | _(none)_ | Validate all `.yaml`/`.yml` files in a directory (recursive) |
@@ -433,7 +435,7 @@ wfctl validate [options] <config.yaml> [config2.yaml ...]
 wfctl validate config.yaml
 wfctl validate example/*.yaml
 wfctl validate --dir ./example/
-wfctl validate --strict admin/config.yaml
+wfctl validate --loose legacy/config.yaml
 wfctl validate --skip-unknown-types example/*.yaml
 wfctl validate --plugin-dir data/plugins config.yaml
 ```
