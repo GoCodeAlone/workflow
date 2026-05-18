@@ -1518,14 +1518,13 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load current state for infra_output sync: %w", err)
 	}
-	// Only reload the workflow config when env resolution is actually needed:
-	// it is needed only when --env is set AND at least one infra_output secret
-	// generator is configured (otherwise syncInfraOutputSecrets is a no-op for
-	// env resolution regardless).
+	// Only reload the workflow config when routing or env resolution is needed:
+	// store-scoped generators need secretStores, and --env needs module
+	// ResolveForEnv so bmw-database.uri can find bmw-staging-db in state.
 	var wfCfg *config.WorkflowConfig
-	if envName != "" {
-		for _, g := range secretsCfg.Generate {
-			if g.Type == "infra_output" {
+	for _, g := range secretsCfg.Generate {
+		if g.Type == "infra_output" {
+			if envName != "" || g.Store != "" {
 				var loadErr error
 				wfCfg, loadErr = config.LoadFromFile(cfgFile)
 				if loadErr != nil {

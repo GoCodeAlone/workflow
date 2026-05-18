@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -48,15 +49,19 @@ func parseInfraConfig(cfgFile string) (*InfraConfig, error) {
 }
 
 // resolveSecretsProvider constructs the appropriate secrets.Provider from cfg.
-// ${VAR} / $VAR references in cfg.Config are expanded via os.ExpandEnv before
-// the provider is constructed, so credentials can be passed through the environment
-// (e.g. VAULT_TOKEN=s.xxx in CI) rather than hard-coded in YAML. cfg.Config is
-// never mutated — expansion produces a deep copy.
+// ${VAR} / $VAR references in cfg.Config are expanded before the provider is
+// constructed, so credentials can be passed through the environment (e.g.
+// VAULT_TOKEN=s.xxx in CI) rather than hard-coded in YAML. cfg.Config is never
+// mutated — expansion produces a deep copy.
 func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
+	return resolveSecretsProviderForEnv(cfg, "")
+}
+
+func resolveSecretsProviderForEnv(cfg *SecretsConfig, envName string) (secrets.Provider, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("no secrets config provided")
 	}
-	c := config.ExpandEnvInMap(cfg.Config)
+	c := expandSecretsConfigForEnv(cfg.Config, envName)
 	if c == nil {
 		c = map[string]any{}
 	}
@@ -67,7 +72,14 @@ func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 		if tokenVar == "" {
 			tokenVar = "GITHUB_TOKEN" //nolint:gosec // G101: this is an env var name, not a credential
 		}
-		return secrets.NewGitHubSecretsProvider(repo, tokenVar)
+		provider, err := secrets.NewGitHubSecretsProvider(repo, tokenVar)
+		if err != nil {
+			return nil, err
+		}
+		if environment, _ := c["environment"].(string); environment != "" {
+			provider.SetEnvironment(environment)
+		}
+		return provider, nil
 
 	case "vault":
 		addr, _ := c["address"].(string)
@@ -98,6 +110,56 @@ func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 
 	default:
 		return nil, fmt.Errorf("unknown secrets provider %q (supported: github, vault, aws, env, keychain)", cfg.Provider)
+	}
+}
+
+func expandSecretsConfigForEnv(m map[string]any, envName string) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = expandSecretConfigValueForEnv(v, envName)
+	}
+	return out
+}
+
+func expandSecretConfigValueForEnv(v any, envName string) any {
+	switch val := v.(type) {
+	case string:
+		return os.Expand(val, func(key string) string {
+			if key == "WORKFLOW_ENV" {
+				return envName
+			}
+			return os.Getenv(key)
+		})
+	case map[string]any:
+		return expandSecretsConfigForEnv(val, envName)
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = expandSecretConfigValueForEnv(item, envName)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func secretsConfigFromStore(store *config.SecretStoreConfig) *SecretsConfig {
+	if store == nil {
+		return nil
+	}
+	provider := strings.TrimSpace(store.Provider)
+	switch provider {
+	case "aws-secrets-manager":
+		provider = "aws"
+	case "github-actions":
+		provider = "github"
+	}
+	return &SecretsConfig{
+		Provider: provider,
+		Config:   store.Config,
 	}
 }
 

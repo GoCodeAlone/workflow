@@ -80,6 +80,59 @@ func TestGitHubProvider_List_ParsesResponse(t *testing.T) {
 	}
 }
 
+func TestGitHubProvider_EnvironmentScopeUsesEnvironmentEndpoints(t *testing.T) {
+	recipientPub, _, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/repos/owner/repo/environments/staging/secrets/public-key":
+			json.NewEncoder(w).Encode(repoPublicKeyResponse{
+				KeyID: "env-key",
+				Key:   base64.StdEncoding.EncodeToString(recipientPub[:]),
+			})
+		case "/repos/owner/repo/environments/staging/secrets/DATABASE_URL":
+			if r.Method != http.MethodPut {
+				http.Error(w, "bad method", http.StatusMethodNotAllowed)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/repos/owner/repo/environments/staging/secrets":
+			json.NewEncoder(w).Encode(map[string]any{
+				"secrets": []map[string]any{{"name": "DATABASE_URL"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	p.SetEnvironment("staging")
+	if p.Environment() != "staging" {
+		t.Fatalf("Environment() = %q, want staging", p.Environment())
+	}
+	if err := p.Set(context.Background(), "DATABASE_URL", "postgres://example"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if _, err := p.List(context.Background()); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	want := []string{
+		"GET /repos/owner/repo/environments/staging/secrets/public-key",
+		"PUT /repos/owner/repo/environments/staging/secrets/DATABASE_URL",
+		"GET /repos/owner/repo/environments/staging/secrets",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("paths:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 func TestGitHubProvider_Set_SendsEncryptedPayload(t *testing.T) {
 	// Generate a NaCl key pair to act as the repo's key pair.
 	recipientPub, recipientPriv, err := box.GenerateKey(rand.Reader)

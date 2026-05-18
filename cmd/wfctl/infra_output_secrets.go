@@ -146,35 +146,28 @@ func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, prov
 
 	// Lazy List() cache — same pattern as bootstrapSecrets for write-only
 	// providers (GitHub Actions) that return ErrUnsupported on Get.
-	var listSet map[string]struct{}
-	var listErr error
-	var listDone bool
-	lookupViaList := func(key string) (bool, error) {
-		if !listDone {
-			names, err := provider.List(ctx)
-			listErr = err
-			if err == nil {
-				listSet = make(map[string]struct{}, len(names))
-				for _, n := range names {
-					listSet[n] = struct{}{}
-				}
-			}
-			listDone = true
-		}
-		if listErr != nil && !errors.Is(listErr, secrets.ErrUnsupported) {
-			return false, fmt.Errorf("list secrets to check %q: %w", key, listErr)
-		}
-		_, ok := listSet[key]
-		return ok, nil
-	}
+	listLookups := map[secrets.Provider]*providerListLookup{}
 
 	stateOutputs := buildStateOutputsMap(states)
 
 	for _, gen := range gens {
+		genProvider, err := providerForSecretGen(wfCfg, provider, gen, envName)
+		if err != nil {
+			return err
+		}
+		lookupViaList := func(key string) (bool, error) {
+			lookup, ok := listLookups[genProvider]
+			if !ok {
+				lookup = &providerListLookup{provider: genProvider}
+				listLookups[genProvider] = lookup
+			}
+			return lookup.exists(ctx, key)
+		}
+
 		// Attempt to read the current value. This serves two purposes:
 		//   1. Existence check for readable providers.
 		//   2. Value comparison in refresh mode to avoid spurious updates.
-		currentVal, getErr := provider.Get(ctx, gen.Key)
+		currentVal, getErr := genProvider.Get(ctx, gen.Key)
 
 		var exists bool
 		var isReadable bool
@@ -212,16 +205,60 @@ func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, prov
 				fmt.Printf("  secret %q: unchanged\n", gen.Key)
 				continue
 			}
-			if err := provider.Set(ctx, gen.Key, newValue); err != nil {
+			if err := genProvider.Set(ctx, gen.Key, newValue); err != nil {
 				return fmt.Errorf("store secret %q: %w", gen.Key, err)
 			}
 			fmt.Printf("  secret %q: updated from infra output\n", gen.Key)
 		} else {
-			if err := provider.Set(ctx, gen.Key, newValue); err != nil {
+			if err := genProvider.Set(ctx, gen.Key, newValue); err != nil {
 				return fmt.Errorf("store secret %q: %w", gen.Key, err)
 			}
 			fmt.Printf("  secret %q: created from infra output\n", gen.Key)
 		}
 	}
 	return nil
+}
+
+type providerListLookup struct {
+	provider secrets.Provider
+	listSet  map[string]struct{}
+	listErr  error
+	listDone bool
+}
+
+func (l *providerListLookup) exists(ctx context.Context, key string) (bool, error) {
+	if !l.listDone {
+		names, err := l.provider.List(ctx)
+		l.listErr = err
+		if err == nil {
+			l.listSet = make(map[string]struct{}, len(names))
+			for _, n := range names {
+				l.listSet[n] = struct{}{}
+			}
+		}
+		l.listDone = true
+	}
+	if l.listErr != nil && !errors.Is(l.listErr, secrets.ErrUnsupported) {
+		return false, fmt.Errorf("list secrets to check %q: %w", key, l.listErr)
+	}
+	_, ok := l.listSet[key]
+	return ok, nil
+}
+
+func providerForSecretGen(wfCfg *config.WorkflowConfig, fallback secrets.Provider, gen SecretGen, envName string) (secrets.Provider, error) {
+	if gen.Store == "" {
+		return fallback, nil
+	}
+	if wfCfg == nil {
+		return nil, fmt.Errorf("secret %q references store %q, but workflow config is unavailable", gen.Key, gen.Store)
+	}
+	store, ok := wfCfg.SecretStores[gen.Store]
+	if !ok || store == nil {
+		return nil, fmt.Errorf("secret %q references unknown store %q", gen.Key, gen.Store)
+	}
+	provider, err := resolveSecretsProviderForEnv(secretsConfigFromStore(store), envName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve store %q for secret %q: %w", gen.Store, gen.Key, err)
+	}
+	return provider, nil
 }

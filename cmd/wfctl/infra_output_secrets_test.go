@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -160,6 +162,36 @@ func TestSyncInfraOutputSecrets_WritesSecret(t *testing.T) {
 	}
 	if p.data["STAGING_DATABASE_URL"] != "postgres://user:pass@db.example.com:5432/app" {
 		t.Errorf("STAGING_DATABASE_URL: got %q", p.data["STAGING_DATABASE_URL"])
+	}
+}
+
+func TestSyncInfraOutputSecrets_RoutesGeneratorToNamedStore(t *testing.T) {
+	envProvider := secrets.NewEnvProvider("ROUTED_")
+	_ = envProvider.Delete(context.Background(), "DATABASE_URL")
+	t.Cleanup(func() { _ = envProvider.Delete(context.Background(), "DATABASE_URL") })
+	p := newSimpleProvider()
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri", Store: "github-env"},
+		},
+	}
+	wfCfg := &config.WorkflowConfig{
+		SecretStores: map[string]*config.SecretStoreConfig{
+			"github-env": {
+				Provider: "env",
+				Config:   map[string]any{"prefix": "ROUTED_"},
+			},
+		},
+	}
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), wfCfg, "staging", nil, false)
+	if err != nil {
+		t.Fatalf("syncInfraOutputSecrets: %v", err)
+	}
+	if _, ok := p.data["DATABASE_URL"]; ok {
+		t.Fatalf("default provider received DATABASE_URL; wanted named store routing")
+	}
+	if got := os.Getenv("ROUTED_DATABASE_URL"); got != "postgres://user:pass@db.example.com:5432/app" {
+		t.Fatalf("ROUTED_DATABASE_URL = %q, want infra output", got)
 	}
 }
 

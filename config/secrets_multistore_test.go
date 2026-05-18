@@ -20,6 +20,11 @@ secretStores:
 secrets:
   defaultStore: github
   provider: env
+  generate:
+    - key: DATABASE_URL
+      type: infra_output
+      source: main-db.uri
+      store: github-env
   entries:
     - name: DATABASE_URL
       description: PostgreSQL connection string
@@ -112,6 +117,12 @@ func TestMultiStoreSecretsConfig(t *testing.T) {
 	}
 	if len(cfg.Secrets.Entries) != 3 {
 		t.Fatalf("Entries len: got %d, want 3", len(cfg.Secrets.Entries))
+	}
+	if len(cfg.Secrets.Generate) != 1 {
+		t.Fatalf("Generate len: got %d, want 1", len(cfg.Secrets.Generate))
+	}
+	if cfg.Secrets.Generate[0].Store != "github-env" {
+		t.Errorf("DATABASE_URL generator store: got %q, want github-env", cfg.Secrets.Generate[0].Store)
 	}
 
 	// Per-secret store field
