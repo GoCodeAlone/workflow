@@ -111,7 +111,7 @@ func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig m
 	if err != nil {
 		return nil, fmt.Errorf("remote step %q (handle %s) encode trigger_data as Struct: %w", s.name, s.handleID, err)
 	}
-	metadata, err := mapToStruct(pc.Metadata)
+	metadata, err := mapToStruct(remotePluginMetadata(pc.Metadata))
 	if err != nil {
 		return nil, fmt.Errorf("remote step %q (handle %s) encode metadata as Struct: %w", s.name, s.handleID, err)
 	}
@@ -149,7 +149,7 @@ func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig m
 	if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
 		return req, nil
 	}
-	typedConfig, err := mapToTypedAny(s.contract.ConfigMessage, resolvedConfig, s.types)
+	typedConfig, err := mapToTypedAny(s.contract.ConfigMessage, stripInternalKeys(resolvedConfig), s.types)
 	if err != nil {
 		if s.contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, fmt.Errorf("remote step %q STRICT_PROTO config message %q cannot use legacy Struct fallback: %w", s.name, s.contract.ConfigMessage, err)
@@ -175,6 +175,20 @@ func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig m
 		req.Current = nil
 	}
 	return req, nil
+}
+
+func remotePluginMetadata(metadata map[string]any) map[string]any {
+	if metadata == nil {
+		return nil
+	}
+	filtered := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		if _, err := structpb.NewValue(value); err != nil {
+			continue
+		}
+		filtered[key] = value
+	}
+	return filtered
 }
 
 // Destroy releases the remote step resources.
