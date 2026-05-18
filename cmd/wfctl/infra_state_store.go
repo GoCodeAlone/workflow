@@ -12,6 +12,7 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin/external"
 )
 
 // infraStateStore is the minimal state persistence interface used by wfctl
@@ -86,16 +87,13 @@ func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 		return resolvePostgresStateStore(cfg)
 
 	case "spaces":
-		return nil, fmt.Errorf("iac.state backend %q is now plugin-served by workflow-plugin-digitalocean v1.1.0; "+
-			"install and load the plugin to use the Spaces backend (wfctl direct-path commands no longer support in-tree spaces)", backend)
+		return resolvePluginStateStore(context.Background(), backend, cfg)
 
 	case "s3":
-		return nil, fmt.Errorf("iac.state backend %q is now plugin-served by workflow-plugin-aws v1.1.0; "+
-			"install and load the plugin to use the S3 backend (wfctl direct-path commands no longer support in-tree s3)", backend)
+		return resolvePluginStateStore(context.Background(), backend, cfg)
 
 	case "gcs":
-		return nil, fmt.Errorf("iac.state backend %q is now plugin-served by workflow-plugin-gcp v1.1.0; "+
-			"install and load the plugin to use the GCS backend (wfctl direct-path commands no longer support in-tree gcs)", backend)
+		return resolvePluginStateStore(context.Background(), backend, cfg)
 
 	case "azure":
 		return nil, fmt.Errorf("azure state store backend not yet supported by wfctl direct-path commands; " +
@@ -105,6 +103,124 @@ func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 	default:
 		return nil, fmt.Errorf("unknown iac.state backend %q", backend)
 	}
+}
+
+type pluginWfctlStateStore struct {
+	inner module.IaCStateStore
+	mgr   *external.ExternalPluginManager
+}
+
+func (s *pluginWfctlStateStore) ListResources(ctx context.Context) ([]interfaces.ResourceState, error) {
+	states, err := s.inner.ListStates(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]interfaces.ResourceState, 0, len(states))
+	for _, state := range states {
+		out = append(out, iacStateToResourceState(state))
+	}
+	return out, nil
+}
+
+func (s *pluginWfctlStateStore) SaveResource(ctx context.Context, state interfaces.ResourceState) error {
+	return s.inner.SaveState(ctx, resourceStateToIaCState(state))
+}
+
+func (s *pluginWfctlStateStore) DeleteResource(ctx context.Context, name string) error {
+	return s.inner.DeleteState(ctx, name)
+}
+
+func (s *pluginWfctlStateStore) Close() error {
+	if s.mgr == nil {
+		return nil
+	}
+	s.mgr.Shutdown()
+	return nil
+}
+
+func resolvePluginStateStore(ctx context.Context, backend string, cfg map[string]any) (infraStateStore, error) {
+	pluginDir := currentInfraPluginDir
+	if pluginDir == "" {
+		pluginDir = os.Getenv("WFCTL_PLUGIN_DIR")
+	}
+	if pluginDir == "" {
+		pluginDir = "./data/plugins"
+	}
+
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		return nil, fmt.Errorf("iac.state backend %q is plugin-served but plugin directory %q is unavailable: %w", backend, pluginDir, err)
+	}
+
+	mgr := external.NewExternalPluginManager(pluginDir, nil)
+	for _, pluginName := range stateBackendPluginCandidates(backend, entries) {
+		adapter, loadErr := mgr.LoadPlugin(pluginName)
+		if loadErr != nil {
+			mgr.Shutdown()
+			return nil, fmt.Errorf("load plugin %q for iac.state backend %q: %w", pluginName, backend, loadErr)
+		}
+		clients, clientsErr := adapter.IaCStateBackendClients()
+		if clientsErr != nil {
+			mgr.Shutdown()
+			return nil, fmt.Errorf("plugin %q iac.state backends: %w", pluginName, clientsErr)
+		}
+		client, ok := clients[backend]
+		if !ok {
+			continue
+		}
+		store := module.NewGRPCIaCStateStore(client)
+		if err := store.Configure(ctx, backend, cfg); err != nil {
+			mgr.Shutdown()
+			return nil, fmt.Errorf("configure plugin-served iac.state backend %q via plugin %q: %w", backend, pluginName, err)
+		}
+		return &pluginWfctlStateStore{inner: store, mgr: mgr}, nil
+	}
+
+	mgr.Shutdown()
+	return nil, fmt.Errorf("iac.state backend %q is plugin-served but no installed plugin in %s advertises it", backend, pluginDir)
+}
+
+func stateBackendPluginCandidates(backend string, entries []os.DirEntry) []string {
+	seen := map[string]struct{}{}
+	var candidates []string
+	hasDir := func(name string) bool {
+		for _, entry := range entries {
+			if entry.IsDir() && entry.Name() == name {
+				return true
+			}
+		}
+		return false
+	}
+	add := func(name string) {
+		if strings.TrimSpace(name) == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		candidates = append(candidates, name)
+	}
+	switch backend {
+	case "spaces":
+		if hasDir("digitalocean") {
+			add("digitalocean")
+		}
+	case "s3":
+		if hasDir("aws") {
+			add("aws")
+		}
+	case "gcs":
+		if hasDir("gcp") {
+			add("gcp")
+		}
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			add(entry.Name())
+		}
+	}
+	return candidates
 }
 
 // ── Filesystem backend ─────────────────────────────────────────────────────────
