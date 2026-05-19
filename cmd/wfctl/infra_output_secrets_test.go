@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -163,6 +165,36 @@ func TestSyncInfraOutputSecrets_WritesSecret(t *testing.T) {
 	}
 }
 
+func TestSyncInfraOutputSecrets_RoutesGeneratorToNamedStore(t *testing.T) {
+	envProvider := secrets.NewEnvProvider("ROUTED_")
+	_ = envProvider.Delete(context.Background(), "DATABASE_URL")
+	t.Cleanup(func() { _ = envProvider.Delete(context.Background(), "DATABASE_URL") })
+	p := newSimpleProvider()
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri", Store: "github-env"},
+		},
+	}
+	wfCfg := &config.WorkflowConfig{
+		SecretStores: map[string]*config.SecretStoreConfig{
+			"github-env": {
+				Provider: "env",
+				Config:   map[string]any{"prefix": "ROUTED_"},
+			},
+		},
+	}
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), wfCfg, "staging", nil, false)
+	if err != nil {
+		t.Fatalf("syncInfraOutputSecrets: %v", err)
+	}
+	if _, ok := p.data["DATABASE_URL"]; ok {
+		t.Fatalf("default provider received DATABASE_URL; wanted named store routing")
+	}
+	if got := os.Getenv("ROUTED_DATABASE_URL"); got != "postgres://user:pass@db.example.com:5432/app" {
+		t.Fatalf("ROUTED_DATABASE_URL = %q, want infra output", got)
+	}
+}
+
 func TestSyncInfraOutputSecrets_WritesMultiple(t *testing.T) {
 	p := newSimpleProvider()
 	cfg := &SecretsConfig{
@@ -180,6 +212,66 @@ func TestSyncInfraOutputSecrets_WritesMultiple(t *testing.T) {
 	}
 	if p.data["REDIS_URL"] != "redis://cache.example.com:6379" {
 		t.Errorf("REDIS_URL: got %q", p.data["REDIS_URL"])
+	}
+}
+
+func TestSyncInfraOutputSecretsScoped_SkipsOutOfScopeGenerators(t *testing.T) {
+	p := newSimpleProvider()
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
+			{Key: "WWW_TARGET", Type: "infra_output", Source: "bmw-dns.target"},
+		},
+	}
+	states := []interfaces.ResourceState{
+		{
+			Name: "bmw-dns",
+			Type: "infra.dns",
+			Outputs: map[string]any{
+				"target": "buymywishlist.com.",
+			},
+		},
+	}
+	scope := map[string]struct{}{"bmw-dns": {}}
+
+	err := syncInfraOutputSecretsScoped(context.Background(), cfg, p, states, nil, "", nil, false, scope)
+	if err != nil {
+		t.Fatalf("syncInfraOutputSecretsScoped: %v", err)
+	}
+	if _, ok := p.data["DATABASE_URL"]; ok {
+		t.Fatalf("out-of-scope DATABASE_URL was written: %v", p.data)
+	}
+	if got := p.data["WWW_TARGET"]; got != "buymywishlist.com." {
+		t.Fatalf("WWW_TARGET = %q, want DNS target", got)
+	}
+}
+
+func TestInfraOutputSourceInScope_InvalidSourceExcluded(t *testing.T) {
+	scope := map[string]struct{}{"bmw-dns": {}}
+	if infraOutputSourceInScope(nil, "DATABASE_URL", "", scope) {
+		t.Fatal("invalid infra_output source must not match a scoped apply")
+	}
+}
+
+func TestInfraOutputSourceInScope_ResolvesEnvModuleName(t *testing.T) {
+	scope := map[string]struct{}{"bmw-staging-db": {}}
+	wfCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{{
+			Name: "bmw-database",
+			Type: "infra.database",
+			Config: map[string]any{
+				"provider": "test-provider",
+			},
+			Environments: map[string]*config.InfraEnvironmentResolution{
+				"staging": {
+					Config: map[string]any{"name": "bmw-staging-db"},
+				},
+			},
+		}},
+	}
+
+	if !infraOutputSourceInScope(wfCfg, "bmw-database.uri", "staging", scope) {
+		t.Fatal("env-resolved infra_output source module should match scoped resource name")
 	}
 }
 

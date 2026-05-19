@@ -1,6 +1,9 @@
 package schema
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // InferredOutput describes a single inferred output key for a step instance.
 type InferredOutput struct {
@@ -18,6 +21,8 @@ func (r *StepSchemaRegistry) InferStepOutputs(stepType string, stepConfig map[st
 		return inferSetOutputs(stepConfig)
 	case "step.db_query":
 		return inferDBQueryOutputs(stepConfig)
+	case "step.db_exec":
+		return inferDBExecOutputs(stepConfig)
 	case "step.db_query_cached":
 		return inferDBQueryCachedOutputs(stepConfig)
 	case "step.request_parse":
@@ -69,13 +74,134 @@ func inferDBQueryOutputs(cfg map[string]any) []InferredOutput {
 	}
 }
 
+func inferDBExecOutputs(cfg map[string]any) []InferredOutput {
+	returning, _ := cfg["returning"].(bool)
+	if returning {
+		return inferDBQueryOutputs(cfg)
+	}
+	return []InferredOutput{
+		{Key: "affected_rows", Type: "number", Description: "Number of rows affected by the statement"},
+		{Key: "ignored_error", Type: "string", Description: "Error text when ignore_error is enabled and execution fails"},
+		{Key: "last_id", Type: "string", Description: "Last inserted row ID as a string"},
+	}
+}
+
 func inferDBQueryCachedOutputs(cfg map[string]any) []InferredOutput {
-	base := inferDBQueryOutputs(cfg)
-	out := make([]InferredOutput, 0, len(base)+1)
-	out = append(out, InferredOutput{Key: "cache_hit", Type: "boolean", Description: "Whether the result came from cache"})
-	out = append(out, base...)
+	mode, _ := cfg["mode"].(string)
+	out := []InferredOutput{{Key: "cache_hit", Type: "boolean", Description: "Whether the result came from cache"}}
+	if mode == "list" {
+		out = append(out,
+			InferredOutput{Key: "count", Type: "number", Description: "Number of rows returned"},
+			InferredOutput{Key: "rows", Type: "array", Description: "All result rows"},
+		)
+		sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+		return out
+	}
+
+	query, _ := cfg["query"].(string)
+	cols := extractSQLColumnsForOutputs(query)
+	if len(cols) == 0 {
+		out = append(out, InferredOutput{Key: "(query-column)", Type: "any", Description: "Selected column emitted as a top-level field"})
+		sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+		return out
+	}
+	for _, col := range cols {
+		out = append(out, InferredOutput{Key: col, Type: "any", Description: "Selected column emitted as a top-level field"})
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
+}
+
+func extractSQLColumnsForOutputs(query string) []string {
+	query = strings.Join(strings.Fields(query), " ")
+	upper := strings.ToUpper(query)
+	selectIdx := strings.Index(upper, "SELECT ")
+	if selectIdx < 0 {
+		return nil
+	}
+
+	selectStart := selectIdx + len("SELECT ")
+	fromIdx := topLevelSQLKeywordIndex(query, selectStart, " FROM ")
+	selectClause := query[selectStart:]
+	if fromIdx > selectStart {
+		selectClause = query[selectStart:fromIdx]
+	}
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(selectClause)), "DISTINCT ") {
+		selectClause = strings.TrimSpace(selectClause)[9:]
+	}
+
+	var columns []string
+	depth := 0
+	current := ""
+	for _, ch := range selectClause {
+		switch ch {
+		case '(':
+			depth++
+			current += string(ch)
+		case ')':
+			depth--
+			current += string(ch)
+		case ',':
+			if depth == 0 {
+				if col := extractSQLColumnNameForOutputs(strings.TrimSpace(current)); col != "" {
+					columns = append(columns, col)
+				}
+				current = ""
+			} else {
+				current += string(ch)
+			}
+		default:
+			current += string(ch)
+		}
+	}
+	if col := extractSQLColumnNameForOutputs(strings.TrimSpace(current)); col != "" {
+		columns = append(columns, col)
+	}
+	return columns
+}
+
+func topLevelSQLKeywordIndex(query string, start int, keyword string) int {
+	upper := strings.ToUpper(query)
+	depth := 0
+	var quote byte
+	for i := start; i <= len(query)-len(keyword); i++ {
+		ch := query[i]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && strings.HasPrefix(upper[i:], keyword) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func extractSQLColumnNameForOutputs(expr string) string {
+	if expr == "" || expr == "*" {
+		return ""
+	}
+	upper := strings.ToUpper(expr)
+	if asIdx := strings.LastIndex(upper, " AS "); asIdx >= 0 {
+		return strings.Trim(strings.TrimSpace(expr[asIdx+4:]), "\"'`")
+	}
+	if dotIdx := strings.LastIndex(expr, "."); dotIdx >= 0 {
+		return strings.Trim(strings.TrimSpace(expr[dotIdx+1:]), "\"'`")
+	}
+	return strings.Trim(strings.TrimSpace(expr), "\"'`")
 }
 
 func inferRequestParseOutputs(_ map[string]any) []InferredOutput {

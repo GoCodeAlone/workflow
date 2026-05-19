@@ -356,7 +356,7 @@ func runInfraPlan(args []string) error {
 		fmt.Println()
 		fmt.Println("Pending JIT resolution (apply-time):")
 		for _, d := range resolutionDiags {
-			fmt.Printf("  %s: ${%s}\n", d.ResourceName, d.Ref)
+			fmt.Printf("  %s: %s\n", d.ResourceName, formatResolutionDiagnosticRef(d.Ref))
 		}
 	}
 
@@ -381,6 +381,7 @@ func runInfraPlan(args []string) error {
 		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
 		// can detect stale plans when the config changes after plan generation.
 		plan.DesiredHash = desiredStateHash(desired)
+		plan.Include = sortedIncludeNames(planIncludeSet)
 		// Stamp generator metadata (wfctl version + IaC plugin versions) so
 		// operators can inspect what toolchain version produced this plan.
 		meta := buildGeneratorMetadata()
@@ -686,6 +687,34 @@ func formatPlanMarkdown(plan interfaces.IaCPlan, showSensitive bool) string {
 	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to replace, %d to destroy.**\n",
 		creates, updates, replaces, deletes)
 	return sb.String()
+}
+
+func formatResolutionDiagnosticRef(ref string) string {
+	if isSensitiveResolutionRef(ref) {
+		return "<redacted sensitive ref>"
+	}
+	return "${" + ref + "}"
+}
+
+func isSensitiveResolutionRef(ref string) bool {
+	ref = strings.ToLower(ref)
+	if ref == "" {
+		return false
+	}
+	parts := strings.Split(ref, ".")
+	last := parts[len(parts)-1]
+	for _, sensitiveKey := range secrets.DefaultSensitiveKeys() {
+		k := strings.ToLower(sensitiveKey)
+		if ref == k || last == k {
+			return true
+		}
+	}
+	for _, token := range []string{"secret", "token", "password", "passwd", "pwd", "private", "credential", "dsn", "uri", "url"} {
+		if strings.Contains(ref, token) {
+			return true
+		}
+	}
+	return false
 }
 
 // resourceSummaryKeys returns the most relevant key-value pairs to display for
@@ -1194,6 +1223,8 @@ func runInfraApply(args []string) error {
 		"Refresh per-field Outputs from cloud truth before applying (recommended pair with --refresh for cutover-style operations)")
 	var skipRefreshFlag bool
 	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set (does NOT cancel explicit --refresh-outputs)")
+	var skipBootstrapFlag bool
+	fs.BoolVar(&skipBootstrapFlag, "skip-bootstrap", false, "Skip auto-bootstrap before apply; use only when required secrets/state already exist")
 	var allowReplaceFlag string
 	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
 		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
@@ -1278,7 +1309,7 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("parse infra config: %w", err)
 	}
-	autoBootstrap := infraCfg == nil || infraCfg.AutoBootstrap == nil || *infraCfg.AutoBootstrap
+	autoBootstrap := !skipBootstrapFlag && (infraCfg == nil || infraCfg.AutoBootstrap == nil || *infraCfg.AutoBootstrap)
 	if autoBootstrap {
 		fmt.Println("Running bootstrap before apply...")
 		bootstrapArgs := []string{"--config", cfgFile}
@@ -1294,6 +1325,7 @@ func runInfraApply(args []string) error {
 	}
 
 	ctx := context.Background()
+	infraOutputSourceScope := parseIncludeFlag(includeFlag)
 
 	// Inject secrets after bootstrap so generated secrets are available.
 	if envName != "" {
@@ -1403,6 +1435,8 @@ func runInfraApply(args []string) error {
 		if err != nil {
 			return fmt.Errorf("parse infra resource specs: %w", err)
 		}
+		planIncludeSet := includeSetFromNames(plan.Include)
+		infraOutputSourceScope = planIncludeSet
 		if plan.DesiredHash == "" {
 			return fmt.Errorf("plan file has no hash — regenerate with: wfctl infra plan -o plan.json")
 		}
@@ -1434,6 +1468,11 @@ func runInfraApply(args []string) error {
 			if stateErr != nil {
 				return fmt.Errorf("load state for stale-check: %w", stateErr)
 			}
+			if err := validateIncludeSet(planIncludeSet, desired, currentState); err != nil {
+				return fmt.Errorf("validate plan include scope: %w", err)
+			}
+			desired = filterSpecsByInclude(desired, planIncludeSet)
+			currentState = filterStatesByInclude(currentState, planIncludeSet)
 			planApplyCfg, cfgErr := config.LoadFromFile(cfgFile)
 			if cfgErr != nil {
 				return fmt.Errorf("load config for stale-check: %w", cfgErr)
@@ -1518,14 +1557,13 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load current state for infra_output sync: %w", err)
 	}
-	// Only reload the workflow config when env resolution is actually needed:
-	// it is needed only when --env is set AND at least one infra_output secret
-	// generator is configured (otherwise syncInfraOutputSecrets is a no-op for
-	// env resolution regardless).
+	// Only reload the workflow config when routing or env resolution is needed:
+	// store-scoped generators need secretStores, and --env needs module
+	// ResolveForEnv so bmw-database.uri can find bmw-staging-db in state.
 	var wfCfg *config.WorkflowConfig
-	if envName != "" {
-		for _, g := range secretsCfg.Generate {
-			if g.Type == "infra_output" {
+	for _, g := range secretsCfg.Generate {
+		if g.Type == "infra_output" {
+			if envName != "" || g.Store != "" {
 				var loadErr error
 				wfCfg, loadErr = config.LoadFromFile(cfgFile)
 				if loadErr != nil {
@@ -1535,7 +1573,7 @@ func runInfraApply(args []string) error {
 			}
 		}
 	}
-	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag)
+	return syncInfraOutputSecretsScoped(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag, infraOutputSourceScope)
 }
 
 func runInfraStatus(args []string) error {

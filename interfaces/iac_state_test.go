@@ -36,6 +36,21 @@ func TestIaCPlan_InputSnapshotField(t *testing.T) {
 	}
 }
 
+func TestIaCPlan_IncludeField(t *testing.T) {
+	p := IaCPlan{Include: []string{"bmw-dns"}}
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got IaCPlan
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Include) != 1 || got.Include[0] != "bmw-dns" {
+		t.Errorf("Include roundtrip failed: %v", got.Include)
+	}
+}
+
 func TestPlanAction_ResolvedConfigHashField(t *testing.T) {
 	// platform.ConfigHash returns a lower-case hex sha256 digest with no
 	// "sha256:" prefix; use a realistic 64-hex value so the test's expected

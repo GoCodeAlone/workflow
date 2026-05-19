@@ -44,6 +44,13 @@ Configs that still reference the legacy types now fail to load with an actionabl
 
 ### Added
 
+- **GitHub environment secret destinations for IaC output sync**: `secretStores` can now use
+  `provider: github` with `config.environment`, including `${WORKFLOW_ENV}`, so
+  `wfctl infra apply --env staging` writes to GitHub Actions environment secrets instead of
+  repository secrets.
+- **`secrets.generate[].store` routing**: `infra_output` generators can name a store from
+  `secretStores`, allowing provisioning output such as database URLs to be piped directly into
+  the intended secret manager location after apply.
 - **Engine-side sensitive-output routing** (v0.27.0): `ResourceDriver` outputs flagged with
   `Sensitive: {key: true}` on Create/Update are routed through the configured `secrets.Provider`
   and replaced in state with `secret_ref://<resource>_<key>` placeholders. Plugins remain

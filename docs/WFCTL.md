@@ -421,7 +421,9 @@ wfctl validate [options] <config.yaml> [config2.yaml ...]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-strict` | `false` | Enable strict validation (no empty modules allowed) |
+| `-strict` | `true` | Enable strict validation (default; retained for compatibility) |
+| `-loose` | `false` | Allow legacy loose validation for transitional configs (planned for removal in v1.0) |
+| `-non-strict` | `false` | Alias for `--loose` |
 | `-skip-unknown-types` | `false` | Skip unknown module/workflow/trigger type checks |
 | `-allow-no-entry-points` | `false` | Allow configs with no triggers, routes, subscriptions, or jobs |
 | `-dir` | _(none)_ | Validate all `.yaml`/`.yml` files in a directory (recursive) |
@@ -433,7 +435,7 @@ wfctl validate [options] <config.yaml> [config2.yaml ...]
 wfctl validate config.yaml
 wfctl validate example/*.yaml
 wfctl validate --dir ./example/
-wfctl validate --strict admin/config.yaml
+wfctl validate --loose legacy/config.yaml
 wfctl validate --skip-unknown-types example/*.yaml
 wfctl validate --plugin-dir data/plugins config.yaml
 ```
@@ -1514,6 +1516,7 @@ Reconcile cloud infrastructure to match the desired state declared in the config
 ```
 wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
                   [--refresh] [--allow-protected-prune] [--skip-refresh]
+                  [--skip-bootstrap]
                   [--allow-replace=NAME1,NAME2,...] [--dry-run] [--format FMT]
 ```
 
@@ -1529,6 +1532,7 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `--refresh` | `false` | Detect drift and prune ghost-in-state entries before applying |
 | `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
 | `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
+| `--skip-bootstrap` | `false` | Skip auto-bootstrap before apply when required secrets/state already exist |
 | `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
 | `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 

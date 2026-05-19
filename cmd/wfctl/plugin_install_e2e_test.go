@@ -478,6 +478,54 @@ func TestInstalledManifestPreservesCLICommandsAndBuildHooks(t *testing.T) {
 	}
 }
 
+// TestInstalledManifestPreservesIaCProviderComputePlanVersion is the regression
+// test for workflow#699 manifest metadata: writeInstalledManifest used to drop
+// top-level iacProvider.computePlanVersion, so installed IaC provider manifests
+// emitted v1/v2 deprecation warnings even when the registry declared v2.
+func TestInstalledManifestPreservesIaCProviderComputePlanVersion(t *testing.T) {
+	rm := &RegistryManifest{
+		Name:        "workflow-plugin-digitalocean",
+		Version:     "2.0.0",
+		Author:      "tester",
+		Description: "regression: iacProvider.computePlanVersion preserved post-install",
+		Type:        "external",
+		Tier:        "community",
+		License:     "MIT",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"iac.provider"},
+			IaCProvider: &RegistryIaCProvider{
+				Name: "digitalocean",
+			},
+		},
+		IaCProvider: &RegistryIaCProvider{
+			ComputePlanVersion: "v2",
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := writeInstalledManifest(path, rm); err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read installed plugin.json: %v", err)
+	}
+	var got struct {
+		IaCProvider *RegistryIaCProvider `json:"iacProvider"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal installed plugin.json: %v", err)
+	}
+	if got.IaCProvider == nil {
+		t.Fatal("expected top-level iacProvider")
+	}
+	if got.IaCProvider.ComputePlanVersion != "v2" {
+		t.Fatalf("computePlanVersion = %q, want v2", got.IaCProvider.ComputePlanVersion)
+	}
+}
+
 // TestInstalledManifestEngineValidation verifies that the plugin.json written by
 // writeInstalledManifest passes the engine's plugin.LoadManifest and Validate.
 func TestInstalledManifestEngineValidation(t *testing.T) {

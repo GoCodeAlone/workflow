@@ -63,8 +63,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "default", Type: FieldTypeString, Description: "Default step name when no route matches", Required: true},
 		},
 		Outputs: []StepOutputDef{
-			{Key: "matched_route", Type: "string", Description: "The route value that was matched"},
+			{Key: "matched_value", Type: "string", Description: "The field value that was matched"},
 			{Key: "next_step", Type: "string", Description: "Name of the next step to execute"},
+			{Key: "used_default", Type: "boolean", Description: "Whether the default route was used"},
 		},
 	})
 
@@ -135,6 +136,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "mode", Type: FieldTypeSelect, Description: "Result mode", Options: []string{"single", "list"}, DefaultValue: "list"},
 		},
 		Outputs: []StepOutputDef{
+			{Key: "found", Type: "boolean", Description: "Whether a row was found (single mode)"},
 			{Key: "row", Type: "map", Description: "First result row as key-value map (single mode)"},
 			{Key: "rows", Type: "[]map", Description: "All result rows (list mode)"},
 			{Key: "count", Type: "number", Description: "Number of rows returned (list mode)"},
@@ -151,8 +153,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "params", Type: FieldTypeArray, Description: "Statement parameters (positional $1, $2...)"},
 		},
 		Outputs: []StepOutputDef{
-			{Key: "rows_affected", Type: "number", Description: "Number of rows affected by the statement"},
-			{Key: "last_insert_id", Type: "number", Description: "Last inserted row ID (if supported by driver)"},
+			{Key: "affected_rows", Type: "number", Description: "Number of rows affected by the statement"},
+			{Key: "last_id", Type: "string", Description: "Last inserted row ID (if supported by driver)"},
+			{Key: "ignored_error", Type: "string", Description: "Error text when ignore_error is enabled and execution fails"},
 		},
 	})
 
@@ -169,7 +172,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "mode", Type: FieldTypeSelect, Description: "Result mode", Options: []string{"single", "list"}, DefaultValue: "single"},
 		},
 		Outputs: []StepOutputDef{
-			{Key: "row", Type: "map", Description: "First result row (single mode, not nested under 'row')"},
+			{Key: "(query-column)", Type: "any", Description: "Selected columns are emitted as top-level fields in single mode"},
 			{Key: "rows", Type: "[]map", Description: "All result rows (list mode)"},
 			{Key: "count", Type: "number", Description: "Number of rows (list mode)"},
 			{Key: "cache_hit", Type: "boolean", Description: "Whether the result came from cache"},

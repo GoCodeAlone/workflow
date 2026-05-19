@@ -56,16 +56,29 @@ func runPluginSearch(args []string) error {
 		fmt.Println("No plugins found.")
 		return nil
 	}
-	fmt.Printf("%-20s %-10s %-12s %-12s %s\n", "NAME", "VERSION", "TIER", "SOURCE", "DESCRIPTION")
-	fmt.Printf("%-20s %-10s %-12s %-12s %s\n", "----", "-------", "----", "------", "-----------")
+	fmt.Print(formatPluginSearchResults(plugins))
+	return nil
+}
+
+// formatPluginSearchResults renders the wfctl plugin search table as a string.
+// Extracted from runPluginSearch so unit tests can exercise the formatter
+// without capturing stdout.
+func formatPluginSearchResults(plugins []PluginSearchResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", "NAME", "VERSION", "TIER", "STATUS", "SOURCE", "DESCRIPTION")
+	fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", "----", "-------", "----", "------", "------", "-----------")
 	for _, p := range plugins {
 		desc := p.Description
 		if len(desc) > 50 {
 			desc = desc[:47] + "..."
 		}
-		fmt.Printf("%-20s %-10s %-12s %-12s %s\n", p.Name, p.Version, p.Tier, p.Source, desc)
+		status := p.Status
+		if status == "" {
+			status = "-"
+		}
+		fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", p.Name, p.Version, p.Tier, status, p.Source, desc)
 	}
-	return nil
+	return b.String()
 }
 
 func runPluginInstall(args []string) error {
@@ -459,14 +472,15 @@ func runPluginList(args []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-20s %-10s %-10s %s\n", "NAME", "VERSION", "TYPE", "DESCRIPTION")
-	fmt.Printf("%-20s %-10s %-10s %s\n", "----", "-------", "----", "-----------")
+	fmt.Printf("%-20s %-10s %-10s %-14s %s\n", "NAME", "VERSION", "TYPE", "STATUS", "DESCRIPTION")
+	fmt.Printf("%-20s %-10s %-10s %-14s %s\n", "----", "-------", "----", "------", "-----------")
 	for _, p := range plugins {
 		desc := p.description
 		if len(desc) > 40 {
 			desc = desc[:37] + "..."
 		}
-		fmt.Printf("%-20s %-10s %-10s %s\n", p.name, p.version, p.pluginType, desc)
+		// Status is not persisted to disk on install; render "-" for installed plugins.
+		fmt.Printf("%-20s %-10s %-10s %-14s %s\n", p.name, p.version, p.pluginType, "-", desc)
 	}
 	return nil
 }
@@ -1362,6 +1376,7 @@ type installedPluginJSON struct {
 	Tags         []string                     `json:"tags,omitempty"`
 	Type         string                       `json:"type,omitempty"`
 	Capabilities *installedPluginCapabilities `json:"capabilities,omitempty"`
+	IaCProvider  *RegistryIaCProvider         `json:"iacProvider,omitempty"`
 }
 
 type installedPluginCapabilities struct {
@@ -1395,6 +1410,7 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 		Tier:        m.Tier,
 		Tags:        m.Keywords,
 		Type:        m.Type,
+		IaCProvider: m.IaCProvider,
 	}
 	if m.Capabilities != nil {
 		pj.Capabilities = &installedPluginCapabilities{

@@ -145,6 +145,87 @@ plugins:
 	}
 }
 
+func TestInstallFromWfctlLockfile_UsesCachedInstallWhenLockMetadataMatches(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	var downloadHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		downloadHits.Add(1)
+		http.Error(w, "cache should satisfy lockfile install", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	const pluginName = "auth"
+	installDir := filepath.Join(pluginDir, pluginName)
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, pluginName), []byte("#!/bin/sh\necho cached auth\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "plugin.json"), minimalPluginJSON(pluginName, "v1.2.3"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plat := config.WfctlLockPlatform{
+		URL:    srv.URL + "/workflow-plugin-auth-" + currentPlatformKey() + ".tar.gz",
+		SHA256: strings.Repeat("a", 64),
+	}
+	entry := config.WfctlLockPluginEntry{
+		Version: "v1.2.3",
+		Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
+		Platforms: map[string]config.WfctlLockPlatform{
+			currentPlatformKey(): plat,
+		},
+	}
+	meta := lockfileInstallMetadata{
+		Version:  entry.Version,
+		Source:   entry.Source,
+		Platform: currentPlatformKey(),
+		URL:      plat.URL,
+		SHA256:   plat.SHA256,
+	}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, lockfileInstallMetadataName), append(metaData, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	lf := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins: map[string]config.WfctlLockPluginEntry{
+			"workflow-plugin-auth": entry,
+		},
+	}
+	if err := config.SaveWfctlLockfile(lockPath, lf); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installFromWfctlLockfile(pluginDir, lockPath, lf); err != nil {
+		t.Fatalf("installFromWfctlLockfile should reuse cached plugin matching lock metadata: %v", err)
+	}
+	if got := downloadHits.Load(); got != 0 {
+		t.Fatalf("download endpoint was hit %d times; cached install should satisfy lockfile", got)
+	}
+}
+
 func TestInstallFromWfctlLockfile_ScrubsExplicitEmptyTopLevelSHA256(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
