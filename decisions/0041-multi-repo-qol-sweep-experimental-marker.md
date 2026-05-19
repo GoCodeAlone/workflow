@@ -6,7 +6,7 @@
 
 ## Context
 
-A new external user adopted the workflow project. The codebase was built with OSS adoption in mind, but a fresh audit reveals 50 public plugin repos, of which only 7 are exercised by any active GoCodeAlone-internal project (`buymywishlist`, `core-dump`, `workflow-compute`, `ratchet`). The other 43 — including frequently-discussed cloud providers (`aws`, `gcp`, `azure`) — compile and pass unit tests but have never been validated end-to-end in production usage.
+A new external user adopted the workflow project. The codebase was built with OSS adoption in mind, but a fresh audit reveals 50 public plugin repos, of which only 8 are exercised by any active GoCodeAlone-internal project (`buymywishlist`, `core-dump`, `workflow-compute`, `ratchet`, and `BMW` worktrees pending analytics-plugin pin merge). The other 42 — including frequently-discussed cloud providers (`aws`, `gcp`, `azure`) — compile and pass unit tests but have never been validated end-to-end in production usage.
 
 We had to choose how to surface this state to external users. Three options:
 
@@ -18,7 +18,7 @@ We had to choose how to surface this state to external users. Three options:
 
 Option 3. Each unverified plugin gets:
 
-- `"status": "experimental"` in `workflow-registry/plugins/<name>/plugin.json`.
+- `"status": "experimental"` in `workflow-registry/plugins/<name>/manifest.json`.
 - A README banner explaining the verification gap in plain language.
 - The wfctl marketplace and the static API JSON expose `status` so users see it before install.
 
@@ -39,7 +39,7 @@ Verified plugins get `"status": "verified"`. The verified-vs-experimental distin
 
 ## Consequences
 
-- 43 public plugins gain an `experimental` banner this sweep — a visible downgrade. Phrasing emphasizes verification gap not code quality.
+- 42 public plugins gain an `experimental` banner this sweep — a visible downgrade. Phrasing emphasizes verification gap not code quality.
 - Future plugins ship `experimental` by default unless an active GoCodeAlone project pins them.
 - Maintenance: when verification state changes, both manifest and README banner must be kept in sync. Mitigation: a `wfctl plugin verify <name>` subcommand could automate this in a follow-up, but is out of scope for this sweep.
 
@@ -50,5 +50,5 @@ This sweep was authored under the brainstorming skill, which mandates user appro
 ## References
 
 - `docs/plans/2026-05-19-multi-repo-qol-sweep-design.md` — design doc this ADR backs
-- `workflow-registry/schema/plugin.json` — schema being extended
+- `workflow-registry/schema/registry-schema.json` — schema being extended
 - `feedback_continuous_autonomous_phases` — autonomous-mandate precedent

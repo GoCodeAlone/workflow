@@ -13,7 +13,7 @@
 2. **No `examples/` directory** in any plugin repo — no copy-pasteable starting point.
 3. **No `CONTRIBUTING.md`** in any plugin repo — contribution path is invisible.
 4. **License inconsistency** — 12 public GoCodeAlone-owned repos have `none` or non-MIT licenses despite the workflow project being MIT.
-5. **Active-usage gap not surfaced.** Only 8 of 50 public plugins are validated in any active GoCodeAlone project. The other 42 ship without any "experimental / unverified" signal.
+5. **Active-usage gap not surfaced.** Only 7 of 50 public plugins are validated by merged main-branch usage in an active GoCodeAlone project. The other 43 ship without any "experimental / unverified" signal.
 
 ## Goal
 
@@ -35,12 +35,19 @@ Aggregated from **every `wfctl.yaml` and `.wfctl-lock.yaml` across all GoCodeAlo
 find /Users/jon/workspace -maxdepth 5 -name 'wfctl.yaml' -exec grep -hE "name: workflow-plugin-" {} \; | sort -u
 ```
 
-### Verified (used in production or pending-pin) — 8 plugins
+Three tiers of status:
+
+- **`verified`** — pinned in a *merged* main-branch wfctl.yaml of a GoCodeAlone production project.
+- **`experimental`** — public plugin, no verified production usage.
+- **`deprecated`** — scheduled removal (not used in this sweep).
+
+A fourth distinction — "pending pin in an open PR" — is **not** modeled as a separate status. Such plugins are classified `experimental` until the pin actually merges, then promoted by a one-line manifest PR.
+
+### Verified (pinned in merged main-branch wfctl.yaml) — 7 plugins
 
 | Plugin | Used in |
 |--------|---------|
 | `workflow-plugin-agent` | ratchet (alias `ratchet`, source = workflow-plugin-agent) |
-| `workflow-plugin-analytics` | BMW (pending pin across 4 worktrees: www-dns, wfctl-v0.60, admin-bootstrap-resolve, payment-intent-route) |
 | `workflow-plugin-audit-chain` | buymywishlist |
 | `workflow-plugin-auth` | buymywishlist |
 | `workflow-plugin-digitalocean` | buymywishlist, core-dump, workflow-compute |
@@ -48,7 +55,9 @@ find /Users/jon/workspace -maxdepth 5 -name 'wfctl.yaml' -exec grep -hE "name: w
 | `workflow-plugin-payments` | buymywishlist |
 | `workflow-plugin-twilio` | buymywishlist |
 
-### Unverified (public, no GoCodeAlone-project usage) — 42 plugins
+> Note on `workflow-plugin-analytics`: appears in 4 *unmerged* BMW worktrees (www-dns, wfctl-v0.60, admin-bootstrap-resolve, payment-intent-route) but is not yet in any merged main-branch wfctl.yaml. Per the three-tier rule above, classified `experimental` for this sweep; will be promoted by a follow-up manifest PR when BMW merges the pin.
+
+### Unverified (public, no GoCodeAlone-project usage) — 43 plugins
 
 All other public `workflow-plugin-*` repos. User-called-out: `aws`, `gcp`, `azure`, `tofu`, `ci-generator`. Full list derived from `gh repo list GoCodeAlone --visibility public` minus the verified set.
 
@@ -103,8 +112,14 @@ Files in `workflow/cmd/wfctl/`:
    ```go
    Status string `json:"status,omitempty"` // verified | experimental | deprecated
    ```
-2. `registry_validate.go` — add a `validPluginStatuses` map alongside `validPluginTiers` (line 34) and enum-validate when present.
-3. Update tests in `multi_registry_test.go` to cover the new optional field.
+2. `registry_validate.go` — add a `validPluginStatuses` map alongside `validPluginTiers` (line 34) **AND** add an enum-validation block inside `ValidateManifest` (mirroring the tier check at lines 63-66) so unknown status values are rejected:
+   ```go
+   if m.Status != "" && !validPluginStatuses[m.Status] {
+       errs = append(errs, ValidationError{Field: "status", Message: fmt.Sprintf("must be one of: verified, experimental, deprecated (got %q)", m.Status)})
+   }
+   ```
+3. Adjacent gap to close in the same PR (per round-2 review N-4): the existing `RegistryManifest` struct is missing a `Private bool \`json:"private,omitempty\"\`` field even though `manifest.json` files include `"private": false`. Add this field as part of Step B since the struct is already being touched.
+4. Update tests in `multi_registry_test.go` to cover the new optional `status` field and the `private` field.
 
 Without Step B, wfctl marketplace silently ignores the `status` field even after the manifests are populated. **Step A and Step B ship as one coordinated 2-PR pair** before any plugin-manifest PR.
 
@@ -113,8 +128,8 @@ Without Step B, wfctl marketplace silently ignores the `status` field even after
 For each plugin, edit the correct file:
 
 - **Correct file path:** `workflow-registry/plugins/<name>/manifest.json` (NOT `plugin.json` — the design v1 used the wrong filename).
-- Add `"status": "verified"` for the 8 verified plugins.
-- Add `"status": "experimental"` for the 42 unverified public plugins.
+- Add `"status": "verified"` for the 7 verified plugins.
+- Add `"status": "experimental"` for the 43 unverified public plugins (analytics included pending BMW pin merge).
 
 ### Step D. Per-plugin-repo README banner
 
@@ -160,10 +175,10 @@ The reviewer agent uses `--skip-unknown-types` uniformly to avoid per-category b
 
 ## Scope Tiers
 
-### P0 (must complete this session) — engine + registry + verified plugins (10 repos)
+### P0 (must complete this session) — engine + registry + verified plugins (9 repos, 10 PRs)
 
-1. `workflow` — README polish, examples index, getting-started cross-references, RegistryManifest Go struct update (Step B)
-2. `workflow-registry` — schema update (Step A), README polish, add CHANGELOG + CONTRIBUTING, populate manifest `status` field for all 50 plugins (Step C)
+1. `workflow` (1 PR) — README polish, examples index, getting-started cross-references, RegistryManifest Go struct update (Step B: add `Status` + `Private` fields + ValidateManifest enum block)
+2. `workflow-registry` (2 PRs) — PR-R1 schema update (Step A); PR-R2 manifest population (Step C: 50 manifests), gated on PR-R1
 3. `workflow-plugin-digitalocean` — full checklist, banner `verified`
 4. `workflow-plugin-payments` — full checklist, banner `verified`
 5. `workflow-plugin-agent` — full checklist, banner `verified`
@@ -171,7 +186,8 @@ The reviewer agent uses `--skip-unknown-types` uniformly to avoid per-category b
 7. `workflow-plugin-auth` — full checklist, banner `verified`
 8. `workflow-plugin-eventbus` — full checklist, banner `verified`
 9. `workflow-plugin-twilio` — full checklist, banner `verified`
-10. `workflow-plugin-analytics` — full checklist, banner `verified`
+
+(`workflow-plugin-analytics` is in tier P2 — experimental until BMW pin merges.)
 
 ### P1 (best-effort this session) — user-called-out unverified plugins (5 repos)
 
@@ -210,8 +226,11 @@ team-lead (main thread)
 ```
 
 - **One worktree per repo.** Per `feedback_per_agent_worktree_per_task_pr`.
-- **One PR per repo.** Branch naming per-repo: `chore/qol-sweep-2026-05-19` (one branch per repo; no collisions because branches live in different repos).
-- **Sequencing constraint (per C-1):** Step A (workflow-registry schema) AND Step B (workflow Go struct) MUST merge **before** Step C (per-manifest population) or per-plugin-repo banner PRs that reference `status`.
+- **One PR per repo, with one exception (per round-2 review N-2):** `workflow-registry` ships TWO PRs to honor the sequencing constraint:
+  - **PR-R1:** schema change only (`schema/registry-schema.json` adds optional `status` enum). Lands FIRST.
+  - **PR-R2:** manifest population (50 `plugins/*/manifest.json` updates writing the `status` field). Gated on PR-R1 merge.
+  - All other repos remain one-PR-per-repo.
+- **Sequencing constraint (per C-1):** PR-R1 (workflow-registry schema) AND the workflow Go-struct PR (Step B) MUST merge **before** PR-R2 (manifest population) or per-plugin-repo banner PRs that reference `status`. PR-R1 and the workflow Go-struct PR can land in either order.
 - **Commits:** Conventional — `docs: add README and examples (QoL sweep)`.
 
 ### Review Tiers (per I-4)
@@ -220,7 +239,7 @@ team-lead (main thread)
 
 | Priority | Pre-merge gate |
 |----------|----------------|
-| P0 (10 repos) | Reviewer-agent audit + Copilot review pass + CI green; then admin-merge |
+| P0 (9 repos, 10 PRs) | Reviewer-agent audit + Copilot review pass + CI green; then admin-merge |
 | P1 (5 repos)  | Reviewer-agent audit + Copilot review pass + CI green; then admin-merge |
 | P2 (37 repos) | Reviewer-agent audit + CI green; admin-merge (Copilot pass desirable but not required because PRs are template-driven one-liners) |
 | P3 (6 repos)  | Reviewer-agent audit + CI green; admin-merge (license-only) |
@@ -258,18 +277,18 @@ Reviewer re-runs on the worktree before marking ready.
 
 Per-PR rollback: `git revert <merge-sha>` + revert PR.
 
-Schema/Go-struct PR rollback: revert workflow-registry PR first (schema), then revert workflow PR (Go struct). Because `status` is optional, intermediate state (struct knows status, schema does not) is benign.
+Schema/Go-struct rollback: there are now three PRs in the schema-feature group — PR-R1 (workflow-registry schema), workflow Go-struct PR (Step B), PR-R2 (workflow-registry manifest population). Revert order: PR-R2 first (so manifests no longer reference `status`), then PR-R1 (schema), then workflow Go-struct PR (struct). Because `status` is optional throughout, any intermediate state is benign — struct + schema unaware of manifests is fine; struct aware + schema unaware would fail ajv CI but only on a newly-merged manifest population, which is why PR-R1 lands before PR-R2.
 
 No runtime config touched. Documentation + manifest-additive only. Blast radius = "tutorial reader confused", not "production broken". Does not trigger runtime-launch-validation.
 
 ## Success Criteria
 
-- 10 P0 PRs merged.
+- 10 P0 PRs merged (9 repos; workflow-registry splits into 2).
 - 5 P1 PRs merged.
-- 37 P2 mass-marker PRs merged.
+- 38 P2 mass-marker PRs merged (37 + analytics until BMW pin lands).
 - 6 P3 license PRs merged.
-- All 42 unverified public plugins show `status: experimental` + README banner.
-- All 8 verified public plugins show `status: verified` + README banner.
+- All 43 unverified public plugins show `status: experimental` + README banner.
+- All 7 verified public plugins show `status: verified` + README banner.
 - All public GoCodeAlone-owned non-fork repos carry MIT (or, for workflow-plugin-migrations, retain Apache-2.0 with documented reason).
 - Post-sweep retro at `docs/retros/2026-05-19-multi-repo-qol-sweep.md`.
 
@@ -293,15 +312,25 @@ No runtime config touched. Documentation + manifest-additive only. Blast radius 
 
 ## Adversarial Review Findings — disposition
 
+### Round 1 (v1 → v2)
+
 | Finding | Severity | Disposition |
 |---------|----------|-------------|
 | C-1 schema strict + Go struct missing | Critical | **Fixed.** Steps A + B specified explicitly; sequencing constraint added. |
 | C-2 wrong filename plugin.json | Critical | **Fixed.** All references corrected to `manifest.json` / `registry-schema.json`. |
 | I-1 wfctl validate flag | Important | **Fixed.** `--skip-unknown-types` mandated; per-category guidance added. |
-| I-2 verified-set incomplete | Important | **Fixed.** Re-sampled across all workspace wfctl.yaml; added `analytics`. Matrix now 8 plugins. |
-| I-3 lint mandate vs doc-only PR | Important | **Fixed.** Explicit doc-only carve-out: skip golangci-lint for doc PRs; pre-existing failures filed not fixed. |
-| I-4 review-required precedent | Important | **Fixed.** Per-priority review tiers added; Copilot pass required for P0/P1; ADR 0041 records deviation. |
-| m-1 branch-naming collision | Minor | **Clarified.** One branch per repo (per-repo namespace); no cross-repo collision possible. |
-| m-2 Apache audit step missing | Minor | **Fixed.** Concrete grep command added. |
-| m-3 reverse-correction discoverability | Minor | **Fixed.** Banner now includes link to issue creation for promotion. |
-| m-4 CONTRIBUTING.md "all PRs reviewed" | Minor | **Acknowledged.** New plugin CONTRIBUTING.md files link upstream; admin-merge deviation recorded in ADR 0041. |
+| I-2 verified-set incomplete | Important | **Fixed.** Re-sampled all workspace wfctl.yaml. |
+| I-3 lint mandate vs doc-only PR | Important | **Fixed.** Explicit doc-only carve-out. |
+| I-4 review-required precedent | Important | **Fixed.** Per-priority review tiers added. |
+| m-1..m-4 | Minor | **Fixed/clarified.** |
+
+### Round 2 (v2 → v3)
+
+| Finding | Severity | Disposition |
+|---------|----------|-------------|
+| C-2 (regression) plugin.json survives in ADR | Critical | **Fixed in v3.** ADR 0041 corrected to `manifest.json` + `registry-schema.json`. |
+| N-1 analytics worktree-only classification | Important | **Fixed in v3.** Analytics demoted to `experimental` until BMW pin merges; verified set is now 7 not 8. |
+| N-2 one-PR-per-repo vs two-step sequencing | Important | **Fixed in v3.** workflow-registry splits into PR-R1 (schema) + PR-R2 (manifests); explicit exception to one-PR-per-repo rule. |
+| N-3 ADR stale count 7 vs 8 | Minor | **Fixed in v3.** ADR count updated to 7 verified + 43 experimental. |
+| N-4 RegistryManifest missing Private field | Minor | **Fixed in v3.** Step B scope expanded to add `Private bool` field alongside `Status`. |
+| N-5 validate enum block not wired | Minor | **Fixed in v3.** Explicit code snippet for ValidateManifest block added. |
