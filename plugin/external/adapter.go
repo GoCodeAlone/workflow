@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/capability"
@@ -32,6 +33,7 @@ type ExternalPluginAdapter struct {
 	name                string
 	client              *PluginClient
 	manifest            *pb.Manifest
+	diskManifest        *plugin.PluginManifest // fallback when gRPC GetManifest is Unimplemented or returns empty Version
 	contractRegistry    *pb.ContractRegistry
 	contractRegistryErr error
 	contracts           contractDescriptorCache
@@ -81,9 +83,38 @@ func NewErrorModule(name string, err error) modular.Module {
 	return &errorModule{name: name, err: err}
 }
 
+// manifestFromDisk field-maps a canonical *plugin.PluginManifest into the
+// *pb.Manifest the adapter caches. Used as the disk-manifest fallback when
+// the plugin's gRPC GetManifest RPC returns codes.Unimplemented or an empty
+// Version. Maps all 6 scalar fields of pb.Manifest.
+func manifestFromDisk(m *plugin.PluginManifest) *pb.Manifest {
+	if m == nil {
+		return nil
+	}
+	return &pb.Manifest{
+		Name:           m.Name,
+		Version:        m.Version,
+		Author:         m.Author,
+		Description:    m.Description,
+		ConfigMutable:  m.ConfigMutable,
+		SampleCategory: m.SampleCategory,
+	}
+}
+
 // NewExternalPluginAdapter creates an adapter from a connected plugin client.
-func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPluginAdapter, error) {
+// diskManifest is the *plugin.PluginManifest loaded by the manager at
+// manager.go:108 via pluginpkg.LoadManifest + Validate. It is used as the
+// canonical fallback when the plugin's gRPC GetManifest RPC returns
+// codes.Unimplemented (strict-cutover IaC plugins) or an empty Version
+// (defensive). Pass nil only in tests that exercise the no-disk fallback
+// path; production callers must pass the manager-loaded manifest.
+func NewExternalPluginAdapter(name string, client *PluginClient, diskManifest *plugin.PluginManifest) (*ExternalPluginAdapter, error) {
 	ctx := context.Background()
+	// Precedence rule (load-bearing): gRPC GetManifest is authoritative when it
+	// returns a non-empty Version. Disk-manifest fallback fires only when gRPC
+	// returns Unimplemented (strict-cutover IaC plugins) OR returns an empty
+	// Version. EngineManifest() reads a.manifest directly — no second-layer
+	// overlay, to avoid precedence ambiguity (see workflow ADR-0031 + plan F2).
 	manifest, err := client.client.GetManifest(ctx, &emptypb.Empty{})
 	if err != nil {
 		if status.Code(err) != codes.Unimplemented {
@@ -91,10 +122,19 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 		}
 		// Strict-cutover IaC plugins (e.g. workflow-plugin-digitalocean v1.0.0+)
 		// register only PluginService.GetContractRegistry via the iacPluginServiceBridge
-		// and leave GetManifest unimplemented. Synthesize a minimal manifest from the
-		// plugin name so adapter.Name() / Version() / Description() accessors return
-		// sensible values; downstream code keys off the param-passed name anyway.
-		manifest = &pb.Manifest{Name: name}
+		// and leave GetManifest unimplemented. Prefer disk-loaded plugin.json fields;
+		// fall back to a name-only synthesized manifest to preserve PR #627 tolerance.
+		if dm := manifestFromDisk(diskManifest); dm != nil {
+			manifest = dm
+		} else {
+			manifest = &pb.Manifest{Name: name}
+		}
+	} else if manifest != nil && manifest.Version == "" {
+		// gRPC returned a manifest but Version is empty (auto-synthesized or
+		// misconfigured plugin). Overlay missing fields from disk if available.
+		if dm := manifestFromDisk(diskManifest); dm != nil {
+			manifest = dm
+		}
 	}
 	var triggerSetupErr error
 	triggerTypes, triggerErr := client.client.GetTriggerTypes(ctx, &emptypb.Empty{})
@@ -119,6 +159,7 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 		name:            name,
 		client:          client,
 		manifest:        manifest,
+		diskManifest:    diskManifest,
 		triggerSetupErr: triggerSetupErr,
 	}
 	if registry, registryErr := client.client.GetContractRegistry(ctx, &emptypb.Empty{}); registryErr == nil {
@@ -263,7 +304,29 @@ func createTypedConfigRequest(descriptor *pb.ContractDescriptor, cfg map[string]
 		}
 		return s, nil, nil
 	}
-	typed, err := mapToTypedAny(descriptor.ConfigMessage, cfg, resolver)
+	// Contracts that declare a typed Mode (STRICT_PROTO or
+	// PROTO_WITH_LEGACY_STRUCT) but leave ConfigMessage empty have no
+	// per-instance config schema — primarily input-only steps like
+	// step.eventbus.ack/publish/consume where data flows through the
+	// InputMessage proto, but also applies to any contract Kind that
+	// legitimately omits a config schema. Encode cfg as legacy struct
+	// only; typed payload is nil. The plugin's typed factory reads data
+	// from the input message (or other typed payload), not from config.
+	if descriptor.ConfigMessage == "" {
+		s, err := mapToStruct(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("encode config as Struct (no typed config schema): %w", err)
+		}
+		return s, nil, nil
+	}
+	// Strip engine-internal "_"-prefix keys before proto decode. STRICT_PROTO
+	// and PROTO_WITH_LEGACY_STRUCT modules use protojson with DiscardUnknown
+	// = false (convert.go:62), which rejects engine internals like
+	// "_config_dir" as unknown fields. Strip is copy-on-clean — the caller's
+	// original cfg map retains all keys for the legacy *structpb.Struct
+	// path below.
+	cleaned := stripInternalKeys(cfg)
+	typed, err := mapToTypedAny(descriptor.ConfigMessage, cleaned, resolver)
 	if err != nil {
 		if descriptor.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 			return nil, nil, fmt.Errorf("STRICT_PROTO contract for config message %q cannot use legacy Struct fallback: %w", descriptor.ConfigMessage, err)
@@ -553,5 +616,198 @@ func (a *ExternalPluginAdapter) ConfigTransformHooks() []plugin.ConfigTransformH
 	}
 }
 
+// iacStateBackendServiceName is the fully-qualified gRPC service the plugin's
+// ContractRegistry must advertise for the adapter to be treated as an
+// iac.state backend provider. Sourced from the generated proto's ServiceDesc
+// so it cannot drift if the proto package path/service name ever changes.
+var iacStateBackendServiceName = pb.IaCStateBackend_ServiceDesc.ServiceName
+
+// advertisesIaCStateBackendService reports whether the adapter's ContractRegistry
+// carries a CONTRACT_KIND_SERVICE descriptor for the IaCStateBackend service.
+func (a *ExternalPluginAdapter) advertisesIaCStateBackendService() bool {
+	if a.contractRegistry == nil {
+		return false
+	}
+	for _, d := range a.contractRegistry.Contracts {
+		if d == nil {
+			continue
+		}
+		if d.Kind == pb.ContractKind_CONTRACT_KIND_SERVICE && d.ServiceName == iacStateBackendServiceName {
+			return true
+		}
+	}
+	return false
+}
+
+// IaCStateBackendClients implements plugin.IaCStateBackendProvider. At
+// plugin-load the engine type-asserts the adapter against that interface and
+// registers each returned (name → client) pair into module's iac.state backend
+// registry. Amendment A2 (decisions/0035).
+//
+// Behaviour:
+//   - If the plugin's ContractRegistry does not advertise the IaCStateBackend
+//     service: when the disk manifest declares a non-empty IaCStateBackends
+//     list, that is a silent misconfiguration (the plugin claims backends but
+//     the host would register none) — return an error so plugin-load fails
+//     loudly. When the manifest is also silent, the plugin genuinely serves no
+//     state backend — return (nil, nil); the engine type-assert still succeeds
+//     and just registers nothing.
+//   - Otherwise call the live ListBackendNames RPC for the authoritative
+//     backend-name list and cross-check it against the plugin's declared
+//     PluginManifest.IaCStateBackends.
+//
+// Cross-check decision: the RPC is the live source of truth. The manifest is
+// only consulted as a declared-vs-served consistency guard — when the manifest
+// declares a non-empty backend set, it MUST match the RPC result exactly (a
+// plugin whose live RPC contradicts its declared manifest is misconfigured and
+// is rejected). When the manifest is silent (no diskManifest, or an empty
+// IaCStateBackends list — e.g. a strict-cutover plugin that left GetManifest
+// unimplemented and whose plugin.json omits the field) the RPC result is
+// accepted on its own.
+func (a *ExternalPluginAdapter) IaCStateBackendClients() (map[string]pb.IaCStateBackendClient, error) {
+	if !a.advertisesIaCStateBackendService() {
+		if a.diskManifest != nil && len(a.diskManifest.IaCStateBackends) > 0 {
+			return nil, fmt.Errorf(
+				"plugin %s: manifest declares iac.state backends %v but the plugin does not advertise the IaCStateBackend service",
+				a.name, a.diskManifest.IaCStateBackends)
+		}
+		return nil, nil
+	}
+	conn := a.Conn()
+	if conn == nil {
+		return nil, fmt.Errorf("plugin %s advertises the IaCStateBackend service but has no gRPC connection", a.name)
+	}
+	client := pb.NewIaCStateBackendClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := client.ListBackendNames(ctx, &pb.ListBackendNamesRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("plugin %s: ListBackendNames RPC: %w", a.name, err)
+	}
+	rpcNames := resp.GetBackendNames()
+	if len(rpcNames) == 0 {
+		return nil, fmt.Errorf("plugin %s advertises the IaCStateBackend service but ListBackendNames returned no names", a.name)
+	}
+	// Cross-check against the declared manifest when it declares any backends.
+	if a.diskManifest != nil && len(a.diskManifest.IaCStateBackends) > 0 {
+		if !sameStringSet(rpcNames, a.diskManifest.IaCStateBackends) {
+			return nil, fmt.Errorf(
+				"plugin %s: iac.state backend mismatch — ListBackendNames RPC returned %v but manifest declares %v",
+				a.name, rpcNames, a.diskManifest.IaCStateBackends)
+		}
+	}
+	clients := make(map[string]pb.IaCStateBackendClient, len(rpcNames))
+	for _, name := range rpcNames {
+		clients[name] = client
+	}
+	return clients, nil
+}
+
+// sameStringSet reports whether a and b contain the same set of strings,
+// ignoring order and duplicates.
+func sameStringSet(a, b []string) bool {
+	set := make(map[string]struct{}, len(a))
+	for _, s := range a {
+		set[s] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(b))
+	for _, s := range b {
+		if _, ok := set[s]; !ok {
+			return false
+		}
+		seen[s] = struct{}{}
+	}
+	return len(seen) == len(set)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KubernetesBackendProvider — plugin-served platform.kubernetes backends.
+//
+// Per ADR 0037 a kubernetes backend (gke) folds into the existing
+// ResourceDriver contract — no new proto surface. A plugin serves the `gke`
+// platform.kubernetes backend when it advertises the ResourceDriver service AND
+// its live Capabilities RPC declares the infra.k8s_cluster resource type.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// resourceDriverServiceName is the fully-qualified gRPC service a plugin's
+// ContractRegistry must advertise for the adapter to be a potential
+// kubernetes-backend provider. Sourced from the generated proto's ServiceDesc
+// so it cannot drift if the proto package path/service name ever changes.
+var resourceDriverServiceName = pb.ResourceDriver_ServiceDesc.ServiceName
+
+// k8sClusterResourceType is the ResourceDriver resource type a plugin must
+// declare (via the Capabilities RPC) for the adapter to register it as the
+// platform.kubernetes `gke` backend. Mirrors module's gkeResourceType — kept
+// local so the plugin/external package takes no dependency on module.
+const k8sClusterResourceType = "infra.k8s_cluster"
+
+// gkeKubernetesBackendType is the platform.kubernetes cluster type name the
+// infra.k8s_cluster ResourceDriver is registered under in core.
+const gkeKubernetesBackendType = "gke"
+
+// advertisesResourceDriverService reports whether the adapter's ContractRegistry
+// carries a CONTRACT_KIND_SERVICE descriptor for the ResourceDriver service.
+func (a *ExternalPluginAdapter) advertisesResourceDriverService() bool {
+	if a.contractRegistry == nil {
+		return false
+	}
+	for _, d := range a.contractRegistry.Contracts {
+		if d == nil {
+			continue
+		}
+		if d.Kind == pb.ContractKind_CONTRACT_KIND_SERVICE && d.ServiceName == resourceDriverServiceName {
+			return true
+		}
+	}
+	return false
+}
+
+// KubernetesBackendClients implements plugin.KubernetesBackendProvider. At
+// plugin-load the engine type-asserts the adapter against that interface and
+// registers each returned (cluster-type → ResourceDriver client) pair into
+// module's kubernetes backend registry. Per ADR 0037.
+//
+// Behaviour:
+//   - If the plugin does not advertise the ResourceDriver service it serves no
+//     kubernetes backend — return (nil, nil); the engine type-assert still
+//     succeeds and just registers nothing.
+//   - Otherwise the live Capabilities RPC is the source of truth (mirroring how
+//     IaCStateBackendClients trusts the ListBackendNames RPC): when it declares
+//     the infra.k8s_cluster resource type, the plugin serves the `gke`
+//     kubernetes backend and a ResourceDriver client is registered under that
+//     name.
+func (a *ExternalPluginAdapter) KubernetesBackendClients() (map[string]pb.ResourceDriverClient, error) {
+	if !a.advertisesResourceDriverService() {
+		return nil, nil
+	}
+	conn := a.Conn()
+	if conn == nil {
+		return nil, fmt.Errorf("plugin %s advertises the ResourceDriver service but has no gRPC connection", a.name)
+	}
+	provider := pb.NewIaCProviderRequiredClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	caps, err := provider.Capabilities(ctx, &pb.CapabilitiesRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("plugin %s: Capabilities RPC: %w", a.name, err)
+	}
+	for _, decl := range caps.GetCapabilities() {
+		if decl.GetResourceType() == k8sClusterResourceType {
+			return map[string]pb.ResourceDriverClient{
+				gkeKubernetesBackendType: pb.NewResourceDriverClient(conn),
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
 // Ensure ExternalPluginAdapter satisfies plugin.EnginePlugin at compile time.
 var _ plugin.EnginePlugin = (*ExternalPluginAdapter)(nil)
+
+// Ensure ExternalPluginAdapter satisfies plugin.KubernetesBackendProvider — the
+// engine type-asserts loaded plugins against it at plugin-load.
+var _ plugin.KubernetesBackendProvider = (*ExternalPluginAdapter)(nil)
+
+// Ensure ExternalPluginAdapter satisfies plugin.IaCStateBackendProvider at
+// compile time — the engine type-asserts loaded plugins against it.
+var _ plugin.IaCStateBackendProvider = (*ExternalPluginAdapter)(nil)

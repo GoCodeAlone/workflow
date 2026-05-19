@@ -165,6 +165,27 @@ func TestRoute_ProviderSetError_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestRoute_ProviderSetErrorReturnsPartialHydrated(t *testing.T) {
+	p := newFakeProvider()
+	failKey := SecretKey("myres", "b_key")
+	p.setErr[failKey] = errors.New("boom")
+	out := &interfaces.ResourceOutput{
+		Outputs:   map[string]any{"a_key": "A", "b_key": "B"},
+		Sensitive: map[string]bool{"a_key": true, "b_key": true},
+	}
+	_, hydrated, err := Route(context.Background(), p, "myres", out)
+	if err == nil {
+		t.Fatal("expected error from second Set")
+	}
+	routedKey := SecretKey("myres", "a_key")
+	if hydrated[routedKey] != "A" {
+		t.Fatalf("hydrated = %v, want partial routed key %q", hydrated, routedKey)
+	}
+	if _, ok := hydrated[failKey]; ok {
+		t.Fatalf("hydrated contains failed key %q: %v", failKey, hydrated)
+	}
+}
+
 func TestRoute_NilProviderWithSensitive_Errors(t *testing.T) {
 	out := &interfaces.ResourceOutput{
 		Outputs:   map[string]any{"secret_key": "S"},

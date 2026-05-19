@@ -506,42 +506,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"format"},
 		},
 
-		// platform plugin (region router + DigitalOcean)
+		// platform plugin (region router)
 		"platform.region_router": {
 			Type:       "platform.region_router",
 			Plugin:     "platform",
 			Stateful:   false,
 			ConfigKeys: []string{"module", "mode"},
-		},
-		"platform.doks": {
-			Type:       "platform.doks",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "cluster_name", "region", "version", "node_pool"},
-		},
-		"platform.do_networking": {
-			Type:       "platform.do_networking",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "vpc", "firewalls"},
-		},
-		"platform.do_dns": {
-			Type:       "platform.do_dns",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "domain", "records"},
-		},
-		"platform.do_app": {
-			Type:       "platform.do_app",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "name", "region", "image", "instances", "http_port", "envs"},
-		},
-		"platform.do_database": {
-			Type:       "platform.do_database",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "engine", "size", "region", "nodes"},
 		},
 		"platform.kubernetes": {
 			Type:       "platform.kubernetes",
@@ -549,35 +519,11 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"account", "cluster", "namespace", "kubeconfig"},
 		},
-		"platform.ecs": {
-			Type:       "platform.ecs",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "cluster", "region"},
-		},
 		"platform.dns": {
 			Type:       "platform.dns",
 			Plugin:     "platform",
 			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "domain"},
-		},
-		"platform.networking": {
-			Type:       "platform.networking",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "vpc"},
-		},
-		"platform.apigateway": {
-			Type:       "platform.apigateway",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "name", "region"},
-		},
-		"platform.autoscaling": {
-			Type:       "platform.autoscaling",
-			Plugin:     "platform",
-			Stateful:   false,
-			ConfigKeys: []string{"account", "provider", "resource"},
+			ConfigKeys: []string{"account", "provider", "zone", "records"},
 		},
 		"platform.region": {
 			Type:       "platform.region",
@@ -679,6 +625,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 		},
 		"infra.certificate": {
 			Type:       "infra.certificate",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.autoscaling_group": {
+			Type:       "infra.autoscaling_group",
 			Plugin:     "infra",
 			Stateful:   false,
 			ConfigKeys: []string{"provider", "size", "resources"},
@@ -1427,33 +1379,6 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			ConfigKeys: []string{"service", "label_selector"},
 		},
 
-		// platform plugin steps (DigitalOcean)
-		"step.do_deploy": {
-			Type:       "step.do_deploy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app", "image"},
-		},
-		"step.do_status": {
-			Type:       "step.do_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app"},
-		},
-		"step.do_logs": {
-			Type:       "step.do_logs",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app"},
-		},
-		"step.do_scale": {
-			Type:       "step.do_scale",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app", "instances"},
-		},
-		"step.do_destroy": {
-			Type:       "step.do_destroy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"app"},
-		},
-
 		// platform plugin steps (platform template)
 		"step.platform_template": {
 			Type:       "step.platform_template",
@@ -1481,28 +1406,6 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.k8s_destroy",
 			Plugin:     "platform",
 			ConfigKeys: []string{"cluster"},
-		},
-
-		// platform plugin steps (scaling)
-		"step.scaling_plan": {
-			Type:       "step.scaling_plan",
-			Plugin:     "platform",
-			ConfigKeys: []string{"scaling"},
-		},
-		"step.scaling_apply": {
-			Type:       "step.scaling_apply",
-			Plugin:     "platform",
-			ConfigKeys: []string{"scaling"},
-		},
-		"step.scaling_status": {
-			Type:       "step.scaling_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"scaling"},
-		},
-		"step.scaling_destroy": {
-			Type:       "step.scaling_destroy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"scaling"},
 		},
 
 		// platform plugin steps (iac)
@@ -1547,67 +1450,6 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.dns_status",
 			Plugin:     "platform",
 			ConfigKeys: []string{"zone"},
-		},
-
-		// platform plugin steps (networking)
-		"step.network_plan": {
-			Type:       "step.network_plan",
-			Plugin:     "platform",
-			ConfigKeys: []string{"network"},
-		},
-		"step.network_apply": {
-			Type:       "step.network_apply",
-			Plugin:     "platform",
-			ConfigKeys: []string{"network"},
-		},
-		"step.network_status": {
-			Type:       "step.network_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"network"},
-		},
-
-		// platform plugin steps (api gateway)
-		"step.apigw_plan": {
-			Type:       "step.apigw_plan",
-			Plugin:     "platform",
-			ConfigKeys: []string{"gateway"},
-		},
-		"step.apigw_apply": {
-			Type:       "step.apigw_apply",
-			Plugin:     "platform",
-			ConfigKeys: []string{"gateway"},
-		},
-		"step.apigw_status": {
-			Type:       "step.apigw_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"gateway"},
-		},
-		"step.apigw_destroy": {
-			Type:       "step.apigw_destroy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"gateway"},
-		},
-
-		// platform plugin steps (ecs)
-		"step.ecs_plan": {
-			Type:       "step.ecs_plan",
-			Plugin:     "platform",
-			ConfigKeys: []string{"service"},
-		},
-		"step.ecs_apply": {
-			Type:       "step.ecs_apply",
-			Plugin:     "platform",
-			ConfigKeys: []string{"service"},
-		},
-		"step.ecs_status": {
-			Type:       "step.ecs_status",
-			Plugin:     "platform",
-			ConfigKeys: []string{"service"},
-		},
-		"step.ecs_destroy": {
-			Type:       "step.ecs_destroy",
-			Plugin:     "platform",
-			ConfigKeys: []string{"service"},
 		},
 
 		// platform plugin steps (app container)

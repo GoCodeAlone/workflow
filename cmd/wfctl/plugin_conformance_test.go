@@ -9,6 +9,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -88,6 +89,14 @@ func TestPluginConformanceLocalJSONPass(t *testing.T) {
 	}
 	if !strings.Contains(ev.StderrTail, "iac-pass stderr marker") {
 		t.Fatalf("stderr tail missing plugin output: %#v", ev)
+	}
+	// Passing evidence must not include a failureReason.
+	if ev.FailureReason != "" {
+		t.Fatalf("passing evidence should not have failureReason, got %q", ev.FailureReason)
+	}
+	// WfctlVersion must never end in +dirty.
+	if strings.HasSuffix(ev.WfctlVersion, "+dirty") {
+		t.Fatalf("wfctlVersion %q must not contain +dirty marker", ev.WfctlVersion)
 	}
 }
 
@@ -301,6 +310,14 @@ func TestPluginConformanceNoTypedIaCServiceFails(t *testing.T) {
 	if ev.EvidenceDigest == "" {
 		t.Fatalf("failure evidence missing digest: %#v", ev)
 	}
+	// Failure evidence must include a human-readable reason so maintainers
+	// can diagnose the failure without local reproduction.
+	if ev.FailureReason == "" {
+		t.Fatalf("failure evidence missing failureReason: %#v", ev)
+	}
+	if !strings.Contains(ev.FailureReason, "typed") && !strings.Contains(ev.FailureReason, "IaC") && !strings.Contains(ev.FailureReason, "legacy") {
+		t.Fatalf("failureReason = %q, want typed-IaC context", ev.FailureReason)
+	}
 }
 
 func TestPluginConformanceTextFormat(t *testing.T) {
@@ -444,5 +461,337 @@ func writeTarGzFromDir(t *testing.T, srcDir, dest string) {
 		return err
 	}); err != nil {
 		t.Fatalf("write archive: %v", err)
+	}
+}
+
+// writeTarGzFiles creates a tar.gz archive whose entries are the key→srcPath pairs in
+// files. Each file is stored at the path "archive/<key>" so that extractTarGzReader's
+// stripTopDir leaves the file at "<key>" in the destination directory.
+func writeTarGzFiles(t *testing.T, dest string, files map[string]string) {
+	t.Helper()
+	f, err := os.Create(dest)
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	defer f.Close()
+	gw := gzip.NewWriter(f)
+	defer gw.Close()
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+	for name, srcPath := range files {
+		info, err := os.Stat(srcPath)
+		if err != nil {
+			t.Fatalf("stat %q: %v", srcPath, err)
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			t.Fatalf("tar header for %q: %v", srcPath, err)
+		}
+		// GoReleaser archives contain a top-level directory that stripTopDir removes.
+		hdr.Name = "archive/" + name
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("write header %q: %v", name, err)
+		}
+		in, err := os.Open(srcPath) //nolint:gosec
+		if err != nil {
+			t.Fatalf("open %q: %v", srcPath, err)
+		}
+		_, copyErr := io.Copy(tw, in)
+		in.Close()
+		if copyErr != nil {
+			t.Fatalf("copy %q: %v", name, copyErr)
+		}
+	}
+}
+
+// buildFixtureBinary compiles the Go package at fixtureDir and writes the binary
+// to a temp path with the given name. It returns the path to the compiled binary.
+func buildFixtureBinary(t *testing.T, fixtureDir, binaryName string) string {
+	t.Helper()
+	binPath := filepath.Join(t.TempDir(), binaryName)
+	cmd := exec.Command("go", "build", "-mod=mod", "-o", binPath, ".") //nolint:gosec
+	cmd.Dir = fixtureDir
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build fixture binary %q: %v: %s", binaryName, err, out)
+	}
+	return binPath
+}
+
+// TestDiscoverArtifactBinaryCandidates verifies the priority ordering and filtering
+// of discoverArtifactBinaryCandidates.
+func TestDiscoverArtifactBinaryCandidates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit checks are not meaningful on Windows")
+	}
+	dir := t.TempDir()
+
+	writeFile := func(name string, mode os.FileMode) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("data"), mode); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	writeFile("digitalocean", 0o755)                          // installName – highest priority
+	writeFile("workflow-plugin-digitalocean", 0o755)          // manifestName – second priority
+	writeFile("digitalocean_linux_amd64", 0o755)              // platform-suffixed installName – scanned
+	writeFile("workflow-plugin-digitalocean_v1_linux", 0o755) // platform-suffixed manifestName – scanned
+	writeFile("plugin.json", 0o644)                           // not executable → excluded
+	writeFile("README.md", 0o755)                             // name doesn't start with install/manifest → excluded
+	writeFile("some-helper", 0o755)                           // name doesn't match → excluded
+	writeFile("non-exec", 0o644)                              // no executable bit → excluded
+
+	candidates := discoverArtifactBinaryCandidates(dir, "workflow-plugin-digitalocean", "digitalocean")
+
+	if len(candidates) < 4 {
+		t.Fatalf("expected at least 4 candidates, got %v", candidates)
+	}
+	if candidates[0] != "digitalocean" {
+		t.Fatalf("candidates[0] = %q, want %q", candidates[0], "digitalocean")
+	}
+	if candidates[1] != "workflow-plugin-digitalocean" {
+		t.Fatalf("candidates[1] = %q, want %q", candidates[1], "workflow-plugin-digitalocean")
+	}
+	// The scanned candidates should follow in some order.
+	scanFound := map[string]bool{}
+	for _, c := range candidates[2:] {
+		scanFound[c] = true
+	}
+	if !scanFound["digitalocean_linux_amd64"] {
+		t.Fatalf("expected digitalocean_linux_amd64 in candidates, got %v", candidates)
+	}
+	if !scanFound["workflow-plugin-digitalocean_v1_linux"] {
+		t.Fatalf("expected workflow-plugin-digitalocean_v1_linux in candidates, got %v", candidates)
+	}
+	// Non-matching and non-executable names must be excluded.
+	for _, c := range candidates {
+		switch c {
+		case "README.md", "plugin.json", "non-exec", "some-helper":
+			t.Fatalf("unexpected candidate %q in %v", c, candidates)
+		}
+	}
+}
+
+// TestDiscoverArtifactBinaryCandidatesSameNames verifies that when installName and
+// manifestName are identical, the candidate appears exactly once.
+func TestDiscoverArtifactBinaryCandidatesSameNames(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit checks are not meaningful on Windows")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "myplugin"), []byte("data"), 0o755); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	candidates := discoverArtifactBinaryCandidates(dir, "myplugin", "myplugin")
+	if len(candidates) != 1 || candidates[0] != "myplugin" {
+		t.Fatalf("candidates = %v, want [myplugin]", candidates)
+	}
+}
+
+// TestPluginConformanceArtifactDiscoversByManifestName verifies that artifact mode
+// discovers a plugin binary named after the full manifest name
+// (e.g. "workflow-plugin-iac-pass") when the archive contains no binary matching the
+// normalised install name (e.g. "iac-pass").
+func TestPluginConformanceArtifactDiscoversByManifestName(t *testing.T) {
+	fixture := prepareIACPassFixture(t)
+
+	// Compile the iac-pass plugin binary.
+	binPath := buildFixtureBinary(t, fixture, "workflow-plugin-iac-pass")
+
+	// Build plugin.json that uses the full "workflow-plugin-*" name so that
+	// normalizePluginName("workflow-plugin-iac-pass") == "iac-pass" (installName)
+	// differs from the binary name in the archive.
+	pluginJSONPath := filepath.Join(t.TempDir(), "plugin.json")
+	if err := os.WriteFile(pluginJSONPath, []byte(`{"name":"workflow-plugin-iac-pass","version":"0.1.0","author":"workflow","description":"manifest-name test"}`), 0o600); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+
+	archive := filepath.Join(t.TempDir(), "workflow-plugin-iac-pass.tar.gz")
+	writeTarGzFiles(t, archive, map[string]string{
+		"plugin.json":              pluginJSONPath,
+		"workflow-plugin-iac-pass": binPath,
+		// Intentionally no file named "iac-pass" so discovery must use manifestName.
+	})
+
+	out := filepath.Join(t.TempDir(), "evidence.json")
+	if err := runPluginConformance([]string{
+		"--mode", "typed-iac",
+		"--artifact", archive,
+		"--engine-version", "v0.51.2",
+		"--output", out,
+	}); err != nil {
+		t.Fatalf("runPluginConformance: %v", err)
+	}
+	ev := readEvidence(t, out)
+	if ev.Status != PluginCompatibilityStatusPass {
+		t.Fatalf("status = %q, want pass\nevidence: %#v", ev.Status, ev)
+	}
+	if ev.Plugin != "workflow-plugin-iac-pass" {
+		t.Fatalf("plugin = %q, want %q", ev.Plugin, "workflow-plugin-iac-pass")
+	}
+	// Diagnostics about candidate selection must appear in stderrTail.
+	if !strings.Contains(ev.StderrTail, "workflow-plugin-iac-pass") {
+		t.Fatalf("stderrTail missing candidate name:\n%s", ev.StderrTail)
+	}
+	if ev.ArchiveSHA256 == "" {
+		t.Fatalf("archiveSHA256 must be set for artifact conformance: %#v", ev)
+	}
+}
+
+// TestPluginConformanceArtifactWrongBinaryEmitsEvidence verifies that when every
+// discovered binary candidate fails the go-plugin handshake, artifact mode:
+//   - returns a non-nil error,
+//   - still writes conformance-evidence.json with status=fail, and
+//   - includes diagnostic lines that name the candidates considered.
+func TestPluginConformanceArtifactWrongBinaryEmitsEvidence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is Unix-specific")
+	}
+
+	dir := t.TempDir()
+
+	pluginJSONPath := filepath.Join(dir, "plugin.json")
+	if err := os.WriteFile(pluginJSONPath, []byte(`{"name":"iac-pass","version":"0.1.0","author":"workflow","description":"wrong binary test"}`), 0o600); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+
+	// Create a non-plugin executable that has the correct install name but does
+	// not perform the go-plugin handshake.
+	wrongBinPath := filepath.Join(dir, "iac-pass")
+	if err := os.WriteFile(wrongBinPath, []byte("#!/bin/sh\necho 'not a plugin' >&2\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write wrong binary: %v", err)
+	}
+
+	archive := filepath.Join(dir, "wrong-binary.tar.gz")
+	writeTarGzFiles(t, archive, map[string]string{
+		"plugin.json": pluginJSONPath,
+		"iac-pass":    wrongBinPath,
+	})
+
+	out := filepath.Join(dir, "evidence.json")
+	err := runPluginConformance([]string{
+		"--mode", "typed-iac",
+		"--artifact", archive,
+		"--engine-version", "v0.51.2",
+		"--output", out,
+	})
+	if err == nil {
+		t.Fatal("expected error for non-plugin binary")
+	}
+
+	// Evidence must still be written.
+	if _, statErr := os.Stat(out); os.IsNotExist(statErr) {
+		t.Fatalf("evidence file not written despite manifest being loadable: %v", statErr)
+	}
+	ev := readEvidence(t, out)
+	if ev.Status != PluginCompatibilityStatusFail {
+		t.Fatalf("status = %q, want fail", ev.Status)
+	}
+	if ev.EvidenceDigest == "" {
+		t.Fatalf("failure evidence missing digest: %#v", ev)
+	}
+	// Diagnostics must name the candidate that was tried.
+	if !strings.Contains(ev.StderrTail, "iac-pass") {
+		t.Fatalf("stderrTail missing candidate name:\n%s", ev.StderrTail)
+	}
+	if !strings.Contains(ev.StderrTail, "artifact binary discovery") {
+		t.Fatalf("stderrTail missing discovery header:\n%s", ev.StderrTail)
+	}
+	// The returned error should name the candidate too.
+	if !strings.Contains(err.Error(), "iac-pass") {
+		t.Fatalf("error = %v, want candidate name in message", err)
+	}
+}
+
+// TestPluginConformanceArtifactGoModFallback verifies that when a source-in-archive
+// tarball contains a non-plugin executable matching the install-name prefix (which
+// fails the handshake) AND a go.mod file, artifact mode falls back to go build rather
+// than emitting fail evidence immediately.
+func TestPluginConformanceArtifactGoModFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is Unix-specific")
+	}
+
+	// Prepare a full source fixture (go.mod + main.go).
+	fixture := prepareIACPassFixture(t)
+
+	// Add a non-plugin executable whose name starts with the installName ("iac-pass")
+	// so discoverArtifactBinaryCandidates picks it up. It fails the handshake, but
+	// the presence of go.mod should trigger a go build fallback.
+	helperScript := filepath.Join(fixture, "iac-pass-info")
+	if err := os.WriteFile(helperScript, []byte("#!/bin/sh\necho 'info tool' >&2\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write helper script: %v", err)
+	}
+
+	// Create archive from the source dir (includes go.mod, main.go, iac-pass-info).
+	archive := filepath.Join(t.TempDir(), "iac-pass-src.tar.gz")
+	writeTarGzFromDir(t, fixture, archive)
+
+	out := filepath.Join(t.TempDir(), "evidence.json")
+	if err := runPluginConformance([]string{
+		"--mode", "typed-iac",
+		"--artifact", archive,
+		"--engine-version", "v0.51.2",
+		"--output", out,
+	}); err != nil {
+		t.Fatalf("expected go.mod fallback to succeed, got: %v", err)
+	}
+	ev := readEvidence(t, out)
+	if ev.Status != PluginCompatibilityStatusPass {
+		t.Fatalf("status = %q, want pass\nevidence: %#v", ev.Status, ev)
+	}
+	if ev.BinarySHA256 == "" {
+		t.Fatalf("binarySHA256 must be set: %#v", ev)
+	}
+}
+
+// TestPluginConformanceArtifactNoGoModFailsCleanly verifies that a binary-only archive
+// (no go.mod) where every executable candidate fails the handshake emits fail evidence
+// with diagnostics rather than a bare error.
+func TestPluginConformanceArtifactNoGoModFailsCleanly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is Unix-specific")
+	}
+
+	dir := t.TempDir()
+
+	pluginJSONPath := filepath.Join(dir, "plugin.json")
+	if err := os.WriteFile(pluginJSONPath, []byte(`{"name":"iac-pass","version":"0.1.0","author":"workflow","description":"no gomod test"}`), 0o600); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+
+	// Non-plugin executable – name starts with installName so it is discovered.
+	wrongBin := filepath.Join(dir, "iac-pass-cli")
+	if err := os.WriteFile(wrongBin, []byte("#!/bin/sh\necho 'cli tool'\n"), 0o755); err != nil {
+		t.Fatalf("write wrong binary: %v", err)
+	}
+
+	// Archive has plugin.json + iac-pass-cli but NO go.mod → binary-only artifact.
+	archive := filepath.Join(dir, "nomod.tar.gz")
+	writeTarGzFiles(t, archive, map[string]string{
+		"plugin.json":  pluginJSONPath,
+		"iac-pass-cli": wrongBin,
+	})
+
+	out := filepath.Join(dir, "evidence.json")
+	err := runPluginConformance([]string{
+		"--mode", "typed-iac",
+		"--artifact", archive,
+		"--engine-version", "v0.51.2",
+		"--output", out,
+	})
+	if err == nil {
+		t.Fatal("expected error for non-plugin binary with no go.mod")
+	}
+	ev := readEvidence(t, out)
+	if ev.Status != PluginCompatibilityStatusFail {
+		t.Fatalf("status = %q, want fail", ev.Status)
+	}
+	if ev.EvidenceDigest == "" {
+		t.Fatalf("failure evidence missing digest: %#v", ev)
+	}
+	if !strings.Contains(ev.StderrTail, "iac-pass-cli") {
+		t.Fatalf("stderrTail missing candidate name:\n%s", ev.StderrTail)
 	}
 }

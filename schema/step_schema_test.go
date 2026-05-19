@@ -215,6 +215,23 @@ func TestInferStepOutputs_DBQuery_List(t *testing.T) {
 	}
 }
 
+func TestInferStepOutputs_DBExec(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.db_exec", map[string]any{})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	for _, want := range []string{"affected_rows", "last_id", "ignored_error"} {
+		if !keys[want] {
+			t.Errorf("expected %s in db_exec outputs, got %v", want, outputs)
+		}
+	}
+	if keys["rows_affected"] || keys["last_insert_id"] {
+		t.Errorf("db_exec runtime emits affected_rows/last_id, not rows_affected/last_insert_id: %v", outputs)
+	}
+}
+
 func TestInferStepOutputs_DBQueryCached(t *testing.T) {
 	reg := NewStepSchemaRegistry()
 	outputs := reg.InferStepOutputs("step.db_query_cached", map[string]any{
@@ -226,6 +243,24 @@ func TestInferStepOutputs_DBQueryCached(t *testing.T) {
 	}
 	if !keys["rows"] || !keys["count"] || !keys["cache_hit"] {
 		t.Errorf("expected rows, count, cache_hit, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_DBQueryCached_SingleModeUsesFlatColumns(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.db_query_cached", map[string]any{
+		"mode":  "single",
+		"query": "SELECT COALESCE((SELECT settings->>'mock_payments' FROM tenants WHERE id = $1), 'false') AS mock_payments",
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["mock_payments"] || !keys["cache_hit"] {
+		t.Errorf("expected mock_payments and cache_hit, got %v", outputs)
+	}
+	if keys["row"] || keys["found"] {
+		t.Errorf("db_query_cached single-mode runtime emits flat columns, not row/found: %v", outputs)
 	}
 }
 

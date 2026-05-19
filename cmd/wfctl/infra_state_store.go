@@ -12,6 +12,8 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin/external"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
 // infraStateStore is the minimal state persistence interface used by wfctl
@@ -82,21 +84,17 @@ func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 		}
 		return &fsWfctlStateStore{dir: dir}, nil
 
-	case "spaces":
-		return resolveSpacesStateStore(cfg)
-
 	case "postgres":
 		return resolvePostgresStateStore(cfg)
 
+	case "spaces":
+		return resolvePluginStateStore(context.Background(), backend, cfg)
+
 	case "s3":
-		return nil, fmt.Errorf("s3 state store backend not yet supported by wfctl direct-path commands; " +
-			"create the bucket manually and reference it in iac.state.bucket. " +
-			"Contribute a resolveS3StateStore helper to unblock this")
+		return resolvePluginStateStore(context.Background(), backend, cfg)
 
 	case "gcs":
-		return nil, fmt.Errorf("gcs state store backend not yet supported by wfctl direct-path commands; " +
-			"create the bucket manually and reference it in iac.state.bucket. " +
-			"Contribute a resolveGCSStateStore helper to unblock this")
+		return resolvePluginStateStore(context.Background(), backend, cfg)
 
 	case "azure":
 		return nil, fmt.Errorf("azure state store backend not yet supported by wfctl direct-path commands; " +
@@ -108,6 +106,131 @@ func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 	}
 }
 
+type pluginWfctlStateStore struct {
+	inner module.IaCStateStore
+	mgr   *external.ExternalPluginManager
+}
+
+func (s *pluginWfctlStateStore) ListResources(ctx context.Context) ([]interfaces.ResourceState, error) {
+	states, err := s.inner.ListStates(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]interfaces.ResourceState, 0, len(states))
+	for _, state := range states {
+		out = append(out, iacStateToResourceState(state))
+	}
+	return out, nil
+}
+
+func (s *pluginWfctlStateStore) SaveResource(ctx context.Context, state interfaces.ResourceState) error {
+	return s.inner.SaveState(ctx, resourceStateToIaCState(state))
+}
+
+func (s *pluginWfctlStateStore) DeleteResource(ctx context.Context, name string) error {
+	return s.inner.DeleteState(ctx, name)
+}
+
+func (s *pluginWfctlStateStore) Close() error {
+	if s.mgr == nil {
+		return nil
+	}
+	s.mgr.Shutdown()
+	return nil
+}
+
+func resolvePluginStateStore(ctx context.Context, backend string, cfg map[string]any) (infraStateStore, error) {
+	pluginDir := currentInfraPluginDir
+	if pluginDir == "" {
+		pluginDir = os.Getenv("WFCTL_PLUGIN_DIR")
+	}
+	if pluginDir == "" {
+		pluginDir = "./data/plugins"
+	}
+
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		return nil, fmt.Errorf("iac.state backend %q is plugin-served but plugin directory %q is unavailable: %w", backend, pluginDir, err)
+	}
+
+	mgr := external.NewExternalPluginManager(pluginDir, nil)
+	for _, pluginName := range stateBackendPluginCandidates(backend, entries) {
+		clients, clientsErr := loadPluginStateBackendClients(mgr, pluginName, backend)
+		if clientsErr != nil {
+			mgr.Shutdown()
+			return nil, clientsErr
+		}
+		client, ok := clients[backend]
+		if !ok {
+			continue
+		}
+		store := module.NewGRPCIaCStateStore(client)
+		if err := store.Configure(ctx, backend, cfg); err != nil {
+			mgr.Shutdown()
+			return nil, fmt.Errorf("configure plugin-served iac.state backend %q via plugin %q: %w", backend, pluginName, err)
+		}
+		return &pluginWfctlStateStore{inner: store, mgr: mgr}, nil
+	}
+
+	mgr.Shutdown()
+	return nil, fmt.Errorf("iac.state backend %q is plugin-served but no installed plugin in %s advertises it", backend, pluginDir)
+}
+
+var loadPluginStateBackendClients = func(mgr *external.ExternalPluginManager, pluginName, backend string) (map[string]pb.IaCStateBackendClient, error) {
+	adapter, loadErr := mgr.LoadPlugin(pluginName)
+	if loadErr != nil {
+		return nil, fmt.Errorf("load plugin %q for iac.state backend %q: %w", pluginName, backend, loadErr)
+	}
+	clients, clientsErr := adapter.IaCStateBackendClients()
+	if clientsErr != nil {
+		return nil, fmt.Errorf("plugin %q iac.state backends: %w", pluginName, clientsErr)
+	}
+	return clients, nil
+}
+
+func stateBackendPluginCandidates(backend string, entries []os.DirEntry) []string {
+	seen := map[string]struct{}{}
+	var candidates []string
+	hasDir := func(name string) bool {
+		for _, entry := range entries {
+			if entry.IsDir() && entry.Name() == name {
+				return true
+			}
+		}
+		return false
+	}
+	add := func(name string) {
+		if strings.TrimSpace(name) == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		candidates = append(candidates, name)
+	}
+	switch backend {
+	case "spaces":
+		if hasDir("digitalocean") {
+			add("digitalocean")
+		}
+	case "s3":
+		if hasDir("aws") {
+			add("aws")
+		}
+	case "gcs":
+		if hasDir("gcp") {
+			add("gcp")
+		}
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			add(entry.Name())
+		}
+	}
+	return candidates
+}
+
 // ── Filesystem backend ─────────────────────────────────────────────────────────
 
 // fsWfctlStateStore persists ResourceState records as JSON files under a
@@ -117,10 +240,9 @@ type fsWfctlStateStore struct {
 	dir string
 }
 
-// iacStateRecord mirrors the JSON schema used by the filesystem and Spaces
-// backends. The field names must stay stable to remain compatible with the
-// existing loadFSState reader and the importFromTFState / importFromPulumi
-// writers.
+// iacStateRecord mirrors the JSON schema used by the filesystem backend. The
+// field names must stay stable to remain compatible with the existing
+// loadFSState reader and the importFromTFState / importFromPulumi writers.
 type iacStateRecord struct {
 	ResourceID   string         `json:"resource_id"`
 	ResourceType string         `json:"resource_type"`
@@ -226,60 +348,6 @@ func (s *fsWfctlStateStore) SaveMetadata(_ context.Context, meta interfaces.Gene
 	return nil
 }
 
-// ── Spaces backend ─────────────────────────────────────────────────────────────
-
-// resolveSpacesStateStore builds a Spaces-backed state store from the expanded
-// iac.state module config. Credentials fall back to DO_SPACES_ACCESS_KEY /
-// DO_SPACES_SECRET_KEY environment variables via module.NewSpacesIaCStateStore.
-func resolveSpacesStateStore(cfg map[string]any) (infraStateStore, error) {
-	bucket, _ := cfg["bucket"].(string)
-	region, _ := cfg["region"].(string)
-	prefix, _ := cfg["prefix"].(string)
-
-	accessKey, _ := cfg["accessKey"].(string)
-	if accessKey == "" {
-		accessKey, _ = cfg["access_key"].(string)
-	}
-	secretKey, _ := cfg["secretKey"].(string)
-	if secretKey == "" {
-		secretKey, _ = cfg["secret_key"].(string)
-	}
-	if bucket == "" {
-		return nil, fmt.Errorf("iac.state backend=spaces requires 'bucket' in config")
-	}
-	inner, err := module.NewSpacesIaCStateStore(region, bucket, prefix, accessKey, secretKey, "")
-	if err != nil {
-		return nil, fmt.Errorf("init spaces state store: %w", err)
-	}
-	return &spacesWfctlStateStore{inner: inner}, nil
-}
-
-// spacesWfctlStateStore wraps module.SpacesIaCStateStore to implement
-// infraStateStore, bridging module.IaCState ↔ interfaces.ResourceState.
-type spacesWfctlStateStore struct {
-	inner *module.SpacesIaCStateStore
-}
-
-func (s *spacesWfctlStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
-	records, err := s.inner.ListStates(nil)
-	if err != nil {
-		return nil, fmt.Errorf("list spaces state: %w", err)
-	}
-	states := make([]interfaces.ResourceState, 0, len(records))
-	for _, r := range records {
-		states = append(states, iacStateToResourceState(r))
-	}
-	return states, nil
-}
-
-func (s *spacesWfctlStateStore) SaveResource(_ context.Context, state interfaces.ResourceState) error {
-	return s.inner.SaveState(resourceStateToIaCState(state))
-}
-
-func (s *spacesWfctlStateStore) DeleteResource(_ context.Context, name string) error {
-	return s.inner.DeleteState(name)
-}
-
 // ── Postgres backend ───────────────────────────────────────────────────────────
 
 // resolvePostgresStateStore builds a Postgres-backed state store from the
@@ -306,8 +374,8 @@ type postgresWfctlStateStore struct {
 	inner *module.PostgresIaCStateStore
 }
 
-func (s *postgresWfctlStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
-	records, err := s.inner.ListStates(nil)
+func (s *postgresWfctlStateStore) ListResources(ctx context.Context) ([]interfaces.ResourceState, error) {
+	records, err := s.inner.ListStates(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list postgres state: %w", err)
 	}
@@ -318,12 +386,12 @@ func (s *postgresWfctlStateStore) ListResources(_ context.Context) ([]interfaces
 	return states, nil
 }
 
-func (s *postgresWfctlStateStore) SaveResource(_ context.Context, state interfaces.ResourceState) error {
-	return s.inner.SaveState(resourceStateToIaCState(state))
+func (s *postgresWfctlStateStore) SaveResource(ctx context.Context, state interfaces.ResourceState) error {
+	return s.inner.SaveState(ctx, resourceStateToIaCState(state))
 }
 
-func (s *postgresWfctlStateStore) DeleteResource(_ context.Context, name string) error {
-	return s.inner.DeleteState(name)
+func (s *postgresWfctlStateStore) DeleteResource(ctx context.Context, name string) error {
+	return s.inner.DeleteState(ctx, name)
 }
 
 // ── Conversion helpers ─────────────────────────────────────────────────────────

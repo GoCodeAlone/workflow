@@ -6,6 +6,36 @@ import "context"
 // A provider manages a collection of resource drivers and maps abstract
 // capabilities to provider-specific resource types. Providers are registered
 // with the engine and selected based on the platform configuration.
+//
+// # Three-Layer Provider Architecture
+//
+// The workflow engine has three distinct provider abstractions. Each serves a
+// different layer and MUST NOT be confused with the others:
+//
+//   - platform.Provider (this interface) — in-core, capability-based declarative
+//     abstraction used by the platform.* module system and pipeline steps
+//     (step.iac_plan, step.iac_apply, step.platform_template, etc.).
+//     Live implementations: DockerComposeProvider, MockProvider.
+//     The AWS implementation (platform/providers/aws/) was deleted in workflow
+//     v0.53.0 (issue #653 Phase 3) because it was build-tag-gated dead code
+//     with zero callers; see ADR-0032.
+//
+//   - interfaces.IaCProvider (in interfaces/iac_provider.go) — the gRPC plugin
+//     boundary interface used by the wfctl `infra.*` command suite. Implemented
+//     by external plugins (workflow-plugin-aws, workflow-plugin-gcp, etc.) via
+//     the typedIaCAdapter. This is the canonical AWS IaC path since v0.53.0.
+//
+//   - provider.CloudProvider (in provider/provider.go) — deploy-pipeline
+//     abstraction for container deployments (ECS/EKS/GKE). Used by
+//     step.deploy_rolling and the deployment executor. Orthogonal to both
+//     platform.Provider and interfaces.IaCProvider.
+//
+// When adding a new cloud provider implementation, choose the layer that matches
+// the use case:
+//   - IaC resource provisioning (VPCs, DBs, clusters): implement interfaces.IaCProvider
+//     as an external gRPC plugin.
+//   - Container deployment pipelines: implement provider.CloudProvider in provider/.
+//   - Local/mock/test capability-based planning: implement platform.Provider here.
 type Provider interface {
 	// Name returns the provider identifier (e.g., "aws", "docker-compose", "gcp").
 	Name() string

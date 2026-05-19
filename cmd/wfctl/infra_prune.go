@@ -341,9 +341,14 @@ func runInfraPruneCmd(args []string) error {
 	fs.BoolVar(&confirm, "confirm", false, "Confirmation flag")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Skip y/N prompt")
 	fs.BoolVar(&recoveryFromLastRotation, "recovery-from-last-rotation", false, "Read recovery file")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	ctx := context.Background()
 	providers, closers, err := pruneLoadProviders(ctx, fs, configFile, envName)

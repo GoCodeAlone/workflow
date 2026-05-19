@@ -11,6 +11,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// TryActivateResult is the structured response returned by the try-activate
+// endpoint. It reports whether the candidate config can be built and what
+// module/step/trigger types the resulting engine would expose.
+type TryActivateResult struct {
+	// Status is "build_ok" on success, "build_failed" on failure.
+	Status       string   `json:"status"`
+	Error        string   `json:"error,omitempty"`
+	ModuleTypes  []string `json:"moduleTypes,omitempty"`
+	StepTypes    []string `json:"stepTypes,omitempty"`
+	TriggerTypes []string `json:"triggerTypes,omitempty"`
+}
+
 // ServiceInfo describes a registered service for API responses.
 type ServiceInfo struct {
 	Name       string   `json:"name"`
@@ -21,11 +33,12 @@ type ServiceInfo struct {
 // WorkflowUIHandler serves the workflow editor UI and provides API endpoints
 // for managing workflow configurations.
 type WorkflowUIHandler struct {
-	mu           sync.RWMutex
-	config       *config.WorkflowConfig
-	reloadFn     func(*config.WorkflowConfig) error
-	engineStatus func() map[string]any
-	svcRegistry  func() map[string]any
+	mu            sync.RWMutex
+	config        *config.WorkflowConfig
+	reloadFn      func(*config.WorkflowConfig) error
+	tryActivateFn func(*config.WorkflowConfig) (*TryActivateResult, error)
+	engineStatus  func() map[string]any
+	svcRegistry   func() map[string]any
 }
 
 // NewWorkflowUIHandler creates a new handler with an optional initial config.
@@ -39,6 +52,14 @@ func NewWorkflowUIHandler(cfg *config.WorkflowConfig) *WorkflowUIHandler {
 // SetReloadFunc sets the callback for reloading the engine with new config.
 func (h *WorkflowUIHandler) SetReloadFunc(fn func(*config.WorkflowConfig) error) {
 	h.reloadFn = fn
+}
+
+// SetTryActivateFunc sets the callback for try-activate (build without deploy).
+// The callback should build a candidate engine from the given config and return
+// a TryActivateResult describing what the candidate would expose. It must not
+// stop the current engine or swap any active pointers.
+func (h *WorkflowUIHandler) SetTryActivateFunc(fn func(*config.WorkflowConfig) (*TryActivateResult, error)) {
+	h.tryActivateFn = fn
 }
 
 // SetStatusFunc sets the callback for getting engine status.
@@ -59,6 +80,7 @@ func (h *WorkflowUIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workflow/services", h.handleGetServices)
 	mux.HandleFunc("POST /api/workflow/validate", h.handleValidate)
 	mux.HandleFunc("POST /api/workflow/reload", h.handleReload)
+	mux.HandleFunc("POST /api/workflow/try-activate", h.handleTryActivate)
 	mux.HandleFunc("GET /api/workflow/status", h.handleStatus)
 }
 
@@ -232,6 +254,8 @@ func (h *WorkflowUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleValidate(w, r)
 		case "reload":
 			h.handleReload(w, r)
+		case "try-activate":
+			h.handleTryActivate(w, r)
 		default:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
@@ -274,6 +298,11 @@ func (h *WorkflowUIHandler) HandleValidate(w http.ResponseWriter, r *http.Reques
 // HandleReload reloads the engine with the current configuration (POST /engine/reload).
 func (h *WorkflowUIHandler) HandleReload(w http.ResponseWriter, r *http.Request) {
 	h.handleReload(w, r)
+}
+
+// HandleTryActivate probes a candidate config (POST /engine/try-activate).
+func (h *WorkflowUIHandler) HandleTryActivate(w http.ResponseWriter, r *http.Request) {
+	h.handleTryActivate(w, r)
 }
 
 // HandleStatus returns the engine status (GET /engine/status).
@@ -429,5 +458,42 @@ func (h *WorkflowUIHandler) handleValidate(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		http.Error(w, "failed to encode result", http.StatusInternalServerError)
+	}
+}
+
+// handleTryActivate builds a candidate engine from the request body without
+// stopping the current engine. It is a probe-only operation: no active pointer
+// is swapped and the current engine continues serving. The JSON response
+// includes the build status and the module/step/trigger types the candidate
+// would expose, giving operators and agent update managers enough context to
+// decide whether to commit a full reload.
+//
+// Request body: JSON-encoded WorkflowConfig.
+// Response: TryActivateResult JSON.
+func (h *WorkflowUIHandler) handleTryActivate(w http.ResponseWriter, r *http.Request) {
+	if h.tryActivateFn == nil {
+		http.Error(w, "try-activate not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var cfg config.WorkflowConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.tryActivateFn(&cfg)
+	if result == nil && err != nil {
+		result = &TryActivateResult{
+			Status: "build_failed",
+			Error:  err.Error(),
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	}
+	if encErr := json.NewEncoder(w).Encode(result); encErr != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 	}
 }

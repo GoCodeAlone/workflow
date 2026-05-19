@@ -75,6 +75,13 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig, envName st
 // they may return nil for the closer.
 var resolveIaCProvider = discoverAndLoadIaCProvider
 
+// currentInfraPluginDir is the per-invocation plugin directory override set by
+// infra commands that accept -plugin-dir. It takes precedence over the
+// WFCTL_PLUGIN_DIR environment variable and the default "./data/plugins" path.
+// Set at the top of each runInfra* function and reset via defer, matching the
+// same seam pattern used by currentApplyIncludeFlag and applyAllowReplaceSet.
+var currentInfraPluginDir string
+
 // iacPluginManifest is the minimal shape needed to read both:
 //   - capabilities.iacProvider.name — used by findIaCPluginDir to
 //     match a plugin to a desired provider name; AND
@@ -86,8 +93,8 @@ var resolveIaCProvider = discoverAndLoadIaCProvider
 // double parse — and either may be empty without affecting the
 // other.
 type iacPluginManifest struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name         string `json:"name"`
+	Version      string `json:"version"`
 	Capabilities struct {
 		IaCProvider struct {
 			Name string `json:"name"`
@@ -117,9 +124,10 @@ type iacPluginManifest struct {
 // plugin.json scan); kept in place to avoid that churn.
 //
 // Until the follow-up: callers receive the value but discard it. The raw
-// string is unconstrained — schema-validated values are {"", "v1", "v2"}
-// per wfctlhelpers.DispatchVersionV2, but this loader path performs only
-// minimal json.Unmarshal so MUST NOT assume.
+// string is unconstrained — SDK schema-validated values are {"", "v1",
+// "v2"}, but this loader path performs only minimal json.Unmarshal so
+// MUST NOT assume. Per workflow#699, the authoritative gate is the
+// typed CapabilitiesResponse check in discoverAndLoadIaCProvider.
 func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion string, hasBinary bool, err error) {
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
@@ -144,6 +152,24 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 		if m.Capabilities.IaCProvider.Name != providerName {
 			continue
 		}
+		// Per workflow#693 (Phase 2.1 follow-up to #640): validate
+		// iacProvider.computePlanVersion ∈ {"", "v1", "v2"} on the
+		// matching plugin manifest. A typo (e.g. "V2", "v2.0", "two")
+		// would surface as the empty/unknown-bucket default, masking
+		// operator intent — hard-fail so the misconfiguration shows
+		// up loudly. Per workflow#699 the authoritative enforcement
+		// is the typed CapabilitiesResponse gate in
+		// discoverAndLoadIaCProvider; this parse-time check is the
+		// pre-load schema sanity (defense-in-depth).
+		switch m.IaCProvider.ComputePlanVersion {
+		case "", "v1", "v2":
+			// valid
+		default:
+			return "", "", false, fmt.Errorf(
+				"plugin %q manifest has invalid iacProvider.computePlanVersion %q (must be \"\", \"v1\", or \"v2\")",
+				pluginName, m.IaCProvider.ComputePlanVersion,
+			)
+		}
 		binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
 		_, statErr := os.Stat(binaryPath)
 		return pluginName, m.IaCProvider.ComputePlanVersion, statErr == nil, nil
@@ -165,13 +191,24 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 // InvokeService string-dispatch surface is removed entirely — plugins
 // that do not register the typed IaCProviderRequired service are
 // rejected at load time with an actionable upgrade message.
+//
+// Per workflow#699 (v0.56.0+): after the typed adapter is constructed,
+// the loader calls Capabilities via the typed RPC with a bounded
+// (10s) context and rejects providers whose
+// CapabilitiesResponse.compute_plan_version != "v2". The gate bypasses
+// the typedIaCAdapter's fetchCapabilities cache (via
+// CapabilitiesWithContext) so a transient handshake failure does not
+// poison the adapter for the rest of the wfctl invocation.
 func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-	pluginDir := os.Getenv("WFCTL_PLUGIN_DIR")
+	pluginDir := currentInfraPluginDir
+	if pluginDir == "" {
+		pluginDir = os.Getenv("WFCTL_PLUGIN_DIR")
+	}
 	if pluginDir == "" {
 		pluginDir = "./data/plugins"
 	}
 
-	pName, _, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
+	pName, manifestCPV, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
 	if findErr != nil {
 		return nil, nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, findErr)
 	}
@@ -180,6 +217,19 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 	}
 	if !hasBinary {
 		return nil, nil, fmt.Errorf("plugin %q declares provider %q but binary is missing — run: wfctl plugin install %s", pName, providerName, pName)
+	}
+
+	// Defense-in-depth deprecation warning (per workflow#699 cycle-2
+	// Finding #7). The authoritative enforcement is the typed
+	// CapabilitiesResponse gate below; the manifest field is only an
+	// advisory hint. Emitted from discoverAndLoadIaCProvider (called
+	// exactly once per resolve) rather than findIaCPluginDir (which
+	// may be called multiple times per invocation).
+	switch manifestCPV {
+	case "":
+		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion is empty; declare \"v2\" explicitly (workflow#699). Note: runtime enforcement reads the typed CapabilitiesResponse.compute_plan_version, not this manifest field; an out-of-date manifest with v2 in Capabilities will still load.", pName)
+	case "v1":
+		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion=\"v1\"; update to \"v2\" (workflow#699). Note: runtime enforcement reads the typed CapabilitiesResponse.compute_plan_version, not this manifest field; an out-of-date manifest with v2 in Capabilities will still load.", pName)
 	}
 
 	mgr := external.NewExternalPluginManager(pluginDir, nil)
@@ -196,6 +246,45 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 		return nil, nil, err
 	}
 	return typed, closer, nil
+}
+
+// capabilitiesWithContexter is the seam typedIaCAdapter satisfies for the
+// load-time workflow#699 gate. Defined as an interface so unit + integration
+// tests can substitute an in-memory stub without standing up a real gRPC
+// adapter.
+type capabilitiesWithContexter interface {
+	CapabilitiesWithContext(ctx context.Context) (*pb.CapabilitiesResponse, error)
+}
+
+// enforceCapabilitiesV2Gate calls Capabilities on the typed adapter with a
+// bounded (10s) context and rejects providers whose
+// compute_plan_version != "v2". Exposed as a package-private seam (var) so
+// integration tests can substitute a stub adapter — see
+// TestDiscoverAndLoadIaCProvider_LoadGate_WiredIntoDiscovery.
+var enforceCapabilitiesV2Gate = func(ctx context.Context, p capabilitiesWithContexter, pluginName string) error {
+	capsCtx, capsCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer capsCancel()
+	capsResp, capsErr := p.CapabilitiesWithContext(capsCtx)
+	if capsErr != nil {
+		return fmt.Errorf("plugin %q: Capabilities RPC failed: %w (see workflow#699)", pluginName, capsErr)
+	}
+	return verifyComputePlanVersionV2(capsResp.GetComputePlanVersion(), pluginName)
+}
+
+// verifyComputePlanVersionV2 rejects a plugin whose
+// CapabilitiesResponse.compute_plan_version is not "v2". Called from
+// discoverAndLoadIaCProvider after the typed adapter handshake; the
+// rejection error is operator-facing — it MUST name the plugin and
+// point at workflow#699.
+func verifyComputePlanVersionV2(cpv, pluginName string) error {
+	if cpv == "v2" {
+		return nil
+	}
+	return fmt.Errorf(
+		"plugin %q declares CapabilitiesResponse.compute_plan_version = %q; "+
+			"workflow v0.56.0+ requires \"v2\" (see workflow#699 — upgrade plugin to v2.0.0 or higher)",
+		pluginName, cpv,
+	)
 }
 
 // iacAdapterAccessor is the slice of *external.ExternalPluginAdapter the
@@ -240,6 +329,14 @@ func buildTypedIaCAdapterFrom(ctx context.Context, providerName, pName string, c
 	typed := newTypedIaCAdapter(conn, registered)
 	if initErr := typed.Initialize(ctx, cfg); initErr != nil {
 		return nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
+	}
+	// workflow#699 load-time gate: enforce ComputePlanVersion="v2" via the
+	// typed CapabilitiesResponse. 10s timeout bounds a hung handshake;
+	// CapabilitiesWithContext bypasses the lifetime-cached fetchCapabilities
+	// so a transient RPC failure here does not poison the adapter for
+	// later well-formed calls (cycle-3 I-NEW-6).
+	if gateErr := enforceCapabilitiesV2Gate(ctx, typed, pName); gateErr != nil {
+		return nil, gateErr
 	}
 	return typed, nil
 }
@@ -418,7 +515,6 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig, 
 	// behaviour is predictable rather than silently wrong.
 	deployTargetTypes := []string{
 		"infra.container_service",
-		"platform.do_app",
 		"platform.app_platform",
 		"infra.k8s_cluster",
 	}

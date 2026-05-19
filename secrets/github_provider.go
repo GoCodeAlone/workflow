@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -23,6 +24,7 @@ const githubAPIBase = "https://api.github.com"
 type GitHubSecretsProvider struct {
 	owner  string
 	repo   string
+	env    string
 	token  string
 	client *http.Client
 }
@@ -48,6 +50,17 @@ func NewGitHubSecretsProvider(repo string, tokenEnvVar string) (*GitHubSecretsPr
 
 func (p *GitHubSecretsProvider) Name() string { return "github" }
 
+// SetEnvironment scopes subsequent operations to a GitHub Actions environment.
+// Empty scope means repository-level secrets.
+func (p *GitHubSecretsProvider) SetEnvironment(environment string) {
+	p.env = strings.TrimSpace(environment)
+}
+
+// Environment returns the configured GitHub Actions environment scope.
+func (p *GitHubSecretsProvider) Environment() string {
+	return p.env
+}
+
 // Get always returns ErrUnsupported because GitHub secrets are write-only.
 func (p *GitHubSecretsProvider) Get(_ context.Context, _ string) (string, error) {
 	return "", ErrUnsupported
@@ -72,8 +85,7 @@ func (p *GitHubSecretsProvider) Set(ctx context.Context, key, value string) erro
 		"key_id":          pubKeyID,
 	}
 	body, _ := json.Marshal(payload)
-	url := fmt.Sprintf("%s/repos/%s/%s/actions/secrets/%s", githubAPIBase, p.owner, p.repo, key)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, p.secretURL(key), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -94,8 +106,7 @@ func (p *GitHubSecretsProvider) Delete(ctx context.Context, key string) error {
 	if key == "" {
 		return ErrInvalidKey
 	}
-	url := fmt.Sprintf("%s/repos/%s/%s/actions/secrets/%s", githubAPIBase, p.owner, p.repo, key)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, p.secretURL(key), nil)
 	if err != nil {
 		return err
 	}
@@ -116,8 +127,7 @@ func (p *GitHubSecretsProvider) Delete(ctx context.Context, key string) error {
 
 // List returns the names of all GitHub Actions secrets for the repo.
 func (p *GitHubSecretsProvider) List(ctx context.Context) ([]string, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/actions/secrets", githubAPIBase, p.owner, p.repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.secretsURL(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -165,14 +175,28 @@ func (p *GitHubSecretsProvider) setHeaders(req *http.Request) {
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 }
 
+func (p *GitHubSecretsProvider) secretsURL() string {
+	if p.env != "" {
+		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/secrets", githubAPIBase, p.owner, p.repo, url.PathEscape(p.env))
+	}
+	return fmt.Sprintf("%s/repos/%s/%s/actions/secrets", githubAPIBase, p.owner, p.repo)
+}
+
+func (p *GitHubSecretsProvider) secretURL(key string) string {
+	return p.secretsURL() + "/" + url.PathEscape(key)
+}
+
+func (p *GitHubSecretsProvider) publicKeyURL() string {
+	return p.secretsURL() + "/public-key"
+}
+
 type repoPublicKeyResponse struct {
 	KeyID string `json:"key_id"`
 	Key   string `json:"key"`
 }
 
 func (p *GitHubSecretsProvider) repoPublicKey(ctx context.Context) (keyID, keyBase64 string, err error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/actions/secrets/public-key", githubAPIBase, p.owner, p.repo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.publicKeyURL(), nil)
 	if err != nil {
 		return "", "", err
 	}

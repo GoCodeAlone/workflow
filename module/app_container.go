@@ -11,7 +11,7 @@ import (
 // AppContainerModule manages application containers on top of platform modules.
 // Config:
 //
-//	environment: name of a platform.kubernetes or platform.ecs module (service registry)
+//	environment: name of a platform.kubernetes module (service registry)
 //	image:       container image (required)
 //	replicas:    desired replica count (default: 1)
 //	ports:       list of container ports
@@ -74,28 +74,6 @@ type K8sManifests struct {
 	Ingress    *K8sIngressManifest    `json:"ingress,omitempty"`
 }
 
-// ECSAppManifests holds the generated ECS task definition and service config.
-type ECSAppManifests struct {
-	TaskDefinition ECSAppTaskDef    `json:"taskDefinition"`
-	Service        ECSAppServiceCfg `json:"service"`
-}
-
-// ECSAppTaskDef represents an ECS task definition for an app container.
-type ECSAppTaskDef struct {
-	Family     string         `json:"family"`
-	CPU        string         `json:"cpu"`
-	Memory     string         `json:"memory"`
-	Containers []ECSContainer `json:"containers"`
-}
-
-// ECSAppServiceCfg represents ECS service configuration for an app container.
-type ECSAppServiceCfg struct {
-	Name           string `json:"name"`
-	TaskDefinition string `json:"taskDefinition"`
-	DesiredCount   int    `json:"desiredCount"`
-	LaunchType     string `json:"launchType"`
-}
-
 // appContainerBackend is the interface implemented by platform-specific backends.
 type appContainerBackend interface {
 	deploy(a *AppContainerModule) (*AppDeployResult, error)
@@ -127,11 +105,8 @@ func (m *AppContainerModule) Init(app modular.Application) error {
 		case *PlatformKubernetes:
 			m.backend = &k8sAppBackend{}
 			m.platformType = "kubernetes"
-		case *PlatformECS:
-			m.backend = &ecsAppBackend{}
-			m.platformType = "ecs"
 		default:
-			return fmt.Errorf("app.container %q: environment %q is not a platform.kubernetes or platform.ecs module (got %T)", m.name, envName, svc)
+			return fmt.Errorf("app.container %q: environment %q is not a platform.kubernetes module (got %T); platform.ecs was removed — use infra.container_service with workflow-plugin-aws", m.name, envName, svc)
 		}
 	} else {
 		// No environment configured: choose backend based on whether a kubeconfig is available.
@@ -144,7 +119,7 @@ func (m *AppContainerModule) Init(app modular.Application) error {
 		} else {
 			m.logger.Warn("app.container: no environment configured and no kubeconfig found; defaulting to mock kubernetes backend",
 				"module", m.name,
-				"hint", "set 'environment' to a platform.kubernetes or platform.ecs module, or ensure KUBECONFIG / ~/.kube/config is present")
+				"hint", "set 'environment' to a platform.kubernetes module, or ensure KUBECONFIG / ~/.kube/config is present")
 			m.backend = &k8sAppBackend{}
 			m.platformType = "kubernetes"
 		}
@@ -583,66 +558,4 @@ func buildK8sManifests(a *AppContainerModule) *K8sManifests {
 	}
 
 	return manifests
-}
-
-// ─── ECS backend ──────────────────────────────────────────────────────────────
-
-// ecsAppBackend implements appContainerBackend for platform.ecs environments.
-// Generates ECS task definition and service config as Go structs
-// (no real ECS API calls).
-type ecsAppBackend struct{}
-
-func (b *ecsAppBackend) deploy(a *AppContainerModule) (*AppDeployResult, error) {
-	return &AppDeployResult{
-		Platform: a.platformType,
-		Name:     a.name,
-		Status:   "active",
-		Endpoint: fmt.Sprintf("http://%s.ecs.local:80", a.name),
-		Replicas: a.spec.Replicas,
-		Image:    a.spec.Image,
-	}, nil
-}
-
-func (b *ecsAppBackend) status(a *AppContainerModule) (*AppDeployResult, error) {
-	return a.current, nil
-}
-
-func (b *ecsAppBackend) rollback(a *AppContainerModule, image string) (*AppDeployResult, error) {
-	if image == "" {
-		return nil, fmt.Errorf("rollback: image is required")
-	}
-	return &AppDeployResult{
-		Platform: a.platformType,
-		Name:     a.name,
-		Status:   "rolled_back",
-		Endpoint: fmt.Sprintf("http://%s.ecs.local:80", a.name),
-		Replicas: a.spec.Replicas,
-		Image:    image,
-	}, nil
-}
-
-func (b *ecsAppBackend) manifests(a *AppContainerModule) (any, error) {
-	return buildECSManifests(a), nil
-}
-
-func buildECSManifests(a *AppContainerModule) *ECSAppManifests {
-	port := 0
-	if len(a.spec.Ports) > 0 {
-		port = a.spec.Ports[0]
-	}
-
-	return &ECSAppManifests{
-		TaskDefinition: ECSAppTaskDef{
-			Family:     a.name + "-task",
-			CPU:        a.spec.CPU,
-			Memory:     a.spec.Memory,
-			Containers: []ECSContainer{{Name: a.name, Image: a.spec.Image, Port: port}},
-		},
-		Service: ECSAppServiceCfg{
-			Name:           a.name,
-			TaskDefinition: a.name + "-task",
-			DesiredCount:   a.spec.Replicas,
-			LaunchType:     "FARGATE",
-		},
-	}
 }

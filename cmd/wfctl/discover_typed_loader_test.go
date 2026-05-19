@@ -40,28 +40,41 @@ func (s *stubIaCAdapter) ContractRegistry() *pb.ContractRegistry { return s.regi
 func (s *stubIaCAdapter) ContractRegistryError() error           { return s.regErr }
 
 // requiredOnlyServer satisfies pb.IaCProviderRequiredServer with the
-// absolute minimum: only Initialize responds (every other method left
-// to UnimplementedIaCProviderRequiredServer's defaults). Initialize is
-// the one method buildTypedIaCAdapterFrom calls during loader path.
+// minimum surface buildTypedIaCAdapterFrom touches during the loader
+// path: Initialize AND Capabilities. Per workflow#699, the load-time
+// gate calls Capabilities right after Initialize via the typed RPC, so
+// a stub that defaults Capabilities to UnimplementedIaCProviderRequiredServer
+// would fail the gate with `code = Unimplemented`. The
+// computePlanVersion field lets per-test variants flip between v2
+// (default — accept path) and "v1" / "" (reject path) without spinning
+// up a second server type.
 type requiredOnlyServer struct {
 	pb.UnimplementedIaCProviderRequiredServer
+	computePlanVersion string // empty default → v1 reject; "v2" → accept
 }
 
 func (s *requiredOnlyServer) Initialize(_ context.Context, _ *pb.InitializeRequest) (*pb.InitializeResponse, error) {
 	return &pb.InitializeResponse{}, nil
 }
 
+func (s *requiredOnlyServer) Capabilities(_ context.Context, _ *pb.CapabilitiesRequest) (*pb.CapabilitiesResponse, error) {
+	return &pb.CapabilitiesResponse{ComputePlanVersion: s.computePlanVersion}, nil
+}
+
 // startInProcessTypedServer spins up an in-process gRPC server that
 // registers the typed IaCProviderRequired service and returns a
-// dial-back conn the test can hand to a stubIaCAdapter.
-func startInProcessTypedServer(t *testing.T) (*grpc.Server, *grpc.ClientConn) {
+// dial-back conn the test can hand to a stubIaCAdapter. computePlanVersion
+// configures the server's Capabilities response — pass "v2" for the
+// happy path (load-time gate accepts) or "v1" / "" to drive the
+// rejection path.
+func startInProcessTypedServer(t *testing.T, computePlanVersion string) (*grpc.Server, *grpc.ClientConn) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("net.Listen: %v", err)
 	}
 	srv := grpc.NewServer()
-	pb.RegisterIaCProviderRequiredServer(srv, &requiredOnlyServer{})
+	pb.RegisterIaCProviderRequiredServer(srv, &requiredOnlyServer{computePlanVersion: computePlanVersion})
 	go func() { _ = srv.Serve(lis) }()
 	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -75,7 +88,7 @@ func startInProcessTypedServer(t *testing.T) (*grpc.Server, *grpc.ClientConn) {
 // loader's post-LoadPlugin path returns the typed adapter
 // (*typedIaCAdapter) — the cutover invariant. Per Spec Step 1.
 func TestDiscoverAndLoadIaCProvider_ReturnsTypedClient(t *testing.T) {
-	srv, conn := startInProcessTypedServer(t)
+	srv, conn := startInProcessTypedServer(t, "v2")
 	defer srv.Stop()
 	defer conn.Close()
 
@@ -115,7 +128,7 @@ func TestDiscoverAndLoadIaCProvider_ReturnsTypedClient(t *testing.T) {
 // invariant. Plugins that haven't migrated to the typed protocol
 // fail loud at load time with a `wfctl plugin update` hint.
 func TestDiscoverAndLoadIaCProvider_RejectsMissingRequiredService(t *testing.T) {
-	srv, conn := startInProcessTypedServer(t)
+	srv, conn := startInProcessTypedServer(t, "v2")
 	defer srv.Stop()
 	defer conn.Close()
 
@@ -147,7 +160,7 @@ func TestDiscoverAndLoadIaCProvider_RejectsMissingRequiredService(t *testing.T) 
 // the underlying error rather than masked by the generic "does not
 // register the required service" message — per Copilot finding on PR #609.
 func TestDiscoverAndLoadIaCProvider_SurfacesContractRegistryError(t *testing.T) {
-	srv, conn := startInProcessTypedServer(t)
+	srv, conn := startInProcessTypedServer(t, "v2")
 	defer srv.Stop()
 	defer conn.Close()
 
@@ -166,5 +179,49 @@ func TestDiscoverAndLoadIaCProvider_SurfacesContractRegistryError(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "ContractRegistry RPC failed") {
 		t.Errorf("expected RPC-failure framing in error; got %q", err.Error())
+	}
+}
+
+// TestBuildTypedIaCAdapterFrom_LoadGate_RejectsV1Plugin proves the
+// workflow#699 load-time gate is actually wired into the loader's
+// post-Initialize path — not just unit-tested in isolation.
+//
+// Drives a v1 plugin through the full buildTypedIaCAdapterFrom chain
+// (Conn/ContractRegistry → newTypedIaCAdapter → Initialize → gate). The
+// in-process stub's Capabilities returns `ComputePlanVersion: "v1"`, so
+// the post-Initialize gate must reject with the operator-facing
+// workflow#699 error.
+//
+// A refactor that deletes the `enforceCapabilitiesV2Gate(ctx, typed,
+// pName)` call site from buildTypedIaCAdapterFrom would silently
+// regress this test even if verifyComputePlanVersionV2 is unchanged.
+// Cycle-2 N5 regression-gate: pins gate placement at the wiring layer,
+// not just the helper.
+func TestBuildTypedIaCAdapterFrom_LoadGate_RejectsV1Plugin(t *testing.T) {
+	srv, conn := startInProcessTypedServer(t, "v1") // v1 → gate must reject
+	defer srv.Stop()
+	defer conn.Close()
+
+	stub := &stubIaCAdapter{
+		conn: conn,
+		registry: &pb.ContractRegistry{
+			Contracts: []*pb.ContractDescriptor{
+				{
+					Kind:        pb.ContractKind_CONTRACT_KIND_SERVICE,
+					ServiceName: iacServiceRequired,
+				},
+			},
+		},
+	}
+
+	_, err := buildTypedIaCAdapterFrom(context.Background(), "stub-provider", "workflow-plugin-stub", map[string]any{}, stub)
+	if err == nil {
+		t.Fatal("expected reject for v1 plugin; got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"workflow#699", "workflow-plugin-stub", "v0.56.0+"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message %q missing expected substring %q", msg, want)
+		}
 	}
 }

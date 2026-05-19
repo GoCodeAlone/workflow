@@ -32,9 +32,20 @@ var version = buildVersion()
 
 func buildVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
+		return cleanBuildVersion(info.Main.Version)
 	}
 	return "dev"
+}
+
+// cleanBuildVersion strips the +dirty suffix that the Go toolchain appends when
+// the working tree has uncommitted changes. The marker reflects the build-time
+// VCS state of the wfctl binary itself, not a meaningful version difference.
+// Pseudo-version strings with +dirty (e.g. v0.22.8-20260510180701-a851625d3bf0+dirty)
+// are also not valid Go module pseudo-versions, so downstream callers like
+// CanonicalEvidenceEngineVersion would silently fall back to "v0.0.0". Stripping
+// the suffix here lets the real commit-bound pseudo-version propagate.
+func cleanBuildVersion(raw string) string {
+	return strings.TrimSuffix(raw, "+dirty")
 }
 
 // isHelpRequested reports whether the error originated from the user

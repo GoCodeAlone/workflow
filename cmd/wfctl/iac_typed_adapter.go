@@ -37,7 +37,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
@@ -54,6 +53,7 @@ const (
 	iacServiceMigrationRepairer = "workflow.plugin.external.iac.IaCProviderMigrationRepairer"
 	iacServiceValidator         = "workflow.plugin.external.iac.IaCProviderValidator"
 	iacServiceDriftConfigDetect = "workflow.plugin.external.iac.IaCProviderDriftConfigDetector"
+	iacServiceFinalizer         = "workflow.plugin.external.iac.IaCProviderFinalizer"
 	iacServiceResourceDriver    = "workflow.plugin.external.iac.ResourceDriver"
 )
 
@@ -78,6 +78,7 @@ type typedIaCAdapter struct {
 	repairer     pb.IaCProviderMigrationRepairerClient
 	validator    pb.IaCProviderValidatorClient
 	driftCfg     pb.IaCProviderDriftConfigDetectorClient
+	finalizer    pb.IaCProviderFinalizerClient
 	resourceDriv pb.ResourceDriverClient
 
 	// cachedCaps memoizes the plugin's CapabilitiesResponse. Access via
@@ -115,6 +116,9 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 	}
 	if registered[iacServiceDriftConfigDetect] {
 		a.driftCfg = pb.NewIaCProviderDriftConfigDetectorClient(conn)
+	}
+	if registered[iacServiceFinalizer] {
+		a.finalizer = pb.NewIaCProviderFinalizerClient(conn)
 	}
 	if registered[iacServiceResourceDriver] {
 		a.resourceDriv = pb.NewResourceDriverClient(conn)
@@ -218,6 +222,25 @@ func (a *typedIaCAdapter) Validator() pb.IaCProviderValidatorClient {
 // plugin's 14-driver type-routing pattern in Task 11.
 func (a *typedIaCAdapter) ResourceDriverClient() pb.ResourceDriverClient {
 	return a.resourceDriv
+}
+
+// Finalizer returns the typed pb.IaCProviderFinalizerClient or nil when
+// the plugin did not register IaCProviderFinalizer. Used by the v2 apply
+// path's statePersistenceHooks helper (cmd/wfctl/infra_apply.go) to gate
+// the ApplyPlanHooks.OnPlanComplete wiring on service-presence — a nil
+// return means no FinalizeApply RPC is invoked. Per ADR 0024 the absence
+// of the registration is the negative signal (no compat shim, no
+// NotSupported flag). Per workflow#695 Phase 2.5.
+func (a *typedIaCAdapter) Finalizer() pb.IaCProviderFinalizerClient {
+	return a.finalizer
+}
+
+// CapabilitiesWithContext returns CapabilitiesResponse with caller-supplied
+// context. Bypasses fetchCapabilities's adapter-lifetime cache — used by
+// the load-time workflow#699 gate which must not poison the cache on
+// transient failure (cycle-3 I-NEW-6).
+func (a *typedIaCAdapter) CapabilitiesWithContext(ctx context.Context) (*pb.CapabilitiesResponse, error) {
+	return a.required.Capabilities(ctx, &pb.CapabilitiesRequest{})
 }
 
 // translateRPCErr converts a gRPC Unimplemented status (the wire signal a
@@ -342,18 +365,6 @@ func (a *typedIaCAdapter) Plan(ctx context.Context, desired []interfaces.Resourc
 	return planFromPB(resp.GetPlan())
 }
 
-func (a *typedIaCAdapter) Apply(ctx context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	pbPlan, err := planToPB(plan)
-	if err != nil {
-		return nil, fmt.Errorf("typed adapter: encode Apply plan: %w", err)
-	}
-	resp, err := a.required.Apply(ctx, &pb.ApplyRequest{Plan: pbPlan})
-	if err != nil {
-		return nil, err
-	}
-	return applyResultFromPB(resp.GetResult())
-}
-
 func (a *typedIaCAdapter) Destroy(ctx context.Context, resources []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
 	resp, err := a.required.Destroy(ctx, &pb.DestroyRequest{Refs: refsToPB(resources)})
 	if err != nil {
@@ -426,22 +437,6 @@ func (a *typedIaCAdapter) SupportedCanonicalKeys() []string {
 		}
 	}
 	return interfaces.CanonicalKeys()
-}
-
-// ComputePlanVersion returns the apply-time dispatch version the plugin
-// declared in CapabilitiesResponse. Empty string (or RPC failure) means
-// "v1" by ComputePlanVersionDeclarer convention — DispatchVersionFor
-// treats unknown values as v1, so unset cleanly degrades to legacy path.
-//
-// The presence of this method on *typedIaCAdapter means it satisfies
-// wfctlhelpers.ComputePlanVersionDeclarer at compile time, restoring the
-// type-assert dispatch parity with legacy remoteIaCProvider. Per ADR-0029.
-func (a *typedIaCAdapter) ComputePlanVersion() string {
-	resp, err := a.fetchCapabilities()
-	if err != nil || resp == nil {
-		return ""
-	}
-	return resp.GetComputePlanVersion()
 }
 
 func (a *typedIaCAdapter) BootstrapStateBackend(ctx context.Context, cfg map[string]any) (*interfaces.BootstrapResult, error) {
@@ -1174,42 +1169,6 @@ func planFromPB(p *pb.IaCPlan) (*interfaces.IaCPlan, error) {
 	}, nil
 }
 
-func applyResultFromPB(r *pb.ApplyResult) (*interfaces.ApplyResult, error) {
-	if r == nil {
-		return nil, nil
-	}
-	resources := make([]interfaces.ResourceOutput, 0, len(r.GetResources()))
-	for _, o := range r.GetResources() {
-		ro, err := outputFromPB(o)
-		if err != nil {
-			return nil, err
-		}
-		if ro != nil {
-			resources = append(resources, *ro)
-		}
-	}
-	errs := make([]interfaces.ActionError, 0, len(r.GetErrors()))
-	for _, e := range r.GetErrors() {
-		errs = append(errs, interfaces.ActionError{Resource: e.GetResource(), Action: e.GetAction(), Error: e.GetError()})
-	}
-	driftReport := make([]interfaces.DriftEntry, 0, len(r.GetInputDriftReport()))
-	for _, d := range r.GetInputDriftReport() {
-		driftReport = append(driftReport, interfaces.DriftEntry{
-			Name:             d.GetName(),
-			PlanFingerprint:  d.GetPlanFingerprint(),
-			ApplyFingerprint: d.GetApplyFingerprint(),
-		})
-	}
-	return &interfaces.ApplyResult{
-		PlanID:               r.GetPlanId(),
-		Resources:            resources,
-		Errors:               errs,
-		InitialInputSnapshot: copyStringMap(r.GetInitialInputSnapshot()),
-		InputDriftReport:     driftReport,
-		ReplaceIDMap:         copyStringMap(r.GetReplaceIdMap()),
-	}, nil
-}
-
 func destroyResultFromPB(r *pb.DestroyResult) *interfaces.DestroyResult {
 	if r == nil {
 		return nil
@@ -1340,10 +1299,4 @@ var (
 	_ interfaces.ProviderMigrationRepairer = (*typedIaCAdapter)(nil)
 	_ interfaces.ResourceDriver            = (*typedResourceDriver)(nil)
 	_ interfaces.Troubleshooter            = (*typedResourceDriver)(nil)
-	// ADR-0029 capability extension: typedIaCAdapter satisfies
-	// ComputePlanVersionDeclarer so wfctlhelpers.DispatchVersionFor's
-	// type-assert dispatch picks up the plugin's declared apply-version
-	// from the cached CapabilitiesResponse instead of silently falling
-	// back to "v1".
-	_ wfctlhelpers.ComputePlanVersionDeclarer = (*typedIaCAdapter)(nil)
 )

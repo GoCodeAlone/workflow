@@ -18,7 +18,20 @@ import (
 var errInvalidRegistrySHA256 = errors.New("invalid sha256")
 
 const (
+	// PluginCompatibilityModeTypedIaC is the conformance mode that proves a
+	// plugin registers pb.IaCProviderRequired and passes the Workflow go-plugin
+	// handshake.  This is the only mode that satisfies typed-IaC registry
+	// readiness for manifests advertising iacProvider capability.
 	PluginCompatibilityModeTypedIaC = "typed-iac"
+
+	// PluginCompatibilityModeLegacyHostLoad is the advisory-only mode for
+	// smoke evidence produced by legacy host-load checks (e.g. sdk.Serve
+	// module plugins that can load and expose metadata/contracts but have not
+	// migrated to sdk.ServeIaCPlugin / pb.IaCProviderRequired). This mode is
+	// NEVER sufficient to satisfy typed-IaC registry readiness; it must not be
+	// used to gate install/update decisions for plugins that advertise
+	// iacProvider capability.
+	PluginCompatibilityModeLegacyHostLoad = "legacy-host-load"
 
 	PluginCompatibilityStatusPass = "pass"
 	PluginCompatibilityStatusFail = "fail"
@@ -112,6 +125,7 @@ type PluginCompatibilityEvidence struct {
 	GeneratedBy           string                    `json:"generatedBy,omitempty"`
 	StdoutTail            string                    `json:"stdoutTail,omitempty"`
 	StderrTail            string                    `json:"stderrTail,omitempty"`
+	FailureReason         string                    `json:"failureReason,omitempty"`
 }
 
 func NormalizePluginVersionIndex(index *PluginVersionIndex, defaultPlugin string) (*PluginVersionIndex, error) {
@@ -234,7 +248,13 @@ func ValidateCompatibilityEvidence(ev PluginCompatibilityEvidence) (PluginCompat
 			ev.WfctlVersion = canonical
 		}
 	}
-	if ev.Mode != PluginCompatibilityModeTypedIaC {
+	switch ev.Mode {
+	case PluginCompatibilityModeTypedIaC:
+		// typed-iac is the only mode that satisfies IaC registry readiness.
+	case PluginCompatibilityModeLegacyHostLoad:
+		// legacy-host-load is advisory only; it must not gate IaC installs.
+		// See manifestAdvertisesIaCProvider / updateRegistryCompatibilityIndex.
+	default:
 		return ev, fmt.Errorf("unsupported compatibility mode %q", ev.Mode)
 	}
 	if ev.Status != PluginCompatibilityStatusPass && ev.Status != PluginCompatibilityStatusFail {

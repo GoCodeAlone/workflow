@@ -168,3 +168,50 @@ func TestRedactStepOutput_EmptyMap(t *testing.T) {
 		t.Errorf("empty map should return empty map, got %v", got)
 	}
 }
+
+func TestRedactCredentialsBlock(t *testing.T) {
+	in := map[string]any{
+		"credentials": map[string]any{
+			"accessKey": "AKIAEXAMPLE",
+			"secretKey": "supersecret",
+		},
+		"credentials_ref": "aws-creds-module",
+		"bucket":          "public-bucket-name",
+	}
+	out := RedactStepOutput(in)
+	// The credentials: block is redacted WHOLESALE — the existing "credential"
+	// pattern replaces the whole sub-tree with the placeholder STRING (no
+	// recursion). That is safe and is the design-sanctioned "already covered".
+	if out["credentials"] != RedactionPlaceholder {
+		t.Fatalf("credentials block must be wholesale-redacted, got: %#v", out["credentials"])
+	}
+	// credentials_ref is a module NAME, not a secret — must be PRESERVED.
+	if out["credentials_ref"] != "aws-creds-module" {
+		t.Fatalf("credentials_ref must NOT be redacted (it is a module reference): %#v", out["credentials_ref"])
+	}
+	if out["bucket"] != "public-bucket-name" {
+		t.Fatalf("non-sensitive field wrongly redacted")
+	}
+}
+
+// TestRedactRefSuffixDoesNotBypassValueSecrets locks in that the "_ref" suffix
+// exempts ONLY structural-reference words (credentials_ref) — it must NOT be a
+// blanket bypass for value-bearing secret patterns. A key like
+// "bearer_token_ref" still matches "token" and must redact.
+func TestRedactRefSuffixDoesNotBypassValueSecrets(t *testing.T) {
+	in := map[string]any{
+		"credentials_ref":  "aws-creds-module", // structural ref → preserved
+		"bearer_token_ref": "tok-abc123",       // matches "token" → must redact
+		"api_key_ref":      "ak-secret",        // matches "api_key" → must redact
+		"secret_ref":       "shhh",             // matches "secret" → must redact
+	}
+	out := RedactStepOutput(in)
+	if out["credentials_ref"] != "aws-creds-module" {
+		t.Errorf("credentials_ref must be preserved, got %#v", out["credentials_ref"])
+	}
+	for _, k := range []string{"bearer_token_ref", "api_key_ref", "secret_ref"} {
+		if out[k] != RedactionPlaceholder {
+			t.Errorf("%s matches a value-bearing secret pattern — _ref must not bypass redaction, got %#v", k, out[k])
+		}
+	}
+}

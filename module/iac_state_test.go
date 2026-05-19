@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -32,10 +33,10 @@ func runStateStoreSuite(t *testing.T, store module.IaCStateStore) {
 
 	t.Run("SaveAndGet", func(t *testing.T) {
 		st := makeState("res-1", "kubernetes", "local", "planned")
-		if err := store.SaveState(st); err != nil {
+		if err := store.SaveState(context.Background(), st); err != nil {
 			t.Fatalf("SaveState: %v", err)
 		}
-		got, err := store.GetState("res-1")
+		got, err := store.GetState(context.Background(), "res-1")
 		if err != nil {
 			t.Fatalf("GetState: %v", err)
 		}
@@ -51,7 +52,7 @@ func runStateStoreSuite(t *testing.T, store module.IaCStateStore) {
 	})
 
 	t.Run("GetNotFound", func(t *testing.T) {
-		got, err := store.GetState("nonexistent")
+		got, err := store.GetState(context.Background(), "nonexistent")
 		if err != nil {
 			t.Fatalf("GetState unexpected error: %v", err)
 		}
@@ -61,28 +62,28 @@ func runStateStoreSuite(t *testing.T, store module.IaCStateStore) {
 	})
 
 	t.Run("SaveState_NilError", func(t *testing.T) {
-		if err := store.SaveState(nil); err == nil {
+		if err := store.SaveState(context.Background(), nil); err == nil {
 			t.Error("expected error for nil state, got nil")
 		}
 	})
 
 	t.Run("SaveState_EmptyIDError", func(t *testing.T) {
 		st := &module.IaCState{ResourceID: "", Status: "planned"}
-		if err := store.SaveState(st); err == nil {
+		if err := store.SaveState(context.Background(), st); err == nil {
 			t.Error("expected error for empty resource_id, got nil")
 		}
 	})
 
 	t.Run("UpdateState", func(t *testing.T) {
 		st := makeState("res-update", "kubernetes", "local", "planned")
-		if err := store.SaveState(st); err != nil {
+		if err := store.SaveState(context.Background(), st); err != nil {
 			t.Fatalf("SaveState: %v", err)
 		}
 		st.Status = "active"
-		if err := store.SaveState(st); err != nil {
+		if err := store.SaveState(context.Background(), st); err != nil {
 			t.Fatalf("SaveState update: %v", err)
 		}
-		got, _ := store.GetState("res-update")
+		got, _ := store.GetState(context.Background(), "res-update")
 		if got.Status != "active" {
 			t.Errorf("expected status=active after update, got %q", got.Status)
 		}
@@ -92,10 +93,10 @@ func runStateStoreSuite(t *testing.T, store module.IaCStateStore) {
 
 	t.Run("ListAll", func(t *testing.T) {
 		// Seed two distinct resources.
-		_ = store.SaveState(makeState("list-a", "kubernetes", "aws", "active"))
-		_ = store.SaveState(makeState("list-b", "ecs", "aws", "planned"))
+		_ = store.SaveState(context.Background(), makeState("list-a", "kubernetes", "aws", "active"))
+		_ = store.SaveState(context.Background(), makeState("list-b", "ecs", "aws", "planned"))
 
-		all, err := store.ListStates(map[string]string{})
+		all, err := store.ListStates(context.Background(), map[string]string{})
 		if err != nil {
 			t.Fatalf("ListStates: %v", err)
 		}
@@ -105,10 +106,10 @@ func runStateStoreSuite(t *testing.T, store module.IaCStateStore) {
 	})
 
 	t.Run("ListByStatus", func(t *testing.T) {
-		_ = store.SaveState(makeState("filter-active", "kubernetes", "gcp", "active"))
-		_ = store.SaveState(makeState("filter-destroyed", "kubernetes", "gcp", "destroyed"))
+		_ = store.SaveState(context.Background(), makeState("filter-active", "kubernetes", "gcp", "active"))
+		_ = store.SaveState(context.Background(), makeState("filter-destroyed", "kubernetes", "gcp", "destroyed"))
 
-		active, err := store.ListStates(map[string]string{"status": "active"})
+		active, err := store.ListStates(context.Background(), map[string]string{"status": "active"})
 		if err != nil {
 			t.Fatalf("ListStates by status: %v", err)
 		}
@@ -120,10 +121,10 @@ func runStateStoreSuite(t *testing.T, store module.IaCStateStore) {
 	})
 
 	t.Run("ListByProvider", func(t *testing.T) {
-		_ = store.SaveState(makeState("prov-aws", "kubernetes", "aws", "active"))
-		_ = store.SaveState(makeState("prov-gcp", "kubernetes", "gcp", "active"))
+		_ = store.SaveState(context.Background(), makeState("prov-aws", "kubernetes", "aws", "active"))
+		_ = store.SaveState(context.Background(), makeState("prov-gcp", "kubernetes", "gcp", "active"))
 
-		awsOnly, err := store.ListStates(map[string]string{"provider": "aws"})
+		awsOnly, err := store.ListStates(context.Background(), map[string]string{"provider": "aws"})
 		if err != nil {
 			t.Fatalf("ListStates by provider: %v", err)
 		}
@@ -137,18 +138,18 @@ func runStateStoreSuite(t *testing.T, store module.IaCStateStore) {
 	// ── DeleteState ───────────────────────────────────────────────────────────
 
 	t.Run("DeleteState", func(t *testing.T) {
-		_ = store.SaveState(makeState("del-me", "kubernetes", "local", "active"))
-		if err := store.DeleteState("del-me"); err != nil {
+		_ = store.SaveState(context.Background(), makeState("del-me", "kubernetes", "local", "active"))
+		if err := store.DeleteState(context.Background(), "del-me"); err != nil {
 			t.Fatalf("DeleteState: %v", err)
 		}
-		got, _ := store.GetState("del-me")
+		got, _ := store.GetState(context.Background(), "del-me")
 		if got != nil {
 			t.Error("expected nil after delete, got non-nil")
 		}
 	})
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
-		if err := store.DeleteState("ghost-resource"); err == nil {
+		if err := store.DeleteState(context.Background(), "ghost-resource"); err == nil {
 			t.Error("expected error for nonexistent resource, got nil")
 		}
 	})
@@ -156,28 +157,28 @@ func runStateStoreSuite(t *testing.T, store module.IaCStateStore) {
 	// ── Lock / Unlock ─────────────────────────────────────────────────────────
 
 	t.Run("LockAndUnlock", func(t *testing.T) {
-		if err := store.Lock("lock-res"); err != nil {
+		if err := store.Lock(context.Background(), "lock-res"); err != nil {
 			t.Fatalf("Lock: %v", err)
 		}
-		if err := store.Unlock("lock-res"); err != nil {
+		if err := store.Unlock(context.Background(), "lock-res"); err != nil {
 			t.Fatalf("Unlock: %v", err)
 		}
 	})
 
 	t.Run("DoubleLock", func(t *testing.T) {
-		if err := store.Lock("double-lock"); err != nil {
+		if err := store.Lock(context.Background(), "double-lock"); err != nil {
 			t.Fatalf("first Lock: %v", err)
 		}
 		// Second lock must fail.
-		if err := store.Lock("double-lock"); err == nil {
+		if err := store.Lock(context.Background(), "double-lock"); err == nil {
 			t.Error("expected error on double-lock, got nil")
 		}
 		// Clean up.
-		_ = store.Unlock("double-lock")
+		_ = store.Unlock(context.Background(), "double-lock")
 	})
 
 	t.Run("UnlockNotLocked", func(t *testing.T) {
-		if err := store.Unlock("never-locked"); err == nil {
+		if err := store.Unlock(context.Background(), "never-locked"); err == nil {
 			t.Error("expected error unlocking a non-locked resource, got nil")
 		}
 	})
@@ -203,13 +204,13 @@ func TestIaCStateStore_Filesystem_PersistAcrossInstances(t *testing.T) {
 
 	st := makeState("persist-res", "kubernetes", "local", "active")
 	store1 := module.NewFSIaCStateStore(dir)
-	if err := store1.SaveState(st); err != nil {
+	if err := store1.SaveState(context.Background(), st); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
 	// New store instance pointing at the same directory.
 	store2 := module.NewFSIaCStateStore(dir)
-	got, err := store2.GetState("persist-res")
+	got, err := store2.GetState(context.Background(), "persist-res")
 	if err != nil {
 		t.Fatalf("GetState: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestIaCStateStore_Filesystem_JSONFiles(t *testing.T) {
 	dir := t.TempDir()
 	store := module.NewFSIaCStateStore(dir)
 
-	if err := store.SaveState(makeState("json-check", "ecs", "aws", "planned")); err != nil {
+	if err := store.SaveState(context.Background(), makeState("json-check", "ecs", "aws", "planned")); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
 
@@ -283,5 +284,30 @@ func TestIaCModule_InvalidBackend(t *testing.T) {
 	m := module.NewIaCModule("bad", map[string]any{"backend": "s3"})
 	if err := m.Init(module.NewMockApplication()); err == nil {
 		t.Error("expected error for unsupported backend, got nil")
+	}
+}
+
+// TestIaCModuleAzureBlobRequiresPlugin asserts that backend: azure_blob with no
+// plugin registered returns the plugin-guidance error — the in-core azure_blob
+// backend has been removed; it is now served by workflow-plugin-azure.
+func TestIaCModuleAzureBlobRequiresPlugin(t *testing.T) {
+	m := module.NewIaCModule("st", map[string]any{
+		"backend":      "azure_blob",
+		"container":    "c",
+		"account_url":  "https://x",
+		"account_name": "n",
+		"account_key":  "k",
+	})
+	err := m.Init(module.NewMockApplication())
+	if err == nil {
+		t.Fatal("azure_blob with no plugin loaded must error — in-core backend is gone")
+	}
+	if !strings.Contains(err.Error(), "azure_blob") {
+		t.Fatalf("error should name the missing backend: %v", err)
+	}
+	// The error must be the plugin-guidance error, NOT an in-core construction
+	// failure — the in-core azure_blob backend has been deleted.
+	if !strings.Contains(err.Error(), "plugin") {
+		t.Fatalf("error should be the plugin-guidance error (mention loading a plugin), got: %v", err)
 	}
 }

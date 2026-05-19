@@ -11,9 +11,9 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
-// Plugin provides storage and database capabilities: storage.s3, storage.local,
-// storage.gcs, storage.sqlite, storage.artifact, database.workflow,
-// persistence.store, cache.redis modules, and artifact pipeline step factories.
+// Plugin provides storage and database capabilities: storage.local,
+// storage.sqlite, storage.artifact, database.workflow, persistence.store,
+// cache.redis modules, and artifact pipeline step factories.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 }
@@ -34,9 +34,7 @@ func New() *Plugin {
 				Description: "Storage, database, persistence, and cache modules with DB pipeline steps",
 				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
-					"storage.s3",
 					"storage.local",
-					"storage.gcs",
 					"storage.sqlite",
 					"storage.artifact",
 					"database.workflow",
@@ -86,38 +84,12 @@ func (p *Plugin) Capabilities() []capability.Contract {
 // ModuleFactories returns factories for all storage/database/persistence module types.
 func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
-		"storage.s3": func(name string, cfg map[string]any) modular.Module {
-			s3Mod := module.NewS3Storage(name)
-			if bucket, ok := cfg["bucket"].(string); ok {
-				s3Mod.SetBucket(bucket)
-			}
-			if region, ok := cfg["region"].(string); ok {
-				s3Mod.SetRegion(region)
-			}
-			if endpoint, ok := cfg["endpoint"].(string); ok {
-				s3Mod.SetEndpoint(endpoint)
-			}
-			return s3Mod
-		},
 		"storage.local": func(name string, cfg map[string]any) modular.Module {
 			rootDir := "./data/storage"
 			if rd, ok := cfg["rootDir"].(string); ok {
 				rootDir = rd
 			}
 			return module.NewLocalStorageModule(name, rootDir)
-		},
-		"storage.gcs": func(name string, cfg map[string]any) modular.Module {
-			gcsMod := module.NewGCSStorage(name)
-			if bucket, ok := cfg["bucket"].(string); ok {
-				gcsMod.SetBucket(bucket)
-			}
-			if project, ok := cfg["project"].(string); ok {
-				gcsMod.SetProject(project)
-			}
-			if creds, ok := cfg["credentialsFile"].(string); ok {
-				gcsMod.SetCredentialsFile(creds)
-			}
-			return gcsMod
 		},
 		"storage.sqlite": func(name string, cfg map[string]any) modular.Module {
 			dbPath := "data/workflow.db"
@@ -323,20 +295,6 @@ func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
 func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 	return []*schema.ModuleSchema{
 		{
-			Type:        "storage.s3",
-			Label:       "S3 Storage",
-			Category:    "integration",
-			Description: "Amazon S3 compatible object storage integration",
-			Inputs:      []schema.ServiceIODef{{Name: "object", Type: "[]byte", Description: "Object data to store or retrieve"}},
-			Outputs:     []schema.ServiceIODef{{Name: "storage", Type: "ObjectStore", Description: "S3-compatible object storage service"}},
-			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "bucket", Label: "Bucket", Type: schema.FieldTypeString, Required: true, Description: "S3 bucket name", Placeholder: "my-bucket"},
-				{Key: "region", Label: "Region", Type: schema.FieldTypeString, DefaultValue: "us-east-1", Description: "AWS region", Placeholder: "us-east-1"},
-				{Key: "endpoint", Label: "Endpoint", Type: schema.FieldTypeString, Description: "Custom S3 endpoint (for MinIO, etc.)", Placeholder: "http://localhost:9000"},
-			},
-			DefaultConfig: map[string]any{"region": "us-east-1"},
-		},
-		{
 			Type:        "storage.local",
 			Label:       "Local Storage",
 			Category:    "integration",
@@ -347,19 +305,6 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "rootDir", Label: "Root Directory", Type: schema.FieldTypeString, Required: true, Description: "Filesystem path for the storage root", Placeholder: "./data/storage"},
 			},
 			DefaultConfig: map[string]any{"rootDir": "./data/storage"},
-		},
-		{
-			Type:        "storage.gcs",
-			Label:       "GCS Storage",
-			Category:    "integration",
-			Description: "Google Cloud Storage integration",
-			Inputs:      []schema.ServiceIODef{{Name: "object", Type: "[]byte", Description: "Object data to store or retrieve"}},
-			Outputs:     []schema.ServiceIODef{{Name: "storage", Type: "ObjectStore", Description: "GCS-compatible object storage service"}},
-			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "bucket", Label: "Bucket", Type: schema.FieldTypeString, Required: true, Description: "GCS bucket name", Placeholder: "my-bucket"},
-				{Key: "project", Label: "GCP Project", Type: schema.FieldTypeString, Description: "Google Cloud project ID", Placeholder: "my-project"},
-				{Key: "credentialsFile", Label: "Credentials File", Type: schema.FieldTypeFilePath, Description: "Path to service account JSON key file", Placeholder: "credentials/gcs-key.json", Sensitive: true},
-			},
 		},
 		{
 			Type:        "storage.sqlite",

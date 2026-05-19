@@ -53,6 +53,10 @@ func validateOutputProviderID(provider interfaces.IaCProvider, providerType stri
 	return validateProviderID(provider, providerType, r.Type, r.Name, r.ProviderID)
 }
 
+func validateOutputProviderIDWithDriver(providerType string, rd interfaces.ResourceDriver, r *interfaces.ResourceOutput) error {
+	return validateProviderIDWithDriver(providerType, rd, r.Type, r.Name, r.ProviderID)
+}
+
 func validateStateProviderID(provider interfaces.IaCProvider, providerType string, r interfaces.ResourceState) error {
 	return validateProviderID(provider, providerType, r.Type, r.Name, r.ProviderID)
 }
@@ -63,6 +67,10 @@ func validateProviderID(provider interfaces.IaCProvider, providerType, resourceT
 		log.Printf("warn: wfctl: cannot probe ResourceDriver for validation of %s %q: %v", resourceType, resourceName, err)
 		return nil
 	}
+	return validateProviderIDWithDriver(providerType, rd, resourceType, resourceName, providerID)
+}
+
+func validateProviderIDWithDriver(providerType string, rd interfaces.ResourceDriver, resourceType, resourceName, providerID string) error {
 	v, ok := rd.(interfaces.ProviderIDValidator)
 	if !ok {
 		return nil

@@ -5,10 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.52.0 (2026-05-13) — BREAKING
+
+### Removed (issue #617)
+
+- All legacy DigitalOcean IaC modules (`platform.do_app`, `platform.do_database`, `platform.do_dns`, `platform.do_networking`, `platform.doks`) and the DO credential resolver `cloud_account_do.go`.
+- All legacy DigitalOcean pipeline steps (`step.do_deploy`, `step.do_status`, `step.do_logs`, `step.do_scale`, `step.do_destroy`).
+- The `github.com/digitalocean/godo` dependency from `go.mod` (root and `example/`).
+
+### Migration
+
+DigitalOcean IaC moved to [`workflow-plugin-digitalocean`](https://github.com/GoCodeAlone/workflow-plugin-digitalocean) v0.12.0+. After loading the plugin, replace legacy module types with `infra.*` types and `provider: digitalocean`. Run `wfctl modernize --apply <config.yaml>` to auto-rewrite supported types — **then manually add `provider: digitalocean` to each rewritten module's `config:` block** (the modernize rule does not inject the provider key; see the [migration guide](docs/migrations/v0.52.0-godo-removal.md) for the exact recipe). Two step types (`step.do_logs`, `step.do_scale`) have no 1:1 pipeline successor — workarounds documented in the migration guide.
+
+Configs that still reference the legacy types now fail to load with an actionable error pointing to the plugin and the relevant `infra.*` successor.
+
+---
+
 ## [Unreleased]
+
+### Breaking changes (workflow#699 — IaCProvider.Apply hard-removal)
+
+- `interfaces.IaCProvider.Apply` removed. Plugins must implement v2 dispatch (declare `CapabilitiesResponse.compute_plan_version="v2"` via the typed RPC) and drop their `Apply` Go method.
+- `pb.IaCProviderRequired.Apply` RPC removed; `ApplyRequest`/`ApplyResponse`/`ApplyResult`/`ActionResult` proto messages deleted (`ActionStatus` enum survives — surfaced through engine-side `interfaces.ActionOutcome`).
+- `iac/wfctlhelpers/dispatch.go` package deleted (`ComputePlanVersionDeclarer`, `DispatchVersionFor`, `DispatchVersionV2`); v2 is the only supported dispatch path.
+- `cmd/iac-codemod` deleted (the v1→v2 migration tool no longer has a target).
+- `plugin/sdk.IaCProvider.EffectiveComputePlanVersion()` accessor deleted (post-cutover, "v1" is not a valid runtime value); the manifest field remains as a parse-time validation surface.
+- Load-time enforcement: `cmd/wfctl/deploy_providers.go`'s `discoverAndLoadIaCProvider` now calls the typed `Capabilities` RPC at plugin handshake (with a 10s bounded context that bypasses the adapter's lifetime cache) and rejects providers whose `compute_plan_version != "v2"`.
+- Makefile lint guard added: `grep -qE '^\s*rpc Apply\s*\(' plugin/external/proto/iac.proto` runs as part of the `lint` target so a future PR cannot silently re-introduce the deleted RPC.
+- Minimum plugin versions: aws v2.0.0+, gcp v2.0.0+, azure v2.0.0+, digitalocean v2.0.0+.
+
+### Fixed (issue #663 — follow-up)
+
+- **`*external.RemoteModule.Dependencies()` now returns the yaml-level `dependsOn:` keys** instead of always returning `nil`. The v0.51.8 fix (PR #664) only reordered the `cfg.Modules` slice — but modular's `app.Init()` then runs its own `DependencyAware`-driven sort over the registered modules, and `RemoteModule` (the wrapper used for every external-plugin module) returned `nil` from `Dependencies()`, so modular saw every external-plugin module as a root and sorted alphabetically. BMW PR #280 image-launch surfaced this as the same `bmw-eventbus`/`bmw-stream` ordering race that v0.51.8 was supposed to close. Engine `BuildFromConfig` now filters `modCfg.DependsOn` through `filterResolvableDeps` (drops empty strings + names not present in `cfg.Modules` — the same edge-set topoSortModules used for ordering) and calls `SetDependencies(filtered)` on each module that **implements** `interface{ SetDependencies([]string) }`, but **only when the filtered slice is non-empty**, immediately after the factory returns and before `app.RegisterModule`. (Modules with no resolvable dependsOn — empty yaml + transform-injected modules whose dependsOn is all empty/ghost — are skipped, so a constructor-time default isn't clobbered with `SetDependencies(nil)`.) `RemoteModule` implements that setter, defensively copies the slice, and modular's Init() walker then reads it via the existing `Dependencies()` contract. 7 unit tests cover the `RemoteModule` contract (default-nil, plumb, empty-slice, overwrite, defensive-copy aliasing, plus two type-assertion pins for `modular.DependencyAware` and the engine's `SetDependencies` interface) plus 4 engine-level `BuildFromConfig` tests covering the production path (basic plumb + defensive copy via raw-slice recorder + back-compat skip + real-modular Init order). Built-in modules can opt in by implementing the same setter; existing behaviour is unchanged for modules that don't.
+
+### Fixed (issue #663)
+
+- **`StdEngine.BuildFromConfig` now topologically sorts `cfg.Modules` by yaml `dependsOn:` before module registration.** Previously the engine walked `cfg.Modules` in slice order and the modular framework's `app.Init()` then walked in registration order. For external-plugin modules (which do not implement `DependencyAware`), yaml-level `dependsOn:` was validated by the schema but ignored at init time — a child module's `Init()` could fire before its parent's `Init()` had registered runtime state in a plugin-local registry (broker, factory table, etc.), causing startup races like the "broker not registered within 10s" failure that bit BMW PR #279. The new `topoSortModules` (in `engine_module_order.go`) uses Kahn's algorithm with a stable tie-break on declared index, tolerates missing dependency targets (schema validation catches those separately), and returns an error listing every module that could not be ordered (cycle members and their downstream dependents — Kahn cannot distinguish them by inDegree alone) if dependencies form a loop. 12 unit tests cover the BMW shape, parallel chains, cycles + their downstream dependents, and edge cases. Operators who used the alphabetical-prefix workaround (renaming a dependency to `aaa-…`) can now revert to canonical names and rely on `dependsOn:` to drive the order.
 
 ### Added
 
+- **GitHub environment secret destinations for IaC output sync**: `secretStores` can now use
+  `provider: github` with `config.environment`, including `${WORKFLOW_ENV}`, so
+  `wfctl infra apply --env staging` writes to GitHub Actions environment secrets instead of
+  repository secrets.
+- **`secrets.generate[].store` routing**: `infra_output` generators can name a store from
+  `secretStores`, allowing provisioning output such as database URLs to be piped directly into
+  the intended secret manager location after apply.
 - **Engine-side sensitive-output routing** (v0.27.0): `ResourceDriver` outputs flagged with
   `Sensitive: {key: true}` on Create/Update are routed through the configured `secrets.Provider`
   and replaced in state with `secret_ref://<resource>_<key>` placeholders. Plugins remain

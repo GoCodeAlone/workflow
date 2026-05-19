@@ -31,12 +31,14 @@ service IaCProviderRequired {
   rpc Version(VersionRequest) returns (VersionResponse);
   rpc Capabilities(CapabilitiesRequest) returns (CapabilitiesResponse);
   rpc Plan(PlanRequest) returns (PlanResponse);
-  rpc Apply(ApplyRequest) returns (ApplyResponse);
   rpc Destroy(DestroyRequest) returns (DestroyResponse);
   rpc Status(StatusRequest) returns (StatusResponse);
   rpc Import(ImportRequest) returns (ImportResponse);
   rpc ResolveSizing(ResolveSizingRequest) returns (ResolveSizingResponse);
   rpc BootstrapStateBackend(BootstrapStateBackendRequest) returns (BootstrapStateBackendResponse);
+  // Method "Apply" was removed per workflow#699 (2026-05-17); v2 dispatch
+  // routes through ResourceDriver per-action + IaCProviderFinalizer.
+  // Do not re-introduce. CI lint guards re-appearance (see Makefile).
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +59,19 @@ service IaCProviderDriftDetector {
 
 service IaCProviderCredentialRevoker {
   rpc RevokeProviderCredential(RevokeProviderCredentialRequest) returns (RevokeProviderCredentialResponse);
+}
+
+// IaCProviderFinalizer is the optional service plugins implement when
+// they need a post-apply-loop finalizer hook under v2 dispatch.
+// Use case: DigitalOcean plugin's database trusted_sources deferred-flush
+// (see DOProvider.Apply post-loop block in workflow-plugin-digitalocean
+// internal/provider.go, iterating drivers that implement deferredUpdater
+// and calling FlushDeferredUpdates) which runs after the per-action loop
+// completes. Under v2 dispatch wfctl bypasses IaCProvider.Apply entirely,
+// so plugins needing post-loop work must opt in via this service.
+// Phase 2.5 of workflow#640.
+service IaCProviderFinalizer {
+  rpc FinalizeApply(FinalizeApplyRequest) returns (FinalizeApplyResponse);
 }
 
 service IaCProviderMigrationRepairer {
@@ -291,14 +306,21 @@ message ActionError {
   string error = 3;
 }
 
-// ApplyResult mirrors interfaces.ApplyResult.
-message ApplyResult {
-  string plan_id = 1;
-  repeated ResourceOutput resources = 2;
-  repeated ActionError errors = 3;
-  map<string, string> initial_input_snapshot = 4;
-  repeated DriftEntry input_drift_report = 5;
-  map<string, string> replace_id_map = 6;
+// ActionStatus categorizes per-action outcomes for wfctl-side hook dispatch.
+// Per workflow#640 Phase 2 + ADR 0040 invariants 1-2. Tags 4+5 reserved
+// for Phase 2.3 ACTION_STATUS_COMPENSATED + ACTION_STATUS_COMPENSATION_FAILED
+// when engine-side compensation lands.
+enum ActionStatus {
+  ACTION_STATUS_UNSPECIFIED = 0;  // wfctl REJECTS this on receipt
+  ACTION_STATUS_SUCCESS = 1;
+  ACTION_STATUS_ERROR = 2;
+  ACTION_STATUS_DELETE_FAILED = 3;
+  // Phase 2.3 (workflow#698): reserved tags 4+5 from Phase 2 now defined +
+  // tag 6 for "skipped" — replaces misclassification of pre-dispatch
+  // ctx-cancel/JIT-fail/driver-resolve-fail as Error/DeleteFailed.
+  ACTION_STATUS_COMPENSATED = 4;          // reserved-for-future-emission; engine v0.56.0 does NOT emit (no auto-compensation); plugins may emit if they implement own compensation
+  ACTION_STATUS_COMPENSATION_FAILED = 5;  // post-driver-success hook failed; cloud-side work IS done; operator must verify state; manual compensation may be required
+  ACTION_STATUS_SKIPPED = 6;              // action never attempted at driver (ctx-cancel pre-dispatch, JIT-substitution-fail, driver-resolve-fail); cloud-side state unchanged
 }
 
 // DestroyResult mirrors interfaces.DestroyResult.
@@ -390,13 +412,6 @@ message PlanResponse {
   IaCPlan plan = 1;
 }
 
-message ApplyRequest {
-  IaCPlan plan = 1;
-}
-message ApplyResponse {
-  ApplyResult result = 1;
-}
-
 message DestroyRequest {
   repeated ResourceRef refs = 1;
 }
@@ -483,6 +498,37 @@ message RevokeProviderCredentialRequest {
   string credential_id = 2;
 }
 message RevokeProviderCredentialResponse {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderFinalizer messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message FinalizeApplyRequest {
+  // plan_id is the IaCPlan.ID being finalized (for plugin-side logging /
+  // correlation; not load-bearing for dispatch).
+  string plan_id = 1;
+}
+
+message FinalizeApplyResponse {
+  reserved 2;  // Phase 2.3 compensation evidence (ACTION_STATUS_COMPENSATED outcomes)
+
+  // errors is the per-driver finalize-side error array. Each entry
+  // preserves the v1 wrapper's per-driver attribution shape (DOProvider.Apply
+  // post-loop block appends interfaces.ActionError{Resource: resourceType,
+  // Action: "deferred_update", Error: flushErr.Error()} for each driver
+  // whose FlushDeferredUpdates fails). Empty array = success. Non-empty =
+  // each error is surfaced to wfctl's result.Errors as-is (preserving
+  // per-driver attribution), AND the outer finalize call returns a
+  // wrapped error to the caller.
+  //
+  // Wire-status invariant (mirrors ADR 0040 invariant 2): the gRPC status
+  // MUST be OK whenever the plugin populates errors[] (including the
+  // empty-success case). A non-OK gRPC status (e.g., codes.Internal from
+  // a server panic) signals transport-level failure; errors[] is IGNORED
+  // by wfctl in that case and the gRPC error is surfaced directly. This
+  // prevents ambiguity between "finalize ran and reported per-driver
+  // errors" (OK + errors[]) and "finalize call itself failed" (non-OK).
+  repeated ActionError errors = 1;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IaCProviderMigrationRepairer messages.
@@ -596,3 +642,66 @@ message TroubleshootRequest {
 message TroubleshootResponse {
   repeated Diagnostic diagnostics = 1;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCStateBackend — strict contract for IaC state storage backends served by a
+// plugin sidecar. Maps 1:1 onto module.IaCStateStore (6 methods). Unary RPCs:
+// the PR 2 benchmark validated unary transport for 1 MB state blobs against the
+// in-process baseline. No lock-lease/TTL field — added additively only once a
+// plugin backend implements honored expiry with a conformance test.
+// ─────────────────────────────────────────────────────────────────────────────
+service IaCStateBackend {
+  rpc Configure  (ConfigureRequest)   returns (ConfigureResponse);
+  rpc GetState   (GetStateRequest)    returns (GetStateResponse);
+  rpc SaveState  (SaveStateRequest)   returns (SaveStateResponse);
+  rpc ListStates (ListStatesRequest)  returns (ListStatesResponse);
+  rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
+  rpc Lock       (LockRequest)        returns (LockResponse);
+  rpc Unlock     (UnlockRequest)      returns (UnlockResponse);
+  rpc ListBackendNames(ListBackendNamesRequest) returns (ListBackendNamesResponse);
+}
+
+// IaCState mirrors module.IaCState (module/iac_state.go:4-18). The free-form
+// Outputs / Config map[string]any fields cross the wire as JSON bytes per the
+// iac.proto hard invariant — same pattern as ResourceState.outputs_json.
+message IaCState {
+  string resource_id   = 1;
+  string resource_type = 2;
+  string provider      = 3;
+  string provider_ref  = 4;
+  string provider_id   = 5;
+  string config_hash   = 6;
+  string status        = 7;
+  bytes  outputs_json  = 8;  // JSON-encoded map[string]any (module.IaCState.Outputs)
+  bytes  config_json   = 9;  // JSON-encoded map[string]any (module.IaCState.Config)
+  repeated string dependencies = 10;
+  string created_at = 11;
+  string updated_at = 12;
+  string error      = 13;
+}
+
+// Configure delivers the iac.state module's YAML config to the plugin so it can
+// construct the SDK-backed store. backend_name selects which backend the config
+// is for. config_json is the JSON-encoded module config map[string]any — same
+// JSON-bytes invariant as InitializeRequest.config_json. See decisions/0036.
+message ConfigureRequest  { string backend_name = 1; bytes config_json = 2; }
+message ConfigureResponse {}
+
+message GetStateRequest    { string resource_id = 1; }
+message GetStateResponse   { IaCState state = 1; bool exists = 2; }
+message SaveStateRequest   { IaCState state = 1; }   // idempotent: full-state replace, last-writer-wins
+message SaveStateResponse  {}
+message ListStatesRequest  { map<string, string> filter = 1; }
+message ListStatesResponse { repeated IaCState states = 1; }
+message DeleteStateRequest  { string resource_id = 1; }
+message DeleteStateResponse {}
+message LockRequest    { string resource_id = 1; }
+message LockResponse   {}
+message UnlockRequest  { string resource_id = 1; }
+message UnlockResponse {}
+
+// ListBackendNames lets the engine ask a loaded plugin which iac.state backend
+// NAMES it serves (e.g. "azure_blob"). The plugin answers from its
+// plugin.json capabilities.iacStateBackends (PluginManifest.IaCStateBackends).
+message ListBackendNamesRequest  {}
+message ListBackendNamesResponse { repeated string backend_names = 1; }

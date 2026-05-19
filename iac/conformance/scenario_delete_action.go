@@ -71,12 +71,13 @@ func scenarioDeleteActionInApplyInvokesDriverDelete(t *testing.T, cfg Config) {
 		},
 	}
 
-	result, err := wfctlhelpers.ApplyPlan(context.Background(), p, plan)
+	result, err := wfctlhelpers.ApplyPlanWithHooks(context.Background(), p, plan, wfctlhelpers.ApplyPlanHooks{})
 	if err != nil {
 		t.Fatalf("ApplyPlan returned top-level error: %v", err)
 	}
 	if result == nil {
 		t.Fatal("ApplyPlan returned nil result")
+		return
 	}
 	if len(result.Errors) != 0 {
 		// Most likely failure mode: provider's dispatch lacks a

@@ -11,6 +11,19 @@ import (
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+// lookupExistingState fetches the current state record for a step's resource.
+// A nil record (not found) is reported as (nil, nil); any store error —
+// including a context cancellation / deadline now that IaCStateStore carries
+// the caller's ctx — is returned so the step aborts rather than proceeding with
+// a stale notion of "existing".
+func lookupExistingState(ctx context.Context, store IaCStateStore, resourceID string) (*IaCState, error) {
+	existing, err := store.GetState(ctx, resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("lookup existing iac.state for %q: %w", resourceID, err)
+	}
+	return existing, nil
+}
+
 // resolveIaCStore looks up an IaCStateStore from the service registry.
 func resolveIaCStore(app modular.Application, storeName, stepName string) (IaCStateStore, error) {
 	if app == nil {
@@ -100,7 +113,7 @@ func NewIaCPlanStepFactory() StepFactory {
 
 func (s *IaCPlanStep) Name() string { return s.name }
 
-func (s *IaCPlanStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *IaCPlanStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	provider, err := resolvePlatformProvider(s.app, s.platform, s.name)
 	if err != nil {
 		return nil, err
@@ -116,7 +129,10 @@ func (s *IaCPlanStep) Execute(_ context.Context, _ *PipelineContext) (*StepResul
 	}
 
 	// Persist planned state.
-	existing, _ := store.GetState(s.resourceID)
+	existing, err := lookupExistingState(ctx, store, s.resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("iac_plan step %q: %w", s.name, err)
+	}
 	now := nowUTC()
 	st := &IaCState{
 		ResourceID:   s.resourceID,
@@ -134,7 +150,7 @@ func (s *IaCPlanStep) Execute(_ context.Context, _ *PipelineContext) (*StepResul
 		st.CreatedAt = now
 	}
 
-	if err := store.SaveState(st); err != nil {
+	if err := store.SaveState(ctx, st); err != nil {
 		return nil, fmt.Errorf("iac_plan step %q: save state: %w", s.name, err)
 	}
 
@@ -185,7 +201,7 @@ func NewIaCApplyStepFactory() StepFactory {
 
 func (s *IaCApplyStep) Name() string { return s.name }
 
-func (s *IaCApplyStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *IaCApplyStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	provider, err := resolvePlatformProvider(s.app, s.platform, s.name)
 	if err != nil {
 		return nil, err
@@ -198,11 +214,14 @@ func (s *IaCApplyStep) Execute(_ context.Context, _ *PipelineContext) (*StepResu
 	now := nowUTC()
 
 	// Transition state to provisioning before calling Apply.
-	existing, _ := store.GetState(s.resourceID)
+	existing, err := lookupExistingState(ctx, store, s.resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("iac_apply step %q: %w", s.name, err)
+	}
 	if existing != nil {
 		existing.Status = "provisioning"
 		existing.UpdatedAt = now
-		_ = store.SaveState(existing)
+		_ = store.SaveState(ctx, existing)
 	}
 
 	result, err := provider.Apply()
@@ -212,7 +231,7 @@ func (s *IaCApplyStep) Execute(_ context.Context, _ *PipelineContext) (*StepResu
 			existing.Status = "error"
 			existing.Error = err.Error()
 			existing.UpdatedAt = nowUTC()
-			_ = store.SaveState(existing)
+			_ = store.SaveState(ctx, existing)
 		}
 		return nil, fmt.Errorf("iac_apply step %q: Apply: %w", s.name, err)
 	}
@@ -255,7 +274,7 @@ func (s *IaCApplyStep) Execute(_ context.Context, _ *PipelineContext) (*StepResu
 		st.CreatedAt = st.UpdatedAt
 	}
 
-	if err := store.SaveState(st); err != nil {
+	if err := store.SaveState(ctx, st); err != nil {
 		return nil, fmt.Errorf("iac_apply step %q: save state: %w", s.name, err)
 	}
 
@@ -308,7 +327,7 @@ func NewIaCStatusStepFactory() StepFactory {
 
 func (s *IaCStatusStep) Name() string { return s.name }
 
-func (s *IaCStatusStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *IaCStatusStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	provider, err := resolvePlatformProvider(s.app, s.platform, s.name)
 	if err != nil {
 		return nil, err
@@ -323,7 +342,7 @@ func (s *IaCStatusStep) Execute(_ context.Context, _ *PipelineContext) (*StepRes
 		return nil, fmt.Errorf("iac_status step %q: Status: %w", s.name, err)
 	}
 
-	st, err := store.GetState(s.resourceID)
+	st, err := store.GetState(ctx, s.resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("iac_status step %q: get state: %w", s.name, err)
 	}
@@ -379,7 +398,7 @@ func NewIaCDestroyStepFactory() StepFactory {
 
 func (s *IaCDestroyStep) Name() string { return s.name }
 
-func (s *IaCDestroyStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *IaCDestroyStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	provider, err := resolvePlatformProvider(s.app, s.platform, s.name)
 	if err != nil {
 		return nil, err
@@ -391,11 +410,14 @@ func (s *IaCDestroyStep) Execute(_ context.Context, _ *PipelineContext) (*StepRe
 
 	now := nowUTC()
 
-	existing, _ := store.GetState(s.resourceID)
+	existing, err := lookupExistingState(ctx, store, s.resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("iac_destroy step %q: %w", s.name, err)
+	}
 	if existing != nil {
 		existing.Status = "destroying"
 		existing.UpdatedAt = now
-		_ = store.SaveState(existing)
+		_ = store.SaveState(ctx, existing)
 	}
 
 	if err := provider.Destroy(); err != nil {
@@ -403,7 +425,7 @@ func (s *IaCDestroyStep) Execute(_ context.Context, _ *PipelineContext) (*StepRe
 			existing.Status = "error"
 			existing.Error = err.Error()
 			existing.UpdatedAt = nowUTC()
-			_ = store.SaveState(existing)
+			_ = store.SaveState(ctx, existing)
 		}
 		return nil, fmt.Errorf("iac_destroy step %q: Destroy: %w", s.name, err)
 	}
@@ -423,7 +445,7 @@ func (s *IaCDestroyStep) Execute(_ context.Context, _ *PipelineContext) (*StepRe
 		st.CreatedAt = st.UpdatedAt
 	}
 
-	if err := store.SaveState(st); err != nil {
+	if err := store.SaveState(ctx, st); err != nil {
 		return nil, fmt.Errorf("iac_destroy step %q: save state: %w", s.name, err)
 	}
 
@@ -476,13 +498,13 @@ func NewIaCDriftDetectStepFactory() StepFactory {
 
 func (s *IaCDriftDetectStep) Name() string { return s.name }
 
-func (s *IaCDriftDetectStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *IaCDriftDetectStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	store, err := resolveIaCStore(s.app, s.storeName, s.name)
 	if err != nil {
 		return nil, err
 	}
 
-	st, err := store.GetState(s.resourceID)
+	st, err := store.GetState(ctx, s.resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("iac_drift_detect step %q: get state: %w", s.name, err)
 	}

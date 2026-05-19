@@ -1,0 +1,45 @@
+modules:
+  - name: api
+    type: platform.do_app
+    config:
+      region: nyc
+  - name: db
+    type: platform.do_database
+    config:
+      engine: pg
+      size: db-s-1vcpu-1gb
+  - name: dns
+    type: platform.do_dns
+    config:
+      domain: example.com
+  - name: net
+    type: platform.do_networking
+    config:
+      vpc_cidr: 10.0.0.0/16
+  - name: k8s
+    type: platform.doks
+    config:
+      region: nyc3
+      node_pool:
+        size: s-2vcpu-4gb
+        count: 3
+
+pipelines:
+  deploy:
+    steps:
+      - type: step.do_deploy
+        config:
+          app: api
+      - type: step.do_status
+        config:
+          app: api
+      - type: step.do_destroy
+        config:
+          app: api
+      - type: step.do_logs
+        config:
+          app: api
+      - type: step.do_scale
+        config:
+          app: api
+          instance_count: 5

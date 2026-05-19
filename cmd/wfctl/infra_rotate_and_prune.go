@@ -62,9 +62,14 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	// Default is true (per ADR 0023): the safer behavior IS the new default;
 	// the legacy quota-fragile behavior is opt-out via --prune-first=false.
 	_ = fs.Bool("prune-first", true, "Prune orphans before rotating (default true; safer at quota — see ADR 0023)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	ctx := context.Background()
 	providers, closers, err := rotateAndPruneLoadProviders(ctx, fs, configFile, envName)

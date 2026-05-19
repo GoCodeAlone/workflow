@@ -619,3 +619,160 @@ func TestWorkflowUIHandler_HandleManagement_WithHTTPHandler(t *testing.T) {
 		t.Errorf("unexpected config: %+v", result)
 	}
 }
+
+// TestWorkflowUIHandler_TryActivate_NotConfigured verifies that the handler
+// returns 503 when no tryActivateFn is set.
+func TestWorkflowUIHandler_TryActivate_NotConfigured(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body, _ := json.Marshal(&config.WorkflowConfig{})
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/try-activate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+}
+
+// TestWorkflowUIHandler_TryActivate_Success verifies that when tryActivateFn
+// succeeds the handler returns 200 with a build_ok result.
+func TestWorkflowUIHandler_TryActivate_Success(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	h.SetTryActivateFunc(func(cfg *config.WorkflowConfig) (*TryActivateResult, error) {
+		return &TryActivateResult{
+			Status:      "build_ok",
+			ModuleTypes: []string{"http.server"},
+			StepTypes:   []string{"step.set"},
+		}, nil
+	})
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body, _ := json.Marshal(&config.WorkflowConfig{})
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/try-activate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result TryActivateResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Status != "build_ok" {
+		t.Errorf("expected status %q, got %q", "build_ok", result.Status)
+	}
+	if len(result.ModuleTypes) == 0 {
+		t.Error("expected non-empty moduleTypes in response")
+	}
+}
+
+// TestWorkflowUIHandler_TryActivate_Failure verifies that when tryActivateFn
+// returns an error the handler returns 422 with a build_failed result.
+func TestWorkflowUIHandler_TryActivate_Failure(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	h.SetTryActivateFunc(func(cfg *config.WorkflowConfig) (*TryActivateResult, error) {
+		return &TryActivateResult{
+			Status: "build_failed",
+			Error:  "unknown module type",
+		}, fmt.Errorf("unknown module type")
+	})
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body, _ := json.Marshal(&config.WorkflowConfig{})
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/try-activate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result TryActivateResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Status != "build_failed" {
+		t.Errorf("expected status %q, got %q", "build_failed", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error in response")
+	}
+}
+
+func TestWorkflowUIHandler_TryActivate_NilResultWithError(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	h.SetTryActivateFunc(func(cfg *config.WorkflowConfig) (*TryActivateResult, error) {
+		return nil, fmt.Errorf("probe failed")
+	})
+
+	body, _ := json.Marshal(&config.WorkflowConfig{})
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/try-activate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleTryActivate(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result TryActivateResult
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Status != "build_failed" {
+		t.Errorf("expected status %q, got %q", "build_failed", result.Status)
+	}
+	if !strings.Contains(result.Error, "probe failed") {
+		t.Errorf("expected error to contain probe failure, got %q", result.Error)
+	}
+}
+
+func TestWorkflowUIHandler_TryActivate_InvalidJSON(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	h.SetTryActivateFunc(func(cfg *config.WorkflowConfig) (*TryActivateResult, error) {
+		t.Fatal("tryActivateFn should not be called for invalid JSON")
+		return nil, nil
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/try-activate", strings.NewReader("{"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleTryActivate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestWorkflowUIHandler_TryActivate_ServeHTTP verifies the ServeHTTP dispatch
+// includes the try-activate path.
+func TestWorkflowUIHandler_TryActivate_ServeHTTP(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	called := false
+	h.SetTryActivateFunc(func(cfg *config.WorkflowConfig) (*TryActivateResult, error) {
+		called = true
+		return &TryActivateResult{Status: "build_ok"}, nil
+	})
+
+	body, _ := json.Marshal(&config.WorkflowConfig{})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/engine/try-activate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if !called {
+		t.Error("expected tryActivateFn to be called via ServeHTTP")
+	}
+}

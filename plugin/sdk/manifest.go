@@ -60,16 +60,13 @@ type IaCProvider struct {
 	ComputePlanVersion string `json:"computePlanVersion,omitempty"`
 }
 
-// EffectiveComputePlanVersion returns the dispatch version, defaulting to
-// "v1" when the manifest omits the field. Callers should always go through
-// this accessor rather than reading ComputePlanVersion directly so the
-// default-v1 contract stays in one place.
-func (p IaCProvider) EffectiveComputePlanVersion() string {
-	if p.ComputePlanVersion == "" {
-		return "v1"
-	}
-	return p.ComputePlanVersion
-}
+// EffectiveComputePlanVersion was removed per workflow#699 (2026-05-17):
+// post-cutover "v1" is not a valid runtime value, so a default-to-v1
+// accessor would lie. The manifest field is now a parse-time-validated
+// advisory only — the authoritative gate is the typed
+// CapabilitiesResponse.compute_plan_version check in
+// cmd/wfctl/deploy_providers.go's discoverAndLoadIaCProvider, which
+// rejects any plugin not declaring "v2" at load time.
 
 // compiledSchema is the parsed manifest schema. It is compiled lazily on
 // first ParseManifest call and cached for the process lifetime; the schema

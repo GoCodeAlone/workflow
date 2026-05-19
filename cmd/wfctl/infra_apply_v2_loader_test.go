@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -113,8 +112,8 @@ modules:
 
 	// Run the production apply entrypoint. The dispatcher must:
 	//   1. Load the provider via resolveIaCProvider (seam) — succeeds.
-	//   2. Type-assert wfctlhelpers.ComputePlanVersionDeclarer →
-	//      "v2" → route through wfctlhelpers.ApplyPlan.
+	//   2. Route through wfctlhelpers.ApplyPlan (v2 is the sole
+	//      dispatch path per workflow#699; no type-assertion fork).
 	//   3. ComputePlan dispatch driver.Diff via T3.6e errgroup,
 	//      observe NeedsReplace=true, emit "replace" action.
 	//   4. wfctlhelpers.ApplyPlan decomposes replace into
@@ -145,6 +144,17 @@ modules:
 	if len(stub.driver.createSpecs) != 1 || stub.driver.createSpecs[0].Config["region"] != "nyc1" {
 		t.Errorf("create spec = %+v, want region=nyc1 (the new desired)", stub.driver.createSpecs)
 	}
+	store := &fsWfctlStateStore{dir: stateDir}
+	states, err := store.ListResources(t.Context())
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("states = %d, want 1", len(states))
+	}
+	if states[0].ProviderID != "stub-created-loader" {
+		t.Fatalf("state ProviderID = %q, want stub-created-loader", states[0].ProviderID)
+	}
 }
 
 // TestApply_V2_LoaderSeam_DriftReportPrinted complements the
@@ -154,7 +164,7 @@ modules:
 // InputDriftReport. T3.7 wired the helper into the v2 dispatch but
 // only T3.7's mock-seam test pins the assertion; this loader-seam
 // variant proves the wiring works end-to-end without the
-// applyV2ApplyPlanFn substitution.
+// applyV2ApplyPlanWithHooksFn substitution.
 //
 // The test substitutes the wfctlhelpers.ApplyPlan dispatch only —
 // ComputePlan and the rest of the pipeline run unmodified — so the
@@ -201,11 +211,11 @@ modules:
 	driftEntries := []interfaces.DriftEntry{
 		{Name: "EXAMPLE_VAR", PlanFingerprint: "plan-fp", ApplyFingerprint: "apply-fp"},
 	}
-	origApply := applyV2ApplyPlanFn
-	applyV2ApplyPlanFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	origApply := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, _ *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
 		return &interfaces.ApplyResult{InputDriftReport: driftEntries}, nil
 	}
-	t.Cleanup(func() { applyV2ApplyPlanFn = origApply })
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = origApply })
 
 	// Capture stderr to assert printDriftReportIfAny output reached
 	// the operator. applyInfraModules writes the drift report to
@@ -225,29 +235,27 @@ modules:
 }
 
 // v2LoaderStubProvider is the in-process equivalent of a v2 IaC
-// plugin loaded via wfctl's discoverAndLoadIaCProvider. Implements
-// interfaces.IaCProvider AND wfctlhelpers.ComputePlanVersionDeclarer
-// (returning "v2") so the apply path's dispatch branch routes
-// through wfctlhelpers.ApplyPlan.
+// plugin loaded via wfctl's discoverAndLoadIaCProvider. Per workflow#699
+// v2 is the only supported dispatch, so satisfying interfaces.IaCProvider
+// suffices; the in-process loader-seam bypasses the runtime
+// CapabilitiesResponse.compute_plan_version gate (that gate fires inside
+// buildTypedIaCAdapterFrom against a real gRPC plugin — see
+// TestBuildTypedIaCAdapterFrom_LoadGate_RejectsV1Plugin in
+// discover_typed_loader_test.go).
 type v2LoaderStubProvider struct {
 	driver *v2LoaderStubDriver
 }
 
 var (
-	_ interfaces.IaCProvider                  = (*v2LoaderStubProvider)(nil)
-	_ wfctlhelpers.ComputePlanVersionDeclarer = (*v2LoaderStubProvider)(nil)
+	_ interfaces.IaCProvider = (*v2LoaderStubProvider)(nil)
 )
 
 func (p *v2LoaderStubProvider) Name() string                                         { return "stub" }
 func (p *v2LoaderStubProvider) Version() string                                      { return "0.0.1-loader-seam" }
-func (p *v2LoaderStubProvider) ComputePlanVersion() string                           { return "v2" }
 func (p *v2LoaderStubProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
 func (p *v2LoaderStubProvider) Capabilities() []interfaces.IaCCapabilityDeclaration  { return nil }
 func (p *v2LoaderStubProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
 	return nil, nil
-}
-func (p *v2LoaderStubProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	return nil, errors.New("v2 path must route through wfctlhelpers.ApplyPlan, not provider.Apply")
 }
 func (p *v2LoaderStubProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
 	return nil, nil

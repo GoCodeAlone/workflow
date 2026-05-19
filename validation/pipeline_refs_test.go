@@ -160,6 +160,113 @@ func TestValidatePipelineTemplateRefs_KnownOutputField(t *testing.T) {
 	}
 }
 
+func TestValidatePipelineTemplateRefs_DBQueryCachedSingleRejectsRowWrapper(t *testing.T) {
+	pipelines := map[string]any{
+		"payment-create-intent": map[string]any{
+			"steps": []any{
+				map[string]any{
+					"name": "check_mock_mode",
+					"type": "step.db_query_cached",
+					"config": map[string]any{
+						"mode":  "single",
+						"query": "SELECT COALESCE((SELECT settings->>'mock_payments' FROM tenants WHERE id = $1), 'false') AS mock_payments",
+					},
+				},
+				map[string]any{
+					"name": "set_mock_flag",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"is_mock": `{{ index .steps "check_mock_mode" "row" "mock_payments" | default "false" }}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	result := validation.ValidatePipelineTemplateRefs(pipelines)
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, `references check_mock_mode.row`) && strings.Contains(w, "mock_payments") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning for stale db_query_cached row wrapper, got %v", result.Warnings)
+	}
+}
+
+func TestValidatePipelineTemplateRefs_DBQueryCachedSingleAcceptsFlatColumn(t *testing.T) {
+	pipelines := map[string]any{
+		"payment-create-intent": map[string]any{
+			"steps": []any{
+				map[string]any{
+					"name": "check_mock_mode",
+					"type": "step.db_query_cached",
+					"config": map[string]any{
+						"mode":  "single",
+						"query": "SELECT COALESCE((SELECT settings->>'mock_payments' FROM tenants WHERE id = $1), 'false') AS mock_payments",
+					},
+				},
+				map[string]any{
+					"name": "set_mock_flag",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"is_mock": `{{ step "check_mock_mode" "mock_payments" | default "false" }}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	result := validation.ValidatePipelineTemplateRefs(pipelines)
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "check_mock_mode") {
+			t.Fatalf("unexpected warning for flat db_query_cached field: %v", result.Warnings)
+		}
+	}
+}
+
+func TestValidatePipelineTemplateRefs_DoesNotTreatNestedLoopStepsAsTopLevel(t *testing.T) {
+	pipelines := map[string]any{
+		"price-sync-nightly": map[string]any{
+			"steps": []any{
+				map[string]any{
+					"name": "process_tracked_items",
+					"type": "step.foreach",
+					"config": map[string]any{
+						"collection": "steps.items.rows",
+						"steps": []any{
+							map[string]any{
+								"name": "check_price",
+								"type": "step.set",
+								"config": map[string]any{
+									"values": map[string]any{"provider_price": "100"},
+								},
+							},
+							map[string]any{
+								"name": "record_price",
+								"type": "step.db_exec",
+								"config": map[string]any{
+									"params": []any{`{{ index .steps "check_price" "provider_price" }}`},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	result := validation.ValidatePipelineTemplateRefs(pipelines)
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "check_price") && strings.Contains(w, "does not exist") {
+			t.Fatalf("nested foreach step should not be validated as a top-level step ref: %v", result.Warnings)
+		}
+	}
+}
+
 // TestValidatePipelineTemplateRefs_SelfReference checks that a step referencing
 // its own output produces a warning.
 func TestValidatePipelineTemplateRefs_SelfReference(t *testing.T) {

@@ -11,11 +11,15 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
-// TestManifest_IaCProvider_ComputePlanVersion exercises the new
-// iacProvider.computePlanVersion field. Cases:
-//   - default-v1:  field omitted → EffectiveComputePlanVersion() == "v1"
-//   - explicit-v1: "v1" → "v1"
-//   - explicit-v2: "v2" → "v2"
+// TestManifest_IaCProvider_ComputePlanVersion exercises the
+// iacProvider.computePlanVersion field at the schema layer. Per
+// workflow#699 the EffectiveComputePlanVersion accessor is gone (the
+// authoritative gate is now the typed CapabilitiesResponse check in
+// cmd/wfctl/deploy_providers.go); the manifest field remains as a
+// parse-time validation surface. Cases:
+//   - omitted:     accepted (manifest field is optional)
+//   - explicit-v1: accepted (advisory; the runtime gate rejects v1)
+//   - explicit-v2: accepted
 //   - rejected:    "v3" → ParseManifest returns an error (schema-rejected)
 func TestManifest_IaCProvider_ComputePlanVersion(t *testing.T) {
 	cases := map[string]struct {
@@ -23,7 +27,7 @@ func TestManifest_IaCProvider_ComputePlanVersion(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		"default-v1":  {`{"name":"x","iacProvider":{}}`, "v1", false},
+		"omitted":     {`{"name":"x","iacProvider":{}}`, "", false},
 		"explicit-v1": {`{"name":"x","iacProvider":{"computePlanVersion":"v1"}}`, "v1", false},
 		"explicit-v2": {`{"name":"x","iacProvider":{"computePlanVersion":"v2"}}`, "v2", false},
 		"rejected":    {`{"name":"x","iacProvider":{"computePlanVersion":"v3"}}`, "", true},
@@ -34,21 +38,10 @@ func TestManifest_IaCProvider_ComputePlanVersion(t *testing.T) {
 			if (err != nil) != c.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, c.wantErr)
 			}
-			if !c.wantErr && m.IaCProvider.EffectiveComputePlanVersion() != c.want {
-				t.Errorf("got %q want %q", m.IaCProvider.EffectiveComputePlanVersion(), c.want)
+			if !c.wantErr && m.IaCProvider.ComputePlanVersion != c.want {
+				t.Errorf("got %q want %q", m.IaCProvider.ComputePlanVersion, c.want)
 			}
 		})
-	}
-}
-
-// TestManifest_IaCProvider_ComputePlanVersion_ZeroValue verifies that an
-// IaCProvider with the zero value (empty string) reports v1, matching the
-// "default-v1" case but exercising the accessor on a Go-zero-valued struct
-// (no JSON involved).
-func TestManifest_IaCProvider_ComputePlanVersion_ZeroValue(t *testing.T) {
-	var p IaCProvider
-	if got := p.EffectiveComputePlanVersion(); got != "v1" {
-		t.Errorf("zero IaCProvider.EffectiveComputePlanVersion() = %q, want %q", got, "v1")
 	}
 }
 
@@ -83,8 +76,8 @@ func TestManifest_RootPermitsAdditionalProperties(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected pass; got %v", err)
 	}
-	if m.IaCProvider.EffectiveComputePlanVersion() != "v2" {
-		t.Errorf("got %q want %q", m.IaCProvider.EffectiveComputePlanVersion(), "v2")
+	if m.IaCProvider.ComputePlanVersion != "v2" {
+		t.Errorf("got %q want %q", m.IaCProvider.ComputePlanVersion, "v2")
 	}
 }
 

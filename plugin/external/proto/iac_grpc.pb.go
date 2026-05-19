@@ -40,7 +40,6 @@ const (
 	IaCProviderRequired_Version_FullMethodName               = "/workflow.plugin.external.iac.IaCProviderRequired/Version"
 	IaCProviderRequired_Capabilities_FullMethodName          = "/workflow.plugin.external.iac.IaCProviderRequired/Capabilities"
 	IaCProviderRequired_Plan_FullMethodName                  = "/workflow.plugin.external.iac.IaCProviderRequired/Plan"
-	IaCProviderRequired_Apply_FullMethodName                 = "/workflow.plugin.external.iac.IaCProviderRequired/Apply"
 	IaCProviderRequired_Destroy_FullMethodName               = "/workflow.plugin.external.iac.IaCProviderRequired/Destroy"
 	IaCProviderRequired_Status_FullMethodName                = "/workflow.plugin.external.iac.IaCProviderRequired/Status"
 	IaCProviderRequired_Import_FullMethodName                = "/workflow.plugin.external.iac.IaCProviderRequired/Import"
@@ -62,7 +61,6 @@ type IaCProviderRequiredClient interface {
 	Version(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*VersionResponse, error)
 	Capabilities(ctx context.Context, in *CapabilitiesRequest, opts ...grpc.CallOption) (*CapabilitiesResponse, error)
 	Plan(ctx context.Context, in *PlanRequest, opts ...grpc.CallOption) (*PlanResponse, error)
-	Apply(ctx context.Context, in *ApplyRequest, opts ...grpc.CallOption) (*ApplyResponse, error)
 	Destroy(ctx context.Context, in *DestroyRequest, opts ...grpc.CallOption) (*DestroyResponse, error)
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
 	Import(ctx context.Context, in *ImportRequest, opts ...grpc.CallOption) (*ImportResponse, error)
@@ -122,16 +120,6 @@ func (c *iaCProviderRequiredClient) Plan(ctx context.Context, in *PlanRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PlanResponse)
 	err := c.cc.Invoke(ctx, IaCProviderRequired_Plan_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *iaCProviderRequiredClient) Apply(ctx context.Context, in *ApplyRequest, opts ...grpc.CallOption) (*ApplyResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ApplyResponse)
-	err := c.cc.Invoke(ctx, IaCProviderRequired_Apply_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +190,6 @@ type IaCProviderRequiredServer interface {
 	Version(context.Context, *VersionRequest) (*VersionResponse, error)
 	Capabilities(context.Context, *CapabilitiesRequest) (*CapabilitiesResponse, error)
 	Plan(context.Context, *PlanRequest) (*PlanResponse, error)
-	Apply(context.Context, *ApplyRequest) (*ApplyResponse, error)
 	Destroy(context.Context, *DestroyRequest) (*DestroyResponse, error)
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
 	Import(context.Context, *ImportRequest) (*ImportResponse, error)
@@ -232,9 +219,6 @@ func (UnimplementedIaCProviderRequiredServer) Capabilities(context.Context, *Cap
 }
 func (UnimplementedIaCProviderRequiredServer) Plan(context.Context, *PlanRequest) (*PlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Plan not implemented")
-}
-func (UnimplementedIaCProviderRequiredServer) Apply(context.Context, *ApplyRequest) (*ApplyResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Apply not implemented")
 }
 func (UnimplementedIaCProviderRequiredServer) Destroy(context.Context, *DestroyRequest) (*DestroyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Destroy not implemented")
@@ -362,24 +346,6 @@ func _IaCProviderRequired_Plan_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IaCProviderRequired_Apply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ApplyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IaCProviderRequiredServer).Apply(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IaCProviderRequired_Apply_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IaCProviderRequiredServer).Apply(ctx, req.(*ApplyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _IaCProviderRequired_Destroy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DestroyRequest)
 	if err := dec(in); err != nil {
@@ -496,10 +462,6 @@ var IaCProviderRequired_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Plan",
 			Handler:    _IaCProviderRequired_Plan_Handler,
-		},
-		{
-			MethodName: "Apply",
-			Handler:    _IaCProviderRequired_Apply_Handler,
 		},
 		{
 			MethodName: "Destroy",
@@ -918,6 +880,128 @@ var IaCProviderCredentialRevoker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeProviderCredential",
 			Handler:    _IaCProviderCredentialRevoker_RevokeProviderCredential_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "iac.proto",
+}
+
+const (
+	IaCProviderFinalizer_FinalizeApply_FullMethodName = "/workflow.plugin.external.iac.IaCProviderFinalizer/FinalizeApply"
+)
+
+// IaCProviderFinalizerClient is the client API for IaCProviderFinalizer service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// IaCProviderFinalizer is the optional service plugins implement when
+// they need a post-apply-loop finalizer hook under v2 dispatch.
+// Use case: DigitalOcean plugin's database trusted_sources deferred-flush
+// (see DOProvider.Apply post-loop block in workflow-plugin-digitalocean
+// internal/provider.go, iterating drivers that implement deferredUpdater
+// and calling FlushDeferredUpdates) which runs after the per-action loop
+// completes. Under v2 dispatch wfctl bypasses IaCProvider.Apply entirely,
+// so plugins needing post-loop work must opt in via this service.
+// Phase 2.5 of workflow#640.
+type IaCProviderFinalizerClient interface {
+	FinalizeApply(ctx context.Context, in *FinalizeApplyRequest, opts ...grpc.CallOption) (*FinalizeApplyResponse, error)
+}
+
+type iaCProviderFinalizerClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCProviderFinalizerClient(cc grpc.ClientConnInterface) IaCProviderFinalizerClient {
+	return &iaCProviderFinalizerClient{cc}
+}
+
+func (c *iaCProviderFinalizerClient) FinalizeApply(ctx context.Context, in *FinalizeApplyRequest, opts ...grpc.CallOption) (*FinalizeApplyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FinalizeApplyResponse)
+	err := c.cc.Invoke(ctx, IaCProviderFinalizer_FinalizeApply_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IaCProviderFinalizerServer is the server API for IaCProviderFinalizer service.
+// All implementations must embed UnimplementedIaCProviderFinalizerServer
+// for forward compatibility.
+//
+// IaCProviderFinalizer is the optional service plugins implement when
+// they need a post-apply-loop finalizer hook under v2 dispatch.
+// Use case: DigitalOcean plugin's database trusted_sources deferred-flush
+// (see DOProvider.Apply post-loop block in workflow-plugin-digitalocean
+// internal/provider.go, iterating drivers that implement deferredUpdater
+// and calling FlushDeferredUpdates) which runs after the per-action loop
+// completes. Under v2 dispatch wfctl bypasses IaCProvider.Apply entirely,
+// so plugins needing post-loop work must opt in via this service.
+// Phase 2.5 of workflow#640.
+type IaCProviderFinalizerServer interface {
+	FinalizeApply(context.Context, *FinalizeApplyRequest) (*FinalizeApplyResponse, error)
+	mustEmbedUnimplementedIaCProviderFinalizerServer()
+}
+
+// UnimplementedIaCProviderFinalizerServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCProviderFinalizerServer struct{}
+
+func (UnimplementedIaCProviderFinalizerServer) FinalizeApply(context.Context, *FinalizeApplyRequest) (*FinalizeApplyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FinalizeApply not implemented")
+}
+func (UnimplementedIaCProviderFinalizerServer) mustEmbedUnimplementedIaCProviderFinalizerServer() {}
+func (UnimplementedIaCProviderFinalizerServer) testEmbeddedByValue()                              {}
+
+// UnsafeIaCProviderFinalizerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCProviderFinalizerServer will
+// result in compilation errors.
+type UnsafeIaCProviderFinalizerServer interface {
+	mustEmbedUnimplementedIaCProviderFinalizerServer()
+}
+
+func RegisterIaCProviderFinalizerServer(s grpc.ServiceRegistrar, srv IaCProviderFinalizerServer) {
+	// If the following call panics, it indicates UnimplementedIaCProviderFinalizerServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCProviderFinalizer_ServiceDesc, srv)
+}
+
+func _IaCProviderFinalizer_FinalizeApply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FinalizeApplyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderFinalizerServer).FinalizeApply(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderFinalizer_FinalizeApply_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderFinalizerServer).FinalizeApply(ctx, req.(*FinalizeApplyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// IaCProviderFinalizer_ServiceDesc is the grpc.ServiceDesc for IaCProviderFinalizer service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCProviderFinalizer_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCProviderFinalizer",
+	HandlerType: (*IaCProviderFinalizerServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "FinalizeApply",
+			Handler:    _IaCProviderFinalizer_FinalizeApply_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -1642,6 +1726,390 @@ var ResourceDriver_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Troubleshoot",
 			Handler:    _ResourceDriver_Troubleshoot_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "iac.proto",
+}
+
+const (
+	IaCStateBackend_Configure_FullMethodName        = "/workflow.plugin.external.iac.IaCStateBackend/Configure"
+	IaCStateBackend_GetState_FullMethodName         = "/workflow.plugin.external.iac.IaCStateBackend/GetState"
+	IaCStateBackend_SaveState_FullMethodName        = "/workflow.plugin.external.iac.IaCStateBackend/SaveState"
+	IaCStateBackend_ListStates_FullMethodName       = "/workflow.plugin.external.iac.IaCStateBackend/ListStates"
+	IaCStateBackend_DeleteState_FullMethodName      = "/workflow.plugin.external.iac.IaCStateBackend/DeleteState"
+	IaCStateBackend_Lock_FullMethodName             = "/workflow.plugin.external.iac.IaCStateBackend/Lock"
+	IaCStateBackend_Unlock_FullMethodName           = "/workflow.plugin.external.iac.IaCStateBackend/Unlock"
+	IaCStateBackend_ListBackendNames_FullMethodName = "/workflow.plugin.external.iac.IaCStateBackend/ListBackendNames"
+)
+
+// IaCStateBackendClient is the client API for IaCStateBackend service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCStateBackend — strict contract for IaC state storage backends served by a
+// plugin sidecar. Maps 1:1 onto module.IaCStateStore (6 methods). Unary RPCs:
+// the PR 2 benchmark validated unary transport for 1 MB state blobs against the
+// in-process baseline. No lock-lease/TTL field — added additively only once a
+// plugin backend implements honored expiry with a conformance test.
+// ─────────────────────────────────────────────────────────────────────────────
+type IaCStateBackendClient interface {
+	Configure(ctx context.Context, in *ConfigureRequest, opts ...grpc.CallOption) (*ConfigureResponse, error)
+	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error)
+	SaveState(ctx context.Context, in *SaveStateRequest, opts ...grpc.CallOption) (*SaveStateResponse, error)
+	ListStates(ctx context.Context, in *ListStatesRequest, opts ...grpc.CallOption) (*ListStatesResponse, error)
+	DeleteState(ctx context.Context, in *DeleteStateRequest, opts ...grpc.CallOption) (*DeleteStateResponse, error)
+	Lock(ctx context.Context, in *LockRequest, opts ...grpc.CallOption) (*LockResponse, error)
+	Unlock(ctx context.Context, in *UnlockRequest, opts ...grpc.CallOption) (*UnlockResponse, error)
+	ListBackendNames(ctx context.Context, in *ListBackendNamesRequest, opts ...grpc.CallOption) (*ListBackendNamesResponse, error)
+}
+
+type iaCStateBackendClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCStateBackendClient(cc grpc.ClientConnInterface) IaCStateBackendClient {
+	return &iaCStateBackendClient{cc}
+}
+
+func (c *iaCStateBackendClient) Configure(ctx context.Context, in *ConfigureRequest, opts ...grpc.CallOption) (*ConfigureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigureResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_Configure_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCStateBackendClient) GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetStateResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_GetState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCStateBackendClient) SaveState(ctx context.Context, in *SaveStateRequest, opts ...grpc.CallOption) (*SaveStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveStateResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_SaveState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCStateBackendClient) ListStates(ctx context.Context, in *ListStatesRequest, opts ...grpc.CallOption) (*ListStatesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListStatesResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_ListStates_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCStateBackendClient) DeleteState(ctx context.Context, in *DeleteStateRequest, opts ...grpc.CallOption) (*DeleteStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteStateResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_DeleteState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCStateBackendClient) Lock(ctx context.Context, in *LockRequest, opts ...grpc.CallOption) (*LockResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LockResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_Lock_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCStateBackendClient) Unlock(ctx context.Context, in *UnlockRequest, opts ...grpc.CallOption) (*UnlockResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnlockResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_Unlock_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCStateBackendClient) ListBackendNames(ctx context.Context, in *ListBackendNamesRequest, opts ...grpc.CallOption) (*ListBackendNamesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBackendNamesResponse)
+	err := c.cc.Invoke(ctx, IaCStateBackend_ListBackendNames_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IaCStateBackendServer is the server API for IaCStateBackend service.
+// All implementations must embed UnimplementedIaCStateBackendServer
+// for forward compatibility.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCStateBackend — strict contract for IaC state storage backends served by a
+// plugin sidecar. Maps 1:1 onto module.IaCStateStore (6 methods). Unary RPCs:
+// the PR 2 benchmark validated unary transport for 1 MB state blobs against the
+// in-process baseline. No lock-lease/TTL field — added additively only once a
+// plugin backend implements honored expiry with a conformance test.
+// ─────────────────────────────────────────────────────────────────────────────
+type IaCStateBackendServer interface {
+	Configure(context.Context, *ConfigureRequest) (*ConfigureResponse, error)
+	GetState(context.Context, *GetStateRequest) (*GetStateResponse, error)
+	SaveState(context.Context, *SaveStateRequest) (*SaveStateResponse, error)
+	ListStates(context.Context, *ListStatesRequest) (*ListStatesResponse, error)
+	DeleteState(context.Context, *DeleteStateRequest) (*DeleteStateResponse, error)
+	Lock(context.Context, *LockRequest) (*LockResponse, error)
+	Unlock(context.Context, *UnlockRequest) (*UnlockResponse, error)
+	ListBackendNames(context.Context, *ListBackendNamesRequest) (*ListBackendNamesResponse, error)
+	mustEmbedUnimplementedIaCStateBackendServer()
+}
+
+// UnimplementedIaCStateBackendServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCStateBackendServer struct{}
+
+func (UnimplementedIaCStateBackendServer) Configure(context.Context, *ConfigureRequest) (*ConfigureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Configure not implemented")
+}
+func (UnimplementedIaCStateBackendServer) GetState(context.Context, *GetStateRequest) (*GetStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetState not implemented")
+}
+func (UnimplementedIaCStateBackendServer) SaveState(context.Context, *SaveStateRequest) (*SaveStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveState not implemented")
+}
+func (UnimplementedIaCStateBackendServer) ListStates(context.Context, *ListStatesRequest) (*ListStatesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListStates not implemented")
+}
+func (UnimplementedIaCStateBackendServer) DeleteState(context.Context, *DeleteStateRequest) (*DeleteStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteState not implemented")
+}
+func (UnimplementedIaCStateBackendServer) Lock(context.Context, *LockRequest) (*LockResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Lock not implemented")
+}
+func (UnimplementedIaCStateBackendServer) Unlock(context.Context, *UnlockRequest) (*UnlockResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Unlock not implemented")
+}
+func (UnimplementedIaCStateBackendServer) ListBackendNames(context.Context, *ListBackendNamesRequest) (*ListBackendNamesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListBackendNames not implemented")
+}
+func (UnimplementedIaCStateBackendServer) mustEmbedUnimplementedIaCStateBackendServer() {}
+func (UnimplementedIaCStateBackendServer) testEmbeddedByValue()                         {}
+
+// UnsafeIaCStateBackendServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCStateBackendServer will
+// result in compilation errors.
+type UnsafeIaCStateBackendServer interface {
+	mustEmbedUnimplementedIaCStateBackendServer()
+}
+
+func RegisterIaCStateBackendServer(s grpc.ServiceRegistrar, srv IaCStateBackendServer) {
+	// If the following call panics, it indicates UnimplementedIaCStateBackendServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCStateBackend_ServiceDesc, srv)
+}
+
+func _IaCStateBackend_Configure_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).Configure(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_Configure_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).Configure(ctx, req.(*ConfigureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCStateBackend_GetState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).GetState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_GetState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).GetState(ctx, req.(*GetStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCStateBackend_SaveState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).SaveState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_SaveState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).SaveState(ctx, req.(*SaveStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCStateBackend_ListStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListStatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).ListStates(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_ListStates_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).ListStates(ctx, req.(*ListStatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCStateBackend_DeleteState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).DeleteState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_DeleteState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).DeleteState(ctx, req.(*DeleteStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCStateBackend_Lock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LockRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).Lock(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_Lock_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).Lock(ctx, req.(*LockRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCStateBackend_Unlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnlockRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).Unlock(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_Unlock_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).Unlock(ctx, req.(*UnlockRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCStateBackend_ListBackendNames_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBackendNamesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCStateBackendServer).ListBackendNames(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCStateBackend_ListBackendNames_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCStateBackendServer).ListBackendNames(ctx, req.(*ListBackendNamesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// IaCStateBackend_ServiceDesc is the grpc.ServiceDesc for IaCStateBackend service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCStateBackend_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCStateBackend",
+	HandlerType: (*IaCStateBackendServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Configure",
+			Handler:    _IaCStateBackend_Configure_Handler,
+		},
+		{
+			MethodName: "GetState",
+			Handler:    _IaCStateBackend_GetState_Handler,
+		},
+		{
+			MethodName: "SaveState",
+			Handler:    _IaCStateBackend_SaveState_Handler,
+		},
+		{
+			MethodName: "ListStates",
+			Handler:    _IaCStateBackend_ListStates_Handler,
+		},
+		{
+			MethodName: "DeleteState",
+			Handler:    _IaCStateBackend_DeleteState_Handler,
+		},
+		{
+			MethodName: "Lock",
+			Handler:    _IaCStateBackend_Lock_Handler,
+		},
+		{
+			MethodName: "Unlock",
+			Handler:    _IaCStateBackend_Unlock_Handler,
+		},
+		{
+			MethodName: "ListBackendNames",
+			Handler:    _IaCStateBackend_ListBackendNames_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

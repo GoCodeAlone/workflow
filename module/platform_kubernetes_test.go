@@ -2,6 +2,7 @@ package module_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -151,35 +152,30 @@ func TestPlatformKubernetes_UnsupportedType(t *testing.T) {
 	}
 }
 
-// TestPlatformKubernetes_EKSStubPlan verifies that EKS Plan returns a stub action.
-func TestPlatformKubernetes_EKSStubPlan(t *testing.T) {
+// TestPlatformKubernetes_EKSBackendMigrationError verifies that the EKS backend
+// returns a helpful migration error directing users to workflow-plugin-aws.
+func TestPlatformKubernetes_EKSBackendMigrationError(t *testing.T) {
 	k := module.NewPlatformKubernetes("eks-cluster", map[string]any{"type": "eks"})
 	app := module.NewMockApplication()
 	if err := k.Init(app); err != nil {
-		t.Fatalf("Init: %v", err)
+		t.Fatalf("Init should succeed: %v", err)
 	}
-	plan, err := k.Plan()
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	if len(plan.Actions) == 0 {
-		t.Fatal("expected at least one action")
-	}
-	if plan.Provider != "eks" {
-		t.Errorf("expected provider=eks, got %q", plan.Provider)
-	}
-}
 
-// TestPlatformKubernetes_EKSApplyNotImplemented verifies EKS Apply returns an error.
-func TestPlatformKubernetes_EKSApplyNotImplemented(t *testing.T) {
-	k := module.NewPlatformKubernetes("eks-cluster", map[string]any{"type": "eks"})
-	app := module.NewMockApplication()
-	if err := k.Init(app); err != nil {
-		t.Fatalf("Init: %v", err)
+	// All operations must return a migration error.
+	_, planErr := k.Plan()
+	if planErr == nil {
+		t.Fatal("Plan: expected migration error, got nil")
 	}
-	_, err := k.Apply()
-	if err == nil {
-		t.Error("expected error from EKS Apply stub, got nil")
+	_, applyErr := k.Apply()
+	if applyErr == nil {
+		t.Fatal("Apply: expected migration error, got nil")
+	}
+
+	errStr := planErr.Error()
+	for _, want := range []string{"workflow-plugin-aws", "v0.53.0", "cluster_type: kind"} {
+		if !strings.Contains(errStr, want) {
+			t.Errorf("error should mention %q, got: %s", want, errStr)
+		}
 	}
 }
 

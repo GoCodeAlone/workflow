@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -915,5 +917,281 @@ func TestEnvOverride_ImportBundle(t *testing.T) {
 
 	if *importBundle != "/some/bundle.tar.gz" {
 		t.Errorf("importBundle = %q, want %q", *importBundle, "/some/bundle.tar.gz")
+	}
+}
+
+// TestReloadEngine_BuildFailureKeepsPriorEngineActive verifies that when the
+// candidate config cannot be built (e.g. unknown module type), reloadEngine
+// returns an error and the serverApp's engine pointer is left unchanged.
+// This proves the safe try-activate contract: the current engine stays live
+// for the entire build phase and is never stopped on build failure.
+func TestReloadEngine_BuildFailureKeepsPriorEngineActive(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	// Start with a valid minimal config.
+	initialCfg := config.NewEmptyWorkflowConfig()
+	app, err := setup(logger, initialCfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	originalEngine := app.engine
+
+	// Attempt a reload with an invalid config (unknown module type).
+	badCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "bad", Type: "nonexistent.module.type.for.test"},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+
+	reloadErr := app.reloadEngine(badCfg)
+	if reloadErr == nil {
+		t.Fatal("expected reloadEngine to return an error for invalid module type")
+	}
+
+	// The engine reference must be unchanged — the old engine was not stopped.
+	if app.engine != originalEngine {
+		t.Error("reloadEngine build failure replaced the active engine; expected it to be unchanged")
+	}
+}
+
+// TestReloadEngine_SuccessReplacesEngine verifies that a successful reload
+// replaces the engine pointer and updates currentConfig.
+func TestReloadEngine_SuccessReplacesEngine(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	initialCfg := config.NewEmptyWorkflowConfig()
+
+	app, err := setup(logger, initialCfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	originalEngine := app.engine
+
+	// Reload with another valid empty config.
+	newCfg := config.NewEmptyWorkflowConfig()
+	if err := app.reloadEngine(newCfg); err != nil {
+		t.Fatalf("reloadEngine with valid config failed: %v", err)
+	}
+
+	if app.engine == originalEngine {
+		t.Error("expected reloadEngine to replace the engine pointer")
+	}
+	if app.engine == nil {
+		t.Error("expected non-nil engine after successful reload")
+	}
+}
+
+// TestReloadEngine_StartFailureRollsBackToPriorConfig verifies that a candidate
+// engine start failure restores the prior config and active engine.
+func TestReloadEngine_StartFailureRollsBackToPriorConfig(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	initialCfg := config.NewEmptyWorkflowConfig()
+
+	app, err := setup(logger, initialCfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	originalConfig := app.currentConfig
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on test port: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	conflictingCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "conflicting-server",
+				Type:   "http.server",
+				Config: map[string]any{"address": listener.Addr().String()},
+			},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+
+	reloadErr := app.reloadEngine(conflictingCfg)
+	if reloadErr == nil {
+		t.Fatal("expected reloadEngine to fail when candidate cannot bind its port")
+	}
+	if app.currentConfig != originalConfig {
+		t.Error("expected rollback to restore previous config pointer")
+	}
+	if app.engine == nil {
+		t.Fatal("expected rollback to leave an active engine")
+	}
+}
+
+func TestReloadEngine_StartFailureReportsRollbackBuildFailure(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	app, err := setup(logger, config.NewEmptyWorkflowConfig())
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	app.currentConfig = &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "bad", Type: "nonexistent.module.type.for.rollback"},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on test port: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	reloadErr := app.reloadEngine(configWithHTTPServerOn(listener.Addr().String()))
+	if reloadErr == nil {
+		t.Fatal("expected reloadEngine to report rollback build failure")
+	}
+	if !strings.Contains(reloadErr.Error(), "rollback build failed") {
+		t.Fatalf("expected rollback build failure, got %v", reloadErr)
+	}
+}
+
+func TestReloadEngine_StartFailureReportsRollbackStartFailure(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	app, err := setup(logger, config.NewEmptyWorkflowConfig())
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on test port: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	conflictingCfg := configWithHTTPServerOn(listener.Addr().String())
+	app.currentConfig = conflictingCfg
+
+	reloadErr := app.reloadEngine(conflictingCfg)
+	if reloadErr == nil {
+		t.Fatal("expected reloadEngine to report rollback start failure")
+	}
+	if !strings.Contains(reloadErr.Error(), "rollback start failed") {
+		t.Fatalf("expected rollback start failure, got %v", reloadErr)
+	}
+}
+
+func configWithHTTPServerOn(address string) *config.WorkflowConfig {
+	return &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name:   "conflicting-server",
+				Type:   "http.server",
+				Config: map[string]any{"address": address},
+			},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+}
+
+// TestTryActivateEngine_ValidConfigReturnsBuildOK verifies that tryActivateEngine
+// returns a "build_ok" result for a valid config without touching the active engine.
+func TestTryActivateEngine_ValidConfigReturnsBuildOK(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	initialCfg := config.NewEmptyWorkflowConfig()
+
+	app, err := setup(logger, initialCfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	originalEngine := app.engine
+
+	candidateCfg := config.NewEmptyWorkflowConfig()
+	result, err := app.tryActivateEngine(candidateCfg)
+	if err != nil {
+		t.Fatalf("tryActivateEngine failed unexpectedly: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil TryActivateResult")
+	}
+	if result.Status != "build_ok" {
+		t.Errorf("expected status %q, got %q", "build_ok", result.Status)
+	}
+	// Active engine pointer must be unchanged.
+	if app.engine != originalEngine {
+		t.Error("tryActivateEngine must not replace the active engine pointer")
+	}
+}
+
+// TestTryActivateEngine_InvalidConfigReturnsBuildFailed verifies that
+// tryActivateEngine returns a non-nil error and a "build_failed" result
+// for a config with an unknown module type.
+func TestTryActivateEngine_InvalidConfigReturnsBuildFailed(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	initialCfg := config.NewEmptyWorkflowConfig()
+
+	app, err := setup(logger, initialCfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	originalEngine := app.engine
+
+	badCfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "bad", Type: "nonexistent.module.type.for.test"},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+
+	result, buildErr := app.tryActivateEngine(badCfg)
+	if buildErr == nil {
+		t.Fatal("expected tryActivateEngine to return error for invalid module type")
+	}
+	if result == nil {
+		t.Fatal("expected non-nil TryActivateResult even on failure")
+	}
+	if result.Status != "build_failed" {
+		t.Errorf("expected status %q, got %q", "build_failed", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected non-empty error field in TryActivateResult")
+	}
+	// Active engine pointer must be unchanged.
+	if app.engine != originalEngine {
+		t.Error("tryActivateEngine failure must not replace the active engine pointer")
 	}
 }

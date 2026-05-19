@@ -31,12 +31,15 @@ type RegistryManifest struct {
 	Source           string                     `json:"source,omitempty"`
 	Type             string                     `json:"type"`
 	Tier             string                     `json:"tier"`
+	Status           string                     `json:"status,omitempty"`  // verified | experimental | deprecated
+	Private          bool                       `json:"private,omitempty"` // mirrors manifest.json `private` field
 	License          string                     `json:"license"`
 	MinEngineVersion string                     `json:"minEngineVersion,omitempty"`
 	Repository       string                     `json:"repository,omitempty"`
 	Keywords         []string                   `json:"keywords,omitempty"`
 	Homepage         string                     `json:"homepage,omitempty"`
 	Capabilities     *RegistryCapabilities      `json:"capabilities,omitempty"`
+	IaCProvider      *RegistryIaCProvider       `json:"iacProvider,omitempty"`
 	Contracts        []pluginContractDescriptor `json:"contracts,omitempty"`
 	Downloads        []PluginDownload           `json:"downloads,omitempty"`
 	Assets           *PluginAssets              `json:"assets,omitempty"`
@@ -75,8 +78,9 @@ type RegistryCLICommand struct {
 // installed plugin.json to match a requested provider name (e.g. "digitalocean")
 // to a plugin directory.
 type RegistryIaCProvider struct {
-	Name          string   `json:"name"`
-	ResourceTypes []string `json:"resourceTypes,omitempty"`
+	Name               string   `json:"name,omitempty"`
+	ResourceTypes      []string `json:"resourceTypes,omitempty"`
+	ComputePlanVersion string   `json:"computePlanVersion,omitempty"`
 }
 
 // PluginDownload describes a platform-specific binary download for a plugin.
@@ -99,6 +103,7 @@ type PluginSummary struct {
 	Version     string
 	Description string
 	Tier        string
+	Status      string // verified | experimental | deprecated; "" if not set
 }
 
 // githubContentsEntry is an entry from the GitHub contents API response.
@@ -203,6 +208,7 @@ func SearchPlugins(query string) ([]PluginSummary, error) {
 				Version:     m.Version,
 				Description: m.Description,
 				Tier:        m.Tier,
+				Status:      m.Status,
 			})
 		}
 	}

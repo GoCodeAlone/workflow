@@ -1,0 +1,123 @@
+v0.51.3 strict-contracts-ergonomics — runtime-launch-validation transcript
+=========================================================================
+
+Date: 2026-05-12
+Branch: fix/strict-contracts-ergonomics-v0.51.3 (HEAD: 5379b67e)
+Plan: docs/plans/2026-05-12-strict-contracts-ergonomics.md (Task 8, R2-6 gate)
+
+Goal
+----
+
+Smoke-load a strict-cutover IaC plugin (i.e. one that uses sdk.ServeIaCPlugin
+without ManifestProvider set) against the rebuilt cmd/server binary, exercising
+the engine-side disk-manifest fallback path end-to-end. Verify:
+
+  (a) No "validate manifest" error at plugin load time.
+  (b) No "proto: unknown field \"_config_dir\"" error during config decode.
+  (c) Plugin loads with non-empty Version on the in-engine adapter.
+
+
+Step 1 — Build cmd/server
+-------------------------
+
+Command:
+    GOWORK=off go build -o /tmp/wf-server ./cmd/server
+
+Result: exits 0. Binary size 272752530 bytes. `--help` parses + prints the
+canonical flag set, confirming the build is functional (smoke-test #1 of the
+launch validation gate).
+
+
+Step 2 — Stage a strict-cutover IaC plugin
+------------------------------------------
+
+The plan's exact recipe expects DO v1.0.11 staged at
+/tmp/wf-plugins-test/digitalocean/{digitalocean,plugin.json}. Locally I have:
+
+  - workflow-plugin-digitalocean source at /Users/jon/workspace/workflow-plugin-digitalocean
+    pinned to v0.12.0 (no v1.0.11 release tagged on this local checkout)
+  - workflow-plugin-digitalocean/cmd/plugin/main.go calls
+    `sdk.ServeIaCPlugin(internal.NewIaCServer(), sdk.IaCServeOptions{})` —
+    zero IaCServeOptions, so NO ManifestProvider set — which is exactly the
+    strict-cutover shape this gate is meant to exercise.
+
+Status: SKIPPED — DO v1.0.11 release not staged locally; rebuilding v0.12.0
+against the in-progress workflow worktree requires either a `replace` directive
+or a workspace include, neither of which is currently configured. Building DO
+out-of-tree would also exercise the published v0.51.2 sdk surface, not the
+v0.51.3 changes under test (i.e. it would not validate the new code path).
+
+Plan §Task 8 explicitly allows this skip when v1.0.11 is not locally available
+and requires the smoke be run as a release gate.
+
+
+Step 3 — In-process substitute (IS executed, IS green)
+------------------------------------------------------
+
+The in-process equivalent of this smoke is the new e2e test added in this same
+PR — `TestManagerLoadPluginThreadsDiskManifestToAdapter` in
+`plugin/external/integration_test.go`. It exercises:
+
+  - manager-side `pluginpkg.LoadManifest + Validate` (mirrors manager.go:108-114)
+  - 3-arg `NewExternalPluginAdapter(name, client, disk)` with a gRPC stub that
+    returns codes.Unimplemented for GetManifest (strict-cutover IaC shape)
+  - asserts `EngineManifest().Version == "9.9.9"` AND `Validate()` returns nil
+    AND `Description()` matches the disk-loaded value
+
+Result:
+    GOWORK=off go test ./plugin/external/ -run TestManagerLoadPlugin -v
+    === RUN   TestManagerLoadPluginThreadsDiskManifestToAdapter
+    --- PASS: TestManagerLoadPluginThreadsDiskManifestToAdapter (0.00s)
+    PASS
+    ok  github.com/GoCodeAlone/workflow/plugin/external 0.682s
+
+This covers the SAME engine code path the subprocess smoke would exercise.
+The only thing it does NOT exercise is the actual go-plugin subprocess fork
++ stdio handshake — that surface is unchanged in v0.51.3.
+
+
+Step 4 — Suite gates (executed, all green)
+------------------------------------------
+
+    GOWORK=off go test ./...                                       → PASS
+        (two pre-existing env-dependent failures observed:
+         * cmd/wfctl TestInfraMultiEnv_E2E — requires DO plugin installed
+           in ./data/plugins; same failure reproduces on origin/main with
+           identical wording → pre-existing, unrelated to v0.51.3
+         * example.test/wfctl-ci/pkg TestFallbackRuns — synthetic
+           negative-test fixture injected by ci_run_test.go; t.Fatal is
+           by design, used by outer test to detect when CI runner falls
+           back to plain `go test`; not a real failure)
+    GOWORK=off go test -race ./plugin/external/... ./plugin/external/sdk/...
+        ok  github.com/GoCodeAlone/workflow/plugin/external      3.125s
+        ok  github.com/GoCodeAlone/workflow/plugin/external/proto 3.083s
+        ok  github.com/GoCodeAlone/workflow/plugin/external/sdk   2.371s
+    GOWORK=off golangci-lint run ./plugin/external/... \
+                                 ./plugin/external/sdk/... \
+                                 ./cmd/wfctl/...
+        0 issues.
+
+
+Verdict
+-------
+
+LOCAL CI gate: PASS (build + e2e + race + lint clean; pre-existing
+env-dependent failures NOT caused by v0.51.3).
+
+LAUNCH gate: PENDING — must run real-subprocess smoke against
+workflow-plugin-digitalocean v1.0.11 (or any other strict-cutover IaC plugin
+release) before tagging v0.51.3. Recommended pre-release ritual:
+
+    1. Tag workflow main with v0.51.3-rc1.
+    2. Build DO plugin against v0.51.3-rc1 SDK.
+    3. Stage DO binary + plugin.json at /tmp/wf-plugins-test/digitalocean/.
+    4. Run /tmp/wf-server -config example/iac-do-basic-config.yaml \
+                          -plugins-dir /tmp/wf-plugins-test
+    5. Verify log "plugin \"digitalocean\" loaded successfully" AND no
+       "validate manifest" / "unknown field \"_config_dir\"" errors.
+    6. If green → promote v0.51.3-rc1 → v0.51.3.
+    7. If red → file regression issue, do NOT tag.
+
+Per ADR-0031 §Consequences this gate is a release prerequisite, not a merge
+prerequisite, so the PR can land while the launch gate runs against the
+to-be-tagged candidate.

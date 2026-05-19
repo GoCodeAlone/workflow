@@ -1,6 +1,7 @@
 package external
 
 import (
+	"reflect"
 	"testing"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -48,6 +49,44 @@ func TestMapToStruct_NilInputReturnsNil(t *testing.T) {
 	}
 	if s != nil {
 		t.Errorf("expected nil struct on nil input, got %v", s)
+	}
+}
+
+// TestStripInternalKeys covers the engine-internal "_"-prefix key strip used
+// before STRICT_PROTO / PROTO_WITH_LEGACY_STRUCT typed encode. Strip is the
+// reserved namespace for engine internals (e.g. "_config_dir") which must not
+// appear in plugin proto schemas — protojson with DiscardUnknown=false rejects
+// them.
+func TestStripInternalKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		in   map[string]any
+		want map[string]any
+	}{
+		{name: "nil input", in: nil, want: nil},
+		{name: "no underscore keys", in: map[string]any{"a": 1, "b": "x"}, want: map[string]any{"a": 1, "b": "x"}},
+		{name: "strips _config_dir", in: map[string]any{"_config_dir": "/etc", "name": "x"}, want: map[string]any{"name": "x"}},
+		{name: "strips multiple", in: map[string]any{"_a": 1, "_b": 2, "c": 3}, want: map[string]any{"c": 3}},
+		{name: "all stripped", in: map[string]any{"_a": 1, "_b": 2}, want: map[string]any{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripInternalKeys(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("stripInternalKeys(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStripInternalKeysDoesNotMutateInput locks in the copy-on-clean contract:
+// the caller's original map MUST retain "_"-prefix keys so the legacy
+// *structpb.Struct path in createTypedConfigRequest can still consume them.
+func TestStripInternalKeysDoesNotMutateInput(t *testing.T) {
+	in := map[string]any{"_config_dir": "/etc", "name": "x"}
+	_ = stripInternalKeys(in)
+	if _, ok := in["_config_dir"]; !ok {
+		t.Fatalf("stripInternalKeys mutated input — _config_dir removed from original")
 	}
 }
 

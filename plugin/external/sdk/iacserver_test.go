@@ -88,7 +88,7 @@ func TestRegisterAllIaCProviderServices_TypedNilPointer_ReturnsError(t *testing.
 
 // TestRegisterAllIaCProviderServices_AllOptionals_AllRegistered
 // asserts that a provider satisfying every optional + required interface
-// triggers registration of all 7 typed services (Required + 6 optional)
+// triggers registration of all 8 typed services (Required + 7 optional)
 // plus the ResourceDriver.
 func TestRegisterAllIaCProviderServices_AllOptionals_AllRegistered(t *testing.T) {
 	grpcSrv := grpc.NewServer()
@@ -105,12 +105,70 @@ func TestRegisterAllIaCProviderServices_AllOptionals_AllRegistered(t *testing.T)
 		"workflow.plugin.external.iac.IaCProviderMigrationRepairer",
 		"workflow.plugin.external.iac.IaCProviderValidator",
 		"workflow.plugin.external.iac.IaCProviderDriftConfigDetector",
+		"workflow.plugin.external.iac.IaCProviderFinalizer",
 		"workflow.plugin.external.iac.ResourceDriver",
 	}
 	for _, name := range wantServices {
 		if _, ok := info[name]; !ok {
 			t.Errorf("expected service %q registered; have: %v", name, serviceNames(info))
 		}
+	}
+}
+
+// TestRegisterAll_RegistersIaCStateBackend asserts that a provider whose type
+// also satisfies pb.IaCStateBackendServer gets the IaCStateBackend service
+// auto-registered — exactly like the IaCProvider* optionals. Amendment A2
+// (decisions/0035).
+func TestRegisterAll_RegistersIaCStateBackend(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &stateBackendProviderStub{}
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info := grpcSrv.GetServiceInfo()
+	if _, ok := info["workflow.plugin.external.iac.IaCStateBackend"]; !ok {
+		t.Fatalf("IaCStateBackend service NOT registered despite provider satisfying interface; have: %v", serviceNames(info))
+	}
+}
+
+// stateBackendProviderStub satisfies IaCProviderRequired (the required minimum
+// for ServeIaCPlugin) AND IaCStateBackend — representative of an IaC plugin
+// whose provider type also serves state storage.
+type stateBackendProviderStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedIaCStateBackendServer
+}
+
+// TestRegisterAll_RegistersIaCProviderFinalizer asserts that a provider whose
+// type also satisfies pb.IaCProviderFinalizerServer gets the
+// IaCProviderFinalizer service auto-registered — same opt-in posture as the
+// other IaCProvider* optionals. Per workflow#695 Phase 2.5 / ADR 0024
+// (absence of registration IS the negative signal; no compat shim).
+func TestRegisterAll_RegistersIaCProviderFinalizer(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &finalizerProviderStub{}
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info := grpcSrv.GetServiceInfo()
+	if _, ok := info["workflow.plugin.external.iac.IaCProviderFinalizer"]; !ok {
+		t.Fatalf("IaCProviderFinalizer service NOT registered despite provider satisfying interface; have: %v", serviceNames(info))
+	}
+}
+
+// TestRegisterAll_SkipsIaCProviderFinalizerWhenNotImplemented locks the
+// negative signal contract: a provider that does NOT satisfy
+// pb.IaCProviderFinalizerServer MUST NOT have the service registered.
+// Per ADR 0024 + ADR 0040 invariant on optional services.
+func TestRegisterAll_SkipsIaCProviderFinalizerWhenNotImplemented(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &fullProviderStub{} // no finalizer embed
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info := grpcSrv.GetServiceInfo()
+	if _, ok := info["workflow.plugin.external.iac.IaCProviderFinalizer"]; ok {
+		t.Fatalf("IaCProviderFinalizer service WAS registered despite provider not satisfying interface; have: %v", serviceNames(info))
 	}
 }
 
@@ -136,6 +194,14 @@ type enumeratorOnlyStub struct {
 	pb.UnimplementedIaCProviderEnumeratorServer
 }
 
+// finalizerProviderStub satisfies IaCProviderRequired (the required minimum
+// for ServeIaCPlugin) AND IaCProviderFinalizer — representative of the DO
+// plugin shape under workflow#695 Phase 2.5.
+type finalizerProviderStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedIaCProviderFinalizerServer
+}
+
 // allCapabilitiesStub satisfies every required + optional IaC service plus
 // ResourceDriver — used to assert auto-registration covers the full surface.
 type allCapabilitiesStub struct {
@@ -146,6 +212,7 @@ type allCapabilitiesStub struct {
 	pb.UnimplementedIaCProviderMigrationRepairerServer
 	pb.UnimplementedIaCProviderValidatorServer
 	pb.UnimplementedIaCProviderDriftConfigDetectorServer
+	pb.UnimplementedIaCProviderFinalizerServer
 	pb.UnimplementedResourceDriverServer
 }
 
@@ -226,7 +293,9 @@ func TestRegisterAllIaCProviderServices_PluginServiceAlreadyRegistered_NoPanic(t
 	// Pre-register PluginService (simulates a mixed sdk.Serve + IaC plugin).
 	// Use an embedded-by-value stub so the pattern is idiomatic Go and not
 	// a pointer-to-unimplemented (which the generated gRPC code warns against).
-	type minimalPluginSvc struct{ pb.UnimplementedPluginServiceServer }
+	type minimalPluginSvc struct {
+		pb.UnimplementedPluginServiceServer
+	}
 	pb.RegisterPluginServiceServer(grpcSrv, &minimalPluginSvc{})
 	// RegisterAllIaCProviderServices must not panic on double-registration.
 	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, &fullProviderStub{}); err != nil {

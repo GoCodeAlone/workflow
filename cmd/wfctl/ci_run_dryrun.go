@@ -177,7 +177,6 @@ func resolveDeployInfoFromConfig(wfCfg *config.WorkflowConfig, envName, provider
 	// references the provider.
 	deployTargetTypes := []string{
 		"infra.container_service",
-		"platform.do_app",
 		"platform.app_platform",
 		"infra.k8s_cluster",
 	}

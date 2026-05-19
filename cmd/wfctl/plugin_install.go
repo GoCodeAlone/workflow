@@ -56,16 +56,29 @@ func runPluginSearch(args []string) error {
 		fmt.Println("No plugins found.")
 		return nil
 	}
-	fmt.Printf("%-20s %-10s %-12s %-12s %s\n", "NAME", "VERSION", "TIER", "SOURCE", "DESCRIPTION")
-	fmt.Printf("%-20s %-10s %-12s %-12s %s\n", "----", "-------", "----", "------", "-----------")
+	fmt.Print(formatPluginSearchResults(plugins))
+	return nil
+}
+
+// formatPluginSearchResults renders the wfctl plugin search table as a string.
+// Extracted from runPluginSearch so unit tests can exercise the formatter
+// without capturing stdout.
+func formatPluginSearchResults(plugins []PluginSearchResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", "NAME", "VERSION", "TIER", "STATUS", "SOURCE", "DESCRIPTION")
+	fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", "----", "-------", "----", "------", "------", "-----------")
 	for _, p := range plugins {
 		desc := p.Description
 		if len(desc) > 50 {
 			desc = desc[:47] + "..."
 		}
-		fmt.Printf("%-20s %-10s %-12s %-12s %s\n", p.Name, p.Version, p.Tier, p.Source, desc)
+		status := p.Status
+		if status == "" {
+			status = "-"
+		}
+		fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", p.Name, p.Version, p.Tier, status, p.Source, desc)
 	}
-	return nil
+	return b.String()
 }
 
 func runPluginInstall(args []string) error {
@@ -87,7 +100,11 @@ func runPluginInstall(args []string) error {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl-lock.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
+	parsedArgs, err := interspersedPluginInstallArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	if err := fs.Parse(parsedArgs); err != nil {
 		return err
 	}
 	// Validate flag combinations before doing anything else.
@@ -251,6 +268,49 @@ func runPluginInstall(args []string) error {
 	return nil
 }
 
+type boolFlag interface {
+	IsBoolFlag() bool
+}
+
+func interspersedPluginInstallArgs(fs *flag.FlagSet, args []string) ([]string, error) {
+	if len(args) == 0 {
+		return args, nil
+	}
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positionals = append(positionals, args[i:]...)
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positionals = append(positionals, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		name := strings.TrimLeft(arg, "-")
+		if idx := strings.IndexByte(name, '='); idx >= 0 {
+			name = name[:idx]
+		}
+		f := fs.Lookup(name)
+		if f == nil || strings.Contains(arg, "=") {
+			continue
+		}
+		if bf, ok := f.Value.(boolFlag); ok && bf.IsBoolFlag() {
+			continue
+		}
+		remaining := args[i+1:]
+		if len(remaining) == 0 {
+			return nil, fmt.Errorf("flag needs an argument: -%s", name)
+		}
+		value := remaining[0]
+		i++
+		flags = append(flags, value)
+	}
+	return append(flags, positionals...), nil
+}
+
 // installPluginFromManifest downloads, extracts, and installs a plugin using the
 // provided registry manifest. It is shared by runPluginInstall and runPluginUpdate.
 // The plugin.json is always written/updated from the manifest to keep version tracking correct.
@@ -269,9 +329,16 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 	}
 
 	destDir := filepath.Join(dataDir, pluginName)
-	if err := os.MkdirAll(destDir, 0750); err != nil {
-		return fmt.Errorf("create plugin dir %s: %w", destDir, err)
+
+	// Prepare a staging directory alongside the final destination so that any
+	// existing installation is never mutated in place. This prevents stale
+	// binaries from surviving an upgrade when the tarball uses a differently-
+	// named executable (e.g. GoReleaser platform-suffix names).
+	stagingDir, cleanupStaging, err := preparePluginStagingDir(destDir)
+	if err != nil {
+		return err
 	}
+	defer cleanupStaging() // no-op if commitPluginStagingDir succeeds (staging renamed away)
 
 	fmt.Fprintf(os.Stderr, "Downloading %s...\n", dl.URL)
 	data, err := downloadURL(dl.URL)
@@ -307,7 +374,7 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 	// Emit install_verify hook after download and before extraction (opt-in via req.Verify).
 	// Write tarball to disk so hook handlers can inspect it (e.g. sigstore cosign verify).
 	if verify != nil {
-		tarballPath := filepath.Join(destDir, pluginName+".tar.gz")
+		tarballPath := filepath.Join(stagingDir, pluginName+".tar.gz")
 		if writeErr := os.WriteFile(tarballPath, data, 0600); writeErr != nil {
 			return fmt.Errorf("write tarball for verify hook: %w", writeErr)
 		}
@@ -318,28 +385,43 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 	}
 
 	fmt.Fprintf(os.Stderr, "Extracting to %s...\n", destDir)
-	if err := extractTarGz(data, destDir); err != nil {
+	if err := extractTarGz(data, stagingDir); err != nil {
 		return fmt.Errorf("extract plugin: %w", err)
 	}
 
 	// Ensure the plugin binary is named to match the plugin name so that
 	// ExternalPluginManager.DiscoverPlugins() can find it (expects <dir>/<name>/<name>).
-	if err := ensurePluginBinary(destDir, pluginName); err != nil {
+	if err := ensurePluginBinary(stagingDir, pluginName); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
 	}
 
 	// Write plugin.json from the registry manifest. This keeps the installed
 	// version metadata in sync with the manifest. If the tarball already
 	// extracted a plugin.json, this overwrites it with the registry version.
-	pluginJSONPath := filepath.Join(destDir, "plugin.json")
+	// Failure is a hard error: continuing with an archive-supplied plugin.json
+	// could silently drop registry-only metadata (capabilities, CLI commands,
+	// build hooks) and would let the archive version bypass verifyInstalledVersion.
+	pluginJSONPath := filepath.Join(stagingDir, "plugin.json")
 	if writeErr := writeInstalledManifest(pluginJSONPath, manifest); writeErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not write plugin.json: %v\n", writeErr)
+		return fmt.Errorf("write plugin.json: %w", writeErr)
 	}
 
-	// Verify the installed plugin.json is valid for ExternalPluginManager.
+	// Verify the staged plugin.json is valid for ExternalPluginManager.
 	fmt.Fprintf(os.Stderr, "Verifying plugin manifest...\n")
-	if verifyErr := verifyInstalledPlugin(destDir, pluginName); verifyErr != nil {
+	if verifyErr := verifyInstalledPlugin(stagingDir, pluginName); verifyErr != nil {
 		return fmt.Errorf("post-install verification failed: %w", verifyErr)
+	}
+
+	// Verify the installed version matches what the manifest declares. This
+	// catches cases where plugin.json could not be written above.
+	if verifyErr := verifyInstalledVersion(stagingDir, manifest.Version); verifyErr != nil {
+		return fmt.Errorf("post-install version check failed: %w", verifyErr)
+	}
+
+	// Atomically replace any previous installation with the validated staging
+	// directory. If this step fails the old installation is left intact.
+	if commitErr := commitPluginStagingDir(stagingDir, destDir); commitErr != nil {
+		return commitErr
 	}
 
 	// Strip any existing "v" prefix from the version before printing so that
@@ -390,14 +472,15 @@ func runPluginList(args []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-20s %-10s %-10s %s\n", "NAME", "VERSION", "TYPE", "DESCRIPTION")
-	fmt.Printf("%-20s %-10s %-10s %s\n", "----", "-------", "----", "-----------")
+	fmt.Printf("%-20s %-10s %-10s %-14s %s\n", "NAME", "VERSION", "TYPE", "STATUS", "DESCRIPTION")
+	fmt.Printf("%-20s %-10s %-10s %-14s %s\n", "----", "-------", "----", "------", "-----------")
 	for _, p := range plugins {
 		desc := p.description
 		if len(desc) > 40 {
 			desc = desc[:37] + "..."
 		}
-		fmt.Printf("%-20s %-10s %-10s %s\n", p.name, p.version, p.pluginType, desc)
+		// Status is not persisted to disk on install; render "-" for installed plugins.
+		fmt.Printf("%-20s %-10s %-10s %-14s %s\n", p.name, p.version, p.pluginType, "-", desc)
 	}
 	return nil
 }
@@ -727,21 +810,31 @@ func installFromURL(rawURL, pluginDir, expectedSHA256 string, skipChecksum bool)
 
 	pluginName := normalizePluginName(pj.Name)
 	destDir := filepath.Join(pluginDir, pluginName)
-	if err := os.MkdirAll(destDir, 0750); err != nil {
-		return fmt.Errorf("create plugin dir: %w", err)
-	}
 
-	if err := extractTarGz(data, destDir); err != nil {
+	// Prepare a staging directory alongside the final destination so that any
+	// existing installation is never mutated in place.
+	stagingDir, cleanupStaging, err := preparePluginStagingDir(destDir)
+	if err != nil {
+		return err
+	}
+	defer cleanupStaging()
+
+	if err := extractTarGz(data, stagingDir); err != nil {
 		return fmt.Errorf("extract to dest: %w", err)
 	}
 
-	if err := ensurePluginBinary(destDir, pluginName); err != nil {
+	if err := ensurePluginBinary(stagingDir, pluginName); err != nil {
 		return fmt.Errorf("could not normalize binary name: %w", err)
 	}
 
-	// Validate the installed plugin (same checks as registry installs).
-	if verifyErr := verifyInstalledPlugin(destDir, pluginName); verifyErr != nil {
+	// Validate the staged plugin (same checks as registry installs).
+	if verifyErr := verifyInstalledPlugin(stagingDir, pluginName); verifyErr != nil {
 		return fmt.Errorf("post-install verification failed: %w", verifyErr)
+	}
+
+	// Atomically replace any previous installation.
+	if commitErr := commitPluginStagingDir(stagingDir, destDir); commitErr != nil {
+		return commitErr
 	}
 
 	// Hash the installed binary (not the archive) so that verifyInstalledChecksum matches.
@@ -802,12 +895,17 @@ func installFromLocal(srcDir, pluginDir string) error {
 
 	pluginName := normalizePluginName(pj.Name)
 	destDir := filepath.Join(pluginDir, pluginName)
-	if err := os.MkdirAll(destDir, 0750); err != nil {
-		return fmt.Errorf("create plugin dir: %w", err)
+
+	// Prepare a staging directory alongside the final destination so that any
+	// existing installation is never mutated in place.
+	stagingDir, cleanupStaging, err := preparePluginStagingDir(destDir)
+	if err != nil {
+		return err
 	}
+	defer cleanupStaging()
 
 	// Copy plugin.json
-	if err := copyFile(pjPath, filepath.Join(destDir, "plugin.json"), 0640); err != nil {
+	if err := copyFile(pjPath, filepath.Join(stagingDir, "plugin.json"), 0640); err != nil {
 		return err
 	}
 
@@ -820,8 +918,13 @@ func installFromLocal(srcDir, pluginDir string) error {
 			return fmt.Errorf("no plugin binary found in %s (tried %s and %s)", srcDir, pluginName, fullName)
 		}
 	}
-	if err := copyFile(srcBinary, filepath.Join(destDir, pluginName), 0750); err != nil {
+	if err := copyFile(srcBinary, filepath.Join(stagingDir, pluginName), 0750); err != nil {
 		return err
+	}
+
+	// Atomically replace any previous installation.
+	if commitErr := commitPluginStagingDir(stagingDir, destDir); commitErr != nil {
+		return commitErr
 	}
 
 	binaryChecksum, hashErr := hashFileSHA256(filepath.Join(destDir, pluginName))
@@ -1273,6 +1376,7 @@ type installedPluginJSON struct {
 	Tags         []string                     `json:"tags,omitempty"`
 	Type         string                       `json:"type,omitempty"`
 	Capabilities *installedPluginCapabilities `json:"capabilities,omitempty"`
+	IaCProvider  *RegistryIaCProvider         `json:"iacProvider,omitempty"`
 }
 
 type installedPluginCapabilities struct {
@@ -1306,6 +1410,7 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 		Tier:        m.Tier,
 		Tags:        m.Keywords,
 		Type:        m.Type,
+		IaCProvider: m.IaCProvider,
 	}
 	if m.Capabilities != nil {
 		pj.Capabilities = &installedPluginCapabilities{
@@ -1362,6 +1467,81 @@ func ensurePluginBinary(destDir, pluginName string) error {
 		return fmt.Errorf("no executable binary found in %s", destDir)
 	}
 	return os.Rename(filepath.Join(destDir, bestName), expectedPath)
+}
+
+// preparePluginStagingDir removes any leftover staging directory and creates a
+// fresh one alongside destDir (same filesystem). The caller must call
+// commitPluginStagingDir on success. On failure the returned cleanup func
+// removes the staging directory.
+func preparePluginStagingDir(destDir string) (stagingDir string, cleanup func(), err error) {
+	stagingDir = destDir + ".installing"
+	if removeErr := os.RemoveAll(stagingDir); removeErr != nil {
+		return "", nil, fmt.Errorf("clean staging dir %s: %w", stagingDir, removeErr)
+	}
+	// Ensure the parent directory exists so MkdirAll only needs to create the
+	// staging leaf.
+	if mkErr := os.MkdirAll(filepath.Dir(destDir), 0750); mkErr != nil {
+		return "", nil, fmt.Errorf("create plugin base dir: %w", mkErr)
+	}
+	if mkErr := os.Mkdir(stagingDir, 0750); mkErr != nil {
+		return "", nil, fmt.Errorf("create staging dir %s: %w", stagingDir, mkErr)
+	}
+	return stagingDir, func() { os.RemoveAll(stagingDir) }, nil //nolint:errcheck
+}
+
+// commitPluginStagingDir replaces destDir with stagingDir. To preserve the
+// existing installation if the final rename fails, the old destDir is first
+// renamed to a trash location on the same filesystem. Only after the new
+// directory is successfully renamed into place is the trash removed.
+//
+//  1. Rename destDir → destDir+".uninstalling"  (no-op if destDir absent)
+//  2. Rename stagingDir → destDir
+//  3. On step-2 failure: restore destDir+".uninstalling" → destDir
+//  4. On step-2 success: remove destDir+".uninstalling"
+//
+// On success stagingDir no longer exists on disk; the deferred cleanup
+// returned by preparePluginStagingDir becomes a harmless no-op.
+func commitPluginStagingDir(stagingDir, destDir string) error {
+	trashDir := destDir + ".uninstalling"
+	// Remove any leftover trash from a previous interrupted commit.
+	if err := os.RemoveAll(trashDir); err != nil {
+		return fmt.Errorf("clean trash dir %s: %w", trashDir, err)
+	}
+
+	// Move the existing install out of the way before installing the new one.
+	// If destDir does not exist yet (first install) we skip this step.
+	hasExisting := false
+	if _, statErr := os.Stat(destDir); statErr == nil {
+		hasExisting = true
+		if err := os.Rename(destDir, trashDir); err != nil {
+			return fmt.Errorf("preserve existing plugin dir %s: %w", destDir, err)
+		}
+	}
+
+	// Move staging into the final location.
+	if err := os.Rename(stagingDir, destDir); err != nil {
+		// Best-effort restore: move the old install back if we preserved it.
+		if hasExisting {
+			_ = os.Rename(trashDir, destDir) //nolint:errcheck
+		}
+		return fmt.Errorf("install plugin dir %s: %w", destDir, err)
+	}
+
+	// New install is in place — remove the old one (best effort).
+	_ = os.RemoveAll(trashDir) //nolint:errcheck
+	return nil
+}
+
+// verifyInstalledVersion checks that the plugin.json in dir declares the
+// expected version. It normalises "v" prefixes before comparing, so "v1.0.8"
+// and "1.0.8" are treated as equal.
+func verifyInstalledVersion(dir, expectedVersion string) error {
+	installedVersion := readInstalledVersion(dir)
+	norm := func(v string) string { return strings.TrimPrefix(v, "v") }
+	if norm(installedVersion) != norm(expectedVersion) {
+		return fmt.Errorf("installed plugin.json version %q does not match expected %q", installedVersion, expectedVersion)
+	}
+	return nil
 }
 
 // verifyInstalledPlugin validates the installed plugin.json using the engine's

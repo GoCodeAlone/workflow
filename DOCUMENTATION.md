@@ -179,7 +179,6 @@ flowchart TD
 | `step.dlq_replay` | Replays messages from the dead-letter queue | pipelinesteps |
 | `step.retry_with_backoff` | Retries a sub-pipeline with exponential backoff | pipelinesteps |
 | `step.resilient_circuit_breaker` | Wraps a sub-pipeline with a circuit breaker | pipelinesteps |
-| `step.s3_upload` | Uploads a file or data to an S3-compatible bucket | pipelinesteps |
 | `step.auth_validate` | Validates an authentication token and populates claims | pipelinesteps |
 | `step.token_revoke` | Revokes an auth token | pipelinesteps |
 | `step.field_reencrypt` | Re-encrypts a field with a new key | pipelinesteps |
@@ -272,10 +271,6 @@ flowchart TD
 | `step.k8s_apply` | Applies a Kubernetes manifest or deployment config | platform |
 | `step.k8s_status` | Retrieves the status of a Kubernetes workload | platform |
 | `step.k8s_destroy` | Tears down a Kubernetes workload | platform |
-| `step.ecs_plan` | Generates an ECS task/service deployment plan | platform |
-| `step.ecs_apply` | Deploys a task or service to AWS ECS | platform |
-| `step.ecs_status` | Retrieves the status of an ECS service | platform |
-| `step.ecs_destroy` | Removes an ECS task or service | platform |
 | `step.iac_plan` | Plans IaC changes (Terraform plan, Pulumi preview, etc.) | platform |
 | `step.iac_apply` | Applies IaC changes | platform |
 | `step.iac_status` | Retrieves the current state of an IaC stack | platform |
@@ -297,17 +292,6 @@ flowchart TD
 | `step.dns_plan` | Plans DNS record changes | platform |
 | `step.dns_apply` | Applies DNS record changes | platform |
 | `step.dns_status` | Retrieves the current DNS records for a domain | platform |
-| `step.network_plan` | Plans networking resource changes (VPC, subnets, etc.) | platform |
-| `step.network_apply` | Applies networking resource changes | platform |
-| `step.network_status` | Retrieves the status of networking resources | platform |
-| `step.apigw_plan` | Plans API gateway configuration changes | platform |
-| `step.apigw_apply` | Applies API gateway configuration changes | platform |
-| `step.apigw_status` | Retrieves API gateway deployment status | platform |
-| `step.apigw_destroy` | Removes an API gateway configuration | platform |
-| `step.scaling_plan` | Plans auto-scaling policy changes | platform |
-| `step.scaling_apply` | Applies auto-scaling policies | platform |
-| `step.scaling_status` | Retrieves current auto-scaling state | platform |
-| `step.scaling_destroy` | Removes auto-scaling policies | platform |
 | `step.app_deploy` | Deploys a containerized application | platform |
 | `step.app_status` | Retrieves deployment status of an application | platform |
 | `step.app_rollback` | Rolls back an application to a previous deployment | platform |
@@ -322,11 +306,11 @@ flowchart TD
 | `step.argo_logs` | Retrieves logs from an Argo Workflow | platform |
 | `step.argo_delete` | Deletes an Argo Workflow | platform |
 | `step.argo_list` | Lists Argo Workflows for a namespace | platform |
-| `step.do_deploy` | Deploys to DigitalOcean App Platform | platform |
-| `step.do_status` | Retrieves DigitalOcean App Platform deployment status | platform |
-| `step.do_logs` | Fetches DigitalOcean App Platform runtime logs | platform |
-| `step.do_scale` | Scales a DigitalOcean App Platform component | platform |
-| `step.do_destroy` | Destroys a DigitalOcean App Platform deployment | platform |
+
+**DigitalOcean IaC steps** were removed from workflow core in v0.52.0 and moved to the
+[workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
+external plugin. After loading the plugin, use the generic `step.iac_*` pipeline steps.
+See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
 
 ### Expression Syntax
 
@@ -503,20 +487,22 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 | `platform.resource` | Infrastructure resource managed by a platform provider | platform |
 | `platform.context` | Execution context for platform operations (org, environment, tier) | platform |
 | `platform.kubernetes` | Kubernetes cluster deployment target | platform |
-| `platform.ecs` | AWS ECS cluster deployment target | platform |
-| `platform.dns` | DNS provider for managing records (Route53, CloudFlare, etc.) | platform |
-| `platform.networking` | VPC and networking resource management | platform |
-| `platform.apigateway` | API gateway resource management (AWS API GW, etc.) | platform |
-| `platform.autoscaling` | Auto-scaling policy and target management | platform |
+| `platform.dns` | DNS provider for managing records (mock; AWS Route53 backend removed in v0.53.0) | platform |
 | `platform.region` | Multi-region deployment configuration | platform |
 | `platform.region_router` | Routes traffic across regions by weight, latency, or failover | platform |
-| `platform.doks` | DigitalOcean Kubernetes Service (DOKS) deployment | platform |
-| `platform.do_app` | DigitalOcean App Platform deployment (deploy, scale, logs, destroy) | platform |
-| `platform.do_networking` | DigitalOcean VPC and firewall management | platform |
-| `platform.do_dns` | DigitalOcean domain and DNS record management | platform |
-| `platform.do_database` | DigitalOcean Managed Database (PostgreSQL, MySQL, Redis) | platform |
+
+**DigitalOcean IaC modules** were removed from workflow core in v0.52.0 and moved to the
+[workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
+external plugin. After loading the plugin, use the generic `infra.*` module
+types with `provider: digitalocean` and the generic `step.iac_*` pipeline
+steps. See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
+
+**AWS IaC modules** (`platform.ecs`, `platform.networking`, `platform.apigateway`, `platform.autoscaling`) were removed from workflow core in v0.53.0 and are provided by the
+[workflow-plugin-aws](https://github.com/GoCodeAlone/workflow-plugin-aws) v0.2.0+ plugin.
+Use the generic `infra.*` module types with `provider: aws` and `step.iac_*` pipeline steps.
+See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 | `iac.provider` | Cloud provider configuration (aws, gcp, azure, digitalocean) for IaC operations | platform |
-| `iac.state` | IaC state persistence (memory, filesystem, spaces, gcs, azure_blob, postgres) | platform |
+| `iac.state` | IaC state persistence (memory + filesystem + postgres in-core; spaces / s3 / gcs / azure_blob via plugins) | platform |
 | `infra.vpc` | Virtual Private Cloud and subnet management | platform |
 | `infra.database` | Managed database instance provisioning and configuration | platform |
 | `infra.cache` | In-memory cache cluster provisioning (Redis, Memcached) | platform |
@@ -530,6 +516,7 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 | `infra.iam_role` | IAM role and policy creation and management | platform |
 | `infra.storage` | Object storage provisioning and access configuration | platform |
 | `infra.certificate` | SSL/TLS certificate provisioning and renewal | platform |
+| `infra.autoscaling_group` | Auto-scaling group provisioning and policy management | platform |
 | `app.container` | Containerised application deployment descriptor | platform |
 | `argo.workflows` | Argo Workflows integration for Kubernetes-native workflow orchestration | platform |
 | `aws.codebuild` | AWS CodeBuild project and build management | cicd |
@@ -549,8 +536,6 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 ### Storage
 | Type | Description | Plugin |
 |------|-------------|--------|
-| `storage.s3` | Amazon S3 storage | storage |
-| `storage.gcs` | Google Cloud Storage | storage |
 | `storage.local` | Local filesystem storage | storage |
 | `storage.sqlite` | SQLite storage | storage |
 | `storage.artifact` | Artifact store for build artifacts shared across pipeline steps | storage |

@@ -11,16 +11,70 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
+// RefWarningCode classifies a pipeline reference warning so callers can make
+// policy decisions without parsing human-readable warning text.
+type RefWarningCode string
+
+const (
+	RefWarningHyphenatedDotAccess RefWarningCode = "hyphenated_dot_access"
+	RefWarningUnknownOutput       RefWarningCode = "unknown_output"
+	RefWarningMissingStep         RefWarningCode = "missing_step"
+	RefWarningSelfReference       RefWarningCode = "self_reference"
+	RefWarningForwardReference    RefWarningCode = "forward_reference"
+	RefWarningSQLColumnMismatch   RefWarningCode = "sql_column_mismatch"
+)
+
 // RefValidationResult holds the outcome of pipeline template reference validation.
-// Warnings are suspicious but non-fatal references; Errors are definitively wrong.
+// Warnings are suspicious but non-fatal references; WarningCodes classifies each
+// warning at the same index. Errors are definitively wrong.
 type RefValidationResult struct {
-	Warnings []string
-	Errors   []string
+	Warnings     []string
+	WarningCodes []RefWarningCode
+	Errors       []string
 }
 
 // HasIssues returns true when there are any warnings or errors.
 func (r *RefValidationResult) HasIssues() bool {
 	return len(r.Warnings) > 0 || len(r.Errors) > 0
+}
+
+// AddWarning records a warning and its stable machine-readable code.
+func (r *RefValidationResult) AddWarning(code RefWarningCode, message string) {
+	r.Warnings = append(r.Warnings, message)
+	r.WarningCodes = append(r.WarningCodes, code)
+}
+
+// BlockingWarningMessages returns warning messages that represent deterministic
+// runtime failures and should fail strict validation.
+func (r *RefValidationResult) BlockingWarningMessages() []string {
+	blocking := make([]string, 0, len(r.Warnings))
+	for i, warning := range r.Warnings {
+		code := RefWarningCode("")
+		if i < len(r.WarningCodes) {
+			code = r.WarningCodes[i]
+		}
+		if IsBlockingRefWarningCode(code) {
+			blocking = append(blocking, warning)
+		}
+	}
+	return blocking
+}
+
+// IsBlockingRefWarningCode reports whether a warning code should fail strict
+// validation. Hyphenated dot-access is non-blocking because the runtime rewrites
+// it, but missing/forward/self refs and invalid output/SQL fields are runtime
+// failures.
+func IsBlockingRefWarningCode(code RefWarningCode) bool {
+	switch code {
+	case RefWarningMissingStep,
+		RefWarningSelfReference,
+		RefWarningForwardReference,
+		RefWarningUnknownOutput,
+		RefWarningSQLColumnMismatch:
+		return true
+	default:
+		return false
+	}
 }
 
 // templateExprRe matches template actions {{ ... }}.
@@ -36,6 +90,9 @@ var stepFieldDotRe = regexp.MustCompile(`\.steps\.([a-zA-Z_][a-zA-Z0-9_-]*)\.([a
 
 // stepRefIndexRe matches index .steps "STEP_NAME" patterns.
 var stepRefIndexRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"`)
+
+// stepIndexFieldRe matches index .steps "STEP_NAME" "FIELD_NAME" patterns.
+var stepIndexFieldRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"\s+"([^"]+)"`)
 
 // stepRefFuncRe matches step "STEP_NAME" function calls at the start of an
 // action, after a pipe, or after an opening parenthesis.
@@ -194,7 +251,15 @@ func validatePipelineTemplateRefs(pipelineName string, stepsRaw []any, reg *sche
 					}
 				}
 
-				// Check for step name references via index (no field path resolvable)
+				// Check for step output field references via index
+				// (index .steps "STEP_NAME" "FIELD_NAME" ...)
+				indexFieldMatches := stepIndexFieldRe.FindAllStringSubmatch(actionContent, -1)
+				for _, m := range indexFieldMatches {
+					refStepName, refField := m[1], m[2]
+					validateStepOutputField(pipelineName, stepName, refStepName, refField, stepMeta, reg, result)
+				}
+
+				// Check for step name references via index.
 				indexMatches := stepRefIndexRe.FindAllStringSubmatch(actionContent, -1)
 				for _, m := range indexMatches {
 					refName := m[1]
@@ -217,7 +282,7 @@ func validatePipelineTemplateRefs(pipelineName string, stepsRaw []any, reg *sche
 
 				// Warn on hyphenated dot-access (auto-fixed but suggest preferred syntax)
 				if hyphenDotRe.MatchString(actionContent) {
-					result.Warnings = append(result.Warnings,
+					result.AddWarning(RefWarningHyphenatedDotAccess,
 						fmt.Sprintf("pipeline %q step %q: template uses hyphenated dot-access which is auto-fixed; prefer step \"name\" \"field\" syntax", pipelineName, stepName))
 				}
 			}
@@ -264,7 +329,7 @@ func validateStepOutputField(pipelineName, currentStep, refStepName, refField st
 	for _, o := range outputs {
 		keys = append(keys, o.Key)
 	}
-	result.Warnings = append(result.Warnings,
+	result.AddWarning(RefWarningUnknownOutput,
 		fmt.Sprintf("pipeline %q step %q: references %s.%s but step %q (%s) declares outputs: %s",
 			pipelineName, currentStep, refStepName, refField, refStepName, meta.typ, strings.Join(keys, ", ")))
 }
@@ -277,15 +342,15 @@ func validateStepRef(pipelineName, currentStep, refName, fieldPath string, curre
 	refIdx, exists := stepNames[refName]
 	switch {
 	case !exists:
-		result.Warnings = append(result.Warnings,
+		result.AddWarning(RefWarningMissingStep,
 			fmt.Sprintf("pipeline %q step %q: references step %q which does not exist in this pipeline", pipelineName, currentStep, refName))
 		return
 	case refIdx == currentIdx:
-		result.Warnings = append(result.Warnings,
+		result.AddWarning(RefWarningSelfReference,
 			fmt.Sprintf("pipeline %q step %q: references itself; a step cannot use its own outputs because they are not available until after execution", pipelineName, currentStep))
 		return
 	case refIdx > currentIdx:
-		result.Warnings = append(result.Warnings,
+		result.AddWarning(RefWarningForwardReference,
 			fmt.Sprintf("pipeline %q step %q: references step %q which has not executed yet (appears later in pipeline)", pipelineName, currentStep, refName))
 		return
 	}
@@ -328,7 +393,7 @@ func validateStepRef(pipelineName, currentStep, refName, fieldPath string, curre
 		}
 	}
 	if matchedOutput == nil {
-		result.Warnings = append(result.Warnings,
+		result.AddWarning(RefWarningUnknownOutput,
 			fmt.Sprintf("pipeline %q step %q: references step %q output field %q which is not a known output of step type %q (known outputs: %s)",
 				pipelineName, currentStep, refName, firstField, info.stepType, joinOutputKeys(outputs)))
 		return
@@ -349,7 +414,7 @@ func validateStepRef(pipelineName, currentStep, refName, fieldPath string, curre
 					}
 				}
 				if !found {
-					result.Warnings = append(result.Warnings,
+					result.AddWarning(RefWarningSQLColumnMismatch,
 						fmt.Sprintf("pipeline %q step %q: references step %q output field \"row.%s\" but the SQL query does not select column %q (available: %s)",
 							pipelineName, currentStep, refName, columnName, columnName, strings.Join(sqlCols, ", ")))
 				}
@@ -380,8 +445,9 @@ func validatePlainStepRefs(pipelineName, stepName string, stepIdx int, stepCfg m
 }
 
 // collectTemplateStrings recursively finds all strings containing {{ in a value tree.
-// This intentionally scans all fields (not just "config") because template expressions
-// can appear in conditions, names, and other step fields.
+// It scans all fields except nested "step"/"steps" definitions. Nested step lists
+// need their own ordering context; validating them as top-level pipeline steps
+// produces false missing-step findings.
 func collectTemplateStrings(data any) []string {
 	var results []string
 	switch v := data.(type) {
@@ -390,7 +456,10 @@ func collectTemplateStrings(data any) []string {
 			results = append(results, v)
 		}
 	case map[string]any:
-		for _, val := range v {
+		for key, val := range v {
+			if key == "step" || key == "steps" {
+				continue
+			}
 			results = append(results, collectTemplateStrings(val)...)
 		}
 	case []any:
@@ -441,12 +510,16 @@ func ExtractSQLColumns(query string) []string {
 	// Find SELECT ... FROM
 	upper := strings.ToUpper(query)
 	selectIdx := strings.Index(upper, "SELECT ")
-	fromIdx := strings.Index(upper, " FROM ")
-	if selectIdx < 0 || fromIdx < 0 || fromIdx <= selectIdx {
+	if selectIdx < 0 {
 		return nil
 	}
 
-	selectClause := query[selectIdx+7 : fromIdx]
+	selectStart := selectIdx + len("SELECT ")
+	fromIdx := topLevelSQLKeywordIndex(query, selectStart, " FROM ")
+	selectClause := query[selectStart:]
+	if fromIdx > selectStart {
+		selectClause = query[selectStart:fromIdx]
+	}
 
 	// Handle DISTINCT
 	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(selectClause)), "DISTINCT ") {
@@ -482,6 +555,36 @@ func ExtractSQLColumns(query string) []string {
 		columns = append(columns, col)
 	}
 	return columns
+}
+
+func topLevelSQLKeywordIndex(query string, start int, keyword string) int {
+	upper := strings.ToUpper(query)
+	depth := 0
+	var quote byte
+	for i := start; i <= len(query)-len(keyword); i++ {
+		ch := query[i]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && strings.HasPrefix(upper[i:], keyword) {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // extractColumnName extracts the effective column name from a SELECT expression.

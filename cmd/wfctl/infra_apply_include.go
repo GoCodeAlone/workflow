@@ -30,6 +30,35 @@ func parseIncludeFlag(raw string) map[string]struct{} {
 	return out
 }
 
+func sortedIncludeNames(include map[string]struct{}) []string {
+	if len(include) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(include))
+	for name := range include {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func includeSetFromNames(names []string) map[string]struct{} {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		out[name] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // validateIncludeSet returns an error if any name in the include set is not
 // declared in either specs or states. Resources can be in either side
 // (state-only resource is eligible for delete; spec-only resource is

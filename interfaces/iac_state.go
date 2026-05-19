@@ -84,6 +84,12 @@ type IaCPlan struct {
 	// --plan compares this against the current config to detect stale plans.
 	DesiredHash string `json:"plan_hash,omitempty"`
 
+	// Include records the sorted resource names passed through
+	// `wfctl infra plan --include`. Empty means the plan covered the full
+	// desired set. wfctl infra apply --plan uses this to recompute DesiredHash
+	// against the same scope without requiring --include at apply time.
+	Include []string `json:"include,omitempty"`
+
 	// SchemaVersion is bumped when on-disk plan format changes (W-5 sets to 2 when JIT is required).
 	SchemaVersion int `json:"schema_version,omitempty"`
 
@@ -141,6 +147,47 @@ type DriftEntry struct {
 	ApplyFingerprint string `json:"apply_fingerprint"`
 }
 
+// ActionStatus categorizes per-action outcomes for wfctl-side hook dispatch.
+// Mirrors pb.ActionStatus (plugin/external/proto/iac.proto) for type-safe Go
+// boundary use; constant tags 0-6 MUST stay in lockstep with the proto.
+// Per workflow#640 Phase 2 + workflow#698 Phase 2.3 + ADR 0040 invariants 1-2.
+//
+// Phase 2.3 reclassification: the engine now distinguishes pre-dispatch
+// (Skipped), dispatch (Error/DeleteFailed), and post-hook (CompensationFailed)
+// failures. Consumers that previously checked ActionStatusError alone for
+// "action did not produce desired end-state" should now check
+// {Error, DeleteFailed, CompensationFailed, Skipped}.
+type ActionStatus uint8
+
+const (
+	// ActionStatusUnspecified is the zero-value. Engine-side population
+	// in wfctlhelpers.ApplyPlanWithHooks must replace this before
+	// returning; wfctl rejects ActionOutcome entries left at
+	// Unspecified per ADR 0040 invariant 2. Per workflow#699 the
+	// proto-side decode path (formerly applyResultFromPB) is gone —
+	// the only producer is now the engine's per-action populate.
+	ActionStatusUnspecified ActionStatus = iota
+	ActionStatusSuccess
+	ActionStatusError
+	ActionStatusDeleteFailed
+	// Phase 2.3 (workflow#698):
+	ActionStatusCompensated        // reserved-for-future-emission; engine v0.56.0 does NOT emit (no auto-compensation); plugins may emit if they implement own compensation
+	ActionStatusCompensationFailed // post-driver-success hook failed; cloud-side work IS done; operator must verify state; manual compensation may be required
+	ActionStatusSkipped            // action never attempted at driver (ctx-cancel pre-dispatch, JIT-substitution-fail, driver-resolve-fail); cloud-side state unchanged
+)
+
+// ActionOutcome is the wfctl-side per-action surfacing for v2 hook
+// dispatch. Engine populates one entry per PlanAction in
+// ApplyResult.Actions; wfctl dispatches v2 hooks (Created / Deleted) by
+// matching ActionIndex back to the planned action slice. Per
+// workflow#699 the proto-side pb.ActionResult mirror was deleted —
+// ActionOutcome is now the sole representation of per-action outcome.
+type ActionOutcome struct {
+	ActionIndex uint32       `json:"action_index"`
+	Status      ActionStatus `json:"status"`
+	Error       string       `json:"error,omitempty"`
+}
+
 // ApplyResult summarises the outcome of applying a plan.
 type ApplyResult struct {
 	PlanID    string           `json:"plan_id"`
@@ -177,6 +224,15 @@ type ApplyResult struct {
 	// the replaced resource by name in their config, so JIT substitution
 	// in W-5 translates "name → new ProviderID" via this map.
 	ReplaceIDMap map[string]string `json:"replace_id_map,omitempty"`
+
+	// Actions surfaces per-PlanAction outcomes for v2 hook dispatch in
+	// wfctl. Always populated (one entry per IaCPlan.Actions index) when
+	// an IaC plugin declares ComputePlanVersion="v2" in
+	// CapabilitiesResponse. Per ADR 0024 + ADR 0040, plugins NOT
+	// declaring v2 are permanently incompatible with workflow v0.54.0+;
+	// there is no compat shim. Per workflow#640 Phase 2 + ADR 0040
+	// invariants 1-2.
+	Actions []ActionOutcome `json:"actions,omitempty"`
 }
 
 // DestroyResult summarises the outcome of a destroy operation.

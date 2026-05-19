@@ -19,6 +19,7 @@ import (
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
@@ -27,12 +28,10 @@ import (
 // nil or InputDriftReport is empty/nil — both yield a no-op so callers
 // don't need to defensively check the field before calling.
 //
-// Wired in by W-3a/T3.1.5 as a standalone helper; the actual call site in
-// applyWithProviderAndStore (or its successor) lands when W-3b/T3.7
-// switches the in-process apply path through wfctlhelpers.ApplyPlan for
-// v2 plugins. Until then this helper is exercised solely by the
-// in-process drift test, NOT yet by any production caller — preserving
-// the W-3a "zero runtime change for v1 plugins" invariant.
+// Production drift-surfacing path on the v2 (only) apply dispatch — per
+// workflow#699, v2 via wfctlhelpers.ApplyPlanWithHooks is the sole code
+// path, so this helper now runs unconditionally after every apply
+// invocation in both applyWithProviderAndStore and applyPrecomputedPlanWithStore.
 func printDriftReportIfAny(w io.Writer, result *interfaces.ApplyResult) {
 	if result == nil || len(result.InputDriftReport) == 0 {
 		return
@@ -53,12 +52,12 @@ var infraApplyTroubleshootTimeout = 30 * time.Second
 // (mirroring resolveIaCProvider/loadIaCPlugin in deploy_providers.go).
 var computeInfraPlan = platform.ComputePlan
 
-// applyV2ApplyPlanFn is the indirection seam through which apply
-// dispatches the v2 path (wfctlhelpers.ApplyPlan). Defaults to the
-// production helper; tests override it to assert routing decisions
-// without standing up a real plugin or executing real driver calls.
-// Same var-seam pattern as computeInfraPlan / resolveIaCProvider.
-var applyV2ApplyPlanFn = wfctlhelpers.ApplyPlan
+// applyV2ApplyPlanWithHooksFn is the indirection seam through which apply
+// dispatches the v2 path. Defaults to the production helper; tests override
+// it to assert routing decisions without standing up a real plugin or
+// executing real driver calls. Same var-seam pattern as computeInfraPlan /
+// resolveIaCProvider.
+var applyV2ApplyPlanWithHooksFn = wfctlhelpers.ApplyPlanWithHooks
 
 // applyAllowReplaceSet is the per-invocation allow-list of resource
 // names whose `protected: true` annotation is overridden for this
@@ -127,8 +126,8 @@ func hasInfraModules(cfgFile string) bool {
 	return false
 }
 
-// hasPlatformModules reports whether cfgFile contains any modules with the legacy
-// platform.* type prefix.
+// hasPlatformModules reports whether cfgFile contains any modules with the
+// platform.* type prefix (e.g., platform.kubernetes, platform.ecs).
 func hasPlatformModules(cfgFile string) bool {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
@@ -356,11 +355,13 @@ func resourceSpecProviderRef(spec interfaces.ResourceSpec) string {
 }
 
 // applyWithProviderAndStore computes a diff plan for the given specs against
-// the current state and executes it via provider.Apply. On success, each
-// provisioned resource is persisted to store. Save failures abort the command
-// so callers cannot miss a successful cloud mutation whose state was not
-// recorded. Deleted resources are removed from store after a successful destroy
-// action.
+// the current state and executes it via wfctlhelpers.ApplyPlanWithHooks (the
+// v2-only dispatch per workflow#699; routed through the
+// applyV2ApplyPlanWithHooksFn seam for test injection). On success, each
+// provisioned resource is persisted to store via the OnResourceApplied hook.
+// Save failures abort the command so callers cannot miss a successful cloud
+// mutation whose state was not recorded. Deleted resources are removed from
+// store via the OnResourceDeleted hook after a successful destroy action.
 //
 // providerType is used only as a label when constructing ResourceState records.
 // Callers pass a nil store (or noopStateStore) when state persistence is not
@@ -410,7 +411,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// group; applyInfraModules does that before invoking this helper.
 
 	var err error
-	current, err = adoptExistingResources(ctx, provider, providerType, specs, current, store)
+	current, err = adoptExistingResources(ctx, provider, providerType, specs, current, store, secretsProvider, hydratedOut)
 	if err != nil {
 		return err
 	}
@@ -432,20 +433,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 
 	// W-6/T6.1: gate replace and delete actions on `protected: true`
 	// resources behind --allow-replace. Without an explicit per-resource
-	// opt-in, the apply errors before any provider Apply / wfctlhelpers
+	// opt-in, the apply errors before the wfctlhelpers.ApplyPlanWithHooks
 	// dispatch — destructive actions on protected infrastructure must
 	// be intentional. T6.2 swaps this fail-fast for an aggregated
 	// multi-blocker report.
 	if err := validateAllowReplaceProtected(plan, applyAllowReplaceSet); err != nil {
 		return err
-	}
-
-	// Collect delete-action resource names so we can clean up state afterward.
-	deleteNames := make(map[string]struct{})
-	for i := range plan.Actions {
-		if plan.Actions[i].Action == "delete" {
-			deleteNames[plan.Actions[i].Resource.Name] = struct{}{}
-		}
 	}
 
 	// Soft-warn if any update/delete action targets a resource whose ProviderID
@@ -454,33 +447,16 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 
-	// W-3b T3.7: branch on the loaded plugin's manifest. Providers
-	// declaring iacProvider.computePlanVersion: v2 in plugin.json route
-	// through wfctlhelpers.ApplyPlan (Replace + drift postcondition);
-	// everything else takes the legacy provider.Apply path. NO env-var
-	// gate (rev2/rev3 fix per cycle-2 — there is no transitional
-	// WFCTL_USE_V2_APPLY); the choice is plugin-author-controlled at
-	// load time and surfaced via the optional
-	// wfctlhelpers.ComputePlanVersionDeclarer interface.
-	var result *interfaces.ApplyResult
-	// DispatchVersionFor centralises the type-assertion + default; pass the
-	// raw provider rather than re-asserting ComputePlanVersionDeclarer at the
-	// call site (per dispatch.go contract).
-	if wfctlhelpers.DispatchVersionFor(provider) == wfctlhelpers.DispatchVersionV2 {
-		result, err = applyV2ApplyPlanFn(ctx, provider, &plan)
-		// printDriftReportIfAny was added unwired in W-3a/T3.1.5; the
-		// v2 dispatch is the production caller that surfaces input
-		// drift to the operator. Run on success OR partial failure
-		// (the operator most needs the drift diagnostic when an apply
-		// fails — "which input went stale during the failed apply?"
-		// — so we print whenever a result was produced rather than
-		// gating on err == nil). Silently no-ops when the report is
-		// empty, so unconditional-on-result-non-nil is safe.
-		if result != nil {
-			printDriftReportIfAny(w, result)
-		}
-	} else {
-		result, err = provider.Apply(ctx, &plan)
+	// v2 is the only supported dispatch per ADR 0024 + workflow#699.
+	// IaCProvider.Apply was hard-deleted from the interface; all routing
+	// goes through wfctlhelpers.ApplyPlanWithHooks (Replace + drift
+	// postcondition + IaCProviderFinalizer fan-out).
+	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
+	// printDriftReportIfAny surfaces input-drift to the operator on
+	// success OR partial failure — silently no-ops on empty reports.
+	if result != nil {
+		printDriftReportIfAny(w, result)
 	}
 	if err != nil {
 		// Derive the most specific resource ref we can for troubleshooting.
@@ -520,8 +496,10 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
-		// Provider.Apply can surface a top-level error (vs. populating
-		// result.Errors[]). Emit the actionable hint here too if the
+		// applyV2ApplyPlanWithHooksFn can surface a top-level error
+		// (gRPC transport failure, plugin-side sentinel bubble, or
+		// local pre-Replace failure) distinct from per-resource entries
+		// in result.Errors[]. Emit the actionable hint here too if the
 		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
 		// otherwise plugin paths that bubble the sentinel via err escape
 		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
@@ -529,79 +507,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {
-		// Pre-flight: if any driver emitted sensitive outputs but no
-		// secrets.Provider is configured, fail fast with a complete
-		// diagnostic before per-resource persistence kicks off.
-		if err := requireSecretsProviderForSensitiveOutputs(secretsProvider, result); err != nil {
-			return fmt.Errorf("state write rejected: %w", err)
-		}
-		// Persist state for every successfully provisioned resource.
-		for _, r := range result.Resources {
-			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
-
-			// Hard-fail when the driver returns a malformed ProviderID for a strict
-			// format. This prevents corrupt state from reaching the store.
-			if err := validateOutputProviderID(provider, providerType, &r); err != nil {
-				return fmt.Errorf("state write rejected: %w", err)
-			}
-
-			// Find the matching spec to get the applied config.
-			var appliedCfg map[string]any
-			var providerRef string
-			var dependencies []string
-			for i := range specs {
-				if specs[i].Name == r.Name {
-					appliedCfg = specs[i].Config
-					providerRef = resolveIaCProviderRef(specs[i].Config)
-					dependencies = append([]string(nil), specs[i].DependsOn...)
-					break
-				}
-			}
-
-			now := time.Now().UTC()
-			rs := interfaces.ResourceState{
-				ID:                  r.Name,
-				Name:                r.Name,
-				Type:                r.Type,
-				Provider:            providerType,
-				ProviderRef:         providerRef,
-				ProviderID:          r.ProviderID,
-				ConfigHash:          configHashMap(appliedCfg),
-				AppliedConfig:       appliedCfg,
-				AppliedConfigSource: "apply",
-				// Outputs is set by persistResourceWithSecretRouting after Route.
-				Dependencies: dependencies,
-				CreatedAt:    now,
-				UpdatedAt:    now,
-			}
-			driver, _ := provider.ResourceDriver(r.Type) // best-effort for compensating Delete; nil-safe
-			hyd, persistErr := persistResourceWithSecretRouting(ctx, store, secretsProvider, driver, rs, r, persistModeApply)
-			if persistErr != nil {
-				return persistErr
-			}
-			if hydratedOut != nil {
-				for k, v := range hyd {
-					hydratedOut[k] = v
-				}
-			}
-		}
-
-		// Delete state records for resources that were destroyed.
-		for name := range deleteNames {
-			if delErr := store.DeleteResource(ctx, name); delErr != nil {
-				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
-			}
-		}
-
 		if len(result.Errors) > 0 {
 			msgs := make([]string, 0, len(result.Errors))
 			for _, ae := range result.Errors {
 				msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
 			}
 			finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
-			// Emit an actionable hint to stderr if any per-resource error
-			// matches interfaces.ErrImageNotInRegistry (typed in-process or
-			// string-match across gRPC boundary). See infra_image_presence_hint.go.
 			emitImageNotInRegistryHint(os.Stderr, finalErr)
 			return finalErr
 		}
@@ -609,7 +520,171 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	return nil
 }
 
-func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) ([]interfaces.ResourceState, error) {
+func statePersistenceHooks(
+	store infraStateStore,
+	secretsProvider secrets.Provider,
+	provider interfaces.IaCProvider,
+	providerType string,
+	planID string,
+	hydratedOut map[string]string,
+) wfctlhelpers.ApplyPlanHooks {
+	return wfctlhelpers.ApplyPlanHooks{
+		OnResourceApplied: func(ctx context.Context, driver interfaces.ResourceDriver, action interfaces.PlanAction, out interfaces.ResourceOutput) error {
+			hyd, persistErr := persistAppliedResourceOutput(ctx, store, secretsProvider, provider, providerType, driver, action, out)
+			if persistErr != nil {
+				return persistErr
+			}
+			fmt.Printf("  ✓ %s (%s)\n", action.Resource.Name, action.Resource.Type)
+			if hydratedOut != nil {
+				for k, v := range hyd {
+					hydratedOut[k] = v
+				}
+			}
+			return nil
+		},
+		OnResourceDeleted: func(ctx context.Context, action interfaces.PlanAction) error {
+			return deleteStateAfterCloudDelete(store, action.Resource.Name)
+		},
+		// OnPlanComplete is the workflow#695 Phase 2.5 hook that bridges
+		// the v2 apply path to the plugin's optional IaCProviderFinalizer
+		// service. Fires exactly once on the natural success-exit return
+		// of applyPlanWithEnvProviderAndHooks (v1 semantic preservation
+		// per cycle-1 plan-review C-3 — see ApplyPlanHooks.OnPlanComplete
+		// godoc for fire/no-fire enumeration).
+		//
+		// No-op paths (preserve pre-Phase-2.5 behavior):
+		//   - provider is not a *typedIaCAdapter (in-process fakes,
+		//     legacy provider shapes): no Finalizer() accessor available;
+		//     skip silently.
+		//   - adapter.Finalizer() returns nil (plugin did not register
+		//     IaCProviderFinalizer per ADR 0024): skip silently. Plugins
+		//     opt in via service registration; absence = no firing.
+		//
+		// Fire path: invoke FinalizeApply RPC; on gRPC transport error
+		// surface wrapped; on per-driver errors in response, aggregate
+		// the per-driver attribution into a single err message that
+		// preserves the Resource/Action/Error shape from the v1 wrapper
+		// (per ADR 0040 invariant on per-driver attribution). The engine
+		// closure in apply.go's deferred OnPlanComplete handler appends
+		// the returned err to result.Errors as the "<plan-finalize>"
+		// entry and surfaces wrapped to outer caller err.
+		OnPlanComplete: func(ctx context.Context) error {
+			adapter, ok := provider.(*typedIaCAdapter)
+			if !ok {
+				return nil
+			}
+			fin := adapter.Finalizer()
+			if fin == nil {
+				return nil
+			}
+			resp, callErr := fin.FinalizeApply(ctx, &pb.FinalizeApplyRequest{PlanId: planID})
+			if callErr != nil {
+				return fmt.Errorf("FinalizeApply gRPC: %w", callErr)
+			}
+			if len(resp.GetErrors()) > 0 {
+				msgs := make([]string, 0, len(resp.GetErrors()))
+				for _, e := range resp.GetErrors() {
+					// Field order is Resource/Action (matches proto field
+					// declaration order in ActionError + apply.go's
+					// ActionError construction). NOTE: applyWithProviderAndStore's
+					// existing per-resource aggregator above uses the inverse
+					// Action/Resource order — pre-existing file-level
+					// inconsistency, not introduced here. Reconciliation
+					// (flipping the older site to Resource/Action canonical
+					// order) is tracked separately; do NOT "fix" this site
+					// back to Action/Resource without flipping the other too.
+					msgs = append(msgs, fmt.Sprintf("%s/%s: %s", e.GetResource(), e.GetAction(), e.GetError()))
+				}
+				return fmt.Errorf("plugin finalize: %d driver(s) failed: %s", len(resp.GetErrors()), strings.Join(msgs, "; "))
+			}
+			return nil
+		},
+	}
+}
+
+func deleteStateAfterCloudDelete(store infraStateStore, name string) error {
+	stateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return store.DeleteResource(stateCtx, name)
+}
+
+func persistAppliedResourceOutput(
+	ctx context.Context,
+	store infraStateStore,
+	secretsProvider secrets.Provider,
+	provider interfaces.IaCProvider,
+	providerType string,
+	driver interfaces.ResourceDriver,
+	action interfaces.PlanAction,
+	out interfaces.ResourceOutput,
+) (map[string]string, error) {
+	spec := action.Resource
+	compensate := actionCreatesReplacementResource(action)
+	normalized, err := normalizeAppliedOutputIdentity(spec, out)
+	if err != nil {
+		if !compensate {
+			return nil, fmt.Errorf("state write rejected: %w", err)
+		}
+		compErr := compensateAfterIdentityValidationFailure(driver, spec, out)
+		if compErr != nil {
+			return nil, fmt.Errorf("state write rejected: %w (compensating delete failed: %v)", err, compErr)
+		}
+		return nil, fmt.Errorf("state write rejected: %w (compensating delete succeeded)", err)
+	}
+	out = normalized
+	if err := validateOutputProviderIDWithDriver(providerType, driver, &out); err != nil {
+		if !compensate {
+			return nil, fmt.Errorf("state write rejected: %w", err)
+		}
+		rs := interfaces.ResourceState{Name: spec.Name, Type: spec.Type, ProviderID: out.ProviderID}
+		compErr := compensateAfterValidationFailure(driver, rs)
+		if compErr != nil {
+			return nil, fmt.Errorf("state write rejected: %w (compensating delete failed: %v)", err, compErr)
+		}
+		return nil, fmt.Errorf("state write rejected: %w (compensating delete succeeded)", err)
+	}
+	now := time.Now().UTC()
+	rs := interfaces.ResourceState{
+		ID:                  spec.Name,
+		Name:                spec.Name,
+		Type:                spec.Type,
+		Provider:            providerType,
+		ProviderRef:         resolveIaCProviderRef(spec.Config),
+		ProviderID:          out.ProviderID,
+		ConfigHash:          configHashMap(spec.Config),
+		AppliedConfig:       spec.Config,
+		AppliedConfigSource: "apply",
+		// Outputs is set by persistResourceWithSecretRouting after Route.
+		Dependencies: append([]string(nil), spec.DependsOn...),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	mode := persistModeApplyNoCompensate
+	if compensate {
+		mode = persistModeApply
+	}
+	return persistResourceWithSecretRouting(ctx, store, secretsProvider, driver, rs, out, mode)
+}
+
+func actionCreatesReplacementResource(action interfaces.PlanAction) bool {
+	return action.Action == "create" || action.Action == "replace"
+}
+
+func normalizeAppliedOutputIdentity(spec interfaces.ResourceSpec, out interfaces.ResourceOutput) (interfaces.ResourceOutput, error) {
+	if out.Name == "" {
+		out.Name = spec.Name
+	} else if out.Name != spec.Name {
+		return out, fmt.Errorf("driver returned output name %q for resource %q", out.Name, spec.Name)
+	}
+	if out.Type == "" {
+		out.Type = spec.Type
+	} else if out.Type != spec.Type {
+		return out, fmt.Errorf("driver returned output type %q for resource %q (expected %q)", out.Type, spec.Name, spec.Type)
+	}
+	return out, nil
+}
+
+func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, secretsProvider secrets.Provider, hydratedOut map[string]string) ([]interfaces.ResourceState, error) {
 	if len(specs) == 0 {
 		return current, nil
 	}
@@ -683,14 +758,24 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 		if err := validateStateProviderID(provider, providerType, state); err != nil {
 			return nil, err
 		}
-		// Sanitize-only via persistResourceWithSecretRouting in read mode:
-		// drivers may declare Sensitive on Read but we MUST NOT call
-		// provider.Set from a Read path (cache-pollution risk per design §4.4).
-		// Provider passed nil; helper is nil-safe in read mode.
-		// Cached-prior variant: avoids per-resource ListResources scans
-		// when adoption pass touches many resources.
-		if _, err := persistResourceWithSecretRoutingCachedPrior(ctx, store, nil, driver, state, *live, persistModeRead, priorByName); err != nil {
+		mode := persistModeRead
+		routeProvider := secrets.Provider(nil)
+		if secretsProvider != nil && hasSensitiveOutputs(live) {
+			// Adoption is a live cloud read, but when a secrets provider is
+			// configured the same apply process must route newly discovered
+			// sensitive outputs. Otherwise infra_output generators cannot
+			// consume write-only stores like GitHub Actions secrets.
+			mode = persistModeAdoptRoute
+			routeProvider = secretsProvider
+		}
+		hydrated, err := persistResourceWithSecretRoutingCachedPrior(ctx, store, routeProvider, driver, state, *live, mode, priorByName)
+		if err != nil {
 			return nil, fmt.Errorf("%s/%s: persist adopted state: %w", spec.Type, spec.Name, err)
+		}
+		if hydratedOut != nil {
+			for k, v := range hydrated {
+				hydratedOut[k] = v
+			}
 		}
 		fmt.Printf("  Adopted existing %s %q (id=%s)\n", spec.Type, spec.Name, state.ProviderID)
 		current = append(current, state)
@@ -828,16 +913,17 @@ type persistMode int
 const (
 	persistModeApply persistMode = iota
 	persistModeRead
+	persistModeApplyNoCompensate
+	persistModeAdoptRoute
 )
 
 // persistResourceWithSecretRouting builds rs.Outputs from out (routing
 // sensitive fields through provider in apply mode), calls
 // store.SaveResource, and returns the hydrated routed-secret map for
-// in-process hand-off. On SaveResource failure after provider.Set
-// succeeded (apply mode only), invokes driver.Delete + provider.Delete
+// in-process hand-off. On sensitive-route or SaveResource failure after
+// cloud mutation (apply mode only), invokes driver.Delete + provider.Delete
 // to compensate the partial cloud-resource creation. Returns a wrapped
-// error naming both the original SaveResource failure and the
-// compensating-Delete outcome.
+// error naming both the original failure and the compensating-Delete outcome.
 //
 // In read mode, the helper does NOT call provider.Set; instead it consults
 // the prior state via store.GetResource and inherits any
@@ -862,7 +948,11 @@ func persistResourceWithSecretRouting(
 ) (map[string]string, error) {
 	switch mode {
 	case persistModeApply:
-		return persistApplyMode(ctx, store, provider, driver, rs, out)
+		return persistApplyMode(ctx, store, provider, driver, rs, out, true)
+	case persistModeApplyNoCompensate:
+		return persistApplyMode(ctx, store, provider, driver, rs, out, false)
+	case persistModeAdoptRoute:
+		return persistAdoptRouteMode(ctx, store, provider, rs, out)
 	case persistModeRead:
 		return nil, persistReadMode(ctx, store, rs, out, nil)
 	default:
@@ -890,7 +980,11 @@ func persistResourceWithSecretRoutingCachedPrior(
 ) (map[string]string, error) {
 	switch mode {
 	case persistModeApply:
-		return persistApplyMode(ctx, store, provider, driver, rs, out)
+		return persistApplyMode(ctx, store, provider, driver, rs, out, true)
+	case persistModeApplyNoCompensate:
+		return persistApplyMode(ctx, store, provider, driver, rs, out, false)
+	case persistModeAdoptRoute:
+		return persistAdoptRouteMode(ctx, store, provider, rs, out)
 	case persistModeRead:
 		return nil, persistReadMode(ctx, store, rs, out, priorByName)
 	default:
@@ -905,24 +999,56 @@ func persistApplyMode(
 	driver interfaces.ResourceDriver,
 	rs interfaces.ResourceState,
 	out interfaces.ResourceOutput,
+	compensate bool,
 ) (map[string]string, error) {
 	sanitized, hydrated, err := sensitive.Route(ctx, provider, rs.Name, &out)
 	if err != nil {
+		if !compensate {
+			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w", rs.Type, rs.Name, err)
+		}
+		compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
+		if compErr != nil {
+			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (compensating delete failed: %v)", rs.Type, rs.Name, err, compErr)
+		}
+		return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (compensating delete succeeded)", rs.Type, rs.Name, err)
+	}
+	rs.Outputs = sanitized
+	if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
+		if !compensate {
+			return nil, fmt.Errorf("%s/%s: persist state after apply: %w", rs.Type, rs.Name, saveErr)
+		}
+		// Compensating Delete: the matching cloud resource is real but
+		// the state record didn't land. Roll back so a re-Apply doesn't
+		// double-create.
+		compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
+		if compErr != nil {
+			return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete failed: %v)", rs.Type, rs.Name, saveErr, compErr)
+		}
+		return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete succeeded)", rs.Type, rs.Name, saveErr)
+	}
+	return hydrated, nil
+}
+
+func persistAdoptRouteMode(
+	ctx context.Context,
+	store infraStateStore,
+	provider secrets.Provider,
+	rs interfaces.ResourceState,
+	out interfaces.ResourceOutput,
+) (map[string]string, error) {
+	sanitized, hydrated, err := sensitive.Route(ctx, provider, rs.Name, &out)
+	if err != nil {
+		if compErr := cleanupRoutedSecrets(provider, hydrated); compErr != nil {
+			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (routed-secret cleanup failed: %v)", rs.Type, rs.Name, err, compErr)
+		}
 		return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w", rs.Type, rs.Name, err)
 	}
 	rs.Outputs = sanitized
 	if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
-		// Compensating Delete: if we routed secrets, the matching cloud
-		// resource is real but the state record didn't land. Roll back so
-		// a re-Apply doesn't double-create.
-		if len(hydrated) > 0 {
-			compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
-			if compErr != nil {
-				return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete failed: %v)", rs.Type, rs.Name, saveErr, compErr)
-			}
-			return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete succeeded)", rs.Type, rs.Name, saveErr)
+		if compErr := cleanupRoutedSecrets(provider, hydrated); compErr != nil {
+			return nil, fmt.Errorf("%s/%s: persist adopted state: %w (routed-secret cleanup failed: %v)", rs.Type, rs.Name, saveErr, compErr)
 		}
-		return nil, fmt.Errorf("%s/%s: persist state after apply: %w", rs.Type, rs.Name, saveErr)
+		return nil, fmt.Errorf("%s/%s: persist adopted state: %w", rs.Type, rs.Name, saveErr)
 	}
 	return hydrated, nil
 }
@@ -980,11 +1106,27 @@ func persistReadMode(
 	return nil
 }
 
+func cleanupRoutedSecrets(provider secrets.Provider, hydrated map[string]string) error {
+	if provider == nil || len(hydrated) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var errs []error
+	for secretName := range hydrated {
+		if delErr := provider.Delete(ctx, secretName); delErr != nil && !errors.Is(delErr, secrets.ErrNotFound) {
+			errs = append(errs, fmt.Errorf("provider.Delete(%s): %w", secretName, delErr))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // compensateAfterSaveFailure rolls back routed secrets and the underlying
-// cloud resource when SaveResource fails after provider.Set succeeded.
-// Uses a fresh 30-second context: the apply context may already be
-// canceled (operator Ctrl-C) but compensation must proceed to avoid
-// orphaning cloud resources + routed secrets.
+// cloud resource after an apply-mode failure where the just-mutated resource is
+// known to be newly created or replacement-created. Uses a fresh 30-second
+// context: the apply context may already be canceled (operator Ctrl-C), but
+// compensation must proceed to avoid orphaning cloud resources + routed
+// secrets.
 func compensateAfterSaveFailure(
 	provider secrets.Provider,
 	driver interfaces.ResourceDriver,
@@ -994,20 +1136,89 @@ func compensateAfterSaveFailure(
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var errs []error
-	if driver != nil {
+	if driver == nil {
+		errs = append(errs, errors.New("driver.Delete unavailable"))
+	} else {
 		ref := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type, ProviderID: rs.ProviderID}
 		if delErr := driver.Delete(ctx, ref); delErr != nil {
-			errs = append(errs, fmt.Errorf("driver.Delete: %w", delErr))
+			if rs.ProviderID == "" {
+				errs = append(errs, fmt.Errorf("driver.Delete: %w", delErr))
+			} else {
+				nameRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type}
+				if nameDelErr := driver.Delete(ctx, nameRef); nameDelErr != nil {
+					errs = append(errs, fmt.Errorf("driver.Delete: %w", errors.Join(delErr, nameDelErr)))
+				}
+			}
 		}
 	}
 	if provider != nil {
-		// Reverse-engineer the original output keys from the secret names.
-		// Format: "<rs.Name>_<output_key>"; strip the prefix.
 		for secretName := range hydrated {
 			if delErr := provider.Delete(ctx, secretName); delErr != nil && !errors.Is(delErr, secrets.ErrNotFound) {
 				errs = append(errs, fmt.Errorf("provider.Delete(%s): %w", secretName, delErr))
 			}
 		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+// compensateAfterValidationFailure rolls back a resource whose output failed
+// identity or ProviderID validation. The ProviderID may be malformed, so a
+// name-only delete is used only when the ProviderID delete does not
+// conclusively succeed.
+func compensateAfterValidationFailure(driver interfaces.ResourceDriver, rs interfaces.ResourceState) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if driver == nil {
+		return errors.New("driver.Delete unavailable")
+	}
+	var errs []error
+	if rs.ProviderID != "" {
+		idRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type, ProviderID: rs.ProviderID}
+		if delErr := driver.Delete(ctx, idRef); delErr != nil {
+			if !errors.Is(delErr, interfaces.ErrResourceNotFound) {
+				errs = append(errs, fmt.Errorf("driver.Delete(%s): %w", rs.ProviderID, delErr))
+			}
+		} else {
+			return nil
+		}
+	}
+	nameRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type}
+	if delErr := driver.Delete(ctx, nameRef); delErr != nil {
+		if !errors.Is(delErr, interfaces.ErrResourceNotFound) {
+			errs = append(errs, fmt.Errorf("driver.Delete(name-only): %w", delErr))
+		}
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+func compensateAfterIdentityValidationFailure(driver interfaces.ResourceDriver, spec interfaces.ResourceSpec, out interfaces.ResourceOutput) error {
+	var errs []error
+	var succeeded bool
+	seen := map[string]struct{}{}
+	add := func(name, typ string) {
+		if name == "" && typ == "" {
+			return
+		}
+		key := name + "\x00" + typ
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		rs := interfaces.ResourceState{Name: name, Type: typ, ProviderID: out.ProviderID}
+		if err := compensateAfterValidationFailure(driver, rs); err != nil {
+			errs = append(errs, err)
+		} else {
+			succeeded = true
+		}
+	}
+	add(out.Name, out.Type)
+	add(spec.Name, spec.Type)
+	if succeeded {
+		return nil
 	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
@@ -1126,8 +1337,9 @@ func loadPlanFromFile(path string) (interfaces.IaCPlan, error) {
 
 // applyFromPrecomputedPlan dispatches a pre-computed plan without calling
 // ComputePlan. It loads IaCProvider plugins from cfgFile, groups plan actions
-// by iac.provider module, and calls provider.Apply for each group. State is
-// persisted exactly as in the live-diff path.
+// by iac.provider module, and invokes applyPrecomputedPlanWithStore (which
+// routes through wfctlhelpers.ApplyPlanWithHooks per workflow#699) for each
+// group. State is persisted exactly as in the live-diff path.
 //
 // The same-process hydrated routed-secret map (sensitive.Route output) is
 // accumulated across provider groups and returned to the caller so the
@@ -1247,9 +1459,11 @@ func applyFromPrecomputedPlan(ctx context.Context, plan interfaces.IaCPlan, cfgF
 }
 
 // applyPrecomputedPlanWithStore executes a pre-computed plan group via
-// provider.Apply and persists state for each provisioned resource. It is the
-// precomputed-plan counterpart of applyWithProviderAndStore, skipping
-// ComputePlan / adoptExistingResources entirely.
+// wfctlhelpers.ApplyPlanWithHooks (the v2-only dispatch per workflow#699)
+// and persists state through the same OnResourceApplied / OnResourceDeleted
+// hooks as applyWithProviderAndStore. It is the precomputed-plan counterpart
+// of applyWithProviderAndStore, skipping ComputePlan / adoptExistingResources
+// entirely.
 func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan, provider interfaces.IaCProvider, providerType string, store infraStateStore, w io.Writer, envName string, cfgFile string, hydratedOut map[string]string) error {
 	if store == nil {
 		store = &noopStateStore{}
@@ -1268,14 +1482,6 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	// must hold regardless of how the plan was produced.
 	if err := validateAllowReplaceProtected(plan, applyAllowReplaceSet); err != nil {
 		return err
-	}
-
-	// Collect delete-action resource names for post-apply state cleanup.
-	deleteNames := make(map[string]struct{})
-	for i := range plan.Actions {
-		if plan.Actions[i].Action == "delete" {
-			deleteNames[plan.Actions[i].Resource.Name] = struct{}{}
-		}
 	}
 
 	// Resolve abstract sizing tiers into concrete provider-specific values,
@@ -1306,7 +1512,12 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 
 	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
-	result, err := provider.Apply(ctx, &plan)
+	// v2 is the only supported dispatch per ADR 0024 + workflow#699.
+	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
+	if result != nil {
+		printDriftReportIfAny(w, result)
+	}
 	if err != nil {
 		ref := interfaces.ResourceRef{}
 		if len(plan.Actions) == 1 {
@@ -1335,8 +1546,10 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 		}); sumErr != nil {
 			log.Printf("step summary: %v (ignored)", sumErr)
 		}
-		// Provider.Apply can surface a top-level error (vs. populating
-		// result.Errors[]). Emit the actionable hint here too if the
+		// applyV2ApplyPlanWithHooksFn can surface a top-level error
+		// (gRPC transport failure, plugin-side sentinel bubble, or
+		// local pre-Replace failure) distinct from per-resource entries
+		// in result.Errors[]. Emit the actionable hint here too if the
 		// top-level error is/wraps interfaces.ErrImageNotInRegistry —
 		// otherwise plugin paths that bubble the sentinel via err escape
 		// the result.Errors[]-only hint below. See infra_image_presence_hint.go.
@@ -1345,73 +1558,12 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	}
 
 	if result != nil {
-		// Pre-flight: same hard-fail as live-diff path.
-		if err := requireSecretsProviderForSensitiveOutputs(secretsProvider, result); err != nil {
-			return fmt.Errorf("state write rejected: %w", err)
-		}
-		for _, r := range result.Resources {
-			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
-
-			if err := validateOutputProviderID(provider, providerType, &r); err != nil {
-				return fmt.Errorf("state write rejected: %w", err)
-			}
-
-			// Retrieve spec metadata from the plan action for state persistence.
-			var appliedCfg map[string]any
-			var providerRef string
-			var dependencies []string
-			for i := range plan.Actions {
-				if plan.Actions[i].Resource.Name == r.Name {
-					appliedCfg = plan.Actions[i].Resource.Config
-					providerRef = resolveIaCProviderRef(plan.Actions[i].Resource.Config)
-					dependencies = append([]string(nil), plan.Actions[i].Resource.DependsOn...)
-					break
-				}
-			}
-
-			now := time.Now().UTC()
-			rs := interfaces.ResourceState{
-				ID:                  r.Name,
-				Name:                r.Name,
-				Type:                r.Type,
-				Provider:            providerType,
-				ProviderRef:         providerRef,
-				ProviderID:          r.ProviderID,
-				ConfigHash:          configHashMap(appliedCfg),
-				AppliedConfig:       appliedCfg,
-				AppliedConfigSource: "apply",
-				// Outputs is set by persistResourceWithSecretRouting after Route.
-				Dependencies: dependencies,
-				CreatedAt:    now,
-				UpdatedAt:    now,
-			}
-			driver, _ := provider.ResourceDriver(r.Type)
-			hyd, persistErr := persistResourceWithSecretRouting(ctx, store, secretsProvider, driver, rs, r, persistModeApply)
-			if persistErr != nil {
-				return persistErr
-			}
-			if hydratedOut != nil {
-				for k, v := range hyd {
-					hydratedOut[k] = v
-				}
-			}
-		}
-
-		for name := range deleteNames {
-			if delErr := store.DeleteResource(ctx, name); delErr != nil {
-				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
-			}
-		}
-
 		if len(result.Errors) > 0 {
 			msgs := make([]string, 0, len(result.Errors))
 			for _, ae := range result.Errors {
 				msgs = append(msgs, fmt.Sprintf("%s/%s: %s", ae.Action, ae.Resource, ae.Error))
 			}
 			finalErr := fmt.Errorf("%d resource(s) failed: %s", len(result.Errors), strings.Join(msgs, "; "))
-			// Emit an actionable hint to stderr if any per-resource error
-			// matches interfaces.ErrImageNotInRegistry (typed in-process or
-			// string-match across gRPC boundary). See infra_image_presence_hint.go.
 			emitImageNotInRegistryHint(os.Stderr, finalErr)
 			return finalErr
 		}
