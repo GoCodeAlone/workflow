@@ -8,26 +8,32 @@ Configuration-driven workflow orchestration engine built in Go on the [modular](
 
 ## Build & Run
 
+If a `go.work` file in a parent directory links this repo into a multi-repo
+workspace (common for GoCodeAlone contributors), prefix commands with
+`GOWORK=off` so the build resolves against this repo's own `go.mod`:
+
 ```sh
 # Build the server
-go build -o server ./cmd/server
+GOWORK=off go build -o server ./cmd/server
 ./server -config example/api-server-config.yaml
 
 # Build the CLI
-go build -o wfctl ./cmd/wfctl
+GOWORK=off go build -o wfctl ./cmd/wfctl
 ./wfctl validate example/api-server-config.yaml
 
 # Run tests
-go test ./...
-go test -race ./...
+GOWORK=off go test ./...
+GOWORK=off go test -race ./...
 
 # UI development
 cd ui && npm install && npm run dev
 
 # Lint
 go fmt ./...
-golangci-lint run
+GOWORK=off golangci-lint run
 ```
+
+(When developing this repo standalone, `GOWORK=off` is redundant but harmless.)
 
 ## Project Structure
 
