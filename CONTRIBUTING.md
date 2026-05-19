@@ -13,18 +13,21 @@ Thank you for your interest in contributing to the workflow engine. This guide c
 
 ### Clone and Build
 
+If a parent directory contains a `go.work` file (multi-repo workspace),
+prefix Go commands with `GOWORK=off` to build against this repo's `go.mod`:
+
 ```bash
 git clone https://github.com/GoCodeAlone/workflow.git
 cd workflow
 
 # Build the server
-go build -o server ./cmd/server
+GOWORK=off go build -o server ./cmd/server
 
 # Run tests
-go test -race ./...
+GOWORK=off go test -race ./...
 
 # Run linter
-golangci-lint run
+GOWORK=off golangci-lint run
 
 # UI setup (optional)
 cd ui
@@ -69,10 +72,10 @@ docs/            API docs, tutorials, ADRs
 5. **Run the full check suite** before submitting:
 
 ```bash
-# Go checks
+# Go checks (prefix with GOWORK=off if you have a parent go.work file)
 go fmt ./...
-golangci-lint run
-go test -race ./...
+GOWORK=off golangci-lint run
+GOWORK=off go test -race ./...
 
 # UI checks (if UI changes)
 cd ui
