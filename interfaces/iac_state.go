@@ -84,6 +84,12 @@ type IaCPlan struct {
 	// --plan compares this against the current config to detect stale plans.
 	DesiredHash string `json:"plan_hash,omitempty"`
 
+	// Include records the sorted resource names passed through
+	// `wfctl infra plan --include`. Empty means the plan covered the full
+	// desired set. wfctl infra apply --plan uses this to recompute DesiredHash
+	// against the same scope without requiring --include at apply time.
+	Include []string `json:"include,omitempty"`
+
 	// SchemaVersion is bumped when on-disk plan format changes (W-5 sets to 2 when JIT is required).
 	SchemaVersion int `json:"schema_version,omitempty"`
 

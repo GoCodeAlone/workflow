@@ -149,6 +149,63 @@ modules:
 	}
 }
 
+// TestInfraApplyConsumesScopedPlan verifies that a persisted plan produced with
+// --include is hash-checked against the same scoped desired set at apply time.
+func TestInfraApplyConsumesScopedPlan(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: test-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+      token: "test-token"
+
+  - name: my-db
+    type: infra.database
+    config:
+      provider: test-provider
+      engine: postgres
+      size: s
+
+  - name: other-db
+    type: infra.database
+    config:
+      provider: test-provider
+      engine: postgres
+      size: s
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	planPath := filepath.Join(dir, "plan.json")
+
+	fake := &applyCapture{}
+	origResolve := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = origResolve })
+	fake.installAsV2Dispatch(t)
+
+	if err := runInfraPlan([]string{"--config", cfgPath, "--include=my-db", "--output", planPath}); err != nil {
+		t.Fatalf("runInfraPlan: %v", err)
+	}
+
+	if err := runInfraApply([]string{"--auto-approve", "--config", cfgPath, "--plan", planPath}); err != nil {
+		t.Fatalf("runInfraApply scoped plan: %v", err)
+	}
+	if !fake.applyCalled {
+		t.Fatal("scoped plan was not applied")
+	}
+	if fake.appliedPlan == nil || len(fake.appliedPlan.Actions) != 1 {
+		t.Fatalf("applied plan actions = %+v, want exactly one action", fake.appliedPlan)
+	}
+	if got := fake.appliedPlan.Actions[0].Resource.Name; got != "my-db" {
+		t.Fatalf("applied resource = %q, want my-db", got)
+	}
+}
+
 func TestInfraApplyPlanSkipBootstrap(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "infra.yaml")
