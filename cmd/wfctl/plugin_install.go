@@ -56,8 +56,17 @@ func runPluginSearch(args []string) error {
 		fmt.Println("No plugins found.")
 		return nil
 	}
-	fmt.Printf("%-20s %-10s %-12s %-14s %-12s %s\n", "NAME", "VERSION", "TIER", "STATUS", "SOURCE", "DESCRIPTION")
-	fmt.Printf("%-20s %-10s %-12s %-14s %-12s %s\n", "----", "-------", "----", "------", "------", "-----------")
+	fmt.Print(formatPluginSearchResults(plugins))
+	return nil
+}
+
+// formatPluginSearchResults renders the wfctl plugin search table as a string.
+// Extracted from runPluginSearch so unit tests can exercise the formatter
+// without capturing stdout.
+func formatPluginSearchResults(plugins []PluginSearchResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", "NAME", "VERSION", "TIER", "STATUS", "SOURCE", "DESCRIPTION")
+	fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", "----", "-------", "----", "------", "------", "-----------")
 	for _, p := range plugins {
 		desc := p.Description
 		if len(desc) > 50 {
@@ -67,9 +76,9 @@ func runPluginSearch(args []string) error {
 		if status == "" {
 			status = "-"
 		}
-		fmt.Printf("%-20s %-10s %-12s %-14s %-12s %s\n", p.Name, p.Version, p.Tier, status, p.Source, desc)
+		fmt.Fprintf(&b, "%-20s %-10s %-12s %-14s %-12s %s\n", p.Name, p.Version, p.Tier, status, p.Source, desc)
 	}
-	return nil
+	return b.String()
 }
 
 func runPluginInstall(args []string) error {
