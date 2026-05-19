@@ -381,6 +381,7 @@ func runInfraPlan(args []string) error {
 		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
 		// can detect stale plans when the config changes after plan generation.
 		plan.DesiredHash = desiredStateHash(desired)
+		plan.Include = sortedIncludeNames(planIncludeSet)
 		// Stamp generator metadata (wfctl version + IaC plugin versions) so
 		// operators can inspect what toolchain version produced this plan.
 		meta := buildGeneratorMetadata()
@@ -1433,6 +1434,7 @@ func runInfraApply(args []string) error {
 		if err != nil {
 			return fmt.Errorf("parse infra resource specs: %w", err)
 		}
+		planIncludeSet := includeSetFromNames(plan.Include)
 		if plan.DesiredHash == "" {
 			return fmt.Errorf("plan file has no hash — regenerate with: wfctl infra plan -o plan.json")
 		}
@@ -1464,6 +1466,11 @@ func runInfraApply(args []string) error {
 			if stateErr != nil {
 				return fmt.Errorf("load state for stale-check: %w", stateErr)
 			}
+			if err := validateIncludeSet(planIncludeSet, desired, currentState); err != nil {
+				return fmt.Errorf("validate plan include scope: %w", err)
+			}
+			desired = filterSpecsByInclude(desired, planIncludeSet)
+			currentState = filterStatesByInclude(currentState, planIncludeSet)
 			planApplyCfg, cfgErr := config.LoadFromFile(cfgFile)
 			if cfgErr != nil {
 				return fmt.Errorf("load config for stale-check: %w", cfgErr)

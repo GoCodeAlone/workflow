@@ -53,6 +53,52 @@ func TestParseIncludeFlag_AllWhitespace_ReturnsNil(t *testing.T) {
 	}
 }
 
+// ── include scope serialisation helpers ───────────────────────────────────────
+
+func TestSortedIncludeNames_NilInclude_ReturnsNil(t *testing.T) {
+	if got := sortedIncludeNames(nil); got != nil {
+		t.Errorf("nil include should yield nil names; got %v", got)
+	}
+}
+
+func TestSortedIncludeNames_ReturnsSortedNames(t *testing.T) {
+	got := sortedIncludeNames(map[string]struct{}{
+		"res-C": {},
+		"res-A": {},
+		"res-B": {},
+	})
+	want := []string{"res-A", "res-B", "res-C"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d names; got %v", len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sorted names = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestIncludeSetFromNames_EmptyInput_ReturnsNil(t *testing.T) {
+	if got := includeSetFromNames(nil); got != nil {
+		t.Errorf("nil names should yield nil include set; got %v", got)
+	}
+	if got := includeSetFromNames([]string{"", "   "}); got != nil {
+		t.Errorf("blank names should yield nil include set; got %v", got)
+	}
+}
+
+func TestIncludeSetFromNames_TrimsBlankNames(t *testing.T) {
+	got := includeSetFromNames([]string{"res-A", "", "   ", "res-B"})
+	if len(got) != 2 {
+		t.Fatalf("expected 2 names; got %v", got)
+	}
+	for _, name := range []string{"res-A", "res-B"} {
+		if _, ok := got[name]; !ok {
+			t.Errorf("expected %q in set; got %v", name, got)
+		}
+	}
+}
+
 // ── validateIncludeSet ────────────────────────────────────────────────────────
 
 func TestValidateIncludeSet_NilInclude_NoError(t *testing.T) {
