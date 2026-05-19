@@ -17,9 +17,11 @@
 
 ## Scope Manifest
 
-**PR Count:** 62
-**Tasks:** 20 (Task 17 split into 17a + 17b for parallelism)
-**Estimated Lines of Change:** ~6,000 (informational; mostly README/CHANGELOG/CONTRIBUTING + LICENSE files + ~35 manifest one-line additions)
+**PR Count:** 19
+**Tasks:** 19
+**Estimated Lines of Change:** ~6,000 (informational)
+
+Note on PR Count: 19 logical-task rows. The plan ships **≈62 GitHub PRs** in total because some tasks ship a batch of small per-repo PRs (Task 17 = 39 PRs split A-M / M-Z internally, Task 18 = 6 PRs). The 19-row count is the alignment-check contract; the 62-PR count is captured in each task's "Ships PRs" annotation.
 
 **Out of scope:**
 - New features, module types, step types, triggers.
@@ -33,30 +35,29 @@
 
 **PR Grouping:**
 
-| PR # | Title | Tasks | Branch | Repo |
-|------|-------|-------|--------|------|
-| 1 | feat(wfctl): add status + private to RegistryManifest + PluginSummary | Task 1 | feat/registrymanifest-status-field | workflow |
-| 2 | feat(schema): add optional status enum to registry-schema | Task 2 | chore/qol-sweep-2026-05-19 | workflow-registry |
-| 3 | docs: workflow main README polish + examples index + plugin templates | Task 3 | chore/qol-sweep-2026-05-19 (umbrella PR #714) | workflow |
-| 4 | docs(do): add CONTRIBUTING + examples; verified banner | Task 4 | chore/qol-sweep-2026-05-19 | workflow-plugin-digitalocean |
-| 5 | docs(payments): add CONTRIBUTING + examples; verified banner | Task 5 | chore/qol-sweep-2026-05-19 | workflow-plugin-payments |
-| 6 | docs(agent): add CONTRIBUTING + examples; verified banner | Task 6 | chore/qol-sweep-2026-05-19 | workflow-plugin-agent |
-| 7 | docs(audit-chain): add CONTRIBUTING + examples; verified banner | Task 7 | chore/qol-sweep-2026-05-19 | workflow-plugin-audit-chain |
-| 8 | docs(auth): add CONTRIBUTING + examples; verified banner | Task 8 | chore/qol-sweep-2026-05-19 | workflow-plugin-auth |
-| 9 | docs(eventbus): add CONTRIBUTING + examples; verified banner | Task 9 | chore/qol-sweep-2026-05-19 | workflow-plugin-eventbus |
-| 10 | docs(twilio): add CONTRIBUTING + examples; verified banner | Task 10 | chore/qol-sweep-2026-05-19 | workflow-plugin-twilio |
-| 11 | docs(aws): add README + examples; experimental banner | Task 11 | chore/qol-sweep-2026-05-19 | workflow-plugin-aws |
-| 12 | docs(gcp): add README + examples; experimental banner | Task 12 | chore/qol-sweep-2026-05-19 | workflow-plugin-gcp |
-| 13 | docs(azure): add README + examples; experimental banner | Task 13 | chore/qol-sweep-2026-05-19 | workflow-plugin-azure |
-| 14 | docs(tofu): add README + examples; experimental banner | Task 14 | chore/qol-sweep-2026-05-19 | workflow-plugin-tofu |
-| 15 | docs(ci-generator): add README + examples; experimental banner | Task 15 | chore/qol-sweep-2026-05-19 | workflow-plugin-ci-generator |
-| 16 | feat(registry): populate status field across registry manifests | Task 16 | chore/qol-sweep-2026-05-19-manifests | workflow-registry |
-| 17a (20 PRs) | docs(<plugin>): experimental banner (P2 batch 1, A–M) | Task 17a | chore/qol-sweep-2026-05-19 | 20 P2 plugins (A–M alphabetical) |
-| 17b (19 PRs) | docs(<plugin>): experimental banner (P2 batch 2, N–Z) | Task 17b | chore/qol-sweep-2026-05-19 | 19 P2 plugins (N–Z alphabetical) |
-| 56–61 | docs: add MIT LICENSE (P3 non-plugin × 6 repos) | Task 18 | chore/qol-sweep-2026-05-19 | 6 P3 non-plugin repos (homebrew-tap, superpowers-marketplace, ratchet, ratchet-cli, claude-skills, rover) |
-| (post-merge) | docs: post-sweep retro | Task 19 | committed to workflow main after PRs land | workflow |
+| PR # | Title | Tasks | Ships PRs | Branch | Repo |
+|------|-------|-------|-----------|--------|------|
+| 1 | feat(wfctl): add status + private to RegistryManifest + PluginSummary | Task 1 | 1 | feat/registrymanifest-status-field | workflow |
+| 2 | feat(schema): add optional status enum to registry-schema | Task 2 | 1 | chore/qol-sweep-2026-05-19 | workflow-registry |
+| 3 | docs: workflow main README polish + examples index + plugin templates | Task 3 | 1 | chore/qol-sweep-2026-05-19 (umbrella PR #714) | workflow |
+| 4 | docs(do): add CONTRIBUTING + examples; verified banner | Task 4 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-digitalocean |
+| 5 | docs(payments): add CONTRIBUTING + examples; verified banner | Task 5 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-payments |
+| 6 | docs(agent): add CONTRIBUTING + examples; verified banner | Task 6 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-agent |
+| 7 | docs(audit-chain): add CONTRIBUTING + examples; verified banner | Task 7 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-audit-chain |
+| 8 | docs(auth): add CONTRIBUTING + examples; verified banner | Task 8 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-auth |
+| 9 | docs(eventbus): add CONTRIBUTING + examples; verified banner | Task 9 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-eventbus |
+| 10 | docs(twilio): add CONTRIBUTING + examples; verified banner | Task 10 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-twilio |
+| 11 | docs(aws): add README + examples; experimental banner | Task 11 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-aws |
+| 12 | docs(gcp): add README + examples; experimental banner | Task 12 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-gcp |
+| 13 | docs(azure): add README + examples; experimental banner | Task 13 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-azure |
+| 14 | docs(tofu): add README + examples; experimental banner | Task 14 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-tofu |
+| 15 | docs(ci-generator): add README + examples; experimental banner | Task 15 | 1 | chore/qol-sweep-2026-05-19 | workflow-plugin-ci-generator |
+| 16 | feat(registry): populate status field across registry manifests | Task 16 | 1 | chore/qol-sweep-2026-05-19-manifests | workflow-registry |
+| 17 | docs(<plugin>): experimental banner (P2 mass-marker × 39 repos) | Task 17 | 39 | chore/qol-sweep-2026-05-19 | 39 P2 plugins (dispatched in two parallel halves A-M, M-Z) |
+| 18 | docs: add MIT LICENSE (P3 non-plugin × 6 repos) | Task 18 | 6 | chore/qol-sweep-2026-05-19 | 6 P3 non-plugin repos |
+| 19 | docs: post-sweep retro | Task 19 | 1 | committed to workflow main after PRs land | workflow |
 
-**Final PR count: 62** (1 workflow Go struct + 1 schema + 1 workflow main docs + 7 P0 verified + 5 P1 unverified-deep + 1 registry manifest population + 39 P2 mass-marker [split 20+19] + 6 P3 license).
+**Total GitHub PRs ≈ 62** (sum of "Ships PRs" column).
 
 **Status:** Draft
 
@@ -541,9 +542,37 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 4-10: P0 Verified-Plugin Sweep (7 plugins, deep-treat)
+### Task 4: workflow-plugin-digitalocean — full P0 checklist
 
-**Plugins:** `workflow-plugin-digitalocean` (Task 4), `workflow-plugin-payments` (Task 5), `workflow-plugin-agent` (Task 6), `workflow-plugin-audit-chain` (Task 7), `workflow-plugin-auth` (Task 8), `workflow-plugin-eventbus` (Task 9), `workflow-plugin-twilio` (Task 10).
+Repo: `workflow-plugin-digitalocean`. Apply the shared P0-verified-plugin checklist below with `<plugin>=digitalocean` and `<project-list>=buymywishlist, core-dump, workflow-compute`.
+
+### Task 5: workflow-plugin-payments — full P0 checklist
+
+Repo: `workflow-plugin-payments`. Apply checklist below with `<plugin>=payments` and `<project-list>=buymywishlist`.
+
+### Task 6: workflow-plugin-agent — full P0 checklist
+
+Repo: `workflow-plugin-agent`. Apply checklist below with `<plugin>=agent` and `<project-list>=ratchet`.
+
+### Task 7: workflow-plugin-audit-chain — full P0 checklist
+
+Repo: `workflow-plugin-audit-chain`. Apply checklist below with `<plugin>=audit-chain` and `<project-list>=buymywishlist`.
+
+### Task 8: workflow-plugin-auth — full P0 checklist
+
+Repo: `workflow-plugin-auth`. Apply checklist below with `<plugin>=auth` and `<project-list>=buymywishlist`.
+
+### Task 9: workflow-plugin-eventbus — full P0 checklist
+
+Repo: `workflow-plugin-eventbus`. Apply checklist below with `<plugin>=eventbus` and `<project-list>=buymywishlist`.
+
+### Task 10: workflow-plugin-twilio — full P0 checklist
+
+Repo: `workflow-plugin-twilio`. Apply checklist below with `<plugin>=twilio` and `<project-list>=buymywishlist`.
+
+### Shared P0 verified-plugin checklist (used by Tasks 4–10)
+
+Per-task verification is identical to the steps below; each task independently runs the full sequence in its own worktree.
 
 **Per-plugin sub-checklist:** (identical for tasks 4–10; substitute `<plugin>` and `<project-list>`)
 
@@ -685,7 +714,27 @@ gh pr edit --add-reviewer "@copilot"
 
 ---
 
-### Task 11-15: P1 Unverified Deep-Treat (5 plugins: aws, gcp, azure, tofu, ci-generator)
+### Task 11: workflow-plugin-aws — P1 deep-treat with new README
+
+Repo: `workflow-plugin-aws`. README absent — author from scratch using the scaffold below. Banner = experimental. Apply the shared P1 checklist that follows.
+
+### Task 12: workflow-plugin-gcp — P1 deep-treat with new README
+
+Repo: `workflow-plugin-gcp`. README absent — author from scratch. Banner = experimental.
+
+### Task 13: workflow-plugin-azure — P1 deep-treat with new README
+
+Repo: `workflow-plugin-azure`. README absent — author from scratch. Banner = experimental.
+
+### Task 14: workflow-plugin-tofu — P1 deep-treat with new README
+
+Repo: `workflow-plugin-tofu`. README absent — author from scratch. Banner = experimental.
+
+### Task 15: workflow-plugin-ci-generator — P1 deep-treat with new README
+
+Repo: `workflow-plugin-ci-generator`. README absent — author from scratch. Banner = experimental.
+
+### Shared P1 unverified-plugin checklist (used by Tasks 11–15)
 
 Same as Task 4–10 with two differences:
 
@@ -891,7 +940,9 @@ gh pr create --title "feat(registry): populate status field across external plug
 
 ---
 
-### Task 17a + 17b: P2 Mass-Marker Sweep (39 plugins, split into 2 batches)
+### Task 17: P2 Mass-Marker Sweep (39 plugins)
+
+The plugin set is dispatched in two parallel halves to bound wall-clock time. Both halves run the identical per-repo checklist below; the split is for parallel-agent scheduling, not for distinct plan tasks.
 
 **Plugin set (39):** all public workflow-plugin-* repos NOT in verified-set (7) and NOT in P1 (5). Authoritative list:
 
