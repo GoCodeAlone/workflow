@@ -465,3 +465,27 @@ func TestStaticRegistrySource_EmptyURL(t *testing.T) {
 		t.Fatal("expected error for empty URL, got nil")
 	}
 }
+
+// TestStaticRegistrySource_SearchPlugins_StatusPropagation verifies that the
+// Status field from staticIndexEntry is propagated through SearchPlugins into
+// the returned PluginSearchResult.Status. This exercises the
+// `Status: e.Status` line in StaticRegistrySource.SearchPlugins directly.
+func TestStaticRegistrySource_SearchPlugins_StatusPropagation(t *testing.T) {
+	index := []staticIndexEntry{
+		{Name: "test-plugin", Version: "1.0.0", Description: "Test plugin", Tier: "community", Status: "experimental"},
+	}
+	srv := buildStaticRegistryServer(t, index, nil)
+	defer srv.Close()
+
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{Name: "test-static", URL: srv.URL})
+	results, err := src.SearchPlugins("")
+	if err != nil {
+		t.Fatalf("SearchPlugins: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Status != "experimental" {
+		t.Fatalf("expected Status=%q, got %q", "experimental", results[0].Status)
+	}
+}
