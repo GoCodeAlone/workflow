@@ -1325,6 +1325,7 @@ func runInfraApply(args []string) error {
 	}
 
 	ctx := context.Background()
+	infraOutputSourceScope := parseIncludeFlag(includeFlag)
 
 	// Inject secrets after bootstrap so generated secrets are available.
 	if envName != "" {
@@ -1435,6 +1436,7 @@ func runInfraApply(args []string) error {
 			return fmt.Errorf("parse infra resource specs: %w", err)
 		}
 		planIncludeSet := includeSetFromNames(plan.Include)
+		infraOutputSourceScope = planIncludeSet
 		if plan.DesiredHash == "" {
 			return fmt.Errorf("plan file has no hash — regenerate with: wfctl infra plan -o plan.json")
 		}
@@ -1571,7 +1573,7 @@ func runInfraApply(args []string) error {
 			}
 		}
 	}
-	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag)
+	return syncInfraOutputSecretsScoped(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag, infraOutputSourceScope)
 }
 
 func runInfraStatus(args []string) error {
