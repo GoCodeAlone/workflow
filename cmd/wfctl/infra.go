@@ -1222,6 +1222,8 @@ func runInfraApply(args []string) error {
 		"Refresh per-field Outputs from cloud truth before applying (recommended pair with --refresh for cutover-style operations)")
 	var skipRefreshFlag bool
 	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set (does NOT cancel explicit --refresh-outputs)")
+	var skipBootstrapFlag bool
+	fs.BoolVar(&skipBootstrapFlag, "skip-bootstrap", false, "Skip auto-bootstrap before apply; use only when required secrets/state already exist")
 	var allowReplaceFlag string
 	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
 		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
@@ -1306,7 +1308,7 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("parse infra config: %w", err)
 	}
-	autoBootstrap := infraCfg == nil || infraCfg.AutoBootstrap == nil || *infraCfg.AutoBootstrap
+	autoBootstrap := !skipBootstrapFlag && (infraCfg == nil || infraCfg.AutoBootstrap == nil || *infraCfg.AutoBootstrap)
 	if autoBootstrap {
 		fmt.Println("Running bootstrap before apply...")
 		bootstrapArgs := []string{"--config", cfgFile}

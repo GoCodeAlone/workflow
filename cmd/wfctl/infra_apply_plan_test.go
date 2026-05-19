@@ -149,6 +149,80 @@ modules:
 	}
 }
 
+func TestInfraApplyPlanSkipBootstrap(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+infra:
+  auto_bootstrap: true
+secrets:
+  provider: env
+  generate:
+    - key: SHOULD_NOT_BOOTSTRAP
+      type: provider_credential
+      source: not-a-real-provider
+      name: should-not-bootstrap
+modules:
+  - name: test-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+  - name: my-dns
+    type: infra.dns
+    config:
+      provider: test-provider
+      domain: example.com
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	specs, err := parseInfraResourceSpecs(cfgPath)
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs: %v", err)
+	}
+	plan := interfaces.IaCPlan{
+		ID:          "dns-plan",
+		DesiredHash: desiredStateHash(specs),
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: specs[0]},
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	planData, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, planData, 0o600); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+
+	fake := &applyCapture{}
+	origResolve := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	defer func() { resolveIaCProvider = origResolve }()
+
+	applyCalled := false
+	origApply := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(_ context.Context, _ interfaces.IaCProvider, p *interfaces.IaCPlan, _ wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		applyCalled = true
+		if p.ID != "dns-plan" {
+			t.Fatalf("plan ID = %q, want dns-plan", p.ID)
+		}
+		return &interfaces.ApplyResult{PlanID: p.ID}, nil
+	}
+	defer func() { applyV2ApplyPlanWithHooksFn = origApply }()
+
+	if err := runInfraApply([]string{"--auto-approve", "--config", cfgPath, "--plan", planPath, "--skip-bootstrap"}); err != nil {
+		t.Fatalf("runInfraApply: %v", err)
+	}
+	if !applyCalled {
+		t.Fatal("v2 dispatch was not called")
+	}
+}
+
 // TestInfraApplyConsumesPlan_StaleDetection verifies that wfctl infra apply --plan
 // fails with a descriptive error when the plan's DesiredHash no longer matches the
 // current desired state (i.e. the config was edited after the plan was generated).

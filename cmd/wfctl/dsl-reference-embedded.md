@@ -1456,6 +1456,10 @@ wfctl infra security-check --plan plan.json --strict-cidr
 wfctl infra apply -c infra.yaml --plan plan.json --auto-approve
 ```
 
+Use `wfctl infra apply --skip-bootstrap` only for scoped/operator applies where
+the required secrets and state backend already exist and bootstrap would mutate
+unrelated secret material.
+
 Example output when a finding is detected:
 
 ```

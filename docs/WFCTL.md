@@ -1516,6 +1516,7 @@ Reconcile cloud infrastructure to match the desired state declared in the config
 ```
 wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
                   [--refresh] [--allow-protected-prune] [--skip-refresh]
+                  [--skip-bootstrap]
                   [--allow-replace=NAME1,NAME2,...] [--dry-run] [--format FMT]
 ```
 
@@ -1531,6 +1532,7 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `--refresh` | `false` | Detect drift and prune ghost-in-state entries before applying |
 | `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
 | `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
+| `--skip-bootstrap` | `false` | Skip auto-bootstrap before apply when required secrets/state already exist |
 | `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
 | `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 
