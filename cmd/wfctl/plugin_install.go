@@ -56,14 +56,18 @@ func runPluginSearch(args []string) error {
 		fmt.Println("No plugins found.")
 		return nil
 	}
-	fmt.Printf("%-20s %-10s %-12s %-12s %s\n", "NAME", "VERSION", "TIER", "SOURCE", "DESCRIPTION")
-	fmt.Printf("%-20s %-10s %-12s %-12s %s\n", "----", "-------", "----", "------", "-----------")
+	fmt.Printf("%-20s %-10s %-12s %-14s %-12s %s\n", "NAME", "VERSION", "TIER", "STATUS", "SOURCE", "DESCRIPTION")
+	fmt.Printf("%-20s %-10s %-12s %-14s %-12s %s\n", "----", "-------", "----", "------", "------", "-----------")
 	for _, p := range plugins {
 		desc := p.Description
 		if len(desc) > 50 {
 			desc = desc[:47] + "..."
 		}
-		fmt.Printf("%-20s %-10s %-12s %-12s %s\n", p.Name, p.Version, p.Tier, p.Source, desc)
+		status := p.Status
+		if status == "" {
+			status = "-"
+		}
+		fmt.Printf("%-20s %-10s %-12s %-14s %-12s %s\n", p.Name, p.Version, p.Tier, status, p.Source, desc)
 	}
 	return nil
 }

@@ -179,6 +179,7 @@ func (g *GitHubRegistrySource) SearchPlugins(query string) ([]PluginSearchResult
 					Version:     m.Version,
 					Description: m.Description,
 					Tier:        m.Tier,
+					Status:      m.Status,
 				},
 				Source: g.name,
 			})
@@ -251,6 +252,7 @@ type staticIndexEntry struct {
 	Version     string `json:"version"`
 	Description string `json:"description"`
 	Tier        string `json:"tier"`
+	Status      string `json:"status,omitempty"` // verified | experimental | deprecated
 }
 
 func (s *StaticRegistrySource) fetchIndex() ([]staticIndexEntry, error) {
@@ -283,6 +285,7 @@ func (s *StaticRegistrySource) SearchPlugins(query string) ([]PluginSearchResult
 					Version:     e.Version,
 					Description: e.Description,
 					Tier:        e.Tier,
+					Status:      e.Status,
 				},
 				Source: s.name,
 			})
