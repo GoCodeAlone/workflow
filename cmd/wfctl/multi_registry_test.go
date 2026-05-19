@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1266,19 +1268,28 @@ func TestRegistryManifest_PrivateField(t *testing.T) {
 }
 
 func TestPluginSummary_StatusPropagation(t *testing.T) {
-	m := &RegistryManifest{
-		Name:        "test",
-		Version:     "1.0.0",
-		Author:      "a",
-		Description: "d",
-		Type:        "external",
-		Tier:        "community",
-		License:     "MIT",
-		Status:      "experimental",
+	// Use the real StaticRegistrySource (not a mock) so the test exercises
+	// the actual Status: e.Status propagation line in SearchPlugins.
+	index := []staticIndexEntry{{
+		Name: "test", Version: "1.0.0", Description: "d", Tier: "community", Status: "experimental",
+	}}
+	indexData, err := json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
 	}
-	src := &mockRegistrySource{
-		name:      "test-source",
-		manifests: map[string]*RegistryManifest{"test": m},
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/index.json" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(indexData) //nolint:errcheck
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	src, err := NewStaticRegistrySource(RegistrySourceConfig{Name: "test-source", URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
 	}
 	summaries, err := src.SearchPlugins("")
 	if err != nil {
