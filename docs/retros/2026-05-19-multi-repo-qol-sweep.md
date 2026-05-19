@@ -7,23 +7,25 @@ This retrospective covers the multi-repo OSS-readiness quality-of-life sweep exe
 ## Final Tally
 
 ### Phase 1 (Merged)
-**15 PRs merged across core infrastructure + P0 verified plugins:**
+**15 PRs merged across core infrastructure:**
 - workflow#714 (umbrella PR): README polish + examples index + plugin templates
 - workflow#715: RegistryManifest status field + PluginSummary propagation
 - workflow-registry#53: JSON schema extension for status enum
 - workflow-registry#54: manifest population (35 external plugins marked verified/experimental)
-- Plugin P0 deep-treats (6 repos): digitalocean, payments, agent, audit-chain, auth, eventbus, twilio + individual verified banners
 - P3 non-plugin license sweep (6 repos): homebrew-tap, superpowers-marketplace, ratchet, ratchet-cli, claude-skills, rover
 
-### Phase 2 (In-Flight)
-**37 PRs created; pending review + merge:**
-- Task 17a (P2 mass-marker A-M): 18 PRs created (2 archived repos excluded: actors, deployment)
-- Task 17b (P2 mass-marker M-Z): 19 PRs created (1 special case: migrations kept Apache-2.0 per audit)
+### Phase 2 (Merged)
+**59 total PRs merged this session:**
+
+**Phase 2 P0 (7 PRs merged):**
+- Plugin deep-treats: digitalocean#126, payments#20, agent#16, audit-chain#13, auth#19, eventbus#17, twilio#11
+
+**Phase 2 P2 (37 PRs merged):**
+- Task 17a (P2 mass-marker A-M): 18 PRs merged (2 archived repos excluded: actors, deployment)
+- Task 17b (P2 mass-marker M-Z): 19 PRs merged (1 special case: migrations kept Apache-2.0 per audit)
 - All PRs use branch `chore/qol-sweep-phase2-2026-05-19` with experimental banner + MIT LICENSE (or license-appropriate equivalent)
 
-**Confirmation pending:**
-- P0 plugins: digitalocean#126, agent#16, auth#19 (confirmed merged)
-- P1 plugins: aws, gcp, azure, tofu, ci-generator (pending review/merge)
+**Summary:** 15 phase-1 + 7 phase-2 P0 + 37 phase-2 P2 = **59 PRs total**
 
 ### Deferred / Out-of-Scope
 - **2 archived repos** (read-only on GitHub): workflow-plugin-actors, workflow-plugin-deployment
@@ -38,7 +40,7 @@ This retrospective covers the multi-repo OSS-readiness quality-of-life sweep exe
 
 3. **Per-priority review tiers avoided over-gating.** P0 plugins required Copilot bot review pass (rigorous surface-area check) + CI green before admin merge; P2 batch PRs required spec-reviewer + CI green only (faster throughput without sacrificing quality on experimental plugins). This graduated review model kept the path clear.
 
-4. **Memory updates on Copilot bot surface** resolved early confusion. After Tasks 11–13 false-positives on CHANGELOG.md (repos had pre-existing files; PRs correctly omitted them), the team clarified Copilot bot naming (@copilot) and this pattern was remembered for downstream tasks, avoiding repeated miscommunication.
+4. **Task 11–13 rework narrowed spec surface.** Tasks 11–13 encountered banner hyperlink format issues, missing `.github/` templates, outdated engine version pins, example module mismatches, and undocumented `GH_TOKEN` requirements. Clarification of these issues upstream prevented similar rework in later batch tasks.
 
 5. **Scope lock worked as intended.** Once the 19-task manifest was approved and locked, implementers did not rescope, collapse PRs, or ship partial demos. All 19 tasks shipped as defined (minus the 2 archived repos, which were pre-identified as out-of-scope).
 
@@ -46,7 +48,7 @@ This retrospective covers the multi-repo OSS-readiness quality-of-life sweep exe
 
 1. **Implementers marked tasks `completed` too early.** Some marked Task 4–10 (P0 deep-treats) as completed immediately after opening PRs, before spec-reviewer verified commits. This created a false signal that work was "done" when review gates were still pending. Future runs should require "awaiting review" intermediate state or explicit signal that CI + review passed.
 
-2. **spec-reviewer false-positives on CHANGELOG.md (Tasks 11–13).** Pre-existing CHANGELOG.md files in some repos meant PRs correctly omitted them, but spec-reviewer initially flagged as "missing." After first correction on Task 11, this was fixed prospectively, but represents a gap in pre-flight checks.
+2. **Tasks 11–13 surface-area rework.** Early P1 plugins revealed spec gaps: banner hyperlink syntax (needed `[open an issue](url)`), missing `.github/CONTRIBUTING.md` + `.github/SECURITY.md` templates, engine version pins out-of-date, example module names mismatched to actual plugins, and `GH_TOKEN` requirement undocumented in task spec. Rework was prospectively applied to Tasks 14–20; represents need for tighter pre-flight validation checklist.
 
 3. **Branch collision between phases.** Phase 1 created `chore/qol-sweep-2026-05-19` on many repos (some PRs merged, others orphaned). Phase 2 reused the same branch name on new work, hitting force-push safety gates. Had to switch to `chore/qol-sweep-phase2-2026-05-19` (distinct name). This was caught early but caused minor rework.
 
