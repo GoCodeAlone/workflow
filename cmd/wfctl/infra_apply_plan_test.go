@@ -206,6 +206,238 @@ modules:
 	}
 }
 
+func TestInfraApplyScopedPlanSyncsOnlyScopedInfraOutputSecrets(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+secrets:
+  provider: env
+  config:
+    prefix: TEST_SCOPED_SYNC_
+  generate:
+    - key: DATABASE_URL
+      type: infra_output
+      source: bmw-database.uri
+    - key: WWW_TARGET
+      type: infra_output
+      source: bmw-dns.target
+modules:
+  - name: test-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+      token: "test-token"
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: bmw-database
+    type: infra.database
+    config:
+      provider: test-provider
+      engine: postgres
+      size: s
+
+  - name: bmw-dns
+    type: infra.dns
+    config:
+      provider: test-provider
+      domain: www.buymywishlist.com
+      target: buymywishlist.com.
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.Unsetenv("TEST_SCOPED_SYNC_DATABASE_URL"); err != nil {
+		t.Fatalf("unset TEST_SCOPED_SYNC_DATABASE_URL: %v", err)
+	}
+	if err := os.Unsetenv("TEST_SCOPED_SYNC_WWW_TARGET"); err != nil {
+		t.Fatalf("unset TEST_SCOPED_SYNC_WWW_TARGET: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TEST_SCOPED_SYNC_DATABASE_URL")
+		_ = os.Unsetenv("TEST_SCOPED_SYNC_WWW_TARGET")
+	})
+
+	specs, err := parseInfraResourceSpecs(cfgPath)
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs: %v", err)
+	}
+	var dnsSpec interfaces.ResourceSpec
+	for _, spec := range specs {
+		if spec.Name == "bmw-dns" {
+			dnsSpec = spec
+			break
+		}
+	}
+	if dnsSpec.Name == "" {
+		t.Fatal("bmw-dns spec not found")
+	}
+	plan := interfaces.IaCPlan{
+		ID:          "scoped-dns-plan",
+		DesiredHash: desiredStateHash([]interfaces.ResourceSpec{dnsSpec}),
+		Include:     []string{"bmw-dns"},
+		Actions: []interfaces.PlanAction{{
+			Action:   "create",
+			Resource: dnsSpec,
+		}},
+		CreatedAt: time.Now().UTC(),
+	}
+	planData, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, planData, 0o600); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+
+	provider := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Resources: []interfaces.ResourceOutput{{
+				Name:       "bmw-dns",
+				Type:       "infra.dns",
+				ProviderID: "dns-www",
+				Outputs: map[string]any{
+					"target": "buymywishlist.com.",
+				},
+			}},
+		},
+	}
+	origResolve := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return provider, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = origResolve })
+	provider.installAsV2Dispatch(t)
+
+	if err := runInfraApply([]string{"--auto-approve", "--config", cfgPath, "--plan", planPath, "--skip-bootstrap"}); err != nil {
+		t.Fatalf("runInfraApply scoped plan: %v", err)
+	}
+	if got := os.Getenv("TEST_SCOPED_SYNC_WWW_TARGET"); got != "buymywishlist.com." {
+		t.Fatalf("TEST_SCOPED_SYNC_WWW_TARGET = %q, want DNS target", got)
+	}
+	if got := os.Getenv("TEST_SCOPED_SYNC_DATABASE_URL"); got != "" {
+		t.Fatalf("TEST_SCOPED_SYNC_DATABASE_URL = %q, want untouched", got)
+	}
+}
+
+func TestInfraApplyScopedPlanSyncsEnvRenamedInfraOutputSecrets(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+secrets:
+  provider: env
+  config:
+    prefix: TEST_SCOPED_ENV_SYNC_
+  generate:
+    - key: DATABASE_URL
+      type: infra_output
+      source: bmw-database.uri
+modules:
+  - name: test-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+      token: "test-token"
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: bmw-database
+    type: infra.database
+    config:
+      provider: test-provider
+      engine: postgres
+      size: s
+    environments:
+      staging:
+        config:
+          name: bmw-staging-db
+
+  - name: bmw-dns
+    type: infra.dns
+    config:
+      provider: test-provider
+      domain: www.buymywishlist.com
+      target: buymywishlist.com.
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.Unsetenv("TEST_SCOPED_ENV_SYNC_DATABASE_URL"); err != nil {
+		t.Fatalf("unset TEST_SCOPED_ENV_SYNC_DATABASE_URL: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TEST_SCOPED_ENV_SYNC_DATABASE_URL")
+	})
+
+	specs, err := parseInfraResourceSpecsForEnv(cfgPath, "staging")
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecsForEnv: %v", err)
+	}
+	var dbSpec interfaces.ResourceSpec
+	for _, spec := range specs {
+		if spec.Name == "bmw-staging-db" {
+			dbSpec = spec
+			break
+		}
+	}
+	if dbSpec.Name == "" {
+		t.Fatal("bmw-staging-db spec not found")
+	}
+	plan := interfaces.IaCPlan{
+		ID:          "scoped-staging-db-plan",
+		DesiredHash: desiredStateHash([]interfaces.ResourceSpec{dbSpec}),
+		Include:     []string{"bmw-staging-db"},
+		Actions: []interfaces.PlanAction{{
+			Action:   "create",
+			Resource: dbSpec,
+		}},
+		CreatedAt: time.Now().UTC(),
+	}
+	planData, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, planData, 0o600); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+
+	provider := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Resources: []interfaces.ResourceOutput{{
+				Name:       "bmw-staging-db",
+				Type:       "infra.database",
+				ProviderID: "db-staging",
+				Outputs: map[string]any{
+					"uri": "postgres://staging.example.com/bmw",
+				},
+			}},
+		},
+	}
+	origResolve := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return provider, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = origResolve })
+	provider.installAsV2Dispatch(t)
+
+	if err := runInfraApply([]string{"--auto-approve", "--config", cfgPath, "--env", "staging", "--plan", planPath, "--skip-bootstrap"}); err != nil {
+		t.Fatalf("runInfraApply scoped staging plan: %v", err)
+	}
+	if got := os.Getenv("TEST_SCOPED_ENV_SYNC_DATABASE_URL"); got != "postgres://staging.example.com/bmw" {
+		t.Fatalf("TEST_SCOPED_ENV_SYNC_DATABASE_URL = %q, want staging DB URI", got)
+	}
+}
+
 func TestInfraApplyPlanSkipBootstrap(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "infra.yaml")

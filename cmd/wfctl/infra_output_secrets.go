@@ -131,14 +131,22 @@ func stateKeys(m map[string]map[string]any) []string {
 // providers like GitHub Actions). May be nil for callers that don't
 // have a same-process apply hand-off (e.g., wfctl infra outputs CLI).
 func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string, hydrated map[string]string, refreshOutputs bool) error {
+	return syncInfraOutputSecretsScoped(ctx, secretsCfg, provider, states, wfCfg, envName, hydrated, refreshOutputs, nil)
+}
+
+func syncInfraOutputSecretsScoped(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string, hydrated map[string]string, refreshOutputs bool, sourceModuleScope map[string]struct{}) error {
 	if secretsCfg == nil {
 		return nil
 	}
 	var gens []SecretGen
 	for _, g := range secretsCfg.Generate {
-		if g.Type == "infra_output" {
-			gens = append(gens, g)
+		if g.Type != "infra_output" {
+			continue
 		}
+		if !infraOutputSourceInScope(wfCfg, g.Source, envName, sourceModuleScope) {
+			continue
+		}
+		gens = append(gens, g)
 	}
 	if len(gens) == 0 {
 		return nil
@@ -217,6 +225,35 @@ func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, prov
 		}
 	}
 	return nil
+}
+
+func infraOutputSourceInScope(wfCfg *config.WorkflowConfig, source, envName string, scope map[string]struct{}) bool {
+	if len(scope) == 0 {
+		return true
+	}
+	dot := strings.Index(source, ".")
+	if dot < 1 {
+		return false
+	}
+	moduleName := source[:dot]
+	if envName != "" && wfCfg != nil {
+		for i := range wfCfg.Modules {
+			m := &wfCfg.Modules[i]
+			if m.Name != moduleName {
+				continue
+			}
+			resolved, ok := m.ResolveForEnv(envName)
+			if !ok {
+				return false
+			}
+			if resolved.Name != "" {
+				moduleName = resolved.Name
+			}
+			break
+		}
+	}
+	_, ok := scope[moduleName]
+	return ok
 }
 
 type providerListLookup struct {
