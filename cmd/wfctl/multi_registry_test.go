@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -75,6 +78,7 @@ func (m *mockRegistrySource) SearchPlugins(query string) ([]PluginSearchResult, 
 					Version:     manifest.Version,
 					Description: manifest.Description,
 					Tier:        manifest.Tier,
+					Status:      manifest.Status,
 				},
 				Source: m.name,
 			})
@@ -1215,5 +1219,83 @@ func TestLoadRegistryConfig_ExplicitEmptyRegistries(t *testing.T) {
 	// Explicit empty registries list must be returned as-is (0 sources).
 	if len(cfg.Registries) != 0 {
 		t.Errorf("expected 0 registries for explicit empty list, got %d: %v", len(cfg.Registries), cfg.Registries)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Status + Private field tests
+// ---------------------------------------------------------------------------
+
+func TestValidateManifest_StatusEnum(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  string
+		wantErr bool
+	}{
+		{"empty allowed", "", false},
+		{"verified", "verified", false},
+		{"experimental", "experimental", false},
+		{"deprecated", "deprecated", false},
+		{"invalid value", "bogus", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := validManifest()
+			m.Status = tc.status
+			errs := ValidateManifest(m, ValidationOptions{})
+			hasStatusErr := false
+			for _, e := range errs {
+				if e.Field == "status" {
+					hasStatusErr = true
+				}
+			}
+			if hasStatusErr != tc.wantErr {
+				t.Fatalf("status=%q wantErr=%v got errs=%v", tc.status, tc.wantErr, errs)
+			}
+		})
+	}
+}
+
+func TestRegistryManifest_PrivateField(t *testing.T) {
+	raw := []byte(`{"name":"x","version":"1.0.0","author":"a","description":"d","type":"external","tier":"community","license":"MIT","private":true}`)
+	var m RegistryManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Private {
+		t.Fatalf("expected Private=true, got %v", m.Private)
+	}
+}
+
+func TestPluginSummary_StatusPropagation(t *testing.T) {
+	// Use the real StaticRegistrySource (not a mock) so the test exercises
+	// the actual Status: e.Status propagation line in SearchPlugins.
+	index := []staticIndexEntry{{
+		Name: "test", Version: "1.0.0", Description: "d", Tier: "community", Status: "experimental",
+	}}
+	indexData, err := json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/index.json" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(indexData) //nolint:errcheck
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	src, err := NewStaticRegistrySource(RegistrySourceConfig{Name: "test-source", URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaries, err := src.SearchPlugins("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 || summaries[0].Status != "experimental" {
+		t.Fatalf("expected status=experimental in summary, got %+v", summaries)
 	}
 }
