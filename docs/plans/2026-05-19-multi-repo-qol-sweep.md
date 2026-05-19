@@ -17,9 +17,9 @@
 
 ## Scope Manifest
 
-**PR Count:** 60
-**Tasks:** 19
-**Estimated Lines of Change:** ~6,000 (informational; mostly README/CHANGELOG/CONTRIBUTING + LICENSE files + 50 manifest one-line additions)
+**PR Count:** 62
+**Tasks:** 20 (Task 17 split into 17a + 17b for parallelism)
+**Estimated Lines of Change:** ~6,000 (informational; mostly README/CHANGELOG/CONTRIBUTING + LICENSE files + ~35 manifest one-line additions)
 
 **Out of scope:**
 - New features, module types, step types, triggers.
@@ -35,9 +35,9 @@
 
 | PR # | Title | Tasks | Branch | Repo |
 |------|-------|-------|--------|------|
-| 1 | feat(wfctl): add status + private fields to RegistryManifest | Task 1 | chore/qol-sweep-2026-05-19 | workflow |
+| 1 | feat(wfctl): add status + private to RegistryManifest + PluginSummary | Task 1 | feat/registrymanifest-status-field | workflow |
 | 2 | feat(schema): add optional status enum to registry-schema | Task 2 | chore/qol-sweep-2026-05-19 | workflow-registry |
-| 3 | docs: workflow main README polish + examples index | Task 3 | (this PR — already open #714) | workflow |
+| 3 | docs: workflow main README polish + examples index + plugin templates | Task 3 | chore/qol-sweep-2026-05-19 (umbrella PR #714) | workflow |
 | 4 | docs(do): add CONTRIBUTING + examples; verified banner | Task 4 | chore/qol-sweep-2026-05-19 | workflow-plugin-digitalocean |
 | 5 | docs(payments): add CONTRIBUTING + examples; verified banner | Task 5 | chore/qol-sweep-2026-05-19 | workflow-plugin-payments |
 | 6 | docs(agent): add CONTRIBUTING + examples; verified banner | Task 6 | chore/qol-sweep-2026-05-19 | workflow-plugin-agent |
@@ -50,20 +50,13 @@
 | 13 | docs(azure): add README + examples; experimental banner | Task 13 | chore/qol-sweep-2026-05-19 | workflow-plugin-azure |
 | 14 | docs(tofu): add README + examples; experimental banner | Task 14 | chore/qol-sweep-2026-05-19 | workflow-plugin-tofu |
 | 15 | docs(ci-generator): add README + examples; experimental banner | Task 15 | chore/qol-sweep-2026-05-19 | workflow-plugin-ci-generator |
-| 16 | feat(registry): populate status field on 51 manifests | Task 16 | chore/qol-sweep-2026-05-19-manifests | workflow-registry |
-| 17–55 | docs(<plugin>): experimental banner (P2 mass-marker × 39 repos) | Task 17 | chore/qol-sweep-2026-05-19 | 39 P2 plugins |
-| 56–60 | docs: add MIT LICENSE (P3 non-plugin × 5 repos) | Task 18 | chore/qol-sweep-2026-05-19 | 5 P3 non-plugin repos |
-| (post-merge) | docs: post-sweep retro | Task 19 | (committed to workflow main after PRs land) | workflow |
+| 16 | feat(registry): populate status field across registry manifests | Task 16 | chore/qol-sweep-2026-05-19-manifests | workflow-registry |
+| 17a (20 PRs) | docs(<plugin>): experimental banner (P2 batch 1, A–M) | Task 17a | chore/qol-sweep-2026-05-19 | 20 P2 plugins (A–M alphabetical) |
+| 17b (19 PRs) | docs(<plugin>): experimental banner (P2 batch 2, N–Z) | Task 17b | chore/qol-sweep-2026-05-19 | 19 P2 plugins (N–Z alphabetical) |
+| 56–61 | docs: add MIT LICENSE (P3 non-plugin × 6 repos) | Task 18 | chore/qol-sweep-2026-05-19 | 6 P3 non-plugin repos (homebrew-tap, superpowers-marketplace, ratchet, ratchet-cli, claude-skills, rover) |
+| (post-merge) | docs: post-sweep retro | Task 19 | committed to workflow main after PRs land | workflow |
 
-(P3 count is 5 not 6 — `EvoSim` was deferred as abandoned; `homebrew-tap`, `superpowers-marketplace`, `ratchet`, `ratchet-cli`, `claude-skills`, `rover` minus EvoSim is actually 6 if rover is included. Final P3 set: homebrew-tap, superpowers-marketplace, ratchet, ratchet-cli, claude-skills, rover = 6 repos.)
-
-Corrected:
-
-| PR # | Title | Tasks | Branch | Repo |
-|------|-------|-------|--------|------|
-| 56–61 | docs: add MIT LICENSE (P3 non-plugin × 6 repos) | Task 18 | chore/qol-sweep-2026-05-19 | 6 P3 non-plugin repos |
-
-Final PR count: 61 (1 workflow Go struct + 1 schema + 1 workflow main docs + 7 P0 verified + 5 P1 unverified-deep + 1 registry manifest population + 39 P2 mass-marker + 6 P3 license).
+**Final PR count: 62** (1 workflow Go struct + 1 schema + 1 workflow main docs + 7 P0 verified + 5 P1 unverified-deep + 1 registry manifest population + 39 P2 mass-marker [split 20+19] + 6 P3 license).
 
 **Status:** Draft
 
@@ -84,35 +77,35 @@ cd _worktrees/qol-sweep
 
 `<default-branch>` is `main` for most repos; the implementer reads `git symbolic-ref refs/remotes/origin/HEAD` to confirm.
 
-**Step S0.2: Establish shared templates in workflow main.**
+**Step S0.2: Establish shared templates in workflow main — folded into Task 3.**
 
-Create reusable template files under `docs/templates/` so per-plugin docs are consistent:
+The templates that Tasks 4–17 reference (`docs/templates/CONTRIBUTING-plugin.md`, banner snippets, issue templates, PR template) are created and committed as part of **Task 3** (which always runs first among the per-plugin tasks). Tasks 4–17 must wait for Task 3 to have its commit pushed to PR #714 before they begin so the template files exist on disk in the implementer's workspace clone.
+
+If Tasks 4–17 are dispatched in parallel with Task 3, the implementer must verify the templates exist before starting:
 
 ```sh
-mkdir -p docs/templates
+test -d /Users/jon/workspace/workflow/_worktrees/qol-sweep/docs/templates || {
+  echo "ERROR: templates missing — Task 3 must complete first"; exit 1
+}
 ```
 
-Files to create (in this worktree; Task 3 commits them):
-
-- `docs/templates/CONTRIBUTING-plugin.md` — link upstream + build/test commands
-- `docs/templates/README-plugin-banner-verified.md` — `✅ Verified — used in <projects>`
-- `docs/templates/README-plugin-banner-experimental.md` — `⚠️ Experimental — not validated in any GoCodeAlone-internal deployment`
-- `docs/templates/issue-templates/bug_report.md`
-- `docs/templates/issue-templates/feature_request.md`
-- `docs/templates/PULL_REQUEST_TEMPLATE.md`
+This is the only cross-task dependency in the plan; everything else is fully parallel.
 
 ---
 
 ### Task 1: Add `status` + `private` fields to RegistryManifest Go struct (Step B)
 
 **Repo:** `workflow`
-**Branch:** existing `chore/qol-sweep-2026-05-19` (this branch, this PR #714 is umbrella) — open a **new** branch `feat/registrymanifest-status-field` for this PR.
-**Change class:** internal logic refactor + struct field addition (Go); verification = unit tests.
+**Branch:** `feat/registrymanifest-status-field` (NEW branch, not the umbrella `chore/qol-sweep-2026-05-19`; this PR must be independently mergeable so Task 16 can gate on it).
+**Change class:** internal logic refactor + struct field addition + CLI output extension (Go); verification = unit tests + `wfctl plugin list` smoke test.
 
 **Files:**
 - Modify: `cmd/wfctl/plugin_registry.go:26-49` (RegistryManifest struct)
 - Modify: `cmd/wfctl/registry_validate.go:34, 61-66` (add validPluginStatuses + validation block)
 - Modify: `cmd/wfctl/multi_registry_test.go` (add test cases for new fields)
+- Modify: `cmd/wfctl/plugin_install.go` or wherever `PluginSummary` is defined + `SearchPlugins` callsites + `wfctl plugin list` output format (find via grep: `grep -rn "type PluginSummary\|func.*SearchPlugins" cmd/wfctl/`).
+
+**Rollback:** revert this PR; existing manifests with `status` fields continue parsing because Go's `encoding/json` ignores unknown fields, but `ValidateManifest` will accept invalid status values until the validation block returns. If Task 16 (manifest population) has already merged, revert Task 16's PR FIRST (so ajv-cli CI in the registry stays green), then revert this PR.
 
 **Step 1.1: Write failing tests first (TDD).**
 
@@ -191,29 +184,95 @@ if m.Status != "" && !validPluginStatuses[m.Status] {
 }
 ```
 
-**Step 1.5: Run tests, confirm they pass.**
+**Step 1.5: Update `PluginSummary` + `SearchPlugins` callsites + `wfctl plugin list` output.**
 
-Run: `go test ./cmd/wfctl -run 'TestValidateManifest_StatusEnum|TestRegistryManifest_PrivateField' -v`
-Expected: PASS — all 6 cases green.
+This is the design-mandated user-visible surface for the `status` field (round-2 plan-review C-1). Without it the manifest-tagging exercise produces no user-visible change.
 
-**Step 1.6: Run full wfctl tests for regression.**
+```sh
+grep -rn "type PluginSummary" cmd/wfctl/
+grep -rn "func.*SearchPlugins" cmd/wfctl/
+grep -rn "fmt.Printf.*plugin list\|wfctl plugin list" cmd/wfctl/
+```
+
+Locate the `PluginSummary` struct (likely `cmd/wfctl/plugin_install.go` or `cmd/wfctl/registry_source.go`). Add a `Status string` field:
+
+```go
+type PluginSummary struct {
+    Name        string
+    Description string
+    Tier        string
+    Source      string
+    Status      string // verified | experimental | deprecated; "" if not set
+}
+```
+
+Propagate the field in every `SearchPlugins()` implementation (likely `GitHubRegistrySource.SearchPlugins()` in `plugin_registry.go` ~line 201 and `StaticRegistrySource.SearchPlugins()` in `registry_source.go` ~line 177 + 281 — confirm with grep). Each construction site that builds a `PluginSummary` from a `RegistryManifest` must add:
+
+```go
+PluginSummary{
+    // ... existing fields
+    Status: m.Status,
+}
+```
+
+Then update the `wfctl plugin list` output (column header + per-row format) and `wfctl marketplace search` output to include the status column. If a `Status` is empty, render as `-` to maintain table alignment.
+
+Add a new test in `multi_registry_test.go`:
+
+```go
+func TestPluginSummary_StatusPropagation(t *testing.T) {
+    m := RegistryManifest{
+        Name: "test", Version: "1.0.0", Author: "a", Description: "d",
+        Type: "external", Tier: "community", License: "MIT",
+        Status: "experimental",
+    }
+    src := &StaticRegistrySource{manifests: []RegistryManifest{m}}
+    summaries, err := src.SearchPlugins(context.Background(), "")
+    if err != nil { t.Fatal(err) }
+    if len(summaries) != 1 || summaries[0].Status != "experimental" {
+        t.Fatalf("expected status=experimental in summary, got %+v", summaries)
+    }
+}
+```
+
+(Adapt `StaticRegistrySource` field/constructor name to whatever actually exists — confirm via grep first.)
+
+**Step 1.6: Run tests, confirm they pass.**
+
+Run: `go test ./cmd/wfctl -run 'TestValidateManifest_StatusEnum|TestRegistryManifest_PrivateField|TestPluginSummary_StatusPropagation' -v`
+Expected: PASS — all cases green.
+
+**Step 1.7: Run full wfctl tests for regression.**
 
 Run: `go test ./cmd/wfctl/...`
 Expected: PASS across all wfctl tests (regression sentinel).
 
-**Step 1.7: Run vet for hygiene.**
+**Step 1.8: Run vet for hygiene.**
 
 Run: `go vet ./cmd/wfctl/...`
 Expected: no output.
 
-**Step 1.8: Commit + open PR.**
+**Step 1.9: Smoke test the CLI surface.**
 
 ```sh
-git add cmd/wfctl/plugin_registry.go cmd/wfctl/registry_validate.go cmd/wfctl/multi_registry_test.go
-git commit -m "feat(wfctl): add status + private fields to RegistryManifest
+go install ./cmd/wfctl
+wfctl marketplace search '' --registry-url=file://path/to/local/registry 2>/dev/null || true
+# Or — if local marketplace setup unavailable — just confirm the help text is unchanged:
+wfctl plugin list --help
+```
 
-- Adds optional Status (verified|experimental|deprecated) to align with workflow-registry schema extension.
-- Adds Private bool to mirror existing manifest.json field (was silently discarded).
+Expected: `--help` exit 0; format unchanged or includes Status column header. Smoke is informational only — the real signal is unit-test pass.
+
+**Step 1.10: Commit + open PR.**
+
+```sh
+git add cmd/wfctl/plugin_registry.go cmd/wfctl/registry_validate.go cmd/wfctl/multi_registry_test.go \
+        cmd/wfctl/plugin_install.go cmd/wfctl/registry_source.go
+git commit -m "feat(wfctl): add status + private to RegistryManifest + PluginSummary
+
+- Adds optional Status (verified|experimental|deprecated) to RegistryManifest aligning with workflow-registry schema extension.
+- Adds Private bool to RegistryManifest mirroring existing manifest.json field (was silently discarded).
+- Propagates Status through PluginSummary + SearchPlugins callsites so wfctl plugin list and wfctl marketplace search surface the verification status.
 - Adds enum validation in ValidateManifest.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -696,7 +755,25 @@ MIT. See [LICENSE](LICENSE).
 **Gating:** **DO NOT START** until PR-R1 (Task 2) AND Task 1 (workflow Go struct) are both merged.
 **Change class:** data migration (manifest field addition).
 
-**Files:** all 51 `workflow-registry/plugins/<name>/manifest.json` for public plugins.
+**Files:** `workflow-registry/plugins/<name>/manifest.json` for every `type=external` manifest, **except** the explicit private-cluster skip-list (waf, security, sandbox, supply-chain, data-protection, authz-ui, cloud-ui) which are out-of-scope per the design.
+
+**Authoritative count (derived via jq, not hardcoded):**
+
+```sh
+# At time of plan writing: registry has 42 type=external manifests.
+# In-scope = 42 minus 7-item private-cluster skip-list = 35 manifests to update.
+# Of those 35: 7 marked verified, 28 marked experimental.
+# Counts derived live by the Step 16.2 script; the plan does not enforce a literal number.
+```
+
+**Verified-set names as they appear in registry directories** (verify with `ls plugins/<name>/manifest.json` before running script):
+
+- `agent`, `audit-chain`, `digitalocean`, `eventbus`, `payments`, `twilio` — directory names match plugin short-name
+- `workflow-plugin-auth` — directory is name-prefixed; the short-name `auth` is a different builtin
+
+**Private-cluster skip-list (do NOT touch):**
+
+- `waf`, `security`, `sandbox`, `supply-chain`, `data-protection`, `authz-ui`, `cloud-ui` (some have registry entries, some don't; skip whichever exist)
 
 **Step 16.1: Set up worktree off main (post-PR-R1 merge).**
 
@@ -710,23 +787,35 @@ cd _worktrees/qol-sweep-manifests
 **Step 16.2: Script the manifest update.**
 
 ```sh
-# Define plugin sets
-VERIFIED=(agent audit-chain auth digitalocean eventbus payments twilio)
-EXPERIMENTAL=$(ls plugins/ | grep -vxE "$(IFS='|'; echo "${VERIFIED[*]}")")
+# In-scope verified plugin set (directory names matching workflow-registry/plugins/<dir>/)
+VERIFIED=(agent audit-chain digitalocean eventbus payments twilio workflow-plugin-auth)
 
-# Apply status=verified
-for p in "${VERIFIED[@]}"; do
-  manifest="plugins/$p/manifest.json"
-  test -f "$manifest" || { echo "MISSING: $manifest"; continue; }
-  jq '.status = "verified"' "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
-done
+# Private cluster — never touched by this sweep
+SKIP_PRIVATE=(waf security sandbox supply-chain data-protection authz-ui cloud-ui workflow-plugin-supply-chain)
 
-# Apply status=experimental to the remaining
-for p in $EXPERIMENTAL; do
-  manifest="plugins/$p/manifest.json"
-  # Skip if not a workflow-plugin-* (e.g., the historic name-prefixed entries)
-  case "$p" in workflow-plugin-*) ;; *) name=$(jq -r .name "$manifest" 2>/dev/null); [[ "$name" != workflow-plugin-* ]] && continue ;; esac
-  jq '.status = "experimental"' "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
+# Build a lookup set for fast contains-check
+declare -A IS_VERIFIED IS_SKIP
+for v in "${VERIFIED[@]}"; do IS_VERIFIED["$v"]=1; done
+for s in "${SKIP_PRIVATE[@]}"; do IS_SKIP["$s"]=1; done
+
+for manifest in plugins/*/manifest.json; do
+  dir=$(basename "$(dirname "$manifest")")
+  type=$(jq -r '.type' "$manifest")
+
+  # Skip builtins — out of scope (status is only for external plugins)
+  [ "$type" != "external" ] && continue
+
+  # Skip private-cluster
+  [ -n "${IS_SKIP[$dir]}" ] && { echo "SKIP private-cluster: $dir"; continue; }
+
+  # Assign status
+  if [ -n "${IS_VERIFIED[$dir]}" ]; then
+    status="verified"
+  else
+    status="experimental"
+  fi
+
+  jq --arg s "$status" '.status = $s' "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
 done
 ```
 
@@ -737,35 +826,51 @@ ajv validate --spec=draft2020 -s schema/registry-schema.json -d 'plugins/*/manif
 ```
 Expected: all manifests valid.
 
-**Step 16.4: Run any repo-specific CI scripts.**
+**Step 16.4: Negative-assertion — confirm private-cluster manifests untouched.**
+
+```sh
+git diff --name-only | grep -E "plugins/(waf|security|sandbox|supply-chain|data-protection|authz-ui|cloud-ui|workflow-plugin-supply-chain)/" && {
+  echo "ERROR: private-cluster manifest was modified"; exit 1
+} || echo "OK: no private-cluster manifest modified"
+```
+
+Expected: "OK" — exit 0.
+
+**Step 16.5: Run any repo-specific CI scripts.**
 
 ```sh
 test -f scripts/validate.sh && bash scripts/validate.sh
-test -f scripts/build-static.sh && bash scripts/build-static.sh  # if registry builds a static API
+test -f scripts/build-static.sh && bash scripts/build-static.sh
 ```
 
-**Step 16.5: Spot-check a few manifests.**
+**Step 16.6: Spot-check.**
 
 ```sh
-for p in digitalocean payments aws gcp; do
-  jq -r '"\(.name): status=\(.status // "MISSING")"' plugins/$p/manifest.json
+for d in digitalocean payments aws gcp workflow-plugin-auth; do
+  test -f plugins/$d/manifest.json && jq -r '"\(.name) (dir=\($dir)): status=\(.status // "MISSING")"' --arg dir "$d" plugins/$d/manifest.json
 done
 ```
 
 Expected:
 - digitalocean: status=verified
 - payments: status=verified
+- workflow-plugin-auth: status=verified
 - aws: status=experimental
 - gcp: status=experimental
 
-**Step 16.6: Commit + push + open PR.**
+**Step 16.7: Commit + push + open PR.**
 
 ```sh
-git add plugins/*/manifest.json
-git commit -m "feat(registry): populate status field on all 51 public plugin manifests
+N_VERIFIED=$(grep -l '"status": "verified"' plugins/*/manifest.json | wc -l | tr -d ' ')
+N_EXPERIMENTAL=$(grep -l '"status": "experimental"' plugins/*/manifest.json | wc -l | tr -d ' ')
 
-Sets status=verified on 7 plugins exercised by merged main-branch usage
-in active GoCodeAlone projects; status=experimental on the remaining 44.
+git add plugins/*/manifest.json
+git commit -m "feat(registry): populate status field across external plugin manifests
+
+Sets status=verified on $N_VERIFIED plugins exercised by merged main-branch
+usage in active GoCodeAlone projects; status=experimental on $N_EXPERIMENTAL
+others. Private-cluster manifests (security/waf/sandbox/supply-chain/
+data-protection/authz-ui/cloud-ui) are explicitly skipped per scope.
 
 Gated on workflow-registry PR-R1 (schema) + workflow RegistryManifest
 struct PR. Part of 2026-05-19 multi-repo OSS-readiness QoL sweep.
@@ -774,20 +879,21 @@ See: workflow#714
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 git push -u origin chore/qol-sweep-2026-05-19-manifests
-gh pr create --title "feat(registry): populate status field on all 51 public plugin manifests" --body "<template>"
+gh pr create --title "feat(registry): populate status field across external plugin manifests" --body "<template>"
 ```
 
 **Verification (change class = data migration):**
-- ajv-cli validation: all 51 manifests + any historic entries pass.
-- Spot check: 7 verified + remainder experimental.
+- ajv-cli validation across all manifests: exit 0.
+- Negative-assertion: zero private-cluster manifests in diff.
+- Spot-check: 7 verified entries match expected set.
 
 **Rollback:** revert the merge commit; manifests revert to no-status state which is still valid against the schema (status is optional).
 
 ---
 
-### Task 17: P2 Mass-Marker Sweep (39 plugins)
+### Task 17a + 17b: P2 Mass-Marker Sweep (39 plugins, split into 2 batches)
 
-**Plugin set (39):** all public workflow-plugin-* repos NOT in verified-set (7) and NOT in P1 (5). Concrete list:
+**Plugin set (39):** all public workflow-plugin-* repos NOT in verified-set (7) and NOT in P1 (5). Authoritative list:
 
 ```
 actors admin analytics approval audit authz bento broker cicd crm
@@ -797,7 +903,25 @@ openlms platform rooms salesforce security-scanner slack sso steam
 teams template turnio vectorstore websocket ws-auth
 ```
 
-That's 39 — matches the P2 count.
+**Pre-flight (per round-2 plan-review I-2):** 13 of these 39 repos have NO entry in workflow-registry (`actors`, `analytics`, `broker`, `deployment`, `infra`, `marketplace`, `mcp`, `messaging-core`, `rooms`, `security-scanner`, `steam`, `template`, `ws-auth`). For those: README banner + LICENSE check still apply; the registry-manifest population in Task 16 cannot mark them experimental because there's no manifest. The implementer files a tracking issue per missing manifest (titled `qol-sweep: create registry manifest for workflow-plugin-<plugin>`) and proceeds with the banner/LICENSE work in the repo.
+
+**Split for parallelism:**
+- **Task 17a (20 plugins, A–M alphabetical):** actors, admin, analytics, approval, audit, authz, bento, broker, cicd, crm, data-engineering, datadog, deployment, discord, erp, github, gitlab, infra, launchdarkly, marketplace
+- **Task 17b (19 plugins, M–Z alphabetical):** mcp, messaging-core, migrations, monday, okta, openlms, platform, rooms, salesforce, security-scanner, slack, sso, steam, teams, template, turnio, vectorstore, websocket, ws-auth
+
+Each batch is dispatched to a separate Haiku implementer agent so total wall-clock stays bounded.
+
+**Repo-existence pre-flight (per round-2 plan-review I-2) — required first step for each batch:**
+
+```sh
+for p in <batch list>; do
+  if ! gh repo view "GoCodeAlone/workflow-plugin-$p" >/dev/null 2>&1; then
+    echo "SKIP missing repo: workflow-plugin-$p"; continue
+  fi
+done
+```
+
+A repo that is missing from GitHub (e.g. if a name was wrong) is logged and skipped — never silently fails.
 
 **Branch:** `chore/qol-sweep-2026-05-19` in each repo.
 **Change class:** documentation banner + LICENSE check (one-liner).
