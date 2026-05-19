@@ -1,0 +1,35 @@
+# Codecov configuration for GoCodeAlone/workflow.
+#
+# Workflow is a large Go codebase with many code paths that exist to support
+# operator-facing CLI surfaces — they get exercised by manual operators or by
+# downstream integration tests, not by unit tests. Codecov's default "auto"
+# patch threshold therefore blocks PRs whose helper functions can't be
+# cheaply unit-tested without a full integration harness.
+#
+# Policy:
+# - patch: informational only — codecov posts the report but does NOT fail
+#   the status check. Reviewers still see the patch coverage in the PR
+#   comment so they can call out under-tested paths in review.
+# - project: 1% threshold — repo-wide coverage can dip by 1 percentage
+#   point before the project status fails. Protects against gradual rot
+#   without blocking on noise.
+#
+# When a PR adds significant under-tested code, reviewers should flag it
+# directly rather than relying on a hard codecov threshold. This matches
+# the manual-review tier in CONTRIBUTING.md.
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        informational: false
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
