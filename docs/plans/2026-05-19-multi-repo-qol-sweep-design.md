@@ -3,7 +3,7 @@
 **Date:** 2026-05-19
 **Trigger:** A new external user adopted the workflow project. The codebase was built assuming OSS adoption but has not been audited end-to-end against that bar.
 **Mode:** Autonomous (operator unavailable for approval; bypass approved per user instruction this session and ADR 0041).
-**Revision:** v2 — incorporates adversarial design review findings (C-1/C-2/I-1/I-2/I-3/I-4 + minors).
+**Revision:** v3 — round 1 fixed C-1/C-2/I-1..I-4; round 2 fixed C-2-regression/N-1..N-5; round 3 fixed F-1..F-4 count drift.
 
 ## Problem
 
@@ -133,7 +133,7 @@ For each plugin, edit the correct file:
 
 ### Step D. Per-plugin-repo README banner
 
-For each of the 42 unverified plugins, add at the top of `README.md`:
+For each of the 43 unverified plugins, add at the top of `README.md`:
 
 ```markdown
 > ⚠️ **Experimental** — This plugin compiles and passes its unit tests but
@@ -197,7 +197,7 @@ The reviewer agent uses `--skip-unknown-types` uniformly to avoid per-category b
 14. `workflow-plugin-tofu` — **add README** + examples + experimental banner
 15. `workflow-plugin-ci-generator` — **add README** + examples + experimental banner
 
-### P2 (mass-marker sweep — minimal change per repo) — remaining 37 unverified public plugins
+### P2 (mass-marker sweep — minimal change per repo) — remaining 38 unverified public plugins (37 + `workflow-plugin-analytics`)
 
 For each: open one minimal PR doing only:
 - Experimental banner in README (or create README from a template if missing)
@@ -220,7 +220,7 @@ team-lead (main thread)
 ├── doc-impl-2 (Sonnet 4.6) — P0 plugins (4)
 ├── doc-impl-3 (Sonnet 4.6) — P0 plugins (4)
 ├── doc-impl-4 (Sonnet 4.6) — P1 plugins (5)
-├── doc-impl-5 (Haiku 4.5)  — P2 mass-marker (37 repos)
+├── doc-impl-5 (Haiku 4.5)  — P2 mass-marker (38 repos incl. analytics)
 ├── doc-impl-6 (Haiku 4.5)  — P3 license-only (6 repos)
 └── reviewer    (Sonnet 4.6) — checklist audit + PR review
 ```
@@ -230,7 +230,7 @@ team-lead (main thread)
   - **PR-R1:** schema change only (`schema/registry-schema.json` adds optional `status` enum). Lands FIRST.
   - **PR-R2:** manifest population (50 `plugins/*/manifest.json` updates writing the `status` field). Gated on PR-R1 merge.
   - All other repos remain one-PR-per-repo.
-- **Sequencing constraint (per C-1):** PR-R1 (workflow-registry schema) AND the workflow Go-struct PR (Step B) MUST merge **before** PR-R2 (manifest population) or per-plugin-repo banner PRs that reference `status`. PR-R1 and the workflow Go-struct PR can land in either order.
+- **Sequencing constraint (per C-1):** PR-R1 (workflow-registry schema) AND the workflow Go-struct PR (Step B) MUST merge **before** PR-R2 (manifest population). Per-plugin-repo banner PRs are README-only and have no schema dependency; they may be opened in parallel from the start and merged independently. PR-R1 and the workflow Go-struct PR can land in either order.
 - **Commits:** Conventional — `docs: add README and examples (QoL sweep)`.
 
 ### Review Tiers (per I-4)
@@ -241,7 +241,7 @@ team-lead (main thread)
 |----------|----------------|
 | P0 (9 repos, 10 PRs) | Reviewer-agent audit + Copilot review pass + CI green; then admin-merge |
 | P1 (5 repos)  | Reviewer-agent audit + Copilot review pass + CI green; then admin-merge |
-| P2 (37 repos) | Reviewer-agent audit + CI green; admin-merge (Copilot pass desirable but not required because PRs are template-driven one-liners) |
+| P2 (38 repos) | Reviewer-agent audit + CI green; admin-merge (Copilot pass desirable but not required because PRs are template-driven one-liners) |
 | P3 (6 repos)  | Reviewer-agent audit + CI green; admin-merge (license-only) |
 
 Per `feedback_copilot_review_settle_window`, allow ~10 minutes after `requested_reviewers POST` for Copilot to surface findings before admin-merge.
@@ -262,7 +262,7 @@ Reviewer re-runs on the worktree before marking ready.
 
 - `wfctl validate` exists and validates plugin YAML against schema. Verified — `docs/WFCTL.md`.
 - `wfctl validate --skip-unknown-types` accepts plugin-introduced module types. Verified by reading `cmd/wfctl/validate.go`.
-- The verified-plugin matrix (8) is complete after broad-scan re-sample. **Risk reduced but not zero.** If a project I didn't sample uses one of the "experimental" plugins, mitigation = revert via one-line manifest change.
+- The verified-plugin matrix (7) is complete after broad-scan re-sample. **Risk reduced but not zero.** If a project I didn't sample uses one of the "experimental" plugins, mitigation = revert via one-line manifest change.
 - Adding `status` field to `registry-schema.json` is additive-safe because `additionalProperties: false` is enforced at the per-plugin entry level but the field is optional. Verified by reading the schema.
 - The user is OK with PRs being admin-merged autonomously per autonomy grant. ADR 0041 records.
 - Updating `RegistryManifest` Go struct is non-breaking because Go's `encoding/json` ignores unknown fields by default. Verified — no `DisallowUnknownFields` call in wfctl manifest parsing.
@@ -298,7 +298,7 @@ No runtime config touched. Documentation + manifest-additive only. Blast radius 
 - workflow-cloud, workflow-cloud-ui, modular, workflow-editor, workflow-vscode, workflow-jetbrains — each warrants own sweep.
 - Live-deployment example validation — needs CI with credentials.
 - Translation / i18n.
-- Per-plugin deep documentation for the 37 P2 plugins (tracking issues filed).
+- Per-plugin deep documentation for the 38 P2 plugins (tracking issues filed).
 - `wfctl plugin verify` subcommand (future ergonomic improvement).
 - GitHub topic tagging — supplementary, easy follow-up.
 

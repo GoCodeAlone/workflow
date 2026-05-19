@@ -6,7 +6,7 @@
 
 ## Context
 
-A new external user adopted the workflow project. The codebase was built with OSS adoption in mind, but a fresh audit reveals 50 public plugin repos, of which only 8 are exercised by any active GoCodeAlone-internal project (`buymywishlist`, `core-dump`, `workflow-compute`, `ratchet`, and `BMW` worktrees pending analytics-plugin pin merge). The other 42 — including frequently-discussed cloud providers (`aws`, `gcp`, `azure`) — compile and pass unit tests but have never been validated end-to-end in production usage.
+A new external user adopted the workflow project. The codebase was built with OSS adoption in mind, but a fresh audit reveals 50 public plugin repos, of which only 7 are exercised by merged main-branch usage in any active GoCodeAlone-internal project (`buymywishlist`, `core-dump`, `workflow-compute`, `ratchet`). The other 43 — including frequently-discussed cloud providers (`aws`, `gcp`, `azure`) and `analytics` (currently pinned in unmerged BMW worktrees only) — compile and pass unit tests but have never been validated end-to-end in production usage.
 
 We had to choose how to surface this state to external users. Three options:
 
@@ -39,7 +39,7 @@ Verified plugins get `"status": "verified"`. The verified-vs-experimental distin
 
 ## Consequences
 
-- 42 public plugins gain an `experimental` banner this sweep — a visible downgrade. Phrasing emphasizes verification gap not code quality.
+- 43 public plugins gain an `experimental` banner this sweep — a visible downgrade. Phrasing emphasizes verification gap not code quality.
 - Future plugins ship `experimental` by default unless an active GoCodeAlone project pins them.
 - Maintenance: when verification state changes, both manifest and README banner must be kept in sync. Mitigation: a `wfctl plugin verify <name>` subcommand could automate this in a follow-up, but is out of scope for this sweep.
 
