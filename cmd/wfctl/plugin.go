@@ -41,6 +41,8 @@ func runPlugin(args []string) error {
 		return runPluginInfo(args[1:])
 	case "deps":
 		return runPluginDeps(args[1:])
+	case "marketplace-verify":
+		return runPluginMarketplaceVerify(args[1:])
 	default:
 		return pluginUsage()
 	}
@@ -64,6 +66,7 @@ Subcommands:
   conformance Run executable plugin/host conformance checks
   info     Show details about an installed plugin
   deps     List dependencies for a plugin
+  marketplace-verify  Scan a GitHub org's wfctl.yaml files for plugin usage; suggests manifest status (verified | experimental)
 
 Use -plugin-dir to specify a custom plugin directory (replaces deprecated -data-dir).
 `)
