@@ -7,13 +7,13 @@
 
 ## Problem
 
-`workflow` ships a real engine with 90+ module types, a registry of ~58 plugins, and 50 public plugin repos. A spot audit reveals four user-visible discoverability holes that a new external adopter hits immediately:
+`workflow` ships a real engine with 90+ module types, a registry of ~58 plugins, and 51 public plugin repos. A spot audit reveals four user-visible discoverability holes that a new external adopter hits immediately:
 
 1. **No README at all** in 5 plugin repos (`aws`, `gcp`, `azure`, `tofu`, `ci-generator`).
 2. **No `examples/` directory** in any plugin repo — no copy-pasteable starting point.
 3. **No `CONTRIBUTING.md`** in any plugin repo — contribution path is invisible.
 4. **License inconsistency** — 12 public GoCodeAlone-owned repos have `none` or non-MIT licenses despite the workflow project being MIT.
-5. **Active-usage gap not surfaced.** Only 7 of 50 public plugins are validated by merged main-branch usage in an active GoCodeAlone project. The other 43 ship without any "experimental / unverified" signal.
+5. **Active-usage gap not surfaced.** Only 7 of 51 public plugins are validated by merged main-branch usage in an active GoCodeAlone project. The other 44 ship without any "experimental / unverified" signal.
 
 ## Goal
 
@@ -57,7 +57,7 @@ A fourth distinction — "pending pin in an open PR" — is **not** modeled as a
 
 > Note on `workflow-plugin-analytics`: appears in 4 *unmerged* BMW worktrees (www-dns, wfctl-v0.60, admin-bootstrap-resolve, payment-intent-route) but is not yet in any merged main-branch wfctl.yaml. Per the three-tier rule above, classified `experimental` for this sweep; will be promoted by a follow-up manifest PR when BMW merges the pin.
 
-### Unverified (public, no GoCodeAlone-project usage) — 43 plugins
+### Unverified (public, no GoCodeAlone-project usage) — 44 plugins
 
 All other public `workflow-plugin-*` repos. User-called-out: `aws`, `gcp`, `azure`, `tofu`, `ci-generator`. Full list derived from `gh repo list GoCodeAlone --visibility public` minus the verified set.
 
@@ -129,11 +129,11 @@ For each plugin, edit the correct file:
 
 - **Correct file path:** `workflow-registry/plugins/<name>/manifest.json` (NOT `plugin.json` — the design v1 used the wrong filename).
 - Add `"status": "verified"` for the 7 verified plugins.
-- Add `"status": "experimental"` for the 43 unverified public plugins (analytics included pending BMW pin merge).
+- Add `"status": "experimental"` for the 44 unverified public plugins (analytics included pending BMW pin merge).
 
 ### Step D. Per-plugin-repo README banner
 
-For each of the 43 unverified plugins, add at the top of `README.md`:
+For each of the 44 unverified plugins, add at the top of `README.md`:
 
 ```markdown
 > ⚠️ **Experimental** — This plugin compiles and passes its unit tests but
@@ -197,7 +197,7 @@ The reviewer agent uses `--skip-unknown-types` uniformly to avoid per-category b
 14. `workflow-plugin-tofu` — **add README** + examples + experimental banner
 15. `workflow-plugin-ci-generator` — **add README** + examples + experimental banner
 
-### P2 (mass-marker sweep — minimal change per repo) — remaining 38 unverified public plugins (37 + `workflow-plugin-analytics`)
+### P2 (mass-marker sweep — minimal change per repo) — remaining 39 unverified public plugins (38 + `workflow-plugin-analytics`)
 
 For each: open one minimal PR doing only:
 - Experimental banner in README (or create README from a template if missing)
@@ -220,7 +220,7 @@ team-lead (main thread)
 ├── doc-impl-2 (Sonnet 4.6) — P0 plugins (4)
 ├── doc-impl-3 (Sonnet 4.6) — P0 plugins (4)
 ├── doc-impl-4 (Sonnet 4.6) — P1 plugins (5)
-├── doc-impl-5 (Haiku 4.5)  — P2 mass-marker (38 repos incl. analytics)
+├── doc-impl-5 (Haiku 4.5)  — P2 mass-marker (39 repos incl. analytics)
 ├── doc-impl-6 (Haiku 4.5)  — P3 license-only (6 repos)
 └── reviewer    (Sonnet 4.6) — checklist audit + PR review
 ```
@@ -241,7 +241,7 @@ team-lead (main thread)
 |----------|----------------|
 | P0 (9 repos, 10 PRs) | Reviewer-agent audit + Copilot review pass + CI green; then admin-merge |
 | P1 (5 repos)  | Reviewer-agent audit + Copilot review pass + CI green; then admin-merge |
-| P2 (38 repos) | Reviewer-agent audit + CI green; admin-merge (Copilot pass desirable but not required because PRs are template-driven one-liners) |
+| P2 (39 repos) | Reviewer-agent audit + CI green; admin-merge (Copilot pass desirable but not required because PRs are template-driven one-liners) |
 | P3 (6 repos)  | Reviewer-agent audit + CI green; admin-merge (license-only) |
 
 Per `feedback_copilot_review_settle_window`, allow ~10 minutes after `requested_reviewers POST` for Copilot to surface findings before admin-merge.
@@ -285,9 +285,9 @@ No runtime config touched. Documentation + manifest-additive only. Blast radius 
 
 - 10 P0 PRs merged (9 repos; workflow-registry splits into 2).
 - 5 P1 PRs merged.
-- 38 P2 mass-marker PRs merged (37 + analytics until BMW pin lands).
+- 39 P2 mass-marker PRs merged (37 + analytics until BMW pin lands).
 - 6 P3 license PRs merged.
-- All 43 unverified public plugins show `status: experimental` + README banner.
+- All 44 unverified public plugins show `status: experimental` + README banner.
 - All 7 verified public plugins show `status: verified` + README banner.
 - All public GoCodeAlone-owned non-fork repos carry MIT (or, for workflow-plugin-migrations, retain Apache-2.0 with documented reason).
 - Post-sweep retro at `docs/retros/2026-05-19-multi-repo-qol-sweep.md`.
@@ -298,7 +298,7 @@ No runtime config touched. Documentation + manifest-additive only. Blast radius 
 - workflow-cloud, workflow-cloud-ui, modular, workflow-editor, workflow-vscode, workflow-jetbrains — each warrants own sweep.
 - Live-deployment example validation — needs CI with credentials.
 - Translation / i18n.
-- Per-plugin deep documentation for the 38 P2 plugins (tracking issues filed).
+- Per-plugin deep documentation for the 39 P2 plugins (tracking issues filed).
 - `wfctl plugin verify` subcommand (future ergonomic improvement).
 - GitHub topic tagging — supplementary, easy follow-up.
 
