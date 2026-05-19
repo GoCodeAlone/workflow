@@ -463,14 +463,15 @@ func runPluginList(args []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-20s %-10s %-10s %s\n", "NAME", "VERSION", "TYPE", "DESCRIPTION")
-	fmt.Printf("%-20s %-10s %-10s %s\n", "----", "-------", "----", "-----------")
+	fmt.Printf("%-20s %-10s %-10s %-14s %s\n", "NAME", "VERSION", "TYPE", "STATUS", "DESCRIPTION")
+	fmt.Printf("%-20s %-10s %-10s %-14s %s\n", "----", "-------", "----", "------", "-----------")
 	for _, p := range plugins {
 		desc := p.description
 		if len(desc) > 40 {
 			desc = desc[:37] + "..."
 		}
-		fmt.Printf("%-20s %-10s %-10s %s\n", p.name, p.version, p.pluginType, desc)
+		// Status is not persisted to disk on install; render "-" for installed plugins.
+		fmt.Printf("%-20s %-10s %-10s %-14s %s\n", p.name, p.version, p.pluginType, "-", desc)
 	}
 	return nil
 }
