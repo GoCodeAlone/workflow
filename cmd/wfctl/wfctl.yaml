@@ -53,6 +53,8 @@ workflows:
         description: Code generation
       - name: git
         description: Git integration
+      - name: logs
+        description: Provider log capture
       - name: registry
         description: Container registry commands
       - name: plugin-registry
@@ -195,6 +197,10 @@ pipelines:
     trigger: {type: cli, config: {command: git}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: git}}
+  cmd-logs:
+    trigger: {type: cli, config: {command: logs}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: logs}}
   cmd-registry:
     trigger: {type: cli, config: {command: registry}}
     steps:

@@ -300,3 +300,39 @@ type ProviderValidator interface {
 type ProviderCredentialRevoker interface {
 	RevokeProviderCredential(ctx context.Context, source string, credentialID string) error
 }
+
+// LogCaptureRequest describes a bounded provider log capture. Providers may
+// support only a subset of fields; unsupported values should return a clear
+// error instead of silently changing scope.
+type LogCaptureRequest struct {
+	ResourceName    string
+	ResourceType    string
+	ProviderID      string
+	ComponentName   string
+	LogType         string
+	TailLines       int
+	Follow          bool
+	DurationSeconds int64
+	DeploymentID    string
+}
+
+// LogChunk is one provider-emitted log payload. Data is already formatted for
+// the caller's output stream; Source is optional metadata such as "historic" or
+// "live".
+type LogChunk struct {
+	Data   []byte
+	Source string
+	EOF    bool
+}
+
+// LogCaptureSink receives log chunks from a provider.
+type LogCaptureSink interface {
+	WriteLogChunk(LogChunk) error
+}
+
+// LogCaptureProvider is an OPTIONAL provider interface for ad-hoc operational
+// log capture. `wfctl logs capture` discovers it through the typed optional
+// IaCProviderLogCapture service.
+type LogCaptureProvider interface {
+	CaptureLogs(ctx context.Context, req LogCaptureRequest, sink LogCaptureSink) error
+}

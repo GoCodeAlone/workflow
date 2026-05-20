@@ -44,6 +44,19 @@ func TestIaCGRPCPlugin_GRPCServer_RegistersAllServices(t *testing.T) {
 	}
 }
 
+func TestIaCGRPCPlugin_GRPCServer_SharesServerWithProvider(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &serveTestServerAwareStub{}
+	p := &iacGRPCPlugin{provider: provider}
+
+	if err := p.GRPCServer(nil, grpcSrv); err != nil {
+		t.Fatalf("GRPCServer returned error: %v", err)
+	}
+	if provider.grpcSrv != grpcSrv {
+		t.Fatalf("expected provider SetGRPCServer hook to receive framework server")
+	}
+}
+
 // TestIaCGRPCPlugin_GRPCServer_PropagatesAutoRegisterError asserts the
 // callback surfaces RegisterAllIaCProviderServices errors so go-plugin
 // aborts plugin startup with an actionable message rather than booting
@@ -205,6 +218,15 @@ type serveTestAllStub struct {
 	pb.UnimplementedIaCProviderRequiredServer
 	pb.UnimplementedIaCProviderEnumeratorServer
 	pb.UnimplementedResourceDriverServer
+}
+
+type serveTestServerAwareStub struct {
+	serveTestAllStub
+	grpcSrv *grpc.Server
+}
+
+func (s *serveTestServerAwareStub) SetGRPCServer(grpcSrv *grpc.Server) {
+	s.grpcSrv = grpcSrv
 }
 
 // emptyServeStub satisfies no IaC interface. The GRPCServer callback

@@ -97,6 +97,7 @@ type fixtureTypedAdapter struct {
 	Validator         pb.IaCProviderValidatorServer
 	DriftConfigDetect pb.IaCProviderDriftConfigDetectorServer
 	ResourceDriver    pb.ResourceDriverServer
+	LogCapture        pb.IaCProviderLogCaptureServer
 }
 
 // build spins up a bufconn-backed gRPC server running f's set of services,
@@ -145,6 +146,10 @@ func (f fixtureTypedAdapter) build(t *testing.T) *typedIaCAdapter {
 	if f.ResourceDriver != nil {
 		pb.RegisterResourceDriverServer(server, f.ResourceDriver)
 		registered[iacServiceResourceDriver] = true
+	}
+	if f.LogCapture != nil {
+		pb.RegisterIaCProviderLogCaptureServer(server, f.LogCapture)
+		registered[iacServiceLogCapture] = true
 	}
 
 	go func() { _ = server.Serve(listener) }()

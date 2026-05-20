@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -124,6 +125,23 @@ func TestTypedAdapter_ValidatePlanReturnsNilWhenValidatorAbsent(t *testing.T) {
 	a := &typedIaCAdapter{}
 	if got := a.ValidatePlan(&interfaces.IaCPlan{}); got != nil {
 		t.Fatalf("expected nil diagnostics when validator absent; got %d", len(got))
+	}
+}
+
+func TestTypedAdapter_CaptureLogsRejectsUnknownType(t *testing.T) {
+	adapter := fixtureTypedAdapter{
+		LogCapture: &pb.UnimplementedIaCProviderLogCaptureServer{},
+	}.build(t)
+
+	err := adapter.CaptureLogs(context.Background(), interfaces.LogCaptureRequest{
+		ResourceName: "app",
+		LogType:      "typo",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected unsupported log type error")
+	}
+	if !strings.Contains(err.Error(), "unsupported log type") {
+		t.Fatalf("error = %q, want unsupported log type", err.Error())
 	}
 }
 

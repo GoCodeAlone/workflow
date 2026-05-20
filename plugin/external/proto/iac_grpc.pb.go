@@ -1317,6 +1317,111 @@ var IaCProviderDriftConfigDetector_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	IaCProviderLogCapture_CaptureLogs_FullMethodName = "/workflow.plugin.external.iac.IaCProviderLogCapture/CaptureLogs"
+)
+
+// IaCProviderLogCaptureClient is the client API for IaCProviderLogCapture service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type IaCProviderLogCaptureClient interface {
+	CaptureLogs(ctx context.Context, in *CaptureLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogChunk], error)
+}
+
+type iaCProviderLogCaptureClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCProviderLogCaptureClient(cc grpc.ClientConnInterface) IaCProviderLogCaptureClient {
+	return &iaCProviderLogCaptureClient{cc}
+}
+
+func (c *iaCProviderLogCaptureClient) CaptureLogs(ctx context.Context, in *CaptureLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &IaCProviderLogCapture_ServiceDesc.Streams[0], IaCProviderLogCapture_CaptureLogs_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[CaptureLogsRequest, LogChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IaCProviderLogCapture_CaptureLogsClient = grpc.ServerStreamingClient[LogChunk]
+
+// IaCProviderLogCaptureServer is the server API for IaCProviderLogCapture service.
+// All implementations must embed UnimplementedIaCProviderLogCaptureServer
+// for forward compatibility.
+type IaCProviderLogCaptureServer interface {
+	CaptureLogs(*CaptureLogsRequest, grpc.ServerStreamingServer[LogChunk]) error
+	mustEmbedUnimplementedIaCProviderLogCaptureServer()
+}
+
+// UnimplementedIaCProviderLogCaptureServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCProviderLogCaptureServer struct{}
+
+func (UnimplementedIaCProviderLogCaptureServer) CaptureLogs(*CaptureLogsRequest, grpc.ServerStreamingServer[LogChunk]) error {
+	return status.Error(codes.Unimplemented, "method CaptureLogs not implemented")
+}
+func (UnimplementedIaCProviderLogCaptureServer) mustEmbedUnimplementedIaCProviderLogCaptureServer() {}
+func (UnimplementedIaCProviderLogCaptureServer) testEmbeddedByValue()                               {}
+
+// UnsafeIaCProviderLogCaptureServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCProviderLogCaptureServer will
+// result in compilation errors.
+type UnsafeIaCProviderLogCaptureServer interface {
+	mustEmbedUnimplementedIaCProviderLogCaptureServer()
+}
+
+func RegisterIaCProviderLogCaptureServer(s grpc.ServiceRegistrar, srv IaCProviderLogCaptureServer) {
+	// If the following call panics, it indicates UnimplementedIaCProviderLogCaptureServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCProviderLogCapture_ServiceDesc, srv)
+}
+
+func _IaCProviderLogCapture_CaptureLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(CaptureLogsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(IaCProviderLogCaptureServer).CaptureLogs(m, &grpc.GenericServerStream[CaptureLogsRequest, LogChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IaCProviderLogCapture_CaptureLogsServer = grpc.ServerStreamingServer[LogChunk]
+
+// IaCProviderLogCapture_ServiceDesc is the grpc.ServiceDesc for IaCProviderLogCapture service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCProviderLogCapture_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCProviderLogCapture",
+	HandlerType: (*IaCProviderLogCaptureServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "CaptureLogs",
+			Handler:       _IaCProviderLogCapture_CaptureLogs_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "iac.proto",
+}
+
+const (
 	ResourceDriver_Create_FullMethodName        = "/workflow.plugin.external.iac.ResourceDriver/Create"
 	ResourceDriver_Read_FullMethodName          = "/workflow.plugin.external.iac.ResourceDriver/Read"
 	ResourceDriver_Update_FullMethodName        = "/workflow.plugin.external.iac.ResourceDriver/Update"
