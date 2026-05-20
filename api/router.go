@@ -185,7 +185,8 @@ func NewRouterWithIAM(stores Stores, cfg Config, iamResolver *iam.IAMResolver) h
 		resolver := iamResolver
 		if resolver == nil {
 			resolver = iam.NewIAMResolver(stores.IAM)
-			resolver.RegisterProvider(&iam.AWSIAMProvider{})
+			// AWSIAMProvider extracted to workflow-plugin-aws; register
+			// it from the plugin side if needed.
 			resolver.RegisterProvider(&iam.KubernetesProvider{})
 			resolver.RegisterProvider(&iam.OIDCProvider{})
 		}

@@ -223,10 +223,3 @@ func TestBuiltinProvider_WithPermissionManager(t *testing.T) {
 		t.Error("expected non-empty permissions for editor")
 	}
 }
-
-func TestAWSIAMProvider_NameCheck(t *testing.T) {
-	aws := NewAWSIAMProviderWithClient("us-east-1", "arn:aws:iam::role/test", &mockIAMClient{})
-	if aws.Name() != "aws-iam" {
-		t.Errorf("expected name 'aws-iam', got %q", aws.Name())
-	}
-}
