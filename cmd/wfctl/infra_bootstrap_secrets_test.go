@@ -387,3 +387,42 @@ func TestBootstrapSecrets_ProviderCredential_RollbackOnFirstSetFailure(t *testin
 		t.Errorf("rollback calls = %v; want one revoke of AK_FIRST", rev.calls)
 	}
 }
+
+// TestBootstrapSecrets_ForwardsGenName is the regression test for the
+// breakage caught during the gocodealone-multisite deploy: SecretGen
+// has a `name:` field but bootstrapSecrets didn't propagate it into
+// genConfig. provider_credential generators requiring a non-empty
+// name (e.g. digitalocean.spaces post-v0.60.4) then failed every run
+// because the config they received was missing the field.
+func TestBootstrapSecrets_ForwardsGenName(t *testing.T) {
+	var capturedConfig map[string]any
+	withStubGenerator(t, func(_ context.Context, _ string, cfg map[string]any) (string, error) {
+		capturedConfig = cfg
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "AK",
+			"secret_key": "SK",
+		})
+		return string(out), nil
+	})
+
+	p := &writeOnlyProvider{listOK: true}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{
+				Key:    "SPACES",
+				Type:   "provider_credential",
+				Source: "digitalocean.spaces",
+				Name:   "multisite-deploy-key",
+			},
+		},
+	}
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+	if got := capturedConfig["name"]; got != "multisite-deploy-key" {
+		t.Errorf("generator received name=%v want multisite-deploy-key (full config: %v)", got, capturedConfig)
+	}
+	if got := capturedConfig["source"]; got != "digitalocean.spaces" {
+		t.Errorf("generator received source=%v want digitalocean.spaces", got)
+	}
+}

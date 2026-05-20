@@ -611,6 +611,9 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 		if gen.Source != "" {
 			genConfig["source"] = gen.Source
 		}
+		if gen.Name != "" {
+			genConfig["name"] = gen.Name
+		}
 
 		// --force-rotate path: for provider_credential, read the OLD access_key
 		// BEFORE deleting so we can revoke it at the upstream provider after minting
