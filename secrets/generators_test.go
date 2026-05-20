@@ -215,6 +215,7 @@ func TestGenerateSecret_ProviderCredential_DOSpaces_WithBucket(t *testing.T) {
 
 	_, err := GenerateSecret(context.Background(), "provider_credential", map[string]any{
 		"source": "digitalocean.spaces",
+		"name":   "with-bucket-test",
 		"bucket": "my-state-bucket",
 	})
 	if err != nil {
@@ -580,5 +581,21 @@ func TestLookupExistingSpacesKey_Miss(t *testing.T) {
 
 	if got := lookupExistingSpacesKey(context.Background(), "stub", "missing"); got != "" {
 		t.Errorf("miss = %q want empty", got)
+	}
+}
+
+// TestGenerateDOSpacesKey_RequiresName verifies that the generator
+// refuses to fall back to a shared default name. Sharing a default
+// like "workflow-spaces-key" across projects causes cross-project
+// collisions in any account that runs more than one workflow-managed
+// deploy.
+func TestGenerateDOSpacesKey_RequiresName(t *testing.T) {
+	t.Setenv("DIGITALOCEAN_TOKEN", "stub")
+	_, err := generateDOSpacesKey(context.Background(), map[string]any{})
+	if err == nil {
+		t.Fatal("expected error when name is unset")
+	}
+	if !strings.Contains(err.Error(), "`name` is required") {
+		t.Errorf("error wording: %v", err)
 	}
 }

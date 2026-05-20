@@ -198,7 +198,13 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 
 	name, _ := config["name"].(string)
 	if name == "" {
-		name = "workflow-spaces-key"
+		// Refuse the default fallback. A shared default name causes
+		// cross-project collisions in any account that runs more than
+		// one workflow-managed deploy — every project would try to
+		// create or adopt the same `workflow-spaces-key`. Force the
+		// operator to name the key per-project (e.g.
+		// `multisite-deploy-key`, `wfcompute-deploy-key`).
+		return "", fmt.Errorf("secrets: provider_credential digitalocean.spaces: `name` is required (use a project-unique slug like \"<project>-deploy-key\"; a shared default would collide across projects in the same DO account)")
 	}
 
 	// DO Spaces Keys API requires a concrete bucket name (3-63 chars) when
@@ -212,6 +218,11 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 	if bucket != "" {
 		grant = map[string]any{"bucket": bucket, "permission": "readwrite"}
 	} else {
+		// fullaccess is required for bootstrap (the IaC state bucket
+		// does not exist yet, so the key cannot be scoped to it).
+		// Once the bucket is created, the operator should rotate to a
+		// bucket-scoped key via the rotate-and-prune flow.
+		fmt.Fprintf(os.Stderr, "secrets: WARN provider_credential digitalocean.spaces name=%q is being granted permission=fullaccess (no `bucket:` configured); rotate to a bucket-scoped key after first apply via `wfctl secrets rotate --target SPACES --bucket <state-bucket>` to limit blast radius.\n", name)
 		grant = map[string]any{"permission": "fullaccess"}
 	}
 	payload := map[string]any{"name": name, "grants": []map[string]any{grant}}
