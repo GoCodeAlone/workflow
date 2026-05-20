@@ -86,6 +86,10 @@ service IaCProviderDriftConfigDetector {
   rpc DetectDriftConfig(DetectDriftConfigRequest) returns (DetectDriftConfigResponse);
 }
 
+service IaCProviderLogCapture {
+  rpc CaptureLogs(CaptureLogsRequest) returns (stream LogChunk);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ResourceDriver — separate gRPC service for per-resource-type CRUD dispatch.
 // The driver instance is identified by (resource_type) carried on every RPC.
@@ -562,6 +566,35 @@ message DetectDriftConfigRequest {
 }
 message DetectDriftConfigResponse {
   repeated DriftResult drifts = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderLogCapture messages.
+// ─────────────────────────────────────────────────────────────────────────────
+enum LogCaptureType {
+  LOG_CAPTURE_TYPE_UNSPECIFIED = 0;
+  LOG_CAPTURE_TYPE_BUILD = 1;
+  LOG_CAPTURE_TYPE_DEPLOY = 2;
+  LOG_CAPTURE_TYPE_RUN = 3;
+  LOG_CAPTURE_TYPE_RUN_RESTARTED = 4;
+}
+
+message CaptureLogsRequest {
+  string resource_name = 1;
+  string resource_type = 2;
+  string provider_id = 3;
+  string component_name = 4;
+  LogCaptureType log_type = 5;
+  int32 tail_lines = 6;
+  bool follow = 7;
+  int64 duration_seconds = 8;
+  string deployment_id = 9;
+}
+
+message LogChunk {
+  bytes data = 1;
+  string source = 2;
+  bool eof = 3;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

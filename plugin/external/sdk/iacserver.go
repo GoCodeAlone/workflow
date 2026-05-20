@@ -36,6 +36,7 @@ import (
 //	pb.IaCProviderMigrationRepairerServer
 //	pb.IaCProviderValidatorServer
 //	pb.IaCProviderDriftConfigDetectorServer
+//	pb.IaCProviderLogCaptureServer
 //	pb.IaCStateBackendServer
 //
 // ResourceDriver:
@@ -162,6 +163,9 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	}
 	if v, ok := provider.(pb.IaCProviderDriftConfigDetectorServer); ok {
 		pb.RegisterIaCProviderDriftConfigDetectorServer(s, v)
+	}
+	if v, ok := provider.(pb.IaCProviderLogCaptureServer); ok {
+		pb.RegisterIaCProviderLogCaptureServer(s, v)
 	}
 	// IaCProviderFinalizer is the workflow#695 Phase 2.5 optional service
 	// for plugins needing a post-apply-loop finalizer hook under v2
@@ -520,6 +524,10 @@ type iacGRPCPlugin struct {
 	opts     IaCServeOptions
 }
 
+type iacGRPCServerAwareProvider interface {
+	SetGRPCServer(*grpc.Server)
+}
+
 // GRPCServer is invoked by go-plugin once it has constructed the
 // *grpc.Server. Delegates to registerAllIaCProviderServicesWithOpts so every
 // typed IaC service the provider satisfies gets registered in one call AND
@@ -530,6 +538,9 @@ type iacGRPCPlugin struct {
 // surfacing missing required methods as a plugin-startup error rather
 // than a generic "unimplemented" status at the first RPC dispatch.
 func (p *iacGRPCPlugin) GRPCServer(_ *goplugin.GRPCBroker, s *grpc.Server) error {
+	if aware, ok := p.provider.(iacGRPCServerAwareProvider); ok {
+		aware.SetGRPCServer(s)
+	}
 	return registerAllIaCProviderServicesWithOpts(s, p.provider, p.opts)
 }
 

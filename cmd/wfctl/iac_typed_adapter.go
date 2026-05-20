@@ -27,9 +27,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -53,6 +56,7 @@ const (
 	iacServiceMigrationRepairer = "workflow.plugin.external.iac.IaCProviderMigrationRepairer"
 	iacServiceValidator         = "workflow.plugin.external.iac.IaCProviderValidator"
 	iacServiceDriftConfigDetect = "workflow.plugin.external.iac.IaCProviderDriftConfigDetector"
+	iacServiceLogCapture        = "workflow.plugin.external.iac.IaCProviderLogCapture"
 	iacServiceFinalizer         = "workflow.plugin.external.iac.IaCProviderFinalizer"
 	iacServiceResourceDriver    = "workflow.plugin.external.iac.ResourceDriver"
 )
@@ -78,6 +82,7 @@ type typedIaCAdapter struct {
 	repairer     pb.IaCProviderMigrationRepairerClient
 	validator    pb.IaCProviderValidatorClient
 	driftCfg     pb.IaCProviderDriftConfigDetectorClient
+	logCapture   pb.IaCProviderLogCaptureClient
 	finalizer    pb.IaCProviderFinalizerClient
 	resourceDriv pb.ResourceDriverClient
 
@@ -116,6 +121,9 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 	}
 	if registered[iacServiceDriftConfigDetect] {
 		a.driftCfg = pb.NewIaCProviderDriftConfigDetectorClient(conn)
+	}
+	if registered[iacServiceLogCapture] {
+		a.logCapture = pb.NewIaCProviderLogCaptureClient(conn)
 	}
 	if registered[iacServiceFinalizer] {
 		a.finalizer = pb.NewIaCProviderFinalizerClient(conn)
@@ -190,6 +198,13 @@ func (a *typedIaCAdapter) DriftDetector() pb.IaCProviderDriftDetectorClient {
 // the required IaCProvider.DetectDrift (existence-only) per ADR 0016.
 func (a *typedIaCAdapter) DriftConfigDetector() pb.IaCProviderDriftConfigDetectorClient {
 	return a.driftCfg
+}
+
+// LogCapture returns the typed pb.IaCProviderLogCaptureClient or nil
+// when the plugin did not register IaCProviderLogCapture. Used by
+// `wfctl logs capture`.
+func (a *typedIaCAdapter) LogCapture() pb.IaCProviderLogCaptureClient {
+	return a.logCapture
 }
 
 // CredentialRevoker returns the typed
@@ -589,6 +604,42 @@ func (a *typedIaCAdapter) RepairDirtyMigration(ctx context.Context, req interfac
 		return nil, translateRPCErr(err)
 	}
 	return migrationRepairResultFromPB(resp.GetResult()), nil
+}
+
+// CaptureLogs satisfies interfaces.LogCaptureProvider.
+func (a *typedIaCAdapter) CaptureLogs(ctx context.Context, req interfaces.LogCaptureRequest, sink interfaces.LogCaptureSink) error {
+	if a.logCapture == nil {
+		return unimplementedOptional(iacServiceLogCapture)
+	}
+	pbReq, err := logCaptureRequestToPB(req)
+	if err != nil {
+		return err
+	}
+	stream, err := a.logCapture.CaptureLogs(ctx, pbReq)
+	if err != nil {
+		return translateRPCErr(err)
+	}
+	for {
+		chunk, recvErr := stream.Recv()
+		if recvErr != nil {
+			if errors.Is(recvErr, io.EOF) {
+				return nil
+			}
+			return translateRPCErr(recvErr)
+		}
+		if sink != nil {
+			if err := sink.WriteLogChunk(interfaces.LogChunk{
+				Data:   append([]byte(nil), chunk.GetData()...),
+				Source: chunk.GetSource(),
+				EOF:    chunk.GetEof(),
+			}); err != nil {
+				return err
+			}
+		}
+		if chunk.GetEof() {
+			return nil
+		}
+	}
 }
 
 // ─── typedResourceDriver (per-type ResourceDriver wrapper) ──────────────────
@@ -1258,6 +1309,46 @@ func migrationRepairResultFromPB(r *pb.MigrationRepairResult) *interfaces.Migrat
 		Applied:       append([]string(nil), r.GetApplied()...),
 		Logs:          r.GetLogs(),
 		Diagnostics:   diags,
+	}
+}
+
+func logCaptureRequestToPB(r interfaces.LogCaptureRequest) (*pb.CaptureLogsRequest, error) {
+	tailLines := r.TailLines
+	if tailLines < 0 {
+		tailLines = 0
+	} else if tailLines > math.MaxInt32 {
+		tailLines = math.MaxInt32
+	}
+	logType, err := logCaptureTypeToPB(r.LogType)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.CaptureLogsRequest{
+		ResourceName:    r.ResourceName,
+		ResourceType:    r.ResourceType,
+		ProviderId:      r.ProviderID,
+		ComponentName:   r.ComponentName,
+		LogType:         logType,
+		TailLines:       int32(tailLines), //nolint:gosec // G115: clamped above
+		Follow:          r.Follow,
+		DurationSeconds: r.DurationSeconds,
+		DeploymentId:    r.DeploymentID,
+	}, nil
+}
+
+func logCaptureTypeToPB(s string) (pb.LogCaptureType, error) {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "BUILD":
+		return pb.LogCaptureType_LOG_CAPTURE_TYPE_BUILD, nil
+	case "DEPLOY":
+		return pb.LogCaptureType_LOG_CAPTURE_TYPE_DEPLOY, nil
+	case "", "RUN":
+		return pb.LogCaptureType_LOG_CAPTURE_TYPE_RUN, nil
+	case "RUN_RESTARTED":
+		return pb.LogCaptureType_LOG_CAPTURE_TYPE_RUN_RESTARTED, nil
+	default:
+		return pb.LogCaptureType_LOG_CAPTURE_TYPE_UNSPECIFIED,
+			fmt.Errorf("log capture: unsupported log type %q (want BUILD, DEPLOY, RUN, or RUN_RESTARTED)", s)
 	}
 }
 

@@ -74,6 +74,7 @@ func TestOptionalServicesHaveDistinctInterfaces(t *testing.T) {
 		pb.IaCProviderMigrationRepairerServer
 		pb.IaCProviderValidatorServer
 		pb.IaCProviderDriftConfigDetectorServer
+		pb.IaCProviderLogCaptureServer
 	}
 	var _ optional = (*allOptionalStub)(nil)
 }
@@ -85,6 +86,7 @@ type allOptionalStub struct {
 	pb.UnimplementedIaCProviderMigrationRepairerServer
 	pb.UnimplementedIaCProviderValidatorServer
 	pb.UnimplementedIaCProviderDriftConfigDetectorServer
+	pb.UnimplementedIaCProviderLogCaptureServer
 }
 
 // TestMigrationRepairConfirmationStringMatchesProtoComment guards the

@@ -88,6 +88,7 @@ var commands = map[string]func([]string) error{
 	"compat":          runCompat,
 	"generate":        runGenerate,
 	"git":             runGit,
+	"logs":            runLogs,
 	"registry":        runRegistry,
 	"plugin-registry": runPluginRegistry,
 	"update":          runUpdate,
