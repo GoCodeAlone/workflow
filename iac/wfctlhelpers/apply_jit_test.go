@@ -96,7 +96,7 @@ func TestApplyPlan_JIT_TwoCreate_BSpecResolvesAID(t *testing.T) {
 		})},
 	}}
 
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestApplyPlan_JIT_PreSyncedFromActionCurrentState(t *testing.T) {
 		Outputs: map[string]any{"cidr": "10.0.0.0/16", "region": "nyc3"},
 	}
 
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestApplyPlan_JIT_UnresolvedRef_RecordsActionErrorAndSkipsDispatch(t *testi
 			"vpc_uuid": "${ghost.id}", // ghost has no state, no replace-id
 		})},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestApplyPlan_JIT_NoRefsInConfig_PassesThroughUnchanged(t *testing.T) {
 			"region": "nyc3",
 		})},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestApplyPlan_JIT_LoopContinuesAfterPerActionJITError(t *testing.T) {
 			"cidr": "10.0.0.0/16",
 		})},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}

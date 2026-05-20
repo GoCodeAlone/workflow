@@ -37,7 +37,7 @@ func TestApplyPlan_InitialInputSnapshot_CapturedAtEntry(t *testing.T) {
 		},
 	}
 	fp := newFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestApply_Postcondition_FingerprintAfterEnvUnset_NoFalsePositive(t *testing
 		fakeProvider: newFakeProvider(),
 		varToUnset:   varName,
 	}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestApplyPlan_PlanStaleDiagnostic_NamesChangedKeys(t *testing.T) {
 		InputSnapshot: map[string]string{varName: planFP},
 	}
 	fp := newFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestApplyPlan_PlanStaleDiagnostic_NamesChangedKeys(t *testing.T) {
 func TestApplyPlan_NoDriftWhenInputSnapshotEmpty(t *testing.T) {
 	plan := &interfaces.IaCPlan{}
 	fp := newFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestApplyPlan_PostconditionRunsEvenIfDispatchErrored(t *testing.T) {
 		},
 	}
 	fp := &erroringFakeProvider{fakeProvider: newFakeProvider()}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}

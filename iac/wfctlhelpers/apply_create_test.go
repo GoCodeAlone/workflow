@@ -85,7 +85,7 @@ func TestApplyPlan_Create_UpsertOnAlreadyExists(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "create", Resource: spec("a", "infra.vpc")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestApplyPlan_Create_AlreadyExists_NoUpsertSupport(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "create", Resource: spec("a", "infra.vpc")},
 	}}
-	result, _ := ApplyPlan(context.Background(), fp, plan)
+	result, _ := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if len(result.Errors) != 1 {
 		t.Fatalf("expected 1 per-action error; got %d (%v)", len(result.Errors), result.Errors)
 	}
@@ -159,7 +159,7 @@ func TestApplyPlan_Create_AlreadyExists_DriverDoesNotImplementUpsertSupporter(t 
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "create", Resource: spec("a", "infra.vpc")},
 	}}
-	result, _ := ApplyPlan(context.Background(), fp, plan)
+	result, _ := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if len(result.Errors) != 1 {
 		t.Fatalf("expected 1 per-action error; got %d (%v)", len(result.Errors), result.Errors)
 	}
@@ -195,7 +195,7 @@ func TestApplyPlan_Create_UpsertReadFailureWraps(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "create", Resource: spec("a", "infra.vpc")},
 	}}
-	result, _ := ApplyPlan(context.Background(), fp, plan)
+	result, _ := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if len(result.Errors) != 1 {
 		t.Fatalf("expected 1 error; got %d (%v)", len(result.Errors), result.Errors)
 	}
@@ -226,7 +226,7 @@ func TestApplyPlan_Create_UpsertEmptyProviderIDFails(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "create", Resource: spec("vpc-1", "infra.vpc")},
 	}}
-	result, _ := ApplyPlan(context.Background(), fp, plan)
+	result, _ := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if len(result.Errors) != 1 {
 		t.Fatalf("expected 1 error; got %d (%v)", len(result.Errors), result.Errors)
 	}
@@ -257,7 +257,7 @@ func TestApplyPlan_Create_UpsertAppendsResources(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "create", Resource: spec("vpc-1", "infra.vpc")},
 	}}
-	result, _ := ApplyPlan(context.Background(), fp, plan)
+	result, _ := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if len(result.Resources) != 1 {
 		t.Fatalf("expected 1 resource appended; got %d (%+v)", len(result.Resources), result.Resources)
 	}

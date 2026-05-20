@@ -81,7 +81,7 @@ func TestApplyPlan_Replace_DeletesThenCreates_PropagatesNewID(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestApplyPlan_Replace_PopulatesReplaceIDMap(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestApplyPlan_Replace_MultipleActionsAllPopulate(t *testing.T) {
 		fakeProvider: newFakeProvider(),
 		newIDs:       map[string]string{"vpc": "new-vpc-id", "db": "new-db-id"},
 	}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestApplyPlan_Replace_DeleteFailsDoesNotCreate(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,13 +232,13 @@ func TestApplyPlan_Replace_CtxCancelAfterDelete_SkipsCreate(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(ctx, fp, plan)
+	result, err := ApplyPlanWithHooks(ctx, fp, plan, ApplyPlanHooks{})
 	if err != nil {
-		// ApplyPlan's loop check catches the cancellation at the next
+		// ApplyPlanWithHooks' loop check catches the cancellation at the next
 		// iteration, but the per-action ctx check inside doReplace
 		// fires first. Either path yields a per-action error rather
 		// than a top-level error from this single-action plan.
-		t.Fatalf("ApplyPlan should not surface top-level error: %v", err)
+		t.Fatalf("ApplyPlanWithHooks should not surface top-level error: %v", err)
 	}
 	if fp.driver.deleteCount != 1 {
 		t.Errorf("Delete should have run before cancellation; deleteCount=%d", fp.driver.deleteCount)
@@ -297,7 +297,7 @@ func TestApplyPlan_Replace_CreateFailsLeavesMapEmpty(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}

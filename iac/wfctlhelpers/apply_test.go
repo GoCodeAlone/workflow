@@ -132,7 +132,7 @@ func TestApplyPlan_HandlesAllFourActions(t *testing.T) {
 		},
 	}
 	fp := newFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestApplyPlan_ReplaceDispatchesViaDeleteThenCreate(t *testing.T) {
 		},
 	}
 	fp := newFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestApplyPlan_UnknownActionRecordsError(t *testing.T) {
 		},
 	}
 	fp := newFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatalf("ApplyPlan should not return a top-level error for a per-action issue; got %v", err)
 	}
@@ -215,7 +215,7 @@ func TestApplyPlan_UnknownActionRecordsError(t *testing.T) {
 func TestApplyPlan_PreservesPlanID(t *testing.T) {
 	plan := &interfaces.IaCPlan{ID: "plan-12345"}
 	fp := newFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestApplyPlan_ResolveDriverErrorRecordsActionError(t *testing.T) {
 	}
 	fp := newFakeProvider()
 	fp.driverErr = errResolveDriver
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatalf("top-level error not expected for per-action driver-resolve failure; got %v", err)
 	}
@@ -283,7 +283,7 @@ func TestApplyPlan_LoopContinuesAfterPerActionFailure(t *testing.T) {
 			{Action: "create", Resource: spec("good", "infra.vpc")},
 		},
 	}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestApplyPlan_CtxCancellationStopsLoop(t *testing.T) {
 		},
 	}
 	fp := newFakeProvider()
-	_, err := ApplyPlan(ctx, fp, plan)
+	_, err := ApplyPlanWithHooks(ctx, fp, plan, ApplyPlanHooks{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled top-level error; got %v", err)
 	}
