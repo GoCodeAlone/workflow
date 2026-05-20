@@ -444,7 +444,13 @@ type CloudProvider interface {
 
 ### 4 Provider Plugins
 
-**`provider/aws/plugin.go`** — AWS: EC2, ECS, EKS, ECR, CloudWatch
+> **Update 2026-05-20 (PR #744):** `provider/aws/*` has been deleted from
+> workflow-core; AWS IaC now lives in the external `workflow-plugin-aws`
+> repo. The references below are kept as the historical phase-6 plan;
+> see the migration doc at
+> `docs/migrations/2026-05-15-plugin-modules-on-iac.md` for current state.
+
+**`provider/aws/plugin.go`** — AWS: EC2, ECS, EKS, ECR, CloudWatch (extracted to workflow-plugin-aws)
 **`provider/gcp/plugin.go`** — GCP: GKE, Cloud Run, GCR, Cloud Monitoring
 **`provider/azure/plugin.go`** — Azure: AKS, ACI, ACR, Azure Monitor
 **`provider/digitalocean/plugin.go`** — DO: DOKS, App Platform, Container Registry

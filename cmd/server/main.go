@@ -44,7 +44,6 @@ import (
 	allplugins "github.com/GoCodeAlone/workflow/plugins/all"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
 	"github.com/GoCodeAlone/workflow/provider"
-	_ "github.com/GoCodeAlone/workflow/provider/aws"
 	_ "github.com/GoCodeAlone/workflow/provider/azure"
 	_ "github.com/GoCodeAlone/workflow/provider/digitalocean"
 	_ "github.com/GoCodeAlone/workflow/provider/gcp"

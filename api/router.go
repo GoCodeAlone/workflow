@@ -185,7 +185,12 @@ func NewRouterWithIAM(stores Stores, cfg Config, iamResolver *iam.IAMResolver) h
 		resolver := iamResolver
 		if resolver == nil {
 			resolver = iam.NewIAMResolver(stores.IAM)
-			resolver.RegisterProvider(&iam.AWSIAMProvider{})
+			// AWS IAM provider removed from workflow core; no in-process
+			// replacement is wired here. To re-enable AWS IAM, the
+			// embedder must construct an iam.IAMResolver, register an
+			// AWS-aware iam.IAMProvider impl on it (e.g., from
+			// workflow-plugin-aws), and pass it as iamResolver above
+			// rather than relying on this default branch.
 			resolver.RegisterProvider(&iam.KubernetesProvider{})
 			resolver.RegisterProvider(&iam.OIDCProvider{})
 		}

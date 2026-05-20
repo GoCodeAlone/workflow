@@ -9,88 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// --- AWS Provider Tests ---
-
-func TestAWSProvider_Type(t *testing.T) {
-	p := &AWSIAMProvider{}
-	if p.Type() != store.IAMProviderAWS {
-		t.Errorf("expected %s, got %s", store.IAMProviderAWS, p.Type())
-	}
-}
-
-func TestAWSProvider_ValidateConfig_Valid(t *testing.T) {
-	p := &AWSIAMProvider{}
-	cfg := json.RawMessage(`{"account_id":"123456789012","region":"us-east-1"}`)
-	if err := p.ValidateConfig(cfg); err != nil {
-		t.Fatalf("expected valid config, got %v", err)
-	}
-}
-
-func TestAWSProvider_ValidateConfig_MissingAccountID(t *testing.T) {
-	p := &AWSIAMProvider{}
-	cfg := json.RawMessage(`{"region":"us-east-1"}`)
-	if err := p.ValidateConfig(cfg); err == nil {
-		t.Fatal("expected error for missing account_id")
-	}
-}
-
-func TestAWSProvider_ValidateConfig_InvalidJSON(t *testing.T) {
-	p := &AWSIAMProvider{}
-	cfg := json.RawMessage(`{invalid}`)
-	if err := p.ValidateConfig(cfg); err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-}
-
-func TestAWSProvider_ResolveIdentities_ValidARN(t *testing.T) {
-	p := &AWSIAMProvider{}
-	cfg := json.RawMessage(`{"account_id":"123456789012"}`)
-	creds := map[string]string{"arn": "arn:aws:iam::123456789012:role/MyRole"}
-
-	ids, err := p.ResolveIdentities(context.Background(), cfg, creds)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if len(ids) != 1 {
-		t.Fatalf("expected 1 identity, got %d", len(ids))
-	}
-	if ids[0].Provider != string(store.IAMProviderAWS) {
-		t.Errorf("expected provider %s, got %s", store.IAMProviderAWS, ids[0].Provider)
-	}
-	if ids[0].Identifier != "arn:aws:iam::123456789012:role/MyRole" {
-		t.Errorf("unexpected identifier: %s", ids[0].Identifier)
-	}
-}
-
-func TestAWSProvider_ResolveIdentities_MissingARN(t *testing.T) {
-	p := &AWSIAMProvider{}
-	cfg := json.RawMessage(`{"account_id":"123456789012"}`)
-
-	_, err := p.ResolveIdentities(context.Background(), cfg, map[string]string{})
-	if err == nil {
-		t.Fatal("expected error for missing ARN")
-	}
-}
-
-func TestAWSProvider_ResolveIdentities_InvalidARN(t *testing.T) {
-	p := &AWSIAMProvider{}
-	cfg := json.RawMessage(`{"account_id":"123456789012"}`)
-	creds := map[string]string{"arn": "not-an-arn"}
-
-	_, err := p.ResolveIdentities(context.Background(), cfg, creds)
-	if err == nil {
-		t.Fatal("expected error for invalid ARN format")
-	}
-}
-
-func TestAWSProvider_TestConnection(t *testing.T) {
-	t.Skip("requires real AWS credentials")
-	p := &AWSIAMProvider{}
-	cfg := json.RawMessage(`{"account_id":"123456789012","region":"us-east-1"}`)
-	if err := p.TestConnection(context.Background(), cfg); err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-}
+// AWS IAM provider tests deleted with iam/aws.go (extracted to workflow-plugin-aws).
 
 // --- Kubernetes Provider Tests ---
 
@@ -323,13 +242,13 @@ func TestIAMResolver_RegisterProvider(t *testing.T) {
 	is := newMockIAMStore()
 	resolver := NewIAMResolver(is)
 
-	resolver.RegisterProvider(&AWSIAMProvider{})
-	p, ok := resolver.GetProvider(store.IAMProviderAWS)
+	resolver.RegisterProvider(&KubernetesProvider{})
+	p, ok := resolver.GetProvider(store.IAMProviderKubernetes)
 	if !ok {
 		t.Fatal("expected provider to be registered")
 	}
-	if p.Type() != store.IAMProviderAWS {
-		t.Errorf("expected %s, got %s", store.IAMProviderAWS, p.Type())
+	if p.Type() != store.IAMProviderKubernetes {
+		t.Errorf("expected %s, got %s", store.IAMProviderKubernetes, p.Type())
 	}
 }
 

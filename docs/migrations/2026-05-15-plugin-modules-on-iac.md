@@ -178,11 +178,14 @@ this single transitive path** and **fail CI on any other** `cloud.google.com/go/
 dep. Any new GCP SDK package (e.g. `cloud.google.com/go/storage`,
 `google.golang.org/api/*`) belongs in `workflow-plugin-gcp`, not core.
 
-This is the GCP-side mirror of Phase B's `aws-sdk-go-v2`-retention paragraph:
-`provider/aws/` legitimately uses the AWS SDK for its deploy pipeline,
-`provider/gcp/` legitimately uses OAuth2 ADC for service-account auth, and
-both arrangements are intentional — the audit gate just guards against
-scope creep beyond those known seams.
+This is the GCP-side mirror of Phase B's `aws-sdk-go-v2`-retention paragraph.
+**Update 2026-05-20 (PR #744):** `provider/aws/` has since been deleted along
+with the remaining direct AWS SDK uses in workflow core (`iam/aws.go`,
+`artifact/s3.go`, `plugin/rbac/aws.go`); `workflow-plugin-aws` is now the
+in-tree home for AWS IaC. `aws-sdk-go-v2` remains in `go.mod` purely as an
+indirect dep (pulled by `modular/eventbus/v2` for sts/kinesis), which is
+a modular-side concern. `provider/gcp/` continues to use OAuth2 ADC for
+service-account auth — that arrangement is unchanged.
 
 ## Rollback
 
@@ -208,6 +211,9 @@ non-test consumers.
 - `go mod tidy` against the merged tree makes no net change to AWS SDK
   service modules — `aws-sdk-go-v2` stays in `go.mod` because `provider/aws/`,
   `plugin/rbac/aws.go`, `iam/aws.go`, and `artifact/s3.go` still import it.
+  **Update (PR #744, 2026-05-20):** all four of those files have since
+  been deleted; `aws-sdk-go-v2` now remains in `go.mod` only as an indirect
+  dep via `modular/eventbus/v2` (sts + kinesis).
 - The `.phase-b-complete` marker arms
   `scripts/audit-cloud-symbols.sh --check`'s zero-`aws-sdk-go-v2` invariant on
   `module/cloud_account_aws_creds.go`.
@@ -256,8 +262,9 @@ Plan-1 and plan-2 manifests + per-task spec records live under
 `2026-05-15-plugin-modules-on-iac.md`).
 
 **Final invariant statement:** workflow-core now imports zero cloud-provider
-SDK clients in `module/`; provider-specific surfaces (`provider/aws/`,
-`provider/gcp/`'s OAuth2-only path) retain only what's needed for the
+SDK clients in `module/`; provider-specific surfaces (`provider/gcp/`'s
+OAuth2-only path; `provider/aws/` was removed in PR #744 and replaced by
+`workflow-plugin-aws`) retain only what's needed for the
 out-of-scope deploy-pipeline / credential-resolution work that #653 +
 decisions/0034 explicitly carve out. Every other cloud-provider integration
 crosses the engine ↔ plugin gRPC boundary.
