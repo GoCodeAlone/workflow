@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"strings"
 )
 
 func runSecrets(args []string) error {
@@ -31,7 +32,16 @@ func runSecrets(args []string) error {
 	case "sync":
 		return runSecretsSync(args[1:])
 	case "setup":
-		return runSecretsSetup(args[1:])
+		// `secrets setup --plugin <name>` shells out to a separate
+		// dispatcher that reads plugin.json required_secrets[]. The
+		// env-name flow stays on runSecretsSetup.
+		rest := args[1:]
+		for _, a := range rest {
+			if a == "--plugin" || strings.HasPrefix(a, "--plugin=") {
+				return runSecretsSetupPlugin(rest)
+			}
+		}
+		return runSecretsSetup(rest)
 	case "list-orphans":
 		return runSecretsListOrphans(args[1:])
 	default:
