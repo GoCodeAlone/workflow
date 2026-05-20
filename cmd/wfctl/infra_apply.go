@@ -843,7 +843,16 @@ func isIaCNotFound(err error) bool {
 		return true
 	}
 	var platformNotFound *platform.ResourceNotFoundError
-	return errors.As(err, &platformNotFound)
+	if errors.As(err, &platformNotFound) {
+		return true
+	}
+	// gRPC fallback: typed adapter loses sentinel identity across the
+	// wire. The message survives as a wrapped string. Match on the
+	// literal ErrResourceNotFound.Error() value so adoption can still
+	// detect "not present yet, fall back to create" against remote
+	// plugin drivers (workflow-plugin-digitalocean v2+ database
+	// adoption is the original repro path).
+	return strings.Contains(err.Error(), interfaces.ErrResourceNotFound.Error())
 }
 
 func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType string, live *interfaces.ResourceOutput) (interfaces.ResourceState, error) {
