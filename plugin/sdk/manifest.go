@@ -1,10 +1,11 @@
 // Package sdk hosts the plugin SDK manifest schema and helpers used by
-// wfctl to discover plugin capabilities (currently: IaC dispatch version).
+// wfctl to discover plugin capabilities.
 //
 // The SDK manifest is intentionally additive over [plugin.PluginManifest];
-// it captures only the fields that wfctl reads at apply-time to choose
-// between the v1 (legacy in-provider Apply) and v2 (wfctlhelpers.ApplyPlan)
-// dispatch paths.
+// it captures only the fields that wfctl validates before typed runtime
+// capability discovery. After the strict lifecycle cutover, the typed
+// CapabilitiesResponse.compute_plan_version declaration is authoritative and
+// wfctl accepts "v2" only.
 package sdk
 
 import (
@@ -50,13 +51,13 @@ type Manifest struct {
 
 // IaCProvider describes IaC-provider-specific manifest fields.
 type IaCProvider struct {
-	// ComputePlanVersion selects the apply-time dispatch path:
-	//   "" (default, treated as "v1"): legacy in-provider Apply switch.
-	//   "v1":                          explicit legacy dispatch.
-	//   "v2":                          route through wfctlhelpers.ApplyPlan
-	//                                   (Replace + input-drift postcondition).
-	// Schema-validated against the enum ["v1","v2"]; "" passes validation
-	// because the field is optional.
+	// ComputePlanVersion is parse-time manifest metadata retained for plugin
+	// authors and validation tooling. Runtime selection is strict: the typed
+	// CapabilitiesResponse.compute_plan_version gate accepts "v2" only and
+	// routes through wfctlhelpers.ApplyPlanWithHooks.
+	// Schema-validated against the enum ["v1","v2"]; "" passes validation for
+	// older manifests, but load-time typed capability validation rejects non-v2
+	// providers.
 	ComputePlanVersion string `json:"computePlanVersion,omitempty"`
 }
 

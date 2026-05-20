@@ -234,11 +234,11 @@ func TestApplyPlan_Replace_CtxCancelAfterDelete_SkipsCreate(t *testing.T) {
 	}}
 	result, err := ApplyPlanWithHooks(ctx, fp, plan, ApplyPlanHooks{})
 	if err != nil {
-		// ApplyPlan's loop check catches the cancellation at the next
+		// ApplyPlanWithHooks' loop check catches the cancellation at the next
 		// iteration, but the per-action ctx check inside doReplace
 		// fires first. Either path yields a per-action error rather
 		// than a top-level error from this single-action plan.
-		t.Fatalf("ApplyPlan should not surface top-level error: %v", err)
+		t.Fatalf("ApplyPlanWithHooks should not surface top-level error: %v", err)
 	}
 	if fp.driver.deleteCount != 1 {
 		t.Errorf("Delete should have run before cancellation; deleteCount=%d", fp.driver.deleteCount)

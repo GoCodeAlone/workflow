@@ -2243,12 +2243,10 @@ type CapabilitiesResponse struct {
 	// cutover (typedIaCAdapter previously couldn't ask the plugin for its
 	// canonical-keys override). See ADR-0029.
 	CanonicalKeys []string `protobuf:"bytes,2,rep,name=canonical_keys,json=canonicalKeys,proto3" json:"canonical_keys,omitempty"`
-	// compute_plan_version: provider-level apply-time dispatch version.
-	// "" or unrecognized = "v1" (legacy provider.Apply path); "v2" routes
-	// through wfctlhelpers.ApplyPlan. Mirrors the
-	// ComputePlanVersionDeclarer optional Go interface so plugin authors
-	// can declare apply-version via gRPC instead of a separate type-assert
-	// probe. See ADR-0029.
+	// compute_plan_version: provider-level apply-time lifecycle declaration.
+	// wfctl accepts "v2" only; empty, "v1", and unrecognized values are rejected
+	// by the provider loader after the strict lifecycle cutover. "v2" routes
+	// through wfctlhelpers.ApplyPlanWithHooks. See ADR-0029 and workflow#640.
 	ComputePlanVersion string `protobuf:"bytes,3,opt,name=compute_plan_version,json=computePlanVersion,proto3" json:"compute_plan_version,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache

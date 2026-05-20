@@ -15,7 +15,7 @@
       "properties": {
         "computePlanVersion": {
           "type": "string",
-          "description": "Selects the apply-time dispatch path. v1 (default when omitted) routes through the legacy in-provider Apply switch. v2 routes through wfctlhelpers.ApplyPlan with full Replace + drift-postcondition support.",
+          "description": "Declares apply-time lifecycle support for validation metadata. Runtime typed capability discovery accepts v2 only and routes through wfctlhelpers.ApplyPlanWithHooks; empty/v1 declarations are rejected at provider load after the strict cutover.",
           "enum": ["v1", "v2"]
         }
       }

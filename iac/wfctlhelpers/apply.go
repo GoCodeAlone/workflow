@@ -1,37 +1,30 @@
 // Package wfctlhelpers hosts the wfctl-side dispatch helper for v2 IaC
-// plugins. wfctl calls [ApplyPlanWithHooks] (or the legacy [ApplyPlan]) when
-// a plugin manifest declares iacProvider.computePlanVersion: v2 (see
-// plugin/sdk.IaCProvider). The helper iterates plan.Actions, fetches the
-// matching ResourceDriver from the provider, and dispatches each action to
-// a per-action sub-function (doCreate, doUpdate, doReplace, doDelete).
+// plugins. wfctl calls [ApplyPlanWithHooks] when a plugin's typed capability
+// response declares compute_plan_version: "v2". The helper iterates
+// plan.Actions, fetches the matching ResourceDriver from the provider, and
+// dispatches each action to a per-action sub-function (doCreate, doUpdate,
+// doReplace, doDelete).
 //
 // # Action lifecycle versions (workflow#640 migration)
 //
-// Two callers can drive plan execution:
-//
-//   - [ApplyPlan] (legacy, marked Deprecated) — empty-hooks equivalent
-//     of [ApplyPlanWithHooks]. State persistence happens at whole-plan
-//     completion only.
-//
-//   - [ApplyPlanWithHooks] (v2, recommended) — caller-supplied per-action
-//     OnResourceApplied / OnResourceDeleted hooks fire at each successful
-//     cloud-mutation boundary. Required for #640's invariants.
+// [ApplyPlanWithHooks] is the only exported plan-execution helper. Its
+// caller-supplied per-action OnResourceApplied / OnResourceDeleted hooks fire
+// at each successful cloud-mutation boundary. Required for #640's invariants.
 //
 // See docs/migrations/2026-05-16-v2-lifecycle-phase1-inventory.md and
 // decisions/0040-v2-action-lifecycle-provider-compatibility.md for the
-// migration contract; ApplyPlan will be removed in Phase 5.
+// final migration closeout.
 //
 // Lifecycle inside W-3a:
 //
-//   - T3.1 (this file's ApplyPlan + dispatch + skeleton sub-functions)
-//   - T3.1.5 — wraps ApplyPlan with the input-drift postcondition
+//   - T3.1 (this file's dispatch helper + skeleton sub-functions)
+//   - T3.1.5 — wraps dispatch with the input-drift postcondition
 //   - T3.2 — fills doCreate with UpsertSupporter recovery
 //   - T3.3 — fills doUpdate + doDelete (the latent doDelete bug fix)
 //   - T3.4 — fills doReplace and populates ApplyResult.ReplaceIDMap
 //
-// Until W-3b lands the cmd/wfctl dispatch wiring, [ApplyPlan] has no
-// in-tree caller — the helper ships in W-3a as foundation only and is
-// exercised solely by this package's tests.
+// workflow#743 removed the former ApplyPlan wrapper after all runtime paths
+// moved to ApplyPlanWithHooks.
 //
 // # Per-action error-prefix policy
 //
@@ -68,15 +61,15 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// ApplyPlan dispatches each plan action to the matching ResourceDriver on
-// the provider. Per-action errors are recorded on result.Errors and do NOT
-// abort the loop — apply best-effort across actions, surface every failure
-// for the operator to triage. Context cancellation between actions IS
-// respected: when ctx is canceled or its deadline expires, the loop stops
-// at the next iteration boundary and returns ctx.Err() as the top-level
-// error so a long apply terminates promptly on Ctrl-C / SIGTERM.
+// ApplyPlanWithHooks dispatches each plan action to the matching ResourceDriver
+// on the provider. Per-action errors are recorded on result.Errors and do NOT
+// abort the loop — apply best-effort across actions, surface every failure for
+// the operator to triage. Context cancellation between actions IS respected:
+// when ctx is canceled or its deadline expires, the loop stops at the next
+// iteration boundary and returns ctx.Err() as the top-level error so a long
+// apply terminates promptly on Ctrl-C / SIGTERM.
 //
-// At entry ApplyPlan captures result.InitialInputSnapshot by fingerprinting
+// At entry the helper captures result.InitialInputSnapshot by fingerprinting
 // every name listed in plan.InputSnapshot through the OS env. After the
 // dispatch loop completes — successfully or not — a deferred postcondition
 // computes result.InputDriftReport against an apply-time snapshot taken
@@ -86,11 +79,11 @@ import (
 // on panic, InputDriftReport is reset to nil and a warning is logged.
 //
 // The function is concurrency-safe with respect to its inputs: result is
-// owned by ApplyPlan for the duration of the call and is not shared with
-// the provider or driver implementations.
+// owned by the helper for the duration of the call and is not shared with the
+// provider or driver implementations.
 //
-// T3.1 ships the dispatch skeleton; T3.1.5 added the postcondition above;
-// T3.2/T3.3/T3.4 fill the per-action sub-functions with their full bodies.
+// T3.1 shipped the dispatch skeleton; T3.1.5 added the postcondition above;
+// T3.2/T3.3/T3.4 filled the per-action sub-functions with their full bodies.
 //
 // ApplyPlanHooks are optional callbacks invoked immediately after a plan action
 // successfully mutates cloud-side state. Hooks let wfctl persist state at the
@@ -110,10 +103,9 @@ type ApplyPlanHooks struct {
 	//   - The per-action loop's `if fatalErr != nil { return ... }`
 	//     early-return — outer err != nil. v1 semantic preservation per
 	//     cycle-1 plan-review C-3: DOProvider.Apply skips deferred-flush
-	//     when wfctlhelpers.ApplyPlan returns a top-level err (the
-	//     `if err != nil { return ... }` guard in DOProvider.Apply
-	//     immediately after the ApplyPlan call in
-	//     workflow-plugin-digitalocean internal/provider.go).
+	//     when ApplyPlanWithHooks returns a top-level err (the
+	//     `if err != nil { return ... }` guard in the caller immediately
+	//     after the helper call).
 	//   - The post-loop length-invariant check that compares
 	//     len(result.Actions) against len(plan.Actions) — outer err != nil.
 	//
@@ -128,8 +120,8 @@ type ApplyPlanHooks struct {
 	OnPlanComplete func(context.Context) error
 }
 
-// ApplyPlanWithHooks is ApplyPlan plus action-boundary hooks for callers that
-// need durable side effects as each cloud mutation succeeds.
+// ApplyPlanWithHooks dispatches plan actions plus action-boundary hooks for
+// callers that need durable side effects as each cloud mutation succeeds.
 func ApplyPlanWithHooks(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks ApplyPlanHooks) (*interfaces.ApplyResult, error) {
 	return applyPlanWithEnvProviderAndHooks(ctx, p, plan, nil, hooks)
 }
@@ -175,10 +167,9 @@ func applyPlanWithEnvProviderAndHooks(
 			// v1 semantic preservation: outer-error exits (the per-action
 			// loop's `if fatalErr != nil { return ... }` early-return and
 			// the post-loop length-invariant check) skip finalize,
-			// matching DOProvider.Apply's "return without flushing on
-			// top-level err" behavior (the `if err != nil { return ... }`
-			// guard immediately after the wrapped ApplyPlan call in
-			// workflow-plugin-digitalocean internal/provider.go).
+			// matching the legacy "return without flushing on top-level
+			// err" behavior (the `if err != nil { return ... }` guard
+			// immediately after the helper call).
 			return
 		}
 		// Symmetry with the drift defer below: OnPlanComplete is a
@@ -629,9 +620,9 @@ func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action int
 //   - Read-after-conflict failures wrap both the original Create error
 //     and the Read error via errors.Join, so callers in this package
 //     can match either via errors.Is.
-//   - The doCreate return value preserves the wrap chain. ApplyPlan's
+//   - The doCreate return value preserves the wrap chain. The helper's
 //     dispatch loop, however, flattens errors to a string in
-//     result.Errors[].Error (see [ApplyPlan]) — external callers
+//     result.Errors[].Error — external callers
 //     reading [interfaces.ApplyResult].Errors lose errors.Is matching
 //     and must inspect the canonical "upsert: read after conflict:"
 //     prefix instead. This boundary is deliberate: ActionError carries
@@ -665,7 +656,7 @@ func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interface
 // ProviderID (when action.Current is non-nil), appending the driver's
 // returned ResourceOutput to result.Resources on success. Driver errors
 // pass through unchanged so the caller's per-action error wrapper
-// (ApplyPlan's loop body) records them with the canonical action +
+// (the helper loop body) records them with the canonical action +
 // resource fields.
 //
 // Defensive contract: doUpdate does NOT synthesize a precondition error
@@ -693,7 +684,7 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 // Decomposes a Replace action into Delete-then-Create on the driver and
 // propagates the new ProviderID through
 // result.ReplaceIDMap[action.Resource.Name] so the JIT substitution wired
-// into ApplyPlan's loop (T5.2) can patch dependent resources whose
+// into the helper loop (T5.2) can patch dependent resources whose
 // configs reference the replaced resource by name.
 //
 // # Cascade contract (T5.3)
@@ -879,9 +870,8 @@ func hasReplaceErrorPrefix(err error) bool {
 // ProviderID. This closes the latent gap documented in the design
 // (DOProvider.Apply has no "case delete" arm today, so wfctl's
 // state-prune action silently skipped cloud-resource deletion through
-// the v1 dispatch path); under v2 dispatch wfctlhelpers.ApplyPlan
-// always invokes the driver's Delete, ensuring state-prune is paired
-// with a real cloud-side mutation.
+// the former v1 dispatch path); v2 dispatch always invokes the driver's
+// Delete, ensuring state-prune is paired with a real cloud-side mutation.
 //
 // Driver errors pass through unchanged for the caller's per-action
 // error wrapping. doDelete does not append to result.Resources — a
