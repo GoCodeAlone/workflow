@@ -713,19 +713,43 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 					allowed[k] = true
 				}
 
-				// Capture access_key + created_at independently of storage so
-				// RotationResult always reports them on a force-rotate, even
-				// though access_key IS in the allowed set and created_at is
-				// NOT (per review #2 C5: stderr emission alone would skip
-				// access_key).
-				var newAccessKey, newCreatedAt string
+				// Capture access_key + created_at BEFORE any Set call so the
+				// transactional rollback path has the upstream credential ID
+				// available even when the very first Set fails. Bug fix:
+				// previously these were extracted DURING iteration, so a
+				// Set("foo_access_key") failure left newAccessKey unset and
+				// the orphaned DO key invisible to the rollback path.
+				newAccessKey := subKeyMap["access_key"]
+				newCreatedAt := subKeyMap["created_at"]
+
+				// Transactional rollback: if ANY Set() inside the loop fails,
+				// revoke the just-created upstream credential before
+				// returning. The DO Spaces Keys API does NOT enforce name
+				// uniqueness, so a partially-applied generation without
+				// rollback leaves an orphaned key whose secret_key is
+				// permanently irrecoverable (see workflow#732 / SPEC V?).
+				//
+				// Rollback is best-effort — failure is logged but does not
+				// mask the original Set error. Operator can still find the
+				// orphan via the wfctl secrets list-orphans helper.
+				revokeOrphan := func(reason error) {
+					if newAccessKey == "" {
+						return
+					}
+					if credRevoker == nil {
+						fmt.Fprintf(os.Stderr, "warn: provider_credential %q minted access_key=%s but no revoker available; the upstream credential is now ORPHANED and unrecoverable. Run `wfctl secrets list-orphans --source %s --name %s` to clean up. Original error: %v\n",
+							gen.Key, newAccessKey, gen.Source, gen.Key, reason)
+						return
+					}
+					if revokeErr := credRevoker.RevokeProviderCredential(ctx, gen.Source, newAccessKey); revokeErr != nil {
+						fmt.Fprintf(os.Stderr, "warn: rollback-revoke just-minted credential %q (access_key=%s) failed: %v — manual cleanup required via `wfctl secrets list-orphans --source %s`\n",
+							gen.Key, newAccessKey, revokeErr, gen.Source)
+						return
+					}
+					fmt.Fprintf(os.Stderr, "wfctl: rolled back orphaned credential %q (access_key=%s) after Set failure\n", gen.Key, newAccessKey)
+				}
+
 				for subKey, subVal := range subKeyMap {
-					if subKey == "access_key" {
-						newAccessKey = subVal
-					}
-					if subKey == "created_at" {
-						newCreatedAt = subVal
-					}
 					if !allowed[subKey] {
 						// Sidecar field — emit to stderr in machine-parseable form
 						// for operator observability + audit logs.
@@ -734,6 +758,7 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 					}
 					fullKey := gen.Key + "_" + subKey
 					if setErr := provider.Set(ctx, fullKey, subVal); setErr != nil {
+						revokeOrphan(setErr)
 						return generated, rotations, fmt.Errorf("store secret %q: %w", fullKey, setErr)
 					}
 					generated[fullKey] = subVal
@@ -743,6 +768,7 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 						fmt.Printf("  secret %q: created\n", fullKey)
 					}
 				}
+				_ = newCreatedAt // captured into RotationResult below
 				if forceRotate[gen.Key] {
 					fmt.Fprintf(os.Stderr, "wfctl: rotated provider_credential %s (replaced existing value at %s)\n", gen.Key, time.Now().UTC().Format(time.RFC3339))
 					// Record the rotation in-process so callers (rotate-and-prune)
