@@ -268,6 +268,43 @@ func TestEngineTriggerWorkflow_RedactsSensitiveResultsInDebugLogs(t *testing.T) 
 	}
 }
 
+func TestEngineTriggerWorkflow_RedactsSensitiveInputInDebugLogs(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	handler := &mockWorkflowHandler{
+		name:       "mock.handler",
+		handlesFor: []string{"sensitive-input-workflow"},
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	data := map[string]any{
+		"username": "alice",
+		"password": "hunter2",
+		"body": map[string]any{
+			"access_token": "jwt.secret.value",
+			"display_name": "Alice",
+		},
+	}
+	if err := engine.TriggerWorkflow(context.Background(), "sensitive-input-workflow", "run", data); err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+
+	logText := strings.Join(app.logger.logs, "\n")
+	for _, leaked := range []string{"hunter2", "jwt.secret.value"} {
+		if strings.Contains(logText, leaked) {
+			t.Fatalf("debug logs leaked sensitive input value %q:\n%s", leaked, logText)
+		}
+	}
+	if !strings.Contains(logText, module.RedactionPlaceholder) {
+		t.Fatalf("debug logs should include redaction placeholder, got:\n%s", logText)
+	}
+	if handler.lastData["password"] != "hunter2" {
+		t.Fatalf("workflow handler must receive raw input data, got %#v", handler.lastData["password"])
+	}
+}
+
 // Mock implementations for testing
 
 // mockApplication implements modular.Application
@@ -593,6 +630,7 @@ type mockWorkflowHandler struct {
 	name       string
 	handlesFor []string
 	results    map[string]any
+	lastData   map[string]any
 }
 
 func (h *mockWorkflowHandler) Name() string {
@@ -608,6 +646,7 @@ func (h *mockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 }
 
 func (h *mockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
+	h.lastData = data
 	return h.results, nil
 }
 

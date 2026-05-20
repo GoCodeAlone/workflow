@@ -70,6 +70,12 @@ func redactValue(v any, patterns []string) any {
 	switch val := v.(type) {
 	case map[string]any:
 		return redactMap(val, patterns)
+	case []map[string]any:
+		out := make([]map[string]any, len(val))
+		for i, item := range val {
+			out[i] = redactMap(item, patterns)
+		}
+		return out
 	case []any:
 		out := make([]any, len(val))
 		for i, item := range val {
