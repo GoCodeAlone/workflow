@@ -226,6 +226,48 @@ func TestEngineTriggerWorkflow(t *testing.T) {
 	}
 }
 
+func TestEngineTriggerWorkflow_RedactsSensitiveResultsInDebugLogs(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	handler := &mockWorkflowHandler{
+		name:       "mock.handler",
+		handlesFor: []string{"sensitive-workflow"},
+		results: map[string]any{
+			"token":    "jwt.secret.value",
+			"status":   "ok",
+			"password": "hunter2",
+			"profile": map[string]any{
+				"api_key": "sk_test_secret",
+				"name":    "Alice",
+			},
+		},
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	holder := &module.PipelineResultHolder{}
+	ctx := context.WithValue(context.Background(), module.PipelineResultContextKey, holder)
+	if err := engine.TriggerWorkflow(ctx, "sensitive-workflow", "run", map[string]any{}); err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+
+	logText := strings.Join(app.logger.logs, "\n")
+	for _, leaked := range []string{"jwt.secret.value", "hunter2", "sk_test_secret"} {
+		if strings.Contains(logText, leaked) {
+			t.Fatalf("debug logs leaked sensitive result value %q:\n%s", leaked, logText)
+		}
+	}
+	if !strings.Contains(logText, module.RedactionPlaceholder) {
+		t.Fatalf("debug logs should include redaction placeholder, got:\n%s", logText)
+	}
+
+	raw := holder.Get()
+	if raw["token"] != "jwt.secret.value" {
+		t.Fatalf("pipeline result holder must preserve raw token for response handling, got %#v", raw["token"])
+	}
+}
+
 // Mock implementations for testing
 
 // mockApplication implements modular.Application
@@ -550,6 +592,7 @@ func (t *mockTrigger) Configure(app modular.Application, triggerConfig any) erro
 type mockWorkflowHandler struct {
 	name       string
 	handlesFor []string
+	results    map[string]any
 }
 
 func (h *mockWorkflowHandler) Name() string {
@@ -565,7 +608,7 @@ func (h *mockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 }
 
 func (h *mockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
-	return nil, nil
+	return h.results, nil
 }
 
 func TestEngine_AddModuleType(t *testing.T) {

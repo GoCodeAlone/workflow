@@ -844,7 +844,8 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 
 			// Log execution results in debug mode
 			e.logger.Info(fmt.Sprintf("Workflow '%s' executed successfully", workflowType))
-			for k, v := range results {
+			logResults := module.RedactStepOutput(results)
+			for k, v := range logResults {
 				e.logger.Debug(fmt.Sprintf("  Result %s: %v", k, v))
 			}
 
