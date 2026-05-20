@@ -265,3 +265,125 @@ func TestBootstrapSecrets_ProviderCredentialProbeIgnoresBareKey(t *testing.T) {
 		t.Fatalf("generator called %d times, want 1", generateCalls)
 	}
 }
+
+// failOnSetProvider triggers a Set() failure on the first matching key
+// — used to exercise the transactional rollback path when a
+// provider_credential creation succeeds upstream but the store-write
+// half fails (e.g. GH PAT lost permissions mid-bootstrap).
+type failOnSetProvider struct {
+	failKey  string
+	setCalls []string
+}
+
+func (p *failOnSetProvider) Name() string { return "fail-on-set" }
+func (p *failOnSetProvider) Get(_ context.Context, _ string) (string, error) {
+	return "", secrets.ErrUnsupported
+}
+func (p *failOnSetProvider) Set(_ context.Context, key, _ string) error {
+	p.setCalls = append(p.setCalls, key)
+	if key == p.failKey {
+		return errFakeStoreUnavailable
+	}
+	return nil
+}
+func (p *failOnSetProvider) Delete(_ context.Context, _ string) error { return nil }
+func (p *failOnSetProvider) List(_ context.Context) ([]string, error) {
+	return nil, secrets.ErrUnsupported
+}
+
+// recordingRevoker captures RevokeProviderCredential calls so the test
+// can assert rollback occurred. Implements interfaces.ProviderCredentialRevoker.
+type recordingRevoker struct {
+	calls []revokeCall
+}
+type revokeCall struct {
+	source       string
+	credentialID string
+}
+
+func (r *recordingRevoker) RevokeProviderCredential(_ context.Context, source, credentialID string) error {
+	r.calls = append(r.calls, revokeCall{source: source, credentialID: credentialID})
+	return nil
+}
+
+var errFakeStoreUnavailable = errFakeStore("store unavailable (simulated)")
+
+type errFakeStore string
+
+func (e errFakeStore) Error() string { return string(e) }
+
+// TestBootstrapSecrets_ProviderCredential_RollbackOnSetFailure is the
+// regression test for the orphan-key bug: when generateSecret returns a
+// fresh DO Spaces key but provider.Set fails to persist it, bootstrap
+// MUST revoke the just-minted upstream credential.
+//
+// Pre-fix behaviour: Set fails → return error → DO key remains in the
+// account with an unrecoverable secret_key. Every subsequent run mints
+// another orphan with the same name.
+//
+// Post-fix: Set failure triggers credRevoker.RevokeProviderCredential
+// with the access_key from the just-generated subKeyMap.
+func TestBootstrapSecrets_ProviderCredential_RollbackOnSetFailure(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "AK_ORPHAN",
+			"secret_key": "SK_DOOMED",
+		})
+		return string(out), nil
+	})
+
+	p := &failOnSetProvider{failKey: "SPACES_secret_key"}
+	rev := &recordingRevoker{}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+
+	_, _, err := bootstrapSecrets(context.Background(), p, cfg, nil, rev)
+	if err == nil {
+		t.Fatal("expected Set failure to surface as error")
+	}
+
+	if len(rev.calls) != 1 {
+		t.Fatalf("expected 1 rollback-revoke call; got %d", len(rev.calls))
+	}
+	if rev.calls[0].credentialID != "AK_ORPHAN" {
+		t.Errorf("rollback called with credentialID=%q want AK_ORPHAN", rev.calls[0].credentialID)
+	}
+	if rev.calls[0].source != "digitalocean.spaces" {
+		t.Errorf("rollback source=%q want digitalocean.spaces", rev.calls[0].source)
+	}
+}
+
+// TestBootstrapSecrets_ProviderCredential_RollbackOnFirstSetFailure
+// guards the most insidious shape of the bug: the very first Set call
+// fails (e.g. access_key write). The pre-fix code extracted
+// newAccessKey *during* the for-range loop, so a first-iteration
+// failure left newAccessKey empty even though the upstream key exists.
+// The fix extracts access_key BEFORE the loop.
+func TestBootstrapSecrets_ProviderCredential_RollbackOnFirstSetFailure(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "AK_FIRST",
+			"secret_key": "SK_FIRST",
+		})
+		return string(out), nil
+	})
+
+	p := &failOnSetProvider{failKey: "SPACES_access_key"}
+	rev := &recordingRevoker{}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+
+	_, _, err := bootstrapSecrets(context.Background(), p, cfg, nil, rev)
+	if err == nil {
+		t.Fatal("expected Set failure")
+	}
+	if len(rev.calls) != 1 || rev.calls[0].credentialID != "AK_FIRST" {
+		t.Errorf("rollback calls = %v; want one revoke of AK_FIRST", rev.calls)
+	}
+}

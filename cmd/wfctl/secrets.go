@@ -32,6 +32,8 @@ func runSecrets(args []string) error {
 		return runSecretsSync(args[1:])
 	case "setup":
 		return runSecretsSetup(args[1:])
+	case "list-orphans":
+		return runSecretsListOrphans(args[1:])
 	default:
 		return secretsUsage()
 	}
@@ -54,6 +56,7 @@ Actions:
   rotate    Trigger rotation of a secret
   sync      Copy secret structure between environments
   setup     Interactively set all secrets for an environment
+  list-orphans  List/delete duplicate-named upstream credentials (e.g. DO Spaces keys)
 
 Ad-hoc provider flags (set, get, list, delete, export):
   --provider  Override provider: keychain, env, aws
@@ -75,6 +78,8 @@ Examples:
   wfctl secrets sync --from staging --to production
   wfctl secrets setup --env local
   wfctl secrets setup --env production --auto-gen-keys
+  wfctl secrets list-orphans --source digitalocean.spaces --name workflow-spaces-key
+  wfctl secrets list-orphans --source digitalocean.spaces --name workflow-spaces-key --delete
 `)
 	return fmt.Errorf("missing or unknown action")
 }
