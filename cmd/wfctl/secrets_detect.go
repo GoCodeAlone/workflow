@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -151,8 +152,25 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 	fromFile := fs.String("from-file", "", "Read secret value from file (for certs/keys)")
 	providerName := fs.String("provider", "", "Ad-hoc provider override (keychain|env|aws); bypasses app.yaml")
 	service := fs.String("service", "", "Service name for keychain provider")
+	scope := fs.String("scope", "", "GitHub secret scope: repo (default) | env | org")
+	envName := fs.String("env", "", "GitHub Actions environment name (required with --scope=env)")
+	org := fs.String("org", "", "GitHub org name (required with --scope=org)")
+	orgVisibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
+	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl secrets set <name> [options]\n\nSet a secret value in the provider.\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), `Usage: wfctl secrets set <name> [options]
+
+Set a secret value in the configured provider.
+
+Scope flags (GitHub only):
+  --scope repo         Default. Writes to the configured app.yaml repo provider.
+  --scope env --env <name>
+                       Writes to the repo-environment of the same repo.
+  --scope org --org <slug> [--visibility all|selected|private] [--token-env <var>]
+                       Writes an org-level secret. Requires admin:org token scope.
+
+Options:
+`)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -210,6 +228,50 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 		return nil
 	}
 
+	// Org-scope: build an org GH provider directly. Bypasses app.yaml
+	// since org secrets are out-of-band of the repo-scoped config.
+	if *scope == "org" {
+		if *org == "" {
+			return fmt.Errorf("--scope=org requires --org <slug>")
+		}
+		vis, err := parseGitHubOrgVisibility(*orgVisibility)
+		if err != nil {
+			return err
+		}
+		p, err := secrets.NewGitHubOrgSecretsProvider(*org, *tokenEnv, vis, nil)
+		if err != nil {
+			return err
+		}
+		if err := p.Set(context.Background(), name, secretValue); err != nil {
+			return fmt.Errorf("set org secret %s: %w", name, err)
+		}
+		fmt.Printf("set %s (org=%s, visibility=%s)\n", name, *org, *orgVisibility)
+		return nil
+	}
+
+	// Env-scope: build a repo-scoped GH provider, then flip into env
+	// mode. Requires the repo to be derived from --config app.yaml's
+	// secret block (provider=github + config.repo).
+	if *scope == "env" {
+		if *envName == "" {
+			return fmt.Errorf("--scope=env requires --env <environment-name>")
+		}
+		repo, err := readGitHubRepoFromAppYAML(*configFile)
+		if err != nil {
+			return err
+		}
+		p, err := secrets.NewGitHubSecretsProvider(repo, *tokenEnv)
+		if err != nil {
+			return err
+		}
+		p.SetEnvironment(*envName)
+		if err := p.Set(context.Background(), name, secretValue); err != nil {
+			return fmt.Errorf("set env secret %s: %w", name, err)
+		}
+		fmt.Printf("set %s (env=%s)\n", name, *envName)
+		return nil
+	}
+
 	// Default path: load provider from app.yaml secrets block.
 	cfg, err := loadSecretsConfig(*configFile)
 	if err != nil {
@@ -224,6 +286,37 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 	}
 	fmt.Printf("set %s\n", name)
 	return nil
+}
+
+// readGitHubRepoFromAppYAML loads app.yaml and returns the configured
+// github repo from secrets.config.repo (or secrets.secretStores.<name>.config.repo).
+func readGitHubRepoFromAppYAML(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	// Lightweight regexp scan — avoids full YAML round-trip and tolerates
+	// either `secrets.config.repo` or `secretStores.<name>.config.repo`.
+	re := regexp.MustCompile(`(?m)^\s*repo:\s*([^\s#]+)`)
+	m := re.FindStringSubmatch(string(data))
+	if len(m) < 2 {
+		return "", fmt.Errorf("could not find `repo:` in %s (expected secrets.config.repo or secretStores.<name>.config.repo)", path)
+	}
+	return strings.Trim(m[1], `"'`), nil
+}
+
+// parseGitHubOrgVisibility canonicalises the --visibility flag.
+func parseGitHubOrgVisibility(s string) (secrets.GitHubOrgVisibility, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "all":
+		return secrets.OrgVisibilityAll, nil
+	case "selected":
+		return secrets.OrgVisibilitySelected, nil
+	case "private":
+		return secrets.OrgVisibilityPrivate, nil
+	default:
+		return "", fmt.Errorf("invalid visibility %q (must be all|selected|private)", s)
+	}
 }
 
 func stdinFileDescriptor() (int, error) {

@@ -19,18 +19,48 @@ import (
 
 const githubAPIBase = "https://api.github.com"
 
-// GitHubSecretsProvider manages GitHub Actions repository secrets.
-// Secrets are write-only on GitHub, so Get() returns ErrUnsupported.
+// GitHubSecretScope selects which GitHub secret namespace a provider
+// writes to. Default zero value = repo (backwards-compat).
+//
+//	GitHubScopeRepo → /repos/{owner}/{repo}/actions/secrets/...
+//	GitHubScopeEnv  → /repos/{owner}/{repo}/environments/{env}/secrets/...
+//	GitHubScopeOrg  → /orgs/{org}/actions/secrets/...
+type GitHubSecretScope string
+
+const (
+	GitHubScopeRepo GitHubSecretScope = "repo"
+	GitHubScopeEnv  GitHubSecretScope = "env"
+	GitHubScopeOrg  GitHubSecretScope = "org"
+)
+
+// GitHubOrgVisibility controls who can pull an org-scoped secret. Mirrors
+// GitHub's API field; one of "all", "selected", "private".
+type GitHubOrgVisibility string
+
+const (
+	OrgVisibilityAll      GitHubOrgVisibility = "all"
+	OrgVisibilitySelected GitHubOrgVisibility = "selected"
+	OrgVisibilityPrivate  GitHubOrgVisibility = "private"
+)
+
+// GitHubSecretsProvider manages GitHub Actions secrets at repo, env, or
+// org scope. Secrets are write-only on GitHub, so Get() returns
+// ErrUnsupported.
 type GitHubSecretsProvider struct {
-	owner  string
-	repo   string
-	env    string
-	token  string
-	client *http.Client
+	scope           GitHubSecretScope
+	owner           string // for repo/env scope
+	repo            string // for repo/env scope
+	env             string // for env scope
+	org             string // for org scope
+	orgVisibility   GitHubOrgVisibility
+	selectedRepoIDs []int64 // required iff scope=org && visibility=selected
+	token           string
+	client          *http.Client
 }
 
-// NewGitHubSecretsProvider creates a provider for the given "owner/repo".
-// tokenEnvVar is the name of the environment variable holding the GitHub token.
+// NewGitHubSecretsProvider creates a repo-scoped provider for the given
+// "owner/repo". tokenEnvVar is the name of the environment variable
+// holding the GitHub token. Backwards-compatible — sets scope=repo.
 func NewGitHubSecretsProvider(repo string, tokenEnvVar string) (*GitHubSecretsProvider, error) {
 	parts := strings.SplitN(repo, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -41,6 +71,7 @@ func NewGitHubSecretsProvider(repo string, tokenEnvVar string) (*GitHubSecretsPr
 		return nil, fmt.Errorf("secrets: env var %q is empty or unset", tokenEnvVar)
 	}
 	return &GitHubSecretsProvider{
+		scope:  GitHubScopeRepo,
 		owner:  parts[0],
 		repo:   parts[1],
 		token:  token,
@@ -48,12 +79,55 @@ func NewGitHubSecretsProvider(repo string, tokenEnvVar string) (*GitHubSecretsPr
 	}, nil
 }
 
+// NewGitHubOrgSecretsProvider creates an org-scoped provider. visibility
+// is one of OrgVisibilityAll / Selected / Private. selectedRepoIDs is
+// required iff visibility=Selected.
+//
+// Requires the token to have admin:org scope.
+func NewGitHubOrgSecretsProvider(org string, tokenEnvVar string, visibility GitHubOrgVisibility, selectedRepoIDs []int64) (*GitHubSecretsProvider, error) {
+	if org == "" {
+		return nil, fmt.Errorf("secrets: github org name is required")
+	}
+	token := os.Getenv(tokenEnvVar)
+	if token == "" {
+		return nil, fmt.Errorf("secrets: env var %q is empty or unset", tokenEnvVar)
+	}
+	if visibility == "" {
+		visibility = OrgVisibilityAll
+	}
+	switch visibility {
+	case OrgVisibilityAll, OrgVisibilitySelected, OrgVisibilityPrivate:
+	default:
+		return nil, fmt.Errorf("secrets: github org visibility must be all|selected|private, got %q", visibility)
+	}
+	if visibility == OrgVisibilitySelected && len(selectedRepoIDs) == 0 {
+		return nil, fmt.Errorf("secrets: github org visibility=selected requires selected_repository_ids")
+	}
+	return &GitHubSecretsProvider{
+		scope:           GitHubScopeOrg,
+		org:             org,
+		orgVisibility:   visibility,
+		selectedRepoIDs: append([]int64(nil), selectedRepoIDs...),
+		token:           token,
+		client:          &http.Client{},
+	}, nil
+}
+
+// Scope reports the current scope.
+func (p *GitHubSecretsProvider) Scope() GitHubSecretScope { return p.scope }
+
 func (p *GitHubSecretsProvider) Name() string { return "github" }
 
 // SetEnvironment scopes subsequent operations to a GitHub Actions environment.
-// Empty scope means repository-level secrets.
+// Empty scope means repository-level secrets. Calling SetEnvironment with a
+// non-empty value flips scope to env.
 func (p *GitHubSecretsProvider) SetEnvironment(environment string) {
 	p.env = strings.TrimSpace(environment)
+	if p.env != "" {
+		p.scope = GitHubScopeEnv
+	} else if p.scope == GitHubScopeEnv {
+		p.scope = GitHubScopeRepo
+	}
 }
 
 // Environment returns the configured GitHub Actions environment scope.
@@ -80,9 +154,15 @@ func (p *GitHubSecretsProvider) Set(ctx context.Context, key, value string) erro
 		return fmt.Errorf("secrets: github encrypt: %w", err)
 	}
 
-	payload := map[string]string{
+	payload := map[string]any{
 		"encrypted_value": encrypted,
 		"key_id":          pubKeyID,
+	}
+	if p.scope == GitHubScopeOrg {
+		payload["visibility"] = string(p.orgVisibility)
+		if p.orgVisibility == OrgVisibilitySelected {
+			payload["selected_repository_ids"] = p.selectedRepoIDs
+		}
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, p.secretURL(key), bytes.NewReader(body))
@@ -176,10 +256,14 @@ func (p *GitHubSecretsProvider) setHeaders(req *http.Request) {
 }
 
 func (p *GitHubSecretsProvider) secretsURL() string {
-	if p.env != "" {
+	switch p.scope {
+	case GitHubScopeOrg:
+		return fmt.Sprintf("%s/orgs/%s/actions/secrets", githubAPIBase, p.org)
+	case GitHubScopeEnv:
 		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/secrets", githubAPIBase, p.owner, p.repo, url.PathEscape(p.env))
+	default: // GitHubScopeRepo
+		return fmt.Sprintf("%s/repos/%s/%s/actions/secrets", githubAPIBase, p.owner, p.repo)
 	}
-	return fmt.Sprintf("%s/repos/%s/%s/actions/secrets", githubAPIBase, p.owner, p.repo)
 }
 
 func (p *GitHubSecretsProvider) secretURL(key string) string {
