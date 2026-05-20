@@ -199,3 +199,29 @@ func TestResolveLogCaptureResourcePreservesSecretEnvVars(t *testing.T) {
 		t.Fatalf("env_vars_secret DATABASE_URL = %v, want literal placeholder", got)
 	}
 }
+
+func TestResolveLogCaptureResourceUsesEnvResolvedName(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{{
+			Name: "web",
+			Type: "infra.container_service",
+			Config: map[string]any{
+				"provider": "do",
+			},
+			Environments: map[string]*config.InfraEnvironmentResolution{
+				"staging": {Config: map[string]any{"name": "web-staging"}},
+			},
+		}},
+	}
+
+	spec, _, err := resolveLogCaptureResource(cfg, "staging", "web")
+	if err != nil {
+		t.Fatalf("resolveLogCaptureResource: %v", err)
+	}
+	if spec.Name != "web-staging" {
+		t.Fatalf("spec.Name = %q, want env-resolved cloud name", spec.Name)
+	}
+	if got := logCaptureResourceCloudName(spec); got != "web-staging" {
+		t.Fatalf("cloud name = %q, want env-resolved cloud name", got)
+	}
+}

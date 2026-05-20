@@ -159,12 +159,14 @@ func resolveLogCaptureResource(cfg *config.WorkflowConfig, envName, name string)
 		if m.Name != name {
 			continue
 		}
+		resolvedName := m.Name
 		resolved := m.Config
 		if envName != "" {
 			envResolved, ok := m.ResolveForEnv(envName)
 			if !ok {
 				return interfaces.ResourceSpec{}, "", fmt.Errorf("logs capture: resource %q is disabled for environment %q", name, envName)
 			}
+			resolvedName = envResolved.Name
 			resolved = envResolved.Config
 		}
 		cfgMap := config.ExpandEnvInMapPreservingKeys(resolved, infraPreserveKeys)
@@ -172,7 +174,7 @@ func resolveLogCaptureResource(cfg *config.WorkflowConfig, envName, name string)
 		if providerRef == "" {
 			return interfaces.ResourceSpec{}, "", fmt.Errorf("logs capture: resource %q missing iac_provider/provider", name)
 		}
-		return interfaces.ResourceSpec{Name: m.Name, Type: m.Type, Config: cfgMap}, providerRef, nil
+		return interfaces.ResourceSpec{Name: resolvedName, Type: m.Type, Config: cfgMap}, providerRef, nil
 	}
 	return interfaces.ResourceSpec{}, "", fmt.Errorf("logs capture: resource %q not found", name)
 }
