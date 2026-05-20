@@ -14,7 +14,7 @@ PR #639 landed the v2 action lifecycle hook path (`wfctlhelpers.ApplyPlanWithHoo
 - **Phase 2 — pending**: design + ship v2-hooks-over-gRPC contract (HARD-CUTOVER per ADR 0024)
 - **Phase 3 — pending**: migrate plugins to v2 contract (per-plugin manual + codemod for canonical-form plugins)
 - ~~Phase 4~~ — **SHIPPED in this PR**: migrated 3 conformance scenarios + 1 test file from `ApplyPlan` to `ApplyPlanWithHooks(..., ApplyPlanHooks{})`. Folded into Phase 1 because staticcheck SA1019 (from the new godoc marker) required it
-- **Phase 5 — pending**: remove `wfctlhelpers.ApplyPlan` entirely (after Phase 2 + Phase 3 land)
+- **Phase 5 — SHIPPED in this PR**: removed `wfctlhelpers.ApplyPlan` and migrated 10 internal test files to `ApplyPlanWithHooks(..., ApplyPlanHooks{})`. v1 apply path fully retired.
 
 ## Workflow-side caller inventory
 
