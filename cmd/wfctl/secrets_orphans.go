@@ -90,13 +90,21 @@ func listSpacesOrphans(ctx context.Context, name string, del bool) error {
 }
 
 // paginateSpacesKeysByName returns every access_key whose name field
-// equals the requested name. Bounded at 100 pages × 100 keys = 10000.
+// equals the requested name. Bounded at 200 pages × 200 keys = 40000.
+//
+// DO's Spaces Keys list endpoint allows per_page up to 200. Earlier
+// 100-cap was leaving callers with partial results on accounts that
+// have many same-named orphans. We also follow the absolute URL
+// returned in `links.pages.next` rather than incrementing page locally
+// — DO's pagination contract is that `next` is authoritative.
 func paginateSpacesKeysByName(ctx context.Context, token, name string) ([]string, error) {
 	var matches []string
-	page := 1
-	for page <= 100 {
-		url := fmt.Sprintf("https://api.digitalocean.com/v2/spaces/keys?per_page=100&page=%d", page)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	next := "https://api.digitalocean.com/v2/spaces/keys?per_page=200&page=1"
+	pages := 0
+	totalKeysSeen := 0
+	for next != "" && pages < 200 {
+		pages++
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -124,16 +132,15 @@ func paginateSpacesKeysByName(ctx context.Context, token, name string) ([]string
 		if err := json.Unmarshal(body, &list); err != nil {
 			return nil, fmt.Errorf("DO list spaces keys parse: %w", err)
 		}
+		totalKeysSeen += len(list.Keys)
 		for _, k := range list.Keys {
 			if k.Name == name {
 				matches = append(matches, k.AccessKey)
 			}
 		}
-		if list.Links.Pages.Next == "" {
-			break
-		}
-		page++
+		next = list.Links.Pages.Next
 	}
+	fmt.Fprintf(os.Stderr, "list-orphans: scanned %d page(s), %d total key(s), %d matches for name=%q\n", pages, totalKeysSeen, len(matches), name)
 	return matches, nil
 }
 
