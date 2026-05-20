@@ -85,6 +85,11 @@ Options:
 
 // ghAPICmd is the indirection point so tests can inject a fake gh binary.
 // Default is the real `gh api` CLI.
+//
+// #nosec G204 -- the binary is the fixed string "gh" and `endpoint` is
+// constructed from a literal-prefix + URL-escaped query inside this
+// package (urlQueryEscape sanitises). No user-controlled shell metachars
+// flow into the subprocess.
 var ghAPICmd = func(ctx context.Context, endpoint string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", "api", endpoint)
 	return cmd.Output()
