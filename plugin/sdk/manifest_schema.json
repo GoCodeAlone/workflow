@@ -15,7 +15,7 @@
       "properties": {
         "computePlanVersion": {
           "type": "string",
-          "description": "Declares apply-time lifecycle support for validation metadata. Runtime typed capability discovery accepts v2 only and routes through wfctlhelpers.ApplyPlanWithHooks; empty/v1 declarations are rejected at provider load after the strict cutover.",
+          "description": "Declares apply-time lifecycle support for validation metadata. Runtime typed capability discovery, not this manifest field, is authoritative: CapabilitiesResponse.compute_plan_version must be v2 and routes through wfctlhelpers.ApplyPlanWithHooks. Older empty/v1 manifest declarations may parse but are not accepted as runtime capability evidence.",
           "enum": ["v1", "v2"]
         }
       }
