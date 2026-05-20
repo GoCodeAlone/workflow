@@ -61,13 +61,30 @@ func redactMap(m map[string]any, patterns []string) map[string]any {
 			out[k] = RedactionPlaceholder
 			continue
 		}
-		if nested, ok := v.(map[string]any); ok {
-			out[k] = redactMap(nested, patterns)
-		} else {
-			out[k] = v
-		}
+		out[k] = redactValue(v, patterns)
 	}
 	return out
+}
+
+func redactValue(v any, patterns []string) any {
+	switch val := v.(type) {
+	case map[string]any:
+		return redactMap(val, patterns)
+	case []map[string]any:
+		out := make([]map[string]any, len(val))
+		for i, item := range val {
+			out[i] = redactMap(item, patterns)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = redactValue(item, patterns)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // isSensitiveField returns true when the lowercased field name contains any of

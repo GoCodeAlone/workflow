@@ -97,6 +97,66 @@ func TestRedactStepOutput_NestedMaps(t *testing.T) {
 	}
 }
 
+func TestRedactStepOutput_NestedSlices(t *testing.T) {
+	output := map[string]any{
+		"rows": []any{
+			map[string]any{
+				"name":         "alice",
+				"access_token": "row-token",
+			},
+			"plain",
+		},
+	}
+
+	got := RedactStepOutput(output)
+
+	rows, ok := got["rows"].([]any)
+	if !ok {
+		t.Fatalf("rows should remain a []any, got %T", got["rows"])
+	}
+	first, ok := rows[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first row should remain a map, got %T", rows[0])
+	}
+	if first["access_token"] != RedactionPlaceholder {
+		t.Fatalf("nested slice token should be redacted, got %#v", first["access_token"])
+	}
+	if first["name"] != "alice" || rows[1] != "plain" {
+		t.Fatalf("non-sensitive slice values should be preserved, got %#v", rows)
+	}
+}
+
+func TestRedactStepOutput_TypedRowSlices(t *testing.T) {
+	output := map[string]any{
+		"rows": []map[string]any{
+			{
+				"name":         "alice",
+				"access_token": "row-token",
+			},
+			{
+				"name":     "bob",
+				"password": "hunter2",
+			},
+		},
+	}
+
+	got := RedactStepOutput(output)
+
+	rows, ok := got["rows"].([]map[string]any)
+	if !ok {
+		t.Fatalf("rows should remain a []map[string]any, got %T", got["rows"])
+	}
+	if rows[0]["access_token"] != RedactionPlaceholder {
+		t.Fatalf("typed row token should be redacted, got %#v", rows[0]["access_token"])
+	}
+	if rows[1]["password"] != RedactionPlaceholder {
+		t.Fatalf("typed row password should be redacted, got %#v", rows[1]["password"])
+	}
+	if rows[0]["name"] != "alice" || rows[1]["name"] != "bob" {
+		t.Fatalf("non-sensitive typed row values should be preserved, got %#v", rows)
+	}
+}
+
 func TestRedactStepOutput_OriginalNotModified(t *testing.T) {
 	original := map[string]any{
 		"password": "hunter2",
