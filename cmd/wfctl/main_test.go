@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -87,7 +88,11 @@ func TestBuildVersionStripsDirtyMarker(t *testing.T) {
 }
 
 func TestLinkedVersionOverridesBuildInfo(t *testing.T) {
-	exe := filepath.Join(t.TempDir(), "wfctl")
+	exeName := "wfctl"
+	if runtime.GOOS == "windows" {
+		exeName += ".exe"
+	}
+	exe := filepath.Join(t.TempDir(), exeName)
 	build := exec.Command("go", "build", "-o", exe, "-ldflags", "-X main.version=v9.9.9", ".")
 	build.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := build.CombinedOutput(); err != nil {
