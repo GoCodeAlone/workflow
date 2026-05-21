@@ -1377,6 +1377,13 @@ type installedPluginJSON struct {
 	Type         string                       `json:"type,omitempty"`
 	Capabilities *installedPluginCapabilities `json:"capabilities,omitempty"`
 	IaCProvider  *RegistryIaCProvider         `json:"iacProvider,omitempty"`
+	// RequiredSecrets carries through from the registry manifest so
+	// `wfctl secrets setup --plugin <name>` can find the declared
+	// secrets in the on-disk plugin.json. Earlier writeInstalledManifest
+	// versions dropped this field, leaving secrets setup --plugin
+	// reporting "declares no required_secrets[]" even when the
+	// upstream manifest declared it.
+	RequiredSecrets []PluginRequiredSecret `json:"required_secrets,omitempty"`
 }
 
 type installedPluginCapabilities struct {
@@ -1401,16 +1408,17 @@ type installedPluginCapabilities struct {
 // plugin.PluginManifest so that ExternalPluginManager.LoadPlugin() can validate it.
 func writeInstalledManifest(path string, m *RegistryManifest) error {
 	pj := installedPluginJSON{
-		Name:        m.Name,
-		Version:     m.Version,
-		Author:      m.Author,
-		Description: m.Description,
-		License:     m.License,
-		Repository:  m.Repository,
-		Tier:        m.Tier,
-		Tags:        m.Keywords,
-		Type:        m.Type,
-		IaCProvider: m.IaCProvider,
+		Name:            m.Name,
+		Version:         m.Version,
+		Author:          m.Author,
+		Description:     m.Description,
+		License:         m.License,
+		Repository:      m.Repository,
+		Tier:            m.Tier,
+		Tags:            m.Keywords,
+		Type:            m.Type,
+		IaCProvider:     m.IaCProvider,
+		RequiredSecrets: m.RequiredSecrets,
 	}
 	if m.Capabilities != nil {
 		pj.Capabilities = &installedPluginCapabilities{

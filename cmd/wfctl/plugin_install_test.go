@@ -1182,3 +1182,75 @@ func writeCompatRegistryIndex(t *testing.T, w http.ResponseWriter, plugin, baseU
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(data)
 }
+
+func TestWriteInstalledManifest_PreservesRequiredSecrets(t *testing.T) {
+	// G4 regression: writeInstalledManifest used to drop the
+	// required_secrets[] block from the registry manifest, so the
+	// on-disk plugin.json had no required_secrets even when upstream
+	// declared them. `wfctl secrets setup --plugin <name>` then
+	// reported "declares no required_secrets[]" no-op.
+	m := &RegistryManifest{
+		Name: "workflow-plugin-hover", Version: "v0.2.0",
+		Author: "GoCodeAlone", Description: "test",
+		RequiredSecrets: []PluginRequiredSecret{
+			{Name: "HOVER_USERNAME", Sensitive: false, Description: "Hover username", Prompt: "Hover username"},
+			{Name: "HOVER_PASSWORD", Sensitive: true, Description: "Hover password"},
+		},
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := writeInstalledManifest(path, m); err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	var pj installedPluginJSON
+	if err := json.Unmarshal(raw, &pj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(pj.RequiredSecrets) != 2 {
+		t.Fatalf("required_secrets len = %d, want 2", len(pj.RequiredSecrets))
+	}
+	if pj.RequiredSecrets[0].Name != "HOVER_USERNAME" {
+		t.Errorf("required_secrets[0].name = %q, want HOVER_USERNAME", pj.RequiredSecrets[0].Name)
+	}
+	if !pj.RequiredSecrets[1].Sensitive {
+		t.Errorf("required_secrets[1].sensitive = false; want true (HOVER_PASSWORD)")
+	}
+	// Also assert the raw JSON contains the field — guards against a
+	// future installedPluginJSON refactor that adds Sensitive omitempty
+	// or otherwise hides the field at marshal time.
+	if !strings.Contains(string(raw), "\"required_secrets\":") {
+		t.Errorf("installed plugin.json missing required_secrets[] key:\n%s", string(raw))
+	}
+}
+
+func TestRegistryManifest_UnmarshalPreservesRequiredSecrets(t *testing.T) {
+	// G4 regression: RegistryManifest dropped required_secrets[] at
+	// json.Unmarshal time because the struct didn't carry the field.
+	src := `{
+		"name": "workflow-plugin-hover",
+		"version": "0.2.0",
+		"author": "GoCodeAlone",
+		"description": "test",
+		"type": "external",
+		"tier": "community",
+		"license": "MIT",
+		"required_secrets": [
+			{"name": "X", "sensitive": false, "description": "d", "prompt": "p"},
+			{"name": "Y", "sensitive": true}
+		]
+	}`
+	var m RegistryManifest
+	if err := json.Unmarshal([]byte(src), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(m.RequiredSecrets) != 2 {
+		t.Fatalf("required_secrets len = %d, want 2", len(m.RequiredSecrets))
+	}
+	if m.RequiredSecrets[1].Name != "Y" || !m.RequiredSecrets[1].Sensitive {
+		t.Errorf("unexpected required_secrets[1]: %+v", m.RequiredSecrets[1])
+	}
+}
