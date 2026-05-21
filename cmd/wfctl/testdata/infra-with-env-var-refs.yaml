@@ -1,5 +1,7 @@
 secrets:
   provider: github
+  entries:
+    - name: MANUAL_API_TOKEN
   generate:
     - key: POSTGRES_PASSWORD
       type: random_hex
@@ -41,3 +43,4 @@ modules:
                   environment:
                     POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}'
                     EXTERNAL_API_TOKEN: '${EXTERNAL_API_TOKEN}'
+                    MANUAL_API_TOKEN: '${MANUAL_API_TOKEN}'
