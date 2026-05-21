@@ -74,6 +74,8 @@ func runInfra(args []string) error {
 		return runInfraImport(args[1:])
 	case "state":
 		return runInfraState(args[1:])
+	case "logs":
+		return runInfraLogs(args[1:])
 	case "bootstrap":
 		return runInfraBootstrap(args[1:])
 	case "outputs":
@@ -122,6 +124,7 @@ Actions:
   destroy        Tear down infrastructure
   import         Import an existing cloud resource into state
   state          Manage IaC state (list, export, import)
+  logs           Capture provider logs for an infrastructure resource
   outputs        Print captured resource outputs from state
   refresh-outputs Read live outputs and reconcile state (no cloud writes)
   align          Validate IaC config + plan alignment (8 rule families)

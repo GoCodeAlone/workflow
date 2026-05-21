@@ -88,6 +88,53 @@ modules:
 	}
 }
 
+func TestInfraLogsAliasUsesProviderLogCapture(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := filepath.Join(tmp, "app.yaml")
+	if err := os.WriteFile(cfg, []byte(`
+version: "1"
+modules:
+  - name: do
+    type: iac.provider
+    config:
+      provider: digitalocean
+  - name: web
+    type: infra.container_service
+    config:
+      provider: do
+      app_name: bmw-staging
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := &fakeLogProvider{}
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return provider, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	err := runInfra([]string{
+		"logs",
+		"--config", cfg,
+		"--resource", "web",
+		"--component", "api",
+		"--tail", "7",
+	})
+	if err != nil {
+		t.Fatalf("runInfra logs: %v", err)
+	}
+	if provider.req.ResourceName != "bmw-staging" {
+		t.Fatalf("ResourceName = %q, want bmw-staging", provider.req.ResourceName)
+	}
+	if provider.req.ComponentName != "api" {
+		t.Fatalf("ComponentName = %q, want api", provider.req.ComponentName)
+	}
+	if provider.req.TailLines != 7 {
+		t.Fatalf("TailLines = %d, want 7", provider.req.TailLines)
+	}
+}
+
 func TestLogsCaptureFollowSetsDuration(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := filepath.Join(tmp, "app.yaml")
