@@ -16,9 +16,15 @@ type writeOnlyProvider struct {
 	getCalls  int
 	listCalls int
 	listOK    bool
+	name      string
 }
 
-func (p *writeOnlyProvider) Name() string { return "write-only-fake" }
+func (p *writeOnlyProvider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
+	return "write-only-fake"
+}
 
 func (p *writeOnlyProvider) Get(_ context.Context, _ string) (string, error) {
 	p.getCalls++
@@ -78,6 +84,35 @@ func TestBootstrapSecrets_WriteOnlyProviderSkipsExisting(t *testing.T) {
 	}
 	if p.listCalls != 1 {
 		t.Fatalf("List called %d times, want 1 (should be cached)", p.listCalls)
+	}
+}
+
+// TestBootstrapSecrets_GitHubProviderCredentialMatchesUppercaseList verifies
+// GitHub's write-only secret list can satisfy mixed-case generated key probes.
+// GitHub Actions secret names are case-insensitive, and the API reports common
+// subkey names as uppercase (SPACES_ACCESS_KEY / SPACES_SECRET_KEY). Without
+// this, auto-bootstrap attempts to recreate an existing upstream provider
+// credential and DigitalOcean refuses the duplicate name.
+func TestBootstrapSecrets_GitHubProviderCredentialMatchesUppercaseList(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		t.Fatal("generator must not be called when GitHub-listed sub-keys already exist")
+		return "", nil
+	})
+	p := &writeOnlyProvider{
+		name:     "github",
+		existing: []string{"SPACES_ACCESS_KEY", "SPACES_SECRET_KEY"},
+		listOK:   true,
+	}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+	if len(p.stored) != 0 {
+		t.Fatalf("stored = %v, want empty (GitHub-listed secrets already exist)", p.stored)
 	}
 }
 
