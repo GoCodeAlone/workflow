@@ -23,6 +23,10 @@ Configs that still reference the legacy types now fail to load with an actionabl
 
 ## [Unreleased]
 
+### Fixed
+
+- `wfctl validate --plugin-dir` now registers plugin `resourceTypes` from both flat manifests and `capabilities.iacProvider.resourceTypes`, so plugin-backed `infra.*` resource modules validate the same way `wfctl infra plan/apply` consume them.
+
 ### Breaking changes (workflow#699 — IaCProvider.Apply hard-removal)
 
 - `interfaces.IaCProvider.Apply` removed. Plugins must implement v2 dispatch (declare `CapabilitiesResponse.compute_plan_version="v2"` via the typed RPC) and drop their `Apply` Go method.

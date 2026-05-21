@@ -517,6 +517,7 @@ type pluginManifestTypes struct {
 	StepTypes     []string `json:"stepTypes"`
 	TriggerTypes  []string `json:"triggerTypes"`
 	WorkflowTypes []string `json:"workflowTypes"`
+	ResourceTypes []string `json:"resourceTypes"`
 	// Capabilities is stored as raw JSON to safely handle both the registry-manifest
 	// format (object with moduleTypes/stepTypes/etc.) and the engine-internal format
 	// (array of CapabilityDecl). A non-object value is silently ignored.
@@ -531,6 +532,10 @@ type pluginManifestCapabilities struct {
 	StepTypes        []string `json:"stepTypes"`
 	TriggerTypes     []string `json:"triggerTypes"`
 	WorkflowHandlers []string `json:"workflowHandlers"`
+	ResourceTypes    []string `json:"resourceTypes"`
+	IaCProvider      *struct {
+		ResourceTypes []string `json:"resourceTypes"`
+	} `json:"iacProvider"`
 }
 
 // LoadPluginTypesFromDir scans pluginDir for subdirectories containing a
@@ -563,6 +568,9 @@ func LoadPluginTypesFromDir(pluginDir string) error {
 			// Step types share the module type registry (identified by "step." prefix).
 			RegisterModuleType(t)
 		}
+		for _, t := range m.ResourceTypes {
+			RegisterModuleType(t)
+		}
 		for _, t := range m.TriggerTypes {
 			RegisterTriggerType(t)
 		}
@@ -580,6 +588,14 @@ func LoadPluginTypesFromDir(pluginDir string) error {
 				}
 				for _, t := range cap.StepTypes {
 					RegisterModuleType(t)
+				}
+				for _, t := range cap.ResourceTypes {
+					RegisterModuleType(t)
+				}
+				if cap.IaCProvider != nil {
+					for _, t := range cap.IaCProvider.ResourceTypes {
+						RegisterModuleType(t)
+					}
 				}
 				for _, t := range cap.TriggerTypes {
 					RegisterTriggerType(t)
