@@ -44,6 +44,13 @@ type RegistryManifest struct {
 	Downloads        []PluginDownload           `json:"downloads,omitempty"`
 	Assets           *PluginAssets              `json:"assets,omitempty"`
 	Dependencies     []PluginDependency         `json:"dependencies,omitempty"`
+	// RequiredSecrets mirrors the plugin.json `required_secrets[]`
+	// block. Consumed by `wfctl secrets setup --plugin <name>` to
+	// prompt for + write each secret to the chosen GitHub scope.
+	// Without this field on the registry struct, the secrets[] list
+	// would be silently dropped at unmarshal time even when the
+	// upstream manifest declared it.
+	RequiredSecrets []PluginRequiredSecret `json:"required_secrets,omitempty"`
 }
 
 // RegistryCapabilities describes what module/step/trigger types a plugin provides.
