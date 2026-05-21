@@ -563,6 +563,7 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 	// the provider once and subsequent lookups are O(1). Resolved lazily on
 	// the first write-only Get.
 	var listSet map[string]struct{}
+	var githubListFoldSet map[string]struct{}
 	var listErr error
 	var listDone bool
 	lookupViaList := func(key string) (bool, error) {
@@ -571,8 +572,14 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 			listErr = err
 			if err == nil {
 				listSet = make(map[string]struct{}, len(names))
+				if provider.Name() == "github" {
+					githubListFoldSet = make(map[string]struct{}, len(names))
+				}
 				for _, n := range names {
 					listSet[n] = struct{}{}
+					if githubListFoldSet != nil {
+						githubListFoldSet[strings.ToUpper(n)] = struct{}{}
+					}
 				}
 			}
 			listDone = true
@@ -580,8 +587,17 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 		if listErr != nil && !errors.Is(listErr, secrets.ErrUnsupported) {
 			return false, fmt.Errorf("list secrets to check %q: %w", key, listErr)
 		}
-		_, ok := listSet[key]
-		return ok, nil
+		if _, ok := listSet[key]; ok {
+			return true, nil
+		}
+		// GitHub Actions secret names are case-insensitive and are commonly
+		// reported uppercased by the API. Generated subkeys such as
+		// SPACES_access_key must still match SPACES_ACCESS_KEY.
+		if githubListFoldSet != nil {
+			_, ok := githubListFoldSet[strings.ToUpper(key)]
+			return ok, nil
+		}
+		return false, nil
 	}
 	secretExists := func(key string) (bool, error) {
 		_, err := provider.Get(ctx, key)
@@ -667,6 +683,7 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 			// write-only providers (GitHub Actions) where Get is unsupported.
 			listDone = false
 			listSet = nil
+			githubListFoldSet = nil
 		} else {
 			// Normal path: check that EVERY expected stored key is already present
 			// before skipping. provider_credential writes multiple sub-keys; if a
