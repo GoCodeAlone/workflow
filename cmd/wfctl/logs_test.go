@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -15,11 +16,18 @@ import (
 
 type fakeLogProvider struct {
 	applyCapture
-	req interfaces.LogCaptureRequest
+	req          interfaces.LogCaptureRequest
+	ctxDeadline  time.Time
+	ctxRemaining time.Duration
+	hasDeadline  bool
 }
 
-func (p *fakeLogProvider) CaptureLogs(_ context.Context, req interfaces.LogCaptureRequest, sink interfaces.LogCaptureSink) error {
+func (p *fakeLogProvider) CaptureLogs(ctx context.Context, req interfaces.LogCaptureRequest, sink interfaces.LogCaptureSink) error {
 	p.req = req
+	p.ctxDeadline, p.hasDeadline = ctx.Deadline()
+	if p.hasDeadline {
+		p.ctxRemaining = time.Until(p.ctxDeadline)
+	}
 	return sink.WriteLogChunk(interfaces.LogChunk{Data: []byte("line one\n"), Source: "historic"})
 }
 
@@ -174,6 +182,54 @@ modules:
 	}
 	if provider.req.DurationSeconds != 5 {
 		t.Fatalf("DurationSeconds = %d, want 5 when --follow is true", provider.req.DurationSeconds)
+	}
+}
+
+func TestLogsCaptureFollowContextAllowsProviderCompletionGrace(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := filepath.Join(tmp, "app.yaml")
+	if err := os.WriteFile(cfg, []byte(`
+version: "1"
+modules:
+  - name: do
+    type: iac.provider
+    config:
+      provider: digitalocean
+  - name: web
+    type: infra.container_service
+    config:
+      provider: do
+      app_name: bmw-staging
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := &fakeLogProvider{}
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return provider, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	var out bytes.Buffer
+	err := runLogsWithOutput([]string{
+		"capture",
+		"--config", cfg,
+		"--resource", "web",
+		"--follow",
+		"--duration", "5s",
+	}, &out)
+	if err != nil {
+		t.Fatalf("runLogsWithOutput: %v", err)
+	}
+	if provider.req.DurationSeconds != 5 {
+		t.Fatalf("DurationSeconds = %d, want 5", provider.req.DurationSeconds)
+	}
+	if !provider.hasDeadline {
+		t.Fatal("expected wfctl to retain a client-side timeout guard")
+	}
+	if got := provider.ctxRemaining; got <= 5*time.Second {
+		t.Fatalf("client context remaining = %v, want grace beyond requested 5s follow", got)
 	}
 }
 
