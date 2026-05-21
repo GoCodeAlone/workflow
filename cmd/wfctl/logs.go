@@ -29,6 +29,13 @@ func runLogsWithOutput(args []string, out io.Writer) error {
 	}
 }
 
+func runInfraLogs(args []string) error {
+	if len(args) > 0 && args[0] == "capture" {
+		args = args[1:]
+	}
+	return runLogsCapture(args, os.Stdout)
+}
+
 func logsUsage() error {
 	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl logs <action> [options]
 
