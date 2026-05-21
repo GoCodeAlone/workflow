@@ -13,6 +13,8 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
+const logCaptureFollowCompletionGrace = 30 * time.Second
+
 func runLogs(args []string) error {
 	return runLogsWithOutput(args, os.Stdout)
 }
@@ -113,7 +115,7 @@ func runLogsCapture(args []string, out io.Writer) error {
 	ctx := context.Background()
 	if follow && duration > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, duration)
+		ctx, cancel = context.WithTimeout(ctx, duration+logCaptureFollowCompletionGrace)
 		defer cancel()
 	}
 	durationSeconds := int64(0)
