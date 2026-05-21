@@ -68,41 +68,15 @@ func buildAlignContext(cfgFile string) (*alignContext, error) {
 		case m.Type == "infra.database":
 			ctx.databases = append(ctx.databases, m)
 		case m.Type == "secrets.generate" || m.Type == "secrets.requires":
-			if gen, ok := extractSecretKeys(m.Config, "generate"); ok {
-				for _, k := range gen {
-					ctx.secretKeys[k] = struct{}{}
-				}
+			for _, k := range secretModuleKeys(m.Config, "generate") {
+				ctx.secretKeys[k] = struct{}{}
 			}
-			if req, ok := extractSecretKeys(m.Config, "requires"); ok {
-				for _, k := range req {
-					ctx.secretKeys[k] = struct{}{}
-				}
+			for _, k := range secretModuleKeys(m.Config, "requires") {
+				ctx.secretKeys[k] = struct{}{}
 			}
 		}
 	}
 	return ctx, nil
-}
-
-// extractSecretKeys extracts key names from config[field] which is expected
-// to be []any where each element is map[string]any with a "key" field.
-func extractSecretKeys(cfg map[string]any, field string) ([]string, bool) {
-	raw, ok := cfg[field]
-	if !ok {
-		return nil, false
-	}
-	items, ok := raw.([]any)
-	if !ok {
-		return nil, false
-	}
-	var keys []string
-	for _, item := range items {
-		if m, ok := item.(map[string]any); ok {
-			if k, ok := m["key"].(string); ok && k != "" {
-				keys = append(keys, k)
-			}
-		}
-	}
-	return keys, true
 }
 
 // ── R-A1: container/runtime alignment ──────────────────────────────────────

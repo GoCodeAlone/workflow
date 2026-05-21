@@ -13,6 +13,7 @@ func TestParseInfraResourceSpecs_PreservesEnvVarRefs(t *testing.T) {
 	t.Setenv("IMAGE_REF", "registry.example.com/api:abc123")
 	t.Setenv("AUTH_TOKEN", "would-be-resolved-secret")
 	t.Setenv("DATABASE_URL", "postgres://would-be-resolved")
+	t.Setenv("EXTERNAL_API_TOKEN", "would-be-resolved-required-secret")
 	// POSTGRES_PASSWORD is in secrets.generate — leave it unset to simulate plan time.
 
 	specs, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
@@ -142,6 +143,103 @@ func TestParseInfraResourceSpecs_PreservesSecretGenVarsInUserData(t *testing.T) 
 	}
 }
 
+func TestParseInfraResourceSpecs_PreservesRequiredSecretVarsInUserData(t *testing.T) {
+	t.Setenv("DIGITALOCEAN_TOKEN", "actual-do-token")
+	t.Setenv("IMAGE_REF", "registry.example.com/api:abc123")
+	t.Setenv("AUTH_TOKEN", "would-be-resolved-secret")
+	t.Setenv("DATABASE_URL", "postgres://would-be-resolved")
+	t.Setenv("POSTGRES_PASSWORD", "deadbeef1234567890abcdef12345678")
+
+	t.Setenv("EXTERNAL_API_TOKEN", "")
+	specsAtPlan, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs (plan): %v", err)
+	}
+	hashAtPlan := desiredStateHash(specsAtPlan)
+
+	t.Setenv("EXTERNAL_API_TOKEN", "required-secret-value")
+	specsAtApply, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs (apply): %v", err)
+	}
+	hashAtApply := desiredStateHash(specsAtApply)
+
+	if hashAtPlan != hashAtApply {
+		planJSON, _ := json.MarshalIndent(specsAtPlan, "", "  ")
+		applyJSON, _ := json.MarshalIndent(specsAtApply, "", "  ")
+		t.Errorf("desiredStateHash mismatch between plan and apply:\n"+
+			"  plan hash:  %s\n  apply hash: %s\n\nplan specs:\n%s\n\napply specs:\n%s",
+			hashAtPlan, hashAtApply, planJSON, applyJSON)
+	}
+
+	var dropletCfg map[string]any
+	for _, s := range specsAtApply {
+		if s.Name == "example-droplet" {
+			dropletCfg = s.Config
+			break
+		}
+	}
+	if dropletCfg == nil {
+		t.Fatal("example-droplet spec not found in parsed specs")
+	}
+	ud, _ := dropletCfg["user_data"].(string)
+	if !strings.Contains(ud, "${EXTERNAL_API_TOKEN}") {
+		t.Errorf("user_data should contain literal ${EXTERNAL_API_TOKEN}, got:\n%s", ud)
+	}
+	if strings.Contains(ud, "required-secret-value") {
+		t.Errorf("user_data should NOT contain the resolved required secret value, got:\n%s", ud)
+	}
+}
+
+func TestParseInfraResourceSpecs_PreservesSecretEntriesInUserData(t *testing.T) {
+	t.Setenv("DIGITALOCEAN_TOKEN", "actual-do-token")
+	t.Setenv("IMAGE_REF", "registry.example.com/api:abc123")
+	t.Setenv("AUTH_TOKEN", "would-be-resolved-secret")
+	t.Setenv("DATABASE_URL", "postgres://would-be-resolved")
+	t.Setenv("POSTGRES_PASSWORD", "deadbeef1234567890abcdef12345678")
+	t.Setenv("EXTERNAL_API_TOKEN", "required-secret-value")
+
+	t.Setenv("MANUAL_API_TOKEN", "")
+	specsAtPlan, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs (plan): %v", err)
+	}
+	hashAtPlan := desiredStateHash(specsAtPlan)
+
+	t.Setenv("MANUAL_API_TOKEN", "manual-secret-value")
+	specsAtApply, err := parseInfraResourceSpecs("testdata/infra-with-env-var-refs.yaml")
+	if err != nil {
+		t.Fatalf("parseInfraResourceSpecs (apply): %v", err)
+	}
+	hashAtApply := desiredStateHash(specsAtApply)
+
+	if hashAtPlan != hashAtApply {
+		planJSON, _ := json.MarshalIndent(specsAtPlan, "", "  ")
+		applyJSON, _ := json.MarshalIndent(specsAtApply, "", "  ")
+		t.Errorf("desiredStateHash mismatch between plan and apply:\n"+
+			"  plan hash:  %s\n  apply hash: %s\n\nplan specs:\n%s\n\napply specs:\n%s",
+			hashAtPlan, hashAtApply, planJSON, applyJSON)
+	}
+
+	var dropletCfg map[string]any
+	for _, s := range specsAtApply {
+		if s.Name == "example-droplet" {
+			dropletCfg = s.Config
+			break
+		}
+	}
+	if dropletCfg == nil {
+		t.Fatal("example-droplet spec not found in parsed specs")
+	}
+	ud, _ := dropletCfg["user_data"].(string)
+	if !strings.Contains(ud, "${MANUAL_API_TOKEN}") {
+		t.Errorf("user_data should contain literal ${MANUAL_API_TOKEN}, got:\n%s", ud)
+	}
+	if strings.Contains(ud, "manual-secret-value") {
+		t.Errorf("user_data should NOT contain the resolved secret entry value, got:\n%s", ud)
+	}
+}
+
 // TestPlanEnvVarPreserveTestdataExists ensures the fixture file exists and
 // has the env_vars_secret block required for the preservation test.
 func TestPlanEnvVarPreserveTestdataExists(t *testing.T) {
@@ -161,5 +259,11 @@ func TestPlanEnvVarPreserveTestdataExists(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "secrets:") {
 		t.Errorf("fixture missing secrets: section — needed for secret-gen preservation test")
+	}
+	if !strings.Contains(string(b), "entries:") {
+		t.Errorf("fixture missing secrets.entries section — needed for secret-entry preservation test")
+	}
+	if !strings.Contains(string(b), "secrets.requires") {
+		t.Errorf("fixture missing secrets.requires module — needed for required-secret preservation test")
 	}
 }

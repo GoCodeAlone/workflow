@@ -132,23 +132,55 @@ func buildResolvedSecretsFromState(
 	return out
 }
 
-// buildRuntimeOnlySecretKeys returns the set of SecretGen keys whose Type
-// is NOT "infra_output". These secrets (random_hex, random_base64,
-// random_alphanumeric, provider_credential, etc.) are runtime-resolved: the
-// runtime JIT resolver substitutes them from env at apply time. They MUST
-// NOT be substituted at plan time — even if the value is present in the
-// process environment — because doing so would embed a literal secret value
-// in the plan, which security-check R4 flags as a potential secret literal
-// in env_vars. See ADR 0014.
+// buildRuntimeOnlySecretKeys returns the set of declared secret keys that must
+// resolve only at apply/runtime. Generated non-infra_output secrets and
+// externally supplied required secrets MUST NOT be substituted at plan time —
+// even if present in the process environment — because doing so would embed a
+// literal secret value in the plan, which security-check R4 flags as a
+// potential secret literal in env_vars. See ADR 0014.
 func buildRuntimeOnlySecretKeys(cfg *config.WorkflowConfig) map[string]struct{} {
-	if cfg == nil || cfg.Secrets == nil || len(cfg.Secrets.Generate) == 0 {
+	if cfg == nil {
 		return nil
 	}
-	out := make(map[string]struct{}, len(cfg.Secrets.Generate))
-	for _, gen := range cfg.Secrets.Generate {
-		if gen.Type != "infra_output" {
-			out[gen.Key] = struct{}{}
+	out := make(map[string]struct{})
+	if cfg.Secrets != nil {
+		for _, gen := range cfg.Secrets.Generate {
+			if gen.Type != "infra_output" && gen.Key != "" {
+				out[gen.Key] = struct{}{}
+			}
 		}
+		for _, entry := range cfg.Secrets.Entries {
+			if entry.Name != "" {
+				out[entry.Name] = struct{}{}
+			}
+		}
+	}
+	for _, m := range cfg.Modules {
+		switch m.Type {
+		case "secrets.requires":
+			for _, key := range secretModuleKeys(m.Config, "requires") {
+				out[key] = struct{}{}
+			}
+		case "secrets.generate":
+			raw, ok := m.Config["generate"].([]any)
+			if !ok {
+				continue
+			}
+			for _, item := range raw {
+				gen, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				key, _ := gen["key"].(string)
+				typ, _ := gen["type"].(string)
+				if key != "" && typ != "infra_output" {
+					out[key] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
