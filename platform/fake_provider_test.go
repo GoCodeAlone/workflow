@@ -90,6 +90,9 @@ type fakeDriver struct {
 	diff          *interfaces.DiffResult
 	diffErr       error
 	diffCallCount atomic.Int64
+	adopt         bool
+	adoptRef      interfaces.ResourceRef
+	readOutput    *interfaces.ResourceOutput
 }
 
 // Compile-time interface conformance check.
@@ -99,7 +102,7 @@ func (d *fakeDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*inte
 	return nil, nil
 }
 func (d *fakeDriver) Read(_ context.Context, _ interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
-	return nil, nil
+	return d.readOutput, nil
 }
 func (d *fakeDriver) Update(_ context.Context, _ interfaces.ResourceRef, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	return nil, nil
@@ -119,3 +122,17 @@ func (d *fakeDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (
 	return nil, nil
 }
 func (d *fakeDriver) SensitiveKeys() []string { return nil }
+
+func (d *fakeDriver) AdoptionRef(spec interfaces.ResourceSpec) (interfaces.ResourceRef, bool, error) {
+	if !d.adopt {
+		return interfaces.ResourceRef{}, false, nil
+	}
+	ref := d.adoptRef
+	if ref.Name == "" {
+		ref.Name = spec.Name
+	}
+	if ref.Type == "" {
+		ref.Type = spec.Type
+	}
+	return ref, true, nil
+}

@@ -738,6 +738,29 @@ func (d *typedResourceDriver) SensitiveKeys() []string {
 	return append([]string(nil), resp.GetKeys()...)
 }
 
+func (d *typedResourceDriver) AdoptionRef(spec interfaces.ResourceSpec) (interfaces.ResourceRef, bool, error) {
+	switch spec.Type {
+	case "infra.dns", "infra.dns_delegation":
+		ref := interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}
+		if providerID, _ := spec.Config["provider_id"].(string); providerID != "" {
+			ref.ProviderID = providerID
+		} else if domain, _ := spec.Config["domain"].(string); domain != "" {
+			ref.ProviderID = domain
+		} else {
+			ref.ProviderID = spec.Name
+		}
+		return ref, true, nil
+	default:
+		if !boolFromAny(spec.Config["adopt_existing"]) {
+			return interfaces.ResourceRef{}, false, nil
+		}
+		if spec.Name == "" {
+			return interfaces.ResourceRef{}, false, fmt.Errorf("%s adoption requires resource name", spec.Type)
+		}
+		return interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}, true, nil
+	}
+}
+
 func (d *typedResourceDriver) SupportsConfigAdoption() bool {
 	return true
 }
@@ -1389,5 +1412,6 @@ var (
 	_ interfaces.ProviderCredentialRevoker = (*typedIaCAdapter)(nil)
 	_ interfaces.ProviderMigrationRepairer = (*typedIaCAdapter)(nil)
 	_ interfaces.ResourceDriver            = (*typedResourceDriver)(nil)
+	_ interfaces.ResourceAdoptionLocator   = (*typedResourceDriver)(nil)
 	_ interfaces.Troubleshooter            = (*typedResourceDriver)(nil)
 )
