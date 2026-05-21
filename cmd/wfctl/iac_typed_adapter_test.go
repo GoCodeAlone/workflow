@@ -244,6 +244,34 @@ func TestTypedAdapter_EndToEnd_NameVersionEnumerateAll(t *testing.T) {
 	}
 }
 
+func TestTypedResourceDriver_AdoptionRefDNSDelegationUsesDomain(t *testing.T) {
+	driver := &typedResourceDriver{resourceType: "infra.dns_delegation"}
+	locator, ok := any(driver).(interfaces.ResourceAdoptionLocator)
+	if !ok {
+		t.Fatal("typedResourceDriver must expose ResourceAdoptionLocator for external IaC drivers")
+	}
+
+	ref, ok, err := locator.AdoptionRef(interfaces.ResourceSpec{
+		Name:   "gocodealone-tech-delegation",
+		Type:   "infra.dns_delegation",
+		Config: map[string]any{"domain": "gocodealone.tech"},
+	})
+	if err != nil {
+		t.Fatalf("AdoptionRef returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("AdoptionRef returned ok=false for dns delegation")
+	}
+	want := interfaces.ResourceRef{
+		Name:       "gocodealone-tech-delegation",
+		Type:       "infra.dns_delegation",
+		ProviderID: "gocodealone.tech",
+	}
+	if ref != want {
+		t.Fatalf("AdoptionRef = %+v, want %+v", ref, want)
+	}
+}
+
 // ─── In-process gRPC test fixture ───────────────────────────────────────────
 
 // ─── ADR-0029 capability-extension tests ─────────────────────────────────

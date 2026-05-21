@@ -58,6 +58,50 @@ func TestDiffer_NewResource(t *testing.T) {
 	}
 }
 
+func TestComputePlan_NewResource_AdoptionNoopDiffSkipsCreate(t *testing.T) {
+	desired := []interfaces.ResourceSpec{
+		{Name: "delegation", Type: "infra.dns_delegation", Config: map[string]any{"domain": "example.com"}},
+	}
+	driver := &fakeDriver{
+		diff:       &interfaces.DiffResult{NeedsUpdate: false},
+		adopt:      true,
+		readOutput: &interfaces.ResourceOutput{Name: "delegation", Type: "infra.dns_delegation", ProviderID: "example.com"},
+	}
+	provider := &fakeProvider{driver: driver}
+
+	plan, err := platform.ComputePlan(context.Background(), provider, desired, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(plan.Actions) != 0 {
+		t.Fatalf("expected no actions for driver no-op new resource, got %+v", plan.Actions)
+	}
+	if got := driver.diffCallCount.Load(); got != 1 {
+		t.Fatalf("Diff call count = %d, want 1", got)
+	}
+}
+
+func TestComputePlan_NewResource_NoAdoptionDoesNotCallDiff(t *testing.T) {
+	desired := []interfaces.ResourceSpec{
+		{Name: "delegation", Type: "infra.dns_delegation", Config: map[string]any{"domain": "example.com"}},
+	}
+	driver := &fakeDriver{diff: &interfaces.DiffResult{NeedsUpdate: true}}
+	provider := &fakeProvider{driver: driver}
+
+	plan, err := platform.ComputePlan(context.Background(), provider, desired, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(plan.Actions) != 1 || plan.Actions[0].Action != "create" {
+		t.Fatalf("expected one create action, got %+v", plan.Actions)
+	}
+	if got := driver.diffCallCount.Load(); got != 0 {
+		t.Fatalf("Diff call count = %d, want 0 without adoption opt-in", got)
+	}
+}
+
 func TestDiffer_DeletedResource(t *testing.T) {
 	desired := []interfaces.ResourceSpec{}
 	current := []interfaces.ResourceState{
