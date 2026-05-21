@@ -6,6 +6,11 @@ secrets:
       length: 32
 
 modules:
+  - name: required-secrets
+    type: secrets.requires
+    config:
+      requires:
+        - key: EXTERNAL_API_TOKEN
   - name: do-provider
     type: iac.provider
     config:
@@ -35,3 +40,4 @@ modules:
                 postgres:
                   environment:
                     POSTGRES_PASSWORD: '${POSTGRES_PASSWORD}'
+                    EXTERNAL_API_TOKEN: '${EXTERNAL_API_TOKEN}'

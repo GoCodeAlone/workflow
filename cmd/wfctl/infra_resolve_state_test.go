@@ -152,6 +152,30 @@ func TestBuildRuntimeOnlySecretKeys(t *testing.T) {
 				{Key: "SESSION_SECRET", Type: "random_base64", Length: 48},
 				{Key: "SPACES_access_key", Type: "provider_credential", Source: "digitalocean.spaces"},
 			},
+			Entries: []config.SecretEntry{
+				{Name: "STRIPE_KEY"},
+			},
+		},
+		Modules: []config.ModuleConfig{
+			{
+				Name: "required-secrets",
+				Type: "secrets.requires",
+				Config: map[string]any{
+					"requires": []any{
+						map[string]any{"key": "WFCOMPUTE_VALIDATION_TOKEN"},
+					},
+				},
+			},
+			{
+				Name: "generated-secrets",
+				Type: "secrets.generate",
+				Config: map[string]any{
+					"generate": []any{
+						map[string]any{"key": "MODULE_RANDOM", "type": "random_hex"},
+						map[string]any{"key": "MODULE_INFRA_OUTPUT", "type": "infra_output"},
+					},
+				},
+			},
 		},
 	}
 	keys := buildRuntimeOnlySecretKeys(cfg)
@@ -159,8 +183,11 @@ func TestBuildRuntimeOnlySecretKeys(t *testing.T) {
 	if _, ok := keys["STAGING_VPC_UUID"]; ok {
 		t.Errorf("STAGING_VPC_UUID (infra_output) must NOT be in runtime-only keys")
 	}
+	if _, ok := keys["MODULE_INFRA_OUTPUT"]; ok {
+		t.Errorf("MODULE_INFRA_OUTPUT (infra_output) must NOT be in runtime-only keys")
+	}
 	// Non-infra_output types must be in the blocklist.
-	for _, wantKey := range []string{"NATS_AUTH_TOKEN", "SESSION_SECRET", "SPACES_access_key"} {
+	for _, wantKey := range []string{"NATS_AUTH_TOKEN", "SESSION_SECRET", "SPACES_access_key", "STRIPE_KEY", "WFCOMPUTE_VALIDATION_TOKEN", "MODULE_RANDOM"} {
 		if _, ok := keys[wantKey]; !ok {
 			t.Errorf("%s must be in runtime-only keys", wantKey)
 		}
@@ -224,5 +251,41 @@ func TestResolveSpecsAgainstState_RuntimeOnlySecretNotSubstituted(t *testing.T) 
 	// The unresolved ref should appear in diagnostics.
 	if len(diags) != 1 || diags[0].Ref != "NATS_AUTH_TOKEN" {
 		t.Errorf("diags: got %+v, want one entry for NATS_AUTH_TOKEN", diags)
+	}
+}
+
+func TestResolveSpecsAgainstState_RequiredSecretNotSubstituted(t *testing.T) {
+	t.Setenv("WFCOMPUTE_VALIDATION_TOKEN", "literal-token-that-must-not-enter-plan")
+	specs := []interfaces.ResourceSpec{{
+		Name: "bmw-staging",
+		Type: "infra.container_service",
+		Config: map[string]any{
+			"env_vars": map[string]any{
+				"WFCOMPUTE_VALIDATION_TOKEN": "${WFCOMPUTE_VALIDATION_TOKEN}",
+			},
+		},
+	}}
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{{
+			Name: "bmw-required-secrets",
+			Type: "secrets.requires",
+			Config: map[string]any{
+				"requires": []any{
+					map[string]any{"key": "WFCOMPUTE_VALIDATION_TOKEN"},
+				},
+			},
+		}},
+	}
+
+	out, diags, err := resolveSpecsAgainstState(specs, nil, cfg, "staging")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	envVars, _ := out[0].Config["env_vars"].(map[string]any)
+	if val := envVars["WFCOMPUTE_VALIDATION_TOKEN"]; val != "${WFCOMPUTE_VALIDATION_TOKEN}" {
+		t.Errorf("WFCOMPUTE_VALIDATION_TOKEN: got %q, want preserved template", val)
+	}
+	if len(diags) != 1 || diags[0].Ref != "WFCOMPUTE_VALIDATION_TOKEN" {
+		t.Errorf("diags: got %+v, want one entry for WFCOMPUTE_VALIDATION_TOKEN", diags)
 	}
 }
