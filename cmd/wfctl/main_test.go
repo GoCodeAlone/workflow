@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,6 +83,25 @@ func TestBuildVersionStripsDirtyMarker(t *testing.T) {
 	v := buildVersion()
 	if strings.HasSuffix(v, "+dirty") {
 		t.Fatalf("buildVersion() = %q, must not end in +dirty", v)
+	}
+}
+
+func TestLinkedVersionOverridesBuildInfo(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "wfctl")
+	build := exec.Command("go", "build", "-o", exe, "-ldflags", "-X main.version=v9.9.9", ".")
+	build.Env = append(os.Environ(), "GOWORK=off")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build wfctl: %v\n%s", err, out)
+	}
+
+	run := exec.Command(exe, "--version")
+	run.Env = append(os.Environ(), "WFCTL_NO_UPDATE_CHECK=1", "CI=true")
+	out, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("wfctl --version: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "v9.9.9" {
+		t.Fatalf("linked version = %q, want v9.9.9", got)
 	}
 }
 

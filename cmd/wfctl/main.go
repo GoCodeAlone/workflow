@@ -28,7 +28,19 @@ import (
 //go:embed wfctl.yaml
 var wfctlConfigBytes []byte
 
-var version = buildVersion()
+// version is set by release builds via:
+//
+//	go build -ldflags "-X main.version=vX.Y.Z"
+//
+// Keep the declaration as a constant string initializer so the linker can
+// override it. init falls back to Go build metadata for module-installed builds.
+var version = "dev"
+
+func init() {
+	if version == "dev" {
+		version = buildVersion()
+	}
+}
 
 func buildVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
