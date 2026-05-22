@@ -41,7 +41,6 @@ func TestMigrationPluginRunnerBuildsWorkflowMigrateArgs(t *testing.T) {
 		t.Fatalf("plugin = %q", gotPlugin)
 	}
 	wantArgs := []string{
-		"--wfctl-cli",
 		"test",
 		"--driver",
 		"golang-migrate",
@@ -61,7 +60,7 @@ func TestBuildMigrationPluginArgsMatchPluginRootContract(t *testing.T) {
 		Driver:    "golang-migrate",
 		SourceDir: "migrations",
 	}, []string{"status"})
-	want := []string{"--wfctl-cli", "status", "--driver", "golang-migrate", "--source-dir", "migrations"}
+	want := []string{"status", "--driver", "golang-migrate", "--source-dir", "migrations"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %#v, want %#v", got, want)
 	}
@@ -69,7 +68,7 @@ func TestBuildMigrationPluginArgsMatchPluginRootContract(t *testing.T) {
 
 func TestBuildMigrationPluginLintArgsMatchPluginContract(t *testing.T) {
 	got := buildMigrationPluginLintArgs(migrationPluginRunConfig{SourceDir: "migrations"})
-	want := []string{"--wfctl-cli", "lint", "migrations"}
+	want := []string{"lint", "migrations"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %#v, want %#v", got, want)
 	}
@@ -122,7 +121,7 @@ func TestDefaultMigrationPluginExecutorDoesNotInheritProcessSecrets(t *testing.T
 	}
 	t.Setenv("LEAKED_CI_SECRET", "must-not-reach-plugin")
 
-	_, err := defaultMigrationPluginExecutor(context.Background(), "workflow-plugin-migrations", []string{"--wfctl-cli", "migrate", "status"}, map[string]string{
+	_, err := defaultMigrationPluginExecutor(context.Background(), "workflow-plugin-migrations", []string{"status", "--driver", "golang-migrate", "--source-dir", "migrations"}, map[string]string{
 		"DATABASE_URL":      "postgres://user:secret@example.com/app",
 		"WFCTL_PLUGIN_DIR":  root,
 		"PLUGIN_PUBLIC_VAR": "ok",
