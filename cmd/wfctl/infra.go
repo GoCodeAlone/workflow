@@ -1273,6 +1273,8 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set (does NOT cancel explicit --refresh-outputs)")
 	var skipBootstrapFlag bool
 	fs.BoolVar(&skipBootstrapFlag, "skip-bootstrap", false, "Skip auto-bootstrap before apply; use only when required secrets/state already exist")
+	var waitFlag bool
+	fs.BoolVar(&waitFlag, "wait", false, "Wait for deployable infra resources to become healthy before exiting")
 	var allowReplaceFlag string
 	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
 		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
@@ -1310,6 +1312,10 @@ func runInfraApply(args []string) error {
 	// state would otherwise leak override authorization across runs.
 	applyAllowReplaceSet = parseAllowReplaceFlag(allowReplaceFlag)
 	defer func() { applyAllowReplaceSet = nil }()
+
+	prevInfraApplyWait := currentInfraApplyWait
+	currentInfraApplyWait = waitFlag
+	defer func() { currentInfraApplyWait = prevInfraApplyWait }()
 
 	// Publish the --include flag value for the apply path's filter helpers
 	// (including dry-run). Reset to "" at the top of every invocation so the

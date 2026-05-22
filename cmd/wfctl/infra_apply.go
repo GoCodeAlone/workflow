@@ -72,6 +72,11 @@ var applyV2ApplyPlanWithHooksFn = wfctlhelpers.ApplyPlanWithHooks
 // before dispatch.
 var applyAllowReplaceSet map[string]struct{}
 
+// currentInfraApplyWait is the per-invocation --wait setting for
+// `wfctl infra apply`. When set, apply waits for deployable infra resources to
+// pass provider health checks before reporting success.
+var currentInfraApplyWait bool
+
 // parseAllowReplaceFlag turns a comma-separated --allow-replace=<csv>
 // flag value into a name-set. Empty input → nil (the canonical
 // "no override" value, indistinguishable from the flag never being
@@ -428,6 +433,9 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	}
 	if len(plan.Actions) == 0 {
 		fmt.Println("  No changes — infrastructure is up-to-date.")
+		if currentInfraApplyWait {
+			return waitForInfraHealth(ctx, provider, specs, current, nil, envName)
+		}
 		return nil
 	}
 
@@ -517,7 +525,79 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 			return finalErr
 		}
 	}
+	if currentInfraApplyWait {
+		if err := waitForInfraHealth(ctx, provider, specs, current, result, envName); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+type infraHealthTarget struct {
+	name string
+	ref  interfaces.ResourceRef
+}
+
+func waitForInfraHealth(ctx context.Context, provider interfaces.IaCProvider, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, result *interfaces.ApplyResult, envName string) error {
+	targets, err := infraHealthTargets(specs, current, result)
+	if err != nil {
+		return err
+	}
+	for _, target := range targets {
+		driver, err := provider.ResourceDriver(target.ref.Type)
+		if err != nil {
+			return fmt.Errorf("health check %s/%s: resolve resource driver: %w", target.ref.Type, target.ref.Name, err)
+		}
+		if err := pollUntilHealthy(ctx, driver, target.ref, target.name, envName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func infraHealthTargets(specs []interfaces.ResourceSpec, current []interfaces.ResourceState, result *interfaces.ApplyResult) ([]infraHealthTarget, error) {
+	currentByName := make(map[string]interfaces.ResourceState, len(current))
+	for i := range current {
+		state := current[i]
+		currentByName[state.Name] = state
+	}
+	appliedByName := map[string]interfaces.ResourceOutput{}
+	if result != nil {
+		for _, out := range result.Resources {
+			appliedByName[out.Name] = out
+		}
+	}
+
+	targets := make([]infraHealthTarget, 0)
+	seen := map[string]struct{}{}
+	for _, spec := range specs {
+		if !shouldWaitForInfraHealth(spec) {
+			continue
+		}
+		if _, ok := seen[spec.Name]; ok {
+			continue
+		}
+		seen[spec.Name] = struct{}{}
+
+		ref := interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}
+		if out, ok := appliedByName[spec.Name]; ok {
+			ref.ProviderID = out.ProviderID
+		}
+		if ref.ProviderID == "" {
+			if state, ok := currentByName[spec.Name]; ok {
+				ref.ProviderID = state.ProviderID
+			}
+		}
+		if ref.ProviderID == "" {
+			return nil, fmt.Errorf("health check %s/%s: no ProviderID available after apply", spec.Type, spec.Name)
+		}
+		targets = append(targets, infraHealthTarget{name: spec.Name, ref: ref})
+	}
+	return targets, nil
+}
+
+func shouldWaitForInfraHealth(spec interfaces.ResourceSpec) bool {
+	return spec.Type == "infra.container_service"
 }
 
 func statePersistenceHooks(
@@ -1577,5 +1657,22 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 			return finalErr
 		}
 	}
+	if currentInfraApplyWait {
+		if err := waitForInfraHealth(ctx, provider, specsFromPlanActions(plan.Actions), nil, result, envName); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func specsFromPlanActions(actions []interfaces.PlanAction) []interfaces.ResourceSpec {
+	specs := make([]interfaces.ResourceSpec, 0, len(actions))
+	for i := range actions {
+		action := actions[i]
+		if action.Action == "delete" {
+			continue
+		}
+		specs = append(specs, action.Resource)
+	}
+	return specs
 }
