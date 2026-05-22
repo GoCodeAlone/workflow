@@ -557,7 +557,8 @@ func waitForInfraHealth(ctx context.Context, provider interfaces.IaCProvider, sp
 
 func infraHealthTargets(specs []interfaces.ResourceSpec, current []interfaces.ResourceState, result *interfaces.ApplyResult) ([]infraHealthTarget, error) {
 	currentByName := make(map[string]interfaces.ResourceState, len(current))
-	for _, state := range current {
+	for i := range current {
+		state := current[i]
 		currentByName[state.Name] = state
 	}
 	appliedByName := map[string]interfaces.ResourceOutput{}
@@ -1666,7 +1667,8 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 
 func specsFromPlanActions(actions []interfaces.PlanAction) []interfaces.ResourceSpec {
 	specs := make([]interfaces.ResourceSpec, 0, len(actions))
-	for _, action := range actions {
+	for i := range actions {
+		action := actions[i]
 		if action.Action == "delete" {
 			continue
 		}
