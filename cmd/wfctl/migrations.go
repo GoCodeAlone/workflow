@@ -55,13 +55,15 @@ type migrationRepairDirtyResult struct {
 
 func runMigrations(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: wfctl migrations <validate|status|ci-check|repair-dirty>")
+		return fmt.Errorf("usage: wfctl migrations <validate|status|up|ci-check|repair-dirty>")
 	}
 	switch args[0] {
 	case "validate":
 		return runMigrationsValidate(args[1:])
 	case "status":
 		return runMigrationsStatus(args[1:])
+	case "up":
+		return runMigrationsUp(args[1:])
 	case "ci-check":
 		return runMigrationsCICheck(args[1:])
 	case "repair-dirty":
@@ -96,6 +98,38 @@ func runMigrationsStatus(args []string) error {
 		result.Decision = "fail"
 	}
 	if writeErr := writeMigrationStatusOutput(result, *format, "migrations"); writeErr != nil {
+		return writeErr
+	}
+	if err != nil {
+		return err
+	}
+	if result.Decision == "fail" {
+		return errors.New(strings.Join(result.Reasons, "; "))
+	}
+	return nil
+}
+
+func runMigrationsUp(args []string) error {
+	fs := flag.NewFlagSet("migrations up", flag.ContinueOnError)
+	configFile := fs.String("config", "app.yaml", "Workflow config file")
+	fs.StringVar(configFile, "c", "app.yaml", "Config file (short for --config)")
+	envName := fs.String("env", "", "Environment name")
+	pluginDir := fs.String("plugin-dir", defaultMigrationPluginDir(), "Plugin directory")
+	format := fs.String("format", "text", "Output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := loadMigrationWorkflowConfig(*configFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	migrations, err := resolveMigrationConfigs(cfg, *envName)
+	if err != nil {
+		return err
+	}
+	result, err := applyMigrationsForConfigs(context.Background(), migrations, *pluginDir)
+	if writeErr := writeMigrationStatusOutput(result, *format, "migrations up"); writeErr != nil {
 		return writeErr
 	}
 	if err != nil {
@@ -559,6 +593,66 @@ func collectMigrationStatusForConfigs(ctx context.Context, migrations []resolved
 		record.Current = status.Current
 		record.Dirty = status.Dirty
 		record.Pending = status.Pending
+		result.Migrations = append(result.Migrations, record)
+	}
+	if len(result.Reasons) > 0 {
+		result.Decision = "fail"
+	}
+	return result, errors.Join(errs...)
+}
+
+func applyMigrationsForConfigs(ctx context.Context, migrations []resolvedMigrationConfig, pluginDir string) (migrationStatusResult, error) {
+	result := migrationStatusResult{
+		Decision:              "pass",
+		Destructive:           false,
+		HumanApprovalRequired: false,
+		Migrations:            make([]migrationValidationRecord, 0, len(migrations)),
+	}
+	runner := newMigrationPluginRunner()
+	var errs []error
+	for _, migration := range migrations {
+		runCfg := migrationPluginRunConfig{
+			Plugin:    migration.Plugin,
+			PluginDir: pluginDir,
+			Driver:    migration.Driver,
+			SourceDir: migration.SourceDir,
+			DSN:       migration.DSN,
+		}
+		record := migrationValidationRecord{Name: migration.Name, Driver: migration.Driver}
+		if _, err := runner.run(ctx, runCfg, "up"); err != nil {
+			reason := fmt.Sprintf("migration %s up failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))
+			result.Reasons = append(result.Reasons, reason)
+			record.Error = reason
+			result.Migrations = append(result.Migrations, record)
+			errs = append(errs, errors.New(reason))
+			continue
+		}
+		statusOutput, err := runner.run(ctx, runCfg, "status")
+		if err != nil {
+			reason := fmt.Sprintf("migration %s post-up status failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))
+			result.Reasons = append(result.Reasons, reason)
+			record.Error = reason
+			result.Migrations = append(result.Migrations, record)
+			errs = append(errs, errors.New(reason))
+			continue
+		}
+		status, err := parseMigrationStatus(statusOutput.Stdout)
+		if err != nil {
+			reason := fmt.Sprintf("migration %s post-up status failed: %s", migration.Name, redactMigrationDSN(err.Error(), migration.DSN))
+			result.Reasons = append(result.Reasons, reason)
+			record.Error = reason
+			result.Migrations = append(result.Migrations, record)
+			errs = append(errs, errors.New(reason))
+			continue
+		}
+		record.Current = status.Current
+		record.Dirty = status.Dirty
+		record.Pending = status.Pending
+		for _, reason := range migrationStatusCleanReasons([]migrationValidationRecord{record}) {
+			reason = strings.Replace(reason, " is dirty ", " is dirty after up ", 1)
+			result.Reasons = append(result.Reasons, reason)
+			errs = append(errs, errors.New(reason))
+		}
 		result.Migrations = append(result.Migrations, record)
 	}
 	if len(result.Reasons) > 0 {

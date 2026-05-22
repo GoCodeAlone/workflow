@@ -1322,6 +1322,7 @@ Manage SQLite-backed engine config schema migrations.
 - `wfctl config migrate apply [--db workflow.db]` — apply pending migrations
 - `wfctl config migrate plugins [--config workflow.yaml]` — migrate requires.plugins[] entries
 - `wfctl config migrate repair-dirty [options]` — repair dirty golang-migrate metadata
+- `wfctl migrations up --config app.yaml --env prod` — apply application database migrations through the configured migration plugin and verify post-up status is clean
 
 > **Deprecated:** `wfctl migrate` is an alias for `wfctl config migrate` and will be removed in v0.21+.
 > Update scripts to use `wfctl config migrate`.

@@ -34,7 +34,7 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 				if strings.Contains(strings.Join(args, " "), " test ") && env["DATABASE_URL"] != "postgres://ephemeral/app-fresh" {
 					t.Fatalf("fresh cycle used DATABASE_URL = %q", env["DATABASE_URL"])
 				}
-				if strings.Contains(strings.Join(args, " "), " lint ") && env["DATABASE_URL"] != "" {
+				if len(args) > 0 && args[0] == "lint" && env["DATABASE_URL"] != "" {
 					t.Fatalf("lint received DATABASE_URL = %q", env["DATABASE_URL"])
 				}
 				return migrationCommandResult{Stdout: `{"current":"202604270001","dirty":false,"pending":[]}`}, nil
@@ -49,9 +49,9 @@ func TestRunMigrationsValidateRunsLintAndFreshCycle(t *testing.T) {
 	}
 
 	want := []string{
-		"workflow-plugin-migrations --wfctl-cli lint migrations ",
+		"workflow-plugin-migrations lint migrations ",
 		"ephemeral app-fresh postgres://secret@example/db",
-		"workflow-plugin-migrations --wfctl-cli test --driver golang-migrate --source-dir migrations postgres://ephemeral/app-fresh",
+		"workflow-plugin-migrations test --driver golang-migrate --source-dir migrations postgres://ephemeral/app-fresh",
 		"cleanup ephemeral app-fresh",
 	}
 	if !reflect.DeepEqual(calls, want) {
@@ -122,7 +122,7 @@ func TestRunMigrationsValidateJSONOutputOnFailure(t *testing.T) {
 	newMigrationPluginRunner = func() migrationPluginRunner {
 		return migrationPluginRunner{
 			exec: func(_ context.Context, _ string, args []string, _ map[string]string) (migrationCommandResult, error) {
-				if strings.Contains(strings.Join(args, " "), " lint ") {
+				if len(args) > 0 && args[0] == "lint" {
 					return migrationCommandResult{}, errors.New("lint failed for postgres://secret@example/db")
 				}
 				return migrationCommandResult{}, nil

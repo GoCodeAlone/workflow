@@ -651,14 +651,21 @@ func stubMigrationBaselineHooks(t *testing.T, calls *[]string, changedFiles []st
 }
 
 func migrationCommandFromArgs(args []string) string {
-	if len(args) < 2 {
+	if len(args) == 0 {
 		return ""
 	}
-	if args[1] == "lint" {
+	offset := 0
+	if args[0] == "--wfctl-cli" {
+		offset = 1
+	}
+	if len(args) <= offset {
+		return ""
+	}
+	if args[offset] == "lint" {
 		return "lint"
 	}
-	command := []string{args[1]}
-	for i := 2; i < len(args); i++ {
+	command := []string{args[offset]}
+	for i := offset + 1; i < len(args); i++ {
 		if args[i] == "--driver" || args[i] == "--source-dir" || args[i] == "--dsn" {
 			break
 		}
@@ -668,8 +675,12 @@ func migrationCommandFromArgs(args []string) string {
 }
 
 func migrationSourceFromArgs(args []string) string {
-	if len(args) >= 3 && args[1] == "lint" {
-		return args[2]
+	offset := 0
+	if len(args) > 0 && args[0] == "--wfctl-cli" {
+		offset = 1
+	}
+	if len(args) > offset+1 && args[offset] == "lint" {
+		return args[offset+1]
 	}
 	return argValue(args, "--source-dir")
 }
