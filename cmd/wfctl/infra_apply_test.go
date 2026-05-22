@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/iac/sensitive"
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
@@ -323,6 +324,106 @@ type noDriverApplyProvider struct {
 
 func (p *noDriverApplyProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
 	return nil, fmt.Errorf("no driver for %s", resourceType)
+}
+
+type waitHealthDriver struct {
+	readDriver
+	results  []interfaces.HealthResult
+	fallback *interfaces.HealthResult
+	refs     []interfaces.ResourceRef
+}
+
+func (d *waitHealthDriver) HealthCheck(_ context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	d.refs = append(d.refs, ref)
+	if len(d.results) == 0 {
+		if d.fallback != nil {
+			return d.fallback, nil
+		}
+		return &interfaces.HealthResult{Healthy: true}, nil
+	}
+	next := d.results[0]
+	d.results = d.results[1:]
+	return &next, nil
+}
+
+func TestWaitForInfraHealth_UsesAppliedContainerProviderID(t *testing.T) {
+	driver := &waitHealthDriver{}
+	provider := &readBackedProvider{driver: driver}
+	specs := []interfaces.ResourceSpec{
+		{Name: "web", Type: "infra.container_service"},
+	}
+	result := &interfaces.ApplyResult{
+		Resources: []interfaces.ResourceOutput{
+			{Name: "web", Type: "infra.container_service", ProviderID: "app-new"},
+		},
+	}
+
+	if err := waitForInfraHealth(context.Background(), provider, specs, nil, result, "prod"); err != nil {
+		t.Fatalf("waitForInfraHealth: %v", err)
+	}
+	if len(driver.refs) != 1 {
+		t.Fatalf("HealthCheck calls = %d, want 1", len(driver.refs))
+	}
+	if got := driver.refs[0].ProviderID; got != "app-new" {
+		t.Fatalf("HealthCheck ProviderID = %q, want app-new", got)
+	}
+}
+
+func TestWaitForInfraHealth_NoChangesStillChecksCurrentContainer(t *testing.T) {
+	driver := &waitHealthDriver{}
+	provider := &readBackedProvider{driver: driver}
+	specs := []interfaces.ResourceSpec{
+		{Name: "web", Type: "infra.container_service"},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "web", Type: "infra.container_service", ProviderID: "app-current"},
+	}
+
+	if err := waitForInfraHealth(context.Background(), provider, specs, current, nil, "prod"); err != nil {
+		t.Fatalf("waitForInfraHealth: %v", err)
+	}
+	if len(driver.refs) != 1 {
+		t.Fatalf("HealthCheck calls = %d, want 1", len(driver.refs))
+	}
+	if got := driver.refs[0].ProviderID; got != "app-current" {
+		t.Fatalf("HealthCheck ProviderID = %q, want app-current", got)
+	}
+}
+
+func TestWaitForInfraHealth_UnhealthyContainerFailsApply(t *testing.T) {
+	origTimeout := healthPollDefaultTimeout
+	origInitial := healthPollInitialInterval
+	origBackoff := healthPollBackoffInterval
+	origProgress := healthPollProgressInterval
+	healthPollDefaultTimeout = time.Millisecond
+	healthPollInitialInterval = time.Millisecond
+	healthPollBackoffInterval = time.Millisecond
+	healthPollProgressInterval = time.Hour
+	t.Cleanup(func() {
+		healthPollDefaultTimeout = origTimeout
+		healthPollInitialInterval = origInitial
+		healthPollBackoffInterval = origBackoff
+		healthPollProgressInterval = origProgress
+	})
+
+	driver := &waitHealthDriver{
+		fallback: &interfaces.HealthResult{Healthy: false, Message: "no deployment found"},
+	}
+	provider := &readBackedProvider{driver: driver}
+	specs := []interfaces.ResourceSpec{
+		{Name: "web", Type: "infra.container_service"},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "web", Type: "infra.container_service", ProviderID: "app-current"},
+	}
+
+	err := waitForInfraHealth(context.Background(), provider, specs, current, nil, "prod")
+	if err == nil {
+		t.Fatal("expected waitForInfraHealth to fail for unhealthy container")
+	}
+	if !strings.Contains(err.Error(), "no deployment found") {
+		t.Fatalf("error = %q, want no deployment found", err.Error())
+	}
 }
 
 // ── TestApplyInfraModules_DirectPath ───────────────────────────────────────────
