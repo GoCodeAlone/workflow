@@ -42,7 +42,7 @@
 | 8 | (no PR — file follow-up issue for remaining 56 plugin repo sweep) | Task 8 | n/a | workflow |
 | 9 | docs(retro): workflow#758 pilot retro + close issue | Task 9 | docs/758-retro | workflow |
 
-**Status:** Draft
+**Status:** Locked 2026-05-23T20:08:47Z
 
 ---
 
