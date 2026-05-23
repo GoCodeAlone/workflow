@@ -70,5 +70,47 @@ func TestIaCBridgeGetManifestUnimplementedWhenNoProvider(t *testing.T) {
 	}
 }
 
+// TestIaCBridgeGetManifest_BuildVersionOverridesDiskVersion locks the
+// single-channel precedence rule for workflow#758: when bridge.buildVersion
+// is non-empty, it overrides diskManifest.Version in the response.
+func TestIaCBridgeGetManifest_BuildVersionOverridesDiskVersion(t *testing.T) {
+	disk := &pluginpkg.PluginManifest{
+		Name: "do", Version: "1.0.0", Author: "GoCodeAlone", Description: "test",
+	}
+	bridge := &iacPluginServiceBridge{
+		grpcSrv:      grpc.NewServer(),
+		diskManifest: disk,
+		buildVersion: "v1.2.3",
+	}
+	got, err := bridge.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.GetVersion() != "v1.2.3" {
+		t.Errorf("Version = %q, want BuildVersion-augmented v1.2.3", got.GetVersion())
+	}
+	// Other fields still come from diskManifest.
+	if got.GetName() != disk.Name {
+		t.Errorf("Name = %q, want %q (other fields unchanged)", got.GetName(), disk.Name)
+	}
+}
+
+// TestIaCBridgeGetManifest_BuildVersionOnlyNoDisk: when there's no
+// diskManifest but BuildVersion is set, the bridge still returns a Manifest
+// (not Unimplemented) carrying only the runtime version.
+func TestIaCBridgeGetManifest_BuildVersionOnlyNoDisk(t *testing.T) {
+	bridge := &iacPluginServiceBridge{
+		grpcSrv:      grpc.NewServer(),
+		buildVersion: "v2.0.0",
+	}
+	got, err := bridge.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.GetVersion() != "v2.0.0" {
+		t.Errorf("Version = %q, want v2.0.0", got.GetVersion())
+	}
+}
+
 // Compile-time guard: bridge must satisfy pb.PluginServiceServer.
 var _ pb.PluginServiceServer = (*iacPluginServiceBridge)(nil)

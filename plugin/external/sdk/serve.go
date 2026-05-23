@@ -35,6 +35,37 @@ func WithManifestProvider(m *pluginpkg.PluginManifest) ServeOption {
 	}
 }
 
+// WithBuildVersion sets the runtime build-version surfaced via GetManifest.
+// Single-channel precedence: takes precedence over any ManifestProvider.Version
+// or provider.Manifest().Version. Typically populated via
+// sdk.ResolveBuildVersion(<plugin's ldflag-injected Version var>).
+//
+// Recommended pattern:
+//
+//	import (
+//	    "github.com/<...>/internal"  // ldflag-injected Version var
+//	    sdk "github.com/GoCodeAlone/workflow/plugin/external/sdk"
+//	)
+//
+//	func main() {
+//	    sdk.Serve(&myPlugin{},
+//	        sdk.WithManifestProvider(manifest),
+//	        sdk.WithBuildVersion(sdk.ResolveBuildVersion(internal.Version)),
+//	    )
+//	}
+//
+// Goreleaser config injects the tag at build time:
+//
+//	ldflags:
+//	  - -X github.com/<...>/internal.Version={{.Version}}
+//
+// Closes workflow#758.
+func WithBuildVersion(v string) ServeOption {
+	return func(s *grpcServer) {
+		s.buildVersion = v
+	}
+}
+
 // Serve is the entry point for plugin authors. It starts the gRPC plugin server
 // and blocks until the host process terminates the connection.
 //

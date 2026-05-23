@@ -87,6 +87,7 @@ func registerAllIaCProviderServicesWithOpts(s *grpc.Server, provider any, opts I
 		bridge := &iacPluginServiceBridge{
 			grpcSrv:      s,
 			diskManifest: opts.ManifestProvider,
+			buildVersion: opts.BuildVersion,
 		}
 		// Wire the optional grpc_server.go delegate when the caller supplied
 		// any (legacy or typed) module/step providers. Zero-value across all
@@ -205,6 +206,12 @@ type iacPluginServiceBridge struct {
 	grpcSrv      *grpc.Server
 	diskManifest *pluginpkg.PluginManifest
 
+	// buildVersion, when non-empty, overrides diskManifest.Version in the
+	// GetManifest RPC response. Populated from IaCServeOptions.BuildVersion
+	// in registerAllIaCProviderServicesWithOpts. Single-channel precedence:
+	// BuildVersion always wins when set. Closes workflow#758.
+	buildVersion string
+
 	// delegate, when non-nil, handles GetModuleTypes / CreateModule /
 	// InitModule / StartModule / StopModule / DestroyModule / GetStepTypes /
 	// CreateStep / ExecuteStep / DestroyStep by forwarding to grpc_server.go's
@@ -302,17 +309,22 @@ func (b *iacPluginServiceBridge) GetContractRegistry(_ context.Context, _ *empty
 // haven't adopted sdk.EmbedManifest still get clean registration via the
 // engine's manager.go-loaded plugin.json.
 func (b *iacPluginServiceBridge) GetManifest(_ context.Context, _ *emptypb.Empty) (*pb.Manifest, error) {
-	if b.diskManifest == nil {
+	if b.diskManifest == nil && b.buildVersion == "" {
 		return nil, status.Error(codes.Unimplemented, "manifest not embedded; engine falls back to disk plugin.json")
 	}
-	return &pb.Manifest{
-		Name:           b.diskManifest.Name,
-		Version:        b.diskManifest.Version,
-		Author:         b.diskManifest.Author,
-		Description:    b.diskManifest.Description,
-		ConfigMutable:  b.diskManifest.ConfigMutable,
-		SampleCategory: b.diskManifest.SampleCategory,
-	}, nil
+	out := &pb.Manifest{}
+	if b.diskManifest != nil {
+		out.Name = b.diskManifest.Name
+		out.Version = b.diskManifest.Version
+		out.Author = b.diskManifest.Author
+		out.Description = b.diskManifest.Description
+		out.ConfigMutable = b.diskManifest.ConfigMutable
+		out.SampleCategory = b.diskManifest.SampleCategory
+	}
+	if b.buildVersion != "" {
+		out.Version = b.buildVersion
+	}
+	return out, nil
 }
 
 // IaCServeOptions configures the IaC plugin gRPC server entrypoint.
@@ -333,6 +345,14 @@ type IaCServeOptions struct {
 	// engine falls back to its manager.go-loaded plugin.json (workflow plan
 	// Task 1).
 	ManifestProvider *pluginpkg.PluginManifest
+
+	// BuildVersion, when non-empty, overrides any ManifestProvider.Version
+	// in the GetManifest RPC response. Typically populated via
+	// sdk.ResolveBuildVersion(<plugin's ldflag-injected Version var>) so
+	// operator + engine observe the release tag at runtime even when the
+	// committed plugin.json carries a dev sentinel ("0.0.0"). Closes
+	// workflow#758.
+	BuildVersion string
 
 	// Modules supplies plugin-native module providers. When non-nil, the
 	// bridge wires GetModuleTypes / CreateModule / InitModule / StartModule /

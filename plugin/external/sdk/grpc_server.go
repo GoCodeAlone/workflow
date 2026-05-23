@@ -37,6 +37,12 @@ type grpcServer struct {
 	// compile-time embed plugin.json without re-declaring fields in the
 	// PluginProvider implementation. Per workflow ADR-0031.
 	diskManifest *pluginpkg.PluginManifest
+
+	// buildVersion, when non-empty, overrides Version in the GetManifest RPC
+	// response (regardless of whether the underlying source is diskManifest
+	// or provider.Manifest()). Set via sdk.WithBuildVersion — single-channel
+	// precedence: BuildVersion always wins when set. Closes workflow#758.
+	buildVersion string
 }
 
 // newGRPCServer creates a gRPC server implementation wrapping the given provider.
@@ -140,25 +146,31 @@ func (s *grpcSubscriber) Unsubscribe(topic string) error {
 // --- Metadata RPCs ---
 
 func (s *grpcServer) GetManifest(_ context.Context, _ *emptypb.Empty) (*pb.Manifest, error) {
+	var out *pb.Manifest
 	if s.diskManifest != nil {
-		return &pb.Manifest{
+		out = &pb.Manifest{
 			Name:           s.diskManifest.Name,
 			Version:        s.diskManifest.Version,
 			Author:         s.diskManifest.Author,
 			Description:    s.diskManifest.Description,
 			ConfigMutable:  s.diskManifest.ConfigMutable,
 			SampleCategory: s.diskManifest.SampleCategory,
-		}, nil
+		}
+	} else {
+		m := s.provider.Manifest()
+		out = &pb.Manifest{
+			Name:           m.Name,
+			Version:        m.Version,
+			Author:         m.Author,
+			Description:    m.Description,
+			ConfigMutable:  m.ConfigMutable,
+			SampleCategory: m.SampleCategory,
+		}
 	}
-	m := s.provider.Manifest()
-	return &pb.Manifest{
-		Name:           m.Name,
-		Version:        m.Version,
-		Author:         m.Author,
-		Description:    m.Description,
-		ConfigMutable:  m.ConfigMutable,
-		SampleCategory: m.SampleCategory,
-	}, nil
+	if s.buildVersion != "" {
+		out.Version = s.buildVersion
+	}
+	return out, nil
 }
 
 func (s *grpcServer) GetAsset(_ context.Context, req *pb.GetAssetRequest) (*pb.GetAssetResponse, error) {
