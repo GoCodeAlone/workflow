@@ -409,14 +409,15 @@ gh pr merge --squash --admin --delete-branch
 ```bash
 ls .github/workflows/sync-plugin-version.yml && \
 ls .github/workflows/release.yml && \
-ls .goreleaser.yaml && \
-ls cmd/plugin/main.go && \
-grep -q '\-X.*\.Version=' .goreleaser.yaml && \
-grep -q 'sdk.ServeIaCPlugin' cmd/plugin/main.go && \
-gh api repos/GoCodeAlone/workflow-plugin-digitalocean/branches/main/protection -q '.enforce_admins.enabled' | grep -q '^false$' && \
+(ls .goreleaser.yaml || ls .goreleaser.yml) && \
+(MAIN=$(find cmd -name main.go | head -1); [ -n "$MAIN" ] && echo "main: $MAIN") && \
+grep -qE '\-X.*\.Version=' .goreleaser.yaml .goreleaser.yml 2>/dev/null && \
+grep -qE 'sdk\.(Serve|ServeIaCPlugin)' $(find cmd -name main.go) && \
+grep -rqE 'var (Version|ProviderVersion)\b' . --include='*.go' && \
+gh api repos/GoCodeAlone/<this-repo>/branches/main/protection -q '.enforce_admins.enabled' | grep -q '^false$' && \
 echo OK || echo FAIL
 ```
-Expected: OK.
+Expected: OK. (Variations per repo: non-IaC uses `sdk.Serve` not `ServeIaCPlugin`; main.go path varies (`cmd/plugin/main.go` vs `cmd/workflow-plugin-<name>/main.go`); Version var may live in `internal` or `provider` package. The audit accepts variance and just verifies presence.)
 
 **Step 2: Apply migration**
 
@@ -455,7 +456,7 @@ Edit `.github/workflows/release.yml` — add at top of `release:` job (before ch
           wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" .
 ```
 
-Add after goreleaser step:
+Add BETWEEN the goreleaser step and the `Publish release (was draft during asset upload)` step (so a verify-fail halts before the draft→public promotion):
 
 ```yaml
       - name: Verify shipped plugin.json carries tag (post-build)
@@ -499,7 +500,12 @@ gh pr merge <N> --squash --admin --delete-branch
 
 ### Task 4: workflow-plugin-aws — pilot Layer 3 per Task 3 template
 
-Same as Task 3 against `workflow-plugin-aws`. Pre-flight audit confirms files exist; per-repo Version var location may differ (AWS uses `cmd/workflow-plugin-aws/main.go` not `cmd/plugin/main.go`); apply same edits to whatever main.go calls `sdk.ServeIaCPlugin`. Verify `.goreleaser.yaml` ldflag points at the right symbol; if AWS uses `provider.ProviderVersion` rather than `internal.Version`, pass that to `ResolveBuildVersion`.
+Same as Task 3 against `workflow-plugin-aws`, with these differences:
+
+- main.go lives at `cmd/workflow-plugin-aws/main.go` (not `cmd/plugin/main.go`).
+- AWS `.goreleaser.yaml` injects BOTH `provider.ProviderVersion` AND `internal.Version`. Check which package-level vars actually exist (`grep -rn 'var \(Version\|ProviderVersion\)' provider/ internal/`). If neither exists, current goreleaser-built binaries silently ship `(devel)` — declare a `var Version = "dev"` in the package the migration will reference (recommend `internal/` for parity with DO).
+- Pass the existing var to `sdk.ResolveBuildVersion(...)`. Migration must add an import for that package in main.go.
+- Pre-flight audit (Step 1) accepts variance.
 
 ### Task 5: workflow-plugin-gcp — pilot Layer 3 per Task 3 template
 
@@ -509,9 +515,22 @@ Same as Task 4 against `workflow-plugin-gcp`.
 
 Same as Task 4 against `workflow-plugin-azure`.
 
-### Task 7: workflow-plugin-github — pilot Layer 3 per Task 3 template
+### Task 7: workflow-plugin-github — pilot Layer 3 per Task 3 template (non-IaC adaptation)
 
-Same as Task 4 against `workflow-plugin-github`. github plugin is non-IaC (uses `sdk.Serve` + `WithManifestProvider`) — adapt main.go to add `sdk.WithBuildVersion(sdk.ResolveBuildVersion(...))` as a ServeOption.
+Same as Task 4 against `workflow-plugin-github`, with these differences:
+
+- github plugin is non-IaC; current main.go calls `sdk.Serve(internal.NewGitHubPlugin())` with NO ServeOption args.
+- Migration changes main.go to:
+
+  ```go
+  sdk.Serve(internal.NewGitHubPlugin(),
+      sdk.WithBuildVersion(sdk.ResolveBuildVersion(internal.Version)),
+  )
+  ```
+
+- If `var Version = "dev"` doesn't yet exist in the package the goreleaser ldflag targets (likely `internal`), add it as part of the migration. Verify by reading `.goreleaser.yaml` ldflag line; e.g. `-X github.com/GoCodeAlone/workflow-plugin-github/internal.Version={{.Version}}` means add `var Version = "dev"` to `internal/`.
+
+- Pre-flight audit (Step 1) accepts `sdk.Serve` per the updated grep `sdk\.(Serve|ServeIaCPlugin)`.
 
 ---
 
@@ -577,3 +596,7 @@ gh issue close 758 --comment "Pilot shipped; follow-up #<N> tracks remaining swe
 ## Pipeline gate at end of plan
 
 This plan executes Layer 1 + Layer 2 + Layer 3 pilot (5 plugins) + follow-up issue + retro autonomously. Layer 3b (remaining 56 plugins) is filed as a follow-up issue requiring separate user authorization based on pilot outcome.
+
+**Hard ordering gate (cycle 4-P1 I2):** Tasks 3-7 (Layer 3 pilot PRs) depend on workflow v0.61.0 being TAGGED + reachable (`gh release view v0.61.0 --repo GoCodeAlone/workflow` returns non-error). Task 1 Step 15 creates that tag immediately after Task 1's PR merges. Layer 3 dispatch MUST wait for that step. Task 2 (workflow-registry) has no such dependency and may run in parallel with Task 1.
+
+**Implementation note for `wfctl plugin validate-contract` rule 4 (cycle 4-P1 I6):** the grep for `sdk.ResolveBuildVersion(` AND (`IaCServeOptions{...BuildVersion:` OR `sdk.WithBuildVersion(`) MUST be whole-file scoped, not line-scoped (gofmt formats multi-line). When a repo has multiple `cmd/**/main.go` binaries, rule 4 PASSES if ANY of them satisfies both patterns (typical: only the plugin's serve binary does; other cmds are operator tools).
