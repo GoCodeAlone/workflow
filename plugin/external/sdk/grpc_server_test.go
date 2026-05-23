@@ -949,6 +949,52 @@ func TestGetManifestFallsBackToProviderWhenNoDisk(t *testing.T) {
 	}
 }
 
+// TestGetManifest_BuildVersionOverridesDiskVersion locks the single-channel
+// precedence rule for workflow#758: when s.buildVersion is non-empty, it
+// overrides diskManifest.Version in the GetManifest response.
+func TestGetManifest_BuildVersionOverridesDiskVersion(t *testing.T) {
+	disk := &pluginpkg.PluginManifest{
+		Name: "p", Version: "1.0.0", Author: "a", Description: "d",
+	}
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "p", Version: "0.0.0"}})
+	s.diskManifest = disk
+	s.buildVersion = "v1.2.3"
+	got, err := s.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Version != "v1.2.3" {
+		t.Errorf("Version = %q, want BuildVersion-augmented v1.2.3", got.Version)
+	}
+	if got.Name != disk.Name {
+		t.Errorf("Name = %q, want %q (other fields unchanged)", got.Name, disk.Name)
+	}
+}
+
+// TestGetManifest_BuildVersionOverridesProviderVersion: when there's no
+// diskManifest, BuildVersion still overrides provider.Manifest().Version.
+func TestGetManifest_BuildVersionOverridesProviderVersion(t *testing.T) {
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "p", Version: "0.0.1"}})
+	s.buildVersion = "v2.0.0"
+	got, err := s.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Version != "v2.0.0" {
+		t.Errorf("Version = %q, want v2.0.0", got.Version)
+	}
+}
+
+// TestWithBuildVersion_OptionSetsField verifies the WithBuildVersion
+// ServeOption properly sets grpcServer.buildVersion.
+func TestWithBuildVersion_OptionSetsField(t *testing.T) {
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "p", Version: "0.0.1"}})
+	WithBuildVersion("v3.1.4")(s)
+	if s.buildVersion != "v3.1.4" {
+		t.Errorf("buildVersion = %q, want v3.1.4", s.buildVersion)
+	}
+}
+
 // detectContentType maps common extensions to MIME types.
 func detectContentType(path string) string {
 	switch {
