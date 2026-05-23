@@ -171,7 +171,7 @@ func scanMainGoFilesForContract(dir string) (mainFound, satisfies bool) {
 	if info, err := os.Stat(cmdDir); err == nil && info.IsDir() {
 		_ = filepath.Walk(cmdDir, func(path string, fi os.FileInfo, werr error) error {
 			if werr != nil {
-				return nil
+				return werr
 			}
 			if fi.IsDir() {
 				return nil
