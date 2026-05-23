@@ -17,7 +17,7 @@
 ## Scope Manifest
 
 **PR Count:** 26
-**Tasks:** 27
+**Tasks:** 29
 **Estimated Lines of Change:** ~1500 across all PRs (informational; not enforced)
 
 **Out of scope:**
@@ -487,43 +487,65 @@ gh pr create --title "chore(release): direct-push + tag-gate + ldflag wiring (wo
 
 ### Tasks 7-19: Public plugin repos (direct-push variant)
 
-Each task is a structural clone of Task 6 against one of:
+Each task is a structural clone of Task 6 against the listed repo. Pre-flight verification per repo: ldflag present in `.goreleaser.yaml`; `sdk.ServeIaCPlugin` (or `sdk.Serve`) in `cmd/plugin/main.go` (or equivalent); branch protection `enforce_admins: false`. If any check fails, switch that repo to the auto-merge variant (Task 20's template).
 
-| Task | Repo | Notes |
-|---|---|---|
-| 7 | workflow-plugin-aws | per Task-6 template |
-| 8 | workflow-plugin-azure | per Task-6 template |
-| 9 | workflow-plugin-gcp | per Task-6 template |
-| 10 | workflow-plugin-tofu | per Task-6 template |
-| 11 | workflow-plugin-ci-generator | per Task-6 template |
-| 12 | workflow-plugin-agent | per Task-6 template; may use `sdk.Serve` (non-IaC) — adapt to `WithBuildVersion` option (Task 2's mirror on sdk.Serve if added) |
-| 13 | workflow-plugin-auth | per Task-6 template |
-| 14 | workflow-plugin-authz | per Task-6 template |
-| 15 | workflow-plugin-cms | per Task-6 template |
-| 16 | workflow-plugin-compute | per Task-6 template |
-| 17 | workflow-plugin-edge-compute | per Task-6 template |
-| 18 | workflow-plugin-github | per Task-6 template |
-| 19 | workflow-plugin-payments | per Task-6 template |
+### Task 7: workflow-plugin-aws — direct-push variant per Task 6
 
-Pre-flight verify gates (ldflag, main.go pattern, branch-protection enforce_admins=false) per repo before applying the Task-6 template. If branch protection forbids direct push, switch that repo to the auto-merge variant (Task 20's template).
+Same template as Task 6 applied to workflow-plugin-aws. Verify ldflag, main.go pattern, enforce_admins=false pre-flight. Same files, same commit shape.
+
+### Task 8: workflow-plugin-azure — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-azure.
+
+### Task 9: workflow-plugin-gcp — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-gcp.
+
+### Task 10: workflow-plugin-tofu — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-tofu.
+
+### Task 11: workflow-plugin-ci-generator — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-ci-generator.
+
+### Task 12: workflow-plugin-agent — direct-push variant per Task 6 (non-IaC adaptation)
+
+Same as Task 7 against workflow-plugin-agent. Agent plugin uses `sdk.Serve` (non-IaC); adapt the main.go update to `sdk.Serve(srv, sdk.WithBuildVersion(sdk.ResolveBuildVersion(internal.Version)))` if Task 2's `WithBuildVersion` option lands on sdk.Serve. If sdk.Serve doesn't yet have the option, file a follow-up before this task ships.
+
+### Task 13: workflow-plugin-auth — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-auth.
+
+### Task 14: workflow-plugin-authz — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-authz.
+
+### Task 15: workflow-plugin-cms — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-cms.
+
+### Task 16: workflow-plugin-compute — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-compute.
+
+### Task 17: workflow-plugin-edge-compute — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-edge-compute.
+
+### Task 18: workflow-plugin-github — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-github.
+
+### Task 19: workflow-plugin-payments — direct-push variant per Task 6
+
+Same as Task 7 against workflow-plugin-payments.
 
 ---
 
 ### Tasks 20-28: Private plugin repos (auto-merge variant)
 
 Per cycle-3 design: private plugins use the auto-merge variant for sync-plugin-version.yml — workflow opens PR + immediately runs `gh pr merge --admin --auto --squash --delete-branch`. The PR exists for audit history; no human in the merge queue.
-
-| Task | Repo |
-|---|---|
-| 20 | workflow-plugin-admin |
-| 21 | workflow-plugin-authz-ui |
-| 22 | workflow-plugin-bento |
-| 23 | workflow-plugin-cloud-ui |
-| 24 | workflow-plugin-data-protection |
-| 25 | workflow-plugin-sandbox |
-| 26 | workflow-plugin-security |
-| 27 | workflow-plugin-supply-chain |
-| 28 | workflow-plugin-waf |
 
 Auto-merge variant: after `gh pr create`:
 
@@ -536,6 +558,42 @@ Auto-merge variant: after `gh pr create`:
 ```
 
 All other steps (tag-gate, check-plugin-contract.sh, main.go update, plugin.json minEngineVersion bump) identical to Task 6.
+
+### Task 20: workflow-plugin-admin — auto-merge variant per template above
+
+Same as Task 6 but with auto-merge sync. Verify ldflag + main.go pre-flight.
+
+### Task 21: workflow-plugin-authz-ui — auto-merge variant per template above
+
+Same as Task 20 against workflow-plugin-authz-ui.
+
+### Task 22: workflow-plugin-bento — auto-merge variant per template above
+
+Same as Task 20 against workflow-plugin-bento.
+
+### Task 23: workflow-plugin-cloud-ui — auto-merge variant per template above
+
+Same as Task 20 against workflow-plugin-cloud-ui.
+
+### Task 24: workflow-plugin-data-protection — auto-merge variant per template above
+
+Same as Task 20 against workflow-plugin-data-protection.
+
+### Task 25: workflow-plugin-sandbox — auto-merge variant per template above
+
+Same as Task 20 against workflow-plugin-sandbox.
+
+### Task 26: workflow-plugin-security — auto-merge variant per template above
+
+Same as Task 20 against workflow-plugin-security.
+
+### Task 27: workflow-plugin-supply-chain — auto-merge variant per template above
+
+Same as Task 20 against workflow-plugin-supply-chain.
+
+### Task 28: workflow-plugin-waf — auto-merge variant per template above
+
+Same as Task 20 against workflow-plugin-waf.
 
 ---
 
