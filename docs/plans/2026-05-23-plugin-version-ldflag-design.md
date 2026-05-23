@@ -1,7 +1,7 @@
-# Plugin version sync hardening + publish-tag semver gate — design
+# Plugin version sync hardening + ldflag contract + publish-tag semver gate — design
 
 Issue: GoCodeAlone/workflow#758
-Date: 2026-05-23 (cycle 2 — pivoted per adversarial cycle 1)
+Date: 2026-05-23 (cycle 3 — restored ldflag contract piece per cycle-2 NC1/NC2)
 Mode: design-only handoff (autonomous brainstorm; user is away)
 
 ## Problem
@@ -46,43 +46,132 @@ Add a first step in `release.yml`:
 - name: Validate tag is strict semver
   run: |
     TAG="${{ github.ref_name }}"
-    if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)(\.[0-9]+)?)?$ ]]; then
-      echo "::error::Tag $TAG is not strict semver (allowed: vN.N.N or vN.N.N-{alpha|beta|rc}[.N])"
+    # Allow both -rc1 (no dot, k8s/Go convention) and -rc.1 (semver-canonical).
+    if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.?[0-9]+)?$ ]]; then
+      echo "::error::Tag $TAG is not a release-grade semver (allowed: vN.N.N or vN.N.N-(alpha|beta|rc)[.]N)"
       exit 1
     fi
 ```
 
-The whitelist `alpha|beta|rc` is narrow on purpose (cycle 1 I4 finding): bare semver pre-release syntax (`-feat-foo.deadbeef`) satisfies semver but is exactly what we want to reject from publish. If teams need a different pre-release vocabulary, the regex is the place to change it (single line).
+The whitelist `alpha|beta|rc` is narrow on purpose (cycle 1 I4 finding): bare semver pre-release syntax (`-feat-foo.deadbeef`) satisfies semver but is exactly what we want to reject from publish. The optional `\.?` between `rc` and the digit accommodates both `v1.2.3-rc1` and `v1.2.3-rc.1` (cycle-2 NI1). If teams need a different pre-release vocabulary, the regex is the place to change it (single line).
+
+**Concurrency safety** (cycle-2 NI2): both this `release.yml` and the `sync-plugin-version.yml` workflow declare:
+
+```yaml
+concurrency:
+  group: plugin-version-sync-${{ github.repository }}
+  cancel-in-progress: false
+```
+
+Two tags fired in quick succession queue serially; the second cannot overwrite an in-flight first. The direct-push variant additionally does `git fetch origin main && git pull --ff-only origin main` before its commit so a concurrent push is detected as a non-fast-forward and fails loudly rather than racing.
 
 Local / branch / test builds via `goreleaser --snapshot` or plain `go build` (which produce `(devel)` / SNAPSHOT tags) are NOT triggered by tag push, so they skip the gate entirely. They install via `wfctl plugin install --local <dir>` which doesn't go through release.yml. That's the answer to "people should be able to generate a plugin from a custom/test branch."
 
-### 3. Independent semver gate in `workflow-registry` ingest
+### 3. Independent semver gate in `workflow-registry` ingest — gates the release tag, not the manifest field
 
-Defense in depth. `workflow-registry/scripts/sync-versions.sh` (or whichever ingest path is canonical — verify before plan) gets the same regex check before accepting a plugin update:
+Defense in depth. `workflow-registry/scripts/sync-versions.sh:125` already calls `gh release view --json tagName` to discover `$latest_tag`. The gate runs against the **tag string** (same source release.yml's gate uses), eliminating cycle-2 NI3's gate-string asymmetry:
 
 ```bash
-TAG="v${manifest_version}"
-if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)(\.[0-9]+)?)?$ ]]; then
-  echo "  REJECT  $plugin_name — manifest version $manifest_version is not strict semver"
+# Validate the upstream release tag, not the manifest's .version field.
+# Same regex as plugin release.yml so both gates fail identically.
+if [[ ! "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.?[0-9]+)?$ ]]; then
+  echo "  REJECT  $plugin_name — upstream release tag $latest_tag is not release-grade semver"
   continue
 fi
 ```
 
-A plugin author who bypasses the release.yml gate (e.g., self-hosted runner, force-push, manual tarball upload) still gets caught at registry sync.
+This catches: (a) plugins that bypass release.yml (self-hosted runner, manual tarball upload), and (b) plugins where the manifest `.version` field has drifted from the tag (older sync-PR mechanism failure, manual edit). Both surfaces are inspected — JSON `.version` continues to be validated by `downloads_match_version` for URL correctness; the tag is independently validated for publishability.
 
-### 4. ldflag version surface (out of cycle-1 scope, kept as future option)
+### 4. Make ldflag-injected runtime version a plugin contract
 
-The runtime-version contract (ldflag → `internal.Version` → GetManifest RPC) already exists in workflow SDK + DO plugin. We don't *change* it here. A future design cycle could collapse the disk `version` field onto the runtime surface — but that requires solving cycle-1's C1/C2/C3 problems first (engine load order, registry URL rewrite, wfctl publish-validation source). Not scoped here.
+Cycle-2 NC1 surfaced that the user's verbatim ask was conditional: *"Removing version tag from json is fine, **but then we need to ensure ldflags version tag as a plugin contract requirement**."* The cycle-2 pivot kept the JSON field (good) but declined the contract requirement (NC1 drift). This piece restores it as a small additive SDK change that does NOT require dropping the JSON field.
+
+Add to `sdk` package:
+
+```go
+// IaCServeOptions adds:
+//   BuildVersion string   // runtime version, typically internal.Version (ldflag-injected)
+
+// ResolveBuildVersion returns the operator-visible build-version string.
+// When declared is non-empty and not a known dev sentinel ("", "dev",
+// "(devel)"), returns declared as-is. Otherwise consults
+// runtime/debug.ReadBuildInfo() and returns a string like
+//   "(devel) [VCS-branch @ shortsha]"
+// when VCS info is available, else "(devel)".
+//
+// This is the supported contract surface for plugin authors to plumb their
+// goreleaser-injected version into GetManifest in a way that also degrades
+// gracefully for local/test builds — addressing the user's stated branch-
+// build-test-nature requirement (workflow#758 cycle-2 NC2).
+func ResolveBuildVersion(declared string) string { ... }
+```
+
+Plugin authors then write:
+
+```go
+// cmd/plugin/main.go
+sdk.ServeIaCPlugin(internal.NewIaCServer(), sdk.IaCServeOptions{
+    BuildVersion: sdk.ResolveBuildVersion(internal.Version),
+})
+```
+
+`internal.Version` already exists in every plugin (set by `-X internal.Version=...` ldflag). For tagged release builds, the resolved string is the canonical semver (e.g. `v1.2.3`). For test/branch builds, it's `(devel) [feat/foo @ abc1234]` — operator-visible, branch-nature reflected, never accidentally publishable.
+
+Engine `iacPluginServiceBridge.GetManifest` (currently at `plugin/external/sdk/iacserver.go:300-312`) augments its returned Manifest.Version: if `BuildVersion` is non-empty, use it; else fall back to `diskManifest.Version` (existing behavior). The engine continues to log the disk Version at load time AND the runtime BuildVersion when they differ, so any drift is visible without being fatal.
+
+**Contract enforcement** (not engine-side; plugin-author-side via lint):
+- `docs/PLUGIN_RELEASE_GATES.md` documents the convention.
+- Add `scripts/check-plugin-contract.sh` to the workflow repo. The script greps a plugin repo's `.goreleaser.yaml` for `-X .*Version=` and its `cmd/plugin/main.go` (or equivalent) for `sdk.ResolveBuildVersion(`. Each plugin's `release.yml` runs this script as a first step.
+- Verifier failure exits non-zero with a clear "missing ldflag contract" error and a link to the convention doc. The contract is enforced at release time, not engine load time — a stricter check would block legacy plugins.
 
 ## Migration plan
 
-Each plugin repo is independent.
+Each plugin repo is independent. The audit (cycle-2 NI4 — user explicitly asked for it) is **in scope** below.
 
-1. **workflow (PR 1, this repo):** no engine changes. Add a `release.yml` snippet template + document in `docs/PLUGIN_RELEASE_GATES.md`. Optionally: small wfctl helper `wfctl plugin validate-tag <vX.Y.Z>` that runs the regex (operator convenience).
-2. **workflow-registry (PR 2):** add the semver gate in `scripts/sync-versions.sh`. Reject malformed versions with clear errors.
-3. **Per-plugin migration PR (N repos):** update local `sync-plugin-version.yml` to direct-push-to-main (or auto-merge variant), AND add the tag-format gate step to local `release.yml`. Each PR is ~10 lines, isolated, individually mergeable. Same PR can also remove any stale `chore: sync plugin.json version to v…` history-trash if desired (out of scope).
+1. **workflow (PR 1, this repo):** add `sdk.ResolveBuildVersion` + `IaCServeOptions.BuildVersion` (§4); engine-side `iacPluginServiceBridge.GetManifest` prefers BuildVersion when set, logs disk-vs-runtime divergence. Add `scripts/check-plugin-contract.sh`. Document in new `docs/PLUGIN_RELEASE_GATES.md`. No removal of existing fields. Tag workflow v0.61.0.
+2. **workflow-registry (PR 2):** add the tag-string regex gate in `scripts/sync-versions.sh` (§3). Reject malformed versions with clear errors.
+3. **Per-plugin migration PR (N repos):** in each plugin repo:
+   - Replace `sync-plugin-version.yml`'s `gh pr create` with direct-push-to-main (or auto-merge variant if branch protection forbids direct push). Add `concurrency:` group.
+   - Add tag-format gate step to `release.yml`. Add `concurrency:` group. Add `scripts/check-plugin-contract.sh` invocation as the first build step.
+   - Update `cmd/plugin/main.go` (or equivalent) to call `sdk.ServeIaCPlugin(srv, sdk.IaCServeOptions{BuildVersion: sdk.ResolveBuildVersion(internal.Version)})`.
+   - Verify `.goreleaser.yaml` has `-X internal.Version=...` (most do; verify per repo).
+   - Bump `minEngineVersion` to `0.61.0` so older engines that don't support BuildVersion-aware GetManifest fall back to disk Version gracefully (which is still present and correct).
+   - Tag next minor for the plugin.
 
-The migration order is workflow → registry → plugins. Plugin migrations can run in parallel.
+Each plugin PR is ~30 lines across 3 files. Individually reviewable + mergeable.
+
+**Plugin audit inventory** (per workspace memory + DO plugin's actual layout):
+
+| Repo | Source | sync-plugin-version.yml? | ldflag wiring? | Variant |
+|---|---|---|---|---|
+| workflow-plugin-admin | private | Y | needs verify | auto-merge |
+| workflow-plugin-agent | public | Y | needs verify | direct-push |
+| workflow-plugin-auth | public | Y | needs verify | direct-push |
+| workflow-plugin-authz | public | Y | needs verify | direct-push |
+| workflow-plugin-authz-ui | private | Y | needs verify | auto-merge |
+| workflow-plugin-aws | public | Y | needs verify | direct-push |
+| workflow-plugin-azure | public | Y | needs verify | direct-push |
+| workflow-plugin-bento | private | Y | needs verify | auto-merge |
+| workflow-plugin-ci-generator | public | Y | needs verify | direct-push |
+| workflow-plugin-cloud-ui | private | Y | needs verify | auto-merge |
+| workflow-plugin-cms | public | Y | needs verify | direct-push |
+| workflow-plugin-compute | public | Y | needs verify | direct-push |
+| workflow-plugin-data-protection | private | Y | needs verify | auto-merge |
+| workflow-plugin-digitalocean | public | Y | YES (verified) | direct-push |
+| workflow-plugin-edge-compute | public | Y | needs verify | direct-push |
+| workflow-plugin-edge-risk | public (scenarios) | likely N | likely N | (excluded — contract-only) |
+| workflow-plugin-gcp | public | Y | needs verify | direct-push |
+| workflow-plugin-github | public | Y | needs verify | direct-push |
+| workflow-plugin-payments | public | Y | needs verify | direct-push |
+| workflow-plugin-sandbox | private | Y | needs verify | auto-merge |
+| workflow-plugin-security | private | Y | needs verify | auto-merge |
+| workflow-plugin-supply-chain | private | Y | needs verify | auto-merge |
+| workflow-plugin-tofu | public | Y | needs verify | direct-push |
+| workflow-plugin-waf | private | Y | needs verify | auto-merge |
+
+The first per-repo migration PR includes the verification: does `sync-plugin-version.yml` exist; does goreleaser have the ldflag; does main.go currently call `sdk.ServeIaCPlugin` (or another `Serve` variant). Plan task per repo enumerates these gates.
+
+The migration order is workflow → registry → plugins. Plugin migrations can run in parallel (24 PRs, each ~30 lines).
 
 ## Verified API surface
 
@@ -122,8 +211,16 @@ Cross-repo rollback risk: very low. None of the changes break the engine/SDK con
 - Dropping `plugin.json.version` field entirely (deferred; needs solving cycle-1 C1/C2/C3 in a separate design).
 - Replacing goreleaser.
 - Cleaning up the existing 13 stale sync PRs (already done manually 2026-05-23).
-- Auditing private plugins (a separate sweep PR per repo; mechanical; can be batched).
-- Changing how plugins surface their runtime version via gRPC (existing ldflag-based path stays unchanged).
+- Changing the engine's pre-spawn `LoadManifest+Validate` semantics (cycle-1 C1 untouched).
+
+## Adversarial cycle 2 — addressed
+
+- NC1 (ldflag not a contract requirement; user-intent drift): **addressed** — §4 adds `sdk.ResolveBuildVersion` + `IaCServeOptions.BuildVersion` SDK contract surface + `scripts/check-plugin-contract.sh` lint enforced in each plugin's release.yml.
+- NC2 (branch/test build version-string surface): **addressed** — §4's `ResolveBuildVersion` consults `runtime/debug.ReadBuildInfo()` for local/test builds; reports `(devel) [feat/foo @ shortsha]` so operator + engine + log all show branch nature.
+- NI1 (regex too narrow for `rc1`/`alpha1`): **addressed** — §2 regex updated to `(alpha|beta|rc)\.?[0-9]+` accepting both `rc1` (k8s/Go convention) and `rc.1` (semver-canonical).
+- NI2 (concurrent two-tag race): **addressed** — §2 mandates `concurrency:` group on both release.yml + sync-plugin-version.yml; direct-push variant does `git fetch origin main && git pull --ff-only` before commit so concurrent pushes fail loudly.
+- NI3 (gate-string asymmetry between release.yml and registry): **addressed** — §3 registry gate now validates the **tag string** (same source as release.yml's gate), not the manifest's `.version` field; eliminates divergence.
+- NI4 (per-plugin audit deferred to out-of-scope despite user request): **addressed** — Migration plan §3 now contains a 24-row plugin audit table; per-repo migration PR includes verification steps; private vs public + variant choice (direct-push vs auto-merge) enumerated.
 
 ## Decision points reserved for user return
 
