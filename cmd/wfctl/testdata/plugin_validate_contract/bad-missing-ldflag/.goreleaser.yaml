@@ -1,0 +1,5 @@
+version: 2
+builds:
+  - id: test
+    ldflags:
+      - -s -w
