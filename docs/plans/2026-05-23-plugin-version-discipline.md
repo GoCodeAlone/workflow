@@ -16,6 +16,8 @@
 
 **PR Count:** 9
 **Tasks:** 9
+
+(Note: PR 8 is a no-PR row — it produces a follow-up issue only. Effective code/doc PRs = 8.)
 **Estimated Lines of Change:** ~1200 across all PRs
 
 **Out of scope:**
@@ -277,6 +279,8 @@ func TestGRPCServer_GetManifest_BuildVersionOverridesDiskVersion(t *testing.T) {
 ```
 
 **Step 9: Add `wfctl plugin validate-contract` subcommand**
+
+Tag source precedence for `--for-publish` (check 6): explicit `--tag <vX.Y.Z>` flag > `$GITHUB_REF_NAME` env (set automatically in GitHub Actions on tag push) > `git describe --tags --exact-match HEAD` (local dev fallback). Test fixtures must exercise both `--tag` and `GITHUB_REF_NAME` paths.
 
 `cmd/wfctl/plugin_validate_contract.go`: new subcommand implementing the §3 design checks. Flags: `--for-publish`, `--tag`, `--release-dir`. Checks:
 1. plugin.json exists + parses + Validate() OK (sentinel `0.0.0` OK)
