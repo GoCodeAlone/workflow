@@ -1,7 +1,7 @@
 # Plugin version discipline: delete sync mechanism + wfctl contract gate — design
 
 Issue: GoCodeAlone/workflow#758
-Date: 2026-05-23 (cycle 4-revB — verified ParseSemver behavior; dropped prerelease scope; switched to debug.ReadBuildInfo-only)
+Date: 2026-05-23 (cycle 4-revC — restored ldflag-arg pattern per cycle-A2 N-C1 verifying go-build vs go-install Main.Version behavior; swept §6 vocabulary; matched actual *grpcServer shape)
 Mode: autonomous execution authorized
 
 ## Problem
@@ -42,62 +42,95 @@ Registry sync derives version from tag (`workflow-registry/scripts/sync-versions
 
 ### 2. Plugin contract surface: SDK changes
 
-Goal: plugin binary surfaces its build-injected version through `GetManifest` so engine, operator, and observability tools see runtime-truth (not stale disk sentinel).
+Goal: plugin binary surfaces its build-injected version through `GetManifest` so engine, operator, and observability tools see runtime-truth.
 
-Add to `plugin/external/sdk/iacserver.go`:
+**Cycle 4-A2 N-C1 correction:** goreleaser invokes `go build`, not `go install`. `runtime/debug.ReadBuildInfo().Main.Version` returns a pseudo-version (`v0.0.0-<ts>-<sha>`) or `"(devel)"` for goreleaser-built binaries — NOT the release tag. The ldflag pattern `-X <pkg>.Version={{.Version}}` is the only mechanism that delivers the tag string at runtime. Restore the cycle-3 arg-taking helper.
+
+**Symbol-name variance is accepted.** Plugin authors name ANY package-level var (`internal.Version`, `provider.ProviderVersion`, `main.version`). `wfctl plugin validate-contract` greps the goreleaser config for the ldflag pattern, not a specific symbol path.
+
+Add new file `plugin/external/sdk/buildversion.go`:
 
 ```go
-type IaCServeOptions struct {
-    // ... existing fields ...
-    BuildVersion string
-}
+// ResolveBuildVersion returns the operator-visible build-version string.
+// declared non-empty + not a known dev sentinel → returned as-is (typical
+// for goreleaser-built binaries where the ldflag injects the release tag).
+// Otherwise consults runtime/debug.ReadBuildInfo() as fallback:
+//   - "(devel) [@ shortsha[.dirty]]" when vcs.revision is set
+//   - "(devel)" when no VCS info
+//
+// Intended call sites (plugin author chooses ANY package-level var name):
+//
+//   var Version = "dev"   // somewhere in plugin code; ldflag-injected at release
+//
+//   sdk.ServeIaCPlugin(srv, sdk.IaCServeOptions{
+//       BuildVersion: sdk.ResolveBuildVersion(internal.Version),
+//   })
+//   // OR for non-IaC:
+//   sdk.Serve(p, sdk.WithManifestProvider(m),
+//       sdk.WithBuildVersion(sdk.ResolveBuildVersion(internal.Version)))
+//
+// Goreleaser config provides the tag:
+//   ldflags:
+//     - -X github.com/<...>/internal.Version={{.Version}}
+//
+// Dev sentinels (declared values that trigger BuildInfo fallback): `""`,
+// `"dev"`, `"(devel)"`. Mirrors the pattern wfctl itself uses
+// (cmd/wfctl/main.go:37-50 — `var version = "dev"` with ldflag override
+// primary + BuildInfo fallback secondary).
+func ResolveBuildVersion(declared string) string { ... }
 ```
 
-Add to `plugin/external/sdk/serve.go`:
+Add `BuildVersion string` field to `IaCServeOptions` (current `plugin/external/sdk/iacserver.go:320`).
+
+Add `WithBuildVersion` ServeOption to `plugin/external/sdk/serve.go`. Existing ServeOption shape is `func(*grpcServer)` (verified at `serve.go:16`); add a `buildVersion string` field to the `grpcServer` struct (current `grpc_server.go:21-39` — alongside the existing `diskManifest *pluginpkg.PluginManifest` field):
 
 ```go
-type serveConfig struct {
+// In grpc_server.go's grpcServer struct:
+type grpcServer struct {
     // ... existing fields ...
-    buildVersion string
+    diskManifest *pluginpkg.PluginManifest
+    buildVersion string  // workflow#758: runtime version override via WithBuildVersion
 }
 
+// In serve.go:
 func WithBuildVersion(v string) ServeOption {
-    return func(c *serveConfig) { c.buildVersion = v }
+    return func(s *grpcServer) {
+        s.buildVersion = v
+    }
 }
 ```
 
-Add new file `plugin/external/sdk/buildversion.go` (cycle 4-A1 C3 fix — no-arg helper, no `internal.Version` symbol naming required):
+Single channel: `grpc_server.go:142-162` `GetManifest` body augmented as below; `iacPluginServiceBridge.GetManifest` (`iacserver.go:300-312`) gets the identical augmentation. BuildVersion always wins when non-empty; precedence explicit and unit-tested.
 
 ```go
-// BuildVersion returns the operator-visible build-version string derived
-// from runtime/debug.ReadBuildInfo(). For binaries built via goreleaser or
-// `go install module@v1.2.3`, returns the release version (info.Main.Version).
-// For local `go build` from a worktree, returns "(devel) [@ shortsha[.dirty]]"
-// using vcs.revision + vcs.modified settings. For `go test` or non-VCS
-// builds, returns "(devel)".
-//
-// Intended call sites:
-//   sdk.ServeIaCPlugin(srv, sdk.IaCServeOptions{BuildVersion: sdk.BuildVersion()})
-//   sdk.Serve(p, sdk.WithManifestProvider(m), sdk.WithBuildVersion(sdk.BuildVersion()))
-//
-// No `-X internal.Version=...` ldflag required. Plugin authors do not need
-// to name a specific package-level variable. Mirrors the pattern used by
-// wfctl itself at cmd/wfctl/main.go:45-50.
-func BuildVersion() string { ... }
+// grpc_server.go GetManifest, after existing diskManifest-or-provider branch:
+m := /* existing computed *pb.Manifest from diskManifest or provider.Manifest() */
+if s.buildVersion != "" {
+    m.Version = s.buildVersion
+}
+return m, nil
 ```
 
-Single channel (cycle 4-A1 I4 fix): `iacPluginServiceBridge.GetManifest` (current `plugin/external/sdk/iacserver.go:300`):
-
 ```go
-out := &pb.Manifest{}
-if b.diskManifest != nil { /* existing copy */ }
+// iacserver.go GetManifest, replacing current line 300-312:
+if b.diskManifest == nil {
+    return nil, status.Error(codes.Unimplemented, "manifest not embedded; engine falls back to disk plugin.json")
+}
+out := &pb.Manifest{
+    Name:           b.diskManifest.Name,
+    Version:        b.diskManifest.Version,
+    Author:         b.diskManifest.Author,
+    Description:    b.diskManifest.Description,
+    ConfigMutable:  b.diskManifest.ConfigMutable,
+    SampleCategory: b.diskManifest.SampleCategory,
+}
 if b.buildVersion != "" {
-    out.Version = b.buildVersion  // BuildVersion always wins; precedence explicit + unit-tested
+    out.Version = b.buildVersion
 }
 return out, nil
 ```
 
-`Serve` (non-IaC) bridge identical: `WithBuildVersion` value, when set, overrides any embedded manifest's `.version`. No two-channel ambiguity.
+Add `buildVersion string` field to `iacPluginServiceBridge`; wire from `IaCServeOptions.BuildVersion` at construction in `ServeIaCPlugin`.
 
 Engine-side: optional one-shot warning log in `plugin/external/adapter.go` when post-spawn GetManifest's Version differs from `diskManifest.Version`. Pure observability; no behavior change.
 
@@ -118,28 +151,44 @@ Checks (always):
 1. `<dir>/plugin.json` exists, parses, passes `PluginManifest.Validate()`. Sentinel `0.0.0` allowed (parses cleanly through current ParseSemver; emits "dev sentinel" info note).
 2. `capabilities` populated (non-empty).
 3. `minEngineVersion` populated (parses as semver constraint).
-4. Any `cmd/**/main.go` contains a call to `sdk.BuildVersion(` (the new no-arg helper) OR an existing `sdk.ResolveBuildVersion(`/`sdk.WithBuildVersion(` pattern. Goreleaser ldflag check dropped — `BuildVersion()` uses `runtime/debug.ReadBuildInfo()` which works without ldflag injection.
+4. Any `cmd/**/main.go` (or other Go file under repo root) contains a call to `sdk.ResolveBuildVersion(` AND a `sdk.IaCServeOptions{...BuildVersion:...}` literal OR a `sdk.WithBuildVersion(` call.
+5. Goreleaser config (`.goreleaser.yaml` or `.goreleaser.yml`) at repo root contains an ldflags line matching `-X .*\.Version=` (any package path; e.g. `-X github.com/.../internal.Version={{.Version}}`). This is the mandatory mechanism that delivers the release tag into the binary at build time (cycle 4-A2 N-C1: `debug.ReadBuildInfo` alone returns pseudo-version, not the tag).
 
 Additional checks (`--for-publish`):
 
-5. Tag from `--tag <vX.Y.Z>` flag (if provided) OR from `$GITHUB_REF_NAME` env (if set) OR from `git describe --tags --exact-match HEAD` matches strict-release-semver regex: `^v[0-9]+\.[0-9]+\.[0-9]+$` (cycle 4-A1 C2/I5 fix — no prerelease branch; engine's ParseSemver rejects prereleases, so accepting them in this gate would let unparseable tags through. Prerelease publishing is deferred to a separate design that updates ParseSemver + sync-versions + all consumers in concert).
-6. Committed plugin.json's `.version` is allowed to disagree with `--tag` (dev sentinel is the documented norm; tarball-shipped version is what matters).
+6. Tag from `--tag <vX.Y.Z>` flag (if provided) OR from `$GITHUB_REF_NAME` env (if set) OR from `git describe --tags --exact-match HEAD` matches strict-release-semver regex: `^v[0-9]+\.[0-9]+\.[0-9]+$` (cycle 4-A1 C2/I5 fix — no prerelease branch; engine's ParseSemver rejects prereleases. Prerelease publishing deferred to a separate design that updates ParseSemver + sync-versions + all consumers in concert).
+7. Committed plugin.json's `.version` is allowed to disagree with `--tag` (sentinel `0.0.0` is the documented norm; tarball-shipped version is what matters).
 
 Exit non-zero on any failure with operator-friendly error referencing `docs/PLUGIN_RELEASE_GATES.md`.
 
+**Tarball-postcheck (`--release-dir <path>`, optional):** when invoked with `--release-dir .release` after goreleaser's before-hook has run, additionally asserts `<path>/plugin.json`'s `.version` field equals the `--tag` value (strips leading `v`). This closes cycle 4-A2 N-I3 by giving Layer 3 release.yml a place to run the tarball-invariant assertion. Layer 3 step 8 in §6 below uses this flag.
+
 ### 4. Tag-format gate in each plugin's `release.yml`
 
-First steps of every plugin's release.yml:
+Two steps in every plugin's release.yml — first (pre-build) gates the tag + static contract; second (post-build) verifies the tarball.
 
 ```yaml
+# 1. Pre-build gate: static contract + tag format
 - uses: GoCodeAlone/setup-wfctl@v1
   with:
-    version: v0.61.0  # SHA-pinned via setup-wfctl action's release; bump on workflow release
-- name: Validate plugin contract for publish
+    version: v0.61.0  # bump when workflow ships a new validate-contract iteration
+- name: Validate plugin contract for publish (pre-build)
   run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" .
+
+# 2. (goreleaser runs here, mutating plugin.json in-place or writing .release/plugin.json)
+
+# 3. Post-build gate: tarball carries the tag
+- name: Verify shipped plugin.json carries tag (post-build)
+  run: |
+    # Find shipped plugin.json (goreleaser pattern variance: in-place or .release/)
+    if [ -f .release/plugin.json ]; then
+      wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" --release-dir .release .
+    else
+      wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" --release-dir . .
+    fi
 ```
 
-Malformed tag or incomplete contract → release halts before goreleaser runs. No bypass mechanism.
+Malformed tag, incomplete contract, or tarball-without-tag → release halts before publish.
 
 ### 5. Registry-side semver gate (defense in depth)
 
@@ -160,12 +209,13 @@ Catches plugins that bypass release.yml (self-hosted runner, manual tarball, for
 - **Layer 2 (workflow-registry repo, single PR)**: tag-string semver gate in `sync-versions.sh` (§5). Can ship in parallel with Layer 1.
 - **Layer 3 (per-plugin PRs, parallel)**: in each plugin repo with a release pipeline today:
   1. `git rm .github/workflows/sync-plugin-version.yml`
-  2. Add tag-format gate step to `.github/workflows/release.yml` per §4
-  3. Update plugin main.go (or equivalent) to pass `sdk.ResolveBuildVersion(internal.Version)` to `IaCServeOptions.BuildVersion` or `WithBuildVersion`
-  4. Set `plugin.json.version` to `"v0.0.0-dev"` (sentinel)
-  5. Verify `.goreleaser.yaml` has `-X .*\.Version=` (most do; verify per repo)
-  6. Local: `wfctl plugin validate-contract .` must pass before opening PR
-  7. Open PR, CI must pass, admin-merge
+  2. Add pre-build + post-build gate steps to `.github/workflows/release.yml` per §4
+  3. Update plugin main.go (or equivalent — any Go file under repo root that calls `sdk.ServeIaCPlugin`/`sdk.Serve`) to pass `sdk.ResolveBuildVersion(<plugin's existing Version var>)` to `IaCServeOptions.BuildVersion` or `WithBuildVersion`. The "Version var" name varies per repo (DO: `internal.Version`; AWS: `provider.ProviderVersion`; etc.); use whichever already exists. If no such var exists yet, add `var Version = "dev"` in the package the goreleaser ldflag targets (per `.goreleaser.yaml`).
+  4. Set `plugin.json.version` to `"0.0.0"` (sentinel — flat M.m.p that ParseSemver accepts; cycle 4-A1 C1 fix)
+  5. Verify `.goreleaser.yaml` has an ldflag line matching `-X .*\.Version=` (most do; verify per repo; the cycle-3 audit table covers this for DO, AWS, others)
+  6. Local: `wfctl plugin validate-contract .` must pass (covers contract rules 1-5 from §3)
+  7. Open PR; CI runs `wfctl plugin validate-contract .` again (rule 1-5); on tag push, release.yml's pre-build + post-build gates fire
+  8. Admin-merge after CI green
 
 Each Layer 3 PR is independent and can run in parallel via per-repo worktree-isolated agents.
 
@@ -216,6 +266,14 @@ No live infra validation required for this PR set.
 - Engine-side hard-blocking minEngineVersion mismatches (existing soft-warn behavior is fine).
 - Full SemVer 2.0.0 pre-release tag support (requires concerted ParseSemver + sync-versions + wfctl install update; deferred to separate design).
 - Binary-vs-file capability freshness gate at contract-check time (cycle 4-A1 I3; deferred to separate design).
+
+## Cycle 4-A2 — addressed
+
+- N-C1 (debug.ReadBuildInfo returns pseudo-version, not tag, for goreleaser-built binaries): **addressed** — restored `sdk.ResolveBuildVersion(declared string)` arg-taking helper; goreleaser ldflag mandatory in contract-check rule 5; symbol-name variance accepted (validate-contract greps `.goreleaser.yaml` for ldflag pattern, not a specific Go symbol).
+- N-C2 (§6 inconsistent vocabulary): **addressed** — §6 swept; sentinel `0.0.0` everywhere, `ResolveBuildVersion(declared)` everywhere, ldflag verify present, Version-var-name flexibility documented.
+- N-I1 (serveConfig struct doesn't exist): **addressed** — design now references actual `*grpcServer` struct + adds `buildVersion string` field there directly (mirroring existing `diskManifest *pluginpkg.PluginManifest` pattern at `grpc_server.go:39`).
+- N-I2 (Serve-path precedence shown only in prose): **addressed** — explicit GetManifest code block for both `grpc_server.go` (non-IaC) and `iacserver.go` (IaC) shown in §2, both demonstrating single-channel "BuildVersion wins when non-empty" precedence.
+- N-I3 (no tarball-postcheck step): **addressed** — `wfctl plugin validate-contract --release-dir <path>` flag added; Layer 3 release.yml gains a post-goreleaser verification step asserting `.release/plugin.json` or in-place plugin.json carries the tag.
 
 ## Cycle 4-A1 — addressed
 
