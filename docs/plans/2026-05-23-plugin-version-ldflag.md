@@ -625,3 +625,28 @@ gh issue close 758 --comment "Shipped per docs/retros/2026-05-NN-workflow-758-pl
 ## Pipeline gate at end of plan
 
 **This plan is design-only mode.** After adversarial-design-review (plan phase) PASS + alignment-check PASS + scope-lock applied, the pipeline STOPS. The cross-repo execution (Tasks 5-28) requires explicit user authorization on return. Task 1-4 (workflow SDK PR) and Task 29 (retro) can be authorized independently of the multi-plugin sweep.
+
+## Plan adversarial cycle 1 — FAIL, user authorization required for rework
+
+Cycle 1 adversarial review surfaced **6 Critical + 9 Important findings** that make the plan-as-written unbuildable. Key findings (full report in chat session transcript):
+
+- **C1 (audit factually wrong):** filesystem inventory shows 8 of 23 listed plugin repos lack `sync-plugin-version.yml` / `release.yml` / `.goreleaser.yaml` / `main.go`: agent (no main — library), cms, compute, cloud-ui (no main), data-protection (no main), edge-compute, sandbox (no main), waf (no main). Tasks 12, 15, 16, 17, 21, 23, 24, 25, 28 operate on files that do not exist.
+- **C2 (hardcoded path):** plan assumes `cmd/plugin/main.go` universal layout. Actual layout is `cmd/workflow-plugin-<name>/main.go` for aws/azure/gcp/auth/authz/cms/github/payments/admin (9 repos).
+- **C3 (SDK gap):** `sdk.Serve` (used by non-IaC plugins) has no `WithBuildVersion` ServeOption. Task 2 only modifies `IaCServeOptions`. Non-IaC plugin contracts cannot be reached without expanding Task 2.
+- **C4 (supply-chain footgun):** Task 4's `curl https://raw.githubusercontent.com/.../main/scripts/check-plugin-contract.sh | bash` from each plugin's release.yml fetches unsigned, unpinned script from `main` branch. Vendor the script per-repo or SHA-pin.
+- **C5 (branch-nature unmet on test path):** `runtime/debug.ReadBuildInfo()` returns no `vcs.*` settings during `go test`, so `ResolveBuildVersion("")` returns bare `"(devel)"`. User said "reflect branch name OR something"; SHA suffix only fires for `go build` non-test contexts. Either explicit goreleaser-time `-X internal.Branch=$(git rev-parse --abbrev-ref HEAD)` injection OR honest scope-limitation note in the design.
+- **C6 (Task 2 wiring underspecified):** prose says "wire through ServeIaCPlugin initialization" — no diff line. `delegate` branch construction path not addressed.
+
+Additional Important findings: tooling decision creep in Task 5 (bats/shellspec), existing permissive tag-gate in DO sync-plugin-version.yml not acknowledged as being replaced, token swap GITHUB_TOKEN→RELEASES_TOKEN unjustified, per-PR bundling violates feedback_implementer_scope_bleed, minEngineVersion bump is soft-warn (R4 over-stated), prose-vs-YAML mismatch on `--auto` flag, no post-rollout gate-fires verification, Task 3 test underspecified, --delete-branch caveat from feedback_stacked_pr_squash_merge_auto_close not noted.
+
+**Rework direction (recommended on user return):**
+
+1. Run a real filesystem audit (per-repo `ls .github/workflows/`, `find . -name main.go`, `grep -l 'goreleaser' .goreleaser.*`) and rebuild the 23-row audit table against ground truth. Drop the ~8 repos lacking a release pipeline; file follow-ups for them as separate "establish release pipeline" work.
+2. Generalize the main.go path discovery in Task 6 (templating or per-task explicit paths).
+3. Expand Task 2 to also add `sdk.WithBuildVersion(string) sdk.ServeOption` for sdk.Serve callers.
+4. Replace Task 4's curl|bash with either (a) per-plugin committed copy of the lint script, or (b) a setup-action SHA-pinned to workflow's release tag.
+5. Decide between (a) explicit goreleaser-time `internal.Branch` ldflag, or (b) documenting "branch-nature surface is best-effort and SHA-only outside CI builds."
+6. Spell out Task 2's bridge constructor wiring as a literal diff.
+7. Address I1-I9 in the same revision.
+
+**Pausing here.** The plan's rebuild crosses the user-intent line (which repos to include is a scope decision that affects the entire migration shape). Execution authorization on return.
