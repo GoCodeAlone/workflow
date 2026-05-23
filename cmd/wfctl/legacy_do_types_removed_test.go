@@ -45,7 +45,7 @@ func TestValidateFile_LegacyDOModule_ReturnsActionableError(t *testing.T) {
 	if err := os.WriteFile(cfgPath, yamlContent, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := validateFile(cfgPath, false, false, false)
+	err := validateFile(cfgPath, false, false, false, false)
 	if err == nil {
 		t.Fatal("expected error for legacy DO module type")
 	}

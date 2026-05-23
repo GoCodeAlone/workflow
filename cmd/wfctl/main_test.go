@@ -354,7 +354,7 @@ triggers:
 `
 	path := writeTestConfig(t, dir, "snake.yaml", snakeCaseConfig)
 	// validateFile returns the detailed error; runValidate returns a summary
-	err := validateFile(path, false, false, false)
+	err := validateFile(path, false, false, false, false)
 	if err == nil {
 		t.Fatal("expected error for snake_case config field")
 	}

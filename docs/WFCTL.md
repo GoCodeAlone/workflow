@@ -428,6 +428,8 @@ wfctl validate [options] <config.yaml> [config2.yaml ...]
 | `-allow-no-entry-points` | `false` | Allow configs with no triggers, routes, subscriptions, or jobs |
 | `-dir` | _(none)_ | Validate all `.yaml`/`.yml` files in a directory (recursive) |
 | `-plugin-dir` | _(none)_ | Directory of installed external plugins; their types are loaded before validation |
+| `-plugin-manifest` | _(none)_ | Path to a `plugin.json` file, a directory containing one, or a directory of plugin checkouts. Repeatable. Loaded before validation so the manifest's module/step/trigger types are recognized. |
+| `-no-resolve-plugins` | `false` | Disable automatic resolution of `requires.plugins[]` against sibling/ancestor checkouts of the config file |
 
 **Examples:**
 
@@ -438,10 +440,22 @@ wfctl validate --dir ./example/
 wfctl validate --loose legacy/config.yaml
 wfctl validate --skip-unknown-types example/*.yaml
 wfctl validate --plugin-dir data/plugins config.yaml
+wfctl validate --plugin-manifest ../workflow-plugin-foo config.yaml
+wfctl validate --plugin-manifest ../workflow-plugin-foo/plugin.json config.yaml
 ```
 
 Use `wfctl config validate` for `wfctl.yaml` and `.wfctl-lock.yaml`; this
 command validates runtime Workflow configs such as `workflow.yaml`.
+
+**Local plugin resolution.** When a config declares `requires.plugins[]`,
+`wfctl validate` automatically searches sibling and ancestor directories of the
+config file for a matching `plugin.json` so scenario or sample repositories can
+be validated without installing every referenced plugin into a registry first.
+Each plugin name is looked up at `<dir>/<name>/plugin.json`,
+`<dir>/plugins/<name>/plugin.json`, and `<dir>/providers/<name>/plugin.json`,
+walking up to three parent directories above the config file. Use
+`--plugin-manifest` for an explicit override or `--no-resolve-plugins` to
+disable the search entirely.
 
 When validating multiple files, a summary is printed:
 ```

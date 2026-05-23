@@ -25,6 +25,9 @@ func runValidate(args []string) error {
 	allowNoEntryPoints := fs.Bool("allow-no-entry-points", false, "Allow configs with no entry points (triggers, routes, subscriptions, jobs)")
 	dir := fs.String("dir", "", "Validate all .yaml/.yml files in a directory (recursive)")
 	pluginDir := fs.String("plugin-dir", "", "Directory of installed external plugins; their types are loaded before validation")
+	var pluginManifests stringSliceFlag
+	fs.Var(&pluginManifests, "plugin-manifest", "Path to a plugin.json file, or a directory containing one (or one level of subdirs that do). Repeatable. Loaded before validation so the declared types pass.")
+	noAutoResolve := fs.Bool("no-resolve-plugins", false, "Disable auto-resolution of requires.plugins[] against sibling/ancestor checkouts")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl validate [options] <config.yaml> [config2.yaml ...]
 
@@ -37,6 +40,8 @@ Examples:
   wfctl validate --loose legacy/config.yaml
   wfctl validate --skip-unknown-types example/*.yaml
   wfctl validate --plugin-dir data/plugins config.yaml
+  wfctl validate --plugin-manifest ../workflow-plugin-foo config.yaml
+  wfctl validate --plugin-manifest ../workflow-plugin-foo/plugin.json config.yaml
 
 Options:
 `)
@@ -61,6 +66,11 @@ Options:
 			return fmt.Errorf("failed to load plugins from %s: %w", *pluginDir, err)
 		}
 		schema.LoadPluginStepSchemasFromDir(*pluginDir)
+	}
+	for _, manifest := range pluginManifests {
+		if err := loadPluginManifestPath(manifest); err != nil {
+			return err
+		}
 	}
 
 	// Collect files to validate
@@ -95,7 +105,7 @@ Options:
 	)
 
 	for _, f := range files {
-		if err := validateFile(f, *strict, *skipUnknownTypes, *allowNoEntryPoints); err != nil {
+		if err := validateFile(f, *strict, *skipUnknownTypes, *allowNoEntryPoints, !*noAutoResolve); err != nil {
 			failed++
 			errors = append(errors, fmt.Sprintf("  FAIL %s\n       %s", f, indentError(err)))
 		} else {
@@ -134,7 +144,7 @@ func indentErrorMessage(message string) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
-func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints bool) error {
+func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, autoResolvePlugins bool) error {
 	// Read raw YAML to extract imports list for verbose feedback.
 	imports := extractImports(cfgPath)
 	if isLikelyWfctlProjectManifest(cfgPath) {
@@ -148,6 +158,10 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 
 	if len(imports) > 0 {
 		fmt.Fprintf(os.Stderr, "  Resolved %d import(s): %s\n", len(imports), strings.Join(imports, ", "))
+	}
+
+	if autoResolvePlugins && cfg.Requires != nil {
+		autoResolveRequiredPlugins(cfgPath, cfg.Requires.Plugins)
 	}
 
 	var opts []schema.ValidationOption
@@ -365,10 +379,11 @@ func reorderFlags(args []string) []string {
 	var flags, positional []string
 	// flags that take a value argument (not self-contained with "=")
 	valueFlagNames := map[string]bool{
-		"dir":        true,
-		"lock-file":  true,
-		"manifest":   true,
-		"plugin-dir": true,
+		"dir":             true,
+		"lock-file":       true,
+		"manifest":        true,
+		"plugin-dir":      true,
+		"plugin-manifest": true,
 	}
 	for i := 0; i < len(args); i++ {
 		if strings.HasPrefix(args[i], "-") {
