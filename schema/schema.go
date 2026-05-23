@@ -557,56 +557,80 @@ func LoadPluginTypesFromDir(pluginDir string) error {
 		if err != nil {
 			continue
 		}
-		var m pluginManifestTypes
-		if err := json.Unmarshal(data, &m); err != nil {
-			continue
-		}
-		for _, t := range m.ModuleTypes {
-			RegisterModuleType(t)
-		}
-		for _, t := range m.StepTypes {
-			// Step types share the module type registry (identified by "step." prefix).
-			RegisterModuleType(t)
-		}
-		for _, t := range m.ResourceTypes {
-			RegisterModuleType(t)
-		}
-		for _, t := range m.TriggerTypes {
-			RegisterTriggerType(t)
-		}
-		for _, t := range m.WorkflowTypes {
-			RegisterWorkflowType(t)
-		}
-		// Also handle the registry-manifest nested capabilities object format.
-		// The capabilities field may be a JSON array (engine-internal CapabilityDecl format)
-		// or a JSON object (registry manifest format). Only process it when it's an object.
-		if len(m.Capabilities) > 0 && m.Capabilities[0] == '{' {
-			var cap pluginManifestCapabilities
-			if err := json.Unmarshal(m.Capabilities, &cap); err == nil {
-				for _, t := range cap.ModuleTypes {
+		registerPluginManifestTypes(data)
+	}
+	return nil
+}
+
+// LoadPluginTypesFromManifest reads a single plugin.json file at manifestPath
+// and registers its declared module/step/trigger/workflow/resource types with
+// the schema package. Returns an error if the file cannot be read or is not
+// valid JSON; this is the explicit-path counterpart to LoadPluginTypesFromDir
+// and surfaces problems instead of silently skipping them.
+func LoadPluginTypesFromManifest(manifestPath string) error {
+	data, err := os.ReadFile(manifestPath) //nolint:gosec // G304: path is explicitly supplied by the operator
+	if err != nil {
+		return fmt.Errorf("read plugin manifest %q: %w", manifestPath, err)
+	}
+	if !registerPluginManifestTypes(data) {
+		return fmt.Errorf("parse plugin manifest %q: not a valid plugin.json", manifestPath)
+	}
+	return nil
+}
+
+// registerPluginManifestTypes parses one plugin.json manifest blob and
+// registers all declared types. Returns false only when the JSON itself is
+// unparseable; missing or empty type fields are not an error.
+func registerPluginManifestTypes(data []byte) bool {
+	var m pluginManifestTypes
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false
+	}
+	for _, t := range m.ModuleTypes {
+		RegisterModuleType(t)
+	}
+	for _, t := range m.StepTypes {
+		// Step types share the module type registry (identified by "step." prefix).
+		RegisterModuleType(t)
+	}
+	for _, t := range m.ResourceTypes {
+		RegisterModuleType(t)
+	}
+	for _, t := range m.TriggerTypes {
+		RegisterTriggerType(t)
+	}
+	for _, t := range m.WorkflowTypes {
+		RegisterWorkflowType(t)
+	}
+	// Also handle the registry-manifest nested capabilities object format.
+	// The capabilities field may be a JSON array (engine-internal CapabilityDecl format)
+	// or a JSON object (registry manifest format). Only process it when it's an object.
+	if len(m.Capabilities) > 0 && m.Capabilities[0] == '{' {
+		var cap pluginManifestCapabilities
+		if err := json.Unmarshal(m.Capabilities, &cap); err == nil {
+			for _, t := range cap.ModuleTypes {
+				RegisterModuleType(t)
+			}
+			for _, t := range cap.StepTypes {
+				RegisterModuleType(t)
+			}
+			for _, t := range cap.ResourceTypes {
+				RegisterModuleType(t)
+			}
+			if cap.IaCProvider != nil {
+				for _, t := range cap.IaCProvider.ResourceTypes {
 					RegisterModuleType(t)
 				}
-				for _, t := range cap.StepTypes {
-					RegisterModuleType(t)
-				}
-				for _, t := range cap.ResourceTypes {
-					RegisterModuleType(t)
-				}
-				if cap.IaCProvider != nil {
-					for _, t := range cap.IaCProvider.ResourceTypes {
-						RegisterModuleType(t)
-					}
-				}
-				for _, t := range cap.TriggerTypes {
-					RegisterTriggerType(t)
-				}
-				for _, t := range cap.WorkflowHandlers {
-					RegisterWorkflowType(t)
-				}
+			}
+			for _, t := range cap.TriggerTypes {
+				RegisterTriggerType(t)
+			}
+			for _, t := range cap.WorkflowHandlers {
+				RegisterWorkflowType(t)
 			}
 		}
 	}
-	return nil
+	return true
 }
 
 // moduleIfThen builds an if/then conditional schema for a specific module type
