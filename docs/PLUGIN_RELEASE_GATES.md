@@ -128,6 +128,34 @@ For local `go build` / dev installs (no ldflag injection), the binary reports `(
 7. Open PR, CI green, admin-merge.
 8. Tag next release. release.yml's gates fire on tag push.
 
+## Registry sync (workflow#762)
+
+`workflow-registry`'s daily cron uses `wfctl plugin registry-sync` to walk
+every plugin manifest, fetch the upstream release tag via `gh`, gate it
+against the same publish-grade-semver regex as `wfctl plugin
+validate-contract --for-publish` (shared in `cmd/wfctl/plugin_release_grade_semver.go`),
+and update `plugins/<name>/manifest.json`'s version + downloads URLs +
+capabilities when drift is detected.
+
+```
+wfctl plugin registry-sync [--fix] [--plugin <name>] [--verify-capabilities] [--registry-dir <path>]
+wfctl plugin registry-sync core --workflow-repo <path> [--fix] [--registry-dir <path>]
+wfctl plugin registry-sync readme [--check] [--registry-dir <path>]
+```
+
+Replaces three bash scripts (`scripts/sync-versions.sh`,
+`scripts/sync-core-manifests.sh`, `scripts/generate-readme.sh`) with one
+Go entrypoint. During the workflow#762 parity cycle, the Go subcommand
+runs in dry-run alongside the authoritative bash; once parity is
+confirmed for one full cron cycle, a follow-up PR deletes the bash
+scripts and swaps `--fix` ownership.
+
+**Defense in depth — type allowlist:** registry-sync rejects any
+`plugin.json.type` value outside `{external, builtin, core, iac}`. In
+particular, `type: "scaffold"` (used by `scaffold-workflow-plugin` +
+`scaffold-workflow-plugin-private`) is rejected to catch accidental
+re-registration of the scaffold repos as plugins.
+
 ## Registry-side gate (defense in depth)
 
 `workflow-registry/scripts/sync-versions.sh` rejects ingest of any plugin whose upstream release tag is not strict-semver:
