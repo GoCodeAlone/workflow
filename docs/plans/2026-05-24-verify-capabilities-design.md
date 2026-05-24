@@ -11,7 +11,8 @@
 - **Cycle 2**: pivot to Manifest scalars + ContractRegistry. FAILED — 2 Critical (plugin.json has no iacResources key; BuildContractRegistry returns ALL services including infra-internal noise).
 - **Cycle 3**: scope-down per reviewer Option 2. Drop contract-diff entirely. FAILED — 2 Critical (isSentinel() missed `"dev"` form per SDK sentinel set; cited wrong fixture precedent — `validate-contract` is pure-static, never compiles fixtures).
 - **Cycle 4**: fix isSentinel() superset; cite correct precedent; preflight + security note; honest Surface rationale; fixture Validate() prereqs. FAILED — 3 Important (spawn-helper cut-point ambiguous; fixture go.mod relative-replace conflicts with copy-to-TempDir precedent; jq picks first binary non-deterministic on multiarch).
-- **Cycle 5** (this version): explicit cut-point for `spawnAndDial` helper (line 504, IaC-validation stays in conformance); fixture build is in-place not copy-to-TempDir + main.go at fixture root not cmd/plugin/; jq filter pins goos+goarch matching runner.
+- **Cycle 5**: cut-point at line 504; in-place fixture build; jq filter pins goos+goarch. FAILED — 3 Important (jq filter fix not propagated to §CI integration block; in-place build omits go.sum handling; cut-point missed `defer client.Kill()` transform).
+- **Cycle 6** (this version): propagate jq filter to §CI integration; pin `-mod=readonly` + checked-in go.sum (sidesteps both pollution and copy-to-TempDir overhead); explicit defer-transform note in cut-point; reconcile line-range citations (462-504 throughout).
 
 ## Problem
 
@@ -64,7 +65,7 @@ wfctl plugin verify-capabilities --binary "$BIN" .
 ### Behavior
 
 1. Load `<plugin-dir>/plugin.json`. Parse + run `PluginManifest.Validate()` (reuse from validate-contract).
-2. Spawn `<binary>` via shared `spawnAndDial(ctx, binaryPath) (*external.PluginAdapter, func())` helper extracted from `cmd/wfctl/plugin_conformance.go:462-515`. Uses `external.Handshake` from `workflow/plugin/external/handshake.go:23`.
+2. Spawn `<binary>` via shared `spawnAndDial(ctx, binaryPath) (*external.PluginAdapter, func())` helper extracted from `cmd/wfctl/plugin_conformance.go:462-504` (cut-point details in §Files). Uses `external.Handshake` from `workflow/plugin/external/handshake.go:23`.
 3. Call `PluginService.GetManifest(Empty) → pb.Manifest` (6 scalar fields per `plugin/external/proto/plugin.proto:96-104`).
 4. Diff strict:
 
@@ -106,17 +107,20 @@ Append to scaffold-template `release.yml` post-goreleaser, pre-publish:
 ```yaml
 - name: Verify capabilities (post-build runtime check)
   run: |
-    BIN=$(jq -r '[.[] | select(.type=="Binary") | .path] | .[0]' dist/artifacts.json)
+    RUNNER_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+    BIN=$(jq -r --arg arch "$RUNNER_ARCH" \
+      '[.[] | select(.type=="Binary" and .goos=="linux" and .goarch==$arch)] | .[0].path // ""' \
+      dist/artifacts.json)
     "${RUNNER_TEMP}/wfctl-bin/wfctl" plugin verify-capabilities --binary "$BIN" .
 ```
 
-`dist/artifacts.json` is goreleaser's manifest of all built artifacts; jq picks the first binary (any arch — verify-capabilities only needs ONE binary to confirm ldflag fired). Avoids hard-coding goreleaser's directory layout per cycle-2 F-NEW-6.
+`dist/artifacts.json` is goreleaser's manifest of all built artifacts. The jq filter pins to the CURRENT runner's goos/goarch — multiarch builds emit multiple Binary artifacts (linux+darwin × amd64+arm64); picking arbitrarily by `.[0]` would yield e.g. darwin-arm64 on a linux-amd64 runner → `exec format error`. The `uname -m` sed map converts kernel arch names to Go arch names (`x86_64`→`amd64`, `aarch64`→`arm64`).
 
 Scaffold-side wiring is a follow-up commit on `scaffold-workflow-plugin` after this workflow PR lands — not part of this design's scope.
 
 ## Files (workflow repo)
 
-- `cmd/wfctl/plugin_spawn.go` — NEW; extracts `spawnAndDial(ctx, binaryPath) (*external.PluginAdapter, func())` from `plugin_conformance.go:462-504` ONLY (spawn + dial + Dispense + `NewExternalPluginAdapter`). **Cut-point: line 504 (right after adapter construction succeeds).** Lines 505-513 of conformance contain IaC-specific post-dial validation (`ContractRegistryError`, `AssertIaCPluginAdvertisesRequiredService`, typed-IaC adapter setup) — these REMAIN inline in `checkTypedIaCPlugin` after calling the helper. The helper is plugin-type-agnostic; IaC-specific assertions stay where they belong.
+- `cmd/wfctl/plugin_spawn.go` — NEW; extracts `spawnAndDial(ctx, binaryPath) (*external.PluginAdapter, func())` from `plugin_conformance.go:462-504` ONLY (spawn + dial + Dispense + `NewExternalPluginAdapter`). **Cut-point: line 504 (right after adapter construction succeeds).** Lines 505-513 of conformance contain IaC-specific post-dial validation (`ContractRegistryError`, `AssertIaCPluginAdvertisesRequiredService`, typed-IaC adapter setup) — these REMAIN inline in `checkTypedIaCPlugin` after calling the helper. The helper is plugin-type-agnostic; IaC-specific assertions stay where they belong. **Defer transform**: existing line 484's `defer client.Kill()` does NOT move into the helper body — instead, the helper returns the `client.Kill` (or a closure wrapping it) as the `func()` cleanup; the CALLER defers the returned cleanup. Without this transformation, a literal extraction either (a) kills the plugin when the helper returns, before the caller can RPC against it, or (b) drops the defer and leaks processes.
 - `cmd/wfctl/plugin_conformance.go` — refactored to call new shared helper; behavior unchanged.
 - `cmd/wfctl/plugin_verify_capabilities.go` — NEW; subcommand entry + diff impl.
 - `cmd/wfctl/plugin_verify_capabilities_test.go` — table-driven tests against `testdata/verify_capabilities/<scenario>/`.
@@ -142,10 +146,10 @@ Scaffold-side wiring is a follow-up commit on `scaffold-workflow-plugin` after t
                   # (5 ups: <scenario>/ → verify_capabilities/ → testdata/ → wfctl/ → cmd/ → REPO_ROOT)
   ```
 
-  **Build pattern: in-place (NOT copy-to-TempDir)**. The fixture's `go.mod` carries a checked-in relative `replace` directive that resolves only when built at the fixture's own checked-in path. The precedent's `prepareConformanceFixture` (`plugin_conformance_test.go:401-419`) copies-to-TempDir AND rewrites go.mod with an absolute path — that pattern's overhead is unnecessary here because verify-capabilities fixtures don't need scenario mutation; they're read-only. Build in-place; emit the binary to `t.TempDir()`:
+  **Build pattern: in-place + `-mod=readonly` + CHECKED-IN go.sum**. Each fixture ships a complete checked-in `go.mod` AND `go.sum` so `go build -mod=readonly` succeeds without writing into the source tree. (Cycle-5 F5-2: `go build -mod=mod` writes `go.sum` to the fixture source tree on first build — pollutes the repo and dirties `vcs.modified=true`. The conformance precedent dodges this via copy-to-TempDir; we sidestep both via readonly + checked-in sums.)
 
   ```go
-  cmd := exec.Command("go", "build", "-mod=mod",
+  cmd := exec.Command("go", "build", "-mod=readonly",
       "-ldflags=-X github.com/test/<scenario>.Version=<tag>",
       "-o", filepath.Join(t.TempDir(), "p"), ".")
   cmd.Dir = "testdata/verify_capabilities/<scenario>"
@@ -153,6 +157,8 @@ Scaffold-side wiring is a follow-up commit on `scaffold-workflow-plugin` after t
   ```
 
   `GOWORK=off` is mandatory — without it, the workflow repo's workspace go.work overrides the per-fixture `replace` directive and the build resolves the wrong workflow version. The `-ldflags -X` package path is `github.com/test/<scenario>` (the fixture's module path; Version var at fixture root), NOT a `<module>/internal.Version` subpath (different from production plugins; simpler test fixture).
+
+  **Fixture-maintenance note**: when workflow SDK adds a new transitive dep that the fixtures pick up, regenerate fixture `go.sum` files via a one-shot `for d in testdata/verify_capabilities/*/; do (cd "$d" && GOWORK=off go mod tidy); done` and commit. Documented in `cmd/wfctl/testdata/verify_capabilities/README.md` (NEW; one-page maintenance note).
 
   Optional: factor `buildFixtureBinary` from `plugin_conformance_test.go:509-519` into a shared `cmd/wfctl/fixture_build_test.go` helper if both test files use it. Defer if duplication is minimal.
 - `cmd/wfctl/plugin.go` — register `case "verify-capabilities"`.
