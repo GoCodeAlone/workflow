@@ -50,7 +50,7 @@
 
 ---
 
-## Task 1: Subcommand registration + flag parsing skeleton
+### Task 1: Subcommand registration + flag parsing skeleton
 
 **Change class:** CLI command.
 
@@ -191,7 +191,7 @@ git commit -m "feat(wfctl): plugin verify-capabilities subcommand skeleton (work
 
 ---
 
-## Task 2: Preflight binary path validation
+### Task 2: Preflight binary path validation
 
 **Change class:** Internal logic refactor (input validation).
 
@@ -308,7 +308,7 @@ git commit -m "feat(wfctl): verify-capabilities preflight binary-path validation
 
 ---
 
-## Task 3: Sentinel-pattern Version diff matrix
+### Task 3: Sentinel-pattern Version diff matrix
 
 **Change class:** Internal logic refactor (pure-logic diff function).
 
@@ -454,7 +454,7 @@ git commit -m "feat(wfctl): verify-capabilities sentinel-pattern Version diff ma
 
 ---
 
-## Task 4: Inline spawn-and-dial + direct GetManifest RPC
+### Task 4: Inline spawn-and-dial + direct GetManifest RPC
 
 **Change class:** Plugin / extension (CLI subcommand that calls a plugin via raw gRPC).
 
@@ -621,7 +621,7 @@ git commit -m "feat(wfctl): wire inline spawn + direct GetManifest + Name/Versio
 
 ---
 
-## Task 5: Create 4 build-PASS fixture scenarios
+### Task 5: Create 4 build-PASS fixture scenarios
 
 **Change class:** Test fixture (no runtime impact).
 
@@ -777,7 +777,7 @@ git commit -m "test(wfctl): verify-capabilities fixtures (4 build-pass scenarios
 
 ---
 
-## Task 6: Create name-drift fixture (binary advertises different Name)
+### Task 6: Create name-drift fixture (binary advertises different Name)
 
 **Change class:** Test fixture.
 
@@ -850,7 +850,7 @@ git commit -m "test(wfctl): name-drift fixture (binary advertises mismatched Nam
 
 ---
 
-## Task 7: Integration tests — 5 scenarios end-to-end
+### Task 7: Integration tests — 5 scenarios end-to-end
 
 **Change class:** Plugin / extension (exercises spawn + RPC + diff against real fixture binaries).
 
@@ -955,7 +955,7 @@ git commit -m "test(wfctl): verify-capabilities integration tests (5 scenarios) 
 
 ---
 
-## Task 8: Documentation update — PLUGIN_RELEASE_GATES.md
+### Task 8: Documentation update — PLUGIN_RELEASE_GATES.md
 
 **Change class:** Documentation.
 
