@@ -59,7 +59,7 @@ Tasks 3 and 4 begin with a verification step (`gh repo view ...` confirming the 
 | 5 | chore(registry): delete plugins/template/ — superseded by scaffold-workflow-plugin (#762 Layer d.3) | Task 5 | chore/762-delete-template | workflow-registry |
 | 6 | chore(issue): update workflow#760 sweep list — drop scaffold repos (#762 Layer d.4) | Task 6 | n/a (issue edit) | workflow (issue) |
 
-**Status:** Draft
+**Status:** Locked 2026-05-24T00:22:15Z
 
 ---
 
