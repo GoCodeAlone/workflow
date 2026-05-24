@@ -17,7 +17,8 @@
 **Revision history:**
 - Cycle 1: 9-task plan with shared `spawnAndDial` helper extraction. FAILED — 4 Critical (fictional `EngineManifest()` signature; fixture template wrong PluginManifest type; missing-ldflag mechanics misstated; fixture plugin.json shape diverges from PluginManifest).
 - Cycle 2: drop helper extraction; direct GetManifest RPC; fix fixture types; fix sentinel mechanics. FAILED — 3 Critical (anchor `case "validate-contract":` didn't exist on stale worktree base; duplicate `import (...)` blocks in test+production files would fail compile; name-drift test assertion too lenient).
-- Cycle 3 (this version): rebased worktree onto current main (validate-contract + registry-sync now in dispatcher). Restructured every "append imports" instruction to "Edit the SINGLE existing import block" with explicit warnings. Task 4 Step 1 documents the final import-block shape end-to-end. Fixture go-directive bumped 1.24 → 1.26.0 (matches workflow root). Name-drift fixture ldflag changed to `v0.0.0` so Version matrix PASSes (isolated Name diff); test assertion tightened to `"name:"` substring; verify-capabilities error now embeds joined failure list so tests can assert on field-name without capturing stderr.
+- Cycle 3: rebased onto main; tightened import-block instructions Tasks 2-4; bumped fixture go directive; isolated name-drift via ldflag. FAILED — 1 Critical (Task 7 reintroduced duplicate-import-block defect — missed by cycle-3 fix that covered only Tasks 2-4) + 2 Important (name-drift comment misstated matrix row; generator shell-quoting hazard via REPO_ROOT in worktrees with spaces).
+- Cycle 4 (this version): fix Task 7 import-block instruction; clarify name-drift matrix-row comment; rewrite generators to embed relative `replace` directly (no $REPO_ROOT, no sed dance). Eliminates remaining cycle-3 findings.
 
 ---
 
@@ -642,7 +643,6 @@ Save as `/tmp/gen-verify-fixtures.sh`:
 #!/bin/bash
 set -euo pipefail
 BASE=cmd/wfctl/testdata/verify_capabilities
-REPO_ROOT=$(git rev-parse --show-toplevel)
 declare -A NAMES=( [good]=verify-good [release-good]=verify-release-good [missing-ldflag]=verify-missing-ldflag [version-drift]=verify-version-drift )
 declare -A VERS=( [good]=0.0.0 [release-good]=1.2.3 [missing-ldflag]=0.0.0 [version-drift]=1.2.3 )
 for s in good release-good missing-ldflag version-drift; do
@@ -686,26 +686,27 @@ func main() {
 	)
 }
 GO
-  cat > "$d/go.mod" <<MOD
-module github.com/test/$s
+  cat > "$d/go.mod" <<'MOD'
+module github.com/test/PLACEHOLDER
 
 go 1.26.0
 
 require github.com/GoCodeAlone/workflow v0.62.0
 
-replace github.com/GoCodeAlone/workflow => $REPO_ROOT
+replace github.com/GoCodeAlone/workflow => ../../../../..
 MOD
+  sed -i.bak "s|PLACEHOLDER|$s|" "$d/go.mod" && rm -f "$d/go.mod.bak"
 done
 ```
 
-**Step 2: Generate + tidy + rewrite to relative replace**
+Note: relative `replace` is written DIRECTLY (no `$REPO_ROOT` indirection) so generators run on worktrees with spaces in their path. PLACEHOLDER substitution uses fixed-text sed (no shell-expansion of module name).
+
+**Step 2: Generate + tidy (writes go.sum in-place)**
 
 ```bash
 bash /tmp/gen-verify-fixtures.sh
 for d in cmd/wfctl/testdata/verify_capabilities/*/; do
   (cd "$d" && GOWORK=off go mod tidy)
-  sed -i.bak "s|replace github.com/GoCodeAlone/workflow => .*|replace github.com/GoCodeAlone/workflow => ../../../../..|" "$d/go.mod"
-  rm -f "$d/go.mod.bak"
 done
 ```
 
@@ -787,7 +788,6 @@ git commit -m "test(wfctl): verify-capabilities fixtures (4 build-pass scenarios
 **Step 1: Generate the fixture**
 
 ```bash
-REPO_ROOT=$(git rev-parse --show-toplevel)
 d=cmd/wfctl/testdata/verify_capabilities/name-drift
 mkdir -p "$d"
 cat > "$d/plugin.json" <<'JSON'
@@ -825,18 +825,16 @@ func main() {
 	)
 }
 GO
-cat > "$d/go.mod" <<MOD
+cat > "$d/go.mod" <<'MOD'
 module github.com/test/name-drift
 
 go 1.26.0
 
 require github.com/GoCodeAlone/workflow v0.62.0
 
-replace github.com/GoCodeAlone/workflow => $REPO_ROOT
+replace github.com/GoCodeAlone/workflow => ../../../../..
 MOD
 (cd "$d" && GOWORK=off go mod tidy)
-sed -i.bak "s|replace github.com/GoCodeAlone/workflow => .*|replace github.com/GoCodeAlone/workflow => ../../../../..|" "$d/go.mod"
-rm -f "$d/go.mod.bak"
 ```
 
 **Step 2: Verify fixture builds**
@@ -862,14 +860,9 @@ git commit -m "test(wfctl): name-drift fixture (binary advertises mismatched Nam
 
 **Step 1: Add the fixture-build helper + 5 test cases**
 
-Append to `cmd/wfctl/plugin_verify_capabilities_test.go`:
+In `cmd/wfctl/plugin_verify_capabilities_test.go`: **Edit the existing SINGLE import block** to add `"os/exec"` (alongside existing `"os"`, `"path/filepath"`, `"strings"`, `"testing"`). DO NOT add a second `import (...)` declaration — golangci-lint will fail the build. Then append the helper + test functions below.
 
 ```go
-import (
-	"os/exec"
-	// keep existing imports
-)
-
 // buildFixtureBinaryForVerify builds the fixture scenario in-place and emits
 // the binary to t.TempDir(). ldflag is the -X ...Version= value ("" = no flag,
 // which makes ResolveBuildVersion fall back to "(devel) [@ sha]" for fixtures
@@ -930,9 +923,13 @@ func TestVerifyCapabilities_VersionDrift(t *testing.T) {
 }
 
 func TestVerifyCapabilities_NameDrift(t *testing.T) {
-	// Use ldflag tag matching plugin.json sentinel so Version PASSes (matrix row "0.0.0 + v0.0.0" -> PASS via TrimPrefix);
-	// Name is the ISOLATED failure under test. Without this, both name AND version mismatches fire and a regression
-	// that breaks Name-diff while leaving Version-diff would silently pass through the lenient "mismatch" substring check.
+	// Build with non-sentinel ldflag tag so Version PASSes — matrix row that
+	// fires: plugin.json="0.0.0" + binary="v0.0.0" → PASS via the
+	// `declared == "0.0.0"` branch returning early (isSentinel("v0.0.0")==false
+	// because the SDK sentinel set is {"", "dev", "0.0.0", "(devel)..."} — NOT
+	// "v0.0.0"). This ISOLATES Name as the sole failure under test, so a
+	// regression that breaks Name-diff while leaving Version-diff intact
+	// doesn't silently pass through a lenient `Contains("mismatch")` check.
 	bin := buildFixtureBinaryForVerify(t, "name-drift", "v0.0.0")
 	err := runPluginVerifyCapabilities([]string{"--binary", bin, "testdata/verify_capabilities/name-drift"})
 	if err == nil {
