@@ -418,7 +418,15 @@ installSkipLockfileUpdate = true
 defer func() { installSkipLockfileUpdate = false }()
 ```
 
-In `cmd/wfctl/plugin_install_wfctllock.go`, find `installFromWfctlLockfile` (around line 27). At the TOP of the per-plugin loop body (before line 86's `installFromURL` call and before the line-99 fallback `runPluginInstall` call), add:
+In `cmd/wfctl/plugin_install_wfctllock.go`, find `installFromWfctlLockfile` (around line 27). At the TOP of the per-plugin loop body (before line 86's `installFromURL` call and before the line-99 fallback `runPluginInstall` call), add a function-scope guard:
+
+```go
+// Note (workflow#771): function-scope guard suppresses lockfile writes by
+// inner install paths. Deps installed via the fallback runPluginInstall
+// inherit this guard and are NOT auto-pinned to the lockfile. Users must
+// explicitly install deps to add them — matches the "lockfile is what the
+// user explicitly pinned" contract.
+```
 
 ```go
 installSkipLockfileUpdate = true
@@ -506,18 +514,22 @@ In `cmd/wfctl/plugin_deps.go` after the existing `resolved[dep.Name] = depManife
 		// Track dep in lockfile (workflow#771 Task 4). The chokepoint guard
 		// inside updateLockfileWithChecksum (Task 1) suppresses writes when
 		// running under an outer-frame installer (installFromLockfile etc.).
-		// Cycle-4 fix per reviewer CYC3-I1: normalize dep key for both hash
-		// path AND lockfile key — keeps dep entries consistent with parent
-		// entries (which use normalizePluginName per runPluginInstall line 257).
-		depKey := normalizePluginName(dep.Name)
-		depBinaryPath := filepath.Join(pluginDir, depKey, depKey)
+		// Cycle-4 reviewer I1 Option-(b): use raw dep.Name for ALL three sites
+		// (install dir, hash path, lockfile key) — matches the un-normalized
+		// install at line 268 (`installPluginFromManifest(pluginDir, dep.Name, ...)`).
+		// Normalizing only the lockfile-side without changing install-side
+		// produces hash-MISS warnings + empty checksums for long-form dep names.
+		// Parent (Task 5) keeps normalize because runPluginInstall:257 normalizes
+		// install-side too — symmetric for that path. Asymmetric across Task 4 vs 5
+		// is a pre-existing convention difference, not regressed by this PR.
+		depBinaryPath := filepath.Join(pluginDir, dep.Name, dep.Name)
 		depChecksum := ""
 		if cs, hashErr := hashFileSHA256(depBinaryPath); hashErr == nil {
 			depChecksum = cs
 		} else {
 			fmt.Fprintf(os.Stderr, "warning: could not hash dep binary %s: %v (lockfile will have no checksum)\n", depBinaryPath, hashErr)
 		}
-		updateLockfileWithChecksum(depKey, depManifest.Version, depManifest.Repository, "", depChecksum)
+		updateLockfileWithChecksum(dep.Name, depManifest.Version, depManifest.Repository, "", depChecksum)
 ```
 
 Add `"path/filepath"` and `"os"` to the existing single import block in `plugin_deps.go` if not already present.
