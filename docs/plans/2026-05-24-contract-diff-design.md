@@ -9,7 +9,8 @@
 
 - **Cycle 1**: initial design hardcoded namespace `workflow.iac.v1.*`. FAILED — 2 Critical (wrong namespace; never traced to proto file; actual is `workflow.plugin.external.iac.*`. Duplicates existing `registeredIaCServices`/`iacServiceRequired` precedent without citing or reusing). + 5 Important.
 - **Cycle 2**: namespace derived programmatically; cite + reuse existing helpers; directional diff; cached accessor; non-goal additions; sweep SDK pin. PASSED with 4 Important amendments to fold.
-- **Cycle 3** (this version): folds the 4 Important amendments: (1) ContractRegistryError() check ahead of diff (cycle-2 IMPORTANT-1); (2) iacserver.go:302 added to §Files so the SDK helper actually wires the bridge for the 4 sweep targets (cycle-2 IMPORTANT-2); (3) fixture construction recipes spelled out per scenario (cycle-2 IMPORTANT-3); (4) hard-cite #765 as sequencing prerequisite in §Assumptions (cycle-2 IMPORTANT-4).
+- **Cycle 3**: folds 4 Important amendments. PASSED design adversarial.
+- **Cycle 4** (this version, post-#765 ship): #765 PR #769 + v0.63.2 actually landed (cycle-1 reviewer was right that they hadn't yet). Worktree rebased onto current main. Replan against ACTUAL shipped inline-spawn pattern (NOT cycle-3's adapter-based hypothesis): direct `pbClient.GetContractRegistry(ctx, &emptypb.Empty{})` after existing `pbClient.GetManifest` call; explicit Unimplemented branch.
 
 ## Problem
 
@@ -72,8 +73,8 @@ func BuildContractRegistryForPlugin(grpcSrv *grpc.Server, namespacePrefix string
 
 After existing Name+Version diff:
 
-- Check `adapter.ContractRegistryError()` FIRST. If non-nil (RPC failed during adapter construction for some reason other than Unimplemented — e.g. network/transport error), surface the error verbatim + exit 1. Do NOT proceed to diff (would emit synthetic "missing" FAILs that mask the real cause).
-- Then reuse cached `adapter.ContractRegistry()` (set at `NewExternalPluginAdapter` construction per `plugin/external/adapter.go:165-172`) — no second RPC. The adapter maps `Unimplemented` to an empty registry, so "Unimplemented" and "empty registry" both reduce to "filter returns 0 services" handled by §4 skip-if-LHS-empty.
+- **Updated for #765 shipped inline-spawn pattern**: verify-capabilities (per `cmd/wfctl/plugin_verify_capabilities.go`) uses inline goplugin.NewClient + pluginClient.Conn() + `pbClient := pb.NewPluginServiceClient(pluginClient.Conn())` — NO adapter construction. Therefore: call `pbClient.GetContractRegistry(ctx, &emptypb.Empty{})` directly (one new RPC; mirrors the existing pbClient.GetManifest call site at line 137).
+- Handle `codes.Unimplemented` explicitly: treat as empty registry (skip-if-LHS-empty fires per §4). Any other RPC error → exit 1 with stderr-tail context (matches existing GetManifest error handling pattern).
 - Reuse the existing client-side filter precedent: `registeredIaCServices` in `cmd/wfctl/deploy_providers.go:344-361` already walks ContractDescriptors and returns SERVICE-kind names. Either call it directly OR refactor into a shared `cmd/wfctl/iac_contract_filter.go` helper consumed by both deploy_providers and verify-capabilities (recommend the refactor; one line in plan-time task list).
 - Derive the namespace prefix programmatically from the existing canonical `iacServiceRequired` const (`cmd/wfctl/iac_typed_adapter.go:52` = `"workflow.plugin.external.iac.IaCProviderRequired"`) via `strings.TrimSuffix(iacServiceRequired, ".IaCProviderRequired") + "."`. No new string literal; single source of truth.
 - Set-difference diff (directional, NOT set-equal):
@@ -118,7 +119,7 @@ Reuse `registeredIaCServices` (deploy_providers.go:344) and `iacServiceRequired`
 - `plugin/external/sdk/contracts.go` — add `BuildContractRegistryForPlugin`.
 - `plugin/external/sdk/iacserver.go:302` — switch `iacPluginServiceBridge.GetContractRegistry` from `BuildContractRegistry(b.grpcSrv)` to `BuildContractRegistryForPlugin(b.grpcSrv, prefix)` where `prefix` is derived as in §2. This is the critical path for the 4 sweep targets — they use `sdk.ServeIaCPlugin` which routes through this bridge, so the SDK helper must be wired here to deliver server-side cleanliness for them. Without this edit, the new helper is dead code for the sweep targets and only the client-side filter in verify-capabilities masks the noise. (Cycle 3 per IMPORTANT-2.)
 - `cmd/wfctl/iac_contract_filter.go` (NEW) OR `cmd/wfctl/deploy_providers.go` move — house `registeredIaCServices` in a location both deploy_providers and verify-capabilities can import.
-- `cmd/wfctl/plugin_verify_capabilities.go` — extend `runPluginVerifyCapabilities` with cached `adapter.ContractRegistry()` walk + filter (reuse helper) + directional diff.
+- `cmd/wfctl/plugin_verify_capabilities.go` — extend `runPluginVerifyCapabilities` with `pbClient.GetContractRegistry(ctx, &emptypb.Empty{})` call (after existing GetManifest call at line 137) + filter via `registeredIaCServices` helper + directional diff.
 - `cmd/wfctl/plugin_verify_capabilities_test.go` — new test scenarios: `iac-good` (matching services), `iac-missing-service` (declared but not advertised → FAIL), `iac-extra-service` (advertised but not declared → WARN exit 0).
 - `cmd/wfctl/testdata/verify_capabilities/iac-{good,missing-service,extra-service}/` — 3 new fixture scenarios using `sdk.ServeIaCPlugin` so they actually register IaC services on the wire. Construction recipes:
   - `iac-good/`: stub provider implements `pb.IaCProviderRequiredServer` + `pb.IaCProviderFinalizerServer`. plugin.json lists BOTH services. Diff: clean PASS.
@@ -132,15 +133,15 @@ Reuse `registeredIaCServices` (deploy_providers.go:344) and `iacServiceRequired`
 
 1. **workflow#765 PR has merged FIRST** — this design extends `cmd/wfctl/plugin_verify_capabilities.go` and depends on the `spawnAndDial`-style spawn path from #765. Without #765, the file doesn't exist and `runPluginVerifyCapabilities` doesn't exist. The worktree for #767 must rebase on top of #765's merge commit before any code in this design's §Files entries can be written. (Cycle 3 per IMPORTANT-4.)
 2. **`pb.IaCProviderRequired_ServiceDesc.ServiceName` resolves to a string ending in `.IaCProviderRequired`** — verified per `/tmp/wfprobe/plugin/external/proto/iac_grpc.pb.go:443` (canonical generated descriptor) AND existing usage in `cmd/wfctl/iac_typed_adapter.go:52` const.
-2. **`adapter.ContractRegistry()` returns the cached registry constructed during `NewExternalPluginAdapter` and is safe to call repeatedly** — verified per `plugin/external/adapter.go:165-176`.
+2. **#765 verify-capabilities uses inline-spawn pattern (not adapter)** — verified at `cmd/wfctl/plugin_verify_capabilities.go:126-137`: `pluginClient, ok := raw.(*external.PluginClient)` → `pbClient := pb.NewPluginServiceClient(pluginClient.Conn())` → `runtime, err := pbClient.GetManifest(ctx, &emptypb.Empty{})`. Contract-diff adds a second RPC `pbClient.GetContractRegistry(ctx, &emptypb.Empty{})` after GetManifest. Same pbClient, same ctx.
 3. **All 4 sweep-target plugins (aws, azure, gcp, digitalocean) pin workflow v0.62.0+** — required for the strict-contracts cutover path that registers the typed IaC services and the PluginService bridge that serves GetContractRegistry. (Cycle 2 explicit per IMPORTANT-4.) Pre-flight check: each plugin's `go.mod` must show `github.com/GoCodeAlone/workflow v0.62.0+` before opening its sweep PR. If any plugin pins an older version, the sweep blocker is a workflow-bump cascade, not this design.
 4. **`grpc.Server.GetServiceInfo()` returns fully-qualified service names** — verified per gRPC-go API.
 5. **Fixture scenarios can build IaC plugins in-place via `go build -mod=readonly`** — verified pattern from #765 fixtures.
 
 ## Failure modes
 
-- **Plugin doesn't implement ContractProvider**: `adapter.ContractRegistry()` returns an empty (but non-nil) registry per `plugin/external/adapter.go:165-176` (Unimplemented is mapped to empty there). Filter returns 0 services. Skip-if-LHS-empty handles non-IaC plugins; for IaC plugins with non-empty plugin.json.iacServices the directional diff fires FAIL on every declared service (consistent with the "plugin advertises nothing" truth-loop signal).
-- **Network/RPC failure mid-call**: N/A — no new RPC in verify-capabilities (cached adapter accessor). Adapter-construction RPC failure already surfaces in spawn-and-dial path.
+- **Plugin doesn't implement ContractProvider (`GetContractRegistry` returns codes.Unimplemented)**: explicit `status.Code(err) == codes.Unimplemented` check; treat as empty registry → skip-if-LHS-empty handles non-IaC plugins; for IaC plugins with non-empty plugin.json.iacServices the directional diff fires FAIL on every declared service (consistent with "plugin advertises nothing" truth-loop signal).
+- **Network/RPC failure mid-call (non-Unimplemented)**: surface error verbatim + stderr-tail; exit 1. Matches existing `GetManifest` error handling at `plugin_verify_capabilities.go:138-141`.
 - **Plugin advertises a service in a different namespace** (e.g. `workflow.iac.v2.*` post-cutover): client-side filter excludes it. Forward-compat handled by re-deriving prefix from a future `IaCProviderRequired_v2_ServiceDesc.ServiceName` or by introducing a `--namespace` flag at v2 cutover time.
 - **Plugin author lists a service in plugin.json that exists in proto but the plugin's Go code doesn't register** (e.g. declared IaCProviderValidator without implementing the interface): registry filter doesn't surface it → declared-but-not-advertised → FAIL. Correct outcome.
 - **Plugin author registers a service the proto package doesn't define** (impossible-by-construction for typed IaC since registration is per-pb-helper): N/A.
