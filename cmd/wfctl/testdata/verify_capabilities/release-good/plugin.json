@@ -1,0 +1,7 @@
+{
+  "name": "verify-release-good",
+  "version": "1.2.3",
+  "minEngineVersion": "v0.62.0",
+  "author": "test fixture",
+  "description": "verify-capabilities release-good scenario"
+}
