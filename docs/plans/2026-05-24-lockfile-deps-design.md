@@ -10,7 +10,8 @@
   - C1: new-format lockfile early-return at `plugin_lockfile.go:147` makes dep-write a no-op on the dominant case (any project with `version: 1` lockfile).
   - C2: dropping the `@version` gate breaks `installFromLockfile`'s no-clobber contract (relied on by lockfile-driven install per `plugin_lockfile.go:115-118` comment).
 - **Cycle 2**: both formats covered + installSkipLockfileUpdate flag for installFromLockfile contract preservation. FAILED — 1 Critical (C3: installFromWfctlLockfile line-105 calls runPluginInstall ALSO unguarded; its in-memory `lf.Save` at line 116 silently clobbers the fan-out's writes) + 1 Important (I4: installPluginReqDirect skips parent lockfile track via direct installPluginFromManifest call, bypassing runPluginInstall).
-- **Cycle 3** (this version): adds installSkipLockfileUpdate guard around installFromWfctlLockfile's runPluginInstall call site (mirror of cycle-2 fix for the legacy installFromLockfile path); adds updateLockfileWithChecksum call to installPluginReqDirect parent path; updates test plan with §e for installFromWfctlLockfile regression.
+- **Cycle 3**: adds installSkipLockfileUpdate guard around installFromWfctlLockfile's runPluginInstall fallback call + updateLockfileWithChecksum in installPluginReqDirect parent path. FAILED — 1 Important (I5: per-arch installFromURL call site in installFromWfctlLockfile line 86 also needs guard; under §2 fan-out it triggers merge-then-clobber by outer in-memory lf.Save).
+- **Cycle 4** (this version): extends §4 guard to also wrap the per-arch installFromURL call site at line 86. Symmetric coverage of all outer-in-memory-lf-holding sites.
 
 ## Problem
 
@@ -127,6 +128,7 @@ defer func() { installSkipLockfileUpdate = false }()
 Specifically:
 - `cmd/wfctl/plugin_lockfile.go` line ~115 (legacy `installFromLockfile`).
 - `cmd/wfctl/plugin_install_wfctllock.go` line ~99 (new-format `installFromWfctlLockfile` fallback path that calls `runPluginInstall(spec)` when per-platform archive is unavailable).
+- `cmd/wfctl/plugin_install_wfctllock.go` line ~86 (new-format `installFromWfctlLockfile` per-platform archive path that calls `installFromURL` — which under §2 fan-out triggers `mergeIntoNewFormatLockfile` and would be re-clobbered by the outer in-memory `lf.Save` at line 116). Same symmetric guard. (Cycle-4 I5.)
 
 (Package-level boolean is acceptable — installs are sequential within a single wfctl invocation; no concurrent goroutines call this path.)
 
