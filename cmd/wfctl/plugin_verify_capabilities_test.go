@@ -261,3 +261,32 @@ func TestDiffIaCServices_EmptyDeclared_SkipsDiff(t *testing.T) {
 		t.Errorf("empty LHS should skip; got missing=%v extra=%v", missing, extra)
 	}
 }
+
+func TestVerifyCapabilities_IaCGood(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "iac-good", "v0.1.0")
+	if err := runPluginVerifyCapabilities([]string{"--binary", bin, "testdata/verify_capabilities/iac-good"}); err != nil {
+		t.Fatalf("want PASS, got: %v", err)
+	}
+}
+
+func TestVerifyCapabilities_IaCMissingService(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "iac-missing-service", "v0.1.0")
+	err := runPluginVerifyCapabilities([]string{"--binary", bin, "testdata/verify_capabilities/iac-missing-service"})
+	if err == nil {
+		t.Fatal("want FAIL on missing Finalizer, got nil")
+	}
+	if !strings.Contains(err.Error(), "iacServices:") {
+		t.Errorf("want iacServices: error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "IaCProviderFinalizer") {
+		t.Errorf("want Finalizer-specific error, got: %v", err)
+	}
+}
+
+func TestVerifyCapabilities_IaCExtraService(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "iac-extra-service", "v0.1.0")
+	// Extra services produce WARN (stderr) but exit 0 per design §3.
+	if err := runPluginVerifyCapabilities([]string{"--binary", bin, "testdata/verify_capabilities/iac-extra-service"}); err != nil {
+		t.Fatalf("want PASS (extra=WARN, not FAIL); got: %v", err)
+	}
+}

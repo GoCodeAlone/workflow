@@ -1,0 +1,11 @@
+{
+  "name": "verify-iac-good",
+  "version": "0.0.0",
+  "minEngineVersion": "v0.62.0",
+  "author": "test fixture",
+  "description": "IaC fixture: registered services match plugin.json declared services",
+  "iacServices": [
+    "workflow.plugin.external.iac.IaCProviderRequired",
+    "workflow.plugin.external.iac.IaCProviderFinalizer"
+  ]
+}
