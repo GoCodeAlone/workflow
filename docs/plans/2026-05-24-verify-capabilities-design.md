@@ -9,7 +9,8 @@
 
 - **Cycle 1**: initial design. FAILED — 3 Critical (diff fields not on wire; IaC bridge Unimplemented; handshake path wrong).
 - **Cycle 2**: pivot to Manifest scalars + ContractRegistry. FAILED — 2 Critical (plugin.json has no iacResources key; BuildContractRegistry returns ALL services including infra-internal noise).
-- **Cycle 3** (this version): scope-down per reviewer Option 2. **Drop contract-diff entirely**; defer to follow-up issue (#766 to be filed). Verify Manifest scalars + correct sentinel-pattern Version. Test fixtures specified per `plugin_validate_contract` precedent.
+- **Cycle 3**: scope-down per reviewer Option 2. Drop contract-diff entirely. FAILED — 2 Critical (isSentinel() missed `"dev"` form per SDK sentinel set; cited wrong fixture precedent — `validate-contract` is pure-static, never compiles fixtures).
+- **Cycle 4** (this version): fix isSentinel() superset; cite correct precedent (`plugin_conformance_test.go:buildFixtureBinary` + per-fixture `go.mod` with `replace` directive + `GOWORK=off`); add preflight binary-path validation + security note; rewrite "Surface" rationale honestly (conformance-flag is technically viable; pick new-subcommand on separation-of-concerns); explicit fixture `PluginManifest.Validate()` prereqs.
 
 ## Problem
 
@@ -27,7 +28,16 @@ New subcommand `wfctl plugin verify-capabilities` that spawns the plugin binary 
 wfctl plugin verify-capabilities --binary <path> <plugin-dir>
 ```
 
-`--binary` REQUIRED (cycle-1 build-from-source dropped per reviewer Option 2; produced false-PASS in dev when ldflag paths varied per repo). Documented invocation:
+`--binary` REQUIRED (cycle-1 build-from-source dropped per reviewer Option 2; produced false-PASS in dev when ldflag paths varied per repo).
+
+**⚠ Security note**: verify-capabilities EXECUTES `--binary <path>` as a subprocess. The plugin's `main()` runs (including any code before `sdk.ServeIaCPlugin`). Only run against build artifacts you trust. Matches `plugin conformance`'s posture.
+
+Preflight checks performed by the subcommand before exec:
+- `os.Stat(path)` — file exists, is regular (not directory/symlink to one)
+- `mode & 0o111 != 0` — file is executable
+- `path != "" && path != "null"` — guards against CI lookups (jq) returning empty / null
+
+Documented invocation:
 
 ```bash
 # Local development:
@@ -36,9 +46,10 @@ go build -ldflags="-X github.com/GoCodeAlone/workflow-plugin-<name>/internal.Ver
 wfctl plugin verify-capabilities --binary /tmp/p .
 
 # CI (post-goreleaser, in release.yml):
-wfctl plugin verify-capabilities --binary "$(jq -r '.[0].path' dist/artifacts.json)" .
-# (jq picks the right architecture's binary from goreleaser's artifacts.json
-# manifest — avoids hard-coding goreleaser layout per F-NEW-6 cycle 2)
+wfctl plugin verify-capabilities --binary "$(jq -r '[.[] | select(.type=="Binary") | .path] | .[0] // ""' dist/artifacts.json)" .
+# jq filter:
+#   - select(.type=="Binary") — goreleaser v2 schema; v1 also uses "Binary" for the binary artifact type
+#   - // ""  fallback to empty string on null/missing → caught by preflight
 ```
 
 ### Behavior
@@ -53,13 +64,15 @@ wfctl plugin verify-capabilities --binary "$(jq -r '.[0].path' dist/artifacts.js
 | `Name` | `name` | `Name` | exact string equal; FAIL on drift |
 | `Version` | `version` | `Version` | matrix below |
 
-**Version rule** (cycle-3, addresses F-NEW-3 with correct sentinel pattern):
+**Version rule** (cycle-4, addresses F-CYCLE3-1 sentinel-set drift):
 
-The dev-sentinel set is `{"", "(devel)", "0.0.0"}` plus any string starting with `"(devel)"` (since `buildInfoVersion()` returns `"(devel) [@ <sha>[.dirty]]"`). Source: `/tmp/wfprobe/plugin/external/sdk/buildversion.go:36-42`.
+The dev-sentinel set MUST be a SUPERSET of SDK's `ResolveBuildVersion` sentinel set `{"", "dev", "(devel)"}` (source: `plugin/external/sdk/buildversion.go:36-42`) PLUS the on-disk plugin.json sentinel `"0.0.0"` (workflow#762 convention) PLUS any string starting with `"(devel)"` (since `buildInfoVersion()` returns `"(devel) [@ <sha>[.dirty]]"`).
 
 ```
-isSentinel(v) := v == "" || v == "0.0.0" || strings.HasPrefix(v, "(devel)")
+isSentinel(v) := v == "" || v == "dev" || v == "0.0.0" || strings.HasPrefix(v, "(devel)")
 ```
+
+Note: `"dev"` is in the predicate because a plugin author may set `-X ...Version=dev` (or pipeline accident) and the binary's `Manifest.Version` then surfaces literal `"dev"` (since SDK only consults build-info fallback when the *declared* string matches; the ldflag-set value flows through unchanged). Without this entry, the matrix's row "0.0.0 + non-sentinel → PASS" would green-light a broken build.
 
 | plugin.json `version` | binary `Manifest.Version` | Outcome | Rationale |
 |---|---|---|---|
@@ -98,14 +111,37 @@ Scaffold-side wiring is a follow-up commit on `scaffold-workflow-plugin` after t
 - `cmd/wfctl/plugin_conformance.go` — refactored to call new shared helper; behavior unchanged.
 - `cmd/wfctl/plugin_verify_capabilities.go` — NEW; subcommand entry + diff impl.
 - `cmd/wfctl/plugin_verify_capabilities_test.go` — table-driven tests against `testdata/verify_capabilities/<scenario>/`.
-- `cmd/wfctl/testdata/verify_capabilities/` — NEW fixture tree, mirrors `cmd/wfctl/testdata/plugin_validate_contract/` precedent:
+- `cmd/wfctl/testdata/verify_capabilities/` — NEW fixture tree. **Precedent: `plugin_conformance_test.go:buildFixtureBinary` + `testdata/conformance/iac-pass/` layout** (NOT `validate-contract`'s pattern — that one is pure-static and never compiles fixtures). Each fixture is a self-contained compilable Go module.
+
+  Scenarios:
   - `good/` — plugin.json `version="0.0.0"`, ldflag-injected binary tag `v0.1.0`. Expect PASS.
   - `release-good/` — plugin.json `version="1.2.3"`, ldflag tag `v1.2.3`. Expect PASS.
-  - `missing-ldflag/` — plugin.json `version="0.0.0"`, no ldflag (binary surfaces sentinel `(devel)`). Expect FAIL.
+  - `missing-ldflag/` — plugin.json `version="0.0.0"`, no ldflag (binary surfaces sentinel `(devel) [@ sha]`). Expect FAIL.
   - `version-drift/` — plugin.json `version="1.2.3"`, ldflag tag `v0.9.0`. Expect FAIL.
   - `name-drift/` — plugin.json `name="foo"`, binary advertises `Name="bar"`. Expect FAIL.
 
-  Each scenario contains `plugin.json` + `cmd/plugin/main.go` (minimal `sdk.Serve` stub). Tests compile the fixture via `go build` invocation at test-time (one fixture per scenario), then run verify-capabilities against the compiled binary in `t.TempDir()`. Pattern mirrors existing `validate-contract` test approach where source fixtures + plugin.json live in testdata.
+  Per-fixture layout (each scenario directory):
+  ```
+  testdata/verify_capabilities/<scenario>/
+    plugin.json                 # MUST satisfy PluginManifest.Validate():
+                                #   name, version, author, description ALL required
+                                #   (per plugin/manifest.go:194-225)
+    cmd/plugin/main.go          # minimal `sdk.Serve(stub{}, sdk.WithBuildVersion(...))`
+    go.mod                      # module github.com/test/<scenario>
+                                # replace github.com/GoCodeAlone/workflow => ../../../../..
+  ```
+
+  Test invocation pattern (mirrors `plugin_conformance_test.go:buildFixtureBinary`):
+  ```go
+  cmd := exec.Command("go", "build", "-mod=mod",
+      "-ldflags=-X test/<scenario>/internal.Version=<tag>",
+      "-o", filepath.Join(t.TempDir(), "p"), "./cmd/plugin")
+  cmd.Dir = "testdata/verify_capabilities/<scenario>"
+  cmd.Env = append(os.Environ(), "GOWORK=off")
+  ```
+  `GOWORK=off` is mandatory — without it, the workspace go.work in the workflow repo overrides the per-fixture `replace` directive and the build resolves the wrong workflow version.
+
+  Optional: factor `buildFixtureBinary` from `plugin_conformance_test.go` into a shared `cmd/wfctl/fixture_build_test.go` helper if both test files use it. Defer if duplication is minimal.
 - `cmd/wfctl/plugin.go` — register `case "verify-capabilities"`.
 - `docs/PLUGIN_RELEASE_GATES.md` — append `Verify-Capabilities` section.
 
@@ -113,7 +149,7 @@ Scaffold-side wiring is a follow-up commit on `scaffold-workflow-plugin` after t
 
 | Choice | Picked | Rejected (reason) |
 |---|---|---|
-| Surface | new subcommand | flag on validate-contract (cycle 2 considered + rejected: mixes static + runtime); flag on `plugin conformance` (conformance IaC-typed-only today) |
+| Surface | new subcommand | flag on validate-contract (mixes static + runtime); flag on `plugin conformance --mode manifest-verify` (TECHNICALLY VIABLE — conformance's `checkTypedIaCPlugin` uses `external.NewExternalPluginAdapter` which handles ANY plugin type, not just IaC; chose new subcommand on separation-of-concerns basis: verify-capabilities is contract truth-check, conformance is typed-IaC interface scan — distinct mental models. F-CYCLE3-4 rejection rewritten per cycle-3 review) |
 | Binary source | REQUIRE `--binary` | build-from-source default — rejected cycle 2: false-PASS in dev with per-repo ldflag-path variance |
 | Diff scope | Manifest.Name + Manifest.Version ONLY | + per-type RPCs (rejected cycle 2: Unimplemented in IaC bridge); + ContractRegistry (rejected cycle 3: plugin.json has no iacResources LHS + BuildContractRegistry returns infra-internal noise; defer to follow-up #766) |
 | Version diff rule | sentinel-pattern matrix (`{"", "(devel)...", "0.0.0"}`) | cycle-1 "non-empty" (broke truth-loop); cycle-2 literal "0.0.0" (didn't match SDK's `(devel)` output) |
