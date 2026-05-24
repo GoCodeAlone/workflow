@@ -39,7 +39,7 @@
 |------|-------|-------|--------|
 | 1 | feat(sdk+wfctl): contract-diff extension for verify-capabilities (workflow#767) | Task 1, Task 2, Task 3, Task 4, Task 5 | feat/767-contract-diff |
 
-**Status:** Draft
+**Status:** Locked 2026-05-24T13:25:37Z
 
 ---
 
