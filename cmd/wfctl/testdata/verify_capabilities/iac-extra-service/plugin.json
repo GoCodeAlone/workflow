@@ -1,0 +1,10 @@
+{
+  "name": "verify-iac-extra",
+  "version": "0.0.0",
+  "minEngineVersion": "v0.62.0",
+  "author": "test fixture",
+  "description": "IaC fixture: binary registers more services than plugin.json declares",
+  "iacServices": [
+    "workflow.plugin.external.iac.IaCProviderRequired"
+  ]
+}

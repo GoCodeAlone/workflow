@@ -598,6 +598,48 @@ func TestManifestNoIaCStateBackends(t *testing.T) {
 	}
 }
 
+func TestPluginManifest_IaCServices_TopLevel(t *testing.T) {
+	const j = `{"name":"x","version":"1.0.0","author":"a","description":"d","iacServices":["workflow.plugin.external.iac.IaCProviderRequired"]}`
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(j), &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.IaCServices) != 1 || m.IaCServices[0] != "workflow.plugin.external.iac.IaCProviderRequired" {
+		t.Errorf("IaCServices = %v", m.IaCServices)
+	}
+}
+
+func TestPluginManifest_IaCServices_NestedPromotion(t *testing.T) {
+	const j = `{"name":"x","version":"1.0.0","author":"a","description":"d","capabilities":{"iacServices":["workflow.plugin.external.iac.IaCProviderRequired","workflow.plugin.external.iac.IaCProviderFinalizer"]}}`
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(j), &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.IaCServices) != 2 {
+		t.Errorf("IaCServices = %v, want 2 entries promoted from nested capabilities", m.IaCServices)
+	}
+}
+
+// Adversarial cycle 1 finding: cover dedup when both top-level AND nested are present.
+func TestPluginManifest_IaCServices_DeduplicatesAcrossTopLevelAndNested(t *testing.T) {
+	const j = `{"name":"x","version":"1.0.0","author":"a","description":"d","iacServices":["workflow.plugin.external.iac.IaCProviderRequired"],"capabilities":{"iacServices":["workflow.plugin.external.iac.IaCProviderRequired","workflow.plugin.external.iac.IaCProviderFinalizer"]}}`
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(j), &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.IaCServices) != 2 {
+		t.Errorf("IaCServices = %v, want 2 deduped entries (appendUnique merge)", m.IaCServices)
+	}
+}
+
+func TestPluginManifest_IaCServices_OmitWhenEmpty(t *testing.T) {
+	m := PluginManifest{Name: "x", Version: "1.0.0", Author: "a", Description: "d"}
+	b, _ := json.Marshal(m)
+	if strings.Contains(string(b), "iacServices") {
+		t.Errorf("empty IaCServices should be omitted; got %s", b)
+	}
+}
+
 // TestManifestCapabilitiesInvalidFormat verifies that a plugin.json whose
 // "capabilities" field is neither an array nor an object (e.g. a bare string)
 // is rejected with a descriptive error.

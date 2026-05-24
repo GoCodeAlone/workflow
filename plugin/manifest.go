@@ -55,6 +55,20 @@ type PluginManifest struct {
 	// A2 (decisions/0035).
 	IaCStateBackends []string `json:"iacStateBackends,omitempty" yaml:"iacStateBackends,omitempty"`
 
+	// IaCServices lists the typed IaC service names this plugin serves
+	// (fully-qualified gRPC service names, e.g.
+	// "workflow.plugin.external.iac.IaCProviderRequired"). Authored in
+	// plugin.json either as a top-level "iacServices" key OR nested under
+	// "capabilities.iacServices" (UnmarshalJSON's object branch promotes
+	// the nested form, same as IaCStateBackends). The engine cross-checks
+	// these against the plugin's runtime ContractRegistry via wfctl plugin
+	// verify-capabilities (workflow#767).
+	//
+	// Orthogonal to IaCStateBackends (which lists backend NAMES, not gRPC
+	// service names). A plugin that registers the IaCStateBackend service
+	// AND lists its backend names will appear in BOTH manifest fields.
+	IaCServices []string `json:"iacServices,omitempty" yaml:"iacServices,omitempty"`
+
 	// StepSchemas provides schema definitions for step types registered by this plugin.
 	// Used by MCP/LSP for hover docs, completions, and output documentation.
 	StepSchemas []*schema.StepSchema `json:"stepSchemas,omitempty" yaml:"stepSchemas,omitempty"`
@@ -148,6 +162,7 @@ func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 			TriggerTypes     []string `json:"triggerTypes"`
 			WorkflowTypes    []string `json:"workflowTypes"`
 			IaCStateBackends []string `json:"iacStateBackends"`
+			IaCServices      []string `json:"iacServices"`
 		}
 		if err := json.Unmarshal(raw.Capabilities, &legacyCaps); err != nil {
 			return fmt.Errorf("invalid capabilities object: %w", err)
@@ -157,6 +172,7 @@ func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 		m.TriggerTypes = appendUnique(m.TriggerTypes, legacyCaps.TriggerTypes...)
 		m.WorkflowTypes = appendUnique(m.WorkflowTypes, legacyCaps.WorkflowTypes...)
 		m.IaCStateBackends = appendUnique(m.IaCStateBackends, legacyCaps.IaCStateBackends...)
+		m.IaCServices = appendUnique(m.IaCServices, legacyCaps.IaCServices...)
 
 	default:
 		return fmt.Errorf("capabilities: unsupported JSON type (expected array or object, got %q)", string(raw.Capabilities))

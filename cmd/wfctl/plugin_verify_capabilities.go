@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 	external "github.com/GoCodeAlone/workflow/plugin/external"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	hclog "github.com/hashicorp/go-hclog"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -141,6 +144,34 @@ Options:
 	if pass, reason := diffVersion(declared.Version, runtime.GetVersion()); !pass {
 		failures = append(failures, "version: "+reason)
 	}
+
+	// Contract-diff (workflow#767). One new RPC after GetManifest.
+	contractReg, regErr := pbClient.GetContractRegistry(ctx, &emptypb.Empty{})
+	switch {
+	case regErr != nil && status.Code(regErr) == codes.Unimplemented:
+		// Empty registry semantics — skip-if-LHS-empty handles non-IaC plugins;
+		// non-empty plugin.json.iacServices → directional diff FAILs every
+		// declared service (correct: plugin advertises nothing).
+		contractReg = nil
+	case regErr != nil:
+		return fmt.Errorf("GetContractRegistry RPC: %w (stderr: %s)", regErr, stderr.String())
+	}
+	// Defense-in-depth: client-side namespace filter per ADR 0042
+	// (decisions/0042-verify-capabilities-iac-namespace.md) and design §2.
+	// Old-SDK plugin binaries (pre-Task-3 bridge) return ALL gRPC services
+	// including PluginService + health — without this filter, every infra
+	// service would WARN-spam as "extra in plugin.json" for unrebased plugins.
+	iacPrefix := strings.TrimSuffix(pb.IaCProviderRequired_ServiceDesc.ServiceName, ".IaCProviderRequired") + "."
+	advertisedServices := serviceNamesFromRegistry(contractReg, iacPrefix)
+	missingSvc, extraSvc := diffIaCServices(declared.IaCServices, advertisedServices)
+	for _, s := range missingSvc {
+		failures = append(failures, fmt.Sprintf("iacServices: plugin.json declares %q but binary does not advertise it", s))
+	}
+	for _, s := range extraSvc {
+		// WARN, not FAIL — directional diff per design §3.
+		fmt.Fprintf(os.Stderr, "WARN  %s: binary advertises %q not in plugin.json.iacServices (additive — consider updating plugin.json)\n", declared.Name, s)
+	}
+
 	if len(failures) > 0 {
 		fmt.Fprintf(os.Stderr, "FAIL  %s (plugin.json)\nerror: %d mismatch(es)\n", declared.Name, len(failures))
 		for _, f := range failures {
@@ -176,6 +207,63 @@ func preflightBinary(path string) error {
 		return fmt.Errorf("--binary %q is not executable (mode=%s)", path, fi.Mode())
 	}
 	return nil
+}
+
+// diffIaCServices computes directional set-difference of declared
+// (plugin.json.iacServices) vs advertised (binary's filtered ContractRegistry).
+// Returns (missing, extra) where:
+//   - missing: declared but not advertised → caller emits FAIL (truth-loop bug).
+//   - extra: advertised but not declared → caller emits WARN (additive doc-lag).
+//
+// Empty declared returns (nil, nil) → caller must skip the diff entirely.
+func diffIaCServices(declared, advertised []string) (missing, extra []string) {
+	if len(declared) == 0 {
+		return nil, nil
+	}
+	declSet := make(map[string]bool, len(declared))
+	for _, s := range declared {
+		declSet[s] = true
+	}
+	advSet := make(map[string]bool, len(advertised))
+	for _, s := range advertised {
+		advSet[s] = true
+	}
+	for _, s := range declared {
+		if !advSet[s] {
+			missing = append(missing, s)
+		}
+	}
+	for _, s := range advertised {
+		if !declSet[s] {
+			extra = append(extra, s)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	return missing, extra
+}
+
+// serviceNamesFromRegistry returns SERVICE-kind contract names from reg
+// whose ServiceName starts with namespacePrefix. Defense-in-depth: the SDK
+// bridge (Task 3) also filters, but old-SDK plugins skip that filter — this
+// client-side check prevents WARN-spam for unrebased plugin binaries.
+// Returns nil for nil reg. Sorted for stable diff output.
+func serviceNamesFromRegistry(reg *pb.ContractRegistry, namespacePrefix string) []string {
+	if reg == nil {
+		return nil
+	}
+	names := make([]string, 0, len(reg.Contracts))
+	for _, c := range reg.Contracts {
+		if c.GetKind() != pb.ContractKind_CONTRACT_KIND_SERVICE {
+			continue
+		}
+		if !strings.HasPrefix(c.GetServiceName(), namespacePrefix) {
+			continue
+		}
+		names = append(names, c.GetServiceName())
+	}
+	sort.Strings(names)
+	return names
 }
 
 // isSentinel returns true when v is one of the SDK's dev-sentinel forms

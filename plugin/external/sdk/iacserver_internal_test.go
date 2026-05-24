@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
@@ -114,3 +115,28 @@ func TestIaCBridgeGetManifest_BuildVersionOnlyNoDisk(t *testing.T) {
 
 // Compile-time guard: bridge must satisfy pb.PluginServiceServer.
 var _ pb.PluginServiceServer = (*iacPluginServiceBridge)(nil)
+
+func TestIaCBridge_ContractRegistry_FiltersInfra(t *testing.T) {
+	s := grpc.NewServer()
+	pb.RegisterIaCProviderRequiredServer(s, &stubIaCRequired{})
+	pb.RegisterPluginServiceServer(s, &iacPluginServiceBridge{grpcSrv: s})
+	bridge := &iacPluginServiceBridge{grpcSrv: s}
+	reg, err := bridge.GetContractRegistry(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range reg.Contracts {
+		if !strings.HasPrefix(c.ServiceName, "workflow.plugin.external.iac.") {
+			t.Errorf("bridge surfaced non-iac service %q after filter", c.ServiceName)
+		}
+	}
+	found := false
+	for _, c := range reg.Contracts {
+		if c.ServiceName == "workflow.plugin.external.iac.IaCProviderRequired" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected IaCProviderRequired in filtered registry")
+	}
+}
