@@ -18,7 +18,8 @@
 - Cycle 1: 9-task plan with shared `spawnAndDial` helper extraction. FAILED — 4 Critical (fictional `EngineManifest()` signature; fixture template wrong PluginManifest type; missing-ldflag mechanics misstated; fixture plugin.json shape diverges from PluginManifest).
 - Cycle 2: drop helper extraction; direct GetManifest RPC; fix fixture types; fix sentinel mechanics. FAILED — 3 Critical (anchor `case "validate-contract":` didn't exist on stale worktree base; duplicate `import (...)` blocks in test+production files would fail compile; name-drift test assertion too lenient).
 - Cycle 3: rebased onto main; tightened import-block instructions Tasks 2-4; bumped fixture go directive; isolated name-drift via ldflag. FAILED — 1 Critical (Task 7 reintroduced duplicate-import-block defect — missed by cycle-3 fix that covered only Tasks 2-4) + 2 Important (name-drift comment misstated matrix row; generator shell-quoting hazard via REPO_ROOT in worktrees with spaces).
-- Cycle 4 (this version): fix Task 7 import-block instruction; clarify name-drift matrix-row comment; rewrite generators to embed relative `replace` directly (no $REPO_ROOT, no sed dance). Eliminates remaining cycle-3 findings.
+- Cycle 4: fix Task 7 import-block instruction; clarify name-drift matrix-row comment; rewrite generators. FAILED — 2 Critical (Task 1 pre-staged unused `os`/`path/filepath` imports → "imported and not used" compile error; Task 7 helper uses `fmt.Sprintf` but `"fmt"` not in import list → `undefined: fmt`).
+- Cycle 5 (this version): Task 1 ships test file with only `strings`/`testing` imports; Task 2 explicitly adds `os` + `path/filepath` when first used; Task 7 explicitly adds `fmt` + `os/exec` (was only `os/exec`). Each task's imports match its actual usage.
 
 ---
 
@@ -68,8 +69,6 @@ Create `cmd/wfctl/plugin_verify_capabilities_test.go`:
 package main
 
 import (
-	"os"           // added in Task 2
-	"path/filepath" // added in Task 2
 	"strings"
 	"testing"
 )
@@ -202,7 +201,7 @@ git commit -m "feat(wfctl): plugin verify-capabilities subcommand skeleton (work
 
 **Step 1: Write the failing tests**
 
-Append the test functions below to `cmd/wfctl/plugin_verify_capabilities_test.go`. **DO NOT add a new `import (...)` block** — the file's existing import block (created in Task 1 with `os`, `path/filepath`, `strings`, `testing`) already covers everything these tests need.
+In `cmd/wfctl/plugin_verify_capabilities_test.go`: **Edit the existing SINGLE import block** to add `"os"` and `"path/filepath"` (alongside existing `"strings"`, `"testing"`). DO NOT add a second `import (...)` declaration. Then append the test functions below.
 
 ```go
 func TestPreflightBinaryEmpty(t *testing.T) {
@@ -860,7 +859,7 @@ git commit -m "test(wfctl): name-drift fixture (binary advertises mismatched Nam
 
 **Step 1: Add the fixture-build helper + 5 test cases**
 
-In `cmd/wfctl/plugin_verify_capabilities_test.go`: **Edit the existing SINGLE import block** to add `"os/exec"` (alongside existing `"os"`, `"path/filepath"`, `"strings"`, `"testing"`). DO NOT add a second `import (...)` declaration — golangci-lint will fail the build. Then append the helper + test functions below.
+In `cmd/wfctl/plugin_verify_capabilities_test.go`: **Edit the existing SINGLE import block** to add `"fmt"` and `"os/exec"` (alongside existing `"os"`, `"path/filepath"`, `"strings"`, `"testing"`). DO NOT add a second `import (...)` declaration — golangci-lint will fail the build. Then append the helper + test functions below.
 
 ```go
 // buildFixtureBinaryForVerify builds the fixture scenario in-place and emits
