@@ -609,10 +609,13 @@ import (
 
 var Version = "dev"
 
+// CRITICAL: this struct must NOT embed pb.UnimplementedIaCProviderFinalizerServer.
+// Embedding the Unimplemented type satisfies the IaCProviderFinalizerServer
+// interface (via mustEmbedUnimplementedIaCProviderFinalizerServer sentinel),
+// which would make sdk.ServeIaCPlugin's type-assertion succeed and REGISTER
+// the Finalizer service — defeating the missing-service test scenario.
 type fixture struct {
 	pb.UnimplementedIaCProviderRequiredServer
-	// Does NOT embed IaCProviderFinalizerServer — type-assertion in
-	// sdk.ServeIaCPlugin skips the optional Finalizer registration.
 }
 
 func (fixture) Name(context.Context, *pb.NameRequest) (*pb.NameResponse, error) {
@@ -780,11 +783,15 @@ GOWORK=off go build -o /tmp/wfctl ./cmd/wfctl
 /tmp/wfctl plugin verify-capabilities --binary /tmp/iac-good cmd/wfctl/testdata/verify_capabilities/iac-good
 # Expected: exit 0, stdout begins with "OK    verify-iac-good"
 
-# 3b. Build iac-missing-service fixture + verify FAIL path with iacServices: marker
+# 3b. Build iac-missing-service fixture + verify FAIL path with iacServices: marker.
+# IMPORTANT: capture wfctl exit BEFORE piping — `$?` after a pipeline reads the
+# last command's exit (tee, almost always 0), not wfctl's. Without this the
+# FAIL-path check silently passes regardless of actual behavior.
 (cd cmd/wfctl/testdata/verify_capabilities/iac-missing-service && GOWORK=off go build -mod=readonly -o /tmp/iac-missing .)
-/tmp/wfctl plugin verify-capabilities --binary /tmp/iac-missing cmd/wfctl/testdata/verify_capabilities/iac-missing-service 2>&1 | tee /tmp/verify-missing.out
-test $? -ne 0 && grep -q "iacServices:" /tmp/verify-missing.out && grep -q "IaCProviderFinalizer" /tmp/verify-missing.out
-# Expected: non-zero exit, stderr contains both "iacServices:" and "IaCProviderFinalizer"
+/tmp/wfctl plugin verify-capabilities --binary /tmp/iac-missing cmd/wfctl/testdata/verify_capabilities/iac-missing-service > /tmp/verify-missing.out 2>&1
+WFCTL_EXIT=$?
+test "$WFCTL_EXIT" -ne 0 && grep -q "iacServices:" /tmp/verify-missing.out && grep -q "IaCProviderFinalizer" /tmp/verify-missing.out
+# Expected: WFCTL_EXIT non-zero, stderr contains both "iacServices:" and "IaCProviderFinalizer"
 
 # 4. Conformance regression — Task 3 touched sdk/iacserver.go
 GOWORK=off go test -run TestPluginConformance -count=1 -timeout 300s ./cmd/wfctl/...
@@ -810,8 +817,9 @@ Backwards-compat: subcommand behavior is additive at the diff level. Older wfctl
 - Task 4's new helper is named `serviceNamesFromRegistry` (NOT `registeredIaCServices`) because `cmd/wfctl/deploy_providers.go:350` already defines `registeredIaCServices` in `package main` — Go forbids same-name top-level functions in the same package regardless of signature.
 - Task 4 helper applies BOTH a `CONTRACT_KIND_SERVICE` kind filter AND a namespace-prefix filter (defense-in-depth per design §2) so old-SDK plugin binaries don't produce WARN-spam.
 - Task 5 fixtures MUST commit `go.sum` — `buildFixtureBinaryForVerify` uses `-mod=readonly` which fails when `go.sum` is absent.
+- `iac-missing-service` fixture struct MUST embed ONLY `pb.UnimplementedIaCProviderRequiredServer` — embedding the Finalizer Unimplemented type satisfies the interface via the `mustEmbed*` sentinel, causing the SDK type-assertion to register it and defeating the missing-service test scenario.
 
-## Adversarial cycle 1 — findings resolved inline
+## Adversarial cycles 1+2 — findings resolved inline
 
 | Finding | Resolution |
 |---|---|
@@ -822,3 +830,5 @@ Backwards-compat: subcommand behavior is additive at the diff level. Older wfctl
 | Important: Final verification CLI subcommand needs representative invocation, not just `--help` | Added 3a (iac-good PASS path) + 3b (iac-missing-service FAIL path) in Final verification block. |
 | Minor: dead `Finalize` method in 2 fixtures | Removed; `FinalizeApply` is satisfied by embedded `UnimplementedIaCProviderFinalizerServer`. |
 | Minor: per-task rollback notes misleading post-merge-squash | All per-task rollbacks now point to PR-level `git revert <merge-sha>` as the only safe path. |
+| **Cycle 2 Critical:** embedding `pb.UnimplementedIaCProviderFinalizerServer` in `iac-missing-service` fixture WOULD register the service (Unimplemented satisfies the interface via `mustEmbed*` sentinel) → false PASS | Removed the embed; fixture now ONLY embeds `UnimplementedIaCProviderRequiredServer`; added critical comment explaining the gRPC interface-satisfaction semantics. |
+| **Cycle 2 Critical:** Final verification 3b bash pipeline `$?` reads `tee` exit not wfctl exit → smoke-test silently passes regardless of actual behavior | Restructured: redirect wfctl output to file via `>`, capture exit via `WFCTL_EXIT=$?` BEFORE any pipeline, then check both exit and grep markers. |
