@@ -215,3 +215,49 @@ func TestVerifyCapabilities_NameDrift(t *testing.T) {
 		t.Errorf("want name-mismatch error, got: %v", err)
 	}
 }
+
+func TestDiffIaCServices_Match(t *testing.T) {
+	missing, extra := diffIaCServices(
+		[]string{"workflow.plugin.external.iac.IaCProviderRequired"},
+		[]string{"workflow.plugin.external.iac.IaCProviderRequired"})
+	if len(missing) != 0 || len(extra) != 0 {
+		t.Errorf("missing=%v extra=%v", missing, extra)
+	}
+}
+
+func TestDiffIaCServices_MissingFromBinary(t *testing.T) {
+	declared := []string{
+		"workflow.plugin.external.iac.IaCProviderRequired",
+		"workflow.plugin.external.iac.IaCProviderFinalizer",
+	}
+	advertised := []string{"workflow.plugin.external.iac.IaCProviderRequired"}
+	missing, extra := diffIaCServices(declared, advertised)
+	if len(missing) != 1 || missing[0] != "workflow.plugin.external.iac.IaCProviderFinalizer" {
+		t.Errorf("want Finalizer missing; got %v", missing)
+	}
+	if len(extra) != 0 {
+		t.Errorf("want no extras; got %v", extra)
+	}
+}
+
+func TestDiffIaCServices_ExtraInBinary(t *testing.T) {
+	missing, extra := diffIaCServices(
+		[]string{"workflow.plugin.external.iac.IaCProviderRequired"},
+		[]string{
+			"workflow.plugin.external.iac.IaCProviderRequired",
+			"workflow.plugin.external.iac.IaCProviderFinalizer",
+		})
+	if len(missing) != 0 {
+		t.Errorf("missing=%v", missing)
+	}
+	if len(extra) != 1 || extra[0] != "workflow.plugin.external.iac.IaCProviderFinalizer" {
+		t.Errorf("want Finalizer extra; got %v", extra)
+	}
+}
+
+func TestDiffIaCServices_EmptyDeclared_SkipsDiff(t *testing.T) {
+	missing, extra := diffIaCServices(nil, []string{"workflow.plugin.external.iac.IaCProviderRequired"})
+	if missing != nil || extra != nil {
+		t.Errorf("empty LHS should skip; got missing=%v extra=%v", missing, extra)
+	}
+}
