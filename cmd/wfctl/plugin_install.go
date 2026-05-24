@@ -264,18 +264,18 @@ func runPluginInstall(args []string) error {
 		return err
 	}
 
-	// Update .wfctl-lock.yaml lockfile if name@version was provided.
-	if _, ver := parseNameVersion(nameArg); ver != "" {
-		pluginName = normalizePluginName(pluginName)
-		binaryChecksum := ""
-		binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
-		if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
-			binaryChecksum = cs
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
-		}
-		updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
+	// Update .wfctl-lock.yaml lockfile (workflow#771: always-track, gate removed).
+	// The chokepoint guard inside updateLockfileWithChecksum (Task 1) is responsible
+	// for suppressing writes during outer-frame installers.
+	pluginName = normalizePluginName(pluginName)
+	binaryChecksum := ""
+	binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
+	if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
+		binaryChecksum = cs
+	} else {
+		fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
 	}
+	updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
 
 	return nil
 }

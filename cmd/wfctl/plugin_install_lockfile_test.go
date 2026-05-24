@@ -741,3 +741,93 @@ func TestUpdateLockfileWithChecksum_NewFormatFanOut(t *testing.T) {
 		t.Errorf("Platforms URL clobbered: %v", got.Platforms)
 	}
 }
+
+// TestRunPluginInstall_NoVersionTracksLockfile verifies that runPluginInstall
+// invoked with a PLAIN name (no @version) still writes the resolved version
+// into the new-format lockfile. Pre-Task-2 the @version gate would skip the
+// lockfile write entirely for plain installs (workflow#771).
+func TestRunPluginInstall_NoVersionTracksLockfile(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	const pluginName = "auth"
+	binaryContent := []byte("#!/bin/sh\necho auth\n")
+	tarball := buildPluginTarGz(t, pluginName, binaryContent, minimalPluginJSON(pluginName, "v1.2.3"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/workflow-plugin-auth/manifest.json":
+			manifest := RegistryManifest{
+				Name:        pluginName,
+				Version:     "v1.2.3",
+				Repository:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				Author:      "tester",
+				Description: "test auth plugin",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:     runtime.GOOS,
+						Arch:   runtime.GOARCH,
+						URL:    "http://" + r.Host + "/releases/download/v1.2.3/auth.tar.gz",
+						SHA256: sha256Hex(tarball),
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(manifest)
+		case "/releases/download/v1.2.3/auth.tar.gz":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	regCfg := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(regCfg), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+	// New-format empty lockfile so the chokepoint fan-out fires.
+	emptyLF := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins:     map[string]config.WfctlLockPluginEntry{},
+	}
+	if err := config.SaveWfctlLockfile(lockPath, emptyLF); err != nil {
+		t.Fatal(err)
+	}
+
+	// PLAIN name — no @version. Pre-Task-2 this skips the lockfile write entirely.
+	if err := runPluginInstall([]string{"--plugin-dir", pluginDir, "workflow-plugin-auth"}); err != nil {
+		t.Fatalf("runPluginInstall: %v", err)
+	}
+
+	loaded, err := config.LoadWfctlLockfile(lockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	entry, ok := loaded.Plugins["auth"]
+	if !ok {
+		// mergeIntoNewFormatLockfile uses normalized name; auth was empty so key is "auth".
+		t.Fatalf("plain install should track lockfile entry; loaded.Plugins=%#v", loaded.Plugins)
+	}
+	if entry.Version != "v1.2.3" {
+		t.Errorf("plain install Version = %q, want v1.2.3", entry.Version)
+	}
+}
