@@ -153,7 +153,10 @@ Options:
 }
 
 var (
-	publishGradeSemverRe  = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+	// publishGradeSemverRe aliases the shared PublishGradeSemverRe (workflow#762)
+	// so old in-file references keep working; new code should reference
+	// PublishGradeSemverRe directly from plugin_release_grade_semver.go.
+	publishGradeSemverRe  = PublishGradeSemverRe
 	resolveBuildVersionRe = regexp.MustCompile(`sdk\.ResolveBuildVersion\s*\(`)
 	buildVersionFieldRe   = regexp.MustCompile(`BuildVersion\s*:`)
 	withBuildVersionRe    = regexp.MustCompile(`sdk\.WithBuildVersion\s*\(`)
