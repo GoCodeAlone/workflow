@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	"google.golang.org/grpc"
@@ -299,7 +300,11 @@ func (b *iacPluginServiceBridge) DestroyStep(ctx context.Context, req *pb.Handle
 // this to gate optional typed-client construction (Enumerator, DriftDetector,
 // etc.) after loading an IaC plugin via discoverAndLoadIaCProvider.
 func (b *iacPluginServiceBridge) GetContractRegistry(_ context.Context, _ *emptypb.Empty) (*pb.ContractRegistry, error) {
-	return BuildContractRegistry(b.grpcSrv), nil
+	// Derive prefix from canonical proto descriptor per ADR 0042
+	// (decisions/0042-verify-capabilities-iac-namespace.md) so the filter
+	// cannot drift from the .proto package declaration.
+	prefix := strings.TrimSuffix(pb.IaCProviderRequired_ServiceDesc.ServiceName, ".IaCProviderRequired") + "."
+	return BuildContractRegistryForPlugin(b.grpcSrv, prefix), nil
 }
 
 // GetManifest returns the disk-embedded *plugin.PluginManifest as a
