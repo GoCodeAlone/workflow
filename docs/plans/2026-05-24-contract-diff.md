@@ -70,6 +70,16 @@ func TestPluginManifest_IaCServices_NestedPromotion(t *testing.T) {
 	}
 }
 
+// Adversarial cycle 1 finding: cover dedup when both top-level AND nested are present.
+func TestPluginManifest_IaCServices_DeduplicatesAcrossTopLevelAndNested(t *testing.T) {
+	const j = `{"name":"x","version":"1.0.0","author":"a","description":"d","iacServices":["workflow.plugin.external.iac.IaCProviderRequired"],"capabilities":{"iacServices":["workflow.plugin.external.iac.IaCProviderRequired","workflow.plugin.external.iac.IaCProviderFinalizer"]}}`
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(j), &m); err != nil { t.Fatal(err) }
+	if len(m.IaCServices) != 2 {
+		t.Errorf("IaCServices = %v, want 2 deduped entries (appendUnique merge)", m.IaCServices)
+	}
+}
+
 func TestPluginManifest_IaCServices_OmitWhenEmpty(t *testing.T) {
 	m := PluginManifest{Name: "x", Version: "1.0.0", Author: "a", Description: "d"}
 	b, _ := json.Marshal(m)
@@ -335,7 +345,7 @@ git commit -m "feat(sdk): IaC bridge GetContractRegistry filters infra services 
 git push
 ```
 
-**Rollback:** revert this commit — bridge returns to surfacing all registered services (current main behavior). No data migration.
+**Rollback:** see PR-level rollback section. Post-merge squash, this task is not independently revertable — `git revert <merge-sha>` reverts all 5 commits atomically.
 
 ---
 
@@ -443,7 +453,12 @@ C. In `runPluginVerifyCapabilities`, AFTER the existing Name/Version diff (after
 	case regErr != nil:
 		return fmt.Errorf("GetContractRegistry RPC: %w (stderr: %s)", regErr, stderr.String())
 	}
-	advertisedServices := registeredIaCServices(contractReg)
+	// Defense-in-depth: client-side namespace filter (design §2). Old-SDK
+	// plugin binaries (pre-Task-3 bridge) return ALL gRPC services including
+	// PluginService + health — without this filter, every infra service would
+	// WARN-spam as "extra in plugin.json" for any unrebased plugin.
+	iacPrefix := strings.TrimSuffix(pb.IaCProviderRequired_ServiceDesc.ServiceName, ".IaCProviderRequired") + "."
+	advertisedServices := serviceNamesFromRegistry(contractReg, iacPrefix)
 	missingSvc, extraSvc := diffIaCServices(declared.IaCServices, advertisedServices)
 	for _, s := range missingSvc {
 		failures = append(failures, fmt.Sprintf("iacServices: plugin.json declares %q but binary does not advertise it", s))
@@ -454,26 +469,28 @@ C. In `runPluginVerifyCapabilities`, AFTER the existing Name/Version diff (after
 	}
 ```
 
-D. Add a small helper `registeredIaCServices` adapter at end of file (returns SERVICE-kind names from a ContractRegistry, sorted):
+D. Add a small helper `serviceNamesFromRegistry` adapter at end of file (returns SERVICE-kind names from a ContractRegistry, filtered by namespace prefix, sorted):
 
 ```go
-// registeredIaCServices returns SERVICE-kind contract names from reg
-// (already-filtered by namespace prefix at the SDK bridge per Task 3).
-// Returns nil for nil reg.
-func registeredIaCServices(reg *pb.ContractRegistry) []string {
+// serviceNamesFromRegistry returns SERVICE-kind contract names from reg
+// whose ServiceName starts with namespacePrefix. Defense-in-depth: the SDK
+// bridge (Task 3) also filters, but old-SDK plugins skip that filter — this
+// client-side check prevents WARN-spam for unrebased plugin binaries.
+// Returns nil for nil reg. Sorted for stable diff output.
+func serviceNamesFromRegistry(reg *pb.ContractRegistry, namespacePrefix string) []string {
 	if reg == nil { return nil }
 	names := make([]string, 0, len(reg.Contracts))
 	for _, c := range reg.Contracts {
-		if c.GetKind() == pb.ContractKind_CONTRACT_KIND_SERVICE {
-			names = append(names, c.GetServiceName())
-		}
+		if c.GetKind() != pb.ContractKind_CONTRACT_KIND_SERVICE { continue }
+		if !strings.HasPrefix(c.GetServiceName(), namespacePrefix) { continue }
+		names = append(names, c.GetServiceName())
 	}
 	sort.Strings(names)
 	return names
 }
 ```
 
-(Note: there is an existing `registeredIaCServices` in `deploy_providers.go:324` that returns `map[string]bool`. The two have different return types; this file's helper has different shape and is local to verify-capabilities. Per design's "no refactor needed" decision, do NOT consolidate — accept the local helper.)
+(Naming note: there is an existing `registeredIaCServices` in `deploy_providers.go:350` returning `map[string]bool`. Go forbids two top-level funcs with the same name in the same `package main` regardless of signature — this would be a hard compile error. The new helper is named `serviceNamesFromRegistry` from the start to avoid the clash, per adversarial cycle 1 Critical finding.)
 
 **Step 4: Run unit tests — verify PASS**
 
@@ -490,7 +507,7 @@ git commit -m "feat(wfctl): verify-capabilities contract-diff (directional FAIL/
 git push
 ```
 
-**Rollback:** revert this commit + Task 3 — verify-capabilities returns to Name/Version diff only; bridge returns to unfiltered.
+**Rollback:** see PR-level rollback section. Post-merge squash, this task is not independently revertable — `git revert <merge-sha>` reverts all 5 commits atomically.
 
 ---
 
@@ -536,13 +553,11 @@ import (
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	sdk "github.com/GoCodeAlone/workflow/plugin/external/sdk"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var Version = "dev"
 
+// FinalizeApply satisfied by embedded UnimplementedIaCProviderFinalizerServer.
 type fixture struct {
 	pb.UnimplementedIaCProviderRequiredServer
 	pb.UnimplementedIaCProviderFinalizerServer
@@ -550,10 +565,6 @@ type fixture struct {
 
 func (fixture) Name(context.Context, *pb.NameRequest) (*pb.NameResponse, error) {
 	return &pb.NameResponse{Name: "verify-iac-good"}, nil
-}
-
-func (fixture) Finalize(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "test fixture")
 }
 
 func main() {
@@ -645,13 +656,11 @@ import (
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	sdk "github.com/GoCodeAlone/workflow/plugin/external/sdk"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var Version = "dev"
 
+// FinalizeApply satisfied by embedded UnimplementedIaCProviderFinalizerServer.
 type fixture struct {
 	pb.UnimplementedIaCProviderRequiredServer
 	pb.UnimplementedIaCProviderFinalizerServer
@@ -659,10 +668,6 @@ type fixture struct {
 
 func (fixture) Name(context.Context, *pb.NameRequest) (*pb.NameResponse, error) {
 	return &pb.NameResponse{Name: "verify-iac-extra"}, nil
-}
-
-func (fixture) Finalize(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "test fixture")
 }
 
 func main() {
@@ -682,16 +687,18 @@ replace github.com/GoCodeAlone/workflow => ../../../../..
 MOD
 ```
 
-**Step 2: Generate + tidy + standalone-build verify**
+**Step 2: Generate + tidy + standalone-build verify** (`go.sum` MUST be committed — `buildFixtureBinaryForVerify` uses `-mod=readonly` which fails when `go.sum` is absent)
 
 ```bash
 bash /tmp/gen-iac-fixtures.sh
 for d in cmd/wfctl/testdata/verify_capabilities/iac-*/; do
+  # go mod tidy generates go.sum — REQUIRED for -mod=readonly fixture builds
   (cd "$d" && GOWORK=off go mod tidy)
   (cd "$d" && GOWORK=off go build -mod=readonly -o /tmp/p .) && echo "$d: ok" || { echo "$d: FAIL"; exit 1; }
+  test -f "$d/go.sum" || { echo "$d: go.sum MISSING — fixture will fail CI"; exit 1; }
 done
 ```
-Expected: all 3 print `ok`.
+Expected: all 3 print `ok`; all 3 have committed `go.sum` after the for-loop.
 
 **Step 3: Write integration tests**
 
@@ -736,12 +743,21 @@ Full regression: `GOWORK=off go test -count=1 -timeout 300s ./cmd/wfctl/...` —
 **Step 5: Commit + push**
 
 ```bash
-git add cmd/wfctl/testdata/verify_capabilities/iac-good cmd/wfctl/testdata/verify_capabilities/iac-missing-service cmd/wfctl/testdata/verify_capabilities/iac-extra-service cmd/wfctl/plugin_verify_capabilities_test.go
+# Recursive add ensures plugin.json, main.go, go.mod, AND go.sum are all staged.
+git add cmd/wfctl/testdata/verify_capabilities/iac-good/ \
+        cmd/wfctl/testdata/verify_capabilities/iac-missing-service/ \
+        cmd/wfctl/testdata/verify_capabilities/iac-extra-service/ \
+        cmd/wfctl/plugin_verify_capabilities_test.go
+# Sanity check: each fixture must have 4 files including go.sum.
+for d in cmd/wfctl/testdata/verify_capabilities/iac-*/; do
+  test -f "$d/go.sum" || { echo "$d/go.sum NOT STAGED"; exit 1; }
+done
+git status --short cmd/wfctl/testdata/verify_capabilities/iac-*
 git commit -m "test(wfctl): 3 IaC integration fixture scenarios (workflow#767 Task 5)"
 git push
 ```
 
-**Rollback:** revert this commit + Task 4 + Task 3 — full revert of contract-diff path; verify-capabilities returns to Name/Version diff only.
+**Rollback:** see PR-level rollback section. Post-merge squash, this task is not independently revertable — `git revert <merge-sha>` reverts all 5 commits atomically.
 
 ---
 
@@ -755,8 +771,20 @@ GOWORK=off go test -count=1 -timeout 300s ./...
 GOWORK=off go vet ./...
 GOWORK=off golangci-lint run ./cmd/wfctl/... ./plugin/...
 
-# 3. wfctl help correct
-GOWORK=off go build -o /tmp/wfctl ./cmd/wfctl && /tmp/wfctl plugin verify-capabilities --help
+# 3. wfctl help + representative end-to-end invocations (per CLI-command verification class)
+GOWORK=off go build -o /tmp/wfctl ./cmd/wfctl
+/tmp/wfctl plugin verify-capabilities --help
+
+# 3a. Build iac-good fixture binary + verify PASS path
+(cd cmd/wfctl/testdata/verify_capabilities/iac-good && GOWORK=off go build -mod=readonly -o /tmp/iac-good .)
+/tmp/wfctl plugin verify-capabilities --binary /tmp/iac-good cmd/wfctl/testdata/verify_capabilities/iac-good
+# Expected: exit 0, stdout begins with "OK    verify-iac-good"
+
+# 3b. Build iac-missing-service fixture + verify FAIL path with iacServices: marker
+(cd cmd/wfctl/testdata/verify_capabilities/iac-missing-service && GOWORK=off go build -mod=readonly -o /tmp/iac-missing .)
+/tmp/wfctl plugin verify-capabilities --binary /tmp/iac-missing cmd/wfctl/testdata/verify_capabilities/iac-missing-service 2>&1 | tee /tmp/verify-missing.out
+test $? -ne 0 && grep -q "iacServices:" /tmp/verify-missing.out && grep -q "IaCProviderFinalizer" /tmp/verify-missing.out
+# Expected: non-zero exit, stderr contains both "iacServices:" and "IaCProviderFinalizer"
 
 # 4. Conformance regression — Task 3 touched sdk/iacserver.go
 GOWORK=off go test -run TestPluginConformance -count=1 -timeout 300s ./cmd/wfctl/...
@@ -779,4 +807,18 @@ Backwards-compat: subcommand behavior is additive at the diff level. Older wfctl
 - **PUSH AFTER EACH COMMIT** per #765 squash-merge debacle lesson. Verify `git log origin/feat/767-contract-diff..HEAD` is empty before opening PR.
 - Edit existing SINGLE `import (...)` blocks; never add a second `import (...)` declaration.
 - Worktree is rebased onto current main (HEAD f43420535 from #771 merge). All shipped #765 verify-capabilities code is present.
-- Task 4's local `registeredIaCServices` helper has different return type than the existing `deploy_providers.go:324` helper of the same name — both coexist in `package main` (function-scoped lookups distinguish; Go allows same name in different files of same package only with different signatures — VERIFY no clash; if Go complains, rename the new helper to `serviceNamesFromRegistry` or similar).
+- Task 4's new helper is named `serviceNamesFromRegistry` (NOT `registeredIaCServices`) because `cmd/wfctl/deploy_providers.go:350` already defines `registeredIaCServices` in `package main` — Go forbids same-name top-level functions in the same package regardless of signature.
+- Task 4 helper applies BOTH a `CONTRACT_KIND_SERVICE` kind filter AND a namespace-prefix filter (defense-in-depth per design §2) so old-SDK plugin binaries don't produce WARN-spam.
+- Task 5 fixtures MUST commit `go.sum` — `buildFixtureBinaryForVerify` uses `-mod=readonly` which fails when `go.sum` is absent.
+
+## Adversarial cycle 1 — findings resolved inline
+
+| Finding | Resolution |
+|---|---|
+| Critical: `registeredIaCServices` name clash with `deploy_providers.go:350` | Renamed new helper to `serviceNamesFromRegistry` unconditionally (Task 4 §D). |
+| Critical: Task 5 fixture `go.sum` not committed → `-mod=readonly` CI fail | Added explicit `go.sum`-check in Step 2 + recursive `git add <dir>/` + sanity check in Step 5 (Task 5). |
+| Important: client-side namespace filter absent (old-SDK WARN-spam) | Added `iacPrefix` derivation + `strings.HasPrefix` filter inside `serviceNamesFromRegistry` (Task 4 §C+§D). |
+| Important: no dedup test for both-top-level-AND-nested manifest input | Added `TestPluginManifest_IaCServices_DeduplicatesAcrossTopLevelAndNested` (Task 1 Step 1). |
+| Important: Final verification CLI subcommand needs representative invocation, not just `--help` | Added 3a (iac-good PASS path) + 3b (iac-missing-service FAIL path) in Final verification block. |
+| Minor: dead `Finalize` method in 2 fixtures | Removed; `FinalizeApply` is satisfied by embedded `UnimplementedIaCProviderFinalizerServer`. |
+| Minor: per-task rollback notes misleading post-merge-squash | All per-task rollbacks now point to PR-level `git revert <merge-sha>` as the only safe path. |
