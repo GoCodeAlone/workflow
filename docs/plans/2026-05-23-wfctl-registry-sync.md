@@ -12,9 +12,30 @@
 
 ---
 
+## Operator pre-flight (required before Task 3 / 4)
+
+The GitHub repo renames + template-flag toggles in Layer (d) require **org-admin or repo-admin auth** on the `gh` CLI session, which an autonomous agent may not have. The operator must run these interactively BEFORE the agent picks up Task 3 / Task 4:
+
+```bash
+# Verify gh has admin scope:
+gh auth status --hostname github.com | grep -E "admin:org|admin:repo"
+
+# Public scaffold:
+gh repo rename workflow-plugin-template --repo GoCodeAlone/workflow-plugin-template scaffold-workflow-plugin
+gh api -X PATCH /repos/GoCodeAlone/scaffold-workflow-plugin -f is_template=true
+gh repo view GoCodeAlone/scaffold-workflow-plugin --json isTemplate -q .isTemplate  # → true
+
+# Private scaffold:
+gh repo rename workflow-plugin-template-private --repo GoCodeAlone/workflow-plugin-template-private scaffold-workflow-plugin-private
+gh api -X PATCH /repos/GoCodeAlone/scaffold-workflow-plugin-private -f is_template=true
+gh repo view GoCodeAlone/scaffold-workflow-plugin-private --json isTemplate -q .isTemplate  # → true
+```
+
+Tasks 3 and 4 begin with a verification step (`gh repo view ...` confirming the renamed repo exists + is_template=true) and bail with a clear error message if the pre-flight wasn't completed.
+
 ## Scope Manifest
 
-**PR Count:** 6
+**PR Count:** 6 (5 code-PRs + 1 issue edit)
 **Tasks:** 6
 **Estimated Lines of Change:** ~2000 across all PRs
 
@@ -141,11 +162,21 @@ Embeds the inspect program (currently in `sync-core-manifests.sh:39-89` as bash 
 5. Parse JSON; for each core plugin, compare against registry's `plugins/<name>/manifest.json`; with `--fix` rewrite.
 6. Output matches bash format for parity.
 
-**Step 5: Readme mode (generate-readme.sh port)**
+**Step 5: Readme mode (generate-readme.sh port; cycle 1 I-P5 surface enumeration)**
 
 `cmd/wfctl/plugin_registry_sync_readme.go`: implements `runPluginRegistrySyncReadme(args []string) error`. Flags: `--check`, `--registry-dir <path>`.
 
-Reads `plugins/*/manifest.json` + `templates/*/template.json` (whatever the bash reads); regenerates the plugin/template indexes in README.md between marker comments. `--check` is dry-run + exit non-zero on diff.
+Ports `workflow-registry/scripts/generate-readme.sh` (129 lines). Specifically:
+
+a. Walks `<registryDir>/plugins/*/manifest.json` and `<registryDir>/templates/*.yaml` (the 7 templates: api-service.yaml, event-processor.yaml, full-stack.yaml, notify-registry.yml, plugin.yaml, stream-processor.yaml, ui-plugin.yaml).
+b. For plugins: extracts `name + description + repository` via JSON parse. Pipe-escapes `|` characters in descriptions (`strings.ReplaceAll(desc, "|", "\\|")`) for markdown-table safety.
+c. For templates: extracts description from YAML comment header via the bash `template_description()` awk-equivalent. Read `awk_extract_description` shape from bash lines 30-50 and replicate verbatim.
+d. Sorts both lists case-fold (`sort.SliceStable` with `strings.ToLower` compare key).
+e. Locates the marker comment regions in `<registryDir>/README.md` (bash uses `<!-- BEGIN PLUGINS -->` … `<!-- END PLUGINS -->` and `<!-- BEGIN TEMPLATES -->` … `<!-- END TEMPLATES -->`; verify by reading the existing README.md before coding).
+f. Substitutes the table content between the markers.
+g. `--check` mode: compare proposed README content to current README; exit 1 on diff with a unified-diff printout.
+
+Test fixtures: `cmd/wfctl/testdata/plugin_registry_sync/readme-{good,stale,pipe-in-desc,case-fold-sort}/`. Pin against bash output byte-for-byte for parity.
 
 **Step 6: Tests (table-driven, fixture-backed)**
 
@@ -160,18 +191,38 @@ Reads `plugins/*/manifest.json` + `templates/*/template.json` (whatever the bash
 
 For `gh` API calls: use a test-injected interface or `httptest`-backed fake.
 
-**Step 7: --verify-capabilities (reuses install pipeline per C3 fix)**
+**Step 7: --verify-capabilities (direct extract + exec per plan cycle 1 C-P1 fix)**
+
+The cycle-1 plan named `runPluginInstall` as the reusable surface; that's wrong (it takes raw CLI args + writes to stderr). The actually reusable function is `installFromLocal(srcDir, pluginDir string) error` at `cmd/wfctl/plugin_install.go:882`. But `--verify-capabilities` doesn't need lockfile/integrity machinery at all — it only needs to spawn the binary to call `GetContractRegistry`. Skip the install step entirely.
 
 When `--verify-capabilities` set, for each plugin:
 
 1. `gh release download <tag> --repo <gh_repo> --pattern '<plugin-name>-<os>-<arch>.tar.gz' -O /tmp/<plugin>-<tag>.tar.gz`
-2. Extract to `/tmp/<plugin>-<tag>-extracted/`
-3. Invoke existing `runPluginInstall` programmatically with `--local /tmp/<plugin>-<tag>-extracted/ --plugin-dir /tmp/<plugin>-<tag>-installed/` (avoids re-implementing rename + lockfile + integrity).
-4. Spawn the installed plugin via existing `wfctl plugin info`-style code path; call `GetContractRegistry` RPC.
+2. Extract to `/tmp/<plugin>-<tag>-extracted/` via existing tarball-extract helper at `cmd/wfctl/plugin_install.go` (find via `grep extractTarGz`).
+3. Locate the binary inside the tarball. Goreleaser pattern: `<plugin-name>` or `<plugin-name>-<os>-<arch>`. Try both; first hit wins.
+4. Spawn the binary via existing plugin-spawn helper (find via `grep -r 'goplugin.NewClient' cmd/wfctl/` — there's a `wfctl plugin info` code path that already does this). Call `GetContractRegistry` RPC.
 5. Diff RPC response vs `<registryDir>/plugins/<name>/manifest.json.capabilities`. If `--fix`, rewrite the registry manifest.
 6. Cleanup temp dirs.
 
-If existing wfctl APIs aren't exported in a way that supports invocation from `registry-sync`, **bail with a `TODO: refactor needed`** rather than reimplementing — file as a sub-task on the PR.
+If the spawn helper isn't usable from registry-sync without refactoring (verify per-task via grep), implement a minimal local spawn directly: `goplugin.NewClient` with the existing handshake + `pb.NewPluginServiceClient` + `GetManifest` (which carries capabilities since workflow#758 v0.61.0). Plan task verification asserts this works locally before commit.
+
+**Step 7.5: Type-allowlist defense (plan cycle 1 C-P3 fix)**
+
+`PluginManifest.Validate()` (plugin/manifest.go:194) does not check `.type` today. The design's Layer (d) step 5 promised that `wfctl plugin registry-sync` rejects `type: "scaffold"` to catch accidental re-registration. Add this enforcement directly in `runPluginRegistrySync`:
+
+```go
+// In syncDefault, after parsing manifest:
+allowedTypes := map[string]bool{"external": true, "builtin": true, "core": true, "iac": true}
+manifestType, _ := raw["type"].(string)
+if manifestType != "" && !allowedTypes[manifestType] {
+    fmt.Fprintf(os.Stderr, "  REJECT  %s — plugin.json.type=%q is not in the registry allowlist (scaffold repos must not be registered)\n", pluginName, manifestType)
+    continue
+}
+```
+
+Test fixture: `cmd/wfctl/testdata/plugin_registry_sync/scaffold-rejected/plugin.json` with `"type": "scaffold"`. Expected output contains `REJECT` for that plugin.
+
+This is the registry-side guarantee that scaffold repos which somehow leak back into `plugins/*/manifest.json` get caught at sync time.
 
 **Step 8: Update docs/PLUGIN_RELEASE_GATES.md**
 
@@ -245,13 +296,27 @@ go_out="$2"
 label="$3"
 
 # Normalize: strip ANSI colors, trim trailing whitespace per line.
-sed -E 's/\x1b\[[0-9;]*[mK]//g; s/[[:space:]]+$//' "$bash_out" | sort > "$bash_out.norm"
-sed -E 's/\x1b\[[0-9;]*[mK]//g; s/[[:space:]]+$//' "$go_out" | sort > "$go_out.norm"
+bash_norm="$(mktemp)"
+go_norm="$(mktemp)"
+sed -E 's/\x1b\[[0-9;]*[mK]//g; s/[[:space:]]+$//' "$bash_out" > "$bash_norm"
+sed -E 's/\x1b\[[0-9;]*[mK]//g; s/[[:space:]]+$//' "$go_out" > "$go_norm"
 
-if ! diff -u "$bash_out.norm" "$go_out.norm"; then
-  echo "::error::Parity diff for $label between bash + Go outputs. Bash remains authoritative; investigate Go port."
+# 1. Sorted set-membership check (fail). Catches missing/extra lines regardless of order.
+sort "$bash_norm" > "$bash_norm.sorted"
+sort "$go_norm" > "$go_norm.sorted"
+if ! diff -u "$bash_norm.sorted" "$go_norm.sorted"; then
+  echo "::error::Parity diff (sorted) for $label between bash + Go outputs. Bash remains authoritative; investigate Go port."
   exit 1
 fi
+
+# 2. Unsorted order check (warning only — cycle 1 I-P3 fix). Reorderings are
+#    not failures (different goroutine schedule etc.), but operators reading
+#    workflow logs deserve a heads-up.
+if ! diff -q "$bash_norm" "$go_norm" >/dev/null 2>&1; then
+  echo "::warning::Parity OK for $label set-membership, BUT line order differs between bash + Go. Verify operator-facing output remains readable."
+  diff -u "$bash_norm" "$go_norm" || true
+fi
+
 echo "Parity OK for $label"
 ```
 
@@ -281,7 +346,7 @@ gh pr merge --squash --admin --delete-branch
 
 ### Task 3: scaffold-workflow-plugin rename + modernize (public scaffold)
 
-**Pre-flight:** Layer (a) merged + workflow v0.62.0 tagged.
+**Pre-flight:** Layer (a) merged + workflow v0.62.0 tagged + v0.62.0 release published. Tasks 3+4 can land their content PRs in parallel with Task 1+2 (rename + content are independent of wfctl's release status). However, **do NOT tag the scaffold repos until v0.62.0 is published**; the release.yml's `setup-wfctl@v1 with version: v0.62.0` step fails otherwise (cycle 1 I-P9).
 
 **Pre-step (org admin):**
 
@@ -296,6 +361,7 @@ gh api -X PATCH /repos/GoCodeAlone/scaffold-workflow-plugin -f is_template=true
 - Rename: `cmd/workflow-plugin-TEMPLATE/` → `cmd/scaffold-workflow-plugin/`
 - Create: `cmd/scaffold-workflow-plugin-iac/main.go` (IaC variant)
 - Create: `internal/version.go`
+- Create: `internal/iacserver.go` (plan cycle 1 C-P2 fix — stub `pb.UnimplementedIaCProviderRequiredServer` impl)
 - Create: `scripts/rename-from-scaffold.sh`
 - Create: `.github/workflows/scaffold-rename-test.yml`
 - Modify: `cmd/scaffold-workflow-plugin/main.go` (non-IaC default)
@@ -305,6 +371,7 @@ gh api -X PATCH /repos/GoCodeAlone/scaffold-workflow-plugin -f is_template=true
 - Delete: `.github/workflows/sync-plugin-version.yml`
 - Modify: `README.md`
 - Modify: `go.mod` (module path)
+- Modify: `internal/plugin.go` (existing `NewPlugin` stays; just ensure it works with module-path rename)
 
 **Step 1: Worktree + branch**
 
@@ -353,7 +420,38 @@ func main() {
 }
 ```
 
-**Step 4: Create IaC main.go**
+**Step 4a: Create internal/iacserver.go (cycle 1 C-P2 fix — stub does not exist in current template)**
+
+`internal/iacserver.go`:
+
+```go
+package internal
+
+import (
+    pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+)
+
+// IaCServer is the IaC-mode stub for the scaffold. Embeds
+// pb.UnimplementedIaCProviderRequiredServer so all RPCs return Unimplemented
+// by default. Instantiators replace this with their real IaC provider
+// implementation when using `--mode iac` (the rename script removes the
+// non-IaC cmd/scaffold-workflow-plugin/ in that mode).
+type IaCServer struct {
+    pb.UnimplementedIaCProviderRequiredServer
+    // Any other servers the plugin implements can be embedded here:
+    //   pb.UnimplementedIaCProviderServer
+    //   pb.UnimplementedIaCProviderLogCaptureServer
+    //   pb.UnimplementedIaCProviderFinalizerServer
+}
+
+func NewIaCServer() *IaCServer {
+    return &IaCServer{}
+}
+```
+
+If the embedded type name `UnimplementedIaCProviderRequiredServer` differs in the current proto-generated code, find it via `grep -rn 'Unimplemented.*IaCProvider' plugin/external/proto/ 2>/dev/null` in a workflow checkout and use the exact name.
+
+**Step 4b: Create IaC main.go**
 
 `cmd/scaffold-workflow-plugin-iac/main.go`:
 
@@ -376,8 +474,6 @@ func main() {
     })
 }
 ```
-
-`internal/NewIaCServer()` returns a stub `IaCProviderRequiredServer` implementation with all methods returning `codes.Unimplemented`. Instantiator replaces with their real implementation.
 
 **Step 5: internal/version.go**
 
@@ -471,13 +567,16 @@ jobs:
 git rm .github/workflows/sync-plugin-version.yml
 ```
 
-**Step 10: scripts/rename-from-scaffold.sh (TESTED)**
+**Step 10: scripts/rename-from-scaffold.sh (TESTED; uses `find` + `jq` per cycle 1 C-P4 + I-P6 fixes)**
 
 ```bash
 #!/usr/bin/env bash
 # Usage: bash scripts/rename-from-scaffold.sh <your-plugin-name> [--mode iac|non-iac]
 # Renames scaffold-workflow-plugin internals to workflow-plugin-<your-plugin-name>.
 # Deletes the unused main.go variant. Updates go.mod, plugin.json, .goreleaser.yaml.
+#
+# Requires: jq (not python3); uses `find -print0 | while read -d ''` (not bash globstar)
+# so it works on default bash without `shopt -s globstar`.
 set -euo pipefail
 
 NEW_NAME="${1:?Usage: rename-from-scaffold.sh <name> [--mode iac|non-iac]}"
@@ -486,6 +585,10 @@ if [[ "${2:-}" == "--mode" ]]; then
   MODE="${3:?Mode required}"
 fi
 case "$MODE" in iac|non-iac) ;; *) echo "Mode must be iac or non-iac" >&2; exit 1 ;; esac
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required" >&2; exit 1
+fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -502,22 +605,20 @@ fi
 # 2. go.mod
 go mod edit -module "github.com/GoCodeAlone/workflow-plugin-$NEW_NAME"
 
-# 3. Bounded sed across known file globs.
-for f in plugin.json .goreleaser.yaml README.md cmd/**/*.go internal/**/*.go; do
-  [[ -f "$f" ]] || continue
-  sed -i.bak "s|scaffold-workflow-plugin|workflow-plugin-$NEW_NAME|g" "$f"
-  rm -f "$f.bak"
-done
+# 3. Bounded find loop across .go + .yaml + .md + plugin.json. Uses
+#    -print0/read -d '' for safety with paths containing spaces; explicit
+#    excludes for vendor/, _worktrees/, .git/.
+find . \( -name '*.go' -o -name '*.yaml' -o -name '*.yml' -o -name '*.md' -o -name 'plugin.json' \) \
+  -not -path './vendor/*' -not -path './_worktrees/*' -not -path './.git/*' -print0 \
+  | while IFS= read -r -d '' f; do
+      sed -i.bak "s|scaffold-workflow-plugin|workflow-plugin-$NEW_NAME|g" "$f"
+      rm -f "$f.bak"
+    done
 
-# 4. plugin.json: reset type from "scaffold" to "external".
-python3 -c "
-import json
-p = json.load(open('plugin.json'))
-p['type'] = 'external'
-p['name'] = 'workflow-plugin-$NEW_NAME'
-json.dump(p, open('plugin.json', 'w'), indent=2)
-open('plugin.json', 'a').write('\n')
-"
+# 4. plugin.json: reset type from "scaffold" to "external"; set name.
+tmp="$(mktemp)"
+jq --arg name "workflow-plugin-$NEW_NAME" '.type = "external" | .name = $name' plugin.json > "$tmp"
+mv "$tmp" plugin.json
 
 # 5. Remove the rename script itself (instantiators don't need it).
 rm scripts/rename-from-scaffold.sh
@@ -530,6 +631,8 @@ echo "Renamed to workflow-plugin-$NEW_NAME ($MODE mode). Review changes, edit ca
 
 **Step 11: .github/workflows/scaffold-rename-test.yml**
 
+Also exercises a nested fixture file to catch C-P4 globstar regressions (the rename test must validate the script handles deeper-than-one-level Go files):
+
 ```yaml
 name: Scaffold rename test
 on: [push, pull_request]
@@ -540,11 +643,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
+      - name: Add nested fixture file to exercise the find loop (cycle 1 C-P4 guard)
+        run: |
+          mkdir -p internal/nested/sub
+          cat > internal/nested/sub/test.go <<'EOF'
+          // Fixture file deeper than one level — verifies the rename script's
+          // find loop catches imports of scaffold-workflow-plugin in nested
+          // packages, not only top-level ones.
+          package sub
+          import _ "github.com/GoCodeAlone/scaffold-workflow-plugin/internal"
+          EOF
       - name: Rename to test-plugin (non-iac) + build
         run: |
           cp -r . /tmp/scaffold-copy
           cd /tmp/scaffold-copy
           bash scripts/rename-from-scaffold.sh test-plugin --mode non-iac
+          # If the nested-fixture import didn't get rewritten, the build fails
+          # with "no required module provides github.com/GoCodeAlone/scaffold-workflow-plugin/internal".
           go build ./...
   rename-iac:
     runs-on: ubuntu-latest
@@ -552,6 +667,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
+      - name: Add nested fixture file (cycle 1 C-P4 guard)
+        run: |
+          mkdir -p internal/nested/sub
+          cat > internal/nested/sub/test.go <<'EOF'
+          package sub
+          import _ "github.com/GoCodeAlone/scaffold-workflow-plugin/internal"
+          EOF
       - name: Rename to test-plugin (iac) + build
         run: |
           cp -r . /tmp/scaffold-copy
@@ -560,7 +682,7 @@ jobs:
           go build ./...
 ```
 
-**Step 12: README.md**
+**Step 12: README.md (cycle 1 I-P1 fix — drop `--from-scaffold` vapourware reference)**
 
 Rewrite as scaffold documentation:
 
@@ -568,14 +690,16 @@ Rewrite as scaffold documentation:
 # scaffold-workflow-plugin
 
 This is a SCAFFOLD repo. It is NOT an installable plugin. Use it to
-create a new workflow plugin via GitHub's "Use this template" button OR
-via `wfctl plugin init --from-scaffold scaffold-workflow-plugin`.
+create a new workflow plugin via GitHub's "Use this template" button.
+
+(A future `wfctl plugin init --from-scaffold` subcommand is filed at
+workflow#762 but not yet implemented; use the GitHub UI path below.)
 
 ## After creating your new repo
 
 1. **Enable GitHub Actions**: Settings → Actions → "I understand my
-   workflows, enable them" (required for releases — templates ship
-   with workflows disabled by default).
+   workflows, enable them" (required for releases — repos created from
+   a template ship with workflows disabled by default).
 2. **Run the rename script**:
    ```
    bash scripts/rename-from-scaffold.sh <your-plugin-name> --mode [iac|non-iac]
@@ -620,27 +744,61 @@ Multi-commit allowed; squash on merge. CI runs scaffold-rename-test workflow whi
 
 ---
 
-### Task 4: scaffold-workflow-plugin-private rename + modernize
+### Task 4: scaffold-workflow-plugin-private rename + modernize (cycle 1 I-P2 expansion)
 
-**Identical structure to Task 3**, against `workflow-plugin-template-private` → `scaffold-workflow-plugin-private`. Differences:
+**Pre-flight (operator already ran per top-of-plan):** rename completed, is_template=true verified.
 
-- `plugin.json.name` = `scaffold-workflow-plugin-private`
-- All module paths reference `scaffold-workflow-plugin-private`
-- README.md opens with I7 clarification: "This repo's `-private` suffix refers to its GitHub repo visibility (only org members can clone). It is NOT related to `plugin.json.private: true` semantics."
-- `.goreleaser.yaml` references `RELEASES_TOKEN` for private go-module access (verify the existing template already has this; if not, add).
+**Files in scaffold-workflow-plugin-private (post-rename):** mirror Task 3's Files list with `private` suffix; same structure.
 
-Same scaffold-rename-test workflow + same release.yml pattern.
-
-Pre-flight admin:
+**Step 1: Verify pre-flight + clone**
 
 ```bash
-gh repo rename workflow-plugin-template-private --repo GoCodeAlone/workflow-plugin-template-private scaffold-workflow-plugin-private
-gh api -X PATCH /repos/GoCodeAlone/scaffold-workflow-plugin-private -f is_template=true
+gh repo view GoCodeAlone/scaffold-workflow-plugin-private --json isTemplate -q .isTemplate  # → true; bail if missing
+cd /Users/jon/workspace
+gh repo clone GoCodeAlone/scaffold-workflow-plugin-private
+cd scaffold-workflow-plugin-private
+git checkout -b feat/762-scaffold-modernize
 ```
 
-**Verify + Commit + push + PR + monitor + admin-merge** same as Task 3.
+**Step 2: Inspect existing RELEASES_TOKEN usage**
 
-**Rollback:** same as Task 3.
+```bash
+grep -rn "RELEASES_TOKEN\|GOPRIVATE" .github/workflows/ .goreleaser.yaml go.mod 2>/dev/null
+```
+
+Decision branch (I-P2):
+- If `RELEASES_TOKEN` already wired in release.yml + `GOPRIVATE` set in goreleaser env: KEEP as-is; only re-derive the import-path strings in Step 4 below.
+- If NOT wired: ADD the standard pattern from any other private plugin repo (e.g., DO plugin's release.yml uses `git config --global url."https://x-access-token:${RELEASES_TOKEN}@github.com/".insteadOf "https://github.com/"`). Copy that step verbatim into the new release.yml.
+
+**Step 3: Rename cmd dir + go.mod module path**
+
+```bash
+git mv cmd/workflow-plugin-TEMPLATE cmd/scaffold-workflow-plugin-private
+go mod edit -module github.com/GoCodeAlone/scaffold-workflow-plugin-private
+find . -name '*.go' -not -path './vendor/*' -not -path './_worktrees/*' \
+  -exec sed -i.bak 's|workflow-plugin-template-private|scaffold-workflow-plugin-private|g' {} \;
+find . -name '*.go.bak' -delete
+```
+
+**Steps 4a-13:** identical to Task 3 Steps 4a-13 except every `scaffold-workflow-plugin` reference becomes `scaffold-workflow-plugin-private`. Same files (internal/iacserver.go stub, two main.go variants, internal/version.go, scripts/rename-from-scaffold.sh, .github/workflows/scaffold-rename-test.yml, release.yml two-step gates, plugin.json sentinel `"0.0.0"` + `"type": "scaffold"`).
+
+**Step 14 (new for Task 4): README opens with I7 clarification**
+
+Prepend to README:
+
+```markdown
+> **About this repo's `-private` suffix:** This refers to the GitHub repo
+> visibility — only GoCodeAlone org members can clone or fork it. It is
+> NOT related to `plugin.json.private: true` semantics (which control
+> marketplace listing). A plugin instantiated from this scaffold may have
+> any GitHub visibility and any plugin.json.private value independently.
+```
+
+Then the standard scaffold README from Task 3 Step 12 (with `scaffold-workflow-plugin-private` substituted everywhere).
+
+**Step 15: Verify + commit + push + PR + monitor + admin-merge** — same shape as Task 3 Steps 13-14. The scaffold-rename-test.yml workflow guards C5 regressions.
+
+**Rollback:** revert PR + `gh repo rename` back to `workflow-plugin-template-private`.
 
 ---
 
@@ -693,7 +851,7 @@ those operators must remove the entry. The plugin was non-functional
 Refs workflow#762
 ```
 
-**Rollback:** `git revert`; restores `plugins/template/manifest.json` and registry once again exposes the scaffold as a plugin (regression).
+**Rollback (cycle 1 I-P7 caveat):** `git revert` restores `plugins/template/manifest.json`, BUT since Tasks 3+4 rename the upstream repos to `scaffold-workflow-plugin*`, the restored manifest points at the OLD URLs which now redirect to the renamed repos (different artifact name pattern). `wfctl plugin install template` would download wrong-named tarballs and fail in non-obvious ways. **In practice this PR is non-revertable once Tasks 3+4 have shipped.** If a true revert is needed, file a separate PR that ALSO unwinds Tasks 3+4's renames.
 
 ---
 
@@ -718,6 +876,22 @@ gh issue comment 760 --repo GoCodeAlone/workflow --body "Updated per workflow#76
 **Verify:** `gh issue view 760 --repo GoCodeAlone/workflow` shows updated body + comment.
 
 ---
+
+## Plan cycle 1 — addressed
+
+- **C-P1 (runPluginInstall not callable)**: addressed — Task 1 Step 7 rewritten to skip install entirely; directly extract tarball + spawn binary via `goplugin.NewClient`. Falls back to local-spawn impl if existing helper isn't reusable.
+- **C-P2 (`internal.NewIaCServer` doesn't exist)**: addressed — Task 3 Files list + new Step 4a create `internal/iacserver.go` with `pb.UnimplementedIaCProviderRequiredServer`-embedded stub.
+- **C-P3 (`type: "scaffold"` allowlist never wired)**: addressed — new Task 1 Step 7.5 adds type-allowlist check in `runPluginRegistrySync` with test fixture `scaffold-rejected/`.
+- **C-P4 (rename script uses bash globstar without `shopt`)**: addressed — Task 3 Step 10 rewrites the script to use `find -print0 | while read -d ''`; Step 11 scaffold-rename-test.yml adds a nested-fixture file to exercise the deeper-than-one-level code path.
+- **I-P1 (`wfctl plugin init --from-scaffold` vapourware)**: addressed — Task 3 Step 12 README drops the reference; uses GitHub "Use this template" UI path only. Future `wfctl plugin init --from-scaffold` filed at workflow#762 follow-up but not in this plan.
+- **I-P2 (Task 4 under-decomposed)**: addressed — Task 4 expanded to 15 explicit steps; `RELEASES_TOKEN` decision is now Step 2 with concrete grep + decision branch.
+- **I-P3 (parity-diff sort hides ordering bugs)**: addressed — parity-diff.sh now does sorted (fail) + unsorted (warn) checks.
+- **I-P4 (gh repo rename admin scope)**: addressed — hoisted to "Operator pre-flight" section at top of plan; Task 3+4 begin with verification step.
+- **I-P5 (readme mode under-specified)**: addressed — Task 1 Step 5 enumerates 7-template surface + pipe-escape + case-fold sort + marker comment names.
+- **I-P6 (python3 vs jq in rename script)**: addressed — Step 10 rewritten with jq.
+- **I-P7 (Task 5 rollback story)**: addressed — Rollback note caveats non-revertability once Tasks 3+4 ship.
+- **I-P8 (PR Count claim of 6 vs 5 code-PRs)**: addressed — header now says "PR Count: 6 (5 code-PRs + 1 issue edit)".
+- **I-P9 (release.yml pins v0.62.0 not yet tagged)**: addressed — Task 3+4 Pre-flight section warns against tagging scaffold repos until v0.62.0 published.
 
 ## Pipeline gate at end of plan
 
