@@ -11,7 +11,8 @@
   - C2: dropping the `@version` gate breaks `installFromLockfile`'s no-clobber contract (relied on by lockfile-driven install per `plugin_lockfile.go:115-118` comment).
 - **Cycle 2**: both formats covered + installSkipLockfileUpdate flag for installFromLockfile contract preservation. FAILED — 1 Critical (C3: installFromWfctlLockfile line-105 calls runPluginInstall ALSO unguarded; its in-memory `lf.Save` at line 116 silently clobbers the fan-out's writes) + 1 Important (I4: installPluginReqDirect skips parent lockfile track via direct installPluginFromManifest call, bypassing runPluginInstall).
 - **Cycle 3**: adds installSkipLockfileUpdate guard around installFromWfctlLockfile's runPluginInstall fallback call + updateLockfileWithChecksum in installPluginReqDirect parent path. FAILED — 1 Important (I5: per-arch installFromURL call site in installFromWfctlLockfile line 86 also needs guard; under §2 fan-out it triggers merge-then-clobber by outer in-memory lf.Save).
-- **Cycle 4** (this version): extends §4 guard to also wrap the per-arch installFromURL call site at line 86. Symmetric coverage of all outer-in-memory-lf-holding sites.
+- **Cycle 4**: extends §4 guard to per-arch installFromURL call site at line 86. FAILED — 1 Critical (C1: gate at runPluginInstall:256 is mechanically inert; line-86 path bypasses runPluginInstall and reaches updateLockfileWithChecksum at plugin_install.go:846 directly, never consulting the flag) + 1 Important (I6: §3 dep tracking unconditionally writes during outer guarded installs).
+- **Cycle 5** (this version): adopts reviewer Option 1 — move installSkipLockfileUpdate check INSIDE updateLockfileWithChecksum itself. Single chokepoint; every call site (256, 846, 934, dep recursion, installPluginReqDirect) auto-respects the guard. C1 and I6 dissolve together.
 
 ## Problem
 
@@ -96,26 +97,26 @@ updateLockfileWithChecksum(dep.Name, depManifest.Version, depManifest.Repository
 
 Per cycle-1 C2: `installFromLockfile` (`plugin_lockfile.go:115-118`) deliberately passes `name` without `@version` to avoid clobbering pinned entries before checksum verification. Removing the gate naively breaks that contract.
 
-Add package-level guard set/cleared by `installFromLockfile`:
+Add package-level guard at the CHOKEPOINT (cycle-5 fix per C1: gate at `runPluginInstall:256` is mechanically inert because `installFromURL` reaches `updateLockfileWithChecksum` at line 846 without going through `runPluginInstall`; same for `installFromLocal` at 934. Move the check INSIDE the helper so every call site is implicitly covered):
 
 ```go
 // In plugin_install.go (package-level):
-// installSkipLockfileUpdate suppresses lockfile updates during installFromLockfile's
-// pre-verification install. Set by installFromLockfile; cleared in deferred reset.
+// installSkipLockfileUpdate suppresses ALL lockfile writes when set. Used by
+// outer installers (installFromLockfile / installFromWfctlLockfile) that hold
+// the lockfile in memory and re-save it themselves; without this guard inner
+// install paths would mutate the on-disk file under them.
 var installSkipLockfileUpdate bool
 
-// In runPluginInstall, replace the gate at line 256:
-if !installSkipLockfileUpdate {
-    binaryChecksum := ""
-    binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
-    if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
-        binaryChecksum = cs
-    } else {
-        fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
+// In plugin_lockfile.go, at the TOP of updateLockfileWithChecksum:
+func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
+    if installSkipLockfileUpdate {
+        return
     }
-    updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
+    // ... rest of existing function body (fan-out per §2)
 }
 ```
+
+Drop the `name@version` gate at `plugin_install.go:256`. The new line-265 `updateLockfileWithChecksum` call always fires; the helper itself decides whether to skip.
 
 In `installFromLockfile` AND `installFromWfctlLockfile` (per cycle-3 C3 — both outer-frame installers hold in-memory `lf` and assume nothing underneath touches the on-disk file):
 
