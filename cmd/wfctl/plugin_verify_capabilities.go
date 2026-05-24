@@ -10,6 +10,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 )
 
 func runPluginVerifyCapabilities(args []string) error {
@@ -56,5 +57,32 @@ Options:
 	}
 	pluginDir := fs.Arg(0)
 	_ = pluginDir
+	if err := preflightBinary(*binary); err != nil {
+		return err
+	}
 	return fmt.Errorf("not yet implemented")
+}
+
+// preflightBinary validates the --binary path before exec:
+//   - non-empty + not literal "null" (guards against jq fallback returning empty)
+//   - file exists and is a regular file (not directory)
+//   - has at least one executable bit set
+func preflightBinary(path string) error {
+	if path == "" || path == "null" {
+		return fmt.Errorf("--binary path empty (jq filter may have returned no match)")
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat %q: %w", path, err)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("--binary %q is a directory", path)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("--binary %q is not a regular file (mode=%s)", path, fi.Mode())
+	}
+	if fi.Mode()&0o111 == 0 {
+		return fmt.Errorf("--binary %q is not executable (mode=%s)", path, fi.Mode())
+	}
+	return nil
 }
