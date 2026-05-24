@@ -66,10 +66,13 @@ In `cmd/wfctl/plugin_install_lockfile_test.go` (edit existing SINGLE import bloc
 ```go
 func TestUpdateLockfileWithChecksum_GuardSkips(t *testing.T) {
 	dir := t.TempDir()
-	savedPath := wfctlLockPath
-	wfctlLockPath = filepath.Join(dir, ".wfctl-lock.yaml")
-	defer func() { wfctlLockPath = savedPath }()
-	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
+	// wfctlLockPath is a const (cmd/wfctl/plugin_lockfile.go:20); existing tests
+	// redirect via os.Chdir + relative-path semantics (precedent at
+	// plugin_install_lockfile_test.go:30, :95, :160, etc).
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil { t.Fatal(err) }
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	installSkipLockfileUpdate = true
@@ -83,14 +86,17 @@ func TestUpdateLockfileWithChecksum_GuardSkips(t *testing.T) {
 
 func TestUpdateLockfileWithChecksum_NewFormatFanOut(t *testing.T) {
 	dir := t.TempDir()
-	savedPath := wfctlLockPath
-	wfctlLockPath = filepath.Join(dir, ".wfctl-lock.yaml")
-	defer func() { wfctlLockPath = savedPath }()
+	// wfctlLockPath is a const (cmd/wfctl/plugin_lockfile.go:20); existing tests
+	// redirect via os.Chdir + relative-path semantics (precedent at
+	// plugin_install_lockfile_test.go:30, :95, :160, etc).
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil { t.Fatal(err) }
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
 	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins:\n  bar:\n    version: 0.1.0\n    source: github.com/x/bar\n    platforms:\n      linux_amd64:\n        url: https://example.com/bar\n        sha256: deadbeef\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	updateLockfileWithChecksum("bar", "1.2.3", "github.com/x/bar-new", "", "feedface")
-	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +147,7 @@ In `cmd/wfctl/plugin_lockfile.go`, add `mergeIntoNewFormatLockfile` helper:
 // refreshing Version + Source. No-ops if the lockfile is missing or
 // legacy-format (Version == 0).
 func mergeIntoNewFormatLockfile(name, version, source string) {
-	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
 	if err != nil || lf == nil || lf.Version == 0 {
 		return
 	}
@@ -219,10 +225,13 @@ Append:
 ```go
 func TestRunPluginInstall_NoVersionTracksLockfile(t *testing.T) {
 	dir := t.TempDir()
-	savedPath := wfctlLockPath
-	wfctlLockPath = filepath.Join(dir, ".wfctl-lock.yaml")
-	defer func() { wfctlLockPath = savedPath }()
-	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
+	// wfctlLockPath is a const (cmd/wfctl/plugin_lockfile.go:20); existing tests
+	// redirect via os.Chdir + relative-path semantics (precedent at
+	// plugin_install_lockfile_test.go:30, :95, :160, etc).
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil { t.Fatal(err) }
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// Directly invoke updateLockfileWithChecksum with the resolved manifest
@@ -230,7 +239,7 @@ func TestRunPluginInstall_NoVersionTracksLockfile(t *testing.T) {
 	// will produce: plain `install <name>` resolves a version then writes
 	// it unconditionally.
 	updateLockfileWithChecksum("baz", "2.0.0", "github.com/x/baz", "", "abc123")
-	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,13 +256,16 @@ The Step-1 test above directly invokes the helper which won't catch the gate's p
 ```go
 func TestRunPluginInstall_NoVersionTracksLockfile(t *testing.T) {
 	dir := t.TempDir()
-	savedPath := wfctlLockPath
-	wfctlLockPath = filepath.Join(dir, ".wfctl-lock.yaml")
-	defer func() { wfctlLockPath = savedPath }()
+	// wfctlLockPath is a const (cmd/wfctl/plugin_lockfile.go:20); existing tests
+	// redirect via os.Chdir + relative-path semantics (precedent at
+	// plugin_install_lockfile_test.go:30, :95, :160, etc).
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil { t.Fatal(err) }
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
 	// New-format empty lockfile so the chokepoint fan-out fires.
-	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins: {}\n"), 0o600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte("version: 1\nplugins: {}\n"), 0o600); err != nil { t.Fatal(err) }
 
-	// Reuse the existing httptest pattern — see TestRunPluginInstall_LocksAfterInstall
+	// Reuse the existing httptest pattern — see TestRunPluginInstall_DoesNotRewriteNewFormatLockfile (the only end-to-end httptest precedent in this file at line 548)
 	// at line 38 of this file. Serve a minimal plugin tarball + manifest; call
 	// runPluginInstall with PLAIN name (no @version). Assert lockfile entry
 	// appears post-install.
@@ -266,7 +278,7 @@ func TestRunPluginInstall_NoVersionTracksLockfile(t *testing.T) {
 }
 ```
 
-**Implementer note**: use existing `TestRunPluginInstall_LocksAfterInstall` (line 38) as the literal template — copy its httptest setup, change `baz@1.0.0` → bare `baz` in the install args, and remove the `@version` parse assertion. The gate's presence will cause the lockfile NOT to be written → test FAILs → drop gate → test PASSes.
+**Implementer note**: use existing `TestRunPluginInstall_DoesNotRewriteNewFormatLockfile (the only end-to-end httptest precedent in this file at line 548)` (line 38) as the literal template — copy its httptest setup, change `baz@1.0.0` → bare `baz` in the install args, and remove the `@version` parse assertion. The gate's presence will cause the lockfile NOT to be written → test FAILs → drop gate → test PASSes.
 
 Run: `GOWORK=off go test -run TestRunPluginInstall_NoVersionTracksLockfile -count=1 ./cmd/wfctl/...`
 Expected: FAIL with "plugins.baz not in lockfile" UNTIL Step 3's gate removal.
@@ -344,9 +356,12 @@ func TestInstallFromLockfile_NoClobberInvariant(t *testing.T) {
 	// does NOT mutate the on-disk lockfile (would clobber pinned entries
 	// before checksum verification).
 	dir := t.TempDir()
-	savedPath := wfctlLockPath
-	wfctlLockPath = filepath.Join(dir, ".wfctl-lock.yaml")
-	defer func() { wfctlLockPath = savedPath }()
+	// wfctlLockPath is a const (cmd/wfctl/plugin_lockfile.go:20); existing tests
+	// redirect via os.Chdir + relative-path semantics (precedent at
+	// plugin_install_lockfile_test.go:30, :95, :160, etc).
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil { t.Fatal(err) }
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
 	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins:\n  pinned:\n    version: 1.0.0\n    source: github.com/x/pinned\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +369,7 @@ func TestInstallFromLockfile_NoClobberInvariant(t *testing.T) {
 	defer func() { installSkipLockfileUpdate = false }()
 	// Simulate inner install attempting to write a different version
 	updateLockfileWithChecksum("pinned", "9.9.9", "github.com/x/pinned-bad", "", "badchecksum")
-	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,19 +405,16 @@ installSkipLockfileUpdate = true
 // reset on each iteration since defer-in-loop would only fire at function exit.
 ```
 
-**Cycle-2 decision per reviewer Important**: use the anon-func wrapper (idiomatic Go, defer-safe even if inner panics). The inline-reset alternative is rejected because it leaks state on panic. Final form:
+**Cycle-3 fix per reviewer CYC2-C2**: anon-func-per-iter wrapper is illegal because `installFromWfctlLockfile`'s loop body has 6× `continue` statements (lines 62, 68, 79, 89, 94, 108 of `plugin_install_wfctllock.go`) — `continue` inside an anonymous function literal is a compile error ("continue is not in a loop"). Use function-scope guard instead:
 
 ```go
-for name, entry := range lf.Plugins {
-	func() {
-		installSkipLockfileUpdate = true
-		defer func() { installSkipLockfileUpdate = false }()
-		// ... existing per-plugin install logic (lines 56-119)
-	}()
-}
+// At the TOP of installFromWfctlLockfile (line ~28), BEFORE the for-loop:
+installSkipLockfileUpdate = true
+defer func() { installSkipLockfileUpdate = false }()
+// ... rest of function (loop with continues intact)
 ```
 
-Move ALL existing loop-body code inside the anonymous function. Both line-86 `installFromURL` and line-99 fallback `runPluginInstall` calls land inside the guarded scope.
+This protects the entire function call (including ALL per-plugin per-arch and per-plugin fallback runPluginInstall calls). Single set+defer pair at function scope; no per-iteration churn. Acceptable because `installFromWfctlLockfile` is itself an outer-frame installer — nothing nested calls it recursively, so the flag stays correctly scoped for the full lifetime of the function.
 
 **Step 4: Run all install-related tests — verify PASS**
 
@@ -435,17 +447,20 @@ Append to `cmd/wfctl/plugin_deps_test.go` (edit existing single import block; do
 ```go
 func TestResolveDependencies_TracksDepsInLockfile(t *testing.T) {
 	dir := t.TempDir()
-	savedPath := wfctlLockPath
-	wfctlLockPath = filepath.Join(dir, ".wfctl-lock.yaml")
-	defer func() { wfctlLockPath = savedPath }()
-	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
+	// wfctlLockPath is a const (cmd/wfctl/plugin_lockfile.go:20); existing tests
+	// redirect via os.Chdir + relative-path semantics (precedent at
+	// plugin_install_lockfile_test.go:30, :95, :160, etc).
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil { t.Fatal(err) }
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// Directly invoke updateLockfileWithChecksum to simulate dep install path.
 	// (Full resolveDependencies test infrastructure already exists; this verifies
 	// the chokepoint helper is reachable from the dep recursion site post-Task-4.)
 	updateLockfileWithChecksum("depA", "0.5.0", "github.com/x/depA", "", "depAsha")
-	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,15 +528,18 @@ Append:
 ```go
 func TestInstallPluginReqDirect_TracksParentInLockfile(t *testing.T) {
 	dir := t.TempDir()
-	savedPath := wfctlLockPath
-	wfctlLockPath = filepath.Join(dir, ".wfctl-lock.yaml")
-	defer func() { wfctlLockPath = savedPath }()
-	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
+	// wfctlLockPath is a const (cmd/wfctl/plugin_lockfile.go:20); existing tests
+	// redirect via os.Chdir + relative-path semantics (precedent at
+	// plugin_install_lockfile_test.go:30, :95, :160, etc).
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil { t.Fatal(err) }
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// Simulate the post-Task-5 write the production code will produce.
 	updateLockfileWithChecksum("from-config-parent", "1.5.0", "github.com/x/parent", "", "sha")
-	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,17 +564,25 @@ In `cmd/wfctl/plugin_deps.go` `installPluginReqDirect` function, AFTER the succe
 	// Track parent in lockfile (workflow#771 Task 5). Closes the asymmetry
 	// where --from-config dep installs were tracked via Task 4 but parent
 	// installs via this path were not.
-	binaryPath := filepath.Join(pluginDir, req.Name, req.Name)
+	// Cycle-3 fix per reviewer CYC2-I1: use the function's NORMALIZED pluginName
+	// (already computed at line 87 via normalizePluginName(rawName)), NOT raw
+	// req.Name. installPluginFromManifest installs at pluginDir/<normalized>/<normalized>;
+	// raw req.Name "workflow-plugin-auth" would hash-miss at pluginDir/workflow-plugin-auth/...
+	// and produce an asymmetric lockfile key vs runPluginInstall's writes.
+	binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
 	checksum := ""
 	if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
 		checksum = cs
 	} else {
 		fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
 	}
-	updateLockfileWithChecksum(req.Name, manifest.Version, manifest.Repository, "", checksum)
+	updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, "", checksum)
 ```
 
-**Cycle-2 pre-resolved**: verified against `cmd/wfctl/plugin_deps.go:82`: `func installPluginReqDirect(pluginDir, registryCfgPath string, req config.PluginRequirement) error` — `pluginDir` and `req` are parameters; `manifest` is the local var at line 95 of the function. Use as written above.
+**Cycle-3 pre-resolved**: verified against `cmd/wfctl/plugin_deps.go:82-95`:
+- Signature: `func installPluginReqDirect(pluginDir, registryCfgPath string, req config.PluginRequirement) error`.
+- Line 87: `pluginName := normalizePluginName(rawName)` — use THIS for both the hash path AND the lockfile key (not raw `req.Name`).
+- `manifest` is the local var at line 95.
 
 **Step 4: Run tests — verify PASS**
 
