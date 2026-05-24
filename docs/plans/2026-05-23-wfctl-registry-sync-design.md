@@ -16,24 +16,64 @@ Three coupled gaps surfaced after workflow#758 pilot landed:
 
 Single issue, four composable layers. Sequencing: (a) → (a') → (d) → (c) → (b).
 
-### Layer (a): `wfctl plugin registry-sync` subcommand
+### Layer (a): `wfctl plugin registry-sync` subcommand — full registry-sync port
 
-New subcommand under existing `wfctl plugin` family (cycle 4-P1 naming rationale; avoids collision with OCI `wfctl registry`).
+New subcommand under existing `wfctl plugin` family (avoids collision with OCI `wfctl registry`).
 
 Surface:
 
 ```
 wfctl plugin registry-sync [--fix] [--plugin <name>] [--verify-capabilities] [--registry-dir <path>]
+wfctl plugin registry-sync core [--fix] [--workflow-repo <path>] [--registry-dir <path>]
+wfctl plugin registry-sync readme [--check] [--registry-dir <path>]
 ```
 
-- Default dry-run; `--fix` writes back.
-- `--plugin <name>` filters to single plugin manifest.
-- `--registry-dir` defaults to `.` (the cwd, typically a workflow-registry checkout in CI).
-- `--verify-capabilities` (optional, registry-side only): downloads upstream release tarball; extracts plugin binary; spawns via `plugin/external/manager.go` machinery; calls `GetContractRegistry` RPC; diffs vs committed `plugin.json.capabilities`; with `--fix` auto-rewrites.
+Three sub-modes covering ALL three current scripts (cycle 1 C1: `sync-versions.sh` is one of three scripts the same CI step runs; porting only one regresses registry coverage and breaks parity-diff isolation):
 
-Implementation lives in `cmd/wfctl/plugin_registry_sync.go` + `_test.go`. Shared strict-semver regex extracted into `cmd/wfctl/plugin_release_grade_semver.go` (constant sourced by `validate-contract --for-publish` AND `registry-sync`). Logic ports `sync-versions.sh` 1:1 with fixture-backed parity tests.
+1. **Default mode (ports `sync-versions.sh`):** walks `<registry-dir>/plugins/*/manifest.json`; for each:
+   - Reads `repository`/`source`; derives `gh_repo` via `normalize_repo` equivalent.
+   - `gh release view` for latest tag.
+   - **Strict-semver gate** (shared regex constant — see below).
+   - Compares against committed `manifest.version`; with `--fix` rewrites version + downloads URLs.
+   - `gh api .../contents/plugin.json?ref=<tag>` to sync `capabilities + minEngineVersion + iacProvider`.
+   - **NEW (--verify-capabilities)**: registry-side only, NOT per-PR. See "Capability verification flow" below.
+2. **`core` mode (ports `sync-core-manifests.sh`):** runs against a workflow checkout (`--workflow-repo`); compiles + runs the inspect program; diffs against registry's `plugins/<core-plugin>/manifest.json`; with `--fix` rewrites.
+3. **`readme` mode (ports `generate-readme.sh`):** regenerates README plugin/template indexes from registry source data; `--check` is dry-run.
 
-`workflow-registry/.github/workflows/sync-registry-manifests.yml` swaps `bash scripts/sync-versions.sh --fix` for `wfctl plugin registry-sync --fix`. Bash script kept alongside for **one parity-verification cycle**, then deleted in a follow-up PR.
+Implementation files:
+- `cmd/wfctl/plugin_registry_sync.go` — root subcommand dispatch + default-mode logic
+- `cmd/wfctl/plugin_registry_sync_core.go` — `core` mode (inspect-program embed + workflow-repo build)
+- `cmd/wfctl/plugin_registry_sync_readme.go` — `readme` mode (README mutate)
+- `cmd/wfctl/plugin_registry_sync_test.go` — table-driven fixtures
+- `cmd/wfctl/testdata/plugin_registry_sync/{good,stale-version,stale-caps,non-semver-tag,empty-assets,fetch-plugin-json-missing,prerelease-tag-vs-stable,...}/` — fixtures pinned against current bash behavior
+
+Shared strict-semver regex extracted into `cmd/wfctl/plugin_release_grade_semver.go` (constant sourced by `validate-contract --for-publish` AND `registry-sync`).
+
+### Layer (a'): workflow-registry parity cycle
+
+PR in `workflow-registry`:
+
+1. Add `wfctl plugin registry-sync` (and `core` + `readme` sub-modes) calls to `sync-registry-manifests.yml` running **in DRY-RUN MODE alongside the existing bash** (no `--fix`).
+2. Both bash + Go write their proposed manifest diffs to workflow artifacts.
+3. CI job compares the two artifacts; non-zero diff fails the workflow.
+4. The actual registry mutations continue coming from the bash scripts during the parity window. **Bash remains authoritative; Go is observation-only.**
+5. After one weekly cron cycle (or operator-triggered manual cycle) confirms zero diff for `sync-versions.sh` + `sync-core-manifests.sh` + `generate-readme.sh`, ship the **followup PR** that:
+   - Swaps `--fix` mode from bash to Go for all three.
+   - Deletes the three bash scripts.
+
+This addresses cycle 1 C1 (parity must cover all three scripts) + D2 (translation risk) + I6 (bash gh-api retains the authoritative path during the window so any rename redirects can't break it).
+
+### Capability verification flow (--verify-capabilities)
+
+**Per cycle 1 C3:** the existing `wfctl plugin install --local <dir>` pipeline already handles binary rename (`ensurePluginBinary`) + lockfile/integrity checks. Rather than spawning via raw `manager.go` machinery, `--verify-capabilities` reuses the install path:
+
+1. `gh release download <tag> --repo <gh_repo> --pattern '<plugin-name>-<os>-<arch>.tar.gz' -O /tmp/<plugin>.tar.gz`
+2. Extract to `/tmp/<plugin>-extracted/`
+3. `wfctl plugin install --local /tmp/<plugin>-extracted/ --plugin-dir /tmp/<plugin>-installed/` (existing pipeline; handles rename + lockfile + integrity)
+4. Use the installed plugin's spawn path (also already exists for `wfctl plugin info`) to call `GetContractRegistry` RPC
+5. Diff against committed `plugin.json.capabilities`; with `--fix` rewrite
+
+**Per cycle 1 I4:** `--verify-capabilities` is registry-side only (runs on the periodic cron). Layer (b) per-PR migrations do NOT use this flag — capabilities are auto-populated on the next cron sync after the release lands. Documented in §Layer (b).
 
 ### Layer (a'): workflow-registry switch + parity cycle
 
@@ -49,28 +89,34 @@ This belts-and-suspenders pattern addresses self-challenge doubt D2 (bash → Go
 
 **Renames:**
 - `workflow-plugin-template` → `scaffold-workflow-plugin` (public; prefix-first naming so it doesn't look like a plugin family member; per user)
-- `workflow-plugin-template-private` → `scaffold-workflow-plugin-private` (private; suffix `-private` keeps both scaffolds alphabetically adjacent in org browse vs `private-scaffold-workflow-plugin`)
+- `workflow-plugin-template-private` → `scaffold-workflow-plugin-private` (private; suffix `-private` keeps both scaffolds alphabetically adjacent in org browse — see I7 mitigation below)
+
+**Cycle 1 fixes baked in:**
+- **C5 + I1** (parallel scaffolding mechanism drift + unsafe sed ritual): the scaffold ships `scripts/rename-from-scaffold.sh` (TESTED in scaffold CI: runs `bash scripts/rename-from-scaffold.sh test-plugin` against a tmp copy of itself + `go build ./...` to assert the rename produces a buildable plugin). README points to the script. `wfctl plugin init` is REPLACED by `wfctl plugin init --from-scaffold [scaffold-workflow-plugin|scaffold-workflow-plugin-private]` which clones the scaffold + runs the rename script + git-init. Existing `sdk.NewTemplateGenerator` deprecated + removed in the same workflow PR series.
+- **I8** (ServeIaCPlugin requires IaC surface): scaffold ships TWO main.go files in `cmd/`:
+  - `cmd/scaffold-workflow-plugin/main.go` — uses `sdk.Serve` + `sdk.WithBuildVersion` (non-IaC default).
+  - `cmd/scaffold-workflow-plugin-iac/main.go` — uses `sdk.ServeIaCPlugin` + `IaCServeOptions.BuildVersion` + stub `IaCProviderRequiredServer` implementation.
+  - The rename script takes a `--mode iac|non-iac` flag (default non-iac) and deletes the other main.go before renaming.
+- **I7** (`-private` ambiguity): README on the private scaffold opens with a paragraph: "This repo's `-private` suffix refers to its GitHub repo visibility (only org members can clone). It is NOT related to `plugin.json.private: true` semantics (which control marketplace listing). A plugin instantiated from this scaffold can choose either repo visibility independently."
 
 **Per-repo steps (one PR per scaffold):**
 
-1. `gh repo rename` (GitHub keeps old-URL redirect for 1 year+).
-2. GitHub repo settings: enable `template_repository: true` (makes the repo selectable under "Use this template" dropdown when creating a new repo).
+1. `gh repo rename` (GitHub keeps old-URL redirect indefinitely unless a new repo claims the old name).
+2. GitHub repo settings: enable `template_repository: true`. **I2 mitigation:** README on both scaffolds opens with a section "After creating a new repo from this template: enable GitHub Actions under Settings → Actions → 'I understand my workflows, enable them' before tagging your first release."
 3. Content updates (single PR per scaffold):
-   - `plugin.json`: `name`: `scaffold-workflow-plugin` (the scaffold itself); `version`: `"0.0.0"`; `minEngineVersion`: `0.61.0`; capabilities populated with placeholder shape (`moduleTypes: ["TEMPLATE.module"]`, `stepTypes: ["TEMPLATE.step"]`, `triggerTypes: []`, `iacProvider: {resourceTypes: ["TEMPLATE.resource"]}`) — shows the expected shape so instantiators see what to fill.
-   - `cmd/workflow-plugin-TEMPLATE/main.go` → rename to `cmd/scaffold-workflow-plugin/main.go`. The README explicitly instructs instantiators to rename this dir to `cmd/workflow-plugin-<their-name>/` immediately after instantiation.
-   - main.go uses `sdk.ServeIaCPlugin(srv, sdk.IaCServeOptions{BuildVersion: sdk.ResolveBuildVersion(internal.Version)})` — covers BOTH module/step (`IaCServeOptions.Modules + Steps`) AND IaC dispatch in a single entrypoint. Plugins that don't need IaC pass empty maps; plugins that don't need modules/steps leave them unset. One canonical entrypoint per user direction.
+   - `plugin.json`: `name`: `scaffold-workflow-plugin` (or `-private`); `version`: `"0.0.0"`; `minEngineVersion`: `0.61.0`; capabilities populated with placeholder shape (`moduleTypes: ["TEMPLATE.module"]`, `stepTypes: ["TEMPLATE.step"]`, `triggerTypes: []`, `iacProvider: {resourceTypes: ["TEMPLATE.resource"]}`) — shows expected shape.
+   - Two main.go files per I8 above.
    - `internal/version.go`: `var Version = "dev"`.
    - `.goreleaser.yaml`: `-X github.com/GoCodeAlone/scaffold-workflow-plugin/internal.Version={{.Version}}` ldflag.
    - `.github/workflows/release.yml`: setup-wfctl@v1 + pre-build + post-build `wfctl plugin validate-contract` gates.
+   - `.github/workflows/scaffold-rename-test.yml` (NEW): scaffold CI runs `bash scripts/rename-from-scaffold.sh testplugin --mode iac` and `--mode non-iac` against tmp copies; verifies `go build ./...` clean in both. Catches C5 silent-corruption regressions.
    - **No** `sync-plugin-version.yml` (defunct workflow not shipped in new scaffolds).
-   - `README.md`: documents the post-instantiation ritual:
-     - Rename `cmd/scaffold-workflow-plugin/` → `cmd/workflow-plugin-<your-name>/`
-     - Edit `plugin.json` (name, description, capabilities, minEngineVersion)
-     - `go mod edit -module github.com/<org>/workflow-plugin-<your-name>`; `find . -name '*.go' -exec sed -i.bak 's|scaffold-workflow-plugin|workflow-plugin-<your-name>|g' {} \;`
-     - First `git commit` + first tag
-4. Delete `workflow-registry/plugins/template/` (scaffold is not an installable plugin); commit in workflow-registry PR.
-5. Add registry-side defense: `wfctl plugin registry-sync` emits a `WARN` if it encounters a registered manifest whose `repository` field points at `*-scaffold-*` or contains `scaffold-workflow-plugin` (catches accidental re-registration).
+   - `scripts/rename-from-scaffold.sh`: TESTED rename script — enumerates every file containing `scaffold-workflow-plugin`; renames `cmd/scaffold-workflow-plugin/` → `cmd/workflow-plugin-<your-name>/`; `go mod edit`; `sed` (bounded to specific file globs, not `find . -name '*.go'`); `git add` + commit-ready state.
+   - `README.md`: documents "Use this template" flow → enable Actions → run `bash scripts/rename-from-scaffold.sh <your-name> --mode {iac|non-iac}` → edit plugin.json capabilities → first commit + tag. References `wfctl plugin init --from-scaffold` as the alternative path.
+4. Delete `workflow-registry/plugins/template/` (scaffold is not an installable plugin); commit in workflow-registry PR. **I3 mitigation:** the workflow-registry PR body explicitly states "operators with `template` in their `.wfctl-lock.yaml` must remove it; the entry was a non-functional stub."
+5. Add registry-side defense: `wfctl plugin registry-sync` rejects (not just warns) any manifest with `repository` field in the exact-allowlist `{"https://github.com/GoCodeAlone/scaffold-workflow-plugin", "https://github.com/GoCodeAlone/scaffold-workflow-plugin-private"}` — cycle 1 C4 fix (allowlist not regex). Plugins legitimately containing "scaffold" in their name (e.g., `workflow-plugin-scaffold-tool`) pass through unchanged.
 6. Update workflow#760 sweep list: drop `workflow-plugin-template` + `workflow-plugin-template-private`. 56 → 54.
+7. **I6 verification task:** Layer (a') parity-cycle window confirms bash + Go both handle the (now-renamed) scaffold URLs correctly. If `gh api repos/<old-name>/contents/...` fails to redirect, the bash script's `fetch_plugin_json` returns empty string and silently falls back (which is the current behavior for any missing-plugin-json case). Go port replicates this fallback per cycle 1 C2 fix below.
 
 ### Layer (c): ldflag + Version var bootstrap (54 repos)
 
@@ -89,11 +135,11 @@ Same template as workflow#758 pilot (DO PR #165). Mechanical 6-file PR per repo:
 1. `git rm .github/workflows/sync-plugin-version.yml`
 2. Edit main.go to call `sdk.ResolveBuildVersion(<plugin's Version var>)` + wire via `IaCServeOptions.BuildVersion` (IaC) or `sdk.WithBuildVersion` (non-IaC `sdk.Serve`).
 3. `plugin.json.version` → `"0.0.0"`; `minEngineVersion` → `0.61.0`.
-4. For repos with null/missing `capabilities`: run `wfctl plugin registry-sync --verify-capabilities --fix` against a local workflow-registry checkout to auto-populate from the binary's `GetContractRegistry` response. This is the deferred I3 fix from #758.
+4. For repos with null/missing `capabilities`: **populated by the agent during the PR via local-build introspection** (NOT via `--verify-capabilities` against a released binary, which has the cycle 1 D1/I4 chicken-and-egg). Specifically the agent runs `GOWORK=off go build -o /tmp/<plugin> ./cmd/...` against the WIP migration locally, then exec's the binary + GetContractRegistry RPC to populate capabilities. **Per cycle 1 I4 + I3 (deferred from #758)**: registry-side cron `wfctl plugin registry-sync --verify-capabilities --fix` is the ongoing safety net for capability drift detection AFTER releases land; the per-PR populate is a one-time bootstrap.
 5. release.yml: add setup-wfctl + pre+post wfctl plugin validate-contract gates.
 6. Bump workflow pin to v0.61.0 (or current latest).
 
-Fans out via parallel sub-agents post-Layer (c).
+Fans out via parallel sub-agents post-Layer (c). **Per cycle 1 I5:** the lead agent pre-computes the (repo, last-release-date) list via `gh api repos/GoCodeAlone/<repo>/releases?per_page=1` BEFORE fan-out and passes the pre-computed skip list (repos with no release in 90 days) to each sub-agent. No per-agent rate-limit cost.
 
 ## Assumptions
 
@@ -147,8 +193,23 @@ No state migrations, no breaking SDK contract changes (all additive), no cross-r
 
 Layer (a) blocks (a'). Layer (a') blocks the bash-delete. Layer (d) is independent of (a)/(a') and can run in parallel. Layer (c) blocks (b) per-repo (PR-pairing per repo: c first, then b).
 
+## Cycle 1 — addressed
+
+- **C1 (sync-core-manifests + generate-readme ignored)**: addressed — Layer (a) now ports all three scripts via `wfctl plugin registry-sync` + `core` + `readme` sub-modes; Layer (a') parity-cycle covers all three with bash-authoritative + Go-observation in dry-run.
+- **C2 (bash → Go parity edge cases)**: addressed — fixture set explicitly enumerated (empty-assets, fetch-plugin-json-missing, prerelease-tag-vs-stable, sort-V-vs-semver); Go implementation must replicate bash output byte-for-byte during the parity window; `version_gt` uses the same `sort -V` semantics as bash for the comparator (sub-optimal vs true semver but parity-correct) — a separate follow-up can swap to semver-correct after parity is established.
+- **C3 (plugin-spawn binary-rename + lockfile contract)**: addressed — `--verify-capabilities` reuses the `wfctl plugin install --local` pipeline (which already handles binary rename + lockfile + integrity); does NOT spawn via raw `manager.go`.
+- **C4 (regex over-match for scaffold defense)**: addressed — exact-URL allowlist for two specific repos, not regex/substring.
+- **C5 (sed ritual unsafe + incomplete)**: addressed — scaffold ships TESTED `scripts/rename-from-scaffold.sh` (CI runs against tmp copies); rename is now a single command, not a sed-in-README. `wfctl plugin init --from-scaffold` clones + runs the script as the canonical scaffolding path (replaces `sdk.NewTemplateGenerator`).
+- **I1 (parallel scaffolding mechanism drift)**: addressed via C5 — `wfctl plugin init` is reworked to consume the scaffold repo, eliminating the parallel mechanism.
+- **I2 (template_repository workflow-enablement gotcha)**: addressed — README on both scaffolds documents the post-instantiation "enable Actions" step.
+- **I3 (`template` lockfile pin break)**: addressed — workflow-registry PR body explicitly states the break + provides mitigation.
+- **I4 (per-PR capability auto-populate chicken-and-egg)**: addressed — per-PR uses local-build introspection (build WIP main.go locally + spawn binary + GetContractRegistry); registry-side `--verify-capabilities` is the ongoing safety net for drift, not per-PR.
+- **I5 (90-day stale gate operationalization)**: addressed — lead agent pre-computes skip list via single `gh api` batch; sub-agents receive pre-computed list.
+- **I6 (gh repo rename + bash gh api redirect)**: addressed — bash remains authoritative during parity window; rename happens AFTER parity-cycle PR ships. Go port replicates the fetch_plugin_json silent-fallback so rename-redirect failures are tolerated (current bash behavior).
+- **I7 (`-private` suffix ambiguity)**: addressed — README on private scaffold opens with explicit clarification.
+- **I8 (`ServeIaCPlugin` requires IaC surface — single-entrypoint claim was wrong)**: addressed — scaffold ships TWO main.go files (IaC + non-IaC); rename script picks one via `--mode` flag.
+
 ## Adversarial cycles expected
 
-- Design cycle 1: probably fail on bash→Go parity surface (every edge case in `sync-versions.sh` becomes a fixture); design clarifications around plugin-spawn API usability from wfctl context (A2 verification); Layer (d)'s post-instantiation rename ritual completeness.
-- Design cycle 2: revisions; likely pass.
-- Plan cycle 1: granularity + per-repo skip-gate operationalization (D3); test fixture enumeration.
+- Cycle 2: likely pass; outstanding risks are around fixture exhaustiveness (Layer a) and the precise shape of the post-instantiation script (Layer d).
+- Plan cycle 1: granularity, per-repo skip-gate operationalization (already addressed via lead-agent pre-compute), test fixture enumeration explicit per task.
