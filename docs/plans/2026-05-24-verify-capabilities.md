@@ -46,7 +46,7 @@
 |------|-------|-------|--------|
 | 1 | feat(wfctl): plugin verify-capabilities subcommand (workflow#765) | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6, Task 7, Task 8 | feat/765-verify-capabilities |
 
-**Status:** Draft
+**Status:** Locked 2026-05-24T05:01:50Z
 
 ---
 
