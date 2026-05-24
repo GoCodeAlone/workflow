@@ -12,6 +12,8 @@
 
 **Design doc:** `docs/plans/2026-05-24-contract-diff-design.md` (cycle 4 PASS adversarial).
 
+**ADR:** [`decisions/0042-verify-capabilities-iac-namespace.md`](../../decisions/0042-verify-capabilities-iac-namespace.md) — namespace prefix derivation single-source-of-truth pattern (applies to Task 2 helper, Task 3 bridge rewire, Task 4 client filter).
+
 **Issue:** workflow#767
 
 ---
@@ -318,8 +320,9 @@ with:
 
 ```go
 func (b *iacPluginServiceBridge) GetContractRegistry(_ context.Context, _ *emptypb.Empty) (*pb.ContractRegistry, error) {
-	// Derive prefix from canonical proto descriptor (workflow#767 §1) so the
-	// filter cannot drift from the .proto package declaration.
+	// Derive prefix from canonical proto descriptor per ADR 0042
+	// (decisions/0042-verify-capabilities-iac-namespace.md) so the filter
+	// cannot drift from the .proto package declaration.
 	prefix := strings.TrimSuffix(pb.IaCProviderRequired_ServiceDesc.ServiceName, ".IaCProviderRequired") + "."
 	return BuildContractRegistryForPlugin(b.grpcSrv, prefix), nil
 }
@@ -453,10 +456,11 @@ C. In `runPluginVerifyCapabilities`, AFTER the existing Name/Version diff (after
 	case regErr != nil:
 		return fmt.Errorf("GetContractRegistry RPC: %w (stderr: %s)", regErr, stderr.String())
 	}
-	// Defense-in-depth: client-side namespace filter (design §2). Old-SDK
-	// plugin binaries (pre-Task-3 bridge) return ALL gRPC services including
-	// PluginService + health — without this filter, every infra service would
-	// WARN-spam as "extra in plugin.json" for any unrebased plugin.
+	// Defense-in-depth: client-side namespace filter per ADR 0042
+	// (decisions/0042-verify-capabilities-iac-namespace.md) and design §2.
+	// Old-SDK plugin binaries (pre-Task-3 bridge) return ALL gRPC services
+	// including PluginService + health — without this filter, every infra
+	// service would WARN-spam as "extra in plugin.json" for unrebased plugins.
 	iacPrefix := strings.TrimSuffix(pb.IaCProviderRequired_ServiceDesc.ServiceName, ".IaCProviderRequired") + "."
 	advertisedServices := serviceNamesFromRegistry(contractReg, iacPrefix)
 	missingSvc, extraSvc := diffIaCServices(declared.IaCServices, advertisedServices)

@@ -102,7 +102,7 @@ Per cycle-2 IMPORTANT-5 Option B: IaCServices INCLUDES `IaCStateBackend` (and Re
 ## Decisions
 
 **§1 — Namespace filter: derive vs hardcode.**
-Derive from `pb.IaCProviderRequired_ServiceDesc.ServiceName` via TrimSuffix. Single source of truth keyed to the .proto package decl. Eliminates cycle-1 C1 (wrong namespace) by construction. ADR: `decisions/NNNN-verify-capabilities-iac-namespace.md`.
+Derive from `pb.IaCProviderRequired_ServiceDesc.ServiceName` via TrimSuffix. Single source of truth keyed to the .proto package decl. Eliminates cycle-1 C1 (wrong namespace) by construction. ADR: `decisions/0042-verify-capabilities-iac-namespace.md`.
 
 **§2 — Server-side filter (plugin authors switch ContractRegistry impl) vs client-side filter (verify-capabilities filters).**
 BOTH. Server-side helper exists for plugin authors who want clean output everywhere (logs, debug RPC). Client-side filter in verify-capabilities runs regardless — plugins that haven't migrated to `BuildContractRegistryForPlugin` still get correct diff results because client-side filter handles the noise. Defense in depth.
