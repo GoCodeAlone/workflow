@@ -1,22 +1,83 @@
 # wfctl plugin install — lockfile dep tracking Design
 
 **Issue:** [workflow#771](https://github.com/GoCodeAlone/workflow/issues/771)
-**Status:** Draft 2026-05-24 — awaiting adversarial design review
+**Status:** Revised cycle 2 2026-05-24 — awaiting re-review
 **Author:** Jon Langevin
+
+## Revision history
+
+- **Cycle 1**: drafted minimal "call updateLockfileWithChecksum from resolveDependencies + drop @version gate". FAILED — 2 Critical:
+  - C1: new-format lockfile early-return at `plugin_lockfile.go:147` makes dep-write a no-op on the dominant case (any project with `version: 1` lockfile).
+  - C2: dropping the `@version` gate breaks `installFromLockfile`'s no-clobber contract (relied on by lockfile-driven install per `plugin_lockfile.go:115-118` comment).
+- **Cycle 2** (this version): both formats covered. New `--no-lockfile-update` flag preserves `installFromLockfile`'s contract. Repository field gap acknowledged. Test plan splits legacy + new-format scenarios.
 
 ## Problem
 
-`wfctl plugin install <name>@<version>` recursively resolves + installs transitive `manifest.Dependencies` (`cmd/wfctl/plugin_deps.go:201 resolveDependencies`) but only the **parent** plugin gets a `.wfctl-lock.yaml` entry. Transitively-installed deps are written to disk via `installPluginFromManifest` (`plugin_deps.go:268`) but never get a lockfile entry.
+`wfctl plugin install <name>@<version>` recursively resolves + installs transitive `manifest.Dependencies` (`cmd/wfctl/plugin_deps.go:201 resolveDependencies`) but only the **parent** plugin gets tracked, and only in some cases:
 
-Second gap: plain `wfctl plugin install <name>` (no `@version`) skips lockfile update entirely (`plugin_install.go:256` `if _, ver := parseNameVersion(nameArg); ver != ""` gate). The resolved registry version isn't captured.
+1. `updateLockfileWithChecksum` only touches the LEGACY `.wfctl-lock.yaml` format (`plugin_lockfile.go:142`). On projects with NEW-format lockfiles (`Version: 1`), the early-return at line 147 silently skips writes entirely → no parent tracking either.
+2. Even on legacy format, the `if _, ver := parseNameVersion(nameArg); ver != ""` gate at `plugin_install.go:256` skips lockfile writes for plain `install <name>` invocations.
+3. Recursive dep installs (`plugin_deps.go:268`) never call any lockfile update — neither format gets dep entries.
 
 ## Solution
 
-Two small edits, single PR:
+Three pieces, single PR:
 
-### 1. Track deps in lockfile (`plugin_deps.go`)
+### 1. New-format lockfile dep+parent merge (`config/wfctl_lockfile.go` consumer)
 
-After successful dep install in `resolveDependencies` (after `plugin_deps.go:270` `resolved[dep.Name] = depManifest.Version`), compute the dep's binary SHA256 and call `updateLockfileWithChecksum` with the same args shape used for parent installs:
+Add `mergeIntoNewFormatLockfile(name, version, source string)` helper in `cmd/wfctl/plugin_lockfile.go` that:
+
+```go
+func mergeIntoNewFormatLockfile(name, version, source string) {
+    lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+    if err != nil || lf == nil || lf.Version == 0 {
+        return // no new-format lockfile present; legacy path handles it
+    }
+    if lf.Plugins == nil {
+        lf.Plugins = make(map[string]config.WfctlLockPluginEntry)
+    }
+    existing := lf.Plugins[name]
+    // Preserve Platforms / Compatibility from existing entry — only update Version + Source.
+    existing.Version = version
+    if source != "" {
+        existing.Source = source
+    }
+    lf.Plugins[name] = existing
+    _ = config.SaveWfctlLockfile(wfctlLockPath, lf)
+}
+```
+
+**Important**: do NOT clobber `existing.Platforms` (per-arch URLs + checksums) — those came from prior `wfctl plugin lock` generation. Merge-update preserves the heavy data, only refreshes Version + Source.
+
+### 2. Refactor `updateLockfileWithChecksum` to update BOTH formats
+
+Replace the early-return at `plugin_lockfile.go:147` with a fan-out:
+
+```go
+func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
+    // New-format lockfile (version: 1) — merge entry preserving Platforms.
+    mergeIntoNewFormatLockfile(pluginName, version, repository)
+
+    // Legacy-format .wfctl.yaml plugins block — existing path.
+    lf, err := loadPluginLockfile(wfctlLockPath)
+    if err != nil {
+        return
+    }
+    if lf.Plugins == nil {
+        lf.Plugins = make(map[string]PluginLockEntry)
+    }
+    lf.Plugins[pluginName] = PluginLockEntry{
+        Version: version, Repository: repository, Registry: registry, SHA256: sha256Hash,
+    }
+    _ = lf.Save(wfctlLockPath)
+}
+```
+
+The legacy path still runs (idempotent on new-format files which don't have `plugins:` in the legacy shape). Both writes are best-effort silent (preserves existing failure-tolerance posture).
+
+### 3. Track deps in `resolveDependencies` (`plugin_deps.go`)
+
+After successful dep install (after `plugin_deps.go:270` `resolved[dep.Name] = depManifest.Version`):
 
 ```go
 depBinaryPath := filepath.Join(pluginDir, dep.Name, dep.Name)
@@ -29,61 +90,99 @@ if cs, hashErr := hashFileSHA256(depBinaryPath); hashErr == nil {
 updateLockfileWithChecksum(dep.Name, depManifest.Version, depManifest.Repository, "", depChecksum)
 ```
 
-Matches the parent's pattern at `plugin_install.go:258-265`. Registry field is empty (matches parent behavior when installed via registry resolution).
+### 4. Replace `@version` gate with explicit skip flag (preserves `installFromLockfile` contract)
 
-### 2. Drop the `name@version` gate (`plugin_install.go`)
+Per cycle-1 C2: `installFromLockfile` (`plugin_lockfile.go:115-118`) deliberately passes `name` without `@version` to avoid clobbering pinned entries before checksum verification. Removing the gate naively breaks that contract.
 
-Remove the `if _, ver := parseNameVersion(nameArg); ver != ""` gate at line 256. Always update the lockfile with the resolved `manifest.Version` after a successful install. Per AC #2: plain `install <name>` should capture the resolved registry version, not skip the lockfile.
+Add package-level guard set/cleared by `installFromLockfile`:
+
+```go
+// In plugin_install.go (package-level):
+// installSkipLockfileUpdate suppresses lockfile updates during installFromLockfile's
+// pre-verification install. Set by installFromLockfile; cleared in deferred reset.
+var installSkipLockfileUpdate bool
+
+// In runPluginInstall, replace the gate at line 256:
+if !installSkipLockfileUpdate {
+    binaryChecksum := ""
+    binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
+    if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
+        binaryChecksum = cs
+    } else {
+        fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
+    }
+    updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
+}
+```
+
+In `installFromLockfile`:
+```go
+installSkipLockfileUpdate = true
+defer func() { installSkipLockfileUpdate = false }()
+// ... existing call to runPluginInstall(...)
+```
+
+(Package-level boolean is acceptable — installs are sequential within a single wfctl invocation; no concurrent goroutines call this path.)
+
+Plain `install <name>` (no `@version`) now writes to lockfile by default per AC #2.
 
 ## Files
 
-- `cmd/wfctl/plugin_deps.go:270` — append the dep-checksum + updateLockfileWithChecksum block.
-- `cmd/wfctl/plugin_install.go:255-266` — drop the `ver != ""` gate; always update lockfile.
-- `cmd/wfctl/plugin_install_lockfile_test.go` — add tests for transitive dep tracking + no-version install tracking.
-- `cmd/wfctl/plugin_deps_test.go` — extend existing dep tests to assert lockfile entries.
+- `cmd/wfctl/plugin_lockfile.go` — refactor `updateLockfileWithChecksum` to fan out to both formats; add `mergeIntoNewFormatLockfile` helper.
+- `cmd/wfctl/plugin_install.go:255-266` — replace `@version` gate with `!installSkipLockfileUpdate` guard; declare package-level bool.
+- `cmd/wfctl/plugin_lockfile.go` (legacy `installFromLockfile`) — set+defer-clear `installSkipLockfileUpdate` around the inner `runPluginInstall` call.
+- `cmd/wfctl/plugin_deps.go:270` — append dep checksum + updateLockfileWithChecksum.
+- `cmd/wfctl/plugin_install_lockfile_test.go` — add tests for: (a) parent+dep tracking on LEGACY format, (b) parent+dep tracking on NEW format (verifying Platforms preserved), (c) no-version-install tracked on both formats, (d) `installFromLockfile` no-clobber invariant still holds (regression test).
+- `cmd/wfctl/plugin_deps_test.go` — extend existing dep tests to assert lockfile entries on both formats.
 
 ## Architecture choices
 
 | Choice | Picked | Rejected (reason) |
 |---|---|---|
-| Where to call updateLockfileWithChecksum for deps | inside resolveDependencies after each install | wrap installPluginFromManifest with always-lockfile (broader blast radius; some callers may not want auto-lock) |
-| no-version install lockfile behavior | always update with resolved version | gate behind `--lock` flag (extra UX surface; AC says default) |
-| Registry field on dep lockfile entry | empty string (matches parent's `sourceName` when via registry) | populate "registry" sentinel (no upstream consumer reads this field meaningfully today) |
+| New-format coverage | refactor `updateLockfileWithChecksum` to fan out | document as out-of-scope (rejected: AC says "track in THE lockfile"; format split is invisible to operator) |
+| `installFromLockfile` no-clobber preservation | package-level bool flag set+deferred | new `runPluginInstallNoLock` entrypoint (rejected: larger diff, more surface) |
+| New-format dep merge semantics | preserve Platforms; update Version+Source only | overwrite entire entry (rejected: would clobber `wfctl plugin lock` generated per-arch data) |
+| `Repository` field on dep entry | use `depManifest.Repository` as-is; empty if unset | fallback to constructed GitHub URL (rejected: per-org assumption + verify against existing registry data — defer to follow-up) |
 
 ## Assumptions
 
-1. **All deps install via `installPluginFromManifest` writing binary at `<pluginDir>/<dep.Name>/<dep.Name>`** — verified per `plugin_install.go:259` parent pattern + `plugin_deps.go:268` dep install call (same function). Binary location consistent.
-2. **`updateLockfileWithChecksum` is safe to call N times in a single install run** — verified per `plugin_lockfile.go:146`: idempotent merge into `lf.Plugins` map; later writes overwrite earlier entries for the same key. Multiple distinct dep names produce distinct entries.
-3. **Failed dep install short-circuits before lockfile call** — verified per `plugin_deps.go:268-269`: `if err := installPluginFromManifest(...); err != nil { return ... }`. Lockfile entry only written on success.
-4. **`hashFileSHA256` is the canonical hash function and returns empty + error on missing binary** — verified per existing `plugin_install.go:261` usage; "no checksum" fallback path documented.
-5. **Lockfile schema field `Registry` accepts empty string** — verified per `plugin_lockfile.go:142-165` struct + Save serialization; YAML omits empty strings naturally per omitempty tags (or stays empty without breaking parse).
+1. **`installPluginFromManifest` writes binary at `<pluginDir>/<dep.Name>/<dep.Name>`** for both parent and dep installs — verified per `plugin_install.go:259` (parent) and `plugin_deps.go:268` (dep, same function). Binary location consistent across both call sites.
+2. **`config.LoadWfctlLockfile` returns `Version == 0` when file is missing OR legacy-format** — verified per `config/wfctl_lockfile.go:49-60`; missing file returns error, legacy parse returns zero-value struct. Helper's `Version > 0` check guards correctly.
+3. **`config.SaveWfctlLockfile` accepts a lockfile struct with existing `Plugins` map and merges via replace** — verified per `config/wfctl_lockfile.go:62`; full re-serialization. Our merge logic pre-builds the desired final map shape.
+4. **`installSkipLockfileUpdate` flag is safe as package-level state** — installs run sequentially within a single wfctl invocation; no goroutine concurrency across `runPluginInstall` calls. Cleared via defer; can't leak.
+5. **`depManifest.Repository` is `omitempty`** but treated as best-effort (empty Source in new-format lockfile = entry still valid; legacy replay needs the field for source URL but lockfile is informational on the legacy path).
+6. **Lockfile writes are idempotent** — `updateLockfileWithChecksum` called N times for N deps produces N distinct entries; existing parent code calls it once and works. New code inherits same semantics.
 
 ## Failure modes
 
-- **Dep binary missing after install (race/disk error)**: `hashFileSHA256` returns error; warning printed; lockfile entry has empty checksum. Parent has same behavior. Acceptable.
-- **Lockfile write fails (permission/disk)**: `updateLockfileWithChecksum` silently no-ops per existing semantics; install still succeeds. Existing behavior; not regressed.
-- **Lockfile write race with concurrent wfctl invocations**: existing lockfile has no locking; new code inherits same race window. Out of scope for this PR (cross-cutting concern).
-- **Plain `install <name>` against a registry whose latest moves between resolution and re-run**: lockfile captures the moment-in-time resolved version. Next run with `.wfctl-lock.yaml` present uses the locked version (already-installed-skip path at `plugin_deps.go:230-234` short-circuits).
+- **Dep binary missing after install (race/disk)**: `hashFileSHA256` returns error → warning printed → lockfile entry has empty checksum. Matches parent behavior. Acceptable.
+- **Lockfile write fails (permission/disk)**: silent no-op per existing semantics; install still succeeds. Not regressed.
+- **New-format `Platforms` data dropped accidentally**: explicit `existing := lf.Plugins[name]` + selective field update preserves Platforms. Regression test required (Test plan §b).
+- **`installFromLockfile` regression** (cycle-1 C2): mitigated by `installSkipLockfileUpdate` guard; regression test required (Test plan §d).
+- **Concurrent wfctl invocations**: lockfile has no file-level locking; pre-existing race window. Not regressed; not addressed in this PR.
+- **Plain `install <name>` against registry whose latest moves**: lockfile captures moment-in-time resolved version. Next run with lockfile present uses locked version (already-installed-skip path).
 
 ## Rollback
 
-Runtime-affecting (changes which entries `.wfctl-lock.yaml` accumulates).
+Runtime-affecting (changes lockfile-write behavior).
 
-- **PR revert**: existing lockfiles with dep entries continue to parse (additive entries; no schema change). Future installs revert to parent-only tracking. Users who relied on dep entries lose them on next install.
-- **Lockfile entries with empty checksum**: rare edge (binary hash failed); existing parent code already handles this case; no new failure path.
-- **Backwards-compat**: `.wfctl-lock.yaml` schema unchanged (using existing PluginLockEntry struct). Older wfctl reading newer lockfile with dep entries: each entry is structurally valid; older wfctl just sees more entries than it would have written itself. No parse failure.
+- **PR revert**: dep entries stop being written. Existing entries continue to parse. Lockfile-driven installs continue to work (gate replacement is internal-only refactor).
+- **`installSkipLockfileUpdate` is package-private**: revert removes the flag + restores the gate. No external API change.
+- **Lockfile schema unchanged**: both legacy `PluginLockEntry` and new `WfctlLockPluginEntry` structures untouched.
+- **Backwards-compat**: older wfctl reading newer-written lockfile: more entries than would have been written; structurally valid; no parse failure.
 
 ## Top 3 doubts (self-challenge)
 
-1. **Plain `install <name>` always updating lockfile** changes user-visible behavior. Some operators may have deliberately avoided lockfile entries by omitting `@version`. Mitigation: the change matches the explicit AC; if users want opt-out, they can `--no-lock` (future flag, out of scope).
-2. **Lockfile write happens after dep install but BEFORE parent install** — if parent install fails, lockfile has dep entries without parent. On retry the dep entries help (skip-already-installed). On manual diagnosis, the half-lockfile is informative. Existing behavior for plain installs: parent succeeds → lockfile written. New behavior: dep written before parent. If parent fails → dep stays in lockfile. Acceptable — install is best-effort transactional already (no atomic rollback).
-3. **No dep version constraint persistence**: lockfile entries are version-pinned, but `dep.MinVersion`/`MaxVersion` constraints from the parent manifest are NOT captured in the dep's lockfile entry. Future re-install reads the lockfile-pinned version and skips constraint re-check (already-installed-skip path). Acceptable for AC scope; future tightening could record constraint metadata.
+1. **Dual-format write doubles I/O on every install.** Acceptable per design (best-effort + cheap YAML write); the operator-perceived value of unified dep tracking outweighs the cost.
+2. **Package-level `installSkipLockfileUpdate` is global state.** Cleaner pattern is a context-passed flag, but requires threading through `runPluginInstall` signature. Defer to a future cleanup if pattern proliferates. Acceptable for this PR (single call site).
+3. **`Platforms` preservation in new-format merge** could surprise — operator who manually crafted a new-format lockfile expects `wfctl plugin install` to be inert. But: design only merges when an entry is being newly written for an install we just performed, NOT for unrelated plugins. The merge is additive per-plugin.
 
 ## Non-goals
 
-- `wfctl plugin remove` lockfile cleanup (separate concern; existing behavior).
-- Lockfile validation against installed state (covered by other tooling).
+- `wfctl plugin remove` lockfile cleanup (separate concern).
 - Lockfile schema migration (additive only — no field changes).
 - Constraint-metadata persistence on dep entries (deferred to future tightening).
-- `--no-lock` opt-out flag (YAGNI for this PR).
+- `--no-lock` user-facing opt-out flag (YAGNI for this PR; AC says default-on).
 - Concurrent-wfctl lockfile race handling (cross-cutting; pre-existing).
+- `Repository` fallback URL construction for empty manifest entries (defer to follow-up; gap documented).
+- Platforms data backfill for newly-tracked deps (deps only get Version+Source; per-arch archive metadata stays absent until next `wfctl plugin lock` run).
