@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"sort"
+	"strings"
 
 	"google.golang.org/grpc"
 
@@ -47,6 +48,45 @@ func BuildContractRegistry(grpcSrv *grpc.Server) *pb.ContractRegistry {
 	names := make([]string, 0, len(info))
 	for name := range info {
 		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		registry.Contracts = append(registry.Contracts, &pb.ContractDescriptor{
+			Kind:        pb.ContractKind_CONTRACT_KIND_SERVICE,
+			ServiceName: name,
+			Mode:        pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+		})
+	}
+	return registry
+}
+
+// BuildContractRegistryForPlugin enumerates gRPC services registered on
+// grpcSrv whose name STARTS WITH namespacePrefix and returns a
+// *pb.ContractRegistry with one SERVICE-kind STRICT_PROTO ContractDescriptor
+// per matching service. Filters out go-plugin infra services (PluginService,
+// GRPCBroker, GRPCStdio, grpc.health.v1.Health) so downstream contract-diff
+// (workflow#767) sees only plugin-owned services.
+//
+// Safe to call with nil server; returns empty (but non-nil) registry.
+// Names alphabetically sorted for stable diff output.
+//
+// Typical caller: iacPluginServiceBridge.GetContractRegistry derives prefix
+// from pb.IaCProviderRequired_ServiceDesc.ServiceName minus the ".IaCProviderRequired"
+// suffix so the filter cannot drift from the .proto package declaration.
+//
+// BuildContractRegistry (full-surface, no filter) is retained for callers
+// that want every registered service.
+func BuildContractRegistryForPlugin(grpcSrv *grpc.Server, namespacePrefix string) *pb.ContractRegistry {
+	registry := &pb.ContractRegistry{}
+	if grpcSrv == nil {
+		return registry
+	}
+	info := grpcSrv.GetServiceInfo()
+	names := make([]string, 0, len(info))
+	for name := range info {
+		if strings.HasPrefix(name, namespacePrefix) {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	for _, name := range names {
