@@ -37,7 +37,7 @@
 |------|-------|-------|--------|
 | 1 | feat(wfctl): lockfile dep tracking + always-track plain installs (workflow#771) | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6 | feat/771-lockfile-deps |
 
-**Status:** Draft
+**Status:** Locked 2026-05-24T08:57:59Z
 
 ## Reviewer override (plan cycle 1 → cycle 2)
 
