@@ -39,6 +39,15 @@
 
 **Status:** Draft
 
+## Reviewer override (plan cycle 1 → cycle 2)
+
+Cycle-1 plan-phase adversarial reviewer flagged 2 Critical:
+
+- **C1 (Tasks 4+5 redundant due to line-846 chokepoint)**: OVERRIDDEN as factually incorrect. Line 846 is inside `installFromURL` (lines 760+), NOT `installPluginFromManifest` (lines 325-431). `installPluginFromManifest` body verified: ends at line 431 with `commitPluginStagingDir` + `Printf("Installed ...")` — NO `updateLockfileWithChecksum` call. `resolveDependencies:268` and `installPluginReqDirect:111` both call `installPluginFromManifest` directly (not via `installFromURL`), so neither triggers any lockfile write today. Tasks 4 + 5 ARE necessary. Override documented per reviewer's "Options" rubric.
+- **C2 (fake-TDD: tests call helper directly, not changed entrypoint)**: ACCEPTED. Cycle 2 rewrites each task's Step-1 test to invoke the changed production entrypoint via httptest server pattern (precedent at `plugin_install_lockfile_test.go:568+`).
+
+Plus cycle-2 fixes Important: anon-func explicit in Task 3, parallel-test warning on global state, variable-name pre-resolution in Task 5, wrong Task-2 Step-4 commentary deleted.
+
 ---
 
 ### Task 1: Add `installSkipLockfileUpdate` chokepoint guard + `mergeIntoNewFormatLockfile` helper
@@ -116,6 +125,11 @@ In `cmd/wfctl/plugin_install.go` (add after existing package-level vars near top
 // lockfile in memory and re-save it themselves; without this guard, inner
 // install paths' lockfile writes would be silently overwritten by the
 // outer re-save (workflow#771 cycle-5 chokepoint pattern).
+//
+// NOTE: package-level state. Tests touching this MUST NOT call t.Parallel() —
+// cross-test flag leakage would silently break lockfile invariants. See
+// design doc §"Top 3 doubts #2" for rationale on rejecting context.Context
+// threading.
 var installSkipLockfileUpdate bool
 ```
 
@@ -226,10 +240,36 @@ func TestRunPluginInstall_NoVersionTracksLockfile(t *testing.T) {
 }
 ```
 
-**Step 2: Run test — verify it passes** (existing helper from Task 1; this confirms the helper supports the "no @version" use case before we wire the call site).
+**Step 1.5 (cycle-2 fix per reviewer C2): rewrite to invoke `runPluginInstall` via httptest pattern**
+
+The Step-1 test above directly invokes the helper which won't catch the gate's presence. Replace with an end-to-end test using the existing `httptest.NewServer` pattern (precedent at `plugin_install_lockfile_test.go:568+`):
+
+```go
+func TestRunPluginInstall_NoVersionTracksLockfile(t *testing.T) {
+	dir := t.TempDir()
+	savedPath := wfctlLockPath
+	wfctlLockPath = filepath.Join(dir, ".wfctl-lock.yaml")
+	defer func() { wfctlLockPath = savedPath }()
+	// New-format empty lockfile so the chokepoint fan-out fires.
+	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins: {}\n"), 0o600); err != nil { t.Fatal(err) }
+
+	// Reuse the existing httptest pattern — see TestRunPluginInstall_LocksAfterInstall
+	// at line 38 of this file. Serve a minimal plugin tarball + manifest; call
+	// runPluginInstall with PLAIN name (no @version). Assert lockfile entry
+	// appears post-install.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// ... mirror existing test's manifest+tarball serving logic
+	}))
+	defer srv.Close()
+	// ... call runPluginInstall([]string{"--plugin-dir", dir, "--source", srv.URL, "baz"})
+	// Then assert lf.Plugins["baz"].Version == manifest.Version
+}
+```
+
+**Implementer note**: use existing `TestRunPluginInstall_LocksAfterInstall` (line 38) as the literal template — copy its httptest setup, change `baz@1.0.0` → bare `baz` in the install args, and remove the `@version` parse assertion. The gate's presence will cause the lockfile NOT to be written → test FAILs → drop gate → test PASSes.
 
 Run: `GOWORK=off go test -run TestRunPluginInstall_NoVersionTracksLockfile -count=1 ./cmd/wfctl/...`
-Expected: PASS (validates Task 1's helper works for the gateless flow).
+Expected: FAIL with "plugins.baz not in lockfile" UNTIL Step 3's gate removal.
 
 **Step 3: Remove the gate**
 
@@ -272,7 +312,7 @@ updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, so
 Run: `GOWORK=off go test -run "TestUpdateLockfileWithChecksum|TestRunPluginInstall" -count=1 ./cmd/wfctl/...`
 Expected: all PASS including the existing `TestRunPluginInstall_DoesNotRewriteNewFormatLockfile` (must still pass because the test's setup may rely on the gate; if it fails, the test invariant is now covered by the Task 3 guard instead).
 
-If `TestRunPluginInstall_DoesNotRewriteNewFormatLockfile` fails: confirm the test's setup mimics the `installFromLockfile`-driven flow (sets `installSkipLockfileUpdate` if exposed). If the test was relying on the gate's `ver != ""` check, the test itself needs an update — but that update belongs in Task 3 (where `installSkipLockfileUpdate` is set by outer-frame installers), not here.
+**Cycle-2 correction** (per reviewer C3 misread): the existing `TestRunPluginInstall_DoesNotRewriteNewFormatLockfile` will continue to PASS even without Task 3's guards, NOT because of guards but because `mergeIntoNewFormatLockfile` (Task 1) preserves `Platforms` and never touches top-level `SHA256` field. The test's assertions about `entry.SHA256 == ""` and `platform.URL == "https://example.test/original.tar.gz"` and `platform.SHA256 == "archive-sha-from-lock"` ALL survive the fan-out because the helper is intentionally non-clobbering. No test update needed in this task.
 
 **Step 5: Commit**
 
@@ -324,10 +364,14 @@ func TestInstallFromLockfile_NoClobberInvariant(t *testing.T) {
 }
 ```
 
-**Step 2: Run test — verify PASS** (the test directly validates Task 1's guard; the actual outer-frame setter sites are wired in Step 3).
+**Step 1.5 (cycle-2 fix per reviewer C2): rewrite to invoke `installFromLockfile` via httptest**
+
+The Step-1 test sets the guard manually without exercising production wiring. Replace with full-flow test that invokes `installFromLockfile` against a legacy-format `.wfctl.yaml` with a `plugins:` block; ensure inner install attempts run but the on-disk pinned entry is preserved (regression catches missing/misplaced guard at outer-frame).
+
+Reuse precedent at `plugin_install_lockfile_test.go:38+` for httptest setup; substitute `runPluginInstall` invocation with `installFromLockfile(...)` and assert the on-disk `lf.Plugins["pinned"].Version` matches the ORIGINAL pin, not the post-install version.
 
 Run: `GOWORK=off go test -run TestInstallFromLockfile_NoClobberInvariant -count=1 ./cmd/wfctl/...`
-Expected: PASS (validates the guard mechanism works end-to-end).
+Expected: FAIL (without Step-3 guard, inner install would clobber pinned entry).
 
 **Step 3: Wire the guard in outer-frame installers**
 
@@ -346,7 +390,7 @@ installSkipLockfileUpdate = true
 // reset on each iteration since defer-in-loop would only fire at function exit.
 ```
 
-(Better: wrap the loop body in an anonymous function with `defer func() { installSkipLockfileUpdate = false }()`, OR explicitly clear at the bottom of the iteration. Pick whichever the implementer finds clearest; defer-in-anon-func is more idiomatic Go.)
+**Cycle-2 decision per reviewer Important**: use the anon-func wrapper (idiomatic Go, defer-safe even if inner panics). The inline-reset alternative is rejected because it leaks state on panic. Final form:
 
 ```go
 for name, entry := range lf.Plugins {
@@ -357,6 +401,8 @@ for name, entry := range lf.Plugins {
 	}()
 }
 ```
+
+Move ALL existing loop-body code inside the anonymous function. Both line-86 `installFromURL` and line-99 fallback `runPluginInstall` calls land inside the guarded scope.
 
 **Step 4: Run all install-related tests — verify PASS**
 
@@ -409,10 +455,12 @@ func TestResolveDependencies_TracksDepsInLockfile(t *testing.T) {
 }
 ```
 
-**Step 2: Run test — verify PASS** (Task 1's helper supports dep-name writes).
+**Step 1.5 (cycle-2 fix per reviewer C2): rewrite to invoke `resolveDependencies` end-to-end**
+
+Replace direct-helper-call with a real `resolveDependencies` invocation using the existing `plugin_deps_test.go:170` pattern (which already wires `manifest`, `pluginDir`, `cfgFile`, `resolved` map). Add post-call assertion that `lf.Plugins[<dep.Name>].Version` is set.
 
 Run: `GOWORK=off go test -run TestResolveDependencies_TracksDepsInLockfile -count=1 ./cmd/wfctl/...`
-Expected: PASS.
+Expected: FAIL — dep tracking line is not yet added at Step 3. After Step 3's append, expected PASS.
 
 **Step 3: Wire dep tracking in `resolveDependencies`**
 
@@ -483,10 +531,12 @@ func TestInstallPluginReqDirect_TracksParentInLockfile(t *testing.T) {
 }
 ```
 
-**Step 2: Run test — verify PASS** (Task 1's helper).
+**Step 1.5 (cycle-2 fix per reviewer C2): rewrite to invoke `installPluginReqDirect` end-to-end**
+
+Use the existing `installPluginReqDirect` test pattern (precedent: similar tests at plugin_deps_test.go) to invoke the function directly with a `config.PluginRequirement`. Assert lockfile entry appears post-call.
 
 Run: `GOWORK=off go test -run TestInstallPluginReqDirect_TracksParentInLockfile -count=1 ./cmd/wfctl/...`
-Expected: PASS.
+Expected: FAIL — `installPluginReqDirect` doesn't write lockfile yet; PASS after Step 3.
 
 **Step 3: Wire the call in `installPluginReqDirect`**
 
@@ -506,7 +556,7 @@ In `cmd/wfctl/plugin_deps.go` `installPluginReqDirect` function, AFTER the succe
 	updateLockfileWithChecksum(req.Name, manifest.Version, manifest.Repository, "", checksum)
 ```
 
-(Verify variable names `pluginDir`, `req`, `manifest` against the actual function signature; substitute as needed.)
+**Cycle-2 pre-resolved**: verified against `cmd/wfctl/plugin_deps.go:82`: `func installPluginReqDirect(pluginDir, registryCfgPath string, req config.PluginRequirement) error` — `pluginDir` and `req` are parameters; `manifest` is the local var at line 95 of the function. Use as written above.
 
 **Step 4: Run tests — verify PASS**
 
