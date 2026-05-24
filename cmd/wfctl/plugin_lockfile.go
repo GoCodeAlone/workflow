@@ -102,6 +102,11 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 		fmt.Println("Run 'wfctl plugin install <name>@<version>' to install and pin a plugin.")
 		return nil
 	}
+	// Function-scope guard (workflow#771 Task 3): suppress lockfile writes from
+	// inner runPluginInstall during the loop, so the on-disk pinned entries are
+	// not clobbered before checksum verification completes.
+	installSkipLockfileUpdate = true
+	defer func() { installSkipLockfileUpdate = false }()
 	var failed []string
 	for name, entry := range lf.Plugins {
 		fmt.Fprintf(os.Stderr, "Installing %s %s...\n", name, entry.Version)
