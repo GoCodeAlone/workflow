@@ -10,7 +10,8 @@
 - **Cycle 1**: initial design. FAILED — 3 Critical (diff fields not on wire; IaC bridge Unimplemented; handshake path wrong).
 - **Cycle 2**: pivot to Manifest scalars + ContractRegistry. FAILED — 2 Critical (plugin.json has no iacResources key; BuildContractRegistry returns ALL services including infra-internal noise).
 - **Cycle 3**: scope-down per reviewer Option 2. Drop contract-diff entirely. FAILED — 2 Critical (isSentinel() missed `"dev"` form per SDK sentinel set; cited wrong fixture precedent — `validate-contract` is pure-static, never compiles fixtures).
-- **Cycle 4** (this version): fix isSentinel() superset; cite correct precedent (`plugin_conformance_test.go:buildFixtureBinary` + per-fixture `go.mod` with `replace` directive + `GOWORK=off`); add preflight binary-path validation + security note; rewrite "Surface" rationale honestly (conformance-flag is technically viable; pick new-subcommand on separation-of-concerns); explicit fixture `PluginManifest.Validate()` prereqs.
+- **Cycle 4**: fix isSentinel() superset; cite correct precedent; preflight + security note; honest Surface rationale; fixture Validate() prereqs. FAILED — 3 Important (spawn-helper cut-point ambiguous; fixture go.mod relative-replace conflicts with copy-to-TempDir precedent; jq picks first binary non-deterministic on multiarch).
+- **Cycle 5** (this version): explicit cut-point for `spawnAndDial` helper (line 504, IaC-validation stays in conformance); fixture build is in-place not copy-to-TempDir + main.go at fixture root not cmd/plugin/; jq filter pins goos+goarch matching runner.
 
 ## Problem
 
@@ -46,10 +47,18 @@ go build -ldflags="-X github.com/GoCodeAlone/workflow-plugin-<name>/internal.Ver
 wfctl plugin verify-capabilities --binary /tmp/p .
 
 # CI (post-goreleaser, in release.yml):
-wfctl plugin verify-capabilities --binary "$(jq -r '[.[] | select(.type=="Binary") | .path] | .[0] // ""' dist/artifacts.json)" .
+RUNNER_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+BIN=$(jq -r --arg arch "$RUNNER_ARCH" \
+  '[.[] | select(.type=="Binary" and .goos=="linux" and .goarch==$arch)] | .[0].path // ""' \
+  dist/artifacts.json)
+wfctl plugin verify-capabilities --binary "$BIN" .
 # jq filter:
-#   - select(.type=="Binary") — goreleaser v2 schema; v1 also uses "Binary" for the binary artifact type
-#   - // ""  fallback to empty string on null/missing → caught by preflight
+#   - select(.type=="Binary" and .goos=="linux" and .goarch==$arch)
+#     — pick THIS RUNNER's binary; multiarch builds (amd64+arm64+darwin+...) emit
+#       multiple Binary artifacts; without the goos/goarch filter, `.[0]` selects
+#       in arbitrary goreleaser-version-dependent order — may pick darwin-arm64
+#       and produce "exec format error" on a linux-amd64 runner.
+#   - // "" fallback to empty string on null/missing → caught by --binary preflight
 ```
 
 ### Behavior
@@ -107,7 +116,7 @@ Scaffold-side wiring is a follow-up commit on `scaffold-workflow-plugin` after t
 
 ## Files (workflow repo)
 
-- `cmd/wfctl/plugin_spawn.go` — NEW; extracts `spawnAndDial(ctx, binaryPath) (*external.PluginAdapter, func())` from `plugin_conformance.go:462-515`. Both `plugin conformance` AND new `plugin verify-capabilities` call it.
+- `cmd/wfctl/plugin_spawn.go` — NEW; extracts `spawnAndDial(ctx, binaryPath) (*external.PluginAdapter, func())` from `plugin_conformance.go:462-504` ONLY (spawn + dial + Dispense + `NewExternalPluginAdapter`). **Cut-point: line 504 (right after adapter construction succeeds).** Lines 505-513 of conformance contain IaC-specific post-dial validation (`ContractRegistryError`, `AssertIaCPluginAdvertisesRequiredService`, typed-IaC adapter setup) — these REMAIN inline in `checkTypedIaCPlugin` after calling the helper. The helper is plugin-type-agnostic; IaC-specific assertions stay where they belong.
 - `cmd/wfctl/plugin_conformance.go` — refactored to call new shared helper; behavior unchanged.
 - `cmd/wfctl/plugin_verify_capabilities.go` — NEW; subcommand entry + diff impl.
 - `cmd/wfctl/plugin_verify_capabilities_test.go` — table-driven tests against `testdata/verify_capabilities/<scenario>/`.
@@ -123,25 +132,29 @@ Scaffold-side wiring is a follow-up commit on `scaffold-workflow-plugin` after t
   Per-fixture layout (each scenario directory):
   ```
   testdata/verify_capabilities/<scenario>/
-    plugin.json                 # MUST satisfy PluginManifest.Validate():
-                                #   name, version, author, description ALL required
-                                #   (per plugin/manifest.go:194-225)
-    cmd/plugin/main.go          # minimal `sdk.Serve(stub{}, sdk.WithBuildVersion(...))`
-    go.mod                      # module github.com/test/<scenario>
-                                # replace github.com/GoCodeAlone/workflow => ../../../../..
+    plugin.json   # MUST satisfy PluginManifest.Validate():
+                  #   name, version, author, description ALL required
+                  #   (per plugin/manifest.go:194-225)
+    main.go       # minimal `sdk.Serve(stub{}, sdk.WithBuildVersion(...))` at fixture root
+                  # (matches plugin_conformance_test.go fixture layout; NOT cmd/plugin/main.go)
+    go.mod        # module github.com/test/<scenario>
+                  # replace github.com/GoCodeAlone/workflow => ../../../../..
+                  # (5 ups: <scenario>/ → verify_capabilities/ → testdata/ → wfctl/ → cmd/ → REPO_ROOT)
   ```
 
-  Test invocation pattern (mirrors `plugin_conformance_test.go:buildFixtureBinary`):
+  **Build pattern: in-place (NOT copy-to-TempDir)**. The fixture's `go.mod` carries a checked-in relative `replace` directive that resolves only when built at the fixture's own checked-in path. The precedent's `prepareConformanceFixture` (`plugin_conformance_test.go:401-419`) copies-to-TempDir AND rewrites go.mod with an absolute path — that pattern's overhead is unnecessary here because verify-capabilities fixtures don't need scenario mutation; they're read-only. Build in-place; emit the binary to `t.TempDir()`:
+
   ```go
   cmd := exec.Command("go", "build", "-mod=mod",
-      "-ldflags=-X test/<scenario>/internal.Version=<tag>",
-      "-o", filepath.Join(t.TempDir(), "p"), "./cmd/plugin")
+      "-ldflags=-X github.com/test/<scenario>.Version=<tag>",
+      "-o", filepath.Join(t.TempDir(), "p"), ".")
   cmd.Dir = "testdata/verify_capabilities/<scenario>"
   cmd.Env = append(os.Environ(), "GOWORK=off")
   ```
-  `GOWORK=off` is mandatory — without it, the workspace go.work in the workflow repo overrides the per-fixture `replace` directive and the build resolves the wrong workflow version.
 
-  Optional: factor `buildFixtureBinary` from `plugin_conformance_test.go` into a shared `cmd/wfctl/fixture_build_test.go` helper if both test files use it. Defer if duplication is minimal.
+  `GOWORK=off` is mandatory — without it, the workflow repo's workspace go.work overrides the per-fixture `replace` directive and the build resolves the wrong workflow version. The `-ldflags -X` package path is `github.com/test/<scenario>` (the fixture's module path; Version var at fixture root), NOT a `<module>/internal.Version` subpath (different from production plugins; simpler test fixture).
+
+  Optional: factor `buildFixtureBinary` from `plugin_conformance_test.go:509-519` into a shared `cmd/wfctl/fixture_build_test.go` helper if both test files use it. Defer if duplication is minimal.
 - `cmd/wfctl/plugin.go` — register `case "verify-capabilities"`.
 - `docs/PLUGIN_RELEASE_GATES.md` — append `Verify-Capabilities` section.
 
