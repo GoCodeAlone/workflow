@@ -7,7 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
 
 // TestCompareSemverConstraints verifies semver comparison used in version constraint checks.
@@ -338,6 +342,193 @@ func TestPluginInstall_ResolveDependencies(t *testing.T) {
 	// The manifest server should not have been called (already installed).
 	if installCount > 0 {
 		t.Errorf("bento manifest fetched %d times, want 0 (already installed)", installCount)
+	}
+}
+
+// TestResolveDependencies_TracksDepsInLockfile verifies workflow#771 Task 4:
+// when resolveDependencies installs a transitive dep, the lockfile receives an
+// entry for that dep (provided no outer-frame installer suppressed writes).
+func TestResolveDependencies_TracksDepsInLockfile(t *testing.T) {
+	pluginDir := t.TempDir()
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	cwd := t.TempDir()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	// Seed an empty v1 lockfile so the chokepoint fan-out fires.
+	emptyLF := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins:     map[string]config.WfctlLockPluginEntry{},
+	}
+	if err := config.SaveWfctlLockfile(wfctlLockPath, emptyLF); err != nil {
+		t.Fatal(err)
+	}
+
+	const depName = "depa"
+	binaryContent := []byte("#!/bin/sh\necho depa\n")
+	pjContent := minimalPluginJSON(depName, "0.5.0")
+	tarball := buildPluginTarGz(t, depName, binaryContent, pjContent)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/" + depName + "/manifest.json":
+			manifest := RegistryManifest{
+				Name:        depName,
+				Version:     "0.5.0",
+				Repository:  "github.com/x/" + depName,
+				Author:      "tester",
+				Description: "depa",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:     runtime.GOOS,
+						Arch:   runtime.GOARCH,
+						URL:    "http://" + r.Host + "/download/" + depName + ".tar.gz",
+						SHA256: sha256Hex(tarball),
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(manifest)
+		case "/download/" + depName + ".tar.gz":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfgFile := writeTestRegistryConfig(t, srv.URL)
+
+	parentManifest := &RegistryManifest{
+		Name:    "parent",
+		Version: "1.0.0",
+		Dependencies: []PluginDependency{
+			{Name: depName, MinVersion: "0.1.0"},
+		},
+	}
+
+	resolved := make(map[string]string)
+	if err := resolveDependencies("parent", parentManifest, pluginDir, cfgFile, []string{}, resolved); err != nil {
+		t.Fatalf("resolveDependencies: %v", err)
+	}
+	if resolved[depName] != "0.5.0" {
+		t.Errorf("resolved[%s] = %q, want 0.5.0", depName, resolved[depName])
+	}
+
+	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	entry, ok := lf.Plugins[depName]
+	if !ok {
+		t.Fatalf("dep not tracked in lockfile; lf.Plugins=%#v", lf.Plugins)
+	}
+	if entry.Version != "0.5.0" {
+		t.Errorf("dep entry Version = %q, want 0.5.0", entry.Version)
+	}
+}
+
+// TestInstallPluginReqDirect_TracksParentInLockfile verifies workflow#771 Task 5:
+// installPluginReqDirect writes a lockfile entry for the parent plugin (closing
+// the asymmetry where --from-config dep installs were tracked via Task 4 but
+// parent installs via this path were not).
+func TestInstallPluginReqDirect_TracksParentInLockfile(t *testing.T) {
+	pluginDir := t.TempDir()
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	cwd := t.TempDir()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	emptyLF := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins:     map[string]config.WfctlLockPluginEntry{},
+	}
+	if err := config.SaveWfctlLockfile(wfctlLockPath, emptyLF); err != nil {
+		t.Fatal(err)
+	}
+
+	// Parent plugin uses long-form name to verify normalize-to-lockfile-key.
+	const parentLong = "workflow-plugin-fromcfg"
+	const parentShort = "fromcfg"
+	binaryContent := []byte("#!/bin/sh\necho fromcfg\n")
+	pjContent := minimalPluginJSON(parentShort, "1.5.0")
+	tarball := buildPluginTarGz(t, parentShort, binaryContent, pjContent)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/" + parentLong + "/manifest.json":
+			manifest := RegistryManifest{
+				Name:        parentShort,
+				Version:     "1.5.0",
+				Repository:  "github.com/x/" + parentShort,
+				Author:      "tester",
+				Description: "fromcfg",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:     runtime.GOOS,
+						Arch:   runtime.GOARCH,
+						URL:    "http://" + r.Host + "/download/" + parentShort + ".tar.gz",
+						SHA256: sha256Hex(tarball),
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(manifest)
+		case "/download/" + parentShort + ".tar.gz":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfgFile := writeTestRegistryConfig(t, srv.URL)
+
+	req := config.PluginRequirement{
+		Name:    parentLong,
+		Version: "1.5.0",
+	}
+
+	if err := installPluginReqDirect(pluginDir, cfgFile, req); err != nil {
+		t.Fatalf("installPluginReqDirect: %v", err)
+	}
+
+	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	// installPluginReqDirect normalizes via normalizePluginName at line 87;
+	// the lockfile entry key is the NORMALIZED form ("fromcfg").
+	entry, ok := lf.Plugins[parentShort]
+	if !ok {
+		t.Fatalf("parent not tracked in lockfile (normalized key %q missing); lf.Plugins=%#v", parentShort, lf.Plugins)
+	}
+	if entry.Version != "1.5.0" {
+		t.Errorf("parent entry Version = %q, want 1.5.0", entry.Version)
 	}
 }
 

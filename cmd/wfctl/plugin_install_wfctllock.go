@@ -30,6 +30,17 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 		return nil
 	}
 
+	// Function-scope guard (workflow#771 Task 3): suppress lockfile writes from
+	// inner install paths (installFromURL + fallback runPluginInstall) so that
+	// platform metadata + pinned entries remain authoritative. Deps installed
+	// via the fallback runPluginInstall inherit this guard and are NOT
+	// auto-pinned to the lockfile — matches the "lockfile is what the user
+	// explicitly pinned" contract. Cycle-3 fix per CYC2-C2: function-scope
+	// because per-iteration anon-func wrappers would break the loop's 6×
+	// `continue` statements (continue not allowed across func literal).
+	installSkipLockfileUpdate = true
+	defer func() { installSkipLockfileUpdate = false }()
+
 	if lockPath != "" {
 		scrubbed := scrubbedWfctlLockfileTopLevelSHA256(lf)
 		if err := config.SaveWfctlLockfile(lockPath, scrubbed); err != nil {
