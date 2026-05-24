@@ -141,40 +141,59 @@ var installSkipLockfileUpdate bool
 
 In `cmd/wfctl/plugin_lockfile.go`, add `mergeIntoNewFormatLockfile` helper:
 
+In `cmd/wfctl/plugin_lockfile.go`, add `mergeIntoNewFormatLockfile` helper. Cycle-4 fix per reviewer CYC3-C2: helper handles BOTH key forms (real-world lockfiles key entries by long-form `workflow-plugin-auth` while runPluginInstall normalizes to `auth`). Returns bool so caller knows whether v1 path fired:
+
 ```go
 // mergeIntoNewFormatLockfile updates the new-format .wfctl-lock.yaml's
 // Plugins[name] entry, preserving Platforms / Compatibility data while
-// refreshing Version + Source. No-ops if the lockfile is missing or
-// legacy-format (Version == 0).
-func mergeIntoNewFormatLockfile(name, version, source string) {
-	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
+// refreshing Version + Source. Returns true iff lockfile is v1 format
+// (so caller can skip the legacy write path).
+//
+// name passed in normalized form. Helper handles existing entries keyed
+// by long-form (e.g. "workflow-plugin-auth") by scanning for any key
+// matching normalizePluginName.
+func mergeIntoNewFormatLockfile(name, version, source string) bool {
+	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
 	if err != nil || lf == nil || lf.Version == 0 {
-		return
+		return false
 	}
 	if lf.Plugins == nil {
 		lf.Plugins = make(map[string]config.WfctlLockPluginEntry)
 	}
-	existing := lf.Plugins[name]
+	// Lookup: exact match first, else scan for normalized-equivalent key.
+	key := name
+	if _, ok := lf.Plugins[name]; !ok {
+		for existingKey := range lf.Plugins {
+			if normalizePluginName(existingKey) == name {
+				key = existingKey
+				break
+			}
+		}
+	}
+	existing := lf.Plugins[key]
 	existing.Version = version
 	if source != "" {
 		existing.Source = source
 	}
-	lf.Plugins[name] = existing
+	lf.Plugins[key] = existing
 	_ = config.SaveWfctlLockfile(wfctlLockPath, lf)
+	return true
 }
 ```
 
-Then refactor `updateLockfileWithChecksum` in `cmd/wfctl/plugin_lockfile.go` (current line 146): remove the `if newLF, err := config.LoadWfctlLockfile(...); err == nil && newLF.Version > 0 { return }` early-return; replace with chokepoint guard + fan-out:
+Then refactor `updateLockfileWithChecksum` with chokepoint guard + MUTUALLY-EXCLUSIVE format paths (cycle-4 fix per CYC3-C1: `PluginLockEntry` has no `Platforms` field, so the legacy `Save()` re-marshals over the v1 file's plugins block destroying Platforms; protect by returning if v1 helper handled it):
 
 ```go
 func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
 	if installSkipLockfileUpdate {
 		return
 	}
-	// New-format lockfile (version: 1) — merge entry preserving Platforms.
-	mergeIntoNewFormatLockfile(pluginName, version, repository)
-
-	// Legacy-format .wfctl.yaml plugins block — existing path.
+	// V1 format takes precedence: if .wfctl-lock.yaml exists with version: 1,
+	// write ONLY to that path (preserves Platforms). Skip legacy save entirely.
+	if mergeIntoNewFormatLockfile(pluginName, version, repository) {
+		return
+	}
+	// Legacy fallback: no v1 lockfile present; write to legacy .wfctl.yaml plugins block.
 	lf, err := loadPluginLockfile(wfctlLockPath)
 	if err != nil {
 		return
@@ -390,9 +409,11 @@ Expected: FAIL (without Step-3 guard, inner install would clobber pinned entry).
 
 **Step 3: Wire the guard in outer-frame installers**
 
-In `cmd/wfctl/plugin_lockfile.go`, find `installFromLockfile` (around line 89). Before the `installArgs := []string{...}` block (around line 115-118), add:
+In `cmd/wfctl/plugin_lockfile.go`, find `installFromLockfile` (around line 89). Cycle-4 fix per CYC3-I2: place guard at FUNCTION SCOPE (top of function, before the for-loop opens at line 106), NOT inside the loop body — mirrors the same fix applied to `installFromWfctlLockfile`. Single set+defer pair:
 
 ```go
+// At the TOP of installFromLockfile (after the v1 branch's early-return at line 92,
+// before the legacy loop opens at line 106):
 installSkipLockfileUpdate = true
 defer func() { installSkipLockfileUpdate = false }()
 ```
@@ -485,14 +506,18 @@ In `cmd/wfctl/plugin_deps.go` after the existing `resolved[dep.Name] = depManife
 		// Track dep in lockfile (workflow#771 Task 4). The chokepoint guard
 		// inside updateLockfileWithChecksum (Task 1) suppresses writes when
 		// running under an outer-frame installer (installFromLockfile etc.).
-		depBinaryPath := filepath.Join(pluginDir, dep.Name, dep.Name)
+		// Cycle-4 fix per reviewer CYC3-I1: normalize dep key for both hash
+		// path AND lockfile key — keeps dep entries consistent with parent
+		// entries (which use normalizePluginName per runPluginInstall line 257).
+		depKey := normalizePluginName(dep.Name)
+		depBinaryPath := filepath.Join(pluginDir, depKey, depKey)
 		depChecksum := ""
 		if cs, hashErr := hashFileSHA256(depBinaryPath); hashErr == nil {
 			depChecksum = cs
 		} else {
 			fmt.Fprintf(os.Stderr, "warning: could not hash dep binary %s: %v (lockfile will have no checksum)\n", depBinaryPath, hashErr)
 		}
-		updateLockfileWithChecksum(dep.Name, depManifest.Version, depManifest.Repository, "", depChecksum)
+		updateLockfileWithChecksum(depKey, depManifest.Version, depManifest.Repository, "", depChecksum)
 ```
 
 Add `"path/filepath"` and `"os"` to the existing single import block in `plugin_deps.go` if not already present.
