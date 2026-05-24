@@ -72,3 +72,62 @@ func TestPreflightBinaryOK(t *testing.T) {
 		t.Errorf("want PASS, got %v", err)
 	}
 }
+
+func TestIsSentinel(t *testing.T) {
+	cases := map[string]bool{
+		"":                          true,
+		"dev":                       true,
+		"0.0.0":                     true,
+		"(devel)":                   true,
+		"(devel) [@ a1b2c3d]":       true,
+		"(devel) [@ a1b2c3d.dirty]": true,
+		"v1.2.3":                    false,
+		"1.2.3":                     false,
+		"v0.0.1":                    false,
+	}
+	for v, want := range cases {
+		if got := isSentinel(v); got != want {
+			t.Errorf("isSentinel(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
+
+func TestDiffVersion(t *testing.T) {
+	cases := []struct {
+		declared, runtime string
+		wantPass          bool
+		wantReason        string
+	}{
+		// 0.0.0 + non-sentinel -> PASS (CI artifact)
+		{"0.0.0", "v1.2.3", true, ""},
+		{"0.0.0", "0.1.0", true, ""},
+		// 0.0.0 + sentinel -> FAIL (ldflag missing)
+		{"0.0.0", "", false, "ldflag"},
+		{"0.0.0", "(devel)", false, "ldflag"},
+		{"0.0.0", "(devel) [@ abc1234]", false, "ldflag"},
+		{"0.0.0", "dev", false, "ldflag"},
+		{"0.0.0", "0.0.0", false, "ldflag"},
+		// X.Y.Z + vX.Y.Z or X.Y.Z -> PASS (normalize leading v)
+		{"1.2.3", "v1.2.3", true, ""},
+		{"1.2.3", "1.2.3", true, ""},
+		// X.Y.Z + sentinel -> FAIL
+		{"1.2.3", "", false, "ldflag"},
+		{"1.2.3", "(devel)", false, "ldflag"},
+		{"1.2.3", "(devel) [@ deadbee]", false, "ldflag"},
+		// X.Y.Z + drift -> FAIL
+		{"1.2.3", "v0.9.0", false, "drift"},
+		{"1.2.3", "v2.0.0", false, "drift"},
+	}
+	for _, c := range cases {
+		pass, reason := diffVersion(c.declared, c.runtime)
+		if pass != c.wantPass {
+			t.Errorf("diffVersion(%q, %q) pass=%v want=%v reason=%q",
+				c.declared, c.runtime, pass, c.wantPass, reason)
+			continue
+		}
+		if !pass && !strings.Contains(reason, c.wantReason) {
+			t.Errorf("diffVersion(%q, %q) reason=%q want substring %q",
+				c.declared, c.runtime, reason, c.wantReason)
+		}
+	}
+}

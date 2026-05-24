@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func runPluginVerifyCapabilities(args []string) error {
@@ -85,4 +86,54 @@ func preflightBinary(path string) error {
 		return fmt.Errorf("--binary %q is not executable (mode=%s)", path, fi.Mode())
 	}
 	return nil
+}
+
+// isSentinel returns true when v is one of the SDK's dev-sentinel forms
+// OR the on-disk plugin.json sentinel "0.0.0".
+//
+// SDK sentinel set (per plugin/external/sdk/buildversion.go:36-42):
+//
+//	"", "dev", "(devel)" — ResolveBuildVersion replaces these with build-info
+//
+// Plus build-info fallback produces "(devel) [@ <sha>[.dirty]]" — HasPrefix catches all forms.
+// Plus on-disk plugin.json "0.0.0" sentinel (workflow#762 convention).
+//
+// The predicate MUST be a SUPERSET of the SDK's set; "dev" is defensive
+// (canonical wiring through sdk.ResolveBuildVersion prevents literal "dev"
+// from reaching the wire — included to catch non-canonical wiring accidents).
+func isSentinel(v string) bool {
+	switch v {
+	case "", "dev", "0.0.0", "(devel)":
+		return true
+	}
+	return strings.HasPrefix(v, "(devel)")
+}
+
+// diffVersion implements the Version-rule matrix from the design doc:
+//
+//	plugin.json   binary Manifest.Version   outcome
+//	------------  ------------------------  -------
+//	"0.0.0"       non-sentinel              PASS (CI artifact under verification)
+//	"0.0.0"       sentinel                  FAIL (ldflag injection missing)
+//	"X.Y.Z"       "vX.Y.Z" or "X.Y.Z"       PASS (normalize leading v)
+//	"X.Y.Z"       sentinel                  FAIL (ldflag missing)
+//	"X.Y.Z"       anything else             FAIL (version drift)
+//
+// Returns (pass bool, reason string). reason is non-empty only when pass=false.
+func diffVersion(declared, runtime string) (bool, string) {
+	runtimeSentinel := isSentinel(runtime)
+	if declared == "0.0.0" {
+		if runtimeSentinel {
+			return false, fmt.Sprintf("ldflag injection missing: plugin.json=%q; binary Manifest.Version=%q (sentinel)", declared, runtime)
+		}
+		return true, ""
+	}
+	if runtimeSentinel {
+		return false, fmt.Sprintf("ldflag injection missing: plugin.json=%q (release); binary Manifest.Version=%q (sentinel)", declared, runtime)
+	}
+	rNorm := strings.TrimPrefix(runtime, "v")
+	if rNorm == declared {
+		return true, ""
+	}
+	return false, fmt.Sprintf("version drift: plugin.json=%q; binary Manifest.Version=%q", declared, runtime)
 }
