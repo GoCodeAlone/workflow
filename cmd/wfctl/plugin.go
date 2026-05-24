@@ -37,6 +37,8 @@ func runPlugin(args []string) error {
 		return runPluginValidate(args[1:])
 	case "validate-contract":
 		return runPluginValidateContract(args[1:])
+	case "verify-capabilities":
+		return runPluginVerifyCapabilities(args[1:])
 	case "registry-sync":
 		return runPluginRegistrySync(args[1:])
 	case "conformance":
@@ -68,6 +70,7 @@ Subcommands:
   remove   Uninstall a plugin (also removes from manifest + lockfile)
   validate Validate a plugin manifest from the registry or a local file
   validate-contract  Validate a plugin source directory against the release contract (workflow#758)
+  verify-capabilities  Spawn plugin binary, verify runtime GetManifest matches plugin.json
   registry-sync  Sync registry manifest versions/capabilities from upstream release tags; subcommands: core, readme (workflow#762)
   conformance Run executable plugin/host conformance checks
   info     Show details about an installed plugin
