@@ -16,7 +16,8 @@
 
 **Revision history:**
 - Cycle 1: 9-task plan with shared `spawnAndDial` helper extraction. FAILED — 4 Critical (fictional `EngineManifest()` signature; fixture template wrong PluginManifest type; missing-ldflag mechanics misstated; fixture plugin.json shape diverges from PluginManifest).
-- Cycle 2 (this version): drop helper extraction (Task 1 → inline ~40 LOC; eliminates I2 — verification-class mismatch on refactor-without-test). Replace `EngineManifest()` with direct `pb.NewPluginServiceClient(conn).GetManifest(ctx, ...)`. Fix fixture template (`sdk.PluginManifest` value, no error). Set fixture initial `Version = "dev"` so `ResolveBuildVersion` falls back to `(devel)` for the missing-ldflag scenario. Minimal plugin.json fixture (drop nonexistent fields).
+- Cycle 2: drop helper extraction; direct GetManifest RPC; fix fixture types; fix sentinel mechanics. FAILED — 3 Critical (anchor `case "validate-contract":` didn't exist on stale worktree base; duplicate `import (...)` blocks in test+production files would fail compile; name-drift test assertion too lenient).
+- Cycle 3 (this version): rebased worktree onto current main (validate-contract + registry-sync now in dispatcher). Restructured every "append imports" instruction to "Edit the SINGLE existing import block" with explicit warnings. Task 4 Step 1 documents the final import-block shape end-to-end. Fixture go-directive bumped 1.24 → 1.26.0 (matches workflow root). Name-drift fixture ldflag changed to `v0.0.0` so Version matrix PASSes (isolated Name diff); test assertion tightened to `"name:"` substring; verify-capabilities error now embeds joined failure list so tests can assert on field-name without capturing stderr.
 
 ---
 
@@ -60,10 +61,14 @@
 
 Create `cmd/wfctl/plugin_verify_capabilities_test.go`:
 
+**Note: every "append" instruction in this plan EDITS the existing file's import block (Go disallows redundant imports across multiple `import` declarations in the same file). Adding new imports = Edit the existing block; never append a second `import (...)` block.**
+
 ```go
 package main
 
 import (
+	"os"           // added in Task 2
+	"path/filepath" // added in Task 2
 	"strings"
 	"testing"
 )
@@ -196,16 +201,9 @@ git commit -m "feat(wfctl): plugin verify-capabilities subcommand skeleton (work
 
 **Step 1: Write the failing tests**
 
-Append to `cmd/wfctl/plugin_verify_capabilities_test.go`:
+Append the test functions below to `cmd/wfctl/plugin_verify_capabilities_test.go`. **DO NOT add a new `import (...)` block** — the file's existing import block (created in Task 1 with `os`, `path/filepath`, `strings`, `testing`) already covers everything these tests need.
 
 ```go
-import (
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-)
-
 func TestPreflightBinaryEmpty(t *testing.T) {
 	if err := preflightBinary(""); err == nil || !strings.Contains(err.Error(), "binary path") {
 		t.Errorf("want empty-path error, got %v", err)
@@ -260,15 +258,9 @@ Expected: FAIL `undefined: preflightBinary`.
 
 **Step 3: Implement**
 
-Append to `cmd/wfctl/plugin_verify_capabilities.go`:
+In `cmd/wfctl/plugin_verify_capabilities.go`: **Edit the existing single import block** to add `"os"` (alongside existing `"flag"`, `"fmt"`). DO NOT add a second `import (...)` block. Then append the `preflightBinary` function below.
 
 ```go
-import (
-	"flag"
-	"fmt"
-	"os"
-)
-
 // preflightBinary validates the --binary path before exec:
 //   - non-empty + not literal "null" (guards against jq fallback returning empty)
 //   - file exists and is a regular file (not directory)
@@ -396,7 +388,7 @@ Expected: FAIL `undefined: isSentinel`, `undefined: diffVersion`.
 
 **Step 3: Implement**
 
-Append to `cmd/wfctl/plugin_verify_capabilities.go` (add `"strings"` to imports):
+In `cmd/wfctl/plugin_verify_capabilities.go`: **Edit the existing single import block** to add `"strings"`. Then append `isSentinel` + `diffVersion` below.
 
 ```go
 // isSentinel returns true when v is one of the SDK's dev-sentinel forms
@@ -471,7 +463,46 @@ git commit -m "feat(wfctl): verify-capabilities sentinel-pattern Version diff ma
 
 This task wires the actual spawn-and-dial INLINE (no shared helper extraction — cycle-2 reviewer Option 3 + I2 elimination). GetManifest is called DIRECTLY via `pb.NewPluginServiceClient(pluginClient.Conn())` to bypass `ExternalPluginAdapter`'s precedence rules.
 
-**Step 1: Load + validate plugin.json**
+**Step 1: Edit the existing import block**
+
+Add these to the SINGLE existing import block at the top of `cmd/wfctl/plugin_verify_capabilities.go` (do NOT add a second `import (...)` declaration):
+
+- `"context"`
+- `"encoding/json"`
+- `"os/exec"`
+- `"path/filepath"`
+- `"time"`
+- `external "github.com/GoCodeAlone/workflow/plugin/external"`
+- `pb "github.com/GoCodeAlone/workflow/plugin/external/proto"`
+- `"github.com/GoCodeAlone/workflow/plugin"`
+- `goplugin "github.com/GoCodeAlone/go-plugin"`
+- `hclog "github.com/hashicorp/go-hclog"`
+- `"google.golang.org/protobuf/types/known/emptypb"`
+
+Final import block should contain (alphabetical, stdlib then 3rd-party):
+
+```go
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	goplugin "github.com/GoCodeAlone/go-plugin"
+	"github.com/GoCodeAlone/workflow/plugin"
+	external "github.com/GoCodeAlone/workflow/plugin/external"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	hclog "github.com/hashicorp/go-hclog"
+	"google.golang.org/protobuf/types/known/emptypb"
+)
+```
+
+**Step 2: Load + validate plugin.json**
 
 In `runPluginVerifyCapabilities`, replace the `return fmt.Errorf("not yet implemented")` line with:
 
@@ -494,9 +525,7 @@ if err := declared.Validate(); err != nil {
 }
 ```
 
-Add imports: `"encoding/json"`, `"path/filepath"`, `"github.com/GoCodeAlone/workflow/plugin"`.
-
-**Step 2: Spawn + dial INLINE (no shared helper)**
+**Step 3: Spawn + dial INLINE (no shared helper)**
 
 Continue in `runPluginVerifyCapabilities`:
 
@@ -540,11 +569,9 @@ if !ok {
 }
 ```
 
-Add imports: `"context"`, `"os/exec"`, `"time"`, `external "github.com/GoCodeAlone/workflow/plugin/external"`, `goplugin "github.com/GoCodeAlone/go-plugin"`, `hclog "github.com/hashicorp/go-hclog"`.
+Note: `tailBuffer` is defined in `cmd/wfctl/plugin_conformance.go` (same package). All required imports already added in Step 1.
 
-Note: `tailBuffer` is defined in `cmd/wfctl/plugin_conformance.go` (same package). No import needed.
-
-**Step 3: Call GetManifest DIRECTLY via raw gRPC client** (bypasses adapter precedence)
+**Step 4: Call GetManifest DIRECTLY via raw gRPC client** (bypasses adapter precedence)
 
 ```go
 pbClient := pb.NewPluginServiceClient(pluginClient.Conn())
@@ -554,9 +581,7 @@ if err != nil {
 }
 ```
 
-Add imports: `pb "github.com/GoCodeAlone/workflow/plugin/external/proto"`, `"google.golang.org/protobuf/types/known/emptypb"`.
-
-**Step 4: Diff Name + Version and report**
+**Step 5: Diff Name + Version and report**
 
 ```go
 var failures []string
@@ -571,13 +596,15 @@ if len(failures) > 0 {
     for _, f := range failures {
         fmt.Fprintf(os.Stderr, "  - %s\n", f)
     }
-    return fmt.Errorf("verify-capabilities: %d mismatch(es)", len(failures))
+    // Embed the joined failure list in the returned error so tests can assert
+    // on specific field names (e.g. "name:" prefix) without capturing stderr.
+    return fmt.Errorf("verify-capabilities: %d mismatch(es): %s", len(failures), strings.Join(failures, "; "))
 }
 fmt.Printf("OK    %s %s (plugin.json: %s)\n", declared.Name, runtime.GetVersion(), declared.Version)
 return nil
 ```
 
-**Step 5: Build + help-output sanity check**
+**Step 6: Build + help-output sanity check**
 
 Run:
 ```bash
@@ -585,7 +612,7 @@ cd cmd/wfctl && go build -o /tmp/wfctl ./... && /tmp/wfctl plugin verify-capabil
 ```
 Expected: help text printed; exit 0. Help contains "REQUIRED: --binary", "WARNING: this command EXECUTES", `jq` CI example.
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git add cmd/wfctl/plugin_verify_capabilities.go
@@ -662,7 +689,7 @@ GO
   cat > "$d/go.mod" <<MOD
 module github.com/test/$s
 
-go 1.24
+go 1.26.0
 
 require github.com/GoCodeAlone/workflow v0.62.0
 
@@ -801,7 +828,7 @@ GO
 cat > "$d/go.mod" <<MOD
 module github.com/test/name-drift
 
-go 1.24
+go 1.26.0
 
 require github.com/GoCodeAlone/workflow v0.62.0
 
@@ -903,13 +930,17 @@ func TestVerifyCapabilities_VersionDrift(t *testing.T) {
 }
 
 func TestVerifyCapabilities_NameDrift(t *testing.T) {
-	bin := buildFixtureBinaryForVerify(t, "name-drift", "v0.1.0")
+	// Use ldflag tag matching plugin.json sentinel so Version PASSes (matrix row "0.0.0 + v0.0.0" -> PASS via TrimPrefix);
+	// Name is the ISOLATED failure under test. Without this, both name AND version mismatches fire and a regression
+	// that breaks Name-diff while leaving Version-diff would silently pass through the lenient "mismatch" substring check.
+	bin := buildFixtureBinaryForVerify(t, "name-drift", "v0.0.0")
 	err := runPluginVerifyCapabilities([]string{"--binary", bin, "testdata/verify_capabilities/name-drift"})
 	if err == nil {
 		t.Fatal("want FAIL, got nil")
 	}
-	if !strings.Contains(err.Error(), "mismatch") {
-		t.Errorf("want mismatch error, got: %v", err)
+	// Tighter assertion: error must specifically mention "name:" prefix from the diff report.
+	if !strings.Contains(err.Error(), "name:") && !strings.Contains(fmt.Sprintf("%v", err), "name:") {
+		t.Errorf("want name-mismatch error, got: %v", err)
 	}
 }
 ```
