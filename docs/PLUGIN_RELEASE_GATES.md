@@ -176,3 +176,62 @@ Same regex as `wfctl plugin validate-contract --for-publish`. Catches plugins th
 - SDK: `plugin/external/sdk/buildversion.go`, `plugin/external/sdk/iacserver.go` (IaCServeOptions.BuildVersion), `plugin/external/sdk/serve.go` (WithBuildVersion)
 - wfctl: `cmd/wfctl/plugin_validate_contract.go`
 - Registry: `workflow-registry/scripts/sync-versions.sh`
+
+## Verify-Capabilities (workflow#765 — runtime truth-check)
+
+`wfctl plugin verify-capabilities` is the runtime sibling of `validate-contract`:
+it spawns the plugin binary, calls `PluginService.GetManifest`, and verifies
+the returned `Name` + `Version` match `plugin.json`. Catches the
+**ldflag-missing truth-loop bug**: a plugin can pass `validate-contract`
+(static check) and still ship a binary whose `Manifest.Version` is the
+SDK's `(devel) [@ sha]` sentinel because the goreleaser ldflag never fired.
+
+### Synopsis
+
+```
+wfctl plugin verify-capabilities --binary <path> <plugin-dir>
+```
+
+`--binary` REQUIRED (no build-from-source — operator builds via goreleaser
+or `go build`).
+
+⚠ **Executes the binary** as a subprocess. Only run against artifacts you trust.
+
+### Local development
+
+```bash
+go build -ldflags="-X github.com/GoCodeAlone/workflow-plugin-<name>/internal.Version=v1.2.3" \
+  -o /tmp/p ./cmd/<name>
+wfctl plugin verify-capabilities --binary /tmp/p .
+```
+
+### CI integration (release.yml post-goreleaser, pre-publish)
+
+```yaml
+- name: Verify capabilities (post-build runtime check)
+  run: |
+    RUNNER_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+    BIN=$(jq -r --arg arch "$RUNNER_ARCH" \
+      '[.[] | select(.type=="Binary" and .goos=="linux" and .goarch==$arch)] | .[0].path // ""' \
+      dist/artifacts.json)
+    "${RUNNER_TEMP}/wfctl-bin/wfctl" plugin verify-capabilities --binary "$BIN" .
+```
+
+### Version diff matrix
+
+| plugin.json `version` | binary `Manifest.Version` | Outcome |
+|---|---|---|
+| `"0.0.0"` (sentinel) | non-sentinel (`"v1.2.3"`) | PASS — CI artifact under verification |
+| `"0.0.0"` | sentinel (`""`, `"dev"`, `"0.0.0"`, `"(devel)..."`) | FAIL — ldflag missing |
+| `"X.Y.Z"` (release) | `"vX.Y.Z"` or `"X.Y.Z"` | PASS — normalize leading v |
+| `"X.Y.Z"` | sentinel | FAIL — ldflag missing |
+| `"X.Y.Z"` | anything else | FAIL — version drift |
+
+### Non-goals
+
+- Does NOT walk per-type RPCs (`GetModuleTypes`/`GetStepTypes`/`GetTriggerTypes`) — IaC bridge returns Unimplemented.
+- Does NOT diff `GetContractRegistry` — deferred to workflow#766 (requires `capabilities.iacServices` schema first).
+- Does NOT build the binary — operator's responsibility.
+- Does NOT verify `minEngineVersion` at runtime (not on `pb.Manifest`).
+
+See `docs/plans/2026-05-24-verify-capabilities-design.md` for full design.
