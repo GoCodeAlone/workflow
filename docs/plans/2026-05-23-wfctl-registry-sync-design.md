@@ -75,16 +75,6 @@ This addresses cycle 1 C1 (parity must cover all three scripts) + D2 (translatio
 
 **Per cycle 1 I4:** `--verify-capabilities` is registry-side only (runs on the periodic cron). Layer (b) per-PR migrations do NOT use this flag — capabilities are auto-populated on the next cron sync after the release lands. Documented in §Layer (b).
 
-### Layer (a'): workflow-registry switch + parity cycle
-
-PR in `workflow-registry`:
-
-1. Add `wfctl plugin registry-sync --fix` to `sync-registry-manifests.yml` as a NEW step running AFTER the existing `bash scripts/sync-versions.sh --fix`.
-2. In dry-run mode for both, log the diff between bash and Go outputs into the workflow artifact.
-3. After one weekly cron cycle confirms zero output diff, ship the **followup PR** that deletes `sync-versions.sh` + removes the bash step.
-
-This belts-and-suspenders pattern addresses self-challenge doubt D2 (bash → Go translation parity risk).
-
 ### Layer (d): template-repo modernization
 
 **Renames:**
