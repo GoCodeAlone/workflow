@@ -26,6 +26,18 @@ import (
 // defaultDataDir is the default location for installed plugin binaries.
 const defaultDataDir = "data/plugins"
 
+// installSkipLockfileUpdate suppresses ALL lockfile writes when set. Outer
+// installers (installFromLockfile / installFromWfctlLockfile) hold the
+// lockfile in memory and re-save it themselves; without this guard, inner
+// install paths' lockfile writes would be silently overwritten by the
+// outer re-save (workflow#771 cycle-5 chokepoint pattern).
+//
+// NOTE: package-level state. Tests touching this MUST NOT call t.Parallel() —
+// cross-test flag leakage would silently break lockfile invariants. See
+// design doc §"Top 3 doubts #2" for rationale on rejecting context.Context
+// threading.
+var installSkipLockfileUpdate bool
+
 func runPluginSearch(args []string) error {
 	fs := flag.NewFlagSet("plugin search", flag.ContinueOnError)
 	cfgPath := fs.String("config", "", "Registry config file path")

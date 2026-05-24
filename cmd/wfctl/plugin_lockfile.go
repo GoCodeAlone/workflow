@@ -139,15 +139,56 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 	return nil
 }
 
+// mergeIntoNewFormatLockfile updates the new-format .wfctl-lock.yaml's
+// Plugins[name] entry, preserving Platforms / Compatibility data while
+// refreshing Version + Source. Returns true iff lockfile is v1 format
+// (so caller can skip the legacy write path).
+//
+// name passed in normalized form. Helper handles existing entries keyed
+// by long-form (e.g. "workflow-plugin-auth") by scanning for any key
+// matching normalizePluginName.
+func mergeIntoNewFormatLockfile(name, version, source string) bool {
+	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	if err != nil || lf == nil || lf.Version == 0 {
+		return false
+	}
+	if lf.Plugins == nil {
+		lf.Plugins = make(map[string]config.WfctlLockPluginEntry)
+	}
+	// Lookup: exact match first, else scan for normalized-equivalent key.
+	key := name
+	if _, ok := lf.Plugins[name]; !ok {
+		for existingKey := range lf.Plugins {
+			if normalizePluginName(existingKey) == name {
+				key = existingKey
+				break
+			}
+		}
+	}
+	existing := lf.Plugins[key]
+	existing.Version = version
+	if source != "" {
+		existing.Source = source
+	}
+	lf.Plugins[key] = existing
+	_ = config.SaveWfctlLockfile(wfctlLockPath, lf)
+	return true
+}
+
 // updateLockfileWithChecksum adds or updates a plugin entry in .wfctl-lock.yaml
 // with SHA-256 checksum. The sha256Hash must be the hash of the installed binary,
 // not the download archive.
 // Silently no-ops if the lockfile cannot be read or written (install still succeeds).
 func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
-	if newLF, err := config.LoadWfctlLockfile(wfctlLockPath); err == nil && newLF.Version > 0 {
+	if installSkipLockfileUpdate {
 		return
 	}
-
+	// V1 format takes precedence: if .wfctl-lock.yaml exists with version: 1,
+	// write ONLY to that path (preserves Platforms). Skip legacy save entirely.
+	if mergeIntoNewFormatLockfile(pluginName, version, repository) {
+		return
+	}
+	// Legacy fallback: no v1 lockfile present; write to legacy .wfctl.yaml plugins block.
 	lf, err := loadPluginLockfile(wfctlLockPath)
 	if err != nil {
 		return

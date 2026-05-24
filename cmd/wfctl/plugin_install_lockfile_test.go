@@ -692,3 +692,52 @@ func TestInstallFromWfctlLockfile_PlatformSHA256IsCaseInsensitive(t *testing.T) 
 		t.Fatalf("installFromWfctlLockfile should accept uppercase platform checksum: %v", err)
 	}
 }
+
+func TestUpdateLockfileWithChecksum_GuardSkips(t *testing.T) {
+	dir := t.TempDir()
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installSkipLockfileUpdate = true
+	defer func() { installSkipLockfileUpdate = false }()
+	updateLockfileWithChecksum("foo", "1.0.0", "", "", "")
+	b, _ := os.ReadFile(wfctlLockPath)
+	if strings.Contains(string(b), "foo") {
+		t.Errorf("guard should have suppressed write; got: %s", b)
+	}
+}
+
+func TestUpdateLockfileWithChecksum_NewFormatFanOut(t *testing.T) {
+	dir := t.TempDir()
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins:\n  bar:\n    version: 0.1.0\n    source: github.com/x/bar\n    platforms:\n      linux_amd64:\n        url: https://example.com/bar\n        sha256: deadbeef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	updateLockfileWithChecksum("bar", "1.2.3", "github.com/x/bar-new", "", "feedface")
+	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := lf.Plugins["bar"]
+	if got.Version != "1.2.3" {
+		t.Errorf("Version = %q, want 1.2.3", got.Version)
+	}
+	if got.Source != "github.com/x/bar-new" {
+		t.Errorf("Source = %q, want github.com/x/bar-new", got.Source)
+	}
+	if len(got.Platforms) == 0 {
+		t.Errorf("Platforms should be preserved; got empty")
+	}
+	if got.Platforms["linux_amd64"].URL != "https://example.com/bar" {
+		t.Errorf("Platforms URL clobbered: %v", got.Platforms)
+	}
+}
