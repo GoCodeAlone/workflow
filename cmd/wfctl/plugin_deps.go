@@ -108,7 +108,27 @@ func installPluginReqDirect(pluginDir, registryCfgPath string, req config.Plugin
 		}
 	}
 
-	return installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify, false)
+	if err := installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify, false); err != nil {
+		return err
+	}
+
+	// Track parent in lockfile (workflow#771 Task 5). Closes the asymmetry
+	// where --from-config dep installs were tracked via Task 4 but parent
+	// installs via this path were not.
+	// Cycle-3 fix per reviewer CYC2-I1: use the function's NORMALIZED pluginName
+	// (already computed at line 87 via normalizePluginName(rawName)), NOT raw
+	// req.Name. installPluginFromManifest installs at pluginDir/<normalized>/<normalized>;
+	// raw req.Name "workflow-plugin-auth" would hash-miss at pluginDir/workflow-plugin-auth/...
+	// and produce an asymmetric lockfile key vs runPluginInstall's writes.
+	binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
+	checksum := ""
+	if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
+		checksum = cs
+	} else {
+		fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
+	}
+	updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, "", checksum)
+	return nil
 }
 
 // runPluginDeps lists dependencies for a plugin without installing them.

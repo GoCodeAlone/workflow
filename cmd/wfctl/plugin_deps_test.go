@@ -440,6 +440,98 @@ func TestResolveDependencies_TracksDepsInLockfile(t *testing.T) {
 	}
 }
 
+// TestInstallPluginReqDirect_TracksParentInLockfile verifies workflow#771 Task 5:
+// installPluginReqDirect writes a lockfile entry for the parent plugin (closing
+// the asymmetry where --from-config dep installs were tracked via Task 4 but
+// parent installs via this path were not).
+func TestInstallPluginReqDirect_TracksParentInLockfile(t *testing.T) {
+	pluginDir := t.TempDir()
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	cwd := t.TempDir()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	emptyLF := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins:     map[string]config.WfctlLockPluginEntry{},
+	}
+	if err := config.SaveWfctlLockfile(wfctlLockPath, emptyLF); err != nil {
+		t.Fatal(err)
+	}
+
+	// Parent plugin uses long-form name to verify normalize-to-lockfile-key.
+	const parentLong = "workflow-plugin-fromcfg"
+	const parentShort = "fromcfg"
+	binaryContent := []byte("#!/bin/sh\necho fromcfg\n")
+	pjContent := minimalPluginJSON(parentShort, "1.5.0")
+	tarball := buildPluginTarGz(t, parentShort, binaryContent, pjContent)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/" + parentLong + "/manifest.json":
+			manifest := RegistryManifest{
+				Name:        parentShort,
+				Version:     "1.5.0",
+				Repository:  "github.com/x/" + parentShort,
+				Author:      "tester",
+				Description: "fromcfg",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:     runtime.GOOS,
+						Arch:   runtime.GOARCH,
+						URL:    "http://" + r.Host + "/download/" + parentShort + ".tar.gz",
+						SHA256: sha256Hex(tarball),
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(manifest)
+		case "/download/" + parentShort + ".tar.gz":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfgFile := writeTestRegistryConfig(t, srv.URL)
+
+	req := config.PluginRequirement{
+		Name:    parentLong,
+		Version: "1.5.0",
+	}
+
+	if err := installPluginReqDirect(pluginDir, cfgFile, req); err != nil {
+		t.Fatalf("installPluginReqDirect: %v", err)
+	}
+
+	lf, err := config.LoadWfctlLockfile(wfctlLockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	// installPluginReqDirect normalizes via normalizePluginName at line 87;
+	// the lockfile entry key is the NORMALIZED form ("fromcfg").
+	entry, ok := lf.Plugins[parentShort]
+	if !ok {
+		t.Fatalf("parent not tracked in lockfile (normalized key %q missing); lf.Plugins=%#v", parentShort, lf.Plugins)
+	}
+	if entry.Version != "1.5.0" {
+		t.Errorf("parent entry Version = %q, want 1.5.0", entry.Version)
+	}
+}
+
 // writeTestRegistryConfig writes a minimal registry YAML config to a temp file
 // pointing at the given static URL, and returns the file path.
 func writeTestRegistryConfig(t *testing.T, baseURL string) string {
