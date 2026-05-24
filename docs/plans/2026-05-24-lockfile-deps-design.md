@@ -9,7 +9,8 @@
 - **Cycle 1**: drafted minimal "call updateLockfileWithChecksum from resolveDependencies + drop @version gate". FAILED — 2 Critical:
   - C1: new-format lockfile early-return at `plugin_lockfile.go:147` makes dep-write a no-op on the dominant case (any project with `version: 1` lockfile).
   - C2: dropping the `@version` gate breaks `installFromLockfile`'s no-clobber contract (relied on by lockfile-driven install per `plugin_lockfile.go:115-118` comment).
-- **Cycle 2** (this version): both formats covered. New `--no-lockfile-update` flag preserves `installFromLockfile`'s contract. Repository field gap acknowledged. Test plan splits legacy + new-format scenarios.
+- **Cycle 2**: both formats covered + installSkipLockfileUpdate flag for installFromLockfile contract preservation. FAILED — 1 Critical (C3: installFromWfctlLockfile line-105 calls runPluginInstall ALSO unguarded; its in-memory `lf.Save` at line 116 silently clobbers the fan-out's writes) + 1 Important (I4: installPluginReqDirect skips parent lockfile track via direct installPluginFromManifest call, bypassing runPluginInstall).
+- **Cycle 3** (this version): adds installSkipLockfileUpdate guard around installFromWfctlLockfile's runPluginInstall call site (mirror of cycle-2 fix for the legacy installFromLockfile path); adds updateLockfileWithChecksum call to installPluginReqDirect parent path; updates test plan with §e for installFromWfctlLockfile regression.
 
 ## Problem
 
@@ -115,24 +116,47 @@ if !installSkipLockfileUpdate {
 }
 ```
 
-In `installFromLockfile`:
+In `installFromLockfile` AND `installFromWfctlLockfile` (per cycle-3 C3 — both outer-frame installers hold in-memory `lf` and assume nothing underneath touches the on-disk file):
+
 ```go
 installSkipLockfileUpdate = true
 defer func() { installSkipLockfileUpdate = false }()
 // ... existing call to runPluginInstall(...)
 ```
 
+Specifically:
+- `cmd/wfctl/plugin_lockfile.go` line ~115 (legacy `installFromLockfile`).
+- `cmd/wfctl/plugin_install_wfctllock.go` line ~99 (new-format `installFromWfctlLockfile` fallback path that calls `runPluginInstall(spec)` when per-platform archive is unavailable).
+
 (Package-level boolean is acceptable — installs are sequential within a single wfctl invocation; no concurrent goroutines call this path.)
 
 Plain `install <name>` (no `@version`) now writes to lockfile by default per AC #2.
+
+### 5. Cover `installPluginReqDirect` parent (cycle-3 I4)
+
+`cmd/wfctl/plugin_deps.go:82-112` (`installPluginReqDirect`) is the `--from-config` / `installFromWorkflowConfig` parent path. It calls `installPluginFromManifest` directly (NOT `runPluginInstall`) so the §4 guard logic doesn't apply. Add lockfile tracking explicitly after the parent install succeeds:
+
+```go
+// In installPluginReqDirect, after successful installPluginFromManifest:
+binaryPath := filepath.Join(pluginDir, req.Name, req.Name)
+checksum := ""
+if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
+    checksum = cs
+}
+updateLockfileWithChecksum(req.Name, manifest.Version, manifest.Repository, "", checksum)
+```
+
+Pre-existing gap (not regressed by this PR) but trivially closeable in the same PR — same chokepoint helper. Closes the user-intent asymmetry where `--from-config` deps land in lockfile but parents don't.
 
 ## Files
 
 - `cmd/wfctl/plugin_lockfile.go` — refactor `updateLockfileWithChecksum` to fan out to both formats; add `mergeIntoNewFormatLockfile` helper.
 - `cmd/wfctl/plugin_install.go:255-266` — replace `@version` gate with `!installSkipLockfileUpdate` guard; declare package-level bool.
 - `cmd/wfctl/plugin_lockfile.go` (legacy `installFromLockfile`) — set+defer-clear `installSkipLockfileUpdate` around the inner `runPluginInstall` call.
+- `cmd/wfctl/plugin_install_wfctllock.go` (new-format `installFromWfctlLockfile`) — set+defer-clear `installSkipLockfileUpdate` around the inner `runPluginInstall` fallback call (cycle-3 C3).
+- `cmd/wfctl/plugin_deps.go:82-112` (`installPluginReqDirect` parent path) — append `updateLockfileWithChecksum` after success (cycle-3 I4).
 - `cmd/wfctl/plugin_deps.go:270` — append dep checksum + updateLockfileWithChecksum.
-- `cmd/wfctl/plugin_install_lockfile_test.go` — add tests for: (a) parent+dep tracking on LEGACY format, (b) parent+dep tracking on NEW format (verifying Platforms preserved), (c) no-version-install tracked on both formats, (d) `installFromLockfile` no-clobber invariant still holds (regression test).
+- `cmd/wfctl/plugin_install_lockfile_test.go` — add tests for: (a) parent+dep tracking on LEGACY format, (b) parent+dep tracking on NEW format (verifying Platforms preserved), (c) no-version-install tracked on both formats, (d) `installFromLockfile` no-clobber invariant still holds (regression test), (e) `installFromWfctlLockfile` no-clobber invariant when fallback fires (regression test for cycle-3 C3), (f) `installPluginReqDirect` parent gets tracked (cycle-3 I4 coverage).
 - `cmd/wfctl/plugin_deps_test.go` — extend existing dep tests to assert lockfile entries on both formats.
 
 ## Architecture choices
