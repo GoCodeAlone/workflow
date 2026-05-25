@@ -2175,12 +2175,12 @@
       "type": "metrics.collector",
       "label": "Metrics Collector",
       "category": "observability",
-      "description": "Collects and exposes application metrics",
+      "description": "Collects application metrics for telemetry export",
       "outputs": [
         {
           "name": "metrics",
           "type": "prometheus.Metrics",
-          "description": "Prometheus metrics endpoint"
+          "description": "Prometheus metrics registry"
         }
       ],
       "configFields": [
@@ -2198,14 +2198,6 @@
           "type": "string",
           "description": "Prometheus metric subsystem",
           "placeholder": "api"
-        },
-        {
-          "key": "metricsPath",
-          "label": "Metrics Path",
-          "type": "string",
-          "description": "Endpoint path for Prometheus scraping",
-          "defaultValue": "/metrics",
-          "placeholder": "/metrics"
         },
         {
           "key": "enabledMetrics",
@@ -2228,7 +2220,6 @@
           "module",
           "active_workflows"
         ],
-        "metricsPath": "/metrics",
         "namespace": "workflow"
       }
     },

@@ -1,12 +1,10 @@
 package module
 
 import (
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
+
+	dto "github.com/prometheus/client_model/go"
 )
 
 func TestNewMetricsCollector(t *testing.T) {
@@ -56,31 +54,32 @@ func TestMetricsCollector_SetActiveWorkflows(t *testing.T) {
 	m.SetActiveWorkflows("http", 3)
 }
 
-func TestMetricsCollector_Handler(t *testing.T) {
+func TestMetricsCollector_Gather(t *testing.T) {
 	m := NewMetricsCollector("test-metrics")
 
 	// Record some metrics first
 	m.RecordWorkflowExecution("http", "process", "success")
 	m.RecordHTTPRequest("GET", "/test", 200, 10*time.Millisecond)
 
-	handler := m.Handler()
-	req := httptest.NewRequest("GET", "/metrics", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
+	families, err := m.Gather()
+	if err != nil {
+		t.Fatalf("Gather failed: %v", err)
 	}
-
-	body, _ := io.ReadAll(rec.Body)
-	bodyStr := string(body)
-
-	if !strings.Contains(bodyStr, "workflow_executions_total") {
-		t.Error("expected metrics output to contain workflow_executions_total")
+	if !hasMetricFamily(families, "workflow_workflow_executions_total") {
+		t.Error("expected gathered metrics to contain workflow_workflow_executions_total")
 	}
-	if !strings.Contains(bodyStr, "http_requests_total") {
-		t.Error("expected metrics output to contain http_requests_total")
+	if !hasMetricFamily(families, "workflow_http_requests_total") {
+		t.Error("expected gathered metrics to contain workflow_http_requests_total")
 	}
+}
+
+func hasMetricFamily(families []*dto.MetricFamily, name string) bool {
+	for _, mf := range families {
+		if mf.GetName() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMetricsCollector_ProvidesServices(t *testing.T) {

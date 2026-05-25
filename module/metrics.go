@@ -1,20 +1,18 @@
 package module
 
 import (
-	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // MetricsCollectorConfig holds configuration for the MetricsCollector module.
 type MetricsCollectorConfig struct {
 	Namespace      string   `yaml:"namespace" json:"namespace" editor:"type=string,description=Prometheus metric namespace prefix,default=workflow,placeholder=workflow"`
 	Subsystem      string   `yaml:"subsystem" json:"subsystem" editor:"type=string,description=Prometheus metric subsystem,placeholder=api"`
-	MetricsPath    string   `yaml:"metricsPath" json:"metricsPath" editor:"type=string,description=Endpoint path for Prometheus scraping,default=/metrics,placeholder=/metrics"`
 	EnabledMetrics []string `yaml:"enabledMetrics" json:"enabledMetrics" editor:"type=array,arrayItemType=string,description=Which metric groups to register (workflow http module active_workflows)"`
 }
 
@@ -23,7 +21,6 @@ func DefaultMetricsCollectorConfig() MetricsCollectorConfig {
 	return MetricsCollectorConfig{
 		Namespace:      "workflow",
 		Subsystem:      "",
-		MetricsPath:    "/metrics",
 		EnabledMetrics: []string{"workflow", "http", "module", "active_workflows"},
 	}
 }
@@ -135,9 +132,6 @@ func NewMetricsCollectorWithConfig(name string, cfg MetricsCollectorConfig) *Met
 	return mc
 }
 
-// MetricsPath returns the configured metrics endpoint path.
-func (m *MetricsCollector) MetricsPath() string { return m.config.MetricsPath }
-
 // Name returns the module name.
 func (m *MetricsCollector) Name() string {
 	return m.name
@@ -148,9 +142,9 @@ func (m *MetricsCollector) Init(app modular.Application) error {
 	return app.RegisterService("metrics.collector", m)
 }
 
-// Handler returns an HTTP handler that serves Prometheus metrics.
-func (m *MetricsCollector) Handler() http.Handler {
-	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+// Gather returns the current Prometheus metric families without exposing an HTTP endpoint.
+func (m *MetricsCollector) Gather() ([]*dto.MetricFamily, error) {
+	return m.registry.Gather()
 }
 
 // RecordWorkflowExecution increments the workflow execution counter.
@@ -189,16 +183,6 @@ func (m *MetricsCollector) SetActiveWorkflows(workflowType string, count float64
 	if m.ActiveWorkflows != nil {
 		m.ActiveWorkflows.WithLabelValues(workflowType).Set(count)
 	}
-}
-
-// MetricsHTTPHandler adapts an http.Handler to the HTTPHandler interface
-type MetricsHTTPHandler struct {
-	Handler http.Handler
-}
-
-// Handle implements the HTTPHandler interface
-func (h *MetricsHTTPHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	h.Handler.ServeHTTP(w, r)
 }
 
 // ProvidesServices returns the services provided by this module.

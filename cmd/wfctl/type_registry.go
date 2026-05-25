@@ -275,7 +275,7 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Type:       "metrics.collector",
 			Plugin:     "observability",
 			Stateful:   false,
-			ConfigKeys: []string{"namespace", "subsystem", "metricsPath", "enabledMetrics"},
+			ConfigKeys: []string{"namespace", "subsystem", "enabledMetrics"},
 		},
 		"observability.telemetry": {
 			Type:       "observability.telemetry",

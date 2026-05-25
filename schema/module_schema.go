@@ -569,15 +569,14 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "metrics.collector",
 		Label:       "Metrics Collector",
 		Category:    "observability",
-		Description: "Collects and exposes application metrics",
-		Outputs:     []ServiceIODef{{Name: "metrics", Type: "prometheus.Metrics", Description: "Prometheus metrics endpoint"}},
+		Description: "Collects application metrics for telemetry export",
+		Outputs:     []ServiceIODef{{Name: "metrics", Type: "prometheus.Metrics", Description: "Prometheus metrics registry"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "namespace", Label: "Namespace", Type: FieldTypeString, DefaultValue: "workflow", Description: "Prometheus metric namespace prefix", Placeholder: "workflow"},
 			{Key: "subsystem", Label: "Subsystem", Type: FieldTypeString, Description: "Prometheus metric subsystem", Placeholder: "api"},
-			{Key: "metricsPath", Label: "Metrics Path", Type: FieldTypeString, DefaultValue: "/metrics", Description: "Endpoint path for Prometheus scraping", Placeholder: "/metrics"},
 			{Key: "enabledMetrics", Label: "Enabled Metrics", Type: FieldTypeArray, ArrayItemType: "string", DefaultValue: []string{"workflow", "http", "module", "active_workflows"}, Description: "Which metric groups to register (workflow, http, module, active_workflows)"},
 		},
-		DefaultConfig: map[string]any{"namespace": "workflow", "metricsPath": "/metrics", "enabledMetrics": []string{"workflow", "http", "module", "active_workflows"}},
+		DefaultConfig: map[string]any{"namespace": "workflow", "enabledMetrics": []string{"workflow", "http", "module", "active_workflows"}},
 	})
 
 	r.Register(&ModuleSchema{

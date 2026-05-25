@@ -116,7 +116,6 @@ func TestModuleFactoriesWithConfig(t *testing.T) {
 		mod := factories["metrics.collector"]("mc", map[string]any{
 			"namespace":      "testns",
 			"subsystem":      "testsub",
-			"metricsPath":    "/test-metrics",
 			"enabledMetrics": []any{"workflow"},
 		})
 		if mod == nil {
@@ -209,6 +208,16 @@ func TestModuleSchemasValidFields(t *testing.T) {
 	p := New()
 	for _, s := range p.ModuleSchemas() {
 		t.Run(s.Type, func(t *testing.T) {
+			if s.Type == "metrics.collector" {
+				for _, f := range s.ConfigFields {
+					if f.Key == "metricsPath" {
+						t.Fatal("metrics.collector schema must not expose a custom metrics endpoint path")
+					}
+				}
+				if _, ok := s.DefaultConfig["metricsPath"]; ok {
+					t.Fatal("metrics.collector default config must not include a custom metrics endpoint path")
+				}
+			}
 			for _, f := range s.ConfigFields {
 				if f.Key == "" {
 					t.Errorf("field has empty Key")
@@ -243,15 +252,14 @@ func TestWiringHooks(t *testing.T) {
 	p := New()
 	hooks := p.WiringHooks()
 
-	if len(hooks) != 6 {
-		t.Fatalf("WiringHooks() count = %d, want 6", len(hooks))
+	if len(hooks) != 5 {
+		t.Fatalf("WiringHooks() count = %d, want 5", len(hooks))
 	}
 
 	expectedNames := map[string]bool{
 		"observability.otel-middleware":   false,
 		"observability.telemetry-bridge":  false,
 		"observability.health-endpoints":  false,
-		"observability.metrics-endpoint":  false,
 		"observability.log-endpoint":      false,
 		"observability.openapi-endpoints": false,
 	}

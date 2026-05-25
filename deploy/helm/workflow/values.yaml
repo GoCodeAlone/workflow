@@ -101,11 +101,3 @@ persistence:
   storageClass: ""
   accessMode: ReadWriteOnce
   size: 1Gi
-
-# Prometheus monitoring
-monitoring:
-  enabled: false
-  serviceMonitor:
-    enabled: false
-    interval: 30s
-    labels: {}

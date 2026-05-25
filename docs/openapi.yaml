@@ -26,8 +26,6 @@ servers:
 tags:
   - name: Health
     description: Health check and readiness probes
-  - name: Metrics
-    description: Prometheus metrics
   - name: Auth
     description: JWT authentication (login, register, profile)
   - name: Affiliates
@@ -765,27 +763,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LiveResponse'
-
-  # ─── Metrics (port 8080) ───────────────────────────────────────────
-  /metrics:
-    get:
-      tags: [Metrics]
-      summary: Prometheus metrics
-      description: |
-        Prometheus-format metrics endpoint. Available metrics:
-        - `workflow_executions_total` (counter)
-        - `workflow_duration_seconds` (histogram)
-        - `http_requests_total` (counter)
-        - `http_request_duration_seconds` (histogram)
-        - `module_operations_total` (counter)
-        - `active_workflows` (gauge)
-      responses:
-        '200':
-          description: Prometheus exposition format
-          content:
-            text/plain:
-              schema:
-                type: string
 
   # ─── Auth (port 8080) ─────────────────────────────────────────────
   /api/auth/login:
