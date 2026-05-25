@@ -24,6 +24,8 @@ func TestKnownModuleTypesPopulated(t *testing.T) {
 		"messaging.broker",
 		"statemachine.engine",
 		"metrics.collector",
+		"observability.telemetry",
+		"observability.collector",
 		"health.checker",
 		"cache.redis",
 	}
