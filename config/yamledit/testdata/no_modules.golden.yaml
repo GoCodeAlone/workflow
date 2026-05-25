@@ -1,0 +1,11 @@
+name: demo
+workflows:
+  default:
+    steps: []
+modules:
+  - name: nats
+    type: infra.message_broker
+    satisfies:
+      - messaging.nats.default
+    config:
+      plan: basic

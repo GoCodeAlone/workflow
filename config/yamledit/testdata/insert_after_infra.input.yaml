@@ -1,0 +1,7 @@
+modules:
+  - name: api
+    type: service.http
+  - name: registry
+    type: infra.container_registry
+  - name: worker
+    type: service.worker

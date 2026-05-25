@@ -1,0 +1,4 @@
+name: demo
+workflows:
+  default:
+    steps: []

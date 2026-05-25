@@ -1,0 +1,11 @@
+# app comment
+name: demo
+x-owned-by: platform
+modules:
+  # api module comment
+  - name: api
+    type: service.http
+    customField: keep-me
+    config:
+      port: 8080
+tail: keep
