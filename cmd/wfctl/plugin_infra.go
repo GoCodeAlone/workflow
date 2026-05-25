@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/requirements"
 )
 
 // LoadPluginManifests loads all plugin.json files from the given plugins directory.
@@ -95,4 +96,10 @@ func DetectPluginInfraNeeds(cfg *config.WorkflowConfig, manifests map[string]*co
 	}
 
 	return needs
+}
+
+// DetectPluginRequirementsV2 exposes provider-neutral moduleInfraRequirementsV2
+// declarations without changing the legacy DetectPluginInfraNeeds return type.
+func DetectPluginRequirementsV2(cfg *config.WorkflowConfig, manifests map[string]*config.PluginManifestFile) ([]requirements.Requirement, error) {
+	return requirements.DiscoverManifestRequirements(cfg, manifests)
 }

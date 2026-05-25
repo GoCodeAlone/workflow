@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/requirements"
 )
 
 func TestLoadPluginManifests_EmptyDir(t *testing.T) {
@@ -213,5 +214,44 @@ func TestDetectPluginInfraNeeds_ServiceModules(t *testing.T) {
 	}
 	if needs[0].Type != "cache" {
 		t.Errorf("type: got %q", needs[0].Type)
+	}
+}
+
+func TestDetectPluginRequirementsV2(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{{Name: "telemetry", Type: "observability.telemetry"}},
+		Services: map[string]*config.ServiceConfig{
+			"api": {
+				Binary: "./cmd/api",
+				Expose: []config.ExposeConfig{{Port: 8080, Protocol: "http"}},
+			},
+		},
+	}
+	manifests := map[string]*config.PluginManifestFile{
+		"workflow-plugin-observability": {
+			Name: "workflow-plugin-observability",
+			ModuleInfraRequirementsV2: config.PluginInfraRequirementsV2{
+				"observability.telemetry": {
+					Requires: []config.ModuleInfraRequirementV2{{
+						Key:                   "observability.telemetry.default",
+						Kind:                  "observability",
+						TelemetrySignals:      []string{"traces"},
+						ObservabilityBackends: []string{"otel"},
+						DeploymentModes:       []string{"sidecar"},
+					}},
+				},
+			},
+		},
+	}
+
+	reqs, err := DetectPluginRequirementsV2(cfg, manifests)
+	if err != nil {
+		t.Fatalf("DetectPluginRequirementsV2: %v", err)
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("requirements len = %d, want 1", len(reqs))
+	}
+	if reqs[0].Key != "observability.telemetry.default" || reqs[0].Kind != requirements.KindObservability {
+		t.Fatalf("requirement = %+v", reqs[0])
 	}
 }
