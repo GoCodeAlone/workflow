@@ -413,8 +413,9 @@ plugin loading paths.
    the mapper RPC must accept credentials/config and may become slow. The first
    implementation should fail if a mapper tries to perform apply-like work.
 3. YAGNI risk: modeling every observability backend upfront could get heavy.
-   Mitigation: features are strings with a small documented vocabulary, and
-   provider plugins can reject unsupported combinations.
+   Mitigation: v1 defines enums only for the required OTel, Datadog,
+   Prometheus, Loki, and Grafana path, and provider plugins can reject
+   unsupported combinations.
 4. Partial failure: YAML write corruption would be the highest-impact bug.
    Mitigation: parse as `yaml.Node`, write atomically, and add golden/idempotence
    tests before implementation.
