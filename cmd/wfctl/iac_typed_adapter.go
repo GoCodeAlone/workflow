@@ -59,6 +59,7 @@ const (
 	iacServiceLogCapture        = "workflow.plugin.external.iac.IaCProviderLogCapture"
 	iacServiceFinalizer         = "workflow.plugin.external.iac.IaCProviderFinalizer"
 	iacServiceResourceDriver    = "workflow.plugin.external.iac.ResourceDriver"
+	iacServiceRequirementMapper = "workflow.plugin.external.iac.IaCProviderRequirementMapper"
 )
 
 // typedIaCAdapter implements interfaces.IaCProvider on top of the typed
@@ -85,6 +86,7 @@ type typedIaCAdapter struct {
 	logCapture   pb.IaCProviderLogCaptureClient
 	finalizer    pb.IaCProviderFinalizerClient
 	resourceDriv pb.ResourceDriverClient
+	reqMapper    pb.IaCProviderRequirementMapperClient
 
 	// cachedCaps memoizes the plugin's CapabilitiesResponse. Access via
 	// fetchCapabilities — never read this field directly.
@@ -130,6 +132,9 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 	}
 	if registered[iacServiceResourceDriver] {
 		a.resourceDriv = pb.NewResourceDriverClient(conn)
+	}
+	if registered[iacServiceRequirementMapper] {
+		a.reqMapper = pb.NewIaCProviderRequirementMapperClient(conn)
 	}
 	return a
 }

@@ -78,7 +78,7 @@ func Derive(ctx context.Context, cfg *config.WorkflowConfig, reqs []requirements
 		}
 		reqs = discovered
 	}
-	provider, err := resolveProvider(cfg, opts)
+	provider, err := ResolveProvider(cfg, opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -114,11 +114,11 @@ func Derive(ctx context.Context, cfg *config.WorkflowConfig, reqs []requirements
 	}, nil
 }
 
-func resolveProvider(cfg *config.WorkflowConfig, opts Options) (string, error) {
+func ResolveProvider(cfg *config.WorkflowConfig, opts Options) (string, error) {
 	if opts.Provider != "" {
 		return opts.Provider, nil
 	}
-	choices := providerChoices(cfg, opts.Environment)
+	choices := ProviderChoices(cfg, opts.Environment)
 	switch len(choices) {
 	case 0:
 		return "", nil
@@ -129,7 +129,7 @@ func resolveProvider(cfg *config.WorkflowConfig, opts Options) (string, error) {
 	}
 }
 
-func providerChoices(cfg *config.WorkflowConfig, envName string) []string {
+func ProviderChoices(cfg *config.WorkflowConfig, envName string) []string {
 	if cfg == nil {
 		return nil
 	}
