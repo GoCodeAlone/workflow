@@ -1,8 +1,12 @@
 package observability
 
 import (
+	"context"
 	"testing"
 
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
 )
@@ -239,12 +243,13 @@ func TestWiringHooks(t *testing.T) {
 	p := New()
 	hooks := p.WiringHooks()
 
-	if len(hooks) != 5 {
-		t.Fatalf("WiringHooks() count = %d, want 5", len(hooks))
+	if len(hooks) != 6 {
+		t.Fatalf("WiringHooks() count = %d, want 6", len(hooks))
 	}
 
 	expectedNames := map[string]bool{
 		"observability.otel-middleware":   false,
+		"observability.telemetry-bridge":  false,
 		"observability.health-endpoints":  false,
 		"observability.metrics-endpoint":  false,
 		"observability.log-endpoint":      false,
@@ -267,6 +272,45 @@ func TestWiringHooks(t *testing.T) {
 			t.Errorf("missing wiring hook %q", name)
 		}
 	}
+}
+
+func TestWireTelemetryBridgeRegistersBridge(t *testing.T) {
+	app := module.NewMockApplication()
+	app.RegisterModule(&testTelemetryModule{name: "telemetry"})
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "telemetry", Type: "observability.telemetry"},
+		},
+	}
+
+	if err := wireTelemetryBridge(app, cfg); err != nil {
+		t.Fatal(err)
+	}
+	svc, ok := app.Services["telemetry.bridge"].(*module.TelemetryBridge)
+	if !ok {
+		t.Fatalf("telemetry.bridge service = %#v", app.Services["telemetry.bridge"])
+	}
+	if err := svc.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type testTelemetryModule struct {
+	name string
+}
+
+func (m *testTelemetryModule) Name() string { return m.name }
+func (m *testTelemetryModule) Init(modular.Application) error {
+	return nil
+}
+func (m *testTelemetryModule) ProvidesServices() []modular.ServiceProvider {
+	return nil
+}
+func (m *testTelemetryModule) RequiresServices() []modular.ServiceDependency {
+	return nil
+}
+func (m *testTelemetryModule) InvokeServiceContext(context.Context, string, map[string]any) (map[string]any, error) {
+	return map[string]any{"accepted": true}, nil
 }
 
 func TestStepFactories(t *testing.T) {
