@@ -89,6 +89,7 @@ graph TD
     audit --> audit-plugins["plugins"]
 
     infra --> infra-plan["plan"]
+    infra --> infra-derive["derive"]
     infra --> infra-apply["apply"]
     infra --> infra-destroy["destroy"]
     infra --> infra-status["status"]
@@ -172,7 +173,7 @@ graph TD
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
-| **Infrastructure** | `infra plan/apply/destroy/status/drift/import/bootstrap/outputs/test`, `infra state list/export/import` |
+| **Infrastructure** | `infra derive/plan/apply/destroy/status/drift/import/bootstrap/outputs/test`, `infra state list/export/import` |
 | **CI/CD** | `ci generate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
 | **Plugin Management** | `plugin`, `plugin-registry`, `registry`, `publish` |
@@ -1360,6 +1361,7 @@ wfctl infra <action> [options] [config.yaml]
 
 | Action | Description |
 |--------|-------------|
+| `derive` | Expand provider-derived IaC modules into Workflow YAML |
 | `plan` | Show planned infrastructure changes |
 | `apply` | Apply infrastructure changes |
 | `status` | Show current infrastructure status |
@@ -1389,6 +1391,37 @@ wfctl infra <action> [options] [config.yaml]
 | `--force-rotate` | `` | (`bootstrap` only) Comma-separated list of secret names to regenerate, replacing existing values. Repeatable. Use to recover from known-bad secrets (empty value, leaked, dead key). Refuses `provider_credential` types. |
 | `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for plugin-loading commands (plan, apply, status, drift, destroy, import, bootstrap, refresh-outputs, cleanup, align, audit-keys, prune, rotate-and-prune). Useful for isolated CI smoke tests. |
 
+#### `infra derive`
+
+`wfctl infra derive` calculates missing infrastructure requirements from the
+Workflow config and asks the selected provider mapper to generate concrete
+`infra.*` modules. It is explicit by design: `infra plan` and `infra apply` do
+not derive modules at apply time.
+
+```bash
+wfctl infra derive --config workflow.yaml --provider digitalocean --runtime do-app-platform --env production --dry-run --non-interactive
+wfctl infra derive --config workflow.yaml --provider aws --runtime ecs --write --non-interactive
+```
+
+Generated modules include `satisfies` keys so future runs can see that the
+requirement has been handled. A user-authored module can opt out of derivation
+the same way:
+
+```yaml
+modules:
+  - name: otel-collector
+    type: infra.container_service
+    satisfies:
+      - observability.telemetry.default
+    config:
+      image: otel/opentelemetry-collector-contrib:latest
+```
+
+`--dry-run` prints the expanded YAML and leaves the file unchanged. `--write`
+updates only the root `--config` file, even when imports contributed the
+requirements. Use `--non-interactive` in CI or agent workflows so ambiguous
+provider/runtime choices fail with a deterministic error instead of prompting.
+
 **State Subcommands:**
 
 ```
@@ -1405,6 +1438,7 @@ wfctl infra state <subaction> [options]
 
 ```bash
 wfctl infra plan infra.yaml
+wfctl infra derive --config workflow.yaml --provider digitalocean --runtime do-app-platform --dry-run --non-interactive
 wfctl infra apply --auto-approve infra.yaml
 wfctl infra status --config infra.yaml
 wfctl infra drift infra.yaml

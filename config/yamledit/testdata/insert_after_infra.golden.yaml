@@ -1,0 +1,15 @@
+modules:
+  - name: api
+    type: service.http
+  - name: registry
+    type: infra.container_registry
+  - name: alpha
+    type: infra.database
+    satisfies:
+      - database.default
+  - name: zeta
+    type: infra.cache
+    satisfies:
+      - cache.default
+  - name: worker
+    type: service.worker

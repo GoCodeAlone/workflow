@@ -1,0 +1,6 @@
+common: &base
+  port: 8080
+modules:
+  - name: api
+    type: service.http
+    config: *base

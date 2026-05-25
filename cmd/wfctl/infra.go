@@ -60,6 +60,8 @@ func runInfra(args []string) error {
 		return infraUsage()
 	}
 	switch args[0] {
+	case "derive":
+		return runInfraDerive(args[1:])
 	case "plan":
 		return runInfraPlan(args[1:])
 	case "apply":
@@ -117,6 +119,7 @@ func infraUsage() error {
 Manage infrastructure defined in a workflow config.
 
 Actions:
+  derive         Expand provider-derived IaC modules into workflow YAML
   plan           Show planned infrastructure changes
   apply          Apply infrastructure changes
   status         Show current infrastructure status
@@ -148,6 +151,8 @@ Options:
   --show-sensitive/-S  Show sensitive values in plaintext (plan/apply only)
   --tag <name>         Tag to match resources (cleanup only; required)
   --dry-run            Preview only (cleanup; default true)
+  --write              Update config file in place (derive only)
+  --non-interactive    Fail instead of prompting for ambiguous choices (derive only)
   --fix                Opt into deletion (cleanup; overrides --dry-run)
 `)
 	return fmt.Errorf("missing or unknown action")
