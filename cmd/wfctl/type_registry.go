@@ -277,6 +277,18 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"namespace", "subsystem", "metricsPath", "enabledMetrics"},
 		},
+		"observability.telemetry": {
+			Type:       "observability.telemetry",
+			Plugin:     "observability",
+			Stateful:   false,
+			ConfigKeys: []string{"serviceName", "environment", "resource", "metricsInterval", "otlpEndpoint"},
+		},
+		"observability.collector": {
+			Type:       "observability.collector",
+			Plugin:     "observability",
+			Stateful:   false,
+			ConfigKeys: []string{"distribution", "topology", "signals", "receivers", "processors", "exporters", "routes"},
+		},
 		"health.checker": {
 			Type:       "health.checker",
 			Plugin:     "observability",
