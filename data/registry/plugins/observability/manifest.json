@@ -18,16 +18,19 @@
       "health.checker",
       "log.collector",
       "observability.otel",
-      "openapi.generator"
+      "openapi.generator",
+      "http.middleware.otel",
+      "tracing.propagation"
     ],
     "stepTypes": [],
     "triggerTypes": [],
     "workflowHandlers": [],
     "wiringHooks": [
+      "observability.otel-middleware",
       "observability.health-endpoints",
-      "observability.metrics-endpoint",
       "observability.log-endpoint",
-      "observability.openapi-endpoints"
+      "observability.openapi-endpoints",
+      "observability.telemetry-bridge"
     ]
   }
 }

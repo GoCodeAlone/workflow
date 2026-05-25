@@ -29,9 +29,6 @@ func metricsCollectorFactory(name string, cfg map[string]any) modular.Module {
 	if v, ok := cfg["subsystem"].(string); ok {
 		mcCfg.Subsystem = v
 	}
-	if v, ok := cfg["metricsPath"].(string); ok {
-		mcCfg.MetricsPath = v
-	}
 	if v, ok := cfg["enabledMetrics"].([]any); ok {
 		enabled := make([]string, 0, len(v))
 		for _, item := range v {

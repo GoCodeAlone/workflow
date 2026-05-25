@@ -17,7 +17,7 @@ func wiringHooks() []plugin.WiringHook {
 	return []plugin.WiringHook{
 		{
 			// Run at priority 100 (highest) so OTEL wraps all other middleware
-			// and every request — including health, metrics, and pipeline routes
+			// and every request — including health and pipeline routes
 			// registered later — is captured in a trace span.
 			Name:     "observability.otel-middleware",
 			Priority: 100,
@@ -29,18 +29,13 @@ func wiringHooks() []plugin.WiringHook {
 			Hook:     wireHealthEndpoints,
 		},
 		{
-			Name:     "observability.metrics-endpoint",
-			Priority: 50,
-			Hook:     wireMetricsEndpoint,
-		},
-		{
 			Name:     "observability.log-endpoint",
 			Priority: 50,
 			Hook:     wireLogEndpoint,
 		},
 		{
 			Name:     "observability.openapi-endpoints",
-			Priority: 40, // run after health/metrics so routes are stable
+			Priority: 40, // run after health/log endpoints so routes are stable
 			Hook:     wireOpenAPIEndpoints,
 		},
 		{
@@ -139,28 +134,6 @@ func wireHealthEndpoints(app modular.Application, _ *config.WorkflowConfig) erro
 				router.AddRoute("GET", healthPath, &module.HealthHTTPHandler{Handler: hc.HealthHandler()})
 				router.AddRoute("GET", readyPath, &module.HealthHTTPHandler{Handler: hc.ReadyHandler()})
 				router.AddRoute("GET", livePath, &module.HealthHTTPHandler{Handler: hc.LiveHandler()})
-			}
-			break
-		}
-	}
-	return nil
-}
-
-// wireMetricsEndpoint registers the metrics endpoint on any available router.
-func wireMetricsEndpoint(app modular.Application, _ *config.WorkflowConfig) error {
-	for _, svc := range app.SvcRegistry() {
-		mc, ok := svc.(*module.MetricsCollector)
-		if !ok {
-			continue
-		}
-		metricsPath := mc.MetricsPath()
-		for _, routerSvc := range app.SvcRegistry() {
-			router, ok := routerSvc.(*module.StandardHTTPRouter)
-			if !ok {
-				continue
-			}
-			if !router.HasRoute("GET", metricsPath) {
-				router.AddRoute("GET", metricsPath, &module.MetricsHTTPHandler{Handler: mc.Handler()})
 			}
 			break
 		}

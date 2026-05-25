@@ -169,7 +169,6 @@ helm upgrade --install workflow ./deploy/helm/workflow \
 | `podDisruptionBudget.minAvailable` | 1 | Min available pods |
 | `ingress.enabled` | false | Enable Ingress |
 | `ingress.className` | "" | Ingress class (e.g., nginx, alb) |
-| `monitoring.serviceMonitor.enabled` | false | Enable Prometheus ServiceMonitor |
 | `envFromSecret` | "" | Name of K8s Secret for env vars |
 
 ### Production Helm values example
@@ -211,13 +210,6 @@ resources:
   limits:
     cpu: 2000m
     memory: 2Gi
-
-monitoring:
-  enabled: true
-  serviceMonitor:
-    enabled: true
-    labels:
-      prometheus: kube-prometheus
 
 envFromSecret: workflow-secrets
 ```

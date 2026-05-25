@@ -37,10 +37,7 @@
     "wiringHooks": [
       "http-auth-provider-wiring",
       "http-static-fileserver-registration",
-      "http-health-endpoint-registration",
-      "http-metrics-endpoint-registration",
-      "http-log-endpoint-registration",
-      "http-openapi-endpoint-registration"
+      "http-cors-global-wiring"
     ]
   }
 }

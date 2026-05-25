@@ -19,6 +19,7 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // getFreePort returns an available TCP port for test servers.
@@ -2462,26 +2463,18 @@ func TestE2E_MetricsAndHealthCheck(t *testing.T) {
 	mc.SetActiveWorkflows("test-workflow", 5)
 	mc.RecordModuleOperation("mh-handler", "handle", "success")
 
-	// Verify the Prometheus handler serves metrics
-	metricsHandler := mc.Handler()
-	if metricsHandler == nil {
-		t.Fatal("MetricsCollector.Handler() returned nil")
+	metricFamilies, err := mc.Gather()
+	if err != nil {
+		t.Fatalf("Gather metrics failed: %v", err)
 	}
-
-	// Serve metrics via a test HTTP recorder
-	rec := &testResponseRecorder{headers: make(http.Header), body: &bytes.Buffer{}}
-	metricsReq, _ := http.NewRequest("GET", "/metrics", nil)
-	metricsHandler.ServeHTTP(rec, metricsReq)
-
-	metricsBody := rec.body.String()
-	if !strings.Contains(metricsBody, "workflow_executions_total") {
-		t.Error("Metrics output missing workflow_executions_total")
+	if !metricFamilyExists(metricFamilies, "workflow_workflow_executions_total") {
+		t.Error("Metrics output missing workflow_workflow_executions_total")
 	}
-	if !strings.Contains(metricsBody, "http_requests_total") {
-		t.Error("Metrics output missing http_requests_total")
+	if !metricFamilyExists(metricFamilies, "workflow_http_requests_total") {
+		t.Error("Metrics output missing workflow_http_requests_total")
 	}
-	if !strings.Contains(metricsBody, "active_workflows") {
-		t.Error("Metrics output missing active_workflows")
+	if !metricFamilyExists(metricFamilies, "workflow_active_workflows") {
+		t.Error("Metrics output missing workflow_active_workflows")
 	}
 	t.Log("  Prometheus metrics contain expected counters")
 
@@ -3004,6 +2997,15 @@ type testResponseRecorder struct {
 	statusCode int
 	headers    http.Header
 	body       *bytes.Buffer
+}
+
+func metricFamilyExists(families []*dto.MetricFamily, name string) bool {
+	for _, family := range families {
+		if family.GetName() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *testResponseRecorder) Header() http.Header {
