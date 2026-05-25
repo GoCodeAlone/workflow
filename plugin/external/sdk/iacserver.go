@@ -38,6 +38,8 @@ import (
 //	pb.IaCProviderValidatorServer
 //	pb.IaCProviderDriftConfigDetectorServer
 //	pb.IaCProviderLogCaptureServer
+//	pb.IaCRequirementDiscoveryServer
+//	pb.IaCProviderRequirementMapperServer
 //	pb.IaCStateBackendServer
 //
 // ResourceDriver:
@@ -168,6 +170,12 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	}
 	if v, ok := provider.(pb.IaCProviderLogCaptureServer); ok {
 		pb.RegisterIaCProviderLogCaptureServer(s, v)
+	}
+	if v, ok := provider.(pb.IaCRequirementDiscoveryServer); ok {
+		pb.RegisterIaCRequirementDiscoveryServer(s, v)
+	}
+	if v, ok := provider.(pb.IaCProviderRequirementMapperServer); ok {
+		pb.RegisterIaCProviderRequirementMapperServer(s, v)
 	}
 	// IaCProviderFinalizer is the workflow#695 Phase 2.5 optional service
 	// for plugins needing a post-apply-loop finalizer hook under v2

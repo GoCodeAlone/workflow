@@ -1422,6 +1422,236 @@ var IaCProviderLogCapture_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	IaCRequirementDiscovery_DiscoverRequirements_FullMethodName = "/workflow.plugin.external.iac.IaCRequirementDiscovery/DiscoverRequirements"
+)
+
+// IaCRequirementDiscoveryClient is the client API for IaCRequirementDiscovery service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// IaCRequirementDiscovery is an optional service for config-aware plugins that
+// need to emit provider-neutral infrastructure requirements from their own
+// module configuration. Hosts pass a typed, redacted Workflow context plus the
+// plugin-owned module config as JSON bytes. The full Workflow YAML and
+// resolved secret values must not cross this boundary.
+type IaCRequirementDiscoveryClient interface {
+	DiscoverRequirements(ctx context.Context, in *DiscoverRequirementsRequest, opts ...grpc.CallOption) (*DiscoverRequirementsResponse, error)
+}
+
+type iaCRequirementDiscoveryClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCRequirementDiscoveryClient(cc grpc.ClientConnInterface) IaCRequirementDiscoveryClient {
+	return &iaCRequirementDiscoveryClient{cc}
+}
+
+func (c *iaCRequirementDiscoveryClient) DiscoverRequirements(ctx context.Context, in *DiscoverRequirementsRequest, opts ...grpc.CallOption) (*DiscoverRequirementsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DiscoverRequirementsResponse)
+	err := c.cc.Invoke(ctx, IaCRequirementDiscovery_DiscoverRequirements_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IaCRequirementDiscoveryServer is the server API for IaCRequirementDiscovery service.
+// All implementations must embed UnimplementedIaCRequirementDiscoveryServer
+// for forward compatibility.
+//
+// IaCRequirementDiscovery is an optional service for config-aware plugins that
+// need to emit provider-neutral infrastructure requirements from their own
+// module configuration. Hosts pass a typed, redacted Workflow context plus the
+// plugin-owned module config as JSON bytes. The full Workflow YAML and
+// resolved secret values must not cross this boundary.
+type IaCRequirementDiscoveryServer interface {
+	DiscoverRequirements(context.Context, *DiscoverRequirementsRequest) (*DiscoverRequirementsResponse, error)
+	mustEmbedUnimplementedIaCRequirementDiscoveryServer()
+}
+
+// UnimplementedIaCRequirementDiscoveryServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCRequirementDiscoveryServer struct{}
+
+func (UnimplementedIaCRequirementDiscoveryServer) DiscoverRequirements(context.Context, *DiscoverRequirementsRequest) (*DiscoverRequirementsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DiscoverRequirements not implemented")
+}
+func (UnimplementedIaCRequirementDiscoveryServer) mustEmbedUnimplementedIaCRequirementDiscoveryServer() {
+}
+func (UnimplementedIaCRequirementDiscoveryServer) testEmbeddedByValue() {}
+
+// UnsafeIaCRequirementDiscoveryServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCRequirementDiscoveryServer will
+// result in compilation errors.
+type UnsafeIaCRequirementDiscoveryServer interface {
+	mustEmbedUnimplementedIaCRequirementDiscoveryServer()
+}
+
+func RegisterIaCRequirementDiscoveryServer(s grpc.ServiceRegistrar, srv IaCRequirementDiscoveryServer) {
+	// If the following call panics, it indicates UnimplementedIaCRequirementDiscoveryServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCRequirementDiscovery_ServiceDesc, srv)
+}
+
+func _IaCRequirementDiscovery_DiscoverRequirements_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DiscoverRequirementsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCRequirementDiscoveryServer).DiscoverRequirements(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCRequirementDiscovery_DiscoverRequirements_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCRequirementDiscoveryServer).DiscoverRequirements(ctx, req.(*DiscoverRequirementsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// IaCRequirementDiscovery_ServiceDesc is the grpc.ServiceDesc for IaCRequirementDiscovery service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCRequirementDiscovery_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCRequirementDiscovery",
+	HandlerType: (*IaCRequirementDiscoveryServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "DiscoverRequirements",
+			Handler:    _IaCRequirementDiscovery_DiscoverRequirements_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "iac.proto",
+}
+
+const (
+	IaCProviderRequirementMapper_MapRequirements_FullMethodName = "/workflow.plugin.external.iac.IaCProviderRequirementMapper/MapRequirements"
+)
+
+// IaCProviderRequirementMapperClient is the client API for IaCProviderRequirementMapper service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// IaCProviderRequirementMapper is an optional provider-owned service that maps
+// provider-neutral requirements to concrete infra.* module specs for a selected
+// provider/runtime/environment. Absence of this registration is the negative
+// signal: the provider can still plan/apply explicit modules, but wfctl cannot
+// ask it to synthesize derived IaC.
+type IaCProviderRequirementMapperClient interface {
+	MapRequirements(ctx context.Context, in *MapRequirementsRequest, opts ...grpc.CallOption) (*MapRequirementsResponse, error)
+}
+
+type iaCProviderRequirementMapperClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCProviderRequirementMapperClient(cc grpc.ClientConnInterface) IaCProviderRequirementMapperClient {
+	return &iaCProviderRequirementMapperClient{cc}
+}
+
+func (c *iaCProviderRequirementMapperClient) MapRequirements(ctx context.Context, in *MapRequirementsRequest, opts ...grpc.CallOption) (*MapRequirementsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MapRequirementsResponse)
+	err := c.cc.Invoke(ctx, IaCProviderRequirementMapper_MapRequirements_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IaCProviderRequirementMapperServer is the server API for IaCProviderRequirementMapper service.
+// All implementations must embed UnimplementedIaCProviderRequirementMapperServer
+// for forward compatibility.
+//
+// IaCProviderRequirementMapper is an optional provider-owned service that maps
+// provider-neutral requirements to concrete infra.* module specs for a selected
+// provider/runtime/environment. Absence of this registration is the negative
+// signal: the provider can still plan/apply explicit modules, but wfctl cannot
+// ask it to synthesize derived IaC.
+type IaCProviderRequirementMapperServer interface {
+	MapRequirements(context.Context, *MapRequirementsRequest) (*MapRequirementsResponse, error)
+	mustEmbedUnimplementedIaCProviderRequirementMapperServer()
+}
+
+// UnimplementedIaCProviderRequirementMapperServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCProviderRequirementMapperServer struct{}
+
+func (UnimplementedIaCProviderRequirementMapperServer) MapRequirements(context.Context, *MapRequirementsRequest) (*MapRequirementsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MapRequirements not implemented")
+}
+func (UnimplementedIaCProviderRequirementMapperServer) mustEmbedUnimplementedIaCProviderRequirementMapperServer() {
+}
+func (UnimplementedIaCProviderRequirementMapperServer) testEmbeddedByValue() {}
+
+// UnsafeIaCProviderRequirementMapperServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCProviderRequirementMapperServer will
+// result in compilation errors.
+type UnsafeIaCProviderRequirementMapperServer interface {
+	mustEmbedUnimplementedIaCProviderRequirementMapperServer()
+}
+
+func RegisterIaCProviderRequirementMapperServer(s grpc.ServiceRegistrar, srv IaCProviderRequirementMapperServer) {
+	// If the following call panics, it indicates UnimplementedIaCProviderRequirementMapperServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCProviderRequirementMapper_ServiceDesc, srv)
+}
+
+func _IaCProviderRequirementMapper_MapRequirements_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MapRequirementsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderRequirementMapperServer).MapRequirements(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderRequirementMapper_MapRequirements_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderRequirementMapperServer).MapRequirements(ctx, req.(*MapRequirementsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// IaCProviderRequirementMapper_ServiceDesc is the grpc.ServiceDesc for IaCProviderRequirementMapper service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCProviderRequirementMapper_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCProviderRequirementMapper",
+	HandlerType: (*IaCProviderRequirementMapperServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "MapRequirements",
+			Handler:    _IaCProviderRequirementMapper_MapRequirements_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "iac.proto",
+}
+
+const (
 	ResourceDriver_Create_FullMethodName        = "/workflow.plugin.external.iac.ResourceDriver/Create"
 	ResourceDriver_Read_FullMethodName          = "/workflow.plugin.external.iac.ResourceDriver/Read"
 	ResourceDriver_Update_FullMethodName        = "/workflow.plugin.external.iac.ResourceDriver/Update"
