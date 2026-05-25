@@ -38,7 +38,7 @@
 | 7 | Map derived requirements in workflow-plugin-gcp | Task 11 | `feat/iac-requirement-mapper` |
 | 8 | Map derived requirements in workflow-plugin-azure | Task 12 | `feat/iac-requirement-mapper` |
 
-**Status:** Draft
+**Status:** Locked 2026-05-25T04:16:44Z
 
 ## Design Inputs
 
