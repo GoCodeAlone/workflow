@@ -136,6 +136,35 @@ modules:
 	}
 }
 
+func TestLoadFromFile_ModuleSatisfies(t *testing.T) {
+	content := `
+modules:
+  - name: otel-collector
+    type: infra.container_service
+    satisfies:
+      - observability.telemetry.default
+    config:
+      image: otel/opentelemetry-collector-contrib:latest
+`
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "modules.yaml")
+	if err := os.WriteFile(fp, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	cfg, err := LoadFromFile(fp)
+	if err != nil {
+		t.Fatalf("LoadFromFile failed: %v", err)
+	}
+	if len(cfg.Modules) != 1 {
+		t.Fatalf("modules len = %d, want 1", len(cfg.Modules))
+	}
+	got := cfg.Modules[0].Satisfies
+	if len(got) != 1 || got[0] != "observability.telemetry.default" {
+		t.Fatalf("Satisfies = %v, want [observability.telemetry.default]", got)
+	}
+}
+
 func TestExternalPluginDeclParsing(t *testing.T) {
 	yaml := `
 modules: []
