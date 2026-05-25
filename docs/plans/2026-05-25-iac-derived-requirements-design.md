@@ -1,7 +1,7 @@
 # IaC Derived Requirements Design
 
 **Date:** 2026-05-25
-**Status:** Draft
+**Status:** Draft — revised after adversarial-review cycle 1
 **Owner:** autonomous pipeline
 **Related:** `decisions/0043-iac-derived-requirements.md`
 
@@ -121,25 +121,37 @@ Core fields:
 
 - `key`: stable requirement identifier, for example
   `observability.telemetry.default` or `messaging.nats.events`.
-- `kind`: enum-like string for the broad category, for example
-  `observability`, `web_api`, `message_broker`, `database`, `cache`, `storage`.
+- `kind`: typed proto enum for the broad category, for example
+  `REQUIREMENT_KIND_OBSERVABILITY`, `REQUIREMENT_KIND_WEB_API`,
+  `REQUIREMENT_KIND_MESSAGE_BROKER`, `REQUIREMENT_KIND_DATABASE`,
+  `REQUIREMENT_KIND_CACHE`, and `REQUIREMENT_KIND_STORAGE`.
 - `source`: module/service/plugin path that produced the requirement.
 - `resource_type_hint`: optional canonical target such as
   `infra.container_service`, `infra.k8s_cluster`, or `infra.database`.
 - `environment`: optional target environment.
-- `runtime`: optional runtime hint such as `kubernetes`, `ecs`, `cloud_run`,
-  `azure_container_apps`, or `do_app_platform`.
-- `features`: typed strings for portable behavior, such as
-  `signals.traces`, `signals.metrics`, `signals.logs`, `backend.otel`,
-  `backend.datadog`, `backend.prometheus`, `backend.loki`,
-  `backend.grafana`, `deployment.sidecar`, `deployment.daemonset`,
-  `deployment.managed`.
+- `runtime`: optional typed proto enum such as `RUNTIME_KUBERNETES`,
+  `RUNTIME_ECS`, `RUNTIME_CLOUD_RUN`, `RUNTIME_AZURE_CONTAINER_APPS`, or
+  `RUNTIME_DO_APP_PLATFORM`.
+- `signals`: repeated typed proto enum for telemetry signals:
+  `TELEMETRY_SIGNAL_TRACES`, `TELEMETRY_SIGNAL_METRICS`, and
+  `TELEMETRY_SIGNAL_LOGS`.
+- `backends`: repeated typed proto enum for requested observability backends:
+  `OBSERVABILITY_BACKEND_OTEL`, `OBSERVABILITY_BACKEND_DATADOG`,
+  `OBSERVABILITY_BACKEND_PROMETHEUS`, `OBSERVABILITY_BACKEND_LOKI`, and
+  `OBSERVABILITY_BACKEND_GRAFANA`.
+- `deployment_modes`: repeated typed proto enum for portable deployment shape:
+  `DEPLOYMENT_MODE_SIDECAR`, `DEPLOYMENT_MODE_DAEMONSET`,
+  `DEPLOYMENT_MODE_SIBLING_SERVICE`, and `DEPLOYMENT_MODE_MANAGED`.
+- `vendor_features`: repeated strings for provider/product-specific extension
+  flags that do not justify a Workflow-owned enum. These are non-portable and
+  must be namespaced, for example `datadog.apm` or `grafana.datasource`.
 - `parameters_json`: JSON bytes only for data that cannot be modeled
   generically without provider or product leakage.
 
 `parameters_json` is a deliberate exception to pure scalar proto fields. It
 follows the existing strict IaC proto pattern for provider-specific
-`config_json` and avoids `Struct` / `Any`.
+`config_json` and avoids `Struct` / `Any`. The default is typed proto enums;
+strings are allowed only for explicitly namespaced vendor extensions.
 
 ### Satisfaction Keys
 
@@ -193,17 +205,25 @@ Initial requirement sources:
 - Built-in config shape: web/API modules, `services:`, and common broker/cache
   module types can produce neutral requirements.
 - Plugin static declarations: evolve `moduleInfraRequirements` into a v2 shape
-  that can carry `key`, `kind`, `features`, and `resource_type_hint` while
-  preserving the existing v1 fields.
+  that can carry `key`, `kind`, telemetry signals, observability backends,
+  deployment modes, vendor features, and `resource_type_hint` while preserving
+  the existing v1 fields.
 - Observability plugin declarations: `observability.telemetry` and
   `observability.collector` declare observability requirements and supported
   backends without application-specific names.
 
-Future source:
+Runtime/config-aware source:
 
-- Optional plugin-side requirement provider service for dynamic requirements
-  that depend on module config. If added, it must be strict-proto and should
-  return the same requirement messages as provider mapping consumes.
+- Add a lightweight Go interface for in-process providers, for example
+  `IaCRequirementProvider`, that modules, steps, or plugin adapters can satisfy
+  without Workflow core depending on a concrete observability plugin package.
+- Add an optional strict-proto external-plugin service for config-aware
+  requirement discovery. It returns the same typed requirement messages consumed
+  by the provider mapper. Absence of service registration means the plugin only
+  participates through static manifest declarations.
+- The first observability implementation should use static declarations when
+  the module config is simple and the dynamic service when selected backends or
+  signal sets depend on module config.
 
 ### `wfctl infra derive`
 
@@ -232,6 +252,24 @@ Behavior:
 `--dry-run` prints the expanded YAML or a JSON summary without writing. `--write`
 updates the file atomically. A later `--output` can write to a separate path.
 
+Provider/runtime precedence:
+
+1. Explicit `--provider` and `--runtime` flags.
+2. Environment-specific provider hints already present in config.
+3. A single unambiguous `iac.provider` module.
+4. Otherwise an ambiguity diagnostic in non-interactive mode or a prompt in TTY
+   mode.
+
+Multi-file behavior for v1:
+
+- `config.LoadFromFile` still resolves imports to gather requirements.
+- `wfctl infra derive --write` mutates only the root `--config` file.
+- Generated modules are written to the root file even when the source
+  requirement came from an imported file. The summary must include the source
+  path so the user can move the generated module manually if desired.
+- A future `--target-file` can direct generated modules into a specific imported
+  file, but v1 does not guess ownership.
+
 ### Observability Mapping
 
 The observability plugin remains generic. Applications choose names and backends
@@ -255,6 +293,18 @@ Examples:
 - DigitalOcean App Platform mapper may produce sibling service components
   because its driver already models "sidecars" as sibling services.
 
+Secret handling:
+
+- Requirement mappers must not return plaintext API keys, tokens, connection
+  strings, or private keys in generated `ResourceSpec.Config`.
+- Generated specs may reference secrets through `${SECRET_NAME}` placeholders
+  or add separate secret-generation/secret-requirement declarations.
+- `wfctl infra derive` rejects generated YAML when provider output includes
+  suspicious plaintext secret-looking keys such as `api_key`, `token`,
+  `password`, `private_key`, or `secret` unless the value is a placeholder.
+- Observability examples that need Datadog, Grafana, Prometheus remote-write, or
+  Loki credentials must generate secret references, not values.
+
 ### YAML Mutation
 
 Use `gopkg.in/yaml.v3` node editing in a new small package, for example
@@ -275,6 +325,15 @@ Rules:
 
 The editor's `js-yaml` ordering behavior is precedent only. It is not sufficient
 for CLI mutation because it does not retain comments.
+
+Editor preservation:
+
+- Add `satisfies?: string[]` to `workflow-editor`'s `ModuleConfig` type and
+  serialization path in the same implementation plan or a prerequisite PR.
+- Until that lands, `wfctl infra derive` should warn when it detects a project
+  workflow-editor version below the first version that preserves `satisfies`.
+- Editor support is preservation-only for v1; the visual UI does not need to
+  author derived requirements before the CLI command ships.
 
 ### CLI Plugin Evaluation
 
@@ -324,6 +383,9 @@ This also creates a reusable pattern for non-observability cases:
 5. Interactive ambiguity is limited to provider/runtime/backend choices; if this
    becomes wider, the design should stop and add a richer planning report rather
    than more prompts.
+6. Root-file expansion is acceptable for v1 multi-file configs as long as the
+   command reports the source path for each generated requirement and remains
+   idempotent.
 
 ## Rollback
 
@@ -357,6 +419,23 @@ plugin loading paths.
    Mitigation: parse as `yaml.Node`, write atomically, and add golden/idempotence
    tests before implementation.
 5. Repo precedent conflict: current IaC proto avoids `Struct`/`Any`. This design
-   follows that precedent; only provider-specific free-form fields use JSON bytes,
-   matching existing `ResourceSpec.config_json`.
+   follows that precedent with typed proto enums for portable concepts; only
+   provider-specific free-form fields use JSON bytes, matching existing
+   `ResourceSpec.config_json`.
 
+## Adversarial Review Resolution
+
+Cycle 1 report:
+`docs/plans/2026-05-25-iac-derived-requirements-design.adversarial-review-1.md`.
+
+Resolved changes:
+
+- Replaced stringly typed `kind`, `runtime`, and observability `features` with
+  proto enum fields; kept namespaced strings only for vendor extensions.
+- Defined v1 multi-file behavior as root-file expansion with source diagnostics.
+- Promoted plugin/module requirement providers into v1 via a Go interface plus
+  optional strict-proto external-plugin service.
+- Added secret-output rules and `wfctl` rejection behavior for generated
+  plaintext secrets.
+- Added workflow-editor preservation work for `modules[].satisfies`.
+- Added provider/runtime precedence rules.
