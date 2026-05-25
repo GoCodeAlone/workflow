@@ -4,7 +4,7 @@
 // Plan:   docs/plans/2026-05-10-strict-contracts-force-cutover.md (Task 3)
 //
 // Hard invariants (per cycle 4 §Acceptance criteria):
-//   - NO google.protobuf.Struct, NO google.protobuf.Any used in any message.
+//   - NO loose Struct/Any wrapper types used in any message.
 //   - Free-form per-resource Config / Outputs payloads cross the wire as
 //     bytes <name>_json, JSON-encoded by the plugin/host. The plugin owns
 //     the serialization shape; the proto layer carries opaque bytes.
@@ -88,6 +88,24 @@ service IaCProviderDriftConfigDetector {
 
 service IaCProviderLogCapture {
   rpc CaptureLogs(CaptureLogsRequest) returns (stream LogChunk);
+}
+
+// IaCRequirementDiscovery is an optional service for config-aware plugins that
+// need to emit provider-neutral infrastructure requirements from their own
+// module configuration. Hosts pass a typed, redacted Workflow context plus the
+// plugin-owned module config as JSON bytes. The full Workflow YAML and
+// resolved secret values must not cross this boundary.
+service IaCRequirementDiscovery {
+  rpc DiscoverRequirements(DiscoverRequirementsRequest) returns (DiscoverRequirementsResponse);
+}
+
+// IaCProviderRequirementMapper is an optional provider-owned service that maps
+// provider-neutral requirements to concrete infra.* module specs for a selected
+// provider/runtime/environment. Absence of this registration is the negative
+// signal: the provider can still plan/apply explicit modules, but wfctl cannot
+// ask it to synthesize derived IaC.
+service IaCProviderRequirementMapper {
+  rpc MapRequirements(MapRequirementsRequest) returns (MapRequirementsResponse);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,6 +251,134 @@ enum DriftClass {
   DRIFT_CLASS_IN_SYNC = 1;
   DRIFT_CLASS_GHOST = 2;
   DRIFT_CLASS_CONFIG = 3;
+}
+
+// RequirementKind is the provider-neutral infrastructure category that wfctl
+// and provider plugins exchange for derived IaC. Values are intentionally
+// portable and provider-agnostic.
+enum RequirementKind {
+  REQUIREMENT_KIND_UNSPECIFIED = 0;
+  REQUIREMENT_KIND_OBSERVABILITY = 1;
+  REQUIREMENT_KIND_WEB_API = 2;
+  REQUIREMENT_KIND_MESSAGE_BROKER = 3;
+  REQUIREMENT_KIND_DATABASE = 4;
+  REQUIREMENT_KIND_CACHE = 5;
+  REQUIREMENT_KIND_STORAGE = 6;
+}
+
+// RequirementRuntime describes the target runtime shape the provider mapper
+// should generate for. Provider plugins return diagnostics for unsupported
+// runtime/mode combinations instead of emitting malformed modules.
+enum RequirementRuntime {
+  REQUIREMENT_RUNTIME_UNSPECIFIED = 0;
+  REQUIREMENT_RUNTIME_KUBERNETES = 1;
+  REQUIREMENT_RUNTIME_ECS = 2;
+  REQUIREMENT_RUNTIME_CLOUD_RUN = 3;
+  REQUIREMENT_RUNTIME_AZURE_CONTAINER_APPS = 4;
+  REQUIREMENT_RUNTIME_DIGITALOCEAN_APP_PLATFORM = 5;
+}
+
+enum TelemetrySignal {
+  TELEMETRY_SIGNAL_UNSPECIFIED = 0;
+  TELEMETRY_SIGNAL_TRACES = 1;
+  TELEMETRY_SIGNAL_METRICS = 2;
+  TELEMETRY_SIGNAL_LOGS = 3;
+}
+
+enum ObservabilityBackend {
+  OBSERVABILITY_BACKEND_UNSPECIFIED = 0;
+  OBSERVABILITY_BACKEND_OTEL = 1;
+  OBSERVABILITY_BACKEND_DATADOG = 2;
+  OBSERVABILITY_BACKEND_PROMETHEUS = 3;
+  OBSERVABILITY_BACKEND_LOKI = 4;
+  OBSERVABILITY_BACKEND_GRAFANA = 5;
+}
+
+enum DeploymentMode {
+  DEPLOYMENT_MODE_UNSPECIFIED = 0;
+  DEPLOYMENT_MODE_SIDECAR = 1;
+  DEPLOYMENT_MODE_DAEMONSET = 2;
+  DEPLOYMENT_MODE_SIBLING_SERVICE = 3;
+  DEPLOYMENT_MODE_MANAGED = 4;
+}
+
+message IaCRequirement {
+  string key = 1;
+  RequirementKind kind = 2;
+  string source = 3;
+  string resource_type_hint = 4;
+  string environment = 5;
+  repeated RequirementRuntime runtimes = 6;
+  repeated TelemetrySignal telemetry_signals = 7;
+  repeated ObservabilityBackend observability_backends = 8;
+  repeated DeploymentMode deployment_modes = 9;
+  repeated string vendor_features = 10;
+  // parameters_json is JSON-encoded plugin-owned requirement detail for data
+  // that is not portable enough to promote to a Workflow-owned proto field.
+  // Prefer adding enum/message fields for portable concepts.
+  bytes parameters_json = 11;
+}
+
+message DiscoverRequirementsRequest {
+  RequirementContext context = 1;
+  // module_config_json is JSON-encoded module config owned by the plugin that
+  // implements IaCRequirementDiscovery. Hosts must not send full Workflow YAML
+  // or resolved secret values here.
+  bytes module_config_json = 2;
+}
+
+message RequirementContext {
+  string application = 1;
+  string environment = 2;
+  repeated ModuleRef modules = 3;
+  repeated string plugin_ids = 4;
+}
+
+message ModuleRef {
+  string name = 1;
+  string type = 2;
+  repeated string satisfies = 3;
+}
+
+message DiscoverRequirementsResponse {
+  repeated IaCRequirement requirements = 1;
+}
+
+message MapRequirementsRequest {
+  string provider = 1;
+  RequirementRuntime runtime = 2;
+  string environment = 3;
+  repeated IaCRequirement requirements = 4;
+}
+
+message DerivedModuleSpec {
+  string name = 1;
+  string type = 2;
+  repeated string satisfies = 3;
+  // config_json is JSON-encoded provider-owned module config. Provider
+  // mappers must emit secret placeholders/references, never plaintext secret
+  // values.
+  bytes config_json = 4;
+  repeated string depends_on = 5;
+}
+
+message RequirementDiagnostic {
+  string key = 1;
+  string code = 2;
+  string message = 3;
+}
+
+message RequirementNote {
+  string key = 1;
+  string message = 2;
+  bool interactive = 3;
+}
+
+message MapRequirementsResponse {
+  repeated string accepted_keys = 1;
+  repeated RequirementDiagnostic rejected = 2;
+  repeated DerivedModuleSpec modules = 3;
+  repeated RequirementNote notes = 4;
 }
 
 // DriftResult mirrors interfaces.DriftResult.

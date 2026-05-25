@@ -62,6 +62,8 @@ func TestAssertProviderCapabilitiesMatchRegistration_ManuallyRegisteredMissingOp
 		"IaCProviderValidator",
 		"IaCProviderDriftConfigDetector",
 		"ResourceDriver",
+		"IaCRequirementDiscovery",
+		"IaCProviderRequirementMapper",
 	}
 	joined := strings.Join(rec.errors, "\n")
 	for _, name := range wantContains {
@@ -149,6 +151,8 @@ type allCapabilitiesStub struct {
 	pb.UnimplementedIaCProviderValidatorServer
 	pb.UnimplementedIaCProviderDriftConfigDetectorServer
 	pb.UnimplementedResourceDriverServer
+	pb.UnimplementedIaCRequirementDiscoveryServer
+	pb.UnimplementedIaCProviderRequirementMapperServer
 }
 
 // requiredOnlyStub satisfies Required ONLY.

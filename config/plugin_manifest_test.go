@@ -159,3 +159,66 @@ func TestPluginManifestNoInfraRequirements(t *testing.T) {
 		t.Errorf("expected nil ModuleInfraRequirements, got %v", manifest.ModuleInfraRequirements)
 	}
 }
+
+func TestPluginManifestRequirementV2YAML(t *testing.T) {
+	raw := `
+name: workflow-plugin-observability
+version: "0.1.2"
+description: Observability plugin
+capabilities:
+  moduleTypes:
+    - observability.telemetry
+  stepTypes: []
+  triggerTypes: []
+moduleInfraRequirementsV2:
+  observability.telemetry:
+    requires:
+      - key: observability.telemetry.default
+        kind: observability
+        source: observability.telemetry
+        resourceTypeHint: infra.container_service
+        environment: production
+        runtimes:
+          - kubernetes
+          - digitalocean_app_platform
+        telemetrySignals:
+          - traces
+          - metrics
+          - logs
+        observabilityBackends:
+          - otel
+          - datadog
+        deploymentModes:
+          - sidecar
+          - sibling_service
+        vendorFeatures:
+          - datadog.apm
+        parameters:
+          collector: otel
+`
+
+	var manifest PluginManifestFile
+	if err := yaml.Unmarshal([]byte(raw), &manifest); err != nil {
+		t.Fatalf("unmarshal YAML: %v", err)
+	}
+	spec := manifest.ModuleInfraRequirementsV2["observability.telemetry"]
+	if spec == nil {
+		t.Fatal("expected observability.telemetry v2 infra requirements")
+	}
+	if len(spec.Requires) != 1 {
+		t.Fatalf("Requires len = %d, want 1", len(spec.Requires))
+	}
+	req := spec.Requires[0]
+	if req.Key != "observability.telemetry.default" {
+		t.Fatalf("Key = %q", req.Key)
+	}
+	if req.Kind != "observability" {
+		t.Fatalf("Kind = %q", req.Kind)
+	}
+	if len(req.TelemetrySignals) != 3 {
+		t.Fatalf("TelemetrySignals = %v", req.TelemetrySignals)
+	}
+	if req.Parameters["collector"] != "otel" {
+		t.Fatalf("Parameters = %v", req.Parameters)
+	}
+}

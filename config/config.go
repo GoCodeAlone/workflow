@@ -73,6 +73,7 @@ func IsApplicationConfig(data []byte) bool {
 type ModuleConfig struct {
 	Name         string                                 `json:"name" yaml:"name"`
 	Type         string                                 `json:"type" yaml:"type"`
+	Satisfies    []string                               `json:"satisfies,omitempty" yaml:"satisfies,omitempty"`
 	Config       map[string]any                         `json:"config,omitempty" yaml:"config,omitempty"`
 	DependsOn    []string                               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
 	Branches     map[string]string                      `json:"branches,omitempty" yaml:"branches,omitempty"`

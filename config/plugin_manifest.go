@@ -3,9 +3,19 @@ package config
 // PluginInfraRequirements maps module types to their infrastructure needs.
 type PluginInfraRequirements map[string]*ModuleInfraSpec
 
+// PluginInfraRequirementsV2 maps module types to provider-neutral IaC
+// requirements. The values intentionally use manifest-friendly strings; the
+// iac/requirements package owns typed enum validation and protobuf conversion.
+type PluginInfraRequirementsV2 map[string]*ModuleInfraSpecV2
+
 // ModuleInfraSpec declares what a module type requires.
 type ModuleInfraSpec struct {
 	Requires []InfraRequirement `json:"requires" yaml:"requires"`
+}
+
+// ModuleInfraSpecV2 declares typed requirement metadata for a module type.
+type ModuleInfraSpecV2 struct {
+	Requires []ModuleInfraRequirementV2 `json:"requires" yaml:"requires"`
 }
 
 // InfraRequirement is a single infrastructure dependency.
@@ -20,13 +30,32 @@ type InfraRequirement struct {
 	Optional    bool     `json:"optional,omitempty" yaml:"optional,omitempty"`
 }
 
+// ModuleInfraRequirementV2 is the plugin.json authoring shape for derived-IaC
+// requirements. It mirrors the portable fields in plugin/external/proto/iac.proto
+// using strings so manifests stay easy to read and preserve unknown future
+// provider details under Parameters.
+type ModuleInfraRequirementV2 struct {
+	Key                   string         `json:"key" yaml:"key"`
+	Kind                  string         `json:"kind" yaml:"kind"`
+	Source                string         `json:"source,omitempty" yaml:"source,omitempty"`
+	ResourceTypeHint      string         `json:"resourceTypeHint,omitempty" yaml:"resourceTypeHint,omitempty"`
+	Environment           string         `json:"environment,omitempty" yaml:"environment,omitempty"`
+	Runtimes              []string       `json:"runtimes,omitempty" yaml:"runtimes,omitempty"`
+	TelemetrySignals      []string       `json:"telemetrySignals,omitempty" yaml:"telemetrySignals,omitempty"`
+	ObservabilityBackends []string       `json:"observabilityBackends,omitempty" yaml:"observabilityBackends,omitempty"`
+	DeploymentModes       []string       `json:"deploymentModes,omitempty" yaml:"deploymentModes,omitempty"`
+	VendorFeatures        []string       `json:"vendorFeatures,omitempty" yaml:"vendorFeatures,omitempty"`
+	Parameters            map[string]any `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+}
+
 // PluginManifestFile represents the full plugin.json manifest.
 type PluginManifestFile struct {
-	Name                    string                  `json:"name" yaml:"name"`
-	Version                 string                  `json:"version" yaml:"version"`
-	Description             string                  `json:"description" yaml:"description"`
-	Capabilities            PluginCapabilities      `json:"capabilities" yaml:"capabilities"`
-	ModuleInfraRequirements PluginInfraRequirements `json:"moduleInfraRequirements,omitempty" yaml:"moduleInfraRequirements,omitempty"`
+	Name                      string                    `json:"name" yaml:"name"`
+	Version                   string                    `json:"version" yaml:"version"`
+	Description               string                    `json:"description" yaml:"description"`
+	Capabilities              PluginCapabilities        `json:"capabilities" yaml:"capabilities"`
+	ModuleInfraRequirements   PluginInfraRequirements   `json:"moduleInfraRequirements,omitempty" yaml:"moduleInfraRequirements,omitempty"`
+	ModuleInfraRequirementsV2 PluginInfraRequirementsV2 `json:"moduleInfraRequirementsV2,omitempty" yaml:"moduleInfraRequirementsV2,omitempty"`
 }
 
 // PluginCapabilities describes what module, step, trigger types, build hooks,

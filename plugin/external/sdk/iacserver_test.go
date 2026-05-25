@@ -156,6 +156,30 @@ func TestRegisterAll_RegistersIaCProviderFinalizer(t *testing.T) {
 	}
 }
 
+func TestRegisterAll_RegistersIaCRequirementDiscovery(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &requirementDiscoveryProviderStub{}
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info := grpcSrv.GetServiceInfo()
+	if _, ok := info[pb.IaCRequirementDiscovery_ServiceDesc.ServiceName]; !ok {
+		t.Fatalf("IaCRequirementDiscovery service NOT registered despite provider satisfying interface; have: %v", serviceNames(info))
+	}
+}
+
+func TestRegisterAll_RegistersIaCProviderRequirementMapper(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &requirementMapperProviderStub{}
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	info := grpcSrv.GetServiceInfo()
+	if _, ok := info[pb.IaCProviderRequirementMapper_ServiceDesc.ServiceName]; !ok {
+		t.Fatalf("IaCProviderRequirementMapper service NOT registered despite provider satisfying interface; have: %v", serviceNames(info))
+	}
+}
+
 // TestRegisterAll_SkipsIaCProviderFinalizerWhenNotImplemented locks the
 // negative signal contract: a provider that does NOT satisfy
 // pb.IaCProviderFinalizerServer MUST NOT have the service registered.
@@ -202,6 +226,16 @@ type finalizerProviderStub struct {
 	pb.UnimplementedIaCProviderFinalizerServer
 }
 
+type requirementDiscoveryProviderStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedIaCRequirementDiscoveryServer
+}
+
+type requirementMapperProviderStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedIaCProviderRequirementMapperServer
+}
+
 // allCapabilitiesStub satisfies every required + optional IaC service plus
 // ResourceDriver — used to assert auto-registration covers the full surface.
 type allCapabilitiesStub struct {
@@ -213,6 +247,8 @@ type allCapabilitiesStub struct {
 	pb.UnimplementedIaCProviderValidatorServer
 	pb.UnimplementedIaCProviderDriftConfigDetectorServer
 	pb.UnimplementedIaCProviderFinalizerServer
+	pb.UnimplementedIaCRequirementDiscoveryServer
+	pb.UnimplementedIaCProviderRequirementMapperServer
 	pb.UnimplementedResourceDriverServer
 }
 

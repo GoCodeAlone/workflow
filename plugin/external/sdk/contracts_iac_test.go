@@ -1,6 +1,8 @@
 package sdk_test
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -36,6 +38,44 @@ func TestBuildContractRegistry_AdvertisesRegisteredIaCServices(t *testing.T) {
 	for _, name := range want {
 		if !services[name] {
 			t.Errorf("ContractRegistry missing service %q; have: %v", name, services)
+		}
+	}
+}
+
+func TestBuildContractRegistry_AdvertisesRequirementServices(t *testing.T) {
+	grpcSrv := grpc.NewServer()
+	provider := &iacRequirementContractProviderStub{}
+	if err := sdk.RegisterAllIaCProviderServices(grpcSrv, provider); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	registry := sdk.BuildContractRegistry(grpcSrv)
+	services := serviceNamesFromRegistry(registry)
+	want := []string{
+		pb.IaCRequirementDiscovery_ServiceDesc.ServiceName,
+		pb.IaCProviderRequirementMapper_ServiceDesc.ServiceName,
+	}
+	for _, name := range want {
+		if !services[name] {
+			t.Errorf("ContractRegistry missing service %q; have: %v", name, services)
+		}
+	}
+}
+
+func TestIaCProtoRejectsLooseTypes(t *testing.T) {
+	body, err := os.ReadFile("../proto/iac.proto")
+	if err != nil {
+		t.Fatalf("read iac.proto: %v", err)
+	}
+	proto := string(body)
+	for _, forbidden := range []string{
+		`import "google/protobuf/struct.proto"`,
+		`import "google/protobuf/any.proto"`,
+		"google.protobuf.Struct",
+		"google.protobuf.Any",
+	} {
+		if strings.Contains(proto, forbidden) {
+			t.Fatalf("iac.proto must stay strict-proto compatible; found %q", forbidden)
 		}
 	}
 }
@@ -92,4 +132,10 @@ type iacContractProviderStub struct {
 	pb.UnimplementedIaCProviderRequiredServer
 	pb.UnimplementedIaCProviderEnumeratorServer
 	pb.UnimplementedIaCProviderDriftDetectorServer
+}
+
+type iacRequirementContractProviderStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedIaCRequirementDiscoveryServer
+	pb.UnimplementedIaCProviderRequirementMapperServer
 }
