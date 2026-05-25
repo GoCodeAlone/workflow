@@ -45,7 +45,9 @@ func Discover(ctx context.Context, input Input) ([]Requirement, error) {
 		return nil
 	}
 
-	for _, req := range discoverBuiltIns(input.Config) {
+	builtIns := discoverBuiltIns(input.Config)
+	for i := range builtIns {
+		req := builtIns[i]
 		if err := add(req); err != nil {
 			return nil, err
 		}
@@ -54,7 +56,8 @@ func Discover(ctx context.Context, input Input) ([]Requirement, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, req := range manifestReqs {
+	for i := range manifestReqs {
+		req := manifestReqs[i]
 		if err := add(req); err != nil {
 			return nil, err
 		}
@@ -64,7 +67,8 @@ func Discover(ctx context.Context, input Input) ([]Requirement, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, req := range reqs {
+		for i := range reqs {
+			req := reqs[i]
 			if err := add(req); err != nil {
 				return nil, err
 			}
@@ -76,7 +80,8 @@ func Discover(ctx context.Context, input Input) ([]Requirement, error) {
 		return out, nil
 	}
 	filtered := out[:0]
-	for _, req := range out {
+	for i := range out {
+		req := out[i]
 		if _, ok := satisfied[req.Key]; ok {
 			continue
 		}
@@ -92,7 +97,8 @@ func DiscoverManifestRequirements(cfg *config.WorkflowConfig, manifests map[stri
 	}
 	seen := make(map[string]struct{})
 	out := make([]Requirement, 0, len(reqs))
-	for _, req := range reqs {
+	for i := range reqs {
+		req := reqs[i]
 		if err := req.Validate(); err != nil {
 			return nil, err
 		}
@@ -107,7 +113,8 @@ func DiscoverManifestRequirements(cfg *config.WorkflowConfig, manifests map[stri
 		return out, nil
 	}
 	filtered := out[:0]
-	for _, req := range out {
+	for i := range out {
+		req := out[i]
 		if _, ok := satisfied[req.Key]; ok {
 			continue
 		}
@@ -162,7 +169,8 @@ func discoverManifestRequirements(cfg *config.WorkflowConfig, manifests map[stri
 			if spec == nil {
 				continue
 			}
-			for _, raw := range spec.Requires {
+			for i := range spec.Requires {
+				raw := spec.Requires[i]
 				req, err := FromManifestRequirement(raw)
 				if err != nil {
 					return nil, fmt.Errorf("module %q requirement %q: %w", mod.Type, raw.Key, err)
