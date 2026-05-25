@@ -167,9 +167,21 @@ message IaCRequirement {
 }
 
 message DiscoverRequirementsRequest {
-  string environment = 1;
-  bytes workflow_config_json = 2;
-  bytes module_config_json = 3;
+  RequirementContext context = 1;
+  bytes module_config_json = 2;
+}
+
+message RequirementContext {
+  string application = 1;
+  string environment = 2;
+  repeated ModuleRef modules = 3;
+  repeated string plugin_ids = 4;
+}
+
+message ModuleRef {
+  string name = 1;
+  string type = 2;
+  repeated string satisfies = 3;
 }
 
 message DiscoverRequirementsResponse {
@@ -219,7 +231,7 @@ service IaCProviderRequirementMapper {
 }
 ```
 
-If implementation exposes a shortcoming in this schema, first try to model it as a new enum/message field. Use `parameters_json`, `workflow_config_json`, `module_config_json`, or `config_json` only with an inline proto comment and a plan note explaining why strict modeling was not practical. These JSON byte fields are for already-declared Workflow/provider config payloads, not arbitrary cross-plugin schema.
+If implementation exposes a shortcoming in this schema, first try to model it as a new enum/message field. Use `parameters_json`, `module_config_json`, or `config_json` only with an inline proto comment and a plan note explaining why strict modeling was not practical. These JSON byte fields are for already-declared plugin/provider config payloads, not arbitrary cross-plugin schema. Do not send the full Workflow YAML or resolved secret values to external discovery plugins.
 
 **Step 4: Regenerate protobufs**
 
