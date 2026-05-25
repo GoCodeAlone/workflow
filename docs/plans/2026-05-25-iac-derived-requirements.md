@@ -14,9 +14,9 @@
 
 ## Scope Manifest
 
-**PR Count:** 5
-**Tasks:** 10
-**Estimated Lines of Change:** ~3600
+**PR Count:** 8
+**Tasks:** 12
+**Estimated Lines of Change:** ~4600
 
 **Out of scope:**
 - Auto-applying derived IaC at `wfctl infra apply` time; derivation is explicit through `wfctl infra derive`.
@@ -33,7 +33,10 @@
 | 2 | Add derivation engine and YAML editing | Task 4, Task 5, Task 6 | `feat/iac-derive-engine` |
 | 3 | Preserve `satisfies` in workflow-editor | Task 7 | `feat/editor-preserve-satisfies` |
 | 4 | Emit observability requirements | Task 8 | `feat/observability-iac-requirements` |
-| 5 | Map derived requirements in provider plugins | Task 9, Task 10 | `feat/provider-requirement-mappers` |
+| 5 | Map derived requirements in workflow-plugin-digitalocean | Task 9 | `feat/iac-requirement-mapper` |
+| 6 | Map derived requirements in workflow-plugin-aws | Task 10 | `feat/iac-requirement-mapper` |
+| 7 | Map derived requirements in workflow-plugin-gcp | Task 11 | `feat/iac-requirement-mapper` |
+| 8 | Map derived requirements in workflow-plugin-azure | Task 12 | `feat/iac-requirement-mapper` |
 
 **Status:** Draft
 
@@ -81,15 +84,25 @@ func TestIaCProviderRequirementMapperIsStrictProto(t *testing.T) {
 
 Add a proto guard test that fails if `iac.proto` imports `google/protobuf/struct.proto` or `google/protobuf/any.proto`.
 
+Add the same strict-contract assertion for the config-aware requirement discovery service:
+
+```go
+func TestIaCRequirementDiscoveryIsStrictProto(t *testing.T) {
+    service := pb.IaCRequirementDiscovery_ServiceDesc.ServiceName
+    registry := sdk.BuildContractRegistry("test", nil)
+    assertStrictServiceContract(t, registry, service, "DiscoverRequirements")
+}
+```
+
 **Step 2: Run tests to verify failure**
 
 Run:
 
 ```sh
-GOWORK=off go test ./plugin/external/sdk -run 'TestIaCProviderRequirementMapper|TestIaCProtoRejectsLooseTypes' -count=1
+GOWORK=off go test ./plugin/external/sdk -run 'TestIaCProviderRequirementMapper|TestIaCRequirementDiscovery|TestIaCProtoRejectsLooseTypes' -count=1
 ```
 
-Expected: FAIL because `IaCProviderRequirementMapper_ServiceDesc` and the contract registry entry do not exist.
+Expected: FAIL because `IaCProviderRequirementMapper_ServiceDesc`, `IaCRequirementDiscovery_ServiceDesc`, and the contract registry entries do not exist.
 
 **Step 3: Add proto types and service**
 
@@ -142,12 +155,25 @@ enum DeploymentMode {
 message IaCRequirement {
   string key = 1;
   RequirementKind kind = 2;
-  repeated RequirementRuntime runtimes = 3;
-  repeated TelemetrySignal telemetry_signals = 4;
-  repeated ObservabilityBackend observability_backends = 5;
-  repeated DeploymentMode deployment_modes = 6;
-  repeated string vendor_features = 7;
-  bytes parameters_json = 8;
+  string source = 3;
+  string resource_type_hint = 4;
+  string environment = 5;
+  repeated RequirementRuntime runtimes = 6;
+  repeated TelemetrySignal telemetry_signals = 7;
+  repeated ObservabilityBackend observability_backends = 8;
+  repeated DeploymentMode deployment_modes = 9;
+  repeated string vendor_features = 10;
+  bytes parameters_json = 11;
+}
+
+message DiscoverRequirementsRequest {
+  string environment = 1;
+  bytes workflow_config_json = 2;
+  bytes module_config_json = 3;
+}
+
+message DiscoverRequirementsResponse {
+  repeated IaCRequirement requirements = 1;
 }
 
 message MapRequirementsRequest {
@@ -166,8 +192,26 @@ message DerivedModuleSpec {
 }
 
 message MapRequirementsResponse {
-  repeated DerivedModuleSpec modules = 1;
-  repeated string warnings = 2;
+  repeated string accepted_keys = 1;
+  repeated RequirementDiagnostic rejected = 2;
+  repeated DerivedModuleSpec modules = 3;
+  repeated RequirementNote notes = 4;
+}
+
+message RequirementDiagnostic {
+  string key = 1;
+  string code = 2;
+  string message = 3;
+}
+
+message RequirementNote {
+  string key = 1;
+  string message = 2;
+  bool interactive = 3;
+}
+
+service IaCRequirementDiscovery {
+  rpc DiscoverRequirements(DiscoverRequirementsRequest) returns (DiscoverRequirementsResponse);
 }
 
 service IaCProviderRequirementMapper {
@@ -175,21 +219,21 @@ service IaCProviderRequirementMapper {
 }
 ```
 
-If implementation exposes a shortcoming in this schema, first try to model it as a new enum/message field. Use `parameters_json` only with an inline proto comment and a plan note explaining why strict modeling was not practical.
+If implementation exposes a shortcoming in this schema, first try to model it as a new enum/message field. Use `parameters_json`, `workflow_config_json`, `module_config_json`, or `config_json` only with an inline proto comment and a plan note explaining why strict modeling was not practical. These JSON byte fields are for already-declared Workflow/provider config payloads, not arbitrary cross-plugin schema.
 
 **Step 4: Regenerate protobufs**
 
 Run:
 
 ```sh
-GOWORK=off go run github.com/bufbuild/buf/cmd/buf@latest generate
+buf generate
 ```
 
-Expected: `plugin/external/proto/iac.pb.go` and `plugin/external/proto/iac_grpc.pb.go` include `IaCProviderRequirementMapper`.
+Expected: `plugin/external/proto/iac.pb.go` and `plugin/external/proto/iac_grpc.pb.go` include `IaCProviderRequirementMapper` and `IaCRequirementDiscovery`.
 
 **Step 5: Register optional mapper service**
 
-Update `plugin/external/sdk/iacserver.go` so `RegisterAllIaCProviderServices` type-asserts provider implementations for the generated mapper server interface and registers it. Update the contract registry to advertise `IaCProviderRequirementMapper/MapRequirements` as `CONTRACT_MODE_STRICT_PROTO`.
+Update `plugin/external/sdk/iacserver.go` so `RegisterAllIaCProviderServices` type-asserts provider implementations for the generated mapper and discovery server interfaces and registers them. Update the contract registry to advertise `IaCProviderRequirementMapper/MapRequirements` and `IaCRequirementDiscovery/DiscoverRequirements` as `CONTRACT_MODE_STRICT_PROTO`.
 
 **Step 6: Add wfctl-side typed client hook**
 
@@ -200,11 +244,11 @@ Update `plugin/external/adapter.go` only if the existing typed adapter path need
 Run:
 
 ```sh
-GOWORK=off go test ./plugin/external/proto ./plugin/external/sdk ./plugin/external -run 'TestIaCProviderRequirementMapper|TestIaCProtoRejectsLooseTypes|TestBuildContractRegistry|TestRegisterAllIaCProviderServices' -count=1
+GOWORK=off go test ./plugin/external/proto ./plugin/external/sdk ./plugin/external -run 'TestIaCProviderRequirementMapper|TestIaCRequirementDiscovery|TestIaCProtoRejectsLooseTypes|TestBuildContractRegistry|TestRegisterAllIaCProviderServices' -count=1
 GOWORK=off go test ./plugin/external/proto ./plugin/external/sdk ./plugin/external -count=1
 ```
 
-Expected: PASS. Generated service name begins with `workflow.plugin.external.iac.` and the registry advertises strict proto.
+Expected: PASS. Generated service names begin with `workflow.plugin.external.iac.` and the registry advertises strict proto.
 
 **Rollback:** revert this PR and regenerate protobufs; provider plugins continue using existing IaC services.
 
@@ -300,7 +344,9 @@ git commit -m "feat: model iac requirements in config"
 
 **Files:**
 - Create: `iac/requirements/discovery.go`
+- Create: `iac/requirements/external.go`
 - Test: `iac/requirements/discovery_test.go`
+- Test: `iac/requirements/external_test.go`
 - Modify: `cmd/wfctl/plugin_infra.go`
 - Test: `cmd/wfctl/plugin_infra_test.go`
 
@@ -311,6 +357,7 @@ Cover:
 - built-in discovery from config shape emits web/api and broker requirements.
 - static manifest v2 requirements are included.
 - an in-process module/provider implementing the Go interface contributes requirements without importing a telemetry plugin.
+- an out-of-process plugin implementing `IaCRequirementDiscovery` contributes typed requirements through the generated protobuf client.
 - existing `modules[].satisfies` removes matching requirements from the unresolved set.
 
 Use an interface shaped like:
@@ -326,24 +373,24 @@ type Provider interface {
 Run:
 
 ```sh
-GOWORK=off go test ./iac/requirements ./cmd/wfctl -run 'TestDiscoverRequirements|TestDetectPluginInfraNeedsIncludesV2' -count=1
+GOWORK=off go test ./iac/requirements ./cmd/wfctl -run 'TestDiscoverRequirements|TestExternalRequirementDiscovery|TestDetectPluginInfraNeedsIncludesV2' -count=1
 ```
 
-Expected: FAIL because discovery does not exist and static manifest v2 is ignored.
+Expected: FAIL because discovery does not exist, static manifest v2 is ignored, and no external discovery adapter exists.
 
 **Step 3: Implement discovery**
 
-Implement requirement collection in `iac/requirements` and adapt `cmd/wfctl/plugin_infra.go` so existing `DetectPluginInfraNeeds` can expose v2 requirements without breaking current v1 output.
+Implement requirement collection in `iac/requirements` and adapt `cmd/wfctl/plugin_infra.go` so existing `DetectPluginInfraNeeds` can expose v2 requirements without breaking current v1 output. Add an external discovery adapter that uses `pb.NewIaCRequirementDiscoveryClient` directly and converts strict proto messages to the local requirement model.
 
 **Step 4: Verify**
 
 Run:
 
 ```sh
-GOWORK=off go test ./iac/requirements ./cmd/wfctl -run 'TestDiscoverRequirements|TestDetectPluginInfraNeedsIncludesV2' -count=1
+GOWORK=off go test ./iac/requirements ./cmd/wfctl -run 'TestDiscoverRequirements|TestExternalRequirementDiscovery|TestDetectPluginInfraNeedsIncludesV2' -count=1
 ```
 
-Expected: PASS. A requirement satisfied by `modules[].satisfies` is absent from unresolved output.
+Expected: PASS. A requirement satisfied by `modules[].satisfies` is absent from unresolved output, and the external discovery adapter uses generated protobuf clients rather than a loose map bridge.
 
 **Rollback:** revert this PR; v1 plugin infra detection remains unchanged.
 
@@ -429,7 +476,7 @@ Cover:
 - mapper response with plaintext secret-like config is rejected.
 - mapper response with `${DATADOG_API_KEY}` is accepted.
 - generated modules inherit `satisfies` keys.
-- mapper warnings are surfaced.
+- mapper rejected diagnostics and notes are surfaced.
 
 **Step 2: Run tests to verify failure**
 
@@ -456,7 +503,8 @@ type Options struct {
 type Result struct {
     Requirements []requirements.Requirement
     Modules      []GeneratedModule
-    Warnings     []string
+    Rejected     []Diagnostic
+    Notes        []Note
 }
 
 func Derive(ctx context.Context, cfg *config.WorkflowConfig, plugins []config.PluginManifest, mapper ProviderMapper, opts Options) (Result, error)
@@ -477,7 +525,7 @@ GOWORK=off go test ./iac/derive ./cmd/wfctl -run 'TestDerive|TestProviderRuntime
 GOWORK=off go test ./iac/derive -count=1
 ```
 
-Expected: PASS. Secret rejection error includes the offending generated module name and key, not the secret value.
+Expected: PASS. Secret rejection error includes the offending generated module name and key, not the secret value; rejected mapper diagnostics remain attached to the requirement key that produced them.
 
 **Rollback:** revert this PR. Since the CLI command is not wired yet, no user-facing behavior changes are active.
 
@@ -507,6 +555,7 @@ Use the same command style as existing `cmd/wfctl` tests. Cover:
 - multi-file config reports imported requirements but mutates only `--config`.
 - non-interactive ambiguity exits non-zero with the provider choices.
 - second write is a no-op.
+- tests use a fake generated-proto mapper fixture so Workflow CLI correctness does not depend on a real provider plugin release.
 
 **Step 2: Run tests to verify failure**
 
@@ -540,14 +589,13 @@ Run:
 ```sh
 GOWORK=off go test ./cmd/wfctl -run 'TestInfraDerive' -count=1
 GOWORK=off go run ./cmd/wfctl infra derive --help
-GOWORK=off go run ./cmd/wfctl infra derive --config cmd/wfctl/testdata/infra_derive/observability.yaml --provider digitalocean --runtime do-app-platform --dry-run --non-interactive
 ```
 
 Expected:
 
 - Tests PASS.
 - Help exits 0 and lists the derive flags.
-- Representative invocation exits 0 and prints YAML containing `satisfies:`.
+- `TestInfraDeriveDryRunWithFakeMapper` prints YAML containing `satisfies:` without mutating the fixture.
 
 **Rollback:** revert this PR. Existing `wfctl infra plan/apply/bootstrap` commands are unchanged.
 
@@ -599,7 +647,7 @@ Assert parse and serialize retain `satisfies` on the module.
 Run:
 
 ```sh
-npm test -- serialization.satisfies
+npm test -- src/utils/serialization.satisfies.test.ts
 ```
 
 Expected: FAIL because `satisfies` is dropped.
@@ -613,7 +661,7 @@ Add `satisfies?: string[]` to `ModuleConfig` and pass it through `nodesToConfig`
 Run:
 
 ```sh
-npm test -- serialization.satisfies
+npm test -- src/utils/serialization.satisfies.test.ts
 npm test
 ```
 
@@ -714,58 +762,41 @@ git add go.mod go.sum plugin.json README.md internal
 git commit -m "feat: emit observability iac requirements"
 ```
 
-### Task 9: Add Provider Mapper Conformance Fixtures
+### Task 9: Add DigitalOcean Requirement Mapper
 
-**Repositories:** `/Users/jon/workspace/workflow-plugin-digitalocean`, `/Users/jon/workspace/workflow-plugin-aws`, `/Users/jon/workspace/workflow-plugin-gcp`, `/Users/jon/workspace/workflow-plugin-azure`
+**Repository:** `/Users/jon/workspace/workflow-plugin-digitalocean`
 
 **Files:**
-- Add or modify provider conformance tests in each repo.
-- Add shared fixture docs or testdata as local repo conventions allow.
+- Modify mapper/provider files according to the repo's existing IaC provider structure.
+- Test: add `TestIaCRequirementMapperDigitalOcean` near existing IaC provider tests.
+- Modify: `go.mod`, `go.sum`, `plugin.json`, docs only after the Workflow release tag exists.
 
-**Step 1: Create feature branches**
-
-Run in each repo:
+**Step 1: Create feature branch**
 
 ```sh
+cd /Users/jon/workspace/workflow-plugin-digitalocean
 git switch -c feat/iac-requirement-mapper
 ```
 
-Expected: branch created from each provider repo's `main`.
+Expected: branch created from `main`.
 
 **Step 2: Write failing conformance tests**
 
-For each provider, test at least:
+Cover OTel collector on DigitalOcean App Platform, Datadog agent where existing App Platform sidecar/sibling support allows it, unsupported runtime diagnostics, `satisfies` propagation, and no plaintext secrets in `config_json`.
 
-- OTel-only requirement returns a deployable collector module for the provider/runtime.
-- Datadog requirement returns agent sidecar/daemonset/sibling-service mapping when supported.
-- Unsupported runtime returns typed warning/error, not a partial malformed module.
-- Returned modules include the original `satisfies` key.
-- Returned `config_json` contains no plaintext secret values.
-
-**Step 3: Run tests to verify failure**
-
-Run in each repo:
+**Step 3: Run test to verify failure**
 
 ```sh
-GOWORK=off go test ./... -run 'TestIaCRequirementMapper' -count=1
+GOWORK=off go test ./... -run 'TestIaCRequirementMapperDigitalOcean' -count=1
 ```
 
-Expected: FAIL because mapper service is not implemented.
+Expected: FAIL because the mapper service is not implemented.
 
-**Step 4: Implement mapper adapters**
+**Step 4: Implement mapper**
 
-Implement the generated `IaCProviderRequirementMapperServer` in each provider plugin. Keep mappings provider-owned:
+Implement generated `IaCProviderRequirementMapperServer` using DigitalOcean-owned App Platform module shapes. Return typed `RequirementDiagnostic` entries when a requested deployment mode cannot be represented.
 
-- DigitalOcean: App Platform sibling service for OTel collector; Datadog sidecar/sibling pattern where existing driver supports it.
-- AWS: ECS sidecar or service module for OTel/Datadog; leave Kubernetes daemonset mapping for EKS runtime.
-- GCP: Cloud Run sidecar-equivalent/service mapping where supported; emit clear unsupported diagnostics where the platform lacks sidecars.
-- Azure: Azure Container Apps sidecar-equivalent/service mapping where supported; emit clear unsupported diagnostics where unavailable.
-
-If a provider cannot faithfully support a mode, return a typed warning and no malformed replacement. Do not fall back to DigitalOcean-shaped config in non-DO repos.
-
-**Step 5: Verify each provider**
-
-Run in each repo:
+**Step 5: Verify**
 
 ```sh
 GOWORK=off go test ./... -count=1
@@ -773,53 +804,193 @@ wfctl plugin validate --strict-contracts plugin.json
 wfctl plugin verify-capabilities --plugin .
 ```
 
-Expected: PASS. Capability output includes the mapper service when the provider implements it.
+Expected: PASS. Capability output includes `IaCProviderRequirementMapper`.
 
-**Rollback:** revert the provider PR. `wfctl infra derive` can still report that no mapper exists for that provider instead of generating invalid IaC.
+**Rollback:** revert this provider PR. Workflow can still derive with other providers or report that no DigitalOcean mapper is available.
 
-**Step 6: Commit and PRs**
-
-Run in each repo:
+**Step 6: Commit and PR**
 
 ```sh
 git add .
-git commit -m "feat: map iac requirements"
+git commit -m "feat: map iac requirements for digitalocean"
 ```
 
-### Task 10: End-to-End Workflow Release and Version Bumps
+### Task 10: Add AWS Requirement Mapper
+
+**Repository:** `/Users/jon/workspace/workflow-plugin-aws`
 
 **Files:**
-- Workflow release files according to the current repo release process.
-- Provider and observability plugin `go.mod`, `go.sum`, `plugin.json`, release workflow inputs if present.
-- Consumer app config that currently used custom `/metrics` or stale telemetry wiring, if discovered in local repos.
+- Modify mapper/provider files according to the repo's existing IaC provider structure.
+- Test: add `TestIaCRequirementMapperAWS` near existing IaC provider tests.
+- Modify: `go.mod`, `go.sum`, `plugin.json`, docs only after the Workflow release tag exists.
 
-**Step 1: Merge green Workflow PRs**
+**Step 1: Create feature branch**
 
-After PRs 1 and 2 are green, merge them in order. Verify `main` is green before tagging.
+```sh
+cd /Users/jon/workspace/workflow-plugin-aws
+git switch -c feat/iac-requirement-mapper
+```
 
-**Step 2: Tag Workflow release**
+Expected: branch created from `main`.
 
-Use the current Workflow release process from repo docs/workflows. Verify whether releases are tag-triggered or GoReleaser-driven before tagging.
+**Step 2: Write failing conformance tests**
 
-Expected: a new Workflow tag exists and contains `wfctl infra derive`, strict requirement proto, and `modules[].satisfies`.
+Cover ECS sidecar/service mapping for OTel and Datadog, EKS daemonset diagnostics if Kubernetes runtime is supported, unsupported runtime diagnostics, `satisfies` propagation, and secret placeholder enforcement.
 
-**Step 3: Bump plugin minimums**
+**Step 3: Run test to verify failure**
 
-Update observability and provider plugins to depend on the new Workflow tag. This is mandatory before releasing mapper implementations.
+```sh
+GOWORK=off go test ./... -run 'TestIaCRequirementMapperAWS' -count=1
+```
 
-**Step 4: Remove custom `/metrics` reliance in owned consumers**
+Expected: FAIL because the mapper service is not implemented.
 
-Search:
+**Step 4: Implement mapper**
+
+Implement generated `IaCProviderRequirementMapperServer` using AWS-owned ECS/EKS module shapes. Do not copy DigitalOcean config keys into AWS output.
+
+**Step 5: Verify**
+
+```sh
+GOWORK=off go test ./... -count=1
+wfctl plugin validate --strict-contracts plugin.json
+wfctl plugin verify-capabilities --plugin .
+```
+
+Expected: PASS. Capability output includes `IaCProviderRequirementMapper`.
+
+**Rollback:** revert this provider PR. Workflow can still derive with other providers or report that no AWS mapper is available.
+
+**Step 6: Commit and PR**
+
+```sh
+git add .
+git commit -m "feat: map iac requirements for aws"
+```
+
+### Task 11: Add GCP Requirement Mapper
+
+**Repository:** `/Users/jon/workspace/workflow-plugin-gcp`
+
+**Files:**
+- Modify mapper/provider files according to the repo's existing IaC provider structure.
+- Test: add `TestIaCRequirementMapperGCP` near existing IaC provider tests.
+- Modify: `go.mod`, `go.sum`, `plugin.json`, docs only after the Workflow release tag exists.
+
+**Step 1: Create feature branch**
+
+```sh
+cd /Users/jon/workspace/workflow-plugin-gcp
+git switch -c feat/iac-requirement-mapper
+```
+
+Expected: branch created from `main`.
+
+**Step 2: Write failing conformance tests**
+
+Cover Cloud Run service/sidecar-equivalent mapping where supported, GKE daemonset mapping where supported, unsupported runtime diagnostics, `satisfies` propagation, and secret placeholder enforcement.
+
+**Step 3: Run test to verify failure**
+
+```sh
+GOWORK=off go test ./... -run 'TestIaCRequirementMapperGCP' -count=1
+```
+
+Expected: FAIL because the mapper service is not implemented.
+
+**Step 4: Implement mapper**
+
+Implement generated `IaCProviderRequirementMapperServer` using GCP-owned Cloud Run/GKE module shapes. Return diagnostics instead of malformed modules for runtimes that cannot host the requested mode.
+
+**Step 5: Verify**
+
+```sh
+GOWORK=off go test ./... -count=1
+wfctl plugin validate --strict-contracts plugin.json
+wfctl plugin verify-capabilities --plugin .
+```
+
+Expected: PASS. Capability output includes `IaCProviderRequirementMapper`.
+
+**Rollback:** revert this provider PR. Workflow can still derive with other providers or report that no GCP mapper is available.
+
+**Step 6: Commit and PR**
+
+```sh
+git add .
+git commit -m "feat: map iac requirements for gcp"
+```
+
+### Task 12: Add Azure Requirement Mapper
+
+**Repository:** `/Users/jon/workspace/workflow-plugin-azure`
+
+**Files:**
+- Modify mapper/provider files according to the repo's existing IaC provider structure.
+- Test: add `TestIaCRequirementMapperAzure` near existing IaC provider tests.
+- Modify: `go.mod`, `go.sum`, `plugin.json`, docs only after the Workflow release tag exists.
+
+**Step 1: Create feature branch**
+
+```sh
+cd /Users/jon/workspace/workflow-plugin-azure
+git switch -c feat/iac-requirement-mapper
+```
+
+Expected: branch created from `main`.
+
+**Step 2: Write failing conformance tests**
+
+Cover Azure Container Apps sidecar-equivalent/service mapping where supported, AKS daemonset mapping where supported, unsupported runtime diagnostics, `satisfies` propagation, and secret placeholder enforcement.
+
+**Step 3: Run test to verify failure**
+
+```sh
+GOWORK=off go test ./... -run 'TestIaCRequirementMapperAzure' -count=1
+```
+
+Expected: FAIL because the mapper service is not implemented.
+
+**Step 4: Implement mapper**
+
+Implement generated `IaCProviderRequirementMapperServer` using Azure-owned Container Apps/AKS module shapes. Return diagnostics instead of malformed modules for runtimes that cannot host the requested mode.
+
+**Step 5: Verify**
+
+```sh
+GOWORK=off go test ./... -count=1
+wfctl plugin validate --strict-contracts plugin.json
+wfctl plugin verify-capabilities --plugin .
+```
+
+Expected: PASS. Capability output includes `IaCProviderRequirementMapper`.
+
+**Rollback:** revert this provider PR. Workflow can still derive with other providers or report that no Azure mapper is available.
+
+**Step 6: Commit and PR**
+
+```sh
+git add .
+git commit -m "feat: map iac requirements for azure"
+```
+
+## Release and Migration Sequence
+
+These steps are operational gates, not scope-manifest PR tasks.
+
+1. Merge Workflow PRs 1 and 2 only after CI is green.
+2. Inspect the current Workflow release workflow before tagging. If tag-triggered release is current, create the next semver tag from green `main`; otherwise follow the repo's current documented release command.
+3. Verify the release asset or module tag contains `wfctl infra derive`, the strict requirement proto, and `modules[].satisfies`.
+4. Start observability/provider PRs only after that Workflow tag exists, then bump each plugin's minimum Workflow version to the new tag before release.
+5. Release the observability plugin first, then provider mapper plugins as they go green.
+6. Search owned application repos for custom `/metrics` reliance:
 
 ```sh
 rg -n '(/metrics|promhttp|prometheus|metrics endpoint|ListenAndServe.*metrics)' /Users/jon/workspace -g'*.go' -g'*.yaml' -g'*.yml'
 ```
 
-For owned apps that were depending on plugin-provided custom `/metrics`, update Workflow YAML to use observability requirements and derived IaC. Do not commit application-specific names into generic plugins.
-
-**Step 5: End-to-end smoke test**
-
-Use a temp copy of a representative Workflow YAML:
+7. For each owned application found, create a separate app-repo PR that removes the custom `/metrics` dependency and uses the released observability plugin plus `wfctl infra derive`. Do not commit app-specific names into generic plugins.
+8. Smoke test a representative app after provider mapper release:
 
 ```sh
 wfctl infra derive --config /tmp/workflow-observability.yaml --provider digitalocean --runtime do-app-platform --write --non-interactive
@@ -828,16 +999,7 @@ wfctl validate --config /tmp/workflow-observability.yaml
 
 Expected: derive exits 0, YAML includes generated modules with `satisfies`, and `wfctl validate` exits 0.
 
-**Rollback:** if release smoke fails, do not publish provider/observability tags. Revert the release candidate branch or tag a patch release after fixing; consumers stay pinned to the previous minimum Workflow version.
-
-**Step 6: Commit version bumps and consumer updates**
-
-Commit separately per repo:
-
-```sh
-git add go.mod go.sum plugin.json README.md
-git commit -m "chore: require workflow <new-version>"
-```
+Rollback: if Workflow release smoke fails before plugin PRs merge, do not release plugin tags. If a plugin release fails, keep consumers pinned to the previous plugin release and fix forward with a patch tag. If an app migration fails, revert only that app PR.
 
 ## Final Verification Matrix
 
