@@ -2,11 +2,13 @@ package observability
 
 import (
 	"context"
+	"time"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/telemetry"
 )
 
 // wiringHooks returns post-init wiring functions that connect observability
@@ -41,7 +43,54 @@ func wiringHooks() []plugin.WiringHook {
 			Priority: 40, // run after health/metrics so routes are stable
 			Hook:     wireOpenAPIEndpoints,
 		},
+		{
+			Name:     "observability.telemetry-bridge",
+			Priority: 10,
+			Hook:     wireTelemetryBridge,
+		},
 	}
+}
+
+type legacyServiceInvoker interface {
+	InvokeService(string, map[string]any) (map[string]any, error)
+}
+
+type legacyServiceInvokerAdapter struct {
+	invoker legacyServiceInvoker
+}
+
+func (a legacyServiceInvokerAdapter) InvokeServiceContext(_ context.Context, method string, args map[string]any) (map[string]any, error) {
+	return a.invoker.InvokeService(method, args)
+}
+
+func wireTelemetryBridge(app modular.Application, cfg *config.WorkflowConfig) error {
+	sink := telemetry.TelemetrySink(telemetry.NoopSink{})
+	if cfg != nil {
+		for _, modCfg := range cfg.Modules {
+			if modCfg.Type != "observability.telemetry" {
+				continue
+			}
+			mod := app.GetModule(modCfg.Name)
+			if invoker, ok := mod.(telemetry.ContextServiceInvoker); ok {
+				sink = telemetry.NewServiceInvokerSink(invoker)
+				break
+			}
+			if invoker, ok := mod.(legacyServiceInvoker); ok {
+				sink = telemetry.NewServiceInvokerSink(legacyServiceInvokerAdapter{invoker: invoker})
+				break
+			}
+		}
+	}
+
+	bridge := module.NewTelemetryBridge("observability.telemetry-bridge", sink, module.TelemetryBridgeConfig{
+		Interval: 30 * time.Second,
+		Timeout:  2 * time.Second,
+	})
+	if err := bridge.Init(app); err != nil {
+		return err
+	}
+	app.RegisterModule(bridge)
+	return bridge.Start(context.Background())
 }
 
 // wireHealthEndpoints registers health check endpoints on any available router,
