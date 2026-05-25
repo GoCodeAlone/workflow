@@ -28,7 +28,11 @@ func TestSDKTelemetryAliasesMatchCoreContracts(t *testing.T) {
 		t.Fatalf("metrics = %#v", got)
 	}
 
-	var _ sdk.TelemetryMetricRecord = telemetry.MetricRecord{}
-	var _ sdk.TelemetryLogRecord = telemetry.LogRecord{}
-	var _ sdk.TelemetrySpanEvent = telemetry.SpanEvent{}
+	requireSDKMetricRecord(telemetry.MetricRecord{})
+	requireSDKLogRecord(telemetry.LogRecord{})
+	requireSDKSpanEvent(telemetry.SpanEvent{})
 }
+
+func requireSDKMetricRecord(sdk.TelemetryMetricRecord) {}
+func requireSDKLogRecord(sdk.TelemetryLogRecord)       {}
+func requireSDKSpanEvent(sdk.TelemetrySpanEvent)       {}
