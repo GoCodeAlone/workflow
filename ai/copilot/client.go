@@ -147,6 +147,17 @@ func (c *Client) createSession(ctx context.Context) (SessionWrapper, error) {
 	return session, nil
 }
 
+func assistantMessageText(resp *copilot.SessionEvent) (string, bool) {
+	if resp == nil {
+		return "", false
+	}
+	data, ok := resp.Data.(*copilot.AssistantMessageData)
+	if !ok {
+		return "", false
+	}
+	return data.Content, true
+}
+
 // GenerateWorkflow creates a workflow config from a natural language request.
 func (c *Client) GenerateWorkflow(ctx context.Context, req ai.GenerateRequest) (*ai.GenerateResponse, error) {
 	session, err := c.createSession(ctx)
@@ -162,11 +173,11 @@ func (c *Client) GenerateWorkflow(ctx context.Context, req ai.GenerateRequest) (
 		return nil, fmt.Errorf("copilot request failed: %w", err)
 	}
 
-	if resp == nil || resp.Data.Content == nil {
+	text, ok := assistantMessageText(resp)
+	if !ok {
 		return nil, fmt.Errorf("empty response from Copilot")
 	}
 
-	text := *resp.Data.Content
 	jsonStr := aillm.ExtractJSON(text)
 	if jsonStr == "" {
 		return nil, fmt.Errorf("no JSON found in Copilot response")
@@ -194,11 +205,12 @@ func (c *Client) GenerateComponent(ctx context.Context, spec ai.ComponentSpec) (
 		return "", fmt.Errorf("copilot request failed: %w", err)
 	}
 
-	if resp == nil || resp.Data.Content == nil {
+	text, ok := assistantMessageText(resp)
+	if !ok {
 		return "", fmt.Errorf("empty response from Copilot")
 	}
 
-	return aillm.ExtractCode(*resp.Data.Content), nil
+	return aillm.ExtractCode(text), nil
 }
 
 // SuggestWorkflow returns workflow suggestions for a use case.
@@ -216,11 +228,11 @@ func (c *Client) SuggestWorkflow(ctx context.Context, useCase string) ([]ai.Work
 		return nil, fmt.Errorf("copilot request failed: %w", err)
 	}
 
-	if resp == nil || resp.Data.Content == nil {
+	text, ok := assistantMessageText(resp)
+	if !ok {
 		return nil, fmt.Errorf("empty response from Copilot")
 	}
 
-	text := *resp.Data.Content
 	jsonStr := aillm.ExtractJSON(text)
 	if jsonStr == "" {
 		return nil, fmt.Errorf("no JSON found in Copilot response")
@@ -253,11 +265,11 @@ func (c *Client) IdentifyMissingComponents(ctx context.Context, cfg *config.Work
 		return nil, fmt.Errorf("copilot request failed: %w", err)
 	}
 
-	if resp == nil || resp.Data.Content == nil {
+	text, ok := assistantMessageText(resp)
+	if !ok {
 		return nil, fmt.Errorf("empty response from Copilot")
 	}
 
-	text := *resp.Data.Content
 	jsonStr := aillm.ExtractJSON(text)
 	if jsonStr == "" {
 		return nil, nil // no missing components

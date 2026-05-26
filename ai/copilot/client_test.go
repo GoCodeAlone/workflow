@@ -47,7 +47,7 @@ func newTestClient(wrapper ClientWrapper) *Client {
 // Helper to create a SessionEvent with the given text content.
 func sessionEventWithContent(text string) *copilot.SessionEvent {
 	return &copilot.SessionEvent{
-		Data: copilot.Data{Content: &text},
+		Data: &copilot.AssistantMessageData{Content: text},
 	}
 }
 
@@ -220,9 +220,9 @@ func TestGenerateWorkflow_EmptyResponse(t *testing.T) {
 	}
 }
 
-func TestGenerateWorkflow_NilContent(t *testing.T) {
+func TestGenerateWorkflow_NonAssistantResponse(t *testing.T) {
 	event := &copilot.SessionEvent{
-		Data: copilot.Data{Content: nil},
+		Data: nil,
 	}
 	wrapper := mockWrapperWithResponse(event, nil)
 	client := newTestClient(wrapper)
