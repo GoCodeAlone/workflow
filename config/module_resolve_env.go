@@ -4,11 +4,12 @@ import "strings"
 
 // ResolvedModule is the effective module config for a specific environment.
 type ResolvedModule struct {
-	Name     string
-	Type     string
-	Provider string
-	Region   string
-	Config   map[string]any
+	Name      string
+	Type      string
+	Provider  string
+	Region    string
+	Protected bool
+	Config    map[string]any
 }
 
 // ResolveForEnv returns the effective module config for envName.
@@ -19,9 +20,10 @@ type ResolvedModule struct {
 // construction (which reads only Config) picks them up.
 func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 	resolved := &ResolvedModule{
-		Name:   m.Name,
-		Type:   m.Type,
-		Config: cloneMap(m.Config),
+		Name:      m.Name,
+		Type:      m.Type,
+		Protected: m.Protected,
+		Config:    cloneMap(m.Config),
 	}
 	setRegionFromConfig(resolved)
 
