@@ -116,6 +116,33 @@ modules:
 	}
 }
 
+func TestParseInfraResourceSpecs_TopLevelProtectedBecomesConfig(t *testing.T) {
+	yaml := `
+modules:
+  - name: app
+    type: infra.container_service
+    protected: true
+    config:
+      image: ghcr.io/example/app:latest
+`
+	f, err := writeTempYAML(t, yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f)
+
+	specs, err := parseInfraResourceSpecs(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 spec, got %d", len(specs))
+	}
+	if got, _ := specs[0].Config["protected"].(bool); !got {
+		t.Fatalf("spec.Config[protected] = %#v, want true", specs[0].Config["protected"])
+	}
+}
+
 // --- formatPlanTable tests ---
 
 func TestFormatPlanTable_ShowsAllActions(t *testing.T) {

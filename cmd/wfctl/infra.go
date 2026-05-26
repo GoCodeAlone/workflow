@@ -441,13 +441,20 @@ func extractDependsOn(cfg map[string]any) []string {
 // populating Size and DependsOn from the resolved Config. Used by both the
 // --env and no-env paths so field extraction never diverges.
 func resourceSpecFromResolvedModule(r *config.ResolvedModule) interfaces.ResourceSpec {
+	cfg := cloneMap(r.Config)
+	if r.Protected {
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
+		cfg["protected"] = true
+	}
 	spec := interfaces.ResourceSpec{
 		Name:      r.Name,
 		Type:      r.Type,
-		Config:    r.Config,
-		DependsOn: extractDependsOn(r.Config),
+		Config:    cfg,
+		DependsOn: extractDependsOn(cfg),
 	}
-	if size, ok := r.Config["size"].(string); ok {
+	if size, ok := cfg["size"].(string); ok {
 		spec.Size = interfaces.Size(size)
 	}
 	return spec
@@ -531,7 +538,7 @@ func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) 
 		if !isInfraType(m.Type) {
 			continue
 		}
-		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)}
+		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Protected: m.Protected, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)}
 		specs = append(specs, resourceSpecFromResolvedModule(r))
 	}
 	return specs, nil
@@ -578,7 +585,7 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 			continue
 		}
 		if envName == "" {
-			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)})
+			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Protected: m.Protected, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)})
 			continue
 		}
 		resolved, ok := m.ResolveForEnv(envName)

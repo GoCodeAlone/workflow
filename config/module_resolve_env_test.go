@@ -17,6 +17,22 @@ func TestResolveForEnv_NoEnvironments_ReturnsTopLevel(t *testing.T) {
 	}
 }
 
+func TestResolveForEnv_PreservesTopLevelProtected(t *testing.T) {
+	m := &ModuleConfig{
+		Name:      "db",
+		Type:      "infra.database",
+		Protected: true,
+		Config:    map[string]any{"size": "small"},
+	}
+	resolved, ok := m.ResolveForEnv("prod")
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	if !resolved.Protected {
+		t.Fatal("want Protected=true")
+	}
+}
+
 func TestResolveForEnv_OverridesMerge(t *testing.T) {
 	m := &ModuleConfig{
 		Name:   "db",
