@@ -21,7 +21,7 @@ type providerIDCapturingDriver struct {
 }
 
 func (d *providerIDCapturingDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.updateCount++
+	d.updateCount++
 	d.updateRef = ref
 	d.updateSpec = spec
 	if d.updateErr != nil {
@@ -31,7 +31,7 @@ func (d *providerIDCapturingDriver) Update(_ context.Context, ref interfaces.Res
 }
 
 func (d *providerIDCapturingDriver) Delete(_ context.Context, ref interfaces.ResourceRef) error {
-	d.fakeDriver.deleteCount++
+	d.deleteCount++
 	d.deleteRef = ref
 	return d.deleteErr
 }
@@ -74,7 +74,7 @@ func TestApplyPlan_Update_PassesProviderID(t *testing.T) {
 		},
 	}
 	fp := newCaptureFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestApplyPlan_Update_NilCurrentIsHandledDefensively(t *testing.T) {
 		},
 	}
 	fp := newCaptureFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestApplyPlan_Delete_NilCurrentIsHandledDefensively(t *testing.T) {
 		},
 	}
 	fp := newCaptureFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestApplyPlan_Delete_InvokesDriverDelete(t *testing.T) {
 		},
 	}
 	fp := newCaptureFakeProvider()
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestApplyPlan_Delete_DriverErrorRecorded(t *testing.T) {
 	}
 	fp := newCaptureFakeProvider()
 	fp.driver.deleteErr = deleteErr
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestApplyPlan_Update_DriverErrorRecorded(t *testing.T) {
 	}
 	fp := newCaptureFakeProvider()
 	fp.driver.updateErr = updateErr
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}

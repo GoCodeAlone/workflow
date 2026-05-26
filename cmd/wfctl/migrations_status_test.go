@@ -186,7 +186,7 @@ func stubMigrationStatusRunner(t *testing.T, result migrationCommandResult, runE
 				if pluginName != "workflow-plugin-migrations" {
 					t.Fatalf("pluginName = %q", pluginName)
 				}
-				if got := strings.Join(args, " "); !strings.Contains(got, "--wfctl-cli status") {
+				if got := strings.Join(args, " "); !strings.HasPrefix(got, "status ") {
 					t.Fatalf("args = %q, want status", got)
 				}
 				if env["DATABASE_URL"] != "postgres://secret@example/db" {

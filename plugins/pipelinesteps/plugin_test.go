@@ -68,7 +68,6 @@ func TestStepFactories(t *testing.T) {
 		"step.dlq_replay",
 		"step.retry_with_backoff",
 		"step.resilient_circuit_breaker",
-		"step.s3_upload",
 		"step.auth_validate",
 		"step.authz_check",
 		"step.token_revoke",

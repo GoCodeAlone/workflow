@@ -1,0 +1,10 @@
+{
+  "name": "workflow-plugin-test-rd-good",
+  "version": "1.2.3",
+  "author": "test",
+  "description": "fixture release dir good",
+  "minEngineVersion": "0.61.0",
+  "capabilities": {
+    "moduleTypes": ["test.module"]
+  }
+}

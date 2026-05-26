@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -83,7 +84,7 @@ func TestInfraBootstrap_ForceRotate_DeletesAndRegenerates(t *testing.T) {
 	}
 	forceRotate := map[string]bool{"FOO": true}
 
-	result, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
+	result, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
 	if err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
@@ -126,23 +127,200 @@ func TestInfraBootstrap_ForceRotate_UnknownNameFailsFast(t *testing.T) {
 	}
 }
 
-// TestInfraBootstrap_ForceRotate_ProviderCredentialRefused asserts that
-// --force-rotate on a provider_credential type returns a descriptive error
-// before touching the store.
-func TestInfraBootstrap_ForceRotate_ProviderCredentialRefused(t *testing.T) {
+// TestInfraBootstrap_ForceRotate_ProviderCredentialAllowed asserts that
+// --force-rotate on a provider_credential type is now permitted (ADR 0012).
+// The old rejection ("must be rotated via the upstream provider") was removed
+// to enable wfctl-managed mint-new-then-revoke-old rotation.
+func TestInfraBootstrap_ForceRotate_ProviderCredentialAllowed(t *testing.T) {
 	cfg := &SecretsConfig{
 		Generate: []SecretGen{
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
 	rotateNames := multiStringFlag{"SPACES"}
-	_, err := buildForceRotateSet(rotateNames, cfg)
-	if err == nil {
-		t.Fatal("expected error for provider_credential, got nil")
+	set, err := buildForceRotateSet(rotateNames, cfg)
+	if err != nil {
+		t.Fatalf("buildForceRotateSet: expected no error for provider_credential, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "must be rotated via the upstream provider") {
-		t.Errorf("error message should mention upstream provider rotation; got: %v", err)
+	if !set["SPACES"] {
+		t.Errorf("force-rotate set missing SPACES; got: %v", set)
 	}
+}
+
+// TestInfraBootstrap_ForceRotate_ProviderCredential_MintsAndRevokes verifies
+// the full mint-new-then-revoke-old flow for provider_credential force-rotate.
+// The revoker captures the old credentialID; the new sub-keys are stored.
+func TestInfraBootstrap_ForceRotate_ProviderCredential_MintsAndRevokes(t *testing.T) {
+	// Stub generator returns a new DO Spaces credential JSON.
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		return `{"access_key":"NEW_AK","secret_key":"NEW_SK"}`, nil
+	})
+
+	// Store has old sub-keys pre-populated.
+	p := newTrackingProvider(map[string]string{
+		"SPACES_access_key": "OLD_AK",
+		"SPACES_secret_key": "OLD_SK",
+	})
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	forceRotate := map[string]bool{"SPACES": true}
+
+	// Capture revoke calls.
+	var revokedSource, revokedID string
+	revoker := &stubProviderRevoker{
+		fn: func(_ context.Context, source, credentialID string) error {
+			revokedSource = source
+			revokedID = credentialID
+			return nil
+		},
+	}
+
+	result, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	if err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+
+	// New sub-keys should be stored.
+	if p.inner["SPACES_access_key"] != "NEW_AK" {
+		t.Errorf("SPACES_access_key = %q, want NEW_AK", p.inner["SPACES_access_key"])
+	}
+	if p.inner["SPACES_secret_key"] != "NEW_SK" {
+		t.Errorf("SPACES_secret_key = %q, want NEW_SK", p.inner["SPACES_secret_key"])
+	}
+	// Result map should contain new values.
+	if result["SPACES_access_key"] != "NEW_AK" {
+		t.Errorf("generated[SPACES_access_key] = %q, want NEW_AK", result["SPACES_access_key"])
+	}
+	// Revocation should have been called with old access_key_id.
+	if revokedSource != "digitalocean.spaces" {
+		t.Errorf("revokedSource = %q, want digitalocean.spaces", revokedSource)
+	}
+	if revokedID != "OLD_AK" {
+		t.Errorf("revokedID = %q, want OLD_AK", revokedID)
+	}
+}
+
+// TestInfraBootstrap_ForceRotate_ProviderCredential_RevokeFailNonFatal verifies
+// that when revocation fails, the new credential is still retained (non-fatal).
+func TestInfraBootstrap_ForceRotate_ProviderCredential_RevokeFailNonFatal(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		return `{"access_key":"NEW_AK2","secret_key":"NEW_SK2"}`, nil
+	})
+
+	p := newTrackingProvider(map[string]string{
+		"SPACES_access_key": "OLD_AK2",
+		"SPACES_secret_key": "OLD_SK2",
+	})
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	forceRotate := map[string]bool{"SPACES": true}
+
+	// Revoker that always fails.
+	revoker := &stubProviderRevoker{
+		fn: func(_ context.Context, _, _ string) error {
+			return fmt.Errorf("simulated revoke failure")
+		},
+	}
+
+	result, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	if err != nil {
+		t.Fatalf("bootstrapSecrets should not fail on revoke error; got: %v", err)
+	}
+	// New credential MUST still be stored even when revoke fails.
+	if p.inner["SPACES_access_key"] != "NEW_AK2" {
+		t.Errorf("SPACES_access_key = %q, want NEW_AK2 (must not roll back on revoke fail)", p.inner["SPACES_access_key"])
+	}
+	if result["SPACES_access_key"] != "NEW_AK2" {
+		t.Errorf("generated[SPACES_access_key] = %q, want NEW_AK2", result["SPACES_access_key"])
+	}
+}
+
+// stubProviderRevoker is a test double for interfaces.ProviderCredentialRevoker.
+// (Task 17 keeps the Go-interface signature for caller stability +
+// test-fixture compatibility; capability discovery in
+// resolveCredentialRevoker uses the typed adapter's CredentialRevoker()
+// accessor before returning the interface, so unregistered services no
+// longer reach the dispatch path.)
+type stubProviderRevoker struct {
+	fn func(ctx context.Context, source, credentialID string) error
+}
+
+func (r *stubProviderRevoker) RevokeProviderCredential(ctx context.Context, source, credentialID string) error {
+	return r.fn(ctx, source, credentialID)
+}
+
+// TestInfraBootstrap_ForceRotate_ProviderCredential_WriteOnlyStore verifies that
+// when the secrets provider is write-only (Get returns ErrUnsupported, e.g.
+// GitHub Actions), revocation is skipped with a warning and the new credential
+// is still stored. The revoker MUST NOT be called because the old credential ID
+// is unknown (ADR 0012 §write-only contract).
+func TestInfraBootstrap_ForceRotate_ProviderCredential_WriteOnlyStore(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		return `{"access_key":"WO_AK","secret_key":"WO_SK"}`, nil
+	})
+
+	// writeOnlyGetUnsupportedProvider returns ErrUnsupported from Get (GitHub Actions model).
+	p := &writeOnlyGetUnsupportedProvider{inner: map[string]string{}}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	forceRotate := map[string]bool{"SPACES": true}
+
+	// Revoker must NOT be called when the old credential ID is unknown.
+	revokeCalled := false
+	revoker := &stubProviderRevoker{
+		fn: func(_ context.Context, _, _ string) error {
+			revokeCalled = true
+			return nil
+		},
+	}
+
+	result, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate, revoker)
+	if err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+	// New credential stored.
+	if result["SPACES_access_key"] != "WO_AK" {
+		t.Errorf("generated[SPACES_access_key] = %q, want WO_AK", result["SPACES_access_key"])
+	}
+	// Revoker must not have been called (no old credential ID to revoke).
+	if revokeCalled {
+		t.Error("revoker was called despite write-only provider (old credential ID unknown); must not revoke")
+	}
+}
+
+// writeOnlyGetUnsupportedProvider is a secrets.Provider where Get returns ErrUnsupported
+// (simulates GitHub Actions secrets — write-only, no read access).
+type writeOnlyGetUnsupportedProvider struct {
+	inner map[string]string
+}
+
+func (p *writeOnlyGetUnsupportedProvider) Name() string { return "write-only" }
+func (p *writeOnlyGetUnsupportedProvider) Get(_ context.Context, _ string) (string, error) {
+	return "", secrets.ErrUnsupported
+}
+func (p *writeOnlyGetUnsupportedProvider) Set(_ context.Context, key, value string) error {
+	if p.inner == nil {
+		p.inner = map[string]string{}
+	}
+	p.inner[key] = value
+	return nil
+}
+func (p *writeOnlyGetUnsupportedProvider) Delete(_ context.Context, _ string) error { return nil }
+func (p *writeOnlyGetUnsupportedProvider) List(_ context.Context) ([]string, error) {
+	names := make([]string, 0, len(p.inner))
+	for k := range p.inner {
+		names = append(names, k)
+	}
+	return names, nil
 }
 
 // TestInfraBootstrap_ForceRotate_BestEffortDeleteOnMissing asserts that when
@@ -165,7 +343,7 @@ func TestInfraBootstrap_ForceRotate_BestEffortDeleteOnMissing(t *testing.T) {
 	}
 	forceRotate := map[string]bool{"FOO": true}
 
-	_, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
+	_, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
 	if err != nil {
 		t.Fatalf("bootstrapSecrets returned error on missing key: %v", err)
 	}
@@ -193,7 +371,7 @@ func TestInfraBootstrap_ForceRotate_BestEffortDeleteNotFound(t *testing.T) {
 	}
 	forceRotate := map[string]bool{"FOO": true}
 
-	_, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
+	_, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate)
 	if err != nil {
 		t.Fatalf("expected no error on best-effort delete; got: %v", err)
 	}
@@ -258,7 +436,7 @@ func TestInfraBootstrap_ForceRotate_CommaSeparated(t *testing.T) {
 		t.Fatalf("buildForceRotateSet: %v", err)
 	}
 
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 
@@ -304,7 +482,7 @@ func TestInfraBootstrap_ForceRotate_Repeatable(t *testing.T) {
 		t.Fatalf("buildForceRotateSet: %v", err)
 	}
 
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, forceRotate); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -16,17 +18,14 @@ import (
 )
 
 // mapToStruct converts a Go map to a protobuf Struct.
-// Returns nil if the input is nil.
-func mapToStruct(m map[string]any) *structpb.Struct {
+// Returns nil if the input is nil. Propagates errors from structpb.NewStruct
+// (workflow#537) so callers can surface conversion failures rather than
+// silently dropping unrepresentable values.
+func mapToStruct(m map[string]any) (*structpb.Struct, error) {
 	if m == nil {
-		return nil
+		return nil, nil
 	}
-	s, err := structpb.NewStruct(m)
-	if err != nil {
-		// Fall back to empty struct on conversion error
-		return &structpb.Struct{}
-	}
-	return s
+	return structpb.NewStruct(m)
 }
 
 // structToMap converts a protobuf Struct to a Go map.
@@ -36,6 +35,32 @@ func structToMap(s *structpb.Struct) map[string]any {
 		return nil
 	}
 	return s.AsMap()
+}
+
+// stripInternalKeys returns a fresh copy of m with all keys having the "_"
+// prefix removed. The engine injects internal keys (e.g., "_config_dir") into
+// every module config to support legacy modules that resolve filesystem-
+// relative paths. STRICT_PROTO modules declare their schema explicitly via
+// protobuf and reject unknown fields at protojson decode time — so engine
+// internals must be stripped before mapToTypedAny is called.
+//
+// Returns nil if m is nil. Copy-on-clean: the caller's original map is not
+// mutated; legacy *structpb.Struct paths continue to receive "_config_dir".
+//
+// The "_" prefix is the reserved namespace for engine internals; STRICT_PROTO
+// module proto schemas must not declare fields with this prefix.
+func stripInternalKeys(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	cleaned := make(map[string]any, len(m))
+	for k, v := range m {
+		if strings.HasPrefix(k, "_") {
+			continue
+		}
+		cleaned[k] = v
+	}
+	return cleaned
 }
 
 func mapToTypedAny(messageName string, values map[string]any, resolver protoregistry.MessageTypeResolver) (*anypb.Any, error) {
@@ -58,6 +83,15 @@ func mapToTypedAnyWithOptions(messageName string, values map[string]any, resolve
 		if filterUnknown {
 			values = filterMapToMessageFields(values, msg.ProtoReflect().Descriptor())
 		}
+		// Workflow template expansion produces text/template string output
+		// even when the underlying config value is a scalar. Engine v0.51.x
+		// strict-proto requires protojson.Unmarshal which rejects string-
+		// encoded scalars for bool/int/float proto fields. Pre-coerce known
+		// string scalars to their declared field types so a template-emitted
+		// "false" for a bool field decodes correctly without forcing every
+		// plugin to publish a coerce-aware contract or every BMW-style
+		// template author to hand-quote in YAML.
+		values = coerceMapScalars(values, msg.ProtoReflect().Descriptor())
 		raw, err := json.Marshal(values)
 		if err != nil {
 			return nil, fmt.Errorf("marshal %s input as JSON: %w", messageName, err)
@@ -71,6 +105,125 @@ func mapToTypedAnyWithOptions(messageName string, values map[string]any, resolve
 		return nil, fmt.Errorf("pack %s typed payload: %w", messageName, err)
 	}
 	return typed, nil
+}
+
+// coerceMapScalars returns a fresh map where string values whose paired
+// proto field is a scalar (bool / int* / uint* / float* / sfixed* / fixed*)
+// have been parsed into the matching Go type. The workflow template engine
+// only emits strings, so config values that originate from `{{ config ... }}`
+// arrive as strings even when the source default is a bool/int literal. The
+// downstream protojson.Unmarshal is strict: it will not accept a string for
+// a bool field. Without this pre-pass, every plugin author would have to
+// either declare bool fields as string (defeats strict-proto) or every
+// BMW-style template would have to be rewritten with provider-specific
+// glue. Coercing at the gateway keeps the contract clean.
+//
+// Coercion rules (all case-insensitive for string parse):
+//   - bool field:    "true"/"false"/"1"/"0"/"yes"/"no"/"on"/"off"
+//   - int* / sint*:  strconv.ParseInt(value, 10, 64)
+//   - uint* / fixed: strconv.ParseUint(value, 10, 64)
+//   - float* / dbl:  strconv.ParseFloat(value, 64)
+//   - empty string for any scalar field: dropped from the map (proto default)
+//   - string field:  passthrough (no change)
+//   - enum field:    passthrough (protojson handles "ENUM_NAME" + numeric)
+//   - message field: passthrough; map values are not recursed because nested
+//     scalar coercion can be applied per-call when those fields are decoded.
+//
+// Unparseable string values (e.g. "maybe" for a bool field) are passed
+// through unchanged so the protojson decoder surfaces the canonical
+// "invalid value for <type> field" error path — coercion intentionally
+// does not mask user typos.
+//
+// Copy-on-coerce: the caller's original map is not mutated.
+func coerceMapScalars(values map[string]any, descriptor protoreflect.MessageDescriptor) map[string]any {
+	if values == nil || descriptor == nil {
+		return values
+	}
+	fields := descriptor.Fields()
+	fieldByKey := make(map[string]protoreflect.FieldDescriptor, fields.Len()*3)
+	for i := 0; i < fields.Len(); i++ {
+		f := fields.Get(i)
+		fieldByKey[string(f.Name())] = f
+		fieldByKey[f.JSONName()] = f
+		fieldByKey[f.TextName()] = f
+	}
+	out := make(map[string]any, len(values))
+	for k, v := range values {
+		out[k] = v
+		field, ok := fieldByKey[k]
+		if !ok || field.IsList() || field.IsMap() {
+			continue
+		}
+		s, isString := v.(string)
+		if !isString {
+			continue
+		}
+		coerced, dropped, ok := coerceStringToScalar(s, field.Kind())
+		if !ok {
+			continue
+		}
+		if dropped {
+			delete(out, k)
+			continue
+		}
+		out[k] = coerced
+	}
+	return out
+}
+
+// coerceStringToScalar parses s as a Go value matching kind. Returns
+// (value, drop=false, ok=true) on success; (nil, drop=true, ok=true) when the
+// input is an empty string and the field is numeric/bool (drop yields proto
+// default); (nil, false, false) when kind is not a coercible scalar OR parse
+// failed (caller passes string through for protojson to error on cleanly).
+func coerceStringToScalar(s string, kind protoreflect.Kind) (any, bool, bool) {
+	switch kind {
+	case protoreflect.BoolKind:
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return nil, true, true
+		}
+		switch strings.ToLower(trimmed) {
+		case "true", "1", "yes", "on":
+			return true, false, true
+		case "false", "0", "no", "off":
+			return false, false, true
+		}
+		return nil, false, false
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,
+		protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return nil, true, true
+		}
+		n, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return nil, false, false
+		}
+		return n, false, true
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind,
+		protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return nil, true, true
+		}
+		n, err := strconv.ParseUint(trimmed, 10, 64)
+		if err != nil {
+			return nil, false, false
+		}
+		return n, false, true
+	case protoreflect.FloatKind, protoreflect.DoubleKind:
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return nil, true, true
+		}
+		n, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return nil, false, false
+		}
+		return n, false, true
+	}
+	return nil, false, false
 }
 
 func filterMapToMessageFields(values map[string]any, descriptor protoreflect.MessageDescriptor) map[string]any {

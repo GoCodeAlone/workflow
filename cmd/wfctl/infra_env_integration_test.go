@@ -80,6 +80,7 @@ func TestInfraUsageDocumentsConfigAwareImportFlags(t *testing.T) {
 		"--env <name>",
 		"--name <resource>",
 		"--id <provider-id>",
+		"logs",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("infra usage missing %q:\n%s", want, out)

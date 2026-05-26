@@ -1,5 +1,20 @@
 package main
 
+// Note: as of v0.27.0 (engine-side sensitive-output routing), no in-tree
+// call site dispatches driver.Diff against state.Outputs that may contain
+// sensitive.PlaceholderPrefix entries. Per-provider Diff implementations
+// receive desired/current via gRPC and are out of scope for engine-side
+// masking. iac/sensitive.MaskSensitiveForDiff is exported as a helper
+// for future in-tree consumers (e.g., a future engine-side drift command
+// that compares state-Outputs to live ResourceOutput before calling
+// Diff). When such a call site lands, wire MaskSensitiveForDiff(
+// driver.SensitiveKeys(), desired.Config, current.Outputs) before the
+// Diff dispatch to prevent placeholder-vs-plaintext false-positives.
+//
+// Verified at v0.27.0 by `grep -rn "driver\.Diff(\|d\.Diff(" cmd/wfctl/
+// iac/`: only iac/conformance/scenario_grpc_roundtrip.go matches, and
+// it's a conformance-test tool that synthesizes its own desired/current.
+
 import (
 	"context"
 	"fmt"
@@ -46,7 +61,27 @@ func runInfraApplyRefreshPhase(
 		return nil
 	}
 
-	results, err := provider.DetectDrift(ctx, refs)
+	// Per Task 17 of the strict-contracts force-cutover (ADR-0028):
+	// pure typed-pb dispatch — no interfaces.X fallback. Production
+	// always yields *typedIaCAdapter via discoverAndLoadIaCProvider;
+	// test fixtures must construct one via the same bufconn-backed
+	// pattern. Hard-fail (typed error) if provider isn't a typed adapter.
+	adapter, ok := provider.(*typedIaCAdapter)
+	if !ok {
+		return fmt.Errorf("detect drift: provider %T is not a typed IaC adapter — re-load via discoverAndLoadIaCProvider", provider)
+	}
+	var results []interfaces.DriftResult
+	var err error
+	if cli := adapter.DriftConfigDetector(); cli != nil {
+		specsMap := buildAppliedSpecMap(states, refs)
+		if specsMap != nil {
+			results, err = detectDriftConfigTyped(ctx, cli, refs, specsMap)
+		} else {
+			results, err = provider.DetectDrift(ctx, refs)
+		}
+	} else {
+		results, err = provider.DetectDrift(ctx, refs)
+	}
 	if err != nil {
 		// Transient or auth error — propagate; do NOT prune anything.
 		return fmt.Errorf("detect drift: %w", err)

@@ -21,10 +21,18 @@ modules:
     config:
       description: "Health check endpoint for {{.Name}}"
 
-  - name: {{.Name}}-metrics
-    type: metrics.collector
+  - name: {{.Name}}-telemetry
+    type: observability.telemetry
     config:
-      description: "Prometheus metrics for {{.Name}}"
+      serviceName: "{{.Name}}"
+      environment: "local"
+
+  - name: {{.Name}}-collector
+    type: observability.collector
+    config:
+      distribution: external
+      topology: external
+      signals: [traces, metrics, logs]
 
 workflows:
   http:

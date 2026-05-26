@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +50,51 @@ func buildStaticRegistryServer(t *testing.T, index []staticIndexEntry, manifests
 	return srv
 }
 
+func buildStaticRegistryServerWithCompat(
+	t *testing.T,
+	index []staticIndexEntry,
+	manifests map[string]*RegistryManifest,
+	compat map[string]*PluginVersionIndex,
+) *httptest.Server {
+	t.Helper()
+	indexData, err := json.Marshal(index)
+	if err != nil {
+		t.Fatalf("marshal index: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/index.json":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write(indexData) //nolint:errcheck
+		case strings.HasPrefix(r.URL.Path, "/compatibility/") && strings.HasSuffix(r.URL.Path, "/index.json"):
+			name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/compatibility/"), "/index.json")
+			if idx, ok := compat[name]; ok {
+				data, _ := json.Marshal(idx)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(data) //nolint:errcheck
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			var pluginName string
+			if _, err := splitPluginManifestPath(r.URL.Path, &pluginName); err == nil {
+				if m, ok := manifests[pluginName]; ok {
+					data, _ := json.Marshal(m)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					w.Write(data) //nolint:errcheck
+					return
+				}
+			}
+			http.NotFound(w, r)
+		}
+	}))
+	return srv
+}
+
 // splitPluginManifestPath parses /plugins/<name>/manifest.json and extracts
 // the plugin name. Returns an error if the path does not match.
 func splitPluginManifestPath(path string, name *string) (string, error) {
@@ -72,6 +120,12 @@ var errNotPluginPath = errSentinel("not a plugin manifest path")
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 // mustNewStaticRegistrySource is a test helper that calls NewStaticRegistrySource
 // and fails the test if an error is returned.
@@ -118,6 +172,86 @@ func TestStaticRegistrySource_FetchManifest(t *testing.T) {
 	}
 	if m.Version != "1.0.0" {
 		t.Errorf("version: got %q, want %q", m.Version, "1.0.0")
+	}
+}
+
+func TestStaticRegistrySource_FetchVersionIndex_Native(t *testing.T) {
+	manifest := &RegistryManifest{Name: "alpha", Version: "1.0.0"}
+	index := &PluginVersionIndex{
+		Plugin: "alpha",
+		Versions: []PluginVersionRecord{{
+			Version:          "1.0.0",
+			MinEngineVersion: "0.51.2",
+		}},
+	}
+	srv := buildStaticRegistryServerWithCompat(t, nil, map[string]*RegistryManifest{"alpha": manifest}, map[string]*PluginVersionIndex{"alpha": index})
+	defer srv.Close()
+
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{Name: "test-static", URL: srv.URL})
+	got, err := src.FetchVersionIndex("alpha")
+	if err != nil {
+		t.Fatalf("FetchVersionIndex: %v", err)
+	}
+	if got.Plugin != "alpha" || len(got.Versions) != 1 || got.Versions[0].Version != "v1.0.0" {
+		t.Fatalf("unexpected index: %#v", got)
+	}
+}
+
+func TestStaticRegistrySource_FetchVersionIndex_SynthesizesFromManifest(t *testing.T) {
+	manifest := &RegistryManifest{
+		Name:             "alpha",
+		Version:          "1.0.0",
+		MinEngineVersion: "0.51.2",
+		Downloads: []PluginDownload{{
+			OS:     "linux",
+			Arch:   "amd64",
+			URL:    "https://example.test/alpha.tar.gz",
+			SHA256: strings.Repeat("a", 64),
+		}},
+	}
+	srv := buildStaticRegistryServerWithCompat(t, nil, map[string]*RegistryManifest{"alpha": manifest}, nil)
+	defer srv.Close()
+
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{Name: "test-static", URL: srv.URL})
+	got, err := src.FetchVersionIndex("alpha")
+	if err != nil {
+		t.Fatalf("FetchVersionIndex: %v", err)
+	}
+	if got.Plugin != "alpha" || len(got.Versions) != 1 {
+		t.Fatalf("unexpected synthetic index: %#v", got)
+	}
+	rec := got.Versions[0]
+	if rec.Version != "v1.0.0" || rec.MinEngineVersion != "v0.51.2" {
+		t.Fatalf("synthetic versions = %#v", rec)
+	}
+	if len(rec.Downloads) != 1 || rec.Downloads[0].SHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("synthetic downloads = %#v", rec.Downloads)
+	}
+}
+
+func TestGitHubRegistrySource_FetchVersionIndex_Native(t *testing.T) {
+	oldClient := registryHTTPClient
+	t.Cleanup(func() { registryHTTPClient = oldClient })
+	registryHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.Contains(req.URL.Path, "/compatibility/alpha/index.json") {
+			t.Fatalf("unexpected path %s", req.URL.Path)
+		}
+		body := `{"plugin":"alpha","versions":[{"version":"v1.0.0"}]}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString(body)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	src := NewGitHubRegistrySource(RegistrySourceConfig{Name: "github", Owner: "o", Repo: "r", Branch: "main"})
+	got, err := src.FetchVersionIndex("alpha")
+	if err != nil {
+		t.Fatalf("FetchVersionIndex: %v", err)
+	}
+	if got.Plugin != "alpha" || got.Versions[0].Version != "v1.0.0" {
+		t.Fatalf("unexpected index: %#v", got)
 	}
 }
 
@@ -329,5 +463,29 @@ func TestStaticRegistrySource_EmptyURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for empty URL, got nil")
+	}
+}
+
+// TestStaticRegistrySource_SearchPlugins_StatusPropagation verifies that the
+// Status field from staticIndexEntry is propagated through SearchPlugins into
+// the returned PluginSearchResult.Status. This exercises the
+// `Status: e.Status` line in StaticRegistrySource.SearchPlugins directly.
+func TestStaticRegistrySource_SearchPlugins_StatusPropagation(t *testing.T) {
+	index := []staticIndexEntry{
+		{Name: "test-plugin", Version: "1.0.0", Description: "Test plugin", Tier: "community", Status: "experimental"},
+	}
+	srv := buildStaticRegistryServer(t, index, nil)
+	defer srv.Close()
+
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{Name: "test-static", URL: srv.URL})
+	results, err := src.SearchPlugins("")
+	if err != nil {
+		t.Fatalf("SearchPlugins: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Status != "experimental" {
+		t.Fatalf("expected Status=%q, got %q", "experimental", results[0].Status)
 	}
 }

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,7 +86,7 @@ modules:
 	// ci.build exists but has no container named "myapp" → orphaned reference
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,7 +112,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +148,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,7 +181,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -213,7 +216,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,7 +250,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -279,7 +282,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yamlContent)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -304,7 +307,7 @@ modules:
 	// No container_service named redis-cache
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -332,7 +335,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -360,7 +363,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -386,7 +389,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -409,7 +412,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -438,12 +441,122 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if findingsHaveRule(findings, "R-A4") {
 		t.Errorf("unexpected R-A4 finding for secrets.generate key: %v", findings)
+	}
+}
+
+func TestInfraAlign_RA4_TopLevelSecretsGenerate_DoesNotFire(t *testing.T) {
+	os.Unsetenv("STAGING_PG_PASSWORD")
+	yaml := `
+appName: test
+secrets:
+  generate:
+    - key: STAGING_PG_PASSWORD
+      type: random_hex
+      length: 32
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        DATABASE_URL: "postgres://user:${STAGING_PG_PASSWORD}@host:5432/db"
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg}
+	findings, err := runInfraAlignChecks(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A4") {
+		t.Errorf("unexpected R-A4 finding for top-level secrets.generate key: %v", findings)
+	}
+}
+
+func TestInfraAlign_RA4_TopLevelSecretsEntries_DoesNotFire(t *testing.T) {
+	os.Unsetenv("STAGING_PG_PASSWORD")
+	yaml := `
+appName: test
+secrets:
+  entries:
+    - name: STAGING_PG_PASSWORD
+      store: vault
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        DATABASE_URL: "postgres://user:${STAGING_PG_PASSWORD}@host:5432/db"
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg}
+	findings, err := runInfraAlignChecks(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A4") {
+		t.Errorf("unexpected R-A4 finding for top-level secrets.entries name: %v", findings)
+	}
+}
+
+// TestInfraAlign_RA4_TopLevelSecrets_FromImport_DoesNotFire pins the imports
+// merge path: when a `secrets:` block is declared in an imported file rather
+// than the main config, R-A4 must still see those keys. This requires
+// processImports to merge WorkflowConfig.Secrets — without that, cfg.Secrets
+// is nil/empty after LoadFromFile and R-A4 fires false-positive.
+func TestInfraAlign_RA4_TopLevelSecrets_FromImport_DoesNotFire(t *testing.T) {
+	os.Unsetenv("STAGING_PG_PASSWORD")
+	os.Unsetenv("STAGING_API_TOKEN")
+	dir := t.TempDir()
+
+	sharedYAML := `
+secrets:
+  generate:
+    - key: STAGING_PG_PASSWORD
+      type: random_hex
+      length: 32
+  entries:
+    - name: STAGING_API_TOKEN
+      store: vault
+`
+	if err := os.WriteFile(filepath.Join(dir, "shared.yaml"), []byte(sharedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+appName: test
+imports:
+  - shared.yaml
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      image: "myapp:latest"
+      http_port: 8080
+      env_vars:
+        DATABASE_URL: "postgres://user:${STAGING_PG_PASSWORD}@host:5432/db"
+        API_TOKEN: "${STAGING_API_TOKEN}"
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := alignOptions{configFile: mainPath}
+	findings, err := runInfraAlignChecks(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A4") {
+		t.Errorf("unexpected R-A4 finding for imported top-level secrets: %v", findings)
 	}
 }
 
@@ -470,7 +583,7 @@ modules:
 	// No infra.database module — FAIL
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -506,7 +619,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -529,7 +642,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -549,7 +662,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -569,7 +682,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -607,7 +720,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg, planFile: planFile}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -643,7 +756,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg, planFile: planFile}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -673,7 +786,7 @@ func TestInfraAlign_RA7_TooManyChanges_Warns(t *testing.T) {
 	planFile := writeAlignPlanJSON(t, plan)
 	cfg := writeAlignYAML(t, `modules: []`)
 	opts := alignOptions{configFile: cfg, planFile: planFile, maxChanges: 50}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -698,7 +811,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -721,7 +834,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -746,7 +859,7 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -770,6 +883,41 @@ func TestInfraAlign_ExitCode_WarnStrict(t *testing.T) {
 	}
 	if code := alignExitCode(findings, true); code != 1 {
 		t.Errorf("expected exit 1 for WARN with --strict, got %d", code)
+	}
+}
+
+// TestAlignExitCode_ErrorSeverity_Returns1 verifies that ERROR severity
+// (introduced in rev3 of the spaces-key plan for R-A9) blocks deploy with
+// exit 1 even without --strict. Without this, an ERROR finding silently
+// downgrades to non-blocking — defeating the rev3 requirement that the
+// doubled-create anti-pattern fail CI.
+func TestAlignExitCode_ErrorSeverity_Returns1(t *testing.T) {
+	findings := []AlignFinding{
+		{Rule: "R-A9", Severity: "ERROR", Resource: "SPACES_access_key", Message: "doubled-create"},
+	}
+	if code := alignExitCode(findings, false); code != 1 {
+		t.Errorf("alignExitCode(ERROR, strict=false) = %d, want 1 — ERROR must always block", code)
+	}
+	if code := alignExitCode(findings, true); code != 1 {
+		t.Errorf("alignExitCode(ERROR, strict=true) = %d, want 1", code)
+	}
+}
+
+// TestAlignRender_ErrorSeverity_CountedInSummary verifies that the markdown
+// summary includes ERROR alongside FAIL/WARN counts. Without this, ERROR
+// findings would render in the table but be invisible in the summary line,
+// hiding the deploy-blocking signal from CI consumers.
+func TestAlignRender_ErrorSeverity_CountedInSummary(t *testing.T) {
+	findings := []AlignFinding{
+		{Rule: "R-A9", Severity: "ERROR", Resource: "SPACES_access_key", Message: "doubled-create"},
+		{Rule: "R-A6", Severity: "WARN", Resource: "nats", Message: "advisory"},
+	}
+	out := renderAlignMarkdown(findings)
+	if !strings.Contains(out, "1 ERROR") {
+		t.Errorf("summary should report '1 ERROR', got: %s", out)
+	}
+	if !strings.Contains(out, "1 WARN") {
+		t.Errorf("summary should still report '1 WARN', got: %s", out)
 	}
 }
 
@@ -829,8 +977,8 @@ func TestCheckRA9_SuspiciousProviderCredentialKey(t *testing.T) {
 			if tc.wantFinding && findings[0].Rule != "R-A9" {
 				t.Errorf("expected Rule=R-A9, got %q", findings[0].Rule)
 			}
-			if tc.wantFinding && findings[0].Severity != "WARN" {
-				t.Errorf("expected Severity=WARN, got %q", findings[0].Severity)
+			if tc.wantFinding && findings[0].Severity != "ERROR" {
+				t.Errorf("expected Severity=ERROR, got %q", findings[0].Severity)
 			}
 		})
 	}
@@ -859,12 +1007,20 @@ modules:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !findingsHaveRuleAndSeverity(findings, "R-A9", "WARN") {
-		t.Errorf("expected R-A9 WARN, got: %v", findings)
+	if !findingsHaveRuleAndSeverity(findings, "R-A9", "ERROR") {
+		t.Errorf("expected R-A9 ERROR, got: %v", findings)
+	}
+	// End-to-end: ERROR severity must produce a non-zero exit code regardless
+	// of --strict (the user-visible CI gate, not just the severity label).
+	if code := alignExitCode(findings, false); code != 1 {
+		t.Errorf("alignExitCode(strict=false) = %d, want 1 — R-A9 ERROR must block without --strict", code)
+	}
+	if code := alignExitCode(findings, true); code != 1 {
+		t.Errorf("alignExitCode(strict=true) = %d, want 1", code)
 	}
 }
 
@@ -885,12 +1041,42 @@ secrets:
 `
 	cfg := writeAlignYAML(t, yaml)
 	opts := alignOptions{configFile: cfg}
-	findings, err := runInfraAlignChecks(opts)
+	findings, err := runInfraAlignChecks(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if findingsHaveRule(findings, "R-A9") {
 		t.Errorf("unexpected R-A9 finding for canonical key: %v", findings)
+	}
+}
+
+// TestInfraAlign_RA9_CanonicalSingleEntry_Passes is the positive happy-path fixture for
+// the R-A9 severity flip (rev3): the canonical single-entry SPACES key with
+// no doubled-create anti-pattern must pass `wfctl infra align --strict` with
+// exit code 0 and produce zero R-A9 findings.
+//
+// This is the inverse of TestInfraAlign_RA9_SuspiciousKey_Fires: it locks in
+// that the rule does not regress into false positives once it fires as ERROR.
+func TestInfraAlign_RA9_CanonicalSingleEntry_Passes(t *testing.T) {
+	yaml := `
+secrets:
+  generate:
+    - key: SPACES
+      type: provider_credential
+      source: digitalocean.spaces
+      name: my-deploy-key
+`
+	cfg := writeAlignYAML(t, yaml)
+	opts := alignOptions{configFile: cfg, strict: true}
+	findings, err := runInfraAlignChecks(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if findingsHaveRule(findings, "R-A9") {
+		t.Fatalf("canonical shape should not trigger R-A9; got: %+v", findings)
+	}
+	if code := alignExitCode(findings, true); code != 0 {
+		t.Fatalf("canonical shape should pass --strict; got exit=%d, findings=%+v", code, findings)
 	}
 }
 
@@ -914,5 +1100,43 @@ func TestInfraAlign_RenderMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 WARN") {
 		t.Error("expected WARN count in summary")
+	}
+}
+
+func TestLoadPlanJSON_MissingFileEmitsActionableHint(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "plan-does-not-exist.json")
+	_, err := loadPlanJSON(missing)
+	if err == nil {
+		t.Fatal("expected error for missing plan file, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"does not exist",
+		"wfctl infra plan",
+		"state-backend",
+		"pipefail",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q hint: %s", want, msg)
+		}
+	}
+	// The hint must wrap (not replace) the underlying error so callers can
+	// still match with errors.Is(..., iofs.ErrNotExist).
+	if !errors.Is(err, iofs.ErrNotExist) {
+		t.Errorf("expected errors.Is(err, iofs.ErrNotExist) to match wrapped error; got: %v", err)
+	}
+}
+
+func TestLoadPlanJSON_DecodeErrorPropagatesVerbatim(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "plan-malformed.json")
+	if err := os.WriteFile(bad, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadPlanJSON(bad)
+	if err == nil {
+		t.Fatal("expected decode error, got nil")
+	}
+	if strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("decode error should not mention does-not-exist hint: %s", err.Error())
 	}
 }

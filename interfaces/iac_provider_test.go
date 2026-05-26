@@ -222,3 +222,42 @@ func TestProviderValidator_TypeAssertion_NonImplementor(t *testing.T) {
 		t.Errorf("nonValidatingProvider must NOT satisfy ProviderValidator (interface must remain optional)")
 	}
 }
+
+// TestDriftConfigDetector_OptionalInterface verifies the optional-declarer
+// pattern works as intended: an IaCProvider impl that does NOT implement
+// DriftConfigDetector type-asserts to false (caller falls back to existence-
+// only DetectDrift); an impl that DOES implement it type-asserts to true.
+func TestDriftConfigDetector_OptionalInterface(t *testing.T) {
+	var minimal interfaces.IaCProvider = nonValidatingProvider{}
+	if _, ok := minimal.(interfaces.DriftConfigDetector); ok {
+		t.Errorf("nonValidatingProvider should NOT satisfy DriftConfigDetector")
+	}
+
+	var capable interfaces.IaCProvider = &capableIaCProvider{}
+	if _, ok := capable.(interfaces.DriftConfigDetector); !ok {
+		t.Errorf("capableIaCProvider MUST satisfy DriftConfigDetector")
+	}
+}
+
+// capableIaCProvider extends nonValidatingProvider with DriftConfigDetector.
+type capableIaCProvider struct{ nonValidatingProvider }
+
+func (*capableIaCProvider) DetectDriftWithSpecs(context.Context, []interfaces.ResourceRef, map[string]interfaces.ResourceSpec) ([]interfaces.DriftResult, error) {
+	return nil, nil
+}
+
+// TestEnumeratorAll_InterfaceShape pins the EnumeratorAll signature so
+// downstream plugins (e.g. workflow-plugin-digitalocean) can rely on it.
+// Per ADR 0016: providers whose resource types do not support tagging
+// (e.g. DO Spaces keys) implement EnumeratorAll instead of Enumerator.
+func TestEnumeratorAll_InterfaceShape(t *testing.T) {
+	// Compile-time assertion: any type implementing this interface
+	// must have the exact method signature.
+	var _ interfaces.EnumeratorAll = (*fakeEnumeratorAll)(nil)
+}
+
+type fakeEnumeratorAll struct{}
+
+func (f *fakeEnumeratorAll) EnumerateAll(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
+	return nil, nil
+}

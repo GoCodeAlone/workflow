@@ -887,10 +887,12 @@ func TestLoadPluginTypesFromDir_RegistersTypes(t *testing.T) {
 	const customModuleType = "external.plugin.module.testonly"
 	const customTriggerType = "external.trigger.testonly"
 	const customWorkflowType = "external.workflow.testonly"
+	const customResourceType = "infra.plugin_resource_testonly"
 
 	// Cleanup after test
 	t.Cleanup(func() {
 		UnregisterModuleType(customModuleType)
+		UnregisterModuleType(customResourceType)
 		UnregisterTriggerType(customTriggerType)
 		UnregisterWorkflowType(customWorkflowType)
 	})
@@ -903,6 +905,7 @@ func TestLoadPluginTypesFromDir_RegistersTypes(t *testing.T) {
 	}
 	manifest := `{
 		"moduleTypes": ["` + customModuleType + `"],
+		"resourceTypes": ["` + customResourceType + `"],
 		"stepTypes": [],
 		"triggerTypes": ["` + customTriggerType + `"],
 		"workflowTypes": ["` + customWorkflowType + `"]
@@ -919,6 +922,7 @@ func TestLoadPluginTypesFromDir_RegistersTypes(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
 			{Name: "ext", Type: customModuleType},
+			{Name: "res", Type: customResourceType},
 		},
 		Triggers: map[string]any{
 			customTriggerType: map[string]any{},
@@ -950,10 +954,14 @@ func TestLoadPluginTypesFromDir_CapabilitiesFormat(t *testing.T) {
 	const customModuleType = "external.caps.module.testonly"
 	const customStepType = "step.caps_step_testonly"
 	const customTriggerType = "external.caps.trigger.testonly"
+	const customResourceType = "infra.caps_resource_testonly"
+	const customIaCResourceType = "infra.caps_iac_resource_testonly"
 
 	t.Cleanup(func() {
 		UnregisterModuleType(customModuleType)
 		UnregisterModuleType(customStepType)
+		UnregisterModuleType(customResourceType)
+		UnregisterModuleType(customIaCResourceType)
 		UnregisterTriggerType(customTriggerType)
 	})
 
@@ -962,7 +970,7 @@ func TestLoadPluginTypesFromDir_CapabilitiesFormat(t *testing.T) {
 	if err := makeDir(pluginDir); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"name":"caps-plugin","version":"1.0.0","type":"external","capabilities":{"configProvider":false,"moduleTypes":["` + customModuleType + `"],"stepTypes":["` + customStepType + `"],"triggerTypes":["` + customTriggerType + `"]}}`
+	manifest := `{"name":"caps-plugin","version":"1.0.0","type":"external","capabilities":{"configProvider":false,"moduleTypes":["` + customModuleType + `"],"stepTypes":["` + customStepType + `"],"triggerTypes":["` + customTriggerType + `"],"resourceTypes":["` + customResourceType + `"],"iacProvider":{"name":"test","resourceTypes":["` + customIaCResourceType + `"]}}}`
 	if err := writeFile(pluginDir+"/plugin.json", []byte(manifest)); err != nil {
 		t.Fatal(err)
 	}
@@ -975,6 +983,8 @@ func TestLoadPluginTypesFromDir_CapabilitiesFormat(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
 			{Name: "ext", Type: customModuleType},
+			{Name: "res", Type: customResourceType},
+			{Name: "iac-res", Type: customIaCResourceType},
 		},
 	}
 	if err := ValidateConfig(cfg, WithAllowNoEntryPoints()); err != nil {
@@ -987,6 +997,12 @@ func TestLoadPluginTypesFromDir_CapabilitiesFormat(t *testing.T) {
 	}
 	if !sliceContains(knownModules, customStepType) {
 		t.Errorf("expected %q in KnownModuleTypes (step), got: %v", customStepType, knownModules)
+	}
+	if !sliceContains(knownModules, customResourceType) {
+		t.Errorf("expected %q in KnownModuleTypes (resource), got: %v", customResourceType, knownModules)
+	}
+	if !sliceContains(knownModules, customIaCResourceType) {
+		t.Errorf("expected %q in KnownModuleTypes (iac provider resource), got: %v", customIaCResourceType, knownModules)
 	}
 	knownTriggers := KnownTriggerTypes()
 	if !sliceContains(knownTriggers, customTriggerType) {

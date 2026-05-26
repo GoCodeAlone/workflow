@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,10 +18,11 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockRegistrySource struct {
-	name      string
-	manifests map[string]*RegistryManifest
-	listErr   error
-	fetchErr  map[string]error
+	name           string
+	manifests      map[string]*RegistryManifest
+	versionIndexes map[string]*PluginVersionIndex
+	listErr        error
+	fetchErr       map[string]error
 }
 
 func (m *mockRegistrySource) Name() string { return m.name }
@@ -48,6 +52,19 @@ func (m *mockRegistrySource) FetchManifest(name string) (*RegistryManifest, erro
 	return manifest, nil
 }
 
+func (m *mockRegistrySource) FetchVersionIndex(name string) (*PluginVersionIndex, error) {
+	if m.versionIndexes != nil {
+		if index, ok := m.versionIndexes[name]; ok {
+			return index, nil
+		}
+	}
+	manifest, err := m.FetchManifest(name)
+	if err != nil {
+		return nil, err
+	}
+	return synthesizeVersionIndexFromManifest(manifest), nil
+}
+
 func (m *mockRegistrySource) SearchPlugins(query string) ([]PluginSearchResult, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
@@ -61,6 +78,7 @@ func (m *mockRegistrySource) SearchPlugins(query string) ([]PluginSearchResult, 
 					Version:     manifest.Version,
 					Description: manifest.Description,
 					Tier:        manifest.Tier,
+					Status:      manifest.Status,
 				},
 				Source: m.name,
 			})
@@ -127,6 +145,9 @@ func TestDefaultRegistryConfig(t *testing.T) {
 	if r.Priority != 0 {
 		t.Errorf("priority: got %d, want 0", r.Priority)
 	}
+	if r.CompatibilityEvidence.Trust != CompatibilityTrustFirstParty {
+		t.Errorf("default trust: got %q, want %q", r.CompatibilityEvidence.Trust, CompatibilityTrustFirstParty)
+	}
 	// Secondary fallback: static mirror (GitHub Pages CDN — lower priority).
 	fb := cfg.Registries[1]
 	if fb.Name != "static-mirror" {
@@ -140,6 +161,21 @@ func TestDefaultRegistryConfig(t *testing.T) {
 	}
 	if fb.Priority != 100 {
 		t.Errorf("fallback priority: got %d, want 100", fb.Priority)
+	}
+	if fb.CompatibilityEvidence.Trust != CompatibilityTrustFirstParty {
+		t.Errorf("static mirror trust: got %q, want %q", fb.CompatibilityEvidence.Trust, CompatibilityTrustFirstParty)
+	}
+}
+
+func TestRegistryCompatibilityTrustDefaults(t *testing.T) {
+	cfg := &RegistryConfig{Registries: []RegistrySourceConfig{{
+		Name: "community",
+		Type: "static",
+		URL:  "https://example.test",
+	}}}
+	applyRegistryConfigDefaults(cfg)
+	if got := cfg.Registries[0].CompatibilityEvidence.Trust; got != CompatibilityTrustAdvisory {
+		t.Fatalf("user registry trust = %q, want %q", got, CompatibilityTrustAdvisory)
 	}
 }
 
@@ -400,6 +436,69 @@ func TestMultiRegistryFetchOriginalNameFirst(t *testing.T) {
 	}
 	if manifest.Name != "workflow-plugin-auth" {
 		t.Errorf("name: got %q, want %q", manifest.Name, "workflow-plugin-auth")
+	}
+}
+
+func TestMultiRegistryFetchVersionIndex_UsesSameSourceAsManifest(t *testing.T) {
+	srcA := &mockRegistrySource{
+		name: "primary",
+		manifests: map[string]*RegistryManifest{
+			"shared-plugin": {Name: "shared-plugin", Version: "1.0.0"},
+		},
+		versionIndexes: map[string]*PluginVersionIndex{
+			"shared-plugin": {
+				Plugin:   "shared-plugin",
+				Versions: []PluginVersionRecord{{Version: "v1.0.0"}},
+			},
+		},
+	}
+	srcB := &mockRegistrySource{
+		name: "secondary",
+		manifests: map[string]*RegistryManifest{
+			"shared-plugin": {Name: "shared-plugin", Version: "2.0.0"},
+		},
+		versionIndexes: map[string]*PluginVersionIndex{
+			"shared-plugin": {
+				Plugin:   "shared-plugin",
+				Versions: []PluginVersionRecord{{Version: "v2.0.0"}},
+			},
+		},
+	}
+
+	mr := NewMultiRegistryFromSources(srcA, srcB)
+	index, source, err := mr.FetchVersionIndex("shared-plugin")
+	if err != nil {
+		t.Fatalf("FetchVersionIndex: %v", err)
+	}
+	if source != "primary" {
+		t.Fatalf("source = %q, want primary", source)
+	}
+	if got := index.Versions[0].Version; got != "v1.0.0" {
+		t.Fatalf("version index came from wrong source: got %q", got)
+	}
+}
+
+func TestMultiRegistryFetchVersionIndex_NormalizedFallback(t *testing.T) {
+	srcA := &mockRegistrySource{
+		name: "registry",
+		manifests: map[string]*RegistryManifest{
+			"auth": {Name: "auth", Version: "1.0.0"},
+		},
+		versionIndexes: map[string]*PluginVersionIndex{
+			"auth": {
+				Plugin:   "auth",
+				Versions: []PluginVersionRecord{{Version: "v1.0.0"}},
+			},
+		},
+	}
+
+	mr := NewMultiRegistryFromSources(srcA)
+	index, _, err := mr.FetchVersionIndex("workflow-plugin-auth")
+	if err != nil {
+		t.Fatalf("FetchVersionIndex: %v", err)
+	}
+	if index.Plugin != "auth" {
+		t.Fatalf("plugin = %q, want auth", index.Plugin)
 	}
 }
 
@@ -1120,5 +1219,83 @@ func TestLoadRegistryConfig_ExplicitEmptyRegistries(t *testing.T) {
 	// Explicit empty registries list must be returned as-is (0 sources).
 	if len(cfg.Registries) != 0 {
 		t.Errorf("expected 0 registries for explicit empty list, got %d: %v", len(cfg.Registries), cfg.Registries)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Status + Private field tests
+// ---------------------------------------------------------------------------
+
+func TestValidateManifest_StatusEnum(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  string
+		wantErr bool
+	}{
+		{"empty allowed", "", false},
+		{"verified", "verified", false},
+		{"experimental", "experimental", false},
+		{"deprecated", "deprecated", false},
+		{"invalid value", "bogus", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := validManifest()
+			m.Status = tc.status
+			errs := ValidateManifest(m, ValidationOptions{})
+			hasStatusErr := false
+			for _, e := range errs {
+				if e.Field == "status" {
+					hasStatusErr = true
+				}
+			}
+			if hasStatusErr != tc.wantErr {
+				t.Fatalf("status=%q wantErr=%v got errs=%v", tc.status, tc.wantErr, errs)
+			}
+		})
+	}
+}
+
+func TestRegistryManifest_PrivateField(t *testing.T) {
+	raw := []byte(`{"name":"x","version":"1.0.0","author":"a","description":"d","type":"external","tier":"community","license":"MIT","private":true}`)
+	var m RegistryManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Private {
+		t.Fatalf("expected Private=true, got %v", m.Private)
+	}
+}
+
+func TestPluginSummary_StatusPropagation(t *testing.T) {
+	// Use the real StaticRegistrySource (not a mock) so the test exercises
+	// the actual Status: e.Status propagation line in SearchPlugins.
+	index := []staticIndexEntry{{
+		Name: "test", Version: "1.0.0", Description: "d", Tier: "community", Status: "experimental",
+	}}
+	indexData, err := json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/index.json" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(indexData) //nolint:errcheck
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	src, err := NewStaticRegistrySource(RegistrySourceConfig{Name: "test-source", URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaries, err := src.SearchPlugins("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 || summaries[0].Status != "experimental" {
+		t.Fatalf("expected status=experimental in summary, got %+v", summaries)
 	}
 }

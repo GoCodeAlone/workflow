@@ -92,7 +92,6 @@ func LoadPluginStepSchemasFromDir(pluginDir string) {
 	if err != nil {
 		return
 	}
-	reg := GetStepSchemaRegistry()
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -102,16 +101,34 @@ func LoadPluginStepSchemasFromDir(pluginDir string) {
 		if err != nil {
 			continue
 		}
-		var m struct {
-			StepSchemas []*StepSchema `json:"stepSchemas"`
-		}
-		if err := json.Unmarshal(data, &m); err != nil {
-			continue
-		}
-		for _, s := range m.StepSchemas {
-			if s != nil && s.Type != "" {
-				reg.Register(s)
-			}
+		registerPluginManifestStepSchemas(data)
+	}
+}
+
+// LoadPluginStepSchemasFromManifest reads a single plugin.json file and
+// registers any stepSchemas it declares. Missing files or invalid JSON are
+// silently ignored to match LoadPluginStepSchemasFromDir's tolerant behavior;
+// callers that need strict feedback should use LoadPluginTypesFromManifest in
+// parallel.
+func LoadPluginStepSchemasFromManifest(manifestPath string) {
+	data, err := os.ReadFile(manifestPath) //nolint:gosec // G304: path is explicitly supplied by the operator
+	if err != nil {
+		return
+	}
+	registerPluginManifestStepSchemas(data)
+}
+
+func registerPluginManifestStepSchemas(data []byte) {
+	var m struct {
+		StepSchemas []*StepSchema `json:"stepSchemas"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return
+	}
+	reg := GetStepSchemaRegistry()
+	for _, s := range m.StepSchemas {
+		if s != nil && s.Type != "" {
+			reg.Register(s)
 		}
 	}
 }

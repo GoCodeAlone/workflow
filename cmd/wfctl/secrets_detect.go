@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
-	"gopkg.in/yaml.v3"
 )
 
 // secretFieldPatterns are field name substrings that indicate a secret value.
@@ -35,16 +35,12 @@ func runSecretsDetect(args []string) error {
 		return err
 	}
 
-	data, err := os.ReadFile(*configFile)
+	cfg, err := config.LoadFromFile(*configFile)
 	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-	var cfg config.WorkflowConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config: %w", err)
+		return fmt.Errorf("load config: %w", err)
 	}
 
-	detected := detectSecrets(&cfg)
+	detected := detectSecrets(cfg)
 	if len(detected) == 0 {
 		fmt.Println("No secret-like values detected.")
 		return nil
@@ -156,8 +152,25 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 	fromFile := fs.String("from-file", "", "Read secret value from file (for certs/keys)")
 	providerName := fs.String("provider", "", "Ad-hoc provider override (keychain|env|aws); bypasses app.yaml")
 	service := fs.String("service", "", "Service name for keychain provider")
+	scope := fs.String("scope", "", "GitHub secret scope: repo (default) | env | org")
+	envName := fs.String("env", "", "GitHub Actions environment name (required with --scope=env)")
+	org := fs.String("org", "", "GitHub org name (required with --scope=org)")
+	orgVisibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
+	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl secrets set <name> [options]\n\nSet a secret value in the provider.\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), `Usage: wfctl secrets set <name> [options]
+
+Set a secret value in the configured provider.
+
+Scope flags (GitHub only):
+  --scope repo         Default. Writes to the configured app.yaml repo provider.
+  --scope env --env <name>
+                       Writes to the repo-environment of the same repo.
+  --scope org --org <slug> [--visibility all|selected|private] [--token-env <var>]
+                       Writes an org-level secret. Requires admin:org token scope.
+
+Options:
+`)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -188,7 +201,11 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 		secretValue = strings.TrimRight(string(b), "\n")
 	case isatty.IsTerminal(os.Stdin.Fd()): // interactive: masked prompt
 		fmt.Fprintf(os.Stderr, "Value for %s: ", name)
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fd, err := stdinFileDescriptor()
+		if err != nil {
+			return err
+		}
+		b, err := term.ReadPassword(fd)
 		if err != nil {
 			return fmt.Errorf("read password: %w", err)
 		}
@@ -211,6 +228,50 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 		return nil
 	}
 
+	// Org-scope: build an org GH provider directly. Bypasses app.yaml
+	// since org secrets are out-of-band of the repo-scoped config.
+	if *scope == "org" {
+		if *org == "" {
+			return fmt.Errorf("--scope=org requires --org <slug>")
+		}
+		vis, err := parseGitHubOrgVisibility(*orgVisibility)
+		if err != nil {
+			return err
+		}
+		p, err := secrets.NewGitHubOrgSecretsProvider(*org, *tokenEnv, vis, nil)
+		if err != nil {
+			return err
+		}
+		if err := p.Set(context.Background(), name, secretValue); err != nil {
+			return fmt.Errorf("set org secret %s: %w", name, err)
+		}
+		fmt.Printf("set %s (org=%s, visibility=%s)\n", name, *org, *orgVisibility)
+		return nil
+	}
+
+	// Env-scope: build a repo-scoped GH provider, then flip into env
+	// mode. Requires the repo to be derived from --config app.yaml's
+	// secret block (provider=github + config.repo).
+	if *scope == "env" {
+		if *envName == "" {
+			return fmt.Errorf("--scope=env requires --env <environment-name>")
+		}
+		repo, err := readGitHubRepoFromAppYAML(*configFile)
+		if err != nil {
+			return err
+		}
+		p, err := secrets.NewGitHubSecretsProvider(repo, *tokenEnv)
+		if err != nil {
+			return err
+		}
+		p.SetEnvironment(*envName)
+		if err := p.Set(context.Background(), name, secretValue); err != nil {
+			return fmt.Errorf("set env secret %s: %w", name, err)
+		}
+		fmt.Printf("set %s (env=%s)\n", name, *envName)
+		return nil
+	}
+
 	// Default path: load provider from app.yaml secrets block.
 	cfg, err := loadSecretsConfig(*configFile)
 	if err != nil {
@@ -225,6 +286,46 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 	}
 	fmt.Printf("set %s\n", name)
 	return nil
+}
+
+// readGitHubRepoFromAppYAML loads app.yaml and returns the configured
+// github repo from secrets.config.repo (or secrets.secretStores.<name>.config.repo).
+func readGitHubRepoFromAppYAML(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	// Lightweight regexp scan — avoids full YAML round-trip and tolerates
+	// either `secrets.config.repo` or `secretStores.<name>.config.repo`.
+	re := regexp.MustCompile(`(?m)^\s*repo:\s*([^\s#]+)`)
+	m := re.FindStringSubmatch(string(data))
+	if len(m) < 2 {
+		return "", fmt.Errorf("could not find `repo:` in %s (expected secrets.config.repo or secretStores.<name>.config.repo)", path)
+	}
+	return strings.Trim(m[1], `"'`), nil
+}
+
+// parseGitHubOrgVisibility canonicalises the --visibility flag.
+func parseGitHubOrgVisibility(s string) (secrets.GitHubOrgVisibility, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "all":
+		return secrets.OrgVisibilityAll, nil
+	case "selected":
+		return secrets.OrgVisibilitySelected, nil
+	case "private":
+		return secrets.OrgVisibilityPrivate, nil
+	default:
+		return "", fmt.Errorf("invalid visibility %q (must be all|selected|private)", s)
+	}
+}
+
+func stdinFileDescriptor() (int, error) {
+	fd := os.Stdin.Fd()
+	maxInt := int(^uint(0) >> 1)
+	if fd > uintptr(maxInt) {
+		return 0, fmt.Errorf("stdin file descriptor %d exceeds supported int range", fd)
+	}
+	return int(fd), nil //nolint:gosec // fd is range-checked before conversion.
 }
 
 func runSecretsList(args []string) error {
@@ -336,23 +437,19 @@ func secretStateLabel(state SecretState) string {
 // loadWorkflowConfigForSecrets loads the full WorkflowConfig for secret operations.
 // Falls back to a default env-provider config if the file does not exist.
 func loadWorkflowConfigForSecrets(configFile string) (*config.WorkflowConfig, error) {
-	data, err := os.ReadFile(configFile)
+	cfg, err := config.LoadFromFile(configFile)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return &config.WorkflowConfig{ //nolint:nilerr // gracefully fall back when file is absent
 				Secrets: &config.SecretsConfig{Provider: "env"},
 			}, nil
 		}
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-	var cfg config.WorkflowConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		return nil, fmt.Errorf("load config: %w", err)
 	}
 	if cfg.Secrets == nil {
 		cfg.Secrets = &config.SecretsConfig{Provider: "env"}
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
 func runSecretsValidate(args []string) error {
@@ -486,16 +583,12 @@ func runSecretsSync(args []string) error {
 // loadSecretsConfig reads a workflow config and returns its SecretsConfig.
 // Returns a default env-provider config if no secrets: section is defined.
 func loadSecretsConfig(configFile string) (*config.SecretsConfig, error) {
-	data, err := os.ReadFile(configFile)
+	cfg, err := config.LoadFromFile(configFile)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return &config.SecretsConfig{Provider: "env"}, nil //nolint:nilerr // gracefully fall back when file is absent
 		}
-		return nil, fmt.Errorf("read config %q: %w", configFile, err)
-	}
-	var cfg config.WorkflowConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		return nil, fmt.Errorf("load config %q: %w", configFile, err)
 	}
 	if cfg.Secrets == nil {
 		return &config.SecretsConfig{Provider: "env"}, nil

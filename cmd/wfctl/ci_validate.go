@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/internal/legacyaws"
+	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/GoCodeAlone/workflow/validation"
+	"gopkg.in/yaml.v3"
 )
 
 // ciFileResult holds the outcome of validating a single config file.
@@ -131,8 +134,46 @@ func ciValidateFile(cfgPath string, strict, immutableConfig bool, immutableSecti
 		opts = append(opts, schema.WithAllowEmptyModules())
 	}
 	opts = append(opts, schema.WithSkipWorkflowTypeCheck(), schema.WithSkipTriggerTypeCheck())
+	// Pass legacy DO module types through schema so the migration error fires
+	// below instead of a generic "unknown module type" (issue #617).
+	for t := range legacydo.ModuleTypes {
+		opts = append(opts, schema.WithExtraModuleTypes(t))
+	}
+	// Same for legacy AWS module types removed in issue #653.
+	for t := range legacyaws.ModuleTypes {
+		opts = append(opts, schema.WithExtraModuleTypes(t))
+	}
 	if err := schema.ValidateConfig(cfg, opts...); err != nil {
 		errs = append(errs, fmt.Errorf("schema: %w", err))
+	}
+
+	// Post-validate sweep: accumulate legacy DO and AWS module/step errors
+	// (issues #617, #653).
+	for _, m := range cfg.Modules {
+		if legacydo.IsModuleType(m.Type) {
+			errs = append(errs, legacydo.FormatModuleError(m.Type, m.Name, false))
+		}
+		if legacyaws.IsModuleType(m.Type) {
+			errs = append(errs, legacyaws.FormatModuleError(m.Type, m.Name, false))
+		}
+	}
+	for _, rawPipeline := range cfg.Pipelines {
+		yamlBytes, err := yaml.Marshal(rawPipeline)
+		if err != nil {
+			continue
+		}
+		var pipeCfg config.PipelineConfig
+		if err := yaml.Unmarshal(yamlBytes, &pipeCfg); err != nil {
+			continue
+		}
+		for _, s := range pipeCfg.Steps {
+			if legacydo.IsStepType(s.Type) {
+				errs = append(errs, legacydo.FormatStepError(s.Type, false))
+			}
+			if legacyaws.IsStepType(s.Type) {
+				errs = append(errs, legacyaws.FormatStepError(s.Type, false))
+			}
+		}
 	}
 
 	// CI config check.

@@ -179,7 +179,6 @@ flowchart TD
 | `step.dlq_replay` | Replays messages from the dead-letter queue | pipelinesteps |
 | `step.retry_with_backoff` | Retries a sub-pipeline with exponential backoff | pipelinesteps |
 | `step.resilient_circuit_breaker` | Wraps a sub-pipeline with a circuit breaker | pipelinesteps |
-| `step.s3_upload` | Uploads a file or data to an S3-compatible bucket | pipelinesteps |
 | `step.auth_validate` | Validates an authentication token and populates claims | pipelinesteps |
 | `step.token_revoke` | Revokes an auth token | pipelinesteps |
 | `step.field_reencrypt` | Re-encrypts a field with a new key | pipelinesteps |
@@ -272,10 +271,6 @@ flowchart TD
 | `step.k8s_apply` | Applies a Kubernetes manifest or deployment config | platform |
 | `step.k8s_status` | Retrieves the status of a Kubernetes workload | platform |
 | `step.k8s_destroy` | Tears down a Kubernetes workload | platform |
-| `step.ecs_plan` | Generates an ECS task/service deployment plan | platform |
-| `step.ecs_apply` | Deploys a task or service to AWS ECS | platform |
-| `step.ecs_status` | Retrieves the status of an ECS service | platform |
-| `step.ecs_destroy` | Removes an ECS task or service | platform |
 | `step.iac_plan` | Plans IaC changes (Terraform plan, Pulumi preview, etc.) | platform |
 | `step.iac_apply` | Applies IaC changes | platform |
 | `step.iac_status` | Retrieves the current state of an IaC stack | platform |
@@ -297,17 +292,6 @@ flowchart TD
 | `step.dns_plan` | Plans DNS record changes | platform |
 | `step.dns_apply` | Applies DNS record changes | platform |
 | `step.dns_status` | Retrieves the current DNS records for a domain | platform |
-| `step.network_plan` | Plans networking resource changes (VPC, subnets, etc.) | platform |
-| `step.network_apply` | Applies networking resource changes | platform |
-| `step.network_status` | Retrieves the status of networking resources | platform |
-| `step.apigw_plan` | Plans API gateway configuration changes | platform |
-| `step.apigw_apply` | Applies API gateway configuration changes | platform |
-| `step.apigw_status` | Retrieves API gateway deployment status | platform |
-| `step.apigw_destroy` | Removes an API gateway configuration | platform |
-| `step.scaling_plan` | Plans auto-scaling policy changes | platform |
-| `step.scaling_apply` | Applies auto-scaling policies | platform |
-| `step.scaling_status` | Retrieves current auto-scaling state | platform |
-| `step.scaling_destroy` | Removes auto-scaling policies | platform |
 | `step.app_deploy` | Deploys a containerized application | platform |
 | `step.app_status` | Retrieves deployment status of an application | platform |
 | `step.app_rollback` | Rolls back an application to a previous deployment | platform |
@@ -322,11 +306,11 @@ flowchart TD
 | `step.argo_logs` | Retrieves logs from an Argo Workflow | platform |
 | `step.argo_delete` | Deletes an Argo Workflow | platform |
 | `step.argo_list` | Lists Argo Workflows for a namespace | platform |
-| `step.do_deploy` | Deploys to DigitalOcean App Platform | platform |
-| `step.do_status` | Retrieves DigitalOcean App Platform deployment status | platform |
-| `step.do_logs` | Fetches DigitalOcean App Platform runtime logs | platform |
-| `step.do_scale` | Scales a DigitalOcean App Platform component | platform |
-| `step.do_destroy` | Destroys a DigitalOcean App Platform deployment | platform |
+
+**DigitalOcean IaC steps** were removed from workflow core in v0.52.0 and moved to the
+[workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
+external plugin. After loading the plugin, use the generic `step.iac_*` pipeline steps.
+See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
 
 ### Expression Syntax
 
@@ -503,20 +487,22 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 | `platform.resource` | Infrastructure resource managed by a platform provider | platform |
 | `platform.context` | Execution context for platform operations (org, environment, tier) | platform |
 | `platform.kubernetes` | Kubernetes cluster deployment target | platform |
-| `platform.ecs` | AWS ECS cluster deployment target | platform |
-| `platform.dns` | DNS provider for managing records (Route53, CloudFlare, etc.) | platform |
-| `platform.networking` | VPC and networking resource management | platform |
-| `platform.apigateway` | API gateway resource management (AWS API GW, etc.) | platform |
-| `platform.autoscaling` | Auto-scaling policy and target management | platform |
+| `platform.dns` | DNS provider for managing records (mock; AWS Route53 backend removed in v0.53.0) | platform |
 | `platform.region` | Multi-region deployment configuration | platform |
 | `platform.region_router` | Routes traffic across regions by weight, latency, or failover | platform |
-| `platform.doks` | DigitalOcean Kubernetes Service (DOKS) deployment | platform |
-| `platform.do_app` | DigitalOcean App Platform deployment (deploy, scale, logs, destroy) | platform |
-| `platform.do_networking` | DigitalOcean VPC and firewall management | platform |
-| `platform.do_dns` | DigitalOcean domain and DNS record management | platform |
-| `platform.do_database` | DigitalOcean Managed Database (PostgreSQL, MySQL, Redis) | platform |
+
+**DigitalOcean IaC modules** were removed from workflow core in v0.52.0 and moved to the
+[workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
+external plugin. After loading the plugin, use the generic `infra.*` module
+types with `provider: digitalocean` and the generic `step.iac_*` pipeline
+steps. See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
+
+**AWS IaC modules** (`platform.ecs`, `platform.networking`, `platform.apigateway`, `platform.autoscaling`) were removed from workflow core in v0.53.0 and are provided by the
+[workflow-plugin-aws](https://github.com/GoCodeAlone/workflow-plugin-aws) v0.2.0+ plugin.
+Use the generic `infra.*` module types with `provider: aws` and `step.iac_*` pipeline steps.
+See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 | `iac.provider` | Cloud provider configuration (aws, gcp, azure, digitalocean) for IaC operations | platform |
-| `iac.state` | IaC state persistence (memory, filesystem, spaces, gcs, azure_blob, postgres) | platform |
+| `iac.state` | IaC state persistence (memory + filesystem + postgres in-core; spaces / s3 / gcs / azure_blob via plugins) | platform |
 | `infra.vpc` | Virtual Private Cloud and subnet management | platform |
 | `infra.database` | Managed database instance provisioning and configuration | platform |
 | `infra.cache` | In-memory cache cluster provisioning (Redis, Memcached) | platform |
@@ -530,6 +516,7 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 | `infra.iam_role` | IAM role and policy creation and management | platform |
 | `infra.storage` | Object storage provisioning and access configuration | platform |
 | `infra.certificate` | SSL/TLS certificate provisioning and renewal | platform |
+| `infra.autoscaling_group` | Auto-scaling group provisioning and policy management | platform |
 | `app.container` | Containerised application deployment descriptor | platform |
 | `argo.workflows` | Argo Workflows integration for Kubernetes-native workflow orchestration | platform |
 | `aws.codebuild` | AWS CodeBuild project and build management | cicd |
@@ -549,8 +536,6 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 ### Storage
 | Type | Description | Plugin |
 |------|-------------|--------|
-| `storage.s3` | Amazon S3 storage | storage |
-| `storage.gcs` | Google Cloud Storage | storage |
 | `storage.local` | Local filesystem storage | storage |
 | `storage.sqlite` | SQLite storage | storage |
 | `storage.artifact` | Artifact store for build artifacts shared across pipeline steps | storage |
@@ -1829,6 +1814,77 @@ Global pages appear in the main navigation. Workflow-scoped pages (`executions`,
 The plugin is auto-registered via `init()` in `plugin/admincore/plugin.go`. No YAML configuration is required.
 
 ---
+
+## Sensitive output routing (v0.27.0+)
+
+When a `ResourceDriver.Create` or `Update` returns a `*ResourceOutput` with
+`Sensitive: {key: true}`, the engine routes those output values through the
+configured `secrets.Provider` instead of writing them plaintext to state.
+Plugins remain platform-agnostic: a plugin compiled into a wfctl-from-CI
+run, a wfctl-from-CLI run, or a workflow-cloud server transparently gets
+sensitive-output handling without each host writing its own routing.
+
+**Routed secret naming:** `<resource_name>_<output_key>` (e.g., a resource
+named `coredump-deploy-key` with `secret_key` output is stored under
+`coredump-deploy-key_secret_key`).
+
+**State placeholder:** Routed fields appear in `state.Outputs` as
+`secret_ref://<resource>_<key>` strings. Distinct from the user-supplied
+`secret://<key>` config-reference convention.
+
+**Required configuration:** A `secrets:` block in your workflow config.
+For local/ad-hoc runs, environment variables are the simplest option:
+
+```yaml
+secrets:
+  provider: env
+  config:
+    prefix: WORKFLOW_
+```
+
+If a plugin emits sensitive outputs but no `secrets.Provider` is configured,
+apply hard-fails BEFORE the per-resource persistence loop with a named
+resource and remediation. This prevents partial-apply mid-stream.
+
+**Failure modes:**
+
+- `secrets.Provider.Set` fails: apply errors; rerun is idempotent.
+- `state.SaveResource` fails after `Set` succeeded: the engine compensates
+  by calling `driver.Delete` + `provider.Delete` (with a fresh 30s
+  context, so compensation runs even on Ctrl-C cancel) and surfaces a
+  combined error naming the compensation outcome.
+
+**Read paths (refresh, adoption):** never call `provider.Set`. Placeholders
+are inherited from prior state to avoid cache pollution. Newly-declared
+sensitive keys on Read paths are dropped.
+
+**Drift detection:** `iac/sensitive.MaskSensitiveForDiff` masks sensitive
+keys from both desired and current sides before `driver.Diff`, preventing
+false-positive drift on keys that the cloud refuses to re-emit (e.g., DO
+Spaces `secret_key`). As of v0.27.0, no in-tree call site dispatches
+`driver.Diff` against state.Outputs that may contain placeholders; the
+helper is exported for future consumers.
+
+**Cold-start consumers:** `secret_ref://` placeholders cannot be rehydrated
+cross-process on write-only providers (GitHub Actions). Same-process
+consumers (e.g., `infra_output:` generators in the same `wfctl infra apply`
+invocation) get the routed value via in-memory hand-off. Cross-process
+consumers reference the routed secret by name via `secret://<resource>_<key>`
+directly.
+
+**Limitation (v0.27.0):** only string-typed sensitive output values are
+supported. Non-string sensitive outputs (e.g., `[]byte`, `int`) yield an
+error from `Route`. Future expansion via a `MarshalSensitive` interface
+is out of scope.
+
+**Recovery:** `wfctl infra audit-state-secrets` audits state for orphan
+secrets, missing routed values, legacy plaintext fields, and mistaken
+config-references in state. Distinct from `audit-secrets` which audits
+the `secrets.generate` config block. Run both as part of regular hygiene:
+
+```sh
+wfctl infra audit-state-secrets --config infra.yaml [--prune]
+```
 
 ## IaC Provider Plugin Interfaces
 

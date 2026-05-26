@@ -1,21 +1,30 @@
 // Package wfctlhelpers hosts the wfctl-side dispatch helper for v2 IaC
-// plugins. wfctl calls [ApplyPlan] when a plugin manifest declares
-// iacProvider.computePlanVersion: v2 (see plugin/sdk.IaCProvider). The
-// helper iterates plan.Actions, fetches the matching ResourceDriver from
-// the provider, and dispatches each action to a per-action sub-function
-// (doCreate, doUpdate, doReplace, doDelete).
+// plugins. wfctl calls [ApplyPlanWithHooks] when a plugin's typed capability
+// response declares compute_plan_version: "v2". The helper iterates
+// plan.Actions, fetches the matching ResourceDriver from the provider, and
+// dispatches each action to a per-action sub-function (doCreate, doUpdate,
+// doReplace, doDelete).
+//
+// # Action lifecycle versions (workflow#640 migration)
+//
+// [ApplyPlanWithHooks] is the only exported plan-execution helper. Its
+// caller-supplied per-action OnResourceApplied / OnResourceDeleted hooks fire
+// at each successful cloud-mutation boundary. Required for #640's invariants.
+//
+// See docs/migrations/2026-05-16-v2-lifecycle-phase1-inventory.md and
+// decisions/0040-v2-action-lifecycle-provider-compatibility.md for the
+// final migration closeout.
 //
 // Lifecycle inside W-3a:
 //
-//   - T3.1 (this file's ApplyPlan + dispatch + skeleton sub-functions)
-//   - T3.1.5 — wraps ApplyPlan with the input-drift postcondition
+//   - T3.1 (this file's dispatch helper + skeleton sub-functions)
+//   - T3.1.5 — wraps dispatch with the input-drift postcondition
 //   - T3.2 — fills doCreate with UpsertSupporter recovery
 //   - T3.3 — fills doUpdate + doDelete (the latent doDelete bug fix)
 //   - T3.4 — fills doReplace and populates ApplyResult.ReplaceIDMap
 //
-// Until W-3b lands the cmd/wfctl dispatch wiring, [ApplyPlan] has no
-// in-tree caller — the helper ships in W-3a as foundation only and is
-// exercised solely by this package's tests.
+// workflow#743 removed the former ApplyPlan wrapper after all runtime paths
+// moved to ApplyPlanWithHooks.
 //
 // # Per-action error-prefix policy
 //
@@ -45,21 +54,22 @@ import (
 	"log"
 	"maps"
 	"os"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/iac/jitsubst"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// ApplyPlan dispatches each plan action to the matching ResourceDriver on
-// the provider. Per-action errors are recorded on result.Errors and do NOT
-// abort the loop — apply best-effort across actions, surface every failure
-// for the operator to triage. Context cancellation between actions IS
-// respected: when ctx is canceled or its deadline expires, the loop stops
-// at the next iteration boundary and returns ctx.Err() as the top-level
-// error so a long apply terminates promptly on Ctrl-C / SIGTERM.
+// ApplyPlanWithHooks dispatches each plan action to the matching ResourceDriver
+// on the provider. Per-action errors are recorded on result.Errors and do NOT
+// abort the loop — apply best-effort across actions, surface every failure for
+// the operator to triage. Context cancellation between actions IS respected:
+// when ctx is canceled or its deadline expires, the loop stops at the next
+// iteration boundary and returns ctx.Err() as the top-level error so a long
+// apply terminates promptly on Ctrl-C / SIGTERM.
 //
-// At entry ApplyPlan captures result.InitialInputSnapshot by fingerprinting
+// At entry the helper captures result.InitialInputSnapshot by fingerprinting
 // every name listed in plan.InputSnapshot through the OS env. After the
 // dispatch loop completes — successfully or not — a deferred postcondition
 // computes result.InputDriftReport against an apply-time snapshot taken
@@ -69,13 +79,51 @@ import (
 // on panic, InputDriftReport is reset to nil and a warning is logged.
 //
 // The function is concurrency-safe with respect to its inputs: result is
-// owned by ApplyPlan for the duration of the call and is not shared with
-// the provider or driver implementations.
+// owned by the helper for the duration of the call and is not shared with the
+// provider or driver implementations.
 //
-// T3.1 ships the dispatch skeleton; T3.1.5 added the postcondition above;
-// T3.2/T3.3/T3.4 fill the per-action sub-functions with their full bodies.
-func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	return applyPlanWithEnvProvider(ctx, p, plan, nil)
+// T3.1 shipped the dispatch skeleton; T3.1.5 added the postcondition above;
+// T3.2/T3.3/T3.4 filled the per-action sub-functions with their full bodies.
+//
+// ApplyPlanHooks are optional callbacks invoked immediately after a plan action
+// successfully mutates cloud-side state. Hooks let wfctl persist state at the
+// action boundary instead of waiting for the whole plan to finish.
+type ApplyPlanHooks struct {
+	OnResourceApplied func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error
+	OnResourceDeleted func(context.Context, interfaces.PlanAction) error
+	// OnPlanComplete fires once after the per-action loop reaches its
+	// natural success-exit return at the end of
+	// applyPlanWithEnvProviderAndHooks, i.e., when the outer function is
+	// about to return (result, nil). Used by the DO plugin's deferred-
+	// flush integration via IaCProviderFinalizer.FinalizeApply RPC.
+	//
+	// Does NOT fire on:
+	//   - The preflightProviderOwnedReplaceWithDeleteHooks early-return —
+	//     loopReached=false, no cloud work happened.
+	//   - The per-action loop's `if fatalErr != nil { return ... }`
+	//     early-return — outer err != nil. v1 semantic preservation per
+	//     cycle-1 plan-review C-3: DOProvider.Apply skips deferred-flush
+	//     when ApplyPlanWithHooks returns a top-level err (the
+	//     `if err != nil { return ... }` guard in the caller immediately
+	//     after the helper call).
+	//   - The post-loop length-invariant check that compares
+	//     len(result.Actions) against len(plan.Actions) — outer err != nil.
+	//
+	// DOES fire on per-action driver-error paths (best-effort; driver
+	// errors append to result.Errors but do NOT set fatalErr; the loop
+	// continues and reaches the natural success-exit return). Mirrors v1
+	// DOProvider.Apply behavior where the deferred-flush ran whenever
+	// the wrapped Apply returned nil err, regardless of per-action
+	// result.Errors entries.
+	//
+	// Per workflow#695 Phase 2.5 / ADR 0024 / ADR 0040.
+	OnPlanComplete func(context.Context) error
+}
+
+// ApplyPlanWithHooks dispatches plan actions plus action-boundary hooks for
+// callers that need durable side effects as each cloud mutation succeeds.
+func ApplyPlanWithHooks(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+	return applyPlanWithEnvProviderAndHooks(ctx, p, plan, nil, hooks)
 }
 
 // applyPlanWithEnvProvider is the same-package test seam used by
@@ -83,16 +131,85 @@ func ApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.I
 // into the deferred drift postcondition (e.g., a panicky closure that
 // stresses the recover() guard). When applyTimeEnv is nil, the function
 // uses inputsnapshot.NewTolerantEnvProvider(plan.InputSnapshot) — the
-// production behavior. The seam stays unexported because the only
-// sanctioned external entry point is ApplyPlan.
+// production behavior.
+//
+// Production callers use ApplyPlanWithHooks. This seam is retained
+// purely so the postcondition test can inject a panicky env-provider.
 func applyPlanWithEnvProvider(
 	ctx context.Context,
 	p interfaces.IaCProvider,
 	plan *interfaces.IaCPlan,
 	applyTimeEnv func(string) (string, bool),
 ) (*interfaces.ApplyResult, error) {
+	return applyPlanWithEnvProviderAndHooks(ctx, p, plan, applyTimeEnv, ApplyPlanHooks{})
+}
+
+func applyPlanWithEnvProviderAndHooks(
+	ctx context.Context,
+	p interfaces.IaCProvider,
+	plan *interfaces.IaCPlan,
+	applyTimeEnv func(string) (string, bool),
+	hooks ApplyPlanHooks,
+) (result *interfaces.ApplyResult, err error) {
+	// loopReached is set to true immediately before the per-action loop
+	// opens (below). The deferred OnPlanComplete closure short-circuits
+	// when loopReached=false so pre-loop preflight failures skip finalize
+	// (no cloud work happened). On loop-reached exits, the closure
+	// additionally gates on err == nil per cycle-1 plan-review C-3 v1
+	// semantic preservation — see the ApplyPlanHooks.OnPlanComplete
+	// godoc above.
+	var loopReached bool
+	defer func() {
+		if !loopReached || hooks.OnPlanComplete == nil {
+			return
+		}
+		if err != nil {
+			// v1 semantic preservation: outer-error exits (the per-action
+			// loop's `if fatalErr != nil { return ... }` early-return and
+			// the post-loop length-invariant check) skip finalize,
+			// matching the legacy "return without flushing on top-level
+			// err" behavior (the `if err != nil { return ... }` guard
+			// immediately after the helper call).
+			return
+		}
+		// Symmetry with the drift defer below: OnPlanComplete is a
+		// caller-provided closure (wired by wfctl in Task 5). A panic
+		// inside it would propagate past the defer chain and prevent
+		// the caller from observing result/err, so wrap with recover()
+		// and convert the panic into a finalize-attributed err entry.
+		var hookErr error
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					hookErr = fmt.Errorf("OnPlanComplete panicked: %v", r)
+				}
+			}()
+			hookErr = hooks.OnPlanComplete(ctx)
+		}()
+		if hookErr != nil {
+			// Append per-driver-attribution entry so callers iterating
+			// result.Errors see the finalize-attributed failure
+			// distinctly from per-action driver errors. Pass the raw
+			// hookErr.Error() — the structured Resource="<plan-finalize>"
+			// + Action="finalize" fields already carry the attribution;
+			// a "plan finalize:" string prefix here would double-attribute
+			// when callers format as "<Resource>/<Action>: <Error>".
+			result.Errors = append(result.Errors, interfaces.ActionError{
+				Resource: "<plan-finalize>",
+				Action:   "finalize",
+				Error:    hookErr.Error(),
+			})
+			// Outer err carries the "plan finalize:" prefix because the
+			// outer-err caller path lacks the structured Resource/Action
+			// fields — the prefix supplies that missing attribution
+			// inline. errors.Is round-trips on the wrapped hookErr.
+			err = fmt.Errorf("plan finalize: %w", hookErr)
+		}
+	}()
+
+	deleteHookActive := hooks.OnResourceDeleted != nil
 	inputNames := snapshotKeys(plan.InputSnapshot)
-	result := &interfaces.ApplyResult{
+	result = &interfaces.ApplyResult{
 		PlanID:               plan.ID,
 		InitialInputSnapshot: inputsnapshot.Snapshot(inputNames, inputsnapshot.OSEnvProvider),
 	}
@@ -136,63 +253,252 @@ func applyPlanWithEnvProvider(
 	// to later actions in the same plan).
 	syncedOutputs := buildInitialSyncedOutputs(plan.Actions)
 
-	for _, action := range plan.Actions {
-		// Honor cancellation at the loop boundary. Drivers should also
-		// check ctx internally for in-flight work, but the loop check
-		// guarantees apply stops between actions even if a driver
-		// happens to ignore ctx. The deferred postcondition still runs
-		// on early return so InputDriftReport is populated even on a
-		// canceled apply.
-		if err := ctx.Err(); err != nil {
+	if deleteHookActive {
+		if err := preflightProviderOwnedReplaceWithDeleteHooks(p, plan); err != nil {
 			return result, err
 		}
-		// Per-action JIT substitution — resolve ${VAR} / ${MODULE.field}
-		// / ${MODULE.id} in action.Resource.Config against
-		// result.ReplaceIDMap (this-apply Replace ProviderIDs) and
-		// syncedOutputs (state + this-apply prior outputs). On error,
-		// record a per-action diagnostic with the canonical "jit
-		// substitution:" prefix and SKIP dispatch — the unresolved spec
-		// must not reach the driver. The loop continues to the next
-		// action (best-effort apply contract). os.LookupEnv is the
-		// production env source; nil-safe inside ResolveSpec — refs that
-		// only need replaceIDMap / syncedOutputs still resolve.
-		resolved, err := jitsubst.ResolveSpec(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv)
-		if err != nil {
-			result.Errors = append(result.Errors, interfaces.ActionError{
-				Resource: action.Resource.Name,
-				Action:   action.Action,
-				Error:    fmt.Sprintf("jit substitution: %v", err),
-			})
-			continue
-		}
-		action.Resource = resolved
-		d, err := p.ResourceDriver(action.Resource.Type)
-		if err != nil {
-			result.Errors = append(result.Errors, interfaces.ActionError{
-				Resource: action.Resource.Name,
-				Action:   action.Action,
-				Error:    fmt.Sprintf("resolve driver: %v", err),
-			})
-			continue
-		}
-		// Capture result.Resources length pre-dispatch so we can identify
-		// the entry (if any) that this action appended and propagate its
-		// outputs into syncedOutputs for subsequent actions. doCreate /
-		// doUpdate / doReplace each append on success; doDelete does not.
-		preLen := len(result.Resources)
-		if err := dispatchAction(ctx, d, action, result); err != nil {
-			result.Errors = append(result.Errors, interfaces.ActionError{
-				Resource: action.Resource.Name,
-				Action:   action.Action,
-				Error:    err.Error(),
-			})
-		}
-		if len(result.Resources) > preLen {
-			out := result.Resources[len(result.Resources)-1]
-			syncedOutputs[out.Name] = flattenOutputs(out)
+	}
+
+	// loopReached gates the deferred OnPlanComplete invocation. Set
+	// BEFORE the loop opens so a zero-iteration (empty Actions) plan
+	// still triggers finalize — matches v1 DOProvider.Apply behavior
+	// where the deferred-flush fires regardless of plan length (stale
+	// queued state from prior runs is flushed even when the current
+	// plan has no actions).
+	loopReached = true
+
+	for i := range plan.Actions {
+		action := plan.Actions[i]
+		// Phase 2 (workflow#640 + ADR 0040 invariant 1): per-PlanAction
+		// ActionOutcome MUST be appended to result.Actions exactly once,
+		// regardless of which continue / fatal-return branch the iteration
+		// took. Cycle-1 plan-review C-1 caught the false-positive where
+		// jit-error / driver-resolve-error continue paths skip the append
+		// and the post-loop length-assert mis-fires. The deferred-closure
+		// pattern below records the outcome unconditionally on every exit
+		// from the inner func; the surrounding for loop then bubbles
+		// fatalErr (hook failures, ctx cancellation) to the caller.
+		var iterErr error                      // best-effort error: action failed, continue
+		var iterStatus interfaces.ActionStatus // Phase 2.3 (workflow#698): assigned at each error site
+		var fatalErr error                     // hook/ctx error: stop the whole apply
+
+		func() {
+			defer func() {
+				// Phase 2.3 (workflow#698): success-path default — if no
+				// error site assigned a phase-specific status, the action
+				// completed cleanly. Otherwise iterStatus was set by the
+				// path that raised iterErr to the correct phase-specific
+				// value (SKIPPED / Error / DeleteFailed / CompensationFailed).
+				if iterErr == nil {
+					iterStatus = interfaces.ActionStatusSuccess
+				}
+				errStr := ""
+				if iterErr != nil {
+					errStr = iterErr.Error()
+				}
+				result.Actions = append(result.Actions, interfaces.ActionOutcome{
+					//nolint:gosec // ActionIndex is loop counter bound by len(plan.Actions); G115 false positive.
+					ActionIndex: uint32(i),
+					Status:      iterStatus,
+					Error:       errStr,
+				})
+			}()
+
+			// Honor cancellation at the loop boundary. Drivers should also
+			// check ctx internally for in-flight work, but the loop check
+			// guarantees apply stops between actions even if a driver
+			// happens to ignore ctx. The deferred postcondition still runs
+			// on early return so InputDriftReport is populated even on a
+			// canceled apply. Phase 2.3 (#698): ctx-cancel is pre-dispatch
+			// — action was never attempted; cloud-side state unchanged.
+			if err := ctx.Err(); err != nil {
+				iterErr = err
+				iterStatus = statusForPreDispatchSkip()
+				fatalErr = err
+				return
+			}
+			// Per-action JIT substitution — resolve ${VAR} / ${MODULE.field}
+			// / ${MODULE.id} in action.Resource.Config against
+			// result.ReplaceIDMap (this-apply Replace ProviderIDs) and
+			// syncedOutputs (state + this-apply prior outputs). On error,
+			// record a per-action diagnostic with the canonical "jit
+			// substitution:" prefix and SKIP dispatch — the unresolved spec
+			// must not reach the driver. The loop continues to the next
+			// action (best-effort apply contract). os.LookupEnv is the
+			// production env source; nil-safe inside ResolveSpec — refs that
+			// only need replaceIDMap / syncedOutputs still resolve. Phase 2.3
+			// (#698): JIT-fail is pre-dispatch — no driver call yet.
+			resolved, err := jitsubst.ResolveSpec(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv)
+			if err != nil {
+				result.Errors = append(result.Errors, interfaces.ActionError{
+					Resource: action.Resource.Name,
+					Action:   action.Action,
+					Error:    fmt.Sprintf("jit substitution: %v", err),
+				})
+				iterErr = fmt.Errorf("jit substitution: %v", err)
+				iterStatus = statusForPreDispatchSkip()
+				return
+			}
+			action.Resource = resolved
+			// Phase 2.3 (#698): driver-resolve-fail is pre-dispatch — no
+			// driver method has been called yet.
+			d, err := p.ResourceDriver(action.Resource.Type)
+			if err != nil {
+				result.Errors = append(result.Errors, interfaces.ActionError{
+					Resource: action.Resource.Name,
+					Action:   action.Action,
+					Error:    fmt.Sprintf("resolve driver: %v", err),
+				})
+				iterErr = fmt.Errorf("resolve driver: %v", err)
+				iterStatus = statusForPreDispatchSkip()
+				return
+			}
+			// Capture result.Resources length pre-dispatch so we can identify
+			// the entry (if any) that this action appended and propagate its
+			// outputs into syncedOutputs for subsequent actions. doCreate /
+			// doUpdate / doReplace each append on success; doDelete does not.
+			preLen := len(result.Resources)
+			actionHooks := hooks
+			actionHooks.OnResourceDeleted = func(ctx context.Context, action interfaces.PlanAction) error {
+				if hooks.OnResourceDeleted != nil {
+					if err := hooks.OnResourceDeleted(ctx, action); err != nil {
+						return err
+					}
+				}
+				delete(syncedOutputs, action.Resource.Name)
+				return nil
+			}
+			if err := dispatchAction(ctx, d, action, result, actionHooks, deleteHookActive); err != nil {
+				var hookErr hookDispatchError
+				if errors.As(err, &hookErr) {
+					// Phase 2.3 (#698): hookDispatchError wraps a hook
+					// (typically driver-layer Delete hook) that ran AFTER
+					// the cloud-side action — cloud-side work IS done;
+					// hook failure is post-hook semantically.
+					fatalErr = fmt.Errorf("%s/%s: %w", action.Resource.Type, action.Resource.Name, hookErr.err)
+					iterErr = hookErr.err
+					iterStatus = statusForPostHookFailure()
+					return
+				}
+				// Phase 2.3 (#698): generic dispatch error — driver's
+				// Create/Update/Delete RPC returned err. Action attempted;
+				// cloud-side state may be partially mutated.
+				result.Errors = append(result.Errors, interfaces.ActionError{
+					Resource: action.Resource.Name,
+					Action:   action.Action,
+					Error:    err.Error(),
+				})
+				iterErr = err
+				iterStatus = statusForDispatchError(action.Action)
+				return
+			}
+			if action.Action == "delete" {
+				// Phase 2.3 (#698): post-delete-hook ran AFTER cloud-side
+				// delete succeeded — cloud-side work IS done; hook failure
+				// is post-hook semantically.
+				if err := actionHooks.OnResourceDeleted(ctx, action); err != nil {
+					fatalErr = fmt.Errorf("%s/%s: post-delete hook: %w", action.Resource.Type, action.Resource.Name, err)
+					iterErr = err
+					iterStatus = statusForPostHookFailure()
+					return
+				}
+			}
+			if len(result.Resources) > preLen {
+				out := result.Resources[len(result.Resources)-1]
+				out = fillMissingOutputIdentity(action.Resource, out)
+				result.Resources[len(result.Resources)-1] = out
+				if hooks.OnResourceApplied != nil {
+					// Phase 2.3 (#698): post-apply-hook ran AFTER cloud-side
+					// create/update succeeded — cloud-side work IS done;
+					// hook failure is post-hook semantically.
+					if err := hooks.OnResourceApplied(ctx, d, action, out); err != nil {
+						fatalErr = fmt.Errorf("%s/%s: post-apply hook: %w", action.Resource.Type, action.Resource.Name, err)
+						iterErr = err
+						iterStatus = statusForPostHookFailure()
+						return
+					}
+				}
+				syncedOutputs[out.Name] = flattenOutputs(out)
+			}
+		}()
+
+		if fatalErr != nil {
+			// Early-return path: ActionOutcome for the offending action
+			// has already been appended by the deferred closure; the
+			// post-loop length-assert is skipped on fatal exits (length
+			// will be < len(plan.Actions), correctly so).
+			return result, fatalErr
 		}
 	}
+
+	// Phase 2 engine invariant (workflow#640 + ADR 0040 invariant 1): on
+	// a normally-completed loop, len(result.Actions) MUST equal
+	// len(plan.Actions). Length validation lives engine-side here, where
+	// it always has — the previous reference to a wfctl-side
+	// applyResultFromPB decoder is moot post-workflow#699 (the v1
+	// plugin-Apply dispatch path is gone).
+	if len(result.Actions) != len(plan.Actions) {
+		return result, fmt.Errorf("internal: ApplyPlanWithHooks produced %d ActionOutcomes for %d plan actions (engine invariant violation per ADR 0040)", len(result.Actions), len(plan.Actions))
+	}
+
 	return result, nil
+}
+
+// Phase 2.3 (workflow#698): replaced single mapDispatchErrToStatus with
+// 3 phase-specific helpers — each per-action exit path now assigns its
+// status directly from the call site (clearer than late-mapping in defer).
+// The single-helper version conflated pre-dispatch failures (ctx-cancel /
+// JIT-fail / driver-resolve-fail) and post-hook failures with
+// dispatch-level errors, breaking ADR 0040 invariant 2 (failed-delete
+// preservation requires distinguishing "delete dispatch failed" from
+// "delete never attempted").
+
+// statusForPreDispatchSkip returns SKIPPED — action was never attempted
+// at the driver. Used for ctx-cancel, JIT-substitution-fail, and
+// driver-resolve-fail paths. Cloud-side state unchanged from pre-apply.
+// Per workflow#698 Phase 2.3.
+func statusForPreDispatchSkip() interfaces.ActionStatus {
+	return interfaces.ActionStatusSkipped
+}
+
+// statusForDispatchError returns Error (non-delete) or DeleteFailed (delete).
+// Used when driver's Create/Update/Delete RPC returned an error. Action was
+// attempted; cloud-side state may be partially mutated. For delete actions,
+// DELETE_FAILED instructs wfctl to preserve state.
+// Per workflow#698 Phase 2.3 (extracted from prior mapDispatchErrToStatus).
+func statusForDispatchError(actionType string) interfaces.ActionStatus {
+	if actionType == "delete" {
+		return interfaces.ActionStatusDeleteFailed
+	}
+	return interfaces.ActionStatusError
+}
+
+// statusForPostHookFailure returns COMPENSATION_FAILED — driver succeeded
+// but wfctl-side hook (OnResourceApplied / OnResourceDeleted) failed (or
+// the driver's own hook layer returned hookDispatchError after touching
+// cloud-side state). Cloud-side work IS done; operator must verify state;
+// may need manual compensation. State preservation required regardless of
+// action type.
+// Per workflow#698 Phase 2.3.
+func statusForPostHookFailure() interfaces.ActionStatus {
+	return interfaces.ActionStatusCompensationFailed
+}
+
+func preflightProviderOwnedReplaceWithDeleteHooks(p interfaces.IaCProvider, plan *interfaces.IaCPlan) error {
+	for i := range plan.Actions {
+		action := plan.Actions[i]
+		if action.Action != "replace" {
+			continue
+		}
+		d, err := p.ResourceDriver(action.Resource.Type)
+		if err != nil {
+			return fmt.Errorf("%s/%s: replace preflight resolve driver: %w", action.Resource.Type, action.Resource.Name, err)
+		}
+		if _, ok := d.(interfaces.ResourceReplacer); ok {
+			return fmt.Errorf("%s/%s: replace: driver-owned ResourceReplacer is disabled while delete state hooks are active; state hooks require engine-owned delete-step visibility", action.Resource.Type, action.Resource.Name)
+		}
+	}
+	return nil
 }
 
 // buildInitialSyncedOutputs walks plan.Actions once and returns a map of
@@ -205,7 +511,8 @@ func applyPlanWithEnvProvider(
 // ProviderID).
 func buildInitialSyncedOutputs(actions []interfaces.PlanAction) map[string]map[string]any {
 	out := make(map[string]map[string]any)
-	for _, a := range actions {
+	for i := range actions {
+		a := actions[i]
 		if a.Current == nil {
 			continue
 		}
@@ -242,6 +549,16 @@ func flattenOutputs(o interfaces.ResourceOutput) map[string]any {
 	return m
 }
 
+func fillMissingOutputIdentity(spec interfaces.ResourceSpec, out interfaces.ResourceOutput) interfaces.ResourceOutput {
+	if out.Name == "" {
+		out.Name = spec.Name
+	}
+	if out.Type == "" {
+		out.Type = spec.Type
+	}
+	return out
+}
+
 // snapshotKeys returns the keys of m as an unordered slice. ComputeDrift
 // sorts its output, and Snapshot iterates in any order, so no key sort
 // is needed at this stage. Inlined helper to keep the dependency
@@ -262,14 +579,14 @@ func snapshotKeys(m map[string]string) []string {
 // An unknown action kind returns an error which ApplyPlan records on
 // result.Errors so an operator running a malformed plan sees a per-action
 // diagnostic rather than a silent skip.
-func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks, deleteHookActive bool) error {
 	switch action.Action {
 	case "create":
 		return doCreate(ctx, d, action, result)
 	case "update":
 		return doUpdate(ctx, d, action, result)
 	case "replace":
-		return doReplace(ctx, d, action, result)
+		return doReplace(ctx, d, action, result, hooks, deleteHookActive)
 	case "delete":
 		return doDelete(ctx, d, action)
 	default:
@@ -303,9 +620,9 @@ func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action int
 //   - Read-after-conflict failures wrap both the original Create error
 //     and the Read error via errors.Join, so callers in this package
 //     can match either via errors.Is.
-//   - The doCreate return value preserves the wrap chain. ApplyPlan's
+//   - The doCreate return value preserves the wrap chain. The helper's
 //     dispatch loop, however, flattens errors to a string in
-//     result.Errors[].Error (see [ApplyPlan]) — external callers
+//     result.Errors[].Error — external callers
 //     reading [interfaces.ApplyResult].Errors lose errors.Is matching
 //     and must inspect the canonical "upsert: read after conflict:"
 //     prefix instead. This boundary is deliberate: ActionError carries
@@ -339,7 +656,7 @@ func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interface
 // ProviderID (when action.Current is non-nil), appending the driver's
 // returned ResourceOutput to result.Resources on success. Driver errors
 // pass through unchanged so the caller's per-action error wrapper
-// (ApplyPlan's loop body) records them with the canonical action +
+// (the helper loop body) records them with the canonical action +
 // resource fields.
 //
 // Defensive contract: doUpdate does NOT synthesize a precondition error
@@ -359,17 +676,22 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 	return nil
 }
 
-// doReplace decomposes a Replace action into Delete-then-Create on the
-// driver and propagates the new ProviderID through
+// DefaultReplace is the engine's default Replace dispatcher: Delete the
+// resource at action.Current, then Create from action.Resource. Public
+// so drivers that opt into ResourceReplacer can delegate a particular
+// spec to engine-default behavior without a sentinel-error round-trip.
+//
+// Decomposes a Replace action into Delete-then-Create on the driver and
+// propagates the new ProviderID through
 // result.ReplaceIDMap[action.Resource.Name] so the JIT substitution wired
-// into ApplyPlan's loop (T5.2) can patch dependent resources whose
+// into the helper loop (T5.2) can patch dependent resources whose
 // configs reference the replaced resource by name.
 //
 // # Cascade contract (T5.3)
 //
 // When a plan has [Replace parent, X dependent] where dependent's
 // Config carries ${parent.id}, the cascade lands automatically:
-// doReplace's post-Create write to result.ReplaceIDMap completes
+// DefaultReplace's post-Create write to result.ReplaceIDMap completes
 // BEFORE the dispatch loop's next iteration calls
 // jitsubst.ResolveSpec on the dependent's spec, so the dependent's
 // driver call (Create or Replace's post-Delete Create) sees the
@@ -402,9 +724,18 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 // result.Errors couldn't tell whether the Delete or the Create failed.
 // Other sub-functions (doCreate non-recovery path, doUpdate, doDelete)
 // pass driver errors through unchanged.
-func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+func DefaultReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+	return defaultReplaceWithHooks(ctx, d, action, result, ApplyPlanHooks{})
+}
+
+func defaultReplaceWithHooks(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks) error {
 	if err := d.Delete(ctx, refFromAction(action)); err != nil {
 		return fmt.Errorf("replace: delete: %w", err)
+	}
+	if hooks.OnResourceDeleted != nil {
+		if err := hooks.OnResourceDeleted(ctx, action); err != nil {
+			return hookDispatchError{err: fmt.Errorf("replace: delete hook: %w", err)}
+		}
 	}
 	// Honor cancellation between Delete and Create. Without this guard
 	// a Ctrl-C / SIGTERM that arrives mid-Replace would still trigger
@@ -434,13 +765,113 @@ func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfac
 	return nil
 }
 
+type hookDispatchError struct {
+	err error
+}
+
+func (e hookDispatchError) Error() string {
+	return e.err.Error()
+}
+
+func (e hookDispatchError) Unwrap() error {
+	return e.err
+}
+
+// doReplace is the dispatch entry point for Replace actions. It probes
+// the driver for the optional ResourceReplacer interface and routes to
+// the driver's Replace implementation when present. Drivers that do not
+// implement ResourceReplacer fall back to DefaultReplace.
+func doReplace(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks, deleteHookActive bool) error {
+	if deleteHookActive {
+		if _, ok := d.(interfaces.ResourceReplacer); ok {
+			return hookDispatchError{err: fmt.Errorf("replace: driver-owned ResourceReplacer is disabled while delete state hooks are active; state hooks require engine-owned delete-step visibility")}
+		}
+	}
+	if r, ok := d.(interfaces.ResourceReplacer); ok {
+		out, err := r.Replace(ctx, refFromAction(action), action.Resource)
+		if err != nil {
+			return wrapDriverReplaceError(err)
+		}
+		return finalizeReplace(out, action.Resource.Name, result)
+	}
+	return defaultReplaceWithHooks(ctx, d, action, result, hooks)
+}
+
+// finalizeReplace runs the post-Replace bookkeeping that DefaultReplace's
+// own Create branch does inline. When a driver-owned Replacer returns a
+// ResourceOutput, this function appends it to result.Resources and
+// populates result.ReplaceIDMap[name] so downstream JIT substitution
+// (apply_replace_cascade) sees the new ProviderID. Lazy-init matches
+// DefaultReplace's existing map-initialization logic.
+func finalizeReplace(out *interfaces.ResourceOutput, name string, result *interfaces.ApplyResult) error {
+	if out != nil {
+		result.Resources = append(result.Resources, *out)
+		if result.ReplaceIDMap == nil {
+			result.ReplaceIDMap = make(map[string]string)
+		}
+		result.ReplaceIDMap[name] = out.ProviderID
+	}
+	return nil
+}
+
+// wrapDriverReplaceError ensures driver-owned Replace errors carry a
+// recognizable prefix so operators can attribute failures consistently
+// regardless of whether engine-default or driver-owned paths fired.
+// Drivers that already wrap with a recognized prefix family pass
+// through unchanged; non-conforming drivers get a "replace: driver: "
+// backstop applied at the dispatch boundary.
+//
+// See hasReplaceErrorPrefix for the accepted prefix families.
+func wrapDriverReplaceError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if hasReplaceErrorPrefix(err) {
+		return err
+	}
+	return fmt.Errorf("replace: driver: %w", err)
+}
+
+// hasReplaceErrorPrefix returns true when err.Error() begins with one
+// of the recognized prefix families (case-sensitive prefix match):
+//   - "replace:"                    (engine-default + the backstop wrapper itself)
+//   - "<resource-type> replace "    (driver-owned, e.g. "droplet replace ")
+//
+// The accepted prefix families are intentionally closed to keep error
+// attribution predictable; new families require a workflow-side change.
+// Drivers that adopt either family are exempt from re-wrapping.
+func hasReplaceErrorPrefix(err error) bool {
+	msg := err.Error()
+	if strings.HasPrefix(msg, "replace:") {
+		return true
+	}
+	// "<word> replace " form — require at least one non-space char
+	// before " replace ", and the substring " replace " in the prefix.
+	// We don't bind specific resource types so future plugins can adopt
+	// freely.
+	idx := strings.Index(msg, " replace ")
+	if idx <= 0 {
+		return false
+	}
+	head := msg[:idx]
+	// head must be a single token with no spaces or colons — e.g. "droplet",
+	// "vpc", "database". Other characters (hyphens, underscores, digits) are
+	// accepted intentionally so resource types like "infra.droplet" or
+	// "k8s-node" can adopt the prefix freely.
+	for _, r := range head {
+		if r == ' ' || r == ':' {
+			return false
+		}
+	}
+	return true
+}
+
 // doDelete invokes Delete with a ResourceRef carrying action.Current's
 // ProviderID. This closes the latent gap documented in the design
 // (DOProvider.Apply has no "case delete" arm today, so wfctl's
 // state-prune action silently skipped cloud-resource deletion through
-// the v1 dispatch path); under v2 dispatch wfctlhelpers.ApplyPlan
-// always invokes the driver's Delete, ensuring state-prune is paired
-// with a real cloud-side mutation.
+// the former v1 dispatch path); v2 dispatch always invokes the driver's
+// Delete, ensuring state-prune is paired with a real cloud-side mutation.
 //
 // Driver errors pass through unchanged for the caller's per-action
 // error wrapping. doDelete does not append to result.Resources — a

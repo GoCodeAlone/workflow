@@ -226,6 +226,85 @@ func TestEngineTriggerWorkflow(t *testing.T) {
 	}
 }
 
+func TestEngineTriggerWorkflow_RedactsSensitiveResultsInDebugLogs(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	handler := &mockWorkflowHandler{
+		name:       "mock.handler",
+		handlesFor: []string{"sensitive-workflow"},
+		results: map[string]any{
+			"token":    "jwt.secret.value",
+			"status":   "ok",
+			"password": "hunter2",
+			"profile": map[string]any{
+				"api_key": "sk_test_secret",
+				"name":    "Alice",
+			},
+		},
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	holder := &module.PipelineResultHolder{}
+	ctx := context.WithValue(context.Background(), module.PipelineResultContextKey, holder)
+	if err := engine.TriggerWorkflow(ctx, "sensitive-workflow", "run", map[string]any{}); err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+
+	logText := strings.Join(app.logger.logs, "\n")
+	for _, leaked := range []string{"jwt.secret.value", "hunter2", "sk_test_secret"} {
+		if strings.Contains(logText, leaked) {
+			t.Fatalf("debug logs leaked sensitive result value %q:\n%s", leaked, logText)
+		}
+	}
+	if !strings.Contains(logText, module.RedactionPlaceholder) {
+		t.Fatalf("debug logs should include redaction placeholder, got:\n%s", logText)
+	}
+
+	raw := holder.Get()
+	if raw["token"] != "jwt.secret.value" {
+		t.Fatalf("pipeline result holder must preserve raw token for response handling, got %#v", raw["token"])
+	}
+}
+
+func TestEngineTriggerWorkflow_RedactsSensitiveInputInDebugLogs(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	handler := &mockWorkflowHandler{
+		name:       "mock.handler",
+		handlesFor: []string{"sensitive-input-workflow"},
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	data := map[string]any{
+		"username": "alice",
+		"password": "hunter2",
+		"body": map[string]any{
+			"access_token": "jwt.secret.value",
+			"display_name": "Alice",
+		},
+	}
+	if err := engine.TriggerWorkflow(context.Background(), "sensitive-input-workflow", "run", data); err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+
+	logText := strings.Join(app.logger.logs, "\n")
+	for _, leaked := range []string{"hunter2", "jwt.secret.value"} {
+		if strings.Contains(logText, leaked) {
+			t.Fatalf("debug logs leaked sensitive input value %q:\n%s", leaked, logText)
+		}
+	}
+	if !strings.Contains(logText, module.RedactionPlaceholder) {
+		t.Fatalf("debug logs should include redaction placeholder, got:\n%s", logText)
+	}
+	if handler.lastData["password"] != "hunter2" {
+		t.Fatalf("workflow handler must receive raw input data, got %#v", handler.lastData["password"])
+	}
+}
+
 // Mock implementations for testing
 
 // mockApplication implements modular.Application
@@ -550,6 +629,8 @@ func (t *mockTrigger) Configure(app modular.Application, triggerConfig any) erro
 type mockWorkflowHandler struct {
 	name       string
 	handlesFor []string
+	results    map[string]any
+	lastData   map[string]any
 }
 
 func (h *mockWorkflowHandler) Name() string {
@@ -565,7 +646,8 @@ func (h *mockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 }
 
 func (h *mockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
-	return nil, nil
+	h.lastData = data
+	return h.results, nil
 }
 
 func TestEngine_AddModuleType(t *testing.T) {
@@ -1737,5 +1819,81 @@ func TestEngine_BuildFromConfig_InvalidTemplateRefsMode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid engine.validation.templateRefs") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestStdEngine_RegisteredModuleTypes(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	// Add a custom type and verify it appears in the result.
+	engine.AddModuleType("test.custom.module", func(name string, cfg map[string]any) modular.Module {
+		return nil
+	})
+
+	types := engine.RegisteredModuleTypes()
+	found := false
+	for _, tp := range types {
+		if tp == "test.custom.module" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("RegisteredModuleTypes did not include %q; got %v", "test.custom.module", types)
+	}
+
+	// Result must be sorted.
+	for i := 1; i < len(types); i++ {
+		if types[i] < types[i-1] {
+			t.Errorf("RegisteredModuleTypes is not sorted: %v", types)
+			break
+		}
+	}
+}
+
+func TestStdEngine_RegisteredStepTypes(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	types := engine.RegisteredStepTypes()
+	if len(types) == 0 {
+		t.Fatal("expected non-empty step types after loading plugins")
+	}
+
+	// Result must be sorted.
+	for i := 1; i < len(types); i++ {
+		if types[i] < types[i-1] {
+			t.Errorf("RegisteredStepTypes is not sorted: %v", types)
+			break
+		}
+	}
+}
+
+func TestStdEngine_RegisteredStepTypes_NilRegistry(t *testing.T) {
+	engine := &StdEngine{}
+	if types := engine.RegisteredStepTypes(); types != nil {
+		t.Fatalf("expected nil step types for nil registry, got %v", types)
+	}
+}
+
+func TestStdEngine_RegisteredTriggerTypes(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	types := engine.RegisteredTriggerTypes()
+	// With plugins loaded there should be at least one trigger type (e.g. "http").
+	if len(types) == 0 {
+		t.Fatal("expected non-empty trigger types after loading plugins")
+	}
+
+	// Result must be sorted.
+	for i := 1; i < len(types); i++ {
+		if types[i] < types[i-1] {
+			t.Errorf("RegisteredTriggerTypes is not sorted: %v", types)
+			break
+		}
 	}
 }

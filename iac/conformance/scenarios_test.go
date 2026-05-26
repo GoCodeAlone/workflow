@@ -491,7 +491,7 @@ func TestScenario_ReplaceCascadePreservesDependents(t *testing.T) {
 	}
 	cfg := Config{
 		Provider: func() interfaces.IaCProvider {
-			return &iactest.NoopProvider{Driver: &driver.NoopDriver, DispatchVersion: "v2"}
+			return &iactest.NoopProvider{Driver: &driver.NoopDriver}
 		},
 	}
 	// The cascade scenario calls wfctlhelpers.ApplyPlan; it routes

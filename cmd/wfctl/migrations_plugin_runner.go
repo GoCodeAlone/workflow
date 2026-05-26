@@ -61,8 +61,7 @@ func (r migrationPluginRunner) runPluginArgs(ctx context.Context, cfg migrationP
 }
 
 func buildMigrationPluginArgs(cfg migrationPluginRunConfig, commandArgs []string) []string {
-	args := []string{"--wfctl-cli"}
-	args = append(args, commandArgs...)
+	args := append([]string(nil), commandArgs...)
 	args = append(args,
 		"--driver", cfg.Driver,
 		"--source-dir", cfg.SourceDir,
@@ -71,7 +70,7 @@ func buildMigrationPluginArgs(cfg migrationPluginRunConfig, commandArgs []string
 }
 
 func buildMigrationPluginLintArgs(cfg migrationPluginRunConfig) []string {
-	return []string{"--wfctl-cli", "lint", cfg.SourceDir}
+	return []string{"lint", cfg.SourceDir}
 }
 
 func buildMigrationPluginEnv(cfg migrationPluginRunConfig) map[string]string {

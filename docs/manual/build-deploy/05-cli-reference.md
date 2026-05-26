@@ -24,6 +24,7 @@ wfctl build <subcommand> [flags]
 | `--tag <tag>` | — | Override image tag for all container targets |
 | `--format <fmt>` | `table` | Output format: `table`, `json`, `yaml` |
 | `--no-push` | false | Build images but do not push |
+| `--push` | true | Push images after build (explicit form; `--push=false` is equivalent to `--no-push`) |
 | `--env <name>` | — | Apply environment overrides from `environments.<name>.build` |
 | `--security-audit` | — | Run security linting; exit 1 on critical findings |
 
@@ -71,20 +72,28 @@ Wraps the `nodejs` builder plugin.
 ## `wfctl build image`
 
 ```
-wfctl build image [--config <file>] [--dry-run] [--tag <tag>]
+wfctl build image [--config <file>] [--dry-run] [--tag <tag>] [--only <names>] [--skip <names>] [--push]
 ```
 
-Builds all `ci.build.containers[]` entries. External containers are resolved (not built).
+Builds matching `ci.build.containers[]` entries. External containers are resolved (not built).
+`--only` and `--skip` accept comma-separated container names.
+
+When `--push` is passed and `ci.build.security.hardened: true`, buildx pushes directly to
+every registry in `push_to[]` via multiple `--tag` flags in a single invocation (no separate
+`docker push` step needed). Without `--push`, a single-platform hardened build loads the
+image into the local daemon (`--load`); multi-platform hardened builds leave the result in
+the buildkit cache.
 
 ---
 
 ## `wfctl build push`
 
 ```
-wfctl build push [--config <file>]
+wfctl build push [--config <file>] [--tag <tag>] [--only <names>] [--skip <names>]
 ```
 
-Pushes each container's image to every registry listed in `push_to[]`.
+Pushes each matching container's image to every registry listed in `push_to[]`.
+`--only` and `--skip` accept comma-separated container names.
 
 ---
 

@@ -1,0 +1,45 @@
+modules:
+  - name: api
+    type: infra.container_service
+    config:
+      region: nyc
+  - name: db
+    type: infra.database
+    config:
+      engine: pg
+      size: db-s-1vcpu-1gb
+  - name: dns
+    type: infra.dns
+    config:
+      domain: example.com
+  - name: net
+    type: platform.do_networking
+    config:
+      vpc_cidr: 10.0.0.0/16
+  - name: k8s
+    type: infra.k8s_cluster
+    config:
+      region: nyc3
+      node_pool:
+        size: s-2vcpu-4gb
+        count: 3
+
+pipelines:
+  deploy:
+    steps:
+      - type: step.do_deploy
+        config:
+          app: api
+      - type: step.do_status
+        config:
+          app: api
+      - type: step.do_destroy
+        config:
+          app: api
+      - type: step.do_logs
+        config:
+          app: api
+      - type: step.do_scale
+        config:
+          app: api
+          instance_count: 5

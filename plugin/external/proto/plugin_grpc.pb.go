@@ -38,6 +38,8 @@ const (
 	PluginService_DeliverMessage_FullMethodName      = "/workflow.plugin.v1.PluginService/DeliverMessage"
 	PluginService_GetConfigFragment_FullMethodName   = "/workflow.plugin.v1.PluginService/GetConfigFragment"
 	PluginService_GetAsset_FullMethodName            = "/workflow.plugin.v1.PluginService/GetAsset"
+	PluginService_ConfigureCallback_FullMethodName   = "/workflow.plugin.v1.PluginService/ConfigureCallback"
+	PluginService_CreateTrigger_FullMethodName       = "/workflow.plugin.v1.PluginService/CreateTrigger"
 )
 
 // PluginServiceClient is the client API for PluginService service.
@@ -82,6 +84,10 @@ type PluginServiceClient interface {
 	GetConfigFragment(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ConfigFragmentResponse, error)
 	// GetAsset returns the content of a static asset embedded in the plugin.
 	GetAsset(ctx context.Context, in *GetAssetRequest, opts ...grpc.CallOption) (*GetAssetResponse, error)
+	// ConfigureCallback tells the plugin how to reach the host callback service.
+	ConfigureCallback(ctx context.Context, in *ConfigureCallbackRequest, opts ...grpc.CallOption) (*ErrorResponse, error)
+	// CreateTrigger instantiates a trigger of the given type.
+	CreateTrigger(ctx context.Context, in *CreateTriggerRequest, opts ...grpc.CallOption) (*HandleResponse, error)
 }
 
 type pluginServiceClient struct {
@@ -272,6 +278,26 @@ func (c *pluginServiceClient) GetAsset(ctx context.Context, in *GetAssetRequest,
 	return out, nil
 }
 
+func (c *pluginServiceClient) ConfigureCallback(ctx context.Context, in *ConfigureCallbackRequest, opts ...grpc.CallOption) (*ErrorResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ErrorResponse)
+	err := c.cc.Invoke(ctx, PluginService_ConfigureCallback_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginServiceClient) CreateTrigger(ctx context.Context, in *CreateTriggerRequest, opts ...grpc.CallOption) (*HandleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HandleResponse)
+	err := c.cc.Invoke(ctx, PluginService_CreateTrigger_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServiceServer is the server API for PluginService service.
 // All implementations must embed UnimplementedPluginServiceServer
 // for forward compatibility.
@@ -314,6 +340,10 @@ type PluginServiceServer interface {
 	GetConfigFragment(context.Context, *emptypb.Empty) (*ConfigFragmentResponse, error)
 	// GetAsset returns the content of a static asset embedded in the plugin.
 	GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error)
+	// ConfigureCallback tells the plugin how to reach the host callback service.
+	ConfigureCallback(context.Context, *ConfigureCallbackRequest) (*ErrorResponse, error)
+	// CreateTrigger instantiates a trigger of the given type.
+	CreateTrigger(context.Context, *CreateTriggerRequest) (*HandleResponse, error)
 	mustEmbedUnimplementedPluginServiceServer()
 }
 
@@ -377,6 +407,12 @@ func (UnimplementedPluginServiceServer) GetConfigFragment(context.Context, *empt
 }
 func (UnimplementedPluginServiceServer) GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAsset not implemented")
+}
+func (UnimplementedPluginServiceServer) ConfigureCallback(context.Context, *ConfigureCallbackRequest) (*ErrorResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConfigureCallback not implemented")
+}
+func (UnimplementedPluginServiceServer) CreateTrigger(context.Context, *CreateTriggerRequest) (*HandleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateTrigger not implemented")
 }
 func (UnimplementedPluginServiceServer) mustEmbedUnimplementedPluginServiceServer() {}
 func (UnimplementedPluginServiceServer) testEmbeddedByValue()                       {}
@@ -723,6 +759,42 @@ func _PluginService_GetAsset_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PluginService_ConfigureCallback_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigureCallbackRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServiceServer).ConfigureCallback(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginService_ConfigureCallback_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServiceServer).ConfigureCallback(ctx, req.(*ConfigureCallbackRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PluginService_CreateTrigger_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTriggerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServiceServer).CreateTrigger(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginService_CreateTrigger_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServiceServer).CreateTrigger(ctx, req.(*CreateTriggerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PluginService_ServiceDesc is the grpc.ServiceDesc for PluginService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -801,6 +873,14 @@ var PluginService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAsset",
 			Handler:    _PluginService_GetAsset_Handler,
+		},
+		{
+			MethodName: "ConfigureCallback",
+			Handler:    _PluginService_ConfigureCallback_Handler,
+		},
+		{
+			MethodName: "CreateTrigger",
+			Handler:    _PluginService_CreateTrigger_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

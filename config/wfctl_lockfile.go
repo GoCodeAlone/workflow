@@ -31,8 +31,18 @@ type WfctlLockPluginEntry struct {
 
 // WfctlLockPlatform holds platform-specific download info.
 type WfctlLockPlatform struct {
-	URL    string `yaml:"url"`
-	SHA256 string `yaml:"sha256"`
+	URL           string                  `yaml:"url"`
+	SHA256        string                  `yaml:"sha256"`
+	Compatibility *WfctlLockCompatibility `yaml:"compatibility,omitempty"`
+}
+
+type WfctlLockCompatibility struct {
+	Mode           string `yaml:"mode,omitempty"`
+	Status         string `yaml:"status,omitempty"`
+	EngineVersion  string `yaml:"engine_version,omitempty"`
+	EvidenceDigest string `yaml:"evidence_digest,omitempty"`
+	Forced         bool   `yaml:"forced,omitempty"`
+	Reason         string `yaml:"reason,omitempty"`
 }
 
 // LoadWfctlLockfile reads and parses a .wfctl-lock.yaml file.
@@ -111,6 +121,35 @@ func SaveWfctlLockfile(path string, lf *WfctlLockfile) error {
 					&yaml.Node{Kind: yaml.ScalarNode, Value: "sha256"},
 					&yaml.Node{Kind: yaml.ScalarNode, Value: p.SHA256},
 				)
+				if p.Compatibility != nil {
+					cNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+					addCompatField := func(k, v string) {
+						if v == "" {
+							return
+						}
+						cNode.Content = append(cNode.Content,
+							&yaml.Node{Kind: yaml.ScalarNode, Value: k},
+							&yaml.Node{Kind: yaml.ScalarNode, Value: v},
+						)
+					}
+					addCompatField("mode", p.Compatibility.Mode)
+					addCompatField("status", p.Compatibility.Status)
+					addCompatField("engine_version", p.Compatibility.EngineVersion)
+					addCompatField("evidence_digest", p.Compatibility.EvidenceDigest)
+					if p.Compatibility.Forced {
+						cNode.Content = append(cNode.Content,
+							&yaml.Node{Kind: yaml.ScalarNode, Value: "forced"},
+							&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"},
+						)
+					}
+					addCompatField("reason", p.Compatibility.Reason)
+					if len(cNode.Content) > 0 {
+						pNode.Content = append(pNode.Content,
+							&yaml.Node{Kind: yaml.ScalarNode, Value: "compatibility"},
+							cNode,
+						)
+					}
+				}
 				platNode.Content = append(platNode.Content,
 					&yaml.Node{Kind: yaml.ScalarNode, Value: pk},
 					pNode,

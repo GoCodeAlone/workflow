@@ -43,6 +43,8 @@ func AllRules() []Rule {
 		emptyRoutesRule(),
 		camelCaseConfigRule(),
 		requestParseConfigRule(),
+		legacyDORule(),
+		legacyAWSRule(),
 	}
 }
 

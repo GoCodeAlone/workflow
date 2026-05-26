@@ -239,7 +239,48 @@ curl -X POST http://localhost:8081/api/v1/admin/engine/reload \
   --data-binary @updated-workflow.yaml
 ```
 
-The reload stops the current engine, builds and starts a new one, and rolls back on failure. In-flight requests may be dropped -- use Kubernetes rolling deployments for zero-downtime updates in production.
+The reload uses a **safe try-activate sequence**:
+
+1. Build candidate engine from the new config (current engine stays live).
+2. On build failure → return error, current engine untouched.
+3. Stop current engine only after candidate is built successfully.
+4. Start candidate engine.
+5. On start failure → rebuild from previous config and restart (rollback).
+
+In-flight requests may be dropped during the stop/start window. For
+zero-downtime updates use Kubernetes rolling deployments.
+
+### Config Try-Activate Probe (Dry Run)
+
+Validate that a candidate config can be built without touching the running engine:
+
+```bash
+curl -X POST http://localhost:8081/api/v1/admin/engine/try-activate \
+  -H "Content-Type: application/json" \
+  --data-binary @candidate-workflow.json
+```
+
+Response on success:
+```json
+{
+  "status": "build_ok",
+  "moduleTypes": ["http.server", "http.router"],
+  "stepTypes": ["step.set", "step.http_call"],
+  "triggerTypes": ["http"]
+}
+```
+
+Response on failure:
+```json
+{
+  "status": "build_failed",
+  "error": "module type \"nonexistent.type\" not found"
+}
+```
+
+The probe is safe to call against a live server — it never stops or swaps the
+active engine. Use it from automated update managers to gate a rollout before
+issuing a full reload.
 
 ### Example Configurations
 

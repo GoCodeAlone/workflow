@@ -331,7 +331,7 @@
       "type": "app.container",
       "label": "App Container",
       "category": "infrastructure",
-      "description": "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service or ECS task definition)",
+      "description": "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service)",
       "outputs": [
         {
           "name": "container",
@@ -344,7 +344,7 @@
           "key": "environment",
           "label": "Environment",
           "type": "string",
-          "description": "Name of the platform.kubernetes or platform.ecs module to deploy to",
+          "description": "Name of the platform.kubernetes module to deploy to",
           "required": true
         },
         {
@@ -2175,12 +2175,12 @@
       "type": "metrics.collector",
       "label": "Metrics Collector",
       "category": "observability",
-      "description": "Collects and exposes application metrics",
+      "description": "Collects application metrics for telemetry export",
       "outputs": [
         {
           "name": "metrics",
           "type": "prometheus.Metrics",
-          "description": "Prometheus metrics endpoint"
+          "description": "Prometheus metrics registry"
         }
       ],
       "configFields": [
@@ -2198,14 +2198,6 @@
           "type": "string",
           "description": "Prometheus metric subsystem",
           "placeholder": "api"
-        },
-        {
-          "key": "metricsPath",
-          "label": "Metrics Path",
-          "type": "string",
-          "description": "Endpoint path for Prometheus scraping",
-          "defaultValue": "/metrics",
-          "placeholder": "/metrics"
         },
         {
           "key": "enabledMetrics",
@@ -2228,7 +2220,6 @@
           "module",
           "active_workflows"
         ],
-        "metricsPath": "/metrics",
         "namespace": "workflow"
       }
     },
@@ -2686,92 +2677,6 @@
         "database": "database"
       }
     },
-    "platform.apigateway": {
-      "type": "platform.apigateway",
-      "label": "API Gateway",
-      "category": "infrastructure",
-      "description": "Manages API gateway provisioning with routes, stages, and rate limiting (mock or AWS API Gateway v2)",
-      "outputs": [
-        {
-          "name": "gateway",
-          "type": "JSON",
-          "description": "Provisioned API gateway endpoint and configuration"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "provider",
-          "label": "Provider",
-          "type": "string",
-          "description": "mock | aws"
-        },
-        {
-          "key": "name",
-          "label": "Gateway Name",
-          "type": "string",
-          "description": "API gateway name",
-          "required": true
-        },
-        {
-          "key": "stage",
-          "label": "Stage",
-          "type": "string",
-          "description": "Deployment stage (dev, staging, prod)"
-        },
-        {
-          "key": "cors",
-          "label": "CORS Config",
-          "type": "map",
-          "description": "CORS configuration (allowedOrigins, allowedMethods, allowedHeaders)"
-        },
-        {
-          "key": "routes",
-          "label": "Routes",
-          "type": "array",
-          "description": "Route definitions"
-        }
-      ]
-    },
-    "platform.autoscaling": {
-      "type": "platform.autoscaling",
-      "label": "Autoscaling Policies",
-      "category": "infrastructure",
-      "description": "Manages autoscaling policies (target tracking, step, scheduled) for AWS or mock resources",
-      "outputs": [
-        {
-          "name": "policies",
-          "type": "JSON",
-          "description": "Configured autoscaling policies"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "provider",
-          "label": "Provider",
-          "type": "string",
-          "description": "mock | aws"
-        },
-        {
-          "key": "policies",
-          "label": "Policies",
-          "type": "array",
-          "description": "Scaling policy definitions",
-          "required": true
-        }
-      ]
-    },
     "platform.context": {
       "type": "platform.context",
       "label": "Platform Context",
@@ -2842,7 +2747,7 @@
           "key": "provider",
           "label": "Provider",
           "type": "string",
-          "description": "mock | aws"
+          "description": "mock | aws (aws Route53 backend removed in v0.53.0; use infra.dns + workflow-plugin-aws)"
         },
         {
           "key": "zone",
@@ -2856,317 +2761,6 @@
           "label": "DNS Records",
           "type": "array",
           "description": "List of DNS record definitions"
-        }
-      ]
-    },
-    "platform.do_app": {
-      "type": "platform.do_app",
-      "label": "DigitalOcean App Platform",
-      "category": "infrastructure",
-      "description": "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
-      "outputs": [
-        {
-          "name": "app",
-          "type": "JSON",
-          "description": "Deployed app endpoint and status on DigitalOcean App Platform"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "provider",
-          "label": "Provider",
-          "type": "string",
-          "description": "mock | digitalocean"
-        },
-        {
-          "key": "name",
-          "label": "App Name",
-          "type": "string",
-          "description": "App Platform application name"
-        },
-        {
-          "key": "region",
-          "label": "Region",
-          "type": "string",
-          "description": "DO region slug (e.g. nyc)"
-        },
-        {
-          "key": "image",
-          "label": "Container Image",
-          "type": "string",
-          "description": "Container image reference"
-        },
-        {
-          "key": "instances",
-          "label": "Instances",
-          "type": "number",
-          "description": "Number of instances"
-        },
-        {
-          "key": "http_port",
-          "label": "HTTP Port",
-          "type": "number",
-          "description": "Container HTTP port"
-        },
-        {
-          "key": "envs",
-          "label": "Environment Variables",
-          "type": "map",
-          "description": "Environment variables for the app"
-        }
-      ]
-    },
-    "platform.do_database": {
-      "type": "platform.do_database",
-      "label": "DigitalOcean Managed Database",
-      "category": "infrastructure",
-      "description": "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
-      "outputs": [
-        {
-          "name": "database",
-          "type": "sql.DB",
-          "description": "Managed database connection for DigitalOcean database cluster"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "provider",
-          "label": "Provider",
-          "type": "string",
-          "description": "mock | digitalocean"
-        },
-        {
-          "key": "engine",
-          "label": "Engine",
-          "type": "string",
-          "description": "Database engine: pg | mysql | redis | mongodb | kafka"
-        },
-        {
-          "key": "version",
-          "label": "Version",
-          "type": "string",
-          "description": "Engine version"
-        },
-        {
-          "key": "size",
-          "label": "Size",
-          "type": "string",
-          "description": "Droplet size slug"
-        },
-        {
-          "key": "region",
-          "label": "Region",
-          "type": "string",
-          "description": "DO region slug"
-        },
-        {
-          "key": "num_nodes",
-          "label": "Node Count",
-          "type": "number",
-          "description": "Number of nodes"
-        },
-        {
-          "key": "name",
-          "label": "Cluster Name",
-          "type": "string",
-          "description": "Database cluster name"
-        }
-      ]
-    },
-    "platform.do_dns": {
-      "type": "platform.do_dns",
-      "label": "DigitalOcean DNS",
-      "category": "infrastructure",
-      "description": "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
-      "outputs": [
-        {
-          "name": "zone",
-          "type": "JSON",
-          "description": "Provisioned DigitalOcean DNS zone and records"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "provider",
-          "label": "Provider",
-          "type": "string",
-          "description": "mock | digitalocean"
-        },
-        {
-          "key": "domain",
-          "label": "Domain",
-          "type": "string",
-          "description": "Domain name (e.g. example.com)",
-          "required": true
-        },
-        {
-          "key": "records",
-          "label": "Records",
-          "type": "array",
-          "description": "List of DNS record definitions"
-        }
-      ]
-    },
-    "platform.do_networking": {
-      "type": "platform.do_networking",
-      "label": "DigitalOcean VPC \u0026 Firewalls",
-      "category": "infrastructure",
-      "description": "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
-      "outputs": [
-        {
-          "name": "vpc",
-          "type": "JSON",
-          "description": "Provisioned DigitalOcean VPC and firewall configuration"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "provider",
-          "label": "Provider",
-          "type": "string",
-          "description": "mock | digitalocean"
-        },
-        {
-          "key": "vpc",
-          "label": "VPC Config",
-          "type": "map",
-          "description": "VPC configuration (name, region, ip_range)",
-          "required": true
-        },
-        {
-          "key": "firewalls",
-          "label": "Firewalls",
-          "type": "array",
-          "description": "List of firewall definitions"
-        }
-      ]
-    },
-    "platform.doks": {
-      "type": "platform.doks",
-      "label": "DigitalOcean Kubernetes (DOKS)",
-      "category": "infrastructure",
-      "description": "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
-      "outputs": [
-        {
-          "name": "cluster",
-          "type": "JSON",
-          "description": "Provisioned DOKS cluster endpoint and kubeconfig"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "cluster_name",
-          "label": "Cluster Name",
-          "type": "string",
-          "description": "DOKS cluster name"
-        },
-        {
-          "key": "region",
-          "label": "Region",
-          "type": "string",
-          "description": "DO region slug (e.g. nyc3)"
-        },
-        {
-          "key": "version",
-          "label": "Kubernetes Version",
-          "type": "string",
-          "description": "Kubernetes version slug"
-        },
-        {
-          "key": "node_pool",
-          "label": "Node Pool",
-          "type": "map",
-          "description": "Node pool config"
-        }
-      ]
-    },
-    "platform.ecs": {
-      "type": "platform.ecs",
-      "label": "ECS Fargate Service",
-      "category": "infrastructure",
-      "description": "AWS ECS/Fargate service with task definitions and ALB target group config",
-      "outputs": [
-        {
-          "name": "service",
-          "type": "JSON",
-          "description": "Provisioned ECS Fargate service ARN and endpoint"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "cluster",
-          "label": "ECS Cluster",
-          "type": "string",
-          "description": "ECS cluster name",
-          "required": true
-        },
-        {
-          "key": "region",
-          "label": "AWS Region",
-          "type": "string",
-          "description": "AWS region (e.g. us-east-1)"
-        },
-        {
-          "key": "launch_type",
-          "label": "Launch Type",
-          "type": "string",
-          "description": "FARGATE or EC2"
-        },
-        {
-          "key": "desired_count",
-          "label": "Desired Count",
-          "type": "string",
-          "description": "Number of tasks to run"
-        },
-        {
-          "key": "vpc_subnets",
-          "label": "VPC Subnets",
-          "type": "array",
-          "description": "List of subnet IDs",
-          "arrayItemType": "string"
-        },
-        {
-          "key": "security_groups",
-          "label": "Security Groups",
-          "type": "array",
-          "description": "List of security group IDs",
-          "arrayItemType": "string"
         }
       ]
     },
@@ -3207,58 +2801,6 @@
           "label": "Node Groups",
           "type": "array",
           "description": "Node group definitions"
-        }
-      ]
-    },
-    "platform.networking": {
-      "type": "platform.networking",
-      "label": "VPC Networking",
-      "category": "infrastructure",
-      "description": "Manages VPC, subnets, NAT gateway, and security groups (mock or AWS backend)",
-      "outputs": [
-        {
-          "name": "vpc",
-          "type": "JSON",
-          "description": "Provisioned VPC with subnets and security groups"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "account",
-          "label": "Cloud Account",
-          "type": "string",
-          "description": "Name of the cloud.account module"
-        },
-        {
-          "key": "provider",
-          "label": "Provider",
-          "type": "string",
-          "description": "mock | aws"
-        },
-        {
-          "key": "vpc",
-          "label": "VPC Config",
-          "type": "map",
-          "description": "VPC configuration (cidr, name)",
-          "required": true
-        },
-        {
-          "key": "subnets",
-          "label": "Subnets",
-          "type": "array",
-          "description": "List of subnet definitions"
-        },
-        {
-          "key": "nat_gateway",
-          "label": "NAT Gateway",
-          "type": "boolean",
-          "description": "Provision a NAT gateway"
-        },
-        {
-          "key": "security_groups",
-          "label": "Security Groups",
-          "type": "array",
-          "description": "List of security group definitions"
         }
       ]
     },
@@ -4125,34 +3667,6 @@
         "max_tokens": 1024,
         "temperature": 0.3
       }
-    },
-    "step.apigw_apply": {
-      "type": "step.apigw_apply",
-      "label": "API Gateway Apply",
-      "category": "pipeline",
-      "description": "Applies API gateway configuration",
-      "configFields": []
-    },
-    "step.apigw_destroy": {
-      "type": "step.apigw_destroy",
-      "label": "API Gateway Destroy",
-      "category": "pipeline",
-      "description": "Destroys a provisioned API gateway",
-      "configFields": []
-    },
-    "step.apigw_plan": {
-      "type": "step.apigw_plan",
-      "label": "API Gateway Plan",
-      "category": "pipeline",
-      "description": "Plans API gateway changes without applying them",
-      "configFields": []
-    },
-    "step.apigw_status": {
-      "type": "step.apigw_status",
-      "label": "API Gateway Status",
-      "category": "pipeline",
-      "description": "Gets the current status of an API gateway",
-      "configFields": []
     },
     "step.app_deploy": {
       "type": "step.app_deploy",
@@ -5672,41 +5186,6 @@
       "description": "Gets the current status of a DNS zone",
       "configFields": []
     },
-    "step.do_deploy": {
-      "type": "step.do_deploy",
-      "label": "DO Deploy",
-      "category": "pipeline",
-      "description": "Deploys to DigitalOcean App Platform",
-      "configFields": []
-    },
-    "step.do_destroy": {
-      "type": "step.do_destroy",
-      "label": "DO Destroy",
-      "category": "pipeline",
-      "description": "Destroys a DigitalOcean App Platform application",
-      "configFields": []
-    },
-    "step.do_logs": {
-      "type": "step.do_logs",
-      "label": "DO Logs",
-      "category": "pipeline",
-      "description": "Retrieves logs from DigitalOcean App Platform",
-      "configFields": []
-    },
-    "step.do_scale": {
-      "type": "step.do_scale",
-      "label": "DO Scale",
-      "category": "pipeline",
-      "description": "Scales a DigitalOcean App Platform application",
-      "configFields": []
-    },
-    "step.do_status": {
-      "type": "step.do_status",
-      "label": "DO Status",
-      "category": "pipeline",
-      "description": "Gets the status of a DigitalOcean App Platform application",
-      "configFields": []
-    },
     "step.docker_build": {
       "type": "step.docker_build",
       "label": "Docker Build",
@@ -5893,34 +5372,6 @@
           "defaultValue": "applied_resources"
         }
       ]
-    },
-    "step.ecs_apply": {
-      "type": "step.ecs_apply",
-      "label": "ECS Apply",
-      "category": "pipeline",
-      "description": "Applies ECS Fargate service deployment",
-      "configFields": []
-    },
-    "step.ecs_destroy": {
-      "type": "step.ecs_destroy",
-      "label": "ECS Destroy",
-      "category": "pipeline",
-      "description": "Destroys an ECS Fargate service",
-      "configFields": []
-    },
-    "step.ecs_plan": {
-      "type": "step.ecs_plan",
-      "label": "ECS Plan",
-      "category": "pipeline",
-      "description": "Plans ECS service deployment changes",
-      "configFields": []
-    },
-    "step.ecs_status": {
-      "type": "step.ecs_status",
-      "label": "ECS Status",
-      "category": "pipeline",
-      "description": "Gets the status of an ECS Fargate service",
-      "configFields": []
     },
     "step.event_decrypt": {
       "type": "step.event_decrypt",
@@ -6828,27 +6279,6 @@
       "description": "Updates an installed marketplace plugin",
       "configFields": []
     },
-    "step.network_apply": {
-      "type": "step.network_apply",
-      "label": "Network Apply",
-      "category": "pipeline",
-      "description": "Applies VPC networking changes",
-      "configFields": []
-    },
-    "step.network_plan": {
-      "type": "step.network_plan",
-      "label": "Network Plan",
-      "category": "pipeline",
-      "description": "Plans VPC networking changes",
-      "configFields": []
-    },
-    "step.network_status": {
-      "type": "step.network_status",
-      "label": "Network Status",
-      "category": "pipeline",
-      "description": "Gets VPC networking status",
-      "configFields": []
-    },
     "step.nosql_delete": {
       "type": "step.nosql_delete",
       "label": "NoSQL Delete",
@@ -7609,34 +7039,6 @@
           "description": "Environment variables"
         }
       ]
-    },
-    "step.scaling_apply": {
-      "type": "step.scaling_apply",
-      "label": "Scaling Apply",
-      "category": "pipeline",
-      "description": "Applies autoscaling policies",
-      "configFields": []
-    },
-    "step.scaling_destroy": {
-      "type": "step.scaling_destroy",
-      "label": "Scaling Destroy",
-      "category": "pipeline",
-      "description": "Removes autoscaling policies",
-      "configFields": []
-    },
-    "step.scaling_plan": {
-      "type": "step.scaling_plan",
-      "label": "Scaling Plan",
-      "category": "pipeline",
-      "description": "Plans autoscaling changes",
-      "configFields": []
-    },
-    "step.scaling_status": {
-      "type": "step.scaling_status",
-      "label": "Scaling Status",
-      "category": "pipeline",
-      "description": "Gets autoscaling status",
-      "configFields": []
     },
     "step.scan_container": {
       "type": "step.scan_container",

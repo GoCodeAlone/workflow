@@ -16,9 +16,15 @@ type writeOnlyProvider struct {
 	getCalls  int
 	listCalls int
 	listOK    bool
+	name      string
 }
 
-func (p *writeOnlyProvider) Name() string { return "write-only-fake" }
+func (p *writeOnlyProvider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
+	return "write-only-fake"
+}
 
 func (p *writeOnlyProvider) Get(_ context.Context, _ string) (string, error) {
 	p.getCalls++
@@ -70,7 +76,7 @@ func TestBootstrapSecrets_WriteOnlyProviderSkipsExisting(t *testing.T) {
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if len(p.stored) != 0 {
@@ -78,6 +84,35 @@ func TestBootstrapSecrets_WriteOnlyProviderSkipsExisting(t *testing.T) {
 	}
 	if p.listCalls != 1 {
 		t.Fatalf("List called %d times, want 1 (should be cached)", p.listCalls)
+	}
+}
+
+// TestBootstrapSecrets_GitHubProviderCredentialMatchesUppercaseList verifies
+// GitHub's write-only secret list can satisfy mixed-case generated key probes.
+// GitHub Actions secret names are case-insensitive, and the API reports common
+// subkey names as uppercase (SPACES_ACCESS_KEY / SPACES_SECRET_KEY). Without
+// this, auto-bootstrap attempts to recreate an existing upstream provider
+// credential and DigitalOcean refuses the duplicate name.
+func TestBootstrapSecrets_GitHubProviderCredentialMatchesUppercaseList(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		t.Fatal("generator must not be called when GitHub-listed sub-keys already exist")
+		return "", nil
+	})
+	p := &writeOnlyProvider{
+		name:     "github",
+		existing: []string{"SPACES_ACCESS_KEY", "SPACES_SECRET_KEY"},
+		listOK:   true,
+	}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+	if len(p.stored) != 0 {
+		t.Fatalf("stored = %v, want empty (GitHub-listed secrets already exist)", p.stored)
 	}
 }
 
@@ -93,7 +128,7 @@ func TestBootstrapSecrets_WriteOnlyProviderGeneratesWhenMissing(t *testing.T) {
 			{Key: "JWT_SECRET", Type: "random_hex", Length: 8},
 		},
 	}
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if _, ok := p.stored["JWT_SECRET"]; !ok {
@@ -111,7 +146,7 @@ func TestBootstrapSecrets_WriteOnlyProviderListUnsupported(t *testing.T) {
 			{Key: "JWT_SECRET", Type: "random_hex", Length: 8},
 		},
 	}
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if len(p.stored) != 1 {
@@ -136,7 +171,7 @@ func TestBootstrapSecrets_ProviderCredentialAllSubKeysPresent(t *testing.T) {
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if len(p.stored) != 0 {
@@ -165,7 +200,7 @@ func TestBootstrapSecrets_ProviderCredentialPartialRegenerates(t *testing.T) {
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if got := p.stored["SPACES_access_key"]; got != "new-access" {
@@ -173,6 +208,65 @@ func TestBootstrapSecrets_ProviderCredentialPartialRegenerates(t *testing.T) {
 	}
 	if got := p.stored["SPACES_secret_key"]; got != "new-secret" {
 		t.Errorf("SPACES_secret_key = %q, want %q", got, "new-secret")
+	}
+}
+
+// TestBootstrapSecrets_StorageFilter_OnlyPersistsSubKeys verifies that
+// provider_credential JSON is filtered to the canonical sub-keys defined in
+// providerCredentialSubKeys before being persisted as GH Secrets. Without
+// this filter, sidecar metadata that the generator now emits alongside the
+// canonical creds (e.g. created_at after Task 8) would leak into the GH
+// Secrets store as phantom keys like SPACES_created_at — breaking the
+// audit-keys/prune contract that "every GH Secret matches an upstream key"
+// (ADR 0020 same-commit constraint with Task 8).
+//
+// This is the failing test for Task 9 of the spaces-key-iac-resource plan.
+// Until Task 10 implements the sub-key allow-list filter in bootstrapSecrets,
+// this test fails at the SPACES_created_at assertion.
+func TestBootstrapSecrets_StorageFilter_OnlyPersistsSubKeys(t *testing.T) {
+	// Stub generateSecret to mimic the post-Task-8 generateDOSpacesKey shape:
+	// access_key + secret_key (canonical) plus created_at (sidecar metadata).
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "AK",
+			"secret_key": "SK",
+			"created_at": "2026-05-08T10:00:00Z",
+		})
+		return string(out), nil
+	})
+
+	// Empty existing → bootstrap will generate.
+	p := &writeOnlyProvider{
+		existing: nil,
+		listOK:   true,
+	}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{
+				Key:    "SPACES",
+				Type:   "provider_credential",
+				Source: "digitalocean.spaces",
+				Name:   "test-key",
+			},
+		},
+	}
+
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+
+	// Storage MUST contain the two canonical sub-keys.
+	if _, ok := p.stored["SPACES_access_key"]; !ok {
+		t.Errorf("SPACES_access_key should be stored; stored=%v", p.stored)
+	}
+	if _, ok := p.stored["SPACES_secret_key"]; !ok {
+		t.Errorf("SPACES_secret_key should be stored; stored=%v", p.stored)
+	}
+
+	// Storage MUST NOT contain sidecar metadata fields like created_at:
+	// these are not real GH Secrets and would pollute audit-keys/prune output.
+	if _, ok := p.stored["SPACES_created_at"]; ok {
+		t.Errorf("SPACES_created_at MUST NOT be stored as a GH Secret (storage-filter regression); stored=%v", p.stored)
 	}
 }
 
@@ -199,10 +293,171 @@ func TestBootstrapSecrets_ProviderCredentialProbeIgnoresBareKey(t *testing.T) {
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
-	if _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if generateCalls != 1 {
 		t.Fatalf("generator called %d times, want 1", generateCalls)
+	}
+}
+
+// failOnSetProvider triggers a Set() failure on the first matching key
+// — used to exercise the transactional rollback path when a
+// provider_credential creation succeeds upstream but the store-write
+// half fails (e.g. GH PAT lost permissions mid-bootstrap).
+type failOnSetProvider struct {
+	failKey  string
+	setCalls []string
+}
+
+func (p *failOnSetProvider) Name() string { return "fail-on-set" }
+func (p *failOnSetProvider) Get(_ context.Context, _ string) (string, error) {
+	return "", secrets.ErrUnsupported
+}
+func (p *failOnSetProvider) Set(_ context.Context, key, _ string) error {
+	p.setCalls = append(p.setCalls, key)
+	if key == p.failKey {
+		return errFakeStoreUnavailable
+	}
+	return nil
+}
+func (p *failOnSetProvider) Delete(_ context.Context, _ string) error { return nil }
+func (p *failOnSetProvider) List(_ context.Context) ([]string, error) {
+	return nil, secrets.ErrUnsupported
+}
+
+// recordingRevoker captures RevokeProviderCredential calls so the test
+// can assert rollback occurred. Implements interfaces.ProviderCredentialRevoker.
+type recordingRevoker struct {
+	calls []revokeCall
+}
+type revokeCall struct {
+	source       string
+	credentialID string
+}
+
+func (r *recordingRevoker) RevokeProviderCredential(_ context.Context, source, credentialID string) error {
+	r.calls = append(r.calls, revokeCall{source: source, credentialID: credentialID})
+	return nil
+}
+
+var errFakeStoreUnavailable = errFakeStore("store unavailable (simulated)")
+
+type errFakeStore string
+
+func (e errFakeStore) Error() string { return string(e) }
+
+// TestBootstrapSecrets_ProviderCredential_RollbackOnSetFailure is the
+// regression test for the orphan-key bug: when generateSecret returns a
+// fresh DO Spaces key but provider.Set fails to persist it, bootstrap
+// MUST revoke the just-minted upstream credential.
+//
+// Pre-fix behaviour: Set fails → return error → DO key remains in the
+// account with an unrecoverable secret_key. Every subsequent run mints
+// another orphan with the same name.
+//
+// Post-fix: Set failure triggers credRevoker.RevokeProviderCredential
+// with the access_key from the just-generated subKeyMap.
+func TestBootstrapSecrets_ProviderCredential_RollbackOnSetFailure(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "AK_ORPHAN",
+			"secret_key": "SK_DOOMED",
+		})
+		return string(out), nil
+	})
+
+	p := &failOnSetProvider{failKey: "SPACES_secret_key"}
+	rev := &recordingRevoker{}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+
+	_, _, err := bootstrapSecrets(context.Background(), p, cfg, nil, rev)
+	if err == nil {
+		t.Fatal("expected Set failure to surface as error")
+	}
+
+	if len(rev.calls) != 1 {
+		t.Fatalf("expected 1 rollback-revoke call; got %d", len(rev.calls))
+	}
+	if rev.calls[0].credentialID != "AK_ORPHAN" {
+		t.Errorf("rollback called with credentialID=%q want AK_ORPHAN", rev.calls[0].credentialID)
+	}
+	if rev.calls[0].source != "digitalocean.spaces" {
+		t.Errorf("rollback source=%q want digitalocean.spaces", rev.calls[0].source)
+	}
+}
+
+// TestBootstrapSecrets_ProviderCredential_RollbackOnFirstSetFailure
+// guards the most insidious shape of the bug: the very first Set call
+// fails (e.g. access_key write). The pre-fix code extracted
+// newAccessKey *during* the for-range loop, so a first-iteration
+// failure left newAccessKey empty even though the upstream key exists.
+// The fix extracts access_key BEFORE the loop.
+func TestBootstrapSecrets_ProviderCredential_RollbackOnFirstSetFailure(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "AK_FIRST",
+			"secret_key": "SK_FIRST",
+		})
+		return string(out), nil
+	})
+
+	p := &failOnSetProvider{failKey: "SPACES_access_key"}
+	rev := &recordingRevoker{}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+
+	_, _, err := bootstrapSecrets(context.Background(), p, cfg, nil, rev)
+	if err == nil {
+		t.Fatal("expected Set failure")
+	}
+	if len(rev.calls) != 1 || rev.calls[0].credentialID != "AK_FIRST" {
+		t.Errorf("rollback calls = %v; want one revoke of AK_FIRST", rev.calls)
+	}
+}
+
+// TestBootstrapSecrets_ForwardsGenName is the regression test for the
+// breakage caught during the gocodealone-multisite deploy: SecretGen
+// has a `name:` field but bootstrapSecrets didn't propagate it into
+// genConfig. provider_credential generators requiring a non-empty
+// name (e.g. digitalocean.spaces post-v0.60.4) then failed every run
+// because the config they received was missing the field.
+func TestBootstrapSecrets_ForwardsGenName(t *testing.T) {
+	var capturedConfig map[string]any
+	withStubGenerator(t, func(_ context.Context, _ string, cfg map[string]any) (string, error) {
+		capturedConfig = cfg
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "AK",
+			"secret_key": "SK",
+		})
+		return string(out), nil
+	})
+
+	p := &writeOnlyProvider{listOK: true}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{
+				Key:    "SPACES",
+				Type:   "provider_credential",
+				Source: "digitalocean.spaces",
+				Name:   "multisite-deploy-key",
+			},
+		},
+	}
+	if _, _, err := bootstrapSecrets(context.Background(), p, cfg, nil); err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+	if got := capturedConfig["name"]; got != "multisite-deploy-key" {
+		t.Errorf("generator received name=%v want multisite-deploy-key (full config: %v)", got, capturedConfig)
+	}
+	if got := capturedConfig["source"]; got != "digitalocean.spaces" {
+		t.Errorf("generator received source=%v want digitalocean.spaces", got)
 	}
 }

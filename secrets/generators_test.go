@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -214,6 +215,7 @@ func TestGenerateSecret_ProviderCredential_DOSpaces_WithBucket(t *testing.T) {
 
 	_, err := GenerateSecret(context.Background(), "provider_credential", map[string]any{
 		"source": "digitalocean.spaces",
+		"name":   "with-bucket-test",
 		"bucket": "my-state-bucket",
 	})
 	if err != nil {
@@ -254,6 +256,75 @@ func TestGenerateSecret_ProviderCredential_MissingToken(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error when DIGITALOCEAN_TOKEN is unset")
+	}
+}
+
+// TestGenerateDOSpacesKey_IncludesCreatedAt asserts that generateDOSpacesKey
+// surfaces the DO API's `created_at` timestamp alongside access_key+secret_key
+// in its JSON output. This is required by the upcoming SpacesKeyDriver IaC
+// resource (PR4b), which keys observed-key adoption on creation timestamps.
+//
+// Test isolation: redirects http.DefaultClient via the package's
+// rewriteTransport helper (defined in github_provider_test.go), matching the
+// sibling DOSpaces tests above. We deliberately do NOT use a process env
+// override (e.g. DIGITALOCEAN_API_URL) — that would be a credential-
+// exfiltration vector in production. Per ADR 0021.
+func TestGenerateDOSpacesKey_IncludesCreatedAt(t *testing.T) {
+	// Stub the DO API server. The generator now does a list-then-
+	// create dance to avoid orphaning duplicate-named keys, so the
+	// stub must respond to both verbs.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/spaces/keys":
+			// No existing keys — let the create path through.
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"keys":  []map[string]any{},
+				"links": map[string]any{"pages": map[string]any{}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/spaces/keys":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"key": map[string]any{
+					"access_key": "AK1234567890",
+					"secret_key": "SK_full_secret_value_here",
+					"name":       "test-key",
+					"created_at": "2026-05-08T10:30:00Z",
+					"grants":     []any{map[string]any{"permission": "fullaccess"}},
+				},
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("DIGITALOCEAN_TOKEN", "stub")
+
+	// Inject the test server URL by monkey-patching http.DefaultClient
+	// transport — same hermetic pattern as the existing
+	// TestGenerateSecret_ProviderCredential_DOSpaces tests above.
+	orig := http.DefaultClient.Transport
+	http.DefaultClient.Transport = rewriteTransport{base: srv.URL}
+	defer func() { http.DefaultClient.Transport = orig }()
+
+	raw, err := generateDOSpacesKey(context.Background(), map[string]any{"name": "test-key"})
+	if err != nil {
+		t.Fatalf("generateDOSpacesKey: %v", err)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got["access_key"] != "AK1234567890" {
+		t.Errorf("access_key: want AK1234567890, got %q", got["access_key"])
+	}
+	if got["secret_key"] != "SK_full_secret_value_here" {
+		t.Errorf("secret_key: want SK_full..., got %q", got["secret_key"])
+	}
+	if got["created_at"] != "2026-05-08T10:30:00Z" {
+		t.Errorf("created_at: want 2026-05-08T10:30:00Z, got %q", got["created_at"])
 	}
 }
 
@@ -366,4 +437,165 @@ func containsStr(s, sub string) bool {
 			}
 			return false
 		}())
+}
+
+// TestGenerateDOSpacesKey_RejectsDuplicateNameBeforeCreate verifies
+// that when a DO key with the requested name already exists, the
+// generator does NOT POST a duplicate. DO does not enforce name
+// uniqueness; a blind re-create would orphan another key whose
+// secret_key is unrecoverable. Instead the generator must fail loudly
+// with the existing access_key so the operator can decide.
+func TestGenerateDOSpacesKey_RejectsDuplicateNameBeforeCreate(t *testing.T) {
+	postCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/spaces/keys":
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"keys": []map[string]any{
+					{"name": "multisite-deploy-key", "access_key": "AK_EXISTING"},
+				},
+				"links": map[string]any{"pages": map[string]any{}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/spaces/keys":
+			postCalls++
+			// Should never reach here — pre-check must short-circuit.
+			w.WriteHeader(http.StatusCreated)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("DIGITALOCEAN_TOKEN", "stub")
+	orig := http.DefaultClient.Transport
+	http.DefaultClient.Transport = rewriteTransport{base: srv.URL}
+	defer func() { http.DefaultClient.Transport = orig }()
+
+	_, err := generateDOSpacesKey(context.Background(), map[string]any{"name": "multisite-deploy-key"})
+	if err == nil {
+		t.Fatal("expected error when duplicate-by-name exists")
+	}
+	if postCalls != 0 {
+		t.Errorf("generator POSTed despite duplicate name; calls=%d", postCalls)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `name="multisite-deploy-key"`) {
+		t.Errorf("error missing attempted name: %v", msg)
+	}
+	if !strings.Contains(msg, "AK_EXISTING") {
+		t.Errorf("error missing existing access_key hint: %v", msg)
+	}
+	if !strings.Contains(msg, "already exists") {
+		t.Errorf("error missing 'already exists' hint: %v", msg)
+	}
+	if !strings.Contains(msg, "--force-rotate") {
+		t.Errorf("error missing rotate guidance: %v", msg)
+	}
+}
+
+// TestGenerateDOSpacesKey_403QuotaWithoutNameConflict surfaces the
+// fallback hint when the conflicting key isn't found by name (could be
+// a real account-level quota OR a renamed zombie).
+func TestGenerateDOSpacesKey_403QuotaWithoutNameConflict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/spaces/keys":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"id":"forbidden","message":"key quota exceeded"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/spaces/keys":
+			w.WriteHeader(http.StatusOK)
+			// No matching name.
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"keys":  []map[string]any{{"name": "unrelated", "access_key": "AK_X"}},
+				"links": map[string]any{"pages": map[string]any{}},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("DIGITALOCEAN_TOKEN", "stub")
+	orig := http.DefaultClient.Transport
+	http.DefaultClient.Transport = rewriteTransport{base: srv.URL}
+	defer func() { http.DefaultClient.Transport = orig }()
+
+	_, err := generateDOSpacesKey(context.Background(), map[string]any{"name": "no-conflict"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "200-key quota AND name-uniqueness conflicts") {
+		t.Errorf("expected disambiguation hint; got %v", msg)
+	}
+	if !strings.Contains(msg, `name="no-conflict"`) {
+		t.Errorf("expected attempted name in error: %v", msg)
+	}
+}
+
+func TestLookupExistingSpacesKey_PaginatedHit(t *testing.T) {
+	pageCount := 0
+	var baseURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v2/spaces/keys" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		pageCount++
+		page := r.URL.Query().Get("page")
+		if page == "1" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"keys":  []map[string]any{{"name": "other", "access_key": "AK_OTHER"}},
+				"links": map[string]any{"pages": map[string]any{"next": baseURL + "/v2/spaces/keys?page=2"}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"keys":  []map[string]any{{"name": "target", "access_key": "AK_TARGET"}},
+			"links": map[string]any{"pages": map[string]any{}},
+		})
+	}))
+	defer srv.Close()
+	baseURL = srv.URL
+
+	orig := http.DefaultClient.Transport
+	http.DefaultClient.Transport = rewriteTransport{base: srv.URL}
+	defer func() { http.DefaultClient.Transport = orig }()
+
+	got := lookupExistingSpacesKey(context.Background(), "stub", "target")
+	if got != "AK_TARGET" {
+		t.Errorf("lookup = %q want AK_TARGET (paged %d times)", got, pageCount)
+	}
+}
+
+func TestLookupExistingSpacesKey_Miss(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"keys":  []map[string]any{{"name": "a"}, {"name": "b"}},
+			"links": map[string]any{"pages": map[string]any{}},
+		})
+	}))
+	defer srv.Close()
+
+	orig := http.DefaultClient.Transport
+	http.DefaultClient.Transport = rewriteTransport{base: srv.URL}
+	defer func() { http.DefaultClient.Transport = orig }()
+
+	if got := lookupExistingSpacesKey(context.Background(), "stub", "missing"); got != "" {
+		t.Errorf("miss = %q want empty", got)
+	}
+}
+
+// TestGenerateDOSpacesKey_RequiresName verifies that the generator
+// refuses to fall back to a shared default name. Sharing a default
+// like "workflow-spaces-key" across projects causes cross-project
+// collisions in any account that runs more than one workflow-managed
+// deploy.
+func TestGenerateDOSpacesKey_RequiresName(t *testing.T) {
+	t.Setenv("DIGITALOCEAN_TOKEN", "stub")
+	_, err := generateDOSpacesKey(context.Background(), map[string]any{})
+	if err == nil {
+		t.Fatal("expected error when name is unset")
+	}
+	if !strings.Contains(err.Error(), "`name` is required") {
+		t.Errorf("error wording: %v", err)
+	}
 }

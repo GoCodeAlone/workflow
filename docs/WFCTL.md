@@ -64,6 +64,7 @@ graph TD
     wfctl --> ci
     wfctl --> git
     wfctl --> registry
+    wfctl --> plugin-registry["plugin-registry"]
     wfctl --> update
     wfctl --> mcp
     wfctl --> editor-schemas["editor-schemas"]
@@ -88,6 +89,7 @@ graph TD
     audit --> audit-plugins["plugins"]
 
     infra --> infra-plan["plan"]
+    infra --> infra-derive["derive"]
     infra --> infra-apply["apply"]
     infra --> infra-destroy["destroy"]
     infra --> infra-status["status"]
@@ -97,6 +99,9 @@ graph TD
     infra --> infra-state["state"]
     infra --> infra-outputs["outputs"]
     infra --> infra-refresh-outputs["refresh-outputs"]
+    infra --> infra-test["test"]
+    infra --> infra-audit-secrets["audit-secrets"]
+    infra --> infra-audit-state-secrets["audit-state-secrets"]
 
     infra-state --> infra-state-list["list"]
     infra-state --> infra-state-export["export"]
@@ -107,8 +112,10 @@ graph TD
     plugin --> plugin-init["init"]
     plugin --> plugin-docs["docs"]
     plugin --> plugin-test["test"]
+    plugin --> plugin-conformance["conformance"]
     plugin --> plugin-search["search"]
     plugin --> plugin-install["install"]
+    plugin --> plugin-lock["lock"]
     plugin --> plugin-list["list"]
     plugin --> plugin-update["update"]
     plugin --> plugin-remove["remove"]
@@ -147,6 +154,12 @@ graph TD
     registry --> registry-list["list"]
     registry --> registry-add["add"]
     registry --> registry-remove["remove"]
+
+    plugin-registry --> plugin-registry-list["list"]
+    plugin-registry --> plugin-registry-add["add"]
+    plugin-registry --> plugin-registry-remove["remove"]
+    plugin-registry --> plugin-registry-compat["compatibility"]
+    plugin-registry-compat --> plugin-registry-compat-update["update"]
 ```
 
 ---
@@ -160,14 +173,14 @@ graph TD
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
-| **Infrastructure** | `infra plan/apply/destroy/status/drift/import/bootstrap/outputs`, `infra state list/export/import` |
+| **Infrastructure** | `infra derive/plan/apply/destroy/status/drift/import/bootstrap/outputs/test`, `infra state list/export/import` |
 | **CI/CD** | `ci generate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
-| **Plugin Management** | `plugin`, `registry`, `publish` |
+| **Plugin Management** | `plugin`, `plugin-registry`, `registry`, `publish` |
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
-| **Platform Inspection** | `audit plans`, `audit plugins`, `ports list`, `security audit`, `security generate-network-policies` |
+| **Platform Inspection** | `audit plans`, `audit plugins`, `audit repo`, `ports list`, `security audit`, `security generate-network-policies` |
 | **Utilities** | `snippets`, `manifest`, `pipeline`, `update`, `mcp` |
 
 ---
@@ -176,7 +189,7 @@ graph TD
 
 ### `audit`
 
-Audit Workflow ecosystem metadata without mutating project code. The command is intended for dogfooding release readiness checks: plans and design docs should carry implementation evidence, and plugin repos should expose compatible manifests.
+Audit Workflow ecosystem metadata without mutating project code. The command is intended for dogfooding release readiness checks: plans and design docs should carry implementation evidence, plugin repos should expose compatible manifests, and repository files should be portable and safe.
 
 ```
 wfctl audit <subject> [options]
@@ -291,6 +304,52 @@ wfctl audit plugins --repo-root /path/to/workspace --strict
 wfctl audit plugins --repo-root /path/to/workspace --strict-contracts
 ```
 
+#### `wfctl audit repo`
+
+Run repository-level quality gate checks. Catches portable-path issues, documentation frontmatter problems, and generated index drift before PR push/merge.
+
+```
+wfctl audit repo [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dir` | `.` | Repository root directory to audit |
+| `--json` | `false` | Write machine-readable JSON output |
+| `--strict` | `false` | Treat warnings as errors (exit non-zero) |
+| `--config` | _(none; resolves to `<dir>/.wfctl.yaml`)_ | Explicit path to project config with audit section |
+
+**Built-in checks:**
+
+| Code | Level | Description |
+|------|-------|-------------|
+| `non_portable_path` | WARN | File path contains non-ASCII, control characters, or Windows-incompatible characters |
+| `missing_doc_frontmatter` | WARN | Structured documentation file in `docs/` lacks YAML frontmatter |
+| `malformed_frontmatter` | ERROR | Frontmatter opening `---` has no closing delimiter |
+| `index_drift` | WARN | Plan file not referenced in `docs/plans/INDEX.md` |
+
+**Project config (`.wfctl.yaml`):**
+
+```yaml
+audit:
+  checks:
+    portable_paths: true
+    index_drift: true
+    doc_frontmatter: true
+  ignores:
+    - "vendor/*"
+    - "testdata/*"
+```
+
+Examples:
+
+```bash
+wfctl audit repo
+wfctl audit repo --dir /path/to/project --json
+wfctl audit repo --strict
+wfctl audit repo --config custom-audit.yaml
+```
+
 ### `editor-bundle`
 
 Export the canonical editor contract bundle for Workflow-aware IDEs and visual editors.
@@ -363,11 +422,15 @@ wfctl validate [options] <config.yaml> [config2.yaml ...]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-strict` | `false` | Enable strict validation (no empty modules allowed) |
+| `-strict` | `true` | Enable strict validation (default; retained for compatibility) |
+| `-loose` | `false` | Allow legacy loose validation for transitional configs (planned for removal in v1.0) |
+| `-non-strict` | `false` | Alias for `--loose` |
 | `-skip-unknown-types` | `false` | Skip unknown module/workflow/trigger type checks |
 | `-allow-no-entry-points` | `false` | Allow configs with no triggers, routes, subscriptions, or jobs |
 | `-dir` | _(none)_ | Validate all `.yaml`/`.yml` files in a directory (recursive) |
 | `-plugin-dir` | _(none)_ | Directory of installed external plugins; their types are loaded before validation |
+| `-plugin-manifest` | _(none)_ | Path to a `plugin.json` file, a directory containing one, or a directory of plugin checkouts. Repeatable. Loaded before validation so the manifest's module/step/trigger types are recognized. |
+| `-no-resolve-plugins` | `false` | Disable automatic resolution of `requires.plugins[]` against sibling/ancestor checkouts of the config file |
 
 **Examples:**
 
@@ -375,10 +438,25 @@ wfctl validate [options] <config.yaml> [config2.yaml ...]
 wfctl validate config.yaml
 wfctl validate example/*.yaml
 wfctl validate --dir ./example/
-wfctl validate --strict admin/config.yaml
+wfctl validate --loose legacy/config.yaml
 wfctl validate --skip-unknown-types example/*.yaml
 wfctl validate --plugin-dir data/plugins config.yaml
+wfctl validate --plugin-manifest ../workflow-plugin-foo config.yaml
+wfctl validate --plugin-manifest ../workflow-plugin-foo/plugin.json config.yaml
 ```
+
+Use `wfctl config validate` for `wfctl.yaml` and `.wfctl-lock.yaml`; this
+command validates runtime Workflow configs such as `workflow.yaml`.
+
+**Local plugin resolution.** When a config declares `requires.plugins[]`,
+`wfctl validate` automatically searches sibling and ancestor directories of the
+config file for a matching `plugin.json` so scenario or sample repositories can
+be validated without installing every referenced plugin into a registry first.
+Each plugin name is looked up at `<dir>/<name>/plugin.json`,
+`<dir>/plugins/<name>/plugin.json`, and `<dir>/providers/<name>/plugin.json`,
+walking up to three parent directories above the config file. Use
+`--plugin-manifest` for an explicit override or `--no-resolve-plugins` to
+disable the search entirely.
 
 When validating multiple files, a summary is printed:
 ```
@@ -488,6 +566,52 @@ Run a plugin through its full lifecycle in a test harness.
 wfctl plugin test [options]
 ```
 
+#### `plugin conformance`
+
+Run executable plugin/host compatibility checks and emit strict evidence for registry compatibility indexes. This executes plugin code, so use trusted source trees or CI-built release artifacts.
+
+```
+wfctl plugin conformance [options] <plugin-dir>
+wfctl plugin conformance --artifact <tar.gz> [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | `typed-iac` | Conformance mode. Only `typed-iac` is accepted; it checks strict typed IaC plugin launch/contract compatibility and is the only mode that satisfies typed-IaC registry readiness for manifests advertising `iacProvider` capability. |
+| `--artifact` | _(none)_ | Release artifact tar.gz to test instead of a local plugin directory |
+| `--build-package` | `.` | Go package to build when testing a source directory, for example `./cmd/plugin` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version recorded in evidence |
+| `--format` | `text` | Output format: `text` or `json` |
+| `--output` | _(none)_ | Write JSON evidence to a file |
+| `--timeout` | `30s` | Plugin launch/check timeout |
+
+**Compatibility evidence modes** (stored in the index; distinct from the `--mode` CLI flag):
+
+`wfctl plugin conformance` only generates `typed-iac` evidence. The `legacy-host-load` mode is an evidence/index mode that appears in compatibility indexes for older host-load smoke checks; it cannot be generated by the conformance command and is rejected as insufficient for manifests advertising `iacProvider` capability.
+
+| Evidence mode | How produced | Satisfies IaC readiness? |
+|---------------|-------------|--------------------------|
+| `typed-iac` | `wfctl plugin conformance --mode typed-iac` | **Yes** — required for manifests with `iacProvider` capability in first-party registries. |
+| `legacy-host-load` | Legacy tooling (not `wfctl plugin conformance`) | **No** — advisory only; never satisfies typed-IaC registry readiness; rejected at index-update time for IaC provider manifests. |
+
+A plugin can pass legacy host-load and still fail `wfctl plugin conformance --mode typed-iac` with:
+
+```
+error: iac: plugin uses legacy InvokeService dispatch removed in workflow v1.0.0
+```
+
+`plugin-registry compatibility update` for a manifest advertising `iacProvider` capability will reject `legacy-host-load` evidence with an actionable error.
+
+Local directory evidence is useful during development. Registry enforcement should use artifact evidence so `archiveSHA256` can be matched against the registry manifest download checksum.
+
+In artifact mode, `wfctl` discovers the plugin binary from the extracted archive automatically. It first tries the normalised install name (e.g. `digitalocean`), then the full manifest name (e.g. `workflow-plugin-digitalocean`), and finally scans the archive root for any other executable. This supports GoReleaser archives where the binary retains the full project name. Discovery runs the go-plugin handshake on each candidate; a candidate that does not perform the typed-IaC handshake is skipped with a diagnostic logged in the evidence `stderrTail`.
+
+```bash
+wfctl plugin conformance --mode typed-iac --format json ./workflow-plugin-digitalocean
+wfctl plugin conformance --mode typed-iac --build-package ./cmd/plugin --format json ./workflow-plugin-digitalocean
+wfctl plugin conformance --artifact dist/workflow-plugin-digitalocean.tar.gz --engine-version v0.51.2 --output evidence.json
+```
+
 #### `plugin search`
 
 Search the plugin registry by name, description, or keyword.
@@ -515,15 +639,39 @@ wfctl plugin install [options] <name>[@<version>]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-data-dir` | `data/plugins` | Plugin data directory |
+| `--plugin-dir` | `data/plugins` | Plugin directory |
+| `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
 | `-config` | _(default registry)_ | Registry config file path |
 | `-registry` | _(all registries)_ | Use a specific registry by name |
+| `--compat-mode` | `enforce` | Compatibility mode for registry installs: `enforce` or `warn` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
+| `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
+| `--skip-checksum` | `false` | Skip archive integrity verification. Use only for trusted internal URLs |
 
 ```bash
 wfctl plugin install my-plugin
 wfctl plugin install my-plugin@1.2.0
 wfctl plugin install --data-dir /opt/plugins my-plugin
 ```
+
+Registry installs resolve compatibility before selecting a version. Direct URL installs, local installs, GitHub repository fallback, and lockfile installs do not use registry evidence unless they are backed by registry metadata.
+
+#### `plugin lock`
+
+Regenerate `.wfctl-lock.yaml` from `wfctl.yaml` or legacy `requires.plugins[]`.
+
+```
+wfctl plugin lock [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `workflow.yaml` | Legacy workflow config path |
+| `--manifest` | `wfctl.yaml` | wfctl project manifest path |
+| `--lock-file` | `.wfctl-lock.yaml` | Lockfile path to write |
+| `--compat-mode` | `enforce` | Compatibility mode for registry lock resolution: `enforce` or `warn` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
+| `--force` | `false` | Permit known-failing or missing required compatibility evidence and record forced metadata in the lockfile |
 
 #### `plugin list`
 
@@ -547,7 +695,16 @@ wfctl plugin update [options] <name>
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-data-dir` | `data/plugins` | Plugin data directory |
+| `--plugin-dir` | `data/plugins` | Plugin directory |
+| `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--config` | _(default registry)_ | Registry config file path |
+| `--manifest` | `wfctl.yaml` | wfctl project manifest path |
+| `--lock-file` | `.wfctl-lock.yaml` | Lockfile path |
+| `--version` | _(none)_ | Pin this exact version in `wfctl.yaml` instead of installing |
+| `--compat-mode` | `enforce` | Compatibility mode for registry updates: `enforce` or `warn` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
+| `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
+| `--skip-checksum` | `false` | Skip archive integrity verification. Use only for trusted internal URLs |
 
 #### `plugin remove`
 
@@ -826,6 +983,47 @@ wfctl manifest [options] <config.yaml>
 wfctl manifest config.yaml
 wfctl manifest -format yaml config.yaml
 wfctl manifest -name my-service config.yaml
+```
+
+---
+
+### `config`
+
+Manage wfctl project configuration.
+
+```
+wfctl config <subcommand> [options]
+```
+
+#### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `validate` | Validate `wfctl.yaml` and `.wfctl-lock.yaml` project config files |
+| `migrate` | Manage engine config database schema migrations |
+
+#### `config validate`
+
+Validate the human-edited `wfctl.yaml` plugin manifest and, unless skipped, the
+machine-generated `.wfctl-lock.yaml` plugin lockfile.
+
+```
+wfctl config validate [options] [wfctl.yaml]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--manifest` | `wfctl.yaml` | Path to the wfctl project manifest |
+| `--lock-file` | `.wfctl-lock.yaml` | Path to the plugin lockfile |
+| `--skip-lock` | `false` | Skip lockfile validation |
+
+**Examples:**
+
+```bash
+wfctl config validate
+wfctl config validate wfctl.yaml
+wfctl config validate --manifest wfctl.yaml --lock-file .wfctl-lock.yaml
+wfctl config validate --skip-lock
 ```
 
 ---
@@ -1163,6 +1361,7 @@ wfctl infra <action> [options] [config.yaml]
 
 | Action | Description |
 |--------|-------------|
+| `derive` | Expand provider-derived IaC modules into Workflow YAML |
 | `plan` | Show planned infrastructure changes |
 | `apply` | Apply infrastructure changes |
 | `status` | Show current infrastructure status |
@@ -1173,6 +1372,12 @@ wfctl infra <action> [options] [config.yaml]
 | `state` | Manage state storage (list/export/import) |
 | `outputs` | Print resource outputs from state (yaml/json/env formats) |
 | `refresh-outputs` | Read live outputs from each provider and reconcile state (no cloud writes) |
+| `test` | Hermetically validate expected infra config, resolved provider inputs, and plan actions |
+| `cleanup` | Tag-based force-cleanup across providers that implement `interfaces.Enumerator` |
+| `audit-secrets` | Report `provider_credential` anti-patterns in `secrets.generate` |
+| `audit-keys` | List cloud-side resources of `--type` via the provider's `interfaces.EnumeratorAll` |
+| `prune` | Destructively delete cloud resources by `--created-before` / `--exclude-access-key` (two-key opt-in) |
+| `rotate-and-prune` | All-in-one: rotate the canonical credential, then prune older keys with the new key as exclusion target |
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -1184,6 +1389,38 @@ wfctl infra <action> [options] [config.yaml]
 | `--parallelism` | `10` | Number of parallel operations |
 | `--lock-timeout` | `0s` | Timeout for state lock acquisition |
 | `--force-rotate` | `` | (`bootstrap` only) Comma-separated list of secret names to regenerate, replacing existing values. Repeatable. Use to recover from known-bad secrets (empty value, leaked, dead key). Refuses `provider_credential` types. |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for plugin-loading commands (plan, apply, status, drift, destroy, import, bootstrap, refresh-outputs, cleanup, align, audit-keys, prune, rotate-and-prune). Useful for isolated CI smoke tests. |
+
+#### `infra derive`
+
+`wfctl infra derive` calculates missing infrastructure requirements from the
+Workflow config and asks the selected provider mapper to generate concrete
+`infra.*` modules. It is explicit by design: `infra plan` and `infra apply` do
+not derive modules at apply time.
+
+```bash
+wfctl infra derive --config workflow.yaml --provider digitalocean --runtime do-app-platform --env production --dry-run --non-interactive
+wfctl infra derive --config workflow.yaml --provider aws --runtime ecs --write --non-interactive
+```
+
+Generated modules include `satisfies` keys so future runs can see that the
+requirement has been handled. A user-authored module can opt out of derivation
+the same way:
+
+```yaml
+modules:
+  - name: otel-collector
+    type: infra.container_service
+    satisfies:
+      - observability.telemetry.default
+    config:
+      image: otel/opentelemetry-collector-contrib:latest
+```
+
+`--dry-run` prints the expanded YAML and leaves the file unchanged. `--write`
+updates only the root `--config` file, even when imports contributed the
+requirements. Use `--non-interactive` in CI or agent workflows so ambiguous
+provider/runtime choices fail with a deterministic error instead of prompting.
 
 **State Subcommands:**
 
@@ -1201,9 +1438,11 @@ wfctl infra state <subaction> [options]
 
 ```bash
 wfctl infra plan infra.yaml
+wfctl infra derive --config workflow.yaml --provider digitalocean --runtime do-app-platform --dry-run --non-interactive
 wfctl infra apply --auto-approve infra.yaml
 wfctl infra status --config infra.yaml
 wfctl infra drift infra.yaml
+wfctl infra test tests/infra_test.yaml
 wfctl infra destroy --auto-approve infra.yaml
 wfctl infra import --config infra.yaml --env staging --name site-dns --id do-domain-123
 wfctl infra import --config infra.yaml --name site-dns
@@ -1216,6 +1455,106 @@ wfctl infra state import --source state.json
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN
 wfctl infra bootstrap -c infra.yaml --env staging --force-rotate NATS_AUTH_TOKEN,DATABASE_URL
 wfctl infra bootstrap -c infra.yaml --force-rotate FOO --force-rotate BAR
+
+# Use an isolated plugin directory for CI smoke tests:
+wfctl infra apply --dry-run --plugin-dir /tmp/ci-plugins -c infra.yaml
+wfctl infra plan --plugin-dir /tmp/ci-plugins -c infra.yaml
+```
+
+#### `infra test`
+
+`wfctl infra test` validates infrastructure expectations without contacting live
+providers or reading cloud credentials. Test mode renders the Workflow config,
+resolves environment/JIT references against the fixture state, and computes the
+plan with the hermetic config-hash differ. It never calls provider `Apply` or
+`Destroy`; provider/plugin contracts remain strict for normal `infra plan` and
+`infra apply` paths.
+
+```bash
+wfctl infra test tests/infra_test.yaml
+```
+
+Smallest useful test file:
+
+```yaml
+config: ../infra.yaml
+env: staging
+current_state:
+  - name: existing-db
+    type: infra.database
+    config_hash: 8f2c...
+expect:
+  resources_count: 3
+  resources:
+    - name: network
+      type: infra.vpc
+      config:
+        cidr: 10.10.0.0/16
+  provider_inputs:
+    resources:
+      - name: api
+        config:
+          image: ghcr.io/acme/api:sha
+  plan:
+    action_counts:
+      create: 2
+      update: 1
+    actions:
+      - action: create
+        resource:
+          name: network
+          type: infra.vpc
+```
+
+Assertions are partial: listed resources/actions must be present, but configs
+may include additional provider-specific keys. Use `resources_count` and
+`plan.action_counts` for generated collections such as N subnets or multiple app
+components, and use `current_state` fixtures to cover update/delete plan shapes.
+
+#### `infra cleanup`
+
+Tag-based force-cleanup across every provider declared in the config. For each `iac.provider` module, type-asserts to the optional `interfaces.Enumerator`; providers that implement it are queried via `EnumerateByTag`, and the matched resources are either listed (`--dry-run`, default) or deleted (`--fix`). Providers that do **not** implement `Enumerator` are skipped with `skipped <provider>: provider does not implement Enumerator` to stdout so operators see the explicit skip.
+
+Used by the conformance smoke gate (`.github/workflows/conformance-smoke.yml`) to scrub resources orphaned by panicking tests before the hourly leak-scrubber cron picks them up. Safe to call from any operator workstation against any IaC config.
+
+```
+wfctl infra cleanup --tag NAME [-c CONFIG] [--env ENV] [--dry-run | --fix]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tag` | _(required)_ | Tag value to match resources against. Format is provider-specific (DO uses single-string tags). |
+| `-c`, `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for config and state resolution |
+| `--dry-run` | `true` | Preview only — list matched resources without deleting. |
+| `--fix` | `false` | Opt into deletion. Overrides `--dry-run`. |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
+
+**Behaviour:**
+
+- Per-provider failures (enumerate or delete) are collected but do **not** short-circuit the run — one bad provider must not suppress the rest. The exit code is non-zero when any provider failed.
+- Skip-on-non-Enumerator is logged to **stdout** (not stderr) so CI step output captures it as run metadata rather than as a failure signal.
+- `--dry-run` defaults to `true`. Even when explicitly setting `--dry-run=false`, the safe-default invariant requires `--fix` to actually mutate cloud resources.
+
+**Provider support (workflow v0.21.x):**
+
+| Provider plugin | Implements `Enumerator`? |
+|---|---|
+| `workflow-plugin-digitalocean` | Yes (PR 6b follow-up; uses `godo.Tags.Get`). |
+| `workflow-plugin-aws` | Not yet — skipped. |
+| `workflow-plugin-gcp` | Not yet — skipped. |
+| `workflow-plugin-azure` | Not yet — skipped. |
+
+When AWS/GCP/Azure providers gain `Enumerator` implementations on their own per-plugin cycles, the cleanup subcommand picks them up automatically — no core change required.
+
+**Example:**
+
+```bash
+# Preview what would be deleted for tag "conformance-pr-123":
+wfctl infra cleanup --tag conformance-pr-123
+
+# Actually delete:
+wfctl infra cleanup --tag conformance-pr-123 --fix
 ```
 
 #### `infra apply`
@@ -1225,7 +1564,8 @@ Reconcile cloud infrastructure to match the desired state declared in the config
 ```
 wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
                   [--refresh] [--allow-protected-prune] [--skip-refresh]
-                  [--allow-replace=NAME1,NAME2,...]
+                  [--skip-bootstrap]
+                  [--allow-replace=NAME1,NAME2,...] [--dry-run] [--format FMT]
 ```
 
 | Flag | Default | Description |
@@ -1235,10 +1575,14 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `-S`, `--show-sensitive` | `false` | Show sensitive values in plaintext |
 | `--env` | `` | Environment name (resolves per-module `environments:` overrides) |
 | `--plan` | `` | Apply from a pre-emitted `plan.json` (skips `ComputePlan`) |
+| `--dry-run` | `false` | Show planned operations without executing provider mutations |
+| `--format` | `table` | Dry-run output format: `table`, `json` |
 | `--refresh` | `false` | Detect drift and prune ghost-in-state entries before applying |
 | `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
 | `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
+| `--skip-bootstrap` | `false` | Skip auto-bootstrap before apply when required secrets/state already exist |
 | `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 
 **Protected-resource gate:**
 
@@ -1265,6 +1609,12 @@ To authorize, re-run with the printed flag value. Names not in the list keep the
 **Examples:**
 
 ```bash
+# Dry-run: preview what apply would do without mutations.
+wfctl infra apply --dry-run --env staging -c infra.yaml
+
+# Dry-run with JSON output for automation.
+wfctl infra apply --dry-run --format json --env staging -c infra.yaml
+
 # Standard apply.
 wfctl infra apply --auto-approve -c infra.yaml --env staging
 
@@ -1276,6 +1626,58 @@ wfctl infra apply --auto-approve -c infra.yaml --env staging --plan plan.json
 wfctl infra apply --auto-approve -c infra.yaml --env prod \
   --allow-replace=coredump-prod-vpc,coredump-prod-pg
 ```
+
+#### Generator metadata
+
+Every plan file (`plan.json`) produced by `wfctl infra plan -o` and the `metadata.json` sidecar written by `wfctl infra apply` (filesystem state backend) record the exact toolchain versions in use at generation time.
+
+**`plan.json`** — the `generator_metadata` field is nested inside the plan object:
+
+```json
+{
+  "id": "plan-1234567890",
+  "actions": [...],
+  "generator_metadata": {
+    "wfctl_version": "v0.42.0",
+    "plugins": [
+      { "name": "workflow-plugin-aws", "version": "2.3.1" },
+      { "name": "workflow-plugin-gcp", "version": "1.0.5" }
+    ]
+  }
+}
+```
+
+**`<state-dir>/metadata.json`** — the file contains only the `generator_metadata` wrapper (no surrounding plan object):
+
+```json
+{
+  "generator_metadata": {
+    "wfctl_version": "v0.42.0",
+    "plugins": [
+      { "name": "workflow-plugin-aws", "version": "2.3.1" },
+      { "name": "workflow-plugin-gcp", "version": "1.0.5" }
+    ]
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `wfctl_version` | The wfctl binary version (from `debug.ReadBuildInfo`; `"dev"` for local builds) |
+| `plugins[].name` | Plugin name from the plugin's `plugin.json` manifest |
+| `plugins[].version` | Plugin version from the plugin's `plugin.json` manifest |
+
+> **Note:** `plugins` lists all IaC provider plugins *installed* in `WFCTL_PLUGIN_DIR` at generation time (those whose `plugin.json` declares `capabilities.iacProvider`). In normal usage this is equivalent to the set that was loaded for the run; extra installed-but-not-used plugins may appear if the directory contains multiple providers.
+
+**Where it is stored:**
+
+- **`plan.json`** — embedded in the `generator_metadata` field when `wfctl infra plan -o plan.json` is used.
+- **`<state-dir>/metadata.json`** — written (and overwritten) by `wfctl infra apply` for the filesystem state backend. This persists the toolchain version even when no plan file is requested.
+
+This metadata is useful for:
+- Knowing which wfctl and plugin versions produced a given state artifact.
+- Identifying version mismatches when re-applying stored plans.
+- Understanding what upgrades may be required if behavior has changed between versions.
 
 #### `infra refresh-outputs`
 
@@ -1337,8 +1739,14 @@ WFCTL_REFRESH_OUTPUTS=1 wfctl infra apply --auto-approve --skip-refresh -c infra
 #### `infra align`
 
 Run a battery of static alignment checks against a config (and optionally a
-plan). Each rule (`R-A1` … `R-A10`) emits findings as a `FAIL` (always
-non-zero exit) or `WARN` (non-zero only with `--strict`).
+plan). Each rule (`R-A1` … `R-A10`) emits findings at one of three severity
+tiers:
+
+- `FAIL` — deterministic failure; always non-zero exit (e.g. unresolved env var).
+- `ERROR` — hard rule violation; always non-zero exit, equivalent to `FAIL`
+  for exit-code purposes. Used by rules that pair the violation with a
+  fix-suggestion in the message (e.g. `R-A9`).
+- `WARN` — advisory; non-zero exit only with `--strict`.
 
 ```
 wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict] [--strict-health] [--strict-cidr] [--max-changes N]
@@ -1349,10 +1757,11 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 | `--config`, `-c` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
 | `--env` | `` | Environment name for per-env config resolution |
 | `--plan` | `` | Path to a plan JSON file. Enables `R-A7` (plan-output sanity) and `R-A10` (provider `ValidatePlan` dispatch). |
-| `--strict` | `false` | Treat all `WARN` findings as `FAIL` (exit 1) |
+| `--strict` | `false` | Treat all `WARN` findings as failing (exit 1). `FAIL` and `ERROR` always block regardless of this flag. |
 | `--strict-health` | `false` | Treat `R-A2` health-check `WARN`s as `FAIL` |
 | `--strict-cidr` | `false` | Enable strict CIDR overlap checks (reserved) |
 | `--max-changes` | `50` | Warn when the plan has more than N actions |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 
 | Rule | Name | Severity |
 |------|------|----------|
@@ -1364,7 +1773,7 @@ wfctl infra align [--config <file>] [--env <env>] [--plan <plan.json>] [--strict
 | R-A6 | Network/exposure alignment | FAIL or WARN |
 | R-A7 | Plan-output sanity (requires `--plan`) | FAIL or WARN |
 | R-A8 | WebAuthn RP_ID alignment | FAIL |
-| R-A9 | Suspicious `provider_credential` key suffix | WARN |
+| R-A9 | Suspicious `provider_credential` key suffix (doubled-create anti-pattern) | ERROR |
 | R-A10 | Provider `ValidatePlan` diagnostics (requires `--plan`) | FAIL or WARN |
 
 **R-A10 — provider-side cross-resource validation.** When `--plan` is given,
@@ -1393,6 +1802,118 @@ wfctl infra align -c infra.yaml --env staging
 # Include R-A7 + R-A10 by passing a plan file; --strict promotes WARNs to FAILs.
 wfctl infra plan -c infra.yaml --env staging -o plan.json
 wfctl infra align -c infra.yaml --env staging --plan plan.json --strict
+```
+
+#### `infra audit-keys`
+
+List every cloud-side resource of `--type <T>` via the provider's
+optional `interfaces.EnumeratorAll`. Renders Name, ProviderID
+(access_key), and CreatedAt as a fixed-width table — the read-only
+surface for drift correction before the destructive `infra prune`.
+
+```
+wfctl infra audit-keys --type <T> [-c CONFIG] [--env ENV]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | _(required)_ | Resource type to enumerate (e.g. `infra.spaces_key`) |
+| `--config`, `-c` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for config resolution |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. |
+
+`audit-keys` requires the loaded `iac.provider` to implement the optional
+`interfaces.EnumeratorAll` interface (per ADR 0016). Providers that don't
+are surfaced as a structured error (`audit-keys: no loaded provider
+implements EnumeratorAll`); pair with `audit-secrets` for the
+config-side equivalent.
+
+```bash
+wfctl infra audit-keys --type infra.spaces_key
+wfctl infra audit-keys --type infra.spaces_key -c infra.yaml --env staging
+```
+
+#### `infra prune`
+
+Destructively delete cloud-side resources matching a time + access_key
+discriminator. The command refuses to run unless **all three** opt-ins
+are satisfied (`--confirm` flag + `WFCTL_CONFIRM_PRUNE=1` env var +
+interactive y/N prompt unless `--non-interactive`), AND the
+`--exclude-access-key` flag names the active credential to preserve
+(paranoia rail — prevents a typo from nuking the live key).
+
+```
+wfctl infra prune --type <T> --created-before <RFC3339> --exclude-access-key <AK> --confirm [--non-interactive] [--preserve-names <regex>] [--recovery-from-last-rotation]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | _(required)_ | Resource type (e.g. `infra.spaces_key`) |
+| `--created-before` | _(required)_ | RFC3339 timestamp; only resources older than this are eligible |
+| `--exclude-access-key` | _(required)_ | Access key to preserve (paranoia rail) |
+| `--preserve-names` | `` | Regex of resource names to preserve (skip during delete; orthogonal to time filter) |
+| `--confirm` | `false` | Required: explicit confirmation flag (paired with `WFCTL_CONFIRM_PRUNE=1` env var) |
+| `--non-interactive` | `false` | Skip the y/N prompt (CI-friendly) |
+| `--recovery-from-last-rotation` | `false` | Read filter args from `${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json` (written by `infra rotate-and-prune` for recovery from partial-failure rotations without re-rotating) |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. |
+
+Exit codes:
+
+- `0`: prune succeeded (zero or more deletions; no failures)
+- `1`: opt-in/filter validation failed, enumerate failed, or one or more deletes failed
+- `2`: argument parse error or missing required `--type`
+
+On success when `--recovery-from-last-rotation` was used, the recovery
+file is removed. On failure, it is retained so the operator can re-invoke
+after diagnosing.
+
+```bash
+WFCTL_CONFIRM_PRUNE=1 wfctl infra prune \
+  --type infra.spaces_key \
+  --created-before 2026-05-08T00:00:00Z \
+  --exclude-access-key AK_ACTIVE \
+  --confirm
+
+# Recovery flow after a partial-failure rotate-and-prune:
+WFCTL_CONFIRM_PRUNE=1 wfctl infra prune \
+  --type infra.spaces_key \
+  --recovery-from-last-rotation \
+  --confirm
+```
+
+#### `infra rotate-and-prune`
+
+All-in-one: rotate the canonical credential for `--name` (mints a new
+key, revokes the old credential per ADR 0012), persist a recovery
+record, then delegate to `infra prune` with the new access_key as the
+exclusion target. On full success, the recovery file is removed (no
+durable evidence beyond the new credential itself + pruned-key state).
+On prune-step failure, the recovery file is retained at
+`${WFCTL_STATE_DIR:-$HOME/.wfctl}/last-rotation.json` (perms `0600`) so
+the operator can re-invoke `infra prune --recovery-from-last-rotation`
+without re-rotating (which would leak yet another key).
+
+```
+wfctl infra rotate-and-prune --type <T> --name <name> --confirm [--non-interactive] [-c CONFIG] [--env ENV] [--preserve-names <regex>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | _(required)_ | Resource type (e.g. `infra.spaces_key`) |
+| `--name` | _(required)_ | Canonical credential name to rotate (matches `secrets.generate[].name`) |
+| `--config`, `-c` | _(auto-detected)_ | Config file |
+| `--env` | `` | Environment name |
+| `--preserve-names` | `` | Regex of resource names to preserve during the prune step (forwarded as `--preserve-names` to `infra prune`) |
+| `--confirm` | `false` | Required: paired with `WFCTL_CONFIRM_PRUNE=1` env var |
+| `--non-interactive` | `false` | Skip the y/N prompt (forwarded to the prune step) |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. |
+
+```bash
+WFCTL_CONFIRM_PRUNE=1 wfctl infra rotate-and-prune \
+  --type infra.spaces_key \
+  --name SPACES \
+  --confirm \
+  --non-interactive
 ```
 
 ---
@@ -1640,6 +2161,8 @@ wfctl ci run [options]
 | `--phase` | `build,test` | Comma-separated phases: `build`, `test`, `deploy` |
 | `--env` | `` | Target environment (required for `deploy` phase) |
 | `--verbose` | `false` | Show detailed command output |
+| `--dry-run` | `false` | Show planned deploy operations without executing (deploy phase only) |
+| `--format` | `table` | Dry-run output format: `table`, `json` |
 
 **Examples:**
 
@@ -1649,6 +2172,12 @@ wfctl ci run --phase build,test
 
 # Deploy to staging
 wfctl ci run --phase deploy --env staging
+
+# Dry-run deploy: preview what deploy would do without mutations.
+wfctl ci run --phase deploy --dry-run --env staging
+
+# Dry-run with JSON output for CI automation.
+wfctl ci run --phase deploy --dry-run --format json --env staging
 
 # Full pipeline
 wfctl ci run --phase build,test,deploy --env production
@@ -1902,12 +2431,16 @@ wfctl git push -config-only
 
 ---
 
-### `registry list`
+### `plugin-registry`
+
+Plugin catalog registry management. `wfctl registry` remains a compatibility alias for this plugin catalog surface until the container registry dispatcher replaces it.
+
+#### `plugin-registry list`
 
 Show configured plugin registries.
 
 ```
-wfctl registry list [options]
+wfctl plugin-registry list [options]
 ```
 
 | Flag | Default | Description |
@@ -1916,12 +2449,12 @@ wfctl registry list [options]
 
 ---
 
-### `registry add`
+#### `plugin-registry add`
 
 Add a plugin registry source.
 
 ```
-wfctl registry add [options] <name>
+wfctl plugin-registry add [options] <name>
 ```
 
 | Flag | Default | Description |
@@ -1934,17 +2467,17 @@ wfctl registry add [options] <name>
 | `--priority` | `10` | Priority (lower = higher priority) |
 
 ```bash
-wfctl registry add --owner myorg --repo my-registry my-registry
+wfctl plugin-registry add --owner myorg --repo my-registry my-registry
 ```
 
 ---
 
-### `registry remove`
+#### `plugin-registry remove`
 
 Remove a plugin registry source. Cannot remove the `default` registry.
 
 ```
-wfctl registry remove [options] <name>
+wfctl plugin-registry remove [options] <name>
 ```
 
 | Flag | Default | Description |
@@ -1952,7 +2485,69 @@ wfctl registry remove [options] <name>
 | `--config` | `~/.config/wfctl/config.yaml` | Registry config file path |
 
 ```bash
-wfctl registry remove my-registry
+wfctl plugin-registry remove my-registry
+```
+
+#### `plugin-registry compatibility update`
+
+Update `compatibility/<plugin>/index.json` in a local plugin registry checkout from one or more conformance evidence files.
+
+```
+wfctl plugin-registry compatibility update --registry-dir <dir> --plugin <name> --version <version> --evidence <file> [--evidence <file>]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--registry-dir` | _(required)_ | Local plugin registry checkout |
+| `--plugin` | _(required)_ | Plugin name |
+| `--version` | _(required)_ | Plugin version |
+| `--evidence` | _(required)_ | Compatibility evidence JSON path. Repeat for multiple platforms or engines |
+| `--derive-ranges` | `false` | Derive pass ranges from enumerated evidence |
+| `--latest-engine` | _(none)_ | Latest engine version used to mark stale evidence metadata |
+
+The updater validates that evidence matches the requested plugin/version, the registry manifest version, current platform fields, and artifact checksum. It writes the compatibility index atomically.
+
+```bash
+wfctl plugin-registry compatibility update \
+  --registry-dir ../workflow-registry \
+  --plugin workflow-plugin-digitalocean \
+  --version v1.0.1 \
+  --evidence evidence/linux-amd64-v0.51.2.json \
+  --latest-engine v0.51.2
+```
+
+Registry config can mark whether compatibility evidence is enforceable:
+
+```yaml
+compatibility:
+  mode: enforce
+registries:
+  - name: internal
+    type: static
+    url: https://registry.example.com/workflow/v1
+    compatibilityEvidence:
+      trust: first_party
+```
+
+`compatibilityEvidence.trust: first_party` allows enforcement. User-added registries default to advisory evidence unless trust is set explicitly. `signed` is reserved for a future signature-backed mode and is rejected today. `compatibility.mode` may be `enforce` or `warn`; CLI flags override the environment, which overrides this config.
+
+Compatibility environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `WFCTL_PLUGIN_COMPAT_MODE` | Default plugin compatibility mode: `enforce` or `warn` |
+| `WFCTL_ENGINE_VERSION` | Workflow engine version used for conformance evidence and resolver decisions |
+
+Plugin CI should generate evidence with the released artifact, then update the registry index:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: GoCodeAlone/workflow/.github/actions/setup-wfctl@main
+    with:
+      version: v0.51.2
+  - run: wfctl plugin conformance --mode typed-iac --artifact dist/plugin.tar.gz --engine-version v0.51.2 --format json --output evidence.json
+  - run: wfctl plugin-registry compatibility update --registry-dir ../workflow-registry --plugin workflow-plugin-example --version "$PLUGIN_VERSION" --evidence evidence.json --latest-engine v0.51.2
 ```
 
 ---
@@ -2389,3 +2984,39 @@ env:
 ```
 
 Files: `.github/workflows/ci.yml`, `benchmark.yml`, `pre-release.yml`, `release.yml`, `dependency-update.yml`. New workflow files that invoke `go test` or `wfctl` should add the same env var.
+
+## `infra audit-state-secrets`
+
+Audit `state.Outputs` against the configured `secrets.Provider` for orphan
+secrets, missing routed values, legacy plaintext, and mistaken
+config-references in state.
+
+```
+wfctl infra audit-state-secrets [--config infra.yaml] [--prune]
+```
+
+**Findings:**
+
+- **orphan secret** — provider has `<resource>_<key>` but no state
+  resource named `<resource>` exists.
+- **missing routed value** — state has `secret_ref://...` placeholder
+  but provider does not have the secret.
+- **legacy plaintext** — state has plaintext value at a key matching
+  `secrets.DefaultSensitiveKeys()` (e.g., `secret_key`, `password`).
+- **config-reference in state** — state contains `secret://...` (user
+  config syntax leaked into a persisted state field).
+
+**Exit codes:** 0 = no findings; 1 = findings; 2 = audit error.
+
+**`--prune`:** delete confirmed orphan secrets from the provider.
+Idempotent; safe to rerun.
+
+**Write-only providers** (e.g., GitHub Actions, where `Get` returns
+`ErrUnsupported`): emits structured ADVISORY lines for placeholders it
+cannot verify, but does not exit non-zero on those alone. Orphan-secret
+detection is also skipped on write-only providers (List unsupported).
+
+Distinct from `audit-secrets` which audits the `secrets.generate` config
+block for anti-patterns. Run both as part of regular hygiene. See
+`DOCUMENTATION.md#sensitive-output-routing-v0270` for the full
+sensitive-output routing model.

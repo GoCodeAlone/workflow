@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -108,11 +109,13 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 			hash = configHash(spec.Config)
 		}
 		if rs, exists := currentMap[spec.Name]; !exists {
-			creates = append(creates, interfaces.PlanAction{
-				Action:             "create",
-				Resource:           spec,
-				ResolvedConfigHash: hash,
-			})
+			create, err := classifyCreate(ctx, p, spec, hash)
+			if err != nil {
+				return interfaces.IaCPlan{}, err
+			}
+			if create != nil {
+				creates = append(creates, *create)
+			}
 		} else {
 			candidates = append(candidates, modCandidate{
 				spec:     spec,
@@ -348,6 +351,64 @@ func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec in
 		}
 	}
 	return nil
+}
+
+// classifyCreate decides whether a desired resource absent from local state
+// should produce a create action. Drivers that opt in to ResourceAdoptionLocator
+// get one chance to locate/read an external resource and Diff it before create.
+// Nil provider, nil driver, or non-adoption drivers preserve legacy create
+// behavior.
+func classifyCreate(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, hash string) (*interfaces.PlanAction, error) {
+	create := &interfaces.PlanAction{
+		Action:             "create",
+		Resource:           spec,
+		ResolvedConfigHash: hash,
+	}
+	if p == nil {
+		return create, nil
+	}
+	driver := resourceDriverForCreate(p, spec.Type)
+	if driver == nil {
+		return create, nil
+	}
+	locator, ok := driver.(interfaces.ResourceAdoptionLocator)
+	if !ok {
+		return create, nil
+	}
+	ref, ok, err := locator.AdoptionRef(spec)
+	if err != nil {
+		return nil, fmt.Errorf("provider.AdoptionRef(%q/%q): %w", spec.Type, spec.Name, err)
+	}
+	if !ok {
+		return create, nil
+	}
+	current, err := driver.Read(ctx, ref)
+	if err != nil {
+		if errors.Is(err, interfaces.ErrResourceNotFound) {
+			return create, nil
+		}
+		return nil, fmt.Errorf("provider.Read(%q/%q): %w", spec.Type, spec.Name, err)
+	}
+	if current == nil {
+		return create, nil
+	}
+	diff, err := driver.Diff(ctx, spec, current)
+	if err != nil {
+		return nil, fmt.Errorf("provider.Diff(%q/%q): %w", spec.Type, spec.Name, err)
+	}
+	if diff == nil || (!diff.NeedsUpdate && !diff.NeedsReplace && !hasForceNew(diff.Changes)) {
+		return nil, nil
+	}
+	create.Changes = diff.Changes
+	return create, nil
+}
+
+func resourceDriverForCreate(p interfaces.IaCProvider, resourceType string) interfaces.ResourceDriver {
+	driver, err := p.ResourceDriver(resourceType)
+	if err != nil {
+		return nil
+	}
+	return driver
 }
 
 // resourceStateToOutput converts the persisted ResourceState into the

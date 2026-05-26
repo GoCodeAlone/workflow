@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -16,8 +17,13 @@ import (
 
 // AlignFinding is a single rule violation emitted by an alignment check.
 type AlignFinding struct {
-	Rule     string // R-A1, R-A2, etc.
-	Severity string // FAIL or WARN
+	Rule string // R-A1, R-A2, etc.
+	// Severity is one of:
+	//   - "FAIL"  — always blocks (exit 1)
+	//   - "ERROR" — always blocks (exit 1); used by rules that want to
+	//               carry a fix-suggestion in the message (e.g. R-A9)
+	//   - "WARN"  — blocks only under --strict
+	Severity string
 	Resource string // affected resource name
 	Message  string // human-readable description
 }
@@ -46,6 +52,12 @@ func buildAlignContext(cfgFile string) (*alignContext, error) {
 	}
 	if cfg.Secrets != nil {
 		ctx.secretGens = cfg.Secrets.Generate
+		for _, gen := range cfg.Secrets.Generate {
+			ctx.secretKeys[gen.Key] = struct{}{}
+		}
+		for _, entry := range cfg.Secrets.Entries {
+			ctx.secretKeys[entry.Name] = struct{}{}
+		}
 	}
 	for _, m := range cfg.Modules {
 		switch {
@@ -56,41 +68,15 @@ func buildAlignContext(cfgFile string) (*alignContext, error) {
 		case m.Type == "infra.database":
 			ctx.databases = append(ctx.databases, m)
 		case m.Type == "secrets.generate" || m.Type == "secrets.requires":
-			if gen, ok := extractSecretKeys(m.Config, "generate"); ok {
-				for _, k := range gen {
-					ctx.secretKeys[k] = struct{}{}
-				}
+			for _, k := range secretModuleKeys(m.Config, "generate") {
+				ctx.secretKeys[k] = struct{}{}
 			}
-			if req, ok := extractSecretKeys(m.Config, "requires"); ok {
-				for _, k := range req {
-					ctx.secretKeys[k] = struct{}{}
-				}
+			for _, k := range secretModuleKeys(m.Config, "requires") {
+				ctx.secretKeys[k] = struct{}{}
 			}
 		}
 	}
 	return ctx, nil
-}
-
-// extractSecretKeys extracts key names from config[field] which is expected
-// to be []any where each element is map[string]any with a "key" field.
-func extractSecretKeys(cfg map[string]any, field string) ([]string, bool) {
-	raw, ok := cfg[field]
-	if !ok {
-		return nil, false
-	}
-	items, ok := raw.([]any)
-	if !ok {
-		return nil, false
-	}
-	var keys []string
-	for _, item := range items {
-		if m, ok := item.(map[string]any); ok {
-			if k, ok := m["key"].(string); ok && k != "" {
-				keys = append(keys, k)
-			}
-		}
-	}
-	return keys, true
 }
 
 // ── R-A1: container/runtime alignment ──────────────────────────────────────
@@ -680,15 +666,21 @@ func checkRA8(ctx *alignContext) []AlignFinding {
 
 // ── R-A9: suspicious provider_credential key suffix ────────────────────────
 
-// checkRA9 warns when a secrets.generate entry with type "provider_credential"
-// uses a key that already ends with a known sub-key suffix (e.g. "_access_key",
-// "_secret_key"). This pattern means the caller pre-appended the sub-key name
-// that bootstrapSecrets will append again, producing double-suffixed storage
-// keys such as SPACES_access_key_access_key. The canonical form is to use the
-// root key (e.g. "SPACES") and let bootstrapSecrets derive the sub-key names.
+// checkRA9 fires (as an ERROR) when a secrets.generate entry with type
+// "provider_credential" uses a key that already ends with a known sub-key
+// suffix (e.g. "_access_key", "_secret_key"). This is the doubled-create
+// anti-pattern: each sub-keyed entry causes bootstrapSecrets to create a
+// separate cloud credential, producing an orphaned pair of keys instead of
+// a single canonical credential. The canonical form is to use the root key
+// (e.g. "SPACES") and let bootstrapSecrets auto-derive the sub-key names
+// from providerCredentialSubKeys[source].
 //
 // The rule only fires for sources registered in providerCredentialSubKeys.
 // Unknown sources are skipped — we cannot predict their sub-key names.
+//
+// Severity: ERROR (was WARN through rev2 of the spaces-key plan; flipped to
+// ERROR in rev3 so `wfctl infra align --strict` blocks deploy when the
+// anti-pattern is present).
 func checkRA9(ctx *alignContext) []AlignFinding {
 	var findings []AlignFinding
 	for _, gen := range ctx.secretGens {
@@ -704,11 +696,11 @@ func checkRA9(ctx *alignContext) []AlignFinding {
 			if strings.HasSuffix(gen.Key, suffix) {
 				findings = append(findings, AlignFinding{
 					Rule:     "R-A9",
-					Severity: "WARN",
+					Severity: "ERROR",
 					Resource: gen.Key,
 					Message: fmt.Sprintf(
-						"provider_credential key %q ends with auto-generated suffix %q — use root key (e.g. %q) and let bootstrapSecrets derive sub-keys",
-						gen.Key, suffix, strings.TrimSuffix(gen.Key, suffix),
+						"provider_credential key %q ends in %q; use canonical key %q — bootstrap auto-derives the sub-keys for source %q",
+						gen.Key, suffix, strings.TrimSuffix(gen.Key, suffix), gen.Source,
 					),
 				})
 				break // one finding per gen entry is enough
@@ -751,17 +743,29 @@ var ra10LogInfo = func(format string, args ...any) {
 // Naming follows the plan T4.2 spec literally; existing rule helpers use the
 // shorter checkRA<N> form, but the descriptive suffix here documents the
 // rule's intent at the call site in infra_align.go.
-func checkRA10_provider_validate_plan(providers []interfaces.IaCProvider, plan *interfaces.IaCPlan) []AlignFinding {
+// checkRA10_provider_validate_plan dispatches the R-A10 ValidatePlan rule
+// across all loaded providers. Per code-review IMPORTANT-2 (PR 618 round 4):
+// takes ctx so the typed-RPC ValidatePlan call honors caller cancellation /
+// deadline rather than dropping it via context.Background().
+func checkRA10_provider_validate_plan(ctx context.Context, providers []interfaces.IaCProvider, plan *interfaces.IaCPlan) []AlignFinding {
 	if plan == nil || len(providers) == 0 {
 		return nil
 	}
 	var findings []AlignFinding
 	for _, p := range providers {
-		v, ok := p.(interfaces.ProviderValidator)
+		// Per Task 17 (ADR-0028): pure typed-pb dispatch — no
+		// interfaces.X fallback. Non-typed providers are silently
+		// skipped (R-A10's "treat unimplemented as not-applicable"
+		// behavior is preserved at the typed-adapter accessor level).
+		adapter, ok := p.(*typedIaCAdapter)
 		if !ok {
 			continue
 		}
-		diags := v.ValidatePlan(plan)
+		cli := adapter.Validator()
+		if cli == nil {
+			continue
+		}
+		diags := validatePlanTyped(ctx, cli, plan)
 		for _, d := range diags {
 			// resource: rendered table label (provider-qualified for plan-
 			// level findings so the table always identifies the source).

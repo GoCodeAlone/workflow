@@ -116,6 +116,17 @@ func registerComponentSchemas(gen *OpenAPIGenerator) {
 		},
 	})
 
+	gen.RegisterComponentSchema("TryActivateResult", &OpenAPISchema{
+		Type: "object",
+		Properties: map[string]*OpenAPISchema{
+			"status":       {Type: "string", Enum: []string{"build_ok", "build_failed"}},
+			"error":        {Type: "string"},
+			"moduleTypes":  {Type: "array", Items: &OpenAPISchema{Type: "string"}},
+			"stepTypes":    {Type: "array", Items: &OpenAPISchema{Type: "string"}},
+			"triggerTypes": {Type: "array", Items: &OpenAPISchema{Type: "string"}},
+		},
+	})
+
 	gen.RegisterComponentSchema("ModuleTypeInfo", &OpenAPISchema{
 		Type: "object",
 		Properties: map[string]*OpenAPISchema{
@@ -573,6 +584,7 @@ func registerEngineOperationSchemas(gen *OpenAPIGenerator) {
 	gen.SetOperationSchema("GET", "/api/v1/admin/engine/modules", nil, SchemaArray(SchemaRef("ModuleTypeInfo")))
 	gen.SetOperationSchema("POST", "/api/v1/admin/engine/validate", SchemaRef("WorkflowConfig"), SchemaRef("ValidationResult"))
 	gen.SetOperationSchema("POST", "/api/v1/admin/engine/reload", nil, SchemaRef("SuccessResponse"))
+	gen.SetOperationSchema("POST", "/api/v1/admin/engine/try-activate", SchemaRef("WorkflowConfig"), SchemaRef("TryActivateResult"))
 }
 
 func registerSchemaOperationSchemas(gen *OpenAPIGenerator) {

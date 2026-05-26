@@ -32,7 +32,7 @@ func TestInfraOutput_EnvResolvesModuleSource(t *testing.T) {
 
 	// Function under test: resolve infra_output source with envName.
 	// Must transform "bmw-database.uri" → lookup "bmw-staging-db" → "uri" field.
-	val, err := resolveInfraOutput(wfCfg, "bmw-database.uri", "staging", fakeState)
+	val, err := resolveInfraOutput(wfCfg, "bmw-database.uri", "staging", fakeState, nil)
 	if err != nil {
 		t.Fatalf("resolveInfraOutput: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestInfraOutput_NoEnvUsesBaseName(t *testing.T) {
 		"bmw-database": {"uri": "postgresql://base"},
 	}
 
-	val, err := resolveInfraOutput(wfCfg, "bmw-database.uri", "", fakeState)
+	val, err := resolveInfraOutput(wfCfg, "bmw-database.uri", "", fakeState, nil)
 	if err != nil {
 		t.Fatalf("resolveInfraOutput: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestInfraOutput_ExplicitlyDisabledModuleErrors(t *testing.T) {
 		"bmw-database": {"uri": "postgresql://base"},
 	}
 
-	_, err := resolveInfraOutput(wfCfg, "bmw-database.uri", "staging", fakeState)
+	_, err := resolveInfraOutput(wfCfg, "bmw-database.uri", "staging", fakeState, nil)
 	if err == nil {
 		t.Fatal("expected error when module is explicitly disabled for env")
 	}

@@ -1,16 +1,25 @@
 package sdk
 
 import (
+	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
-// TestManifest_IaCProvider_ComputePlanVersion exercises the new
-// iacProvider.computePlanVersion field. Cases:
-//   - default-v1:  field omitted → EffectiveComputePlanVersion() == "v1"
-//   - explicit-v1: "v1" → "v1"
-//   - explicit-v2: "v2" → "v2"
+// TestManifest_IaCProvider_ComputePlanVersion exercises the
+// iacProvider.computePlanVersion field at the schema layer. Per
+// workflow#699 the EffectiveComputePlanVersion accessor is gone (the
+// authoritative gate is now the typed CapabilitiesResponse check in
+// cmd/wfctl/deploy_providers.go); the manifest field remains as a
+// parse-time validation surface. Cases:
+//   - omitted:     accepted (manifest field is optional)
+//   - explicit-v1: accepted (advisory; the runtime gate rejects v1)
+//   - explicit-v2: accepted
 //   - rejected:    "v3" → ParseManifest returns an error (schema-rejected)
 func TestManifest_IaCProvider_ComputePlanVersion(t *testing.T) {
 	cases := map[string]struct {
@@ -18,7 +27,7 @@ func TestManifest_IaCProvider_ComputePlanVersion(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		"default-v1":  {`{"name":"x","iacProvider":{}}`, "v1", false},
+		"omitted":     {`{"name":"x","iacProvider":{}}`, "", false},
 		"explicit-v1": {`{"name":"x","iacProvider":{"computePlanVersion":"v1"}}`, "v1", false},
 		"explicit-v2": {`{"name":"x","iacProvider":{"computePlanVersion":"v2"}}`, "v2", false},
 		"rejected":    {`{"name":"x","iacProvider":{"computePlanVersion":"v3"}}`, "", true},
@@ -29,21 +38,10 @@ func TestManifest_IaCProvider_ComputePlanVersion(t *testing.T) {
 			if (err != nil) != c.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, c.wantErr)
 			}
-			if !c.wantErr && m.IaCProvider.EffectiveComputePlanVersion() != c.want {
-				t.Errorf("got %q want %q", m.IaCProvider.EffectiveComputePlanVersion(), c.want)
+			if !c.wantErr && m.IaCProvider.ComputePlanVersion != c.want {
+				t.Errorf("got %q want %q", m.IaCProvider.ComputePlanVersion, c.want)
 			}
 		})
-	}
-}
-
-// TestManifest_IaCProvider_ComputePlanVersion_ZeroValue verifies that an
-// IaCProvider with the zero value (empty string) reports v1, matching the
-// "default-v1" case but exercising the accessor on a Go-zero-valued struct
-// (no JSON involved).
-func TestManifest_IaCProvider_ComputePlanVersion_ZeroValue(t *testing.T) {
-	var p IaCProvider
-	if got := p.EffectiveComputePlanVersion(); got != "v1" {
-		t.Errorf("zero IaCProvider.EffectiveComputePlanVersion() = %q, want %q", got, "v1")
 	}
 }
 
@@ -78,9 +76,132 @@ func TestManifest_RootPermitsAdditionalProperties(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected pass; got %v", err)
 	}
-	if m.IaCProvider.EffectiveComputePlanVersion() != "v2" {
-		t.Errorf("got %q want %q", m.IaCProvider.EffectiveComputePlanVersion(), "v2")
+	if m.IaCProvider.ComputePlanVersion != "v2" {
+		t.Errorf("got %q want %q", m.IaCProvider.ComputePlanVersion, "v2")
 	}
+}
+
+// TestManifest_IaCProvider_AdditionalPropertiesFalse_IsEnforced is an
+// active regression guard for workflow#540.
+//
+// Background: workflow#540 surfaced from P-DO PR #61 as "the
+// `iacProvider` block accepts extra keys (`name`, `resourceTypes`,
+// `configSchema`) without validation error, despite the schema
+// declaring `additionalProperties: false`." The bug does not reproduce
+// against the current `jsonschema/v6` build (verified empirically with
+// `ParseManifest` rejecting the canonical fixtures during the test
+// authoring); this test enforces the contract going forward so any
+// future regression — library upgrade, schema-loader change, draft
+// dialect drift — turns CI red on the same canonical inputs that
+// motivated the issue.
+//
+// Fixtures cover the exact key names cited in the issue
+// (`name`, `resourceTypes`, `configSchema`) plus a synthetic key, since
+// the bug surfaced on real `iacProvider` content rather than on
+// arbitrary unknown keys. Each case must produce a `*jsonschema.ValidationError`
+// whose causes tree contains a `*kind.AdditionalProperties` entry naming
+// the offending keys — asserting against the structured ErrorKind
+// rather than against English error wording so the test does not break
+// when the library localises or rewords its messages (Copilot review on
+// workflow#553, commit e0ae98b).
+//
+// SHAPE: assertive regression guard. The plan rev3 §I-5 alt-shape
+// originally specified `t.Skip` because the bug was assumed live on
+// main; that assumption did not hold (Copilot review on workflow#553,
+// commit 6563b57). With the bug not reproducing today, the assertive
+// shape is strictly stronger — any future regression fails CI loudly
+// with a clear pointer to workflow#540.
+func TestManifest_IaCProvider_AdditionalPropertiesFalse_IsEnforced(t *testing.T) {
+	cases := map[string]struct {
+		manifest string
+		// wantKeys is the set of extra iacProvider keys the test expects
+		// the schema validator to flag with an additionalProperties
+		// rejection. Asserting against the structured ErrorKind tree
+		// means the assertion does not depend on the library's English
+		// error wording — only on the contractual behaviour ("the
+		// `additionalProperties` keyword fired on these specific keys").
+		wantKeys []string
+	}{
+		"issue-name": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","name":"do"}}`,
+			wantKeys: []string{"name"},
+		},
+		"issue-resourceTypes": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","resourceTypes":["droplet"]}}`,
+			wantKeys: []string{"resourceTypes"},
+		},
+		"issue-configSchema": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","configSchema":{}}}`,
+			wantKeys: []string{"configSchema"},
+		},
+		"issue-all-three": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","name":"do","resourceTypes":["droplet"],"configSchema":{}}}`,
+			wantKeys: []string{"name", "resourceTypes", "configSchema"},
+		},
+		"synthetic-extra-key": {
+			manifest: `{"name":"test-plugin","iacProvider":{"computePlanVersion":"v2","bogusKeyThatShouldBeRejected":"value"}}`,
+			wantKeys: []string{"bogusKeyThatShouldBeRejected"},
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseManifest([]byte(c.manifest))
+			if err == nil {
+				t.Fatalf("workflow#540 regressed: ParseManifest accepted extra iacProvider key(s) %v; expected schema rejection",
+					c.wantKeys)
+			}
+			// Walk the *jsonschema.ValidationError tree and collect
+			// every key that triggered an `additionalProperties`
+			// rejection. Library wording can change; the structured
+			// ErrorKind cannot without a behaviour change.
+			rejected := collectAdditionalPropertiesRejections(err)
+			if len(rejected) == 0 {
+				t.Fatalf("workflow#540: no additionalProperties ErrorKind in error tree; got %v", err)
+			}
+			for _, want := range c.wantKeys {
+				if !rejected[want] {
+					t.Errorf("workflow#540: expected key %q rejected by additionalProperties; rejected=%v err=%v",
+						want, keysOf(rejected), err)
+				}
+			}
+		})
+	}
+}
+
+// collectAdditionalPropertiesRejections walks a validation error
+// (typically wrapped by ParseManifest) and returns every key that the
+// jsonschema library flagged via the `additionalProperties` keyword.
+// Returns an empty map if no such ErrorKind is present, which
+// distinguishes a real workflow#540 regression from an unrelated
+// failure (JSON parse, schema compile, etc.).
+func collectAdditionalPropertiesRejections(err error) map[string]bool {
+	out := map[string]bool{}
+	var verr *jsonschema.ValidationError
+	if !errors.As(err, &verr) {
+		return out
+	}
+	var visit func(*jsonschema.ValidationError)
+	visit = func(e *jsonschema.ValidationError) {
+		if ap, ok := e.ErrorKind.(*kind.AdditionalProperties); ok {
+			for _, p := range ap.Properties {
+				out[p] = true
+			}
+		}
+		for _, child := range e.Causes {
+			visit(child)
+		}
+	}
+	visit(verr)
+	return out
+}
+
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out) // stable diagnostic output
+	return out
 }
 
 // TestManifestSchemaJSON_ReturnsCopy verifies that mutating the slice

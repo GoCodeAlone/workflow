@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -176,16 +177,18 @@ func generateCIFiles(opts ciOptions) (map[string]string, error) {
 // ── GitHub Actions ────────────────────────────────────────────────────────────
 
 type ghaTemplateData struct {
-	InfraConfig string
-	Runner      string
-	Branch      string
+	InfraConfig  string
+	Runner       string
+	Branch       string
+	WfctlVersion string
 }
 
 func generateGitHubActions(opts ciOptions) (map[string]string, error) {
 	data := ghaTemplateData{
-		InfraConfig: opts.InfraConfig,
-		Runner:      opts.Runner,
-		Branch:      "main",
+		InfraConfig:  opts.InfraConfig,
+		Runner:       opts.Runner,
+		Branch:       "main",
+		WfctlVersion: ciGeneratedWfctlVersion(),
 	}
 
 	infraYAML, err := renderCITemplate("gha-infra", ghaInfraTemplate, data)
@@ -230,7 +233,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install wfctl
-        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+        uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: '{{.WfctlVersion}}'
       - name: Plan infrastructure
         run: wfctl infra plan --config '{{.InfraConfig}}' --format markdown > plan.md
       - name: Post plan comment
@@ -255,7 +260,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install wfctl
-        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+        uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: '{{.WfctlVersion}}'
       - name: Apply infrastructure
         run: wfctl infra apply --config '{{.InfraConfig}}' --auto-approve
 `
@@ -280,23 +287,33 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install wfctl
+        uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: '{{.WfctlVersion}}'
       - name: Run tests
-        run: go test ./...
-      - name: Build
-        run: go build ./...
+        env:
+          INFRA_CONFIG: '{{.InfraConfig}}'
+        run: wfctl ci run --config "$INFRA_CONFIG" --phase test
+      - name: Build without push
+        env:
+          INFRA_CONFIG: '{{.InfraConfig}}'
+        run: wfctl build --config "$INFRA_CONFIG" --no-push --tag ci --fallback-go-build
 `
 
 // ── GitLab CI ─────────────────────────────────────────────────────────────────
 
 type gitlabTemplateData struct {
-	InfraConfig string
-	Branch      string
+	InfraConfig  string
+	Branch       string
+	WfctlVersion string
 }
 
 func generateGitLabCI(opts ciOptions) (map[string]string, error) {
 	data := gitlabTemplateData{
-		InfraConfig: opts.InfraConfig,
-		Branch:      "main",
+		InfraConfig:  opts.InfraConfig,
+		Branch:       "main",
+		WfctlVersion: ciGeneratedWfctlVersion(),
 	}
 
 	content, err := renderCITemplate("gitlab-ci", gitlabCITemplate, data)
@@ -316,11 +333,15 @@ const gitlabCITemplate = `stages:
 
 variables:
   INFRA_CONFIG: "{{.InfraConfig}}"
+  WFCTL_VERSION: "{{.WfctlVersion}}"
+
+before_script:
+  - go install "github.com/GoCodeAlone/workflow/cmd/wfctl@${WFCTL_VERSION}"
+  - export PATH="$(go env GOPATH)/bin:$PATH"
 
 infra-plan:
   stage: plan
   script:
-    - go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
     - wfctl infra plan --config "$INFRA_CONFIG" --format markdown > plan.md
   artifacts:
     paths:
@@ -338,7 +359,6 @@ infra-apply:
     - job: infra-plan
       artifacts: true
   script:
-    - go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
     - wfctl infra apply --config "$INFRA_CONFIG" --auto-approve
   environment:
     name: production
@@ -352,8 +372,8 @@ build:
   stage: build
   needs: []
   script:
-    - go test ./...
-    - go build ./...
+    - wfctl ci run --config "$INFRA_CONFIG" --phase test
+    - wfctl build --config "$INFRA_CONFIG" --no-push --tag ci --fallback-go-build
   rules:
     - if: $CI_COMMIT_BRANCH == "{{.Branch}}"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -370,4 +390,13 @@ func renderCITemplate(name, tmplStr string, data any) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+var cleanReleaseTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+func ciGeneratedWfctlVersion() string {
+	if !cleanReleaseTagPattern.MatchString(version) {
+		return "latest"
+	}
+	return version
 }

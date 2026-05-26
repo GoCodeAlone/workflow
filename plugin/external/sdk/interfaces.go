@@ -6,6 +6,7 @@ import (
 	"context"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"github.com/GoCodeAlone/workflow/telemetry"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -161,3 +162,14 @@ type ServiceContextInvoker interface {
 type TypedServiceInvoker interface {
 	InvokeTypedMethod(method string, input *anypb.Any) (*anypb.Any, error)
 }
+
+type TelemetryAttrs = telemetry.Attrs
+type TelemetryMetricKind = telemetry.MetricKind
+type TelemetryMetricRecord = telemetry.MetricRecord
+type TelemetryMetricRecorder = telemetry.MetricRecorder
+type TelemetryMetricEmitter = telemetry.MetricEmitter
+type TelemetryLogRecord = telemetry.LogRecord
+type TelemetryLogEmitter = telemetry.LogEmitter
+type TelemetrySpanEvent = telemetry.SpanEvent
+type TelemetrySpanRecorder = telemetry.SpanRecorder
+type TelemetryTraceAnnotator = telemetry.TraceAnnotator

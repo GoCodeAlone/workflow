@@ -14,7 +14,12 @@ type IaCProvider interface {
 
 	// Lifecycle
 	Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error)
-	Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error)
+	// Apply was removed per workflow#699 (2026-05-17). v2 dispatch
+	// routes through wfctlhelpers.ApplyPlanWithHooks (ResourceDriver
+	// per-action + IaCProviderFinalizer.FinalizeApply post-loop). The
+	// load-time Capabilities-RPC gate in cmd/wfctl/deploy_providers.go
+	// rejects plugins whose CapabilitiesResponse.compute_plan_version
+	// is not "v2".
 	Destroy(ctx context.Context, resources []ResourceRef) (*DestroyResult, error)
 
 	// Observability
@@ -61,6 +66,63 @@ type IaCProvider interface {
 // implementation is not yet exercised by core code.
 type ProviderPlanner interface {
 	PlanV2(ctx context.Context, desired []ResourceSpec, current []ResourceState) (IaCPlan, error)
+}
+
+// Enumerator is an OPTIONAL interface for providers that can list resources
+// by tag across the cloud account. Used by `wfctl infra cleanup --tag <name>`.
+// Providers without a tag-query API simply do not implement it; the cleanup
+// subcommand skips them with a structured stdout log line so operators see
+// the explicit skip rather than silent under-cleanup.
+//
+// The contract is intentionally narrow: implementations MUST return refs that
+// the same provider's ResourceDriver(type).Delete can act on. ProviderID is
+// recommended (the cleanup command may use it for log correlation), but Name
+// + Type are the load-bearing identifiers Delete needs.
+//
+// Callers MUST type-assert against this interface and treat the negative
+// case as a skip — providers may or may not implement Enumerator depending
+// on whether their cloud API exposes a tag-query primitive. The
+// implementation status of individual provider plugins is documented in
+// docs/WFCTL.md `#### infra cleanup`, not here, so the API comment does
+// not go stale every time a new plugin gains tag-query support.
+type Enumerator interface {
+	EnumerateByTag(ctx context.Context, tag string) ([]ResourceRef, error)
+}
+
+// EnumeratorAll is an OPTIONAL provider interface for resource types that
+// don't support tagging (e.g. DO Spaces keys). Returns ALL resources of
+// resourceType in the account regardless of tag, with full metadata
+// (Outputs map populated) so callers can filter without re-reading.
+//
+// Returns []*ResourceOutput rather than []ResourceRef because filtering
+// (drift detection, prune) needs the metadata. Implementations should
+// paginate transparently. Returning *ResourceOutput keeps the contract
+// consistent with ResourceDriver.Read which also returns this shape.
+//
+// Per ADR 0016. Used by `wfctl infra audit-keys` + `wfctl infra prune`.
+type EnumeratorAll interface {
+	EnumerateAll(ctx context.Context, resourceType string) ([]*ResourceOutput, error)
+}
+
+// DriftConfigDetector is an OPTIONAL interface a provider MAY implement to
+// surface config-drift in addition to the existence-only Ghost / InSync /
+// Unknown classifications produced by DetectDrift.
+//
+// specs is the per-ref applied-config map sourced from state. Callers build it
+// from ResourceState.AppliedConfig (wrapped into ResourceSpec); missing or
+// empty entries instruct the provider to fall back to existence-only behavior
+// for that ref. The map key is ref.Name (matches ResourceState.Name).
+//
+// Callers MUST type-assert against this interface and fall back to
+// IaCProvider.DetectDrift(refs) on the negative case. Providers that do
+// not implement DriftConfigDetector continue to work unchanged.
+//
+// Providers SHOULD only return DriftClassConfig when they have high
+// confidence the applied entry represents user-supplied config (not
+// adoption-shaped Outputs reflow); see ResourceState.AppliedConfigSource
+// (iac_state.go) for the canonical discriminator.
+type DriftConfigDetector interface {
+	DetectDriftWithSpecs(ctx context.Context, resources []ResourceRef, specs map[string]ResourceSpec) ([]DriftResult, error)
 }
 
 // BootstrapResult contains metadata returned by a successful BootstrapStateBackend call.
@@ -215,4 +277,62 @@ type PlanDiagnostic struct {
 // calls. The returned slice may be nil (no diagnostics).
 type ProviderValidator interface {
 	ValidatePlan(plan *IaCPlan) []PlanDiagnostic
+}
+
+// ProviderCredentialRevoker is an OPTIONAL interface a provider MAY implement
+// to support revoking previously-issued provider_credential credentials.
+// Used by `wfctl infra bootstrap --force-rotate <name>` to invalidate the OLD
+// credential at the upstream provider AFTER the new one has been minted and
+// stored (mint-new-then-revoke-old ordering; see ADR 0012).
+//
+// source is the provider_credential source string (e.g. "digitalocean.spaces").
+// credentialID is the provider-specific identifier of the OLD credential
+// (e.g. the access_key for DO Spaces — stored as <name>_access_key).
+//
+// Callers MUST type-assert before calling and treat the negative case as a
+// "log warning, not implemented" path — providers that do not implement this
+// interface are valid; revocation just does not happen automatically.
+//
+// Error contract:
+//   - nil → successfully revoked (or credential was already absent)
+//   - non-nil → revocation failed; caller logs warning + emits telemetry but
+//     MUST NOT roll back the newly-stored credential (the new key is valid)
+type ProviderCredentialRevoker interface {
+	RevokeProviderCredential(ctx context.Context, source string, credentialID string) error
+}
+
+// LogCaptureRequest describes a bounded provider log capture. Providers may
+// support only a subset of fields; unsupported values should return a clear
+// error instead of silently changing scope.
+type LogCaptureRequest struct {
+	ResourceName    string
+	ResourceType    string
+	ProviderID      string
+	ComponentName   string
+	LogType         string
+	TailLines       int
+	Follow          bool
+	DurationSeconds int64
+	DeploymentID    string
+}
+
+// LogChunk is one provider-emitted log payload. Data is already formatted for
+// the caller's output stream; Source is optional metadata such as "historic" or
+// "live".
+type LogChunk struct {
+	Data   []byte
+	Source string
+	EOF    bool
+}
+
+// LogCaptureSink receives log chunks from a provider.
+type LogCaptureSink interface {
+	WriteLogChunk(LogChunk) error
+}
+
+// LogCaptureProvider is an OPTIONAL provider interface for ad-hoc operational
+// log capture. `wfctl logs capture` discovers it through the typed optional
+// IaCProviderLogCapture service.
+type LogCaptureProvider interface {
+	CaptureLogs(ctx context.Context, req LogCaptureRequest, sink LogCaptureSink) error
 }

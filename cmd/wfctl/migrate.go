@@ -30,6 +30,7 @@ func runConfig(args []string) error {
 Manage engine configuration.
 
 Subcommands:
+  validate  Validate wfctl.yaml and .wfctl-lock.yaml project config files
   migrate   Manage engine config database schema migrations
             (replaces the deprecated wfctl migrate command)
 
@@ -37,16 +38,21 @@ Subcommands:
 		return fmt.Errorf("missing or unknown subcommand")
 	}
 	switch args[0] {
+	case "validate":
+		return runConfigValidate(args[1:])
 	case "migrate":
 		return runConfigMigrate(args[1:])
 	default:
-		return fmt.Errorf("unknown wfctl config subcommand %q (available: migrate)", args[0])
+		return fmt.Errorf("unknown wfctl config subcommand %q (available: validate, migrate)", args[0])
 	}
 }
 
 // migrateDeprecationWriter is the io.Writer that receives the deprecation
 // banner from runMigrateDeprecated. Defaults to os.Stderr; overridden in tests.
-var migrateDeprecationWriter io.Writer = os.Stderr
+var (
+	defaultMigrateDeprecationWriter io.Writer = os.Stderr
+	migrateDeprecationWriter        io.Writer = defaultMigrateDeprecationWriter
+)
 
 // runMigrateDeprecated is the legacy wfctl migrate dispatcher. It prints a
 // one-time deprecation notice then delegates to runConfigMigrate.

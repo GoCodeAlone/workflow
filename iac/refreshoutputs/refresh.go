@@ -12,6 +12,7 @@ package refreshoutputs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -77,6 +78,14 @@ func Refresh(ctx context.Context, p interfaces.IaCProvider, states []interfaces.
 // refreshOne performs a single resource Read and writes the live Outputs
 // into dst when they differ from src.Outputs. It returns nil on success or
 // the error otherwise.
+//
+// Ghost handling: if the provider reports ErrResourceNotFound, the resource
+// exists in local state but cloud has no record of it (deleted out-of-band).
+// refreshOne skips the ghost silently — it preserves dst.Outputs == src.Outputs
+// and returns nil so the batch continues. Ghost-prune (wfctl infra apply
+// --refresh) remains the canonical mechanism for removing stale state entries.
+// This separates "refresh outputs of live resources" from "remove state entries
+// for gone resources" — they are orthogonal concerns.
 func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.ResourceState, src interfaces.ResourceState) error {
 	d, err := p.ResourceDriver(src.Type)
 	if err != nil {
@@ -85,21 +94,40 @@ func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.R
 	ref := interfaces.ResourceRef{Name: src.Name, Type: src.Type, ProviderID: src.ProviderID}
 	live, err := d.Read(ctx, ref)
 	if err != nil {
+		if errors.Is(err, interfaces.ErrResourceNotFound) {
+			// Ghost: cloud reports the resource does not exist. Explicitly keep
+			// dst.Outputs aligned with src so refreshOne is self-contained and
+			// does not rely on the caller having pre-copied src into dst.
+			// The caller's --refresh phase (or operator) handles ghost-prune
+			// separately; refresh-outputs is non-mutating for ghosts.
+			dst.Outputs = src.Outputs
+			return nil
+		}
 		return fmt.Errorf("could not refresh %q: %w", src.Name, err)
 	}
-	if !reflect.DeepEqual(live.Outputs, src.Outputs) {
-		dst.Outputs = cloneMap(live.Outputs)
+	// Merge: preserve fields in src.Outputs that don't appear in live.Outputs.
+	// Some cloud Read endpoints don't return all fields that were captured at
+	// create-time (e.g., DO Droplet's user_data is write-only on Read). A naive
+	// replace clobbers those fields, causing plan to falsely detect drift on the
+	// next plan/apply cycle. Merge ensures refresh-outputs is idempotent for
+	// fields beyond cloud's Read scope.
+	//
+	// Copy-on-write: the clone is only allocated on the first detected change,
+	// so resources that haven't changed incur no per-resource allocation.
+	var merged map[string]any
+	for k, v := range live.Outputs {
+		if existing, ok := src.Outputs[k]; ok && reflect.DeepEqual(existing, v) {
+			continue
+		}
+		// First change detected: clone src.Outputs (nil-safe) and start merging.
+		if merged == nil {
+			merged = make(map[string]any, len(src.Outputs)+len(live.Outputs))
+			maps.Copy(merged, src.Outputs)
+		}
+		merged[k] = v
+	}
+	if merged != nil {
+		dst.Outputs = merged
 	}
 	return nil
-}
-
-// cloneMap returns an independent shallow copy of m. Callers receive a map
-// they can mutate without aliasing the live driver output.
-func cloneMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	c := make(map[string]any, len(m))
-	maps.Copy(c, m)
-	return c
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/infra"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/internal/legacyaws"
+	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -223,6 +226,39 @@ func (e *StdEngine) GetStepRegistry() interfaces.StepRegistrar {
 	return e.stepRegistry
 }
 
+// RegisteredModuleTypes returns the sorted list of module type names registered
+// with this engine (via AddModuleType or LoadPlugin).
+func (e *StdEngine) RegisteredModuleTypes() []string {
+	types := make([]string, 0, len(e.moduleFactories))
+	for t := range e.moduleFactories {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
+}
+
+// RegisteredStepTypes returns the sorted list of pipeline step type names
+// registered with this engine (via AddStepType or LoadPlugin).
+func (e *StdEngine) RegisteredStepTypes() []string {
+	if e.stepRegistry == nil {
+		return nil
+	}
+	types := e.stepRegistry.Types()
+	sort.Strings(types)
+	return types
+}
+
+// RegisteredTriggerTypes returns the sorted list of trigger type keys registered
+// with this engine (via RegisterTriggerType or LoadPlugin).
+func (e *StdEngine) RegisteredTriggerTypes() []string {
+	types := make([]string, 0, len(e.triggerTypeMap))
+	for t := range e.triggerTypeMap {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
+}
+
 // PluginLoader returns the engine's plugin loader, creating it lazily if needed.
 func (e *StdEngine) PluginLoader() *plugin.PluginLoader {
 	if e.pluginLoader == nil {
@@ -322,6 +358,37 @@ func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool
 			setter.SetLogger(sl)
 		}
 	}
+	// Register any iac.state backends the plugin serves into module's
+	// package-level registry, so `iac.state` configs with
+	// `backend: <name>` dispatch to the plugin-served gRPC backend.
+	// Amendment A2 (decisions/0035).
+	if sb, ok := p.(plugin.IaCStateBackendProvider); ok {
+		clients, err := sb.IaCStateBackendClients()
+		if err != nil {
+			return fmt.Errorf("load plugin %q: iac.state backends: %w", p.EngineManifest().Name, err)
+		}
+		for name, client := range clients {
+			if err := module.RegisterIaCStateBackend(name, client); err != nil {
+				return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
+			}
+		}
+	}
+	// Register any platform.kubernetes backends the plugin serves into module's
+	// package-level registry, so `platform.kubernetes` configs with a
+	// plugin-provided `type:` (e.g. gke) dispatch to the plugin-served
+	// ResourceDriver-backed backend. Per ADR 0037 — folds into the existing
+	// ResourceDriver contract, no new proto surface.
+	if kb, ok := p.(plugin.KubernetesBackendProvider); ok {
+		clients, err := kb.KubernetesBackendClients()
+		if err != nil {
+			return fmt.Errorf("load plugin %q: kubernetes backends: %w", p.EngineManifest().Name, err)
+		}
+		for name, client := range clients {
+			if err := module.RegisterKubernetesBackendClient(name, client); err != nil {
+				return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
+			}
+		}
+	}
 	e.enginePlugins = append(e.enginePlugins, p)
 	return nil
 }
@@ -390,13 +457,22 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		schema.WithSkipWorkflowTypeCheck(),
 		schema.WithSkipTriggerTypeCheck(),
 	}
-	if len(e.moduleFactories) > 0 {
-		extra := make([]string, 0, len(e.moduleFactories))
-		for t := range e.moduleFactories {
-			extra = append(extra, t)
-		}
-		valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
+	extra := make([]string, 0, len(e.moduleFactories)+len(legacydo.ModuleTypes)+len(legacyaws.ModuleTypes))
+	for t := range e.moduleFactories {
+		extra = append(extra, t)
 	}
+	// Pass legacy DO module types through schema so the factory-loop guard
+	// (which emits legacydo.FormatModuleError) is the rejection point —
+	// schema rejection produces a generic error and would mask the
+	// actionable migration message (issue #617).
+	for t := range legacydo.ModuleTypes {
+		extra = append(extra, t)
+	}
+	// Same pattern for legacy AWS module types removed in issue #653.
+	for t := range legacyaws.ModuleTypes {
+		extra = append(extra, t)
+	}
+	valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
 	if err := schema.ValidateConfig(cfg, valOpts...); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
@@ -476,8 +552,45 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		}
 	}
 
-	// Compute config hash after transform hooks so the hash reflects the effective
-	// runtime config (hooks may mutate cfg before modules are registered).
+	// Reorder cfg.Modules so each module's RegisterModule call follows every
+	// module it lists in DependsOn. Resolves the init-order race that bit
+	// external-plugin consumers in BMW PR #279 (workflow#663): the modular
+	// app.Init() pass walks modules in registration order, and external-plugin
+	// module factories do not implement DependencyAware, so without this sort
+	// a consumer module's Init() can call into a broker registry that its
+	// dependency module has not populated yet.
+	//
+	// Ordering applies AFTER ConfigTransformHooks (which can inject modules) and
+	// BEFORE configHash so the hash reflects the order the engine actually
+	// builds from. topoSortModules tolerates a missing dependency target as a
+	// defensive no-op edge — schema.ValidateConfig rejects missing-target
+	// references for the *declared* modules, and a transform-injected module
+	// with an unresolvable dep simply gets placed as if the edge didn't exist
+	// (the runtime error, if any, surfaces when the dependent module fails to
+	// look up its parent in the plugin-local registry).
+	orderedModules, err := topoSortModules(cfg.Modules)
+	if err != nil {
+		return fmt.Errorf("module dependency ordering failed: %w", err)
+	}
+	cfg.Modules = orderedModules
+
+	// Build the resolvable-dependency name set so the SetDependencies plumbing
+	// below can filter raw modCfg.DependsOn the same way topoSortModules
+	// filters its internal edges. Without this filter, the engine would forward
+	// empty-string entries and unknown names — both intentionally ignored by
+	// topoSortModules — straight into modular's DependencyAware sort, which
+	// would then either misorder (unknown names treated as future deps that
+	// never resolve) or panic (depending on the modular framework version).
+	moduleNameSet := make(map[string]struct{}, len(cfg.Modules))
+	for _, m := range cfg.Modules {
+		if m.Name != "" {
+			moduleNameSet[m.Name] = struct{}{}
+		}
+	}
+
+	// Compute config hash after transform hooks + dependency ordering so the
+	// hash reflects the effective runtime config (hooks may mutate cfg, and
+	// topoSortModules may reorder cfg.Modules, before modules are registered).
 	// Reset first so a marshal failure never leaves a stale hash from a previous build.
 	e.configHash = ""
 	if configBytes, err := yaml.Marshal(cfg); err == nil {
@@ -505,12 +618,38 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		// Look up the module factory from the registry (populated by LoadPlugin)
 		factory, exists := e.moduleFactories[modCfg.Type]
 		if !exists {
+			if legacydo.IsModuleType(modCfg.Type) {
+				_, iacLoaded := e.moduleFactories["iac.provider"]
+				return legacydo.FormatModuleError(modCfg.Type, modCfg.Name, iacLoaded)
+			}
+			if legacyaws.IsModuleType(modCfg.Type) {
+				_, iacLoaded := e.moduleFactories["iac.provider"]
+				return legacyaws.FormatModuleError(modCfg.Type, modCfg.Name, iacLoaded)
+			}
 			return fmt.Errorf("unknown module type %q for module %q — ensure the required plugin is loaded", modCfg.Type, modCfg.Name)
 		}
 		e.logger.Debug("Using factory for module type: " + modCfg.Type)
 		mod = factory(modCfg.Name, modCfg.Config)
 		if mod == nil {
 			return fmt.Errorf("factory for module type %q returned nil for module %q", modCfg.Type, modCfg.Name)
+		}
+
+		// Plumb yaml-level `dependsOn:` into the module so modular's Init()
+		// walker honours it (workflow#663). Without this, external-plugin
+		// modules — which all return nil from Dependencies() by default —
+		// looked like roots to modular and got initialised in alphabetical
+		// order, which broke any plugin where module A's Init() registered
+		// runtime state that module B's Init() needed. The topoSortModules
+		// pass above already reordered cfg.Modules; this hands the same
+		// information to modular so its own initialisation graph agrees
+		// with engine-level ordering. filterResolvableDeps drops empty
+		// entries + unknown names so the slice modular sees matches the
+		// edge set topoSortModules used.
+		if depTarget, ok := mod.(interface{ SetDependencies([]string) }); ok {
+			filtered := filterResolvableDeps(modCfg.DependsOn, moduleNameSet, modCfg.Name)
+			if len(filtered) > 0 {
+				depTarget.SetDependencies(filtered)
+			}
 		}
 
 		e.app.RegisterModule(mod)
@@ -560,6 +699,14 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	// Configure triggers (new section)
 	if err := e.configureTriggers(cfg.Triggers); err != nil {
 		return fmt.Errorf("failed to configure triggers: %w", err)
+	}
+
+	// Inform the step registry whether the iac.provider module factory is loaded.
+	// This lets StepRegistry.Create emit an actionable migration error for legacy
+	// DO step types instead of the generic "unknown step type" message (issue #617).
+	_, iacLoaded := e.moduleFactories["iac.provider"]
+	if r, ok := e.stepRegistry.(*module.StepRegistry); ok {
+		r.SetIaCProviderLoaded(iacLoaded)
 	}
 
 	// Configure pipelines (composable step-based workflows)
@@ -676,7 +823,8 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 			e.logger.Info(fmt.Sprintf("Triggered workflow '%s' with action '%s'", workflowType, action))
 
 			// Log the data in debug mode
-			for k, v := range data {
+			logData := module.RedactStepOutput(data)
+			for k, v := range logData {
 				e.logger.Debug(fmt.Sprintf("  %s: %v", k, v))
 			}
 
@@ -697,7 +845,8 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 
 			// Log execution results in debug mode
 			e.logger.Info(fmt.Sprintf("Workflow '%s' executed successfully", workflowType))
-			for k, v := range results {
+			logResults := module.RedactStepOutput(results)
+			for k, v := range logResults {
 				e.logger.Debug(fmt.Sprintf("  Result %s: %v", k, v))
 			}
 

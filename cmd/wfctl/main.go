@@ -28,13 +28,36 @@ import (
 //go:embed wfctl.yaml
 var wfctlConfigBytes []byte
 
-var version = buildVersion()
+// version is set by release builds via:
+//
+//	go build -ldflags "-X main.version=vX.Y.Z"
+//
+// Keep the declaration as a constant string initializer so the linker can
+// override it. init falls back to Go build metadata for module-installed builds.
+var version = "dev"
+
+func init() {
+	if version == "dev" {
+		version = buildVersion()
+	}
+}
 
 func buildVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
+		return cleanBuildVersion(info.Main.Version)
 	}
 	return "dev"
+}
+
+// cleanBuildVersion strips the +dirty suffix that the Go toolchain appends when
+// the working tree has uncommitted changes. The marker reflects the build-time
+// VCS state of the wfctl binary itself, not a meaningful version difference.
+// Pseudo-version strings with +dirty (e.g. v0.22.8-20260510180701-a851625d3bf0+dirty)
+// are also not valid Go module pseudo-versions, so downstream callers like
+// CanonicalEvidenceEngineVersion would silently fall back to "v0.0.0". Stripping
+// the suffix here lets the real commit-bound pseudo-version propagate.
+func cleanBuildVersion(raw string) string {
+	return strings.TrimSuffix(raw, "+dirty")
 }
 
 // isHelpRequested reports whether the error originated from the user
@@ -77,6 +100,7 @@ var commands = map[string]func([]string) error{
 	"compat":          runCompat,
 	"generate":        runGenerate,
 	"git":             runGit,
+	"logs":            runLogs,
 	"registry":        runRegistry,
 	"plugin-registry": runPluginRegistry,
 	"update":          runUpdate,
@@ -186,6 +210,27 @@ func main() {
 		updateNoticeDone = checkForUpdateNotice()
 	}
 
+	if _, isStatic := commands[cmd]; !isStatic {
+		registry, err := BuildCLIRegistry(defaultPluginCommandDir())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: load plugin CLI commands: %v\n", err) //nolint:gosec // G705
+			os.Exit(1)
+		}
+		if entry := registry.LookupCLICommand(cmd); entry != nil {
+			if err := DispatchCLICommand(entry, os.Args[1:]); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705
+				os.Exit(1)
+			}
+			if updateNoticeDone != nil {
+				select {
+				case <-updateNoticeDone:
+				case <-time.After(time.Second):
+				}
+			}
+			return
+		}
+	}
+
 	// Set up a context that is cancelled on SIGINT/SIGTERM so that long-running
 	// commands (e.g. wfctl mcp, wfctl run) can be interrupted cleanly.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -221,4 +266,11 @@ func main() {
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+func defaultPluginCommandDir() string {
+	if pluginDir := strings.TrimSpace(os.Getenv("WFCTL_PLUGIN_DIR")); pluginDir != "" {
+		return pluginDir
+	}
+	return defaultDataDir
 }

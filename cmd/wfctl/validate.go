@@ -9,17 +9,25 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/internal/legacyaws"
+	"github.com/GoCodeAlone/workflow/internal/legacydo"
 	"github.com/GoCodeAlone/workflow/schema"
+	"github.com/GoCodeAlone/workflow/validation"
 	"gopkg.in/yaml.v3"
 )
 
 func runValidate(args []string) error {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
-	strict := fs.Bool("strict", false, "Enable strict validation (no empty modules allowed)")
+	strict := fs.Bool("strict", true, "Enable strict validation (default; retained for compatibility)")
+	loose := fs.Bool("loose", false, "Allow legacy loose validation for transitional configs (planned for removal in v1.0)")
+	nonStrict := fs.Bool("non-strict", false, "Alias for --loose")
 	skipUnknownTypes := fs.Bool("skip-unknown-types", false, "Skip unknown module/workflow/trigger type checks")
 	allowNoEntryPoints := fs.Bool("allow-no-entry-points", false, "Allow configs with no entry points (triggers, routes, subscriptions, jobs)")
 	dir := fs.String("dir", "", "Validate all .yaml/.yml files in a directory (recursive)")
 	pluginDir := fs.String("plugin-dir", "", "Directory of installed external plugins; their types are loaded before validation")
+	var pluginManifests stringSliceFlag
+	fs.Var(&pluginManifests, "plugin-manifest", "Path to a plugin.json file, or a directory containing one (or one level of subdirs that do). Repeatable. Loaded before validation so the declared types pass.")
+	noAutoResolve := fs.Bool("no-resolve-plugins", false, "Disable auto-resolution of requires.plugins[] against sibling/ancestor checkouts")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl validate [options] <config.yaml> [config2.yaml ...]
 
@@ -29,9 +37,11 @@ Examples:
   wfctl validate config.yaml
   wfctl validate example/*.yaml
   wfctl validate --dir ./example/
-  wfctl validate --strict admin/config.yaml
+  wfctl validate --loose legacy/config.yaml
   wfctl validate --skip-unknown-types example/*.yaml
   wfctl validate --plugin-dir data/plugins config.yaml
+  wfctl validate --plugin-manifest ../workflow-plugin-foo config.yaml
+  wfctl validate --plugin-manifest ../workflow-plugin-foo/plugin.json config.yaml
 
 Options:
 `)
@@ -45,12 +55,21 @@ Options:
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *loose || *nonStrict {
+		*strict = false
+	}
 
 	// Load external plugin types before validation so their module/trigger/workflow
 	// types are recognised and don't cause false "unknown type" errors.
 	if *pluginDir != "" {
 		if err := schema.LoadPluginTypesFromDir(*pluginDir); err != nil {
 			return fmt.Errorf("failed to load plugins from %s: %w", *pluginDir, err)
+		}
+		schema.LoadPluginStepSchemasFromDir(*pluginDir)
+	}
+	for _, manifest := range pluginManifests {
+		if err := loadPluginManifestPath(manifest); err != nil {
+			return err
 		}
 	}
 
@@ -86,7 +105,7 @@ Options:
 	)
 
 	for _, f := range files {
-		if err := validateFile(f, *strict, *skipUnknownTypes, *allowNoEntryPoints); err != nil {
+		if err := validateFile(f, *strict, *skipUnknownTypes, *allowNoEntryPoints, !*noAutoResolve); err != nil {
 			failed++
 			errors = append(errors, fmt.Sprintf("  FAIL %s\n       %s", f, indentError(err)))
 		} else {
@@ -109,14 +128,28 @@ Options:
 	}
 
 	if failed > 0 {
+		if total == 1 && len(errors) == 1 {
+			return fmt.Errorf("%d config(s) failed validation: %s", failed, indentErrorMessage(errors[0]))
+		}
 		return fmt.Errorf("%d config(s) failed validation", failed)
 	}
 	return nil
 }
 
-func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints bool) error {
+func indentErrorMessage(message string) string {
+	lines := strings.Split(message, "\n")
+	if len(lines) == 0 {
+		return message
+	}
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, autoResolvePlugins bool) error {
 	// Read raw YAML to extract imports list for verbose feedback.
 	imports := extractImports(cfgPath)
+	if isLikelyWfctlProjectManifest(cfgPath) {
+		return fmt.Errorf("%s is a wfctl project manifest; use 'wfctl config validate %s' instead", cfgPath, cfgPath)
+	}
 
 	cfg, err := config.LoadFromFile(cfgPath)
 	if err != nil {
@@ -125,6 +158,10 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 
 	if len(imports) > 0 {
 		fmt.Fprintf(os.Stderr, "  Resolved %d import(s): %s\n", len(imports), strings.Join(imports, ", "))
+	}
+
+	if autoResolvePlugins && cfg.Requires != nil {
+		autoResolveRequiredPlugins(cfgPath, cfg.Requires.Plugins)
 	}
 
 	var opts []schema.ValidationOption
@@ -141,8 +178,48 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 		opts = append(opts, schema.WithAllowNoEntryPoints())
 	}
 
+	// Pass legacy DO module types through schema validation so the actionable
+	// migration error fires below instead of a generic "unknown module type".
+	for t := range legacydo.ModuleTypes {
+		opts = append(opts, schema.WithExtraModuleTypes(t))
+	}
+	// Same for legacy AWS module types removed in issue #653.
+	for t := range legacyaws.ModuleTypes {
+		opts = append(opts, schema.WithExtraModuleTypes(t))
+	}
+
 	if err := schema.ValidateConfig(cfg, opts...); err != nil {
 		return err
+	}
+
+	// Post-validate sweep: reject legacy DO and AWS module/step types with
+	// actionable migration errors (issues #617, #653). wfctl validate has no
+	// engine, so the iacProviderLoaded flag is always false here.
+	for _, m := range cfg.Modules {
+		if legacydo.IsModuleType(m.Type) {
+			return legacydo.FormatModuleError(m.Type, m.Name, false)
+		}
+		if legacyaws.IsModuleType(m.Type) {
+			return legacyaws.FormatModuleError(m.Type, m.Name, false)
+		}
+	}
+	for _, rawPipeline := range cfg.Pipelines {
+		yamlBytes, err := yaml.Marshal(rawPipeline)
+		if err != nil {
+			continue
+		}
+		var pipeCfg config.PipelineConfig
+		if err := yaml.Unmarshal(yamlBytes, &pipeCfg); err != nil {
+			continue
+		}
+		for _, s := range pipeCfg.Steps {
+			if legacydo.IsStepType(s.Type) {
+				return legacydo.FormatStepError(s.Type, false)
+			}
+			if legacyaws.IsStepType(s.Type) {
+				return legacyaws.FormatStepError(s.Type, false)
+			}
+		}
 	}
 
 	// Validate ci:, environments:, and secrets: sections when present.
@@ -175,6 +252,32 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 	}
 	for _, warn := range config.CrossValidate(cfg) {
 		fmt.Fprintf(os.Stderr, "  WARN %s: %s\n", cfgPath, warn)
+	}
+
+	if cfg.Pipelines != nil {
+		if refs := validation.ValidatePipelineTemplateRefs(cfg.Pipelines, schema.GetStepSchemaRegistry()); refs.HasIssues() {
+			var findings []string
+			blocking := refs.BlockingWarningMessages()
+			for _, w := range refs.Warnings {
+				msg := "pipeline-refs warning: " + w
+				findings = append(findings, msg)
+				if !strict || !containsString(blocking, w) {
+					fmt.Fprintf(os.Stderr, "  WARN %s: %s\n", cfgPath, msg)
+				}
+			}
+			for _, e := range refs.Errors {
+				findings = append(findings, "pipeline-refs error: "+e)
+			}
+			if len(refs.Errors) > 0 {
+				return fmt.Errorf("%s", strings.Join(findings, "\n"))
+			}
+			if strict && len(blocking) > 0 {
+				for i, w := range blocking {
+					blocking[i] = "pipeline-refs warning: " + w
+				}
+				return fmt.Errorf("%s", strings.Join(blocking, "\n"))
+			}
+		}
 	}
 
 	fmt.Printf("  PASS %s (%d modules, %d workflows, %d triggers)\n",
@@ -276,8 +379,11 @@ func reorderFlags(args []string) []string {
 	var flags, positional []string
 	// flags that take a value argument (not self-contained with "=")
 	valueFlagNames := map[string]bool{
-		"dir":        true,
-		"plugin-dir": true,
+		"dir":             true,
+		"lock-file":       true,
+		"manifest":        true,
+		"plugin-dir":      true,
+		"plugin-manifest": true,
 	}
 	for i := 0; i < len(args); i++ {
 		if strings.HasPrefix(args[i], "-") {

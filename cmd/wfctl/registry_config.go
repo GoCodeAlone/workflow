@@ -11,19 +11,25 @@ import (
 
 // RegistryConfig defines wfctl plugin registry configuration.
 type RegistryConfig struct {
-	Registries []RegistrySourceConfig `yaml:"registries" json:"registries"`
+	Registries    []RegistrySourceConfig      `yaml:"registries" json:"registries"`
+	Compatibility RegistryCompatibilityConfig `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+}
+
+type RegistryCompatibilityConfig struct {
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 // RegistrySourceConfig defines a single registry source.
 type RegistrySourceConfig struct {
-	Name     string `yaml:"name" json:"name"`         // e.g. "default", "my-org"
-	Type     string `yaml:"type" json:"type"`         // "github" or "static"
-	Owner    string `yaml:"owner" json:"owner"`       // GitHub owner/org (type: github)
-	Repo     string `yaml:"repo" json:"repo"`         // GitHub repo name (type: github)
-	Branch   string `yaml:"branch" json:"branch"`     // Git branch, default "main" (type: github)
-	Priority int    `yaml:"priority" json:"priority"` // Lower = higher priority
-	URL      string `yaml:"url" json:"url"`           // Base URL (type: static)
-	Token    string `yaml:"token" json:"token"`       // Auth token (optional)
+	Name                  string                              `yaml:"name" json:"name"`         // e.g. "default", "my-org"
+	Type                  string                              `yaml:"type" json:"type"`         // "github" or "static"
+	Owner                 string                              `yaml:"owner" json:"owner"`       // GitHub owner/org (type: github)
+	Repo                  string                              `yaml:"repo" json:"repo"`         // GitHub repo name (type: github)
+	Branch                string                              `yaml:"branch" json:"branch"`     // Git branch, default "main" (type: github)
+	Priority              int                                 `yaml:"priority" json:"priority"` // Lower = higher priority
+	URL                   string                              `yaml:"url" json:"url"`           // Base URL (type: static)
+	Token                 string                              `yaml:"token" json:"token"`       // Auth token (optional)
+	CompatibilityEvidence RegistryCompatibilityEvidenceConfig `yaml:"compatibilityEvidence,omitempty" json:"compatibilityEvidence,omitempty"`
 }
 
 // DefaultRegistryConfig returns the built-in registry config.
@@ -41,12 +47,18 @@ func DefaultRegistryConfig() *RegistryConfig {
 				Repo:     registryRepo,
 				Branch:   registryBranch,
 				Priority: 0,
+				CompatibilityEvidence: RegistryCompatibilityEvidenceConfig{
+					Trust: CompatibilityTrustFirstParty,
+				},
 			},
 			{
 				Name:     "static-mirror",
 				Type:     "static",
 				URL:      "https://gocodealone.github.io/workflow-registry/v1",
 				Priority: 100,
+				CompatibilityEvidence: RegistryCompatibilityEvidenceConfig{
+					Trust: CompatibilityTrustFirstParty,
+				},
 			},
 		},
 	}
@@ -102,7 +114,14 @@ func loadRegistryConfigFile(path string) (*RegistryConfig, bool, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, false, fmt.Errorf("parse registry config %s: %w", path, err)
 	}
-	// Ensure defaults.
+	applyRegistryConfigDefaults(&cfg)
+	return &cfg, true, nil
+}
+
+func applyRegistryConfigDefaults(cfg *RegistryConfig) {
+	if cfg == nil {
+		return
+	}
 	for i := range cfg.Registries {
 		if cfg.Registries[i].Branch == "" {
 			cfg.Registries[i].Branch = "main"
@@ -110,8 +129,10 @@ func loadRegistryConfigFile(path string) (*RegistryConfig, bool, error) {
 		if cfg.Registries[i].Type == "" {
 			cfg.Registries[i].Type = "github"
 		}
+		if cfg.Registries[i].CompatibilityEvidence.Trust == "" {
+			cfg.Registries[i].CompatibilityEvidence.Trust = CompatibilityTrustAdvisory
+		}
 	}
-	return &cfg, true, nil
 }
 
 // SaveRegistryConfig writes a registry config to a YAML file.

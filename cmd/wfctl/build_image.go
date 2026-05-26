@@ -25,9 +25,13 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 	cfgPath := fs.String("config", "", "Config file")
 	dryRun := fs.Bool("dry-run", false, "Print planned actions without executing")
 	tagOverride := fs.String("tag", "", "Override image tag for all containers")
+	only := fs.String("only", "", "Build only containers matching this name (comma-separated)")
+	skip := fs.String("skip", "", "Skip containers matching this name (comma-separated)")
+	pushImages := fs.Bool("push", false, "Push images directly via buildx (hardened mode: adds --push to buildx; non-hardened: no effect, separate push step handles it)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	filter := buildOpts{only: splitCSV(*only), skip: splitCSV(*skip)}
 
 	if os.Getenv("WFCTL_BUILD_DRY_RUN") == "1" {
 		*dryRun = true
@@ -56,6 +60,9 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 
 	for i := range cfg.CI.Build.Containers {
 		ctr := cfg.CI.Build.Containers[i]
+		if !shouldInclude(ctr.Name, filter) {
+			continue
+		}
 		tag := *tagOverride
 		if tag == "" {
 			tag = "latest"
@@ -84,7 +91,7 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 				return fmt.Errorf("ko build %q: %w", ctr.Name, err)
 			}
 		default: // dockerfile
-			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, cfg.CI.Registries, out); err != nil {
+			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, *pushImages, cfg.CI.Registries, out); err != nil {
 				return fmt.Errorf("dockerfile build %q: %w", ctr.Name, err)
 			}
 		}
@@ -92,7 +99,7 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 	return nil
 }
 
-func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, registries []config.CIRegistry, out io.Writer) error {
+func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, push bool, registries []config.CIRegistry, out io.Writer) error {
 	dockerfile := ctr.Dockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
@@ -154,6 +161,21 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 			fmt.Fprintf(out, "warning: DOCKER_BUILDKIT is not set to 1; provenance attestation requires BuildKit\n")
 		}
 		args = append(args, "--provenance=mode=max", "--sbom=true")
+		// The docker-container driver caches the build result but does not export
+		// it unless --push or --load is explicitly specified.
+		if push && len(ctr.PushTo) > 0 {
+			// Multi-registry: add every push_to ref as a --tag flag so buildx
+			// pushes to all registries in a single invocation.
+			allRefs := allImageRefsForContainer(ctr, tag, registries)
+			for _, ref := range allRefs[1:] {
+				args = append(args, "--tag", ref)
+			}
+			args = append(args, "--push")
+		} else if len(ctr.Platforms) <= 1 {
+			// Single-platform with no push (or no push_to): load into local daemon.
+			// Multi-platform + no-push: --load is unsupported; leave in buildkit cache.
+			args = append(args, "--load")
+		}
 	}
 
 	args = append(args, ".")
@@ -266,4 +288,28 @@ func imageRefForContainer(ctr config.CIContainerTarget, tag string, registries [
 		return ctr.PushTo[0] + "/" + ctr.Name + ":" + tag
 	}
 	return ctr.Name + ":" + tag
+}
+
+// allImageRefsForContainer returns image refs for every registry listed in push_to[].
+// Falls back to local name:tag when push_to is empty.
+// Used by hardened buildx builds to populate multiple --tag flags so all registries
+// are pushed in a single buildx invocation.
+func allImageRefsForContainer(ctr config.CIContainerTarget, tag string, registries []config.CIRegistry) []string {
+	if len(ctr.PushTo) == 0 {
+		return []string{ctr.Name + ":" + tag}
+	}
+	regMap := make(map[string]string, len(registries))
+	for _, reg := range registries {
+		regMap[reg.Name] = reg.Path
+	}
+	refs := make([]string, 0, len(ctr.PushTo))
+	for _, regName := range ctr.PushTo {
+		if path, ok := regMap[regName]; ok {
+			refs = append(refs, path+"/"+ctr.Name+":"+tag)
+		} else {
+			// Fall back to raw registry name when path not configured.
+			refs = append(refs, regName+"/"+ctr.Name+":"+tag)
+		}
+	}
+	return refs
 }

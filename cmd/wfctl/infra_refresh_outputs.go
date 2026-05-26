@@ -41,9 +41,14 @@ func runInfraRefreshOutputs(args []string) error {
 	// values < 1 as "use default" so callers passing an explicit 0 (or
 	// negative) keep working; this default just makes `--help` honest.
 	fs.IntVar(&concurrency, "concurrency", 8, "Maximum concurrent Read calls")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
@@ -241,7 +246,26 @@ func refreshOneProviderGroup(
 			continue
 		}
 		states[idx] = fresh
-		if err := store.SaveResource(ctx, fresh); err != nil {
+		// Build a ResourceOutput so persistResourceWithSecretRouting (read mode)
+		// can sanitize sensitive keys from the refreshed cloud outputs. Use
+		// driver.SensitiveKeys() as the per-call Sensitive map source for
+		// refresh: refresh paths don't have a per-call Sensitive declaration
+		// from a driver method, but SensitiveKeys() is the static driver
+		// declaration that approximates the same intent.
+		ro := interfaces.ResourceOutput{
+			Name: fresh.Name, Type: fresh.Type, ProviderID: fresh.ProviderID,
+			Outputs: fresh.Outputs,
+		}
+		if drv, derr := provider.ResourceDriver(fresh.Type); derr == nil && drv != nil {
+			sk := drv.SensitiveKeys()
+			if len(sk) > 0 {
+				ro.Sensitive = make(map[string]bool, len(sk))
+				for _, k := range sk {
+					ro.Sensitive[k] = true
+				}
+			}
+		}
+		if _, err := persistResourceWithSecretRouting(ctx, store, nil, nil, fresh, ro, persistModeRead); err != nil {
 			return fmt.Errorf("provider %q: persist refreshed %q: %w", def.moduleName, fresh.Name, err)
 		}
 		*updated++

@@ -35,10 +35,20 @@ func runPlugin(args []string) error {
 		return runPluginRemove(args[1:])
 	case "validate":
 		return runPluginValidate(args[1:])
+	case "validate-contract":
+		return runPluginValidateContract(args[1:])
+	case "verify-capabilities":
+		return runPluginVerifyCapabilities(args[1:])
+	case "registry-sync":
+		return runPluginRegistrySync(args[1:])
+	case "conformance":
+		return runPluginConformance(args[1:])
 	case "info":
 		return runPluginInfo(args[1:])
 	case "deps":
 		return runPluginDeps(args[1:])
+	case "marketplace-verify":
+		return runPluginMarketplaceVerify(args[1:])
 	default:
 		return pluginUsage()
 	}
@@ -59,8 +69,13 @@ Subcommands:
   update   Update an installed plugin to its latest version
   remove   Uninstall a plugin (also removes from manifest + lockfile)
   validate Validate a plugin manifest from the registry or a local file
+  validate-contract  Validate a plugin source directory against the release contract (workflow#758)
+  verify-capabilities  Spawn plugin binary, verify runtime GetManifest matches plugin.json
+  registry-sync  Sync registry manifest versions/capabilities from upstream release tags; subcommands: core, readme (workflow#762)
+  conformance Run executable plugin/host conformance checks
   info     Show details about an installed plugin
   deps     List dependencies for a plugin
+  marketplace-verify  Scan a GitHub org's wfctl.yaml files for plugin usage; suggests manifest status (verified | experimental)
 
 Use -plugin-dir to specify a custom plugin directory (replaces deprecated -data-dir).
 `)

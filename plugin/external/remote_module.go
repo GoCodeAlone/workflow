@@ -18,6 +18,16 @@ type RemoteModule struct {
 	contract         *pb.ContractDescriptor
 	serviceContracts map[string]*pb.ContractDescriptor
 	types            protoregistry.MessageTypeResolver
+
+	// dependencies holds the yaml-level `dependsOn:` keys for this module.
+	// Populated by the engine after the factory returns via SetDependencies
+	// — see workflow#663. Returned from Dependencies() so modular's Init()
+	// walker honours them when computing module init order. Without this,
+	// every external-plugin module appeared as a root and modular sorted
+	// them alphabetically, which broke any plugin where module A's Init()
+	// registered runtime state in a plugin-local registry that module B's
+	// Init() looked up.
+	dependencies []string
 }
 
 type remoteModuleContracts struct {
@@ -53,7 +63,28 @@ func (m *RemoteModule) Name() string {
 }
 
 func (m *RemoteModule) Dependencies() []string {
-	return nil
+	return m.dependencies
+}
+
+// SetDependencies records the yaml-level `dependsOn:` keys declared for this
+// module so modular's Init() walker can honour them. Called by the engine
+// from BuildFromConfig immediately after the factory returns and before
+// app.RegisterModule, but only when the module's `modCfg.DependsOn` is
+// **non-empty after filtering** (filterResolvableDeps drops empty strings
+// + names not present in cfg.Modules) AND the module satisfies
+// `interface{ SetDependencies([]string) }` — modules with no resolvable
+// dependsOn are skipped so a constructor-time default isn't clobbered with
+// a SetDependencies(nil) call. See workflow#663.
+//
+// Defensive copy: although the engine already copies before calling, the
+// setter is exported and Dependencies() exposes the same backing array to
+// modular. Copying here too means any caller (engine, tests, future
+// integration paths) can mutate its source slice after calling without
+// silently corrupting this module's init graph.
+func (m *RemoteModule) SetDependencies(deps []string) {
+	cp := make([]string, len(deps))
+	copy(cp, deps)
+	m.dependencies = cp
 }
 
 func (m *RemoteModule) ProvidesServices() []string {
@@ -132,15 +163,32 @@ func (m *RemoteModule) InvokeServiceContext(ctx context.Context, method string, 
 	req := &pb.InvokeServiceRequest{
 		HandleId: m.handleID,
 		Method:   method,
-		Args:     mapToStruct(args),
 	}
 	contract := m.serviceContracts[method]
+	// Encode args as Struct only when the wire actually carries it. STRICT_PROTO
+	// nils req.Args after a successful typed encode and relies on TypedInput;
+	// failing early on Struct encoding for values JSON can marshal but Struct
+	// cannot (e.g. time.Time targeting a strict typed payload) would break
+	// otherwise-valid STRICT_PROTO calls — Copilot review #555 finding.
+	encodeLegacyArgs := contract == nil ||
+		contract.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED ||
+		contract.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT ||
+		contract.Mode == pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT
+	if encodeLegacyArgs {
+		argsStruct, err := mapToStruct(args)
+		if err != nil {
+			return nil, fmt.Errorf("remote invoke %s: encode args as Struct: %w", method, err)
+		}
+		req.Args = argsStruct
+	}
 	if contract != nil && contract.Mode != pb.ContractMode_CONTRACT_MODE_UNSPECIFIED && contract.Mode != pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT {
 		typedInput, err := mapToTypedAny(contract.InputMessage, args, m.types)
 		if err != nil {
 			if contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {
 				return nil, fmt.Errorf("remote invoke %s STRICT_PROTO input message %q cannot use legacy Struct fallback: %w", method, contract.InputMessage, err)
 			}
+			// PROTO_WITH_LEGACY_STRUCT: typed encoding failed, fall back to
+			// the legacy Struct already encoded above.
 		} else {
 			req.TypedInput = typedInput
 			if contract.Mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO {

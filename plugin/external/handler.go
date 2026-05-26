@@ -117,7 +117,8 @@ func (h *PluginHandler) handleUnload(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, map[string]string{"name": name, "action": "unloaded"})
 }
 
-// handleReload reloads an external plugin by name (unload + load).
+// handleReload reloads an external plugin by name without unloading the active
+// process until the replacement has loaded successfully.
 func (h *PluginHandler) handleReload(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {

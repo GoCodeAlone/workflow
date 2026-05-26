@@ -23,11 +23,18 @@ import (
 //	func main() {
 //	    sdk.ServePluginFull(&myPlugin{}, &myCLI{}, &myHooks{})
 //	}
-func ServePluginFull(p PluginProvider, cli CLIProvider, hooks HookHandler) {
+//
+// With disk-embedded manifest:
+//
+//	func main() {
+//	    sdk.ServePluginFull(&myPlugin{}, &myCLI{}, &myHooks{},
+//	        sdk.WithManifestProvider(manifest))
+//	}
+func ServePluginFull(p PluginProvider, cli CLIProvider, hooks HookHandler, opts ...ServeOption) {
 	code := DispatchArgs(os.Args, p, cli, hooks, os.Stdin, os.Stdout)
 	if code < 0 {
 		// code -1 means "no special flag found — run normal gRPC serve"
-		Serve(p)
+		Serve(p, opts...)
 		return
 	}
 	os.Exit(code)

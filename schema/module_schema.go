@@ -569,15 +569,14 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "metrics.collector",
 		Label:       "Metrics Collector",
 		Category:    "observability",
-		Description: "Collects and exposes application metrics",
-		Outputs:     []ServiceIODef{{Name: "metrics", Type: "prometheus.Metrics", Description: "Prometheus metrics endpoint"}},
+		Description: "Collects application metrics for telemetry export",
+		Outputs:     []ServiceIODef{{Name: "metrics", Type: "prometheus.Metrics", Description: "Prometheus metrics registry"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "namespace", Label: "Namespace", Type: FieldTypeString, DefaultValue: "workflow", Description: "Prometheus metric namespace prefix", Placeholder: "workflow"},
 			{Key: "subsystem", Label: "Subsystem", Type: FieldTypeString, Description: "Prometheus metric subsystem", Placeholder: "api"},
-			{Key: "metricsPath", Label: "Metrics Path", Type: FieldTypeString, DefaultValue: "/metrics", Description: "Endpoint path for Prometheus scraping", Placeholder: "/metrics"},
 			{Key: "enabledMetrics", Label: "Enabled Metrics", Type: FieldTypeArray, ArrayItemType: "string", DefaultValue: []string{"workflow", "http", "module", "active_workflows"}, Description: "Which metric groups to register (workflow, http, module, active_workflows)"},
 		},
-		DefaultConfig: map[string]any{"namespace": "workflow", "metricsPath": "/metrics", "enabledMetrics": []string{"workflow", "http", "module", "active_workflows"}},
+		DefaultConfig: map[string]any{"namespace": "workflow", "enabledMetrics": []string{"workflow", "http", "module", "active_workflows"}},
 	})
 
 	r.Register(&ModuleSchema{
@@ -2423,10 +2422,10 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "app.container",
 		Label:       "App Container",
 		Category:    "infrastructure",
-		Description: "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service or ECS task definition)",
+		Description: "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service)",
 		Outputs:     []ServiceIODef{{Name: "container", Type: "JSON", Description: "Deployment output with service endpoint and status"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "environment", Label: "Environment", Type: FieldTypeString, Required: true, Description: "Name of the platform.kubernetes or platform.ecs module to deploy to"},
+			{Key: "environment", Label: "Environment", Type: FieldTypeString, Required: true, Description: "Name of the platform.kubernetes module to deploy to"},
 			{Key: "image", Label: "Container Image", Type: FieldTypeString, Required: true, Description: "Container image reference (e.g. registry.example.com/my-api:v1.0.0)"},
 			{Key: "replicas", Label: "Replicas", Type: FieldTypeNumber, Description: "Desired replica count"},
 			{Key: "ports", Label: "Ports", Type: FieldTypeArray, Description: "List of container port numbers"},
@@ -2636,39 +2635,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
-	// ---- Platform API Gateway ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.apigateway",
-		Label:       "API Gateway",
-		Category:    "infrastructure",
-		Description: "Manages API gateway provisioning with routes, stages, and rate limiting (mock or AWS API Gateway v2)",
-		Outputs:     []ServiceIODef{{Name: "gateway", Type: "JSON", Description: "Provisioned API gateway endpoint and configuration"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
-			{Key: "name", Label: "Gateway Name", Type: FieldTypeString, Required: true, Description: "API gateway name"},
-			{Key: "stage", Label: "Stage", Type: FieldTypeString, Description: "Deployment stage (dev, staging, prod)"},
-			{Key: "cors", Label: "CORS Config", Type: FieldTypeMap, Description: "CORS configuration (allowedOrigins, allowedMethods, allowedHeaders)"},
-			{Key: "routes", Label: "Routes", Type: FieldTypeArray, Description: "Route definitions"},
-		},
-	})
-
-	// ---- Platform Autoscaling ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.autoscaling",
-		Label:       "Autoscaling Policies",
-		Category:    "infrastructure",
-		Description: "Manages autoscaling policies (target tracking, step, scheduled) for AWS or mock resources",
-		Outputs:     []ServiceIODef{{Name: "policies", Type: "JSON", Description: "Configured autoscaling policies"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
-			{Key: "policies", Label: "Policies", Type: FieldTypeArray, Required: true, Description: "Scaling policy definitions"},
-		},
-	})
-
 	// ---- Platform DNS ----
 
 	r.Register(&ModuleSchema{
@@ -2679,117 +2645,9 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Outputs:     []ServiceIODef{{Name: "zone", Type: "JSON", Description: "Provisioned DNS zone and record set"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws (aws Route53 backend removed in v0.53.0; use infra.dns + workflow-plugin-aws)"},
 			{Key: "zone", Label: "Zone Config", Type: FieldTypeMap, Required: true, Description: "Zone configuration (name, comment, private, vpcId)"},
 			{Key: "records", Label: "DNS Records", Type: FieldTypeArray, Description: "List of DNS record definitions"},
-		},
-	})
-
-	// ---- Platform DigitalOcean App ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.do_app",
-		Label:       "DigitalOcean App Platform",
-		Category:    "infrastructure",
-		Description: "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
-		Outputs:     []ServiceIODef{{Name: "app", Type: "JSON", Description: "Deployed app endpoint and status on DigitalOcean App Platform"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
-			{Key: "name", Label: "App Name", Type: FieldTypeString, Description: "App Platform application name"},
-			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug (e.g. nyc)"},
-			{Key: "image", Label: "Container Image", Type: FieldTypeString, Description: "Container image reference"},
-			{Key: "instances", Label: "Instances", Type: FieldTypeNumber, Description: "Number of instances"},
-			{Key: "http_port", Label: "HTTP Port", Type: FieldTypeNumber, Description: "Container HTTP port"},
-			{Key: "envs", Label: "Environment Variables", Type: FieldTypeMap, Description: "Environment variables for the app"},
-		},
-	})
-
-	// ---- Platform DigitalOcean Database ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.do_database",
-		Label:       "DigitalOcean Managed Database",
-		Category:    "infrastructure",
-		Description: "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
-		Outputs:     []ServiceIODef{{Name: "database", Type: "sql.DB", Description: "Managed database connection for DigitalOcean database cluster"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
-			{Key: "engine", Label: "Engine", Type: FieldTypeString, Description: "Database engine: pg | mysql | redis | mongodb | kafka"},
-			{Key: "version", Label: "Version", Type: FieldTypeString, Description: "Engine version"},
-			{Key: "size", Label: "Size", Type: FieldTypeString, Description: "Droplet size slug"},
-			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug"},
-			{Key: "num_nodes", Label: "Node Count", Type: FieldTypeNumber, Description: "Number of nodes"},
-			{Key: "name", Label: "Cluster Name", Type: FieldTypeString, Description: "Database cluster name"},
-		},
-	})
-
-	// ---- Platform DigitalOcean DNS ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.do_dns",
-		Label:       "DigitalOcean DNS",
-		Category:    "infrastructure",
-		Description: "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
-		Outputs:     []ServiceIODef{{Name: "zone", Type: "JSON", Description: "Provisioned DigitalOcean DNS zone and records"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
-			{Key: "domain", Label: "Domain", Type: FieldTypeString, Required: true, Description: "Domain name (e.g. example.com)"},
-			{Key: "records", Label: "Records", Type: FieldTypeArray, Description: "List of DNS record definitions"},
-		},
-	})
-
-	// ---- Platform DigitalOcean Networking ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.do_networking",
-		Label:       "DigitalOcean VPC & Firewalls",
-		Category:    "infrastructure",
-		Description: "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
-		Outputs:     []ServiceIODef{{Name: "vpc", Type: "JSON", Description: "Provisioned DigitalOcean VPC and firewall configuration"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
-			{Key: "vpc", Label: "VPC Config", Type: FieldTypeMap, Required: true, Description: "VPC configuration (name, region, ip_range)"},
-			{Key: "firewalls", Label: "Firewalls", Type: FieldTypeArray, Description: "List of firewall definitions"},
-		},
-	})
-
-	// ---- Platform DOKS ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.doks",
-		Label:       "DigitalOcean Kubernetes (DOKS)",
-		Category:    "infrastructure",
-		Description: "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
-		Outputs:     []ServiceIODef{{Name: "cluster", Type: "JSON", Description: "Provisioned DOKS cluster endpoint and kubeconfig"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "cluster_name", Label: "Cluster Name", Type: FieldTypeString, Description: "DOKS cluster name"},
-			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug (e.g. nyc3)"},
-			{Key: "version", Label: "Kubernetes Version", Type: FieldTypeString, Description: "Kubernetes version slug"},
-			{Key: "node_pool", Label: "Node Pool", Type: FieldTypeMap, Description: "Node pool config"},
-		},
-	})
-
-	// ---- Platform ECS ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.ecs",
-		Label:       "ECS Fargate Service",
-		Category:    "infrastructure",
-		Description: "AWS ECS/Fargate service with task definitions and ALB target group config",
-		Outputs:     []ServiceIODef{{Name: "service", Type: "JSON", Description: "Provisioned ECS Fargate service ARN and endpoint"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "cluster", Label: "ECS Cluster", Type: FieldTypeString, Required: true, Description: "ECS cluster name"},
-			{Key: "region", Label: "AWS Region", Type: FieldTypeString, Description: "AWS region (e.g. us-east-1)"},
-			{Key: "launch_type", Label: "Launch Type", Type: FieldTypeString, Description: "FARGATE or EC2"},
-			{Key: "desired_count", Label: "Desired Count", Type: FieldTypeString, Description: "Number of tasks to run"},
-			{Key: "vpc_subnets", Label: "VPC Subnets", Type: FieldTypeArray, ArrayItemType: "string", Description: "List of subnet IDs"},
-			{Key: "security_groups", Label: "Security Groups", Type: FieldTypeArray, ArrayItemType: "string", Description: "List of security group IDs"},
 		},
 	})
 
@@ -2806,24 +2664,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "type", Label: "Cluster Type", Type: FieldTypeString, Required: true, Description: "eks | gke | aks | kind | k3s"},
 			{Key: "version", Label: "Kubernetes Version", Type: FieldTypeString, Description: "e.g. 1.29"},
 			{Key: "nodeGroups", Label: "Node Groups", Type: FieldTypeArray, Description: "Node group definitions"},
-		},
-	})
-
-	// ---- Platform Networking ----
-
-	r.Register(&ModuleSchema{
-		Type:        "platform.networking",
-		Label:       "VPC Networking",
-		Category:    "infrastructure",
-		Description: "Manages VPC, subnets, NAT gateway, and security groups (mock or AWS backend)",
-		Outputs:     []ServiceIODef{{Name: "vpc", Type: "JSON", Description: "Provisioned VPC with subnets and security groups"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
-			{Key: "vpc", Label: "VPC Config", Type: FieldTypeMap, Required: true, Description: "VPC configuration (cidr, name)"},
-			{Key: "subnets", Label: "Subnets", Type: FieldTypeArray, Description: "List of subnet definitions"},
-			{Key: "nat_gateway", Label: "NAT Gateway", Type: FieldTypeBool, Description: "Provision a NAT gateway"},
-			{Key: "security_groups", Label: "Security Groups", Type: FieldTypeArray, Description: "List of security group definitions"},
 		},
 	})
 
@@ -2974,10 +2814,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	}{
 		{"step.actor_send", "Actor Send", "Send a message to an actor without waiting for a response"},
 		{"step.actor_ask", "Actor Ask", "Send a message to an actor and wait for a response"},
-		{"step.apigw_apply", "API Gateway Apply", "Applies API gateway configuration"},
-		{"step.apigw_destroy", "API Gateway Destroy", "Destroys a provisioned API gateway"},
-		{"step.apigw_plan", "API Gateway Plan", "Plans API gateway changes without applying them"},
-		{"step.apigw_status", "API Gateway Status", "Gets the current status of an API gateway"},
 		{"step.app_deploy", "App Deploy", "Deploys an application container"},
 		{"step.app_rollback", "App Rollback", "Rolls back an application to a previous version"},
 		{"step.app_status", "App Status", "Gets the deployment status of an application"},
@@ -3002,15 +2838,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		{"step.dns_apply", "DNS Apply", "Applies DNS zone and record changes"},
 		{"step.dns_plan", "DNS Plan", "Plans DNS changes without applying them"},
 		{"step.dns_status", "DNS Status", "Gets the current status of a DNS zone"},
-		{"step.do_deploy", "DO Deploy", "Deploys to DigitalOcean App Platform"},
-		{"step.do_destroy", "DO Destroy", "Destroys a DigitalOcean App Platform application"},
-		{"step.do_logs", "DO Logs", "Retrieves logs from DigitalOcean App Platform"},
-		{"step.do_scale", "DO Scale", "Scales a DigitalOcean App Platform application"},
-		{"step.do_status", "DO Status", "Gets the status of a DigitalOcean App Platform application"},
-		{"step.ecs_apply", "ECS Apply", "Applies ECS Fargate service deployment"},
-		{"step.ecs_destroy", "ECS Destroy", "Destroys an ECS Fargate service"},
-		{"step.ecs_plan", "ECS Plan", "Plans ECS service deployment changes"},
-		{"step.ecs_status", "ECS Status", "Gets the status of an ECS Fargate service"},
 		{"step.git_checkout", "Git Checkout", "Checks out a Git branch, tag, or commit"},
 		{"step.git_clone", "Git Clone", "Clones a Git repository"},
 		{"step.git_commit", "Git Commit", "Creates a Git commit"},
@@ -3036,9 +2863,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		{"step.marketplace_search", "Marketplace Search", "Searches the plugin marketplace"},
 		{"step.marketplace_uninstall", "Marketplace Uninstall", "Uninstalls a marketplace plugin"},
 		{"step.marketplace_update", "Marketplace Update", "Updates an installed marketplace plugin"},
-		{"step.network_apply", "Network Apply", "Applies VPC networking changes"},
-		{"step.network_plan", "Network Plan", "Plans VPC networking changes"},
-		{"step.network_status", "Network Status", "Gets VPC networking status"},
 		{"step.nosql_delete", "NoSQL Delete", "Deletes an item from a NoSQL store"},
 		{"step.policy_evaluate", "Policy Evaluate", "Evaluates input against a policy"},
 		{"step.policy_list", "Policy List", "Lists loaded policies"},
@@ -3050,10 +2874,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		{"step.region_status", "Region Status", "Gets multi-region health status"},
 		{"step.region_sync", "Region Sync", "Syncs state across regions"},
 		{"step.region_weight", "Region Weight", "Sets traffic weight for a region"},
-		{"step.scaling_apply", "Scaling Apply", "Applies autoscaling policies"},
-		{"step.scaling_destroy", "Scaling Destroy", "Removes autoscaling policies"},
-		{"step.scaling_plan", "Scaling Plan", "Plans autoscaling changes"},
-		{"step.scaling_status", "Scaling Status", "Gets autoscaling status"},
 		{"step.secret_rotate", "Secret Rotate", "Rotates a secret"},
 		{"step.trace_annotate", "Trace Annotate", "Adds attributes to the current trace span"},
 		{"step.trace_extract", "Trace Extract", "Extracts trace context from incoming headers"},

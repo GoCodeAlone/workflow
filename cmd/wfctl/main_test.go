@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -44,6 +46,67 @@ func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
 	wrapped := fmt.Errorf("pipeline failed: %w", flag.ErrHelp)
 	if !isHelpRequested(wrapped) {
 		t.Error("isHelpRequested should return true for wrapped flag.ErrHelp")
+	}
+}
+
+func TestBuildVersionStripsDirtyMarker(t *testing.T) {
+	// cleanBuildVersion must strip +dirty from both release tags and pseudo-versions.
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{
+			in:   "v0.22.8-0.20260510180701-a851625d3bf0+dirty",
+			want: "v0.22.8-0.20260510180701-a851625d3bf0",
+		},
+		{
+			in:   "v0.51.2+dirty",
+			want: "v0.51.2",
+		},
+		{
+			in:   "v0.51.2",
+			want: "v0.51.2",
+		},
+		{
+			in:   "v0.22.8-0.20260510180701-a851625d3bf0",
+			want: "v0.22.8-0.20260510180701-a851625d3bf0",
+		},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			got := cleanBuildVersion(tc.in)
+			if got != tc.want {
+				t.Fatalf("cleanBuildVersion(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// buildVersion() itself must never return a value ending in +dirty.
+	v := buildVersion()
+	if strings.HasSuffix(v, "+dirty") {
+		t.Fatalf("buildVersion() = %q, must not end in +dirty", v)
+	}
+}
+
+func TestLinkedVersionOverridesBuildInfo(t *testing.T) {
+	exeName := "wfctl"
+	if runtime.GOOS == "windows" {
+		exeName += ".exe"
+	}
+	exe := filepath.Join(t.TempDir(), exeName)
+	build := exec.Command("go", "build", "-o", exe, "-ldflags", "-X main.version=v9.9.9", ".")
+	build.Env = append(os.Environ(), "GOWORK=off")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build wfctl: %v\n%s", err, out)
+	}
+
+	run := exec.Command(exe, "--version")
+	run.Env = append(os.Environ(), "WFCTL_NO_UPDATE_CHECK=1", "CI=true")
+	out, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("wfctl --version: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "v9.9.9" {
+		t.Fatalf("linked version = %q, want v9.9.9", got)
 	}
 }
 
@@ -106,13 +169,65 @@ func TestRunValidateInvalid(t *testing.T) {
 	}
 }
 
-func TestRunValidateStrict(t *testing.T) {
+func TestRunValidateStrictByDefault(t *testing.T) {
 	dir := t.TempDir()
 	emptyConfig := "modules: []\n"
 	path := writeTestConfig(t, dir, "empty.yaml", emptyConfig)
-	err := runValidate([]string{"-strict", path})
+	err := runValidate([]string{path})
 	if err == nil {
-		t.Fatal("expected error in strict mode with empty modules")
+		t.Fatal("expected error by default with empty modules")
+	}
+}
+
+func TestRunValidateLooseAllowsEmptyModules(t *testing.T) {
+	dir := t.TempDir()
+	emptyConfig := "modules: []\n"
+	path := writeTestConfig(t, dir, "empty.yaml", emptyConfig)
+	if err := runValidate([]string{"--loose", path}); err != nil {
+		t.Fatalf("expected --loose to allow empty modules, got: %v", err)
+	}
+	if err := runValidate([]string{"--non-strict", path}); err != nil {
+		t.Fatalf("expected --non-strict to allow empty modules, got: %v", err)
+	}
+}
+
+func TestRunValidateCatchesDBQueryCachedRowWrapperByDefault(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+modules:
+  - name: router
+    type: http.router
+pipelines:
+  payment-create-intent:
+    trigger:
+      type: http
+      config:
+        path: /api/v1/payments/intents
+        method: POST
+    steps:
+      - name: check_mock_mode
+        type: step.db_query_cached
+        config:
+          database: db
+          query: "SELECT COALESCE((SELECT settings->>'mock_payments' FROM tenants WHERE id = $1), 'false') AS mock_payments"
+          mode: single
+          cache_key: tenant:test:mock_payments
+      - name: set_mock_flag
+        type: step.set
+        config:
+          values:
+            is_mock: '{{ index .steps "check_mock_mode" "row" "mock_payments" | default "false" }}'
+`
+	path := writeTestConfig(t, dir, "payment.yaml", cfg)
+	err := runValidate([]string{path})
+	if err == nil {
+		t.Fatal("expected validate to fail on stale db_query_cached row wrapper")
+	}
+	if !strings.Contains(err.Error(), "pipeline-refs warning") || !strings.Contains(err.Error(), "check_mock_mode.row") {
+		t.Fatalf("validate error should mention pipeline refs and check_mock_mode.row, got: %v", err)
+	}
+	if err := runValidate([]string{"--loose", path}); err != nil {
+		t.Fatalf("--loose should allow transitional pipeline reference warnings, got: %v", err)
 	}
 }
 
@@ -214,12 +329,12 @@ modules:
 `
 	path := writeTestConfig(t, dir, "custom.yaml", unknownTypeConfig)
 	// Should fail without the flag
-	err := runValidate([]string{path})
+	err := runValidate([]string{"--allow-no-entry-points", path})
 	if err == nil {
 		t.Fatal("expected error for unknown type")
 	}
 	// Should pass with the flag
-	if err := runValidate([]string{"--skip-unknown-types", path}); err != nil {
+	if err := runValidate([]string{"--skip-unknown-types", "--allow-no-entry-points", path}); err != nil {
 		t.Fatalf("expected pass with --skip-unknown-types, got: %v", err)
 	}
 }
@@ -239,7 +354,7 @@ triggers:
 `
 	path := writeTestConfig(t, dir, "snake.yaml", snakeCaseConfig)
 	// validateFile returns the detailed error; runValidate returns a summary
-	err := validateFile(path, false, false, false)
+	err := validateFile(path, false, false, false, false)
 	if err == nil {
 		t.Fatal("expected error for snake_case config field")
 	}
@@ -344,12 +459,12 @@ modules:
 	path := writeTestConfig(t, dir, "workflow.yaml", configContent)
 
 	// Without --plugin-dir: should fail (unknown type)
-	if err := runValidate([]string{path}); err == nil {
+	if err := runValidate([]string{"--allow-no-entry-points", path}); err == nil {
 		t.Fatal("expected error for unknown external module type without --plugin-dir")
 	}
 
 	// With --plugin-dir: should pass
-	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, "--allow-no-entry-points", path}); err != nil {
 		t.Errorf("expected valid config with --plugin-dir, got: %v", err)
 	}
 	t.Cleanup(func() {
@@ -376,16 +491,119 @@ func TestRunValidatePluginDirCapabilities(t *testing.T) {
 	path := writeTestConfig(t, dir, "workflow.yaml", configContent)
 
 	// Without --plugin-dir: should fail (unknown type)
-	if err := runValidate([]string{path}); err == nil {
+	if err := runValidate([]string{"--allow-no-entry-points", path}); err == nil {
 		t.Fatal("expected error for unknown external module type without --plugin-dir")
 	}
 
 	// With --plugin-dir: should pass (types from capabilities object are recognized)
-	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, "--allow-no-entry-points", path}); err != nil {
 		t.Errorf("expected valid config with --plugin-dir (capabilities format), got: %v", err)
 	}
 	t.Cleanup(func() {
 		schema.UnregisterModuleType("custom.caps.validate.testonly")
 		schema.UnregisterModuleType("step.caps_validate_testonly")
 	})
+}
+
+func TestRunValidatePluginDirLoadsStepSchemas(t *testing.T) {
+	pluginsDir := t.TempDir()
+	pluginSubdir := filepath.Join(pluginsDir, "my-ext-plugin-step-schema")
+	if err := os.MkdirAll(pluginSubdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name": "my-ext-plugin-step-schema",
+		"version": "1.0.0",
+		"moduleTypes": ["custom.step_schema_validate_testonly"],
+		"stepSchemas": [
+			{
+				"type": "step.schema_validate_testonly",
+				"description": "test-only plugin step schema",
+				"configFields": [
+					{"key": "target", "type": "string", "required": true}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(pluginSubdir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := schema.GetStepSchemaRegistry()
+	if reg.Get("step.schema_validate_testonly") != nil {
+		t.Fatal("step.schema_validate_testonly should not exist before loading")
+	}
+
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, "workflow.yaml", `
+modules:
+  - name: ext-mod
+    type: custom.step_schema_validate_testonly
+`)
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, "--allow-no-entry-points", path}); err != nil {
+		t.Fatalf("expected valid config with --plugin-dir, got: %v", err)
+	}
+	if got := reg.Get("step.schema_validate_testonly"); got == nil {
+		t.Fatal("expected runValidate --plugin-dir to load plugin step schema")
+	}
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("custom.step_schema_validate_testonly")
+		reg.Unregister("step.schema_validate_testonly")
+	})
+}
+
+func TestRunValidatePluginDirUsesStepSchemasForPipelineRefs(t *testing.T) {
+	pluginsDir := t.TempDir()
+	pluginSubdir := filepath.Join(pluginsDir, "my-ext-plugin-output-schema")
+	if err := os.MkdirAll(pluginSubdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name": "my-ext-plugin-output-schema",
+		"version": "1.0.0",
+		"stepTypes": ["step.output_schema_validate_testonly"],
+		"stepSchemas": [
+			{
+				"type": "step.output_schema_validate_testonly",
+				"description": "test-only plugin step output schema",
+				"outputs": [
+					{"key": "known_output", "type": "string"}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(pluginSubdir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := schema.GetStepSchemaRegistry()
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("step.output_schema_validate_testonly")
+		reg.Unregister("step.output_schema_validate_testonly")
+	})
+
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, "workflow.yaml", `
+modules:
+  - name: server
+    type: http.server
+    config:
+      address: ":8080"
+pipelines:
+  test:
+    steps:
+      - name: plugin-step
+        type: step.output_schema_validate_testonly
+      - name: consume
+        type: step.set
+        config:
+          values:
+            result: '{{ step "plugin-step" "missing_output" }}'
+`)
+
+	err := runValidate([]string{"--plugin-dir", pluginsDir, "--allow-no-entry-points", path})
+	if err == nil {
+		t.Fatal("expected strict validation to reject plugin step output field not declared by plugin schema")
+	}
+	if !strings.Contains(err.Error(), "missing_output") {
+		t.Fatalf("expected error to mention missing plugin output field, got: %v", err)
+	}
 }

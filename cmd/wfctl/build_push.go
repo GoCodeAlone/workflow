@@ -14,9 +14,12 @@ func runBuildPush(args []string) error {
 	fs := flag.NewFlagSet("build push", flag.ContinueOnError)
 	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow config file")
 	tagOverride := fs.String("tag", "", "Override image tag for all containers")
+	only := fs.String("only", "", "Push only containers matching this name (comma-separated)")
+	skip := fs.String("skip", "", "Skip containers matching this name (comma-separated)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	filter := buildOpts{only: splitCSV(*only), skip: splitCSV(*skip)}
 
 	cfg, err := config.LoadFromFile(*cfgPath)
 	if err != nil {
@@ -37,6 +40,9 @@ func runBuildPush(args []string) error {
 
 	for i := range cfg.CI.Build.Containers {
 		ct := cfg.CI.Build.Containers[i]
+		if !shouldInclude(ct.Name, filter) {
+			continue
+		}
 		if ct.External {
 			continue
 		}

@@ -18,11 +18,66 @@ import (
 const (
 	githubReleasesURL = "https://api.github.com/repos/GoCodeAlone/workflow/releases/latest"
 	envNoUpdateCheck  = "WFCTL_NO_UPDATE_CHECK"
-	downloadTimeout   = 10 * time.Minute // generous timeout for large binary downloads
+	// envCI is set to a non-empty value by most CI systems (GitHub Actions, CircleCI, Travis, etc.).
+	envCI = "CI"
+	// envGitHubActions is set to "true" specifically by GitHub Actions runners.
+	envGitHubActions = "GITHUB_ACTIONS"
+	downloadTimeout  = 10 * time.Minute // generous timeout for large binary downloads
+	// updateCheckTTL is the minimum interval between background update-check network calls.
+	updateCheckTTL = 24 * time.Hour
 )
 
 // githubReleasesURLOverride allows tests to substitute a fake server URL.
 var githubReleasesURLOverride string
+
+// updateCheckCachePathOverride allows tests to redirect the timestamp cache to a temp file.
+var updateCheckCachePathOverride string
+
+// updateCheckCachePath returns the path to the file that records the last
+// successful update-check timestamp, used to limit checks to once per day.
+// Returns an empty string if the OS cache directory cannot be determined.
+func updateCheckCachePath() string {
+	if updateCheckCachePathOverride != "" {
+		return updateCheckCachePathOverride
+	}
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(cacheDir, "wfctl", "last_update_check")
+}
+
+// shouldCheckForUpdate returns true when the daily throttle allows a new check.
+// If the cache file is missing, unreadable, or older than updateCheckTTL, it
+// returns true; otherwise it returns false.
+func shouldCheckForUpdate() bool {
+	p := updateCheckCachePath()
+	if p == "" {
+		return true
+	}
+	data, err := os.ReadFile(p) //nolint:gosec // G304: path from os.UserCacheDir
+	if err != nil {
+		return true
+	}
+	ts, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
+	if err != nil {
+		return true
+	}
+	return time.Since(ts) > updateCheckTTL
+}
+
+// markUpdateChecked writes the current UTC time to the cache file so that the
+// next call to shouldCheckForUpdate respects the daily throttle.
+func markUpdateChecked() {
+	p := updateCheckCachePath()
+	if p == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0750); err != nil { //nolint:gosec // G301: cache dirs typically use 0750+
+		return
+	}
+	_ = os.WriteFile(p, []byte(time.Now().UTC().Format(time.RFC3339)), 0600) //nolint:gosec // G306: cache file, readable by owner only
+}
 
 // githubRelease is the minimal GitHub releases API response we need.
 type githubRelease struct {
@@ -137,14 +192,29 @@ Options:
 // It returns a channel that is closed when the check completes (or is skipped).
 // Callers should wait on the channel after their main work is done to allow
 // the notice to be printed without delaying command execution.
+//
+// The check is skipped entirely when:
+//   - WFCTL_NO_UPDATE_CHECK is set (explicit opt-out)
+//   - version is "dev" (local build)
+//   - CI or GITHUB_ACTIONS is set (running inside a CI environment)
+//   - A check was already performed within the last 24 hours (daily throttle)
 func checkForUpdateNotice() <-chan struct{} {
 	done := make(chan struct{})
-	if os.Getenv(envNoUpdateCheck) != "" || version == "dev" {
+	if os.Getenv(envNoUpdateCheck) != "" || version == "dev" ||
+		os.Getenv(envCI) != "" || os.Getenv(envGitHubActions) != "" {
+		close(done)
+		return done
+	}
+	// Throttle to at most one background check per day.
+	if !shouldCheckForUpdate() {
 		close(done)
 		return done
 	}
 	go func() {
 		defer close(done)
+		// Record the attempt before the network call so that a failed/slow
+		// check still advances the TTL and avoids hammering the API.
+		markUpdateChecked()
 		rel, err := fetchLatestRelease()
 		if err != nil || rel == nil {
 			return

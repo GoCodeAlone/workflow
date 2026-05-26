@@ -26,6 +26,7 @@ var infraTypes = []string{
 	"infra.iam_role",
 	"infra.storage",
 	"infra.certificate",
+	"infra.autoscaling_group",
 }
 
 // Plugin registers all infra.* abstract module types.

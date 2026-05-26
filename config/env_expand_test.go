@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -244,5 +245,180 @@ func TestExpandEnvInMapPreservingKeys_EmptyPreserveListEqualsExpandEnvInMap(t *t
 	out := ExpandEnvInMapPreservingKeys(in, []string{})
 	if out["k"] != "vv" {
 		t.Errorf("with empty preserve list, behavior should equal ExpandEnvInMap; got %q", out["k"])
+	}
+}
+
+// ── ExpandEnvInMapPreservingVars tests ───────────────────────────────────────
+
+func TestExpandEnvInMapPreservingVars_NilInputReturnsNil(t *testing.T) {
+	if got := ExpandEnvInMapPreservingVars(nil, nil, nil); got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+}
+
+// TestExpandEnvInMapPreservingVars_SecretVarPreservedInUserData is the primary
+// regression test for the user_data hash-mismatch bug: a secret var referenced
+// in a non-env_vars field must be kept as a literal ${VAR} so that
+// desiredStateHash is identical whether the var is set or not.
+func TestExpandEnvInMapPreservingVars_SecretVarPreservedInUserData(t *testing.T) {
+	// Simulate plan-time: STAGING_PG_PASSWORD not in environment.
+	t.Setenv("STAGING_PG_PASSWORD", "") // ensure test isolation; simulates unset
+
+	in := map[string]any{
+		"region": "${DO_REGION}",
+		"user_data": "#cloud-config\nwrite_files:\n  - content: |\n      " +
+			"POSTGRES_PASSWORD: '${STAGING_PG_PASSWORD}'\n",
+	}
+	t.Setenv("DO_REGION", "nyc3")
+
+	out := ExpandEnvInMapPreservingVars(in,
+		[]string{"env_vars", "env_vars_secret"}, // preserveKeys
+		[]string{"STAGING_PG_PASSWORD"},         // preserveVarNames
+	)
+
+	// Normal var (not in preserveVarNames) is still expanded.
+	if got := out["region"]; got != "nyc3" {
+		t.Errorf("region: got %q, want nyc3", got)
+	}
+
+	// Secret var reference in user_data is preserved as literal.
+	ud, _ := out["user_data"].(string)
+	if !strings.Contains(ud, "${STAGING_PG_PASSWORD}") {
+		t.Errorf("user_data: want ${STAGING_PG_PASSWORD} preserved, got:\n%s", ud)
+	}
+}
+
+// TestExpandEnvInMapPreservingVars_HashConsistencyWithWithout verifies that
+// hashing the output is identical whether the secret var is set or not,
+// which is the exact invariant needed for desiredStateHash.
+func TestExpandEnvInMapPreservingVars_HashConsistencyWithWithout(t *testing.T) {
+	in := map[string]any{
+		"user_data": "POSTGRES_PASSWORD: '${STAGING_PG_PASSWORD}'",
+	}
+
+	// Run without the var in env.
+	t.Setenv("STAGING_PG_PASSWORD", "")
+	outUnset := ExpandEnvInMapPreservingVars(in, nil, []string{"STAGING_PG_PASSWORD"})
+
+	// Run with the var set to a real value.
+	t.Setenv("STAGING_PG_PASSWORD", "deadbeef1234567890abcdef")
+	outSet := ExpandEnvInMapPreservingVars(in, nil, []string{"STAGING_PG_PASSWORD"})
+
+	if outUnset["user_data"] != outSet["user_data"] {
+		t.Errorf("hash inconsistency: unset produced %q, set produced %q",
+			outUnset["user_data"], outSet["user_data"])
+	}
+	want := "POSTGRES_PASSWORD: '${STAGING_PG_PASSWORD}'"
+	if outSet["user_data"] != want {
+		t.Errorf("user_data: got %q, want %q", outSet["user_data"], want)
+	}
+}
+
+func TestExpandEnvInMapPreservingVars_NonSecretVarStillExpanded(t *testing.T) {
+	t.Setenv("IMAGE_TAG", "v1.2.3")
+	t.Setenv("SECRET_KEY", "s3cret")
+
+	in := map[string]any{
+		"image":  "${IMAGE_TAG}",
+		"config": "${SECRET_KEY}",
+	}
+	out := ExpandEnvInMapPreservingVars(in, nil, []string{"SECRET_KEY"})
+
+	if got := out["image"]; got != "v1.2.3" {
+		t.Errorf("image: got %q, want v1.2.3", got)
+	}
+	if got := out["config"]; got != "${SECRET_KEY}" {
+		t.Errorf("config: got %q, want ${SECRET_KEY} (secret var preserved)", got)
+	}
+}
+
+func TestExpandEnvInMapPreservingVars_PreserveKeysTakePriority(t *testing.T) {
+	t.Setenv("MY_SECRET", "actual-secret")
+	t.Setenv("OTHER_VAR", "other-value")
+
+	in := map[string]any{
+		// env_vars is in preserveKeys — entire submap is deep-copied, no expansion.
+		"env_vars": map[string]any{
+			"TOKEN": "${MY_SECRET}",
+		},
+		// user_data is NOT in preserveKeys — secret var is preserved, other vars expand.
+		"user_data": "secret=${MY_SECRET} region=${OTHER_VAR}",
+	}
+	out := ExpandEnvInMapPreservingVars(in,
+		[]string{"env_vars"},
+		[]string{"MY_SECRET"},
+	)
+
+	// env_vars submap: fully copied as-is (preserveKeys wins).
+	ev := out["env_vars"].(map[string]any)
+	if ev["TOKEN"] != "${MY_SECRET}" {
+		t.Errorf("env_vars.TOKEN: got %q, want literal ${MY_SECRET}", ev["TOKEN"])
+	}
+
+	// user_data: MY_SECRET preserved, OTHER_VAR expanded.
+	ud, _ := out["user_data"].(string)
+	if !strings.Contains(ud, "${MY_SECRET}") {
+		t.Errorf("user_data: want ${MY_SECRET} preserved, got %q", ud)
+	}
+	if !strings.Contains(ud, "other-value") {
+		t.Errorf("user_data: want OTHER_VAR expanded to other-value, got %q", ud)
+	}
+}
+
+func TestExpandEnvInMapPreservingVars_EmptyVarListBehavesLikePreservingKeys(t *testing.T) {
+	t.Setenv("SOME_VAR", "expanded")
+	in := map[string]any{"k": "${SOME_VAR}"}
+	outNew := ExpandEnvInMapPreservingVars(in, nil, nil)
+	outOld := ExpandEnvInMapPreservingKeys(in, nil)
+	if outNew["k"] != outOld["k"] {
+		t.Errorf("empty preserveVarNames: ExpandEnvInMapPreservingVars(%q) = %q, ExpandEnvInMapPreservingKeys(%q) = %q",
+			in["k"], outNew["k"], in["k"], outOld["k"])
+	}
+}
+
+// TestExpandEnvInMapPreservingVars_UnbracedSecretVarCanonicalised verifies that
+// an unbraced $SECRET_VAR reference (no curly braces) in a preserved var is
+// canonicalised to ${SECRET_VAR} rather than being expanded.
+// Apply-time JIT resolution only supports the braced form, so canonicalisation
+// is the correct and expected behaviour for unbraced references.
+func TestExpandEnvInMapPreservingVars_UnbracedSecretVarCanonicalised(t *testing.T) {
+	t.Setenv("DB_PASSWORD", "supersecret")
+	t.Setenv("REGION", "us-east-1")
+
+	in := map[string]any{
+		// unbraced: $DB_PASSWORD — secret var, should be canonicalised to ${DB_PASSWORD}
+		"user_data": "PASSWORD=$DB_PASSWORD region=${REGION}",
+	}
+	out := ExpandEnvInMapPreservingVars(in, nil, []string{"DB_PASSWORD"})
+
+	ud, _ := out["user_data"].(string)
+	// Secret var must be preserved — canonicalised to braced form.
+	if !strings.Contains(ud, "${DB_PASSWORD}") {
+		t.Errorf("user_data: want ${DB_PASSWORD} (canonicalised), got: %q", ud)
+	}
+	// Non-secret var must still be expanded normally.
+	if !strings.Contains(ud, "us-east-1") {
+		t.Errorf("user_data: want REGION expanded to us-east-1, got: %q", ud)
+	}
+	// The raw unbraced form must not appear in the output.
+	if strings.Contains(ud, "$DB_PASSWORD") && !strings.Contains(ud, "${DB_PASSWORD}") {
+		t.Errorf("user_data: unbraced $DB_PASSWORD should have been canonicalised, got: %q", ud)
+	}
+}
+
+func TestExpandEnvInMapPreservingVars_SecretVarInNestedSlice(t *testing.T) {
+	t.Setenv("PG_PASSWORD", "should-be-preserved")
+	in := map[string]any{
+		"services": []any{
+			map[string]any{
+				"name":      "db",
+				"user_data": "PASSWORD=${PG_PASSWORD}",
+			},
+		},
+	}
+	out := ExpandEnvInMapPreservingVars(in, nil, []string{"PG_PASSWORD"})
+	svc := out["services"].([]any)[0].(map[string]any)
+	if got := svc["user_data"]; got != "PASSWORD=${PG_PASSWORD}" {
+		t.Errorf("services[0].user_data: got %q, want literal reference", got)
 	}
 }

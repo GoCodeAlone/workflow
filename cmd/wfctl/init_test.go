@@ -54,6 +54,15 @@ func TestRunInitAPIServiceTemplate(t *testing.T) {
 	if !strings.Contains(string(yml), "my-service-server") {
 		t.Errorf("workflow.yaml missing expected module name, got: %s", string(yml))
 	}
+	if !strings.Contains(string(yml), "type: observability.telemetry") {
+		t.Errorf("workflow.yaml missing observability.telemetry, got: %s", string(yml))
+	}
+	if !strings.Contains(string(yml), "type: observability.collector") {
+		t.Errorf("workflow.yaml missing observability.collector, got: %s", string(yml))
+	}
+	if strings.Contains(string(yml), "type: metrics.collector") {
+		t.Errorf("workflow.yaml should not create metrics.collector, got: %s", string(yml))
+	}
 }
 
 func TestRunInitEventProcessorTemplate(t *testing.T) {
@@ -95,6 +104,16 @@ func TestRunInitFullStackTemplate(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(outDir, f)); os.IsNotExist(err) {
 			t.Errorf("expected %s to be created", f)
 		}
+	}
+	yml, err := os.ReadFile(filepath.Join(outDir, "workflow.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read workflow.yaml: %v", err)
+	}
+	if !strings.Contains(string(yml), "type: observability.telemetry") {
+		t.Errorf("workflow.yaml missing observability.telemetry, got: %s", string(yml))
+	}
+	if strings.Contains(string(yml), "type: metrics.collector") {
+		t.Errorf("workflow.yaml should not create metrics.collector, got: %s", string(yml))
 	}
 }
 

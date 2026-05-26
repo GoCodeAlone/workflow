@@ -16,6 +16,44 @@ var (
 	ErrUnauthorized          = errors.New("iac: unauthorized")            // 401
 	ErrForbidden             = errors.New("iac: forbidden")               // 403
 	ErrValidation            = errors.New("iac: validation error")        // 400/422
+	// ErrImageNotInRegistry indicates that an image tag or digest referenced
+	// by a desired ResourceSpec is not present in the registry. Drivers
+	// SHOULD return this (wrapped) from Diff, Create, and Update when an
+	// image-presence pre-flight fails. Callers can use errors.Is for typed
+	// identification, but gRPC-bound callers should ALSO match the message
+	// string "iac: image tag or digest not found in registry" for
+	// cross-process robustness — structpb does not preserve sentinel
+	// identity across the gRPC plugin boundary. The message string is
+	// load-bearing; do not change it.
+	ErrImageNotInRegistry = errors.New("iac: image tag or digest not found in registry")
+	// ErrProviderMethodUnimplemented indicates that a remote IaC provider
+	// plugin does not implement the optional method that was just dispatched.
+	// Used by the wfctl gRPC proxy *remoteIaCProvider to translate
+	// gRPC codes.Unimplemented (and equivalent string-matched plugin errors)
+	// into a stable sentinel that dispatch sites can errors.Is on.
+	//
+	// Why this exists
+	// ───────────────
+	// v0.27.0 added optional sub-interfaces (EnumeratorAll, Enumerator, etc.)
+	// to interfaces.IaCProvider. Dispatch sites (infra_audit_keys.go,
+	// infra_cleanup.go, infra_prune.go) iterate providers and use a
+	// type-assertion `p.(interfaces.X)` as the "does this provider support X?"
+	// gate. v0.27.1 bridged these methods on remoteIaCProvider so audit-keys
+	// could reach plugins that DO implement them, but as a side effect every
+	// gRPC-loaded provider now satisfies the optional interface — even ones
+	// whose plugin process does not implement the underlying method.
+	//
+	// To preserve the iterate-and-skip semantics, dispatch sites now call the
+	// method and check for ErrProviderMethodUnimplemented via errors.Is. A
+	// match is treated identically to the pre-v0.27.1 negative type-assert:
+	// log "skipped <provider>: does not implement <Interface>" and continue
+	// iterating to the next provider.
+	//
+	// Plugins SHOULD return status.Error(codes.Unimplemented, "...") from
+	// their InvokeMethod / InvokeMethodContext dispatcher when an optional
+	// method is not supported. The proxy translates this to
+	// ErrProviderMethodUnimplemented for callers.
+	ErrProviderMethodUnimplemented = errors.New("iac: provider method unimplemented")
 )
 
 // ResourceDriver handles CRUD for a single resource type within a provider.
@@ -58,6 +96,40 @@ type ResourceAdoptionLocator interface {
 // Read defeats the recovery path.
 type UpsertSupporter interface {
 	SupportsUpsert() bool
+}
+
+// ResourceReplacer is an optional interface ResourceDriver
+// implementations may provide when a resource's Replace transition
+// needs more than naive Delete-then-Create — typically because the
+// resource owns single-attach dependents (e.g., a DO Droplet with
+// Block Storage Volumes, an AWS EC2 instance with EBS Volumes, a GCP
+// VM with persistent disks) that the cloud refuses to associate with
+// a new parent until the old parent releases them.
+//
+// wfctlhelpers.doReplace probes for this interface; on opt-in, the
+// driver receives the OLD ref and the NEW spec and is responsible for
+// the full transition. On non-opt-in, doReplace calls
+// wfctlhelpers.DefaultReplace (the existing Delete-then-Create logic,
+// exported for direct dispatch).
+//
+// Drivers SHOULD NOT implement this interface unless the resource has
+// orchestration needs the engine cannot satisfy generically — naive
+// Delete-then-Create is correct for the majority of cloud resources
+// and is the default for a reason (atomicity, error attribution).
+//
+// A driver that opts in but wants engine-default behavior for a
+// particular spec calls wfctlhelpers.DefaultReplace directly. The
+// engine never inspects the returned error to decide between paths,
+// so there is no sentinel-error round-trip.
+//
+// Error attribution: drivers MUST wrap their sub-step errors with a
+// recognizable prefix (e.g., "<resource-type> replace %q: detach
+// volume %q: %w"). Non-conforming returns are wrapped by the engine
+// with "replace: driver: " at the dispatch boundary so operator
+// attribution is preserved at runtime regardless of per-plugin
+// discipline.
+type ResourceReplacer interface {
+	Replace(ctx context.Context, oldRef ResourceRef, spec ResourceSpec) (*ResourceOutput, error)
 }
 
 // ResourceOutput is the concrete output of a provisioned or read resource.

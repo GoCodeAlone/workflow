@@ -73,6 +73,7 @@ func IsApplicationConfig(data []byte) bool {
 type ModuleConfig struct {
 	Name         string                                 `json:"name" yaml:"name"`
 	Type         string                                 `json:"type" yaml:"type"`
+	Satisfies    []string                               `json:"satisfies,omitempty" yaml:"satisfies,omitempty"`
 	Config       map[string]any                         `json:"config,omitempty" yaml:"config,omitempty"`
 	DependsOn    []string                               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
 	Branches     map[string]string                      `json:"branches,omitempty" yaml:"branches,omitempty"`
@@ -331,6 +332,8 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 			}
 		}
 
+		mergeImportedCI(cfg, impCfg.CI)
+
 		// Merge external plugin declarations — deduplicate by name (first definition wins)
 		if impCfg.Plugins != nil && len(impCfg.Plugins.External) > 0 {
 			if cfg.Plugins == nil {
@@ -361,10 +364,321 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 			cfg.Sidecars = append(cfg.Sidecars, sc)
 			existingSidecars[sc.Name] = struct{}{}
 		}
+
+		// Merge SecretStores — per-store dedupe by name (parent wins).
+		// SecretsConfig.DefaultStore + SecretEntry.Store reference these by
+		// name via ResolveSecretStore / getProviderForStore, so the import
+		// merge must include the store map; otherwise an imported store name
+		// is later treated as a raw provider and provider construction fails.
+		if len(impCfg.SecretStores) > 0 {
+			if cfg.SecretStores == nil {
+				cfg.SecretStores = make(map[string]*SecretStoreConfig, len(impCfg.SecretStores))
+			}
+			for k, v := range impCfg.SecretStores {
+				if _, exists := cfg.SecretStores[k]; !exists {
+					cfg.SecretStores[k] = v
+				}
+			}
+		}
+
+		// Merge Environments — per-env dedupe by name (parent wins).
+		// ResolveSecretStore consults Environments[env].SecretsStoreOverride
+		// to route secrets to a specific store for a given environment. A
+		// shared imported file commonly defines per-env overrides while the
+		// main file only redeclares envs it customizes; without merging,
+		// imported overrides are dropped and secrets fall back to
+		// defaultStore/provider — silently fetching from the wrong backend.
+		if len(impCfg.Environments) > 0 {
+			if cfg.Environments == nil {
+				cfg.Environments = make(map[string]*EnvironmentConfig, len(impCfg.Environments))
+			}
+			for k, v := range impCfg.Environments {
+				if _, exists := cfg.Environments[k]; !exists {
+					cfg.Environments[k] = v
+				}
+			}
+		}
+
+		// Merge top-level secrets. Generate (dedupe by Key) and Entries
+		// (dedupe by Name) are appended. Scalar fields follow parent-wins.
+		// `Config` is a map[string]any: per-key merge so an imported "shared
+		// defaults" config can survive a partial main-file override (e.g.
+		// import provides {repo, token_env}; main only sets {token_env}).
+		if impCfg.Secrets != nil {
+			if cfg.Secrets == nil {
+				cfg.Secrets = &SecretsConfig{}
+			}
+			// Scalar fields: parent wins; only adopt if unset on parent.
+			if cfg.Secrets.DefaultStore == "" {
+				cfg.Secrets.DefaultStore = impCfg.Secrets.DefaultStore
+			}
+			if cfg.Secrets.Provider == "" {
+				cfg.Secrets.Provider = impCfg.Secrets.Provider
+			}
+			// Config map: per-key merge — main wins on conflicts, imported
+			// keys not present in main are preserved (shared-defaults pattern).
+			if len(impCfg.Secrets.Config) > 0 {
+				if cfg.Secrets.Config == nil {
+					cfg.Secrets.Config = make(map[string]any, len(impCfg.Secrets.Config))
+				}
+				for k, v := range impCfg.Secrets.Config {
+					if _, exists := cfg.Secrets.Config[k]; !exists {
+						cfg.Secrets.Config[k] = v
+					}
+				}
+			}
+			if cfg.Secrets.Rotation == nil {
+				cfg.Secrets.Rotation = impCfg.Secrets.Rotation
+			}
+			// Generate slice — dedupe by Key (first definition wins).
+			existingGen := make(map[string]struct{}, len(cfg.Secrets.Generate))
+			for _, g := range cfg.Secrets.Generate {
+				existingGen[g.Key] = struct{}{}
+			}
+			for _, g := range impCfg.Secrets.Generate {
+				if _, exists := existingGen[g.Key]; exists {
+					continue
+				}
+				cfg.Secrets.Generate = append(cfg.Secrets.Generate, g)
+				existingGen[g.Key] = struct{}{}
+			}
+			// Entries slice — dedupe by Name (first definition wins).
+			existingEntries := make(map[string]struct{}, len(cfg.Secrets.Entries))
+			for _, e := range cfg.Secrets.Entries {
+				existingEntries[e.Name] = struct{}{}
+			}
+			for _, e := range impCfg.Secrets.Entries {
+				if _, exists := existingEntries[e.Name]; exists {
+					continue
+				}
+				cfg.Secrets.Entries = append(cfg.Secrets.Entries, e)
+				existingEntries[e.Name] = struct{}{}
+			}
+		}
 	}
 
 	cfg.Imports = nil // clear after processing
 	return nil
+}
+
+func mergeImportedCI(cfg *WorkflowConfig, imported *CIConfig) {
+	if imported == nil {
+		return
+	}
+	if cfg.CI == nil {
+		cfg.CI = imported
+		return
+	}
+	mergeImportedCIBuild(cfg.CI.Build, imported.Build, func(build *CIBuildConfig) {
+		cfg.CI.Build = build
+	})
+	mergeImportedCITest(cfg.CI.Test, imported.Test, func(test *CITestConfig) {
+		cfg.CI.Test = test
+	})
+	if cfg.CI.Deploy == nil {
+		cfg.CI.Deploy = imported.Deploy
+	} else if imported.Deploy != nil {
+		if cfg.CI.Deploy.Environments == nil {
+			cfg.CI.Deploy.Environments = make(map[string]*CIDeployEnvironment, len(imported.Deploy.Environments))
+		}
+		for k, v := range imported.Deploy.Environments {
+			if _, exists := cfg.CI.Deploy.Environments[k]; !exists {
+				cfg.CI.Deploy.Environments[k] = v
+			}
+		}
+	}
+	if cfg.CI.Infra == nil {
+		cfg.CI.Infra = imported.Infra
+	}
+	if len(imported.Registries) > 0 {
+		existing := make(map[string]struct{}, len(cfg.CI.Registries))
+		for _, registry := range cfg.CI.Registries {
+			existing[registry.Name] = struct{}{}
+		}
+		for _, registry := range imported.Registries {
+			if _, exists := existing[registry.Name]; exists {
+				continue
+			}
+			cfg.CI.Registries = append(cfg.CI.Registries, registry)
+			existing[registry.Name] = struct{}{}
+		}
+	}
+	if len(imported.Migrations) > 0 {
+		existing := make(map[string]struct{}, len(cfg.CI.Migrations))
+		for i := range cfg.CI.Migrations {
+			migration := &cfg.CI.Migrations[i]
+			existing[migration.Name] = struct{}{}
+		}
+		for i := range imported.Migrations {
+			migration := &imported.Migrations[i]
+			if _, exists := existing[migration.Name]; exists {
+				continue
+			}
+			cfg.CI.Migrations = append(cfg.CI.Migrations, *migration)
+			existing[migration.Name] = struct{}{}
+		}
+	}
+}
+
+func mergeImportedCIBuild(current, imported *CIBuildConfig, set func(*CIBuildConfig)) {
+	if imported == nil {
+		return
+	}
+	if current == nil {
+		set(imported)
+		return
+	}
+	current.Targets = appendMissingCITargets(current.Targets, imported.Targets)
+	current.Containers = appendMissingCIContainers(current.Containers, imported.Containers)
+	current.Assets = appendMissingCIAssets(current.Assets, imported.Assets)
+	mergeImportedCIBuildSecurity(current.Security, imported.Security, func(security *CIBuildSecurity) {
+		current.Security = security
+	})
+}
+
+func mergeImportedCITest(current, imported *CITestConfig, set func(*CITestConfig)) {
+	if imported == nil {
+		return
+	}
+	if current == nil {
+		set(imported)
+		return
+	}
+	if current.Unit == nil {
+		current.Unit = imported.Unit
+	}
+	if current.Integration == nil {
+		current.Integration = imported.Integration
+	}
+	if current.E2E == nil {
+		current.E2E = imported.E2E
+	}
+}
+
+func mergeImportedCIBuildSecurity(current, imported *CIBuildSecurity, set func(*CIBuildSecurity)) {
+	if imported == nil {
+		return
+	}
+	if current == nil {
+		set(imported)
+		return
+	}
+	fillBoolSecurityField(current, imported, "hardened", &current.Hardened, imported.Hardened)
+	fillBoolSecurityField(current, imported, "sbom", &current.SBOM, imported.SBOM)
+	fillStringSecurityField(current, imported, "provenance", &current.Provenance, imported.Provenance)
+	fillBoolSecurityField(current, imported, "sign", &current.Sign, imported.Sign)
+	fillBoolSecurityField(current, imported, "non_root", &current.NonRoot, imported.NonRoot)
+	if !securityFieldSet(current, "base_image_policy") && securityFieldAvailable(imported, "base_image_policy") {
+		current.BaseImagePolicy = imported.BaseImagePolicy
+		markSecurityFieldSet(current, "base_image_policy")
+	}
+}
+
+func fillBoolSecurityField(current, imported *CIBuildSecurity, field string, target *bool, importedValue bool) {
+	if securityFieldSet(current, field) || !securityFieldAvailable(imported, field) {
+		return
+	}
+	*target = importedValue
+	markSecurityFieldSet(current, field)
+}
+
+func fillStringSecurityField(current, imported *CIBuildSecurity, field string, target *string, importedValue string) {
+	if securityFieldSet(current, field) || !securityFieldAvailable(imported, field) {
+		return
+	}
+	*target = importedValue
+	markSecurityFieldSet(current, field)
+}
+
+func securityFieldSet(security *CIBuildSecurity, field string) bool {
+	if security == nil {
+		return false
+	}
+	if len(security.set) > 0 {
+		return security.set[field]
+	}
+	switch field {
+	case "hardened":
+		return security.Hardened
+	case "sbom":
+		return security.SBOM
+	case "provenance":
+		return security.Provenance != ""
+	case "sign":
+		return security.Sign
+	case "non_root":
+		return security.NonRoot
+	case "base_image_policy":
+		return security.BaseImagePolicy != nil
+	default:
+		return false
+	}
+}
+
+func securityFieldAvailable(security *CIBuildSecurity, field string) bool {
+	if security == nil {
+		return false
+	}
+	if len(security.set) > 0 {
+		return security.set[field]
+	}
+	return securityFieldSet(security, field)
+}
+
+func markSecurityFieldSet(security *CIBuildSecurity, field string) {
+	if security.set == nil {
+		security.set = make(map[string]bool)
+	}
+	security.set[field] = true
+}
+
+func appendMissingCITargets(current, imported []CITarget) []CITarget {
+	existing := make(map[string]struct{}, len(current))
+	for i := range current {
+		target := &current[i]
+		existing[target.Name] = struct{}{}
+	}
+	for i := range imported {
+		target := &imported[i]
+		if _, exists := existing[target.Name]; exists {
+			continue
+		}
+		current = append(current, *target)
+		existing[target.Name] = struct{}{}
+	}
+	return current
+}
+
+func appendMissingCIContainers(current, imported []CIContainerTarget) []CIContainerTarget {
+	existing := make(map[string]struct{}, len(current))
+	for i := range current {
+		target := &current[i]
+		existing[target.Name] = struct{}{}
+	}
+	for i := range imported {
+		target := &imported[i]
+		if _, exists := existing[target.Name]; exists {
+			continue
+		}
+		current = append(current, *target)
+		existing[target.Name] = struct{}{}
+	}
+	return current
+}
+
+func appendMissingCIAssets(current, imported []CIAssetTarget) []CIAssetTarget {
+	existing := make(map[string]struct{}, len(current))
+	for _, target := range current {
+		existing[target.Name] = struct{}{}
+	}
+	for _, target := range imported {
+		if _, exists := existing[target.Name]; exists {
+			continue
+		}
+		current = append(current, target)
+		existing[target.Name] = struct{}{}
+	}
+	return current
 }
 
 // LoadFromBytes loads a workflow configuration from a YAML byte slice.

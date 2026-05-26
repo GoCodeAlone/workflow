@@ -2,11 +2,13 @@ package observability
 
 import (
 	"context"
+	"time"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/telemetry"
 )
 
 // wiringHooks returns post-init wiring functions that connect observability
@@ -15,7 +17,7 @@ func wiringHooks() []plugin.WiringHook {
 	return []plugin.WiringHook{
 		{
 			// Run at priority 100 (highest) so OTEL wraps all other middleware
-			// and every request — including health, metrics, and pipeline routes
+			// and every request — including health and pipeline routes
 			// registered later — is captured in a trace span.
 			Name:     "observability.otel-middleware",
 			Priority: 100,
@@ -27,21 +29,63 @@ func wiringHooks() []plugin.WiringHook {
 			Hook:     wireHealthEndpoints,
 		},
 		{
-			Name:     "observability.metrics-endpoint",
-			Priority: 50,
-			Hook:     wireMetricsEndpoint,
-		},
-		{
 			Name:     "observability.log-endpoint",
 			Priority: 50,
 			Hook:     wireLogEndpoint,
 		},
 		{
 			Name:     "observability.openapi-endpoints",
-			Priority: 40, // run after health/metrics so routes are stable
+			Priority: 40, // run after health/log endpoints so routes are stable
 			Hook:     wireOpenAPIEndpoints,
 		},
+		{
+			Name:     "observability.telemetry-bridge",
+			Priority: 10,
+			Hook:     wireTelemetryBridge,
+		},
 	}
+}
+
+type legacyServiceInvoker interface {
+	InvokeService(string, map[string]any) (map[string]any, error)
+}
+
+type legacyServiceInvokerAdapter struct {
+	invoker legacyServiceInvoker
+}
+
+func (a legacyServiceInvokerAdapter) InvokeServiceContext(_ context.Context, method string, args map[string]any) (map[string]any, error) {
+	return a.invoker.InvokeService(method, args)
+}
+
+func wireTelemetryBridge(app modular.Application, cfg *config.WorkflowConfig) error {
+	sink := telemetry.TelemetrySink(telemetry.NoopSink{})
+	if cfg != nil {
+		for _, modCfg := range cfg.Modules {
+			if modCfg.Type != "observability.telemetry" {
+				continue
+			}
+			mod := app.GetModule(modCfg.Name)
+			if invoker, ok := mod.(telemetry.ContextServiceInvoker); ok {
+				sink = telemetry.NewServiceInvokerSink(invoker)
+				break
+			}
+			if invoker, ok := mod.(legacyServiceInvoker); ok {
+				sink = telemetry.NewServiceInvokerSink(legacyServiceInvokerAdapter{invoker: invoker})
+				break
+			}
+		}
+	}
+
+	bridge := module.NewTelemetryBridge("observability.telemetry-bridge", sink, module.TelemetryBridgeConfig{
+		Interval: 30 * time.Second,
+		Timeout:  2 * time.Second,
+	})
+	if err := bridge.Init(app); err != nil {
+		return err
+	}
+	app.RegisterModule(bridge)
+	return bridge.Start(context.Background())
 }
 
 // wireHealthEndpoints registers health check endpoints on any available router,
@@ -90,28 +134,6 @@ func wireHealthEndpoints(app modular.Application, _ *config.WorkflowConfig) erro
 				router.AddRoute("GET", healthPath, &module.HealthHTTPHandler{Handler: hc.HealthHandler()})
 				router.AddRoute("GET", readyPath, &module.HealthHTTPHandler{Handler: hc.ReadyHandler()})
 				router.AddRoute("GET", livePath, &module.HealthHTTPHandler{Handler: hc.LiveHandler()})
-			}
-			break
-		}
-	}
-	return nil
-}
-
-// wireMetricsEndpoint registers the metrics endpoint on any available router.
-func wireMetricsEndpoint(app modular.Application, _ *config.WorkflowConfig) error {
-	for _, svc := range app.SvcRegistry() {
-		mc, ok := svc.(*module.MetricsCollector)
-		if !ok {
-			continue
-		}
-		metricsPath := mc.MetricsPath()
-		for _, routerSvc := range app.SvcRegistry() {
-			router, ok := routerSvc.(*module.StandardHTTPRouter)
-			if !ok {
-				continue
-			}
-			if !router.HasRoute("GET", metricsPath) {
-				router.AddRoute("GET", metricsPath, &module.MetricsHTTPHandler{Handler: mc.Handler()})
 			}
 			break
 		}

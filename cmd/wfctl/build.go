@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -40,14 +41,15 @@ func runBuild(args []string) error {
 	fs := flag.NewFlagSet("build", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		cfgPath string
-		dryRun  bool
-		only    string
-		skip    string
-		tag     string
-		format  string
-		noPush  bool
-		envName string
+		cfgPath         string
+		dryRun          bool
+		only            string
+		skip            string
+		tag             string
+		format          string
+		noPush          bool
+		envName         string
+		fallbackGoBuild bool
 	)
 	fs.StringVar(&cfgPath, "config", "workflow.yaml", "Path to workflow config file")
 	fs.StringVar(&cfgPath, "c", "workflow.yaml", "Path to workflow config file (short)")
@@ -57,9 +59,16 @@ func runBuild(args []string) error {
 	fs.StringVar(&tag, "tag", "", "Override image tag for all container targets")
 	fs.StringVar(&format, "format", "table", "Output format: table | json | yaml")
 	fs.BoolVar(&noPush, "no-push", false, "Build but do not push images to registries")
+	fs.BoolVar(&fallbackGoBuild, "fallback-go-build", false, "Run go build ./... when ci.build has no build targets")
+	var push bool
+	fs.BoolVar(&push, "push", true, "Push images to registries after build (default true; --push=false is equivalent to --no-push)")
 	fs.StringVar(&envName, "env", "", "Environment name for per-env config overrides")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	// --push=false is equivalent to --no-push.
+	if !push {
+		noPush = true
 	}
 
 	if dryRun {
@@ -71,7 +80,10 @@ func runBuild(args []string) error {
 	if err != nil {
 		return fmt.Errorf("wfctl build: load config: %w", err)
 	}
-	if cfg.CI == nil || cfg.CI.Build == nil {
+	if cfg.CI == nil || cfg.CI.Build == nil || !hasConfiguredBuildTargets(cfg.CI.Build) {
+		if fallbackGoBuild {
+			return runDefaultGoBuild(dryRun)
+		}
 		fmt.Println("No build configuration, skipping build phase")
 		return nil
 	}
@@ -86,6 +98,25 @@ func runBuild(args []string) error {
 		envName: envName,
 		cfgPath: cfgPath,
 	})
+}
+
+func hasConfiguredBuildTargets(build *config.CIBuildConfig) bool {
+	if build == nil {
+		return false
+	}
+	return len(build.Targets) > 0 || len(build.Containers) > 0 || len(build.Assets) > 0
+}
+
+func runDefaultGoBuild(dryRun bool) error {
+	if dryRun {
+		fmt.Println("[dry-run] go build ./...")
+		return nil
+	}
+	fmt.Println("No build targets configured, running go build ./...")
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // buildOpts carries parsed build flags for use across subcommands.
@@ -104,6 +135,11 @@ type buildOpts struct {
 // Honors --only, --skip, --no-push. Behavior is wired fully in T19.
 func runBuildOrchestrate(cfg *config.WorkflowConfig, opts buildOpts) error {
 	build := cfg.CI.Build
+
+	// Detect hardened mode once; with buildx (docker-container driver) the push
+	// must be done inside the buildx invocation itself — a separate docker push
+	// would fail because the image is only in buildkit's cache, not the local daemon.
+	hardened := cfg.CI.Build.Security != nil && cfg.CI.Build.Security.Hardened
 
 	// Go targets.
 	for i := range build.Targets {
@@ -157,19 +193,39 @@ func runBuildOrchestrate(cfg *config.WorkflowConfig, opts buildOpts) error {
 		if opts.tag != "" {
 			imgArgs = append(imgArgs, "--tag", opts.tag)
 		}
+		if len(opts.only) > 0 {
+			imgArgs = append(imgArgs, "--only", strings.Join(opts.only, ","))
+		}
+		if len(opts.skip) > 0 {
+			imgArgs = append(imgArgs, "--skip", strings.Join(opts.skip, ","))
+		}
+		// For hardened builds (docker buildx with docker-container driver), pass
+		// --push so buildx pushes directly from the buildkit cache. Without this,
+		// buildx would silently cache the result and the subsequent docker push
+		// would fail with "image does not exist locally".
+		if !opts.noPush && hardened {
+			imgArgs = append(imgArgs, "--push")
+		}
 		if err := runBuildImage(imgArgs); err != nil {
 			return err
 		}
 	}
 
-	// Push step (unless --no-push).
-	if !opts.noPush && !opts.dryRun {
+	// Push step (unless --no-push, dry-run, or hardened mode where buildx
+	// already pushed directly from the buildkit cache).
+	if !opts.noPush && !opts.dryRun && !hardened {
 		pushArgs := []string{}
 		if opts.cfgPath != "" {
 			pushArgs = append(pushArgs, "--config", opts.cfgPath)
 		}
 		if opts.tag != "" {
 			pushArgs = append(pushArgs, "--tag", opts.tag)
+		}
+		if len(opts.only) > 0 {
+			pushArgs = append(pushArgs, "--only", strings.Join(opts.only, ","))
+		}
+		if len(opts.skip) > 0 {
+			pushArgs = append(pushArgs, "--skip", strings.Join(opts.skip, ","))
 		}
 		if err := runBuildPush(pushArgs); err != nil {
 			return fmt.Errorf("push: %w", err)

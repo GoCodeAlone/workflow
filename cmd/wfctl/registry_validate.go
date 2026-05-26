@@ -32,6 +32,7 @@ var semverRegex = regexp.MustCompile(`^\d+\.\d+\.\d+`)
 var sha256Regex = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 var validPluginTypes = map[string]bool{"builtin": true, "external": true, "ui": true}
 var validPluginTiers = map[string]bool{"core": true, "community": true, "premium": true}
+var validPluginStatuses = map[string]bool{"verified": true, "experimental": true, "deprecated": true}
 var validDownloadOS = map[string]bool{"linux": true, "darwin": true, "windows": true}
 var validDownloadArch = map[string]bool{"amd64": true, "arm64": true}
 
@@ -63,6 +64,9 @@ func ValidateManifest(m *RegistryManifest, opts ValidationOptions) []ValidationE
 		errs = append(errs, ValidationError{Field: "tier", Message: "required field is empty"})
 	} else if !validPluginTiers[m.Tier] {
 		errs = append(errs, ValidationError{Field: "tier", Message: fmt.Sprintf("must be one of: core, community, premium (got %q)", m.Tier)})
+	}
+	if m.Status != "" && !validPluginStatuses[m.Status] {
+		errs = append(errs, ValidationError{Field: "status", Message: fmt.Sprintf("must be one of: verified, experimental, deprecated (got %q)", m.Status)})
 	}
 	if m.License == "" {
 		errs = append(errs, ValidationError{Field: "license", Message: "required field is empty"})

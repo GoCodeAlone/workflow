@@ -11,7 +11,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/sensitive"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -37,12 +40,111 @@ func (f *applyCapture) Plan(_ context.Context, desired []interfaces.ResourceSpec
 	f.planSpecs = append(f.planSpecs, desired...)
 	return nil, nil
 }
+
+// Apply is no longer on the interfaces.IaCProvider surface (workflow#699
+// removed it); kept as a concrete method so tests' applyCapture-based
+// assertions (applyCalled / appliedPlan) survive. installAsV2Dispatch
+// wires the method into the global v2 dispatch seam — call it at the
+// top of every test that depends on the pre-v2 applyCalled semantics.
 func (f *applyCapture) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.applyCalled = true
 	f.appliedPlan = plan
 	return &interfaces.ApplyResult{}, nil
+}
+
+// installAsV2Dispatch substitutes the global applyV2ApplyPlanWithHooksFn
+// seam so the test's call to applyInfraModules / applyWithProviderAndStore /
+// applyPrecomputedPlanWithStore routes through this stub's Apply method
+// instead of the real wfctlhelpers.ApplyPlanWithHooks (which would
+// dispatch per-action via ResourceDriver, a layer most v1-era tests don't
+// stub). Also fires the appropriate OnResourceApplied / OnResourceDeleted
+// hooks for each plan action so state-persistence assertions still pass
+// without the per-action driver layer. Auto-restored on test cleanup.
+// Per workflow#699 fixup.
+func (f *applyCapture) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := f.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, p, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
+}
+
+// fireSyntheticHooks invokes the v2 ApplyPlanHooks lifecycle for each
+// plan action based on the recorded ApplyResult — bridging the
+// per-action hook semantics of the production wfctlhelpers.ApplyPlanWithHooks
+// path with the all-at-once shape of the test stub's Apply method.
+// Successful per-resource entries in result.Resources fire
+// OnResourceApplied (matching by name); delete actions absent from
+// result.Errors fire OnResourceDeleted. OnPlanComplete fires once at
+// the end. Returns the first non-nil error from the hooks so callers
+// can surface state-persistence failures the way the production helper
+// does.
+func fireSyntheticHooks(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks, result *interfaces.ApplyResult) error {
+	// Build a per-name error index so we don't fire successful-path
+	// hooks for actions that errored.
+	errored := map[string]bool{}
+	if result != nil {
+		for _, e := range result.Errors {
+			errored[e.Resource] = true
+		}
+	}
+	for i := range plan.Actions {
+		action := plan.Actions[i]
+		if errored[action.Resource.Name] {
+			continue
+		}
+		switch action.Action {
+		case "create", "update", "replace":
+			if hooks.OnResourceApplied == nil {
+				continue
+			}
+			// Only fire OnResourceApplied for actions whose output is
+			// explicitly listed in result.Resources. The v1 contract
+			// was that an empty result.Resources meant "nothing
+			// persisted by the driver"; mirroring it here keeps the
+			// v1-era tests' single-save assertions intact while the
+			// real v2 production path persists via the same hook on
+			// real driver outputs.
+			var out interfaces.ResourceOutput
+			var matched bool
+			if result != nil {
+				for _, r := range result.Resources {
+					if r.Name == action.Resource.Name {
+						out = r
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				continue
+			}
+			driver, _ := p.ResourceDriver(action.Resource.Type)
+			if err := hooks.OnResourceApplied(ctx, driver, action, out); err != nil {
+				return err
+			}
+		case "delete":
+			if hooks.OnResourceDeleted == nil {
+				continue
+			}
+			if err := hooks.OnResourceDeleted(ctx, action); err != nil {
+				return err
+			}
+		}
+	}
+	if hooks.OnPlanComplete != nil {
+		if err := hooks.OnPlanComplete(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (f *applyCapture) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
 	return nil, nil
@@ -70,6 +172,7 @@ type readDriver struct {
 	readOut            *interfaces.ResourceOutput
 	readErr            error
 	reads              []interfaces.ResourceRef
+	deletes            []interfaces.ResourceRef
 	expectedProviderID string
 	format             interfaces.ProviderIDFormat
 }
@@ -90,7 +193,10 @@ func (d *readDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec 
 	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID}, nil
 }
 
-func (d *readDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+func (d *readDriver) Delete(_ context.Context, ref interfaces.ResourceRef) error {
+	d.deletes = append(d.deletes, ref)
+	return nil
+}
 
 func (d *readDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
 	// W-3b ComputePlan dispatches Diff per resource. The adoption tests
@@ -127,6 +233,50 @@ func (d *readDriver) AdoptionRef(spec interfaces.ResourceSpec) (interfaces.Resou
 	return interfaces.ResourceRef{Name: spec.Name, Type: spec.Type, ProviderID: providerID}, true, nil
 }
 
+type configAdoptDriver struct {
+	readOut                *interfaces.ResourceOutput
+	readErr                error
+	reads                  []interfaces.ResourceRef
+	expectedProviderID     string
+	supportsConfigAdoption bool
+}
+
+func (d *configAdoptDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type}, nil
+}
+
+func (d *configAdoptDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	d.reads = append(d.reads, ref)
+	if d.expectedProviderID != "" && ref.ProviderID != d.expectedProviderID {
+		return nil, interfaces.ErrResourceNotFound
+	}
+	return d.readOut, d.readErr
+}
+
+func (d *configAdoptDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID}, nil
+}
+
+func (d *configAdoptDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+
+func (d *configAdoptDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	return &interfaces.DiffResult{NeedsUpdate: true}, nil
+}
+
+func (d *configAdoptDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	return nil, nil
+}
+
+func (d *configAdoptDriver) Scale(_ context.Context, ref interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: ref.Name, Type: ref.Type, ProviderID: ref.ProviderID}, nil
+}
+
+func (d *configAdoptDriver) SensitiveKeys() []string { return nil }
+
+func (d *configAdoptDriver) SupportsConfigAdoption() bool {
+	return d.supportsConfigAdoption
+}
+
 type readBackedProvider struct {
 	applyCapture
 	driver interfaces.ResourceDriver
@@ -149,12 +299,131 @@ func (p *readBackedFailingApplyProvider) Apply(_ context.Context, plan *interfac
 	return nil, p.applyErr
 }
 
+// installAsV2Dispatch shadows applyCapture's promoted method so the
+// failing-apply variant's Apply (which returns p.applyErr) is the one
+// the v2 seam invokes. Promotion would otherwise capture
+// applyCapture.Apply, which returns a clean ApplyResult and never
+// surfaces applyErr. Fires synthetic v2 hooks for state-persistence
+// assertions.
+func (p *readBackedFailingApplyProvider) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := p.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
+}
+
 type noDriverApplyProvider struct {
 	applyCapture
 }
 
 func (p *noDriverApplyProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
 	return nil, fmt.Errorf("no driver for %s", resourceType)
+}
+
+type waitHealthDriver struct {
+	readDriver
+	results  []interfaces.HealthResult
+	fallback *interfaces.HealthResult
+	refs     []interfaces.ResourceRef
+}
+
+func (d *waitHealthDriver) HealthCheck(_ context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	d.refs = append(d.refs, ref)
+	if len(d.results) == 0 {
+		if d.fallback != nil {
+			return d.fallback, nil
+		}
+		return &interfaces.HealthResult{Healthy: true}, nil
+	}
+	next := d.results[0]
+	d.results = d.results[1:]
+	return &next, nil
+}
+
+func TestWaitForInfraHealth_UsesAppliedContainerProviderID(t *testing.T) {
+	driver := &waitHealthDriver{}
+	provider := &readBackedProvider{driver: driver}
+	specs := []interfaces.ResourceSpec{
+		{Name: "web", Type: "infra.container_service"},
+	}
+	result := &interfaces.ApplyResult{
+		Resources: []interfaces.ResourceOutput{
+			{Name: "web", Type: "infra.container_service", ProviderID: "app-new"},
+		},
+	}
+
+	if err := waitForInfraHealth(context.Background(), provider, specs, nil, result, "prod"); err != nil {
+		t.Fatalf("waitForInfraHealth: %v", err)
+	}
+	if len(driver.refs) != 1 {
+		t.Fatalf("HealthCheck calls = %d, want 1", len(driver.refs))
+	}
+	if got := driver.refs[0].ProviderID; got != "app-new" {
+		t.Fatalf("HealthCheck ProviderID = %q, want app-new", got)
+	}
+}
+
+func TestWaitForInfraHealth_NoChangesStillChecksCurrentContainer(t *testing.T) {
+	driver := &waitHealthDriver{}
+	provider := &readBackedProvider{driver: driver}
+	specs := []interfaces.ResourceSpec{
+		{Name: "web", Type: "infra.container_service"},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "web", Type: "infra.container_service", ProviderID: "app-current"},
+	}
+
+	if err := waitForInfraHealth(context.Background(), provider, specs, current, nil, "prod"); err != nil {
+		t.Fatalf("waitForInfraHealth: %v", err)
+	}
+	if len(driver.refs) != 1 {
+		t.Fatalf("HealthCheck calls = %d, want 1", len(driver.refs))
+	}
+	if got := driver.refs[0].ProviderID; got != "app-current" {
+		t.Fatalf("HealthCheck ProviderID = %q, want app-current", got)
+	}
+}
+
+func TestWaitForInfraHealth_UnhealthyContainerFailsApply(t *testing.T) {
+	origTimeout := healthPollDefaultTimeout
+	origInitial := healthPollInitialInterval
+	origBackoff := healthPollBackoffInterval
+	origProgress := healthPollProgressInterval
+	healthPollDefaultTimeout = time.Millisecond
+	healthPollInitialInterval = time.Millisecond
+	healthPollBackoffInterval = time.Millisecond
+	healthPollProgressInterval = time.Hour
+	t.Cleanup(func() {
+		healthPollDefaultTimeout = origTimeout
+		healthPollInitialInterval = origInitial
+		healthPollBackoffInterval = origBackoff
+		healthPollProgressInterval = origProgress
+	})
+
+	driver := &waitHealthDriver{
+		fallback: &interfaces.HealthResult{Healthy: false, Message: "no deployment found"},
+	}
+	provider := &readBackedProvider{driver: driver}
+	specs := []interfaces.ResourceSpec{
+		{Name: "web", Type: "infra.container_service"},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "web", Type: "infra.container_service", ProviderID: "app-current"},
+	}
+
+	err := waitForInfraHealth(context.Background(), provider, specs, current, nil, "prod")
+	if err == nil {
+		t.Fatal("expected waitForInfraHealth to fail for unhealthy container")
+	}
+	if !strings.Contains(err.Error(), "no deployment found") {
+		t.Fatalf("error = %q, want no deployment found", err.Error())
+	}
 }
 
 // ── TestApplyInfraModules_DirectPath ───────────────────────────────────────────
@@ -193,6 +462,7 @@ modules:
 	}
 
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	orig := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 		if providerType != "fake-cloud" {
@@ -202,16 +472,16 @@ modules:
 	}
 	defer func() { resolveIaCProvider = orig }()
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 
-	// Apply must have been called.
+	// Dispatch (v2 seam) must have been called.
 	if !fake.applyCalled {
-		t.Fatal("provider.Apply was not called")
+		t.Fatal("v2 dispatch was not called")
 	}
 
 	// Plan must contain exactly 2 create actions (no current state → all creates).
@@ -309,7 +579,7 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
@@ -401,7 +671,7 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
@@ -446,7 +716,7 @@ modules:
 		t.Fatalf("write config: %v", err)
 	}
 
-	err := applyInfraModules(context.Background(), cfgPath, "")
+	_, err := applyInfraModules(context.Background(), cfgPath, "")
 	if err == nil {
 		t.Fatal("expected duplicate resource name error, got nil")
 	}
@@ -501,6 +771,7 @@ modules:
 	}
 
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	orig := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 		if providerType != "fake-cloud" {
@@ -510,7 +781,7 @@ modules:
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 
@@ -662,7 +933,8 @@ func TestApplyWithProvider_NoChanges(t *testing.T) {
 	}}
 
 	fake := &applyCapture{}
-	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", []interfaces.ResourceSpec{spec}, current, nil, io.Discard, ""); err != nil {
+	fake.installAsV2Dispatch(t)
+	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", []interfaces.ResourceSpec{spec}, current, nil, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -702,9 +974,10 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -760,6 +1033,96 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 	}
 }
 
+func TestApplyWithProvider_AdoptionRoutesNewSensitiveOutputs(t *testing.T) {
+	const rawURI = "postgres://doadmin:secret@example.com:25060/defaultdb"
+	spec := interfaces.ResourceSpec{
+		Name:   "adopted-db",
+		Type:   "infra.database",
+		Config: map[string]any{"adopt_existing": true},
+	}
+	driver := &readDriver{
+		readOut: &interfaces.ResourceOutput{
+			Name:       "adopted-db",
+			Type:       "infra.database",
+			ProviderID: "db-123",
+			Outputs: map[string]any{
+				"uri": rawURI,
+				"config": map[string]any{
+					"engine": "pg",
+				},
+			},
+			Sensitive: map[string]bool{"uri": true},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
+	store := &fakeStateStore{}
+	cfgPath := filepath.Join(t.TempDir(), "workflow.yaml")
+	if err := os.WriteFile(cfgPath, []byte("secrets:\n  provider: env\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	secretName := sensitive.SecretKey("adopted-db", "uri")
+	t.Setenv(secretName, "")
+	hydrated := map[string]string{}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(context.Context, interfaces.IaCProvider, []interfaces.ResourceSpec, []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", cfgPath, hydrated); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 1 {
+		t.Fatalf("saved states = %d, want adopted state", len(store.saved))
+	}
+	if got := store.saved[0].Outputs["uri"]; got != sensitive.Placeholder("adopted-db", "uri") {
+		t.Fatalf("adopted uri output = %#v, want routed placeholder", got)
+	}
+	if got := os.Getenv(strings.ToUpper(secretName)); got != rawURI {
+		t.Fatalf("routed env secret = %q, want raw URI", got)
+	}
+	if got := hydrated[secretName]; got != rawURI {
+		t.Fatalf("hydrated handoff = %q, want raw URI", got)
+	}
+}
+
+func TestAdoptExistingResources_AdoptionRoutingSaveFailureCleansSecretsOnly(t *testing.T) {
+	const rawURI = "postgres://doadmin:secret@example.com:25060/defaultdb"
+	spec := interfaces.ResourceSpec{
+		Name:   "adopted-db",
+		Type:   "infra.database",
+		Config: map[string]any{"adopt_existing": true},
+	}
+	driver := &readDriver{
+		readOut: &interfaces.ResourceOutput{
+			Name:       "adopted-db",
+			Type:       "infra.database",
+			ProviderID: "db-123",
+			Outputs:    map[string]any{"uri": rawURI},
+			Sensitive:  map[string]bool{"uri": true},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
+	store := &fakeStateStore{saveErr: errors.New("state unavailable")}
+	secretsProvider := newEnvTestProvider()
+
+	_, err := adoptExistingResources(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, secretsProvider, map[string]string{})
+	if err == nil {
+		t.Fatalf("adoptExistingResources succeeded, want state persistence error")
+	}
+	if len(secretsProvider.values) != 0 {
+		t.Fatalf("routed secrets after failed adoption = %#v, want cleanup", secretsProvider.values)
+	}
+	if len(driver.deletes) != 0 {
+		t.Fatalf("driver deletes = %#v, want no cloud resource delete for adoption", driver.deletes)
+	}
+}
+
 func TestApplyWithProvider_DNSAdoptionFailedUpdateKeepsLiveAppliedConfig(t *testing.T) {
 	desiredConfig := map[string]any{
 		"provider": "do-provider",
@@ -792,9 +1155,10 @@ func TestApplyWithProvider_DNSAdoptionFailedUpdateKeepsLiveAppliedConfig(t *test
 		readBackedProvider: readBackedProvider{driver: driver},
 		applyErr:           errors.New("provider update failed"),
 	}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected apply failure, got nil")
 	}
@@ -832,8 +1196,9 @@ func TestApplyWithProvider_DNSAdoptionFallsBackToNameWhenDomainOmitted(t *testin
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
-	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 	if len(driver.reads) != 1 {
@@ -860,9 +1225,10 @@ func TestApplyWithProvider_DNSAdoptionSaveFailureFailsBeforeApply(t *testing.T) 
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{saveErr: errors.New("disk full")}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected adoption save failure, got nil")
 	}
@@ -893,8 +1259,9 @@ func TestApplyWithProvider_DNSAdoptionRequiresWritableStateStore(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected adoption to fail with noop state store")
 	}
@@ -925,9 +1292,10 @@ func TestApplyWithProvider_AdoptsResourceThroughDriverLocator(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
@@ -955,6 +1323,136 @@ func TestApplyWithProvider_AdoptsResourceThroughDriverLocator(t *testing.T) {
 	}
 }
 
+func TestApplyWithProvider_AdoptsResourceWhenConfigAdoptExistingTrue(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "wfcompute-stg-db",
+		Type: "infra.database",
+		Config: map[string]any{
+			"adopt_existing": true,
+			"engine":         "pg",
+			"version":        "18",
+		},
+	}
+	driver := &configAdoptDriver{
+		supportsConfigAdoption: true,
+		readOut: &interfaces.ResourceOutput{
+			Name:       "wfcompute-stg-db",
+			Type:       "infra.database",
+			ProviderID: "db-123",
+			Outputs: map[string]any{
+				"name":   "wfcompute-stg-db",
+				"engine": "pg",
+			},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
+	store := &fakeStateStore{}
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	if len(driver.reads) != 1 {
+		t.Fatalf("driver reads = %d, want 1", len(driver.reads))
+	}
+	if driver.reads[0] != (interfaces.ResourceRef{Name: "wfcompute-stg-db", Type: "infra.database"}) {
+		t.Fatalf("read ref = %+v, want name/type only", driver.reads[0])
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 1 || store.saved[0].ProviderID != "db-123" {
+		t.Fatalf("saved states = %+v, want adopted db-123", store.saved)
+	}
+	provider.mu.Lock()
+	appliedPlan := provider.appliedPlan
+	provider.mu.Unlock()
+	if appliedPlan == nil || len(appliedPlan.Actions) != 1 || appliedPlan.Actions[0].Action != "update" {
+		t.Fatalf("applied plan = %#v, want update after adoption", appliedPlan)
+	}
+}
+
+func TestApplyWithProvider_ConfigAdoptionRejectsUnsupportedDriver(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "wfcompute-stg-db",
+		Type: "infra.database",
+		Config: map[string]any{
+			"adopt_existing": true,
+		},
+	}
+	driver := &configAdoptDriver{}
+	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected unsupported config adoption error")
+	}
+	if !strings.Contains(err.Error(), "adopt_existing requires a driver that supports name-based adoption") {
+		t.Fatalf("error = %v, want unsupported config adoption failure", err)
+	}
+	if len(driver.reads) != 0 {
+		t.Fatalf("driver reads = %d, want 0", len(driver.reads))
+	}
+}
+
+func TestApplyWithProvider_ConfigAdoptionRejectsNilDriver(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "wfcompute-stg-db",
+		Type: "infra.database",
+		Config: map[string]any{
+			"adopt_existing": true,
+		},
+	}
+	provider := &readBackedProvider{}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected nil driver resolution error")
+	}
+	if !strings.Contains(err.Error(), "resolve resource driver: driver returned nil") {
+		t.Fatalf("error = %v, want nil driver resolution failure", err)
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if provider.applyCalled {
+		t.Fatal("Apply should not be called when explicit adoption driver resolution fails")
+	}
+}
+
+func TestApplyWithProvider_DNSAdoptionPreservesBuiltInRefWithAdoptExisting(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name: "site-dns",
+		Type: "infra.dns",
+		Config: map[string]any{
+			"adopt_existing": true,
+			"domain":         "example.com",
+		},
+	}
+	driver := &configAdoptDriver{
+		expectedProviderID: "example.com",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "do-domain-123",
+			Outputs: map[string]any{
+				"domain": "example.com",
+			},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	if len(driver.reads) != 1 {
+		t.Fatalf("driver reads = %d, want 1", len(driver.reads))
+	}
+	if driver.reads[0] != (interfaces.ResourceRef{Name: "site-dns", Type: "infra.dns", ProviderID: "example.com"}) {
+		t.Fatalf("read ref = %+v, want built-in DNS domain ref", driver.reads[0])
+	}
+}
+
 func TestApplyWithProvider_SkipsAdoptionWhenAppDriverHasNoLocator(t *testing.T) {
 	spec := interfaces.ResourceSpec{
 		Name:   "site-app",
@@ -962,15 +1460,16 @@ func TestApplyWithProvider_SkipsAdoptionWhenAppDriverHasNoLocator(t *testing.T) 
 		Config: map[string]any{"image": "example/app:latest"},
 	}
 	provider := &noDriverApplyProvider{}
+	provider.installAsV2Dispatch(t)
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
 	if err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 	if !provider.applyCalled {
-		t.Fatal("Apply should be called for normal create when app driver lacks adoption locator")
+		t.Fatal("v2 dispatch should be invoked for normal create when app driver lacks adoption locator")
 	}
 	if provider.appliedPlan == nil || len(provider.appliedPlan.Actions) != 1 || provider.appliedPlan.Actions[0].Action != "create" {
 		t.Fatalf("applied plan = %#v, want one create", provider.appliedPlan)
@@ -994,9 +1493,10 @@ func TestApplyWithProvider_DNSAdoptionRejectsMalformedProviderID(t *testing.T) {
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected malformed ProviderID error")
 	}
@@ -1024,9 +1524,10 @@ func TestApplyWithProvider_DNSReadNotFoundKeepsCreateBehavior(t *testing.T) {
 	}
 	driver := &readDriver{readErr: interfaces.ErrResourceNotFound}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -1054,8 +1555,9 @@ func TestApplyWithProvider_DNSReadErrorFailsBeforeApply(t *testing.T) {
 	}
 	driver := &readDriver{readErr: errors.New("provider API unavailable")}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected read error, got nil")
 	}
@@ -1077,8 +1579,9 @@ func TestApplyWithProvider_DNSReadNilLiveOutputFailsBeforeApply(t *testing.T) {
 	}
 	driver := &readDriver{}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected nil live output adoption error")
 	}
@@ -1106,9 +1609,10 @@ func TestApplyWithProvider_DNSReadEmptyProviderIDFailsBeforeApply(t *testing.T) 
 		},
 	}
 	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error when adopted live output has empty ProviderID")
 	}
@@ -1145,8 +1649,9 @@ func TestApplyWithProvider_DeletesRemovedResource(t *testing.T) {
 	}
 
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
-	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", specs, current, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", specs, current, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -1201,8 +1706,31 @@ func (p *stateReturningProvider) Capabilities() []interfaces.IaCCapabilityDeclar
 func (p *stateReturningProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
 	return nil, nil
 }
+
+// Apply is no longer on the interfaces.IaCProvider surface (workflow#699
+// removed it); kept as a concrete method so tests can preset applyResult /
+// applyErr and observe the dispatch outcome. installAsV2Dispatch wires
+// this concrete method into the global v2 dispatch seam.
 func (p *stateReturningProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
 	return p.applyResult, p.applyErr
+}
+
+// installAsV2Dispatch substitutes the global applyV2ApplyPlanWithHooksFn
+// seam so tests that preset applyResult / applyErr observe the dispatch
+// outcome without crossing into the per-driver layer. Also fires the v2
+// ApplyPlanHooks lifecycle so state-persistence assertions still pass.
+// Auto-restored on test cleanup. Per workflow#699 fixup.
+func (p *stateReturningProvider) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := p.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
 }
 func (p *stateReturningProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
 	return nil, nil
@@ -1228,6 +1756,23 @@ func (p *stateReturningProvider) BootstrapStateBackend(_ context.Context, _ map[
 }
 func (p *stateReturningProvider) Close() error { return nil }
 
+type stateReturningProviderWithDriver struct {
+	stateReturningProvider
+	driver interfaces.ResourceDriver
+	cancel context.CancelFunc
+}
+
+func (p *stateReturningProviderWithDriver) Apply(ctx context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	if p.cancel != nil {
+		p.cancel()
+	}
+	return p.stateReturningProvider.Apply(ctx, plan)
+}
+
+func (p *stateReturningProviderWithDriver) ResourceDriver(string) (interfaces.ResourceDriver, error) {
+	return p.driver, nil
+}
+
 // TestApplyWithProvider_SavesStateForSuccessfulResources asserts that
 // applyWithProviderAndStore calls store.SaveResource for each resource in
 // the Apply result.
@@ -1244,9 +1789,10 @@ func TestApplyWithProvider_SavesStateForSuccessfulResources(t *testing.T) {
 			},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -1300,9 +1846,10 @@ func TestApplyWithProvider_SavesStateOnPartialFailure(t *testing.T) {
 			},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected error on partial failure, got nil")
 	}
@@ -1326,14 +1873,291 @@ func TestApplyWithProvider_StoreSaveFailureFails(t *testing.T) {
 			Resources: []interfaces.ResourceOutput{{Name: "r1", ProviderID: "vpc-1"}},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 	store := &fakeStateStore{saveErr: fmt.Errorf("disk full")}
 
-	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "")
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
 	if err == nil {
 		t.Fatal("expected save failure after apply, got nil")
 	}
 	if !strings.Contains(err.Error(), "persist state") || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("error = %v, want hard state persistence failure", err)
+	}
+}
+
+func TestApplyWithProvider_UpdateSaveFailureDoesNotDelete(t *testing.T) {
+	desiredCfg := map[string]any{"version": 2}
+	current := interfaces.ResourceState{
+		Name:       "r1",
+		Type:       "infra.test",
+		ProviderID: "id-existing",
+	}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+			Action:   "update",
+			Resource: specs[0],
+			Current:  &current[0],
+		}}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	driver := &v2UpdateFailureDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{
+					Name:       "r1",
+					Type:       "infra.test",
+					ProviderID: "id-existing",
+				}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}, saveErr: fmt.Errorf("disk full")}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: desiredCfg}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected save failure after update, got nil")
+	}
+	if strings.Contains(err.Error(), "compensating delete") {
+		t.Fatalf("error = %v, update path must not compensate with delete", err)
+	}
+	if driver.deleteCount != 0 {
+		t.Fatalf("driver delete count = %d, want 0 for update save failure", driver.deleteCount)
+	}
+}
+
+func TestApplyWithProvider_UpdateProviderIDFailureDoesNotDelete(t *testing.T) {
+	desiredCfg := map[string]any{"version": 2}
+	current := interfaces.ResourceState{
+		Name:       "r1",
+		Type:       "infra.test",
+		ProviderID: "id-existing",
+	}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+			Action:   "update",
+			Resource: specs[0],
+			Current:  &current[0],
+		}}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	driver := &v2UpdateInvalidProviderIDDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{
+					Name:       "r1",
+					Type:       "infra.test",
+					ProviderID: "not-a-uuid",
+				}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: desiredCfg}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected ProviderID validation failure after update, got nil")
+	}
+	if strings.Contains(err.Error(), "compensating delete") {
+		t.Fatalf("error = %v, update path must not compensate with delete", err)
+	}
+	if driver.deleteCount != 0 {
+		t.Fatalf("driver delete count = %d, want 0 for update ProviderID failure", driver.deleteCount)
+	}
+}
+
+func TestApplyWithProvider_UpdateSensitiveRoutingFailureDoesNotDelete(t *testing.T) {
+	desiredCfg := map[string]any{"version": 2}
+	current := interfaces.ResourceState{
+		Name:       "r1",
+		Type:       "infra.test",
+		ProviderID: "id-existing",
+	}
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(_ context.Context, _ interfaces.IaCProvider, specs []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+			Action:   "update",
+			Resource: specs[0],
+			Current:  &current[0],
+		}}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	driver := &v2UpdateFailureDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{
+					Name:       "r1",
+					Type:       "infra.test",
+					ProviderID: "id-existing",
+					Outputs:    map[string]any{"token": "secret"},
+					Sensitive:  map[string]bool{"token": true},
+				}},
+			},
+		},
+		driver: driver,
+	}
+	fake.installAsV2Dispatch(t)
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: desiredCfg}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected sensitive routing failure after update, got nil")
+	}
+	if strings.Contains(err.Error(), "compensating delete") {
+		t.Fatalf("error = %v, update path must not compensate with delete", err)
+	}
+	if driver.deleteCount != 0 {
+		t.Fatalf("driver delete count = %d, want 0 for update sensitive-routing failure", driver.deleteCount)
+	}
+}
+
+func TestApplyWithProvider_FailedDeleteKeepsState(t *testing.T) {
+	current := interfaces.ResourceState{Name: "old", Type: "infra.test", ProviderID: "id-old"}
+	store := &fakeStateStore{saved: []interfaces.ResourceState{current}}
+	fake := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Errors: []interfaces.ActionError{{Action: "delete", Resource: "old", Error: "delete failed"}},
+		},
+	}
+	fake.installAsV2Dispatch(t)
+
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", nil, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil); err == nil {
+		t.Fatal("expected delete failure, got nil")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.deleted) != 0 {
+		t.Fatalf("deleted state entries = %v, want none after failed delete", store.deleted)
+	}
+}
+
+// TestApplyWithProvider_PartialFailureDoesNotInferDeleteSuccess was
+// deleted per workflow#699. The test pinned the v1 conservative
+// "any error → no delete-state cleanup" short-circuit
+// (successfulDeleteNames returning empty when result.Errors was
+// non-empty). Post-v2 the dispatch fires per-action OnResourceDeleted
+// hooks independently of other actions' outcomes; the v2 equivalent
+// (TestApplyWithProviderAndStore_V2FailedDeleteKeepsState) asserts the
+// correct per-action behavior.
+
+func TestApplyWithProvider_CreateMissingIdentitySaveFailureCompensates(t *testing.T) {
+	driver := &v2SensitiveCreateDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{ProviderID: "id-created"}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{saveErr: fmt.Errorf("disk full")}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: map[string]any{"version": 1}}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected save failure after create, got nil")
+	}
+	if !strings.Contains(err.Error(), "compensating delete succeeded") {
+		t.Fatalf("error = %v, want create compensation", err)
+	}
+	if driver.deleteCount == 0 {
+		t.Fatal("expected compensating delete for create output with missing identity")
+	}
+}
+
+func TestApplyWithProvider_CreateSensitiveOutputWithoutSecretsCompensates(t *testing.T) {
+	driver := &v2SensitiveCreateDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{{
+					Name:       "r1",
+					Type:       "infra.test",
+					ProviderID: "id-created",
+					Outputs:    map[string]any{"token": "secret"},
+					Sensitive:  map[string]bool{"token": true},
+				}},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{}
+	specs := []interfaces.ResourceSpec{{Name: "r1", Type: "infra.test", Config: map[string]any{"version": 1}}}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected sensitive routing failure after create, got nil")
+	}
+	if !strings.Contains(err.Error(), "compensating delete succeeded") {
+		t.Fatalf("error = %v, want create compensation", err)
+	}
+	if driver.deleteCount == 0 {
+		t.Fatal("expected compensating delete for create with sensitive outputs and no provider")
+	}
+}
+
+func TestApplyWithProvider_SensitivePreflightDoesNotPartiallySave(t *testing.T) {
+	driver := &v2SensitiveCreateDriver{}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{
+			applyResult: &interfaces.ApplyResult{
+				Resources: []interfaces.ResourceOutput{
+					{Name: "plain", Type: "infra.test", ProviderID: "id-plain", Outputs: map[string]any{"url": "https://example.test"}},
+					{Name: "secret", Type: "infra.test", ProviderID: "id-secret", Outputs: map[string]any{"token": "secret"}, Sensitive: map[string]bool{"token": true}},
+				},
+			},
+		},
+		driver: driver,
+	}
+	store := &fakeStateStore{}
+	specs := []interfaces.ResourceSpec{
+		{Name: "plain", Type: "infra.test", Config: map[string]any{"version": 1}},
+		{Name: "secret", Type: "infra.test", Config: map[string]any{"version": 1}},
+	}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "", "", nil)
+	if err == nil {
+		t.Fatal("expected sensitive routing failure, got nil")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 0 {
+		t.Fatalf("saved state = %+v, want no partial state before sensitive preflight failure", store.saved)
+	}
+	if driver.deleteCount == 0 {
+		t.Fatal("expected compensating delete for sensitive create")
+	}
+}
+
+func TestApplyWithProvider_DeletePrunesStateAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	current := interfaces.ResourceState{Name: "old", Type: "infra.test", ProviderID: "id-old"}
+	store := &cancelAwareStateStore{fakeStateStore: fakeStateStore{saved: []interfaces.ResourceState{current}}}
+	fake := &stateReturningProviderWithDriver{
+		stateReturningProvider: stateReturningProvider{applyResult: &interfaces.ApplyResult{}},
+		cancel:                 cancel,
+	}
+	fake.installAsV2Dispatch(t)
+
+	if err := applyWithProviderAndStore(ctx, fake, "fake-cloud", nil, []interfaces.ResourceState{current}, store, io.Discard, "", "", nil); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.deleted) != 1 || store.deleted[0] != "old" {
+		t.Fatalf("deleted state entries = %v, want [old]", store.deleted)
 	}
 }
 
@@ -1362,7 +2186,7 @@ modules:
 		t.Fatalf("write config: %v", err)
 	}
 
-	err := applyInfraModules(context.Background(), cfgPath, "staging")
+	_, err := applyInfraModules(context.Background(), cfgPath, "staging")
 	if err == nil {
 		t.Fatal("expected error for disabled provider, got nil")
 	}
@@ -1388,7 +2212,7 @@ modules:
 		t.Fatalf("write config: %v", err)
 	}
 
-	err := applyInfraModules(context.Background(), cfgPath, "")
+	_, err := applyInfraModules(context.Background(), cfgPath, "")
 	if err == nil {
 		t.Fatal("expected error for missing provider, got nil")
 	}
@@ -1430,6 +2254,22 @@ func (s *sizingCapture) Apply(_ context.Context, plan *interfaces.IaCPlan) (*int
 	return &interfaces.ApplyResult{}, nil
 }
 
+// installAsV2Dispatch shadows applyCapture's promoted method so the
+// sizing-specific Apply (which records appliedSpecs) is the one the v2
+// seam invokes.
+func (s *sizingCapture) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := s.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
+}
+
 // TestApplyInfraModules_CallsResolveSizing_ForEachSpec verifies that
 // applyWithProviderAndStore invokes provider.ResolveSizing for each spec
 // that has a non-empty Size field, and that the resolved InstanceType and
@@ -1447,8 +2287,9 @@ func TestApplyInfraModules_CallsResolveSizing_ForEachSpec(t *testing.T) {
 			Specs:        map[string]any{"memory_mb": 2048},
 		},
 	}
+	fake.installAsV2Dispatch(t)
 
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, nil, io.Discard, ""); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, nil, io.Discard, "", "", nil); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -1507,7 +2348,7 @@ modules:
 	if err := os.WriteFile(legacyOnly, []byte(`
 modules:
   - name: app
-    type: platform.do_app
+    type: example.legacy_unknown
     config: {}
 `), 0o600); err != nil {
 		t.Fatal(err)
@@ -1552,6 +2393,7 @@ modules:
 	// Override resolveIaCProvider to return a provider + error-producing closer.
 	orig := resolveIaCProvider
 	fake := &applyCapture{}
+	fake.installAsV2Dispatch(t)
 	closerErr := "shutdown-sentinel-error"
 	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 		return fake, &errCloser{msg: closerErr}, nil
@@ -1571,7 +2413,7 @@ modules:
 		_ = r.Close()
 	})
 
-	err := applyInfraModules(context.Background(), cfgPath, "")
+	_, err := applyInfraModules(context.Background(), cfgPath, "")
 
 	w.Close()
 	os.Stderr = oldStderr
@@ -1590,5 +2432,83 @@ modules:
 	}
 	if !strings.Contains(stderrOutput, "warning") {
 		t.Errorf("stderr = %q, want it to contain 'warning'", stderrOutput)
+	}
+}
+
+// ── TestApply_StateRecordsAppliedConfigSource* ─────────────────────────────────
+
+// TestApply_StateRecordsAppliedConfigSourceApply asserts that applyWithProviderAndStore
+// writes AppliedConfigSource="apply" on successful resource creation.
+func TestApply_StateRecordsAppliedConfigSourceApply(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "res-A",
+		Type:   "infra.test",
+		Config: map[string]any{"k": "v"},
+	}
+	fake := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Resources: []interfaces.ResourceOutput{
+				{Name: "res-A", Type: "infra.test", ProviderID: "id-A", Outputs: map[string]any{"k": "v"}},
+			},
+		},
+	}
+	fake.installAsV2Dispatch(t)
+	store := &fakeStateStore{}
+
+	if err := applyWithProviderAndStore(t.Context(), fake, "test", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 1 {
+		t.Fatalf("expected 1 saved state; got %d", len(store.saved))
+	}
+	saved := store.saved[0]
+	if saved.AppliedConfigSource != "apply" {
+		t.Errorf("AppliedConfigSource: got %q, want %q", saved.AppliedConfigSource, "apply")
+	}
+}
+
+// TestAdoption_StateRecordsAppliedConfigSourceAdoption asserts that state saved
+// via the adoption path (adoptExistingResources) records AppliedConfigSource="adoption".
+func TestAdoption_StateRecordsAppliedConfigSourceAdoption(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"provider": "do-provider", "domain": "example.com"},
+	}
+	driver := &readDriver{
+		expectedProviderID: "example.com",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "do-domain-123",
+			Outputs:    map[string]any{"domain": "example.com"},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	provider.installAsV2Dispatch(t)
+	store := &fakeStateStore{}
+
+	if err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "", "", nil); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	// The first saved state is from adoption; subsequent saves are from apply.
+	var adoptedState *interfaces.ResourceState
+	for i := range store.saved {
+		if store.saved[i].Name == "site-dns" && store.saved[i].AppliedConfigSource == "adoption" {
+			adoptedState = &store.saved[i]
+			break
+		}
+	}
+	if adoptedState == nil {
+		t.Fatalf("expected adopted state with AppliedConfigSource=adoption; saved=%+v", store.saved)
+	}
+	if adoptedState.AppliedConfigSource != "adoption" {
+		t.Errorf("AppliedConfigSource: got %q, want %q", adoptedState.AppliedConfigSource, "adoption")
 	}
 }

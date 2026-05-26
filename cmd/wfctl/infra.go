@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +60,8 @@ func runInfra(args []string) error {
 		return infraUsage()
 	}
 	switch args[0] {
+	case "derive":
+		return runInfraDerive(args[1:])
 	case "plan":
 		return runInfraPlan(args[1:])
 	case "apply":
@@ -73,6 +76,8 @@ func runInfra(args []string) error {
 		return runInfraImport(args[1:])
 	case "state":
 		return runInfraState(args[1:])
+	case "logs":
+		return runInfraLogs(args[1:])
 	case "bootstrap":
 		return runInfraBootstrap(args[1:])
 	case "outputs":
@@ -81,8 +86,28 @@ func runInfra(args []string) error {
 		return runInfraRefreshOutputs(args[1:])
 	case "align":
 		return runInfraAlign(args[1:])
+	case "test":
+		return runInfraTest(args[1:])
 	case "security-check":
 		return runInfraSecurityCheck(args[1:])
+	case "cleanup":
+		return runInfraCleanup(args[1:])
+	case "audit-secrets":
+		if rc := runInfraAuditSecrets(args[1:], os.Stdout); rc != 0 {
+			return fmt.Errorf("audit-secrets exited with code %d", rc)
+		}
+		return nil
+	case "audit-keys":
+		return runInfraAuditKeysCmd(args[1:])
+	case "prune":
+		return runInfraPruneCmd(args[1:])
+	case "rotate-and-prune":
+		return runInfraRotateAndPruneCmd(args[1:])
+	case "audit-state-secrets":
+		if rc := runInfraAuditStateSecrets(args[1:], os.Stdout); rc != 0 {
+			return fmt.Errorf("audit-state-secrets exited with code %d", rc)
+		}
+		return nil
 	default:
 		return infraUsage()
 	}
@@ -94,6 +119,7 @@ func infraUsage() error {
 Manage infrastructure defined in a workflow config.
 
 Actions:
+  derive         Expand provider-derived IaC modules into workflow YAML
   plan           Show planned infrastructure changes
   apply          Apply infrastructure changes
   status         Show current infrastructure status
@@ -101,10 +127,18 @@ Actions:
   destroy        Tear down infrastructure
   import         Import an existing cloud resource into state
   state          Manage IaC state (list, export, import)
+  logs           Capture provider logs for an infrastructure resource
   outputs        Print captured resource outputs from state
   refresh-outputs Read live outputs and reconcile state (no cloud writes)
   align          Validate IaC config + plan alignment (8 rule families)
+  test           Hermetically validate expected infra config and plan outcomes
   security-check Scan plan.json for security policy violations
+  cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
+  audit-secrets  Report provider_credential anti-patterns in secrets.generate
+  audit-keys     List cloud-side resources of --type via the provider's EnumeratorAll
+  prune          Destructively delete cloud resources by --created-before / --exclude-access-key (two-key opt-in)
+  rotate-and-prune  All-in-one: rotate canonical credential, then prune older keys with the new key as exclusion target
+  audit-state-secrets  Audit state.Outputs vs. secrets.Provider for orphans, legacy, missing
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
@@ -115,6 +149,11 @@ Options:
   --format <fmt>       Output format: table (default) or markdown (plan only)
   --output <file>      Write plan to JSON file (plan only)
   --show-sensitive/-S  Show sensitive values in plaintext (plan/apply only)
+  --tag <name>         Tag to match resources (cleanup only; required)
+  --dry-run            Preview only (cleanup; default true)
+  --write              Update config file in place (derive only)
+  --non-interactive    Fail instead of prompting for ambiguous choices (derive only)
+  --fix                Opt into deletion (cleanup; overrides --dry-run)
 `)
 	return fmt.Errorf("missing or unknown action")
 }
@@ -213,9 +252,17 @@ func runInfraPlan(args []string) error {
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var planIncludeFlag string
+	fs.StringVar(&planIncludeFlag, "include", "",
+		"Comma-separated list of resource names to scope this command to (filters both desired specs and current state)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 	format := &formatVal
 	output := &outputVal
 	showSensitive := showSensitiveVal
@@ -238,6 +285,34 @@ func runInfraPlan(args []string) error {
 		return fmt.Errorf("load current state: %w", err)
 	}
 
+	// --include: apply scope filter. Validate before filtering so unknown names
+	// produce a descriptive error. State-only resources (eligible for delete)
+	// are accepted in the include set. parseInfraResourceSpecsForEnv returns
+	// both infra.* and platform.* specs; --include works across both.
+	planIncludeSet := parseIncludeFlag(planIncludeFlag)
+	if err := validateIncludeSet(planIncludeSet, desired, current); err != nil {
+		return err
+	}
+	desired = filterSpecsByInclude(desired, planIncludeSet)
+	current = filterStatesByInclude(current, planIncludeSet)
+
+	// Plan-time JIT resolution (PR-1): substitute ${MODULE.field} and
+	// ${SECRET} refs against current state so driver.Diff sees real
+	// values instead of literal templates. Refs whose source isn't in
+	// state stay templated; planRequiresJITSubstitution detects them
+	// and SchemaVersion=2 stamping handles the apply-time path.
+	var resolutionDiags []ResolutionDiagnostic
+	{
+		wfCfgForResolver, cfgLoadErr := config.LoadFromFile(cfgFile)
+		if cfgLoadErr != nil {
+			return fmt.Errorf("load config for plan-time resolver: %w", cfgLoadErr)
+		}
+		desired, resolutionDiags, err = resolveSpecsAgainstState(desired, current, wfCfgForResolver, envName)
+		if err != nil {
+			return fmt.Errorf("resolve specs against state: %w", err)
+		}
+	}
+
 	// W-3b: load each iac.provider plugin and dispatch ComputePlan per
 	// provider group. The provider is required so platform.ComputePlan can
 	// invoke ResourceDriver.Diff for ForceNew-aware Replace classification
@@ -247,7 +322,12 @@ func runInfraPlan(args []string) error {
 	// out-of-band scripts that never declared one).
 	plan, err := computePlanForInfraSpecs(context.Background(), cfgFile, envName, desired, current)
 	if err != nil {
-		return fmt.Errorf("compute plan: %w", err)
+		wrapped := fmt.Errorf("compute plan: %w", err)
+		// Emit an actionable hint to stderr if the underlying driver Diff
+		// rejected an AppSpec image that's missing from its registry. See
+		// infra_image_presence_hint.go.
+		emitImageNotInRegistryHint(os.Stderr, wrapped)
+		return wrapped
 	}
 
 	// Capture env-var fingerprints so apply (persisted-plan path: T1.5; in-process
@@ -279,6 +359,16 @@ func runInfraPlan(args []string) error {
 		fmt.Print(formatPlanTable(plan, showSensitive))
 	}
 
+	// Print any plan-time JIT resolution diagnostics after the plan table
+	// so they're visible only when the plan rendering succeeded.
+	if len(resolutionDiags) > 0 {
+		fmt.Println()
+		fmt.Println("Pending JIT resolution (apply-time):")
+		for _, d := range resolutionDiags {
+			fmt.Printf("  %s: %s\n", d.ResourceName, formatResolutionDiagnosticRef(d.Ref))
+		}
+	}
+
 	if *output != "" {
 		// T5.5: persisted plan.json is the wfctl-infra-apply --plan
 		// canonical input. JIT-style plans cannot be persisted because
@@ -295,11 +385,16 @@ func runInfraPlan(args []string) error {
 			// cmd/wfctl/main.go's top-level wrapper. errors.New (rather than
 			// fmt.Errorf) avoids govet's no-verbs noise and is canonical for
 			// fixed-string error literals per Go convention.
-			return errors.New("this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan.")
+			return errors.New("this plan requires JIT resolution; persisted plan.json is not supported. Run 'wfctl infra apply' directly without -o/--plan")
 		}
 		// Embed a hash of the desired-state inputs so wfctl infra apply --plan
 		// can detect stale plans when the config changes after plan generation.
 		plan.DesiredHash = desiredStateHash(desired)
+		plan.Include = sortedIncludeNames(planIncludeSet)
+		// Stamp generator metadata (wfctl version + IaC plugin versions) so
+		// operators can inspect what toolchain version produced this plan.
+		meta := buildGeneratorMetadata()
+		plan.GeneratorMetadata = &meta
 		if err := writePlanJSON(plan, *output); err != nil {
 			return fmt.Errorf("write plan: %w", err)
 		}
@@ -358,19 +453,85 @@ func resourceSpecFromResolvedModule(r *config.ResolvedModule) interfaces.Resourc
 	return spec
 }
 
+// declaredSecretKeys returns the variable names declared as workflow secrets.
+// These keys are preserved as literal ${VAR} references during plan-time
+// config expansion so that desiredStateHash produces the same result
+// regardless of whether the variable is currently set in the process
+// environment. This covers generated secrets and externally supplied required
+// secrets declared through either the top-level secrets block or secrets.*
+// modules.
+func declaredSecretKeys(cfg *config.WorkflowConfig) []string {
+	if cfg == nil {
+		return nil
+	}
+	keys := map[string]struct{}{}
+	if cfg.Secrets != nil {
+		for _, g := range cfg.Secrets.Generate {
+			if g.Key != "" {
+				keys[g.Key] = struct{}{}
+			}
+		}
+		for _, entry := range cfg.Secrets.Entries {
+			if entry.Name != "" {
+				keys[entry.Name] = struct{}{}
+			}
+		}
+	}
+	for _, m := range cfg.Modules {
+		if m.Type != "secrets.generate" && m.Type != "secrets.requires" {
+			continue
+		}
+		for _, field := range []string{"generate", "requires"} {
+			for _, key := range secretModuleKeys(m.Config, field) {
+				keys[key] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(keys))
+	for key := range keys {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func secretModuleKeys(moduleCfg map[string]any, field string) []string {
+	raw, ok := moduleCfg[field]
+	if !ok {
+		return nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		key, ok := m["key"].(string)
+		if ok && key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
 // parseInfraResourceSpecs reads an infra config (resolving imports:) and
-// returns ResourceSpecs for all infra.* and platform.* modules.
+// returns ResourceSpecs for all infra.* and platform.* (e.g., platform.kubernetes, platform.ecs) modules.
 func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", cfgFile, err)
 	}
+	secretVars := declaredSecretKeys(cfg)
 	var specs []interfaces.ResourceSpec
 	for _, m := range cfg.Modules {
 		if !isInfraType(m.Type) {
 			continue
 		}
-		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingKeys(m.Config, infraPreserveKeys)}
+		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)}
 		specs = append(specs, resourceSpecFromResolvedModule(r))
 	}
 	return specs, nil
@@ -409,6 +570,7 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 	if envName != "" && cfg.Environments != nil {
 		topEnv = cfg.Environments[envName]
 	}
+	secretVars := declaredSecretKeys(cfg)
 	var out []*config.ResolvedModule
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
@@ -416,7 +578,7 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 			continue
 		}
 		if envName == "" {
-			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingKeys(m.Config, infraPreserveKeys)})
+			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)})
 			continue
 		}
 		resolved, ok := m.ResolveForEnv(envName)
@@ -464,14 +626,17 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 		// Use the preserving variant so that env_vars submaps retain their
 		// ${VAR} literals through plan serialization (apply-time injection
 		// resolves them when the plugin creates/updates the resource).
-		resolved.Config = config.ExpandEnvInMapPreservingKeys(resolved.Config, infraPreserveKeys)
+		// secretVars are also preserved so that fields like user_data that
+		// reference declared secrets produce the same hash at plan time
+		// (variable unset) and apply time (variable set).
+		resolved.Config = config.ExpandEnvInMapPreservingVars(resolved.Config, infraPreserveKeys, secretVars)
 		out = append(out, resolved)
 	}
 	return out, nil
 }
 
 func isContainerType(t string) bool {
-	return t == "infra.container_service" || t == "platform.do_app"
+	return t == "infra.container_service"
 }
 
 // loadCurrentState loads ResourceStates from the configured iac.state backend.
@@ -529,9 +694,9 @@ func formatPlanTable(plan interfaces.IaCPlan, showSensitive bool) string {
 		fmt.Fprintln(&sb)
 	}
 
-	creates, updates, deletes := countActions(plan)
-	fmt.Fprintf(&sb, "Plan: %d to create, %d to update, %d to destroy.\n",
-		creates, updates, deletes)
+	creates, updates, replaces, deletes := countActions(plan)
+	fmt.Fprintf(&sb, "Plan: %d to create, %d to update, %d to replace, %d to destroy.\n",
+		creates, updates, replaces, deletes)
 	return sb.String()
 }
 
@@ -571,10 +736,38 @@ func formatPlanMarkdown(plan interfaces.IaCPlan, showSensitive bool) string {
 		sb.WriteString("</details>\n\n")
 	}
 
-	creates, updates, deletes := countActions(plan)
-	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to destroy.**\n",
-		creates, updates, deletes)
+	creates, updates, replaces, deletes := countActions(plan)
+	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to replace, %d to destroy.**\n",
+		creates, updates, replaces, deletes)
 	return sb.String()
+}
+
+func formatResolutionDiagnosticRef(ref string) string {
+	if isSensitiveResolutionRef(ref) {
+		return "<redacted sensitive ref>"
+	}
+	return "${" + ref + "}"
+}
+
+func isSensitiveResolutionRef(ref string) bool {
+	ref = strings.ToLower(ref)
+	if ref == "" {
+		return false
+	}
+	parts := strings.Split(ref, ".")
+	last := parts[len(parts)-1]
+	for _, sensitiveKey := range secrets.DefaultSensitiveKeys() {
+		k := strings.ToLower(sensitiveKey)
+		if ref == k || last == k {
+			return true
+		}
+	}
+	for _, token := range []string{"secret", "token", "password", "passwd", "pwd", "private", "credential", "dsn", "uri", "url"} {
+		if strings.Contains(ref, token) {
+			return true
+		}
+	}
+	return false
 }
 
 // resourceSummaryKeys returns the most relevant key-value pairs to display for
@@ -790,6 +983,8 @@ func actionSymbol(action string) string {
 		return "+"
 	case "update":
 		return "~"
+	case "replace":
+		return "±"
 	case "delete":
 		return "-"
 	default:
@@ -797,13 +992,15 @@ func actionSymbol(action string) string {
 	}
 }
 
-func countActions(plan interfaces.IaCPlan) (creates, updates, deletes int) {
+func countActions(plan interfaces.IaCPlan) (creates, updates, replaces, deletes int) {
 	for i := range plan.Actions {
 		switch plan.Actions[i].Action {
 		case "create":
 			creates++
 		case "update":
 			updates++
+		case "replace":
+			replaces++
 		case "delete":
 			deletes++
 		}
@@ -829,9 +1026,14 @@ func runInfraImport(args []string) error {
 	fs.StringVar(&envName, "env", "", "Environment name")
 	fs.StringVar(&nameVal, "name", "", "Desired resource name from config")
 	fs.StringVar(&cloudIDVal, "id", "", "Cloud-provider resource ID")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
 		return err
@@ -927,10 +1129,28 @@ func findInfraSpecByName(cfgFile, envName, name string) (interfaces.ResourceSpec
 	return interfaces.ResourceSpec{}, fmt.Errorf("infra resource %q not found in %s", name, cfgFile)
 }
 
+// resolveIaCProviderRef returns the iac.provider module name to dispatch to
+// for a resource. Reads "iac_provider" first (canonical, disambiguates
+// implementation from IaC routing), falls back to "provider" for backward
+// compatibility. Resources whose plugin schema uses "provider" as the
+// implementation identifier (e.g. infra.eventbus's provider="nats" |
+// "kafka") should declare iac_provider explicitly. Resources where
+// "provider" is itself the iac.provider module name (e.g. infra.database's
+// provider="do-provider") continue to work via the fallback.
+func resolveIaCProviderRef(cfg map[string]any) string {
+	if v, ok := cfg["iac_provider"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := cfg["provider"].(string); ok {
+		return v
+	}
+	return ""
+}
+
 func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpec) (string, map[string]any, error) {
-	moduleRef, _ := spec.Config["provider"].(string)
+	moduleRef := resolveIaCProviderRef(spec.Config)
 	if moduleRef == "" {
-		return "", nil, fmt.Errorf("infra module %q (%s): missing required 'provider' field", spec.Name, spec.Type)
+		return "", nil, fmt.Errorf("infra module %q (%s): missing required 'iac_provider' or 'provider' field", spec.Name, spec.Type)
 	}
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
@@ -957,7 +1177,7 @@ func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpe
 		}
 		return providerType, modCfg, nil
 	}
-	return "", nil, fmt.Errorf("infra module %q references provider %q which is not declared as an iac.provider module", spec.Name, moduleRef)
+	return "", nil, fmt.Errorf("infra module %q references iac.provider module %q (resolved from iac_provider/provider field) which is not declared as an iac.provider module", spec.Name, moduleRef)
 }
 
 func isNoopStateStore(store infraStateStore) bool {
@@ -1022,6 +1242,13 @@ func platformNow() time.Time {
 }
 
 func runInfraApply(args []string) error {
+	// runHydrated carries routed-secret values from the same-process apply
+	// (sensitive.Route's hydrated map) to syncInfraOutputSecrets below.
+	// Empty when no driver emitted sensitive outputs; nil for the
+	// precomputed-plan branch unless threaded through. Required for
+	// rehydration on write-only providers (GitHub Actions secrets are
+	// write-only after Set).
+	var runHydrated map[string]string
 	fs := flag.NewFlagSet("infra apply", flag.ContinueOnError)
 	var configFlag string
 	fs.StringVar(&configFlag, "config", "", "Config file")
@@ -1034,17 +1261,33 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var dryRun bool
+	fs.BoolVar(&dryRun, "dry-run", false, "Show planned operations without executing provider mutations")
+	var dryRunFormat string
+	fs.StringVar(&dryRunFormat, "format", "table", "Dry-run output format: table, json")
 	var planFile string
 	fs.StringVar(&planFile, "plan", "", "Apply from a pre-emitted plan.json (skips ComputePlan)")
 	var refreshFlag bool
 	fs.BoolVar(&refreshFlag, "refresh", false, "Detect drift and prune ghost-in-state entries before applying")
 	var allowProtectedPruneFlag bool
 	fs.BoolVar(&allowProtectedPruneFlag, "allow-protected-prune", false, "Allow pruning state entries for resources marked protected: true (requires --refresh)")
+	var refreshOutputsFlag bool
+	fs.BoolVar(&refreshOutputsFlag, "refresh-outputs", false,
+		"Refresh per-field Outputs from cloud truth before applying (recommended pair with --refresh for cutover-style operations)")
 	var skipRefreshFlag bool
-	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set")
+	fs.BoolVar(&skipRefreshFlag, "skip-refresh", false, "Skip the WFCTL_REFRESH_OUTPUTS pre-step refresh even if the env var is set (does NOT cancel explicit --refresh-outputs)")
+	var skipBootstrapFlag bool
+	fs.BoolVar(&skipBootstrapFlag, "skip-bootstrap", false, "Skip auto-bootstrap before apply; use only when required secrets/state already exist")
+	var waitFlag bool
+	fs.BoolVar(&waitFlag, "wait", false, "Wait for deployable infra resources to become healthy before exiting")
 	var allowReplaceFlag string
 	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
 		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
+	var includeFlag string
+	fs.StringVar(&includeFlag, "include", "",
+		"Comma-separated list of resource names to scope this command to (filters both desired specs and current state)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -1059,6 +1302,13 @@ func runInfraApply(args []string) error {
 		return fmt.Errorf("--allow-protected-prune requires --refresh")
 	}
 
+	// Pre-flight: --include + --plan is rejected. The plan already carries the
+	// scope from the plan-time --include invocation; applying a scoped plan with
+	// a different --include would produce confusing partial-apply behavior.
+	if parseIncludeFlag(includeFlag) != nil && planFile != "" {
+		return fmt.Errorf("--include cannot be combined with --plan (use --include at plan time, then apply with --plan; the plan already carries the scope)")
+	}
+
 	// W-6/T6.1: publish the parsed --allow-replace set for the apply
 	// path's gate (validateAllowReplaceProtected, called from both
 	// applyWithProviderAndStore and applyPrecomputedPlanWithStore).
@@ -1068,6 +1318,24 @@ func runInfraApply(args []string) error {
 	applyAllowReplaceSet = parseAllowReplaceFlag(allowReplaceFlag)
 	defer func() { applyAllowReplaceSet = nil }()
 
+	prevInfraApplyWait := currentInfraApplyWait
+	currentInfraApplyWait = waitFlag
+	defer func() { currentInfraApplyWait = prevInfraApplyWait }()
+
+	// Publish the --include flag value for the apply path's filter helpers
+	// (including dry-run). Reset to "" at the top of every invocation so the
+	// filter fails open (all-resources) on subsequent invocations that do not
+	// pass the flag. Must be set before the dry-run early return so the dry-run
+	// planner can see the same include scope.
+	currentApplyIncludeFlag = includeFlag
+	defer func() { currentApplyIncludeFlag = "" }()
+
+	// Publish the --plugin-dir override so discoverAndLoadIaCProvider picks it
+	// up for this invocation. Reset after the command exits.
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
+
 	cfgFile := configFlag
 	if cfgFile == "" {
 		var err error
@@ -1075,6 +1343,11 @@ func runInfraApply(args []string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// --dry-run: compute and display the plan without executing any mutations.
+	if dryRun {
+		return runInfraApplyDryRun(cfgFile, envName, dryRunFormat, showSensitiveVal)
 	}
 
 	if !*autoApprove {
@@ -1095,12 +1368,15 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("parse infra config: %w", err)
 	}
-	autoBootstrap := infraCfg == nil || infraCfg.AutoBootstrap == nil || *infraCfg.AutoBootstrap
+	autoBootstrap := !skipBootstrapFlag && (infraCfg == nil || infraCfg.AutoBootstrap == nil || *infraCfg.AutoBootstrap)
 	if autoBootstrap {
 		fmt.Println("Running bootstrap before apply...")
 		bootstrapArgs := []string{"--config", cfgFile}
 		if envName != "" {
 			bootstrapArgs = append(bootstrapArgs, "--env", envName)
+		}
+		if pluginDirFlag != "" {
+			bootstrapArgs = append(bootstrapArgs, "--plugin-dir", pluginDirFlag)
 		}
 		if err := runInfraBootstrap(bootstrapArgs); err != nil {
 			return fmt.Errorf("bootstrap: %w", err)
@@ -1108,6 +1384,7 @@ func runInfraApply(args []string) error {
 	}
 
 	ctx := context.Background()
+	infraOutputSourceScope := parseIncludeFlag(includeFlag)
 
 	// Inject secrets after bootstrap so generated secrets are available.
 	if envName != "" {
@@ -1123,9 +1400,29 @@ func runInfraApply(args []string) error {
 		}
 	}
 
+	// --refresh-outputs: read cloud-truth Outputs and persist field-level
+	// changes to state. Runs as a pre-step to either --refresh ghost-prune
+	// or the regular plan/apply path — so ghost-prune sees fresh Outputs.
+	// NOT gated by skipRefreshFlag — that flag only cancels the env-var-
+	// driven pre-step; explicit --refresh-outputs is operator-opt-in and
+	// overrides skip semantics. Per ADR 0008: paired flag, not a semantic
+	// change to --refresh.
+	refreshOutputsRan := false
+	if refreshOutputsFlag {
+		if hasInfraModules(cfgFile) {
+			if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
+				return fmt.Errorf("--refresh-outputs: %w", err)
+			}
+			refreshOutputsRan = true
+		} else {
+			fmt.Println("Refresh-outputs: --refresh-outputs requires infra.* modules; legacy platform.* config — no-op.")
+		}
+	}
+
 	// --refresh: detect drift first and prune ghost-in-state entries (cloud 404s)
 	// before running the normal plan + apply. Only applicable for infra.* configs;
-	// silently skipped for legacy platform.* configs.
+	// silently skipped for legacy platform.* configs. Runs AFTER --refresh-outputs
+	// so the drift check sees the freshest possible Outputs.
 	if refreshFlag && hasInfraModules(cfgFile) {
 		fmt.Println("Refreshing state (detecting drift)...")
 		store, storeErr := resolveStateStore(cfgFile, envName)
@@ -1137,20 +1434,29 @@ func runInfraApply(args []string) error {
 			return fmt.Errorf("list state for refresh: %w", statesErr)
 		}
 		groups, groupOrder := groupStatesByProvider(states, cfgFile, envName)
-		for _, moduleRef := range groupOrder {
-			g := groups[moduleRef]
+		// Wrap each group in a helper so the deferred closer fires after the
+		// group finishes, not at runInfraApply exit. Without this, a config
+		// with N provider groups would hold N connections open throughout the
+		// rest of the apply path (same pattern as infra_plan_provider.go and
+		// infra_apply.go).
+		refreshGroup := func(moduleRef string, g *providerGroup) error {
 			provider, closer, provErr := resolveIaCProvider(ctx, g.provType, g.provCfg)
 			if provErr != nil {
 				return fmt.Errorf("refresh: load provider %q: %w", moduleRef, provErr)
 			}
-			refreshErr := runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
-				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
 			if closer != nil {
-				if cerr := closer.Close(); cerr != nil {
-					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", g.provType, cerr)
-				}
+				provType := g.provType
+				defer func() {
+					if cerr := closer.Close(); cerr != nil {
+						fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+					}
+				}()
 			}
-			if refreshErr != nil {
+			return runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
+				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
+		}
+		for _, moduleRef := range groupOrder {
+			if refreshErr := refreshGroup(moduleRef, groups[moduleRef]); refreshErr != nil {
 				return fmt.Errorf("refresh phase: %w", refreshErr)
 			}
 		}
@@ -1161,8 +1467,9 @@ func runInfraApply(args []string) error {
 	// before computing the plan, so apply doesn't make decisions on
 	// stale state. Default off; --skip-refresh always wins. Only
 	// applicable for infra.* configs (legacy platform.* path doesn't
-	// flow through iac/refreshoutputs).
-	if applyPreStepRefreshEnabled(skipRefreshFlag) && hasInfraModules(cfgFile) {
+	// flow through iac/refreshoutputs). Skipped when --refresh-outputs
+	// already ran (refreshOutputsRan guard prevents double-trigger).
+	if !refreshOutputsRan && applyPreStepRefreshEnabled(skipRefreshFlag) && hasInfraModules(cfgFile) {
 		if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
 			return fmt.Errorf("apply pre-step refresh-outputs: %w", err)
 		}
@@ -1187,6 +1494,8 @@ func runInfraApply(args []string) error {
 		if err != nil {
 			return fmt.Errorf("parse infra resource specs: %w", err)
 		}
+		planIncludeSet := includeSetFromNames(plan.Include)
+		infraOutputSourceScope = planIncludeSet
 		if plan.DesiredHash == "" {
 			return fmt.Errorf("plan file has no hash — regenerate with: wfctl infra plan -o plan.json")
 		}
@@ -1208,13 +1517,39 @@ func runInfraApply(args []string) error {
 				return inputsnapshot.NewStaleError(drift)
 			}
 		}
+		// Mirror the plan-time resolver: apply resolveSpecsAgainstState before
+		// hashing so that DesiredHash is computed on post-resolution specs, matching
+		// what runInfraPlan recorded in plan.DesiredHash. Without this step, any ref
+		// that resolved at plan time would cause a currentHash != plan.DesiredHash
+		// mismatch on every --plan apply.
+		{
+			currentState, stateErr := loadCurrentState(cfgFile, envName)
+			if stateErr != nil {
+				return fmt.Errorf("load state for stale-check: %w", stateErr)
+			}
+			if err := validateIncludeSet(planIncludeSet, desired, currentState); err != nil {
+				return fmt.Errorf("validate plan include scope: %w", err)
+			}
+			desired = filterSpecsByInclude(desired, planIncludeSet)
+			currentState = filterStatesByInclude(currentState, planIncludeSet)
+			planApplyCfg, cfgErr := config.LoadFromFile(cfgFile)
+			if cfgErr != nil {
+				return fmt.Errorf("load config for stale-check: %w", cfgErr)
+			}
+			desired, _, err = resolveSpecsAgainstState(desired, currentState, planApplyCfg, envName)
+			if err != nil {
+				return fmt.Errorf("resolve specs for stale-check: %w", err)
+			}
+		}
 		currentHash := desiredStateHash(desired)
 		if plan.DesiredHash != currentHash {
 			return fmt.Errorf("plan stale: config hash mismatch (run wfctl infra plan again)")
 		}
-		if err := applyFromPrecomputedPlan(ctx, plan, cfgFile, envName); err != nil {
+		h, err := applyFromPrecomputedPlan(ctx, plan, cfgFile, envName)
+		if err != nil {
 			return err
 		}
+		runHydrated = h
 		// Fall through to post-apply infra_output secrets sync below —
 		// same as the live-diff path so STAGING_DATABASE_URL and similar
 		// infra_output secrets are always refreshed after a successful apply.
@@ -1231,9 +1566,11 @@ func runInfraApply(args []string) error {
 			)
 		}
 		if hasInfraModules(cfgFile) {
-			if err := applyInfraModules(ctx, cfgFile, envName); err != nil {
+			h, err := applyInfraModules(ctx, cfgFile, envName)
+			if err != nil {
 				return err
 			}
+			runHydrated = h
 		} else {
 			pipelineCfg := cfgFile
 			if envName != "" {
@@ -1246,6 +1583,22 @@ func runInfraApply(args []string) error {
 			}
 			if err := runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"}); err != nil {
 				return err
+			}
+		}
+	}
+
+	// Post-apply: persist generator metadata (wfctl version + plugin versions)
+	// to the state directory so it is available for future audit without
+	// requiring the original plan.json.  Best-effort: failures here are logged
+	// as warnings and do not roll back the apply.
+	{
+		metaStore, metaErr := resolveStateStore(cfgFile, envName)
+		if metaErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: open state store for metadata: %v\n", metaErr)
+		} else if mp, ok := metaStore.(metadataPersister); ok {
+			meta := buildGeneratorMetadata()
+			if saveErr := mp.SaveMetadata(ctx, meta); saveErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: save generator metadata: %v\n", saveErr)
 			}
 		}
 	}
@@ -1263,14 +1616,13 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load current state for infra_output sync: %w", err)
 	}
-	// Only reload the workflow config when env resolution is actually needed:
-	// it is needed only when --env is set AND at least one infra_output secret
-	// generator is configured (otherwise syncInfraOutputSecrets is a no-op for
-	// env resolution regardless).
+	// Only reload the workflow config when routing or env resolution is needed:
+	// store-scoped generators need secretStores, and --env needs module
+	// ResolveForEnv so bmw-database.uri can find bmw-staging-db in state.
 	var wfCfg *config.WorkflowConfig
-	if envName != "" {
-		for _, g := range secretsCfg.Generate {
-			if g.Type == "infra_output" {
+	for _, g := range secretsCfg.Generate {
+		if g.Type == "infra_output" {
+			if envName != "" || g.Store != "" {
 				var loadErr error
 				wfCfg, loadErr = config.LoadFromFile(cfgFile)
 				if loadErr != nil {
@@ -1280,7 +1632,7 @@ func runInfraApply(args []string) error {
 			}
 		}
 	}
-	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName)
+	return syncInfraOutputSecretsScoped(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag, infraOutputSourceScope)
 }
 
 func runInfraStatus(args []string) error {
@@ -1290,9 +1642,14 @@ func runInfraStatus(args []string) error {
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
@@ -1325,9 +1682,14 @@ func runInfraDrift(args []string) error {
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
@@ -1363,10 +1725,15 @@ func runInfraDestroy(args []string) error {
 	fs.BoolVar(&autoApproveVal, "y", false, "Skip confirmation (short for --auto-approve)")
 	var envName string
 	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	autoApprove := &autoApproveVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	cfgFile := configFlag
 	if cfgFile == "" {

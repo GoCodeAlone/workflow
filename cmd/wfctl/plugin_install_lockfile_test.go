@@ -145,6 +145,87 @@ plugins:
 	}
 }
 
+func TestInstallFromWfctlLockfile_UsesCachedInstallWhenLockMetadataMatches(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	var downloadHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		downloadHits.Add(1)
+		http.Error(w, "cache should satisfy lockfile install", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	const pluginName = "auth"
+	installDir := filepath.Join(pluginDir, pluginName)
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, pluginName), []byte("#!/bin/sh\necho cached auth\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "plugin.json"), minimalPluginJSON(pluginName, "v1.2.3"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plat := config.WfctlLockPlatform{
+		URL:    srv.URL + "/workflow-plugin-auth-" + currentPlatformKey() + ".tar.gz",
+		SHA256: strings.Repeat("a", 64),
+	}
+	entry := config.WfctlLockPluginEntry{
+		Version: "v1.2.3",
+		Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
+		Platforms: map[string]config.WfctlLockPlatform{
+			currentPlatformKey(): plat,
+		},
+	}
+	meta := lockfileInstallMetadata{
+		Version:  entry.Version,
+		Source:   entry.Source,
+		Platform: currentPlatformKey(),
+		URL:      plat.URL,
+		SHA256:   plat.SHA256,
+	}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, lockfileInstallMetadataName), append(metaData, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	lf := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins: map[string]config.WfctlLockPluginEntry{
+			"workflow-plugin-auth": entry,
+		},
+	}
+	if err := config.SaveWfctlLockfile(lockPath, lf); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installFromWfctlLockfile(pluginDir, lockPath, lf); err != nil {
+		t.Fatalf("installFromWfctlLockfile should reuse cached plugin matching lock metadata: %v", err)
+	}
+	if got := downloadHits.Load(); got != 0 {
+		t.Fatalf("download endpoint was hit %d times; cached install should satisfy lockfile", got)
+	}
+}
+
 func TestInstallFromWfctlLockfile_ScrubsExplicitEmptyTopLevelSHA256(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
@@ -609,5 +690,248 @@ func TestInstallFromWfctlLockfile_PlatformSHA256IsCaseInsensitive(t *testing.T) 
 
 	if err := installFromWfctlLockfile(pluginDir, lockPath, lf); err != nil {
 		t.Fatalf("installFromWfctlLockfile should accept uppercase platform checksum: %v", err)
+	}
+}
+
+func TestUpdateLockfileWithChecksum_GuardSkips(t *testing.T) {
+	dir := t.TempDir()
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installSkipLockfileUpdate = true
+	defer func() { installSkipLockfileUpdate = false }()
+	updateLockfileWithChecksum("foo", "1.0.0", "", "", "")
+	b, _ := os.ReadFile(wfctlLockPath)
+	if strings.Contains(string(b), "foo") {
+		t.Errorf("guard should have suppressed write; got: %s", b)
+	}
+}
+
+func TestUpdateLockfileWithChecksum_NewFormatFanOut(t *testing.T) {
+	dir := t.TempDir()
+	prevWD, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if err := os.WriteFile(wfctlLockPath, []byte("version: 1\nplugins:\n  bar:\n    version: 0.1.0\n    source: github.com/x/bar\n    platforms:\n      linux_amd64:\n        url: https://example.com/bar\n        sha256: deadbeef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	updateLockfileWithChecksum("bar", "1.2.3", "github.com/x/bar-new", "", "feedface")
+	lf, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := lf.Plugins["bar"]
+	if got.Version != "1.2.3" {
+		t.Errorf("Version = %q, want 1.2.3", got.Version)
+	}
+	if got.Source != "github.com/x/bar-new" {
+		t.Errorf("Source = %q, want github.com/x/bar-new", got.Source)
+	}
+	if len(got.Platforms) == 0 {
+		t.Errorf("Platforms should be preserved; got empty")
+	}
+	if got.Platforms["linux_amd64"].URL != "https://example.com/bar" {
+		t.Errorf("Platforms URL clobbered: %v", got.Platforms)
+	}
+}
+
+// TestRunPluginInstall_NoVersionTracksLockfile verifies that runPluginInstall
+// invoked with a PLAIN name (no @version) still writes the resolved version
+// into the new-format lockfile. Pre-Task-2 the @version gate would skip the
+// lockfile write entirely for plain installs (workflow#771).
+func TestRunPluginInstall_NoVersionTracksLockfile(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	const pluginName = "auth"
+	binaryContent := []byte("#!/bin/sh\necho auth\n")
+	tarball := buildPluginTarGz(t, pluginName, binaryContent, minimalPluginJSON(pluginName, "v1.2.3"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/workflow-plugin-auth/manifest.json":
+			manifest := RegistryManifest{
+				Name:        pluginName,
+				Version:     "v1.2.3",
+				Repository:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				Author:      "tester",
+				Description: "test auth plugin",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:     runtime.GOOS,
+						Arch:   runtime.GOARCH,
+						URL:    "http://" + r.Host + "/releases/download/v1.2.3/auth.tar.gz",
+						SHA256: sha256Hex(tarball),
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(manifest)
+		case "/releases/download/v1.2.3/auth.tar.gz":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	regCfg := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(regCfg), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+	// New-format empty lockfile so the chokepoint fan-out fires.
+	emptyLF := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins:     map[string]config.WfctlLockPluginEntry{},
+	}
+	if err := config.SaveWfctlLockfile(lockPath, emptyLF); err != nil {
+		t.Fatal(err)
+	}
+
+	// PLAIN name — no @version. Pre-Task-2 this skips the lockfile write entirely.
+	if err := runPluginInstall([]string{"--plugin-dir", pluginDir, "workflow-plugin-auth"}); err != nil {
+		t.Fatalf("runPluginInstall: %v", err)
+	}
+
+	loaded, err := config.LoadWfctlLockfile(lockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	entry, ok := loaded.Plugins["auth"]
+	if !ok {
+		// mergeIntoNewFormatLockfile uses normalized name; auth was empty so key is "auth".
+		t.Fatalf("plain install should track lockfile entry; loaded.Plugins=%#v", loaded.Plugins)
+	}
+	if entry.Version != "v1.2.3" {
+		t.Errorf("plain install Version = %q, want v1.2.3", entry.Version)
+	}
+}
+
+// TestInstallFromLockfile_NoClobberInvariant verifies the outer-frame guard:
+// when installFromLockfile drives the install loop, inner runPluginInstall
+// (now Task-2 always-tracks) must NOT mutate the on-disk lockfile —
+// otherwise inner writes would clobber the pinned entries before the outer
+// checksum verification completes.
+func TestInstallFromLockfile_NoClobberInvariant(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	const pluginName = "auth"
+	binaryContent := []byte("#!/bin/sh\necho auth\n")
+	tarball := buildPluginTarGz(t, pluginName, binaryContent, minimalPluginJSON(pluginName, "v1.2.3"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/workflow-plugin-auth/manifest.json":
+			manifest := RegistryManifest{
+				Name:        pluginName,
+				Version:     "v1.2.3",
+				Repository:  "github.com/GoCodeAlone/workflow-plugin-auth",
+				Author:      "tester",
+				Description: "test auth plugin",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:     runtime.GOOS,
+						Arch:   runtime.GOARCH,
+						URL:    "http://" + r.Host + "/releases/download/v1.2.3/auth.tar.gz",
+						SHA256: sha256Hex(tarball),
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(manifest)
+		case "/releases/download/v1.2.3/auth.tar.gz":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	regCfg := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	if err := os.WriteFile(filepath.Join(dir, ".wfctl.yaml"), []byte(regCfg), 0o600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+
+	// Pinned new-format lockfile entry with sentinel Source so we can detect
+	// inner-install clobber (inner would overwrite Source with the manifest's repo).
+	lf := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins: map[string]config.WfctlLockPluginEntry{
+			"workflow-plugin-auth": {
+				Version: "v1.2.3",
+				Source:  "github.com/PINNED/auth-sentinel",
+				SHA256:  strings.Repeat("0", 64),
+				Platforms: map[string]config.WfctlLockPlatform{
+					currentPlatformKey(): {
+						URL:    "http://" + strings.TrimPrefix(srv.URL, "http://") + "/releases/download/v1.2.3/auth.tar.gz",
+						SHA256: sha256Hex(tarball),
+					},
+				},
+			},
+		},
+	}
+	if err := config.SaveWfctlLockfile(lockPath, lf); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installFromLockfile(pluginDir, ""); err != nil {
+		t.Fatalf("installFromLockfile: %v", err)
+	}
+
+	loaded, err := config.LoadWfctlLockfile(lockPath)
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	entry := loaded.Plugins["workflow-plugin-auth"]
+	if entry.Source != "github.com/PINNED/auth-sentinel" {
+		t.Errorf("outer-frame guard missing: Source clobbered by inner install. got=%q want=github.com/PINNED/auth-sentinel", entry.Source)
+	}
+	platform := entry.Platforms[currentPlatformKey()]
+	if platform.URL == "" {
+		t.Errorf("outer-frame guard missing: Platforms wiped by inner install. got=%#v", entry.Platforms)
 	}
 }

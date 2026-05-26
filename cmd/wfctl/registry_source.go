@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"time"
 )
+
+var errRegistryNotFound = errors.New("registry resource not found")
 
 // RegistrySource is the interface for a plugin registry backend.
 type RegistrySource interface {
@@ -18,6 +21,8 @@ type RegistrySource interface {
 	ListPlugins() ([]string, error)
 	// FetchManifest retrieves the manifest for a named plugin.
 	FetchManifest(name string) (*RegistryManifest, error)
+	// FetchVersionIndex retrieves generated compatibility evidence for a named plugin.
+	FetchVersionIndex(name string) (*PluginVersionIndex, error)
 	// SearchPlugins returns plugins matching the query string.
 	SearchPlugins(query string) ([]PluginSearchResult, error)
 }
@@ -116,6 +121,45 @@ func (g *GitHubRegistrySource) FetchManifest(name string) (*RegistryManifest, er
 	return &m, nil
 }
 
+func (g *GitHubRegistrySource) FetchVersionIndex(name string) (*PluginVersionIndex, error) {
+	url := fmt.Sprintf(
+		"https://raw.githubusercontent.com/%s/%s/%s/compatibility/%s/index.json",
+		g.owner, g.repo, g.branch, name,
+	)
+	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:gosec // URL constructed from configured registry
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	resp, err := registryHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch compatibility index for %q from %s: %w", name, g.name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		manifest, manifestErr := g.FetchManifest(name)
+		if manifestErr != nil {
+			return nil, manifestErr
+		}
+		return synthesizeVersionIndexFromManifest(manifest), nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("registry %s returned HTTP %d for compatibility index %q", g.name, resp.StatusCode, name)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read compatibility index for %q from %s: %w", name, g.name, err)
+	}
+	var idx PluginVersionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, fmt.Errorf("parse compatibility index for %q from %s: %w", name, g.name, err)
+	}
+	normalized, err := NormalizePluginVersionIndex(&idx, name)
+	if err != nil {
+		return nil, fmt.Errorf("normalize compatibility index for %q from %s: %w", name, g.name, err)
+	}
+	return normalized, nil
+}
+
 func (g *GitHubRegistrySource) SearchPlugins(query string) ([]PluginSearchResult, error) {
 	names, err := g.ListPlugins()
 	if err != nil {
@@ -135,6 +179,7 @@ func (g *GitHubRegistrySource) SearchPlugins(query string) ([]PluginSearchResult
 					Version:     m.Version,
 					Description: m.Description,
 					Tier:        m.Tier,
+					Status:      m.Status,
 				},
 				Source: g.name,
 			})
@@ -177,12 +222,37 @@ func (s *StaticRegistrySource) FetchManifest(name string) (*RegistryManifest, er
 	return &m, nil
 }
 
+func (s *StaticRegistrySource) FetchVersionIndex(name string) (*PluginVersionIndex, error) {
+	url := fmt.Sprintf("%s/compatibility/%s/index.json", s.baseURL, name)
+	data, err := s.fetch(url)
+	if err != nil {
+		if errors.Is(err, errRegistryNotFound) {
+			manifest, manifestErr := s.FetchManifest(name)
+			if manifestErr != nil {
+				return nil, manifestErr
+			}
+			return synthesizeVersionIndexFromManifest(manifest), nil
+		}
+		return nil, fmt.Errorf("fetch compatibility index for %q from %s: %w", name, s.name, err)
+	}
+	var idx PluginVersionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, fmt.Errorf("parse compatibility index for %q from %s: %w", name, s.name, err)
+	}
+	normalized, err := NormalizePluginVersionIndex(&idx, name)
+	if err != nil {
+		return nil, fmt.Errorf("normalize compatibility index for %q from %s: %w", name, s.name, err)
+	}
+	return normalized, nil
+}
+
 // staticIndexEntry is a single entry in the registry index.json file.
 type staticIndexEntry struct {
 	Name        string `json:"name"`
 	Version     string `json:"version"`
 	Description string `json:"description"`
 	Tier        string `json:"tier"`
+	Status      string `json:"status,omitempty"` // verified | experimental | deprecated
 }
 
 func (s *StaticRegistrySource) fetchIndex() ([]staticIndexEntry, error) {
@@ -215,6 +285,7 @@ func (s *StaticRegistrySource) SearchPlugins(query string) ([]PluginSearchResult
 					Version:     e.Version,
 					Description: e.Description,
 					Tier:        e.Tier,
+					Status:      e.Status,
 				},
 				Source: s.name,
 			})
@@ -254,12 +325,41 @@ func (s *StaticRegistrySource) fetch(url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("not found (HTTP 404) at %s", url)
+		return nil, fmt.Errorf("%w: HTTP 404 at %s", errRegistryNotFound, url)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+func synthesizeVersionIndexFromManifest(manifest *RegistryManifest) *PluginVersionIndex {
+	if manifest == nil {
+		return &PluginVersionIndex{}
+	}
+	version := manifest.Version
+	if canonical, err := CanonicalPluginVersion(version); err == nil {
+		version = canonical
+	}
+	minEngineVersion := manifest.MinEngineVersion
+	if minEngineVersion != "" {
+		if canonical, err := CanonicalEngineVersion(minEngineVersion); err == nil {
+			minEngineVersion = canonical
+		}
+	}
+	index := &PluginVersionIndex{
+		Plugin: manifest.Name,
+		Versions: []PluginVersionRecord{{
+			Version:          version,
+			MinEngineVersion: minEngineVersion,
+			Downloads:        manifest.Downloads,
+		}},
+	}
+	normalized, err := NormalizePluginVersionIndex(index, manifest.Name)
+	if err != nil {
+		return index
+	}
+	return normalized
 }
 
 // matchesRegistryQuery checks if a manifest matches a search query.

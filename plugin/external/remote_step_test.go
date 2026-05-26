@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -27,6 +28,17 @@ type stubPluginServiceClient struct {
 	lastInvokeRequest *pb.InvokeServiceRequest
 	invokeResponse    *pb.InvokeServiceResponse
 	invokeErr         error
+
+	lastCreateTriggerReq *pb.CreateTriggerRequest
+	createTriggerResp    *pb.HandleResponse
+	createTriggerNilResp bool
+	createTriggerCalls   int
+	configureCallbackReq *pb.ConfigureCallbackRequest
+	initModuleCalls      int
+	startModuleCalls     int
+	stopModuleCalls      int
+	destroyModuleCalls   int
+	startErrorOnCall     int
 }
 
 // ExecuteStep records the request and returns the configured response.
@@ -61,15 +73,22 @@ func (c *stubPluginServiceClient) CreateModule(_ context.Context, _ *pb.CreateMo
 	return &pb.HandleResponse{}, nil
 }
 func (c *stubPluginServiceClient) InitModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.initModuleCalls++
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) StartModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.startModuleCalls++
+	if c.startErrorOnCall > 0 && c.startModuleCalls == c.startErrorOnCall {
+		return &pb.ErrorResponse{Error: "start failed"}, nil
+	}
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) StopModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.stopModuleCalls++
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) DestroyModule(_ context.Context, _ *pb.HandleRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.destroyModuleCalls++
 	return &pb.ErrorResponse{}, nil
 }
 func (c *stubPluginServiceClient) CreateStep(_ context.Context, _ *pb.CreateStepRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
@@ -96,6 +115,21 @@ func (c *stubPluginServiceClient) GetConfigFragment(_ context.Context, _ *emptyp
 }
 func (c *stubPluginServiceClient) GetAsset(_ context.Context, _ *pb.GetAssetRequest, _ ...grpc.CallOption) (*pb.GetAssetResponse, error) {
 	return &pb.GetAssetResponse{}, nil
+}
+func (c *stubPluginServiceClient) ConfigureCallback(_ context.Context, req *pb.ConfigureCallbackRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.configureCallbackReq = req
+	return &pb.ErrorResponse{}, nil
+}
+func (c *stubPluginServiceClient) CreateTrigger(_ context.Context, req *pb.CreateTriggerRequest, _ ...grpc.CallOption) (*pb.HandleResponse, error) {
+	c.lastCreateTriggerReq = req
+	c.createTriggerCalls++
+	if c.createTriggerNilResp {
+		return nil, nil
+	}
+	if c.createTriggerResp != nil {
+		return c.createTriggerResp, nil
+	}
+	return &pb.HandleResponse{HandleId: fmt.Sprintf("trigger-handle-%d", c.createTriggerCalls)}, nil
 }
 
 // TestRemoteStep_Execute_ResolvesTemplatesInConfig verifies that template
@@ -224,6 +258,130 @@ func TestRemoteStep_Execute_StrictContractSendsTypedPayloads(t *testing.T) {
 	}
 }
 
+// TestRemoteStep_Execute_StrictContractSkipsLegacyStructEncodeForCurrent
+// pins Copilot review #555 finding: under STRICT_PROTO, the legacy
+// Struct field req.Current is nilled before send. The new
+// error-propagating mapToStruct must not reject otherwise-valid
+// STRICT_PROTO calls that carry values in pc.Current that JSON can
+// marshal but Struct cannot. Specifically: an unknown-to-the-typed-
+// message field (filtered out by mapToTypedAnyKnownFields) whose
+// value is structpb-unrepresentable (a non-string-keyed map). The
+// deferred-encode path skips Struct encoding for Current under
+// STRICT_PROTO so this works.
+func TestRemoteStep_Execute_StrictContractSkipsLegacyStructEncodeForCurrent(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		response: &pb.ExecuteStepResponse{TypedOutput: mustAnyFromMapForTest(t, "workflow.plugin.v1.Manifest", map[string]any{
+			"name":    "typed-output",
+			"version": "v1",
+		})},
+	}
+	contract := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		StepType:      "test.strict",
+		ConfigMessage: "workflow.plugin.v1.Manifest",
+		InputMessage:  "workflow.plugin.v1.Manifest",
+		OutputMessage: "workflow.plugin.v1.Manifest",
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+	}
+	step := NewRemoteStep("test-step", "handle-strict", stub, map[string]any{
+		"name":    "typed-config",
+		"version": "v1",
+	}, contract)
+
+	// Set pc.Current directly with a Struct-unrepresentable value in an
+	// unknown-to-Manifest field. The typed encoder filters unknowns
+	// (mapToTypedAnyKnownFields), so the value never reaches the typed
+	// payload. The deferred Struct encode path skips Current under
+	// STRICT_PROTO so the value never reaches structpb.NewStruct either.
+	pc := module.NewPipelineContext(map[string]any{
+		"name":    "typed-input",
+		"version": "v1",
+	}, nil)
+	pc.Current["unrepresentable"] = map[int]string{1: "a"}
+
+	_, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("STRICT_PROTO execute should not encode legacy Struct for Current; got %v", err)
+	}
+	if stub.lastRequest == nil {
+		t.Fatal("expected ExecuteStep to be called")
+	}
+	if stub.lastRequest.Current != nil {
+		t.Fatalf("expected strict step to omit legacy Current, got %v", stub.lastRequest.Current)
+	}
+	if stub.lastRequest.Config != nil {
+		t.Fatalf("expected strict step to omit legacy Config, got %v", stub.lastRequest.Config)
+	}
+}
+
+func TestRemoteStep_Execute_FiltersUnrepresentableMetadata(t *testing.T) {
+	stub := &stubPluginServiceClient{}
+	step := NewRemoteStep("test-step", "handle-metadata", stub, nil)
+	pc := module.NewPipelineContext(map[string]any{"name": "typed-input"}, map[string]any{
+		"pipeline":              "http-flow",
+		"_http_response_writer": make(chan int),
+		"_http_request":         map[int]string{1: "request"},
+		"explicit_trace":        true,
+	})
+
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if stub.lastRequest == nil {
+		t.Fatal("expected ExecuteStep to be called")
+	}
+	got := stub.lastRequest.Metadata.AsMap()
+	if got["pipeline"] != "http-flow" {
+		t.Fatalf("expected serializable metadata to be preserved, got %#v", got)
+	}
+	if got["explicit_trace"] != true {
+		t.Fatalf("expected boolean metadata to be preserved, got %#v", got)
+	}
+	if _, ok := got["_http_response_writer"]; ok {
+		t.Fatalf("expected response writer metadata to be filtered, got %#v", got)
+	}
+	if _, ok := got["_http_request"]; ok {
+		t.Fatalf("expected request metadata to be filtered, got %#v", got)
+	}
+}
+
+func TestRemoteStep_Execute_StrictContractStripsInternalConfigKeys(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		response: &pb.ExecuteStepResponse{TypedOutput: mustAnyFromMapForTest(t, "workflow.plugin.v1.Manifest", map[string]any{
+			"name":    "typed-output",
+			"version": "v1",
+		})},
+	}
+	contract := &pb.ContractDescriptor{
+		Kind:          pb.ContractKind_CONTRACT_KIND_STEP,
+		StepType:      "test.strict",
+		ConfigMessage: "workflow.plugin.v1.Manifest",
+		InputMessage:  "workflow.plugin.v1.Manifest",
+		OutputMessage: "workflow.plugin.v1.Manifest",
+		Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+	}
+	step := NewRemoteStep("test-step", "handle-strict", stub, map[string]any{
+		"_config_dir": "/config",
+		"name":        "typed-config",
+		"version":     "v1",
+	}, contract)
+	pc := module.NewPipelineContext(map[string]any{
+		"name":    "typed-input",
+		"version": "v1",
+	}, nil)
+
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("STRICT_PROTO execute should strip internal config keys before typed encode; got %v", err)
+	}
+	if stub.lastRequest == nil {
+		t.Fatal("expected ExecuteStep to be called")
+	}
+	if stub.lastRequest.Config != nil {
+		t.Fatalf("expected strict step to omit legacy Config, got %v", stub.lastRequest.Config)
+	}
+	assertAnyTypeForTest(t, stub.lastRequest.TypedConfig, "workflow.plugin.v1.Manifest")
+}
+
 func TestRemoteStep_Execute_StrictContractFiltersUnknownCurrentFields(t *testing.T) {
 	stub := &stubPluginServiceClient{
 		response: &pb.ExecuteStepResponse{TypedOutput: mustAnyFromMapForTest(t, "workflow.plugin.v1.Manifest", map[string]any{
@@ -257,7 +415,7 @@ func TestRemoteStep_Execute_StrictContractFiltersUnknownCurrentFields(t *testing
 
 func TestRemoteStep_Execute_StrictContractRequiresTypedOutput(t *testing.T) {
 	stub := &stubPluginServiceClient{
-		response: &pb.ExecuteStepResponse{Output: mapToStruct(map[string]any{
+		response: &pb.ExecuteStepResponse{Output: mustMapToStruct(t, map[string]any{
 			"name": "legacy-output",
 		})},
 	}
@@ -378,7 +536,7 @@ func TestRemoteModule_InvokeService_ProtoWithLegacyKeepsArgs(t *testing.T) {
 
 func TestRemoteModule_InvokeService_StrictContractRequiresTypedOutput(t *testing.T) {
 	stub := &stubPluginServiceClient{
-		invokeResponse: &pb.InvokeServiceResponse{Result: mapToStruct(map[string]any{
+		invokeResponse: &pb.InvokeServiceResponse{Result: mustMapToStruct(t, map[string]any{
 			"name": "legacy-output",
 		})},
 	}
@@ -404,6 +562,56 @@ func TestRemoteModule_InvokeService_StrictContractRequiresTypedOutput(t *testing
 	if !strings.Contains(err.Error(), "requires typed_output") {
 		t.Fatalf("expected missing typed output error, got %v", err)
 	}
+}
+
+// TestRemoteModule_InvokeService_StrictContractOmitsArgsStruct pins
+// Copilot review #555 finding: STRICT_PROTO nils req.Args after a
+// successful typed encode. The deferred-encode path skips Struct
+// encoding for STRICT_PROTO entirely, so a Struct-unrepresentable
+// value in args (here: a non-string-keyed map) does not eagerly fail
+// the encode. mapToTypedAny is non-filtering so the value would still
+// fail typed JSON marshaling — but that path's error is the legitimate
+// "STRICT_PROTO cannot use legacy Struct fallback" surfaced from
+// typed encoding, not a spurious early Struct-encode error from the
+// deferred path. This test asserts the deferred path produces zero
+// Struct-encoding errors when STRICT_PROTO is in effect by sending
+// only typed-message-known fields (which JSON-marshal fine) and
+// confirming req.Args is nil.
+func TestRemoteModule_InvokeService_StrictContractOmitsArgsStruct(t *testing.T) {
+	stub := &stubPluginServiceClient{
+		invokeResponse: &pb.InvokeServiceResponse{
+			TypedOutput: mustAnyFromMapForTest(t, "workflow.plugin.v1.Manifest", map[string]any{
+				"name":    "typed-output",
+				"version": "v1",
+			}),
+		},
+	}
+	module := NewRemoteModule("test-module", "module-handle", stub, remoteModuleContracts{
+		services: map[string]*pb.ContractDescriptor{
+			"Scan": {
+				Kind:          pb.ContractKind_CONTRACT_KIND_SERVICE,
+				Method:        "Scan",
+				InputMessage:  "workflow.plugin.v1.Manifest",
+				OutputMessage: "workflow.plugin.v1.Manifest",
+				Mode:          pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			},
+		},
+	})
+
+	_, err := module.InvokeService("Scan", map[string]any{
+		"name":    "typed-input",
+		"version": "v1",
+	})
+	if err != nil {
+		t.Fatalf("STRICT_PROTO invoke unexpectedly errored: %v", err)
+	}
+	if stub.lastInvokeRequest == nil {
+		t.Fatal("expected InvokeService to be called")
+	}
+	if stub.lastInvokeRequest.Args != nil {
+		t.Fatalf("STRICT_PROTO must omit legacy Args, got %v", stub.lastInvokeRequest.Args)
+	}
+	assertAnyTypeForTest(t, stub.lastInvokeRequest.TypedInput, "workflow.plugin.v1.Manifest")
 }
 
 func TestRemoteModule_InvokeService_PreservesStatusErrors(t *testing.T) {

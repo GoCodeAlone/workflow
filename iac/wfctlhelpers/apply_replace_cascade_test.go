@@ -49,7 +49,7 @@ func TestApplyPlan_ReplaceCascade_DependentCreateGetsNewParentID(t *testing.T) {
 			}),
 		},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestApplyPlan_ReplaceCascade_DependentReplaceGetsNewParentID(t *testing.T) 
 			Current: &interfaces.ResourceState{Name: "dependent", ProviderID: "droplet-old-uuid"},
 		},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}

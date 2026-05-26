@@ -64,6 +64,12 @@ service PluginService {
 
   // GetAsset returns the content of a static asset embedded in the plugin.
   rpc GetAsset(GetAssetRequest) returns (GetAssetResponse);
+
+  // ConfigureCallback tells the plugin how to reach the host callback service.
+  rpc ConfigureCallback(ConfigureCallbackRequest) returns (ErrorResponse);
+
+  // CreateTrigger instantiates a trigger of the given type.
+  rpc CreateTrigger(CreateTriggerRequest) returns (HandleResponse);
 }
 
 // EngineCallbackService is implemented by the host and called by the plugin.
@@ -200,6 +206,18 @@ message CreateStepRequest {
   string name = 2;
   google.protobuf.Struct config = 3;
   google.protobuf.Any typed_config = 4;
+}
+
+// CreateTriggerRequest asks the plugin to instantiate a trigger.
+message CreateTriggerRequest {
+  string type = 1;
+  string name = 2;
+  google.protobuf.Struct config = 3;
+}
+
+// ConfigureCallbackRequest carries the go-plugin broker ID for callbacks.
+message ConfigureCallbackRequest {
+  uint32 broker_id = 1;
 }
 
 // HandleResponse returns a handle ID for a created resource.

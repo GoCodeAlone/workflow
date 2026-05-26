@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +78,59 @@ func TestGitHubProvider_List_ParsesResponse(t *testing.T) {
 	}
 	if names[0] != "DB_PASSWORD" || names[1] != "API_KEY" {
 		t.Errorf("unexpected names: %v", names)
+	}
+}
+
+func TestGitHubProvider_EnvironmentScopeUsesEnvironmentEndpoints(t *testing.T) {
+	recipientPub, _, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/repos/owner/repo/environments/staging/secrets/public-key":
+			json.NewEncoder(w).Encode(repoPublicKeyResponse{
+				KeyID: "env-key",
+				Key:   base64.StdEncoding.EncodeToString(recipientPub[:]),
+			})
+		case "/repos/owner/repo/environments/staging/secrets/DATABASE_URL":
+			if r.Method != http.MethodPut {
+				http.Error(w, "bad method", http.StatusMethodNotAllowed)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/repos/owner/repo/environments/staging/secrets":
+			json.NewEncoder(w).Encode(map[string]any{
+				"secrets": []map[string]any{{"name": "DATABASE_URL"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	p.SetEnvironment("staging")
+	if p.Environment() != "staging" {
+		t.Fatalf("Environment() = %q, want staging", p.Environment())
+	}
+	if err := p.Set(context.Background(), "DATABASE_URL", "postgres://example"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if _, err := p.List(context.Background()); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	want := []string{
+		"GET /repos/owner/repo/environments/staging/secrets/public-key",
+		"PUT /repos/owner/repo/environments/staging/secrets/DATABASE_URL",
+		"GET /repos/owner/repo/environments/staging/secrets",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("paths:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -359,5 +413,125 @@ func TestBlake2bNonceLengthMatters(t *testing.T) {
 		t.Fatal("blake2b(x,24) == blake2b(x,32)[:24] — they should differ; " +
 			"if this fails the nonce regression guard is broken and GitHub will " +
 			"reject secrets with 'improperly encrypted secret'")
+	}
+}
+
+// TestGitHubProvider_OrgScopeURL asserts org-scoped requests route to
+// /orgs/{org}/actions/secrets and that PUT payload includes visibility.
+func TestGitHubProvider_OrgScopeURL(t *testing.T) {
+	var seenPath string
+	var seenPayload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/public-key"):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"key_id": "kid",
+				"key":    "C2cZi4nfu9ND7+iRGz9Z+Zf2cZ6OAd1d2c2DqEbtv0M=",
+			})
+		case r.Method == http.MethodPut:
+			b, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(b, &seenPayload)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	p, err := NewGitHubOrgSecretsProvider("my-org", "GITHUB_TOKEN", OrgVisibilityAll, nil)
+	if err != nil {
+		t.Fatalf("NewGitHubOrgSecretsProvider: %v", err)
+	}
+	p.client = &http.Client{Transport: rewriteTransport{base: srv.URL}}
+
+	if err := p.Set(context.Background(), "MY_SECRET", "value"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if !strings.HasPrefix(seenPath, "/orgs/my-org/actions/secrets/") {
+		t.Errorf("PUT path = %q; want /orgs/my-org/actions/secrets/...", seenPath)
+	}
+	if vis, _ := seenPayload["visibility"].(string); vis != "all" {
+		t.Errorf("payload visibility = %q; want all", vis)
+	}
+}
+
+func TestGitHubProvider_OrgScope_Selected_RequiresRepoIDs(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "x")
+	_, err := NewGitHubOrgSecretsProvider("my-org", "GITHUB_TOKEN", OrgVisibilitySelected, nil)
+	if err == nil {
+		t.Fatal("expected error when visibility=selected and no repo IDs")
+	}
+	if !strings.Contains(err.Error(), "selected_repository_ids") {
+		t.Errorf("wrong error: %v", err)
+	}
+}
+
+func TestGitHubProvider_OrgScope_PrivateVisibility(t *testing.T) {
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/public-key") {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"key_id": "kid", "key": "C2cZi4nfu9ND7+iRGz9Z+Zf2cZ6OAd1d2c2DqEbtv0M=",
+			})
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &payload)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	t.Setenv("GITHUB_TOKEN", "x")
+	p, _ := NewGitHubOrgSecretsProvider("o", "GITHUB_TOKEN", OrgVisibilityPrivate, nil)
+	p.client = &http.Client{Transport: rewriteTransport{base: srv.URL}}
+	_ = p.Set(context.Background(), "K", "v")
+	if payload["visibility"] != "private" {
+		t.Errorf("visibility = %v want private", payload["visibility"])
+	}
+}
+
+func TestGitHubProvider_RepoScope_NoVisibility(t *testing.T) {
+	// Repo scope must NOT include visibility in payload (org-only field).
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/public-key") {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"key_id": "kid", "key": "C2cZi4nfu9ND7+iRGz9Z+Zf2cZ6OAd1d2c2DqEbtv0M=",
+			})
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &payload)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+	p := newTestGitHubProvider(t, srv)
+	_ = p.Set(context.Background(), "K", "v")
+	if _, hasVis := payload["visibility"]; hasVis {
+		t.Errorf("repo-scope PUT should not include visibility; got payload=%v", payload)
+	}
+}
+
+func TestGitHubProvider_ScopeReporter(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "x")
+	p, _ := NewGitHubSecretsProvider("o/r", "GITHUB_TOKEN")
+	if p.Scope() != GitHubScopeRepo {
+		t.Errorf("repo: scope = %q", p.Scope())
+	}
+	p.SetEnvironment("staging")
+	if p.Scope() != GitHubScopeEnv {
+		t.Errorf("env: scope = %q", p.Scope())
+	}
+	p.SetEnvironment("")
+	if p.Scope() != GitHubScopeRepo {
+		t.Errorf("env-clear: scope = %q", p.Scope())
+	}
+	op, _ := NewGitHubOrgSecretsProvider("o", "GITHUB_TOKEN", OrgVisibilityAll, nil)
+	if op.Scope() != GitHubScopeOrg {
+		t.Errorf("org: scope = %q", op.Scope())
 	}
 }

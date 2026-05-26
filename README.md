@@ -116,6 +116,16 @@ Schema-agnostic field resolution for REST API handlers:
 - Configurable field aliases in YAML (`fieldMapping`, `transitionMap`, `summaryFields`)
 - Runtime field resolution from workflow context
 
+## Plugin Ecosystem
+
+The workflow engine has a [registry of 51 public plugins](https://github.com/GoCodeAlone/workflow-registry). Each plugin in the registry carries a `status` field:
+
+- **✅ Verified** — pinned in a merged main-branch `wfctl.yaml` of an active GoCodeAlone production project. Production miles.
+- **⚠️ Experimental** — compiles and passes its unit tests, but no validated production deployment. Use with caution.
+- **🚫 Deprecated** — scheduled removal.
+
+See the [Plugin Authoring Guide](docs/PLUGIN_AUTHORING.md) to build your own.
+
 ## Quick Start
 
 ### Requirements

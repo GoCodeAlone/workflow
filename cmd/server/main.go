@@ -44,7 +44,6 @@ import (
 	allplugins "github.com/GoCodeAlone/workflow/plugins/all"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
 	"github.com/GoCodeAlone/workflow/provider"
-	_ "github.com/GoCodeAlone/workflow/provider/aws"
 	_ "github.com/GoCodeAlone/workflow/provider/azure"
 	_ "github.com/GoCodeAlone/workflow/provider/digitalocean"
 	_ "github.com/GoCodeAlone/workflow/provider/gcp"
@@ -123,6 +122,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	// External plugins run as separate processes communicating over gRPC.
 	// Failures are non-fatal — the engine works fine with only builtin plugins.
 	extMgr := pluginexternal.NewExternalPluginManager(extPluginDir, log.Default())
+	extMgr.SetCallbackServer(newExternalCallbackServer(engine))
 	discovered, discoverErr := extMgr.DiscoverPlugins()
 	if discoverErr != nil {
 		logger.Warn("Failed to discover external plugins", "error", discoverErr)
@@ -168,6 +168,16 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	}
 
 	return engine, loader, registry, nil
+}
+
+func newExternalCallbackServer(engine *workflow.StdEngine) *pluginexternal.CallbackServer {
+	return pluginexternal.NewCallbackServer(
+		func(triggerType, action string, data map[string]any) error {
+			return engine.TriggerWorkflow(context.Background(), triggerType, action, data)
+		},
+		nil,
+		log.Default(),
+	)
 }
 
 // loadConfig loads a workflow configuration from the configured file path,
@@ -411,6 +421,9 @@ func initManagementHandlers(logger *slog.Logger, engine *workflow.StdEngine, cfg
 	mgmtHandler := module.NewWorkflowUIHandler(cfg)
 	mgmtHandler.SetReloadFunc(func(newCfg *config.WorkflowConfig) error {
 		return app.reloadEngine(newCfg)
+	})
+	mgmtHandler.SetTryActivateFunc(func(newCfg *config.WorkflowConfig) (*module.TryActivateResult, error) {
+		return app.tryActivateEngine(newCfg)
 	})
 	mgmtHandler.SetStatusFunc(func() map[string]any {
 		return map[string]any{"status": "running"}
@@ -824,6 +837,7 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 
 	extPluginDir2 := filepath.Join(*dataDir, "plugins")
 	extPluginMgr := pluginexternal.NewExternalPluginManager(extPluginDir2, log.Default())
+	extPluginMgr.SetCallbackServer(newExternalCallbackServer(engine))
 	extPluginHandler := pluginexternal.NewPluginHandler(extPluginMgr)
 	extPluginMux := http.NewServeMux()
 	extPluginHandler.RegisterRoutes(extPluginMux)
@@ -1039,37 +1053,67 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 	return nil
 }
 
-// reloadEngine stops the current engine, builds a new one from the given config,
-// starts it, and re-registers all persistent services with the new Application.
-// This preserves all stores, handlers, and database connections across reloads.
+// reloadEngine implements a safe try-activate reload:
+//  1. Build candidate engine from newCfg (no ports bound, current engine stays live).
+//  2. Stop current engine only after the candidate has been built successfully.
+//  3. Start candidate engine; on failure rebuild from the previous config and
+//     restart it (rollback).
+//
+// Stores, handlers, and database connections stored on serverApp survive
+// every reload cycle.
 func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 	logger := app.logger
 
-	// Stop the current engine
-	if stopErr := app.engine.Stop(context.Background()); stopErr != nil {
+	// Stage 1: Build candidate. Current engine is still live; if this fails
+	// the old engine continues serving without interruption.
+	newEngine, _, _, buildErr := buildEngine(newCfg, logger)
+	if buildErr != nil {
+		return fmt.Errorf("failed to build candidate engine (current engine unchanged): %w", buildErr)
+	}
+
+	// Stage 2: Stop the current engine now that a viable candidate exists.
+	oldEngine := app.engine
+	oldConfig := app.currentConfig
+	if stopErr := oldEngine.Stop(context.Background()); stopErr != nil {
 		logger.Warn("Error stopping engine during reload", "error", stopErr)
 	}
 
-	// Build and start a new engine
-	newEngine, _, _, buildErr := buildEngine(newCfg, logger)
-	if buildErr != nil {
-		return fmt.Errorf("failed to rebuild engine: %w", buildErr)
-	}
-
-	// Update the serverApp reference BEFORE registering services,
-	// since registerManagementServices reads app.engine.
+	// Update references before registering services (registerManagementServices
+	// reads app.engine to reach the Application registry).
 	app.engine = newEngine
-
-	// Re-register pre-start management services with the new Application
+	app.currentConfig = newCfg
 	registerManagementServices(logger, app)
 
-	// Start the new engine
+	// Stage 3: Activate candidate.
 	if startErr := newEngine.Start(context.Background()); startErr != nil {
-		return fmt.Errorf("failed to start reloaded engine: %w", startErr)
+		logger.Error("Candidate engine failed to start; attempting rollback to previous config", "error", startErr)
+		if stopErr := newEngine.Stop(context.Background()); stopErr != nil {
+			logger.Warn("Failed to stop candidate engine after failed reload start", "error", stopErr)
+		}
+
+		// Rollback: rebuild from previous config and restart.
+		rollbackEngine, _, _, rollbackBuildErr := buildEngine(oldConfig, logger)
+		if rollbackBuildErr != nil {
+			app.currentConfig = oldConfig // keep old config pointer for diagnostics
+			return fmt.Errorf("reload failed AND rollback build failed — process is degraded: candidate=%w, rollback=%v", startErr, rollbackBuildErr)
+		}
+		app.engine = rollbackEngine
+		app.currentConfig = oldConfig
+		registerManagementServices(logger, app)
+		if rollbackStartErr := rollbackEngine.Start(context.Background()); rollbackStartErr != nil {
+			return fmt.Errorf("reload failed AND rollback start failed — process is degraded: candidate=%w, rollback=%v", startErr, rollbackStartErr)
+		}
+		if app.stores.v1Store != nil {
+			if regErr := app.registerPostStartServices(logger); regErr != nil {
+				logger.Warn("Failed to re-register post-start services during rollback", "error", regErr)
+			}
+		}
+		logger.Info("Engine reload rolled back to previous config")
+		return fmt.Errorf("reload failed (rolled back to previous config): %w", startErr)
 	}
 
-	// Re-register post-start services (stores already initialized, just need
-	// to be re-registered with the new Application's service registry).
+	// Stage 4: Re-register post-start services with the new Application's
+	// service registry (stores are already initialized, just need re-wiring).
 	if app.stores.v1Store != nil {
 		if regErr := app.registerPostStartServices(logger); regErr != nil {
 			return fmt.Errorf("failed to re-register post-start services: %w", regErr)
@@ -1078,6 +1122,29 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 
 	logger.Info("Engine reloaded successfully — all services preserved")
 	return nil
+}
+
+// tryActivateEngine builds a candidate engine from cfg without stopping the
+// current engine or swapping any active pointers. It is a probe-only operation
+// that returns a structured result describing what the candidate would expose.
+// If the build fails, the current engine is completely unaffected.
+func (app *serverApp) tryActivateEngine(cfg *config.WorkflowConfig) (*module.TryActivateResult, error) {
+	candidateEngine, _, _, buildErr := buildEngine(cfg, app.logger)
+	if buildErr != nil {
+		return &module.TryActivateResult{
+			Status: "build_failed",
+			Error:  buildErr.Error(),
+		}, buildErr
+	}
+
+	// Collect registered module/step/trigger type names from the candidate.
+	result := &module.TryActivateResult{
+		Status:       "build_ok",
+		ModuleTypes:  candidateEngine.RegisteredModuleTypes(),
+		StepTypes:    candidateEngine.RegisteredStepTypes(),
+		TriggerTypes: candidateEngine.RegisteredTriggerTypes(),
+	}
+	return result, nil
 }
 
 // importBundles imports and deploys workflow bundles specified via --import-bundle.

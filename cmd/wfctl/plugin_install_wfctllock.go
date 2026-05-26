@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -28,6 +30,17 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 		return nil
 	}
 
+	// Function-scope guard (workflow#771 Task 3): suppress lockfile writes from
+	// inner install paths (installFromURL + fallback runPluginInstall) so that
+	// platform metadata + pinned entries remain authoritative. Deps installed
+	// via the fallback runPluginInstall inherit this guard and are NOT
+	// auto-pinned to the lockfile — matches the "lockfile is what the user
+	// explicitly pinned" contract. Cycle-3 fix per CYC2-C2: function-scope
+	// because per-iteration anon-func wrappers would break the loop's 6×
+	// `continue` statements (continue not allowed across func literal).
+	installSkipLockfileUpdate = true
+	defer func() { installSkipLockfileUpdate = false }()
+
 	if lockPath != "" {
 		scrubbed := scrubbedWfctlLockfileTopLevelSHA256(lf)
 		if err := config.SaveWfctlLockfile(lockPath, scrubbed); err != nil {
@@ -46,7 +59,6 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 	var failed []string
 	for _, name := range names {
 		entry := lf.Plugins[name]
-		fmt.Fprintf(os.Stderr, "Installing %s@%s...\n", name, entry.Version)
 
 		installed := false
 
@@ -66,8 +78,29 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 				failed = append(failed, errMsg)
 				continue
 			}
+			if cached, err := installedPluginSatisfiesLock(pluginDirVal, name, entry, platKey, plat); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: cached install for %s is not reusable: %v\n", name, err)
+			} else if cached {
+				fmt.Fprintf(os.Stderr, "Using cached %s@%s from %s\n", name, entry.Version, filepath.Join(pluginDirVal, normalizePluginName(name)))
+				installed = true
+			}
+		}
+
+		if installed {
+			continue
+		}
+
+		fmt.Fprintf(os.Stderr, "Installing %s@%s...\n", name, entry.Version)
+
+		if len(entry.Platforms) > 0 {
+			plat := entry.Platforms[platKey]
 			if err := installFromURL(plat.URL, pluginDirVal, plat.SHA256, false); err != nil {
 				fmt.Fprintf(os.Stderr, "error installing %s from URL: %v\n", name, err)
+				failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
+				continue
+			}
+			if err := writeLockfileInstallMetadata(pluginDirVal, name, entry, platKey, plat); err != nil {
+				fmt.Fprintf(os.Stderr, "error recording install metadata for %s: %v\n", name, err)
 				failed = append(failed, fmt.Sprintf("%s (%v)", name, err))
 				continue
 			}
@@ -119,4 +152,65 @@ func scrubbedWfctlLockfileTopLevelSHA256(lf *config.WfctlLockfile) *config.Wfctl
 // currentPlatformKey returns the GOOS-GOARCH key used in WfctlLockPlatform maps.
 func currentPlatformKey() string {
 	return fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
+}
+
+const lockfileInstallMetadataName = ".wfctl-install.json"
+
+type lockfileInstallMetadata struct {
+	Version  string `json:"version"`
+	Source   string `json:"source,omitempty"`
+	Platform string `json:"platform"`
+	URL      string `json:"url"`
+	SHA256   string `json:"sha256"`
+}
+
+func installedPluginSatisfiesLock(pluginDir, lockName string, entry config.WfctlLockPluginEntry, platform string, plat config.WfctlLockPlatform) (bool, error) {
+	installName := normalizePluginName(lockName)
+	installDir := filepath.Join(pluginDir, installName)
+	if _, err := os.Stat(installDir); os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("stat %s: %w", installDir, err)
+	}
+	if err := verifyInstalledPlugin(installDir, installName); err != nil {
+		return false, err
+	}
+	if err := verifyInstalledVersion(installDir, entry.Version); err != nil {
+		return false, err
+	}
+
+	data, err := os.ReadFile(filepath.Join(installDir, lockfileInstallMetadataName))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read install metadata: %w", err)
+	}
+	var meta lockfileInstallMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return false, fmt.Errorf("parse install metadata: %w", err)
+	}
+	if !samePluginVersion(meta.Version, entry.Version) {
+		return false, nil
+	}
+	if meta.Source != entry.Source || meta.Platform != platform || meta.URL != plat.URL || !strings.EqualFold(meta.SHA256, plat.SHA256) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func writeLockfileInstallMetadata(pluginDir, lockName string, entry config.WfctlLockPluginEntry, platform string, plat config.WfctlLockPlatform) error {
+	installDir := filepath.Join(pluginDir, normalizePluginName(lockName))
+	meta := lockfileInstallMetadata{
+		Version:  entry.Version,
+		Source:   entry.Source,
+		Platform: platform,
+		URL:      plat.URL,
+		SHA256:   strings.ToLower(plat.SHA256),
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(installDir, lockfileInstallMetadataName), append(data, '\n'), 0o600)
 }

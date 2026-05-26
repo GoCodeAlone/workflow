@@ -25,14 +25,14 @@ type orderRecordingDriver struct {
 }
 
 func (d *orderRecordingDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
-	d.fakeDriver.deleteCount++
+	d.deleteCount++
 	d.step++
 	d.deleteAt = d.step
 	return d.deleteErr
 }
 
 func (d *orderRecordingDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.createCount++
+	d.createCount++
 	d.step++
 	d.createAt = d.step
 	if d.createErr != nil {
@@ -81,7 +81,7 @@ func TestApplyPlan_Replace_DeletesThenCreates_PropagatesNewID(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestApplyPlan_Replace_PopulatesReplaceIDMap(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestApplyPlan_Replace_MultipleActionsAllPopulate(t *testing.T) {
 		fakeProvider: newFakeProvider(),
 		newIDs:       map[string]string{"vpc": "new-vpc-id", "db": "new-db-id"},
 	}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,12 +169,12 @@ type perResourceReplaceDriver struct {
 }
 
 func (d *perResourceReplaceDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
-	d.fakeDriver.deleteCount++
+	d.deleteCount++
 	return nil
 }
 
 func (d *perResourceReplaceDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	d.fakeDriver.createCount++
+	d.createCount++
 	id := d.newIDs[spec.Name]
 	if id == "" {
 		id = "fallback-id"
@@ -194,7 +194,7 @@ func TestApplyPlan_Replace_DeleteFailsDoesNotCreate(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,13 +232,13 @@ func TestApplyPlan_Replace_CtxCancelAfterDelete_SkipsCreate(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(ctx, fp, plan)
+	result, err := ApplyPlanWithHooks(ctx, fp, plan, ApplyPlanHooks{})
 	if err != nil {
-		// ApplyPlan's loop check catches the cancellation at the next
+		// ApplyPlanWithHooks' loop check catches the cancellation at the next
 		// iteration, but the per-action ctx check inside doReplace
 		// fires first. Either path yields a per-action error rather
 		// than a top-level error from this single-action plan.
-		t.Fatalf("ApplyPlan should not surface top-level error: %v", err)
+		t.Fatalf("ApplyPlanWithHooks should not surface top-level error: %v", err)
 	}
 	if fp.driver.deleteCount != 1 {
 		t.Errorf("Delete should have run before cancellation; deleteCount=%d", fp.driver.deleteCount)
@@ -279,7 +279,7 @@ type cancelOnDeleteDriver struct {
 }
 
 func (d *cancelOnDeleteDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
-	d.fakeDriver.deleteCount++
+	d.deleteCount++
 	d.cancel() // ctx is now canceled; Create must not run.
 	return nil
 }
@@ -297,7 +297,7 @@ func TestApplyPlan_Replace_CreateFailsLeavesMapEmpty(t *testing.T) {
 	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{
 		{Action: "replace", Resource: spec("vpc", "infra.vpc"), Current: stateWithID("vpc", "old-uuid")},
 	}}
-	result, err := ApplyPlan(context.Background(), fp, plan)
+	result, err := ApplyPlanWithHooks(context.Background(), fp, plan, ApplyPlanHooks{})
 	if err != nil {
 		t.Fatal(err)
 	}

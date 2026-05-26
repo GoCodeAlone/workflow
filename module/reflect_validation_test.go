@@ -149,8 +149,8 @@ func TestReflectValidation_HealthCheckerConfig(t *testing.T) {
 func TestReflectValidation_MetricsCollectorConfig(t *testing.T) {
 	fields := schema.GenerateConfigFields(module.MetricsCollectorConfig{})
 
-	if len(fields) != 4 {
-		t.Fatalf("expected 4 tagged fields, got %d", len(fields))
+	if len(fields) != 3 {
+		t.Fatalf("expected 3 tagged fields, got %d", len(fields))
 	}
 
 	namespace := fields[0]
@@ -159,15 +159,7 @@ func TestReflectValidation_MetricsCollectorConfig(t *testing.T) {
 		t.Errorf("namespace: expected default=workflow, got %v", namespace.DefaultValue)
 	}
 
-	metricsPath := fields[2]
-	if metricsPath.Key != "metricsPath" {
-		t.Errorf("expected key=metricsPath, got %q", metricsPath.Key)
-	}
-	if metricsPath.DefaultValue != "/metrics" {
-		t.Errorf("metricsPath: expected default=/metrics, got %v", metricsPath.DefaultValue)
-	}
-
-	enabledMetrics := fields[3]
+	enabledMetrics := fields[2]
 	assertField(t, "enabledMetrics", enabledMetrics, schema.FieldTypeArray, false, false)
 	if enabledMetrics.ArrayItemType != "string" {
 		t.Errorf("enabledMetrics: expected arrayItemType=string, got %q", enabledMetrics.ArrayItemType)

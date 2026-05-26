@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -36,9 +40,14 @@ func runInfraAlign(args []string) error {
 	fs.BoolVar(&opts.strictHealth, "strict-health", false, "Treat R-A2 health-check WARNs as FAILs")
 	fs.BoolVar(&opts.strictCIDR, "strict-cidr", false, "Enable strict CIDR overlap checks (reserved for future use)")
 	fs.IntVar(&opts.maxChanges, "max-changes", 50, "Warn when plan has more than N changes")
+	var pluginDirFlag string
+	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	prevInfraPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginDirFlag
+	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
 	// Resolve config file
 	if opts.configFile == "" {
@@ -67,7 +76,23 @@ func runInfraAlign(args []string) error {
 		return fmt.Errorf("no config file specified and no infra.yaml found")
 	}
 
-	findings, err := runInfraAlignChecks(opts)
+	// Per code-review round 5 IMPORTANT-2 follow-up: bind a
+	// signal.NotifyContext so operator Ctrl-C / SIGTERM cancels
+	// in-flight typed-RPC calls (R-A10 ValidatePlan, plus any
+	// downstream typed dispatch that honors ctx). Without this,
+	// the ctx threaded through runInfraAlignChecks is a bare
+	// context.Background() that no signal can interrupt — defeating
+	// IMPORTANT-2's intent (cancellation propagation, not just
+	// the function-signature shape). Other wfctl runInfra*
+	// entrypoints (status, drift, apply, etc.) currently use
+	// context.Background() directly and do not honor signals; the
+	// signal-aware pattern landing here is the operator-tooling
+	// shape we want, and a follow-up sweep can wire it into the
+	// other entrypoints once this PR lands.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	findings, err := runInfraAlignChecks(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -86,7 +111,7 @@ func runInfraAlign(args []string) error {
 	if alignExitCode(findings, opts.strict) != 0 {
 		var failCount int
 		for _, f := range findings {
-			if f.Severity == "FAIL" || (opts.strict && f.Severity == "WARN") {
+			if f.Severity == "FAIL" || f.Severity == "ERROR" || (opts.strict && f.Severity == "WARN") {
 				failCount++
 			}
 		}
@@ -97,8 +122,14 @@ func runInfraAlign(args []string) error {
 
 // runInfraAlignChecks runs all alignment rule families and returns findings.
 // This is separated from runInfraAlign to make it testable.
-func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
-	ctx, err := buildAlignContext(opts.configFile)
+//
+// Per code-review IMPORTANT-2 (PR 618 round 4): takes a context.Context so
+// the R-A10 typed-RPC ValidatePlan dispatch honors operator Ctrl-C / parent
+// cancellation / RPC deadline propagation. The legacy interfaces.X dispatch
+// inherited the calling-goroutine's context implicitly via the Go method's
+// signature; the typed-pb path requires explicit ctx threading.
+func runInfraAlignChecks(ctx context.Context, opts alignOptions) ([]AlignFinding, error) {
+	alignCtx, err := buildAlignContext(opts.configFile)
 	if err != nil {
 		return nil, err
 	}
@@ -106,22 +137,22 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 	var findings []AlignFinding
 
 	// R-A1: container/runtime alignment
-	findings = append(findings, checkRA1(ctx)...)
+	findings = append(findings, checkRA1(alignCtx)...)
 
 	// R-A2: health-check alignment
-	findings = append(findings, checkRA2(ctx, opts.strictHealth)...)
+	findings = append(findings, checkRA2(alignCtx, opts.strictHealth)...)
 
 	// R-A3: service-to-service DNS alignment
-	findings = append(findings, checkRA3(ctx)...)
+	findings = append(findings, checkRA3(alignCtx)...)
 
 	// R-A4: env-var resolution
-	findings = append(findings, checkRA4(ctx)...)
+	findings = append(findings, checkRA4(alignCtx)...)
 
 	// R-A5: migrations alignment
-	findings = append(findings, checkRA5(ctx)...)
+	findings = append(findings, checkRA5(alignCtx)...)
 
 	// R-A6: network/exposure alignment
-	findings = append(findings, checkRA6(ctx)...)
+	findings = append(findings, checkRA6(alignCtx)...)
 
 	// Load plan once if --plan provided; reused by R-A7 and R-A10 to avoid
 	// duplicate file I/O + JSON parsing (and to keep the two rules consistent
@@ -141,18 +172,18 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 	}
 
 	// R-A8: WebAuthn alignment
-	findings = append(findings, checkRA8(ctx)...)
+	findings = append(findings, checkRA8(alignCtx)...)
 
 	// R-A9: suspicious provider_credential key suffix
-	findings = append(findings, checkRA9(ctx)...)
+	findings = append(findings, checkRA9(alignCtx)...)
 
 	// R-A10: provider.ValidatePlan dispatch — only when --plan is provided.
 	// alignLoadProviders is a test seam; the default loader enumerates
-	// iac.provider modules in ctx.Config (already parsed) and loads each via
-	// the existing resolveIaCProvider plugin path. Closers (if any) are
+	// iac.provider modules in alignCtx.modules (already parsed) and loads each
+	// via the existing resolveIaCProvider plugin path. Closers (if any) are
 	// released after the rule runs.
 	if plan != nil {
-		providers, closers, err := alignLoadProviders(ctx, opts.envName, plan)
+		providers, closers, err := alignLoadProviders(alignCtx, opts.envName, plan)
 		if err != nil {
 			return nil, fmt.Errorf("load providers for R-A10: %w", err)
 		}
@@ -166,7 +197,7 @@ func runInfraAlignChecks(opts alignOptions) ([]AlignFinding, error) {
 				}
 			}
 		}()
-		findings = append(findings, checkRA10_provider_validate_plan(providers, plan)...)
+		findings = append(findings, checkRA10_provider_validate_plan(ctx, providers, plan)...)
 	}
 
 	return findings, nil
@@ -221,9 +252,22 @@ func defaultAlignLoadProviders(alignCtx *alignContext, envName string, _ *interf
 }
 
 // loadPlanJSON reads and decodes a plan JSON file.
+//
+// When the file does not exist the returned error includes an actionable
+// hint: a missing plan file at align time almost always means the upstream
+// `wfctl infra plan --output <path>` step failed silently — for example
+// because of a state-backend credential error in CI where shell pipefail is
+// off and the non-zero exit was masked by `| tee $GITHUB_STEP_SUMMARY`.
+// Surfacing the hint here saves operators a triage hop.
 func loadPlanJSON(path string) (*interfaces.IaCPlan, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if errors.Is(err, iofs.ErrNotExist) {
+			// Wrap (don't replace) so errors.Is(..., iofs.ErrNotExist) still
+			// matches and the underlying *PathError is preserved for callers
+			// that want to introspect the cause.
+			return nil, fmt.Errorf("plan file %q does not exist — did the upstream `wfctl infra plan --output %q` step succeed? Check its stderr for state-backend errors (e.g. InvalidAccessKeyId, SignatureDoesNotMatch). In CI, ensure the plan step uses `set -o pipefail` so wfctl's non-zero exit is not masked by a downstream pipe (e.g. `| tee`): %w", path, path, err)
+		}
 		return nil, err
 	}
 	defer f.Close()
@@ -235,9 +279,19 @@ func loadPlanJSON(path string) (*interfaces.IaCPlan, error) {
 }
 
 // alignExitCode returns 0 (success) or 1 (failure) based on findings and flags.
+//
+// Severities that always block (exit 1):
+//   - FAIL: deterministic failure (e.g. unresolved env var, R-A1 missing image)
+//   - ERROR: hard rule violation that must block deploy regardless of --strict
+//     (introduced in rev3 of the spaces-key plan for R-A9; ERROR is treated
+//     identically to FAIL by exit-code logic so a rule author can use ERROR to
+//     signal "this is fixable; here's the fix" without weakening the gate)
+//
+// Severities that block only under --strict:
+//   - WARN: advisory, surfaced as a heads-up but non-blocking by default
 func alignExitCode(findings []AlignFinding, strict bool) int {
 	for _, f := range findings {
-		if f.Severity == "FAIL" {
+		if f.Severity == "FAIL" || f.Severity == "ERROR" {
 			return 1
 		}
 		if strict && f.Severity == "WARN" {
@@ -268,11 +322,13 @@ func renderAlignMarkdown(findings []AlignFinding) string {
 	}
 	sb.WriteString("\n")
 
-	var failCount, warnCount int
+	var failCount, errorCount, warnCount int
 	for _, f := range findings {
 		switch f.Severity {
 		case "FAIL":
 			failCount++
+		case "ERROR":
+			errorCount++
 		case "WARN":
 			warnCount++
 		}
@@ -281,6 +337,9 @@ func renderAlignMarkdown(findings []AlignFinding) string {
 	parts := []string{}
 	if failCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d FAIL", failCount))
+	}
+	if errorCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d ERROR", errorCount))
 	}
 	if warnCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d WARN", warnCount))

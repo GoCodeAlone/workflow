@@ -1,10 +1,11 @@
 // Package sdk hosts the plugin SDK manifest schema and helpers used by
-// wfctl to discover plugin capabilities (currently: IaC dispatch version).
+// wfctl to discover plugin capabilities.
 //
 // The SDK manifest is intentionally additive over [plugin.PluginManifest];
-// it captures only the fields that wfctl reads at apply-time to choose
-// between the v1 (legacy in-provider Apply) and v2 (wfctlhelpers.ApplyPlan)
-// dispatch paths.
+// it captures only the fields that wfctl validates before typed runtime
+// capability discovery. After the strict lifecycle cutover, the typed
+// CapabilitiesResponse.compute_plan_version declaration is authoritative and
+// wfctl accepts "v2" only.
 package sdk
 
 import (
@@ -50,26 +51,23 @@ type Manifest struct {
 
 // IaCProvider describes IaC-provider-specific manifest fields.
 type IaCProvider struct {
-	// ComputePlanVersion selects the apply-time dispatch path:
-	//   "" (default, treated as "v1"): legacy in-provider Apply switch.
-	//   "v1":                          explicit legacy dispatch.
-	//   "v2":                          route through wfctlhelpers.ApplyPlan
-	//                                   (Replace + input-drift postcondition).
-	// Schema-validated against the enum ["v1","v2"]; "" passes validation
-	// because the field is optional.
+	// ComputePlanVersion is parse-time manifest metadata retained for plugin
+	// authors and validation tooling. Runtime selection is strict: the typed
+	// CapabilitiesResponse.compute_plan_version gate accepts "v2" only and
+	// routes through wfctlhelpers.ApplyPlanWithHooks.
+	// Schema-validated against the enum ["v1","v2"]; "" passes validation for
+	// older manifests, but load-time typed capability validation rejects non-v2
+	// providers.
 	ComputePlanVersion string `json:"computePlanVersion,omitempty"`
 }
 
-// EffectiveComputePlanVersion returns the dispatch version, defaulting to
-// "v1" when the manifest omits the field. Callers should always go through
-// this accessor rather than reading ComputePlanVersion directly so the
-// default-v1 contract stays in one place.
-func (p IaCProvider) EffectiveComputePlanVersion() string {
-	if p.ComputePlanVersion == "" {
-		return "v1"
-	}
-	return p.ComputePlanVersion
-}
+// EffectiveComputePlanVersion was removed per workflow#699 (2026-05-17):
+// post-cutover "v1" is not a valid runtime value, so a default-to-v1
+// accessor would lie. The manifest field is now a parse-time-validated
+// advisory only — the authoritative gate is the typed
+// CapabilitiesResponse.compute_plan_version check in
+// cmd/wfctl/deploy_providers.go's discoverAndLoadIaCProvider, which
+// rejects any plugin not declaring "v2" at load time.
 
 // compiledSchema is the parsed manifest schema. It is compiled lazily on
 // first ParseManifest call and cached for the process lifetime; the schema

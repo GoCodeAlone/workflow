@@ -133,6 +133,29 @@ func TestResolveSecretsProvider_GitHubProvider(t *testing.T) {
 	}
 }
 
+func TestResolveSecretsProvider_GitHubProviderEnvironmentScope(t *testing.T) {
+	t.Setenv("GH_TOKEN_TEST", "fake-token")
+	cfg := &SecretsConfig{
+		Provider: "github",
+		Config: map[string]any{
+			"repo":        "owner/repo",
+			"token_env":   "GH_TOKEN_TEST",
+			"environment": "${WORKFLOW_ENV}",
+		},
+	}
+	p, err := resolveSecretsProviderForEnv(cfg, "staging")
+	if err != nil {
+		t.Fatalf("resolveSecretsProviderForEnv github: %v", err)
+	}
+	gh, ok := p.(*secrets.GitHubSecretsProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *secrets.GitHubSecretsProvider", p)
+	}
+	if gh.Environment() != "staging" {
+		t.Errorf("github environment = %q, want staging", gh.Environment())
+	}
+}
+
 func TestResolveSecretsProvider_UnknownProvider(t *testing.T) {
 	cfg := &SecretsConfig{Provider: "mystery"}
 	_, err := resolveSecretsProvider(cfg)

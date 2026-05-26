@@ -56,8 +56,10 @@ func runAuditWithOutput(args []string, out io.Writer) error {
 		return runAuditPlansWithOutput(args[1:], out)
 	case "plugins":
 		return runAuditPluginsWithOutput(args[1:], out)
+	case "repo":
+		return runAuditRepoWithOutput(args[1:], out)
 	default:
-		return fmt.Errorf("unknown audit subcommand %q (try: plans, plugins)", args[0])
+		return fmt.Errorf("unknown audit subcommand %q (try: plans, plugins, repo)", args[0])
 	}
 }
 
@@ -68,7 +70,8 @@ Audit Workflow project metadata.
 
 Subjects:
   plans    Audit docs/plans metadata and implementation evidence
-  plugins  Audit workflow-plugin-* manifest shape`)
+  plugins  Audit workflow-plugin-* manifest shape
+  repo     Audit repository quality gates (paths, docs, drift)`)
 	return fmt.Errorf("missing audit subcommand")
 }
 

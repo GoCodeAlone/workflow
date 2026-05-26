@@ -60,6 +60,10 @@ baseline-bench.txt
 current-bench.txt
 benchmark-results.txt
 benchstat-output.txt
-.worktrees
+# Local agent/dev worktrees
+_worktrees/
+.worktrees/
 cmd/wfctl/.wfctl.yaml
 cmd/wfctl/.wfctl-lock.yaml
+
+.claude/

@@ -6,19 +6,33 @@ import (
 	"net"
 	"testing"
 
+	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // --- minimal test providers ---
+
+// mustMapToStruct is a test helper wrapping mapToStruct; it fails the test if
+// the map contains a structpb-incompatible value (e.g. chan, func).
+func mustMapToStruct(t *testing.T, m map[string]any) *structpb.Struct {
+	t.Helper()
+	s, err := mapToStruct(m)
+	if err != nil {
+		t.Fatalf("mustMapToStruct: %v", err)
+	}
+	return s
+}
 
 type minimalProvider struct{}
 
@@ -77,6 +91,90 @@ func (p *contractProvider) ContractRegistry() *pb.ContractRegistry {
 	}
 }
 
+type triggerOnlyProvider struct {
+	minimalProvider
+	created *recordingTrigger
+}
+
+func (p *triggerOnlyProvider) TriggerTypes() []string {
+	return []string{"trigger.test"}
+}
+
+func (p *triggerOnlyProvider) CreateTrigger(typeName string, config map[string]any, cb TriggerCallback) (TriggerInstance, error) {
+	if typeName != "trigger.test" {
+		return nil, errors.New("unexpected trigger type: " + typeName)
+	}
+	p.created = &recordingTrigger{
+		config: config,
+		cb:     cb,
+	}
+	return p.created, nil
+}
+
+type recordingTrigger struct {
+	config map[string]any
+	cb     TriggerCallback
+	starts int
+	stops  int
+}
+
+func (t *recordingTrigger) Start(context.Context) error {
+	t.starts++
+	return nil
+}
+
+func (t *recordingTrigger) Stop(context.Context) error {
+	t.stops++
+	return nil
+}
+
+type recordingCallbackClient struct {
+	req *pb.TriggerWorkflowRequest
+}
+
+func (c *recordingCallbackClient) TriggerWorkflow(_ context.Context, req *pb.TriggerWorkflowRequest, _ ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	c.req = req
+	return &pb.ErrorResponse{}, nil
+}
+
+func (c *recordingCallbackClient) GetService(context.Context, *pb.GetServiceRequest, ...grpc.CallOption) (*pb.GetServiceResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingCallbackClient) Log(context.Context, *pb.LogRequest, ...grpc.CallOption) (*emptypb.Empty, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingCallbackClient) PublishMessage(context.Context, *pb.PublishMessageRequest, ...grpc.CallOption) (*pb.PublishMessageResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingCallbackClient) Subscribe(context.Context, *pb.SubscribeRequest, ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *recordingCallbackClient) Unsubscribe(context.Context, *pb.UnsubscribeRequest, ...grpc.CallOption) (*pb.ErrorResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+type moduleAndTriggerProvider struct {
+	triggerOnlyProvider
+	module        ModuleInstance
+	moduleCreated int
+}
+
+func (p *moduleAndTriggerProvider) ModuleTypes() []string {
+	return []string{"trigger.test"}
+}
+
+func (p *moduleAndTriggerProvider) CreateModule(typeName, name string, config map[string]any) (ModuleInstance, error) {
+	if typeName != "trigger.test" {
+		return nil, errors.New("unexpected module type: " + typeName)
+	}
+	p.moduleCreated++
+	return p.module, nil
+}
+
 type typedServiceProvider struct {
 	minimalProvider
 	module ModuleInstance
@@ -93,6 +191,41 @@ func (p *typedServiceProvider) CreateModule(typeName, name string, config map[st
 type typedServiceFactoryProvider struct {
 	minimalProvider
 	TypedModuleProvider
+}
+
+type triggerProviderForTest struct {
+	minimalProvider
+	lastType   string
+	lastConfig map[string]any
+	lastCB     TriggerCallback
+	trigger    *triggerInstanceForTest
+}
+
+func (p *triggerProviderForTest) TriggerTypes() []string {
+	return []string{"compute.completed"}
+}
+
+func (p *triggerProviderForTest) CreateTrigger(typeName string, config map[string]any, cb TriggerCallback) (TriggerInstance, error) {
+	p.lastType = typeName
+	p.lastConfig = config
+	p.lastCB = cb
+	p.trigger = &triggerInstanceForTest{}
+	return p.trigger, nil
+}
+
+type triggerInstanceForTest struct {
+	started bool
+	stopped bool
+}
+
+func (t *triggerInstanceForTest) Start(context.Context) error {
+	t.started = true
+	return nil
+}
+
+func (t *triggerInstanceForTest) Stop(context.Context) error {
+	t.stopped = true
+	return nil
 }
 
 type typedServiceModule struct {
@@ -180,6 +313,156 @@ func TestGetAsset_WithAssetProvider(t *testing.T) {
 	}
 	if resp.ContentType != "text/html" {
 		t.Errorf("expected text/html content type, got %q", resp.ContentType)
+	}
+}
+
+func TestTriggerProviderCreatesTriggerThroughLifecycle(t *testing.T) {
+	provider := &triggerOnlyProvider{}
+	srv := newGRPCServer(provider)
+	callback := &recordingCallbackClient{}
+	srv.SetCallbackClient(callback)
+
+	types, err := srv.GetTriggerTypes(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetTriggerTypes returned rpc error: %v", err)
+	}
+	if len(types.Types) != 1 || types.Types[0] != "trigger.test" {
+		t.Fatalf("expected trigger.test type, got %#v", types.Types)
+	}
+
+	createResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
+		Type:   "trigger.test",
+		Name:   "pipeline:test-trigger",
+		Config: mustMapToStruct(t, map[string]any{"pool": "private"}),
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateTrigger application error: %s", createResp.Error)
+	}
+	if createResp.HandleId == "" {
+		t.Fatal("CreateTrigger returned empty HandleId")
+	}
+	if provider.created == nil {
+		t.Fatal("expected CreateTrigger to be called")
+	}
+	if got := provider.created.config["pool"]; got != "private" {
+		t.Fatalf("expected trigger config to be forwarded, got %#v", provider.created.config)
+	}
+
+	if resp, err := srv.InitModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil || resp.Error != "" {
+		t.Fatalf("InitModule = (%v, %v), want no error", resp, err)
+	}
+	if resp, err := srv.StartModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil || resp.Error != "" {
+		t.Fatalf("StartModule = (%v, %v), want no error", resp, err)
+	}
+	if provider.created.starts != 1 {
+		t.Fatalf("expected one trigger start, got %d", provider.created.starts)
+	}
+
+	if err := provider.created.cb("completed", map[string]any{"task_id": "task-1"}); err != nil {
+		t.Fatalf("trigger callback returned error: %v", err)
+	}
+	if callback.req == nil {
+		t.Fatal("expected callback request")
+	}
+	if callback.req.TriggerType != "pipeline:test-trigger" || callback.req.Action != "completed" {
+		t.Fatalf("unexpected callback request: %#v", callback.req)
+	}
+	if got := callback.req.Data.AsMap()["task_id"]; got != "task-1" {
+		t.Fatalf("expected callback task_id, got %#v", callback.req.Data.AsMap())
+	}
+
+	if resp, err := srv.StopModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil || resp.Error != "" {
+		t.Fatalf("StopModule = (%v, %v), want no error", resp, err)
+	}
+	if provider.created.stops != 1 {
+		t.Fatalf("expected one trigger stop, got %d", provider.created.stops)
+	}
+}
+
+func TestTriggerProviderCallbackFallsBackToTriggerType(t *testing.T) {
+	provider := &triggerOnlyProvider{}
+	srv := newGRPCServer(provider)
+	callback := &recordingCallbackClient{}
+	srv.SetCallbackClient(callback)
+
+	createResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
+		Type: "trigger.test",
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateTrigger application error: %s", createResp.Error)
+	}
+	if err := provider.created.cb("completed", map[string]any{"task_id": "task-1"}); err != nil {
+		t.Fatalf("trigger callback returned error: %v", err)
+	}
+	if callback.req == nil {
+		t.Fatal("expected callback request")
+	}
+	if callback.req.TriggerType != "trigger.test" {
+		t.Fatalf("expected callback fallback trigger type, got %#v", callback.req)
+	}
+}
+
+func TestSetCallbackClientClosesExistingBrokerConnection(t *testing.T) {
+	conn, err := grpc.NewClient("passthrough:///unused", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+
+	srv := newGRPCServer(&triggerOnlyProvider{})
+	srv.callbackConn = conn
+	srv.SetCallbackClient(&recordingCallbackClient{})
+
+	if srv.callbackConn != nil {
+		t.Fatal("expected callbackConn to be cleared")
+	}
+	if got := conn.GetState(); got != connectivity.Shutdown {
+		t.Fatalf("expected previous callback connection to be closed, state=%s", got)
+	}
+}
+
+func TestCreateModulePrefersModuleProviderWhenTypeAlsoTrigger(t *testing.T) {
+	module := &typedServiceModule{}
+	provider := &moduleAndTriggerProvider{
+		triggerOnlyProvider: triggerOnlyProvider{},
+		module:              module,
+	}
+	srv := newGRPCServer(provider)
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "trigger.test",
+		Name: "module-with-trigger-name",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateModule application error: %s", createResp.Error)
+	}
+	if provider.moduleCreated != 1 {
+		t.Fatalf("expected module provider to handle CreateModule, got %d", provider.moduleCreated)
+	}
+	if provider.created != nil {
+		t.Fatal("CreateModule should not route to TriggerProvider")
+	}
+
+	triggerResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
+		Type: "trigger.test",
+		Name: "trigger",
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger returned rpc error: %v", err)
+	}
+	if triggerResp.Error != "" {
+		t.Fatalf("unexpected CreateTrigger application error: %s", triggerResp.Error)
+	}
+	if provider.created == nil {
+		t.Fatal("expected CreateTrigger to route to TriggerProvider")
 	}
 }
 
@@ -334,6 +617,42 @@ func TestInvokeService_WithTypedInvoker(t *testing.T) {
 	}
 }
 
+func TestCreateTrigger_DispatchesTriggerProviderTypes(t *testing.T) {
+	provider := &triggerProviderForTest{}
+	srv := newGRPCServer(provider)
+
+	createResp, err := srv.CreateTrigger(context.Background(), &pb.CreateTriggerRequest{
+		Type:   "compute.completed",
+		Name:   "compute.completed",
+		Config: mustMapToStruct(t, map[string]any{"task_status": "succeeded"}),
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger returned rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected create error: %s", createResp.Error)
+	}
+	if provider.lastType != "compute.completed" {
+		t.Fatalf("CreateTrigger type = %q", provider.lastType)
+	}
+	if provider.lastConfig["task_status"] != "succeeded" {
+		t.Fatalf("CreateTrigger config = %#v", provider.lastConfig)
+	}
+
+	if _, err := srv.StartModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil {
+		t.Fatalf("StartModule: %v", err)
+	}
+	if provider.trigger == nil || !provider.trigger.started {
+		t.Fatal("trigger instance was not started through module lifecycle")
+	}
+	if _, err := srv.StopModule(context.Background(), &pb.HandleRequest{HandleId: createResp.HandleId}); err != nil {
+		t.Fatalf("StopModule: %v", err)
+	}
+	if !provider.trigger.stopped {
+		t.Fatal("trigger instance was not stopped through module lifecycle")
+	}
+}
+
 func TestInvokeService_WithTypedModuleFactoryForwardsTypedInvoker(t *testing.T) {
 	module := &typedServiceModule{}
 	srv := newGRPCServer(&typedServiceFactoryProvider{
@@ -408,7 +727,7 @@ func TestInvokeService_WithTypedModuleFactoryForwardsLegacyInvoker(t *testing.T)
 	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
 		HandleId: createResp.HandleId,
 		Method:   "Echo",
-		Args: mapToStruct(map[string]any{
+		Args: mustMapToStruct(t, map[string]any{
 			"value": "legacy-input",
 		}),
 	})
@@ -443,7 +762,7 @@ func TestInvokeService_ForwardsContextToLegacyInvoker(t *testing.T) {
 	resp, err := srv.InvokeService(ctx, &pb.InvokeServiceRequest{
 		HandleId: createResp.HandleId,
 		Method:   "Echo",
-		Args: mapToStruct(map[string]any{
+		Args: mustMapToStruct(t, map[string]any{
 			"value": "legacy-input",
 		}),
 	})
@@ -476,7 +795,7 @@ func TestInvokeService_PreservesStatusErrors(t *testing.T) {
 	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
 		HandleId: createResp.HandleId,
 		Method:   "IaCProvider.RepairDirtyMigration",
-		Args:     mapToStruct(map[string]any{}),
+		Args:     mustMapToStruct(t, map[string]any{}),
 	})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("InvokeService error code = %v, want Unimplemented (resp=%+v, err=%v)", status.Code(err), resp, err)
@@ -511,6 +830,67 @@ func TestInvokeService_WithTypedInputRequiresTypedInvoker(t *testing.T) {
 	}
 }
 
+// TestMapToStruct_SDK_PropagatesError verifies that the SDK's local mapToStruct
+// surfaces structpb.NewStruct errors instead of silently dropping data
+// (workflow#537 — mirrors the same test in plugin/external/convert_test.go).
+func TestMapToStruct_SDK_PropagatesError(t *testing.T) {
+	m := map[string]any{
+		"ok":  "value",
+		"bad": make(chan int), // chan is not structpb-representable
+	}
+	s, err := mapToStruct(m)
+	if err == nil {
+		t.Fatal("expected error from structpb.NewStruct on chan, got nil")
+	}
+	if s != nil {
+		t.Errorf("expected nil struct on error, got %v", s)
+	}
+}
+
+// TestInvokeService_PropagatesOutputEncodingError verifies that InvokeService
+// surfaces a structpb-encoding failure in the Response.Error field instead of
+// silently returning an empty result (workflow#537).
+func TestInvokeService_PropagatesOutputEncodingError(t *testing.T) {
+	// Module whose InvokeMethod returns a value that structpb cannot encode.
+	badModule := &badOutputModule{}
+	srv := newGRPCServer(&typedServiceProvider{module: badModule})
+
+	createResp, err := srv.CreateModule(context.Background(), &pb.CreateModuleRequest{
+		Type: "typed.service",
+		Name: "svc",
+	})
+	if err != nil {
+		t.Fatalf("CreateModule rpc error: %v", err)
+	}
+	if createResp.Error != "" {
+		t.Fatalf("unexpected CreateModule application error: %s", createResp.Error)
+	}
+	if createResp.HandleId == "" {
+		t.Fatal("CreateModule returned empty HandleId")
+	}
+
+	resp, err := srv.InvokeService(context.Background(), &pb.InvokeServiceRequest{
+		HandleId: createResp.HandleId,
+		Method:   "BadOutput",
+	})
+	if err != nil {
+		t.Fatalf("InvokeService returned unexpected rpc error: %v", err)
+	}
+	if resp.Error == "" {
+		t.Fatal("expected encoding error in Response.Error, got empty string")
+	}
+}
+
+// badOutputModule returns a map with a chan value which structpb cannot encode.
+type badOutputModule struct{}
+
+func (badOutputModule) Init() error                 { return nil }
+func (badOutputModule) Start(context.Context) error { return nil }
+func (badOutputModule) Stop(context.Context) error  { return nil }
+func (badOutputModule) InvokeMethod(_ string, _ map[string]any) (map[string]any, error) {
+	return map[string]any{"bad": make(chan int)}, nil
+}
+
 func mustPackGRPCTestMessage(t *testing.T, msg proto.Message) *anypb.Any {
 	t.Helper()
 	typed, err := anypb.New(msg)
@@ -518,6 +898,101 @@ func mustPackGRPCTestMessage(t *testing.T, msg proto.Message) *anypb.Any {
 		t.Fatalf("pack typed message: %v", err)
 	}
 	return typed
+}
+
+// stubProvider is a minimal PluginProvider returning a caller-supplied manifest.
+// Used by the WithManifestProvider tests to control provider-side fallback
+// without dragging in goplugin.Serve machinery.
+type stubProvider struct {
+	manifest PluginManifest
+}
+
+func (p *stubProvider) Manifest() PluginManifest { return p.manifest }
+
+// TestGetManifestPrefersDiskManifest locks in the precedence rule: when
+// WithManifestProvider wired a non-nil *plugin.PluginManifest, GetManifest
+// returns its fields, ignoring the PluginProvider.Manifest() fallback.
+func TestGetManifestPrefersDiskManifest(t *testing.T) {
+	disk := &pluginpkg.PluginManifest{
+		Name:           "embedded-plugin",
+		Version:        "1.2.3",
+		Author:         "GoCodeAlone",
+		Description:    "embedded test",
+		ConfigMutable:  true,
+		SampleCategory: "iac",
+	}
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "fallback", Version: ""}})
+	s.diskManifest = disk
+	got, err := s.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Version != "1.2.3" {
+		t.Fatalf("Version = %q, want 1.2.3 (disk override)", got.Version)
+	}
+	if got.SampleCategory != "iac" {
+		t.Fatalf("SampleCategory = %q, want iac", got.SampleCategory)
+	}
+}
+
+// TestGetManifestFallsBackToProviderWhenNoDisk covers the provider-only path:
+// without a disk manifest, GetManifest falls through to provider.Manifest()
+// so existing callers without WithManifestProvider continue to work.
+func TestGetManifestFallsBackToProviderWhenNoDisk(t *testing.T) {
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "p", Version: "0.1.0"}})
+	got, err := s.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Version != "0.1.0" {
+		t.Fatalf("Version = %q, want 0.1.0 (provider fallback)", got.Version)
+	}
+}
+
+// TestGetManifest_BuildVersionOverridesDiskVersion locks the single-channel
+// precedence rule for workflow#758: when s.buildVersion is non-empty, it
+// overrides diskManifest.Version in the GetManifest response.
+func TestGetManifest_BuildVersionOverridesDiskVersion(t *testing.T) {
+	disk := &pluginpkg.PluginManifest{
+		Name: "p", Version: "1.0.0", Author: "a", Description: "d",
+	}
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "p", Version: "0.0.0"}})
+	s.diskManifest = disk
+	s.buildVersion = "v1.2.3"
+	got, err := s.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Version != "v1.2.3" {
+		t.Errorf("Version = %q, want BuildVersion-augmented v1.2.3", got.Version)
+	}
+	if got.Name != disk.Name {
+		t.Errorf("Name = %q, want %q (other fields unchanged)", got.Name, disk.Name)
+	}
+}
+
+// TestGetManifest_BuildVersionOverridesProviderVersion: when there's no
+// diskManifest, BuildVersion still overrides provider.Manifest().Version.
+func TestGetManifest_BuildVersionOverridesProviderVersion(t *testing.T) {
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "p", Version: "0.0.1"}})
+	s.buildVersion = "v2.0.0"
+	got, err := s.GetManifest(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Version != "v2.0.0" {
+		t.Errorf("Version = %q, want v2.0.0", got.Version)
+	}
+}
+
+// TestWithBuildVersion_OptionSetsField verifies the WithBuildVersion
+// ServeOption properly sets grpcServer.buildVersion.
+func TestWithBuildVersion_OptionSetsField(t *testing.T) {
+	s := newGRPCServer(&stubProvider{manifest: PluginManifest{Name: "p", Version: "0.0.1"}})
+	WithBuildVersion("v3.1.4")(s)
+	if s.buildVersion != "v3.1.4" {
+		t.Errorf("buildVersion = %q, want v3.1.4", s.buildVersion)
+	}
 }
 
 // detectContentType maps common extensions to MIME types.

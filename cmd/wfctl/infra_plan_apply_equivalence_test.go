@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -26,6 +27,22 @@ func (r *recordingProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (
 	}
 	// Return a zero-value result so apply succeeds without cloud calls.
 	return &interfaces.ApplyResult{}, nil
+}
+
+// installAsV2Dispatch shadows applyCapture's promoted method so the
+// recording variant's Apply (which captures action.Resource per spec)
+// is the one the v2 seam invokes.
+func (r *recordingProvider) installAsV2Dispatch(t testing.TB) {
+	t.Helper()
+	orig := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, prov interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		result, err := r.Apply(ctx, plan)
+		if hookErr := fireSyntheticHooks(ctx, prov, plan, hooks, result); hookErr != nil && err == nil {
+			err = hookErr
+		}
+		return result, err
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
 }
 
 // TestPlanApplyEquivalence_EnvOverrideNames is the regression gate for Bug #32
@@ -112,13 +129,14 @@ modules:
 
 	// ── Step 2: what apply actually sends to the provider ────────────────────
 	rp := &recordingProvider{}
+	rp.installAsV2Dispatch(t)
 	orig := resolveIaCProvider
 	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 		return rp, nil, nil
 	}
 	t.Cleanup(func() { resolveIaCProvider = orig })
 
-	if err := applyInfraModules(context.Background(), cfgPath, "staging"); err != nil {
+	if _, err := applyInfraModules(context.Background(), cfgPath, "staging"); err != nil {
 		t.Fatalf("applyInfraModules: %v", err)
 	}
 

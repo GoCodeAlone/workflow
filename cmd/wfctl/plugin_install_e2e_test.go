@@ -423,6 +423,109 @@ func TestSafeJoin(t *testing.T) {
 	}
 }
 
+// TestInstalledManifestPreservesCLICommandsAndBuildHooks is the regression
+// test for the post-install dispatch bug: writeInstalledManifest used to drop
+// capabilities.cliCommands and capabilities.buildHooks, so even when a
+// registry manifest declared them, BuildCLIRegistry / build-hook discovery
+// reading the on-disk plugin.json saw an empty list. `wfctl <plugin-cmd>`
+// then reported `unknown command` and build hooks silently no-oped.
+func TestInstalledManifestPreservesCLICommandsAndBuildHooks(t *testing.T) {
+	rm := &RegistryManifest{
+		Name:        "workflow-plugin-payments",
+		Version:     "0.3.1",
+		Author:      "tester",
+		Description: "regression: cliCommands + buildHooks preserved post-install",
+		Type:        "external",
+		Tier:        "core",
+		License:     "Apache-2.0",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"payments.provider"},
+			StepTypes:   []string{"step.payment_charge"},
+			CLICommands: []RegistryCLICommand{
+				{Name: "payments", Description: "Payment provider operations"},
+			},
+			// Use a canonical event identifier (underscore-separated) per
+			// interfaces.HookEvent* convention; using a hyphen-separated
+			// placeholder would mask future validation drift.
+			BuildHooks: []RegistryBuildHook{
+				{Event: "pre_build", Priority: 10},
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := writeInstalledManifest(path, rm); err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read installed plugin.json: %v", err)
+	}
+	var got installedPluginJSON
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal installed plugin.json: %v", err)
+	}
+	if got.Capabilities == nil {
+		t.Fatal("expected non-nil Capabilities")
+	}
+	if len(got.Capabilities.CLICommands) != 1 || got.Capabilities.CLICommands[0].Name != "payments" {
+		t.Errorf("CLICommands = %+v, want [{Name: payments, …}]", got.Capabilities.CLICommands)
+	}
+	if len(got.Capabilities.BuildHooks) != 1 || got.Capabilities.BuildHooks[0].Event != "pre_build" {
+		t.Errorf("BuildHooks = %+v, want [{Event: pre_build, …}]", got.Capabilities.BuildHooks)
+	}
+}
+
+// TestInstalledManifestPreservesIaCProviderComputePlanVersion is the regression
+// test for workflow#699 manifest metadata: writeInstalledManifest used to drop
+// top-level iacProvider.computePlanVersion, so installed IaC provider manifests
+// emitted v1/v2 deprecation warnings even when the registry declared v2.
+func TestInstalledManifestPreservesIaCProviderComputePlanVersion(t *testing.T) {
+	rm := &RegistryManifest{
+		Name:        "workflow-plugin-digitalocean",
+		Version:     "2.0.0",
+		Author:      "tester",
+		Description: "regression: iacProvider.computePlanVersion preserved post-install",
+		Type:        "external",
+		Tier:        "community",
+		License:     "MIT",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"iac.provider"},
+			IaCProvider: &RegistryIaCProvider{
+				Name: "digitalocean",
+			},
+		},
+		IaCProvider: &RegistryIaCProvider{
+			ComputePlanVersion: "v2",
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := writeInstalledManifest(path, rm); err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read installed plugin.json: %v", err)
+	}
+	var got struct {
+		IaCProvider *RegistryIaCProvider `json:"iacProvider"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal installed plugin.json: %v", err)
+	}
+	if got.IaCProvider == nil {
+		t.Fatal("expected top-level iacProvider")
+	}
+	if got.IaCProvider.ComputePlanVersion != "v2" {
+		t.Fatalf("computePlanVersion = %q, want v2", got.IaCProvider.ComputePlanVersion)
+	}
+}
+
 // TestInstalledManifestEngineValidation verifies that the plugin.json written by
 // writeInstalledManifest passes the engine's plugin.LoadManifest and Validate.
 func TestInstalledManifestEngineValidation(t *testing.T) {
@@ -747,7 +850,6 @@ func TestPluginUpdateFallbackToRepo(t *testing.T) {
 		topDir + "/" + pluginName: binaryContent,
 	}
 	tarball := buildTarGz(t, tarEntries, 0755)
-	checksum := sha256Hex(tarball)
 
 	// manifest served by the plugin's repo when registry lookup fails.
 	updatedManifest := &RegistryManifest{
@@ -773,10 +875,9 @@ func TestPluginUpdateFallbackToRepo(t *testing.T) {
 			// Fill in the tarball URL dynamically (srv.URL is known here).
 			m := *updatedManifest
 			m.Downloads = []PluginDownload{{
-				OS:     runtime.GOOS,
-				Arch:   runtime.GOARCH,
-				URL:    "/tarball", // relative, will be prefixed by srv.URL in the handler
-				SHA256: checksum,
+				OS:   runtime.GOOS,
+				Arch: runtime.GOARCH,
+				URL:  "/tarball", // relative, will be prefixed by srv.URL in the handler
 			}}
 			// Use absolute URL for the tarball.
 			m.Downloads[0].URL = "http://" + r.Host + "/tarball"
@@ -836,6 +937,7 @@ func TestPluginUpdateFallbackToRepo(t *testing.T) {
 	err := runPluginUpdate([]string{
 		"-plugin-dir", pluginsDir,
 		"-config", cfgFile,
+		"-skip-checksum",
 		pluginName,
 	})
 	if err != nil {

@@ -1,0 +1,6 @@
+{
+  "name": "iac-pass",
+  "version": "0.1.0",
+  "author": "workflow",
+  "description": "Passing typed IaC conformance fixture"
+}

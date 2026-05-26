@@ -108,7 +108,27 @@ func installPluginReqDirect(pluginDir, registryCfgPath string, req config.Plugin
 		}
 	}
 
-	return installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify, false)
+	if err := installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify, false); err != nil {
+		return err
+	}
+
+	// Track parent in lockfile (workflow#771 Task 5). Closes the asymmetry
+	// where --from-config dep installs were tracked via Task 4 but parent
+	// installs via this path were not.
+	// Cycle-3 fix per reviewer CYC2-I1: use the function's NORMALIZED pluginName
+	// (already computed at line 87 via normalizePluginName(rawName)), NOT raw
+	// req.Name. installPluginFromManifest installs at pluginDir/<normalized>/<normalized>;
+	// raw req.Name "workflow-plugin-auth" would hash-miss at pluginDir/workflow-plugin-auth/...
+	// and produce an asymmetric lockfile key vs runPluginInstall's writes.
+	binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
+	checksum := ""
+	if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
+		checksum = cs
+	} else {
+		fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
+	}
+	updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, "", checksum)
+	return nil
 }
 
 // runPluginDeps lists dependencies for a plugin without installing them.
@@ -269,6 +289,26 @@ func resolveDependencies(
 			return fmt.Errorf("install dependency %q of %q: %w", dep.Name, pluginName, err)
 		}
 		resolved[dep.Name] = depManifest.Version
+
+		// Track dep in lockfile (workflow#771 Task 4). The chokepoint guard
+		// inside updateLockfileWithChecksum (Task 1) suppresses writes when
+		// running under an outer-frame installer (installFromLockfile etc.).
+		// Cycle-4 reviewer I1 Option-(b): use raw dep.Name for ALL three sites
+		// (install dir, hash path, lockfile key) — matches the un-normalized
+		// install above (`installPluginFromManifest(pluginDir, dep.Name, ...)`).
+		// Normalizing only the lockfile-side without changing install-side
+		// produces hash-MISS warnings + empty checksums for long-form dep names.
+		// Parent (Task 5) keeps normalize because runPluginInstall:257 normalizes
+		// install-side too — symmetric for that path. Asymmetric across Task 4 vs 5
+		// is a pre-existing convention difference, not regressed by this PR.
+		depBinaryPath := filepath.Join(pluginDir, dep.Name, dep.Name)
+		depChecksum := ""
+		if cs, hashErr := hashFileSHA256(depBinaryPath); hashErr == nil {
+			depChecksum = cs
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: could not hash dep binary %s: %v (lockfile will have no checksum)\n", depBinaryPath, hashErr)
+		}
+		updateLockfileWithChecksum(dep.Name, depManifest.Version, depManifest.Repository, "", depChecksum)
 	}
 	return nil
 }

@@ -1,0 +1,19 @@
+# app comment
+name: demo
+x-owned-by: platform
+modules:
+  # api module comment
+  - name: api
+    type: service.http
+    customField: keep-me
+    config:
+      port: 8080
+  - name: otel-collector
+    type: infra.container_service
+    satisfies:
+      - observability.telemetry.default
+    config:
+      image: otel/opentelemetry-collector-contrib:latest
+    dependsOn:
+      - api
+tail: keep

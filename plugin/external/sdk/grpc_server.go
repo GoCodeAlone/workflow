@@ -8,8 +8,10 @@ import (
 	"sync"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
+	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -27,7 +29,20 @@ type grpcServer struct {
 	messageHandlers map[string]func(payload []byte, metadata map[string]string) error
 
 	callbackClient pb.EngineCallbackServiceClient
+	callbackConn   *grpc.ClientConn
 	broker         *goplugin.GRPCBroker
+
+	// diskManifest, when non-nil, takes precedence over provider.Manifest()
+	// in GetManifest. Set via sdk.WithManifestProvider — lets plugins
+	// compile-time embed plugin.json without re-declaring fields in the
+	// PluginProvider implementation. Per workflow ADR-0031.
+	diskManifest *pluginpkg.PluginManifest
+
+	// buildVersion, when non-empty, overrides Version in the GetManifest RPC
+	// response (regardless of whether the underlying source is diskManifest
+	// or provider.Manifest()). Set via sdk.WithBuildVersion — single-channel
+	// precedence: BuildVersion always wins when set. Closes workflow#758.
+	buildVersion string
 }
 
 // newGRPCServer creates a gRPC server implementation wrapping the given provider.
@@ -48,9 +63,14 @@ func (s *grpcServer) setBroker(broker *goplugin.GRPCBroker) {
 }
 
 // SetCallbackClient stores the host callback gRPC client so that modules can
-// publish messages and manage subscriptions via the host.
+// publish messages and manage subscriptions via the host. It is intended for
+// startup/test wiring before live callbacks begin.
 func (s *grpcServer) SetCallbackClient(client pb.EngineCallbackServiceClient) {
 	s.mu.Lock()
+	if s.callbackConn != nil {
+		_ = s.callbackConn.Close()
+	}
+	s.callbackConn = nil
 	s.callbackClient = client
 	s.mu.Unlock()
 }
@@ -126,15 +146,31 @@ func (s *grpcSubscriber) Unsubscribe(topic string) error {
 // --- Metadata RPCs ---
 
 func (s *grpcServer) GetManifest(_ context.Context, _ *emptypb.Empty) (*pb.Manifest, error) {
-	m := s.provider.Manifest()
-	return &pb.Manifest{
-		Name:           m.Name,
-		Version:        m.Version,
-		Author:         m.Author,
-		Description:    m.Description,
-		ConfigMutable:  m.ConfigMutable,
-		SampleCategory: m.SampleCategory,
-	}, nil
+	var out *pb.Manifest
+	if s.diskManifest != nil {
+		out = &pb.Manifest{
+			Name:           s.diskManifest.Name,
+			Version:        s.diskManifest.Version,
+			Author:         s.diskManifest.Author,
+			Description:    s.diskManifest.Description,
+			ConfigMutable:  s.diskManifest.ConfigMutable,
+			SampleCategory: s.diskManifest.SampleCategory,
+		}
+	} else {
+		m := s.provider.Manifest()
+		out = &pb.Manifest{
+			Name:           m.Name,
+			Version:        m.Version,
+			Author:         m.Author,
+			Description:    m.Description,
+			ConfigMutable:  m.ConfigMutable,
+			SampleCategory: m.SampleCategory,
+		}
+	}
+	if s.buildVersion != "" {
+		out.Version = s.buildVersion
+	}
+	return out, nil
 }
 
 func (s *grpcServer) GetAsset(_ context.Context, req *pb.GetAssetRequest) (*pb.GetAssetResponse, error) {
@@ -275,6 +311,109 @@ func (s *grpcServer) CreateModule(_ context.Context, req *pb.CreateModuleRequest
 	s.registerModuleInstance(handle, inst)
 
 	return &pb.HandleResponse{HandleId: handle}, nil
+}
+
+func (s *grpcServer) ConfigureCallback(_ context.Context, req *pb.ConfigureCallbackRequest) (*pb.ErrorResponse, error) {
+	if req.BrokerId == 0 {
+		return &pb.ErrorResponse{Error: "callback broker id is required"}, nil
+	}
+	s.mu.RLock()
+	broker := s.broker
+	s.mu.RUnlock()
+	if broker == nil {
+		return &pb.ErrorResponse{Error: "callback broker is not configured"}, nil
+	}
+
+	conn, err := broker.Dial(req.BrokerId)
+	if err != nil {
+		return &pb.ErrorResponse{Error: fmt.Sprintf("dial callback broker: %v", err)}, nil
+	}
+
+	s.mu.Lock()
+	if s.callbackConn != nil {
+		_ = s.callbackConn.Close()
+	}
+	s.callbackConn = conn
+	s.callbackClient = pb.NewEngineCallbackServiceClient(conn)
+	s.mu.Unlock()
+
+	return &pb.ErrorResponse{}, nil
+}
+
+func (s *grpcServer) CreateTrigger(_ context.Context, req *pb.CreateTriggerRequest) (*pb.HandleResponse, error) {
+	tp, ok := s.provider.(TriggerProvider)
+	if !ok {
+		return &pb.HandleResponse{Error: "plugin does not provide triggers"}, nil
+	}
+	if !containsString(tp.TriggerTypes(), req.Type) {
+		return &pb.HandleResponse{Error: fmt.Sprintf("unknown trigger type %q", req.Type)}, nil
+	}
+
+	callbackWorkflowType := req.Name
+	if callbackWorkflowType == "" {
+		callbackWorkflowType = req.Type
+	}
+	inst, err := tp.CreateTrigger(req.Type, structToMap(req.Config), s.triggerCallback(callbackWorkflowType))
+	if err != nil {
+		return &pb.HandleResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
+	}
+
+	handle := uuid.New().String()
+	s.registerModuleInstance(handle, triggerModuleAdapter{trigger: inst})
+	return &pb.HandleResponse{HandleId: handle}, nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *grpcServer) triggerCallback(triggerType string) TriggerCallback {
+	return func(action string, data map[string]any) error {
+		s.mu.RLock()
+		cb := s.callbackClient
+		s.mu.RUnlock()
+		if cb == nil {
+			return errors.New("trigger callback client is not configured")
+		}
+
+		payload, err := mapToStruct(data)
+		if err != nil {
+			return fmt.Errorf("trigger callback data: %w", err)
+		}
+		resp, err := cb.TriggerWorkflow(context.Background(), &pb.TriggerWorkflowRequest{
+			TriggerType: triggerType,
+			Action:      action,
+			Data:        payload,
+		})
+		if err != nil {
+			return fmt.Errorf("trigger workflow callback: %w", err)
+		}
+		if resp != nil && resp.Error != "" {
+			return fmt.Errorf("trigger workflow callback: %s", resp.Error)
+		}
+		return nil
+	}
+}
+
+type triggerModuleAdapter struct {
+	trigger TriggerInstance
+}
+
+func (m triggerModuleAdapter) Init() error {
+	return nil
+}
+
+func (m triggerModuleAdapter) Start(ctx context.Context) error {
+	return m.trigger.Start(ctx)
+}
+
+func (m triggerModuleAdapter) Stop(ctx context.Context) error {
+	return m.trigger.Stop(ctx)
 }
 
 func (s *grpcServer) registerModuleInstance(handle string, inst ModuleInstance) {
@@ -436,8 +575,12 @@ func (s *grpcServer) ExecuteStep(ctx context.Context, req *pb.ExecuteStepRequest
 		return &pb.ExecuteStepResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
 
+	output, encErr := mapToStruct(result.Output)
+	if encErr != nil {
+		return &pb.ExecuteStepResponse{Error: fmt.Sprintf("encode step output: %v", encErr)}, nil //nolint:nilerr // app error in response field
+	}
 	return &pb.ExecuteStepResponse{
-		Output:       mapToStruct(result.Output),
+		Output:       output,
 		StopPipeline: result.StopPipeline,
 	}, nil
 }
@@ -510,7 +653,11 @@ func (s *grpcServer) InvokeService(ctx context.Context, req *pb.InvokeServiceReq
 			}
 			return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 		}
-		return &pb.InvokeServiceResponse{Result: mapToStruct(result)}, nil
+		resultStruct, encErr := mapToStruct(result)
+		if encErr != nil {
+			return &pb.InvokeServiceResponse{Error: fmt.Sprintf("encode service result: %v", encErr)}, nil //nolint:nilerr // app error in response field
+		}
+		return &pb.InvokeServiceResponse{Result: resultStruct}, nil
 	}
 
 	invoker, ok := inst.(ServiceInvoker)
@@ -527,7 +674,11 @@ func (s *grpcServer) InvokeService(ctx context.Context, req *pb.InvokeServiceReq
 		}
 		return &pb.InvokeServiceResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
-	return &pb.InvokeServiceResponse{Result: mapToStruct(result)}, nil
+	resultStruct, encErr := mapToStruct(result)
+	if encErr != nil {
+		return &pb.InvokeServiceResponse{Error: fmt.Sprintf("encode service result: %v", encErr)}, nil //nolint:nilerr // app error in response field
+	}
+	return &pb.InvokeServiceResponse{Result: resultStruct}, nil
 }
 
 type grpcStatusError interface {
@@ -572,10 +723,13 @@ func structToMap(s *structpb.Struct) map[string]any {
 	return s.AsMap()
 }
 
-func mapToStruct(m map[string]any) *structpb.Struct {
+func mapToStruct(m map[string]any) (*structpb.Struct, error) {
 	if m == nil {
-		return nil
+		return nil, nil
 	}
-	s, _ := structpb.NewStruct(m)
-	return s
+	s, err := structpb.NewStruct(m)
+	if err != nil {
+		return nil, fmt.Errorf("structpb.NewStruct: %w", err)
+	}
+	return s, nil
 }

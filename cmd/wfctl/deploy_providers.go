@@ -19,10 +19,9 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
-	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/external"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/grpc"
 )
 
 // DeployConfig holds all parameters needed to execute a deployment.
@@ -76,6 +75,13 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig, envName st
 // they may return nil for the closer.
 var resolveIaCProvider = discoverAndLoadIaCProvider
 
+// currentInfraPluginDir is the per-invocation plugin directory override set by
+// infra commands that accept -plugin-dir. It takes precedence over the
+// WFCTL_PLUGIN_DIR environment variable and the default "./data/plugins" path.
+// Set at the top of each runInfra* function and reset via defer, matching the
+// same seam pattern used by currentApplyIncludeFlag and applyAllowReplaceSet.
+var currentInfraPluginDir string
+
 // iacPluginManifest is the minimal shape needed to read both:
 //   - capabilities.iacProvider.name — used by findIaCPluginDir to
 //     match a plugin to a desired provider name; AND
@@ -87,6 +93,8 @@ var resolveIaCProvider = discoverAndLoadIaCProvider
 // double parse — and either may be empty without affecting the
 // other.
 type iacPluginManifest struct {
+	Name         string `json:"name"`
+	Version      string `json:"version"`
 	Capabilities struct {
 		IaCProvider struct {
 			Name string `json:"name"`
@@ -104,17 +112,22 @@ type iacPluginManifest struct {
 // the executable is present).
 //
 // The computePlanVersion return is the RAW value from the SDK manifest's
-// iacProvider.computePlanVersion field. This loader path performs only
-// minimal json.Unmarshal — no schema validation — so callers must NOT
-// assume the returned string is constrained to {"", "v1", "v2"}. Use
-// the wfctlhelpers.DispatchVersionV2 constant for the v2-equality check
-// (anything else, including unknown values and empty, defaults to v1):
+// iacProvider.computePlanVersion field. Currently UNUSED by
+// discoverAndLoadIaCProvider after the strict-contracts force-cutover
+// (the old caller `readIaCPluginComputePlanVersion` was deleted with
+// remoteIaCProvider). Reserved for the follow-up
+// CapabilitiesResponse.IaCCapabilityDeclaration.compute_plan_version
+// capability-extension PR (option (d) per team-lead ruling, batched with
+// canonical_keys between Task 17 and Task 20). Removing the return now
+// would force a signature churn round when the follow-up wires it back
+// in via a different reader (typed proto Capabilities RPC instead of
+// plugin.json scan); kept in place to avoid that churn.
 //
-//	if computePlanVersion == wfctlhelpers.DispatchVersionV2 { ... v2 path ... }
-//
-// (wfctlhelpers.DispatchVersionFor takes a provider value, not a raw
-// string, so it does not apply at this loader-level seam where only
-// the string is in hand.)
+// Until the follow-up: callers receive the value but discard it. The raw
+// string is unconstrained — SDK schema-validated values are {"", "v1",
+// "v2"}, but this loader path performs only minimal json.Unmarshal so
+// MUST NOT assume. Per workflow#699, the authoritative gate is the
+// typed CapabilitiesResponse check in discoverAndLoadIaCProvider.
 func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion string, hasBinary bool, err error) {
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
@@ -139,6 +152,24 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 		if m.Capabilities.IaCProvider.Name != providerName {
 			continue
 		}
+		// Per workflow#693 (Phase 2.1 follow-up to #640): validate
+		// iacProvider.computePlanVersion ∈ {"", "v1", "v2"} on the
+		// matching plugin manifest. A typo (e.g. "V2", "v2.0", "two")
+		// would surface as the empty/unknown-bucket default, masking
+		// operator intent — hard-fail so the misconfiguration shows
+		// up loudly. Per workflow#699 the authoritative enforcement
+		// is the typed CapabilitiesResponse gate in
+		// discoverAndLoadIaCProvider; this parse-time check is the
+		// pre-load schema sanity (defense-in-depth).
+		switch m.IaCProvider.ComputePlanVersion {
+		case "", "v1", "v2":
+			// valid
+		default:
+			return "", "", false, fmt.Errorf(
+				"plugin %q manifest has invalid iacProvider.computePlanVersion %q (must be \"\", \"v1\", or \"v2\")",
+				pluginName, m.IaCProvider.ComputePlanVersion,
+			)
+		}
 		binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
 		_, statErr := os.Stat(binaryPath)
 		return pluginName, m.IaCProvider.ComputePlanVersion, statErr == nil, nil
@@ -146,411 +177,202 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 	return "", "", false, nil
 }
 
-// loadIaCPlugin finds and loads the IaC plugin for the given provider, returning
-// its name, module factories, and a closer that shuts down the plugin subprocess.
-// Tests replace this var to inject fakes without touching the filesystem.
-var loadIaCPlugin = defaultLoadIaCPlugin
-
-func defaultLoadIaCPlugin(pluginDir, providerName string) (pluginName string, factories map[string]plugin.ModuleFactory, closer io.Closer, err error) {
-	pName, _, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
-	if findErr != nil {
-		return "", nil, nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, findErr)
-	}
-	if pName == "" {
-		return "", nil, nil, fmt.Errorf("no plugin found for IaC provider %q in %s — run: wfctl plugin install <plugin-name>", providerName, pluginDir)
-	}
-	if !hasBinary {
-		return "", nil, nil, fmt.Errorf("plugin %q declares provider %q but binary is missing — run: wfctl plugin install %s", pName, providerName, pName)
-	}
-	mgr := external.NewExternalPluginManager(pluginDir, nil)
-	adapter, loadErr := mgr.LoadPlugin(pName)
-	if loadErr != nil {
-		mgr.Shutdown()
-		return "", nil, nil, fmt.Errorf("load plugin %q for provider %q: %w", pName, providerName, loadErr)
-	}
-	return pName, adapter.ModuleFactories(), closerFunc(func() error { mgr.Shutdown(); return nil }), nil
-}
-
-// readIaCPluginComputePlanVersion re-reads plugin.json under
-// pluginDir to extract iacProvider.computePlanVersion for providerName.
-// Returns "" (treated as v1 by the dispatcher) when the manifest
-// can't be read or the field is omitted. Callers MUST tolerate empty
-// — apply behavior degrades to the legacy v1 path on any read
-// failure rather than blocking the apply.
+// discoverAndLoadIaCProvider implements the default resolveIaCProvider: it
+// scans the plugin directory for a plugin that declares
+// iacProvider.name == providerName, loads it via ExternalPluginManager, and
+// returns a typedIaCAdapter (satisfying interfaces.IaCProvider) plus a
+// Closer that shuts down the plugin subprocess. The caller must call
+// Close() on the returned Closer when done.
 //
-// Re-reads rather than threading the version through loadIaCPlugin's
-// existing 4-tuple return so the var-seam signature (and its 1 test
-// override) stays stable. Cost: one extra os.ReadFile of a tiny JSON
-// file per provider load — negligible vs. the gRPC plugin start.
-func readIaCPluginComputePlanVersion(pluginDir, providerName string) string {
-	_, version, _, err := findIaCPluginDir(pluginDir, providerName)
-	if err != nil {
-		return ""
-	}
-	return version
-}
-
-// discoverAndLoadIaCProvider implements the default resolveIaCProvider: it scans
-// the plugin directory for a plugin that declares iacProvider.name == providerName,
-// loads it via ExternalPluginManager, and returns the IaCProvider plus a Closer
-// that shuts down the plugin subprocess. The caller must call Close() when done.
+// Per plan §Task 16 (strict-contracts force-cutover, rev5): the loader
+// constructs the typed pb.IaCProviderRequiredClient + per-optional-service
+// clients directly from the plugin's gRPC connection and wraps them in
+// typedIaCAdapter (Task 30, PR #605). The legacy remoteIaCProvider
+// InvokeService string-dispatch surface is removed entirely — plugins
+// that do not register the typed IaCProviderRequired service are
+// rejected at load time with an actionable upgrade message.
+//
+// Per workflow#699 (v0.56.0+): after the typed adapter is constructed,
+// the loader calls Capabilities via the typed RPC with a bounded
+// (10s) context and rejects providers whose
+// CapabilitiesResponse.compute_plan_version != "v2". The gate bypasses
+// the typedIaCAdapter's fetchCapabilities cache (via
+// CapabilitiesWithContext) so a transient handshake failure does not
+// poison the adapter for the rest of the wfctl invocation.
 func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-	pluginDir := os.Getenv("WFCTL_PLUGIN_DIR")
+	pluginDir := currentInfraPluginDir
+	if pluginDir == "" {
+		pluginDir = os.Getenv("WFCTL_PLUGIN_DIR")
+	}
 	if pluginDir == "" {
 		pluginDir = "./data/plugins"
 	}
 
-	pluginName, factories, closer, err := loadIaCPlugin(pluginDir, providerName)
+	pName, manifestCPV, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
+	if findErr != nil {
+		return nil, nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, findErr)
+	}
+	if pName == "" {
+		return nil, nil, fmt.Errorf("no plugin found for IaC provider %q in %s — run: wfctl plugin install <plugin-name>", providerName, pluginDir)
+	}
+	if !hasBinary {
+		return nil, nil, fmt.Errorf("plugin %q declares provider %q but binary is missing — run: wfctl plugin install %s", pName, providerName, pName)
+	}
+
+	// Defense-in-depth deprecation warning (per workflow#699 cycle-2
+	// Finding #7). The authoritative enforcement is the typed
+	// CapabilitiesResponse gate below; the manifest field is only an
+	// advisory hint. Emitted from discoverAndLoadIaCProvider (called
+	// exactly once per resolve) rather than findIaCPluginDir (which
+	// may be called multiple times per invocation).
+	switch manifestCPV {
+	case "":
+		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion is empty; declare \"v2\" explicitly (workflow#699). Note: runtime enforcement reads the typed CapabilitiesResponse.compute_plan_version, not this manifest field; an out-of-date manifest with v2 in Capabilities will still load.", pName)
+	case "v1":
+		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion=\"v1\"; update to \"v2\" (workflow#699). Note: runtime enforcement reads the typed CapabilitiesResponse.compute_plan_version, not this manifest field; an out-of-date manifest with v2 in Capabilities will still load.", pName)
+	}
+
+	mgr := external.NewExternalPluginManager(pluginDir, nil)
+	adapter, loadErr := mgr.LoadPlugin(pName)
+	if loadErr != nil {
+		mgr.Shutdown()
+		return nil, nil, fmt.Errorf("load plugin %q for provider %q: %w", pName, providerName, loadErr)
+	}
+	closer := closerFunc(func() error { mgr.Shutdown(); return nil })
+
+	typed, err := buildTypedIaCAdapterFrom(ctx, providerName, pName, cfg, adapter)
 	if err != nil {
+		_ = closer.Close()
 		return nil, nil, err
 	}
-
-	factory, ok := factories["iac.provider"]
-	if !ok {
-		_ = closer.Close()
-		return nil, nil, fmt.Errorf("plugin %q does not expose an iac.provider module type — upgrade with: wfctl plugin update %s", pluginName, pluginName)
-	}
-
-	mod := factory("iac-provider", cfg)
-	if pluginErr := external.AsModuleError(mod); pluginErr != nil {
-		_ = closer.Close()
-		return nil, nil, fmt.Errorf("plugin %q iac.provider factory failed: %w", pluginName, pluginErr)
-	}
-	if mod == nil {
-		_ = closer.Close()
-		return nil, nil, fmt.Errorf("plugin %q iac.provider factory returned nil (unexpected — file an issue)", pluginName)
-	}
-
-	// RemoteModule does not directly implement interfaces.IaCProvider; instead it
-	// exposes InvokeService for cross-process method dispatch. Wrap it in a
-	// remoteIaCProvider that routes each IaCProvider call through InvokeService.
-	invoker, ok := mod.(remoteServiceInvoker)
-	if !ok {
-		_ = closer.Close()
-		return nil, nil, fmt.Errorf("plugin %q iac.provider module (%T) does not support service invocation — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
-	}
-
-	iacProvider := &remoteIaCProvider{
-		invoker:            invoker,
-		computePlanVersion: readIaCPluginComputePlanVersion(pluginDir, providerName),
-	}
-	// Notify the plugin that Initialize has been called (the plugin may treat
-	// this as a no-op if it already ran Initialize inside CreateModule).
-	if initErr := iacProvider.Initialize(ctx, cfg); initErr != nil {
-		_ = closer.Close()
-		return nil, nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
-	}
-	return iacProvider, closer, nil
+	return typed, closer, nil
 }
 
-// remoteServiceInvoker is satisfied by *external.RemoteModule, which provides
-// InvokeService for cross-process method dispatch.
-type remoteServiceInvoker interface {
-	InvokeService(method string, args map[string]any) (map[string]any, error)
+// capabilitiesWithContexter is the seam typedIaCAdapter satisfies for the
+// load-time workflow#699 gate. Defined as an interface so unit + integration
+// tests can substitute an in-memory stub without standing up a real gRPC
+// adapter.
+type capabilitiesWithContexter interface {
+	CapabilitiesWithContext(ctx context.Context) (*pb.CapabilitiesResponse, error)
 }
 
-type remoteServiceContextInvoker interface {
-	InvokeServiceContext(ctx context.Context, method string, args map[string]any) (map[string]any, error)
-}
-
-// remoteIaCProvider implements interfaces.IaCProvider by routing every method
-// through InvokeService to the plugin subprocess. Only the methods needed by
-// wfctl ci run deploy are fully implemented; the rest return a clear error.
-//
-// W-3b T3.7: also satisfies wfctlhelpers.ComputePlanVersionDeclarer via
-// ComputePlanVersion(), populated from the plugin.json SDK manifest at
-// load time. wfctl's apply path type-asserts the interface to choose
-// between v1 (legacy provider.Apply) and v2 (wfctlhelpers.ApplyPlan)
-// dispatch.
-type remoteIaCProvider struct {
-	invoker            remoteServiceInvoker
-	computePlanVersion string
-}
-
-// ComputePlanVersion satisfies wfctlhelpers.ComputePlanVersionDeclarer.
-// Returns the SDK-manifest value cached at load time ("", "v1", or
-// "v2"); empty defaults to v1 in the dispatcher.
-func (r *remoteIaCProvider) ComputePlanVersion() string {
-	return r.computePlanVersion
-}
-
-func (r *remoteIaCProvider) Name() string {
-	res, err := r.invoker.InvokeService("IaCProvider.Name", nil)
-	if err != nil {
-		return ""
+// enforceCapabilitiesV2Gate calls Capabilities on the typed adapter with a
+// bounded (10s) context and rejects providers whose
+// compute_plan_version != "v2". Exposed as a package-private seam (var) so
+// integration tests can substitute a stub adapter — see
+// TestDiscoverAndLoadIaCProvider_LoadGate_WiredIntoDiscovery.
+var enforceCapabilitiesV2Gate = func(ctx context.Context, p capabilitiesWithContexter, pluginName string) error {
+	capsCtx, capsCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer capsCancel()
+	capsResp, capsErr := p.CapabilitiesWithContext(capsCtx)
+	if capsErr != nil {
+		return fmt.Errorf("plugin %q: Capabilities RPC failed: %w (see workflow#699)", pluginName, capsErr)
 	}
-	name, _ := res["name"].(string)
-	return name
+	return verifyComputePlanVersionV2(capsResp.GetComputePlanVersion(), pluginName)
 }
 
-func (r *remoteIaCProvider) Version() string {
-	res, err := r.invoker.InvokeService("IaCProvider.Version", nil)
-	if err != nil {
-		return ""
-	}
-	v, _ := res["version"].(string)
-	return v
-}
-
-func (r *remoteIaCProvider) Initialize(_ context.Context, cfg map[string]any) error {
-	_, err := r.invoker.InvokeService("IaCProvider.Initialize", cfg)
-	return err
-}
-
-// jsonToAny converts any typed value to a JSON-compatible any (map[string]any,
-// []any, etc.) suitable for embedding in InvokeService arg maps.
-func jsonToAny(v any) (any, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	var out any
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// anyToStruct decodes a JSON-compatible any value (map[string]any / []any) into
-// a typed struct using a JSON round-trip.
-func anyToStruct(src any, dst any) error {
-	b, err := json.Marshal(src)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, dst)
-}
-
-func (r *remoteIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration {
-	res, err := r.invoker.InvokeService("IaCProvider.Capabilities", nil)
-	if err != nil {
+// verifyComputePlanVersionV2 rejects a plugin whose
+// CapabilitiesResponse.compute_plan_version is not "v2". Called from
+// discoverAndLoadIaCProvider after the typed adapter handshake; the
+// rejection error is operator-facing — it MUST name the plugin and
+// point at workflow#699.
+func verifyComputePlanVersionV2(cpv, pluginName string) error {
+	if cpv == "v2" {
 		return nil
 	}
-	raw, ok := res["capabilities"]
-	if !ok {
+	return fmt.Errorf(
+		"plugin %q declares CapabilitiesResponse.compute_plan_version = %q; "+
+			"workflow v0.56.0+ requires \"v2\" (see workflow#699 — upgrade plugin to v2.0.0 or higher)",
+		pluginName, cpv,
+	)
+}
+
+// iacAdapterAccessor is the slice of *external.ExternalPluginAdapter the
+// typed-IaC loader needs after a successful LoadPlugin. Extracted as an
+// interface so buildTypedIaCAdapterFrom is unit-testable against an
+// in-process gRPC server without spawning a real plugin subprocess —
+// the spec Step 1 boundary test (TestDiscoverAndLoadIaCProvider_ReturnsTypedClient)
+// constructs a stub adapter satisfying this interface and verifies the
+// returned interfaces.IaCProvider is *typedIaCAdapter.
+type iacAdapterAccessor interface {
+	Conn() *grpc.ClientConn
+	ContractRegistry() *pb.ContractRegistry
+	ContractRegistryError() error
+}
+
+// buildTypedIaCAdapterFrom is the post-LoadPlugin half of
+// discoverAndLoadIaCProvider, factored out so it's unit-testable in
+// isolation against an in-process gRPC server. Returns the typed
+// IaCProvider on success, a typed error otherwise. Caller is
+// responsible for closing the plugin manager on error.
+func buildTypedIaCAdapterFrom(ctx context.Context, providerName, pName string, cfg map[string]any, adapter iacAdapterAccessor) (interfaces.IaCProvider, error) {
+	conn := adapter.Conn()
+	if conn == nil {
+		return nil, fmt.Errorf("plugin %q does not expose a gRPC connection (host adapter missing PluginClient.Conn) — upgrade with: wfctl plugin update %s", pName, pName)
+	}
+
+	// Surface a ContractRegistry RPC failure FIRST. Without this guard,
+	// a transport / Unimplemented error against GetContractRegistry
+	// silently degrades to an empty registry, and the next
+	// `if !registered[iacServiceRequired]` branch fires the misleading
+	// "does not register the required service" message — masking the
+	// real cause. Per Copilot finding on PR #609.
+	if regErr := adapter.ContractRegistryError(); regErr != nil {
+		return nil, fmt.Errorf("plugin %q ContractRegistry RPC failed: %w — upgrade with: wfctl plugin update %s", pName, regErr, pName)
+	}
+
+	registered := registeredIaCServices(adapter.ContractRegistry())
+	if !registered[iacServiceRequired] {
+		return nil, fmt.Errorf("plugin %q does not register the required %q gRPC service — upgrade with: wfctl plugin update %s", pName, iacServiceRequired, pName)
+	}
+
+	typed := newTypedIaCAdapter(conn, registered)
+	if initErr := typed.Initialize(ctx, cfg); initErr != nil {
+		return nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
+	}
+	// workflow#699 load-time gate: enforce ComputePlanVersion="v2" via the
+	// typed CapabilitiesResponse. 10s timeout bounds a hung handshake;
+	// CapabilitiesWithContext bypasses the lifetime-cached fetchCapabilities
+	// so a transient RPC failure here does not poison the adapter for
+	// later well-formed calls (cycle-3 I-NEW-6).
+	if gateErr := enforceCapabilitiesV2Gate(ctx, typed, pName); gateErr != nil {
+		return nil, gateErr
+	}
+	return typed, nil
+}
+
+// registeredIaCServices walks a plugin's ContractRegistry response and
+// collects the fully-qualified gRPC service names of every SERVICE-kind
+// contract. typedIaCAdapter uses this map to gate optional-client
+// construction — only services the plugin actually advertised get a
+// typed client; the rest yield interfaces.ErrProviderMethodUnimplemented
+// at call time so dispatch sites can errors.Is and skip the provider.
+func registeredIaCServices(reg *pb.ContractRegistry) map[string]bool {
+	if reg == nil {
 		return nil
 	}
-	var caps []interfaces.IaCCapabilityDeclaration
-	if err := anyToStruct(raw, &caps); err != nil {
-		return nil
-	}
-	return caps
-}
-
-func (r *remoteIaCProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
-	desiredAny, err := jsonToAny(desired)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.Plan: marshal desired: %w", err)
-	}
-	currentAny, err := jsonToAny(current)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.Plan: marshal current: %w", err)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.Plan", map[string]any{
-		"desired": desiredAny,
-		"current": currentAny,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var plan interfaces.IaCPlan
-	if err := anyToStruct(res, &plan); err != nil {
-		return nil, fmt.Errorf("IaCProvider.Plan: decode result: %w", err)
-	}
-	return &plan, nil
-}
-
-func (r *remoteIaCProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	planAny, err := jsonToAny(plan)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.Apply: marshal plan: %w", err)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.Apply", map[string]any{"plan": planAny})
-	if err != nil {
-		return nil, err
-	}
-	var result interfaces.ApplyResult
-	if err := anyToStruct(res, &result); err != nil {
-		return nil, fmt.Errorf("IaCProvider.Apply: decode result: %w", err)
-	}
-	return &result, nil
-}
-
-func (r *remoteIaCProvider) Destroy(_ context.Context, refs []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
-	refsAny, err := jsonToAny(refs)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.Destroy: marshal refs: %w", err)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.Destroy", map[string]any{
-		"refs": refsAny,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var result interfaces.DestroyResult
-	if err := anyToStruct(res, &result); err != nil {
-		return nil, fmt.Errorf("IaCProvider.Destroy: decode result: %w", err)
-	}
-	return &result, nil
-}
-
-func (r *remoteIaCProvider) Status(_ context.Context, refs []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
-	refsAny, err := jsonToAny(refs)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.Status: marshal refs: %w", err)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.Status", map[string]any{
-		"refs": refsAny,
-	})
-	if err != nil {
-		return nil, err
-	}
-	raw, ok := res["statuses"]
-	if !ok {
-		return nil, nil
-	}
-	var statuses []interfaces.ResourceStatus
-	if err := anyToStruct(raw, &statuses); err != nil {
-		return nil, fmt.Errorf("IaCProvider.Status: decode result: %w", err)
-	}
-	return statuses, nil
-}
-
-func (r *remoteIaCProvider) DetectDrift(_ context.Context, refs []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
-	refsAny, err := jsonToAny(refs)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.DetectDrift: marshal refs: %w", err)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.DetectDrift", map[string]any{
-		"refs": refsAny,
-	})
-	if err != nil {
-		return nil, err
-	}
-	raw, ok := res["drifts"]
-	if !ok {
-		return nil, nil
-	}
-	var drifts []interfaces.DriftResult
-	if err := anyToStruct(raw, &drifts); err != nil {
-		return nil, fmt.Errorf("IaCProvider.DetectDrift: decode result: %w", err)
-	}
-	return drifts, nil
-}
-
-func (r *remoteIaCProvider) Import(_ context.Context, cloudID string, resourceType string) (*interfaces.ResourceState, error) {
-	res, err := r.invoker.InvokeService("IaCProvider.Import", map[string]any{
-		"provider_id":   cloudID,
-		"resource_type": resourceType,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var state interfaces.ResourceState
-	if err := anyToStruct(res, &state); err != nil {
-		return nil, fmt.Errorf("IaCProvider.Import: decode result: %w", err)
-	}
-	return &state, nil
-}
-
-func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.Size, hints *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
-	hintsAny, err := jsonToAny(hints)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.ResolveSizing: marshal hints: %w", err)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.ResolveSizing", map[string]any{
-		"resource_type": resourceType,
-		"size":          string(size),
-		"hints":         hintsAny,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var sizing interfaces.ProviderSizing
-	if err := anyToStruct(res, &sizing); err != nil {
-		return nil, fmt.Errorf("IaCProvider.ResolveSizing: decode result: %w", err)
-	}
-	return &sizing, nil
-}
-
-func (r *remoteIaCProvider) RepairDirtyMigration(ctx context.Context, req interfaces.MigrationRepairRequest) (*interfaces.MigrationRepairResult, error) {
-	reqAny, err := jsonToAny(req)
-	if err != nil {
-		return nil, fmt.Errorf("IaCProvider.RepairDirtyMigration: marshal request: %w", err)
-	}
-	args := map[string]any{
-		"request": reqAny,
-	}
-	var res map[string]any
-	if invoker, ok := r.invoker.(remoteServiceContextInvoker); ok {
-		res, err = invoker.InvokeServiceContext(ctx, "IaCProvider.RepairDirtyMigration", args)
-	} else {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+	out := make(map[string]bool, len(reg.GetContracts()))
+	for _, c := range reg.GetContracts() {
+		if c.GetKind() == pb.ContractKind_CONTRACT_KIND_SERVICE {
+			out[c.GetServiceName()] = true
 		}
-		res, err = r.invoker.InvokeService("IaCProvider.RepairDirtyMigration", args)
-	}
-	if err != nil {
-		return nil, err
-	}
-	var result interfaces.MigrationRepairResult
-	if err := anyToStruct(res, &result); err != nil {
-		return nil, fmt.Errorf("IaCProvider.RepairDirtyMigration: decode result: %w", err)
-	}
-	return &result, nil
-}
-
-func (r *remoteIaCProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
-	return &remoteResourceDriver{invoker: r.invoker, resourceType: resourceType}, nil
-}
-
-// SupportedCanonicalKeys returns the full canonical key set for remote providers.
-// External plugin providers may override this via the plugin manifest in a future phase.
-func (r *remoteIaCProvider) BootstrapStateBackend(ctx context.Context, cfg map[string]any) (*interfaces.BootstrapResult, error) {
-	res, err := r.invoker.InvokeService("IaCProvider.BootstrapStateBackend", cfg)
-	if err != nil {
-		return nil, err
-	}
-	if res == nil {
-		return nil, nil
-	}
-	var result interfaces.BootstrapResult
-	if err := anyToStruct(res, &result); err != nil {
-		return nil, fmt.Errorf("BootstrapStateBackend: decode result: %w", err)
-	}
-	return &result, nil
-}
-
-func (r *remoteIaCProvider) SupportedCanonicalKeys() []string {
-	return interfaces.CanonicalKeys()
-}
-
-func (r *remoteIaCProvider) Close() error { return nil }
-
-// remoteResourceDriver routes ResourceDriver calls to the plugin via InvokeService.
-type remoteResourceDriver struct {
-	invoker      remoteServiceInvoker
-	resourceType string
-}
-
-// sensitiveToAny converts a map[string]bool (the Sensitive field on
-// ResourceOutput) into the map[string]any shape structpb.NewStruct
-// accepts. Returns nil for empty/nil input so the wire stays
-// trim-friendly. Without this conversion, the upstream
-// plugin/external/convert.go::mapToStruct silently drops the entire
-// args struct on NewStruct failure (it returns &structpb.Struct{}
-// rather than surfacing the typing error) — the bug T3.9
-// runtime-launch-validation surfaced.
-func sensitiveToAny(s map[string]bool) map[string]any {
-	if len(s) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(s))
-	for k, v := range s {
-		out[k] = v
 	}
 	return out
 }
+
+// closerFunc adapts a func() error to io.Closer.
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
+
+// ─── Error classification + retry helpers ───────────────────────────────────
+//
+// Used by pluginDeployProvider to wrap typed-RPC errors with stable IaC
+// sentinels so callers can errors.Is + classify. Independent of the
+// transport layer — kept after the strict-contracts cutover (Task 16)
+// because typed gRPC errors arrive as plain text on the wire too;
+// wrapIaCError sniffs the message for HTTP-status / common-phrase
+// patterns, which is provider-agnostic.
 
 // wrapIaCError categorizes plugin errors by matching HTTP status codes and
 // common message patterns, wrapping with the appropriate IaC sentinel so
@@ -628,257 +450,13 @@ func retryOnTransient(ctx context.Context, op func() error) error {
 func deployOpError(resourceName, op string, err error) error {
 	switch {
 	case errors.Is(err, interfaces.ErrUnauthorized) || errors.Is(err, interfaces.ErrForbidden):
-		return fmt.Errorf("plugin deploy %q: %s: auth failed — check DIGITALOCEAN_TOKEN permissions: %w", resourceName, op, err)
+		return fmt.Errorf("plugin deploy %q: %s: auth failed — check provider credentials: %w", resourceName, op, err)
 	case errors.Is(err, interfaces.ErrValidation):
 		return fmt.Errorf("plugin deploy %q: %s: validation error: %w", resourceName, op, err)
 	default:
 		return fmt.Errorf("plugin deploy %q: %s failed: %w", resourceName, op, err)
 	}
 }
-
-// decodeResourceOutput converts an InvokeService response map into a *interfaces.ResourceOutput,
-// including the Outputs map and Sensitive flags that the previous Update implementation discarded.
-func decodeResourceOutput(m map[string]any) *interfaces.ResourceOutput {
-	out := &interfaces.ResourceOutput{
-		ProviderID: stringFromMap(m, "provider_id"),
-		Name:       stringFromMap(m, "name"),
-		Type:       stringFromMap(m, "type"),
-		Status:     stringFromMap(m, "status"),
-	}
-	if raw, ok := m["outputs"]; ok {
-		if outputs, ok := raw.(map[string]any); ok {
-			out.Outputs = outputs
-		}
-	}
-	if raw, ok := m["sensitive"]; ok {
-		switch v := raw.(type) {
-		case map[string]bool:
-			out.Sensitive = v
-		case map[string]any:
-			sens := make(map[string]bool, len(v))
-			for k, val := range v {
-				if b, ok := val.(bool); ok {
-					sens[k] = b
-				}
-			}
-			out.Sensitive = sens
-		}
-	}
-	return out
-}
-
-func (d *remoteResourceDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	res, err := d.invoker.InvokeService("ResourceDriver.Create", map[string]any{
-		"resource_type": d.resourceType,
-		"spec_name":     spec.Name,
-		"spec_type":     spec.Type,
-		"spec_config":   spec.Config,
-	})
-	if err != nil {
-		return nil, wrapIaCError(err)
-	}
-	return decodeResourceOutput(res), nil
-}
-
-func (d *remoteResourceDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
-	res, err := d.invoker.InvokeService("ResourceDriver.Read", map[string]any{
-		"resource_type":   d.resourceType,
-		"ref_name":        ref.Name,
-		"ref_type":        ref.Type,
-		"ref_provider_id": ref.ProviderID,
-	})
-	if err != nil {
-		return nil, wrapIaCError(err)
-	}
-	return decodeResourceOutput(res), nil
-}
-
-func (d *remoteResourceDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	res, err := d.invoker.InvokeService("ResourceDriver.Update", map[string]any{
-		"resource_type":   d.resourceType,
-		"ref_name":        ref.Name,
-		"ref_type":        ref.Type,
-		"ref_provider_id": ref.ProviderID,
-		"spec_name":       spec.Name,
-		"spec_type":       spec.Type,
-		"spec_config":     spec.Config,
-	})
-	if err != nil {
-		return nil, wrapIaCError(err)
-	}
-	return decodeResourceOutput(res), nil
-}
-
-func (d *remoteResourceDriver) Delete(_ context.Context, ref interfaces.ResourceRef) error {
-	_, err := d.invoker.InvokeService("ResourceDriver.Delete", map[string]any{
-		"resource_type":   d.resourceType,
-		"ref_name":        ref.Name,
-		"ref_type":        ref.Type,
-		"ref_provider_id": ref.ProviderID,
-	})
-	return wrapIaCError(err)
-}
-
-func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.ResourceSpec, current *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
-	args := map[string]any{
-		"resource_type":       d.resourceType,
-		"spec_name":           desired.Name,
-		"spec_type":           desired.Type,
-		"spec_config":         desired.Config,
-		"current_name":        current.Name,
-		"current_type":        current.Type,
-		"current_provider_id": current.ProviderID,
-		"current_status":      current.Status,
-		"current_outputs":     current.Outputs,
-	}
-	// Sensitive crosses the gRPC boundary as map[string]any.
-	// structpb.NewStruct rejects map[string]bool; without this
-	// conversion the entire args struct silently drops to empty
-	// (mapToStruct in plugin/external/convert.go falls back to
-	// &structpb.Struct{} on err) and the plugin observes args=map[]
-	// — the bug T3.9 runtime-launch-validation surfaced.
-	//
-	// Only include the key when the converted map is non-empty, so the
-	// wire stays trim-friendly (matches sensitiveToAny's docstring).
-	// Setting `args["current_sensitive"] = nil` would serialize as a
-	// NullValue rather than omitting the field, defeating that intent.
-	if conv := sensitiveToAny(current.Sensitive); conv != nil {
-		args["current_sensitive"] = conv
-	}
-	res, err := d.invoker.InvokeService("ResourceDriver.Diff", args)
-	if err != nil {
-		return nil, wrapIaCError(err)
-	}
-	result := &interfaces.DiffResult{}
-	result.NeedsUpdate, _ = res["needs_update"].(bool)
-	result.NeedsReplace, _ = res["needs_replace"].(bool)
-	if rawChanges, ok := res["changes"]; ok {
-		if changes, ok := rawChanges.([]any); ok {
-			for _, c := range changes {
-				if cm, ok := c.(map[string]any); ok {
-					fc := interfaces.FieldChange{
-						Path: stringFromMap(cm, "path"),
-						Old:  cm["old"],
-						New:  cm["new"],
-					}
-					fc.ForceNew, _ = cm["force_new"].(bool)
-					result.Changes = append(result.Changes, fc)
-				}
-			}
-		}
-	}
-	return result, nil
-}
-
-func (d *remoteResourceDriver) HealthCheck(_ context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
-	res, err := d.invoker.InvokeService("ResourceDriver.HealthCheck", map[string]any{
-		"resource_type":   d.resourceType,
-		"ref_name":        ref.Name,
-		"ref_type":        ref.Type,
-		"ref_provider_id": ref.ProviderID,
-	})
-	if err != nil {
-		return nil, wrapIaCError(err)
-	}
-	healthy, _ := res["healthy"].(bool)
-	message, _ := res["message"].(string)
-	return &interfaces.HealthResult{Healthy: healthy, Message: message}, nil
-}
-
-func (d *remoteResourceDriver) Scale(_ context.Context, ref interfaces.ResourceRef, replicas int) (*interfaces.ResourceOutput, error) {
-	res, err := d.invoker.InvokeService("ResourceDriver.Scale", map[string]any{
-		"resource_type":   d.resourceType,
-		"ref_name":        ref.Name,
-		"ref_type":        ref.Type,
-		"ref_provider_id": ref.ProviderID,
-		"replicas":        replicas,
-	})
-	if err != nil {
-		return nil, wrapIaCError(err)
-	}
-	return decodeResourceOutput(res), nil
-}
-
-func (d *remoteResourceDriver) SensitiveKeys() []string {
-	res, err := d.invoker.InvokeService("ResourceDriver.SensitiveKeys", map[string]any{
-		"resource_type": d.resourceType,
-	})
-	if err != nil {
-		return nil
-	}
-	raw, ok := res["keys"]
-	if !ok {
-		return nil
-	}
-	items, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	keys := make([]string, 0, len(items))
-	for _, item := range items {
-		if s, ok := item.(string); ok {
-			keys = append(keys, s)
-		}
-	}
-	return keys
-}
-
-// Troubleshoot calls the plugin's optional Troubleshooter.Troubleshoot.
-// Returns (nil, nil) silently when the plugin returns Unimplemented so
-// the caller doesn't need to probe for capability — absence is a valid answer.
-func (d *remoteResourceDriver) Troubleshoot(ctx context.Context, ref interfaces.ResourceRef, failureMsg string) ([]interfaces.Diagnostic, error) {
-	// Pass ref as flat primitives — structpb.NewStruct (the gRPC transport)
-	// cannot encode arbitrary Go structs; each field must be a scalar.
-	res, err := d.invoker.InvokeService("ResourceDriver.Troubleshoot", map[string]any{
-		"resource_type":   d.resourceType,
-		"ref_name":        ref.Name,
-		"ref_provider_id": ref.ProviderID,
-		"ref_type":        ref.Type,
-		"failure_msg":     failureMsg,
-	})
-	if err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() == codes.Unimplemented {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("resource driver Troubleshoot: %w", err)
-	}
-	raw, _ := res["diagnostics"].([]any)
-	out := make([]interfaces.Diagnostic, 0, len(raw))
-	for _, r := range raw {
-		m, _ := r.(map[string]any)
-		diag := interfaces.Diagnostic{
-			ID:     stringVal(m, "id"),
-			Phase:  stringVal(m, "phase"),
-			Cause:  stringVal(m, "cause"),
-			Detail: stringVal(m, "detail"),
-		}
-		if s := stringVal(m, "at"); s != "" {
-			if t, perr := time.Parse(time.RFC3339, s); perr == nil {
-				diag.At = t
-			}
-		}
-		out = append(out, diag)
-	}
-	return out, nil
-}
-
-// stringVal returns a string field from a map or "" if missing/wrong type.
-func stringVal(m map[string]any, k string) string {
-	if v, ok := m[k].(string); ok {
-		return v
-	}
-	return ""
-}
-
-func stringFromMap(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
-}
-
-// closerFunc adapts a func() error to io.Closer.
-type closerFunc func() error
-
-func (f closerFunc) Close() error { return f() }
 
 // newPluginDeployProvider looks up a matching iac.provider + infra.container_service
 // module pair in wfCfg and wraps them as a DeployProvider. envName selects the
@@ -937,7 +515,6 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig, 
 	// behaviour is predictable rather than silently wrong.
 	deployTargetTypes := []string{
 		"infra.container_service",
-		"platform.do_app",
 		"platform.app_platform",
 		"infra.k8s_cluster",
 	}

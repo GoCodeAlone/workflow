@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
-	"gopkg.in/yaml.v3"
 )
 
 func runCIRun(args []string) error {
@@ -22,6 +21,8 @@ func runCIRun(args []string) error {
 	phases := fs.String("phase", "build,test", "Comma-separated phases: build, test, deploy")
 	env := fs.String("env", "", "Target environment (required for deploy phase)")
 	verbose := fs.Bool("verbose", false, "Show detailed output")
+	dryRun := fs.Bool("dry-run", false, "Show planned operations without executing (deploy phase only)")
+	dryRunFormat := fs.String("format", "table", "Dry-run output format: table, json")
 	pluginDir := fs.String("plugin-dir", "", "Directory containing installed plugins (default: $WFCTL_PLUGIN_DIR or ./data/plugins)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl ci run [options]\n\nRun CI phases from workflow config.\n\nOptions:\n")
@@ -31,16 +32,9 @@ func runCIRun(args []string) error {
 		return err
 	}
 
-	data, err := os.ReadFile(*configFile)
+	cfg, err := config.LoadFromFile(*configFile)
 	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-	var cfg config.WorkflowConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config: %w", err)
-	}
-	if cfg.CI == nil {
-		return fmt.Errorf("no ci: section in %s", *configFile)
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	phaseList := strings.Split(*phases, ",")
@@ -52,29 +46,38 @@ func runCIRun(args []string) error {
 					return fmt.Errorf("build phase failed: %w", err)
 				}
 			}
-			if err := runBuildPhase(cfg.CI.Build, *verbose); err != nil {
+			if err := runBuildPhase(ciBuild(cfg), *verbose); err != nil {
 				return fmt.Errorf("build phase failed: %w", err)
 			}
 		case "test":
-			if err := runTestPhase(cfg.CI.Test, *verbose); err != nil {
+			if !hasConfiguredTests(ciTest(cfg)) {
+				if err := runDefaultGoTests(*verbose); err != nil {
+					return fmt.Errorf("test phase failed: %w", err)
+				}
+				continue
+			}
+			if err := runTestPhase(ciTest(cfg), *verbose); err != nil {
 				return fmt.Errorf("test phase failed: %w", err)
 			}
 		case "deploy":
 			if *env == "" {
 				return fmt.Errorf("--env is required for deploy phase")
 			}
+			if *dryRun {
+				return runDeployPhaseDryRun(ciDeploy(cfg), *env, cfg, cfg.Services, *dryRunFormat, *configFile)
+			}
 			if *pluginDir != "" {
 				os.Setenv("WFCTL_PLUGIN_DIR", *pluginDir) //nolint:errcheck
 			}
-			if err := runMigrationDeployGuard(*configFile, *env, *pluginDir, &cfg); err != nil {
+			if err := runMigrationDeployGuard(*configFile, *env, *pluginDir, cfg); err != nil {
 				return fmt.Errorf("migration guard failed: %w", err)
 			}
 			if len(cfg.Services) > 0 {
-				if err := runMultiServiceDeploy(cfg.CI.Deploy, *env, &cfg, cfg.Services, *verbose); err != nil {
+				if err := runMultiServiceDeploy(ciDeploy(cfg), *env, cfg, cfg.Services, *verbose); err != nil {
 					return fmt.Errorf("deploy phase failed: %w", err)
 				}
 			} else {
-				if err := runDeployPhaseWithConfig(cfg.CI.Deploy, *env, &cfg, nil, *verbose); err != nil {
+				if err := runDeployPhaseWithConfig(ciDeploy(cfg), *env, cfg, nil, *verbose); err != nil {
 					return fmt.Errorf("deploy phase failed: %w", err)
 				}
 			}
@@ -83,6 +86,42 @@ func runCIRun(args []string) error {
 		}
 	}
 	return nil
+}
+
+func ciBuild(cfg *config.WorkflowConfig) *config.CIBuildConfig {
+	if cfg == nil || cfg.CI == nil {
+		return nil
+	}
+	return cfg.CI.Build
+}
+
+func ciTest(cfg *config.WorkflowConfig) *config.CITestConfig {
+	if cfg == nil || cfg.CI == nil {
+		return nil
+	}
+	return cfg.CI.Test
+}
+
+func ciDeploy(cfg *config.WorkflowConfig) *config.CIDeployConfig {
+	if cfg == nil || cfg.CI == nil {
+		return nil
+	}
+	return cfg.CI.Deploy
+}
+
+func hasConfiguredTests(test *config.CITestConfig) bool {
+	if test == nil {
+		return false
+	}
+	return test.Unit != nil || test.Integration != nil || test.E2E != nil
+}
+
+func runDefaultGoTests(_ bool) error {
+	fmt.Println("No test configuration, running go test ./...")
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func runMigrationDeployGuard(configFile, envName, pluginDir string, cfg *config.WorkflowConfig) error {

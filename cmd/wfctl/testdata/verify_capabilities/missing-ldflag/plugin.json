@@ -1,0 +1,7 @@
+{
+  "name": "verify-missing-ldflag",
+  "version": "0.0.0",
+  "minEngineVersion": "v0.62.0",
+  "author": "test fixture",
+  "description": "verify-capabilities missing-ldflag scenario"
+}

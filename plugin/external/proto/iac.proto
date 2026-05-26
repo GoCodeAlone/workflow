@@ -1,0 +1,884 @@
+// iac.proto — typed gRPC contract for IaCProvider + ResourceDriver plugins.
+//
+// Design: docs/plans/2026-05-10-strict-contracts-force-cutover-design.md
+// Plan:   docs/plans/2026-05-10-strict-contracts-force-cutover.md (Task 3)
+//
+// Hard invariants (per cycle 4 §Acceptance criteria):
+//   - NO loose Struct/Any wrapper types used in any message.
+//   - Free-form per-resource Config / Outputs payloads cross the wire as
+//     bytes <name>_json, JSON-encoded by the plugin/host. The plugin owns
+//     the serialization shape; the proto layer carries opaque bytes.
+//   - ResourceOutput.sensitive uses typed map<string, bool> (NOT structpb).
+//   - REQUIRED service: every method must be implemented by every plugin.
+//     Compile fails on the SDK type-assert if a method is missing.
+//   - OPTIONAL services: providers register only the services they support.
+//     Absence of registration IS the negative signal — no NotSupported flag.
+syntax = "proto3";
+
+package workflow.plugin.external.iac;
+
+option go_package = "github.com/GoCodeAlone/workflow/plugin/external/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REQUIRED service — every IaC provider MUST implement every RPC.
+// Go compiler enforces full interface satisfaction at the SDK type-assert.
+// ─────────────────────────────────────────────────────────────────────────────
+service IaCProviderRequired {
+  rpc Initialize(InitializeRequest) returns (InitializeResponse);
+  rpc Name(NameRequest) returns (NameResponse);
+  rpc Version(VersionRequest) returns (VersionResponse);
+  rpc Capabilities(CapabilitiesRequest) returns (CapabilitiesResponse);
+  rpc Plan(PlanRequest) returns (PlanResponse);
+  rpc Destroy(DestroyRequest) returns (DestroyResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+  rpc Import(ImportRequest) returns (ImportResponse);
+  rpc ResolveSizing(ResolveSizingRequest) returns (ResolveSizingResponse);
+  rpc BootstrapStateBackend(BootstrapStateBackendRequest) returns (BootstrapStateBackendResponse);
+  // Method "Apply" was removed per workflow#699 (2026-05-17); v2 dispatch
+  // routes through ResourceDriver per-action + IaCProviderFinalizer.
+  // Do not re-introduce. CI lint guards re-appearance (see Makefile).
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPTIONAL services — providers register only the services they implement.
+// wfctl checks at handle-open which optional services are registered via
+// the existing ContractRegistry RPC. The absence of a registration is the
+// negative signal; there is no NotSupported field on any optional response.
+// ─────────────────────────────────────────────────────────────────────────────
+service IaCProviderEnumerator {
+  rpc EnumerateAll(EnumerateAllRequest) returns (EnumerateAllResponse);
+  rpc EnumerateByTag(EnumerateByTagRequest) returns (EnumerateByTagResponse);
+}
+
+service IaCProviderDriftDetector {
+  rpc DetectDrift(DetectDriftRequest) returns (DetectDriftResponse);
+  rpc DetectDriftWithSpecs(DetectDriftWithSpecsRequest) returns (DetectDriftWithSpecsResponse);
+}
+
+service IaCProviderCredentialRevoker {
+  rpc RevokeProviderCredential(RevokeProviderCredentialRequest) returns (RevokeProviderCredentialResponse);
+}
+
+// IaCProviderFinalizer is the optional service plugins implement when
+// they need a post-apply-loop finalizer hook under v2 dispatch.
+// Use case: DigitalOcean plugin's database trusted_sources deferred-flush
+// (see DOProvider.Apply post-loop block in workflow-plugin-digitalocean
+// internal/provider.go, iterating drivers that implement deferredUpdater
+// and calling FlushDeferredUpdates) which runs after the per-action loop
+// completes. Under v2 dispatch wfctl bypasses IaCProvider.Apply entirely,
+// so plugins needing post-loop work must opt in via this service.
+// Phase 2.5 of workflow#640.
+service IaCProviderFinalizer {
+  rpc FinalizeApply(FinalizeApplyRequest) returns (FinalizeApplyResponse);
+}
+
+service IaCProviderMigrationRepairer {
+  rpc RepairDirtyMigration(RepairDirtyMigrationRequest) returns (RepairDirtyMigrationResponse);
+}
+
+service IaCProviderValidator {
+  rpc ValidatePlan(ValidatePlanRequest) returns (ValidatePlanResponse);
+}
+
+service IaCProviderDriftConfigDetector {
+  rpc DetectDriftConfig(DetectDriftConfigRequest) returns (DetectDriftConfigResponse);
+}
+
+service IaCProviderLogCapture {
+  rpc CaptureLogs(CaptureLogsRequest) returns (stream LogChunk);
+}
+
+// IaCRequirementDiscovery is an optional service for config-aware plugins that
+// need to emit provider-neutral infrastructure requirements from their own
+// module configuration. Hosts pass a typed, redacted Workflow context plus the
+// plugin-owned module config as JSON bytes. The full Workflow YAML and
+// resolved secret values must not cross this boundary.
+service IaCRequirementDiscovery {
+  rpc DiscoverRequirements(DiscoverRequirementsRequest) returns (DiscoverRequirementsResponse);
+}
+
+// IaCProviderRequirementMapper is an optional provider-owned service that maps
+// provider-neutral requirements to concrete infra.* module specs for a selected
+// provider/runtime/environment. Absence of this registration is the negative
+// signal: the provider can still plan/apply explicit modules, but wfctl cannot
+// ask it to synthesize derived IaC.
+service IaCProviderRequirementMapper {
+  rpc MapRequirements(MapRequirementsRequest) returns (MapRequirementsResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ResourceDriver — separate gRPC service for per-resource-type CRUD dispatch.
+// The driver instance is identified by (resource_type) carried on every RPC.
+// ─────────────────────────────────────────────────────────────────────────────
+service ResourceDriver {
+  rpc Create(ResourceCreateRequest) returns (ResourceCreateResponse);
+  rpc Read(ResourceReadRequest) returns (ResourceReadResponse);
+  rpc Update(ResourceUpdateRequest) returns (ResourceUpdateResponse);
+  rpc Delete(ResourceDeleteRequest) returns (ResourceDeleteResponse);
+  rpc Diff(ResourceDiffRequest) returns (ResourceDiffResponse);
+  rpc Scale(ResourceScaleRequest) returns (ResourceScaleResponse);
+  rpc HealthCheck(ResourceHealthCheckRequest) returns (ResourceHealthCheckResponse);
+  rpc SensitiveKeys(SensitiveKeysRequest) returns (SensitiveKeysResponse);
+  rpc Troubleshoot(TroubleshootRequest) returns (TroubleshootResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Common typed messages.
+//
+// JSON-bytes fields (config_json, outputs_json, applied_config_json,
+// old_json, new_json) carry provider-specific free-form payloads that
+// cannot be statically typed at the engine boundary. They are the
+// strict-contract replacement for *structpb.Struct: the plugin owns
+// json.Marshal/Unmarshal directly, eliminating the structpb conversion
+// surface that previously dropped map[string]bool entries silently
+// (T3.9 runtime-launch-validation finding).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ResourceSpec mirrors interfaces.ResourceSpec.
+message ResourceSpec {
+  string name = 1;
+  string type = 2;
+  // config_json is a JSON-encoded map[string]any of provider-specific
+  // configuration. Plugins parse it with encoding/json.
+  bytes config_json = 3;
+  string size = 4;            // interfaces.Size string ("xs","s","m","l","xl")
+  ResourceHints hints = 5;
+  repeated string depends_on = 6;
+}
+
+// ResourceRef mirrors interfaces.ResourceRef.
+message ResourceRef {
+  string name = 1;
+  string type = 2;
+  string provider_id = 3;
+}
+
+// ResourceHints mirrors interfaces.ResourceHints.
+message ResourceHints {
+  string cpu = 1;
+  string memory = 2;
+  string storage = 3;
+}
+
+// ProviderSizing mirrors interfaces.ProviderSizing.
+message ProviderSizing {
+  string instance_type = 1;
+  bytes specs_json = 2; // JSON-encoded map[string]any of provider-specific specs
+}
+
+// IaCCapabilityDeclaration mirrors interfaces.IaCCapabilityDeclaration.
+message IaCCapabilityDeclaration {
+  string resource_type = 1;
+  int32 tier = 2;
+  repeated string operations = 3;
+}
+
+// ResourceState mirrors interfaces.ResourceState. The on-disk JSON state
+// file format is unchanged across the cutover (per design §State-file
+// compat invariant); this proto carries the in-flight RPC representation.
+message ResourceState {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  string provider = 4;
+  string provider_ref = 5;
+  string provider_id = 6;
+  string config_hash = 7;
+  // applied_config_json is the JSON-encoded map[string]any.
+  bytes applied_config_json = 8;
+  // applied_config_source: "" | "apply" | "adoption" (provenance discriminator).
+  string applied_config_source = 9;
+  // outputs_json is the JSON-encoded map[string]any.
+  bytes outputs_json = 10;
+  repeated string dependencies = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+  google.protobuf.Timestamp last_drift_check = 14;
+}
+
+// ResourceOutput mirrors interfaces.ResourceOutput. The sensitive map is
+// typed map<string, bool> per the design — the structpb roundtrip that
+// previously dropped this map silently is eliminated.
+message ResourceOutput {
+  string name = 1;
+  string type = 2;
+  string provider_id = 3;
+  // outputs_json is the JSON-encoded map[string]any of provider-emitted
+  // fields (IPs, endpoints, connection strings, etc.).
+  bytes outputs_json = 4;
+  map<string, bool> sensitive = 5;
+  string status = 6;
+}
+
+// ResourceStatus mirrors interfaces.ResourceStatus.
+message ResourceStatus {
+  string name = 1;
+  string type = 2;
+  string provider_id = 3;
+  string status = 4; // running | stopped | degraded | unknown
+  bytes outputs_json = 5;
+}
+
+// FieldChange mirrors interfaces.FieldChange.
+message FieldChange {
+  string path = 1;
+  // old_json / new_json carry arbitrary scalar/map/list values JSON-encoded.
+  bytes old_json = 2;
+  bytes new_json = 3;
+  bool force_new = 4;
+}
+
+// DiffResult mirrors interfaces.DiffResult.
+message DiffResult {
+  bool needs_update = 1;
+  bool needs_replace = 2;
+  repeated FieldChange changes = 3;
+}
+
+// DriftClass mirrors interfaces.DriftClass.
+//
+// Wire-stable enum (int32). Translation table to interfaces.DriftClass (string):
+//   DRIFT_CLASS_UNKNOWN ↔ ""        (DriftClassUnknown zero value)
+//   DRIFT_CLASS_IN_SYNC ↔ "in-sync"
+//   DRIFT_CLASS_GHOST   ↔ "ghost"
+//   DRIFT_CLASS_CONFIG  ↔ "config"
+// Plugin/host MUST translate at the marshal boundary; missed translation
+// silently coerces all values to UNKNOWN.
+enum DriftClass {
+  DRIFT_CLASS_UNKNOWN = 0;
+  DRIFT_CLASS_IN_SYNC = 1;
+  DRIFT_CLASS_GHOST = 2;
+  DRIFT_CLASS_CONFIG = 3;
+}
+
+// RequirementKind is the provider-neutral infrastructure category that wfctl
+// and provider plugins exchange for derived IaC. Values are intentionally
+// portable and provider-agnostic.
+enum RequirementKind {
+  REQUIREMENT_KIND_UNSPECIFIED = 0;
+  REQUIREMENT_KIND_OBSERVABILITY = 1;
+  REQUIREMENT_KIND_WEB_API = 2;
+  REQUIREMENT_KIND_MESSAGE_BROKER = 3;
+  REQUIREMENT_KIND_DATABASE = 4;
+  REQUIREMENT_KIND_CACHE = 5;
+  REQUIREMENT_KIND_STORAGE = 6;
+}
+
+// RequirementRuntime describes the target runtime shape the provider mapper
+// should generate for. Provider plugins return diagnostics for unsupported
+// runtime/mode combinations instead of emitting malformed modules.
+enum RequirementRuntime {
+  REQUIREMENT_RUNTIME_UNSPECIFIED = 0;
+  REQUIREMENT_RUNTIME_KUBERNETES = 1;
+  REQUIREMENT_RUNTIME_ECS = 2;
+  REQUIREMENT_RUNTIME_CLOUD_RUN = 3;
+  REQUIREMENT_RUNTIME_AZURE_CONTAINER_APPS = 4;
+  REQUIREMENT_RUNTIME_DIGITALOCEAN_APP_PLATFORM = 5;
+}
+
+enum TelemetrySignal {
+  TELEMETRY_SIGNAL_UNSPECIFIED = 0;
+  TELEMETRY_SIGNAL_TRACES = 1;
+  TELEMETRY_SIGNAL_METRICS = 2;
+  TELEMETRY_SIGNAL_LOGS = 3;
+}
+
+enum ObservabilityBackend {
+  OBSERVABILITY_BACKEND_UNSPECIFIED = 0;
+  OBSERVABILITY_BACKEND_OTEL = 1;
+  OBSERVABILITY_BACKEND_DATADOG = 2;
+  OBSERVABILITY_BACKEND_PROMETHEUS = 3;
+  OBSERVABILITY_BACKEND_LOKI = 4;
+  OBSERVABILITY_BACKEND_GRAFANA = 5;
+}
+
+enum DeploymentMode {
+  DEPLOYMENT_MODE_UNSPECIFIED = 0;
+  DEPLOYMENT_MODE_SIDECAR = 1;
+  DEPLOYMENT_MODE_DAEMONSET = 2;
+  DEPLOYMENT_MODE_SIBLING_SERVICE = 3;
+  DEPLOYMENT_MODE_MANAGED = 4;
+}
+
+message IaCRequirement {
+  string key = 1;
+  RequirementKind kind = 2;
+  string source = 3;
+  string resource_type_hint = 4;
+  string environment = 5;
+  repeated RequirementRuntime runtimes = 6;
+  repeated TelemetrySignal telemetry_signals = 7;
+  repeated ObservabilityBackend observability_backends = 8;
+  repeated DeploymentMode deployment_modes = 9;
+  repeated string vendor_features = 10;
+  // parameters_json is JSON-encoded plugin-owned requirement detail for data
+  // that is not portable enough to promote to a Workflow-owned proto field.
+  // Prefer adding enum/message fields for portable concepts.
+  bytes parameters_json = 11;
+}
+
+message DiscoverRequirementsRequest {
+  RequirementContext context = 1;
+  // module_config_json is JSON-encoded module config owned by the plugin that
+  // implements IaCRequirementDiscovery. Hosts must not send full Workflow YAML
+  // or resolved secret values here.
+  bytes module_config_json = 2;
+}
+
+message RequirementContext {
+  string application = 1;
+  string environment = 2;
+  repeated ModuleRef modules = 3;
+  repeated string plugin_ids = 4;
+}
+
+message ModuleRef {
+  string name = 1;
+  string type = 2;
+  repeated string satisfies = 3;
+}
+
+message DiscoverRequirementsResponse {
+  repeated IaCRequirement requirements = 1;
+}
+
+message MapRequirementsRequest {
+  string provider = 1;
+  RequirementRuntime runtime = 2;
+  string environment = 3;
+  repeated IaCRequirement requirements = 4;
+}
+
+message DerivedModuleSpec {
+  string name = 1;
+  string type = 2;
+  repeated string satisfies = 3;
+  // config_json is JSON-encoded provider-owned module config. Provider
+  // mappers must emit secret placeholders/references, never plaintext secret
+  // values.
+  bytes config_json = 4;
+  repeated string depends_on = 5;
+}
+
+message RequirementDiagnostic {
+  string key = 1;
+  string code = 2;
+  string message = 3;
+}
+
+message RequirementNote {
+  string key = 1;
+  string message = 2;
+  bool interactive = 3;
+}
+
+message MapRequirementsResponse {
+  repeated string accepted_keys = 1;
+  repeated RequirementDiagnostic rejected = 2;
+  repeated DerivedModuleSpec modules = 3;
+  repeated RequirementNote notes = 4;
+}
+
+// DriftResult mirrors interfaces.DriftResult.
+message DriftResult {
+  string name = 1;
+  string type = 2;
+  bool drifted = 3;
+  DriftClass class = 4;
+  bytes expected_json = 5; // JSON-encoded map[string]any
+  bytes actual_json = 6;   // JSON-encoded map[string]any
+  repeated string fields = 7;
+}
+
+// DriftEntry mirrors interfaces.DriftEntry.
+message DriftEntry {
+  string name = 1;
+  string plan_fingerprint = 2;
+  string apply_fingerprint = 3;
+}
+
+// HealthResult mirrors interfaces.HealthResult.
+message HealthResult {
+  bool healthy = 1;
+  string message = 2;
+}
+
+// Diagnostic mirrors interfaces.Diagnostic (Troubleshooter type).
+message Diagnostic {
+  string id = 1;
+  string phase = 2;
+  string cause = 3;
+  google.protobuf.Timestamp at = 4;
+  string detail = 5;
+}
+
+// PlanDiagnosticSeverity mirrors interfaces.PlanDiagnosticSeverity.
+// Wire ordering matches the Go iota: INFO=0, WARNING=1, ERROR=2.
+enum PlanDiagnosticSeverity {
+  PLAN_DIAGNOSTIC_INFO = 0;
+  PLAN_DIAGNOSTIC_WARNING = 1;
+  PLAN_DIAGNOSTIC_ERROR = 2;
+}
+
+// PlanDiagnostic mirrors interfaces.PlanDiagnostic.
+message PlanDiagnostic {
+  PlanDiagnosticSeverity severity = 1;
+  string resource = 2;
+  string field = 3;
+  string message = 4;
+}
+
+// PlanAction mirrors interfaces.PlanAction.
+message PlanAction {
+  string action = 1; // create | update | replace | delete
+  ResourceSpec resource = 2;
+  ResourceState current = 3;
+  repeated FieldChange changes = 4;
+  string resolved_config_hash = 5;
+}
+
+// IaCPlan mirrors interfaces.IaCPlan.
+message IaCPlan {
+  string id = 1;
+  repeated PlanAction actions = 2;
+  google.protobuf.Timestamp created_at = 3;
+  string desired_hash = 4;
+  int32 schema_version = 5;
+  map<string, string> input_snapshot = 6;
+}
+
+// ActionError mirrors interfaces.ActionError.
+message ActionError {
+  string resource = 1;
+  string action = 2;
+  string error = 3;
+}
+
+// ActionStatus categorizes per-action outcomes for wfctl-side hook dispatch.
+// Per workflow#640 Phase 2 + ADR 0040 invariants 1-2. Tags 4+5 reserved
+// for Phase 2.3 ACTION_STATUS_COMPENSATED + ACTION_STATUS_COMPENSATION_FAILED
+// when engine-side compensation lands.
+enum ActionStatus {
+  ACTION_STATUS_UNSPECIFIED = 0;  // wfctl REJECTS this on receipt
+  ACTION_STATUS_SUCCESS = 1;
+  ACTION_STATUS_ERROR = 2;
+  ACTION_STATUS_DELETE_FAILED = 3;
+  // Phase 2.3 (workflow#698): reserved tags 4+5 from Phase 2 now defined +
+  // tag 6 for "skipped" — replaces misclassification of pre-dispatch
+  // ctx-cancel/JIT-fail/driver-resolve-fail as Error/DeleteFailed.
+  ACTION_STATUS_COMPENSATED = 4;          // reserved-for-future-emission; engine v0.56.0 does NOT emit (no auto-compensation); plugins may emit if they implement own compensation
+  ACTION_STATUS_COMPENSATION_FAILED = 5;  // post-driver-success hook failed; cloud-side work IS done; operator must verify state; manual compensation may be required
+  ACTION_STATUS_SKIPPED = 6;              // action never attempted at driver (ctx-cancel pre-dispatch, JIT-substitution-fail, driver-resolve-fail); cloud-side state unchanged
+}
+
+// DestroyResult mirrors interfaces.DestroyResult.
+message DestroyResult {
+  repeated string destroyed = 1;
+  repeated ActionError errors = 2;
+}
+
+// BootstrapResult mirrors interfaces.BootstrapResult.
+message BootstrapResult {
+  string bucket = 1;
+  string region = 2;
+  string endpoint = 3;
+  map<string, string> env_vars = 4;
+}
+
+// MigrationRepairRequest mirrors interfaces.MigrationRepairRequest.
+message MigrationRepairRequest {
+  string app_resource_name = 1;
+  string database_resource_name = 2;
+  string job_image = 3;
+  string source_dir = 4;
+  string expected_dirty_version = 5;
+  string force_version = 6;
+  bool then_up = 7;
+  bool up_if_clean = 8;
+  // confirm_force MUST equal interfaces.MigrationRepairConfirmation
+  // ("FORCE_MIGRATION_METADATA"); the plugin re-validates server-side.
+  string confirm_force = 9;
+  map<string, string> env = 10;
+  int32 timeout_seconds = 11;
+}
+
+// MigrationRepairResult mirrors interfaces.MigrationRepairResult.
+message MigrationRepairResult {
+  string provider_job_id = 1;
+  // status is one of MigrationRepairStatusSucceeded / Failed /
+  // ApprovalRequired / Unsupported (interfaces/migration_repair.go).
+  string status = 2;
+  repeated string applied = 3;
+  string logs = 4;
+  repeated Diagnostic diagnostics = 5;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderRequired request/response messages.
+// ─────────────────────────────────────────────────────────────────────────────
+
+message InitializeRequest {
+  // config_json is the JSON-encoded provider-config map[string]any.
+  bytes config_json = 1;
+}
+message InitializeResponse {}
+
+message NameRequest {}
+message NameResponse {
+  string name = 1;
+}
+
+message VersionRequest {}
+message VersionResponse {
+  string version = 1;
+}
+
+message CapabilitiesRequest {}
+message CapabilitiesResponse {
+  repeated IaCCapabilityDeclaration capabilities = 1;
+  // canonical_keys: provider-level override of interfaces.CanonicalKeys()
+  // wfctl-side default. Empty list = use default; non-empty = filter to
+  // exactly these keys (e.g. DO plugin removes loadbalancer/vpc/k8s).
+  // Closes the SupportedCanonicalKeys regression introduced by the typed
+  // cutover (typedIaCAdapter previously couldn't ask the plugin for its
+  // canonical-keys override). See ADR-0029.
+  repeated string canonical_keys = 2;
+  // compute_plan_version: provider-level apply-time lifecycle declaration.
+  // wfctl accepts "v2" only; empty, "v1", and unrecognized values are rejected
+  // by the provider loader after the strict lifecycle cutover. "v2" routes
+  // through wfctlhelpers.ApplyPlanWithHooks. See ADR-0029 and workflow#640.
+  string compute_plan_version = 3;
+}
+
+message PlanRequest {
+  repeated ResourceSpec desired = 1;
+  repeated ResourceState current = 2;
+}
+message PlanResponse {
+  IaCPlan plan = 1;
+}
+
+message DestroyRequest {
+  repeated ResourceRef refs = 1;
+}
+message DestroyResponse {
+  DestroyResult result = 1;
+}
+
+message StatusRequest {
+  repeated ResourceRef refs = 1;
+}
+message StatusResponse {
+  repeated ResourceStatus statuses = 1;
+}
+
+message ImportRequest {
+  string provider_id = 1;
+  string resource_type = 2;
+}
+message ImportResponse {
+  ResourceState state = 1;
+}
+
+message ResolveSizingRequest {
+  string resource_type = 1;
+  string size = 2; // interfaces.Size string
+  ResourceHints hints = 3;
+}
+message ResolveSizingResponse {
+  ProviderSizing sizing = 1;
+}
+
+message BootstrapStateBackendRequest {
+  // config_json is the JSON-encoded iac.state module config map[string]any.
+  bytes config_json = 1;
+}
+message BootstrapStateBackendResponse {
+  BootstrapResult result = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderEnumerator messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message EnumerateAllRequest {
+  string resource_type = 1;
+}
+message EnumerateAllResponse {
+  repeated ResourceOutput outputs = 1;
+}
+
+message EnumerateByTagRequest {
+  string tag = 1;
+}
+message EnumerateByTagResponse {
+  repeated ResourceRef refs = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderDriftDetector messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message DetectDriftRequest {
+  repeated ResourceRef refs = 1;
+}
+message DetectDriftResponse {
+  repeated DriftResult drifts = 1;
+}
+
+message DetectDriftWithSpecsRequest {
+  repeated ResourceRef refs = 1;
+  // specs is keyed by ResourceRef.Name (matches ResourceState.Name) per the
+  // Go DriftConfigDetector.DetectDriftWithSpecs contract.
+  map<string, ResourceSpec> specs = 2;
+}
+message DetectDriftWithSpecsResponse {
+  repeated DriftResult drifts = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderCredentialRevoker messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message RevokeProviderCredentialRequest {
+  // source is the provider_credential source string (e.g. "digitalocean.spaces").
+  string source = 1;
+  // credential_id is the provider-specific identifier of the OLD credential.
+  string credential_id = 2;
+}
+message RevokeProviderCredentialResponse {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderFinalizer messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message FinalizeApplyRequest {
+  // plan_id is the IaCPlan.ID being finalized (for plugin-side logging /
+  // correlation; not load-bearing for dispatch).
+  string plan_id = 1;
+}
+
+message FinalizeApplyResponse {
+  reserved 2;  // Phase 2.3 compensation evidence (ACTION_STATUS_COMPENSATED outcomes)
+
+  // errors is the per-driver finalize-side error array. Each entry
+  // preserves the v1 wrapper's per-driver attribution shape (DOProvider.Apply
+  // post-loop block appends interfaces.ActionError{Resource: resourceType,
+  // Action: "deferred_update", Error: flushErr.Error()} for each driver
+  // whose FlushDeferredUpdates fails). Empty array = success. Non-empty =
+  // each error is surfaced to wfctl's result.Errors as-is (preserving
+  // per-driver attribution), AND the outer finalize call returns a
+  // wrapped error to the caller.
+  //
+  // Wire-status invariant (mirrors ADR 0040 invariant 2): the gRPC status
+  // MUST be OK whenever the plugin populates errors[] (including the
+  // empty-success case). A non-OK gRPC status (e.g., codes.Internal from
+  // a server panic) signals transport-level failure; errors[] is IGNORED
+  // by wfctl in that case and the gRPC error is surfaced directly. This
+  // prevents ambiguity between "finalize ran and reported per-driver
+  // errors" (OK + errors[]) and "finalize call itself failed" (non-OK).
+  repeated ActionError errors = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderMigrationRepairer messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message RepairDirtyMigrationRequest {
+  MigrationRepairRequest request = 1;
+}
+message RepairDirtyMigrationResponse {
+  MigrationRepairResult result = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderValidator messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message ValidatePlanRequest {
+  IaCPlan plan = 1;
+}
+message ValidatePlanResponse {
+  repeated PlanDiagnostic diagnostics = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderDriftConfigDetector messages.
+// Mirrors the existing interfaces.DriftConfigDetector.DetectDriftWithSpecs
+// contract: refs + per-ref applied-config specs → drift classifications.
+// Carried as a separate optional service per design §Optional services.
+// ─────────────────────────────────────────────────────────────────────────────
+message DetectDriftConfigRequest {
+  repeated ResourceRef refs = 1;
+  map<string, ResourceSpec> specs = 2;
+}
+message DetectDriftConfigResponse {
+  repeated DriftResult drifts = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderLogCapture messages.
+// ─────────────────────────────────────────────────────────────────────────────
+enum LogCaptureType {
+  LOG_CAPTURE_TYPE_UNSPECIFIED = 0;
+  LOG_CAPTURE_TYPE_BUILD = 1;
+  LOG_CAPTURE_TYPE_DEPLOY = 2;
+  LOG_CAPTURE_TYPE_RUN = 3;
+  LOG_CAPTURE_TYPE_RUN_RESTARTED = 4;
+}
+
+message CaptureLogsRequest {
+  string resource_name = 1;
+  string resource_type = 2;
+  string provider_id = 3;
+  string component_name = 4;
+  LogCaptureType log_type = 5;
+  int32 tail_lines = 6;
+  bool follow = 7;
+  int64 duration_seconds = 8;
+  string deployment_id = 9;
+}
+
+message LogChunk {
+  bytes data = 1;
+  string source = 2;
+  bool eof = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ResourceDriver request/response messages.
+// Each request carries resource_type so a single ResourceDriver server can
+// dispatch to the per-type driver implementation (matches DO plugin's
+// 14-driver type-routing pattern in Task 11).
+// ─────────────────────────────────────────────────────────────────────────────
+message ResourceCreateRequest {
+  string resource_type = 1;
+  ResourceSpec spec = 2;
+}
+message ResourceCreateResponse {
+  ResourceOutput output = 1;
+}
+
+message ResourceReadRequest {
+  string resource_type = 1;
+  ResourceRef ref = 2;
+}
+message ResourceReadResponse {
+  ResourceOutput output = 1;
+}
+
+message ResourceUpdateRequest {
+  string resource_type = 1;
+  ResourceRef ref = 2;
+  ResourceSpec spec = 3;
+}
+message ResourceUpdateResponse {
+  ResourceOutput output = 1;
+}
+
+message ResourceDeleteRequest {
+  string resource_type = 1;
+  ResourceRef ref = 2;
+}
+message ResourceDeleteResponse {}
+
+message ResourceDiffRequest {
+  string resource_type = 1;
+  ResourceSpec desired = 2;
+  ResourceOutput current = 3;
+}
+message ResourceDiffResponse {
+  DiffResult result = 1;
+}
+
+message ResourceScaleRequest {
+  string resource_type = 1;
+  ResourceRef ref = 2;
+  int32 replicas = 3;
+}
+message ResourceScaleResponse {
+  ResourceOutput output = 1;
+}
+
+message ResourceHealthCheckRequest {
+  string resource_type = 1;
+  ResourceRef ref = 2;
+}
+message ResourceHealthCheckResponse {
+  HealthResult result = 1;
+}
+
+message SensitiveKeysRequest {
+  string resource_type = 1;
+}
+message SensitiveKeysResponse {
+  repeated string keys = 1;
+}
+
+message TroubleshootRequest {
+  string resource_type = 1;
+  ResourceRef ref = 2;
+  string failure_msg = 3;
+}
+message TroubleshootResponse {
+  repeated Diagnostic diagnostics = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCStateBackend — strict contract for IaC state storage backends served by a
+// plugin sidecar. Maps 1:1 onto module.IaCStateStore (6 methods). Unary RPCs:
+// the PR 2 benchmark validated unary transport for 1 MB state blobs against the
+// in-process baseline. No lock-lease/TTL field — added additively only once a
+// plugin backend implements honored expiry with a conformance test.
+// ─────────────────────────────────────────────────────────────────────────────
+service IaCStateBackend {
+  rpc Configure  (ConfigureRequest)   returns (ConfigureResponse);
+  rpc GetState   (GetStateRequest)    returns (GetStateResponse);
+  rpc SaveState  (SaveStateRequest)   returns (SaveStateResponse);
+  rpc ListStates (ListStatesRequest)  returns (ListStatesResponse);
+  rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
+  rpc Lock       (LockRequest)        returns (LockResponse);
+  rpc Unlock     (UnlockRequest)      returns (UnlockResponse);
+  rpc ListBackendNames(ListBackendNamesRequest) returns (ListBackendNamesResponse);
+}
+
+// IaCState mirrors module.IaCState (module/iac_state.go:4-18). The free-form
+// Outputs / Config map[string]any fields cross the wire as JSON bytes per the
+// iac.proto hard invariant — same pattern as ResourceState.outputs_json.
+message IaCState {
+  string resource_id   = 1;
+  string resource_type = 2;
+  string provider      = 3;
+  string provider_ref  = 4;
+  string provider_id   = 5;
+  string config_hash   = 6;
+  string status        = 7;
+  bytes  outputs_json  = 8;  // JSON-encoded map[string]any (module.IaCState.Outputs)
+  bytes  config_json   = 9;  // JSON-encoded map[string]any (module.IaCState.Config)
+  repeated string dependencies = 10;
+  string created_at = 11;
+  string updated_at = 12;
+  string error      = 13;
+}
+
+// Configure delivers the iac.state module's YAML config to the plugin so it can
+// construct the SDK-backed store. backend_name selects which backend the config
+// is for. config_json is the JSON-encoded module config map[string]any — same
+// JSON-bytes invariant as InitializeRequest.config_json. See decisions/0036.
+message ConfigureRequest  { string backend_name = 1; bytes config_json = 2; }
+message ConfigureResponse {}
+
+message GetStateRequest    { string resource_id = 1; }
+message GetStateResponse   { IaCState state = 1; bool exists = 2; }
+message SaveStateRequest   { IaCState state = 1; }   // idempotent: full-state replace, last-writer-wins
+message SaveStateResponse  {}
+message ListStatesRequest  { map<string, string> filter = 1; }
+message ListStatesResponse { repeated IaCState states = 1; }
+message DeleteStateRequest  { string resource_id = 1; }
+message DeleteStateResponse {}
+message LockRequest    { string resource_id = 1; }
+message LockResponse   {}
+message UnlockRequest  { string resource_id = 1; }
+message UnlockResponse {}
+
+// ListBackendNames lets the engine ask a loaded plugin which iac.state backend
+// NAMES it serves (e.g. "azure_blob"). The plugin answers from its
+// plugin.json capabilities.iacStateBackends (PluginManifest.IaCStateBackends).
+message ListBackendNamesRequest  {}
+message ListBackendNamesResponse { repeated string backend_names = 1; }

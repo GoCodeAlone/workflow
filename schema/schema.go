@@ -204,18 +204,9 @@ var coreModuleTypes = []string{
 	"openapi.consumer",
 	"openapi.generator",
 	"persistence.store",
-	"platform.apigateway",
-	"platform.autoscaling",
 	"platform.context",
 	"platform.dns",
-	"platform.do_app",
-	"platform.do_database",
-	"platform.do_dns",
-	"platform.do_networking",
-	"platform.doks",
-	"platform.ecs",
 	"platform.kubernetes",
-	"platform.networking",
 	"platform.provider",
 	"platform.region",
 	"platform.region_router",
@@ -237,10 +228,6 @@ var coreModuleTypes = []string{
 	"step.ai_classify",
 	"step.ai_complete",
 	"step.ai_extract",
-	"step.apigw_apply",
-	"step.apigw_destroy",
-	"step.apigw_plan",
-	"step.apigw_status",
 	"step.app_deploy",
 	"step.app_rollback",
 	"step.app_status",
@@ -296,19 +283,10 @@ var coreModuleTypes = []string{
 	"step.dns_apply",
 	"step.dns_plan",
 	"step.dns_status",
-	"step.do_deploy",
-	"step.do_destroy",
-	"step.do_logs",
-	"step.do_scale",
-	"step.do_status",
 	"step.docker_build",
 	"step.docker_push",
 	"step.docker_run",
 	"step.drift_check",
-	"step.ecs_apply",
-	"step.ecs_destroy",
-	"step.ecs_plan",
-	"step.ecs_status",
 	"step.event_decrypt",
 	"step.event_publish",
 	"step.feature_flag",
@@ -350,9 +328,6 @@ var coreModuleTypes = []string{
 	"step.marketplace_search",
 	"step.marketplace_uninstall",
 	"step.marketplace_update",
-	"step.network_apply",
-	"step.network_plan",
-	"step.network_status",
 	"step.nosql_delete",
 	"step.nosql_get",
 	"step.nosql_put",
@@ -384,10 +359,6 @@ var coreModuleTypes = []string{
 	"step.retry_with_backoff",
 	"step.s3_upload",
 	"step.sandbox_exec",
-	"step.scaling_apply",
-	"step.scaling_destroy",
-	"step.scaling_plan",
-	"step.scaling_status",
 	"step.scan_container",
 	"step.scan_deps",
 	"step.scan_sast",
@@ -546,6 +517,7 @@ type pluginManifestTypes struct {
 	StepTypes     []string `json:"stepTypes"`
 	TriggerTypes  []string `json:"triggerTypes"`
 	WorkflowTypes []string `json:"workflowTypes"`
+	ResourceTypes []string `json:"resourceTypes"`
 	// Capabilities is stored as raw JSON to safely handle both the registry-manifest
 	// format (object with moduleTypes/stepTypes/etc.) and the engine-internal format
 	// (array of CapabilityDecl). A non-object value is silently ignored.
@@ -560,6 +532,10 @@ type pluginManifestCapabilities struct {
 	StepTypes        []string `json:"stepTypes"`
 	TriggerTypes     []string `json:"triggerTypes"`
 	WorkflowHandlers []string `json:"workflowHandlers"`
+	ResourceTypes    []string `json:"resourceTypes"`
+	IaCProvider      *struct {
+		ResourceTypes []string `json:"resourceTypes"`
+	} `json:"iacProvider"`
 }
 
 // LoadPluginTypesFromDir scans pluginDir for subdirectories containing a
@@ -581,45 +557,80 @@ func LoadPluginTypesFromDir(pluginDir string) error {
 		if err != nil {
 			continue
 		}
-		var m pluginManifestTypes
-		if err := json.Unmarshal(data, &m); err != nil {
-			continue
-		}
-		for _, t := range m.ModuleTypes {
-			RegisterModuleType(t)
-		}
-		for _, t := range m.StepTypes {
-			// Step types share the module type registry (identified by "step." prefix).
-			RegisterModuleType(t)
-		}
-		for _, t := range m.TriggerTypes {
-			RegisterTriggerType(t)
-		}
-		for _, t := range m.WorkflowTypes {
-			RegisterWorkflowType(t)
-		}
-		// Also handle the registry-manifest nested capabilities object format.
-		// The capabilities field may be a JSON array (engine-internal CapabilityDecl format)
-		// or a JSON object (registry manifest format). Only process it when it's an object.
-		if len(m.Capabilities) > 0 && m.Capabilities[0] == '{' {
-			var cap pluginManifestCapabilities
-			if err := json.Unmarshal(m.Capabilities, &cap); err == nil {
-				for _, t := range cap.ModuleTypes {
+		registerPluginManifestTypes(data)
+	}
+	return nil
+}
+
+// LoadPluginTypesFromManifest reads a single plugin.json file at manifestPath
+// and registers its declared module/step/trigger/workflow/resource types with
+// the schema package. Returns an error if the file cannot be read or is not
+// valid JSON; this is the explicit-path counterpart to LoadPluginTypesFromDir
+// and surfaces problems instead of silently skipping them.
+func LoadPluginTypesFromManifest(manifestPath string) error {
+	data, err := os.ReadFile(manifestPath) //nolint:gosec // G304: path is explicitly supplied by the operator
+	if err != nil {
+		return fmt.Errorf("read plugin manifest %q: %w", manifestPath, err)
+	}
+	if !registerPluginManifestTypes(data) {
+		return fmt.Errorf("parse plugin manifest %q: not a valid plugin.json", manifestPath)
+	}
+	return nil
+}
+
+// registerPluginManifestTypes parses one plugin.json manifest blob and
+// registers all declared types. Returns false only when the JSON itself is
+// unparseable; missing or empty type fields are not an error.
+func registerPluginManifestTypes(data []byte) bool {
+	var m pluginManifestTypes
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false
+	}
+	for _, t := range m.ModuleTypes {
+		RegisterModuleType(t)
+	}
+	for _, t := range m.StepTypes {
+		// Step types share the module type registry (identified by "step." prefix).
+		RegisterModuleType(t)
+	}
+	for _, t := range m.ResourceTypes {
+		RegisterModuleType(t)
+	}
+	for _, t := range m.TriggerTypes {
+		RegisterTriggerType(t)
+	}
+	for _, t := range m.WorkflowTypes {
+		RegisterWorkflowType(t)
+	}
+	// Also handle the registry-manifest nested capabilities object format.
+	// The capabilities field may be a JSON array (engine-internal CapabilityDecl format)
+	// or a JSON object (registry manifest format). Only process it when it's an object.
+	if len(m.Capabilities) > 0 && m.Capabilities[0] == '{' {
+		var cap pluginManifestCapabilities
+		if err := json.Unmarshal(m.Capabilities, &cap); err == nil {
+			for _, t := range cap.ModuleTypes {
+				RegisterModuleType(t)
+			}
+			for _, t := range cap.StepTypes {
+				RegisterModuleType(t)
+			}
+			for _, t := range cap.ResourceTypes {
+				RegisterModuleType(t)
+			}
+			if cap.IaCProvider != nil {
+				for _, t := range cap.IaCProvider.ResourceTypes {
 					RegisterModuleType(t)
 				}
-				for _, t := range cap.StepTypes {
-					RegisterModuleType(t)
-				}
-				for _, t := range cap.TriggerTypes {
-					RegisterTriggerType(t)
-				}
-				for _, t := range cap.WorkflowHandlers {
-					RegisterWorkflowType(t)
-				}
+			}
+			for _, t := range cap.TriggerTypes {
+				RegisterTriggerType(t)
+			}
+			for _, t := range cap.WorkflowHandlers {
+				RegisterWorkflowType(t)
 			}
 		}
 	}
-	return nil
+	return true
 }
 
 // moduleIfThen builds an if/then conditional schema for a specific module type

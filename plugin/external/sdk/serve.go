@@ -6,10 +6,65 @@ import (
 	"os"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
+	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
 	ext "github.com/GoCodeAlone/workflow/plugin/external"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
 )
+
+// ServeOption configures Serve and ServePluginFull.
+type ServeOption func(*grpcServer)
+
+// WithManifestProvider wires a canonical *plugin.PluginManifest (typically
+// loaded via sdk.EmbedManifest) into the gRPC GetManifest handler. When set,
+// the disk-embedded manifest takes precedence over the provider's Manifest()
+// method.
+//
+// Recommended pattern:
+//
+//	//go:embed plugin.json
+//	var manifestJSON []byte
+//	var manifest = sdk.MustEmbedManifest(manifestJSON)
+//
+//	func main() {
+//	    sdk.Serve(&myProvider{}, sdk.WithManifestProvider(manifest))
+//	}
+func WithManifestProvider(m *pluginpkg.PluginManifest) ServeOption {
+	return func(s *grpcServer) {
+		s.diskManifest = m
+	}
+}
+
+// WithBuildVersion sets the runtime build-version surfaced via GetManifest.
+// Single-channel precedence: takes precedence over any ManifestProvider.Version
+// or provider.Manifest().Version. Typically populated via
+// sdk.ResolveBuildVersion(<plugin's ldflag-injected Version var>).
+//
+// Recommended pattern:
+//
+//	import (
+//	    "github.com/<...>/internal"  // ldflag-injected Version var
+//	    sdk "github.com/GoCodeAlone/workflow/plugin/external/sdk"
+//	)
+//
+//	func main() {
+//	    sdk.Serve(&myPlugin{},
+//	        sdk.WithManifestProvider(manifest),
+//	        sdk.WithBuildVersion(sdk.ResolveBuildVersion(internal.Version)),
+//	    )
+//	}
+//
+// Goreleaser config injects the tag at build time:
+//
+//	ldflags:
+//	  - -X github.com/<...>/internal.Version={{.Version}}
+//
+// Closes workflow#758.
+func WithBuildVersion(v string) ServeOption {
+	return func(s *grpcServer) {
+		s.buildVersion = v
+	}
+}
 
 // Serve is the entry point for plugin authors. It starts the gRPC plugin server
 // and blocks until the host process terminates the connection.
@@ -23,12 +78,21 @@ import (
 //	func main() {
 //	    sdk.Serve(&myPlugin{})
 //	}
-func Serve(provider PluginProvider) {
+//
+// With disk-embedded manifest:
+//
+//	func main() {
+//	    sdk.Serve(&myPlugin{}, sdk.WithManifestProvider(manifest))
+//	}
+func Serve(provider PluginProvider, opts ...ServeOption) {
 	if up, ok := provider.(UIProvider); ok {
 		writeUIManifestIfAbsent(up.UIManifest())
 	}
 
 	server := newGRPCServer(provider)
+	for _, opt := range opts {
+		opt(server)
+	}
 
 	goplugin.Serve(&goplugin.ServeConfig{
 		HandshakeConfig: ext.Handshake,

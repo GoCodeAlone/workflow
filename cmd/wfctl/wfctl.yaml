@@ -27,6 +27,8 @@ workflows:
         description: Analyze config and report infrastructure requirements
       - name: migrate
         description: Manage database schema migrations
+      - name: config
+        description: Manage wfctl project configuration
       - name: migrations
         description: Validate and guard migration workflows
       - name: build-ui
@@ -51,6 +53,8 @@ workflows:
         description: Code generation
       - name: git
         description: Git integration
+      - name: logs
+        description: Provider log capture
       - name: registry
         description: Container registry commands
       - name: plugin-registry
@@ -141,6 +145,10 @@ pipelines:
     trigger: {type: cli, config: {command: migrate}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: migrate}}
+  cmd-config:
+    trigger: {type: cli, config: {command: config}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: config}}
   cmd-migrations:
     trigger: {type: cli, config: {command: migrations}}
     steps:
@@ -189,6 +197,10 @@ pipelines:
     trigger: {type: cli, config: {command: git}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: git}}
+  cmd-logs:
+    trigger: {type: cli, config: {command: logs}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: logs}}
   cmd-registry:
     trigger: {type: cli, config: {command: registry}}
     steps:
