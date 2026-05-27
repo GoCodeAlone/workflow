@@ -14,6 +14,7 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/iac/jitsubst"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -1191,8 +1192,15 @@ func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpe
 }
 
 func isNoopStateStore(store infraStateStore) bool {
-	_, ok := store.(*noopStateStore)
-	return ok
+	if _, ok := store.(*noopStateStore); ok {
+		return true
+	}
+	// resolveStateStore now delegates to wfctlhelpers.ResolveStateStore,
+	// which returns *wfctlhelpers.NoopStateStore for configs without an
+	// iac.state module. Recognise both concrete types so downstream
+	// "do not persist; this is a no-op store" checks stay honest after the
+	// Task-1 lift.
+	return wfctlhelpers.IsNoopStateStore(store)
 }
 
 func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType string, imported *interfaces.ResourceState, providerIDOverride string) (interfaces.ResourceState, error) {

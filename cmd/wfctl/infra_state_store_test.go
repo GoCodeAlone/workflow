@@ -58,8 +58,16 @@ func TestResolveStateStore_ReturnsDiscoverErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing config error, got nil")
 	}
-	if !strings.Contains(err.Error(), "discover iac.state modules") {
-		t.Fatalf("error = %v, want discover context", err)
+	// Post-Task-1 lift: resolveStateStore delegates to wfctlhelpers.
+	// The error context shifted from "discover iac.state modules" to a
+	// more direct "load <path>: ..." since the failure now surfaces at
+	// config.LoadFromFile rather than the discover wrapper. Both forms
+	// are equally diagnostic for the operator; the assertion checks for
+	// the config-load context to confirm the missing-file root cause is
+	// preserved.
+	msg := err.Error()
+	if !strings.Contains(msg, "load") || !strings.Contains(msg, "missing.yaml") {
+		t.Fatalf("error = %v, want config-load context naming missing.yaml", err)
 	}
 }
 
