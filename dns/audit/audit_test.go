@@ -11,7 +11,7 @@ func TestAuditLog_AppendsAttemptThenOutcome(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", tmp)
 	LogAttempt("user@host", "example.com", "www", "A", "upsert", "multisite", "digitalocean")
 	LogOutcome("user@host", "example.com", "www", "A", "success", "")
-	path := tmp + "/wfctl/plugins/workflow-plugin-infra/dns-policy-audit.jsonl"
+	path := tmp + "/wfctl/plugins/wfctl/dns-audit.jsonl"
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read audit: %v", err)
@@ -26,7 +26,7 @@ func TestAuditLog_PolicyEdit(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", tmp)
 	LogPolicyEdit("sre@wfctl", "example.com", "set-policy", "abc123", "def456")
-	path := tmp + "/wfctl/plugins/workflow-plugin-infra/dns-policy-audit.jsonl"
+	path := tmp + "/wfctl/plugins/wfctl/dns-audit.jsonl"
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read audit: %v", err)
