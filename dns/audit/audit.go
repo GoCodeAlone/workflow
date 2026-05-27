@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -61,8 +62,14 @@ func migrateLegacyAuditTrail() error {
 	}
 	legacyData, err := os.ReadFile(legacy)
 	if err != nil {
-		// No legacy file — nothing to migrate. Common case on fresh installs.
-		return nil
+		// Legacy file absent — common case on fresh installs. Anything else
+		// (permission denied, IO error) should propagate so operators see
+		// it rather than silently losing the migration on a transient
+		// problem. The nilerr lint catches the alternative.
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read legacy audit %s: %w", legacy, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(current), 0o700); err != nil {
 		return err
