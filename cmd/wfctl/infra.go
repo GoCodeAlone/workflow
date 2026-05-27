@@ -415,9 +415,13 @@ func runInfraPlan(args []string) error {
 
 // parseInfraResourceSpecs reads an infra YAML file and returns the list of
 // infra.* modules as ResourceSpecs for plan computation.
-// isInfraType returns true for module types handled by wfctl infra commands.
+// isInfraType is a one-line delegating shim onto wfctlhelpers.IsInfraType.
+// Implementation moved per docs/plans/2026-05-27-infra-admin-dynamic.md
+// Task 1 (consolidation follow-up addressing spec-reviewer F2) so wfctl
+// and the host-side infra.admin module share one definition. New code
+// should call wfctlhelpers.IsInfraType directly.
 func isInfraType(t string) bool {
-	return strings.HasPrefix(t, "infra.") || strings.HasPrefix(t, "platform.")
+	return wfctlhelpers.IsInfraType(t)
 }
 
 // extractDependsOn pulls the depends_on value from a module config map.
@@ -646,8 +650,10 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 	return out, nil
 }
 
+// isContainerType is a one-line delegating shim onto
+// wfctlhelpers.IsContainerType. See isInfraType above for rationale.
 func isContainerType(t string) bool {
-	return t == "infra.container_service"
+	return wfctlhelpers.IsContainerType(t)
 }
 
 // loadCurrentState loads ResourceStates from the configured iac.state backend.

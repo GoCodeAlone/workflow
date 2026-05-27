@@ -20,8 +20,18 @@ import (
 // ResolveStateStore loads cfgFile, finds the iac.state module, and returns
 // its backend as a full interfaces.IaCStateStore. envName is forwarded for
 // per-environment backend config resolution; empty = no env overrides.
-// pluginDir locates plugin binaries for plugin-served backends (spaces/s3/
-// gcs); empty falls back to WFCTL_PLUGIN_DIR then "./data/plugins".
+//
+// pluginDir locates plugin binaries for plugin-served backends
+// (spaces/s3/gcs). The lookup order is:
+//  1. pluginDir argument when non-empty
+//  2. WFCTL_PLUGIN_DIR environment variable
+//  3. "./data/plugins" (legacy default)
+//
+// The host-side infra.admin module (workflow/module/infra_admin.go) is
+// expected to pass an empty string and rely on the WFCTL_PLUGIN_DIR
+// fallback so a single env var configures both CLI and module. The CLI
+// passes its `currentInfraPluginDir` seam variable to honor the
+// --plugin-dir flag.
 //
 // Returns a no-op store (not an error) when no iac.state module is
 // declared so first-run callers get silent no-op persistence — same
@@ -35,7 +45,7 @@ import (
 func ResolveStateStore(cfgFile, envName, pluginDir string) (interfaces.IaCStateStore, error) {
 	cfgToUse := cfgFile
 	if envName != "" {
-		tmp, err := writeEnvResolvedConfig(cfgFile, envName)
+		tmp, err := WriteEnvResolvedConfig(cfgFile, envName)
 		if err != nil {
 			return nil, fmt.Errorf("resolve %q environment for state store: %w", envName, err)
 		}

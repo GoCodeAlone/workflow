@@ -10,18 +10,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// writeEnvResolvedConfig loads cfgFile (honoring imports:), resolves every
+// WriteEnvResolvedConfig loads cfgFile (honoring imports:), resolves every
 // module for envName (ResolveForEnv is called on ALL module types so that
 // environments[envName]: null is honored for iac.*, cloud.account, etc.),
 // applies top-level environments[env] defaults, and writes the entire
 // WorkflowConfig back to a temp file. The caller must defer os.Remove(tmpPath).
 //
-// Mirrors cmd/wfctl/infra_env_resolve.go:writeEnvResolvedConfig so the
-// helper path produces byte-identical resolved configs to the wfctl CLI.
-// Per docs/plans/2026-05-27-infra-admin-dynamic.md Task 1 this is part of
-// the lift; the cmd/wfctl version delegates here to avoid double
-// maintenance.
-func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error) {
+// Per docs/plans/2026-05-27-infra-admin-dynamic.md Task 1 this is the
+// shared lift; cmd/wfctl/infra_env_resolve.go's writeEnvResolvedConfig is
+// a one-line shim that delegates here to avoid double maintenance.
+func WriteEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error) {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
 		return "", fmt.Errorf("load %s: %w", cfgFile, err)
@@ -39,7 +37,7 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 		if !ok {
 			continue
 		}
-		if topEnv != nil && isInfraType(rm.Type) {
+		if topEnv != nil && IsInfraType(rm.Type) {
 			if rm.Region == "" {
 				rm.Region = topEnv.Region
 				if rm.Region != "" {
@@ -62,7 +60,7 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 					}
 				}
 			}
-			if isContainerType(rm.Type) && len(topEnv.EnvVars) > 0 {
+			if IsContainerType(rm.Type) && len(topEnv.EnvVars) > 0 {
 				ev, _ := rm.Config["env_vars"].(map[string]any)
 				if ev == nil {
 					ev = map[string]any{}
@@ -112,15 +110,16 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 	return f.Name(), nil
 }
 
-// isInfraType returns true for module types in the infra.*/platform.*
-// namespaces. Kept consistent with cmd/wfctl/infra.go:isInfraType.
-func isInfraType(t string) bool {
+// IsInfraType returns true for module types in the infra.*/platform.*
+// namespaces. cmd/wfctl/infra.go:isInfraType is a one-line shim that
+// delegates here so the two codepaths cannot drift.
+func IsInfraType(t string) bool {
 	return strings.HasPrefix(t, "infra.") || strings.HasPrefix(t, "platform.")
 }
 
-// isContainerType returns true for module types that accept env_vars
-// defaults from top-level environments[env]. Kept consistent with
-// cmd/wfctl/infra.go:isContainerType.
-func isContainerType(t string) bool {
+// IsContainerType returns true for module types that accept env_vars
+// defaults from top-level environments[env]. cmd/wfctl/infra.go:
+// isContainerType is a one-line shim that delegates here.
+func IsContainerType(t string) bool {
 	return t == "infra.container_service"
 }
