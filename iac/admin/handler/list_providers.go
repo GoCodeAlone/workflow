@@ -12,21 +12,37 @@ import (
 // ListProviders implements InfraAdminService.ListProviders by
 // walking the provided `providers` map (keyed by host YAML module
 // name) and emitting one AdminProviderSummary per entry. The
-// summary carries the live provider type (from provider.Name()),
-// the catalogued region + engine lists for that provider type,
-// and the full catalog type list as supported_types.
+// summary carries the YAML-config provider_type string from the
+// caller-supplied providerTypeByModule map (NOT provider.Name() —
+// see invariant below), the catalogued region + engine lists for
+// that provider type, and the full catalog type list as
+// supported_types.
+//
+// **provider_type MUST come from the YAML config string, not
+// provider.Name()** — per spec-reviewer T6 F1 (commit 1ea231fdd) +
+// design cycle-5/6 backports:
+//   - interfaces.IaCProvider.Name() returns the plugin's DISPLAY
+//     name (e.g. "DigitalOcean Provider"). This is operator-facing
+//     decoration, not a stable identifier.
+//   - The YAML-config provider: field (e.g. "digitalocean") is the
+//     stable identifier the region + engine catalogs key against.
+//   - The host module (T15) reads each iac.provider module's
+//     config at Init time and populates providerTypeByModule
+//     keyed by module-name → provider-type-string.
+//   - If providerTypeByModule[modName] is missing (e.g. a stale
+//     module loaded without re-Init), provider_type stays empty
+//     and SupportedRegions + SupportedEngines come back empty —
+//     UI degrades gracefully rather than rendering wrong dropdowns.
 //
 // Signature deviation from design §Handler library (informational —
 // not blocking): the design listed
 //
 //	ListProviders(ctx, providers, regionCat, in)
 //
-// but the proto's AdminProviderSummary fields supported_engines +
-// supported_types require engineCat + fieldCat as parameters.
-// Adding them keeps the function pure (no hidden RPC fan-out for
-// engine/type lookup); the design's shorter signature was an
-// underspecification rather than an intentional minimal surface.
-// Spec-reviewer was DM'd at T6 commit time with this rationale.
+// The proto's AdminProviderSummary requires supported_engines +
+// supported_types (so fieldCat + engineCat are needed) AND the F1
+// fix requires providerTypeByModule. Final shape is 7 params;
+// design line 233 was underspecified.
 //
 // regions_source is the literal "local-catalog" per design §FieldSpec
 // Catalog so consumers can distinguish v1's local lookup from a
@@ -35,7 +51,8 @@ import (
 // Per design §Authz: default-deny via the shared authz guard.
 func ListProviders(
 	ctx context.Context,
-	providers map[string]interfaces.IaCProvider,
+	providers map[string]interfaces.IaCProvider, //nolint:revive // reserved for symmetry + future per-provider RPCs (e.g. live capability probe)
+	providerTypeByModule map[string]string,
 	fieldCat *catalog.FieldSpecCatalog,
 	regionCat *catalog.RegionCatalog,
 	engineCat *catalog.EngineCatalog,
@@ -63,11 +80,7 @@ func ListProviders(
 
 	out := &adminpb.AdminListProvidersOutput{}
 	for _, modName := range moduleNames {
-		p := providers[modName]
-		providerType := ""
-		if p != nil {
-			providerType = p.Name()
-		}
+		providerType := providerTypeByModule[modName] // may be "" if Init didn't populate
 		summary := &adminpb.AdminProviderSummary{
 			ModuleName:       modName,
 			ProviderType:     providerType,

@@ -728,8 +728,11 @@ func (x *AdminFieldSpec) GetDependsOnField() string {
 // AdminResourceTypeMetadata is the form-builder's view of one
 // infra.* Config message. config_message_fqn is the fully-qualified
 // proto message name in workflow-plugin-infra/internal/contracts/
-// infra.proto (e.g. "workflow.plugin.infra.v1.VPCConfig") so callers
-// can correlate against the vendored proto descriptor.
+// infra.proto (e.g. "workflow.plugins.infra.v1.VPCConfig" — note
+// the plural "plugins" matching the vendored proto's package
+// declaration; earlier doc-example used "plugin" singular which
+// didn't match the wire, see spec-reviewer T6 F2 on commit 1ea231fdd)
+// so callers can correlate against the vendored proto descriptor.
 type AdminResourceTypeMetadata struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Type               string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`

@@ -3,7 +3,6 @@ package catalog_test
 import (
 	"os"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/admin/catalog"
@@ -26,38 +25,14 @@ var protoConfigAllowlist = map[string]bool{
 // + a protoparse driver.
 var configMessagePattern = regexp.MustCompile(`(?m)^\s*message\s+([A-Za-z0-9_]+Config)\s*\{`)
 
-// typeToConfigMessage maps an "infra.<snake>" type name to its proto
-// CamelCase Config message. The mapping mirrors the per-driver naming
-// convention shared between catalog/fields.go and the vendored proto.
-//
-// Special-case acronym preservations (VPC, K8S, DNS, IAM, API) avoid
-// degenerate `Vpc` → `VPC` toggling. The set is closed at 13 entries
-// (the design's typed-Config inventory).
+// typeToConfigMessage is a thin shim onto the lifted shared helper
+// catalog.ConfigMessageShortName (see naming.go). Kept as a local
+// alias so existing T9 parity-test code reads unchanged; the actual
+// mapping table moved to a non-test file per spec-reviewer T6 F2
+// (commit 1ea231fdd) so the T6 handler library can call the same
+// algorithm rather than reimplementing it and drifting.
 func typeToConfigMessage(typeName string) string {
-	tail := strings.TrimPrefix(typeName, "infra.")
-	switch tail {
-	case "vpc":
-		return "VPCConfig"
-	case "k8s_cluster":
-		return "K8SClusterConfig"
-	case "dns":
-		return "DNSConfig"
-	case "iam_role":
-		return "IAMRoleConfig"
-	case "api_gateway":
-		return "APIGatewayConfig"
-	}
-	// Default: camelize snake-case tail (e.g. "container_service" →
-	// "ContainerService") then append "Config". Words are joined
-	// without separators per protobuf convention.
-	parts := strings.Split(tail, "_")
-	for i, p := range parts {
-		if len(p) == 0 {
-			continue
-		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
-	}
-	return strings.Join(parts, "") + "Config"
+	return catalog.ConfigMessageShortName(typeName)
 }
 
 func extractConfigMessages(t *testing.T, src string) []string {

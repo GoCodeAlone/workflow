@@ -77,37 +77,15 @@ func projectFieldSpecs(in []catalog.FieldSpec) []*adminpb.AdminFieldSpec {
 }
 
 // typeNameToConfigFQN maps a catalog type name (e.g. "infra.vpc")
-// to its fully-qualified proto message name in workflow-plugin-infra/
-// internal/contracts/infra.proto (e.g.
-// "workflow.plugin.infra.v1.VPCConfig"). Used by the
-// AdminResourceTypeMetadata.config_message_fqn field so cross-language
-// consumers can correlate against the vendored proto descriptor.
-//
-// The mapping is purely a string transform: strip "infra." prefix,
-// snake_case → PascalCase, append "Config". Centralised here so
-// future per-type FQN overrides can be added in one place.
+// to its fully-qualified proto message name in
+// workflow-plugins-infra/internal/contracts/infra.proto (e.g.
+// "workflow.plugins.infra.v1.VPCConfig"). Delegates to
+// catalog.ConfigMessageFQN so the package prefix + acronym-preserving
+// CamelCase transform are single-sourced — earlier inline code in
+// this file produced "workflow.plugin.infra.v1.VpcConfig" (wrong on
+// both halves) per spec-reviewer T6 F2 (commit 1ea231fdd). The
+// vendored proto at iac/admin/testdata/infra.proto is authoritative
+// for both the package name and the message-name acronym table.
 func typeNameToConfigFQN(typeName string) string {
-	const prefix = "workflow.plugin.infra.v1."
-	const suffix = "Config"
-	const trim = "infra."
-	if len(typeName) <= len(trim) || typeName[:len(trim)] != trim {
-		return ""
-	}
-	short := typeName[len(trim):]
-	// snake_case → PascalCase
-	var b []byte
-	upperNext := true
-	for i := 0; i < len(short); i++ {
-		c := short[i]
-		if c == '_' {
-			upperNext = true
-			continue
-		}
-		if upperNext && c >= 'a' && c <= 'z' {
-			c -= 'a' - 'A'
-		}
-		b = append(b, c)
-		upperNext = false
-	}
-	return prefix + string(b) + suffix
+	return catalog.ConfigMessageFQN(typeName)
 }

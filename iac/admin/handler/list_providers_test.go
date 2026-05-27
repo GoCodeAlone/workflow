@@ -49,20 +49,35 @@ func (p *nameableProvider) BootstrapStateBackend(_ context.Context, _ map[string
 }
 func (p *nameableProvider) Close() error { return nil }
 
-func providersFixture() map[string]interfaces.IaCProvider {
-	return map[string]interfaces.IaCProvider{
-		"do-prod":     &nameableProvider{name: "digitalocean"},
-		"aws-prod":    &nameableProvider{name: "aws"},
-		"stub-tester": &nameableProvider{name: "stub"},
+// providersFixture returns the providers map + a parallel
+// providerTypeByModule map captured "as if" at module Init from the
+// host YAML config. Per spec-reviewer T6 F1: the test fixture must
+// separate the two so a regression that mistakenly uses provider.Name()
+// can't be masked by a fake that happens to return the YAML-config
+// string. We deliberately set the fake Names to DIFFERENT,
+// DISPLAY-style strings so the bug would surface as wrong
+// provider_type / empty region+engine lists.
+func providersFixture() (map[string]interfaces.IaCProvider, map[string]string) {
+	providers := map[string]interfaces.IaCProvider{
+		"do-prod":     &nameableProvider{name: "DigitalOcean Provider"}, // display name
+		"aws-prod":    &nameableProvider{name: "AWS Provider Plugin"},   // display name
+		"stub-tester": &nameableProvider{name: "Stub IaC Provider"},     // display name
 	}
+	providerTypeByModule := map[string]string{
+		"do-prod":     "digitalocean", // YAML-config string (stable identifier)
+		"aws-prod":    "aws",
+		"stub-tester": "stub",
+	}
+	return providers, providerTypeByModule
 }
 
 func TestListProviders_HappyPath(t *testing.T) {
-	providers := providersFixture()
+	providers, providerTypeByModule := providersFixture()
 	in := &adminpb.AdminListProvidersInput{Evidence: authzOK()}
 	out, err := handler.ListProviders(
 		context.Background(),
 		providers,
+		providerTypeByModule,
 		catalog.New(),
 		catalog.NewRegionCatalog(),
 		catalog.NewEngineCatalog(),
@@ -80,10 +95,10 @@ func TestListProviders_HappyPath(t *testing.T) {
 }
 
 func TestListProviders_PopulatesRegionsAndEnginesAndTypes(t *testing.T) {
-	providers := providersFixture()
+	providers, providerTypeByModule := providersFixture()
 	in := &adminpb.AdminListProvidersInput{Evidence: authzOK()}
 	out, _ := handler.ListProviders(
-		context.Background(), providers,
+		context.Background(), providers, providerTypeByModule,
 		catalog.New(), catalog.NewRegionCatalog(), catalog.NewEngineCatalog(), in,
 	)
 	var doProv *adminpb.AdminProviderSummary
@@ -96,7 +111,7 @@ func TestListProviders_PopulatesRegionsAndEnginesAndTypes(t *testing.T) {
 		t.Fatal("do-prod missing from result")
 	}
 	if doProv.ProviderType != "digitalocean" {
-		t.Errorf("ProviderType = %q, want digitalocean (from provider.Name())", doProv.ProviderType)
+		t.Errorf("ProviderType = %q, want digitalocean (from providerTypeByModule, NOT provider.Name())", doProv.ProviderType)
 	}
 	if doProv.RegionsSource != "local-catalog" {
 		t.Errorf("RegionsSource = %q, want local-catalog (v1 per design)", doProv.RegionsSource)
@@ -120,11 +135,80 @@ func TestListProviders_PopulatesRegionsAndEnginesAndTypes(t *testing.T) {
 	}
 }
 
-func TestListProviders_SortedByModuleName(t *testing.T) {
-	providers := providersFixture()
+// TestListProviders_UsesCapturedConfigStringNotProviderName is the
+// regression guard for spec-reviewer T6 F1 (commit 1ea231fdd):
+// provider.Name() returns the plugin's display name in production;
+// the YAML-config provider: string (captured at module Init via
+// providerTypeByModule) is what the catalogs key against. If the
+// handler ever reverts to p.Name(), this test fails because the
+// fake's Name() returns "DigitalOcean Provider" — not in any
+// catalog — so SupportedRegions + SupportedEngines come back empty.
+func TestListProviders_UsesCapturedConfigStringNotProviderName(t *testing.T) {
+	providers, providerTypeByModule := providersFixture()
 	in := &adminpb.AdminListProvidersInput{Evidence: authzOK()}
 	out, _ := handler.ListProviders(
-		context.Background(), providers,
+		context.Background(), providers, providerTypeByModule,
+		catalog.New(), catalog.NewRegionCatalog(), catalog.NewEngineCatalog(), in,
+	)
+	var doProv *adminpb.AdminProviderSummary
+	for _, p := range out.Providers {
+		if p.ModuleName == "do-prod" {
+			doProv = p
+		}
+	}
+	if doProv == nil {
+		t.Fatal("do-prod missing")
+	}
+	// Bug-class assertion: handler MUST NOT carry the display name
+	// from provider.Name() into provider_type. The fixture's fake
+	// Name() returns "DigitalOcean Provider" — if that leaks
+	// through, the catalog lookup downstream will fail and
+	// SupportedRegions will be empty.
+	if doProv.ProviderType == "DigitalOcean Provider" {
+		t.Fatal("BUG: provider_type carries provider.Name() (display name) instead of providerTypeByModule (YAML config string)")
+	}
+	if doProv.ProviderType != "digitalocean" {
+		t.Errorf("ProviderType = %q, want exactly 'digitalocean'", doProv.ProviderType)
+	}
+	if len(doProv.SupportedRegions) == 0 {
+		t.Error("SupportedRegions empty — provider_type isn't a catalog key (the F1 bug symptom)")
+	}
+}
+
+// TestListProviders_MissingProviderTypeByModule_DegradesGracefully
+// guards the F1 fix's degradation path: when providerTypeByModule
+// doesn't include a key for a registered iac.provider module (e.g.
+// stale Init, hot-reload race), the handler still emits a summary
+// entry with empty provider_type + empty regions/engines so the UI
+// renders a graceful empty-dropdown affordance instead of crashing
+// or dropping the provider entirely.
+func TestListProviders_MissingProviderTypeByModule_DegradesGracefully(t *testing.T) {
+	providers, _ := providersFixture()
+	// Pass an EMPTY map — simulates "Init never populated for these modules".
+	emptyTypeMap := map[string]string{}
+	in := &adminpb.AdminListProvidersInput{Evidence: authzOK()}
+	out, _ := handler.ListProviders(
+		context.Background(), providers, emptyTypeMap,
+		catalog.New(), catalog.NewRegionCatalog(), catalog.NewEngineCatalog(), in,
+	)
+	if len(out.Providers) != len(providers) {
+		t.Fatalf("got %d providers, want %d (handler dropped entries instead of degrading)", len(out.Providers), len(providers))
+	}
+	for _, p := range out.Providers {
+		if p.ProviderType != "" {
+			t.Errorf("module %q ProviderType = %q, want empty when providerTypeByModule key is missing", p.ModuleName, p.ProviderType)
+		}
+		if len(p.SupportedRegions) != 0 {
+			t.Errorf("module %q SupportedRegions = %v, want empty (regions keyed by empty string)", p.ModuleName, p.SupportedRegions)
+		}
+	}
+}
+
+func TestListProviders_SortedByModuleName(t *testing.T) {
+	providers, providerTypeByModule := providersFixture()
+	in := &adminpb.AdminListProvidersInput{Evidence: authzOK()}
+	out, _ := handler.ListProviders(
+		context.Background(), providers, providerTypeByModule,
 		catalog.New(), catalog.NewRegionCatalog(), catalog.NewEngineCatalog(), in,
 	)
 	gotNames := make([]string, 0, len(out.Providers))
@@ -137,7 +221,7 @@ func TestListProviders_SortedByModuleName(t *testing.T) {
 }
 
 func TestListProviders_DefaultDeny(t *testing.T) {
-	providers := providersFixture()
+	providers, providerTypeByModule := providersFixture()
 	cases := []struct {
 		name string
 		ev   *adminpb.AdminAuthzEvidence
@@ -150,7 +234,7 @@ func TestListProviders_DefaultDeny(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			in := &adminpb.AdminListProvidersInput{Evidence: c.ev}
 			out, _ := handler.ListProviders(
-				context.Background(), providers,
+				context.Background(), providers, providerTypeByModule,
 				catalog.New(), catalog.NewRegionCatalog(), catalog.NewEngineCatalog(), in,
 			)
 			if out.Error == "" {
@@ -164,17 +248,20 @@ func TestListProviders_DefaultDeny(t *testing.T) {
 }
 
 func TestListProviders_UnknownProviderTypeStillSurfaces(t *testing.T) {
-	// A provider with a Name() that's not in the region/engine catalog
-	// should still appear in the listing, but with empty
-	// supported_regions / supported_engines (so the UI can render a
-	// "no regions available" placeholder rather than dropping the
-	// provider).
+	// A registered iac.provider module whose YAML-config provider:
+	// string isn't in the region/engine catalog should still appear
+	// in the listing, but with empty supported_regions /
+	// supported_engines (so the UI can render a "no regions available"
+	// placeholder rather than dropping the provider).
 	providers := map[string]interfaces.IaCProvider{
-		"unknown-mod": &nameableProvider{name: "mystery-cloud"},
+		"unknown-mod": &nameableProvider{name: "Mystery Cloud Provider"}, // display name; irrelevant
+	}
+	providerTypeByModule := map[string]string{
+		"unknown-mod": "mystery-cloud", // YAML config string; not in any catalog
 	}
 	in := &adminpb.AdminListProvidersInput{Evidence: authzOK()}
 	out, _ := handler.ListProviders(
-		context.Background(), providers,
+		context.Background(), providers, providerTypeByModule,
 		catalog.New(), catalog.NewRegionCatalog(), catalog.NewEngineCatalog(), in,
 	)
 	if len(out.Providers) != 1 {
@@ -182,7 +269,7 @@ func TestListProviders_UnknownProviderTypeStillSurfaces(t *testing.T) {
 	}
 	p := out.Providers[0]
 	if p.ProviderType != "mystery-cloud" {
-		t.Errorf("ProviderType = %q, want mystery-cloud", p.ProviderType)
+		t.Errorf("ProviderType = %q, want mystery-cloud (from providerTypeByModule)", p.ProviderType)
 	}
 	if len(p.SupportedRegions) != 0 {
 		t.Errorf("SupportedRegions = %v, want empty (mystery-cloud not in catalog)", p.SupportedRegions)
