@@ -199,6 +199,13 @@ function addArrayRow(spec, rows, elementKind) {
         { name: `${spec.name}_item`, required: false, default_value: '' },
         resolveDynamicEnum(spec, snapshotFormState()),
       );
+      // Code-review I-1: tag the row's select with the same
+      // data-enum-dynamic / data-depends-on attributes that
+      // refreshDependentDynamics() looks for, so changing the parent
+      // field (e.g. provider) rebuilds the array rows' options too.
+      // Without these, array_enum_dynamic dropdowns go stale.
+      if (spec.enum_source) input.dataset.enumDynamic = spec.enum_source;
+      if (spec.depends_on_field) input.dataset.dependsOn = spec.depends_on_field;
       break;
     default:
       input = document.createElement('input');
@@ -321,23 +328,36 @@ function renderType(typeMeta) {
 }
 
 function readSubmittedFieldValues() {
-  const out = {};
+  // Collect array values into JS arrays first, scalars into strings,
+  // then JSON.stringify the arrays into their map<string,string> slots
+  // before returning. Code-review I-2: per spec-reviewer + code-reviewer
+  // contract lock, array field_values are JSON-encoded so the server
+  // (T6 GenerateConfig) can `json.Unmarshal([]byte(s), &arr)` and
+  // recover the original slice — robust against array elements that
+  // contain commas (firewall rule DSLs, etc.). Scalars stay as plain
+  // strings to keep simple paths cheap.
+  const scalars = {};
+  const arrays = {};
   const fields = document.getElementById('fields');
   for (const el of fields.querySelectorAll('input, select')) {
     if (!el.name) continue;
     if (el.type === 'checkbox') {
-      out[el.name] = el.checked ? 'true' : 'false';
+      scalars[el.name] = el.checked ? 'true' : 'false';
       continue;
     }
     if (el.name.endsWith('[]')) {
       const key = el.name.slice(0, -2);
-      const cur = out[key];
       const val = el.value;
       if (val === '' || val == null) continue;
-      out[key] = cur ? `${cur},${val}` : val;
+      if (!arrays[key]) arrays[key] = [];
+      arrays[key].push(val);
       continue;
     }
-    if (el.value !== '' && el.value != null) out[el.name] = el.value;
+    if (el.value !== '' && el.value != null) scalars[el.name] = el.value;
+  }
+  const out = { ...scalars };
+  for (const key of Object.keys(arrays)) {
+    out[key] = JSON.stringify(arrays[key]);
   }
   return out;
 }
