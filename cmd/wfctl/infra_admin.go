@@ -51,6 +51,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/admin/catalog"
 	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
@@ -148,14 +149,20 @@ Common flags:
 
 // adminDeps bundles the three things every read subcommand needs to
 // invoke the handler library: state backend, provider map (keyed by
-// host YAML module name), and the catalog triple.
+// host YAML module name), the catalog triple, and the
+// providerTypeByModule lookup populated from the YAML config at
+// resolve-time (per design cycle-5/6 + spec-reviewer T6 F1 — the
+// YAML-config `provider:` field is the stable identifier the
+// catalogs key against; provider.Name() returns the plugin's
+// display name and is NOT a stable identifier).
 type adminDeps struct {
-	store         interfaces.IaCStateStore
-	providers     map[string]interfaces.IaCProvider
-	closers       []io.Closer
-	fieldCatalog  *catalog.FieldSpecCatalog
-	regionCatalog *catalog.RegionCatalog
-	engineCatalog *catalog.EngineCatalog
+	store                interfaces.IaCStateStore
+	providers            map[string]interfaces.IaCProvider
+	providerTypeByModule map[string]string
+	closers              []io.Closer
+	fieldCatalog         *catalog.FieldSpecCatalog
+	regionCatalog        *catalog.RegionCatalog
+	engineCatalog        *catalog.EngineCatalog
 }
 
 // resolveAdminDeps loads the workflow config and instantiates everything
@@ -173,14 +180,54 @@ func resolveAdminDeps(ctx context.Context, cfgFile, envName string) (*adminDeps,
 	if err != nil {
 		return nil, fmt.Errorf("load providers: %w", err)
 	}
+	providerTypeByModule, err := loadProviderTypeByModule(cfgFile)
+	if err != nil {
+		// Roll back the loaded providers so we don't leak subprocesses.
+		for _, c := range closers {
+			_ = c.Close()
+		}
+		return nil, fmt.Errorf("load providerTypeByModule: %w", err)
+	}
 	return &adminDeps{
-		store:         store,
-		providers:     providers,
-		closers:       closers,
-		fieldCatalog:  catalog.New(),
-		regionCatalog: catalog.NewRegionCatalog(),
-		engineCatalog: catalog.NewEngineCatalog(),
+		store:                store,
+		providers:            providers,
+		providerTypeByModule: providerTypeByModule,
+		closers:              closers,
+		fieldCatalog:         catalog.New(),
+		regionCatalog:        catalog.NewRegionCatalog(),
+		engineCatalog:        catalog.NewEngineCatalog(),
 	}, nil
+}
+
+// loadProviderTypeByModule walks cfgFile's modules and returns a map
+// of {iac.provider module name -> YAML `provider:` string}. Per
+// spec-reviewer T6 F1 + design cycle-5/6: this is the captured-at-
+// Init contract handler.ListProviders relies on for the
+// provider_type field in AdminProviderSummary. T15 (host module)
+// will populate the same map from its app.GetService-resolved
+// modules; the CLI side reads it from disk.
+func loadProviderTypeByModule(cfgFile string) (map[string]string, error) {
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", cfgFile, err)
+	}
+	out := map[string]string{}
+	for i := range cfg.Modules {
+		m := &cfg.Modules[i]
+		if m.Type != "iac.provider" {
+			continue
+		}
+		modCfg := config.ExpandEnvInMap(m.Config)
+		pt, _ := modCfg["provider"].(string)
+		if pt == "" {
+			// Skip silently — matches LoadAllIaCProvidersFromConfig's
+			// same-shape behavior; misconfigured module already won't
+			// have a provider entry in the providers map either.
+			continue
+		}
+		out[m.Name] = pt
+	}
+	return out, nil
 }
 
 func (d *adminDeps) Close() {
@@ -416,7 +463,7 @@ func runInfraAdminListProviders(args []string) error {
 		EnvName:  *envName,
 		Evidence: infraAdminEvidence(),
 	}
-	out, err := handler.ListProviders(ctx, deps.providers, deps.fieldCatalog, deps.regionCatalog, deps.engineCatalog, in)
+	out, err := handler.ListProviders(ctx, deps.providers, deps.providerTypeByModule, deps.fieldCatalog, deps.regionCatalog, deps.engineCatalog, in)
 	if err != nil {
 		return err
 	}
