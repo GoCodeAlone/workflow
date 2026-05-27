@@ -71,28 +71,49 @@ message AdminResourceDetail {
   repeated string sensitive_outputs_redacted = 6;
 }
 
+// AdminListResourcesInput is the request shape for the ListResources
+// RPC. Filters narrow the returned set; evidence carries the host-side
+// authz outcome (default-deny semantics).
 message AdminListResourcesInput {
   string type_filter          = 1;
   string provider_filter      = 2;
   string app_context_filter   = 3;
   string env_name             = 4;
   AdminAuthzEvidence evidence = 5;
+  // Tag 6-99 reserved for future filter additions; tag 100 is the
+  // uniform error discriminator on Output messages (Input messages
+  // don't carry error but reserve the tag for symmetry).
+  reserved 6 to 99, 101 to 199;
 }
 
+// AdminListResourcesOutput is the response shape for the ListResources
+// RPC. error is set when the handler refused (e.g. authz denied); when
+// non-empty, consumers MUST ignore the typed payload.
 message AdminListResourcesOutput {
   repeated AdminResourceSummary resources = 1;
   string error = 100;
+  // Tag 2-99 reserved for future Output-payload fields; tag 101-199
+  // reserved for future Output-side error/diagnostic metadata.
+  reserved 2 to 99, 101 to 199;
 }
 
+// AdminGetResourceInput is the request shape for the GetResource RPC.
+// name is the resource's host-side identity (the YAML `name:`); the
+// returned detail includes the full applied config + outputs.
 message AdminGetResourceInput {
   string name                 = 1;
   string env_name             = 2;
   AdminAuthzEvidence evidence = 3;
+  reserved 4 to 99, 101 to 199;
 }
 
+// AdminGetResourceOutput is the response shape for the GetResource RPC.
+// Carries AdminResourceDetail when found; error when the resource is
+// missing or authz denied.
 message AdminGetResourceOutput {
   AdminResourceDetail resource = 1;
   string error = 100;
+  reserved 2 to 99, 101 to 199;
 }
 
 // AdminFieldSpec describes one field of a typed infra.* Config so the
@@ -137,14 +158,22 @@ message AdminResourceTypeMetadata {
   string description                = 5;
 }
 
+// AdminListResourceTypesInput is the request shape for the
+// ListResourceTypes RPC. provider_filter narrows the returned types to
+// those a given provider supports.
 message AdminListResourceTypesInput {
   string provider_filter = 1;
   AdminAuthzEvidence evidence = 2;
+  reserved 3 to 99, 101 to 199;
 }
 
+// AdminListResourceTypesOutput is the response shape for the
+// ListResourceTypes RPC. types is the form-builder's view of every
+// registered infra.* Config (one entry per FieldSpecCatalog type).
 message AdminListResourceTypesOutput {
   repeated AdminResourceTypeMetadata types = 1;
   string error = 100;
+  reserved 2 to 99, 101 to 199;
 }
 
 // AdminProviderSummary is the ListProviders response row. v1
@@ -163,14 +192,21 @@ message AdminProviderSummary {
   string regions_source           = 7;  // "local-catalog" for v1
 }
 
+// AdminListProvidersInput is the request shape for the ListProviders
+// RPC. env_name selects the per-environment overlay.
 message AdminListProvidersInput {
   string env_name        = 1;
   AdminAuthzEvidence evidence = 2;
+  reserved 3 to 99, 101 to 199;
 }
 
+// AdminListProvidersOutput is the response shape for the ListProviders
+// RPC. One AdminProviderSummary per iac.provider module declared in the
+// host's WorkflowConfig.
 message AdminListProvidersOutput {
   repeated AdminProviderSummary providers = 1;
   string error = 100;
+  reserved 2 to 99, 101 to 199;
 }
 
 // AdminGenerateConfigInput carries the form-builder submission.
@@ -185,12 +221,20 @@ message AdminGenerateConfigInput {
   string provider_module = 3;
   map<string, string> field_values = 4;
   AdminAuthzEvidence evidence = 5;
+  reserved 6 to 99, 101 to 199;
 }
 
+// AdminGenerateConfigOutput is the response shape for the
+// GenerateConfig RPC. yaml_snippet is the typed-coerced YAML the form
+// produced; validation_errors carries any per-field validation
+// failures the catalog reported (form remains submittable on
+// validation_errors — `error` is reserved for handler-level failures
+// like authz denial).
 message AdminGenerateConfigOutput {
   string yaml_snippet  = 1;
   repeated string validation_errors = 2;
   string error = 100;
+  reserved 3 to 99, 101 to 199;
 }
 
 // AdminAuditEntry is the line shape for the audit log (one entry per

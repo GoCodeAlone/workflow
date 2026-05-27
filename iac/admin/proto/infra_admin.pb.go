@@ -320,6 +320,9 @@ func (x *AdminResourceDetail) GetSensitiveOutputsRedacted() []string {
 	return nil
 }
 
+// AdminListResourcesInput is the request shape for the ListResources
+// RPC. Filters narrow the returned set; evidence carries the host-side
+// authz outcome (default-deny semantics).
 type AdminListResourcesInput struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	TypeFilter       string                 `protobuf:"bytes,1,opt,name=type_filter,json=typeFilter,proto3" json:"type_filter,omitempty"`
@@ -396,6 +399,9 @@ func (x *AdminListResourcesInput) GetEvidence() *AdminAuthzEvidence {
 	return nil
 }
 
+// AdminListResourcesOutput is the response shape for the ListResources
+// RPC. error is set when the handler refused (e.g. authz denied); when
+// non-empty, consumers MUST ignore the typed payload.
 type AdminListResourcesOutput struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
 	Resources     []*AdminResourceSummary `protobuf:"bytes,1,rep,name=resources,proto3" json:"resources,omitempty"`
@@ -448,6 +454,9 @@ func (x *AdminListResourcesOutput) GetError() string {
 	return ""
 }
 
+// AdminGetResourceInput is the request shape for the GetResource RPC.
+// name is the resource's host-side identity (the YAML `name:`); the
+// returned detail includes the full applied config + outputs.
 type AdminGetResourceInput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -508,6 +517,9 @@ func (x *AdminGetResourceInput) GetEvidence() *AdminAuthzEvidence {
 	return nil
 }
 
+// AdminGetResourceOutput is the response shape for the GetResource RPC.
+// Carries AdminResourceDetail when found; error when the resource is
+// missing or authz denied.
 type AdminGetResourceOutput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Resource      *AdminResourceDetail   `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
@@ -794,6 +806,9 @@ func (x *AdminResourceTypeMetadata) GetDescription() string {
 	return ""
 }
 
+// AdminListResourceTypesInput is the request shape for the
+// ListResourceTypes RPC. provider_filter narrows the returned types to
+// those a given provider supports.
 type AdminListResourceTypesInput struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ProviderFilter string                 `protobuf:"bytes,1,opt,name=provider_filter,json=providerFilter,proto3" json:"provider_filter,omitempty"`
@@ -846,6 +861,9 @@ func (x *AdminListResourceTypesInput) GetEvidence() *AdminAuthzEvidence {
 	return nil
 }
 
+// AdminListResourceTypesOutput is the response shape for the
+// ListResourceTypes RPC. types is the form-builder's view of every
+// registered infra.* Config (one entry per FieldSpecCatalog type).
 type AdminListResourceTypesOutput struct {
 	state         protoimpl.MessageState       `protogen:"open.v1"`
 	Types         []*AdminResourceTypeMetadata `protobuf:"bytes,1,rep,name=types,proto3" json:"types,omitempty"`
@@ -996,6 +1014,8 @@ func (x *AdminProviderSummary) GetRegionsSource() string {
 	return ""
 }
 
+// AdminListProvidersInput is the request shape for the ListProviders
+// RPC. env_name selects the per-environment overlay.
 type AdminListProvidersInput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	EnvName       string                 `protobuf:"bytes,1,opt,name=env_name,json=envName,proto3" json:"env_name,omitempty"`
@@ -1048,6 +1068,9 @@ func (x *AdminListProvidersInput) GetEvidence() *AdminAuthzEvidence {
 	return nil
 }
 
+// AdminListProvidersOutput is the response shape for the ListProviders
+// RPC. One AdminProviderSummary per iac.provider module declared in the
+// host's WorkflowConfig.
 type AdminListProvidersOutput struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
 	Providers     []*AdminProviderSummary `protobuf:"bytes,1,rep,name=providers,proto3" json:"providers,omitempty"`
@@ -1182,6 +1205,12 @@ func (x *AdminGenerateConfigInput) GetEvidence() *AdminAuthzEvidence {
 	return nil
 }
 
+// AdminGenerateConfigOutput is the response shape for the
+// GenerateConfig RPC. yaml_snippet is the typed-coerced YAML the form
+// produced; validation_errors carries any per-field validation
+// failures the catalog reported (form remains submittable on
+// validation_errors — `error` is reserved for handler-level failures
+// like authz denial).
 type AdminGenerateConfigOutput struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	YamlSnippet      string                 `protobuf:"bytes,1,opt,name=yaml_snippet,json=yamlSnippet,proto3" json:"yaml_snippet,omitempty"`
@@ -1368,24 +1397,24 @@ const file_iac_admin_proto_infra_admin_proto_rawDesc = "" +
 	"\vconfig_hash\x18\x04 \x01(\tR\n" +
 	"configHash\x121\n" +
 	"\x15last_drift_check_unix\x18\x05 \x01(\x03R\x12lastDriftCheckUnix\x12<\n" +
-	"\x1asensitive_outputs_redacted\x18\x06 \x03(\tR\x18sensitiveOutputsRedacted\"\xed\x01\n" +
+	"\x1asensitive_outputs_redacted\x18\x06 \x03(\tR\x18sensitiveOutputsRedacted\"\xfa\x01\n" +
 	"\x17AdminListResourcesInput\x12\x1f\n" +
 	"\vtype_filter\x18\x01 \x01(\tR\n" +
 	"typeFilter\x12'\n" +
 	"\x0fprovider_filter\x18\x02 \x01(\tR\x0eproviderFilter\x12,\n" +
 	"\x12app_context_filter\x18\x03 \x01(\tR\x10appContextFilter\x12\x19\n" +
 	"\benv_name\x18\x04 \x01(\tR\aenvName\x12?\n" +
-	"\bevidence\x18\x05 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidence\"u\n" +
+	"\bevidence\x18\x05 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidenceJ\x04\b\x06\x10dJ\x05\be\x10\xc8\x01\"\x82\x01\n" +
 	"\x18AdminListResourcesOutput\x12C\n" +
 	"\tresources\x18\x01 \x03(\v2%.workflow.iac.v1.AdminResourceSummaryR\tresources\x12\x14\n" +
-	"\x05error\x18d \x01(\tR\x05error\"\x87\x01\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x02\x10dJ\x05\be\x10\xc8\x01\"\x94\x01\n" +
 	"\x15AdminGetResourceInput\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
 	"\benv_name\x18\x02 \x01(\tR\aenvName\x12?\n" +
-	"\bevidence\x18\x03 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidence\"p\n" +
+	"\bevidence\x18\x03 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidenceJ\x04\b\x04\x10dJ\x05\be\x10\xc8\x01\"}\n" +
 	"\x16AdminGetResourceOutput\x12@\n" +
 	"\bresource\x18\x01 \x01(\v2$.workflow.iac.v1.AdminResourceDetailR\bresource\x12\x14\n" +
-	"\x05error\x18d \x01(\tR\x05error\"\x98\x03\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x02\x10dJ\x05\be\x10\xc8\x01\"\x98\x03\n" +
 	"\x0eAdminFieldSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12\x12\n" +
@@ -1408,13 +1437,13 @@ const file_iac_admin_proto_infra_admin_proto_rawDesc = "" +
 	"\x12config_message_fqn\x18\x02 \x01(\tR\x10configMessageFqn\x127\n" +
 	"\x06fields\x18\x03 \x03(\v2\x1f.workflow.iac.v1.AdminFieldSpecR\x06fields\x12/\n" +
 	"\x13supported_providers\x18\x04 \x03(\tR\x12supportedProviders\x12 \n" +
-	"\vdescription\x18\x05 \x01(\tR\vdescription\"\x87\x01\n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\"\x94\x01\n" +
 	"\x1bAdminListResourceTypesInput\x12'\n" +
 	"\x0fprovider_filter\x18\x01 \x01(\tR\x0eproviderFilter\x12?\n" +
-	"\bevidence\x18\x02 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidence\"v\n" +
+	"\bevidence\x18\x02 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidenceJ\x04\b\x03\x10dJ\x05\be\x10\xc8\x01\"\x83\x01\n" +
 	"\x1cAdminListResourceTypesOutput\x12@\n" +
 	"\x05types\x18\x01 \x03(\v2*.workflow.iac.v1.AdminResourceTypeMetadataR\x05types\x12\x14\n" +
-	"\x05error\x18d \x01(\tR\x05error\"\xaa\x02\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x02\x10dJ\x05\be\x10\xc8\x01\"\xaa\x02\n" +
 	"\x14AdminProviderSummary\x12\x1f\n" +
 	"\vmodule_name\x18\x01 \x01(\tR\n" +
 	"moduleName\x12#\n" +
@@ -1423,13 +1452,13 @@ const file_iac_admin_proto_infra_admin_proto_rawDesc = "" +
 	"\x11supported_regions\x18\x04 \x03(\tR\x10supportedRegions\x12'\n" +
 	"\x0fsupported_types\x18\x05 \x03(\tR\x0esupportedTypes\x12+\n" +
 	"\x11supported_engines\x18\x06 \x03(\tR\x10supportedEngines\x12%\n" +
-	"\x0eregions_source\x18\a \x01(\tR\rregionsSource\"u\n" +
+	"\x0eregions_source\x18\a \x01(\tR\rregionsSource\"\x82\x01\n" +
 	"\x17AdminListProvidersInput\x12\x19\n" +
 	"\benv_name\x18\x01 \x01(\tR\aenvName\x12?\n" +
-	"\bevidence\x18\x02 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidence\"u\n" +
+	"\bevidence\x18\x02 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidenceJ\x04\b\x03\x10dJ\x05\be\x10\xc8\x01\"\x82\x01\n" +
 	"\x18AdminListProvidersOutput\x12C\n" +
 	"\tproviders\x18\x01 \x03(\v2%.workflow.iac.v1.AdminProviderSummaryR\tproviders\x12\x14\n" +
-	"\x05error\x18d \x01(\tR\x05error\"\xed\x02\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x02\x10dJ\x05\be\x10\xc8\x01\"\xfa\x02\n" +
 	"\x18AdminGenerateConfigInput\x12#\n" +
 	"\rresource_type\x18\x01 \x01(\tR\fresourceType\x12#\n" +
 	"\rresource_name\x18\x02 \x01(\tR\fresourceName\x12'\n" +
@@ -1438,11 +1467,11 @@ const file_iac_admin_proto_infra_admin_proto_rawDesc = "" +
 	"\bevidence\x18\x05 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidence\x1a>\n" +
 	"\x10FieldValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x81\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x06\x10dJ\x05\be\x10\xc8\x01\"\x8e\x01\n" +
 	"\x19AdminGenerateConfigOutput\x12!\n" +
 	"\fyaml_snippet\x18\x01 \x01(\tR\vyamlSnippet\x12+\n" +
 	"\x11validation_errors\x18\x02 \x03(\tR\x10validationErrors\x12\x14\n" +
-	"\x05error\x18d \x01(\tR\x05error\"\xd6\x01\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x03\x10dJ\x05\be\x10\xc8\x01\"\xd6\x01\n" +
 	"\x0fAdminAuditEntry\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\x05R\rschemaVersion\x12\x17\n" +
 	"\ats_unix\x18\x02 \x01(\x03R\x06tsUnix\x12\x18\n" +
