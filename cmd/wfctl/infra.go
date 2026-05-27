@@ -111,6 +111,8 @@ func runInfra(args []string) error {
 			return fmt.Errorf("audit-state-secrets exited with code %d", rc)
 		}
 		return nil
+	case "admin":
+		return runInfraAdmin(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -137,6 +139,9 @@ Actions:
   align          Validate IaC config + plan alignment (8 rule families)
   test           Hermetically validate expected infra config and plan outcomes
   security-check Scan plan.json for security policy violations
+  admin          Query the infra.admin host-side module surface
+                   (list-resources, get-resource, list-types,
+                    list-providers, generate-config, audit-tail)
   cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
   audit-secrets  Report provider_credential anti-patterns in secrets.generate
   audit-keys     List cloud-side resources of --type via the provider's EnumeratorAll
