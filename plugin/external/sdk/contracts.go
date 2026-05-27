@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -8,6 +9,68 @@ import (
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
+
+// MessageContract describes a descriptor-only protobuf message contract.
+type MessageContract struct {
+	ContractType    string
+	ProtoPackage    string
+	MessageNames    []string
+	GoImportPath    string
+	SchemaDigest    string
+	ProtocolVersion string
+}
+
+// BuildMessageContractRegistry returns a registry containing MESSAGE-kind
+// descriptors. Descriptor-only plugins can expose these contracts statically
+// in plugin.contracts.json; runtime-backed plugins can return the same shape
+// from ContractRegistry for parity tests.
+func BuildMessageContractRegistry(contracts ...MessageContract) (*pb.ContractRegistry, error) {
+	registry := &pb.ContractRegistry{}
+	for _, contract := range contracts {
+		descriptor, err := contractDescriptorForMessageContract(contract)
+		if err != nil {
+			return nil, err
+		}
+		registry.Contracts = append(registry.Contracts, descriptor)
+	}
+	return registry, nil
+}
+
+func contractDescriptorForMessageContract(contract MessageContract) (*pb.ContractDescriptor, error) {
+	if strings.TrimSpace(contract.ContractType) == "" {
+		return nil, fmt.Errorf("message contract type is required")
+	}
+	if strings.TrimSpace(contract.ProtoPackage) == "" {
+		return nil, fmt.Errorf("message contract proto package is required")
+	}
+	if len(contract.MessageNames) == 0 {
+		return nil, fmt.Errorf("message contract must declare at least one message")
+	}
+	if strings.TrimSpace(contract.SchemaDigest) == "" {
+		return nil, fmt.Errorf("message contract schema digest is required")
+	}
+	if strings.TrimSpace(contract.ProtocolVersion) == "" {
+		return nil, fmt.Errorf("message contract protocol version is required")
+	}
+	names := make([]string, 0, len(contract.MessageNames))
+	for _, name := range contract.MessageNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, fmt.Errorf("message contract contains empty message name")
+		}
+		names = append(names, name)
+	}
+	return &pb.ContractDescriptor{
+		Kind:            pb.ContractKind_CONTRACT_KIND_MESSAGE,
+		Mode:            pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+		ContractType:    contract.ContractType,
+		ProtoPackage:    contract.ProtoPackage,
+		MessageNames:    names,
+		GoImportPath:    contract.GoImportPath,
+		SchemaDigest:    contract.SchemaDigest,
+		ProtocolVersion: contract.ProtocolVersion,
+	}, nil
+}
 
 // BuildContractRegistry enumerates the gRPC services registered on
 // grpcSrv and returns a *pb.ContractRegistry with a SERVICE-kind

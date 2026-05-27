@@ -110,6 +110,7 @@ enum ContractKind {
   CONTRACT_KIND_STEP = 2;
   CONTRACT_KIND_SERVICE = 3;
   CONTRACT_KIND_TRIGGER = 4;
+  CONTRACT_KIND_MESSAGE = 5;
 }
 
 // ContractMode describes how strictly the host and plugin should use typed payloads.
@@ -140,6 +141,12 @@ message ContractDescriptor {
   string input_message = 8;
   string output_message = 9;
   ContractMode mode = 10;
+  string contract_type = 11;
+  string proto_package = 12;
+  repeated string message_names = 13;
+  string go_import_path = 14;
+  string schema_digest = 15;
+  string protocol_version = 16;
 }
 
 // GetAssetRequest asks the plugin to return an embedded static asset.

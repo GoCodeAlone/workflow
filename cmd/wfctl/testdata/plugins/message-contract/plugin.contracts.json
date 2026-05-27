@@ -1,0 +1,19 @@
+{
+  "version": "v1",
+  "descriptorSetRef": "descriptors/message.pb",
+  "contracts": [
+    {
+      "kind": "message",
+      "contractType": "compute.network_audit_evidence.v1",
+      "protoPackage": "workflow_plugin_compute_core.protocol.v1",
+      "messageNames": [
+        "NetworkAuditRecord",
+        "NetworkAuditRecordProjection"
+      ],
+      "goImportPath": "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb",
+      "schemaDigest": "sha256:0123456789abcdef",
+      "protocolVersion": "compute.v1alpha1",
+      "mode": "strict"
+    }
+  ]
+}

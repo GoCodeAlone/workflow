@@ -1,0 +1,7 @@
+{
+  "name": "message-contract",
+  "version": "1.0.0",
+  "author": "Workflow",
+  "description": "Descriptor-only message contract fixture",
+  "capabilities": {}
+}

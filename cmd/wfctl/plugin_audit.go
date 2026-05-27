@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,8 +29,67 @@ func auditPluginRepo(path string) pluginAuditResult {
 	return auditPluginRepoWithOptions(path, pluginAuditOptions{})
 }
 
+func runPluginAudit(args []string) error {
+	return runPluginAuditWithOutput(args, os.Stdout)
+}
+
+func runPluginAuditWithOutput(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("plugin audit", flag.ContinueOnError)
+	fs.SetOutput(out)
+	jsonOut := fs.Bool("json", false, "Write JSON output")
+	strict := fs.Bool("strict", false, "Treat warnings and errors as failures")
+	strictContracts := fs.Bool("strict-contracts", false, "Fail when advertised plugin types lack strict contract descriptors")
+	var requiredKinds multiStringFlag
+	fs.Var(&requiredKinds, "require-contract-kind", "Require a static contract kind in plugin.contracts.json. Repeatable or comma-separated.")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), `Usage: wfctl plugin audit [options] <plugin-dir>
+
+Audit a single plugin source directory.
+
+Options:
+`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return fmt.Errorf("exactly one <plugin-dir> argument required")
+	}
+
+	result := auditPluginRepoWithOptions(fs.Arg(0), pluginAuditOptions{
+		StrictContracts:      *strictContracts,
+		RequireContractKinds: []string(requiredKinds),
+	})
+	report := pluginAuditReport{
+		Plugins:  []pluginAuditResult{result},
+		Findings: append([]planFinding(nil), result.Findings...),
+		Summary:  summarizePluginAudit([]pluginAuditResult{result}),
+	}
+
+	if *jsonOut {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			return err
+		}
+	} else {
+		renderPluginAuditReport(out, report)
+	}
+
+	if *strict && (report.Summary.Errors > 0 || report.Summary.Warnings > 0) {
+		return fmt.Errorf("%d plugin audit finding(s) found", report.Summary.Errors+report.Summary.Warnings)
+	}
+	if *strictContracts && countPluginContractFindings(report.Findings) > 0 {
+		return fmt.Errorf("%d plugin contract audit finding(s) found", countPluginContractFindings(report.Findings))
+	}
+	return nil
+}
+
 type pluginAuditOptions struct {
-	StrictContracts bool
+	StrictContracts      bool
+	RequireContractKinds []string
 }
 
 type pluginContractCoverage struct {
@@ -36,6 +97,7 @@ type pluginContractCoverage struct {
 	Steps          pluginContractKindCoverage `json:"steps"`
 	Triggers       pluginContractKindCoverage `json:"triggers"`
 	ServiceMethods pluginContractKindCoverage `json:"serviceMethods"`
+	Messages       pluginContractKindCoverage `json:"messages"`
 }
 
 type pluginContractKindCoverage struct {
@@ -52,18 +114,24 @@ type pluginContractDescriptorFile struct {
 }
 
 type pluginContractDescriptor struct {
-	Kind             string `json:"kind"`
-	Type             string `json:"type"`
-	Mode             string `json:"mode"`
-	Config           string `json:"config,omitempty"`
-	Input            string `json:"input,omitempty"`
-	Output           string `json:"output,omitempty"`
-	ModuleType       string `json:"moduleType,omitempty"`
-	StepType         string `json:"stepType,omitempty"`
-	TriggerType      string `json:"triggerType,omitempty"`
-	ServiceName      string `json:"serviceName,omitempty"`
-	Method           string `json:"method,omitempty"`
-	DescriptorSetRef string `json:"descriptorSetRef,omitempty"`
+	Kind             string   `json:"kind"`
+	Type             string   `json:"type"`
+	Mode             string   `json:"mode"`
+	Config           string   `json:"config,omitempty"`
+	Input            string   `json:"input,omitempty"`
+	Output           string   `json:"output,omitempty"`
+	ModuleType       string   `json:"moduleType,omitempty"`
+	StepType         string   `json:"stepType,omitempty"`
+	TriggerType      string   `json:"triggerType,omitempty"`
+	ServiceName      string   `json:"serviceName,omitempty"`
+	Method           string   `json:"method,omitempty"`
+	DescriptorSetRef string   `json:"descriptorSetRef,omitempty"`
+	ContractType     string   `json:"contractType,omitempty"`
+	ProtoPackage     string   `json:"protoPackage,omitempty"`
+	MessageNames     []string `json:"messageNames,omitempty"`
+	GoImportPath     string   `json:"goImportPath,omitempty"`
+	SchemaDigest     string   `json:"schemaDigest,omitempty"`
+	ProtocolVersion  string   `json:"protocolVersion,omitempty"`
 }
 
 func (d *pluginContractDescriptor) UnmarshalJSON(data []byte) error {
@@ -83,6 +151,12 @@ func (d *pluginContractDescriptor) UnmarshalJSON(data []byte) error {
 	d.ServiceName = firstStringField(raw, "serviceName", "service_name")
 	d.Method = firstStringField(raw, "method")
 	d.DescriptorSetRef = firstStringField(raw, "descriptorSetRef", "descriptor_set_ref")
+	d.ContractType = firstStringField(raw, "contractType", "contract_type")
+	d.ProtoPackage = firstStringField(raw, "protoPackage", "proto_package")
+	d.MessageNames = stringSliceFromAny(firstAnyField(raw, "messageNames", "message_names"))
+	d.GoImportPath = firstStringField(raw, "goImportPath", "go_import_path")
+	d.SchemaDigest = firstStringField(raw, "schemaDigest", "schema_digest")
+	d.ProtocolVersion = firstStringField(raw, "protocolVersion", "protocol_version")
 	return nil
 }
 
@@ -233,9 +307,19 @@ func addPluginContractFindings(result *pluginAuditResult, manifest map[string]an
 	result.Findings = append(result.Findings, findings...)
 
 	byKindType := make(map[string]pluginContractDescriptor)
+	kindCounts := make(map[string]pluginContractKindCoverage)
 	for i := range descriptors {
 		descriptor := descriptors[i]
 		kind := normalizePluginContractKind(descriptor.Kind)
+		if kind != "" && !isKnownPluginContractKind(kind) {
+			result.Findings = append(result.Findings, planFinding{
+				Path:    result.ContractFile,
+				Level:   strictContractFindingLevel(opts),
+				Code:    "unknown_contract_kind",
+				Message: fmt.Sprintf("unknown contract kind %q", descriptor.Kind),
+			})
+			continue
+		}
 		typ := strings.TrimSpace(descriptor.contractType(kind))
 		if kind == "" || typ == "" {
 			continue
@@ -243,12 +327,74 @@ func addPluginContractFindings(result *pluginAuditResult, manifest map[string]an
 		descriptor.Kind = kind
 		descriptor.Mode = normalizePluginContractMode(descriptor.Mode)
 		byKindType[kind+"\x00"+typ] = descriptor
+		coverage := kindCounts[kind]
+		coverage.Total++
+		if descriptor.Mode == "strict" {
+			coverage.Strict++
+		} else {
+			coverage.Legacy++
+		}
+		kindCounts[kind] = coverage
+		if kind == "message" {
+			addMessageContractDescriptorFindings(result, descriptor, opts)
+		}
 	}
 
 	result.ContractCoverage.Modules = addPluginContractKindFindings(result, "module", advertised.Modules, byKindType, opts)
 	result.ContractCoverage.Steps = addPluginContractKindFindings(result, "step", advertised.Steps, byKindType, opts)
 	result.ContractCoverage.Triggers = addPluginContractKindFindings(result, "trigger", advertised.Triggers, byKindType, opts)
 	result.ContractCoverage.ServiceMethods = addPluginContractKindFindings(result, "service_method", advertised.ServiceMethods, byKindType, opts)
+	result.ContractCoverage.Messages = kindCounts["message"]
+	addRequiredContractKindFindings(result, kindCounts, opts)
+}
+
+func addMessageContractDescriptorFindings(result *pluginAuditResult, descriptor pluginContractDescriptor, opts pluginAuditOptions) {
+	for field, value := range map[string]string{
+		"contractType":    descriptor.ContractType,
+		"protoPackage":    descriptor.ProtoPackage,
+		"schemaDigest":    descriptor.SchemaDigest,
+		"protocolVersion": descriptor.ProtocolVersion,
+	} {
+		if strings.TrimSpace(value) == "" {
+			result.Findings = append(result.Findings, planFinding{
+				Path:    result.ContractFile,
+				Level:   strictContractFindingLevel(opts),
+				Code:    "invalid_message_contract_descriptor",
+				Message: fmt.Sprintf("message contract missing %s", field),
+			})
+		}
+	}
+	if len(descriptor.MessageNames) == 0 {
+		result.Findings = append(result.Findings, planFinding{
+			Path:    result.ContractFile,
+			Level:   strictContractFindingLevel(opts),
+			Code:    "invalid_message_contract_descriptor",
+			Message: "message contract missing messageNames",
+		})
+	}
+}
+
+func addRequiredContractKindFindings(result *pluginAuditResult, kindCounts map[string]pluginContractKindCoverage, opts pluginAuditOptions) {
+	for _, required := range opts.RequireContractKinds {
+		kind := normalizePluginContractKind(required)
+		if !isKnownPluginContractKind(kind) {
+			result.Findings = append(result.Findings, planFinding{
+				Path:    filepath.Join(result.RepoPath, "plugin.contracts.json"),
+				Level:   strictContractFindingLevel(opts),
+				Code:    "unknown_required_contract_kind",
+				Message: fmt.Sprintf("unknown required contract kind %q", required),
+			})
+			continue
+		}
+		if kindCounts[kind].Total == 0 {
+			result.Findings = append(result.Findings, planFinding{
+				Path:    filepath.Join(result.RepoPath, "plugin.contracts.json"),
+				Level:   strictContractFindingLevel(opts),
+				Code:    "missing_required_contract_kind",
+				Message: fmt.Sprintf("required contract kind %q is not declared", kind),
+			})
+		}
+	}
 }
 
 func loadPluginContractDescriptors(repoPath string, manifest map[string]any, opts pluginAuditOptions) ([]pluginContractDescriptor, string, bool, []planFinding) {
@@ -374,6 +520,8 @@ func (d pluginContractDescriptor) contractType(kind string) string {
 			return d.ServiceName + "/" + d.Method
 		}
 		return d.Method
+	case "message":
+		return d.ContractType
 	default:
 		return ""
 	}
@@ -467,8 +615,19 @@ func normalizePluginContractKind(kind string) string {
 		return "trigger"
 	case "service_method", "service-method", "servicemethod", "servicemethods", "service", "contract_kind_service":
 		return "service_method"
+	case "message", "messages", "contract_kind_message":
+		return "message"
 	default:
 		return strings.ToLower(strings.TrimSpace(kind))
+	}
+}
+
+func isKnownPluginContractKind(kind string) bool {
+	switch kind {
+	case "module", "step", "trigger", "service_method", "message":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -498,7 +657,10 @@ func countPluginContractFindings(findings []planFinding) int {
 func isPluginContractFinding(finding planFinding) bool {
 	return strings.Contains(finding.Code, "contract_descriptor") ||
 		finding.Code == "read_plugin_contract_descriptors" ||
-		finding.Code == "invalid_plugin_contract_descriptors"
+		finding.Code == "invalid_plugin_contract_descriptors" ||
+		finding.Code == "unknown_contract_kind" ||
+		finding.Code == "unknown_required_contract_kind" ||
+		finding.Code == "missing_required_contract_kind"
 }
 
 func pluginContractKindLabel(kind string) string {
@@ -524,6 +686,15 @@ func firstStringField(values map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstAnyField(values map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, ok := values[key]; ok {
+			return value
+		}
+	}
+	return nil
 }
 
 func stringSliceFromAny(value any) []string {

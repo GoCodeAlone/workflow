@@ -1,0 +1,12 @@
+{
+  "name": "message-runtime-contract",
+  "version": "1.0.0",
+  "author": "Workflow",
+  "description": "Runtime-backed message contract fixture",
+  "minEngineVersion": "0.1.0",
+  "capabilities": {
+    "moduleTypes": [
+      "message.contracts"
+    ]
+  }
+}
