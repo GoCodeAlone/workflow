@@ -65,16 +65,85 @@ func LoadIaCProviderFromConfig(ctx context.Context, cfgFile string) (interfaces.
 		if mod.Type != "iac.provider" {
 			continue
 		}
-		modCfg := config.ExpandEnvInMap(mod.Config)
-		pt, ok := modCfg["provider"].(string)
-		if !ok || pt == "" {
-			continue
-		}
-		prov, closer, err := Resolver(ctx, pt, modCfg)
+		prov, closer, ok, err := loadProviderModule(ctx, mod)
 		if err != nil {
-			return nil, nil, fmt.Errorf("load provider %q: %w", pt, err)
+			return nil, nil, err
+		}
+		if !ok {
+			continue
 		}
 		return prov, closer, nil
 	}
 	return nil, nil, nil // no iac.provider module in config
+}
+
+// LoadAllIaCProvidersFromConfig finds EVERY iac.provider module in
+// cfgFile and resolves each one, returning them as a map keyed by
+// module name (so the handler library + ListProviders response can
+// attribute each Provider record to its declared module). The
+// caller-returned []io.Closer carries one entry per resolved provider
+// in declaration order; closing them releases the underlying plugin
+// subprocesses.
+//
+// Per design doc cycle-4 Important #6 (resolved by plan §Task 3):
+// LoadIaCProviderFromConfig is first-match-only, which is correct for
+// the wfctl single-cloud bootstrap path but insufficient for the
+// admin-UI handler library that lists all configured providers.
+//
+// On resolver failure for any provider, the helper closes every
+// previously-resolved provider (best-effort) and returns
+// (nil, nil, error) so callers cannot accidentally leak subprocesses
+// they have no handle to release. iac.provider modules missing a
+// `provider:` field are silently skipped (consistent with
+// LoadIaCProviderFromConfig's single-module behavior).
+func LoadAllIaCProvidersFromConfig(ctx context.Context, cfgFile string) (map[string]interfaces.IaCProvider, []io.Closer, error) {
+	rawCfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load config: %w", err)
+	}
+	providers := map[string]interfaces.IaCProvider{}
+	var closers []io.Closer
+	for i := range rawCfg.Modules {
+		mod := &rawCfg.Modules[i]
+		if mod.Type != "iac.provider" {
+			continue
+		}
+		prov, closer, ok, err := loadProviderModule(ctx, mod)
+		if err != nil {
+			// Roll back: close every successfully-resolved provider so the
+			// caller does not leak subprocesses it has no handle to release.
+			for _, c := range closers {
+				_ = c.Close()
+			}
+			return nil, nil, err
+		}
+		if !ok {
+			continue
+		}
+		providers[mod.Name] = prov
+		if closer != nil {
+			closers = append(closers, closer)
+		}
+	}
+	return providers, closers, nil
+}
+
+// loadProviderModule resolves a single iac.provider ModuleConfig via
+// the registered Resolver. Returns (provider, closer, true, nil) on
+// success, (nil, nil, false, nil) when the module lacks a
+// `provider:` field (caller skips it), and (nil, nil, false, err) on
+// resolver failure. Factored out of LoadIaCProviderFromConfig +
+// LoadAllIaCProvidersFromConfig so the body cannot drift between the
+// two callsites.
+func loadProviderModule(ctx context.Context, mod *config.ModuleConfig) (interfaces.IaCProvider, io.Closer, bool, error) {
+	modCfg := config.ExpandEnvInMap(mod.Config)
+	pt, ok := modCfg["provider"].(string)
+	if !ok || pt == "" {
+		return nil, nil, false, nil
+	}
+	prov, closer, err := Resolver(ctx, pt, modCfg)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("load provider %q: %w", pt, err)
+	}
+	return prov, closer, true, nil
 }
