@@ -86,18 +86,32 @@ func ListResources(
 // app_context derives from state.AppliedConfig["labels"]["app_context"]
 // per design §App context. Falls back to empty string when the label
 // is absent (so AppContextFilter == "" matches every resource).
+//
+// Status is hardcoded "active" in v1 because interfaces.ResourceState
+// has no Status field; the on-disk StateRecord.Status IS captured by
+// the wfctlhelpers fs/postgres backends but dropped during the
+// ResourceState conversion. Promoting Status into interfaces.
+// ResourceState is a v1.1 item that lands alongside reconciliation
+// (design §Personas explicitly excludes mid-cycle states from v1).
+// Per spec-reviewer + code-reviewer T5 M-1 on commit 5fe88fe45.
 func stateToSummary(s *interfaces.ResourceState) *adminpb.AdminResourceSummary {
-	return &adminpb.AdminResourceSummary{
+	out := &adminpb.AdminResourceSummary{
 		Name:           s.Name,
 		Type:           s.Type,
 		ProviderModule: s.ProviderRef,
 		ProviderType:   s.Provider,
 		ProviderId:     s.ProviderID,
-		Status:         "active",
-		UpdatedAtUnix:  s.UpdatedAt.Unix(),
+		Status:         "active", // TODO(v1.1): promote Status to interfaces.ResourceState
 		Dependencies:   append([]string(nil), s.Dependencies...),
 		AppContext:     extractAppContext(s.AppliedConfig),
 	}
+	// Guard against zero time.Time → year-1 BCE Unix epoch (per
+	// code-reviewer T5 M-2). The JS fmtTs helper checks `!unix`, so
+	// a 0 here renders as "—" rather than a misleading "0001-01-01".
+	if !s.UpdatedAt.IsZero() {
+		out.UpdatedAtUnix = s.UpdatedAt.Unix()
+	}
+	return out
 }
 
 // extractAppContext digs labels.app_context out of an AppliedConfig

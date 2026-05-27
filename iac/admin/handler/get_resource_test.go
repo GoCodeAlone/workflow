@@ -191,3 +191,61 @@ func TestGetResource_PopulatesSummaryFields(t *testing.T) {
 		t.Errorf("dependencies = %v, want [vpc-prod]", s.Dependencies)
 	}
 }
+
+// TestGetResource_NilAppliedConfig pins the json.Marshal(nil) →
+// "null" path so the JS receives a parseable JSON literal rather
+// than an empty payload. Per code-reviewer T5 M-3 (commit 5fe88fe45).
+func TestGetResource_NilAppliedConfig(t *testing.T) {
+	store := &fakeStateStore{
+		resources: []interfaces.ResourceState{{
+			Name:          "nil-cfg",
+			Type:          "infra.vpc",
+			Provider:      "stub",
+			ProviderRef:   "stub-mod",
+			AppliedConfig: nil, // explicit nil
+			Outputs:       nil,
+		}},
+	}
+	in := &adminpb.AdminGetResourceInput{Name: "nil-cfg", Evidence: authzOK()}
+	out, err := handler.GetResource(context.Background(), store, in)
+	if err != nil {
+		t.Fatalf("GetResource: %v", err)
+	}
+	if out.Error != "" {
+		t.Errorf("unexpected error: %q", out.Error)
+	}
+	if string(out.Resource.AppliedConfigJson) != "null" {
+		t.Errorf("applied_config_json = %q, want \"null\" (JSON encoding of nil map)", string(out.Resource.AppliedConfigJson))
+	}
+	if string(out.Resource.OutputsJson) != "null" {
+		t.Errorf("outputs_json = %q, want \"null\"", string(out.Resource.OutputsJson))
+	}
+}
+
+// TestGetResource_ZeroLastDriftCheckEmitsZero pins the T5 M-2 fix:
+// a zero LastDriftCheck.Time MUST emit 0 (not the year-1-BCE Unix
+// epoch -6795364578871), so the JS `!unix` guard renders "—" rather
+// than "0001-01-01T00:00:00.000Z".
+func TestGetResource_ZeroLastDriftCheckEmitsZero(t *testing.T) {
+	store := &fakeStateStore{
+		resources: []interfaces.ResourceState{{
+			Name:          "never-checked",
+			Type:          "infra.vpc",
+			Provider:      "stub",
+			ProviderRef:   "stub-mod",
+			AppliedConfig: map[string]any{},
+			// LastDriftCheck unset → zero value
+		}},
+	}
+	in := &adminpb.AdminGetResourceInput{Name: "never-checked", Evidence: authzOK()}
+	out, err := handler.GetResource(context.Background(), store, in)
+	if err != nil {
+		t.Fatalf("GetResource: %v", err)
+	}
+	if out.Resource.LastDriftCheckUnix != 0 {
+		t.Errorf("LastDriftCheckUnix = %d, want 0 for zero time.Time", out.Resource.LastDriftCheckUnix)
+	}
+	if out.Resource.Summary.UpdatedAtUnix != 0 {
+		t.Errorf("UpdatedAtUnix = %d, want 0 for zero time.Time", out.Resource.Summary.UpdatedAtUnix)
+	}
+}

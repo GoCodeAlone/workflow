@@ -25,6 +25,20 @@
 // must be refused for safety per design §Authz row.
 package handler
 
+// **Error-string credential-leak caveat** (per code-reviewer T5 M-5,
+// commit 5fe88fe45): every handler in this package returns upstream
+// error messages through Output.error verbatim (e.g.
+// "list state: " + err.Error()). Current upstream errors come from
+// os.ReadFile / json.Marshal / fake stores in tests — none carry
+// credentials. But future backends (e.g. a Postgres-backed state
+// store that errors with a DSN-in-message) could leak secrets
+// through this channel. Scrub well-known credential-bearing
+// patterns (URLs with userinfo, etc.) at the backend boundary OR
+// in this package before concatenating, OR pin the no-credential
+// upstream assumption per backend at integration-test time (T17).
+// Not in T5 scope; flagged here so a future contributor sees the
+// risk before extending the handler family.
+
 import adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
 
 // authzError returns the operator-facing rejection string when the

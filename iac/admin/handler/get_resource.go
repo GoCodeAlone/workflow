@@ -62,54 +62,65 @@ func GetResource(
 		return &adminpb.AdminGetResourceOutput{Error: "marshal outputs: " + err.Error()}, nil //nolint:nilerr
 	}
 
-	return &adminpb.AdminGetResourceOutput{
-		Resource: &adminpb.AdminResourceDetail{
-			Summary:                  stateToSummary(state),
-			AppliedConfigJson:        appliedJSON,
-			OutputsJson:              outputsJSON,
-			ConfigHash:               state.ConfigHash,
-			LastDriftCheckUnix:       state.LastDriftCheck.Unix(),
-			SensitiveOutputsRedacted: redactedKeys,
-		},
-	}, nil
+	detail := &adminpb.AdminResourceDetail{
+		Summary:                  stateToSummary(state),
+		AppliedConfigJson:        appliedJSON,
+		OutputsJson:              outputsJSON,
+		ConfigHash:               state.ConfigHash,
+		SensitiveOutputsRedacted: redactedKeys,
+	}
+	// Guard against zero time.Time → year-1 BCE Unix epoch (per
+	// code-reviewer T5 M-2). Resources that have never been drift-
+	// checked carry a zero LastDriftCheck; leave the proto field at
+	// 0 so the JS fmtTs helper's `!unix` check renders "—".
+	if !state.LastDriftCheck.IsZero() {
+		detail.LastDriftCheckUnix = state.LastDriftCheck.Unix()
+	}
+	return &adminpb.AdminGetResourceOutput{Resource: detail}, nil
 }
 
-// maskOutputsForWire returns a copy of outputs with sensitive values
-// masked + the sorted list of keys that WERE masked. Implementation
-// is independent of secrets.MaskSensitiveOutputs (which doesn't
-// surface the list of redacted keys); see design §Secret redaction.
+// maskOutputsForWire returns the masked outputs map + the sorted list
+// of keys that WERE masked. The masking itself is delegated to
+// secrets.MaskSensitiveOutputs so the handler library and any other
+// caller of that helper agree byte-for-byte on the redaction
+// algorithm — single source of truth. The handler's own contract
+// (per design §Secret redaction) is the additional
+// `sensitive_outputs_redacted` list, which the helper does NOT
+// surface; we compute it here via one extra pass over the map.
+//
+// Per code-reviewer T5 I-1 (commit 5fe88fe45): an earlier draft
+// hand-rolled the masking with a duplicate `(sensitive)` literal,
+// which would have silently drifted if secrets ever extended its
+// helper to do partial-value masking. Routing through
+// secrets.MaskSensitiveOutputs eliminates that drift surface — same
+// bug class as T1's sanitizeStateID allowlist-vs-replacer
+// divergence the same reviewer caught earlier.
 //
 // "Sensitive" means a key matches one of secrets.DefaultSensitiveKeys()
 // — the host-side authoritative list. Future enhancement: merge
 // driver-specific keys via secrets.MergeSensitiveKeys; v1 sticks to
 // defaults so the masking surface is stable across providers.
-//
-// Returns the same underlying map reference when outputs has no
-// sensitive keys (no copy needed); on any redaction it returns a
-// new map so the caller cannot accidentally mutate the original
-// state's outputs.
 func maskOutputsForWire(outputs map[string]any) (map[string]any, []string) {
 	if len(outputs) == 0 {
 		return outputs, nil
 	}
-	sensitive := map[string]struct{}{}
-	for _, k := range secrets.DefaultSensitiveKeys() {
-		sensitive[k] = struct{}{}
+	keys := secrets.DefaultSensitiveKeys()
+	sensitiveSet := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		sensitiveSet[k] = true
 	}
 	var redacted []string
-	masked := make(map[string]any, len(outputs))
-	for k, v := range outputs {
-		if _, ok := sensitive[k]; ok {
-			masked[k] = "(sensitive)"
+	for k := range outputs {
+		if sensitiveSet[k] {
 			redacted = append(redacted, k)
-		} else {
-			masked[k] = v
 		}
 	}
-	sort.Strings(redacted) // deterministic ordering for snapshot tests + diff-friendly UI
 	if len(redacted) == 0 {
-		// No redaction happened — return original to avoid an unnecessary copy.
+		// No sensitive keys present — return original (no copy) so the
+		// caller cannot accidentally mutate the original state's
+		// outputs but we don't pay for an unused allocation either.
 		return outputs, nil
 	}
-	return masked, redacted
+	sort.Strings(redacted) // deterministic ordering for snapshot tests + diff-friendly UI
+	return secrets.MaskSensitiveOutputs(outputs, keys), redacted
 }
