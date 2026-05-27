@@ -1,6 +1,10 @@
 package platform
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
+)
 
 // ConstraintViolationError is returned when a capability declaration violates
 // a constraint imposed by a parent tier.
@@ -84,6 +88,13 @@ func (e *ResourceNotFoundError) Error() string {
 		return fmt.Sprintf("resource %q not found in provider %q", e.Name, e.Provider)
 	}
 	return fmt.Sprintf("resource %q not found", e.Name)
+}
+
+// Is reports whether target is interfaces.ErrResourceNotFound. Lets
+// errors.Is(err, interfaces.ErrResourceNotFound) natively match this
+// typed error without callers needing both errors.Is and errors.As.
+func (e *ResourceNotFoundError) Is(target error) bool {
+	return target == interfaces.ErrResourceNotFound
 }
 
 // PlanConflictError is returned when a plan conflicts with another plan

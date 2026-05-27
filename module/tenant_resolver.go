@@ -187,7 +187,7 @@ func (r *TenantContextResolver) lookup(key string) (interfaces.Tenant, error) {
 	if err == nil {
 		return t, nil
 	}
-	if !errors.Is(err, interfaces.ErrResourceNotFound) {
+	if !interfaces.IsErrResourceNotFound(err) {
 		return interfaces.Tenant{}, fmt.Errorf("registry lookup by slug %q: %w", key, err)
 	}
 	// Fall back to domain lookup.
@@ -195,7 +195,7 @@ func (r *TenantContextResolver) lookup(key string) (interfaces.Tenant, error) {
 	if err == nil {
 		return t, nil
 	}
-	if errors.Is(err, interfaces.ErrResourceNotFound) {
+	if interfaces.IsErrResourceNotFound(err) {
 		return interfaces.Tenant{}, nil
 	}
 	return interfaces.Tenant{}, fmt.Errorf("registry lookup by domain %q: %w", key, err)

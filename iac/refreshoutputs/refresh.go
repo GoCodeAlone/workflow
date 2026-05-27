@@ -12,7 +12,6 @@ package refreshoutputs
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -94,7 +93,7 @@ func refreshOne(ctx context.Context, p interfaces.IaCProvider, dst *interfaces.R
 	ref := interfaces.ResourceRef{Name: src.Name, Type: src.Type, ProviderID: src.ProviderID}
 	live, err := d.Read(ctx, ref)
 	if err != nil {
-		if errors.Is(err, interfaces.ErrResourceNotFound) {
+		if interfaces.IsErrResourceNotFound(err) {
 			// Ghost: cloud reports the resource does not exist. Explicitly keep
 			// dst.Outputs aligned with src so refreshOne is self-contained and
 			// does not rely on the caller having pre-copied src into dst.

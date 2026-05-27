@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -384,7 +383,7 @@ func classifyCreate(ctx context.Context, p interfaces.IaCProvider, spec interfac
 	}
 	current, err := driver.Read(ctx, ref)
 	if err != nil {
-		if errors.Is(err, interfaces.ErrResourceNotFound) {
+		if interfaces.IsErrResourceNotFound(err) {
 			return create, nil
 		}
 		return nil, fmt.Errorf("provider.Read(%q/%q): %w", spec.Type, spec.Name, err)

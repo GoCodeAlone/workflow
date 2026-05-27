@@ -705,7 +705,7 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	case readErr == nil && readOut != nil && readOut.ProviderID != "":
 		ref.ProviderID = readOut.ProviderID
 		log.Printf("plugin deploy %q: found existing resource (id=%s)", p.resourceName, ref.ProviderID)
-	case readErr != nil && errors.Is(readErr, interfaces.ErrResourceNotFound):
+	case readErr != nil && interfaces.IsErrResourceNotFound(readErr):
 		// Resource confirmed absent — skip Update, go straight to Create.
 		return p.doCreate(ctx, driver, ref, spec, imageStr)
 	case readErr != nil:
@@ -724,7 +724,7 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 		fmt.Printf("  plugin deploy: updated %q at %s (id=%s)\n", p.resourceName, imageStr, out.ProviderID)
 		return nil
 	}
-	if !errors.Is(updateErr, interfaces.ErrResourceNotFound) {
+	if !interfaces.IsErrResourceNotFound(updateErr) {
 		return deployOpError(p.resourceName, "update", updateErr)
 	}
 	// Resource does not exist yet — fall back to Create.
