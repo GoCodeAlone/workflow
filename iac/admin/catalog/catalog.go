@@ -146,9 +146,23 @@ func (c *FieldSpecCatalog) AllTypes() []string {
 // {VPCConfig, ContainerServiceConfig, K8SClusterConfig, ...} to
 // their per-field specs.
 //
-// Exposed as a package-level var rather than a function literal so
-// T7b's fields.go can assign it directly via `var catalogEntries =
-// func() map[string][]FieldSpec { ... }` without touching this file.
+// Exposed as a package-level var (not a const, not a function
+// literal embedded in New) so T7b's fields.go can reassign it from
+// an init() function in the same package — Go forbids redeclaring
+// a package-level var of the same name across files, so T7b's
+// fields.go MUST take this shape:
+//
+//	package catalog
+//	func init() {
+//	    catalogEntries = func() map[string][]FieldSpec {
+//	        return map[string][]FieldSpec{
+//	            "infra.vpc": { ... },
+//	            // ... 13 typed Configs ...
+//	        }
+//	    }
+//	}
+//
+// Per spec-reviewer T7a comment-nit (commit ff0662602).
 var catalogEntries = func() map[string][]FieldSpec {
 	return map[string][]FieldSpec{}
 }
@@ -175,6 +189,8 @@ func FreeformReason(typeName, fieldName string) (string, bool) {
 
 // freeformReasons is the parallel annotation table populated by T7b.
 // Skeleton ships empty so the package compiles + the smoke test
-// passes; T7b overrides this via init() or direct assignment from
-// fields.go.
+// passes; T7b reassigns this from a same-package init() in fields.go
+// (same mechanism + Go-redeclaration constraint as catalogEntries
+// above — assign via init(), don't re-`var`-declare). Per
+// spec-reviewer T7a comment-nit (commit ff0662602).
 var freeformReasons = map[string]map[string]string{}
