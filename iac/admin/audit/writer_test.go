@@ -2,7 +2,6 @@ package audit_test
 
 import (
 	"bufio"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,8 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/iac/admin/audit"
+	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // TestOpen_CreatesFileIfMissing pins that Open creates the audit
@@ -43,10 +44,14 @@ func TestOpen_FatalOnDirPath(t *testing.T) {
 	}
 }
 
-// TestWrite_AppendsOneJSONLineWithSchemaVersion1 pins the wire
-// shape per design: each Write emits exactly one JSON line carrying
-// schema_version:1. Multiple writes append; lines do not overlap.
-func TestWrite_AppendsOneJSONLineWithSchemaVersion1(t *testing.T) {
+// TestWrite_AppendsOneProtojsonLineWithSchemaVersion1 pins the
+// wire shape per design + spec-reviewer T14 F1: each Write emits
+// exactly one protojson line carrying schema_version:1. Multiple
+// writes append; lines do not overlap. Per-line round-trip
+// through protojson.Unmarshal into AdminAuditEntry asserts the
+// contract end-to-end (this is the test that would catch the
+// earlier draft's schema-mismatch bug).
+func TestWrite_AppendsOneProtojsonLineWithSchemaVersion1(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
 	w, err := audit.Open(path)
@@ -55,19 +60,16 @@ func TestWrite_AppendsOneJSONLineWithSchemaVersion1(t *testing.T) {
 	}
 	defer w.Close()
 
-	entries := []audit.Entry{
+	entries := []*audit.Entry{
 		{
-			TS:         time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC),
-			ActionID:   "id-1",
+			TsUnix:     time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC).Unix(),
 			Subject:    "user:alice",
 			Action:     "list_resources",
-			Targets:    []string{},
 			Result:     "ok",
 			AppContext: "web",
 		},
 		{
-			TS:         time.Date(2026, 5, 27, 12, 0, 1, 0, time.UTC),
-			ActionID:   "id-2",
+			TsUnix:     time.Date(2026, 5, 27, 12, 0, 1, 0, time.UTC).Unix(),
 			Subject:    "user:bob",
 			Action:     "get_resource",
 			Targets:    []string{"vpc-prod"},
@@ -90,13 +92,22 @@ func TestWrite_AppendsOneJSONLineWithSchemaVersion1(t *testing.T) {
 		t.Fatalf("expected 2 lines, got %d:\n%s", len(lines), string(data))
 	}
 	for i, line := range lines {
-		var got map[string]any
-		if err := json.Unmarshal([]byte(line), &got); err != nil {
-			t.Fatalf("line %d not valid JSON: %v\n%s", i, err, line)
+		// Round-trip through protojson against the actual proto
+		// message. This is the contract guard: a future regression
+		// to encoding/json or to a non-proto struct will fail here.
+		var got adminpb.AdminAuditEntry
+		if err := protojson.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("line %d: protojson.Unmarshal into AdminAuditEntry: %v\n%s", i, err, line)
 		}
-		v, _ := got["schema_version"].(float64)
-		if int(v) != 1 {
-			t.Errorf("line %d schema_version = %v, want 1", i, got["schema_version"])
+		if got.SchemaVersion != 1 {
+			t.Errorf("line %d schema_version = %d, want 1", i, got.SchemaVersion)
+		}
+		// snake_case key shape: assert literal "ts_unix" / "schema_version" appear.
+		if !strings.Contains(line, "\"schema_version\"") {
+			t.Errorf("line %d missing snake_case schema_version key: %s", i, line)
+		}
+		if !strings.Contains(line, "\"ts_unix\"") {
+			t.Errorf("line %d missing snake_case ts_unix key (writer must use UseProtoNames=true): %s", i, line)
 		}
 	}
 }
@@ -104,7 +115,7 @@ func TestWrite_AppendsOneJSONLineWithSchemaVersion1(t *testing.T) {
 // TestWrite_ConcurrentAppendsAreSerialised pins the mutex around
 // the write path so two goroutines writing simultaneously don't
 // interleave bytes. We launch N writers; final line count == N AND
-// every line is valid JSON.
+// every line is valid protojson (decoded back into AdminAuditEntry).
 func TestWrite_ConcurrentAppendsAreSerialised(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
@@ -122,12 +133,11 @@ func TestWrite_ConcurrentAppendsAreSerialised(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for range writesEach {
-				_ = w.Write(audit.Entry{
-					TS:       time.Now().UTC(),
-					ActionID: "concurrent",
-					Subject:  "user:test",
-					Action:   "list_resources",
-					Result:   "ok",
+				_ = w.Write(&audit.Entry{
+					TsUnix:  time.Now().UTC().Unix(),
+					Subject: "user:test",
+					Action:  "list_resources",
+					Result:  "ok",
 				})
 			}
 		}(i)
@@ -146,15 +156,15 @@ func TestWrite_ConcurrentAppendsAreSerialised(t *testing.T) {
 		if line == "" {
 			continue
 		}
-		var got map[string]any
-		if err := json.Unmarshal([]byte(line), &got); err != nil {
-			t.Fatalf("line %d not valid JSON (interleaved write?): %v\n%s", count, err, line)
+		var got adminpb.AdminAuditEntry
+		if err := protojson.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("line %d not valid protojson (interleaved write?): %v\n%s", count, err, line)
 		}
 		count++
 	}
 	want := writers * writesEach
 	if count != want {
-		t.Errorf("got %d valid JSON lines, want %d (lost writes or interleaved bytes)", count, want)
+		t.Errorf("got %d valid protojson lines, want %d (lost writes or interleaved bytes)", count, want)
 	}
 }
 
@@ -164,6 +174,10 @@ func TestWrite_ConcurrentAppendsAreSerialised(t *testing.T) {
 // writer reopens at the original path. Subsequent writes land in
 // the NEW file (the original on-disk path), not in the moved
 // inode the old fd still pointed at.
+//
+// Subject is used as the pre/post discriminator (the proto-aligned
+// Entry doesn't carry an `action_id` field; subject is the closest
+// per-entry label that survives the protojson round-trip).
 func TestSIGHUP_ReopensFileHandle(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
@@ -174,7 +188,7 @@ func TestSIGHUP_ReopensFileHandle(t *testing.T) {
 	defer w.Close()
 
 	// Write one entry pre-rotation.
-	if err := w.Write(audit.Entry{ActionID: "pre", Action: "list_resources", Result: "ok"}); err != nil {
+	if err := w.Write(&audit.Entry{Subject: "subject:pre", Action: "list_resources", Result: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,7 +208,7 @@ func TestSIGHUP_ReopensFileHandle(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Write one entry post-rotation.
-	if err := w.Write(audit.Entry{ActionID: "post", Action: "list_resources", Result: "ok"}); err != nil {
+	if err := w.Write(&audit.Entry{Subject: "subject:post", Action: "list_resources", Result: "ok"}); err != nil {
 		t.Fatalf("post-rotation Write: %v", err)
 	}
 
@@ -203,10 +217,10 @@ func TestSIGHUP_ReopensFileHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(preData), `"action_id":"pre"`) {
+	if !strings.Contains(string(preData), `"subject":"subject:pre"`) {
 		t.Errorf("rotated file missing pre-rotation entry: %s", string(preData))
 	}
-	if strings.Contains(string(preData), `"action_id":"post"`) {
+	if strings.Contains(string(preData), `"subject":"subject:post"`) {
 		t.Errorf("rotated file contains POST-rotation entry — SIGHUP reopen failed: %s", string(preData))
 	}
 
@@ -215,10 +229,10 @@ func TestSIGHUP_ReopensFileHandle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read post-rotation file: %v", err)
 	}
-	if !strings.Contains(string(postData), `"action_id":"post"`) {
+	if !strings.Contains(string(postData), `"subject":"subject:post"`) {
 		t.Errorf("post-rotation file missing post-entry: %s", string(postData))
 	}
-	if strings.Contains(string(postData), `"action_id":"pre"`) {
+	if strings.Contains(string(postData), `"subject":"subject:pre"`) {
 		t.Errorf("post-rotation file contains pre-rotation entry — SIGHUP reopen wrote to wrong path: %s", string(postData))
 	}
 }
@@ -251,7 +265,24 @@ func TestWrite_AfterCloseReturnsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.Close()
-	if err := w.Write(audit.Entry{ActionID: "after-close"}); err == nil {
+	if err := w.Write(&audit.Entry{Subject: "after-close"}); err == nil {
 		t.Error("expected Write after Close to error, got nil")
+	}
+}
+
+// TestWrite_NilEntryReturnsError pins the defensive nil-guard so
+// a future caller accidentally passing nil doesn't crash the host
+// process — audit data integrity is preserved by surfacing the
+// programming error.
+func TestWrite_NilEntryReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	w, err := audit.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := w.Write(nil); err == nil {
+		t.Error("expected Write(nil) to error, got nil")
 	}
 }

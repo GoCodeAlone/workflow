@@ -8,50 +8,54 @@
 // Design: docs/plans/2026-05-27-infra-admin-dynamic-design.md §Security Review
 // Plan:   docs/plans/2026-05-27-infra-admin-dynamic.md (Task 14)
 //
-// Entry schema (proto AdminAuditEntry mirror) carries schema_version:1
-// so future-additive changes can be detected by reader tools. The
-// JSON form intentionally uses snake_case keys matching the proto
-// field names so downstream consumers (a future audit-tail HTTP
-// endpoint streaming AdminAuditEntry over ndjson) see the same wire
-// shape.
+// **Wire format**: protojson over workflow.iac.v1.AdminAuditEntry.
+// Per design §Access logging: "Each line is AdminAuditEntry
+// proto-JSON. Reader `wfctl infra admin audit-tail --base-url ...`
+// (HTTP-backed)". Writing via protojson preserves the strict-contract
+// invariant that on-disk lines are byte-identical to what the HTTP
+// audit-tail endpoint serves, so the CLI's protojson.Unmarshal
+// decoder works end-to-end.
+//
+// Earlier T14 draft (commit 42b9e1c11) defined an Entry struct with
+// 10 plan-listed fields including `ts time.Time`, `action_id`,
+// `dry_run`, `confirm_destroy` — but the design proto AdminAuditEntry
+// has only 7 fields and uses `ts_unix int64`. Per spec-reviewer T14
+// F1 + strict-interpretation invariant ("design wins when plan/
+// design diverge"), Entry is now a thin alias for the proto message
+// with no host-only extras. If v1.1 needs the extras, that's an
+// ADR-tracked schema amendment, not a quiet plan-extra add.
 package audit
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
+
+	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// Entry is the host-side struct form of an audit record. Mirrors
-// workflow.iac.v1.AdminAuditEntry from iac/admin/proto/infra_admin.
-// proto so a future HTTP audit-tail endpoint can stream the on-disk
-// JSONL line-for-line as AdminAuditEntry protojson.
-type Entry struct {
-	// SchemaVersion is set automatically by Write; callers don't
-	// populate it. Hardcoded to 1 per design Security Review;
-	// future schema-breaking changes bump the major.
-	SchemaVersion int `json:"schema_version"`
+// Entry is a re-export of the proto AdminAuditEntry message so
+// audit-package callers don't have to import the adminpb package
+// directly. The writer's Write method marshals via protojson, so
+// any field added to the proto becomes available to writers
+// without an audit-package code change.
+//
+// Strict contract: this MUST stay an alias rather than a parallel
+// struct definition. The spec-reviewer T14 F1 follow-up moved from
+// a host-only struct to this alias precisely to eliminate the
+// drift surface between the writer + the typed wire shape.
+type Entry = adminpb.AdminAuditEntry
 
-	TS         time.Time `json:"ts"`
-	ActionID   string    `json:"action_id"`
-	Subject    string    `json:"subject"`
-	Action     string    `json:"action"`
-	Targets    []string  `json:"targets,omitempty"`
-	Result     string    `json:"result"`
-	AppContext string    `json:"app_context,omitempty"`
-
-	// DryRun + ConfirmDestroy carry context for future mutating
-	// actions (not exercised in v1 read-only). Per plan §Task 14
-	// the schema declaration spans these so v1.1 lands without a
-	// schema bump.
-	DryRun         bool   `json:"dry_run,omitempty"`
-	ConfirmDestroy string `json:"confirm_destroy,omitempty"`
-}
+// marshalOpts is the single protojson marshaling configuration the
+// writer uses. UseProtoNames=true emits snake_case JSON keys
+// matching the .proto field names (the same configuration T15's
+// writeProto helper uses for HTTP responses), so the on-disk JSONL
+// shape matches what the HTTP audit-tail endpoint will serve.
+var marshalOpts = protojson.MarshalOptions{UseProtoNames: true}
 
 // Writer wraps an append-only JSONL file with concurrent-safe writes
 // and SIGHUP reopen. The host module (T15) holds one Writer for the
@@ -145,20 +149,27 @@ func (w *Writer) reopen() {
 	w.file = f
 }
 
-// Write serializes the entry to one JSON line + newline and appends
-// it under the mutex. Empty path means the writer was never opened
-// (defensive — should be caught at Open); Closed-after returns a
-// clear error.
+// Write serializes the entry to one protojson line + newline and
+// appends it under the mutex. Closed-after returns a clear error
+// rather than silently dropping the entry — losing audit data is
+// worse than a noisy error per design Security Review.
 //
 // SchemaVersion is set to 1 on the caller-provided entry before
 // marshaling so callers cannot accidentally emit a different
 // version. If the schema ever bumps to 2, this is the single
 // change-point.
-func (w *Writer) Write(e Entry) error {
+//
+// The entry is taken by pointer because adminpb.AdminAuditEntry
+// (the alias target) holds internal protobuf state; passing by
+// value would copy that state and trigger a vet warning.
+func (w *Writer) Write(e *Entry) error {
+	if e == nil {
+		return errors.New("audit.Write: nil entry")
+	}
 	e.SchemaVersion = 1
-	data, err := json.Marshal(e)
+	data, err := marshalOpts.Marshal(e)
 	if err != nil {
-		return fmt.Errorf("audit.Write: marshal: %w", err)
+		return fmt.Errorf("audit.Write: protojson marshal: %w", err)
 	}
 
 	w.mu.Lock()

@@ -37,6 +37,7 @@ package main
 // as the matching adminpb proto type.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -57,6 +58,7 @@ import (
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // infraAdminEvidence returns the AdminAuthzEvidence stamp every
@@ -642,11 +644,26 @@ func renderAuditTable(body io.Reader) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	defer func() { _ = w.Flush() }()
 	fmt.Fprintln(w, "TS\tSUBJECT\tACTION\tRESULT\tTARGETS")
-	dec := json.NewDecoder(body)
-	for dec.More() {
+
+	// Per code-reviewer T19+T20 I-2 + cross-task contract: the audit
+	// endpoint emits AdminAuditEntry protojson (T14 writer uses
+	// protojson.MarshalOptions{UseProtoNames: true} on disk; T15's
+	// audit-tail HTTP handler will stream those lines verbatim).
+	// protojson encodes int64 fields (e.g. ts_unix) as DECIMAL
+	// STRINGS for JS BigInt safety — `encoding/json` decoding into a
+	// Go int64 field rejects the string with "json: cannot unmarshal
+	// string into Go struct field". Per-line protojson.Unmarshal is
+	// the only correct decoder.
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
 		var entry adminpb.AdminAuditEntry
-		if err := dec.Decode(&entry); err != nil {
-			return fmt.Errorf("decode audit entry: %w", err)
+		if err := protojson.Unmarshal([]byte(line), &entry); err != nil {
+			return fmt.Errorf("decode audit entry (line %q): %w", line, err)
 		}
 		ts := ""
 		if entry.TsUnix > 0 {
@@ -654,6 +671,9 @@ func renderAuditTable(body io.Reader) error {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			ts, entry.Subject, entry.Action, entry.Result, strings.Join(entry.Targets, ","))
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read audit body: %w", err)
 	}
 	return nil
 }
