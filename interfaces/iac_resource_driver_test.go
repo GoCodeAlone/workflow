@@ -96,3 +96,32 @@ func TestErrImageNotInRegistry_MessageStringStable(t *testing.T) {
 		t.Fatalf("ErrImageNotInRegistry.Error() = %q; want %q (load-bearing for gRPC string-match fallback)", got, want)
 	}
 }
+
+func TestErrResourceNotFound_MessageStringStable(t *testing.T) {
+	const expected = "iac: resource not found"
+	if got := interfaces.ErrResourceNotFound.Error(); got != expected {
+		t.Fatalf("ErrResourceNotFound message changed (was %q, want %q) — load-bearing for cross-process matching", got, expected)
+	}
+}
+
+func TestIsErrResourceNotFound(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"direct", interfaces.ErrResourceNotFound, true},
+		{"wrapped with fmt.Errorf %w", fmt.Errorf("driver: %w", interfaces.ErrResourceNotFound), true},
+		{"stringified across gRPC (no sentinel)", errors.New("plugin: " + interfaces.ErrResourceNotFound.Error()), true},
+		{"unrelated NotFound", errors.New("file: not found"), false},
+		{"empty error", errors.New(""), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := interfaces.IsErrResourceNotFound(tc.err); got != tc.want {
+				t.Errorf("IsErrResourceNotFound(%v) = %v; want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}

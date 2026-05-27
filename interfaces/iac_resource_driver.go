@@ -3,6 +3,7 @@ package interfaces
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -55,6 +56,25 @@ var (
 	// ErrProviderMethodUnimplemented for callers.
 	ErrProviderMethodUnimplemented = errors.New("iac: provider method unimplemented")
 )
+
+// IsErrResourceNotFound reports whether err is or wraps ErrResourceNotFound,
+// including the case where the sentinel was stringified across a gRPC plugin
+// boundary (where errors.Is fails because structpb does not preserve sentinel
+// identity). Matches the ErrImageNotInRegistry precedent above. The message
+// string of ErrResourceNotFound is load-bearing for this match; do not change
+// it without updating TestErrResourceNotFound_MessageStringStable.
+//
+// For non-gRPC callers (e.g., SQL-backed tenant lookups in module/),
+// errors.Is fires and strings.Contains is never reached.
+func IsErrResourceNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrResourceNotFound) {
+		return true
+	}
+	return strings.Contains(err.Error(), ErrResourceNotFound.Error())
+}
 
 // ResourceDriver handles CRUD for a single resource type within a provider.
 type ResourceDriver interface {
