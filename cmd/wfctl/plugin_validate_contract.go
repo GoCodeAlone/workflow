@@ -195,7 +195,8 @@ func hasRequiredStaticMessageContract(descriptors []pluginContractDescriptor, re
 	if !requiresMessage {
 		return false
 	}
-	for _, descriptor := range descriptors {
+	for i := range descriptors {
+		descriptor := &descriptors[i]
 		if normalizePluginContractKind(descriptor.Kind) == "message" && strings.TrimSpace(descriptor.ContractType) != "" {
 			return true
 		}
