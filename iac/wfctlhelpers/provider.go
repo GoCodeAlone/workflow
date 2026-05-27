@@ -103,6 +103,14 @@ func LoadIaCProviderFromConfig(ctx context.Context, cfgFile string) (interfaces.
 // they have no handle to release. iac.provider modules missing a
 // `provider:` field are silently skipped (consistent with
 // LoadIaCProviderFromConfig's single-module behavior).
+//
+// Invariant: cfg.Modules has unique Names — enforced upstream by
+// config.LoadFromFile. If two iac.provider modules ever shared a name
+// (config-validation bug), the later one would silently overwrite the
+// earlier in the map while the earlier's closer still gets released by
+// the caller; per code-reviewer T3 M-1 (commit 9dff95246) this is
+// acceptable today but worth documenting so future readers know the
+// uniqueness assumption is load-bearing.
 func LoadAllIaCProvidersFromConfig(ctx context.Context, cfgFile string) (map[string]interfaces.IaCProvider, []io.Closer, error) {
 	rawCfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
@@ -119,6 +127,10 @@ func LoadAllIaCProvidersFromConfig(ctx context.Context, cfgFile string) (map[str
 		if err != nil {
 			// Roll back: close every successfully-resolved provider so the
 			// caller does not leak subprocesses it has no handle to release.
+			// Close errors during rollback are intentionally discarded — the
+			// primary error from Resolver takes precedence; surfacing a
+			// cleanup error would mask the root cause. Per code-reviewer T3
+			// M-3 (commit 9dff95246).
 			for _, c := range closers {
 				_ = c.Close()
 			}
