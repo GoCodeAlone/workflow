@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Infra Resources</title>
+  <link rel="stylesheet" href="/admin/infra-admin/styles.css">
+</head>
+<body>
+  <h1>Infra Resources</h1>
+  <div id="filters" class="form-controls">
+    <input id="filter-type" placeholder="type filter (e.g. infra.vpc)" autocomplete="off">
+    <select id="filter-provider"><option value="">all providers</option></select>
+    <input id="filter-app-context" placeholder="app_context filter" autocomplete="off">
+    <button id="refresh" type="button">Refresh</button>
+  </div>
+  <table id="resources">
+    <thead>
+      <tr><th>Name</th><th>Type</th><th>Provider</th><th>Status</th><th>Updated</th><th></th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div id="error" role="alert" aria-live="polite"></div>
+  <script src="/admin/infra-admin/resources.js"></script>
+</body>
+</html>

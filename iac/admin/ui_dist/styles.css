@@ -1,0 +1,28 @@
+/* infra-admin: minimal dense operational styling.
+   Embedded into the host workflow binary via workflow/iac/admin/ui.go.
+   CSP: default-src 'self'; style-src 'self' — no inline styles, no @import. */
+
+* { box-sizing: border-box; }
+body { font: 14px/1.45 system-ui, sans-serif; margin: 1rem; color: #1a1a1a; background: #fafafa; }
+h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+h2 { font-size: 1.1rem; margin: 1.2rem 0 0.5rem; }
+
+#filters, .form-controls { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; align-items: center; flex-wrap: wrap; }
+input, select, button { font: inherit; padding: 0.3rem 0.5rem; border: 1px solid #ccc; border-radius: 3px; background: #fff; }
+button { cursor: pointer; background: #f0f0f0; }
+button:hover { background: #e6e6e6; }
+button[disabled] { cursor: not-allowed; opacity: 0.5; }
+
+table { border-collapse: collapse; width: 100%; background: #fff; }
+th, td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
+th { background: #f4f4f4; font-weight: 600; }
+tr:hover td { background: #fafaff; }
+
+#error { color: #b00020; margin-top: 0.5rem; min-height: 1.2em; }
+#yaml-output { background: #f7f7f7; border: 1px solid #ddd; padding: 0.7rem; overflow-x: auto; font: 13px/1.4 ui-monospace, monospace; }
+.field-row { display: grid; grid-template-columns: 12rem 1fr; gap: 0.5rem; margin-bottom: 0.4rem; align-items: center; }
+.field-label { font-weight: 500; }
+.field-help { color: #666; font-size: 0.85em; }
+.array-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.array-row { display: flex; gap: 0.3rem; }
+.redacted { color: #888; font-style: italic; }
