@@ -8,6 +8,44 @@ import (
 	"google.golang.org/grpc"
 )
 
+func TestBuildMessageContractRegistry(t *testing.T) {
+	reg, err := BuildMessageContractRegistry(MessageContract{
+		ContractType:    "compute.network_audit_evidence.v1",
+		ProtoPackage:    "workflow_plugin_compute_core.protocol.v1",
+		MessageNames:    []string{"NetworkAuditRecord", "NetworkAuditRecordProjection"},
+		GoImportPath:    "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb",
+		SchemaDigest:    "sha256:0123456789abcdef",
+		ProtocolVersion: "compute.v1alpha1",
+	})
+	if err != nil {
+		t.Fatalf("BuildMessageContractRegistry: %v", err)
+	}
+	if len(reg.Contracts) != 1 {
+		t.Fatalf("contracts = %d, want 1", len(reg.Contracts))
+	}
+	contract := reg.Contracts[0]
+	if contract.Kind != pb.ContractKind_CONTRACT_KIND_MESSAGE {
+		t.Fatalf("kind = %v, want MESSAGE", contract.Kind)
+	}
+	if contract.ContractType != "compute.network_audit_evidence.v1" {
+		t.Fatalf("contract type = %q", contract.ContractType)
+	}
+	if got := contract.MessageNames; len(got) != 2 || got[0] != "NetworkAuditRecord" {
+		t.Fatalf("message names = %v", got)
+	}
+}
+
+func TestBuildMessageContractRegistryRequiresReleaseMetadata(t *testing.T) {
+	_, err := BuildMessageContractRegistry(MessageContract{
+		ContractType: "compute.network_audit_evidence.v1",
+		ProtoPackage: "workflow_plugin_compute_core.protocol.v1",
+		MessageNames: []string{"NetworkAuditRecord"},
+	})
+	if err == nil {
+		t.Fatal("expected missing schema/protocol metadata to fail")
+	}
+}
+
 func TestBuildContractRegistryForPlugin_NilServer(t *testing.T) {
 	reg := BuildContractRegistryForPlugin(nil, "workflow.plugin.external.iac.")
 	if reg == nil {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -99,5 +101,77 @@ func TestRunPluginValidateContract_MissingArg(t *testing.T) {
 	err := runPluginValidateContract([]string{})
 	if err == nil {
 		t.Fatal("expected error for missing plugin-dir arg")
+	}
+}
+
+func TestRunPluginValidateContract_MessageContractStaticProfile(t *testing.T) {
+	err := runPluginValidateContract([]string{
+		"--require-contract-kind", "message",
+		"testdata/plugins/message-contract",
+	})
+	if err != nil {
+		t.Fatalf("expected descriptor-only message contract to pass, got %v", err)
+	}
+}
+
+func TestRunPluginValidateContract_MessageContractRuntimeProfile(t *testing.T) {
+	err := runPluginValidateContract([]string{
+		"--require-contract-kind", "message",
+		"testdata/plugins/message-runtime-contract",
+	})
+	if err != nil {
+		t.Fatalf("expected runtime-backed message contract to keep release checks and pass, got %v", err)
+	}
+}
+
+func TestRunPluginValidateContract_MessageContractGoreleaserOnlyRuntimeSurface(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{
+  "name": "message-goreleaser-runtime",
+  "version": "1.0.0",
+  "author": "Workflow",
+  "description": "runtime surface outside cmd/root",
+  "capabilities": {},
+  "contracts": "plugin.contracts.json"
+}`), 0644); err != nil {
+		t.Fatalf("write plugin manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.contracts.json"), []byte(`{
+  "version": "v1",
+  "contracts": [
+    {
+      "kind": "message",
+      "contractType": "compute.network_audit_evidence.v1",
+      "protoPackage": "workflow_plugin_compute_core.protocol.v1",
+      "messageNames": ["NetworkAuditRecord"],
+      "schemaDigest": "sha256:0123456789abcdef",
+      "protocolVersion": "compute.v1alpha1",
+      "mode": "strict"
+    }
+  ]
+}`), 0644); err != nil {
+		t.Fatalf("write plugin contracts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".goreleaser.yaml"), []byte(`builds:
+  - main: ./plugin
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+`), 0644); err != nil {
+		t.Fatalf("write goreleaser config: %v", err)
+	}
+
+	err := runPluginValidateContract([]string{"--require-contract-kind", "message", dir})
+	if err == nil {
+		t.Fatal("expected non-cmd runtime surface to keep executable release checks")
+	}
+}
+
+func TestRunPluginValidateContract_UnknownContractKindFails(t *testing.T) {
+	err := runPluginValidateContract([]string{"testdata/plugins/unknown-contract-kind"})
+	if err == nil {
+		t.Fatal("expected unknown contract kind fixture to fail")
+	}
+	if !strings.Contains(err.Error(), "contract check") {
+		t.Fatalf("error = %v, want contract check", err)
 	}
 }

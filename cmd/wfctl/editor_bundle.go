@@ -292,6 +292,10 @@ func editorBundleContractIDFromPluginDescriptor(descriptor *pluginContractDescri
 			return id, nil
 		}
 		return "", fmt.Errorf("malformed service_method contract descriptor: serviceName and method are required when moduleType or serviceName is set")
+	case "message":
+		if typ := descriptor.contractType(kind); typ != "" {
+			return "message:" + typ, nil
+		}
 	}
 	return "", nil
 }
@@ -349,6 +353,14 @@ func contractDescriptorFromPluginDescriptor(descriptor *pluginContractDescriptor
 		if _, ok := editorBundleServiceContractID(contract.ModuleType, contract.ServiceName, contract.Method); !ok {
 			return nil, fmt.Errorf("malformed service_method contract descriptor: serviceName and method are required when moduleType or serviceName is set")
 		}
+	case "message":
+		contract.Kind = pb.ContractKind_CONTRACT_KIND_MESSAGE
+		contract.ContractType = descriptor.ContractType
+		contract.ProtoPackage = descriptor.ProtoPackage
+		contract.MessageNames = append([]string(nil), descriptor.MessageNames...)
+		contract.GoImportPath = descriptor.GoImportPath
+		contract.SchemaDigest = descriptor.SchemaDigest
+		contract.ProtocolVersion = descriptor.ProtocolVersion
 	default:
 		return nil, nil
 	}

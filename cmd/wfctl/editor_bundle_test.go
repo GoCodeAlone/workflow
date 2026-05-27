@@ -111,6 +111,44 @@ func TestRunEditorBundleLoadsPluginContractDescriptorSetReference(t *testing.T) 
 	}
 }
 
+func TestRunEditorBundleLoadsMessageContractDescriptor(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "editor-bundle.json")
+
+	if err := runEditorBundle([]string{"--registry=false", "--plugin-dir", "testdata/plugins/message-contract", "--output", outPath}); err != nil {
+		t.Fatalf("editor-bundle failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	var bundle struct {
+		Contracts map[string]struct {
+			DescriptorSetRef string   `json:"descriptorSetRef"`
+			ProtoPackage     string   `json:"protoPackage"`
+			MessageNames     []string `json:"messageNames"`
+			ProtocolVersion  string   `json:"protocolVersion"`
+		} `json:"contracts"`
+	}
+	if err := json.Unmarshal(data, &bundle); err != nil {
+		t.Fatalf("bundle is not valid JSON: %v", err)
+	}
+	contract := bundle.Contracts["message:compute.network_audit_evidence.v1"]
+	if contract.DescriptorSetRef != "descriptors/message.pb" {
+		t.Fatalf("descriptorSetRef = %q", contract.DescriptorSetRef)
+	}
+	if contract.ProtoPackage != "workflow_plugin_compute_core.protocol.v1" {
+		t.Fatalf("protoPackage = %q", contract.ProtoPackage)
+	}
+	if len(contract.MessageNames) != 2 || contract.MessageNames[0] != "NetworkAuditRecord" {
+		t.Fatalf("messageNames = %v", contract.MessageNames)
+	}
+	if contract.ProtocolVersion != "compute.v1alpha1" {
+		t.Fatalf("protocolVersion = %q", contract.ProtocolVersion)
+	}
+}
+
 func TestRunEditorBundleRejectsMalformedPluginContractDescriptors(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "workflow-plugin-bad-contracts")
@@ -298,6 +336,26 @@ func TestRunEditorBundlePreservesPerContractDescriptorSetReferences(t *testing.T
       "input": "workflow.two.Input",
       "output": "workflow.two.Output",
       "descriptorSetRef": "proto/two.pb"
+    },
+    {
+      "kind": "message",
+      "contractType": "message.one",
+      "mode": "strict",
+      "protoPackage": "workflow.one",
+      "messageNames": ["Event"],
+      "schemaDigest": "sha256:one",
+      "protocolVersion": "v1",
+      "descriptorSetRef": "proto/message-one.pb"
+    },
+    {
+      "kind": "message",
+      "contractType": "message.two",
+      "mode": "strict",
+      "protoPackage": "workflow.two",
+      "messageNames": ["Event"],
+      "schemaDigest": "sha256:two",
+      "protocolVersion": "v1",
+      "descriptorSetRef": "proto/message-two.pb"
     }
   ]
 }`), 0644); err != nil {
@@ -338,6 +396,18 @@ func TestRunEditorBundlePreservesPerContractDescriptorSetReferences(t *testing.T
 	}
 	if got := bundle.Messages["workflow.two.Input"].DescriptorSetRef; got != "proto/two.pb" {
 		t.Fatalf("workflow.two.Input descriptorSetRef = %q", got)
+	}
+	if got := bundle.Contracts["message:message.one"].DescriptorSetRef; got != "proto/message-one.pb" {
+		t.Fatalf("message.one descriptorSetRef = %q", got)
+	}
+	if got := bundle.Contracts["message:message.two"].DescriptorSetRef; got != "proto/message-two.pb" {
+		t.Fatalf("message.two descriptorSetRef = %q", got)
+	}
+	if got := bundle.Messages["workflow.one.Event"].DescriptorSetRef; got != "proto/message-one.pb" {
+		t.Fatalf("workflow.one.Event descriptorSetRef = %q", got)
+	}
+	if got := bundle.Messages["workflow.two.Event"].DescriptorSetRef; got != "proto/message-two.pb" {
+		t.Fatalf("workflow.two.Event descriptorSetRef = %q", got)
 	}
 	if bundle.DescriptorSets["proto/one.pb"].ExternalRef != "proto/one.pb" {
 		t.Fatalf("descriptor set one reference missing: %+v", bundle.DescriptorSets)

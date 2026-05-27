@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,37 @@ func TestTemplateGeneratorGenerate(t *testing.T) {
 	}
 	if !strings.Contains(source, `func Execute(`) {
 		t.Error("expected source to contain Execute function")
+	}
+}
+
+func TestMessageContractDescriptor(t *testing.T) {
+	descriptor, err := (MessageContract{
+		ContractType:    "compute.network_audit_evidence.v1",
+		ProtoPackage:    "workflow_plugin_compute_core.protocol.v1",
+		MessageNames:    []string{"NetworkAuditRecord", "NetworkAuditRecordProjection"},
+		GoImportPath:    "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb",
+		SchemaDigest:    "sha256:0123456789abcdef",
+		ProtocolVersion: "compute.v1alpha1",
+	}).ContractDescriptor()
+	if err != nil {
+		t.Fatalf("ContractDescriptor: %v", err)
+	}
+	if descriptor.GetContractType() != "compute.network_audit_evidence.v1" {
+		t.Fatalf("contract_type = %q", descriptor.GetContractType())
+	}
+	if got := descriptor.GetMessageNames(); len(got) != 2 || got[1] != "NetworkAuditRecordProjection" {
+		t.Fatalf("message_names = %v", got)
+	}
+}
+
+func TestMessageContractDescriptorRequiresReleaseMetadata(t *testing.T) {
+	_, err := (MessageContract{
+		ContractType: "compute.network_audit_evidence.v1",
+		ProtoPackage: "workflow_plugin_compute_core.protocol.v1",
+		MessageNames: []string{"NetworkAuditRecord"},
+	}).ContractDescriptor()
+	if err == nil {
+		t.Fatal("expected missing schema/protocol metadata to fail")
 	}
 }
 
@@ -150,6 +182,94 @@ func TestTemplateGeneratorGenerateStrictContractScaffoldByDefault(t *testing.T) 
 		if strings.Contains(stepsSrc, legacy) {
 			t.Errorf("steps.go should not contain legacy map entrypoint %q:\n%s", legacy, stepsSrc)
 		}
+	}
+}
+
+func TestTemplateGeneratorEmitsMessageContracts(t *testing.T) {
+	dir := t.TempDir()
+	outputDir := filepath.Join(dir, "message-plugin")
+
+	gen := NewTemplateGenerator()
+	err := gen.Generate(GenerateOptions{
+		Name:            "message-plugin",
+		Version:         "1.0.0",
+		Author:          "TestOrg",
+		Description:     "A message plugin",
+		OutputDir:       outputDir,
+		WorkflowReplace: filepath.Join(dir, "workflow"),
+		MessageContracts: []MessageContract{{
+			ContractType:    "compute.network_audit_evidence.v1",
+			ProtoPackage:    "workflow_plugin_compute_core.protocol.v1",
+			MessageNames:    []string{"NetworkAuditRecord", "NetworkAuditRecordProjection"},
+			GoImportPath:    "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb",
+			SchemaDigest:    "sha256:0123456789abcdef",
+			ProtocolVersion: "compute.v1alpha1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+
+	descriptorData, err := os.ReadFile(filepath.Join(outputDir, "plugin.contracts.json"))
+	if err != nil {
+		t.Fatalf("read plugin.contracts.json: %v", err)
+	}
+	var payload struct {
+		Contracts []struct {
+			Kind            string   `json:"kind"`
+			ContractType    string   `json:"contractType"`
+			ProtoPackage    string   `json:"protoPackage"`
+			MessageNames    []string `json:"messageNames"`
+			GoImportPath    string   `json:"goImportPath"`
+			SchemaDigest    string   `json:"schemaDigest"`
+			ProtocolVersion string   `json:"protocolVersion"`
+		} `json:"contracts"`
+	}
+	if err := json.Unmarshal(descriptorData, &payload); err != nil {
+		t.Fatalf("parse plugin.contracts.json: %v", err)
+	}
+	var found bool
+	for _, contract := range payload.Contracts {
+		if contract.Kind != "message" {
+			continue
+		}
+		found = true
+		if contract.ContractType != "compute.network_audit_evidence.v1" {
+			t.Fatalf("contractType = %q", contract.ContractType)
+		}
+		if contract.ProtoPackage != "workflow_plugin_compute_core.protocol.v1" {
+			t.Fatalf("protoPackage = %q", contract.ProtoPackage)
+		}
+		if len(contract.MessageNames) != 2 || contract.MessageNames[1] != "NetworkAuditRecordProjection" {
+			t.Fatalf("messageNames = %v", contract.MessageNames)
+		}
+		if contract.GoImportPath == "" || contract.SchemaDigest == "" || contract.ProtocolVersion == "" {
+			t.Fatalf("message contract metadata not preserved: %+v", contract)
+		}
+	}
+	if !found {
+		t.Fatalf("plugin.contracts.json missing message contract:\n%s", descriptorData)
+	}
+}
+
+func TestTemplateGeneratorRejectsInvalidMessageContracts(t *testing.T) {
+	dir := t.TempDir()
+	gen := NewTemplateGenerator()
+	err := gen.Generate(GenerateOptions{
+		Name:            "message-plugin",
+		Version:         "1.0.0",
+		Author:          "TestOrg",
+		Description:     "A message plugin",
+		OutputDir:       filepath.Join(dir, "message-plugin"),
+		WorkflowReplace: filepath.Join(dir, "workflow"),
+		MessageContracts: []MessageContract{{
+			ContractType: "compute.network_audit_evidence.v1",
+			ProtoPackage: "workflow_plugin_compute_core.protocol.v1",
+			MessageNames: []string{"NetworkAuditRecord"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected invalid message contract to fail generation")
 	}
 }
 

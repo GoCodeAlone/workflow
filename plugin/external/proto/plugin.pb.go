@@ -34,6 +34,7 @@ const (
 	ContractKind_CONTRACT_KIND_STEP        ContractKind = 2
 	ContractKind_CONTRACT_KIND_SERVICE     ContractKind = 3
 	ContractKind_CONTRACT_KIND_TRIGGER     ContractKind = 4
+	ContractKind_CONTRACT_KIND_MESSAGE     ContractKind = 5
 )
 
 // Enum value maps for ContractKind.
@@ -44,6 +45,7 @@ var (
 		2: "CONTRACT_KIND_STEP",
 		3: "CONTRACT_KIND_SERVICE",
 		4: "CONTRACT_KIND_TRIGGER",
+		5: "CONTRACT_KIND_MESSAGE",
 	}
 	ContractKind_value = map[string]int32{
 		"CONTRACT_KIND_UNSPECIFIED": 0,
@@ -51,6 +53,7 @@ var (
 		"CONTRACT_KIND_STEP":        2,
 		"CONTRACT_KIND_SERVICE":     3,
 		"CONTRACT_KIND_TRIGGER":     4,
+		"CONTRACT_KIND_MESSAGE":     5,
 	}
 )
 
@@ -276,19 +279,25 @@ func (x *ContractRegistry) GetFileDescriptorSet() *descriptorpb.FileDescriptorSe
 
 // ContractDescriptor maps a plugin capability type to protobuf message names.
 type ContractDescriptor struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          ContractKind           `protobuf:"varint,1,opt,name=kind,proto3,enum=workflow.plugin.v1.ContractKind" json:"kind,omitempty"`
-	ModuleType    string                 `protobuf:"bytes,2,opt,name=module_type,json=moduleType,proto3" json:"module_type,omitempty"`
-	StepType      string                 `protobuf:"bytes,3,opt,name=step_type,json=stepType,proto3" json:"step_type,omitempty"`
-	TriggerType   string                 `protobuf:"bytes,4,opt,name=trigger_type,json=triggerType,proto3" json:"trigger_type,omitempty"`
-	ServiceName   string                 `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
-	Method        string                 `protobuf:"bytes,6,opt,name=method,proto3" json:"method,omitempty"`
-	ConfigMessage string                 `protobuf:"bytes,7,opt,name=config_message,json=configMessage,proto3" json:"config_message,omitempty"`
-	InputMessage  string                 `protobuf:"bytes,8,opt,name=input_message,json=inputMessage,proto3" json:"input_message,omitempty"`
-	OutputMessage string                 `protobuf:"bytes,9,opt,name=output_message,json=outputMessage,proto3" json:"output_message,omitempty"`
-	Mode          ContractMode           `protobuf:"varint,10,opt,name=mode,proto3,enum=workflow.plugin.v1.ContractMode" json:"mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Kind            ContractKind           `protobuf:"varint,1,opt,name=kind,proto3,enum=workflow.plugin.v1.ContractKind" json:"kind,omitempty"`
+	ModuleType      string                 `protobuf:"bytes,2,opt,name=module_type,json=moduleType,proto3" json:"module_type,omitempty"`
+	StepType        string                 `protobuf:"bytes,3,opt,name=step_type,json=stepType,proto3" json:"step_type,omitempty"`
+	TriggerType     string                 `protobuf:"bytes,4,opt,name=trigger_type,json=triggerType,proto3" json:"trigger_type,omitempty"`
+	ServiceName     string                 `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	Method          string                 `protobuf:"bytes,6,opt,name=method,proto3" json:"method,omitempty"`
+	ConfigMessage   string                 `protobuf:"bytes,7,opt,name=config_message,json=configMessage,proto3" json:"config_message,omitempty"`
+	InputMessage    string                 `protobuf:"bytes,8,opt,name=input_message,json=inputMessage,proto3" json:"input_message,omitempty"`
+	OutputMessage   string                 `protobuf:"bytes,9,opt,name=output_message,json=outputMessage,proto3" json:"output_message,omitempty"`
+	Mode            ContractMode           `protobuf:"varint,10,opt,name=mode,proto3,enum=workflow.plugin.v1.ContractMode" json:"mode,omitempty"`
+	ContractType    string                 `protobuf:"bytes,11,opt,name=contract_type,json=contractType,proto3" json:"contract_type,omitempty"`
+	ProtoPackage    string                 `protobuf:"bytes,12,opt,name=proto_package,json=protoPackage,proto3" json:"proto_package,omitempty"`
+	MessageNames    []string               `protobuf:"bytes,13,rep,name=message_names,json=messageNames,proto3" json:"message_names,omitempty"`
+	GoImportPath    string                 `protobuf:"bytes,14,opt,name=go_import_path,json=goImportPath,proto3" json:"go_import_path,omitempty"`
+	SchemaDigest    string                 `protobuf:"bytes,15,opt,name=schema_digest,json=schemaDigest,proto3" json:"schema_digest,omitempty"`
+	ProtocolVersion string                 `protobuf:"bytes,16,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ContractDescriptor) Reset() {
@@ -389,6 +398,48 @@ func (x *ContractDescriptor) GetMode() ContractMode {
 		return x.Mode
 	}
 	return ContractMode_CONTRACT_MODE_UNSPECIFIED
+}
+
+func (x *ContractDescriptor) GetContractType() string {
+	if x != nil {
+		return x.ContractType
+	}
+	return ""
+}
+
+func (x *ContractDescriptor) GetProtoPackage() string {
+	if x != nil {
+		return x.ProtoPackage
+	}
+	return ""
+}
+
+func (x *ContractDescriptor) GetMessageNames() []string {
+	if x != nil {
+		return x.MessageNames
+	}
+	return nil
+}
+
+func (x *ContractDescriptor) GetGoImportPath() string {
+	if x != nil {
+		return x.GoImportPath
+	}
+	return ""
+}
+
+func (x *ContractDescriptor) GetSchemaDigest() string {
+	if x != nil {
+		return x.SchemaDigest
+	}
+	return ""
+}
+
+func (x *ContractDescriptor) GetProtocolVersion() string {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return ""
 }
 
 // GetAssetRequest asks the plugin to return an embedded static asset.
@@ -2169,7 +2220,7 @@ const file_plugin_proto_rawDesc = "" +
 	"\x0fsample_category\x18\x06 \x01(\tR\x0esampleCategory\"\xac\x01\n" +
 	"\x10ContractRegistry\x12D\n" +
 	"\tcontracts\x18\x01 \x03(\v2&.workflow.plugin.v1.ContractDescriptorR\tcontracts\x12R\n" +
-	"\x13file_descriptor_set\x18\x02 \x01(\v2\".google.protobuf.FileDescriptorSetR\x11fileDescriptorSet\"\x8f\x03\n" +
+	"\x13file_descriptor_set\x18\x02 \x01(\v2\".google.protobuf.FileDescriptorSetR\x11fileDescriptorSet\"\xf4\x04\n" +
 	"\x12ContractDescriptor\x124\n" +
 	"\x04kind\x18\x01 \x01(\x0e2 .workflow.plugin.v1.ContractKindR\x04kind\x12\x1f\n" +
 	"\vmodule_type\x18\x02 \x01(\tR\n" +
@@ -2182,7 +2233,13 @@ const file_plugin_proto_rawDesc = "" +
 	"\rinput_message\x18\b \x01(\tR\finputMessage\x12%\n" +
 	"\x0eoutput_message\x18\t \x01(\tR\routputMessage\x124\n" +
 	"\x04mode\x18\n" +
-	" \x01(\x0e2 .workflow.plugin.v1.ContractModeR\x04mode\"%\n" +
+	" \x01(\x0e2 .workflow.plugin.v1.ContractModeR\x04mode\x12#\n" +
+	"\rcontract_type\x18\v \x01(\tR\fcontractType\x12#\n" +
+	"\rproto_package\x18\f \x01(\tR\fprotoPackage\x12#\n" +
+	"\rmessage_names\x18\r \x03(\tR\fmessageNames\x12$\n" +
+	"\x0ego_import_path\x18\x0e \x01(\tR\fgoImportPath\x12#\n" +
+	"\rschema_digest\x18\x0f \x01(\tR\fschemaDigest\x12)\n" +
+	"\x10protocol_version\x18\x10 \x01(\tR\x0fprotocolVersion\"%\n" +
 	"\x0fGetAssetRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\"e\n" +
 	"\x10GetAssetResponse\x12\x18\n" +
@@ -2315,13 +2372,14 @@ const file_plugin_proto_rawDesc = "" +
 	"\vyaml_config\x18\x01 \x01(\fR\n" +
 	"yamlConfig\x12\x1d\n" +
 	"\n" +
-	"plugin_dir\x18\x02 \x01(\tR\tpluginDir*\x95\x01\n" +
+	"plugin_dir\x18\x02 \x01(\tR\tpluginDir*\xb0\x01\n" +
 	"\fContractKind\x12\x1d\n" +
 	"\x19CONTRACT_KIND_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14CONTRACT_KIND_MODULE\x10\x01\x12\x16\n" +
 	"\x12CONTRACT_KIND_STEP\x10\x02\x12\x19\n" +
 	"\x15CONTRACT_KIND_SERVICE\x10\x03\x12\x19\n" +
-	"\x15CONTRACT_KIND_TRIGGER\x10\x04*\x9a\x01\n" +
+	"\x15CONTRACT_KIND_TRIGGER\x10\x04\x12\x19\n" +
+	"\x15CONTRACT_KIND_MESSAGE\x10\x05*\x9a\x01\n" +
 	"\fContractMode\x12\x1d\n" +
 	"\x19CONTRACT_MODE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCONTRACT_MODE_LEGACY_STRUCT\x10\x01\x12*\n" +

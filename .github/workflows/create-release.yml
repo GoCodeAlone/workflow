@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.next_version.outputs.tag }}
+      release_tag: ${{ steps.next_version.outputs.tag }}
 
     steps:
       - name: Check out code
@@ -81,12 +82,24 @@ jobs:
           git tag "${{ steps.next_version.outputs.tag }}"
           git push origin "${{ steps.next_version.outputs.tag }}"
 
+      - name: Write release metadata
+        run: |
+          mkdir -p release-metadata
+          printf '%s\n' "${{ steps.next_version.outputs.tag }}" > release-metadata/release-tag.txt
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: release-metadata/release-tag.txt
+          if-no-files-found: error
+
   release:
     name: Build and publish release
     needs: tag
     uses: ./.github/workflows/release.yml
     with:
-      tag_name: ${{ needs.tag.outputs.tag }}
+      tag_name: ${{ needs.tag.outputs.release_tag }}
     secrets:
       repo_dispatch_token: ${{ secrets.repo_dispatch_token }}
     permissions:

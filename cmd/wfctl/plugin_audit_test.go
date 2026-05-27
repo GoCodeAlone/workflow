@@ -94,6 +94,45 @@ func TestAuditPluginStrictContractsWithGeneratedDescriptors(t *testing.T) {
 	}
 }
 
+func TestAuditPluginMessageContractsCounted(t *testing.T) {
+	result := auditPluginRepoWithOptions("testdata/plugins/message-contract", pluginAuditOptions{
+		StrictContracts:      true,
+		RequireContractKinds: []string{"message"},
+	})
+	if len(result.Findings) != 0 {
+		t.Fatalf("findings = %v", result.Findings)
+	}
+	if result.ContractCoverage.Messages.Total != 1 || result.ContractCoverage.Messages.Strict != 1 {
+		t.Fatalf("message coverage = %+v", result.ContractCoverage.Messages)
+	}
+}
+
+func TestAuditPluginUnknownContractKindFails(t *testing.T) {
+	result := auditPluginRepoWithOptions("testdata/plugins/unknown-contract-kind", pluginAuditOptions{StrictContracts: true})
+	if !hasPlanFinding(result.Findings, "ERROR", "unknown_contract_kind") {
+		t.Fatalf("expected unknown contract kind error, got %v", result.Findings)
+	}
+}
+
+func TestAuditPluginUnknownContractKindWithoutTypeFails(t *testing.T) {
+	dir := writePluginAuditRepo(t, "workflow-plugin-unknown-kind", `{
+  "name": "workflow-plugin-unknown-kind",
+  "version": "0.1.0",
+  "capabilities": {}
+}`)
+	writePluginContracts(t, dir, `{
+  "version": "1",
+  "contracts": [
+    {"kind": "mystery", "mode": "strict"}
+  ]
+}`)
+
+	result := auditPluginRepoWithOptions(dir, pluginAuditOptions{StrictContracts: true})
+	if !hasPlanFinding(result.Findings, "ERROR", "unknown_contract_kind") {
+		t.Fatalf("expected unknown contract kind error, got %v", result.Findings)
+	}
+}
+
 func TestAuditPluginStrictContractsWithProtoShapedDescriptors(t *testing.T) {
 	dir := writePluginAuditRepo(t, "workflow-plugin-strict-proto-shape", `{
   "name": "workflow-plugin-strict-proto-shape",
@@ -198,6 +237,23 @@ func TestRunAuditPluginsStrictContractsFailsOnMissingDescriptors(t *testing.T) {
 		t.Fatal("expected strict contracts audit failure")
 	}
 	for _, want := range []string{"missing_module_contract_descriptor", "missing_step_contract_descriptor", "module 0/1 strict"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in output:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestRunPluginAuditStrictContractsFailsOnUnknownAndMissingRequiredKinds(t *testing.T) {
+	var out bytes.Buffer
+	err := runPluginAuditWithOutput([]string{
+		"--strict-contracts",
+		"--require-contract-kind", "message",
+		"testdata/plugins/unknown-contract-kind",
+	}, &out)
+	if err == nil {
+		t.Fatalf("expected strict contract audit failure, got nil\n%s", out.String())
+	}
+	for _, want := range []string{"unknown_contract_kind", "missing_required_contract_kind"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in output:\n%s", want, out.String())
 		}

@@ -1,0 +1,5 @@
+builds:
+  - id: message-runtime-contract
+    main: ./cmd/plugin
+    ldflags:
+      - -s -w -X main.Version={{.Version}}

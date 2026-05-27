@@ -26,6 +26,7 @@ func runPluginValidateContract(args []string) error {
 	forPublish := fs.Bool("for-publish", false, "Apply publish-grade checks (strict-semver tag, etc.)")
 	tag := fs.String("tag", "", "Release tag (e.g. v1.2.3); falls back to $GITHUB_REF_NAME then `git describe --tags --exact-match HEAD`")
 	releaseDir := fs.String("release-dir", "", "Post-build verification: assert this dir's plugin.json carries --tag")
+	requireContractKind := fs.String("require-contract-kind", "", "Require a static contract kind in plugin.contracts.json (for example: message)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl plugin validate-contract [options] <plugin-dir>
 
@@ -69,6 +70,7 @@ Options:
 
 	var failures []string
 	addFail := func(msg string) { failures = append(failures, msg) }
+	requiredKinds := parseRequiredContractKinds(*requireContractKind)
 
 	// Check 1: plugin.json parses + Validate() OK
 	manifestPath := filepath.Join(abs, "plugin.json")
@@ -77,6 +79,7 @@ Options:
 		addFail(fmt.Sprintf("plugin.json: %v", err))
 	}
 	var manifest plugin.PluginManifest
+	var rawManifest map[string]any
 	if err == nil {
 		if jerr := json.Unmarshal(manifestBytes, &manifest); jerr != nil {
 			addFail(fmt.Sprintf("plugin.json: parse: %v", jerr))
@@ -85,10 +88,26 @@ Options:
 		} else if manifest.Version == "0.0.0" {
 			fmt.Fprintln(os.Stderr, "  INFO  plugin.json.version is dev sentinel \"0.0.0\" — release builds inject the tag via goreleaser ldflag")
 		}
+		_ = json.Unmarshal(manifestBytes, &rawManifest)
 	}
 
+	descriptors, _, _, _ := loadPluginContractDescriptors(abs, rawManifest, pluginAuditOptions{
+		StrictContracts:      true,
+		RequireContractKinds: requiredKinds,
+	})
+	auditResult := auditPluginRepoWithOptions(abs, pluginAuditOptions{
+		StrictContracts:      true,
+		RequireContractKinds: requiredKinds,
+	})
+	for _, finding := range auditResult.Findings {
+		if isValidateContractBlockingFinding(finding) {
+			addFail(fmt.Sprintf("%s: %s", finding.Code, finding.Message))
+		}
+	}
+	staticMessageOnly := hasRequiredStaticMessageContract(descriptors, requiredKinds) && !hasPluginRuntimeSurface(abs, rawManifest)
+
 	// Check 2 + 3: capabilities + minEngineVersion populated
-	if err == nil {
+	if err == nil && !staticMessageOnly {
 		var raw map[string]any
 		if jerr := json.Unmarshal(manifestBytes, &raw); jerr == nil {
 			caps, ok := raw["capabilities"].(map[string]any)
@@ -103,15 +122,17 @@ Options:
 	}
 
 	// Check 4: any cmd/**/main.go contains ResolveBuildVersion AND BuildVersion wiring
-	mainFound, mainHasContract := scanMainGoFilesForContract(abs)
-	if !mainFound {
-		addFail("no cmd/**/main.go (or .go file under repo root) found to scan for contract")
-	} else if !mainHasContract {
-		addFail("no main.go contains both sdk.ResolveBuildVersion(...) AND (IaCServeOptions.BuildVersion: ... OR sdk.WithBuildVersion(...))")
+	if !staticMessageOnly {
+		mainFound, mainHasContract := scanMainGoFilesForContract(abs)
+		if !mainFound {
+			addFail("no cmd/**/main.go (or .go file under repo root) found to scan for contract")
+		} else if !mainHasContract {
+			addFail("no main.go contains both sdk.ResolveBuildVersion(...) AND (IaCServeOptions.BuildVersion: ... OR sdk.WithBuildVersion(...))")
+		}
 	}
 
 	// Check 5: goreleaser config carries -X *.Version= ldflag
-	if !goreleaserHasVersionLdflag(abs) {
+	if !staticMessageOnly && !goreleaserHasVersionLdflag(abs) {
 		addFail(".goreleaser.{yaml,yml}: missing `-X *.Version=` ldflag (mandatory mechanism to deliver release tag into binary)")
 	}
 
@@ -150,6 +171,83 @@ Options:
 	}
 	fmt.Println("wfctl plugin validate-contract: PASS")
 	return nil
+}
+
+func parseRequiredContractKinds(raw string) []string {
+	var out []string
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func hasRequiredStaticMessageContract(descriptors []pluginContractDescriptor, requiredKinds []string) bool {
+	var requiresMessage bool
+	for _, required := range requiredKinds {
+		if normalizePluginContractKind(required) == "message" {
+			requiresMessage = true
+			break
+		}
+	}
+	if !requiresMessage {
+		return false
+	}
+	for _, descriptor := range descriptors {
+		if normalizePluginContractKind(descriptor.Kind) == "message" && strings.TrimSpace(descriptor.ContractType) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPluginRuntimeSurface(dir string, manifest map[string]any) bool {
+	if strings.TrimSpace(firstStringField(manifest, "minEngineVersion", "min_engine_version")) != "" {
+		return true
+	}
+	switch capabilities := manifest["capabilities"].(type) {
+	case []any:
+		if len(capabilities) > 0 {
+			return true
+		}
+	case map[string]any:
+		if len(capabilities) > 0 {
+			return true
+		}
+	}
+	if info, err := os.Stat(filepath.Join(dir, "cmd")); err == nil && info.IsDir() {
+		return true
+	}
+	if goreleaserHasVersionLdflag(dir) ||
+		pluginAuditFileExists(filepath.Join(dir, ".goreleaser.yaml")) ||
+		pluginAuditFileExists(filepath.Join(dir, ".goreleaser.yml")) ||
+		pluginAuditFileExists(filepath.Join(dir, "go.mod")) {
+		return true
+	}
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isValidateContractBlockingFinding(finding planFinding) bool {
+	switch finding.Code {
+	case "invalid_plugin_contract_descriptors",
+		"read_plugin_contract_descriptors",
+		"unknown_contract_kind",
+		"unknown_required_contract_kind",
+		"missing_required_contract_kind",
+		"invalid_message_contract_descriptor":
+		return true
+	default:
+		return false
+	}
 }
 
 var (

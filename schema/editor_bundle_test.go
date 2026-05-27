@@ -168,6 +168,53 @@ func TestExportEditorBundleIncludesExternalDescriptorSetReferences(t *testing.T)
 	}
 }
 
+func TestExportEditorBundlePreservesMessageContracts(t *testing.T) {
+	bundle, err := ExportEditorBundle(EditorBundleOptions{
+		ContractRegistries: []EditorContractRegistrySource{
+			{
+				Plugin:           "workflow-plugin-compute-core",
+				Source:           EditorContractSourcePluginContractsJSON,
+				DescriptorSetRef: "descriptors/message.pb",
+				Registry: &pb.ContractRegistry{
+					Contracts: []*pb.ContractDescriptor{
+						{
+							Kind:            pb.ContractKind_CONTRACT_KIND_MESSAGE,
+							Mode:            pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+							ContractType:    "compute.network_audit_evidence.v1",
+							ProtoPackage:    "workflow_plugin_compute_core.protocol.v1",
+							MessageNames:    []string{"NetworkAuditRecord", "NetworkAuditRecordProjection"},
+							GoImportPath:    "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb",
+							SchemaDigest:    "sha256:0123456789abcdef",
+							ProtocolVersion: "compute.v1alpha1",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("export editor bundle: %v", err)
+	}
+
+	contract := bundle.Contracts["message:compute.network_audit_evidence.v1"]
+	if contract == nil {
+		t.Fatalf("expected message contract, got keys %+v", bundle.Contracts)
+	}
+	if contract.ProtoPackage != "workflow_plugin_compute_core.protocol.v1" {
+		t.Fatalf("proto package = %q", contract.ProtoPackage)
+	}
+	if len(contract.MessageNames) != 2 || contract.MessageNames[1] != "NetworkAuditRecordProjection" {
+		t.Fatalf("message names = %v", contract.MessageNames)
+	}
+	if contract.GoImportPath == "" || contract.SchemaDigest == "" || contract.ProtocolVersion == "" {
+		t.Fatalf("message metadata not preserved: %+v", contract)
+	}
+	fullName := "workflow_plugin_compute_core.protocol.v1.NetworkAuditRecordProjection"
+	if bundle.Messages[fullName] == nil {
+		t.Fatalf("expected message placeholder %q, got %+v", fullName, bundle.Messages)
+	}
+}
+
 func TestExportEditorBundlePreservesPerContractExternalDescriptorSetReferences(t *testing.T) {
 	bundle, err := ExportEditorBundle(EditorBundleOptions{
 		ContractRegistries: []EditorContractRegistrySource{

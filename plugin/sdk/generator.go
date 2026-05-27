@@ -27,16 +27,17 @@ func NewTemplateGenerator() *TemplateGenerator {
 
 // GenerateOptions configures what gets generated.
 type GenerateOptions struct {
-	Name            string
-	Version         string
-	Author          string
-	Description     string
-	License         string
-	OutputDir       string
-	WithContract    bool
-	LegacyContracts bool
-	GoModule        string // e.g. "github.com/MyOrg/workflow-plugin-foo"
-	WorkflowReplace string // optional local replace path for github.com/GoCodeAlone/workflow
+	Name             string
+	Version          string
+	Author           string
+	Description      string
+	License          string
+	OutputDir        string
+	WithContract     bool
+	LegacyContracts  bool
+	GoModule         string // e.g. "github.com/MyOrg/workflow-plugin-foo"
+	WorkflowReplace  string // optional local replace path for github.com/GoCodeAlone/workflow
+	MessageContracts []MessageContract
 }
 
 // Generate creates a new plugin directory with manifest and component skeleton,
@@ -64,6 +65,11 @@ func (g *TemplateGenerator) Generate(opts GenerateOptions) error {
 		// Strict scaffolds depend on APIs in the current Workflow source tree
 		// until the next Workflow module release is published.
 		opts.LegacyContracts = true
+	}
+	for _, contract := range opts.MessageContracts {
+		if _, err := contract.ContractDescriptor(); err != nil {
+			return fmt.Errorf("message contract %q: %w", contract.ContractType, err)
+		}
 	}
 
 	// Validate the name
@@ -168,7 +174,11 @@ func generateProjectStructure(opts GenerateOptions) error {
 		if err := writeFile(filepath.Join(protoDir, protoFileName(shortName)), generateProtoContract(goModule, shortName), 0600); err != nil {
 			return err
 		}
-		if err := writeFile(filepath.Join(opts.OutputDir, "plugin.contracts.json"), generatePluginContractsJSON(shortName), 0600); err != nil {
+		if err := writeFile(filepath.Join(opts.OutputDir, "plugin.contracts.json"), generatePluginContractsJSON(shortName, true, opts.MessageContracts), 0600); err != nil {
+			return err
+		}
+	} else if len(opts.MessageContracts) > 0 {
+		if err := writeFile(filepath.Join(opts.OutputDir, "plugin.contracts.json"), generatePluginContractsJSON(shortName, false, opts.MessageContracts), 0600); err != nil {
 			return err
 		}
 	}
@@ -351,22 +361,24 @@ func generateProtoContract(goModule, shortName string) string {
 	return b.String()
 }
 
-func generatePluginContractsJSON(shortName string) string {
+func generatePluginContractsJSON(shortName string, includeStep bool, messageContracts []MessageContract) string {
 	stepType := "step." + shortName + "_example"
-	return fmt.Sprintf(`{
-  "version": "v1",
-  "contracts": [
-    {
-      "kind": "step",
-      "type": %q,
-      "mode": "strict",
-      "config": "google.protobuf.StringValue",
-      "input": "google.protobuf.StringValue",
-      "output": "google.protobuf.StringValue"
-    }
-  ]
-}
-`, stepType)
+	var contracts []map[string]any
+	if includeStep {
+		contracts = append(contracts, map[string]any{
+			"kind":   "step",
+			"type":   stepType,
+			"mode":   "strict",
+			"config": "google.protobuf.StringValue",
+			"input":  "google.protobuf.StringValue",
+			"output": "google.protobuf.StringValue",
+		})
+	}
+	for _, contract := range messageContracts {
+		encoded, _ := contract.pluginContractsJSONMap()
+		contracts = append(contracts, encoded)
+	}
+	return encodePluginContractsJSON(contracts)
 }
 
 func generateLegacyProviderGo(opts GenerateOptions, shortName string) string {

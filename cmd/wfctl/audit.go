@@ -284,11 +284,12 @@ func renderPluginAuditReport(out io.Writer, report pluginAuditReport) {
 }
 
 func pluginContractCoverageSummary(coverage pluginContractCoverage) string {
-	return fmt.Sprintf("module %d/%d strict, step %d/%d strict, trigger %d/%d strict, service method %d/%d strict",
+	return fmt.Sprintf("module %d/%d strict, step %d/%d strict, trigger %d/%d strict, service method %d/%d strict, message %d/%d strict",
 		coverage.Modules.Strict, coverage.Modules.Total,
 		coverage.Steps.Strict, coverage.Steps.Total,
 		coverage.Triggers.Strict, coverage.Triggers.Total,
-		coverage.ServiceMethods.Strict, coverage.ServiceMethods.Total)
+		coverage.ServiceMethods.Strict, coverage.ServiceMethods.Total,
+		coverage.Messages.Strict, coverage.Messages.Total)
 }
 
 func pluginFindingCodes(findings []planFinding) []string {

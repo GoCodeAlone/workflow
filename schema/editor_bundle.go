@@ -52,16 +52,22 @@ type EditorContractBundle struct {
 }
 
 type EditorContractDescriptor struct {
-	ID               string `json:"id"`
-	Plugin           string `json:"plugin,omitempty"`
-	OwnerType        string `json:"ownerType"`
-	OwnerKey         string `json:"ownerKey"`
-	Mode             string `json:"mode"`
-	RequestMessage   string `json:"requestMessage,omitempty"`
-	ResponseMessage  string `json:"responseMessage,omitempty"`
-	ConfigMessage    string `json:"configMessage,omitempty"`
-	DescriptorSetRef string `json:"descriptorSetRef,omitempty"`
-	Source           string `json:"source"`
+	ID               string   `json:"id"`
+	Plugin           string   `json:"plugin,omitempty"`
+	OwnerType        string   `json:"ownerType"`
+	OwnerKey         string   `json:"ownerKey"`
+	Mode             string   `json:"mode"`
+	RequestMessage   string   `json:"requestMessage,omitempty"`
+	ResponseMessage  string   `json:"responseMessage,omitempty"`
+	ConfigMessage    string   `json:"configMessage,omitempty"`
+	DescriptorSetRef string   `json:"descriptorSetRef,omitempty"`
+	Source           string   `json:"source"`
+	ContractType     string   `json:"contractType,omitempty"`
+	ProtoPackage     string   `json:"protoPackage,omitempty"`
+	MessageNames     []string `json:"messageNames,omitempty"`
+	GoImportPath     string   `json:"goImportPath,omitempty"`
+	SchemaDigest     string   `json:"schemaDigest,omitempty"`
+	ProtocolVersion  string   `json:"protocolVersion,omitempty"`
 }
 
 type EditorMessageDescriptor struct {
@@ -374,6 +380,12 @@ func normalizeContractDescriptor(source EditorContractRegistrySource, descriptor
 		ConfigMessage:    descriptor.ConfigMessage,
 		DescriptorSetRef: descriptorSetRef,
 		Source:           editorContractSource(source.Source),
+		ContractType:     descriptor.ContractType,
+		ProtoPackage:     descriptor.ProtoPackage,
+		MessageNames:     append([]string(nil), descriptor.MessageNames...),
+		GoImportPath:     descriptor.GoImportPath,
+		SchemaDigest:     descriptor.SchemaDigest,
+		ProtocolVersion:  descriptor.ProtocolVersion,
 	}
 }
 
@@ -399,6 +411,8 @@ func editorContractOwner(descriptor *pb.ContractDescriptor) (string, string) {
 			return "service", descriptor.ServiceName + "/" + descriptor.Method
 		}
 		return "service", descriptor.Method
+	case pb.ContractKind_CONTRACT_KIND_MESSAGE:
+		return "message", descriptor.ContractType
 	default:
 		return "", ""
 	}
@@ -437,7 +451,11 @@ func editorContractSource(source string) string {
 }
 
 func addReferencedMessagePlaceholders(messages map[string]*EditorMessageDescriptor, contract *EditorContractDescriptor, descriptorSetRef string) {
-	for _, name := range []string{contract.ConfigMessage, contract.RequestMessage, contract.ResponseMessage} {
+	names := []string{contract.ConfigMessage, contract.RequestMessage, contract.ResponseMessage}
+	for _, messageName := range contract.MessageNames {
+		names = append(names, editorBundleMessageFullName(contract.ProtoPackage, messageName))
+	}
+	for _, name := range names {
 		if name == "" {
 			continue
 		}
@@ -457,6 +475,14 @@ func addReferencedMessagePlaceholders(messages map[string]*EditorMessageDescript
 			DescriptorSetRef: descriptorSetRef,
 		}
 	}
+}
+
+func editorBundleMessageFullName(protoPackage, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.Contains(name, ".") || strings.TrimSpace(protoPackage) == "" {
+		return name
+	}
+	return strings.TrimSpace(protoPackage) + "." + name
 }
 
 func GenerateInfraSchema() *Schema {
