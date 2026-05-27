@@ -39,12 +39,16 @@ package module
 //   * Stop closes the audit writer (if open).
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
@@ -497,7 +501,14 @@ func readAdminBody(r *http.Request) ([]byte, error) {
 // audit package) but never propagate — the access log is a
 // best-effort observability surface, not a request-path
 // dependency.
-func (m *InfraAdmin) auditAccess(r *http.Request, action string, ev *adminpb.AdminAuthzEvidence) {
+//
+// The result string distinguishes outcomes per the proto field's
+// semantic intent: "ok" for served requests, "denied" for authz
+// refusals (handler's Output.error non-empty). Per spec-reviewer
+// T15 F2 (commit 60971783d): hardcoding "ok" hid real denial
+// attempts in the access log, defeating the audit log's
+// security-review purpose.
+func (m *InfraAdmin) auditAccess(r *http.Request, action string, ev *adminpb.AdminAuthzEvidence, result string) {
 	if m.audit == nil {
 		return
 	}
@@ -509,10 +520,23 @@ func (m *InfraAdmin) auditAccess(r *http.Request, action string, ev *adminpb.Adm
 		TsUnix:  nowUnix(),
 		Subject: subject,
 		Action:  action,
-		Result:  "ok",
+		Result:  result,
 	}
 	_ = m.audit.Write(entry)
 	_ = r // r reserved for future targets/app_context extraction
+}
+
+// auditResultFor maps a handler output's Error field to the
+// audit log's `result` value. Empty error → "ok"; non-empty →
+// "denied" (the handler library's primary refusal path is
+// authz-default-deny, so "denied" is the most informative
+// label for v1; future v1.1 might split into "denied"/"error"
+// /"not_found" but the proto field is a free-form string).
+func auditResultFor(errMsg string) string {
+	if errMsg == "" {
+		return "ok"
+	}
+	return "denied"
 }
 
 // nowUnix is a package-level var so tests can substitute a fixed
@@ -535,7 +559,7 @@ func (m *InfraAdmin) handleListResources(w http.ResponseWriter, r *http.Request)
 	}
 	out, _ := handler.ListResources(r.Context(), m.state, m.providers, m.fieldCatalog, &in)
 	writeProtoMsg(w, out)
-	m.auditAccess(r, "list_resources", in.GetEvidence())
+	m.auditAccess(r, "list_resources", in.GetEvidence(), auditResultFor(out.GetError()))
 }
 
 func (m *InfraAdmin) handleGetResource(w http.ResponseWriter, r *http.Request) {
@@ -559,7 +583,7 @@ func (m *InfraAdmin) handleGetResource(w http.ResponseWriter, r *http.Request) {
 	}
 	out, _ := handler.GetResource(r.Context(), m.state, &in)
 	writeProtoMsg(w, out)
-	m.auditAccess(r, "get_resource", in.GetEvidence())
+	m.auditAccess(r, "get_resource", in.GetEvidence(), auditResultFor(out.GetError()))
 }
 
 func (m *InfraAdmin) handleListResourceTypes(w http.ResponseWriter, r *http.Request) {
@@ -577,7 +601,7 @@ func (m *InfraAdmin) handleListResourceTypes(w http.ResponseWriter, r *http.Requ
 	}
 	out, _ := handler.ListResourceTypes(r.Context(), m.fieldCatalog, m.providers, &in)
 	writeProtoMsg(w, out)
-	m.auditAccess(r, "list_types", in.GetEvidence())
+	m.auditAccess(r, "list_types", in.GetEvidence(), auditResultFor(out.GetError()))
 }
 
 func (m *InfraAdmin) handleListProviders(w http.ResponseWriter, r *http.Request) {
@@ -603,7 +627,7 @@ func (m *InfraAdmin) handleListProviders(w http.ResponseWriter, r *http.Request)
 		&in,
 	)
 	writeProtoMsg(w, out)
-	m.auditAccess(r, "list_providers", in.GetEvidence())
+	m.auditAccess(r, "list_providers", in.GetEvidence(), auditResultFor(out.GetError()))
 }
 
 func (m *InfraAdmin) handleGenerateConfig(w http.ResponseWriter, r *http.Request) {
@@ -621,27 +645,107 @@ func (m *InfraAdmin) handleGenerateConfig(w http.ResponseWriter, r *http.Request
 	}
 	out, _ := handler.GenerateConfig(r.Context(), m.fieldCatalog, &in)
 	writeProtoMsg(w, out)
-	m.auditAccess(r, "generate_config", in.GetEvidence())
+	m.auditAccess(r, "generate_config", in.GetEvidence(), auditResultFor(out.GetError()))
 }
 
 // handleAuditTail streams the audit log file as ndjson when the
-// audit writer is enabled. The handler reads the on-disk file
-// directly rather than spawning a tail subprocess — the file is
-// append-only and the writer's SIGHUP-reopen contract means the
-// inode-pointer we open here may go stale, but for v1 we accept
-// that limitation (audit-tail is a snapshot at request time, not
-// a live stream).
+// audit writer is enabled. Honors `?since=<unix>&limit=N` query
+// params per design §Security Review row "Access logging":
+// "GET /api/infra-admin/audit?since=<unix>&limit=N returning
+// ndjson". The CLI's `wfctl infra admin audit-tail --since 1h`
+// translates the duration to a unix timestamp; the host filters
+// by ts_unix > since AND emits at most `limit` entries (0 = no
+// limit). Per spec-reviewer T15 F1 (commit 60971783d).
+//
+// Implementation: scans the file line-by-line via bufio.Scanner
+// (1MB max line, same as the CLI decoder), protojson-decodes each
+// line to read ts_unix, drops out-of-window entries, forwards the
+// rest as ndjson. Lines that fail to decode are skipped silently
+// — append-only file may contain partial writes mid-rotation; the
+// audit-tail consumer treats those as benign.
+//
+// Status semantics: opens the file with os.Open BEFORE writing
+// any response headers so a missing/permission-denied file
+// produces a clean 404 / 500. ServeFile's pre-WriteHeader contract
+// is the source of the F3 collision the prior draft had.
 func (m *InfraAdmin) handleAuditTail(w http.ResponseWriter, r *http.Request) {
 	if m.audit == nil {
 		http.Error(w, "audit log not configured (set access_log_path on infra.admin module)", http.StatusNotFound)
 		return
 	}
+
+	// Parse query params. Empty / unparseable values default to 0
+	// (no filter / no limit) — matches the design's permissive shape.
+	q := r.URL.Query()
+	var sinceUnix int64
+	if v := q.Get("since"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			sinceUnix = n
+		}
+	}
+	var limit int
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			limit = n
+		}
+	}
+
+	f, err := os.Open(m.config.AccessLogPath)
+	if err != nil {
+		// File missing or permission denied — 404 mirrors
+		// http.ServeFile's IsNotExist branch; 500 covers other
+		// I/O failures. Body is plain text since the CLI's
+		// renderAuditTable surfaces the error string verbatim.
+		if errors.Is(err, fs.ErrNotExist) {
+			http.Error(w, "audit log file not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "open audit log: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	// Only set headers once we know the file is readable. Header
+	// + status MUST be set before the first body write, but we
+	// stream after — clearing F3.
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
-	// Serve the file via http.ServeFile-style semantics; the CLI's
-	// renderAuditTable iterates protojson lines so the body bytes
-	// are forwarded verbatim.
-	http.ServeFile(w, r, m.config.AccessLogPath)
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var emitted int
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		// Filter by ts_unix when since is set. Decode just enough
+		// to read the field; ignore decode errors so partial-write
+		// lines don't truncate the stream for downstream entries.
+		if sinceUnix > 0 {
+			var entry adminpb.AdminAuditEntry
+			if err := protojson.Unmarshal(line, &entry); err != nil {
+				continue
+			}
+			if entry.GetTsUnix() < sinceUnix {
+				continue
+			}
+		}
+		// Forward the line as-is so the protojson byte sequence is
+		// preserved byte-for-byte (the CLI's decoder expects the
+		// exact wire format the writer emitted, not a re-marshaled
+		// shape — preserves the int64-as-decimal-string convention).
+		if _, werr := w.Write(append(line, '\n')); werr != nil {
+			return
+		}
+		emitted++
+		if limit > 0 && emitted >= limit {
+			return
+		}
+	}
+	// Scanner errors mid-stream get swallowed — the client already
+	// received bytes so we can't change the HTTP status. The next
+	// audit-tail request will re-attempt.
 }
 
 // writeProtoMsg marshals a proto message via the shared protojson

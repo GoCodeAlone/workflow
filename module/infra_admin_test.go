@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -457,6 +459,303 @@ func TestInfraAdmin_RequiresServices_ListsAllDependencies(t *testing.T) {
 		if d.Name == "workflowEngine" {
 			t.Error("RequiresServices must NOT list workflowEngine — it's registered after Init")
 		}
+	}
+}
+
+// TestInfraAdmin_AuditTail_FiltersBySince pins the design's
+// `?since=<unix>` query-param contract — the CLI's
+// `wfctl infra admin audit-tail --since 1h` depends on the host
+// filtering by timestamp; without this, --since is silently a
+// no-op. Per spec-reviewer T15 F1 (commit 60971783d).
+//
+// Writes 3 audit entries with staggered timestamps, then queries
+// the audit endpoint with since=<middle timestamp> and asserts
+// only the 2 newest entries are returned.
+func TestInfraAdmin_AuditTail_FiltersBySince(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	dir := t.TempDir()
+	cfg := standardCfg()
+	cfg.AccessLogPath = filepath.Join(dir, "audit.jsonl")
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stamp three entries with explicit ts_unix values so we can
+	// assert filtering deterministically. Use module's audit
+	// writer directly so the file is in the exact protojson
+	// shape the handler reads.
+	t0 := int64(1716800000)
+	t1 := int64(1716800100)
+	t2 := int64(1716800200)
+	for _, ts := range []int64{t0, t1, t2} {
+		entry := &adminpb.AdminAuditEntry{
+			TsUnix:  ts,
+			Subject: fmt.Sprintf("user:t-%d", ts),
+			Action:  "list_resources",
+			Result:  "ok",
+		}
+		if err := m.audit.Write(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Filter with since=t1 → expect t1 + t2 (entries with
+	// ts_unix < t1 dropped). The handler uses < not <= on the
+	// since threshold per design ("entries newer than this
+	// duration" — strict).
+	req := httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/api/infra-admin/audit?since=%d", t1), nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "application/x-ndjson" {
+		t.Errorf("Content-Type = %q, want application/x-ndjson", rec.Header().Get("Content-Type"))
+	}
+	lines := strings.Split(strings.TrimRight(rec.Body.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("filtered ndjson has %d lines, want 2 (entries at t1 + t2)\n%s", len(lines), rec.Body.String())
+	}
+	// Decode each and verify the timestamps match what we expect.
+	var got []int64
+	for _, line := range lines {
+		var entry adminpb.AdminAuditEntry
+		if err := protojson.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("decode line: %v\n%s", err, line)
+		}
+		got = append(got, entry.GetTsUnix())
+	}
+	if got[0] != t1 || got[1] != t2 {
+		t.Errorf("got ts_unix sequence %v, want [%d, %d]", got, t1, t2)
+	}
+}
+
+// TestInfraAdmin_AuditTail_FiltersByLimit pins the `?limit=N`
+// query-param contract — caller can cap the number of returned
+// entries to avoid response-size explosions on long logs.
+func TestInfraAdmin_AuditTail_FiltersByLimit(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	dir := t.TempDir()
+	cfg := standardCfg()
+	cfg.AccessLogPath = filepath.Join(dir, "audit.jsonl")
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range 5 {
+		entry := &adminpb.AdminAuditEntry{
+			TsUnix:  int64(1716800000 + i*10),
+			Subject: fmt.Sprintf("user:%d", i),
+			Action:  "list_resources",
+			Result:  "ok",
+		}
+		if err := m.audit.Write(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/infra-admin/audit?limit=2", nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	lines := strings.Split(strings.TrimRight(rec.Body.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Errorf("got %d lines with limit=2, want 2\n%s", len(lines), rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_AuditTail_NoFilterReturnsAll verifies the
+// no-query-param case (CLI invoked without --since / --limit)
+// returns every line.
+func TestInfraAdmin_AuditTail_NoFilterReturnsAll(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	dir := t.TempDir()
+	cfg := standardCfg()
+	cfg.AccessLogPath = filepath.Join(dir, "audit.jsonl")
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range 3 {
+		if err := m.audit.Write(&adminpb.AdminAuditEntry{TsUnix: int64(1716800000 + i*10), Action: "list_resources", Result: "ok"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/infra-admin/audit", nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	lines := strings.Split(strings.TrimRight(rec.Body.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Errorf("got %d lines without filters, want 3", len(lines))
+	}
+}
+
+// TestInfraAdmin_AuditTail_FileMissingReturns404 pins the F3
+// status-code fix — file open failure surfaces as a clean 404
+// rather than a 200-with-error-body. The earlier draft pre-set
+// the 200 status before http.ServeFile, which then surfaced
+// "404 page not found" as body content with status 200.
+func TestInfraAdmin_AuditTail_FileMissingReturns404(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	dir := t.TempDir()
+	cfg := standardCfg()
+	cfg.AccessLogPath = filepath.Join(dir, "audit.jsonl")
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	// Delete the audit file AFTER Init creates it so the open
+	// fails at handler-time.
+	if err := os.Remove(cfg.AccessLogPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/infra-admin/audit", nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (file missing); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_AuditTail_NotConfiguredReturns404 pins the
+// "audit log not configured" 404 path — distinct from the
+// file-missing 404 (different operator diagnosis).
+func TestInfraAdmin_AuditTail_NotConfiguredReturns404(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	cfg := standardCfg()
+	// cfg.AccessLogPath left empty — audit writer not opened.
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/infra-admin/audit", nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (not configured)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "not configured") {
+		t.Errorf("expected 'not configured' in body, got %q", rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_AuditAccess_RecordsDeniedResult pins F2:
+// authz-denied requests MUST log result="denied", not "ok".
+// Otherwise security-event review hides actual denial attempts.
+func TestInfraAdmin_AuditAccess_RecordsDeniedResult(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	dir := t.TempDir()
+	cfg := standardCfg()
+	cfg.AccessLogPath = filepath.Join(dir, "audit.jsonl")
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Send a request WITHOUT evidence — handler library rejects
+	// with default-deny → out.Error non-empty → audit should
+	// record result="denied".
+	body := []byte(`{}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/resources", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (authz refusal surfaces via Output.error per tag-100)", rec.Code)
+	}
+
+	// Read the audit log + assert the recorded result is "denied".
+	data, err := os.ReadFile(cfg.AccessLogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"result":"denied"`) {
+		t.Errorf("audit log missing denied result for refused request:\n%s", string(data))
+	}
+	if strings.Contains(string(data), `"result":"ok"`) {
+		t.Errorf("audit log records 'ok' for a denied request — F2 regression:\n%s", string(data))
+	}
+}
+
+// TestInfraAdmin_AuditAccess_RecordsOkResult is the positive
+// counterpart — happy-path requests log result="ok".
+func TestInfraAdmin_AuditAccess_RecordsOkResult(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	dir := t.TempDir()
+	cfg := standardCfg()
+	cfg.AccessLogPath = filepath.Join(dir, "audit.jsonl")
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	body := []byte(`{"evidence":{"authz_checked":true,"authz_allowed":true,"subject":"user:alice"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/resources", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	data, err := os.ReadFile(cfg.AccessLogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"result":"ok"`) {
+		t.Errorf("audit log missing 'ok' result for happy-path request:\n%s", string(data))
 	}
 }
 
