@@ -917,23 +917,7 @@ func driverSupportsConfigAdoption(driver interfaces.ResourceDriver) bool {
 }
 
 func isIaCNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, interfaces.ErrResourceNotFound) {
-		return true
-	}
-	var platformNotFound *platform.ResourceNotFoundError
-	if errors.As(err, &platformNotFound) {
-		return true
-	}
-	// gRPC fallback: typed adapter loses sentinel identity across the
-	// wire. The message survives as a wrapped string. Match on the
-	// literal ErrResourceNotFound.Error() value so adoption can still
-	// detect "not present yet, fall back to create" against remote
-	// plugin drivers (workflow-plugin-digitalocean v2+ database
-	// adoption is the original repro path).
-	return strings.Contains(err.Error(), interfaces.ErrResourceNotFound.Error())
+	return interfaces.IsErrResourceNotFound(err)
 }
 
 func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType string, live *interfaces.ResourceOutput) (interfaces.ResourceState, error) {
@@ -1268,7 +1252,7 @@ func compensateAfterValidationFailure(driver interfaces.ResourceDriver, rs inter
 	if rs.ProviderID != "" {
 		idRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type, ProviderID: rs.ProviderID}
 		if delErr := driver.Delete(ctx, idRef); delErr != nil {
-			if !errors.Is(delErr, interfaces.ErrResourceNotFound) {
+			if !interfaces.IsErrResourceNotFound(delErr) {
 				errs = append(errs, fmt.Errorf("driver.Delete(%s): %w", rs.ProviderID, delErr))
 			}
 		} else {
@@ -1277,7 +1261,7 @@ func compensateAfterValidationFailure(driver interfaces.ResourceDriver, rs inter
 	}
 	nameRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type}
 	if delErr := driver.Delete(ctx, nameRef); delErr != nil {
-		if !errors.Is(delErr, interfaces.ErrResourceNotFound) {
+		if !interfaces.IsErrResourceNotFound(delErr) {
 			errs = append(errs, fmt.Errorf("driver.Delete(name-only): %w", delErr))
 		}
 		return errors.Join(errs...)

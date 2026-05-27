@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -194,7 +193,7 @@ func (r *SQLTenantRegistry) Ensure(spec interfaces.TenantSpec) (interfaces.Tenan
 	if err == nil {
 		return existing, nil
 	}
-	if !errors.Is(err, interfaces.ErrResourceNotFound) {
+	if !interfaces.IsErrResourceNotFound(err) {
 		return interfaces.Tenant{}, fmt.Errorf("ensure tenant: lookup: %w", err)
 	}
 
@@ -372,7 +371,7 @@ func (r *SQLTenantRegistry) List(filter interfaces.TenantFilter) ([]interfaces.T
 func (r *SQLTenantRegistry) Update(id string, patch interfaces.TenantPatch) (interfaces.Tenant, error) {
 	// Fetch existing so we can invalidate stale domain cache keys if domains changed.
 	existing, fetchErr := r.GetByID(id)
-	if fetchErr != nil && !errors.Is(fetchErr, interfaces.ErrResourceNotFound) {
+	if fetchErr != nil && !interfaces.IsErrResourceNotFound(fetchErr) {
 		return interfaces.Tenant{}, fmt.Errorf("update tenant: fetch existing: %w", fetchErr)
 	}
 
