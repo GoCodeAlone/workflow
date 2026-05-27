@@ -60,23 +60,29 @@ modules:
 	}
 
 	pluginDir := os.Getenv("WFCTL_E2E_DO_PLUGIN_DIR")
-	args := []string{"--config", cfgPath, "--provider", "do-prod", "--type", "infra.dns", "--dry-run"}
+	// baseArgs is the canonical flag set without --dry-run; each pass
+	// builds its own slice off this base so the dry-run vs. real-run
+	// transition does NOT depend on flag ordering inside `args`. Earlier
+	// revisions mutated the last element + ran dropFlag, which broke when
+	// WFCTL_E2E_DO_PLUGIN_DIR was set (the last element became the plugin
+	// directory path, not --dry-run, and the in-place rewrite corrupted
+	// the args list).
+	baseArgs := []string{"--config", cfgPath, "--provider", "do-prod", "--type", "infra.dns"}
 	if pluginDir != "" {
-		args = append(args, "--plugin-dir", pluginDir)
+		baseArgs = append(baseArgs, "--plugin-dir", pluginDir)
 	}
-	if err := runInfraImportAll(args); err != nil {
+
+	dryRunArgs := append([]string(nil), baseArgs...)
+	dryRunArgs = append(dryRunArgs, "--dry-run")
+	if err := runInfraImportAll(dryRunArgs); err != nil {
 		t.Fatalf("e2e import-all dry-run: %v", err)
 	}
 
-	// Second pass: real import. Skip if dry-run already reported zero
-	// zones (account has no DNS zones, can't validate). Tightest contract
-	// the e2e can assert is: dry-run succeeded; reading the state directory
-	// after a real import shows non-zero files.
-	args[len(args)-1] = "--type"
-	args = append(args, "infra.dns")
-	// Drop the --dry-run flag for the real pass.
-	args = dropFlag(args, "--dry-run")
-	if err := runInfraImportAll(args); err != nil {
+	// Second pass: real import. Tightest contract the e2e can assert is:
+	// dry-run succeeded; reading the state directory after a real import
+	// shows non-zero rows (or zero if the account has no DNS zones).
+	realArgs := append([]string(nil), baseArgs...)
+	if err := runInfraImportAll(realArgs); err != nil {
 		t.Fatalf("e2e import-all real: %v", err)
 	}
 	// Snapshot the state-store contents by listing the filesystem backend.
@@ -104,18 +110,4 @@ modules:
 		}
 	}
 	t.Logf("e2e: imported %d DNS zones into local state store", len(resources))
-}
-
-// dropFlag removes the first occurrence of name from args. Helper for the
-// dry-run → real-run transition above; standard library does not expose a
-// slice-remove primitive.
-func dropFlag(args []string, name string) []string {
-	out := make([]string, 0, len(args))
-	for _, a := range args {
-		if a == name {
-			continue
-		}
-		out = append(out, a)
-	}
-	return out
 }

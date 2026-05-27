@@ -166,7 +166,7 @@ func runInfraImportAllWithDeps(ctx context.Context, provider interfaces.IaCProvi
 			// well-formed EnumerateAll output always has at least one;
 			// surface as a soft failure rather than a hard abort so a
 			// single malformed provider entry doesn't tank the run.
-			failures = append(failures, fmt.Sprintf("(unnamed): EnumerateAll output has empty zone + empty ProviderID; skipped"))
+			failures = append(failures, "(unnamed): EnumerateAll output has empty zone + empty ProviderID; skipped")
 			continue
 		}
 		if dryRun {
