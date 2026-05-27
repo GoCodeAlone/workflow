@@ -62,11 +62,22 @@ import (
 // CLI-side invocation needs. CLI operators have already been vetted by
 // filesystem ACL on the config file; the handler library's default-
 // deny guard still requires the evidence to be populated.
+//
+// Subject preference per implementer-1's T19 guidance: the OS-side
+// USER env var when present, falling back to a static "wfctl-cli"
+// sentinel. The env var is best-effort (operators can spoof it); its
+// only purpose is improving the audit-log breadcrumb for routine
+// CLI use, NOT as an authz primitive. Authz is the filesystem ACL on
+// the config file.
 func infraAdminEvidence() *adminpb.AdminAuthzEvidence {
+	subject := os.Getenv("USER")
+	if subject == "" {
+		subject = "wfctl-cli"
+	}
 	return &adminpb.AdminAuthzEvidence{
 		AuthzChecked:       true,
 		AuthzAllowed:       true,
-		Subject:            "wfctl-cli",
+		Subject:            subject,
 		GrantedPermissions: []string{"infra:read"},
 	}
 }
