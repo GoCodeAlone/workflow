@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -369,9 +370,14 @@ func importFromPulumi(srcFile, stateDir string) error {
 	return nil
 }
 
+// sanitizeStateID is a one-line delegating shim onto
+// wfctlhelpers.SanitizeStateID. The algorithm moved to the shared helper
+// per docs/plans/2026-05-27-infra-admin-dynamic.md Task 1 + code-reviewer
+// M-3 follow-up so cmd/wfctl and the host-side infra.admin module cannot
+// drift on the on-disk filename scheme (cross-path mutual readability is
+// a contract — see cmd/wfctl/state_compat_test.go).
 func sanitizeStateID(id string) string {
-	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_")
-	return replacer.Replace(id)
+	return wfctlhelpers.SanitizeStateID(id)
 }
 
 func generateLineage() string {

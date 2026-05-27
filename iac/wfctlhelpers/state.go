@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -202,7 +201,7 @@ func (s *FSStateStore) ListResources(_ context.Context) ([]interfaces.ResourceSt
 }
 
 func (s *FSStateStore) GetResource(ctx context.Context, name string) (*interfaces.ResourceState, error) {
-	fname := filepath.Join(s.dir, sanitizeStateID(name)+".json")
+	fname := filepath.Join(s.dir, SanitizeStateID(name)+".json")
 	data, err := os.ReadFile(fname)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -241,7 +240,7 @@ func (s *FSStateStore) SaveResource(_ context.Context, state interfaces.Resource
 	if err != nil {
 		return fmt.Errorf("save state %q: marshal: %w", state.ID, err)
 	}
-	fname := filepath.Join(s.dir, sanitizeStateID(state.ID)+".json")
+	fname := filepath.Join(s.dir, SanitizeStateID(state.ID)+".json")
 	if err := os.WriteFile(fname, data, 0o600); err != nil {
 		return fmt.Errorf("save state %q: write: %w", state.ID, err)
 	}
@@ -249,7 +248,7 @@ func (s *FSStateStore) SaveResource(_ context.Context, state interfaces.Resource
 }
 
 func (s *FSStateStore) DeleteResource(_ context.Context, name string) error {
-	fname := filepath.Join(s.dir, sanitizeStateID(name)+".json")
+	fname := filepath.Join(s.dir, SanitizeStateID(name)+".json")
 	if err := os.Remove(fname); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -301,10 +300,15 @@ func (s *FSStateStore) Close() error { return nil }
 // (which uses {SaveResource/...} with interfaces.ResourceState records).
 // Out-of-subset methods (SavePlan, GetPlan, Lock with TTL) panic per design
 // doc cycle-5 row 4.
+//
+// Close-safety: Close nils mgr after Shutdown so a second Close is a
+// no-op. Per code-reviewer M-2 follow-up, this safety relies on Close
+// being called from a single goroutine (consistent with modular's Stop
+// lifecycle); we deliberately do not add a mutex.
 type moduleStoreAdapter struct {
-	inner module.IaCStateStore
-	mu    sync.Mutex
-	mgr   *external.ExternalPluginManager // non-nil for plugin-served backends; Shutdown on Close
+	inner  module.IaCStateStore
+	mgr    *external.ExternalPluginManager // non-nil for plugin-served backends; Shutdown on Close
+	closed bool
 }
 
 func wrapModuleStore(inner module.IaCStateStore) *moduleStoreAdapter {
@@ -354,8 +358,10 @@ func (a *moduleStoreAdapter) Lock(_ context.Context, _ string, _ time.Duration) 
 }
 
 func (a *moduleStoreAdapter) Close() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	if a.closed {
+		return nil
+	}
+	a.closed = true
 	if a.mgr != nil {
 		a.mgr.Shutdown()
 		a.mgr = nil
@@ -403,9 +409,11 @@ func resolvePluginStore(ctx context.Context, backend string, cfg map[string]any,
 	return nil, fmt.Errorf("iac.state backend %q is plugin-served but no installed plugin in %s advertises it", backend, pluginDir)
 }
 
-// loadPluginStateBackendClients is exposed as a package-level variable so
-// tests can substitute a fake plugin loader without touching real plugin
-// binaries. The default loads via the external plugin manager.
+// loadPluginStateBackendClients is a test seam: tests substitute this to
+// avoid loading real plugin binaries when exercising the spaces/s3/gcs
+// backend code paths. Production callers MUST NOT mutate it; the default
+// loads via the external plugin manager and that is the only behavior
+// users rely on.
 var loadPluginStateBackendClients = func(mgr *external.ExternalPluginManager, pluginName, backend string) (map[string]pb.IaCStateBackendClient, error) {
 	adapter, loadErr := mgr.LoadPlugin(pluginName)
 	if loadErr != nil {
@@ -467,21 +475,16 @@ func stateBackendPluginCandidates(backend string, entries []os.DirEntry) []strin
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-// sanitizeStateID returns a filesystem-safe filename for a resource ID.
-// The same algorithm is used by cmd/wfctl/infra_state.go:sanitizeStateID
-// so files written by either path collide on the same key.
-func sanitizeStateID(id string) string {
-	const allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._"
-	var b strings.Builder
-	b.Grow(len(id))
-	for _, r := range id {
-		if strings.ContainsRune(allowed, r) {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('_')
-		}
-	}
-	return b.String()
+// SanitizeStateID returns a filesystem-safe filename for a resource ID by
+// replacing the four path-hostile characters (/, \, :, *) with underscore.
+// Matches cmd/wfctl/infra_state.go:sanitizeStateID byte-for-byte so files
+// written via either path are mutually readable. cmd/wfctl's version is a
+// one-line shim that delegates here. Code-reviewer M-3 caught an
+// earlier draft that used a stricter allowlist; this version honors the
+// existing on-disk format.
+func SanitizeStateID(id string) string {
+	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_")
+	return replacer.Replace(id)
 }
 
 func stateRecordToResource(r StateRecord) interfaces.ResourceState {
