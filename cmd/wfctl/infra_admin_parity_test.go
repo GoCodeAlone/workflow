@@ -128,8 +128,10 @@ func TestInfraAdminCLI_ListTypesOutput_RoundTrip(t *testing.T) {
 	original := &adminpb.AdminListResourceTypesOutput{
 		Types: []*adminpb.AdminResourceTypeMetadata{
 			{
-				Type:             "infra.vpc",
-				ConfigMessageFqn: "workflow.plugin.infra.v1.VPCConfig",
+				Type: "infra.vpc",
+				// Plural "plugins" + acronym-preserving VPC per T6 F2 fix
+				// (commit 8ac54ca84). Matches real handler output now.
+				ConfigMessageFqn: "workflow.plugins.infra.v1.VPCConfig",
 				Fields: []*adminpb.AdminFieldSpec{
 					{Name: "provider", Kind: "enum_dynamic", EnumSource: "providers", Required: true},
 					{Name: "cidr", Kind: "string", Required: true},
