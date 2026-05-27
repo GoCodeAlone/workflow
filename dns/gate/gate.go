@@ -86,13 +86,16 @@ func Gate(ctx context.Context, reader policy.DNSPolicyReader, zone, name, record
 	return NewCachingGate().Check(ctx, reader, zone, name, recordType, owner)
 }
 
-// DriverReader adapts an interfaces.ResourceDriver to the
-// policy.DNSPolicyReader interface so the Gate can read TXT records via
-// the strict-contract driver path. Scans the zone's Outputs["records"]
-// for TXT records matching the given name. Read-only: UpsertTXT delegates
-// to a sister mutate path (Driver.Update with a synthesized spec); kept
-// out of this adapter because the gate only ever reads. The dns-policy
-// command surface owns the write path separately.
+// DriverReader adapts an interfaces.ResourceDriver to the full
+// policy.DNSPolicyReader interface so the Gate can read TXT records AND
+// the dns-policy mutating commands (set / transfer-ownership) can write
+// them — all via the strict-contract driver path (no libdns dependency).
+//
+// GetTXT scans Outputs["records"] for TXT records matching the given
+// name. UpsertTXT issues a Driver.Update against a synthesized
+// ResourceSpec whose records list replaces all TXT entries at the target
+// name. Both halves are scoped narrowly to the policy-TXT use case; the
+// general DNS-record CRUD surface is `wfctl infra apply`.
 type DriverReader struct {
 	// Driver is the resolved ResourceDriver for resource type "infra.dns".
 	// Caller is responsible for getting the right driver (via
@@ -171,3 +174,100 @@ func matchTXT(rec map[string]any, recordName string) bool {
 	n, _ := rec["name"].(string)
 	return t == "TXT" && n == recordName
 }
+
+// UpsertTXT implements the write half of policy.DNSPolicyReader so
+// DriverReader satisfies the full interface used by the wfctl dns-policy
+// mutating commands AND can be passed to CachingGate.Check (which takes a
+// DNSPolicyReader, not a narrower Reader sub-interface).
+//
+// Strategy: Read the current zone via Driver.Read, rewrite the records
+// slice replacing all TXT entries at `name` with the supplied values (one
+// TXT RR per value), then call Driver.Update with a synthesized
+// ResourceSpec carrying the new records list.
+//
+// Limitations: the synthesized ResourceSpec carries only `domain` +
+// `records` fields. Providers requiring additional zone-level config on
+// Update (e.g. CF "type" / "settings") may reject. The narrow scope is
+// intentional — this adapter exists to manage the policy TXT specifically,
+// not to be a general DNS-record CRUD surface (the `wfctl infra apply`
+// path covers general record CRUD via config-declared records).
+func (r *DriverReader) UpsertTXT(ctx context.Context, name string, values []string, ttl int) error {
+	if r.Driver == nil {
+		return fmt.Errorf("dnsgate.DriverReader: nil Driver")
+	}
+	if r.Zone == "" {
+		return fmt.Errorf("dnsgate.DriverReader: empty Zone")
+	}
+	out, err := r.Driver.Read(ctx, interfaces.ResourceRef{Type: "infra.dns", ProviderID: r.Zone})
+	if err != nil {
+		return fmt.Errorf("dnsgate.UpsertTXT: read current zone: %w", err)
+	}
+	var records []map[string]any
+	if out != nil {
+		records = recordsToMaps(out.Outputs["records"])
+	}
+	updated := upsertTXTInRecords(records, name, values, ttl)
+	spec := interfaces.ResourceSpec{
+		Name: r.Zone,
+		Type: "infra.dns",
+		Config: map[string]any{
+			"domain":  r.Zone,
+			"records": updated,
+		},
+	}
+	_, err = r.Driver.Update(ctx, interfaces.ResourceRef{Type: "infra.dns", ProviderID: r.Zone}, spec)
+	if err != nil {
+		return fmt.Errorf("dnsgate.UpsertTXT: update zone: %w", err)
+	}
+	return nil
+}
+
+// recordsToMaps normalises both concrete-type variants of the records
+// slice ([]map[string]any and []any-of-map) into the typed form needed
+// for Update.
+func recordsToMaps(records any) []map[string]any {
+	switch v := records.(type) {
+	case []map[string]any:
+		return append([]map[string]any(nil), v...)
+	case []any:
+		out := make([]map[string]any, 0, len(v))
+		for _, raw := range v {
+			if rec, ok := raw.(map[string]any); ok {
+				out = append(out, rec)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// upsertTXTInRecords removes all TXT records at `name` from the slice and
+// appends one fresh TXT record per value. Idempotent on the policy shape:
+// re-running with the same values produces an equivalent records list
+// (modulo slice order).
+func upsertTXTInRecords(records []map[string]any, name string, values []string, ttl int) []map[string]any {
+	out := make([]map[string]any, 0, len(records))
+	for _, rec := range records {
+		t, _ := rec["type"].(string)
+		n, _ := rec["name"].(string)
+		if t == "TXT" && n == name {
+			continue // drop existing TXT at this name; replaced below
+		}
+		out = append(out, rec)
+	}
+	for _, v := range values {
+		out = append(out, map[string]any{
+			"type": "TXT",
+			"name": name,
+			"data": v,
+			"ttl":  ttl,
+		})
+	}
+	return out
+}
+
+// Compile-time assertion that *DriverReader satisfies the full
+// policy.DNSPolicyReader contract (GetTXT + UpsertTXT). Catches a
+// regression where one half of the interface gets accidentally removed
+// (the failure mode that broke PR 7's first push).
+var _ policy.DNSPolicyReader = (*DriverReader)(nil)
