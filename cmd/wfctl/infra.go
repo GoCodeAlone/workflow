@@ -74,6 +74,8 @@ func runInfra(args []string) error {
 		return runInfraDestroy(args[1:])
 	case "import":
 		return runInfraImport(args[1:])
+	case "import-all":
+		return runInfraImportAll(args[1:])
 	case "state":
 		return runInfraState(args[1:])
 	case "logs":
@@ -126,6 +128,7 @@ Actions:
   drift          Detect configuration drift
   destroy        Tear down infrastructure
   import         Import an existing cloud resource into state
+  import-all     Bulk-import every resource of --type from a provider via EnumerateAll
   state          Manage IaC state (list, export, import)
   logs           Capture provider logs for an infrastructure resource
   outputs        Print captured resource outputs from state
