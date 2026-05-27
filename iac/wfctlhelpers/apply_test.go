@@ -317,6 +317,74 @@ func (p *selectiveFakeProvider) ResourceDriver(typ string) (interfaces.ResourceD
 
 // TestApplyPlan_CtxCancellationStopsLoop verifies the loop respects
 // context cancellation between actions. Drivers may honor ctx individually,
+// TestApplyPlan_OnBeforeAction_abortsFatal pins the OnBeforeAction hook
+// contract: a non-nil error from OnBeforeAction is FATAL — it aborts the
+// per-action loop with no further actions dispatched, no further hook
+// invocations, and a top-level error wrapping the hook's error so callers
+// see the policy/gate denial unambiguously. Mirrors the design's Phase 3a
+// "OnBeforeAction error tier specified as FATAL" decision (cycle 3.5 I-NEW-2).
+func TestApplyPlan_OnBeforeAction_abortsFatal(t *testing.T) {
+	plan := &interfaces.IaCPlan{
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: spec("a", "infra.dns")},
+			{Action: "create", Resource: spec("b", "infra.dns")},
+		},
+	}
+	fp := newFakeProvider()
+	var beforeCalls int
+	hooks := ApplyPlanHooks{
+		OnBeforeAction: func(_ context.Context, a interfaces.PlanAction) error {
+			beforeCalls++
+			if a.Resource.Name == "a" {
+				return errors.New("policy denied: a is not delegated for this owner")
+			}
+			return nil
+		},
+	}
+	_, err := ApplyPlanWithHooks(context.Background(), fp, plan, hooks)
+	if err == nil || !strings.Contains(err.Error(), "policy denied") {
+		t.Fatalf("expected top-level error wrapping policy denial; got %v", err)
+	}
+	if beforeCalls != 1 {
+		t.Errorf("OnBeforeAction calls = %d; want 1 (abort on first failure, second action not reached)", beforeCalls)
+	}
+	if fp.driver.createCount != 0 {
+		t.Errorf("createCount = %d; want 0 (fatal hook must abort before any driver call)", fp.driver.createCount)
+	}
+}
+
+// TestApplyPlan_OnBeforeAction_nilAllowsAll pins the success path: when
+// OnBeforeAction returns nil for every action, the hook is non-blocking and
+// the apply proceeds as if no hook were wired. Catches the regression where
+// a nil-return path is misinterpreted as failure due to a stale fatalErr
+// assignment.
+func TestApplyPlan_OnBeforeAction_nilAllowsAll(t *testing.T) {
+	plan := &interfaces.IaCPlan{
+		Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: spec("a", "infra.dns")},
+			{Action: "create", Resource: spec("b", "infra.dns")},
+		},
+	}
+	fp := newFakeProvider()
+	var beforeCalls int
+	hooks := ApplyPlanHooks{
+		OnBeforeAction: func(_ context.Context, _ interfaces.PlanAction) error {
+			beforeCalls++
+			return nil
+		},
+	}
+	_, err := ApplyPlanWithHooks(context.Background(), fp, plan, hooks)
+	if err != nil {
+		t.Fatalf("OnBeforeAction returning nil should not abort apply; got %v", err)
+	}
+	if beforeCalls != 2 {
+		t.Errorf("OnBeforeAction calls = %d; want 2 (one per action)", beforeCalls)
+	}
+	if fp.driver.createCount != 2 {
+		t.Errorf("createCount = %d; want 2 (every action dispatches when hook returns nil)", fp.driver.createCount)
+	}
+}
+
 // but the loop itself must check at the iteration boundary so a
 // long-running multi-action apply terminates promptly on Ctrl-C / deadline.
 func TestApplyPlan_CtxCancellationStopsLoop(t *testing.T) {

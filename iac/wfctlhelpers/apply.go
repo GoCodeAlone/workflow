@@ -89,6 +89,25 @@ import (
 // successfully mutates cloud-side state. Hooks let wfctl persist state at the
 // action boundary instead of waiting for the whole plan to finish.
 type ApplyPlanHooks struct {
+	// OnBeforeAction fires PRE-DISPATCH for every PlanAction, after the
+	// per-iteration ctx.Err() check but before JIT substitution / driver
+	// resolution / cloud-side mutation. The intended use case is policy /
+	// ownership gates that can deny a record-level change before any
+	// cloud-side state moves (see workflow/dns/gate + the wfctl dns-policy
+	// surface).
+	//
+	// FATAL semantics (cycle 3.5 I-NEW-2): a non-nil return aborts the
+	// per-action loop with a wrapped error — no further actions dispatch,
+	// no further hook invocations fire, and the top-level
+	// ApplyPlanWithHooks return value is the wrapped error. This is NOT
+	// best-effort. Operators rely on "policy denied" being a hard-stop;
+	// silently continuing past a gate denial would defeat the purpose of
+	// having a gate.
+	//
+	// Distinct from OnResourceApplied / OnResourceDeleted (post-dispatch,
+	// best-effort persistence hooks) — those record state AFTER cloud-side
+	// work; OnBeforeAction decides whether cloud-side work happens at all.
+	OnBeforeAction    func(context.Context, interfaces.PlanAction) error
 	OnResourceApplied func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error
 	OnResourceDeleted func(context.Context, interfaces.PlanAction) error
 	// OnPlanComplete fires once after the per-action loop reaches its
@@ -316,6 +335,22 @@ func applyPlanWithEnvProviderAndHooks(
 				iterStatus = statusForPreDispatchSkip()
 				fatalErr = err
 				return
+			}
+			// OnBeforeAction (FATAL): pre-dispatch policy / ownership gate.
+			// Fires AFTER ctx.Err() (cancellation always wins over policy)
+			// but BEFORE jit substitution + driver resolution + cloud-side
+			// mutation. A non-nil return aborts the whole apply; subsequent
+			// actions never see OnBeforeAction. Per cycle 3.5 I-NEW-2 the
+			// error tier is hard-stop, not best-effort — DNS ownership
+			// denials are exactly the kind of "must not happen" condition
+			// that silently continuing would mask.
+			if hooks.OnBeforeAction != nil {
+				if err := hooks.OnBeforeAction(ctx, action); err != nil {
+					fatalErr = fmt.Errorf("%s/%s: apply aborted by OnBeforeAction hook: %w", action.Resource.Type, action.Resource.Name, err)
+					iterErr = err
+					iterStatus = statusForPreDispatchSkip()
+					return
+				}
 			}
 			// Per-action JIT substitution — resolve ${VAR} / ${MODULE.field}
 			// / ${MODULE.id} in action.Resource.Config against
