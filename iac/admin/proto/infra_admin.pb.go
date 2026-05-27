@@ -1134,10 +1134,26 @@ type AdminGenerateConfigInput struct {
 	ResourceType   string                 `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
 	ResourceName   string                 `protobuf:"bytes,2,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
 	ProviderModule string                 `protobuf:"bytes,3,opt,name=provider_module,json=providerModule,proto3" json:"provider_module,omitempty"`
-	FieldValues    map[string]string      `protobuf:"bytes,4,rep,name=field_values,json=fieldValues,proto3" json:"field_values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Evidence       *AdminAuthzEvidence    `protobuf:"bytes,5,opt,name=evidence,proto3" json:"evidence,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// field_values carries the form-builder submission keyed by
+	// AdminFieldSpec.name. Single-valued fields (string/enum/bool/
+	// number) are encoded as their literal string. Array-shaped
+	// fields (kind ∈ {array_string, array_object, array_number,
+	// array_enum_dynamic}) are JSON-encoded — e.g.
+	//
+	//	field_values["ingress"] = "[\"rule a\", \"rule b, c\"]"
+	//
+	// — so values containing commas, quotes, or other delimiters
+	// survive the wire losslessly. The server decodes via
+	// json.Unmarshal in iac/admin/handler/generate_config.go.
+	//
+	// Cross-task contract locked 2026-05-27 between T6 (server) +
+	// T10-T12 (form-builder JS). Defensive fallback in the handler
+	// wraps a non-JSON literal into a one-element array so a
+	// malformed UI submission doesn't crash the server.
+	FieldValues   map[string]string   `protobuf:"bytes,4,rep,name=field_values,json=fieldValues,proto3" json:"field_values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Evidence      *AdminAuthzEvidence `protobuf:"bytes,5,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AdminGenerateConfigInput) Reset() {

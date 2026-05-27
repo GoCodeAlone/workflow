@@ -219,6 +219,20 @@ message AdminGenerateConfigInput {
   string resource_type   = 1;
   string resource_name   = 2;
   string provider_module = 3;
+  // field_values carries the form-builder submission keyed by
+  // AdminFieldSpec.name. Single-valued fields (string/enum/bool/
+  // number) are encoded as their literal string. Array-shaped
+  // fields (kind ∈ {array_string, array_object, array_number,
+  // array_enum_dynamic}) are JSON-encoded — e.g.
+  //   field_values["ingress"] = "[\"rule a\", \"rule b, c\"]"
+  // — so values containing commas, quotes, or other delimiters
+  // survive the wire losslessly. The server decodes via
+  // json.Unmarshal in iac/admin/handler/generate_config.go.
+  //
+  // Cross-task contract locked 2026-05-27 between T6 (server) +
+  // T10-T12 (form-builder JS). Defensive fallback in the handler
+  // wraps a non-JSON literal into a one-element array so a
+  // malformed UI submission doesn't crash the server.
   map<string, string> field_values = 4;
   AdminAuthzEvidence evidence = 5;
   reserved 6 to 99, 101 to 199;
