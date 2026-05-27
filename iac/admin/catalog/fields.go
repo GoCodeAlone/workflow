@@ -60,12 +60,16 @@ func init() {
 					Description: "Fully-qualified image tag, e.g. registry.example.com/svc:1.4.2",
 				},
 				{
+					// MinCount/MaxCount on array_number FieldSpec applies as the
+					// per-element HTML5 min/max in new.js (NOT as array length —
+					// that's only seeded from MinCount). Range is the TCP/UDP
+					// port range, NOT a count of ports. Spec-reviewer F1.
 					Name:        "ports",
 					Label:       "Container ports",
 					Kind:        "array_number",
 					ElementKind: "number",
 					MinCount:    1,
-					MaxCount:    20,
+					MaxCount:    65535,
 					Description: "TCP/UDP listen ports (1-65535)",
 				},
 				{
@@ -206,20 +210,30 @@ func init() {
 					DefaultValue: "internet-facing",
 				},
 				{
+					// Same overload caveat as container_service.ports — range
+					// is the TCP port range, applied as per-element HTML5
+					// min/max by new.js. Spec-reviewer F1.
 					Name:        "ports",
 					Label:       "Listener ports",
 					Kind:        "array_number",
 					ElementKind: "number",
 					MinCount:    1,
-					MaxCount:    20,
+					MaxCount:    65535,
 					Description: "TCP listener ports (1-65535)",
 				},
 			},
 
 			// ---- infra.dns → DNSConfig (proto §85) ----
+			//
+			// Region is intentionally omitted: design §FieldSpec Catalog
+			// (line 427) lists DNSConfig fields as provider/zone/record/
+			// target — DNS is a global-zone resource for most providers
+			// (Route53 global, DO DNS, CF DNS) and the proto's region
+			// field exists only because every InfraResourceConfig
+			// inherits region. Form-builder skips it to avoid prompting
+			// users for a value the driver ignores. Spec-reviewer F2.
 			"infra.dns": {
 				providerField(),
-				regionField(),
 				{
 					Name:        "zone",
 					Label:       "DNS zone",

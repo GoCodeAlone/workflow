@@ -67,10 +67,19 @@ func TestCatalog_AllExpectedTypesRegistered(t *testing.T) {
 	}
 }
 
+// regionOptionalTypes lists types where the catalog deliberately omits
+// the universal region field because the underlying resource is
+// region-less in the design table (DNS is global per most providers).
+// See infra.dns header comment in fields.go (spec-reviewer F2).
+var regionOptionalTypes = map[string]bool{
+	"infra.dns": true,
+}
+
 // TestCatalog_EveryTypeHasProviderAndRegion confirms the universal
-// (provider, region) prefix is wired on every entry. The form-builder
-// JS in new.js relies on this convention for dependent-dropdown
-// wiring (region depends_on provider).
+// (provider, region) prefix is wired on every entry except those
+// in regionOptionalTypes. The form-builder JS in new.js relies on
+// the provider field being present everywhere (enum_dynamic source
+// for dependent dropdowns); region presence is per-design.
 func TestCatalog_EveryTypeHasProviderAndRegion(t *testing.T) {
 	cat := catalog.New()
 	for _, typeName := range cat.AllTypes() {
@@ -95,8 +104,8 @@ func TestCatalog_EveryTypeHasProviderAndRegion(t *testing.T) {
 		if !hasProvider {
 			t.Errorf("%s: missing required `provider` field", typeName)
 		}
-		if !hasRegion {
-			t.Errorf("%s: missing required `region` field", typeName)
+		if !hasRegion && !regionOptionalTypes[typeName] {
+			t.Errorf("%s: missing `region` field (not in regionOptionalTypes allowlist)", typeName)
 		}
 	}
 }
