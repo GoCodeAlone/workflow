@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build build-wfctl
+.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build build-wfctl vendor-infra-proto
 
 # Common benchmark flags
 BENCH_FLAGS = -bench=. -benchmem -run=^$$ -timeout=30m
@@ -90,6 +90,24 @@ run-admin: build
 # Build container image with ko (requires ko: brew install ko)
 ko-build:
 	KO_DOCKER_REPO=ko.local ko build ./cmd/server --bare --platform=linux/$(shell go env GOARCH)
+
+# Refresh the vendored workflow-plugin-infra proto descriptor used by
+# the FieldSpec catalog parity test (iac/admin/catalog/
+# catalog_proto_parity_test.go). Run on every minor upstream
+# workflow-plugin-infra release; then update the `Source version:`
+# header inside iac/admin/testdata/infra.proto to match the new tag.
+#
+# Assumes workflow-plugin-infra is checked out as a workspace sibling
+# (../workflow-plugin-infra) per the workspace convention.
+vendor-infra-proto:
+	@if [ ! -f ../workflow-plugin-infra/internal/contracts/infra.proto ]; then \
+		echo "vendor-infra-proto: ../workflow-plugin-infra/internal/contracts/infra.proto not found"; \
+		exit 1; \
+	fi
+	@printf '// Vendored from GoCodeAlone/workflow-plugin-infra/internal/contracts/infra.proto\n// Source version: TODO-update-tag (sourced %s)\n// Refresh via: make vendor-infra-proto\n// Drift detection: catalog_proto_parity_test.go\n\n' "$$(date +%Y-%m-%d)" > iac/admin/testdata/infra.proto
+	@cat ../workflow-plugin-infra/internal/contracts/infra.proto >> iac/admin/testdata/infra.proto
+	@echo "Vendored infra.proto refreshed at iac/admin/testdata/infra.proto."
+	@echo "  -> update the 'Source version:' header to the upstream tag now."
 
 # Clean build artifacts
 clean:
