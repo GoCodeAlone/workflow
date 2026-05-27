@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build build-wfctl vendor-infra-proto
+.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build build-wfctl vendor-infra-proto test-integration-admin
 
 # Common benchmark flags
 BENCH_FLAGS = -bench=. -benchmem -run=^$$ -timeout=30m
@@ -51,6 +51,24 @@ lint:
 	else \
 		echo "workflow#699 guard: rpc Apply correctly absent"; \
 	fi
+
+# Run the T17 host-module integration test that exercises the live
+# workflow-plugin-admin gRPC plugin subprocess. The test itself
+# (module/infra_admin_integration_test.go) probes for the sibling
+# repo at ../workflow-plugin-admin and skips when absent — this
+# target makes the dependency explicit + lets CI pass an env var
+# to point at a pre-checked-out clone. Per
+# docs/plans/2026-05-27-infra-admin-dynamic.md Task 17.
+#
+# Usage:
+#   make test-integration-admin                    # uses ../workflow-plugin-admin
+#   WORKFLOW_PLUGIN_ADMIN_PATH=/path make ...      # explicit override
+test-integration-admin:
+	@if [ ! -f "$${WORKFLOW_PLUGIN_ADMIN_PATH:-../workflow-plugin-admin}/go.mod" ]; then \
+		echo "workflow-plugin-admin not found at $${WORKFLOW_PLUGIN_ADMIN_PATH:-../workflow-plugin-admin}; set WORKFLOW_PLUGIN_ADMIN_PATH or checkout the sibling repo"; \
+		exit 1; \
+	fi
+	GOWORK=off go test -run TestInfraAdmin_IntegrationWithLiveAdminPlugin -v ./module/
 
 # Format code
 fmt:
