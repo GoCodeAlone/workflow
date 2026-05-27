@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Draft New Infra Resource</title>
+  <link rel="stylesheet" href="/admin/infra-admin/styles.css">
+</head>
+<body>
+  <h1>Draft New Resource</h1>
+
+  <form id="new-resource-form" autocomplete="off">
+    <div class="form-controls">
+      <label class="field-label" for="type">Resource type</label>
+      <select id="type" name="type" required>
+        <option value="">— select —</option>
+      </select>
+      <label class="field-label" for="name">Resource name</label>
+      <input id="name" name="name" type="text" required pattern="[a-z][a-z0-9_-]*" title="lowercase letter, then letters/digits/_/-">
+    </div>
+
+    <div id="fields"><!-- typed fields injected by new.js --></div>
+
+    <div class="form-controls">
+      <button id="submit" type="submit">Generate YAML</button>
+      <button id="reset" type="reset">Reset</button>
+    </div>
+  </form>
+
+  <section id="output">
+    <h2>Generated YAML</h2>
+    <pre id="yaml-output"></pre>
+    <div class="form-controls">
+      <button id="copy" type="button" disabled>Copy to clipboard</button>
+    </div>
+    <ul id="validation-errors" class="redacted"></ul>
+  </section>
+
+  <div id="error" role="alert" aria-live="polite"></div>
+  <script src="/admin/infra-admin/new.js"></script>
+</body>
+</html>

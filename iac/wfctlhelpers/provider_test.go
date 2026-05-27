@@ -1,0 +1,296 @@
+package wfctlhelpers_test
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
+	"github.com/GoCodeAlone/workflow/interfaces"
+)
+
+// stubProvider is a minimal interfaces.IaCProvider implementation used by
+// the provider-lift tests so they don't need to spawn a real plugin
+// subprocess. Only Name() is exercised; the rest exist to satisfy the
+// interface and return zero values.
+type stubProvider struct{ name string }
+
+func (s *stubProvider) Name() string                                         { return s.name }
+func (s *stubProvider) Version() string                                      { return "test" }
+func (s *stubProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
+func (s *stubProvider) Capabilities() []interfaces.IaCCapabilityDeclaration  { return nil }
+func (s *stubProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return nil, errors.New("stub: Plan not implemented")
+}
+func (s *stubProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	return nil, errors.New("stub: Destroy not implemented")
+}
+func (s *stubProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, errors.New("stub: Status not implemented")
+}
+func (s *stubProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	return nil, errors.New("stub: DetectDrift not implemented")
+}
+func (s *stubProvider) Import(_ context.Context, _, _ string) (*interfaces.ResourceState, error) {
+	return nil, errors.New("stub: Import not implemented")
+}
+func (s *stubProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, errors.New("stub: ResolveSizing not implemented")
+}
+func (s *stubProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return nil, errors.New("stub: ResourceDriver not implemented")
+}
+func (s *stubProvider) SupportedCanonicalKeys() []string { return nil }
+func (s *stubProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (s *stubProvider) Close() error { return nil }
+
+type nopCloser struct{ closed bool }
+
+func (n *nopCloser) Close() error { n.closed = true; return nil }
+
+// installFakeResolver swaps wfctlhelpers.Resolver to a fake for the
+// duration of the test, restoring the previous resolver on cleanup. The
+// fake returns a stubProvider whose Name reflects the providerType
+// argument so the test can assert which iac.provider module won.
+func installFakeResolver(t *testing.T) (recorded *[]string) {
+	t.Helper()
+	calls := []string{}
+	orig := wfctlhelpers.Resolver
+	wfctlhelpers.Resolver = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		calls = append(calls, providerType)
+		return &stubProvider{name: providerType}, &nopCloser{}, nil
+	}
+	t.Cleanup(func() { wfctlhelpers.Resolver = orig })
+	return &calls
+}
+
+func TestLoadIaCProviderFromConfig_StubProvider(t *testing.T) {
+	calls := installFakeResolver(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "stub.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`modules:
+  - name: stub-provider
+    type: iac.provider
+    config:
+      provider: stub
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, closer, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadIaCProviderFromConfig: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("provider is nil with nil error")
+	}
+	if closer == nil {
+		t.Fatal("closer is nil; expected the fake's nopCloser")
+	}
+	defer closer.Close()
+	if provider.Name() != "stub" {
+		t.Errorf("provider.Name() = %q, want %q", provider.Name(), "stub")
+	}
+	if len(*calls) != 1 || (*calls)[0] != "stub" {
+		t.Errorf("resolver invocations = %v, want [stub]", *calls)
+	}
+}
+
+// TestLoadIaCProviderFromConfig_NoProviderModule returns (nil, nil, nil)
+// when the config has no iac.provider module — the caller treats this
+// as "no provider available" rather than an error. Mirrors the
+// wfctl-internal behavior.
+func TestLoadIaCProviderFromConfig_NoProviderModule(t *testing.T) {
+	installFakeResolver(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "no-provider.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`modules:
+  - name: web
+    type: http.server
+    config: {}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, closer, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadIaCProviderFromConfig: %v", err)
+	}
+	if provider != nil {
+		t.Errorf("provider = %v, want nil", provider)
+	}
+	if closer != nil {
+		t.Errorf("closer = %v, want nil", closer)
+	}
+}
+
+// TestLoadIaCProviderFromConfig_FirstMatchWins documents the
+// first-match-only invariant the design doc cycle-4 reviewer flagged
+// (Important #6 → resolved by adding LoadAllIaCProvidersFromConfig in
+// Task 3). Pinning the behavior here prevents accidental reordering of
+// the loop or change in tie-break semantics.
+func TestLoadIaCProviderFromConfig_FirstMatchWins(t *testing.T) {
+	calls := installFakeResolver(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "multi.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`modules:
+  - name: first
+    type: iac.provider
+    config:
+      provider: alpha
+  - name: second
+    type: iac.provider
+    config:
+      provider: beta
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, closer, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadIaCProviderFromConfig: %v", err)
+	}
+	defer closer.Close()
+	if provider.Name() != "alpha" {
+		t.Errorf("first-match-wins: got %q, want %q", provider.Name(), "alpha")
+	}
+	if len(*calls) != 1 {
+		t.Errorf("resolver called %d times, want exactly 1 (first match short-circuits)", len(*calls))
+	}
+}
+
+// TestLoadIaCProviderFromConfig_LoadError surfaces config-load errors
+// with context so the caller can diagnose missing/malformed configs.
+func TestLoadIaCProviderFromConfig_LoadError(t *testing.T) {
+	installFakeResolver(t)
+	_, _, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), filepath.Join(t.TempDir(), "missing.yaml"))
+	if err == nil {
+		t.Fatal("expected error for missing config, got nil")
+	}
+}
+
+// TestLoadIaCProviderFromConfig_NoResolverRegistered guards the default
+// resolver returns a clear error when no init() has registered a real
+// loader. Without this, an empty Resolver field would panic with a
+// nil-func-call, which is far less actionable than the wfctlhelpers:
+// prefix error.
+func TestLoadIaCProviderFromConfig_NoResolverRegistered(t *testing.T) {
+	orig := wfctlhelpers.Resolver
+	wfctlhelpers.Resolver = wfctlhelpers.UnregisteredResolver
+	t.Cleanup(func() { wfctlhelpers.Resolver = orig })
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "stub.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`modules:
+  - name: stub-provider
+    type: iac.provider
+    config:
+      provider: stub
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), cfgPath)
+	if err == nil {
+		t.Fatal("expected error from unregistered resolver, got nil")
+	}
+}
+
+// TestLoadIaCProviderFromConfig_ExpandsEnvInModuleConfig pins the
+// invariant that config.ExpandEnvInMap is applied to the module config
+// BEFORE the Resolver is dispatched — so ${VAR} references in the YAML
+// resolve at load time. Per code-reviewer I-1 on commit 63129d65f:
+// env-var expansion is a known regression footgun in this codebase
+// (see MEMORY.md BMW os.ExpandEnv 9-layer-bug-chain), so the
+// expansion-step needs an explicit test guard.
+//
+// Also satisfies code-reviewer M-2 by capturing the full cfg map the
+// fake Resolver received and asserting flow-through.
+func TestLoadIaCProviderFromConfig_ExpandsEnvInModuleConfig(t *testing.T) {
+	var receivedCfg map[string]any
+	var receivedType string
+	orig := wfctlhelpers.Resolver
+	wfctlhelpers.Resolver = func(_ context.Context, providerType string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		receivedType = providerType
+		receivedCfg = cfg
+		return &stubProvider{name: providerType}, &nopCloser{}, nil
+	}
+	t.Cleanup(func() { wfctlhelpers.Resolver = orig })
+
+	t.Setenv("WFCTLHELPERS_TEST_REGION", "nyc3")
+	t.Setenv("WFCTLHELPERS_TEST_TOKEN", "tok-xyz")
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "envrefs.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      region: ${WFCTLHELPERS_TEST_REGION}
+      token: ${WFCTLHELPERS_TEST_TOKEN}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, closer, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadIaCProviderFromConfig: %v", err)
+	}
+	if closer != nil {
+		defer closer.Close()
+	}
+
+	if receivedType != "digitalocean" {
+		t.Errorf("Resolver got provider type %q, want %q", receivedType, "digitalocean")
+	}
+	if got, _ := receivedCfg["region"].(string); got != "nyc3" {
+		t.Errorf("region = %q, want %q — ExpandEnvInMap not applied before Resolver dispatch", got, "nyc3")
+	}
+	if got, _ := receivedCfg["token"].(string); got != "tok-xyz" {
+		t.Errorf("token = %q, want %q — ExpandEnvInMap not applied to all string fields", got, "tok-xyz")
+	}
+}
+
+// TestLoadIaCProviderFromConfig_SkipsEmptyProviderField guards the
+// "iac.provider module with no provider: field, continue to next
+// module" branch — currently uncovered (code-reviewer I-2 on commit
+// 63129d65f). A future "fail-fast on missing provider field" refactor
+// could silently break first-match-after-skip semantics for configs
+// where someone typos `providr:` in module A and has a valid module B.
+func TestLoadIaCProviderFromConfig_SkipsEmptyProviderField(t *testing.T) {
+	calls := installFakeResolver(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "skip.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`modules:
+  - name: incomplete
+    type: iac.provider
+    config: {}
+  - name: valid
+    type: iac.provider
+    config:
+      provider: beta
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, closer, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadIaCProviderFromConfig: %v", err)
+	}
+	if closer != nil {
+		defer closer.Close()
+	}
+	if provider == nil || provider.Name() != "beta" {
+		name := "<nil>"
+		if provider != nil {
+			name = provider.Name()
+		}
+		t.Errorf("provider = %q, want beta — incomplete module should be skipped, second match should win", name)
+	}
+	if len(*calls) != 1 || (*calls)[0] != "beta" {
+		t.Errorf("Resolver calls = %v, want [beta] (first module is skipped pre-resolve)", *calls)
+	}
+}

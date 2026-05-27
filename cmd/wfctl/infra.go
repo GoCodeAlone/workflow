@@ -14,6 +14,7 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/iac/jitsubst"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -110,6 +111,8 @@ func runInfra(args []string) error {
 			return fmt.Errorf("audit-state-secrets exited with code %d", rc)
 		}
 		return nil
+	case "admin":
+		return runInfraAdmin(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -136,6 +139,9 @@ Actions:
   align          Validate IaC config + plan alignment (8 rule families)
   test           Hermetically validate expected infra config and plan outcomes
   security-check Scan plan.json for security policy violations
+  admin          Query the infra.admin host-side module surface
+                   (list-resources, get-resource, list-types,
+                    list-providers, generate-config, audit-tail)
   cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
   audit-secrets  Report provider_credential anti-patterns in secrets.generate
   audit-keys     List cloud-side resources of --type via the provider's EnumeratorAll
@@ -414,9 +420,13 @@ func runInfraPlan(args []string) error {
 
 // parseInfraResourceSpecs reads an infra YAML file and returns the list of
 // infra.* modules as ResourceSpecs for plan computation.
-// isInfraType returns true for module types handled by wfctl infra commands.
+// isInfraType is a one-line delegating shim onto wfctlhelpers.IsInfraType.
+// Implementation moved per docs/plans/2026-05-27-infra-admin-dynamic.md
+// Task 1 (consolidation follow-up addressing spec-reviewer F2) so wfctl
+// and the host-side infra.admin module share one definition. New code
+// should call wfctlhelpers.IsInfraType directly.
 func isInfraType(t string) bool {
-	return strings.HasPrefix(t, "infra.") || strings.HasPrefix(t, "platform.")
+	return wfctlhelpers.IsInfraType(t)
 }
 
 // extractDependsOn pulls the depends_on value from a module config map.
@@ -645,8 +655,10 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 	return out, nil
 }
 
+// isContainerType is a one-line delegating shim onto
+// wfctlhelpers.IsContainerType. See isInfraType above for rationale.
 func isContainerType(t string) bool {
-	return t == "infra.container_service"
+	return wfctlhelpers.IsContainerType(t)
 }
 
 // loadCurrentState loads ResourceStates from the configured iac.state backend.
@@ -1191,8 +1203,15 @@ func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpe
 }
 
 func isNoopStateStore(store infraStateStore) bool {
-	_, ok := store.(*noopStateStore)
-	return ok
+	if _, ok := store.(*noopStateStore); ok {
+		return true
+	}
+	// resolveStateStore now delegates to wfctlhelpers.ResolveStateStore,
+	// which returns *wfctlhelpers.NoopStateStore for configs without an
+	// iac.state module. Recognise both concrete types so downstream
+	// "do not persist; this is a no-op store" checks stay honest after the
+	// Task-1 lift.
+	return wfctlhelpers.IsNoopStateStore(store)
 }
 
 func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType string, imported *interfaces.ResourceState, providerIDOverride string) (interfaces.ResourceState, error) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin/external"
@@ -47,7 +47,7 @@ func (n *noopStateStore) SaveResource(_ context.Context, _ interfaces.ResourceSt
 func (n *noopStateStore) DeleteResource(_ context.Context, _ string) error { return nil }
 
 // resolveStateStore returns an infraStateStore for the iac.state backend
-// declared in cfgFile. Returns a noopStateStore (not an error) when no
+// declared in cfgFile. Returns a no-op store (not an error) when no
 // iac.state module is present — first-run callers just get no-op persistence.
 //
 // When envName is non-empty, per-environment overrides (e.g. region, bucket
@@ -55,55 +55,20 @@ func (n *noopStateStore) DeleteResource(_ context.Context, _ string) error { ret
 // remote backends (Spaces, S3, etc.) where credentials or endpoints differ per
 // environment — without it the base config is used, which may be missing
 // required fields such as region, causing init to fail.
+//
+// Delegates to wfctlhelpers.ResolveStateStore (per docs/plans/
+// 2026-05-27-infra-admin-dynamic.md Task 1) so the host-side infra.admin
+// module and the CLI share one implementation. The returned
+// interfaces.IaCStateStore satisfies the local infraStateStore subset by
+// structural typing; metadataPersister type-assertions on wfctlhelpers
+// concrete types remain functional because *wfctlhelpers.FSStateStore
+// implements SaveMetadata.
 func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
-	cfgToUse := cfgFile
-	if envName != "" {
-		tmp, err := writeEnvResolvedConfig(cfgFile, envName)
-		if err != nil {
-			return nil, fmt.Errorf("resolve %q environment for state store: %w", envName, err)
-		}
-		defer os.Remove(tmp)
-		cfgToUse = tmp
-	}
-	iacStates, _, _, err := discoverInfraModules(cfgToUse)
+	full, err := wfctlhelpers.ResolveStateStore(cfgFile, envName, currentInfraPluginDir)
 	if err != nil {
-		return nil, fmt.Errorf("discover iac.state modules: %w", err)
+		return nil, err
 	}
-	if len(iacStates) == 0 {
-		return &noopStateStore{}, nil
-	}
-	m := iacStates[0]
-	cfg := config.ExpandEnvInMap(m.Config)
-	backend, _ := cfg["backend"].(string)
-
-	switch backend {
-	case "filesystem", "":
-		dir, _ := cfg["directory"].(string)
-		if dir == "" {
-			dir = "/var/lib/workflow/iac-state"
-		}
-		return &fsWfctlStateStore{dir: dir}, nil
-
-	case "postgres":
-		return resolvePostgresStateStore(cfg)
-
-	case "spaces":
-		return resolvePluginStateStore(context.Background(), backend, cfg)
-
-	case "s3":
-		return resolvePluginStateStore(context.Background(), backend, cfg)
-
-	case "gcs":
-		return resolvePluginStateStore(context.Background(), backend, cfg)
-
-	case "azure":
-		return nil, fmt.Errorf("azure state store backend not yet supported by wfctl direct-path commands; " +
-			"create the container manually and reference it in iac.state.bucket. " +
-			"Contribute a resolveAzureStateStore helper to unblock this")
-
-	default:
-		return nil, fmt.Errorf("unknown iac.state backend %q", backend)
-	}
+	return full, nil
 }
 
 type pluginWfctlStateStore struct {
@@ -349,50 +314,11 @@ func (s *fsWfctlStateStore) SaveMetadata(_ context.Context, meta interfaces.Gene
 }
 
 // ── Postgres backend ───────────────────────────────────────────────────────────
-
-// resolvePostgresStateStore builds a Postgres-backed state store from the
-// expanded iac.state module config. The config must include a `dsn` field
-// (or `connection_string`) with a valid PostgreSQL DSN.
-func resolvePostgresStateStore(cfg map[string]any) (infraStateStore, error) {
-	dsn, _ := cfg["dsn"].(string)
-	if dsn == "" {
-		dsn, _ = cfg["connection_string"].(string)
-	}
-	if dsn == "" {
-		return nil, fmt.Errorf("iac.state backend=postgres requires 'dsn' or 'connection_string' in config")
-	}
-	inner, err := module.NewPostgresIaCStateStore(context.Background(), dsn)
-	if err != nil {
-		return nil, fmt.Errorf("init postgres state store: %w", err)
-	}
-	return &postgresWfctlStateStore{inner: inner}, nil
-}
-
-// postgresWfctlStateStore wraps module.PostgresIaCStateStore to implement
-// infraStateStore, bridging module.IaCState ↔ interfaces.ResourceState.
-type postgresWfctlStateStore struct {
-	inner *module.PostgresIaCStateStore
-}
-
-func (s *postgresWfctlStateStore) ListResources(ctx context.Context) ([]interfaces.ResourceState, error) {
-	records, err := s.inner.ListStates(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("list postgres state: %w", err)
-	}
-	states := make([]interfaces.ResourceState, 0, len(records))
-	for _, r := range records {
-		states = append(states, iacStateToResourceState(r))
-	}
-	return states, nil
-}
-
-func (s *postgresWfctlStateStore) SaveResource(ctx context.Context, state interfaces.ResourceState) error {
-	return s.inner.SaveState(ctx, resourceStateToIaCState(state))
-}
-
-func (s *postgresWfctlStateStore) DeleteResource(ctx context.Context, name string) error {
-	return s.inner.DeleteState(ctx, name)
-}
+//
+// The Postgres-backend constructor moved into wfctlhelpers as part of the
+// Task-1 lift; resolveStateStore now delegates there. The cmd/wfctl-side
+// type and resolver were removed once they had no remaining production
+// or test callers.
 
 // ── Conversion helpers ─────────────────────────────────────────────────────────
 

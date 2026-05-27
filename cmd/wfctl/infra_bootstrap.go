@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -367,35 +368,25 @@ func resolveCredentialRevoker(ctx context.Context, cfgFile string, secretsCfg *S
 	return adapter, iacCloser
 }
 
-// loadIaCProviderFromConfig finds the first iac.provider module in cfgFile,
-// loads the provider plugin, and returns it. Returns (nil, nil, nil) when no
-// iac.provider module is declared (caller treats as "provider not available").
-// The returned io.Closer (if non-nil) must be closed by the caller.
+// loadIaCProviderFromConfig is a one-line delegating shim onto
+// wfctlhelpers.LoadIaCProviderFromConfig. The body moved to the shared
+// helper per docs/plans/2026-05-27-infra-admin-dynamic.md Task 2 so the
+// in-tree bootstrap path and the upcoming `wfctl infra admin`
+// subcommands (T19-T20) share one definition. Resolver wiring lives in
+// provider_resolver_init.go.
+//
+// Returns (nil, nil, nil) when no iac.provider module is declared
+// (caller treats as "provider not available"). The returned io.Closer
+// (when non-nil) MUST be closed by the caller; the interface anonymous
+// return type is preserved here so existing cmd/wfctl callers compile
+// unchanged after the lift.
 func loadIaCProviderFromConfig(ctx context.Context, cfgFile string) (interfaces.IaCProvider, interface{ Close() error }, error) {
-	rawCfg, err := config.LoadFromFile(cfgFile)
+	prov, closer, err := wfctlhelpers.LoadIaCProviderFromConfig(ctx, cfgFile)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load config: %w", err)
+		return nil, nil, err
 	}
-	var provType string
-	var provCfg map[string]any
-	for i := range rawCfg.Modules {
-		mod := &rawCfg.Modules[i]
-		if mod.Type != "iac.provider" {
-			continue
-		}
-		modCfg := config.ExpandEnvInMap(mod.Config)
-		if pt, ok := modCfg["provider"].(string); ok && pt != "" {
-			provType = pt
-			provCfg = modCfg
-			break
-		}
-	}
-	if provType == "" {
-		return nil, nil, nil // no iac.provider module in config
-	}
-	prov, closer, err := resolveIaCProvider(ctx, provType, provCfg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load provider %q: %w", provType, err)
+	if closer == nil {
+		return prov, nil, nil
 	}
 	return prov, closer, nil
 }
