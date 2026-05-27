@@ -93,6 +93,19 @@ type InfraAdminConfig struct {
 	// middleware ordering changes.
 	SecurityHeadersModule string `yaml:"security_headers_module" json:"security_headers_module"`
 
+	// AuthModule names the HTTPMiddleware module that enforces
+	// authentication on every infra-admin API + asset route. Per
+	// design §Security Review: "All /api/infra-admin/* and
+	// /admin/infra-admin/* sit behind the host's auth route
+	// filter (same as /admin/*)". The middleware MUST reject
+	// unauthenticated requests with 401 before the handler runs;
+	// without it the handler-side AdminAuthzEvidence default-deny
+	// is trivially bypassable because the client supplies the
+	// evidence in the request body. Resolved via app.GetService
+	// at Init. Empty disables auth (test-only / single-tenant
+	// dev mode); production deployments MUST set this.
+	AuthModule string `yaml:"auth_module" json:"auth_module"`
+
 	// ProviderModules lists the iac.provider module names to
 	// resolve. Each is resolved to an interfaces.IaCProvider via
 	// app.GetService at Init.
@@ -118,6 +131,7 @@ type InfraAdmin struct {
 	providerTypeByModule map[string]string
 	router               *StandardHTTPRouter
 	secHdrs              HTTPMiddleware
+	auth                 HTTPMiddleware
 
 	// Catalogs are instantiated in-process at Init.
 	fieldCatalog  *catalog.FieldSpecCatalog
@@ -180,6 +194,9 @@ func (m *InfraAdmin) Dependencies() []string {
 	if m.config.SecurityHeadersModule != "" {
 		deps = append(deps, m.config.SecurityHeadersModule)
 	}
+	if m.config.AuthModule != "" {
+		deps = append(deps, m.config.AuthModule)
+	}
 	deps = append(deps, m.config.ProviderModules...)
 	return deps
 }
@@ -204,6 +221,9 @@ func (m *InfraAdmin) RequiresServices() []modular.ServiceDependency {
 	}
 	if m.config.SecurityHeadersModule != "" {
 		deps = append(deps, modular.ServiceDependency{Name: m.config.SecurityHeadersModule})
+	}
+	if m.config.AuthModule != "" {
+		deps = append(deps, modular.ServiceDependency{Name: m.config.AuthModule})
 	}
 	for _, pm := range m.config.ProviderModules {
 		deps = append(deps, modular.ServiceDependency{Name: pm})
@@ -266,6 +286,29 @@ func (m *InfraAdmin) Init(app modular.Application) error {
 			return fmt.Errorf("infra.admin: security-headers module %q is %T, need HTTPMiddleware", m.config.SecurityHeadersModule, mw)
 		}
 		m.secHdrs = secMw
+	}
+
+	// Auth middleware — per design §Security Review the
+	// /api/infra-admin/* and /admin/infra-admin/* routes MUST
+	// sit behind the host's auth route filter (same as
+	// /admin/*). Without it, the handler-side AdminAuthzEvidence
+	// default-deny is bypassable: the client supplies
+	// {authz_checked, authz_allowed} in the request body, so an
+	// unauthenticated network actor can send
+	// {evidence:{authz_checked:true,authz_allowed:true}} and the
+	// handler accepts it. The auth middleware rejects requests
+	// without a valid Bearer token at 401 before the handler ever
+	// runs, closing that gap.
+	if m.config.AuthModule != "" {
+		var mw any
+		if err := app.GetService(m.config.AuthModule, &mw); err != nil {
+			return fmt.Errorf("infra.admin: auth module %q: %w", m.config.AuthModule, err)
+		}
+		authMw, ok := mw.(HTTPMiddleware)
+		if !ok {
+			return fmt.Errorf("infra.admin: auth module %q is %T, need HTTPMiddleware", m.config.AuthModule, mw)
+		}
+		m.auth = authMw
 	}
 
 	// Per-provider IaCProvider handles.
@@ -368,9 +411,18 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 		return fmt.Errorf("infra.admin: router unresolved — Init failed silently?")
 	}
 
+	// Middleware chain: auth FIRST so unauthenticated requests
+	// short-circuit at 401 before any handler / security-headers
+	// processing runs. Per design §Security Review +
+	// AddRouteWithMiddleware contract (http_router.go:228-235):
+	// middlewares execute in slice order, so [auth, secHdrs] means
+	// auth wraps secHdrs wraps the handler.
 	mws := []HTTPMiddleware{}
+	if m.auth != nil {
+		mws = append(mws, m.auth)
+	}
 	if m.secHdrs != nil {
-		mws = []HTTPMiddleware{m.secHdrs}
+		mws = append(mws, m.secHdrs)
 	}
 
 	// Typed API routes.

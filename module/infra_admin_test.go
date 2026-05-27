@@ -759,6 +759,162 @@ func TestInfraAdmin_AuditAccess_RecordsOkResult(t *testing.T) {
 	}
 }
 
+// authMwStub is a Bearer-token HTTPMiddleware used by the T15
+// auth-route-filter regression tests. It rejects every request
+// missing an `Authorization: Bearer …` header with 401 BEFORE the
+// handler runs — mirrors module.AuthMiddleware's production
+// behaviour for the route-filter contract that closes the
+// AdminAuthzEvidence-spoofing gap (design §Security Review).
+type authMwStub struct {
+	name string
+	// validToken, when non-empty, is the only Bearer token accepted.
+	// Empty string means "any non-empty Bearer token passes" (matches
+	// AuthMiddleware default-provider behaviour when no provider
+	// matches the token).
+	validToken string
+}
+
+func (s *authMwStub) Process(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+			return
+		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if s.validToken != "" && token != s.validToken {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// newAuthEnabledApp builds a test app with the standard T15
+// dependency surface plus an auth.jwt-shaped HTTPMiddleware
+// registered under "auth". Pairs with standardAuthCfg() below.
+func newAuthEnabledApp(t *testing.T, providerType string) (*withConfigSectionApp, *recordingEngine, *stateStoreStub, *authMwStub) {
+	t.Helper()
+	app, engine, store := newAppWithWorkflowSection(t, providerType)
+	auth := &authMwStub{name: "auth"}
+	_ = app.RegisterService("auth", auth)
+	return app, engine, store, auth
+}
+
+// standardAuthCfg returns the design's reference config WITH the
+// auth_module field set — the production shape per §Security
+// Review. Mirrors the YAML the workflow-scenarios/92 config will
+// declare in PR-2.
+func standardAuthCfg() InfraAdminConfig {
+	c := standardCfg()
+	c.AuthModule = "auth"
+	return c
+}
+
+// TestInfraAdmin_UnauthenticatedRequest_Returns401 — design §Security
+// Review regression: a request with NO Bearer token MUST be rejected
+// with 401 BEFORE the handler runs. Without the auth middleware in
+// front of the route, the handler-side AdminAuthzEvidence
+// default-deny gives 403 with a body — which is still a leak compared
+// to the explicit auth-first 401 contract.
+func TestInfraAdmin_UnauthenticatedRequest_Returns401(t *testing.T) {
+	app, _, _, _ := newAuthEnabledApp(t, "digitalocean")
+	m := NewInfraAdmin("infra-admin", configToMap(t, standardAuthCfg())).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// No Authorization header at all.
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/resources",
+		bytes.NewReader([]byte(`{}`)))
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("unauthenticated request: status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_ClientCannotSpoofAuthzEvidence — design §Security
+// Review hard contract: a client supplying
+// {evidence:{authz_checked:true,authz_allowed:true}} in the request
+// body with NO Authorization header MUST still get 401. Without the
+// auth route filter, this spoofing trivially bypasses the
+// handler-side default-deny. With the auth filter, the request
+// never reaches the handler.
+//
+// This test is the explicit regression gate for the security gap
+// team-lead identified during PR-1 review: AdminAuthzEvidence is
+// client-supplied data; the host MUST authenticate before
+// believing it.
+func TestInfraAdmin_ClientCannotSpoofAuthzEvidence(t *testing.T) {
+	app, _, _, _ := newAuthEnabledApp(t, "digitalocean")
+	m := NewInfraAdmin("infra-admin", configToMap(t, standardAuthCfg())).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	spoof := []byte(`{"evidence":{"authz_checked":true,"authz_allowed":true,"subject":"attacker"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/resources",
+		bytes.NewReader(spoof))
+	// Deliberately NO Authorization header — attacker sets the
+	// evidence flags in the body but has no credential.
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("evidence-spoof attempt: status = %d, want 401 (security gap)\n"+
+			"client supplied authz_checked+authz_allowed in body without Bearer token; auth filter should reject before handler\n"+
+			"body=%s", rec.Code, rec.Body.String())
+	}
+	// Asset routes are equally protected.
+	assetReq := httptest.NewRequest(http.MethodGet, "/admin/infra-admin/resources.html", nil)
+	assetRec := httptest.NewRecorder()
+	m.router.ServeHTTP(assetRec, assetReq)
+	if assetRec.Code != http.StatusUnauthorized {
+		t.Errorf("unauthenticated asset request: status = %d, want 401; body=%s", assetRec.Code, assetRec.Body.String())
+	}
+}
+
+// TestInfraAdmin_AuthenticatedRequest_ReachesHandler is the
+// positive counterpart — a valid Bearer token lets the request
+// flow through the auth middleware to the handler, which then
+// applies its own default-deny / authz check. Pins that auth is
+// NOT a blanket-deny — properly authenticated requests still get
+// to the typed protojson API surface.
+func TestInfraAdmin_AuthenticatedRequest_ReachesHandler(t *testing.T) {
+	app, _, _, _ := newAuthEnabledApp(t, "digitalocean")
+	m := NewInfraAdmin("infra-admin", configToMap(t, standardAuthCfg())).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/resources",
+		bytes.NewReader([]byte(`{"evidence":{"authz_checked":true,"authz_allowed":true,"subject":"user:alice"}}`)))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("authenticated request: status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // configToMap round-trips a typed InfraAdminConfig through JSON
 // into the map shape the factory expects (matching how the engine
 // passes config maps to module factories at BuildFromConfig time).

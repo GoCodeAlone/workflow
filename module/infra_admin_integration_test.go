@@ -231,6 +231,13 @@ func TestInfraAdmin_IntegrationWithLiveAdminPlugin(t *testing.T) {
 	// AND the service registry has an iac-state entry.
 	iacStateModule := &integrationStateStubModule{name: "iac-state"}
 
+	// Auth middleware — design §Security Review requires every
+	// /api/infra-admin/* and /admin/infra-admin/* request to sit
+	// behind a route-filter auth layer. Wire a Bearer-token auth
+	// stub that accepts the test-token below. Assertions (c) +
+	// (d) supply the matching Bearer header.
+	authStub := &integrationAuthStubModule{name: "auth", validToken: "integration-test-token"}
+
 	auditPath := filepath.Join(tmpDir, "audit.jsonl")
 	infraAdmin := module.NewInfraAdmin("infra-admin", map[string]any{
 		"route_prefix":            "/api/infra-admin",
@@ -238,6 +245,7 @@ func TestInfraAdmin_IntegrationWithLiveAdminPlugin(t *testing.T) {
 		"state_module":            "iac-state",
 		"http_module":             "http-router",
 		"security_headers_module": "security-headers",
+		"auth_module":             "auth",
 		"provider_modules":        []string{},
 		"access_log_path":         auditPath,
 	})
@@ -246,6 +254,7 @@ func TestInfraAdmin_IntegrationWithLiveAdminPlugin(t *testing.T) {
 	app.RegisterModule(httpRouter)
 	app.RegisterModule(secHdrs)
 	app.RegisterModule(iacStateModule)
+	app.RegisterModule(authStub)
 	app.RegisterModule(infraAdmin)
 
 	// ── 5. Single Init pass ───────────────────────────────────
@@ -398,6 +407,7 @@ func TestInfraAdmin_IntegrationWithLiveAdminPlugin(t *testing.T) {
 	}
 	postReq := httptest.NewRequest(http.MethodPost, "/api/infra-admin/resources", bytes.NewReader(listResBody))
 	postReq.Header.Set("Content-Type", "application/json")
+	postReq.Header.Set("Authorization", "Bearer integration-test-token")
 	postRec := httptest.NewRecorder()
 	liveRouter.ServeHTTP(postRec, postReq)
 	if postRec.Code != http.StatusOK {
@@ -413,6 +423,7 @@ func TestInfraAdmin_IntegrationWithLiveAdminPlugin(t *testing.T) {
 
 	// ── 6c. Assertion (d): GET /admin/infra-admin/resources.html ─
 	assetReq := httptest.NewRequest(http.MethodGet, "/admin/infra-admin/resources.html", nil)
+	assetReq.Header.Set("Authorization", "Bearer integration-test-token")
 	assetRec := httptest.NewRecorder()
 	liveRouter.ServeHTTP(assetRec, assetReq)
 	if assetRec.Code != http.StatusOK {
@@ -490,6 +501,53 @@ func extractContributionIDs(t *testing.T, out map[string]any) map[string]struct{
 		}
 	}
 	return ids
+}
+
+// integrationAuthStubModule is a modular.Module that provides a
+// Bearer-token HTTPMiddleware under the configured name. Per
+// design §Security Review the infra.admin module mounts its
+// /api/infra-admin/* + /admin/infra-admin/* routes behind an
+// auth route filter; this stub mirrors the production
+// AuthMiddleware contract (reject 401 if missing/invalid Bearer
+// token) so the integration test exercises the full security
+// path end-to-end.
+type integrationAuthStubModule struct {
+	name       string
+	validToken string
+}
+
+func (m *integrationAuthStubModule) Name() string                   { return m.name }
+func (m *integrationAuthStubModule) Init(modular.Application) error { return nil }
+func (m *integrationAuthStubModule) Dependencies() []string         { return nil }
+func (m *integrationAuthStubModule) RequiresServices() []modular.ServiceDependency {
+	return nil
+}
+func (m *integrationAuthStubModule) ProvidesServices() []modular.ServiceProvider {
+	return []modular.ServiceProvider{{
+		Name:        m.name,
+		Description: "integration-test Bearer-token auth middleware",
+		Instance:    module.HTTPMiddleware(&integrationAuthMW{validToken: m.validToken}),
+	}}
+}
+
+type integrationAuthMW struct {
+	validToken string
+}
+
+func (a *integrationAuthMW) Process(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+			return
+		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if a.validToken != "" && token != a.validToken {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // noopWorkflowEngine satisfies module.WorkflowEngine so
