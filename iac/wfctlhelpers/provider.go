@@ -26,6 +26,13 @@ type IaCProviderResolverFunc func(ctx context.Context, providerType string, cfg 
 // discoverAndLoadIaCProvider); tests substitute fakes with t.Cleanup
 // restore. Per docs/plans/2026-05-27-infra-admin-dynamic.md Task 2.
 //
+// Production callers other than cmd/wfctl's init() MUST NOT mutate
+// this var; tests substitute fakes with t.Cleanup restore. NOT
+// goroutine-safe — mirrors the T1 loadPluginStateBackendClients seam
+// precedent. Code-reviewer M-1 on commit 63129d65f flagged the export
+// surface; the godoc tightening here keeps the contract explicit
+// without adding a setter that would diverge from T1's pattern.
+//
 // The cmd/wfctl loader (discoverAndLoadIaCProvider) is ~2800 lines of
 // plugin-manager + typed-adapter machinery (deploy_providers.go +
 // iac_typed_adapter.go). Lifting that wholesale into wfctlhelpers was

@@ -199,3 +199,98 @@ func TestLoadIaCProviderFromConfig_NoResolverRegistered(t *testing.T) {
 		t.Fatal("expected error from unregistered resolver, got nil")
 	}
 }
+
+// TestLoadIaCProviderFromConfig_ExpandsEnvInModuleConfig pins the
+// invariant that config.ExpandEnvInMap is applied to the module config
+// BEFORE the Resolver is dispatched — so ${VAR} references in the YAML
+// resolve at load time. Per code-reviewer I-1 on commit 63129d65f:
+// env-var expansion is a known regression footgun in this codebase
+// (see MEMORY.md BMW os.ExpandEnv 9-layer-bug-chain), so the
+// expansion-step needs an explicit test guard.
+//
+// Also satisfies code-reviewer M-2 by capturing the full cfg map the
+// fake Resolver received and asserting flow-through.
+func TestLoadIaCProviderFromConfig_ExpandsEnvInModuleConfig(t *testing.T) {
+	var receivedCfg map[string]any
+	var receivedType string
+	orig := wfctlhelpers.Resolver
+	wfctlhelpers.Resolver = func(_ context.Context, providerType string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		receivedType = providerType
+		receivedCfg = cfg
+		return &stubProvider{name: providerType}, &nopCloser{}, nil
+	}
+	t.Cleanup(func() { wfctlhelpers.Resolver = orig })
+
+	t.Setenv("WFCTLHELPERS_TEST_REGION", "nyc3")
+	t.Setenv("WFCTLHELPERS_TEST_TOKEN", "tok-xyz")
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "envrefs.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      region: ${WFCTLHELPERS_TEST_REGION}
+      token: ${WFCTLHELPERS_TEST_TOKEN}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, closer, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadIaCProviderFromConfig: %v", err)
+	}
+	if closer != nil {
+		defer closer.Close()
+	}
+
+	if receivedType != "digitalocean" {
+		t.Errorf("Resolver got provider type %q, want %q", receivedType, "digitalocean")
+	}
+	if got, _ := receivedCfg["region"].(string); got != "nyc3" {
+		t.Errorf("region = %q, want %q — ExpandEnvInMap not applied before Resolver dispatch", got, "nyc3")
+	}
+	if got, _ := receivedCfg["token"].(string); got != "tok-xyz" {
+		t.Errorf("token = %q, want %q — ExpandEnvInMap not applied to all string fields", got, "tok-xyz")
+	}
+}
+
+// TestLoadIaCProviderFromConfig_SkipsEmptyProviderField guards the
+// "iac.provider module with no provider: field, continue to next
+// module" branch — currently uncovered (code-reviewer I-2 on commit
+// 63129d65f). A future "fail-fast on missing provider field" refactor
+// could silently break first-match-after-skip semantics for configs
+// where someone typos `providr:` in module A and has a valid module B.
+func TestLoadIaCProviderFromConfig_SkipsEmptyProviderField(t *testing.T) {
+	calls := installFakeResolver(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "skip.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`modules:
+  - name: incomplete
+    type: iac.provider
+    config: {}
+  - name: valid
+    type: iac.provider
+    config:
+      provider: beta
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, closer, err := wfctlhelpers.LoadIaCProviderFromConfig(context.Background(), cfgPath)
+	if err != nil {
+		t.Fatalf("LoadIaCProviderFromConfig: %v", err)
+	}
+	if closer != nil {
+		defer closer.Close()
+	}
+	if provider == nil || provider.Name() != "beta" {
+		name := "<nil>"
+		if provider != nil {
+			name = provider.Name()
+		}
+		t.Errorf("provider = %q, want beta — incomplete module should be skipped, second match should win", name)
+	}
+	if len(*calls) != 1 || (*calls)[0] != "beta" {
+		t.Errorf("Resolver calls = %v, want [beta] (first module is skipped pre-resolve)", *calls)
+	}
+}
