@@ -31,6 +31,16 @@ func (wm *WorkspaceManager) StorageForProject(projectID string) (*LocalStorage, 
 		return nil, fmt.Errorf("project ID is required")
 	}
 
+	// Reject project IDs that are not a single, plain path segment. "." and ".."
+	// would resolve to the workspaces root or its parent (breaking isolation /
+	// escaping the base), and any path separator means the caller is trying to
+	// address a nested or sibling location rather than a single project dir.
+	if projectID == "." || projectID == ".." ||
+		strings.ContainsRune(projectID, '/') ||
+		strings.ContainsRune(projectID, os.PathSeparator) {
+		return nil, fmt.Errorf("invalid project ID %q: must be a single path segment", projectID)
+	}
+
 	// Resolve the base directory (workspaces root) to an absolute path.
 	workspacesBase, err := filepath.Abs(filepath.Join(wm.dataDir, "workspaces"))
 	if err != nil {

@@ -1114,6 +1114,11 @@ func TestLoadWorkflowFromPath_PathTraversal(t *testing.T) {
 
 	token := generateTestToken(secret, "1", "admin@test.com", "admin")
 
+	// Each of these resolves to a path OUTSIDE allowedDir. The containment guard
+	// is the only code path that produces 403 Forbidden — os.Stat on a missing
+	// file would yield 400, and a readable file would yield 201/500. Asserting
+	// EXACTLY 403 makes this test revert-sensitive: removing the guard changes
+	// the status code (to 400 for the nonexistent traversal targets), failing it.
 	maliciousPaths := []string{
 		"../../etc/passwd",
 		"/etc/passwd",
@@ -1126,14 +1131,32 @@ func TestLoadWorkflowFromPath_PathTraversal(t *testing.T) {
 			body := fmt.Sprintf(`{"path": %q, "project_id": "00000000-0000-0000-0000-000000000002"}`, p)
 			rr := doRequest(handler, "POST", "/api/v1/workflows/load-from-path", body, token)
 
-			// Must be rejected; we expect 400 (path not found / invalid path)
-			// or 403 (outside allowed directory). 200/201 would mean the handler
-			// served a file from outside the allowed base.
-			if rr.Code == http.StatusCreated || rr.Code == http.StatusOK {
-				t.Errorf("path %q: expected rejection, got %d (body: %s)",
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("path %q: expected 403 Forbidden from containment guard, got %d (body: %s)",
 					p, rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+// TestLoadWorkflowFromPath_ContainedByDefault verifies that even with NO dataDir
+// configured, the endpoint is contained to the process working directory (default-
+// deny posture) rather than reading arbitrary absolute paths. Covers CRITICAL: the
+// production handler does not always have SetDataDir called.
+func TestLoadWorkflowFromPath_ContainedByDefault(t *testing.T) {
+	handler, _, secret := setupTestHandler(t)
+	// Intentionally do NOT call SetDataDir — exercise the default-deny fallback.
+
+	token := generateTestToken(secret, "1", "admin@test.com", "admin")
+
+	// /etc/passwd is outside the process working directory, so the default
+	// containment base (filepath.Abs(".")) must reject it with 403.
+	body := `{"path": "/etc/passwd", "project_id": "00000000-0000-0000-0000-000000000002"}`
+	rr := doRequest(handler, "POST", "/api/v1/workflows/load-from-path", body, token)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 (default containment to working dir), got %d (body: %s)",
+			rr.Code, rr.Body.String())
 	}
 }
 

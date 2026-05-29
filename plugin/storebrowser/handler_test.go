@@ -616,6 +616,80 @@ func TestInvalidTableName(t *testing.T) {
 	}
 }
 
+// TestIsValidTableName_RejectsMalicious is a direct unit test of the identifier
+// guard added to fix the go/sql-injection CodeQL alert (#60). It is inherently
+// revert-sensitive: if isValidTableName is removed the test fails to compile, and
+// if its regexp is loosened the malicious cases below start passing.
+func TestIsValidTableName_RejectsMalicious(t *testing.T) {
+	malicious := []string{
+		"id;DROP",
+		"id`",
+		"../../etc/passwd",
+		"id--",
+		"id()",
+		"id OR 1=1",
+		"1 UNION SELECT",
+		"name\"",
+		"col,other",
+		"",
+	}
+	for _, m := range malicious {
+		if isValidTableName(m) {
+			t.Errorf("isValidTableName(%q) = true, want false (injection-prone identifier accepted)", m)
+		}
+	}
+
+	valid := []string{"id", "name", "user_id", "_private", "Col2", "a1b2"}
+	for _, v := range valid {
+		if !isValidTableName(v) {
+			t.Errorf("isValidTableName(%q) = false, want true (legitimate identifier rejected)", v)
+		}
+	}
+}
+
+// TestTableRowsSortInjection_GuardCatchesSchemaColumn proves the NEW isValidTableName
+// guard in tableRows, not the pre-existing schema allowlist. It creates a table with
+// a column whose real name contains a space ("bad col"). That column IS present in the
+// schema (so getTableColumns/validCols would accept it), but isValidTableName rejects
+// it BEFORE the query is built. If the isValidTableName guard is removed, this column
+// passes the schema check and the request would proceed to the DB (status 200),
+// which this test asserts must NOT happen.
+func TestTableRowsSortInjection_GuardCatchesSchemaColumn(t *testing.T) {
+	db := newTestDB(t)
+	// Column name with a space is a valid SQLite identifier when quoted, so it
+	// exists in the schema, but it is not a safe bare SQL identifier.
+	_, err := db.Exec(`CREATE TABLE guard_test (id INTEGER PRIMARY KEY, "bad col" TEXT)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(`INSERT INTO guard_test (id, "bad col") VALUES (1, 'x')`)
+
+	// Sanity check: the malicious-looking column really is in the schema allowlist,
+	// so a passing result here would mean the schema check alone did NOT protect us.
+	cols, err := getTableColumns(db, "guard_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cols["bad col"] {
+		t.Fatalf("precondition failed: %q expected in schema columns %v", "bad col", cols)
+	}
+
+	h := &handler{db: db}
+	mux := newTestMux(h)
+
+	u := "/tables/guard_test/rows?sort=" + url.QueryEscape("bad col")
+	req := httptest.NewRequest("GET", u, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// The isValidTableName guard must reject this with 400 before it reaches the DB.
+	// Without the guard, "bad col" passes the schema allowlist and the handler would
+	// return 200 (or 500 if the unquoted identifier produced a SQL error).
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 (isValidTableName guard), got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
 // TestTableRowsSortInjection verifies that a malicious sort column value is
 // rejected before it can reach the database.  This exercises the isValidTableName
 // guard added to fix the go/sql-injection CodeQL alert on handler.go (alert #60).
