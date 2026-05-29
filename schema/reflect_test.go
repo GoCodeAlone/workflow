@@ -1,6 +1,8 @@
 package schema
 
 import (
+	"math"
+	"strconv"
 	"testing"
 )
 
@@ -266,6 +268,42 @@ func TestParseDefault(t *testing.T) {
 		got := parseDefault(tc.input)
 		if got != tc.want {
 			t.Errorf("parseDefault(%q) = %v (%T), want %v (%T)", tc.input, got, got, tc.want, tc.want)
+		}
+	}
+}
+
+// TestParseDefaultIntOverflow verifies that integer values outside the range of
+// int on the current platform are never returned as int (which would silently
+// overflow on 32-bit hosts). On 64-bit hosts this exercises the guard for
+// hypothetical 32-bit deployment by directly testing the bounds.
+func TestParseDefaultIntOverflow(t *testing.T) {
+	// Values within [MinInt, MaxInt] must parse as int.
+	maxInt := strconv.FormatInt(math.MaxInt, 10)
+	gotMax := parseDefault(maxInt)
+	if _, ok := gotMax.(int); !ok {
+		t.Errorf("parseDefault(%q) should return int, got %T", maxInt, gotMax)
+	}
+	if gotMax != math.MaxInt {
+		t.Errorf("parseDefault(%q) = %v, want %v", maxInt, gotMax, math.MaxInt)
+	}
+
+	minInt := strconv.FormatInt(math.MinInt, 10)
+	gotMin := parseDefault(minInt)
+	if _, ok := gotMin.(int); !ok {
+		t.Errorf("parseDefault(%q) should return int, got %T", minInt, gotMin)
+	}
+	if gotMin != math.MinInt {
+		t.Errorf("parseDefault(%q) = %v, want %v", minInt, gotMin, math.MinInt)
+	}
+
+	// On 32-bit platforms (math.MaxInt == math.MaxInt32), values between
+	// math.MaxInt32+1 and math.MaxInt64 must NOT return as int.
+	if math.MaxInt == math.MaxInt32 {
+		overflowVal := int64(math.MaxInt32) + 1
+		overflowStr := strconv.FormatInt(overflowVal, 10)
+		got := parseDefault(overflowStr)
+		if _, ok := got.(int); ok {
+			t.Errorf("parseDefault(%q) returned int on 32-bit platform, expected non-int to avoid overflow", overflowStr)
 		}
 	}
 }

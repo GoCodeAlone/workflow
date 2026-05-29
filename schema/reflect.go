@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -129,6 +130,10 @@ func parseDefault(s string) any {
 		return false
 	}
 	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		// Guard against overflow when converting int64 → int on 32-bit platforms.
+		if i < math.MinInt || i > math.MaxInt {
+			return s // out-of-range: preserve as string
+		}
 		return int(i)
 	}
 	if f, err := strconv.ParseFloat(s, 64); err == nil {
