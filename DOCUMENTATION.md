@@ -1791,7 +1791,7 @@ Runs LSP diagnostics on YAML content directly from a pipeline step.
 
 ---
 
-### Admin Core Plugin (`plugin/admincore/`)
+### Admin Core Plugin (`plugins/admincore/`)
 
 The `admincore` plugin is a NativePlugin that registers the built-in admin UI page definitions. It declares no HTTP routes -- all views are rendered entirely in the React frontend. Registering this plugin ensures navigation is driven by the plugin system with no static fallbacks.
 
@@ -1811,7 +1811,7 @@ The `admincore` plugin is a NativePlugin that registers the built-in admin UI pa
 
 Global pages appear in the main navigation. Workflow-scoped pages (`executions`, `logs`, `events`) are only shown when a workflow is open.
 
-The plugin is auto-registered via `init()` in `plugin/admincore/plugin.go`. No YAML configuration is required.
+The plugin is auto-registered via `init()` in `plugins/admincore/plugin.go`. No YAML configuration is required.
 
 ---
 

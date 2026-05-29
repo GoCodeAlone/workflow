@@ -115,7 +115,7 @@ These are the most significant issues but carry the highest refactoring risk and
   - `step.ai_complete`, `step.ai_classify`, `step.ai_extract` pipeline steps
   - CI/CD steps: `step.docker_build`, `step.docker_push`, `step.docker_run`, `step.scan_sast`, `step.scan_container`, `step.scan_deps`, `step.artifact_push`, `step.artifact_pull`
   - `step.jq` — JSON query transformations
-  - `plugin/admincore/` — admin platform plugin
+  - `plugins/admincore/` — admin platform plugin
   - `observability.otel` — no example YAML or configuration guide
 
 ### Example Count Exaggeration
