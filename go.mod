@@ -6,19 +6,19 @@ require (
 	charm.land/bubbletea/v2 v2.0.2
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/GoCodeAlone/go-plugin v1.7.0
-	github.com/GoCodeAlone/modular v1.13.0
-	github.com/GoCodeAlone/modular/modules/auth v1.15.0
-	github.com/GoCodeAlone/modular/modules/cache v1.15.0
-	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.8.0
-	github.com/GoCodeAlone/modular/modules/jsonschema v1.15.0
-	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.8.0
+	github.com/GoCodeAlone/modular v1.13.4
+	github.com/GoCodeAlone/modular/modules/auth v1.17.0
+	github.com/GoCodeAlone/modular/modules/cache v1.17.0
+	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0
+	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0
+	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0
 	github.com/GoCodeAlone/yaegi v0.17.2
 	github.com/IBM/sarama v1.47.0
 	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/cucumber/godog v0.15.1
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/expr-lang/expr v1.17.8
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/github/copilot-sdk/go v0.3.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
