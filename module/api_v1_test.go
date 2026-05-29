@@ -1100,3 +1100,91 @@ func TestV1Store_ExecutionFailure(t *testing.T) {
 		t.Errorf("got failed count %d, want 1", counts["failed"])
 	}
 }
+
+// TestLoadWorkflowFromPath_PathTraversal verifies that the loadWorkflowFromPath
+// endpoint rejects paths that escape h.dataDir when that field is configured.
+// This covers the go/path-injection CodeQL alerts #56, #57, #58 in
+// module/api_v1_handler.go (os.Stat / filepath.Join / os.ReadFile sinks).
+func TestLoadWorkflowFromPath_PathTraversal(t *testing.T) {
+	handler, _, secret := setupTestHandler(t)
+
+	// Create a temporary directory to act as the allowed data directory.
+	allowedDir := t.TempDir()
+	handler.SetDataDir(allowedDir)
+
+	token := generateTestToken(secret, "1", "admin@test.com", "admin")
+
+	// Each of these resolves to a path OUTSIDE allowedDir. The containment guard
+	// is the only code path that produces 403 Forbidden — os.Stat on a missing
+	// file would yield 400, and a readable file would yield 201/500. Asserting
+	// EXACTLY 403 makes this test revert-sensitive: removing the guard changes
+	// the status code (to 400 for the nonexistent traversal targets), failing it.
+	maliciousPaths := []string{
+		"../../etc/passwd",
+		"/etc/passwd",
+		allowedDir + "/../../etc/passwd",
+		"../outside",
+	}
+
+	for _, p := range maliciousPaths {
+		t.Run(p, func(t *testing.T) {
+			body := fmt.Sprintf(`{"path": %q, "project_id": "00000000-0000-0000-0000-000000000002"}`, p)
+			rr := doRequest(handler, "POST", "/api/v1/workflows/load-from-path", body, token)
+
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("path %q: expected 403 Forbidden from containment guard, got %d (body: %s)",
+					p, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestLoadWorkflowFromPath_ContainedByDefault verifies that even with NO dataDir
+// configured, the endpoint is contained to the process working directory (default-
+// deny posture) rather than reading arbitrary absolute paths. Covers CRITICAL: the
+// production handler does not always have SetDataDir called.
+func TestLoadWorkflowFromPath_ContainedByDefault(t *testing.T) {
+	handler, _, secret := setupTestHandler(t)
+	// Intentionally do NOT call SetDataDir — exercise the default-deny fallback.
+
+	token := generateTestToken(secret, "1", "admin@test.com", "admin")
+
+	// /etc/passwd is outside the process working directory, so the default
+	// containment base (filepath.Abs(".")) must reject it with 403.
+	body := `{"path": "/etc/passwd", "project_id": "00000000-0000-0000-0000-000000000002"}`
+	rr := doRequest(handler, "POST", "/api/v1/workflows/load-from-path", body, token)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 (default containment to working dir), got %d (body: %s)",
+			rr.Code, rr.Body.String())
+	}
+}
+
+// TestLoadWorkflowFromPath_AllowedPath verifies that a path inside dataDir is
+// still accepted when loadWorkflowFromPath has a dataDir configured.
+func TestLoadWorkflowFromPath_AllowedPath(t *testing.T) {
+	handler, _, secret := setupTestHandler(t)
+
+	// Set up a data dir with a workflow config inside it.
+	dataDir := t.TempDir()
+	handler.SetDataDir(dataDir)
+
+	// Create a valid workflow.yaml inside the allowed dir.
+	wfDir := filepath.Join(dataDir, "my-workflow")
+	if err := os.MkdirAll(wfDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	wfFile := filepath.Join(wfDir, "workflow.yaml")
+	if err := os.WriteFile(wfFile, []byte("name: test\npipelines: []\n"), 0o640); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	token := generateTestToken(secret, "1", "admin@test.com", "admin")
+
+	body := fmt.Sprintf(`{"path": %q, "project_id": "00000000-0000-0000-0000-000000000002"}`, wfDir)
+	rr := doRequest(handler, "POST", "/api/v1/workflows/load-from-path", body, token)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+}

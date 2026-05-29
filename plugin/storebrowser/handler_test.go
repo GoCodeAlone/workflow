@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/store"
@@ -612,5 +613,185 @@ func TestInvalidTableName(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid table name, got %d", w.Code)
+	}
+}
+
+// TestIsValidTableName_RejectsMalicious is a direct unit test of the identifier
+// guard added to fix the go/sql-injection CodeQL alert (#60). It is inherently
+// revert-sensitive: if isValidTableName is removed the test fails to compile, and
+// if its regexp is loosened the malicious cases below start passing.
+func TestIsValidTableName_RejectsMalicious(t *testing.T) {
+	malicious := []string{
+		"id;DROP",
+		"id`",
+		"../../etc/passwd",
+		"id--",
+		"id()",
+		"id OR 1=1",
+		"1 UNION SELECT",
+		"name\"",
+		"col,other",
+		"",
+	}
+	for _, m := range malicious {
+		if isValidTableName(m) {
+			t.Errorf("isValidTableName(%q) = true, want false (injection-prone identifier accepted)", m)
+		}
+	}
+
+	valid := []string{"id", "name", "user_id", "_private", "Col2", "a1b2"}
+	for _, v := range valid {
+		if !isValidTableName(v) {
+			t.Errorf("isValidTableName(%q) = false, want true (legitimate identifier rejected)", v)
+		}
+	}
+}
+
+// TestTableRowsSortInjection_GuardCatchesSchemaColumn proves the NEW isValidTableName
+// guard in tableRows, not the pre-existing schema allowlist. It creates a table with
+// a column whose real name contains a space ("bad col"). That column IS present in the
+// schema (so getTableColumns/validCols would accept it), but isValidTableName rejects
+// it BEFORE the query is built. If the isValidTableName guard is removed, this column
+// passes the schema check and the request would proceed to the DB (status 200),
+// which this test asserts must NOT happen.
+func TestTableRowsSortInjection_GuardCatchesSchemaColumn(t *testing.T) {
+	db := newTestDB(t)
+	// Column name with a space is a valid SQLite identifier when quoted, so it
+	// exists in the schema, but it is not a safe bare SQL identifier.
+	_, err := db.Exec(`CREATE TABLE guard_test (id INTEGER PRIMARY KEY, "bad col" TEXT)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(`INSERT INTO guard_test (id, "bad col") VALUES (1, 'x')`)
+
+	// Sanity check: the malicious-looking column really is in the schema allowlist,
+	// so a passing result here would mean the schema check alone did NOT protect us.
+	cols, err := getTableColumns(db, "guard_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cols["bad col"] {
+		t.Fatalf("precondition failed: %q expected in schema columns %v", "bad col", cols)
+	}
+
+	h := &handler{db: db}
+	mux := newTestMux(h)
+
+	u := "/tables/guard_test/rows?sort=" + url.QueryEscape("bad col")
+	req := httptest.NewRequest("GET", u, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// The isValidTableName guard must reject this with 400 before it reaches the DB.
+	// Without the guard, "bad col" passes the schema allowlist and the handler would
+	// return 200 (or 500 if the unquoted identifier produced a SQL error).
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 (isValidTableName guard), got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+// TestTableRowsSortInjection verifies that a malicious sort column value is
+// rejected before it can reach the database.  This exercises the isValidTableName
+// guard added to fix the go/sql-injection CodeQL alert on handler.go (alert #60).
+func TestTableRowsSortInjection(t *testing.T) {
+	db := newTestDB(t)
+	_, err := db.Exec("CREATE TABLE inj_test (id INTEGER PRIMARY KEY, name TEXT)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Exec("INSERT INTO inj_test (id, name) VALUES (1, 'a')")
+
+	h := &handler{db: db}
+	mux := newTestMux(h)
+
+	maliciousInputs := []struct {
+		name  string
+		value string
+	}{
+		{"semicolon_drop", "id;DROP"},         // semicolon injection (no space to avoid URL panic)
+		{"backtick", "id`"},                   // backtick injection
+		{"dot_traversal", "../../etc/passwd"}, // path-like traversal
+		{"dash_comment", "id--"},              // double-dash SQL comment
+		{"parens", "id()"},                    // function-call injection
+	}
+
+	for _, tc := range maliciousInputs {
+		t.Run(tc.name, func(t *testing.T) {
+			// Build the request using url.Values so the sort param is properly
+			// encoded rather than hand-concatenated into a URL string.
+			u := "/tables/inj_test/rows?sort=" + url.QueryEscape(tc.value)
+			req := httptest.NewRequest("GET", u, nil)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			// Must be rejected with 400; must NOT be 200 or 500 (which would
+			// indicate the input reached the database layer).
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("expected 400 for sort %q (%s), got %d (body: %s)",
+					tc.value, tc.name, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+// TestSQLQueryInjectionAttempts verifies the /query endpoint rejects common
+// SQL injection patterns. This covers the go/sql-injection CodeQL alert #61
+// (the admin read-only SQL REPL enforces SELECT-only with no semicolons).
+func TestSQLQueryInjectionAttempts(t *testing.T) {
+	db := newTestDB(t)
+	h := &handler{db: db}
+	mux := newTestMux(h)
+
+	tests := []struct {
+		name           string
+		query          string
+		wantStatusCode int
+	}{
+		{
+			name:  "semicolon_separation",
+			query: "SELECT 1; DROP TABLE foo--",
+			// dangerousKeywords (DROP) fires before sanitizeReadOnlyQuery checks ";",
+			// so the response is 403 Forbidden, not 400 Bad Request. The key
+			// property is that neither the semicolon nor the DROP reaches the DB.
+			wantStatusCode: http.StatusForbidden,
+		},
+		{
+			name:           "comment_injection",
+			query:          "SELECT 1 -- injected comment",
+			wantStatusCode: http.StatusBadRequest, // sanitizeReadOnlyQuery blocks "--"
+		},
+		{
+			name:           "block_comment",
+			query:          "SELECT /* injected */ 1",
+			wantStatusCode: http.StatusBadRequest, // sanitizeReadOnlyQuery blocks "/*"
+		},
+		{
+			name:           "uppercase_drop",
+			query:          "SELECT 1 WHERE DROP TABLE foo",
+			wantStatusCode: http.StatusForbidden, // dangerousKeywords blocks DROP
+		},
+		{
+			name: "tautology_or",
+			// A valid SELECT with tautology — this should execute as a read-only
+			// query (the DB is empty so it returns 0 rows); the key property is
+			// that it does NOT return 500 or inject anything.
+			query:          "SELECT 1 WHERE 1=1 OR 1=1",
+			wantStatusCode: http.StatusOK,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]string{"query": tc.query})
+			req := httptest.NewRequest("POST", "/query", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			if w.Code != tc.wantStatusCode {
+				t.Errorf("query %q: expected status %d, got %d (body: %s)",
+					tc.query, tc.wantStatusCode, w.Code, w.Body.String())
+			}
+		})
 	}
 }

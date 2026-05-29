@@ -538,6 +538,11 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 
 	// Create V1 API handler
 	v1Handler := module.NewV1APIHandler(store, secret)
+	// Constrain server-local path reads (loadWorkflowFromPath) to the configured
+	// data directory. Without this, the path-injection guard in the handler is
+	// inactive and an authenticated admin could read arbitrary files off the host
+	// via the /workflows/load-from-path endpoint.
+	v1Handler.SetDataDir(*dataDir)
 	v1Handler.SetReloadFunc(func(configYAML string) error {
 		cfg, parseErr := config.LoadFromString(configYAML)
 		if parseErr != nil {

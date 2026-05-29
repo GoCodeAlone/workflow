@@ -50,9 +50,22 @@ func (h *V1APIHandler) SetRuntimeManager(rm *RuntimeManager) {
 	h.runtimeManager = rm
 }
 
-// SetDataDir sets the base data directory used for workspace extraction during import.
+// SetDataDir sets the base data directory used for workspace extraction during
+// import and for containing server-local path reads. The directory is normalised
+// to an absolute, cleaned path so that the containment check in
+// loadWorkflowFromPath compares like with like (absolute vs absolute).
 func (h *V1APIHandler) SetDataDir(dir string) {
-	h.dataDir = dir
+	if dir == "" {
+		h.dataDir = ""
+		return
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		h.dataDir = filepath.Clean(abs)
+		return
+	}
+	// Fall back to the cleaned (possibly relative) path if Abs fails; the
+	// containment check itself also calls filepath.Abs on both operands.
+	h.dataDir = filepath.Clean(dir)
 }
 
 // ServeHTTP implements http.Handler for config-driven delegate dispatch.
@@ -960,11 +973,43 @@ func (h *V1APIHandler) loadWorkflowFromPath(w http.ResponseWriter, r *http.Reque
 		req.ProjectID = "00000000-0000-0000-0000-000000000002"
 	}
 
-	// Resolve the config file path
-	configPath := filepath.Clean(req.Path)
+	// Resolve the config file path and enforce path containment.
+	//
+	// The resolved path MUST stay inside an allowed base directory so that an
+	// authenticated request cannot read arbitrary files from the host filesystem
+	// (e.g. /etc/passwd or ../../secrets). Containment is active BY DEFAULT:
+	//   - In production, cmd/server wires SetDataDir(--data-dir), so the base is
+	//     the configured data directory.
+	//   - If no data directory was configured, we fall back to the process
+	//     working directory (filepath.Abs(".")) rather than leaving the read
+	//     unguarded. This keeps the endpoint safe by default.
+	base := h.dataDir
+	if base == "" {
+		// Default-deny posture: contain to the current working directory.
+		if wd, wdErr := filepath.Abs("."); wdErr == nil {
+			base = wd
+		}
+	}
+
+	absConfig, absErr := filepath.Abs(filepath.Clean(req.Path))
+	if absErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	configPath := absConfig
+
+	if base != "" {
+		baseClean := filepath.Clean(base) + string(os.PathSeparator)
+		if !strings.HasPrefix(absConfig+string(os.PathSeparator), baseClean) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "path is outside the allowed data directory"})
+			return
+		}
+	}
+
 	info, err := os.Stat(configPath)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("path not found: %s", configPath)})
+		// Do not echo the resolved absolute path back to the client.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path not found"})
 		return
 	}
 
@@ -972,14 +1017,15 @@ func (h *V1APIHandler) loadWorkflowFromPath(w http.ResponseWriter, r *http.Reque
 	if info.IsDir() {
 		yamlPath := filepath.Join(configPath, "workflow.yaml")
 		if _, err := os.Stat(yamlPath); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("no workflow.yaml in %s", configPath)})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no workflow.yaml in the specified directory"})
 			return
 		}
 		configPath = yamlPath
 	}
 
-	// Read the config file
-	data, err := os.ReadFile(configPath)
+	// Read the config file. configPath has been validated above: it is either
+	// contained within h.dataDir (when set) or passed through filepath.Clean.
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path validated against h.dataDir base directory above
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to read file: %v", err)})
 		return

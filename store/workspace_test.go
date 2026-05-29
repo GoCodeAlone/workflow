@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -44,6 +45,53 @@ func TestWorkspaceManager_StorageForProject_EmptyID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty project ID, got nil")
 	}
+}
+
+// TestWorkspaceManager_StorageForProject_PathTraversal verifies that a
+// malicious projectID cannot escape the workspaces base directory.
+// This covers the go/path-injection CodeQL alert #14 (source: workspace_handler.go).
+func TestWorkspaceManager_StorageForProject_PathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	wm := NewWorkspaceManager(dir)
+
+	// These IDs contain raw path separators / dot-dot sequences that filepath.Join
+	// will collapse, allowing traversal outside the workspaces root.
+	shouldBeRejected := []string{
+		"../../etc/passwd",
+		"../../../tmp/evil",
+		"proj/../../../etc",
+	}
+
+	for _, id := range shouldBeRejected {
+		t.Run(id, func(t *testing.T) {
+			_, err := wm.StorageForProject(id)
+			if err == nil {
+				t.Errorf("StorageForProject(%q): expected error for path traversal, got nil", id)
+			}
+		})
+	}
+
+	// URL-encoded dot-dot sequences (%2e%2e%2f...) are treated literally by the
+	// filesystem — the path becomes /workspaces/%2e%2e%2fetc (inside root).
+	// This is the expected safe behaviour; the test documents it explicitly.
+	t.Run("url_encoded_traversal_is_safe", func(t *testing.T) {
+		id := "%2e%2e%2f%2e%2e%2fetc%2fpasswd"
+		storage, err := wm.StorageForProject(id)
+		if err != nil {
+			// Also acceptable — any error is safe.
+			return
+		}
+		// If no error, verify the root is still inside the workspaces base.
+		root := storage.Root()
+		workspacesBase := filepath.Join(dir, "workspaces")
+		if !filepath.IsAbs(root) {
+			t.Errorf("Root() returned non-absolute path %q", root)
+		}
+		// The root must start with the workspaces base.
+		if !strings.HasPrefix(root, workspacesBase) {
+			t.Errorf("Root() %q escapes workspaces base %q", root, workspacesBase)
+		}
+	})
 }
 
 func TestWorkspaceManager_ProjectIsolation(t *testing.T) {
