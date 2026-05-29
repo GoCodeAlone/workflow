@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -498,5 +499,62 @@ func TestSQLiteAPIKeyStoreFromDB(t *testing.T) {
 	}
 	if validated.Name != "from-db-test" {
 		t.Errorf("Name: got %q, want %q", validated.Name, "from-db-test")
+	}
+}
+
+// TestHashKeyUsesSHA256 verifies that hashKey produces a full SHA-256 hex digest
+// (64 hex characters = 256 bits). This acts as a regression guard: if the
+// implementation were ever downgraded to MD5 (32 chars) or SHA-1 (40 chars),
+// this test would catch it immediately.
+func TestHashKeyUsesSHA256(t *testing.T) {
+	const wantHexLen = 64 // SHA-256 = 32 bytes = 64 hex chars
+
+	inputs := []string{
+		"wf_0000000000000000000000000000dead",
+		"wf_" + strings.Repeat("a", 32),
+		"",
+	}
+	for _, in := range inputs {
+		h := hashKey(in)
+		if len(h) != wantHexLen {
+			t.Errorf("hashKey(%q): got len %d, want %d (SHA-256)", in, len(h), wantHexLen)
+		}
+		if _, err := hex.DecodeString(h); err != nil {
+			t.Errorf("hashKey(%q): output is not valid hex: %v", in, err)
+		}
+	}
+
+	// Same input must always produce the same digest (deterministic).
+	const key = "wf_deterministic_key_test_value00"
+	h1, h2 := hashKey(key), hashKey(key+"") // two separate calls
+	if h1 != h2 {
+		t.Errorf("hashKey is not deterministic: %q != %q", h1, h2)
+	}
+
+	// Different inputs must produce different digests.
+	if hashKey("wf_aaa") == hashKey("wf_bbb") {
+		t.Error("hashKey collision on distinct inputs")
+	}
+}
+
+// TestConstantTimeHashCompare verifies the constant-time equality helper used
+// during API-key validation to prevent timing-oracle attacks.
+func TestConstantTimeHashCompare(t *testing.T) {
+	a := hashKey("wf_" + strings.Repeat("x", 32))
+	b := hashKey("wf_" + strings.Repeat("x", 32))
+	c := hashKey("wf_" + strings.Repeat("y", 32))
+
+	if !constantTimeHashCompare(a, b) {
+		t.Error("identical hashes should compare equal")
+	}
+	if constantTimeHashCompare(a, c) {
+		t.Error("different hashes should not compare equal")
+	}
+	// Empty strings are equal to each other and not equal to a real hash.
+	if !constantTimeHashCompare("", "") {
+		t.Error("empty strings should compare equal")
+	}
+	if constantTimeHashCompare(a, "") {
+		t.Error("hash should not equal empty string")
 	}
 }
