@@ -34,6 +34,10 @@ type Provider struct {
 }
 
 // New creates a new OpenAI AIProvider.
+//
+// NOTE: This provider is currently unwired. The activation site is
+// plugins/ai/plugin.go via aiRegistry.RegisterProvider(New(cfg)) —
+// do NOT wire it via initAIService.
 func New(cfg Config) (*Provider, error) {
 	apiKey := cfg.APIKey
 	if apiKey == "" {

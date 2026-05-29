@@ -47,6 +47,10 @@ type Provider struct {
 }
 
 // New creates a new generic OpenAI-compatible provider.
+//
+// NOTE: This provider is currently unwired. The activation site is
+// plugins/ai/plugin.go via aiRegistry.RegisterProvider(New(cfg)) —
+// do NOT wire it via initAIService.
 func New(cfg Config) (*Provider, error) {
 	if cfg.Name == "" {
 		return nil, fmt.Errorf("generic: provider name is required")
