@@ -8,9 +8,9 @@ require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.8.3 // indirect
 	github.com/GoCodeAlone/go-plugin v1.7.0 // indirect
-	github.com/GoCodeAlone/modular v1.13.0 // indirect
-	github.com/GoCodeAlone/modular/modules/auth v1.15.0 // indirect
-	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.8.0 // indirect
+	github.com/GoCodeAlone/modular v1.13.4 // indirect
+	github.com/GoCodeAlone/modular/modules/auth v1.17.0 // indirect
+	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0 // indirect
 	github.com/GoCodeAlone/yaegi v0.17.2 // indirect
 	github.com/IBM/sarama v1.47.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -50,7 +50,7 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
