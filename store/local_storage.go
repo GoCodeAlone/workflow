@@ -35,11 +35,19 @@ func (l *LocalStorage) Root() string {
 
 // resolve converts a relative storage path to an absolute filesystem path,
 // ensuring the result stays within the root directory.
+//
+// The containment check appends a path separator to both sides so that a root
+// of "/tmp/work" does NOT accidentally allow "/tmp/workevil/..." (a naive
+// HasPrefix check without the separator would pass in that case).
 func (l *LocalStorage) resolve(path string) (string, error) {
 	clean := filepath.Clean(path)
 	abs := filepath.Join(l.root, clean)
-	// Prevent path traversal
-	if !strings.HasPrefix(abs, l.root) {
+	// Append separator to enforce strict directory containment.
+	// l.root is already absolute (set in NewLocalStorage via filepath.Abs).
+	rootWithSep := l.root + string(filepath.Separator)
+	// The resolved path must either equal the root exactly or start with
+	// root+separator (i.e. be inside the root directory tree).
+	if abs != l.root && !strings.HasPrefix(abs, rootWithSep) {
 		return "", fmt.Errorf("path %q escapes storage root", path)
 	}
 	return abs, nil

@@ -960,8 +960,31 @@ func (h *V1APIHandler) loadWorkflowFromPath(w http.ResponseWriter, r *http.Reque
 		req.ProjectID = "00000000-0000-0000-0000-000000000002"
 	}
 
-	// Resolve the config file path
+	// Resolve the config file path and enforce path containment.
+	//
+	// When h.dataDir is set (production), the resolved path must stay inside
+	// h.dataDir so that a malicious or misconfigured request cannot read
+	// arbitrary files from the host filesystem (e.g. /etc/passwd or
+	// ../../secrets). When dataDir is empty (e.g. in tests that construct the
+	// handler without SetDataDir), we still call filepath.Clean to normalise
+	// the path but accept it as-is because the caller is responsible for
+	// providing a trusted value in that mode.
 	configPath := filepath.Clean(req.Path)
+	if h.dataDir != "" {
+		// Anchor: all paths must resolve to inside the configured data directory.
+		baseClean := filepath.Clean(h.dataDir) + string(os.PathSeparator)
+		absConfig, absErr := filepath.Abs(configPath)
+		if absErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+			return
+		}
+		if !strings.HasPrefix(absConfig+string(os.PathSeparator), baseClean) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "path is outside the allowed data directory"})
+			return
+		}
+		configPath = absConfig
+	}
+
 	info, err := os.Stat(configPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("path not found: %s", configPath)})
@@ -978,8 +1001,9 @@ func (h *V1APIHandler) loadWorkflowFromPath(w http.ResponseWriter, r *http.Reque
 		configPath = yamlPath
 	}
 
-	// Read the config file
-	data, err := os.ReadFile(configPath)
+	// Read the config file. configPath has been validated above: it is either
+	// contained within h.dataDir (when set) or passed through filepath.Clean.
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path validated against h.dataDir base directory above
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to read file: %v", err)})
 		return

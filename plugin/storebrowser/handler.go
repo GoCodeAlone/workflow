@@ -172,7 +172,16 @@ func (h *handler) tableRows(w http.ResponseWriter, r *http.Request) {
 
 	orderClause := ""
 	if sortCol != "" {
-		// Validate the column name exists in this table.
+		// Reject sort column names that contain non-identifier characters before
+		// even querying the database. This gives static analysis tools (e.g. CodeQL)
+		// a clear, local sanitizer to track, and prevents any injection attempt
+		// from reaching the DB-schema lookup.
+		if !isValidTableName(sortCol) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid sort column: %s", sortCol))
+			return
+		}
+		// Cross-check the column name against the actual schema of this table so
+		// that we never reference a column that does not exist.
 		validCols, err := getTableColumns(h.db, tableName)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("get columns: %v", err))
@@ -182,14 +191,18 @@ func (h *handler) tableRows(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid sort column: %s", sortCol))
 			return
 		}
-		orderClause = fmt.Sprintf(" ORDER BY %s %s", sortCol, order)
+		// Both sortCol (identifier-validated + schema-checked) and order (normalised
+		// to the literal strings "ASC"/"DESC" above) are safe to interpolate.
+		orderClause = fmt.Sprintf(" ORDER BY %s %s", sortCol, order) //nolint:gosec // G201: sortCol validated by isValidTableName + schema allowlist; order is "ASC"|"DESC"
 	}
 
-	// tableName is validated against the allowlist returned by getValidTables() above,
-	// and orderClause uses a column validated against getTableColumns(). Both are safe
-	// from injection. Parameters are bound via ? placeholders.
-	query := fmt.Sprintf("SELECT * FROM %s%s LIMIT ? OFFSET ?", tableName, orderClause) //nolint:gosec // tableName and orderClause are validated against DB schema above
-	rows, err := h.db.QueryContext(r.Context(), query, limit, offset)                   //nolint:gosec // G701: query built from validated table name and column
+	// tableName is validated against the allowlist returned by getValidTables() above.
+	// orderClause is empty or " ORDER BY <col> ASC|DESC" where <col> passed
+	// isValidTableName (identifier regexp) and was cross-checked against the live
+	// DB schema. LIMIT/OFFSET are bound as ? placeholders. No user input is
+	// interpolated without prior validation.
+	query := fmt.Sprintf("SELECT * FROM %s%s LIMIT ? OFFSET ?", tableName, orderClause) //nolint:gosec // G201: identifiers validated; values parameterised
+	rows, err := h.db.QueryContext(r.Context(), query, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("query rows: %v", err))
 		return
@@ -257,7 +270,18 @@ func (h *handler) execQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := tx.QueryContext(r.Context(), q) //nolint:gosec // G701: query validated by sanitizeReadOnlyQuery
+	// The query is user-supplied SQL executed in a read-only transaction (BeginTx
+	// with TxOptions{ReadOnly:true}).  Before reaching this point the query has
+	// been validated by:
+	//   1. sanitizeReadOnlyQuery — enforces SELECT-only, no statement separators (;),
+	//      no SQL comments (-- / /*).
+	//   2. dangerousKeywords regexp — blocks DROP/DELETE/INSERT/UPDATE/ALTER/CREATE
+	//      and other write keywords regardless of case.
+	// Parameterisation is intentionally impossible here because the user supplies
+	// the full SQL structure (this is an admin read-only SQL REPL). The read-only
+	// transaction boundary means write operations would be rolled back even if
+	// they somehow bypassed the keyword checks.
+	rows, err := tx.QueryContext(r.Context(), q) //nolint:gosec // G201: admin-only read-only SQL REPL; query validated by sanitizeReadOnlyQuery + dangerousKeywords + ReadOnly tx
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("query error: %v", err))
 		return
