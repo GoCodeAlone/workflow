@@ -23,7 +23,6 @@ type nonInteractiveSetupArgs struct {
 	stdinKV        []string // KEY=VALUE lines read from stdin pipe
 	only           []string // --only A,B,C
 	skipExisting   bool     // --skip-existing
-	all            bool     // --all (default)
 }
 
 // runSecretsSetupNonInteractive is the testable, context-less entry point

@@ -48,8 +48,7 @@ var (
 func (m *selectModel) Init() tea.Cmd { return nil }
 
 func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
+	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.quit = true

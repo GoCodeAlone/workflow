@@ -53,9 +53,8 @@ func (m *inputModel) Init() tea.Cmd {
 
 func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
+	if kp, ok := msg.(tea.KeyPressMsg); ok {
+		switch kp.String() {
 		case "ctrl+c":
 			m.quit = true
 			return m, tea.Quit

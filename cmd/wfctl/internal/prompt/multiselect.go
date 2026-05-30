@@ -59,8 +59,7 @@ var (
 func (m *multiSelectModel) Init() tea.Cmd { return nil }
 
 func (m *multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
+	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.quit = true
