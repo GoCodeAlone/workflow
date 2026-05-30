@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/dns/record"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -46,6 +47,8 @@ func runInfraImportAll(args []string) error {
 	fs := flag.NewFlagSet("infra import-all", flag.ContinueOnError)
 	var configFile, envName, providerName, resourceType, pluginDirFlag, outputPath string
 	var dryRun bool
+	var format string
+	var sanitize bool
 	fs.StringVar(&configFile, "config", "", "Config file")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	fs.StringVar(&envName, "env", "", "Environment name")
@@ -55,6 +58,8 @@ func runInfraImportAll(args []string) error {
 	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	fs.StringVar(&outputPath, "output", "", "Optional: dump state-store contents to this file (in addition to the state backend)")
 	fs.StringVar(&outputPath, "o", "", "Output path (short for --output)")
+	fs.StringVar(&format, "format", "state", "Output format for --output: state|portfolio")
+	fs.BoolVar(&sanitize, "sanitize", false, "Portfolio only: redact TXT secrets + example-ize public IPs")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -63,6 +68,12 @@ func runInfraImportAll(args []string) error {
 	}
 	if resourceType == "" {
 		return fmt.Errorf("import-all requires --type (e.g. infra.dns)")
+	}
+	if format != "state" && format != "portfolio" {
+		return fmt.Errorf("import-all: --format %q is not valid; must be state or portfolio", format)
+	}
+	if sanitize && format != "portfolio" {
+		return fmt.Errorf("import-all: --sanitize requires --format portfolio")
 	}
 
 	// Plugin-dir flag follows the same scoped-override pattern used by
@@ -109,7 +120,13 @@ func runInfraImportAll(args []string) error {
 
 	n, dispatchErr := runInfraImportAllWithDeps(ctx, provider, providerType, store, resourceType, dryRun)
 	if outputPath != "" {
-		if werr := dumpStateToFile(ctx, store, outputPath); werr != nil {
+		var werr error
+		if format == "portfolio" {
+			werr = dumpPortfolioToFile(ctx, store, outputPath, sanitize)
+		} else {
+			werr = dumpStateToFile(ctx, store, outputPath)
+		}
+		if werr != nil {
 			// Output dump is auxiliary; surface as a warning rather than
 			// overwriting the dispatch error. Operators care about the
 			// import result first; the dump is a debug-trail bonus.
@@ -307,6 +324,39 @@ func dumpStateToFile(ctx context.Context, store infraStateStore, path string) er
 		return fmt.Errorf("list resources: %w", err)
 	}
 	data, err := json.MarshalIndent(map[string]any{"resources": resources}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// dumpPortfolioToFile converts the state-store contents to a canonical
+// dns-portfolio export and writes it to path as JSON.
+//
+// This is an auxiliary dump (mirroring dumpStateToFile's auxiliary role):
+// errors are surfaced as warnings by the caller and do not change the
+// command exit code — the import + state persistence already succeeded.
+//
+// The portfolio is validated (structural only — unknown record types are
+// preserved, per the design's open-set snapshot contract) before writing.
+// If sanitize is true, TXT secrets + public IPs are redacted so the file
+// can be committed to a public repository.
+func dumpPortfolioToFile(ctx context.Context, store infraStateStore, path string, sanitize bool) error {
+	states, err := store.ListResources(ctx)
+	if err != nil {
+		return fmt.Errorf("list resources: %w", err)
+	}
+	p := record.FromResourceStates(states)
+	if sanitize {
+		record.Sanitize(&p)
+	}
+	if err := p.Validate(); err != nil {
+		return fmt.Errorf("portfolio validate: %w", err)
+	}
+	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
