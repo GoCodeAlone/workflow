@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // SecretPrefix is the URI scheme used in config values to reference secrets.
@@ -32,6 +33,25 @@ type Provider interface {
 	Delete(ctx context.Context, key string) error
 	// List returns all available secret keys. Returns ErrUnsupported if not supported.
 	List(ctx context.Context) ([]string, error)
+}
+
+// SecretMeta is presence + freshness for one key. Never carries a value.
+type SecretMeta struct {
+	Name      string
+	Exists    bool
+	UpdatedAt time.Time // zero when the store doesn't expose it
+}
+
+// MetadataProvider is optional: stores that can report which keys exist and when they changed.
+type MetadataProvider interface {
+	Provider
+	StatAll(ctx context.Context) ([]SecretMeta, error)
+}
+
+// AccessChecker is optional: verify the store is reachable + usable for setup.
+// CheckAccess MUST NOT leak credential material in its error.
+type AccessChecker interface {
+	CheckAccess(ctx context.Context) error
 }
 
 // RotationProvider extends Provider with key rotation capabilities.
