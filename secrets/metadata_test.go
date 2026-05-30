@@ -91,8 +91,9 @@ func TestEnvProvider_StatAll(t *testing.T) {
 		t.Fatalf("expected at least 2 metas, got %d", len(metas))
 	}
 	for _, m := range metas {
-		if m.UpdatedAt.IsZero() {
-			// Env provider can't know mtime — UpdatedAt should always be zero.
+		// Env provider can't know mtime — UpdatedAt is always zero.
+		if !m.UpdatedAt.IsZero() {
+			t.Errorf("key %q: expected zero UpdatedAt for env provider, got %v", m.Name, m.UpdatedAt)
 		}
 		if !m.Exists {
 			t.Errorf("key %q: expected Exists=true", m.Name)
