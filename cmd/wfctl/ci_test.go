@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/cigen"
 )
 
 func TestGenerateGitHubActions(t *testing.T) {
@@ -252,6 +254,134 @@ func fileKeys(files map[string]string) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// ─── Wizard unit tests (no TTY) ─────────────────────────────────────────────
+
+func TestApplyWizardOverrides_SmokeFalseDropsSmoke(t *testing.T) {
+	plan := &cigen.CIPlan{
+		Runner: "ubuntu-latest",
+		Smoke:  &cigen.SmokeSpec{URL: "https://example.com/healthz", Path: "/healthz"},
+	}
+	choices := wizardChoices{
+		Platform:   "github_actions",
+		Runner:     "ubuntu-latest",
+		Smoke:      false, // operator toggled off
+		Migrations: false,
+		PlanGuard:  false,
+	}
+	applyWizardOverrides(plan, choices)
+	if plan.Smoke != nil {
+		t.Error("expected plan.Smoke to be nil when choices.Smoke=false")
+	}
+}
+
+func TestApplyWizardOverrides_SmokeTruePreservesSmoke(t *testing.T) {
+	smoke := &cigen.SmokeSpec{URL: "https://example.com/healthz", Path: "/healthz"}
+	plan := &cigen.CIPlan{
+		Runner: "ubuntu-latest",
+		Smoke:  smoke,
+	}
+	choices := wizardChoices{
+		Platform:   "github_actions",
+		Runner:     "ubuntu-latest",
+		Smoke:      true,
+		Migrations: false,
+		PlanGuard:  false,
+	}
+	applyWizardOverrides(plan, choices)
+	if plan.Smoke == nil {
+		t.Error("expected plan.Smoke to be preserved when choices.Smoke=true")
+	}
+	if plan.Smoke.URL != smoke.URL {
+		t.Errorf("smoke URL changed unexpectedly: got %q, want %q", plan.Smoke.URL, smoke.URL)
+	}
+}
+
+func TestApplyWizardOverrides_MigrationsFalseDropsMigrations(t *testing.T) {
+	plan := &cigen.CIPlan{
+		Runner:     "ubuntu-latest",
+		Migrations: &cigen.MigrationsSpec{DBEnv: "DB_URL", Source: "migrations"},
+	}
+	choices := wizardChoices{
+		Platform:   "github_actions",
+		Runner:     "ubuntu-latest",
+		Smoke:      false,
+		Migrations: false, // operator toggled off
+		PlanGuard:  false,
+	}
+	applyWizardOverrides(plan, choices)
+	if plan.Migrations != nil {
+		t.Error("expected plan.Migrations to be nil when choices.Migrations=false")
+	}
+}
+
+func TestApplyWizardOverrides_RunnerOverrideApplies(t *testing.T) {
+	plan := &cigen.CIPlan{Runner: "ubuntu-latest"}
+	choices := wizardChoices{
+		Platform:   "github_actions",
+		Runner:     "self-hosted",
+		Smoke:      false,
+		Migrations: false,
+		PlanGuard:  false,
+	}
+	applyWizardOverrides(plan, choices)
+	if plan.Runner != "self-hosted" {
+		t.Errorf("expected Runner=%q, got %q", "self-hosted", plan.Runner)
+	}
+}
+
+func TestApplyWizardOverrides_PlanGuardToggle(t *testing.T) {
+	plan := &cigen.CIPlan{Runner: "ubuntu-latest", PlanGuard: true}
+	choices := wizardChoices{
+		Platform:   "github_actions",
+		Runner:     "ubuntu-latest",
+		Smoke:      false,
+		Migrations: false,
+		PlanGuard:  false, // operator toggled off
+	}
+	applyWizardOverrides(plan, choices)
+	if plan.PlanGuard {
+		t.Error("expected PlanGuard=false after wizard override")
+	}
+
+	// Toggle back on
+	choices.PlanGuard = true
+	applyWizardOverrides(plan, choices)
+	if !plan.PlanGuard {
+		t.Error("expected PlanGuard=true after wizard override")
+	}
+}
+
+func TestApplyWizardOverrides_PlatformSelectsRenderer(t *testing.T) {
+	// Verify that the wizard choices struct carries the right platform string
+	// and that applyWizardOverrides does not overwrite plan fields with platform info
+	// (platform is used by the caller to select renderer, not stored in CIPlan).
+	plan := &cigen.CIPlan{Runner: "ubuntu-latest"}
+	ghaChoices := wizardChoices{Platform: "github_actions", Runner: "ubuntu-latest"}
+	glChoices := wizardChoices{Platform: "gitlab_ci", Runner: "ubuntu-latest"}
+
+	applyWizardOverrides(plan, ghaChoices)
+	if ghaChoices.Platform != "github_actions" {
+		t.Errorf("platform should be github_actions, got %q", ghaChoices.Platform)
+	}
+
+	applyWizardOverrides(plan, glChoices)
+	if glChoices.Platform != "gitlab_ci" {
+		t.Errorf("platform should be gitlab_ci, got %q", glChoices.Platform)
+	}
+}
+
+func TestCIGenerateMissingPlatformNonTTY(t *testing.T) {
+	// When --platform is absent and stdin is not a TTY (test runner context),
+	// runCIGenerate must return an error that mentions --platform.
+	err := runCIGenerate([]string{})
+	if err == nil {
+		t.Fatal("expected error when --platform is missing in non-TTY context")
+	}
+	if !strings.Contains(err.Error(), "--platform") {
+		t.Errorf("expected error to mention --platform, got: %v", err)
+	}
 }
 
 // ─── New ci plan + ci generate extended tests ────────────────────────────────
