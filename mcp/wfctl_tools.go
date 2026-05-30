@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/cigen"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/manifest"
 	"github.com/GoCodeAlone/workflow/modernize"
@@ -147,6 +148,27 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleGenerateGithubActions,
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("ci_plan",
+			mcp.WithDescription("Analyze a workflow YAML config and emit a platform-neutral CIPlan JSON. "+
+				"The plan describes project name, wfctl version, deploy phases, secrets union, "+
+				"migrations spec, smoke test URL, plan guard, and warnings. "+
+				"Pass the returned JSON to 'wfctl ci generate --from-plan' to render CI files."),
+			mcp.WithString("yaml_content",
+				mcp.Required(),
+				mcp.Description("The YAML content of the workflow configuration"),
+			),
+			mcp.WithString("phase_config_yaml",
+				mcp.Description("Optional YAML content of a prerequisite phase config (creates a 2-phase plan)"),
+			),
+			mcp.WithString("wfctl_version",
+				mcp.Description("wfctl version to pin in the plan (default: latest)"),
+			),
+			mcp.WithReadOnlyHintAnnotation(true),
+		),
+		s.handleCIPlan,
 	)
 
 	s.mcpServer.AddTool(
@@ -391,29 +413,114 @@ func (s *Server) handleGenerateGithubActions(_ context.Context, req mcp.CallTool
 		return mcp.NewToolResultError("yaml_content is required"), nil
 	}
 
-	cfg, err := config.LoadFromString(yamlContent)
+	// Route through cigen.Analyze + RenderGitHubActions for plan-derived output.
+	plan, err := mcpAnalyzeFromYAML(yamlContent, mcp.ParseString(req, "phase_config_yaml", ""), mcp.ParseString(req, "wfctl_version", ""))
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("YAML parse error: %v", err)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("analyze error: %v", err)), nil
+	}
+	files, err := cigen.RenderGitHubActions(plan)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("render error: %v", err)), nil
+	}
+
+	// Also run legacy feature detection for backward-compat result shape.
+	cfg, cfgErr := config.LoadFromString(yamlContent)
+	var features *mcpProjectFeatures
+	if cfgErr == nil {
+		features = mcpDetectFeatures(cfg)
 	}
 
 	registry := mcp.ParseString(req, "registry", "ghcr.io")
 	platforms := mcp.ParseString(req, "platforms", "linux/amd64,linux/arm64")
 
-	features := mcpDetectFeatures(cfg)
-	ciYAML := mcpGenerateCIWorkflow(features)
-	cdYAML := mcpGenerateCDWorkflow(features, registry, platforms)
-
-	result := map[string]any{
-		"features": features,
-		"ci_yaml":  ciYAML,
-		"cd_yaml":  cdYAML,
+	// Collect ci_yaml from the first generated file for backward compat.
+	var ciYAML string
+	for _, content := range files {
+		ciYAML = content
+		break
 	}
 
-	if features.HasPlugin {
-		result["release_yaml"] = mcpGenerateReleaseWorkflow()
+	result := map[string]any{
+		"plan":     plan,
+		"files":    files,
+		"ci_yaml":  ciYAML,
+		"features": features,
+	}
+
+	if features != nil {
+		cdYAML := mcpGenerateCDWorkflow(features, registry, platforms)
+		result["cd_yaml"] = cdYAML
+		if features.HasPlugin {
+			result["release_yaml"] = mcpGenerateReleaseWorkflow()
+		}
 	}
 
 	return marshalToolResult(result)
+}
+
+// handleCIPlan is the MCP handler for the ci_plan tool.
+func (s *Server) handleCIPlan(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	yamlContent := mcp.ParseString(req, "yaml_content", "")
+	if yamlContent == "" {
+		return mcp.NewToolResultError("yaml_content is required"), nil
+	}
+
+	phaseConfigYAML := mcp.ParseString(req, "phase_config_yaml", "")
+	wfctlVersion := mcp.ParseString(req, "wfctl_version", "")
+
+	plan, err := mcpAnalyzeFromYAML(yamlContent, phaseConfigYAML, wfctlVersion)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("ci_plan error: %v", err)), nil
+	}
+
+	return marshalToolResult(plan)
+}
+
+// Logical, repo-relative config-path names the MCP path hands to cigen.Analyze.
+// The real config bytes live in os.CreateTemp files that are deleted before the
+// CIPlan is returned, so the plan's DeployPhase.ConfigPath (and every generated
+// `--config '...'` step + `paths:` filter) MUST reference these stable names
+// rather than the temp paths. Callers regenerate the config at these paths in
+// their repo checkout.
+const (
+	mcpLogicalConfigPath = "deploy.yaml"
+	mcpLogicalPrereqPath = "deploy.prereq.yaml"
+)
+
+// mcpAnalyzeFromYAML writes YAML content to a temp file, calls cigen.Analyze,
+// and returns the CIPlan. The plan's phase config paths are stable logical
+// names (see mcpLogicalConfigPath) rather than the temp filesystem path, so the
+// generated CI references a real checkout path. phaseConfigYAML may be empty
+// (single-phase plan); when set, the prereq config bytes are parsed via temp
+// file but the plan references mcpLogicalPrereqPath.
+func mcpAnalyzeFromYAML(yamlContent, phaseConfigYAML, wfctlVersion string) (*cigen.CIPlan, error) {
+	// Write primary config to a temp file
+	primaryFile, err := os.CreateTemp("", "wfctl-mcp-config-*.yaml")
+	if err != nil {
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(primaryFile.Name()) //nolint:errcheck
+	if _, err := primaryFile.WriteString(yamlContent); err != nil {
+		primaryFile.Close() //nolint:errcheck
+		return nil, fmt.Errorf("write temp file: %w", err)
+	}
+	primaryFile.Close() //nolint:errcheck
+
+	opts := cigen.Options{
+		WfctlVersion: wfctlVersion,
+		// Use a stable logical path so the generated CI does not point at the
+		// temp file deleted by the defer above.
+		ConfigPathAlias: mcpLogicalConfigPath,
+	}
+
+	// The prereq phase config is only used as a path string by Analyze (its
+	// contents are never read), so we pass the logical name directly without a
+	// temp file.
+	if phaseConfigYAML != "" {
+		opts.PhaseConfig = mcpLogicalPrereqPath
+	}
+
+	return cigen.Analyze([]string{primaryFile.Name()}, opts)
 }
 
 func (s *Server) handleDetectProjectFeatures(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1579,55 +1686,6 @@ func mcpDetectFeatures(cfg *config.WorkflowConfig) *mcpProjectFeatures {
 	sort.Strings(features.ModuleTypes)
 
 	return features
-}
-
-func mcpGenerateCIWorkflow(features *mcpProjectFeatures) string {
-	var b strings.Builder
-
-	b.WriteString("name: CI\n")
-	b.WriteString("on:\n")
-	b.WriteString("  pull_request:\n")
-	b.WriteString("    branches: [main]\n")
-	b.WriteString("  push:\n")
-	b.WriteString("    branches: [main]\n")
-	b.WriteString("\n")
-	b.WriteString("jobs:\n")
-	b.WriteString("  validate:\n")
-	b.WriteString("    runs-on: ubuntu-latest\n")
-	b.WriteString("    steps:\n")
-	b.WriteString("      - uses: actions/checkout@v4\n")
-	b.WriteString("      - uses: actions/setup-go@v5\n")
-	b.WriteString("        with:\n")
-	b.WriteString("          go-version: '1.22'\n")
-	b.WriteString("      - name: Install wfctl\n")
-	b.WriteString("        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest\n")
-	b.WriteString("      - name: Validate config\n")
-	b.WriteString("        run: wfctl validate config.yaml\n")
-	b.WriteString("      - name: Inspect config\n")
-	b.WriteString("        run: wfctl inspect config.yaml\n")
-
-	if features.HasUI {
-		b.WriteString("      - uses: actions/setup-node@v4\n")
-		b.WriteString("        with:\n")
-		b.WriteString("          node-version: '22'\n")
-		b.WriteString("      - name: Build UI\n")
-		b.WriteString("        run: wfctl build-ui --ui-dir ui\n")
-	}
-
-	if features.HasAuth {
-		b.WriteString("      - name: Verify secrets setup\n")
-		b.WriteString("        run: echo \"Secrets configured for auth modules\"\n")
-		b.WriteString("        env:\n")
-		b.WriteString("          JWT_SECRET: ${{ secrets.JWT_SECRET }}\n")
-	}
-
-	if features.HasDatabase {
-		b.WriteString("      - name: Run migrations\n")
-		b.WriteString("        run: wfctl migrate --config config.yaml\n")
-		b.WriteString("        continue-on-error: true\n")
-	}
-
-	return b.String()
 }
 
 func mcpGenerateCDWorkflow(features *mcpProjectFeatures, registry, platforms string) string {

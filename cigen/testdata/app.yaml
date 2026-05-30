@@ -1,0 +1,43 @@
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: ${DIGITALOCEAN_TOKEN}
+      spaces_access_key: ${SPACES_access_key}
+      spaces_secret_key: ${SPACES_secret_key}
+
+  - name: my-app
+    type: infra.container_service
+    protected: true
+    config:
+      provider: do-provider
+      health_check:
+        http_path: /healthz
+      domains:
+        - domain: myapp.example.com
+          type: PRIMARY
+          zone: example.com
+      env_vars_secret:
+        APP_DB_URL: ${APP_DB_URL}
+        APP_SECRET: ${APP_SECRET}
+
+  - name: my-plugin
+    type: analytics.google_provider
+    config:
+      credentials_json: ${GOOGLE_CREDENTIALS}
+
+ci:
+  migrations:
+    - name: app
+      driver: golang-migrate
+      source_dir: migrations
+      database:
+        env: APP_DB_URL
+
+secrets:
+  entries:
+    - name: DIGITALOCEAN_TOKEN
+      description: DigitalOcean API token.
+    - name: RELEASES_TOKEN
+      description: GitHub release token.

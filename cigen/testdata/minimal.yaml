@@ -1,0 +1,5 @@
+modules:
+  - name: web
+    type: http.server
+    config:
+      port: 8080

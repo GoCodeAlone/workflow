@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"text/template"
 
-	"gopkg.in/yaml.v3"
+	"github.com/GoCodeAlone/workflow/cigen"
 )
 
 func runCI(args []string) error {
@@ -20,12 +19,17 @@ func runCI(args []string) error {
 	switch args[0] {
 	case "generate":
 		return runCIGenerate(args[1:])
+	case "plan":
+		return runCIPlan(args[1:])
 	case "run":
 		return runCIRun(args[1:])
 	case "init":
 		return runCIInit(args[1:])
 	case "validate":
 		return runCIValidate(args[1:])
+	case "--help", "-h", "help":
+		_ = ciUsage()
+		return nil
 	default:
 		return ciUsage()
 	}
@@ -38,18 +42,27 @@ Generate CI/CD pipeline configuration files.
 
 Actions:
   generate  Generate CI config for a supported platform
+  plan      Analyze config and emit a CIPlan JSON (platform-neutral)
   run       Run CI phases (build, test, deploy) from workflow config
   init      Generate bootstrap CI YAML for GitHub Actions or GitLab CI
+  validate  Validate CI config sections
 
 Options:
-  --platform <name>   CI platform: github_actions, gitlab_ci (required)
-  --config <file>     Workflow config file (default: app.yaml or infra.yaml)
-  --output <dir>      Output directory (default: .)
-  --runner <label>    Runner label (github_actions only, default: ubuntu-latest)
+  --platform <name>     CI platform: github_actions, gitlab_ci (required for generate)
+  --config <file>       Workflow config file (default: app.yaml or infra.yaml)
+  --out <path>          Output path for generate files (directory, default: .)
+  --from-plan <file>    Skip Analyze; load a CIPlan JSON directly
+  --diff                Print unified diff vs on-disk file instead of writing
+  --exit-code           With --diff: exit 1 when files differ, 0 when identical
+  --write               Allow overwriting existing files
+  --phase-config <file> Prerequisite phase config (adds a prereq DeployPhase)
+  --runner <label>      Runner label (github_actions only, default: ubuntu-latest)
 
 Examples:
-  wfctl ci generate --platform github_actions --config infra.yaml --output .github/workflows/
-  wfctl ci generate --platform gitlab_ci --config infra.yaml --output .
+  wfctl ci plan -c deploy.yaml --out -
+  wfctl ci generate --platform github_actions --config deploy.yaml --write
+  wfctl ci generate --platform github_actions --from-plan plan.json --write
+  wfctl ci generate --platform github_actions --config deploy.yaml --diff --exit-code
 `)
 	return fmt.Errorf("missing or unknown action")
 }
@@ -58,60 +71,164 @@ func runCIGenerate(args []string) error {
 	fs := flag.NewFlagSet("ci generate", flag.ContinueOnError)
 	platform := fs.String("platform", "", "CI platform: github_actions, gitlab_ci")
 	configFile := fs.String("config", "", "Workflow config file")
+	configFileShort := fs.String("c", "", "Workflow config file (shorthand)")
 	outputDir := fs.String("output", ".", "Output directory")
+	out := fs.String("out", "", "Output directory (alias for --output)")
 	runner := fs.String("runner", "ubuntu-latest", "Runner label (github_actions only)")
+	fromPlan := fs.String("from-plan", "", "Load a CIPlan JSON file instead of analyzing")
+	diff := fs.Bool("diff", false, "Print unified diff vs on-disk file instead of writing")
+	exitCode := fs.Bool("exit-code", false, "With --diff: exit 1 when files differ")
+	write := fs.Bool("write", false, "Allow overwriting existing files")
+	phaseConfig := fs.String("phase-config", "", "Prerequisite phase config path")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// Resolve config shorthand
+	if *configFile == "" && *configFileShort != "" {
+		*configFile = *configFileShort
+	}
+	// --out as alias for --output
+	if *out != "" && *outputDir == "." {
+		*outputDir = *out
 	}
 
 	if *platform == "" {
 		return fmt.Errorf("--platform is required (github_actions, gitlab_ci)")
 	}
 
-	cfg, err := resolveCIConfig(*configFile)
-	if err != nil {
-		return err
+	// Build the plan
+	var plan *cigen.CIPlan
+	if *fromPlan != "" {
+		data, err := os.ReadFile(*fromPlan)
+		if err != nil {
+			return fmt.Errorf("ci generate: read plan: %w", err)
+		}
+		plan = &cigen.CIPlan{}
+		if err := json.Unmarshal(data, plan); err != nil {
+			return fmt.Errorf("ci generate: parse plan: %w", err)
+		}
+	} else {
+		configPath, err := resolveCIConfig(*configFile)
+		if err != nil {
+			return err
+		}
+		opts := cigen.Options{
+			WfctlVersion: ciGeneratedWfctlVersion(),
+			Runner:       *runner,
+			PhaseConfig:  *phaseConfig,
+		}
+		var analyzeErr error
+		plan, analyzeErr = cigen.Analyze([]string{configPath}, opts)
+		if analyzeErr != nil {
+			return fmt.Errorf("ci generate: analyze: %w", analyzeErr)
+		}
 	}
 
-	moduleTypes := detectModuleTypes(cfg)
-
-	opts := ciOptions{
-		Platform:    *platform,
-		InfraConfig: cfg,
-		OutputDir:   *outputDir,
-		Runner:      *runner,
-		HasInfra:    moduleTypes["infra"],
-		HasDatabase: moduleTypes["database"],
+	// Render
+	var files map[string]string
+	var renderErr error
+	switch *platform {
+	case "github_actions":
+		files, renderErr = cigen.RenderGitHubActions(plan)
+	case "gitlab_ci":
+		files, renderErr = cigen.RenderGitLabCI(plan)
+	default:
+		return fmt.Errorf("unsupported platform %q (supported: github_actions, gitlab_ci)", *platform)
+	}
+	if renderErr != nil {
+		return renderErr
 	}
 
-	files, err := generateCIFiles(opts)
-	if err != nil {
-		return err
+	// --diff mode: print diff and optionally exit 1 if different
+	if *diff {
+		hasDiff := false
+		for relPath, content := range files {
+			destPath := resolveOutputPath(relPath, *outputDir)
+			existing, err := os.ReadFile(destPath)
+			if err != nil {
+				// File doesn't exist — everything is a diff
+				fmt.Printf("--- %s (new file)\n+++ %s\n", destPath, destPath)
+				for _, line := range strings.Split(content, "\n") {
+					fmt.Printf("+ %s\n", line)
+				}
+				hasDiff = true
+				continue
+			}
+			if string(existing) != content {
+				hasDiff = true
+				fmt.Printf("--- %s\n+++ %s (generated)\n", destPath, destPath)
+				printLineDiff(string(existing), content)
+			}
+		}
+		if *exitCode && hasDiff {
+			os.Exit(1)
+		}
+		return nil
 	}
 
+	// Write mode: write files, respecting --write flag
 	if err := os.MkdirAll(*outputDir, 0o750); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
 	for relPath, content := range files {
-		dest := filepath.Join(*outputDir, filepath.Base(relPath))
-		// Preserve subdirectory structure relative to output for GHA workflows
-		if strings.Contains(relPath, "/") {
-			// relPath is already a full relative path like .github/workflows/infra.yml
-			// Write relative to cwd, not outputDir
-			dest = relPath
-			if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
-				return fmt.Errorf("create dir for %s: %w", dest, err)
-			}
+		destPath := resolveOutputPath(relPath, *outputDir)
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
+			return fmt.Errorf("create dir for %s: %w", destPath, err)
 		}
-		if err := os.WriteFile(dest, []byte(content), 0o600); err != nil {
-			return fmt.Errorf("write %s: %w", dest, err)
+		if _, err := os.Stat(destPath); err == nil && !*write {
+			return fmt.Errorf("file %s already exists; use --write to overwrite", destPath)
 		}
-		fmt.Printf("wrote %s\n", dest)
+		if err := os.WriteFile(destPath, []byte(content), 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", destPath, err)
+		}
+		fmt.Printf("wrote %s\n", destPath)
 	}
 
 	return nil
 }
+
+// resolveOutputPath determines the final destination for a generated file.
+// When outputDir is "." (the default), paths that contain "/" are kept relative
+// to cwd (e.g. .github/workflows/foo.yml stays as-is). When outputDir is an
+// explicit non-"." directory, ALL generated paths are rooted there.
+func resolveOutputPath(relPath, outputDir string) string {
+	if outputDir == "" || outputDir == "." {
+		return relPath
+	}
+	return filepath.Join(outputDir, relPath)
+}
+
+// printLineDiff prints a simple +/- line-level diff.
+func printLineDiff(old, newStr string) {
+	oldLines := strings.Split(old, "\n")
+	newLines := strings.Split(newStr, "\n")
+
+	maxLen := len(oldLines)
+	if len(newLines) > maxLen {
+		maxLen = len(newLines)
+	}
+	for i := 0; i < maxLen; i++ {
+		var ov, nv string
+		if i < len(oldLines) {
+			ov = oldLines[i]
+		}
+		if i < len(newLines) {
+			nv = newLines[i]
+		}
+		if ov != nv {
+			if i < len(oldLines) {
+				fmt.Printf("- %s\n", ov)
+			}
+			if i < len(newLines) {
+				fmt.Printf("+ %s\n", nv)
+			}
+		}
+	}
+}
+
+// ── Legacy API: keep ciOptions and generateCIFiles for backward-compat tests ─
 
 // resolveCIConfig finds the config file or tries defaults.
 func resolveCIConfig(explicit string) (string, error) {
@@ -126,34 +243,7 @@ func resolveCIConfig(explicit string) (string, error) {
 	return "infra.yaml", nil // fall back to the conventional name even if absent
 }
 
-// detectModuleTypes parses the config YAML and returns which module categories exist.
-func detectModuleTypes(cfgFile string) map[string]bool {
-	data, err := os.ReadFile(cfgFile)
-	if err != nil {
-		return map[string]bool{}
-	}
-	var parsed struct {
-		Modules []struct {
-			Type string `yaml:"type"`
-		} `yaml:"modules"`
-	}
-	if err := yaml.Unmarshal(data, &parsed); err != nil {
-		return map[string]bool{}
-	}
-	result := map[string]bool{}
-	for _, m := range parsed.Modules {
-		switch {
-		case strings.HasPrefix(m.Type, "infra."):
-			result["infra"] = true
-		case strings.HasPrefix(m.Type, "database."):
-			result["database"] = true
-		case strings.HasPrefix(m.Type, "platform."):
-			result["platform"] = true
-		}
-	}
-	return result
-}
-
+// ciOptions is retained for backward-compatible internal use by tests.
 type ciOptions struct {
 	Platform    string
 	InfraConfig string
@@ -163,6 +253,8 @@ type ciOptions struct {
 	HasDatabase bool
 }
 
+// generateCIFiles is the legacy entry point used by existing tests.
+// It builds a minimal CIPlan from ciOptions and delegates to the cigen renderers.
 func generateCIFiles(opts ciOptions) (map[string]string, error) {
 	switch opts.Platform {
 	case "github_actions":
@@ -174,222 +266,40 @@ func generateCIFiles(opts ciOptions) (map[string]string, error) {
 	}
 }
 
-// ── GitHub Actions ────────────────────────────────────────────────────────────
-
-type ghaTemplateData struct {
-	InfraConfig  string
-	Runner       string
-	Branch       string
-	WfctlVersion string
-}
-
+// generateGitHubActions builds a minimal CIPlan from opts and renders GHA files.
 func generateGitHubActions(opts ciOptions) (map[string]string, error) {
-	data := ghaTemplateData{
-		InfraConfig:  opts.InfraConfig,
-		Runner:       opts.Runner,
-		Branch:       "main",
-		WfctlVersion: ciGeneratedWfctlVersion(),
-	}
-
-	infraYAML, err := renderCITemplate("gha-infra", ghaInfraTemplate, data)
-	if err != nil {
-		return nil, fmt.Errorf("render infra.yml: %w", err)
-	}
-
-	buildYAML, err := renderCITemplate("gha-build", ghaBuildTemplate, data)
-	if err != nil {
-		return nil, fmt.Errorf("render build.yml: %w", err)
-	}
-
-	return map[string]string{
-		".github/workflows/infra.yml": infraYAML,
-		".github/workflows/build.yml": buildYAML,
-	}, nil
+	plan := ciOptionsToPlan(opts)
+	return cigen.RenderGitHubActions(plan)
 }
 
-const ghaInfraTemplate = `name: Infrastructure
-on:
-  pull_request:
-    paths:
-      - '{{.InfraConfig}}'
-      - 'infra/**'
-  push:
-    branches:
-      - {{.Branch}}
-    paths:
-      - '{{.InfraConfig}}'
-      - 'infra/**'
-permissions:
-  contents: read
-  pull-requests: write
-jobs:
-  plan:
-    if: github.event_name == 'pull_request'
-    runs-on: '{{.Runner}}'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Install wfctl
-        uses: GoCodeAlone/setup-wfctl@v1
-        with:
-          version: '{{.WfctlVersion}}'
-      - name: Plan infrastructure
-        run: wfctl infra plan --config '{{.InfraConfig}}' --format markdown > plan.md
-      - name: Post plan comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const plan = fs.readFileSync('plan.md', 'utf8');
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: plan
-            });
-  apply:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/{{.Branch}}'
-    runs-on: '{{.Runner}}'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Install wfctl
-        uses: GoCodeAlone/setup-wfctl@v1
-        with:
-          version: '{{.WfctlVersion}}'
-      - name: Apply infrastructure
-        run: wfctl infra apply --config '{{.InfraConfig}}' --auto-approve
-`
-
-const ghaBuildTemplate = `name: Build
-on:
-  push:
-    branches:
-      - {{.Branch}}
-  pull_request:
-    branches:
-      - {{.Branch}}
-permissions:
-  contents: read
-  packages: write
-jobs:
-  build:
-    runs-on: '{{.Runner}}'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Install wfctl
-        uses: GoCodeAlone/setup-wfctl@v1
-        with:
-          version: '{{.WfctlVersion}}'
-      - name: Run tests
-        env:
-          INFRA_CONFIG: '{{.InfraConfig}}'
-        run: wfctl ci run --config "$INFRA_CONFIG" --phase test
-      - name: Build without push
-        env:
-          INFRA_CONFIG: '{{.InfraConfig}}'
-        run: wfctl build --config "$INFRA_CONFIG" --no-push --tag ci --fallback-go-build
-`
-
-// ── GitLab CI ─────────────────────────────────────────────────────────────────
-
-type gitlabTemplateData struct {
-	InfraConfig  string
-	Branch       string
-	WfctlVersion string
-}
-
+// generateGitLabCI builds a minimal CIPlan from opts and renders GitLab CI.
 func generateGitLabCI(opts ciOptions) (map[string]string, error) {
-	data := gitlabTemplateData{
-		InfraConfig:  opts.InfraConfig,
-		Branch:       "main",
-		WfctlVersion: ciGeneratedWfctlVersion(),
-	}
-
-	content, err := renderCITemplate("gitlab-ci", gitlabCITemplate, data)
-	if err != nil {
-		return nil, fmt.Errorf("render .gitlab-ci.yml: %w", err)
-	}
-
-	return map[string]string{
-		".gitlab-ci.yml": content,
-	}, nil
+	plan := ciOptionsToPlan(opts)
+	return cigen.RenderGitLabCI(plan)
 }
 
-const gitlabCITemplate = `stages:
-  - plan
-  - apply
-  - build
-
-variables:
-  INFRA_CONFIG: "{{.InfraConfig}}"
-  WFCTL_VERSION: "{{.WfctlVersion}}"
-
-before_script:
-  - go install "github.com/GoCodeAlone/workflow/cmd/wfctl@${WFCTL_VERSION}"
-  - export PATH="$(go env GOPATH)/bin:$PATH"
-
-infra-plan:
-  stage: plan
-  script:
-    - wfctl infra plan --config "$INFRA_CONFIG" --format markdown > plan.md
-  artifacts:
-    paths:
-      - plan.md
-    expire_in: 1 hour
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - "{{.InfraConfig}}"
-        - "infra/**/*"
-
-infra-apply:
-  stage: apply
-  needs:
-    - job: infra-plan
-      artifacts: true
-  script:
-    - wfctl infra apply --config "$INFRA_CONFIG" --auto-approve
-  environment:
-    name: production
-  rules:
-    - if: $CI_COMMIT_BRANCH == "{{.Branch}}" && $CI_PIPELINE_SOURCE == "push"
-      changes:
-        - "{{.InfraConfig}}"
-        - "infra/**/*"
-
-build:
-  stage: build
-  needs: []
-  script:
-    - wfctl ci run --config "$INFRA_CONFIG" --phase test
-    - wfctl build --config "$INFRA_CONFIG" --no-push --tag ci --fallback-go-build
-  rules:
-    - if: $CI_COMMIT_BRANCH == "{{.Branch}}"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-`
-
-// renderCITemplate executes a named text/template with data and returns the result.
-func renderCITemplate(name, tmplStr string, data any) (string, error) {
-	tmpl, err := template.New(name).Parse(tmplStr)
-	if err != nil {
-		return "", err
+// ciOptionsToPlan converts legacy ciOptions to a minimal CIPlan.
+func ciOptionsToPlan(opts ciOptions) *cigen.CIPlan {
+	configPath := opts.InfraConfig
+	if configPath == "" {
+		configPath = "infra.yaml"
 	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
+	runner := opts.Runner
+	if runner == "" {
+		runner = "ubuntu-latest"
 	}
-	return buf.String(), nil
+	return &cigen.CIPlan{
+		Project:       "infra",
+		WfctlVersion:  ciGeneratedWfctlVersion(),
+		DefaultBranch: "main",
+		Runner:        runner,
+		Phases: []cigen.DeployPhase{
+			{Name: "deploy", ConfigPath: configPath},
+		},
+		Secrets:  []cigen.SecretRef{},
+		Warnings: []string{},
+		Triggers: cigen.TriggerSpec{PR: true, PushMain: true, Dispatch: true},
+	}
 }
 
 var cleanReleaseTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
