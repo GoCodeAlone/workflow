@@ -108,8 +108,18 @@ func resolveSecretsProviderForEnv(cfg *SecretsConfig, envName string) (secrets.P
 		}
 		return secrets.NewKeychainProvider(service)
 
+	case "file":
+		path, _ := c["path"].(string)
+		if path == "" {
+			return nil, fmt.Errorf("secrets.file: 'path' is required")
+		}
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return nil, fmt.Errorf("secrets.file: create directory %s: %w", path, err)
+		}
+		return secrets.NewFileProvider(path), nil
+
 	default:
-		return nil, fmt.Errorf("unknown secrets provider %q (supported: github, vault, aws, env, keychain)", cfg.Provider)
+		return nil, fmt.Errorf("unknown secrets provider %q (supported: github, vault, aws, env, keychain, file)", cfg.Provider)
 	}
 }
 
