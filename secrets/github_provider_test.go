@@ -516,6 +516,98 @@ func TestGitHubProvider_RepoScope_NoVisibility(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// StatAll + CheckAccess tests
+// ---------------------------------------------------------------------------
+
+func TestGitHubProvider_StatAll(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/actions/secrets":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"secrets": []map[string]any{
+					{
+						"name":       "A",
+						"created_at": "2026-05-01T00:00:00Z",
+						"updated_at": "2026-05-20T00:00:00Z",
+					},
+				},
+			})
+		case "/repos/owner/repo/actions/secrets/public-key":
+			// 32 zero bytes encoded as base64
+			key := make([]byte, 32)
+			json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+				"key_id": "1",
+				"key":    base64.StdEncoding.EncodeToString(key),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+
+	metas, err := p.StatAll(context.Background())
+	if err != nil {
+		t.Fatalf("StatAll: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 meta, got %d", len(metas))
+	}
+	if metas[0].Name != "A" {
+		t.Errorf("Name = %q, want A", metas[0].Name)
+	}
+	if !metas[0].Exists {
+		t.Error("expected Exists=true")
+	}
+	// UpdatedAt should be 2026-05-20
+	if metas[0].UpdatedAt.Year() != 2026 || metas[0].UpdatedAt.Month() != 5 || metas[0].UpdatedAt.Day() != 20 {
+		t.Errorf("UpdatedAt = %v, want 2026-05-20", metas[0].UpdatedAt)
+	}
+}
+
+func TestGitHubProvider_CheckAccess_Success(t *testing.T) {
+	key := make([]byte, 32)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			"key_id": "1",
+			"key":    base64.StdEncoding.EncodeToString(key),
+		})
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	if err := p.CheckAccess(context.Background()); err != nil {
+		t.Errorf("CheckAccess expected nil, got %v", err)
+	}
+}
+
+func TestGitHubProvider_CheckAccess_Forbidden(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"must have admin rights"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	err := p.CheckAccess(context.Background())
+	if err == nil {
+		t.Fatal("expected non-nil error for 403")
+	}
+	// Must NOT contain the token string.
+	if strings.Contains(err.Error(), "test-token") {
+		t.Errorf("error leaks token: %v", err)
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should mention 403: %v", err)
+	}
+	if !strings.Contains(err.Error(), "creds redacted") {
+		t.Errorf("error should mention 'creds redacted': %v", err)
+	}
+}
+
 func TestGitHubProvider_ScopeReporter(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "x")
 	p, _ := NewGitHubSecretsProvider("o/r", "GITHUB_TOKEN")
