@@ -1,0 +1,132 @@
+name: multisite
+on:
+  pull_request:
+    paths:
+      - 'deploy.prereq.yaml'
+      - 'deploy.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy.prereq.yaml'
+      - 'deploy.yaml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install wfctl
+        uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: 'latest'
+      - name: Install plugins (prereq)
+        run: wfctl plugin install --config 'deploy.prereq.yaml'
+      - name: Install plugins (deploy)
+        run: wfctl plugin install --config 'deploy.yaml'
+      - name: Plan prereq
+        run: wfctl infra plan --config 'deploy.prereq.yaml' --format markdown >> plan.md
+      - name: Plan deploy
+        run: wfctl infra plan --config 'deploy.yaml' --format markdown >> plan.md
+      - name: Post plan comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: plan
+            });
+  apply-prereq:
+    if: "(github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'"
+    runs-on: ubuntu-latest
+    env:
+      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      GHCR_CREDENTIALS: ${{ secrets.GHCR_CREDENTIALS }}
+      GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON: ${{ secrets.GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON }}
+      MULTISITE_AUDIT_SIGN_KEY: ${{ secrets.MULTISITE_AUDIT_SIGN_KEY }}
+      MULTISITE_CONTENT_REPO_TOKEN: ${{ secrets.MULTISITE_CONTENT_REPO_TOKEN }}
+      MULTISITE_DB_URL: ${{ secrets.MULTISITE_DB_URL }}
+      MULTISITE_INGEST_HMAC_SECRET: ${{ secrets.MULTISITE_INGEST_HMAC_SECRET }}
+      MULTISITE_JWT_SECRET: ${{ secrets.MULTISITE_JWT_SECRET }}
+      MULTISITE_OAUTH_FACEBOOK_APP_ID: ${{ secrets.MULTISITE_OAUTH_FACEBOOK_APP_ID }}
+      MULTISITE_OAUTH_FACEBOOK_APP_SECRET: ${{ secrets.MULTISITE_OAUTH_FACEBOOK_APP_SECRET }}
+      MULTISITE_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.MULTISITE_OAUTH_GOOGLE_CLIENT_ID }}
+      MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET }}
+      MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE: ${{ secrets.MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE }}
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      SPACES_access_key: ${{ secrets.SPACES_access_key }}
+      SPACES_secret_key: ${{ secrets.SPACES_secret_key }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install wfctl
+        uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: 'latest'
+      - name: Install plugins
+        run: wfctl plugin install --config 'deploy.prereq.yaml'
+      - name: Plan guard
+        run: |
+          wfctl infra plan --config 'deploy.prereq.yaml' | tee plan-guard.txt
+          if grep -Eq -- '^[[:space:]]*(- delete|-/\+ replace)[[:space:]]' plan-guard.txt || \
+             grep -Eq -- 'Plan: .*([1-9][0-9]* to replace|[1-9][0-9]* to destroy)' plan-guard.txt; then
+            echo "::error::Refusing apply: plan includes replace or destroy of a protected resource." >&2
+            exit 1
+          fi
+      - name: Apply prereq
+        run: wfctl infra apply --config 'deploy.prereq.yaml' --auto-approve
+  apply-deploy:
+    if: "(github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'"
+    needs: apply-prereq
+    runs-on: ubuntu-latest
+    env:
+      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      GHCR_CREDENTIALS: ${{ secrets.GHCR_CREDENTIALS }}
+      GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON: ${{ secrets.GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON }}
+      MULTISITE_AUDIT_SIGN_KEY: ${{ secrets.MULTISITE_AUDIT_SIGN_KEY }}
+      MULTISITE_CONTENT_REPO_TOKEN: ${{ secrets.MULTISITE_CONTENT_REPO_TOKEN }}
+      MULTISITE_DB_URL: ${{ secrets.MULTISITE_DB_URL }}
+      MULTISITE_INGEST_HMAC_SECRET: ${{ secrets.MULTISITE_INGEST_HMAC_SECRET }}
+      MULTISITE_JWT_SECRET: ${{ secrets.MULTISITE_JWT_SECRET }}
+      MULTISITE_OAUTH_FACEBOOK_APP_ID: ${{ secrets.MULTISITE_OAUTH_FACEBOOK_APP_ID }}
+      MULTISITE_OAUTH_FACEBOOK_APP_SECRET: ${{ secrets.MULTISITE_OAUTH_FACEBOOK_APP_SECRET }}
+      MULTISITE_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.MULTISITE_OAUTH_GOOGLE_CLIENT_ID }}
+      MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET }}
+      MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE: ${{ secrets.MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE }}
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      SPACES_access_key: ${{ secrets.SPACES_access_key }}
+      SPACES_secret_key: ${{ secrets.SPACES_secret_key }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install wfctl
+        uses: GoCodeAlone/setup-wfctl@v1
+        with:
+          version: 'latest'
+      - name: Install plugins
+        run: wfctl plugin install --config 'deploy.yaml'
+      - name: Plan guard
+        run: |
+          wfctl infra plan --config 'deploy.yaml' | tee plan-guard.txt
+          if grep -Eq -- '^[[:space:]]*(- delete|-/\+ replace)[[:space:]]' plan-guard.txt || \
+             grep -Eq -- 'Plan: .*([1-9][0-9]* to replace|[1-9][0-9]* to destroy)' plan-guard.txt; then
+            echo "::error::Refusing apply: plan includes replace or destroy of a protected resource." >&2
+            exit 1
+          fi
+      - name: Run migrations
+        run: wfctl migrations up --config 'deploy.yaml'
+      - name: Apply deploy
+        run: wfctl infra apply --config 'deploy.yaml' --auto-approve
+  smoke:
+    needs: apply-deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Smoke test
+        run: |
+          curl --fail --max-time 30 'https://gocodealone.tech/healthz'

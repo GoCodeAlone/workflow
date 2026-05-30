@@ -36,6 +36,10 @@ type Options struct {
 	// so generated CI steps and path filters reference a real checkout path
 	// rather than a deleted /tmp file.
 	ConfigPathAlias string
+	// PhaseConfigAlias is the ConfigPathAlias equivalent for the prereq phase.
+	// When set, it is used verbatim as the prereq DeployPhase.ConfigPath
+	// instead of the relativized PhaseConfig filesystem path.
+	PhaseConfigAlias string
 }
 
 // Analyze reads the workflow config files in configs and derives a CIPlan.
@@ -99,7 +103,11 @@ func Analyze(configs []string, opts Options) (*CIPlan, error) {
 	}
 	phaseConfigPath := opts.PhaseConfig
 	if phaseConfigPath != "" {
-		phaseConfigPath = relativizeConfigPath(phaseConfigPath)
+		if opts.PhaseConfigAlias != "" {
+			phaseConfigPath = opts.PhaseConfigAlias
+		} else {
+			phaseConfigPath = relativizeConfigPath(phaseConfigPath)
+		}
 	}
 	plan.Phases = derivePhases(primaryConfigPath, phaseConfigPath)
 

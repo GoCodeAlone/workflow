@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/cigen"
+	"github.com/mattn/go-isatty"
 )
 
 func runCI(args []string) error {
@@ -80,6 +81,9 @@ func runCIGenerate(args []string) error {
 	exitCode := fs.Bool("exit-code", false, "With --diff: exit 1 when files differ")
 	write := fs.Bool("write", false, "Allow overwriting existing files")
 	phaseConfig := fs.String("phase-config", "", "Prerequisite phase config path")
+	configPathAlias := fs.String("config-path-alias", "", "Logical repo-relative path for the primary config in generated CI (default: relativized real path)")
+	phaseConfigAlias := fs.String("phase-config-alias", "", "Logical repo-relative path for the prereq config in generated CI")
+	interactive := fs.Bool("interactive", false, "Force interactive wizard even when --platform is set")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -93,8 +97,13 @@ func runCIGenerate(args []string) error {
 		*outputDir = *out
 	}
 
-	if *platform == "" {
-		return fmt.Errorf("--platform is required (github_actions, gitlab_ci)")
+	// When --platform is absent, use the interactive wizard (TTY required).
+	// When stdin is not a TTY and --platform is also absent, fail clearly.
+	if *platform == "" && !*interactive {
+		if !isatty.IsTerminal(os.Stdin.Fd()) {
+			return fmt.Errorf("specify --platform for non-interactive generation (github_actions, gitlab_ci)")
+		}
+		// Fall through — wizard will be run after the plan is built.
 	}
 
 	// Build the plan
@@ -114,9 +123,11 @@ func runCIGenerate(args []string) error {
 			return err
 		}
 		opts := cigen.Options{
-			WfctlVersion: ciGeneratedWfctlVersion(),
-			Runner:       *runner,
-			PhaseConfig:  *phaseConfig,
+			WfctlVersion:     ciGeneratedWfctlVersion(),
+			Runner:           *runner,
+			PhaseConfig:      *phaseConfig,
+			ConfigPathAlias:  *configPathAlias,
+			PhaseConfigAlias: *phaseConfigAlias,
 		}
 		var analyzeErr error
 		plan, analyzeErr = cigen.Analyze([]string{configPath}, opts)
@@ -125,16 +136,34 @@ func runCIGenerate(args []string) error {
 		}
 	}
 
+	// Wizard: run when --platform is absent or --interactive is explicitly set.
+	// The wizard populates choices which override plan fields and set the platform.
+	resolvedPlatform := *platform
+	if resolvedPlatform == "" || *interactive {
+		choices, wizErr := runCIWizard(plan)
+		if wizErr != nil {
+			return fmt.Errorf("ci generate: wizard: %w", wizErr)
+		}
+		applyWizardOverrides(plan, choices)
+		if resolvedPlatform == "" {
+			resolvedPlatform = choices.Platform
+		}
+		// Wizard controls the write flag when it ran (unless already set via CLI)
+		if !*write && choices.Write {
+			*write = true
+		}
+	}
+
 	// Render
 	var files map[string]string
 	var renderErr error
-	switch *platform {
+	switch resolvedPlatform {
 	case "github_actions":
 		files, renderErr = cigen.RenderGitHubActions(plan)
 	case "gitlab_ci":
 		files, renderErr = cigen.RenderGitLabCI(plan)
 	default:
-		return fmt.Errorf("unsupported platform %q (supported: github_actions, gitlab_ci)", *platform)
+		return fmt.Errorf("unsupported platform %q (supported: github_actions, gitlab_ci)", resolvedPlatform)
 	}
 	if renderErr != nil {
 		return renderErr

@@ -1,0 +1,86 @@
+{
+  "project": "multisite",
+  "wfctl_version": "latest",
+  "default_branch": "main",
+  "runner": "ubuntu-latest",
+  "plugin_install": true,
+  "secrets": [
+    {
+      "name": "DIGITALOCEAN_TOKEN"
+    },
+    {
+      "name": "GHCR_CREDENTIALS"
+    },
+    {
+      "name": "GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON"
+    },
+    {
+      "name": "MULTISITE_AUDIT_SIGN_KEY"
+    },
+    {
+      "name": "MULTISITE_CONTENT_REPO_TOKEN"
+    },
+    {
+      "name": "MULTISITE_DB_URL"
+    },
+    {
+      "name": "MULTISITE_INGEST_HMAC_SECRET"
+    },
+    {
+      "name": "MULTISITE_JWT_SECRET"
+    },
+    {
+      "name": "MULTISITE_OAUTH_FACEBOOK_APP_ID"
+    },
+    {
+      "name": "MULTISITE_OAUTH_FACEBOOK_APP_SECRET"
+    },
+    {
+      "name": "MULTISITE_OAUTH_GOOGLE_CLIENT_ID"
+    },
+    {
+      "name": "MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET"
+    },
+    {
+      "name": "MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE"
+    },
+    {
+      "name": "RELEASES_TOKEN"
+    },
+    {
+      "name": "SPACES_access_key"
+    },
+    {
+      "name": "SPACES_secret_key"
+    }
+  ],
+  "phases": [
+    {
+      "name": "prereq",
+      "config_path": "deploy.prereq.yaml"
+    },
+    {
+      "name": "deploy",
+      "config_path": "deploy.yaml"
+    }
+  ],
+  "migrations": {
+    "db_env": "MULTISITE_DB_URL",
+    "source": "migrations"
+  },
+  "smoke": {
+    "url": "https://gocodealone.tech/healthz",
+    "path": "/healthz"
+  },
+  "plan_guard": true,
+  "triggers": {
+    "pr": true,
+    "push_main": true,
+    "dispatch": true
+  },
+  "warnings": [
+    "secret \"MULTISITE_DB_URL\" is populated by IaC output — the real GitHub secret name may differ (e.g. include a resource hash suffix); verify the secret name matches what wfctl infra bootstrap writes",
+    "secret \"SPACES_access_key\" does not match ^[A-Z0-9_]+$ — the config casing is preserved as-is; you may need a GitHub-side alias if the platform normalises secret names to upper-case",
+    "secret \"SPACES_secret_key\" does not match ^[A-Z0-9_]+$ — the config casing is preserved as-is; you may need a GitHub-side alias if the platform normalises secret names to upper-case"
+  ]
+}

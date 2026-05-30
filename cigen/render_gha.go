@@ -205,17 +205,31 @@ func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs 
 		b.WriteString("          fi\n")
 	}
 
-	// Migrations step (only in the last phase)
+	// Migrations step (only in the last phase). Use `wfctl migrations up`,
+	// the real migration runner — `wfctl ci run --phase migrate` is NOT a valid
+	// phase (ci run only accepts build|test|deploy) and would fail at runtime.
+	// No step-level `env:` is needed: deriveSecrets always adds the migrations
+	// DBEnv to the secrets union, so it is already in the apply job's job-level
+	// `env:` block above; re-declaring it here would be redundant.
 	isLastPhase := phase.Name == p.Phases[len(p.Phases)-1].Name
 	if isLastPhase && p.Migrations != nil {
 		b.WriteString("      - name: Run migrations\n")
-		fmt.Fprintf(b, "        run: wfctl ci run --config '%s' --phase migrate\n", phase.ConfigPath)
-		b.WriteString("        env:\n")
-		fmt.Fprintf(b, "          %s: ${{ secrets.%s }}\n", p.Migrations.DBEnv, p.Migrations.DBEnv)
+		fmt.Fprintf(b, "        run: %s\n", migrationsUpCommand(phase.ConfigPath, p.Migrations.Env))
 	}
 
 	fmt.Fprintf(b, "      - name: Apply %s\n", phase.Name)
 	fmt.Fprintf(b, "        run: wfctl infra apply --config '%s' --auto-approve\n", phase.ConfigPath)
+}
+
+// migrationsUpCommand builds the `wfctl migrations up` invocation. The deploy
+// env is included as `--env <env>` only when MigrationsSpec.Env is set;
+// otherwise it is omitted (the command defaults to the empty environment).
+func migrationsUpCommand(configPath, env string) string {
+	cmd := fmt.Sprintf("wfctl migrations up --config '%s'", configPath)
+	if env != "" {
+		cmd += fmt.Sprintf(" --env %s", env)
+	}
+	return cmd
 }
 
 // writePhasePaths emits the paths filter for push/pull_request triggers.
