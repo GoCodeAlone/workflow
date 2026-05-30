@@ -7,7 +7,7 @@
 # extended in that design's Phase 0. It exists because review cycles kept
 # finding hand-maintained inventory claims wrong — first grep matching SDK
 # names inside doc comments (cycle 9), then a survey scoped to module/ that
-# missed aws-sdk importers in provider/, plugin/rbac/, iam/, artifact/
+# missed aws-sdk importers in provider/, iam/, artifact/
 # (cycle 10). This script is comment-immune AND whole-repo by construction.
 #
 # This script answers, mechanically:
@@ -60,7 +60,7 @@ FAIL=0
 echo "== Cloud-SDK real-import map (WHOLE REPO, *_test.go excluded) =="
 echo "   module/ = this design's IaC-state/platform/standalone scope"
 echo "   elsewhere = out-of-scope surface (see design Non-Goals): provider/,"
-echo "   plugin/rbac/, iam/, artifact/ — the #653 'RBAC/secrets/artifact stay'"
+echo "   iam/, artifact/ — the #653 'RBAC/secrets/artifact stay'"
 echo "   surface, parallel to godo."
 for sdk in "${SDK_TREES[@]}"; do
   echo
@@ -128,7 +128,7 @@ echo "== Invariant: build graph has no unexpected gcp/azure/api transitive deps 
 #       2026-05-15 migration doc; legitimate transitive, not a GCP SDK
 #       client).
 # Asymmetric vs aws-sdk-go-v2 (Phase B): aws-sdk-go-v2 STAYS for out-of-scope
-# provider/aws/ + plugin/rbac/aws.go + iam/aws.go + artifact/s3.go.
+# provider/aws/ + iam/aws.go + artifact/s3.go.
 if [[ $CHECK -eq 1 && -f .phase-c-complete ]]; then
   # Capture exit code separately so a failed `go list` cannot be swallowed
   # by `|| true` (which would also mask legitimate gate violations).
