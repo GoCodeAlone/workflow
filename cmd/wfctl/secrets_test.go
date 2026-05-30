@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -358,5 +359,75 @@ func TestSecretsExport_ShellExportFormat(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), `export TK1="v1"`) {
 		t.Errorf("missing export line:\n%s", buf.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// runSecretsList --json and UPDATED column tests
+// ---------------------------------------------------------------------------
+
+func TestSecretsList_JSONFlag(t *testing.T) {
+	// Write a temp config with env provider and a declared entry.
+	dir := t.TempDir()
+	cfgFile := dir + "/app.yaml"
+	if err := os.WriteFile(cfgFile, []byte(`secrets:
+  provider: env
+  entries:
+    - name: TEST_LIST_JSON_KEY
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture stdout.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runSecretsList([]string{"--config", cfgFile, "--json"})
+
+	w.Close()
+	out, _ := io.ReadAll(r)
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("runSecretsList --json: %v", err)
+	}
+
+	// Output must be valid JSON.
+	var parsed []map[string]any
+	if jsonErr := json.Unmarshal(out, &parsed); jsonErr != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput: %s", jsonErr, out)
+	}
+}
+
+func TestSecretsList_TextMode_HasUpdatedColumn(t *testing.T) {
+	// Write a temp config with env provider.
+	dir := t.TempDir()
+	cfgFile := dir + "/app.yaml"
+	if err := os.WriteFile(cfgFile, []byte(`secrets:
+  provider: env
+  entries:
+    - name: TEST_LIST_TEXT_KEY
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture stdout.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runSecretsList([]string{"--config", cfgFile})
+
+	w.Close()
+	out, _ := io.ReadAll(r)
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("runSecretsList text mode: %v", err)
+	}
+
+	if !strings.Contains(string(out), "UPDATED") {
+		t.Errorf("text mode output should contain UPDATED column header:\n%s", out)
 	}
 }
