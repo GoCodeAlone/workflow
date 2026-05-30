@@ -66,6 +66,52 @@ func TestDumpPortfolioToFile(t *testing.T) {
 	}
 }
 
+// TestDumpPortfolioToFile_WithSanitize pins I-3: dumpPortfolioToFile(...,true)
+// with a genuinely-public IP in a record produces a portfolio with
+// Sanitized==true and the record value redacted to an RFC-5737 example IP.
+func TestDumpPortfolioToFile_WithSanitize(t *testing.T) {
+	store := &fakeStateStore{}
+	_ = store.SaveResource(context.Background(), interfaces.ResourceState{
+		ID:         "do-example-com",
+		Name:       "do-example-com",
+		Type:       "infra.dns",
+		Provider:   "digitalocean",
+		ProviderID: "example.com",
+		Outputs: map[string]any{
+			"records": []any{
+				// 8.8.8.8 is genuinely public (Google DNS), NOT RFC-5737.
+				map[string]any{"type": "A", "name": "@", "data": "8.8.8.8", "ttl": 300},
+			},
+		},
+	})
+	dir := t.TempDir()
+	out := filepath.Join(dir, "portfolio.json")
+	if err := dumpPortfolioToFile(context.Background(), store, out, true); err != nil {
+		t.Fatalf("dumpPortfolioToFile sanitize: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var p record.Portfolio
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatalf("unmarshal portfolio: %v", err)
+	}
+	if !p.Sanitized {
+		t.Error("sanitized portfolio must have sanitized==true")
+	}
+	if len(p.Snapshots) != 1 || len(p.Snapshots[0].Records) == 0 {
+		t.Fatalf("want 1 snapshot with records; got %d snapshots", len(p.Snapshots))
+	}
+	got := p.Snapshots[0].Records[0].Value
+	if got == "8.8.8.8" {
+		t.Error("public IP 8.8.8.8 was NOT redacted in sanitized dump")
+	}
+	if !strings.HasPrefix(got, "192.0.2.") && !strings.HasPrefix(got, "198.51.100.") && !strings.HasPrefix(got, "203.0.113.") {
+		t.Errorf("sanitized A value = %q; want an RFC-5737 example IP", got)
+	}
+}
+
 // TestDumpStateToFile_StillWorksAsDefault pins that --format state (the
 // default) still produces {"resources":[...]} format unchanged.
 func TestDumpStateToFile_StillWorksAsDefault(t *testing.T) {

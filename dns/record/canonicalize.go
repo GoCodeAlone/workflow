@@ -67,25 +67,24 @@ func recordFromMap(m map[string]any) Record {
 		TTL:   intVal(m, "ttl"),
 		Tag:   stringVal(m, "tag"),
 	}
+	// I-1: store the value when the KEY is present regardless of its numeric
+	// value — a present zero is meaningful (RFC-7505 null-MX priority=0,
+	// SRV weight=0, port=0). Dropping zeros would silently corrupt the record.
 	if v, ok := m["priority"]; ok {
-		if n := toInt(v); n != 0 {
-			r.Priority = &n
-		}
+		n := toInt(v)
+		r.Priority = &n
 	}
 	if v, ok := m["port"]; ok {
-		if n := toInt(v); n != 0 {
-			r.Port = &n
-		}
+		n := toInt(v)
+		r.Port = &n
 	}
 	if v, ok := m["weight"]; ok {
-		if n := toInt(v); n != 0 {
-			r.Weight = &n
-		}
+		n := toInt(v)
+		r.Weight = &n
 	}
 	if v, ok := m["flags"]; ok {
-		if n := toInt(v); n != 0 {
-			r.Flags = &n
-		}
+		n := toInt(v)
+		r.Flags = &n
 	}
 	return r
 }
