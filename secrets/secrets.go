@@ -132,6 +132,36 @@ func (p *EnvProvider) envKey(key string) string {
 	return k
 }
 
+// StatAll implements MetadataProvider. It lists env vars that match the prefix
+// (same logic as List) and returns SecretMeta with Exists=true and zero UpdatedAt
+// (env vars have no last-modified timestamp).
+func (p *EnvProvider) StatAll(_ context.Context) ([]SecretMeta, error) {
+	prefix := strings.ToUpper(p.prefix)
+	if prefix == "" {
+		return nil, ErrUnsupported
+	}
+	var metas []SecretMeta
+	for _, env := range os.Environ() {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.HasPrefix(parts[0], prefix) {
+			metas = append(metas, SecretMeta{
+				Name:   parts[0],
+				Exists: true,
+				// UpdatedAt intentionally zero — env vars carry no mtime.
+			})
+		}
+	}
+	return metas, nil
+}
+
+// CheckAccess implements AccessChecker. For EnvProvider, access is always available.
+func (p *EnvProvider) CheckAccess(_ context.Context) error {
+	return nil
+}
+
 // --- File Provider ---
 
 // FileProvider reads secrets from files in a directory.
@@ -195,6 +225,44 @@ func (p *FileProvider) List(_ context.Context) ([]string, error) {
 		}
 	}
 	return keys, nil
+}
+
+// StatAll implements MetadataProvider. It returns SecretMeta for every file in
+// the directory, using the file's modification time as UpdatedAt.
+func (p *FileProvider) StatAll(_ context.Context) ([]SecretMeta, error) {
+	entries, err := os.ReadDir(p.dir)
+	if err != nil {
+		return nil, fmt.Errorf("secrets: failed to list directory: %w", err)
+	}
+	var metas []SecretMeta
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		metas = append(metas, SecretMeta{
+			Name:      e.Name(),
+			Exists:    true,
+			UpdatedAt: info.ModTime(),
+		})
+	}
+	return metas, nil
+}
+
+// CheckAccess implements AccessChecker. It verifies the directory exists and is
+// writable by attempting to create (then remove) a probe file.
+func (p *FileProvider) CheckAccess(_ context.Context) error {
+	probe := p.dir + "/.wfctl_probe"
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("secrets: file store not accessible: %w", err)
+	}
+	f.Close()
+	os.Remove(probe) //nolint:errcheck
+	return nil
 }
 
 // --- Vault Configuration ---

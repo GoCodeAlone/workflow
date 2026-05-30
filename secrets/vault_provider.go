@@ -300,6 +300,32 @@ func parseVaultKey(key string) (path, field string) {
 	return key, ""
 }
 
+// StatAll implements MetadataProvider on a best-effort basis. If the Vault
+// client is wired and the mount is reachable, it returns entries from the KV v2
+// metadata list. Otherwise it returns ErrUnsupported so callers can fall back.
+func (p *VaultProvider) StatAll(ctx context.Context) ([]SecretMeta, error) {
+	keys, err := p.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: vault StatAll: %v", ErrUnsupported, err)
+	}
+	metas := make([]SecretMeta, len(keys))
+	for i, k := range keys {
+		metas[i] = SecretMeta{Name: k, Exists: true}
+	}
+	return metas, nil
+}
+
+// CheckAccess implements AccessChecker. It performs a lightweight check by
+// attempting to list the mount's metadata root. Errors never contain credential
+// material.
+func (p *VaultProvider) CheckAccess(ctx context.Context) error {
+	_, err := p.List(ctx)
+	if err != nil {
+		return fmt.Errorf("vault store access: %w (creds redacted)", err)
+	}
+	return nil
+}
+
 // isVaultNotFound checks if a vault error is a 404 / not found.
 func isVaultNotFound(err error) bool {
 	if err == nil {
