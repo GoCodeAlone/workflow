@@ -148,16 +148,17 @@ func splitIPv4(s string) []int {
 	cur := 0
 	hasCur := false
 	for i := 0; i <= len(s); i++ {
-		if i == len(s) || s[i] == '.' {
+		switch {
+		case i == len(s) || s[i] == '.':
 			if hasCur {
 				parts = append(parts, cur)
 			}
 			cur = 0
 			hasCur = false
-		} else if s[i] >= '0' && s[i] <= '9' {
+		case s[i] >= '0' && s[i] <= '9':
 			cur = cur*10 + int(s[i]-'0')
 			hasCur = true
-		} else {
+		default:
 			return nil // not a valid dotted-decimal
 		}
 	}

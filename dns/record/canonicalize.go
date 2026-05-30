@@ -15,7 +15,8 @@ import "github.com/GoCodeAlone/workflow/interfaces"
 // Non-infra.dns states are silently skipped.
 func FromResourceStates(states []interfaces.ResourceState) Portfolio {
 	p := Portfolio{Schema: SchemaV1}
-	for _, st := range states {
+	for i := range states {
+		st := &states[i]
 		if st.Type != "infra.dns" {
 			continue
 		}
