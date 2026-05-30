@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -116,30 +118,13 @@ func resolveSetupStoreName(
 	return "env", nil
 }
 
-// storeNames returns a comma-separated list of store names for error messages.
+// storeNames returns a comma-separated, sorted list of store names for error
+// messages (sorted for deterministic output).
 func storeNames(stores map[string]*config.SecretStoreConfig) string {
 	names := make([]string, 0, len(stores))
 	for k := range stores {
 		names = append(names, k)
 	}
-	// stable sort for deterministic errors
-	stableSort(names)
-	result := ""
-	for i, n := range names {
-		if i > 0 {
-			result += ", "
-		}
-		result += n
-	}
-	return result
-}
-
-// stableSort sorts a slice of strings in-place (simple insertion sort for
-// small slices — avoids importing sort just for this).
-func stableSort(ss []string) {
-	for i := 1; i < len(ss); i++ {
-		for j := i; j > 0 && ss[j] < ss[j-1]; j-- {
-			ss[j], ss[j-1] = ss[j-1], ss[j]
-		}
-	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }

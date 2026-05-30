@@ -47,7 +47,6 @@ type multiSelectModel struct {
 	items    []Item
 	cursor   int
 	selected map[int]bool
-	done     bool
 	quit     bool
 }
 
@@ -79,7 +78,6 @@ func (m *multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected[m.cursor] = true
 			}
 		case "enter":
-			m.done = true
 			return m, tea.Quit
 		}
 	}

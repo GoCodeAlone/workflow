@@ -32,6 +32,7 @@ func runSecretsSetup(args []string) error {
 	var secretFlag multiStringFlag
 	fs.Var(&secretFlag, "secret", "NAME=VALUE literal (WARNING: leaks to process table; use --from-env in CI). Repeatable.")
 	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set (default: all)")
+	allFlag := fs.Bool("all", false, "Set all declared secrets (the default when --only is absent; explicit form)")
 	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the store")
 	storeName := fs.String("store", "", "Named store to use (overrides config defaultStore)")
 	// Legacy flags (kept for backwards compatibility with --plugin path).
@@ -53,7 +54,8 @@ Non-interactive (--non-interactive, --auto-gen-keys, or when stdin is not a TTY)
   --from-env        Read each value from $NAME. Recommended for CI.
   --secret NAME=VAL Set a specific secret inline (WARNING: leaks to process table).
   Pipe KEY=VALUE    Read KEY=VALUE lines from stdin.
-  --only A,B        Restrict which secrets to set.
+  --all             Set all declared secrets (default when --only is absent).
+  --only A,B        Restrict which secrets to set (mutually exclusive with --all).
   --skip-existing   Skip secrets already set in the store.
   --auto-gen-keys   Generate random values for _KEY/_SECRET/_TOKEN/_SIGNING names.
 
@@ -77,6 +79,13 @@ Options:
 				only = append(only, n)
 			}
 		}
+	}
+
+	// --all and --only are mutually exclusive. --all is the explicit form of
+	// the default (set every declared secret); when present it just means
+	// "don't restrict", which is what an empty --only already does.
+	if *allFlag && len(only) > 0 {
+		return fmt.Errorf("--all and --only are mutually exclusive")
 	}
 
 	ctx := context.Background()

@@ -14,7 +14,6 @@ import (
 	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/secrets"
 	"github.com/mattn/go-isatty"
-	"golang.org/x/term"
 )
 
 // PluginRequiredSecret mirrors the plugin.json `required_secrets[]`
@@ -52,11 +51,20 @@ func runSecretsSetupPluginWithIO(args []string, in io.Reader, out io.Writer) err
 	orgVisibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	configFile := fs.String("config", "app.yaml", "app.yaml (used to resolve the github repo when --scope=repo|env)")
+	fromEnv := fs.Bool("from-env", false, "Read each secret value from $NAME (recommended for CI; avoids process-table leaks)")
+	var secretFlag multiStringFlag
+	fs.Var(&secretFlag, "secret", "NAME=VALUE literal (WARNING: leaks to process table; use --from-env in CI). Repeatable.")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl secrets setup --plugin <name> [options]
 
-Interactively set the secrets declared by a plugin's plugin.json
-required_secrets[] block. Sensitive fields are masked.
+Set the secrets declared by a plugin's plugin.json required_secrets[] block.
+
+Interactive (default when stdin is a TTY): each secret is prompted; sensitive
+fields are masked.
+
+Non-interactive (when stdin is not a TTY): values come from --from-env ($NAME),
+--secret NAME=VALUE, or piped KEY=VALUE lines. A secret with no value source is
+skipped (never blocks waiting for input).
 
 Options:
 `)
@@ -97,14 +105,40 @@ Options:
 		return ds, nil
 	}
 
-	// Valuer: interactive prompt.Input when on a TTY with no injected reader;
-	// otherwise read one line per secret from `in`/stdin (test/pipe path).
-	interactive := in == nil && isatty.IsTerminal(os.Stdin.Fd())
+	// Decide the input mode up-front:
+	//   - in != nil                          → reader path (tests / explicit pipe).
+	//   - in == nil && stdin is a TTY        → interactive prompt.Input (masked).
+	//   - in == nil && stdin is NOT a TTY    → non-interactive value sources only
+	//     (--from-env / --secret); a secret with no source is SKIPPED, never read
+	//     via Fscanln (which would block forever on an open empty pipe).
+	stdinIsTTY := isatty.IsTerminal(os.Stdin.Fd())
+	interactive := in == nil && stdinIsTTY
+
+	// Build the non-interactive value source map (--secret literals).
+	secretMap := make(map[string]string)
+	for _, lit := range secretFlag {
+		k, v, found := strings.Cut(lit, "=")
+		if !found {
+			return fmt.Errorf("--secret %q: expected NAME=VALUE format", lit)
+		}
+		secretMap[k] = v
+	}
+
 	var promptErr error
 	valuer := func(rs PluginRequiredSecret) (string, bool, error) {
-		var val string
-		var verr error
-		if interactive {
+		switch {
+		case in != nil:
+			// Reader path (tests / explicit pipe): one line per secret.
+			val, verr := promptOne(rs, in)
+			if verr != nil {
+				return "", false, verr
+			}
+			if val == "" {
+				return "", false, nil
+			}
+			return val, true, nil
+
+		case interactive:
 			label := rs.Prompt
 			if label == "" {
 				label = rs.Name
@@ -112,20 +146,31 @@ Options:
 			if rs.Description != "" {
 				label = label + " — " + rs.Description
 			}
-			val, verr = prompt.Input(label, rs.Sensitive)
-			if errors.Is(verr, prompt.ErrNotInteractive) {
-				promptErr = verr
+			val, verr := prompt.Input(label, rs.Sensitive)
+			if verr != nil {
+				if errors.Is(verr, prompt.ErrNotInteractive) {
+					promptErr = verr
+				}
+				return "", false, verr
 			}
-		} else {
-			val, verr = promptOne(rs, in)
+			if val == "" {
+				return "", false, nil
+			}
+			return val, true, nil
+
+		default:
+			// Non-interactive (non-TTY): value sources only — NEVER block on stdin.
+			if *fromEnv {
+				if v := os.Getenv(rs.Name); v != "" {
+					return v, true, nil
+				}
+			}
+			if v, ok := secretMap[rs.Name]; ok {
+				return v, true, nil
+			}
+			// No value source for this secret → skip (don't hang, don't fail hard).
+			return "", false, nil
 		}
-		if verr != nil {
-			return "", false, verr
-		}
-		if val == "" {
-			return "", false, nil // no value → skip
-		}
-		return val, true, nil
 	}
 
 	auditFn := func(name, _ string) {
@@ -135,10 +180,13 @@ Options:
 	report, err := runSetupEngine(context.Background(), manifest.RequiredSecrets,
 		func(rs PluginRequiredSecret) string { return rs.Name },
 		provider, selector, valuer, auditFn, true)
+	// Surface a mid-flow ErrNotInteractive regardless of the engine's error
+	// (stopOnErr=true means it usually returns the wrapped error, but check the
+	// captured promptErr too for robustness).
+	if promptErr != nil {
+		return promptErr
+	}
 	if err != nil {
-		if promptErr != nil {
-			return promptErr
-		}
 		return err
 	}
 
@@ -175,9 +223,11 @@ func loadPluginManifest(name, dirOverride string) (*pluginManifest, error) {
 	return &m, nil
 }
 
-// promptOne reads a value for one required secret. Masks if Sensitive.
-// When `in` is non-nil (tests / piped input) it reads a line from it
-// regardless of Sensitive — masking is interactive-only.
+// promptOne reads a single value for one required secret from the supplied
+// reader. It is used only on the reader-backed path (tests / explicit piped
+// input); masking is interactive-only and handled by prompt.Input on a TTY, so
+// this helper never touches os.Stdin and therefore can never block on an open
+// empty pipe via Fscanln.
 func promptOne(rs PluginRequiredSecret, in io.Reader) (string, error) {
 	label := rs.Prompt
 	if label == "" {
@@ -188,34 +238,17 @@ func promptOne(rs PluginRequiredSecret, in io.Reader) (string, error) {
 	}
 	fmt.Fprintf(os.Stderr, "%s: ", label)
 
-	if in != nil {
-		// Test/piped path — read one line.
-		buf := make([]byte, 4096)
-		n, err := in.Read(buf)
-		if err != nil && err != io.EOF {
-			return "", err
-		}
-		return strings.TrimRight(string(buf[:n]), "\r\n"), nil
+	if in == nil {
+		// Defensive: callers must pass a reader. Treat a nil reader as "no
+		// value" rather than reading os.Stdin (which could block).
+		return "", nil
 	}
-
-	if rs.Sensitive && isatty.IsTerminal(os.Stdin.Fd()) {
-		fd, err := stdinFileDescriptor()
-		if err != nil {
-			return "", err
-		}
-		b, err := term.ReadPassword(fd)
-		fmt.Fprintln(os.Stderr)
-		if err != nil {
-			return "", fmt.Errorf("read masked: %w", err)
-		}
-		return string(b), nil
-	}
-	// Non-sensitive interactive — echo.
-	var line string
-	if _, err := fmt.Fscanln(os.Stdin, &line); err != nil && err.Error() != "unexpected newline" {
+	buf := make([]byte, 4096)
+	n, err := in.Read(buf)
+	if err != nil && err != io.EOF {
 		return "", err
 	}
-	return line, nil
+	return strings.TrimRight(string(buf[:n]), "\r\n"), nil
 }
 
 // buildSecretWriter mints the GitHub provider for the requested scope.

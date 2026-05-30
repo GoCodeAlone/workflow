@@ -151,11 +151,14 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 	report, err := runSetupEngine(ctx, decls,
 		func(d setupDecl) string { return d.name },
 		provider, selector, valuer, auditFn, false)
+	// If a prompt.Input hit a non-TTY mid-flow, surface ErrNotInteractive so the
+	// caller's fallback triggers. The engine runs with stopOnErr=false, so it
+	// returns (report, nil) even when the valuer reported ErrNotInteractive —
+	// hence this check must run regardless of err.
+	if promptErr != nil {
+		return promptErr
+	}
 	if err != nil {
-		// If a prompt.Input hit a non-TTY mid-flow, surface ErrNotInteractive.
-		if promptErr != nil {
-			return promptErr
-		}
 		return err
 	}
 

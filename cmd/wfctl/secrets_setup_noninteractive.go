@@ -122,6 +122,11 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 		return out, nil
 	}
 
+	// failureReasons records the actionable per-secret error so it can be
+	// printed alongside the [failed] summary line (the engine accumulator only
+	// keeps the name when stopOnErr=false).
+	failureReasons := make(map[string]string)
+
 	// Valuer: --from-env > stdinKV/--secret > --auto-gen-keys > error if none.
 	// When --from-env is set, a missing env var is a skip (provided=false)
 	// rather than an error — the caller only wants to set what's available.
@@ -148,7 +153,9 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 			return "", false, nil
 		}
 		// No value source at all — non-interactive hard error naming the secret.
-		return "", false, fmt.Errorf("no value for secret %q: set $%s, pass --from-env, or use --secret %s=VALUE", d.name, d.name, d.name)
+		err := fmt.Errorf("no value for secret %q: set $%s, pass --from-env, or use --secret %s=VALUE", d.name, d.name, d.name)
+		failureReasons[d.name] = err.Error()
+		return "", false, err
 	}
 
 	// Audit: append a JSONL record for each successful Set (never the value).
@@ -171,7 +178,11 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 		fmt.Fprintf(out, "  %-24s  [skipped]\n", n)
 	}
 	for _, n := range report.Failed {
-		fmt.Fprintf(out, "  %-24s  [failed]\n", n)
+		if reason := failureReasons[n]; reason != "" {
+			fmt.Fprintf(out, "  %-24s  [failed] %s\n", n, reason)
+		} else {
+			fmt.Fprintf(out, "  %-24s  [failed]\n", n)
+		}
 	}
 	fmt.Fprintf(out, "\nDone: %d set, %d skipped, %d failed.\n",
 		len(report.Set), len(report.Skipped), len(report.Failed))

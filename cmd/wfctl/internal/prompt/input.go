@@ -41,7 +41,6 @@ func Input(label string, masked bool) (string, error) {
 type inputModel struct {
 	label string
 	ti    textinput.Model
-	done  bool
 	quit  bool
 }
 
@@ -59,7 +58,6 @@ func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quit = true
 			return m, tea.Quit
 		case "enter":
-			m.done = true
 			return m, tea.Quit
 		}
 	}

@@ -48,6 +48,44 @@ secretStores:
 	return cfgPath, storeDir
 }
 
+// TestSetupAllOnlyConflict verifies --all and --only are mutually exclusive.
+func TestSetupAllOnlyConflict(t *testing.T) {
+	cfgPath, _ := writeSetupConfig(t, "A")
+	err := runSecretsSetup([]string{"--all", "--only", "A", "--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected error when --all and --only are both given")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %v, want 'mutually exclusive'", err)
+	}
+}
+
+// TestSetupAllFlagSetsEverything verifies --all (the explicit default) sets all
+// declared secrets. Under `go test` stdin is not a TTY, so runSecretsSetup
+// routes to the non-interactive path; --secret supplies the values.
+func TestSetupAllFlagSetsEverything(t *testing.T) {
+	cfgPath, storeDir := writeSetupConfig(t, "A", "B")
+	err := runSecretsSetup([]string{
+		"--all",
+		"--secret", "A=av",
+		"--secret", "B=bv",
+		"--store", "localfs",
+		"--config", cfgPath,
+	})
+	if err != nil {
+		t.Fatalf("--all setup: %v", err)
+	}
+	for name, want := range map[string]string{"A": "av", "B": "bv"} {
+		data, readErr := os.ReadFile(filepath.Join(storeDir, name))
+		if readErr != nil {
+			t.Fatalf("read %s: %v", name, readErr)
+		}
+		if string(data) != want {
+			t.Errorf("%s = %q, want %q", name, string(data), want)
+		}
+	}
+}
+
 // TestNonInteractive_FromEnv verifies --from-env reads the secret value
 // from $NAME without any argv leak.
 func TestNonInteractive_FromEnv(t *testing.T) {

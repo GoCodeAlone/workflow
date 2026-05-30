@@ -38,7 +38,6 @@ type confirmModel struct {
 	hint     string
 	def      bool
 	answer   bool
-	done     bool
 	quit     bool
 }
 
@@ -52,15 +51,12 @@ func (m *confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "y":
 			m.answer = true
-			m.done = true
 			return m, tea.Quit
 		case "n":
 			m.answer = false
-			m.done = true
 			return m, tea.Quit
 		case "enter":
 			m.answer = m.def
-			m.done = true
 			return m, tea.Quit
 		}
 	}
