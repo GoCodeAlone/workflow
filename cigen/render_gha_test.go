@@ -133,6 +133,92 @@ func TestRenderGitHubActions_NilPlan(t *testing.T) {
 	}
 }
 
+func TestRenderGitHubActions_PlanGuardIsRealGate(t *testing.T) {
+	plan := richCIPlan() // PlanGuard: true
+	files, err := cigen.RenderGitHubActions(plan)
+	if err != nil {
+		t.Fatalf("RenderGitHubActions: %v", err)
+	}
+	var content string
+	for _, c := range files {
+		content = c
+		break
+	}
+
+	if !strings.Contains(content, "Plan guard") {
+		t.Fatal("expected a Plan guard step when PlanGuard is set")
+	}
+	// The guard must be a REAL gate, not a no-op.
+	if strings.Contains(content, "|| true") {
+		t.Error("plan guard must not contain `|| true` (would never fail the job)")
+	}
+	// It must be able to fail the job.
+	if !strings.Contains(content, "exit 1") {
+		t.Error("plan guard must contain a failing-exit path (exit 1)")
+	}
+	// It must detect replace/destroy in the plan output.
+	if !strings.Contains(content, "to replace") || !strings.Contains(content, "to destroy") {
+		t.Error("plan guard should detect replace/destroy plans")
+	}
+	// Plan output should stay visible (tee), not silenced with -q.
+	if !strings.Contains(content, "tee") {
+		t.Error("plan guard should keep plan output visible (tee)")
+	}
+}
+
+func TestRenderGitHubActions_NoPlanGuardWhenUnset(t *testing.T) {
+	plan := richCIPlan()
+	plan.PlanGuard = false
+	files, err := cigen.RenderGitHubActions(plan)
+	if err != nil {
+		t.Fatalf("RenderGitHubActions: %v", err)
+	}
+	var content string
+	for _, c := range files {
+		content = c
+		break
+	}
+	if strings.Contains(content, "Plan guard") {
+		t.Error("did not expect a Plan guard step when PlanGuard is unset")
+	}
+}
+
+func TestRenderGitHubActions_RelativePathsFilter(t *testing.T) {
+	// A plan whose phase config path is already relative must render a relative
+	// `paths:` entry with no leading slash. (Analyze is responsible for
+	// relativizing absolute paths; the renderer must emit whatever it is given
+	// verbatim, and the path filter must not contain an absolute path.)
+	plan := &cigen.CIPlan{
+		Project:       "myapp",
+		WfctlVersion:  "latest",
+		DefaultBranch: "main",
+		Runner:        "ubuntu-latest",
+		Phases: []cigen.DeployPhase{
+			{Name: "deploy", ConfigPath: "deploy.yaml"},
+		},
+		Secrets:  []cigen.SecretRef{},
+		Triggers: cigen.TriggerSpec{PR: true, PushMain: true, Dispatch: true},
+		Warnings: []string{},
+	}
+	files, err := cigen.RenderGitHubActions(plan)
+	if err != nil {
+		t.Fatalf("RenderGitHubActions: %v", err)
+	}
+	var content string
+	for _, c := range files {
+		content = c
+		break
+	}
+
+	if !strings.Contains(content, "- 'deploy.yaml'") {
+		t.Errorf("expected relative paths entry `- 'deploy.yaml'`, got:\n%s", content)
+	}
+	// No absolute path leaked into the paths: filter.
+	if strings.Contains(content, "- '/") {
+		t.Error("paths: filter must not contain an absolute path")
+	}
+}
+
 // richCIPlan returns a CIPlan with 2 phases, migrations, smoke, and 3 secrets.
 func richCIPlan() *cigen.CIPlan {
 	return &cigen.CIPlan{

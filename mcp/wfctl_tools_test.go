@@ -981,6 +981,72 @@ func TestCIPlan_MissingContent(t *testing.T) {
 	}
 }
 
+func TestCIPlan_ConfigPathIsLogicalNotTemp(t *testing.T) {
+	// The MCP path writes yaml_content to an os.CreateTemp file that is deleted
+	// before the plan is returned. The plan's phase config_path MUST be a stable
+	// logical name (deploy.yaml), never the deleted /tmp path.
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content": testConfigYAML,
+	})
+
+	result, err := srv.handleCIPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var plan map[string]any
+	if err := json.Unmarshal([]byte(text), &plan); err != nil {
+		t.Fatalf("expected valid JSON CIPlan: %v\n%s", err, text)
+	}
+
+	phases, ok := plan["phases"].([]any)
+	if !ok || len(phases) == 0 {
+		t.Fatalf("expected phases in plan, got %v", plan["phases"])
+	}
+	phase, _ := phases[0].(map[string]any)
+	cfgPath, _ := phase["config_path"].(string)
+	if cfgPath != "deploy.yaml" {
+		t.Errorf("expected logical config_path 'deploy.yaml', got %q", cfgPath)
+	}
+	if contains(cfgPath, "wfctl-mcp-config") || contains(cfgPath, "/tmp") || contains(cfgPath, "/var/folders") {
+		t.Errorf("config_path must not be a temp filesystem path, got %q", cfgPath)
+	}
+}
+
+func TestCIPlan_TwoPhaseLogicalPaths(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content":      testConfigYAML,
+		"phase_config_yaml": testConfigYAML,
+	})
+
+	result, err := srv.handleCIPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var plan map[string]any
+	if err := json.Unmarshal([]byte(text), &plan); err != nil {
+		t.Fatalf("expected valid JSON CIPlan: %v\n%s", err, text)
+	}
+
+	phases, ok := plan["phases"].([]any)
+	if !ok || len(phases) != 2 {
+		t.Fatalf("expected 2 phases, got %v", plan["phases"])
+	}
+	prereq, _ := phases[0].(map[string]any)
+	if cp, _ := prereq["config_path"].(string); cp != "deploy.prereq.yaml" {
+		t.Errorf("expected prereq config_path 'deploy.prereq.yaml', got %q", cp)
+	}
+	deploy, _ := phases[1].(map[string]any)
+	if cp, _ := deploy["config_path"].(string); cp != "deploy.yaml" {
+		t.Errorf("expected deploy config_path 'deploy.yaml', got %q", cp)
+	}
+}
+
 func TestCIPlan_WithMigrationsConfig(t *testing.T) {
 	srv := NewServer("")
 	req := makeCallToolRequest(map[string]any{

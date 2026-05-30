@@ -168,7 +168,7 @@ func writePluginInstallStep(b *strings.Builder, p *CIPlan) {
 // writeApplyJob emits a single apply job.
 func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs *string, p *CIPlan, runner, version, branch string) {
 	fmt.Fprintf(b, "  %s:\n", jobName)
-	fmt.Fprintf(b, "    if: \"github.event_name == 'push' && github.ref == 'refs/heads/%s' || github.event_name == 'workflow_dispatch'\"\n", branch)
+	fmt.Fprintf(b, "    if: \"(github.event_name == 'push' && github.ref == 'refs/heads/%s') || github.event_name == 'workflow_dispatch'\"\n", branch)
 	if needs != nil {
 		fmt.Fprintf(b, "    needs: %s\n", *needs)
 	}
@@ -191,10 +191,18 @@ func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs 
 		fmt.Fprintf(b, "        run: wfctl plugin install --config '%s'\n", phase.ConfigPath)
 	}
 
-	// PlanGuard: grep for no-op before applying
+	// PlanGuard: a protected resource is in scope, so refuse to apply when the
+	// plan includes a replace or destroy. The plan output stays visible in the
+	// CI log (tee) and a destructive plan fails the job (exit 1) — no `|| true`.
 	if p.PlanGuard {
 		b.WriteString("      - name: Plan guard\n")
-		fmt.Fprintf(b, "        run: wfctl infra plan --config '%s' --format json | grep -q '\"changes\":0' || true\n", phase.ConfigPath)
+		b.WriteString("        run: |\n")
+		fmt.Fprintf(b, "          wfctl infra plan --config '%s' | tee plan-guard.txt\n", phase.ConfigPath)
+		b.WriteString("          if grep -Eq -- '^[[:space:]]*(- delete|-/\\+ replace)[[:space:]]' plan-guard.txt || \\\n")
+		b.WriteString("             grep -Eq -- 'Plan: .*([1-9][0-9]* to replace|[1-9][0-9]* to destroy)' plan-guard.txt; then\n")
+		b.WriteString("            echo \"::error::Refusing apply: plan includes replace or destroy of a protected resource.\" >&2\n")
+		b.WriteString("            exit 1\n")
+		b.WriteString("          fi\n")
 	}
 
 	// Migrations step (only in the last phase)

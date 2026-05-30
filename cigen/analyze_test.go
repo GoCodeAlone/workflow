@@ -1,6 +1,8 @@
 package cigen_test
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/cigen"
@@ -107,5 +109,55 @@ func TestAnalyze_NoMigrationsNoMigrationsSpec(t *testing.T) {
 	}
 	if plan.Migrations != nil {
 		t.Errorf("expected Migrations=nil for config with no ci.migrations, got %+v", plan.Migrations)
+	}
+}
+
+func TestAnalyze_AbsolutePathRelativized(t *testing.T) {
+	// When given an absolute path under cwd, the resulting phase ConfigPath must
+	// be relativized (no leading slash) so the generated CI `paths:` filter and
+	// `--config` args reference a checkout-relative path.
+	abs, err := filepath.Abs("testdata/app.yaml")
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if !filepath.IsAbs(abs) {
+		t.Fatalf("expected an absolute path, got %q", abs)
+	}
+
+	plan, err := cigen.Analyze([]string{abs}, cigen.Options{})
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(plan.Phases) != 1 {
+		t.Fatalf("expected 1 phase, got %d", len(plan.Phases))
+	}
+	got := plan.Phases[0].ConfigPath
+	if filepath.IsAbs(got) {
+		t.Errorf("expected relativized ConfigPath, got absolute %q", got)
+	}
+	if strings.HasPrefix(got, "/") {
+		t.Errorf("ConfigPath must not start with /, got %q", got)
+	}
+	if got != filepath.Join("testdata", "app.yaml") {
+		t.Errorf("expected relative path %q, got %q", filepath.Join("testdata", "app.yaml"), got)
+	}
+}
+
+func TestAnalyze_ConfigPathAliasUsedVerbatim(t *testing.T) {
+	// When ConfigPathAlias is set (the MCP path), the primary phase ConfigPath
+	// must be the alias verbatim, NOT the real (temp/absolute) path.
+	abs, err := filepath.Abs("testdata/app.yaml")
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	plan, err := cigen.Analyze([]string{abs}, cigen.Options{
+		ConfigPathAlias: "deploy.yaml",
+	})
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if plan.Phases[len(plan.Phases)-1].ConfigPath != "deploy.yaml" {
+		t.Errorf("expected primary phase ConfigPath to be alias %q, got %q",
+			"deploy.yaml", plan.Phases[len(plan.Phases)-1].ConfigPath)
 	}
 }

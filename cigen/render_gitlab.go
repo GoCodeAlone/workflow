@@ -46,13 +46,12 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 	}
 	b.WriteString("\n")
 
-	// Global variables
+	// Global variables. Project-level CI/CD variables (secrets) are already
+	// injected into every job's environment by GitLab, so we do NOT re-declare
+	// them as `NAME: $NAME` (a no-op that only obscures the pipeline). Only the
+	// wfctl version pin is a genuine pipeline variable.
 	b.WriteString("variables:\n")
 	fmt.Fprintf(&b, "  WFCTL_VERSION: %q\n", version)
-	for _, s := range p.Secrets {
-		// Secret refs in GitLab CI are just $NAME CI variables
-		fmt.Fprintf(&b, "  %s: $%s\n", s.Name, s.Name)
-	}
 	b.WriteString("\n")
 
 	// before_script

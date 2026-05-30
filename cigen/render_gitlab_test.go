@@ -43,7 +43,7 @@ func TestRenderGitLabCI_Stages(t *testing.T) {
 	}
 }
 
-func TestRenderGitLabCI_SecretRefs(t *testing.T) {
+func TestRenderGitLabCI_NoRedundantSecretVars(t *testing.T) {
 	plan := richCIPlan()
 
 	files, err := cigen.RenderGitLabCI(plan)
@@ -52,10 +52,19 @@ func TestRenderGitLabCI_SecretRefs(t *testing.T) {
 	}
 	content := files[".gitlab-ci.yml"]
 
+	// Project-level CI/CD variables (secrets) are auto-injected by GitLab into
+	// every job, so the renderer must NOT re-declare them as `NAME: $NAME`
+	// no-ops in the global variables block.
 	for _, s := range plan.Secrets {
-		if !strings.Contains(content, "$"+s.Name) {
-			t.Errorf("expected $%s in output", s.Name)
+		redundant := "  " + s.Name + ": $" + s.Name
+		if strings.Contains(content, redundant) {
+			t.Errorf("expected no redundant `%s: $%s` declaration in variables block", s.Name, s.Name)
 		}
+	}
+
+	// The only declared pipeline variable should be the wfctl version pin.
+	if !strings.Contains(content, "WFCTL_VERSION:") {
+		t.Error("expected WFCTL_VERSION variable in output")
 	}
 }
 

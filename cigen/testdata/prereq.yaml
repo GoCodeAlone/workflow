@@ -1,0 +1,9 @@
+# Minimal prerequisite-phase fixture for TestAnalyze_PhaseConfig.
+# Analyze treats the phase config as a path string only (it does not load this
+# file), but it is checked in so the referenced path resolves to a real file.
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: ${DIGITALOCEAN_TOKEN}

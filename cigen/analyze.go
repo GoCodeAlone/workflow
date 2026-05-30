@@ -27,6 +27,15 @@ type Options struct {
 	PhaseConfig string
 	// Project overrides the project name derived from the config file.
 	Project string
+	// ConfigPathAlias, when set, is used verbatim as the primary phase's
+	// DeployPhase.ConfigPath instead of the real (possibly temporary or
+	// absolute) filesystem path Analyze was handed. Callers that read the
+	// config from a non-repo location — e.g. the MCP server, which writes
+	// yaml_content to an os.CreateTemp file — MUST set this to a stable,
+	// repo-relative logical name (e.g. "deploy.yaml" or the project name)
+	// so generated CI steps and path filters reference a real checkout path
+	// rather than a deleted /tmp file.
+	ConfigPathAlias string
 }
 
 // Analyze reads the workflow config files in configs and derives a CIPlan.
@@ -79,10 +88,50 @@ func Analyze(configs []string, opts Options) (*CIPlan, error) {
 	// Warnings
 	plan.Warnings = deriveWarnings(cfg, plan.Migrations, plan.Secrets)
 
-	// Phases
-	plan.Phases = derivePhases(primaryPath, opts.PhaseConfig)
+	// Phases. The primary phase's config path is the stable logical alias when
+	// provided (MCP path), otherwise the real path relativized to the working
+	// directory so the generated `paths:` trigger filter and `--config` step
+	// args reference a checkout-relative path rather than an absolute or /tmp
+	// path that never matches a CI checkout.
+	primaryConfigPath := opts.ConfigPathAlias
+	if primaryConfigPath == "" {
+		primaryConfigPath = relativizeConfigPath(primaryPath)
+	}
+	phaseConfigPath := opts.PhaseConfig
+	if phaseConfigPath != "" {
+		phaseConfigPath = relativizeConfigPath(phaseConfigPath)
+	}
+	plan.Phases = derivePhases(primaryConfigPath, phaseConfigPath)
 
 	return plan, nil
+}
+
+// relativizeConfigPath converts a config path to one relative to the current
+// working directory. If the path cannot be made relative or escapes cwd
+// (resolves to a parent via ".."), it falls back to the base filename so the
+// generated CI never references an absolute or out-of-tree path.
+func relativizeConfigPath(path string) string {
+	if path == "" {
+		return path
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return filepath.Base(path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Base(path)
+	}
+	rel, err := filepath.Rel(cwd, abs)
+	if err != nil {
+		return filepath.Base(path)
+	}
+	// Escapes cwd (e.g. "../sibling/deploy.yaml") — a CI checkout would not
+	// contain it at that path, so fall back to the base name.
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.Base(path)
+	}
+	return rel
 }
 
 // resolveVersion returns v if non-empty, otherwise "latest".
@@ -209,7 +258,7 @@ func deriveSecrets(cfg *config.WorkflowConfig, migrations *MigrationsSpec) []Sec
 			extractVarRefs(evs, addSecret)
 		}
 		// 3. iac.provider token/spaces keys
-		if strings.HasPrefix(m.Type, "iac.provider") || m.Type == "iac.provider" {
+		if strings.HasPrefix(m.Type, "iac.provider") {
 			for _, key := range []string{"token", "spaces_access_key", "spaces_secret_key", "accessKey", "secretKey"} {
 				if val, ok := m.Config[key]; ok {
 					if s, ok := val.(string); ok {

@@ -476,8 +476,23 @@ func (s *Server) handleCIPlan(_ context.Context, req mcp.CallToolRequest) (*mcp.
 	return marshalToolResult(plan)
 }
 
-// mcpAnalyzeFromYAML writes YAML content to temp files, calls cigen.Analyze, and
-// returns the CIPlan. phaseConfigYAML may be empty (single-phase plan).
+// Logical, repo-relative config-path names the MCP path hands to cigen.Analyze.
+// The real config bytes live in os.CreateTemp files that are deleted before the
+// CIPlan is returned, so the plan's DeployPhase.ConfigPath (and every generated
+// `--config '...'` step + `paths:` filter) MUST reference these stable names
+// rather than the temp paths. Callers regenerate the config at these paths in
+// their repo checkout.
+const (
+	mcpLogicalConfigPath = "deploy.yaml"
+	mcpLogicalPrereqPath = "deploy.prereq.yaml"
+)
+
+// mcpAnalyzeFromYAML writes YAML content to a temp file, calls cigen.Analyze,
+// and returns the CIPlan. The plan's phase config paths are stable logical
+// names (see mcpLogicalConfigPath) rather than the temp filesystem path, so the
+// generated CI references a real checkout path. phaseConfigYAML may be empty
+// (single-phase plan); when set, the prereq config bytes are parsed via temp
+// file but the plan references mcpLogicalPrereqPath.
 func mcpAnalyzeFromYAML(yamlContent, phaseConfigYAML, wfctlVersion string) (*cigen.CIPlan, error) {
 	// Write primary config to a temp file
 	primaryFile, err := os.CreateTemp("", "wfctl-mcp-config-*.yaml")
@@ -493,21 +508,16 @@ func mcpAnalyzeFromYAML(yamlContent, phaseConfigYAML, wfctlVersion string) (*cig
 
 	opts := cigen.Options{
 		WfctlVersion: wfctlVersion,
+		// Use a stable logical path so the generated CI does not point at the
+		// temp file deleted by the defer above.
+		ConfigPathAlias: mcpLogicalConfigPath,
 	}
 
-	// Write phase config if provided
+	// The prereq phase config is only used as a path string by Analyze (its
+	// contents are never read), so we pass the logical name directly without a
+	// temp file.
 	if phaseConfigYAML != "" {
-		prereqFile, err := os.CreateTemp("", "wfctl-mcp-prereq-*.yaml")
-		if err != nil {
-			return nil, fmt.Errorf("create prereq temp file: %w", err)
-		}
-		defer os.Remove(prereqFile.Name()) //nolint:errcheck
-		if _, err := prereqFile.WriteString(phaseConfigYAML); err != nil {
-			prereqFile.Close() //nolint:errcheck
-			return nil, fmt.Errorf("write prereq temp file: %w", err)
-		}
-		prereqFile.Close() //nolint:errcheck
-		opts.PhaseConfig = prereqFile.Name()
+		opts.PhaseConfig = mcpLogicalPrereqPath
 	}
 
 	return cigen.Analyze([]string{primaryFile.Name()}, opts)
