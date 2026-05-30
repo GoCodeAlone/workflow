@@ -122,12 +122,15 @@ func TestSecretsProviderAdapter_List_MetadataProvider_UpdatedAt(t *testing.T) {
 }
 
 func TestNewSecretsProvider_NotUnknownProviderError(t *testing.T) {
+	// Clear GITHUB_TOKEN so the github branch is actually reached even when the
+	// ambient environment has a token set — otherwise the test would short-circuit.
+	t.Setenv("GITHUB_TOKEN", "")
+
 	// newSecretsProvider("github") should NOT return the old "unknown secrets provider" error.
 	// It may fail with another error (e.g. missing token), but not the old sentinel.
 	_, err := newSecretsProvider("github")
 	if err == nil {
-		// If it succeeded (e.g. GITHUB_TOKEN happened to be set), that's also fine.
-		return
+		t.Fatal("expected an error (missing GITHUB_TOKEN), got nil")
 	}
 	if strings.Contains(err.Error(), "unknown secrets provider") {
 		t.Errorf("newSecretsProvider(\"github\") returned the old unknown-provider error: %v", err)

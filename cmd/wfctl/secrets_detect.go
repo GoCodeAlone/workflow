@@ -425,13 +425,11 @@ func runSecretsList(args []string) error {
 	}
 
 	// Build statuses for all declared entries so we can use them for --json or UPDATED column.
+	// Use Check (not Get) so the adapter's StatAll→Get→List precedence applies — this is
+	// essential for write-only stores like github where Get returns ErrUnsupported.
 	var statuses []SecretStatus
 	for _, entry := range secretsCfg.Entries {
-		state := SecretNotSet
-		val, _ := provider.Get(ctx, entry.Name)
-		if val != "" {
-			state = SecretSet
-		}
+		state, _ := provider.Check(ctx, entry.Name)
 		statuses = append(statuses, SecretStatus{
 			Name:  entry.Name,
 			Store: cmp(secretsCfg.Provider, "env"),

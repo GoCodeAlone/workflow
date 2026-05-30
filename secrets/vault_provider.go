@@ -316,12 +316,11 @@ func (p *VaultProvider) StatAll(ctx context.Context) ([]SecretMeta, error) {
 }
 
 // CheckAccess implements AccessChecker. It performs a lightweight check by
-// attempting to list the mount's metadata root. Errors never contain credential
-// material.
+// attempting to list the mount's metadata root. The returned error never wraps
+// the raw vault error, which may carry the address or secret path.
 func (p *VaultProvider) CheckAccess(ctx context.Context) error {
-	_, err := p.List(ctx)
-	if err != nil {
-		return fmt.Errorf("vault store access: %w (creds redacted)", err)
+	if _, err := p.List(ctx); err != nil {
+		return fmt.Errorf("vault store access: check failed (creds redacted)")
 	}
 	return nil
 }

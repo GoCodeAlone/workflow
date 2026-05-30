@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,8 +106,8 @@ func TestEnvProvider_StatAll_NoPrefix(t *testing.T) {
 	// Without prefix, StatAll should return ErrUnsupported.
 	p := NewEnvProvider("")
 	_, err := p.StatAll(context.Background())
-	if err == nil {
-		t.Error("expected error from StatAll with no prefix")
+	if !errors.Is(err, ErrUnsupported) {
+		t.Errorf("expected ErrUnsupported from StatAll with no prefix, got %v", err)
 	}
 }
 
