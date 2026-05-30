@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,46 +20,42 @@ func TestGenerateGitHubActions(t *testing.T) {
 		t.Fatalf("generateCIFiles: %v", err)
 	}
 
-	infraYML, ok := files[".github/workflows/infra.yml"]
-	if !ok {
-		t.Fatal("expected .github/workflows/infra.yml in output")
+	if len(files) == 0 {
+		t.Fatal("expected at least one file in output")
+	}
+
+	// Find the main workflow file (the cigen renderer produces a single named file)
+	var workflowYML string
+	for path, content := range files {
+		if strings.HasSuffix(path, ".yml") && strings.Contains(path, ".github/workflows/") {
+			workflowYML = content
+			break
+		}
+	}
+	if workflowYML == "" {
+		t.Fatalf("expected a .github/workflows/*.yml file in output, got keys: %v", fileKeys(files))
 	}
 
 	markers := []string{
 		"actions/checkout@v4",
-		"actions/setup-go@v5",
 		"GoCodeAlone/setup-wfctl@v1",
 		"wfctl infra plan",
 		"permissions",
-		"actions/github-script@v7",
 	}
 	for _, m := range markers {
-		if !strings.Contains(infraYML, m) {
-			t.Errorf("infra.yml missing marker %q", m)
+		if !strings.Contains(workflowYML, m) {
+			t.Errorf("workflow YAML missing marker %q", m)
 		}
 	}
 
-	buildYML, ok := files[".github/workflows/build.yml"]
-	if !ok {
-		t.Fatal("expected .github/workflows/build.yml in output")
+	// Plan job must be PR-gated
+	if !strings.Contains(workflowYML, "github.event_name == 'pull_request'") {
+		t.Error("expected plan job to be gated on pull_request")
 	}
-	if !strings.Contains(buildYML, "actions/checkout@v4") {
-		t.Error("build.yml missing actions/checkout@v4")
-	}
-	if !strings.Contains(buildYML, "actions/setup-go@v5") {
-		t.Error("build.yml missing actions/setup-go@v5")
-	}
-	if !strings.Contains(buildYML, "GoCodeAlone/setup-wfctl@v1") {
-		t.Error("build.yml missing setup-wfctl action")
-	}
-	if !strings.Contains(buildYML, "wfctl ci run --config \"$INFRA_CONFIG\" --phase test") {
-		t.Error("build.yml missing wfctl ci run test phase")
-	}
-	if !strings.Contains(buildYML, "wfctl build --config \"$INFRA_CONFIG\" --no-push --tag ci --fallback-go-build") {
-		t.Error("build.yml missing wfctl build")
-	}
-	if strings.Contains(buildYML, "go build ./...") {
-		t.Error("build.yml should use wfctl build instead of raw go build")
+
+	// Apply job must exist
+	if !strings.Contains(workflowYML, "wfctl infra apply") {
+		t.Error("expected apply step using wfctl infra apply")
 	}
 }
 
@@ -80,14 +77,11 @@ func TestGenerateGitLabCI(t *testing.T) {
 
 	markers := []string{
 		"rules:",
-		"needs:",
 		"before_script:",
-		"WFCTL_VERSION: \"latest\"",
-		"go install \"github.com/GoCodeAlone/workflow/cmd/wfctl@${WFCTL_VERSION}\"",
-		"export PATH=\"$(go env GOPATH)/bin:$PATH\"",
+		`WFCTL_VERSION: "latest"`,
+		`go install "github.com/GoCodeAlone/workflow/cmd/wfctl@${WFCTL_VERSION}"`,
+		`export PATH="$(go env GOPATH)/bin:$PATH"`,
 		"wfctl infra plan",
-		"wfctl ci run --config \"$INFRA_CONFIG\" --phase test",
-		"wfctl build --config \"$INFRA_CONFIG\" --no-push --tag ci --fallback-go-build",
 		"environment:",
 	}
 	for _, m := range markers {
@@ -115,8 +109,13 @@ func TestCIGeneratePinsCurrentWfctlVersionWhenReleased(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate GitHub Actions: %v", err)
 	}
-	if !strings.Contains(ghaFiles[".github/workflows/build.yml"], "version: 'v9.9.9'") {
-		t.Fatal("GitHub Actions build workflow should pin the generated wfctl version")
+	var ghaContent string
+	for _, c := range ghaFiles {
+		ghaContent = c
+		break
+	}
+	if !strings.Contains(ghaContent, "version: 'v9.9.9'") {
+		t.Fatal("GitHub Actions workflow should pin the generated wfctl version")
 	}
 
 	gitlabFiles, err := generateCIFiles(ciOptions{
@@ -214,10 +213,23 @@ func TestResolveCIConfigPicksAppYaml(t *testing.T) {
 func TestCIGenerateWritesFiles(t *testing.T) {
 	dir := t.TempDir()
 
+	// Write a minimal config so runCIGenerate can analyze it
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte("modules:\n  - name: web\n    type: http.server\n    config:\n      port: 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(orig) //nolint:errcheck
+
 	err := runCIGenerate([]string{
 		"--platform", "gitlab_ci",
 		"--config", "infra.yaml",
 		"--output", dir,
+		"--write",
 	})
 	if err != nil {
 		t.Fatalf("runCIGenerate: %v", err)
@@ -230,5 +242,178 @@ func TestCIGenerateWritesFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "rules:") {
 		t.Error("generated .gitlab-ci.yml missing 'rules:'")
+	}
+}
+
+// fileKeys returns sorted keys from the files map for debugging.
+func fileKeys(files map[string]string) []string {
+	keys := make([]string, 0, len(files))
+	for k := range files {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// ─── New ci plan + ci generate extended tests ────────────────────────────────
+
+func TestRunCIPlan_StdoutJSON(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(cfgPath, []byte("modules:\n  - name: web\n    type: http.server\n    config:\n      port: 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(orig) //nolint:errcheck
+
+	outPath := filepath.Join(dir, "plan.json")
+	err := runCIPlan([]string{"--config", "app.yaml", "--out", outPath})
+	if err != nil {
+		t.Fatalf("runCIPlan: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read plan.json: %v", err)
+	}
+
+	var plan map[string]any
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatalf("plan.json is not valid JSON: %v", err)
+	}
+
+	if _, ok := plan["warnings"]; !ok {
+		t.Error("expected 'warnings' field in CIPlan JSON")
+	}
+	if _, ok := plan["phases"]; !ok {
+		t.Error("expected 'phases' field in CIPlan JSON")
+	}
+}
+
+func TestRunCIGenerate_FromPlan(t *testing.T) {
+	dir := t.TempDir()
+
+	planJSON := `{
+  "project": "test",
+  "wfctl_version": "latest",
+  "default_branch": "main",
+  "runner": "ubuntu-latest",
+  "plugin_install": false,
+  "phases": [{"name":"deploy","config_path":"app.yaml"}],
+  "secrets": [],
+  "plan_guard": false,
+  "triggers": {"pr":true,"push_main":true,"dispatch":true},
+  "warnings": []
+}`
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, []byte(planJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(orig) //nolint:errcheck
+
+	err := runCIGenerate([]string{
+		"--platform", "gitlab_ci",
+		"--from-plan", planPath,
+		"--output", outDir,
+		"--write",
+	})
+	if err != nil {
+		t.Fatalf("runCIGenerate --from-plan: %v", err)
+	}
+
+	dest := filepath.Join(outDir, ".gitlab-ci.yml")
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("expected %s to exist: %v", dest, err)
+	}
+	if !strings.Contains(string(data), "rules:") {
+		t.Error("expected 'rules:' in generated gitlab-ci.yml")
+	}
+}
+
+func TestRunCIGenerate_DiffExitCode(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(cfgPath, []byte("modules:\n  - name: web\n    type: http.server\n    config:\n      port: 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(orig) //nolint:errcheck
+
+	// First write the files
+	err := runCIGenerate([]string{
+		"--platform", "gitlab_ci",
+		"--config", "app.yaml",
+		"--output", dir,
+		"--write",
+	})
+	if err != nil {
+		t.Fatalf("initial generate: %v", err)
+	}
+
+	// Now run --diff against the same output — no diff, so exit code 0 (no os.Exit called)
+	// We can't test os.Exit directly, but we can test the function doesn't error.
+	// We test --diff without --exit-code to avoid os.Exit being called.
+	err = runCIGenerate([]string{
+		"--platform", "gitlab_ci",
+		"--config", "app.yaml",
+		"--output", dir,
+		"--diff",
+	})
+	if err != nil {
+		t.Fatalf("--diff should not return error when files match: %v", err)
+	}
+}
+
+func TestRunCIGenerate_NoOverwriteWithoutWrite(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(cfgPath, []byte("modules:\n  - name: web\n    type: http.server\n    config:\n      port: 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create the output file
+	destDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destDir, ".gitlab-ci.yml"), []byte("old content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(orig) //nolint:errcheck
+
+	err := runCIGenerate([]string{
+		"--platform", "gitlab_ci",
+		"--config", "app.yaml",
+		"--output", destDir,
+		// no --write
+	})
+	if err == nil {
+		t.Fatal("expected error when target file exists and --write is not set")
+	}
+	if !strings.Contains(err.Error(), "--write") {
+		t.Errorf("expected error to mention --write, got: %v", err)
 	}
 }
