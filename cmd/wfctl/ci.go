@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,10 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"text/template"
 
 	"github.com/GoCodeAlone/workflow/cigen"
-	"gopkg.in/yaml.v3"
 )
 
 func runCI(args []string) error {
@@ -190,10 +187,11 @@ func runCIGenerate(args []string) error {
 }
 
 // resolveOutputPath determines the final destination for a generated file.
-// For paths containing directories (e.g. .github/workflows/foo.yml), the
-// path is kept relative to cwd. For flat filenames, it is placed in outputDir.
+// When outputDir is "." (the default), paths that contain "/" are kept relative
+// to cwd (e.g. .github/workflows/foo.yml stays as-is). When outputDir is an
+// explicit non-"." directory, ALL generated paths are rooted there.
 func resolveOutputPath(relPath, outputDir string) string {
-	if strings.Contains(relPath, "/") {
+	if outputDir == "" || outputDir == "." {
 		return relPath
 	}
 	return filepath.Join(outputDir, relPath)
@@ -240,34 +238,6 @@ func resolveCIConfig(explicit string) (string, error) {
 		}
 	}
 	return "infra.yaml", nil // fall back to the conventional name even if absent
-}
-
-// detectModuleTypes parses the config YAML and returns which module categories exist.
-func detectModuleTypes(cfgFile string) map[string]bool {
-	data, err := os.ReadFile(cfgFile)
-	if err != nil {
-		return map[string]bool{}
-	}
-	var parsed struct {
-		Modules []struct {
-			Type string `yaml:"type"`
-		} `yaml:"modules"`
-	}
-	if err := yaml.Unmarshal(data, &parsed); err != nil {
-		return map[string]bool{}
-	}
-	result := map[string]bool{}
-	for _, m := range parsed.Modules {
-		switch {
-		case strings.HasPrefix(m.Type, "infra."):
-			result["infra"] = true
-		case strings.HasPrefix(m.Type, "database."):
-			result["database"] = true
-		case strings.HasPrefix(m.Type, "platform."):
-			result["platform"] = true
-		}
-	}
-	return result
 }
 
 // ciOptions is retained for backward-compatible internal use by tests.
@@ -327,19 +297,6 @@ func ciOptionsToPlan(opts ciOptions) *cigen.CIPlan {
 		Warnings: []string{},
 		Triggers: cigen.TriggerSpec{PR: true, PushMain: true, Dispatch: true},
 	}
-}
-
-// renderCITemplate is kept for callers in ci_init.go and similar.
-func renderCITemplate(name, tmplStr string, data any) (string, error) {
-	tmpl, err := template.New(name).Parse(tmplStr)
-	if err != nil {
-		return "", err
-	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
 }
 
 var cleanReleaseTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)

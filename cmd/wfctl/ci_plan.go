@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/GoCodeAlone/workflow/cigen"
@@ -13,6 +12,7 @@ import (
 func runCIPlan(args []string) error {
 	fs := flag.NewFlagSet("ci plan", flag.ContinueOnError)
 	configFile := fs.String("config", "", "Workflow config file (default: app.yaml or infra.yaml)")
+	configFileShort := fs.String("c", "", "Workflow config file (shorthand for --config)")
 	out := fs.String("out", "-", "Output file for the CIPlan JSON ('-' for stdout)")
 	phaseConfig := fs.String("phase-config", "", "Prerequisite phase config path (creates a 2-phase plan)")
 	wfctlVer := fs.String("wfctl-version", "", "Pin wfctl version in plan (default: latest)")
@@ -31,6 +31,11 @@ Options:
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// Resolve -c shorthand
+	if *configFile == "" && *configFileShort != "" {
+		*configFile = *configFileShort
 	}
 
 	configPath, err := resolveCIConfig(*configFile)
@@ -65,6 +70,6 @@ Options:
 		return fmt.Errorf("ci plan: create %s: %w", *out, err)
 	}
 	defer f.Close() //nolint:errcheck
-	_, err = io.WriteString(f, string(data)+"\n")
+	_, err = f.WriteString(string(data) + "\n")
 	return err
 }

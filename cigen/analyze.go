@@ -311,8 +311,7 @@ func extractPrimaryDomain(cfg map[string]any) string {
 	if !ok {
 		return ""
 	}
-	switch v := domains.(type) {
-	case []any:
+	if v, ok := domains.([]any); ok {
 		for _, d := range v {
 			switch dm := d.(type) {
 			case map[string]any:

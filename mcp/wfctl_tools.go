@@ -1678,55 +1678,6 @@ func mcpDetectFeatures(cfg *config.WorkflowConfig) *mcpProjectFeatures {
 	return features
 }
 
-func mcpGenerateCIWorkflow(features *mcpProjectFeatures) string {
-	var b strings.Builder
-
-	b.WriteString("name: CI\n")
-	b.WriteString("on:\n")
-	b.WriteString("  pull_request:\n")
-	b.WriteString("    branches: [main]\n")
-	b.WriteString("  push:\n")
-	b.WriteString("    branches: [main]\n")
-	b.WriteString("\n")
-	b.WriteString("jobs:\n")
-	b.WriteString("  validate:\n")
-	b.WriteString("    runs-on: ubuntu-latest\n")
-	b.WriteString("    steps:\n")
-	b.WriteString("      - uses: actions/checkout@v4\n")
-	b.WriteString("      - uses: actions/setup-go@v5\n")
-	b.WriteString("        with:\n")
-	b.WriteString("          go-version: '1.22'\n")
-	b.WriteString("      - name: Install wfctl\n")
-	b.WriteString("        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest\n")
-	b.WriteString("      - name: Validate config\n")
-	b.WriteString("        run: wfctl validate config.yaml\n")
-	b.WriteString("      - name: Inspect config\n")
-	b.WriteString("        run: wfctl inspect config.yaml\n")
-
-	if features.HasUI {
-		b.WriteString("      - uses: actions/setup-node@v4\n")
-		b.WriteString("        with:\n")
-		b.WriteString("          node-version: '22'\n")
-		b.WriteString("      - name: Build UI\n")
-		b.WriteString("        run: wfctl build-ui --ui-dir ui\n")
-	}
-
-	if features.HasAuth {
-		b.WriteString("      - name: Verify secrets setup\n")
-		b.WriteString("        run: echo \"Secrets configured for auth modules\"\n")
-		b.WriteString("        env:\n")
-		b.WriteString("          JWT_SECRET: ${{ secrets.JWT_SECRET }}\n")
-	}
-
-	if features.HasDatabase {
-		b.WriteString("      - name: Run migrations\n")
-		b.WriteString("        run: wfctl migrate --config config.yaml\n")
-		b.WriteString("        continue-on-error: true\n")
-	}
-
-	return b.String()
-}
-
 func mcpGenerateCDWorkflow(features *mcpProjectFeatures, registry, platforms string) string {
 	var b strings.Builder
 

@@ -60,7 +60,7 @@ func renderGHAWorkflow(p *CIPlan, name string) (string, error) {
 	var b strings.Builder
 
 	// Header + triggers
-	b.WriteString(fmt.Sprintf("name: %s\n", name))
+	fmt.Fprintf(&b, "name: %s\n", name)
 	b.WriteString("on:\n")
 	if p.Triggers.PR {
 		b.WriteString("  pull_request:\n")
@@ -68,7 +68,7 @@ func renderGHAWorkflow(p *CIPlan, name string) (string, error) {
 	}
 	if p.Triggers.PushMain {
 		b.WriteString("  push:\n")
-		b.WriteString(fmt.Sprintf("    branches: [%s]\n", branch))
+		fmt.Fprintf(&b, "    branches: [%s]\n", branch)
 		writePhasePaths(&b, p)
 	}
 	if p.Triggers.Dispatch {
@@ -83,7 +83,7 @@ func renderGHAWorkflow(p *CIPlan, name string) (string, error) {
 	// Plan job (PR only)
 	b.WriteString("  plan:\n")
 	b.WriteString("    if: github.event_name == 'pull_request'\n")
-	b.WriteString(fmt.Sprintf("    runs-on: %s\n", runner))
+	fmt.Fprintf(&b, "    runs-on: %s\n", runner)
 	b.WriteString("    steps:\n")
 	writeCheckoutStep(&b)
 	writeSetupWfctlStep(&b, version)
@@ -91,8 +91,8 @@ func renderGHAWorkflow(p *CIPlan, name string) (string, error) {
 		writePluginInstallStep(&b, p)
 	}
 	for _, phase := range p.Phases {
-		b.WriteString(fmt.Sprintf("      - name: Plan %s\n", phase.Name))
-		b.WriteString(fmt.Sprintf("        run: wfctl infra plan --config '%s' --format markdown >> plan.md\n", phase.ConfigPath))
+		fmt.Fprintf(&b, "      - name: Plan %s\n", phase.Name)
+		fmt.Fprintf(&b, "        run: wfctl infra plan --config '%s' --format markdown >> plan.md\n", phase.ConfigPath)
 	}
 	b.WriteString("      - name: Post plan comment\n")
 	b.WriteString("        uses: actions/github-script@v7\n")
@@ -132,13 +132,13 @@ func renderGHAWorkflow(p *CIPlan, name string) (string, error) {
 			lastApplyJob = fmt.Sprintf("apply-%s", lastPhase.Name)
 		}
 		b.WriteString("  smoke:\n")
-		b.WriteString(fmt.Sprintf("    needs: %s\n", lastApplyJob))
-		b.WriteString(fmt.Sprintf("    if: github.event_name == 'push' && github.ref == 'refs/heads/%s'\n", branch))
-		b.WriteString(fmt.Sprintf("    runs-on: %s\n", runner))
+		fmt.Fprintf(&b, "    needs: %s\n", lastApplyJob)
+		fmt.Fprintf(&b, "    if: github.event_name == 'push' && github.ref == 'refs/heads/%s'\n", branch)
+		fmt.Fprintf(&b, "    runs-on: %s\n", runner)
 		b.WriteString("    steps:\n")
-		b.WriteString(fmt.Sprintf("      - name: Smoke test\n"))
-		b.WriteString(fmt.Sprintf("        run: |\n"))
-		b.WriteString(fmt.Sprintf("          curl --fail --max-time 30 '%s'\n", p.Smoke.URL))
+		b.WriteString("      - name: Smoke test\n")
+		b.WriteString("        run: |\n")
+		fmt.Fprintf(&b, "          curl --fail --max-time 30 '%s'\n", p.Smoke.URL)
 	}
 
 	return b.String(), nil
@@ -154,32 +154,32 @@ func writeSetupWfctlStep(b *strings.Builder, version string) {
 	b.WriteString("      - name: Install wfctl\n")
 	b.WriteString("        uses: GoCodeAlone/setup-wfctl@v1\n")
 	b.WriteString("        with:\n")
-	b.WriteString(fmt.Sprintf("          version: '%s'\n", version))
+	fmt.Fprintf(b, "          version: '%s'\n", version)
 }
 
 // writePluginInstallStep emits a wfctl plugin install step.
 func writePluginInstallStep(b *strings.Builder, p *CIPlan) {
 	for _, phase := range p.Phases {
-		b.WriteString(fmt.Sprintf("      - name: Install plugins (%s)\n", phase.Name))
-		b.WriteString(fmt.Sprintf("        run: wfctl plugin install --config '%s'\n", phase.ConfigPath))
+		fmt.Fprintf(b, "      - name: Install plugins (%s)\n", phase.Name)
+		fmt.Fprintf(b, "        run: wfctl plugin install --config '%s'\n", phase.ConfigPath)
 	}
 }
 
 // writeApplyJob emits a single apply job.
 func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs *string, p *CIPlan, runner, version, branch string) {
-	b.WriteString(fmt.Sprintf("  %s:\n", jobName))
-	b.WriteString(fmt.Sprintf("    if: \"github.event_name == 'push' && github.ref == 'refs/heads/%s' || github.event_name == 'workflow_dispatch'\"\n", branch))
+	fmt.Fprintf(b, "  %s:\n", jobName)
+	fmt.Fprintf(b, "    if: \"github.event_name == 'push' && github.ref == 'refs/heads/%s' || github.event_name == 'workflow_dispatch'\"\n", branch)
 	if needs != nil {
-		b.WriteString(fmt.Sprintf("    needs: %s\n", *needs))
+		fmt.Fprintf(b, "    needs: %s\n", *needs)
 	}
-	b.WriteString(fmt.Sprintf("    runs-on: %s\n", runner))
+	fmt.Fprintf(b, "    runs-on: %s\n", runner)
 
 	// Secrets env block
 	if len(p.Secrets) > 0 {
 		b.WriteString("    env:\n")
 		for _, s := range p.Secrets {
 			// Use ${{ secrets.NAME }} — use raw string to avoid template interpretation
-			b.WriteString(fmt.Sprintf("      %s: ${{ secrets.%s }}\n", s.Name, s.Name))
+			fmt.Fprintf(b, "      %s: ${{ secrets.%s }}\n", s.Name, s.Name)
 		}
 	}
 
@@ -187,27 +187,27 @@ func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs 
 	writeCheckoutStep(b)
 	writeSetupWfctlStep(b, version)
 	if p.PluginInstall {
-		b.WriteString(fmt.Sprintf("      - name: Install plugins\n"))
-		b.WriteString(fmt.Sprintf("        run: wfctl plugin install --config '%s'\n", phase.ConfigPath))
+		b.WriteString("      - name: Install plugins\n")
+		fmt.Fprintf(b, "        run: wfctl plugin install --config '%s'\n", phase.ConfigPath)
 	}
 
 	// PlanGuard: grep for no-op before applying
 	if p.PlanGuard {
 		b.WriteString("      - name: Plan guard\n")
-		b.WriteString(fmt.Sprintf("        run: wfctl infra plan --config '%s' --format json | grep -q '\"changes\":0' || true\n", phase.ConfigPath))
+		fmt.Fprintf(b, "        run: wfctl infra plan --config '%s' --format json | grep -q '\"changes\":0' || true\n", phase.ConfigPath)
 	}
 
 	// Migrations step (only in the last phase)
 	isLastPhase := phase.Name == p.Phases[len(p.Phases)-1].Name
 	if isLastPhase && p.Migrations != nil {
 		b.WriteString("      - name: Run migrations\n")
-		b.WriteString(fmt.Sprintf("        run: wfctl ci run --config '%s' --phase migrate\n", phase.ConfigPath))
+		fmt.Fprintf(b, "        run: wfctl ci run --config '%s' --phase migrate\n", phase.ConfigPath)
 		b.WriteString("        env:\n")
-		b.WriteString(fmt.Sprintf("          %s: ${{ secrets.%s }}\n", p.Migrations.DBEnv, p.Migrations.DBEnv))
+		fmt.Fprintf(b, "          %s: ${{ secrets.%s }}\n", p.Migrations.DBEnv, p.Migrations.DBEnv)
 	}
 
-	b.WriteString(fmt.Sprintf("      - name: Apply %s\n", phase.Name))
-	b.WriteString(fmt.Sprintf("        run: wfctl infra apply --config '%s' --auto-approve\n", phase.ConfigPath))
+	fmt.Fprintf(b, "      - name: Apply %s\n", phase.Name)
+	fmt.Fprintf(b, "        run: wfctl infra apply --config '%s' --auto-approve\n", phase.ConfigPath)
 }
 
 // writePhasePaths emits the paths filter for push/pull_request triggers.
@@ -216,7 +216,7 @@ func writePhasePaths(b *strings.Builder, p *CIPlan) {
 	seen := make(map[string]bool)
 	for _, phase := range p.Phases {
 		if !seen[phase.ConfigPath] {
-			b.WriteString(fmt.Sprintf("      - '%s'\n", phase.ConfigPath))
+			fmt.Fprintf(b, "      - '%s'\n", phase.ConfigPath)
 			seen[phase.ConfigPath] = true
 		}
 	}

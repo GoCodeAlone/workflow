@@ -42,16 +42,16 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 	}
 	b.WriteString("stages:\n")
 	for _, s := range stages {
-		b.WriteString(fmt.Sprintf("  - %s\n", s))
+		fmt.Fprintf(&b, "  - %s\n", s)
 	}
 	b.WriteString("\n")
 
 	// Global variables
 	b.WriteString("variables:\n")
-	b.WriteString(fmt.Sprintf("  WFCTL_VERSION: \"%s\"\n", version))
+	fmt.Fprintf(&b, "  WFCTL_VERSION: %q\n", version)
 	for _, s := range p.Secrets {
 		// Secret refs in GitLab CI are just $NAME CI variables
-		b.WriteString(fmt.Sprintf("  %s: $%s\n", s.Name, s.Name))
+		fmt.Fprintf(&b, "  %s: $%s\n", s.Name, s.Name)
 	}
 	b.WriteString("\n")
 
@@ -61,7 +61,7 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 	b.WriteString("  - export PATH=\"$(go env GOPATH)/bin:$PATH\"\n")
 	if p.PluginInstall {
 		for _, phase := range p.Phases {
-			b.WriteString(fmt.Sprintf("  - wfctl plugin install --config '%s'\n", phase.ConfigPath))
+			fmt.Fprintf(&b, "  - wfctl plugin install --config '%s'\n", phase.ConfigPath)
 		}
 	}
 	b.WriteString("\n")
@@ -72,10 +72,10 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 		if len(p.Phases) > 1 {
 			jobName = fmt.Sprintf("plan-%s", phase.Name)
 		}
-		b.WriteString(fmt.Sprintf("%s:\n", jobName))
+		fmt.Fprintf(&b, "%s:\n", jobName)
 		b.WriteString("  stage: plan\n")
 		b.WriteString("  script:\n")
-		b.WriteString(fmt.Sprintf("    - wfctl infra plan --config '%s' --format markdown > plan.md\n", phase.ConfigPath))
+		fmt.Fprintf(&b, "    - wfctl infra plan --config '%s' --format markdown > plan.md\n", phase.ConfigPath)
 		b.WriteString("  artifacts:\n")
 		b.WriteString("    paths:\n")
 		b.WriteString("      - plan.md\n")
@@ -83,7 +83,7 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 		b.WriteString("  rules:\n")
 		b.WriteString("    - if: $CI_PIPELINE_SOURCE == \"merge_request_event\"\n")
 		b.WriteString("      changes:\n")
-		b.WriteString(fmt.Sprintf("        - \"%s\"\n", phase.ConfigPath))
+		fmt.Fprintf(&b, "        - %q\n", phase.ConfigPath)
 		b.WriteString("\n")
 	}
 
@@ -94,23 +94,23 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 		if len(p.Phases) > 1 {
 			jobName = fmt.Sprintf("apply-%s", phase.Name)
 		}
-		b.WriteString(fmt.Sprintf("%s:\n", jobName))
+		fmt.Fprintf(&b, "%s:\n", jobName)
 		b.WriteString("  stage: apply\n")
 		if prevJob != "" {
 			b.WriteString("  needs:\n")
-			b.WriteString(fmt.Sprintf("    - job: %s\n", prevJob))
+			fmt.Fprintf(&b, "    - job: %s\n", prevJob)
 			b.WriteString("      artifacts: false\n")
 		}
 		b.WriteString("  script:\n")
 		isLastPhase := i == len(p.Phases)-1
 		if isLastPhase && p.Migrations != nil {
-			b.WriteString(fmt.Sprintf("    - wfctl ci run --config '%s' --phase migrate\n", phase.ConfigPath))
+			fmt.Fprintf(&b, "    - wfctl ci run --config '%s' --phase migrate\n", phase.ConfigPath)
 		}
-		b.WriteString(fmt.Sprintf("    - wfctl infra apply --config '%s' --auto-approve\n", phase.ConfigPath))
+		fmt.Fprintf(&b, "    - wfctl infra apply --config '%s' --auto-approve\n", phase.ConfigPath)
 		b.WriteString("  environment:\n")
 		b.WriteString("    name: production\n")
 		b.WriteString("  rules:\n")
-		b.WriteString(fmt.Sprintf("    - if: $CI_COMMIT_BRANCH == \"%s\" && $CI_PIPELINE_SOURCE == \"push\"\n", branch))
+		fmt.Fprintf(&b, "    - if: $CI_COMMIT_BRANCH == %q && $CI_PIPELINE_SOURCE == \"push\"\n", branch)
 		if p.Triggers.Dispatch {
 			b.WriteString("    - if: $CI_PIPELINE_SOURCE == \"web\"\n")
 		}
@@ -128,11 +128,11 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 		b.WriteString("smoke:\n")
 		b.WriteString("  stage: smoke\n")
 		b.WriteString("  needs:\n")
-		b.WriteString(fmt.Sprintf("    - job: %s\n", lastApplyJob))
+		fmt.Fprintf(&b, "    - job: %s\n", lastApplyJob)
 		b.WriteString("  script:\n")
-		b.WriteString(fmt.Sprintf("    - curl --fail --max-time 30 '%s'\n", p.Smoke.URL))
+		fmt.Fprintf(&b, "    - curl --fail --max-time 30 '%s'\n", p.Smoke.URL)
 		b.WriteString("  rules:\n")
-		b.WriteString(fmt.Sprintf("    - if: $CI_COMMIT_BRANCH == \"%s\" && $CI_PIPELINE_SOURCE == \"push\"\n", branch))
+		fmt.Fprintf(&b, "    - if: $CI_COMMIT_BRANCH == %q && $CI_PIPELINE_SOURCE == \"push\"\n", branch)
 		b.WriteString("\n")
 	}
 
