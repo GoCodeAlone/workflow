@@ -63,6 +63,9 @@ type MigrationsSpec struct {
 	DBEnv string `json:"db_env"`
 	// Source is the migrations source directory.
 	Source string `json:"source,omitempty"`
+	// Env is the deploy environment name passed to `wfctl migrations up --env`.
+	// Empty when no environment is configured; the --env flag is then omitted.
+	Env string `json:"env,omitempty"`
 }
 
 // SmokeSpec describes the post-deploy smoke test.

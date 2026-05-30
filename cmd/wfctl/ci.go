@@ -81,6 +81,8 @@ func runCIGenerate(args []string) error {
 	exitCode := fs.Bool("exit-code", false, "With --diff: exit 1 when files differ")
 	write := fs.Bool("write", false, "Allow overwriting existing files")
 	phaseConfig := fs.String("phase-config", "", "Prerequisite phase config path")
+	configPathAlias := fs.String("config-path-alias", "", "Logical repo-relative path for the primary config in generated CI (default: relativized real path)")
+	phaseConfigAlias := fs.String("phase-config-alias", "", "Logical repo-relative path for the prereq config in generated CI")
 	interactive := fs.Bool("interactive", false, "Force interactive wizard even when --platform is set")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -121,9 +123,11 @@ func runCIGenerate(args []string) error {
 			return err
 		}
 		opts := cigen.Options{
-			WfctlVersion: ciGeneratedWfctlVersion(),
-			Runner:       *runner,
-			PhaseConfig:  *phaseConfig,
+			WfctlVersion:     ciGeneratedWfctlVersion(),
+			Runner:           *runner,
+			PhaseConfig:      *phaseConfig,
+			ConfigPathAlias:  *configPathAlias,
+			PhaseConfigAlias: *phaseConfigAlias,
 		}
 		var analyzeErr error
 		plan, analyzeErr = cigen.Analyze([]string{configPath}, opts)

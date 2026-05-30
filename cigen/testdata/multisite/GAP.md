@@ -8,17 +8,26 @@ validation artifact per ADR 0004 (demonstration-fidelity mandate).
 
 ## How this was produced
 
+The `--config-path-alias` / `--phase-config-alias` flags are used so the
+committed artifact shows clean repo-relative `deploy.yaml` / `deploy.prereq.yaml`
+paths instead of the testdata-relative paths the binary would otherwise emit
+(it uses the `--config` argument verbatim as the CI trigger `paths:` filter).
+
 ```sh
 # 1. Real ci plan
 wfctl-pr4 ci plan \
   -c cigen/testdata/multisite/deploy.yaml \
   --phase-config cigen/testdata/multisite/deploy.prereq.yaml \
+  --config-path-alias deploy.yaml \
+  --phase-config-alias deploy.prereq.yaml \
   --out cigen/testdata/multisite/plan.json
 
 # 2. Real ci generate
 wfctl-pr4 ci generate \
   -c cigen/testdata/multisite/deploy.yaml \
   --phase-config cigen/testdata/multisite/deploy.prereq.yaml \
+  --config-path-alias deploy.yaml \
+  --phase-config-alias deploy.prereq.yaml \
   --platform github_actions \
   --out cigen/testdata/multisite \
   --write
@@ -43,7 +52,7 @@ diff -u .../infra.yml cigen/testdata/multisite/generated-infra.yml > /tmp/multis
 
 - Hand-written `infra.yml`: 283 lines
 - Generated `generated-infra.yml`: 134 lines
-- Diff: 249 lines removed, 100 lines added (386-line diff total)
+- Diff: 248 lines removed, 99 lines added (384-line diff total)
 
 Nearly all lines differ. The generated file is correct in structure and
 logically sound, but is much simpler than the production hand-written file.
@@ -59,8 +68,8 @@ intent of the hand-written workflow, as confirmed by the diff:
   jobs in the correct sequence with `needs: apply-prereq` chaining.
 - **PR trigger + push-to-main trigger + workflow_dispatch**: all three trigger
   types present in `on:`.
-- **paths: filters on both PR and push**: derived from the two config file
-  paths supplied to Analyze. (Correct paths differ — see NOT derivable below.)
+- **paths: filters on both PR and push**: clean repo-relative `deploy.yaml`
+  and `deploy.prereq.yaml` paths (via `--config-path-alias` / `--phase-config-alias`).
 - **wfctl plugin install step**: present in plan and both apply jobs (derived
   from `iac.*` and `analytics.*` module types → `plugin_install=true`).
 - **Plan-guard in both apply jobs**: the `wfctl infra plan | tee plan-guard.txt`
@@ -72,8 +81,15 @@ intent of the hand-written workflow, as confirmed by the diff:
   apply job using `${{ secrets.NAME }}` syntax.
 - **Two-phase plugin install in plan job**: `Install plugins (prereq)` and
   `Install plugins (deploy)` steps both present.
-- **Migrations step in apply-deploy**: `Run migrations` step using
-  `wfctl ci run --config ... --phase migrate` derived from `ci.migrations`.
+- **Migrations step in apply-deploy** (FUNCTIONAL — fixed): `Run migrations`
+  step runs `wfctl migrations up --config 'deploy.yaml'`, the REAL migration
+  runner, derived from `ci.migrations`. This is the same subcommand the
+  hand-written workflow uses (`wfctl migrations up --config deploy.yaml --env
+  prod --format json`); the generated form omits the operational `--env prod
+  --format json` flags (see "NOT derivable" below). A previous version of the
+  generator emitted `wfctl ci run --config ... --phase migrate`, which is NOT a
+  valid `ci run` phase (only build|test|deploy) and would have failed at
+  runtime; that defect is fixed.
 - **Smoke job**: derived from `infra.container_service` with
   `health_check.http_path=/healthz` and `domain: gocodealone.tech`. URL
   correctly computed as `https://gocodealone.tech/healthz`.
@@ -260,57 +276,58 @@ The hand-written workflow is named `Infrastructure` with global env vars
 The generator derives the name from the config basename (`multisite`) and
 emits no global env block.
 
----
+### 14. Migration `--env prod --format json` flags
 
-## What the generator got WRONG (not just incomplete)
-
-### paths: filter references testdata paths, not repo root paths
-
-The generated `paths:` filter lists:
+The generated migrations step is now functional and uses the correct
+subcommand:
 ```yaml
-paths:
-  - 'cigen/testdata/multisite/deploy.prereq.yaml'
-  - 'cigen/testdata/multisite/deploy.yaml'
+run: wfctl migrations up --config 'deploy.yaml'
 ```
 
-This is the actual filesystem path that was passed to Analyze, relativized
-to the current working directory. When `ci generate` is run from a repo root
-with `-c deploy.yaml`, the paths filter correctly resolves to `deploy.yaml`.
-The testdata path is an artifact of running the binary from the workflow repo's
-root with `cigen/testdata/multisite/deploy.yaml` as the argument — it is not
-a bug in the logic, but demonstrates that the `--config` argument path is used
-verbatim as the CI trigger path filter, which requires operators to run
-`ci generate` from the target project root or use `--config-path-alias`.
-
-### Migration step uses wrong command
-
-Generated:
-```yaml
-run: wfctl ci run --config 'cigen/testdata/multisite/deploy.yaml' --phase migrate
-```
-
-Hand-written:
+The hand-written form adds operational flags:
 ```yaml
 run: wfctl migrations up --config deploy.yaml --env prod --format json
 ```
 
-The generator emits `wfctl ci run --phase migrate` which is a different
-subcommand from the actual `wfctl migrations up` used in production. The
-`wfctl ci run --phase migrate` command exists but may not match the exact
-operational semantics of `wfctl migrations up --env prod --format json`.
-This is a real divergence in the generated command.
+The `--env prod` flag selects a deploy-environment-scoped migration config;
+the `deploy.yaml` config has a single top-level `ci.migrations` block with no
+named environments, so the generator has no environment name to emit. (The
+generator WILL emit `--env <env>` when `MigrationsSpec.Env` is set.) `--format
+json` is a presentation choice. Neither is derivable from the base config.
+
+---
+
+## What the generator got WRONG (not just incomplete)
+
+None remaining at command level. Both previously-documented defects are FIXED:
+
+- **Migration step command (FIXED)**: the generator previously emitted
+  `wfctl ci run --config ... --phase migrate`, but `wfctl ci run` only accepts
+  the phases `build|test|deploy` and errors on anything else (`unknown phase:
+  "migrate"`) — the generated step would have failed at runtime. It now emits
+  `wfctl migrations up --config '<cfg>'`, the real migration runner. The
+  DB-url secret is already wired into the apply job's `env:` block via the
+  secrets union, so the command can read it.
+- **paths: filter (FIXED in this artifact)**: the binary uses the `--config`
+  argument verbatim as the CI trigger `paths:` filter, so running it from the
+  workflow repo root with `cigen/testdata/multisite/deploy.yaml` would emit a
+  testdata-relative path. This artifact now uses `--config-path-alias deploy.yaml`
+  / `--phase-config-alias deploy.prereq.yaml` to produce clean repo-relative
+  paths. Operators generating CI for a real project should either run from the
+  project root (so `-c deploy.yaml` is already clean) or pass the alias flags.
 
 ---
 
 ## Verdict
 
 `wfctl ci generate` correctly derives the two-phase plan/apply structure,
-plan-guard, secret inventory (by config name), smoke URL, migrations DBEnv,
-plugin install, and trigger shape. It correctly warns about the DB hash-suffix
-and SPACES casing gaps. It does NOT derive: hash-suffixed secret references,
-image wait loops, GHCR credential derivation, phase-selector dispatch inputs,
-action SHA pinning, apply pipeline steps, concurrency guards, per-step env
-scoping, multi-route smoke matrix, or the `always()+skipped` dependency
-condition. The generator is a useful starting scaffold; the 15+ hand-authored
-additions are each justified by runtime or operational concerns not encodable
-in the workflow config format alone.
+plan-guard, secret inventory (by config name), smoke URL, a FUNCTIONAL
+migrations step (`wfctl migrations up`), plugin install, and trigger shape.
+It correctly warns about the DB hash-suffix and SPACES casing gaps. It does
+NOT derive: hash-suffixed secret references, image wait loops, GHCR credential
+derivation, phase-selector dispatch inputs, action SHA pinning, apply pipeline
+steps, concurrency guards, per-step env scoping, multi-route smoke matrix, the
+`always()+skipped` dependency condition, or the migration `--env prod --format
+json` operational flags. The generator is a useful starting scaffold; the
+14+ hand-authored additions are each justified by runtime or operational
+concerns not encodable in the workflow config format alone.

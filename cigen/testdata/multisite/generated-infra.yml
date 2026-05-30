@@ -2,13 +2,13 @@ name: multisite
 on:
   pull_request:
     paths:
-      - 'cigen/testdata/multisite/deploy.prereq.yaml'
-      - 'cigen/testdata/multisite/deploy.yaml'
+      - 'deploy.prereq.yaml'
+      - 'deploy.yaml'
   push:
     branches: [main]
     paths:
-      - 'cigen/testdata/multisite/deploy.prereq.yaml'
-      - 'cigen/testdata/multisite/deploy.yaml'
+      - 'deploy.prereq.yaml'
+      - 'deploy.yaml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,13 +24,13 @@ jobs:
         with:
           version: 'latest'
       - name: Install plugins (prereq)
-        run: wfctl plugin install --config 'cigen/testdata/multisite/deploy.prereq.yaml'
+        run: wfctl plugin install --config 'deploy.prereq.yaml'
       - name: Install plugins (deploy)
-        run: wfctl plugin install --config 'cigen/testdata/multisite/deploy.yaml'
+        run: wfctl plugin install --config 'deploy.yaml'
       - name: Plan prereq
-        run: wfctl infra plan --config 'cigen/testdata/multisite/deploy.prereq.yaml' --format markdown >> plan.md
+        run: wfctl infra plan --config 'deploy.prereq.yaml' --format markdown >> plan.md
       - name: Plan deploy
-        run: wfctl infra plan --config 'cigen/testdata/multisite/deploy.yaml' --format markdown >> plan.md
+        run: wfctl infra plan --config 'deploy.yaml' --format markdown >> plan.md
       - name: Post plan comment
         uses: actions/github-script@v7
         with:
@@ -70,17 +70,17 @@ jobs:
         with:
           version: 'latest'
       - name: Install plugins
-        run: wfctl plugin install --config 'cigen/testdata/multisite/deploy.prereq.yaml'
+        run: wfctl plugin install --config 'deploy.prereq.yaml'
       - name: Plan guard
         run: |
-          wfctl infra plan --config 'cigen/testdata/multisite/deploy.prereq.yaml' | tee plan-guard.txt
+          wfctl infra plan --config 'deploy.prereq.yaml' | tee plan-guard.txt
           if grep -Eq -- '^[[:space:]]*(- delete|-/\+ replace)[[:space:]]' plan-guard.txt || \
              grep -Eq -- 'Plan: .*([1-9][0-9]* to replace|[1-9][0-9]* to destroy)' plan-guard.txt; then
             echo "::error::Refusing apply: plan includes replace or destroy of a protected resource." >&2
             exit 1
           fi
       - name: Apply prereq
-        run: wfctl infra apply --config 'cigen/testdata/multisite/deploy.prereq.yaml' --auto-approve
+        run: wfctl infra apply --config 'deploy.prereq.yaml' --auto-approve
   apply-deploy:
     if: "(github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'"
     needs: apply-prereq
@@ -109,21 +109,21 @@ jobs:
         with:
           version: 'latest'
       - name: Install plugins
-        run: wfctl plugin install --config 'cigen/testdata/multisite/deploy.yaml'
+        run: wfctl plugin install --config 'deploy.yaml'
       - name: Plan guard
         run: |
-          wfctl infra plan --config 'cigen/testdata/multisite/deploy.yaml' | tee plan-guard.txt
+          wfctl infra plan --config 'deploy.yaml' | tee plan-guard.txt
           if grep -Eq -- '^[[:space:]]*(- delete|-/\+ replace)[[:space:]]' plan-guard.txt || \
              grep -Eq -- 'Plan: .*([1-9][0-9]* to replace|[1-9][0-9]* to destroy)' plan-guard.txt; then
             echo "::error::Refusing apply: plan includes replace or destroy of a protected resource." >&2
             exit 1
           fi
       - name: Run migrations
-        run: wfctl ci run --config 'cigen/testdata/multisite/deploy.yaml' --phase migrate
+        run: wfctl migrations up --config 'deploy.yaml'
         env:
           MULTISITE_DB_URL: ${{ secrets.MULTISITE_DB_URL }}
       - name: Apply deploy
-        run: wfctl infra apply --config 'cigen/testdata/multisite/deploy.yaml' --auto-approve
+        run: wfctl infra apply --config 'deploy.yaml' --auto-approve
   smoke:
     needs: apply-deploy
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

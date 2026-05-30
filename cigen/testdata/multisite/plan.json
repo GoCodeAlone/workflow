@@ -57,11 +57,11 @@
   "phases": [
     {
       "name": "prereq",
-      "config_path": "cigen/testdata/multisite/deploy.prereq.yaml"
+      "config_path": "deploy.prereq.yaml"
     },
     {
       "name": "deploy",
-      "config_path": "cigen/testdata/multisite/deploy.yaml"
+      "config_path": "deploy.yaml"
     }
   ],
   "migrations": {

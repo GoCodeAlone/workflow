@@ -76,8 +76,36 @@ func TestRenderGitHubActions_MigrationsStep(t *testing.T) {
 		break
 	}
 
-	if !strings.Contains(content, "migrate") {
-		t.Error("expected migrations step in output")
+	// Must emit the REAL migration runner. `wfctl ci run --phase migrate` is not
+	// a valid phase (ci run only accepts build|test|deploy) and would fail at
+	// runtime, so it must NOT appear.
+	if !strings.Contains(content, "wfctl migrations up --config") {
+		t.Errorf("expected migrations step to run 'wfctl migrations up --config', got:\n%s", content)
+	}
+	if strings.Contains(content, "--phase migrate") {
+		t.Error("migrations step must NOT use 'wfctl ci run --phase migrate' (not a valid phase)")
+	}
+}
+
+func TestRenderGitHubActions_MigrationsStep_WithEnv(t *testing.T) {
+	plan := richCIPlan()
+	plan.Migrations.Env = "prod"
+
+	files, err := cigen.RenderGitHubActions(plan)
+	if err != nil {
+		t.Fatalf("RenderGitHubActions: %v", err)
+	}
+	var content string
+	for _, c := range files {
+		content = c
+		break
+	}
+
+	if !strings.Contains(content, "wfctl migrations up --config") {
+		t.Errorf("expected 'wfctl migrations up --config' in output, got:\n%s", content)
+	}
+	if !strings.Contains(content, "--env prod") {
+		t.Errorf("expected '--env prod' when Migrations.Env is set, got:\n%s", content)
 	}
 }
 

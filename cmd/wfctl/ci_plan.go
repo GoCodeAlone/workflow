@@ -15,6 +15,8 @@ func runCIPlan(args []string) error {
 	configFileShort := fs.String("c", "", "Workflow config file (shorthand for --config)")
 	out := fs.String("out", "-", "Output file for the CIPlan JSON ('-' for stdout)")
 	phaseConfig := fs.String("phase-config", "", "Prerequisite phase config path (creates a 2-phase plan)")
+	configPathAlias := fs.String("config-path-alias", "", "Logical repo-relative path for the primary config in generated CI (default: relativized real path)")
+	phaseConfigAlias := fs.String("phase-config-alias", "", "Logical repo-relative path for the prereq config in generated CI")
 	wfctlVer := fs.String("wfctl-version", "", "Pin wfctl version in plan (default: latest)")
 	branch := fs.String("branch", "", "Default branch name (default: main)")
 	runner := fs.String("runner", "", "GitHub Actions runner label (default: ubuntu-latest)")
@@ -44,10 +46,12 @@ Options:
 	}
 
 	opts := cigen.Options{
-		WfctlVersion:  *wfctlVer,
-		DefaultBranch: *branch,
-		Runner:        *runner,
-		PhaseConfig:   *phaseConfig,
+		WfctlVersion:     *wfctlVer,
+		DefaultBranch:    *branch,
+		Runner:           *runner,
+		PhaseConfig:      *phaseConfig,
+		ConfigPathAlias:  *configPathAlias,
+		PhaseConfigAlias: *phaseConfigAlias,
 	}
 
 	plan, err := cigen.Analyze([]string{configPath}, opts)
