@@ -50,16 +50,17 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 		return nil
 	}
 
-	// Resolve which store to use.
-	storeName := a.storeName
-	if storeName == "" {
-		if cfg.Secrets.DefaultStore != "" {
-			storeName = cfg.Secrets.DefaultStore
-		} else if cfg.Secrets.Provider != "" {
-			storeName = cfg.Secrets.Provider
-		} else {
-			storeName = "env"
+	// Resolve which store to use via the 5-priority resolver.
+	defaultStore := ""
+	if cfg.Secrets != nil {
+		defaultStore = cfg.Secrets.DefaultStore
+		if defaultStore == "" {
+			defaultStore = cfg.Secrets.Provider
 		}
+	}
+	storeName, err := resolveSetupStoreName(a.storeName, defaultStore, cfg.SecretStores, false)
+	if err != nil {
+		return err
 	}
 
 	provider, err := getProviderForStore(storeName, cfg)
@@ -136,9 +137,9 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 		return "", false, fmt.Errorf("no value for secret %q: set $%s, pass --from-env, or use --secret %s=VALUE", d.name, d.name, d.name)
 	}
 
-	// Audit: write name + store to the shared audit log (Task 9 will wire the real audit).
-	auditFn := func(name, store string) {
-		// no-op until Task 9 wires writeSecretsAuditRecord
+	// Audit: append a JSONL record for each successful Set (never the value).
+	auditFn := func(name, _ string) {
+		_ = writeSecretsAuditRecord(name, storeName) //nolint:errcheck // best-effort audit
 	}
 
 	report, err := runSetupEngine(ctx, decls,
