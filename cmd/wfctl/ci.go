@@ -27,6 +27,9 @@ func runCI(args []string) error {
 		return runCIInit(args[1:])
 	case "validate":
 		return runCIValidate(args[1:])
+	case "--help", "-h", "help":
+		_ = ciUsage()
+		return nil
 	default:
 		return ciUsage()
 	}
