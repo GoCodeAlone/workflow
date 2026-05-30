@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/secrets"
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
@@ -80,26 +81,72 @@ Options:
 	// Pre-build the destination provider so a malformed scope fails
 	// loud BEFORE prompting.
 	scopeStr := strings.ToLower(strings.TrimSpace(*scope))
-	provider, scopeLabel, err := buildSecretWriter(scopeStr, *envName, *org, *orgVisibility, *tokenEnv, *configFile)
+	ghProvider, scopeLabel, err := buildSecretWriter(scopeStr, *envName, *org, *orgVisibility, *tokenEnv, *configFile)
 	if err != nil {
 		return err
 	}
 
 	fmt.Fprintf(out, "Setting up secrets for plugin %q → %s\n\n", manifest.Name, scopeLabel)
 
-	for _, rs := range manifest.RequiredSecrets {
-		val, err := promptOne(rs, in)
-		if err != nil {
-			return err
+	// Wrap the GitHub provider in the shared adapter so the engine can use it.
+	provider := secretsProviderAdapter{p: ghProvider}
+
+	// Selector: set every declared required secret (no skip-existing for the
+	// plugin flow — required secrets are always offered).
+	selector := func(ds []PluginRequiredSecret, _ []SecretStatus) ([]PluginRequiredSecret, error) {
+		return ds, nil
+	}
+
+	// Valuer: interactive prompt.Input when on a TTY with no injected reader;
+	// otherwise read one line per secret from `in`/stdin (test/pipe path).
+	interactive := in == nil && isatty.IsTerminal(os.Stdin.Fd())
+	var promptErr error
+	valuer := func(rs PluginRequiredSecret) (string, bool, error) {
+		var val string
+		var verr error
+		if interactive {
+			label := rs.Prompt
+			if label == "" {
+				label = rs.Name
+			}
+			if rs.Description != "" {
+				label = label + " — " + rs.Description
+			}
+			val, verr = prompt.Input(label, rs.Sensitive)
+			if errors.Is(verr, prompt.ErrNotInteractive) {
+				promptErr = verr
+			}
+		} else {
+			val, verr = promptOne(rs, in)
+		}
+		if verr != nil {
+			return "", false, verr
 		}
 		if val == "" {
-			fmt.Fprintf(out, "  %s: skipped (no value provided)\n", rs.Name)
-			continue
+			return "", false, nil // no value → skip
 		}
-		if err := provider.Set(context.Background(), rs.Name, val); err != nil {
-			return fmt.Errorf("set %s: %w", rs.Name, err)
+		return val, true, nil
+	}
+
+	auditFn := func(name, _ string) {
+		_ = writeSecretsAuditRecord(name, "github:"+scopeStr) //nolint:errcheck // best-effort audit
+	}
+
+	report, err := runSetupEngine(context.Background(), manifest.RequiredSecrets,
+		func(rs PluginRequiredSecret) string { return rs.Name },
+		provider, selector, valuer, auditFn, true)
+	if err != nil {
+		if promptErr != nil {
+			return promptErr
 		}
-		fmt.Fprintf(out, "  %s: set\n", rs.Name)
+		return err
+	}
+
+	for _, n := range report.Set {
+		fmt.Fprintf(out, "  %s: set\n", n)
+	}
+	for _, n := range report.Skipped {
+		fmt.Fprintf(out, "  %s: skipped (no value provided)\n", n)
 	}
 	fmt.Fprintf(out, "\nAll done.\n")
 	return nil
@@ -171,15 +218,12 @@ func promptOne(rs PluginRequiredSecret, in io.Reader) (string, error) {
 	return line, nil
 }
 
-// scopedWriter is the narrow interface secrets setup --plugin needs.
-// Both secrets.GitHubSecretsProvider satisfies it.
-type scopedWriter interface {
-	Set(ctx context.Context, key, value string) error
-}
-
 // buildSecretWriter mints the GitHub provider for the requested scope.
-// scopeLabel is a human-readable string for the setup prelude.
-func buildSecretWriter(scope, envName, org, visibility, tokenEnv, configFile string) (scopedWriter, string, error) {
+// scopeLabel is a human-readable string for the setup prelude. The returned
+// provider is a full secrets.Provider (the GitHub providers implement Get/Set/
+// Delete/List + StatAll + CheckAccess) so it can be wrapped in the shared
+// secretsProviderAdapter and driven by the setup engine.
+func buildSecretWriter(scope, envName, org, visibility, tokenEnv, configFile string) (secrets.Provider, string, error) {
 	switch scope {
 	case "org":
 		if org == "" {

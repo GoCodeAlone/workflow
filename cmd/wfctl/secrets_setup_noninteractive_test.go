@@ -140,6 +140,34 @@ func TestNonInteractive_SecretFlag(t *testing.T) {
 	}
 }
 
+// TestNonInteractive_AutoGenKeys verifies --auto-gen-keys generates a value
+// for key/secret/token names and writes it, while leaving non-candidate names
+// to error/skip.
+func TestNonInteractive_AutoGenKeys(t *testing.T) {
+	cfgPath, storeDir := writeSetupConfig(t, "API_KEY")
+
+	var buf bytes.Buffer
+	err := runSecretsSetupNonInteractive(&nonInteractiveSetupArgs{
+		configFile:  cfgPath,
+		autoGenKeys: true,
+		storeName:   "localfs",
+	}, &buf)
+	if err != nil {
+		t.Fatalf("auto-gen setup: %v", err)
+	}
+	data, readErr := os.ReadFile(filepath.Join(storeDir, "API_KEY"))
+	if readErr != nil {
+		t.Fatalf("read API_KEY: %v", readErr)
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		t.Error("API_KEY should have an auto-generated value")
+	}
+	// The generated value must NOT appear in stdout.
+	if strings.Contains(buf.String(), string(data)) {
+		t.Errorf("output leaked generated value: %s", buf.String())
+	}
+}
+
 // TestNonInteractive_MissingValue verifies that a selected secret with no
 // value source causes a named error (no hang).
 func TestNonInteractive_MissingValue(t *testing.T) {

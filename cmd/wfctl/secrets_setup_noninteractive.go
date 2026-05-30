@@ -23,6 +23,7 @@ type nonInteractiveSetupArgs struct {
 	stdinKV        []string // KEY=VALUE lines read from stdin pipe
 	only           []string // --only A,B,C
 	skipExisting   bool     // --skip-existing
+	autoGenKeys    bool     // --auto-gen-keys: generate random values for _KEY/_SECRET/_TOKEN/_SIGNING
 }
 
 // runSecretsSetupNonInteractive is the testable, context-less entry point
@@ -121,7 +122,7 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 		return out, nil
 	}
 
-	// Valuer: --from-env > stdinKV/--secret > error if nothing found.
+	// Valuer: --from-env > stdinKV/--secret > --auto-gen-keys > error if none.
 	// When --from-env is set, a missing env var is a skip (provided=false)
 	// rather than an error — the caller only wants to set what's available.
 	// When no value source at all is configured, this is a hard error.
@@ -135,6 +136,12 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 		}
 		if v, ok := secretMap[d.name]; ok {
 			return v, true, nil
+		}
+		// --auto-gen-keys: generate a random value for key/secret/token names.
+		if a.autoGenKeys && isAutoGenCandidate(d.name) {
+			if gv := generateSecretValue(); gv != "" {
+				return gv, true, nil
+			}
 		}
 		if a.fromEnv {
 			// from-env was the value source but $NAME was empty → skip, not error.
