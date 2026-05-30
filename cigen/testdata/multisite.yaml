@@ -1,0 +1,75 @@
+# multisite-shaped fixture — exercises secrets-union + smoke + warnings
+
+infra:
+  auto_bootstrap: true
+
+ci:
+  migrations:
+    - name: multisite
+      plugin: workflow-plugin-migrations
+      driver: golang-migrate
+      source_dir: migrations
+      database:
+        env: MULTISITE_DB_URL
+      validation:
+        forbid_dirty: true
+
+secrets:
+  defaultStore: github-actions
+  entries:
+    - name: DIGITALOCEAN_TOKEN
+      description: DigitalOcean API token.
+    - name: RELEASES_TOKEN
+      description: GitHub token.
+    - name: GHCR_CREDENTIALS
+      description: GHCR pull cred.
+    - name: SPACES_access_key
+      description: DO Spaces access key.
+    - name: SPACES_secret_key
+      description: DO Spaces secret key.
+    - name: MULTISITE_DB_URL
+      description: Managed Postgres URL.
+
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      region: nyc3
+      token: ${DIGITALOCEAN_TOKEN}
+      spaces_access_key: ${SPACES_access_key}
+      spaces_secret_key: ${SPACES_secret_key}
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: spaces
+      bucket: multisite-iac-state
+      prefix: prod/
+      region: nyc3
+      accessKey: ${SPACES_access_key}
+      secretKey: ${SPACES_secret_key}
+
+  - name: gocodealone-multisite
+    type: infra.container_service
+    protected: true
+    config:
+      provider: do-provider
+      region: nyc
+      image: ghcr.io/gocodealone/gocodealone-multisite:${IMAGE_SHA}
+      http_port: 8080
+      health_check:
+        http_path: /healthz
+      routes:
+        - path: /
+      domains:
+        - domain: gocodealone.tech
+          type: PRIMARY
+          zone: gocodealone.tech
+        - domain: www.gocodealone.tech
+          type: ALIAS
+          zone: gocodealone.tech
+      env_vars_secret:
+        MULTISITE_DB_URL: ${MULTISITE_DB_URL}
+        MULTISITE_INGEST_HMAC_SECRET: ${MULTISITE_INGEST_HMAC_SECRET}
+        MULTISITE_JWT_SECRET: ${MULTISITE_JWT_SECRET}
