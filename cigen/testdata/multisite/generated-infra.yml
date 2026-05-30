@@ -120,8 +120,6 @@ jobs:
           fi
       - name: Run migrations
         run: wfctl migrations up --config 'deploy.yaml'
-        env:
-          MULTISITE_DB_URL: ${{ secrets.MULTISITE_DB_URL }}
       - name: Apply deploy
         run: wfctl infra apply --config 'deploy.yaml' --auto-approve
   smoke:

@@ -85,6 +85,27 @@ func TestRenderGitHubActions_MigrationsStep(t *testing.T) {
 	if strings.Contains(content, "--phase migrate") {
 		t.Error("migrations step must NOT use 'wfctl ci run --phase migrate' (not a valid phase)")
 	}
+
+	// The DB secret must still be available to the migrations step via the
+	// apply job's job-level `env:` block (deriveSecrets always adds DBEnv to
+	// the union). The migrations step must NOT re-declare it with a redundant
+	// step-level `env:`.
+	if !strings.Contains(content, "      APP_DB_URL: ${{ secrets.APP_DB_URL }}") {
+		t.Errorf("expected DBEnv secret in job-level env block, got:\n%s", content)
+	}
+	migIdx := strings.Index(content, "- name: Run migrations")
+	if migIdx < 0 {
+		t.Fatalf("expected a 'Run migrations' step, got:\n%s", content)
+	}
+	// Slice from the migrations step to the next step (Apply) and assert no
+	// step-level env block appears inside it.
+	rest := content[migIdx:]
+	if nextIdx := strings.Index(rest[1:], "- name:"); nextIdx >= 0 {
+		rest = rest[:nextIdx+1]
+	}
+	if strings.Contains(rest, "env:") {
+		t.Errorf("migrations step must NOT carry a redundant step-level env: block, got:\n%s", rest)
+	}
 }
 
 func TestRenderGitHubActions_MigrationsStep_WithEnv(t *testing.T) {

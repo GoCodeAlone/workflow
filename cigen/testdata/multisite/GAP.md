@@ -78,7 +78,8 @@ intent of the hand-written workflow, as confirmed by the diff:
   `multisite-pg` and `gocodealone-multisite` modules.
 - **apply-job `env:` block with 1:1 secret name mapping**: all 16 secrets
   from the union of both configs are present in the `env:` block on each
-  apply job using `${{ secrets.NAME }}` syntax.
+  apply job using `${{ secrets.NAME }}` syntax. NOTE: this union is GLOBAL
+  across phases — see "Known limitations: global-union secret over-exposure".
 - **Two-phase plugin install in plan job**: `Install plugins (prereq)` and
   `Install plugins (deploy)` steps both present.
 - **Migrations step in apply-deploy** (FUNCTIONAL — fixed): `Run migrations`
@@ -297,6 +298,26 @@ json` is a presentation choice. Neither is derivable from the base config.
 
 ---
 
+## Known limitations (this PR's scope)
+
+### Global-union secret over-exposure across phases
+
+`deriveSecrets` computes a single GLOBAL union of every secret referenced by
+either config, and `RenderGitHubActions` emits that same full union as the
+job-level `env:` block on EVERY apply job. As a consequence, the generated
+`apply-prereq` job carries secrets it does not use — for example
+`MULTISITE_DB_URL` appears in `apply-prereq`'s `env:` even though the prereq
+phase runs no migrations and never reads that secret.
+
+This is honest over-exposure: it does not break the pipeline (the extra
+secrets are simply unused in that job), but it widens the blast radius of each
+job beyond the minimum it needs. The hand-written `infra.yml` scopes secrets
+more tightly (per-step `env:` on the steps that actually use them — see item 8
+above). Per-phase / per-step secret scoping in the generator is future work
+and is explicitly NOT in this PR's scope.
+
+---
+
 ## What the generator got WRONG (not just incomplete)
 
 None remaining at command level. Both previously-documented defects are FIXED:
@@ -328,6 +349,7 @@ NOT derive: hash-suffixed secret references, image wait loops, GHCR credential
 derivation, phase-selector dispatch inputs, action SHA pinning, apply pipeline
 steps, concurrency guards, per-step env scoping, multi-route smoke matrix, the
 `always()+skipped` dependency condition, or the migration `--env prod --format
-json` operational flags. The generator is a useful starting scaffold; the
-14+ hand-authored additions are each justified by runtime or operational
-concerns not encodable in the workflow config format alone.
+json` operational flags. It also over-exposes secrets via a global union on
+every apply job (see "Known limitations"). The generator is a useful starting
+scaffold; the 14+ hand-authored additions are each justified by runtime or
+operational concerns not encodable in the workflow config format alone.

@@ -316,6 +316,28 @@ func TestApplyWizardOverrides_MigrationsFalseDropsMigrations(t *testing.T) {
 	}
 }
 
+func TestApplyWizardOverrides_MigrationsTruePreservesMigrations(t *testing.T) {
+	mig := &cigen.MigrationsSpec{DBEnv: "DB_URL", Source: "migrations"}
+	plan := &cigen.CIPlan{
+		Runner:     "ubuntu-latest",
+		Migrations: mig,
+	}
+	choices := wizardChoices{
+		Platform:   "github_actions",
+		Runner:     "ubuntu-latest",
+		Smoke:      false,
+		Migrations: true,
+		PlanGuard:  false,
+	}
+	applyWizardOverrides(plan, choices)
+	if plan.Migrations == nil {
+		t.Fatal("expected plan.Migrations to be preserved when choices.Migrations=true")
+	}
+	if plan.Migrations.DBEnv != mig.DBEnv {
+		t.Errorf("migrations DBEnv changed unexpectedly: got %q, want %q", plan.Migrations.DBEnv, mig.DBEnv)
+	}
+}
+
 func TestApplyWizardOverrides_RunnerOverrideApplies(t *testing.T) {
 	plan := &cigen.CIPlan{Runner: "ubuntu-latest"}
 	choices := wizardChoices{

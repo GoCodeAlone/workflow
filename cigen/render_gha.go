@@ -208,14 +208,13 @@ func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs 
 	// Migrations step (only in the last phase). Use `wfctl migrations up`,
 	// the real migration runner — `wfctl ci run --phase migrate` is NOT a valid
 	// phase (ci run only accepts build|test|deploy) and would fail at runtime.
-	// The DB-url secret is already present in the apply job's `env:` block via
-	// the secrets union, so the migration command can read it.
+	// No step-level `env:` is needed: deriveSecrets always adds the migrations
+	// DBEnv to the secrets union, so it is already in the apply job's job-level
+	// `env:` block above; re-declaring it here would be redundant.
 	isLastPhase := phase.Name == p.Phases[len(p.Phases)-1].Name
 	if isLastPhase && p.Migrations != nil {
 		b.WriteString("      - name: Run migrations\n")
 		fmt.Fprintf(b, "        run: %s\n", migrationsUpCommand(phase.ConfigPath, p.Migrations.Env))
-		b.WriteString("        env:\n")
-		fmt.Fprintf(b, "          %s: ${{ secrets.%s }}\n", p.Migrations.DBEnv, p.Migrations.DBEnv)
 	}
 
 	fmt.Fprintf(b, "      - name: Apply %s\n", phase.Name)
