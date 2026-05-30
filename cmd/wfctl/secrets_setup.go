@@ -1,30 +1,63 @@
 package main
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
+	"github.com/mattn/go-isatty"
 )
 
-// runSecretsSetup implements `wfctl secrets setup --env <name>`.
-// It iterates over all secrets declared in the config for the given environment
-// and prompts for values, using hidden terminal input where possible.
+// runSecretsSetup implements `wfctl secrets setup [options]`.
+//
+// Routing:
+//   - --non-interactive, --auto-gen-keys, or a non-TTY stdin → the engine-backed
+//     non-interactive path (flag/env-sourced selector + valuer).
+//   - otherwise → the interactive wizard (prompt.MultiSelect selector +
+//     masked prompt.Input valuer). If the wizard detects a non-TTY mid-flow
+//     it returns prompt.ErrNotInteractive and we fall back to non-interactive.
+//
+// Both paths share the same runSetupEngine + audit logic.
 func runSecretsSetup(args []string) error {
 	fs := flag.NewFlagSet("secrets setup", flag.ContinueOnError)
 	envName := fs.String("env", "local", "Target environment name")
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
-	autoGenKeys := fs.Bool("auto-gen-keys", false, "Auto-generate random values for secrets ending in _KEY, _SECRET, or _TOKEN")
+	autoGenKeys := fs.Bool("auto-gen-keys", false, "Auto-generate random values for secrets ending in _KEY, _SECRET, or _TOKEN (implies non-interactive)")
+	nonInteractive := fs.Bool("non-interactive", false, "Non-interactive mode (also auto when stdin is not a TTY)")
+	fromEnv := fs.Bool("from-env", false, "Read each secret value from $NAME (recommended for CI; avoids process-table leaks)")
+	var secretFlag multiStringFlag
+	fs.Var(&secretFlag, "secret", "NAME=VALUE literal (WARNING: leaks to process table; use --from-env in CI). Repeatable.")
+	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set (default: all)")
+	allFlag := fs.Bool("all", false, "Set all declared secrets (the default when --only is absent; explicit form)")
+	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the store")
+	storeName := fs.String("store", "", "Named store to use (overrides config defaultStore)")
+	// Legacy flags (kept for backwards compatibility with --plugin path).
+	fs.String("scope", "repo", "GitHub scope: repo | env | org (legacy --plugin path)")
+	fs.String("org", "", "Organization slug (legacy --plugin path)")
+	fs.String("visibility", "all", "Org-scope visibility (legacy --plugin path)")
+	fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT (legacy --plugin path)")
+
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl secrets setup [options]
 
-Interactively set all secrets declared in the config for a given environment.
-For each secret, you are prompted for a value. Input is hidden.
-Secrets in no-access stores (e.g., cloud KMS without credentials) are skipped.
+Set secrets declared in the config for a given environment.
+
+Interactive (default when stdin is a TTY):
+  Lists each declared secret with its status, lets you select which to set,
+  prompts to pick a store when none is configured, and masks sensitive input.
+
+Non-interactive (--non-interactive, --auto-gen-keys, or when stdin is not a TTY):
+  --from-env        Read each value from $NAME. Recommended for CI.
+  --secret NAME=VAL Set a specific secret inline (WARNING: leaks to process table).
+  Pipe KEY=VALUE    Read KEY=VALUE lines from stdin.
+  --all             Set all declared secrets (default when --only is absent).
+  --only A,B        Restrict which secrets to set (mutually exclusive with --all).
+  --skip-existing   Skip secrets already set in the store.
+  --auto-gen-keys   Generate random values for _KEY/_SECRET/_TOKEN/_SIGNING names.
 
 Options:
 `)
@@ -34,88 +67,62 @@ Options:
 		return err
 	}
 
-	cfg, err := config.LoadFromFile(*configFile)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+	// --auto-gen-keys is inherently non-interactive (it generates values).
+	useNonInteractive := *nonInteractive || *autoGenKeys || !isatty.IsTerminal(os.Stdin.Fd())
+
+	// Parse --only.
+	var only []string
+	if *onlyFlag != "" {
+		for _, n := range strings.Split(*onlyFlag, ",") {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				only = append(only, n)
+			}
+		}
 	}
 
-	if cfg.Secrets == nil || len(cfg.Secrets.Entries) == 0 {
-		fmt.Println("No secrets declared in config.")
-		return nil
+	// --all and --only are mutually exclusive. --all is the explicit form of
+	// the default (set every declared secret); when present it just means
+	// "don't restrict", which is what an empty --only already does.
+	if *allFlag && len(only) > 0 {
+		return fmt.Errorf("--all and --only are mutually exclusive")
 	}
-
-	fmt.Printf("Setting up secrets for environment: %s\n\n", *envName)
 
 	ctx := context.Background()
-	reader := bufio.NewReader(os.Stdin)
 
-	var set, skipped int
-	for _, entry := range cfg.Secrets.Entries {
-		storeName := ResolveSecretStore(entry.Name, *envName, cfg)
-		provider, provErr := getProviderForStore(storeName, cfg)
-		if provErr != nil {
-			fmt.Printf("  %-24s  [SKIP] store %q not accessible: %v\n", entry.Name, storeName, provErr)
-			skipped++
-			continue
-		}
-
-		// Check if already set.
-		existing, _ := provider.Get(ctx, entry.Name)
-		hint := ""
-		if existing != "" {
-			hint = " (already set — press Enter to keep)"
-		}
-
-		// Auto-generate for key/secret/token names if flag is set.
-		if *autoGenKeys && existing == "" && isAutoGenCandidate(entry.Name) {
-			val := generateSecretValue()
-			if val == "" {
-				fmt.Printf("  %-24s  [ERROR] crypto/rand unavailable; cannot auto-generate\n", entry.Name)
-				skipped++
-				continue
-			}
-			if setErr := provider.Set(ctx, entry.Name, val); setErr != nil {
-				fmt.Printf("  %-24s  [ERROR] %v\n", entry.Name, setErr)
-			} else {
-				fmt.Printf("  %-24s  [auto-generated]\n", entry.Name)
-				set++
-			}
-			continue
-		}
-
-		// Prompt for value.
-		desc := ""
-		if entry.Description != "" {
-			desc = " — " + entry.Description
-		}
-		fmt.Printf("  %s%s%s\n  Value: ", entry.Name, desc, hint)
-
-		line, readErr := reader.ReadString('\n')
-		if readErr != nil {
-			return fmt.Errorf("read input: %w", readErr)
-		}
-		line = strings.TrimRight(line, "\r\n")
-
-		if line == "" {
-			if existing != "" {
-				fmt.Printf("  %-24s  [kept]\n", entry.Name)
-			} else {
-				fmt.Printf("  %-24s  [skipped]\n", entry.Name)
-				skipped++
-			}
-			continue
-		}
-
-		if setErr := provider.Set(ctx, entry.Name, line); setErr != nil {
-			fmt.Printf("  %-24s  [ERROR] %v\n", entry.Name, setErr)
-		} else {
-			fmt.Printf("  %-24s  [set]\n", entry.Name)
-			set++
-		}
+	if useNonInteractive {
+		return runSecretsSetupNonInteractiveCtx(ctx, &nonInteractiveSetupArgs{
+			configFile:     *configFile,
+			storeName:      *storeName,
+			fromEnv:        *fromEnv,
+			secretLiterals: []string(secretFlag),
+			stdinKV:        readStdinKV(),
+			only:           only,
+			skipExisting:   *skipExisting,
+			autoGenKeys:    *autoGenKeys,
+		}, os.Stdout)
 	}
 
-	fmt.Printf("\nDone: %d set, %d skipped.\n", set, skipped)
-	return nil
+	// ---- Interactive wizard ----
+	err := runSecretsSetupInteractive(ctx, &interactiveSetupArgs{
+		configFile: *configFile,
+		storeName:  *storeName,
+		envName:    *envName,
+	}, os.Stdout)
+	if errors.Is(err, prompt.ErrNotInteractive) {
+		// stdin turned out not to be a TTY mid-flow — fall back gracefully.
+		return runSecretsSetupNonInteractiveCtx(ctx, &nonInteractiveSetupArgs{
+			configFile:     *configFile,
+			storeName:      *storeName,
+			fromEnv:        *fromEnv,
+			secretLiterals: []string(secretFlag),
+			stdinKV:        readStdinKV(),
+			only:           only,
+			skipExisting:   *skipExisting,
+			autoGenKeys:    *autoGenKeys,
+		}, os.Stdout)
+	}
+	return err
 }
 
 // isAutoGenCandidate returns true if the secret name looks like a key, token, or signing secret.

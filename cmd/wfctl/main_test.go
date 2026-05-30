@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/schema"
 )
@@ -107,6 +110,91 @@ func TestLinkedVersionOverridesBuildInfo(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(out)); got != "v9.9.9" {
 		t.Fatalf("linked version = %q, want v9.9.9", got)
+	}
+}
+
+// TestSecretsSetupNonTTYDoesNotHang is the binary-level regression guard for
+// the two findings in PR2 code review:
+//
+//  1. interactive valuer ErrNotInteractive must surface (so the non-interactive
+//     fallback triggers), and
+//  2. the non-TTY path must never block on stdin (Fscanln / open empty pipe).
+//
+// It builds the real wfctl binary and runs `secrets setup --config <tmp>` with
+// EMPTY stdin piped (a non-TTY pipe that yields EOF), under a hard deadline.
+// Asserts: exits non-zero, output names the missing secret, and the process
+// returns well before the deadline (no hang).
+func TestSecretsSetupNonTTYDoesNotHang(t *testing.T) {
+	exeName := "wfctl"
+	if runtime.GOOS == "windows" {
+		exeName += ".exe"
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, exeName)
+	build := exec.Command("go", "build", "-o", exe, ".")
+	build.Env = append(os.Environ(), "GOWORK=off")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build wfctl: %v\n%s", err, out)
+	}
+
+	// Minimal config: one declared secret, a writable file store, and an
+	// http.server entry point so the config is otherwise valid.
+	storeDir := filepath.Join(dir, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatalf("mkdir store: %v", err)
+	}
+	cfg := `modules:
+  - name: http
+    type: http.server
+    config:
+      address: ":0"
+secrets:
+  defaultStore: localfs
+  entries:
+    - name: NEEDS_VALUE
+secretStores:
+  localfs:
+    provider: file
+    config:
+      path: ` + storeDir + `
+`
+	cfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write app.yaml: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// No --non-interactive flag: the binary must DETECT the non-TTY pipe and
+	// route to the non-interactive path rather than blocking on a prompt.
+	run := exec.CommandContext(ctx, exe, "secrets", "setup", "--config", cfgPath)
+	run.Env = append(os.Environ(), "WFCTL_NO_UPDATE_CHECK=1", "CI=true")
+	run.Stdin = strings.NewReader("") // empty, non-TTY stdin → immediate EOF
+	var combined bytes.Buffer
+	run.Stdout = &combined
+	run.Stderr = &combined
+
+	start := time.Now()
+	err := run.Run()
+	elapsed := time.Since(start)
+
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("wfctl secrets setup HUNG (deadline exceeded after %s); output:\n%s", elapsed, combined.String())
+	}
+	if err == nil {
+		t.Fatalf("expected non-zero exit (missing secret value), got success; output:\n%s", combined.String())
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T: %v\noutput:\n%s", err, err, combined.String())
+	}
+	if combined.Len() == 0 || !strings.Contains(combined.String(), "NEEDS_VALUE") {
+		t.Fatalf("output should name the missing secret NEEDS_VALUE; got:\n%s", combined.String())
+	}
+	// Sanity: it must have returned promptly, not near the deadline.
+	if elapsed > 15*time.Second {
+		t.Fatalf("returned too slowly (%s) — possible partial hang; output:\n%s", elapsed, combined.String())
 	}
 }
 
