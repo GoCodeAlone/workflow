@@ -1,0 +1,184 @@
+# gocodealone-multisite — application deploy spec.
+#
+# Phase 2 of two-phase deploy. Provisions the App Platform container
+# service that runs the multisite-host binary built from this repo.
+#
+# Run with:
+#   wfctl infra plan -c deploy.yaml
+#   wfctl infra apply -c deploy.yaml --wait
+#
+# Image must be pushed to GHCR by CI before apply; IMAGE_SHA is
+# provided as an env var by the GHA workflow.
+
+infra:
+  auto_bootstrap: true
+
+ci:
+  migrations:
+    - name: multisite
+      plugin: workflow-plugin-migrations
+      driver: golang-migrate
+      source_dir: migrations
+      database:
+        env: MULTISITE_DB_URL
+      validation:
+        forbid_dirty: true
+
+secretStores:
+  github-actions:
+    provider: github
+    config:
+      repo: GoCodeAlone/gocodealone-multisite
+      token_env: RELEASES_TOKEN
+
+secrets:
+  defaultStore: github-actions
+  provider: github
+  config:
+    repo: GoCodeAlone/gocodealone-multisite
+    token_env: RELEASES_TOKEN
+  entries:
+    - name: DIGITALOCEAN_TOKEN
+      description: DigitalOcean API token.
+    - name: RELEASES_TOKEN
+      description: GitHub token for wfctl plugin install + GHCR pull cred derivation.
+    - name: GHCR_CREDENTIALS
+      description: GHCR pull credential for DigitalOcean App Platform.
+    - name: SPACES_access_key
+      description: DO Spaces access key (wfctl state backend).
+    - name: SPACES_secret_key
+      description: DO Spaces secret key (wfctl state backend).
+    - name: MULTISITE_DB_URL
+      description: Managed Postgres URL — populated by deploy.prereq.yaml.
+    - name: MULTISITE_INGEST_HMAC_SECRET
+      description: HMAC secret shared with content repos for the release webhook.
+    - name: MULTISITE_JWT_SECRET
+      description: JWT signing key for the admin session.
+    - name: MULTISITE_AUDIT_SIGN_KEY
+      description: Audit-chain row signing key.
+    - name: MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE
+      description: One-shot bootstrap code redeemed for first super-admin.
+    - name: MULTISITE_CONTENT_REPO_TOKEN
+      description: GitHub PAT to fetch private content-repo release tarballs.
+    - name: MULTISITE_OAUTH_GOOGLE_CLIENT_ID
+      description: Google OAuth client ID (optional).
+    - name: MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET
+      description: Google OAuth client secret (optional).
+    - name: MULTISITE_OAUTH_FACEBOOK_APP_ID
+      description: Facebook OAuth app ID (optional).
+    - name: MULTISITE_OAUTH_FACEBOOK_APP_SECRET
+      description: Facebook OAuth app secret (optional).
+    - name: GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON
+      description: Google service-account JSON with Analytics Admin access for GA4 provisioning.
+
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      region: nyc3
+      token: ${DIGITALOCEAN_TOKEN}
+      spaces_access_key: ${SPACES_access_key}
+      spaces_secret_key: ${SPACES_secret_key}
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: spaces
+      bucket: multisite-iac-state
+      prefix: prod/
+      region: nyc3
+      accessKey: ${SPACES_access_key}
+      secretKey: ${SPACES_secret_key}
+
+  - name: google-analytics
+    type: analytics.google_provider
+    config:
+      credentials_json: ${GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON}
+      allow_adc: false
+      analytics_account: accounts/395146029
+
+  # DB spec mirrors deploy.prereq.yaml but adds trusted_sources. The
+  # firewall rule references the gocodealone-multisite App Platform
+  # service below, which does not exist when prereq applies — only at
+  # deploy.yaml apply time. wfctl adopts the existing DB and updates
+  # its firewall (deferred-update) to whitelist the just-created app.
+  # See workflow-compute deploy.{prereq,}.yaml for the same pattern.
+  - name: multisite-pg
+    type: infra.database
+    protected: true
+    config:
+      provider: do-provider
+      engine: pg
+      version: "18"
+      size: db-s-1vcpu-1gb
+      num_nodes: 1
+      region: nyc3
+      adopt_existing: true
+
+  - name: gocodealone-multisite
+    type: infra.container_service
+    protected: true
+    config:
+      provider: do-provider
+      region: nyc
+      image: ghcr.io/gocodealone/gocodealone-multisite:${IMAGE_SHA}
+      http_port: 8080
+      health_check:
+        http_path: /healthz
+      routes:
+        - path: /
+      domains:
+        - domain: gocodealone.tech
+          type: PRIMARY
+          zone: gocodealone.tech
+        - domain: www.gocodealone.tech
+          type: ALIAS
+          zone: gocodealone.tech
+        - domain: admin.gocodealone.tech
+          type: ALIAS
+          zone: gocodealone.tech
+      provider_specific:
+        digitalocean:
+          registry_credentials: ${GHCR_CREDENTIALS}
+      env_vars:
+        MULTISITE_LISTEN_ADDR: ":8080"
+        MULTISITE_PREVIEW_SUBDOMAIN_BASE: preview.gocodealone.tech
+        MULTISITE_BUNDLE_ROOT: /var/lib/multisite/bundles
+        MULTISITE_DEFAULT_TENANT_SLUG: gocodealone
+        MULTISITE_DEFAULT_TENANT_LABEL: GoCodeAlone
+        MULTISITE_DEFAULT_TENANT_DOMAINS: gocodealone.tech,www.gocodealone.tech
+        MULTISITE_CONTENT_REPO_TENANT_MAP: GoCodeAlone/gocodealone-website:gocodealone
+        MULTISITE_ADMIN_HOST: admin.gocodealone.tech
+        MULTISITE_SUPER_ADMIN_EMAIL: admin@gocodealone.tech
+        MULTISITE_BOOTSTRAP_CONTENT_TENANT: gocodealone
+        MULTISITE_BOOTSTRAP_CONTENT_REPO: GoCodeAlone/gocodealone-website
+        MULTISITE_BOOTSTRAP_CONTENT_TAG: v0.1.0
+        MULTISITE_BOOTSTRAP_CONTENT_TARBALL_URL: https://api.github.com/repos/GoCodeAlone/gocodealone-website/releases/assets/426414415
+        MULTISITE_WEBAUTHN_RP_ID: gocodealone.tech
+        MULTISITE_WEBAUTHN_RP_ORIGIN: https://admin.gocodealone.tech
+      env_vars_secret:
+        MULTISITE_DB_URL: ${MULTISITE_DB_URL}
+        MULTISITE_INGEST_HMAC_SECRET: ${MULTISITE_INGEST_HMAC_SECRET}
+        MULTISITE_JWT_SECRET: ${MULTISITE_JWT_SECRET}
+        MULTISITE_AUDIT_SIGN_KEY: ${MULTISITE_AUDIT_SIGN_KEY}
+        MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE: ${MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE}
+        MULTISITE_CONTENT_REPO_TOKEN: ${MULTISITE_CONTENT_REPO_TOKEN}
+        MULTISITE_OAUTH_GOOGLE_CLIENT_ID: ${MULTISITE_OAUTH_GOOGLE_CLIENT_ID}
+        MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET: ${MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET}
+        MULTISITE_OAUTH_FACEBOOK_APP_ID: ${MULTISITE_OAUTH_FACEBOOK_APP_ID}
+        MULTISITE_OAUTH_FACEBOOK_APP_SECRET: ${MULTISITE_OAUTH_FACEBOOK_APP_SECRET}
+
+pipelines:
+  apply:
+    steps:
+      - name: ensure_gocodealone_ga4
+        type: step.analytics_google_ga4_ensure
+        config:
+          provider: google-analytics
+          account: accounts/395146029
+          property: properties/538139248
+          property_name: GoCodeAlone
+          stream_name: gocodealone.tech
+          default_uri: https://gocodealone.tech
+          dry_run: false
