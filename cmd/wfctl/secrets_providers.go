@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 	"time"
+
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // SecretState describes the accessibility of a secret in its backing store.
@@ -45,14 +47,126 @@ type SecretStatus struct {
 	IsSet bool
 }
 
-// newSecretsProvider constructs the provider matching the given name.
-func newSecretsProvider(providerName string) (SecretsProvider, error) {
-	switch providerName {
-	case "env", "":
-		return &envProvider{}, nil
-	default:
-		return nil, fmt.Errorf("unknown secrets provider %q (supported: env)", providerName)
+// secretsProviderAdapter wraps a secrets.Provider and implements SecretsProvider.
+// It upgrades to MetadataProvider/AccessChecker when the underlying provider
+// supports them.
+type secretsProviderAdapter struct {
+	p secrets.Provider
+}
+
+func (a secretsProviderAdapter) Get(ctx context.Context, name string) (string, error) {
+	return a.p.Get(ctx, name)
+}
+
+func (a secretsProviderAdapter) Set(ctx context.Context, name, value string) error {
+	return a.p.Set(ctx, name, value)
+}
+
+func (a secretsProviderAdapter) Delete(ctx context.Context, name string) error {
+	return a.p.Delete(ctx, name)
+}
+
+// Check returns the SecretState for the named secret.
+// When the underlying provider is a MetadataProvider, it uses StatAll to check
+// membership. Otherwise it falls back to List() membership check.
+func (a secretsProviderAdapter) Check(ctx context.Context, name string) (SecretState, error) {
+	if mp, ok := a.p.(secrets.MetadataProvider); ok {
+		metas, err := mp.StatAll(ctx)
+		if err != nil && !errors.Is(err, secrets.ErrUnsupported) {
+			return SecretFetchError, err
+		}
+		for _, m := range metas {
+			if m.Name == name {
+				if m.Exists {
+					return SecretSet, nil
+				}
+				return SecretNotSet, nil
+			}
+		}
+		return SecretNotSet, nil
 	}
+	// Fall back to List() membership.
+	names, err := a.p.List(ctx)
+	if err != nil {
+		if errors.Is(err, secrets.ErrUnsupported) {
+			return SecretFetchError, nil
+		}
+		return SecretFetchError, err
+	}
+	for _, n := range names {
+		if n == name {
+			return SecretSet, nil
+		}
+	}
+	return SecretNotSet, nil
+}
+
+// List returns SecretStatus entries from the provider.
+// When the underlying provider is a MetadataProvider, statuses include
+// LastRotated sourced from SecretMeta.UpdatedAt. Otherwise, statuses are
+// presence-only (zero LastRotated).
+func (a secretsProviderAdapter) List(ctx context.Context) ([]SecretStatus, error) {
+	if mp, ok := a.p.(secrets.MetadataProvider); ok {
+		metas, err := mp.StatAll(ctx)
+		if err != nil && !errors.Is(err, secrets.ErrUnsupported) {
+			return nil, err
+		}
+		if err == nil {
+			statuses := make([]SecretStatus, len(metas))
+			for i, m := range metas {
+				state := SecretNotSet
+				if m.Exists {
+					state = SecretSet
+				}
+				statuses[i] = SecretStatus{
+					Name:        m.Name,
+					State:       state,
+					IsSet:       m.Exists,
+					LastRotated: m.UpdatedAt,
+				}
+			}
+			return statuses, nil
+		}
+		// ErrUnsupported — fall through to List() below.
+	}
+	// Fall back to plain List() with presence-only statuses.
+	names, err := a.p.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	statuses := make([]SecretStatus, len(names))
+	for i, n := range names {
+		statuses[i] = SecretStatus{
+			Name:  n,
+			State: SecretSet,
+			IsSet: true,
+		}
+	}
+	return statuses, nil
+}
+
+// checkAccess calls CheckAccess on the underlying provider if it implements
+// AccessChecker. Returns nil when the provider does not implement the interface.
+func (a secretsProviderAdapter) checkAccess(ctx context.Context) error {
+	if ac, ok := a.p.(secrets.AccessChecker); ok {
+		return ac.CheckAccess(ctx)
+	}
+	return nil
+}
+
+// newSecretsProvider constructs the provider matching the given name.
+// It now supports all 5 backends (env, github, vault, aws, keychain) by
+// delegating to resolveSecretsProvider, then wrapping the result in the adapter.
+func newSecretsProvider(providerName string) (SecretsProvider, error) {
+	name := providerName
+	if name == "" {
+		name = "env"
+	}
+	p, err := resolveSecretsProvider(&SecretsConfig{Provider: name})
+	if err != nil {
+		return nil, err
+	}
+	return secretsProviderAdapter{p}, nil
 }
 
 // envProvider reads/writes secrets as OS environment variables.

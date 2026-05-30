@@ -510,7 +510,20 @@ func runSecretsInit(args []string) error {
 		envSuffix = " for environment " + *envName
 	}
 	fmt.Printf("Initialized secrets provider %q%s\n", *providerName, envSuffix)
-	fmt.Printf("Provider %q uses OS environment variables — no additional setup required.\n", *providerName)
+	switch *providerName {
+	case "env", "":
+		fmt.Printf("Provider %q uses OS environment variables — no additional setup required.\n", *providerName)
+	case "github":
+		fmt.Printf("Provider %q reads from GitHub Actions secrets — ensure GITHUB_TOKEN is set.\n", *providerName)
+	case "vault":
+		fmt.Printf("Provider %q reads from HashiCorp Vault — configure address and token in secrets.config.\n", *providerName)
+	case "aws":
+		fmt.Printf("Provider %q reads from AWS Secrets Manager — ensure AWS credentials are available.\n", *providerName)
+	case "keychain":
+		fmt.Printf("Provider %q reads from the OS keychain — no additional setup required.\n", *providerName)
+	default:
+		fmt.Printf("Provider %q initialized — check provider documentation for setup.\n", *providerName)
+	}
 	return nil
 }
 

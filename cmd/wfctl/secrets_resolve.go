@@ -55,7 +55,12 @@ func ResolveSecretStore(secretName string, envName string, cfg *config.WorkflowC
 func getProviderForStore(storeName string, cfg *config.WorkflowConfig) (SecretsProvider, error) {
 	if cfg != nil {
 		if store, ok := cfg.SecretStores[storeName]; ok && store != nil {
-			return newSecretsProvider(store.Provider)
+			// Named store found — build via resolveSecretsProvider and wrap in adapter.
+			p, err := resolveSecretsProvider(secretsConfigFromStore(store))
+			if err != nil {
+				return nil, err
+			}
+			return secretsProviderAdapter{p}, nil
 		}
 	}
 	// Store name not in SecretStores map — treat as a direct provider name.
