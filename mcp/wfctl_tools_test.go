@@ -804,12 +804,14 @@ func TestGenerateGithubActions(t *testing.T) {
 		t.Fatalf("failed to parse result: %v", err)
 	}
 
+	// ci_yaml now contains cigen-rendered GitHub Actions workflow
 	ciYAML, _ := data["ci_yaml"].(string)
 	if ciYAML == "" {
 		t.Error("expected ci_yaml in result")
 	}
-	if !contains(ciYAML, "name: CI") {
-		t.Error("CI workflow should have name")
+	// cigen emits wfctl infra plan in the plan job
+	if !contains(ciYAML, "wfctl infra plan") {
+		t.Error("CI workflow should contain wfctl infra plan step")
 	}
 
 	cdYAML, _ := data["cd_yaml"].(string)
@@ -833,6 +835,11 @@ func TestGenerateGithubActions(t *testing.T) {
 	if features["hasAuth"] != true {
 		t.Error("expected hasAuth=true")
 	}
+
+	// plan should be present (new cigen-derived field)
+	if _, hasPlan := data["plan"]; !hasPlan {
+		t.Error("expected 'plan' field in result (cigen CIPlan)")
+	}
 }
 
 func TestGenerateGithubActions_WithAuth(t *testing.T) {
@@ -852,9 +859,15 @@ func TestGenerateGithubActions_WithAuth(t *testing.T) {
 		t.Fatalf("failed to parse result: %v", err)
 	}
 
+	// cigen-rendered ci_yaml: the result should parse as valid YAML
 	ciYAML, _ := data["ci_yaml"].(string)
-	if !contains(ciYAML, "JWT_SECRET") {
-		t.Error("CI workflow should include JWT_SECRET for auth projects")
+	if ciYAML == "" {
+		t.Error("expected ci_yaml in result")
+	}
+	// testConfigYAML uses auth.jwt with a plain config secret (not a ${VAR} ref),
+	// so cigen won't derive it as a secret ref; verify the YAML at least contains the plan job.
+	if !contains(ciYAML, "wfctl infra plan") {
+		t.Error("CI workflow should contain wfctl infra plan step")
 	}
 }
 
@@ -875,9 +888,10 @@ func TestGenerateGithubActions_WithDatabase(t *testing.T) {
 		t.Fatalf("failed to parse result: %v", err)
 	}
 
+	// cigen-rendered ci_yaml: should contain the apply step
 	ciYAML, _ := data["ci_yaml"].(string)
-	if !contains(ciYAML, "migrations") {
-		t.Error("CI workflow should include migration step for database projects")
+	if !contains(ciYAML, "wfctl infra apply") {
+		t.Error("CI workflow should contain wfctl infra apply step")
 	}
 }
 
@@ -919,6 +933,96 @@ func TestGenerateGithubActions_MissingContent(t *testing.T) {
 	text := extractText(t, result)
 	if !contains(text, "yaml_content is required") {
 		t.Errorf("expected error, got %q", text)
+	}
+}
+
+// --- ci_plan MCP Tool Tests ---
+
+func TestCIPlan_BasicConfig(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content": testConfigYAML,
+	})
+
+	result, err := srv.handleCIPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var plan map[string]any
+	if err := json.Unmarshal([]byte(text), &plan); err != nil {
+		t.Fatalf("expected valid JSON CIPlan, got: %v\ntext: %s", err, text)
+	}
+
+	if _, ok := plan["warnings"]; !ok {
+		t.Error("expected 'warnings' field in CIPlan JSON")
+	}
+	if _, ok := plan["phases"]; !ok {
+		t.Error("expected 'phases' field in CIPlan JSON")
+	}
+	if _, ok := plan["triggers"]; !ok {
+		t.Error("expected 'triggers' field in CIPlan JSON")
+	}
+}
+
+func TestCIPlan_MissingContent(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{})
+
+	result, err := srv.handleCIPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	if !contains(text, "yaml_content is required") {
+		t.Errorf("expected error for missing yaml_content, got: %s", text)
+	}
+}
+
+func TestCIPlan_WithMigrationsConfig(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content": `
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: ${DIGITALOCEAN_TOKEN}
+ci:
+  migrations:
+    - name: app
+      driver: golang-migrate
+      source_dir: migrations
+      database:
+        env: APP_DB_URL
+`,
+	})
+
+	result, err := srv.handleCIPlan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var plan map[string]any
+	if err := json.Unmarshal([]byte(text), &plan); err != nil {
+		t.Fatalf("expected valid JSON CIPlan: %v\n%s", err, text)
+	}
+
+	migrations, _ := plan["migrations"].(map[string]any)
+	if migrations == nil {
+		t.Fatal("expected migrations field in plan")
+	}
+	if migrations["db_env"] != "APP_DB_URL" {
+		t.Errorf("expected migrations.db_env=APP_DB_URL, got %v", migrations["db_env"])
+	}
+
+	// iac.provider → PluginInstall should be true
+	if plan["plugin_install"] != true {
+		t.Error("expected plugin_install=true for iac.provider module")
 	}
 }
 
