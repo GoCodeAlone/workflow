@@ -123,17 +123,25 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 	}
 
 	// Valuer: --from-env > stdinKV/--secret > error if nothing found.
+	// When --from-env is set, a missing env var is a skip (provided=false)
+	// rather than an error — the caller only wants to set what's available.
+	// When no value source at all is configured, this is a hard error.
 	valuer := func(d decl) (string, bool, error) {
 		if a.fromEnv {
 			v := os.Getenv(d.name)
 			if v != "" {
 				return v, true, nil
 			}
+			// env var not set — check the other sources before skipping.
 		}
 		if v, ok := secretMap[d.name]; ok {
 			return v, true, nil
 		}
-		// No value source — in non-interactive mode this is an error.
+		if a.fromEnv {
+			// from-env was the value source but $NAME was empty → skip, not error.
+			return "", false, nil
+		}
+		// No value source at all — non-interactive hard error naming the secret.
 		return "", false, fmt.Errorf("no value for secret %q: set $%s, pass --from-env, or use --secret %s=VALUE", d.name, d.name, d.name)
 	}
 
