@@ -67,31 +67,54 @@ func (a secretsProviderAdapter) Delete(ctx context.Context, name string) error {
 }
 
 // Check returns the SecretState for the named secret.
-// When the underlying provider is a MetadataProvider, it uses StatAll to check
-// membership. Otherwise it falls back to List() membership check.
+//
+// Resolution order, most-precise first:
+//  1. MetadataProvider.StatAll — when it succeeds, membership + presence is authoritative.
+//  2. Get(name)-presence — when StatAll is unavailable/errored but Get works
+//     (env, file, vault, aws). A non-empty value is Set; an empty value or
+//     ErrNotFound is NotSet.
+//  3. List()-membership — only when Get itself reports ErrUnsupported
+//     (write-only stores like github, where reading a value is impossible).
 func (a secretsProviderAdapter) Check(ctx context.Context, name string) (SecretState, error) {
 	if mp, ok := a.p.(secrets.MetadataProvider); ok {
 		metas, err := mp.StatAll(ctx)
-		if err != nil && !errors.Is(err, secrets.ErrUnsupported) {
-			return SecretFetchError, err
-		}
-		for _, m := range metas {
-			if m.Name == name {
-				if m.Exists {
-					return SecretSet, nil
+		if err == nil {
+			for _, m := range metas {
+				if m.Name == name {
+					if m.Exists {
+						return SecretSet, nil
+					}
+					return SecretNotSet, nil
 				}
-				return SecretNotSet, nil
 			}
+			return SecretNotSet, nil
+		}
+		// StatAll failed (including ErrUnsupported) — fall through to Get/List.
+	}
+
+	// Get-presence check.
+	v, err := a.p.Get(ctx, name)
+	if err == nil {
+		if v != "" {
+			return SecretSet, nil
 		}
 		return SecretNotSet, nil
 	}
-	// Fall back to List() membership.
-	names, err := a.p.List(ctx)
-	if err != nil {
-		if errors.Is(err, secrets.ErrUnsupported) {
+	if errors.Is(err, secrets.ErrNotFound) {
+		return SecretNotSet, nil
+	}
+	if !errors.Is(err, secrets.ErrUnsupported) {
+		// Unexpected Get error (e.g. permission denied) — surface as fetch error.
+		return SecretFetchError, err
+	}
+
+	// Get is unsupported (write-only store) — fall back to List() membership.
+	names, listErr := a.p.List(ctx)
+	if listErr != nil {
+		if errors.Is(listErr, secrets.ErrUnsupported) {
 			return SecretFetchError, nil
 		}
-		return SecretFetchError, err
+		return SecretFetchError, listErr
 	}
 	for _, n := range names {
 		if n == name {
@@ -102,15 +125,15 @@ func (a secretsProviderAdapter) Check(ctx context.Context, name string) (SecretS
 }
 
 // List returns SecretStatus entries from the provider.
-// When the underlying provider is a MetadataProvider, statuses include
-// LastRotated sourced from SecretMeta.UpdatedAt. Otherwise, statuses are
-// presence-only (zero LastRotated).
+//
+// It prefers MetadataProvider.StatAll (which carries LastRotated from
+// SecretMeta.UpdatedAt). When StatAll is unavailable or errors, it falls back to
+// the plain List() names with presence-only statuses. A store that supports
+// neither (e.g. env with no prefix) yields an empty list rather than an error,
+// so callers that only need per-entry Check semantics are unaffected.
 func (a secretsProviderAdapter) List(ctx context.Context) ([]SecretStatus, error) {
 	if mp, ok := a.p.(secrets.MetadataProvider); ok {
 		metas, err := mp.StatAll(ctx)
-		if err != nil && !errors.Is(err, secrets.ErrUnsupported) {
-			return nil, err
-		}
 		if err == nil {
 			statuses := make([]SecretStatus, len(metas))
 			for i, m := range metas {
@@ -127,11 +150,15 @@ func (a secretsProviderAdapter) List(ctx context.Context) ([]SecretStatus, error
 			}
 			return statuses, nil
 		}
-		// ErrUnsupported — fall through to List() below.
+		// StatAll failed (including ErrUnsupported) — fall through to List() below.
 	}
 	// Fall back to plain List() with presence-only statuses.
 	names, err := a.p.List(ctx)
 	if err != nil {
+		if errors.Is(err, secrets.ErrUnsupported) {
+			// Store cannot enumerate — return empty rather than erroring.
+			return nil, nil
+		}
 		return nil, err
 	}
 	statuses := make([]SecretStatus, len(names))
