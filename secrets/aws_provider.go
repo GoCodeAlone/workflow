@@ -307,6 +307,32 @@ func extractJSONField(jsonStr, field string) (string, error) {
 	return fmt.Sprintf("%v", val), nil
 }
 
+// StatAll implements MetadataProvider on a best-effort basis. It lists secret
+// names from AWS Secrets Manager and returns them with Exists=true and zero
+// UpdatedAt (LastChangedDate is not fetched to avoid N+1 API calls). Returns
+// ErrUnsupported when listing is not available.
+func (p *AWSSecretsManagerProvider) StatAll(ctx context.Context) ([]SecretMeta, error) {
+	keys, err := p.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: aws StatAll: %v", ErrUnsupported, err)
+	}
+	metas := make([]SecretMeta, len(keys))
+	for i, k := range keys {
+		metas[i] = SecretMeta{Name: k, Exists: true}
+	}
+	return metas, nil
+}
+
+// CheckAccess implements AccessChecker. It performs a lightweight check by
+// attempting to list secrets. Errors never contain credential material.
+func (p *AWSSecretsManagerProvider) CheckAccess(ctx context.Context) error {
+	_, err := p.List(ctx)
+	if err != nil {
+		return fmt.Errorf("aws store access: check failed (creds redacted)")
+	}
+	return nil
+}
+
 // sha256Hex computes hex-encoded SHA-256 hash.
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)

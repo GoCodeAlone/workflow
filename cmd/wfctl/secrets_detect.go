@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -328,12 +330,22 @@ func stdinFileDescriptor() (int, error) {
 	return int(fd), nil //nolint:gosec // fd is range-checked before conversion.
 }
 
+// secretListJSONEntry is the JSON output shape for a single secret in --json mode.
+type secretListJSONEntry struct {
+	Name      string `json:"name"`
+	Store     string `json:"store,omitempty"`
+	State     string `json:"state"`
+	Exists    bool   `json:"exists"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
 func runSecretsList(args []string) error {
 	fs := flag.NewFlagSet("secrets list", flag.ContinueOnError)
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
 	envName := fs.String("env", "", "Environment name for store resolution (optional)")
 	providerName := fs.String("provider", "", "Ad-hoc provider override (keychain|env|aws); bypasses app.yaml")
 	service := fs.String("service", "", "Service name for keychain provider")
+	asJSON := fs.Bool("json", false, "Output as JSON array")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl secrets list [options]\n\nList declared secrets and their status.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -379,10 +391,14 @@ func runSecretsList(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%-40s  %-12s  %-10s\n", "NAME", "STORE", "STATUS")
-		fmt.Printf("%-40s  %-12s  %-10s\n", strings.Repeat("-", 40), strings.Repeat("-", 12), strings.Repeat("-", 10))
+		if *asJSON {
+			return printSecretsJSON(statuses)
+		}
+		fmt.Printf("%-40s  %-12s  %-10s  %-20s\n", "NAME", "STORE", "STATUS", "UPDATED")
+		fmt.Printf("%-40s  %-12s  %-10s  %-20s\n", strings.Repeat("-", 40), strings.Repeat("-", 12), strings.Repeat("-", 10), strings.Repeat("-", 20))
 		for _, s := range statuses {
-			fmt.Printf("%-40s  %-12s  %-10s\n", s.Name, s.Store, secretStateLabel(s.State))
+			updatedAt := formatUpdatedAt(s.LastRotated)
+			fmt.Printf("%-40s  %-12s  %-10s  %-20s\n", s.Name, s.Store, secretStateLabel(s.State), updatedAt)
 		}
 		return nil
 	}
@@ -397,23 +413,97 @@ func runSecretsList(args []string) error {
 		return err
 	}
 
-	fmt.Printf("Provider: %s\n\n", cmp(secretsCfg.Provider, "env"))
-	fmt.Printf("%-40s  %-6s\n", "NAME", "STATUS")
-	fmt.Printf("%-40s  %-6s\n", strings.Repeat("-", 40), "------")
-
-	for _, entry := range secretsCfg.Entries {
-		val, _ := provider.Get(ctx, entry.Name)
-		status := "unset"
-		if val != "" {
-			status = "set"
+	// Check access if the provider supports it (only print in text mode).
+	if !*asJSON {
+		if adapter, ok := provider.(secretsProviderAdapter); ok {
+			if accessErr := adapter.checkAccess(ctx); accessErr != nil {
+				fmt.Printf("Store access: ✗ %s\n", accessErr.Error())
+			} else {
+				fmt.Printf("Store access: ✓\n")
+			}
 		}
+	}
+
+	// Build statuses for all declared entries so we can use them for --json or UPDATED column.
+	// Use Check (not Get) so the adapter's StatAll→Get→List precedence applies — this is
+	// essential for write-only stores like github where Get returns ErrUnsupported.
+	var statuses []SecretStatus
+	for _, entry := range secretsCfg.Entries {
+		state, _ := provider.Check(ctx, entry.Name)
+		statuses = append(statuses, SecretStatus{
+			Name:  entry.Name,
+			Store: cmp(secretsCfg.Provider, "env"),
+			State: state,
+			IsSet: state == SecretSet,
+		})
+	}
+
+	// Enrich with metadata if supported.
+	if adapter, ok := provider.(secretsProviderAdapter); ok {
+		if mp, ok2 := adapter.p.(secrets.MetadataProvider); ok2 {
+			if metas, metaErr := mp.StatAll(ctx); metaErr == nil {
+				metaByName := make(map[string]secrets.SecretMeta, len(metas))
+				for _, m := range metas {
+					metaByName[m.Name] = m
+				}
+				for i, s := range statuses {
+					if m, found := metaByName[s.Name]; found {
+						statuses[i].LastRotated = m.UpdatedAt
+					}
+				}
+			}
+		}
+	}
+
+	if *asJSON {
+		return printSecretsJSON(statuses)
+	}
+
+	fmt.Printf("Provider: %s\n\n", cmp(secretsCfg.Provider, "env"))
+	fmt.Printf("%-40s  %-6s  %-20s\n", "NAME", "STATUS", "UPDATED")
+	fmt.Printf("%-40s  %-6s  %-20s\n", strings.Repeat("-", 40), "------", strings.Repeat("-", 20))
+
+	for i, entry := range secretsCfg.Entries {
 		desc := ""
 		if entry.Description != "" {
 			desc = "  # " + entry.Description
 		}
-		fmt.Printf("%-40s  %-6s%s\n", entry.Name, status, desc)
+		updatedAt := "—"
+		if i < len(statuses) {
+			updatedAt = formatUpdatedAt(statuses[i].LastRotated)
+		}
+		fmt.Printf("%-40s  %-6s  %-20s%s\n", entry.Name, secretStateLabel(statuses[i].State), updatedAt, desc)
 	}
 	return nil
+}
+
+// printSecretsJSON marshals statuses to a JSON array and writes to stdout.
+func printSecretsJSON(statuses []SecretStatus) error {
+	entries := make([]secretListJSONEntry, len(statuses))
+	for i, s := range statuses {
+		entry := secretListJSONEntry{
+			Name:   s.Name,
+			Store:  s.Store,
+			State:  secretStateLabel(s.State),
+			Exists: s.IsSet,
+		}
+		if !s.LastRotated.IsZero() {
+			entry.UpdatedAt = s.LastRotated.UTC().Format(time.RFC3339)
+		}
+		entries[i] = entry
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(entries)
+}
+
+// formatUpdatedAt returns a human-readable string for a LastRotated timestamp.
+// Returns "—" when the timestamp is zero.
+func formatUpdatedAt(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	return t.UTC().Format("2006-01-02 15:04")
 }
 
 // secretStateLabel returns a human-readable label for a SecretState.
@@ -510,7 +600,20 @@ func runSecretsInit(args []string) error {
 		envSuffix = " for environment " + *envName
 	}
 	fmt.Printf("Initialized secrets provider %q%s\n", *providerName, envSuffix)
-	fmt.Printf("Provider %q uses OS environment variables — no additional setup required.\n", *providerName)
+	switch *providerName {
+	case "env", "":
+		fmt.Printf("Provider %q uses OS environment variables — no additional setup required.\n", *providerName)
+	case "github":
+		fmt.Printf("Provider %q reads from GitHub Actions secrets — ensure GITHUB_TOKEN is set.\n", *providerName)
+	case "vault":
+		fmt.Printf("Provider %q reads from HashiCorp Vault — configure address and token in secrets.config.\n", *providerName)
+	case "aws":
+		fmt.Printf("Provider %q reads from AWS Secrets Manager — ensure AWS credentials are available.\n", *providerName)
+	case "keychain":
+		fmt.Printf("Provider %q reads from the OS keychain — no additional setup required.\n", *providerName)
+	default:
+		fmt.Printf("Provider %q initialized — check provider documentation for setup.\n", *providerName)
+	}
 	return nil
 }
 

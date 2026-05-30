@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/nacl/box"
@@ -56,6 +57,15 @@ type GitHubSecretsProvider struct {
 	selectedRepoIDs []int64 // required iff scope=org && visibility=selected
 	token           string
 	client          *http.Client
+	baseURL         string // overridden in tests to point at an httptest.Server
+}
+
+// base returns the API base URL, using baseURL when set (for tests).
+func (p *GitHubSecretsProvider) base() string {
+	if p.baseURL != "" {
+		return p.baseURL
+	}
+	return githubAPIBase
 }
 
 // NewGitHubSecretsProvider creates a repo-scoped provider for the given
@@ -205,8 +215,15 @@ func (p *GitHubSecretsProvider) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// List returns the names of all GitHub Actions secrets for the repo.
-func (p *GitHubSecretsProvider) List(ctx context.Context) ([]string, error) {
+// ghSecretEntry is the JSON shape returned by GitHub's list-secrets endpoints.
+type ghSecretEntry struct {
+	Name      string    `json:"name"`
+	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// listSecretEntries fetches and decodes all secret entries (name + timestamps).
+func (p *GitHubSecretsProvider) listSecretEntries(ctx context.Context) ([]ghSecretEntry, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.secretsURL(), nil)
 	if err != nil {
 		return nil, err
@@ -221,18 +238,68 @@ func (p *GitHubSecretsProvider) List(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("secrets: github list secrets: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
 	}
 	var result struct {
-		Secrets []struct {
-			Name string `json:"name"`
-		} `json:"secrets"`
+		Secrets []ghSecretEntry `json:"secrets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("secrets: github list decode: %w", err)
 	}
-	names := make([]string, len(result.Secrets))
-	for i, s := range result.Secrets {
+	return result.Secrets, nil
+}
+
+// List returns the names of all GitHub Actions secrets for the repo.
+func (p *GitHubSecretsProvider) List(ctx context.Context) ([]string, error) {
+	entries, err := p.listSecretEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(entries))
+	for i, s := range entries {
 		names[i] = s.Name
 	}
 	return names, nil
+}
+
+// StatAll implements MetadataProvider. It returns presence + timestamp for every
+// secret visible to the configured token. UpdatedAt is the updated_at field from
+// GitHub, falling back to created_at when updated_at is zero.
+func (p *GitHubSecretsProvider) StatAll(ctx context.Context) ([]SecretMeta, error) {
+	entries, err := p.listSecretEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	metas := make([]SecretMeta, len(entries))
+	for i, e := range entries {
+		ts := e.UpdatedAt
+		if ts.IsZero() {
+			ts = e.CreatedAt
+		}
+		metas[i] = SecretMeta{
+			Name:      e.Name,
+			Exists:    true,
+			UpdatedAt: ts,
+		}
+	}
+	return metas, nil
+}
+
+// CheckAccess implements AccessChecker. It verifies the configured credentials
+// have at least read access by fetching the public key. Errors never contain
+// credential material.
+func (p *GitHubSecretsProvider) CheckAccess(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.publicKeyURL(), nil)
+	if err != nil {
+		return fmt.Errorf("github store access: request build: %w", err)
+	}
+	p.setHeaders(req)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("github store access: %w (creds redacted)", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github store access: HTTP %d (creds redacted)", resp.StatusCode)
+	}
+	return nil
 }
 
 // readErrorBody reads up to 512 bytes from resp.Body and returns them as a
@@ -258,11 +325,11 @@ func (p *GitHubSecretsProvider) setHeaders(req *http.Request) {
 func (p *GitHubSecretsProvider) secretsURL() string {
 	switch p.scope {
 	case GitHubScopeOrg:
-		return fmt.Sprintf("%s/orgs/%s/actions/secrets", githubAPIBase, p.org)
+		return fmt.Sprintf("%s/orgs/%s/actions/secrets", p.base(), p.org)
 	case GitHubScopeEnv:
-		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/secrets", githubAPIBase, p.owner, p.repo, url.PathEscape(p.env))
+		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/secrets", p.base(), p.owner, p.repo, url.PathEscape(p.env))
 	default: // GitHubScopeRepo
-		return fmt.Sprintf("%s/repos/%s/%s/actions/secrets", githubAPIBase, p.owner, p.repo)
+		return fmt.Sprintf("%s/repos/%s/%s/actions/secrets", p.base(), p.owner, p.repo)
 	}
 }
 
