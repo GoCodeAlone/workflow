@@ -67,11 +67,18 @@ type PluginLoader interface {
 	LoadPlugin(p plugin.EnginePlugin) error
 }
 
-// DefaultPlugins returns the standard set of built-in engine plugins.
+// scenarioExtras holds additional plugins that are only linked in when the
+// "scenario_stub" build tag is active (see extras_stub.go). The init()
+// function in that file appends to this slice; without the tag it remains
+// nil and DefaultPlugins() returns only the base set.
+var scenarioExtras []plugin.EnginePlugin
+
+// DefaultPlugins returns the standard set of built-in engine plugins,
+// extended by any scenario-specific extras registered via build tags.
 // The slice is freshly allocated on each call so callers may safely append
 // custom plugins without affecting other callers.
 func DefaultPlugins() []plugin.EnginePlugin {
-	return []plugin.EnginePlugin{
+	base := []plugin.EnginePlugin{
 		pluginlicense.New(),
 		pluginconfigprovider.New(),
 		pluginhttp.New(),
@@ -105,6 +112,7 @@ func DefaultPlugins() []plugin.EnginePlugin {
 		pluginscanner.New(),
 		pluginactors.New(),
 	}
+	return append(base, scenarioExtras...)
 }
 
 // LoadAll loads all default built-in plugins into the given engine.
