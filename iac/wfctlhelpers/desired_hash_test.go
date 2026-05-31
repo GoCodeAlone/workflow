@@ -3,6 +3,7 @@ package wfctlhelpers_test
 import (
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
@@ -109,5 +110,52 @@ func TestDesiredStateHash_SortOrderIndependent(t *testing.T) {
 	h2 := wfctlhelpers.DesiredStateHash(nil, b, nil, "")
 	if h1 != h2 {
 		t.Errorf("hash is order-dependent: a=%q b=%q", h1, h2)
+	}
+}
+
+// TestDesiredStateHash_MatchesHandlerInlined is the divergence-guard for
+// the inlined copy in iac/admin/handler (handler.DesiredHash). Both
+// implementations must produce byte-identical digests for the same inputs,
+// preventing silent copy-drift after future refactors of either function.
+//
+// handler.DesiredHash is exported specifically for this cross-package test;
+// iac/admin/handler does NOT import iac/wfctlhelpers (no cycle).
+func TestDesiredStateHash_MatchesHandlerInlined(t *testing.T) {
+	cases := []struct {
+		name    string
+		desired []interfaces.ResourceSpec
+		current []interfaces.ResourceState
+	}{
+		{
+			name:    "empty",
+			desired: nil,
+			current: nil,
+		},
+		{
+			name: "create-only (no current)",
+			desired: []interfaces.ResourceSpec{
+				{Name: "vpc1", Type: "infra.vpc", Config: map[string]any{"region": "nyc1"}},
+			},
+			current: nil,
+		},
+		{
+			name: "module-ref collapsed",
+			desired: []interfaces.ResourceSpec{
+				{Name: "db1", Type: "infra.database", Config: map[string]any{"vpc_id": "${vpc1.id}"}},
+			},
+			current: []interfaces.ResourceState{
+				{Name: "vpc1", ProviderID: "do-vpc-111"},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h1 := wfctlhelpers.DesiredStateHash(nil, tc.desired, tc.current, "")
+			h2 := handler.DesiredHash(nil, tc.desired, tc.current)
+			if h1 != h2 {
+				t.Errorf("divergence between wfctlhelpers.DesiredStateHash and handler.DesiredHash:\n  wfctlhelpers=%q\n  handler=     %q", h1, h2)
+			}
+		})
 	}
 }

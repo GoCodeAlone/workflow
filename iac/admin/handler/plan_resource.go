@@ -142,10 +142,17 @@ func summariseChanges(changes []interfaces.FieldChange) string {
 	return fmt.Sprintf("%d field(s) changed", len(changes))
 }
 
-// handlerDesiredHash mirrors wfctlhelpers.DesiredStateHash but is inlined
-// here to avoid an import cycle (iac/wfctlhelpers → module → iac/admin/handler).
-// cfg is reserved for future secret-resolution parity; current implementation
-// collapses ${MODULE.id} refs via jitsubst then SHA-256 hashes the sorted JSON.
+// DesiredHash mirrors wfctlhelpers.DesiredStateHash but is defined here
+// to avoid an import cycle (iac/wfctlhelpers → module → iac/admin/handler).
+// Exported so iac/wfctlhelpers/desired_hash_test.go can assert both
+// implementations produce identical digests for the same inputs, preventing
+// silent copy-drift. cfg is reserved for future secret-resolution parity.
+func DesiredHash(cfg *config.WorkflowConfig, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) string {
+	return handlerDesiredHash(cfg, desired, current)
+}
+
+// handlerDesiredHash is the internal implementation; callers within the
+// handler package use this directly; external callers use DesiredHash.
 func handlerDesiredHash(_ *config.WorkflowConfig, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) string {
 	// Build syncedOutputs from current state (module name → outputs + "id").
 	syncedOutputs := make(map[string]map[string]any, len(current))

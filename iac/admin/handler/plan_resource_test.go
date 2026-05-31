@@ -110,4 +110,15 @@ func TestPlanResource_WithCurrentState(t *testing.T) {
 	if len(out.Actions) != 2 {
 		t.Fatalf("expected 2 actions (1 update + 1 create), got %d", len(out.Actions))
 	}
+	// Pin the create/update distinction per spec (FAIL-16 fix).
+	actionByName := map[string]string{}
+	for _, a := range out.Actions {
+		actionByName[a.ResourceName] = a.ActionType
+	}
+	if actionByName["vpc1"] != "update" {
+		t.Errorf("vpc1 (existing) should be 'update', got %q", actionByName["vpc1"])
+	}
+	if actionByName["db1"] != "create" {
+		t.Errorf("db1 (new) should be 'create', got %q", actionByName["db1"])
+	}
 }
