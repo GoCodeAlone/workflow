@@ -127,15 +127,26 @@ git commit -m "feat(cigen): add DeployPhase.Secrets + Scoped for per-phase scopi
 
 **Files:**
 - Modify: `cigen/analyze.go` — `Analyze` (per-phase secrets), `derivePhases` (carry secrets/scoped), `deriveMigrations` (populate Env), `deriveWarnings` (ambiguity + unscopable notes)
-- Test: `cigen/analyze_test.go` (extend)
+- Test: `cigen/analyze_phase_test.go` (NEW — **`package cigen` internal**, NOT `cigen_test`)
 
 **Change class:** internal logic (analyze pure function) → unit tests sufficient.
 
+> **Why an internal test file (resolves plan-review C1/C2):** the existing `cigen/analyze_test.go` is `package cigen_test` (external). The new tests call **unexported** funcs (`deriveMigrations`, `deriveSecrets`, `deriveWarnings`) and `config.LoadFromFile`, so they MUST live in a `package cigen` (internal) file — from there the unexported symbols are reachable unqualified and the file declares its own `config`/`strings` imports. Do NOT append these to `analyze_test.go`.
+
 **Step 1: Write the failing tests**
 
-Append to `cigen/analyze_test.go`:
+Create `cigen/analyze_phase_test.go`:
 
 ```go
+package cigen
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/GoCodeAlone/workflow/config"
+)
+
 func TestAnalyze_PerPhaseScoping_PrereqExcludesDeploySecret(t *testing.T) {
 	plan, err := Analyze([]string{"testdata/multisite/deploy.yaml"}, Options{
 		PhaseConfig: "testdata/multisite/deploy.prereq.yaml",
@@ -405,15 +416,46 @@ git commit -m "feat(cigen): scope per-phase secrets in Analyze; derive single-en
 
 **Files:**
 - Modify: `cigen/render_gha.go` — `writeApplyJob` (~177-184), `migrationsUpCommand` (~227-233)
-- Test: `cigen/render_gha_test.go` (extend)
+- Test: `cigen/render_gha_phase_test.go` (NEW — **`package cigen` internal**)
 
-**Change class:** generator output (CI workflow content). Verification: render → parse-back YAML + literal-substring asserts. **Rollback: revert the PR; `wfctl ci generate` reverts to union-scoping + bare-migrations output (additive field, JSON omitempty — old plan.json consumers unaffected).**
+**Change class:** generator output (CI workflow content). Verification: render → parse-back YAML (`gopkg.in/yaml.v3`, a direct dep) + literal-substring asserts. **Rollback: revert the PR; `wfctl ci generate` reverts to union-scoping + bare-migrations output (additive field, JSON omitempty — old plan.json consumers unaffected).**
+
+> **Why an internal test file (resolves plan-review C1):** `migrationsUpCommand` is unexported. The new test must be `package cigen`. The existing `render_gha_test.go` (`cigen_test`, external) helpers (`richCIPlan`, etc.) are NOT reachable from it — the new file is self-contained (parses YAML with `yaml.Unmarshal`, same lib the external tests use).
+>
+> **Pre-existing tests survive (verified):** `TestRenderGitHubActions_MigrationsStep` (render_gha_test.go:82) and `_WithEnv` (:128) assert with `strings.Contains(...,"wfctl migrations up --config")` / `"--env prod"` — substring checks that remain true after ` --format json` is appended. `richCIPlan()`-built plans leave `Scoped=false` → union fallback → secret-env tests unchanged. No edits to the existing external tests are required; the Task 4 full-package run confirms it.
 
 **Step 1: Write the failing tests**
 
-Append to `cigen/render_gha_test.go`:
+Create `cigen/render_gha_phase_test.go`:
 
 ```go
+package cigen
+
+import (
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+// jobEnv returns the rendered `env:` map for a named job, parsed from YAML.
+func jobEnv(t *testing.T, yml, job string) map[string]any {
+	t.Helper()
+	var doc struct {
+		Jobs map[string]struct {
+			Env map[string]any `yaml:"env"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(yml), &doc); err != nil {
+		t.Fatalf("output is not valid YAML: %v\n%s", err, yml)
+	}
+	j, ok := doc.Jobs[job]
+	if !ok {
+		t.Fatalf("job %q not found in:\n%s", job, yml)
+	}
+	return j.Env
+}
+
 func TestRenderGHA_PerPhaseEnvScoping(t *testing.T) {
 	plan, err := Analyze([]string{"testdata/multisite/deploy.yaml"}, Options{
 		PhaseConfig: "testdata/multisite/deploy.prereq.yaml",
@@ -429,16 +471,14 @@ func TestRenderGHA_PerPhaseEnvScoping(t *testing.T) {
 	for _, c := range files {
 		yml = c
 	}
-	prereqEnv := jobEnvBlock(t, yml, "apply-prereq")
-	deployEnv := jobEnvBlock(t, yml, "apply-deploy")
-	if strings.Contains(prereqEnv, "MULTISITE_DB_URL") {
-		t.Errorf("apply-prereq env must NOT contain MULTISITE_DB_URL.\nenv:\n%s", prereqEnv)
+	prereqEnv := jobEnv(t, yml, "apply-prereq") // also asserts valid YAML
+	deployEnv := jobEnv(t, yml, "apply-deploy")
+	if _, ok := prereqEnv["MULTISITE_DB_URL"]; ok {
+		t.Errorf("apply-prereq env must NOT contain MULTISITE_DB_URL; got %v", prereqEnv)
 	}
-	if !strings.Contains(deployEnv, "MULTISITE_DB_URL") {
-		t.Errorf("apply-deploy env must contain MULTISITE_DB_URL.\nenv:\n%s", deployEnv)
+	if _, ok := deployEnv["MULTISITE_DB_URL"]; !ok {
+		t.Errorf("apply-deploy env must contain MULTISITE_DB_URL; got %v", deployEnv)
 	}
-	// Output still parses as YAML (reuse existing parse-back helper).
-	assertValidYAML(t, yml)
 }
 
 func TestMigrationsUpCommand_AlwaysFormatJSON(t *testing.T) {
@@ -450,8 +490,6 @@ func TestMigrationsUpCommand_AlwaysFormatJSON(t *testing.T) {
 	}
 }
 ```
-
-Add a `jobEnvBlock` helper to the test file if one does not already exist — extract the lines between `  <job>:` and its `    steps:` and return the `env:` portion. (If the existing test file already has a YAML-parse helper, reuse it to read `jobs.<job>.env` instead of string-slicing; check `render_gha_test.go` first and prefer the existing approach. `assertValidYAML` likewise — reuse the existing parse-back assertion already used by the file's tests; if it's named differently, use that name.)
 
 **Step 2: Run tests to verify they fail**
 
@@ -538,23 +576,89 @@ Expected: exit 0.
 ### Task 5: Regenerate multisite evidence + honest GAP.md
 
 **Files:**
+- Create: `cigen/multisite_evidence_test.go` (NEW — **`package cigen` internal** on-disk golden test)
 - Regenerate: `cigen/testdata/multisite/plan.json`, `cigen/testdata/multisite/generated-infra.yml`
 - Modify: `cigen/testdata/multisite/GAP.md`
 
-**Change class:** generator output artifact (demonstration-fidelity). Verification: real binary regen + measured diff; literal output committed.
+**Change class:** generator output artifact (demonstration-fidelity). Verification: real binary regen + measured diff + **on-disk golden test** (resolves plan-review Important: no existing test reads these committed files; this adds one, satisfying the "verify the artifact behaves" mandate); literal output committed.
 
-**Step 1:** Find how the committed evidence is generated. Inspect the existing golden/regen test or a `//go:generate` directive:
+**Step 0: Write the on-disk golden test FIRST (fails against the current buggy committed evidence).**
 
-Run: `grep -rn "generated-infra.yml\|plan.json\|UPDATE\|golden\|regen" cigen/*_test.go`
-Identify the regen mechanism (e.g. an `UPDATE=1 go test` golden-update env, or a small regen helper). If a golden-update path exists, use it. If not, regenerate via the real CLI:
+Create `cigen/multisite_evidence_test.go`:
 
-```bash
-cd cigen/testdata/multisite
-GOWORK=off go run ../../../cmd/wfctl ci plan --config deploy.yaml --phase-config deploy.prereq.yaml --format json > plan.json
-GOWORK=off go run ../../../cmd/wfctl ci generate --config deploy.yaml --phase-config deploy.prereq.yaml --platform github_actions --output-dir . --stdout > generated-infra.yml
+```go
+package cigen
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+// TestMultisiteEvidence_Honest locks the committed demonstration-fidelity
+// artifact. It reads the on-disk generated-infra.yml (NOT a freshly rendered
+// plan) and asserts exactly the honest claims in GAP.md: apply-prereq is
+// scoped (no deploy-only DB secret), apply-deploy keeps it, and the migrations
+// step carries --format json but NOT --env (multisite declares no environments).
+func TestMultisiteEvidence_Honest(t *testing.T) {
+	b, err := os.ReadFile("testdata/multisite/generated-infra.yml")
+	if err != nil {
+		t.Fatalf("read committed evidence: %v", err)
+	}
+	yml := string(b)
+
+	var doc struct {
+		Jobs map[string]struct {
+			Env map[string]any `yaml:"env"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("committed evidence is not valid YAML: %v", err)
+	}
+	if _, ok := doc.Jobs["apply-prereq"].Env["MULTISITE_DB_URL"]; ok {
+		t.Errorf("apply-prereq must NOT carry the deploy-only MULTISITE_DB_URL (scoping gap #3)")
+	}
+	if _, ok := doc.Jobs["apply-deploy"].Env["MULTISITE_DB_URL"]; !ok {
+		t.Errorf("apply-deploy must carry MULTISITE_DB_URL")
+	}
+	if !strings.Contains(yml, "wfctl migrations up --config 'deploy.yaml' --format json") {
+		t.Errorf("migrations step must emit --format json (gap #4)")
+	}
+	if strings.Contains(yml, "migrations up") && strings.Contains(yml, "--env ") {
+		t.Errorf("multisite declares no ci.migrations.environments → --env must NOT be emitted (honest, design C1)")
+	}
+}
 ```
 
-(Verify the exact `ci plan` / `ci generate` flag names with `--help` first — `--phase-config`, `--stdout`, `--format`, and `--output-dir` must match the real command. Adjust to the real flags; do NOT hand-edit the output to fake the shape.)
+Run: `GOWORK=off go test ./cigen/ -run TestMultisiteEvidence_Honest -v`
+Expected: FAIL (current committed `generated-infra.yml` has the union in apply-prereq incl `MULTISITE_DB_URL`, and a bare `migrations up` with no `--format json`).
+
+**Step 1: Regenerate the evidence with the REAL CLI flags (the exact recipe documented in `GAP.md` "How this was produced" — resolves plan-review C3).** `ci plan` has no `--format` (output is JSON to `--out`, `-`=stdout); `ci generate` writes files to `--out`/`--output` dir with `--write` (there is NO `--stdout`/`--output-dir` flag). From the repo root of the worktree:
+
+```bash
+GOWORK=off go run ./cmd/wfctl ci plan \
+  -c cigen/testdata/multisite/deploy.yaml \
+  --phase-config cigen/testdata/multisite/deploy.prereq.yaml \
+  --config-path-alias deploy.yaml \
+  --phase-config-alias deploy.prereq.yaml \
+  --out cigen/testdata/multisite/plan.json
+
+GOWORK=off go run ./cmd/wfctl ci generate \
+  -c cigen/testdata/multisite/deploy.yaml \
+  --phase-config cigen/testdata/multisite/deploy.prereq.yaml \
+  --config-path-alias deploy.yaml \
+  --phase-config-alias deploy.prereq.yaml \
+  --platform github_actions \
+  --out cigen/testdata/multisite \
+  --write
+# emits cigen/testdata/multisite/.github/workflows/multisite.yml — move it:
+mv cigen/testdata/multisite/.github/workflows/multisite.yml cigen/testdata/multisite/generated-infra.yml
+rm -rf cigen/testdata/multisite/.github
+```
+
+(These are the flags verified in `cmd/wfctl/ci_plan.go:13-22` and `cmd/wfctl/ci.go:72-86`. Do NOT hand-edit the output to fake the shape — if the diff is wrong the implementation is wrong.)
 
 **Step 2:** Verify the measured diff (the honest claim):
 
@@ -571,16 +675,16 @@ If the diff does not match these expectations, STOP — the implementation is wr
 - **KEEP in "not derivable":** migrations `--env <env>` (requires an `environments:` block multisite does not declare) + the hash-suffixed DB secret name, GHCR image-wait, GHCR creds, GA4 step, smoke matrix, concurrency, SHA-pins.
 - State the claim is exactly the measured diff — never "matches the hand-tuned `--env prod`".
 
-**Step 4:** Re-run the package to confirm the golden tests accept the regenerated artifacts:
+**Step 4:** Re-run the package — the on-disk golden test from Step 0 now PASSES against the regenerated evidence, and the whole package stays green:
 
 Run: `GOWORK=off go test ./cigen/...`
-Expected: PASS (the multisite golden test now matches the regenerated files).
+Expected: PASS (incl `TestMultisiteEvidence_Honest`).
 
 **Step 5: Commit**
 
 ```bash
-git add cigen/testdata/multisite/plan.json cigen/testdata/multisite/generated-infra.yml cigen/testdata/multisite/GAP.md
-git commit -m "test(cigen): regen multisite evidence (scoped prereq env + migrations --format json); honest GAP.md"
+git add cigen/multisite_evidence_test.go cigen/testdata/multisite/plan.json cigen/testdata/multisite/generated-infra.yml cigen/testdata/multisite/GAP.md
+git commit -m "test(cigen): regen multisite evidence (scoped prereq env + migrations --format json) + on-disk golden test; honest GAP.md"
 ```
 
 ---
