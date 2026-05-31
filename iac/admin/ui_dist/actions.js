@@ -2,7 +2,7 @@
 // CSP-compliant: external file only.
 //
 // Endpoint:
-//   GET /api/infra-admin/audit?limit=N&since=<unix> → ndjson of AdminAuditEntry
+//   GET /api/infra-admin/audit?limit=N → ndjson of AdminAuditEntry
 //
 // Wire format: ndjson — one protojson-encoded AdminAuditEntry per line.
 // AdminAuditEntry fields (snake_case): schema_version, ts_unix, subject,
@@ -17,6 +17,9 @@ const TOKEN_KEY = 'infra_admin_bearer';
 const REFRESH_INTERVAL_MS = 30_000;
 
 let autoRefreshTimer = null;
+// lastEntries caches the most recent fetch so client-side filter changes
+// re-render from memory without a round-trip.
+let lastEntries = [];
 
 // --- helpers ---------------------------------------------------------------
 
@@ -108,65 +111,9 @@ function renderEntries(entries) {
 
 // --- fetch -----------------------------------------------------------------
 
-async function fetchAudit() {
-  const tok = bearer();
-  if (!tok) {
-    showError('bearer token required — paste JWT into the token field above');
-    return;
-  }
-
-  const limit = document.getElementById('filter-limit').value || '50';
-  const url = `${API}/audit${limit !== '0' ? `?limit=${encodeURIComponent(limit)}` : ''}`;
-
-  try {
-    const resp = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${tok}` },
-    });
-    if (!resp.ok) {
-      showError(`audit: HTTP ${resp.status}`);
-      return;
-    }
-    const text = await resp.text();
-    showError('');
-    const entries = parseNdjson(text);
-    renderEntries(entries);
-  } catch (err) {
-    showError(`audit: ${err.message}`);
-  }
-}
-
-// --- auto-refresh ----------------------------------------------------------
-
-function startAutoRefresh() {
-  stopAutoRefresh();
-  autoRefreshTimer = setInterval(fetchAudit, REFRESH_INTERVAL_MS);
-}
-
-function stopAutoRefresh() {
-  if (autoRefreshTimer !== null) {
-    clearInterval(autoRefreshTimer);
-    autoRefreshTimer = null;
-  }
-}
-
-// --- wire events -----------------------------------------------------------
-
-document.getElementById('btn-refresh').addEventListener('click', fetchAudit);
-
-document.getElementById('auto-refresh').addEventListener('change', function () {
-  if (this.checked) {
-    startAutoRefresh();
-  } else {
-    stopAutoRefresh();
-  }
-});
-
-// Re-filter the already-fetched entries when filter selects change.
-// (Avoids a round-trip for a client-side filter change.)
-let lastEntries = [];
-const origFetch = fetchAudit;
-
-// Wrap fetchAudit to cache entries for re-filtering.
+// fetchAndCache fetches the audit log, caches results in lastEntries for
+// client-side re-filtering, and renders the table. Called by Refresh button,
+// limit-change, auto-refresh timer, and initial page load.
 async function fetchAndCache() {
   const tok = bearer();
   if (!tok) {
@@ -194,13 +141,37 @@ async function fetchAndCache() {
   }
 }
 
-// Replace button listener with caching version.
-document.getElementById('btn-refresh').removeEventListener('click', fetchAudit);
+// --- auto-refresh ----------------------------------------------------------
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  // fetchAndCache keeps lastEntries current so filter re-renders stay fresh.
+  autoRefreshTimer = setInterval(fetchAndCache, REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer !== null) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+// --- wire events -----------------------------------------------------------
+
 document.getElementById('btn-refresh').addEventListener('click', fetchAndCache);
 
+document.getElementById('auto-refresh').addEventListener('change', function () {
+  if (this.checked) {
+    startAutoRefresh();
+  } else {
+    stopAutoRefresh();
+  }
+});
+
+// Filter-select changes re-render from the cache — no round-trip needed.
 document.getElementById('filter-action').addEventListener('change', () => renderEntries(lastEntries));
 document.getElementById('filter-result').addEventListener('change', () => renderEntries(lastEntries));
-// limit change needs a new fetch (different server-side slice).
+// Limit change fetches a different server-side slice.
 document.getElementById('filter-limit').addEventListener('change', fetchAndCache);
 
 // Restore stored token on load.
