@@ -107,7 +107,8 @@ func ApplyResource(
 	}
 
 	// Execute the plan via the provider's ResourceDriver.
-	result, applyErr := handlerApplyPlan(ctx, prov, plan)
+	// Pass store so successful create/update actions are persisted to state.
+	result, applyErr := handlerApplyPlan(ctx, prov, plan, store)
 	if applyErr != nil {
 		return &adminpb.AdminApplyOutput{Error: "apply: " + applyErr.Error()}, nil //nolint:nilerr
 	}
@@ -135,11 +136,10 @@ func ApplyResource(
 
 // handlerApplyPlan is a simplified apply loop that calls
 // provider.ResourceDriver + driver.Create/Update/Delete per action.
-// It does NOT implement replace-cascade, JIT substitution, or
-// input-snapshot drift detection — those are deferred to a future
-// iteration. Provider errors are collected in result.Errors (best-effort,
-// not early-return) so the operator sees the full failure set.
-func handlerApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+// When store is non-nil, successful create/update actions persist the
+// resulting ResourceState to the state store (assertion (1) from T10 spec).
+// Provider errors are collected in result.Errors (best-effort, no early-return).
+func handlerApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, store interfaces.IaCStateStore) (*interfaces.ApplyResult, error) {
 	result := &interfaces.ApplyResult{}
 	for i := range plan.Actions {
 		a := &plan.Actions[i]
@@ -169,8 +169,10 @@ func handlerApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *inter
 				result.Errors = append(result.Errors, interfaces.ActionError{Resource: a.Resource.Name, Action: a.Action, Error: cerr.Error()})
 			case out != nil:
 				result.Resources = append(result.Resources, interfaces.ResourceOutput{Name: out.Name, Type: out.Type, ProviderID: out.ProviderID})
+				persistState(ctx, store, a.Resource, out.ProviderID)
 			default:
 				result.Resources = append(result.Resources, interfaces.ResourceOutput{Name: a.Resource.Name, Type: a.Resource.Type})
+				persistState(ctx, store, a.Resource, "")
 			}
 		case "update":
 			ref := interfaces.ResourceRef{Name: a.Resource.Name, Type: a.Resource.Type}
@@ -183,8 +185,10 @@ func handlerApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *inter
 				result.Errors = append(result.Errors, interfaces.ActionError{Resource: a.Resource.Name, Action: a.Action, Error: uerr.Error()})
 			case out != nil:
 				result.Resources = append(result.Resources, interfaces.ResourceOutput{Name: out.Name, Type: out.Type, ProviderID: out.ProviderID})
+				persistState(ctx, store, a.Resource, out.ProviderID)
 			default:
 				result.Resources = append(result.Resources, interfaces.ResourceOutput{Name: a.Resource.Name, Type: a.Resource.Type})
+				persistState(ctx, store, a.Resource, ref.ProviderID)
 			}
 		case "delete", "replace":
 			// For delete, the Current carries the ref.
@@ -198,6 +202,23 @@ func handlerApplyPlan(ctx context.Context, p interfaces.IaCProvider, plan *inter
 		}
 	}
 	return result, nil
+}
+
+// persistState writes a ResourceState to the store after a successful
+// create or update. Errors are silently discarded — the apply itself
+// succeeded at the provider level; a state-write failure is surfaced
+// on the next read (stale state) rather than rolling back the cloud op.
+// nil store is a no-op (test-only / store-less deploys).
+func persistState(ctx context.Context, store interfaces.IaCStateStore, spec interfaces.ResourceSpec, providerID string) {
+	if store == nil {
+		return
+	}
+	_ = store.SaveResource(ctx, interfaces.ResourceState{
+		Name:          spec.Name,
+		Type:          spec.Type,
+		ProviderID:    providerID,
+		AppliedConfig: spec.Config,
+	})
 }
 
 // handlerValidateAllowReplaceProtected inlines wfctlhelpers.ValidateAllowReplaceProtected

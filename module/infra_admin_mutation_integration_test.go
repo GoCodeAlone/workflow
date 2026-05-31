@@ -4,21 +4,14 @@ package module
 // BuildFromConfig (per ADR-0003→v4 lesson that BuildFromConfig makes test
 // setup brittle — manual wiring is explicit about what's under test).
 //
-// Wiring: auth stub middleware + recording state store + stub iac.provider
-// (T2: stubprovider.New()) + infra.admin module. Requests are driven over
-// httptest.
+// Wiring: auth stub + recordingStateStore + stubprovider.New() (T2) +
+// stubEnforcer (I-2) + infra.admin module + audit log.
 //
-// Assertions per T10:
-//   (2) ApplyResource → AdminAuditEntry{action:apply, result:ok} written to audit log
-//   (3) applied[] in response body non-empty
+// Assertions per T10 spec:
+//   (1) state store gains the resource after apply (C-1: handler saves state)
+//   (2) AdminAuditEntry{action:apply, result:ok} written to audit log
+//   (3) applied[] in response body non-empty (C-2: non-empty desiredSpecs)
 //   After DestroyResource: AdminAuditEntry{action:destroy, result:ok}
-//
-// Note: the admin handler delegates cloud operations to the provider's
-// ResourceDriver (stub is in-process); the engine's wfctlhelpers
-// state-persistence path is NOT wired here — state store writes would
-// require the full IaC apply engine (wfctlhelpers.ApplyPlanWithHooks + IaC
-// pipeline). This test exercises the handler library, RBAC gates, and audit
-// path end-to-end over HTTP.
 
 import (
 	"bufio"
@@ -30,7 +23,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/admin/handler"
@@ -40,32 +35,107 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// mutationIntegrationApp manually wires the infra.admin module for
-// mutation integration tests.
-func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionApp, *InfraAdmin) {
+// recordingStateStore captures SaveResource calls so integration tests
+// can assert assertion (1): state store gains the resource.
+type recordingStateStore struct {
+	mu        sync.Mutex
+	resources []interfaces.ResourceState
+}
+
+func (s *recordingStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]interfaces.ResourceState, len(s.resources))
+	copy(out, s.resources)
+	return out, nil
+}
+func (s *recordingStateStore) GetResource(_ context.Context, name string) (*interfaces.ResourceState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.resources {
+		if s.resources[i].Name == name {
+			r := s.resources[i]
+			return &r, nil
+		}
+	}
+	return nil, nil
+}
+func (s *recordingStateStore) SaveResource(_ context.Context, state interfaces.ResourceState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Upsert: replace existing by name or append.
+	for i := range s.resources {
+		if s.resources[i].Name == state.Name {
+			s.resources[i] = state
+			return nil
+		}
+	}
+	s.resources = append(s.resources, state)
+	return nil
+}
+func (s *recordingStateStore) DeleteResource(_ context.Context, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.resources {
+		if s.resources[i].Name == name {
+			s.resources = append(s.resources[:i], s.resources[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+func (s *recordingStateStore) SavePlan(_ context.Context, _ interfaces.IaCPlan) error { return nil }
+func (s *recordingStateStore) GetPlan(_ context.Context, _ string) (*interfaces.IaCPlan, error) {
+	return nil, nil
+}
+func (s *recordingStateStore) Lock(_ context.Context, _ string, _ time.Duration) (interfaces.IaCLockHandle, error) {
+	return nil, nil
+}
+func (s *recordingStateStore) Close() error { return nil }
+
+// integrationEnforcer always grants access (integration happy-path).
+type integrationEnforcer struct{}
+
+func (e *integrationEnforcer) Enforce(_, _, _ string, _ ...string) (bool, error) {
+	return true, nil
+}
+
+// mutationIntegrationApp manually wires the infra.admin module with:
+// - auth stub + authz stub enforcer (I-2)
+// - recordingStateStore (C-1 assertion)
+// - stub iac.provider (T2: stubprovider.New())
+// - WorkflowConfig with one infra.database resource (C-2: non-empty desiredSpecs)
+func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionApp, *InfraAdmin, *recordingStateStore) {
 	t.Helper()
 	providerName := "stub-provider"
 
 	// Base app with auth + workflow config section.
 	app, _, _ := newAppWithWorkflowSection(t, "stub")
 
-	// Override workflow config to include the stub iac.provider module.
+	// WorkflowConfig: one iac.provider + one infra.database (C-2: non-empty
+	// desiredSpecs so plan produces real actions and applied[] is non-empty).
 	section := &wfConfigSection{cfg: &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
 			{Name: providerName, Type: "iac.provider", Config: map[string]any{"provider": "stub"}},
+			{Name: "db1", Type: "infra.database", Config: map[string]any{"size": "s", "engine": "pg14"}},
 		},
 	}}
 	app.services["__workflow_section__"] = section
+	// withConfigSectionApp caches the section at construction time — replace it
+	// so GetConfigSection("workflow") returns the new config.
+	app.section = section
 
-	// Register auth stub.
+	// Auth stub + authz stub enforcer (I-2).
 	auth := &authMwStub{name: "auth"}
 	_ = app.RegisterService("auth", auth)
+	_ = app.RegisterService("my-authz", &integrationEnforcer{})
 
-	// Register the stub provider (T2: stubprovider.New()).
+	// Stub provider registered under its module name (per T2).
 	_ = app.RegisterService(providerName, stubprovider.New())
 
-	// Register state store + http-router + security-headers (standard).
-	_ = app.RegisterService("iac-state", &stateStoreStub{})
+	// Recording state store so we can assert assertion (1).
+	store := &recordingStateStore{}
+	_ = app.RegisterService("iac-state", store)
 
 	cfg := InfraAdminConfig{
 		RoutePrefix:           "/api/infra-admin",
@@ -74,21 +144,23 @@ func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionA
 		HTTPModule:            "http-router",
 		SecurityHeadersModule: "security-headers",
 		AuthModule:            "auth",
+		AuthzModule:           "my-authz", // I-2: wire authz so Enforce is called
 		ProviderModules:       []string{providerName},
 		AccessLogPath:         auditPath,
 	}
 	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
-	return app, m
+	return app, m, store
 }
 
 // TestMutationIntegration_Apply verifies the end-to-end apply path:
-// - HTTP POST /api/infra-admin/plan → plan_id + desired_hash
-// - HTTP POST /api/infra-admin/apply → applied[] + audit entry ok
+//   - POST /plan → plan_id + desired_hash non-empty (I-1)
+//   - POST /apply → applied[] non-empty (C-2), state store gains resource (C-1),
+//     audit entry {action:apply, result:ok} (assertion 2)
 func TestMutationIntegration_Apply(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "audit.jsonl")
 
-	app, m := mutationIntegrationApp(t, auditPath)
+	app, m, store := mutationIntegrationApp(t, auditPath)
 	if err := m.Init(app); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -100,10 +172,12 @@ func TestMutationIntegration_Apply(t *testing.T) {
 	}
 
 	// Step 1: Plan.
-	planBody := `{"app_context":"","evidence":{"authz_checked":true,"authz_allowed":true,"subject":"operator"}}`
+	planBody := `{"evidence":{"authz_checked":true,"authz_allowed":true,"subject":"operator"}}`
 	planReq := httptest.NewRequest(http.MethodPost, "/api/infra-admin/plan",
 		bytes.NewReader([]byte(planBody)))
 	planReq.Header.Set("Authorization", "Bearer test-token")
+	ctx := context.WithValue(planReq.Context(), authClaimsContextKey, map[string]any{"sub": "operator"})
+	planReq = planReq.WithContext(ctx)
 	planRec := httptest.NewRecorder()
 	m.router.ServeHTTP(planRec, planReq)
 	if planRec.Code != http.StatusOK {
@@ -115,18 +189,28 @@ func TestMutationIntegration_Apply(t *testing.T) {
 		t.Fatalf("plan: decode response: %v\n%s", err, planRec.Body.String())
 	}
 
+	// Assertion I-1: plan_id and desired_hash must be non-empty.
+	if planOut.GetPlanId() == "" {
+		t.Error("plan_id must be non-empty")
+	}
+	if planOut.GetDesiredHash() == "" {
+		t.Error("desired_hash must be non-empty")
+	}
+	if planOut.GetError() != "" {
+		t.Fatalf("plan: unexpected error: %s", planOut.GetError())
+	}
+
 	// Step 2: Apply with the hash from the plan response.
-	applyBody, _ := json.Marshal(map[string]any{
+	applyPayload, _ := json.Marshal(map[string]any{
 		"plan_id":      planOut.GetPlanId(),
 		"desired_hash": planOut.GetDesiredHash(),
 		"evidence":     map[string]any{"authz_checked": true, "authz_allowed": true, "subject": "operator"},
 	})
 	applyReq := httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
-		bytes.NewReader(applyBody))
+		bytes.NewReader(applyPayload))
 	applyReq.Header.Set("Authorization", "Bearer test-token")
-	// Set auth claims so subjectFromRequest returns the operator subject.
-	ctx := context.WithValue(applyReq.Context(), authClaimsContextKey, map[string]any{"sub": "operator"})
-	applyReq = applyReq.WithContext(ctx)
+	applyCtx := context.WithValue(applyReq.Context(), authClaimsContextKey, map[string]any{"sub": "operator"})
+	applyReq = applyReq.WithContext(applyCtx)
 	applyRec := httptest.NewRecorder()
 	m.router.ServeHTTP(applyRec, applyReq)
 
@@ -138,11 +222,30 @@ func TestMutationIntegration_Apply(t *testing.T) {
 	if err := protojson.Unmarshal(applyRec.Body.Bytes(), &applyOut); err != nil {
 		t.Fatalf("apply: decode response: %v\n%s", err, applyRec.Body.String())
 	}
-	// Assertion (3): applied[] non-empty OR no per-resource errors.
-	// (desiredSpecs is empty because the workflow config has no infra.* modules,
-	// so the plan produces 0 actions → applied[] is empty but no error occurred.)
 	if applyOut.GetError() != "" {
 		t.Errorf("apply: unexpected error: %s", applyOut.GetError())
+	}
+
+	// Assertion (3): applied[] non-empty (C-2 fix: WorkflowConfig has db1 infra.database).
+	if len(applyOut.GetApplied()) == 0 {
+		t.Error("apply: applied[] should be non-empty — desiredSpecs has 1 infra.database resource")
+	}
+
+	// Assertion (1): state store gains the resource (C-1 fix: handler now calls SaveResource).
+	stateRows, _ := store.ListResources(context.Background())
+	if len(stateRows) == 0 {
+		t.Error("apply: state store should have at least 1 resource after apply")
+	} else {
+		found := false
+		for _, row := range stateRows {
+			if row.Name == "db1" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("apply: state store missing 'db1'; rows: %v", stateRows)
+		}
 	}
 
 	// Assertion (2): audit entry with action:apply result:ok.
@@ -150,12 +253,12 @@ func TestMutationIntegration_Apply(t *testing.T) {
 }
 
 // TestMutationIntegration_Destroy verifies the end-to-end destroy path:
-// HTTP POST /api/infra-admin/destroy → destroyed[] + audit entry ok
+// POST /destroy with confirm_hash → destroyed[] + audit entry ok
 func TestMutationIntegration_Destroy(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "audit.jsonl")
 
-	app, m := mutationIntegrationApp(t, auditPath)
+	app, m, _ := mutationIntegrationApp(t, auditPath)
 	if err := m.Init(app); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -166,7 +269,7 @@ func TestMutationIntegration_Destroy(t *testing.T) {
 		t.Fatalf("router.Start: %v", err)
 	}
 
-	// Compute confirm_hash from refs for TOCTOU gate (T7 IMPORTANT-1 fix).
+	// Compute confirm_hash from refs for TOCTOU gate (T7 IMPORTANT-1 / I-3).
 	refs := []*adminpb.AdminResourceRef{
 		{Name: "vpc1", Type: "infra.vpc"},
 		{Name: "db1", Type: "infra.database"},
