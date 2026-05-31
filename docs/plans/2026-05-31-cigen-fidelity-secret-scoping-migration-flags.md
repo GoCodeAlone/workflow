@@ -406,7 +406,7 @@ Expected: PASS (all cigen tests, including the new ones AND the pre-existing gol
 **Step 5: Commit**
 
 ```bash
-git add cigen/analyze.go cigen/analyze_test.go cigen/testdata/migrations-one-env.yaml cigen/testdata/migrations-two-envs.yaml
+git add cigen/analyze.go cigen/analyze_phase_test.go cigen/testdata/migrations-one-env.yaml cigen/testdata/migrations-two-envs.yaml
 git commit -m "feat(cigen): scope per-phase secrets in Analyze; derive single-env migrations --env"
 ```
 
@@ -542,7 +542,7 @@ Expected: PASS (all cigen tests).
 **Step 5: Commit**
 
 ```bash
-git add cigen/render_gha.go cigen/render_gha_test.go
+git add cigen/render_gha.go cigen/render_gha_phase_test.go
 git commit -m "feat(cigen): per-phase env block + wfctl migrations up --format json"
 ```
 
