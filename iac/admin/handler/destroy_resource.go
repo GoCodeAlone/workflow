@@ -115,7 +115,9 @@ func hashDestroyRefs(refs []*adminpb.AdminResourceRef) string {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	data, err := json.Marshal(sorted)
 	if err != nil {
-		return "" // error sentinel — callers treat "" as "hash unavailable"
+		// Use a non-matchable sentinel so an empty client confirm_hash
+		// never accidentally satisfies the gate on a marshal failure.
+		return fmt.Sprintf("hash-error-%d-refs", len(refs))
 	}
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("%x", sum)

@@ -147,6 +147,14 @@ func TestDesiredStateHash_MatchesHandlerInlined(t *testing.T) {
 				{Name: "vpc1", ProviderID: "do-vpc-111"},
 			},
 		},
+		{
+			// delete branch: resource in current, absent from desired
+			name:    "delete (current-only)",
+			desired: nil,
+			current: []interfaces.ResourceState{
+				{Name: "old-vpc", Type: "infra.vpc", ProviderID: "do-vpc-999"},
+			},
+		},
 	}
 
 	for _, tc := range cases {

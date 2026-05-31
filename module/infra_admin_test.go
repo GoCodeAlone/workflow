@@ -1027,7 +1027,9 @@ func TestInfraAdmin_Init_AllowUnauthenticatedNoError(t *testing.T) {
 func TestInfraAdmin_Init_AuthzModuleResolved(t *testing.T) {
 	base, _, _ := newInfraAdminTestApp(t, "digitalocean")
 	enforcer := &stubEnforcer{allowed: true}
-	_ = base.RegisterService("my-authz", enforcer)
+	if err := base.RegisterService("my-authz", enforcer); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 
 	cfg := standardCfg()
 	cfg.AuthzModule = "my-authz"
@@ -1291,8 +1293,10 @@ func TestInfraAdmin_ConcurrentApplyReturns409(t *testing.T) {
 // client body asserts in evidence.granted_permissions.
 func TestInfraAdmin_ViewerCannotApply(t *testing.T) {
 	app, _, _, _ := newAuthEnabledApp(t, "digitalocean")
-	enforcer := &stubEnforcer{allowed: false} // denies everything
-	_ = app.RegisterService("my-authz", enforcer)
+	enforcer := &stubEnforcer{allowed: false}                         // denies everything
+	if err := app.RegisterService("my-authz", enforcer); err != nil { // F3 fix
+		t.Fatalf("setup: %v", err)
+	}
 
 	cfg := standardAuthCfg()
 	cfg.AuthzModule = "my-authz"
@@ -1308,23 +1312,35 @@ func TestInfraAdmin_ViewerCannotApply(t *testing.T) {
 		t.Fatalf("router.Start: %v", err)
 	}
 
-	// Apply with valid evidence (client claims allowed) — server-side
-	// Enforcer should deny regardless.
-	body := `{"evidence":{"authz_checked":true,"authz_allowed":true},"desired_hash":"any"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
-		bytes.NewReader([]byte(body)))
-	req.Header.Set("Authorization", "Bearer test-token")
-	// Set auth claims so subjectFromRequest returns a non-empty subject.
-	ctx := context.WithValue(req.Context(), authClaimsContextKey, map[string]any{"sub": "viewer"})
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-	m.router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200 with error body, got %d; %s", rec.Code, rec.Body.String())
+	viewerCtx := func(r *http.Request) *http.Request {
+		ctx := context.WithValue(r.Context(), authClaimsContextKey, map[string]any{"sub": "viewer"})
+		return r.WithContext(ctx)
 	}
-	if !strings.Contains(rec.Body.String(), "denied") {
-		t.Errorf("viewer apply should be denied by server-side Enforcer; body=%s", rec.Body.String())
+
+	// Apply: client claims allowed, server Enforcer denies.
+	applyReq := viewerCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+		bytes.NewReader([]byte(`{"evidence":{"authz_checked":true,"authz_allowed":true},"desired_hash":"any"}`))))
+	applyReq.Header.Set("Authorization", "Bearer test-token")
+	applyRec := httptest.NewRecorder()
+	m.router.ServeHTTP(applyRec, applyReq)
+	if applyRec.Code != http.StatusOK {
+		t.Fatalf("apply: want 200 with error body, got %d", applyRec.Code)
+	}
+	if !strings.Contains(applyRec.Body.String(), "denied") {
+		t.Errorf("viewer apply should be denied by server-side Enforcer; body=%s", applyRec.Body.String())
+	}
+
+	// Destroy: same enforcer denies infra:destroy too (F1 fix — cover destroy route).
+	destroyReq := viewerCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/destroy",
+		bytes.NewReader([]byte(`{"refs":[{"name":"vpc1","type":"infra.vpc"}],"confirm_hash":"any","evidence":{"authz_checked":true,"authz_allowed":true}}`))))
+	destroyReq.Header.Set("Authorization", "Bearer test-token")
+	destroyRec := httptest.NewRecorder()
+	m.router.ServeHTTP(destroyRec, destroyReq)
+	if destroyRec.Code != http.StatusOK {
+		t.Fatalf("destroy: want 200 with error body, got %d", destroyRec.Code)
+	}
+	if !strings.Contains(destroyRec.Body.String(), "denied") {
+		t.Errorf("viewer destroy should be denied by server-side Enforcer; body=%s", destroyRec.Body.String())
 	}
 }
 
