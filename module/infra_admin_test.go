@@ -1199,3 +1199,155 @@ func TestInfraAdmin_AuditResultFor3Way(t *testing.T) {
 		}
 	}
 }
+
+// ── T9: named security regression suite ──────────────────────────────────────
+
+// TestInfraAdmin_MutationRequiresBearer is the canonical CSRF regression:
+// mutation routes MUST reject requests without Authorization: Bearer.
+// (Renamed version of TestInfraAdmin_MutationRequiresBearerToken — same
+// contract, keeps the T9 name the plan locked.)
+func TestInfraAdmin_MutationRequiresBearer(t *testing.T) {
+	m, _ := startMutationModule(t)
+	for _, path := range []string{"/plan", "/apply", "/destroy", "/drift"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/infra-admin"+path,
+			bytes.NewReader([]byte(`{}`)))
+		// Explicitly no Authorization header.
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s without Bearer: want 401, got %d; body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestInfraAdmin_ApplyRejectsStalePlanHash is the TOCTOU regression:
+// an apply request whose desired_hash does not match the in-process config
+// MUST be rejected before any cloud operation runs.
+func TestInfraAdmin_ApplyRejectsStalePlanHash(t *testing.T) {
+	m, _ := startMutationModule(t)
+
+	body := `{"plan_id":"p1","desired_hash":"stale-deliberately-wrong","evidence":{"authz_checked":true,"authz_allowed":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "stale") {
+		t.Errorf("expected stale-hash error in response, got: %s", rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_ConcurrentApplyReturns409 is the single-flight regression.
+// It drives TWO goroutines concurrently against the same provider — one
+// holds the mutex directly (simulating an in-flight apply) while the other
+// hits the route and must see 409. A sequential variant would falsely pass
+// (plan-review M-2).
+func TestInfraAdmin_ConcurrentApplyReturns409(t *testing.T) {
+	m, _ := startMutationModule(t)
+
+	// Manually lock the first provider's mutex to simulate an in-flight apply.
+	var held *sync.Mutex
+	for _, pm := range m.config.ProviderModules {
+		if mu, ok := m.providerMu[pm]; ok {
+			held = mu
+			break
+		}
+	}
+	if held == nil {
+		t.Skip("no provider mutex found (no ProviderModules configured)")
+	}
+	held.Lock()
+	defer held.Unlock()
+
+	// Now an apply request MUST see 409 (mutex already locked).
+	body := `{"plan_id":"p1","desired_hash":"any","evidence":{"authz_checked":true,"authz_allowed":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+
+	// Run the request in a goroutine to properly simulate concurrency.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.router.ServeHTTP(rec, req)
+	}()
+	<-done
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("concurrent apply: want 409, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_ViewerCannotApply is the write-tier RBAC regression:
+// a subject that the authz module grants only infra:read MUST receive an
+// error on apply/destroy routes, server-side, regardless of what the
+// client body asserts in evidence.granted_permissions.
+func TestInfraAdmin_ViewerCannotApply(t *testing.T) {
+	app, _, _, _ := newAuthEnabledApp(t, "digitalocean")
+	enforcer := &stubEnforcer{allowed: false} // denies everything
+	_ = app.RegisterService("my-authz", enforcer)
+
+	cfg := standardAuthCfg()
+	cfg.AuthzModule = "my-authz"
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatalf("router.Start: %v", err)
+	}
+
+	// Apply with valid evidence (client claims allowed) — server-side
+	// Enforcer should deny regardless.
+	body := `{"evidence":{"authz_checked":true,"authz_allowed":true},"desired_hash":"any"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Authorization", "Bearer test-token")
+	// Set auth claims so subjectFromRequest returns a non-empty subject.
+	ctx := context.WithValue(req.Context(), authClaimsContextKey, map[string]any{"sub": "viewer"})
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 with error body, got %d; %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "denied") {
+		t.Errorf("viewer apply should be denied by server-side Enforcer; body=%s", rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_AuditDistinguishesDeniedFromError verifies that the
+// 3-way audit classification correctly distinguishes authz denials from
+// backend errors (extended from T8's TestInfraAdmin_AuditResultFor3Way).
+func TestInfraAdmin_AuditDistinguishesDeniedFromError(t *testing.T) {
+	// Denial (authz/evidence/stale markers) → "denied"
+	for _, msg := range []string{
+		"authz evidence missing",
+		"infra:apply denied for subject viewer",
+		"plan is stale (desired_hash mismatch)",
+	} {
+		if got := auditResultFor(msg); got != "denied" {
+			t.Errorf("auditResultFor(%q) = %q, want 'denied'", msg, got)
+		}
+	}
+	// Error (provider failure) → "error"
+	for _, msg := range []string{
+		"apply: list state: connection refused",
+		"plan: no iac.provider registered",
+		"destroy: provider timeout",
+	} {
+		if got := auditResultFor(msg); got != "error" {
+			t.Errorf("auditResultFor(%q) = %q, want 'error'", msg, got)
+		}
+	}
+}
