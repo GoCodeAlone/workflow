@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"io"
 	"io/fs"
 	"strings"
 	"testing"
@@ -93,18 +94,11 @@ func readAsset(t *testing.T, path string) string {
 		t.Fatalf("AssetFS.Open(%q): %v", path, err)
 	}
 	defer f.Close()
-	var buf strings.Builder
-	b := make([]byte, 4096)
-	for {
-		n, err := f.Read(b)
-		if n > 0 {
-			buf.Write(b[:n])
-		}
-		if err != nil {
-			break
-		}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("io.ReadAll(%q): %v", path, err)
 	}
-	return buf.String()
+	return string(data)
 }
 
 // TestResourceHTML_MutationPanelMarkup pins key mutation-panel markup
@@ -189,6 +183,9 @@ func TestActionsHTML_AuditViewerMarkup(t *testing.T) {
 
 // TestActionsJS_AuditEndpoint pins that actions.js fetches the correct
 // audit endpoint with Authorization header and handles ndjson parsing.
+// setInterval is pinned to the fetchAndCache call specifically — the
+// T12 bug was setInterval(fetchAudit,...) which would pass a bare
+// "setInterval" check but leave the cache stale after auto-refresh.
 func TestActionsJS_AuditEndpoint(t *testing.T) {
 	content := readAsset(t, "ui_dist/actions.js")
 	must := []string{
@@ -200,7 +197,7 @@ func TestActionsJS_AuditEndpoint(t *testing.T) {
 		`audit-ok`,
 		`audit-denied`,
 		`audit-error`,
-		`setInterval`,
+		`setInterval(fetchAndCache,`, // pin the correct callee, not just presence
 		`sessionStorage`,
 	}
 	for _, s := range must {
