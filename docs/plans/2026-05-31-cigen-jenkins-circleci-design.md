@@ -10,7 +10,8 @@ header comment + accepted standard-pipeline consequence; I4/I5 precise PR2 test
 rewrite (replace `_TemplateUnchanged` with `_CigenMarkers`, delete
 `staticGenerator`/`registerTestGenerator`, unit-test `validateRelativeOutputPath`
 directly, integration_test.go drives `ExecuteCIGenerate` for jenkins+circleci);
-m4 Jenkins-no-PR-comment recorded in Non-Goals.
+m4 Jenkins-no-PR-comment recorded in Non-Goals. cycle 3 = PASS (converged; lone
+Minor — integration_test.go mock→real ExecuteCIGenerate — applied).
 
 ## Problem
 
@@ -254,11 +255,14 @@ with `requires:` and `filters.branches`. Multi-phase = `apply-prereq` →
       the registry seam) and a sort assertion over a real multi-file cigen render
       (preserves the file-ordering guarantee).
   - `integration_test.go`: this is the **plugin-path proof for acceptance #2** —
-    it drives `ExecuteCIGenerate` end-to-end. Extend the existing
-    `TestIntegration_CIGenerateWithInput` (circleci, line ~140) and add a jenkins
-    integration test so both assert the written `Jenkinsfile` / `.circleci/
-    config.yml` are config-derived (secret wiring, `wfctl migrations up`, smoke,
-    plan-guard) and free of legacy `go test`/`wfctl deploy --image`.
+    it must drive `ExecuteCIGenerate` end-to-end. NOTE: the current
+    `TestIntegration_CIGenerateWithInput` (circleci, line ~140) uses
+    `wftest.MockStep`, which cannot write/assert real file content — PR2 must
+    **replace the mock with a direct `ExecuteCIGenerate` call** that writes to a
+    temp dir, and add the jenkins equivalent, so both assert the written
+    `Jenkinsfile` / `.circleci/config.yml` are config-derived (secret wiring,
+    `wfctl migrations up`, smoke, plan-guard) and free of legacy `go test`/`wfctl
+    deploy --image`.
 - Version bump plugin → **v0.2.0** (behavior change: jenkins/circleci now
   config-derived).
 
