@@ -1096,3 +1096,106 @@ func TestInfraAdmin_SubjectFromRequest(t *testing.T) {
 		t.Errorf("claims without sub: want \"\", got %q", got)
 	}
 }
+
+// ── T8: mutation route + requireBearer + audit 3-way tests ───────────────────
+
+// startMutationModule is a helper that boots an InfraAdmin module with
+// auth enabled (so mutation routes are registered).
+func startMutationModule(t *testing.T) (*InfraAdmin, *authMwStub) {
+	t.Helper()
+	app, _, _, auth := newAuthEnabledApp(t, "digitalocean")
+	m := NewInfraAdmin("infra-admin", configToMap(t, standardAuthCfg())).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatalf("router.Start: %v", err)
+	}
+	return m, auth
+}
+
+// TestInfraAdmin_MutationRoutesRegistered asserts that 4 mutation routes
+// are registered when auth_module is configured.
+func TestInfraAdmin_MutationRoutesRegistered(t *testing.T) {
+	m, _ := startMutationModule(t)
+	mutRoutes := []string{"/plan", "/apply", "/destroy", "/drift"}
+	for _, route := range mutRoutes {
+		req := httptest.NewRequest(http.MethodPost, "/api/infra-admin"+route,
+			bytes.NewReader([]byte(`{}`)))
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		// Should NOT be 404 (route must exist); anything else is acceptable
+		// from the handler (may be 200 with error in body).
+		if rec.Code == http.StatusNotFound {
+			t.Errorf("mutation route %s not registered (got 404)", route)
+		}
+	}
+}
+
+// TestInfraAdmin_MutationRouteAbsentWithoutAuth asserts that mutation routes
+// are NOT registered when allow_unauthenticated:true (no auth_module).
+func TestInfraAdmin_MutationRouteAbsentWithoutAuth(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	cfg := standardCfg() // AllowUnauthenticated:true, no AuthModule
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatalf("router.Start: %v", err)
+	}
+	for _, route := range []string{"/plan", "/apply", "/destroy", "/drift"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/infra-admin"+route,
+			bytes.NewReader([]byte(`{}`)))
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("mutation route %s should be absent (no auth_module), got %d", route, rec.Code)
+		}
+	}
+}
+
+// TestInfraAdmin_MutationRequiresBearerToken asserts that mutation routes
+// return 401 when the Authorization: Bearer header is missing, even when
+// the auth middleware lets the request through.
+func TestInfraAdmin_MutationRequiresBearerToken(t *testing.T) {
+	m, _ := startMutationModule(t)
+	// No Authorization header at all.
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/plan",
+		bytes.NewReader([]byte(`{}`)))
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	// The auth stub lets it through, but requireBearer should reject it.
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("mutation without Bearer: status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_AuditResultFor3Way asserts the 3-way classification
+// of auditResultFor.
+func TestInfraAdmin_AuditResultFor3Way(t *testing.T) {
+	cases := []struct {
+		errMsg string
+		want   string
+	}{
+		{"", "ok"},
+		{"authz evidence missing — admin middleware did not attach", "denied"},
+		{"apply: infra:apply denied for subject viewer", "denied"},
+		{"apply: plan is stale (desired_hash mismatch)", "denied"},
+		{"apply: list state: connection refused", "error"},
+		{"plan: no iac.provider registered", "error"},
+	}
+	for _, tc := range cases {
+		got := auditResultFor(tc.errMsg)
+		if got != tc.want {
+			t.Errorf("auditResultFor(%q) = %q, want %q", tc.errMsg, got, tc.want)
+		}
+	}
+}
