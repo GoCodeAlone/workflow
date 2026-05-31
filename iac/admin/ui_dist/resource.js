@@ -308,8 +308,10 @@ async function handleApply() {
     showMutationOk(`Applied: ${applied || '(none)'}`);
     if (errors) showMutationError(`Errors: ${errors}`);
     document.getElementById('plan-result').hidden = true;
+    // S-1: clear all plan state (including stale actions) after apply.
     PLAN_STATE.planId = '';
     PLAN_STATE.desiredHash = '';
+    PLAN_STATE.actions = [];
   } catch (err) {
     showMutationError(`apply: ${err.message}`);
   }
@@ -318,10 +320,16 @@ async function handleApply() {
 async function handleDestroy() {
   showMutationError('');
   showMutationOk('');
+  // I-1: mirror Apply's guard — Destroy carries the same confirm_hash discipline.
+  // An empty hash defeats TOCTOU protection; require a prior Plan run.
+  if (!PLAN_STATE.desiredHash) {
+    showMutationError('run Plan first to obtain a confirm_hash before destroying');
+    return;
+  }
   try {
     const data = await postMutation(`${API}/destroy`, {
       refs: [{ name: RESOURCE_STATE.name, type: RESOURCE_STATE.type }],
-      confirm_hash: PLAN_STATE.desiredHash || '',
+      confirm_hash: PLAN_STATE.desiredHash,
       evidence: { authz_checked: true, authz_allowed: true },
     });
     const destroyed = (data.destroyed || []).join(', ');
@@ -368,9 +376,8 @@ document.getElementById('destroy-confirm').addEventListener('change', function (
 
 document.getElementById('btn-destroy').addEventListener('click', handleDestroy);
 
-// Persist token on change.
-document.getElementById('bearer-token').addEventListener('change', function () {
-  if (this.value) sessionStorage.setItem(TOKEN_KEY, this.value);
-});
+// S-2: redundant change listener removed — bearer() already persists the
+// token to sessionStorage on every mutation call; no separate change
+// listener needed.
 
 load();
