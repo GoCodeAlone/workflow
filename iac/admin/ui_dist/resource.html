@@ -26,6 +26,66 @@
     <p id="redacted-note" class="field-help"></p>
   </section>
 
+  <!-- v1.1 mutation panel ------------------------------------------------- -->
+  <section id="mutations">
+    <h2>Mutations</h2>
+
+    <div class="form-controls" id="token-row">
+      <label class="field-label" for="bearer-token">Bearer token</label>
+      <input id="bearer-token" type="password"
+             placeholder="paste JWT bearer token"
+             autocomplete="off"
+             aria-describedby="token-help">
+      <span id="token-help" class="field-help">
+        Required for plan / apply / destroy / drift. Stored in sessionStorage for this tab only.
+      </span>
+    </div>
+
+    <div class="form-controls">
+      <button id="btn-plan" type="button">Plan</button>
+      <button id="btn-drift" type="button">Check Drift</button>
+    </div>
+
+    <!-- Plan result: action diff table + confirm/apply controls -->
+    <div id="plan-result" hidden>
+      <h3>Plan</h3>
+      <p id="plan-meta" class="field-help"></p>
+      <table id="plan-actions-table">
+        <thead><tr><th>Action</th><th>Resource</th><th>Type</th><th>Summary</th><th>Allow replace</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="form-controls" id="apply-controls">
+        <label>
+          <input id="apply-confirm" type="checkbox">
+          I confirm I want to apply these changes
+        </label>
+        <button id="btn-apply" type="button" disabled>Apply</button>
+      </div>
+    </div>
+
+    <!-- Destroy panel -->
+    <div id="destroy-panel" class="form-controls">
+      <label>
+        <input id="destroy-confirm" type="checkbox">
+        I confirm I want to destroy this resource (irreversible)
+      </label>
+      <button id="btn-destroy" type="button" disabled>Destroy</button>
+    </div>
+
+    <!-- Drift result -->
+    <div id="drift-result" hidden>
+      <h3>Drift Check</h3>
+      <table id="drift-table">
+        <thead><tr><th>Resource</th><th>Type</th><th>Drifted</th><th>Class</th><th>Fields</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="mutation-error" role="alert" aria-live="polite" class="redacted"></div>
+    <div id="mutation-ok" role="status" aria-live="polite"></div>
+  </section>
+
   <div id="error" role="alert" aria-live="polite"></div>
   <script src="/admin/infra-admin/resource.js"></script>
 </body>
