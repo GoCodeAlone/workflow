@@ -75,6 +75,10 @@ if ! curl -fsSL "$UPSTREAM_URL" -o "$UPSTREAM_TMP"; then
 fi
 
 # Extract *Config message names from a proto file (line-by-line regex).
+# Scope is intentionally limited to `*Config` messages — these are the
+# typed resource configs that catalog_proto_parity_test.go asserts have
+# catalog entries. Non-Config messages (service RPCs, generic types) are
+# out of scope for the parity test and are therefore excluded here too.
 extract_config_messages() {
   grep -oE '^[[:space:]]*message[[:space:]]+([A-Za-z0-9_]+Config)[[:space:]]*\{' "$1" \
     | sed 's|.*message[[:space:]]\+\([A-Za-z0-9_]*Config\)[[:space:]]*{.*|\1|' \
