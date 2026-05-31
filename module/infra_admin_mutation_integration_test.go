@@ -134,15 +134,15 @@ func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionA
 	// Auth stub + authz stub enforcer (I-2).
 	auth := &authMwStub{name: "auth"}
 	enforcer := &integrationEnforcer{}
-	_ = app.RegisterService("auth", auth)
-	_ = app.RegisterService("my-authz", enforcer)
+	mustRegister(t, app, "auth", auth)
+	mustRegister(t, app, "my-authz", enforcer)
 
 	// Stub provider registered under its module name (per T2).
-	_ = app.RegisterService(providerName, stubprovider.New())
+	mustRegister(t, app, providerName, stubprovider.New())
 
 	// Recording state store so we can assert assertion (1).
 	store := &recordingStateStore{}
-	_ = app.RegisterService("iac-state", store)
+	mustRegister(t, app, "iac-state", store)
 
 	cfg := InfraAdminConfig{
 		RoutePrefix:           "/api/infra-admin",
@@ -208,7 +208,7 @@ func TestMutationIntegration_Apply(t *testing.T) {
 	}
 
 	// Step 2: Apply with the hash from the plan response.
-	applyPayload, _ := json.Marshal(map[string]any{
+	applyPayload := mustMarshal(t, map[string]any{
 		"plan_id":      planOut.GetPlanId(),
 		"desired_hash": planOut.GetDesiredHash(),
 		"evidence":     map[string]any{"authz_checked": true, "authz_allowed": true, "subject": "operator"},
@@ -239,7 +239,10 @@ func TestMutationIntegration_Apply(t *testing.T) {
 	}
 
 	// Assertion (1): state store gains the resource (C-1 fix: handler now calls SaveResource).
-	stateRows, _ := store.ListResources(context.Background())
+	stateRows, err := store.ListResources(context.Background())
+	if err != nil {
+		t.Fatalf("apply: ListResources: %v", err)
+	}
 	if len(stateRows) == 0 {
 		t.Error("apply: state store should have at least 1 resource after apply")
 	} else {
@@ -287,7 +290,7 @@ func TestMutationIntegration_Destroy(t *testing.T) {
 		{Name: "db1", Type: "infra.database"},
 	}
 	confirmHash := handler.HashDestroyRefs(refs)
-	destroyPayload, _ := json.Marshal(map[string]any{
+	destroyPayload := mustMarshal(t, map[string]any{
 		"refs":         []map[string]string{{"name": "vpc1", "type": "infra.vpc"}, {"name": "db1", "type": "infra.database"}},
 		"confirm_hash": confirmHash,
 		"evidence":     map[string]any{"authz_checked": true, "authz_allowed": true, "subject": "operator"},
@@ -344,6 +347,27 @@ func assertAuditEntry(t *testing.T, auditPath, action, result string) {
 		}
 	}
 	t.Errorf("audit log %q missing entry {action:%q, result:%q}", auditPath, action, result)
+}
+
+// mustRegister is a test helper that calls app.RegisterService and
+// fatalf on error, replacing _ = app.RegisterService(...) patterns.
+func mustRegister(t *testing.T, app interface {
+	RegisterService(string, any) error
+}, name string, svc any) {
+	t.Helper()
+	if err := app.RegisterService(name, svc); err != nil {
+		t.Fatalf("setup: RegisterService(%q): %v", name, err)
+	}
+}
+
+// mustMarshal is a test helper that calls json.Marshal and fatalf on error.
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("setup: json.Marshal: %v", err)
+	}
+	return data
 }
 
 // Compile-time: interfaces.IaCProvider satisfied by stubprovider.Provider.
