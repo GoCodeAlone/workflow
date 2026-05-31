@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -13,40 +12,44 @@ import (
 )
 
 // DesiredStateHash returns a stable SHA-256 hex digest of the canonical
-// desired-state inputs: specs resolved via plan-time JIT substitution
-// (${MODULE.id} refs collapsed to current state ProviderIDs), then sorted
-// by name and JSON-serialised.
+// desired-state inputs: specs with ${MODULE.id} refs collapsed to current
+// state ProviderIDs, then sorted by name and JSON-serialised.
 //
-// The function mirrors the CLI path in cmd/wfctl (resolveSpecsAgainstState
-// followed by desiredStateHash) so that in-process plan and apply calls
-// produce the same digest as the wfctl command-line tool. It is the stable
-// seam for the two-phase (plan→apply) TOCTOU guard in infra.admin handlers.
+// IMPORTANT — env/secret refs are preserved verbatim (NOT resolved):
+// ${ENV_VAR} and ${secret.*} placeholders hash as their literal template
+// strings. This is deliberate: these values may differ between processes
+// (secret-gen vars, os.Getenv) but must produce the same hash at plan
+// time and at apply time. Env drift is tracked separately via the
+// plan's InputSnapshot / InputDriftReport mechanism, not the hash.
+// Collapsing env refs here caused plan-hash ≠ apply-hash regressions
+// (TestParseInfraResourceSpecs_Preserves*).
 //
-// The cfg parameter is reserved for future secret-resolution parity with the
-// CLI's buildResolvedSecretsFromState / buildRuntimeOnlySecretKeys path. When
-// cfg is nil, only module-output refs (${MODULE.field}) are collapsed; env-var
-// and secret refs fall through to os.LookupEnv unchanged, matching the
-// CLI's lenient plan-time behavior for refs not present in current state.
+// Only ${MODULE.field} refs whose source is present in `current` are
+// collapsed — these are stable ProviderIDs that will not change between
+// plan and apply for the same desired configuration.
 //
-// The empty-specs case hashes the JSON array "[]" (not the empty string); the
-// returned empty string is the error sentinel (marshal failure) only.
+// cfg and env are reserved for a future extension that threads cfg+env
+// through buildResolvedSecretsFromState to achieve full CLI parity for
+// infra_output-typed secrets. They are intentionally unused today.
+//
+// The empty-specs case hashes "[]" (not the empty string); the
+// returned "hash-error" string is the unreachable marshal-failure sentinel.
 func DesiredStateHash(cfg *config.WorkflowConfig, desired []interfaces.ResourceSpec, current []interfaces.ResourceState, env string) string {
-	// cfg and env are reserved for future buildResolvedSecretsFromState parity
-	// with the CLI (cmd/wfctl/infra_resolve_state.go). Callers requiring full
-	// ${secret.*} resolution parity must pass a non-nil cfg and extend this
-	// function to thread cfg+env through buildResolvedSecretsFromState.
-	// Currently unused: secret refs fall through to os.LookupEnv (lenient).
 	_ = cfg // reserved: see godoc
 	_ = env // reserved: see godoc
+
 	// Step 1: build syncedOutputs from current state.
 	// Maps module-name → {"id": providerID, <other outputs>}
 	syncedOutputs := buildHashSyncedOutputs(current)
 
-	// Step 2: apply plan-time JIT resolution to collapse ${MODULE.id} refs.
-	// Unresolved refs (not in state) are left as-is (lenient / no error).
+	// Step 2: collapse only ${MODULE.field} refs that are resolvable from
+	// current state. Use a no-op env lookup so ${ENV_VAR} and ${secret.*}
+	// placeholders are preserved verbatim — they must hash identically
+	// at plan time and at apply time for plan↔apply stability.
+	noopEnv := func(string) (string, bool) { return "", false }
 	resolved := make([]interfaces.ResourceSpec, 0, len(desired))
 	for _, spec := range desired {
-		r, _, err := jitsubst.TryResolveSpec(spec, nil, syncedOutputs, os.LookupEnv)
+		r, _, err := jitsubst.TryResolveSpec(spec, nil, syncedOutputs, noopEnv)
 		if err != nil {
 			// Malformed ref — use unresolved spec; hash will differ from a
 			// clean spec (deterministic for same bad input).

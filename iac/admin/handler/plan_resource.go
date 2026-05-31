@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -168,10 +167,14 @@ func handlerDesiredHash(_ *config.WorkflowConfig, desired []interfaces.ResourceS
 		syncedOutputs[s.Name] = m
 	}
 
-	// Resolve ${MODULE.id} refs; unresolved refs left as-is (lenient).
+	// Resolve only ${MODULE.field} refs from current state.
+	// Use a no-op env lookup so ${ENV_VAR} and ${secret.*} placeholders
+	// are preserved verbatim — they must hash identically at plan time
+	// and apply time (env drift tracked via InputSnapshot, not the hash).
+	noopEnv := func(string) (string, bool) { return "", false }
 	resolved := make([]interfaces.ResourceSpec, 0, len(desired))
 	for _, spec := range desired {
-		r, _, err := jitsubst.TryResolveSpec(spec, nil, syncedOutputs, os.LookupEnv)
+		r, _, err := jitsubst.TryResolveSpec(spec, nil, syncedOutputs, noopEnv)
 		if err != nil {
 			r = spec
 		}
