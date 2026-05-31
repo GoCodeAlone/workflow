@@ -57,11 +57,95 @@
   "phases": [
     {
       "name": "prereq",
-      "config_path": "deploy.prereq.yaml"
+      "config_path": "deploy.prereq.yaml",
+      "secrets": [
+        {
+          "name": "DIGITALOCEAN_TOKEN"
+        },
+        {
+          "name": "GHCR_CREDENTIALS"
+        },
+        {
+          "name": "MULTISITE_CONTENT_REPO_TOKEN"
+        },
+        {
+          "name": "MULTISITE_OAUTH_FACEBOOK_APP_ID"
+        },
+        {
+          "name": "MULTISITE_OAUTH_FACEBOOK_APP_SECRET"
+        },
+        {
+          "name": "MULTISITE_OAUTH_GOOGLE_CLIENT_ID"
+        },
+        {
+          "name": "MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET"
+        },
+        {
+          "name": "RELEASES_TOKEN"
+        },
+        {
+          "name": "SPACES_access_key"
+        },
+        {
+          "name": "SPACES_secret_key"
+        }
+      ],
+      "scoped": true
     },
     {
       "name": "deploy",
-      "config_path": "deploy.yaml"
+      "config_path": "deploy.yaml",
+      "secrets": [
+        {
+          "name": "DIGITALOCEAN_TOKEN"
+        },
+        {
+          "name": "GHCR_CREDENTIALS"
+        },
+        {
+          "name": "GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON"
+        },
+        {
+          "name": "MULTISITE_AUDIT_SIGN_KEY"
+        },
+        {
+          "name": "MULTISITE_CONTENT_REPO_TOKEN"
+        },
+        {
+          "name": "MULTISITE_DB_URL"
+        },
+        {
+          "name": "MULTISITE_INGEST_HMAC_SECRET"
+        },
+        {
+          "name": "MULTISITE_JWT_SECRET"
+        },
+        {
+          "name": "MULTISITE_OAUTH_FACEBOOK_APP_ID"
+        },
+        {
+          "name": "MULTISITE_OAUTH_FACEBOOK_APP_SECRET"
+        },
+        {
+          "name": "MULTISITE_OAUTH_GOOGLE_CLIENT_ID"
+        },
+        {
+          "name": "MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET"
+        },
+        {
+          "name": "MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE"
+        },
+        {
+          "name": "RELEASES_TOKEN"
+        },
+        {
+          "name": "SPACES_access_key"
+        },
+        {
+          "name": "SPACES_secret_key"
+        }
+      ],
+      "scoped": true
     }
   ],
   "migrations": {

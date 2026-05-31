@@ -101,15 +101,31 @@ func Analyze(configs []string, opts Options) (*CIPlan, error) {
 	if primaryConfigPath == "" {
 		primaryConfigPath = relativizeConfigPath(primaryPath)
 	}
+
+	// Per-phase secret scoping (multi-phase only). The prereq phase is scoped to
+	// the secrets ITS config references; the deploy (last) phase keeps the
+	// primary union (which already includes the migration DBEnv via deriveSecrets).
+	var prereqSecrets []SecretRef
+	scoped := false
 	phaseConfigPath := opts.PhaseConfig
 	if phaseConfigPath != "" {
 		if opts.PhaseConfigAlias != "" {
 			phaseConfigPath = opts.PhaseConfigAlias
 		} else {
-			phaseConfigPath = relativizeConfigPath(phaseConfigPath)
+			phaseConfigPath = relativizeConfigPath(opts.PhaseConfig)
+		}
+		if pcfg, perr := config.LoadFromFile(opts.PhaseConfig); perr == nil {
+			// deriveMigrations is primary-only: the migrating phase is the LAST
+			// phase, so the prereq never gets a migration DBEnv (pass nil).
+			prereqSecrets = deriveSecrets(pcfg, nil)
+			scoped = true
+		} else {
+			plan.Warnings = append(plan.Warnings,
+				fmt.Sprintf("per-phase secret scoping unavailable: phase config %q not loadable (%v); using union", opts.PhaseConfig, perr))
 		}
 	}
-	plan.Phases = derivePhases(primaryConfigPath, phaseConfigPath)
+
+	plan.Phases = derivePhases(primaryConfigPath, phaseConfigPath, plan.Secrets, prereqSecrets, scoped)
 
 	return plan, nil
 }
@@ -222,6 +238,12 @@ func deriveMigrations(cfg *config.WorkflowConfig) *MigrationsSpec {
 	}
 	if spec.DBEnv == "" {
 		return nil
+	}
+	// Derive --env only when exactly one environment is declared (unambiguous).
+	if len(m.Environments) == 1 {
+		for envName := range m.Environments {
+			spec.Env = envName
+		}
 	}
 	return spec
 }
@@ -390,18 +412,28 @@ func extractPrimaryDomain(cfg map[string]any) string {
 }
 
 // derivePhases builds the ordered list of deploy phases.
-func derivePhases(primaryPath, phaseConfig string) []DeployPhase {
+func derivePhases(primaryPath, phaseConfig string, primarySecrets, prereqSecrets []SecretRef, scoped bool) []DeployPhase {
 	var phases []DeployPhase
 	if phaseConfig != "" {
 		phases = append(phases, DeployPhase{
 			Name:       "prereq",
 			ConfigPath: phaseConfig,
+			Secrets:    prereqSecrets,
+			Scoped:     scoped,
 		})
 	}
-	phases = append(phases, DeployPhase{
+	deploy := DeployPhase{
 		Name:       "deploy",
 		ConfigPath: primaryPath,
-	})
+	}
+	// The deploy phase is scoped to the primary union only in the multi-phase
+	// case (scoped==true means the prereq loaded). Single-phase stays unscoped:
+	// the union IS its scope, so the renderer's union fallback applies unchanged.
+	if scoped {
+		deploy.Secrets = primarySecrets
+		deploy.Scoped = true
+	}
+	phases = append(phases, deploy)
 	return phases
 }
 
@@ -425,6 +457,14 @@ func deriveWarnings(cfg *config.WorkflowConfig, migrations *MigrationsSpec, secr
 			warnings = append(warnings,
 				fmt.Sprintf("secret %q does not match ^[A-Z0-9_]+$ — the config casing is preserved as-is; you may need a GitHub-side alias if the platform normalises secret names to upper-case",
 					s.Name))
+		}
+	}
+
+	// (c) migrations environment ambiguity: ≥2 declared → --env omitted.
+	if cfg.CI != nil && len(cfg.CI.Migrations) > 0 {
+		if n := len(cfg.CI.Migrations[0].Environments); n >= 2 {
+			warnings = append(warnings,
+				fmt.Sprintf("migrations environment ambiguous (%d declared); --env omitted — set it in the generated workflow", n))
 		}
 	}
 
