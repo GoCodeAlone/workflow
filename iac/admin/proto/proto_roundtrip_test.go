@@ -229,15 +229,28 @@ func TestAdminPlanOutput_Roundtrip(t *testing.T) {
 		t.Errorf("plan_json mangled: got %q want %q", out.PlanJson, planJSON)
 	}
 
-	// tag-100 error discriminator
+	// tag-100 error discriminator — fix F1: capture marshal err; fix F3: typed fields empty.
 	errOut := &adminpb.AdminPlanOutput{Error: "authz denied"}
-	eb, _ := protojson.Marshal(errOut)
+	eb, err := protojson.Marshal(errOut)
+	if err != nil {
+		t.Fatalf("error-case Marshal: %v", err)
+	}
 	var errRt adminpb.AdminPlanOutput
 	if err := protojson.Unmarshal(eb, &errRt); err != nil {
 		t.Fatalf("error roundtrip Unmarshal: %v", err)
 	}
 	if errRt.Error != "authz denied" {
 		t.Errorf("AdminPlanOutput error tag-100 lost: got %q", errRt.Error)
+	}
+	// F3: error response must have no typed payload fields set.
+	if errRt.PlanId != "" {
+		t.Errorf("expect no plan_id on error response; got %q", errRt.PlanId)
+	}
+	if errRt.DesiredHash != "" {
+		t.Errorf("expect no desired_hash on error response; got %q", errRt.DesiredHash)
+	}
+	if len(errRt.Actions) != 0 {
+		t.Errorf("expect no actions on error response; got %v", errRt.Actions)
 	}
 }
 
@@ -309,15 +322,25 @@ func TestAdminApplyOutput_Roundtrip(t *testing.T) {
 		t.Errorf("error field lost: got %q", out.Errors[0].Error)
 	}
 
-	// tag-100 discriminator
+	// tag-100 discriminator — fix F1: capture marshal err; fix F3: typed fields empty.
 	errOut := &adminpb.AdminApplyOutput{Error: "stale plan"}
-	eb, _ := protojson.Marshal(errOut)
+	eb, err := protojson.Marshal(errOut)
+	if err != nil {
+		t.Fatalf("error-case Marshal: %v", err)
+	}
 	var errRt adminpb.AdminApplyOutput
 	if err := protojson.Unmarshal(eb, &errRt); err != nil {
 		t.Fatalf("error roundtrip: %v", err)
 	}
 	if errRt.Error != "stale plan" {
 		t.Errorf("AdminApplyOutput error tag-100 lost: got %q", errRt.Error)
+	}
+	// F3: error response must have no typed payload fields set.
+	if len(errRt.Applied) != 0 {
+		t.Errorf("expect no applied on error response; got %v", errRt.Applied)
+	}
+	if len(errRt.Errors) != 0 {
+		t.Errorf("expect no errors on error response; got %v", errRt.Errors)
 	}
 }
 
@@ -376,14 +399,25 @@ func TestAdminDestroyOutput_Roundtrip(t *testing.T) {
 		t.Errorf("errors lost: %+v", out.Errors)
 	}
 
+	// F1: capture marshal err; F3: typed fields empty on error response.
 	errOut := &adminpb.AdminDestroyOutput{Error: "confirm_hash mismatch"}
-	eb, _ := protojson.Marshal(errOut)
+	eb, err := protojson.Marshal(errOut)
+	if err != nil {
+		t.Fatalf("error-case Marshal: %v", err)
+	}
 	var errRt adminpb.AdminDestroyOutput
 	if err := protojson.Unmarshal(eb, &errRt); err != nil {
 		t.Fatalf("error roundtrip: %v", err)
 	}
 	if errRt.Error != "confirm_hash mismatch" {
 		t.Errorf("AdminDestroyOutput error tag-100 lost: got %q", errRt.Error)
+	}
+	// F3: error response must have no typed payload fields set.
+	if len(errRt.Destroyed) != 0 {
+		t.Errorf("expect no destroyed on error response; got %v", errRt.Destroyed)
+	}
+	if len(errRt.Errors) != 0 {
+		t.Errorf("expect no errors on error response; got %v", errRt.Errors)
 	}
 }
 
@@ -450,8 +484,12 @@ func TestAdminDriftOutput_Roundtrip(t *testing.T) {
 		t.Errorf("fields lost: %v", out.Drift[0].Fields)
 	}
 
+	// F1: capture marshal err; F3: typed fields empty on error response.
 	errOut := &adminpb.AdminDriftOutput{Error: "provider unavailable"}
-	eb, _ := protojson.Marshal(errOut)
+	eb, err := protojson.Marshal(errOut)
+	if err != nil {
+		t.Fatalf("error-case Marshal: %v", err)
+	}
 	var errRt adminpb.AdminDriftOutput
 	if err := protojson.Unmarshal(eb, &errRt); err != nil {
 		t.Fatalf("error roundtrip: %v", err)
@@ -459,14 +497,20 @@ func TestAdminDriftOutput_Roundtrip(t *testing.T) {
 	if errRt.Error != "provider unavailable" {
 		t.Errorf("AdminDriftOutput error tag-100 lost: got %q", errRt.Error)
 	}
+	// F3: error response must have no typed payload fields set.
+	if len(errRt.Drift) != 0 {
+		t.Errorf("expect no drift on error response; got %v", errRt.Drift)
+	}
 }
 
-// TestMutationOutputs_DiscardUnknown verifies that all mutation Output
-// messages accept payloads with extra (future) fields when parsed with
-// DiscardUnknown:true — the server uses this option (unmarshalOpts in
-// module/infra_admin.go) for forward compatibility.
+// TestMutationOutputs_DiscardUnknown verifies forward compatibility: clients
+// parse server Output responses and servers parse client Input requests with
+// DiscardUnknown:true so future proto additions (new fields) are silently
+// ignored rather than rejected (F2: comment corrected to cover both directions).
 func TestMutationOutputs_DiscardUnknown(t *testing.T) {
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+
+	// Output direction: clients parsing server responses (forward compat).
 	extraPayload := []byte(`{"unknownField":"ignored","plan_id":"p1","desired_hash":"h1"}`)
 	var planOut adminpb.AdminPlanOutput
 	if err := opts.Unmarshal(extraPayload, &planOut); err != nil {
@@ -501,5 +545,22 @@ func TestMutationOutputs_DiscardUnknown(t *testing.T) {
 	}
 	if driftOut.Error != "timeout" {
 		t.Errorf("error not read through DiscardUnknown: got %q", driftOut.Error)
+	}
+
+	// Input direction: server parsing client requests (F2: the more security-
+	// relevant direction — server must not reject valid requests because the
+	// client sent an extra unknown field from a newer client version).
+	// module/infra_admin.go uses unmarshalOpts{DiscardUnknown:true} when
+	// decoding all Input bodies.
+	applyInputPayload := []byte(`{"futureClientField":"v2","plan_id":"p2","desired_hash":"h2","allow_replace":["r1"]}`)
+	var applyIn adminpb.AdminApplyInput
+	if err := opts.Unmarshal(applyInputPayload, &applyIn); err != nil {
+		t.Errorf("AdminApplyInput DiscardUnknown (server-side): %v", err)
+	}
+	if applyIn.PlanId != "p2" {
+		t.Errorf("plan_id not read through DiscardUnknown (input): got %q", applyIn.PlanId)
+	}
+	if len(applyIn.AllowReplace) != 1 || applyIn.AllowReplace[0] != "r1" {
+		t.Errorf("allow_replace not read through DiscardUnknown (input): got %v", applyIn.AllowReplace)
 	}
 }
