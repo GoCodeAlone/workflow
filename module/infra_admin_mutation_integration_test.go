@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,9 +95,14 @@ func (s *recordingStateStore) Lock(_ context.Context, _ string, _ time.Duration)
 func (s *recordingStateStore) Close() error { return nil }
 
 // integrationEnforcer always grants access (integration happy-path).
-type integrationEnforcer struct{}
+// calls is bumped atomically so tests can assert Enforce was actually
+// invoked (per spec-reviewer T10 non-blocking note).
+type integrationEnforcer struct {
+	calls int64
+}
 
 func (e *integrationEnforcer) Enforce(_, _, _ string, _ ...string) (bool, error) {
+	atomic.AddInt64(&e.calls, 1)
 	return true, nil
 }
 
@@ -105,7 +111,7 @@ func (e *integrationEnforcer) Enforce(_, _, _ string, _ ...string) (bool, error)
 // - recordingStateStore (C-1 assertion)
 // - stub iac.provider (T2: stubprovider.New())
 // - WorkflowConfig with one infra.database resource (C-2: non-empty desiredSpecs)
-func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionApp, *InfraAdmin, *recordingStateStore) {
+func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionApp, *InfraAdmin, *recordingStateStore, *integrationEnforcer) {
 	t.Helper()
 	providerName := "stub-provider"
 
@@ -127,8 +133,9 @@ func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionA
 
 	// Auth stub + authz stub enforcer (I-2).
 	auth := &authMwStub{name: "auth"}
+	enforcer := &integrationEnforcer{}
 	_ = app.RegisterService("auth", auth)
-	_ = app.RegisterService("my-authz", &integrationEnforcer{})
+	_ = app.RegisterService("my-authz", enforcer)
 
 	// Stub provider registered under its module name (per T2).
 	_ = app.RegisterService(providerName, stubprovider.New())
@@ -149,7 +156,7 @@ func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionA
 		AccessLogPath:         auditPath,
 	}
 	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
-	return app, m, store
+	return app, m, store, enforcer
 }
 
 // TestMutationIntegration_Apply verifies the end-to-end apply path:
@@ -160,7 +167,7 @@ func TestMutationIntegration_Apply(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "audit.jsonl")
 
-	app, m, store := mutationIntegrationApp(t, auditPath)
+	app, m, store, enforcer := mutationIntegrationApp(t, auditPath)
 	if err := m.Init(app); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -250,6 +257,11 @@ func TestMutationIntegration_Apply(t *testing.T) {
 
 	// Assertion (2): audit entry with action:apply result:ok.
 	assertAuditEntry(t, auditPath, "apply", "ok")
+
+	// I-2 verification: Enforce was invoked (spec-reviewer T10 non-blocking note).
+	if atomic.LoadInt64(&enforcer.calls) == 0 {
+		t.Error("authz Enforce was never called during apply — authz module not wired correctly")
+	}
 }
 
 // TestMutationIntegration_Destroy verifies the end-to-end destroy path:
@@ -258,7 +270,7 @@ func TestMutationIntegration_Destroy(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "audit.jsonl")
 
-	app, m, _ := mutationIntegrationApp(t, auditPath)
+	app, m, _, _ := mutationIntegrationApp(t, auditPath)
 	if err := m.Init(app); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
