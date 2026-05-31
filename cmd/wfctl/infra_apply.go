@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1375,25 +1374,13 @@ func isAbstractSize(s interfaces.Size) bool {
 // desired-state inputs: specs sorted by name and JSON-serialised. It is
 // embedded in plan.json by runInfraPlan and verified by runInfraApply
 // --plan to detect plans that are stale relative to the current config.
+//
+// Deprecated: this shim delegates to wfctlhelpers.DesiredStateHash, which is
+// the canonical implementation and should be called directly by new code.
+// Call sites here pass pre-resolved specs (resolveSpecsAgainstState has
+// already been applied), so nil cfg + nil current produce identical results.
 func desiredStateHash(specs []interfaces.ResourceSpec) string {
-	// Do NOT short-circuit for empty specs: a plan that removes all resources
-	// ("delete all") has a valid, deterministic hash (sha256("[]")). Returning ""
-	// for empty specs would block such plans with a misleading "no hash" error.
-	// The "" sentinel is reserved exclusively for marshal failures below.
-	sorted := make([]interfaces.ResourceSpec, len(specs))
-	copy(sorted, specs)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Name < sorted[j].Name
-	})
-	data, err := json.Marshal(sorted)
-	if err != nil {
-		// Should never happen for YAML-decoded structs, but return the empty
-		// sentinel rather than silently hashing nil bytes — callers treat ""
-		// as "hash unavailable" and will reject the plan with a clear error.
-		return ""
-	}
-	sum := sha256.Sum256(data)
-	return fmt.Sprintf("%x", sum)
+	return wfctlhelpers.DesiredStateHash(nil, specs, nil, "")
 }
 
 // loadPlanFromFile reads and deserialises a plan.json written by wfctl infra plan -o.
