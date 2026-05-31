@@ -48,7 +48,7 @@ func applyWizardOverrides(plan *cigen.CIPlan, choices wizardChoices) {
 }
 
 // platformOptions is the ordered list of CI platforms for the wizard.
-var platformOptions = []string{"github_actions", "gitlab_ci"}
+var platformOptions = []string{"github_actions", "gitlab_ci", "jenkins", "circleci"}
 
 // runnerOptions is the ordered list of common runner labels for the wizard.
 var runnerOptions = []string{"ubuntu-latest", "self-hosted", "other (type below)"}
