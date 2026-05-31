@@ -32,7 +32,7 @@
 |------|-------|-------|--------|
 | 1 | feat(cigen): per-phase secret scoping + migration --format json/--env | Task 1, Task 2, Task 3, Task 4, Task 5 | feat/cigen-phase-secret-scoping |
 
-**Status:** Locked 2026-05-31T20:35:52Z
+**Status:** Complete 2026-05-31T21:01:08Z
 
 ---
 
