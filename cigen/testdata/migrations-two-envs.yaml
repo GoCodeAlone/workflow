@@ -1,0 +1,13 @@
+ci:
+  migrations:
+    - name: app
+      source_dir: migrations
+      database:
+        env: APP_DB_URL
+      environments:
+        staging:
+          database:
+            env: STAGING_DB_URL
+        prod:
+          database:
+            env: PROD_DB_URL
