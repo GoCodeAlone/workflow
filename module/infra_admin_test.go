@@ -259,8 +259,9 @@ func TestInfraAdmin_Init_AuditFailureIsFatal(t *testing.T) {
 }
 
 // TestInfraAdmin_Start_Fires3ContributionPipelines pins the
-// design's Start contract: exactly 3 engine.TriggerWorkflow calls
-// fire, with the expected pipeline names + contribution payloads.
+// design's Start contract: the expected engine.TriggerWorkflow calls
+// fire for all registered admin-plugin contribution pipelines.
+// Updated to 4 with the T12 audit-viewer (register-infra-admin-actions).
 func TestInfraAdmin_Start_Fires3ContributionPipelines(t *testing.T) {
 	app, engine, _ := newAppWithWorkflowSection(t, "digitalocean")
 	m := NewInfraAdmin("infra-admin", configToMap(t, standardCfg())).(*InfraAdmin)
@@ -270,13 +271,11 @@ func TestInfraAdmin_Start_Fires3ContributionPipelines(t *testing.T) {
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if len(engine.triggers) != 3 {
-		t.Fatalf("TriggerWorkflow calls = %d, want 3", len(engine.triggers))
-	}
 	wantNames := map[string]bool{
 		"pipeline:register-infra-admin-resources":       false,
 		"pipeline:register-infra-admin-resource-detail": false,
 		"pipeline:register-infra-admin-new-resource":    false,
+		"pipeline:register-infra-admin-actions":         false, // T12 audit-viewer
 	}
 	for _, tr := range engine.triggers {
 		if _, ok := wantNames[tr.WorkflowType]; ok {
@@ -289,6 +288,9 @@ func TestInfraAdmin_Start_Fires3ContributionPipelines(t *testing.T) {
 		if !fired {
 			t.Errorf("expected trigger for %s, not fired", name)
 		}
+	}
+	if len(engine.triggers) != len(wantNames) {
+		t.Errorf("TriggerWorkflow calls = %d, want %d", len(engine.triggers), len(wantNames))
 	}
 }
 

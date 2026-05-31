@@ -33,6 +33,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
 	"github.com/GoCodeAlone/workflow/iac/stubprovider"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -165,9 +166,19 @@ func TestMutationIntegration_Destroy(t *testing.T) {
 		t.Fatalf("router.Start: %v", err)
 	}
 
-	destroyBody := `{"refs":[{"name":"vpc1","type":"infra.vpc"},{"name":"db1","type":"infra.database"}],"evidence":{"authz_checked":true,"authz_allowed":true,"subject":"operator"}}`
+	// Compute confirm_hash from refs for TOCTOU gate (T7 IMPORTANT-1 fix).
+	refs := []*adminpb.AdminResourceRef{
+		{Name: "vpc1", Type: "infra.vpc"},
+		{Name: "db1", Type: "infra.database"},
+	}
+	confirmHash := handler.HashDestroyRefs(refs)
+	destroyPayload, _ := json.Marshal(map[string]any{
+		"refs":         []map[string]string{{"name": "vpc1", "type": "infra.vpc"}, {"name": "db1", "type": "infra.database"}},
+		"confirm_hash": confirmHash,
+		"evidence":     map[string]any{"authz_checked": true, "authz_allowed": true, "subject": "operator"},
+	})
 	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/destroy",
-		bytes.NewReader([]byte(destroyBody)))
+		bytes.NewReader(destroyPayload))
 	req.Header.Set("Authorization", "Bearer test-token")
 	ctx := context.WithValue(req.Context(), authClaimsContextKey, map[string]any{"sub": "operator"})
 	req = req.WithContext(ctx)
