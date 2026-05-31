@@ -649,6 +649,21 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				}},
 			},
 		}},
+		// T12: audit-viewer page — read-tier infra:read permission (same as
+		// other read contributions; audit tail is GET-only, no mutation risk).
+		{"register-infra-admin-actions", map[string]any{
+			"module": "admin",
+			"contribution": map[string]any{
+				"id":          "infra.audit",
+				"title":       "Infra Audit Log",
+				"category":    "infra",
+				"path":        m.config.AssetPrefix + "/actions.html",
+				"render_mode": "iframe",
+				"permissions": []map[string]any{{
+					"resource": "infra", "action": "read", "permission": "infra:read",
+				}},
+			},
+		}},
 	}
 	for _, c := range contributions {
 		if err := m.engine.TriggerWorkflow(ctx, "pipeline:"+c.pipelineName, "", c.payload); err != nil {

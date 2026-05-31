@@ -30,7 +30,13 @@ import (
 //
 // The empty-specs case hashes the JSON array "[]" (not the empty string); the
 // returned empty string is the error sentinel (marshal failure) only.
-func DesiredStateHash(cfg *config.WorkflowConfig, desired []interfaces.ResourceSpec, current []interfaces.ResourceState, _ string) string {
+func DesiredStateHash(cfg *config.WorkflowConfig, desired []interfaces.ResourceSpec, current []interfaces.ResourceState, env string) string {
+	// env is reserved for future buildResolvedSecretsFromState parity with
+	// the CLI (cmd/wfctl/infra_resolve_state.go). Callers requiring full
+	// ${secret.*} resolution parity must pass a non-nil cfg and extend this
+	// function to thread env through buildResolvedSecretsFromState.
+	// Currently unused: secret refs fall through to os.LookupEnv (lenient).
+	_ = env
 	// Step 1: build syncedOutputs from current state.
 	// Maps module-name → {"id": providerID, <other outputs>}
 	syncedOutputs := buildHashSyncedOutputs(current)
