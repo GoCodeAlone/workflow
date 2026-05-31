@@ -44,7 +44,7 @@ func renderJenkinsfile(p *CIPlan) (string, error) {
 	b.WriteString("//   Plan stages gate on changeRequest() (PR branches); apply/smoke stages gate\n")
 	b.WriteString("//   on the default branch. In a standard single-branch job, changeRequest() is\n")
 	b.WriteString("//   always false and plan stages will not run.\n")
-	if creds := jenkinsCredentialUnion(p); len(creds) > 0 {
+	if creds := secretUnion(p); len(creds) > 0 {
 		fmt.Fprintf(&b, "// Required Jenkins credentials: %s\n", strings.Join(creds, ", "))
 	}
 
@@ -143,10 +143,11 @@ func writeJenkinsPlanGuard(b *strings.Builder, configPath string) {
 	b.WriteString("        '''\n")
 }
 
-// jenkinsCredentialUnion returns the sorted, de-duplicated set of secret names
-// the rendered Jenkinsfile binds, across the plan-wide union and any scoped
-// phases — used for the operator-facing `// Required Jenkins credentials:` header.
-func jenkinsCredentialUnion(p *CIPlan) []string {
+// secretUnion returns the sorted, de-duplicated set of secret names a renderer
+// references, across the plan-wide union and any scoped phases. Used by both the
+// Jenkins `// Required Jenkins credentials:` header and the CircleCI
+// `# Required project environment variables:` header.
+func secretUnion(p *CIPlan) []string {
 	seen := make(map[string]bool)
 	var names []string
 	add := func(refs []SecretRef) {

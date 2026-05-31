@@ -61,6 +61,57 @@ func TestRenderJenkins_NilPlan(t *testing.T) {
 	}
 }
 
+// TestRenderJenkins_ScopedPhase locks in the phase.Scoped branch: a scoped phase
+// must bind ONLY its own secrets, not the plan-wide union.
+func TestRenderJenkins_ScopedPhase(t *testing.T) {
+	p := &cigen.CIPlan{
+		DefaultBranch: "main",
+		Secrets:       []cigen.SecretRef{{Name: "UNION_ONLY"}},
+		Phases: []cigen.DeployPhase{
+			{Name: "prereq", ConfigPath: "prereq.yaml", Scoped: true, Secrets: []cigen.SecretRef{{Name: "PREREQ_ONLY"}}},
+			{Name: "deploy", ConfigPath: "deploy.yaml", Scoped: true, Secrets: []cigen.SecretRef{{Name: "DEPLOY_ONLY"}}},
+		},
+	}
+	content := mustJenkins(t, p)
+	prereq := stageBlock(content, "Apply prereq")
+	deploy := stageBlock(content, "Apply deploy")
+	if !strings.Contains(prereq, "credentials('PREREQ_ONLY')") {
+		t.Errorf("prereq stage must bind PREREQ_ONLY\n%s", prereq)
+	}
+	if strings.Contains(prereq, "credentials('DEPLOY_ONLY')") || strings.Contains(prereq, "credentials('UNION_ONLY')") {
+		t.Errorf("prereq stage must NOT bind other phases' / union secrets\n%s", prereq)
+	}
+	if !strings.Contains(deploy, "credentials('DEPLOY_ONLY')") {
+		t.Errorf("deploy stage must bind DEPLOY_ONLY\n%s", deploy)
+	}
+	// Header union spans both scoped phases.
+	if !strings.Contains(content, "// Required Jenkins credentials: DEPLOY_ONLY, PREREQ_ONLY, UNION_ONLY") {
+		t.Errorf("expected sorted union header\n%s", content)
+	}
+}
+
+func mustJenkins(t *testing.T, p *cigen.CIPlan) string {
+	t.Helper()
+	files, err := cigen.RenderJenkins(p)
+	if err != nil {
+		t.Fatalf("RenderJenkins: %v", err)
+	}
+	return files["Jenkinsfile"]
+}
+
+// stageBlock returns the text of the named stage up to the next stage or EOF.
+func stageBlock(content, stageName string) string {
+	start := strings.Index(content, "stage('"+stageName+"')")
+	if start < 0 {
+		return ""
+	}
+	rest := content[start+1:]
+	if next := strings.Index(rest, "    stage('"); next >= 0 {
+		return content[start : start+1+next]
+	}
+	return content[start:]
+}
+
 func TestRenderJenkins_SinglePhase(t *testing.T) {
 	p := richCIPlan()
 	p.Phases = []cigen.DeployPhase{{Name: "deploy", ConfigPath: "deploy.yaml"}}

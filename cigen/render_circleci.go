@@ -40,7 +40,7 @@ func renderCircleCIConfig(p *CIPlan) (string, error) {
 	// Project-level env vars (secrets) are auto-injected into every job by
 	// CircleCI; set these in the project settings. They are referenced, never
 	// re-declared as NAME: $NAME no-ops.
-	if creds := jenkinsCredentialUnion(p); len(creds) > 0 {
+	if creds := secretUnion(p); len(creds) > 0 {
 		fmt.Fprintf(&b, "# Required project environment variables: %s\n", strings.Join(creds, ", "))
 	}
 	b.WriteString("\n")
