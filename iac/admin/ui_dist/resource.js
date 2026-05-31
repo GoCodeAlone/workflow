@@ -267,6 +267,9 @@ async function load() {
 async function handlePlan() {
   showMutationError('');
   showMutationOk('');
+  // F2: disable button during in-flight request to prevent overlapping requests.
+  const btn = document.getElementById('btn-plan');
+  btn.disabled = true;
   try {
     const data = await postMutation(`${API}/plan`, {
       app_context: RESOURCE_STATE.appContext,
@@ -279,6 +282,8 @@ async function handlePlan() {
     }
   } catch (err) {
     showMutationError(`plan: ${err.message}`);
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -295,6 +300,9 @@ async function handleApply() {
     document.querySelectorAll('.allow-replace-cb:checked'),
   ).map(cb => cb.value);
 
+  // F2: disable button during in-flight request.
+  const btn = document.getElementById('btn-apply');
+  btn.disabled = true;
   try {
     const data = await postMutation(`${API}/apply`, {
       plan_id: PLAN_STATE.planId,
@@ -314,18 +322,29 @@ async function handleApply() {
     PLAN_STATE.actions = [];
   } catch (err) {
     showMutationError(`apply: ${err.message}`);
+  } finally {
+    // Restore disabled state based on confirm checkbox (not unconditionally).
+    btn.disabled = !document.getElementById('apply-confirm').checked;
   }
 }
 
 async function handleDestroy() {
   showMutationError('');
   showMutationOk('');
+  // F1: resource must be fully loaded before we can build a valid ref.
+  if (!RESOURCE_STATE.type) {
+    showMutationError('resource not loaded — refresh page');
+    return;
+  }
   // I-1: mirror Apply's guard — Destroy carries the same confirm_hash discipline.
   // An empty hash defeats TOCTOU protection; require a prior Plan run.
   if (!PLAN_STATE.desiredHash) {
     showMutationError('run Plan first to obtain a confirm_hash before destroying');
     return;
   }
+  // F2: disable button during in-flight request.
+  const destroyBtn = document.getElementById('btn-destroy');
+  destroyBtn.disabled = true;
   try {
     const data = await postMutation(`${API}/destroy`, {
       refs: [{ name: RESOURCE_STATE.name, type: RESOURCE_STATE.type }],
@@ -338,12 +357,17 @@ async function handleDestroy() {
     if (errors) showMutationError(`Errors: ${errors}`);
   } catch (err) {
     showMutationError(`destroy: ${err.message}`);
+  } finally {
+    destroyBtn.disabled = !document.getElementById('destroy-confirm').checked;
   }
 }
 
 async function handleDrift() {
   showMutationError('');
   showMutationOk('');
+  // F2: disable button during in-flight request.
+  const btn = document.getElementById('btn-drift');
+  btn.disabled = true;
   try {
     const data = await postMutation(`${API}/drift`, {
       refs: [{ name: RESOURCE_STATE.name, type: RESOURCE_STATE.type }],
@@ -354,6 +378,8 @@ async function handleDrift() {
     showMutationOk(anyDrift ? 'Drift detected — see table below.' : 'No drift detected.');
   } catch (err) {
     showMutationError(`drift: ${err.message}`);
+  } finally {
+    btn.disabled = false;
   }
 }
 
