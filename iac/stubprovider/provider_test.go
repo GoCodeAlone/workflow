@@ -12,12 +12,14 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// TestStub_InterfaceConformance asserts that stubprovider.New() satisfies
-// interfaces.IaCProvider at compile time (the var _ line in the package
-// guards this, but an explicit test surfaces a clear failure message when
-// the interface drifts).
+// TestStub_InterfaceConformance asserts that New() returns a non-nil
+// provider. The compile-time guard (var _ in provider.go) already verifies
+// type satisfaction; this test catches a nil-return regression at runtime.
 func TestStub_InterfaceConformance(t *testing.T) {
-	var _ interfaces.IaCProvider = stubprovider.New()
+	p := stubprovider.New()
+	if p == nil {
+		t.Fatal("New() returned nil")
+	}
 }
 
 // TestStub_Plan_CreateAction asserts that Plan on a 1-spec desired set
@@ -114,5 +116,52 @@ func TestStub_DetectDrift_NotDrifted(t *testing.T) {
 		if r.Drifted {
 			t.Errorf("DetectDrift: expected Drifted:false for %q, got true", r.Name)
 		}
+		if r.Class != interfaces.DriftClassInSync {
+			t.Errorf("DetectDrift: expected Class DriftClassInSync for %q, got %q", r.Name, r.Class)
+		}
+	}
+}
+
+// TestStub_Plan_UpdateAction asserts that Plan produces an "update" action
+// when a resource is present in both desired and current state.
+func TestStub_Plan_UpdateAction(t *testing.T) {
+	p := stubprovider.New()
+	desired := []interfaces.ResourceSpec{
+		{Name: "my-vpc", Type: "infra.vpc"},
+	}
+	current := []interfaces.ResourceState{
+		{Name: "my-vpc", Type: "infra.vpc", ProviderID: "do-vpc-111"},
+	}
+	plan, err := p.Plan(context.Background(), desired, current)
+	if err != nil {
+		t.Fatalf("Plan: unexpected error: %v", err)
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("Plan: expected 1 action, got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].Action != "update" {
+		t.Errorf("Plan: expected action 'update', got %q", plan.Actions[0].Action)
+	}
+}
+
+// TestStub_Plan_DeleteAction asserts that Plan produces a "delete" action
+// when a resource is present in current state but absent from desired.
+func TestStub_Plan_DeleteAction(t *testing.T) {
+	p := stubprovider.New()
+	current := []interfaces.ResourceState{
+		{Name: "old-vpc", Type: "infra.vpc", ProviderID: "do-vpc-999"},
+	}
+	plan, err := p.Plan(context.Background(), nil, current)
+	if err != nil {
+		t.Fatalf("Plan: unexpected error: %v", err)
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("Plan: expected 1 action, got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].Action != "delete" {
+		t.Errorf("Plan: expected action 'delete', got %q", plan.Actions[0].Action)
+	}
+	if plan.Actions[0].Resource.Name != "old-vpc" {
+		t.Errorf("Plan: expected resource name 'old-vpc', got %q", plan.Actions[0].Resource.Name)
 	}
 }
