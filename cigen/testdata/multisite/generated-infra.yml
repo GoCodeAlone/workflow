@@ -49,17 +49,11 @@ jobs:
     env:
       DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
       GHCR_CREDENTIALS: ${{ secrets.GHCR_CREDENTIALS }}
-      GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON: ${{ secrets.GOOGLE_ANALYTICS_ADMIN_CREDENTIALS_JSON }}
-      MULTISITE_AUDIT_SIGN_KEY: ${{ secrets.MULTISITE_AUDIT_SIGN_KEY }}
       MULTISITE_CONTENT_REPO_TOKEN: ${{ secrets.MULTISITE_CONTENT_REPO_TOKEN }}
-      MULTISITE_DB_URL: ${{ secrets.MULTISITE_DB_URL }}
-      MULTISITE_INGEST_HMAC_SECRET: ${{ secrets.MULTISITE_INGEST_HMAC_SECRET }}
-      MULTISITE_JWT_SECRET: ${{ secrets.MULTISITE_JWT_SECRET }}
       MULTISITE_OAUTH_FACEBOOK_APP_ID: ${{ secrets.MULTISITE_OAUTH_FACEBOOK_APP_ID }}
       MULTISITE_OAUTH_FACEBOOK_APP_SECRET: ${{ secrets.MULTISITE_OAUTH_FACEBOOK_APP_SECRET }}
       MULTISITE_OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.MULTISITE_OAUTH_GOOGLE_CLIENT_ID }}
       MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.MULTISITE_OAUTH_GOOGLE_CLIENT_SECRET }}
-      MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE: ${{ secrets.MULTISITE_SUPER_ADMIN_BOOTSTRAP_CODE }}
       RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
       SPACES_access_key: ${{ secrets.SPACES_access_key }}
       SPACES_secret_key: ${{ secrets.SPACES_secret_key }}
@@ -119,7 +113,7 @@ jobs:
             exit 1
           fi
       - name: Run migrations
-        run: wfctl migrations up --config 'deploy.yaml'
+        run: wfctl migrations up --config 'deploy.yaml' --format json
       - name: Apply deploy
         run: wfctl infra apply --config 'deploy.yaml' --auto-approve
   smoke:
