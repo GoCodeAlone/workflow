@@ -597,6 +597,15 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 	// Per T4: when m.auth==nil (allow_unauthenticated mode) mutation
 	// routes are absent; a warning was already logged at Init.
 	if m.auth != nil {
+		// T8 F2: warn when multiple providers are configured — the single-flight
+		// mutex covers only the first declared provider in v1.1; applies to
+		// provider A will block applies to provider B unnecessarily.
+		if len(m.config.ProviderModules) > 1 {
+			m.app.Logger().Warn(
+				"infra.admin: single-flight mutex covers first provider only in v1.1 — multi-provider configs may see unexpected 409s",
+				"providers", len(m.config.ProviderModules),
+			)
+		}
 		requireBearer := requireBearerAuthMiddleware{}
 		mutMws := append(mws, requireBearer) //nolint:gocritic // intentional append-to-mws copy
 		mutRoutes := []struct {
@@ -1085,7 +1094,8 @@ func (m *InfraAdmin) handlePlanResource(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	out, _ := handler.PlanResource(r.Context(), m.state, m.providers, m.wfCfg, m.desiredSpecs, &in)
+	// handlers never return non-nil error (errors go to out.Error per proto tag-100 pattern)
+	out, _ := handler.PlanResource(r.Context(), m.state, m.providers, m.wfCfg, m.desiredSpecs, &in) //nolint:errcheck
 	writeProtoMsg(w, out)
 	m.auditAccess(r, "plan", in.GetEvidence(), auditResultFor(out.GetError()))
 }
@@ -1110,7 +1120,7 @@ func (m *InfraAdmin) handleApplyResource(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	subject := m.subjectFromRequest(r)
-	out, _ := handler.ApplyResource(r.Context(), m.state, m.providers, m.authz, subject, m.wfCfg, m.desiredSpecs, &in)
+	out, _ := handler.ApplyResource(r.Context(), m.state, m.providers, m.authz, subject, m.wfCfg, m.desiredSpecs, &in) //nolint:errcheck // errors go to out.Error
 	writeProtoMsg(w, out)
 	m.auditAccess(r, "apply", in.GetEvidence(), auditResultFor(out.GetError()))
 }
@@ -1135,7 +1145,7 @@ func (m *InfraAdmin) handleDestroyResource(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	subject := m.subjectFromRequest(r)
-	out, _ := handler.DestroyResource(r.Context(), m.providers, m.authz, subject, &in)
+	out, _ := handler.DestroyResource(r.Context(), m.providers, m.authz, subject, &in) //nolint:errcheck // errors go to out.Error
 	writeProtoMsg(w, out)
 	m.auditAccess(r, "destroy", in.GetEvidence(), auditResultFor(out.GetError()))
 }
@@ -1153,7 +1163,7 @@ func (m *InfraAdmin) handleDriftCheckResource(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
-	out, _ := handler.DriftCheckResource(r.Context(), m.providers, &in)
+	out, _ := handler.DriftCheckResource(r.Context(), m.providers, &in) //nolint:errcheck // errors go to out.Error
 	writeProtoMsg(w, out)
 	m.auditAccess(r, "drift", in.GetEvidence(), auditResultFor(out.GetError()))
 }

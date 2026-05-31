@@ -31,12 +31,13 @@ import (
 // The empty-specs case hashes the JSON array "[]" (not the empty string); the
 // returned empty string is the error sentinel (marshal failure) only.
 func DesiredStateHash(cfg *config.WorkflowConfig, desired []interfaces.ResourceSpec, current []interfaces.ResourceState, env string) string {
-	// env is reserved for future buildResolvedSecretsFromState parity with
-	// the CLI (cmd/wfctl/infra_resolve_state.go). Callers requiring full
+	// cfg and env are reserved for future buildResolvedSecretsFromState parity
+	// with the CLI (cmd/wfctl/infra_resolve_state.go). Callers requiring full
 	// ${secret.*} resolution parity must pass a non-nil cfg and extend this
-	// function to thread env through buildResolvedSecretsFromState.
+	// function to thread cfg+env through buildResolvedSecretsFromState.
 	// Currently unused: secret refs fall through to os.LookupEnv (lenient).
-	_ = env
+	_ = cfg // reserved: see godoc
+	_ = env // reserved: see godoc
 	// Step 1: build syncedOutputs from current state.
 	// Maps module-name → {"id": providerID, <other outputs>}
 	syncedOutputs := buildHashSyncedOutputs(current)
@@ -62,9 +63,10 @@ func DesiredStateHash(cfg *config.WorkflowConfig, desired []interfaces.ResourceS
 	// Step 4: SHA-256 over the canonical JSON.
 	data, err := json.Marshal(resolved)
 	if err != nil {
-		// Should never happen for YAML-decoded structs; return the error
-		// sentinel ("") so callers reject the plan with a clear message.
-		return ""
+		// Unreachable for YAML-decoded ResourceSpec structs, but return a
+		// non-matchable sentinel distinct from any valid hash so callers
+		// treat it as "hash unavailable" rather than "empty desired set".
+		return "hash-error"
 	}
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("%x", sum)
