@@ -174,11 +174,16 @@ func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs 
 	}
 	fmt.Fprintf(b, "    runs-on: %s\n", runner)
 
-	// Secrets env block
-	if len(p.Secrets) > 0 {
+	// Secrets env block. Branch the SOURCE on phase.Scoped (NOT len): a scoped
+	// phase uses its own subset (possibly empty → no env block); an unscoped
+	// phase falls back to the plan-wide union.
+	secrets := p.Secrets
+	if phase.Scoped {
+		secrets = phase.Secrets
+	}
+	if len(secrets) > 0 {
 		b.WriteString("    env:\n")
-		for _, s := range p.Secrets {
-			// Use ${{ secrets.NAME }} — use raw string to avoid template interpretation
+		for _, s := range secrets {
 			fmt.Fprintf(b, "      %s: ${{ secrets.%s }}\n", s.Name, s.Name)
 		}
 	}
@@ -209,8 +214,7 @@ func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs 
 	// the real migration runner — `wfctl ci run --phase migrate` is NOT a valid
 	// phase (ci run only accepts build|test|deploy) and would fail at runtime.
 	// No step-level `env:` is needed: deriveSecrets always adds the migrations
-	// DBEnv to the secrets union, so it is already in the apply job's job-level
-	// `env:` block above; re-declaring it here would be redundant.
+	// DBEnv to the last phase's env block above; re-declaring it here would be redundant.
 	isLastPhase := phase.Name == p.Phases[len(p.Phases)-1].Name
 	if isLastPhase && p.Migrations != nil {
 		b.WriteString("      - name: Run migrations\n")
@@ -221,14 +225,15 @@ func writeApplyJob(b *strings.Builder, jobName string, phase DeployPhase, needs 
 	fmt.Fprintf(b, "        run: wfctl infra apply --config '%s' --auto-approve\n", phase.ConfigPath)
 }
 
-// migrationsUpCommand builds the `wfctl migrations up` invocation. The deploy
-// env is included as `--env <env>` only when MigrationsSpec.Env is set;
-// otherwise it is omitted (the command defaults to the empty environment).
+// migrationsUpCommand builds the `wfctl migrations up` invocation. `--env <env>`
+// is included only when MigrationsSpec.Env is set; `--format json` is always
+// appended (machine-readable output; matches the deployed multisite workflow).
 func migrationsUpCommand(configPath, env string) string {
 	cmd := fmt.Sprintf("wfctl migrations up --config '%s'", configPath)
 	if env != "" {
 		cmd += fmt.Sprintf(" --env %s", env)
 	}
+	cmd += " --format json"
 	return cmd
 }
 
