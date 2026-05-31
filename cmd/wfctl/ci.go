@@ -49,7 +49,7 @@ Actions:
   validate  Validate CI config sections
 
 Options:
-  --platform <name>     CI platform: github_actions, gitlab_ci (required for generate)
+  --platform <name>     CI platform: github_actions, gitlab_ci, jenkins, circleci (required for generate)
   --config <file>       Workflow config file (default: app.yaml or infra.yaml)
   --out <path>          Output path for generate files (directory, default: .)
   --from-plan <file>    Skip Analyze; load a CIPlan JSON directly
@@ -70,7 +70,7 @@ Examples:
 
 func runCIGenerate(args []string) error {
 	fs := flag.NewFlagSet("ci generate", flag.ContinueOnError)
-	platform := fs.String("platform", "", "CI platform: github_actions, gitlab_ci")
+	platform := fs.String("platform", "", "CI platform: github_actions, gitlab_ci, jenkins, circleci")
 	configFile := fs.String("config", "", "Workflow config file")
 	configFileShort := fs.String("c", "", "Workflow config file (shorthand)")
 	outputDir := fs.String("output", ".", "Output directory")
@@ -101,7 +101,7 @@ func runCIGenerate(args []string) error {
 	// When stdin is not a TTY and --platform is also absent, fail clearly.
 	if *platform == "" && !*interactive {
 		if !isatty.IsTerminal(os.Stdin.Fd()) {
-			return fmt.Errorf("specify --platform for non-interactive generation (github_actions, gitlab_ci)")
+			return fmt.Errorf("specify --platform for non-interactive generation (github_actions, gitlab_ci, jenkins, circleci)")
 		}
 		// Fall through — wizard will be run after the plan is built.
 	}
@@ -162,8 +162,12 @@ func runCIGenerate(args []string) error {
 		files, renderErr = cigen.RenderGitHubActions(plan)
 	case "gitlab_ci":
 		files, renderErr = cigen.RenderGitLabCI(plan)
+	case "jenkins":
+		files, renderErr = cigen.RenderJenkins(plan)
+	case "circleci":
+		files, renderErr = cigen.RenderCircleCI(plan)
 	default:
-		return fmt.Errorf("unsupported platform %q (supported: github_actions, gitlab_ci)", resolvedPlatform)
+		return fmt.Errorf("unsupported platform %q (supported: github_actions, gitlab_ci, jenkins, circleci)", resolvedPlatform)
 	}
 	if renderErr != nil {
 		return renderErr
@@ -290,8 +294,12 @@ func generateCIFiles(opts ciOptions) (map[string]string, error) {
 		return generateGitHubActions(opts)
 	case "gitlab_ci":
 		return generateGitLabCI(opts)
+	case "jenkins":
+		return generateJenkins(opts)
+	case "circleci":
+		return generateCircleCI(opts)
 	default:
-		return nil, fmt.Errorf("unsupported platform %q (supported: github_actions, gitlab_ci)", opts.Platform)
+		return nil, fmt.Errorf("unsupported platform %q (supported: github_actions, gitlab_ci, jenkins, circleci)", opts.Platform)
 	}
 }
 
@@ -305,6 +313,18 @@ func generateGitHubActions(opts ciOptions) (map[string]string, error) {
 func generateGitLabCI(opts ciOptions) (map[string]string, error) {
 	plan := ciOptionsToPlan(opts)
 	return cigen.RenderGitLabCI(plan)
+}
+
+// generateJenkins builds a minimal CIPlan from opts and renders a Jenkinsfile.
+func generateJenkins(opts ciOptions) (map[string]string, error) {
+	plan := ciOptionsToPlan(opts)
+	return cigen.RenderJenkins(plan)
+}
+
+// generateCircleCI builds a minimal CIPlan from opts and renders CircleCI config.
+func generateCircleCI(opts ciOptions) (map[string]string, error) {
+	plan := ciOptionsToPlan(opts)
+	return cigen.RenderCircleCI(plan)
 }
 
 // ciOptionsToPlan converts legacy ciOptions to a minimal CIPlan.

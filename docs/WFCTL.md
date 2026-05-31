@@ -2115,7 +2115,7 @@ Generated files:
 
 ### `ci generate`
 
-Analyze a workflow config with the `cigen` engine (config → `CIPlan` → render) and write CI configuration files for the target platform. The engine derives:
+Analyze a workflow config with the `cigen` engine (config → `CIPlan` → render) and write CI configuration files for the target platform. All four platforms (`github_actions`, `gitlab_ci`, `jenkins`, `circleci`) are config-derived from the same `CIPlan`. The engine derives:
 
 - A `secrets: env:` block of `${{ secrets.NAME }}` references from declared `secrets.entries`
 - A `wfctl plugin install` step when plugin or infra modules are detected
@@ -2132,7 +2132,7 @@ wfctl ci generate [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--platform` | _(wizard)_ | CI platform: `github_actions`, `gitlab_ci`. Required in non-interactive mode. |
+| `--platform` | _(wizard)_ | CI platform: `github_actions`, `gitlab_ci`, `jenkins`, `circleci`. Required in non-interactive mode. |
 | `-c`, `--config` | `app.yaml` or `infra.yaml` | Workflow config file to analyze |
 | `--output`, `--out` | `.` | Output directory for generated files |
 | `--runner` | `ubuntu-latest` | Runner label (GitHub Actions only) |
@@ -2162,6 +2162,13 @@ wfctl ci generate -c deploy.yaml --platform github_actions --diff --exit-code
 
 # Render from a pre-built plan (no re-analysis)
 wfctl ci generate --platform github_actions --from-plan plan.json --write
+
+# Jenkins (declarative Jenkinsfile) — requires a Jenkins Multibranch Pipeline job;
+# the generated Jenkinsfile carries a header comment listing the required credentials
+wfctl ci generate -c deploy.yaml --platform jenkins --write
+
+# CircleCI (.circleci/config.yml) — references project-level env vars (auto-injected)
+wfctl ci generate -c deploy.yaml --platform circleci --write
 ```
 
 ---

@@ -569,3 +569,23 @@ func TestRunCIGenerate_NoOverwriteWithoutWrite(t *testing.T) {
 		t.Errorf("expected error to mention --write, got: %v", err)
 	}
 }
+
+// TestGenerateCIFiles_JenkinsCircleCI verifies the platform switch dispatches to
+// the cigen Jenkins/CircleCI renderers (#804). Content quality is gated by the
+// cigen unit tests, not here.
+func TestGenerateCIFiles_JenkinsCircleCI(t *testing.T) {
+	cases := map[string]string{"jenkins": "pipeline {", "circleci": "version: 2.1"}
+	for plat, marker := range cases {
+		files, err := generateCIFiles(ciOptions{Platform: plat, InfraConfig: "infra.yaml"})
+		if err != nil {
+			t.Fatalf("%s: %v", plat, err)
+		}
+		joined := ""
+		for _, c := range files {
+			joined += c
+		}
+		if !strings.Contains(joined, marker) {
+			t.Errorf("%s: expected marker %q in output", plat, marker)
+		}
+	}
+}
