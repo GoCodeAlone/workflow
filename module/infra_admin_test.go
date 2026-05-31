@@ -169,6 +169,9 @@ func standardCfg() InfraAdminConfig {
 		HTTPModule:            "http-router",
 		SecurityHeadersModule: "security-headers",
 		ProviderModules:       []string{"do-provider"},
+		// T4: test-only insecure mode; auth is exercised separately
+		// via standardAuthCfg() + newAuthEnabledApp().
+		AllowUnauthenticated: true,
 	}
 }
 
@@ -929,4 +932,167 @@ func configToMap(t *testing.T, cfg InfraAdminConfig) map[string]any {
 		t.Fatalf("unmarshal cfg map: %v", err)
 	}
 	return m
+}
+
+// ── T4: auth refuse-empty + authz_module + subject propagation ────────────
+
+// recordingLogger captures log messages from app.Logger() calls so
+// tests can assert on specific warning strings.
+type recordingLogger struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (l *recordingLogger) Debug(msg string, _ ...any) {}
+func (l *recordingLogger) Info(msg string, _ ...any)  {}
+func (l *recordingLogger) Warn(msg string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.msgs = append(l.msgs, msg)
+}
+func (l *recordingLogger) Error(msg string, _ ...any) {}
+func (l *recordingLogger) lastWarn() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.msgs) == 0 {
+		return ""
+	}
+	return l.msgs[len(l.msgs)-1]
+}
+
+// recordingApp wraps infraMockApp and uses a recordingLogger.
+type recordingApp struct {
+	*infraMockApp
+	logger *recordingLogger
+}
+
+func newRecordingApp(base *infraMockApp) *recordingApp {
+	return &recordingApp{infraMockApp: base, logger: &recordingLogger{}}
+}
+
+func (a *recordingApp) Logger() modular.Logger { return a.logger }
+
+// stubEnforcer is a minimal Enforcer for T4 tests.
+type stubEnforcer struct {
+	allowed bool
+}
+
+func (e *stubEnforcer) Enforce(_, _, _ string, _ ...string) (bool, error) {
+	return e.allowed, nil
+}
+
+// TestInfraAdmin_Init_AuthModuleRequired asserts that Init returns an
+// error when auth_module is empty and allow_unauthenticated is false.
+func TestInfraAdmin_Init_AuthModuleRequired(t *testing.T) {
+	app, _, _ := newInfraAdminTestApp(t, "digitalocean")
+	cfg := standardCfg()
+	cfg.AllowUnauthenticated = false // explicit false
+	cfg.AuthModule = ""
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	err := m.Init(app)
+	if err == nil {
+		t.Fatal("Init with no auth_module and allow_unauthenticated:false should return error")
+	}
+	const wantSubstr = "auth_module required"
+	if !strings.Contains(err.Error(), wantSubstr) {
+		t.Errorf("Init error %q should contain %q", err.Error(), wantSubstr)
+	}
+}
+
+// TestInfraAdmin_Init_AllowUnauthenticatedNoError asserts that Init
+// succeeds with allow_unauthenticated:true and no auth_module, and
+// logs the exact warning string pinned by plan-review M-1.
+func TestInfraAdmin_Init_AllowUnauthenticatedNoError(t *testing.T) {
+	base, _, _ := newInfraAdminTestApp(t, "digitalocean")
+	app := newRecordingApp(base)
+	cfg := standardCfg() // already has AllowUnauthenticated:true
+	cfg.AuthModule = ""
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init with allow_unauthenticated:true should not error: %v", err)
+	}
+
+	const wantWarn = "infra.admin: mutation routes DISABLED (no auth_module); reads only"
+	if got := app.logger.lastWarn(); got != wantWarn {
+		t.Errorf("warning = %q, want %q", got, wantWarn)
+	}
+}
+
+// TestInfraAdmin_Init_AuthzModuleResolved asserts that a configured
+// authz_module is resolved as an Enforcer at Init.
+func TestInfraAdmin_Init_AuthzModuleResolved(t *testing.T) {
+	base, _, _ := newInfraAdminTestApp(t, "digitalocean")
+	enforcer := &stubEnforcer{allowed: true}
+	_ = base.RegisterService("my-authz", enforcer)
+
+	cfg := standardCfg()
+	cfg.AuthzModule = "my-authz"
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(base); err != nil {
+		t.Fatalf("Init with authz_module should not error: %v", err)
+	}
+	if m.authz == nil {
+		t.Error("m.authz should be non-nil after Init with authz_module configured")
+	}
+}
+
+// TestInfraAdmin_Init_AuthzModuleListedInDependencies asserts that a
+// configured authz_module appears in both Dependencies() and
+// RequiresServices() so the engine init-orders it before infra.admin.
+func TestInfraAdmin_Init_AuthzModuleListedInDependencies(t *testing.T) {
+	cfg := standardCfg()
+	cfg.AuthzModule = "my-authz"
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+
+	foundDep := false
+	for _, d := range m.Dependencies() {
+		if d == "my-authz" {
+			foundDep = true
+		}
+	}
+	if !foundDep {
+		t.Error("authz_module not in Dependencies()")
+	}
+
+	foundSvc := false
+	for _, s := range m.RequiresServices() {
+		if s.Name == "my-authz" {
+			foundSvc = true
+		}
+	}
+	if !foundSvc {
+		t.Error("authz_module not in RequiresServices()")
+	}
+}
+
+// TestInfraAdmin_SubjectFromRequest asserts that subjectFromRequest
+// extracts the "sub" claim from the auth middleware's context value.
+func TestInfraAdmin_SubjectFromRequest(t *testing.T) {
+	m := &InfraAdmin{name: "test"}
+
+	// No claims in context → empty string.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	if got := m.subjectFromRequest(req); got != "" {
+		t.Errorf("no claims: want \"\", got %q", got)
+	}
+
+	// Claims with "sub" → return sub.
+	claims := map[string]any{"sub": "user:alice", "email": "alice@example.com"}
+	ctx := context.WithValue(req.Context(), authClaimsContextKey, claims)
+	req2 := req.WithContext(ctx)
+	if got := m.subjectFromRequest(req2); got != "user:alice" {
+		t.Errorf("with claims: want \"user:alice\", got %q", got)
+	}
+
+	// Claims without "sub" → empty string.
+	claims2 := map[string]any{"email": "bob@example.com"}
+	ctx2 := context.WithValue(req.Context(), authClaimsContextKey, claims2)
+	req3 := req.WithContext(ctx2)
+	if got := m.subjectFromRequest(req3); got != "" {
+		t.Errorf("claims without sub: want \"\", got %q", got)
+	}
 }

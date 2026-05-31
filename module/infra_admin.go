@@ -116,6 +116,29 @@ type InfraAdminConfig struct {
 	// at Init and propagates open errors as a module-init failure
 	// (FATAL per design Security Review).
 	AccessLogPath string `yaml:"access_log_path" json:"access_log_path"`
+
+	// AllowUnauthenticated opts into insecure single-tenant mode.
+	// When false (the default) and AuthModule is empty, Init returns
+	// an error requiring auth_module. Mutation routes are NEVER
+	// registered without a real AuthModule; with AllowUnauthenticated:true
+	// only read routes are active and a prominent warning is logged.
+	AllowUnauthenticated bool `yaml:"allow_unauthenticated" json:"allow_unauthenticated"`
+
+	// AuthzModule names the authz.casbin (or compatible) module to
+	// resolve for server-side RBAC on mutation routes. When non-empty,
+	// infra.admin resolves the module as an Enforcer at Init and calls
+	// Enforce(subject,"infra:apply"/"infra:destroy"/"infra:read","allow")
+	// on every request. When empty, authentication is required but RBAC
+	// is skipped (authn-only single-tenant posture).
+	AuthzModule string `yaml:"authz_module" json:"authz_module"`
+}
+
+// Enforcer is the server-side RBAC interface satisfied by the
+// authz.casbin module wrapper. The variadic extra ...string matches
+// the concrete Casbin wrapper's method signature (plan-review C-NEW-1),
+// so a non-variadic declaration would not be satisfied by the wrapper.
+type Enforcer interface {
+	Enforce(sub, obj, act string, extra ...string) (bool, error)
 }
 
 // InfraAdmin is the engine-side workflow module. Implements
@@ -132,6 +155,7 @@ type InfraAdmin struct {
 	router               *StandardHTTPRouter
 	secHdrs              HTTPMiddleware
 	auth                 HTTPMiddleware
+	authz                Enforcer // nil when authz_module not configured
 
 	// Catalogs are instantiated in-process at Init.
 	fieldCatalog  *catalog.FieldSpecCatalog
@@ -197,6 +221,9 @@ func (m *InfraAdmin) Dependencies() []string {
 	if m.config.AuthModule != "" {
 		deps = append(deps, m.config.AuthModule)
 	}
+	if m.config.AuthzModule != "" {
+		deps = append(deps, m.config.AuthzModule)
+	}
 	deps = append(deps, m.config.ProviderModules...)
 	return deps
 }
@@ -225,6 +252,9 @@ func (m *InfraAdmin) RequiresServices() []modular.ServiceDependency {
 	if m.config.AuthModule != "" {
 		deps = append(deps, modular.ServiceDependency{Name: m.config.AuthModule})
 	}
+	if m.config.AuthzModule != "" {
+		deps = append(deps, modular.ServiceDependency{Name: m.config.AuthzModule})
+	}
 	for _, pm := range m.config.ProviderModules {
 		deps = append(deps, modular.ServiceDependency{Name: pm})
 	}
@@ -247,6 +277,16 @@ func (m *InfraAdmin) ProvidesServices() []modular.ServiceProvider { return nil }
 // the engine.
 func (m *InfraAdmin) Init(app modular.Application) error {
 	m.app = app
+
+	// T4 (#29): require auth_module unless the operator explicitly
+	// opted into insecure single-tenant mode. Mutation routes are
+	// NEVER registered without auth regardless of this flag.
+	if m.config.AuthModule == "" && !m.config.AllowUnauthenticated {
+		return fmt.Errorf("infra.admin: auth_module required (set allow_unauthenticated:true to opt into insecure single-tenant mode)")
+	}
+	if m.config.AuthModule == "" && m.config.AllowUnauthenticated {
+		app.Logger().Warn("infra.admin: mutation routes DISABLED (no auth_module); reads only")
+	}
 
 	// State store.
 	if m.config.StateModule != "" {
@@ -309,6 +349,19 @@ func (m *InfraAdmin) Init(app modular.Application) error {
 			return fmt.Errorf("infra.admin: auth module %q is %T, need HTTPMiddleware", m.config.AuthModule, mw)
 		}
 		m.auth = authMw
+	}
+
+	// Authz enforcer (optional — for server-side write-tier RBAC).
+	if m.config.AuthzModule != "" {
+		var authzSvc any
+		if err := app.GetService(m.config.AuthzModule, &authzSvc); err != nil {
+			return fmt.Errorf("infra.admin: authz module %q: %w", m.config.AuthzModule, err)
+		}
+		enforcer, ok := authzSvc.(Enforcer)
+		if !ok {
+			return fmt.Errorf("infra.admin: authz module %q is %T, need Enforcer", m.config.AuthzModule, authzSvc)
+		}
+		m.authz = enforcer
 	}
 
 	// Per-provider IaCProvider handles.
@@ -560,6 +613,20 @@ func readAdminBody(r *http.Request) ([]byte, error) {
 // T15 F2 (commit 60971783d): hardcoding "ok" hid real denial
 // attempts in the access log, defeating the audit log's
 // security-review purpose.
+// subjectFromRequest extracts the authenticated subject from the
+// request context. The auth middleware stores JWT claims as
+// map[string]any under authClaimsContextKey; sub is the standard
+// JWT claim for the principal. Returns "" when no claims are present
+// (e.g. allow_unauthenticated mode or auth middleware not wired).
+func (m *InfraAdmin) subjectFromRequest(r *http.Request) string {
+	claims, ok := r.Context().Value(authClaimsContextKey).(map[string]any)
+	if !ok || claims == nil {
+		return ""
+	}
+	sub, _ := claims["sub"].(string)
+	return sub
+}
+
 func (m *InfraAdmin) auditAccess(r *http.Request, action string, ev *adminpb.AdminAuthzEvidence, result string) {
 	if m.audit == nil {
 		return
