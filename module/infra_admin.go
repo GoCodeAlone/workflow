@@ -489,14 +489,42 @@ func infraSpecFromResolved(r *config.ResolvedModule) interfaces.ResourceSpec {
 		cfg["protected"] = true
 	}
 	spec := interfaces.ResourceSpec{
-		Name:   r.Name,
-		Type:   r.Type,
-		Config: cfg,
+		Name:      r.Name,
+		Type:      r.Type,
+		Config:    cfg,
+		DependsOn: extractModuleDependsOn(cfg), // mirrors CLI's extractDependsOn
 	}
 	if size, ok := cfg["size"].(string); ok {
 		spec.Size = interfaces.Size(size)
 	}
 	return spec
+}
+
+// extractModuleDependsOn reads the `depends_on` key from a resource config map
+// and returns the list of dependency names. Inlined from cmd/wfctl/infra.go
+// (package main — not importable) to keep the TOCTOU hash consistent with the
+// CLI path.
+func extractModuleDependsOn(cfg map[string]any) []string {
+	if cfg == nil {
+		return nil
+	}
+	raw, ok := cfg["depends_on"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, d := range v {
+			if s, ok := d.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // cloneAnyMap returns a shallow copy of m (nil-safe).
