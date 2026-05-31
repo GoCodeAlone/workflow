@@ -174,7 +174,7 @@ graph TD
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
 | **Infrastructure** | `infra derive/plan/apply/destroy/status/drift/import/bootstrap/outputs/test`, `infra state list/export/import` |
-| **CI/CD** | `ci generate`, `generate github-actions` |
+| **CI/CD** | `ci plan`, `ci generate`, `ci run`, `ci init`, `ci validate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
 | **Plugin Management** | `plugin`, `plugin-registry`, `registry`, `publish` |
 | **UI Generation** | `ui scaffold`, `build-ui` |
@@ -2115,35 +2115,86 @@ Generated files:
 
 ### `ci generate`
 
-Generate CI/CD pipeline configuration from a workflow definition. Detects infrastructure modules, deployment steps, and state management to produce environment-specific CI configurations.
+Analyze a workflow config with the `cigen` engine (config → `CIPlan` → render) and write CI configuration files for the target platform. The engine derives:
+
+- A `secrets: env:` block of `${{ secrets.NAME }}` references from declared `secrets.entries`
+- A `wfctl plugin install` step when plugin or infra modules are detected
+- A two-phase prereq → deploy pipeline when `--phase-config` is provided
+- A `wfctl migrations up` step when `ci.migrations` is configured
+- A plan-guard job (fails on replace/destroy) for protected resources
+- A healthz smoke job when a `/healthz` endpoint is derivable
+
+Emits warnings for secret names that cannot be automatically derived.
 
 ```
-wfctl ci generate [options] <config.yaml>
+wfctl ci generate [options]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--output` | `./ci/generated/` | Output directory for generated CI configurations |
-| `--format` | `yaml` | Output format: `yaml` or `json` |
-| `--environments` | `dev,staging,prod` | Comma-separated environments to generate configs for |
-| `--include-infra` | `true` | Include infrastructure provisioning steps |
-| `--include-tests` | `true` | Include automated test execution steps |
-| `--parallelism` | `4` | Maximum concurrent deployment steps |
+| `--platform` | _(wizard)_ | CI platform: `github_actions`, `gitlab_ci`. Required in non-interactive mode. |
+| `-c`, `--config` | `app.yaml` or `infra.yaml` | Workflow config file to analyze |
+| `--output`, `--out` | `.` | Output directory for generated files |
+| `--runner` | `ubuntu-latest` | Runner label (GitHub Actions only) |
+| `--from-plan` | _(none)_ | Load a `CIPlan` JSON file instead of analyzing — skips the Analyze step |
+| `--diff` | `false` | Print unified diff vs on-disk file instead of writing |
+| `--exit-code` | `false` | With `--diff`: exit 1 when files differ, 0 when identical |
+| `--write` | `false` | Allow overwriting existing files (required when destination files already exist) |
+| `--phase-config` | _(none)_ | Prerequisite phase config path; adds a prereq `DeployPhase` before the main deploy |
+| `--config-path-alias` | _(relativized real path)_ | Logical repo-relative path for the primary config in generated CI steps |
+| `--phase-config-alias` | _(relativized real path)_ | Logical repo-relative path for the prereq config in generated CI steps |
+| `--interactive` | `false` | Force the interactive wizard even when `--platform` is set |
+
+When `--platform` is absent and stdin is a TTY, an interactive wizard runs to select the platform and other choices. When stdin is not a TTY and `--platform` is also absent, the command fails with a clear error.
 
 **Examples:**
 
 ```bash
-wfctl ci generate workflow.yaml
-wfctl ci generate -output ./ci/ -environments dev,staging,prod workflow.yaml
-wfctl ci generate -format json -include-infra=true workflow.yaml
+# Generate GitHub Actions CI, overwriting existing files
+wfctl ci generate -c deploy.yaml --platform github_actions --out .github/workflows --write
+
+# Two-phase pipeline: prereq infra config + main deploy config
+wfctl ci generate -c deploy.yaml --phase-config deploy.prereq.yaml \
+  --platform github_actions --write
+
+# Diff mode: check what would change (CI-safe, non-destructive)
+wfctl ci generate -c deploy.yaml --platform github_actions --diff --exit-code
+
+# Render from a pre-built plan (no re-analysis)
+wfctl ci generate --platform github_actions --from-plan plan.json --write
 ```
 
-Generated configuration includes:
-- Environment-specific provisioning pipelines (dev/staging/prod)
-- Infrastructure validation and drift detection
-- Deployment strategy configuration (rolling, blue-green, canary)
-- Rollback procedures and health checks
-- State management and backup/restore operations
+---
+
+### `ci plan`
+
+Analyze a workflow config and emit a platform-neutral `CIPlan` as JSON. The plan is suitable for inspection, AI-assisted editing, or passing directly to `wfctl ci generate --from-plan` to render CI files without re-analyzing.
+
+```
+wfctl ci plan [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c`, `--config` | `app.yaml` or `infra.yaml` | Workflow config file to analyze |
+| `--out` | `-` (stdout) | Output file for the `CIPlan` JSON; `-` writes to stdout |
+| `--phase-config` | _(none)_ | Prerequisite phase config path; creates a 2-phase plan |
+| `--config-path-alias` | _(relativized real path)_ | Logical repo-relative path for the primary config in the plan |
+| `--phase-config-alias` | _(relativized real path)_ | Logical repo-relative path for the prereq config in the plan |
+| `--wfctl-version` | `latest` | Pin a specific wfctl version string in the plan |
+| `--branch` | `main` | Default branch name embedded in the plan |
+| `--runner` | `ubuntu-latest` | GitHub Actions runner label embedded in the plan |
+
+**Examples:**
+
+```bash
+# Inspect the plan interactively
+wfctl ci plan -c deploy.yaml
+
+# Two-phase plan to a file, then render
+wfctl ci plan -c deploy.yaml --phase-config deploy.prereq.yaml --out plan.json
+wfctl ci generate --platform github_actions --from-plan plan.json --write
+```
 
 ---
 
@@ -2272,10 +2323,13 @@ Returns an error (exit non-zero) when the secret is not set.
 
 #### `secrets list`
 
-List all declared secrets, their store routing, and access-aware set/unset status. For multi-store configs, each secret shows which store it resolves to and whether the store is accessible.
+List all declared secrets, their store routing, and access-aware set/unset status. For multi-store configs, each secret shows which store it resolves to and whether the store is accessible. Text output includes an **UPDATED** column showing the last-changed timestamp when the store exposes it, and a store-access line. Use `--json` for machine-readable output.
 
 ```bash
 wfctl secrets list --config app.yaml
+
+# Machine-readable JSON
+wfctl secrets list --config app.yaml --json
 
 # Ad-hoc: list all env vars with a given prefix
 wfctl secrets list --provider env --service MYAPP_
@@ -2284,8 +2338,9 @@ wfctl secrets list --provider env --service MYAPP_
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | `app.yaml` | Workflow config file |
-| `--env` | _(none)_ | Environment name for multi-store secret resolution |
-| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
+| `--env` | _(none)_ | Environment name for store resolution |
+| `--json` | `false` | Output as a JSON array: `[{name, store, state, exists, updatedAt}]` |
+| `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws`; bypasses `app.yaml` |
 | `--service` | _(none)_ | Service name / prefix for the selected provider |
 
 #### `secrets delete`
@@ -2360,7 +2415,17 @@ wfctl secrets sync --from staging --to production
 
 #### `secrets setup`
 
-Interactively set all secrets declared in the config for a given environment. Prompts for each secret's value with hidden terminal input. Secrets in inaccessible stores are skipped. Use `--auto-gen-keys` to automatically generate random values for secrets whose names end in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`.
+Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY.
+
+**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names.
+
+**Non-interactive mode** (auto when stdin is not a TTY, or forced with `--non-interactive` / `--auto-gen-keys`): reads values from the sources below in priority order:
+- `--from-env` — reads `$NAME` for each secret. Recommended for CI; avoids process-table leaks. Secrets whose env var is unset are skipped.
+- Piped `KEY=VALUE` lines on stdin.
+- `--secret NAME=VALUE` — inline literal. **Warning: leaks to process table. Avoid in CI.**
+- `--auto-gen-keys` — generates random values for names ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`.
+
+Every successful `Set` call is appended to an audit log at `${XDG_STATE_HOME:-$HOME/.local/state}/wfctl/plugins/wfctl/secrets-audit.jsonl` (secret names only — values are never written).
 
 ```
 wfctl secrets setup [options]
@@ -2368,14 +2433,34 @@ wfctl secrets setup [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--env` | `local` | Target environment name |
+| `--env` | `local` | Target environment name (interactive path) |
 | `--config` | `app.yaml` | Workflow config file |
-| `--auto-gen-keys` | `false` | Auto-generate random values for key/token/secret-named entries |
+| `--store` | _(config defaultStore)_ | Named store to use; overrides `secrets.defaultStore` |
+| `--non-interactive` | `false` | Force non-interactive mode (also auto when stdin is not a TTY) |
+| `--from-env` | `false` | Read each secret value from `$NAME`. Recommended for CI. |
+| `--secret` | _(none)_ | `NAME=VALUE` literal. **Warning: leaks to process table.** Repeatable. |
+| `--all` | `false` | Set all declared secrets (explicit form of the default when `--only` is absent) |
+| `--only` | _(all)_ | Comma-separated list of secret names to set; mutually exclusive with `--all` |
+| `--skip-existing` | `false` | Skip secrets that already have a value in the store |
+| `--auto-gen-keys` | `false` | Auto-generate random values for secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive |
+| `--scope` | `repo` | GitHub scope: `repo` \| `env` \| `org` (legacy `--plugin` path) |
+| `--org` | _(none)_ | Organization slug (legacy `--plugin` path) |
+| `--visibility` | `all` | Org-scope visibility: `all` \| `selected` \| `private` (legacy `--plugin` path) |
+| `--token-env` | `GITHUB_TOKEN` | Env var holding the GitHub PAT (legacy `--plugin` path) |
 
 ```bash
+# Interactive wizard
 wfctl secrets setup --env local
-wfctl secrets setup --env production --auto-gen-keys
 wfctl secrets setup --env staging --config config/staging.yaml
+
+# CI: read values from environment variables, skip already-set secrets
+wfctl secrets setup --from-env --skip-existing --non-interactive
+
+# Auto-generate all key/token/signing secrets
+wfctl secrets setup --env production --auto-gen-keys
+
+# Set specific secrets only
+wfctl secrets setup --only DB_URL,STRIPE_KEY --from-env
 ```
 
 ---
