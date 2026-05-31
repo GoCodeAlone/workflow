@@ -86,11 +86,10 @@ func TestRenderJenkins_ConfigDerived(t *testing.T) {
 	must := []string{
 		"pipeline {",
 		"// Requires a Jenkins Multibranch Pipeline",   // C2 header
-		"// Required Jenkins credentials: APP_DB_URL, SECRET_ONE, SECRET_TWO", // union, sorted
+		"// Required Jenkins credentials: APP_DB_URL, SECRET_ONE, SECRET_TWO", // union, SORTED — renderer MUST sort
 		"stage('Apply prereq')",
 		"stage('Apply deploy')",
 		"environment {",
-		"credentials('APP_DB_URL')",
 		"when { changeRequest() }",                       // plan gate
 		"when { branch 'main' }",                          // apply gate
 		"wfctl migrations up",                             // real runner
@@ -101,6 +100,13 @@ func TestRenderJenkins_ConfigDerived(t *testing.T) {
 	for _, m := range must {
 		if !strings.Contains(content, m) {
 			t.Errorf("Jenkinsfile missing %q\n---\n%s", m, content)
+		}
+	}
+	// Each secret wired individually (robust against header-sort-order regressions):
+	// richCIPlan phases are NOT Scoped, so both apply stages use the p.Secrets union.
+	for _, name := range []string{"APP_DB_URL", "SECRET_ONE", "SECRET_TWO"} {
+		if !strings.Contains(content, "credentials('"+name+"')") {
+			t.Errorf("expected credentials('%s') binding", name)
 		}
 	}
 	// plan-guard present
@@ -214,8 +220,13 @@ func TestRenderCircleCI_ValidYAMLAndStructure(t *testing.T) {
 	if strings.Contains(content, "needs:") {
 		t.Error("CircleCI uses requires:, not GHA needs:")
 	}
-	// CircleCI auto-injects project env vars; no redundant NAME: $NAME re-declare
+	// Positive secret-wiring: each secret name must appear (referenced by an apply
+	// job's run/env), so a renderer that emits NO secret wiring fails this.
 	for _, s := range richCIPlan().Secrets {
+		if !strings.Contains(content, s.Name) {
+			t.Errorf("expected secret %s referenced in output", s.Name)
+		}
+		// CircleCI auto-injects project env vars; no redundant NAME: $NAME re-declare.
 		if strings.Contains(content, "  "+s.Name+": $"+s.Name) {
 			t.Errorf("redundant secret re-declare for %s", s.Name)
 		}
@@ -287,13 +298,20 @@ Rollback: revert commit — additive.
 
 ```go
 func TestGenerateCIFiles_JenkinsCircleCI(t *testing.T) {
-	for _, plat := range []string{"jenkins", "circleci"} {
+	// Purpose: verify the platform SWITCH dispatches to the cigen renderers.
+	// Content quality is gated by the cigen unit tests (Tasks 1+2), not here.
+	cases := map[string]string{"jenkins": "pipeline {", "circleci": "version: 2.1"}
+	for plat, marker := range cases {
 		files, err := generateCIFiles(ciOptions{Platform: plat, InfraConfig: "infra.yaml"})
 		if err != nil {
 			t.Fatalf("%s: %v", plat, err)
 		}
-		if len(files) == 0 {
-			t.Fatalf("%s: expected output files", plat)
+		joined := ""
+		for _, c := range files {
+			joined += c
+		}
+		if !strings.Contains(joined, marker) {
+			t.Errorf("%s: expected marker %q in output", plat, marker)
 		}
 	}
 }
@@ -325,8 +343,11 @@ cd $(mktemp -d) && cp /Users/jon/workspace/workflow/example/*.yaml . 2>/dev/null
 /tmp/wfctl-804 ci generate --platform circleci --config <same> --output-dir out --write && \
   grep -q "version: 2.1" out/.circleci/config.yml && echo "CIRCLE OK"
 ```
+Use a real, rich config: `example/api-server-config.yaml` (or, once Task 8 has
+authored it, `scenarios/97-…/config/app.yaml`). Replace `<an example config>`
+with that path.
 Expected: `JENKINS OK` + `CIRCLE OK`; capture transcript for the PR. (Keep
-`/tmp/wfctl-804` — Task 9 reuses it as `WFCTL_BIN`.)
+`/tmp/wfctl-804` — Tasks 8/9 reuse it as `WFCTL_BIN`.)
 
 **Step 6: Commit**
 ```bash
@@ -365,6 +386,22 @@ v0.68.0 if PR1 reverted.
 
 > After PR1 review + CI green + merge: tag **v0.68.0** on workflow main (the
 > prerequisite gate for PR2). Version-skew note: nothing else in workflow lags.
+>
+> **I4 — release-availability gate (MANDATORY before Task 5):** pushing `v0.68.0`
+> triggers the workflow `release.yml` action; the Go module proxy only serves
+> `@v0.68.0` after the release run completes. Before Task 5's `go get`, wait via a
+> bash poll-loop ([[feedback_ci_wait_use_bash_poll_loop]]):
+> ```bash
+> # 1) wait for the release workflow run to finish
+> until gh run list --repo GoCodeAlone/workflow --workflow=release.yml --branch main \
+>   --limit 1 --json status,conclusion -q '.[0].status' | grep -q completed; do sleep 30; done
+> # 2) confirm the proxy serves the version (retry — proxy lags the release slightly)
+> for i in $(seq 1 20); do
+>   GOWORK=off GOPROXY=https://proxy.golang.org go list -m github.com/GoCodeAlone/workflow@v0.68.0 \
+>     2>/dev/null && break || sleep 30
+> done
+> ```
+> Only proceed to Task 5 once `go list -m …@v0.68.0` succeeds.
 
 ---
 
@@ -436,11 +473,17 @@ Run: `GOWORK=off go build ./... 2>&1 | tail`
 Expected: `internal/` builds; `go vet`/test compile fails only in `*_test.go`
 (handled next). Production build clean.
 
-**Step 4: Commit**
+**Step 4: Commit (LOCAL ONLY — do NOT push yet)**
 ```bash
 git add internal/generator.go && git rm -r internal/platforms/
 git commit -m "feat: route all four platforms through cigen, delete template generators (#804)"
 ```
+> **C2 — broken-CI window:** between this commit and Task 7 the `*_test.go` files
+> reference the deleted `registry`/`Generator`/`platforms.Options` and will NOT
+> compile. Do NOT push the PR2 branch to remote until Task 7 makes `go test ./...`
+> green — `finishing-a-development-branch` pushes the whole branch once, so CI only
+> ever sees the Task-7-complete state.
+
 Rollback: `git revert` restores `internal/platforms/` and the registry.
 
 ---
@@ -451,6 +494,15 @@ Rollback: `git revert` restores `internal/platforms/` and the registry.
 - Modify: `internal/generator_test.go` (replace the two `_TemplateUnchanged` tests with `_CigenMarkers`; delete `staticGenerator` + `registerTestGenerator`; rewrite the path-safety + sort tests to call package functions directly)
 - Modify: `integration_test.go` (replace the `wftest.MockStep` circleci test with a real `ExecuteCIGenerate` call; add jenkins)
 - Modify: `plugin.json` (`0.1.6` → `0.2.0`)
+
+**Step 0 (I3 — confirm testdata richness):** the new `_CigenMarkers` tests rely on
+the same `testdataConfig` the GHA/GitLab marker tests use. Confirm that config
+yields migrations + secrets BEFORE authoring the jenkins/circleci equivalents:
+Run: `cd /Users/jon/workspace/workflow-plugin-ci-generator && GOWORK=off go test ./internal/ -run 'TestExecuteCIGenerateGitHubActions_CigenMarkers' -v 2>&1 | tail`
+Expected: PASS (proves the shared testdata config → a plan with Migrations +
+Secrets; the same plan feeds RenderJenkins/RenderCircleCI, so their markers will
+render). If it FAILS or the config lacks an `infra.*` module, enrich the testdata
+config first.
 
 **Step 1: Rewrite `internal/generator_test.go`** —
 - Replace `TestExecuteCIGenerateJenkins_TemplateUnchanged` (~267) and
@@ -516,10 +568,26 @@ Rollback: revert commits; pin plugin back to v0.1.6 + workflow v0.67.0.
 - Create: `scenarios/97-ci-generate-jenkins-circleci/test/run.sh` (executable)
 - Modify: `scenarios.json` (register id 97)
 
+**Step 0 (m1 — schema accepts jenkins/circleci):** the `step.ci_generate` config
+shape check only works if the step schema accepts `platform: jenkins|circleci`.
+The legacy plugin registry already supported both platforms, so the schema is
+expected to accept them, but confirm:
+Run: `WFCTL_BIN=/tmp/wfctl-804; $WFCTL_BIN get-step-schema step.ci_generate 2>/dev/null | grep -A6 -i platform || echo "no enum constraint"`
+Expected: `platform` has no enum, OR the enum includes jenkins/circleci. If the
+schema enumerates only github_actions/gitlab_ci, drop the validate sub-check
+(Step 2 item 4) and note it — the behavior proof (PR2 integration test) still
+covers acceptance #2.
+
 **Step 1: Author `config/app.yaml`** — a minimal but real workflow config that
-`cigen.Analyze` derives a rich plan from (secrets, smoke, migrations, plan-guard,
-plugin-install). Validate it parses: `python3 -c "import yaml;
-yaml.safe_load(open('.../config/app.yaml'))"`.
+`cigen.Analyze` derives a rich plan from. Required for each derivation (per
+`cigen/analyze.go`): smoke ⇐ an `infra.container_service` module with
+`health_check.http_path` + a `domains` entry `type: PRIMARY`; migrations ⇐ a
+`ci.migrations[]` entry with `database.env`; plan-guard ⇐ any module with
+`protected: true`; plugin-install ⇐ any `infra.*`/`iac.*`/`plugin.*` module;
+secrets ⇐ a `secrets.entries` block. Validate it parses: `python3 -c "import yaml;
+yaml.safe_load(open('.../config/app.yaml'))"`. After authoring, dry-run the
+analyzer to confirm the plan is rich: `$WFCTL_BIN ci plan --config
+.../config/app.yaml` shows migrations + secrets + smoke + plan_guard.
 
 **Step 2: Author `test/run.sh`** (mirror scenario 77's wfctl-locate + PASS/FAIL
 harness) that:
@@ -563,9 +631,10 @@ cd /Users/jon/workspace/workflow-scenarios && \
   WFCTL_BIN=/tmp/wfctl-804 bash scenarios/97-ci-generate-jenkins-circleci/test/run.sh \
   | tee scenarios/97-ci-generate-jenkins-circleci/test/artifacts/last-run.log
 ```
-Expected: `Results: N passed, 0 failed` (N ≥ 10). If any FAIL → fix the renderer
-(Task 1/2) or the scenario, re-run. The log is the honest evidence pasted into
-the PR3 body.
+Expected: `Results: N passed, 0 failed` — the gate is **0 failed** (the exact
+passed count = however many assertions the authored `run.sh` contains; do not
+hard-code a target). If any FAIL → fix the renderer (Task 1/2) or the scenario,
+re-run. The log is the honest evidence pasted into the PR3 body.
 
 **Step 3: Commit the evidence**
 ```bash
