@@ -371,6 +371,23 @@ audit + rollback notes apply (see Rollback).
   to v0.1.6 + workflow consumers to v0.67.0 and rebuild. Version-skew audit at
   finish: plugin's workflow pin must equal the freshly tagged v0.68.0 (no lag).
 
+## Backport (2026-05-31, post-execution — manifest scope unchanged)
+
+Three existence-check discoveries at execution (all the `Existence /
+runtime-validity` class from autodev #55; no manifest scope change):
+- **Scenario id 97 → 100.** Plan guessed "next free id 97"; 97–99 were already
+  taken. Used actual next-free 100.
+- **Scenario config `app.yaml` → `deploy.yaml`.** The scenarios CI strict-`wfctl
+  validate`s every `config/app.yaml`; an infra/cigen-input config has no app
+  entry point and fails. Renamed to `config/deploy.yaml` (matches `wfctl ci
+  generate -c deploy.yaml`; excluded from the app-validate glob, like scenarios
+  88/93). The local run.sh only ran `ci generate` (cigen analyze, no entry-point
+  requirement), so it didn't catch this.
+- **Plugin version 0.2.0 → 0.3.0.** Plan's Task 7 read plugin.json (0.1.6) and
+  bumped to 0.2.0, but `v0.2.0` was already a released tag (PR #18; plugin.json
+  had drifted below it). Bumped to v0.3.0 (PR #22). Lesson: check `git
+  ls-remote --tags`, not just the version file, before choosing a release version.
+
 ## Follow-ups (out of scope for #804)
 
 - **GitLab plan-guard + scoped-secret parity:** `render_gitlab.go` lacks both the
