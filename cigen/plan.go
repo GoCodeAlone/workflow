@@ -55,6 +55,14 @@ type DeployPhase struct {
 	ConfigPath string `json:"config_path"`
 	// Include is an optional list of module names to include in this phase.
 	Include []string `json:"include,omitempty"`
+	// Secrets is the set of secrets this phase's apply job needs. Populated
+	// only when Scoped is true; otherwise the renderer uses CIPlan.Secrets.
+	Secrets []SecretRef `json:"secrets,omitempty"`
+	// Scoped is true when per-phase secret derivation ran against a real,
+	// loaded config for this phase. The renderer branches its env: source on
+	// this flag — NOT on len(Secrets) — so a genuinely zero-secret scoped
+	// phase emits no union, while an unscoped phase falls back to the union.
+	Scoped bool `json:"scoped,omitempty"`
 }
 
 // MigrationsSpec describes the database migration step.
