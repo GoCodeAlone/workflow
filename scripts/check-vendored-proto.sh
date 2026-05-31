@@ -81,7 +81,7 @@ fi
 # out of scope for the parity test and are therefore excluded here too.
 extract_config_messages() {
   grep -oE '^[[:space:]]*message[[:space:]]+([A-Za-z0-9_]+Config)[[:space:]]*\{' "$1" \
-    | sed 's|.*message[[:space:]]\+\([A-Za-z0-9_]*Config\)[[:space:]]*{.*|\1|' \
+    | sed -E 's|.*message[[:space:]]+([A-Za-z0-9_]+Config)[[:space:]]*\{.*|\1|' \
     | sort
 }
 
