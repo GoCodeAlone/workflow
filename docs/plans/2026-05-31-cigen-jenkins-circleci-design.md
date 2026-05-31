@@ -4,6 +4,7 @@
 **Date:** 2026-05-31
 **Issue:** https://github.com/GoCodeAlone/workflow/issues/804
 **Repos touched:** workflow (cigen + wfctl), workflow-plugin-ci-generator (rewire), workflow-scenarios (proof)
+**Adversarial review:** design cycle 1 = FAIL (1C/3I/3m) → all resolved this revision (C1 GHA-authoritative precedent; I1 Jenkins declarative structure specified; I2 plugin-path proof = PR2 integration test + PR3 config-shape; I3 required-credentials comment; m1/m2/m3 wording/error-string/test-depth).
 
 ## Problem
 
@@ -80,33 +81,86 @@ conventions, "config-derived" principle) + the cigen renderer precedent
 
 ### Renderer output mapping (CIPlan → platform)
 
-Both renderers mirror `render_gha.go` / `render_gitlab.go` exactly:
+**Authoritative precedent is `render_gha.go`**, NOT GitLab. The GHA renderer is
+the only existing renderer that implements **plan-guard** (`writeApplyJob` lines
+202–211) and **per-phase secret scoping** (branch on `phase.Scoped`, line 181).
+`render_gitlab.go` omits both — that is a pre-existing GitLab gap (see Backport /
+Follow-up below), not a precedent to copy. Both new renderers implement the full
+GHA feature set: plan / per-phase apply (scoped secrets + plan-guard + last-phase
+migrations) / smoke.
 
-- **plan job** (one per phase): `wfctl infra plan --config <phase.ConfigPath>`,
-  triggered on PR / merge-request.
-- **apply job** (one per phase, chained via `needs`/`requires` when multi-phase):
-  - secret env block sourced by branching on `phase.Scoped` (NOT `len`): scoped
-    phase uses `phase.Secrets`; unscoped falls back to `p.Secrets`.
+Logical job/stage set (same as GHA):
+
+- **plan** (one per phase): `wfctl infra plan --config <phase.ConfigPath>`,
+  gated on PR / merge-request / `changeRequest()`.
+- **apply** (one per phase):
+  - secret env sourced by branching on `phase.Scoped` (NOT `len`): scoped phase
+    uses `phase.Secrets`; unscoped falls back to `p.Secrets`.
   - **plan-guard** (when `p.PlanGuard`): `wfctl infra plan … | tee`, grep for
-    replace/destroy, `exit 1` — no `|| true`.
+    replace/destroy, `exit 1` — no `|| true`. (Carried from GHA.)
   - **migrations** (last phase only, when `p.Migrations != nil`): the shared
     `migrationsUpCommand(configPath, p.Migrations.Env)`.
   - `wfctl infra apply --config <phase.ConfigPath> --auto-approve`.
-  - apply runs only on the default branch (+ manual dispatch where the platform
-    supports it).
-- **smoke job** (when `p.Smoke != nil`): `curl --fail --max-time 30 <Smoke.URL>`,
-  needs the last apply.
+  - apply gated to the default branch (+ manual dispatch where supported).
+- **smoke** (when `p.Smoke != nil`): `curl --fail --max-time 30 <Smoke.URL>`,
+  ordered after the last apply.
 - **plugin install** (when `p.PluginInstall`): `wfctl plugin install --config
   <phase.ConfigPath>` before plan/apply.
 - wfctl is installed/pinned per platform idiom using `p.WfctlVersion`.
 
-**Platform-specific secret idiom** (the one real per-platform difference):
+#### Jenkins declarative structure (the real structural difference — I1)
+
+A declarative Jenkinsfile has a **single linear `stages {}` block** — there is no
+GHA/GitLab independent-job graph and no `needs:`. The PR-vs-push split and
+multi-phase ordering map onto **sequential stages gated by `when`**, with
+**per-stage `environment {}`** for per-phase secret scoping:
+
+```
+pipeline {
+  agent { label 'linux' }
+  options { ... }
+  stages {
+    stage('Plan <phase>')  { when { changeRequest() } steps { sh 'wfctl infra plan --config <cfg> ...' } }   // one per phase
+    stage('Apply <phase>') {                                                                                  // one per phase, in order
+      when { branch '<default>' }
+      environment { SECRET = credentials('SECRET'); ... }   // per-phase scoped secrets
+      steps {
+        sh '<plan-guard grep, exit 1>'                       // when PlanGuard
+        sh '<migrationsUpCommand>'                           // last phase only, when Migrations
+        sh 'wfctl infra apply --config <cfg> --auto-approve'
+      }
+    }
+    stage('Smoke') { when { branch '<default>' } steps { sh "curl --fail --max-time 30 '<url>'" } }            // when Smoke
+  }
+}
+```
+
+Multi-phase chaining is **implicit stage ordering** (prereq apply stage precedes
+deploy apply stage); no `needs` keyword exists or is needed. Each apply stage's
+own `environment {}` gives the per-phase secret scope GHA gets via per-job `env:`.
+
+#### CircleCI structure
+
+CircleCI 2.1 DOES have independent jobs + a `workflows:` graph with `requires:`
+(closest to GHA). plan/apply/smoke are jobs; the `workflows` block orders them
+with `requires:` and `filters.branches`. Multi-phase = `apply-prereq` →
+`apply-deploy` via `requires:`.
+
+**Platform-specific secret idiom** (the real per-platform difference):
 
 - **Jenkins** (declarative): `environment { NAME = credentials('NAME') }` inside
-  the apply stage — the idiomatic Jenkins secret binding. No plaintext.
+  each apply stage. `credentials('NAME')` binds a credential **pre-created in the
+  Jenkins credential store with id `NAME`** — unlike GHA `${{secrets.NAME}}` /
+  GitLab auto-injected vars, an absent credential fails the build at runtime. To
+  surface this operator precondition (I3), the Jenkins renderer emits a header
+  comment `// Required Jenkins credentials: NAME1, NAME2, ...` listing every
+  secret the file binds, plus the existing `Warnings` for non-`^[A-Z0-9_]+$`
+  names. No plaintext secret value is ever written.
 - **CircleCI**: project-level env vars are auto-injected into every job (like
   GitLab), so the renderer does **not** re-declare `NAME: $NAME` no-ops; it only
-  references them. (Mirrors `render_gitlab.go`'s `NoRedundantSecretVars` rule.)
+  references them. (Mirrors `render_gitlab.go`'s `NoRedundantSecretVars` rule.
+  CircleCI *contexts* are opt-in and orthogonal — a user adds `context:` manually
+  if needed, same as GitLab.)
 
 ### New/changed files
 
@@ -116,12 +170,25 @@ Both renderers mirror `render_gha.go` / `render_gitlab.go` exactly:
 - `cigen/render_circleci.go` — `RenderCircleCI(*CIPlan) (map[string]string,
   error)` → `{".circleci/config.yml": …}`.
 - `cigen/render_jenkins_test.go`, `cigen/render_circleci_test.go` — reuse the
-  shared `richCIPlan()` helper; assert: valid syntax (YAML for CircleCI; Jenkins
-  structural greps), secret wiring present, `wfctl migrations up` present, smoke
-  present, plan-guard present, two-phase chaining, nil-plan error, and **absence**
-  of legacy `go test ./...` / `wfctl deploy --image` / `docker build`.
+  shared `richCIPlan()` helper; assert:
+  - **Jenkins**: structural greps — `pipeline {`, per-phase `stage('Apply …')`,
+    `environment {`, `credentials('APP_DB_URL')` (and other secret names), the
+    `// Required Jenkins credentials:` header lists every secret, `wfctl
+    migrations up`, plan-guard grep + `exit 1`, smoke `curl`, two-phase ordering
+    (Apply prereq stage appears before Apply deploy stage), nil-plan error, a
+    **single-phase** plan renders without panic.
+  - **CircleCI**: `yaml.Unmarshal` succeeds AND structural assertions —
+    `version: 2.1`, `workflows:` present, job names under workflows include plan
+    + apply variants, `requires:` references match job names (NOT GHA `needs:`),
+    no redundant `NAME: $NAME` secret re-declares, `wfctl migrations up`, smoke,
+    plan-guard, two-phase `requires:` chain, nil-plan error, single-phase case.
+  - **Both**: **absence** of legacy `go test ./...` / `wfctl deploy --image` /
+    `docker build` / `docker push` (proves the docker-stage drop, ADR 0044).
 - `cmd/wfctl/ci.go` — add `case "jenkins"` / `case "circleci"` to the render
-  switch (line ~160) and the legacy `generateCIFiles` switch; update usage text.
+  switch (line ~160) AND to the legacy `generateCIFiles` switch (line ~288);
+  update BOTH the usage text (lines ~52/73/104) and the two
+  `"unsupported platform %q (supported: github_actions, gitlab_ci)"` error
+  strings (lines ~166, ~294) to list all four platforms.
 - `cmd/wfctl/ci_wizard.go` — add `jenkins`, `circleci` to `platformOptions`.
 - `DOCUMENTATION.md` / `docs/WFCTL.md` — note four-platform support.
 - Version bump → **v0.68.0** (minor: new public renderers + CLI platforms).
@@ -134,12 +201,19 @@ Both renderers mirror `render_gha.go` / `render_gitlab.go` exactly:
   PlatformCircleCI:` with a 4-way render switch); delete the `registry` map, the
   `Generator` interface, and the legacy `default:` branch.
 - **Delete the entire `internal/platforms/` package** — after rewire all four
-  constructors are unused. (NOTE: `github_actions.go`/`gitlab_ci.go` were already
-  dead post-#18; only their own tests referenced them. Removing the whole package
-  is the honest cleanup, flagged for adversarial review as a slightly broader-
-  than-jenkins/circleci deletion.)
-- Update `internal/generator_test.go` / `integration_test.go` to assert the four
-  platforms render config-derived output via cigen (drop template-generator tests).
+  constructors are unused. `github_actions.go`/`gitlab_ci.go` are no longer called
+  from the production path (`generator.go` routes GHA/GitLab through cigen since
+  #18); their own `*_test.go` files are the only remaining referees. PR2 deletes
+  all four generators **and their tests** — this is intentional (retiring all four
+  template generators, not only jenkins/circleci), a slightly broader-than-#804
+  cleanup justified because leaving two dead files + dead tests is worse.
+- Update `internal/generator_test.go` / `integration_test.go`: the integration
+  test is the **plugin-path proof for acceptance #2** — it calls the plugin entry
+  point `ExecuteCIGenerate` with `platform: jenkins` and `platform: circleci`
+  against a real config and asserts the written `Jenkinsfile` / `.circleci/
+  config.yml` are config-derived (secret wiring, `wfctl migrations up`, smoke,
+  plan-guard) and free of legacy `go test`/`wfctl deploy --image`. Drop the
+  template-generator unit tests.
 - Version bump plugin → **v0.2.0** (behavior change: jenkins/circleci now
   config-derived).
 
@@ -154,7 +228,11 @@ Both renderers mirror `render_gha.go` / `render_gitlab.go` exactly:
   --write` and `--platform circleci`; assert the generated `Jenkinsfile` and
   `.circleci/config.yml` each contain: a config secret name, `wfctl migrations
   up`, the smoke URL, plan-guard grep, `wfctl infra apply`; and do NOT contain
-  `go test ./...` / `wfctl deploy --image`. Skip cleanly if wfctl absent.
+  `go test ./...` / `wfctl deploy --image`. Additionally run `wfctl validate` on
+  a small `step.ci_generate` config with `platform: jenkins` and `circleci` to
+  prove the plugin-step config shape is accepted (config-shape half of acceptance
+  #2; the behavior half is PR2's `integration_test.go`). Skip cleanly if wfctl
+  absent.
 - Register in `scenarios.json` (next free id **97**).
 
 ### Cross-repo sequencing (hard dependency)
@@ -178,8 +256,14 @@ executes the real `wfctl ci generate`, not a reimplementation.
   `credentials('NAME')` (Jenkins credential store), CircleCI references
   auto-injected project env vars — neither writes a secret value into the file.
   Same posture as GHA (`${{ secrets.NAME }}`) / GitLab (auto-injected).
-- **Plan-guard preserved:** the destructive-plan guard (`exit 1`, no `|| true`)
-  is carried into both new renderers — a protected resource still blocks apply.
+- **Plan-guard carried from GHA:** the destructive-plan guard (`exit 1`, no
+  `|| true`) is implemented in both new renderers, modeled on the **GHA**
+  renderer (the GitLab renderer lacks it — see Follow-up). A protected resource
+  still blocks apply in Jenkins/CircleCI output.
+- **GitLab plan-guard gap (pre-existing, out of scope):** `render_gitlab.go`
+  emits no plan-guard and no scoped-secret branch. This PR does **not** fix that
+  (it is #804-orthogonal) but records it as a follow-up so GitLab reaches parity
+  later. The new renderers do NOT inherit GitLab's gap.
 - **No new network/exec surface:** renderers are pure string builders; the plugin
   path already writes files under a validated relative output dir
   (`validateRelativeOutputPath`).
@@ -205,15 +289,24 @@ audit + rollback notes apply (see Rollback).
 - **Real boundary in the proof:** PR3 runs the built wfctl and asserts on the
   actual emitted files (existence + behavior), not on the config — the
   Existence/runtime-validity discipline (autodev #55) applied here.
+- **Acceptance-coverage split (I2):** acceptance #1 (`wfctl ci generate
+  --platform jenkins|circleci`, CLI) is proven by PR1 golden tests + the PR3
+  scenario behavior run. Acceptance #2 (`step.ci_generate` plugin route) is
+  proven by **PR2's `integration_test.go`**, which drives `ExecuteCIGenerate`
+  (the real plugin entry point) for both platforms and asserts config-derived
+  output — a distinct code path from the CLI. The PR3 scenario additionally
+  includes a `wfctl validate` check that a `step.ci_generate` config with
+  `platform: jenkins|circleci` is accepted (config-shape proof, like scenario
+  77). No acceptance criterion is left unproven.
 
 ## Assumptions
 
 | id | assumption | challenge | fallback |
 |---|---|---|---|
 | A1 | Dropping the legacy docker-build/deploy stages is acceptable | A Jenkins/CircleCI user may rely on the old build/deploy | Documented behavior change + plugin minor bump v0.2.0 + ADR; GHA/GitLab never emitted these, so this is parity, not loss of a config-derived feature. |
-| A2 | `credentials('NAME')` is the right Jenkins secret idiom for arbitrary secret names | Some names need a configured Jenkins credential id; binding may differ for files vs strings | Emit string credentials by default (matches env-var usage); a `Warnings` note already exists for non-`^[A-Z0-9_]+$` names. |
+| A2 | `credentials('NAME')` is the right Jenkins secret idiom for arbitrary secret names | Unlike GHA/GitLab, `credentials('NAME')` requires a Jenkins credential **pre-created with id `NAME`**; an absent one fails the build at runtime (harder to debug) | Emit string credentials by default (matches env-var usage); the Jenkins renderer emits a `// Required Jenkins credentials: …` header listing every bound secret so the operator knows what to pre-create; existing `Warnings` for non-`^[A-Z0-9_]+$` names retained. |
 | A3 | workflow can be tagged v0.68.0 before the plugin bump | Tag/release cadence | PR1 merge + tag is a prerequisite gate for PR2; sequenced explicitly. |
-| A4 | `github_actions.go`/`gitlab_ci.go` in the plugin are already dead | They might be referenced indirectly | Verified: `generator.go` registry holds only jenkins/circleci; GHA/GitLab go through cigen since #18. Confirmed by grep this session. |
+| A4 | `github_actions.go`/`gitlab_ci.go` in the plugin are no longer on the production path | They might be referenced indirectly | Verified: `generator.go` registry holds only jenkins/circleci; GHA/GitLab route through cigen since #18; only their own `*_test.go` reference the dead constructors. Whole-package deletion (incl. those tests) is intentional. |
 | A5 | CircleCI auto-injects project env vars into jobs (like GitLab) | Contexts vs project env differences | Reference-only (no redeclare) is the safe subset; if a user uses CircleCI contexts they add `context:` manually — same as GitLab's model. |
 
 ## Rollback
@@ -228,6 +321,13 @@ audit + rollback notes apply (see Rollback).
 - **Version pins:** workflow v0.68.0 / plugin v0.2.0 — to roll back, pin plugin
   to v0.1.6 + workflow consumers to v0.67.0 and rebuild. Version-skew audit at
   finish: plugin's workflow pin must equal the freshly tagged v0.68.0 (no lag).
+
+## Follow-ups (out of scope for #804)
+
+- **GitLab plan-guard + scoped-secret parity:** `render_gitlab.go` lacks both the
+  destructive-plan guard and the `phase.Scoped` secret branch that GHA (and now
+  Jenkins/CircleCI) implement. File a follow-up issue to bring GitLab to parity.
+  Not fixed here to keep #804 scoped to jenkins/circleci.
 
 ## Self-Challenge
 
