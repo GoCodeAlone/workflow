@@ -34,7 +34,7 @@
 | 2 | feat: route jenkins/circleci through cigen, retire template generators (#804) | Task 5, Task 6, Task 7 | workflow-plugin-ci-generator: feat/cigen-jenkins-circleci-804 |
 | 3 | test(scenario-97): config-derived jenkins/circleci CI generation proof (#804) | Task 8, Task 9 | workflow-scenarios: feat/cigen-jenkins-circleci-proof-804 |
 
-**Status:** Draft
+**Status:** Locked 2026-05-31T22:52:06Z
 
 ---
 
