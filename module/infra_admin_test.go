@@ -1513,3 +1513,34 @@ func TestInfraAdmin_AuditDistinguishesDeniedFromError(t *testing.T) {
 		}
 	}
 }
+
+// TestInfraAdmin_AuditResultFromErr pins auditResultFromErr — the typed
+// mutation-route classifier that replaces strings.Contains in the audit
+// path. The key regression: a provider error whose message contains
+// "denied" must log as "error", NOT "denied".
+func TestInfraAdmin_AuditResultFromErr(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		outErr string
+		want   string
+	}{
+		{"success", nil, "", "ok"},
+		{"authz sentinel", handler.ErrAuthzDenied, "apply: infra:apply denied for subject viewer", "denied"},
+		// The critical false-positive regression: provider error containing
+		// "denied" must NOT be classified as "denied" (strings.Contains would
+		// have done so). Only errors.Is(ErrAuthzDenied) triggers "denied".
+		{"provider error with denied text", nil, "apply: plan: provider: access denied to cloud API", "error"},
+		{"stale hash", nil, "apply: plan is stale (desired_hash mismatch)", "error"},
+		{"no provider registered", nil, "plan: no iac.provider registered", "error"},
+		{"evidence denial via sentinel", handler.ErrAuthzDenied, "authz evidence missing", "denied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := auditResultFromErr(tc.err, tc.outErr)
+			if got != tc.want {
+				t.Errorf("auditResultFromErr(%v, %q) = %q, want %q", tc.err, tc.outErr, got, tc.want)
+			}
+		})
+	}
+}

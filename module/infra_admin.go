@@ -796,15 +796,14 @@ func (m *InfraAdmin) auditAccess(r *http.Request, action string, ev *adminpb.Adm
 	_ = r // r reserved for future targets/app_context extraction
 }
 
-// auditResultFor maps a handler output's Error field to the
-// audit log's `result` value. Empty error → "ok"; non-empty →
-// "denied" (the handler library's primary refusal path is
-// authz-default-deny, so "denied" is the most informative
-// auditResultFor classifies an Output.error string into the
+// auditResultFor classifies a read-handler output's Error field into the
 // three-way audit result: "ok" (no error), "denied" (authz/evidence
-// rejection), or "error" (provider/backend failure). The
-// discrimination is substring-based on the error prefix, which the
-// handler library follows consistently.
+// rejection), or "error" (provider/backend failure). Read handlers
+// (ListResources, GetResource, etc.) return (output, nil) even on authz
+// denial, so the only signal available is the error string. The
+// discrimination is substring-based — acceptable here because read
+// handlers do not call provider APIs that could return "denied" text.
+// Mutation handlers MUST use auditResultFromErr (typed sentinel).
 func auditResultFor(errMsg string) string {
 	if errMsg == "" {
 		return "ok"
@@ -818,6 +817,27 @@ func auditResultFor(errMsg string) string {
 	}
 	// Everything else is a backend or configuration error.
 	return "error"
+}
+
+// auditResultFromErr classifies a mutation handler's outcome into the
+// three-way audit result using the TYPED handler error — NOT
+// strings.Contains. This eliminates the false-positive where a provider
+// error message containing "denied" (e.g. "provider: access denied to
+// cloud API") would be mis-logged as result:"denied" by the substring path.
+//
+// Classification:
+//
+//	errors.Is(err, handler.ErrAuthzDenied) → "denied"
+//	outError != ""                          → "error"
+//	(both empty/nil)                        → "ok"
+func auditResultFromErr(err error, outError string) string {
+	if errors.Is(err, handler.ErrAuthzDenied) {
+		return "denied"
+	}
+	if outError != "" {
+		return "error"
+	}
+	return "ok"
 }
 
 // nowUnix is a package-level var so tests can substitute a fixed
@@ -1148,14 +1168,17 @@ func (m *InfraAdmin) handlePlanResource(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if !ok {
-			http.Error(w, "plan: infra:apply denied for subject "+subject, http.StatusForbidden)
+			// Route through writeMutationResponse so the 403 body is
+			// proto-JSON — consistent with apply/destroy 403 shape (Fix 2).
+			deniedOut := &adminpb.AdminPlanOutput{Error: "plan: infra:apply denied for subject " + subject}
+			writeMutationResponse(w, deniedOut, handler.ErrAuthzDenied)
 			m.auditAccess(r, "plan", in.GetEvidence(), "denied")
 			return
 		}
 	}
 	out, handlerErr := handler.PlanResource(r.Context(), m.state, m.providers, m.wfCfg, m.desiredSpecs, &in)
 	writeMutationResponse(w, out, handlerErr)
-	m.auditAccess(r, "plan", in.GetEvidence(), auditResultFor(out.GetError()))
+	m.auditAccess(r, "plan", in.GetEvidence(), auditResultFromErr(handlerErr, out.GetError()))
 }
 
 func (m *InfraAdmin) handleApplyResource(w http.ResponseWriter, r *http.Request) {
@@ -1180,7 +1203,7 @@ func (m *InfraAdmin) handleApplyResource(w http.ResponseWriter, r *http.Request)
 	subject := m.subjectFromRequest(r)
 	out, handlerErr := handler.ApplyResource(r.Context(), m.state, m.providers, m.authz, subject, m.wfCfg, m.desiredSpecs, &in)
 	writeMutationResponse(w, out, handlerErr)
-	m.auditAccess(r, "apply", in.GetEvidence(), auditResultFor(out.GetError()))
+	m.auditAccess(r, "apply", in.GetEvidence(), auditResultFromErr(handlerErr, out.GetError()))
 }
 
 func (m *InfraAdmin) handleDestroyResource(w http.ResponseWriter, r *http.Request) {
@@ -1205,7 +1228,7 @@ func (m *InfraAdmin) handleDestroyResource(w http.ResponseWriter, r *http.Reques
 	subject := m.subjectFromRequest(r)
 	out, handlerErr := handler.DestroyResource(r.Context(), m.providers, m.authz, subject, &in)
 	writeMutationResponse(w, out, handlerErr)
-	m.auditAccess(r, "destroy", in.GetEvidence(), auditResultFor(out.GetError()))
+	m.auditAccess(r, "destroy", in.GetEvidence(), auditResultFromErr(handlerErr, out.GetError()))
 }
 
 func (m *InfraAdmin) handleDriftCheckResource(w http.ResponseWriter, r *http.Request) {
