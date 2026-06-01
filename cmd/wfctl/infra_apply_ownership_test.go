@@ -91,6 +91,70 @@ func TestOwnershipGate_CreateSetsOwnerAfterMutationBeforePersist(t *testing.T) {
 	}
 }
 
+func TestOwnershipGate_UpdateDoesNotSetOwnerAfterMutation(t *testing.T) {
+	provider := &ownershipProviderStub{owners: map[string]string{"infra.container_service/app": "team-a"}}
+	action := ownershipAction("update")
+	var priorCalled bool
+	hooks := wfctlhelpers.ApplyPlanHooks{
+		OnResourceApplied: func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error {
+			priorCalled = true
+			if len(provider.setOwners) != 0 {
+				t.Fatalf("update post-apply hook set owner unexpectedly: %+v", provider.setOwners)
+			}
+			return nil
+		},
+	}
+	withApplyOwner(t, "team-a", false, func() {
+		wireOwnershipGateIntoHooks(&hooks, provider)
+		if err := hooks.OnBeforeAction(context.Background(), action); err != nil {
+			t.Fatalf("OnBeforeAction: %v", err)
+		}
+		if err := hooks.OnResourceApplied(context.Background(), nil, action, interfaces.ResourceOutput{
+			Name:       "app",
+			Type:       "infra.container_service",
+			ProviderID: "app-1",
+		}); err != nil {
+			t.Fatalf("OnResourceApplied: %v", err)
+		}
+	})
+	if !priorCalled {
+		t.Fatal("prior apply hook was not called")
+	}
+}
+
+func TestOwnershipGate_SkipsDNSDelegation(t *testing.T) {
+	provider := &ownershipProviderStub{owners: map[string]string{}}
+	action := ownershipAction("update")
+	action.Resource.Type = "infra.dns_delegation"
+	action.Current.Type = "infra.dns_delegation"
+	var priorCalled bool
+	hooks := wfctlhelpers.ApplyPlanHooks{
+		OnResourceApplied: func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error {
+			priorCalled = true
+			return nil
+		},
+	}
+	withApplyOwner(t, "team-a", false, func() {
+		wireOwnershipGateIntoHooks(&hooks, provider)
+		if err := hooks.OnBeforeAction(context.Background(), action); err != nil {
+			t.Fatalf("OnBeforeAction: %v", err)
+		}
+		if err := hooks.OnResourceApplied(context.Background(), nil, action, interfaces.ResourceOutput{
+			Name:       "app",
+			Type:       "infra.dns_delegation",
+			ProviderID: "delegation-1",
+		}); err != nil {
+			t.Fatalf("OnResourceApplied: %v", err)
+		}
+	})
+	if !priorCalled {
+		t.Fatal("prior apply hook was not called")
+	}
+	if len(provider.setOwners) != 0 {
+		t.Fatalf("dns_delegation should not set owner; got %+v", provider.setOwners)
+	}
+}
+
 func TestOwnershipGate_SkipsUnsupportedProvider(t *testing.T) {
 	provider := &iactest.NoopProvider{ProviderName: "plain"}
 	action := ownershipAction("update")

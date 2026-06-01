@@ -41,7 +41,7 @@ func wireOwnershipGateIntoHooks(hooks *wfctlhelpers.ApplyPlanHooks, provider int
 
 	priorApplied := hooks.OnResourceApplied
 	hooks.OnResourceApplied = func(ctx context.Context, driver interfaces.ResourceDriver, action interfaces.PlanAction, out interfaces.ResourceOutput) error {
-		if shouldSkipGenericOwnership(action) {
+		if shouldSkipGenericOwnership(action) || !actionCreatesReplacementResource(action) {
 			if priorApplied == nil {
 				return nil
 			}
@@ -159,5 +159,7 @@ func ownershipRefForAction(action interfaces.PlanAction) interfaces.ResourceRef 
 }
 
 func shouldSkipGenericOwnership(action interfaces.PlanAction) bool {
-	return action.Resource.Type == "infra.dns" || action.Action == "delete" && action.Current == nil
+	return action.Resource.Type == "infra.dns" ||
+		action.Resource.Type == "infra.dns_delegation" ||
+		action.Action == "delete" && action.Current == nil
 }
