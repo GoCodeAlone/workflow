@@ -919,12 +919,11 @@ func (x *AdminListResourceTypesOutput) GetError() string {
 	return ""
 }
 
-// AdminProviderSummary is the ListProviders response row. v1
-// populates supported_regions / supported_types / supported_engines
-// from the host-side catalog (regions.go + engines.go + fields.go);
-// regions_source is the literal string "local-catalog" so consumers
-// can distinguish v1's local lookup from a future v1.1
-// IaCProviderRegionLister gRPC service.
+// AdminProviderSummary is the ListProviders response row. supported_regions
+// comes from IaCProviderRegionLister when the provider advertises it and the
+// call succeeds; otherwise it falls back to the host-side catalog
+// (regions.go). supported_types / supported_engines remain host catalogued.
+// regions_source is "provider-lister" or "local-catalog".
 type AdminProviderSummary struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	ModuleName       string                 `protobuf:"bytes,1,opt,name=module_name,json=moduleName,proto3" json:"module_name,omitempty"`
@@ -933,7 +932,7 @@ type AdminProviderSummary struct {
 	SupportedRegions []string               `protobuf:"bytes,4,rep,name=supported_regions,json=supportedRegions,proto3" json:"supported_regions,omitempty"`
 	SupportedTypes   []string               `protobuf:"bytes,5,rep,name=supported_types,json=supportedTypes,proto3" json:"supported_types,omitempty"`
 	SupportedEngines []string               `protobuf:"bytes,6,rep,name=supported_engines,json=supportedEngines,proto3" json:"supported_engines,omitempty"`
-	RegionsSource    string                 `protobuf:"bytes,7,opt,name=regions_source,json=regionsSource,proto3" json:"regions_source,omitempty"` // "local-catalog" for v1
+	RegionsSource    string                 `protobuf:"bytes,7,opt,name=regions_source,json=regionsSource,proto3" json:"regions_source,omitempty"` // "provider-lister" or "local-catalog"
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }

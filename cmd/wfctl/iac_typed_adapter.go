@@ -32,6 +32,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,6 +54,7 @@ const (
 	iacServiceEnumerator        = "workflow.plugin.external.iac.IaCProviderEnumerator"
 	iacServiceDriftDetector     = "workflow.plugin.external.iac.IaCProviderDriftDetector"
 	iacServiceCredentialRevoker = "workflow.plugin.external.iac.IaCProviderCredentialRevoker"
+	iacServiceRegionLister      = "workflow.plugin.external.iac.IaCProviderRegionLister"
 	iacServiceMigrationRepairer = "workflow.plugin.external.iac.IaCProviderMigrationRepairer"
 	iacServiceValidator         = "workflow.plugin.external.iac.IaCProviderValidator"
 	iacServiceDriftConfigDetect = "workflow.plugin.external.iac.IaCProviderDriftConfigDetector"
@@ -80,6 +82,7 @@ type typedIaCAdapter struct {
 	enumerator   pb.IaCProviderEnumeratorClient
 	drift        pb.IaCProviderDriftDetectorClient
 	revoker      pb.IaCProviderCredentialRevokerClient
+	regionLister pb.IaCProviderRegionListerClient
 	repairer     pb.IaCProviderMigrationRepairerClient
 	validator    pb.IaCProviderValidatorClient
 	driftCfg     pb.IaCProviderDriftConfigDetectorClient
@@ -114,6 +117,9 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 	}
 	if registered[iacServiceCredentialRevoker] {
 		a.revoker = pb.NewIaCProviderCredentialRevokerClient(conn)
+	}
+	if registered[iacServiceRegionLister] {
+		a.regionLister = pb.NewIaCProviderRegionListerClient(conn)
 	}
 	if registered[iacServiceMigrationRepairer] {
 		a.repairer = pb.NewIaCProviderMigrationRepairerClient(conn)
@@ -219,6 +225,37 @@ func (a *typedIaCAdapter) LogCapture() pb.IaCProviderLogCaptureClient {
 // provider credential after the new one is minted (ADR 0012).
 func (a *typedIaCAdapter) CredentialRevoker() pb.IaCProviderCredentialRevokerClient {
 	return a.revoker
+}
+
+// RegionLister returns the typed pb.IaCProviderRegionListerClient or nil
+// when the plugin did not register IaCProviderRegionLister. Used by
+// infra-admin provider metadata to prefer provider-sourced region lists
+// over the host's local catalog.
+func (a *typedIaCAdapter) RegionLister() pb.IaCProviderRegionListerClient {
+	return a.regionLister
+}
+
+// ListProviderRegions queries the optional region lister and returns sorted
+// provider region identifiers. The display name is intentionally ignored here
+// because infra-admin's current response shape carries region IDs only.
+func (a *typedIaCAdapter) ListProviderRegions(ctx context.Context, envName string) ([]string, error) {
+	if a.regionLister == nil {
+		return nil, unimplementedOptional(iacServiceRegionLister)
+	}
+	resp, err := a.regionLister.ListRegions(ctx, &pb.ListRegionsRequest{EnvName: envName})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	regions := make([]string, 0, len(resp.GetRegions()))
+	for _, region := range resp.GetRegions() {
+		name := strings.TrimSpace(region.GetName())
+		if name == "" {
+			continue
+		}
+		regions = append(regions, name)
+	}
+	sort.Strings(regions)
+	return regions, nil
 }
 
 // MigrationRepairer returns the typed

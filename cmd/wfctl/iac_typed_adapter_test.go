@@ -94,6 +94,10 @@ func TestTypedAdapter_OptionalReturnsUnimplementedSentinel(t *testing.T) {
 		{"RevokeProviderCredential", func() error {
 			return a.RevokeProviderCredential(context.Background(), "digitalocean.spaces", "key-1")
 		}},
+		{"ListProviderRegions", func() error {
+			_, err := a.ListProviderRegions(context.Background(), "staging")
+			return err
+		}},
 		{"RepairDirtyMigration", func() error {
 			_, err := a.RepairDirtyMigration(context.Background(), interfaces.MigrationRepairRequest{})
 			return err
@@ -394,6 +398,61 @@ func TestTypedAdapter_Finalizer_NilWhenNotRegistered(t *testing.T) {
 	if adapter.Finalizer() != nil {
 		t.Error("Finalizer() returned non-nil when IaCProviderFinalizer not registered")
 	}
+}
+
+func TestTypedAdapter_RegionLister_PopulatedWhenRegistered(t *testing.T) {
+	conn := dialLazyConn(t)
+	adapter := newTypedIaCAdapter(conn, map[string]bool{
+		iacServiceRegionLister: true,
+	})
+	if adapter.RegionLister() == nil {
+		t.Error("RegionLister() returned nil when IaCProviderRegionLister is in registered set")
+	}
+}
+
+func TestTypedAdapter_RegionLister_NilWhenNotRegistered(t *testing.T) {
+	conn := dialLazyConn(t)
+	adapter := newTypedIaCAdapter(conn, map[string]bool{
+		iacServiceEnumerator: true,
+	})
+	if adapter.RegionLister() != nil {
+		t.Error("RegionLister() returned non-nil when IaCProviderRegionLister not registered")
+	}
+}
+
+func TestTypedAdapter_ListProviderRegions(t *testing.T) {
+	adapter := fixtureTypedAdapter{
+		RegionLister: regionListerStub{},
+	}.build(t)
+
+	got, err := adapter.ListProviderRegions(context.Background(), "staging")
+	if err != nil {
+		t.Fatalf("ListProviderRegions: %v", err)
+	}
+	want := []string{"nyc3", "sfo3"}
+	if len(got) != len(want) {
+		t.Fatalf("regions = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("regions = %v, want %v", got, want)
+		}
+	}
+}
+
+type regionListerStub struct {
+	pb.UnimplementedIaCProviderRegionListerServer
+}
+
+func (regionListerStub) ListRegions(ctx context.Context, req *pb.ListRegionsRequest) (*pb.ListRegionsResponse, error) {
+	if req.GetEnvName() != "staging" {
+		return nil, status.Errorf(codes.InvalidArgument, "env = %q, want staging", req.GetEnvName())
+	}
+	return &pb.ListRegionsResponse{Regions: []*pb.ProviderRegion{
+		{Name: "sfo3"},
+		{Name: "nyc3"},
+		{Name: ""},
+	}}, nil
 }
 
 // dialLazyConn returns a real *grpc.ClientConn pointing at an in-process

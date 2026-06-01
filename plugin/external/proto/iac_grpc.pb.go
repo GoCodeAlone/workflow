@@ -4,7 +4,7 @@
 // Plan:   docs/plans/2026-05-10-strict-contracts-force-cutover.md (Task 3)
 //
 // Hard invariants (per cycle 4 §Acceptance criteria):
-//   - NO google.protobuf.Struct, NO google.protobuf.Any used in any message.
+//   - NO loose Struct/Any wrapper types used in any message.
 //   - Free-form per-resource Config / Outputs payloads cross the wire as
 //     bytes <name>_json, JSON-encoded by the plugin/host. The plugin owns
 //     the serialization shape; the proto layer carries opaque bytes.
@@ -880,6 +880,109 @@ var IaCProviderCredentialRevoker_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeProviderCredential",
 			Handler:    _IaCProviderCredentialRevoker_RevokeProviderCredential_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "iac.proto",
+}
+
+const (
+	IaCProviderRegionLister_ListRegions_FullMethodName = "/workflow.plugin.external.iac.IaCProviderRegionLister/ListRegions"
+)
+
+// IaCProviderRegionListerClient is the client API for IaCProviderRegionLister service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type IaCProviderRegionListerClient interface {
+	ListRegions(ctx context.Context, in *ListRegionsRequest, opts ...grpc.CallOption) (*ListRegionsResponse, error)
+}
+
+type iaCProviderRegionListerClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCProviderRegionListerClient(cc grpc.ClientConnInterface) IaCProviderRegionListerClient {
+	return &iaCProviderRegionListerClient{cc}
+}
+
+func (c *iaCProviderRegionListerClient) ListRegions(ctx context.Context, in *ListRegionsRequest, opts ...grpc.CallOption) (*ListRegionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRegionsResponse)
+	err := c.cc.Invoke(ctx, IaCProviderRegionLister_ListRegions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IaCProviderRegionListerServer is the server API for IaCProviderRegionLister service.
+// All implementations must embed UnimplementedIaCProviderRegionListerServer
+// for forward compatibility.
+type IaCProviderRegionListerServer interface {
+	ListRegions(context.Context, *ListRegionsRequest) (*ListRegionsResponse, error)
+	mustEmbedUnimplementedIaCProviderRegionListerServer()
+}
+
+// UnimplementedIaCProviderRegionListerServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCProviderRegionListerServer struct{}
+
+func (UnimplementedIaCProviderRegionListerServer) ListRegions(context.Context, *ListRegionsRequest) (*ListRegionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListRegions not implemented")
+}
+func (UnimplementedIaCProviderRegionListerServer) mustEmbedUnimplementedIaCProviderRegionListerServer() {
+}
+func (UnimplementedIaCProviderRegionListerServer) testEmbeddedByValue() {}
+
+// UnsafeIaCProviderRegionListerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCProviderRegionListerServer will
+// result in compilation errors.
+type UnsafeIaCProviderRegionListerServer interface {
+	mustEmbedUnimplementedIaCProviderRegionListerServer()
+}
+
+func RegisterIaCProviderRegionListerServer(s grpc.ServiceRegistrar, srv IaCProviderRegionListerServer) {
+	// If the following call panics, it indicates UnimplementedIaCProviderRegionListerServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCProviderRegionLister_ServiceDesc, srv)
+}
+
+func _IaCProviderRegionLister_ListRegions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRegionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderRegionListerServer).ListRegions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderRegionLister_ListRegions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderRegionListerServer).ListRegions(ctx, req.(*ListRegionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// IaCProviderRegionLister_ServiceDesc is the grpc.ServiceDesc for IaCProviderRegionLister service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCProviderRegionLister_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCProviderRegionLister",
+	HandlerType: (*IaCProviderRegionListerServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ListRegions",
+			Handler:    _IaCProviderRegionLister_ListRegions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

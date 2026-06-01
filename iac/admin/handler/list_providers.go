@@ -3,11 +3,16 @@ package handler
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/iac/admin/catalog"
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+type providerRegionLister interface {
+	ListProviderRegions(context.Context, string) ([]string, error)
+}
 
 // ListProviders implements InfraAdminService.ListProviders by
 // walking the provided `providers` map (keyed by host YAML module
@@ -44,9 +49,9 @@ import (
 // fix requires providerTypeByModule. Final shape is 7 params;
 // design line 233 was underspecified.
 //
-// regions_source is the literal "local-catalog" per design §FieldSpec
-// Catalog so consumers can distinguish v1's local lookup from a
-// future v1.1 IaCProviderRegionLister gRPC service.
+// regions_source is "provider-lister" when the provider advertises and
+// successfully serves IaCProviderRegionLister; otherwise it remains the
+// literal "local-catalog" fallback.
 //
 // Per design §Authz: default-deny via the shared authz guard.
 func ListProviders(
@@ -81,15 +86,38 @@ func ListProviders(
 	out := &adminpb.AdminListProvidersOutput{}
 	for _, modName := range moduleNames {
 		providerType := providerTypeByModule[modName] // may be "" if Init didn't populate
+		supportedRegions := regionCat.For(providerType)
+		regionsSource := "local-catalog"
+		if lister, ok := providers[modName].(providerRegionLister); ok {
+			if regions, err := lister.ListProviderRegions(ctx, in.GetEnvName()); err == nil {
+				supportedRegions = normalizeProviderRegions(regions)
+				regionsSource = "provider-lister"
+			}
+		}
 		summary := &adminpb.AdminProviderSummary{
 			ModuleName:       modName,
 			ProviderType:     providerType,
-			SupportedRegions: regionCat.For(providerType),
+			SupportedRegions: supportedRegions,
 			SupportedEngines: engineCat.For(providerType),
 			SupportedTypes:   append([]string(nil), allTypes...),
-			RegionsSource:    "local-catalog",
+			RegionsSource:    regionsSource,
 		}
 		out.Providers = append(out.Providers, summary)
 	}
 	return out, nil
+}
+
+func normalizeProviderRegions(regions []string) []string {
+	out := make([]string, 0, len(regions))
+	seen := make(map[string]bool, len(regions))
+	for _, region := range regions {
+		region = strings.TrimSpace(region)
+		if region == "" || seen[region] {
+			continue
+		}
+		seen[region] = true
+		out = append(out, region)
+	}
+	sort.Strings(out)
+	return out
 }
