@@ -63,6 +63,125 @@ func authzOK() *adminpb.AdminAuthzEvidence {
 	}
 }
 
+// planningProvider is a minimal interfaces.IaCProvider for handler tests.
+// It replaces the deleted iac/stubprovider package — scenario fixtures must
+// not live in the workflow engine core. Provides real Plan, Destroy,
+// DetectDrift, and ResourceDriver behavior so tests can exercise the full
+// dispatch path without an external package dependency.
+type planningProvider struct{}
+
+var _ interfaces.IaCProvider = (*planningProvider)(nil)
+
+func (p *planningProvider) Name() string    { return "test-planning" }
+func (p *planningProvider) Version() string { return "0.0.0-test" }
+func (p *planningProvider) Initialize(_ context.Context, _ map[string]any) error {
+	return nil
+}
+func (p *planningProvider) Capabilities() []interfaces.IaCCapabilityDeclaration { return nil }
+
+func (p *planningProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	currentByName := make(map[string]*interfaces.ResourceState, len(current))
+	for i := range current {
+		currentByName[current[i].Name] = &current[i]
+	}
+	desiredByName := make(map[string]struct{}, len(desired))
+	for _, s := range desired {
+		desiredByName[s.Name] = struct{}{}
+	}
+	plan := &interfaces.IaCPlan{}
+	for _, spec := range desired {
+		if _, exists := currentByName[spec.Name]; exists {
+			plan.Actions = append(plan.Actions, interfaces.PlanAction{Action: "update", Resource: spec, Current: currentByName[spec.Name]})
+		} else {
+			plan.Actions = append(plan.Actions, interfaces.PlanAction{Action: "create", Resource: spec})
+		}
+	}
+	for i := range current {
+		st := &current[i]
+		if _, wanted := desiredByName[st.Name]; !wanted {
+			plan.Actions = append(plan.Actions, interfaces.PlanAction{Action: "delete", Resource: interfaces.ResourceSpec{Name: st.Name, Type: st.Type}, Current: st})
+		}
+	}
+	return plan, nil
+}
+
+func (p *planningProvider) Destroy(_ context.Context, refs []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	names := make([]string, 0, len(refs))
+	for _, r := range refs {
+		names = append(names, r.Name)
+	}
+	return &interfaces.DestroyResult{Destroyed: names}, nil
+}
+
+func (p *planningProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, nil
+}
+
+func (p *planningProvider) DetectDrift(_ context.Context, refs []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	results := make([]interfaces.DriftResult, 0, len(refs))
+	for _, r := range refs {
+		results = append(results, interfaces.DriftResult{Name: r.Name, Type: r.Type, Drifted: false, Class: interfaces.DriftClassInSync})
+	}
+	return results, nil
+}
+
+func (p *planningProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
+	return nil, nil
+}
+
+func (p *planningProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, nil
+}
+
+func (p *planningProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return &planningDriver{}, nil
+}
+
+func (p *planningProvider) SupportedCanonicalKeys() []string { return nil }
+
+func (p *planningProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+
+func (p *planningProvider) Close() error { return nil }
+
+// planningDriver is a minimal interfaces.ResourceDriver for handler tests.
+type planningDriver struct{}
+
+var _ interfaces.ResourceDriver = (*planningDriver)(nil)
+
+func (d *planningDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: "test-" + spec.Name}, nil
+}
+
+func (d *planningDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: ref.Name, Type: ref.Type, ProviderID: ref.ProviderID}, nil
+}
+
+func (d *planningDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	pid := ref.ProviderID
+	if pid == "" {
+		pid = "test-" + spec.Name
+	}
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: pid}, nil
+}
+
+func (d *planningDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+
+func (d *planningDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	return &interfaces.DiffResult{NeedsUpdate: false, NeedsReplace: false}, nil
+}
+
+func (d *planningDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	return nil, nil
+}
+
+func (d *planningDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+
+func (d *planningDriver) SensitiveKeys() []string { return nil }
+
 // seedFixture returns a 3-resource store + label-bearing state covering
 // the filter dimensions: type (infra.vpc vs infra.database), provider
 // module (do-prod vs do-staging), and app_context (web vs api).

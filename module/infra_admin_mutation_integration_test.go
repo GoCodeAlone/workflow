@@ -4,7 +4,7 @@ package module
 // BuildFromConfig (per ADR-0003→v4 lesson that BuildFromConfig makes test
 // setup brittle — manual wiring is explicit about what's under test).
 //
-// Wiring: auth stub + recordingStateStore + stubprovider.New() (T2) +
+// Wiring: auth stub + recordingStateStore + testMutationProvider (T2) +
 // stubEnforcer (I-2) + infra.admin module + audit log.
 //
 // Assertions per T10 spec:
@@ -31,7 +31,6 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
-	"github.com/GoCodeAlone/workflow/iac/stubprovider"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -109,7 +108,7 @@ func (e *integrationEnforcer) Enforce(_, _, _ string, _ ...string) (bool, error)
 // mutationIntegrationApp manually wires the infra.admin module with:
 // - auth stub + authz stub enforcer (I-2)
 // - recordingStateStore (C-1 assertion)
-// - stub iac.provider (T2: stubprovider.New())
+// - testMutationProvider (replaces the deleted iac/stubprovider; T2)
 // - WorkflowConfig with one infra.database resource (C-2: non-empty desiredSpecs)
 func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionApp, *InfraAdmin, *recordingStateStore, *integrationEnforcer) {
 	t.Helper()
@@ -138,7 +137,7 @@ func mutationIntegrationApp(t *testing.T, auditPath string) (*withConfigSectionA
 	mustRegister(t, app, "my-authz", enforcer)
 
 	// Stub provider registered under its module name (per T2).
-	mustRegister(t, app, providerName, stubprovider.New())
+	mustRegister(t, app, providerName, &testMutationProvider{})
 
 	// Recording state store so we can assert assertion (1).
 	store := &recordingStateStore{}
@@ -370,5 +369,114 @@ func mustMarshal(t *testing.T, v any) []byte {
 	return data
 }
 
-// Compile-time: interfaces.IaCProvider satisfied by stubprovider.Provider.
-var _ interfaces.IaCProvider = (*stubprovider.Provider)(nil)
+// testMutationProvider is an in-package IaCProvider for T10 integration tests.
+// It replaces the deleted iac/stubprovider package — scenario test fixtures must
+// not live in the workflow engine core. Provides real Plan, Destroy, and
+// ResourceDriver so the integration path exercises apply+state persistence.
+type testMutationProvider struct{}
+
+var _ interfaces.IaCProvider = (*testMutationProvider)(nil)
+
+func (p *testMutationProvider) Name() string                                         { return "test-mutation" }
+func (p *testMutationProvider) Version() string                                      { return "0.0.0-test" }
+func (p *testMutationProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
+func (p *testMutationProvider) Capabilities() []interfaces.IaCCapabilityDeclaration  { return nil }
+
+func (p *testMutationProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	currentByName := make(map[string]*interfaces.ResourceState, len(current))
+	for i := range current {
+		currentByName[current[i].Name] = &current[i]
+	}
+	desiredByName := make(map[string]struct{}, len(desired))
+	for _, s := range desired {
+		desiredByName[s.Name] = struct{}{}
+	}
+	plan := &interfaces.IaCPlan{}
+	for _, spec := range desired {
+		if _, exists := currentByName[spec.Name]; exists {
+			plan.Actions = append(plan.Actions, interfaces.PlanAction{Action: "update", Resource: spec, Current: currentByName[spec.Name]})
+		} else {
+			plan.Actions = append(plan.Actions, interfaces.PlanAction{Action: "create", Resource: spec})
+		}
+	}
+	for i := range current {
+		st := &current[i]
+		if _, wanted := desiredByName[st.Name]; !wanted {
+			plan.Actions = append(plan.Actions, interfaces.PlanAction{Action: "delete", Resource: interfaces.ResourceSpec{Name: st.Name, Type: st.Type}, Current: st})
+		}
+	}
+	return plan, nil
+}
+
+func (p *testMutationProvider) Destroy(_ context.Context, refs []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	names := make([]string, 0, len(refs))
+	for _, r := range refs {
+		names = append(names, r.Name)
+	}
+	return &interfaces.DestroyResult{Destroyed: names}, nil
+}
+
+func (p *testMutationProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, nil
+}
+
+func (p *testMutationProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	return nil, nil
+}
+
+func (p *testMutationProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
+	return nil, nil
+}
+
+func (p *testMutationProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, nil
+}
+
+func (p *testMutationProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return &testMutationDriver{}, nil
+}
+
+func (p *testMutationProvider) SupportedCanonicalKeys() []string { return nil }
+
+func (p *testMutationProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+
+func (p *testMutationProvider) Close() error { return nil }
+
+// testMutationDriver is a minimal ResourceDriver for T10 integration tests.
+type testMutationDriver struct{}
+
+var _ interfaces.ResourceDriver = (*testMutationDriver)(nil)
+
+func (d *testMutationDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: "test-" + spec.Name}, nil
+}
+
+func (d *testMutationDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: ref.Name, Type: ref.Type, ProviderID: ref.ProviderID}, nil
+}
+
+func (d *testMutationDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	pid := ref.ProviderID
+	if pid == "" {
+		pid = "test-" + spec.Name
+	}
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: pid}, nil
+}
+
+func (d *testMutationDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
+
+func (d *testMutationDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	return &interfaces.DiffResult{NeedsUpdate: false, NeedsReplace: false}, nil
+}
+
+func (d *testMutationDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	return nil, nil
+}
+
+func (d *testMutationDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
+	return nil, nil
+}
+
+func (d *testMutationDriver) SensitiveKeys() []string { return nil }

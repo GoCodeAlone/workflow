@@ -17,6 +17,7 @@ import (
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -1191,7 +1192,7 @@ func TestInfraAdmin_AuditResultFor3Way(t *testing.T) {
 	}{
 		{"", "ok"},
 		{"authz evidence missing — admin middleware did not attach", "denied"},
-		{"apply: infra:apply denied for subject viewer", "denied"},
+		{"apply: infra:apply denied", "denied"},
 		{"apply: plan is stale (desired_hash mismatch)", "denied"},
 		{"apply: list state: connection refused", "error"},
 		{"plan: no iac.provider registered", "error"},
@@ -1237,8 +1238,10 @@ func TestInfraAdmin_ApplyRejectsStalePlanHash(t *testing.T) {
 	rec := httptest.NewRecorder()
 	m.router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("unexpected status %d; body=%s", rec.Code, rec.Body.String())
+	// Stale hash is a provider/backend error → HTTP 500 (Bug 3 fix: writeMutationResponse
+	// maps non-authz output.Error → 500 so provider-error("denied" text) ≠ 403).
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("stale hash: want 500 (non-authz output.Error), got %d; body=%s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "stale") {
 		t.Errorf("expected stale-hash error in response, got: %s", rec.Body.String())
@@ -1317,14 +1320,14 @@ func TestInfraAdmin_ViewerCannotApply(t *testing.T) {
 		return r.WithContext(ctx)
 	}
 
-	// Apply: client claims allowed, server Enforcer denies.
+	// Apply: client claims allowed, server Enforcer denies → HTTP 403 (Bug 3 fix).
 	applyReq := viewerCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
 		bytes.NewReader([]byte(`{"evidence":{"authz_checked":true,"authz_allowed":true},"desired_hash":"any"}`))))
 	applyReq.Header.Set("Authorization", "Bearer test-token")
 	applyRec := httptest.NewRecorder()
 	m.router.ServeHTTP(applyRec, applyReq)
-	if applyRec.Code != http.StatusOK {
-		t.Fatalf("apply: want 200 with error body, got %d", applyRec.Code)
+	if applyRec.Code != http.StatusForbidden {
+		t.Fatalf("apply: want 403 (typed ErrAuthzDenied), got %d; body=%s", applyRec.Code, applyRec.Body.String())
 	}
 	if !strings.Contains(applyRec.Body.String(), "denied") {
 		t.Errorf("viewer apply should be denied by server-side Enforcer; body=%s", applyRec.Body.String())
@@ -1336,12 +1339,168 @@ func TestInfraAdmin_ViewerCannotApply(t *testing.T) {
 	destroyReq.Header.Set("Authorization", "Bearer test-token")
 	destroyRec := httptest.NewRecorder()
 	m.router.ServeHTTP(destroyRec, destroyReq)
-	if destroyRec.Code != http.StatusOK {
-		t.Fatalf("destroy: want 200 with error body, got %d", destroyRec.Code)
+	if destroyRec.Code != http.StatusForbidden {
+		t.Fatalf("destroy: want 403 (typed ErrAuthzDenied), got %d; body=%s", destroyRec.Code, destroyRec.Body.String())
 	}
 	if !strings.Contains(destroyRec.Body.String(), "denied") {
 		t.Errorf("viewer destroy should be denied by server-side Enforcer; body=%s", destroyRec.Body.String())
 	}
+}
+
+// deniedPlanProvider wraps infraMockProvider and overrides Plan to return
+// an error whose message contains "denied" — used by the provider-error→500
+// discriminator test to verify that strings.Contains("denied") is NOT used
+// for HTTP status classification (typed ErrAuthzDenied sentinel instead).
+type deniedPlanProvider struct {
+	infraMockProvider
+}
+
+func (p *deniedPlanProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return nil, errors.New("provider: access denied to cloud API")
+}
+
+// TestInfraAdmin_TypedAuthzDenied_Returns403 pins the 4 typed HTTP-status
+// discriminator behaviors introduced by Bug 3 + Bug 4:
+//
+//	viewer→/plan=403  (handlePlanResource Enforcer gate, Bug 4)
+//	viewer→/apply=403 (handler.ErrAuthzDenied → writeMutationResponse, Bug 3)
+//	operator→/apply=200 (happy path unaffected)
+//	provider-error("denied" text)→500 NOT 403 (strings.Contains FP eliminated)
+func TestInfraAdmin_TypedAuthzDenied_Returns403(t *testing.T) {
+	// subjectCtx injects a JWT "sub" claim into the request context
+	// so subjectFromRequest() extracts the right principal.
+	subjectCtx := func(r *http.Request, sub string) *http.Request {
+		ctx := context.WithValue(r.Context(), authClaimsContextKey, map[string]any{"sub": sub})
+		return r.WithContext(ctx)
+	}
+
+	// startWithConfig boots an InfraAdmin with auth+authz+provider registered.
+	startWithConfig := func(t *testing.T, enforcer Enforcer, prov interfaces.IaCProvider) *InfraAdmin {
+		t.Helper()
+		app, _, _, _ := newAuthEnabledApp(t, "digitalocean")
+		if enforcer != nil {
+			if err := app.RegisterService("my-authz", enforcer); err != nil {
+				t.Fatalf("setup: RegisterService(my-authz): %v", err)
+			}
+		}
+		if prov != nil {
+			// Override the default do-provider so the module uses our custom one.
+			if err := app.RegisterService("do-provider", prov); err != nil {
+				t.Fatalf("setup: RegisterService(do-provider): %v", err)
+			}
+		}
+		cfg := standardAuthCfg()
+		if enforcer != nil {
+			cfg.AuthzModule = "my-authz"
+		}
+		m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+		if err := m.Init(app); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		if err := m.Start(context.Background()); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		if err := m.router.Start(context.Background()); err != nil {
+			t.Fatalf("router.Start: %v", err)
+		}
+		return m
+	}
+
+	// ── viewer→/plan=403 ─────────────────────────────────────────────────────
+	// handlePlanResource now calls m.authz.Enforce before handler.PlanResource
+	// (Bug 4 fix). Viewer subject denied → HTTP 403 directly from module layer.
+	// Additional assertions (Copilot findings):
+	//   - Body is proto-JSON AdminPlanOutput (not plaintext) — consistent with apply/destroy 403s.
+	//   - Body does NOT contain the subject string "viewer" — no principal leak.
+	t.Run("viewer/plan=403", func(t *testing.T) {
+		enforcer := &stubEnforcer{allowed: false}
+		m := startWithConfig(t, enforcer, nil)
+
+		req := subjectCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/plan",
+			bytes.NewReader([]byte(`{"evidence":{"authz_checked":true,"authz_allowed":true}}`))), "viewer")
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("viewer/plan: want 403, got %d; body=%s", rec.Code, rec.Body.String())
+		}
+		// Body must be proto-JSON AdminPlanOutput, not plaintext (Copilot finding 1+2).
+		if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+			t.Errorf("viewer/plan 403: Content-Type = %q, want application/json (proto-JSON body)", ct)
+		}
+		var planOut adminpb.AdminPlanOutput
+		if err := protojson.Unmarshal(rec.Body.Bytes(), &planOut); err != nil {
+			t.Errorf("viewer/plan 403: body is not valid AdminPlanOutput JSON: %v\n%s", err, rec.Body.String())
+		}
+		// Subject must NOT appear in response body — no principal leakage.
+		if strings.Contains(rec.Body.String(), "viewer") {
+			t.Errorf("viewer/plan 403: body contains subject 'viewer' — principal leak; body=%s", rec.Body.String())
+		}
+	})
+
+	// ── viewer→/apply=403 ────────────────────────────────────────────────────
+	// handler.ApplyResource Gate 2 returns ErrAuthzDenied → writeMutationResponse → 403.
+	t.Run("viewer/apply=403", func(t *testing.T) {
+		enforcer := &stubEnforcer{allowed: false}
+		m := startWithConfig(t, enforcer, nil)
+
+		// Compute correct desired_hash for empty desiredSpecs + empty state.
+		hash := handler.DesiredHash(nil, nil, nil)
+		body := `{"desired_hash":"` + hash + `","evidence":{"authz_checked":true,"authz_allowed":true}}`
+		req := subjectCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+			bytes.NewReader([]byte(body))), "viewer")
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("viewer/apply: want 403, got %d; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// ── operator→/apply=200 ──────────────────────────────────────────────────
+	// operator is allowed → plan succeeds (empty desired specs) → apply succeeds → 200.
+	t.Run("operator/apply=200", func(t *testing.T) {
+		enforcer := &stubEnforcer{allowed: true}
+		m := startWithConfig(t, enforcer, nil)
+
+		hash := handler.DesiredHash(nil, nil, nil)
+		body := `{"desired_hash":"` + hash + `","evidence":{"authz_checked":true,"authz_allowed":true}}`
+		req := subjectCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+			bytes.NewReader([]byte(body))), "operator")
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("operator/apply: want 200, got %d; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// ── provider-error("denied" text)→500 NOT 403 ───────────────────────────
+	// The provider's Plan returns an error whose message contains "denied".
+	// writeMutationResponse must use errors.Is(err, ErrAuthzDenied) — NOT
+	// strings.Contains — so this maps to 500 (backend error), NOT 403 (authz).
+	t.Run("provider-error-denied-text/apply=500-not-403", func(t *testing.T) {
+		enforcer := &stubEnforcer{allowed: true}
+		prov := &deniedPlanProvider{infraMockProvider: infraMockProvider{name: "digitalocean"}}
+		m := startWithConfig(t, enforcer, prov)
+
+		hash := handler.DesiredHash(nil, nil, nil)
+		body := `{"desired_hash":"` + hash + `","evidence":{"authz_checked":true,"authz_allowed":true}}`
+		req := subjectCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+			bytes.NewReader([]byte(body))), "operator")
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code == http.StatusForbidden {
+			t.Errorf("provider-error with 'denied' text: got 403 (strings.Contains FP!) want 500; body=%s", rec.Body.String())
+		}
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("provider-error with 'denied' text: want 500, got %d; body=%s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "denied") {
+			t.Errorf("provider-error body should contain 'denied' (provider error text); got: %s", rec.Body.String())
+		}
+	})
 }
 
 // TestInfraAdmin_AuditDistinguishesDeniedFromError verifies that the
@@ -1351,7 +1510,7 @@ func TestInfraAdmin_AuditDistinguishesDeniedFromError(t *testing.T) {
 	// Denial (authz/evidence/stale markers) → "denied"
 	for _, msg := range []string{
 		"authz evidence missing",
-		"infra:apply denied for subject viewer",
+		"infra:apply denied",
 		"plan is stale (desired_hash mismatch)",
 	} {
 		if got := auditResultFor(msg); got != "denied" {
@@ -1367,5 +1526,36 @@ func TestInfraAdmin_AuditDistinguishesDeniedFromError(t *testing.T) {
 		if got := auditResultFor(msg); got != "error" {
 			t.Errorf("auditResultFor(%q) = %q, want 'error'", msg, got)
 		}
+	}
+}
+
+// TestInfraAdmin_AuditResultFromErr pins auditResultFromErr — the typed
+// mutation-route classifier that replaces strings.Contains in the audit
+// path. The key regression: a provider error whose message contains
+// "denied" must log as "error", NOT "denied".
+func TestInfraAdmin_AuditResultFromErr(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		outErr string
+		want   string
+	}{
+		{"success", nil, "", "ok"},
+		{"authz sentinel", handler.ErrAuthzDenied, "apply: infra:apply denied", "denied"},
+		// The critical false-positive regression: provider error containing
+		// "denied" must NOT be classified as "denied" (strings.Contains would
+		// have done so). Only errors.Is(ErrAuthzDenied) triggers "denied".
+		{"provider error with denied text", nil, "apply: plan: provider: access denied to cloud API", "error"},
+		{"stale hash", nil, "apply: plan is stale (desired_hash mismatch)", "error"},
+		{"no provider registered", nil, "plan: no iac.provider registered", "error"},
+		{"evidence denial via sentinel", handler.ErrAuthzDenied, "authz evidence missing", "denied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := auditResultFromErr(tc.err, tc.outErr)
+			if got != tc.want {
+				t.Errorf("auditResultFromErr(%v, %q) = %q, want %q", tc.err, tc.outErr, got, tc.want)
+			}
+		})
 	}
 }

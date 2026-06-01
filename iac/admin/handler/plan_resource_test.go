@@ -2,18 +2,18 @@ package handler_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
-	"github.com/GoCodeAlone/workflow/iac/stubprovider"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // TestPlanResource_DefaultDeny asserts that evidence with checked=false
 // returns a non-empty error and no plan payload.
 func TestPlanResource_DefaultDeny(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	desired := []interfaces.ResourceSpec{
 		{Name: "vpc1", Type: "infra.vpc"},
@@ -22,8 +22,8 @@ func TestPlanResource_DefaultDeny(t *testing.T) {
 		Evidence: &adminpb.AdminAuthzEvidence{AuthzChecked: false},
 	}
 	out, err := handler.PlanResource(context.Background(), nil, providers, nil, desired, in)
-	if err != nil {
-		t.Fatalf("PlanResource: unexpected error: %v", err)
+	if !errors.Is(err, handler.ErrAuthzDenied) {
+		t.Fatalf("PlanResource: want ErrAuthzDenied, got %v (out.Error=%s)", err, out.GetError())
 	}
 	if out.Error == "" {
 		t.Error("PlanResource with evidence.checked=false should return non-empty error")
@@ -36,7 +36,7 @@ func TestPlanResource_DefaultDeny(t *testing.T) {
 // TestPlanResource_ReturnsActions asserts that a valid evidence returns
 // a plan_id, non-empty desired_hash, and at least one action.
 func TestPlanResource_ReturnsActions(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	desired := []interfaces.ResourceSpec{
 		{Name: "vpc1", Type: "infra.vpc", Config: map[string]any{"region": "nyc1"}},
@@ -91,7 +91,7 @@ func TestPlanResource_WithCurrentState(t *testing.T) {
 			{Name: "vpc1", Type: "infra.vpc", ProviderID: "do-vpc-111"},
 		},
 	}
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	desired := []interfaces.ResourceSpec{
 		{Name: "vpc1", Type: "infra.vpc"},     // already exists → update

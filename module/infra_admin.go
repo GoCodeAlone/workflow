@@ -64,6 +64,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// outputError is a type constraint satisfied by all admin output proto
+// messages — they all embed an Error string field. Used by
+// writeMutationResponse to inspect the output's error without a type switch.
+type outputError interface {
+	proto.Message
+	GetError() string
+}
+
 // InfraAdminConfig is the YAML-config shape the host expects under
 // the `infra.admin` module entry. Field names use snake_case yaml
 // tags to match the rest of the workflow config; defaults match the
@@ -655,7 +663,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				"category":    "infra",
 				"path":        m.config.AssetPrefix + "/resources.html",
 				"render_mode": "iframe",
-				"permissions": []map[string]any{{
+				"permissions": []any{map[string]any{
 					"resource": "infra", "action": "read", "permission": "infra:read",
 				}},
 			},
@@ -668,7 +676,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				"category":    "infra",
 				"path":        m.config.AssetPrefix + "/resource.html",
 				"render_mode": "iframe",
-				"permissions": []map[string]any{{
+				"permissions": []any{map[string]any{
 					"resource": "infra", "action": "read", "permission": "infra:read",
 				}},
 			},
@@ -681,7 +689,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				"category":    "infra",
 				"path":        m.config.AssetPrefix + "/new.html",
 				"render_mode": "iframe",
-				"permissions": []map[string]any{{
+				"permissions": []any{map[string]any{
 					"resource": "infra", "action": "read", "permission": "infra:read",
 				}},
 			},
@@ -696,7 +704,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				"category":    "infra",
 				"path":        m.config.AssetPrefix + "/actions.html",
 				"render_mode": "iframe",
-				"permissions": []map[string]any{{
+				"permissions": []any{map[string]any{
 					"resource": "infra", "action": "read", "permission": "infra:read",
 				}},
 			},
@@ -788,15 +796,14 @@ func (m *InfraAdmin) auditAccess(r *http.Request, action string, ev *adminpb.Adm
 	_ = r // r reserved for future targets/app_context extraction
 }
 
-// auditResultFor maps a handler output's Error field to the
-// audit log's `result` value. Empty error → "ok"; non-empty →
-// "denied" (the handler library's primary refusal path is
-// authz-default-deny, so "denied" is the most informative
-// auditResultFor classifies an Output.error string into the
+// auditResultFor classifies a read-handler output's Error field into the
 // three-way audit result: "ok" (no error), "denied" (authz/evidence
-// rejection), or "error" (provider/backend failure). The
-// discrimination is substring-based on the error prefix, which the
-// handler library follows consistently.
+// rejection), or "error" (provider/backend failure). Read handlers
+// (ListResources, GetResource, etc.) return (output, nil) even on authz
+// denial, so the only signal available is the error string. The
+// discrimination is substring-based — acceptable here because read
+// handlers do not call provider APIs that could return "denied" text.
+// Mutation handlers MUST use auditResultFromErr (typed sentinel).
 func auditResultFor(errMsg string) string {
 	if errMsg == "" {
 		return "ok"
@@ -810,6 +817,27 @@ func auditResultFor(errMsg string) string {
 	}
 	// Everything else is a backend or configuration error.
 	return "error"
+}
+
+// auditResultFromErr classifies a mutation handler's outcome into the
+// three-way audit result using the TYPED handler error — NOT
+// strings.Contains. This eliminates the false-positive where a provider
+// error message containing "denied" (e.g. "provider: access denied to
+// cloud API") would be mis-logged as result:"denied" by the substring path.
+//
+// Classification:
+//
+//	errors.Is(err, handler.ErrAuthzDenied) → "denied"
+//	outError != ""                          → "error"
+//	(both empty/nil)                        → "ok"
+func auditResultFromErr(err error, outError string) string {
+	if errors.Is(err, handler.ErrAuthzDenied) {
+		return "denied"
+	}
+	if outError != "" {
+		return "error"
+	}
+	return "ok"
 }
 
 // nowUnix is a package-level var so tests can substitute a fixed
@@ -1037,6 +1065,41 @@ func writeProtoMsg(w http.ResponseWriter, msg proto.Message) {
 	_, _ = w.Write(data)
 }
 
+// writeStatusProto marshals a proto message and writes it with the given
+// HTTP status code. On marshal failure, falls back to plain-text 500.
+func writeStatusProto(w http.ResponseWriter, status int, msg proto.Message) {
+	data, err := marshalOpts.Marshal(msg)
+	if err != nil {
+		http.Error(w, "marshal response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(data)
+}
+
+// writeMutationResponse writes a mutation handler's output using a typed
+// HTTP status discriminator:
+//
+//   - handler.ErrAuthzDenied → HTTP 403 (typed sentinel; avoids strings.Contains
+//     false-positives when a provider error message happens to contain "denied")
+//   - non-empty Output.error (provider / backend failure) → HTTP 500
+//   - success → HTTP 200 (via writeProtoMsg)
+//
+// Using this for plan/apply/destroy replaces the naive writeProtoMsg(w, out)
+// pattern that silently returned 200 for all outcomes (Bug 3 + Bug 4 fix).
+func writeMutationResponse(w http.ResponseWriter, msg outputError, err error) {
+	if errors.Is(err, handler.ErrAuthzDenied) {
+		writeStatusProto(w, http.StatusForbidden, msg)
+		return
+	}
+	if msg.GetError() != "" {
+		writeStatusProto(w, http.StatusInternalServerError, msg)
+		return
+	}
+	writeProtoMsg(w, msg)
+}
+
 // ── T8: requireBearerAuth middleware ─────────────────────────────────────────
 
 // requireBearerAuthMiddleware is an HTTPMiddleware that rejects requests
@@ -1094,10 +1157,30 @@ func (m *InfraAdmin) handlePlanResource(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	// handlers never return non-nil error (errors go to out.Error per proto tag-100 pattern)
-	out, _ := handler.PlanResource(r.Context(), m.state, m.providers, m.wfCfg, m.desiredSpecs, &in) //nolint:errcheck
-	writeProtoMsg(w, out)
-	m.auditAccess(r, "plan", in.GetEvidence(), auditResultFor(out.GetError()))
+	// Server-side RBAC: plan is infra:apply-gated — viewers must not be
+	// able to probe the desired-state hash or action list (Bug 4 fix).
+	subject := m.subjectFromRequest(r)
+	if m.authz != nil {
+		ok, enforceErr := m.authz.Enforce(subject, "infra:apply", "allow")
+		if enforceErr != nil {
+			// Route through writeStatusProto so the 500 body is proto-JSON,
+			// consistent with all other mutation error responses (Finding 1).
+			writeStatusProto(w, http.StatusInternalServerError, &adminpb.AdminPlanOutput{Error: "plan: authz enforce error"})
+			m.auditAccess(r, "plan", in.GetEvidence(), "error")
+			return
+		}
+		if !ok {
+			// Generic denial — do NOT reflect the authenticated subject in the
+			// response body (Finding 2). Subject is captured in the audit log
+			// separately. Route through writeMutationResponse for proto-JSON body.
+			writeMutationResponse(w, &adminpb.AdminPlanOutput{Error: "plan: infra:apply denied"}, handler.ErrAuthzDenied)
+			m.auditAccess(r, "plan", in.GetEvidence(), "denied")
+			return
+		}
+	}
+	out, handlerErr := handler.PlanResource(r.Context(), m.state, m.providers, m.wfCfg, m.desiredSpecs, &in)
+	writeMutationResponse(w, out, handlerErr)
+	m.auditAccess(r, "plan", in.GetEvidence(), auditResultFromErr(handlerErr, out.GetError()))
 }
 
 func (m *InfraAdmin) handleApplyResource(w http.ResponseWriter, r *http.Request) {
@@ -1120,9 +1203,9 @@ func (m *InfraAdmin) handleApplyResource(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	subject := m.subjectFromRequest(r)
-	out, _ := handler.ApplyResource(r.Context(), m.state, m.providers, m.authz, subject, m.wfCfg, m.desiredSpecs, &in) //nolint:errcheck // errors go to out.Error
-	writeProtoMsg(w, out)
-	m.auditAccess(r, "apply", in.GetEvidence(), auditResultFor(out.GetError()))
+	out, handlerErr := handler.ApplyResource(r.Context(), m.state, m.providers, m.authz, subject, m.wfCfg, m.desiredSpecs, &in)
+	writeMutationResponse(w, out, handlerErr)
+	m.auditAccess(r, "apply", in.GetEvidence(), auditResultFromErr(handlerErr, out.GetError()))
 }
 
 func (m *InfraAdmin) handleDestroyResource(w http.ResponseWriter, r *http.Request) {
@@ -1145,9 +1228,9 @@ func (m *InfraAdmin) handleDestroyResource(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	subject := m.subjectFromRequest(r)
-	out, _ := handler.DestroyResource(r.Context(), m.providers, m.authz, subject, &in) //nolint:errcheck // errors go to out.Error
-	writeProtoMsg(w, out)
-	m.auditAccess(r, "destroy", in.GetEvidence(), auditResultFor(out.GetError()))
+	out, handlerErr := handler.DestroyResource(r.Context(), m.providers, m.authz, subject, &in)
+	writeMutationResponse(w, out, handlerErr)
+	m.auditAccess(r, "destroy", in.GetEvidence(), auditResultFromErr(handlerErr, out.GetError()))
 }
 
 func (m *InfraAdmin) handleDriftCheckResource(w http.ResponseWriter, r *http.Request) {

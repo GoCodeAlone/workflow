@@ -2,11 +2,11 @@ package handler_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
-	"github.com/GoCodeAlone/workflow/iac/stubprovider"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -25,7 +25,7 @@ func (e *testEnforcer) Enforce(sub, obj, act string, _ ...string) (bool, error) 
 // TestApplyResource_DefaultDeny asserts that evidence with checked=false
 // returns a non-empty error (default-deny).
 func TestApplyResource_DefaultDeny(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	desired := []interfaces.ResourceSpec{
 		{Name: "vpc1", Type: "infra.vpc"},
@@ -40,8 +40,8 @@ func TestApplyResource_DefaultDeny(t *testing.T) {
 		Evidence:    &adminpb.AdminAuthzEvidence{AuthzChecked: false},
 	}
 	out, err := handler.ApplyResource(context.Background(), nil, providers, nil, "subject", nil, desired, in)
-	if err != nil {
-		t.Fatalf("ApplyResource: unexpected Go error: %v", err)
+	if !errors.Is(err, handler.ErrAuthzDenied) {
+		t.Fatalf("ApplyResource: want ErrAuthzDenied, got %v (out.Error=%s)", err, out.GetError())
 	}
 	if out.Error == "" {
 		t.Error("ApplyResource with evidence.checked=false should return non-empty error")
@@ -51,7 +51,7 @@ func TestApplyResource_DefaultDeny(t *testing.T) {
 // TestApplyResource_AuthzDenies asserts that a subject the enforcer
 // denies infra:apply → 403 even if the client body has valid evidence.
 func TestApplyResource_AuthzDenies(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	desired := []interfaces.ResourceSpec{{Name: "vpc1", Type: "infra.vpc"}}
 
@@ -71,8 +71,8 @@ func TestApplyResource_AuthzDenies(t *testing.T) {
 		},
 	}
 	out, err := handler.ApplyResource(context.Background(), nil, providers, enforcer, "viewer", nil, desired, in)
-	if err != nil {
-		t.Fatalf("ApplyResource: unexpected Go error: %v", err)
+	if !errors.Is(err, handler.ErrAuthzDenied) {
+		t.Fatalf("ApplyResource: want ErrAuthzDenied, got %v (out.Error=%s)", err, out.GetError())
 	}
 	if out.Error == "" {
 		t.Error("ApplyResource should reject subject denied infra:apply by server-side Enforcer")
@@ -82,7 +82,7 @@ func TestApplyResource_AuthzDenies(t *testing.T) {
 // TestApplyResource_HappyPath asserts that a valid evidence + hash + allowed
 // subject returns applied[] with no errors.
 func TestApplyResource_HappyPath(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	desired := []interfaces.ResourceSpec{
 		{Name: "vpc1", Type: "infra.vpc", Config: map[string]any{"region": "nyc1"}},
@@ -114,7 +114,7 @@ func TestApplyResource_HappyPath(t *testing.T) {
 // TestApplyResource_StalePlanHash asserts that a mismatched desired_hash
 // → "plan is stale" error and no apply.
 func TestApplyResource_StalePlanHash(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	desired := []interfaces.ResourceSpec{{Name: "vpc1", Type: "infra.vpc"}}
 
