@@ -65,6 +65,17 @@ service IaCProviderRegionLister {
   rpc ListRegions(ListRegionsRequest) returns (ListRegionsResponse);
 }
 
+// IaCProviderOwnership is an optional service for providers that can read,
+// write, and enumerate cloud-side resource ownership metadata. Providers map
+// this contract to native tags, labels, or other provider-appropriate metadata.
+// DNS ownership remains handled by wfctl dns-policy and is intentionally not
+// generalized through this service.
+service IaCProviderOwnership {
+  rpc GetOwner(GetOwnerRequest) returns (GetOwnerResponse);
+  rpc SetOwner(SetOwnerRequest) returns (SetOwnerResponse);
+  rpc ListOwners(ListOwnersRequest) returns (ListOwnersResponse);
+}
+
 // IaCProviderFinalizer is the optional service plugins implement when
 // they need a post-apply-loop finalizer hook under v2 dispatch.
 // Use case: DigitalOcean plugin's database trusted_sources deferred-flush
@@ -668,6 +679,45 @@ message ProviderRegion {
 
 message ListRegionsResponse {
   repeated ProviderRegion regions = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderOwnership messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message GetOwnerRequest {
+  ResourceRef ref = 1;
+}
+
+message GetOwnerResponse {
+  // owner is the provider-neutral owner identity. Empty means unowned.
+  string owner = 1;
+  // source describes where the owner was found, e.g. "tag:managed-by",
+  // "label:managed-by", or "naming-prefix".
+  string source = 2;
+}
+
+message SetOwnerRequest {
+  ResourceRef ref = 1;
+  string owner = 2;
+}
+message SetOwnerResponse {}
+
+message ListOwnersRequest {
+  // owner filters results to a single owner. Empty means provider default;
+  // providers may return all resources they can safely enumerate.
+  string owner = 1;
+  // resource_type optionally narrows enumeration to one ResourceRef.Type.
+  string resource_type = 2;
+}
+
+message OwnedResource {
+  ResourceRef ref = 1;
+  string owner = 2;
+  string source = 3;
+}
+
+message ListOwnersResponse {
+  repeated OwnedResource resources = 1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

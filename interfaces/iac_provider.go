@@ -104,6 +104,38 @@ type EnumeratorAll interface {
 	EnumerateAll(ctx context.Context, resourceType string) ([]*ResourceOutput, error)
 }
 
+// ResourceOwner captures cloud-side resource ownership metadata returned by
+// providers that implement OwnershipProvider. Owner is the portable identity;
+// Source describes the provider-specific mechanism (for example
+// "tag:managed-by" or "label:managed-by").
+type ResourceOwner struct {
+	Ref    ResourceRef `json:"ref"`
+	Owner  string      `json:"owner,omitempty"`
+	Source string      `json:"source,omitempty"`
+}
+
+// OwnerFilter narrows ownership enumeration. An empty Owner asks the provider
+// to use its default scope; an empty ResourceType means all supported types the
+// provider can safely enumerate.
+type OwnerFilter struct {
+	Owner        string `json:"owner,omitempty"`
+	ResourceType string `json:"resource_type,omitempty"`
+}
+
+// OwnershipProvider is an OPTIONAL interface for providers that can read, set,
+// and enumerate cloud-side ownership metadata. Used by `wfctl infra apply
+// --owner <name>` and `wfctl infra owners`.
+//
+// Implementations map this provider-neutral contract to native tags, labels, or
+// other safe metadata. `GetOwner` returns Owner="" when the resource is
+// unowned. `SetOwner` must be idempotent for the same owner. DNS ownership is
+// intentionally out of scope because wfctl dns-policy owns DNS TXT policy.
+type OwnershipProvider interface {
+	GetOwner(ctx context.Context, ref ResourceRef) (*ResourceOwner, error)
+	SetOwner(ctx context.Context, ref ResourceRef, owner string) error
+	ListOwners(ctx context.Context, filter OwnerFilter) ([]ResourceOwner, error)
+}
+
 // DriftConfigDetector is an OPTIONAL interface a provider MAY implement to
 // surface config-drift in addition to the existence-only Ghost / InSync /
 // Unknown classifications produced by DetectDrift.

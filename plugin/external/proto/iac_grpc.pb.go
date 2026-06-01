@@ -990,6 +990,196 @@ var IaCProviderRegionLister_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	IaCProviderOwnership_GetOwner_FullMethodName   = "/workflow.plugin.external.iac.IaCProviderOwnership/GetOwner"
+	IaCProviderOwnership_SetOwner_FullMethodName   = "/workflow.plugin.external.iac.IaCProviderOwnership/SetOwner"
+	IaCProviderOwnership_ListOwners_FullMethodName = "/workflow.plugin.external.iac.IaCProviderOwnership/ListOwners"
+)
+
+// IaCProviderOwnershipClient is the client API for IaCProviderOwnership service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// IaCProviderOwnership is an optional service for providers that can read,
+// write, and enumerate cloud-side resource ownership metadata. Providers map
+// this contract to native tags, labels, or other provider-appropriate metadata.
+// DNS ownership remains handled by wfctl dns-policy and is intentionally not
+// generalized through this service.
+type IaCProviderOwnershipClient interface {
+	GetOwner(ctx context.Context, in *GetOwnerRequest, opts ...grpc.CallOption) (*GetOwnerResponse, error)
+	SetOwner(ctx context.Context, in *SetOwnerRequest, opts ...grpc.CallOption) (*SetOwnerResponse, error)
+	ListOwners(ctx context.Context, in *ListOwnersRequest, opts ...grpc.CallOption) (*ListOwnersResponse, error)
+}
+
+type iaCProviderOwnershipClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCProviderOwnershipClient(cc grpc.ClientConnInterface) IaCProviderOwnershipClient {
+	return &iaCProviderOwnershipClient{cc}
+}
+
+func (c *iaCProviderOwnershipClient) GetOwner(ctx context.Context, in *GetOwnerRequest, opts ...grpc.CallOption) (*GetOwnerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOwnerResponse)
+	err := c.cc.Invoke(ctx, IaCProviderOwnership_GetOwner_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCProviderOwnershipClient) SetOwner(ctx context.Context, in *SetOwnerRequest, opts ...grpc.CallOption) (*SetOwnerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetOwnerResponse)
+	err := c.cc.Invoke(ctx, IaCProviderOwnership_SetOwner_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCProviderOwnershipClient) ListOwners(ctx context.Context, in *ListOwnersRequest, opts ...grpc.CallOption) (*ListOwnersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOwnersResponse)
+	err := c.cc.Invoke(ctx, IaCProviderOwnership_ListOwners_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IaCProviderOwnershipServer is the server API for IaCProviderOwnership service.
+// All implementations must embed UnimplementedIaCProviderOwnershipServer
+// for forward compatibility.
+//
+// IaCProviderOwnership is an optional service for providers that can read,
+// write, and enumerate cloud-side resource ownership metadata. Providers map
+// this contract to native tags, labels, or other provider-appropriate metadata.
+// DNS ownership remains handled by wfctl dns-policy and is intentionally not
+// generalized through this service.
+type IaCProviderOwnershipServer interface {
+	GetOwner(context.Context, *GetOwnerRequest) (*GetOwnerResponse, error)
+	SetOwner(context.Context, *SetOwnerRequest) (*SetOwnerResponse, error)
+	ListOwners(context.Context, *ListOwnersRequest) (*ListOwnersResponse, error)
+	mustEmbedUnimplementedIaCProviderOwnershipServer()
+}
+
+// UnimplementedIaCProviderOwnershipServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCProviderOwnershipServer struct{}
+
+func (UnimplementedIaCProviderOwnershipServer) GetOwner(context.Context, *GetOwnerRequest) (*GetOwnerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetOwner not implemented")
+}
+func (UnimplementedIaCProviderOwnershipServer) SetOwner(context.Context, *SetOwnerRequest) (*SetOwnerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetOwner not implemented")
+}
+func (UnimplementedIaCProviderOwnershipServer) ListOwners(context.Context, *ListOwnersRequest) (*ListOwnersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListOwners not implemented")
+}
+func (UnimplementedIaCProviderOwnershipServer) mustEmbedUnimplementedIaCProviderOwnershipServer() {}
+func (UnimplementedIaCProviderOwnershipServer) testEmbeddedByValue()                              {}
+
+// UnsafeIaCProviderOwnershipServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCProviderOwnershipServer will
+// result in compilation errors.
+type UnsafeIaCProviderOwnershipServer interface {
+	mustEmbedUnimplementedIaCProviderOwnershipServer()
+}
+
+func RegisterIaCProviderOwnershipServer(s grpc.ServiceRegistrar, srv IaCProviderOwnershipServer) {
+	// If the following call panics, it indicates UnimplementedIaCProviderOwnershipServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCProviderOwnership_ServiceDesc, srv)
+}
+
+func _IaCProviderOwnership_GetOwner_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOwnerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderOwnershipServer).GetOwner(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderOwnership_GetOwner_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderOwnershipServer).GetOwner(ctx, req.(*GetOwnerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCProviderOwnership_SetOwner_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetOwnerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderOwnershipServer).SetOwner(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderOwnership_SetOwner_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderOwnershipServer).SetOwner(ctx, req.(*SetOwnerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCProviderOwnership_ListOwners_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListOwnersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderOwnershipServer).ListOwners(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderOwnership_ListOwners_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderOwnershipServer).ListOwners(ctx, req.(*ListOwnersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// IaCProviderOwnership_ServiceDesc is the grpc.ServiceDesc for IaCProviderOwnership service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCProviderOwnership_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCProviderOwnership",
+	HandlerType: (*IaCProviderOwnershipServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetOwner",
+			Handler:    _IaCProviderOwnership_GetOwner_Handler,
+		},
+		{
+			MethodName: "SetOwner",
+			Handler:    _IaCProviderOwnership_SetOwner_Handler,
+		},
+		{
+			MethodName: "ListOwners",
+			Handler:    _IaCProviderOwnership_ListOwners_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "iac.proto",
+}
+
+const (
 	IaCProviderFinalizer_FinalizeApply_FullMethodName = "/workflow.plugin.external.iac.IaCProviderFinalizer/FinalizeApply"
 )
 

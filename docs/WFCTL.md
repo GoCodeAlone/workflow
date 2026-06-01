@@ -99,6 +99,7 @@ graph TD
     infra --> infra-state["state"]
     infra --> infra-outputs["outputs"]
     infra --> infra-refresh-outputs["refresh-outputs"]
+    infra --> infra-owners["owners"]
     infra --> infra-test["test"]
     infra --> infra-audit-secrets["audit-secrets"]
     infra --> infra-audit-state-secrets["audit-state-secrets"]
@@ -173,7 +174,7 @@ graph TD
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
-| **Infrastructure** | `infra derive/plan/apply/destroy/status/drift/import/bootstrap/outputs/test`, `infra state list/export/import` |
+| **Infrastructure** | `infra derive/plan/apply/destroy/status/drift/import/bootstrap/outputs/owners/test`, `infra state list/export/import` |
 | **CI/CD** | `ci plan`, `ci generate`, `ci run`, `ci init`, `ci validate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
 | **Plugin Management** | `plugin`, `plugin-registry`, `registry`, `publish` |
@@ -1557,6 +1558,24 @@ wfctl infra cleanup --tag conformance-pr-123
 wfctl infra cleanup --tag conformance-pr-123 --fix
 ```
 
+#### `infra owners`
+
+List cloud resources that a provider reports as owned by a Workflow owner identity. For each `iac.provider` module, wfctl calls the optional `interfaces.OwnershipProvider` contract. Providers that do not implement ownership are skipped with a visible stdout line.
+
+```
+wfctl infra owners --owner NAME [-c CONFIG] [--env ENV] [--type RESOURCE_TYPE]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--owner` | _(required)_ | Owner identity to enumerate, such as a repository, team, or deployment owner. |
+| `--type` | `` | Optional resource type filter, e.g. `infra.container_service`. |
+| `-c`, `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for config and state resolution |
+| `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. |
+
+Provider plugins map ownership to their native mechanism, such as `managed-by:<owner>` tags, `managed-by=<owner>` labels, or provider-specific metadata. DNS ownership is separate and remains governed by `wfctl dns-policy`.
+
 #### `infra apply`
 
 Reconcile cloud infrastructure to match the desired state declared in the config. Computes a diff plan via each `iac.provider` and dispatches creates/updates/replaces/deletes through the loaded provider plugin. State is persisted after every successful action so the next run sees the cloud-truth.
@@ -1565,6 +1584,7 @@ Reconcile cloud infrastructure to match the desired state declared in the config
 wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
                   [--refresh] [--allow-protected-prune] [--skip-refresh]
                   [--skip-bootstrap]
+                  [--owner NAME] [--force-owner]
                   [--allow-replace=NAME1,NAME2,...] [--dry-run] [--format FMT]
 ```
 
@@ -1581,8 +1601,12 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
 | `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
 | `--skip-bootstrap` | `false` | Skip auto-bootstrap before apply when required secrets/state already exist |
+| `--owner` | env `WORKFLOW_RESOURCE_OWNER` | Owner identity for generic non-DNS cloud-resource ownership checks. When set, providers with `OwnershipProvider` support block mismatched owners and stamp missing owners; providers without that optional service are skipped. |
+| `--force-owner` | `false` | Override a mismatched generic ownership marker for this apply. Requires `--owner` or `WORKFLOW_RESOURCE_OWNER`. |
 | `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
 | `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
+
+Generic ownership checks do not replace authentication or provider IAM. They are a pre-dispatch safety gate to avoid accidental cross-owner mutation where provider plugins can read/write ownership metadata. DNS resources are excluded from this generic gate and continue to use `wfctl dns-policy`.
 
 **Protected-resource gate:**
 

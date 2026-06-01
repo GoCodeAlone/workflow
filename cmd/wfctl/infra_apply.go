@@ -460,6 +460,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// postcondition + IaCProviderFinalizer fan-out).
 	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
 	wireDNSGateIntoHooks(&hooks, provider)
+	wireOwnershipGateIntoHooks(&hooks, provider)
 	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
 	// printDriftReportIfAny surfaces input-drift to the operator on
 	// success OR partial failure — silently no-ops on empty reports.
@@ -1576,6 +1577,7 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	// v2 is the only supported dispatch per ADR 0024 + workflow#699.
 	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
 	wireDNSGateIntoHooks(&hooks, provider)
+	wireOwnershipGateIntoHooks(&hooks, provider)
 	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
 	if result != nil {
 		printDriftReportIfAny(w, result)
