@@ -69,6 +69,10 @@ func runInfraOwners(args []string) error {
 		}
 		got, listErr := ownership.ListOwners(ctx, interfaces.OwnerFilter{Owner: *owner, ResourceType: *resourceType})
 		if listErr != nil {
+			if errors.Is(listErr, interfaces.ErrProviderMethodUnimplemented) {
+				fmt.Fprintf(ownersStdout, "skipped %s: provider does not implement OwnershipProvider\n", p.Name())
+				continue
+			}
 			totalErrs = append(totalErrs, fmt.Errorf("%s: list owners: %w", p.Name(), listErr))
 			fmt.Fprintf(ownersStderr, "%s: list owners: %v\n", p.Name(), listErr)
 			continue

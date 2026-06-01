@@ -1601,7 +1601,7 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `--allow-protected-prune` | `false` | Allow pruning state entries for resources marked `protected: true` (requires `--refresh`) |
 | `--skip-refresh` | `false` | Skip the `WFCTL_REFRESH_OUTPUTS` pre-step refresh even if the env var is set |
 | `--skip-bootstrap` | `false` | Skip auto-bootstrap before apply when required secrets/state already exist |
-| `--owner` | env `WORKFLOW_RESOURCE_OWNER` | Owner identity for generic non-DNS cloud-resource ownership checks. When set, providers with `OwnershipProvider` support block mismatched owners and stamp missing owners. |
+| `--owner` | env `WORKFLOW_RESOURCE_OWNER` | Owner identity for generic non-DNS cloud-resource ownership checks. When set, providers with `OwnershipProvider` support block mismatched owners and stamp missing owners; providers without that optional service are skipped. |
 | `--force-owner` | `false` | Override a mismatched generic ownership marker for this apply. Requires `--owner` or `WORKFLOW_RESOURCE_OWNER`. |
 | `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
 | `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -86,11 +87,17 @@ func (g ownershipGate) beforeAction(ctx context.Context, action interfaces.PlanA
 	}
 	provider, err := g.ownershipProvider()
 	if err != nil {
+		if errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
+			return nil
+		}
 		return err
 	}
 	ref := ownershipRefForAction(action)
 	owner, err := provider.GetOwner(ctx, ref)
 	if err != nil {
+		if errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
+			return nil
+		}
 		if action.Action == "create" && interfaces.IsErrResourceNotFound(err) {
 			return nil
 		}
@@ -115,9 +122,15 @@ func (g ownershipGate) beforeAction(ctx context.Context, action interfaces.PlanA
 func (g ownershipGate) setOwner(ctx context.Context, ref interfaces.ResourceRef) error {
 	provider, err := g.ownershipProvider()
 	if err != nil {
+		if errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
+			return nil
+		}
 		return err
 	}
 	if err := provider.SetOwner(ctx, ref, g.owner); err != nil {
+		if errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
+			return nil
+		}
 		return fmt.Errorf("ownership: set owner for %s/%s to %q: %w", ref.Type, ref.Name, g.owner, err)
 	}
 	return nil
@@ -126,7 +139,7 @@ func (g ownershipGate) setOwner(ctx context.Context, ref interfaces.ResourceRef)
 func (g ownershipGate) ownershipProvider() (interfaces.OwnershipProvider, error) {
 	provider, ok := g.provider.(interfaces.OwnershipProvider)
 	if !ok {
-		return nil, fmt.Errorf("ownership: provider %q does not implement OwnershipProvider", g.provider.Name())
+		return nil, fmt.Errorf("ownership: provider %q does not implement OwnershipProvider: %w", g.provider.Name(), interfaces.ErrProviderMethodUnimplemented)
 	}
 	return provider, nil
 }

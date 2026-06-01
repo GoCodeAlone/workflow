@@ -56,6 +56,25 @@ func TestRunInfraOwnersSkipsUnsupportedProviders(t *testing.T) {
 	}
 }
 
+func TestRunInfraOwnersSkipsTypedAdapterUnsupportedSentinel(t *testing.T) {
+	var stdout bytes.Buffer
+	prevOut, prevErr, prevLoader := ownersStdout, ownersStderr, ownersLoadProviders
+	ownersStdout, ownersStderr = &stdout, io.Discard
+	ownersLoadProviders = func(context.Context, *flag.FlagSet, string, string) ([]interfaces.IaCProvider, []io.Closer, error) {
+		return []interfaces.IaCProvider{&ownersUnsupportedProvider{}}, nil, nil
+	}
+	t.Cleanup(func() {
+		ownersStdout, ownersStderr, ownersLoadProviders = prevOut, prevErr, prevLoader
+	})
+
+	if err := runInfraOwners([]string{"--owner", "team-a"}); err != nil {
+		t.Fatalf("runInfraOwners: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "skipped owners-unsupported: provider does not implement OwnershipProvider") {
+		t.Fatalf("stdout did not show skip:\n%s", stdout.String())
+	}
+}
+
 type ownersCmdProvider struct {
 	iactest.NoopProvider
 }
@@ -76,4 +95,22 @@ func (p *ownersCmdProvider) ListOwners(_ context.Context, filter interfaces.Owne
 		Owner:  filter.Owner,
 		Source: "tag:managed-by",
 	}}, nil
+}
+
+type ownersUnsupportedProvider struct {
+	iactest.NoopProvider
+}
+
+func (p *ownersUnsupportedProvider) Name() string { return "owners-unsupported" }
+
+func (p *ownersUnsupportedProvider) GetOwner(context.Context, interfaces.ResourceRef) (*interfaces.ResourceOwner, error) {
+	return nil, interfaces.ErrProviderMethodUnimplemented
+}
+
+func (p *ownersUnsupportedProvider) SetOwner(context.Context, interfaces.ResourceRef, string) error {
+	return interfaces.ErrProviderMethodUnimplemented
+}
+
+func (p *ownersUnsupportedProvider) ListOwners(context.Context, interfaces.OwnerFilter) ([]interfaces.ResourceOwner, error) {
+	return nil, interfaces.ErrProviderMethodUnimplemented
 }

@@ -91,6 +91,62 @@ func TestOwnershipGate_CreateSetsOwnerAfterMutationBeforePersist(t *testing.T) {
 	}
 }
 
+func TestOwnershipGate_SkipsUnsupportedProvider(t *testing.T) {
+	provider := &iactest.NoopProvider{ProviderName: "plain"}
+	action := ownershipAction("update")
+	var priorCalled bool
+	hooks := wfctlhelpers.ApplyPlanHooks{
+		OnResourceApplied: func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error {
+			priorCalled = true
+			return nil
+		},
+	}
+	withApplyOwner(t, "team-a", false, func() {
+		wireOwnershipGateIntoHooks(&hooks, provider)
+		if err := hooks.OnBeforeAction(context.Background(), action); err != nil {
+			t.Fatalf("OnBeforeAction: %v", err)
+		}
+		if err := hooks.OnResourceApplied(context.Background(), nil, action, interfaces.ResourceOutput{
+			Name:       "app",
+			Type:       "infra.container_service",
+			ProviderID: "app-1",
+		}); err != nil {
+			t.Fatalf("OnResourceApplied: %v", err)
+		}
+	})
+	if !priorCalled {
+		t.Fatal("prior apply hook was not called")
+	}
+}
+
+func TestOwnershipGate_SkipsTypedAdapterUnsupportedSentinel(t *testing.T) {
+	provider := &ownershipUnsupportedProvider{}
+	action := ownershipAction("update")
+	var priorCalled bool
+	hooks := wfctlhelpers.ApplyPlanHooks{
+		OnResourceApplied: func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error {
+			priorCalled = true
+			return nil
+		},
+	}
+	withApplyOwner(t, "team-a", false, func() {
+		wireOwnershipGateIntoHooks(&hooks, provider)
+		if err := hooks.OnBeforeAction(context.Background(), action); err != nil {
+			t.Fatalf("OnBeforeAction: %v", err)
+		}
+		if err := hooks.OnResourceApplied(context.Background(), nil, action, interfaces.ResourceOutput{
+			Name:       "app",
+			Type:       "infra.container_service",
+			ProviderID: "app-1",
+		}); err != nil {
+			t.Fatalf("OnResourceApplied: %v", err)
+		}
+	})
+	if !priorCalled {
+		t.Fatal("prior apply hook was not called")
+	}
+}
+
 func TestOwnerFromFlagOrEnv(t *testing.T) {
 	t.Setenv("WORKFLOW_RESOURCE_OWNER", "from-env")
 	if got := ownerFromFlagOrEnv("from-flag"); got != "from-flag" {
@@ -155,4 +211,20 @@ func (p *ownershipProviderStub) ListOwners(_ context.Context, filter interfaces.
 
 func ownershipKey(ref interfaces.ResourceRef) string {
 	return ref.Type + "/" + ref.Name
+}
+
+type ownershipUnsupportedProvider struct {
+	iactest.NoopProvider
+}
+
+func (p *ownershipUnsupportedProvider) GetOwner(context.Context, interfaces.ResourceRef) (*interfaces.ResourceOwner, error) {
+	return nil, interfaces.ErrProviderMethodUnimplemented
+}
+
+func (p *ownershipUnsupportedProvider) SetOwner(context.Context, interfaces.ResourceRef, string) error {
+	return interfaces.ErrProviderMethodUnimplemented
+}
+
+func (p *ownershipUnsupportedProvider) ListOwners(context.Context, interfaces.OwnerFilter) ([]interfaces.ResourceOwner, error) {
+	return nil, interfaces.ErrProviderMethodUnimplemented
 }
