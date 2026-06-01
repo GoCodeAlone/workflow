@@ -291,11 +291,11 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, 
 func validateConditionalRouteKeySyntax(cfgPath string) error {
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		return nil
+		return fmt.Errorf("inspect conditional route keys: %w", err)
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil
+		return fmt.Errorf("inspect conditional route keys: %w", err)
 	}
 	if len(doc.Content) == 0 {
 		return nil
