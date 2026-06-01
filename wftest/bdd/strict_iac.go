@@ -89,6 +89,10 @@ var iacServiceChecks = []iacServiceCheck{
 		_, ok := p.(pb.IaCProviderRequirementMapperServer)
 		return ok
 	}},
+	{"workflow.plugin.external.iac.IaCProviderRegionLister", func(p any) bool {
+		_, ok := p.(pb.IaCProviderRegionListerServer)
+		return ok
+	}},
 }
 
 // AssertProviderCapabilitiesMatchRegistration asserts that every typed
