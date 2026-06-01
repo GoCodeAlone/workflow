@@ -131,6 +131,61 @@ Per-record `detect_via` lets you trade redundancy for fewer
 outbound calls; private LANs without internet access can supply
 a custom detector via the plugin SDK.
 
+## Ownership policy
+
+DNS ownership is enforced through the cross-provider `wfctl dns-policy`
+surface, not through per-record `_dns-managed-by` TXT records.
+
+`wfctl dns-policy` stores a zone-level TXT policy at:
+
+```text
+_workflow-dns-policy.<zone>
+```
+
+Each policy entry declares an owner, optional record-name patterns, optional
+record types, and at most one default owner. During `wfctl infra apply`,
+`infra.dns` actions pass through a pre-dispatch gate when `WORKFLOW_DNS_OWNER`
+is set. The gate reads the policy through the active provider's
+`ResourceDriver("infra.dns")` and denies changes where the caller's owner is
+not delegated for the `(record name, record type)` tuple.
+
+Common operations:
+
+```sh
+wfctl dns-policy show --config infra.yaml --provider do-prod --zone example.com
+
+wfctl dns-policy set \
+  --config infra.yaml \
+  --provider do-prod \
+  --zone example.com \
+  --owner sre \
+  --patterns 'www,api,*._acme-challenge' \
+  --types 'A,CNAME,TXT'
+
+wfctl dns-policy transfer-ownership \
+  --config infra.yaml \
+  --provider do-prod \
+  --zone example.com \
+  --name api \
+  --new-owner platform
+
+WORKFLOW_DNS_OWNER=platform wfctl infra apply --config infra.yaml --env prod
+```
+
+Operational rules:
+
+- Missing policy fails closed when `WORKFLOW_DNS_OWNER` is set and an
+  `infra.dns` action is checked.
+- Missing `WORKFLOW_DNS_OWNER` logs a warning and skips DNS policy enforcement
+  for compatibility with older applies.
+- `SOA` and `NS` are protected unless explicitly delegated by type.
+- The policy TXT is preserved by DNS record sanitizers so ownership metadata is
+  visible in audits.
+
+The older `_dns-managed-by.<domain>` idea is intentionally superseded. A single
+zone-level policy is easier to audit, supports multi-owner delegation, and
+avoids scattering ownership records across every managed DNS name.
+
 ## Secret management
 
 Each provider declares its required secrets in plugin.json's
