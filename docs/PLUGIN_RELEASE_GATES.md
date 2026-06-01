@@ -156,6 +156,17 @@ particular, `type: "scaffold"` (used by `scaffold-workflow-plugin` +
 `scaffold-workflow-plugin-private`) is rejected to catch accidental
 re-registration of the scaffold repos as plugins.
 
+**Defense in depth — runtime capability verification:** when
+`--verify-capabilities` is set, registry-sync downloads the upstream release
+asset for the current `GOOS/GOARCH`, extracts the plugin binary, and runs the
+same runtime `GetManifest` check as `wfctl plugin verify-capabilities` against
+the registry manifest. Registry aliases may use short names such as `github`
+while the binary reports `workflow-plugin-github`, so this registry-side check
+does not enforce strict name equality; the standalone
+`wfctl plugin verify-capabilities` command remains strict for source-tree
+`plugin.json` checks. This is intentionally slow and executes downloaded plugin
+binaries; only use it in trusted registry maintenance environments.
+
 ## Registry-side gate (defense in depth)
 
 `workflow-registry/scripts/sync-versions.sh` rejects ingest of any plugin whose upstream release tag is not strict-semver:

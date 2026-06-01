@@ -80,25 +80,45 @@ Options:
 	if err != nil {
 		return fmt.Errorf("resolve %q: %w", pluginDir, err)
 	}
-	manifestPath := filepath.Join(abs, "plugin.json")
+	return verifyPluginManifestAgainstBinary(*binary, filepath.Join(abs, "plugin.json"))
+}
+
+func verifyPluginManifestAgainstBinary(binary, manifestPath string) error {
+	return verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath, manifestCompareOptions{})
+}
+
+type manifestCompareOptions struct {
+	SkipName bool
+}
+
+func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, opts manifestCompareOptions) error {
+	if err := preflightBinary(binary); err != nil {
+		return err
+	}
+
+	absManifestPath, err := filepath.Abs(manifestPath)
+	if err != nil {
+		return fmt.Errorf("resolve %q: %w", manifestPath, err)
+	}
+	manifestPath = absManifestPath
 	manifestBytes, err := os.ReadFile(manifestPath) //nolint:gosec // operator-supplied path.
 	if err != nil {
-		return fmt.Errorf("plugin.json: %w", err)
+		return fmt.Errorf("%s: %w", filepath.Base(manifestPath), err)
 	}
 	var declared plugin.PluginManifest
 	if err := json.Unmarshal(manifestBytes, &declared); err != nil {
-		return fmt.Errorf("plugin.json parse: %w", err)
+		return fmt.Errorf("%s parse: %w", filepath.Base(manifestPath), err)
 	}
 	if err := declared.Validate(); err != nil {
-		return fmt.Errorf("plugin.json validate: %w", err)
+		return fmt.Errorf("%s validate: %w", filepath.Base(manifestPath), err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	binAbs, err := filepath.Abs(*binary)
+	binAbs, err := filepath.Abs(binary)
 	if err != nil {
-		return fmt.Errorf("resolve --binary %q: %w", *binary, err)
+		return fmt.Errorf("resolve --binary %q: %w", binary, err)
 	}
 
 	var stdout, stderr tailBuffer
@@ -137,13 +157,7 @@ Options:
 		return fmt.Errorf("GetManifest RPC: %w (stderr: %s)", err, stderr.String())
 	}
 
-	var failures []string
-	if runtime.GetName() != declared.Name {
-		failures = append(failures, fmt.Sprintf("name: plugin.json=%q; binary Manifest.Name=%q", declared.Name, runtime.GetName()))
-	}
-	if pass, reason := diffVersion(declared.Version, runtime.GetVersion()); !pass {
-		failures = append(failures, "version: "+reason)
-	}
+	failures := compareManifestWithRuntime(declared, runtime, opts)
 
 	// Contract-diff (workflow#767). One new RPC after GetManifest.
 	contractReg, regErr := pbClient.GetContractRegistry(ctx, &emptypb.Empty{})
@@ -183,6 +197,17 @@ Options:
 	}
 	fmt.Printf("OK    %s %s (plugin.json: %s)\n", declared.Name, runtime.GetVersion(), declared.Version)
 	return nil
+}
+
+func compareManifestWithRuntime(declared plugin.PluginManifest, runtime *pb.Manifest, opts manifestCompareOptions) []string {
+	var failures []string
+	if !opts.SkipName && runtime.GetName() != declared.Name {
+		failures = append(failures, fmt.Sprintf("name: plugin.json=%q; binary Manifest.Name=%q", declared.Name, runtime.GetName()))
+	}
+	if pass, reason := diffVersion(declared.Version, runtime.GetVersion()); !pass {
+		failures = append(failures, "version: "+reason)
+	}
+	return failures
 }
 
 // preflightBinary validates the --binary path before exec:

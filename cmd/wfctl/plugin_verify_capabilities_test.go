@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/plugin"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
 func TestVerifyCapabilitiesUsage(t *testing.T) {
@@ -131,6 +134,21 @@ func TestDiffVersion(t *testing.T) {
 			t.Errorf("diffVersion(%q, %q) reason=%q want substring %q",
 				c.declared, c.runtime, reason, c.wantReason)
 		}
+	}
+}
+
+func TestCompareManifestWithRuntimeCanSkipRegistryAliasName(t *testing.T) {
+	declared := plugin.PluginManifest{Name: "github", Version: "1.0.6"}
+	runtime := &pb.Manifest{Name: "workflow-plugin-github", Version: "v1.0.6"}
+
+	strict := compareManifestWithRuntime(declared, runtime, manifestCompareOptions{})
+	if len(strict) != 1 || !strings.Contains(strict[0], "name:") {
+		t.Fatalf("strict comparison failures = %v, want one name mismatch", strict)
+	}
+
+	registry := compareManifestWithRuntime(declared, runtime, manifestCompareOptions{SkipName: true})
+	if len(registry) != 0 {
+		t.Fatalf("registry comparison failures = %v, want none", registry)
 	}
 }
 

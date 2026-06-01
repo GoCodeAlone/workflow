@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -138,5 +141,61 @@ func TestPluginRegistrySync_UsageHelp(t *testing.T) {
 	// flag.ErrHelp is the expected error for --help.
 	if !strings.Contains(err.Error(), "help") {
 		t.Logf("non-help error from --help (may be OK): %v", err)
+	}
+}
+
+func TestPluginRegistrySync_SelectPlatformReleaseAsset(t *testing.T) {
+	assets := []releaseAsset{
+		{Name: "workflow-plugin-foo-linux-amd64.tar.gz", OS: "linux", Arch: "amd64", URL: "linux-amd64"},
+		{Name: "workflow-plugin-foo-darwin-arm64.tar.gz", OS: "darwin", Arch: "arm64", URL: "darwin-arm64"},
+		{Name: "workflow-plugin-foo-linux-arm64.tar.gz", OS: "linux", Arch: "arm64", URL: "linux-arm64"},
+	}
+
+	got, ok := selectPlatformReleaseAsset(assets, "linux", "arm64")
+	if !ok {
+		t.Fatal("expected linux/arm64 asset to be selected")
+	}
+	if got.Name != "workflow-plugin-foo-linux-arm64.tar.gz" {
+		t.Fatalf("selected asset = %q, want linux arm64 tarball", got.Name)
+	}
+
+	if _, ok := selectPlatformReleaseAsset(assets, "windows", "amd64"); ok {
+		t.Fatal("unexpected asset for missing windows/amd64 platform")
+	}
+}
+
+func TestPluginRegistrySync_LocateExtractedBinary(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "workflow-plugin-foo")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit lookup is POSIX-specific")
+	}
+
+	got, err := locateRegistrySyncBinary(dir, "foo", "workflow-plugin-foo")
+	if err != nil {
+		t.Fatalf("locateRegistrySyncBinary returned error: %v", err)
+	}
+	if got != bin {
+		t.Fatalf("binary path = %q, want %q", got, bin)
+	}
+
+	if _, err := locateRegistrySyncBinary(dir, "missing-plugin"); err == nil {
+		t.Fatal("expected missing binary error")
+	}
+}
+
+func TestPluginRegistrySync_AssetBinaryName(t *testing.T) {
+	cases := map[string]string{
+		"workflow-plugin-github-darwin-arm64.tar.gz": "workflow-plugin-github",
+		"workflow-plugin-foo_linux_amd64.tgz":        "workflow-plugin-foo",
+		"custom-plugin":                              "custom-plugin",
+	}
+	for in, want := range cases {
+		if got := assetBinaryName(in); got != want {
+			t.Fatalf("assetBinaryName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
