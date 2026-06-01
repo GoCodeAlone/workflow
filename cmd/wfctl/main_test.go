@@ -319,6 +319,46 @@ pipelines:
 	}
 }
 
+func TestRunValidateRejectsConditionalRoutesWithNonStringKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+modules:
+  - name: router
+    type: http.router
+pipelines:
+  authz:
+    trigger:
+      type: mock
+    steps:
+      - name: route-by-authz
+        type: step.conditional
+        config:
+          field: authz.allowed
+          routes:
+            true: allow
+            false: deny
+      - name: allow
+        type: step.log
+        config:
+          message: allow
+      - name: deny
+        type: step.log
+        config:
+          message: deny
+`
+	path := writeTestConfig(t, dir, "conditional.yaml", cfg)
+
+	err := runValidate([]string{"--skip-unknown-types", "--allow-no-entry-points", path})
+	if err == nil {
+		t.Fatal("expected validate to fail on non-string conditional route keys")
+	}
+	if !strings.Contains(err.Error(), "step.conditional") ||
+		!strings.Contains(err.Error(), "routes") ||
+		!strings.Contains(err.Error(), "'true'") {
+		t.Fatalf("expected actionable conditional route key error, got: %v", err)
+	}
+}
+
 func TestRunValidateMissingArg(t *testing.T) {
 	err := runValidate([]string{})
 	if err == nil {

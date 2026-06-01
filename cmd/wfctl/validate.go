@@ -150,6 +150,9 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, 
 	if isLikelyWfctlProjectManifest(cfgPath) {
 		return fmt.Errorf("%s is a wfctl project manifest; use 'wfctl config validate %s' instead", cfgPath, cfgPath)
 	}
+	if err := validateConditionalRouteKeySyntax(cfgPath); err != nil {
+		return err
+	}
 
 	cfg, err := config.LoadFromFile(cfgPath)
 	if err != nil {
@@ -283,6 +286,82 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, 
 	fmt.Printf("  PASS %s (%d modules, %d workflows, %d triggers)\n",
 		cfgPath, len(cfg.Modules), len(cfg.Workflows), len(cfg.Triggers))
 	return nil
+}
+
+func validateConditionalRouteKeySyntax(cfgPath string) error {
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	if len(doc.Content) == 0 {
+		return nil
+	}
+	root := doc.Content[0]
+	pipelines := mappingValue(root, "pipelines")
+	if pipelines == nil || pipelines.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(pipelines.Content); i += 2 {
+		pipelineName := pipelines.Content[i].Value
+		pipeline := pipelines.Content[i+1]
+		if pipeline.Kind != yaml.MappingNode {
+			continue
+		}
+		steps := mappingValue(pipeline, "steps")
+		if steps == nil || steps.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, step := range steps.Content {
+			if step.Kind != yaml.MappingNode || mappingScalarValue(step, "type") != "step.conditional" {
+				continue
+			}
+			stepName := mappingScalarValue(step, "name")
+			if stepName == "" {
+				stepName = "<unnamed>"
+			}
+			cfg := mappingValue(step, "config")
+			if cfg == nil || cfg.Kind != yaml.MappingNode {
+				continue
+			}
+			routes := mappingValue(cfg, "routes")
+			if routes == nil || routes.Kind != yaml.MappingNode {
+				continue
+			}
+			for j := 0; j+1 < len(routes.Content); j += 2 {
+				key := routes.Content[j]
+				if key.ShortTag() == "!!str" {
+					continue
+				}
+				return fmt.Errorf("pipeline %q step %q (type step.conditional): routes key %q is parsed as %s, not string; quote it as '%s'",
+					pipelineName, stepName, key.Value, strings.TrimPrefix(key.ShortTag(), "!!"), key.Value)
+			}
+		}
+	}
+	return nil
+}
+
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func mappingScalarValue(n *yaml.Node, key string) string {
+	v := mappingValue(n, key)
+	if v == nil || v.Kind != yaml.ScalarNode {
+		return ""
+	}
+	return v.Value
 }
 
 // skipDirs are directory names that should be excluded from recursive scanning.

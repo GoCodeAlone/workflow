@@ -48,8 +48,8 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 
 	// Global variables. Project-level CI/CD variables (secrets) are already
 	// injected into every job's environment by GitLab, so we do NOT re-declare
-	// them as `NAME: $NAME` (a no-op that only obscures the pipeline). Only the
-	// wfctl version pin is a genuine pipeline variable.
+	// the plan-wide union globally. Only the wfctl version pin is a genuine
+	// pipeline variable.
 	b.WriteString("variables:\n")
 	fmt.Fprintf(&b, "  WFCTL_VERSION: %q\n", version)
 	b.WriteString("\n")
@@ -100,10 +100,23 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 			fmt.Fprintf(&b, "    - job: %s\n", prevJob)
 			b.WriteString("      artifacts: false\n")
 		}
+		secrets := p.Secrets
+		if phase.Scoped {
+			secrets = phase.Secrets
+		}
+		if len(secrets) > 0 {
+			b.WriteString("  variables:\n")
+			for _, name := range sortedSecretNames(secrets) {
+				fmt.Fprintf(&b, "    %s: $%s\n", name, name)
+			}
+		}
 		b.WriteString("  script:\n")
 		isLastPhase := i == len(p.Phases)-1
 		if isLastPhase && p.Migrations != nil {
 			fmt.Fprintf(&b, "    - %s\n", migrationsUpCommand(phase.ConfigPath, p.Migrations.Env))
+		}
+		if p.PlanGuard {
+			writeGitLabPlanGuard(&b, phase.ConfigPath)
 		}
 		fmt.Fprintf(&b, "    - wfctl infra apply --config '%s' --auto-approve\n", phase.ConfigPath)
 		b.WriteString("  environment:\n")
@@ -136,4 +149,17 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+// writeGitLabPlanGuard refuses to apply when the plan includes a replace or
+// destroy of a protected resource. The plan output stays in the job log (tee)
+// and a destructive plan fails the job (exit 1) — no `|| true`.
+func writeGitLabPlanGuard(b *strings.Builder, configPath string) {
+	b.WriteString("    - |\n")
+	fmt.Fprintf(b, "      wfctl infra plan --config '%s' | tee plan-guard.txt\n", configPath)
+	b.WriteString("      if grep -Eq -- '^[[:space:]]*(- delete|-/\\+ replace)[[:space:]]' plan-guard.txt || \\\n")
+	b.WriteString("         grep -Eq -- 'Plan: .*([1-9][0-9]* to replace|[1-9][0-9]* to destroy)' plan-guard.txt; then\n")
+	b.WriteString("        echo 'Refusing apply: plan includes replace or destroy of a protected resource.' >&2\n")
+	b.WriteString("        exit 1\n")
+	b.WriteString("      fi\n")
 }
