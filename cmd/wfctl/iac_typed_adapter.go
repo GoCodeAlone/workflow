@@ -55,6 +55,7 @@ const (
 	iacServiceDriftDetector     = "workflow.plugin.external.iac.IaCProviderDriftDetector"
 	iacServiceCredentialRevoker = "workflow.plugin.external.iac.IaCProviderCredentialRevoker"
 	iacServiceRegionLister      = "workflow.plugin.external.iac.IaCProviderRegionLister"
+	iacServiceOwnership         = "workflow.plugin.external.iac.IaCProviderOwnership"
 	iacServiceMigrationRepairer = "workflow.plugin.external.iac.IaCProviderMigrationRepairer"
 	iacServiceValidator         = "workflow.plugin.external.iac.IaCProviderValidator"
 	iacServiceDriftConfigDetect = "workflow.plugin.external.iac.IaCProviderDriftConfigDetector"
@@ -83,6 +84,7 @@ type typedIaCAdapter struct {
 	drift        pb.IaCProviderDriftDetectorClient
 	revoker      pb.IaCProviderCredentialRevokerClient
 	regionLister pb.IaCProviderRegionListerClient
+	ownership    pb.IaCProviderOwnershipClient
 	repairer     pb.IaCProviderMigrationRepairerClient
 	validator    pb.IaCProviderValidatorClient
 	driftCfg     pb.IaCProviderDriftConfigDetectorClient
@@ -120,6 +122,9 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 	}
 	if registered[iacServiceRegionLister] {
 		a.regionLister = pb.NewIaCProviderRegionListerClient(conn)
+	}
+	if registered[iacServiceOwnership] {
+		a.ownership = pb.NewIaCProviderOwnershipClient(conn)
 	}
 	if registered[iacServiceMigrationRepairer] {
 		a.repairer = pb.NewIaCProviderMigrationRepairerClient(conn)
@@ -233,6 +238,13 @@ func (a *typedIaCAdapter) CredentialRevoker() pb.IaCProviderCredentialRevokerCli
 // over the host's local catalog.
 func (a *typedIaCAdapter) RegionLister() pb.IaCProviderRegionListerClient {
 	return a.regionLister
+}
+
+// Ownership returns the typed pb.IaCProviderOwnershipClient or nil when the
+// plugin did not register IaCProviderOwnership. Used by wfctl infra ownership
+// gates and resource-owner enumeration.
+func (a *typedIaCAdapter) Ownership() pb.IaCProviderOwnershipClient {
+	return a.ownership
 }
 
 // ListProviderRegions queries the optional region lister and returns sorted
@@ -566,6 +578,60 @@ func (a *typedIaCAdapter) EnumerateByTag(ctx context.Context, tag string) ([]int
 		return nil, translateRPCErr(err)
 	}
 	return refsFromPB(resp.GetRefs()), nil
+}
+
+// GetOwner satisfies interfaces.OwnershipProvider.
+func (a *typedIaCAdapter) GetOwner(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOwner, error) {
+	if a.ownership == nil {
+		return nil, unimplementedOptional(iacServiceOwnership)
+	}
+	resp, err := a.ownership.GetOwner(ctx, &pb.GetOwnerRequest{Ref: refToPB(ref)})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	return &interfaces.ResourceOwner{
+		Ref:    ref,
+		Owner:  resp.GetOwner(),
+		Source: resp.GetSource(),
+	}, nil
+}
+
+// SetOwner satisfies interfaces.OwnershipProvider.
+func (a *typedIaCAdapter) SetOwner(ctx context.Context, ref interfaces.ResourceRef, owner string) error {
+	if a.ownership == nil {
+		return unimplementedOptional(iacServiceOwnership)
+	}
+	_, err := a.ownership.SetOwner(ctx, &pb.SetOwnerRequest{
+		Ref:   refToPB(ref),
+		Owner: owner,
+	})
+	return translateRPCErr(err)
+}
+
+// ListOwners satisfies interfaces.OwnershipProvider.
+func (a *typedIaCAdapter) ListOwners(ctx context.Context, filter interfaces.OwnerFilter) ([]interfaces.ResourceOwner, error) {
+	if a.ownership == nil {
+		return nil, unimplementedOptional(iacServiceOwnership)
+	}
+	resp, err := a.ownership.ListOwners(ctx, &pb.ListOwnersRequest{
+		Owner:        filter.Owner,
+		ResourceType: filter.ResourceType,
+	})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	out := make([]interfaces.ResourceOwner, 0, len(resp.GetResources()))
+	for _, r := range resp.GetResources() {
+		if r == nil {
+			continue
+		}
+		out = append(out, interfaces.ResourceOwner{
+			Ref:    refFromPB(r.GetRef()),
+			Owner:  r.GetOwner(),
+			Source: r.GetSource(),
+		})
+	}
+	return out, nil
 }
 
 // DetectDriftWithSpecs satisfies interfaces.DriftConfigDetector. Routed
@@ -1449,6 +1515,7 @@ var (
 	_ interfaces.IaCProvider               = (*typedIaCAdapter)(nil)
 	_ interfaces.Enumerator                = (*typedIaCAdapter)(nil)
 	_ interfaces.EnumeratorAll             = (*typedIaCAdapter)(nil)
+	_ interfaces.OwnershipProvider         = (*typedIaCAdapter)(nil)
 	_ interfaces.DriftConfigDetector       = (*typedIaCAdapter)(nil)
 	_ interfaces.ProviderValidator         = (*typedIaCAdapter)(nil)
 	_ interfaces.ProviderCredentialRevoker = (*typedIaCAdapter)(nil)

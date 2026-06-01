@@ -35,6 +35,7 @@ func TestBuildContractRegistry_AdvertisesRegisteredIaCServices(t *testing.T) {
 		"workflow.plugin.external.iac.IaCProviderEnumerator",
 		"workflow.plugin.external.iac.IaCProviderDriftDetector",
 		"workflow.plugin.external.iac.IaCProviderRegionLister",
+		"workflow.plugin.external.iac.IaCProviderOwnership",
 	}
 	for _, name := range want {
 		if !services[name] {
@@ -134,6 +135,7 @@ type iacContractProviderStub struct {
 	pb.UnimplementedIaCProviderEnumeratorServer
 	pb.UnimplementedIaCProviderDriftDetectorServer
 	pb.UnimplementedIaCProviderRegionListerServer
+	pb.UnimplementedIaCProviderOwnershipServer
 }
 
 type iacRequirementContractProviderStub struct {

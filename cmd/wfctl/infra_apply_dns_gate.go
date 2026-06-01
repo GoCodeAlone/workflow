@@ -102,7 +102,7 @@ func extractDNSRecords(records any) []map[string]any {
 // AFTER constructing the hooks via statePersistenceHooks so the OnBefore
 // closure shares the same provider reference.
 func wireDNSGateIntoHooks(hooks *wfctlhelpers.ApplyPlanHooks, provider interfaces.IaCProvider) {
-	hooks.OnBeforeAction = dnsGateHook(provider)
+	appendOnBeforeActionHook(hooks, dnsGateHook(provider))
 }
 
 // Compile-time guard that the policy + gate packages stay in dependency

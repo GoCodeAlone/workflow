@@ -50,6 +50,9 @@ func TestTypedAdapter_SatisfiesIaCProvider(t *testing.T) {
 	if _, ok := any(a).(interfaces.EnumeratorAll); !ok {
 		t.Fatalf("typedIaCAdapter must satisfy interfaces.EnumeratorAll")
 	}
+	if _, ok := any(a).(interfaces.OwnershipProvider); !ok {
+		t.Fatalf("typedIaCAdapter must satisfy interfaces.OwnershipProvider")
+	}
 	if _, ok := any(a).(interfaces.DriftConfigDetector); !ok {
 		t.Fatalf("typedIaCAdapter must satisfy interfaces.DriftConfigDetector")
 	}
@@ -81,6 +84,17 @@ func TestTypedAdapter_OptionalReturnsUnimplementedSentinel(t *testing.T) {
 		}},
 		{"EnumerateByTag", func() error {
 			_, err := a.EnumerateByTag(context.Background(), "production")
+			return err
+		}},
+		{"GetOwner", func() error {
+			_, err := a.GetOwner(context.Background(), interfaces.ResourceRef{Name: "app", Type: "infra.container_service"})
+			return err
+		}},
+		{"SetOwner", func() error {
+			return a.SetOwner(context.Background(), interfaces.ResourceRef{Name: "app", Type: "infra.container_service"}, "team-a")
+		}},
+		{"ListOwners", func() error {
+			_, err := a.ListOwners(context.Background(), interfaces.OwnerFilter{Owner: "team-a"})
 			return err
 		}},
 		{"DetectDrift", func() error {
@@ -420,6 +434,56 @@ func TestTypedAdapter_RegionLister_NilWhenNotRegistered(t *testing.T) {
 	}
 }
 
+func TestTypedAdapter_Ownership_PopulatedWhenRegistered(t *testing.T) {
+	conn := dialLazyConn(t)
+	adapter := newTypedIaCAdapter(conn, map[string]bool{
+		iacServiceOwnership: true,
+	})
+	if adapter.Ownership() == nil {
+		t.Error("Ownership() returned nil when IaCProviderOwnership is in registered set")
+	}
+}
+
+func TestTypedAdapter_Ownership_NilWhenNotRegistered(t *testing.T) {
+	conn := dialLazyConn(t)
+	adapter := newTypedIaCAdapter(conn, map[string]bool{
+		iacServiceEnumerator: true,
+	})
+	if adapter.Ownership() != nil {
+		t.Error("Ownership() returned non-nil when IaCProviderOwnership not registered")
+	}
+}
+
+func TestTypedAdapter_OwnershipRoundTrip(t *testing.T) {
+	stub := &ownershipStub{}
+	adapter := fixtureTypedAdapter{Ownership: stub}.build(t)
+	ref := interfaces.ResourceRef{Name: "app", Type: "infra.container_service", ProviderID: "app-1"}
+
+	got, err := adapter.GetOwner(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("GetOwner: %v", err)
+	}
+	if got.Owner != "team-a" || got.Source != "tag:managed-by" || got.Ref != ref {
+		t.Fatalf("GetOwner = %+v, want owner/source/ref", got)
+	}
+	if err := adapter.SetOwner(context.Background(), ref, "team-b"); err != nil {
+		t.Fatalf("SetOwner: %v", err)
+	}
+	if stub.setOwner != "team-b" || stub.setRef != ref {
+		t.Fatalf("SetOwner recorded ref=%+v owner=%q, want %+v/team-b", stub.setRef, stub.setOwner, ref)
+	}
+	owners, err := adapter.ListOwners(context.Background(), interfaces.OwnerFilter{Owner: "team-a", ResourceType: "infra.container_service"})
+	if err != nil {
+		t.Fatalf("ListOwners: %v", err)
+	}
+	if len(owners) != 1 || owners[0].Owner != "team-a" || owners[0].Ref != ref {
+		t.Fatalf("ListOwners = %+v, want one owned resource", owners)
+	}
+	if stub.listOwner != "team-a" || stub.listType != "infra.container_service" {
+		t.Fatalf("ListOwners request owner/type = %q/%q", stub.listOwner, stub.listType)
+	}
+}
+
 func TestTypedAdapter_ListProviderRegions(t *testing.T) {
 	adapter := fixtureTypedAdapter{
 		RegionLister: regionListerStub{},
@@ -438,6 +502,37 @@ func TestTypedAdapter_ListProviderRegions(t *testing.T) {
 			t.Fatalf("regions = %v, want %v", got, want)
 		}
 	}
+}
+
+type ownershipStub struct {
+	pb.UnimplementedIaCProviderOwnershipServer
+	setRef    interfaces.ResourceRef
+	setOwner  string
+	listOwner string
+	listType  string
+}
+
+func (s *ownershipStub) GetOwner(_ context.Context, req *pb.GetOwnerRequest) (*pb.GetOwnerResponse, error) {
+	if got := refFromPB(req.GetRef()); got.Name != "app" {
+		return nil, status.Errorf(codes.InvalidArgument, "name = %q, want app", got.Name)
+	}
+	return &pb.GetOwnerResponse{Owner: "team-a", Source: "tag:managed-by"}, nil
+}
+
+func (s *ownershipStub) SetOwner(_ context.Context, req *pb.SetOwnerRequest) (*pb.SetOwnerResponse, error) {
+	s.setRef = refFromPB(req.GetRef())
+	s.setOwner = req.GetOwner()
+	return &pb.SetOwnerResponse{}, nil
+}
+
+func (s *ownershipStub) ListOwners(_ context.Context, req *pb.ListOwnersRequest) (*pb.ListOwnersResponse, error) {
+	s.listOwner = req.GetOwner()
+	s.listType = req.GetResourceType()
+	return &pb.ListOwnersResponse{Resources: []*pb.OwnedResource{{
+		Ref:    refToPB(interfaces.ResourceRef{Name: "app", Type: "infra.container_service", ProviderID: "app-1"}),
+		Owner:  "team-a",
+		Source: "tag:managed-by",
+	}}}, nil
 }
 
 type regionListerStub struct {

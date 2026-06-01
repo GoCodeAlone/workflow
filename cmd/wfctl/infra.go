@@ -95,6 +95,8 @@ func runInfra(args []string) error {
 		return runInfraSecurityCheck(args[1:])
 	case "cleanup":
 		return runInfraCleanup(args[1:])
+	case "owners":
+		return runInfraOwners(args[1:])
 	case "audit-secrets":
 		if rc := runInfraAuditSecrets(args[1:], os.Stdout); rc != 0 {
 			return fmt.Errorf("audit-secrets exited with code %d", rc)
@@ -143,6 +145,7 @@ Actions:
                    (list-resources, get-resource, list-types,
                     list-providers, generate-config, audit-tail)
   cleanup        Tag-based force-cleanup across providers (--tag NAME [--fix])
+  owners         List cloud resources carrying a provider ownership marker
   audit-secrets  Report provider_credential anti-patterns in secrets.generate
   audit-keys     List cloud-side resources of --type via the provider's EnumeratorAll
   prune          Destructively delete cloud resources by --created-before / --exclude-access-key (two-key opt-in)
@@ -159,6 +162,8 @@ Options:
   --output <file>      Write plan to JSON file (plan only)
   --show-sensitive/-S  Show sensitive values in plaintext (plan/apply only)
   --tag <name>         Tag to match resources (cleanup only; required)
+  --owner <name>       Owner identity for ownership checks/listing
+  --force-owner        Override mismatched ownership on apply (requires --owner)
   --dry-run            Preview only (cleanup; default true)
   --write              Update config file in place (derive only)
   --non-interactive    Fail instead of prompting for ambiguous choices (derive only)
@@ -1309,6 +1314,10 @@ func runInfraApply(args []string) error {
 	fs.BoolVar(&skipBootstrapFlag, "skip-bootstrap", false, "Skip auto-bootstrap before apply; use only when required secrets/state already exist")
 	var waitFlag bool
 	fs.BoolVar(&waitFlag, "wait", false, "Wait for deployable infra resources to become healthy before exiting")
+	var ownerFlag string
+	fs.StringVar(&ownerFlag, "owner", "", "Owner identity for generic cloud-resource ownership checks (defaults to WORKFLOW_RESOURCE_OWNER)")
+	var forceOwnerFlag bool
+	fs.BoolVar(&forceOwnerFlag, "force-owner", false, "Override mismatched generic cloud-resource ownership for this apply (requires --owner or WORKFLOW_RESOURCE_OWNER)")
 	var allowReplaceFlag string
 	fs.StringVar(&allowReplaceFlag, "allow-replace", "",
 		"Comma-separated list of resource names whose protected: true status is overridden for this apply (replace/delete actions only)")
@@ -1338,6 +1347,11 @@ func runInfraApply(args []string) error {
 		return fmt.Errorf("--include cannot be combined with --plan (use --include at plan time, then apply with --plan; the plan already carries the scope)")
 	}
 
+	owner := ownerFromFlagOrEnv(ownerFlag)
+	if forceOwnerFlag && owner == "" {
+		return fmt.Errorf("--force-owner requires --owner or WORKFLOW_RESOURCE_OWNER")
+	}
+
 	// W-6/T6.1: publish the parsed --allow-replace set for the apply
 	// path's gate (validateAllowReplaceProtected, called from both
 	// applyWithProviderAndStore and applyPrecomputedPlanWithStore).
@@ -1350,6 +1364,15 @@ func runInfraApply(args []string) error {
 	prevInfraApplyWait := currentInfraApplyWait
 	currentInfraApplyWait = waitFlag
 	defer func() { currentInfraApplyWait = prevInfraApplyWait }()
+
+	prevApplyOwner := currentApplyOwner
+	prevApplyForceOwner := currentApplyForceOwner
+	currentApplyOwner = owner
+	currentApplyForceOwner = forceOwnerFlag
+	defer func() {
+		currentApplyOwner = prevApplyOwner
+		currentApplyForceOwner = prevApplyForceOwner
+	}()
 
 	// Publish the --include flag value for the apply path's filter helpers
 	// (including dry-run). Reset to "" at the top of every invocation so the
