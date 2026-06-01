@@ -72,10 +72,6 @@ Options:
 		return fmt.Errorf("exactly one <plugin-dir> argument required")
 	}
 	pluginDir := fs.Arg(0)
-	if err := preflightBinary(*binary); err != nil {
-		return err
-	}
-
 	abs, err := filepath.Abs(pluginDir)
 	if err != nil {
 		return fmt.Errorf("resolve %q: %w", pluginDir, err)
@@ -202,7 +198,7 @@ func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, o
 func compareManifestWithRuntime(declared plugin.PluginManifest, runtime *pb.Manifest, opts manifestCompareOptions) []string {
 	var failures []string
 	if !opts.SkipName && runtime.GetName() != declared.Name {
-		failures = append(failures, fmt.Sprintf("name: plugin.json=%q; binary Manifest.Name=%q", declared.Name, runtime.GetName()))
+		failures = append(failures, fmt.Sprintf("name: declared manifest=%q; binary Manifest.Name=%q", declared.Name, runtime.GetName()))
 	}
 	if pass, reason := diffVersion(declared.Version, runtime.GetVersion()); !pass {
 		failures = append(failures, "version: "+reason)
