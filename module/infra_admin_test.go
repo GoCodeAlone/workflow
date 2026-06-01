@@ -1192,7 +1192,7 @@ func TestInfraAdmin_AuditResultFor3Way(t *testing.T) {
 	}{
 		{"", "ok"},
 		{"authz evidence missing — admin middleware did not attach", "denied"},
-		{"apply: infra:apply denied for subject viewer", "denied"},
+		{"apply: infra:apply denied", "denied"},
 		{"apply: plan is stale (desired_hash mismatch)", "denied"},
 		{"apply: list state: connection refused", "error"},
 		{"plan: no iac.provider registered", "error"},
@@ -1409,6 +1409,9 @@ func TestInfraAdmin_TypedAuthzDenied_Returns403(t *testing.T) {
 	// ── viewer→/plan=403 ─────────────────────────────────────────────────────
 	// handlePlanResource now calls m.authz.Enforce before handler.PlanResource
 	// (Bug 4 fix). Viewer subject denied → HTTP 403 directly from module layer.
+	// Additional assertions (Copilot findings):
+	//   - Body is proto-JSON AdminPlanOutput (not plaintext) — consistent with apply/destroy 403s.
+	//   - Body does NOT contain the subject string "viewer" — no principal leak.
 	t.Run("viewer/plan=403", func(t *testing.T) {
 		enforcer := &stubEnforcer{allowed: false}
 		m := startWithConfig(t, enforcer, nil)
@@ -1420,6 +1423,18 @@ func TestInfraAdmin_TypedAuthzDenied_Returns403(t *testing.T) {
 		m.router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("viewer/plan: want 403, got %d; body=%s", rec.Code, rec.Body.String())
+		}
+		// Body must be proto-JSON AdminPlanOutput, not plaintext (Copilot finding 1+2).
+		if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+			t.Errorf("viewer/plan 403: Content-Type = %q, want application/json (proto-JSON body)", ct)
+		}
+		var planOut adminpb.AdminPlanOutput
+		if err := protojson.Unmarshal(rec.Body.Bytes(), &planOut); err != nil {
+			t.Errorf("viewer/plan 403: body is not valid AdminPlanOutput JSON: %v\n%s", err, rec.Body.String())
+		}
+		// Subject must NOT appear in response body — no principal leakage.
+		if strings.Contains(rec.Body.String(), "viewer") {
+			t.Errorf("viewer/plan 403: body contains subject 'viewer' — principal leak; body=%s", rec.Body.String())
 		}
 	})
 
@@ -1495,7 +1510,7 @@ func TestInfraAdmin_AuditDistinguishesDeniedFromError(t *testing.T) {
 	// Denial (authz/evidence/stale markers) → "denied"
 	for _, msg := range []string{
 		"authz evidence missing",
-		"infra:apply denied for subject viewer",
+		"infra:apply denied",
 		"plan is stale (desired_hash mismatch)",
 	} {
 		if got := auditResultFor(msg); got != "denied" {
@@ -1526,7 +1541,7 @@ func TestInfraAdmin_AuditResultFromErr(t *testing.T) {
 		want   string
 	}{
 		{"success", nil, "", "ok"},
-		{"authz sentinel", handler.ErrAuthzDenied, "apply: infra:apply denied for subject viewer", "denied"},
+		{"authz sentinel", handler.ErrAuthzDenied, "apply: infra:apply denied", "denied"},
 		// The critical false-positive regression: provider error containing
 		// "denied" must NOT be classified as "denied" (strings.Contains would
 		// have done so). Only errors.Is(ErrAuthzDenied) triggers "denied".

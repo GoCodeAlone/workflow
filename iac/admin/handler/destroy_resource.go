@@ -43,7 +43,9 @@ func DestroyResource(
 			return &adminpb.AdminDestroyOutput{Error: "destroy: authz enforce error"}, nil //nolint:nilerr
 		}
 		if !ok {
-			return &adminpb.AdminDestroyOutput{Error: "destroy: infra:destroy denied for subject " + subject}, ErrAuthzDenied
+			// Generic denial — do NOT reflect the authenticated subject in the
+			// response body. Subject is captured by the module-layer audit log.
+			return &adminpb.AdminDestroyOutput{Error: "destroy: infra:destroy denied"}, ErrAuthzDenied
 		}
 	}
 

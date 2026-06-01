@@ -1163,15 +1163,17 @@ func (m *InfraAdmin) handlePlanResource(w http.ResponseWriter, r *http.Request) 
 	if m.authz != nil {
 		ok, enforceErr := m.authz.Enforce(subject, "infra:apply", "allow")
 		if enforceErr != nil {
-			http.Error(w, "plan: authz enforce error", http.StatusInternalServerError)
+			// Route through writeStatusProto so the 500 body is proto-JSON,
+			// consistent with all other mutation error responses (Finding 1).
+			writeStatusProto(w, http.StatusInternalServerError, &adminpb.AdminPlanOutput{Error: "plan: authz enforce error"})
 			m.auditAccess(r, "plan", in.GetEvidence(), "error")
 			return
 		}
 		if !ok {
-			// Route through writeMutationResponse so the 403 body is
-			// proto-JSON — consistent with apply/destroy 403 shape (Fix 2).
-			deniedOut := &adminpb.AdminPlanOutput{Error: "plan: infra:apply denied for subject " + subject}
-			writeMutationResponse(w, deniedOut, handler.ErrAuthzDenied)
+			// Generic denial — do NOT reflect the authenticated subject in the
+			// response body (Finding 2). Subject is captured in the audit log
+			// separately. Route through writeMutationResponse for proto-JSON body.
+			writeMutationResponse(w, &adminpb.AdminPlanOutput{Error: "plan: infra:apply denied"}, handler.ErrAuthzDenied)
 			m.auditAccess(r, "plan", in.GetEvidence(), "denied")
 			return
 		}

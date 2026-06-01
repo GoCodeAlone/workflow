@@ -56,7 +56,9 @@ func ApplyResource(
 			return &adminpb.AdminApplyOutput{Error: "apply: authz enforce error"}, nil //nolint:nilerr
 		}
 		if !ok {
-			return &adminpb.AdminApplyOutput{Error: "apply: infra:apply denied for subject " + subject}, ErrAuthzDenied
+			// Generic denial — do NOT reflect the authenticated subject in the
+			// response body. Subject is captured by the module-layer audit log.
+			return &adminpb.AdminApplyOutput{Error: "apply: infra:apply denied"}, ErrAuthzDenied
 		}
 	}
 

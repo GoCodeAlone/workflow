@@ -25,8 +25,10 @@ import (
 // The providers map is keyed by module name; the first entry is used for
 // planning (single-provider per-route model for v1.1).
 //
-// Evidence default-deny: if authzError is non-empty, the handler
-// short-circuits with Output.error (HTTP stays 200; consumer sniffs tag-100).
+// Evidence default-deny: if authzError is non-empty, the handler returns
+// (output, ErrAuthzDenied). The module layer maps this to HTTP 403 via
+// writeMutationResponse — NOT 200; the proto tag-100 pattern applies only
+// to non-authz errors (provider/backend failures).
 func PlanResource(
 	ctx context.Context,
 	store interfaces.IaCStateStore, //nolint:revive // nil ok when no state needed (e.g. fresh deploy)
