@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -27,9 +28,8 @@ import (
 //  6. Fetches tagged plugin.json from upstream; syncs capabilities,
 //     minEngineVersion, iacProvider into registry manifest.
 //  7. (--verify-capabilities) Downloads release tarball + spawns binary;
-//     diffs GetManifest's capabilities vs committed; with --fix rewrites.
-//     NOTE: deferred to a follow-up PR per plan I4 / I-P9 — initial impl
-//     stubs this with a clear "not implemented yet" message.
+//     reuses wfctl plugin verify-capabilities to diff runtime GetManifest
+//     against the registry manifest.
 func runPluginRegistrySync(args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
@@ -195,7 +195,16 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 		}
 
 		if verifyCaps {
-			fmt.Fprintf(os.Stderr, "  NOTE   %s — --verify-capabilities not yet implemented (workflow#762 follow-up)\n", pluginName)
+			verifyName, _ := raw["name"].(string)
+			if verifyName == "" {
+				verifyName = pluginName
+			}
+			if err := verifyRegistryPluginCapabilities(verifyName, manifestPath, ghRepo, targetTag); err != nil {
+				fmt.Fprintf(os.Stderr, "  ERROR  %s — verify capabilities: %v\n", pluginName, err)
+				mismatches++
+				continue
+			}
+			fmt.Printf("    OK  %s capabilities verified against %s (%s/%s)\n", pluginName, targetTag, runtime.GOOS, runtime.GOARCH)
 		}
 	}
 
@@ -247,6 +256,7 @@ func releaseExists(ghRepo, tag string) bool {
 }
 
 type releaseAsset struct {
+	Name string `json:"name"`
 	OS   string `json:"os"`
 	Arch string `json:"arch"`
 	URL  string `json:"url"`
@@ -288,9 +298,141 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 		if !isKnownOS(os) || !isKnownArch(arch) {
 			continue
 		}
-		assets = append(assets, releaseAsset{OS: os, Arch: arch, URL: a.URL})
+		assets = append(assets, releaseAsset{Name: a.Name, OS: os, Arch: arch, URL: a.URL})
 	}
 	return assets, nil
+}
+
+var (
+	registrySyncReleaseDownloads     = releaseDownloads
+	registrySyncDownloadReleaseAsset = downloadReleaseAsset
+	registrySyncVerifyManifest       = verifyPluginManifestAgainstBinaryWithOptions
+)
+
+func verifyRegistryPluginCapabilities(pluginName, manifestPath, ghRepo, tag string) error {
+	assets, err := registrySyncReleaseDownloads(ghRepo, tag)
+	if err != nil {
+		return fmt.Errorf("list release downloads for %s %s: %w", ghRepo, tag, err)
+	}
+	asset, ok := selectPlatformReleaseAsset(assets, runtime.GOOS, runtime.GOARCH)
+	if !ok {
+		return fmt.Errorf("no %s/%s release asset found for %s %s", runtime.GOOS, runtime.GOARCH, ghRepo, tag)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "wfctl-registry-sync-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	assetPath, err := registrySyncDownloadReleaseAsset(ghRepo, tag, asset.Name, tmpDir)
+	if err != nil {
+		return err
+	}
+
+	searchDir := tmpDir
+	if isTarGz(assetPath) {
+		extractDir := filepath.Join(tmpDir, "extracted")
+		file, err := os.Open(assetPath) // #nosec G304 -- release asset downloaded to agent tempdir
+		if err != nil {
+			return err
+		}
+		if err := extractTarGzReader(file, extractDir); err != nil {
+			file.Close()
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		searchDir = extractDir
+	}
+
+	binaryPath, err := locateRegistrySyncBinary(searchDir, pluginName, assetBinaryName(asset.Name))
+	if err != nil {
+		return err
+	}
+	return registrySyncVerifyManifest(binaryPath, manifestPath, manifestCompareOptions{SkipName: true})
+}
+
+func selectPlatformReleaseAsset(assets []releaseAsset, goos, goarch string) (releaseAsset, bool) {
+	for _, asset := range assets {
+		if asset.OS == goos && asset.Arch == goarch {
+			return asset, true
+		}
+	}
+	return releaseAsset{}, false
+}
+
+func downloadReleaseAsset(ghRepo, tag, assetName, dir string) (string, error) {
+	if assetName == "" {
+		return "", fmt.Errorf("release asset name is empty")
+	}
+	cmd := exec.Command("gh", "release", "download", tag, "--repo", ghRepo, "--pattern", assetName, "--dir", dir, "--clobber") // #nosec G204 -- ghRepo+tag+assetName from trusted registry manifest/release metadata
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("gh release download %s %s %s: %w: %s", ghRepo, tag, assetName, err, strings.TrimSpace(string(out)))
+	}
+	return filepath.Join(dir, assetName), nil
+}
+
+func isTarGz(path string) bool {
+	return strings.HasSuffix(path, ".tar.gz") || strings.HasSuffix(path, ".tgz")
+}
+
+func assetBinaryName(assetName string) string {
+	name := strings.TrimSuffix(assetName, ".tar.gz")
+	name = strings.TrimSuffix(name, ".tgz")
+	for _, sep := range []string{"-", "_"} {
+		parts := strings.Split(name, sep)
+		if len(parts) >= 3 && isKnownOS(parts[len(parts)-2]) && isKnownArch(parts[len(parts)-1]) {
+			return strings.Join(parts[:len(parts)-2], sep)
+		}
+	}
+	return name
+}
+
+func locateRegistrySyncBinary(root string, names ...string) (string, error) {
+	wanted := map[string]bool{}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		wanted[name] = true
+		wanted[name+".exe"] = true
+	}
+	var candidates []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		base := filepath.Base(path)
+		if !wanted[base] {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() && info.Mode()&0111 != 0 {
+			candidates = append(candidates, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(candidates)
+	if len(candidates) == 0 {
+		var requested []string
+		for name := range wanted {
+			requested = append(requested, name)
+		}
+		sort.Strings(requested)
+		return "", fmt.Errorf("no executable matching %v found under %s", requested, root)
+	}
+	return candidates[0], nil
 }
 
 func isKnownOS(s string) bool {
