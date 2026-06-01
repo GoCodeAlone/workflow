@@ -79,6 +79,30 @@ func TestPipeline_NilEventRecorder_NoEvents(t *testing.T) {
 	}
 }
 
+func TestPipeline_EventRecorder_EmptyExecutionIDSkipsRecording(t *testing.T) {
+	recorder := &mockEventRecorder{
+		err: fmt.Errorf("parse execution ID \"\": invalid UUID length: 0"),
+	}
+
+	p := &Pipeline{
+		Name:          "inline-http",
+		Steps:         []PipelineStep{newMockStep("step1", map[string]any{"ok": true})},
+		OnError:       ErrorStrategyStop,
+		EventRecorder: recorder,
+	}
+
+	pc, err := p.Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("pipeline should succeed without execution tracking: %v", err)
+	}
+	if pc.Current["ok"] != true {
+		t.Fatalf("expected step output to be merged, got %#v", pc.Current)
+	}
+	if events := recorder.getEvents(); len(events) != 0 {
+		t.Fatalf("empty ExecutionID should skip recorder calls, got %+v", events)
+	}
+}
+
 func TestPipeline_EventRecorder_SuccessfulExecution(t *testing.T) {
 	recorder := &mockEventRecorder{}
 

@@ -64,7 +64,7 @@ type Pipeline struct {
 // If EventRecorder is nil, this is a no-op. Errors are logged but never
 // returned — event recording is best-effort and must not fail the pipeline.
 func (p *Pipeline) recordEvent(ctx context.Context, eventType string, data map[string]any) {
-	if p.EventRecorder == nil {
+	if p.EventRecorder == nil || p.ExecutionID == "" {
 		return
 	}
 
