@@ -6,6 +6,9 @@ Each `example/*.yaml` is a runnable config. Validate with:
 wfctl validate example/<name>.yaml
 ```
 
+Full application and plugin examples also live under `example/`. Do not add a
+top-level `examples/` directory; see [Repository Layout](REPO_LAYOUT.md).
+
 | Example | Description |
 |---------|-------------|
 | [actor-system-config.yaml](../example/actor-system-config.yaml) | Actor Model Example |
@@ -39,3 +42,13 @@ wfctl validate example/<name>.yaml
 | [trigger-workflow-example.yaml](../example/trigger-workflow-example.yaml) | Trigger-based workflow activation |
 | [ui-build-and-serve.yaml](../example/ui-build-and-serve.yaml) | UI Build & Serve Pipeline |
 | [webhook-pipeline.yaml](../example/webhook-pipeline.yaml) | Webhook-driven pipeline |
+
+## Application And Plugin Examples
+
+| Example | Description |
+|---------|-------------|
+| [chat-platform](../example/chat-platform/) | Multi-service chat platform sample app |
+| [ecommerce-app](../example/ecommerce-app/) | E-commerce sample app |
+| [external-plugin](../example/external-plugin/) | Minimal external plugin implementing `step.uppercase` |
+| [multi-workflow](../example/multi-workflow/) | Multi-file workflow composition |
+| [multi-workflow-ecommerce](../example/multi-workflow-ecommerce/) | Multi-workflow e-commerce composition |
