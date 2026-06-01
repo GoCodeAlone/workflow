@@ -315,43 +315,42 @@ func validateConditionalRouteKeySyntaxFile(cfgPath string, seen map[string]bool)
 	}
 	root := doc.Content[0]
 	pipelines := mappingValue(root, "pipelines")
-	if pipelines == nil || pipelines.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(pipelines.Content); i += 2 {
-		pipelineName := pipelines.Content[i].Value
-		pipeline := pipelines.Content[i+1]
-		if pipeline.Kind != yaml.MappingNode {
-			continue
-		}
-		steps := mappingValue(pipeline, "steps")
-		if steps == nil || steps.Kind != yaml.SequenceNode {
-			continue
-		}
-		for _, step := range steps.Content {
-			step = resolveYAMLAlias(step)
-			if step == nil || step.Kind != yaml.MappingNode || mappingScalarValue(step, "type") != "step.conditional" {
+	if pipelines != nil && pipelines.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(pipelines.Content); i += 2 {
+			pipelineName := pipelines.Content[i].Value
+			pipeline := pipelines.Content[i+1]
+			if pipeline.Kind != yaml.MappingNode {
 				continue
 			}
-			stepName := mappingScalarValue(step, "name")
-			if stepName == "" {
-				stepName = "<unnamed>"
-			}
-			cfg := mappingValue(step, "config")
-			if cfg == nil || cfg.Kind != yaml.MappingNode {
+			steps := mappingValue(pipeline, "steps")
+			if steps == nil || steps.Kind != yaml.SequenceNode {
 				continue
 			}
-			routes := mappingValue(cfg, "routes")
-			if routes == nil || routes.Kind != yaml.MappingNode {
-				continue
-			}
-			for j := 0; j+1 < len(routes.Content); j += 2 {
-				key := routes.Content[j]
-				if key.ShortTag() == "!!str" {
+			for _, step := range steps.Content {
+				step = resolveYAMLAlias(step)
+				if step == nil || step.Kind != yaml.MappingNode || mappingScalarValue(step, "type") != "step.conditional" {
 					continue
 				}
-				return fmt.Errorf("pipeline %q step %q (type step.conditional): routes key %q is parsed as %s, not string; quote it as '%s'",
-					pipelineName, stepName, key.Value, strings.TrimPrefix(key.ShortTag(), "!!"), key.Value)
+				stepName := mappingScalarValue(step, "name")
+				if stepName == "" {
+					stepName = "<unnamed>"
+				}
+				cfg := mappingValue(step, "config")
+				if cfg == nil || cfg.Kind != yaml.MappingNode {
+					continue
+				}
+				routes := mappingValue(cfg, "routes")
+				if routes == nil || routes.Kind != yaml.MappingNode {
+					continue
+				}
+				for j := 0; j+1 < len(routes.Content); j += 2 {
+					key := routes.Content[j]
+					if key.ShortTag() == "!!str" {
+						continue
+					}
+					return fmt.Errorf("pipeline %q step %q (type step.conditional): routes key %q is parsed as %s, not string; quote it as '%s'",
+						pipelineName, stepName, key.Value, strings.TrimPrefix(key.ShortTag(), "!!"), key.Value)
+				}
 			}
 		}
 	}
