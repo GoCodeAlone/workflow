@@ -200,6 +200,13 @@ func TestInfraAdmin_Init_ResolvesAllServices(t *testing.T) {
 	if len(m.providers) != 1 || m.providers["do-provider"] == nil {
 		t.Errorf("providers = %v, want one do-provider entry", m.providers)
 	}
+	// providerTypeByModule is populated in Start() now, not Init() — the
+	// engine registers the "workflow" config section after app.Init(), so
+	// Init-time GetConfigSection would fail. Drive populateProviderTypes
+	// explicitly to assert the F1 contract (the function is unchanged).
+	if err := m.populateProviderTypes(app); err != nil {
+		t.Fatalf("populateProviderTypes: %v", err)
+	}
 	if m.providerTypeByModule["do-provider"] != "digitalocean" {
 		t.Errorf("providerTypeByModule[do-provider] = %q, want digitalocean (F1 contract)", m.providerTypeByModule["do-provider"])
 	}
