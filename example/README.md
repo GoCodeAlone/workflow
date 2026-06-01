@@ -125,6 +125,14 @@ The following examples demonstrate various workflow patterns:
 - `dependency-injection-example.yaml` - Service injection patterns
 - `trigger-workflow-example.yaml` - Event trigger demonstrations
 
+## Full App And Plugin Examples
+
+- `chat-platform/` - Multi-service chat platform sample app
+- `ecommerce-app/` - E-commerce sample app
+- `external-plugin/` - Minimal strict-proto external plugin
+- `multi-workflow/` - Multi-file workflow composition
+- `multi-workflow-ecommerce/` - Multi-workflow e-commerce composition
+
 ## Running Examples
 
 Option 1: Specify configuration file

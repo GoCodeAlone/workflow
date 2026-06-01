@@ -395,6 +395,41 @@ pipelines: {}
 	}
 }
 
+func TestRunValidateRejectsImportedConditionalRoutesWhenRootHasNoPipelines(t *testing.T) {
+	dir := t.TempDir()
+	imported := `
+pipelines:
+  imported:
+    steps:
+      - name: route-by-authz
+        type: step.conditional
+        config:
+          field: authz.allowed
+          routes:
+            true: allow
+            false: deny
+`
+	writeTestConfig(t, dir, "imported.yaml", imported)
+	cfg := `
+imports:
+  - imported.yaml
+modules:
+  - name: router
+    type: http.router
+`
+	path := writeTestConfig(t, dir, "main.yaml", cfg)
+
+	err := runValidate([]string{"--skip-unknown-types", "--allow-no-entry-points", path})
+	if err == nil {
+		t.Fatal("expected validate to fail on imported non-string conditional route keys")
+	}
+	if !strings.Contains(err.Error(), "imported.yaml") ||
+		!strings.Contains(err.Error(), "step.conditional") ||
+		!strings.Contains(err.Error(), "'true'") {
+		t.Fatalf("expected actionable imported conditional route key error, got: %v", err)
+	}
+}
+
 func TestRunValidateRejectsAliasedConditionalRoutesWithNonStringKeys(t *testing.T) {
 	dir := t.TempDir()
 	cfg := `

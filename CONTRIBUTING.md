@@ -37,22 +37,9 @@ npm test
 
 ### Project Structure
 
-```
-cmd/server/      Server binary entry point
-config/          YAML config structs
-module/          48 built-in module implementations
-handlers/        5 workflow handler types
-dynamic/         Yaegi-based hot-reload system
-ai/              AI integration (llm/, copilot/)
-plugin/          Plugin registry, SDK, community validator
-schema/          JSON Schema generation and validation
-middleware/      HTTP middleware (validation, rate limiting)
-audit/           Structured audit logging
-ui/              React + ReactFlow visual builder
-example/         YAML configs and application examples
-mock/            Test helpers
-docs/            API docs, tutorials, ADRs
-```
+See [Repository Layout](docs/REPO_LAYOUT.md) for the authoritative directory
+map. Committed examples belong under `example/`; do not add root-level
+`examples/`, `test-*`, or scratch generated app directories.
 
 ## How to Contribute
 
