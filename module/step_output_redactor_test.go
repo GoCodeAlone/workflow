@@ -97,6 +97,33 @@ func TestRedactStepOutput_NestedMaps(t *testing.T) {
 	}
 }
 
+func TestRedactStepOutput_NestedSensitiveHeaders(t *testing.T) {
+	output := map[string]any{
+		"headers": map[string]any{
+			"Authorization":           "Bearer jwt.secret.value",
+			"Cookie":                  "sid=session-secret",
+			"Set-Cookie":              "sid=session-secret; HttpOnly",
+			"X-API-Key":               "api-secret",
+			"X-Scenario90-Seed-Token": "seed-secret",
+			"Content-Type":            "application/json",
+		},
+	}
+
+	got := RedactStepOutput(output)
+	headers, ok := got["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers should remain a map, got %T", got["headers"])
+	}
+	for _, key := range []string{"Authorization", "Cookie", "Set-Cookie", "X-API-Key", "X-Scenario90-Seed-Token"} {
+		if headers[key] != RedactionPlaceholder {
+			t.Fatalf("%s should be redacted, got %#v", key, headers[key])
+		}
+	}
+	if headers["Content-Type"] != "application/json" {
+		t.Fatalf("Content-Type should be preserved, got %#v", headers["Content-Type"])
+	}
+}
+
 func TestRedactStepOutput_NestedSlices(t *testing.T) {
 	output := map[string]any{
 		"rows": []any{

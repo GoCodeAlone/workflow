@@ -268,6 +268,49 @@ func TestEngineTriggerWorkflow_RedactsSensitiveResultsInDebugLogs(t *testing.T) 
 	}
 }
 
+func TestEngineTriggerWorkflow_RedactsSensitiveResultHeadersInDebugLogs(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	handler := &mockWorkflowHandler{
+		name:       "mock.handler",
+		handlesFor: []string{"header-result-workflow"},
+		results: map[string]any{
+			"headers": map[string]any{
+				"Authorization": "Bearer jwt.secret.value",
+				"Cookie":        "sid=session-secret",
+				"Set-Cookie":    "sid=session-secret; HttpOnly",
+				"X-API-Key":     "api-secret",
+				"Content-Type":  "application/json",
+			},
+		},
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	holder := &module.PipelineResultHolder{}
+	ctx := context.WithValue(context.Background(), module.PipelineResultContextKey, holder)
+	if err := engine.TriggerWorkflow(ctx, "header-result-workflow", "run", map[string]any{}); err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+
+	logText := strings.Join(app.logger.logs, "\n")
+	for _, leaked := range []string{"jwt.secret.value", "session-secret", "api-secret"} {
+		if strings.Contains(logText, leaked) {
+			t.Fatalf("debug logs leaked sensitive header value %q:\n%s", leaked, logText)
+		}
+	}
+	if !strings.Contains(logText, module.RedactionPlaceholder) {
+		t.Fatalf("debug logs should include redaction placeholder, got:\n%s", logText)
+	}
+
+	raw := holder.Get()
+	headers := raw["headers"].(map[string]any)
+	if headers["Authorization"] != "Bearer jwt.secret.value" {
+		t.Fatalf("pipeline result holder must preserve raw Authorization header, got %#v", headers["Authorization"])
+	}
+}
+
 func TestEngineTriggerWorkflow_RedactsSensitiveInputInDebugLogs(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
