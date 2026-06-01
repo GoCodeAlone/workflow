@@ -51,13 +51,14 @@ func TestRenderGitLabCI_NoRedundantSecretVars(t *testing.T) {
 		t.Fatalf("RenderGitLabCI: %v", err)
 	}
 	content := files[".gitlab-ci.yml"]
+	globalVars := gitLabTopLevelBlock(content, "variables")
 
 	// Project-level CI/CD variables (secrets) are auto-injected by GitLab into
-	// every job, so the renderer must NOT re-declare them as `NAME: $NAME`
-	// no-ops in the global variables block.
+	// every job, so the renderer must NOT re-declare the plan-wide union as
+	// `NAME: $NAME` no-ops in the global variables block.
 	for _, s := range plan.Secrets {
 		redundant := "  " + s.Name + ": $" + s.Name
-		if strings.Contains(content, redundant) {
+		if strings.Contains(globalVars, redundant) {
 			t.Errorf("expected no redundant `%s: $%s` declaration in variables block", s.Name, s.Name)
 		}
 	}
@@ -97,6 +98,73 @@ func TestRenderGitLabCI_TwoPhaseNeeds(t *testing.T) {
 	}
 }
 
+func TestRenderGitLabCI_PlanGuardIsRealGate(t *testing.T) {
+	plan := richCIPlan()
+
+	files, err := cigen.RenderGitLabCI(plan)
+	if err != nil {
+		t.Fatalf("RenderGitLabCI: %v", err)
+	}
+	content := files[".gitlab-ci.yml"]
+
+	if !strings.Contains(content, "plan-guard.txt") {
+		t.Fatal("expected a plan guard when PlanGuard is set")
+	}
+	if strings.Contains(content, "|| true") {
+		t.Error("plan guard must not contain `|| true`")
+	}
+	if !strings.Contains(content, "exit 1") {
+		t.Error("plan guard must contain a failing-exit path")
+	}
+	if !strings.Contains(content, "to replace") || !strings.Contains(content, "to destroy") {
+		t.Error("plan guard should detect replace/destroy plans")
+	}
+	if !strings.Contains(content, "tee plan-guard.txt") {
+		t.Error("plan guard should keep plan output visible")
+	}
+	deploy := gitLabJobBlock(content, "apply-deploy")
+	guardIndex := strings.Index(deploy, "plan-guard.txt")
+	migrateIndex := strings.Index(deploy, "wfctl migrations up")
+	if guardIndex < 0 || migrateIndex < 0 {
+		t.Fatalf("expected plan guard and migrations in deploy job\n%s", deploy)
+	}
+	if guardIndex > migrateIndex {
+		t.Fatalf("plan guard must run before migrations\n%s", deploy)
+	}
+}
+
+func TestRenderGitLabCI_ScopedPhase(t *testing.T) {
+	p := &cigen.CIPlan{
+		DefaultBranch: "main",
+		Secrets:       []cigen.SecretRef{{Name: "UNION_ONLY"}},
+		Phases: []cigen.DeployPhase{
+			{Name: "prereq", ConfigPath: "prereq.yaml", Scoped: true, Secrets: []cigen.SecretRef{{Name: "PREREQ_ONLY"}}},
+			{Name: "deploy", ConfigPath: "deploy.yaml", Scoped: true, Secrets: []cigen.SecretRef{{Name: "DEPLOY_ONLY"}}},
+		},
+	}
+
+	files, err := cigen.RenderGitLabCI(p)
+	if err != nil {
+		t.Fatalf("RenderGitLabCI: %v", err)
+	}
+	content := files[".gitlab-ci.yml"]
+	prereq := gitLabJobBlock(content, "apply-prereq")
+	deploy := gitLabJobBlock(content, "apply-deploy")
+
+	if !strings.Contains(prereq, "PREREQ_ONLY") {
+		t.Errorf("prereq job must reference PREREQ_ONLY\n%s", prereq)
+	}
+	if strings.Contains(prereq, "DEPLOY_ONLY") || strings.Contains(prereq, "UNION_ONLY") {
+		t.Errorf("prereq job must not reference other phases' / union secrets\n%s", prereq)
+	}
+	if !strings.Contains(deploy, "DEPLOY_ONLY") {
+		t.Errorf("deploy job must reference DEPLOY_ONLY\n%s", deploy)
+	}
+	if strings.Contains(deploy, "PREREQ_ONLY") || strings.Contains(deploy, "UNION_ONLY") {
+		t.Errorf("deploy job must not reference other phases' / union secrets\n%s", deploy)
+	}
+}
+
 func TestRenderGitLabCI_NilPlan(t *testing.T) {
 	_, err := cigen.RenderGitLabCI(nil)
 	if err == nil {
@@ -116,4 +184,31 @@ func TestRenderGitLabCI_NoDeprecatedOnlySyntax(t *testing.T) {
 	if strings.Contains(content, "\nonly:") {
 		t.Error(".gitlab-ci.yml uses deprecated 'only:' syntax")
 	}
+}
+
+func gitLabJobBlock(content, jobName string) string {
+	start := strings.Index(content, jobName+":\n")
+	if start < 0 {
+		return ""
+	}
+	rest := content[start+len(jobName)+2:]
+	if next := strings.Index(rest, "\napply-"); next >= 0 {
+		return content[start : start+len(jobName)+2+next]
+	}
+	if next := strings.Index(rest, "\nsmoke:"); next >= 0 {
+		return content[start : start+len(jobName)+2+next]
+	}
+	return content[start:]
+}
+
+func gitLabTopLevelBlock(content, name string) string {
+	start := strings.Index(content, name+":\n")
+	if start < 0 {
+		return ""
+	}
+	rest := content[start+len(name)+2:]
+	if next := strings.Index(rest, "\n\n"); next >= 0 {
+		return content[start : start+len(name)+2+next]
+	}
+	return content[start:]
 }

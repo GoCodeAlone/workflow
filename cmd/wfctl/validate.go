@@ -150,6 +150,9 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, 
 	if isLikelyWfctlProjectManifest(cfgPath) {
 		return fmt.Errorf("%s is a wfctl project manifest; use 'wfctl config validate %s' instead", cfgPath, cfgPath)
 	}
+	if err := validateConditionalRouteKeySyntax(cfgPath); err != nil {
+		return err
+	}
 
 	cfg, err := config.LoadFromFile(cfgPath)
 	if err != nil {
@@ -283,6 +286,130 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, 
 	fmt.Printf("  PASS %s (%d modules, %d workflows, %d triggers)\n",
 		cfgPath, len(cfg.Modules), len(cfg.Workflows), len(cfg.Triggers))
 	return nil
+}
+
+func validateConditionalRouteKeySyntax(cfgPath string) error {
+	return validateConditionalRouteKeySyntaxFile(cfgPath, make(map[string]bool))
+}
+
+func validateConditionalRouteKeySyntaxFile(cfgPath string, seen map[string]bool) error {
+	absPath, err := filepath.Abs(cfgPath)
+	if err != nil {
+		return fmt.Errorf("inspect conditional route keys: %w", err)
+	}
+	if seen[absPath] {
+		return nil
+	}
+	seen[absPath] = true
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return fmt.Errorf("inspect conditional route keys: %w", err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("inspect conditional route keys: %w", err)
+	}
+	if len(doc.Content) == 0 {
+		return nil
+	}
+	root := doc.Content[0]
+	pipelines := mappingValue(root, "pipelines")
+	if pipelines == nil || pipelines.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(pipelines.Content); i += 2 {
+		pipelineName := pipelines.Content[i].Value
+		pipeline := pipelines.Content[i+1]
+		if pipeline.Kind != yaml.MappingNode {
+			continue
+		}
+		steps := mappingValue(pipeline, "steps")
+		if steps == nil || steps.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, step := range steps.Content {
+			step = resolveYAMLAlias(step)
+			if step == nil || step.Kind != yaml.MappingNode || mappingScalarValue(step, "type") != "step.conditional" {
+				continue
+			}
+			stepName := mappingScalarValue(step, "name")
+			if stepName == "" {
+				stepName = "<unnamed>"
+			}
+			cfg := mappingValue(step, "config")
+			if cfg == nil || cfg.Kind != yaml.MappingNode {
+				continue
+			}
+			routes := mappingValue(cfg, "routes")
+			if routes == nil || routes.Kind != yaml.MappingNode {
+				continue
+			}
+			for j := 0; j+1 < len(routes.Content); j += 2 {
+				key := routes.Content[j]
+				if key.ShortTag() == "!!str" {
+					continue
+				}
+				return fmt.Errorf("pipeline %q step %q (type step.conditional): routes key %q is parsed as %s, not string; quote it as '%s'",
+					pipelineName, stepName, key.Value, strings.TrimPrefix(key.ShortTag(), "!!"), key.Value)
+			}
+		}
+	}
+	for _, imp := range importPathsFromNode(root) {
+		impPath := imp
+		if !filepath.IsAbs(impPath) {
+			impPath = filepath.Join(filepath.Dir(absPath), impPath)
+		}
+		if err := validateConditionalRouteKeySyntaxFile(impPath, seen); err != nil {
+			return fmt.Errorf("import %q: %w", imp, err)
+		}
+	}
+	return nil
+}
+
+func importPathsFromNode(root *yaml.Node) []string {
+	imports := mappingValue(root, "imports")
+	if imports == nil || imports.Kind != yaml.SequenceNode {
+		return nil
+	}
+	paths := make([]string, 0, len(imports.Content))
+	for _, item := range imports.Content {
+		if item.Kind == yaml.ScalarNode && item.ShortTag() == "!!str" {
+			paths = append(paths, item.Value)
+		}
+	}
+	return paths
+}
+
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	n = resolveYAMLAlias(n)
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return resolveYAMLAlias(n.Content[i+1])
+		}
+	}
+	return nil
+}
+
+func mappingScalarValue(n *yaml.Node, key string) string {
+	v := mappingValue(n, key)
+	v = resolveYAMLAlias(v)
+	if v == nil || v.Kind != yaml.ScalarNode {
+		return ""
+	}
+	return v.Value
+}
+
+func resolveYAMLAlias(n *yaml.Node) *yaml.Node {
+	seen := map[*yaml.Node]bool{}
+	for n != nil && n.Kind == yaml.AliasNode && n.Alias != nil && !seen[n] {
+		seen[n] = true
+		n = n.Alias
+	}
+	return n
 }
 
 // skipDirs are directory names that should be excluded from recursive scanning.

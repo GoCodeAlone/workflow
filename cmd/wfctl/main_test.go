@@ -319,6 +319,115 @@ pipelines:
 	}
 }
 
+func TestRunValidateRejectsConditionalRoutesWithNonStringKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+modules:
+  - name: router
+    type: http.router
+pipelines:
+  authz:
+    trigger:
+      type: mock
+    steps:
+      - name: route-by-authz
+        type: step.conditional
+        config:
+          field: authz.allowed
+          routes:
+            true: allow
+            false: deny
+      - name: allow
+        type: step.log
+        config:
+          message: allow
+      - name: deny
+        type: step.log
+        config:
+          message: deny
+`
+	path := writeTestConfig(t, dir, "conditional.yaml", cfg)
+
+	err := runValidate([]string{"--skip-unknown-types", "--allow-no-entry-points", path})
+	if err == nil {
+		t.Fatal("expected validate to fail on non-string conditional route keys")
+	}
+	if !strings.Contains(err.Error(), "step.conditional") ||
+		!strings.Contains(err.Error(), "routes") ||
+		!strings.Contains(err.Error(), "'true'") {
+		t.Fatalf("expected actionable conditional route key error, got: %v", err)
+	}
+}
+
+func TestRunValidateRejectsImportedConditionalRoutesWithNonStringKeys(t *testing.T) {
+	dir := t.TempDir()
+	imported := `
+pipelines:
+  imported:
+    steps:
+      - name: route-by-authz
+        type: step.conditional
+        config:
+          field: authz.allowed
+          routes:
+            true: allow
+            false: deny
+`
+	writeTestConfig(t, dir, "imported.yaml", imported)
+	cfg := `
+imports:
+  - imported.yaml
+modules:
+  - name: router
+    type: http.router
+pipelines: {}
+`
+	path := writeTestConfig(t, dir, "main.yaml", cfg)
+
+	err := runValidate([]string{"--skip-unknown-types", "--allow-no-entry-points", path})
+	if err == nil {
+		t.Fatal("expected validate to fail on imported non-string conditional route keys")
+	}
+	if !strings.Contains(err.Error(), "imported.yaml") ||
+		!strings.Contains(err.Error(), "step.conditional") ||
+		!strings.Contains(err.Error(), "'true'") {
+		t.Fatalf("expected actionable imported conditional route key error, got: %v", err)
+	}
+}
+
+func TestRunValidateRejectsAliasedConditionalRoutesWithNonStringKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+shared:
+  routes: &routes
+    true: allow
+    false: deny
+  config: &condition
+    field: authz.allowed
+    routes: *routes
+modules:
+  - name: router
+    type: http.router
+pipelines:
+  authz:
+    steps:
+      - name: route-by-authz
+        type: step.conditional
+        config: *condition
+`
+	path := writeTestConfig(t, dir, "conditional-alias.yaml", cfg)
+
+	err := runValidate([]string{"--skip-unknown-types", "--allow-no-entry-points", path})
+	if err == nil {
+		t.Fatal("expected validate to fail on aliased non-string conditional route keys")
+	}
+	if !strings.Contains(err.Error(), "step.conditional") ||
+		!strings.Contains(err.Error(), "routes") ||
+		!strings.Contains(err.Error(), "'true'") {
+		t.Fatalf("expected actionable aliased conditional route key error, got: %v", err)
+	}
+}
+
 func TestRunValidateMissingArg(t *testing.T) {
 	err := runValidate([]string{})
 	if err == nil {
