@@ -92,7 +92,7 @@ install-hooks:
 
 # Build example binary
 build-examples:
-	cd example && go build -o workflow-example ./...
+	cd example && go build -o workflow-example .
 
 # Validate all example configs load without error
 test-configs:
