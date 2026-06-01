@@ -126,6 +126,9 @@ The workflow engine has a [registry of 51 public plugins](https://github.com/GoC
 
 See the [Plugin Authoring Guide](docs/PLUGIN_AUTHORING.md) to build your own.
 
+For repository layout and where to place examples, fixtures, and generated
+scaffolds, see [Repository Layout](docs/REPO_LAYOUT.md).
+
 ## Quick Start
 
 ### Requirements
