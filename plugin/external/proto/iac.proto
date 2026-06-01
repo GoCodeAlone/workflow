@@ -61,6 +61,10 @@ service IaCProviderCredentialRevoker {
   rpc RevokeProviderCredential(RevokeProviderCredentialRequest) returns (RevokeProviderCredentialResponse);
 }
 
+service IaCProviderRegionLister {
+  rpc ListRegions(ListRegionsRequest) returns (ListRegionsResponse);
+}
+
 // IaCProviderFinalizer is the optional service plugins implement when
 // they need a post-apply-loop finalizer hook under v2 dispatch.
 // Use case: DigitalOcean plugin's database trusted_sources deferred-flush
@@ -646,6 +650,25 @@ message RevokeProviderCredentialRequest {
   string credential_id = 2;
 }
 message RevokeProviderCredentialResponse {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderRegionLister messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message ListRegionsRequest {
+  // env_name is the optional Workflow environment selected by the caller.
+  string env_name = 1;
+}
+
+message ProviderRegion {
+  // name is the provider-specific region identifier used in Workflow config.
+  string name = 1;
+  // display_name is optional UI text. Empty means consumers should show name.
+  string display_name = 2;
+}
+
+message ListRegionsResponse {
+  repeated ProviderRegion regions = 1;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IaCProviderFinalizer messages.

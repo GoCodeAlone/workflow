@@ -71,6 +71,7 @@ func TestOptionalServicesHaveDistinctInterfaces(t *testing.T) {
 		pb.IaCProviderEnumeratorServer
 		pb.IaCProviderDriftDetectorServer
 		pb.IaCProviderCredentialRevokerServer
+		pb.IaCProviderRegionListerServer
 		pb.IaCProviderMigrationRepairerServer
 		pb.IaCProviderValidatorServer
 		pb.IaCProviderDriftConfigDetectorServer
@@ -83,6 +84,7 @@ type allOptionalStub struct {
 	pb.UnimplementedIaCProviderEnumeratorServer
 	pb.UnimplementedIaCProviderDriftDetectorServer
 	pb.UnimplementedIaCProviderCredentialRevokerServer
+	pb.UnimplementedIaCProviderRegionListerServer
 	pb.UnimplementedIaCProviderMigrationRepairerServer
 	pb.UnimplementedIaCProviderValidatorServer
 	pb.UnimplementedIaCProviderDriftConfigDetectorServer

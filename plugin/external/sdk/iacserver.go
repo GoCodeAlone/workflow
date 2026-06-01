@@ -34,6 +34,7 @@ import (
 //	pb.IaCProviderEnumeratorServer
 //	pb.IaCProviderDriftDetectorServer
 //	pb.IaCProviderCredentialRevokerServer
+//	pb.IaCProviderRegionListerServer
 //	pb.IaCProviderMigrationRepairerServer
 //	pb.IaCProviderValidatorServer
 //	pb.IaCProviderDriftConfigDetectorServer
@@ -158,6 +159,9 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	}
 	if v, ok := provider.(pb.IaCProviderCredentialRevokerServer); ok {
 		pb.RegisterIaCProviderCredentialRevokerServer(s, v)
+	}
+	if v, ok := provider.(pb.IaCProviderRegionListerServer); ok {
+		pb.RegisterIaCProviderRegionListerServer(s, v)
 	}
 	if v, ok := provider.(pb.IaCProviderMigrationRepairerServer); ok {
 		pb.RegisterIaCProviderMigrationRepairerServer(s, v)

@@ -49,6 +49,16 @@ func (p *nameableProvider) BootstrapStateBackend(_ context.Context, _ map[string
 }
 func (p *nameableProvider) Close() error { return nil }
 
+type regionListingProvider struct {
+	*nameableProvider
+	regions []string
+	err     error
+}
+
+func (p *regionListingProvider) ListProviderRegions(_ context.Context, _ string) ([]string, error) {
+	return append([]string(nil), p.regions...), p.err
+}
+
 // providersFixture returns the providers map + a parallel
 // providerTypeByModule map captured "as if" at module Init from the
 // host YAML config. Per spec-reviewer T6 F1: the test fixture must
@@ -132,6 +142,67 @@ func TestListProviders_PopulatesRegionsAndEnginesAndTypes(t *testing.T) {
 	// of the catalog treats every type as cross-provider.
 	if len(doProv.SupportedTypes) < 13 {
 		t.Errorf("SupportedTypes count = %d, want >= 13 (full catalog)", len(doProv.SupportedTypes))
+	}
+}
+
+func TestListProviders_UsesProviderRegionListerWhenAvailable(t *testing.T) {
+	providers := map[string]interfaces.IaCProvider{
+		"do-prod": &regionListingProvider{
+			nameableProvider: &nameableProvider{name: "DigitalOcean Provider"},
+			regions:          []string{"sfo3", "nyc3"},
+		},
+	}
+	providerTypeByModule := map[string]string{"do-prod": "digitalocean"}
+	in := &adminpb.AdminListProvidersInput{EnvName: "staging", Evidence: authzOK()}
+	out, _ := handler.ListProviders(
+		context.Background(),
+		providers,
+		providerTypeByModule,
+		catalog.New(),
+		catalog.NewRegionCatalog(),
+		catalog.NewEngineCatalog(),
+		in,
+	)
+	if len(out.Providers) != 1 {
+		t.Fatalf("got %d providers, want 1", len(out.Providers))
+	}
+	got := out.Providers[0]
+	if got.RegionsSource != "provider-lister" {
+		t.Fatalf("RegionsSource = %q, want provider-lister", got.RegionsSource)
+	}
+	want := []string{"nyc3", "sfo3"}
+	if !equalStrings(got.SupportedRegions, want) {
+		t.Fatalf("SupportedRegions = %v, want provider lister regions %v", got.SupportedRegions, want)
+	}
+}
+
+func TestListProviders_RegionListerErrorFallsBackToLocalCatalog(t *testing.T) {
+	providers := map[string]interfaces.IaCProvider{
+		"do-prod": &regionListingProvider{
+			nameableProvider: &nameableProvider{name: "DigitalOcean Provider"},
+			err:              errors.New("credentials unavailable"),
+		},
+	}
+	providerTypeByModule := map[string]string{"do-prod": "digitalocean"}
+	in := &adminpb.AdminListProvidersInput{Evidence: authzOK()}
+	out, _ := handler.ListProviders(
+		context.Background(),
+		providers,
+		providerTypeByModule,
+		catalog.New(),
+		catalog.NewRegionCatalog(),
+		catalog.NewEngineCatalog(),
+		in,
+	)
+	if len(out.Providers) != 1 {
+		t.Fatalf("got %d providers, want 1", len(out.Providers))
+	}
+	got := out.Providers[0]
+	if got.RegionsSource != "local-catalog" {
+		t.Fatalf("RegionsSource = %q, want local-catalog fallback", got.RegionsSource)
+	}
+	if !contains(got.SupportedRegions, "nyc3") {
+		t.Fatalf("SupportedRegions = %v, want local catalog fallback including nyc3", got.SupportedRegions)
 	}
 }
 
@@ -291,4 +362,16 @@ func contains(slice []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

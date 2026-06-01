@@ -179,12 +179,11 @@ message AdminListResourceTypesOutput {
   reserved 2 to 99, 101 to 199;
 }
 
-// AdminProviderSummary is the ListProviders response row. v1
-// populates supported_regions / supported_types / supported_engines
-// from the host-side catalog (regions.go + engines.go + fields.go);
-// regions_source is the literal string "local-catalog" so consumers
-// can distinguish v1's local lookup from a future v1.1
-// IaCProviderRegionLister gRPC service.
+// AdminProviderSummary is the ListProviders response row. supported_regions
+// comes from IaCProviderRegionLister when the provider advertises it and the
+// call succeeds; otherwise it falls back to the host-side catalog
+// (regions.go). supported_types / supported_engines remain host catalogued.
+// regions_source is "provider-lister" or "local-catalog".
 message AdminProviderSummary {
   string module_name              = 1;
   string provider_type            = 2;
@@ -192,7 +191,7 @@ message AdminProviderSummary {
   repeated string supported_regions = 4;
   repeated string supported_types = 5;
   repeated string supported_engines = 6;
-  string regions_source           = 7;  // "local-catalog" for v1
+  string regions_source           = 7;  // "provider-lister" or "local-catalog"
 }
 
 // AdminListProvidersInput is the request shape for the ListProviders

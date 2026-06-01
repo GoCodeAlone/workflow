@@ -93,6 +93,7 @@ type fixtureTypedAdapter struct {
 	Enumerator        pb.IaCProviderEnumeratorServer
 	DriftDetector     pb.IaCProviderDriftDetectorServer
 	CredentialRevoker pb.IaCProviderCredentialRevokerServer
+	RegionLister      pb.IaCProviderRegionListerServer
 	MigrationRepairer pb.IaCProviderMigrationRepairerServer
 	Validator         pb.IaCProviderValidatorServer
 	DriftConfigDetect pb.IaCProviderDriftConfigDetectorServer
@@ -130,6 +131,10 @@ func (f fixtureTypedAdapter) build(t *testing.T) *typedIaCAdapter {
 	if f.CredentialRevoker != nil {
 		pb.RegisterIaCProviderCredentialRevokerServer(server, f.CredentialRevoker)
 		registered[iacServiceCredentialRevoker] = true
+	}
+	if f.RegionLister != nil {
+		pb.RegisterIaCProviderRegionListerServer(server, f.RegionLister)
+		registered[iacServiceRegionLister] = true
 	}
 	if f.MigrationRepairer != nil {
 		pb.RegisterIaCProviderMigrationRepairerServer(server, f.MigrationRepairer)
