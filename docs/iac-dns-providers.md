@@ -159,7 +159,7 @@ wfctl dns-policy set \
   --provider do-prod \
   --zone example.com \
   --owner sre \
-  --patterns 'www,api,*._acme-challenge' \
+  --patterns 'www,api,_acme-challenge,_acme-challenge.*' \
   --types 'A,CNAME,TXT'
 
 wfctl dns-policy transfer-ownership \
