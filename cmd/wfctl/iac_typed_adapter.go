@@ -240,7 +240,7 @@ func (a *typedIaCAdapter) RegionLister() pb.IaCProviderRegionListerClient {
 // because infra-admin's current response shape carries region IDs only.
 func (a *typedIaCAdapter) ListProviderRegions(ctx context.Context, envName string) ([]string, error) {
 	if a.regionLister == nil {
-		return nil, fmt.Errorf("ListProviderRegions: %w", interfaces.ErrProviderMethodUnimplemented)
+		return nil, unimplementedOptional(iacServiceRegionLister)
 	}
 	resp, err := a.regionLister.ListRegions(ctx, &pb.ListRegionsRequest{EnvName: envName})
 	if err != nil {
