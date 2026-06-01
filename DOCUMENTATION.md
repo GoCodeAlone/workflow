@@ -60,6 +60,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 | `auth.m2m` | Machine-to-machine OAuth2: client_credentials grant, JWT-bearer, ES256/HS256, JWKS endpoint | auth |
 | `auth.token-blacklist` | Token revocation blacklist backed by SQLite or in-memory store | auth |
 | `security.field-protection` | Field-level encryption/decryption for sensitive data fields | auth |
+| `authz.local` | In-process exact-match RBAC enforcer for scenario testing (scenario_stub build tag only) | localauthz |
 
 > `auth.modular` was removed in favor of `auth.jwt`.
 

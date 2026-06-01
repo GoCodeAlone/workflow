@@ -2,8 +2,14 @@
 
 package all
 
-import pluginstub "github.com/GoCodeAlone/workflow/plugins/stubprovider"
+import (
+	pluginlocalauthz "github.com/GoCodeAlone/workflow/plugins/localauthz"
+	pluginstub "github.com/GoCodeAlone/workflow/plugins/stubprovider"
+)
 
 func init() {
-	scenarioExtras = append(scenarioExtras, pluginstub.New())
+	scenarioExtras = append(scenarioExtras,
+		pluginstub.New(),
+		pluginlocalauthz.New(),
+	)
 }
