@@ -41,6 +41,9 @@ func ListResources(
 	if msg := authzError(in.GetEvidence()); msg != "" {
 		return &adminpb.AdminListResourcesOutput{Error: msg}, nil
 	}
+	if store == nil {
+		return &adminpb.AdminListResourcesOutput{Error: "list: no state store configured"}, nil
+	}
 
 	states, err := store.ListResources(ctx)
 	if err != nil {

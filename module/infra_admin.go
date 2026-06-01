@@ -64,6 +64,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// outputError is a type constraint satisfied by all admin output proto
+// messages — they all embed an Error string field. Used by
+// writeMutationResponse to inspect the output's error without a type switch.
+type outputError interface {
+	proto.Message
+	GetError() string
+}
+
 // InfraAdminConfig is the YAML-config shape the host expects under
 // the `infra.admin` module entry. Field names use snake_case yaml
 // tags to match the rest of the workflow config; defaults match the
@@ -655,7 +663,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				"category":    "infra",
 				"path":        m.config.AssetPrefix + "/resources.html",
 				"render_mode": "iframe",
-				"permissions": []map[string]any{{
+				"permissions": []any{map[string]any{
 					"resource": "infra", "action": "read", "permission": "infra:read",
 				}},
 			},
@@ -668,7 +676,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				"category":    "infra",
 				"path":        m.config.AssetPrefix + "/resource.html",
 				"render_mode": "iframe",
-				"permissions": []map[string]any{{
+				"permissions": []any{map[string]any{
 					"resource": "infra", "action": "read", "permission": "infra:read",
 				}},
 			},
@@ -681,7 +689,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				"category":    "infra",
 				"path":        m.config.AssetPrefix + "/new.html",
 				"render_mode": "iframe",
-				"permissions": []map[string]any{{
+				"permissions": []any{map[string]any{
 					"resource": "infra", "action": "read", "permission": "infra:read",
 				}},
 			},
@@ -696,7 +704,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				"category":    "infra",
 				"path":        m.config.AssetPrefix + "/actions.html",
 				"render_mode": "iframe",
-				"permissions": []map[string]any{{
+				"permissions": []any{map[string]any{
 					"resource": "infra", "action": "read", "permission": "infra:read",
 				}},
 			},
@@ -1037,6 +1045,41 @@ func writeProtoMsg(w http.ResponseWriter, msg proto.Message) {
 	_, _ = w.Write(data)
 }
 
+// writeStatusProto marshals a proto message and writes it with the given
+// HTTP status code. On marshal failure, falls back to plain-text 500.
+func writeStatusProto(w http.ResponseWriter, status int, msg proto.Message) {
+	data, err := marshalOpts.Marshal(msg)
+	if err != nil {
+		http.Error(w, "marshal response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(data)
+}
+
+// writeMutationResponse writes a mutation handler's output using a typed
+// HTTP status discriminator:
+//
+//   - handler.ErrAuthzDenied → HTTP 403 (typed sentinel; avoids strings.Contains
+//     false-positives when a provider error message happens to contain "denied")
+//   - non-empty Output.error (provider / backend failure) → HTTP 500
+//   - success → HTTP 200 (via writeProtoMsg)
+//
+// Using this for plan/apply/destroy replaces the naive writeProtoMsg(w, out)
+// pattern that silently returned 200 for all outcomes (Bug 3 + Bug 4 fix).
+func writeMutationResponse(w http.ResponseWriter, msg outputError, err error) {
+	if errors.Is(err, handler.ErrAuthzDenied) {
+		writeStatusProto(w, http.StatusForbidden, msg)
+		return
+	}
+	if msg.GetError() != "" {
+		writeStatusProto(w, http.StatusInternalServerError, msg)
+		return
+	}
+	writeProtoMsg(w, msg)
+}
+
 // ── T8: requireBearerAuth middleware ─────────────────────────────────────────
 
 // requireBearerAuthMiddleware is an HTTPMiddleware that rejects requests
@@ -1094,9 +1137,24 @@ func (m *InfraAdmin) handlePlanResource(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	// handlers never return non-nil error (errors go to out.Error per proto tag-100 pattern)
-	out, _ := handler.PlanResource(r.Context(), m.state, m.providers, m.wfCfg, m.desiredSpecs, &in) //nolint:errcheck
-	writeProtoMsg(w, out)
+	// Server-side RBAC: plan is infra:apply-gated — viewers must not be
+	// able to probe the desired-state hash or action list (Bug 4 fix).
+	subject := m.subjectFromRequest(r)
+	if m.authz != nil {
+		ok, enforceErr := m.authz.Enforce(subject, "infra:apply", "allow")
+		if enforceErr != nil {
+			http.Error(w, "plan: authz enforce error", http.StatusInternalServerError)
+			m.auditAccess(r, "plan", in.GetEvidence(), "error")
+			return
+		}
+		if !ok {
+			http.Error(w, "plan: infra:apply denied for subject "+subject, http.StatusForbidden)
+			m.auditAccess(r, "plan", in.GetEvidence(), "denied")
+			return
+		}
+	}
+	out, handlerErr := handler.PlanResource(r.Context(), m.state, m.providers, m.wfCfg, m.desiredSpecs, &in)
+	writeMutationResponse(w, out, handlerErr)
 	m.auditAccess(r, "plan", in.GetEvidence(), auditResultFor(out.GetError()))
 }
 
@@ -1120,8 +1178,8 @@ func (m *InfraAdmin) handleApplyResource(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	subject := m.subjectFromRequest(r)
-	out, _ := handler.ApplyResource(r.Context(), m.state, m.providers, m.authz, subject, m.wfCfg, m.desiredSpecs, &in) //nolint:errcheck // errors go to out.Error
-	writeProtoMsg(w, out)
+	out, handlerErr := handler.ApplyResource(r.Context(), m.state, m.providers, m.authz, subject, m.wfCfg, m.desiredSpecs, &in)
+	writeMutationResponse(w, out, handlerErr)
 	m.auditAccess(r, "apply", in.GetEvidence(), auditResultFor(out.GetError()))
 }
 
@@ -1145,8 +1203,8 @@ func (m *InfraAdmin) handleDestroyResource(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	subject := m.subjectFromRequest(r)
-	out, _ := handler.DestroyResource(r.Context(), m.providers, m.authz, subject, &in) //nolint:errcheck // errors go to out.Error
-	writeProtoMsg(w, out)
+	out, handlerErr := handler.DestroyResource(r.Context(), m.providers, m.authz, subject, &in)
+	writeMutationResponse(w, out, handlerErr)
 	m.auditAccess(r, "destroy", in.GetEvidence(), auditResultFor(out.GetError()))
 }
 

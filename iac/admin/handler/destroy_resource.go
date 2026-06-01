@@ -33,7 +33,7 @@ func DestroyResource(
 ) (*adminpb.AdminDestroyOutput, error) {
 	// Gate 1: default-deny.
 	if msg := authzError(in.GetEvidence()); msg != "" {
-		return &adminpb.AdminDestroyOutput{Error: msg}, nil
+		return &adminpb.AdminDestroyOutput{Error: msg}, ErrAuthzDenied
 	}
 
 	// Gate 2: server-side RBAC.
@@ -43,7 +43,7 @@ func DestroyResource(
 			return &adminpb.AdminDestroyOutput{Error: "destroy: authz enforce error"}, nil //nolint:nilerr
 		}
 		if !ok {
-			return &adminpb.AdminDestroyOutput{Error: "destroy: infra:destroy denied for subject " + subject}, nil
+			return &adminpb.AdminDestroyOutput{Error: "destroy: infra:destroy denied for subject " + subject}, ErrAuthzDenied
 		}
 	}
 

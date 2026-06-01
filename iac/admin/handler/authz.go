@@ -39,7 +39,19 @@ package handler
 // Not in T5 scope; flagged here so a future contributor sees the
 // risk before extending the handler family.
 
-import adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
+import (
+	"errors"
+
+	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
+)
+
+// ErrAuthzDenied is the sentinel error returned by handlers when an
+// authz check (evidence default-deny or server-side RBAC via Enforcer)
+// rejects the request. The HTTP module layer maps this via errors.Is to
+// HTTP 403 — NOT via strings.Contains on the error message, which would
+// produce false positives when a provider's error message happens to
+// contain "denied".
+var ErrAuthzDenied = errors.New("authz denied")
 
 // authzError returns the operator-facing rejection string when the
 // supplied evidence does not meet default-deny criteria. Returns ""

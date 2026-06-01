@@ -46,7 +46,7 @@ func ApplyResource(
 ) (*adminpb.AdminApplyOutput, error) {
 	// Gate 1: default-deny.
 	if msg := authzError(in.GetEvidence()); msg != "" {
-		return &adminpb.AdminApplyOutput{Error: msg}, nil
+		return &adminpb.AdminApplyOutput{Error: msg}, ErrAuthzDenied
 	}
 
 	// Gate 2: server-side RBAC (NOT the client's evidence.granted_permissions).
@@ -56,7 +56,7 @@ func ApplyResource(
 			return &adminpb.AdminApplyOutput{Error: "apply: authz enforce error"}, nil //nolint:nilerr
 		}
 		if !ok {
-			return &adminpb.AdminApplyOutput{Error: "apply: infra:apply denied for subject " + subject}, nil
+			return &adminpb.AdminApplyOutput{Error: "apply: infra:apply denied for subject " + subject}, ErrAuthzDenied
 		}
 	}
 

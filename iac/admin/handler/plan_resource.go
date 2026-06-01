@@ -36,7 +36,7 @@ func PlanResource(
 	in *adminpb.AdminPlanInput,
 ) (*adminpb.AdminPlanOutput, error) {
 	if msg := authzError(in.GetEvidence()); msg != "" {
-		return &adminpb.AdminPlanOutput{Error: msg}, nil
+		return &adminpb.AdminPlanOutput{Error: msg}, ErrAuthzDenied
 	}
 	if len(providers) == 0 {
 		return &adminpb.AdminPlanOutput{Error: "plan: no iac.provider registered"}, nil

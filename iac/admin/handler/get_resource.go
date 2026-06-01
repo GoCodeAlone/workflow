@@ -38,6 +38,9 @@ func GetResource(
 	if msg := authzError(in.GetEvidence()); msg != "" {
 		return &adminpb.AdminGetResourceOutput{Error: msg}, nil
 	}
+	if store == nil {
+		return &adminpb.AdminGetResourceOutput{Error: "get: no state store configured"}, nil
+	}
 
 	state, err := store.GetResource(ctx, in.GetName())
 	if err != nil {
