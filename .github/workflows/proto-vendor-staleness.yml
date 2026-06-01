@@ -1,0 +1,43 @@
+name: Proto Vendor Staleness
+
+# Fails when iac/admin/testdata/infra.proto drifts from the upstream
+# GoCodeAlone/workflow-plugin-infra proto at the pinned source tag.
+# Refresh procedure: `make vendor-infra-proto` + update Source version header.
+#
+# Why this matters: catalog_proto_parity_test.go (iac/admin/catalog/) asserts
+# every *Config message in the vendored proto has a catalog entry. If the
+# vendored proto silently lags the upstream, new resource types added by
+# workflow-plugin-infra land in production without field-spec catalog coverage.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'iac/admin/testdata/infra.proto'
+      - 'scripts/check-vendored-proto.sh'
+      - '.github/workflows/proto-vendor-staleness.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'iac/admin/testdata/infra.proto'
+      - 'scripts/check-vendored-proto.sh'
+      - '.github/workflows/proto-vendor-staleness.yml'
+  # Also run on a weekly schedule to catch upstream drift even when the
+  # vendored file isn't touched locally.
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-vendored-proto:
+    name: Check vendored infra.proto against upstream
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check vendored proto staleness
+        run: bash scripts/check-vendored-proto.sh
