@@ -395,6 +395,39 @@ pipelines: {}
 	}
 }
 
+func TestRunValidateRejectsAliasedConditionalRoutesWithNonStringKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+shared:
+  routes: &routes
+    true: allow
+    false: deny
+  config: &condition
+    field: authz.allowed
+    routes: *routes
+modules:
+  - name: router
+    type: http.router
+pipelines:
+  authz:
+    steps:
+      - name: route-by-authz
+        type: step.conditional
+        config: *condition
+`
+	path := writeTestConfig(t, dir, "conditional-alias.yaml", cfg)
+
+	err := runValidate([]string{"--skip-unknown-types", "--allow-no-entry-points", path})
+	if err == nil {
+		t.Fatal("expected validate to fail on aliased non-string conditional route keys")
+	}
+	if !strings.Contains(err.Error(), "step.conditional") ||
+		!strings.Contains(err.Error(), "routes") ||
+		!strings.Contains(err.Error(), "'true'") {
+		t.Fatalf("expected actionable aliased conditional route key error, got: %v", err)
+	}
+}
+
 func TestRunValidateMissingArg(t *testing.T) {
 	err := runValidate([]string{})
 	if err == nil {

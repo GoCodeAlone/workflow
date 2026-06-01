@@ -329,7 +329,8 @@ func validateConditionalRouteKeySyntaxFile(cfgPath string, seen map[string]bool)
 			continue
 		}
 		for _, step := range steps.Content {
-			if step.Kind != yaml.MappingNode || mappingScalarValue(step, "type") != "step.conditional" {
+			step = resolveYAMLAlias(step)
+			if step == nil || step.Kind != yaml.MappingNode || mappingScalarValue(step, "type") != "step.conditional" {
 				continue
 			}
 			stepName := mappingScalarValue(step, "name")
@@ -381,12 +382,13 @@ func importPathsFromNode(root *yaml.Node) []string {
 }
 
 func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	n = resolveYAMLAlias(n)
 	if n == nil || n.Kind != yaml.MappingNode {
 		return nil
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == key {
-			return n.Content[i+1]
+			return resolveYAMLAlias(n.Content[i+1])
 		}
 	}
 	return nil
@@ -394,10 +396,20 @@ func mappingValue(n *yaml.Node, key string) *yaml.Node {
 
 func mappingScalarValue(n *yaml.Node, key string) string {
 	v := mappingValue(n, key)
+	v = resolveYAMLAlias(v)
 	if v == nil || v.Kind != yaml.ScalarNode {
 		return ""
 	}
 	return v.Value
+}
+
+func resolveYAMLAlias(n *yaml.Node) *yaml.Node {
+	seen := map[*yaml.Node]bool{}
+	for n != nil && n.Kind == yaml.AliasNode && n.Alias != nil && !seen[n] {
+		seen[n] = true
+		n = n.Alias
+	}
+	return n
 }
 
 // skipDirs are directory names that should be excluded from recursive scanning.
