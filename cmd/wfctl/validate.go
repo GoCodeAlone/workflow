@@ -289,6 +289,19 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, 
 }
 
 func validateConditionalRouteKeySyntax(cfgPath string) error {
+	return validateConditionalRouteKeySyntaxFile(cfgPath, make(map[string]bool))
+}
+
+func validateConditionalRouteKeySyntaxFile(cfgPath string, seen map[string]bool) error {
+	absPath, err := filepath.Abs(cfgPath)
+	if err != nil {
+		return fmt.Errorf("inspect conditional route keys: %w", err)
+	}
+	if seen[absPath] {
+		return nil
+	}
+	seen[absPath] = true
+
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return fmt.Errorf("inspect conditional route keys: %w", err)
@@ -341,7 +354,30 @@ func validateConditionalRouteKeySyntax(cfgPath string) error {
 			}
 		}
 	}
+	for _, imp := range importPathsFromNode(root) {
+		impPath := imp
+		if !filepath.IsAbs(impPath) {
+			impPath = filepath.Join(filepath.Dir(absPath), impPath)
+		}
+		if err := validateConditionalRouteKeySyntaxFile(impPath, seen); err != nil {
+			return fmt.Errorf("import %q: %w", imp, err)
+		}
+	}
 	return nil
+}
+
+func importPathsFromNode(root *yaml.Node) []string {
+	imports := mappingValue(root, "imports")
+	if imports == nil || imports.Kind != yaml.SequenceNode {
+		return nil
+	}
+	paths := make([]string, 0, len(imports.Content))
+	for _, item := range imports.Content {
+		if item.Kind == yaml.ScalarNode && item.ShortTag() == "!!str" {
+			paths = append(paths, item.Value)
+		}
+	}
+	return paths
 }
 
 func mappingValue(n *yaml.Node, key string) *yaml.Node {

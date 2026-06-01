@@ -112,11 +112,11 @@ func renderGitLabWorkflow(p *CIPlan) (string, error) {
 		}
 		b.WriteString("  script:\n")
 		isLastPhase := i == len(p.Phases)-1
-		if isLastPhase && p.Migrations != nil {
-			fmt.Fprintf(&b, "    - %s\n", migrationsUpCommand(phase.ConfigPath, p.Migrations.Env))
-		}
 		if p.PlanGuard {
 			writeGitLabPlanGuard(&b, phase.ConfigPath)
+		}
+		if isLastPhase && p.Migrations != nil {
+			fmt.Fprintf(&b, "    - %s\n", migrationsUpCommand(phase.ConfigPath, p.Migrations.Env))
 		}
 		fmt.Fprintf(&b, "    - wfctl infra apply --config '%s' --auto-approve\n", phase.ConfigPath)
 		b.WriteString("  environment:\n")

@@ -122,6 +122,15 @@ func TestRenderGitLabCI_PlanGuardIsRealGate(t *testing.T) {
 	if !strings.Contains(content, "tee plan-guard.txt") {
 		t.Error("plan guard should keep plan output visible")
 	}
+	deploy := gitLabJobBlock(content, "apply-deploy")
+	guardIndex := strings.Index(deploy, "plan-guard.txt")
+	migrateIndex := strings.Index(deploy, "wfctl migrations up")
+	if guardIndex < 0 || migrateIndex < 0 {
+		t.Fatalf("expected plan guard and migrations in deploy job\n%s", deploy)
+	}
+	if guardIndex > migrateIndex {
+		t.Fatalf("plan guard must run before migrations\n%s", deploy)
+	}
 }
 
 func TestRenderGitLabCI_ScopedPhase(t *testing.T) {
