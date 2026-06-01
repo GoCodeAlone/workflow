@@ -397,13 +397,15 @@ func (m *InfraAdmin) Init(app modular.Application) error {
 		m.providerMu[pm] = &sync.Mutex{}
 	}
 
-	// Populate providerTypeByModule from the loaded WorkflowConfig
-	// per spec-reviewer T6 F1 + design cycle-5/6: handler.
-	// ListProviders needs the YAML-config `provider:` string, NOT
-	// the plugin's display name from provider.Name().
-	if err := m.populateProviderTypes(app); err != nil {
-		return fmt.Errorf("infra.admin: populate provider types: %w", err)
-	}
+	// NOTE: providerTypeByModule / wfCfg / desiredSpecs are populated in
+	// Start(), NOT here. engine.BuildFromConfig registers the "workflow"
+	// config section AFTER app.Init() (engine.go: app.Init() then
+	// RegisterConfigSection("workflow")), so app.GetConfigSection("workflow")
+	// returns "not found" during Init and would silently degrade
+	// provider_type, supported_regions, and the mutation desiredSpecs to
+	// empty. Start() runs after BuildFromConfig completes, when the section
+	// is present. (Surfaced by scenario-92 live boot; unit tests pre-register
+	// the section via withConfigSectionApp so they did not catch it.)
 
 	// In-process catalogs.
 	m.fieldCatalog = catalog.New()
@@ -561,6 +563,14 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 	}
 	if err := m.app.GetService("workflowEngine", &m.engine); err != nil {
 		return fmt.Errorf("infra.admin: workflowEngine: %w", err)
+	}
+
+	// Populate providerTypeByModule + wfCfg + desiredSpecs from the loaded
+	// WorkflowConfig. MUST run here (Start), not Init: the engine registers
+	// the "workflow" config section after app.Init(), so this would silently
+	// degrade to empty during Init. Runs before routes serve any request.
+	if err := m.populateProviderTypes(m.app); err != nil {
+		return fmt.Errorf("infra.admin: populate provider types: %w", err)
 	}
 
 	if m.router == nil {
