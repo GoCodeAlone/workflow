@@ -2,18 +2,18 @@ package handler_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
-	"github.com/GoCodeAlone/workflow/iac/stubprovider"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // TestDestroyResource_DefaultDeny asserts that evidence with checked=false
 // returns a non-empty error (default-deny).
 func TestDestroyResource_DefaultDeny(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	in := &adminpb.AdminDestroyInput{
 		Evidence: &adminpb.AdminAuthzEvidence{AuthzChecked: false},
@@ -22,8 +22,8 @@ func TestDestroyResource_DefaultDeny(t *testing.T) {
 		},
 	}
 	out, err := handler.DestroyResource(context.Background(), providers, nil, "operator", in)
-	if err != nil {
-		t.Fatalf("DestroyResource: unexpected Go error: %v", err)
+	if !errors.Is(err, handler.ErrAuthzDenied) {
+		t.Fatalf("DestroyResource: want ErrAuthzDenied, got %v (out.Error=%s)", err, out.GetError())
 	}
 	if out.Error == "" {
 		t.Error("DestroyResource with evidence.checked=false should return non-empty error")
@@ -33,7 +33,7 @@ func TestDestroyResource_DefaultDeny(t *testing.T) {
 // TestDestroyResource_AuthzDenies asserts that a subject denied
 // infra:destroy by the Enforcer is rejected even with valid evidence.
 func TestDestroyResource_AuthzDenies(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	enforcer := &testEnforcer{allow: map[string]bool{
 		// viewer is NOT granted infra:destroy
@@ -43,8 +43,8 @@ func TestDestroyResource_AuthzDenies(t *testing.T) {
 		Refs:     []*adminpb.AdminResourceRef{{Name: "vpc1", Type: "infra.vpc"}},
 	}
 	out, err := handler.DestroyResource(context.Background(), providers, enforcer, "viewer", in)
-	if err != nil {
-		t.Fatalf("DestroyResource: unexpected Go error: %v", err)
+	if !errors.Is(err, handler.ErrAuthzDenied) {
+		t.Fatalf("DestroyResource: want ErrAuthzDenied, got %v (out.Error=%s)", err, out.GetError())
 	}
 	if out.Error == "" {
 		t.Error("DestroyResource should reject subject denied infra:destroy by server-side Enforcer")
@@ -54,7 +54,7 @@ func TestDestroyResource_AuthzDenies(t *testing.T) {
 // TestDestroyResource_HappyPath asserts that a valid subject + refs + correct
 // confirm_hash → destroyed[] with the ref names.
 func TestDestroyResource_HappyPath(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	refs := []*adminpb.AdminResourceRef{
 		{Name: "vpc1", Type: "infra.vpc"},
@@ -80,7 +80,7 @@ func TestDestroyResource_HappyPath(t *testing.T) {
 // TestDestroyResource_MismatchedConfirmHash asserts that a wrong or empty
 // confirm_hash → TOCTOU error, no destroy operation performed (IMPORTANT-1).
 func TestDestroyResource_MismatchedConfirmHash(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	refs := []*adminpb.AdminResourceRef{
 		{Name: "vpc1", Type: "infra.vpc"},

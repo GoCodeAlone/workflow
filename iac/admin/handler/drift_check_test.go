@@ -6,14 +6,13 @@ import (
 
 	"github.com/GoCodeAlone/workflow/iac/admin/handler"
 	adminpb "github.com/GoCodeAlone/workflow/iac/admin/proto"
-	"github.com/GoCodeAlone/workflow/iac/stubprovider"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // TestDriftCheckResource_DefaultDeny asserts that evidence with checked=false
 // returns a non-empty error and no drift payload.
 func TestDriftCheckResource_DefaultDeny(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	in := &adminpb.AdminDriftInput{
 		Evidence: &adminpb.AdminAuthzEvidence{AuthzChecked: false},
@@ -36,7 +35,7 @@ func TestDriftCheckResource_DefaultDeny(t *testing.T) {
 // TestDriftCheckResource_ReturnsNotDrifted asserts that the stub provider's
 // DetectDrift (Drifted:false) maps to AdminDriftResult with Drifted:false.
 func TestDriftCheckResource_ReturnsNotDrifted(t *testing.T) {
-	prov := stubprovider.New()
+	prov := &planningProvider{}
 	providers := map[string]interfaces.IaCProvider{"stub": prov}
 	in := &adminpb.AdminDriftInput{
 		Evidence: &adminpb.AdminAuthzEvidence{AuthzChecked: true, AuthzAllowed: true},
