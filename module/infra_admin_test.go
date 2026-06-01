@@ -169,6 +169,9 @@ func standardCfg() InfraAdminConfig {
 		HTTPModule:            "http-router",
 		SecurityHeadersModule: "security-headers",
 		ProviderModules:       []string{"do-provider"},
+		// T4: test-only insecure mode; auth is exercised separately
+		// via standardAuthCfg() + newAuthEnabledApp().
+		AllowUnauthenticated: true,
 	}
 }
 
@@ -256,8 +259,9 @@ func TestInfraAdmin_Init_AuditFailureIsFatal(t *testing.T) {
 }
 
 // TestInfraAdmin_Start_Fires3ContributionPipelines pins the
-// design's Start contract: exactly 3 engine.TriggerWorkflow calls
-// fire, with the expected pipeline names + contribution payloads.
+// design's Start contract: the expected engine.TriggerWorkflow calls
+// fire for all registered admin-plugin contribution pipelines.
+// Updated to 4 with the T12 audit-viewer (register-infra-admin-actions).
 func TestInfraAdmin_Start_Fires3ContributionPipelines(t *testing.T) {
 	app, engine, _ := newAppWithWorkflowSection(t, "digitalocean")
 	m := NewInfraAdmin("infra-admin", configToMap(t, standardCfg())).(*InfraAdmin)
@@ -267,13 +271,11 @@ func TestInfraAdmin_Start_Fires3ContributionPipelines(t *testing.T) {
 	if err := m.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if len(engine.triggers) != 3 {
-		t.Fatalf("TriggerWorkflow calls = %d, want 3", len(engine.triggers))
-	}
 	wantNames := map[string]bool{
 		"pipeline:register-infra-admin-resources":       false,
 		"pipeline:register-infra-admin-resource-detail": false,
 		"pipeline:register-infra-admin-new-resource":    false,
+		"pipeline:register-infra-admin-actions":         false, // T12 audit-viewer
 	}
 	for _, tr := range engine.triggers {
 		if _, ok := wantNames[tr.WorkflowType]; ok {
@@ -286,6 +288,9 @@ func TestInfraAdmin_Start_Fires3ContributionPipelines(t *testing.T) {
 		if !fired {
 			t.Errorf("expected trigger for %s, not fired", name)
 		}
+	}
+	if len(engine.triggers) != len(wantNames) {
+		t.Errorf("TriggerWorkflow calls = %d, want %d", len(engine.triggers), len(wantNames))
 	}
 }
 
@@ -929,4 +934,438 @@ func configToMap(t *testing.T, cfg InfraAdminConfig) map[string]any {
 		t.Fatalf("unmarshal cfg map: %v", err)
 	}
 	return m
+}
+
+// ── T4: auth refuse-empty + authz_module + subject propagation ────────────
+
+// recordingLogger captures log messages from app.Logger() calls so
+// tests can assert on specific warning strings.
+type recordingLogger struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (l *recordingLogger) Debug(msg string, _ ...any) {}
+func (l *recordingLogger) Info(msg string, _ ...any)  {}
+func (l *recordingLogger) Warn(msg string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.msgs = append(l.msgs, msg)
+}
+func (l *recordingLogger) Error(msg string, _ ...any) {}
+func (l *recordingLogger) lastWarn() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.msgs) == 0 {
+		return ""
+	}
+	return l.msgs[len(l.msgs)-1]
+}
+
+// recordingApp wraps infraMockApp and uses a recordingLogger.
+type recordingApp struct {
+	*infraMockApp
+	logger *recordingLogger
+}
+
+func newRecordingApp(base *infraMockApp) *recordingApp {
+	return &recordingApp{infraMockApp: base, logger: &recordingLogger{}}
+}
+
+func (a *recordingApp) Logger() modular.Logger { return a.logger }
+
+// stubEnforcer is a minimal Enforcer for T4 tests.
+type stubEnforcer struct {
+	allowed bool
+}
+
+func (e *stubEnforcer) Enforce(_, _, _ string, _ ...string) (bool, error) {
+	return e.allowed, nil
+}
+
+// TestInfraAdmin_Init_AuthModuleRequired asserts that Init returns an
+// error when auth_module is empty and allow_unauthenticated is false.
+func TestInfraAdmin_Init_AuthModuleRequired(t *testing.T) {
+	app, _, _ := newInfraAdminTestApp(t, "digitalocean")
+	cfg := standardCfg()
+	cfg.AllowUnauthenticated = false // explicit false
+	cfg.AuthModule = ""
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	err := m.Init(app)
+	if err == nil {
+		t.Fatal("Init with no auth_module and allow_unauthenticated:false should return error")
+	}
+	const wantSubstr = "auth_module required"
+	if !strings.Contains(err.Error(), wantSubstr) {
+		t.Errorf("Init error %q should contain %q", err.Error(), wantSubstr)
+	}
+}
+
+// TestInfraAdmin_Init_AllowUnauthenticatedNoError asserts that Init
+// succeeds with allow_unauthenticated:true and no auth_module, and
+// logs the exact warning string pinned by plan-review M-1.
+func TestInfraAdmin_Init_AllowUnauthenticatedNoError(t *testing.T) {
+	base, _, _ := newInfraAdminTestApp(t, "digitalocean")
+	app := newRecordingApp(base)
+	cfg := standardCfg() // already has AllowUnauthenticated:true
+	cfg.AuthModule = ""
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init with allow_unauthenticated:true should not error: %v", err)
+	}
+
+	const wantWarn = "infra.admin: mutation routes DISABLED (no auth_module); reads only"
+	if got := app.logger.lastWarn(); got != wantWarn {
+		t.Errorf("warning = %q, want %q", got, wantWarn)
+	}
+}
+
+// TestInfraAdmin_Init_AuthzModuleResolved asserts that a configured
+// authz_module is resolved as an Enforcer at Init.
+func TestInfraAdmin_Init_AuthzModuleResolved(t *testing.T) {
+	base, _, _ := newInfraAdminTestApp(t, "digitalocean")
+	enforcer := &stubEnforcer{allowed: true}
+	if err := base.RegisterService("my-authz", enforcer); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	cfg := standardCfg()
+	cfg.AuthzModule = "my-authz"
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(base); err != nil {
+		t.Fatalf("Init with authz_module should not error: %v", err)
+	}
+	if m.authz == nil {
+		t.Error("m.authz should be non-nil after Init with authz_module configured")
+	}
+}
+
+// TestInfraAdmin_Init_AuthzModuleListedInDependencies asserts that a
+// configured authz_module appears in both Dependencies() and
+// RequiresServices() so the engine init-orders it before infra.admin.
+func TestInfraAdmin_Init_AuthzModuleListedInDependencies(t *testing.T) {
+	cfg := standardCfg()
+	cfg.AuthzModule = "my-authz"
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+
+	foundDep := false
+	for _, d := range m.Dependencies() {
+		if d == "my-authz" {
+			foundDep = true
+		}
+	}
+	if !foundDep {
+		t.Error("authz_module not in Dependencies()")
+	}
+
+	foundSvc := false
+	for _, s := range m.RequiresServices() {
+		if s.Name == "my-authz" {
+			foundSvc = true
+		}
+	}
+	if !foundSvc {
+		t.Error("authz_module not in RequiresServices()")
+	}
+}
+
+// TestInfraAdmin_SubjectFromRequest asserts that subjectFromRequest
+// extracts the "sub" claim from the auth middleware's context value.
+func TestInfraAdmin_SubjectFromRequest(t *testing.T) {
+	m := &InfraAdmin{name: "test"}
+
+	// No claims in context → empty string.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	if got := m.subjectFromRequest(req); got != "" {
+		t.Errorf("no claims: want \"\", got %q", got)
+	}
+
+	// Claims with "sub" → return sub.
+	claims := map[string]any{"sub": "user:alice", "email": "alice@example.com"}
+	ctx := context.WithValue(req.Context(), authClaimsContextKey, claims)
+	req2 := req.WithContext(ctx)
+	if got := m.subjectFromRequest(req2); got != "user:alice" {
+		t.Errorf("with claims: want \"user:alice\", got %q", got)
+	}
+
+	// Claims without "sub" → empty string.
+	claims2 := map[string]any{"email": "bob@example.com"}
+	ctx2 := context.WithValue(req.Context(), authClaimsContextKey, claims2)
+	req3 := req.WithContext(ctx2)
+	if got := m.subjectFromRequest(req3); got != "" {
+		t.Errorf("claims without sub: want \"\", got %q", got)
+	}
+}
+
+// ── T8: mutation route + requireBearer + audit 3-way tests ───────────────────
+
+// startMutationModule is a helper that boots an InfraAdmin module with
+// auth enabled (so mutation routes are registered).
+func startMutationModule(t *testing.T) (*InfraAdmin, *authMwStub) {
+	t.Helper()
+	app, _, _, auth := newAuthEnabledApp(t, "digitalocean")
+	m := NewInfraAdmin("infra-admin", configToMap(t, standardAuthCfg())).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatalf("router.Start: %v", err)
+	}
+	return m, auth
+}
+
+// TestInfraAdmin_MutationRoutesRegistered asserts that 4 mutation routes
+// are registered when auth_module is configured.
+func TestInfraAdmin_MutationRoutesRegistered(t *testing.T) {
+	m, _ := startMutationModule(t)
+	mutRoutes := []string{"/plan", "/apply", "/destroy", "/drift"}
+	for _, route := range mutRoutes {
+		req := httptest.NewRequest(http.MethodPost, "/api/infra-admin"+route,
+			bytes.NewReader([]byte(`{}`)))
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		// Should NOT be 404 (route must exist); anything else is acceptable
+		// from the handler (may be 200 with error in body).
+		if rec.Code == http.StatusNotFound {
+			t.Errorf("mutation route %s not registered (got 404)", route)
+		}
+	}
+}
+
+// TestInfraAdmin_MutationRouteAbsentWithoutAuth asserts that mutation routes
+// are NOT registered when allow_unauthenticated:true (no auth_module).
+func TestInfraAdmin_MutationRouteAbsentWithoutAuth(t *testing.T) {
+	app, _, _ := newAppWithWorkflowSection(t, "digitalocean")
+	cfg := standardCfg() // AllowUnauthenticated:true, no AuthModule
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatalf("router.Start: %v", err)
+	}
+	for _, route := range []string{"/plan", "/apply", "/destroy", "/drift"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/infra-admin"+route,
+			bytes.NewReader([]byte(`{}`)))
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("mutation route %s should be absent (no auth_module), got %d", route, rec.Code)
+		}
+	}
+}
+
+// TestInfraAdmin_MutationRequiresBearerToken asserts that mutation routes
+// return 401 when the Authorization: Bearer header is missing, even when
+// the auth middleware lets the request through.
+func TestInfraAdmin_MutationRequiresBearerToken(t *testing.T) {
+	m, _ := startMutationModule(t)
+	// No Authorization header at all.
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/plan",
+		bytes.NewReader([]byte(`{}`)))
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	// The auth stub lets it through, but requireBearer should reject it.
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("mutation without Bearer: status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_AuditResultFor3Way asserts the 3-way classification
+// of auditResultFor.
+func TestInfraAdmin_AuditResultFor3Way(t *testing.T) {
+	cases := []struct {
+		errMsg string
+		want   string
+	}{
+		{"", "ok"},
+		{"authz evidence missing — admin middleware did not attach", "denied"},
+		{"apply: infra:apply denied for subject viewer", "denied"},
+		{"apply: plan is stale (desired_hash mismatch)", "denied"},
+		{"apply: list state: connection refused", "error"},
+		{"plan: no iac.provider registered", "error"},
+	}
+	for _, tc := range cases {
+		got := auditResultFor(tc.errMsg)
+		if got != tc.want {
+			t.Errorf("auditResultFor(%q) = %q, want %q", tc.errMsg, got, tc.want)
+		}
+	}
+}
+
+// ── T9: named security regression suite ──────────────────────────────────────
+
+// TestInfraAdmin_MutationRequiresBearer is the canonical CSRF regression:
+// mutation routes MUST reject requests without Authorization: Bearer.
+// (Renamed version of TestInfraAdmin_MutationRequiresBearerToken — same
+// contract, keeps the T9 name the plan locked.)
+func TestInfraAdmin_MutationRequiresBearer(t *testing.T) {
+	m, _ := startMutationModule(t)
+	for _, path := range []string{"/plan", "/apply", "/destroy", "/drift"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/infra-admin"+path,
+			bytes.NewReader([]byte(`{}`)))
+		// Explicitly no Authorization header.
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s without Bearer: want 401, got %d; body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestInfraAdmin_ApplyRejectsStalePlanHash is the TOCTOU regression:
+// an apply request whose desired_hash does not match the in-process config
+// MUST be rejected before any cloud operation runs.
+func TestInfraAdmin_ApplyRejectsStalePlanHash(t *testing.T) {
+	m, _ := startMutationModule(t)
+
+	body := `{"plan_id":"p1","desired_hash":"stale-deliberately-wrong","evidence":{"authz_checked":true,"authz_allowed":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "stale") {
+		t.Errorf("expected stale-hash error in response, got: %s", rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_ConcurrentApplyReturns409 is the single-flight regression.
+// It drives TWO goroutines concurrently against the same provider — one
+// holds the mutex directly (simulating an in-flight apply) while the other
+// hits the route and must see 409. A sequential variant would falsely pass
+// (plan-review M-2).
+func TestInfraAdmin_ConcurrentApplyReturns409(t *testing.T) {
+	m, _ := startMutationModule(t)
+
+	// Manually lock the first provider's mutex to simulate an in-flight apply.
+	var held *sync.Mutex
+	for _, pm := range m.config.ProviderModules {
+		if mu, ok := m.providerMu[pm]; ok {
+			held = mu
+			break
+		}
+	}
+	if held == nil {
+		t.Skip("no provider mutex found (no ProviderModules configured)")
+	}
+	held.Lock()
+	defer held.Unlock()
+
+	// Now an apply request MUST see 409 (mutex already locked).
+	body := `{"plan_id":"p1","desired_hash":"any","evidence":{"authz_checked":true,"authz_allowed":true}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+		bytes.NewReader([]byte(body)))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+
+	// Run the request in a goroutine to properly simulate concurrency.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.router.ServeHTTP(rec, req)
+	}()
+	<-done
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("concurrent apply: want 409, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestInfraAdmin_ViewerCannotApply is the write-tier RBAC regression:
+// a subject that the authz module grants only infra:read MUST receive an
+// error on apply/destroy routes, server-side, regardless of what the
+// client body asserts in evidence.granted_permissions.
+func TestInfraAdmin_ViewerCannotApply(t *testing.T) {
+	app, _, _, _ := newAuthEnabledApp(t, "digitalocean")
+	enforcer := &stubEnforcer{allowed: false}                         // denies everything
+	if err := app.RegisterService("my-authz", enforcer); err != nil { // F3 fix
+		t.Fatalf("setup: %v", err)
+	}
+
+	cfg := standardAuthCfg()
+	cfg.AuthzModule = "my-authz"
+
+	m := NewInfraAdmin("infra-admin", configToMap(t, cfg)).(*InfraAdmin)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := m.router.Start(context.Background()); err != nil {
+		t.Fatalf("router.Start: %v", err)
+	}
+
+	viewerCtx := func(r *http.Request) *http.Request {
+		ctx := context.WithValue(r.Context(), authClaimsContextKey, map[string]any{"sub": "viewer"})
+		return r.WithContext(ctx)
+	}
+
+	// Apply: client claims allowed, server Enforcer denies.
+	applyReq := viewerCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/apply",
+		bytes.NewReader([]byte(`{"evidence":{"authz_checked":true,"authz_allowed":true},"desired_hash":"any"}`))))
+	applyReq.Header.Set("Authorization", "Bearer test-token")
+	applyRec := httptest.NewRecorder()
+	m.router.ServeHTTP(applyRec, applyReq)
+	if applyRec.Code != http.StatusOK {
+		t.Fatalf("apply: want 200 with error body, got %d", applyRec.Code)
+	}
+	if !strings.Contains(applyRec.Body.String(), "denied") {
+		t.Errorf("viewer apply should be denied by server-side Enforcer; body=%s", applyRec.Body.String())
+	}
+
+	// Destroy: same enforcer denies infra:destroy too (F1 fix — cover destroy route).
+	destroyReq := viewerCtx(httptest.NewRequest(http.MethodPost, "/api/infra-admin/destroy",
+		bytes.NewReader([]byte(`{"refs":[{"name":"vpc1","type":"infra.vpc"}],"confirm_hash":"any","evidence":{"authz_checked":true,"authz_allowed":true}}`))))
+	destroyReq.Header.Set("Authorization", "Bearer test-token")
+	destroyRec := httptest.NewRecorder()
+	m.router.ServeHTTP(destroyRec, destroyReq)
+	if destroyRec.Code != http.StatusOK {
+		t.Fatalf("destroy: want 200 with error body, got %d", destroyRec.Code)
+	}
+	if !strings.Contains(destroyRec.Body.String(), "denied") {
+		t.Errorf("viewer destroy should be denied by server-side Enforcer; body=%s", destroyRec.Body.String())
+	}
+}
+
+// TestInfraAdmin_AuditDistinguishesDeniedFromError verifies that the
+// 3-way audit classification correctly distinguishes authz denials from
+// backend errors (extended from T8's TestInfraAdmin_AuditResultFor3Way).
+func TestInfraAdmin_AuditDistinguishesDeniedFromError(t *testing.T) {
+	// Denial (authz/evidence/stale markers) → "denied"
+	for _, msg := range []string{
+		"authz evidence missing",
+		"infra:apply denied for subject viewer",
+		"plan is stale (desired_hash mismatch)",
+	} {
+		if got := auditResultFor(msg); got != "denied" {
+			t.Errorf("auditResultFor(%q) = %q, want 'denied'", msg, got)
+		}
+	}
+	// Error (provider failure) → "error"
+	for _, msg := range []string{
+		"apply: list state: connection refused",
+		"plan: no iac.provider registered",
+		"destroy: provider timeout",
+	} {
+		if got := auditResultFor(msg); got != "error" {
+			t.Errorf("auditResultFor(%q) = %q, want 'error'", msg, got)
+		}
+	}
 }

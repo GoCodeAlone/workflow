@@ -269,16 +269,162 @@ message AdminAuditEntry {
   string app_context    = 7;
 }
 
-// InfraAdminService is the typed read-only surface. v1 has 5 RPCs;
-// the HTTP audit-tail endpoint (GET /api/infra-admin/audit) streams
-// AdminAuditEntry ndjson outside of this gRPC service per design doc
-// §Access logging. Mutating endpoints (PLAN/APPLY/DESTROY/
-// DRIFT-CHECK) are out of scope for v1 — they remain in
-// `wfctl infra apply/destroy/drift`.
+// InfraAdminService is the typed read surface (v1) plus the v1.1
+// mutation surface. v1 has 5 read RPCs; v1.1 adds 4 mutation RPCs
+// (Plan/Apply/Destroy/DriftCheck). The HTTP audit-tail endpoint
+// (GET /api/infra-admin/audit) streams AdminAuditEntry ndjson outside
+// this gRPC service per design doc §Access logging.
+//
+// v1.1 mutation security chain (per ADR-0007 + ADR-0008):
+//   auth(401) → secHdrs → requireBearer(401/CSRF) →
+//   server-side authz.Enforce(subject, perm, "allow")(403) →
+//   desired_hash/confirm_hash TOCTOU → ValidateAllowReplaceProtected →
+//   per-provider TryLock(409)
+// Client-supplied AdminAuthzEvidence is audit-only; authz is
+// server-authoritative.
 service InfraAdminService {
   rpc ListResources(AdminListResourcesInput) returns (AdminListResourcesOutput);
   rpc GetResource(AdminGetResourceInput) returns (AdminGetResourceOutput);
   rpc ListResourceTypes(AdminListResourceTypesInput) returns (AdminListResourceTypesOutput);
   rpc ListProviders(AdminListProvidersInput) returns (AdminListProvidersOutput);
   rpc GenerateConfig(AdminGenerateConfigInput) returns (AdminGenerateConfigOutput);
+  // v1.1 mutation RPCs — require write-tier auth (bearer + RBAC).
+  rpc PlanResource(AdminPlanInput) returns (AdminPlanOutput);
+  rpc ApplyResource(AdminApplyInput) returns (AdminApplyOutput);
+  rpc DestroyResource(AdminDestroyInput) returns (AdminDestroyOutput);
+  rpc DriftCheckResource(AdminDriftInput) returns (AdminDriftOutput);
+}
+
+// --- v1.1 mutation messages ---
+
+// AdminPlanInput is the request shape for the PlanResource RPC.
+// Plans only the in-process config (no client-proposed desired state —
+// see NEW-M-3). evidence is audit-only; server-side authz.Enforce
+// gates the handler (ADR-0007).
+message AdminPlanInput {
+  string app_context     = 1;
+  string resource_filter = 2;
+  AdminAuthzEvidence evidence = 3;
+  reserved 4 to 99, 101 to 199;
+}
+
+// AdminPlanAction is one proposed change in the plan (create/update/
+// replace/delete). change_summary is a human-readable diff summary.
+message AdminPlanAction {
+  string action_type    = 1;
+  string resource_name  = 2;
+  string type           = 3;
+  string change_summary = 4;
+  reserved 5 to 99, 101 to 199;
+}
+
+// AdminPlanOutput is the response shape for the PlanResource RPC.
+// plan_id is opaque; desired_hash is the SHA-256 of the resolved
+// desired-state (same input as wfctlhelpers.DesiredStateHash) — the
+// client MUST echo it in AdminApplyInput for TOCTOU protection.
+// plan_json carries the full plan payload as opaque bytes.
+// error tag-100: non-empty → consumer ignores typed payload.
+message AdminPlanOutput {
+  string plan_id    = 1;
+  string desired_hash = 2;
+  repeated AdminPlanAction actions = 3;
+  bytes  plan_json  = 4;
+  string error      = 100;
+  reserved 5 to 99, 101 to 199;
+}
+
+// AdminApplyInput is the request shape for the ApplyResource RPC.
+// plan_id + desired_hash MUST match the values returned by a prior
+// PlanResource call (TOCTOU protection per ADR-0008). allow_replace
+// is the explicit opt-in list for replace actions; the handler calls
+// ValidateAllowReplaceProtected against it. evidence is audit-only.
+message AdminApplyInput {
+  string plan_id      = 1;
+  string desired_hash = 2;
+  repeated string allow_replace = 3;
+  string app_context  = 4;
+  AdminAuthzEvidence evidence = 5;
+  reserved 6 to 99, 101 to 199;
+}
+
+// AdminApplyOutput is the response shape for the ApplyResource RPC.
+// applied carries summaries of successfully applied resources; errors
+// carries per-resource failures (provider errors redacted of creds).
+// error tag-100: top-level failure (authz / stale-hash / etc).
+message AdminApplyOutput {
+  repeated AdminResourceSummary applied = 1;
+  repeated AdminActionError errors      = 2;
+  string error                          = 100;
+  reserved 3 to 99, 101 to 199;
+}
+
+// AdminActionError carries a per-resource error from an apply or
+// destroy operation. Provider error messages have credentials
+// redacted before serialization.
+message AdminActionError {
+  string resource = 1;
+  string action   = 2;
+  string error    = 3;
+  reserved 4 to 99, 101 to 199;
+}
+
+// AdminResourceRef identifies a resource by name + type for destroy
+// and drift-check operations.
+message AdminResourceRef {
+  string name = 1;
+  string type = 2;
+  reserved 3 to 99, 101 to 199;
+}
+
+// AdminDestroyInput is the request shape for the DestroyResource RPC.
+// refs lists the resources to destroy. confirm_hash is the
+// desired-state hash the client must echo for TOCTOU protection
+// (same semantics as AdminApplyInput.desired_hash). evidence is
+// audit-only.
+message AdminDestroyInput {
+  repeated AdminResourceRef refs = 1;
+  string confirm_hash            = 2;
+  AdminAuthzEvidence evidence    = 3;
+  reserved 4 to 99, 101 to 199;
+}
+
+// AdminDestroyOutput is the response shape for the DestroyResource
+// RPC. destroyed lists the names of successfully destroyed resources;
+// errors carries per-resource failures. error tag-100: top-level.
+message AdminDestroyOutput {
+  repeated string destroyed       = 1;
+  repeated AdminActionError errors = 2;
+  string error                    = 100;
+  reserved 3 to 99, 101 to 199;
+}
+
+// AdminDriftInput is the request shape for the DriftCheckResource RPC.
+// refs narrows the check to the listed resources; an empty refs list
+// checks all resources known to the provider. evidence is audit-only.
+message AdminDriftInput {
+  repeated AdminResourceRef refs = 1;
+  AdminAuthzEvidence evidence    = 2;
+  reserved 3 to 99, 101 to 199;
+}
+
+// AdminDriftResult is one resource's drift check outcome. drifted is
+// true when the live cloud state diverges from desired; class is the
+// drift category (e.g. "config", "presence"); fields lists the
+// specific diverged field names.
+message AdminDriftResult {
+  string resource_name  = 1;
+  string type           = 2;
+  bool   drifted        = 3;
+  string class          = 4;
+  repeated string fields = 5;
+  reserved 6 to 99, 101 to 199;
+}
+
+// AdminDriftOutput is the response shape for the DriftCheckResource
+// RPC. drift carries one entry per checked resource. error tag-100:
+// top-level failure (authz / provider unavailable / etc).
+message AdminDriftOutput {
+  repeated AdminDriftResult drift = 1;
+  string error                    = 100;
+  reserved 2 to 99, 101 to 199;
 }

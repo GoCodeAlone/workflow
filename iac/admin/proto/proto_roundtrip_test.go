@@ -157,3 +157,410 @@ func TestAdminListResourcesOutput_ErrorField(t *testing.T) {
 		t.Errorf("resources should be empty on error response: got %v", out.Resources)
 	}
 }
+
+// --- T5 mutation message round-trips ---
+
+// TestAdminPlanInput_Roundtrip pins the AdminPlanInput wire shape:
+// app_context + resource_filter survive protojson; evidence nested
+// with authz_checked/authz_allowed/subject/granted_permissions.
+func TestAdminPlanInput_Roundtrip(t *testing.T) {
+	in := &adminpb.AdminPlanInput{
+		AppContext:     "myapp",
+		ResourceFilter: "infra.vpc",
+		Evidence: &adminpb.AdminAuthzEvidence{
+			AuthzChecked:       true,
+			AuthzAllowed:       true,
+			Subject:            "user:bob",
+			GrantedPermissions: []string{"infra:read"},
+		},
+	}
+	b, err := protojson.Marshal(in)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	var out adminpb.AdminPlanInput
+	if err := protojson.Unmarshal(b, &out); err != nil {
+		t.Fatalf("protojson.Unmarshal: %v", err)
+	}
+	if out.AppContext != "myapp" {
+		t.Errorf("app_context lost: got %q", out.AppContext)
+	}
+	if out.ResourceFilter != "infra.vpc" {
+		t.Errorf("resource_filter lost: got %q", out.ResourceFilter)
+	}
+	if out.Evidence == nil || out.Evidence.Subject != "user:bob" {
+		t.Errorf("evidence/subject lost: %+v", out.Evidence)
+	}
+}
+
+// TestAdminPlanOutput_Roundtrip checks plan_id, desired_hash, actions,
+// plan_json and that error is reachable at tag 100.
+func TestAdminPlanOutput_Roundtrip(t *testing.T) {
+	planJSON := []byte(`{"actions":[{"type":"create"}]}`)
+	in := &adminpb.AdminPlanOutput{
+		PlanId:      "plan-abc",
+		DesiredHash: "abc123",
+		Actions: []*adminpb.AdminPlanAction{
+			{ActionType: "create", ResourceName: "site-vpc", Type: "infra.vpc", ChangeSummary: "+vpc"},
+		},
+		PlanJson: planJSON,
+	}
+	b, err := protojson.Marshal(in)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	var out adminpb.AdminPlanOutput
+	if err := protojson.Unmarshal(b, &out); err != nil {
+		t.Fatalf("protojson.Unmarshal: %v", err)
+	}
+	if out.PlanId != "plan-abc" {
+		t.Errorf("plan_id lost: got %q", out.PlanId)
+	}
+	if out.DesiredHash != "abc123" {
+		t.Errorf("desired_hash lost: got %q", out.DesiredHash)
+	}
+	if len(out.Actions) != 1 || out.Actions[0].ActionType != "create" {
+		t.Errorf("actions lost: %+v", out.Actions)
+	}
+	if out.Actions[0].ChangeSummary != "+vpc" {
+		t.Errorf("change_summary lost: got %q", out.Actions[0].ChangeSummary)
+	}
+	if string(out.PlanJson) != string(planJSON) {
+		t.Errorf("plan_json mangled: got %q want %q", out.PlanJson, planJSON)
+	}
+
+	// tag-100 error discriminator — fix F1: capture marshal err; fix F3: typed fields empty.
+	errOut := &adminpb.AdminPlanOutput{Error: "authz denied"}
+	eb, err := protojson.Marshal(errOut)
+	if err != nil {
+		t.Fatalf("error-case Marshal: %v", err)
+	}
+	var errRt adminpb.AdminPlanOutput
+	if err := protojson.Unmarshal(eb, &errRt); err != nil {
+		t.Fatalf("error roundtrip Unmarshal: %v", err)
+	}
+	if errRt.Error != "authz denied" {
+		t.Errorf("AdminPlanOutput error tag-100 lost: got %q", errRt.Error)
+	}
+	// F3: error response must have no typed payload fields set.
+	if errRt.PlanId != "" {
+		t.Errorf("expect no plan_id on error response; got %q", errRt.PlanId)
+	}
+	if errRt.DesiredHash != "" {
+		t.Errorf("expect no desired_hash on error response; got %q", errRt.DesiredHash)
+	}
+	if len(errRt.Actions) != 0 {
+		t.Errorf("expect no actions on error response; got %v", errRt.Actions)
+	}
+}
+
+// TestAdminApplyInput_Roundtrip checks plan_id, desired_hash,
+// allow_replace, app_context, and evidence survive protojson.
+func TestAdminApplyInput_Roundtrip(t *testing.T) {
+	in := &adminpb.AdminApplyInput{
+		PlanId:       "plan-abc",
+		DesiredHash:  "abc123",
+		AllowReplace: []string{"site-vpc"},
+		AppContext:   "myapp",
+		Evidence: &adminpb.AdminAuthzEvidence{
+			AuthzChecked: true,
+			AuthzAllowed: true,
+			Subject:      "user:operator",
+		},
+	}
+	b, err := protojson.Marshal(in)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	var out adminpb.AdminApplyInput
+	if err := protojson.Unmarshal(b, &out); err != nil {
+		t.Fatalf("protojson.Unmarshal: %v", err)
+	}
+	if out.PlanId != "plan-abc" {
+		t.Errorf("plan_id lost: got %q", out.PlanId)
+	}
+	if out.DesiredHash != "abc123" {
+		t.Errorf("desired_hash lost: got %q", out.DesiredHash)
+	}
+	if len(out.AllowReplace) != 1 || out.AllowReplace[0] != "site-vpc" {
+		t.Errorf("allow_replace lost: got %v", out.AllowReplace)
+	}
+	if out.AppContext != "myapp" {
+		t.Errorf("app_context lost: got %q", out.AppContext)
+	}
+	if out.Evidence == nil || out.Evidence.Subject != "user:operator" {
+		t.Errorf("evidence/subject lost: %+v", out.Evidence)
+	}
+}
+
+// TestAdminApplyOutput_Roundtrip checks applied summaries, action errors,
+// and that error tag-100 survives.
+func TestAdminApplyOutput_Roundtrip(t *testing.T) {
+	in := &adminpb.AdminApplyOutput{
+		Applied: []*adminpb.AdminResourceSummary{
+			{Name: "site-vpc", Type: "infra.vpc", Status: "active"},
+		},
+		Errors: []*adminpb.AdminActionError{
+			{Resource: "db-main", Action: "create", Error: "timeout"},
+		},
+	}
+	b, err := protojson.Marshal(in)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	var out adminpb.AdminApplyOutput
+	if err := protojson.Unmarshal(b, &out); err != nil {
+		t.Fatalf("protojson.Unmarshal: %v", err)
+	}
+	if len(out.Applied) != 1 || out.Applied[0].Name != "site-vpc" {
+		t.Errorf("applied lost: %+v", out.Applied)
+	}
+	if len(out.Errors) != 1 || out.Errors[0].Resource != "db-main" {
+		t.Errorf("errors lost: %+v", out.Errors)
+	}
+	if out.Errors[0].Error != "timeout" {
+		t.Errorf("error field lost: got %q", out.Errors[0].Error)
+	}
+
+	// tag-100 discriminator — fix F1: capture marshal err; fix F3: typed fields empty.
+	errOut := &adminpb.AdminApplyOutput{Error: "stale plan"}
+	eb, err := protojson.Marshal(errOut)
+	if err != nil {
+		t.Fatalf("error-case Marshal: %v", err)
+	}
+	var errRt adminpb.AdminApplyOutput
+	if err := protojson.Unmarshal(eb, &errRt); err != nil {
+		t.Fatalf("error roundtrip: %v", err)
+	}
+	if errRt.Error != "stale plan" {
+		t.Errorf("AdminApplyOutput error tag-100 lost: got %q", errRt.Error)
+	}
+	// F3: error response must have no typed payload fields set.
+	if len(errRt.Applied) != 0 {
+		t.Errorf("expect no applied on error response; got %v", errRt.Applied)
+	}
+	if len(errRt.Errors) != 0 {
+		t.Errorf("expect no errors on error response; got %v", errRt.Errors)
+	}
+}
+
+// TestAdminDestroyInput_Roundtrip checks refs (AdminResourceRef),
+// confirm_hash, and evidence survive protojson.
+func TestAdminDestroyInput_Roundtrip(t *testing.T) {
+	in := &adminpb.AdminDestroyInput{
+		Refs: []*adminpb.AdminResourceRef{
+			{Name: "old-vpc", Type: "infra.vpc"},
+		},
+		ConfirmHash: "hash-xyz",
+		Evidence: &adminpb.AdminAuthzEvidence{
+			AuthzChecked: true,
+			AuthzAllowed: true,
+			Subject:      "user:admin",
+		},
+	}
+	b, err := protojson.Marshal(in)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	var out adminpb.AdminDestroyInput
+	if err := protojson.Unmarshal(b, &out); err != nil {
+		t.Fatalf("protojson.Unmarshal: %v", err)
+	}
+	if len(out.Refs) != 1 || out.Refs[0].Name != "old-vpc" {
+		t.Errorf("refs lost: %+v", out.Refs)
+	}
+	if out.Refs[0].Type != "infra.vpc" {
+		t.Errorf("ref.type lost: got %q", out.Refs[0].Type)
+	}
+	if out.ConfirmHash != "hash-xyz" {
+		t.Errorf("confirm_hash lost: got %q", out.ConfirmHash)
+	}
+}
+
+// TestAdminDestroyOutput_Roundtrip checks destroyed list, action errors,
+// and error tag-100.
+func TestAdminDestroyOutput_Roundtrip(t *testing.T) {
+	in := &adminpb.AdminDestroyOutput{
+		Destroyed: []string{"old-vpc"},
+		Errors:    []*adminpb.AdminActionError{{Resource: "lb-main", Action: "destroy", Error: "in use"}},
+	}
+	b, err := protojson.Marshal(in)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	var out adminpb.AdminDestroyOutput
+	if err := protojson.Unmarshal(b, &out); err != nil {
+		t.Fatalf("protojson.Unmarshal: %v", err)
+	}
+	if len(out.Destroyed) != 1 || out.Destroyed[0] != "old-vpc" {
+		t.Errorf("destroyed lost: %v", out.Destroyed)
+	}
+	if len(out.Errors) != 1 || out.Errors[0].Action != "destroy" {
+		t.Errorf("errors lost: %+v", out.Errors)
+	}
+
+	// F1: capture marshal err; F3: typed fields empty on error response.
+	errOut := &adminpb.AdminDestroyOutput{Error: "confirm_hash mismatch"}
+	eb, err := protojson.Marshal(errOut)
+	if err != nil {
+		t.Fatalf("error-case Marshal: %v", err)
+	}
+	var errRt adminpb.AdminDestroyOutput
+	if err := protojson.Unmarshal(eb, &errRt); err != nil {
+		t.Fatalf("error roundtrip: %v", err)
+	}
+	if errRt.Error != "confirm_hash mismatch" {
+		t.Errorf("AdminDestroyOutput error tag-100 lost: got %q", errRt.Error)
+	}
+	// F3: error response must have no typed payload fields set.
+	if len(errRt.Destroyed) != 0 {
+		t.Errorf("expect no destroyed on error response; got %v", errRt.Destroyed)
+	}
+	if len(errRt.Errors) != 0 {
+		t.Errorf("expect no errors on error response; got %v", errRt.Errors)
+	}
+}
+
+// TestAdminDriftInput_Roundtrip checks refs and evidence survive protojson.
+func TestAdminDriftInput_Roundtrip(t *testing.T) {
+	in := &adminpb.AdminDriftInput{
+		Refs: []*adminpb.AdminResourceRef{
+			{Name: "site-vpc", Type: "infra.vpc"},
+		},
+		Evidence: &adminpb.AdminAuthzEvidence{
+			AuthzChecked: true,
+			AuthzAllowed: true,
+			Subject:      "user:viewer",
+		},
+	}
+	b, err := protojson.Marshal(in)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	var out adminpb.AdminDriftInput
+	if err := protojson.Unmarshal(b, &out); err != nil {
+		t.Fatalf("protojson.Unmarshal: %v", err)
+	}
+	if len(out.Refs) != 1 || out.Refs[0].Name != "site-vpc" {
+		t.Errorf("refs lost: %+v", out.Refs)
+	}
+	if out.Evidence == nil || out.Evidence.Subject != "user:viewer" {
+		t.Errorf("evidence/subject lost: %+v", out.Evidence)
+	}
+}
+
+// TestAdminDriftOutput_Roundtrip checks AdminDriftResult fields and
+// error tag-100 survive protojson.
+func TestAdminDriftOutput_Roundtrip(t *testing.T) {
+	in := &adminpb.AdminDriftOutput{
+		Drift: []*adminpb.AdminDriftResult{
+			{
+				ResourceName: "site-vpc",
+				Type:         "infra.vpc",
+				Drifted:      true,
+				Class:        "config",
+				Fields:       []string{"region", "ip_range"},
+			},
+		},
+	}
+	b, err := protojson.Marshal(in)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	var out adminpb.AdminDriftOutput
+	if err := protojson.Unmarshal(b, &out); err != nil {
+		t.Fatalf("protojson.Unmarshal: %v", err)
+	}
+	if len(out.Drift) != 1 || out.Drift[0].ResourceName != "site-vpc" {
+		t.Errorf("drift lost: %+v", out.Drift)
+	}
+	if !out.Drift[0].Drifted {
+		t.Errorf("drifted bool lost")
+	}
+	if out.Drift[0].Class != "config" {
+		t.Errorf("class lost: got %q", out.Drift[0].Class)
+	}
+	if len(out.Drift[0].Fields) != 2 || out.Drift[0].Fields[0] != "region" {
+		t.Errorf("fields lost: %v", out.Drift[0].Fields)
+	}
+
+	// F1: capture marshal err; F3: typed fields empty on error response.
+	errOut := &adminpb.AdminDriftOutput{Error: "provider unavailable"}
+	eb, err := protojson.Marshal(errOut)
+	if err != nil {
+		t.Fatalf("error-case Marshal: %v", err)
+	}
+	var errRt adminpb.AdminDriftOutput
+	if err := protojson.Unmarshal(eb, &errRt); err != nil {
+		t.Fatalf("error roundtrip: %v", err)
+	}
+	if errRt.Error != "provider unavailable" {
+		t.Errorf("AdminDriftOutput error tag-100 lost: got %q", errRt.Error)
+	}
+	// F3: error response must have no typed payload fields set.
+	if len(errRt.Drift) != 0 {
+		t.Errorf("expect no drift on error response; got %v", errRt.Drift)
+	}
+}
+
+// TestMutationOutputs_DiscardUnknown verifies forward compatibility: clients
+// parse server Output responses and servers parse client Input requests with
+// DiscardUnknown:true so future proto additions (new fields) are silently
+// ignored rather than rejected (F2: comment corrected to cover both directions).
+func TestMutationOutputs_DiscardUnknown(t *testing.T) {
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+
+	// Output direction: clients parsing server responses (forward compat).
+	extraPayload := []byte(`{"unknownField":"ignored","plan_id":"p1","desired_hash":"h1"}`)
+	var planOut adminpb.AdminPlanOutput
+	if err := opts.Unmarshal(extraPayload, &planOut); err != nil {
+		t.Errorf("AdminPlanOutput DiscardUnknown: %v", err)
+	}
+	if planOut.PlanId != "p1" {
+		t.Errorf("plan_id not read through DiscardUnknown: got %q", planOut.PlanId)
+	}
+
+	applyPayload := []byte(`{"unknownField":"ignored","error":"denied"}`)
+	var applyOut adminpb.AdminApplyOutput
+	if err := opts.Unmarshal(applyPayload, &applyOut); err != nil {
+		t.Errorf("AdminApplyOutput DiscardUnknown: %v", err)
+	}
+	if applyOut.Error != "denied" {
+		t.Errorf("error not read through DiscardUnknown: got %q", applyOut.Error)
+	}
+
+	destroyPayload := []byte(`{"unknownField":"ignored","destroyed":["r1"]}`)
+	var destroyOut adminpb.AdminDestroyOutput
+	if err := opts.Unmarshal(destroyPayload, &destroyOut); err != nil {
+		t.Errorf("AdminDestroyOutput DiscardUnknown: %v", err)
+	}
+	if len(destroyOut.Destroyed) != 1 {
+		t.Errorf("destroyed not read through DiscardUnknown: %v", destroyOut.Destroyed)
+	}
+
+	driftPayload := []byte(`{"unknownField":"ignored","error":"timeout"}`)
+	var driftOut adminpb.AdminDriftOutput
+	if err := opts.Unmarshal(driftPayload, &driftOut); err != nil {
+		t.Errorf("AdminDriftOutput DiscardUnknown: %v", err)
+	}
+	if driftOut.Error != "timeout" {
+		t.Errorf("error not read through DiscardUnknown: got %q", driftOut.Error)
+	}
+
+	// Input direction: server parsing client requests (F2: the more security-
+	// relevant direction — server must not reject valid requests because the
+	// client sent an extra unknown field from a newer client version).
+	// module/infra_admin.go uses unmarshalOpts{DiscardUnknown:true} when
+	// decoding all Input bodies.
+	applyInputPayload := []byte(`{"futureClientField":"v2","plan_id":"p2","desired_hash":"h2","allow_replace":["r1"]}`)
+	var applyIn adminpb.AdminApplyInput
+	if err := opts.Unmarshal(applyInputPayload, &applyIn); err != nil {
+		t.Errorf("AdminApplyInput DiscardUnknown (server-side): %v", err)
+	}
+	if applyIn.PlanId != "p2" {
+		t.Errorf("plan_id not read through DiscardUnknown (input): got %q", applyIn.PlanId)
+	}
+	if len(applyIn.AllowReplace) != 1 || applyIn.AllowReplace[0] != "r1" {
+		t.Errorf("allow_replace not read through DiscardUnknown (input): got %v", applyIn.AllowReplace)
+	}
+}

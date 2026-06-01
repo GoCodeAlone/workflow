@@ -1387,6 +1387,802 @@ func (x *AdminAuditEntry) GetAppContext() string {
 	return ""
 }
 
+// AdminPlanInput is the request shape for the PlanResource RPC.
+// Plans only the in-process config (no client-proposed desired state —
+// see NEW-M-3). evidence is audit-only; server-side authz.Enforce
+// gates the handler (ADR-0007).
+type AdminPlanInput struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	AppContext     string                 `protobuf:"bytes,1,opt,name=app_context,json=appContext,proto3" json:"app_context,omitempty"`
+	ResourceFilter string                 `protobuf:"bytes,2,opt,name=resource_filter,json=resourceFilter,proto3" json:"resource_filter,omitempty"`
+	Evidence       *AdminAuthzEvidence    `protobuf:"bytes,3,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *AdminPlanInput) Reset() {
+	*x = AdminPlanInput{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminPlanInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminPlanInput) ProtoMessage() {}
+
+func (x *AdminPlanInput) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminPlanInput.ProtoReflect.Descriptor instead.
+func (*AdminPlanInput) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *AdminPlanInput) GetAppContext() string {
+	if x != nil {
+		return x.AppContext
+	}
+	return ""
+}
+
+func (x *AdminPlanInput) GetResourceFilter() string {
+	if x != nil {
+		return x.ResourceFilter
+	}
+	return ""
+}
+
+func (x *AdminPlanInput) GetEvidence() *AdminAuthzEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+// AdminPlanAction is one proposed change in the plan (create/update/
+// replace/delete). change_summary is a human-readable diff summary.
+type AdminPlanAction struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ActionType    string                 `protobuf:"bytes,1,opt,name=action_type,json=actionType,proto3" json:"action_type,omitempty"`
+	ResourceName  string                 `protobuf:"bytes,2,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
+	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
+	ChangeSummary string                 `protobuf:"bytes,4,opt,name=change_summary,json=changeSummary,proto3" json:"change_summary,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminPlanAction) Reset() {
+	*x = AdminPlanAction{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminPlanAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminPlanAction) ProtoMessage() {}
+
+func (x *AdminPlanAction) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminPlanAction.ProtoReflect.Descriptor instead.
+func (*AdminPlanAction) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *AdminPlanAction) GetActionType() string {
+	if x != nil {
+		return x.ActionType
+	}
+	return ""
+}
+
+func (x *AdminPlanAction) GetResourceName() string {
+	if x != nil {
+		return x.ResourceName
+	}
+	return ""
+}
+
+func (x *AdminPlanAction) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *AdminPlanAction) GetChangeSummary() string {
+	if x != nil {
+		return x.ChangeSummary
+	}
+	return ""
+}
+
+// AdminPlanOutput is the response shape for the PlanResource RPC.
+// plan_id is opaque; desired_hash is the SHA-256 of the resolved
+// desired-state (same input as wfctlhelpers.DesiredStateHash) — the
+// client MUST echo it in AdminApplyInput for TOCTOU protection.
+// plan_json carries the full plan payload as opaque bytes.
+// error tag-100: non-empty → consumer ignores typed payload.
+type AdminPlanOutput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PlanId        string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	DesiredHash   string                 `protobuf:"bytes,2,opt,name=desired_hash,json=desiredHash,proto3" json:"desired_hash,omitempty"`
+	Actions       []*AdminPlanAction     `protobuf:"bytes,3,rep,name=actions,proto3" json:"actions,omitempty"`
+	PlanJson      []byte                 `protobuf:"bytes,4,opt,name=plan_json,json=planJson,proto3" json:"plan_json,omitempty"`
+	Error         string                 `protobuf:"bytes,100,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminPlanOutput) Reset() {
+	*x = AdminPlanOutput{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminPlanOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminPlanOutput) ProtoMessage() {}
+
+func (x *AdminPlanOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminPlanOutput.ProtoReflect.Descriptor instead.
+func (*AdminPlanOutput) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AdminPlanOutput) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
+func (x *AdminPlanOutput) GetDesiredHash() string {
+	if x != nil {
+		return x.DesiredHash
+	}
+	return ""
+}
+
+func (x *AdminPlanOutput) GetActions() []*AdminPlanAction {
+	if x != nil {
+		return x.Actions
+	}
+	return nil
+}
+
+func (x *AdminPlanOutput) GetPlanJson() []byte {
+	if x != nil {
+		return x.PlanJson
+	}
+	return nil
+}
+
+func (x *AdminPlanOutput) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// AdminApplyInput is the request shape for the ApplyResource RPC.
+// plan_id + desired_hash MUST match the values returned by a prior
+// PlanResource call (TOCTOU protection per ADR-0008). allow_replace
+// is the explicit opt-in list for replace actions; the handler calls
+// ValidateAllowReplaceProtected against it. evidence is audit-only.
+type AdminApplyInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PlanId        string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	DesiredHash   string                 `protobuf:"bytes,2,opt,name=desired_hash,json=desiredHash,proto3" json:"desired_hash,omitempty"`
+	AllowReplace  []string               `protobuf:"bytes,3,rep,name=allow_replace,json=allowReplace,proto3" json:"allow_replace,omitempty"`
+	AppContext    string                 `protobuf:"bytes,4,opt,name=app_context,json=appContext,proto3" json:"app_context,omitempty"`
+	Evidence      *AdminAuthzEvidence    `protobuf:"bytes,5,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminApplyInput) Reset() {
+	*x = AdminApplyInput{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminApplyInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminApplyInput) ProtoMessage() {}
+
+func (x *AdminApplyInput) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminApplyInput.ProtoReflect.Descriptor instead.
+func (*AdminApplyInput) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AdminApplyInput) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
+func (x *AdminApplyInput) GetDesiredHash() string {
+	if x != nil {
+		return x.DesiredHash
+	}
+	return ""
+}
+
+func (x *AdminApplyInput) GetAllowReplace() []string {
+	if x != nil {
+		return x.AllowReplace
+	}
+	return nil
+}
+
+func (x *AdminApplyInput) GetAppContext() string {
+	if x != nil {
+		return x.AppContext
+	}
+	return ""
+}
+
+func (x *AdminApplyInput) GetEvidence() *AdminAuthzEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+// AdminApplyOutput is the response shape for the ApplyResource RPC.
+// applied carries summaries of successfully applied resources; errors
+// carries per-resource failures (provider errors redacted of creds).
+// error tag-100: top-level failure (authz / stale-hash / etc).
+type AdminApplyOutput struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Applied       []*AdminResourceSummary `protobuf:"bytes,1,rep,name=applied,proto3" json:"applied,omitempty"`
+	Errors        []*AdminActionError     `protobuf:"bytes,2,rep,name=errors,proto3" json:"errors,omitempty"`
+	Error         string                  `protobuf:"bytes,100,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminApplyOutput) Reset() {
+	*x = AdminApplyOutput{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminApplyOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminApplyOutput) ProtoMessage() {}
+
+func (x *AdminApplyOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminApplyOutput.ProtoReflect.Descriptor instead.
+func (*AdminApplyOutput) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *AdminApplyOutput) GetApplied() []*AdminResourceSummary {
+	if x != nil {
+		return x.Applied
+	}
+	return nil
+}
+
+func (x *AdminApplyOutput) GetErrors() []*AdminActionError {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
+func (x *AdminApplyOutput) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// AdminActionError carries a per-resource error from an apply or
+// destroy operation. Provider error messages have credentials
+// redacted before serialization.
+type AdminActionError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Resource      string                 `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
+	Action        string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminActionError) Reset() {
+	*x = AdminActionError{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminActionError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminActionError) ProtoMessage() {}
+
+func (x *AdminActionError) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminActionError.ProtoReflect.Descriptor instead.
+func (*AdminActionError) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *AdminActionError) GetResource() string {
+	if x != nil {
+		return x.Resource
+	}
+	return ""
+}
+
+func (x *AdminActionError) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *AdminActionError) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// AdminResourceRef identifies a resource by name + type for destroy
+// and drift-check operations.
+type AdminResourceRef struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminResourceRef) Reset() {
+	*x = AdminResourceRef{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminResourceRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminResourceRef) ProtoMessage() {}
+
+func (x *AdminResourceRef) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminResourceRef.ProtoReflect.Descriptor instead.
+func (*AdminResourceRef) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *AdminResourceRef) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AdminResourceRef) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+// AdminDestroyInput is the request shape for the DestroyResource RPC.
+// refs lists the resources to destroy. confirm_hash is the
+// desired-state hash the client must echo for TOCTOU protection
+// (same semantics as AdminApplyInput.desired_hash). evidence is
+// audit-only.
+type AdminDestroyInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Refs          []*AdminResourceRef    `protobuf:"bytes,1,rep,name=refs,proto3" json:"refs,omitempty"`
+	ConfirmHash   string                 `protobuf:"bytes,2,opt,name=confirm_hash,json=confirmHash,proto3" json:"confirm_hash,omitempty"`
+	Evidence      *AdminAuthzEvidence    `protobuf:"bytes,3,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminDestroyInput) Reset() {
+	*x = AdminDestroyInput{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminDestroyInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminDestroyInput) ProtoMessage() {}
+
+func (x *AdminDestroyInput) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminDestroyInput.ProtoReflect.Descriptor instead.
+func (*AdminDestroyInput) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *AdminDestroyInput) GetRefs() []*AdminResourceRef {
+	if x != nil {
+		return x.Refs
+	}
+	return nil
+}
+
+func (x *AdminDestroyInput) GetConfirmHash() string {
+	if x != nil {
+		return x.ConfirmHash
+	}
+	return ""
+}
+
+func (x *AdminDestroyInput) GetEvidence() *AdminAuthzEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+// AdminDestroyOutput is the response shape for the DestroyResource
+// RPC. destroyed lists the names of successfully destroyed resources;
+// errors carries per-resource failures. error tag-100: top-level.
+type AdminDestroyOutput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Destroyed     []string               `protobuf:"bytes,1,rep,name=destroyed,proto3" json:"destroyed,omitempty"`
+	Errors        []*AdminActionError    `protobuf:"bytes,2,rep,name=errors,proto3" json:"errors,omitempty"`
+	Error         string                 `protobuf:"bytes,100,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminDestroyOutput) Reset() {
+	*x = AdminDestroyOutput{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminDestroyOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminDestroyOutput) ProtoMessage() {}
+
+func (x *AdminDestroyOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminDestroyOutput.ProtoReflect.Descriptor instead.
+func (*AdminDestroyOutput) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *AdminDestroyOutput) GetDestroyed() []string {
+	if x != nil {
+		return x.Destroyed
+	}
+	return nil
+}
+
+func (x *AdminDestroyOutput) GetErrors() []*AdminActionError {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
+func (x *AdminDestroyOutput) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// AdminDriftInput is the request shape for the DriftCheckResource RPC.
+// refs narrows the check to the listed resources; an empty refs list
+// checks all resources known to the provider. evidence is audit-only.
+type AdminDriftInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Refs          []*AdminResourceRef    `protobuf:"bytes,1,rep,name=refs,proto3" json:"refs,omitempty"`
+	Evidence      *AdminAuthzEvidence    `protobuf:"bytes,2,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminDriftInput) Reset() {
+	*x = AdminDriftInput{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminDriftInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminDriftInput) ProtoMessage() {}
+
+func (x *AdminDriftInput) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminDriftInput.ProtoReflect.Descriptor instead.
+func (*AdminDriftInput) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *AdminDriftInput) GetRefs() []*AdminResourceRef {
+	if x != nil {
+		return x.Refs
+	}
+	return nil
+}
+
+func (x *AdminDriftInput) GetEvidence() *AdminAuthzEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+// AdminDriftResult is one resource's drift check outcome. drifted is
+// true when the live cloud state diverges from desired; class is the
+// drift category (e.g. "config", "presence"); fields lists the
+// specific diverged field names.
+type AdminDriftResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ResourceName  string                 `protobuf:"bytes,1,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Drifted       bool                   `protobuf:"varint,3,opt,name=drifted,proto3" json:"drifted,omitempty"`
+	Class         string                 `protobuf:"bytes,4,opt,name=class,proto3" json:"class,omitempty"`
+	Fields        []string               `protobuf:"bytes,5,rep,name=fields,proto3" json:"fields,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminDriftResult) Reset() {
+	*x = AdminDriftResult{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminDriftResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminDriftResult) ProtoMessage() {}
+
+func (x *AdminDriftResult) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminDriftResult.ProtoReflect.Descriptor instead.
+func (*AdminDriftResult) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *AdminDriftResult) GetResourceName() string {
+	if x != nil {
+		return x.ResourceName
+	}
+	return ""
+}
+
+func (x *AdminDriftResult) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *AdminDriftResult) GetDrifted() bool {
+	if x != nil {
+		return x.Drifted
+	}
+	return false
+}
+
+func (x *AdminDriftResult) GetClass() string {
+	if x != nil {
+		return x.Class
+	}
+	return ""
+}
+
+func (x *AdminDriftResult) GetFields() []string {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
+
+// AdminDriftOutput is the response shape for the DriftCheckResource
+// RPC. drift carries one entry per checked resource. error tag-100:
+// top-level failure (authz / provider unavailable / etc).
+type AdminDriftOutput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Drift         []*AdminDriftResult    `protobuf:"bytes,1,rep,name=drift,proto3" json:"drift,omitempty"`
+	Error         string                 `protobuf:"bytes,100,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminDriftOutput) Reset() {
+	*x = AdminDriftOutput{}
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminDriftOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminDriftOutput) ProtoMessage() {}
+
+func (x *AdminDriftOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_iac_admin_proto_infra_admin_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminDriftOutput.ProtoReflect.Descriptor instead.
+func (*AdminDriftOutput) Descriptor() ([]byte, []int) {
+	return file_iac_admin_proto_infra_admin_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *AdminDriftOutput) GetDrift() []*AdminDriftResult {
+	if x != nil {
+		return x.Drift
+	}
+	return nil
+}
+
+func (x *AdminDriftOutput) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_iac_admin_proto_infra_admin_proto protoreflect.FileDescriptor
 
 const file_iac_admin_proto_infra_admin_proto_rawDesc = "" +
@@ -1499,13 +2295,72 @@ const file_iac_admin_proto_infra_admin_proto_rawDesc = "" +
 	"\atargets\x18\x05 \x03(\tR\atargets\x12\x16\n" +
 	"\x06result\x18\x06 \x01(\tR\x06result\x12\x1f\n" +
 	"\vapp_context\x18\a \x01(\tR\n" +
-	"appContext2\x9a\x04\n" +
+	"appContext\"\xa8\x01\n" +
+	"\x0eAdminPlanInput\x12\x1f\n" +
+	"\vapp_context\x18\x01 \x01(\tR\n" +
+	"appContext\x12'\n" +
+	"\x0fresource_filter\x18\x02 \x01(\tR\x0eresourceFilter\x12?\n" +
+	"\bevidence\x18\x03 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidenceJ\x04\b\x04\x10dJ\x05\be\x10\xc8\x01\"\x9f\x01\n" +
+	"\x0fAdminPlanAction\x12\x1f\n" +
+	"\vaction_type\x18\x01 \x01(\tR\n" +
+	"actionType\x12#\n" +
+	"\rresource_name\x18\x02 \x01(\tR\fresourceName\x12\x12\n" +
+	"\x04type\x18\x03 \x01(\tR\x04type\x12%\n" +
+	"\x0echange_summary\x18\x04 \x01(\tR\rchangeSummaryJ\x04\b\x05\x10dJ\x05\be\x10\xc8\x01\"\xc9\x01\n" +
+	"\x0fAdminPlanOutput\x12\x17\n" +
+	"\aplan_id\x18\x01 \x01(\tR\x06planId\x12!\n" +
+	"\fdesired_hash\x18\x02 \x01(\tR\vdesiredHash\x12:\n" +
+	"\aactions\x18\x03 \x03(\v2 .workflow.iac.v1.AdminPlanActionR\aactions\x12\x1b\n" +
+	"\tplan_json\x18\x04 \x01(\fR\bplanJson\x12\x14\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x05\x10dJ\x05\be\x10\xc8\x01\"\xe1\x01\n" +
+	"\x0fAdminApplyInput\x12\x17\n" +
+	"\aplan_id\x18\x01 \x01(\tR\x06planId\x12!\n" +
+	"\fdesired_hash\x18\x02 \x01(\tR\vdesiredHash\x12#\n" +
+	"\rallow_replace\x18\x03 \x03(\tR\fallowReplace\x12\x1f\n" +
+	"\vapp_context\x18\x04 \x01(\tR\n" +
+	"appContext\x12?\n" +
+	"\bevidence\x18\x05 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidenceJ\x04\b\x06\x10dJ\x05\be\x10\xc8\x01\"\xb1\x01\n" +
+	"\x10AdminApplyOutput\x12?\n" +
+	"\aapplied\x18\x01 \x03(\v2%.workflow.iac.v1.AdminResourceSummaryR\aapplied\x129\n" +
+	"\x06errors\x18\x02 \x03(\v2!.workflow.iac.v1.AdminActionErrorR\x06errors\x12\x14\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x03\x10dJ\x05\be\x10\xc8\x01\"i\n" +
+	"\x10AdminActionError\x12\x1a\n" +
+	"\bresource\x18\x01 \x01(\tR\bresource\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05errorJ\x04\b\x04\x10dJ\x05\be\x10\xc8\x01\"G\n" +
+	"\x10AdminResourceRef\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04typeJ\x04\b\x03\x10dJ\x05\be\x10\xc8\x01\"\xbb\x01\n" +
+	"\x11AdminDestroyInput\x125\n" +
+	"\x04refs\x18\x01 \x03(\v2!.workflow.iac.v1.AdminResourceRefR\x04refs\x12!\n" +
+	"\fconfirm_hash\x18\x02 \x01(\tR\vconfirmHash\x12?\n" +
+	"\bevidence\x18\x03 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidenceJ\x04\b\x04\x10dJ\x05\be\x10\xc8\x01\"\x90\x01\n" +
+	"\x12AdminDestroyOutput\x12\x1c\n" +
+	"\tdestroyed\x18\x01 \x03(\tR\tdestroyed\x129\n" +
+	"\x06errors\x18\x02 \x03(\v2!.workflow.iac.v1.AdminActionErrorR\x06errors\x12\x14\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x03\x10dJ\x05\be\x10\xc8\x01\"\x96\x01\n" +
+	"\x0fAdminDriftInput\x125\n" +
+	"\x04refs\x18\x01 \x03(\v2!.workflow.iac.v1.AdminResourceRefR\x04refs\x12?\n" +
+	"\bevidence\x18\x02 \x01(\v2#.workflow.iac.v1.AdminAuthzEvidenceR\bevidenceJ\x04\b\x03\x10dJ\x05\be\x10\xc8\x01\"\xa0\x01\n" +
+	"\x10AdminDriftResult\x12#\n" +
+	"\rresource_name\x18\x01 \x01(\tR\fresourceName\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
+	"\adrifted\x18\x03 \x01(\bR\adrifted\x12\x14\n" +
+	"\x05class\x18\x04 \x01(\tR\x05class\x12\x16\n" +
+	"\x06fields\x18\x05 \x03(\tR\x06fieldsJ\x04\b\x06\x10dJ\x05\be\x10\xc8\x01\"n\n" +
+	"\x10AdminDriftOutput\x127\n" +
+	"\x05drift\x18\x01 \x03(\v2!.workflow.iac.v1.AdminDriftResultR\x05drift\x12\x14\n" +
+	"\x05error\x18d \x01(\tR\x05errorJ\x04\b\x02\x10dJ\x05\be\x10\xc8\x012\xfa\x06\n" +
 	"\x11InfraAdminService\x12d\n" +
 	"\rListResources\x12(.workflow.iac.v1.AdminListResourcesInput\x1a).workflow.iac.v1.AdminListResourcesOutput\x12^\n" +
 	"\vGetResource\x12&.workflow.iac.v1.AdminGetResourceInput\x1a'.workflow.iac.v1.AdminGetResourceOutput\x12p\n" +
 	"\x11ListResourceTypes\x12,.workflow.iac.v1.AdminListResourceTypesInput\x1a-.workflow.iac.v1.AdminListResourceTypesOutput\x12d\n" +
 	"\rListProviders\x12(.workflow.iac.v1.AdminListProvidersInput\x1a).workflow.iac.v1.AdminListProvidersOutput\x12g\n" +
-	"\x0eGenerateConfig\x12).workflow.iac.v1.AdminGenerateConfigInput\x1a*.workflow.iac.v1.AdminGenerateConfigOutputB9Z7github.com/GoCodeAlone/workflow/iac/admin/proto;adminpbb\x06proto3"
+	"\x0eGenerateConfig\x12).workflow.iac.v1.AdminGenerateConfigInput\x1a*.workflow.iac.v1.AdminGenerateConfigOutput\x12Q\n" +
+	"\fPlanResource\x12\x1f.workflow.iac.v1.AdminPlanInput\x1a .workflow.iac.v1.AdminPlanOutput\x12T\n" +
+	"\rApplyResource\x12 .workflow.iac.v1.AdminApplyInput\x1a!.workflow.iac.v1.AdminApplyOutput\x12Z\n" +
+	"\x0fDestroyResource\x12\".workflow.iac.v1.AdminDestroyInput\x1a#.workflow.iac.v1.AdminDestroyOutput\x12Y\n" +
+	"\x12DriftCheckResource\x12 .workflow.iac.v1.AdminDriftInput\x1a!.workflow.iac.v1.AdminDriftOutputB9Z7github.com/GoCodeAlone/workflow/iac/admin/proto;adminpbb\x06proto3"
 
 var (
 	file_iac_admin_proto_infra_admin_proto_rawDescOnce sync.Once
@@ -1519,7 +2374,7 @@ func file_iac_admin_proto_infra_admin_proto_rawDescGZIP() []byte {
 	return file_iac_admin_proto_infra_admin_proto_rawDescData
 }
 
-var file_iac_admin_proto_infra_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_iac_admin_proto_infra_admin_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_iac_admin_proto_infra_admin_proto_goTypes = []any{
 	(*AdminAuthzEvidence)(nil),           // 0: workflow.iac.v1.AdminAuthzEvidence
 	(*AdminResourceSummary)(nil),         // 1: workflow.iac.v1.AdminResourceSummary
@@ -1538,7 +2393,19 @@ var file_iac_admin_proto_infra_admin_proto_goTypes = []any{
 	(*AdminGenerateConfigInput)(nil),     // 14: workflow.iac.v1.AdminGenerateConfigInput
 	(*AdminGenerateConfigOutput)(nil),    // 15: workflow.iac.v1.AdminGenerateConfigOutput
 	(*AdminAuditEntry)(nil),              // 16: workflow.iac.v1.AdminAuditEntry
-	nil,                                  // 17: workflow.iac.v1.AdminGenerateConfigInput.FieldValuesEntry
+	(*AdminPlanInput)(nil),               // 17: workflow.iac.v1.AdminPlanInput
+	(*AdminPlanAction)(nil),              // 18: workflow.iac.v1.AdminPlanAction
+	(*AdminPlanOutput)(nil),              // 19: workflow.iac.v1.AdminPlanOutput
+	(*AdminApplyInput)(nil),              // 20: workflow.iac.v1.AdminApplyInput
+	(*AdminApplyOutput)(nil),             // 21: workflow.iac.v1.AdminApplyOutput
+	(*AdminActionError)(nil),             // 22: workflow.iac.v1.AdminActionError
+	(*AdminResourceRef)(nil),             // 23: workflow.iac.v1.AdminResourceRef
+	(*AdminDestroyInput)(nil),            // 24: workflow.iac.v1.AdminDestroyInput
+	(*AdminDestroyOutput)(nil),           // 25: workflow.iac.v1.AdminDestroyOutput
+	(*AdminDriftInput)(nil),              // 26: workflow.iac.v1.AdminDriftInput
+	(*AdminDriftResult)(nil),             // 27: workflow.iac.v1.AdminDriftResult
+	(*AdminDriftOutput)(nil),             // 28: workflow.iac.v1.AdminDriftOutput
+	nil,                                  // 29: workflow.iac.v1.AdminGenerateConfigInput.FieldValuesEntry
 }
 var file_iac_admin_proto_infra_admin_proto_depIdxs = []int32{
 	1,  // 0: workflow.iac.v1.AdminResourceDetail.summary:type_name -> workflow.iac.v1.AdminResourceSummary
@@ -1551,23 +2418,42 @@ var file_iac_admin_proto_infra_admin_proto_depIdxs = []int32{
 	8,  // 7: workflow.iac.v1.AdminListResourceTypesOutput.types:type_name -> workflow.iac.v1.AdminResourceTypeMetadata
 	0,  // 8: workflow.iac.v1.AdminListProvidersInput.evidence:type_name -> workflow.iac.v1.AdminAuthzEvidence
 	11, // 9: workflow.iac.v1.AdminListProvidersOutput.providers:type_name -> workflow.iac.v1.AdminProviderSummary
-	17, // 10: workflow.iac.v1.AdminGenerateConfigInput.field_values:type_name -> workflow.iac.v1.AdminGenerateConfigInput.FieldValuesEntry
+	29, // 10: workflow.iac.v1.AdminGenerateConfigInput.field_values:type_name -> workflow.iac.v1.AdminGenerateConfigInput.FieldValuesEntry
 	0,  // 11: workflow.iac.v1.AdminGenerateConfigInput.evidence:type_name -> workflow.iac.v1.AdminAuthzEvidence
-	3,  // 12: workflow.iac.v1.InfraAdminService.ListResources:input_type -> workflow.iac.v1.AdminListResourcesInput
-	5,  // 13: workflow.iac.v1.InfraAdminService.GetResource:input_type -> workflow.iac.v1.AdminGetResourceInput
-	9,  // 14: workflow.iac.v1.InfraAdminService.ListResourceTypes:input_type -> workflow.iac.v1.AdminListResourceTypesInput
-	12, // 15: workflow.iac.v1.InfraAdminService.ListProviders:input_type -> workflow.iac.v1.AdminListProvidersInput
-	14, // 16: workflow.iac.v1.InfraAdminService.GenerateConfig:input_type -> workflow.iac.v1.AdminGenerateConfigInput
-	4,  // 17: workflow.iac.v1.InfraAdminService.ListResources:output_type -> workflow.iac.v1.AdminListResourcesOutput
-	6,  // 18: workflow.iac.v1.InfraAdminService.GetResource:output_type -> workflow.iac.v1.AdminGetResourceOutput
-	10, // 19: workflow.iac.v1.InfraAdminService.ListResourceTypes:output_type -> workflow.iac.v1.AdminListResourceTypesOutput
-	13, // 20: workflow.iac.v1.InfraAdminService.ListProviders:output_type -> workflow.iac.v1.AdminListProvidersOutput
-	15, // 21: workflow.iac.v1.InfraAdminService.GenerateConfig:output_type -> workflow.iac.v1.AdminGenerateConfigOutput
-	17, // [17:22] is the sub-list for method output_type
-	12, // [12:17] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	0,  // 12: workflow.iac.v1.AdminPlanInput.evidence:type_name -> workflow.iac.v1.AdminAuthzEvidence
+	18, // 13: workflow.iac.v1.AdminPlanOutput.actions:type_name -> workflow.iac.v1.AdminPlanAction
+	0,  // 14: workflow.iac.v1.AdminApplyInput.evidence:type_name -> workflow.iac.v1.AdminAuthzEvidence
+	1,  // 15: workflow.iac.v1.AdminApplyOutput.applied:type_name -> workflow.iac.v1.AdminResourceSummary
+	22, // 16: workflow.iac.v1.AdminApplyOutput.errors:type_name -> workflow.iac.v1.AdminActionError
+	23, // 17: workflow.iac.v1.AdminDestroyInput.refs:type_name -> workflow.iac.v1.AdminResourceRef
+	0,  // 18: workflow.iac.v1.AdminDestroyInput.evidence:type_name -> workflow.iac.v1.AdminAuthzEvidence
+	22, // 19: workflow.iac.v1.AdminDestroyOutput.errors:type_name -> workflow.iac.v1.AdminActionError
+	23, // 20: workflow.iac.v1.AdminDriftInput.refs:type_name -> workflow.iac.v1.AdminResourceRef
+	0,  // 21: workflow.iac.v1.AdminDriftInput.evidence:type_name -> workflow.iac.v1.AdminAuthzEvidence
+	27, // 22: workflow.iac.v1.AdminDriftOutput.drift:type_name -> workflow.iac.v1.AdminDriftResult
+	3,  // 23: workflow.iac.v1.InfraAdminService.ListResources:input_type -> workflow.iac.v1.AdminListResourcesInput
+	5,  // 24: workflow.iac.v1.InfraAdminService.GetResource:input_type -> workflow.iac.v1.AdminGetResourceInput
+	9,  // 25: workflow.iac.v1.InfraAdminService.ListResourceTypes:input_type -> workflow.iac.v1.AdminListResourceTypesInput
+	12, // 26: workflow.iac.v1.InfraAdminService.ListProviders:input_type -> workflow.iac.v1.AdminListProvidersInput
+	14, // 27: workflow.iac.v1.InfraAdminService.GenerateConfig:input_type -> workflow.iac.v1.AdminGenerateConfigInput
+	17, // 28: workflow.iac.v1.InfraAdminService.PlanResource:input_type -> workflow.iac.v1.AdminPlanInput
+	20, // 29: workflow.iac.v1.InfraAdminService.ApplyResource:input_type -> workflow.iac.v1.AdminApplyInput
+	24, // 30: workflow.iac.v1.InfraAdminService.DestroyResource:input_type -> workflow.iac.v1.AdminDestroyInput
+	26, // 31: workflow.iac.v1.InfraAdminService.DriftCheckResource:input_type -> workflow.iac.v1.AdminDriftInput
+	4,  // 32: workflow.iac.v1.InfraAdminService.ListResources:output_type -> workflow.iac.v1.AdminListResourcesOutput
+	6,  // 33: workflow.iac.v1.InfraAdminService.GetResource:output_type -> workflow.iac.v1.AdminGetResourceOutput
+	10, // 34: workflow.iac.v1.InfraAdminService.ListResourceTypes:output_type -> workflow.iac.v1.AdminListResourceTypesOutput
+	13, // 35: workflow.iac.v1.InfraAdminService.ListProviders:output_type -> workflow.iac.v1.AdminListProvidersOutput
+	15, // 36: workflow.iac.v1.InfraAdminService.GenerateConfig:output_type -> workflow.iac.v1.AdminGenerateConfigOutput
+	19, // 37: workflow.iac.v1.InfraAdminService.PlanResource:output_type -> workflow.iac.v1.AdminPlanOutput
+	21, // 38: workflow.iac.v1.InfraAdminService.ApplyResource:output_type -> workflow.iac.v1.AdminApplyOutput
+	25, // 39: workflow.iac.v1.InfraAdminService.DestroyResource:output_type -> workflow.iac.v1.AdminDestroyOutput
+	28, // 40: workflow.iac.v1.InfraAdminService.DriftCheckResource:output_type -> workflow.iac.v1.AdminDriftOutput
+	32, // [32:41] is the sub-list for method output_type
+	23, // [23:32] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_iac_admin_proto_infra_admin_proto_init() }
@@ -1581,7 +2467,7 @@ func file_iac_admin_proto_infra_admin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_iac_admin_proto_infra_admin_proto_rawDesc), len(file_iac_admin_proto_infra_admin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

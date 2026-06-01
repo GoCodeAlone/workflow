@@ -49,6 +49,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
@@ -116,6 +118,29 @@ type InfraAdminConfig struct {
 	// at Init and propagates open errors as a module-init failure
 	// (FATAL per design Security Review).
 	AccessLogPath string `yaml:"access_log_path" json:"access_log_path"`
+
+	// AllowUnauthenticated opts into insecure single-tenant mode.
+	// When false (the default) and AuthModule is empty, Init returns
+	// an error requiring auth_module. Mutation routes are NEVER
+	// registered without a real AuthModule; with AllowUnauthenticated:true
+	// only read routes are active and a prominent warning is logged.
+	AllowUnauthenticated bool `yaml:"allow_unauthenticated" json:"allow_unauthenticated"`
+
+	// AuthzModule names the authz.casbin (or compatible) module to
+	// resolve for server-side RBAC on mutation routes. When non-empty,
+	// infra.admin resolves the module as an Enforcer at Init and calls
+	// Enforce(subject,"infra:apply"/"infra:destroy"/"infra:read","allow")
+	// on every request. When empty, authentication is required but RBAC
+	// is skipped (authn-only single-tenant posture).
+	AuthzModule string `yaml:"authz_module" json:"authz_module"`
+}
+
+// Enforcer is the server-side RBAC interface satisfied by the
+// authz.casbin module wrapper. The variadic extra ...string matches
+// the concrete Casbin wrapper's method signature (plan-review C-NEW-1),
+// so a non-variadic declaration would not be satisfied by the wrapper.
+type Enforcer interface {
+	Enforce(sub, obj, act string, extra ...string) (bool, error)
 }
 
 // InfraAdmin is the engine-side workflow module. Implements
@@ -132,6 +157,19 @@ type InfraAdmin struct {
 	router               *StandardHTTPRouter
 	secHdrs              HTTPMiddleware
 	auth                 HTTPMiddleware
+	authz                Enforcer // nil when authz_module not configured
+
+	// T8: in-process desired spec source + per-provider mutexes.
+	// wfCfg is the WorkflowConfig read at Init; desiredSpecs is the
+	// set of infra.* resource specs extracted from it. Both are
+	// passed to PlanResource/ApplyResource handlers so the TOCTOU
+	// hash is consistent across plan→apply rounds.
+	wfCfg        *config.WorkflowConfig
+	desiredSpecs []interfaces.ResourceSpec
+	// providerMu maps provider module name → a mutex for single-flight
+	// apply/destroy. Pre-populated at Init so the per-provider map
+	// is read-only at Start/request time (no concurrent write).
+	providerMu map[string]*sync.Mutex
 
 	// Catalogs are instantiated in-process at Init.
 	fieldCatalog  *catalog.FieldSpecCatalog
@@ -170,9 +208,10 @@ func NewInfraAdmin(name string, cfg map[string]any) modular.Module {
 		_ = json.Unmarshal(raw, &c)
 	}
 	return &InfraAdmin{
-		name:      name,
-		config:    c,
-		providers: map[string]interfaces.IaCProvider{},
+		name:       name,
+		config:     c,
+		providers:  map[string]interfaces.IaCProvider{},
+		providerMu: map[string]*sync.Mutex{},
 	}
 }
 
@@ -196,6 +235,9 @@ func (m *InfraAdmin) Dependencies() []string {
 	}
 	if m.config.AuthModule != "" {
 		deps = append(deps, m.config.AuthModule)
+	}
+	if m.config.AuthzModule != "" {
+		deps = append(deps, m.config.AuthzModule)
 	}
 	deps = append(deps, m.config.ProviderModules...)
 	return deps
@@ -225,6 +267,9 @@ func (m *InfraAdmin) RequiresServices() []modular.ServiceDependency {
 	if m.config.AuthModule != "" {
 		deps = append(deps, modular.ServiceDependency{Name: m.config.AuthModule})
 	}
+	if m.config.AuthzModule != "" {
+		deps = append(deps, modular.ServiceDependency{Name: m.config.AuthzModule})
+	}
 	for _, pm := range m.config.ProviderModules {
 		deps = append(deps, modular.ServiceDependency{Name: pm})
 	}
@@ -247,6 +292,16 @@ func (m *InfraAdmin) ProvidesServices() []modular.ServiceProvider { return nil }
 // the engine.
 func (m *InfraAdmin) Init(app modular.Application) error {
 	m.app = app
+
+	// T4 (#29): require auth_module unless the operator explicitly
+	// opted into insecure single-tenant mode. Mutation routes are
+	// NEVER registered without auth regardless of this flag.
+	if m.config.AuthModule == "" && !m.config.AllowUnauthenticated {
+		return fmt.Errorf("infra.admin: auth_module required (set allow_unauthenticated:true to opt into insecure single-tenant mode)")
+	}
+	if m.config.AuthModule == "" && m.config.AllowUnauthenticated {
+		app.Logger().Warn("infra.admin: mutation routes DISABLED (no auth_module); reads only")
+	}
 
 	// State store.
 	if m.config.StateModule != "" {
@@ -311,13 +366,27 @@ func (m *InfraAdmin) Init(app modular.Application) error {
 		m.auth = authMw
 	}
 
-	// Per-provider IaCProvider handles.
+	// Authz enforcer (optional — for server-side write-tier RBAC).
+	if m.config.AuthzModule != "" {
+		var authzSvc any
+		if err := app.GetService(m.config.AuthzModule, &authzSvc); err != nil {
+			return fmt.Errorf("infra.admin: authz module %q: %w", m.config.AuthzModule, err)
+		}
+		enforcer, ok := authzSvc.(Enforcer)
+		if !ok {
+			return fmt.Errorf("infra.admin: authz module %q is %T, need Enforcer", m.config.AuthzModule, authzSvc)
+		}
+		m.authz = enforcer
+	}
+
+	// Per-provider IaCProvider handles + single-flight mutexes.
 	for _, pm := range m.config.ProviderModules {
 		var p interfaces.IaCProvider
 		if err := app.GetService(pm, &p); err != nil {
 			return fmt.Errorf("infra.admin: provider %q: %w", pm, err)
 		}
 		m.providers[pm] = p
+		m.providerMu[pm] = &sync.Mutex{}
 	}
 
 	// Populate providerTypeByModule from the loaded WorkflowConfig
@@ -376,19 +445,98 @@ func (m *InfraAdmin) populateProviderTypes(app modular.Application) error {
 	if !ok || wfCfg == nil {
 		return nil
 	}
+	// Store the full config for TOCTOU hash computation.
+	m.wfCfg = wfCfg
+
 	for i := range wfCfg.Modules {
 		mod := &wfCfg.Modules[i]
-		if mod.Type != "iac.provider" {
-			continue
+		switch {
+		case mod.Type == "iac.provider":
+			modCfg := config.ExpandEnvInMap(mod.Config)
+			pt, _ := modCfg["provider"].(string)
+			if pt != "" {
+				m.providerTypeByModule[mod.Name] = pt
+			}
+		case isInfraModuleType(mod.Type):
+			// Extract ResourceSpec from infra.* module. Uses ResolveForEnv
+			// ("" = default env) to honour per-env overrides and the
+			// Protected flag — same path as the CLI's resourceSpecFromResolvedModule.
+			resolved, include := mod.ResolveForEnv("")
+			if !include {
+				continue
+			}
+			m.desiredSpecs = append(m.desiredSpecs, infraSpecFromResolved(resolved))
 		}
-		modCfg := config.ExpandEnvInMap(mod.Config)
-		pt, _ := modCfg["provider"].(string)
-		if pt == "" {
-			continue
-		}
-		m.providerTypeByModule[mod.Name] = pt
 	}
 	return nil
+}
+
+// isInfraModuleType returns true for infra.* and platform.* module types
+// that represent cloud resources (the set the CLI plans against).
+// Mirrors wfctlhelpers.IsInfraType without importing that package.
+func isInfraModuleType(t string) bool {
+	return strings.HasPrefix(t, "infra.") || strings.HasPrefix(t, "platform.")
+}
+
+// infraSpecFromResolved builds an interfaces.ResourceSpec from a
+// config.ResolvedModule. Mirrors cmd/wfctl resourceSpecFromResolvedModule.
+func infraSpecFromResolved(r *config.ResolvedModule) interfaces.ResourceSpec {
+	cfg := cloneAnyMap(r.Config)
+	if r.Protected {
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
+		cfg["protected"] = true
+	}
+	spec := interfaces.ResourceSpec{
+		Name:      r.Name,
+		Type:      r.Type,
+		Config:    cfg,
+		DependsOn: extractModuleDependsOn(cfg), // mirrors CLI's extractDependsOn
+	}
+	if size, ok := cfg["size"].(string); ok {
+		spec.Size = interfaces.Size(size)
+	}
+	return spec
+}
+
+// extractModuleDependsOn reads the `depends_on` key from a resource config map
+// and returns the list of dependency names. Inlined from cmd/wfctl/infra.go
+// (package main — not importable) to keep the TOCTOU hash consistent with the
+// CLI path.
+func extractModuleDependsOn(cfg map[string]any) []string {
+	if cfg == nil {
+		return nil
+	}
+	raw, ok := cfg["depends_on"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, d := range v {
+			if s, ok := d.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// cloneAnyMap returns a shallow copy of m (nil-safe).
+func cloneAnyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 // Start resolves the workflowEngine service (registered after
@@ -425,7 +573,7 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 		mws = append(mws, m.secHdrs)
 	}
 
-	// Typed API routes.
+	// Typed API routes (reads — no bearer requirement beyond auth middleware).
 	apiRoutes := []struct {
 		method  string
 		path    string
@@ -441,6 +589,39 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 	for _, r := range apiRoutes {
 		adapter := NewHTTPHandlerAdapter(r.handler)
 		m.router.AddRouteWithMiddleware(r.method, r.path, adapter, mws)
+	}
+
+	// Mutation routes — only registered when auth is configured.
+	// requireBearerAuth is added to the middleware chain (innermost
+	// before the handler) as CSRF protection for state-mutating RPCs.
+	// Per T4: when m.auth==nil (allow_unauthenticated mode) mutation
+	// routes are absent; a warning was already logged at Init.
+	if m.auth != nil {
+		// T8 F2: warn when multiple providers are configured — the single-flight
+		// mutex covers only the first declared provider in v1.1; applies to
+		// provider A will block applies to provider B unnecessarily.
+		if len(m.config.ProviderModules) > 1 {
+			m.app.Logger().Warn(
+				"infra.admin: single-flight mutex covers first provider only in v1.1 — multi-provider configs may see unexpected 409s",
+				"providers", len(m.config.ProviderModules),
+			)
+		}
+		requireBearer := requireBearerAuthMiddleware{}
+		mutMws := append(mws, requireBearer) //nolint:gocritic // intentional append-to-mws copy
+		mutRoutes := []struct {
+			method  string
+			path    string
+			handler http.HandlerFunc
+		}{
+			{"POST", m.config.RoutePrefix + "/plan", m.handlePlanResource},
+			{"POST", m.config.RoutePrefix + "/apply", m.handleApplyResource},
+			{"POST", m.config.RoutePrefix + "/destroy", m.handleDestroyResource},
+			{"POST", m.config.RoutePrefix + "/drift", m.handleDriftCheckResource},
+		}
+		for _, r := range mutRoutes {
+			adapter := NewHTTPHandlerAdapter(r.handler)
+			m.router.AddRouteWithMiddleware(r.method, r.path, adapter, mutMws)
+		}
 	}
 
 	// Asset routes — http.FileServer over the embedded admin.AssetFS.
@@ -505,6 +686,21 @@ func (m *InfraAdmin) Start(ctx context.Context) error {
 				}},
 			},
 		}},
+		// T12: audit-viewer page — read-tier infra:read permission (same as
+		// other read contributions; audit tail is GET-only, no mutation risk).
+		{"register-infra-admin-actions", map[string]any{
+			"module": "admin",
+			"contribution": map[string]any{
+				"id":          "infra.audit",
+				"title":       "Infra Audit Log",
+				"category":    "infra",
+				"path":        m.config.AssetPrefix + "/actions.html",
+				"render_mode": "iframe",
+				"permissions": []map[string]any{{
+					"resource": "infra", "action": "read", "permission": "infra:read",
+				}},
+			},
+		}},
 	}
 	for _, c := range contributions {
 		if err := m.engine.TriggerWorkflow(ctx, "pipeline:"+c.pipelineName, "", c.payload); err != nil {
@@ -560,6 +756,20 @@ func readAdminBody(r *http.Request) ([]byte, error) {
 // T15 F2 (commit 60971783d): hardcoding "ok" hid real denial
 // attempts in the access log, defeating the audit log's
 // security-review purpose.
+// subjectFromRequest extracts the authenticated subject from the
+// request context. The auth middleware stores JWT claims as
+// map[string]any under authClaimsContextKey; sub is the standard
+// JWT claim for the principal. Returns "" when no claims are present
+// (e.g. allow_unauthenticated mode or auth middleware not wired).
+func (m *InfraAdmin) subjectFromRequest(r *http.Request) string {
+	claims, ok := r.Context().Value(authClaimsContextKey).(map[string]any)
+	if !ok || claims == nil {
+		return ""
+	}
+	sub, _ := claims["sub"].(string)
+	return sub
+}
+
 func (m *InfraAdmin) auditAccess(r *http.Request, action string, ev *adminpb.AdminAuthzEvidence, result string) {
 	if m.audit == nil {
 		return
@@ -582,13 +792,24 @@ func (m *InfraAdmin) auditAccess(r *http.Request, action string, ev *adminpb.Adm
 // audit log's `result` value. Empty error → "ok"; non-empty →
 // "denied" (the handler library's primary refusal path is
 // authz-default-deny, so "denied" is the most informative
-// label for v1; future v1.1 might split into "denied"/"error"
-// /"not_found" but the proto field is a free-form string).
+// auditResultFor classifies an Output.error string into the
+// three-way audit result: "ok" (no error), "denied" (authz/evidence
+// rejection), or "error" (provider/backend failure). The
+// discrimination is substring-based on the error prefix, which the
+// handler library follows consistently.
 func auditResultFor(errMsg string) string {
 	if errMsg == "" {
 		return "ok"
 	}
-	return "denied"
+	// Authz/evidence/TOCTOU rejections contain "authz", "denied",
+	// "evidence", or "stale" — classify as denied (client mistake).
+	for _, marker := range []string{"authz", "denied", "evidence", "stale"} {
+		if strings.Contains(errMsg, marker) {
+			return "denied"
+		}
+	}
+	// Everything else is a backend or configuration error.
+	return "error"
 }
 
 // nowUnix is a package-level var so tests can substitute a fixed
@@ -814,4 +1035,135 @@ func writeProtoMsg(w http.ResponseWriter, msg proto.Message) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// ── T8: requireBearerAuth middleware ─────────────────────────────────────────
+
+// requireBearerAuthMiddleware is an HTTPMiddleware that rejects requests
+// lacking an Authorization: Bearer <token> header with 401. It is applied
+// to mutation routes only (plan/apply/destroy/drift) as a CSRF guard.
+// It does NOT validate the token — the outer auth middleware (m.auth) has
+// already done so; this gate only checks the header form to prevent
+// cookie-based CSRF forgeries against mutation routes.
+type requireBearerAuthMiddleware struct{}
+
+func (requireBearerAuthMiddleware) Process(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") || len(auth) <= len("Bearer ") {
+			http.Error(w, "mutation routes require Authorization: Bearer <token>", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ── T8: mutation route handlers ──────────────────────────────────────────────
+
+// tryLockProvider attempts to acquire the per-provider mutex. Returns a
+// release func and true on success; 409 on the wire + false when already locked.
+func (m *InfraAdmin) tryLockProvider(w http.ResponseWriter) (release func(), ok bool) {
+	// Select the first provider's mutex (single-provider model for v1.1).
+	var mu *sync.Mutex
+	for _, pm := range m.config.ProviderModules {
+		if mu2, exists := m.providerMu[pm]; exists {
+			mu = mu2
+			break
+		}
+	}
+	if mu == nil {
+		return func() {}, true // no mutex → no contention guard needed
+	}
+	if !mu.TryLock() {
+		http.Error(w, `{"error":"apply in progress — retry later"}`, http.StatusConflict)
+		return nil, false
+	}
+	return func() { mu.Unlock() }, true
+}
+
+func (m *InfraAdmin) handlePlanResource(w http.ResponseWriter, r *http.Request) {
+	body, err := readAdminBody(r)
+	if err != nil {
+		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	var in adminpb.AdminPlanInput
+	if len(body) > 0 {
+		if err := unmarshalOpts.Unmarshal(body, &in); err != nil {
+			http.Error(w, "decode request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	// handlers never return non-nil error (errors go to out.Error per proto tag-100 pattern)
+	out, _ := handler.PlanResource(r.Context(), m.state, m.providers, m.wfCfg, m.desiredSpecs, &in) //nolint:errcheck
+	writeProtoMsg(w, out)
+	m.auditAccess(r, "plan", in.GetEvidence(), auditResultFor(out.GetError()))
+}
+
+func (m *InfraAdmin) handleApplyResource(w http.ResponseWriter, r *http.Request) {
+	release, ok := m.tryLockProvider(w)
+	if !ok {
+		return
+	}
+	defer release()
+
+	body, err := readAdminBody(r)
+	if err != nil {
+		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	var in adminpb.AdminApplyInput
+	if len(body) > 0 {
+		if err := unmarshalOpts.Unmarshal(body, &in); err != nil {
+			http.Error(w, "decode request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	subject := m.subjectFromRequest(r)
+	out, _ := handler.ApplyResource(r.Context(), m.state, m.providers, m.authz, subject, m.wfCfg, m.desiredSpecs, &in) //nolint:errcheck // errors go to out.Error
+	writeProtoMsg(w, out)
+	m.auditAccess(r, "apply", in.GetEvidence(), auditResultFor(out.GetError()))
+}
+
+func (m *InfraAdmin) handleDestroyResource(w http.ResponseWriter, r *http.Request) {
+	release, ok := m.tryLockProvider(w)
+	if !ok {
+		return
+	}
+	defer release()
+
+	body, err := readAdminBody(r)
+	if err != nil {
+		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	var in adminpb.AdminDestroyInput
+	if len(body) > 0 {
+		if err := unmarshalOpts.Unmarshal(body, &in); err != nil {
+			http.Error(w, "decode request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	subject := m.subjectFromRequest(r)
+	out, _ := handler.DestroyResource(r.Context(), m.providers, m.authz, subject, &in) //nolint:errcheck // errors go to out.Error
+	writeProtoMsg(w, out)
+	m.auditAccess(r, "destroy", in.GetEvidence(), auditResultFor(out.GetError()))
+}
+
+func (m *InfraAdmin) handleDriftCheckResource(w http.ResponseWriter, r *http.Request) {
+	body, err := readAdminBody(r)
+	if err != nil {
+		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	var in adminpb.AdminDriftInput
+	if len(body) > 0 {
+		if err := unmarshalOpts.Unmarshal(body, &in); err != nil {
+			http.Error(w, "decode request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	out, _ := handler.DriftCheckResource(r.Context(), m.providers, &in) //nolint:errcheck // errors go to out.Error
+	writeProtoMsg(w, out)
+	m.auditAccess(r, "drift", in.GetEvidence(), auditResultFor(out.GetError()))
 }
