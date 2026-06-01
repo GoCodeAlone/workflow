@@ -1,6 +1,10 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -198,4 +202,104 @@ func TestPluginRegistrySync_AssetBinaryName(t *testing.T) {
 			t.Fatalf("assetBinaryName(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+func TestPluginRegistrySync_VerifyCapabilitiesDownloadsExtractsAndSkipsName(t *testing.T) {
+	restoreRegistrySyncTestHooks(t)
+
+	dir := t.TempDir()
+	assetName := "workflow-plugin-foo-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz"
+	assetPath := filepath.Join(dir, assetName)
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"foo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "plugin.json")
+	if err := writeTestTarGz(assetPath, "archive/workflow-plugin-foo", []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	registrySyncReleaseDownloads = func(ghRepo, tag string) ([]releaseAsset, error) {
+		if ghRepo != "owner/repo" || tag != "v1.2.3" {
+			t.Fatalf("releaseDownloads args = %q %q, want owner/repo v1.2.3", ghRepo, tag)
+		}
+		return []releaseAsset{{Name: assetName, OS: runtime.GOOS, Arch: runtime.GOARCH}}, nil
+	}
+	registrySyncDownloadReleaseAsset = func(ghRepo, tag, name, targetDir string) (string, error) {
+		if name != assetName {
+			t.Fatalf("download asset name = %q, want %q", name, assetName)
+		}
+		if targetDir == "" {
+			t.Fatal("download target dir is empty")
+		}
+		return assetPath, nil
+	}
+
+	var verifyCalled bool
+	registrySyncVerifyManifest = func(binary, manifest string, opts manifestCompareOptions) error {
+		verifyCalled = true
+		if filepath.Base(binary) != "workflow-plugin-foo" {
+			t.Fatalf("binary = %q, want extracted workflow-plugin-foo", binary)
+		}
+		if manifest != manifestPath {
+			t.Fatalf("manifest = %q, want %q", manifest, manifestPath)
+		}
+		if !opts.SkipName {
+			t.Fatal("registry verification must skip strict manifest name comparison")
+		}
+		return nil
+	}
+
+	if err := verifyRegistryPluginCapabilities("foo", manifestPath, "owner/repo", "v1.2.3"); err != nil {
+		t.Fatalf("verifyRegistryPluginCapabilities returned error: %v", err)
+	}
+	if !verifyCalled {
+		t.Fatal("expected registrySyncVerifyManifest to be called")
+	}
+}
+
+func TestPluginRegistrySync_VerifyCapabilitiesDownloadError(t *testing.T) {
+	restoreRegistrySyncTestHooks(t)
+
+	registrySyncReleaseDownloads = func(string, string) ([]releaseAsset, error) {
+		return []releaseAsset{{Name: "workflow-plugin-foo-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz", OS: runtime.GOOS, Arch: runtime.GOARCH}}, nil
+	}
+	registrySyncDownloadReleaseAsset = func(string, string, string, string) (string, error) {
+		return "", errors.New("download failed")
+	}
+
+	err := verifyRegistryPluginCapabilities("foo", filepath.Join(t.TempDir(), "plugin.json"), "owner/repo", "v1.2.3")
+	if err == nil || !strings.Contains(err.Error(), "download failed") {
+		t.Fatalf("error = %v, want download failure", err)
+	}
+}
+
+func restoreRegistrySyncTestHooks(t *testing.T) {
+	t.Helper()
+	oldReleaseDownloads := registrySyncReleaseDownloads
+	oldDownloadReleaseAsset := registrySyncDownloadReleaseAsset
+	oldVerifyManifest := registrySyncVerifyManifest
+	t.Cleanup(func() {
+		registrySyncReleaseDownloads = oldReleaseDownloads
+		registrySyncDownloadReleaseAsset = oldDownloadReleaseAsset
+		registrySyncVerifyManifest = oldVerifyManifest
+	})
+}
+
+func writeTestTarGz(path, name string, data []byte, mode int64) error {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: mode, Size: int64(len(data))}); err != nil {
+		return err
+	}
+	if _, err := tw.Write(data); err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	if err := gw.Close(); err != nil {
+		return err
+	}
+	return os.WriteFile(path, buf.Bytes(), 0o644)
 }

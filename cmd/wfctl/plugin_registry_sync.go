@@ -303,8 +303,14 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 	return assets, nil
 }
 
+var (
+	registrySyncReleaseDownloads     = releaseDownloads
+	registrySyncDownloadReleaseAsset = downloadReleaseAsset
+	registrySyncVerifyManifest       = verifyPluginManifestAgainstBinaryWithOptions
+)
+
 func verifyRegistryPluginCapabilities(pluginName, manifestPath, ghRepo, tag string) error {
-	assets, err := releaseDownloads(ghRepo, tag)
+	assets, err := registrySyncReleaseDownloads(ghRepo, tag)
 	if err != nil {
 		return fmt.Errorf("list release downloads for %s %s: %w", ghRepo, tag, err)
 	}
@@ -319,7 +325,7 @@ func verifyRegistryPluginCapabilities(pluginName, manifestPath, ghRepo, tag stri
 	}
 	defer os.RemoveAll(tmpDir)
 
-	assetPath, err := downloadReleaseAsset(ghRepo, tag, asset.Name, tmpDir)
+	assetPath, err := registrySyncDownloadReleaseAsset(ghRepo, tag, asset.Name, tmpDir)
 	if err != nil {
 		return err
 	}
@@ -327,11 +333,15 @@ func verifyRegistryPluginCapabilities(pluginName, manifestPath, ghRepo, tag stri
 	searchDir := tmpDir
 	if isTarGz(assetPath) {
 		extractDir := filepath.Join(tmpDir, "extracted")
-		data, err := os.ReadFile(assetPath) // #nosec G304 -- release asset downloaded to agent tempdir
+		file, err := os.Open(assetPath) // #nosec G304 -- release asset downloaded to agent tempdir
 		if err != nil {
 			return err
 		}
-		if err := extractTarGz(data, extractDir); err != nil {
+		if err := extractTarGzReader(file, extractDir); err != nil {
+			file.Close()
+			return err
+		}
+		if err := file.Close(); err != nil {
 			return err
 		}
 		searchDir = extractDir
@@ -341,7 +351,7 @@ func verifyRegistryPluginCapabilities(pluginName, manifestPath, ghRepo, tag stri
 	if err != nil {
 		return err
 	}
-	return verifyPluginManifestAgainstBinaryWithOptions(binaryPath, manifestPath, manifestCompareOptions{SkipName: true})
+	return registrySyncVerifyManifest(binaryPath, manifestPath, manifestCompareOptions{SkipName: true})
 }
 
 func selectPlatformReleaseAsset(assets []releaseAsset, goos, goarch string) (releaseAsset, bool) {
