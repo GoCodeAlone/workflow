@@ -21,7 +21,7 @@ For UI work:
 
 ```sh
 cd ui
-npm install
+npm ci
 npm test -- --run
 npm run dev
 ```
