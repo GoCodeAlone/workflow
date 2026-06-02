@@ -2233,6 +2233,51 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	// ---- IaC Commit Back ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_commit_back",
+		Plugin:      "platform",
+		Description: "Serialises the authored resource specs to YAML via iac/specgen.SpecToYAML and commits the result back to a git branch after a full-success apply. On partial apply returns {committed:false, reason:\"partial-apply\"} without committing. On apply-succeeded-but-git-failed returns {state_diverged:true} so the caller can surface HTTP 207. secret:// refs survive verbatim in the serialised YAML.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "repo_dir", Type: FieldTypeString, Description: "Git working directory the commands run in", Required: true},
+			{Key: "branch", Type: FieldTypeString, Description: "Branch name to create and push", Required: true},
+			{Key: "message", Type: FieldTypeString, Description: "Git commit message (default: chore: commit back applied infrastructure specs)"},
+			{Key: "target", Type: FieldTypeString, Description: "Publish target: 'branch-push' (default; git push) or 'gh-pr' (gh pr create --fill)"},
+			{Key: "apply_result_from", Type: FieldTypeString, Description: "Context path to the upstream apply step result (default: steps.apply.apply_result)"},
+			{Key: "specs", Type: FieldTypeArray, Description: "Static authored specs to serialise (mutually exclusive with specs_from)"},
+			{Key: "specs_from", Type: FieldTypeString, Description: "Context path to the specs (mutually exclusive with specs)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "committed", Type: "boolean", Description: "Whether a commit was produced"},
+			{Key: "ref", Type: "string", Description: "Branch or PR reference (set when committed:true)"},
+			{Key: "state_diverged", Type: "boolean", Description: "True when apply succeeded but git failed (HTTP 207 scenario)"},
+			{Key: "reason", Type: "string", Description: "Reason when committed:false or state_diverged:true"},
+		},
+	})
+
+	// ---- IaC Provider Reconcile ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_provider_reconcile",
+		Plugin:      "platform",
+		Description: "Drift → import → approximate cloud-snapshot YAML → draft PR. APPROXIMATE: the YAML is a cloud snapshot, NOT a faithful reconstruction of authored specs (no SpecToYAML). The draft PR body carries the mandatory disclaimer: 'imported from cloud; approximate; does NOT reconstruct your secret:// refs — review before merge'. On git failure returns {draft:false, state_diverged:true}. Use step.iac_commit_back for authoritative spec commits.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
+			{Key: "branch", Type: FieldTypeString, Description: "Branch name for the draft commit (default: infra/reconcile)"},
+			{Key: "target", Type: FieldTypeString, Description: "Publish target: 'branch-push' (default; git push) or 'gh-pr' (gh pr create --draft)"},
+			{Key: "repo_dir", Type: FieldTypeString, Description: "Git working directory the commands run in", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "draft", Type: "boolean", Description: "True iff a draft commit/PR was produced (false when no drift detected or git failed)"},
+			{Key: "ref", Type: "string", Description: "Branch or PR reference (set when draft:true)"},
+			{Key: "warning", Type: "string", Description: "The mandatory disclaimer string"},
+			{Key: "count", Type: "number", Description: "Number of drifted resources imported"},
+			{Key: "state_diverged", Type: "boolean", Description: "True when drift was detected but the git commit/push failed"},
+			{Key: "reason", Type: "string", Description: "Reason when state_diverged:true"},
+		},
+	})
+
 	// ---- Kubernetes Apply ----
 
 	r.Register(&StepSchema{

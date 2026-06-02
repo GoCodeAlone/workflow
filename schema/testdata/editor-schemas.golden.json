@@ -5992,6 +5992,13 @@
       "description": "Applies infrastructure changes",
       "configFields": []
     },
+    "step.iac_commit_back": {
+      "type": "step.iac_commit_back",
+      "label": "IaC Commit Back",
+      "category": "pipeline",
+      "description": "Commits serialised authored specs back to git after a full-success apply",
+      "configFields": []
+    },
     "step.iac_destroy": {
       "type": "step.iac_destroy",
       "label": "IaC Destroy",
@@ -6053,6 +6060,13 @@
       "label": "IaC Provider Plan",
       "category": "pipeline",
       "description": "Plans infrastructure changes via IaCProvider service",
+      "configFields": []
+    },
+    "step.iac_provider_reconcile": {
+      "type": "step.iac_provider_reconcile",
+      "label": "IaC Provider Reconcile",
+      "category": "pipeline",
+      "description": "Drift → import → approximate cloud-snapshot YAML → draft PR (review-required)",
       "configFields": []
     },
     "step.iac_secret_reachability": {
