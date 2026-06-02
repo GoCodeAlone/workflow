@@ -9,13 +9,6 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// IaCApplyFn is the function signature for the v2 apply dispatch helper.
-// Matches wfctlhelpers.ApplyPlanWithHooks exactly so the platform plugin can
-// pass that function directly, and tests can inject a stub without importing
-// wfctlhelpers (which would create a module→wfctlhelpers→module cycle via
-// wfctlhelpers/state.go).
-type IaCApplyFn func(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks any) (*interfaces.ApplyResult, error)
-
 // ─── step.iac_provider_apply ─────────────────────────────────────────────────
 
 // IaCProviderApplyStep implements the stateless two-phase apply:
