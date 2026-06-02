@@ -42,6 +42,28 @@ func ParseResourceSpecs(raw any) ([]interfaces.ResourceSpec, error) {
 		if sz, ok := m["size"].(string); ok {
 			spec.Size = interfaces.Size(sz)
 		}
+		if dl, ok := m["depends_on"].([]any); ok {
+			deps := make([]string, 0, len(dl))
+			for _, d := range dl {
+				if ds, ok := d.(string); ok {
+					deps = append(deps, ds)
+				}
+			}
+			spec.DependsOn = deps
+		}
+		if h, ok := m["hints"].(map[string]any); ok {
+			hints := &interfaces.ResourceHints{}
+			if v, ok := h["cpu"].(string); ok {
+				hints.CPU = v
+			}
+			if v, ok := h["memory"].(string); ok {
+				hints.Memory = v
+			}
+			if v, ok := h["storage"].(string); ok {
+				hints.Storage = v
+			}
+			spec.Hints = hints
+		}
 		specs = append(specs, spec)
 	}
 	return specs, nil

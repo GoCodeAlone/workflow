@@ -1,6 +1,7 @@
 package specparse_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/iac/specparse"
@@ -86,5 +87,46 @@ func TestParseResourceSpecs_RoundTripShape(t *testing.T) {
 	_, err = specparse.ParseResourceSpecs("notalist")
 	if err == nil {
 		t.Error("non-list raw: expected error, got nil")
+	}
+}
+
+// TestParseResourceSpecs_DependsOnAndHints verifies that raw []any spec maps
+// carrying depends_on and hints keys parse into the corresponding struct
+// fields. The typed adapter dispatches these to provider plugins, so dropping
+// them silently is a correctness bug on the dynamic-apply input path.
+func TestParseResourceSpecs_DependsOnAndHints(t *testing.T) {
+	raw := []any{
+		map[string]any{
+			"name":       "web-server",
+			"type":       "droplet",
+			"depends_on": []any{"vpc", "network"},
+			"hints": map[string]any{
+				"cpu":     "2",
+				"memory":  "4Gi",
+				"storage": "10Gi",
+			},
+		},
+	}
+
+	specs, err := specparse.ParseResourceSpecs(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 spec, got %d", len(specs))
+	}
+	s := specs[0]
+
+	wantDeps := []string{"vpc", "network"}
+	if !reflect.DeepEqual(s.DependsOn, wantDeps) {
+		t.Errorf("DependsOn = %v, want %v", s.DependsOn, wantDeps)
+	}
+
+	if s.Hints == nil {
+		t.Fatal("Hints is nil, want populated *ResourceHints")
+	}
+	wantHints := &interfaces.ResourceHints{CPU: "2", Memory: "4Gi", Storage: "10Gi"}
+	if !reflect.DeepEqual(s.Hints, wantHints) {
+		t.Errorf("Hints = %+v, want %+v", s.Hints, wantHints)
 	}
 }

@@ -29,6 +29,8 @@ func TestSpecToYAML_RoundTrip(t *testing.T) {
 					"team:backend",
 				},
 			},
+			Hints:     &interfaces.ResourceHints{CPU: "2", Memory: "4Gi", Storage: "10Gi"},
+			DependsOn: []string{"vpc", "network"},
 		},
 		{
 			Name: "db",
