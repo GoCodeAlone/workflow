@@ -133,7 +133,7 @@ func TestIaCProviderDriftStep_Execute_WithDriftDetector(t *testing.T) {
 	}
 }
 
-func TestIaCProviderDriftStep_Execute_Unsupported_NilDriftDetector(t *testing.T) {
+func TestIaCProviderDriftStep_Execute_NilDriftDetector_FallsBackToDetectDrift(t *testing.T) {
 	app := module.NewMockApplication()
 	// Provider implements DriftDetectorProvider but returns nil detector.
 	provider := &stubProviderWithDriftDetector{detector: nil}
