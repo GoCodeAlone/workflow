@@ -47,6 +47,7 @@ func TestStepFactories(t *testing.T) {
 		"step.iac_provider_apply",
 		"step.iac_provider_destroy",
 		"step.iac_provider_drift",
+		"step.iac_secret_reachability",
 		"step.dns_plan",
 		"step.dns_apply",
 		"step.dns_status",
