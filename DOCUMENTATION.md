@@ -277,6 +277,12 @@ flowchart TD
 | `step.iac_destroy` | Destroys all resources in an IaC stack | platform |
 | `step.iac_drift_detect` | Detects configuration drift between desired and actual state | platform |
 | `step.iac_generate_hcl` | Generates Terraform HCL from infrastructure definitions | platform |
+| `step.iac_provider_list` | Lists current resources via a registered `iac.provider` plugin (`interfaces.IaCProvider`) | platform |
+| `step.iac_provider_catalog` | Returns a provider's regions (via `IaCProviderRegionLister`, static fallback) + resource-type capabilities | platform |
+| `step.iac_provider_plan` | Plans changes against an `iac.provider`; returns the plan + a stateless `desired_hash` | platform |
+| `step.iac_provider_apply` | Applies a plan after recomputing + validating `desired_hash` (stateless two-phase TOCTOU guard) | platform |
+| `step.iac_provider_destroy` | Destroys resources via an `iac.provider` plugin | platform |
+| `step.iac_provider_drift` | Detects drift via an `iac.provider` (optional `IaCProviderDriftDetector`; `supported:false` fallback) | platform |
 | `step.tofu_init` | Initializes an OpenTofu working directory | platform |
 | `step.tofu_plan` | Creates an OpenTofu execution plan | platform |
 | `step.tofu_apply` | Applies OpenTofu changes to infrastructure | platform |
