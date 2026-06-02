@@ -143,12 +143,12 @@ wfctl plugin registry-sync core --workflow-repo <path> [--fix] [--registry-dir <
 wfctl plugin registry-sync readme [--check] [--registry-dir <path>]
 ```
 
-Replaces three bash scripts (`scripts/sync-versions.sh`,
+Replaces three registry maintenance scripts (`scripts/sync-versions.sh`,
 `scripts/sync-core-manifests.sh`, `scripts/generate-readme.sh`) with one
-Go entrypoint. During the workflow#762 parity cycle, the Go subcommand
-runs in dry-run alongside the authoritative bash; once parity is
-confirmed for one full cron cycle, a follow-up PR deletes the bash
-scripts and swaps `--fix` ownership.
+Go entrypoint. `registry-sync`, `registry-sync core`, and
+`registry-sync readme` own the native behavior; `workflow-registry` can keep
+thin compatibility wrappers during migration, but the source of truth should
+be the `wfctl` implementation.
 
 **Defense in depth — type allowlist:** registry-sync rejects any
 `plugin.json.type` value outside `{external, builtin, core, iac}`. In

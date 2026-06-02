@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -145,6 +146,106 @@ func TestPluginRegistrySync_UsageHelp(t *testing.T) {
 	// flag.ErrHelp is the expected error for --help.
 	if !strings.Contains(err.Error(), "help") {
 		t.Logf("non-help error from --help (may be OK): %v", err)
+	}
+}
+
+func TestPluginRegistrySyncReadme_CheckDetectsDriftWithoutBash(t *testing.T) {
+	registry := t.TempDir()
+	mustWrite(t, filepath.Join(registry, "README.md"), "# Registry\n\n## Schema\n\nschema docs\n")
+	mustWrite(t, filepath.Join(registry, "plugins", "alpha", "manifest.json"), `{
+  "name": "alpha",
+  "description": "Alpha | plugin",
+  "type": "builtin",
+  "tier": "core"
+}`)
+	mustWrite(t, filepath.Join(registry, "templates", "api-service.yaml"), "description: API | service\n")
+
+	err := runPluginRegistrySyncReadme([]string{"--check", "--registry-dir", registry})
+	if err == nil || !strings.Contains(err.Error(), "README.md is out of date") {
+		t.Fatalf("check error = %v, want README drift error", err)
+	}
+
+	if err := runPluginRegistrySyncReadme([]string{"--registry-dir", registry}); err != nil {
+		t.Fatalf("runPluginRegistrySyncReadme returned error: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(registry, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{
+		"## Built-in Plugins",
+		"| [alpha](./plugins/alpha/manifest.json) | Alpha \\| plugin |",
+		"## Templates",
+		"| [api-service](./templates/api-service.yaml) | API \\| service |",
+		"## Schema",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("README missing %q:\n%s", want, text)
+		}
+	}
+	if got := strings.Count(text, "## Schema"); got != 1 {
+		t.Fatalf("README schema section count = %d, want 1:\n%s", got, text)
+	}
+}
+
+func TestPluginRegistrySyncCore_DetectsAndFixesManifestDrift(t *testing.T) {
+	registry := t.TempDir()
+	manifest := filepath.Join(registry, "plugins", "corealpha", "manifest.json")
+	mustWrite(t, manifest, `{
+  "name": "workflow-plugin-core-alpha",
+  "version": "0.1.0",
+  "author": "GoCodeAlone",
+  "description": "stale",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/corealpha",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "downloads": [{"os": "linux"}],
+  "capabilities": {"moduleTypes": ["old"]}
+}`)
+
+	plugins := []coreRegistryPlugin{{
+		Name:             "workflow-plugin-core-alpha",
+		Version:          "1.2.3",
+		Description:      "current",
+		ModuleTypes:      []string{"alpha"},
+		StepTypes:        []string{"step"},
+		TriggerTypes:     []string{"trigger"},
+		WorkflowHandlers: []string{"handler"},
+		WiringHooks:      []string{"hook"},
+	}}
+
+	var stderr bytes.Buffer
+	err := syncCorePluginManifests(registry, plugins, false, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "core manifest validation failed") {
+		t.Fatalf("dry-run error = %v, stderr=%s", err, stderr.String())
+	}
+
+	stderr.Reset()
+	if err := syncCorePluginManifests(registry, plugins, true, &stderr); err != nil {
+		t.Fatalf("fix returned error: %v", err)
+	}
+	raw, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["version"] != "1.2.3" || got["description"] != "current" {
+		t.Fatalf("manifest not updated: %#v", got)
+	}
+	if _, ok := got["downloads"]; ok {
+		t.Fatalf("downloads should be removed from builtin core manifest: %#v", got)
+	}
+	caps := got["capabilities"].(map[string]any)
+	if len(caps["moduleTypes"].([]any)) != 1 || caps["moduleTypes"].([]any)[0] != "alpha" {
+		t.Fatalf("capabilities not updated: %#v", caps)
 	}
 }
 
@@ -302,4 +403,14 @@ func writeTestTarGz(path, name string, data []byte, mode int64) error {
 		return err
 	}
 	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
