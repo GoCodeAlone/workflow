@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-06-02** — the RegionLister shipped via the infra-admin migration (workflow v0.70.0, providerclient accessors). This plan references deleted iac/admin files. Retained for history.
+
 # IaC Provider Region Lister Implementation Plan
 
 > **For the implementing agent:** REQUIRED SUB-SKILL: Use autodev:executing-plans to implement this plan task-by-task.

@@ -10,12 +10,11 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// TestResolveStateStore_MemoryBackend verifies the lifted ResolveStateStore
-// resolves an iac.state module with backend: memory to a usable
-// interfaces.IaCStateStore that returns an empty resource list on a fresh
-// open. This is the entry-point assertion for the host-side infra.admin
-// module's state binding per docs/plans/2026-05-27-infra-admin-dynamic.md
-// Task 1.
+// TestResolveStateStore_MemoryBackend verifies that wfctlhelpers.ResolveStateStore
+// resolves an iac.state module configured with backend: memory to a usable
+// interfaces.IaCStateStore. It asserts an empty fresh store, then exercises a
+// full round-trip (SaveResource / ListResources / GetResource / DeleteResource)
+// to confirm the store contract is satisfied end-to-end.
 func TestResolveStateStore_MemoryBackend(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "test.yaml")

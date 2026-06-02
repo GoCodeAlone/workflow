@@ -9,6 +9,7 @@ import (
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/iac/jitsubst"
+	"github.com/GoCodeAlone/workflow/iac/specparse"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -52,38 +53,12 @@ func NewIaCProviderPlanStepFactory() StepFactory {
 }
 
 // parseResourceSpecs converts a raw config value ([]any of map[string]any) into
-// []interfaces.ResourceSpec. A nil or missing "specs" key is allowed (returns empty
-// slice) for providers that derive specs internally.
+// []interfaces.ResourceSpec. A nil or missing "specs" key is allowed (returns a
+// nil slice) for providers that derive specs internally.
+// Thin wrapper around specparse.ParseResourceSpecs; kept private so call sites
+// in iac_provider_plan and iac_provider_apply are unchanged.
 func parseResourceSpecs(raw any) ([]interfaces.ResourceSpec, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("specs must be a list, got %T", raw)
-	}
-	specs := make([]interfaces.ResourceSpec, 0, len(list))
-	for i, item := range list {
-		m, ok := item.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("specs[%d] must be a map, got %T", i, item)
-		}
-		spec := interfaces.ResourceSpec{}
-		if n, ok := m["name"].(string); ok {
-			spec.Name = n
-		}
-		if t, ok := m["type"].(string); ok {
-			spec.Type = t
-		}
-		if c, ok := m["config"].(map[string]any); ok {
-			spec.Config = c
-		}
-		if sz, ok := m["size"].(string); ok {
-			spec.Size = interfaces.Size(sz)
-		}
-		specs = append(specs, spec)
-	}
-	return specs, nil
+	return specparse.ParseResourceSpecs(raw)
 }
 
 // parseResourceRefs converts a raw config value to []interfaces.ResourceRef.
