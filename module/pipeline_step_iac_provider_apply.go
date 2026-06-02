@@ -94,8 +94,11 @@ func (s *IaCProviderApplyStep) Execute(ctx context.Context, pc *PipelineContext)
 		if err != nil {
 			return nil, fmt.Errorf("iac_provider_apply step %q: resolve specs_from %q: %w", s.name, s.specsFrom, err)
 		}
-		if specs == nil {
-			return nil, fmt.Errorf("iac_provider_apply step %q: specs_from %q resolved to nil/empty", s.name, s.specsFrom)
+		// Guard against zero specs: ParseResourceSpecs returns a non-nil empty
+		// slice for []any{}, so a len check (not a nil check) is required —
+		// applying over zero specs is a destroy-everything footgun.
+		if len(specs) == 0 {
+			return nil, fmt.Errorf("iac_provider_apply step %q: specs_from %q resolved to empty/zero specs", s.name, s.specsFrom)
 		}
 	}
 

@@ -216,3 +216,78 @@ func TestIaCProviderPlan_SpecsFromAndStatic_FactoryError(t *testing.T) {
 		t.Errorf("expected 'mutually exclusive' error, got: %v", err)
 	}
 }
+
+// TestIaCProviderPlan_SpecsFromFailures asserts that the dynamic specs_from path
+// fails cleanly (rather than silently planning over nil/zero specs) when the
+// resolved value is missing, the wrong type, or empty.
+func TestIaCProviderPlan_SpecsFromFailures(t *testing.T) {
+	cases := []struct {
+		name        string
+		stepOutputs map[string]map[string]any
+		wantErrSub  string
+	}{
+		{
+			name:        "path missing from context (request_parse didn't run)",
+			stepOutputs: nil,
+			wantErrSub:  "resolved to empty/zero specs",
+		},
+		{
+			name: "body present but lacks specs key",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {
+					"body": map[string]any{},
+				},
+			},
+			wantErrSub: "resolved to empty/zero specs",
+		},
+		{
+			name: "specs resolves to a non-list scalar",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {
+					"body": map[string]any{
+						"specs": "not-a-list",
+					},
+				},
+			},
+			wantErrSub: "resolve specs_from",
+		},
+		{
+			name: "specs resolves to an empty list",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {
+					"body": map[string]any{
+						"specs": []any{},
+					},
+				},
+			},
+			wantErrSub: "resolved to empty/zero specs",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := module.NewMockApplication()
+			provider := makePlanProvider(t)
+			if err := app.RegisterService("my-provider", provider); err != nil {
+				t.Fatal(err)
+			}
+
+			factory := module.NewIaCProviderPlanStepFactory()
+			step, err := factory("plan-step", map[string]any{
+				"provider":   "my-provider",
+				"specs_from": "steps.parse-request.body.specs",
+			}, app)
+			if err != nil {
+				t.Fatalf("factory error: %v", err)
+			}
+
+			_, err = step.Execute(context.Background(), &module.PipelineContext{StepOutputs: tc.stepOutputs})
+			if err == nil {
+				t.Fatal("expected error, got nil (must not proceed with nil/zero specs)")
+			}
+			if !containsString(err.Error(), tc.wantErrSub) {
+				t.Errorf("expected error containing %q, got: %v", tc.wantErrSub, err)
+			}
+		})
+	}
+}

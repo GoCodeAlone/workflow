@@ -2146,7 +2146,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Plans infrastructure changes against an IaCProvider service; computes a stable desired-state hash using a no-op env resolver.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
-			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs (list of {name, type, config, size})"},
+			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs (list of {name, type, config, size}); mutually exclusive with specs_from"},
+			{Key: "specs_from", Type: FieldTypeString, Description: "Dotted context path to resolve specs at Execute time (e.g. steps.parse-request.body.specs); mutually exclusive with specs"},
 			{Key: "env", Type: FieldTypeString, Description: "Environment name (reserved; unused by hash computation)"},
 		},
 		Outputs: []StepOutputDef{
@@ -2164,8 +2165,10 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Applies an IaC plan via two-phase hash guard: recomputes DesiredStateHash and rejects with 'plan hash mismatch' when hashes diverge.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
-			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs passed to plan and hash recomputation"},
-			{Key: "desired_hash", Type: FieldTypeString, Description: "Client-submitted hash from the plan step; must match recomputed hash", Required: true},
+			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs passed to plan and hash recomputation; mutually exclusive with specs_from"},
+			{Key: "specs_from", Type: FieldTypeString, Description: "Dotted context path to resolve specs at Execute time (e.g. steps.parse-request.body.specs); mutually exclusive with specs"},
+			{Key: "desired_hash", Type: FieldTypeString, Description: "Client-submitted hash from the plan step; must match recomputed hash; mutually exclusive with desired_hash_from"},
+			{Key: "desired_hash_from", Type: FieldTypeString, Description: "Dotted context path to resolve the client-submitted hash at Execute time (e.g. steps.parse-request.body.desired_hash); mutually exclusive with desired_hash"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "apply_result", Type: "any", Description: "ApplyResult from wfctlhelpers.ApplyPlanWithHooks"},
