@@ -42,26 +42,33 @@ func NewIaCProviderListStepFactory() StepFactory {
 		if providerName == "" {
 			return nil, fmt.Errorf("iac_provider_list step %q: 'provider' is required", name)
 		}
-		// Optional: list of refs to query; nil means pass empty slice to Status
-		// (providers should return all resources when refs is empty).
+		// Optional: list of refs to query; absent means pass nil to Status
+		// (providers should return all resources when refs is nil/empty).
+		// If "refs" is present but malformed (wrong type or wrong item shape), the
+		// factory returns a config error — silently widening to list-all would mask a
+		// misconfigured step that was intended to be a filtered query.
 		var refs []interfaces.ResourceRef
 		if rawRefs, ok := cfg["refs"]; ok {
-			if refList, ok := rawRefs.([]any); ok {
-				for _, r := range refList {
-					if rm, ok := r.(map[string]any); ok {
-						ref := interfaces.ResourceRef{}
-						if n, ok := rm["name"].(string); ok {
-							ref.Name = n
-						}
-						if t, ok := rm["type"].(string); ok {
-							ref.Type = t
-						}
-						if pid, ok := rm["provider_id"].(string); ok {
-							ref.ProviderID = pid
-						}
-						refs = append(refs, ref)
-					}
+			refList, ok := rawRefs.([]any)
+			if !ok {
+				return nil, fmt.Errorf("iac_provider_list step %q: 'refs' must be a list, got %T", name, rawRefs)
+			}
+			for i, r := range refList {
+				rm, ok := r.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("iac_provider_list step %q: refs[%d] must be a map, got %T", name, i, r)
 				}
+				ref := interfaces.ResourceRef{}
+				if n, ok := rm["name"].(string); ok {
+					ref.Name = n
+				}
+				if t, ok := rm["type"].(string); ok {
+					ref.Type = t
+				}
+				if pid, ok := rm["provider_id"].(string); ok {
+					ref.ProviderID = pid
+				}
+				refs = append(refs, ref)
 			}
 		}
 		return &IaCProviderListStep{

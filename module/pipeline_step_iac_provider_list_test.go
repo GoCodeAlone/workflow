@@ -120,6 +120,62 @@ func TestIaCProviderListStep_Factory_RequiresProvider(t *testing.T) {
 	}
 }
 
+func TestIaCProviderListStep_Factory_MalformedRefs_WrongTopType(t *testing.T) {
+	// refs present but wrong top-level type (string instead of []any) — must error
+	// at factory time, not silently fall through to unfiltered list-all.
+	factory := module.NewIaCProviderListStepFactory()
+	_, err := factory("list-step", map[string]any{
+		"provider": "my-provider",
+		"refs":     "not-a-list",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected factory error for non-list 'refs', got nil")
+	}
+	if want := "refs' must be a list"; !containsString(err.Error(), want) {
+		t.Errorf("expected error containing %q, got: %v", want, err)
+	}
+}
+
+func TestIaCProviderListStep_Factory_MalformedRefs_WrongItemType(t *testing.T) {
+	// refs is a list but contains a non-map item — must error at factory time.
+	factory := module.NewIaCProviderListStepFactory()
+	_, err := factory("list-step", map[string]any{
+		"provider": "my-provider",
+		"refs":     []any{"not-a-map"},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected factory error for non-map refs item, got nil")
+	}
+	if want := "refs[0] must be a map"; !containsString(err.Error(), want) {
+		t.Errorf("expected error containing %q, got: %v", want, err)
+	}
+}
+
+func TestIaCProviderListStep_Factory_AbsentRefs_ListsAll(t *testing.T) {
+	// Absent refs key is fine — the step queries all resources.
+	app := module.NewMockApplication()
+	provider := &stubIaCProvider{
+		statusResult: []interfaces.ResourceStatus{
+			{Name: "db", Type: "infra.database", ProviderID: "pid-1", Status: "running"},
+		},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+	factory := module.NewIaCProviderListStepFactory()
+	step, err := factory("list-step", map[string]any{"provider": "my-provider"}, app)
+	if err != nil {
+		t.Fatalf("factory error for absent refs: %v", err)
+	}
+	result, err := step.Execute(context.Background(), &module.PipelineContext{})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Output["count"] != 1 {
+		t.Errorf("expected count=1 for list-all, got %v", result.Output["count"])
+	}
+}
+
 // containsString is a test helper used across iac_provider step tests.
 func containsString(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstring(s, sub))
