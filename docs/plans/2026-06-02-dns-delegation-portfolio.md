@@ -36,7 +36,7 @@
 
 **Deploy ordering (load-bearing):** PR1 merge → workflow/wfctl release (minor — behavioral change to `FromResourceStates` + import-all state IDs); PR2 merge → hover v0.5.1 release; THEN PR3 (bumps both pins, re-runs import). PR3 is independently revertible (revert pins) but NOT independently deployable.
 
-**Status:** Draft
+**Status:** Locked 2026-06-02T15:51:47Z
 
 ---
 
