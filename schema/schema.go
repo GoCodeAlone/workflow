@@ -318,6 +318,7 @@ var coreModuleTypes = []string{
 	"step.iac_provider_drift",
 	"step.iac_provider_list",
 	"step.iac_provider_plan",
+	"step.iac_secret_reachability",
 	"step.iac_status",
 	"step.jq",
 	"step.json_parse",

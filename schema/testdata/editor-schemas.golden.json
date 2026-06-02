@@ -6055,6 +6055,13 @@
       "description": "Plans infrastructure changes via IaCProvider service",
       "configFields": []
     },
+    "step.iac_secret_reachability": {
+      "type": "step.iac_secret_reachability",
+      "label": "IaC Secret Reachability",
+      "category": "pipeline",
+      "description": "Pre-flight gate: reports whether a plan's secret:// refs are reachable from the chosen exec-env",
+      "configFields": []
+    },
     "step.iac_status": {
       "type": "step.iac_status",
       "label": "IaC Status",

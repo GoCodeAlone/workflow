@@ -88,6 +88,12 @@ func (s *IaCSecretReachabilityStep) Execute(ctx context.Context, pc *PipelineCon
 		if err != nil {
 			return nil, fmt.Errorf("iac_secret_reachability step %q: resolve specs_from %q: %w", s.name, s.specsFrom, err)
 		}
+		// Fail-safe: a specs_from that resolves to nil/empty (missing/misspelled
+		// context path, or a body lacking specs) must NOT silently bypass the
+		// gate with all_reachable=true. Error, matching iac_provider_plan/apply.
+		if len(specs) == 0 {
+			return nil, fmt.Errorf("iac_secret_reachability step %q: specs_from %q resolved to empty/zero specs", s.name, s.specsFrom)
+		}
 	}
 
 	// Resolve the secrets provider from the service registry.

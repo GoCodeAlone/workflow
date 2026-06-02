@@ -473,3 +473,31 @@ func TestSecretReachabilityStep_Factory_SpecsAndSpecsFromMutualExclusion(t *test
 		t.Errorf("expected 'mutually exclusive' error, got: %v", err)
 	}
 }
+
+// TestSecretReachabilityStep_SpecsFromEmpty_Errors verifies the fail-safe: a
+// specs_from that resolves to a missing/empty context path errors instead of
+// silently returning all_reachable=true (which would bypass the gate).
+func TestSecretReachabilityStep_SpecsFromEmpty_Errors(t *testing.T) {
+	app := module.NewMockApplication()
+	stub := &stubSecretsProviderWithAccess{checkErr: nil}
+	if err := app.RegisterService("my-vault", &stubSecretsModuleAccessor{underlying: stub}); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCSecretReachabilityStepFactory()
+	step, err := factory("reach-step", map[string]any{
+		"provider":   "my-vault",
+		"exec_env":   "remote",
+		"specs_from": "steps.parse-request.body.specs",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	// PipelineContext WITHOUT the parse-request output → specs_from resolves nil.
+	pc := &module.PipelineContext{StepOutputs: map[string]map[string]any{}}
+
+	if _, err := step.Execute(context.Background(), pc); err == nil {
+		t.Fatal("expected an error when specs_from resolves to empty/missing, got nil (fail-open!)")
+	}
+}

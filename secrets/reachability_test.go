@@ -247,10 +247,11 @@ func TestReachability_GitHubShortCircuit_CheckAccessNotConsulted(t *testing.T) {
 	}
 }
 
-// TestReachability_VaultProvider tests the real *VaultProvider path (remote with
-// AccessChecker). Since VaultProvider requires a real vault.Client, we use the
-// stubRemoteWithAccess to cover the functional branch; the actual *VaultProvider
-// type-switch is confirmed by compilation.
+// TestReachability_VaultAndAWS_WithAccessChecker covers the AccessChecker branch
+// that *VaultProvider and *AWSSecretsManagerProvider hit (rule 3). Those concrete
+// providers require live clients, so this test uses stubRemoteWithAccess — a stub
+// implementing AccessChecker — to exercise the same default-case probe path. It
+// does NOT instantiate the real provider types.
 func TestReachability_VaultAndAWS_WithAccessChecker(t *testing.T) {
 	// stubRemoteWithAccess covers the same code path as *VaultProvider and
 	// *AWSSecretsManagerProvider: it implements AccessChecker.
@@ -323,8 +324,8 @@ func TestReachability_PropagatesContext(t *testing.T) {
 
 // newTestGitHubProvider creates a real *secrets.GitHubSecretsProvider using a
 // fake token so the type-switch in Reachability fires correctly.
-// It sets the GITHUB_TOKEN env var temporarily so NewGitHubSecretsProvider
-// doesn't reject the empty token.
+// It sets the WORKFLOW_TEST_GH_TOKEN env var temporarily (the name passed into
+// NewGitHubSecretsProvider) so the provider doesn't reject an empty token.
 func newTestGitHubProvider(t *testing.T) *secrets.GitHubSecretsProvider {
 	t.Helper()
 	t.Setenv("WORKFLOW_TEST_GH_TOKEN", "ghp_fake_token_for_type_switch_test")
@@ -357,4 +358,22 @@ func containsSubstr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestReachability_NilProvider verifies a nil or typed-nil provider is fail-safe
+// unreachable (never panics, never reports reachable).
+func TestReachability_NilProvider(t *testing.T) {
+	// Untyped nil.
+	if r := secrets.Reachability(context.Background(), nil, "local"); r.Reachable {
+		t.Errorf("nil provider should be unreachable, got reachable")
+	}
+	// Typed-nil pointer stored in the Provider interface.
+	var typedNil *secrets.VaultProvider
+	r := secrets.Reachability(context.Background(), typedNil, "local")
+	if r.Reachable {
+		t.Errorf("typed-nil *VaultProvider should be unreachable, got reachable")
+	}
+	if r.Reason == "" {
+		t.Errorf("expected a non-empty reason for nil provider")
+	}
 }

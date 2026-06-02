@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"fmt"
+	"reflect"
 )
 
 // Result holds the outcome of a Reachability check.
@@ -82,6 +83,12 @@ func hostLocalKind(p Provider) string {
 //  5. Providers that do NOT implement AccessChecker + local execEnv — treat as
 //     reachable (local operation; the runtime will surface access errors if any).
 func Reachability(ctx context.Context, p Provider, execEnv string) Result {
+	// Fail-safe: a nil provider — including a typed-nil pointer stored in the
+	// Provider interface (e.g. (*VaultProvider)(nil)) — is never reachable, and
+	// calling into it could panic on a nil receiver. Reject before any dispatch.
+	if isNilProvider(p) {
+		return Result{Reachable: false, Reason: "no secrets provider configured (nil provider)"}
+	}
 	if kind := hostLocalKind(p); kind != "" {
 		// Host-local backend — verifiable only from a local exec-env.
 		if isLocalExecEnv(execEnv) {
@@ -125,5 +132,20 @@ func Reachability(ctx context.Context, p Provider, execEnv string) Result {
 			Reachable: false,
 			Reason:    "reachability unknown for remote exec-env; assuming unreachable",
 		}
+	}
+}
+
+// isNilProvider reports whether p is nil or a typed-nil pointer/interface stored
+// in the Provider interface — both of which must be treated as unreachable.
+func isNilProvider(p Provider) bool {
+	if p == nil {
+		return true
+	}
+	v := reflect.ValueOf(p)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	default:
+		return false
 	}
 }
