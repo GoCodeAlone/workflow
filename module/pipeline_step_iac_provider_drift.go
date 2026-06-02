@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/GoCodeAlone/modular"
@@ -68,14 +69,18 @@ func (s *IaCProviderDriftStep) Execute(ctx context.Context, _ *PipelineContext) 
 	// Existence-only drift via the required DetectDrift method.
 	drifts, driftErr := provider.DetectDrift(ctx, s.refs)
 	if driftErr != nil {
-		// ErrProviderMethodUnimplemented from the required surface means the plugin
-		// wired neither path — surface as unsupported, not as an error. The step
-		// intentionally swallows the error here and converts it to structured output
-		// so callers can gate on {supported: false} without pipeline failure.
-		// all_drifted, drifts, and count are included with zero values so that
-		// downstream type-assertions (e.g. result.Output["any_drifted"].(bool)) do
-		// not panic on the unsupported path.
-		return &StepResult{Output: map[string]any{ //nolint:nilerr
+		// Only ErrProviderMethodUnimplemented means the plugin wired neither drift
+		// path — surface as {supported:false} so callers can gate without pipeline
+		// failure. Any other error (network, provider failure, etc.) is a real error
+		// and MUST be returned so it propagates as HTTP 5xx rather than being masked
+		// as an unsupported-feature response.
+		if !errors.Is(driftErr, interfaces.ErrProviderMethodUnimplemented) {
+			return nil, fmt.Errorf("iac_provider_drift step %q: DetectDrift: %w", s.name, driftErr)
+		}
+		// Plugin declared DetectDrift is unimplemented — treat as unsupported.
+		// Zero-value fields are included so downstream type-assertions on
+		// result.Output["any_drifted"].(bool) do not panic.
+		return &StepResult{Output: map[string]any{
 			"provider":    s.provider,
 			"supported":   false,
 			"reason":      driftErr.Error(),

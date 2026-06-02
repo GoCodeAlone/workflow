@@ -181,11 +181,11 @@ func TestIaCProviderDriftStep_Execute_Unsupported_NoInterface(t *testing.T) {
 	}
 }
 
-func TestIaCProviderDriftStep_Execute_Unsupported_DetectDriftError(t *testing.T) {
+func TestIaCProviderDriftStep_Execute_Unsupported_DetectDriftUnimplemented(t *testing.T) {
 	app := module.NewMockApplication()
-	// Provider whose DetectDrift returns ErrProviderMethodUnimplemented.
+	// Provider whose DetectDrift returns the ErrProviderMethodUnimplemented sentinel.
 	provider := &stubIaCProvider{
-		driftErr: errors.New("workflow: provider method not implemented"),
+		driftErr: interfaces.ErrProviderMethodUnimplemented,
 	}
 	if err := app.RegisterService("my-provider", provider); err != nil {
 		t.Fatal(err)
@@ -199,11 +199,36 @@ func TestIaCProviderDriftStep_Execute_Unsupported_DetectDriftError(t *testing.T)
 
 	result, err := step.Execute(context.Background(), &module.PipelineContext{})
 	if err != nil {
-		t.Fatalf("Execute should not error: %v", err)
+		t.Fatalf("Execute should not error when DetectDrift returns unimplemented: %v", err)
 	}
-	// Error from required DetectDrift surface → unsupported.
+	// ErrProviderMethodUnimplemented sentinel → unsupported, not an error.
 	if result.Output["supported"] != false {
-		t.Errorf("expected supported=false when DetectDrift errors, got %v", result.Output["supported"])
+		t.Errorf("expected supported=false when DetectDrift returns unimplemented, got %v", result.Output["supported"])
+	}
+}
+
+func TestIaCProviderDriftStep_Execute_RealError_Propagated(t *testing.T) {
+	app := module.NewMockApplication()
+	// Provider whose DetectDrift returns a genuine (non-sentinel) error.
+	provider := &stubIaCProvider{
+		driftErr: errors.New("network timeout reaching provider API"),
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderDriftStepFactory()
+	step, err := factory("drift-step", map[string]any{"provider": "my-provider"}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	_, err = step.Execute(context.Background(), &module.PipelineContext{})
+	if err == nil {
+		t.Fatal("expected real DetectDrift error to be propagated, got nil")
+	}
+	if !containsString(err.Error(), "network timeout reaching provider API") {
+		t.Errorf("expected original error text in propagated error, got: %v", err)
 	}
 }
 
