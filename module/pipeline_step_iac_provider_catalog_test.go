@@ -2,6 +2,7 @@ package module_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -144,5 +145,41 @@ func TestIaCProviderCatalogStep_Factory_RequiresProvider(t *testing.T) {
 	_, err := factory("catalog-step", map[string]any{}, nil)
 	if err == nil {
 		t.Fatal("expected error when 'provider' missing, got nil")
+	}
+}
+
+func TestIaCProviderCatalogStep_StaticFallback_RegionListerError(t *testing.T) {
+	// Provider implements RegionListerProvider AND returns a non-nil lister,
+	// but ListRegions returns an error.  The step must fall back to static
+	// regions and surface source == "static_fallback_error".
+	app := module.NewMockApplication()
+	listErr := errors.New("regions API unavailable")
+	provider := &stubProviderWithRegionLister{
+		lister: &stubRegionLister{err: listErr},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderCatalogStepFactory()
+	step, err := factory("catalog-step", map[string]any{"provider": "my-provider"}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	result, err := step.Execute(context.Background(), &module.PipelineContext{})
+	if err != nil {
+		t.Fatalf("Execute must not error on ListRegions failure: %v", err)
+	}
+
+	if result.Output["source"] != "static_fallback_error" {
+		t.Errorf("expected source=static_fallback_error, got %v", result.Output["source"])
+	}
+	regions, ok := result.Output["regions"].([]string)
+	if !ok {
+		t.Fatalf("expected []string regions, got %T", result.Output["regions"])
+	}
+	if len(regions) == 0 {
+		t.Error("expected non-empty static region list on fallback")
 	}
 }
