@@ -193,3 +193,192 @@ func TestIaCProviderApplyStep_Factory_RequiresHash(t *testing.T) {
 		t.Fatal("expected error when 'desired_hash' missing")
 	}
 }
+
+// ─── specs_from / desired_hash_from (dynamic input) tests ────────────────────
+
+// TestIaCProviderApply_DynamicInput verifies that specs_from + desired_hash_from
+// pull specs and hash from the pipeline context at Execute time, and that the
+// recompute-hash guard still fires (matching hash → apply proceeds).
+func TestIaCProviderApply_DynamicInput(t *testing.T) {
+	app := module.NewMockApplication()
+	provider, correctHash := buildApplyProvider(t)
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderApplyStepFactory(noopApplyFn)
+	// No static specs or hash — both come from context.
+	step, err := factory("apply-step", map[string]any{
+		"provider":          "my-provider",
+		"specs_from":        "steps.plan-step.specs",
+		"desired_hash_from": "steps.plan-step.desired_hash",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := &module.PipelineContext{
+		StepOutputs: map[string]map[string]any{
+			"plan-step": {
+				"desired_hash": correctHash,
+				"specs": []any{
+					map[string]any{"name": "my-db", "type": "infra.database"},
+				},
+			},
+		},
+	}
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Output["apply_result"] == nil {
+		t.Error("expected apply_result in output")
+	}
+	if result.Output["desired_hash"] != correctHash {
+		t.Errorf("desired_hash mismatch: got %v", result.Output["desired_hash"])
+	}
+}
+
+// TestIaCProviderApply_HashMismatchRejected verifies that supplying a wrong
+// desired_hash via context still triggers the TOCTOU/drift guard.
+func TestIaCProviderApply_HashMismatchRejected(t *testing.T) {
+	app := module.NewMockApplication()
+	provider, _ := buildApplyProvider(t)
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	applied := false
+	trackingApplyFn := func(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+		applied = true
+		return noopApplyFn(ctx, p, plan)
+	}
+
+	factory := module.NewIaCProviderApplyStepFactory(trackingApplyFn)
+	step, err := factory("apply-step", map[string]any{
+		"provider":          "my-provider",
+		"specs_from":        "steps.plan-step.specs",
+		"desired_hash_from": "steps.plan-step.desired_hash",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := &module.PipelineContext{
+		StepOutputs: map[string]map[string]any{
+			"plan-step": {
+				// Wrong hash — should trigger mismatch error.
+				"desired_hash": "deadbeef0000000000000000000000000000000000000000000000000000dead",
+				"specs": []any{
+					map[string]any{"name": "my-db", "type": "infra.database"},
+				},
+			},
+		},
+	}
+
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for hash mismatch, got nil")
+	}
+	if !containsString(err.Error(), "plan hash mismatch") {
+		t.Errorf("expected 'plan hash mismatch' error, got: %v", err)
+	}
+	if applied {
+		t.Error("applyFn must not be called when hash mismatches")
+	}
+}
+
+// TestIaCProviderApply_SecretRefSurvives verifies that specs containing
+// secret:// refs survive unchanged through the dynamic-input path — no resolver
+// is invoked, and the literal ref is what reaches the applyFn.
+func TestIaCProviderApply_SecretRefSurvives(t *testing.T) {
+	// specsWithSecret is the raw []any form that would come from the pipeline context
+	// (e.g. via step.request_parse output). It includes a secret:// ref that must
+	// not be expanded.
+	specsWithSecret := []any{
+		map[string]any{
+			"name": "secret-db",
+			"type": "infra.database",
+			"config": map[string]any{
+				"password": "secret://vault/x",
+			},
+		},
+	}
+
+	// Compute the correct hash by driving the plan step with the same []any data,
+	// so both plan and apply hash over identical parsed ResourceSpec values.
+	hashApp := module.NewMockApplication()
+	hashProvider := &stubIaCProvider{
+		statusResult: nil,
+		planResult:   &interfaces.IaCPlan{ID: "x"},
+	}
+	if err := hashApp.RegisterService("hp", hashProvider); err != nil {
+		t.Fatal(err)
+	}
+	planFactory := module.NewIaCProviderPlanStepFactory()
+	hashStep, err := planFactory("h", map[string]any{"provider": "hp", "specs": specsWithSecret}, hashApp)
+	if err != nil {
+		t.Fatalf("hash step factory error: %v", err)
+	}
+	hashResult, err := hashStep.Execute(context.Background(), &module.PipelineContext{})
+	if err != nil {
+		t.Fatalf("hash step Execute error: %v", err)
+	}
+	correctHash := hashResult.Output["desired_hash"].(string)
+
+	// Build the actual provider under test (no existing resources).
+	app := module.NewMockApplication()
+	provider := &stubIaCProvider{
+		statusResult: nil,
+		planResult: &interfaces.IaCPlan{
+			ID: "plan-secret",
+			Actions: []interfaces.PlanAction{
+				{Action: "create", Resource: interfaces.ResourceSpec{Name: "secret-db", Type: "infra.database"}},
+			},
+		},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture what plan reaches the applyFn.
+	var capturedPlan *interfaces.IaCPlan
+	capturingApplyFn := func(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+		capturedPlan = plan
+		return noopApplyFn(ctx, p, plan)
+	}
+
+	factory := module.NewIaCProviderApplyStepFactory(capturingApplyFn)
+	step, err := factory("apply-step", map[string]any{
+		"provider":          "my-provider",
+		"specs_from":        "steps.plan-step.specs",
+		"desired_hash_from": "steps.plan-step.desired_hash",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := &module.PipelineContext{
+		StepOutputs: map[string]map[string]any{
+			"plan-step": {
+				"desired_hash": correctHash,
+				"specs":        specsWithSecret,
+			},
+		},
+	}
+
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	// The captured plan must not be nil — the applyFn was called.
+	if capturedPlan == nil {
+		t.Fatal("expected applyFn to be called with a plan")
+	}
+	// The plan's DesiredHash must match the hash we computed from the literal secret ref.
+	if capturedPlan.DesiredHash != correctHash {
+		t.Errorf("plan DesiredHash = %q, want %q", capturedPlan.DesiredHash, correctHash)
+	}
+}
