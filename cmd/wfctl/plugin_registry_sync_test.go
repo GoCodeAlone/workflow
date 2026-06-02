@@ -108,6 +108,34 @@ func TestPluginRegistrySync_DownloadsMatchVersion(t *testing.T) {
 	})
 }
 
+func TestPluginRegistrySync_DefaultSkipsBuiltinManifests(t *testing.T) {
+	registry := t.TempDir()
+	mustWrite(t, filepath.Join(registry, "plugins", "admincore", "manifest.json"), `{
+  "name": "workflow-plugin-admincore",
+  "version": "0.69.6",
+  "description": "Workflow admin core",
+  "source": "github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "type": "builtin",
+  "tier": "core"
+}`)
+
+	binDir := t.TempDir()
+	marker := filepath.Join(binDir, "gh-called")
+	mustWrite(t, filepath.Join(binDir, "gh"), "#!/bin/sh\ntouch "+marker+"\nexit 1\n")
+	if err := os.Chmod(filepath.Join(binDir, "gh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := syncDefault(registry, false, "", false); err != nil {
+		t.Fatalf("syncDefault returned error: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("default registry sync must not query GitHub for builtin manifests; marker stat err=%v", err)
+	}
+}
+
 // TestPluginRegistrySync_PublishGradeSemverGate verifies the shared regex
 // rejects non-publish-grade tags (workflow#762 plan C2 fixture pin).
 func TestPluginRegistrySync_PublishGradeSemverGate(t *testing.T) {
@@ -246,6 +274,69 @@ func TestPluginRegistrySyncCore_DetectsAndFixesManifestDrift(t *testing.T) {
 	caps := got["capabilities"].(map[string]any)
 	if len(caps["moduleTypes"].([]any)) != 1 || caps["moduleTypes"].([]any)[0] != "alpha" {
 		t.Fatalf("capabilities not updated: %#v", caps)
+	}
+}
+
+func TestPluginRegistrySyncCore_DetectsAndFixesDownloadsOnlyDrift(t *testing.T) {
+	registry := t.TempDir()
+	manifest := filepath.Join(registry, "plugins", "corealpha", "manifest.json")
+	mustWrite(t, manifest, `{
+  "name": "workflow-plugin-core-alpha",
+  "version": "1.2.3",
+  "author": "GoCodeAlone",
+  "description": "current",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/corealpha",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "downloads": [{
+    "os": "linux",
+    "arch": "amd64",
+    "url": "https://github.com/GoCodeAlone/workflow/releases/download/v0.69.6/wfctl-linux-amd64.tar.gz"
+  }],
+  "capabilities": {
+    "moduleTypes": ["alpha"],
+    "stepTypes": ["step"],
+    "triggerTypes": ["trigger"],
+    "workflowHandlers": ["handler"],
+    "wiringHooks": ["hook"]
+  }
+}`)
+
+	plugins := []coreRegistryPlugin{{
+		Name:             "workflow-plugin-core-alpha",
+		Version:          "1.2.3",
+		Description:      "current",
+		ModuleTypes:      []string{"alpha"},
+		StepTypes:        []string{"step"},
+		TriggerTypes:     []string{"trigger"},
+		WorkflowHandlers: []string{"handler"},
+		WiringHooks:      []string{"hook"},
+	}}
+
+	var stderr bytes.Buffer
+	err := syncCorePluginManifests(registry, plugins, false, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "core manifest validation failed") {
+		t.Fatalf("dry-run error = %v, stderr=%s", err, stderr.String())
+	}
+
+	stderr.Reset()
+	if err := syncCorePluginManifests(registry, plugins, true, &stderr); err != nil {
+		t.Fatalf("fix returned error: %v", err)
+	}
+	raw, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["downloads"]; ok {
+		t.Fatalf("downloads should be removed from builtin core manifest: %#v", got)
 	}
 }
 
