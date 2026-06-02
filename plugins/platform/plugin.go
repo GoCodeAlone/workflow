@@ -4,12 +4,24 @@
 package platform
 
 import (
+	"context"
+
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/handlers"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
 )
+
+// iacProviderApplyFn is the apply dispatch function passed to
+// NewIaCProviderApplyStepFactory. It wraps wfctlhelpers.ApplyPlanWithHooks
+// with an empty hooks struct so the step's function signature
+// (ctx, provider, plan) is satisfied without the step importing wfctlhelpers.
+func iacProviderApplyFn(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return wfctlhelpers.ApplyPlanWithHooks(ctx, p, plan, wfctlhelpers.ApplyPlanHooks{})
+}
 
 // Plugin is the platform EnginePlugin.
 type Plugin struct {
@@ -32,7 +44,7 @@ func New() *Plugin {
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
 				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.dns", "platform.region", "platform.region_router", "iac.state", "app.container", "argo.workflows"},
-				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list"},
+				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.iac_provider_list", "step.iac_provider_catalog", "step.iac_provider_plan", "step.iac_provider_apply", "step.iac_provider_destroy", "step.iac_provider_drift", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
 			},
@@ -120,6 +132,25 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		},
 		"step.iac_drift_detect": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewIaCDriftDetectStepFactory()(name, cfg, app)
+		},
+		// IaCProvider steps (general, provider-agnostic).
+		"step.iac_provider_list": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCProviderListStepFactory()(name, cfg, app)
+		},
+		"step.iac_provider_catalog": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCProviderCatalogStepFactory()(name, cfg, app)
+		},
+		"step.iac_provider_plan": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCProviderPlanStepFactory()(name, cfg, app)
+		},
+		"step.iac_provider_apply": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCProviderApplyStepFactory(iacProviderApplyFn)(name, cfg, app)
+		},
+		"step.iac_provider_destroy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCProviderDestroyStepFactory()(name, cfg, app)
+		},
+		"step.iac_provider_drift": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCProviderDriftStepFactory()(name, cfg, app)
 		},
 		"step.dns_plan": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewDNSPlanStepFactory()(name, cfg, app)
