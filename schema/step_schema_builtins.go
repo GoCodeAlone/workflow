@@ -2215,6 +2215,24 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	// ---- IaC Secret Reachability ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_secret_reachability",
+		Plugin:      "platform",
+		Description: "Pre-flight gate: collects the secret:// refs in a plan's specs and reports whether they are reachable from the chosen exec-env (fail-safe; the direct-apply route 409s when any are unreachable). The verdict is provider-level (one AccessChecker probe), reported per ref.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered secrets.Provider service", Required: true},
+			{Key: "exec_env", Type: FieldTypeString, Description: "Execution environment the apply will run in (empty/local/local-docker = local; anything else = remote)"},
+			{Key: "specs", Type: FieldTypeArray, Description: "Static resource specs (mutually exclusive with specs_from)"},
+			{Key: "specs_from", Type: FieldTypeString, Description: "Pipeline-context path to the specs (e.g. steps.parse-request.body.specs); mutually exclusive with specs"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "secrets", Type: "[]any", Description: "Per-ref verdicts: {ref, reachable, reason}"},
+			{Key: "all_reachable", Type: "boolean", Description: "True iff every referenced secret is reachable from the exec-env"},
+		},
+	})
+
 	// ---- Kubernetes Apply ----
 
 	r.Register(&StepSchema{

@@ -2858,6 +2858,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		{"step.iac_provider_drift", "IaC Provider Drift", "Detects drift via IaCProvider service"},
 		{"step.iac_provider_list", "IaC Provider List", "Lists resource statuses from IaCProvider service"},
 		{"step.iac_provider_plan", "IaC Provider Plan", "Plans infrastructure changes via IaCProvider service"},
+		{"step.iac_secret_reachability", "IaC Secret Reachability", "Pre-flight gate: reports whether a plan's secret:// refs are reachable from the chosen exec-env"},
 		{"step.iac_status", "IaC Status", "Gets IaC provisioning status"},
 		{"step.k8s_apply", "K8s Apply", "Applies Kubernetes manifests"},
 		{"step.k8s_destroy", "K8s Destroy", "Deletes Kubernetes resources"},

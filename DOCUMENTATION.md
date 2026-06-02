@@ -283,6 +283,7 @@ flowchart TD
 | `step.iac_provider_apply` | Applies a plan after recomputing + validating `desired_hash` (stateless two-phase TOCTOU guard) | platform |
 | `step.iac_provider_destroy` | Destroys resources via an `iac.provider` plugin | platform |
 | `step.iac_provider_drift` | Detects drift via an `iac.provider` (optional `IaCProviderDriftDetector`; `supported:false` fallback) | platform |
+| `step.iac_secret_reachability` | Pre-flight gate: checks whether `secret://` refs in plan specs are reachable from the chosen exec-env. The verdict is provider-level (one `CheckAccess` probe; the same result is reported per distinct ref); returns `all_reachable` bool. Fail-safe for remote exec-envs (host-local backends unverifiable per ADR 0017, unknown backends, and probe failure → unreachable) | platform |
 | `step.tofu_init` | Initializes an OpenTofu working directory | platform |
 | `step.tofu_plan` | Creates an OpenTofu execution plan | platform |
 | `step.tofu_apply` | Applies OpenTofu changes to infrastructure | platform |
