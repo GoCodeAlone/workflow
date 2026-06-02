@@ -172,17 +172,6 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 		))
 	}
 
-	// T18: register the engine-side infra.admin module factory so the
-	// host loads `type: infra.admin` without requiring a plugin. Per
-	// docs/plans/2026-05-27-infra-admin-dynamic.md + ADR-0002 the
-	// admin surface is engine-side rather than a plugin contribution,
-	// so the factory belongs here in NewStdEngine alongside the
-	// step.workflow_call registration. Also registers with the
-	// schema's known-module-types so TestSchemaKnowsPluginModuleTypes
-	// stays green and config-validation accepts `type: infra.admin`.
-	const infraAdminType = "infra.admin"
-	e.moduleFactories[infraAdminType] = module.NewInfraAdmin
-	schema.RegisterModuleType(infraAdminType)
 	return e
 }
 

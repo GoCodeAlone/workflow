@@ -2205,6 +2205,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Outputs: []StepOutputDef{
 			{Key: "provider", Type: "string", Description: "Provider service name"},
 			{Key: "supported", Type: "boolean", Description: "Whether drift detection is supported"},
+			{Key: "reason", Type: "string", Description: "Why drift detection is unsupported (set only when supported=false)"},
 			{Key: "any_drifted", Type: "boolean", Description: "Whether any resource has drifted"},
 			{Key: "drifts", Type: "[]any", Description: "Per-resource drift results"},
 			{Key: "count", Type: "number", Description: "Number of resources checked"},
