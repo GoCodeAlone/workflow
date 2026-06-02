@@ -61,8 +61,9 @@ type Pipeline struct {
 }
 
 // recordEvent is a nil-safe helper that records an event via EventRecorder.
-// If EventRecorder is nil, this is a no-op. Errors are logged but never
-// returned — event recording is best-effort and must not fail the pipeline.
+// If EventRecorder is nil or ExecutionID is empty, this is a no-op. Errors are
+// logged but never returned — event recording is best-effort and must not fail
+// the pipeline.
 func (p *Pipeline) recordEvent(ctx context.Context, eventType string, data map[string]any) {
 	if p.EventRecorder == nil || p.ExecutionID == "" {
 		return
