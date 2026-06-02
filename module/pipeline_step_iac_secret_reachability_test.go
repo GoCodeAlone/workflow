@@ -16,6 +16,7 @@ import (
 type stubSecretsProviderWithAccess struct {
 	checkErr    error
 	checkCalled bool
+	checkCount  int
 }
 
 func (s *stubSecretsProviderWithAccess) Name() string { return "stub-vault" }
@@ -27,6 +28,7 @@ func (s *stubSecretsProviderWithAccess) Delete(_ context.Context, _ string) erro
 func (s *stubSecretsProviderWithAccess) List(_ context.Context) ([]string, error) { return nil, nil }
 func (s *stubSecretsProviderWithAccess) CheckAccess(_ context.Context) error {
 	s.checkCalled = true
+	s.checkCount++
 	return s.checkErr
 }
 
@@ -90,6 +92,11 @@ func TestSecretReachabilityStep_VaultWithAccess(t *testing.T) {
 	result, err := step.Execute(context.Background(), &module.PipelineContext{})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
+	}
+
+	// The AccessChecker probe must have been consulted (remote backend path).
+	if !stub.checkCalled {
+		t.Error("expected CheckAccess to be called on the vault provider")
 	}
 
 	allReachable, ok := result.Output["all_reachable"].(bool)
@@ -316,6 +323,12 @@ func TestSecretReachabilityStep_MultipleRefs_SameProvider(t *testing.T) {
 		t.Error("expected all_reachable=false when vault is unreachable")
 	}
 
+	// The verdict is provider-level: CheckAccess must fire EXACTLY ONCE even
+	// though two distinct refs are reported.
+	if stub.checkCount != 1 {
+		t.Errorf("expected CheckAccess called exactly once (provider-level verdict), got %d", stub.checkCount)
+	}
+
 	secretsList, ok := result.Output["secrets"].([]map[string]any)
 	if !ok {
 		t.Fatalf("expected []map[string]any secrets, got %T", result.Output["secrets"])
@@ -380,5 +393,83 @@ func TestSecretReachabilityStep_DirectProvider(t *testing.T) {
 	allReachable, _ := result.Output["all_reachable"].(bool)
 	if !allReachable {
 		t.Error("expected all_reachable=true for direct provider with CheckAccess→nil")
+	}
+}
+
+// TestSecretReachabilityStep_SpecsFromContext verifies the dynamic specs_from
+// path: specs are resolved from the pipeline context at Execute time, and their
+// secret:// refs are collected and checked.
+func TestSecretReachabilityStep_SpecsFromContext(t *testing.T) {
+	app := module.NewMockApplication()
+	stub := &stubSecretsProviderWithAccess{checkErr: nil}
+	if err := app.RegisterService("my-vault", &stubSecretsModuleAccessor{underlying: stub}); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCSecretReachabilityStepFactory()
+	step, err := factory("reach-step", map[string]any{
+		"provider":   "my-vault",
+		"exec_env":   "remote",
+		"specs_from": "steps.parse-request.body.specs",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := &module.PipelineContext{
+		StepOutputs: map[string]map[string]any{
+			"parse-request": {
+				"body": map[string]any{
+					"specs": []any{
+						map[string]any{
+							"name": "vault-db",
+							"type": "infra.database",
+							"config": map[string]any{
+								"password": "secret://vault/dynamic-pass",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if !stub.checkCalled {
+		t.Error("expected CheckAccess to be called for specs_from path")
+	}
+	allReachable, _ := result.Output["all_reachable"].(bool)
+	if !allReachable {
+		t.Error("expected all_reachable=true for reachable vault via specs_from")
+	}
+	secretsList, ok := result.Output["secrets"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected []map[string]any secrets, got %T", result.Output["secrets"])
+	}
+	if len(secretsList) != 1 || secretsList[0]["ref"] != "secret://vault/dynamic-pass" {
+		t.Errorf("expected one ref secret://vault/dynamic-pass from specs_from, got %#v", secretsList)
+	}
+}
+
+// TestSecretReachabilityStep_Factory_SpecsAndSpecsFromMutualExclusion verifies
+// that setting both 'specs' and 'specs_from' is rejected at factory time.
+func TestSecretReachabilityStep_Factory_SpecsAndSpecsFromMutualExclusion(t *testing.T) {
+	factory := module.NewIaCSecretReachabilityStepFactory()
+	_, err := factory("reach-step", map[string]any{
+		"provider":   "my-vault",
+		"specs_from": "steps.parse-request.body.specs",
+		"specs": []any{
+			map[string]any{"name": "x", "type": "infra.database"},
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected factory error when both specs and specs_from are set")
+	}
+	if !containsString(err.Error(), "mutually exclusive") {
+		t.Errorf("expected 'mutually exclusive' error, got: %v", err)
 	}
 }

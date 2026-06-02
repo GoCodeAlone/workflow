@@ -108,7 +108,9 @@ func (s *IaCSecretReachabilityStep) Execute(ctx context.Context, pc *PipelineCon
 	}
 
 	// Call Reachability once — the verdict is provider-level, not per-ref.
-	verdict := secrets.Reachability(p, s.execEnv)
+	// Propagate the Execute ctx so a slow/unreachable backend probe is bounded
+	// by the pipeline/route deadline rather than hanging the pre-flight.
+	verdict := secrets.Reachability(ctx, p, s.execEnv)
 
 	secretEntries := make([]map[string]any, 0, len(refs))
 	for _, ref := range refs {
@@ -167,8 +169,8 @@ func resolveSecretsProvider(app modular.Application, providerName, stepName stri
 
 // collectSecretRefs walks the Config map of each ResourceSpec and returns a
 // sorted, deduplicated slice of all string values that start with secrets.SecretPrefix.
-// It recurses into nested map[string]any and []any values so nested config
-// trees are fully scanned.
+// It recurses into nested map[string]any, []any, and typed []string values so
+// both YAML-decoded and programmatically-built spec configs are fully scanned.
 func collectSecretRefs(specs []interfaces.ResourceSpec) []string {
 	seen := make(map[string]struct{})
 	for _, spec := range specs {
@@ -183,11 +185,20 @@ func collectSecretRefs(specs []interfaces.ResourceSpec) []string {
 }
 
 // collectFromValue recursively extracts secret:// refs from an arbitrary value.
+// It handles both YAML-decoded shapes (map[string]any, []any) and typed Go
+// shapes built programmatically (notably []string), since ResourceSpec.Config
+// may carry either when specs are constructed in code rather than parsed.
 func collectFromValue(v any, seen map[string]struct{}) {
 	switch val := v.(type) {
 	case string:
 		if strings.HasPrefix(val, secrets.SecretPrefix) {
 			seen[val] = struct{}{}
+		}
+	case []string:
+		for _, item := range val {
+			if strings.HasPrefix(item, secrets.SecretPrefix) {
+				seen[item] = struct{}{}
+			}
 		}
 	case map[string]any:
 		for _, child := range val {

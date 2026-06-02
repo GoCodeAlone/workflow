@@ -72,7 +72,7 @@ func TestReachability(t *testing.T) {
 		wantReachable bool
 		wantReasonSub string // non-empty: the reason must contain this substring
 	}{
-		// ── Local backends — always reachable ─────────────────────────────────
+		// ── Host-local backends + LOCAL exec-env — reachable ──────────────────
 		{
 			name:          "EnvProvider local-exec",
 			provider:      secrets.NewEnvProvider(""),
@@ -80,22 +80,47 @@ func TestReachability(t *testing.T) {
 			wantReachable: true,
 		},
 		{
-			name:          "EnvProvider remote-exec",
+			name:          "EnvProvider empty (local) exec",
 			provider:      secrets.NewEnvProvider("APP_"),
-			execEnv:       "remote",
-			wantReachable: true,
-		},
-		{
-			name:          "FileProvider local-exec",
-			provider:      secrets.NewFileProvider("/tmp"),
 			execEnv:       "",
 			wantReachable: true,
 		},
 		{
-			name:          "FileProvider remote-exec",
+			name:          "FileProvider local-docker exec",
+			provider:      secrets.NewFileProvider("/tmp"),
+			execEnv:       "local-docker",
+			wantReachable: true,
+		},
+		{
+			name:          "KeychainProvider local exec",
+			provider:      newTestKeychainProvider(t),
+			execEnv:       "local",
+			wantReachable: true,
+		},
+
+		// ── Host-local backends + REMOTE exec-env — fail-safe UNREACHABLE ──────
+		// Under ADR 0017 the remote agent resolves its own secrets; the engine
+		// cannot vouch for engine-host env/file/keychain on a remote runner.
+		{
+			name:          "EnvProvider remote-exec → fail-safe unreachable",
+			provider:      secrets.NewEnvProvider("APP_"),
+			execEnv:       "remote",
+			wantReachable: false,
+			wantReasonSub: "host-local backend (env)",
+		},
+		{
+			name:          "FileProvider remote-exec → fail-safe unreachable",
 			provider:      secrets.NewFileProvider("/tmp"),
 			execEnv:       "k8s-prod",
-			wantReachable: true,
+			wantReachable: false,
+			wantReasonSub: "host-local backend (file)",
+		},
+		{
+			name:          "KeychainProvider remote-exec → fail-safe unreachable",
+			provider:      newTestKeychainProvider(t),
+			execEnv:       "remote",
+			wantReachable: false,
+			wantReasonSub: "host-local backend (keychain)",
 		},
 
 		// ── GitHubSecretsProvider — always unreachable (write-only short-circuit) ─
@@ -169,7 +194,7 @@ func TestReachability(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := secrets.Reachability(tc.provider, tc.execEnv)
+			result := secrets.Reachability(context.Background(), tc.provider, tc.execEnv)
 			if result.Reachable != tc.wantReachable {
 				t.Errorf("Reachable = %v, want %v (reason: %q)", result.Reachable, tc.wantReachable, result.Reason)
 			}
@@ -198,7 +223,7 @@ func TestReachability(t *testing.T) {
 func TestReachability_GitHubShortCircuit_CheckAccessNotConsulted(t *testing.T) {
 	p := newTestGitHubProvider(t)
 
-	result := secrets.Reachability(p, "remote")
+	result := secrets.Reachability(context.Background(), p, "remote")
 	if result.Reachable {
 		t.Error("GitHubSecretsProvider must be unreachable (write-only)")
 	}
@@ -213,7 +238,7 @@ func TestReachability_GitHubShortCircuit_CheckAccessNotConsulted(t *testing.T) {
 	// won't catch it — it will fall through to the generic remote path.
 	// This is intentional: the type-switch is explicitly for *GitHubSecretsProvider.
 	// Verify the stub does get its CheckAccess called (it's a regular remote-with-access).
-	result2 := secrets.Reachability(stub, "remote")
+	result2 := secrets.Reachability(context.Background(), stub, "remote")
 	if !result2.Reachable {
 		t.Errorf("stub with CheckAccess→nil should be reachable, got reason: %q", result2.Reason)
 	}
@@ -230,7 +255,7 @@ func TestReachability_VaultAndAWS_WithAccessChecker(t *testing.T) {
 	// stubRemoteWithAccess covers the same code path as *VaultProvider and
 	// *AWSSecretsManagerProvider: it implements AccessChecker.
 	stub := &stubRemoteWithAccess{checkAccessErr: nil}
-	result := secrets.Reachability(stub, "prod-env")
+	result := secrets.Reachability(context.Background(), stub, "prod-env")
 	if !result.Reachable {
 		t.Errorf("remote with CheckAccess→nil should be reachable, got: %q", result.Reason)
 	}
@@ -239,12 +264,58 @@ func TestReachability_VaultAndAWS_WithAccessChecker(t *testing.T) {
 	}
 
 	stubErr := &stubRemoteWithAccess{checkAccessErr: errors.New("vault: token expired")}
-	result2 := secrets.Reachability(stubErr, "prod-env")
+	result2 := secrets.Reachability(context.Background(), stubErr, "prod-env")
 	if result2.Reachable {
 		t.Error("remote with CheckAccess returning err should be unreachable")
 	}
 	if !containsSubstr(result2.Reason, "token expired") {
 		t.Errorf("expected reason to contain error text, got %q", result2.Reason)
+	}
+}
+
+// stubCtxObservingProvider records the context it received in CheckAccess so a
+// test can prove ctx is propagated (not context.Background()).
+type stubCtxObservingProvider struct {
+	gotCtx context.Context
+}
+
+func (s *stubCtxObservingProvider) Name() string                                    { return "stub-ctx" }
+func (s *stubCtxObservingProvider) Get(_ context.Context, _ string) (string, error) { return "", nil }
+func (s *stubCtxObservingProvider) Set(_ context.Context, _, _ string) error        { return nil }
+func (s *stubCtxObservingProvider) Delete(_ context.Context, _ string) error        { return nil }
+func (s *stubCtxObservingProvider) List(_ context.Context) ([]string, error)        { return nil, nil }
+func (s *stubCtxObservingProvider) CheckAccess(ctx context.Context) error {
+	s.gotCtx = ctx
+	return ctx.Err()
+}
+
+var _ secrets.AccessChecker = (*stubCtxObservingProvider)(nil)
+
+// TestReachability_PropagatesContext proves Reachability passes the caller's ctx
+// (not a fresh context.Background) into AccessChecker.CheckAccess, so a route /
+// pipeline deadline bounds the probe. An already-cancelled context must surface
+// as an unreachable verdict.
+func TestReachability_PropagatesContext(t *testing.T) {
+	stub := &stubCtxObservingProvider{}
+
+	type ctxKey string
+	const k ctxKey = "marker"
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), k, "v"))
+	cancel() // already cancelled — CheckAccess returns ctx.Err()
+
+	result := secrets.Reachability(ctx, stub, "remote")
+
+	if stub.gotCtx == nil {
+		t.Fatal("CheckAccess did not receive a context")
+	}
+	if stub.gotCtx.Value(k) != "v" {
+		t.Error("Reachability did not propagate the caller's context into CheckAccess (got a different context)")
+	}
+	if result.Reachable {
+		t.Error("expected unreachable when the propagated context is already cancelled")
+	}
+	if !containsSubstr(result.Reason, "access check failed") {
+		t.Errorf("expected access-check-failed reason, got %q", result.Reason)
 	}
 }
 
@@ -260,6 +331,18 @@ func newTestGitHubProvider(t *testing.T) *secrets.GitHubSecretsProvider {
 	p, err := secrets.NewGitHubSecretsProvider("owner/repo", "WORKFLOW_TEST_GH_TOKEN")
 	if err != nil {
 		t.Fatalf("NewGitHubSecretsProvider: %v", err)
+	}
+	return p
+}
+
+// newTestKeychainProvider creates a real *secrets.KeychainProvider so the
+// host-local type-switch in Reachability fires correctly. It performs no OS
+// keychain I/O (Reachability classifies by type, it does not probe keychain).
+func newTestKeychainProvider(t *testing.T) *secrets.KeychainProvider {
+	t.Helper()
+	p, err := secrets.NewKeychainProvider("workflow-test-reachability")
+	if err != nil {
+		t.Fatalf("NewKeychainProvider: %v", err)
 	}
 	return p
 }
