@@ -47,7 +47,7 @@
 **Step 1: Tests.** In `canonicalize_test.go`:
 - Update `TestFromResourceStatesSkipsNonDNS` (finding T-1): a genuinely-unknown type (`infra.compute`) is still skipped (0 snapshots); `infra.dns_delegation` is now CONSUMED.
 - `TestFromResourceStates_DelegationPopulatesAuthority`: state `{Type:"infra.dns_delegation", Provider:"hover", ProviderID:"x.com", Outputs:{"registrar_nameservers":[]any{"ns1.dnsimple.com"},"live_nameservers":[]any{"ns1.digitalocean.com"}}}` → one snapshot, `Authority["registrar_nameservers"]==[]any{"ns1.dnsimple.com"}`, `Authority["live_nameservers"]==[]any{"ns1.digitalocean.com"}`, `Records != nil && len(Records)==0`.
-- `TestFromResourceStates_MergesBothLayersByDomain`: an `infra.dns` state + an `infra.dns_delegation` state, SAME `(provider="hover", ProviderID="x.com")` → exactly ONE snapshot carrying both `Records` and `Authority`.
+- `TestFromResourceStates_MergesBothLayersByDomain`: an `infra.dns` state + an `infra.dns_delegation` state, SAME `(provider="hover", ProviderID="x.com")` → exactly ONE snapshot carrying both `Records` and `Authority`; assert `snap.ID` contains NO `/` and equals `"hover-x-com"` (derived from provider+domain, NOT the type-namespaced `st.ID` — finding I-NEW-1).
 - `TestFromResourceStates_DelegationOnlyDomain` (finding m-1): delegation-only → authority-only snapshot, `Records: []Record{}` (non-nil → JSON `"records":[]`, finding I-NEW-2).
 - Records-only unchanged: N `infra.dns` states → N snapshots.
 
@@ -58,7 +58,8 @@ Run: `GOWORK=off GOTOOLCHAIN=auto go test ./dns/record -run TestFromResourceStat
 - `infra.dns` → append `Records` (existing `pickRecords`/`recordFromMap`).
 - `infra.dns_delegation` → set `Authority` reading ONLY `registrar_nameservers` + `live_nameservers` from `st.Outputs` (each `[]any`; copy only those keys — never the whole Outputs map; omit a missing key).
 - other types → `continue`.
-- emit sorted by `(provider, domain)`; first state to create a group sets `ID`.
+- set `snap.ID = provider + "-" + sanitizeDomainForID(domain)` (add a tiny unexported helper in `dns/record` that lowercases + replaces runs of non-alphanumeric — incl. `.` and `/` — with `-`). Do NOT inherit `st.ID` (Task 2 makes it type-namespaced, e.g. `infra.dns/x.com`, which would leak a `/` into the portfolio JSON — finding I-NEW-1). The domain comes from `st.ProviderID` (the bare domain), so it's stable across both layers.
+- emit sorted by `(provider, domain)`.
 
 Run tests → PASS.
 
@@ -94,9 +95,9 @@ Rollback: revert → import IDs return to domain-only (single-type imports unaff
 
 **Repo:** workflow **Files:** Modify `dns/record/sanitize.go`, `dns/record/sanitize_test.go`
 
-**Step 1: Test.** `TestSanitizeStripsUnknownAuthorityKeys`: `Authority{"registrar_nameservers":...,"live_nameservers":...,"secret_token":"x"}` → after `Sanitize`, allow-list `{registrar_nameservers, live_nameservers, domain_id}` kept, others removed; Records sanitization unchanged. Run → FAIL.
+**Step 1: Test.** `TestSanitizeStripsUnknownAuthorityKeys`: `Authority{"registrar_nameservers":...,"live_nameservers":...,"secret_token":"x"}` → after `Sanitize`, allow-list `{registrar_nameservers, live_nameservers}` kept, others removed; Records sanitization unchanged. Run → FAIL.
 
-**Step 2: Implement.** After the Records pass, for each snapshot with non-nil `Authority`, delete keys ∉ allow-list.
+**Step 2: Implement.** After the Records pass, for each snapshot with non-nil `Authority`, delete keys ∉ allow-list `{registrar_nameservers, live_nameservers}`.
 
 **Step 3:** `GOWORK=off GOTOOLCHAIN=auto go test ./dns/record -count=1` green; `golangci-lint run --new-from-rev=origin/main ./dns/...` exit 0.
 
@@ -108,7 +109,7 @@ Rollback: revert.
 
 **Repo:** workflow-plugin-hover **Files:** Modify `internal/provider.go` (`EnumerateAll`), `internal/provider_test.go`
 
-**Step 1: Test.** `TestEnumerateAll_DelegationListsDomains`: stub lister with 2 domains → `EnumerateAll(ctx,"infra.dns_delegation")` returns 2 `ResourceOutput`s, each `Type=="infra.dns_delegation"`, `ProviderID==domain.Name`; unknown type still errors `"resource type %q not supported"`. Run → FAIL.
+**Step 1: Test.** `TestEnumerateAll_DelegationListsDomains`: stub lister with 2 domains → `EnumerateAll(ctx,"infra.dns_delegation")` returns 2 `ResourceOutput`s, `ProviderID==domain.Name` for each; unknown type still errors `"resource type %q not supported"`. (Note: `o.Type` on the output is advisory — the authoritative resource type for state persistence is the `--type` flag threaded as `resourceType` into `buildResourceStateFromImport`, exercised by Task 2's `TestBuildResourceStateFromImport_TypeNamespacedID`; this test just verifies the domain listing — finding I-NEW-2.) Run → FAIL.
 
 **Step 2: Implement.** Accept `infra.dns` AND `infra.dns_delegation` in the guard; for either, `ListDomains` → emit `ResourceOutput{ProviderID:d.Name, Type:resourceType}` (delegation NS fetched in Import — keep enumerate to one `ListDomains` call; no per-domain `domain_id` Output needed). Reject other types.
 
@@ -121,14 +122,14 @@ Rollback: revert.
 **Repo:** workflow-plugin-hover **Files:** Modify `internal/provider.go` (`Import`), `internal/drivers/delegation.go`, `internal/drivers/delegation_test.go`, `internal/provider_test.go`
 
 **Step 1: Tests.**
-- `delegation_test.go` `TestDelegationReadForImport_DualNS`: stub client `GetDomainDelegation`→`["ns1.dnsimple.com"]`, stub public resolver→`["ns1.digitalocean.com"]`; the new `ReadForImport` returns `Outputs{"nameservers":[]any{"ns1.dnsimple.com"}, "registrar_nameservers":[]any{"ns1.dnsimple.com"}, "live_nameservers":[]any{"ns1.digitalocean.com"}, "domain_id":...}`. (`nameservers`==registrar=PRIMARY so existing `Diff`/`parseDelegationSpec`/`nameserversFromOutputs` stay consistent — no spurious drift, finding I-NEW-3.)
+- `delegation_test.go` `TestDelegationReadForImport_DualNS`: stub client `GetDomainDelegation`→`["ns1.dnsimple.com"]`, stub public resolver→`["ns1.digitalocean.com"]`; the new `ReadForImport` returns `Outputs{"nameservers":[]any{"ns1.dnsimple.com"}, "registrar_nameservers":[]any{"ns1.dnsimple.com"}, "live_nameservers":[]any{"ns1.digitalocean.com"}}`. (`nameservers`==registrar=PRIMARY so existing `Diff`/`parseDelegationSpec`/`nameserversFromOutputs` stay consistent — no spurious drift, finding I-NEW-3.)
 - `TestDelegationReadForImport_LiveLookupFailsGracefully`: public resolver errors → `live_nameservers` omitted; `nameservers`/`registrar_nameservers` still from registrar.
 - `provider_test.go` `TestImport_DelegationUsesRegistrarNotLiveRead`: with a stub where registrar≠live, `HoverProvider.Import(ctx,"x.com","infra.dns_delegation")` returns a `ResourceState` whose `Outputs["registrar_nameservers"]`==registrar (proves it bypassed the live-first `Read`).
 
 Run → FAIL.
 
 **Step 2: Implement.**
-- `internal/drivers/delegation.go`: add `func (d *DelegationDriver) ReadForImport(ctx, ref) (*interfaces.ResourceOutput, error)` — `GetDomainDelegation` (registrar, authoritative); `lookupPublicNameservers` best-effort (error → omit `live_nameservers`); build `Outputs{nameservers:registrar(primary), registrar_nameservers:registrar, live_nameservers:live, domain_id:...}` (`[]any` via existing `nameserversToAny`). Do NOT touch `Read`.
+- `internal/drivers/delegation.go`: add `func (d *DelegationDriver) ReadForImport(ctx, ref) (*interfaces.ResourceOutput, error)` — `GetDomainDelegation` (registrar, authoritative); `lookupPublicNameservers` best-effort (error → omit `live_nameservers`); build `Outputs{nameservers:registrar(primary), registrar_nameservers:registrar, live_nameservers:live}` (`[]any` via existing `nameserversToAny`; omit the unused `domain_id`). Do NOT touch `Read`.
 - `internal/provider.go` `Import`: BEFORE the generic `d.Read`, `if resourceType == "infra.dns_delegation" { dd, ok := d.(*drivers.DelegationDriver); if ok { out, err := dd.ReadForImport(...); build+return ResourceState } }`. (`drivers` is already imported at provider.go:14; `p.ResourceDriver("infra.dns_delegation")` returns the `*DelegationDriver`.) Fall through to `d.Read` for `infra.dns`.
 
 **Step 3: Verify.** `GOWORK=off GOTOOLCHAIN=auto go build ./... && go vet ./... && go test ./... -count=1` all green (existing delegation `Diff`/`Read` tests stay green — `nameservers` primary key preserved). `golangci-lint run --new-from-rev=origin/main` exit 0.
