@@ -19,6 +19,13 @@ import (
 //   - Private/reserved IP ranges (RFC-1918, RFC-6598 CGNAT, loopback,
 //     link-local, IPv6 ULA, RFC-5737/3849 documentation) are left as-is.
 //
+// authorityAllowList is the exhaustive set of keys permitted in
+// Snapshot.Authority after sanitization. Any key not in this set is removed.
+var authorityAllowList = map[string]bool{
+	"registrar_nameservers": true,
+	"live_nameservers":      true,
+}
+
 // Sanitize sets p.Sanitized = true.
 func Sanitize(p *Portfolio) {
 	for si := range p.Snapshots {
@@ -41,6 +48,12 @@ func Sanitize(p *Portfolio) {
 				if looksLikeSecret(r.Value) {
 					r.Value = "[redacted]"
 				}
+			}
+		}
+		// Strip any Authority key not in the allow-list.
+		for key := range p.Snapshots[si].Authority {
+			if !authorityAllowList[key] {
+				delete(p.Snapshots[si].Authority, key)
 			}
 		}
 	}

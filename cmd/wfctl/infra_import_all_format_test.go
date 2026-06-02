@@ -156,3 +156,127 @@ func TestImportAllSanitizeFlagRequiresPortfolioFormat(t *testing.T) {
 		t.Errorf("error should mention 'sanitize'; got: %v", err)
 	}
 }
+
+// TestBuildResourceStateFromImport_TypeNamespacedID pins the CRITICAL-1 fix:
+// importing infra.dns and infra.dns_delegation for the SAME domain must
+// produce DISTINCT state IDs (and therefore distinct on-disk filenames) so
+// that a second import does not overwrite the first. ProviderID must stay the
+// bare domain in both cases — record.FromResourceStates keys the snapshot
+// domain on ProviderID, not on ID.
+func TestBuildResourceStateFromImport_TypeNamespacedID(t *testing.T) {
+	imported := &interfaces.ResourceState{
+		ProviderID: "example.com",
+		Type:       "infra.dns",
+	}
+
+	dnsState, err := buildResourceStateFromImport("example.com", "example.com", "infra.dns", "hover", imported)
+	if err != nil {
+		t.Fatalf("buildResourceStateFromImport infra.dns: %v", err)
+	}
+
+	delegImported := &interfaces.ResourceState{
+		ProviderID: "example.com",
+		Type:       "infra.dns_delegation",
+	}
+	delegState, err := buildResourceStateFromImport("example.com", "example.com", "infra.dns_delegation", "hover", delegImported)
+	if err != nil {
+		t.Fatalf("buildResourceStateFromImport infra.dns_delegation: %v", err)
+	}
+
+	// IDs must be distinct so SaveResource writes to different filenames.
+	if dnsState.ID == delegState.ID {
+		t.Errorf("infra.dns and infra.dns_delegation produced the same ID %q; want distinct IDs", dnsState.ID)
+	}
+
+	// ProviderID must remain the bare domain so FromResourceStates can group
+	// both states into a single snapshot.
+	if dnsState.ProviderID != "example.com" {
+		t.Errorf("infra.dns ProviderID = %q; want %q", dnsState.ProviderID, "example.com")
+	}
+	if delegState.ProviderID != "example.com" {
+		t.Errorf("infra.dns_delegation ProviderID = %q; want %q", delegState.ProviderID, "example.com")
+	}
+
+	// Verify the on-disk filenames are also distinct via sanitizeStateID.
+	dnsFname := sanitizeStateID(dnsState.ID) + ".json"
+	delegFname := sanitizeStateID(delegState.ID) + ".json"
+	if dnsFname == delegFname {
+		t.Errorf("sanitized filenames are the same %q; want distinct files", dnsFname)
+	}
+}
+
+// TestDumpPortfolio_MergesDnsAndDelegationForSameDomain pins the end-to-end
+// portfolio merge contract (CRITICAL-1 class): when BOTH an infra.dns state
+// and an infra.dns_delegation state for the same domain are present in the
+// store (using type-namespaced IDs so they coexist), dumpPortfolioToFile must
+// produce exactly ONE snapshot for that domain carrying both records and
+// authority.registrar_nameservers.
+func TestDumpPortfolio_MergesDnsAndDelegationForSameDomain(t *testing.T) {
+	store := &fakeStateStore{}
+
+	// infra.dns state — type-namespaced ID, bare domain as ProviderID.
+	_ = store.SaveResource(context.Background(), interfaces.ResourceState{
+		ID:         "infra.dns/example-com",
+		Name:       "infra.dns/example-com",
+		Type:       "infra.dns",
+		Provider:   "hover",
+		ProviderID: "example.com",
+		Outputs: map[string]any{
+			"records": []any{
+				map[string]any{"type": "A", "name": "@", "data": "192.0.2.1", "ttl": 300},
+			},
+		},
+	})
+
+	// infra.dns_delegation state — distinct ID, same bare domain as ProviderID.
+	_ = store.SaveResource(context.Background(), interfaces.ResourceState{
+		ID:         "infra.dns_delegation/example-com",
+		Name:       "infra.dns_delegation/example-com",
+		Type:       "infra.dns_delegation",
+		Provider:   "hover",
+		ProviderID: "example.com",
+		Outputs: map[string]any{
+			"registrar_nameservers": []any{"ns1.example.net", "ns2.example.net"},
+		},
+	})
+
+	dir := t.TempDir()
+	out := filepath.Join(dir, "portfolio.json")
+	if err := dumpPortfolioToFile(context.Background(), store, out, false); err != nil {
+		t.Fatalf("dumpPortfolioToFile: %v", err)
+	}
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var p record.Portfolio
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatalf("unmarshal portfolio: %v", err)
+	}
+
+	// Exactly one snapshot for example.com.
+	if len(p.Snapshots) != 1 {
+		t.Fatalf("want 1 snapshot for example.com; got %d: %+v", len(p.Snapshots), p.Snapshots)
+	}
+	snap := p.Snapshots[0]
+
+	// Snapshot must carry at least one record from the infra.dns state.
+	if len(snap.Records) == 0 {
+		t.Error("snapshot has no records; want at least one (from infra.dns state)")
+	}
+
+	// Snapshot must carry authority.registrar_nameservers from the delegation state.
+	if snap.Authority == nil {
+		t.Fatal("snapshot.authority is nil; want registrar_nameservers from infra.dns_delegation state")
+	}
+	ns, ok := snap.Authority["registrar_nameservers"]
+	if !ok {
+		t.Errorf("snapshot.authority missing registrar_nameservers; got %+v", snap.Authority)
+	} else {
+		nsSlice, ok := ns.([]any)
+		if !ok || len(nsSlice) == 0 {
+			t.Errorf("registrar_nameservers = %v; want non-empty slice", ns)
+		}
+	}
+}

@@ -1,10 +1,23 @@
 package record
 
-import "github.com/GoCodeAlone/workflow/interfaces"
+import (
+	"sort"
+	"strings"
+	"unicode"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
+)
 
 // FromResourceStates converts imported IaC state into a canonical Portfolio.
 // Reads each infra.dns ResourceState's records (Outputs preferred, else
 // AppliedConfig), renaming provider-specific value keys to the canonical "value".
+// Each infra.dns_delegation state populates Snapshot.Authority with
+// registrar_nameservers and live_nameservers for the matching domain.
+// States of other types are silently skipped.
+//
+// Snapshots are grouped by (Provider, Domain) so that infra.dns and
+// infra.dns_delegation states for the same domain are merged into one Snapshot.
+// Output is sorted by (Provider, Domain) for deterministic order.
 //
 // Provider value-key divergence (verified against provider drivers):
 //   - DigitalOcean + Cloudflare emit "data"
@@ -12,36 +25,113 @@ import "github.com/GoCodeAlone/workflow/interfaces"
 //   - Namecheap emits "address"
 //
 // The valueAlias helper resolves the first non-empty of: data → content → address → value.
-// Non-infra.dns states are silently skipped.
 func FromResourceStates(states []interfaces.ResourceState) Portfolio {
 	p := Portfolio{Schema: SchemaV1}
+
+	type key struct{ provider, domain string }
+	order := []key{}
+	snapByKey := map[key]*Snapshot{}
+
+	getOrCreate := func(provider, domain string) *Snapshot {
+		k := key{provider, domain}
+		if s, ok := snapByKey[k]; ok {
+			return s
+		}
+		s := &Snapshot{
+			ID:       provider + "-" + sanitizeDomainForID(domain),
+			Provider: provider,
+			Domain:   domain,
+			Records:  []Record{},
+		}
+		snapByKey[k] = s
+		order = append(order, k)
+		return s
+	}
+
 	for i := range states {
 		st := &states[i]
-		if st.Type != "infra.dns" {
-			continue
-		}
-		recs := pickRecords(st.Outputs, st.AppliedConfig)
-		snap := Snapshot{
-			ID:       st.ID,
-			Provider: st.Provider,
-			Domain:   st.ProviderID,
-		}
-		// Fall back to AppliedConfig["domain"] if ProviderID is empty.
-		if snap.Domain == "" {
-			if d, ok := st.AppliedConfig["domain"].(string); ok {
-				snap.Domain = d
+
+		switch st.Type {
+		case "infra.dns":
+			domain := st.ProviderID
+			if domain == "" {
+				if d, ok := st.AppliedConfig["domain"].(string); ok {
+					domain = d
+				}
 			}
-		}
-		for _, raw := range recs {
-			m, ok := raw.(map[string]any)
-			if !ok {
+			if domain == "" {
 				continue
 			}
-			snap.Records = append(snap.Records, recordFromMap(m))
+			snap := getOrCreate(st.Provider, domain)
+			recs := pickRecords(st.Outputs, st.AppliedConfig)
+			for _, raw := range recs {
+				m, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				snap.Records = append(snap.Records, recordFromMap(m))
+			}
+
+		case "infra.dns_delegation":
+			domain := st.ProviderID
+			if domain == "" {
+				if d, ok := st.AppliedConfig["domain"].(string); ok {
+					domain = d
+				}
+			}
+			if domain == "" {
+				continue
+			}
+			snap := getOrCreate(st.Provider, domain)
+			for _, nsKey := range []string{"registrar_nameservers", "live_nameservers"} {
+				if v, ok := st.Outputs[nsKey]; ok {
+					if slice, ok := v.([]any); ok {
+						cp := make([]any, len(slice))
+						copy(cp, slice)
+						if snap.Authority == nil {
+							snap.Authority = map[string]any{}
+						}
+						snap.Authority[nsKey] = cp
+					}
+				}
+			}
+
+		default:
+			continue
 		}
-		p.Snapshots = append(p.Snapshots, snap)
+	}
+
+	// Sort by (provider, domain) for deterministic output.
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].provider != order[j].provider {
+			return order[i].provider < order[j].provider
+		}
+		return order[i].domain < order[j].domain
+	})
+
+	for _, k := range order {
+		p.Snapshots = append(p.Snapshots, *snapByKey[k])
 	}
 	return p
+}
+
+// sanitizeDomainForID converts a domain string into an ID-safe slug:
+// lowercase, runs of non-alphanumeric runes (incl. '.' and '/') replaced
+// with a single '-', leading/trailing '-' trimmed.
+func sanitizeDomainForID(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	inRun := false
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			inRun = false
+		} else if !inRun {
+			b.WriteByte('-')
+			inRun = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // pickRecords returns the records slice from Outputs if non-empty,
