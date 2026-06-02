@@ -2,7 +2,6 @@ package module_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -98,7 +97,7 @@ func TestIaCProviderPlanStep_HashStableWhenEnvVarChanges(t *testing.T) {
 	}
 
 	// First hash: env var set to "secret1".
-	os.Setenv("DB_PASSWORD", "secret1")
+	t.Setenv("DB_PASSWORD", "secret1")
 	result1, err := step.Execute(context.Background(), &module.PipelineContext{})
 	if err != nil {
 		t.Fatalf("Execute (run 1) error: %v", err)
@@ -106,7 +105,7 @@ func TestIaCProviderPlanStep_HashStableWhenEnvVarChanges(t *testing.T) {
 	hash1 := result1.Output["desired_hash"].(string)
 
 	// Second hash: env var changed to "secret2".
-	os.Setenv("DB_PASSWORD", "secret2")
+	t.Setenv("DB_PASSWORD", "secret2")
 	result2, err := step.Execute(context.Background(), &module.PipelineContext{})
 	if err != nil {
 		t.Fatalf("Execute (run 2) error: %v", err)

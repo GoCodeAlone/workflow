@@ -136,7 +136,10 @@ func (s *IaCProviderPlanStep) Execute(ctx context.Context, _ *PipelineContext) (
 	// Compute desired state hash with a NO-OP env resolver so that
 	// ${ENV_VAR} and ${secret.*} placeholders hash as literal strings —
 	// same hash at plan time and at apply time regardless of env values.
-	desiredHash := computeDesiredStateHash(s.specs, current)
+	desiredHash, err := computeDesiredStateHash(s.specs, current)
+	if err != nil {
+		return nil, fmt.Errorf("iac_provider_plan step %q: compute desired hash: %w", s.name, err)
+	}
 
 	// Build the plan from the provider.
 	plan, err := provider.Plan(ctx, s.specs, current)
@@ -177,7 +180,11 @@ func (s *IaCProviderPlanStep) Execute(ctx context.Context, _ *PipelineContext) (
 //     strings — hash is stable across env-value changes.
 //  3. Sort resolved specs by name for stable ordering.
 //  4. SHA-256 over the canonical JSON.
-func computeDesiredStateHash(desired []interfaces.ResourceSpec, current []interfaces.ResourceState) string {
+//
+// An error is returned if marshalling the resolved specs fails. Callers MUST
+// treat this as a hard failure — a constant fallback would bypass the tamper/drift
+// guard.
+func computeDesiredStateHash(desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (string, error) {
 	// Step 1: build syncedOutputs from current state.
 	syncedOutputs := make(map[string]map[string]any, len(current))
 	for i := range current {
@@ -208,13 +215,15 @@ func computeDesiredStateHash(desired []interfaces.ResourceSpec, current []interf
 		return resolved[i].Name < resolved[j].Name
 	})
 
-	// Step 4: SHA-256 over the canonical JSON.
+	// Step 4: SHA-256 over the canonical JSON. A marshal error here is a hard
+	// failure — returning a constant fallback would silently match across plan and
+	// apply and bypass the tamper/drift guard.
 	data, err := json.Marshal(resolved)
 	if err != nil {
-		return "hash-error"
+		return "", fmt.Errorf("marshal resolved specs: %w", err)
 	}
 	sum := sha256.Sum256(data)
-	return fmt.Sprintf("%x", sum)
+	return fmt.Sprintf("%x", sum), nil
 }
 
 // statusesToResourceStates converts []interfaces.ResourceStatus to

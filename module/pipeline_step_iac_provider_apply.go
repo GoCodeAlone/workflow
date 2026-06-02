@@ -74,7 +74,10 @@ func (s *IaCProviderApplyStep) Execute(ctx context.Context, _ *PipelineContext) 
 		return nil, fmt.Errorf("iac_provider_apply step %q: Status: %w", s.name, err)
 	}
 	current := statusesToResourceStates(statuses)
-	recomputedHash := computeDesiredStateHash(s.specs, current)
+	recomputedHash, err := computeDesiredStateHash(s.specs, current)
+	if err != nil {
+		return nil, fmt.Errorf("iac_provider_apply step %q: compute desired hash: %w", s.name, err)
+	}
 
 	// Phase 2: guard — reject if hashes diverge (state changed or plan tampered).
 	if recomputedHash != s.submittedHash {
