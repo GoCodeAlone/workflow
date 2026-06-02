@@ -141,3 +141,78 @@ func TestIaCProviderPlanStep_Factory_RequiresProvider(t *testing.T) {
 		t.Fatal("expected error when 'provider' missing")
 	}
 }
+
+// ─── specs_from tests ─────────────────────────────────────────────────────────
+
+// TestIaCProviderPlan_SpecsFromContext verifies that when specs_from is set, the
+// step resolves specs from the pipeline context (StepOutputs) at Execute time and
+// returns a valid desired_hash in its output.
+func TestIaCProviderPlan_SpecsFromContext(t *testing.T) {
+	app := module.NewMockApplication()
+	provider := makePlanProvider(t)
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderPlanStepFactory()
+	// No static specs — specs_from points into StepOutputs.
+	step, err := factory("plan-step", map[string]any{
+		"provider":   "my-provider",
+		"specs_from": "steps.parse-request.body.specs",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	// Build a PipelineContext whose StepOutputs["parse-request"]["body"]["specs"]
+	// contains one resource spec with a secret:// ref in its config.
+	pc := &module.PipelineContext{
+		StepOutputs: map[string]map[string]any{
+			"parse-request": {
+				"body": map[string]any{
+					"specs": []any{
+						map[string]any{
+							"name": "vault-db",
+							"type": "infra.database",
+							"config": map[string]any{
+								"password": "secret://vault/x",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	hash, ok := result.Output["desired_hash"].(string)
+	if !ok || hash == "" {
+		t.Errorf("expected non-empty desired_hash, got %v", result.Output["desired_hash"])
+	}
+	if result.Output["plan"] == nil {
+		t.Error("expected plan in output, got nil")
+	}
+}
+
+// TestIaCProviderPlan_SpecsFromAndStatic_FactoryError verifies that setting both
+// specs and specs_from is rejected at factory time (mutually exclusive).
+func TestIaCProviderPlan_SpecsFromAndStatic_FactoryError(t *testing.T) {
+	factory := module.NewIaCProviderPlanStepFactory()
+	_, err := factory("plan-step", map[string]any{
+		"provider":   "my-provider",
+		"specs_from": "steps.parse-request.body.specs",
+		"specs": []any{
+			map[string]any{"name": "my-db", "type": "infra.database"},
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected factory error when both specs and specs_from are set")
+	}
+	if !containsString(err.Error(), "mutually exclusive") {
+		t.Errorf("expected 'mutually exclusive' error, got: %v", err)
+	}
+}
