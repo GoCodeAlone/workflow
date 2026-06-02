@@ -3,7 +3,7 @@ module github.com/GoCodeAlone/workflow
 go 1.26.0
 
 require (
-	charm.land/bubbles/v2 v2.0.0
+	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.2
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/GoCodeAlone/go-plugin v1.7.0
