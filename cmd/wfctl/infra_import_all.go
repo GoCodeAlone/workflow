@@ -227,8 +227,16 @@ func runInfraImportAllWithDeps(ctx context.Context, provider interfaces.IaCProvi
 // for ProviderID resolution + AppliedConfig hashing + timestamp normalization
 // so the synthesized state matches the single-resource import path exactly.
 func buildResourceStateFromImport(zoneName, cloudID, resourceType, providerType string, imported *interfaces.ResourceState) (interfaces.ResourceState, error) {
+	// Prefix the sanitized zone name with the resource type so that importing
+	// two different types (e.g. infra.dns and infra.dns_delegation) for the
+	// same domain produces DISTINCT IDs and therefore distinct on-disk
+	// filenames.  sanitizeStateID maps "/" → "_", so
+	//   "infra.dns/example-com"           → infra.dns_example-com.json
+	//   "infra.dns_delegation/example-com" → infra.dns_delegation_example-com.json
+	// ProviderID stays as the bare cloudID (domain) so record.FromResourceStates
+	// can group both types into a single portfolio snapshot by (Provider, Domain).
 	spec := interfaces.ResourceSpec{
-		Name: sanitizeImportedZoneName(zoneName),
+		Name: resourceType + "/" + sanitizeImportedZoneName(zoneName),
 		Type: resourceType,
 	}
 	return resourceStateFromImportedState(spec, providerType, imported, cloudID)
