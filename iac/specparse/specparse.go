@@ -14,7 +14,7 @@ import (
 
 // ParseResourceSpecs converts a raw config value ([]any of map[string]any)
 // into []interfaces.ResourceSpec. A nil raw value is allowed and returns a
-// nil slice. Secret:// refs in config values are preserved verbatim.
+// nil slice. secret:// refs in config values are preserved verbatim.
 func ParseResourceSpecs(raw any) ([]interfaces.ResourceSpec, error) {
 	if raw == nil {
 		return nil, nil

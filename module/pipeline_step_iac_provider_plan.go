@@ -53,8 +53,8 @@ func NewIaCProviderPlanStepFactory() StepFactory {
 }
 
 // parseResourceSpecs converts a raw config value ([]any of map[string]any) into
-// []interfaces.ResourceSpec. A nil or missing "specs" key is allowed (returns empty
-// slice) for providers that derive specs internally.
+// []interfaces.ResourceSpec. A nil or missing "specs" key is allowed (returns a
+// nil slice) for providers that derive specs internally.
 // Thin wrapper around specparse.ParseResourceSpecs; kept private so call sites
 // in iac_provider_plan and iac_provider_apply are unchanged.
 func parseResourceSpecs(raw any) ([]interfaces.ResourceSpec, error) {

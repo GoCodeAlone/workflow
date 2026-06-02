@@ -3,7 +3,7 @@
 //
 // SpecToYAML is the inverse of specparse.ParseResourceSpecs: it emits the
 // same field names ("name", "type", "config", "size", "depends_on", "hints")
-// so that a re-parse round-trips without loss. Secret:// references in Config
+// so that a re-parse round-trips without loss. secret:// references in Config
 // values are emitted verbatim — no expansion is performed.
 package specgen
 
@@ -15,7 +15,7 @@ import (
 // SpecToYAML marshals specs to YAML in the resource-spec schema.
 // Each spec becomes a mapping with fields name, type, size (omitted when
 // empty), config (omitted when nil), depends_on (omitted when empty), and
-// hints (omitted when nil, with empty subfields omitted). Secret:// refs
+// hints (omitted when nil, with empty subfields omitted). secret:// refs
 // survive verbatim.
 func SpecToYAML(specs []interfaces.ResourceSpec) ([]byte, error) {
 	items := make([]map[string]any, 0, len(specs))
