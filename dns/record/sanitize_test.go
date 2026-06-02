@@ -324,6 +324,85 @@ func TestSanitizePreservesExistingExampleIPs(t *testing.T) {
 	}
 }
 
+// TestSanitizeStripsUnknownAuthorityKeys pins that Sanitize removes any key
+// from Snapshot.Authority that is NOT in the allow-list
+// {registrar_nameservers, live_nameservers}, while leaving allowed keys intact.
+// A nil Authority must not panic, and Records sanitization must still work.
+func TestSanitizeStripsUnknownAuthorityKeys(t *testing.T) {
+	// Snapshot with a non-nil Authority containing both allowed and disallowed keys.
+	p := record.Portfolio{
+		Schema: record.SchemaV1,
+		Snapshots: []record.Snapshot{
+			{
+				Provider: "digitalocean",
+				Domain:   "example.com",
+				Authority: map[string]any{
+					"registrar_nameservers": []any{"ns1.x"},
+					"live_nameservers":      []any{"ns2.x"},
+					"secret_token":          "leak",
+					"domain_id":             "12345",
+				},
+				Records: []record.Record{
+					// A public IP that should be redacted (records pass still works).
+					{Type: "A", Name: "@", Value: "8.8.8.8", TTL: 300},
+				},
+			},
+			{
+				// Snapshot with nil Authority — must not panic.
+				Provider: "cloudflare",
+				Domain:   "other.com",
+				Records:  []record.Record{},
+			},
+		},
+	}
+
+	record.Sanitize(&p)
+
+	auth := p.Snapshots[0].Authority
+
+	// Allowed keys must remain, values deep-equal to input.
+	rns, ok := auth["registrar_nameservers"]
+	if !ok {
+		t.Error("registrar_nameservers was removed; it must remain")
+	} else {
+		wantRNS := []any{"ns1.x"}
+		got, _ := rns.([]any)
+		if len(got) != 1 || got[0] != wantRNS[0] {
+			t.Errorf("registrar_nameservers = %v; want %v", got, wantRNS)
+		}
+	}
+
+	lns, ok := auth["live_nameservers"]
+	if !ok {
+		t.Error("live_nameservers was removed; it must remain")
+	} else {
+		wantLNS := []any{"ns2.x"}
+		got, _ := lns.([]any)
+		if len(got) != 1 || got[0] != wantLNS[0] {
+			t.Errorf("live_nameservers = %v; want %v", got, wantLNS)
+		}
+	}
+
+	// Disallowed keys must be removed.
+	if _, found := auth["secret_token"]; found {
+		t.Error("secret_token was NOT removed; it must be stripped by Sanitize")
+	}
+	if _, found := auth["domain_id"]; found {
+		t.Error("domain_id was NOT removed; it must be stripped by Sanitize")
+	}
+
+	// Nil Authority on second snapshot must not panic (verified by reaching here).
+
+	// Records sanitization still works: public IP was redacted.
+	gotIP := p.Snapshots[0].Records[0].Value
+	if gotIP == "8.8.8.8" {
+		t.Error("public IP 8.8.8.8 was NOT redacted; Records sanitization must still run")
+	}
+	if !isExampleIP(gotIP) {
+		t.Errorf("after Sanitize, A record value = %q; want an RFC-5737 example IP", gotIP)
+	}
+}
+
 // isExampleIP returns true if the IP is in an RFC-5737 documentation range.
 func isExampleIP(ip string) bool {
 	return strings.HasPrefix(ip, "192.0.2.") ||
