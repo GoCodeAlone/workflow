@@ -43,7 +43,7 @@ func runPluginRegistrySync(args []string) error {
 	fs := flag.NewFlagSet("plugin registry-sync", flag.ContinueOnError)
 	fix := fs.Bool("fix", false, "Apply changes (default: dry-run)")
 	pluginFilter := fs.String("plugin", "", "Restrict to single plugin directory name")
-	verifyCaps := fs.Bool("verify-capabilities", false, "Spawn binary + diff capabilities (registry-side; slow; not yet implemented)")
+	verifyCaps := fs.Bool("verify-capabilities", false, "Spawn binary + diff capabilities (registry-side; slow)")
 	registryDir := fs.String("registry-dir", ".", "Path to a workflow-registry checkout")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl plugin registry-sync [options]
