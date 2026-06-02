@@ -587,6 +587,16 @@ var iacProviderRequiredServiceName = pb.IaCProviderRequired_ServiceDesc.ServiceN
 // advertisesIaCProviderRequiredService reports whether the adapter's
 // ContractRegistry carries a CONTRACT_KIND_SERVICE descriptor for the
 // IaCProviderRequired service. Mirrors advertisesIaCStateBackendService.
+//
+// diskManifest fallback rationale: the ContractRegistry is the live, authoritative
+// source for service advertisement. The diskManifest.IaCServices fallback is
+// intentionally permissive — it enables wiring when GetContractRegistry returned
+// Unimplemented (strict-cutover IaC plugins). This is unlike state-backend
+// detection (which fails loudly when the registry says NO but the manifest says
+// YES) because IaC providers are registered as a service in the DI graph, not
+// gated by a per-RPC live cross-check. The contract: if diskManifest says the
+// plugin serves IaCProviderRequired, we trust it at wiring time and let the
+// actual gRPC calls fail loudly at runtime if the service isn't there.
 func (a *ExternalPluginAdapter) advertisesIaCProviderRequiredService() bool {
 	if a.contractRegistry == nil {
 		return false
@@ -601,8 +611,8 @@ func (a *ExternalPluginAdapter) advertisesIaCProviderRequiredService() bool {
 	}
 	// Also check diskManifest.IaCServices as a fallback — the plugin may declare
 	// the service there without advertising it in the ContractRegistry (e.g. when
-	// GetContractRegistry returned Unimplemented). This mirrors the check in
-	// IaCStateBackendClients which cross-checks against diskManifest.
+	// GetContractRegistry returned Unimplemented). See the fallback rationale in
+	// the doc comment above.
 	if a.diskManifest != nil {
 		for _, svc := range a.diskManifest.IaCServices {
 			if svc == iacProviderRequiredServiceName {
@@ -611,6 +621,35 @@ func (a *ExternalPluginAdapter) advertisesIaCProviderRequiredService() bool {
 		}
 	}
 	return false
+}
+
+// advertisedOptionalIaCServices returns the set of optional IaC service names
+// that the plugin's ContractRegistry has explicitly advertised. These are the
+// names passed to providerclient.New so it can gate optional gRPC client
+// construction on advertisement (mirroring newTypedIaCAdapter's registered map).
+//
+// Only services from the ContractRegistry are included — diskManifest is not
+// consulted for optional services because the optional-service guard is
+// advertisement-only (no fallback); an unadvertised optional service simply
+// means the capability is absent.
+func (a *ExternalPluginAdapter) advertisedOptionalIaCServices() map[string]bool {
+	out := make(map[string]bool)
+	if a.contractRegistry == nil {
+		return out
+	}
+	for _, d := range a.contractRegistry.Contracts {
+		if d == nil {
+			continue
+		}
+		if d.Kind != pb.ContractKind_CONTRACT_KIND_SERVICE {
+			continue
+		}
+		switch d.ServiceName {
+		case providerclient.IaCServiceRegionLister, providerclient.IaCServiceDriftDetector:
+			out[d.ServiceName] = true
+		}
+	}
+	return out
 }
 
 // WiringHooks returns a WiringHook that registers the plugin as an
@@ -625,6 +664,13 @@ func (a *ExternalPluginAdapter) advertisesIaCProviderRequiredService() bool {
 //
 // If the plugin does not advertise IaCProviderRequired this method returns nil
 // (no wiring needed — not an iac.provider plugin).
+//
+// Optional services (IaCProviderRegionLister, IaCProviderDriftDetector) are
+// collected from the ContractRegistry and forwarded to providerclient.New.
+// Optional gRPC clients are constructed only for advertised services, so the
+// adapter's capability accessors (RegionLister(), DriftDetector()) return nil
+// for unadvertised services — ensuring catalog steps' static-fallback paths
+// remain reachable.
 func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
 	if !a.advertisesIaCProviderRequiredService() {
 		return nil
@@ -634,6 +680,12 @@ func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
 	// guard handles that.
 	name := a.name
 	conn := a.Conn()
+	// Collect optional service advertisements from the ContractRegistry now
+	// (before the hook closure runs) so the providerclient.New call inside the
+	// hook receives a stable snapshot. advertisedOptionalIaCServices never
+	// consults diskManifest — only ContractRegistry entries count for optional
+	// service gating.
+	optionalServices := a.advertisedOptionalIaCServices()
 	return []plugin.WiringHook{
 		{
 			// Name follows the convention "<plugin>-iac-provider-registration".
@@ -646,7 +698,7 @@ func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
 				if conn == nil {
 					return fmt.Errorf("plugin %q advertises IaCProviderRequired but has no gRPC connection", name)
 				}
-				adapter := providerclient.New(conn)
+				adapter := providerclient.New(conn, optionalServices)
 				if err := app.RegisterService(name, adapter); err != nil {
 					return fmt.Errorf("plugin %q: register IaCProvider service: %w", name, err)
 				}

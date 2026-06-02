@@ -8,7 +8,7 @@
 //
 // Usage (via WiringHook in plugin/external/adapter.go):
 //
-//	adapter := providerclient.New(conn)
+//	adapter := providerclient.New(conn, advertisedServices)
 //	app.RegisterService(moduleName, adapter)
 //
 // Steps resolve the provider via:
@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -31,30 +32,179 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Adapter wraps the pb.IaCProviderRequired gRPC client (and optional
-// pb.IaCProviderRegionListerClient) as interfaces.IaCProvider +
-// interfaces.IaCProviderRegionLister. The conn-backed optional clients are
-// always constructed: the gRPC channel multiplexes them cheaply, and the
-// optional-service guard is at the plugin's server side (Unimplemented).
+// Fully-qualified gRPC service names for optional IaC services. These mirror
+// the constants in cmd/wfctl/iac_typed_adapter.go and are sourced from the
+// generated proto ServiceDesc so they cannot drift. The WiringHook in
+// plugin/external/adapter.go passes the advertised set here; optional gRPC
+// clients are constructed only when the corresponding name is present.
+const (
+	// IaCServiceRegionLister is the gRPC service name for the optional
+	// IaCProviderRegionLister service.
+	IaCServiceRegionLister = "workflow.plugin.external.iac.IaCProviderRegionLister"
+	// IaCServiceDriftDetector is the gRPC service name for the optional
+	// IaCProviderDriftDetector service.
+	IaCServiceDriftDetector = "workflow.plugin.external.iac.IaCProviderDriftDetector"
+)
+
+// RegionListerProvider is a capability-discovery interface implemented by
+// *Adapter when the plugin advertised IaCProviderRegionLister. Steps that want
+// to prefer provider-sourced region lists type-assert the registered
+// interfaces.IaCProvider to RegionListerProvider and call RegionLister().
+// A nil return from RegionLister() means the plugin did not advertise the
+// service — the step MUST fall back to its static catalog.
+type RegionListerProvider interface {
+	// RegionLister returns the region-lister capability object, or nil when
+	// the plugin did not advertise IaCProviderRegionLister.
+	RegionLister() interfaces.IaCProviderRegionLister
+}
+
+// driftDetectorAdapter is the value returned by DriftDetector() when the
+// plugin advertises the IaCProviderDriftDetector service. It wraps the gRPC
+// client and satisfies interfaces.DriftConfigDetector so consumers can route
+// DetectDriftWithSpecs through the optional service.
+//
+// DetectDrift (existence-only) is routed through the required IaCProvider
+// interface on *Adapter. The full config-aware drift (DetectDriftWithSpecs)
+// lives here, mirroring how typedIaCAdapter routes driftCfg.
+type driftDetectorAdapter struct {
+	client pb.IaCProviderDriftDetectorClient
+}
+
+// DetectDriftWithSpecs calls the optional IaCProviderDriftDetector.DetectDrift
+// gRPC (existence-only variant routed through the optional service). Steps that
+// need the config-aware path use the DriftConfigDetector interface accessor.
+func (d *driftDetectorAdapter) DetectDriftWithSpecs(ctx context.Context, resources []interfaces.ResourceRef, specs map[string]interfaces.ResourceSpec) ([]interfaces.DriftResult, error) {
+	// Build the per-ref spec map for the RPC. Absent specs for a ref instruct
+	// the provider to fall back to existence-only behavior for that ref.
+	pbSpecs := make(map[string]*pb.ResourceSpec, len(specs))
+	for k, v := range specs {
+		ps, err := specToPB(v)
+		if err != nil {
+			return nil, fmt.Errorf("providerclient: encode DetectDriftWithSpecs specs[%s]: %w", k, err)
+		}
+		pbSpecs[k] = ps
+	}
+	resp, err := d.client.DetectDriftWithSpecs(ctx, &pb.DetectDriftWithSpecsRequest{
+		Refs:  refsToPB(resources),
+		Specs: pbSpecs,
+	})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return nil, fmt.Errorf("%w: DetectDriftWithSpecs not implemented by plugin",
+				interfaces.ErrProviderMethodUnimplemented)
+		}
+		return nil, err
+	}
+	return driftsFromPB(resp.GetDrifts())
+}
+
+// DriftDetectorProvider is a capability-discovery interface implemented by
+// *Adapter when the plugin advertised IaCProviderDriftDetector. Steps that
+// need config-aware drift detection type-assert the registered
+// interfaces.IaCProvider to DriftDetectorProvider and call DriftDetector().
+// A nil return means the plugin did not advertise the service.
+type DriftDetectorProvider interface {
+	// DriftDetector returns the drift-detector capability object (satisfying
+	// interfaces.DriftConfigDetector), or nil when the plugin did not advertise
+	// IaCProviderDriftDetector.
+	DriftDetector() interfaces.DriftConfigDetector
+}
+
+// Adapter wraps the pb.IaCProviderRequired gRPC client (and advertisement-gated
+// optional clients) as interfaces.IaCProvider. Optional sub-interfaces
+// (IaCProviderRegionLister, DriftConfigDetector) are exposed via typed accessors
+// (RegionLister(), DriftDetector()) that return nil when the plugin did not
+// advertise the corresponding gRPC service.
+//
+// The critical invariant: *Adapter does NOT unconditionally satisfy
+// interfaces.IaCProviderRegionLister. Callers MUST type-assert to
+// RegionListerProvider and call RegionLister() to discover the capability, then
+// use the returned object. This mirrors typedIaCAdapter which returns nil
+// optional clients for unadvertised services — enabling catalog steps'
+// "static fallback if unadvertised" path to fire correctly.
 //
 // Compile-time guards are in adapter_test.go.
 type Adapter struct {
 	conn         grpc.ClientConnInterface
 	required     pb.IaCProviderRequiredClient
-	regionLister pb.IaCProviderRegionListerClient
+	regionLister *regionListerImpl     // nil when IaCServiceRegionLister not advertised
+	drift        *driftDetectorAdapter // nil when IaCServiceDriftDetector not advertised
+
+	// Capabilities cache. Populated on first call to fetchCapabilities via
+	// capsOnce; reused for the adapter's lifetime (capabilities don't change
+	// during a session). Mirrors typedIaCAdapter.cachedCaps + capsFetch.
+	capsOnce   sync.Once
+	cachedCaps *pb.CapabilitiesResponse
+	capsErr    error
 }
 
-// New constructs an Adapter over conn. Both the required and optional
-// region-lister clients are constructed eagerly against the shared conn;
-// the connection multiplexes them at zero marginal cost. If the plugin
-// does not serve the optional service, calls to ListRegions return
-// interfaces.ErrProviderMethodUnimplemented.
-func New(conn grpc.ClientConnInterface) *Adapter {
-	return &Adapter{
-		conn:         conn,
-		required:     pb.NewIaCProviderRequiredClient(conn),
-		regionLister: pb.NewIaCProviderRegionListerClient(conn),
+// regionListerImpl wraps pb.IaCProviderRegionListerClient and satisfies
+// interfaces.IaCProviderRegionLister. It is the concrete type returned by
+// Adapter.RegionLister().
+type regionListerImpl struct {
+	client pb.IaCProviderRegionListerClient
+}
+
+func (r *regionListerImpl) ListRegions(ctx context.Context, env string) ([]string, error) {
+	resp, err := r.client.ListRegions(ctx, &pb.ListRegionsRequest{EnvName: env})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return nil, fmt.Errorf("%w: IaCProviderRegionLister not registered by plugin",
+				interfaces.ErrProviderMethodUnimplemented)
+		}
+		return nil, err
 	}
+	regions := make([]string, 0, len(resp.GetRegions()))
+	for _, r := range resp.GetRegions() {
+		if name := r.GetName(); name != "" {
+			regions = append(regions, name)
+		}
+	}
+	return regions, nil
+}
+
+// New constructs an Adapter over conn. Optional gRPC clients (RegionLister,
+// DriftDetector) are constructed ONLY when the matching service name appears in
+// advertisedServices. Passing nil or an empty map is valid — the adapter
+// exposes only the required surface in that case.
+//
+// advertisedServices should be populated from the plugin's ContractRegistry
+// (see plugin/external/adapter.go WiringHooks). The service-name constants
+// IaCServiceRegionLister and IaCServiceDriftDetector are provided for the
+// caller's convenience.
+func New(conn grpc.ClientConnInterface, advertisedServices map[string]bool) *Adapter {
+	a := &Adapter{
+		conn:     conn,
+		required: pb.NewIaCProviderRequiredClient(conn),
+	}
+	if advertisedServices[IaCServiceRegionLister] {
+		a.regionLister = &regionListerImpl{client: pb.NewIaCProviderRegionListerClient(conn)}
+	}
+	if advertisedServices[IaCServiceDriftDetector] {
+		a.drift = &driftDetectorAdapter{client: pb.NewIaCProviderDriftDetectorClient(conn)}
+	}
+	return a
+}
+
+// RegionLister implements RegionListerProvider. Returns the region-lister
+// capability object when the plugin advertised IaCProviderRegionLister, or nil
+// when it did not. Callers MUST nil-check before using.
+func (a *Adapter) RegionLister() interfaces.IaCProviderRegionLister {
+	if a.regionLister == nil {
+		return nil
+	}
+	return a.regionLister
+}
+
+// DriftDetector implements DriftDetectorProvider. Returns the drift-detector
+// capability object (satisfying interfaces.DriftConfigDetector) when the plugin
+// advertised IaCProviderDriftDetector, or nil when it did not. Callers MUST
+// nil-check before using.
+func (a *Adapter) DriftDetector() interfaces.DriftConfigDetector {
+	if a.drift == nil {
+		return nil
+	}
+	return a.drift
 }
 
 // ─── interfaces.IaCProvider ──────────────────────────────────────────────────
@@ -89,10 +239,27 @@ func (a *Adapter) Initialize(ctx context.Context, cfg map[string]any) error {
 	return err
 }
 
-// Capabilities calls the IaCProviderRequired.Capabilities RPC and translates
-// the response to []interfaces.IaCCapabilityDeclaration.
+// fetchCapabilities returns the plugin's CapabilitiesResponse, caching the
+// first result for the adapter's lifetime via sync.Once. RPC errors are also
+// cached so repeated accesses don't repeatedly fail against an unreachable
+// plugin. Capabilities are advertised at plugin startup and don't change
+// during a session; caching is correct and cheap. Mirrors typedIaCAdapter.
+func (a *Adapter) fetchCapabilities() (*pb.CapabilitiesResponse, error) {
+	a.capsOnce.Do(func() {
+		resp, err := a.required.Capabilities(context.Background(), &pb.CapabilitiesRequest{})
+		if err != nil {
+			a.capsErr = err
+			return
+		}
+		a.cachedCaps = resp
+	})
+	return a.cachedCaps, a.capsErr
+}
+
+// Capabilities calls the IaCProviderRequired.Capabilities RPC (cached) and
+// translates the response to []interfaces.IaCCapabilityDeclaration.
 func (a *Adapter) Capabilities() []interfaces.IaCCapabilityDeclaration {
-	resp, err := a.required.Capabilities(context.Background(), &pb.CapabilitiesRequest{})
+	resp, err := a.fetchCapabilities()
 	if err != nil {
 		return nil
 	}
@@ -142,13 +309,24 @@ func (a *Adapter) Status(ctx context.Context, resources []interfaces.ResourceRef
 	return statusesFromPB(resp.GetStatuses())
 }
 
-// DetectDrift calls IaCProviderRequired.Status to satisfy the IaCProvider interface.
-// This is a stub implementation — the required interface needs DetectDrift, so we
-// surface a not-implemented error. Full drift detection is available via the
-// IaCProviderDriftDetector optional service, which is not in scope for PR-1.
+// DetectDrift routes through the optional IaCProviderDriftDetector gRPC service
+// when the plugin advertised it (advertisement-gated in New). Falls back to
+// ErrProviderMethodUnimplemented when the detector was not advertised — callers
+// use errors.Is to skip or fall back to static drift logic.
 func (a *Adapter) DetectDrift(ctx context.Context, resources []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
-	return nil, fmt.Errorf("%w: DetectDrift optional service not wired in PR-1 adapter",
-		interfaces.ErrProviderMethodUnimplemented)
+	if a.drift == nil {
+		return nil, fmt.Errorf("%w: IaCProviderDriftDetector not advertised by plugin",
+			interfaces.ErrProviderMethodUnimplemented)
+	}
+	resp, err := a.drift.client.DetectDrift(ctx, &pb.DetectDriftRequest{Refs: refsToPB(resources)})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return nil, fmt.Errorf("%w: IaCProviderDriftDetector.DetectDrift not implemented",
+				interfaces.ErrProviderMethodUnimplemented)
+		}
+		return nil, err
+	}
+	return driftsFromPB(resp.GetDrifts())
 }
 
 // Import calls IaCProviderRequired.Import.
@@ -181,10 +359,12 @@ func (a *Adapter) ResourceDriver(resourceType string) (interfaces.ResourceDriver
 		interfaces.ErrProviderMethodUnimplemented)
 }
 
-// SupportedCanonicalKeys returns the keys from Capabilities, or the global
-// canonical key set if the plugin doesn't declare a subset.
+// SupportedCanonicalKeys returns the canonical keys from the cached
+// CapabilitiesResponse, or the global set when the plugin doesn't declare a
+// subset. Reuses fetchCapabilities so the Capabilities RPC is called at most
+// once per adapter lifetime (per ADR-0029 / typedIaCAdapter precedent).
 func (a *Adapter) SupportedCanonicalKeys() []string {
-	resp, err := a.required.Capabilities(context.Background(), &pb.CapabilitiesRequest{})
+	resp, err := a.fetchCapabilities()
 	if err == nil && resp != nil {
 		if keys := resp.GetCanonicalKeys(); len(keys) > 0 {
 			return append([]string(nil), keys...)
@@ -194,6 +374,9 @@ func (a *Adapter) SupportedCanonicalKeys() []string {
 }
 
 // BootstrapStateBackend calls IaCProviderRequired.BootstrapStateBackend.
+// All three result fields (Bucket, Region, Endpoint) are mapped from the proto
+// response — Endpoint carries the S3-compatible API URL (e.g. DO Spaces endpoint)
+// that was silently dropped in the original implementation.
 func (a *Adapter) BootstrapStateBackend(ctx context.Context, cfg map[string]any) (*interfaces.BootstrapResult, error) {
 	cfgJSON, err := marshalJSONMap(cfg)
 	if err != nil {
@@ -208,9 +391,10 @@ func (a *Adapter) BootstrapStateBackend(ctx context.Context, cfg map[string]any)
 		return nil, nil
 	}
 	return &interfaces.BootstrapResult{
-		Bucket:  r.GetBucket(),
-		Region:  r.GetRegion(),
-		EnvVars: copyStringMap(r.GetEnvVars()),
+		Bucket:   r.GetBucket(),
+		Region:   r.GetRegion(),
+		Endpoint: r.GetEndpoint(),
+		EnvVars:  copyStringMap(r.GetEnvVars()),
 	}, nil
 }
 
@@ -220,37 +404,13 @@ func (a *Adapter) Close() error {
 	return nil
 }
 
-// ─── interfaces.IaCProviderRegionLister ─────────────────────────────────────
-
-// ListRegions calls the IaCProviderRegionLister.ListRegions RPC and returns
-// region identifiers sorted by the server. If the plugin does not implement
-// the service (gRPC Unimplemented) an ErrProviderMethodUnimplemented is returned
-// so callers can fall back to a static catalog.
-func (a *Adapter) ListRegions(ctx context.Context, env string) ([]string, error) {
-	resp, err := a.regionLister.ListRegions(ctx, &pb.ListRegionsRequest{EnvName: env})
-	if err != nil {
-		if status.Code(err) == codes.Unimplemented {
-			return nil, fmt.Errorf("%w: IaCProviderRegionLister not registered by plugin",
-				interfaces.ErrProviderMethodUnimplemented)
-		}
-		return nil, err
-	}
-	regions := make([]string, 0, len(resp.GetRegions()))
-	for _, r := range resp.GetRegions() {
-		if name := r.GetName(); name != "" {
-			regions = append(regions, name)
-		}
-	}
-	return regions, nil
-}
-
 // ─── Proto↔interfaces conversion helpers ────────────────────────────────────
 //
 // These mirror the same-named functions in cmd/wfctl/iac_typed_adapter.go
 // (package main, not importable by core). They are intentionally minimal —
 // only the subset required by the PR-1 methods above (Plan, Status, Destroy,
-// ListRegions). Additional converters can be added as PR-2 (step impl) needs
-// them. Do NOT import cmd/wfctl.
+// DetectDrift, ListRegions). Additional converters can be added as PR-2 (step
+// impl) needs them. Do NOT import cmd/wfctl.
 
 func marshalJSONMap(m map[string]any) ([]byte, error) {
 	if m == nil {
@@ -555,4 +715,42 @@ func planFromPB(p *pb.IaCPlan) (*interfaces.IaCPlan, error) {
 		SchemaVersion: int(p.GetSchemaVersion()),
 		InputSnapshot: copyStringMap(p.GetInputSnapshot()),
 	}, nil
+}
+
+// driftsFromPB translates []*pb.DriftResult to []interfaces.DriftResult.
+func driftsFromPB(drifts []*pb.DriftResult) ([]interfaces.DriftResult, error) {
+	out := make([]interfaces.DriftResult, 0, len(drifts))
+	for _, d := range drifts {
+		expected, err := unmarshalJSONMap(d.GetExpectedJson())
+		if err != nil {
+			return nil, err
+		}
+		actual, err := unmarshalJSONMap(d.GetActualJson())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, interfaces.DriftResult{
+			Name:     d.GetName(),
+			Type:     d.GetType(),
+			Drifted:  d.GetDrifted(),
+			Class:    driftClassFromPB(d.GetClass()),
+			Expected: expected,
+			Actual:   actual,
+			Fields:   append([]string(nil), d.GetFields()...),
+		})
+	}
+	return out, nil
+}
+
+func driftClassFromPB(c pb.DriftClass) interfaces.DriftClass {
+	switch c {
+	case pb.DriftClass_DRIFT_CLASS_IN_SYNC:
+		return interfaces.DriftClassInSync
+	case pb.DriftClass_DRIFT_CLASS_GHOST:
+		return interfaces.DriftClassGhost
+	case pb.DriftClass_DRIFT_CLASS_CONFIG:
+		return interfaces.DriftClassConfig
+	default:
+		return interfaces.DriftClassUnknown
+	}
 }
