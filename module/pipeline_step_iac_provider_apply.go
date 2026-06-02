@@ -51,12 +51,16 @@ func NewIaCProviderApplyStepFactory(applyFn func(ctx context.Context, p interfac
 
 		desiredHashFrom, _ := cfg["desired_hash_from"].(string)
 		submittedHash, _ := cfg["desired_hash"].(string)
-		if desiredHashFrom != "" && submittedHash != "" {
+		// Use key-presence (not value) for the one-of check, mirroring specs/specs_from,
+		// so a config carrying both keys is rejected even if one decodes to null/"".
+		_, hasStaticHash := cfg["desired_hash"]
+		_, hasHashFrom := cfg["desired_hash_from"]
+		if hasHashFrom && hasStaticHash {
 			return nil, fmt.Errorf("iac_provider_apply step %q: 'desired_hash' and 'desired_hash_from' are mutually exclusive", name)
 		}
 		// Require exactly one hash source.
-		if desiredHashFrom == "" && submittedHash == "" {
-			return nil, fmt.Errorf("iac_provider_apply step %q: 'desired_hash' is required", name)
+		if !hasHashFrom && !hasStaticHash {
+			return nil, fmt.Errorf("iac_provider_apply step %q: one of 'desired_hash' or 'desired_hash_from' is required", name)
 		}
 
 		// Parse static specs (skipped when specs_from is set).
