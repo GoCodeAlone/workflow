@@ -184,6 +184,9 @@ func TestPluginRegistrySyncReadme_CheckDetectsDriftWithoutBash(t *testing.T) {
 			t.Fatalf("README missing %q:\n%s", want, text)
 		}
 	}
+	if got := strings.Count(text, "## Schema"); got != 1 {
+		t.Fatalf("README schema section count = %d, want 1:\n%s", got, text)
+	}
 }
 
 func TestPluginRegistrySyncCore_DetectsAndFixesManifestDrift(t *testing.T) {

@@ -242,6 +242,8 @@ func readmePrefix(current string) string {
 		"## External Plugins",
 		"## First-party External Plugins",
 		"## Community and Premium External Plugins",
+		"## Templates",
+		"## Schema",
 	}
 	idx := len(current)
 	for _, h := range headings {
