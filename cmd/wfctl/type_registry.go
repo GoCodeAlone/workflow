@@ -1447,6 +1447,38 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			ConfigKeys: []string{"platform", "resource_id", "state_store"},
 		},
 
+		// platform plugin steps (iac provider — general, provider-agnostic)
+		"step.iac_provider_list": {
+			Type:       "step.iac_provider_list",
+			Plugin:     "platform",
+			ConfigKeys: []string{"provider", "refs"},
+		},
+		"step.iac_provider_catalog": {
+			Type:       "step.iac_provider_catalog",
+			Plugin:     "platform",
+			ConfigKeys: []string{"provider", "env"},
+		},
+		"step.iac_provider_plan": {
+			Type:       "step.iac_provider_plan",
+			Plugin:     "platform",
+			ConfigKeys: []string{"provider", "specs", "env"},
+		},
+		"step.iac_provider_apply": {
+			Type:       "step.iac_provider_apply",
+			Plugin:     "platform",
+			ConfigKeys: []string{"provider", "specs", "desired_hash"},
+		},
+		"step.iac_provider_destroy": {
+			Type:       "step.iac_provider_destroy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"provider", "refs"},
+		},
+		"step.iac_provider_drift": {
+			Type:       "step.iac_provider_drift",
+			Plugin:     "platform",
+			ConfigKeys: []string{"provider", "refs"},
+		},
+
 		// platform plugin steps (dns)
 		"step.dns_plan": {
 			Type:       "step.dns_plan",

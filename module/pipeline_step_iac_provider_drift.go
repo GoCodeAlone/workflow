@@ -66,14 +66,16 @@ func (s *IaCProviderDriftStep) Execute(ctx context.Context, _ *PipelineContext) 
 	}
 
 	// Existence-only drift via the required DetectDrift method.
-	drifts, err := provider.DetectDrift(ctx, s.refs)
-	if err != nil {
+	drifts, driftErr := provider.DetectDrift(ctx, s.refs)
+	if driftErr != nil {
 		// ErrProviderMethodUnimplemented from the required surface means the plugin
-		// wired neither path — surface as unsupported.
-		return &StepResult{Output: map[string]any{
+		// wired neither path — surface as unsupported, not as an error. The step
+		// intentionally swallows the error here and converts it to structured output
+		// so callers can gate on {supported: false} without pipeline failure.
+		return &StepResult{Output: map[string]any{ //nolint:nilerr
 			"provider":  s.provider,
 			"supported": false,
-			"reason":    err.Error(),
+			"reason":    driftErr.Error(),
 		}}, nil
 	}
 	return driftResult(s.provider, drifts, true), nil
