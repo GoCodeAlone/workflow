@@ -368,3 +368,19 @@ type LogCaptureSink interface {
 type LogCaptureProvider interface {
 	CaptureLogs(ctx context.Context, req LogCaptureRequest, sink LogCaptureSink) error
 }
+
+// IaCProviderRegionLister is an OPTIONAL interface that an IaCProvider
+// implementation MAY also satisfy to expose provider-sourced region lists.
+// Callers MUST type-assert against this interface and treat the negative case
+// as a skip (static-catalog fallback) — providers that do not implement it
+// continue to work unchanged. Mirrors the Enumerator/DriftDetector/
+// ProviderValidator optional-interface pattern.
+//
+// ListRegions returns the region identifiers available in the provider for the
+// given environment name (used to scope region lists by env when providers
+// expose env-scoped credentials). An empty env is treated as "all regions".
+// Implementations SHOULD sort the returned slice; callers that need a stable
+// order MUST sort themselves.
+type IaCProviderRegionLister interface {
+	ListRegions(ctx context.Context, env string) ([]string, error)
+}
