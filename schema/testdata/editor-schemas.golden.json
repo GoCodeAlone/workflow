@@ -6013,6 +6013,48 @@
       "description": "Plans infrastructure changes without applying",
       "configFields": []
     },
+    "step.iac_provider_apply": {
+      "type": "step.iac_provider_apply",
+      "label": "IaC Provider Apply",
+      "category": "pipeline",
+      "description": "Two-phase hash-guard apply via IaCProvider service",
+      "configFields": []
+    },
+    "step.iac_provider_catalog": {
+      "type": "step.iac_provider_catalog",
+      "label": "IaC Provider Catalog",
+      "category": "pipeline",
+      "description": "Fetches regions and resource types from IaCProvider service",
+      "configFields": []
+    },
+    "step.iac_provider_destroy": {
+      "type": "step.iac_provider_destroy",
+      "label": "IaC Provider Destroy",
+      "category": "pipeline",
+      "description": "Destroys resources via IaCProvider service",
+      "configFields": []
+    },
+    "step.iac_provider_drift": {
+      "type": "step.iac_provider_drift",
+      "label": "IaC Provider Drift",
+      "category": "pipeline",
+      "description": "Detects drift via IaCProvider service",
+      "configFields": []
+    },
+    "step.iac_provider_list": {
+      "type": "step.iac_provider_list",
+      "label": "IaC Provider List",
+      "category": "pipeline",
+      "description": "Lists resource statuses from IaCProvider service",
+      "configFields": []
+    },
+    "step.iac_provider_plan": {
+      "type": "step.iac_provider_plan",
+      "label": "IaC Provider Plan",
+      "category": "pipeline",
+      "description": "Plans infrastructure changes via IaCProvider service",
+      "configFields": []
+    },
     "step.iac_status": {
       "type": "step.iac_status",
       "label": "IaC Status",

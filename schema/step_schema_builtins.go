@@ -2103,6 +2103,115 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	// ---- IaC Provider List ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_provider_list",
+		Plugin:      "platform",
+		Description: "Lists current resource statuses from an IaCProvider service.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
+			{Key: "refs", Type: FieldTypeArray, Description: "Optional list of resource refs to query; empty queries all"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "provider", Type: "string", Description: "Provider service name"},
+			{Key: "resources", Type: "[]any", Description: "Resource status summaries"},
+			{Key: "count", Type: "number", Description: "Number of resources returned"},
+		},
+	})
+
+	// ---- IaC Provider Catalog ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_provider_catalog",
+		Plugin:      "platform",
+		Description: "Fetches provider regions and supported resource types; falls back to a static region list when the provider does not advertise IaCProviderRegionLister.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
+			{Key: "env", Type: FieldTypeString, Description: "Environment name forwarded to ListRegions for env-scoped region lists"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "provider", Type: "string", Description: "Provider service name"},
+			{Key: "regions", Type: "[]any", Description: "Available region identifiers"},
+			{Key: "types", Type: "[]any", Description: "Supported resource type capability declarations"},
+			{Key: "source", Type: "string", Description: "Region source: live | static | static_fallback_error"},
+		},
+	})
+
+	// ---- IaC Provider Plan ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_provider_plan",
+		Plugin:      "platform",
+		Description: "Plans infrastructure changes against an IaCProvider service; computes a stable desired-state hash using a no-op env resolver.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
+			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs (list of {name, type, config, size})"},
+			{Key: "env", Type: FieldTypeString, Description: "Environment name (reserved; unused by hash computation)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plan", Type: "any", Description: "IaCPlan with DesiredHash set"},
+			{Key: "desired_hash", Type: "string", Description: "SHA-256 hex of canonical desired state"},
+			{Key: "provider", Type: "string", Description: "Provider service name"},
+		},
+	})
+
+	// ---- IaC Provider Apply ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_provider_apply",
+		Plugin:      "platform",
+		Description: "Applies an IaC plan via two-phase hash guard: recomputes DesiredStateHash and rejects with 'plan hash mismatch' when hashes diverge.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
+			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs passed to plan and hash recomputation"},
+			{Key: "desired_hash", Type: FieldTypeString, Description: "Client-submitted hash from the plan step; must match recomputed hash", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "apply_result", Type: "any", Description: "ApplyResult from wfctlhelpers.ApplyPlanWithHooks"},
+			{Key: "desired_hash", Type: "string", Description: "Recomputed desired-state hash"},
+			{Key: "provider", Type: "string", Description: "Provider service name"},
+			{Key: "action_count", Type: "number", Description: "Number of plan actions dispatched"},
+		},
+	})
+
+	// ---- IaC Provider Destroy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_provider_destroy",
+		Plugin:      "platform",
+		Description: "Destroys resources via an IaCProvider service.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
+			{Key: "refs", Type: FieldTypeArray, Description: "Resource refs to destroy (list of {name, type, provider_id})"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "destroyed", Type: "[]any", Description: "Names of destroyed resources"},
+			{Key: "destroy_errors", Type: "[]any", Description: "Per-resource errors if any"},
+			{Key: "provider", Type: "string", Description: "Provider service name"},
+		},
+	})
+
+	// ---- IaC Provider Drift ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_provider_drift",
+		Plugin:      "platform",
+		Description: "Detects drift via an IaCProvider service; uses config-aware DetectDriftWithSpecs when the provider advertises DriftDetectorProvider, else falls back to existence-only DetectDrift.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
+			{Key: "refs", Type: FieldTypeArray, Description: "Resource refs to check (list of {name, type, provider_id})"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "provider", Type: "string", Description: "Provider service name"},
+			{Key: "supported", Type: "boolean", Description: "Whether drift detection is supported"},
+			{Key: "reason", Type: "string", Description: "Why drift detection is unsupported (set only when supported=false)"},
+			{Key: "any_drifted", Type: "boolean", Description: "Whether any resource has drifted"},
+			{Key: "drifts", Type: "[]any", Description: "Per-resource drift results"},
+			{Key: "count", Type: "number", Description: "Number of resources checked"},
+		},
+	})
+
 	// ---- Kubernetes Apply ----
 
 	r.Register(&StepSchema{

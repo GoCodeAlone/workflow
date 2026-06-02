@@ -261,3 +261,43 @@ type fakeEnumeratorAll struct{}
 func (f *fakeEnumeratorAll) EnumerateAll(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
 	return nil, nil
 }
+
+// ─── IaCProviderRegionLister optional interface ───────────────────────────────
+
+// regionListerProvider implements both IaCProvider and IaCProviderRegionLister.
+type regionListerProvider struct{ nonValidatingProvider }
+
+func (r *regionListerProvider) ListRegions(_ context.Context, env string) ([]string, error) {
+	return []string{"us-east-1", "us-west-2"}, nil
+}
+
+// Compile-time assertion: regionListerProvider satisfies IaCProviderRegionLister.
+var _ interfaces.IaCProviderRegionLister = (*regionListerProvider)(nil)
+
+// TestIaCProviderRegionLister_ImplementorSatisfies verifies that a type
+// implementing ListRegions(ctx, env) satisfies the new optional interface.
+func TestIaCProviderRegionLister_ImplementorSatisfies(t *testing.T) {
+	var p interfaces.IaCProvider = &regionListerProvider{}
+
+	rl, ok := p.(interfaces.IaCProviderRegionLister)
+	if !ok {
+		t.Fatalf("regionListerProvider must satisfy IaCProviderRegionLister")
+	}
+	regions, err := rl.ListRegions(context.Background(), "prod")
+	if err != nil {
+		t.Fatalf("ListRegions returned unexpected error: %v", err)
+	}
+	if len(regions) == 0 {
+		t.Errorf("ListRegions returned no regions")
+	}
+}
+
+// TestIaCProviderRegionLister_NonImplementorFails verifies the interface is
+// truly optional: a provider that does NOT implement ListRegions must fail
+// the type-assert so callers can gate accordingly.
+func TestIaCProviderRegionLister_NonImplementorFails(t *testing.T) {
+	var p interfaces.IaCProvider = nonValidatingProvider{}
+	if _, ok := p.(interfaces.IaCProviderRegionLister); ok {
+		t.Errorf("nonValidatingProvider must NOT satisfy IaCProviderRegionLister (interface is optional)")
+	}
+}
