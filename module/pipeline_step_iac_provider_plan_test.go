@@ -141,3 +141,153 @@ func TestIaCProviderPlanStep_Factory_RequiresProvider(t *testing.T) {
 		t.Fatal("expected error when 'provider' missing")
 	}
 }
+
+// ─── specs_from tests ─────────────────────────────────────────────────────────
+
+// TestIaCProviderPlan_SpecsFromContext verifies that when specs_from is set, the
+// step resolves specs from the pipeline context (StepOutputs) at Execute time and
+// returns a valid desired_hash in its output.
+func TestIaCProviderPlan_SpecsFromContext(t *testing.T) {
+	app := module.NewMockApplication()
+	provider := makePlanProvider(t)
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderPlanStepFactory()
+	// No static specs — specs_from points into StepOutputs.
+	step, err := factory("plan-step", map[string]any{
+		"provider":   "my-provider",
+		"specs_from": "steps.parse-request.body.specs",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	// Build a PipelineContext whose StepOutputs["parse-request"]["body"]["specs"]
+	// contains one resource spec with a secret:// ref in its config.
+	pc := &module.PipelineContext{
+		StepOutputs: map[string]map[string]any{
+			"parse-request": {
+				"body": map[string]any{
+					"specs": []any{
+						map[string]any{
+							"name": "vault-db",
+							"type": "infra.database",
+							"config": map[string]any{
+								"password": "secret://vault/x",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	hash, ok := result.Output["desired_hash"].(string)
+	if !ok || hash == "" {
+		t.Errorf("expected non-empty desired_hash, got %v", result.Output["desired_hash"])
+	}
+	if result.Output["plan"] == nil {
+		t.Error("expected plan in output, got nil")
+	}
+}
+
+// TestIaCProviderPlan_SpecsFromAndStatic_FactoryError verifies that setting both
+// specs and specs_from is rejected at factory time (mutually exclusive).
+func TestIaCProviderPlan_SpecsFromAndStatic_FactoryError(t *testing.T) {
+	factory := module.NewIaCProviderPlanStepFactory()
+	_, err := factory("plan-step", map[string]any{
+		"provider":   "my-provider",
+		"specs_from": "steps.parse-request.body.specs",
+		"specs": []any{
+			map[string]any{"name": "my-db", "type": "infra.database"},
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected factory error when both specs and specs_from are set")
+	}
+	if !containsString(err.Error(), "mutually exclusive") {
+		t.Errorf("expected 'mutually exclusive' error, got: %v", err)
+	}
+}
+
+// TestIaCProviderPlan_SpecsFromFailures asserts that the dynamic specs_from path
+// fails cleanly (rather than silently planning over nil/zero specs) when the
+// resolved value is missing, the wrong type, or empty.
+func TestIaCProviderPlan_SpecsFromFailures(t *testing.T) {
+	cases := []struct {
+		name        string
+		stepOutputs map[string]map[string]any
+		wantErrSub  string
+	}{
+		{
+			name:        "path missing from context (request_parse didn't run)",
+			stepOutputs: nil,
+			wantErrSub:  "resolved to empty/zero specs",
+		},
+		{
+			name: "body present but lacks specs key",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {
+					"body": map[string]any{},
+				},
+			},
+			wantErrSub: "resolved to empty/zero specs",
+		},
+		{
+			name: "specs resolves to a non-list scalar",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {
+					"body": map[string]any{
+						"specs": "not-a-list",
+					},
+				},
+			},
+			wantErrSub: "resolve specs_from",
+		},
+		{
+			name: "specs resolves to an empty list",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {
+					"body": map[string]any{
+						"specs": []any{},
+					},
+				},
+			},
+			wantErrSub: "resolved to empty/zero specs",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := module.NewMockApplication()
+			provider := makePlanProvider(t)
+			if err := app.RegisterService("my-provider", provider); err != nil {
+				t.Fatal(err)
+			}
+
+			factory := module.NewIaCProviderPlanStepFactory()
+			step, err := factory("plan-step", map[string]any{
+				"provider":   "my-provider",
+				"specs_from": "steps.parse-request.body.specs",
+			}, app)
+			if err != nil {
+				t.Fatalf("factory error: %v", err)
+			}
+
+			_, err = step.Execute(context.Background(), &module.PipelineContext{StepOutputs: tc.stepOutputs})
+			if err == nil {
+				t.Fatal("expected error, got nil (must not proceed with nil/zero specs)")
+			}
+			if !containsString(err.Error(), tc.wantErrSub) {
+				t.Errorf("expected error containing %q, got: %v", tc.wantErrSub, err)
+			}
+		})
+	}
+}

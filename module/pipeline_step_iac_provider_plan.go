@@ -19,11 +19,12 @@ import (
 // a DesiredStateHash with a NO-OP env resolver, builds a plan, and returns the
 // plan JSON plus the stable hash.
 type IaCProviderPlanStep struct {
-	name     string
-	provider string
-	env      string
-	specs    []interfaces.ResourceSpec
-	app      modular.Application
+	name      string
+	provider  string
+	env       string
+	specs     []interfaces.ResourceSpec
+	specsFrom string // dotted context path; mutually exclusive with specs
+	app       modular.Application
 }
 
 // NewIaCProviderPlanStepFactory returns a StepFactory for step.iac_provider_plan.
@@ -35,19 +36,31 @@ func NewIaCProviderPlanStepFactory() StepFactory {
 		}
 		env, _ := cfg["env"].(string)
 
-		// Parse specs from config. Each spec is a map[string]any with at least
-		// name and type fields; config sub-map is optional.
-		specs, err := parseResourceSpecs(cfg["specs"])
-		if err != nil {
-			return nil, fmt.Errorf("iac_provider_plan step %q: parse specs: %w", name, err)
+		specsFrom, _ := cfg["specs_from"].(string)
+		_, hasStaticSpecs := cfg["specs"]
+
+		// specs and specs_from are mutually exclusive.
+		if specsFrom != "" && hasStaticSpecs {
+			return nil, fmt.Errorf("iac_provider_plan step %q: 'specs' and 'specs_from' are mutually exclusive", name)
+		}
+
+		// Parse static specs from config (nil-safe; skipped when specs_from is set).
+		var specs []interfaces.ResourceSpec
+		if hasStaticSpecs {
+			var err error
+			specs, err = parseResourceSpecs(cfg["specs"])
+			if err != nil {
+				return nil, fmt.Errorf("iac_provider_plan step %q: parse specs: %w", name, err)
+			}
 		}
 
 		return &IaCProviderPlanStep{
-			name:     name,
-			provider: providerName,
-			env:      env,
-			specs:    specs,
-			app:      app,
+			name:      name,
+			provider:  providerName,
+			env:       env,
+			specs:     specs,
+			specsFrom: specsFrom,
+			app:       app,
 		}, nil
 	}
 }
@@ -93,7 +106,24 @@ func parseResourceRefs(raw any) ([]interfaces.ResourceRef, error) {
 
 func (s *IaCProviderPlanStep) Name() string { return s.name }
 
-func (s *IaCProviderPlanStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *IaCProviderPlanStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	// Resolve specs: dynamic path takes precedence when specsFrom is configured.
+	specs := s.specs
+	if s.specsFrom != "" {
+		raw := resolveBodyFrom(s.specsFrom, pc)
+		var err error
+		specs, err = specparse.ParseResourceSpecs(raw)
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_plan step %q: resolve specs_from %q: %w", s.name, s.specsFrom, err)
+		}
+		// Guard against zero specs: ParseResourceSpecs returns a non-nil empty
+		// slice for []any{}, so a len check (not a nil check) is required —
+		// planning over zero specs is a destroy-everything footgun.
+		if len(specs) == 0 {
+			return nil, fmt.Errorf("iac_provider_plan step %q: specs_from %q resolved to empty/zero specs", s.name, s.specsFrom)
+		}
+	}
+
 	provider, err := resolveIaCProvider(s.app, s.provider, s.name, "iac_provider_plan")
 	if err != nil {
 		return nil, err
@@ -111,13 +141,13 @@ func (s *IaCProviderPlanStep) Execute(ctx context.Context, _ *PipelineContext) (
 	// Compute desired state hash with a NO-OP env resolver so that
 	// ${ENV_VAR} and ${secret.*} placeholders hash as literal strings —
 	// same hash at plan time and at apply time regardless of env values.
-	desiredHash, err := computeDesiredStateHash(s.specs, current)
+	desiredHash, err := computeDesiredStateHash(specs, current)
 	if err != nil {
 		return nil, fmt.Errorf("iac_provider_plan step %q: compute desired hash: %w", s.name, err)
 	}
 
 	// Build the plan from the provider.
-	plan, err := provider.Plan(ctx, s.specs, current)
+	plan, err := provider.Plan(ctx, specs, current)
 	if err != nil {
 		return nil, fmt.Errorf("iac_provider_plan step %q: Plan: %w", s.name, err)
 	}
