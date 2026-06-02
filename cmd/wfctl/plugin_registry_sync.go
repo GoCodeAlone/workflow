@@ -24,10 +24,11 @@ import (
 //  4. Rejects plugin.json.type values outside the registry allowlist
 //     (catches accidental scaffold re-registration per workflow#762
 //     Layer (d) step 5).
-//  5. Compares manifest.version + downloads URLs; with --fix rewrites.
-//  6. Fetches tagged plugin.json from upstream; syncs capabilities,
+//  5. Skips built-in/core manifests; those are owned by "registry-sync core".
+//  6. Compares manifest.version + downloads URLs; with --fix rewrites.
+//  7. Fetches tagged plugin.json from upstream; syncs capabilities,
 //     minEngineVersion, iacProvider into registry manifest.
-//  7. (--verify-capabilities) Downloads release tarball + spawns binary;
+//  8. (--verify-capabilities) Downloads release tarball + spawns binary;
 //     reuses wfctl plugin verify-capabilities to diff runtime GetManifest
 //     against the registry manifest.
 func runPluginRegistrySync(args []string) error {
@@ -123,6 +124,10 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 			mismatches++
 			continue
 		}
+		if isCoreRegistryManifestType(manifestType) {
+			fmt.Printf("  SKIP  %s — %s manifests are synced by registry-sync core\n", pluginName, manifestType)
+			continue
+		}
 
 		repoURL, _ := raw["repository"].(string)
 		if repoURL == "" {
@@ -212,6 +217,15 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 		return fmt.Errorf("%d plugin manifest(s) need updates; re-run with --fix", mismatches)
 	}
 	return nil
+}
+
+func isCoreRegistryManifestType(manifestType string) bool {
+	switch manifestType {
+	case "builtin", "core":
+		return true
+	default:
+		return false
+	}
 }
 
 func readJSONFile(path string) (map[string]any, error) {

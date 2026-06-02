@@ -123,7 +123,8 @@ func syncCorePluginManifests(registryDir string, plugins []coreRegistryPlugin, f
 		if err != nil {
 			return err
 		}
-		if !reflect.DeepEqual(current, expected) {
+		hasDownloads := coreManifestHasDownloads(currentRaw)
+		if !reflect.DeepEqual(current, expected) || hasDownloads {
 			if fix {
 				if err := writeCoreManifest(expectedPath, expected, currentRaw); err != nil {
 					return err
@@ -131,7 +132,11 @@ func syncCorePluginManifests(registryDir string, plugins []coreRegistryPlugin, f
 				fmt.Fprintf(stderr, "updated %s\n", relRegistryPath(registryDir, expectedPath))
 				continue
 			}
-			fmt.Fprintf(stderr, "core plugin manifest drift for %s: %s\n", p.Name, relRegistryPath(registryDir, expectedPath))
+			if hasDownloads {
+				fmt.Fprintf(stderr, "core plugin manifest drift for %s: %s (builtin manifests must not include downloads)\n", p.Name, relRegistryPath(registryDir, expectedPath))
+			} else {
+				fmt.Fprintf(stderr, "core plugin manifest drift for %s: %s\n", p.Name, relRegistryPath(registryDir, expectedPath))
+			}
 			failures++
 		}
 	}
@@ -145,6 +150,11 @@ func syncCorePluginManifests(registryDir string, plugins []coreRegistryPlugin, f
 		fmt.Fprintln(stderr, "Core plugin manifests match workflow plugin declarations.")
 	}
 	return nil
+}
+
+func coreManifestHasDownloads(raw map[string]any) bool {
+	_, ok := raw["downloads"]
+	return ok
 }
 
 type coreManifest struct {
