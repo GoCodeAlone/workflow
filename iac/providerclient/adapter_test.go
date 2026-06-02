@@ -238,6 +238,9 @@ func TestAdapter_ListRegions(t *testing.T) {
 }
 
 // TestAdapter_TypeAssertIaCProvider verifies Adapter satisfies interfaces.IaCProvider.
+// The compile-time assertion (var _ interfaces.IaCProvider = (*Adapter)(nil)) at the
+// top of this file is the load-bearing check; this runtime test verifies New() returns
+// a non-nil adapter that is usable as the interface.
 func TestAdapter_TypeAssertIaCProvider(t *testing.T) {
 	srv := grpc.NewServer()
 	pb.RegisterIaCProviderRequiredServer(srv, &fakeRequiredServer{})
@@ -245,9 +248,13 @@ func TestAdapter_TypeAssertIaCProvider(t *testing.T) {
 	conn := startFakeServer(t, srv)
 
 	a := providerclient.New(conn)
+	if a == nil {
+		t.Fatal("providerclient.New returned nil")
+	}
+	// Verify the name RPC works through the interfaces.IaCProvider method.
 	var p interfaces.IaCProvider = a
-	if p == nil {
-		t.Fatal("Adapter does not satisfy interfaces.IaCProvider")
+	if got := p.Name(); got != "fake-provider" {
+		t.Errorf("p.Name() via interface = %q, want fake-provider", got)
 	}
 }
 

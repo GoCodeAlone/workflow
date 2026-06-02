@@ -270,13 +270,6 @@ func unmarshalJSONMap(b []byte) (map[string]any, error) {
 	return out, nil
 }
 
-func marshalJSONAny(v any) ([]byte, error) {
-	if v == nil {
-		return nil, nil
-	}
-	return json.Marshal(v)
-}
-
 func unmarshalJSONAny(b []byte) (any, error) {
 	if len(b) == 0 {
 		return nil, nil
@@ -473,19 +466,6 @@ func sizingFromPB(s *pb.ProviderSizing) (*interfaces.ProviderSizing, error) {
 		return nil, err
 	}
 	return &interfaces.ProviderSizing{InstanceType: s.GetInstanceType(), Specs: specs}, nil
-}
-
-func driftClassFromPB(c pb.DriftClass) interfaces.DriftClass {
-	switch c {
-	case pb.DriftClass_DRIFT_CLASS_IN_SYNC:
-		return interfaces.DriftClassInSync
-	case pb.DriftClass_DRIFT_CLASS_GHOST:
-		return interfaces.DriftClassGhost
-	case pb.DriftClass_DRIFT_CLASS_CONFIG:
-		return interfaces.DriftClassConfig
-	default:
-		return interfaces.DriftClassUnknown
-	}
 }
 
 func changesFromPB(changes []*pb.FieldChange) ([]interfaces.FieldChange, error) {

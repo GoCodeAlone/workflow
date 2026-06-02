@@ -11,6 +11,7 @@ import (
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/deploy"
+	"github.com/GoCodeAlone/workflow/iac/providerclient"
 	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -576,8 +577,83 @@ func (a *ExternalPluginAdapter) StepSchemas() []*schema.StepSchema {
 	return nil
 }
 
+// iacProviderRequiredServiceName is the fully-qualified gRPC service a plugin's
+// ContractRegistry must advertise for the adapter to be treated as an
+// iac.provider — the analog of iacStateBackendServiceName. Sourced from the
+// generated proto's ServiceDesc so it cannot drift if the proto package
+// path/service name ever changes.
+var iacProviderRequiredServiceName = pb.IaCProviderRequired_ServiceDesc.ServiceName
+
+// advertisesIaCProviderRequiredService reports whether the adapter's
+// ContractRegistry carries a CONTRACT_KIND_SERVICE descriptor for the
+// IaCProviderRequired service. Mirrors advertisesIaCStateBackendService.
+func (a *ExternalPluginAdapter) advertisesIaCProviderRequiredService() bool {
+	if a.contractRegistry == nil {
+		return false
+	}
+	for _, d := range a.contractRegistry.Contracts {
+		if d == nil {
+			continue
+		}
+		if d.Kind == pb.ContractKind_CONTRACT_KIND_SERVICE && d.ServiceName == iacProviderRequiredServiceName {
+			return true
+		}
+	}
+	// Also check diskManifest.IaCServices as a fallback — the plugin may declare
+	// the service there without advertising it in the ContractRegistry (e.g. when
+	// GetContractRegistry returned Unimplemented). This mirrors the check in
+	// IaCStateBackendClients which cross-checks against diskManifest.
+	if a.diskManifest != nil {
+		for _, svc := range a.diskManifest.IaCServices {
+			if svc == iacProviderRequiredServiceName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// WiringHooks returns a WiringHook that registers the plugin as an
+// interfaces.IaCProvider service in the modular application DI graph when this
+// plugin advertises the IaCProviderRequired gRPC service.
+//
+// Registration key convention: the plugin name (a.name, as declared in the
+// plugin manifest / app.yaml plugin entry). Steps that want to use this
+// provider configure `provider: <pluginName>` and the engine resolves it via
+// app.GetService(cfg.Provider, &provider). This key is the same name that
+// appears in the scenario app.yaml's plugin entry for the iac.provider plugin.
+//
+// If the plugin does not advertise IaCProviderRequired this method returns nil
+// (no wiring needed — not an iac.provider plugin).
 func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
-	return nil
+	if !a.advertisesIaCProviderRequiredService() {
+		return nil
+	}
+	// Capture immutable fields before the closure. conn may be nil
+	// (test adapters built without a real gRPC connection); the hook
+	// guard handles that.
+	name := a.name
+	conn := a.Conn()
+	return []plugin.WiringHook{
+		{
+			// Name follows the convention "<plugin>-iac-provider-registration".
+			// Priority 50: runs after high-priority service wiring (e.g. OTEL at
+			// 100, auth at 90) so the service registry is stable, but before lower-
+			// priority wiring that might look up providers.
+			Name:     name + "-iac-provider-registration",
+			Priority: 50,
+			Hook: func(app modular.Application, _ *config.WorkflowConfig) error {
+				if conn == nil {
+					return fmt.Errorf("plugin %q advertises IaCProviderRequired but has no gRPC connection", name)
+				}
+				adapter := providerclient.New(conn)
+				if err := app.RegisterService(name, adapter); err != nil {
+					return fmt.Errorf("plugin %q: register IaCProvider service: %w", name, err)
+				}
+				return nil
+			},
+		},
+	}
 }
 
 func (a *ExternalPluginAdapter) DeployTargets() map[string]deploy.DeployTarget {
