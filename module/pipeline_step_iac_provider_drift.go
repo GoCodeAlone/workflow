@@ -72,10 +72,16 @@ func (s *IaCProviderDriftStep) Execute(ctx context.Context, _ *PipelineContext) 
 		// wired neither path — surface as unsupported, not as an error. The step
 		// intentionally swallows the error here and converts it to structured output
 		// so callers can gate on {supported: false} without pipeline failure.
+		// all_drifted, drifts, and count are included with zero values so that
+		// downstream type-assertions (e.g. result.Output["any_drifted"].(bool)) do
+		// not panic on the unsupported path.
 		return &StepResult{Output: map[string]any{ //nolint:nilerr
-			"provider":  s.provider,
-			"supported": false,
-			"reason":    driftErr.Error(),
+			"provider":    s.provider,
+			"supported":   false,
+			"reason":      driftErr.Error(),
+			"any_drifted": false,
+			"drifts":      []map[string]any{},
+			"count":       0,
 		}}, nil
 	}
 	return driftResult(s.provider, drifts, true), nil
