@@ -6,10 +6,15 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/sandbox"
 	"github.com/GoCodeAlone/workflow/sandbox/remote"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
+
+type providerRunnerAccessor interface {
+	Runner() interfaces.IaCProviderRunner
+}
 
 // resolveSandboxRunner returns a SandboxRunner for the requested execution environment.
 //
@@ -17,6 +22,8 @@ import (
 //   - "" or "local-docker" — local Docker daemon (default).
 //   - "ephemeral" — one-off Argo Workflow on Kubernetes (PR9). Requires a
 //     configured argo.workflows module; see resolveEphemeralRunner.
+//   - "provider-ephemeral" — one-off native cloud-provider job. Requires a
+//     provider name whose registered service exposes Runner() IaCProviderRunner.
 //   - any registered runner name — dispatches to the named RemoteRunner from the
 //     sandbox.remote_runners registry (PR8). The registry is looked up from the
 //     modular service registry via app. If the name is not registered, a clear
@@ -30,17 +37,41 @@ import (
 // determined by config at runtime, not build time. Any unresolved name (not in the
 // registry) returns an error at Execute time, which is the appropriate gate (same as
 // other service-name references in the pipeline).
-func resolveSandboxRunner(ctx context.Context, app modular.Application, execEnv string, cfg sandbox.SandboxConfig, argoModuleName string) (sandbox.SandboxRunner, error) {
+func resolveSandboxRunner(ctx context.Context, app modular.Application, execEnv string, cfg sandbox.SandboxConfig, argoModuleName, providerName string) (sandbox.SandboxRunner, error) {
 	switch execEnv {
 	case "", "local-docker":
 		return sandbox.NewLocalDockerRunner(cfg)
 	case "ephemeral":
 		// Wire ephemeral runner via Argo Workflows module (PR9).
 		return resolveEphemeralRunner(app, argoModuleName, cfg)
+	case "provider-ephemeral":
+		return resolveProviderEphemeralRunner(app, providerName, cfg)
 	default:
 		// Treat execEnv as a named remote runner. Look it up in the service registry.
 		return resolveNamedRemoteRunner(ctx, app, execEnv, cfg)
 	}
+}
+
+func resolveProviderEphemeralRunner(app modular.Application, providerName string, cfg sandbox.SandboxConfig) (sandbox.SandboxRunner, error) {
+	if app == nil {
+		return nil, fmt.Errorf("sandbox_exec: exec_env provider-ephemeral requires an application context (no app registered)")
+	}
+	if strings.TrimSpace(providerName) == "" {
+		return nil, fmt.Errorf("sandbox_exec: exec_env provider-ephemeral requires provider to name an IaC provider service")
+	}
+	svc, ok := app.SvcRegistry()[providerName]
+	if !ok {
+		return nil, fmt.Errorf("sandbox_exec: exec_env provider-ephemeral: provider %q not found in service registry", providerName)
+	}
+	accessor, ok := svc.(providerRunnerAccessor)
+	if !ok {
+		return nil, fmt.Errorf("sandbox_exec: exec_env provider-ephemeral: provider %q does not expose IaCProviderRunner", providerName)
+	}
+	runner := accessor.Runner()
+	if runner == nil {
+		return nil, fmt.Errorf("sandbox_exec: exec_env provider-ephemeral: provider %q did not advertise IaCProviderRunner", providerName)
+	}
+	return newProviderEphemeralRunner(runner, providerName, cfg, 0), nil
 }
 
 // resolveEphemeralRunner resolves an ArgoEphemeralRunner for exec_env: ephemeral.

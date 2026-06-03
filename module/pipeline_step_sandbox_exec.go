@@ -17,8 +17,9 @@ type SandboxExecStep struct {
 	image           string
 	command         []string
 	securityProfile string
-	execEnv         string // "" or "local-docker" → local Docker; "ephemeral" → Argo; others are remote runner names
+	execEnv         string // "" or "local-docker" → local Docker; "ephemeral" → Argo; "provider-ephemeral" → IaCProviderRunner; others are remote runner names
 	argoModule      string // optional: argo.workflows module name for exec_env: ephemeral
+	provider        string // optional: iac.provider service name for exec_env: provider-ephemeral
 	memoryLimit     int64
 	cpuLimit        float64
 	timeout         time.Duration
@@ -98,6 +99,7 @@ func NewSandboxExecStepFactory() StepFactory {
 		if ee, ok := cfg["exec_env"].(string); ok && ee != "" {
 			// exec_env validation: "local-docker" is the local runner;
 			// "ephemeral" routes to the Argo Workflows ephemeral runner (PR9);
+			// "provider-ephemeral" routes to an IaCProviderRunner optional service;
 			// any other non-empty string is treated as a named remote runner and
 			// validated at Execute time by resolveSandboxRunner (PR8). We no longer
 			// reject unknown values at construction time since named runner
@@ -110,6 +112,10 @@ func NewSandboxExecStepFactory() StepFactory {
 			// exec_env is "ephemeral". If unset, the factory auto-detects the
 			// sole registered *ArgoWorkflowsModule (error if 0 or >1 found).
 			step.argoModule = am
+		}
+
+		if provider, ok := cfg["provider"].(string); ok && provider != "" {
+			step.provider = provider
 		}
 
 		if envRaw, ok := cfg["env"].(map[string]any); ok {
@@ -147,7 +153,7 @@ func (s *SandboxExecStep) Name() string { return s.name }
 func (s *SandboxExecStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	sbCfg := s.buildSandboxConfig()
 
-	sb, err := resolveSandboxRunner(ctx, s.app, s.execEnv, sbCfg, s.argoModule)
+	sb, err := resolveSandboxRunner(ctx, s.app, s.execEnv, sbCfg, s.argoModule, s.provider)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox_exec step %q: failed to create sandbox: %w", s.name, err)
 	}

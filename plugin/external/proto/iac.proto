@@ -105,6 +105,15 @@ service IaCProviderLogCapture {
   rpc CaptureLogs(CaptureLogsRequest) returns (stream LogChunk);
 }
 
+// IaCProviderRunner is an optional provider-owned service for launching
+// one-off jobs on cloud-native runner primitives. Absence of this registration
+// is the negative signal; callers must fall back or error clearly.
+service IaCProviderRunner {
+  rpc RunJob(JobSpec) returns (JobHandle);
+  rpc JobStatus(JobHandle) returns (JobStatusReply);
+  rpc JobLogs(JobHandle) returns (stream LogChunk);
+}
+
 // IaCRequirementDiscovery is an optional service for config-aware plugins that
 // need to emit provider-neutral infrastructure requirements from their own
 // module configuration. Hosts pass a typed, redacted Workflow context plus the
@@ -812,6 +821,65 @@ message LogChunk {
   bytes data = 1;
   string source = 2;
   bool eof = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IaCProviderRunner messages.
+// ─────────────────────────────────────────────────────────────────────────────
+message JobSpec {
+  string name = 1;
+  string kind = 2;
+  string image = 3;
+  string run_command = 4;
+  map<string, string> env_vars = 5;
+  map<string, string> env_vars_secret = 6;
+  string cron = 7;
+  JobTerminationSpec termination = 8;
+  repeated JobAlertSpec alerts = 9;
+  repeated JobLogDestinationSpec log_destinations = 10;
+}
+
+message JobTerminationSpec {
+  int32 drain_seconds = 1;
+  int32 grace_period_seconds = 2;
+}
+
+message JobAlertSpec {
+  string rule = 1;
+  string operator = 2;
+  double value = 3;
+  string window = 4;
+  bool disabled = 5;
+}
+
+message JobLogDestinationSpec {
+  string name = 1;
+  string endpoint = 2;
+  map<string, string> headers = 3;
+  bool tls = 4;
+}
+
+message JobHandle {
+  string id = 1;
+  string name = 2;
+  string provider = 3;
+  map<string, string> metadata = 4;
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_PENDING = 1;
+  JOB_STATE_RUNNING = 2;
+  JOB_STATE_SUCCEEDED = 3;
+  JOB_STATE_FAILED = 4;
+  JOB_STATE_CANCELLED = 5;
+}
+
+message JobStatusReply {
+  JobHandle handle = 1;
+  JobState state = 2;
+  int32 exit_code = 3;
+  string message = 4;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

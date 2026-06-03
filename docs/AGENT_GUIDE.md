@@ -52,4 +52,6 @@ npm run dev
 Workflow is plugin-first, but not every extension point should be moved out of
 core immediately. Core keeps bootstrap-critical CLI behavior and shared
 contracts; external plugins own provider-specific runtime integrations. For CI
-generation, see `decisions/0045-ci-generation-boundary.md`.
+generation, see `decisions/0045-ci-generation-boundary.md`. For native
+provider job execution, keep the shared `IaCProviderRunner` contract in core and
+implement cloud-specific runners in provider plugins.
