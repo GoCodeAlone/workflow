@@ -113,3 +113,19 @@ func TestSandboxExec_ExecEnvLocalDocker_ExplicitlySet(t *testing.T) {
 	}
 	_ = runner.Close()
 }
+
+// TestSandboxExec_Factory_InvalidExecEnv verifies the step factory rejects an
+// unsupported exec_env at construction time (fail-early), not at Execute time.
+func TestSandboxExec_Factory_InvalidExecEnv(t *testing.T) {
+	app := NewMockApplication()
+	factory := NewSandboxExecStepFactory()
+	for _, ee := range []string{"remote", "ephemeral", "nope"} {
+		if _, err := factory("sb", map[string]any{"image": "alpine", "exec_env": ee}, app); err == nil {
+			t.Errorf("exec_env %q: expected factory error, got nil", ee)
+		}
+	}
+	// local-docker + absent must still succeed.
+	if _, err := factory("sb", map[string]any{"image": "alpine", "exec_env": "local-docker"}, app); err != nil {
+		t.Errorf("exec_env local-docker: unexpected factory error: %v", err)
+	}
+}

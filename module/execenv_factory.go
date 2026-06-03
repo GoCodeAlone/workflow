@@ -18,6 +18,9 @@ import (
 //
 // Any other value returns a clear error so mis-spelled or not-yet-configured
 // exec_env values fail at pipeline construction time rather than silently.
+// NOTE: the `app` parameter is intentionally reserved (named `_` today) — PR7/PR8
+// (remote runner) + PR9 (Argo) resolve their runner config from the service
+// registry via `app`. Do NOT drop it from the signature when wiring those cases.
 func resolveSandboxRunner(_ modular.Application, execEnv string, cfg sandbox.SandboxConfig) (sandbox.SandboxRunner, error) {
 	switch execEnv {
 	case "", "local-docker":

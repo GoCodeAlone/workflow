@@ -94,7 +94,13 @@ func NewSandboxExecStepFactory() StepFactory {
 			step.network = net
 		}
 
-		if ee, ok := cfg["exec_env"].(string); ok {
+		if ee, ok := cfg["exec_env"].(string); ok && ee != "" {
+			// Validate at factory time (fail-early, like security_profile). Only
+			// local-docker is wired in this phase; remote/ephemeral are added to
+			// this allow-list when PR7/PR8 (remote-runner) and PR9 (Argo) wire them.
+			if ee != "local-docker" {
+				return nil, fmt.Errorf("sandbox_exec step %q: exec_env %q not supported (only local-docker is wired; remote/ephemeral arrive in later phases)", name, ee)
+			}
 			step.execEnv = ee
 		}
 
