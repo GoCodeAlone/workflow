@@ -167,7 +167,12 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 			currentReleaseExists = false
 		}
 		if versionGT(latestVersion, manifestVersion) || !currentReleaseExists {
-			latestDownloads, _ := releaseDownloads(ghRepo, latestTag)
+			latestDownloads, err := releaseDownloads(ghRepo, latestTag)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ERROR  %s — list release downloads for %s: %v\n", pluginName, latestTag, err)
+				mismatches++
+				continue
+			}
 			switch {
 			case len(latestDownloads) > 0:
 				targetVersion = latestVersion
@@ -295,7 +300,10 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 	if err := json.Unmarshal(out, &resp); err != nil {
 		return nil, err
 	}
-	checksums, _ := releaseChecksums(ghRepo, tag)
+	checksums, err := releaseChecksums(ghRepo, tag)
+	if err != nil {
+		return nil, err
+	}
 	var assets []releaseAsset
 	for _, a := range resp.Assets {
 		goos, goarch, ok := releaseAssetPlatform(a.Name)
@@ -315,9 +323,13 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 
 func releaseChecksums(ghRepo, tag string) (map[string]string, error) {
 	cmd := exec.Command("gh", "release", "download", tag, "--repo", ghRepo, "--pattern", "checksums.txt", "--output", "-") // #nosec G204 -- ghRepo+tag from trusted manifest
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, err
+		msg := strings.ToLower(string(out))
+		if strings.Contains(msg, "no assets match") || strings.Contains(msg, "no matching assets") || strings.Contains(msg, "not found") {
+			return map[string]string{}, nil
+		}
+		return nil, fmt.Errorf("download checksums.txt: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return parseReleaseChecksums(string(out)), nil
 }
@@ -325,15 +337,24 @@ func releaseChecksums(ghRepo, tag string) (map[string]string, error) {
 func parseReleaseChecksums(text string) map[string]string {
 	checksums := make(map[string]string)
 	for _, line := range strings.Split(text, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		sha, err := NormalizeSHA256Hex(fields[0])
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		sha, err := NormalizeSHA256Hex(parts[0])
 		if err != nil {
 			continue
 		}
-		checksums[filepath.Base(fields[len(fields)-1])] = sha
+		name := strings.TrimSpace(parts[1])
+		name = strings.TrimPrefix(name, "*")
+		if name == "" {
+			continue
+		}
+		checksums[filepath.Base(name)] = sha
 	}
 	return checksums
 }
@@ -544,20 +565,28 @@ func versionGT(newVer, oldVer string) bool {
 }
 
 func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, targetVersion string) error {
-	downloads, _ := registrySyncReleaseDownloads(ghRepo, targetTag)
+	downloads, err := registrySyncReleaseDownloads(ghRepo, targetTag)
+	if err != nil {
+		return fmt.Errorf("list release downloads: %w", err)
+	}
 	if len(downloads) == 0 {
 		raw["version"] = targetVersion
 	} else {
+		existingSHAs := existingDownloadSHA256(raw)
 		raw["version"] = targetVersion
 		dlAny := make([]any, 0, len(downloads))
 		for _, dl := range downloads {
+			sha := dl.SHA256
+			if sha == "" {
+				sha = existingSHAs[downloadIdentity(dl.OS, dl.Arch, dl.URL)]
+			}
 			entry := map[string]any{
 				"os":   dl.OS,
 				"arch": dl.Arch,
 				"url":  dl.URL,
 			}
-			if dl.SHA256 != "" {
-				entry["sha256"] = dl.SHA256
+			if sha != "" {
+				entry["sha256"] = sha
 			}
 			dlAny = append(dlAny, entry)
 		}
@@ -577,6 +606,34 @@ func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, target
 	}
 	out = append(out, '\n')
 	return os.WriteFile(manifestPath, out, 0644) // #nosec G306
+}
+
+func existingDownloadSHA256(raw map[string]any) map[string]string {
+	out := make(map[string]string)
+	downloads, _ := raw["downloads"].([]any)
+	for _, item := range downloads {
+		entry, _ := item.(map[string]any)
+		if entry == nil {
+			continue
+		}
+		goos, _ := entry["os"].(string)
+		goarch, _ := entry["arch"].(string)
+		url, _ := entry["url"].(string)
+		sha, _ := entry["sha256"].(string)
+		if goos == "" || goarch == "" || url == "" || sha == "" {
+			continue
+		}
+		normalized, err := NormalizeSHA256Hex(sha)
+		if err != nil {
+			continue
+		}
+		out[downloadIdentity(goos, goarch, url)] = normalized
+	}
+	return out
+}
+
+func downloadIdentity(goos, goarch, url string) string {
+	return goos + "\x00" + goarch + "\x00" + url
 }
 
 func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) {

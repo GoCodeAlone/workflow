@@ -150,6 +150,7 @@ func TestPluginRegistrySync_ParseReleaseChecksums(t *testing.T) {
 44A1F367B554555A872EC274D9B50D71372D40FA66704C3F806F1CAFAF14412C  workflow-plugin-aws-darwin-amd64.tar.gz
 not-a-sha  workflow-plugin-aws-linux-amd64.tar.gz
 1f1043c2addbc1a668873d12b1696c03ab428c32df034425fc072d2235af664b  ./dist/workflow-plugin-aws-darwin-arm64.tar.gz
+b9dd1cc9c84498be7cfdea1fc3846a8965900ecc870d6be5dd2069300e8f351c  plugin name with spaces.tar.gz
 `)
 
 	if got["workflow-plugin-aws-darwin-amd64.tar.gz"] != "44a1f367b554555a872ec274d9b50d71372d40fa66704c3f806f1cafaf14412c" {
@@ -160,6 +161,9 @@ not-a-sha  workflow-plugin-aws-linux-amd64.tar.gz
 	}
 	if _, ok := got["workflow-plugin-aws-linux-amd64.tar.gz"]; ok {
 		t.Fatal("invalid checksum should be ignored")
+	}
+	if got["plugin name with spaces.tar.gz"] != "b9dd1cc9c84498be7cfdea1fc3846a8965900ecc870d6be5dd2069300e8f351c" {
+		t.Fatalf("spaced filename checksum = %q", got["plugin name with spaces.tar.gz"])
 	}
 }
 
@@ -555,6 +559,66 @@ func TestPluginRegistrySync_ApplyFixIncludesDownloadChecksums(t *testing.T) {
 	first := downloads[0].(map[string]any)
 	if first["sha256"] != strings.Repeat("a", 64) {
 		t.Fatalf("sha256 = %q", first["sha256"])
+	}
+}
+
+func TestPluginRegistrySync_ApplyFixPreservesExistingDownloadChecksum(t *testing.T) {
+	restoreRegistrySyncTestHooks(t)
+
+	url := "https://github.com/owner/repo/releases/download/v1.2.3/workflow-plugin-foo-linux-amd64.tar.gz"
+	registrySyncReleaseDownloads = func(string, string) ([]releaseAsset, error) {
+		return []releaseAsset{{
+			Name: "workflow-plugin-foo-linux-amd64.tar.gz",
+			OS:   "linux",
+			Arch: "amd64",
+			URL:  url,
+		}}, nil
+	}
+
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	raw := map[string]any{
+		"name":    "workflow-plugin-foo",
+		"type":    "external",
+		"version": "1.0.0",
+		"downloads": []any{
+			map[string]any{
+				"os":     "linux",
+				"arch":   "amd64",
+				"url":    url,
+				"sha256": strings.Repeat("B", 64),
+			},
+		},
+	}
+
+	if err := applyFix(manifest, raw, "owner/repo", "v1.2.3", "1.2.3"); err != nil {
+		t.Fatalf("applyFix returned error: %v", err)
+	}
+
+	var got map[string]any
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	downloads := got["downloads"].([]any)
+	first := downloads[0].(map[string]any)
+	if first["sha256"] != strings.Repeat("b", 64) {
+		t.Fatalf("sha256 = %q", first["sha256"])
+	}
+}
+
+func TestPluginRegistrySync_ApplyFixPropagatesDownloadErrors(t *testing.T) {
+	restoreRegistrySyncTestHooks(t)
+
+	registrySyncReleaseDownloads = func(string, string) ([]releaseAsset, error) {
+		return nil, errors.New("checksum fetch failed")
+	}
+
+	err := applyFix(filepath.Join(t.TempDir(), "manifest.json"), map[string]any{}, "owner/repo", "v1.2.3", "1.2.3")
+	if err == nil || !strings.Contains(err.Error(), "checksum fetch failed") {
+		t.Fatalf("error = %v, want checksum fetch failure", err)
 	}
 }
 
