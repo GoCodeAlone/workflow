@@ -1715,6 +1715,196 @@ var IaCProviderLogCapture_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	IaCProviderRunner_RunJob_FullMethodName    = "/workflow.plugin.external.iac.IaCProviderRunner/RunJob"
+	IaCProviderRunner_JobStatus_FullMethodName = "/workflow.plugin.external.iac.IaCProviderRunner/JobStatus"
+	IaCProviderRunner_JobLogs_FullMethodName   = "/workflow.plugin.external.iac.IaCProviderRunner/JobLogs"
+)
+
+// IaCProviderRunnerClient is the client API for IaCProviderRunner service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// IaCProviderRunner is an optional provider-owned service for launching
+// one-off jobs on cloud-native runner primitives. Absence of this registration
+// is the negative signal; callers must fall back or error clearly.
+type IaCProviderRunnerClient interface {
+	RunJob(ctx context.Context, in *JobSpec, opts ...grpc.CallOption) (*JobHandle, error)
+	JobStatus(ctx context.Context, in *JobHandle, opts ...grpc.CallOption) (*JobStatusReply, error)
+	JobLogs(ctx context.Context, in *JobHandle, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogChunk], error)
+}
+
+type iaCProviderRunnerClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIaCProviderRunnerClient(cc grpc.ClientConnInterface) IaCProviderRunnerClient {
+	return &iaCProviderRunnerClient{cc}
+}
+
+func (c *iaCProviderRunnerClient) RunJob(ctx context.Context, in *JobSpec, opts ...grpc.CallOption) (*JobHandle, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JobHandle)
+	err := c.cc.Invoke(ctx, IaCProviderRunner_RunJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCProviderRunnerClient) JobStatus(ctx context.Context, in *JobHandle, opts ...grpc.CallOption) (*JobStatusReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JobStatusReply)
+	err := c.cc.Invoke(ctx, IaCProviderRunner_JobStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *iaCProviderRunnerClient) JobLogs(ctx context.Context, in *JobHandle, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &IaCProviderRunner_ServiceDesc.Streams[0], IaCProviderRunner_JobLogs_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[JobHandle, LogChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IaCProviderRunner_JobLogsClient = grpc.ServerStreamingClient[LogChunk]
+
+// IaCProviderRunnerServer is the server API for IaCProviderRunner service.
+// All implementations must embed UnimplementedIaCProviderRunnerServer
+// for forward compatibility.
+//
+// IaCProviderRunner is an optional provider-owned service for launching
+// one-off jobs on cloud-native runner primitives. Absence of this registration
+// is the negative signal; callers must fall back or error clearly.
+type IaCProviderRunnerServer interface {
+	RunJob(context.Context, *JobSpec) (*JobHandle, error)
+	JobStatus(context.Context, *JobHandle) (*JobStatusReply, error)
+	JobLogs(*JobHandle, grpc.ServerStreamingServer[LogChunk]) error
+	mustEmbedUnimplementedIaCProviderRunnerServer()
+}
+
+// UnimplementedIaCProviderRunnerServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIaCProviderRunnerServer struct{}
+
+func (UnimplementedIaCProviderRunnerServer) RunJob(context.Context, *JobSpec) (*JobHandle, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunJob not implemented")
+}
+func (UnimplementedIaCProviderRunnerServer) JobStatus(context.Context, *JobHandle) (*JobStatusReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method JobStatus not implemented")
+}
+func (UnimplementedIaCProviderRunnerServer) JobLogs(*JobHandle, grpc.ServerStreamingServer[LogChunk]) error {
+	return status.Error(codes.Unimplemented, "method JobLogs not implemented")
+}
+func (UnimplementedIaCProviderRunnerServer) mustEmbedUnimplementedIaCProviderRunnerServer() {}
+func (UnimplementedIaCProviderRunnerServer) testEmbeddedByValue()                           {}
+
+// UnsafeIaCProviderRunnerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IaCProviderRunnerServer will
+// result in compilation errors.
+type UnsafeIaCProviderRunnerServer interface {
+	mustEmbedUnimplementedIaCProviderRunnerServer()
+}
+
+func RegisterIaCProviderRunnerServer(s grpc.ServiceRegistrar, srv IaCProviderRunnerServer) {
+	// If the following call panics, it indicates UnimplementedIaCProviderRunnerServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IaCProviderRunner_ServiceDesc, srv)
+}
+
+func _IaCProviderRunner_RunJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JobSpec)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderRunnerServer).RunJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderRunner_RunJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderRunnerServer).RunJob(ctx, req.(*JobSpec))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCProviderRunner_JobStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JobHandle)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IaCProviderRunnerServer).JobStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IaCProviderRunner_JobStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IaCProviderRunnerServer).JobStatus(ctx, req.(*JobHandle))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IaCProviderRunner_JobLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(JobHandle)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(IaCProviderRunnerServer).JobLogs(m, &grpc.GenericServerStream[JobHandle, LogChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IaCProviderRunner_JobLogsServer = grpc.ServerStreamingServer[LogChunk]
+
+// IaCProviderRunner_ServiceDesc is the grpc.ServiceDesc for IaCProviderRunner service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IaCProviderRunner_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.IaCProviderRunner",
+	HandlerType: (*IaCProviderRunnerServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "RunJob",
+			Handler:    _IaCProviderRunner_RunJob_Handler,
+		},
+		{
+			MethodName: "JobStatus",
+			Handler:    _IaCProviderRunner_JobStatus_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "JobLogs",
+			Handler:       _IaCProviderRunner_JobLogs_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "iac.proto",
+}
+
+const (
 	IaCRequirementDiscovery_DiscoverRequirements_FullMethodName = "/workflow.plugin.external.iac.IaCRequirementDiscovery/DiscoverRequirements"
 )
 

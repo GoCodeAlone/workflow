@@ -2271,6 +2271,32 @@ wfctl ci run --phase build,test,deploy --env production
 
 **Deploy phase** is a placeholder in Tier 1 — full provider implementations (k8s, aws-ecs, etc.) ship in Tier 2.
 
+#### `step.sandbox_exec` execution environments
+
+`step.sandbox_exec` defaults to local Docker when `exec_env` is omitted or set
+to `local-docker`. `exec_env: ephemeral` runs the command as a one-off Argo
+Workflow through an `argo.workflows` module. `exec_env: provider-ephemeral`
+runs the command through the selected IaC provider's optional
+`IaCProviderRunner` capability.
+
+```yaml
+steps:
+  - name: migrate
+    type: step.sandbox_exec
+    config:
+      exec_env: provider-ephemeral
+      provider: digitalocean
+      image: registry.example.com/app-migrate:${IMAGE_SHA}
+      command: ["./migrate", "up"]
+      env:
+        DATABASE_URL: secret://app/database-url
+```
+
+For `provider-ephemeral`, `provider` is required and must name a registered
+`iac.provider` service that advertises `IaCProviderRunner`. Secret references
+in `env` are passed through for provider-side resolution; wfctl does not resolve
+them to plaintext before the provider job boundary.
+
 ---
 
 ### `ci init`

@@ -134,6 +134,38 @@ func (s *fakeDriftDetectorServer) DetectDrift(_ context.Context, req *pb.DetectD
 	return &pb.DetectDriftResponse{Drifts: results}, nil
 }
 
+// fakeRunnerServer implements IaCProviderRunnerServer.
+type fakeRunnerServer struct {
+	pb.UnimplementedIaCProviderRunnerServer
+	lastSpec *pb.JobSpec
+}
+
+func (s *fakeRunnerServer) RunJob(_ context.Context, req *pb.JobSpec) (*pb.JobHandle, error) {
+	s.lastSpec = req
+	return &pb.JobHandle{
+		Id:       "job-123",
+		Name:     req.GetName(),
+		Provider: "fake-provider",
+		Metadata: map[string]string{"region": "us-east-1"},
+	}, nil
+}
+
+func (s *fakeRunnerServer) JobStatus(_ context.Context, handle *pb.JobHandle) (*pb.JobStatusReply, error) {
+	return &pb.JobStatusReply{
+		Handle:   handle,
+		State:    pb.JobState_JOB_STATE_SUCCEEDED,
+		ExitCode: 0,
+		Message:  "done",
+	}, nil
+}
+
+func (s *fakeRunnerServer) JobLogs(_ *pb.JobHandle, stream grpc.ServerStreamingServer[pb.LogChunk]) error {
+	if err := stream.Send(&pb.LogChunk{Data: []byte("hello\n"), Source: "stdout"}); err != nil {
+		return err
+	}
+	return stream.Send(&pb.LogChunk{Eof: true})
+}
+
 // ─── Test setup helper ───────────────────────────────────────────────────────
 
 // startFakeServer starts an in-process gRPC server on a bufconn listener and
@@ -423,6 +455,94 @@ func TestAdapter_DriftDetector_Unadvertised(t *testing.T) {
 	if dd := ddp.DriftDetector(); dd != nil {
 		t.Errorf("DriftDetector() returned non-nil when IaCServiceDriftDetector was not advertised; got %T", dd)
 	}
+}
+
+// TestAdapter_Runner_Advertised verifies the optional IaCProviderRunner client is
+// gated by advertised service names and round-trips JobSpec/JobHandle/JobLogs.
+func TestAdapter_Runner_Advertised(t *testing.T) {
+	srv := grpc.NewServer()
+	pb.RegisterIaCProviderRequiredServer(srv, &fakeRequiredServer{})
+	runnerServer := &fakeRunnerServer{}
+	pb.RegisterIaCProviderRunnerServer(srv, runnerServer)
+	conn := startFakeServer(t, srv)
+
+	a := providerclient.New(conn, map[string]bool{
+		providerclient.IaCServiceRunner: true,
+	})
+
+	rp, ok := any(a).(providerclient.RunnerProvider)
+	if !ok {
+		t.Fatal("*Adapter must satisfy RunnerProvider")
+	}
+	runner := rp.Runner()
+	if runner == nil {
+		t.Fatal("Runner() returned nil when service was advertised")
+	}
+
+	handle, err := runner.RunJob(context.Background(), interfaces.JobSpec{
+		Name:       "migrate",
+		Kind:       "POST_DEPLOY",
+		Image:      "alpine:3.19",
+		RunCommand: "echo hello",
+		EnvVars:    map[string]string{"PLAIN": "value"},
+	})
+	if err != nil {
+		t.Fatalf("RunJob() returned error: %v", err)
+	}
+	if handle.ID != "job-123" || handle.Provider != "fake-provider" {
+		t.Fatalf("handle = %+v, want ID=job-123 Provider=fake-provider", handle)
+	}
+	if runnerServer.lastSpec.GetImage() != "alpine:3.19" || runnerServer.lastSpec.GetRunCommand() != "echo hello" {
+		t.Fatalf("server saw JobSpec = %+v", runnerServer.lastSpec)
+	}
+
+	status, err := runner.JobStatus(context.Background(), *handle)
+	if err != nil {
+		t.Fatalf("JobStatus() returned error: %v", err)
+	}
+	if status.State != interfaces.JobStateSucceeded || status.ExitCode != 0 {
+		t.Fatalf("status = %+v, want succeeded exit 0", status)
+	}
+
+	sink := &capturingLogSink{}
+	if err := runner.JobLogs(context.Background(), *handle, sink); err != nil {
+		t.Fatalf("JobLogs() returned error: %v", err)
+	}
+	if got := string(sink.data); got != "hello\n" {
+		t.Fatalf("captured logs = %q, want %q", got, "hello\\n")
+	}
+}
+
+func TestAdapter_Runner_Unadvertised(t *testing.T) {
+	srv := grpc.NewServer()
+	pb.RegisterIaCProviderRequiredServer(srv, &fakeRequiredServer{})
+	conn := startFakeServer(t, srv)
+
+	a := providerclient.New(conn, nil)
+	if _, ok := any(a).(interfaces.IaCProviderRunner); ok {
+		t.Fatal("*Adapter must NOT satisfy interfaces.IaCProviderRunner directly")
+	}
+	rp, ok := any(a).(providerclient.RunnerProvider)
+	if !ok {
+		t.Fatal("*Adapter must satisfy RunnerProvider regardless of advertisement")
+	}
+	if runner := rp.Runner(); runner != nil {
+		t.Fatalf("Runner() returned non-nil when IaCProviderRunner was not advertised; got %T", runner)
+	}
+}
+
+type capturingLogSink struct {
+	data []byte
+	eof  bool
+}
+
+func (s *capturingLogSink) WriteLogChunk(chunk interfaces.LogChunk) error {
+	if chunk.EOF {
+		s.eof = true
+		return nil
+	}
+	s.data = append(s.data, chunk.Data...)
+	return nil
 }
 
 // TestAdapter_TypeAssertIaCProvider verifies Adapter satisfies interfaces.IaCProvider.

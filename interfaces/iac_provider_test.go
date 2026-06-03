@@ -301,3 +301,47 @@ func TestIaCProviderRegionLister_NonImplementorFails(t *testing.T) {
 		t.Errorf("nonValidatingProvider must NOT satisfy IaCProviderRegionLister (interface is optional)")
 	}
 }
+
+// ─── IaCProviderRunner optional interface ───────────────────────────────────
+
+type runnerProvider struct{ nonValidatingProvider }
+
+func (r *runnerProvider) RunJob(_ context.Context, spec interfaces.JobSpec) (*interfaces.JobHandle, error) {
+	return &interfaces.JobHandle{ID: "job-1", Name: spec.Name, Provider: "fake"}, nil
+}
+
+func (r *runnerProvider) JobStatus(_ context.Context, handle interfaces.JobHandle) (*interfaces.JobStatusReply, error) {
+	return &interfaces.JobStatusReply{Handle: handle, State: interfaces.JobStateSucceeded, ExitCode: 0}, nil
+}
+
+func (r *runnerProvider) JobLogs(_ context.Context, _ interfaces.JobHandle, sink interfaces.LogCaptureSink) error {
+	if sink == nil {
+		return nil
+	}
+	return sink.WriteLogChunk(interfaces.LogChunk{Data: []byte("ok\n"), Source: "run", EOF: true})
+}
+
+var _ interfaces.IaCProviderRunner = (*runnerProvider)(nil)
+
+func TestIaCProviderRunner_ImplementorSatisfies(t *testing.T) {
+	var p interfaces.IaCProvider = &runnerProvider{}
+
+	runner, ok := p.(interfaces.IaCProviderRunner)
+	if !ok {
+		t.Fatalf("runnerProvider must satisfy IaCProviderRunner")
+	}
+	handle, err := runner.RunJob(context.Background(), interfaces.JobSpec{Name: "migrate", Image: "alpine", RunCommand: "echo ok"})
+	if err != nil {
+		t.Fatalf("RunJob returned unexpected error: %v", err)
+	}
+	if handle.ID != "job-1" || handle.Name != "migrate" {
+		t.Fatalf("RunJob handle = %+v, want ID=job-1 Name=migrate", handle)
+	}
+}
+
+func TestIaCProviderRunner_NonImplementorFails(t *testing.T) {
+	var p interfaces.IaCProvider = nonValidatingProvider{}
+	if _, ok := p.(interfaces.IaCProviderRunner); ok {
+		t.Errorf("nonValidatingProvider must NOT satisfy IaCProviderRunner (interface is optional)")
+	}
+}

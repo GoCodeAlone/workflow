@@ -40,6 +40,7 @@ import (
 //	pb.IaCProviderValidatorServer
 //	pb.IaCProviderDriftConfigDetectorServer
 //	pb.IaCProviderLogCaptureServer
+//	pb.IaCProviderRunnerServer
 //	pb.IaCRequirementDiscoveryServer
 //	pb.IaCProviderRequirementMapperServer
 //	pb.IaCStateBackendServer
@@ -178,6 +179,9 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	}
 	if v, ok := provider.(pb.IaCProviderLogCaptureServer); ok {
 		pb.RegisterIaCProviderLogCaptureServer(s, v)
+	}
+	if v, ok := provider.(pb.IaCProviderRunnerServer); ok {
+		pb.RegisterIaCProviderRunnerServer(s, v)
 	}
 	if v, ok := provider.(pb.IaCRequirementDiscoveryServer); ok {
 		pb.RegisterIaCRequirementDiscoveryServer(s, v)

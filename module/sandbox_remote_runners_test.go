@@ -86,10 +86,10 @@ func TestNewSandboxRemoteRunnersModule_MissingAddress_Error(t *testing.T) {
 }
 
 // TestNewSandboxRemoteRunnersModule_ReservedName_Error verifies that a runner
-// named with a reserved exec_env value (empty/local-docker/ephemeral) is rejected
+// named with a reserved exec_env value is rejected
 // at Init time — otherwise it would be silently unreachable.
 func TestNewSandboxRemoteRunnersModule_ReservedName_Error(t *testing.T) {
-	for _, name := range []string{"", "local-docker", "ephemeral"} {
+	for _, name := range []string{"", "local-docker", "ephemeral", "provider-ephemeral"} {
 		cfg := map[string]any{
 			"remote_runners": []any{
 				map[string]any{

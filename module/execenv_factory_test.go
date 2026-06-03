@@ -4,7 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/providerclient"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/sandbox"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -15,7 +18,7 @@ func TestExecEnvFactory_DefaultLocalDocker(t *testing.T) {
 	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
 
 	for _, execEnv := range []string{"", "local-docker"} {
-		runner, err := resolveSandboxRunner(context.Background(), nil, execEnv, cfg, "")
+		runner, err := resolveSandboxRunner(context.Background(), nil, execEnv, cfg, "", "")
 		if err != nil {
 			// Runner creation uses the Docker client env (DOCKER_HOST/TLS); a
 			// failure here is a Docker-availability issue, not an exec_env-routing
@@ -55,7 +58,7 @@ func TestExecEnvFactory_UnknownExecEnv_Error(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		runner, err := resolveSandboxRunner(context.Background(), nil, tt.execEnv, cfg, "")
+		runner, err := resolveSandboxRunner(context.Background(), nil, tt.execEnv, cfg, "", "")
 		if err == nil {
 			t.Errorf("execEnv=%q: expected error, got nil runner=%v", tt.execEnv, runner)
 			if runner != nil {
@@ -90,7 +93,7 @@ func TestSandboxExec_ExecEnvAbsent_Unchanged(t *testing.T) {
 
 	// Confirm the factory resolves it to a local runner without error.
 	cfg := s.buildSandboxConfig()
-	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg, s.argoModule)
+	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg, s.argoModule, s.provider)
 	if err != nil {
 		t.Skipf("resolveSandboxRunner with empty execEnv: docker client unavailable: %v", err)
 	}
@@ -117,7 +120,7 @@ func TestSandboxExec_ExecEnvLocalDocker_ExplicitlySet(t *testing.T) {
 	}
 
 	cfg := s.buildSandboxConfig()
-	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg, s.argoModule)
+	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg, s.argoModule, s.provider)
 	if err != nil {
 		t.Skipf("docker client unavailable: %v", err)
 	}
@@ -268,7 +271,7 @@ func TestResolveNamedRemoteRunner_SecretTokenBuilds(t *testing.T) {
 		t.Fatalf("RegisterService(registry): %v", err)
 	}
 
-	runner, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine", Profile: "standard"}, "")
+	runner, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine", Profile: "standard"}, "", "")
 	if err != nil {
 		t.Fatalf("resolveSandboxRunner: %v", err)
 	}
@@ -301,7 +304,7 @@ func TestResolveNamedRemoteRunner_SecretTokenNoProvider_Errors(t *testing.T) {
 		t.Fatalf("RegisterService(registry): %v", err)
 	}
 
-	_, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine"}, "")
+	_, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine"}, "", "")
 	if err == nil {
 		t.Fatal("expected error: secret:// token with no provider must not build a runner")
 	}
@@ -326,7 +329,7 @@ func TestExecEnvFactory_Ephemeral_WithArgoModule(t *testing.T) {
 	cfg := sandbox.SandboxConfig{Image: "alpine:3.19", Profile: "standard"}
 
 	// Explicit name.
-	runner, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "my-argo")
+	runner, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "my-argo", "")
 	if err != nil {
 		t.Fatalf("resolveSandboxRunner ephemeral (explicit name): %v", err)
 	}
@@ -336,7 +339,7 @@ func TestExecEnvFactory_Ephemeral_WithArgoModule(t *testing.T) {
 	_ = runner.Close()
 
 	// Auto-detect (empty argoModuleName) — exactly one argo module registered.
-	runner2, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "")
+	runner2, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "", "")
 	if err != nil {
 		t.Fatalf("resolveSandboxRunner ephemeral (auto-detect): %v", err)
 	}
@@ -353,7 +356,7 @@ func TestExecEnvFactory_Ephemeral_NoArgoModule(t *testing.T) {
 	// No argo module registered.
 
 	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
-	_, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "")
+	_, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "", "")
 	if err == nil {
 		t.Fatal("expected error when no argo module is registered for ephemeral exec_env")
 	}
@@ -369,11 +372,122 @@ func TestExecEnvFactory_Ephemeral_ExplicitNameNotFound(t *testing.T) {
 	// No module named "missing-argo" registered.
 
 	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
-	_, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "missing-argo")
+	_, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "missing-argo", "")
 	if err == nil {
 		t.Fatal("expected error for unknown argo_module name")
 	}
 	if !strings.Contains(err.Error(), "missing-argo") {
 		t.Errorf("expected error to mention module name, got: %v", err)
 	}
+}
+
+// ─── provider-ephemeral (#840) tests ───────────────────────────────────────
+
+func TestExecEnvFactory_ProviderEphemeral_WithRunnerProvider(t *testing.T) {
+	app := NewMockApplication()
+	fake := &fakeRunnerProvider{runner: &fakeJobRunner{
+		statuses: []interfaces.JobState{interfaces.JobStateSucceeded},
+		logs:     []interfaces.LogChunk{{Data: []byte("done\n"), Source: "stdout"}},
+	}}
+	if err := app.RegisterService("cloud", fake); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+
+	cfg := sandbox.SandboxConfig{Image: "alpine:3.19", Env: map[string]string{"A": "B"}}
+	runner, err := resolveSandboxRunner(context.Background(), app, "provider-ephemeral", cfg, "", "cloud")
+	if err != nil {
+		t.Fatalf("resolveSandboxRunner provider-ephemeral: %v", err)
+	}
+	if runner == nil {
+		t.Fatal("expected non-nil ProviderEphemeralRunner")
+	}
+	result, err := runner.Exec(context.Background(), []string{"echo", "done"})
+	if err != nil {
+		t.Fatalf("provider runner Exec: %v", err)
+	}
+	if result.ExitCode != 0 || result.Stdout != "done\n" {
+		t.Fatalf("result = %+v, want exit 0 stdout done", result)
+	}
+	if fake.runner.lastSpec.Kind != interfaces.JobKindEphemeral {
+		t.Fatalf("RunJob spec kind = %q, want %q", fake.runner.lastSpec.Kind, interfaces.JobKindEphemeral)
+	}
+	if fake.runner.lastSpec.Image != "alpine:3.19" || fake.runner.lastSpec.RunCommand != "echo done" {
+		t.Fatalf("RunJob spec = %+v", fake.runner.lastSpec)
+	}
+}
+
+func TestProviderEphemeralRunner_NilStatusErrors(t *testing.T) {
+	runner := newProviderEphemeralRunner(&nilStatusJobRunner{}, "cloud", sandbox.SandboxConfig{Image: "alpine"}, time.Millisecond)
+	_, err := runner.Exec(context.Background(), []string{"true"})
+	if err == nil {
+		t.Fatal("expected nil JobStatusReply to return an error")
+	}
+	if !strings.Contains(err.Error(), "nil job status") {
+		t.Fatalf("error = %v, want mention nil job status", err)
+	}
+}
+
+func TestExecEnvFactory_ProviderEphemeral_MissingProviderName(t *testing.T) {
+	_, err := resolveSandboxRunner(context.Background(), NewMockApplication(), "provider-ephemeral", sandbox.SandboxConfig{Image: "alpine"}, "", "")
+	if err == nil {
+		t.Fatal("expected provider-ephemeral without provider name to error")
+	}
+	if !strings.Contains(err.Error(), "provider") {
+		t.Fatalf("error = %v, want mention provider", err)
+	}
+}
+
+type fakeRunnerProvider struct {
+	runner *fakeJobRunner
+}
+
+func (p *fakeRunnerProvider) Runner() interfaces.IaCProviderRunner { return p.runner }
+
+var _ providerclient.RunnerProvider = (*fakeRunnerProvider)(nil)
+
+type fakeJobRunner struct {
+	lastSpec interfaces.JobSpec
+	statuses []interfaces.JobState
+	logs     []interfaces.LogChunk
+}
+
+func (r *fakeJobRunner) RunJob(_ context.Context, spec interfaces.JobSpec) (*interfaces.JobHandle, error) {
+	r.lastSpec = spec
+	return &interfaces.JobHandle{ID: "job-1", Name: spec.Name, Provider: "fake"}, nil
+}
+
+func (r *fakeJobRunner) JobStatus(_ context.Context, handle interfaces.JobHandle) (*interfaces.JobStatusReply, error) {
+	state := interfaces.JobStateSucceeded
+	if len(r.statuses) > 0 {
+		state = r.statuses[0]
+		r.statuses = r.statuses[1:]
+	}
+	exitCode := 0
+	if state != interfaces.JobStateSucceeded {
+		exitCode = 1
+	}
+	return &interfaces.JobStatusReply{Handle: handle, State: state, ExitCode: exitCode}, nil
+}
+
+func (r *fakeJobRunner) JobLogs(_ context.Context, _ interfaces.JobHandle, sink interfaces.LogCaptureSink) error {
+	for _, chunk := range r.logs {
+		if err := sink.WriteLogChunk(chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type nilStatusJobRunner struct{}
+
+func (r *nilStatusJobRunner) RunJob(_ context.Context, spec interfaces.JobSpec) (*interfaces.JobHandle, error) {
+	return &interfaces.JobHandle{ID: "job-1", Name: spec.Name, Provider: "fake"}, nil
+}
+
+func (r *nilStatusJobRunner) JobStatus(context.Context, interfaces.JobHandle) (*interfaces.JobStatusReply, error) {
+	return nil, nil
+}
+
+func (r *nilStatusJobRunner) JobLogs(context.Context, interfaces.JobHandle, interfaces.LogCaptureSink) error {
+	return nil
 }

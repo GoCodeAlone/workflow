@@ -369,6 +369,51 @@ type LogCaptureProvider interface {
 	CaptureLogs(ctx context.Context, req LogCaptureRequest, sink LogCaptureSink) error
 }
 
+// JobState is the provider-neutral lifecycle state for a one-off provider job.
+type JobState string
+
+const (
+	JobStateUnknown   JobState = "unknown"
+	JobStatePending   JobState = "pending"
+	JobStateRunning   JobState = "running"
+	JobStateSucceeded JobState = "succeeded"
+	JobStateFailed    JobState = "failed"
+	JobStateCancelled JobState = "cancelled"
+)
+
+// JobHandle identifies a provider-created one-off job. Metadata is
+// provider-owned and may include region, task ARN, job URL, or similar
+// correlation fields.
+type JobHandle struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name,omitempty"`
+	Provider string            `json:"provider,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// JobStatusReply is the latest provider-reported state for a JobHandle.
+type JobStatusReply struct {
+	Handle   JobHandle `json:"handle"`
+	State    JobState  `json:"state"`
+	ExitCode int       `json:"exit_code"`
+	Message  string    `json:"message,omitempty"`
+}
+
+// IaCProviderRunner is an OPTIONAL provider interface for launching and
+// observing one-off cloud-native jobs, such as ECS RunTask, Cloud Run Jobs,
+// Azure Container Instances, or DigitalOcean App jobs. Providers that do not
+// implement this continue to work unchanged; callers must discover it through
+// provider-specific accessors or type assertions and treat absence as
+// unsupported.
+//
+// EnvVarsSecret entries in JobSpec are references for provider-side resolution.
+// The engine must not resolve them to plaintext before crossing this boundary.
+type IaCProviderRunner interface {
+	RunJob(ctx context.Context, spec JobSpec) (*JobHandle, error)
+	JobStatus(ctx context.Context, handle JobHandle) (*JobStatusReply, error)
+	JobLogs(ctx context.Context, handle JobHandle, sink LogCaptureSink) error
+}
+
 // IaCProviderRegionLister is an OPTIONAL interface that an IaCProvider
 // implementation MAY also satisfy to expose provider-sourced region lists.
 // Callers MUST type-assert against this interface and treat the negative case

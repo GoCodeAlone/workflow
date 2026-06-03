@@ -1,7 +1,15 @@
 package interfaces
 
+const (
+	JobKindPreDeploy    = "PRE_DEPLOY"
+	JobKindPostDeploy   = "POST_DEPLOY"
+	JobKindFailedDeploy = "FAILED_DEPLOY"
+	JobKindScheduled    = "SCHEDULED"
+	JobKindEphemeral    = "EPHEMERAL"
+)
+
 // JobSpec describes a one-off or scheduled job workload.
-// Kind is one of: PRE_DEPLOY, POST_DEPLOY, FAILED_DEPLOY, SCHEDULED.
+// Kind is one of: PRE_DEPLOY, POST_DEPLOY, FAILED_DEPLOY, SCHEDULED, EPHEMERAL.
 type JobSpec struct {
 	Name            string               `json:"name" yaml:"name"`
 	Kind            string               `json:"kind" yaml:"kind"`

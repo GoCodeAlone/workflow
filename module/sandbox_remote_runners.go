@@ -19,9 +19,10 @@ const SandboxRemoteRunnerServiceName = "sandbox.remote_runners"
 // runner registered under one of these names would be silently unreachable
 // (resolveSandboxRunner short-circuits them before consulting the registry).
 var reservedRunnerNames = map[string]bool{
-	"":             true,
-	"local-docker": true,
-	"ephemeral":    true,
+	"":                   true,
+	"local-docker":       true,
+	"ephemeral":          true,
+	"provider-ephemeral": true,
 }
 
 // RemoteRunnerSpec holds the config for a single named remote sandbox runner.
@@ -186,7 +187,7 @@ func (m *SandboxRemoteRunnersModule) Init(_ modular.Application) error {
 	runners := make(map[string]RemoteRunnerSpec, len(m.specs))
 	for _, spec := range m.specs {
 		if reservedRunnerNames[spec.Name] {
-			return fmt.Errorf("sandbox.remote_runners: runner name %q is empty or reserved (reserved: local-docker, ephemeral); choose a distinct name", spec.Name)
+			return fmt.Errorf("sandbox.remote_runners: runner name %q is empty or reserved (reserved: local-docker, ephemeral, provider-ephemeral); choose a distinct name", spec.Name)
 		}
 		if _, dup := runners[spec.Name]; dup {
 			return fmt.Errorf("sandbox.remote_runners: duplicate runner name %q", spec.Name)
