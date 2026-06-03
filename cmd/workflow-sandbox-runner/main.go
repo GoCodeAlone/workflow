@@ -131,6 +131,13 @@ func checkAuthRequirement(token, caFile string, allowUnauth bool) error {
 // If certFile and keyFile are empty, the server starts without TLS (test/dev only).
 // If caFile is also set, mTLS client authentication is enabled.
 func buildServerOptions(certFile, keyFile, caFile string) ([]grpc.ServerOption, error) {
+	// mTLS requires the server to present its own certificate; a CA alone only
+	// configures client-cert verification. Refuse a --tls-ca that lacks the
+	// server cert/key, otherwise the agent would start INSECURE while the
+	// operator believes mTLS is on (checkAuthRequirement treats --tls-ca as auth).
+	if caFile != "" && (certFile == "" || keyFile == "") {
+		return nil, fmt.Errorf("--tls-ca requires both --tls-cert and --tls-key (mTLS needs the server's own certificate)")
+	}
 	if certFile == "" && keyFile == "" {
 		// No TLS — insecure mode for local development / testing.
 		return []grpc.ServerOption{grpc.Creds(insecure.NewCredentials())}, nil

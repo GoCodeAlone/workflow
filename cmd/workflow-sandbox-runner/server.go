@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
 	"log/slog"
@@ -73,6 +74,16 @@ func newSandboxExecServerWithFactory(provider secrets.Provider, log *slog.Logger
 //  4. Streams stdout/stderr chunks and terminates with an exit_code chunk.
 func (s *sandboxExecServer) Exec(req *pb.SandboxExecRequest, stream grpc.ServerStreamingServer[pb.SandboxExecChunk]) error {
 	ctx := stream.Context()
+
+	// 0. Up-front request validation. These are caller errors, not server
+	// failures — surface them as InvalidArgument rather than letting the Docker
+	// runner reject them as a generic Internal error later.
+	if len(req.GetCommand()) == 0 {
+		return status.Error(codes.InvalidArgument, "command must not be empty")
+	}
+	if req.GetImage() == "" {
+		return status.Error(codes.InvalidArgument, "image is required")
+	}
 
 	// 1. Profile clamping.
 	clampedProfile := clampProfile(req.GetProfile())
@@ -178,9 +189,15 @@ func newBearerStreamInterceptor(token string) grpc.StreamServerInterceptor {
 		if !strings.HasPrefix(authHeader, prefix) {
 			return status.Error(codes.Unauthenticated, "authorization header must use Bearer scheme")
 		}
-		// Constant-time comparison to avoid leaking the token via timing.
-		got := authHeader[len(prefix):]
-		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+		// Compare fixed-length SHA-256 digests so the comparison is constant-time
+		// AND length-independent: subtle.ConstantTimeCompare is only constant-time
+		// for equal-length inputs, so comparing the raw tokens would leak the
+		// expected token's length via a different (early-return) code path. Digests
+		// are always 32 bytes, removing that side channel.
+		presented := authHeader[len(prefix):]
+		got := sha256.Sum256([]byte(presented))
+		want := sha256.Sum256([]byte(token))
+		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
 			return status.Error(codes.Unauthenticated, "invalid bearer token")
 		}
 		return handler(srv, ss)

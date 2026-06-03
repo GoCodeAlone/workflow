@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -19,17 +20,22 @@ func TestNewSandboxRemoteRunnersModule_Empty(t *testing.T) {
 }
 
 func TestNewSandboxRemoteRunnersModule_ParsesRunners(t *testing.T) {
+	// Both runners carry a token, so they declare TLS (a token over no-TLS is
+	// rejected at Init unless allow_insecure). Here we use allow_insecure to keep
+	// the fixture about parsing rather than TLS file loading.
 	cfg := map[string]any{
 		"remote_runners": []any{
 			map[string]any{
-				"name":    "prod-runner",
-				"address": "agent.prod.example.com:50051",
-				"token":   "secret://runner/prod-token",
+				"name":           "prod-runner",
+				"address":        "agent.prod.example.com:50051",
+				"token":          "secret://runner/prod-token",
+				"allow_insecure": true,
 			},
 			map[string]any{
-				"name":    "staging-runner",
-				"address": "agent.staging.example.com:50051",
-				"token":   "staging-literal-token",
+				"name":           "staging-runner",
+				"address":        "agent.staging.example.com:50051",
+				"token":          "staging-literal-token",
+				"allow_insecure": true,
 			},
 		},
 	}
@@ -103,15 +109,21 @@ func TestNewSandboxRemoteRunnersModule_ReservedName_Error(t *testing.T) {
 // TestNewSandboxRemoteRunnersModule_DuplicateName_Error verifies a duplicate
 // runner name is rejected rather than silently overwriting the first.
 func TestNewSandboxRemoteRunnersModule_DuplicateName_Error(t *testing.T) {
+	// Both specs are otherwise valid (allow_insecure permits token-over-no-TLS),
+	// isolating the duplicate-name failure.
 	cfg := map[string]any{
 		"remote_runners": []any{
-			map[string]any{"name": "dup", "address": "a:1", "token": "t1"},
-			map[string]any{"name": "dup", "address": "b:2", "token": "t2"},
+			map[string]any{"name": "dup", "address": "a:1", "token": "t1", "allow_insecure": true},
+			map[string]any{"name": "dup", "address": "b:2", "token": "t2", "allow_insecure": true},
 		},
 	}
 	m := NewSandboxRemoteRunnersModule("rn", cfg)
-	if err := m.Init(nil); err == nil {
-		t.Error("expected error for duplicate runner name, got nil")
+	err := m.Init(nil)
+	if err == nil {
+		t.Fatal("expected error for duplicate runner name, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("expected duplicate-name error, got: %v", err)
 	}
 }
 
@@ -229,7 +241,7 @@ func TestNewSandboxRemoteRunnersModule_ParsesSecretsProvider(t *testing.T) {
 	cfg := map[string]any{
 		"secrets_provider": "my-vault",
 		"remote_runners": []any{
-			map[string]any{"name": "r1", "address": "a:1", "token": "secret://x"},
+			map[string]any{"name": "r1", "address": "a:1", "token": "secret://x", "allow_insecure": true},
 		},
 	}
 	m := NewSandboxRemoteRunnersModule("rn", cfg)
@@ -248,5 +260,124 @@ func TestRemoteRunnerRegistry_NilSafe(t *testing.T) {
 	}
 	if r.SecretsProvider() != "" {
 		t.Error("nil registry SecretsProvider should return empty")
+	}
+}
+
+// TestNewSandboxRemoteRunnersModule_TokenNoTLS_Error verifies a runner that sets
+// a token but no TLS is rejected at Init (token would travel in cleartext)
+// unless allow_insecure is set.
+func TestNewSandboxRemoteRunnersModule_TokenNoTLS_Error(t *testing.T) {
+	cfg := map[string]any{
+		"remote_runners": []any{
+			map[string]any{
+				"name":    "tok-no-tls",
+				"address": "agent.example.com:50051",
+				"token":   "some-token",
+				// no tls, no allow_insecure
+			},
+		},
+	}
+	m := NewSandboxRemoteRunnersModule("rn", cfg)
+	err := m.Init(nil)
+	if err == nil {
+		t.Fatal("expected error for token-without-TLS runner, got nil")
+	}
+	if !strings.Contains(err.Error(), "cleartext") {
+		t.Errorf("expected cleartext-token error, got: %v", err)
+	}
+}
+
+// TestNewSandboxRemoteRunnersModule_TokenNoTLS_AllowInsecure_OK verifies the
+// allow_insecure opt-in permits a token-over-no-TLS runner.
+func TestNewSandboxRemoteRunnersModule_TokenNoTLS_AllowInsecure_OK(t *testing.T) {
+	cfg := map[string]any{
+		"remote_runners": []any{
+			map[string]any{
+				"name":           "tok-insecure",
+				"address":        "localhost:50051",
+				"token":          "some-token",
+				"allow_insecure": true,
+			},
+		},
+	}
+	m := NewSandboxRemoteRunnersModule("rn", cfg)
+	if err := m.Init(nil); err != nil {
+		t.Fatalf("allow_insecure should permit token-over-no-TLS: %v", err)
+	}
+	if _, ok := m.registry.Get("tok-insecure"); !ok {
+		t.Error("expected tok-insecure registered")
+	}
+}
+
+// TestNewSandboxRemoteRunnersModule_TLSCertWithoutKey_Error verifies that a TLS
+// spec with only one of cert/key is rejected at Init (both-or-neither).
+func TestNewSandboxRemoteRunnersModule_TLSCertWithoutKey_Error(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tls  map[string]any
+	}{
+		{"cert-only", map[string]any{"cert": "/c.pem"}},
+		{"key-only", map[string]any{"key": "/k.pem"}},
+	} {
+		cfg := map[string]any{
+			"remote_runners": []any{
+				map[string]any{
+					"name":    "partial-tls",
+					"address": "agent.example.com:50051",
+					"tls":     tc.tls,
+				},
+			},
+		}
+		m := NewSandboxRemoteRunnersModule("rn", cfg)
+		if err := m.Init(nil); err == nil {
+			t.Errorf("%s: expected Init error for partial cert/key, got nil", tc.name)
+		}
+	}
+}
+
+// TestNewSandboxRemoteRunnersModule_CAOnly_OK verifies a TLS spec with only a CA
+// (server verification, no client cert) is accepted at Init.
+func TestNewSandboxRemoteRunnersModule_CAOnly_OK(t *testing.T) {
+	cfg := map[string]any{
+		"remote_runners": []any{
+			map[string]any{
+				"name":    "ca-only",
+				"address": "agent.example.com:50051",
+				"tls":     map[string]any{"ca": "/ca.pem"},
+			},
+		},
+	}
+	m := NewSandboxRemoteRunnersModule("rn", cfg)
+	if err := m.Init(nil); err != nil {
+		t.Fatalf("CA-only TLS should be accepted at Init: %v", err)
+	}
+	if _, ok := m.registry.Get("ca-only"); !ok {
+		t.Error("expected ca-only registered")
+	}
+}
+
+// TestBuildTLSConfig_CertKeyMismatch_Error verifies buildTLSConfig rejects a
+// lone cert or key (both-or-neither), rather than silently dropping client auth.
+func TestBuildTLSConfig_CertKeyMismatch_Error(t *testing.T) {
+	if _, err := buildTLSConfig("/cert.pem", "", ""); err == nil {
+		t.Error("expected error for cert without key, got nil")
+	}
+	if _, err := buildTLSConfig("", "/key.pem", ""); err == nil {
+		t.Error("expected error for key without cert, got nil")
+	}
+}
+
+// TestBuildTLSConfig_NeitherCertNorKey_OK verifies buildTLSConfig succeeds with
+// no client cert (e.g. server-verification-only via CA-less config).
+func TestBuildTLSConfig_NeitherCertNorKey_OK(t *testing.T) {
+	cfg, err := buildTLSConfig("", "", "")
+	if err != nil {
+		t.Fatalf("buildTLSConfig with no cert/key/ca: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil tls.Config")
+	}
+	if len(cfg.Certificates) != 0 {
+		t.Error("expected no client certificates")
 	}
 }

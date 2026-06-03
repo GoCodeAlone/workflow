@@ -36,8 +36,11 @@ type RemoteRunnerSpec struct {
 	Token string `yaml:"token"`
 	// TLS holds optional mTLS settings for the connection to the agent.
 	TLS *RemoteRunnerTLSSpec `yaml:"tls,omitempty"`
-	// AllowInsecure permits a non-empty Token to be sent over a non-TLS
-	// connection. Explicit opt-in for local/dev only; production must use TLS.
+	// AllowInsecure is an explicit local/dev-only opt-in that relaxes two
+	// otherwise-rejected insecure configurations:
+	//   - sending a non-empty Token over a non-TLS connection, and
+	//   - registering a runner with NEITHER a token NOR TLS.
+	// Production must use TLS (and/or a token); never set this in production.
 	AllowInsecure bool `yaml:"allow_insecure"`
 }
 
@@ -196,6 +199,18 @@ func (m *SandboxRemoteRunnersModule) Init(_ modular.Application) error {
 		if spec.Token == "" && !spec.hasTLS() && !spec.AllowInsecure {
 			return fmt.Errorf("sandbox.remote_runners: runner %q has neither a token nor TLS; set token, set tls, or set allow_insecure: true for local/dev only", spec.Name)
 		}
+		// A runner with a token but no TLS would leak the bearer token in
+		// cleartext. The client-side NewRemoteRunner enforces this too, but
+		// catch it here at Init so the misconfiguration fails fast at boot
+		// rather than at first Execute.
+		if spec.Token != "" && !spec.hasTLS() && !spec.AllowInsecure {
+			return fmt.Errorf("sandbox.remote_runners: runner %q sets a token but no TLS; the token would be sent in cleartext — set tls, or set allow_insecure: true for local/dev only", spec.Name)
+		}
+		// Client cert/key must be set together — fail fast at boot rather than at
+		// first Execute (buildTLSConfig also enforces this).
+		if spec.TLS != nil && (spec.TLS.Cert == "") != (spec.TLS.Key == "") {
+			return fmt.Errorf("sandbox.remote_runners: runner %q: tls.cert and tls.key must be set together (both-or-neither)", spec.Name)
+		}
 		runners[spec.Name] = spec
 	}
 	m.registry = &RemoteRunnerRegistry{
@@ -232,6 +247,13 @@ func (m *SandboxRemoteRunnersModule) Stop(_ context.Context) error { return nil 
 // caFile is the CA certificate for verifying the server (required when non-empty).
 func buildTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS13}
+
+	// Client cert and key must be supplied together (both-or-neither). Silently
+	// ignoring a lone cert/key would drop client authentication the operator
+	// intended to configure.
+	if (certFile == "") != (keyFile == "") {
+		return nil, fmt.Errorf("tls: 'cert' and 'key' must be set together (both-or-neither)")
+	}
 
 	if certFile != "" && keyFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)

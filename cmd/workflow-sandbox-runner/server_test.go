@@ -449,3 +449,73 @@ func TestExec_NonZeroExitCode(t *testing.T) {
 		t.Errorf("exit_code: got %d, want 7", exitCode)
 	}
 }
+
+// expectStreamCode opens the stream's first Recv (or the call error) and asserts
+// the returned gRPC status code. Used by error-path tests.
+func expectStreamCode(t *testing.T, callErr error, stream pb.SandboxExecService_ExecClient, want codes.Code) {
+	t.Helper()
+	if callErr != nil {
+		st, _ := status.FromError(callErr)
+		if st.Code() != want {
+			t.Errorf("expected %v, got %v: %v", want, st.Code(), callErr)
+		}
+		return
+	}
+	_, recvErr := stream.Recv()
+	if recvErr == nil || recvErr == io.EOF {
+		t.Fatalf("expected %v error, got: %v", want, recvErr)
+	}
+	st, _ := status.FromError(recvErr)
+	if st.Code() != want {
+		t.Errorf("expected %v, got %v: %v", want, st.Code(), recvErr)
+	}
+}
+
+// TestAuth_WrongLengthToken_Unauthenticated verifies a token of a DIFFERENT
+// LENGTH than the configured token is rejected. This guards the length-independent
+// (SHA-256 digest) comparison path: a raw ConstantTimeCompare would early-return on
+// length mismatch and leak the expected token's length via timing.
+func TestAuth_WrongLengthToken_Unauthenticated(t *testing.T) {
+	const token = "secret-token-abc" // 16 bytes
+	client, cleanup := buildTestServer(t, &fakeProvider{}, token, func(cfg sandbox.SandboxConfig) (sandbox.SandboxRunner, error) {
+		return &fakeRunner{}, nil
+	})
+	defer cleanup()
+
+	// A much shorter token (different length) must still be rejected as Unauthenticated.
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer x"))
+	stream, err := client.Exec(ctx, &pb.SandboxExecRequest{
+		Profile: "standard", Image: "alpine", Command: []string{"true"},
+	})
+	expectStreamCode(t, err, stream, codes.Unauthenticated)
+}
+
+// TestExec_EmptyCommand_InvalidArgument verifies an empty command is a caller
+// error (InvalidArgument), not a server failure (Internal).
+func TestExec_EmptyCommand_InvalidArgument(t *testing.T) {
+	client, cleanup := buildTestServer(t, &fakeProvider{}, "", func(cfg sandbox.SandboxConfig) (sandbox.SandboxRunner, error) {
+		t.Error("runner factory must not be called for an empty command")
+		return &fakeRunner{}, nil
+	})
+	defer cleanup()
+
+	stream, err := client.Exec(context.Background(), &pb.SandboxExecRequest{
+		Profile: "standard", Image: "alpine", Command: nil, // empty
+	})
+	expectStreamCode(t, err, stream, codes.InvalidArgument)
+}
+
+// TestExec_MissingImage_InvalidArgument verifies a missing image is a caller
+// error (InvalidArgument), not a server failure (Internal).
+func TestExec_MissingImage_InvalidArgument(t *testing.T) {
+	client, cleanup := buildTestServer(t, &fakeProvider{}, "", func(cfg sandbox.SandboxConfig) (sandbox.SandboxRunner, error) {
+		t.Error("runner factory must not be called for a missing image")
+		return &fakeRunner{}, nil
+	})
+	defer cleanup()
+
+	stream, err := client.Exec(context.Background(), &pb.SandboxExecRequest{
+		Profile: "standard", Image: "", Command: []string{"echo", "hi"},
+	})
+	expectStreamCode(t, err, stream, codes.InvalidArgument)
+}
