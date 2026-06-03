@@ -145,6 +145,24 @@ func TestPluginRegistrySync_ReleaseAssetPlatform(t *testing.T) {
 	}
 }
 
+func TestPluginRegistrySync_ParseReleaseChecksums(t *testing.T) {
+	got := parseReleaseChecksums(`
+44A1F367B554555A872EC274D9B50D71372D40FA66704C3F806F1CAFAF14412C  workflow-plugin-aws-darwin-amd64.tar.gz
+not-a-sha  workflow-plugin-aws-linux-amd64.tar.gz
+1f1043c2addbc1a668873d12b1696c03ab428c32df034425fc072d2235af664b  ./dist/workflow-plugin-aws-darwin-arm64.tar.gz
+`)
+
+	if got["workflow-plugin-aws-darwin-amd64.tar.gz"] != "44a1f367b554555a872ec274d9b50d71372d40fa66704c3f806f1cafaf14412c" {
+		t.Fatalf("darwin amd64 checksum = %q", got["workflow-plugin-aws-darwin-amd64.tar.gz"])
+	}
+	if got["workflow-plugin-aws-darwin-arm64.tar.gz"] != "1f1043c2addbc1a668873d12b1696c03ab428c32df034425fc072d2235af664b" {
+		t.Fatalf("darwin arm64 checksum = %q", got["workflow-plugin-aws-darwin-arm64.tar.gz"])
+	}
+	if _, ok := got["workflow-plugin-aws-linux-amd64.tar.gz"]; ok {
+		t.Fatal("invalid checksum should be ignored")
+	}
+}
+
 func TestPluginRegistrySync_MetadataSyncProjectsIaCServices(t *testing.T) {
 	raw := map[string]any{
 		"capabilities": map[string]any{
@@ -495,6 +513,48 @@ func TestPluginRegistrySync_AssetBinaryName(t *testing.T) {
 		if got := assetBinaryName(in); got != want {
 			t.Fatalf("assetBinaryName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestPluginRegistrySync_ApplyFixIncludesDownloadChecksums(t *testing.T) {
+	restoreRegistrySyncTestHooks(t)
+
+	registrySyncReleaseDownloads = func(ghRepo, tag string) ([]releaseAsset, error) {
+		if ghRepo != "owner/repo" || tag != "v1.2.3" {
+			t.Fatalf("releaseDownloads args = %q %q, want owner/repo v1.2.3", ghRepo, tag)
+		}
+		return []releaseAsset{{
+			Name:   "workflow-plugin-foo-linux-amd64.tar.gz",
+			OS:     "linux",
+			Arch:   "amd64",
+			URL:    "https://github.com/owner/repo/releases/download/v1.2.3/workflow-plugin-foo-linux-amd64.tar.gz",
+			SHA256: strings.Repeat("a", 64),
+		}}, nil
+	}
+
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	raw := map[string]any{
+		"name":    "workflow-plugin-foo",
+		"type":    "external",
+		"version": "1.0.0",
+	}
+
+	if err := applyFix(manifest, raw, "owner/repo", "v1.2.3", "1.2.3"); err != nil {
+		t.Fatalf("applyFix returned error: %v", err)
+	}
+
+	var got map[string]any
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	downloads := got["downloads"].([]any)
+	first := downloads[0].(map[string]any)
+	if first["sha256"] != strings.Repeat("a", 64) {
+		t.Fatalf("sha256 = %q", first["sha256"])
 	}
 }
 

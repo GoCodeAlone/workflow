@@ -270,10 +270,11 @@ func releaseExists(ghRepo, tag string) bool {
 }
 
 type releaseAsset struct {
-	Name string `json:"name"`
-	OS   string `json:"os"`
-	Arch string `json:"arch"`
-	URL  string `json:"url"`
+	Name   string `json:"name"`
+	OS     string `json:"os"`
+	Arch   string `json:"arch"`
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256,omitempty"`
 }
 
 // releaseDownloads returns the platform release-asset list for a tag, in the
@@ -294,15 +295,47 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 	if err := json.Unmarshal(out, &resp); err != nil {
 		return nil, err
 	}
+	checksums, _ := releaseChecksums(ghRepo, tag)
 	var assets []releaseAsset
 	for _, a := range resp.Assets {
 		goos, goarch, ok := releaseAssetPlatform(a.Name)
 		if !ok {
 			continue
 		}
-		assets = append(assets, releaseAsset{Name: a.Name, OS: goos, Arch: goarch, URL: a.URL})
+		assets = append(assets, releaseAsset{
+			Name:   a.Name,
+			OS:     goos,
+			Arch:   goarch,
+			URL:    a.URL,
+			SHA256: checksums[a.Name],
+		})
 	}
 	return assets, nil
+}
+
+func releaseChecksums(ghRepo, tag string) (map[string]string, error) {
+	cmd := exec.Command("gh", "release", "download", tag, "--repo", ghRepo, "--pattern", "checksums.txt", "--output", "-") // #nosec G204 -- ghRepo+tag from trusted manifest
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseReleaseChecksums(string(out)), nil
+}
+
+func parseReleaseChecksums(text string) map[string]string {
+	checksums := make(map[string]string)
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		sha, err := NormalizeSHA256Hex(fields[0])
+		if err != nil {
+			continue
+		}
+		checksums[filepath.Base(fields[len(fields)-1])] = sha
+	}
+	return checksums
 }
 
 func releaseAssetPlatform(assetName string) (string, string, bool) {
@@ -511,18 +544,22 @@ func versionGT(newVer, oldVer string) bool {
 }
 
 func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, targetVersion string) error {
-	downloads, _ := releaseDownloads(ghRepo, targetTag)
+	downloads, _ := registrySyncReleaseDownloads(ghRepo, targetTag)
 	if len(downloads) == 0 {
 		raw["version"] = targetVersion
 	} else {
 		raw["version"] = targetVersion
 		dlAny := make([]any, 0, len(downloads))
 		for _, dl := range downloads {
-			dlAny = append(dlAny, map[string]any{
+			entry := map[string]any{
 				"os":   dl.OS,
 				"arch": dl.Arch,
 				"url":  dl.URL,
-			})
+			}
+			if dl.SHA256 != "" {
+				entry["sha256"] = dl.SHA256
+			}
+			dlAny = append(dlAny, entry)
 		}
 		raw["downloads"] = dlAny
 	}
