@@ -26,6 +26,11 @@ type Mount struct {
 
 // SandboxConfig holds configuration for a Docker sandbox execution environment.
 type SandboxConfig struct {
+	// Profile is the security profile name that produced this config ("strict",
+	// "standard", "permissive"). It is informational — it does not affect local
+	// Docker execution but is forwarded to remote runners so they can apply their
+	// own profile clamping (ADR 0019).
+	Profile     string            `yaml:"profile,omitempty"`
 	Image       string            `yaml:"image"`
 	WorkDir     string            `yaml:"work_dir"`
 	Env         map[string]string `yaml:"env"`
@@ -44,6 +49,15 @@ type SandboxConfig struct {
 	User            string            `yaml:"user"`       // e.g., "nobody:nogroup"
 	PidsLimit       int64             `yaml:"pids_limit"` // max process count
 	Tmpfs           map[string]string `yaml:"tmpfs"`      // e.g., {"/tmp": "size=64m,noexec"}
+}
+
+// GetProfile returns the profile name stored in the config, falling back to
+// "strict" (the safest default) when the field is empty.
+func (c SandboxConfig) GetProfile() string {
+	if c.Profile != "" {
+		return c.Profile
+	}
+	return "strict"
 }
 
 // DefaultSecureSandboxConfig returns a hardened SandboxConfig suitable for

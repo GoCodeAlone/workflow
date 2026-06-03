@@ -51,6 +51,7 @@ func New() *Plugin {
 				Author:      "GoCodeAlone",
 				Description: "Generic pipeline step types, pre-processing validators, and pipeline workflow handler (including base64_decode)",
 				Tier:        plugin.TierCore,
+				ModuleTypes: []string{"sandbox.remote_runners"},
 				StepTypes: []string{
 					"step.validate",
 					"step.transform",
@@ -123,6 +124,15 @@ func (p *Plugin) Capabilities() []capability.Contract {
 		{
 			Name:        "pipeline-steps",
 			Description: "Generic pipeline step operations: validate, transform, conditional, set, log, delegate, jq, foreach, while, webhook_verify, etc.",
+		},
+	}
+}
+
+// ModuleFactories returns module factories for the pipelinesteps plugin module types.
+func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
+	return map[string]plugin.ModuleFactory{
+		"sandbox.remote_runners": func(name string, cfg map[string]any) modular.Module {
+			return module.NewSandboxRemoteRunnersModule(name, cfg)
 		},
 	}
 }

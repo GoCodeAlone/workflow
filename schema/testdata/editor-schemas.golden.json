@@ -3099,6 +3099,33 @@
       ],
       "configFields": []
     },
+    "sandbox.remote_runners": {
+      "type": "sandbox.remote_runners",
+      "label": "Sandbox Remote Runners",
+      "category": "infrastructure",
+      "description": "Registers named remote sandbox agents for use by step.sandbox_exec via exec_env",
+      "outputs": [
+        {
+          "name": "registry",
+          "type": "RemoteRunnerRegistry",
+          "description": "Named remote runner lookup registry consumed by step.sandbox_exec"
+        }
+      ],
+      "configFields": [
+        {
+          "key": "remote_runners",
+          "label": "Remote Runners",
+          "type": "array",
+          "description": "List of remote runner specs: name, address, token, tls.{cert,key,ca}, allow_insecure"
+        },
+        {
+          "key": "secrets_provider",
+          "label": "Secrets Provider",
+          "type": "string",
+          "description": "Name of a secrets module used to resolve secret:// token references"
+        }
+      ]
+    },
     "scheduler.modular": {
       "type": "scheduler.modular",
       "label": "Scheduler",

@@ -512,6 +512,7 @@ Use the generic `infra.*` module types with `provider: aws` and `step.iac_*` pip
 See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 | `iac.provider` | Cloud provider configuration (aws, gcp, azure, digitalocean) for IaC operations | platform |
 | `iac.state` | IaC state persistence (memory + filesystem + postgres in-core; spaces / s3 / gcs / azure_blob via plugins) | platform |
+| `sandbox.remote_runners` | Named remote sandbox agent registry; exposes RemoteRunnerRegistry service so `step.sandbox_exec` can dispatch to remote agents via `exec_env: <name>` | pipelinesteps |
 | `infra.vpc` | Virtual Private Cloud and subnet management | platform |
 | `infra.database` | Managed database instance provisioning and configuration | platform |
 | `infra.cache` | In-memory cache cluster provisioning (Redis, Memcached) | platform |

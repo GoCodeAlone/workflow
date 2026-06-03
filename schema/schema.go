@@ -214,6 +214,7 @@ var coreModuleTypes = []string{
 	"policy.mock",
 	"processing.step",
 	"reverseproxy",
+	"sandbox.remote_runners",
 	"scheduler.modular",
 	"secrets.aws",
 	"secrets.vault",
