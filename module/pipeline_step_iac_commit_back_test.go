@@ -271,6 +271,121 @@ func TestIaCCommitBack_PartialApplyByCount_NoCommit(t *testing.T) {
 	}
 }
 
+// TestIaCCommitBack_MissingActionCount_NoCommit is the destructive-empty
+// safety guard: an apply_result that is present with NO errors but where
+// action_count is MISSING must NOT be treated as full success. Without the
+// guard, a missing count degrades to 0 and an absent/empty actions slice makes
+// 0 == 0 → "full success" → it would COMMIT on a malformed/empty apply_result.
+func TestIaCCommitBack_MissingActionCount_NoCommit(t *testing.T) {
+	dir := t.TempDir()
+
+	var calls [][]string
+	gitFn := stubGitExecFn(t, 0, &calls)
+
+	factory := module.NewIaCCommitBackStepFactory(gitFn)
+	step, err := factory("cb", map[string]any{
+		"repo_dir": dir,
+		"branch":   "infra/auto",
+		"message":  "chore: commit back",
+		"specs": []any{
+			map[string]any{"name": "db", "type": "infra.database"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	// apply_result present, errors empty, NO actions — but action_count is
+	// entirely ABSENT from the apply step output.
+	applyResult := buildFullApplyResult(t, 0)
+	pc := &module.PipelineContext{
+		StepOutputs: map[string]map[string]any{
+			"apply": {
+				"apply_result": applyResult,
+				// action_count intentionally omitted
+			},
+		},
+	}
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute must not error on missing action_count, got: %v", err)
+	}
+
+	if committed, _ := result.Output["committed"].(bool); committed {
+		t.Error("expected committed:false when action_count is missing (destructive-empty guard)")
+	}
+	reason, _ := result.Output["reason"].(string)
+	if reason != "partial-apply" {
+		t.Errorf("expected reason 'partial-apply', got %q", reason)
+	}
+	if len(calls) > 0 {
+		t.Errorf("git must not be called when action_count is missing, got %d calls", len(calls))
+	}
+}
+
+// TestIaCCommitBack_NonNumericActionCount_NoCommit asserts that a present but
+// non-numeric action_count (e.g. a string) is also rejected as not-full-success.
+func TestIaCCommitBack_NonNumericActionCount_NoCommit(t *testing.T) {
+	dir := t.TempDir()
+
+	var calls [][]string
+	gitFn := stubGitExecFn(t, 0, &calls)
+
+	factory := module.NewIaCCommitBackStepFactory(gitFn)
+	step, err := factory("cb", map[string]any{
+		"repo_dir": dir,
+		"branch":   "infra/auto",
+		"message":  "chore: commit back",
+		"specs": []any{
+			map[string]any{"name": "db", "type": "infra.database"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	applyResult := buildFullApplyResult(t, 0)
+	pc := &module.PipelineContext{
+		StepOutputs: map[string]map[string]any{
+			"apply": {
+				"apply_result": applyResult,
+				"action_count": "not-a-number",
+			},
+		},
+	}
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute must not error on non-numeric action_count, got: %v", err)
+	}
+	if committed, _ := result.Output["committed"].(bool); committed {
+		t.Error("expected committed:false when action_count is non-numeric")
+	}
+	if len(calls) > 0 {
+		t.Errorf("git must not be called when action_count is non-numeric, got %d calls", len(calls))
+	}
+}
+
+// TestIaCCommitBack_Factory_InvalidTarget verifies the factory rejects an
+// unknown target value rather than silently falling back to branch-push.
+func TestIaCCommitBack_Factory_InvalidTarget(t *testing.T) {
+	gitFn := stubGitExecFn(t, 0, nil)
+	factory := module.NewIaCCommitBackStepFactory(gitFn)
+	_, err := factory("cb", map[string]any{
+		"repo_dir": "/tmp",
+		"branch":   "infra/auto",
+		"target":   "force-push-to-main", // not a valid target
+		"specs":    []any{},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid target, got nil")
+	}
+	if !containsString(err.Error(), "invalid target") {
+		t.Errorf("expected 'invalid target' error, got: %v", err)
+	}
+}
+
 // TestIaCCommitBack_PartialApply_NoCommit verifies that a partial apply
 // (Errors non-empty) causes the step to skip committing and return
 // committed:false with reason:"partial-apply".

@@ -2272,7 +2272,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "draft", Type: "boolean", Description: "True iff a draft commit/PR was produced (false when no drift detected or git failed)"},
 			{Key: "ref", Type: "string", Description: "Branch or PR reference (set when draft:true)"},
 			{Key: "warning", Type: "string", Description: "The mandatory disclaimer string"},
-			{Key: "count", Type: "number", Description: "Number of drifted resources imported"},
+			{Key: "count", Type: "number", Description: "Number of drifted resources detected"},
 			{Key: "state_diverged", Type: "boolean", Description: "True when drift was detected but the git commit/push failed"},
 			{Key: "reason", Type: "string", Description: "Reason when state_diverged:true"},
 		},

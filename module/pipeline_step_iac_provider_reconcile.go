@@ -26,7 +26,7 @@ import (
 //	  "draft":          bool   — true iff a draft commit/PR was actually produced
 //	  "ref":            string — optional (branch/PR ref when draft=true)
 //	  "warning":        string — the disclaimer
-//	  "count":          int    — number of drifted resources imported
+//	  "count":          int    — number of drifted resources detected
 //	  "state_diverged": bool   — true when drift was found but git failed (no PR produced)
 //	  "reason":         string — set when state_diverged=true
 //	}
@@ -62,9 +62,10 @@ func NewIaCProviderReconcileStepFactory(gitFn GitExecFn) StepFactory {
 		if branch == "" {
 			branch = "infra/reconcile"
 		}
-		target, _ := cfg["target"].(string)
-		if target == "" {
-			target = defaultTarget
+		rawTarget, _ := cfg["target"].(string)
+		target, err := resolveTarget(rawTarget)
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_reconcile step %q: %w", name, err)
 		}
 		repoDir, _ := cfg["repo_dir"].(string)
 		if repoDir == "" {
@@ -97,14 +98,19 @@ func (s *IaCProviderReconcileStep) Execute(ctx context.Context, _ *PipelineConte
 		return nil, fmt.Errorf("iac_provider_reconcile step %q: Status: %w", s.name, err)
 	}
 
-	// Build refs from current statuses.
+	// Build refs from current statuses, and index them by Name+Type so a drift
+	// result can be matched back to its ProviderID regardless of the order or
+	// count the provider returns DetectDrift results in.
 	refs := make([]statusRef, 0, len(statuses))
+	refByKey := make(map[string]statusRef, len(statuses))
 	for _, st := range statuses {
-		refs = append(refs, statusRef{
+		r := statusRef{
 			Name:       st.Name,
 			Type:       st.Type,
 			ProviderID: st.ProviderID,
-		})
+		}
+		refs = append(refs, r)
+		refByKey[driftKey(st.Name, st.Type)] = r
 	}
 
 	drifts, err := provider.DetectDrift(ctx, statusRefsToResourceRefs(refs))
@@ -112,11 +118,20 @@ func (s *IaCProviderReconcileStep) Execute(ctx context.Context, _ *PipelineConte
 		return nil, fmt.Errorf("iac_provider_reconcile step %q: DetectDrift: %w", s.name, err)
 	}
 
-	// Step 2: collect drifted resources.
+	// Step 2: collect drifted resources by matching each drift result back to a
+	// status ref via Name+Type — NOT by positional index, which assumes the
+	// provider preserves order+length (a wrong-ProviderID / out-of-range hazard).
 	var drifted []statusRef
-	for i, d := range drifts {
-		if d.Drifted {
-			drifted = append(drifted, refs[i])
+	for _, d := range drifts {
+		if !d.Drifted {
+			continue
+		}
+		if r, ok := refByKey[driftKey(d.Name, d.Type)]; ok {
+			drifted = append(drifted, r)
+		} else {
+			// Drift reported for a resource Status didn't list — carry the
+			// drift's own identity (no ProviderID available to import by).
+			drifted = append(drifted, statusRef{Name: d.Name, Type: d.Type})
 		}
 	}
 
@@ -233,6 +248,13 @@ type statusRef struct {
 	Name       string
 	Type       string
 	ProviderID string
+}
+
+// driftKey is the identity used to match a DriftResult back to its status ref.
+// Name+Type together identify a resource within a provider's namespace; the
+// NUL separator avoids ambiguity between e.g. ("ab","c") and ("a","bc").
+func driftKey(name, typ string) string {
+	return name + "\x00" + typ
 }
 
 // statusRefsToResourceRefs converts []statusRef to []interfaces.ResourceRef.

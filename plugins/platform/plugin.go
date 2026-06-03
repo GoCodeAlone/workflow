@@ -49,8 +49,22 @@ func gitExecFn(ctx context.Context, argv []string, env map[string]string, workDi
 	// trusted; this is the explicit host-native design (see comment above).
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // G204: trusted literal binary + no shell; see func doc
 	cmd.Dir = workDir
-	cmd.Env = os.Environ()
+	// Build the environment from a map so that explicit overrides reliably win:
+	// appending env over a copy of os.Environ() would leave DUPLICATE KEY=
+	// entries, and some platforms honor the FIRST occurrence — meaning a
+	// GH_TOKEN override might not take effect. Materializing from a map yields
+	// exactly one entry per key with the override applied last.
+	envMap := make(map[string]string)
+	for _, kv := range os.Environ() {
+		if eq := strings.IndexByte(kv, '='); eq >= 0 {
+			envMap[kv[:eq]] = kv[eq+1:]
+		}
+	}
 	for k, v := range env {
+		envMap[k] = v
+	}
+	cmd.Env = make([]string, 0, len(envMap))
+	for k, v := range envMap {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 	out, err := cmd.CombinedOutput()

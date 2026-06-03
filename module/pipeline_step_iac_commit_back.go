@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,8 +51,25 @@ type IaCCommitBackStep struct {
 const (
 	defaultApplyResultFrom = "steps.apply.apply_result"
 	defaultTarget          = "branch-push"
+	targetBranchPush       = "branch-push"
+	targetGHPR             = "gh-pr"
 	specsYAMLFilename      = "resources.yaml"
 )
+
+// resolveTarget validates a configured publish target. An empty value defaults
+// to branch-push; any value other than "branch-push" or "gh-pr" is rejected
+// (so a typo silently falling back to branch-push can't push to an unintended
+// place). Shared by step.iac_commit_back and step.iac_provider_reconcile.
+func resolveTarget(raw string) (string, error) {
+	switch raw {
+	case "":
+		return defaultTarget, nil
+	case targetBranchPush, targetGHPR:
+		return raw, nil
+	default:
+		return "", fmt.Errorf("invalid target %q (must be %q or %q)", raw, targetBranchPush, targetGHPR)
+	}
+}
 
 // NewIaCCommitBackStepFactory returns a StepFactory for step.iac_commit_back.
 // gitFn is the git executor — pass the prod impl from plugins/platform/plugin.go
@@ -74,9 +92,10 @@ func NewIaCCommitBackStepFactory(gitFn GitExecFn) StepFactory {
 		if message == "" {
 			message = "chore: commit back applied infrastructure specs"
 		}
-		target, _ := cfg["target"].(string)
-		if target == "" {
-			target = defaultTarget
+		rawTarget, _ := cfg["target"].(string)
+		target, err := resolveTarget(rawTarget)
+		if err != nil {
+			return nil, fmt.Errorf("iac_commit_back step %q: %w", name, err)
 		}
 		applyResultFrom, _ := cfg["apply_result_from"].(string)
 		if applyResultFrom == "" {
@@ -91,7 +110,6 @@ func NewIaCCommitBackStepFactory(gitFn GitExecFn) StepFactory {
 
 		var specs []interfaces.ResourceSpec
 		if hasStaticSpecs {
-			var err error
 			specs, err = parseResourceSpecs(cfg["specs"])
 			if err != nil {
 				return nil, fmt.Errorf("iac_commit_back step %q: parse specs: %w", name, err)
@@ -197,8 +215,12 @@ func (s *IaCCommitBackStep) Execute(ctx context.Context, pc *PipelineContext) (*
 }
 
 // isFullSuccess returns true iff the apply result has no errors AND the number
-// of recorded action outcomes matches action_count (both decoded from JSON
-// so all numbers are float64).
+// of recorded action outcomes matches a PRESENT, numeric action_count.
+//
+// action_count MUST be present and numeric: a missing/non-numeric action_count
+// is treated as NOT full success. Otherwise a malformed or empty apply_result
+// (no action_count, no actions) would degrade to 0 == 0 → "full success" and
+// commit on garbage input — a destructive-empty hazard.
 func isFullSuccess(rawApplyResult any, rawActionCount any) bool {
 	if rawApplyResult == nil {
 		return false
@@ -213,11 +235,14 @@ func isFullSuccess(rawApplyResult any, rawActionCount any) bool {
 			return false
 		}
 	}
-	// action_count is the number of planned actions; Actions slice in the result
-	// should match. Both come from JSON decode so they are float64.
-	actionCount := int(toFloat64(rawActionCount))
+	// action_count is the number of planned actions; the Actions slice in the
+	// result must match. Require action_count present + numeric — never infer 0.
+	actionCount, ok := toFloat64(rawActionCount)
+	if !ok {
+		return false
+	}
 	actions, _ := m["actions"].([]any)
-	return len(actions) == actionCount
+	return len(actions) == int(actionCount)
 }
 
 // replaceLastSegment replaces the last dot-separated segment of path with newSeg.
@@ -231,18 +256,26 @@ func replaceLastSegment(path, newSeg string) string {
 	return newSeg
 }
 
-// toFloat64 safely converts JSON-decoded numeric values (float64 from json.Unmarshal,
-// or int/int64 from direct Go construction) to float64.
-func toFloat64(v any) float64 {
+// toFloat64 converts a JSON-decoded numeric value (float64 from json.Unmarshal,
+// json.Number, or int/int64/float32 from direct Go construction) to float64.
+// The second return is false when v is nil or not a numeric type, so callers
+// can distinguish "absent/non-numeric" from a legitimate zero.
+func toFloat64(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
-		return n
-	case int:
-		return float64(n)
-	case int64:
-		return float64(n)
+		return n, true
 	case float32:
-		return float64(n)
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return f, true
 	}
-	return 0
+	return 0, false
 }

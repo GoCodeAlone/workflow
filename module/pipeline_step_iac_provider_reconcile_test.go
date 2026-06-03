@@ -23,6 +23,22 @@ func (s *stubDriftImportProvider) Import(_ context.Context, _ string, _ string) 
 // compile-time check
 var _ interfaces.IaCProvider = (*stubDriftImportProvider)(nil)
 
+// capturingImportProvider records each (cloudID, resourceType) Import was called
+// with and returns a ResourceState echoing that cloudID, so a test can assert
+// the step imported each drifted resource by its CORRECT ProviderID — proving
+// drift→ref matching is identity-based, not positional.
+type capturingImportProvider struct {
+	stubIaCProvider
+	importedCloudIDs []string
+}
+
+func (s *capturingImportProvider) Import(_ context.Context, cloudID string, resourceType string) (*interfaces.ResourceState, error) {
+	s.importedCloudIDs = append(s.importedCloudIDs, cloudID)
+	return &interfaces.ResourceState{ProviderID: cloudID, Type: resourceType}, nil
+}
+
+var _ interfaces.IaCProvider = (*capturingImportProvider)(nil)
+
 // ─── step.iac_provider_reconcile tests ───────────────────────────────────────
 
 // TestIaCProviderReconcile_DriftedProducesDraftCommit verifies that when the
@@ -337,6 +353,87 @@ func TestIaCProviderReconcile_GitFails_StateDiverged(t *testing.T) {
 	// Must not claim a ref.
 	if _, ok := result.Output["ref"]; ok {
 		t.Errorf("must not claim a ref on git failure, got %v", result.Output["ref"])
+	}
+}
+
+// TestIaCProviderReconcile_DriftOrderIndependent proves that drift results are
+// matched back to their status ref by Name+Type identity, NOT by positional
+// index: DetectDrift returns results in a DIFFERENT order than the refs, yet
+// each drifted resource is imported by its CORRECT ProviderID (no swap, no
+// out-of-range panic).
+func TestIaCProviderReconcile_DriftOrderIndependent(t *testing.T) {
+	dir := t.TempDir()
+
+	var calls [][]string
+	gitFn := stubGitExecFn(t, 0, &calls)
+
+	app := module.NewMockApplication()
+	provider := &capturingImportProvider{
+		stubIaCProvider: stubIaCProvider{
+			// Status lists web (pid-web) then db (pid-db).
+			statusResult: []interfaces.ResourceStatus{
+				{Name: "web", Type: "infra.app", ProviderID: "pid-web"},
+				{Name: "db", Type: "infra.database", ProviderID: "pid-db"},
+			},
+			// DetectDrift returns them in the REVERSE order, with only db drifted.
+			driftResult: []interfaces.DriftResult{
+				{Name: "db", Type: "infra.database", Drifted: true},
+				{Name: "web", Type: "infra.app", Drifted: false},
+			},
+		},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderReconcileStepFactory(gitFn)
+	step, err := factory("reconcile", map[string]any{
+		"provider": "my-provider",
+		"branch":   "infra/reconcile",
+		"repo_dir": dir,
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	result, err := step.Execute(context.Background(), &module.PipelineContext{})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if draft, _ := result.Output["draft"].(bool); !draft {
+		t.Errorf("expected draft:true, got %v", result.Output)
+	}
+	if count, _ := result.Output["count"].(int); count != 1 {
+		t.Errorf("expected count:1 (only db drifted), got %v", result.Output["count"])
+	}
+
+	// Only db drifted → Import must be called exactly once, with pid-db (NOT
+	// pid-web, which positional indexing would have wrongly selected).
+	if len(provider.importedCloudIDs) != 1 {
+		t.Fatalf("expected exactly 1 Import call, got %d: %v", len(provider.importedCloudIDs), provider.importedCloudIDs)
+	}
+	if provider.importedCloudIDs[0] != "pid-db" {
+		t.Errorf("expected Import with correct ProviderID 'pid-db', got %q (positional matching bug)", provider.importedCloudIDs[0])
+	}
+}
+
+// TestIaCProviderReconcile_Factory_InvalidTarget verifies the factory rejects
+// an unknown target value rather than silently defaulting to branch-push.
+func TestIaCProviderReconcile_Factory_InvalidTarget(t *testing.T) {
+	gitFn := stubGitExecFn(t, 0, nil)
+	factory := module.NewIaCProviderReconcileStepFactory(gitFn)
+	_, err := factory("reconcile", map[string]any{
+		"provider": "my-provider",
+		"branch":   "infra/reconcile",
+		"repo_dir": "/tmp",
+		"target":   "yolo-merge",
+	}, module.NewMockApplication())
+	if err == nil {
+		t.Fatal("expected error for invalid target, got nil")
+	}
+	if !containsString(err.Error(), "invalid target") {
+		t.Errorf("expected 'invalid target' error, got: %v", err)
 	}
 }
 
