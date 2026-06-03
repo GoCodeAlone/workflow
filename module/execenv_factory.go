@@ -16,8 +16,10 @@ import (
 //   - "remote"    — remote runner (PR7/PR8)
 //   - "ephemeral" — ephemeral/cloud runner (PR8/PR9)
 //
-// Any other value returns a clear error so mis-spelled or not-yet-configured
-// exec_env values fail at pipeline construction time rather than silently.
+// Any other value returns a clear error at runner-resolution (step Execute)
+// time. Note: the step factory ALSO rejects unsupported exec_env values at
+// pipeline-construction time, so a mis-spelled value normally fails earlier;
+// this runtime guard is the backstop.
 // NOTE: the `app` parameter is intentionally reserved (named `_` today) — PR7/PR8
 // (remote runner) + PR9 (Argo) resolve their runner config from the service
 // registry via `app`. Do NOT drop it from the signature when wiring those cases.

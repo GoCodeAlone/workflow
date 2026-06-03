@@ -7106,6 +7106,7 @@
           "label": "Execution Environment",
           "type": "select",
           "description": "Execution backend (default local-docker; remote/ephemeral wired in later phases)",
+          "defaultValue": "local-docker",
           "options": [
             "local-docker"
           ]
