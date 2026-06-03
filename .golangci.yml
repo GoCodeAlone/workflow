@@ -58,6 +58,12 @@ linters:
     paths:
       # Exclude third-party vendored Go code bundled under ui/node_modules from analysis entirely
       - ui/node_modules
+      # Exclude protobuf-generated files. protoc-gen-go emits unsafe.Slice/
+      # unsafe.StringData (gosec G103) and protoc-gen-go-grpc emits embedded
+      # ClientStream selectors (staticcheck QF1008); neither is actionable on
+      # generated code, and gosec ignores the golangci `generated:` setting.
+      # The single \.pb\.go$ entry also covers *_grpc.pb.go.
+      - \.pb\.go$
     presets:
       - std-error-handling
 
