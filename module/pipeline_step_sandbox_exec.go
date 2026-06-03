@@ -17,6 +17,7 @@ type SandboxExecStep struct {
 	image           string
 	command         []string
 	securityProfile string
+	execEnv         string // "" or "local-docker" → local Docker; others deferred to later PRs
 	memoryLimit     int64
 	cpuLimit        float64
 	timeout         time.Duration
@@ -24,16 +25,18 @@ type SandboxExecStep struct {
 	env             map[string]string
 	mounts          []sandbox.Mount
 	failOnError     bool
+	app             modular.Application
 }
 
 // NewSandboxExecStepFactory returns a StepFactory for step.sandbox_exec.
 func NewSandboxExecStepFactory() StepFactory {
-	return func(name string, cfg map[string]any, _ modular.Application) (PipelineStep, error) {
+	return func(name string, cfg map[string]any, app modular.Application) (PipelineStep, error) {
 		step := &SandboxExecStep{
 			name:            name,
 			image:           defaultSandboxImage,
 			securityProfile: "strict",
 			failOnError:     true,
+			app:             app,
 		}
 
 		if img, ok := cfg["image"].(string); ok && img != "" {
@@ -91,6 +94,10 @@ func NewSandboxExecStepFactory() StepFactory {
 			step.network = net
 		}
 
+		if ee, ok := cfg["exec_env"].(string); ok {
+			step.execEnv = ee
+		}
+
 		if envRaw, ok := cfg["env"].(map[string]any); ok {
 			step.env = make(map[string]string, len(envRaw))
 			for k, v := range envRaw {
@@ -126,7 +133,7 @@ func (s *SandboxExecStep) Name() string { return s.name }
 func (s *SandboxExecStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	sbCfg := s.buildSandboxConfig()
 
-	sb, err := sandbox.NewDockerSandbox(sbCfg)
+	sb, err := resolveSandboxRunner(s.app, s.execEnv, sbCfg)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox_exec step %q: failed to create sandbox: %w", s.name, err)
 	}
@@ -153,29 +160,9 @@ func (s *SandboxExecStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 // buildSandboxConfig constructs a SandboxConfig based on the security profile
 // and any explicit overrides provided in the step config.
 func (s *SandboxExecStep) buildSandboxConfig() sandbox.SandboxConfig {
-	var cfg sandbox.SandboxConfig
-
-	switch s.securityProfile {
-	case "permissive":
-		cfg = sandbox.SandboxConfig{
-			Image:       s.image,
-			NetworkMode: "bridge",
-		}
-	case "standard":
-		cfg = sandbox.SandboxConfig{
-			Image:           s.image,
-			MemoryLimit:     256 * 1024 * 1024,
-			CPULimit:        0.5,
-			NetworkMode:     "bridge",
-			CapDrop:         []string{"NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE", "SETUID", "SETGID"},
-			CapAdd:          []string{"NET_BIND_SERVICE"},
-			NoNewPrivileges: true,
-			PidsLimit:       64,
-			Timeout:         5 * time.Minute,
-		}
-	default: // "strict"
-		cfg = sandbox.DefaultSecureSandboxConfig(s.image)
-	}
+	// Delegate profile→config mapping to the shared sandbox package function so
+	// remote runners (PR7/8) can reuse the same profile clamping logic.
+	cfg := sandbox.BuildSandboxConfig(s.securityProfile, s.image)
 
 	// Apply explicit overrides
 	if s.memoryLimit > 0 {
