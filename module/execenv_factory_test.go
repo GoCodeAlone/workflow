@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/iac/providerclient"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -407,8 +408,22 @@ func TestExecEnvFactory_ProviderEphemeral_WithRunnerProvider(t *testing.T) {
 	if result.ExitCode != 0 || result.Stdout != "done\n" {
 		t.Fatalf("result = %+v, want exit 0 stdout done", result)
 	}
+	if fake.runner.lastSpec.Kind != interfaces.JobKindEphemeral {
+		t.Fatalf("RunJob spec kind = %q, want %q", fake.runner.lastSpec.Kind, interfaces.JobKindEphemeral)
+	}
 	if fake.runner.lastSpec.Image != "alpine:3.19" || fake.runner.lastSpec.RunCommand != "echo done" {
 		t.Fatalf("RunJob spec = %+v", fake.runner.lastSpec)
+	}
+}
+
+func TestProviderEphemeralRunner_NilStatusErrors(t *testing.T) {
+	runner := newProviderEphemeralRunner(&nilStatusJobRunner{}, "cloud", sandbox.SandboxConfig{Image: "alpine"}, time.Millisecond)
+	_, err := runner.Exec(context.Background(), []string{"true"})
+	if err == nil {
+		t.Fatal("expected nil JobStatusReply to return an error")
+	}
+	if !strings.Contains(err.Error(), "nil job status") {
+		t.Fatalf("error = %v, want mention nil job status", err)
 	}
 }
 
@@ -460,5 +475,19 @@ func (r *fakeJobRunner) JobLogs(_ context.Context, _ interfaces.JobHandle, sink 
 			return err
 		}
 	}
+	return nil
+}
+
+type nilStatusJobRunner struct{}
+
+func (r *nilStatusJobRunner) RunJob(_ context.Context, spec interfaces.JobSpec) (*interfaces.JobHandle, error) {
+	return &interfaces.JobHandle{ID: "job-1", Name: spec.Name, Provider: "fake"}, nil
+}
+
+func (r *nilStatusJobRunner) JobStatus(context.Context, interfaces.JobHandle) (*interfaces.JobStatusReply, error) {
+	return nil, nil
+}
+
+func (r *nilStatusJobRunner) JobLogs(context.Context, interfaces.JobHandle, interfaces.LogCaptureSink) error {
 	return nil
 }

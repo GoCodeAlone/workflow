@@ -46,7 +46,7 @@ func (r *ProviderEphemeralRunner) Exec(ctx context.Context, cmd []string) (*sand
 	seq := providerEphemeralCounter.Add(1)
 	spec := interfaces.JobSpec{
 		Name:       fmt.Sprintf("provider-ephemeral-exec-%d", seq),
-		Kind:       "EPHEMERAL",
+		Kind:       interfaces.JobKindEphemeral,
 		Image:      r.cfg.Image,
 		RunCommand: strings.Join(cmd, " "),
 		EnvVars:    copyStringMapModule(r.cfg.Env),
@@ -87,7 +87,10 @@ func (r *ProviderEphemeralRunner) waitForTerminalStatus(ctx context.Context, han
 		if err != nil {
 			return nil, fmt.Errorf("provider ephemeral runner: poll job status: %w", err)
 		}
-		if status != nil && providerJobStateTerminal(status.State) {
+		if status == nil {
+			return nil, fmt.Errorf("provider ephemeral runner: provider %q returned nil job status for job %q", r.providerName, handle.ID)
+		}
+		if providerJobStateTerminal(status.State) {
 			return status, nil
 		}
 		timer := time.NewTimer(r.pollInterval)
