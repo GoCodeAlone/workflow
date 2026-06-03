@@ -5,6 +5,10 @@ package platform
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/handlers"
@@ -21,6 +25,53 @@ import (
 // (ctx, provider, plan) is satisfied without the step importing wfctlhelpers.
 func iacProviderApplyFn(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
 	return wfctlhelpers.ApplyPlanWithHooks(ctx, p, plan, wfctlhelpers.ApplyPlanHooks{})
+}
+
+// gitExecFn is the production GitExecFn passed to NewIaCCommitBackStepFactory
+// and NewIaCProviderReconcileStepFactory. It runs git/gh commands HOST-NATIVE
+// via os/exec: the engine committing back to its own repository is not
+// untrusted-code execution, and a per-call ephemeral sandbox cannot preserve
+// git working-tree state across commands or see the YAML the step wrote into
+// repo_dir. (The standard-profile Docker sandbox is retained elsewhere for the
+// remote-runner's arbitrary commands.)
+//
+// argv is the complete argument vector with the binary as argv[0]; it is run
+// directly with no shell. The command inherits the host environment (so
+// GH_TOKEN/GITHUB_TOKEN are forwarded automatically) with env merged over it.
+// workDir is the git working directory.
+func gitExecFn(ctx context.Context, argv []string, env map[string]string, workDir string) (string, error) {
+	if len(argv) == 0 {
+		return "", fmt.Errorf("gitExecFn: empty argv")
+	}
+	// argv[0] is always a literal binary name ("git"/"gh") set by the step code,
+	// and the remaining args are step-controlled and run with no shell, so there
+	// is no command-injection surface. The engine committing to its own repo is
+	// trusted; this is the explicit host-native design (see comment above).
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // G204: trusted literal binary + no shell; see func doc
+	cmd.Dir = workDir
+	// Build the environment from a map so that explicit overrides reliably win:
+	// appending env over a copy of os.Environ() would leave DUPLICATE KEY=
+	// entries, and some platforms honor the FIRST occurrence — meaning a
+	// GH_TOKEN override might not take effect. Materializing from a map yields
+	// exactly one entry per key with the override applied last.
+	envMap := make(map[string]string)
+	for _, kv := range os.Environ() {
+		if eq := strings.IndexByte(kv, '='); eq >= 0 {
+			envMap[kv[:eq]] = kv[eq+1:]
+		}
+	}
+	for k, v := range env {
+		envMap[k] = v
+	}
+	cmd.Env = make([]string, 0, len(envMap))
+	for k, v := range envMap {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("gitExecFn: %v: %w: %s", argv, err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // Plugin is the platform EnginePlugin.
@@ -44,7 +95,7 @@ func New() *Plugin {
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
 				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.dns", "platform.region", "platform.region_router", "iac.state", "app.container", "argo.workflows"},
-				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.iac_provider_list", "step.iac_provider_catalog", "step.iac_provider_plan", "step.iac_provider_apply", "step.iac_provider_destroy", "step.iac_provider_drift", "step.iac_secret_reachability", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list"},
+				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.iac_provider_list", "step.iac_provider_catalog", "step.iac_provider_plan", "step.iac_provider_apply", "step.iac_provider_destroy", "step.iac_provider_drift", "step.iac_secret_reachability", "step.iac_commit_back", "step.iac_provider_reconcile", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
 			},
@@ -154,6 +205,12 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		},
 		"step.iac_secret_reachability": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewIaCSecretReachabilityStepFactory()(name, cfg, app)
+		},
+		"step.iac_commit_back": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCCommitBackStepFactory(gitExecFn)(name, cfg, app)
+		},
+		"step.iac_provider_reconcile": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCProviderReconcileStepFactory(gitExecFn)(name, cfg, app)
 		},
 		"step.dns_plan": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewDNSPlanStepFactory()(name, cfg, app)
