@@ -149,11 +149,14 @@ func TestPluginRegistrySync_MetadataSyncProjectsIaCServices(t *testing.T) {
 	raw := map[string]any{
 		"capabilities": map[string]any{
 			"moduleTypes": []any{"old"},
+			"serviceMethods": []any{
+				"existing.service/Call",
+			},
 		},
 	}
 	pluginJSON := map[string]any{
-		"capabilities": map[string]any{
-			"moduleTypes": []any{"iac.provider"},
+		"capabilities": []any{
+			map[string]any{"name": "canonical-capability", "role": "provider"},
 		},
 		"iacServices": []any{
 			"workflow.plugin.external.iac.IaCProviderRequired",
@@ -168,15 +171,42 @@ func TestPluginRegistrySync_MetadataSyncProjectsIaCServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("capabilities type = %T", raw["capabilities"])
 	}
-	serviceMethods, ok := caps["serviceMethods"].([]any)
-	if !ok {
-		t.Fatalf("serviceMethods type = %T", caps["serviceMethods"])
+	if moduleTypes := caps["moduleTypes"].([]any); len(moduleTypes) != 1 || moduleTypes[0] != "old" {
+		t.Fatalf("canonical capabilities array should not replace registry capabilities object: %#v", caps)
 	}
-	if len(serviceMethods) != 2 || serviceMethods[1] != "workflow.plugin.external.iac.IaCProviderRunner" {
+	serviceMethods := registrySyncStringSliceFromAny(caps["serviceMethods"])
+	if len(serviceMethods) != 3 || serviceMethods[0] != "existing.service/Call" || serviceMethods[2] != "workflow.plugin.external.iac.IaCProviderRunner" {
 		t.Fatalf("serviceMethods = %#v", serviceMethods)
 	}
 	if got := raw["minEngineVersion"]; got != "0.73.0" {
 		t.Fatalf("minEngineVersion = %v, want 0.73.0", got)
+	}
+}
+
+func TestPluginRegistrySync_MetadataSyncProjectsNestedIaCServices(t *testing.T) {
+	raw := map[string]any{}
+	pluginJSON := map[string]any{
+		"capabilities": map[string]any{
+			"moduleTypes": []any{"iac.provider"},
+			"iacServices": []any{
+				"workflow.plugin.external.iac.IaCProviderRequired",
+				"workflow.plugin.external.iac.IaCProviderRunner",
+			},
+		},
+	}
+
+	syncManifestMetadataFromPluginJSON(raw, pluginJSON)
+
+	caps, ok := raw["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("capabilities type = %T", raw["capabilities"])
+	}
+	if _, ok := caps["iacServices"]; ok {
+		t.Fatalf("registry capabilities should not retain schema-unknown iacServices: %#v", caps)
+	}
+	serviceMethods := registrySyncStringSliceFromAny(caps["serviceMethods"])
+	if len(serviceMethods) != 2 || serviceMethods[1] != "workflow.plugin.external.iac.IaCProviderRunner" {
+		t.Fatalf("serviceMethods = %#v", serviceMethods)
 	}
 }
 

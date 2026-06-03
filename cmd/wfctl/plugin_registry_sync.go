@@ -296,11 +296,11 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 	}
 	var assets []releaseAsset
 	for _, a := range resp.Assets {
-		os, arch, ok := releaseAssetPlatform(a.Name)
+		goos, goarch, ok := releaseAssetPlatform(a.Name)
 		if !ok {
 			continue
 		}
-		assets = append(assets, releaseAsset{Name: a.Name, OS: os, Arch: arch, URL: a.URL})
+		assets = append(assets, releaseAsset{Name: a.Name, OS: goos, Arch: goarch, URL: a.URL})
 	}
 	return assets, nil
 }
@@ -543,16 +543,25 @@ func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, target
 }
 
 func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) {
+	var caps map[string]any
 	if caps, ok := pluginJSON["capabilities"]; ok && caps != nil {
-		raw["capabilities"] = caps
+		if capsObj, ok := caps.(map[string]any); ok {
+			raw["capabilities"] = capsObj
+		}
 	}
-	if services, ok := pluginJSON["iacServices"]; ok && services != nil {
-		caps, _ := raw["capabilities"].(map[string]any)
+	caps, _ = raw["capabilities"].(map[string]any)
+
+	services := registrySyncStringSliceFromAny(pluginJSON["iacServices"])
+	if nestedServices := registrySyncStringSliceFromAny(caps["iacServices"]); len(nestedServices) > 0 {
+		services = appendUniqueStrings(services, nestedServices...)
+		delete(caps, "iacServices")
+	}
+	if len(services) > 0 {
 		if caps == nil {
 			caps = map[string]any{}
 			raw["capabilities"] = caps
 		}
-		caps["serviceMethods"] = services
+		caps["serviceMethods"] = appendUniqueStrings(registrySyncStringSliceFromAny(caps["serviceMethods"]), services...)
 	}
 	if mev, ok := pluginJSON["minEngineVersion"]; ok && mev != nil {
 		raw["minEngineVersion"] = mev
@@ -560,6 +569,36 @@ func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) {
 	if iac, ok := pluginJSON["iacProvider"]; ok && iac != nil {
 		raw["iacProvider"] = iac
 	}
+}
+
+func registrySyncStringSliceFromAny(v any) []string {
+	switch values := v.(type) {
+	case []string:
+		return values
+	case []any:
+		var out []string
+		for _, value := range values {
+			if s, ok := value.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func appendUniqueStrings(base []string, values ...string) []string {
+	seen := make(map[string]bool, len(base)+len(values))
+	var out []string
+	for _, value := range append(base, values...) {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 // fetchPluginJSON gets the tagged plugin.json from the upstream repo via the
