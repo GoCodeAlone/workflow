@@ -296,25 +296,30 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 	}
 	var assets []releaseAsset
 	for _, a := range resp.Assets {
-		// Match goreleaser pattern: <name>-<os>-<arch>.tar.gz OR <name>_<os>_<arch>.tar.gz
-		nameNoExt := strings.TrimSuffix(a.Name, ".tar.gz")
-		nameNoExt = strings.TrimSuffix(nameNoExt, ".tgz")
-		parts := strings.Split(nameNoExt, "-")
-		if len(parts) < 3 {
-			parts = strings.Split(nameNoExt, "_")
-			if len(parts) < 3 {
-				continue
-			}
-		}
-		os := parts[len(parts)-2]
-		arch := parts[len(parts)-1]
-		// Sanity-check os/arch values
-		if !isKnownOS(os) || !isKnownArch(arch) {
+		os, arch, ok := releaseAssetPlatform(a.Name)
+		if !ok {
 			continue
 		}
 		assets = append(assets, releaseAsset{Name: a.Name, OS: os, Arch: arch, URL: a.URL})
 	}
 	return assets, nil
+}
+
+func releaseAssetPlatform(assetName string) (string, string, bool) {
+	nameNoExt := strings.TrimSuffix(assetName, ".tar.gz")
+	nameNoExt = strings.TrimSuffix(nameNoExt, ".tgz")
+	for _, sep := range []string{"-", "_"} {
+		parts := strings.Split(nameNoExt, sep)
+		if len(parts) < 3 {
+			continue
+		}
+		os := parts[len(parts)-2]
+		arch := parts[len(parts)-1]
+		if isKnownOS(os) && isKnownArch(arch) {
+			return os, arch, true
+		}
+	}
+	return "", "", false
 }
 
 var (
@@ -525,15 +530,7 @@ func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, target
 	// workflow#703 — also sync capabilities + minEngineVersion + iacProvider
 	// from the tagged plugin.json (source-of-truth in the upstream repo).
 	if pluginJSON, _ := fetchPluginJSON(ghRepo, targetTag); pluginJSON != nil {
-		if caps, ok := pluginJSON["capabilities"]; ok && caps != nil {
-			raw["capabilities"] = caps
-		}
-		if mev, ok := pluginJSON["minEngineVersion"]; ok && mev != nil {
-			raw["minEngineVersion"] = mev
-		}
-		if iac, ok := pluginJSON["iacProvider"]; ok && iac != nil {
-			raw["iacProvider"] = iac
-		}
+		syncManifestMetadataFromPluginJSON(raw, pluginJSON)
 	}
 
 	// Marshal with 2-space indent + trailing newline (matches bash jq output).
@@ -543,6 +540,26 @@ func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, target
 	}
 	out = append(out, '\n')
 	return os.WriteFile(manifestPath, out, 0644) // #nosec G306
+}
+
+func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) {
+	if caps, ok := pluginJSON["capabilities"]; ok && caps != nil {
+		raw["capabilities"] = caps
+	}
+	if services, ok := pluginJSON["iacServices"]; ok && services != nil {
+		caps, _ := raw["capabilities"].(map[string]any)
+		if caps == nil {
+			caps = map[string]any{}
+			raw["capabilities"] = caps
+		}
+		caps["serviceMethods"] = services
+	}
+	if mev, ok := pluginJSON["minEngineVersion"]; ok && mev != nil {
+		raw["minEngineVersion"] = mev
+	}
+	if iac, ok := pluginJSON["iacProvider"]; ok && iac != nil {
+		raw["iacProvider"] = iac
+	}
 }
 
 // fetchPluginJSON gets the tagged plugin.json from the upstream repo via the
