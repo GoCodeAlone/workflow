@@ -1309,6 +1309,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "timeout", Type: FieldTypeDuration, Description: "Execution timeout"},
 			{Key: "env", Type: FieldTypeMap, Description: "Environment variables"},
 			{Key: "fail_on_error", Type: FieldTypeBool, Description: "Stop pipeline if exit_code != 0", DefaultValue: true},
+			{Key: "exec_env", Type: FieldTypeSelect, Description: "Execution environment backend", Options: []string{"local-docker", "remote", "ephemeral"}, DefaultValue: "local-docker"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "exit_code", Type: "number", Description: "Container exit code"},
