@@ -2320,7 +2320,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.sandbox_exec",
 		Label:       "Sandbox Exec",
 		Category:    "pipeline",
-		Description: "Runs a command in a hardened Docker sandbox container with resource limits",
+		Description: "Runs a command in a hardened sandbox with resource limits — locally in a Docker container (default) or, via exec_env, on a remote runner or an ephemeral Argo Workflow",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "image", Label: "Image", Type: FieldTypeString, Description: "Container image URI"},
 			{Key: "command", Label: "Command", Type: FieldTypeArray, Description: "Command to execute"},

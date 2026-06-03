@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -21,6 +22,7 @@ type argoSubmitter interface {
 	SubmitWorkflow(ctx context.Context, spec *ArgoWorkflowSpec) (string, error)
 	WorkflowStatus(ctx context.Context, workflowName string) (string, error)
 	WorkflowLogs(ctx context.Context, workflowName string) ([]string, error)
+	DeleteWorkflow(ctx context.Context, workflowName string) error
 }
 
 // Compile-time assertion: *ArgoWorkflowsModule satisfies argoSubmitter.
@@ -134,6 +136,16 @@ func (r *ArgoEphemeralRunner) Exec(ctx context.Context, cmd []string) (*sandbox.
 	for {
 		select {
 		case <-ctx.Done():
+			// The caller cancelled/timed out. Best-effort terminate the submitted
+			// workflow so it doesn't keep running (and billing) in the cluster
+			// until TTL GC — analogous to the local runner stopping its container.
+			// Use a fresh short-lived ctx since the caller's is already done.
+			delCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if delErr := r.submitter.DeleteWorkflow(delCtx, runName); delErr != nil {
+				slog.Warn("argo ephemeral runner: failed to delete workflow after ctx cancellation",
+					"workflow", runName, "err", delErr)
+			}
+			cancel()
 			return nil, ctx.Err()
 		case <-ticker.C:
 			status, err := r.submitter.WorkflowStatus(ctx, runName)
@@ -151,7 +163,8 @@ done:
 	// Fetch logs and join into a single Stdout string.
 	lines, err := r.submitter.WorkflowLogs(ctx, runName)
 	if err != nil {
-		// Non-fatal: return partial result with empty stdout and log the issue.
+		// Non-fatal: surface the failure as a warning line in stdout (so the
+		// caller still gets the exit-code verdict) rather than aborting.
 		lines = []string{fmt.Sprintf("[argo ephemeral runner] warning: could not retrieve logs: %v", err)}
 	}
 	stdout := strings.Join(lines, "\n")

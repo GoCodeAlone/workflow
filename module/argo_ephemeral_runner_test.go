@@ -51,6 +51,15 @@ type fakeArgoSubmitter struct {
 	// ctx is cancelled, then returns ctx.Err(). This simulates an in-flight HTTP
 	// call that honors ctx cancellation (the real backend's doRequest behavior).
 	blockStatusOnCtx bool
+
+	// deleteCalled records whether DeleteWorkflow was invoked (best-effort
+	// cleanup on ctx cancellation).
+	deleteCalled bool
+}
+
+func (f *fakeArgoSubmitter) DeleteWorkflow(_ context.Context, _ string) error {
+	f.deleteCalled = true
+	return nil
 }
 
 func (f *fakeArgoSubmitter) SubmitWorkflow(_ context.Context, spec *ArgoWorkflowSpec) (string, error) {
@@ -312,6 +321,11 @@ func TestArgoEphemeralRunner_CtxCancelDuringPoll(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context error, got: %v", err)
 	}
+	// On cancellation the runner best-effort deletes the submitted workflow so it
+	// doesn't keep running in the cluster until TTL GC.
+	if !fake.deleteCalled {
+		t.Error("expected DeleteWorkflow to be called on ctx cancellation")
+	}
 }
 
 // TestArgoEphemeralRunner_CtxCancelDuringInFlightStatus verifies that ctx
@@ -453,4 +467,8 @@ func (c *capturingSubmitter) WorkflowStatus(ctx context.Context, name string) (s
 
 func (c *capturingSubmitter) WorkflowLogs(ctx context.Context, name string) ([]string, error) {
 	return c.inner.WorkflowLogs(ctx, name)
+}
+
+func (c *capturingSubmitter) DeleteWorkflow(ctx context.Context, name string) error {
+	return c.inner.DeleteWorkflow(ctx, name)
 }

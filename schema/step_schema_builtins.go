@@ -1299,7 +1299,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	r.Register(&StepSchema{
 		Type:        "step.sandbox_exec",
 		Plugin:      "pipelinesteps",
-		Description: "Runs a command in a hardened Docker sandbox container with resource limits.",
+		Description: "Runs a command in a hardened sandbox with resource limits — locally in a Docker container (default) or, via exec_env, on a remote runner or an ephemeral Argo Workflow.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "image", Type: FieldTypeString, Description: "Container image URI", DefaultValue: "cgr.dev/chainguard/wolfi-base:latest"},
 			{Key: "command", Type: FieldTypeArray, Description: "Command to execute in sandbox"},
@@ -1309,7 +1309,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "timeout", Type: FieldTypeDuration, Description: "Execution timeout"},
 			{Key: "env", Type: FieldTypeMap, Description: "Environment variables"},
 			{Key: "fail_on_error", Type: FieldTypeBool, Description: "Stop pipeline if exit_code != 0", DefaultValue: true},
-			{Key: "exec_env", Type: FieldTypeSelect, Description: "Execution environment backend: local-docker (default) or ephemeral (Argo Workflow on k8s, PR9). Named remote runners (sandbox.remote_runners) are not listed here because they are registered dynamically.", Options: []string{"local-docker", "ephemeral"}, DefaultValue: "local-docker"},
+			{Key: "exec_env", Type: FieldTypeSelect, Description: "Execution environment backend: local-docker (default) or ephemeral (one-off Argo Workflow on k8s). Named remote runners (configured via sandbox.remote_runners) are also valid values but are not listed here because they are registered dynamically.", Options: []string{"local-docker", "ephemeral"}, DefaultValue: "local-docker"},
 			{Key: "argo_module", Type: FieldTypeString, Description: "Name of the argo.workflows service to use when exec_env is ephemeral. If unset, the sole registered argo.workflows module is used (error if 0 or >1 exist)."},
 		},
 		Outputs: []StepOutputDef{
