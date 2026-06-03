@@ -265,7 +265,7 @@ func TestArgoWorkflows_SubmitStatusLogsDeleteLifecycle(t *testing.T) {
 		{"name": "build", "image": "golang:1.22"},
 	})
 
-	runName, err := m.SubmitWorkflow(spec)
+	runName, err := m.SubmitWorkflow(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("SubmitWorkflow: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestArgoWorkflows_SubmitStatusLogsDeleteLifecycle(t *testing.T) {
 		t.Fatal("expected non-empty run name")
 	}
 
-	status, err := m.WorkflowStatus(runName)
+	status, err := m.WorkflowStatus(context.Background(), runName)
 	if err != nil {
 		t.Fatalf("WorkflowStatus: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestArgoWorkflows_SubmitStatusLogsDeleteLifecycle(t *testing.T) {
 		t.Errorf("expected Succeeded, got %q", status)
 	}
 
-	logs, err := m.WorkflowLogs(runName)
+	logs, err := m.WorkflowLogs(context.Background(), runName)
 	if err != nil {
 		t.Fatalf("WorkflowLogs: %v", err)
 	}
@@ -289,11 +289,11 @@ func TestArgoWorkflows_SubmitStatusLogsDeleteLifecycle(t *testing.T) {
 		t.Error("expected at least one log line")
 	}
 
-	if err := m.DeleteWorkflow(runName); err != nil {
+	if err := m.DeleteWorkflow(context.Background(), runName); err != nil {
 		t.Fatalf("DeleteWorkflow: %v", err)
 	}
 
-	if _, err := m.WorkflowStatus(runName); err == nil {
+	if _, err := m.WorkflowStatus(context.Background(), runName); err == nil {
 		t.Error("expected error after deletion, got nil")
 	}
 }
@@ -305,7 +305,7 @@ func TestArgoWorkflows_SubmitRequiresRunning(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 	spec := module.TranslatePipelineToArgo("wf", "argo", nil)
-	if _, err := m.SubmitWorkflow(spec); err == nil {
+	if _, err := m.SubmitWorkflow(context.Background(), spec); err == nil {
 		t.Error("expected error submitting to non-running Argo, got nil")
 	}
 }
@@ -315,12 +315,12 @@ func TestArgoWorkflows_ListWorkflows(t *testing.T) {
 
 	for _, wfName := range []string{"wf1", "wf2"} {
 		spec := module.TranslatePipelineToArgo(wfName, "argo", nil)
-		if _, err := m.SubmitWorkflow(spec); err != nil {
+		if _, err := m.SubmitWorkflow(context.Background(), spec); err != nil {
 			t.Fatalf("SubmitWorkflow %s: %v", wfName, err)
 		}
 	}
 
-	workflows, err := m.ListWorkflows("")
+	workflows, err := m.ListWorkflows(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListWorkflows: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestArgoWorkflows_ListWorkflows(t *testing.T) {
 
 func TestArgoWorkflows_DeleteNonexistent(t *testing.T) {
 	_, m := newRunningArgoApp(t)
-	if err := m.DeleteWorkflow("ghost-workflow"); err == nil {
+	if err := m.DeleteWorkflow(context.Background(), "ghost-workflow"); err == nil {
 		t.Error("expected error deleting nonexistent workflow, got nil")
 	}
 }
@@ -394,7 +394,7 @@ func TestArgoStatusStep(t *testing.T) {
 	app, m := newRunningArgoApp(t)
 
 	spec := module.TranslatePipelineToArgo("ci", "argo", nil)
-	runName, err := m.SubmitWorkflow(spec)
+	runName, err := m.SubmitWorkflow(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("SubmitWorkflow: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestArgoStatusStep_FromContext(t *testing.T) {
 	app, m := newRunningArgoApp(t)
 
 	spec := module.TranslatePipelineToArgo("ci", "argo", nil)
-	runName, err := m.SubmitWorkflow(spec)
+	runName, err := m.SubmitWorkflow(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("SubmitWorkflow: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestArgoLogsStep(t *testing.T) {
 	app, m := newRunningArgoApp(t)
 
 	spec := module.TranslatePipelineToArgo("ci", "argo", []map[string]any{{"name": "build"}})
-	runName, err := m.SubmitWorkflow(spec)
+	runName, err := m.SubmitWorkflow(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("SubmitWorkflow: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestArgoDeleteStep(t *testing.T) {
 	app, m := newRunningArgoApp(t)
 
 	spec := module.TranslatePipelineToArgo("ci", "argo", nil)
-	runName, err := m.SubmitWorkflow(spec)
+	runName, err := m.SubmitWorkflow(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("SubmitWorkflow: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestArgoListStep(t *testing.T) {
 	app, m := newRunningArgoApp(t)
 
 	spec := module.TranslatePipelineToArgo("wf", "argo", nil)
-	if _, err := m.SubmitWorkflow(spec); err != nil {
+	if _, err := m.SubmitWorkflow(context.Background(), spec); err != nil {
 		t.Fatalf("SubmitWorkflow: %v", err)
 	}
 

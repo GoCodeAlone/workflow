@@ -1309,7 +1309,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "timeout", Type: FieldTypeDuration, Description: "Execution timeout"},
 			{Key: "env", Type: FieldTypeMap, Description: "Environment variables"},
 			{Key: "fail_on_error", Type: FieldTypeBool, Description: "Stop pipeline if exit_code != 0", DefaultValue: true},
-			{Key: "exec_env", Type: FieldTypeSelect, Description: "Execution environment backend (default local-docker; remote/ephemeral wired in later phases)", Options: []string{"local-docker"}, DefaultValue: "local-docker"},
+			{Key: "exec_env", Type: FieldTypeSelect, Description: "Execution environment backend: local-docker (default) or ephemeral (Argo Workflow on k8s, PR9). Named remote runners (sandbox.remote_runners) are not listed here because they are registered dynamically.", Options: []string{"local-docker", "ephemeral"}, DefaultValue: "local-docker"},
+			{Key: "argo_module", Type: FieldTypeString, Description: "Name of the argo.workflows service to use when exec_env is ephemeral. If unset, the sole registered argo.workflows module is used (error if 0 or >1 exist)."},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "exit_code", Type: "number", Description: "Container exit code"},

@@ -43,13 +43,13 @@ func NewArgoSubmitStepFactory() StepFactory {
 
 func (s *ArgoSubmitStep) Name() string { return s.name }
 
-func (s *ArgoSubmitStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *ArgoSubmitStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	m, err := resolveArgoModule(s.app, s.service, s.name)
 	if err != nil {
 		return nil, err
 	}
 	spec := TranslatePipelineToArgo(s.wfName, m.namespace(), s.steps)
-	runName, err := m.SubmitWorkflow(spec)
+	runName, err := m.SubmitWorkflow(ctx, spec)
 	if err != nil {
 		return nil, fmt.Errorf("argo_submit step %q: %w", s.name, err)
 	}
@@ -86,7 +86,7 @@ func NewArgoStatusStepFactory() StepFactory {
 
 func (s *ArgoStatusStep) Name() string { return s.name }
 
-func (s *ArgoStatusStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+func (s *ArgoStatusStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	m, err := resolveArgoModule(s.app, s.service, s.name)
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func (s *ArgoStatusStep) Execute(_ context.Context, pc *PipelineContext) (*StepR
 	if wfRun == "" {
 		return nil, fmt.Errorf("argo_status step %q: 'workflow_run' is required (set in config or from prior argo_submit)", s.name)
 	}
-	status, err := m.WorkflowStatus(wfRun)
+	status, err := m.WorkflowStatus(ctx, wfRun)
 	if err != nil {
 		return nil, fmt.Errorf("argo_status step %q: %w", s.name, err)
 	}
@@ -138,7 +138,7 @@ func NewArgoLogsStepFactory() StepFactory {
 
 func (s *ArgoLogsStep) Name() string { return s.name }
 
-func (s *ArgoLogsStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+func (s *ArgoLogsStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	m, err := resolveArgoModule(s.app, s.service, s.name)
 	if err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func (s *ArgoLogsStep) Execute(_ context.Context, pc *PipelineContext) (*StepRes
 	if wfRun == "" {
 		return nil, fmt.Errorf("argo_logs step %q: 'workflow_run' is required", s.name)
 	}
-	lines, err := m.WorkflowLogs(wfRun)
+	lines, err := m.WorkflowLogs(ctx, wfRun)
 	if err != nil {
 		return nil, fmt.Errorf("argo_logs step %q: %w", s.name, err)
 	}
@@ -188,7 +188,7 @@ func NewArgoDeleteStepFactory() StepFactory {
 
 func (s *ArgoDeleteStep) Name() string { return s.name }
 
-func (s *ArgoDeleteStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+func (s *ArgoDeleteStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	m, err := resolveArgoModule(s.app, s.service, s.name)
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func (s *ArgoDeleteStep) Execute(_ context.Context, pc *PipelineContext) (*StepR
 	if wfRun == "" {
 		return nil, fmt.Errorf("argo_delete step %q: 'workflow_run' is required", s.name)
 	}
-	if err := m.DeleteWorkflow(wfRun); err != nil {
+	if err := m.DeleteWorkflow(ctx, wfRun); err != nil {
 		return nil, fmt.Errorf("argo_delete step %q: %w", s.name, err)
 	}
 	return &StepResult{Output: map[string]any{
@@ -236,12 +236,12 @@ func NewArgoListStepFactory() StepFactory {
 
 func (s *ArgoListStep) Name() string { return s.name }
 
-func (s *ArgoListStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *ArgoListStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	m, err := resolveArgoModule(s.app, s.service, s.name)
 	if err != nil {
 		return nil, err
 	}
-	workflows, err := m.ListWorkflows(s.labelSelector)
+	workflows, err := m.ListWorkflows(ctx, s.labelSelector)
 	if err != nil {
 		return nil, fmt.Errorf("argo_list step %q: %w", s.name, err)
 	}

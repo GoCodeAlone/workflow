@@ -17,7 +17,8 @@ type SandboxExecStep struct {
 	image           string
 	command         []string
 	securityProfile string
-	execEnv         string // "" or "local-docker" → local Docker; others deferred to later PRs
+	execEnv         string // "" or "local-docker" → local Docker; "ephemeral" → Argo; others are remote runner names
+	argoModule      string // optional: argo.workflows module name for exec_env: ephemeral
 	memoryLimit     int64
 	cpuLimit        float64
 	timeout         time.Duration
@@ -96,12 +97,19 @@ func NewSandboxExecStepFactory() StepFactory {
 
 		if ee, ok := cfg["exec_env"].(string); ok && ee != "" {
 			// exec_env validation: "local-docker" is the local runner;
+			// "ephemeral" routes to the Argo Workflows ephemeral runner (PR9);
 			// any other non-empty string is treated as a named remote runner and
 			// validated at Execute time by resolveSandboxRunner (PR8). We no longer
 			// reject unknown values at construction time since named runner
 			// registrations are config-driven and not known until runtime.
-			// The reserved "ephemeral" value is still deferred to PR9.
 			step.execEnv = ee
+		}
+
+		if am, ok := cfg["argo_module"].(string); ok && am != "" {
+			// argo_module names the argo.workflows service to use when
+			// exec_env is "ephemeral". If unset, the factory auto-detects the
+			// sole registered *ArgoWorkflowsModule (error if 0 or >1 found).
+			step.argoModule = am
 		}
 
 		if envRaw, ok := cfg["env"].(map[string]any); ok {
@@ -139,7 +147,7 @@ func (s *SandboxExecStep) Name() string { return s.name }
 func (s *SandboxExecStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	sbCfg := s.buildSandboxConfig()
 
-	sb, err := resolveSandboxRunner(ctx, s.app, s.execEnv, sbCfg)
+	sb, err := resolveSandboxRunner(ctx, s.app, s.execEnv, sbCfg, s.argoModule)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox_exec step %q: failed to create sandbox: %w", s.name, err)
 	}

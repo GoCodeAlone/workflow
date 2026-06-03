@@ -15,30 +15,85 @@ import (
 //
 // Supported values for execEnv:
 //   - "" or "local-docker" — local Docker daemon (default).
+//   - "ephemeral" — one-off Argo Workflow on Kubernetes (PR9). Requires a
+//     configured argo.workflows module; see resolveEphemeralRunner.
 //   - any registered runner name — dispatches to the named RemoteRunner from the
 //     sandbox.remote_runners registry (PR8). The registry is looked up from the
 //     modular service registry via app. If the name is not registered, a clear
 //     error is returned at runtime (step Execute time).
 //
-// Deferred values:
-//   - "ephemeral" — ephemeral/cloud runner (PR9)
+// Note: remote runner names are not enumerable at schema-definition time because
+// they are registered dynamically via sandbox.remote_runners config.
 //
 // Validation strategy: the step factory (pipeline_step_sandbox_exec.go) no longer
 // rejects non-local-docker exec_env values at construction time — named runners are
 // determined by config at runtime, not build time. Any unresolved name (not in the
 // registry) returns an error at Execute time, which is the appropriate gate (same as
 // other service-name references in the pipeline).
-func resolveSandboxRunner(ctx context.Context, app modular.Application, execEnv string, cfg sandbox.SandboxConfig) (sandbox.SandboxRunner, error) {
+func resolveSandboxRunner(ctx context.Context, app modular.Application, execEnv string, cfg sandbox.SandboxConfig, argoModuleName string) (sandbox.SandboxRunner, error) {
 	switch execEnv {
 	case "", "local-docker":
 		return sandbox.NewLocalDockerRunner(cfg)
 	case "ephemeral":
-		// TODO(PR9): wire ephemeral/cloud runner here.
-		return nil, fmt.Errorf("sandbox_exec: exec_env %q not yet configured (deferred to PR9)", execEnv)
+		// Wire ephemeral runner via Argo Workflows module (PR9).
+		return resolveEphemeralRunner(app, argoModuleName, cfg)
 	default:
 		// Treat execEnv as a named remote runner. Look it up in the service registry.
 		return resolveNamedRemoteRunner(ctx, app, execEnv, cfg)
 	}
+}
+
+// resolveEphemeralRunner resolves an ArgoEphemeralRunner for exec_env: ephemeral.
+//
+// Module resolution:
+//   - If argoModuleName is non-empty, look it up in the service registry directly
+//     (it must be a *ArgoWorkflowsModule).
+//   - If argoModuleName is empty, scan the entire service registry for the SOLE
+//     *ArgoWorkflowsModule instance. This is the zero-config path: if exactly one
+//     argo.workflows module is configured, no explicit name is needed. If zero or
+//     more than one are found, a clear error is returned.
+func resolveEphemeralRunner(app modular.Application, argoModuleName string, cfg sandbox.SandboxConfig) (sandbox.SandboxRunner, error) {
+	if app == nil {
+		return nil, fmt.Errorf("sandbox_exec: exec_env ephemeral requires an application context (no app registered)")
+	}
+
+	var argoMod *ArgoWorkflowsModule
+
+	if argoModuleName != "" {
+		// Explicit name: look it up directly.
+		svc, ok := app.SvcRegistry()[argoModuleName]
+		if !ok {
+			return nil, fmt.Errorf("sandbox_exec: exec_env ephemeral: argo module %q not found in service registry", argoModuleName)
+		}
+		m, ok := svc.(*ArgoWorkflowsModule)
+		if !ok {
+			return nil, fmt.Errorf("sandbox_exec: exec_env ephemeral: service %q is not an *ArgoWorkflowsModule (got %T)", argoModuleName, svc)
+		}
+		argoMod = m
+	} else {
+		// Auto-detect: scan for the sole *ArgoWorkflowsModule.
+		var candidates []*ArgoWorkflowsModule
+		for _, svc := range app.SvcRegistry() {
+			if m, ok := svc.(*ArgoWorkflowsModule); ok {
+				candidates = append(candidates, m)
+			}
+		}
+		switch len(candidates) {
+		case 0:
+			return nil, fmt.Errorf("sandbox_exec: exec_env ephemeral requires a configured argo.workflows module (none found in service registry); set argo_module to name one explicitly")
+		case 1:
+			argoMod = candidates[0]
+		default:
+			names := make([]string, len(candidates))
+			for i, m := range candidates {
+				names[i] = m.Name()
+			}
+			return nil, fmt.Errorf("sandbox_exec: exec_env ephemeral: ambiguous argo.workflows module (found %d: %v); set argo_module to select one explicitly", len(candidates), names)
+		}
+	}
+
+	// pollInterval 0 → newArgoEphemeralRunner falls back to the package default.
+	return newArgoEphemeralRunner(argoMod, argoMod.namespace(), cfg, 0), nil
 }
 
 // resolveNamedRemoteRunner looks up a RemoteRunnerSpec by name from the
