@@ -108,6 +108,108 @@ func TestPluginRegistrySync_DownloadsMatchVersion(t *testing.T) {
 	})
 }
 
+func TestPluginRegistrySync_ReleaseAssetPlatform(t *testing.T) {
+	cases := []struct {
+		name     string
+		wantOS   string
+		wantArch string
+		wantOK   bool
+	}{
+		{
+			name:     "workflow-plugin-aws-linux-amd64.tar.gz",
+			wantOS:   "linux",
+			wantArch: "amd64",
+			wantOK:   true,
+		},
+		{
+			name:     "workflow-plugin-gcp_2.3.0_linux_amd64.tar.gz",
+			wantOS:   "linux",
+			wantArch: "amd64",
+			wantOK:   true,
+		},
+		{
+			name:   "checksums.txt",
+			wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotOS, gotArch, gotOK := releaseAssetPlatform(tc.name)
+			if gotOK != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", gotOK, tc.wantOK)
+			}
+			if gotOS != tc.wantOS || gotArch != tc.wantArch {
+				t.Fatalf("platform = %s/%s, want %s/%s", gotOS, gotArch, tc.wantOS, tc.wantArch)
+			}
+		})
+	}
+}
+
+func TestPluginRegistrySync_MetadataSyncProjectsIaCServices(t *testing.T) {
+	raw := map[string]any{
+		"capabilities": map[string]any{
+			"moduleTypes": []any{"old"},
+			"serviceMethods": []any{
+				"existing.service/Call",
+			},
+		},
+	}
+	pluginJSON := map[string]any{
+		"capabilities": []any{
+			map[string]any{"name": "canonical-capability", "role": "provider"},
+		},
+		"iacServices": []any{
+			"workflow.plugin.external.iac.IaCProviderRequired",
+			"workflow.plugin.external.iac.IaCProviderRunner",
+		},
+		"minEngineVersion": "0.73.0",
+	}
+
+	syncManifestMetadataFromPluginJSON(raw, pluginJSON)
+
+	caps, ok := raw["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("capabilities type = %T", raw["capabilities"])
+	}
+	if moduleTypes := caps["moduleTypes"].([]any); len(moduleTypes) != 1 || moduleTypes[0] != "old" {
+		t.Fatalf("canonical capabilities array should not replace registry capabilities object: %#v", caps)
+	}
+	serviceMethods := registrySyncStringSliceFromAny(caps["serviceMethods"])
+	if len(serviceMethods) != 3 || serviceMethods[0] != "existing.service/Call" || serviceMethods[2] != "workflow.plugin.external.iac.IaCProviderRunner" {
+		t.Fatalf("serviceMethods = %#v", serviceMethods)
+	}
+	if got := raw["minEngineVersion"]; got != "0.73.0" {
+		t.Fatalf("minEngineVersion = %v, want 0.73.0", got)
+	}
+}
+
+func TestPluginRegistrySync_MetadataSyncProjectsNestedIaCServices(t *testing.T) {
+	raw := map[string]any{}
+	pluginJSON := map[string]any{
+		"capabilities": map[string]any{
+			"moduleTypes": []any{"iac.provider"},
+			"iacServices": []any{
+				"workflow.plugin.external.iac.IaCProviderRequired",
+				"workflow.plugin.external.iac.IaCProviderRunner",
+			},
+		},
+	}
+
+	syncManifestMetadataFromPluginJSON(raw, pluginJSON)
+
+	caps, ok := raw["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("capabilities type = %T", raw["capabilities"])
+	}
+	if _, ok := caps["iacServices"]; ok {
+		t.Fatalf("registry capabilities should not retain schema-unknown iacServices: %#v", caps)
+	}
+	serviceMethods := registrySyncStringSliceFromAny(caps["serviceMethods"])
+	if len(serviceMethods) != 2 || serviceMethods[1] != "workflow.plugin.external.iac.IaCProviderRunner" {
+		t.Fatalf("serviceMethods = %#v", serviceMethods)
+	}
+}
+
 func TestPluginRegistrySync_DefaultSkipsBuiltinManifests(t *testing.T) {
 	registry := t.TempDir()
 	mustWrite(t, filepath.Join(registry, "plugins", "admincore", "manifest.json"), `{

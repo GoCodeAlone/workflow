@@ -296,25 +296,30 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 	}
 	var assets []releaseAsset
 	for _, a := range resp.Assets {
-		// Match goreleaser pattern: <name>-<os>-<arch>.tar.gz OR <name>_<os>_<arch>.tar.gz
-		nameNoExt := strings.TrimSuffix(a.Name, ".tar.gz")
-		nameNoExt = strings.TrimSuffix(nameNoExt, ".tgz")
-		parts := strings.Split(nameNoExt, "-")
+		goos, goarch, ok := releaseAssetPlatform(a.Name)
+		if !ok {
+			continue
+		}
+		assets = append(assets, releaseAsset{Name: a.Name, OS: goos, Arch: goarch, URL: a.URL})
+	}
+	return assets, nil
+}
+
+func releaseAssetPlatform(assetName string) (string, string, bool) {
+	nameNoExt := strings.TrimSuffix(assetName, ".tar.gz")
+	nameNoExt = strings.TrimSuffix(nameNoExt, ".tgz")
+	for _, sep := range []string{"-", "_"} {
+		parts := strings.Split(nameNoExt, sep)
 		if len(parts) < 3 {
-			parts = strings.Split(nameNoExt, "_")
-			if len(parts) < 3 {
-				continue
-			}
+			continue
 		}
 		os := parts[len(parts)-2]
 		arch := parts[len(parts)-1]
-		// Sanity-check os/arch values
-		if !isKnownOS(os) || !isKnownArch(arch) {
-			continue
+		if isKnownOS(os) && isKnownArch(arch) {
+			return os, arch, true
 		}
-		assets = append(assets, releaseAsset{Name: a.Name, OS: os, Arch: arch, URL: a.URL})
 	}
-	return assets, nil
+	return "", "", false
 }
 
 var (
@@ -525,15 +530,7 @@ func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, target
 	// workflow#703 — also sync capabilities + minEngineVersion + iacProvider
 	// from the tagged plugin.json (source-of-truth in the upstream repo).
 	if pluginJSON, _ := fetchPluginJSON(ghRepo, targetTag); pluginJSON != nil {
-		if caps, ok := pluginJSON["capabilities"]; ok && caps != nil {
-			raw["capabilities"] = caps
-		}
-		if mev, ok := pluginJSON["minEngineVersion"]; ok && mev != nil {
-			raw["minEngineVersion"] = mev
-		}
-		if iac, ok := pluginJSON["iacProvider"]; ok && iac != nil {
-			raw["iacProvider"] = iac
-		}
+		syncManifestMetadataFromPluginJSON(raw, pluginJSON)
 	}
 
 	// Marshal with 2-space indent + trailing newline (matches bash jq output).
@@ -543,6 +540,65 @@ func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, target
 	}
 	out = append(out, '\n')
 	return os.WriteFile(manifestPath, out, 0644) // #nosec G306
+}
+
+func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) {
+	var caps map[string]any
+	if caps, ok := pluginJSON["capabilities"]; ok && caps != nil {
+		if capsObj, ok := caps.(map[string]any); ok {
+			raw["capabilities"] = capsObj
+		}
+	}
+	caps, _ = raw["capabilities"].(map[string]any)
+
+	services := registrySyncStringSliceFromAny(pluginJSON["iacServices"])
+	if nestedServices := registrySyncStringSliceFromAny(caps["iacServices"]); len(nestedServices) > 0 {
+		services = appendUniqueStrings(services, nestedServices...)
+		delete(caps, "iacServices")
+	}
+	if len(services) > 0 {
+		if caps == nil {
+			caps = map[string]any{}
+			raw["capabilities"] = caps
+		}
+		caps["serviceMethods"] = appendUniqueStrings(registrySyncStringSliceFromAny(caps["serviceMethods"]), services...)
+	}
+	if mev, ok := pluginJSON["minEngineVersion"]; ok && mev != nil {
+		raw["minEngineVersion"] = mev
+	}
+	if iac, ok := pluginJSON["iacProvider"]; ok && iac != nil {
+		raw["iacProvider"] = iac
+	}
+}
+
+func registrySyncStringSliceFromAny(v any) []string {
+	switch values := v.(type) {
+	case []string:
+		return values
+	case []any:
+		var out []string
+		for _, value := range values {
+			if s, ok := value.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func appendUniqueStrings(base []string, values ...string) []string {
+	seen := make(map[string]bool, len(base)+len(values))
+	var out []string
+	for _, value := range append(base, values...) {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 // fetchPluginJSON gets the tagged plugin.json from the upstream repo via the
