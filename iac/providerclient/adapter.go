@@ -310,10 +310,16 @@ func (r *resourceDriverAdapter) HealthCheck(ctx context.Context, ref interfaces.
 
 // Scale calls ResourceDriver.Scale with the resource ref and replica count.
 func (r *resourceDriverAdapter) Scale(ctx context.Context, ref interfaces.ResourceRef, replicas int) (*interfaces.ResourceOutput, error) {
+	// Reject out-of-int32-range replica counts explicitly rather than silently
+	// saturating (mirrors cmd/wfctl typedResourceDriver.Scale) — a clamp could
+	// trigger an unintended scale operation.
+	if replicas < math.MinInt32 || replicas > math.MaxInt32 {
+		return nil, fmt.Errorf("providerclient %s: scale replicas %d out of int32 range", r.resourceType, replicas)
+	}
 	resp, err := r.client.Scale(ctx, &pb.ResourceScaleRequest{
 		ResourceType: r.resourceType,
 		Ref:          refToPB(ref),
-		Replicas:     clampInt32(replicas),
+		Replicas:     int32(replicas), //nolint:gosec // G115: range-checked above
 	})
 	if err != nil {
 		return nil, mapResourceDriverGRPCError(err, "Scale")
@@ -383,7 +389,7 @@ func mapResourceDriverGRPCError(err error, method string) error {
 	case codes.InvalidArgument, codes.FailedPrecondition:
 		return fmt.Errorf("%w: ResourceDriver.%s: %w", interfaces.ErrValidation, method, err)
 	case codes.Unimplemented:
-		return fmt.Errorf("%w: ResourceDriver.%s not implemented by plugin", interfaces.ErrProviderMethodUnimplemented, method)
+		return fmt.Errorf("%w: ResourceDriver.%s not implemented by plugin: %w", interfaces.ErrProviderMethodUnimplemented, method, err)
 	default:
 		// Preserve attribution (method name) while keeping the gRPC status
 		// observable through the unwrap chain.
