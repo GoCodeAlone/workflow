@@ -2320,7 +2320,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.sandbox_exec",
 		Label:       "Sandbox Exec",
 		Category:    "pipeline",
-		Description: "Runs a command in a hardened Docker sandbox container with resource limits",
+		Description: "Runs a command in a hardened sandbox with resource limits — locally in a Docker container (default) or, via exec_env, on a remote runner or an ephemeral Argo Workflow",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "image", Label: "Image", Type: FieldTypeString, Description: "Container image URI"},
 			{Key: "command", Label: "Command", Type: FieldTypeArray, Description: "Command to execute"},
@@ -2328,7 +2328,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "memory_limit", Label: "Memory Limit", Type: FieldTypeString, Description: "Memory limit (e.g. 128m)"},
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, Description: "Execution timeout"},
 			{Key: "env", Label: "Environment", Type: FieldTypeMap, Description: "Environment variables"},
-			{Key: "exec_env", Label: "Execution Environment", Type: FieldTypeSelect, Options: []string{"local-docker"}, DefaultValue: "local-docker", Description: "Execution backend (default local-docker; remote/ephemeral wired in later phases)"},
+			{Key: "exec_env", Label: "Execution Environment", Type: FieldTypeSelect, Options: []string{"local-docker", "ephemeral"}, DefaultValue: "local-docker", Description: "Execution backend: local-docker (default) or ephemeral (Argo Workflow on k8s). Named remote runners (sandbox.remote_runners) are not listed here because they are registered dynamically."},
+			{Key: "argo_module", Label: "Argo Module", Type: FieldTypeString, Description: "Name of the argo.workflows service to use when exec_env is ephemeral. If unset, the sole registered argo.workflows module is used (error if 0 or >1 exist)."},
 		},
 	})
 

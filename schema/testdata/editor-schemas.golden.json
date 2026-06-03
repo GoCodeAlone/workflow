@@ -7085,7 +7085,7 @@
       "type": "step.sandbox_exec",
       "label": "Sandbox Exec",
       "category": "pipeline",
-      "description": "Runs a command in a hardened Docker sandbox container with resource limits",
+      "description": "Runs a command in a hardened sandbox with resource limits — locally in a Docker container (default) or, via exec_env, on a remote runner or an ephemeral Argo Workflow",
       "configFields": [
         {
           "key": "image",
@@ -7132,11 +7132,18 @@
           "key": "exec_env",
           "label": "Execution Environment",
           "type": "select",
-          "description": "Execution backend (default local-docker; remote/ephemeral wired in later phases)",
+          "description": "Execution backend: local-docker (default) or ephemeral (Argo Workflow on k8s). Named remote runners (sandbox.remote_runners) are not listed here because they are registered dynamically.",
           "defaultValue": "local-docker",
           "options": [
-            "local-docker"
+            "local-docker",
+            "ephemeral"
           ]
+        },
+        {
+          "key": "argo_module",
+          "label": "Argo Module",
+          "type": "string",
+          "description": "Name of the argo.workflows service to use when exec_env is ephemeral. If unset, the sole registered argo.workflows module is used (error if 0 or \u003e1 exist)."
         }
       ]
     },

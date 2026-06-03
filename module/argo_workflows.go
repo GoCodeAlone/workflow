@@ -31,6 +31,13 @@ type ArgoWorkflowSpec struct {
 	Entrypoint string            `json:"entrypoint"`
 	Templates  []ArgoTemplate    `json:"templates"`
 	Arguments  map[string]string `json:"arguments,omitempty"`
+
+	// TTLSecondsAfterFinished, when > 0, instructs the Argo controller to
+	// auto-delete the Workflow object this many seconds after it completes
+	// (succeeds, fails, or errors). It maps to spec.ttlStrategy.secondsAfterCompletion
+	// in the Argo Workflow CRD. Used by the ephemeral runner to prevent
+	// completed one-off workflows from accumulating in the namespace.
+	TTLSecondsAfterFinished int `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
 // ArgoTemplate is a single template (DAG or step list) within an Argo Workflow.
@@ -70,16 +77,20 @@ type ArgoWorkflowsModule struct {
 }
 
 // argoBackend is the internal interface for Argo Workflows backends.
+//
+// The workflow run methods (submit/status/logs/delete/list) take a context so
+// in-flight HTTP calls in the real backend honor cancellation/deadline rather
+// than only between caller poll ticks (see argoRealBackend.doRequest).
 type argoBackend interface {
 	plan(m *ArgoWorkflowsModule) (*PlatformPlan, error)
 	apply(m *ArgoWorkflowsModule) (*PlatformResult, error)
 	status(m *ArgoWorkflowsModule) (*ArgoWorkflowState, error)
 	destroy(m *ArgoWorkflowsModule) error
-	submitWorkflow(m *ArgoWorkflowsModule, spec *ArgoWorkflowSpec) (string, error)
-	workflowStatus(m *ArgoWorkflowsModule, workflowName string) (string, error)
-	workflowLogs(m *ArgoWorkflowsModule, workflowName string) ([]string, error)
-	deleteWorkflow(m *ArgoWorkflowsModule, workflowName string) error
-	listWorkflows(m *ArgoWorkflowsModule, labelSelector string) ([]string, error)
+	submitWorkflow(ctx context.Context, m *ArgoWorkflowsModule, spec *ArgoWorkflowSpec) (string, error)
+	workflowStatus(ctx context.Context, m *ArgoWorkflowsModule, workflowName string) (string, error)
+	workflowLogs(ctx context.Context, m *ArgoWorkflowsModule, workflowName string) ([]string, error)
+	deleteWorkflow(ctx context.Context, m *ArgoWorkflowsModule, workflowName string) error
+	listWorkflows(ctx context.Context, m *ArgoWorkflowsModule, labelSelector string) ([]string, error)
 }
 
 // NewArgoWorkflowsModule creates a new ArgoWorkflowsModule.
@@ -183,29 +194,34 @@ func (m *ArgoWorkflowsModule) Destroy() error {
 }
 
 // SubmitWorkflow translates a pipeline config into an Argo Workflow spec and submits it.
-// Returns the workflow run name.
-func (m *ArgoWorkflowsModule) SubmitWorkflow(spec *ArgoWorkflowSpec) (string, error) {
-	return m.backend.submitWorkflow(m, spec)
+// Returns the workflow run name. The context bounds the underlying HTTP call in
+// the real backend so cancellation/deadline aborts an in-flight request.
+func (m *ArgoWorkflowsModule) SubmitWorkflow(ctx context.Context, spec *ArgoWorkflowSpec) (string, error) {
+	return m.backend.submitWorkflow(ctx, m, spec)
 }
 
-// WorkflowStatus returns the execution status of a workflow run.
-func (m *ArgoWorkflowsModule) WorkflowStatus(workflowName string) (string, error) {
-	return m.backend.workflowStatus(m, workflowName)
+// WorkflowStatus returns the execution status of a workflow run. The context
+// bounds the underlying HTTP call in the real backend.
+func (m *ArgoWorkflowsModule) WorkflowStatus(ctx context.Context, workflowName string) (string, error) {
+	return m.backend.workflowStatus(ctx, m, workflowName)
 }
 
-// WorkflowLogs returns log lines from a workflow run.
-func (m *ArgoWorkflowsModule) WorkflowLogs(workflowName string) ([]string, error) {
-	return m.backend.workflowLogs(m, workflowName)
+// WorkflowLogs returns log lines from a workflow run. The context bounds the
+// underlying HTTP call in the real backend.
+func (m *ArgoWorkflowsModule) WorkflowLogs(ctx context.Context, workflowName string) ([]string, error) {
+	return m.backend.workflowLogs(ctx, m, workflowName)
 }
 
-// DeleteWorkflow removes a completed or failed workflow.
-func (m *ArgoWorkflowsModule) DeleteWorkflow(workflowName string) error {
-	return m.backend.deleteWorkflow(m, workflowName)
+// DeleteWorkflow removes a completed or failed workflow. The context bounds the
+// underlying HTTP call in the real backend.
+func (m *ArgoWorkflowsModule) DeleteWorkflow(ctx context.Context, workflowName string) error {
+	return m.backend.deleteWorkflow(ctx, m, workflowName)
 }
 
-// ListWorkflows lists workflows matching the optional label selector.
-func (m *ArgoWorkflowsModule) ListWorkflows(labelSelector string) ([]string, error) {
-	return m.backend.listWorkflows(m, labelSelector)
+// ListWorkflows lists workflows matching the optional label selector. The context
+// bounds the underlying HTTP call in the real backend.
+func (m *ArgoWorkflowsModule) ListWorkflows(ctx context.Context, labelSelector string) ([]string, error) {
+	return m.backend.listWorkflows(ctx, m, labelSelector)
 }
 
 // namespace returns the configured namespace, falling back to "argo".
@@ -344,7 +360,7 @@ func (b *argoMockBackend) destroy(m *ArgoWorkflowsModule) error {
 	return nil
 }
 
-func (b *argoMockBackend) submitWorkflow(m *ArgoWorkflowsModule, spec *ArgoWorkflowSpec) (string, error) {
+func (b *argoMockBackend) submitWorkflow(_ context.Context, m *ArgoWorkflowsModule, spec *ArgoWorkflowSpec) (string, error) {
 	b.ensureInit()
 	if m.state.Status != "running" {
 		return "", fmt.Errorf("argo.workflows %q: not running (status=%s)", m.name, m.state.Status)
@@ -358,7 +374,7 @@ func (b *argoMockBackend) submitWorkflow(m *ArgoWorkflowsModule, spec *ArgoWorkf
 	return runName, nil
 }
 
-func (b *argoMockBackend) workflowStatus(m *ArgoWorkflowsModule, workflowName string) (string, error) {
+func (b *argoMockBackend) workflowStatus(_ context.Context, m *ArgoWorkflowsModule, workflowName string) (string, error) {
 	b.ensureInit()
 	status, ok := b.workflows[workflowName]
 	if !ok {
@@ -372,7 +388,7 @@ func (b *argoMockBackend) workflowStatus(m *ArgoWorkflowsModule, workflowName st
 	return status, nil
 }
 
-func (b *argoMockBackend) workflowLogs(m *ArgoWorkflowsModule, workflowName string) ([]string, error) {
+func (b *argoMockBackend) workflowLogs(_ context.Context, m *ArgoWorkflowsModule, workflowName string) ([]string, error) {
 	b.ensureInit()
 	if _, ok := b.workflows[workflowName]; !ok {
 		return nil, fmt.Errorf("argo.workflows %q: workflow %q not found", m.name, workflowName)
@@ -384,7 +400,7 @@ func (b *argoMockBackend) workflowLogs(m *ArgoWorkflowsModule, workflowName stri
 	return lines, nil
 }
 
-func (b *argoMockBackend) deleteWorkflow(m *ArgoWorkflowsModule, workflowName string) error {
+func (b *argoMockBackend) deleteWorkflow(_ context.Context, m *ArgoWorkflowsModule, workflowName string) error {
 	b.ensureInit()
 	if _, ok := b.workflows[workflowName]; !ok {
 		return fmt.Errorf("argo.workflows %q: workflow %q not found", m.name, workflowName)
@@ -394,7 +410,7 @@ func (b *argoMockBackend) deleteWorkflow(m *ArgoWorkflowsModule, workflowName st
 	return nil
 }
 
-func (b *argoMockBackend) listWorkflows(m *ArgoWorkflowsModule, labelSelector string) ([]string, error) {
+func (b *argoMockBackend) listWorkflows(_ context.Context, _ *ArgoWorkflowsModule, _ string) ([]string, error) {
 	b.ensureInit()
 	names := make([]string, 0, len(b.workflows))
 	for name := range b.workflows {
@@ -510,7 +526,7 @@ func (b *argoRealBackend) destroy(m *ArgoWorkflowsModule) error {
 
 // submitWorkflow submits an Argo Workflow via the REST API.
 // Returns the server-assigned workflow name.
-func (b *argoRealBackend) submitWorkflow(m *ArgoWorkflowsModule, spec *ArgoWorkflowSpec) (string, error) {
+func (b *argoRealBackend) submitWorkflow(ctx context.Context, m *ArgoWorkflowsModule, spec *ArgoWorkflowSpec) (string, error) {
 	ns := m.namespace()
 	if spec.Namespace != "" {
 		ns = spec.Namespace
@@ -523,7 +539,7 @@ func (b *argoRealBackend) submitWorkflow(m *ArgoWorkflowsModule, spec *ArgoWorkf
 		"workflow":  wf,
 	}
 
-	data, status, err := b.doRequest(context.Background(), http.MethodPost,
+	data, status, err := b.doRequest(ctx, http.MethodPost,
 		fmt.Sprintf("/api/v1/workflows/%s", ns), reqBody)
 	if err != nil {
 		return "", fmt.Errorf("argo submit workflow: %w", err)
@@ -543,9 +559,9 @@ func (b *argoRealBackend) submitWorkflow(m *ArgoWorkflowsModule, spec *ArgoWorkf
 	return result.Metadata.Name, nil
 }
 
-func (b *argoRealBackend) workflowStatus(m *ArgoWorkflowsModule, workflowName string) (string, error) {
+func (b *argoRealBackend) workflowStatus(ctx context.Context, m *ArgoWorkflowsModule, workflowName string) (string, error) {
 	ns := m.namespace()
-	data, status, err := b.doRequest(context.Background(), http.MethodGet,
+	data, status, err := b.doRequest(ctx, http.MethodGet,
 		fmt.Sprintf("/api/v1/workflows/%s/%s", ns, workflowName), nil)
 	if err != nil {
 		return "", fmt.Errorf("argo get workflow status: %w", err)
@@ -568,10 +584,10 @@ func (b *argoRealBackend) workflowStatus(m *ArgoWorkflowsModule, workflowName st
 	return result.Status.Phase, nil
 }
 
-func (b *argoRealBackend) workflowLogs(m *ArgoWorkflowsModule, workflowName string) ([]string, error) {
+func (b *argoRealBackend) workflowLogs(ctx context.Context, m *ArgoWorkflowsModule, workflowName string) ([]string, error) {
 	ns := m.namespace()
 	// Use the Argo log endpoint: GET /api/v1/workflows/{ns}/{name}/log?logOptions.container=main
-	data, status, err := b.doRequest(context.Background(), http.MethodGet,
+	data, status, err := b.doRequest(ctx, http.MethodGet,
 		fmt.Sprintf("/api/v1/workflows/%s/%s/log?logOptions.container=main&grep=&selector=", ns, workflowName), nil)
 	if err != nil {
 		return nil, fmt.Errorf("argo get workflow logs: %w", err)
@@ -601,9 +617,9 @@ func (b *argoRealBackend) workflowLogs(m *ArgoWorkflowsModule, workflowName stri
 	return lines, nil
 }
 
-func (b *argoRealBackend) deleteWorkflow(m *ArgoWorkflowsModule, workflowName string) error {
+func (b *argoRealBackend) deleteWorkflow(ctx context.Context, m *ArgoWorkflowsModule, workflowName string) error {
 	ns := m.namespace()
-	data, status, err := b.doRequest(context.Background(), http.MethodDelete,
+	data, status, err := b.doRequest(ctx, http.MethodDelete,
 		fmt.Sprintf("/api/v1/workflows/%s/%s", ns, workflowName), nil)
 	if err != nil {
 		return fmt.Errorf("argo delete workflow: %w", err)
@@ -617,14 +633,14 @@ func (b *argoRealBackend) deleteWorkflow(m *ArgoWorkflowsModule, workflowName st
 	return nil
 }
 
-func (b *argoRealBackend) listWorkflows(m *ArgoWorkflowsModule, labelSelector string) ([]string, error) {
+func (b *argoRealBackend) listWorkflows(ctx context.Context, m *ArgoWorkflowsModule, labelSelector string) ([]string, error) {
 	ns := m.namespace()
 	path := fmt.Sprintf("/api/v1/workflows/%s", ns)
 	if labelSelector != "" {
 		path += "?listOptions.labelSelector=" + labelSelector
 	}
 
-	data, status, err := b.doRequest(context.Background(), http.MethodGet, path, nil)
+	data, status, err := b.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("argo list workflows: %w", err)
 	}
@@ -710,6 +726,14 @@ func argoWorkflowCRD(spec *ArgoWorkflowSpec) map[string]any {
 			params = append(params, map[string]any{"name": k, "value": v})
 		}
 		wf["spec"].(map[string]any)["arguments"] = map[string]any{"parameters": params}
+	}
+
+	// Auto-cleanup: when a TTL is set, emit a ttlStrategy so the Argo controller
+	// garbage-collects the completed Workflow object (prevents namespace buildup).
+	if spec.TTLSecondsAfterFinished > 0 {
+		wf["spec"].(map[string]any)["ttlStrategy"] = map[string]any{
+			"secondsAfterCompletion": spec.TTLSecondsAfterFinished,
+		}
 	}
 
 	return wf

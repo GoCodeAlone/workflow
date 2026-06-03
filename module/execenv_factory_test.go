@@ -15,7 +15,7 @@ func TestExecEnvFactory_DefaultLocalDocker(t *testing.T) {
 	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
 
 	for _, execEnv := range []string{"", "local-docker"} {
-		runner, err := resolveSandboxRunner(context.Background(), nil, execEnv, cfg)
+		runner, err := resolveSandboxRunner(context.Background(), nil, execEnv, cfg, "")
 		if err != nil {
 			// Runner creation uses the Docker client env (DOCKER_HOST/TLS); a
 			// failure here is a Docker-availability issue, not an exec_env-routing
@@ -30,13 +30,15 @@ func TestExecEnvFactory_DefaultLocalDocker(t *testing.T) {
 	}
 }
 
-// TestExecEnvFactory_UnknownExecEnv_Error verifies that unknown or deferred
-// exec_env values return a clear error rather than silently falling through.
+// TestExecEnvFactory_UnknownExecEnv_Error verifies that unknown exec_env values
+// return a clear error rather than silently falling through.
 //
 // As of PR8, exec_env values other than "" / "local-docker" / "ephemeral" are
 // treated as named remote runner names. Without an application context (nil app),
-// they all return a "no application context" error. The reserved "ephemeral"
-// value is still explicitly deferred to PR9 with its own message.
+// they all return a "no application context" error.
+//
+// As of PR9, "ephemeral" is fully wired: with a nil app it returns a clear
+// "requires an application context" error (not "deferred to PR9").
 func TestExecEnvFactory_UnknownExecEnv_Error(t *testing.T) {
 	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
 
@@ -44,8 +46,8 @@ func TestExecEnvFactory_UnknownExecEnv_Error(t *testing.T) {
 		execEnv     string
 		errContains string
 	}{
-		// "ephemeral" is still explicitly deferred.
-		{"ephemeral", "not yet configured"},
+		// "ephemeral" now returns a clear "no application context" error (PR9 wired).
+		{"ephemeral", "application context"},
 		// Named runner names fail with "no application context" when app is nil.
 		{"remote", "not configured"},
 		{"nope", "not configured"},
@@ -53,7 +55,7 @@ func TestExecEnvFactory_UnknownExecEnv_Error(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		runner, err := resolveSandboxRunner(context.Background(), nil, tt.execEnv, cfg)
+		runner, err := resolveSandboxRunner(context.Background(), nil, tt.execEnv, cfg, "")
 		if err == nil {
 			t.Errorf("execEnv=%q: expected error, got nil runner=%v", tt.execEnv, runner)
 			if runner != nil {
@@ -88,7 +90,7 @@ func TestSandboxExec_ExecEnvAbsent_Unchanged(t *testing.T) {
 
 	// Confirm the factory resolves it to a local runner without error.
 	cfg := s.buildSandboxConfig()
-	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg)
+	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg, s.argoModule)
 	if err != nil {
 		t.Skipf("resolveSandboxRunner with empty execEnv: docker client unavailable: %v", err)
 	}
@@ -115,7 +117,7 @@ func TestSandboxExec_ExecEnvLocalDocker_ExplicitlySet(t *testing.T) {
 	}
 
 	cfg := s.buildSandboxConfig()
-	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg)
+	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg, s.argoModule)
 	if err != nil {
 		t.Skipf("docker client unavailable: %v", err)
 	}
@@ -266,7 +268,7 @@ func TestResolveNamedRemoteRunner_SecretTokenBuilds(t *testing.T) {
 		t.Fatalf("RegisterService(registry): %v", err)
 	}
 
-	runner, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine", Profile: "standard"})
+	runner, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine", Profile: "standard"}, "")
 	if err != nil {
 		t.Fatalf("resolveSandboxRunner: %v", err)
 	}
@@ -299,8 +301,79 @@ func TestResolveNamedRemoteRunner_SecretTokenNoProvider_Errors(t *testing.T) {
 		t.Fatalf("RegisterService(registry): %v", err)
 	}
 
-	_, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine"})
+	_, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine"}, "")
 	if err == nil {
 		t.Fatal("expected error: secret:// token with no provider must not build a runner")
+	}
+}
+
+// ─── ephemeral (PR9) tests ────────────────────────────────────────────────────
+
+// TestExecEnvFactory_Ephemeral_WithArgoModule verifies that exec_env: ephemeral
+// with a registered *ArgoWorkflowsModule returns a non-nil ArgoEphemeralRunner.
+func TestExecEnvFactory_Ephemeral_WithArgoModule(t *testing.T) {
+	app := NewMockApplication()
+
+	// Register a mock argo.workflows module.
+	argoMod := NewArgoWorkflowsModule("my-argo", map[string]any{
+		"backend":   "mock",
+		"namespace": "argo",
+	})
+	if err := argoMod.Init(app); err != nil {
+		t.Fatalf("argo module Init: %v", err)
+	}
+
+	cfg := sandbox.SandboxConfig{Image: "alpine:3.19", Profile: "standard"}
+
+	// Explicit name.
+	runner, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "my-argo")
+	if err != nil {
+		t.Fatalf("resolveSandboxRunner ephemeral (explicit name): %v", err)
+	}
+	if runner == nil {
+		t.Fatal("expected non-nil ArgoEphemeralRunner")
+	}
+	_ = runner.Close()
+
+	// Auto-detect (empty argoModuleName) — exactly one argo module registered.
+	runner2, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "")
+	if err != nil {
+		t.Fatalf("resolveSandboxRunner ephemeral (auto-detect): %v", err)
+	}
+	if runner2 == nil {
+		t.Fatal("expected non-nil ArgoEphemeralRunner (auto-detect)")
+	}
+	_ = runner2.Close()
+}
+
+// TestExecEnvFactory_Ephemeral_NoArgoModule verifies that exec_env: ephemeral
+// with no registered argo module returns a clear error.
+func TestExecEnvFactory_Ephemeral_NoArgoModule(t *testing.T) {
+	app := NewMockApplication()
+	// No argo module registered.
+
+	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
+	_, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "")
+	if err == nil {
+		t.Fatal("expected error when no argo module is registered for ephemeral exec_env")
+	}
+	if !strings.Contains(err.Error(), "argo.workflows") {
+		t.Errorf("expected error to mention argo.workflows, got: %v", err)
+	}
+}
+
+// TestExecEnvFactory_Ephemeral_ExplicitNameNotFound verifies a clear error when
+// the explicitly named argo_module is not in the registry.
+func TestExecEnvFactory_Ephemeral_ExplicitNameNotFound(t *testing.T) {
+	app := NewMockApplication()
+	// No module named "missing-argo" registered.
+
+	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
+	_, err := resolveSandboxRunner(context.Background(), app, "ephemeral", cfg, "missing-argo")
+	if err == nil {
+		t.Fatal("expected error for unknown argo_module name")
+	}
+	if !strings.Contains(err.Error(), "missing-argo") {
+		t.Errorf("expected error to mention module name, got: %v", err)
 	}
 }
