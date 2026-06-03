@@ -1,10 +1,12 @@
 package module
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/sandbox"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // TestExecEnvFactory_DefaultLocalDocker verifies that an empty execEnv or
@@ -13,7 +15,7 @@ func TestExecEnvFactory_DefaultLocalDocker(t *testing.T) {
 	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
 
 	for _, execEnv := range []string{"", "local-docker"} {
-		runner, err := resolveSandboxRunner(nil, execEnv, cfg)
+		runner, err := resolveSandboxRunner(context.Background(), nil, execEnv, cfg)
 		if err != nil {
 			// Runner creation uses the Docker client env (DOCKER_HOST/TLS); a
 			// failure here is a Docker-availability issue, not an exec_env-routing
@@ -30,6 +32,11 @@ func TestExecEnvFactory_DefaultLocalDocker(t *testing.T) {
 
 // TestExecEnvFactory_UnknownExecEnv_Error verifies that unknown or deferred
 // exec_env values return a clear error rather than silently falling through.
+//
+// As of PR8, exec_env values other than "" / "local-docker" / "ephemeral" are
+// treated as named remote runner names. Without an application context (nil app),
+// they all return a "no application context" error. The reserved "ephemeral"
+// value is still explicitly deferred to PR9 with its own message.
 func TestExecEnvFactory_UnknownExecEnv_Error(t *testing.T) {
 	cfg := sandbox.SandboxConfig{Image: "alpine:3.19"}
 
@@ -37,14 +44,16 @@ func TestExecEnvFactory_UnknownExecEnv_Error(t *testing.T) {
 		execEnv     string
 		errContains string
 	}{
-		{"remote", "not yet configured"},
+		// "ephemeral" is still explicitly deferred.
 		{"ephemeral", "not yet configured"},
+		// Named runner names fail with "no application context" when app is nil.
+		{"remote", "not configured"},
 		{"nope", "not configured"},
 		{"argo", "not configured"},
 	}
 
 	for _, tt := range tests {
-		runner, err := resolveSandboxRunner(nil, tt.execEnv, cfg)
+		runner, err := resolveSandboxRunner(context.Background(), nil, tt.execEnv, cfg)
 		if err == nil {
 			t.Errorf("execEnv=%q: expected error, got nil runner=%v", tt.execEnv, runner)
 			if runner != nil {
@@ -79,7 +88,7 @@ func TestSandboxExec_ExecEnvAbsent_Unchanged(t *testing.T) {
 
 	// Confirm the factory resolves it to a local runner without error.
 	cfg := s.buildSandboxConfig()
-	runner, err := resolveSandboxRunner(s.app, s.execEnv, cfg)
+	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg)
 	if err != nil {
 		t.Skipf("resolveSandboxRunner with empty execEnv: docker client unavailable: %v", err)
 	}
@@ -106,7 +115,7 @@ func TestSandboxExec_ExecEnvLocalDocker_ExplicitlySet(t *testing.T) {
 	}
 
 	cfg := s.buildSandboxConfig()
-	runner, err := resolveSandboxRunner(s.app, s.execEnv, cfg)
+	runner, err := resolveSandboxRunner(context.Background(), s.app, s.execEnv, cfg)
 	if err != nil {
 		t.Skipf("docker client unavailable: %v", err)
 	}
@@ -116,18 +125,182 @@ func TestSandboxExec_ExecEnvLocalDocker_ExplicitlySet(t *testing.T) {
 	_ = runner.Close()
 }
 
-// TestSandboxExec_Factory_InvalidExecEnv verifies the step factory rejects an
-// unsupported exec_env at construction time (fail-early), not at Execute time.
-func TestSandboxExec_Factory_InvalidExecEnv(t *testing.T) {
+// TestSandboxExec_Factory_ValidExecEnv verifies the step factory accepts exec_env
+// values at construction time. As of PR8, named remote runner names are allowed at
+// construction time (validation is deferred to Execute time, when the service registry
+// is consulted). Only "local-docker" and the empty string are local runners; all
+// other non-empty strings are accepted as potential remote runner names.
+func TestSandboxExec_Factory_ValidExecEnv(t *testing.T) {
 	app := NewMockApplication()
 	factory := NewSandboxExecStepFactory()
-	for _, ee := range []string{"remote", "ephemeral", "nope"} {
-		if _, err := factory("sb", map[string]any{"image": "alpine", "exec_env": ee}, app); err == nil {
-			t.Errorf("exec_env %q: expected factory error, got nil", ee)
+
+	// All of these must now succeed at construction time.
+	// "remote", "ephemeral", and arbitrary names are accepted — errors appear at Execute time.
+	for _, ee := range []string{"local-docker", "", "remote", "ephemeral", "nope", "prod-runner"} {
+		if _, err := factory("sb", map[string]any{"image": "alpine", "exec_env": ee}, app); err != nil {
+			t.Errorf("exec_env %q: unexpected factory error: %v", ee, err)
 		}
 	}
-	// local-docker + absent must still succeed.
-	if _, err := factory("sb", map[string]any{"image": "alpine", "exec_env": "local-docker"}, app); err != nil {
-		t.Errorf("exec_env local-docker: unexpected factory error: %v", err)
+}
+
+// mapSecretsProvider is an in-memory secrets.Provider for token-resolution tests.
+type mapSecretsProvider struct {
+	vals map[string]string
+}
+
+func (p *mapSecretsProvider) Name() string { return "map" }
+func (p *mapSecretsProvider) Get(_ context.Context, key string) (string, error) {
+	if v, ok := p.vals[key]; ok {
+		return v, nil
+	}
+	return "", secrets.ErrNotFound
+}
+func (p *mapSecretsProvider) Set(_ context.Context, _, _ string) error { return secrets.ErrUnsupported }
+func (p *mapSecretsProvider) Delete(_ context.Context, _ string) error { return secrets.ErrUnsupported }
+func (p *mapSecretsProvider) List(_ context.Context) ([]string, error) {
+	return nil, secrets.ErrUnsupported
+}
+
+// TestResolveRunnerToken_SecretRefResolvesThroughProvider is the CRITICAL test:
+// a spec token "secret://x" + a configured provider must resolve to the literal
+// secret value — NOT pass the "secret://x" string through verbatim.
+func TestResolveRunnerToken_SecretRefResolvesThroughProvider(t *testing.T) {
+	app := NewMockApplication()
+	provider := &mapSecretsProvider{vals: map[string]string{"runner/prod-token": "RESOLVED-SECRET-VALUE"}}
+	if err := app.RegisterService("my-vault", provider); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+
+	got, err := resolveRunnerToken(context.Background(), app, "my-vault", "secret://runner/prod-token", "prod-runner")
+	if err != nil {
+		t.Fatalf("resolveRunnerToken: %v", err)
+	}
+	if got != "RESOLVED-SECRET-VALUE" {
+		t.Errorf("token: got %q, want %q (must NOT pass secret:// through verbatim)", got, "RESOLVED-SECRET-VALUE")
+	}
+}
+
+// TestResolveRunnerToken_LiteralPassesThrough verifies a literal (non-secret://)
+// token is returned unchanged even when no provider is configured.
+func TestResolveRunnerToken_LiteralPassesThrough(t *testing.T) {
+	app := NewMockApplication()
+	got, err := resolveRunnerToken(context.Background(), app, "", "literal-token", "r1")
+	if err != nil {
+		t.Fatalf("resolveRunnerToken: %v", err)
+	}
+	if got != "literal-token" {
+		t.Errorf("token: got %q, want %q", got, "literal-token")
+	}
+}
+
+// TestResolveRunnerToken_Empty returns empty without error.
+func TestResolveRunnerToken_Empty(t *testing.T) {
+	app := NewMockApplication()
+	got, err := resolveRunnerToken(context.Background(), app, "", "", "r1")
+	if err != nil {
+		t.Fatalf("resolveRunnerToken: %v", err)
+	}
+	if got != "" {
+		t.Errorf("token: got %q, want empty", got)
+	}
+}
+
+// TestResolveRunnerToken_SecretRefNoProvider_Error verifies a secret:// token
+// with NO configured provider is a hard error — we must NOT send the literal
+// "secret://..." string as the Bearer header.
+func TestResolveRunnerToken_SecretRefNoProvider_Error(t *testing.T) {
+	app := NewMockApplication()
+	_, err := resolveRunnerToken(context.Background(), app, "", "secret://runner/token", "r1")
+	if err == nil {
+		t.Fatal("expected error for secret:// token with no provider, got nil")
+	}
+}
+
+// TestResolveRunnerToken_ProviderMissingRef_Error verifies a non-leaky error
+// when the provider cannot resolve the reference.
+func TestResolveRunnerToken_ProviderMissingRef_Error(t *testing.T) {
+	app := NewMockApplication()
+	provider := &mapSecretsProvider{vals: map[string]string{}}
+	if err := app.RegisterService("my-vault", provider); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+	_, err := resolveRunnerToken(context.Background(), app, "my-vault", "secret://missing", "r1")
+	if err == nil {
+		t.Fatal("expected error for unresolvable secret ref, got nil")
+	}
+	// The error must not echo the secret reference value.
+	if strings.Contains(err.Error(), "missing") {
+		t.Errorf("error leaks the secret key/ref: %v", err)
+	}
+}
+
+// TestResolveNamedRemoteRunner_SecretTokenReachesConfig is the end-to-end CRITICAL
+// check: a registered runner with a secret:// token resolves the token through the
+// provider before the RemoteRunner dials (allow_insecure lets the no-TLS+token build
+// succeed in-test). We assert the runner builds without error, proving the resolved
+// (non-secret://) value reached RemoteRunnerConfig.Token — a verbatim secret:// would
+// not change the build outcome here, so we additionally cover the value path via the
+// resolveRunnerToken unit test above.
+func TestResolveNamedRemoteRunner_SecretTokenBuilds(t *testing.T) {
+	app := NewMockApplication()
+	provider := &mapSecretsProvider{vals: map[string]string{"runner/tok": "REAL-TOKEN"}}
+	if err := app.RegisterService("vault", provider); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+
+	mod := NewSandboxRemoteRunnersModule("rn", map[string]any{
+		"secrets_provider": "vault",
+		"remote_runners": []any{
+			map[string]any{
+				"name":           "prod",
+				"address":        "localhost:50051",
+				"token":          "secret://runner/tok",
+				"allow_insecure": true, // permit token over no-TLS in-test
+			},
+		},
+	})
+	if err := mod.Init(app); err != nil {
+		t.Fatalf("module Init: %v", err)
+	}
+	if err := app.RegisterService(SandboxRemoteRunnerServiceName, mod.registry); err != nil {
+		t.Fatalf("RegisterService(registry): %v", err)
+	}
+
+	runner, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine", Profile: "standard"})
+	if err != nil {
+		t.Fatalf("resolveSandboxRunner: %v", err)
+	}
+	if runner == nil {
+		t.Fatal("expected non-nil runner")
+	}
+	_ = runner.Close()
+}
+
+// TestResolveNamedRemoteRunner_SecretTokenNoProvider_Errors verifies the
+// end-to-end path refuses to build a runner when a secret:// token cannot be
+// resolved (no provider) — instead of silently sending the literal ref.
+func TestResolveNamedRemoteRunner_SecretTokenNoProvider_Errors(t *testing.T) {
+	app := NewMockApplication()
+	mod := NewSandboxRemoteRunnersModule("rn", map[string]any{
+		// no secrets_provider configured
+		"remote_runners": []any{
+			map[string]any{
+				"name":           "prod",
+				"address":        "localhost:50051",
+				"token":          "secret://runner/tok",
+				"allow_insecure": true,
+			},
+		},
+	})
+	if err := mod.Init(app); err != nil {
+		t.Fatalf("module Init: %v", err)
+	}
+	if err := app.RegisterService(SandboxRemoteRunnerServiceName, mod.registry); err != nil {
+		t.Fatalf("RegisterService(registry): %v", err)
+	}
+
+	_, err := resolveSandboxRunner(context.Background(), app, "prod", sandbox.SandboxConfig{Image: "alpine"})
+	if err == nil {
+		t.Fatal("expected error: secret:// token with no provider must not build a runner")
 	}
 }

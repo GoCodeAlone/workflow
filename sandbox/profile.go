@@ -17,11 +17,13 @@ func BuildSandboxConfig(profile, image string) SandboxConfig {
 	switch profile {
 	case "permissive":
 		return SandboxConfig{
+			Profile:     "permissive",
 			Image:       image,
 			NetworkMode: "bridge",
 		}
 	case "standard":
 		return SandboxConfig{
+			Profile:         "standard",
 			Image:           image,
 			MemoryLimit:     256 * 1024 * 1024,
 			CPULimit:        0.5,
@@ -33,6 +35,8 @@ func BuildSandboxConfig(profile, image string) SandboxConfig {
 			Timeout:         5 * time.Minute,
 		}
 	default: // "strict" and any unknown value
-		return DefaultSecureSandboxConfig(image)
+		cfg := DefaultSecureSandboxConfig(image)
+		cfg.Profile = "strict"
+		return cfg
 	}
 }

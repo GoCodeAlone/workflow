@@ -180,6 +180,11 @@ jobs:
             cmd: ./cmd/workflow-lsp-server
             prefix: workflow-lsp-server
             platforms: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+          - name: sandbox-runner
+            cmd: ./cmd/workflow-sandbox-runner
+            prefix: workflow-sandbox-runner
+            # No windows: the agent shells to a Linux Docker daemon to run sandboxed containers.
+            platforms: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
     steps:
     - name: Check out code

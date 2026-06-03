@@ -2298,6 +2298,22 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	// ---- Sandbox Remote Runners ----
+
+	r.Register(&ModuleSchema{
+		Type:        "sandbox.remote_runners",
+		Label:       "Sandbox Remote Runners",
+		Category:    "infrastructure",
+		Description: "Registers named remote sandbox agents for use by step.sandbox_exec via exec_env",
+		// Provider-only module: it exposes a service (Outputs) but consumes no
+		// upstream service ports (no Inputs) — mirrors secrets.vault / iac.state.
+		Outputs: []ServiceIODef{{Name: "registry", Type: "RemoteRunnerRegistry", Description: "Named remote runner lookup registry consumed by step.sandbox_exec"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "remote_runners", Label: "Remote Runners", Type: FieldTypeArray, Description: "List of remote runner specs: name, address, token, tls.{cert,key,ca}, allow_insecure"},
+			{Key: "secrets_provider", Label: "Secrets Provider", Type: FieldTypeString, Description: "Name of a secrets module used to resolve secret:// token references"},
+		},
+	})
+
 	// ---- Sandbox Exec ----
 
 	r.Register(&ModuleSchema{

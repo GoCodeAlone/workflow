@@ -364,6 +364,14 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"componentId", "successTransition", "compensateTransition", "maxRetries", "retryBackoffMs", "timeoutSeconds"},
 		},
 
+		// pipelinesteps plugin (sandbox runner config module)
+		"sandbox.remote_runners": {
+			Type:       "sandbox.remote_runners",
+			Plugin:     "pipelinesteps",
+			Stateful:   false,
+			ConfigKeys: []string{"remote_runners", "secrets_provider"},
+		},
+
 		// secrets plugin
 		"secrets.vault": {
 			Type:       "secrets.vault",

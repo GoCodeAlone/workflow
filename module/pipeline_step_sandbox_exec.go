@@ -95,12 +95,12 @@ func NewSandboxExecStepFactory() StepFactory {
 		}
 
 		if ee, ok := cfg["exec_env"].(string); ok && ee != "" {
-			// Validate at factory time (fail-early, like security_profile). Only
-			// local-docker is wired in this phase; remote/ephemeral are added to
-			// this allow-list when PR7/PR8 (remote-runner) and PR9 (Argo) wire them.
-			if ee != "local-docker" {
-				return nil, fmt.Errorf("sandbox_exec step %q: exec_env %q not supported (only local-docker is wired; remote/ephemeral arrive in later phases)", name, ee)
-			}
+			// exec_env validation: "local-docker" is the local runner;
+			// any other non-empty string is treated as a named remote runner and
+			// validated at Execute time by resolveSandboxRunner (PR8). We no longer
+			// reject unknown values at construction time since named runner
+			// registrations are config-driven and not known until runtime.
+			// The reserved "ephemeral" value is still deferred to PR9.
 			step.execEnv = ee
 		}
 
@@ -139,7 +139,7 @@ func (s *SandboxExecStep) Name() string { return s.name }
 func (s *SandboxExecStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
 	sbCfg := s.buildSandboxConfig()
 
-	sb, err := resolveSandboxRunner(s.app, s.execEnv, sbCfg)
+	sb, err := resolveSandboxRunner(ctx, s.app, s.execEnv, sbCfg)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox_exec step %q: failed to create sandbox: %w", s.name, err)
 	}
