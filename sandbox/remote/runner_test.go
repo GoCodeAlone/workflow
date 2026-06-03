@@ -376,3 +376,19 @@ func TestNewRemoteRunner_TokenWithoutTLSAllowedWithOptIn(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = r.Close() })
 }
+
+// TestRemoteRunner_ExecEmptyCommandRejected verifies an empty argv is rejected
+// before any RPC (matches the local DockerSandbox runner).
+func TestRemoteRunner_ExecEmptyCommandRejected(t *testing.T) {
+	r, err := NewRemoteRunner(RemoteRunnerConfig{Address: "127.0.0.1:1", AllowInsecure: true})
+	if err != nil {
+		t.Fatalf("NewRemoteRunner: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	if _, err := r.Exec(context.Background(), nil); err == nil {
+		t.Error("expected error for nil command")
+	}
+	if _, err := r.Exec(context.Background(), []string{}); err == nil {
+		t.Error("expected error for empty command")
+	}
+}

@@ -134,6 +134,11 @@ func (r *RemoteRunner) connect() (*grpc.ClientConn, error) {
 // env VALUES that contain secret:// references are passed verbatim to the
 // agent — RemoteRunner does NOT resolve them (ADR 0017).
 func (r *RemoteRunner) Exec(ctx context.Context, cmd []string) (*sandbox.ExecResult, error) {
+	// Reject an empty argv, matching the local DockerSandbox runner — an empty
+	// command is a caller/config error, not a valid remote exec.
+	if len(cmd) == 0 {
+		return nil, fmt.Errorf("remote sandbox: empty command")
+	}
 	conn, err := r.connect()
 	if err != nil {
 		return nil, err
@@ -176,6 +181,13 @@ func (r *RemoteRunner) Exec(ctx context.Context, cmd []string) (*sandbox.ExecRes
 		case *pb.SandboxExecChunk_ExitCode:
 			exitCode = int(v.ExitCode)
 			exitCodeSeen = true
+		}
+		// exit_code is the terminal chunk per the proto contract. Stop reading as
+		// soon as it arrives rather than waiting for io.EOF — a server that sends
+		// exit_code but forgets to close (or sends trailing chunks) must not hang
+		// the client.
+		if exitCodeSeen {
+			break
 		}
 	}
 
