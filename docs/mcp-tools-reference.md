@@ -237,23 +237,26 @@ Render CI/CD workflow YAML from a workflow config. The CI workflow (`files`/`ci_
 
 #### `scaffold_environment`
 
-Generate environment configuration (Docker Compose, kubernetes manifests).
+Generate an `environments:` YAML section (per-environment provider, region, env vars, secrets provider, exposure method) for a workflow config.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `target` | string | yes | Target environment (`docker-compose`, `kubernetes`, `minikube`) |
-| `config` | string | no | Existing workflow config to analyze |
+| `provider` | string | yes | Deployment provider: `docker`, `kubernetes`, `aws-ecs`, `gcp-cloudrun`, `digitalocean` |
+| `environments` | array | no | Environment names to generate (default: `['local', 'staging', 'production']`) |
+| `secrets_provider` | string | no | Secrets provider: `env`, `aws-secrets-manager`, `gcp-secret-manager`, `vault` (default: `env`) |
+| `exposure` | string | no | Exposure method for the `local` environment: `tailscale`, `cloudflare`, `port-forward` (default: `port-forward`) |
 
 ---
 
 #### `scaffold_infra`
 
-Generate infrastructure-as-code for a workflow application.
+Generate an `infra:` YAML section by analyzing the config's modules (e.g. `database.postgres` → RDS, `cache.redis` → ElastiCache).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `provider` | string | yes | IaC provider (`opentofu`, `terraform`, `pulumi`) |
-| `config` | string | no | Existing workflow config |
+| `yaml_content` | string | yes | Workflow YAML config content to analyze for infrastructure needs |
+| `provider` | string | yes | Cloud provider for resources: `aws`, `gcp`, `azure`, `digitalocean` |
+| `environment` | string | no | Environment name for resource sizing (default: `production`) |
 
 ---
 
