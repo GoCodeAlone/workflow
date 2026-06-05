@@ -108,10 +108,15 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 			"anti-patterns (hyphenated step names, template syntax in conditionals, missing db_query mode, "+
 			"dot-access patterns, absolute dbPaths, empty routes, snake_case config keys). "+
 			"Use the registry_search tool to discover available plugins from the workflow-registry. "+
+			"For CI/CD generation use the config-derived cigen engine (analyze -> CIPlan -> render): the "+
+			"ci_plan tool analyzes a workflow config into a platform-neutral CIPlan (deploy phases, "+
+			"secrets scoped per phase, a wfctl migrations step, a health-check smoke job, and a plan-guard), "+
+			"and generate_github_actions renders it into GitHub Actions YAML - both produce CI derived "+
+			"from the app config, NOT fixed templates. Mirrors the wfctl 'ci plan' / 'ci generate' commands. "+
 			"Resources provide documentation and example configurations. "+
 			"The workflow engine includes a CLI tool called wfctl with commands for project scaffolding, "+
 			"config validation, deployment (Docker, Kubernetes, cloud), API spec extraction, "+
-			"diff/contract testing, CI/CD generation, plugin management, and Git integration. "+
+			"diff/contract testing, config-derived CI/CD generation (ci plan / ci generate), plugin management, and Git integration. "+
 			"Read the workflow://docs/overview resource for full CLI reference."),
 	)
 
