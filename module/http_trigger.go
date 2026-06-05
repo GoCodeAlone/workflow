@@ -413,7 +413,10 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig any) erro
 
 		// Get optional params
 		params, _ := routeMap["params"].(map[string]any)
-		includeRawBody := boolConfigValue(routeMap["include_raw_body"]) || boolConfigValue(routeMap["raw_body"])
+		includeRawBody := boolConfigValue(routeMap["include_raw_body"])
+		if _, ok := routeMap["include_raw_body"]; !ok {
+			includeRawBody = boolConfigValue(routeMap["raw_body"])
+		}
 
 		// Add the route
 		t.routes = append(t.routes, HTTPTriggerRoute{

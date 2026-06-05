@@ -168,9 +168,8 @@ func (p *HTTPPlugin) PipelineTriggerConfigWrappers() map[string]plugin.TriggerCo
 			}
 			if includeRawBody, ok := cfg["include_raw_body"]; ok {
 				route["include_raw_body"] = includeRawBody
-			}
-			if rawBody, ok := cfg["raw_body"]; ok {
-				route["raw_body"] = rawBody
+			} else if rawBody, ok := cfg["raw_body"]; ok {
+				route["include_raw_body"] = rawBody
 			}
 			return map[string]any{
 				"routes": []any{route},

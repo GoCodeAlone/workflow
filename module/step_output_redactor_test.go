@@ -28,6 +28,9 @@ func TestRedactStepOutput_SensitiveFields(t *testing.T) {
 		{"mfa_secret", true},
 		{"Stripe-Signature", true},
 		{"webhook_signature", true},
+		{"request_body", true},
+		{"raw_body", true},
+		{"paypal_transmission_sig", true},
 		// safe fields
 		{"username", false},
 		{"email", false},

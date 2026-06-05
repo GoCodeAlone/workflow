@@ -474,8 +474,42 @@ func TestPipelineTriggerConfigWrappers(t *testing.T) {
 		if route["include_raw_body"] != true {
 			t.Errorf("include_raw_body = %v, want true", route["include_raw_body"])
 		}
+		if _, exists := route["raw_body"]; exists {
+			t.Error("raw_body legacy alias should not be forwarded when include_raw_body is present")
+		}
 		if route["workflow"] != "pipeline:list-items" {
 			t.Errorf("workflow = %v, want pipeline:list-items", route["workflow"])
+		}
+	})
+
+	t.Run("normalizes legacy raw body alias", func(t *testing.T) {
+		result := wrapper("legacy", map[string]any{
+			"path":     "/legacy",
+			"method":   "POST",
+			"raw_body": true,
+		})
+		route := result["routes"].([]any)[0].(map[string]any)
+		if route["include_raw_body"] != true {
+			t.Errorf("include_raw_body = %v, want true from raw_body alias", route["include_raw_body"])
+		}
+		if _, exists := route["raw_body"]; exists {
+			t.Error("raw_body legacy alias should be normalized away")
+		}
+	})
+
+	t.Run("canonical raw body key takes precedence", func(t *testing.T) {
+		result := wrapper("legacy", map[string]any{
+			"path":             "/legacy",
+			"method":           "POST",
+			"include_raw_body": false,
+			"raw_body":         true,
+		})
+		route := result["routes"].([]any)[0].(map[string]any)
+		if route["include_raw_body"] != false {
+			t.Errorf("include_raw_body = %v, want false from canonical key", route["include_raw_body"])
+		}
+		if _, exists := route["raw_body"]; exists {
+			t.Error("raw_body legacy alias should be normalized away")
 		}
 	})
 
