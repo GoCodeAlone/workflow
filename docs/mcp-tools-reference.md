@@ -200,12 +200,38 @@ Generate a JSON Schema for workflow config files.
 
 #### `scaffold_ci`
 
-Generate CI/CD pipeline config for a workflow application.
+Generate a `ci:` YAML section (build / test / deploy sub-sections) for a workflow config, tailored to the app type.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `provider` | string | yes | CI provider (`github-actions`, `gitlab-ci`, `circleci`) |
-| `config` | string | no | Existing workflow config to analyze |
+| `description` | string | yes | Short description of the application (e.g. 'Go API server with Postgres') |
+| `yaml_content` | string | no | Existing workflow config to analyze (used to detect app type) |
+| `binary_path` | string | no | Go binary entrypoint path (default: `./cmd/server`) |
+| `environments` | array | no | Deployment environment names to include (e.g. `['staging', 'production']`) |
+
+---
+
+#### `ci_plan`
+
+Analyze a workflow config and emit a platform-neutral `CIPlan` JSON via the config-derived cigen engine (deploy phases with per-phase scoped secrets, migrations spec, smoke test, plan-guard, warnings). Render it with `generate_github_actions` or `wfctl ci generate --from-plan`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `yaml_content` | string | yes | The YAML content of the workflow configuration |
+| `phase_config_yaml` | string | no | YAML of a prerequisite phase config (creates a two-phase plan) |
+| `wfctl_version` | string | no | wfctl version to pin in the plan (default: latest) |
+
+---
+
+#### `generate_github_actions`
+
+Render CI/CD workflow YAML from a workflow config. The CI workflow (`files`/`ci_yaml`) is config-derived via the cigen engine (scoped secrets, migrations step, smoke job, plan-guard); also returns the `plan` (CIPlan) and legacy template-based `cd_yaml`/`release_yaml` (which use the `registry`/`platforms` inputs).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `yaml_content` | string | yes | The YAML content of the workflow configuration |
+| `registry` | string | no | Container registry for the legacy CD/release output (default: `ghcr.io`) |
+| `platforms` | string | no | Build platforms for the legacy CD/release output (default: `linux/amd64,linux/arm64`) |
 
 ---
 
