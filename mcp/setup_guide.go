@@ -71,6 +71,10 @@ When a user wants automated deployment:
 
 4. **Validate** — use ` + "`validate_config`" + ` to check the final config
 
+**Two CI paths:**
+- *Thin bootstrap* (the steps above): ` + "`scaffold_ci`" + ` writes a ` + "`ci:`" + ` section and ` + "`generate_bootstrap`" + ` emits a minimal file that calls ` + "`wfctl ci run`" + ` (the engine runs the steps).
+- *Config-derived platform-native workflow*: use ` + "`ci_plan`" + ` + ` + "`generate_github_actions`" + ` (or ` + "`wfctl ci plan`" + ` / ` + "`wfctl ci generate`" + `) to render a full GitHub Actions / GitLab CI workflow from the config - scoped secrets, migrations, smoke job, plan-guard. Pick this when you want a native CI YAML committed to the repo.
+
 ---
 
 ## Secrets Management Flow
