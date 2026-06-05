@@ -26,6 +26,8 @@ func TestRedactStepOutput_SensitiveFields(t *testing.T) {
 		{"backup_code", true},
 		{"totp_secret", true},
 		{"mfa_secret", true},
+		{"Stripe-Signature", true},
+		{"webhook_signature", true},
 		// safe fields
 		{"username", false},
 		{"email", false},

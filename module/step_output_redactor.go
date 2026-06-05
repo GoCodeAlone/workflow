@@ -11,6 +11,7 @@ var SensitiveFieldPatterns = []string{
 	"credential",
 	"authorization",
 	"cookie",
+	"signature",
 	"api_key",
 	"api-key",
 	"apikey",
