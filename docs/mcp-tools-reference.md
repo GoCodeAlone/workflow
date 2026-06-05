@@ -232,12 +232,14 @@ Render CI/CD workflow YAML from a workflow config. The CI workflow (`files`/`ci_
 | `yaml_content` | string | yes | The YAML content of the workflow configuration |
 | `registry` | string | no | Container registry for the legacy CD/release output (default: `ghcr.io`) |
 | `platforms` | string | no | Build platforms for the legacy CD/release output (default: `linux/amd64,linux/arm64`) |
+| `phase_config_yaml` | string | no | YAML of a prerequisite phase config (creates a two-phase plan) |
+| `wfctl_version` | string | no | wfctl version to pin in the plan (default: latest) |
 
 ---
 
 #### `scaffold_environment`
 
-Generate an `environments:` YAML section (per-environment provider, region, env vars, secrets provider, exposure method) for a workflow config.
+Generate an `environments:` YAML section (per-environment provider, env vars, secrets provider, exposure method) for a workflow config.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
