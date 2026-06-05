@@ -31,7 +31,7 @@
 |------|-------|-------|--------|
 | 1 | docs(mcp): surface cigen config-derived CI generation in MCP output | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6, Task 7 | feat/mcp-cigen-info |
 
-**Status:** Draft
+**Status:** Locked 2026-06-05T01:05:30Z
 
 ---
 
