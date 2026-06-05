@@ -29,7 +29,7 @@
 |------|-------|-------|--------|
 | 1 | fix(mcp): declare generate_github_actions phase params + correct scaffold ref-doc | Task 1, Task 2, Task 3, Task 4 | feat/mcp-tool-metadata-accuracy |
 
-**Status:** Locked 2026-06-05T02:44:05Z
+**Status:** Complete 2026-06-05T03:12:57Z
 
 ---
 
