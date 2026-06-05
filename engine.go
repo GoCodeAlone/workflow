@@ -836,7 +836,7 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 			// Execute the workflow using the handler
 			results, err := handler.ExecuteWorkflow(ctx, workflowType, action, data)
 			if err != nil {
-				e.logger.Error(fmt.Sprintf("Failed to execute workflow '%s'", workflowType))
+				e.logger.Error(fmt.Sprintf("Failed to execute workflow '%s' (error_type=%T)", workflowType, err))
 				if e.eventEmitter != nil {
 					e.eventEmitter.EmitWorkflowFailed(ctx, workflowType, action, time.Since(startTime), err)
 				}

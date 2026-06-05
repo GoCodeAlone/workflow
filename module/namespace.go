@@ -100,7 +100,7 @@ func (vn *ValidatingNamespace) FormatName(baseName string) string {
 func (vn *ValidatingNamespace) ResolveDependency(dependencyName string) string {
 	name := vn.base.ResolveDependency(dependencyName)
 	if err := vn.ValidateModuleName(name); err != nil {
-		fmt.Println("Warning: invalid module dependency name")
+		fmt.Printf("Warning: invalid module dependency name (error_type=%T)\n", err)
 	}
 	return name
 }
