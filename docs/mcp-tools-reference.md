@@ -232,28 +232,33 @@ Render CI/CD workflow YAML from a workflow config. The CI workflow (`files`/`ci_
 | `yaml_content` | string | yes | The YAML content of the workflow configuration |
 | `registry` | string | no | Container registry for the legacy CD/release output (default: `ghcr.io`) |
 | `platforms` | string | no | Build platforms for the legacy CD/release output (default: `linux/amd64,linux/arm64`) |
+| `phase_config_yaml` | string | no | YAML of a prerequisite phase config (creates a two-phase plan) |
+| `wfctl_version` | string | no | wfctl version to pin in the plan (default: latest) |
 
 ---
 
 #### `scaffold_environment`
 
-Generate environment configuration (Docker Compose, kubernetes manifests).
+Generate an `environments:` YAML section (per-environment provider, env vars, secrets provider, exposure method) for a workflow config.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `target` | string | yes | Target environment (`docker-compose`, `kubernetes`, `minikube`) |
-| `config` | string | no | Existing workflow config to analyze |
+| `provider` | string | yes | Deployment provider: `docker`, `kubernetes`, `aws-ecs`, `gcp-cloudrun`, `digitalocean` |
+| `environments` | array | no | Environment names to generate (default: `['local', 'staging', 'production']`) |
+| `secrets_provider` | string | no | Secrets provider: `env`, `aws-secrets-manager`, `gcp-secret-manager`, `vault` (default: `env`) |
+| `exposure` | string | no | Exposure method for the `local` environment: `tailscale`, `cloudflare`, `port-forward` (default: `port-forward`) |
 
 ---
 
 #### `scaffold_infra`
 
-Generate infrastructure-as-code for a workflow application.
+Generate an `infra:` YAML section by analyzing the config's modules (e.g. `database.postgres` → RDS, `cache.redis` → ElastiCache).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `provider` | string | yes | IaC provider (`opentofu`, `terraform`, `pulumi`) |
-| `config` | string | no | Existing workflow config |
+| `yaml_content` | string | yes | Workflow YAML config content to analyze for infrastructure needs |
+| `provider` | string | yes | Cloud provider for resources: `aws`, `gcp`, `azure`, `digitalocean` |
+| `environment` | string | no | Environment name for resource sizing (default: `production`) |
 
 ---
 
