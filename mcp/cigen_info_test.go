@@ -58,3 +58,21 @@ func TestMCPOutputSurfacesCigen(t *testing.T) {
 		t.Errorf("ci_plan description missing %q", "cigen")
 	}
 }
+
+// TestGenerateGithubActionsDeclaresAllHandlerParams locks the tool's input
+// schema to the params its handler reads (handleGenerateGithubActions reads
+// yaml_content, registry, platforms, phase_config_yaml, wfctl_version).
+func TestGenerateGithubActionsDeclaresAllHandlerParams(t *testing.T) {
+	srv := NewServer("")
+	tools := srv.MCPServer().ListTools()
+	gha, ok := tools["generate_github_actions"]
+	if !ok {
+		t.Fatal("generate_github_actions tool not registered")
+	}
+	props := gha.Tool.InputSchema.Properties
+	for _, p := range []string{"yaml_content", "registry", "platforms", "phase_config_yaml", "wfctl_version"} {
+		if _, ok := props[p]; !ok {
+			t.Errorf("generate_github_actions input schema missing declared param %q", p)
+		}
+	}
+}
