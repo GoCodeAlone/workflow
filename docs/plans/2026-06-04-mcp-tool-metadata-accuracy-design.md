@@ -1,7 +1,7 @@
 # MCP tool metadata accuracy (generate_github_actions params + scaffold ref-doc) — design
 
 **Date:** 2026-06-04
-**Status:** Design (adversarial review pending)
+**Status:** Design — adversarial review PASS (1 cycle, 2026-06-04)
 **Repo:** `workflow` (`mcp/wfctl_tools.go` + `docs/mcp-tools-reference.md`)
 **Guidance:** `docs/AGENT_GUIDE.md` + `CLAUDE.md` (no `docs/design-guidance.md`). Follow-on to #854.
 
@@ -32,7 +32,7 @@ The `generate_github_actions` tool schema declares every param its handler reads
    Both optional (no `mcp.Required()`) — the handler already defaults them to `""`.
 
 2. **`docs/mcp-tools-reference.md`** — replace the `scaffold_environment` and `scaffold_infra` parameter tables with the real defs:
-   - `scaffold_environment`: `provider` (string, yes — docker/kubernetes/aws-ecs/gcp-cloudrun/digitalocean), `environments` (array, no — default `['local','staging','production']`), `secrets_provider` (string, no — env/aws-secrets-manager/gcp-secret-manager/vault, default env), `exposure` (string, no — tailscale/cloudflare/port-forward, default port-forward).
+   - `scaffold_environment`: `provider` (string, yes — docker/kubernetes/aws-ecs/gcp-cloudrun/digitalocean), `environments` (array, no — default `['local','staging','production']`), `secrets_provider` (string, no — env/aws-secrets-manager/gcp-secret-manager/vault, default env), `exposure` (string, no — exposure method **for local**: tailscale/cloudflare/port-forward, default port-forward; only applied to the `local` environment).
    - `scaffold_infra`: `yaml_content` (string, yes), `provider` (string, yes — aws/gcp/azure/digitalocean), `environment` (string, no — default production).
    Also refresh the one-line purpose of each to match the def description (environments section / infra section).
 
