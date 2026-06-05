@@ -82,6 +82,27 @@ type Server struct {
 	toolHandlers      map[string]ToolHandlerFunc // populated by collectToolHandlers
 }
 
+// serverInstructions is the MCP server's instruction string sent to clients in
+// the initialize response. Kept as a package const so tests can assert its
+// content (the mcp-go server exposes no Instructions getter at runtime).
+const serverInstructions = "This MCP server exposes the GoCodeAlone/workflow engine via wfctl. " +
+	"Use the provided tools to list available module types, step types, trigger types, " +
+	"workflow types, generate JSON schemas, validate YAML configurations, inspect configs, " +
+	"and manage plugins. Use the modernize tool to detect and fix known YAML config " +
+	"anti-patterns (hyphenated step names, template syntax in conditionals, missing db_query mode, " +
+	"dot-access patterns, absolute dbPaths, empty routes, snake_case config keys). " +
+	"Use the registry_search tool to discover available plugins from the workflow-registry. " +
+	"For CI/CD generation use the config-derived cigen engine (analyze -> CIPlan -> render): the " +
+	"ci_plan tool analyzes a workflow config into a platform-neutral CIPlan (deploy phases, " +
+	"secrets scoped per phase, a wfctl migrations step, a health-check smoke job, and a plan-guard), " +
+	"and generate_github_actions renders it into GitHub Actions YAML - both produce CI derived " +
+	"from the app config, NOT fixed templates. Mirrors the wfctl 'ci plan' / 'ci generate' commands. " +
+	"Resources provide documentation and example configurations. " +
+	"The workflow engine includes a CLI tool called wfctl with commands for project scaffolding, " +
+	"config validation, deployment (Docker, Kubernetes, cloud), API spec extraction, " +
+	"diff/contract testing, config-derived CI/CD generation (ci plan / ci generate), plugin management, and Git integration. " +
+	"Read the workflow://docs/overview resource for full CLI reference."
+
 // NewServer creates a new MCP server with all workflow engine tools and
 // resources registered. pluginDir is the directory where installed plugins
 // reside (e.g., "data/plugins"). If set, the server will read plugin manifests
@@ -101,23 +122,7 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 		Version,
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(false, true),
-		server.WithInstructions("This MCP server exposes the GoCodeAlone/workflow engine via wfctl. "+
-			"Use the provided tools to list available module types, step types, trigger types, "+
-			"workflow types, generate JSON schemas, validate YAML configurations, inspect configs, "+
-			"and manage plugins. Use the modernize tool to detect and fix known YAML config "+
-			"anti-patterns (hyphenated step names, template syntax in conditionals, missing db_query mode, "+
-			"dot-access patterns, absolute dbPaths, empty routes, snake_case config keys). "+
-			"Use the registry_search tool to discover available plugins from the workflow-registry. "+
-			"For CI/CD generation use the config-derived cigen engine (analyze -> CIPlan -> render): the "+
-			"ci_plan tool analyzes a workflow config into a platform-neutral CIPlan (deploy phases, "+
-			"secrets scoped per phase, a wfctl migrations step, a health-check smoke job, and a plan-guard), "+
-			"and generate_github_actions renders it into GitHub Actions YAML - both produce CI derived "+
-			"from the app config, NOT fixed templates. Mirrors the wfctl 'ci plan' / 'ci generate' commands. "+
-			"Resources provide documentation and example configurations. "+
-			"The workflow engine includes a CLI tool called wfctl with commands for project scaffolding, "+
-			"config validation, deployment (Docker, Kubernetes, cloud), API spec extraction, "+
-			"diff/contract testing, config-derived CI/CD generation (ci plan / ci generate), plugin management, and Git integration. "+
-			"Read the workflow://docs/overview resource for full CLI reference."),
+		server.WithInstructions(serverInstructions),
 	)
 
 	// Load types from installed plugin manifests so that plugin-provided types

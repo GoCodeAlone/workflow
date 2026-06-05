@@ -29,7 +29,15 @@ func TestMCPOutputSurfacesCigen(t *testing.T) {
 		}
 	}
 
-	// Server Instructions: mention cigen + ci_plan.
+	// Server Instructions (sent to clients in the initialize response): name the
+	// cigen surface. Asserted via the package const because mcp-go exposes no
+	// Instructions getter on the constructed server.
+	for _, want := range []string{"cigen", "ci_plan", "config-derived"} {
+		if !strings.Contains(serverInstructions, want) {
+			t.Errorf("serverInstructions missing %q", want)
+		}
+	}
+
 	srv := NewServer("")
 	tools := srv.MCPServer().ListTools()
 

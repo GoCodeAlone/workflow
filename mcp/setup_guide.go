@@ -73,7 +73,7 @@ When a user wants automated deployment:
 
 **Two CI paths:**
 - *Thin bootstrap* (the steps above): ` + "`scaffold_ci`" + ` writes a ` + "`ci:`" + ` section and ` + "`generate_bootstrap`" + ` emits a minimal file that calls ` + "`wfctl ci run`" + ` (the engine runs the steps).
-- *Config-derived platform-native workflow*: use ` + "`ci_plan`" + ` + ` + "`generate_github_actions`" + ` (or ` + "`wfctl ci plan`" + ` / ` + "`wfctl ci generate`" + `) to render a full GitHub Actions / GitLab CI workflow from the config - scoped secrets, migrations, smoke job, plan-guard. Pick this when you want a native CI YAML committed to the repo.
+- *Config-derived platform-native workflow*: use ` + "`ci_plan`" + ` to build the CIPlan and ` + "`generate_github_actions`" + ` to render **GitHub Actions** (the MCP render tool is GitHub-Actions-only) - scoped secrets, migrations, smoke job, plan-guard. For GitLab CI / other platforms, or to render an edited plan, use the wfctl CLI: ` + "`wfctl ci generate --platform <github_actions|gitlab_ci> [--from-plan <plan.json>]`" + `. Pick this when you want a native CI YAML committed to the repo.
 
 ---
 
