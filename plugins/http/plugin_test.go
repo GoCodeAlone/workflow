@@ -445,11 +445,12 @@ func TestPipelineTriggerConfigWrappers(t *testing.T) {
 		t.Fatal("missing pipeline trigger config wrapper for http")
 	}
 
-	t.Run("forwards path, method, and middlewares", func(t *testing.T) {
+	t.Run("forwards path, method, middlewares, and raw body opt-in", func(t *testing.T) {
 		cfg := map[string]any{
-			"path":        "/items",
-			"method":      "GET",
-			"middlewares": []any{"auth-bearer", "rate-limit"},
+			"path":             "/items",
+			"method":           "GET",
+			"middlewares":      []any{"auth-bearer", "rate-limit"},
+			"include_raw_body": true,
 		}
 		result := wrapper("list-items", cfg)
 		routes, ok := result["routes"].([]any)
@@ -469,6 +470,9 @@ func TestPipelineTriggerConfigWrappers(t *testing.T) {
 		}
 		if mw[0] != "auth-bearer" || mw[1] != "rate-limit" {
 			t.Errorf("middlewares = %v, want [auth-bearer rate-limit]", mw)
+		}
+		if route["include_raw_body"] != true {
+			t.Errorf("include_raw_body = %v, want true", route["include_raw_body"])
 		}
 		if route["workflow"] != "pipeline:list-items" {
 			t.Errorf("workflow = %v, want pipeline:list-items", route["workflow"])

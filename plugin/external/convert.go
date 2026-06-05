@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -25,7 +26,52 @@ func mapToStruct(m map[string]any) (*structpb.Struct, error) {
 	if m == nil {
 		return nil, nil
 	}
-	return structpb.NewStruct(m)
+	return structpb.NewStruct(normalizeStructMap(m))
+}
+
+func normalizeStructMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = normalizeStructValue(v)
+	}
+	return out
+}
+
+func normalizeStructValue(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		return normalizeStructMap(value)
+	case []any:
+		out := make([]any, len(value))
+		for i, item := range value {
+			out[i] = normalizeStructValue(item)
+		}
+		return out
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Map:
+		if rv.Type().Key().Kind() != reflect.String {
+			return v
+		}
+		out := make(map[string]any, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			out[iter.Key().String()] = normalizeStructValue(iter.Value().Interface())
+		}
+		return out
+	case reflect.Slice, reflect.Array:
+		out := make([]any, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			out[i] = normalizeStructValue(rv.Index(i).Interface())
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // structToMap converts a protobuf Struct to a Go map.

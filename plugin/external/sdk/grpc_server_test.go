@@ -847,6 +847,42 @@ func TestMapToStruct_SDK_PropagatesError(t *testing.T) {
 	}
 }
 
+func TestMapToStruct_SDK_NormalizesTypedSlices(t *testing.T) {
+	s, err := mapToStruct(map[string]any{
+		"ids": []string{"a", "b"},
+		"rows": []map[string]any{
+			{"id": "row-1", "amount": int64(100)},
+		},
+		"labels": []map[string]string{
+			{"name": "urgent"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("mapToStruct: %v", err)
+	}
+	got := s.AsMap()
+	ids, ok := got["ids"].([]any)
+	if !ok || len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("ids = %#v, want []any{a,b}", got["ids"])
+	}
+	rows, ok := got["rows"].([]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("rows = %#v, want one row", got["rows"])
+	}
+	row, ok := rows[0].(map[string]any)
+	if !ok || row["id"] != "row-1" || row["amount"] != float64(100) {
+		t.Fatalf("row = %#v, want normalized map row", rows[0])
+	}
+	labels, ok := got["labels"].([]any)
+	if !ok || len(labels) != 1 {
+		t.Fatalf("labels = %#v, want one typed map label", got["labels"])
+	}
+	label, ok := labels[0].(map[string]any)
+	if !ok || label["name"] != "urgent" {
+		t.Fatalf("label = %#v, want normalized typed map", labels[0])
+	}
+}
+
 // TestInvokeService_PropagatesOutputEncodingError verifies that InvokeService
 // surfaces a structpb-encoding failure in the Response.Error field instead of
 // silently returning an empty result (workflow#537).

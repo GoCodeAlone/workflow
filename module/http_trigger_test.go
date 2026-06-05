@@ -110,6 +110,109 @@ func TestHTTPTrigger(t *testing.T) {
 	}
 }
 
+func TestHTTPTrigger_IncludeRawBodyExposesWebhookPayload(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+	engine := NewMockWorkflowEngine()
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":             "/webhooks/stripe",
+				"method":           "POST",
+				"workflow":         "stripe-webhook",
+				"action":           "execute",
+				"include_raw_body": true,
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["POST /webhooks/stripe"]
+	if handler == nil {
+		t.Fatal("handler not registered")
+	}
+
+	rawBody := `{"id":"evt_test","type":"checkout.session.completed"}`
+	req := httptest.NewRequest("POST", "/webhooks/stripe", strings.NewReader(rawBody))
+	req.Header.Set("Stripe-Signature", "t=123,v1=sig")
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	if len(engine.triggeredWorkflows) != 1 {
+		t.Fatalf("Expected 1 triggered workflow, got %d", len(engine.triggeredWorkflows))
+	}
+	data := engine.triggeredWorkflows[0].Data
+	if got := data["request_body"]; got != rawBody {
+		t.Fatalf("request_body = %v, want %s", got, rawBody)
+	}
+	if got := data["stripe_signature"]; got != "t=123,v1=sig" {
+		t.Fatalf("stripe_signature = %v", got)
+	}
+	if got := data["webhook_signature"]; got != "t=123,v1=sig" {
+		t.Fatalf("webhook_signature = %v", got)
+	}
+	body, ok := data["body"].(map[string]any)
+	if !ok || body["id"] != "evt_test" {
+		t.Fatalf("body = %v, want parsed webhook JSON", data["body"])
+	}
+}
+
+func TestHTTPTrigger_RawBodyAbsentByDefault(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+	engine := NewMockWorkflowEngine()
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/items",
+				"method":   "POST",
+				"workflow": "items",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["POST /api/items"]
+	req := httptest.NewRequest("POST", "/api/items", strings.NewReader(`{"name":"gift"}`))
+	req.Header.Set("Stripe-Signature", "t=123,v1=sig")
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	data := engine.triggeredWorkflows[0].Data
+	if _, ok := data["request_body"]; ok {
+		t.Fatalf("request_body should be absent by default: %v", data)
+	}
+	if _, ok := data["stripe_signature"]; ok {
+		t.Fatalf("stripe_signature should be absent by default: %v", data)
+	}
+	if _, ok := data["body"].(map[string]any); !ok {
+		t.Fatalf("body should still be parsed by default: %v", data["body"])
+	}
+}
+
 // MockHTTPRouter is a simple mock HTTP router for testing
 type MockHTTPRouter struct {
 	name   string
