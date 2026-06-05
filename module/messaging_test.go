@@ -2,6 +2,7 @@ package module
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -163,6 +164,83 @@ func TestSimpleMessageHandler(t *testing.T) {
 	if err != nil {
 		t.Errorf("message forwarding failed: %v", err)
 	}
+}
+
+func TestSimpleMessageHandler_DoesNotLogSensitiveMessageBody(t *testing.T) {
+	logger := &structuredRecordingLogger{}
+	handler := NewSimpleMessageHandler("test-handler")
+	handler.logger = logger
+
+	secretMessage := []byte(`{"Stripe-Signature":"t=123,v1=secret-signature","body":"ok"}`)
+	if err := handler.HandleMessage(secretMessage); err != nil {
+		t.Fatalf("HandleMessage failed: %v", err)
+	}
+
+	logText := strings.Join(logger.entries, "\n")
+	if strings.Contains(logText, "secret-signature") || strings.Contains(logText, "Stripe-Signature") {
+		t.Fatalf("handler log leaked sensitive message body:\n%s", logText)
+	}
+	if !strings.Contains(logText, "message_bytes") {
+		t.Fatalf("handler log should include message size context, got:\n%s", logText)
+	}
+}
+
+func TestInMemoryProducer_DoesNotLogSensitiveMessageBody(t *testing.T) {
+	logger := &structuredRecordingLogger{}
+	broker := NewInMemoryMessageBroker("test-broker")
+	broker.logger = logger
+	handler := NewSimpleMessageHandler("test-handler")
+	handler.logger = &noopLogger{}
+	handler.SetHandleFunc(func(message []byte) error { return nil })
+	broker.subscriptions["topic"] = []MessageHandler{handler}
+
+	secretMessage := []byte(`{"Stripe-Signature":"t=123,v1=secret-signature","body":"ok"}`)
+	if err := broker.Producer().SendMessage("topic", secretMessage); err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+
+	logText := strings.Join(logger.entries, "\n")
+	if strings.Contains(logText, "secret-signature") || strings.Contains(logText, "Stripe-Signature") {
+		t.Fatalf("producer log leaked sensitive message body:\n%s", logText)
+	}
+	if !strings.Contains(logText, "message_bytes") {
+		t.Fatalf("producer log should include message size context, got:\n%s", logText)
+	}
+}
+
+type structuredRecordingLogger struct {
+	entries []string
+}
+
+func (l *structuredRecordingLogger) Debug(message string, args ...any) {
+	l.entries = append(l.entries, structuredLogEntry(message, args...))
+}
+
+func (l *structuredRecordingLogger) Info(message string, args ...any) {
+	l.entries = append(l.entries, structuredLogEntry(message, args...))
+}
+
+func (l *structuredRecordingLogger) Warning(message string, args ...any) {
+	l.entries = append(l.entries, structuredLogEntry(message, args...))
+}
+
+func (l *structuredRecordingLogger) Warn(message string, args ...any) {
+	l.entries = append(l.entries, structuredLogEntry(message, args...))
+}
+
+func (l *structuredRecordingLogger) Error(message string, args ...any) {
+	l.entries = append(l.entries, structuredLogEntry(message, args...))
+}
+
+func (l *structuredRecordingLogger) Critical(message string, args ...any) {
+	l.entries = append(l.entries, structuredLogEntry(message, args...))
+}
+
+func structuredLogEntry(message string, args ...any) string {
+	if len(args) == 0 {
+		return message
+	}
+	return fmt.Sprintf("%s %v", message, args)
 }
 
 func createIsolatedAppForMessagingTest(t *testing.T) modular.Application {

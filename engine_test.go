@@ -348,6 +348,36 @@ func TestEngineTriggerWorkflow_RedactsSensitiveInputInDebugLogs(t *testing.T) {
 	}
 }
 
+func TestEngineTriggerWorkflow_DoesNotLogSensitiveFailureError(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	handler := &mockWorkflowHandler{
+		name:       "mock.handler",
+		handlesFor: []string{"failing-webhook-workflow"},
+		execErr:    fmt.Errorf("stripe header Stripe-Signature=t=123,v1=secret-signature"),
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	err := engine.TriggerWorkflow(context.Background(), "failing-webhook-workflow", "run", map[string]any{
+		"Stripe-Signature": "t=123,v1=secret-signature",
+	})
+	if err == nil {
+		t.Fatal("expected workflow failure")
+	}
+
+	logText := strings.Join(app.logger.logs, "\n")
+	for _, leaked := range []string{"secret-signature", "Stripe-Signature=t=123"} {
+		if strings.Contains(logText, leaked) {
+			t.Fatalf("error logs leaked sensitive failure value %q:\n%s", leaked, logText)
+		}
+	}
+	if !strings.Contains(err.Error(), "secret-signature") {
+		t.Fatalf("returned error should preserve original detail for callers, got %v", err)
+	}
+}
+
 // Mock implementations for testing
 
 // mockApplication implements modular.Application
@@ -674,6 +704,7 @@ type mockWorkflowHandler struct {
 	handlesFor []string
 	results    map[string]any
 	lastData   map[string]any
+	execErr    error
 }
 
 func (h *mockWorkflowHandler) Name() string {
@@ -690,6 +721,9 @@ func (h *mockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 
 func (h *mockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	h.lastData = data
+	if h.execErr != nil {
+		return nil, h.execErr
+	}
 	return h.results, nil
 }
 

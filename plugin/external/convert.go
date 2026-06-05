@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/plugin/external/internal/structpbutil"
 	"github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -25,7 +26,7 @@ func mapToStruct(m map[string]any) (*structpb.Struct, error) {
 	if m == nil {
 		return nil, nil
 	}
-	return structpb.NewStruct(m)
+	return structpb.NewStruct(structpbutil.NormalizeMap(m))
 }
 
 // structToMap converts a protobuf Struct to a Go map.

@@ -177,7 +177,7 @@ func (p *inMemoryProducer) SendMessage(topic string, message []byte) error {
 			p.broker.logger.Error("Error handling message on", "topic", topic, "error", err)
 		}
 	}
-	p.broker.logger.Info("Message sent to ", "topic", topic, "message", string(message))
+	p.broker.logger.Info("Message sent to ", "topic", topic, "message_bytes", len(message))
 
 	return nil
 }

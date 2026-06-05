@@ -243,11 +243,12 @@ type HTTPTriggerConfig struct {
 
 // HTTPTriggerRoute represents a single HTTP route configuration
 type HTTPTriggerRoute struct {
-	Path     string         `json:"path" yaml:"path"`
-	Method   string         `json:"method" yaml:"method"`
-	Workflow string         `json:"workflow" yaml:"workflow"`
-	Action   string         `json:"action" yaml:"action"`
-	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Path           string         `json:"path" yaml:"path"`
+	Method         string         `json:"method" yaml:"method"`
+	Workflow       string         `json:"workflow" yaml:"workflow"`
+	Action         string         `json:"action" yaml:"action"`
+	Params         map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	IncludeRawBody bool           `json:"include_raw_body,omitempty" yaml:"include_raw_body,omitempty"`
 }
 
 // HTTPTrigger implements a trigger that starts workflows from HTTP requests
@@ -412,18 +413,35 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig any) erro
 
 		// Get optional params
 		params, _ := routeMap["params"].(map[string]any)
+		includeRawBody := boolConfigValue(routeMap["include_raw_body"])
+		if _, ok := routeMap["include_raw_body"]; !ok {
+			includeRawBody = boolConfigValue(routeMap["raw_body"])
+		}
 
 		// Add the route
 		t.routes = append(t.routes, HTTPTriggerRoute{
-			Path:     path,
-			Method:   method,
-			Workflow: workflow,
-			Action:   action,
-			Params:   params,
+			Path:           path,
+			Method:         method,
+			Workflow:       workflow,
+			Action:         action,
+			Params:         params,
+			IncludeRawBody: includeRawBody,
 		})
 	}
 
 	return nil
+}
+
+func boolConfigValue(v any) bool {
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(b))
+		return err == nil && parsed
+	default:
+		return false
+	}
 }
 
 // createHandler creates an HTTP handler for a specific route
@@ -481,6 +499,10 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 				var body map[string]any
 				if err := json.Unmarshal(bodyBytes, &body); err == nil {
 					data["body"] = body
+				}
+				if route.IncludeRawBody {
+					data["request_body"] = string(bodyBytes)
+					addWebhookSignatureData(data, r.Header)
 				}
 				// Restore the body so downstream steps can re-read it
 				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -541,6 +563,27 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 
 	// Create an HTTP handler using the standard adapter
 	return &StandardHTTPHandler{handlerFn}
+}
+
+func addWebhookSignatureData(data map[string]any, headers http.Header) {
+	if sig := headers.Get("Stripe-Signature"); sig != "" {
+		data["Stripe-Signature"] = sig
+		data["stripe_signature"] = sig
+		data["webhook_signature"] = sig
+	}
+
+	for headerName, fieldName := range map[string]string{
+		"Paypal-Transmission-Id":   "paypal_transmission_id",
+		"Paypal-Transmission-Time": "paypal_transmission_time",
+		"Paypal-Cert-Url":          "paypal_cert_url",
+		"Paypal-Auth-Algo":         "paypal_auth_algo",
+		"Paypal-Transmission-Sig":  "paypal_transmission_sig",
+	} {
+		if value := headers.Get(headerName); value != "" {
+			data[headerName] = value
+			data[fieldName] = value
+		}
+	}
 }
 
 // StandardHTTPHandler adapts a function to the HTTPHandler interface

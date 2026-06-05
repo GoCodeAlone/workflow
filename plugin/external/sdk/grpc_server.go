@@ -9,6 +9,7 @@ import (
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/plugin/external/internal/structpbutil"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
@@ -727,7 +728,7 @@ func mapToStruct(m map[string]any) (*structpb.Struct, error) {
 	if m == nil {
 		return nil, nil
 	}
-	s, err := structpb.NewStruct(m)
+	s, err := structpb.NewStruct(structpbutil.NormalizeMap(m))
 	if err != nil {
 		return nil, fmt.Errorf("structpb.NewStruct: %w", err)
 	}

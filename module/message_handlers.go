@@ -109,7 +109,7 @@ func (h *SimpleMessageHandler) HandleMessage(message []byte) error {
 	}
 
 	// Default implementation if no custom handler is provided
-	h.logger.Info("Message received", "handler", h.name, "message", string(message))
+	h.logger.Info("Message received", "handler", h.name, "message_bytes", len(message))
 
 	// Forward to target topics if configured
 	if h.producer != nil && len(h.targetTopics) > 0 {
