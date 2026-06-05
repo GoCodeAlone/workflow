@@ -162,9 +162,24 @@ trigger types, and workflow handlers. Plugins can be:
 - ` + "`wfctl migrate diff -db <file>`" + ` — Show pending migrations without applying
 - ` + "`wfctl migrate apply -db <file>`" + ` — Apply pending migrations
 
-### CI/CD & Git Integration
+### CI/CD generation (config-derived via the cigen engine)
 
-- ` + "`wfctl generate github-actions <config.yaml>`" + ` — Generate GitHub Actions CI/CD workflow files from config
+CI generation is **config-derived**, not template-based: the cigen engine (analyze -> CIPlan ->
+render) builds the workflow from your app config. The output reflects the config's required
+secrets (scoped per deploy phase - an apply job only gets the secrets that phase references), a
+` + "`wfctl migrations up`" + ` step when ` + "`ci.migrations`" + ` is declared (with ` + "`--format json`" + ` and ` + "`--env`" + ` when an
+environment is unambiguous), a health-check smoke job, plugin-install steps when the app uses
+plugins, and a plan-guard that fails the job on a replace/destroy. All four target platforms
+(` + "`github_actions`" + `, ` + "`gitlab_ci`" + `, ` + "`jenkins`" + `, ` + "`circleci`" + `) are config-derived from the same CIPlan.
+
+- ` + "`wfctl ci plan <config.yaml>`" + ` — Analyze the config and emit a platform-neutral CIPlan JSON (` + "`--out -`" + ` for stdout, ` + "`--phase-config <prereq.yaml>`" + ` for a two-phase prereq->deploy plan). Edit it, then render with ` + "`--from-plan`" + `.
+- ` + "`wfctl ci generate <config.yaml> --platform github_actions`" + ` — Render CI files from the config (or ` + "`--from-plan <plan.json>`" + `). ` + "`--diff`" + ` previews vs the on-disk file; ` + "`--write`" + ` overwrites; ` + "`--out <dir>`" + ` sets the output directory.
+- ` + "`wfctl generate github-actions <config.yaml>`" + ` — Legacy command name; the CI workflow is now rendered through the same cigen engine.
+
+MCP equivalents: the ` + "`ci_plan`" + ` tool returns the CIPlan, and ` + "`generate_github_actions`" + ` renders it to GitHub Actions YAML.
+
+### Git Integration
+
 - ` + "`wfctl git connect -repo <owner/repo>`" + ` — Link project to a GitHub repository (` + "`-init`" + ` to create repo)
 - ` + "`wfctl git push -message <msg>`" + ` — Commit and push to configured repo (` + "`-tag <version>`" + ` to tag release)
 `

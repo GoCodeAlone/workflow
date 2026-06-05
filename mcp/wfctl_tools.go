@@ -133,8 +133,7 @@ func (s *Server) registerWfctlTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("generate_github_actions",
-			mcp.WithDescription("Generate GitHub Actions CI/CD workflow YAML files based on analysis of a workflow config. "+
-				"Detects features (UI, auth, database, plugins, HTTP) and generates appropriate CI and CD workflows."),
+			mcp.WithDescription("Render CI/CD workflow YAML from a workflow config. The CI workflow (the 'files'/'ci_yaml' result) is config-derived via the cigen engine (analyze -> CIPlan -> render): required secrets scoped per deploy phase, a 'wfctl migrations up' step when ci.migrations is set, a health-check smoke job, plugin-install steps when plugins are used, and a plan-guard that fails on a replace/destroy - not a fixed template. Also returns the 'plan' (CIPlan) and legacy template-based 'cd_yaml'/'release_yaml' (these use the registry/platforms inputs). This tool re-analyzes the config on each call and renders GitHub Actions ONLY - it does NOT accept a pre-built/edited CIPlan. Use the ci_plan tool to preview the CIPlan; to render an edited plan or a GitLab CI workflow, use the wfctl CLI ('wfctl ci generate --from-plan' / '--platform gitlab_ci')."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
 				mcp.Description("The YAML content of the workflow configuration"),
@@ -152,10 +151,10 @@ func (s *Server) registerWfctlTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("ci_plan",
-			mcp.WithDescription("Analyze a workflow YAML config and emit a platform-neutral CIPlan JSON. "+
-				"The plan describes project name, wfctl version, deploy phases, secrets union, "+
+			mcp.WithDescription("Analyze a workflow YAML config and emit a platform-neutral CIPlan JSON using the config-derived cigen engine. "+
+				"The plan describes project name, wfctl version, deploy phases (with secrets scoped per phase), the secrets union, "+
 				"migrations spec, smoke test URL, plan guard, and warnings. "+
-				"Pass the returned JSON to 'wfctl ci generate --from-plan' to render CI files."),
+				"To render: the generate_github_actions tool renders GitHub Actions from the same config (it re-analyzes - it does NOT consume this JSON); to render THIS plan JSON (e.g. after editing) or other platforms, use the wfctl CLI 'wfctl ci generate --from-plan'."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
 				mcp.Description("The YAML content of the workflow configuration"),
