@@ -211,16 +211,45 @@ func loadPluginManifest(name, dirOverride string) (*pluginManifest, error) {
 	if dir == "" {
 		dir = "./data/plugins"
 	}
-	path := filepath.Join(dir, name, "plugin.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read plugin manifest %s: %w (run `wfctl plugin install` first; or pass --plugin-dir)", path, err)
+	var tried []string
+	var lastErr error
+	for _, candidate := range pluginManifestCandidateDirs(name) {
+		path := filepath.Join(dir, candidate, "plugin.json")
+		tried = append(tried, path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var m pluginManifest
+		if err := json.Unmarshal(data, &m); err != nil {
+			return nil, fmt.Errorf("parse plugin manifest %s: %w", path, err)
+		}
+		return &m, nil
 	}
-	var m pluginManifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("parse plugin manifest %s: %w", path, err)
+	if len(tried) == 1 {
+		return nil, fmt.Errorf("read plugin manifest %s: %w (run `wfctl plugin install` first; or pass --plugin-dir)", tried[0], lastErr)
 	}
-	return &m, nil
+	return nil, fmt.Errorf("read plugin manifest for %q: tried %s: %w (run `wfctl plugin install` first; or pass --plugin-dir)", name, strings.Join(tried, ", "), lastErr)
+}
+
+func pluginManifestCandidateDirs(name string) []string {
+	trimmed := strings.TrimSpace(name)
+	normalized := normalizePluginName(trimmed)
+	candidates := []string{trimmed, normalized}
+	if normalized != "" {
+		candidates = append(candidates, "workflow-plugin-"+normalized)
+	}
+	seen := make(map[string]bool, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		out = append(out, candidate)
+	}
+	return out
 }
 
 // promptOne reads a single value for one required secret from the supplied

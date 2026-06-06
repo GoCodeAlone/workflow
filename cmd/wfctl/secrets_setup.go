@@ -23,6 +23,16 @@ import (
 //
 // Both paths share the same runSetupEngine + audit logic.
 func runSecretsSetup(args []string) error {
+	for _, a := range args {
+		if a == "--manifest" || strings.HasPrefix(a, "--manifest=") {
+			manifestArgs, err := parseManifestSetupFlags(args)
+			if err != nil {
+				return err
+			}
+			return runSecretsSetupManifestWithIO(manifestArgs, nil, os.Stdout)
+		}
+	}
+
 	fs := flag.NewFlagSet("secrets setup", flag.ContinueOnError)
 	envName := fs.String("env", "local", "Target environment name")
 	configFile := fs.String("config", "app.yaml", "Workflow config file")

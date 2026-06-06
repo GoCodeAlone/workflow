@@ -49,6 +49,26 @@ func TestLoadPluginManifest_HappyPath(t *testing.T) {
 	}
 }
 
+func TestLoadPluginManifest_NormalizedInstallDir(t *testing.T) {
+	dir := t.TempDir()
+	writePluginManifestFile(t, dir, "cloudflare", `{
+		"name": "workflow-plugin-cloudflare",
+		"required_secrets": [
+			{"name": "CLOUDFLARE_API_TOKEN", "sensitive": true}
+		]
+	}`)
+	m, err := loadPluginManifest("workflow-plugin-cloudflare", dir)
+	if err != nil {
+		t.Fatalf("loadPluginManifest: %v", err)
+	}
+	if m.Name != "workflow-plugin-cloudflare" {
+		t.Errorf("name = %q", m.Name)
+	}
+	if len(m.RequiredSecrets) != 1 || m.RequiredSecrets[0].Name != "CLOUDFLARE_API_TOKEN" {
+		t.Fatalf("required_secrets = %+v", m.RequiredSecrets)
+	}
+}
+
 func TestLoadPluginManifest_MissingDir(t *testing.T) {
 	_, err := loadPluginManifest("nope", t.TempDir())
 	if err == nil {

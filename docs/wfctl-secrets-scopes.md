@@ -85,10 +85,21 @@ wfctl secrets setup --plugin workflow-plugin-hover \
 
 This:
 
-1. Reads `data/plugins/workflow-plugin-hover/plugin.json`.
+1. Reads `plugin.json` from the installed plugin directory. The directory may be
+   the full plugin name, the normalized provider name, or
+   `workflow-plugin-<provider>`.
 2. Iterates `required_secrets[]`.
 3. Prompts for each (masked iff `sensitive: true`).
 4. Writes each to the chosen GH scope.
+
+Repo-level setup can discover all provider plugin secrets from `wfctl.yaml` and
+`.wfctl-lock.yaml`:
+
+```sh
+wfctl secrets setup --manifest wfctl.yaml \
+  --config 'infra/*.yaml,deploy.yaml' \
+  --scope org --org GoCodeAlone --from-env
+```
 
 Pipe a value list to skip the prompt loop in CI:
 
