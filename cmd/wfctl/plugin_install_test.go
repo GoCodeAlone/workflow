@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // captureTransport is a test http.RoundTripper that:
@@ -414,6 +415,75 @@ func TestDownloadURL_PrivateReleaseAsset(t *testing.T) {
 	}
 	if string(got) != string(wantPayload) {
 		t.Errorf("payload = %q, want %q", got, wantPayload)
+	}
+}
+
+func TestDownloadURL_PrivateReleaseAssetUsesFreshAssetDownloadDeadline(t *testing.T) {
+	const (
+		wantAssetID  = int64(99)
+		wantFilename = "plugin-linux-amd64.tar.gz"
+		wantTag      = "v1.0.0"
+		wantOwner    = "GoCodeAlone"
+		wantRepo     = "test-plugin"
+		wantToken    = "test-secret-token"
+	)
+
+	var metadataDeadline, assetDeadline time.Time
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok {
+			return nil, fmt.Errorf("%s has no request deadline", req.URL.Path)
+		}
+
+		switch req.URL.Path {
+		case fmt.Sprintf("/repos/%s/%s/releases/tags/%s", wantOwner, wantRepo, wantTag):
+			metadataDeadline = deadline
+			time.Sleep(10 * time.Millisecond)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(
+					fmt.Sprintf(`{"assets":[{"id":%d,"name":%q}]}`, wantAssetID, wantFilename),
+				)),
+				Header:  make(http.Header),
+				Request: req,
+			}, nil
+		case fmt.Sprintf("/repos/%s/%s/releases/assets/%d", wantOwner, wantRepo, wantAssetID):
+			assetDeadline = deadline
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("fake tarball bytes")),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected path %s", req.URL.Path)
+		}
+	})
+
+	origAPIBase := gitHubAPIBaseURL
+	origAPIClient := gitHubAPIClient
+	gitHubAPIBaseURL = "https://api.github.test"
+	gitHubAPIClient = &http.Client{Transport: rt}
+	t.Cleanup(func() {
+		gitHubAPIBaseURL = origAPIBase
+		gitHubAPIClient = origAPIClient
+	})
+
+	t.Setenv("RELEASES_TOKEN", wantToken)
+	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		t.Setenv(k, "")
+	}
+
+	rawURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
+		wantOwner, wantRepo, wantTag, wantFilename)
+	if _, err := downloadURL(rawURL); err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+	if metadataDeadline.IsZero() || assetDeadline.IsZero() {
+		t.Fatalf("missing recorded deadlines: metadata=%v asset=%v", metadataDeadline, assetDeadline)
+	}
+	if !assetDeadline.After(metadataDeadline) {
+		t.Fatalf("asset deadline = %v, want after metadata deadline %v", assetDeadline, metadataDeadline)
 	}
 }
 
