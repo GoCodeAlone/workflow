@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // captureTransport is a test http.RoundTripper that:
@@ -113,6 +115,59 @@ func installTestClient(t *testing.T, ct *captureTransport) {
 	orig := http.DefaultClient
 	http.DefaultClient = &http.Client{Transport: ct}
 	t.Cleanup(func() { http.DefaultClient = orig })
+}
+
+func TestDownloadURL_DirectGetUsesBoundedRequestContext(t *testing.T) {
+	orig := http.DefaultClient
+	http.DefaultClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if _, ok := req.Context().Deadline(); !ok {
+				return nil, fmt.Errorf("request has no deadline")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { http.DefaultClient = orig })
+
+	got, err := downloadURL("https://example.com/plugin.tar.gz")
+	if err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+	if string(got) != "ok" {
+		t.Fatalf("downloadURL body = %q, want ok", got)
+	}
+}
+
+func TestDownloadURL_LargeDirectDownloadEmitsProgress(t *testing.T) {
+	orig := http.DefaultClient
+	http.DefaultClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				ContentLength: int64(len("fake tarball bytes")),
+				Body:          io.NopCloser(strings.NewReader("fake tarball bytes")),
+				Header:        make(http.Header),
+				Request:       req,
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { http.DefaultClient = orig })
+
+	stderr, err := captureStderr(t, func() error {
+		_, err := downloadURL("https://example.com/plugin.tar.gz")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+	if !strings.Contains(stderr, "Download progress") || !strings.Contains(stderr, "Download complete") {
+		t.Fatalf("stderr = %q, want progress and completion indicators", stderr)
+	}
 }
 
 // TestDownloadURL_GitHubAuthHeader verifies that downloadURL injects a Bearer
@@ -387,6 +442,75 @@ func TestDownloadURL_PrivateReleaseAsset(t *testing.T) {
 	}
 	if string(got) != string(wantPayload) {
 		t.Errorf("payload = %q, want %q", got, wantPayload)
+	}
+}
+
+func TestDownloadURL_PrivateReleaseAssetUsesFreshAssetDownloadDeadline(t *testing.T) {
+	const (
+		wantAssetID  = int64(99)
+		wantFilename = "plugin-linux-amd64.tar.gz"
+		wantTag      = "v1.0.0"
+		wantOwner    = "GoCodeAlone"
+		wantRepo     = "test-plugin"
+		wantToken    = "test-secret-token"
+	)
+
+	var metadataDeadline, assetDeadline time.Time
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok {
+			return nil, fmt.Errorf("%s has no request deadline", req.URL.Path)
+		}
+
+		switch req.URL.Path {
+		case fmt.Sprintf("/repos/%s/%s/releases/tags/%s", wantOwner, wantRepo, wantTag):
+			metadataDeadline = deadline
+			time.Sleep(10 * time.Millisecond)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(
+					fmt.Sprintf(`{"assets":[{"id":%d,"name":%q}]}`, wantAssetID, wantFilename),
+				)),
+				Header:  make(http.Header),
+				Request: req,
+			}, nil
+		case fmt.Sprintf("/repos/%s/%s/releases/assets/%d", wantOwner, wantRepo, wantAssetID):
+			assetDeadline = deadline
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("fake tarball bytes")),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected path %s", req.URL.Path)
+		}
+	})
+
+	origAPIBase := gitHubAPIBaseURL
+	origAPIClient := gitHubAPIClient
+	gitHubAPIBaseURL = "https://api.github.test"
+	gitHubAPIClient = &http.Client{Transport: rt}
+	t.Cleanup(func() {
+		gitHubAPIBaseURL = origAPIBase
+		gitHubAPIClient = origAPIClient
+	})
+
+	t.Setenv("RELEASES_TOKEN", wantToken)
+	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		t.Setenv(k, "")
+	}
+
+	rawURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
+		wantOwner, wantRepo, wantTag, wantFilename)
+	if _, err := downloadURL(rawURL); err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+	if metadataDeadline.IsZero() || assetDeadline.IsZero() {
+		t.Fatalf("missing recorded deadlines: metadata=%v asset=%v", metadataDeadline, assetDeadline)
+	}
+	if !assetDeadline.After(metadataDeadline) {
+		t.Fatalf("asset deadline = %v, want after metadata deadline %v", assetDeadline, metadataDeadline)
 	}
 }
 

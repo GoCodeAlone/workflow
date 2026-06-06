@@ -1054,6 +1054,8 @@ var gitHubAPIBaseURL = "https://api.github.com"
 // independently. A generous timeout covers large binary asset downloads.
 var gitHubAPIClient = &http.Client{Timeout: 10 * time.Minute}
 
+const gitHubReleaseMetadataTimeout = 30 * time.Second
+
 // gitHubToken returns the first non-empty GitHub token from the environment,
 // checking RELEASES_TOKEN, GH_TOKEN, and GITHUB_TOKEN in order.
 func gitHubToken() string {
@@ -1119,7 +1121,9 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 		neturl.PathEscape(repo),
 		neturl.PathEscape(tag),
 	)
-	req, err := http.NewRequest(http.MethodGet, releaseURL, nil)
+	metadataCtx, metadataCancel := context.WithTimeout(context.Background(), gitHubReleaseMetadataTimeout)
+	defer metadataCancel()
+	req, err := http.NewRequestWithContext(metadataCtx, http.MethodGet, releaseURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1146,6 +1150,7 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return nil, fmt.Errorf("decode GitHub release response: %w", err)
 	}
+	metadataCancel()
 
 	var assetID int64
 	for _, a := range release.Assets {
@@ -1165,7 +1170,9 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 		neturl.PathEscape(repo),
 		assetID,
 	)
-	req2, err := http.NewRequest(http.MethodGet, assetURL, nil)
+	assetCtx, assetCancel := context.WithTimeout(context.Background(), downloadTimeout)
+	defer assetCancel()
+	req2, err := http.NewRequestWithContext(assetCtx, http.MethodGet, assetURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1182,7 +1189,7 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 	if resp2.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub asset download API: HTTP %d for asset %d", resp2.StatusCode, assetID)
 	}
-	return io.ReadAll(resp2.Body)
+	return readDownloadBodyWithProgress(resp2.Body, resp2.ContentLength)
 }
 
 // downloadURL fetches a URL and returns the body bytes.
@@ -1203,7 +1210,10 @@ func downloadURL(rawURL string) ([]byte, error) {
 	}
 
 	// Public repos and non-release GitHub URLs: direct GET with optional Bearer.
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil) //nolint:gosec // G107: URL comes from registry manifest
+	ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil) //nolint:gosec // G107: URL comes from registry manifest
 	if err != nil {
 		return nil, err
 	}
@@ -1220,7 +1230,7 @@ func downloadURL(rawURL string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, rawURL)
 	}
-	return io.ReadAll(resp.Body)
+	return readDownloadBodyWithProgress(resp.Body, resp.ContentLength)
 }
 
 // verifyChecksum checks that data matches the expected SHA256 hex string.
