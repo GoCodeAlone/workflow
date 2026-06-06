@@ -73,7 +73,7 @@ deploy-staging:
   needs: [build-image]
   runs-on: ubuntu-latest
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         ref: ${{ github.event.workflow_run.head_sha || github.sha }}
     - uses: GoCodeAlone/setup-wfctl@v1
@@ -96,7 +96,7 @@ repair-staging-migrations:
   environment: staging
   runs-on: ubuntu-latest
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - uses: GoCodeAlone/setup-wfctl@v1
     - run: |
         wfctl migrate repair-dirty --config infra.yaml --env staging \

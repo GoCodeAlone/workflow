@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out workflow repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Compute the hour-bucket as a step output so the cache step
       # can reference it. Hourly TTL: same PR series re-checking

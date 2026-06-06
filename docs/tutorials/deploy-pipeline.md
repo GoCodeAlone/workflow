@@ -355,21 +355,21 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: GoCodeAlone/setup-wfctl@v1
       - run: wfctl ci run --phase build,test
   deploy-staging:
     runs-on: ubuntu-latest
     needs: [build-test]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: GoCodeAlone/setup-wfctl@v1
       - run: wfctl ci run --phase deploy --env staging
   deploy-prod:
     runs-on: ubuntu-latest
     needs: [build-test]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: GoCodeAlone/setup-wfctl@v1
       - run: wfctl ci run --phase deploy --env prod
 ```
@@ -389,7 +389,7 @@ Insert a `build-image` job between `build-test` and the deploy jobs. This compil
     outputs:
       sha: ${{ steps.meta.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
@@ -413,7 +413,7 @@ Reference the SHA in your deploy jobs via the `IMAGE_SHA` environment variable (
   deploy-staging:
     needs: [build-image]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: GoCodeAlone/setup-wfctl@v1
       - run: wfctl ci run --phase deploy --env staging
         env:
@@ -453,7 +453,7 @@ Change `deploy-prod.needs` from `[build-test]` to `[deploy-staging]`. This makes
     runs-on: ubuntu-latest
     needs: [build-image]           # waits for image push
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: GoCodeAlone/setup-wfctl@v1
       - run: wfctl ci run --phase deploy --env staging
         env:
@@ -464,7 +464,7 @@ Change `deploy-prod.needs` from `[build-test]` to `[deploy-staging]`. This makes
     runs-on: ubuntu-latest
     needs: [deploy-staging]        # auto-promotes after staging succeeds
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: GoCodeAlone/setup-wfctl@v1
       - run: wfctl ci run --phase deploy --env prod
         env:
@@ -508,7 +508,7 @@ When `requireApproval: true`, `wfctl ci init` emits `environment: prod` in the g
     needs: [deploy-staging]
     environment: prod              # GitHub waits for environment protection approval
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: GoCodeAlone/setup-wfctl@v1
       - run: wfctl ci run --phase deploy --env prod
 ```

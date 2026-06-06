@@ -146,7 +146,7 @@ func renderGHAWorkflow(p *CIPlan, name string) (string, error) {
 
 // writeCheckoutStep emits the checkout step.
 func writeCheckoutStep(b *strings.Builder) {
-	b.WriteString("      - uses: actions/checkout@v4\n")
+	b.WriteString("      - uses: actions/checkout@v6\n")
 }
 
 // writeSetupWfctlStep emits the setup-wfctl action step.

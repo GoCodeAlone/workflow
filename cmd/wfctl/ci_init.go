@@ -122,7 +122,7 @@ func generateGHABootstrap(cfg *config.WorkflowConfig) string {
 	sb.WriteString("  build-test:\n")
 	sb.WriteString("    runs-on: ubuntu-latest\n")
 	sb.WriteString("    steps:\n")
-	sb.WriteString("      - uses: actions/checkout@v4\n")
+	sb.WriteString("      - uses: actions/checkout@v6\n")
 	sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
 	sb.WriteString("      - run: wfctl ci run --phase build,test\n")
 
@@ -145,7 +145,7 @@ func generateGHABootstrap(cfg *config.WorkflowConfig) string {
 				sb.WriteString("    environment: " + envName + "\n")
 			}
 			sb.WriteString("    steps:\n")
-			sb.WriteString("      - uses: actions/checkout@v4\n")
+			sb.WriteString("      - uses: actions/checkout@v6\n")
 			sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
 			if configHasMigrations(cfg) {
 				sb.WriteString("      - run: mkdir -p .wfctl\n")
@@ -270,7 +270,7 @@ func generateGHADeploy(cfg *config.WorkflowConfig) string {
 	sb.WriteString("    if: github.event.workflow_run.conclusion == 'success'\n")
 	sb.WriteString("    runs-on: ubuntu-latest\n")
 	sb.WriteString("    steps:\n")
-	sb.WriteString("      - uses: actions/checkout@v4\n")
+	sb.WriteString("      - uses: actions/checkout@v6\n")
 	sb.WriteString("        with:\n")
 	sb.WriteString("          ref: " + sha + "\n")
 	sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
@@ -299,7 +299,7 @@ func generateGHADeploy(cfg *config.WorkflowConfig) string {
 				sb.WriteString("    environment: " + envName + "\n")
 			}
 			sb.WriteString("    steps:\n")
-			sb.WriteString("      - uses: actions/checkout@v4\n")
+			sb.WriteString("      - uses: actions/checkout@v6\n")
 			sb.WriteString("        with:\n")
 			sb.WriteString("          ref: " + sha + "\n")
 			sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
@@ -358,7 +358,7 @@ func generateRetentionYML(cfg *config.WorkflowConfig) string {
 	sb.WriteString("  prune:\n")
 	sb.WriteString("    runs-on: ubuntu-latest\n")
 	sb.WriteString("    steps:\n")
-	sb.WriteString("      - uses: actions/checkout@v4\n")
+	sb.WriteString("      - uses: actions/checkout@v6\n")
 	sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
 	for _, e := range entries {
 		sb.WriteString("      - run: wfctl registry prune --registry " + e.name + "\n")

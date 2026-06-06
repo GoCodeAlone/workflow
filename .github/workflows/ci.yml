@@ -34,7 +34,7 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -95,7 +95,7 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -133,7 +133,7 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -178,7 +178,7 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -201,7 +201,7 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -225,7 +225,7 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -272,7 +272,7 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -307,7 +307,7 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -381,7 +381,7 @@ jobs:
     name: Verify godo is not imported (issue #617)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Grep gate — *.go files must not import godo
         run: |
           ! grep -rn --include="*.go" \
@@ -398,7 +398,7 @@ jobs:
     name: Cloud-SDK inventory + k8s-backend init() partition + asymmetric graph audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -448,7 +448,7 @@ jobs:
     name: Verify removed AWS SDK packages are not imported (issue #653)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Grep gate — no *.go file (repo-wide) may import fully-removed AWS service packages
         # Scans the whole repo. service/eks is allowed only in provider/ (ECS/EKS deploy pipeline).
         # platform/providers/aws/ was deleted in Phase 3; provider/aws/ (deploy pipeline) is kept.

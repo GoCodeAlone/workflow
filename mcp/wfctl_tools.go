@@ -1711,7 +1711,7 @@ func mcpGenerateCDWorkflow(features *mcpProjectFeatures, registry, platforms str
 	b.WriteString("      contents: read\n")
 	b.WriteString("      packages: write\n")
 	b.WriteString("    steps:\n")
-	b.WriteString("      - uses: actions/checkout@v4\n")
+	b.WriteString("      - uses: actions/checkout@v6\n")
 	b.WriteString("      - uses: actions/setup-go@v5\n")
 	b.WriteString("        with:\n")
 	b.WriteString("          go-version: '1.22'\n")
@@ -1914,7 +1914,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'

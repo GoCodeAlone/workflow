@@ -2149,6 +2149,10 @@ Analyze a workflow config with the `cigen` engine (config → `CIPlan` → rende
 - A healthz smoke job when a `/healthz` endpoint is derivable
 
 Emits warnings for secret names that cannot be automatically derived.
+Generated artifacts are validated before they are written. GitHub Actions uses
+the embedded Go `actionlint` dependency; GitLab CI, Jenkins, and CircleCI use
+offline provider-shape checks. Built-in validation does not require external
+lint executables or live provider services.
 
 ```
 wfctl ci generate [options]
@@ -2225,6 +2229,39 @@ wfctl ci plan -c deploy.yaml
 # Two-phase plan to a file, then render
 wfctl ci plan -c deploy.yaml --phase-config deploy.prereq.yaml --out plan.json
 wfctl ci generate --platform github_actions --from-plan plan.json --write
+```
+
+---
+
+### `ci validate`
+
+Validate workflow configs for CI use, or validate rendered CI provider artifacts
+when `--platform` is supplied. GitHub Actions validation uses the embedded Go
+`actionlint` dependency. GitLab CI, Jenkins, and CircleCI validation performs
+offline structural checks without requiring provider CLIs or live lint APIs.
+
+```
+wfctl ci validate [options] <config.yaml>
+wfctl ci validate --platform <platform> <ci-file>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--platform` | _(none)_ | Rendered CI artifact platform: `github_actions`, `gitlab_ci`, `jenkins`, `circleci` |
+| `--format` | `text` | Output format: `text` or `json` |
+| `--strict` | `false` | Strict workflow-config validation mode |
+| `--immutable-config` | `false` | Fail workflow-config validation if the `ci:` section is absent or invalid |
+| `--immutable-sections` | _(none)_ | Comma-separated workflow-config sections that must not be empty |
+| `--plugin-dir` | _(none)_ | Directory of installed external plugins for workflow-config validation |
+
+Examples:
+
+```bash
+wfctl ci validate deploy.yaml
+wfctl ci validate --platform github_actions .github/workflows/deploy.yml
+wfctl ci validate --platform gitlab_ci .gitlab-ci.yml
+wfctl ci validate --platform jenkins Jenkinsfile
+wfctl ci validate --platform circleci .circleci/config.yml
 ```
 
 ---
@@ -2684,7 +2721,7 @@ Plugin CI should generate evidence with the released artifact, then update the r
 
 ```yaml
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v6
   - uses: GoCodeAlone/workflow/.github/actions/setup-wfctl@main
     with:
       version: v0.51.2
