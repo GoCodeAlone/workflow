@@ -190,7 +190,7 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 		// Verify a non-default builder is active; the default "docker" driver rejects --provenance.
 		if err := exec.Command("docker", "buildx", "inspect", "--bootstrap").Run(); err != nil {
 			return fmt.Errorf("hardened build requires docker buildx: run 'docker buildx create --use' "+
-				"or add a SHA-pinned docker/setup-buildx-action v3 step to your CI workflow (%w)", err)
+				"or add '%s' to your CI workflow (%w)", githubActionsDockerSetupBuildxRef, err)
 		}
 	}
 
