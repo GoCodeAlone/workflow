@@ -1112,6 +1112,9 @@ func parseGitHubReleaseDownloadURL(rawURL string) (owner, repo, tag, filename st
 // (github.com/.../releases/download/.../file) redirects to a signed S3 URL and
 // does not propagate the Authorization header correctly.
 func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
+	defer cancel()
+
 	// Step 1: resolve the asset ID from the release metadata.
 	releaseURL := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", //nolint:gosec // G107
 		gitHubAPIBaseURL,
@@ -1119,7 +1122,7 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 		neturl.PathEscape(repo),
 		neturl.PathEscape(tag),
 	)
-	req, err := http.NewRequest(http.MethodGet, releaseURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, releaseURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1165,7 +1168,7 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 		neturl.PathEscape(repo),
 		assetID,
 	)
-	req2, err := http.NewRequest(http.MethodGet, assetURL, nil)
+	req2, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1203,7 +1206,10 @@ func downloadURL(rawURL string) ([]byte, error) {
 	}
 
 	// Public repos and non-release GitHub URLs: direct GET with optional Bearer.
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil) //nolint:gosec // G107: URL comes from registry manifest
+	ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil) //nolint:gosec // G107: URL comes from registry manifest
 	if err != nil {
 		return nil, err
 	}

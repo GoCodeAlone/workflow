@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -353,8 +354,11 @@ func verifyAssetChecksum(checksumAsset *githubAsset, assetName string, data []by
 
 // downloadWithTimeout fetches a URL using an HTTP client with the given timeout.
 func downloadWithTimeout(url string, timeout time.Duration) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	client := &http.Client{Timeout: timeout}
-	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx // timeout is set on the client
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -113,6 +114,32 @@ func installTestClient(t *testing.T, ct *captureTransport) {
 	orig := http.DefaultClient
 	http.DefaultClient = &http.Client{Transport: ct}
 	t.Cleanup(func() { http.DefaultClient = orig })
+}
+
+func TestDownloadURL_DirectGetUsesBoundedRequestContext(t *testing.T) {
+	orig := http.DefaultClient
+	http.DefaultClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if _, ok := req.Context().Deadline(); !ok {
+				return nil, fmt.Errorf("request has no deadline")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { http.DefaultClient = orig })
+
+	got, err := downloadURL("https://example.com/plugin.tar.gz")
+	if err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+	if string(got) != "ok" {
+		t.Fatalf("downloadURL body = %q, want ok", got)
+	}
 }
 
 // TestDownloadURL_GitHubAuthHeader verifies that downloadURL injects a Bearer
