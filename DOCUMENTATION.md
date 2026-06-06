@@ -1511,7 +1511,7 @@ steps:
   - name: run-tests
     type: step.docker_run
     config:
-      image: "golang:1.25"
+      image: "golang:1.26.4"
       command: ["go", "test", "./..."]
       env:
         CI: "true"

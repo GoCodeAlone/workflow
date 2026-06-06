@@ -439,7 +439,7 @@ npx playwright test --config playwright.config.ts
 ```
 example/ecommerce-app/
 ├── workflow.yaml           # Complete application configuration (24 modules)
-├── Dockerfile              # Multi-stage build (golang:1.25 -> alpine:3.19)
+├── Dockerfile              # Multi-stage build (golang:1.26.4 -> alpine:3.19)
 ├── docker-compose.yml      # Store + Prometheus + Grafana
 ├── README.md               # This file
 ├── seed/

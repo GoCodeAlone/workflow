@@ -30,7 +30,7 @@ jobs:
       packages: read
     strategy:
       matrix:
-        go-version: ['1.26']
+        go-version: ['1.26.4']
 
     steps:
     - name: Check out code
@@ -40,7 +40,7 @@ jobs:
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: ${{ matrix.go-version }}
-        cache: true
+        cache: false
 
     - name: Set up Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -78,7 +78,7 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Upload coverage reports
-      uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
+      uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
       if: always() && steps.codecov-token.outputs.available == 'true'
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -100,8 +100,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Set up Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -138,8 +138,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Set up Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -162,7 +162,7 @@ jobs:
       run: go build -v ./...
 
     - name: Upload UI build artifact
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: admin-ui-dist
         path: ui/dist/
@@ -183,8 +183,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Build examples
       run: |
@@ -206,8 +206,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Run golangci-lint on examples
       uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
@@ -232,8 +232,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Run go mod tidy (workflow)
       run: go mod tidy
@@ -312,8 +312,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Set up Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -359,19 +359,19 @@ jobs:
           echo -n "  $config ... "
 
           # Run with timeout — exit 124 means timeout (expected for servers)
-          output=$(timeout 10s ./workflow-example -config "$config" 2>&1) && {
+          if timeout 10s ./workflow-example -config "$config" >/tmp/workflow-example.out 2>&1; then
             echo "OK (exited cleanly)"
             passed=$((passed + 1))
-          } || {
+          else
             rc=$?
-            if [ $rc -eq 124 ]; then
+            if [ "$rc" -eq 124 ]; then
               echo "OK (server timeout — expected)"
               passed=$((passed + 1))
             else
               echo "WARN (exit $rc — may need runtime deps)"
               warned=$((warned + 1))
             fi
-          }
+          fi
         done
 
         echo ""
@@ -402,7 +402,7 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Download module deps (needed for `go list -deps`)
         env:
           GOWORK: "off"
@@ -424,7 +424,7 @@ jobs:
           DEPS=$(go list -deps ./... 2>&1)
           LIST_EXIT=$?
           set -e
-          if [ $LIST_EXIT -ne 0 ]; then
+          if [ "$LIST_EXIT" -ne 0 ]; then
             echo "FAIL: \`go list -deps ./...\` exited $LIST_EXIT (gate cannot enforce):"
             echo "$DEPS" | head -10 | sed 's/^/  /'
             exit 1
@@ -436,7 +436,7 @@ jobs:
             || true)
           if [ -n "$UNEXPECTED" ]; then
             echo "FAIL: unexpected gcp/azure/api transitive deps in workflow-core build graph:"
-            printf '  %s\n' $UNEXPECTED
+            printf '  %s\n' "$UNEXPECTED"
             echo
             echo "Only cloud.google.com/go/compute/metadata is allowlisted (OAuth2 ADC helper)."
             echo "Other gcp/azure SDK packages belong in a plugin, not workflow core."

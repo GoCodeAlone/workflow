@@ -74,7 +74,7 @@ go build -o server ./cmd/server
 
 The `server` binary is the only executable you need. Everything else is YAML config files, seed data, and optional dynamic component source files.
 
-3. **Optional**: Node.js 18+ if you want to use the visual workflow builder UI
+3. **Optional**: Node.js 24+ if you want to use the visual workflow builder UI
 4. **Optional**: `golangci-lint` if you plan to contribute custom modules
 
 ---

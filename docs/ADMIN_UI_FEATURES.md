@@ -181,7 +181,7 @@ These routes delegate to specialized Go services with meaningful step names:
 |------|---------|
 | `admin/config.yaml` | Removed 16 modules, kept 2 generic handlers, rewrote ~100 route pipelines |
 | `module/api_v1_store.go` | Added 6 new CREATE TABLE statements |
-| `module/query_handler.go` | Fixed route key lookup to use Go 1.22+ `r.Pattern` |
+| `module/query_handler.go` | Fixed route key lookup to use Go 1.26.4+ `r.Pattern` |
 | `module/command_handler.go` | Same fix as query_handler.go |
 | `module/pipeline_step_conditional.go` | Added `buildFieldTemplate()` for hyphenated field paths |
 | `module/pipeline_step_json_response.go` | Added support for non-map response bodies (arrays) |
@@ -192,7 +192,7 @@ These routes delegate to specialized Go services with meaningful step names:
 
 ## Key Technical Decisions
 
-1. **Route key uses `r.Pattern`**: Go 1.22+ ServeMux sets `r.Pattern` on each request. We use this as the pipeline lookup key (`"METHOD /path"`) to avoid collisions when multiple routes share the same last segment.
+1. **Route key uses `r.Pattern`**: Go 1.26.4+ ServeMux sets `r.Pattern` on each request. We use this as the pipeline lookup key (`"METHOD /path"`) to avoid collisions when multiple routes share the same last segment.
 
 2. **Hyphenated step names**: Go templates interpret `-` as subtraction. The `buildFieldTemplate()` function auto-detects hyphens and generates `{{index . "seg1" "seg2"}}` syntax instead of `{{.seg1.seg2}}`.
 
