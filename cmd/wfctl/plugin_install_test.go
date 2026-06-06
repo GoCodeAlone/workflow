@@ -175,6 +175,14 @@ func TestDownloadURL_LargeDirectDownloadEmitsProgress(t *testing.T) {
 	}
 }
 
+func TestCloseResponseBodyClosesNonNilBody(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader("metadata")}
+	closeResponseBody(&http.Response{Body: body})
+	if !body.closed {
+		t.Fatal("response body was not closed")
+	}
+}
+
 // TestDownloadURL_GitHubAuthHeader verifies that downloadURL injects a Bearer
 // Authorization header for non-release github.com URLs (direct-download path)
 // using the first non-empty token env var (RELEASES_TOKEN > GH_TOKEN >
@@ -517,6 +525,16 @@ func TestDownloadURL_PrivateReleaseAssetUsesFreshAssetDownloadDeadline(t *testin
 	if !assetDeadline.After(metadataDeadline) {
 		t.Fatalf("asset deadline = %v, want after metadata deadline %v", assetDeadline, metadataDeadline)
 	}
+}
+
+type trackingReadCloser struct {
+	*strings.Reader
+	closed bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return nil
 }
 
 // TestDownloadURL_PublicReleaseNoToken verifies that when no token is set,
