@@ -417,8 +417,8 @@ func loadPluginContractDescriptors(repoPath string, manifest map[string]any, opt
 	contractPath := filepath.Join(repoPath, "plugin.contracts.json")
 	data, err := os.ReadFile(contractPath)
 	if err == nil {
-		var file pluginContractDescriptorFile
-		if err := json.Unmarshal(data, &file); err != nil {
+		fileContracts, err := parsePluginContractDescriptorBytes(data)
+		if err != nil {
 			findings = append(findings, planFinding{
 				Path:    contractPath,
 				Level:   strictContractFindingLevel(opts),
@@ -427,8 +427,7 @@ func loadPluginContractDescriptors(repoPath string, manifest map[string]any, opt
 			})
 			return descriptors, contractPath, true, findings
 		}
-		applyDescriptorSetRef(file.Contracts, file.DescriptorSetRef)
-		descriptors = append(descriptors, file.Contracts...)
+		descriptors = append(descriptors, fileContracts...)
 		return descriptors, contractPath, true, findings
 	}
 	if os.IsNotExist(err) {
@@ -448,6 +447,10 @@ func parsePluginContractDescriptors(raw any) ([]pluginContractDescriptor, error)
 	if err != nil {
 		return nil, err
 	}
+	return parsePluginContractDescriptorBytes(data)
+}
+
+func parsePluginContractDescriptorBytes(data []byte) ([]pluginContractDescriptor, error) {
 	var descriptors []pluginContractDescriptor
 	if err := json.Unmarshal(data, &descriptors); err == nil {
 		return descriptors, nil
