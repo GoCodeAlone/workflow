@@ -34,18 +34,18 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: ${{ matrix.go-version }}
         cache: true
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
-        node-version: '20'
+        node-version: '24'
         registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
@@ -78,7 +78,7 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Upload coverage reports
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
       if: always() && steps.codecov-token.outputs.available == 'true'
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -95,18 +95,18 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: '1.26'
         cache: true
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
-        node-version: '20'
+        node-version: '24'
         registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
@@ -118,7 +118,7 @@ jobs:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v7
+      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
       with:
         version: v2.12.0
         args: --timeout=10m
@@ -133,18 +133,18 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: '1.26'
         cache: true
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
-        node-version: '20'
+        node-version: '24'
         registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
@@ -162,7 +162,7 @@ jobs:
       run: go build -v ./...
 
     - name: Upload UI build artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: admin-ui-dist
         path: ui/dist/
@@ -178,10 +178,10 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: '1.26'
         cache: true
@@ -201,16 +201,16 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: '1.26'
         cache: true
 
     - name: Run golangci-lint on examples
-      uses: golangci/golangci-lint-action@v7
+      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
       with:
         version: v2.12.0
         args: --timeout=10m
@@ -225,12 +225,12 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: '1.26'
         cache: true
@@ -272,12 +272,12 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
-        node-version: '20'
+        node-version: '24'
         registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
@@ -307,18 +307,18 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: '1.26'
         cache: true
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
-        node-version: '20'
+        node-version: '24'
         registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
@@ -381,7 +381,7 @@ jobs:
     name: Verify godo is not imported (issue #617)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Grep gate — *.go files must not import godo
         run: |
           ! grep -rn --include="*.go" \
@@ -398,8 +398,8 @@ jobs:
     name: Cloud-SDK inventory + k8s-backend init() partition + asymmetric graph audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
           cache: true
@@ -448,7 +448,7 @@ jobs:
     name: Verify removed AWS SDK packages are not imported (issue #653)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Grep gate — no *.go file (repo-wide) may import fully-removed AWS service packages
         # Scans the whole repo. service/eks is allowed only in provider/ (ECS/EKS deploy pipeline).
         # platform/providers/aws/ was deleted in Phase 3; provider/aws/ (deploy pipeline) is kept.

@@ -211,8 +211,8 @@ ci:
 	if !strings.Contains(text, "wfctl ci run") {
 		t.Error("expected wfctl ci run call")
 	}
-	if !strings.Contains(text, "actions/checkout@v6") {
-		t.Error("expected checkout action")
+	if !strings.Contains(text, "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3") {
+		t.Error("expected SHA-pinned checkout action")
 	}
 }
 

@@ -16,7 +16,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 `
 	ciPath := filepath.Join(dir, "ci.yml")
 	if err := os.WriteFile(ciPath, []byte(ciYAML), 0644); err != nil {

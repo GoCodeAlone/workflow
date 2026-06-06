@@ -397,11 +397,11 @@ func TestCIWorkflowContent(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, "actions/checkout@v6") {
-		t.Error("ci.yml should use actions/checkout@v6")
+	if !strings.Contains(content, "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3") {
+		t.Error("ci.yml should use SHA-pinned actions/checkout v6.0.3")
 	}
-	if !strings.Contains(content, "actions/setup-go@v5") {
-		t.Error("ci.yml should use actions/setup-go@v5")
+	if !strings.Contains(content, "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0") {
+		t.Error("ci.yml should use SHA-pinned actions/setup-go v6.4.0")
 	}
 	if !strings.Contains(content, "wfctl validate") {
 		t.Error("ci.yml should include wfctl validate step")

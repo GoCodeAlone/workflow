@@ -39,8 +39,8 @@ func TestGenerateGitHubActions(t *testing.T) {
 	}
 
 	markers := []string{
-		"actions/checkout@v6",
-		"GoCodeAlone/setup-wfctl@v1",
+		"actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3",
+		"GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1",
 		"wfctl infra plan",
 		"permissions",
 	}

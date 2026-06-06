@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out workflow repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       # Compute the hour-bucket as a step output so the cache step
       # can reference it. Hourly TTL: same PR series re-checking
@@ -46,13 +46,13 @@ jobs:
         id: hour
         run: echo "value=$(date -u +%Y%m%d%H)" >> "$GITHUB_OUTPUT"
 
-      # actions/cache@v4 does post-step write-back automatically:
+      # actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 does post-step write-back automatically:
       # if cache-hit is false, the action records the path's contents
       # at job-end and uploads under this key for the next run on the
       # same key. No explicit upload-cache step is needed.
       - name: Restore budget result cache
         id: budget-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           key: budget-${{ github.event.pull_request.base.sha || github.sha }}-${{ steps.hour.outputs.value }}
           path: /tmp/budget-result.json

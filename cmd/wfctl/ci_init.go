@@ -122,8 +122,8 @@ func generateGHABootstrap(cfg *config.WorkflowConfig) string {
 	sb.WriteString("  build-test:\n")
 	sb.WriteString("    runs-on: ubuntu-latest\n")
 	sb.WriteString("    steps:\n")
-	sb.WriteString("      - uses: actions/checkout@v6\n")
-	sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+	fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsCheckoutRef)
+	fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsSetupWfctlRef)
 	sb.WriteString("      - run: wfctl ci run --phase build,test\n")
 
 	// Emit one deploy job per environment in ci.deploy.environments.
@@ -145,8 +145,8 @@ func generateGHABootstrap(cfg *config.WorkflowConfig) string {
 				sb.WriteString("    environment: " + envName + "\n")
 			}
 			sb.WriteString("    steps:\n")
-			sb.WriteString("      - uses: actions/checkout@v6\n")
-			sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+			fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsCheckoutRef)
+			fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsSetupWfctlRef)
 			if configHasMigrations(cfg) {
 				sb.WriteString("      - run: mkdir -p .wfctl\n")
 				sb.WriteString("      - run: wfctl migrations validate --env " + envName + " --commit ${{ github.sha }} --result-file .wfctl/migrations-result.json --format json\n")
@@ -270,10 +270,10 @@ func generateGHADeploy(cfg *config.WorkflowConfig) string {
 	sb.WriteString("    if: github.event.workflow_run.conclusion == 'success'\n")
 	sb.WriteString("    runs-on: ubuntu-latest\n")
 	sb.WriteString("    steps:\n")
-	sb.WriteString("      - uses: actions/checkout@v6\n")
+	fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsCheckoutRef)
 	sb.WriteString("        with:\n")
 	sb.WriteString("          ref: " + sha + "\n")
-	sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+	fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsSetupWfctlRef)
 	sb.WriteString("      - id: build\n")
 	sb.WriteString("        run: wfctl build --push --format json\n")
 	if len(regEnvVars) > 0 {
@@ -299,10 +299,10 @@ func generateGHADeploy(cfg *config.WorkflowConfig) string {
 				sb.WriteString("    environment: " + envName + "\n")
 			}
 			sb.WriteString("    steps:\n")
-			sb.WriteString("      - uses: actions/checkout@v6\n")
+			fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsCheckoutRef)
 			sb.WriteString("        with:\n")
 			sb.WriteString("          ref: " + sha + "\n")
-			sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+			fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsSetupWfctlRef)
 			if configHasMigrations(cfg) {
 				sb.WriteString("      - run: mkdir -p .wfctl && wfctl migrations validate --env " + envName + " --commit " + sha + " --result-file .wfctl/migrations-result.json --format json\n")
 			}
@@ -358,8 +358,8 @@ func generateRetentionYML(cfg *config.WorkflowConfig) string {
 	sb.WriteString("  prune:\n")
 	sb.WriteString("    runs-on: ubuntu-latest\n")
 	sb.WriteString("    steps:\n")
-	sb.WriteString("      - uses: actions/checkout@v6\n")
-	sb.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+	fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsCheckoutRef)
+	fmt.Fprintf(&sb, "      - uses: %s\n", githubActionsSetupWfctlRef)
 	for _, e := range entries {
 		sb.WriteString("      - run: wfctl registry prune --registry " + e.name + "\n")
 		if e.envVar != "" {

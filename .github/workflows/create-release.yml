@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
 
@@ -88,7 +88,7 @@ jobs:
           printf '%s\n' "${{ steps.next_version.outputs.tag }}" > release-metadata/release-tag.txt
 
       - name: Upload release metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-metadata
           path: release-metadata/release-tag.txt

@@ -241,7 +241,7 @@ The hand-written workflow pins actions by SHA:
 ```yaml
 - uses: GoCodeAlone/setup-wfctl@362fe9aaf4792e5adffa2b406ee39dcad31f54a9
 ```
-and adds `actions/setup-go@v6` with `go-version-file: go.mod`.
+and adds `actions/setup-go` pinned to v6.4.0 with `go-version-file: go.mod`.
 
 The generator uses tag references (`@v4`, `@v1`) without SHA pinning and
 does not emit a Go setup step. Not derivable from config.
