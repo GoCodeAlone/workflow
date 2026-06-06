@@ -134,7 +134,12 @@ func TestDownloadURL_DirectGetUsesBoundedRequestContext(t *testing.T) {
 	}
 	t.Cleanup(func() { http.DefaultClient = orig })
 
-	got, err := downloadURL("https://example.com/plugin.tar.gz")
+	var got []byte
+	_, err := captureStderr(t, func() error {
+		var err error
+		got, err = downloadURL("https://example.com/plugin.tar.gz")
+		return err
+	})
 	if err != nil {
 		t.Fatalf("downloadURL: %v", err)
 	}

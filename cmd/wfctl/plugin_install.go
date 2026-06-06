@@ -1122,9 +1122,9 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 		neturl.PathEscape(tag),
 	)
 	metadataCtx, metadataCancel := context.WithTimeout(context.Background(), gitHubReleaseMetadataTimeout)
-	defer metadataCancel()
 	req, err := http.NewRequestWithContext(metadataCtx, http.MethodGet, releaseURL, nil)
 	if err != nil {
+		metadataCancel()
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -1134,10 +1134,12 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 
 	resp, err := gitHubAPIClient.Do(req)
 	if err != nil {
+		metadataCancel()
 		return nil, fmt.Errorf("GitHub releases API: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		metadataCancel()
 		return nil, fmt.Errorf("GitHub releases API: HTTP %d for %s/%s@%s", resp.StatusCode, owner, repo, tag)
 	}
 
@@ -1148,6 +1150,7 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 		} `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		metadataCancel()
 		return nil, fmt.Errorf("decode GitHub release response: %w", err)
 	}
 	metadataCancel()
