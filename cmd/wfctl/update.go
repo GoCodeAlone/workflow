@@ -371,7 +371,7 @@ func downloadWithTimeout(url string, timeout time.Duration) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
-	return io.ReadAll(resp.Body)
+	return readDownloadBodyWithProgress(resp.Body, resp.ContentLength)
 }
 
 // replaceBinary writes newData to execPath atomically by writing to a temp file

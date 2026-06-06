@@ -143,6 +143,33 @@ func TestDownloadURL_DirectGetUsesBoundedRequestContext(t *testing.T) {
 	}
 }
 
+func TestDownloadURL_LargeDirectDownloadEmitsProgress(t *testing.T) {
+	orig := http.DefaultClient
+	http.DefaultClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				ContentLength: int64(len("fake tarball bytes")),
+				Body:          io.NopCloser(strings.NewReader("fake tarball bytes")),
+				Header:        make(http.Header),
+				Request:       req,
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { http.DefaultClient = orig })
+
+	stderr, err := captureStderr(t, func() error {
+		_, err := downloadURL("https://example.com/plugin.tar.gz")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+	if !strings.Contains(stderr, "Download progress") || !strings.Contains(stderr, "Download complete") {
+		t.Fatalf("stderr = %q, want progress and completion indicators", stderr)
+	}
+}
+
 // TestDownloadURL_GitHubAuthHeader verifies that downloadURL injects a Bearer
 // Authorization header for non-release github.com URLs (direct-download path)
 // using the first non-empty token env var (RELEASES_TOKEN > GH_TOKEN >

@@ -1189,7 +1189,7 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 	if resp2.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub asset download API: HTTP %d for asset %d", resp2.StatusCode, assetID)
 	}
-	return io.ReadAll(resp2.Body)
+	return readDownloadBodyWithProgress(resp2.Body, resp2.ContentLength)
 }
 
 // downloadURL fetches a URL and returns the body bytes.
@@ -1230,7 +1230,7 @@ func downloadURL(rawURL string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, rawURL)
 	}
-	return io.ReadAll(resp.Body)
+	return readDownloadBodyWithProgress(resp.Body, resp.ContentLength)
 }
 
 // verifyChecksum checks that data matches the expected SHA256 hex string.
