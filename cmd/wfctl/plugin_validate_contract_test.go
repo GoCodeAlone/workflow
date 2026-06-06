@@ -124,6 +124,67 @@ func TestRunPluginValidateContract_MessageContractRuntimeProfile(t *testing.T) {
 	}
 }
 
+func TestRunPluginValidateContract_ProviderDescriptorArrayIsIgnoredByStrictContracts(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{
+  "name": "workflow-plugin-provider-contracts",
+  "version": "0.1.0",
+  "author": "Workflow",
+  "description": "provider descriptor array compatibility",
+  "license": "MIT",
+  "type": "external",
+  "tier": "community",
+  "minEngineVersion": "0.57.4",
+  "capabilities": {
+    "stepTypes": ["step.provider_contracts"]
+  },
+  "contracts": [
+    {
+      "id": "product-capture.browser.v1",
+      "path": "contracts/product-capture-provider.json",
+      "schema": "schemas/product-capture-provider.schema.json"
+    }
+  ]
+}`), 0644); err != nil {
+		t.Fatalf("write plugin manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.contracts.json"), []byte(`[
+  {
+    "id": "product-capture.browser.v1",
+    "path": "contracts/product-capture-provider.json",
+    "schema": "schemas/product-capture-provider.schema.json"
+  }
+]`), 0644); err != nil {
+		t.Fatalf("write plugin contracts: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "plugin"), 0755); err != nil {
+		t.Fatalf("mkdir cmd/plugin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "plugin", "main.go"), []byte(`package main
+
+import sdk "github.com/GoCodeAlone/workflow/plugin/external/sdk"
+
+func main() {
+	version := sdk.ResolveBuildVersion("0.1.0")
+	_ = sdk.IaCServeOptions{BuildVersion: version}
+}
+`), 0644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".goreleaser.yaml"), []byte(`builds:
+  - main: ./cmd/plugin
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+`), 0644); err != nil {
+		t.Fatalf("write goreleaser config: %v", err)
+	}
+
+	err := runPluginValidateContract([]string{"--for-publish", "--tag", "v0.1.0", dir})
+	if err != nil {
+		t.Fatalf("expected provider descriptor contracts array to be ignored by strict plugin-contract validation, got %v", err)
+	}
+}
+
 func TestRunPluginValidateContract_MessageContractGoreleaserOnlyRuntimeSurface(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{
