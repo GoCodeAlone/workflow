@@ -355,22 +355,22 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - run: wfctl ci run --phase build,test
   deploy-staging:
     runs-on: ubuntu-latest
     needs: [build-test]
     steps:
-      - uses: actions/checkout@v6
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - run: wfctl ci run --phase deploy --env staging
   deploy-prod:
     runs-on: ubuntu-latest
     needs: [build-test]
     steps:
-      - uses: actions/checkout@v6
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - run: wfctl ci run --phase deploy --env prod
 ```
 
@@ -389,11 +389,11 @@ Insert a `build-image` job between `build-test` and the deploy jobs. This compil
     outputs:
       sha: ${{ steps.meta.outputs.sha }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version: '1.26'
-      - uses: digitalocean/action-doctl@v2
+      - uses: digitalocean/action-doctl@3cb3953159719656269e044e0e24ca16dd2a690f # v2.5.2
         with:
           token: ${{ secrets.DIGITALOCEAN_TOKEN }}
       - name: Build binary
@@ -413,8 +413,8 @@ Reference the SHA in your deploy jobs via the `IMAGE_SHA` environment variable (
   deploy-staging:
     needs: [build-image]
     steps:
-      - uses: actions/checkout@v6
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - run: wfctl ci run --phase deploy --env staging
         env:
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
@@ -453,8 +453,8 @@ Change `deploy-prod.needs` from `[build-test]` to `[deploy-staging]`. This makes
     runs-on: ubuntu-latest
     needs: [build-image]           # waits for image push
     steps:
-      - uses: actions/checkout@v6
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - run: wfctl ci run --phase deploy --env staging
         env:
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
@@ -464,8 +464,8 @@ Change `deploy-prod.needs` from `[build-test]` to `[deploy-staging]`. This makes
     runs-on: ubuntu-latest
     needs: [deploy-staging]        # auto-promotes after staging succeeds
     steps:
-      - uses: actions/checkout@v6
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - run: wfctl ci run --phase deploy --env prod
         env:
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
@@ -508,8 +508,8 @@ When `requireApproval: true`, `wfctl ci init` emits `environment: prod` in the g
     needs: [deploy-staging]
     environment: prod              # GitHub waits for environment protection approval
     steps:
-      - uses: actions/checkout@v6
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - run: wfctl ci run --phase deploy --env prod
 ```
 

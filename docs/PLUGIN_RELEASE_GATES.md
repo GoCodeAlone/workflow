@@ -63,11 +63,11 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with: { fetch-depth: 0 }
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with: { go-version-file: go.mod }
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
         with: { version: v0.61.0 }
 
       # 1. Pre-build gate: static contract + tag format
@@ -75,7 +75,7 @@ jobs:
         run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" .
 
       # 2. Build (goreleaser mutates plugin.json or writes .release/plugin.json)
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7
         with:
           distribution: goreleaser
           version: '~> v2'

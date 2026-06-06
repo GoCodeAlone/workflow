@@ -1711,15 +1711,15 @@ func mcpGenerateCDWorkflow(features *mcpProjectFeatures, registry, platforms str
 	b.WriteString("      contents: read\n")
 	b.WriteString("      packages: write\n")
 	b.WriteString("    steps:\n")
-	b.WriteString("      - uses: actions/checkout@v6\n")
-	b.WriteString("      - uses: actions/setup-go@v5\n")
+	fmt.Fprintf(&b, "      - uses: %s\n", mcpGithubActionsCheckoutRef)
+	fmt.Fprintf(&b, "      - uses: %s\n", mcpGithubActionsSetupGoRef)
 	b.WriteString("        with:\n")
 	b.WriteString("          go-version: '1.22'\n")
 
 	if features.HasUI {
-		b.WriteString("      - uses: actions/setup-node@v4\n")
+		fmt.Fprintf(&b, "      - uses: %s\n", mcpGithubActionsSetupNodeRef)
 		b.WriteString("        with:\n")
-		b.WriteString("          node-version: '22'\n")
+		b.WriteString("          node-version: '24'\n")
 		b.WriteString("      - name: Build UI\n")
 		b.WriteString("        run: |\n")
 		b.WriteString("          cd ui && npm ci && npm run build && cd ..\n")
@@ -1729,15 +1729,15 @@ func mcpGenerateCDWorkflow(features *mcpProjectFeatures, registry, platforms str
 	b.WriteString("        run: |\n")
 	b.WriteString("          GOOS=linux GOARCH=amd64 go build -o bin/server ./cmd/server/\n")
 	b.WriteString("      - name: Log in to registry\n")
-	b.WriteString("        uses: docker/login-action@v3\n")
+	fmt.Fprintf(&b, "        uses: %s\n", mcpGithubActionsDockerLoginRef)
 	b.WriteString("        with:\n")
 	b.WriteString("          registry: ${{ env.REGISTRY }}\n")
 	b.WriteString("          username: ${{ github.actor }}\n")
 	b.WriteString("          password: ${{ secrets.GITHUB_TOKEN }}\n")
 	b.WriteString("      - name: Set up Docker Buildx\n")
-	b.WriteString("        uses: docker/setup-buildx-action@v3\n")
+	fmt.Fprintf(&b, "        uses: %s\n", mcpGithubActionsDockerSetupBuildx)
 	b.WriteString("      - name: Build and push Docker image\n")
-	b.WriteString("        uses: docker/build-push-action@v5\n")
+	fmt.Fprintf(&b, "        uses: %s\n", mcpGithubActionsDockerBuildPushRef)
 	b.WriteString("        with:\n")
 	b.WriteString("          context: .\n")
 	b.WriteString("          push: true\n")
@@ -1914,8 +1914,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version: '1.22'
       - name: Build plugin binaries
@@ -1927,7 +1927,7 @@ jobs:
             done
           done
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/*
 `

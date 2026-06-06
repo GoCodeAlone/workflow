@@ -721,8 +721,8 @@ func generateGitHubActionsBootstrap(cfg *config.WorkflowConfig) string {
 	b.WriteString("  build-test:\n")
 	b.WriteString("    runs-on: ubuntu-latest\n")
 	b.WriteString("    steps:\n")
-	b.WriteString("      - uses: actions/checkout@v6\n")
-	b.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+	fmt.Fprintf(&b, "      - uses: %s\n", mcpGithubActionsCheckoutRef)
+	fmt.Fprintf(&b, "      - uses: %s\n", mcpGithubActionsSetupWfctlRef)
 	b.WriteString("      - run: wfctl ci run --phase build,test\n")
 
 	if cfg.CI != nil && cfg.CI.Deploy != nil {
@@ -737,8 +737,8 @@ func generateGitHubActionsBootstrap(cfg *config.WorkflowConfig) string {
 			}
 			b.WriteString("    if: github.ref == 'refs/heads/main'\n")
 			b.WriteString("    steps:\n")
-			b.WriteString("      - uses: actions/checkout@v6\n")
-			b.WriteString("      - uses: GoCodeAlone/setup-wfctl@v1\n")
+			fmt.Fprintf(&b, "      - uses: %s\n", mcpGithubActionsCheckoutRef)
+			fmt.Fprintf(&b, "      - uses: %s\n", mcpGithubActionsSetupWfctlRef)
 			fmt.Fprintf(&b, "      - run: wfctl ci run --phase deploy --env %s\n", envName)
 		}
 	}

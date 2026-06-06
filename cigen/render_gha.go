@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+const (
+	githubActionsCheckoutRef   = "actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3"
+	githubActionsScriptRef     = "actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7"
+	githubActionsSetupWfctlRef = "GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1"
+)
+
 // RenderGitHubActions generates GitHub Actions workflow YAML files from a CIPlan.
 // It returns a map of relative paths to YAML content.
 func RenderGitHubActions(p *CIPlan) (map[string]string, error) {
@@ -95,7 +101,7 @@ func renderGHAWorkflow(p *CIPlan, name string) (string, error) {
 		fmt.Fprintf(&b, "        run: wfctl infra plan --config '%s' --format markdown >> plan.md\n", phase.ConfigPath)
 	}
 	b.WriteString("      - name: Post plan comment\n")
-	b.WriteString("        uses: actions/github-script@v7\n")
+	fmt.Fprintf(&b, "        uses: %s\n", githubActionsScriptRef)
 	b.WriteString("        with:\n")
 	b.WriteString("          script: |\n")
 	b.WriteString("            const fs = require('fs');\n")
@@ -146,13 +152,13 @@ func renderGHAWorkflow(p *CIPlan, name string) (string, error) {
 
 // writeCheckoutStep emits the checkout step.
 func writeCheckoutStep(b *strings.Builder) {
-	b.WriteString("      - uses: actions/checkout@v6\n")
+	fmt.Fprintf(b, "      - uses: %s\n", githubActionsCheckoutRef)
 }
 
 // writeSetupWfctlStep emits the setup-wfctl action step.
 func writeSetupWfctlStep(b *strings.Builder, version string) {
 	b.WriteString("      - name: Install wfctl\n")
-	b.WriteString("        uses: GoCodeAlone/setup-wfctl@v1\n")
+	fmt.Fprintf(b, "        uses: %s\n", githubActionsSetupWfctlRef)
 	b.WriteString("        with:\n")
 	fmt.Fprintf(b, "          version: '%s'\n", version)
 }

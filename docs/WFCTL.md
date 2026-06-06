@@ -2728,8 +2728,8 @@ Plugin CI should generate evidence with the released artifact, then update the r
 
 ```yaml
 steps:
-  - uses: actions/checkout@v6
-  - uses: GoCodeAlone/workflow/.github/actions/setup-wfctl@main
+  - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+  - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
     with:
       version: v0.51.2
   - run: wfctl plugin conformance --mode typed-iac --artifact dist/plugin.tar.gz --engine-version v0.51.2 --format json --output evidence.json

@@ -47,6 +47,16 @@ type projectFeatures struct {
 	configFile  string
 }
 
+const (
+	githubActionsCheckoutRef        = "actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3"
+	githubActionsSetupGoRef         = "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0"
+	githubActionsSetupNodeRef       = "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0"
+	githubActionsSetupWfctlRef      = "GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1"
+	githubActionsDockerLoginRef     = "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3"
+	githubActionsDockerSetupBuildx  = "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3"
+	githubActionsDockerBuildPushRef = "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6"
+)
+
 func runGenerateGithubActions(args []string) error {
 	fs := flag.NewFlagSet("generate github-actions", flag.ContinueOnError)
 	output := fs.String("output", ".github/workflows/", "Output directory for generated workflow files")
@@ -163,8 +173,8 @@ func writeCIWorkflow(path string, features *projectFeatures) error {
 	b.WriteString("  validate:\n")
 	b.WriteString("    runs-on: ubuntu-latest\n")
 	b.WriteString("    steps:\n")
-	b.WriteString("      - uses: actions/checkout@v6\n")
-	b.WriteString("      - uses: actions/setup-go@v5\n")
+	fmt.Fprintf(&b, "      - uses: %s\n", githubActionsCheckoutRef)
+	fmt.Fprintf(&b, "      - uses: %s\n", githubActionsSetupGoRef)
 	b.WriteString("        with:\n")
 	b.WriteString("          go-version: '1.22'\n")
 	b.WriteString("      - name: Install wfctl\n")
@@ -175,9 +185,9 @@ func writeCIWorkflow(path string, features *projectFeatures) error {
 	fmt.Fprintf(&b, "        run: wfctl inspect %s\n", features.configFile)
 
 	if features.hasUI {
-		b.WriteString("      - uses: actions/setup-node@v4\n")
+		fmt.Fprintf(&b, "      - uses: %s\n", githubActionsSetupNodeRef)
 		b.WriteString("        with:\n")
-		b.WriteString("          node-version: '22'\n")
+		b.WriteString("          node-version: '24'\n")
 		b.WriteString("      - name: Build UI\n")
 		b.WriteString("        run: wfctl build-ui --ui-dir ui\n")
 	}
@@ -216,15 +226,15 @@ func writeCDWorkflow(path string, features *projectFeatures, registry, platforms
 	b.WriteString("      contents: read\n")
 	b.WriteString("      packages: write\n")
 	b.WriteString("    steps:\n")
-	b.WriteString("      - uses: actions/checkout@v6\n")
-	b.WriteString("      - uses: actions/setup-go@v5\n")
+	fmt.Fprintf(&b, "      - uses: %s\n", githubActionsCheckoutRef)
+	fmt.Fprintf(&b, "      - uses: %s\n", githubActionsSetupGoRef)
 	b.WriteString("        with:\n")
 	b.WriteString("          go-version: '1.22'\n")
 
 	if features.hasUI {
-		b.WriteString("      - uses: actions/setup-node@v4\n")
+		fmt.Fprintf(&b, "      - uses: %s\n", githubActionsSetupNodeRef)
 		b.WriteString("        with:\n")
-		b.WriteString("          node-version: '22'\n")
+		b.WriteString("          node-version: '24'\n")
 		b.WriteString("      - name: Build UI\n")
 		b.WriteString("        run: |\n")
 		b.WriteString("          cd ui && npm ci && npm run build && cd ..\n")
@@ -234,15 +244,15 @@ func writeCDWorkflow(path string, features *projectFeatures, registry, platforms
 	b.WriteString("        run: |\n")
 	b.WriteString("          GOOS=linux GOARCH=amd64 go build -o bin/server ./cmd/server/\n")
 	b.WriteString("      - name: Log in to registry\n")
-	b.WriteString("        uses: docker/login-action@v3\n")
+	fmt.Fprintf(&b, "        uses: %s\n", githubActionsDockerLoginRef)
 	b.WriteString("        with:\n")
 	b.WriteString("          registry: ${{ env.REGISTRY }}\n")
 	b.WriteString("          username: ${{ github.actor }}\n")
 	b.WriteString("          password: ${{ secrets.GITHUB_TOKEN }}\n")
 	b.WriteString("      - name: Set up Docker Buildx\n")
-	b.WriteString("        uses: docker/setup-buildx-action@v3\n")
+	fmt.Fprintf(&b, "        uses: %s\n", githubActionsDockerSetupBuildx)
 	b.WriteString("      - name: Build and push Docker image\n")
-	b.WriteString("        uses: docker/build-push-action@v5\n")
+	fmt.Fprintf(&b, "        uses: %s\n", githubActionsDockerBuildPushRef)
 	b.WriteString("        with:\n")
 	b.WriteString("          context: .\n")
 	b.WriteString("          push: true\n")
@@ -266,8 +276,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version: '1.22'
       - name: Build plugin binaries
@@ -279,7 +289,7 @@ jobs:
             done
           done
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/*
 `

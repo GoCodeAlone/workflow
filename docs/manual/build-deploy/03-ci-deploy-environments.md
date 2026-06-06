@@ -73,10 +73,10 @@ deploy-staging:
   needs: [build-image]
   runs-on: ubuntu-latest
   steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       with:
         ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-    - uses: GoCodeAlone/setup-wfctl@v1
+    - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
     - run: wfctl ci run --phase deploy --env staging
 ```
 
@@ -96,8 +96,8 @@ repair-staging-migrations:
   environment: staging
   runs-on: ubuntu-latest
   steps:
-    - uses: actions/checkout@v6
-    - uses: GoCodeAlone/setup-wfctl@v1
+    - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+    - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
     - run: |
         wfctl migrate repair-dirty --config infra.yaml --env staging \
           --database app-db \

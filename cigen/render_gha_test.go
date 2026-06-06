@@ -63,6 +63,38 @@ func TestRenderGitHubActions_TwoPhases(t *testing.T) {
 	}
 }
 
+func TestRenderGitHubActions_PinsActionSHAs(t *testing.T) {
+	plan := richCIPlan()
+	files, err := cigen.RenderGitHubActions(plan)
+	if err != nil {
+		t.Fatalf("RenderGitHubActions: %v", err)
+	}
+	var content string
+	for _, c := range files {
+		content = c
+		break
+	}
+
+	for _, want := range []string{
+		"actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3",
+		"GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1",
+		"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("generated GitHub Actions workflow missing pinned action %q:\n%s", want, content)
+		}
+	}
+	for _, moving := range []string{
+		"actions/checkout@" + "v6",
+		"GoCodeAlone/setup-wfctl@" + "v1",
+		"actions/github-script@" + "v7",
+	} {
+		if strings.Contains(content, moving) {
+			t.Fatalf("generated GitHub Actions workflow contains moving action ref %q:\n%s", moving, content)
+		}
+	}
+}
+
 func TestRenderGitHubActions_MigrationsStep(t *testing.T) {
 	plan := richCIPlan()
 
