@@ -436,7 +436,9 @@ jobs:
             || true)
           if [ -n "$UNEXPECTED" ]; then
             echo "FAIL: unexpected gcp/azure/api transitive deps in workflow-core build graph:"
-            printf '  %s\n' "$UNEXPECTED"
+            while IFS= read -r dep; do
+              printf '  %s\n' "$dep"
+            done <<< "$UNEXPECTED"
             echo
             echo "Only cloud.google.com/go/compute/metadata is allowlisted (OAuth2 ADC helper)."
             echo "Other gcp/azure SDK packages belong in a plugin, not workflow core."
