@@ -2728,7 +2728,7 @@ Plugin CI should generate evidence with the released artifact, then update the r
 
 ```yaml
 steps:
-  - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+  - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
   - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
     with:
       version: v0.51.2

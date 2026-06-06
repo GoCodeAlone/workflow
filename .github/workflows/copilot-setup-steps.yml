@@ -26,7 +26,7 @@ jobs:
     # If you do not check out your code, Copilot will do this for you.
     steps:
       - name: Checkout code
-        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       # Setup Go environment for development and testing
       - name: Setup Go
@@ -52,7 +52,7 @@ jobs:
 
       # Install golangci-lint for Go code linting
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@db582008a42febd596419635a5abc9d9815daa9c # v9.2.1
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         continue-on-error: true
         with:
           version: latest
