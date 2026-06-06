@@ -1,6 +1,6 @@
 module github.com/test/missing-ldflag
 
-go 1.26.0
+go 1.26.1
 
 require github.com/GoCodeAlone/workflow v0.62.0
 
