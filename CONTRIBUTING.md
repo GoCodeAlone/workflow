@@ -6,8 +6,8 @@ Thank you for your interest in contributing to the workflow engine. This guide c
 
 ### Prerequisites
 
-- Go 1.26+
-- Node.js 18+ (for UI development)
+- Go 1.26.4+
+- Node.js 24+ (for UI development)
 - Git
 - `golangci-lint` (install: `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`)
 

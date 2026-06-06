@@ -133,8 +133,8 @@ scaffolds, see [Repository Layout](docs/REPO_LAYOUT.md).
 
 ### Requirements
 
-- Go 1.26+
-- Node.js 18+ (for UI development)
+- Go 1.26.4+
+- Node.js 24+ (for UI development)
 
 ### Run the Server
 

@@ -7,6 +7,6 @@ const (
 	// #nosec G101 -- action commit SHA, not a credential.
 	mcpGithubActionsSetupWfctlRef        = "GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1"
 	mcpGithubActionsDockerLoginRef       = "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3"
-	mcpGithubActionsDockerSetupBuildxRef = "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3"
-	mcpGithubActionsDockerBuildPushRef   = "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6"
+	mcpGithubActionsDockerSetupBuildxRef = "docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0"
+	mcpGithubActionsDockerBuildPushRef   = "docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0"
 )

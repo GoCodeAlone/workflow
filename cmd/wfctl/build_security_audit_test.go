@@ -377,7 +377,7 @@ ci:
     containers:
       - name: app
         method: dockerfile
-`, `FROM golang:1.22-alpine
+`, `FROM golang:1.26.4-alpine
 RUN addgroup -S app && adduser -S app -G app
 USER app
 COPY . .
@@ -406,7 +406,7 @@ ci:
     containers:
       - name: app
         method: dockerfile
-`, `FROM golang:1.22-alpine
+`, `FROM golang:1.26.4-alpine
 USER app
 `)
 	findings := runBuildAuditChecks(cfgPath, filepath.Dir(cfgPath))

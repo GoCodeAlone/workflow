@@ -1,6 +1,6 @@
 module example
 
-go 1.26.1
+go 1.26.4
 
 replace github.com/GoCodeAlone/workflow => ../
 

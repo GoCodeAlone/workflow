@@ -4,7 +4,7 @@ A hands-on tutorial for developers who want to build real applications using the
 
 Throughout this guide, the [Chat Platform example](../../example/chat-platform/) serves as the reference architecture. It is a production-grade mental health support platform built entirely from YAML configuration and dynamic Go components -- no custom server code required.
 
-**Prerequisites**: Go 1.25+, the workflow server binary, and a text editor.
+**Prerequisites**: Go 1.26.4+, the workflow server binary, and a text editor.
 
 ---
 
@@ -63,7 +63,7 @@ It is not a good fit for:
 
 ### Prerequisites
 
-1. **Go 1.25+** installed on your machine
+1. **Go 1.26.4+** installed on your machine
 2. **The workflow repository** cloned and built:
 
 ```bash
@@ -74,7 +74,7 @@ go build -o server ./cmd/server
 
 The `server` binary is the only executable you need. Everything else is YAML config files, seed data, and optional dynamic component source files.
 
-3. **Optional**: Node.js 18+ if you want to use the visual workflow builder UI
+3. **Optional**: Node.js 24+ if you want to use the visual workflow builder UI
 4. **Optional**: `golangci-lint` if you plan to contribute custom modules
 
 ---

@@ -30,8 +30,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Set up Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -65,8 +65,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Set up Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -115,12 +115,12 @@ jobs:
     - name: Create checksums
       run: |
         cd dist
-        sha256sum * > checksums.txt
+        sha256sum ./* > checksums.txt
 
     - name: Clean up old snapshot releases
       run: |
         # Delete all previous snapshot-* releases (keep only latest)
-        gh release list --limit 50 | grep '^snapshot-' | awk '{print $1}' | while read tag; do
+        gh release list --limit 50 | grep '^snapshot-' | awk '{print $1}' | while read -r tag; do
           gh release delete "$tag" --yes --cleanup-tag || true
         done
       env:
@@ -158,8 +158,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26'
-        cache: true
+        go-version: '1.26.4'
+        cache: false
 
     - name: Set up ko
       uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9

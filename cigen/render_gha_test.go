@@ -78,7 +78,7 @@ func TestRenderGitHubActions_PinsActionSHAs(t *testing.T) {
 	for _, want := range []string{
 		"actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3",
 		"GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1",
-		"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7",
+		"actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("generated GitHub Actions workflow missing pinned action %q:\n%s", want, content)
@@ -87,7 +87,7 @@ func TestRenderGitHubActions_PinsActionSHAs(t *testing.T) {
 	for _, moving := range []string{
 		"actions/checkout@" + "v6",
 		"GoCodeAlone/setup-wfctl@" + "v1",
-		"actions/github-script@" + "v7",
+		"actions/github-script@" + "v9",
 	} {
 		if strings.Contains(content, moving) {
 			t.Fatalf("generated GitHub Actions workflow contains moving action ref %q:\n%s", moving, content)

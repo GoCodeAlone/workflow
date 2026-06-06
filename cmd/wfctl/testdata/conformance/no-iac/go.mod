@@ -1,6 +1,6 @@
 module example.com/no-iac
 
-go 1.26.0
+go 1.26.4
 
 require github.com/GoCodeAlone/workflow v0.0.0
 

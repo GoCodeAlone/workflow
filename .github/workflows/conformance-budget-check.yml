@@ -46,13 +46,13 @@ jobs:
         id: hour
         run: echo "value=$(date -u +%Y%m%d%H)" >> "$GITHUB_OUTPUT"
 
-      # actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 does post-step write-back automatically:
+      # actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5 does post-step write-back automatically:
       # if cache-hit is false, the action records the path's contents
       # at job-end and uploads under this key for the next run on the
       # same key. No explicit upload-cache step is needed.
       - name: Restore budget result cache
         id: budget-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           key: budget-${{ github.event.pull_request.base.sha || github.sha }}-${{ steps.hour.outputs.value }}
           path: /tmp/budget-result.json

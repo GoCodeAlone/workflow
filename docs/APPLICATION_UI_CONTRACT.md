@@ -219,7 +219,7 @@ go build -o myapp ./cmd/server
 
 ```dockerfile
 # Stage 1: Build UI
-FROM node:20-alpine AS ui-builder
+FROM node:24-alpine AS ui-builder
 WORKDIR /app/ui
 COPY ui/package*.json ./
 RUN npm ci
@@ -227,7 +227,7 @@ COPY ui/ ./
 RUN npm run build
 
 # Stage 2: Build Go binary
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.26.4-alpine AS go-builder
 WORKDIR /app
 COPY --from=ui-builder /app/ui/dist ./module/ui_dist
 COPY . .

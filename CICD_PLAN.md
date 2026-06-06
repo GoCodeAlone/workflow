@@ -90,7 +90,7 @@ func (s *DockerSandbox) CopyOut(ctx context.Context, srcPath string) (io.ReadClo
 - name: build-ui
   type: step.shell_exec
   config:
-    image: node:20-alpine
+    image: node:24-alpine
     commands:
       - npm ci
       - npm run build
