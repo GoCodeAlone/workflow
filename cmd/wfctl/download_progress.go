@@ -62,13 +62,14 @@ func (p *downloadProgress) emit(prefix string) {
 
 func formatDownloadBytes(n int64) string {
 	const unit = 1024
+	const prefixes = "KMGTPE"
 	if n < unit {
 		return fmt.Sprintf("%d B", n)
 	}
 	div, exp := int64(unit), 0
-	for next := n / unit; next >= unit && exp < 4; next /= unit {
+	for next := n / unit; next >= unit && exp < len(prefixes)-1; next /= unit {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), prefixes[exp])
 }

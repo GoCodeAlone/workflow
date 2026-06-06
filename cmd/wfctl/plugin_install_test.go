@@ -134,7 +134,12 @@ func TestDownloadURL_DirectGetUsesBoundedRequestContext(t *testing.T) {
 	}
 	t.Cleanup(func() { http.DefaultClient = orig })
 
-	got, err := downloadURL("https://example.com/plugin.tar.gz")
+	var got []byte
+	_, err := captureStderr(t, func() error {
+		var err error
+		got, err = downloadURL("https://example.com/plugin.tar.gz")
+		return err
+	})
 	if err != nil {
 		t.Fatalf("downloadURL: %v", err)
 	}
@@ -167,6 +172,14 @@ func TestDownloadURL_LargeDirectDownloadEmitsProgress(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "Download progress") || !strings.Contains(stderr, "Download complete") {
 		t.Fatalf("stderr = %q, want progress and completion indicators", stderr)
+	}
+}
+
+func TestCloseResponseBodyClosesNonNilBody(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader("metadata")}
+	closeResponseBody(&http.Response{Body: body})
+	if !body.closed {
+		t.Fatal("response body was not closed")
 	}
 }
 
@@ -512,6 +525,16 @@ func TestDownloadURL_PrivateReleaseAssetUsesFreshAssetDownloadDeadline(t *testin
 	if !assetDeadline.After(metadataDeadline) {
 		t.Fatalf("asset deadline = %v, want after metadata deadline %v", assetDeadline, metadataDeadline)
 	}
+}
+
+type trackingReadCloser struct {
+	*strings.Reader
+	closed bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return nil
 }
 
 // TestDownloadURL_PublicReleaseNoToken verifies that when no token is set,
