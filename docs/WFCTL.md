@@ -2509,7 +2509,7 @@ wfctl secrets sync --from staging --to production
 
 #### `secrets setup`
 
-Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY.
+Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY. With `--manifest`, discovers secrets from `wfctl.yaml`, `.wfctl-lock.yaml`, installed plugin `required_secrets[]`, and `${ENV_VAR}` references in workflow configs.
 
 **Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names.
 
@@ -2529,6 +2529,9 @@ wfctl secrets setup [options]
 |------|---------|-------------|
 | `--env` | `local` | Target environment name (interactive path) |
 | `--config` | `app.yaml` | Workflow config file |
+| `--manifest` | _(none)_ | Use a `wfctl.yaml` plugin manifest to discover repo-level plugin and config secrets |
+| `--lock-file` | `.wfctl-lock.yaml` | Lockfile to include when `--manifest` is used |
+| `--plugin-dir` | `$WFCTL_PLUGIN_DIR` or `./data/plugins` | Installed plugin directory for `required_secrets[]` discovery |
 | `--store` | _(config defaultStore)_ | Named store to use; overrides `secrets.defaultStore` |
 | `--non-interactive` | `false` | Force non-interactive mode (also auto when stdin is not a TTY) |
 | `--from-env` | `false` | Read each secret value from `$NAME`. Recommended for CI. |
@@ -2537,10 +2540,10 @@ wfctl secrets setup [options]
 | `--only` | _(all)_ | Comma-separated list of secret names to set; mutually exclusive with `--all` |
 | `--skip-existing` | `false` | Skip secrets that already have a value in the store |
 | `--auto-gen-keys` | `false` | Auto-generate random values for secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive |
-| `--scope` | `repo` | GitHub scope: `repo` \| `env` \| `org` (legacy `--plugin` path) |
-| `--org` | _(none)_ | Organization slug (legacy `--plugin` path) |
-| `--visibility` | `all` | Org-scope visibility: `all` \| `selected` \| `private` (legacy `--plugin` path) |
-| `--token-env` | `GITHUB_TOKEN` | Env var holding the GitHub PAT (legacy `--plugin` path) |
+| `--scope` | `repo` | GitHub scope for plugin or manifest setup: `repo` \| `env` \| `org` |
+| `--org` | _(none)_ | Organization slug for `--scope org` |
+| `--visibility` | `all` | Org-scope visibility: `all` \| `selected` \| `private` |
+| `--token-env` | `GITHUB_TOKEN` | Env var holding the GitHub PAT |
 
 ```bash
 # Interactive wizard
@@ -2555,6 +2558,10 @@ wfctl secrets setup --env production --auto-gen-keys
 
 # Set specific secrets only
 wfctl secrets setup --only DB_URL,STRIPE_KEY --from-env
+
+# Discover provider plugin secrets from wfctl.yaml/.wfctl-lock.yaml plus config ${ENV_VAR} refs
+wfctl secrets setup --manifest wfctl.yaml --config 'infra/*.yaml,deploy.yaml' \
+  --plugin-dir data/plugins --scope org --org GoCodeAlone --from-env
 ```
 
 ---

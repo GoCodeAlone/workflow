@@ -199,6 +199,17 @@ wfctl secrets setup --plugin workflow-plugin-hover \
   --scope env --env production
 ```
 
+For a repo that already has `wfctl.yaml` and `.wfctl-lock.yaml`, use the
+manifest-driven form to discover all installed provider plugin secrets plus
+`${ENV_VAR}` references in config files:
+
+```sh
+wfctl secrets setup --manifest wfctl.yaml \
+  --config 'infra/*.yaml,deploy.yaml' \
+  --plugin-dir data/plugins \
+  --scope org --org GoCodeAlone --from-env
+```
+
 See `docs/wfctl-secrets-scopes.md` for the scope flag matrix.
 
 ## Provider plan
