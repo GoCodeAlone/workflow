@@ -46,7 +46,7 @@ Actions:
   plan      Analyze config and emit a CIPlan JSON (platform-neutral)
   run       Run CI phases (build, test, deploy) from workflow config
   init      Generate bootstrap CI YAML for GitHub Actions or GitLab CI
-  validate  Validate CI config sections
+  validate  Validate workflow CI config sections or rendered CI provider artifacts
 
 Options:
   --platform <name>     CI platform: github_actions, gitlab_ci, jenkins, circleci (required for generate)
@@ -171,6 +171,9 @@ func runCIGenerate(args []string) error {
 	}
 	if renderErr != nil {
 		return renderErr
+	}
+	if findings := cigen.ValidateRenderedFiles(resolvedPlatform, files); len(findings) > 0 {
+		return fmt.Errorf("ci generate: rendered %s artifact failed validation: %s", resolvedPlatform, strings.Join(cigen.ValidationMessages(findings), "; "))
 	}
 
 	// --diff mode: print diff and optionally exit 1 if different

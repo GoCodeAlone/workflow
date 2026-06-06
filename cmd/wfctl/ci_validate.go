@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/cigen"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/internal/legacyaws"
 	"github.com/GoCodeAlone/workflow/internal/legacydo"
@@ -32,11 +33,14 @@ func runCIValidate(args []string) error {
 	override := fs.String("override", "", "Override token to bypass failed checks (3-word passphrase)")
 	format := fs.String("format", "text", "Output format: text or json")
 	pluginDir := fs.String("plugin-dir", "", "Directory of installed external plugins")
+	platform := fs.String("platform", "", "Validate rendered CI artifact platform: github_actions, gitlab_ci, jenkins, circleci")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl ci validate [options] <config.yaml>
+       wfctl ci validate --platform <platform> <ci-file>
 
 Run full validation suite on a workflow config for CI pipelines. Includes
 structural validation, immutability checks, and pipeline reference analysis.
+With --platform, validates rendered provider CI artifacts instead.
 
 Options:
 `)
@@ -50,6 +54,10 @@ Options:
 	if len(files) == 0 {
 		fs.Usage()
 		return fmt.Errorf("at least one config file is required")
+	}
+
+	if *platform != "" {
+		return runCIValidateArtifacts(*platform, files, *format)
 	}
 
 	if *pluginDir != "" {
@@ -115,6 +123,48 @@ Options:
 		if !allPassed {
 			return fmt.Errorf("%d file(s) failed ci validate", ciCountFailed(results))
 		}
+	}
+	return nil
+}
+
+func runCIValidateArtifacts(platform string, files []string, format string) error {
+	rendered := make(map[string]string, len(files))
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			rendered[file] = ""
+			continue
+		}
+		rendered[file] = string(data)
+	}
+	findings := cigen.ValidateRenderedFiles(platform, rendered)
+	for _, file := range files {
+		if _, err := os.Stat(file); err != nil {
+			findings = append(findings, cigen.ValidationFinding{
+				Path:    file,
+				Code:    "read_ci_artifact",
+				Message: fmt.Sprintf("read CI artifact: %v", err),
+			})
+		}
+	}
+	passed := len(findings) == 0
+	switch format {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(map[string]any{"platform": platform, "findings": findings, "passed": passed}); err != nil {
+			return err
+		}
+	default:
+		for _, file := range files {
+			fmt.Printf("  VALIDATE %s (%s)\n", file, platform)
+		}
+		for _, finding := range findings {
+			fmt.Printf("       %s: %s\n", finding.Code, finding.Message)
+		}
+	}
+	if !passed {
+		return fmt.Errorf("%d file(s) failed ci validate", len(files))
 	}
 	return nil
 }

@@ -46,7 +46,7 @@ jobs:
       DAILY_SCRUB_THRESHOLD: 3     # > 3 scrub events / day → file budget incident too
     steps:
       - name: Check out workflow repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Detect unconfigured secret. The cron fires on a fixed
       # schedule regardless of secret provisioning state; if the

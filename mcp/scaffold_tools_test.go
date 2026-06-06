@@ -211,7 +211,7 @@ ci:
 	if !strings.Contains(text, "wfctl ci run") {
 		t.Error("expected wfctl ci run call")
 	}
-	if !strings.Contains(text, "actions/checkout@v4") {
+	if !strings.Contains(text, "actions/checkout@v6") {
 		t.Error("expected checkout action")
 	}
 }

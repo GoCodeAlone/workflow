@@ -52,9 +52,9 @@ jobs:
       matrix:
         plugin: [workflow-plugin-aws, workflow-plugin-gcp, workflow-plugin-azure]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: { path: workflow }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: GoCodeAlone/${{ matrix.plugin }}
           path: ${{ matrix.plugin }}
@@ -93,7 +93,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
       - name: Typed-IaC E2E test (in-process gRPC roundtrip)

@@ -397,8 +397,8 @@ func TestCIWorkflowContent(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, "actions/checkout@v4") {
-		t.Error("ci.yml should use actions/checkout@v4")
+	if !strings.Contains(content, "actions/checkout@v6") {
+		t.Error("ci.yml should use actions/checkout@v6")
 	}
 	if !strings.Contains(content, "actions/setup-go@v5") {
 		t.Error("ci.yml should use actions/setup-go@v5")
