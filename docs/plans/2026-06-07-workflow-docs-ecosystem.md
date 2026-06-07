@@ -33,7 +33,7 @@
 | 2 | feat: generate Go API docs with wfctl | Task 5, Task 6 | feat/wfctl-go-docs |
 | 3 | docs: reorganize website docs and API reference | Task 7, Task 8, Task 9 | feat/website-go-api-docs |
 
-**Status:** Locked 2026-06-07T04:11:52Z
+**Status:** Complete 2026-06-07T07:34:29Z
 
 ## Global Design Guidance Mapping
 
