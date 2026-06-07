@@ -35,6 +35,9 @@ func parseChecksumsTxt(body string) (map[string]string, error) {
 			return nil, fmt.Errorf("malformed checksums.txt line: %q (expected exactly two spaces between hash and filename)", line)
 		}
 		name = strings.TrimPrefix(name, "./")
+		if name == "" {
+			return nil, fmt.Errorf("malformed checksums.txt line: %q (empty filename after normalization)", line)
+		}
 		if existing, ok := result[name]; ok && existing != hash {
 			return nil, fmt.Errorf("conflicting checksums.txt entries for %q", name)
 		}

@@ -53,6 +53,16 @@ func TestParseChecksumsTxt_RejectsConflictingDotSlashAliases(t *testing.T) {
 	}
 }
 
+func TestParseChecksumsTxt_RejectsEmptyDotSlashName(t *testing.T) {
+	_, err := parseChecksumsTxt("abc123def456  ./\n")
+	if err == nil {
+		t.Fatal("expected ./ checksum entry to fail")
+	}
+	if !strings.Contains(err.Error(), "empty filename") {
+		t.Fatalf("error = %v, want empty filename error", err)
+	}
+}
+
 func TestParseChecksumsTxt_SkipsBlankLines(t *testing.T) {
 	body := "\nabc123  plugin.tar.gz\n\n"
 	got, err := parseChecksumsTxt(body)
