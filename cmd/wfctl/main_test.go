@@ -245,6 +245,29 @@ func TestRunValidateValid(t *testing.T) {
 	}
 }
 
+func TestRunValidateAllowsInfraSecretPseudoModules(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+modules:
+  - name: required-secrets
+    type: secrets.requires
+    config:
+      requires:
+        - key: EXTERNAL_API_TOKEN
+  - name: generated-secrets
+    type: secrets.generate
+    config:
+      generate:
+        - key: DATABASE_URL
+          type: infra_output
+          source: database.uri
+`
+	path := writeTestConfig(t, dir, "infra-secrets.yaml", cfg)
+	if err := runValidate([]string{"--allow-no-entry-points", path}); err != nil {
+		t.Fatalf("expected secrets pseudo-modules to validate, got: %v", err)
+	}
+}
+
 func TestRunValidateInvalid(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestConfig(t, dir, "invalid.yaml", invalidConfig)
