@@ -292,7 +292,7 @@ jobs:
     - name: Create checksums
       run: |
         cd dist
-        sha256sum ./* > checksums.txt
+        sha256sum ./* | sed 's#  \./#  #' > checksums.txt
 
     - name: Create Release (draft during asset upload)
       uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
