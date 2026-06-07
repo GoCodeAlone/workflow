@@ -182,14 +182,29 @@ func (a secretsProviderAdapter) checkAccess(ctx context.Context) error {
 }
 
 // newSecretsProvider constructs the provider matching the given name.
-// It now supports all 5 backends (env, github, vault, aws, keychain) by
-// delegating to resolveSecretsProvider, then wrapping the result in the adapter.
+// It is intended for ad-hoc provider selection where no provider-specific
+// config was loaded from a workflow config file.
 func newSecretsProvider(providerName string) (SecretsProvider, error) {
 	name := providerName
 	if name == "" {
 		name = "env"
 	}
-	p, err := resolveSecretsProvider(&SecretsConfig{Provider: name})
+	return newSecretsProviderFromConfig(&SecretsConfig{Provider: name})
+}
+
+// newSecretsProviderFromConfig constructs the provider from a full SecretsConfig.
+// It preserves provider-specific config such as GitHub repo/token_env, Vault
+// address/token, and env prefixes loaded from app.yaml/infra.yaml.
+func newSecretsProviderFromConfig(cfg *SecretsConfig) (SecretsProvider, error) {
+	if cfg == nil {
+		cfg = &SecretsConfig{Provider: "env"}
+	}
+	if cfg.Provider == "" {
+		copied := *cfg
+		copied.Provider = "env"
+		cfg = &copied
+	}
+	p, err := resolveSecretsProvider(cfg)
 	if err != nil {
 		return nil, err
 	}

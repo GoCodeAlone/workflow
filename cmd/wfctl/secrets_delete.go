@@ -47,7 +47,7 @@ func runSecretsDelete(args []string) error {
 	if err != nil {
 		return err
 	}
-	provider, err := newSecretsProvider(cfg.Provider)
+	provider, err := newSecretsProviderFromConfig(cfg)
 	if err != nil {
 		return err
 	}
