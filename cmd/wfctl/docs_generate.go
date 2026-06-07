@@ -12,12 +12,15 @@ import (
 	"go/token"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 type docsGenerateAPIOptions struct {
@@ -163,6 +166,7 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 	sort.Slice(meta.Packages, func(i, j int) bool {
 		return meta.Packages[i].ImportPath < meta.Packages[j].ImportPath
 	})
+	limitDocsVersionLines(meta.Versions, opts.MaxVersionLines)
 	metaBytes, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return fmt.Errorf("docs generate: marshal metadata: %w", err)
@@ -350,6 +354,7 @@ func renderRegistryPluginAPIPackages(ctx context.Context, opts docsGenerateAPIOp
 	}
 	var rendered []renderedDocsPackage
 	var warnings []string
+	allowLocalPluginSources := docsRegistryLocalSource(opts.Registry)
 	for i := range manifests {
 		manifest := &manifests[i]
 		if strings.TrimSpace(manifest.Name) == "" {
@@ -364,7 +369,11 @@ func renderRegistryPluginAPIPackages(ctx context.Context, opts docsGenerateAPIOp
 			warnings = append(warnings, fmt.Sprintf("%s skipped: missing version", manifest.Name))
 			continue
 		}
-		checkout, err := checkoutDocsPluginRepo(ctx, manifest, cacheDir)
+		if _, err := safeDocsPluginSlug(manifest.Name); err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
+			continue
+		}
+		checkout, err := checkoutDocsPluginRepo(ctx, manifest, cacheDir, allowLocalPluginSources)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
 			continue
@@ -420,15 +429,21 @@ func loadDocsRegistry(ctx context.Context, ref string) ([]RegistryManifest, erro
 	return manifests, nil
 }
 
-func checkoutDocsPluginRepo(ctx context.Context, manifest *RegistryManifest, cacheDir string) (string, error) {
-	slug := pluginSlug(manifest.Name)
-	dest := filepath.Join(cacheDir, slug)
+func checkoutDocsPluginRepo(ctx context.Context, manifest *RegistryManifest, cacheDir string, allowLocalSource bool) (string, error) {
+	slug, err := safeDocsPluginSlug(manifest.Name)
+	if err != nil {
+		return "", err
+	}
+	dest, err := docsPluginCacheDestination(cacheDir, slug)
+	if err != nil {
+		return "", err
+	}
 	if err := os.RemoveAll(dest); err != nil {
 		return "", err
 	}
-	cloneSource := strings.TrimSpace(manifest.Source)
-	if cloneSource == "" {
-		cloneSource = manifest.Repository
+	cloneSource, err := docsPluginCloneSource(manifest, allowLocalSource)
+	if err != nil {
+		return "", err
 	}
 	args := []string{"clone", "--depth", "1", "--branch", manifest.Version, cloneSource, dest}
 	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed git command; args are not shell-expanded.
@@ -449,7 +464,10 @@ func renderPluginAPIPackage(ctx context.Context, checkout, modulePath string, ma
 	if err != nil {
 		return renderedDocsPackage{}, err
 	}
-	slug := pluginSlug(manifest.Name)
+	slug, err := safeDocsPluginSlug(manifest.Name)
+	if err != nil {
+		return renderedDocsPackage{}, err
+	}
 	route := "plugins/" + slug + "/latest/index.md"
 	synopsis := docPkg.Synopsis(docPkg.Doc)
 	if synopsis == "" {
@@ -484,7 +502,13 @@ func readGoModulePath(path string) (string, error) {
 }
 
 func trustedGoCodeAloneRepo(repo string) bool {
-	return strings.HasPrefix(strings.TrimSpace(repo), "https://github.com/GoCodeAlone/")
+	parsed, err := url.Parse(strings.TrimSpace(repo))
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "https" &&
+		parsed.Host == "github.com" &&
+		strings.HasPrefix(strings.TrimLeft(parsed.Path, "/"), "GoCodeAlone/")
 }
 
 func pluginSlug(name string) string {
@@ -496,6 +520,123 @@ func pluginSlug(name string) string {
 		name = strings.TrimPrefix(name, "workflow-plugin-")
 	}
 	return name
+}
+
+func safeDocsPluginSlug(name string) (string, error) {
+	slug := pluginSlug(name)
+	if slug == "" || slug == "." || slug == ".." {
+		return "", fmt.Errorf("invalid plugin slug %q", slug)
+	}
+	if strings.ContainsAny(slug, `/\`) {
+		return "", fmt.Errorf("invalid plugin slug %q", slug)
+	}
+	for i, r := range slug {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		if i > 0 && (r == '-' || r == '_' || r == '.') {
+			continue
+		}
+		return "", fmt.Errorf("invalid plugin slug %q", slug)
+	}
+	return slug, nil
+}
+
+func docsPluginCacheDestination(cacheDir, slug string) (string, error) {
+	absCacheDir, err := filepath.Abs(cacheDir)
+	if err != nil {
+		return "", err
+	}
+	dest := filepath.Join(absCacheDir, slug)
+	rel, err := filepath.Rel(absCacheDir, dest)
+	if err != nil {
+		return "", err
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid plugin cache destination %q", dest)
+	}
+	return dest, nil
+}
+
+func docsPluginCloneSource(manifest *RegistryManifest, allowLocalSource bool) (string, error) {
+	source := strings.TrimSpace(manifest.Source)
+	if source == "" {
+		source = strings.TrimSpace(manifest.Repository)
+	}
+	if docsPluginLocalCloneSource(source) {
+		if allowLocalSource {
+			return source, nil
+		}
+		return "", fmt.Errorf("source %q is outside the GoCodeAlone GitHub trust boundary", source)
+	}
+	if trustedGoCodeAloneRepo(source) {
+		return source, nil
+	}
+	return "", fmt.Errorf("source %q is outside the GoCodeAlone GitHub trust boundary", source)
+}
+
+func docsRegistryLocalSource(registry string) bool {
+	registry = strings.TrimSpace(registry)
+	return !strings.HasPrefix(registry, "https://") && !strings.HasPrefix(registry, "http://")
+}
+
+func docsPluginLocalCloneSource(source string) bool {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return false
+	}
+	if filepath.IsAbs(source) || strings.HasPrefix(source, ".") {
+		return true
+	}
+	if strings.Contains(source, "://") || strings.HasPrefix(source, "git@") || strings.Contains(source, ":") {
+		return false
+	}
+	return true
+}
+
+func limitDocsVersionLines(versions map[string][]string, maxLines int) {
+	for key, values := range versions {
+		values = uniqueDocsVersions(values)
+		sort.SliceStable(values, func(i, j int) bool {
+			return compareDocsVersions(values[i], values[j]) > 0
+		})
+		if maxLines > 0 && len(values) > maxLines {
+			values = values[:maxLines]
+		}
+		versions[key] = values
+	}
+}
+
+func uniqueDocsVersions(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func compareDocsVersions(left, right string) int {
+	leftValid := semver.IsValid(left)
+	rightValid := semver.IsValid(right)
+	if leftValid && rightValid {
+		return semver.Compare(left, right)
+	}
+	if leftValid {
+		return 1
+	}
+	if rightValid {
+		return -1
+	}
+	return strings.Compare(left, right)
 }
 
 func pluginSourceLink(repository, version string) string {

@@ -119,6 +119,18 @@ func TestDocsGenerateRegistryPlugins(t *testing.T) {
       "version": "v0.1.0",
       "repository": "https://github.com/Other/workflow-plugin-outside",
       "source": ` + strconvQuote(pluginRepo) + `
+    },
+    {
+      "name": "workflow-plugin-..",
+      "version": "v0.1.0",
+      "repository": "https://github.com/GoCodeAlone/workflow-plugin-dotdot",
+      "source": ` + strconvQuote(pluginRepo) + `
+    },
+    {
+      "name": "workflow-plugin-untrusted-source",
+      "version": "v0.1.0",
+      "repository": "https://github.com/GoCodeAlone/workflow-plugin-untrusted-source",
+      "source": "https://github.com/Other/workflow-plugin-untrusted-source"
     }
   ]
 }`
@@ -176,10 +188,51 @@ func TestDocsGenerateRegistryPlugins(t *testing.T) {
 		t.Fatalf("packages = %+v, want generated alpha plugin route", meta.Packages)
 	}
 	joinedWarnings := strings.Join(meta.Warnings, "\n")
-	for _, want := range []string{"workflow-plugin-missing", "v0.2.0", "workflow-plugin-outside", "trust boundary"} {
+	for _, want := range []string{"workflow-plugin-missing", "v0.2.0", "workflow-plugin-outside", "trust boundary", "invalid plugin slug", "workflow-plugin-untrusted-source"} {
 		if !strings.Contains(joinedWarnings, want) {
 			t.Fatalf("warnings missing %q:\n%s", want, joinedWarnings)
 		}
+	}
+}
+
+func TestLimitDocsVersionLines(t *testing.T) {
+	versions := map[string][]string{
+		"workflow": {
+			"v0.74.3",
+			"v0.74.2",
+			"v0.75.0",
+			"v1.0.0",
+			"v0.73.9",
+			"v0.75.0",
+		},
+	}
+
+	limitDocsVersionLines(versions, 2)
+
+	want := []string{"v1.0.0", "v0.75.0"}
+	got := versions["workflow"]
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("workflow versions = %v, want %v", got, want)
+	}
+}
+
+func TestDocsPluginCloneSourceRejectsLocalSourceFromRemoteRegistry(t *testing.T) {
+	manifest := &RegistryManifest{
+		Name:       "workflow-plugin-alpha",
+		Repository: "https://github.com/GoCodeAlone/workflow-plugin-alpha",
+		Source:     "../workflow-plugin-alpha",
+	}
+
+	if _, err := docsPluginCloneSource(manifest, false); err == nil {
+		t.Fatal("expected remote registry local source to be rejected")
+	}
+
+	source, err := docsPluginCloneSource(manifest, true)
+	if err != nil {
+		t.Fatalf("local registry source rejected: %v", err)
+	}
+	if source != manifest.Source {
+		t.Fatalf("source = %q, want %q", source, manifest.Source)
 	}
 }
 
