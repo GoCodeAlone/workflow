@@ -360,10 +360,32 @@ func readKVLines(r io.Reader) []string {
 }
 
 func firstConfigPattern(patterns string) string {
+	fallback := ""
 	for _, raw := range strings.Split(patterns, ",") {
 		if pattern := strings.TrimSpace(raw); pattern != "" {
-			return pattern
+			if fallback == "" {
+				fallback = pattern
+			}
+			if strings.ContainsAny(pattern, "*?[") {
+				matches, err := filepath.Glob(pattern)
+				if err != nil {
+					continue
+				}
+				sort.Strings(matches)
+				for _, match := range matches {
+					if fileExists(match) {
+						return match
+					}
+				}
+				continue
+			}
+			if fileExists(pattern) {
+				return pattern
+			}
 		}
+	}
+	if fallback != "" {
+		return fallback
 	}
 	return "app.yaml"
 }

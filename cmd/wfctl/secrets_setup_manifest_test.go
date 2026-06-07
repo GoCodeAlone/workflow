@@ -110,3 +110,21 @@ func TestParseManifestSetupFlagsDefaultsConfigPatterns(t *testing.T) {
 		t.Fatalf("configPatterns = %q, want infra/*.wfctl.yaml", args.configPatterns)
 	}
 }
+
+func TestFirstConfigPatternResolvesGlobToExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "infra"), 0o755); err != nil {
+		t.Fatalf("mkdir infra: %v", err)
+	}
+	for _, name := range []string{"b.wfctl.yaml", "a.wfctl.yaml"} {
+		if err := os.WriteFile(filepath.Join(dir, "infra", name), []byte("resources: []\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	got := firstConfigPattern("missing.yaml,infra/*.wfctl.yaml")
+	if got != filepath.Join("infra", "a.wfctl.yaml") {
+		t.Fatalf("firstConfigPattern = %q, want infra/a.wfctl.yaml", got)
+	}
+}

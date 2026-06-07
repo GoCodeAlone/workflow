@@ -49,10 +49,10 @@ func runSecretsSetup(args []string) error {
 	storeName := fs.String("store", "", "Named store to use (overrides config defaultStore)")
 	// Manifest-backed GitHub setup flags. These also keep the legacy --plugin
 	// path compatible because runSecrets dispatches --plugin before this path.
-	scope := fs.String("scope", "repo", "GitHub scope: repo | env | org")
-	org := fs.String("org", "", "Organization slug (required with --scope=org)")
-	visibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
-	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
+	scope := fs.String("scope", "repo", "GitHub scope for manifest-backed setup: repo | env | org")
+	org := fs.String("org", "", "Organization slug for manifest-backed --scope=org")
+	visibility := fs.String("visibility", "all", "Manifest-backed org-scope visibility: all | selected | private")
+	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT for manifest-backed setup")
 	lockFile := fs.String("lock-file", ".wfctl-lock.yaml", "wfctl plugin lockfile used when wfctl.yaml is auto-discovered")
 	pluginDir := fs.String("plugin-dir", "", "Plugin install dir used when wfctl.yaml is auto-discovered")
 
@@ -334,7 +334,7 @@ func missingSecretsSetupConfigError(configs []string) error {
 	if len(configs) > 0 {
 		return ambiguousSecretsConfigError(configs)
 	}
-	return fmt.Errorf("no secrets setup config found; looked for app.yaml, workflow.yaml, infra.yaml, and wfctl.yaml. Rerun with --config <path> for app/workflow secrets or --manifest wfctl.yaml for plugin/infra secrets")
+	return fmt.Errorf("no secrets setup config found; looked for app.yaml/app.yml, workflow.yaml/workflow.yml, infra.yaml/infra.yml, and wfctl.yaml. Rerun with --config <path> for app/workflow secrets or --manifest wfctl.yaml for plugin/infra secrets")
 }
 
 // isAutoGenCandidate returns true if the secret name looks like a key, token, or signing secret.
