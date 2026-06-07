@@ -8,6 +8,9 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
 )
 
+// Version is injected by the release build so runtime manifests report the tag.
+var Version = "dev"
+
 //go:embed ui/dist
 var uiAssets embed.FS
 
@@ -18,7 +21,7 @@ type {{.NameCamel}}Plugin struct{}
 func (p *{{.NameCamel}}Plugin) Manifest() sdk.PluginManifest {
 	return sdk.PluginManifest{
 		Name:        "{{.Name}}",
-		Version:     "0.1.0",
+		Version:     sdk.ResolveBuildVersion(Version),
 		Author:      "{{.Author}}",
 		Description: "{{.Description}}",
 	}

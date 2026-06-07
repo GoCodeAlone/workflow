@@ -35,8 +35,8 @@ func TestTemplateGeneratorGenerate(t *testing.T) {
 	if manifest.Name != "my-plugin" {
 		t.Errorf("Name = %q, want %q", manifest.Name, "my-plugin")
 	}
-	if manifest.Version != "1.0.0" {
-		t.Errorf("Version = %q, want %q", manifest.Version, "1.0.0")
+	if manifest.Version != "0.0.0" {
+		t.Errorf("Version = %q, want %q", manifest.Version, "0.0.0")
 	}
 
 	// Check component was created
@@ -390,8 +390,101 @@ func TestTemplateGeneratorDefaults(t *testing.T) {
 	}
 
 	manifest, _ := plugin.LoadManifest(filepath.Join(outputDir, "plugin.json"))
-	if manifest.Version != "0.1.0" {
-		t.Errorf("default version = %q, want %q", manifest.Version, "0.1.0")
+	if manifest.Version != "0.0.0" {
+		t.Errorf("default version = %q, want %q", manifest.Version, "0.0.0")
+	}
+}
+
+func TestTemplateGeneratorReleaseVersionComesFromBuildMetadata(t *testing.T) {
+	dir := t.TempDir()
+	outputDir := filepath.Join(dir, "versioned-plugin")
+
+	gen := NewTemplateGenerator()
+	err := gen.Generate(GenerateOptions{
+		Name:        "versioned-plugin",
+		Version:     "1.2.3",
+		Author:      "TestOrg",
+		Description: "Version metadata test",
+		OutputDir:   outputDir,
+		GoModule:    "github.com/TestOrg/workflow-plugin-versioned-plugin",
+	})
+	if err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+
+	manifest, err := plugin.LoadManifest(filepath.Join(outputDir, "plugin.json"))
+	if err != nil {
+		t.Fatalf("LoadManifest error: %v", err)
+	}
+	if manifest.Version != "0.0.0" {
+		t.Fatalf("plugin.json version = %q, want stable sentinel %q", manifest.Version, "0.0.0")
+	}
+
+	providerData, err := os.ReadFile(filepath.Join(outputDir, "internal", "provider.go"))
+	if err != nil {
+		t.Fatalf("read provider.go: %v", err)
+	}
+	providerSrc := string(providerData)
+	for _, want := range []string{
+		`var Version = "dev"`,
+		`Version:     sdk.ResolveBuildVersion(Version)`,
+	} {
+		if !strings.Contains(providerSrc, want) {
+			t.Errorf("provider.go missing %q:\n%s", want, providerSrc)
+		}
+	}
+
+	mainData, err := os.ReadFile(filepath.Join(outputDir, "cmd", "workflow-plugin-versioned-plugin", "main.go"))
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	mainSrc := string(mainData)
+	if !strings.Contains(mainSrc, "sdk.WithBuildVersion(sdk.ResolveBuildVersion(internal.Version))") {
+		t.Errorf("main.go should pass the ldflag-injected build version to the SDK:\n%s", mainSrc)
+	}
+
+	goreleaserData, err := os.ReadFile(filepath.Join(outputDir, ".goreleaser.yml"))
+	if err != nil {
+		t.Fatalf("read .goreleaser.yml: %v", err)
+	}
+	if !strings.Contains(string(goreleaserData), "-X github.com/TestOrg/workflow-plugin-versioned-plugin/internal.Version={{.Version}}") {
+		t.Errorf(".goreleaser.yml should inject internal.Version, got:\n%s", goreleaserData)
+	}
+}
+
+func TestTemplateGeneratorReleaseWorkflowUsesContractGateAndCurrentActions(t *testing.T) {
+	dir := t.TempDir()
+	outputDir := filepath.Join(dir, "release-plugin")
+
+	gen := NewTemplateGenerator()
+	err := gen.Generate(GenerateOptions{
+		Name:        "release-plugin",
+		Author:      "TestOrg",
+		Description: "Release workflow test",
+		OutputDir:   outputDir,
+	})
+	if err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(outputDir, ".github", "workflows", "sync-plugin-version.yml")); !os.IsNotExist(err) {
+		t.Fatalf("sync-plugin-version.yml should not be generated, stat err: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatalf("read release.yml: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1",
+		"wfctl plugin validate-contract --for-publish --tag \"${{ github.ref_name }}\" .",
+		"goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2",
+		"version: '~> v2'",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("release.yml missing %q:\n%s", want, content)
+		}
 	}
 }
 
