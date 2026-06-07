@@ -22,7 +22,7 @@
 #   - GOPRIVATE / GONOSUMCHECK for private module access
 #   - SHA-tag + major.minor tag aliases (sha-<sha>, v0.3, etc.)
 #   - sha256sum checksums.txt for release assets
-#   - softprops/action-gh-release with prerelease detection
+#   - gh release create with prerelease detection
 #   - Homebrew tap dispatch (peter-evans/repository-dispatch → homebrew-tap)
 #   - IDE plugin dispatch (→ workflow-editor)
 #   - go mod tidy auto-commit + PR diff check
