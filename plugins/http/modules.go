@@ -77,16 +77,28 @@ func normalizeListenPort(v any) (int, bool) {
 	case int16:
 		return validListenPort(int(p))
 	case int32:
+		if p > 65535 {
+			return 0, false
+		}
 		return validListenPort(int(p))
 	case int64:
+		if p > 65535 {
+			return 0, false
+		}
 		return validListenPort(int(p))
 	case uint:
+		if p > 65535 {
+			return 0, false
+		}
 		return validListenPort(int(p))
 	case uint8:
 		return validListenPort(int(p))
 	case uint16:
 		return validListenPort(int(p))
 	case uint32:
+		if p > 65535 {
+			return 0, false
+		}
 		return validListenPort(int(p))
 	case uint64:
 		if p > 65535 {

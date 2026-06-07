@@ -52,10 +52,11 @@ type docsAPIPackageMeta struct {
 }
 
 type goListPackage struct {
-	Dir        string `json:"Dir"`
-	ImportPath string `json:"ImportPath"`
-	Name       string `json:"Name"`
-	Doc        string `json:"Doc"`
+	Dir        string   `json:"Dir"`
+	ImportPath string   `json:"ImportPath"`
+	Name       string   `json:"Name"`
+	Doc        string   `json:"Doc"`
+	GoFiles    []string `json:"GoFiles"`
 }
 
 type renderedDocsPackage struct {
@@ -127,12 +128,13 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 		return fmt.Errorf("docs generate: no packages generated")
 	}
 
-	for _, pkg := range rendered {
+	for i := range rendered {
+		pkg := &rendered[i]
 		dest := filepath.Join(out, filepath.FromSlash(pkg.Meta.Path))
 		if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 			return fmt.Errorf("docs generate: create %s: %w", filepath.Dir(dest), err)
 		}
-		if err := os.WriteFile(dest, []byte(pkg.Doc), 0o640); err != nil {
+		if err := os.WriteFile(dest, []byte(pkg.Doc), 0o600); err != nil {
 			return fmt.Errorf("docs generate: write %s: %w", dest, err)
 		}
 		fmt.Printf("  create  %s\n", dest)
@@ -147,7 +149,8 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 		Packages:      make([]docsAPIPackageMeta, 0, len(rendered)),
 		Warnings:      warnings,
 	}
-	for _, pkg := range rendered {
+	for i := range rendered {
+		pkg := &rendered[i]
 		meta.Packages = append(meta.Packages, pkg.Meta)
 		key := pkg.Meta.Subject
 		if pkg.Meta.Subject == "plugin" {
@@ -165,7 +168,7 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 		return fmt.Errorf("docs generate: marshal metadata: %w", err)
 	}
 	metaPath := filepath.Join(out, "versions.json")
-	if err := os.WriteFile(metaPath, append(metaBytes, '\n'), 0o640); err != nil {
+	if err := os.WriteFile(metaPath, append(metaBytes, '\n'), 0o600); err != nil {
 		return fmt.Errorf("docs generate: write versions.json: %w", err)
 	}
 	fmt.Printf("  create  %s\n", metaPath)
@@ -187,7 +190,7 @@ func renderWorkflowAPIPackage(ctx context.Context, source, modulePath, version, 
 		return renderedDocsPackage{}, fmt.Errorf("docs generate: parse %s: %w", pkgRel, err)
 	}
 	route := "workflow/latest/" + strings.Trim(pkgRel, "/") + "/index.md"
-	synopsis := doc.Synopsis(docPkg.Doc)
+	synopsis := docPkg.Synopsis(docPkg.Doc)
 	if synopsis == "" {
 		synopsis = listPkg.Doc
 	}
@@ -228,25 +231,26 @@ func goListAPIPackage(ctx context.Context, source, modulePath, pkgRel string) (g
 
 func parseDocPackage(listPkg goListPackage) (*doc.Package, *token.FileSet, error) {
 	fset := token.NewFileSet()
-	filter := func(info os.FileInfo) bool {
-		name := info.Name()
-		return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+	files := make([]*ast.File, 0, len(listPkg.GoFiles))
+	for _, name := range listPkg.GoFiles {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		path := filepath.Join(listPkg.Dir, name)
+		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if err != nil {
+			return nil, nil, err
+		}
+		files = append(files, file)
 	}
-	pkgs, err := parser.ParseDir(fset, listPkg.Dir, filter, parser.ParseComments)
+	if len(files) == 0 {
+		return nil, nil, fmt.Errorf("no Go package found in %s", listPkg.Dir)
+	}
+	docPkg, err := doc.NewFromFiles(fset, files, listPkg.ImportPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	astPkg := pkgs[listPkg.Name]
-	if astPkg == nil {
-		for _, candidate := range pkgs {
-			astPkg = candidate
-			break
-		}
-	}
-	if astPkg == nil {
-		return nil, nil, fmt.Errorf("no Go package found in %s", listPkg.Dir)
-	}
-	return doc.New(astPkg, listPkg.ImportPath, 0), fset, nil
+	return docPkg, fset, nil
 }
 
 func renderPackageMarkdown(fset *token.FileSet, pkg *doc.Package, meta docsAPIPackageMeta, sourceLink string) string {
@@ -346,7 +350,8 @@ func renderRegistryPluginAPIPackages(ctx context.Context, opts docsGenerateAPIOp
 	}
 	var rendered []renderedDocsPackage
 	var warnings []string
-	for _, manifest := range manifests {
+	for i := range manifests {
+		manifest := &manifests[i]
 		if strings.TrimSpace(manifest.Name) == "" {
 			warnings = append(warnings, "plugin registry entry missing name")
 			continue
@@ -415,7 +420,7 @@ func loadDocsRegistry(ctx context.Context, ref string) ([]RegistryManifest, erro
 	return manifests, nil
 }
 
-func checkoutDocsPluginRepo(ctx context.Context, manifest RegistryManifest, cacheDir string) (string, error) {
+func checkoutDocsPluginRepo(ctx context.Context, manifest *RegistryManifest, cacheDir string) (string, error) {
 	slug := pluginSlug(manifest.Name)
 	dest := filepath.Join(cacheDir, slug)
 	if err := os.RemoveAll(dest); err != nil {
@@ -435,7 +440,7 @@ func checkoutDocsPluginRepo(ctx context.Context, manifest RegistryManifest, cach
 	return dest, nil
 }
 
-func renderPluginAPIPackage(ctx context.Context, checkout, modulePath string, manifest RegistryManifest) (renderedDocsPackage, error) {
+func renderPluginAPIPackage(ctx context.Context, checkout, modulePath string, manifest *RegistryManifest) (renderedDocsPackage, error) {
 	listPkg, err := goListAPIPackage(ctx, checkout, modulePath, ".")
 	if err != nil {
 		return renderedDocsPackage{}, err
@@ -446,7 +451,7 @@ func renderPluginAPIPackage(ctx context.Context, checkout, modulePath string, ma
 	}
 	slug := pluginSlug(manifest.Name)
 	route := "plugins/" + slug + "/latest/index.md"
-	synopsis := doc.Synopsis(docPkg.Doc)
+	synopsis := docPkg.Synopsis(docPkg.Doc)
 	if synopsis == "" {
 		synopsis = listPkg.Doc
 	}
