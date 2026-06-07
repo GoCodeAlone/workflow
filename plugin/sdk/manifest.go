@@ -1,5 +1,5 @@
-// Package sdk hosts the plugin SDK manifest schema and helpers used by
-// wfctl to discover plugin capabilities.
+// This file hosts the plugin SDK manifest schema and helpers used by wfctl to
+// discover plugin capabilities.
 //
 // The SDK manifest is intentionally additive over [plugin.PluginManifest];
 // it captures only the fields that wfctl validates before typed runtime

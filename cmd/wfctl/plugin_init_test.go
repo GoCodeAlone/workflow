@@ -178,6 +178,9 @@ func TestRunPluginInit_PluginJSON(t *testing.T) {
 	if pj["version"] == nil || pj["version"].(string) == "" {
 		t.Error("plugin.json: missing or empty version")
 	}
+	if pj["version"].(string) != "0.0.0" {
+		t.Errorf("version: got %q, want stable plugin.json sentinel %q", pj["version"], "0.0.0")
+	}
 	if pj["author"] == nil || pj["author"].(string) == "" {
 		t.Error("plugin.json: missing or empty author")
 	}

@@ -1,5 +1,3 @@
-// Package sdk provides the public API for building external workflow plugins.
-// Plugin authors implement the interfaces defined here and call Serve() to run.
 package sdk
 
 import (
@@ -10,7 +8,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// PluginProvider is the main interface plugin authors implement.
+// PluginProvider is the minimum interface every external plugin implements.
 type PluginProvider interface {
 	// Manifest returns the plugin's metadata.
 	Manifest() PluginManifest
@@ -21,14 +19,24 @@ type ContractProvider interface {
 	ContractRegistry() *pb.ContractRegistry
 }
 
-// PluginManifest describes the plugin.
+// PluginManifest is the runtime metadata a plugin returns to the host.
+//
+// For release-built plugins, prefer sdk.WithBuildVersion with
+// ResolveBuildVersion so Version reflects the Git tag injected by the build
+// instead of the committed plugin.json sentinel.
 type PluginManifest struct {
-	Name           string
-	Version        string
-	Author         string
-	Description    string
-	ConfigMutable  bool   // whether tenants can override the config fragment
-	SampleCategory string // non-empty means this is a sample/app plugin
+	// Name is the canonical plugin name, usually workflow-plugin-<short-name>.
+	Name string
+	// Version is the operator-visible runtime version.
+	Version string
+	// Author identifies the organization or person that maintains the plugin.
+	Author string
+	// Description is shown in registry and documentation output.
+	Description string
+	// ConfigMutable reports whether tenants can override the config fragment.
+	ConfigMutable bool
+	// SampleCategory marks sample/app plugins for grouped presentation.
+	SampleCategory string
 }
 
 // AssetProvider allows plugins to serve embedded static assets (e.g., UI files).
@@ -163,13 +171,32 @@ type TypedServiceInvoker interface {
 	InvokeTypedMethod(method string, input *anypb.Any) (*anypb.Any, error)
 }
 
+// TelemetryAttrs aliases the host telemetry attribute map type for plugin APIs.
 type TelemetryAttrs = telemetry.Attrs
+
+// TelemetryMetricKind aliases the host metric kind enum for plugin APIs.
 type TelemetryMetricKind = telemetry.MetricKind
+
+// TelemetryMetricRecord aliases the host metric record type for plugin APIs.
 type TelemetryMetricRecord = telemetry.MetricRecord
+
+// TelemetryMetricRecorder aliases the host metric recorder interface for plugin APIs.
 type TelemetryMetricRecorder = telemetry.MetricRecorder
+
+// TelemetryMetricEmitter aliases the host metric emitter interface for plugin APIs.
 type TelemetryMetricEmitter = telemetry.MetricEmitter
+
+// TelemetryLogRecord aliases the host log record type for plugin APIs.
 type TelemetryLogRecord = telemetry.LogRecord
+
+// TelemetryLogEmitter aliases the host log emitter interface for plugin APIs.
 type TelemetryLogEmitter = telemetry.LogEmitter
+
+// TelemetrySpanEvent aliases the host span event type for plugin APIs.
 type TelemetrySpanEvent = telemetry.SpanEvent
+
+// TelemetrySpanRecorder aliases the host span recorder interface for plugin APIs.
 type TelemetrySpanRecorder = telemetry.SpanRecorder
+
+// TelemetryTraceAnnotator aliases the host trace annotator interface for plugin APIs.
 type TelemetryTraceAnnotator = telemetry.TraceAnnotator

@@ -91,7 +91,7 @@ func runPluginInit(args []string) error {
 	}
 	fs := flag.NewFlagSet("plugin init", flag.ExitOnError)
 	author := fs.String("author", "", "Plugin author (required)")
-	ver := fs.String("version", "0.1.0", "Plugin version")
+	ver := fs.String("version", "0.0.0", "Deprecated; release versions are injected from Git tags")
 	desc := fs.String("description", "", "Plugin description")
 	license := fs.String("license", "", "Plugin license")
 	output := fs.String("output", "", "Output directory (defaults to plugin name)")

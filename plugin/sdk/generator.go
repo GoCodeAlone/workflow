@@ -16,8 +16,9 @@ type TemplateGenerator struct{}
 const (
 	workflowReleasedVersion        = "v0.18.15"
 	workflowStrictContractsVersion = "v0.19.0-alpha.5"
-	workflowMinimumGoVersion       = "1.26.0"
-	defaultPluginGoVersion         = "1.22"
+	workflowMinimumGoVersion       = "1.26.4"
+	defaultPluginGoVersion         = "1.26.4"
+	pluginManifestVersionSentinel  = "0.0.0"
 )
 
 // NewTemplateGenerator creates a new TemplateGenerator.
@@ -25,18 +26,42 @@ func NewTemplateGenerator() *TemplateGenerator {
 	return &TemplateGenerator{}
 }
 
-// GenerateOptions configures what gets generated.
+// GenerateOptions configures a generated plugin project.
+//
+// The committed plugin.json version is always the stable "0.0.0" sentinel.
+// Release versions are injected into the generated binary from Git tags via
+// GoReleaser ldflags and surfaced at runtime through sdk.ResolveBuildVersion.
 type GenerateOptions struct {
-	Name             string
-	Version          string
-	Author           string
-	Description      string
-	License          string
-	OutputDir        string
-	WithContract     bool
-	LegacyContracts  bool
-	GoModule         string // e.g. "github.com/MyOrg/workflow-plugin-foo"
-	WorkflowReplace  string // optional local replace path for github.com/GoCodeAlone/workflow
+	// Name is the plugin manifest name. It may include the workflow-plugin-
+	// prefix; generated type names and step names use the normalized suffix.
+	Name string
+	// Version is deprecated. Generated plugin.json files use the "0.0.0"
+	// sentinel and release builds inject the real tag into the binary.
+	Version string
+	// Author is required and is also used to build the default Go module path.
+	Author string
+	// Description is written to plugin.json and README.md. When empty, a
+	// generic description is used.
+	Description string
+	// License is copied into plugin.json when supplied.
+	License string
+	// OutputDir is the directory to create. It defaults to Name.
+	OutputDir string
+	// WithContract adds the legacy dynamic field contract to plugin.json.
+	WithContract bool
+	// LegacyContracts forces the older map-based step scaffold. By default the
+	// generator emits strict typed contracts when it can resolve a local
+	// workflow source checkout.
+	LegacyContracts bool
+	// GoModule overrides the default github.com/<author>/workflow-plugin-<name>
+	// module path.
+	GoModule string
+	// WorkflowReplace is an optional local replace path for
+	// github.com/GoCodeAlone/workflow.
+	WorkflowReplace string
+	// MessageContracts are descriptor-only protobuf contracts to include in
+	// plugin.contracts.json for plugins that publish messages without serving a
+	// step for them.
 	MessageContracts []MessageContract
 }
 
@@ -47,7 +72,7 @@ func (g *TemplateGenerator) Generate(opts GenerateOptions) error {
 		return fmt.Errorf("plugin name is required")
 	}
 	if opts.Version == "" {
-		opts.Version = "0.1.0"
+		opts.Version = pluginManifestVersionSentinel
 	}
 	if opts.Author == "" {
 		return fmt.Errorf("author is required")
@@ -75,7 +100,7 @@ func (g *TemplateGenerator) Generate(opts GenerateOptions) error {
 	// Validate the name
 	manifest := &plugin.PluginManifest{
 		Name:        opts.Name,
-		Version:     opts.Version,
+		Version:     pluginManifestVersionSentinel,
 		Author:      opts.Author,
 		Description: opts.Description,
 		License:     opts.License,
@@ -189,7 +214,7 @@ func generateProjectStructure(opts GenerateOptions) error {
 	}
 
 	// .goreleaser.yml
-	if err := writeFile(filepath.Join(opts.OutputDir, ".goreleaser.yml"), generateGoReleaserYML(binaryName), 0600); err != nil {
+	if err := writeFile(filepath.Join(opts.OutputDir, ".goreleaser.yml"), generateGoReleaserYML(binaryName, goModule), 0600); err != nil {
 		return err
 	}
 
@@ -239,7 +264,9 @@ func generateMainGo(goModule, shortName string) string {
 	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
 	b.WriteString(")\n\n")
 	b.WriteString("func main() {\n")
-	fmt.Fprintf(&b, "\tsdk.Serve(internal.New%sProvider())\n", toCamelCase(shortName))
+	fmt.Fprintf(&b, "\tsdk.Serve(internal.New%sProvider(),\n", toCamelCase(shortName))
+	b.WriteString("\t\tsdk.WithBuildVersion(sdk.ResolveBuildVersion(internal.Version)),\n")
+	b.WriteString("\t)\n")
 	b.WriteString("}\n")
 	return b.String()
 }
@@ -273,6 +300,8 @@ func generateProviderGo(opts GenerateOptions, shortName string) string {
 	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
 	b.WriteString("\t\"google.golang.org/protobuf/types/known/anypb\"\n")
 	b.WriteString(")\n\n")
+	b.WriteString("// Version is injected by the release build so runtime manifests report the tag.\n")
+	b.WriteString("var Version = \"dev\"\n\n")
 	fmt.Fprintf(&b, "// %s implements sdk.PluginProvider, sdk.TypedStepProvider, and sdk.ContractProvider.\n", typeName)
 	fmt.Fprintf(&b, "type %s struct{}\n\n", typeName)
 	fmt.Fprintf(&b, "// New%s creates a new %s.\n", typeName, typeName)
@@ -283,7 +312,7 @@ func generateProviderGo(opts GenerateOptions, shortName string) string {
 	fmt.Fprintf(&b, "func (p *%s) Manifest() sdk.PluginManifest {\n", typeName)
 	b.WriteString("\treturn sdk.PluginManifest{\n")
 	fmt.Fprintf(&b, "\t\tName:        %q,\n", "workflow-plugin-"+shortName)
-	fmt.Fprintf(&b, "\t\tVersion:     %q,\n", opts.Version)
+	b.WriteString("\t\tVersion:     sdk.ResolveBuildVersion(Version),\n")
 	fmt.Fprintf(&b, "\t\tAuthor:      %q,\n", opts.Author)
 	fmt.Fprintf(&b, "\t\tDescription: %q,\n", opts.Description)
 	b.WriteString("\t}\n")
@@ -389,6 +418,8 @@ func generateLegacyProviderGo(opts GenerateOptions, shortName string) string {
 	b.WriteString("\t\"fmt\"\n\n")
 	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
 	b.WriteString(")\n\n")
+	b.WriteString("// Version is injected by the release build so runtime manifests report the tag.\n")
+	b.WriteString("var Version = \"dev\"\n\n")
 	fmt.Fprintf(&b, "// %s implements sdk.PluginProvider and sdk.StepProvider.\n", typeName)
 	fmt.Fprintf(&b, "type %s struct{}\n\n", typeName)
 	fmt.Fprintf(&b, "// New%s creates a new %s.\n", typeName, typeName)
@@ -399,7 +430,7 @@ func generateLegacyProviderGo(opts GenerateOptions, shortName string) string {
 	fmt.Fprintf(&b, "func (p *%s) Manifest() sdk.PluginManifest {\n", typeName)
 	b.WriteString("\treturn sdk.PluginManifest{\n")
 	fmt.Fprintf(&b, "\t\tName:        %q,\n", "workflow-plugin-"+shortName)
-	fmt.Fprintf(&b, "\t\tVersion:     %q,\n", opts.Version)
+	b.WriteString("\t\tVersion:     sdk.ResolveBuildVersion(Version),\n")
 	fmt.Fprintf(&b, "\t\tAuthor:      %q,\n", opts.Author)
 	fmt.Fprintf(&b, "\t\tDescription: %q,\n", opts.Description)
 	b.WriteString("\t}\n")
@@ -549,7 +580,7 @@ func workflowModuleDeclared(dir string) bool {
 	return false
 }
 
-func generateGoReleaserYML(binaryName string) string {
+func generateGoReleaserYML(binaryName, goModule string) string {
 	var b strings.Builder
 	b.WriteString("version: 2\n\n")
 	b.WriteString("builds:\n")
@@ -558,6 +589,8 @@ func generateGoReleaserYML(binaryName string) string {
 	fmt.Fprintf(&b, "    main: ./cmd/%s\n", binaryName)
 	b.WriteString("    env:\n")
 	b.WriteString("      - CGO_ENABLED=0\n")
+	b.WriteString("    ldflags:\n")
+	fmt.Fprintf(&b, "      - -s -w -X %s/internal.Version={{.Version}}\n", goModule)
 	b.WriteString("    goos:\n")
 	b.WriteString("      - linux\n")
 	b.WriteString("      - darwin\n")
@@ -611,6 +644,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -618,13 +653,19 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version: '%s'
+      - name: Setup wfctl
+        uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
+      - name: Validate release contract before packaging
+        run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" --plugin .
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
         with:
           version: '~> v2'
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate packaged release contract
+        run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" --plugin .
 
   notify-registry:
     if: startsWith(github.ref, 'refs/tags/v')
