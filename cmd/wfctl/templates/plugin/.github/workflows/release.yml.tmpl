@@ -16,7 +16,7 @@ jobs:
       - name: Setup wfctl
         uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - name: Validate release contract before packaging
-        run: wfctl plugin validate-contract --for-publish --tag "${{ "{{" }} github.ref_name {{ "}}" }}" --plugin .
+        run: wfctl plugin validate-contract --for-publish --tag "${{ "{{" }} github.ref_name {{ "}}" }}" .
       - name: Build plugin binaries
         run: |
           mkdir -p dist
@@ -26,7 +26,7 @@ jobs:
             done
           done
       - name: Validate packaged release contract
-        run: wfctl plugin validate-contract --for-publish --tag "${{ "{{" }} github.ref_name {{ "}}" }}" --plugin .
+        run: wfctl plugin validate-contract --for-publish --tag "${{ "{{" }} github.ref_name {{ "}}" }}" .
       - name: Create release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

@@ -656,7 +656,7 @@ jobs:
       - name: Setup wfctl
         uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
       - name: Validate release contract before packaging
-        run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" --plugin .
+        run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" .
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
         with:
@@ -665,7 +665,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Validate packaged release contract
-        run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" --plugin .
+        run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" .
 
   notify-registry:
     if: startsWith(github.ref, 'refs/tags/v')
