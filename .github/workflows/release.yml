@@ -295,14 +295,20 @@ jobs:
         sha256sum ./* | sed 's#  \./#  #' > checksums.txt
 
     - name: Create Release (draft during asset upload)
-      uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-      with:
-        tag_name: ${{ env.TAG_NAME }}
-        files: |
-          dist/*
-        draft: true
-        prerelease: ${{ contains(env.TAG_NAME, '-') }}
-        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        prerelease_flag=()
+        if [[ "${TAG_NAME}" == *-* ]]; then
+          prerelease_flag+=(--prerelease)
+        fi
+        gh release create "${TAG_NAME}" dist/* \
+          --repo "${GITHUB_REPOSITORY}" \
+          --draft \
+          --verify-tag \
+          --generate-notes \
+          "${prerelease_flag[@]}"
 
     - name: Publish release (was draft during asset upload)
       env:

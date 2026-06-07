@@ -239,8 +239,12 @@ func TestRunGenerateGithubActionsWithPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read release.yml: %v", err)
 	}
-	if !strings.Contains(string(data), "softprops/action-gh-release") {
-		t.Error("release.yml should use softprops/action-gh-release")
+	content := string(data)
+	if strings.Contains(content, "softprops/action-gh-release") {
+		t.Error("release.yml should not use softprops/action-gh-release")
+	}
+	if !strings.Contains(content, "gh release create") {
+		t.Error("release.yml should publish releases with gh release create")
 	}
 }
 
@@ -454,8 +458,11 @@ func TestReleaseWorkflowContent(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, "softprops/action-gh-release") {
-		t.Error("release.yml should use softprops/action-gh-release")
+	if strings.Contains(content, "softprops/action-gh-release") {
+		t.Error("release.yml should not use softprops/action-gh-release")
+	}
+	if !strings.Contains(content, "gh release create") {
+		t.Error("release.yml should publish releases with gh release create")
 	}
 	if !strings.Contains(content, "dist/*") {
 		t.Error("release.yml should upload dist/* files")

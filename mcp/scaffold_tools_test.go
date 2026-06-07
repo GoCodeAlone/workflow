@@ -244,6 +244,16 @@ ci:
 	}
 }
 
+func TestMCPGenerateReleaseWorkflowUsesGHCLI(t *testing.T) {
+	text := mcpGenerateReleaseWorkflow()
+	if strings.Contains(text, "softprops/action-gh-release") {
+		t.Error("release workflow should not use softprops/action-gh-release")
+	}
+	if !strings.Contains(text, "gh release create") {
+		t.Error("release workflow should publish releases with gh release create")
+	}
+}
+
 func TestHandleGenerateBootstrap_InvalidPlatform(t *testing.T) {
 	s := newTestServer()
 	req := mcp.CallToolRequest{}
