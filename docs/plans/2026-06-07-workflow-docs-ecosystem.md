@@ -15,7 +15,7 @@
 ## Scope Manifest
 
 **PR Count:** 3
-**Tasks:** 10
+**Tasks:** 9
 **Estimated Lines of Change:** ~2200
 
 **Out of scope:**
@@ -30,8 +30,8 @@
 | PR # | Title | Tasks | Branch |
 |------|-------|-------|--------|
 | 1 | fix: normalize config authoring quirks | Task 1, Task 2, Task 3, Task 4 | fix/config-quirks-075 |
-| 2 | feat: generate Go API docs with wfctl | Task 5, Task 6, Task 7 | feat/wfctl-go-docs |
-| 3 | docs: reorganize website docs and API reference | Task 8, Task 9, Task 10 | feat/website-go-api-docs |
+| 2 | feat: generate Go API docs with wfctl | Task 5, Task 6 | feat/wfctl-go-docs |
+| 3 | docs: reorganize website docs and API reference | Task 7, Task 8, Task 9 | feat/website-go-api-docs |
 
 **Status:** Draft
 
@@ -40,15 +40,15 @@
 | Guidance | Plan wiring |
 |---|---|
 | `GOWORK=off` for Go commands | Every Go verification command includes `GOWORK=off`. |
-| Prefer `wfctl` for lifecycle tooling | Task 5 creates `wfctl docs generate`; Task 8 dogfoods it from website sync. |
+| Prefer `wfctl` for lifecycle tooling | Task 5 creates `wfctl docs generate`; Task 7 dogfoods it from website sync. |
 | Keep examples under `example/` | No new root examples; tests use temp dirs or existing fixtures. |
 | Plugin/provider boundaries | Task 6 reads plugin registry metadata; generator does not execute plugin code. |
-| Fix known product foibles before docs normalize them | Tasks 1-4 fix and verify quirks before Task 10 removes the public quirks page. |
+| Fix known product foibles before docs normalize them | Tasks 1-4 fix and verify quirks before Task 9 removes the public quirks page. |
 
 ## Task 1: HTTP Server Port Alias And Registry Metadata
 
 **Files:**
-- Modify: `plugins/http/factories.go`
+- Modify: `plugins/http/modules.go`
 - Modify: `plugins/http/schemas.go`
 - Modify: `cmd/wfctl/type_registry.go`
 - Test: `plugins/http/plugin_test.go`
@@ -371,35 +371,7 @@ Expected: PASS with warnings asserted.
 
 **Rollback:** keep workflow-only generation; disable plugin registry flag in website sync.
 
-## Task 7: Release Workflow Minor Version
-
-**Files:**
-- No source files unless release notes are stored in repo.
-
-**Step 1: Pre-release verification**
-
-Run:
-
-```bash
-GOWORK=off go test ./cmd/wfctl ./config ./module ./plugin/... ./plugins/http ./plugins/pipelinesteps -count=1
-GOWORK=off go test ./... -count=1
-```
-
-Expected: PASS.
-
-**Step 2: Merge PRs 1 and 2**
-
-After CI/review green, admin-merge PRs in order.
-
-**Step 3: Trigger minor release**
-
-Run the workflow release automation from main with minor bump.
-
-Expected: new Workflow release tag after `v0.74.7`, e.g. `v0.75.0`, publishes `wfctl` assets.
-
-**Rollback:** if release fails before publish, rerun after fix; if published with regression, release patch reverting the bad commits.
-
-## Task 8: Website Sync Invokes `wfctl docs generate`
+## Task 7: Website Sync Invokes `wfctl docs generate`
 
 **Files in `gocodealone-website`:**
 - Modify: `scripts/sync-docs.mjs`
@@ -450,7 +422,7 @@ Expected: PASS; generated reference pages are present and Starlight builds.
 
 **Rollback:** revert website sync invocation; committed generated docs remain last-known-good.
 
-## Task 9: Website Navigation And Version Metadata
+## Task 8: Website Navigation And Version Metadata
 
 **Files in `gocodealone-website`:**
 - Modify: `docs/site/astro.config.mjs`
@@ -501,7 +473,7 @@ Expected: PASS; Pagefind indexes generated reference pages.
 
 **Rollback:** restore previous sidebar and keep generated pages reachable by direct URL.
 
-## Task 10: Regenerate Website Docs, Release Website
+## Task 9: Regenerate Website Docs, Release Website
 
 **Files in `gocodealone-website`:**
 - Generated Markdown under `docs/site/src/content/docs/`
