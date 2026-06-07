@@ -204,6 +204,54 @@ func TestStepTypeCount(t *testing.T) {
 	}
 }
 
+func TestKnownStepTypesRequestParseConfigKeys(t *testing.T) {
+	info, ok := KnownStepTypes()["step.request_parse"]
+	if !ok {
+		t.Fatal("step.request_parse not found")
+	}
+	want := []string{"path_params", "query_params", "parse_body", "parse_headers", "format"}
+	if !sameStringSet(info.ConfigKeys, want) {
+		t.Fatalf("step.request_parse ConfigKeys = %v, want %v", info.ConfigKeys, want)
+	}
+}
+
+func TestKnownStepTypesResponseAliasesMatchConfigKeys(t *testing.T) {
+	types := KnownStepTypes()
+	jsonInfo, ok := types["step.json_response"]
+	if !ok {
+		t.Fatal("step.json_response not found")
+	}
+	aliasInfo, ok := types["step.response"]
+	if !ok {
+		t.Fatal("step.response not found")
+	}
+	if !sameStringSet(jsonInfo.ConfigKeys, aliasInfo.ConfigKeys) {
+		t.Fatalf("step.json_response ConfigKeys = %v, step.response ConfigKeys = %v", jsonInfo.ConfigKeys, aliasInfo.ConfigKeys)
+	}
+}
+
+func sameStringSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	seen := make(map[string]int, len(got))
+	for _, v := range got {
+		seen[v]++
+	}
+	for _, v := range want {
+		if seen[v] == 0 {
+			return false
+		}
+		seen[v]--
+	}
+	for _, count := range seen {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // TestKnownStepTypesCoverAllPlugins ensures KnownStepTypes() is in sync with all step
 // types registered by the built-in plugins. Any step type registered by a DefaultPlugin
 // that is not listed in KnownStepTypes() will cause this test to fail, preventing silent

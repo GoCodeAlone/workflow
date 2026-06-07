@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -327,11 +328,21 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 			break
 		}
 		address, _ := mod.Config["address"].(string)
-		_, hasPort := mod.Config["port"]
-		if strings.TrimSpace(address) == "" && !hasPort {
+		if strings.TrimSpace(address) != "" {
+			break
+		}
+		port, hasPort := mod.Config["port"]
+		if !hasPort {
 			*errs = append(*errs, &ValidationError{
 				Path:    prefix + ".config",
 				Message: `http.server requires either "address" or "port"`,
+			})
+			break
+		}
+		if !validTCPPortValue(port) {
+			*errs = append(*errs, &ValidationError{
+				Path:    prefix + ".config.port",
+				Message: "port must be a valid TCP port number between 1 and 65535",
 			})
 		}
 	case "database.partitioned":
@@ -422,6 +433,41 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 				}
 			}
 		}
+	}
+}
+
+func validTCPPortValue(v any) bool {
+	switch p := v.(type) {
+	case int:
+		return p >= 1 && p <= 65535
+	case int8:
+		return p >= 1
+	case int16:
+		return p >= 1
+	case int32:
+		return p >= 1 && p <= 65535
+	case int64:
+		return p >= 1 && p <= 65535
+	case uint:
+		return p >= 1 && p <= 65535
+	case uint8:
+		return p >= 1
+	case uint16:
+		return p >= 1
+	case uint32:
+		return p >= 1 && p <= 65535
+	case uint64:
+		return p >= 1 && p <= 65535
+	case float32:
+		f := float64(p)
+		return f >= 1 && f <= 65535 && f == float64(int64(f))
+	case float64:
+		return p >= 1 && p <= 65535 && p == float64(int64(p))
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(p))
+		return err == nil && n >= 1 && n <= 65535
+	default:
+		return false
 	}
 }
 

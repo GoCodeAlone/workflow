@@ -377,6 +377,36 @@ func TestValidateConfig_HTTPServer_ValidPortAlias(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_HTTPServer_InvalidPortAlias(t *testing.T) {
+	tests := []struct {
+		name string
+		port any
+	}{
+		{name: "non-numeric", port: "abc"},
+		{name: "nil", port: nil},
+		{name: "too-low", port: 0},
+		{name: "too-high", port: 70000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.WorkflowConfig{
+				Modules: []config.ModuleConfig{
+					{Name: "srv", Type: "http.server", Config: map[string]any{"port": tt.port}},
+				},
+				Triggers: map[string]any{
+					"http": map[string]any{"port": 9090},
+				},
+			}
+			err := ValidateConfig(cfg)
+			if err == nil {
+				t.Fatal("expected invalid port error")
+			}
+			assertContains(t, err.Error(), "modules[0].config.port")
+			assertContains(t, err.Error(), "valid TCP port")
+		})
+	}
+}
+
 func TestValidateConfig_StaticFileserver_MissingRoot(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{

@@ -772,7 +772,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.request_parse": {
 			Type:       "step.request_parse",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"body", "query", "headers", "path_params", "query_params", "parse_body", "parse_headers", "format"},
+			ConfigKeys: []string{"path_params", "query_params", "parse_body", "parse_headers", "format"},
 		},
 		"step.db_query": {
 			Type:       "step.db_query",
@@ -802,7 +802,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.json_response": {
 			Type:       "step.json_response",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"status", "body", "headers"},
+			ConfigKeys: []string{"status", "status_from", "body", "body_from", "headers"},
 		},
 		"step.response": {
 			Type:       "step.response",
