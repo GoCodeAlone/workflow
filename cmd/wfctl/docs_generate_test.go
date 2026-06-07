@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,4 +95,129 @@ func TestDocsGenerateWorkflowPackages(t *testing.T) {
 			t.Fatalf("generated doc missing %q:\n%s", want, doc)
 		}
 	}
+}
+
+func TestDocsGenerateRegistryPlugins(t *testing.T) {
+	pluginRepo := createDocsPluginRepo(t, "github.com/GoCodeAlone/workflow-plugin-alpha", "alpha", "v0.1.0")
+	registryPath := filepath.Join(t.TempDir(), "registry.json")
+	registry := `{
+  "plugins": [
+    {
+      "name": "workflow-plugin-alpha",
+      "version": "v0.1.0",
+      "repository": "https://github.com/GoCodeAlone/workflow-plugin-alpha",
+      "source": ` + strconvQuote(pluginRepo) + `
+    },
+    {
+      "name": "workflow-plugin-missing",
+      "version": "v0.2.0",
+      "repository": "https://github.com/GoCodeAlone/workflow-plugin-missing",
+      "source": ` + strconvQuote(pluginRepo) + `
+    },
+    {
+      "name": "workflow-plugin-outside",
+      "version": "v0.1.0",
+      "repository": "https://github.com/Other/workflow-plugin-outside",
+      "source": ` + strconvQuote(pluginRepo) + `
+    }
+  ]
+}`
+	if err := os.WriteFile(registryPath, []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := t.TempDir()
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	_, err := captureStdout(t, func() error {
+		return runDocsGenerate([]string{
+			"--source", ".",
+			"--out", outDir,
+			"--module", "github.com/GoCodeAlone/workflow",
+			"--version", "v0.75.0",
+			"--registry", registryPath,
+			"--cache-dir", cacheDir,
+			"--subjects", "plugins",
+		})
+	})
+	if err != nil {
+		t.Fatalf("docs generate registry plugins: %v", err)
+	}
+
+	docPath := filepath.Join(outDir, "plugins", "alpha", "latest", "index.md")
+	rawDoc, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read generated plugin doc: %v", err)
+	}
+	doc := string(rawDoc)
+	for _, want := range []string{
+		"# package alpha",
+		"Import path: `github.com/GoCodeAlone/workflow-plugin-alpha`",
+		"Version: `v0.1.0`",
+		"https://github.com/GoCodeAlone/workflow-plugin-alpha/tree/v0.1.0",
+		"## Functions",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("generated plugin doc missing %q:\n%s", want, doc)
+		}
+	}
+
+	rawMeta, err := os.ReadFile(filepath.Join(outDir, "versions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta docsAPIMetadata
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if got := meta.Versions["plugins/alpha"]; len(got) != 1 || got[0] != "v0.1.0" {
+		t.Fatalf("plugins/alpha versions = %v, want [v0.1.0]", got)
+	}
+	if len(meta.Packages) != 1 || meta.Packages[0].Path != "plugins/alpha/latest/index.md" {
+		t.Fatalf("packages = %+v, want generated alpha plugin route", meta.Packages)
+	}
+	joinedWarnings := strings.Join(meta.Warnings, "\n")
+	for _, want := range []string{"workflow-plugin-missing", "v0.2.0", "workflow-plugin-outside", "trust boundary"} {
+		if !strings.Contains(joinedWarnings, want) {
+			t.Fatalf("warnings missing %q:\n%s", want, joinedWarnings)
+		}
+	}
+}
+
+func createDocsPluginRepo(t *testing.T, modulePath, packageName, tag string) string {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module "+modulePath+"\n\ngo 1.26\n")
+	write(packageName+".go", "package "+packageName+"\n\n// PluginName returns the fixture plugin name.\nfunc PluginName() string { return "+strconvQuote(packageName)+" }\n")
+	runDocsTestGit(t, dir, "init")
+	runDocsTestGit(t, dir, "config", "user.email", "docs@example.test")
+	runDocsTestGit(t, dir, "config", "user.name", "Docs Test")
+	runDocsTestGit(t, dir, "add", ".")
+	runDocsTestGit(t, dir, "commit", "-m", "initial")
+	runDocsTestGit(t, dir, "tag", tag)
+	return dir
+}
+
+func runDocsTestGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

@@ -1985,7 +1985,13 @@ wfctl docs generate -output ./docs/ workflow.yaml
 wfctl docs generate -output ./docs/ -plugin-dir ./plugins/ workflow.yaml
 wfctl docs generate -output ./docs/ -title "Order Service" workflow.yaml
 wfctl docs generate --source . --out ./docs/api --module github.com/GoCodeAlone/workflow --version v0.75.0 --packages plugin,plugin/sdk,plugin/external/sdk
+wfctl docs generate --source . --out ./docs/api --module github.com/GoCodeAlone/workflow --version v0.75.0 --subjects plugins --registry ./registry.json --cache-dir ./.cache/wfctl-docs
 ```
+
+Plugin API generation checks out each trusted `https://github.com/GoCodeAlone/*`
+repository at the exact registry version tag. Missing tags and repositories
+outside that trust boundary are recorded as warnings in `versions.json` without
+failing the whole docs run.
 
 ---
 

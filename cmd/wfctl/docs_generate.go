@@ -10,6 +10,8 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,9 +77,16 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 	if strings.TrimSpace(opts.Version) == "" {
 		return fmt.Errorf("docs generate: --version is required for Go API docs")
 	}
+	subjects := splitDocsCSV(opts.Subjects)
+	if len(subjects) == 0 {
+		subjects = []string{"workflow"}
+	}
 	packages := splitDocsCSV(opts.Packages)
-	if len(packages) == 0 {
+	if docsContainsString(subjects, "workflow") && len(packages) == 0 {
 		return fmt.Errorf("docs generate: --packages must include at least one package")
+	}
+	if docsContainsString(subjects, "plugins") && strings.TrimSpace(opts.Registry) == "" {
+		return fmt.Errorf("docs generate: --registry is required when --subjects includes plugins")
 	}
 
 	source, err := filepath.Abs(opts.Source)
@@ -95,14 +104,24 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 	ctx := context.Background()
 	rendered := make([]renderedDocsPackage, 0, len(packages))
 	var warnings []string
-	for _, pkg := range packages {
-		docPkg, err := renderWorkflowAPIPackage(ctx, source, opts.Module, opts.Version, pkg)
-		if err != nil {
-			warnings = append(warnings, err.Error())
-			continue
+	if docsContainsString(subjects, "workflow") {
+		for _, pkg := range packages {
+			docPkg, err := renderWorkflowAPIPackage(ctx, source, opts.Module, opts.Version, pkg)
+			if err != nil {
+				warnings = append(warnings, err.Error())
+				continue
+			}
+			rendered = append(rendered, docPkg)
+			warnings = append(warnings, docPkg.Warnings...)
 		}
-		rendered = append(rendered, docPkg)
-		warnings = append(warnings, docPkg.Warnings...)
+	}
+	if docsContainsString(subjects, "plugins") {
+		pluginDocs, pluginWarnings, err := renderRegistryPluginAPIPackages(ctx, opts)
+		if err != nil {
+			return err
+		}
+		rendered = append(rendered, pluginDocs...)
+		warnings = append(warnings, pluginWarnings...)
 	}
 	if len(rendered) == 0 {
 		return fmt.Errorf("docs generate: no packages generated")
@@ -122,14 +141,21 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 	meta := docsAPIMetadata{
 		SchemaVersion: 1,
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-		Subject:       "workflow",
-		Subjects:      splitDocsCSV(opts.Subjects),
-		Versions:      map[string][]string{"workflow": {opts.Version}},
+		Subject:       subjects[0],
+		Subjects:      subjects,
+		Versions:      map[string][]string{},
 		Packages:      make([]docsAPIPackageMeta, 0, len(rendered)),
 		Warnings:      warnings,
 	}
 	for _, pkg := range rendered {
 		meta.Packages = append(meta.Packages, pkg.Meta)
+		key := pkg.Meta.Subject
+		if pkg.Meta.Subject == "plugin" {
+			key = "plugins/" + pluginSlug(pkg.Meta.Name)
+		}
+		if pkg.Meta.Version != "" && !docsContainsString(meta.Versions[key], pkg.Meta.Version) {
+			meta.Versions[key] = append(meta.Versions[key], pkg.Meta.Version)
+		}
 	}
 	sort.Slice(meta.Packages, func(i, j int) bool {
 		return meta.Packages[i].ImportPath < meta.Packages[j].ImportPath
@@ -180,7 +206,10 @@ func renderWorkflowAPIPackage(ctx context.Context, source, modulePath, version, 
 }
 
 func goListAPIPackage(ctx context.Context, source, modulePath, pkgRel string) (goListPackage, error) {
-	importPath := strings.TrimRight(modulePath, "/") + "/" + strings.Trim(pkgRel, "/")
+	importPath := strings.TrimRight(modulePath, "/")
+	if strings.Trim(pkgRel, "/") != "" && pkgRel != "." {
+		importPath += "/" + strings.Trim(pkgRel, "/")
+	}
 	cmd := exec.CommandContext(ctx, "go", "list", "-json", importPath) // #nosec G204 -- fixed go command with package arg from CLI input.
 	cmd.Dir = source
 	cmd.Env = append(os.Environ(), "GOWORK=off")
@@ -301,6 +330,184 @@ func workflowSourceLink(version, pkgRel string) string {
 		ref = "main"
 	}
 	return "https://github.com/GoCodeAlone/workflow/tree/" + ref + "/" + strings.Trim(pkgRel, "/")
+}
+
+func renderRegistryPluginAPIPackages(ctx context.Context, opts docsGenerateAPIOptions) ([]renderedDocsPackage, []string, error) {
+	manifests, err := loadDocsRegistry(ctx, opts.Registry)
+	if err != nil {
+		return nil, nil, fmt.Errorf("docs generate: load registry: %w", err)
+	}
+	cacheDir := opts.CacheDir
+	if cacheDir == "" {
+		cacheDir = filepath.Join(os.TempDir(), "wfctl-docs-plugin-cache")
+	}
+	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
+		return nil, nil, fmt.Errorf("docs generate: create cache dir: %w", err)
+	}
+	var rendered []renderedDocsPackage
+	var warnings []string
+	for _, manifest := range manifests {
+		if strings.TrimSpace(manifest.Name) == "" {
+			warnings = append(warnings, "plugin registry entry missing name")
+			continue
+		}
+		if !trustedGoCodeAloneRepo(manifest.Repository) {
+			warnings = append(warnings, fmt.Sprintf("%s skipped: repository %q is outside the GoCodeAlone GitHub trust boundary", manifest.Name, manifest.Repository))
+			continue
+		}
+		if strings.TrimSpace(manifest.Version) == "" {
+			warnings = append(warnings, fmt.Sprintf("%s skipped: missing version", manifest.Name))
+			continue
+		}
+		checkout, err := checkoutDocsPluginRepo(ctx, manifest, cacheDir)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
+			continue
+		}
+		modulePath, err := readGoModulePath(filepath.Join(checkout, "go.mod"))
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
+			continue
+		}
+		docPkg, err := renderPluginAPIPackage(ctx, checkout, modulePath, manifest)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
+			continue
+		}
+		rendered = append(rendered, docPkg)
+	}
+	return rendered, warnings, nil
+}
+
+func loadDocsRegistry(ctx context.Context, ref string) ([]RegistryManifest, error) {
+	var data []byte
+	var err error
+	if strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "http://") {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, ref, nil)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		resp, httpErr := http.DefaultClient.Do(req)
+		if httpErr != nil {
+			return nil, httpErr
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("registry returned HTTP %d", resp.StatusCode)
+		}
+		data, err = io.ReadAll(resp.Body)
+	} else {
+		data, err = os.ReadFile(ref)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Plugins []RegistryManifest `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &envelope); err == nil && envelope.Plugins != nil {
+		return envelope.Plugins, nil
+	}
+	var manifests []RegistryManifest
+	if err := json.Unmarshal(data, &manifests); err != nil {
+		return nil, err
+	}
+	return manifests, nil
+}
+
+func checkoutDocsPluginRepo(ctx context.Context, manifest RegistryManifest, cacheDir string) (string, error) {
+	slug := pluginSlug(manifest.Name)
+	dest := filepath.Join(cacheDir, slug)
+	if err := os.RemoveAll(dest); err != nil {
+		return "", err
+	}
+	cloneSource := strings.TrimSpace(manifest.Source)
+	if cloneSource == "" {
+		cloneSource = manifest.Repository
+	}
+	args := []string{"clone", "--depth", "1", "--branch", manifest.Version, cloneSource, dest}
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed git command; args are not shell-expanded.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git clone tag %s: %w: %s", manifest.Version, err, strings.TrimSpace(stderr.String()))
+	}
+	return dest, nil
+}
+
+func renderPluginAPIPackage(ctx context.Context, checkout, modulePath string, manifest RegistryManifest) (renderedDocsPackage, error) {
+	listPkg, err := goListAPIPackage(ctx, checkout, modulePath, ".")
+	if err != nil {
+		return renderedDocsPackage{}, err
+	}
+	docPkg, fset, err := parseDocPackage(listPkg)
+	if err != nil {
+		return renderedDocsPackage{}, err
+	}
+	slug := pluginSlug(manifest.Name)
+	route := "plugins/" + slug + "/latest/index.md"
+	synopsis := doc.Synopsis(docPkg.Doc)
+	if synopsis == "" {
+		synopsis = listPkg.Doc
+	}
+	meta := docsAPIPackageMeta{
+		Subject:    "plugin",
+		Name:       manifest.Name,
+		ImportPath: listPkg.ImportPath,
+		Version:    manifest.Version,
+		Path:       route,
+		Synopsis:   synopsis,
+	}
+	return renderedDocsPackage{
+		Meta: meta,
+		Doc:  renderPackageMarkdown(fset, docPkg, meta, pluginSourceLink(manifest.Repository, manifest.Version)),
+	}, nil
+}
+
+func readGoModulePath(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "module" {
+			return fields[1], nil
+		}
+	}
+	return "", fmt.Errorf("module path not found in %s", path)
+}
+
+func trustedGoCodeAloneRepo(repo string) bool {
+	return strings.HasPrefix(strings.TrimSpace(repo), "https://github.com/GoCodeAlone/")
+}
+
+func pluginSlug(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.TrimSuffix(name, ".git")
+	name = strings.TrimPrefix(name, "workflow-plugin-")
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+		name = strings.TrimPrefix(name, "workflow-plugin-")
+	}
+	return name
+}
+
+func pluginSourceLink(repository, version string) string {
+	repository = strings.TrimSuffix(strings.TrimSpace(repository), ".git")
+	if repository == "" {
+		return ""
+	}
+	return repository + "/tree/" + version
+}
+
+func docsContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func splitDocsCSV(raw string) []string {
