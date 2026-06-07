@@ -33,7 +33,7 @@
 | 2 | feat: generate Go API docs with wfctl | Task 5, Task 6 | feat/wfctl-go-docs |
 | 3 | docs: reorganize website docs and API reference | Task 7, Task 8, Task 9 | feat/website-go-api-docs |
 
-**Status:** Draft
+**Status:** Locked 2026-06-07T04:11:52Z
 
 ## Global Design Guidance Mapping
 
@@ -45,7 +45,7 @@
 | Plugin/provider boundaries | Task 6 reads plugin registry metadata; generator does not execute plugin code. |
 | Fix known product foibles before docs normalize them | Tasks 1-4 fix and verify quirks before Task 9 removes the public quirks page. |
 
-## Task 1: HTTP Server Port Alias And Registry Metadata
+### Task 1: HTTP Server Port Alias And Registry Metadata
 
 **Files:**
 - Modify: `plugins/http/modules.go`
@@ -105,7 +105,7 @@ Expected: FAIL on `port` alias. Restore fix and re-run; Expected: PASS.
 
 **Rollback:** revert this task commit; configs using canonical `address` remain valid.
 
-## Task 2: Database Step Alias Normalization
+### Task 2: Database Step Alias Normalization
 
 **Files:**
 - Modify: `module/pipeline_step_db_query.go`
@@ -166,7 +166,7 @@ Expected: FAIL on alias tests. Restore and re-run; Expected: PASS.
 
 **Rollback:** revert this task commit; canonical DB configs remain valid.
 
-## Task 3: Request, Response, And Conditional Ergonomics
+### Task 3: Request, Response, And Conditional Ergonomics
 
 **Files:**
 - Modify: `module/pipeline_step_request_parse.go`
@@ -233,7 +233,7 @@ Expected: targeted command FAIL. Restore and re-run; Expected: PASS.
 
 **Rollback:** revert this task commit; canonical pipeline configs remain valid.
 
-## Task 4: Retire Public Quirks Doc In Workflow Source
+### Task 4: Retire Public Quirks Doc In Workflow Source
 
 **Files:**
 - Delete: `docs/config-field-quirks.md`
@@ -276,7 +276,7 @@ Expected: PASS.
 
 **Rollback:** restore the deleted doc and revert docs edits if the behavior release is reverted.
 
-## Task 5: Add `wfctl docs generate` Command Skeleton And Workflow Packages
+### Task 5: Add `wfctl docs generate` Command Skeleton And Workflow Packages
 
 **Files:**
 - Create: `cmd/wfctl/docs_generate.go`
@@ -322,7 +322,7 @@ Expected: PASS; output dir contains Markdown and metadata.
 
 **Rollback:** remove command and docs; existing `wfctl docs` behavior remains unchanged.
 
-## Task 6: Add Released-Tag Plugin API Generation
+### Task 6: Add Released-Tag Plugin API Generation
 
 **Files:**
 - Modify: `cmd/wfctl/docs_generate.go`
@@ -371,7 +371,7 @@ Expected: PASS with warnings asserted.
 
 **Rollback:** keep workflow-only generation; disable plugin registry flag in website sync.
 
-## Task 7: Website Sync Invokes `wfctl docs generate`
+### Task 7: Website Sync Invokes `wfctl docs generate`
 
 **Files in `gocodealone-website`:**
 - Modify: `scripts/sync-docs.mjs`
@@ -422,7 +422,7 @@ Expected: PASS; generated reference pages are present and Starlight builds.
 
 **Rollback:** revert website sync invocation; committed generated docs remain last-known-good.
 
-## Task 8: Website Navigation And Version Metadata
+### Task 8: Website Navigation And Version Metadata
 
 **Files in `gocodealone-website`:**
 - Modify: `docs/site/astro.config.mjs`
@@ -473,7 +473,7 @@ Expected: PASS; Pagefind indexes generated reference pages.
 
 **Rollback:** restore previous sidebar and keep generated pages reachable by direct URL.
 
-## Task 9: Regenerate Website Docs, Release Website
+### Task 9: Regenerate Website Docs, Release Website
 
 **Files in `gocodealone-website`:**
 - Generated Markdown under `docs/site/src/content/docs/`
