@@ -2812,12 +2812,18 @@ wfctl modernize [options] <config.yaml|directory>
 |----|----------|---------|-------------|
 | `hyphen-steps` | error | yes | Rename hyphenated step names to underscores |
 | `conditional-field` | error | yes | Convert template syntax in conditional field to dot-path |
+| `db-config-aliases` | warning | yes | Rewrite DB step aliases (`module`, `args`, `one`, `many`) to canonical config |
 | `db-query-mode` | warning | yes | Add mode:single when downstream uses .row/.found |
 | `db-query-index` | error | yes | Convert .steps.X.row.Y to index syntax |
 | `database-to-sqlite` | warning | yes | Convert database.workflow to storage.sqlite |
 | `absolute-dbpath` | warning | no | Warn on absolute dbPath values |
 | `empty-routes` | error | no | Detect empty routes in step.conditional |
 | `camelcase-config` | warning | no | Detect snake_case config keys |
+| `request-parse-config` | warning | no | Detect request parsing config that should be reviewed |
+
+Modernize rewrites accepted compatibility aliases back to canonical config where
+a deterministic fix exists. Runtime compatibility remains additive; canonical
+docs and generated schemas prefer the stable spelling.
 
 **Plugin-provided rules** are loaded when `--plugin-dir` is specified. Each installed plugin can declare its own migration rules in its `plugin.json` manifest under the `modernizeRules` key. Rules from all plugins in the directory are merged with the built-in rules.
 

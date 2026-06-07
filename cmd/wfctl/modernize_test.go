@@ -645,6 +645,7 @@ func TestModernizeAllRulesRegistered(t *testing.T) {
 		"absolute-dbpath",
 		"empty-routes",
 		"camelcase-config",
+		"db-config-aliases",
 		"request-parse-config",
 		"legacy-do-types",
 		"legacy-aws-types",
