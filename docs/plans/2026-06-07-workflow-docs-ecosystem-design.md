@@ -114,6 +114,13 @@ For Workflow pre-1.0, the public selector groups by minor line (`v0.8`,
 default selector groups by major line (`v1`, `v2`) with a metadata shape that
 can expose minor selectors later.
 
+Generation is bounded. The default website snapshot publishes `latest` plus the
+most recent three Workflow minor lines before v1.0, then `latest` plus the most
+recent three major lines after v1.0. Older generated lines are pruned from the
+website snapshot unless explicitly configured. Plugin API docs publish `latest`
+first, then add version-line pages only when registry metadata exposes enough
+release history to resolve them reliably.
+
 Generated output should be routeable as:
 
 - `/docs/reference/go/workflow/latest/`
@@ -130,6 +137,13 @@ content.
 `docs/config-field-quirks.md` is accurate enough to be useful but harmful as
 public doctrine. Known framework rough edges should become 0.8 fixes, then the
 doc should be removed from public sync and replaced by migration/release notes.
+
+Compatibility policy: 0.8 aliases are additive input normalization, not a second
+canonical schema. Canonical docs continue to show one spelling. `wfctl
+modernize` rewrites aliases to canonical keys. Validation should emit
+non-blocking warnings where practical, but accepted aliases remain supported at
+least through v1.0 because removing them before the first stable release would
+undercut the purpose of fixing authoring ergonomics.
 
 Fixes for the 0.8 path:
 
@@ -162,6 +176,9 @@ URLs come from trusted registry metadata but are still treated as untrusted
 content: generation must cap clone depth, avoid shell interpolation, and redact
 tokens from warnings. Website workflows use the least token scope needed to
 fetch public repositories and open docs PRs.
+Repository inputs are constrained to public GitHub repos from GoCodeAlone-owned
+registry entries in the first implementation. Wider third-party repository
+support requires a separate trust-boundary review.
 
 The 0.8 config alias work preserves existing behavior while accepting additional
 input forms. Aliases must be normalized before execution so downstream modules
