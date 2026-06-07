@@ -282,6 +282,7 @@ func registerCyclicPluginFactories(engine *workflow.StdEngine) {
 	engine.AddStepType("step.db_query", module.NewDBQueryStepFactory())
 	engine.AddStepType("step.db_exec", module.NewDBExecStepFactory())
 	engine.AddStepType("step.json_response", module.NewJSONResponseStepFactory())
+	engine.AddStepType("step.response", module.NewJSONResponseStepFactory())
 
 	// Workflow handlers from the cyclic plugins are registered directly by
 	// individual tests via engine.RegisterWorkflowHandler(), so we don't

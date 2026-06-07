@@ -87,7 +87,7 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Type:       "http.server",
 			Plugin:     "http",
 			Stateful:   false,
-			ConfigKeys: []string{"address", "readTimeout", "writeTimeout", "idleTimeout"},
+			ConfigKeys: []string{"address", "port", "readTimeout", "writeTimeout", "idleTimeout"},
 		},
 		"http.client": {
 			Type:       "http.client",
@@ -712,7 +712,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.conditional": {
 			Type:       "step.conditional",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"condition", "then", "else"},
+			ConfigKeys: []string{"field", "routes", "default", "if", "then", "else"},
 		},
 		"step.set": {
 			Type:       "step.set",
@@ -772,22 +772,22 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.request_parse": {
 			Type:       "step.request_parse",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"body", "query", "headers"},
+			ConfigKeys: []string{"path_params", "query_params", "parse_body", "parse_headers", "format"},
 		},
 		"step.db_query": {
 			Type:       "step.db_query",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"database", "query", "params", "tenantKey"},
+			ConfigKeys: []string{"database", "module", "query", "params", "args", "mode", "tenantKey"},
 		},
 		"step.db_exec": {
 			Type:       "step.db_exec",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"database", "query", "params", "tenantKey"},
+			ConfigKeys: []string{"database", "module", "query", "params", "args", "mode", "tenantKey"},
 		},
 		"step.db_query_cached": {
 			Type:       "step.db_query_cached",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"database", "query", "params", "cache_key", "cache_ttl", "scan_fields"},
+			ConfigKeys: []string{"database", "module", "query", "params", "args", "mode", "cache_key", "cache_ttl", "scan_fields"},
 		},
 		"step.db_create_partition": {
 			Type:       "step.db_create_partition",
@@ -802,7 +802,12 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.json_response": {
 			Type:       "step.json_response",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"status", "body", "headers"},
+			ConfigKeys: []string{"status", "status_from", "body", "body_from", "headers"},
+		},
+		"step.response": {
+			Type:       "step.response",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"status", "status_from", "body", "body_from", "headers"},
 		},
 		"step.static_file": {
 			Type:       "step.static_file",

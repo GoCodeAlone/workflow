@@ -9,6 +9,58 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestDBExecStep_AliasNormalization(t *testing.T) {
+	factory := NewDBExecStepFactory()
+	step, err := factory("update", map[string]any{
+		"module":    "alias-db",
+		"query":     "UPDATE items SET name = ? WHERE id = ?",
+		"args":      []any{"Widget", "i1"},
+		"returning": true,
+		"mode":      "one",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	dbStep := step.(*DBExecStep)
+	if dbStep.database != "alias-db" {
+		t.Fatalf("database = %q, want alias-db", dbStep.database)
+	}
+	if dbStep.mode != "single" {
+		t.Fatalf("mode = %q, want single", dbStep.mode)
+	}
+	if got := strings.Join(dbStep.params, ","); got != "Widget,i1" {
+		t.Fatalf("params = %q, want Widget,i1", got)
+	}
+}
+
+func TestDBExecStep_CanonicalConfigWinsOverAliases(t *testing.T) {
+	factory := NewDBExecStepFactory()
+	step, err := factory("update", map[string]any{
+		"database":  "canonical-db",
+		"module":    "alias-db",
+		"query":     "UPDATE items SET name = ? WHERE id = ?",
+		"params":    []any{"Canonical", "i1"},
+		"args":      []any{"Alias", "i1"},
+		"returning": true,
+		"mode":      "many",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	dbStep := step.(*DBExecStep)
+	if dbStep.database != "canonical-db" {
+		t.Fatalf("database = %q, want canonical-db", dbStep.database)
+	}
+	if dbStep.mode != "list" {
+		t.Fatalf("mode = %q, want list", dbStep.mode)
+	}
+	if got := strings.Join(dbStep.params, ","); got != "Canonical,i1" {
+		t.Fatalf("params = %q, want Canonical,i1", got)
+	}
+}
+
 func TestDBExecStep_Insert(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {

@@ -72,6 +72,81 @@ func mockAppWithDB(name string, db *sql.DB) *MockApplication {
 	return app
 }
 
+func TestDBQueryStep_AliasNormalization(t *testing.T) {
+	factory := NewDBQueryStepFactory()
+	step, err := factory("fetch", map[string]any{
+		"module": "alias-db",
+		"query":  "SELECT id FROM companies WHERE id = ?",
+		"args":   []any{"c1"},
+		"mode":   "many",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	dbStep := step.(*DBQueryStep)
+	if dbStep.database != "alias-db" {
+		t.Fatalf("database = %q, want alias-db", dbStep.database)
+	}
+	if dbStep.mode != "list" {
+		t.Fatalf("mode = %q, want list", dbStep.mode)
+	}
+	if got := strings.Join(dbStep.params, ","); got != "c1" {
+		t.Fatalf("params = %q, want c1", got)
+	}
+}
+
+func TestDBQueryStep_CanonicalConfigWinsOverAliases(t *testing.T) {
+	factory := NewDBQueryStepFactory()
+	step, err := factory("fetch", map[string]any{
+		"database": "canonical-db",
+		"module":   "alias-db",
+		"query":    "SELECT id FROM companies WHERE id = ?",
+		"params":   []any{"canonical"},
+		"args":     []any{"alias"},
+		"mode":     "one",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	dbStep := step.(*DBQueryStep)
+	if dbStep.database != "canonical-db" {
+		t.Fatalf("database = %q, want canonical-db", dbStep.database)
+	}
+	if dbStep.mode != "single" {
+		t.Fatalf("mode = %q, want single", dbStep.mode)
+	}
+	if got := strings.Join(dbStep.params, ","); got != "canonical" {
+		t.Fatalf("params = %q, want canonical", got)
+	}
+}
+
+func TestDBQueryCachedStep_AliasNormalization(t *testing.T) {
+	factory := NewDBQueryCachedStepFactory()
+	step, err := factory("fetch-cached", map[string]any{
+		"module":    "alias-db",
+		"query":     "SELECT id FROM companies WHERE id = ?",
+		"args":      []any{"c1"},
+		"cache_key": "company:c1",
+		"mode":      "many",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	dbStep := step.(*DBQueryCachedStep)
+	if dbStep.database != "alias-db" {
+		t.Fatalf("database = %q, want alias-db", dbStep.database)
+	}
+	if dbStep.mode != "list" {
+		t.Fatalf("mode = %q, want list", dbStep.mode)
+	}
+	if got := strings.Join(dbStep.params, ","); got != "c1" {
+		t.Fatalf("params = %q, want c1", got)
+	}
+}
+
 func TestDBQueryStep_ListMode(t *testing.T) {
 	db := setupTestDB(t)
 	app := mockAppWithDB("test-db", db)

@@ -3,9 +3,11 @@ package module
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/pipeline"
 )
 
 // ConditionalStep routes pipeline execution to different steps based on a
@@ -15,12 +17,33 @@ type ConditionalStep struct {
 	field        string
 	routes       map[string]string
 	defaultRoute string
+	ifExpr       string
+	thenStep     string
+	elseStep     string
 	tmpl         *TemplateEngine
 }
+
+var leadingDotExprIdentRe = regexp.MustCompile(`(^|[\s(=!<>])\.([A-Za-z_][A-Za-z0-9_]*)`)
 
 // NewConditionalStepFactory returns a StepFactory that creates ConditionalStep instances.
 func NewConditionalStepFactory() StepFactory {
 	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
+		ifExpr, _ := config["if"].(string)
+		if ifExpr != "" {
+			thenStep, _ := config["then"].(string)
+			if thenStep == "" {
+				return nil, fmt.Errorf("conditional step %q: 'then' is required when 'if' is configured", name)
+			}
+			elseStep, _ := config["else"].(string)
+			return &ConditionalStep{
+				name:     name,
+				ifExpr:   ifExpr,
+				thenStep: thenStep,
+				elseStep: elseStep,
+				tmpl:     NewTemplateEngine(),
+			}, nil
+		}
+
 		field, _ := config["field"].(string)
 		if field == "" {
 			return nil, fmt.Errorf("conditional step %q: 'field' is required", name)
@@ -57,6 +80,25 @@ func (s *ConditionalStep) Name() string { return s.name }
 
 // Execute resolves the field value and determines the next step.
 func (s *ConditionalStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+	if s.ifExpr != "" {
+		condition, err := s.evaluateIf(pc)
+		if err != nil {
+			return nil, fmt.Errorf("conditional step %q: failed to evaluate if expression: %w", s.name, err)
+		}
+		nextStep := s.elseStep
+		if condition {
+			nextStep = s.thenStep
+		}
+		output := map[string]any{"condition": condition}
+		if nextStep != "" {
+			output["next_step"] = nextStep
+		}
+		return &StepResult{
+			Output:   output,
+			NextStep: nextStep,
+		}, nil
+	}
+
 	// Resolve the field value. If the field already contains template
 	// delimiters ({{ }}), use it as-is. Otherwise, build a template
 	// expression from the dot-separated field path.
@@ -88,6 +130,35 @@ func (s *ConditionalStep) Execute(_ context.Context, pc *PipelineContext) (*Step
 	}
 
 	return nil, fmt.Errorf("conditional step %q: value %q not found in routes and no default configured", s.name, resolved)
+}
+
+func (s *ConditionalStep) evaluateIf(pc *PipelineContext) (bool, error) {
+	expr := strings.TrimSpace(s.ifExpr)
+	if strings.HasPrefix(expr, "{{") && strings.HasSuffix(expr, "}}") {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(expr, "{{"), "}}"))
+		if strings.Contains(inner, "==") || strings.Contains(inner, "!=") || strings.Contains(inner, ">") || strings.Contains(inner, "<") {
+			normalized := leadingDotExprIdentRe.ReplaceAllString(inner, `${1}${2}`)
+			resolved, err := pipeline.NewExprEngine().Evaluate(normalized, pc)
+			if err != nil {
+				return false, err
+			}
+			return truthyString(resolved), nil
+		}
+	}
+	resolved, err := s.tmpl.Resolve(expr, pc)
+	if err != nil {
+		return false, err
+	}
+	return truthyString(resolved), nil
+}
+
+func truthyString(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "0", "false", "no", "n", "off", "<nil>":
+		return false
+	default:
+		return true
+	}
 }
 
 // buildFieldTemplate converts a dot-separated field path into a Go template

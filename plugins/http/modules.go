@@ -1,6 +1,10 @@
 package http
 
 import (
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
@@ -35,10 +39,7 @@ func moduleFactories() map[string]plugin.ModuleFactory {
 }
 
 func httpServerFactory(name string, cfg map[string]any) modular.Module {
-	address := ""
-	if addr, ok := cfg["address"].(string); ok {
-		address = addr
-	}
+	address := httpServerAddress(cfg)
 	srv := module.NewStandardHTTPServer(name, address)
 
 	parseDuration := func(key string) time.Duration {
@@ -51,6 +52,74 @@ func httpServerFactory(name string, cfg map[string]any) modular.Module {
 	}
 	srv.SetTimeouts(parseDuration("readTimeout"), parseDuration("writeTimeout"), parseDuration("idleTimeout"))
 	return srv
+}
+
+func httpServerAddress(cfg map[string]any) string {
+	if addr, ok := cfg["address"].(string); ok && strings.TrimSpace(addr) != "" {
+		return addr
+	}
+	port, ok := cfg["port"]
+	if !ok {
+		return ""
+	}
+	if p, ok := normalizeListenPort(port); ok {
+		return fmt.Sprintf(":%d", p)
+	}
+	return ""
+}
+
+func normalizeListenPort(v any) (int, bool) {
+	switch p := v.(type) {
+	case int:
+		return validListenPort(p)
+	case int8:
+		return validListenPort(int(p))
+	case int16:
+		return validListenPort(int(p))
+	case int32:
+		return validListenPort(int(p))
+	case int64:
+		return validListenPort(int(p))
+	case uint:
+		return validListenPort(int(p))
+	case uint8:
+		return validListenPort(int(p))
+	case uint16:
+		return validListenPort(int(p))
+	case uint32:
+		return validListenPort(int(p))
+	case uint64:
+		if p > 65535 {
+			return 0, false
+		}
+		return validListenPort(int(p))
+	case float64:
+		if math.Trunc(p) != p || p > 65535 {
+			return 0, false
+		}
+		return validListenPort(int(p))
+	case float32:
+		p64 := float64(p)
+		if math.Trunc(p64) != p64 || p64 > 65535 {
+			return 0, false
+		}
+		return validListenPort(int(p64))
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil {
+			return 0, false
+		}
+		return validListenPort(parsed)
+	default:
+		return 0, false
+	}
+}
+
+func validListenPort(port int) (int, bool) {
+	if port < 0 || port > 65535 {
+		return 0, false
+	}
+	return port, true
 }
 
 func httpRouterFactory(name string, _ map[string]any) modular.Module {

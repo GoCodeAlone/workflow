@@ -253,6 +253,7 @@ Available step types:
 | `step.db_query` | Execute a SELECT query against a database module |
 | `step.db_exec` | Execute INSERT/UPDATE/DELETE against a database module |
 | `step.json_response` | Return a JSON HTTP response |
+| `step.response` | Alias for `step.json_response` |
 | `step.http_call` | Make an outbound HTTP request |
 | `step.publish` | Publish a message to a broker or EventBus topic |
 | `step.state_transition` | Trigger a state machine transition |
@@ -262,6 +263,17 @@ Available step types:
 | `step.parallel` | Execute multiple steps concurrently |
 | `step.script` | Execute a Yaegi dynamic script |
 | `step.notify` | Send notifications (Slack, email, webhook) |
+
+Canonical examples in this guide use `address`, `database`, `params`,
+`mode: list`/`single`, `parse_body`, and `step.json_response`. Workflow also
+accepts common aliases such as `port`, `module`, `args`, `mode: many`/`one`,
+`format: json`, and `step.response`. Run `wfctl modernize --apply <config>` to
+rewrite aliases to canonical fields before committing shared configuration.
+
+Pipeline HTTP routes are usually declared inline on each pipeline with
+`trigger.type: http`. This keeps the route next to the steps that handle it.
+`workflows.http.routes` remains available for module-handler routes; the two
+models are additive rather than competing.
 
 ---
 

@@ -104,6 +104,10 @@ modules:
 - `dependsOn` forms a DAG — circular dependencies are rejected at startup
 - Module types are registered by plugins declared in `requires.plugins`
 
+### Canonical Field Notes
+- `http.server.config.address` is the canonical listen address. `port: 8080` is accepted as an authoring alias and normalizes to `":8080"` when `address` is omitted.
+- Use `wfctl modernize --apply` to rewrite accepted aliases back to canonical fields before committing long-lived config.
+
 ---
 
 <!-- section: workflows -->
@@ -410,8 +414,15 @@ The original `{{ }}` syntax is still fully supported:
 | `step.conditional` | Branch execution based on a field value |
 | `step.http_call` | Make an outbound HTTP request |
 | `step.json_response` | Send a JSON HTTP response and stop pipeline |
+| `step.response` | Alias for `step.json_response` |
 | `step.db_query` | Execute a SQL query against a database module |
 | `step.publish` | Publish a message to a messaging topic |
+
+### Pipeline Authoring Notes
+- `step.db_query`, `step.db_exec`, and `step.db_query_cached` use `database` and `params` as canonical keys. The aliases `module` and `args` are accepted, and `mode: one`/`many` normalize to `single`/`list`.
+- `step.request_parse` uses `parse_body: true` as the canonical body parsing flag. `format: json` and `format: form` are accepted aliases that enable body parsing.
+- `step.conditional` supports switch-style `field`/`routes`/`default` and boolean `if`/`then`/`else` routing. `${ status == "active" }` is the preferred boolean expression syntax.
+- `step.json_response` and its `step.response` alias encode template results that resolve to JSON arrays or objects as raw JSON values rather than strings.
 
 ### Example
 ```yaml

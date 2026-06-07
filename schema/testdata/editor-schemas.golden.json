@@ -1804,10 +1804,16 @@
           "key": "address",
           "label": "Listen Address",
           "type": "string",
-          "description": "Host:port to listen on (e.g. :8080, 0.0.0.0:80)",
-          "required": true,
+          "description": "Canonical host:port to listen on (e.g. :8080, 0.0.0.0:80)",
           "defaultValue": ":8080",
           "placeholder": ":8080"
+        },
+        {
+          "key": "port",
+          "label": "Port Alias",
+          "type": "number",
+          "description": "Alias for address; normalized to :\u003cport\u003e when address is omitted",
+          "placeholder": "8080"
         }
       ],
       "defaultConfig": {
@@ -4433,8 +4439,7 @@
           "key": "field",
           "label": "Field",
           "type": "string",
-          "description": "Field path to evaluate for routing",
-          "required": true,
+          "description": "Field path to evaluate for switch-style routing",
           "placeholder": "event_type"
         },
         {
@@ -4442,7 +4447,6 @@
           "label": "Routes",
           "type": "map",
           "description": "Map of field values to target step names",
-          "required": true,
           "mapValueType": "string"
         },
         {
@@ -4450,6 +4454,25 @@
           "label": "Default Step",
           "type": "string",
           "description": "Step name to route to when no match is found"
+        },
+        {
+          "key": "if",
+          "label": "If",
+          "type": "string",
+          "description": "Boolean condition for if/then/else routing; supports ${ } expressions and Go template truthy output",
+          "placeholder": "${ status == \"active\" }"
+        },
+        {
+          "key": "then",
+          "label": "Then Step",
+          "type": "string",
+          "description": "Step name to route to when if evaluates truthy"
+        },
+        {
+          "key": "else",
+          "label": "Else Step",
+          "type": "string",
+          "description": "Step name to route to when if evaluates false"
         }
       ]
     },
@@ -4603,8 +4626,15 @@
           "key": "database",
           "label": "Database",
           "type": "string",
-          "description": "Name of the database service (must implement DBProvider)",
-          "required": true,
+          "description": "Canonical name of the database service (must implement DBProvider)",
+          "placeholder": "admin-db",
+          "inheritFrom": "dependency.name"
+        },
+        {
+          "key": "module",
+          "label": "Database Alias",
+          "type": "string",
+          "description": "Alias for database; wfctl modernize rewrites this to database",
           "placeholder": "admin-db",
           "inheritFrom": "dependency.name"
         },
@@ -4622,6 +4652,25 @@
           "type": "array",
           "description": "Template-resolved parameter values for ? placeholders",
           "arrayItemType": "string"
+        },
+        {
+          "key": "args",
+          "label": "Parameters Alias",
+          "type": "array",
+          "description": "Alias for params; wfctl modernize rewrites this to params",
+          "arrayItemType": "string"
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "type": "select",
+          "description": "Result mode for returning statements: list/many returns rows/count, single/one returns row/found",
+          "options": [
+            "list",
+            "single",
+            "many",
+            "one"
+          ]
         },
         {
           "key": "tenantKey",
@@ -4663,8 +4712,15 @@
           "key": "database",
           "label": "Database",
           "type": "string",
-          "description": "Name of the database service (must implement DBProvider)",
-          "required": true,
+          "description": "Canonical name of the database service (must implement DBProvider)",
+          "placeholder": "admin-db",
+          "inheritFrom": "dependency.name"
+        },
+        {
+          "key": "module",
+          "label": "Database Alias",
+          "type": "string",
+          "description": "Alias for database; wfctl modernize rewrites this to database",
           "placeholder": "admin-db",
           "inheritFrom": "dependency.name"
         },
@@ -4684,14 +4740,23 @@
           "arrayItemType": "string"
         },
         {
+          "key": "args",
+          "label": "Parameters Alias",
+          "type": "array",
+          "description": "Alias for params; wfctl modernize rewrites this to params",
+          "arrayItemType": "string"
+        },
+        {
           "key": "mode",
           "label": "Mode",
           "type": "select",
-          "description": "Result mode: 'list' returns rows/count, 'single' returns row/found",
+          "description": "Result mode: list/many returns rows/count, single/one returns row/found",
           "defaultValue": "list",
           "options": [
             "list",
-            "single"
+            "single",
+            "many",
+            "one"
           ]
         },
         {
@@ -4734,8 +4799,15 @@
           "key": "database",
           "label": "Database",
           "type": "string",
-          "description": "Name of the database service (must implement DBProvider)",
-          "required": true,
+          "description": "Canonical name of the database service (must implement DBProvider)",
+          "placeholder": "db",
+          "inheritFrom": "dependency.name"
+        },
+        {
+          "key": "module",
+          "label": "Database Alias",
+          "type": "string",
+          "description": "Alias for database; wfctl modernize rewrites this to database",
           "placeholder": "db",
           "inheritFrom": "dependency.name"
         },
@@ -4755,14 +4827,23 @@
           "arrayItemType": "string"
         },
         {
+          "key": "args",
+          "label": "Parameters Alias",
+          "type": "array",
+          "description": "Alias for params; wfctl modernize rewrites this to params",
+          "arrayItemType": "string"
+        },
+        {
           "key": "mode",
           "label": "Mode",
           "type": "select",
-          "description": "Result mode: 'single' returns row/found, 'list' returns rows/count",
+          "description": "Result mode: single/one returns row/found, list/many returns rows/count",
           "defaultValue": "single",
           "options": [
             "single",
-            "list"
+            "list",
+            "one",
+            "many"
           ]
         },
         {
@@ -6924,7 +7005,24 @@
           "key": "parse_body",
           "label": "Parse Body",
           "type": "boolean",
-          "description": "Whether to parse the JSON request body"
+          "description": "Whether to parse the request body"
+        },
+        {
+          "key": "format",
+          "label": "Format Alias",
+          "type": "select",
+          "description": "Alias that enables body parsing for JSON or form request bodies",
+          "options": [
+            "json",
+            "form"
+          ]
+        },
+        {
+          "key": "parse_headers",
+          "label": "Parse Headers",
+          "type": "array",
+          "description": "Header names to extract",
+          "arrayItemType": "string"
         }
       ]
     },
@@ -6960,6 +7058,62 @@
           "label": "Fallback Step",
           "type": "map",
           "description": "Optional fallback step map executed when the circuit is open; must include 'type' key"
+        }
+      ]
+    },
+    "step.response": {
+      "type": "step.response",
+      "label": "Response",
+      "category": "pipeline",
+      "description": "Alias for step.json_response; writes an HTTP JSON response with custom status code and stops the pipeline",
+      "inputs": [
+        {
+          "name": "context",
+          "type": "PipelineContext",
+          "description": "Pipeline context with _http_response_writer metadata"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "StepResult",
+          "description": "Response status (always sets Stop: true)"
+        }
+      ],
+      "configFields": [
+        {
+          "key": "status",
+          "label": "Status Code",
+          "type": "number",
+          "description": "HTTP status code for the response",
+          "defaultValue": "200"
+        },
+        {
+          "key": "status_from",
+          "label": "Status From",
+          "type": "string",
+          "description": "Dotted path to resolve HTTP status code dynamically (e.g., steps.call_upstream.status_code). Takes precedence over 'status' when resolved to a valid HTTP status code (100-599).",
+          "placeholder": "steps.call_upstream.status_code"
+        },
+        {
+          "key": "headers",
+          "label": "Headers",
+          "type": "map",
+          "description": "Additional response headers",
+          "mapValueType": "string"
+        },
+        {
+          "key": "body",
+          "label": "Body",
+          "type": "map",
+          "description": "Response body as JSON (supports template expressions)"
+        },
+        {
+          "key": "body_from",
+          "label": "Body From",
+          "type": "string",
+          "description": "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)",
+          "placeholder": "steps.get-company.row"
         }
       ]
     },

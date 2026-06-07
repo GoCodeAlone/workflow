@@ -366,6 +366,7 @@ var coreModuleTypes = []string{
 	"step.region_weight",
 	"step.request_parse",
 	"step.resilient_circuit_breaker",
+	"step.response",
 	"step.retry_with_backoff",
 	"step.s3_upload",
 	"step.sandbox_exec",

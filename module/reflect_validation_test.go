@@ -183,7 +183,7 @@ func TestReflectValidation_HTTPServerConfig(t *testing.T) {
 	}
 
 	address := fields[0]
-	assertField(t, "address", address, schema.FieldTypeString, true, false)
+	assertField(t, "address", address, schema.FieldTypeString, false, false)
 	if address.DefaultValue != ":8080" {
 		t.Errorf("address: expected default=:8080, got %v", address.DefaultValue)
 	}

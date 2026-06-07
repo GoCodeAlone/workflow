@@ -78,6 +78,22 @@ func TestKnownModuleTypesStateful(t *testing.T) {
 	}
 }
 
+func TestKnownModuleTypesHTTPServerListsPortAlias(t *testing.T) {
+	info, ok := KnownModuleTypes()["http.server"]
+	if !ok {
+		t.Fatal("http.server not found")
+	}
+	keys := make(map[string]bool, len(info.ConfigKeys))
+	for _, key := range info.ConfigKeys {
+		keys[key] = true
+	}
+	for _, key := range []string{"address", "port"} {
+		if !keys[key] {
+			t.Fatalf("http.server ConfigKeys missing %q: %v", key, info.ConfigKeys)
+		}
+	}
+}
+
 func TestKnownStepTypesPopulated(t *testing.T) {
 	types := KnownStepTypes()
 	if len(types) == 0 {
@@ -94,6 +110,7 @@ func TestKnownStepTypesPopulated(t *testing.T) {
 		"step.db_query",
 		"step.publish",
 		"step.http_call",
+		"step.response",
 		"step.cache_get",
 		"step.auth_validate",
 		"step.authz_check",
@@ -185,6 +202,54 @@ func TestStepTypeCount(t *testing.T) {
 	if len(types) < 120 {
 		t.Errorf("expected at least 120 step types, got %d — some step types may have been dropped", len(types))
 	}
+}
+
+func TestKnownStepTypesRequestParseConfigKeys(t *testing.T) {
+	info, ok := KnownStepTypes()["step.request_parse"]
+	if !ok {
+		t.Fatal("step.request_parse not found")
+	}
+	want := []string{"path_params", "query_params", "parse_body", "parse_headers", "format"}
+	if !sameStringSet(info.ConfigKeys, want) {
+		t.Fatalf("step.request_parse ConfigKeys = %v, want %v", info.ConfigKeys, want)
+	}
+}
+
+func TestKnownStepTypesResponseAliasesMatchConfigKeys(t *testing.T) {
+	types := KnownStepTypes()
+	jsonInfo, ok := types["step.json_response"]
+	if !ok {
+		t.Fatal("step.json_response not found")
+	}
+	aliasInfo, ok := types["step.response"]
+	if !ok {
+		t.Fatal("step.response not found")
+	}
+	if !sameStringSet(jsonInfo.ConfigKeys, aliasInfo.ConfigKeys) {
+		t.Fatalf("step.json_response ConfigKeys = %v, step.response ConfigKeys = %v", jsonInfo.ConfigKeys, aliasInfo.ConfigKeys)
+	}
+}
+
+func sameStringSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	seen := make(map[string]int, len(got))
+	for _, v := range got {
+		seen[v]++
+	}
+	for _, v := range want {
+		if seen[v] == 0 {
+			return false
+		}
+		seen[v]--
+	}
+	for _, count := range seen {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // TestKnownStepTypesCoverAllPlugins ensures KnownStepTypes() is in sync with all step

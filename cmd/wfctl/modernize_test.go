@@ -353,6 +353,100 @@ pipelines:
 	}
 }
 
+func TestModernizeDBConfigAliases(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: fetch_user
+        type: step.db_query
+        config:
+          module: my-db
+          query: "SELECT * FROM users WHERE id = ?"
+          args:
+            - u1
+          mode: one
+      - name: save_user
+        type: step.db_exec
+        config:
+          module: my-db
+          query: "UPDATE users SET name = ? WHERE id = ?"
+          args:
+            - Ada
+            - u1
+          mode: many
+`
+	rule := findRule("db-config-aliases")
+	if rule == nil {
+		t.Fatal("db-config-aliases rule not found")
+	}
+
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) < 4 {
+		t.Fatalf("expected alias findings, got %d: %v", len(findings), findings)
+	}
+	changes := rule.Fix(doc)
+	if len(changes) < 4 {
+		t.Fatalf("expected alias changes, got %d: %v", len(changes), changes)
+	}
+
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+	for _, absent := range []string{"module:", "args:", "mode: one", "mode: many"} {
+		if strings.Contains(result, absent) {
+			t.Fatalf("expected %q to be modernized, got:\n%s", absent, result)
+		}
+	}
+	for _, present := range []string{"database: my-db", "params:", "mode: single", "mode: list"} {
+		if !strings.Contains(result, present) {
+			t.Fatalf("expected %q in modernized output, got:\n%s", present, result)
+		}
+	}
+}
+
+func TestModernizeDBConfigAliasesCanonicalWins(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: fetch_user
+        type: step.db_query
+        config:
+          database: canonical-db
+          module: alias-db
+          query: "SELECT * FROM users WHERE id = ?"
+          params:
+            - canonical
+          args:
+            - alias
+          mode: one
+`
+	rule := findRule("db-config-aliases")
+	if rule == nil {
+		t.Fatal("db-config-aliases rule not found")
+	}
+	doc := parseTestYAML(t, input)
+	changes := rule.Fix(doc)
+	if len(changes) == 0 {
+		t.Fatal("expected alias cleanup changes")
+	}
+
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+	for _, absent := range []string{"module:", "args:"} {
+		if strings.Contains(result, absent) {
+			t.Fatalf("expected %q to be removed, got:\n%s", absent, result)
+		}
+	}
+	if strings.Contains(result, "alias-db") || strings.Contains(result, "alias") {
+		t.Fatalf("expected canonical fields to win, got:\n%s", result)
+	}
+	if !strings.Contains(result, "database: canonical-db") || !strings.Contains(result, "- canonical") {
+		t.Fatalf("expected canonical fields to remain, got:\n%s", result)
+	}
+}
+
 func TestDbQueryIndexCheck(t *testing.T) {
 	input := `
 pipelines:
@@ -551,6 +645,7 @@ func TestModernizeAllRulesRegistered(t *testing.T) {
 		"absolute-dbpath",
 		"empty-routes",
 		"camelcase-config",
+		"db-config-aliases",
 		"request-parse-config",
 		"legacy-do-types",
 		"legacy-aws-types",

@@ -35,6 +35,25 @@ func findMapValue(node *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
+func findMapKeyValueIndex(node *yaml.Node, key string) (int, *yaml.Node, *yaml.Node) {
+	if node.Kind != yaml.MappingNode {
+		return -1, nil, nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return i, node.Content[i], node.Content[i+1]
+		}
+	}
+	return -1, nil, nil
+}
+
+func removeMapKeyValue(node *yaml.Node, idx int) {
+	if node == nil || node.Kind != yaml.MappingNode || idx < 0 || idx+1 >= len(node.Content) {
+		return
+	}
+	node.Content = append(node.Content[:idx], node.Content[idx+2:]...)
+}
+
 // stepNameInfo holds a step name and its YAML line number.
 type stepNameInfo struct {
 	Name string
@@ -432,6 +451,111 @@ func dbQueryModeRule() Rule {
 			return changes
 		},
 	}
+}
+
+func dbConfigAliasesRule() Rule {
+	stepTypes := []string{"step.db_query", "step.db_exec", "step.db_query_cached"}
+	return Rule{
+		ID:          "db-config-aliases",
+		Description: "Rewrite DB step aliases to canonical database/params/list/single config",
+		Severity:    "warning",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			for _, stepType := range stepTypes {
+				forEachStepOfType(root, stepType, func(step *yaml.Node) {
+					cfg := findMapValue(step, "config")
+					if cfg == nil || cfg.Kind != yaml.MappingNode {
+						return
+					}
+					if _, key, _ := findMapKeyValueIndex(cfg, "module"); key != nil {
+						findings = append(findings, Finding{
+							RuleID:  "db-config-aliases",
+							Line:    key.Line,
+							Message: fmt.Sprintf("%s uses alias config key \"module\"; use \"database\"", stepType),
+							Fixable: true,
+						})
+					}
+					if _, key, _ := findMapKeyValueIndex(cfg, "args"); key != nil {
+						findings = append(findings, Finding{
+							RuleID:  "db-config-aliases",
+							Line:    key.Line,
+							Message: fmt.Sprintf("%s uses alias config key \"args\"; use \"params\"", stepType),
+							Fixable: true,
+						})
+					}
+					if _, _, mode := findMapKeyValueIndex(cfg, "mode"); mode != nil && mode.Kind == yaml.ScalarNode {
+						switch mode.Value {
+						case "one", "many":
+							findings = append(findings, Finding{
+								RuleID:  "db-config-aliases",
+								Line:    mode.Line,
+								Message: fmt.Sprintf("%s uses mode %q; use %q", stepType, mode.Value, modernDBMode(mode.Value)),
+								Fixable: true,
+							})
+						}
+					}
+				})
+			}
+			return findings
+		},
+		Fix: func(root *yaml.Node) []Change {
+			var changes []Change
+			for _, stepType := range stepTypes {
+				forEachStepOfType(root, stepType, func(step *yaml.Node) {
+					cfg := findMapValue(step, "config")
+					if cfg == nil || cfg.Kind != yaml.MappingNode {
+						return
+					}
+					modernizeConfigKeyAlias(cfg, "module", "database", "db-config-aliases", stepType, &changes)
+					modernizeConfigKeyAlias(cfg, "args", "params", "db-config-aliases", stepType, &changes)
+					if _, _, mode := findMapKeyValueIndex(cfg, "mode"); mode != nil && mode.Kind == yaml.ScalarNode {
+						if modern := modernDBMode(mode.Value); modern != mode.Value {
+							changes = append(changes, Change{
+								RuleID:      "db-config-aliases",
+								Line:        mode.Line,
+								Description: fmt.Sprintf("Updated %s mode %q -> %q", stepType, mode.Value, modern),
+							})
+							mode.Value = modern
+						}
+					}
+				})
+			}
+			return changes
+		},
+	}
+}
+
+func modernDBMode(mode string) string {
+	switch mode {
+	case "one":
+		return "single"
+	case "many":
+		return "list"
+	default:
+		return mode
+	}
+}
+
+func modernizeConfigKeyAlias(cfg *yaml.Node, alias, canonical, ruleID, stepType string, changes *[]Change) {
+	aliasIdx, aliasKey, _ := findMapKeyValueIndex(cfg, alias)
+	if aliasKey == nil {
+		return
+	}
+	if _, canonicalKey, _ := findMapKeyValueIndex(cfg, canonical); canonicalKey != nil {
+		*changes = append(*changes, Change{
+			RuleID:      ruleID,
+			Line:        aliasKey.Line,
+			Description: fmt.Sprintf("Removed %s alias %q because canonical %q is present", stepType, alias, canonical),
+		})
+		removeMapKeyValue(cfg, aliasIdx)
+		return
+	}
+	*changes = append(*changes, Change{
+		RuleID:      ruleID,
+		Line:        aliasKey.Line,
+		Description: fmt.Sprintf("Renamed %s config key %q -> %q", stepType, alias, canonical),
+	})
+	aliasKey.Value = canonical
 }
 
 // dotRowAccessRegex matches patterns like .steps.stepname.row.column inside {{ }}.

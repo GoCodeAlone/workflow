@@ -125,7 +125,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Description: "Standard HTTP server that listens on a network address",
 		Outputs:     []ServiceIODef{{Name: "request", Type: "http.Request", Description: "Incoming HTTP requests"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "address", Label: "Listen Address", Type: FieldTypeString, Required: true, Description: "Host:port to listen on (e.g. :8080, 0.0.0.0:80)", DefaultValue: ":8080", Placeholder: ":8080"},
+			{Key: "address", Label: "Listen Address", Type: FieldTypeString, Description: "Canonical host:port to listen on (e.g. :8080, 0.0.0.0:80)", DefaultValue: ":8080", Placeholder: ":8080"},
+			{Key: "port", Label: "Port Alias", Type: FieldTypeNumber, Description: "Alias for address; normalized to :<port> when address is omitted", Placeholder: "8080"},
 		},
 		DefaultConfig: map[string]any{"address": ":8080"},
 		MaxIncoming:   intPtr(0),
@@ -927,9 +928,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with field to evaluate for routing"}},
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Routing decision with target step name"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "field", Label: "Field", Type: FieldTypeString, Required: true, Description: "Field path to evaluate for routing", Placeholder: "event_type"},
-			{Key: "routes", Label: "Routes", Type: FieldTypeMap, MapValueType: "string", Required: true, Description: "Map of field values to target step names"},
+			{Key: "field", Label: "Field", Type: FieldTypeString, Description: "Field path to evaluate for switch-style routing", Placeholder: "event_type"},
+			{Key: "routes", Label: "Routes", Type: FieldTypeMap, MapValueType: "string", Description: "Map of field values to target step names"},
 			{Key: "default", Label: "Default Step", Type: FieldTypeString, Description: "Step name to route to when no match is found"},
+			{Key: "if", Label: "If", Type: FieldTypeString, Description: "Boolean condition for if/then/else routing; supports ${ } expressions and Go template truthy output", Placeholder: `${ status == "active" }`},
+			{Key: "then", Label: "Then Step", Type: FieldTypeString, Description: "Step name to route to when if evaluates truthy"},
+			{Key: "else", Label: "Else Step", Type: FieldTypeString, Description: "Step name to route to when if evaluates false"},
 		},
 	})
 
@@ -1026,7 +1030,9 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "path_params", Label: "Path Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Parameter names to extract from URL path (e.g., id, companyId)"},
 			{Key: "query_params", Label: "Query Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Query string parameter names to extract"},
-			{Key: "parse_body", Label: "Parse Body", Type: FieldTypeBool, Description: "Whether to parse the JSON request body"},
+			{Key: "parse_body", Label: "Parse Body", Type: FieldTypeBool, Description: "Whether to parse the request body"},
+			{Key: "format", Label: "Format Alias", Type: FieldTypeSelect, Options: []string{"json", "form"}, Description: "Alias that enables body parsing for JSON or form request bodies"},
+			{Key: "parse_headers", Label: "Parse Headers", Type: FieldTypeArray, ArrayItemType: "string", Description: "Header names to extract"},
 		},
 	})
 
@@ -1038,10 +1044,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for template parameter resolution"}},
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Query results as rows/count (list mode) or row/found (single mode)"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
+			{Key: "database", Label: "Database", Type: FieldTypeString, Description: "Canonical name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
+			{Key: "module", Label: "Database Alias", Type: FieldTypeString, Description: "Alias for database; wfctl modernize rewrites this to database", Placeholder: "admin-db", InheritFrom: "dependency.name"},
 			{Key: "query", Label: "SQL Query", Type: FieldTypeSQL, Required: true, Description: "Parameterized SQL SELECT query (use ? for placeholders). Template expressions are forbidden unless allow_dynamic_sql is true.", Placeholder: "SELECT id, name FROM companies WHERE id = ?"},
 			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for ? placeholders in query"},
-			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"list", "single"}, DefaultValue: "list", Description: "Result mode: 'list' returns rows/count, 'single' returns row/found"},
+			{Key: "args", Label: "Parameters Alias", Type: FieldTypeArray, ArrayItemType: "string", Description: "Alias for params; wfctl modernize rewrites this to params"},
+			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"list", "single", "many", "one"}, DefaultValue: "list", Description: "Result mode: list/many returns rows/count, single/one returns row/found"},
 			{Key: "tenantKey", Label: "Tenant Key", Type: FieldTypeString, Description: "Dot-path in pipeline context to resolve the tenant value for automatic scoping (requires database.partitioned)", Placeholder: "steps.auth.tenant_id"},
 			{Key: "allow_dynamic_sql", Label: "Allow Dynamic SQL", Type: FieldTypeBool, DefaultValue: "false", Description: "When true, template expressions in 'query' are resolved at runtime. Each resolved value must contain only letters, digits, underscores and hyphens to prevent SQL injection."},
 		},
@@ -1055,10 +1063,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for template parameter and cache key resolution"}},
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Query results as rows/count (list mode) or row/found (single mode), plus cache_hit boolean"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of the database service (must implement DBProvider)", Placeholder: "db", InheritFrom: "dependency.name"},
+			{Key: "database", Label: "Database", Type: FieldTypeString, Description: "Canonical name of the database service (must implement DBProvider)", Placeholder: "db", InheritFrom: "dependency.name"},
+			{Key: "module", Label: "Database Alias", Type: FieldTypeString, Description: "Alias for database; wfctl modernize rewrites this to database", Placeholder: "db", InheritFrom: "dependency.name"},
 			{Key: "query", Label: "SQL Query", Type: FieldTypeSQL, Required: true, Description: "Parameterized SQL SELECT query using $N placeholders (e.g. $1, $2); automatically converted to ? for SQLite drivers. Template expressions are forbidden unless allow_dynamic_sql is true.", Placeholder: "SELECT backend_url, settings FROM routing_config WHERE tenant_id = $1 LIMIT 1"},
 			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for query placeholders"},
-			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"single", "list"}, DefaultValue: "single", Description: "Result mode: 'single' returns row/found, 'list' returns rows/count"},
+			{Key: "args", Label: "Parameters Alias", Type: FieldTypeArray, ArrayItemType: "string", Description: "Alias for params; wfctl modernize rewrites this to params"},
+			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"single", "list", "one", "many"}, DefaultValue: "single", Description: "Result mode: single/one returns row/found, list/many returns rows/count"},
 			{Key: "cache_key", Label: "Cache Key", Type: FieldTypeString, Required: true, Description: "Template-resolved key used to store/retrieve the cached result", Placeholder: "tenant_config:{{.steps.parse.headers.X-Tenant-Id}}"},
 			{Key: "cache_ttl", Label: "Cache TTL", Type: FieldTypeString, DefaultValue: "5m", Description: "Duration string for how long to cache the result (e.g. '5m', '30s', '1h')", Placeholder: "5m"},
 			{Key: "scan_fields", Label: "Scan Fields", Type: FieldTypeArray, ArrayItemType: "string", Description: "Column names to include in the output (omit to include all columns)"},
@@ -1074,9 +1084,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for template parameter resolution"}},
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Execution result with affected_rows and last_id"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
+			{Key: "database", Label: "Database", Type: FieldTypeString, Description: "Canonical name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
+			{Key: "module", Label: "Database Alias", Type: FieldTypeString, Description: "Alias for database; wfctl modernize rewrites this to database", Placeholder: "admin-db", InheritFrom: "dependency.name"},
 			{Key: "query", Label: "SQL Statement", Type: FieldTypeSQL, Required: true, Description: "Parameterized SQL INSERT/UPDATE/DELETE statement (use ? for placeholders). Template expressions are forbidden unless allow_dynamic_sql is true.", Placeholder: "INSERT INTO companies (id, name) VALUES (?, ?)"},
 			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for ? placeholders"},
+			{Key: "args", Label: "Parameters Alias", Type: FieldTypeArray, ArrayItemType: "string", Description: "Alias for params; wfctl modernize rewrites this to params"},
+			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"list", "single", "many", "one"}, Description: "Result mode for returning statements: list/many returns rows/count, single/one returns row/found"},
 			{Key: "tenantKey", Label: "Tenant Key", Type: FieldTypeString, Description: "Dot-path in pipeline context to resolve the tenant value for automatic scoping. Supported for UPDATE/DELETE only (requires database.partitioned)", Placeholder: "steps.auth.tenant_id"},
 			{Key: "allow_dynamic_sql", Label: "Allow Dynamic SQL", Type: FieldTypeBool, DefaultValue: "false", Description: "When true, template expressions in 'query' are resolved at runtime. Each resolved value must contain only letters, digits, underscores and hyphens to prevent SQL injection."},
 		},
@@ -1114,6 +1127,22 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "JSON Response",
 		Category:    "pipeline",
 		Description: "Writes an HTTP JSON response with custom status code and stops the pipeline",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with _http_response_writer metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Response status (always sets Stop: true)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "status", Label: "Status Code", Type: FieldTypeNumber, DefaultValue: "200", Description: "HTTP status code for the response"},
+			{Key: "status_from", Label: "Status From", Type: FieldTypeString, Description: "Dotted path to resolve HTTP status code dynamically (e.g., steps.call_upstream.status_code). Takes precedence over 'status' when resolved to a valid HTTP status code (100-599).", Placeholder: "steps.call_upstream.status_code"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Additional response headers"},
+			{Key: "body", Label: "Body", Type: FieldTypeMap, Description: "Response body as JSON (supports template expressions)"},
+			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.response",
+		Label:       "Response",
+		Category:    "pipeline",
+		Description: "Alias for step.json_response; writes an HTTP JSON response with custom status code and stops the pipeline",
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with _http_response_writer metadata"}},
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Response status (always sets Stop: true)"}},
 		ConfigFields: []ConfigFieldDef{

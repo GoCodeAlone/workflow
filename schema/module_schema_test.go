@@ -56,7 +56,7 @@ func TestModuleSchemaRegistry_ConfigFieldsMatchEngine(t *testing.T) {
 		moduleType string
 		wantFields []string
 	}{
-		{"http.server", []string{"address"}},
+		{"http.server", []string{"address", "port"}},
 		{"http.handler", []string{"contentType"}},
 		{"http.middleware.ratelimit", []string{"requestsPerMinute", "burstSize"}},
 		{"http.middleware.cors", []string{"allowedOrigins", "allowedMethods"}},
