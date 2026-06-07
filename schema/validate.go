@@ -318,6 +318,22 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 
 	// Additional type-specific structural checks beyond simple required fields
 	switch mod.Type {
+	case "http.server":
+		if mod.Config == nil {
+			*errs = append(*errs, &ValidationError{
+				Path:    prefix + ".config",
+				Message: `http.server requires either "address" or "port"`,
+			})
+			break
+		}
+		address, _ := mod.Config["address"].(string)
+		_, hasPort := mod.Config["port"]
+		if strings.TrimSpace(address) == "" && !hasPort {
+			*errs = append(*errs, &ValidationError{
+				Path:    prefix + ".config",
+				Message: `http.server requires either "address" or "port"`,
+			})
+		}
 	case "database.partitioned":
 		if mod.Config == nil {
 			break

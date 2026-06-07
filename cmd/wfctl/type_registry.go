@@ -87,7 +87,7 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Type:       "http.server",
 			Plugin:     "http",
 			Stateful:   false,
-			ConfigKeys: []string{"address", "readTimeout", "writeTimeout", "idleTimeout"},
+			ConfigKeys: []string{"address", "port", "readTimeout", "writeTimeout", "idleTimeout"},
 		},
 		"http.client": {
 			Type:       "http.client",

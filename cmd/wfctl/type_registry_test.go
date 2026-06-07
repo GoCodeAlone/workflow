@@ -78,6 +78,22 @@ func TestKnownModuleTypesStateful(t *testing.T) {
 	}
 }
 
+func TestKnownModuleTypesHTTPServerListsPortAlias(t *testing.T) {
+	info, ok := KnownModuleTypes()["http.server"]
+	if !ok {
+		t.Fatal("http.server not found")
+	}
+	keys := make(map[string]bool, len(info.ConfigKeys))
+	for _, key := range info.ConfigKeys {
+		keys[key] = true
+	}
+	for _, key := range []string{"address", "port"} {
+		if !keys[key] {
+			t.Fatalf("http.server ConfigKeys missing %q: %v", key, info.ConfigKeys)
+		}
+	}
+}
+
 func TestKnownStepTypesPopulated(t *testing.T) {
 	types := KnownStepTypes()
 	if len(types) == 0 {

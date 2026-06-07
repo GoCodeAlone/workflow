@@ -125,7 +125,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Description: "Standard HTTP server that listens on a network address",
 		Outputs:     []ServiceIODef{{Name: "request", Type: "http.Request", Description: "Incoming HTTP requests"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "address", Label: "Listen Address", Type: FieldTypeString, Required: true, Description: "Host:port to listen on (e.g. :8080, 0.0.0.0:80)", DefaultValue: ":8080", Placeholder: ":8080"},
+			{Key: "address", Label: "Listen Address", Type: FieldTypeString, Description: "Canonical host:port to listen on (e.g. :8080, 0.0.0.0:80)", DefaultValue: ":8080", Placeholder: ":8080"},
+			{Key: "port", Label: "Port Alias", Type: FieldTypeNumber, Description: "Alias for address; normalized to :<port> when address is omitted", Placeholder: "8080"},
 		},
 		DefaultConfig: map[string]any{"address": ":8080"},
 		MaxIncoming:   intPtr(0),

@@ -30,7 +30,8 @@ func httpServerSchema() *schema.ModuleSchema {
 		Description: "Standard HTTP server that listens on a network address",
 		Outputs:     []schema.ServiceIODef{{Name: "request", Type: "http.Request", Description: "Incoming HTTP requests"}},
 		ConfigFields: []schema.ConfigFieldDef{
-			{Key: "address", Label: "Listen Address", Type: schema.FieldTypeString, Required: true, Description: "Host:port to listen on (e.g. :8080, 0.0.0.0:80)", DefaultValue: ":8080", Placeholder: ":8080"},
+			{Key: "address", Label: "Listen Address", Type: schema.FieldTypeString, Description: "Canonical host:port to listen on (e.g. :8080, 0.0.0.0:80)", DefaultValue: ":8080", Placeholder: ":8080"},
+			{Key: "port", Label: "Port Alias", Type: schema.FieldTypeNumber, Description: "Alias for address; normalized to :<port> when address is omitted", Placeholder: "8080"},
 		},
 		DefaultConfig: map[string]any{"address": ":8080"},
 		MaxIncoming:   intPtr(0),

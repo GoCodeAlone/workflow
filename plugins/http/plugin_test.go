@@ -1,6 +1,7 @@
 package http
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/capability"
@@ -19,6 +20,58 @@ func TestNew(t *testing.T) {
 	}
 	if p.Version() != "1.0.0" {
 		t.Errorf("Version() = %q, want %q", p.Version(), "1.0.0")
+	}
+}
+
+func TestHTTPServerPortAlias(t *testing.T) {
+	factory := moduleFactories()["http.server"]
+	if factory == nil {
+		t.Fatal("missing http.server factory")
+	}
+
+	tests := []struct {
+		name string
+		cfg  map[string]any
+		want string
+	}{
+		{name: "int port", cfg: map[string]any{"port": 8080}, want: ":8080"},
+		{name: "float port", cfg: map[string]any{"port": float64(9090)}, want: ":9090"},
+		{name: "string port", cfg: map[string]any{"port": "7070"}, want: ":7070"},
+		{name: "address wins", cfg: map[string]any{"address": "127.0.0.1:6060", "port": 7070}, want: "127.0.0.1:6060"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mod := factory("server", tt.cfg)
+			got := reflect.ValueOf(mod).Elem().FieldByName("address").String()
+			if got != tt.want {
+				t.Fatalf("address = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHTTPServerSchemaListsPortAlias(t *testing.T) {
+	s := httpServerSchema()
+	fields := make(map[string]schema.ConfigFieldDef, len(s.ConfigFields))
+	for _, field := range s.ConfigFields {
+		fields[field.Key] = field
+	}
+
+	address, ok := fields["address"]
+	if !ok {
+		t.Fatal("http.server schema missing address field")
+	}
+	if address.Required {
+		t.Fatal("address must not be individually required when port is accepted as an alias")
+	}
+
+	port, ok := fields["port"]
+	if !ok {
+		t.Fatal("http.server schema missing port alias field")
+	}
+	if port.Type != schema.FieldTypeNumber {
+		t.Fatalf("port field type = %q, want %q", port.Type, schema.FieldTypeNumber)
 	}
 }
 

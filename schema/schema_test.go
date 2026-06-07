@@ -323,7 +323,7 @@ func TestValidateConfig_ValidWorkflowAndTrigger(t *testing.T) {
 // Module-specific config validation tests
 // ---------------------------------------------------------------------------
 
-func TestValidateConfig_HTTPServer_MissingAddress(t *testing.T) {
+func TestValidateConfig_HTTPServer_MissingAddressOrPort(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
 			{Name: "srv", Type: "http.server", Config: map[string]any{}},
@@ -331,9 +331,9 @@ func TestValidateConfig_HTTPServer_MissingAddress(t *testing.T) {
 	}
 	err := ValidateConfig(cfg)
 	if err == nil {
-		t.Fatal("expected error for missing address")
+		t.Fatal("expected error for missing address or port")
 	}
-	assertContains(t, err.Error(), `required config field "address" is missing`)
+	assertContains(t, err.Error(), `requires either "address" or "port"`)
 }
 
 func TestValidateConfig_HTTPServer_NilConfig(t *testing.T) {
@@ -346,13 +346,27 @@ func TestValidateConfig_HTTPServer_NilConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nil config")
 	}
-	assertContains(t, err.Error(), "address")
+	assertContains(t, err.Error(), `requires either "address" or "port"`)
 }
 
 func TestValidateConfig_HTTPServer_ValidAddress(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
 			{Name: "srv", Type: "http.server", Config: map[string]any{"address": ":9090"}},
+		},
+		Triggers: map[string]any{
+			"http": map[string]any{"port": 9090},
+		},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("expected valid, got: %v", err)
+	}
+}
+
+func TestValidateConfig_HTTPServer_ValidPortAlias(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "srv", Type: "http.server", Config: map[string]any{"port": 9090}},
 		},
 		Triggers: map[string]any{
 			"http": map[string]any{"port": 9090},
