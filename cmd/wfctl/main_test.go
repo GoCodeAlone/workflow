@@ -245,6 +245,65 @@ func TestRunValidateValid(t *testing.T) {
 	}
 }
 
+func TestRunValidateAllowsInfraSecretPseudoModules(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+modules:
+  - name: required-secrets
+    type: secrets.requires
+    config:
+      requires:
+        - key: EXTERNAL_API_TOKEN
+  - name: generated-secrets
+    type: secrets.generate
+    config:
+      generate:
+        - key: DATABASE_URL
+          type: infra_output
+          source: database.uri
+`
+	path := writeTestConfig(t, dir, "infra-secrets.yaml", cfg)
+	if err := runValidate([]string{"--allow-no-entry-points", path}); err != nil {
+		t.Fatalf("expected secrets pseudo-modules to validate, got: %v", err)
+	}
+}
+
+func TestRunValidateRejectsInfraSecretPseudoModulesByDefault(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+modules:
+  - name: required-secrets
+    type: secrets.requires
+    config:
+      requires:
+        - key: EXTERNAL_API_TOKEN
+  - name: server
+    type: http.server
+    config:
+      address: ":8080"
+pipelines:
+  ping:
+    trigger:
+      type: http
+      config:
+        path: /ping
+        method: GET
+    steps:
+      - name: log
+        type: step.log
+        config:
+          message: pong
+`
+	path := writeTestConfig(t, dir, "app-with-infra-secret.yaml", cfg)
+	err := runValidate([]string{path})
+	if err == nil {
+		t.Fatal("expected default validation to reject infra-only secrets pseudo-modules")
+	}
+	if !strings.Contains(err.Error(), `unknown module type "secrets.requires"`) {
+		t.Fatalf("expected unknown secrets.requires module type error, got: %v", err)
+	}
+}
+
 func TestRunValidateInvalid(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestConfig(t, dir, "invalid.yaml", invalidConfig)
