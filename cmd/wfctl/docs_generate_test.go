@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
+	"go/doc"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,6 +82,12 @@ func TestDocsGenerateWorkflowPackages(t *testing.T) {
 	}
 
 	docPath := filepath.Join(outDir, "workflow", "latest", "plugin", "index.md")
+	if mode := statFileMode(t, docPath); mode != 0o644 {
+		t.Fatalf("generated doc mode = %04o, want 0644", mode)
+	}
+	if mode := statFileMode(t, metaPath); mode != 0o644 {
+		t.Fatalf("versions.json mode = %04o, want 0644", mode)
+	}
 	rawDoc, err := os.ReadFile(docPath)
 	if err != nil {
 		t.Fatalf("read generated plugin doc: %v", err)
@@ -236,6 +245,66 @@ func TestDocsPluginCloneSourceRejectsLocalSourceFromRemoteRegistry(t *testing.T)
 	}
 }
 
+func TestTrustedGoCodeAloneRepoRejectsDotSegments(t *testing.T) {
+	for _, repo := range []string{
+		"https://github.com/GoCodeAlone/../Other/workflow-plugin-alpha",
+		"https://github.com/GoCodeAlone/%2e%2e/Other/workflow-plugin-alpha",
+		"https://github.com/GoCodeAlone/./workflow-plugin-alpha",
+	} {
+		if trustedGoCodeAloneRepo(repo) {
+			t.Fatalf("trustedGoCodeAloneRepo(%q) = true, want false", repo)
+		}
+	}
+	if !trustedGoCodeAloneRepo("https://github.com/GoCodeAlone/workflow-plugin-alpha") {
+		t.Fatal("expected normal GoCodeAlone HTTPS repo to be trusted")
+	}
+}
+
+func TestCheckoutDocsPluginRepoReusesCache(t *testing.T) {
+	pluginRepo := createDocsPluginRepo(t, "github.com/GoCodeAlone/workflow-plugin-alpha", "alpha", "v0.1.0")
+	cacheDir := t.TempDir()
+	manifest := &RegistryManifest{
+		Name:       "workflow-plugin-alpha",
+		Version:    "v0.1.0",
+		Repository: "https://github.com/GoCodeAlone/workflow-plugin-alpha",
+		Source:     pluginRepo,
+	}
+
+	checkout, err := checkoutDocsPluginRepo(context.Background(), manifest, cacheDir, true)
+	if err != nil {
+		t.Fatalf("first checkout: %v", err)
+	}
+	sentinel := filepath.Join(checkout, ".git", "wfctl-cache-sentinel")
+	if err := os.WriteFile(sentinel, []byte("cached"), 0o600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	secondCheckout, err := checkoutDocsPluginRepo(context.Background(), manifest, cacheDir, true)
+	if err != nil {
+		t.Fatalf("second checkout: %v", err)
+	}
+	if secondCheckout != checkout {
+		t.Fatalf("checkout path = %q, want %q", secondCheckout, checkout)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("cache sentinel was removed: %v", err)
+	}
+}
+
+func TestRenderPackageMarkdownWarnings(t *testing.T) {
+	rendered := renderPackageMarkdown(token.NewFileSet(), &doc.Package{Name: "alpha"}, docsAPIPackageMeta{
+		ImportPath: "github.com/GoCodeAlone/workflow-plugin-alpha",
+		Version:    "v0.1.0",
+	}, "https://github.com/GoCodeAlone/workflow-plugin-alpha/tree/v0.1.0", []string{"missing package docs"})
+
+	if !strings.Contains(rendered, "- missing package docs") {
+		t.Fatalf("rendered doc missing warning:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "## Warnings\n\nNone") {
+		t.Fatalf("rendered doc still claims warnings are none:\n%s", rendered)
+	}
+}
+
 func createDocsPluginRepo(t *testing.T, modulePath, packageName, tag string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -273,4 +342,13 @@ func runDocsTestGit(t *testing.T, dir string, args ...string) {
 func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+func statFileMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.Mode().Perm()
 }

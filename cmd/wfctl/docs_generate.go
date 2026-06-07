@@ -137,7 +137,8 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 		if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 			return fmt.Errorf("docs generate: create %s: %w", filepath.Dir(dest), err)
 		}
-		if err := os.WriteFile(dest, []byte(pkg.Doc), 0o600); err != nil {
+		// #nosec G306 -- generated documentation artifacts are intended to be readable by tooling.
+		if err := os.WriteFile(dest, []byte(pkg.Doc), 0o644); err != nil {
 			return fmt.Errorf("docs generate: write %s: %w", dest, err)
 		}
 		fmt.Printf("  create  %s\n", dest)
@@ -172,7 +173,8 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 		return fmt.Errorf("docs generate: marshal metadata: %w", err)
 	}
 	metaPath := filepath.Join(out, "versions.json")
-	if err := os.WriteFile(metaPath, append(metaBytes, '\n'), 0o600); err != nil {
+	// #nosec G306 -- generated documentation metadata is intended to be readable by tooling.
+	if err := os.WriteFile(metaPath, append(metaBytes, '\n'), 0o644); err != nil {
 		return fmt.Errorf("docs generate: write versions.json: %w", err)
 	}
 	fmt.Printf("  create  %s\n", metaPath)
@@ -208,7 +210,7 @@ func renderWorkflowAPIPackage(ctx context.Context, source, modulePath, version, 
 	}
 	return renderedDocsPackage{
 		Meta: meta,
-		Doc:  renderPackageMarkdown(fset, docPkg, meta, workflowSourceLink(version, pkgRel)),
+		Doc:  renderPackageMarkdown(fset, docPkg, meta, workflowSourceLink(version, pkgRel), nil),
 	}, nil
 }
 
@@ -257,13 +259,21 @@ func parseDocPackage(listPkg goListPackage) (*doc.Package, *token.FileSet, error
 	return docPkg, fset, nil
 }
 
-func renderPackageMarkdown(fset *token.FileSet, pkg *doc.Package, meta docsAPIPackageMeta, sourceLink string) string {
+func renderPackageMarkdown(fset *token.FileSet, pkg *doc.Package, meta docsAPIPackageMeta, sourceLink string, warnings []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# package %s\n\n", pkg.Name)
 	fmt.Fprintf(&b, "Import path: `%s`\n\n", meta.ImportPath)
 	fmt.Fprintf(&b, "Version: `%s`\n\n", meta.Version)
 	fmt.Fprintf(&b, "Source: %s\n\n", sourceLink)
-	b.WriteString("## Warnings\n\nNone\n\n")
+	b.WriteString("## Warnings\n\n")
+	if len(warnings) == 0 {
+		b.WriteString("None\n\n")
+	} else {
+		for _, warning := range warnings {
+			fmt.Fprintf(&b, "- %s\n", warning)
+		}
+		b.WriteString("\n")
+	}
 	if strings.TrimSpace(pkg.Doc) != "" {
 		b.WriteString("## Synopsis\n\n")
 		b.WriteString(strings.TrimSpace(pkg.Doc))
@@ -401,7 +411,8 @@ func loadDocsRegistry(ctx context.Context, ref string) ([]RegistryManifest, erro
 		if reqErr != nil {
 			return nil, reqErr
 		}
-		resp, httpErr := http.DefaultClient.Do(req)
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, httpErr := client.Do(req)
 		if httpErr != nil {
 			return nil, httpErr
 		}
@@ -438,11 +449,16 @@ func checkoutDocsPluginRepo(ctx context.Context, manifest *RegistryManifest, cac
 	if err != nil {
 		return "", err
 	}
-	if err := os.RemoveAll(dest); err != nil {
-		return "", err
-	}
 	cloneSource, err := docsPluginCloneSource(manifest, allowLocalSource)
 	if err != nil {
+		return "", err
+	}
+	if docsPluginRepoExists(dest) {
+		if err := refreshDocsPluginRepo(ctx, dest, cloneSource, manifest.Version); err == nil {
+			return dest, nil
+		}
+	}
+	if err := os.RemoveAll(dest); err != nil {
 		return "", err
 	}
 	args := []string{"clone", "--depth", "1", "--branch", manifest.Version, cloneSource, dest}
@@ -483,7 +499,7 @@ func renderPluginAPIPackage(ctx context.Context, checkout, modulePath string, ma
 	}
 	return renderedDocsPackage{
 		Meta: meta,
-		Doc:  renderPackageMarkdown(fset, docPkg, meta, pluginSourceLink(manifest.Repository, manifest.Version)),
+		Doc:  renderPackageMarkdown(fset, docPkg, meta, pluginSourceLink(manifest.Repository, manifest.Version), nil),
 	}, nil
 }
 
@@ -506,9 +522,19 @@ func trustedGoCodeAloneRepo(repo string) bool {
 	if err != nil {
 		return false
 	}
-	return parsed.Scheme == "https" &&
-		parsed.Host == "github.com" &&
-		strings.HasPrefix(strings.TrimLeft(parsed.Path, "/"), "GoCodeAlone/")
+	if parsed.Scheme != "https" || parsed.Host != "github.com" {
+		return false
+	}
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(segments) < 2 || segments[0] != "GoCodeAlone" {
+		return false
+	}
+	for _, segment := range segments {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func pluginSlug(name string) string {
@@ -556,6 +582,47 @@ func docsPluginCacheDestination(cacheDir, slug string) (string, error) {
 		return "", fmt.Errorf("invalid plugin cache destination %q", dest)
 	}
 	return dest, nil
+}
+
+func docsPluginRepoExists(dest string) bool {
+	info, err := os.Stat(filepath.Join(dest, ".git"))
+	return err == nil && info.IsDir()
+}
+
+func refreshDocsPluginRepo(ctx context.Context, dest, cloneSource, version string) error {
+	remote, err := runDocsGit(ctx, dest, "remote", "get-url", "origin")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(remote) != cloneSource {
+		return fmt.Errorf("cached repository remote %q does not match %q", strings.TrimSpace(remote), cloneSource)
+	}
+	tagRef := "refs/tags/" + version + ":refs/tags/" + version
+	if _, err := runDocsGit(ctx, dest, "fetch", "--depth", "1", "--force", "origin", tagRef); err != nil {
+		return err
+	}
+	if _, err := runDocsGit(ctx, dest, "checkout", "--detach", version); err != nil {
+		return err
+	}
+	if _, err := runDocsGit(ctx, dest, "reset", "--hard"); err != nil {
+		return err
+	}
+	if _, err := runDocsGit(ctx, dest, "clean", "-fdx"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func runDocsGit(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed git command; args are not shell-expanded.
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return string(out), nil
 }
 
 func docsPluginCloneSource(manifest *RegistryManifest, allowLocalSource bool) (string, error) {
