@@ -246,6 +246,9 @@ func TestRunGenerateGithubActionsWithPlugin(t *testing.T) {
 	if !strings.Contains(content, "gh release create") {
 		t.Error("release.yml should publish releases with gh release create")
 	}
+	if !strings.Contains(content, "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}") {
+		t.Error("release.yml should authenticate gh with GH_TOKEN")
+	}
 }
 
 func TestRunGenerateGithubActionsCIOnly(t *testing.T) {
@@ -463,6 +466,9 @@ func TestReleaseWorkflowContent(t *testing.T) {
 	}
 	if !strings.Contains(content, "gh release create") {
 		t.Error("release.yml should publish releases with gh release create")
+	}
+	if !strings.Contains(content, "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}") {
+		t.Error("release.yml should authenticate gh with GH_TOKEN")
 	}
 	if !strings.Contains(content, "dist/*") {
 		t.Error("release.yml should upload dist/* files")

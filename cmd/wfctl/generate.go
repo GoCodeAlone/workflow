@@ -291,7 +291,7 @@ jobs:
           done
       - name: Create release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           gh release create "${GITHUB_REF_NAME}" dist/* \

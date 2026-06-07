@@ -252,6 +252,9 @@ func TestMCPGenerateReleaseWorkflowUsesGHCLI(t *testing.T) {
 	if !strings.Contains(text, "gh release create") {
 		t.Error("release workflow should publish releases with gh release create")
 	}
+	if !strings.Contains(text, "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}") {
+		t.Error("release workflow should authenticate gh with GH_TOKEN")
+	}
 }
 
 func TestHandleGenerateBootstrap_InvalidPlatform(t *testing.T) {

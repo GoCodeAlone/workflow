@@ -296,7 +296,7 @@ jobs:
 
     - name: Create Release (draft during asset upload)
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
         prerelease_flag=()
@@ -312,7 +312,7 @@ jobs:
 
     - name: Publish release (was draft during asset upload)
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: gh release edit ${{ env.TAG_NAME }} --draft=false --repo ${{ github.repository }}
 
   update-homebrew:
