@@ -181,13 +181,15 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints, 
 		opts = append(opts, schema.WithAllowNoEntryPoints())
 	}
 
-	// Infra pseudo-modules are consumed by wfctl infra plan/align/bootstrap,
-	// not by the runtime engine, so keep them local to CLI validation rather
-	// than adding them to the engine's core module registry.
-	opts = append(opts,
-		schema.WithExtraModuleTypes("secrets.generate"),
-		schema.WithExtraModuleTypes("secrets.requires"),
-	)
+	if allowNoEntryPoints && !skipUnknownTypes {
+		// Infra pseudo-modules are consumed by wfctl infra plan/align/bootstrap,
+		// not by the runtime engine, so keep them scoped to infra-style CLI
+		// validation rather than adding them to the engine's core registry.
+		opts = append(opts,
+			schema.WithExtraModuleTypes("secrets.generate"),
+			schema.WithExtraModuleTypes("secrets.requires"),
+		)
+	}
 
 	// Pass legacy DO module types through schema validation so the actionable
 	// migration error fires below instead of a generic "unknown module type".

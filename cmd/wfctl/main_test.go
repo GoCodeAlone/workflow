@@ -268,6 +268,42 @@ modules:
 	}
 }
 
+func TestRunValidateRejectsInfraSecretPseudoModulesByDefault(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `
+modules:
+  - name: required-secrets
+    type: secrets.requires
+    config:
+      requires:
+        - key: EXTERNAL_API_TOKEN
+  - name: server
+    type: http.server
+    config:
+      address: ":8080"
+pipelines:
+  ping:
+    trigger:
+      type: http
+      config:
+        path: /ping
+        method: GET
+    steps:
+      - name: log
+        type: step.log
+        config:
+          message: pong
+`
+	path := writeTestConfig(t, dir, "app-with-infra-secret.yaml", cfg)
+	err := runValidate([]string{path})
+	if err == nil {
+		t.Fatal("expected default validation to reject infra-only secrets pseudo-modules")
+	}
+	if !strings.Contains(err.Error(), `unknown module type "secrets.requires"`) {
+		t.Fatalf("expected unknown secrets.requires module type error, got: %v", err)
+	}
+}
+
 func TestRunValidateInvalid(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestConfig(t, dir, "invalid.yaml", invalidConfig)
