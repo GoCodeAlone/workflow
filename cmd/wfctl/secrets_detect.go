@@ -102,7 +102,7 @@ func detectSecrets(cfg *config.WorkflowConfig) []detectedSecret {
 
 	// Also check secrets: entries against the provider.
 	if cfg.Secrets != nil {
-		provider, err := newSecretsProvider(cfg.Secrets.Provider)
+		provider, err := newSecretsProviderFromConfig(cfg.Secrets)
 		if err == nil {
 			ctx := context.Background()
 			for _, entry := range cfg.Secrets.Entries {
@@ -279,7 +279,7 @@ Options:
 	if err != nil {
 		return err
 	}
-	provider, err := newSecretsProvider(cfg.Provider)
+	provider, err := newSecretsProviderFromConfig(cfg)
 	if err != nil {
 		return err
 	}
@@ -408,7 +408,7 @@ func runSecretsList(args []string) error {
 	if secretsCfg == nil {
 		secretsCfg = &config.SecretsConfig{Provider: "env"}
 	}
-	provider, err := newSecretsProvider(secretsCfg.Provider)
+	provider, err := newSecretsProviderFromConfig(secretsCfg)
 	if err != nil {
 		return err
 	}
@@ -558,7 +558,7 @@ func runSecretsValidate(args []string) error {
 		return err
 	}
 
-	provider, err := newSecretsProvider(cfg.Provider)
+	provider, err := newSecretsProviderFromConfig(cfg)
 	if err != nil {
 		return err
 	}

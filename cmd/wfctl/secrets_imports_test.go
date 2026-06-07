@@ -247,6 +247,26 @@ func TestSecretsValidate_HonorsImports(t *testing.T) {
 	}
 }
 
+func TestSecretsValidate_PreservesGitHubProviderConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GH_MANAGEMENT_TOKEN", "test-token")
+
+	cfg := `secrets:
+  provider: github
+  config:
+    repo: GoCodeAlone/buymywishlist
+    token_env: GH_MANAGEMENT_TOKEN
+`
+	path := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runSecretsValidate([]string{"--config", path}); err != nil {
+		t.Fatalf("runSecretsValidate should preserve github repo/token_env config: %v", err)
+	}
+}
+
 // TestSecretsValidate_ImportedEntryUnset verifies that runSecretsValidate
 // reports missing imported entries as errors.
 func TestSecretsValidate_ImportedEntryUnset(t *testing.T) {

@@ -137,6 +137,24 @@ func TestNewSecretsProvider_NotUnknownProviderError(t *testing.T) {
 	}
 }
 
+func TestNewSecretsProviderFromConfig_PreservesGitHubConfig(t *testing.T) {
+	t.Setenv("GH_MANAGEMENT_TOKEN", "test-token")
+
+	p, err := newSecretsProviderFromConfig(&SecretsConfig{
+		Provider: "github",
+		Config: map[string]any{
+			"repo":      "GoCodeAlone/buymywishlist",
+			"token_env": "GH_MANAGEMENT_TOKEN",
+		},
+	})
+	if err != nil {
+		t.Fatalf("newSecretsProviderFromConfig: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
 func TestNewSecretsProvider_Env_Success(t *testing.T) {
 	p, err := newSecretsProvider("env")
 	if err != nil {

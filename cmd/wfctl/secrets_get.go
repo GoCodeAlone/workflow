@@ -53,7 +53,7 @@ func runSecretsGetWithWriter(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	provider, err := newSecretsProvider(cfg.Provider)
+	provider, err := newSecretsProviderFromConfig(cfg)
 	if err != nil {
 		return err
 	}
