@@ -10,6 +10,22 @@ import (
 	"testing"
 )
 
+func chdirForTest(t *testing.T, dir string) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Fatalf("restore cwd %s: %v", wd, err)
+		}
+	})
+}
+
 // writeSetupConfig writes a minimal app.yaml + a file-store directory for
 // non-interactive setup tests.  Returns (configPath, storeDir).
 func writeSetupConfig(t *testing.T, entries ...string) (string, string) {
@@ -46,6 +62,81 @@ secretStores:
 		t.Fatalf("write app.yaml: %v", err)
 	}
 	return cfgPath, storeDir
+}
+
+func TestSetupNoArgsMissingConfigExplainsDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+
+	err := runSecretsSetup(nil)
+	if err == nil {
+		t.Fatal("expected missing config error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"no secrets setup config found",
+		"--config <path>",
+		"--manifest wfctl.yaml",
+		"app.yaml",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "open app.yaml") {
+		t.Fatalf("error should not expose raw app.yaml open failure: %q", msg)
+	}
+}
+
+func TestSetupNoArgsDiscoversWorkflowYAML(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	storeDir := filepath.Join(dir, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatalf("mkdir store: %v", err)
+	}
+	cfg := `modules:
+  - name: http
+    type: http.server
+    config:
+      address: ":0"
+secrets:
+  defaultStore: localfs
+  entries:
+    - name: A
+secretStores:
+  localfs:
+    provider: file
+    config:
+      path: ` + storeDir + `
+`
+	if err := os.WriteFile(filepath.Join(dir, "workflow.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write workflow.yaml: %v", err)
+	}
+
+	err := runSecretsSetup([]string{"--secret", "A=av", "--store", "localfs"})
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(storeDir, "A"))
+	if err != nil {
+		t.Fatalf("read secret: %v", err)
+	}
+	if string(data) != "av" {
+		t.Fatalf("stored secret = %q, want av", data)
+	}
+}
+
+func TestSetupNoArgsDiscoversWfctlManifest(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "wfctl.yaml"), []byte("version: 1\nplugins: []\n"), 0o644); err != nil {
+		t.Fatalf("write wfctl.yaml: %v", err)
+	}
+
+	if err := runSecretsSetup(nil); err != nil {
+		t.Fatalf("setup should use wfctl.yaml manifest defaults: %v", err)
+	}
 }
 
 // TestSetupAllOnlyConflict verifies --all and --only are mutually exclusive.

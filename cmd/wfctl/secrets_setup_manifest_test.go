@@ -91,3 +91,40 @@ func TestParseManifestSetupFlagsAcceptsSetupSelectors(t *testing.T) {
 		t.Fatalf("flags not preserved: %+v", args)
 	}
 }
+
+func TestParseManifestSetupFlagsDefaultsConfigPatterns(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "infra"), 0o755); err != nil {
+		t.Fatalf("mkdir infra: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "infra", "dns.wfctl.yaml"), []byte("resources: []\n"), 0o644); err != nil {
+		t.Fatalf("write infra config: %v", err)
+	}
+
+	args, err := parseManifestSetupFlags([]string{"--manifest", "wfctl.yaml"})
+	if err != nil {
+		t.Fatalf("parseManifestSetupFlags: %v", err)
+	}
+	if args.configPatterns != "infra/*.wfctl.yaml" {
+		t.Fatalf("configPatterns = %q, want infra/*.wfctl.yaml", args.configPatterns)
+	}
+}
+
+func TestFirstConfigPatternResolvesGlobToExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "infra"), 0o755); err != nil {
+		t.Fatalf("mkdir infra: %v", err)
+	}
+	for _, name := range []string{"b.wfctl.yaml", "a.wfctl.yaml"} {
+		if err := os.WriteFile(filepath.Join(dir, "infra", name), []byte("resources: []\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	got := firstConfigPattern("missing.yaml,infra/*.wfctl.yaml")
+	if got != filepath.Join("infra", "a.wfctl.yaml") {
+		t.Fatalf("firstConfigPattern = %q, want infra/a.wfctl.yaml", got)
+	}
+}
