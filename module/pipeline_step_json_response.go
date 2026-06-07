@@ -178,7 +178,7 @@ func (s *JSONResponseStep) resolveResponseBody(pc *PipelineContext) any {
 			if err != nil {
 				return s.bodyRaw
 			}
-			return resolved
+			return decodeJSONObjectOrArray(resolved)
 		}
 		return s.bodyRaw
 	}
@@ -228,10 +228,26 @@ func (s *JSONResponseStep) resolveBodyValue(v any, pc *PipelineContext) (any, er
 		}
 		return result, nil
 	case string:
-		return s.tmpl.Resolve(val, pc)
+		resolved, err := s.tmpl.Resolve(val, pc)
+		if err != nil {
+			return nil, err
+		}
+		return decodeJSONObjectOrArray(resolved), nil
 	default:
 		return v, nil
 	}
+}
+
+func decodeJSONObjectOrArray(value string) any {
+	trimmed := strings.TrimSpace(value)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return value
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return value
+	}
+	return decoded
 }
 
 // resolveBodyFrom resolves a dotted path like "steps.get-company.row" from the

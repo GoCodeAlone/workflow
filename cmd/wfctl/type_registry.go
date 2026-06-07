@@ -712,7 +712,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.conditional": {
 			Type:       "step.conditional",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"condition", "then", "else"},
+			ConfigKeys: []string{"field", "routes", "default", "if", "then", "else"},
 		},
 		"step.set": {
 			Type:       "step.set",
@@ -772,7 +772,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.request_parse": {
 			Type:       "step.request_parse",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"body", "query", "headers"},
+			ConfigKeys: []string{"body", "query", "headers", "path_params", "query_params", "parse_body", "parse_headers", "format"},
 		},
 		"step.db_query": {
 			Type:       "step.db_query",
@@ -803,6 +803,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.json_response",
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"status", "body", "headers"},
+		},
+		"step.response": {
+			Type:       "step.response",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"status", "status_from", "body", "body_from", "headers"},
 		},
 		"step.static_file": {
 			Type:       "step.static_file",

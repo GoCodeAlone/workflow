@@ -98,6 +98,37 @@ func TestRequestParseStep_ParseBody(t *testing.T) {
 	}
 }
 
+func TestRequestParseStep_FormatJSONAlias(t *testing.T) {
+	factory := NewRequestParseStepFactory()
+	step, err := factory("parse-body", map[string]any{
+		"format": "json",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"name":"Acme Corp","slug":"acme"}`)
+	req, _ := http.NewRequest("POST", "/api/v1/companies", body)
+	req.Header.Set("Content-Type", "application/json")
+
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_request": req,
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	bodyData, ok := result.Output["body"].(map[string]any)
+	if !ok {
+		t.Fatal("expected body in output")
+	}
+	if bodyData["name"] != "Acme Corp" {
+		t.Errorf("expected name='Acme Corp', got %v", bodyData["name"])
+	}
+}
+
 func TestRequestParseStep_MultiplePathParams(t *testing.T) {
 	factory := NewRequestParseStepFactory()
 	step, err := factory("parse-multi", map[string]any{

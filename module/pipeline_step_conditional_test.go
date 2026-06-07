@@ -81,6 +81,60 @@ func TestConditionalStep_UsesDefaultWhenNoMatch(t *testing.T) {
 	}
 }
 
+func TestConditionalStep_IfThenElse(t *testing.T) {
+	factory := NewConditionalStepFactory()
+	step, err := factory("route-active", map[string]any{
+		"if":   `{{ .status == "active" }}`,
+		"then": "proceed",
+		"else": "reject",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	active := NewPipelineContext(map[string]any{"status": "active"}, nil)
+	result, err := step.Execute(context.Background(), active)
+	if err != nil {
+		t.Fatalf("execute active: %v", err)
+	}
+	if result.NextStep != "proceed" {
+		t.Fatalf("active NextStep = %q, want proceed", result.NextStep)
+	}
+	if result.Output["condition"] != true {
+		t.Fatalf("condition output = %v, want true", result.Output["condition"])
+	}
+
+	inactive := NewPipelineContext(map[string]any{"status": "inactive"}, nil)
+	result, err = step.Execute(context.Background(), inactive)
+	if err != nil {
+		t.Fatalf("execute inactive: %v", err)
+	}
+	if result.NextStep != "reject" {
+		t.Fatalf("inactive NextStep = %q, want reject", result.NextStep)
+	}
+}
+
+func TestConditionalStep_IfThenElseExpr(t *testing.T) {
+	factory := NewConditionalStepFactory()
+	step, err := factory("route-active", map[string]any{
+		"if":   `${ status == "active" }`,
+		"then": "proceed",
+		"else": "reject",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{"status": "active"}, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if result.NextStep != "proceed" {
+		t.Fatalf("NextStep = %q, want proceed", result.NextStep)
+	}
+}
+
 func TestConditionalStep_ErrorWhenNoMatchAndNoDefault(t *testing.T) {
 	factory := NewConditionalStepFactory()
 	step, err := factory("route-strict", map[string]any{

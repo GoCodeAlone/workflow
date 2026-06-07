@@ -110,6 +110,7 @@ func TestKnownStepTypesPopulated(t *testing.T) {
 		"step.db_query",
 		"step.publish",
 		"step.http_call",
+		"step.response",
 		"step.cache_get",
 		"step.auth_validate",
 		"step.authz_check",

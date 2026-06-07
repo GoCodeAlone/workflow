@@ -1,6 +1,7 @@
 // Package pipelinesteps provides a plugin that registers generic pipeline step
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
 // http_call, http_proxy, request_parse, db_query, db_exec, db_query_cached, json_response,
+// response,
 // raw_response, json_parse, static_file, validate_path_param, validate_pagination,
 // validate_request_body, foreach, while, webhook_verify, base64_decode, ui_scaffold,
 // ui_scaffold_analyze, dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping),
@@ -70,6 +71,7 @@ func New() *Plugin {
 					"step.db_create_partition",
 					"step.db_sync_partitions",
 					"step.json_response",
+					"step.response",
 					"step.raw_response",
 					"step.pipeline_output",
 					"step.json_parse",
@@ -157,6 +159,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.db_create_partition":   wrapStepFactory(module.NewDBCreatePartitionStepFactory()),
 		"step.db_sync_partitions":    wrapStepFactory(module.NewDBSyncPartitionsStepFactory()),
 		"step.json_response":         wrapStepFactory(module.NewJSONResponseStepFactory()),
+		"step.response":              wrapStepFactory(module.NewJSONResponseStepFactory()),
 		"step.raw_response":          wrapStepFactory(module.NewRawResponseStepFactory()),
 		"step.pipeline_output":       wrapStepFactory(module.NewPipelineOutputStepFactory()),
 		"step.json_parse":            wrapStepFactory(module.NewJSONParseStepFactory()),

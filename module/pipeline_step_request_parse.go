@@ -47,6 +47,9 @@ func NewRequestParseStepFactory() StepFactory {
 		}
 
 		parseBody, _ := config["parse_body"].(bool)
+		if format, _ := config["format"].(string); strings.EqualFold(format, "json") || strings.EqualFold(format, "form") {
+			parseBody = true
+		}
 
 		var parseHeaders []string
 		if ph, ok := config["parse_headers"]; ok {

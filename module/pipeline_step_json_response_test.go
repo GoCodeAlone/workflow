@@ -180,6 +180,70 @@ func TestJSONResponseStep_TemplateBody(t *testing.T) {
 	}
 }
 
+func TestJSONResponseStep_TemplateRawJSONArray(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("templated-array", map[string]any{
+		"status": 200,
+		"body":   "{{ .steps.list.json }}",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("list", map[string]any{
+		"json": `[{"id":"c1"},{"id":"c2"}]`,
+	})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	var body []map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(body))
+	}
+	if body[0]["id"] != "c1" {
+		t.Fatalf("expected first id c1, got %v", body[0]["id"])
+	}
+}
+
+func TestJSONResponseStep_TemplateRawJSONObject(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("templated-object", map[string]any{
+		"status": 200,
+		"body":   "{{ .steps.fetch.json }}",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("fetch", map[string]any{
+		"json": `{"id":"c1","name":"Acme"}`,
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	body, ok := result.Output["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map body, got %T", result.Output["body"])
+	}
+	if body["id"] != "c1" {
+		t.Fatalf("expected id c1, got %v", body["id"])
+	}
+}
+
 func TestJSONResponseStep_NoWriter(t *testing.T) {
 	factory := NewJSONResponseStepFactory()
 	step, err := factory("no-writer", map[string]any{

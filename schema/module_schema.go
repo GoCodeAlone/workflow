@@ -928,9 +928,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with field to evaluate for routing"}},
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Routing decision with target step name"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "field", Label: "Field", Type: FieldTypeString, Required: true, Description: "Field path to evaluate for routing", Placeholder: "event_type"},
-			{Key: "routes", Label: "Routes", Type: FieldTypeMap, MapValueType: "string", Required: true, Description: "Map of field values to target step names"},
+			{Key: "field", Label: "Field", Type: FieldTypeString, Description: "Field path to evaluate for switch-style routing", Placeholder: "event_type"},
+			{Key: "routes", Label: "Routes", Type: FieldTypeMap, MapValueType: "string", Description: "Map of field values to target step names"},
 			{Key: "default", Label: "Default Step", Type: FieldTypeString, Description: "Step name to route to when no match is found"},
+			{Key: "if", Label: "If", Type: FieldTypeString, Description: "Boolean condition for if/then/else routing; supports ${ } expressions and Go template truthy output", Placeholder: `${ status == "active" }`},
+			{Key: "then", Label: "Then Step", Type: FieldTypeString, Description: "Step name to route to when if evaluates truthy"},
+			{Key: "else", Label: "Else Step", Type: FieldTypeString, Description: "Step name to route to when if evaluates false"},
 		},
 	})
 
@@ -1027,7 +1030,9 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "path_params", Label: "Path Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Parameter names to extract from URL path (e.g., id, companyId)"},
 			{Key: "query_params", Label: "Query Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Query string parameter names to extract"},
-			{Key: "parse_body", Label: "Parse Body", Type: FieldTypeBool, Description: "Whether to parse the JSON request body"},
+			{Key: "parse_body", Label: "Parse Body", Type: FieldTypeBool, Description: "Whether to parse the request body"},
+			{Key: "format", Label: "Format Alias", Type: FieldTypeSelect, Options: []string{"json", "form"}, Description: "Alias that enables body parsing for JSON or form request bodies"},
+			{Key: "parse_headers", Label: "Parse Headers", Type: FieldTypeArray, ArrayItemType: "string", Description: "Header names to extract"},
 		},
 	})
 
@@ -1122,6 +1127,22 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "JSON Response",
 		Category:    "pipeline",
 		Description: "Writes an HTTP JSON response with custom status code and stops the pipeline",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with _http_response_writer metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Response status (always sets Stop: true)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "status", Label: "Status Code", Type: FieldTypeNumber, DefaultValue: "200", Description: "HTTP status code for the response"},
+			{Key: "status_from", Label: "Status From", Type: FieldTypeString, Description: "Dotted path to resolve HTTP status code dynamically (e.g., steps.call_upstream.status_code). Takes precedence over 'status' when resolved to a valid HTTP status code (100-599).", Placeholder: "steps.call_upstream.status_code"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Additional response headers"},
+			{Key: "body", Label: "Body", Type: FieldTypeMap, Description: "Response body as JSON (supports template expressions)"},
+			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.response",
+		Label:       "Response",
+		Category:    "pipeline",
+		Description: "Alias for step.json_response; writes an HTTP JSON response with custom status code and stops the pipeline",
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with _http_response_writer metadata"}},
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Response status (always sets Stop: true)"}},
 		ConfigFields: []ConfigFieldDef{

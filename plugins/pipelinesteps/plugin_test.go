@@ -49,6 +49,7 @@ func TestStepFactories(t *testing.T) {
 		"step.db_create_partition",
 		"step.db_sync_partitions",
 		"step.json_response",
+		"step.response",
 		"step.raw_response",
 		"step.pipeline_output",
 		"step.json_parse",
@@ -94,6 +95,39 @@ func TestStepFactories(t *testing.T) {
 
 	if len(factories) != len(expectedSteps) {
 		t.Errorf("expected %d step factories, got %d", len(expectedSteps), len(factories))
+	}
+}
+
+func TestStepResponseAlias(t *testing.T) {
+	p := New()
+	factories := p.StepFactories()
+	alias, ok := factories["step.response"]
+	if !ok {
+		t.Fatal("missing step.response factory")
+	}
+	canonical, ok := factories["step.json_response"]
+	if !ok {
+		t.Fatal("missing step.json_response factory")
+	}
+
+	aliasStep, err := alias("respond", map[string]any{"body": map[string]any{"ok": true}}, nil)
+	if err != nil {
+		t.Fatalf("alias factory error: %v", err)
+	}
+	canonicalStep, err := canonical("respond", map[string]any{"body": map[string]any{"ok": true}}, nil)
+	if err != nil {
+		t.Fatalf("canonical factory error: %v", err)
+	}
+	aliasNamed, ok := aliasStep.(interface{ Name() string })
+	if !ok {
+		t.Fatalf("alias step does not expose Name(): %T", aliasStep)
+	}
+	canonicalNamed, ok := canonicalStep.(interface{ Name() string })
+	if !ok {
+		t.Fatalf("canonical step does not expose Name(): %T", canonicalStep)
+	}
+	if aliasNamed.Name() != canonicalNamed.Name() {
+		t.Fatalf("alias step name = %q, want %q", aliasNamed.Name(), canonicalNamed.Name())
 	}
 }
 
