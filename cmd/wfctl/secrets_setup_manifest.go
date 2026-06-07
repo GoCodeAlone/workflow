@@ -373,7 +373,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	manifestPath := fs.String("manifest", "", "wfctl.yaml plugin manifest")
 	lockfilePath := fs.String("lock-file", ".wfctl-lock.yaml", "wfctl plugin lockfile")
 	pluginDir := fs.String("plugin-dir", "", "Plugin install dir (default: $WFCTL_PLUGIN_DIR or ./data/plugins)")
-	configPatterns := fs.String("config", "app.yaml", "Workflow config file or comma-separated glob list for env reference discovery")
+	configPatterns := fs.String("config", defaultManifestSetupConfigPatterns(), "Workflow config file or comma-separated glob list for env reference discovery")
 	scope := fs.String("scope", "repo", "GitHub scope: repo | env | org")
 	envName := fs.String("env", "", "Environment name (required with --scope=env)")
 	org := fs.String("org", "", "Organization slug (required with --scope=org)")

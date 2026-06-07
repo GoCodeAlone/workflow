@@ -14,12 +14,23 @@ import (
 //
 // Returns ("", ErrNotInteractive) when stdin is not a terminal.
 func Input(label string, masked bool) (string, error) {
+	return InputWithSuggestions(label, masked, nil)
+}
+
+// InputWithSuggestions prompts the user for a single-line text value and shows
+// completion suggestions when suggestions is non-empty. Tab accepts the current
+// suggestion using the underlying bubbles textinput behavior.
+func InputWithSuggestions(label string, masked bool, suggestions []string) (string, error) {
 	if !isTTY() {
 		return "", ErrNotInteractive
 	}
 	ti := textinput.New()
 	ti.Placeholder = label
 	ti.Focus()
+	if len(suggestions) > 0 {
+		ti.ShowSuggestions = true
+		ti.SetSuggestions(suggestions)
+	}
 	if masked {
 		ti.EchoMode = textinput.EchoPassword
 		ti.EchoCharacter = '*'
