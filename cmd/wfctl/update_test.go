@@ -378,6 +378,23 @@ func TestVerifyAssetChecksum_Valid(t *testing.T) {
 	}
 }
 
+func TestVerifyAssetChecksum_AcceptsDotSlashAssetPrefix(t *testing.T) {
+	data := []byte("fake binary content")
+	h := sha256.Sum256(data)
+	hash := hex.EncodeToString(h[:])
+	checksumsContent := fmt.Sprintf("%s  ./wfctl-darwin-arm64\n", hash)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(checksumsContent))
+	}))
+	defer srv.Close()
+
+	checksumAsset := &githubAsset{Name: "checksums.txt", BrowserDownloadURL: srv.URL}
+	if err := verifyAssetChecksum(checksumAsset, "wfctl-darwin-arm64", data); err != nil {
+		t.Fatalf("verifyAssetChecksum: %v", err)
+	}
+}
+
 func TestVerifyAssetChecksum_Mismatch(t *testing.T) {
 	data := []byte("fake binary content")
 	checksumsContent := "deadbeef  wfctl-linux-amd64\n"

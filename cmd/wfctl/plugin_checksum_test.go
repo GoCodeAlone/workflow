@@ -30,6 +30,29 @@ func TestParseChecksumsTxt_Valid(t *testing.T) {
 	}
 }
 
+func TestParseChecksumsTxt_NormalizesDotSlashPrefix(t *testing.T) {
+	body := "abc123def456  ./wfctl-darwin-arm64\n"
+	got, err := parseChecksumsTxt(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got["wfctl-darwin-arm64"] != "abc123def456" {
+		t.Fatalf("normalized checksum = %q, want abc123def456", got["wfctl-darwin-arm64"])
+	}
+}
+
+func TestParseChecksumsTxt_RejectsConflictingDotSlashAliases(t *testing.T) {
+	body := "abc123def456  wfctl-darwin-arm64\n" +
+		"789abcdef012  ./wfctl-darwin-arm64\n"
+	_, err := parseChecksumsTxt(body)
+	if err == nil {
+		t.Fatal("expected conflicting checksum aliases to fail")
+	}
+	if !strings.Contains(err.Error(), "conflicting") {
+		t.Fatalf("error = %v, want conflicting checksum error", err)
+	}
+}
+
 func TestParseChecksumsTxt_SkipsBlankLines(t *testing.T) {
 	body := "\nabc123  plugin.tar.gz\n\n"
 	got, err := parseChecksumsTxt(body)
