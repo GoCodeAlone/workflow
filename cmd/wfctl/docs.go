@@ -46,15 +46,29 @@ Examples:
 func runDocsGenerate(args []string) error {
 	fs := flag.NewFlagSet("docs generate", flag.ContinueOnError)
 	output := fs.String("output", "./docs/generated/", "Output directory for generated documentation")
+	out := fs.String("out", "", "Output directory for generated Go API documentation (alias for --output in API mode)")
+	source := fs.String("source", "", "Repository source directory for Go API documentation")
+	modulePath := fs.String("module", "", "Go module path for Go API documentation")
+	version := fs.String("version", "", "Released version or tag for generated Go API documentation")
+	packages := fs.String("packages", "", "Comma-separated package paths to include in Go API documentation")
+	registry := fs.String("registry", "", "Plugin registry JSON path or URL for plugin Go API documentation")
+	cacheDir := fs.String("cache-dir", "", "Directory used to cache cloned plugin repositories")
+	subjects := fs.String("subjects", "workflow", "Comma-separated API doc subjects to generate: workflow,plugins")
+	maxVersionLines := fs.Int("max-version-lines", 3, "Maximum released major/minor version lines to include in metadata")
 	pluginDir := fs.String("plugin-dir", "", "Directory containing external plugin manifests (plugin.json)")
 	title := fs.String("title", "", "Application title (default: derived from config)")
 
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: wfctl docs generate [options] <config.yaml>
+		fmt.Fprintf(fs.Output(), `Usage:
+  wfctl docs generate [options] <config.yaml>
+  wfctl docs generate --source <repo> --out <dir> --module <module> --version <tag> --packages <list>
 
 Generate Markdown documentation with Mermaid diagrams from a workflow
 configuration file. If -plugin-dir is specified, external plugin manifests
 (plugin.json) are loaded and described in the output.
+
+When --source is provided, generate Go API reference Markdown from released
+Workflow or plugin packages and write version metadata to versions.json.
 
 Options:
 `)
@@ -63,6 +77,24 @@ Options:
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	if *source != "" || *modulePath != "" || *packages != "" || *registry != "" {
+		outDir := *out
+		if outDir == "" {
+			outDir = *output
+		}
+		return runDocsGenerateAPI(docsGenerateAPIOptions{
+			Source:          *source,
+			Out:             outDir,
+			Module:          *modulePath,
+			Version:         *version,
+			Packages:        *packages,
+			Registry:        *registry,
+			CacheDir:        *cacheDir,
+			Subjects:        *subjects,
+			MaxVersionLines: *maxVersionLines,
+		})
 	}
 
 	if fs.NArg() < 1 {

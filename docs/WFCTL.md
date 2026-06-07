@@ -1944,19 +1944,29 @@ WFCTL_CONFIRM_PRUNE=1 wfctl infra rotate-and-prune \
 
 ### `docs generate`
 
-Generate Markdown documentation with Mermaid diagrams from a workflow configuration file. Produces a set of `.md` files describing modules, pipelines, workflows, external plugins, and system architecture.
+Generate Markdown documentation. With a config file, this produces Mermaid-backed application docs for modules, pipelines, workflows, external plugins, and system architecture. With `--source`, this produces Go API reference Markdown and `versions.json` metadata for released Workflow and plugin packages.
 
 ```
 wfctl docs generate [options] <config.yaml>
+wfctl docs generate --source <repo> --out <dir> --module <module> --version <tag> --packages <list>
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-output` | `./docs/generated/` | Output directory for generated documentation |
+| `-out` | _(same as `-output`)_ | Output directory for Go API docs |
+| `-source` | _(none)_ | Repository source directory for Go API docs |
+| `-module` | _(none)_ | Go module path for Go API docs |
+| `-version` | _(none)_ | Released version/tag represented by the generated docs |
+| `-packages` | _(none)_ | Comma-separated package paths to include |
+| `-registry` | _(none)_ | Plugin registry JSON path or URL for plugin API docs |
+| `-cache-dir` | _(none)_ | Directory for cached plugin repository checkouts |
+| `-subjects` | `workflow` | API doc subjects to generate: `workflow`, `plugins` |
+| `-max-version-lines` | `3` | Maximum released version lines to include in metadata |
 | `-plugin-dir` | _(none)_ | Directory containing external plugin manifests (`plugin.json`) |
 | `-title` | _(derived from config filename)_ | Application title used in the README |
 
-**Generated files:**
+**Generated config documentation files:**
 
 | File | Description |
 |------|-------------|
@@ -1974,6 +1984,7 @@ wfctl docs generate workflow.yaml
 wfctl docs generate -output ./docs/ workflow.yaml
 wfctl docs generate -output ./docs/ -plugin-dir ./plugins/ workflow.yaml
 wfctl docs generate -output ./docs/ -title "Order Service" workflow.yaml
+wfctl docs generate --source . --out ./docs/api --module github.com/GoCodeAlone/workflow --version v0.75.0 --packages plugin,plugin/sdk,plugin/external/sdk
 ```
 
 ---
