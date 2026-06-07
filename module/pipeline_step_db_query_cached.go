@@ -38,7 +38,7 @@ type DBQueryCachedStep struct {
 // NewDBQueryCachedStepFactory returns a StepFactory that creates DBQueryCachedStep instances.
 func NewDBQueryCachedStepFactory() StepFactory {
 	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
-		database, _ := config["database"].(string)
+		database := configStringAlias(config, "database", "module")
 		if database == "" {
 			return nil, fmt.Errorf("db_query_cached step %q: 'database' is required", name)
 		}
@@ -70,16 +70,7 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			cacheTTL = parsed
 		}
 
-		var params []string
-		if p, ok := config["params"]; ok {
-			if list, ok := p.([]any); ok {
-				for _, item := range list {
-					if s, ok := item.(string); ok {
-						params = append(params, s)
-					}
-				}
-			}
-		}
+		params := configStringListAlias(config, "params", "args")
 
 		var scanFields []string
 		if sf, ok := config["scan_fields"]; ok {
@@ -93,6 +84,7 @@ func NewDBQueryCachedStepFactory() StepFactory {
 		}
 
 		mode, _ := config["mode"].(string)
+		mode = normalizeDBMode(mode)
 		if mode == "" {
 			mode = "single"
 		}

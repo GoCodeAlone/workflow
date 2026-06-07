@@ -777,17 +777,17 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.db_query": {
 			Type:       "step.db_query",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"database", "query", "params", "tenantKey"},
+			ConfigKeys: []string{"database", "module", "query", "params", "args", "mode", "tenantKey"},
 		},
 		"step.db_exec": {
 			Type:       "step.db_exec",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"database", "query", "params", "tenantKey"},
+			ConfigKeys: []string{"database", "module", "query", "params", "args", "mode", "tenantKey"},
 		},
 		"step.db_query_cached": {
 			Type:       "step.db_query_cached",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"database", "query", "params", "cache_key", "cache_ttl", "scan_fields"},
+			ConfigKeys: []string{"database", "module", "query", "params", "args", "mode", "cache_key", "cache_ttl", "scan_fields"},
 		},
 		"step.db_create_partition": {
 			Type:       "step.db_create_partition",

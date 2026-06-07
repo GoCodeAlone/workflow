@@ -37,6 +37,7 @@ func AllRules() []Rule {
 	return []Rule{
 		hyphenStepsRule(),
 		conditionalFieldRule(),
+		dbConfigAliasesRule(),
 		dbQueryModeRule(),
 		dbQueryIndexRule(),
 		absoluteDbPathRule(),

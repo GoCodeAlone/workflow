@@ -26,7 +26,7 @@ type DBExecStep struct {
 // NewDBExecStepFactory returns a StepFactory that creates DBExecStep instances.
 func NewDBExecStepFactory() StepFactory {
 	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
-		database, _ := config["database"].(string)
+		database := configStringAlias(config, "database", "module")
 		if database == "" {
 			return nil, fmt.Errorf("db_exec step %q: 'database' is required", name)
 		}
@@ -43,22 +43,14 @@ func NewDBExecStepFactory() StepFactory {
 			return nil, fmt.Errorf("db_exec step %q: query must not contain template expressions (use params instead)", name)
 		}
 
-		var params []string
-		if p, ok := config["params"]; ok {
-			if list, ok := p.([]any); ok {
-				for _, item := range list {
-					if s, ok := item.(string); ok {
-						params = append(params, s)
-					}
-				}
-			}
-		}
+		params := configStringListAlias(config, "params", "args")
 
 		ignoreError, _ := config["ignore_error"].(bool)
 		tenantKey, _ := config["tenantKey"].(string)
 		returning, _ := config["returning"].(bool)
 
 		mode, _ := config["mode"].(string)
+		mode = normalizeDBMode(mode)
 		if returning {
 			if mode == "" {
 				mode = "list"
