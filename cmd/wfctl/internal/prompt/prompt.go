@@ -2,10 +2,11 @@
 // charm.land/bubbletea/v2 and charm.land/bubbles/v2.
 //
 // Every public constructor checks whether stdin is an interactive terminal
-// before starting a bubbletea program. If stdin is not a terminal the
-// constructor returns (zero, ErrNotInteractive) immediately so callers in
-// CI / pipe mode can detect the condition and fall back to non-interactive
-// paths without any risk of hanging.
+// and whether stderr or stdout can render terminal output before starting a
+// bubbletea program. If either side is unavailable, the constructor returns
+// (zero, ErrNotInteractive) immediately so callers in CI / pipe mode can
+// detect the condition and fall back to non-interactive paths without any
+// risk of hanging.
 package prompt
 
 import (

@@ -2538,6 +2538,8 @@ Set secrets declared in the config for a given environment. Automatically select
 
 Manifest-backed setup treats missing values as an error in non-interactive mode unless `--from-env` is set. With `--from-env`, unset environment variables are skipped so CI can set only the values it has.
 
+Manifest-backed setup discovers provider and config secrets from `wfctl.yaml` and does not support `--auto-gen-keys`; provide values with `--from-env`, `--secret NAME=VALUE`, piped `KEY=VALUE` input, or an interactive terminal prompt.
+
 Every successful `Set` call is appended to an audit log at `${XDG_STATE_HOME:-$HOME/.local/state}/wfctl/plugins/wfctl/secrets-audit.jsonl` (secret names only — values are never written).
 
 ```
@@ -2558,7 +2560,7 @@ wfctl secrets setup [options]
 | `--all` | `false` | Set all declared secrets (explicit form of the default when `--only` is absent) |
 | `--only` | _(all)_ | Comma-separated list of secret names to set; mutually exclusive with `--all` |
 | `--skip-existing` | `false` | Skip secrets that already have a value in the store |
-| `--auto-gen-keys` | `false` | Auto-generate random values for secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive |
+| `--auto-gen-keys` | `false` | Auto-generate random values for config-backed secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive; not supported for manifest-backed `wfctl.yaml` setup |
 | `--scope` | `repo` | GitHub scope for plugin or manifest setup: `repo` \| `env` \| `org` |
 | `--org` | _(none)_ | Organization slug for `--scope org` |
 | `--visibility` | `all` | Org-scope visibility: `all` \| `selected` \| `private` |

@@ -430,7 +430,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	visibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	fromEnv := fs.Bool("from-env", false, "Read each secret value from $NAME")
-	nonInteractive := fs.Bool("non-interactive", false, "Accepted for parity with config setup; manifest setup auto-detects input mode")
+	nonInteractive := fs.Bool("non-interactive", false, "Force non-interactive mode for manifest setup")
 	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set")
 	allFlag := fs.Bool("all", false, "Set all discovered secrets")
 	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the target scope")
