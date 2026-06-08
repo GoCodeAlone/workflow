@@ -289,7 +289,8 @@ type manifestEnvironmentPreflightOptions struct {
 
 func preflightManifestSecretTargetEnvironments(ctx context.Context, targets []manifestSecretTarget, opts manifestEnvironmentPreflightOptions) error {
 	seen := map[string]bool{}
-	for _, target := range targets {
+	for i := range targets {
+		target := targets[i]
 		manager, ok := manifestSecretTargetEnvironmentManager(target.Provider)
 		if !ok {
 			continue
