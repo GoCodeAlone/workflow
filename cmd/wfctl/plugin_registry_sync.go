@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -261,17 +265,16 @@ func normalizeRepo(repoURL string) string {
 }
 
 func ghReleaseLatestTag(ghRepo string) (string, error) {
-	cmd := exec.Command("gh", "release", "view", "--repo", ghRepo, "--json", "tagName", "-q", ".tagName") // #nosec G204 -- ghRepo is from trusted committed manifest
-	out, err := cmd.Output()
+	release, err := fetchGitHubReleaseMetadata("repos/" + escapedGitHubRepoPath(ghRepo) + "/releases/latest")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(release.TagName), nil
 }
 
 func releaseExists(ghRepo, tag string) bool {
-	cmd := exec.Command("gh", "release", "view", tag, "--repo", ghRepo, "--json", "tagName") // #nosec G204 -- ghRepo+tag from trusted manifest
-	return cmd.Run() == nil
+	_, err := githubReleaseByTag(ghRepo, tag)
+	return err == nil
 }
 
 type releaseAsset struct {
@@ -282,30 +285,74 @@ type releaseAsset struct {
 	SHA256 string `json:"sha256,omitempty"`
 }
 
+type githubReleaseAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+type githubReleaseMetadata struct {
+	TagName string               `json:"tag_name"`
+	Assets  []githubReleaseAsset `json:"assets"`
+}
+
+func escapedGitHubRepoPath(ghRepo string) string {
+	owner, repo, ok := strings.Cut(ghRepo, "/")
+	if !ok {
+		return neturl.PathEscape(ghRepo)
+	}
+	return neturl.PathEscape(owner) + "/" + neturl.PathEscape(repo)
+}
+
+func githubReleaseByTag(ghRepo, tag string) (*githubReleaseMetadata, error) {
+	return fetchGitHubReleaseMetadata("repos/" + escapedGitHubRepoPath(ghRepo) + "/releases/tags/" + neturl.PathEscape(tag))
+}
+
+func fetchGitHubReleaseMetadata(apiPath string) (*githubReleaseMetadata, error) {
+	apiURL := strings.TrimRight(gitHubAPIBaseURL, "/") + "/" + strings.TrimLeft(apiPath, "/")
+	ctx, cancel := context.WithTimeout(context.Background(), gitHubReleaseMetadataTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil) //nolint:gosec // URL is built from trusted repo/tag metadata.
+	if err != nil {
+		return nil, err
+	}
+	if tok := gitHubToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "wfctl/"+version)
+
+	resp, err := gitHubAPIClient.Do(req)
+	if err != nil {
+		closeResponseBody(resp)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("GitHub releases API: HTTP %d for %s: %s", resp.StatusCode, apiPath, strings.TrimSpace(string(body)))
+	}
+	var release githubReleaseMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("decode GitHub release response: %w", err)
+	}
+	return &release, nil
+}
+
 // releaseDownloads returns the platform release-asset list for a tag, in the
 // shape the registry's manifest.json expects. Matches the bash
 // release_downloads helper.
 func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
-	cmd := exec.Command("gh", "release", "view", tag, "--repo", ghRepo, "--json", "assets") // #nosec G204 -- ghRepo+tag from trusted manifest
-	out, err := cmd.Output()
+	release, err := githubReleaseByTag(ghRepo, tag)
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Assets []struct {
-			Name string `json:"name"`
-			URL  string `json:"url"`
-		} `json:"assets"`
-	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, err
-	}
-	checksums, err := releaseChecksums(ghRepo, tag)
+	checksums, err := releaseChecksumsFromMetadata(release)
 	if err != nil {
 		return nil, err
 	}
 	var assets []releaseAsset
-	for _, a := range resp.Assets {
+	for _, a := range release.Assets {
 		goos, goarch, ok := releaseAssetPlatform(a.Name)
 		if !ok {
 			continue
@@ -314,7 +361,7 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 			Name:   a.Name,
 			OS:     goos,
 			Arch:   goarch,
-			URL:    a.URL,
+			URL:    a.BrowserDownloadURL,
 			SHA256: checksums[a.Name],
 		})
 	}
@@ -322,16 +369,28 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 }
 
 func releaseChecksums(ghRepo, tag string) (map[string]string, error) {
-	cmd := exec.Command("gh", "release", "download", tag, "--repo", ghRepo, "--pattern", "checksums.txt", "--output", "-") // #nosec G204 -- ghRepo+tag from trusted manifest
-	out, err := cmd.CombinedOutput()
+	release, err := githubReleaseByTag(ghRepo, tag)
 	if err != nil {
-		msg := strings.ToLower(string(out))
-		if strings.Contains(msg, "no assets match") || strings.Contains(msg, "no matching assets") || strings.Contains(msg, "not found") {
-			return map[string]string{}, nil
-		}
-		return nil, fmt.Errorf("download checksums.txt: %w: %s", err, strings.TrimSpace(string(out)))
+		return nil, err
 	}
-	return parseReleaseChecksums(string(out)), nil
+	return releaseChecksumsFromMetadata(release)
+}
+
+func releaseChecksumsFromMetadata(release *githubReleaseMetadata) (map[string]string, error) {
+	for _, asset := range release.Assets {
+		if asset.Name != "checksums.txt" {
+			continue
+		}
+		if asset.BrowserDownloadURL == "" {
+			return nil, fmt.Errorf("checksums.txt has empty browser_download_url")
+		}
+		data, err := downloadURL(asset.BrowserDownloadURL)
+		if err != nil {
+			return nil, fmt.Errorf("download checksums.txt: %w", err)
+		}
+		return parseReleaseChecksums(string(data)), nil
+	}
+	return map[string]string{}, nil
 }
 
 func parseReleaseChecksums(text string) map[string]string {
