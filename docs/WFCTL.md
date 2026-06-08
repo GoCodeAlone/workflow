@@ -2528,13 +2528,17 @@ wfctl secrets sync --from staging --to production
 
 Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY. With `--manifest`, discovers secrets from `wfctl.yaml`, `.wfctl-lock.yaml`, installed plugin `required_secrets[]`, and `${ENV_VAR}` references in workflow configs. Repo/env-scoped GitHub setup uses `secrets.config.repo` or `secretStores.<name>.config.repo` when configured; otherwise it infers the repo from `git remote.origin.url` and prints that assumption in the setup target or error.
 
-**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names.
+**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names. Manifest-backed setup prints the selected GitHub target and whether the repo was configured explicitly or inferred before prompting for values.
 
 **Non-interactive mode** (auto when stdin is not a TTY, or forced with `--non-interactive` / `--auto-gen-keys`): reads values from the sources below in priority order:
 - `--from-env` — reads `$NAME` for each secret. Recommended for CI; avoids process-table leaks. Secrets whose env var is unset are skipped.
 - Piped `KEY=VALUE` lines on stdin.
 - `--secret NAME=VALUE` — inline literal. **Warning: leaks to process table. Avoid in CI.**
 - `--auto-gen-keys` — generates random values for names ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`.
+
+Manifest-backed setup treats missing values as an error in non-interactive mode unless `--from-env` is set. With `--from-env`, unset environment variables are skipped so CI can set only the values it has.
+
+Manifest-backed setup discovers provider and config secrets from `wfctl.yaml` and does not support `--auto-gen-keys`; provide values with `--from-env`, `--secret NAME=VALUE`, piped `KEY=VALUE` input, or an interactive terminal prompt.
 
 Every successful `Set` call is appended to an audit log at `${XDG_STATE_HOME:-$HOME/.local/state}/wfctl/plugins/wfctl/secrets-audit.jsonl` (secret names only — values are never written).
 
@@ -2556,7 +2560,7 @@ wfctl secrets setup [options]
 | `--all` | `false` | Set all declared secrets (explicit form of the default when `--only` is absent) |
 | `--only` | _(all)_ | Comma-separated list of secret names to set; mutually exclusive with `--all` |
 | `--skip-existing` | `false` | Skip secrets that already have a value in the store |
-| `--auto-gen-keys` | `false` | Auto-generate random values for secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive |
+| `--auto-gen-keys` | `false` | Auto-generate random values for config-backed secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive; not supported for manifest-backed `wfctl.yaml` setup |
 | `--scope` | `repo` | GitHub scope for plugin or manifest setup: `repo` \| `env` \| `org` |
 | `--org` | _(none)_ | Organization slug for `--scope org` |
 | `--visibility` | `all` | Org-scope visibility: `all` \| `selected` \| `private` |

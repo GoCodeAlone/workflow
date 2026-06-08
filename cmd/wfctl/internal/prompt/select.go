@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,15 +16,16 @@ func Select(title string, opts []string) (int, error) {
 	if !isTTY() {
 		return 0, ErrNotInteractive
 	}
+	out, _ := outputWriter()
 	m := &selectModel{title: title, opts: opts}
-	p := tea.NewProgram(m, tea.WithOutput(io.Discard))
+	p := tea.NewProgram(m, tea.WithOutput(out))
 	result, err := p.Run()
 	if err != nil {
 		return 0, fmt.Errorf("prompt select: %w", err)
 	}
 	fm := result.(*selectModel)
 	if fm.quit {
-		return 0, ErrNotInteractive
+		return 0, ErrInterrupted
 	}
 	return fm.cursor, nil
 }

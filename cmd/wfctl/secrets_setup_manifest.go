@@ -14,7 +14,6 @@ import (
 
 	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/config"
-	"github.com/mattn/go-isatty"
 	"gopkg.in/yaml.v3"
 )
 
@@ -36,6 +35,7 @@ type manifestSetupArgs struct {
 	visibility     string
 	tokenEnv       string
 	fromEnv        bool
+	nonInteractive bool
 	secretLiterals []string
 	only           []string
 	skipExisting   bool
@@ -69,7 +69,7 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 			}
 		}
 	}
-	interactive := in == nil && isatty.IsTerminal(os.Stdin.Fd())
+	interactive := in == nil && !a.nonInteractive && prompt.CanPrompt()
 
 	onlySet := make(map[string]bool, len(a.only))
 	for _, name := range a.only {
@@ -96,38 +96,31 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 	}
 	var promptErr error
 	valuer := func(secret manifestDiscoveredSecret) (string, bool, error) {
-		if a.fromEnv {
-			if v := os.Getenv(secret.Name); v != "" {
-				return v, true, nil
-			}
+		value, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
+			interactive: interactive,
+			fromEnv:     a.fromEnv,
+			secretMap:   secretMap,
+		})
+		if err != nil && errors.Is(err, prompt.ErrNotInteractive) {
+			promptErr = err
 		}
-		if v, ok := secretMap[secret.Name]; ok {
-			return v, true, nil
-		}
-		if interactive {
-			label := secret.Name
-			if secret.Description != "" {
-				label += " - " + secret.Description
-			}
-			value, err := prompt.Input(label, secret.Sensitive)
-			if err != nil {
-				if errors.Is(err, prompt.ErrNotInteractive) {
-					promptErr = err
-				}
-				return "", false, err
-			}
-			if value == "" {
-				return "", false, nil
-			}
-			return value, true, nil
-		}
-		return "", false, nil
+		return value, provided, err
 	}
 	auditFn := func(name, _ string) {
 		_ = writeSecretsAuditRecord(name, "github:"+strings.ToLower(strings.TrimSpace(a.scope))) //nolint:errcheck // best-effort audit
 	}
 
 	fmt.Fprintf(out, "Setting up secrets from %s -> %s\n\n", a.manifestPath, scopeLabel)
+	switch {
+	case interactive:
+		fmt.Fprintln(out, "Interactive mode: prompting for secret values. Leave a value empty to skip it.")
+		fmt.Fprintln(out, "Use --from-env, --secret NAME=VALUE, or --non-interactive for scripted setup.")
+	case a.fromEnv:
+		fmt.Fprintln(out, "Non-interactive mode: reading values from matching environment variables; unset values will be skipped.")
+	default:
+		fmt.Fprintln(out, "Non-interactive mode: using --secret NAME=VALUE or piped KEY=VALUE values; missing values will fail.")
+	}
+	fmt.Fprintln(out)
 	for _, secret := range discovered {
 		fmt.Fprintf(out, "  %s (%s)\n", secret.Name, strings.Join(secret.Sources, ", "))
 	}
@@ -191,6 +184,41 @@ func discoverManifestSecrets(manifestPath, lockfilePath, pluginDir, configPatter
 		}
 	}
 	return sortedManifestSecrets(secretsByName), nil
+}
+
+type manifestSecretValueOptions struct {
+	interactive bool
+	fromEnv     bool
+	secretMap   map[string]string
+}
+
+func manifestSecretValue(secret manifestDiscoveredSecret, opts manifestSecretValueOptions) (string, bool, error) {
+	if opts.fromEnv {
+		if v := os.Getenv(secret.Name); v != "" {
+			return v, true, nil
+		}
+	}
+	if v, ok := opts.secretMap[secret.Name]; ok {
+		return v, true, nil
+	}
+	if opts.interactive {
+		label := secret.Name
+		if secret.Description != "" {
+			label += " - " + secret.Description
+		}
+		value, err := prompt.Input(label, secret.Sensitive)
+		if err != nil {
+			return "", false, err
+		}
+		if value == "" {
+			return "", false, nil
+		}
+		return value, true, nil
+	}
+	if opts.fromEnv {
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("no value for secret %q: set $%s and pass --from-env, use --secret %s=VALUE, or run interactively from a terminal", secret.Name, secret.Name, secret.Name)
 }
 
 func discoverManifestPlugins(manifestPath, lockfilePath string) ([]string, error) {
@@ -402,7 +430,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	visibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	fromEnv := fs.Bool("from-env", false, "Read each secret value from $NAME")
-	nonInteractive := fs.Bool("non-interactive", false, "Accepted for parity with config setup; manifest setup auto-detects input mode")
+	nonInteractive := fs.Bool("non-interactive", false, "Force non-interactive mode for manifest setup")
 	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set")
 	allFlag := fs.Bool("all", false, "Set all discovered secrets")
 	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the target scope")
@@ -411,7 +439,6 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
-	_ = nonInteractive
 	if strings.TrimSpace(*manifestPath) == "" {
 		return nil, errors.New("--manifest <wfctl.yaml> is required")
 	}
@@ -433,6 +460,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 		visibility:     *visibility,
 		tokenEnv:       *tokenEnv,
 		fromEnv:        *fromEnv,
+		nonInteractive: *nonInteractive,
 		secretLiterals: []string(secretFlag),
 		only:           only,
 		skipExisting:   *skipExisting,

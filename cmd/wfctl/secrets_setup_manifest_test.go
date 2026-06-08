@@ -92,6 +92,42 @@ func TestParseManifestSetupFlagsAcceptsSetupSelectors(t *testing.T) {
 	if !args.skipExisting || !args.fromEnv {
 		t.Fatalf("flags not preserved: %+v", args)
 	}
+	if !args.nonInteractive {
+		t.Fatalf("--non-interactive was not preserved: %+v", args)
+	}
+}
+
+func TestManifestSecretValueNonInteractiveRequiresValueSource(t *testing.T) {
+	secret := manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}}
+	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
+		interactive: false,
+		fromEnv:     false,
+		secretMap:   map[string]string{},
+	})
+	if err == nil {
+		t.Fatalf("expected missing value error, got value=%q provided=%v", got, provided)
+	}
+	msg := err.Error()
+	for _, want := range []string{"DIGITALOCEAN_TOKEN", "--from-env", "--secret DIGITALOCEAN_TOKEN=VALUE"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
+func TestManifestSecretValueFromEnvMissingSkips(t *testing.T) {
+	secret := manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}}
+	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
+		interactive: false,
+		fromEnv:     true,
+		secretMap:   map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("manifestSecretValue: %v", err)
+	}
+	if provided || got != "" {
+		t.Fatalf("got value=%q provided=%v, want skipped empty value", got, provided)
+	}
 }
 
 func TestParseManifestSetupFlagsDefaultsConfigPatterns(t *testing.T) {
@@ -110,6 +146,25 @@ func TestParseManifestSetupFlagsDefaultsConfigPatterns(t *testing.T) {
 	}
 	if args.configPatterns != "infra/*.wfctl.yaml" {
 		t.Fatalf("configPatterns = %q, want infra/*.wfctl.yaml", args.configPatterns)
+	}
+}
+
+func TestRunSecretsSetupRejectsAutoGenKeysForManifestTarget(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "wfctl.yaml"), []byte("version: 1\nplugins: []\n"), 0o644); err != nil {
+		t.Fatalf("write wfctl.yaml: %v", err)
+	}
+
+	err := runSecretsSetup([]string{"--auto-gen-keys"})
+	if err == nil {
+		t.Fatal("expected --auto-gen-keys manifest error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"--auto-gen-keys", "wfctl.yaml", "--from-env"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
 	}
 }
 
