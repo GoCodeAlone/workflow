@@ -2565,7 +2565,7 @@ Set secrets declared in the config for a given environment. Automatically select
 
 **Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names.
 
-Manifest-backed interactive setup uses a compact two-stage flow by default:
+Manifest-backed interactive setup uses a compact three-step flow by default:
 
 1. A table lists one row per discovered secret and one column per concrete provider target. Status marks are `○` unset, `✓` set, `!` inaccessible/check failed, and `?` unconfigured.
 2. After selecting secrets, choose the scope/store targets for each selected secret. GitHub targets are explicit GitHub destinations (`github:repo`, `github:env`, `github:org`); local `.env`/file stores appear as file/env targets, not GitHub scopes.

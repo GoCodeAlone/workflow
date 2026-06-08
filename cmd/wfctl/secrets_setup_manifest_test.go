@@ -490,6 +490,39 @@ func TestBuildManifestSecretMatrixRowsDisambiguatesDuplicateScopes(t *testing.T)
 	}
 }
 
+func TestBuildManifestSecretMatrixRowsKeepsTruncatedSubjectsUnique(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:  "gh-a:repo",
+			Label:  "github repo GoCodeAlone/repository-with-shared-prefix-alpha",
+			Status: SecretStatus{
+				State: SecretNotSet,
+			},
+		},
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:  "gh-b:repo",
+			Label:  "github repo GoCodeAlone/repository-with-shared-prefix-beta",
+			Status: SecretStatus{
+				State: SecretSet,
+				IsSet: true,
+			},
+		},
+	}
+
+	cols, rows, _ := buildManifestSecretMatrixRows(targets, false, false)
+	if len(cols) != 3 {
+		t.Fatalf("cols = %+v, want secret + two disambiguated repo targets", cols)
+	}
+	if cols[1].Title == cols[2].Title {
+		t.Fatalf("truncated duplicate subjects collapsed into one matrix column: %+v", cols)
+	}
+	if rows[0].Cells[1] != "○" || rows[0].Cells[2] != "✓" {
+		t.Fatalf("row = %+v, want per-target statuses retained", rows[0].Cells)
+	}
+}
+
 func TestBuildManifestTargetItemsAreCompactByDefault(t *testing.T) {
 	targets := []manifestSecretTarget{
 		{

@@ -632,7 +632,11 @@ func runManifestSecretTargetSetupWithValues(ctx context.Context, targets []manif
 }
 
 func manifestSecretTargetKey(target manifestSecretTarget) string {
-	return target.Secret.Name + "\x00" + target.Store
+	return strings.Join([]string{
+		target.Secret.Name,
+		strings.TrimSpace(target.Store),
+		strings.TrimSpace(target.Label),
+	}, "\x00")
 }
 
 func manifestSecretTargetDisplayName(target manifestSecretTarget) string {
@@ -801,9 +805,10 @@ func buildManifestSecretTargetItems(targets []manifestSecretTarget, includeExist
 func buildManifestTargetItems(targets []manifestSecretTarget, includeExisting bool, verbose bool) []prompt.Item {
 	items := make([]prompt.Item, 0, len(targets))
 	counts := manifestSecretTargetScopeCounts(targets)
+	labels := manifestSecretTargetMatrixLabels(targets, counts)
 	for i := range targets {
 		target := &targets[i]
-		label := fmt.Sprintf("%-12s %s", manifestSecretTargetMatrixLabel(*target, counts), shortSecretStateLabel(target.Status))
+		label := fmt.Sprintf("%-12s %s", manifestSecretTargetMatrixLabelFor(*target, labels, counts), shortSecretStateLabel(target.Status))
 		if verbose {
 			if target.Label != "" {
 				label += "  " + target.Label
@@ -844,7 +849,8 @@ func selectManifestSecretTargetsForSetup(targets []manifestSecretTarget, opts ma
 func buildManifestSecretMatrixRows(targets []manifestSecretTarget, includeExisting bool, verbose bool) ([]prompt.TableColumn, []prompt.TableItem, []manifestSecretTargetGroup) {
 	groups := groupManifestSecretTargets(targets)
 	counts := manifestSecretTargetScopeCounts(targets)
-	scopes := manifestSecretMatrixScopes(targets, counts)
+	labels := manifestSecretTargetMatrixLabels(targets, counts)
+	scopes := manifestSecretMatrixScopes(targets, labels, counts)
 	nameWidth := manifestSecretNameColumnWidth(groups)
 	cols := []prompt.TableColumn{{Title: "Secret", Width: nameWidth}}
 	if verbose {
@@ -864,7 +870,7 @@ func buildManifestSecretMatrixRows(targets []manifestSecretTarget, includeExisti
 		anyUnset := false
 		for i := range group.Targets {
 			target := group.Targets[i]
-			statusByScope[manifestSecretTargetMatrixLabel(target, counts)] = target.Status
+			statusByScope[manifestSecretTargetMatrixLabelFor(target, labels, counts)] = target.Status
 			if !target.Status.IsSet {
 				anyUnset = true
 			}
@@ -902,12 +908,12 @@ func groupManifestSecretTargets(targets []manifestSecretTarget) []manifestSecret
 	return groups
 }
 
-func manifestSecretMatrixScopes(targets []manifestSecretTarget, counts map[string]int) []string {
+func manifestSecretMatrixScopes(targets []manifestSecretTarget, labels map[string]string, counts map[string]int) []string {
 	seen := map[string]bool{}
 	scopes := make([]string, 0)
 	for i := range targets {
 		target := targets[i]
-		scope := manifestSecretTargetMatrixLabel(target, counts)
+		scope := manifestSecretTargetMatrixLabelFor(target, labels, counts)
 		if scope == "" || seen[scope] {
 			continue
 		}
@@ -987,11 +993,7 @@ func manifestSecretTargetScopeCounts(targets []manifestSecretTarget) map[string]
 	seenTargets := map[string]bool{}
 	for i := range targets {
 		target := targets[i]
-		key := strings.Join([]string{
-			manifestSecretTargetScopeLabel(target),
-			strings.TrimSpace(target.Store),
-			strings.TrimSpace(target.Label),
-		}, "\x00")
+		key := manifestSecretProviderTargetKey(target)
 		if seenTargets[key] {
 			continue
 		}
@@ -999,6 +1001,41 @@ func manifestSecretTargetScopeCounts(targets []manifestSecretTarget) map[string]
 		counts[manifestSecretTargetScopeLabel(target)]++
 	}
 	return counts
+}
+
+func manifestSecretTargetMatrixLabels(targets []manifestSecretTarget, counts map[string]int) map[string]string {
+	labels := make(map[string]string, len(targets))
+	used := map[string]bool{}
+	for i := range targets {
+		target := targets[i]
+		key := manifestSecretProviderTargetKey(target)
+		if _, ok := labels[key]; ok {
+			continue
+		}
+		base := manifestSecretTargetMatrixLabel(target, counts)
+		label := base
+		for suffix := 2; used[label]; suffix++ {
+			label = fmt.Sprintf("%s#%d", base, suffix)
+		}
+		used[label] = true
+		labels[key] = label
+	}
+	return labels
+}
+
+func manifestSecretProviderTargetKey(target manifestSecretTarget) string {
+	return strings.Join([]string{
+		manifestSecretTargetScopeLabel(target),
+		strings.TrimSpace(target.Store),
+		strings.TrimSpace(target.Label),
+	}, "\x00")
+}
+
+func manifestSecretTargetMatrixLabelFor(target manifestSecretTarget, labels map[string]string, counts map[string]int) string {
+	if label, ok := labels[manifestSecretProviderTargetKey(target)]; ok {
+		return label
+	}
+	return manifestSecretTargetMatrixLabel(target, counts)
 }
 
 func manifestSecretTargetMatrixLabel(target manifestSecretTarget, counts map[string]int) string {
