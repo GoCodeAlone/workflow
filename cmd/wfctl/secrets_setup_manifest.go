@@ -111,12 +111,13 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 	}
 
 	fmt.Fprintf(out, "Setting up secrets from %s -> %s\n\n", a.manifestPath, scopeLabel)
-	if interactive {
+	switch {
+	case interactive:
 		fmt.Fprintln(out, "Interactive mode: prompting for secret values. Leave a value empty to skip it.")
 		fmt.Fprintln(out, "Use --from-env, --secret NAME=VALUE, or --non-interactive for scripted setup.")
-	} else if a.fromEnv {
+	case a.fromEnv:
 		fmt.Fprintln(out, "Non-interactive mode: reading values from matching environment variables; unset values will be skipped.")
-	} else {
+	default:
 		fmt.Fprintln(out, "Non-interactive mode: using --secret NAME=VALUE or piped KEY=VALUE values; missing values will fail.")
 	}
 	fmt.Fprintln(out)
