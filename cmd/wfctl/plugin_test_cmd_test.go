@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,5 +140,28 @@ func TestPluginUsageIncludesTest(t *testing.T) {
 	err2 := runPlugin([]string{"unknown-subcommand"})
 	if err2 == nil {
 		t.Fatal("expected error for unknown subcommand")
+	}
+}
+
+func TestRunPluginHelpFlagsPrintUsageWithoutError(t *testing.T) {
+	for _, args := range [][]string{{"-h"}, {"--help"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var out bytes.Buffer
+			oldOutput := flag.CommandLine.Output()
+			flag.CommandLine.SetOutput(&out)
+			t.Cleanup(func() {
+				flag.CommandLine.SetOutput(oldOutput)
+			})
+
+			if err := runPlugin(args); err != nil {
+				t.Fatalf("runPlugin(%v) error = %v, want nil", args, err)
+			}
+			if !strings.Contains(out.String(), "Usage: wfctl plugin <subcommand>") {
+				t.Fatalf("help output missing plugin usage:\n%s", out.String())
+			}
+			if !strings.Contains(out.String(), "Subcommands:") {
+				t.Fatalf("help output missing subcommand list:\n%s", out.String())
+			}
+		})
 	}
 }
