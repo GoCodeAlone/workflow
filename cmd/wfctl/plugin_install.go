@@ -207,7 +207,7 @@ func runPluginInstall(args []string) error {
 		}
 		pluginName = normalizePluginName(ghRepo)
 		destDir := filepath.Join(pluginDirVal, pluginName)
-		if err := installFromGitHub(ghOwner, ghRepo, ghVersion, destDir); err != nil {
+		if err := installFromGitHub(ghOwner, ghRepo, ghVersion, destDir, *skipChecksum); err != nil {
 			return fmt.Errorf("registry: %w; github: %w", registryErr, err)
 		}
 		if err := ensurePluginBinary(destDir, pluginName); err != nil {

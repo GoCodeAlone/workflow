@@ -657,6 +657,41 @@ wfctl plugin install --data-dir /opt/plugins my-plugin
 
 Registry installs resolve compatibility before selecting a version. Direct URL installs, local installs, GitHub repository fallback, and lockfile installs do not use registry evidence unless they are backed by registry metadata.
 
+#### `plugin run`
+
+Install a plugin when requested, then dispatch one of its wfctl CLI commands
+without requiring a Workflow project directory.
+
+```
+wfctl plugin run [options] <plugin-name-or-github-ref> -- <plugin-command> [args...]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--plugin-dir` | `$WFCTL_PLUGIN_DIR` or `data/plugins` | Plugin directory |
+| `--data-dir` | `$WFCTL_PLUGIN_DIR` or `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--ensure-installed` | `false` | Install or update the plugin before dispatching |
+| `--registry` | _(all registries)_ | Use a specific registry by name during install |
+| `--config` | _(default registry)_ | Registry config file path during install |
+| `--url` | _(none)_ | Install from a direct download URL when `--ensure-installed` is set |
+| `--local` | _(none)_ | Install from a local plugin directory when `--ensure-installed` is set |
+| `--sha256` | _(none)_ | Expected archive SHA256 for `--url` installs |
+| `--skip-checksum` | `false` | Skip archive integrity verification during install |
+| `--compat-mode` | `enforce` | Compatibility mode for registry installs: `enforce` or `warn` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
+| `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
+
+```bash
+wfctl plugin run GoCodeAlone/workflow-plugin-compute@v0.1.8 \
+  --ensure-installed \
+  -- compute agent setup --server https://compute.example.com --invite-url "$INVITE_URL" --non-interactive --json
+```
+
+`plugin run` reuses `plugin install` for installation and checksum enforcement.
+For projectless bootstraps, it suppresses `.wfctl-lock.yaml` writes in the
+current directory; normal `wfctl plugin install` remains the command to pin
+project lockfiles.
+
 #### `plugin lock`
 
 Regenerate `.wfctl-lock.yaml` from `wfctl.yaml` or legacy `requires.plugins[]`.
