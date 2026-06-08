@@ -738,7 +738,8 @@ func collectManifestSecretTargetValues(targets []manifestSecretTarget, fallback 
 	}
 	values := make(map[string]manifestProvidedSecretValue, len(targets))
 	groups := groupManifestSecretTargets(targets)
-	for _, group := range groups {
+	for groupIdx := range groups {
+		group := &groups[groupIdx]
 		if fallback != nil {
 			value, provided, err := fallback(group.Secret)
 			if err != nil {
@@ -1056,7 +1057,8 @@ func buildManifestSecretMatrixRows(targets []manifestSecretTarget, includeExisti
 	}
 
 	rows := make([]prompt.TableItem, 0, len(groups))
-	for _, group := range groups {
+	for groupIdx := range groups {
+		group := &groups[groupIdx]
 		cells := []string{group.Secret.Name}
 		if verbose {
 			cells = append(cells, strings.Join(group.Secret.Sources, ", "))
@@ -1120,7 +1122,8 @@ func manifestSecretMatrixScopes(targets []manifestSecretTarget, labels map[strin
 
 func manifestSecretNameColumnWidth(groups []manifestSecretTargetGroup) int {
 	width := len("Secret")
-	for _, group := range groups {
+	for groupIdx := range groups {
+		group := &groups[groupIdx]
 		width = max(width, len(group.Secret.Name))
 	}
 	return min(max(width+1, 18), 36) //nolint:mnd
@@ -1387,10 +1390,6 @@ func discoverManifestPlugins(manifestPath, lockfilePath string) ([]string, error
 	}
 	sort.Strings(plugins)
 	return plugins, nil
-}
-
-func addDiscoveredSecret(secretsByName map[string]*manifestDiscoveredSecret, required PluginRequiredSecret, source string) {
-	addDiscoveredSecretWithStoreHint(secretsByName, required, source, "")
 }
 
 func addDiscoveredSecretWithTargets(secretsByName map[string]*manifestDiscoveredSecret, required PluginRequiredSecret, source string, targets []PluginSecretTarget) {
