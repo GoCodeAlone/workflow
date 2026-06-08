@@ -305,27 +305,27 @@ func buildSecretWriter(scope, envName, org, visibility, tokenEnv, configFile str
 		if envName == "" {
 			return nil, "", errors.New("--scope=env requires --env <environment-name>")
 		}
-		repo, err := readGitHubRepoFromAppYAML(configFile)
+		repo, source, err := readGitHubRepoForSecretsSetup(configFile)
 		if err != nil {
 			return nil, "", err
 		}
 		p, err := secrets.NewGitHubSecretsProvider(repo, tokenEnv)
 		if err != nil {
-			return nil, "", err
+			return nil, "", contextualCLIError{err: fmt.Errorf("configure GitHub env secrets for %s (%s): %w", repo, source, err)}
 		}
 		p.SetEnvironment(envName)
-		return p, fmt.Sprintf("github env %q on %s", envName, repo), nil
+		return p, fmt.Sprintf("github env %q on %s (%s)", envName, repo, source), nil
 
 	case "", "repo":
-		repo, err := readGitHubRepoFromAppYAML(configFile)
+		repo, source, err := readGitHubRepoForSecretsSetup(configFile)
 		if err != nil {
 			return nil, "", err
 		}
 		p, err := secrets.NewGitHubSecretsProvider(repo, tokenEnv)
 		if err != nil {
-			return nil, "", err
+			return nil, "", contextualCLIError{err: fmt.Errorf("configure GitHub repo secrets for %s (%s): %w", repo, source, err)}
 		}
-		return p, fmt.Sprintf("github repo %s", repo), nil
+		return p, fmt.Sprintf("github repo %s (%s)", repo, source), nil
 
 	default:
 		return nil, "", fmt.Errorf("unknown --scope %q (want repo|env|org)", scope)

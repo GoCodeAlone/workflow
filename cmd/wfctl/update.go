@@ -121,6 +121,8 @@ Options:
 
 	latest := strings.TrimPrefix(rel.TagName, "v")
 	current := strings.TrimPrefix(version, "v")
+	fmt.Fprintf(os.Stderr, "Current version: %s\n", version)
+	fmt.Fprintf(os.Stderr, "Latest version: %s\n", rel.TagName)
 
 	if *checkOnly {
 		if current == "dev" || !isNewerVersion(latest, current) {
@@ -137,6 +139,7 @@ Options:
 		fmt.Printf("wfctl %s is already the latest version.\n", version)
 		return nil
 	}
+	fmt.Fprintf(os.Stderr, "Updating wfctl %s -> %s\n", version, rel.TagName)
 
 	asset, err := findReleaseAsset(rel.Assets)
 	if err != nil {

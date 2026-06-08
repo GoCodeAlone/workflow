@@ -2,8 +2,10 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -126,5 +128,111 @@ func TestFirstConfigPatternResolvesGlobToExistingFile(t *testing.T) {
 	got := firstConfigPattern("missing.yaml,infra/*.wfctl.yaml")
 	if got != filepath.Join("infra", "a.wfctl.yaml") {
 		t.Fatalf("firstConfigPattern = %q, want infra/a.wfctl.yaml", got)
+	}
+}
+
+func TestBuildSecretWriterRepoScopeFallsBackToGitRemote(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	runGitForTest(t, dir, "init")
+	runGitForTest(t, dir, "remote", "add", "origin", "git@github.com:GoCodeAlone/gocodealone-dns.git")
+	t.Setenv("GITHUB_TOKEN", "stub")
+
+	if err := os.MkdirAll(filepath.Join(dir, "infra"), 0o755); err != nil {
+		t.Fatalf("mkdir infra: %v", err)
+	}
+	configPath := filepath.Join(dir, "infra", "digitalocean.wfctl.yaml")
+	if err := os.WriteFile(configPath, []byte(`modules:
+  - name: do
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: ${DIGITALOCEAN_TOKEN}
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, label, err := buildSecretWriter("repo", "", "", "all", "GITHUB_TOKEN", configPath)
+	if err != nil {
+		t.Fatalf("buildSecretWriter: %v", err)
+	}
+	if !strings.Contains(label, "GoCodeAlone/gocodealone-dns") {
+		t.Fatalf("label = %q, want git remote repo", label)
+	}
+	if !strings.Contains(label, "inferred from git remote.origin.url") {
+		t.Fatalf("label = %q, want inference source", label)
+	}
+}
+
+func TestBuildSecretWriterRepoScopeErrorIncludesInferredRepo(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	runGitForTest(t, dir, "init")
+	runGitForTest(t, dir, "remote", "add", "origin", "https://github.com/GoCodeAlone/gocodealone-dns.git")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	if err := os.MkdirAll(filepath.Join(dir, "infra"), 0o755); err != nil {
+		t.Fatalf("mkdir infra: %v", err)
+	}
+	configPath := filepath.Join(dir, "infra", "digitalocean.wfctl.yaml")
+	if err := os.WriteFile(configPath, []byte(`modules:
+  - name: do
+    type: iac.provider
+    config:
+      provider: digitalocean
+      token: ${DIGITALOCEAN_TOKEN}
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, _, err := buildSecretWriter("repo", "", "", "all", "GITHUB_TOKEN", configPath)
+	if err == nil {
+		t.Fatal("expected missing token error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"GoCodeAlone/gocodealone-dns",
+		"inferred from git remote.origin.url",
+		`env var "GITHUB_TOKEN"`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
+func TestReadGitHubRepoFromConfigUsesSecretStores(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(configPath, []byte(`modules: []
+secrets:
+  defaultStore: github
+  entries:
+    - name: TOKEN
+secretStores:
+  github:
+    provider: github
+    config:
+      repo: GoCodeAlone/workflow
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got, err := readGitHubRepoFromAppYAML(configPath)
+	if err != nil {
+		t.Fatalf("readGitHubRepoFromAppYAML: %v", err)
+	}
+	if got != "GoCodeAlone/workflow" {
+		t.Fatalf("repo = %q, want GoCodeAlone/workflow", got)
+	}
+}
+
+func runGitForTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }

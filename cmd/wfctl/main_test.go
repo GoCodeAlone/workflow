@@ -52,6 +52,33 @@ func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
 	}
 }
 
+func TestCommandErrorForDisplayStopsAtContextualCLIError(t *testing.T) {
+	sentinel := errors.New("sentinel")
+	contextErr := contextualCLIError{err: fmt.Errorf("configure GitHub repo secrets for owner/repo (inferred from git remote.origin.url): %w", sentinel)}
+	err := fmt.Errorf("pipeline step failed: %w", contextErr)
+
+	got := commandErrorForDisplay(err)
+	if got == nil {
+		t.Fatal("expected display error")
+	}
+	if got.Error() != contextErr.Error() {
+		t.Fatalf("display error = %q, want %q", got.Error(), contextErr.Error())
+	}
+	if !errors.Is(got, sentinel) {
+		t.Fatal("display error must preserve underlying error unwrapping")
+	}
+}
+
+func TestCommandErrorForDisplayFallsBackToRootCause(t *testing.T) {
+	root := errors.New("root cause")
+	err := fmt.Errorf("pipeline step failed: %w", fmt.Errorf("invoke failed: %w", root))
+
+	got := commandErrorForDisplay(err)
+	if got != root {
+		t.Fatalf("display error = %v, want root cause", got)
+	}
+}
+
 func TestBuildVersionStripsDirtyMarker(t *testing.T) {
 	// cleanBuildVersion must strip +dirty from both release tags and pseudo-versions.
 	for _, tc := range []struct {
