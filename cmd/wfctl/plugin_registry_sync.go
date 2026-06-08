@@ -325,7 +325,7 @@ func fetchGitHubReleaseMetadata(apiPath string) (*githubReleaseMetadata, error) 
 	resp, err := gitHubAPIClient.Do(req)
 	if err != nil {
 		closeResponseBody(resp)
-		return nil, err
+		return nil, fmt.Errorf("GitHub releases API request %s: %w", apiPath, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

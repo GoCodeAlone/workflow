@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -519,11 +520,11 @@ func TestPluginRegistrySync_ReleaseDownloadsUsesGitHubREST(t *testing.T) {
 	})
 	t.Setenv("RELEASES_TOKEN", "test-token")
 
-	var sawAuth bool
+	var sawAuth atomic.Bool
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "Bearer test-token" {
-			sawAuth = true
+			sawAuth.Store(true)
 		}
 		switch r.URL.Path {
 		case "/repos/owner/repo/releases/latest":
@@ -570,7 +571,7 @@ func TestPluginRegistrySync_ReleaseDownloadsUsesGitHubREST(t *testing.T) {
 	if got.OS != "linux" || got.Arch != "amd64" || got.URL != srv.URL+"/workflow-plugin-foo-linux-amd64.tar.gz" || got.SHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("download = %#v", got)
 	}
-	if !sawAuth {
+	if !sawAuth.Load() {
 		t.Fatal("GitHub API request did not include RELEASES_TOKEN bearer auth")
 	}
 }
