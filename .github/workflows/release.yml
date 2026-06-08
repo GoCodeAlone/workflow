@@ -61,7 +61,6 @@ jobs:
   build-ui:
     name: Build Admin UI
     runs-on: ubuntu-latest
-    needs: test
 
     steps:
     - name: Check out code
@@ -163,7 +162,6 @@ jobs:
   build-binaries:
     name: Build ${{ matrix.name }} binaries
     runs-on: ubuntu-latest
-    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -241,7 +239,11 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-binaries, build-ui]
+    # Build temporary release artifacts in parallel with the pre-release test
+    # job, but do not publish the GitHub release until tests and artifacts have
+    # completed. The Docker job still waits for tests because it pushes to GHCR
+    # directly rather than uploading a temporary artifact.
+    needs: [test, build-binaries, build-ui]
 
     steps:
     - name: Check out code
