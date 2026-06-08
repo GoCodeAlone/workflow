@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -129,6 +130,114 @@ func TestGitHubProvider_EnvironmentScopeUsesEnvironmentEndpoints(t *testing.T) {
 		"PUT /repos/owner/repo/environments/staging/secrets/DATABASE_URL",
 		"GET /repos/owner/repo/environments/staging/secrets",
 	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("paths:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestGitHubProvider_ListEnvironments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/owner/repo/environments" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"environments": []map[string]any{
+				{"name": "staging"},
+				{"name": "production"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	envs, err := p.ListEnvironments(context.Background())
+	if err != nil {
+		t.Fatalf("ListEnvironments: %v", err)
+	}
+	if len(envs) != 2 {
+		t.Fatalf("expected 2 environments, got %d: %v", len(envs), envs)
+	}
+	if envs[0].Provider != "github" || envs[0].Name != "staging" || !envs[0].Exists {
+		t.Fatalf("unexpected first environment: %+v", envs[0])
+	}
+	if !strings.Contains(envs[0].Label, "staging") || !strings.Contains(envs[0].Label, "owner/repo") {
+		t.Fatalf("label = %q, want environment and repo context", envs[0].Label)
+	}
+}
+
+func TestGitHubProvider_ValidateEnvironmentNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/environments/missing" {
+			http.NotFound(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	_, err := p.ValidateEnvironment(context.Background(), "missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ValidateEnvironment error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGitHubProvider_EnsureEnvironmentCreatesMissing(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/environments/preview":
+			http.NotFound(w, r)
+		case r.Method == http.MethodPut && r.URL.Path == "/repos/owner/repo/environments/preview":
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]any{"name": "preview"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	env, err := p.EnsureEnvironment(context.Background(), "preview")
+	if err != nil {
+		t.Fatalf("EnsureEnvironment: %v", err)
+	}
+	if env.Provider != "github" || env.Name != "preview" || !env.Exists {
+		t.Fatalf("unexpected environment: %+v", env)
+	}
+	want := []string{
+		"GET /repos/owner/repo/environments/preview",
+		"PUT /repos/owner/repo/environments/preview",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("paths:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestGitHubProvider_EnsureEnvironmentUsesExisting(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/environments/production" {
+			json.NewEncoder(w).Encode(map[string]any{"name": "production"})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	env, err := p.EnsureEnvironment(context.Background(), "production")
+	if err != nil {
+		t.Fatalf("EnsureEnvironment: %v", err)
+	}
+	if env.Name != "production" || !env.Exists {
+		t.Fatalf("unexpected environment: %+v", env)
+	}
+	want := []string{"GET /repos/owner/repo/environments/production"}
 	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("paths:\n%s\nwant:\n%s", strings.Join(paths, "\n"), strings.Join(want, "\n"))
 	}

@@ -2563,6 +2563,8 @@ wfctl secrets sync --from staging --to production
 
 Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY. With `--manifest`, discovers secrets from `wfctl.yaml`, `.wfctl-lock.yaml`, installed plugin `required_secrets[]`, and `${ENV_VAR}` references in workflow configs. Repo/env-scoped GitHub setup uses `secrets.config.repo` or `secretStores.<name>.config.repo` when configured; otherwise it infers the repo from `git remote.origin.url` and prints that assumption in the setup target or error.
 
+Manifest-backed setup treats static YAML environment declarations as desired provider environments. Top-level `environments`, `ci.deploy.environments`, `platform.environment`, and literal `secretStores.<name>.config.environment` values become environment-scoped targets when the backing provider supports them. Runtime placeholders such as `${WORKFLOW_ENV}` are not treated as literal target names. Missing provider environments fail non-interactive setup; interactive setup asks before creating them.
+
 **Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names.
 
 Manifest-backed interactive setup uses a compact three-step flow by default:

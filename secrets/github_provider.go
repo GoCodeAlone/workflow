@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -332,6 +333,110 @@ func (p *GitHubSecretsProvider) CheckAccess(ctx context.Context) error {
 	return nil
 }
 
+// ListEnvironments returns the GitHub Actions environments defined for the
+// configured repository.
+func (p *GitHubSecretsProvider) ListEnvironments(ctx context.Context) ([]ProviderEnvironment, error) {
+	if err := p.requireRepoEnvironmentTarget(); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.environmentsURL(), nil)
+	if err != nil {
+		return nil, err
+	}
+	p.setHeaders(req)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("secrets: github list environments: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
+	}
+	var result struct {
+		Environments []struct {
+			Name string `json:"name"`
+		} `json:"environments"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("secrets: github list environments decode: %w", err)
+	}
+	envs := make([]ProviderEnvironment, 0, len(result.Environments))
+	for _, env := range result.Environments {
+		name := strings.TrimSpace(env.Name)
+		if name == "" {
+			continue
+		}
+		envs = append(envs, p.githubEnvironment(name, true, "github-api"))
+	}
+	return envs, nil
+}
+
+// ValidateEnvironment verifies that a GitHub Actions environment exists for the
+// configured repository.
+func (p *GitHubSecretsProvider) ValidateEnvironment(ctx context.Context, name string) (ProviderEnvironment, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ProviderEnvironment{}, ErrInvalidKey
+	}
+	if err := p.requireRepoEnvironmentTarget(); err != nil {
+		return ProviderEnvironment{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.environmentURL(name), nil)
+	if err != nil {
+		return ProviderEnvironment{}, err
+	}
+	p.setHeaders(req)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return ProviderEnvironment{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return ProviderEnvironment{}, fmt.Errorf("%w: github environment %s", ErrNotFound, name)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return ProviderEnvironment{}, fmt.Errorf("secrets: github validate environment %q: HTTP %d%s", name, resp.StatusCode, readErrorBody(resp))
+	}
+	var result struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil && !errors.Is(err, io.EOF) {
+		return ProviderEnvironment{}, fmt.Errorf("secrets: github validate environment decode: %w", err)
+	}
+	if strings.TrimSpace(result.Name) != "" {
+		name = strings.TrimSpace(result.Name)
+	}
+	return p.githubEnvironment(name, true, "github-api"), nil
+}
+
+// EnsureEnvironment creates the GitHub Actions environment when it is missing.
+func (p *GitHubSecretsProvider) EnsureEnvironment(ctx context.Context, name string) (ProviderEnvironment, error) {
+	env, err := p.ValidateEnvironment(ctx, name)
+	if err == nil {
+		return env, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return ProviderEnvironment{}, err
+	}
+	name = strings.TrimSpace(name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, p.environmentURL(name), bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return ProviderEnvironment{}, err
+	}
+	p.setHeaders(req)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return ProviderEnvironment{}, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
+		return p.githubEnvironment(name, true, "github-api"), nil
+	default:
+		return ProviderEnvironment{}, fmt.Errorf("secrets: github create environment %q: HTTP %d%s", name, resp.StatusCode, readErrorBody(resp))
+	}
+}
+
 // readErrorBody reads up to 512 bytes from resp.Body and returns them as a
 // trimmed string prefixed with ": " for appending to an error message.
 // Returns "" when the body is empty, so callers don't emit a trailing ": ".
@@ -363,12 +468,38 @@ func (p *GitHubSecretsProvider) secretsURL() string {
 	}
 }
 
+func (p *GitHubSecretsProvider) environmentsURL() string {
+	return fmt.Sprintf("%s/repos/%s/%s/environments", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo))
+}
+
+func (p *GitHubSecretsProvider) environmentURL(name string) string {
+	return p.environmentsURL() + "/" + url.PathEscape(name)
+}
+
 func (p *GitHubSecretsProvider) secretURL(key string) string {
 	return p.secretsURL() + "/" + url.PathEscape(key)
 }
 
 func (p *GitHubSecretsProvider) publicKeyURL() string {
 	return p.secretsURL() + "/public-key"
+}
+
+func (p *GitHubSecretsProvider) requireRepoEnvironmentTarget() error {
+	if strings.TrimSpace(p.owner) == "" || strings.TrimSpace(p.repo) == "" {
+		return fmt.Errorf("%w: github environments require a repository target", ErrUnsupported)
+	}
+	return nil
+}
+
+func (p *GitHubSecretsProvider) githubEnvironment(name string, exists bool, source string) ProviderEnvironment {
+	subject := fmt.Sprintf("%s on %s/%s", name, p.owner, p.repo)
+	return ProviderEnvironment{
+		Provider: "github",
+		Name:     name,
+		Label:    "github env " + subject,
+		Exists:   exists,
+		Source:   source,
+	}
 }
 
 type repoPublicKeyResponse struct {

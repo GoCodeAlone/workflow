@@ -45,6 +45,25 @@ type ProviderTarget struct {
 	Label    string
 }
 
+// ProviderEnvironment describes a provider-owned environment or namespace used
+// as a secret target. It is intentionally metadata-only and must never include
+// secret values or credential material.
+type ProviderEnvironment struct {
+	Provider string
+	Name     string
+	Label    string
+	Exists   bool
+	Source   string
+}
+
+// EnvironmentManager is optional: providers implement it when they can inspect
+// and create environment-like namespaces used by scoped secrets.
+type EnvironmentManager interface {
+	ListEnvironments(ctx context.Context) ([]ProviderEnvironment, error)
+	ValidateEnvironment(ctx context.Context, name string) (ProviderEnvironment, error)
+	EnsureEnvironment(ctx context.Context, name string) (ProviderEnvironment, error)
+}
+
 // TargetDescriber is optional: providers implement it when they can describe
 // their concrete namespace, such as GitHub repo/env/org or AWS region.
 type TargetDescriber interface {

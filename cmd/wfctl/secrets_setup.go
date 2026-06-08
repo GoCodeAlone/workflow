@@ -127,6 +127,7 @@ Options:
 				scope:          *scope,
 				scopeExplicit:  hasFlag(args, "scope"),
 				envName:        *envName,
+				envExplicit:    hasFlag(args, "env"),
 				org:            *org,
 				visibility:     *visibility,
 				tokenEnv:       *tokenEnv,
