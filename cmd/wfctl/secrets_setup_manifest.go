@@ -108,7 +108,7 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 		return runSecretsSetupManifestTargets(context.Background(), a, discovered, preprovidedValuer, out, &promptErr)
 	}
 
-	ghProvider, scopeLabel, err := buildSecretWriter(strings.ToLower(strings.TrimSpace(a.scope)), a.envName, a.org, a.visibility, a.tokenEnv, firstConfigPattern(a.configPatterns))
+	ghProvider, scopeLabel, err := buildSecretWriter(strings.ToLower(strings.TrimSpace(a.scope)), manifestSetupEnvName(a.envName, a.envExplicit), a.org, a.visibility, a.tokenEnv, firstConfigPattern(a.configPatterns))
 	if err != nil {
 		return err
 	}
@@ -472,6 +472,13 @@ func appendManifestEnvironmentName(names []string, name string) []string {
 	names = append(names, name)
 	sort.Strings(names)
 	return names
+}
+
+func manifestSetupEnvName(envName string, explicit bool) string {
+	if !explicit {
+		return ""
+	}
+	return strings.TrimSpace(envName)
 }
 
 func buildConfiguredManifestSecretStoreTargets(cfg *config.WorkflowConfig) []manifestSecretTargetProvider {
@@ -1566,6 +1573,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	if *allFlag && len(only) > 0 {
 		return nil, fmt.Errorf("--all and --only are mutually exclusive")
 	}
+	envExplicit := hasFlag(args, "env")
 	return &manifestSetupArgs{
 		manifestPath:   *manifestPath,
 		lockfilePath:   *lockfilePath,
@@ -1573,8 +1581,8 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 		configPatterns: *configPatterns,
 		scope:          *scope,
 		scopeExplicit:  hasFlag(args, "scope"),
-		envName:        *envName,
-		envExplicit:    hasFlag(args, "env"),
+		envName:        manifestSetupEnvName(*envName, envExplicit),
+		envExplicit:    envExplicit,
 		org:            *org,
 		visibility:     *visibility,
 		tokenEnv:       *tokenEnv,

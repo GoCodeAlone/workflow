@@ -339,34 +339,41 @@ func (p *GitHubSecretsProvider) ListEnvironments(ctx context.Context) ([]Provide
 	if err := p.requireRepoEnvironmentTarget(); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.environmentsURL(), nil)
-	if err != nil {
-		return nil, err
-	}
-	p.setHeaders(req)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("secrets: github list environments: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
-	}
-	var result struct {
-		Environments []struct {
-			Name string `json:"name"`
-		} `json:"environments"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("secrets: github list environments decode: %w", err)
-	}
-	envs := make([]ProviderEnvironment, 0, len(result.Environments))
-	for _, env := range result.Environments {
-		name := strings.TrimSpace(env.Name)
-		if name == "" {
-			continue
+	nextURL := p.environmentsURL()
+	var envs []ProviderEnvironment
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
 		}
-		envs = append(envs, p.githubEnvironment(name, true, "github-api"))
+		p.setHeaders(req)
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			err := fmt.Errorf("secrets: github list environments: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
+			resp.Body.Close()
+			return nil, err
+		}
+		var result struct {
+			Environments []struct {
+				Name string `json:"name"`
+			} `json:"environments"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("secrets: github list environments decode: %w", err)
+		}
+		resp.Body.Close()
+		for _, env := range result.Environments {
+			name := strings.TrimSpace(env.Name)
+			if name == "" {
+				continue
+			}
+			envs = append(envs, p.githubEnvironment(name, true, "github-api"))
+		}
+		nextURL = githubNextLink(resp.Header.Get("Link"))
 	}
 	return envs, nil
 }
@@ -469,11 +476,13 @@ func (p *GitHubSecretsProvider) secretsURL() string {
 }
 
 func (p *GitHubSecretsProvider) environmentsURL() string {
-	return fmt.Sprintf("%s/repos/%s/%s/environments", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo))
+	values := url.Values{}
+	values.Set("per_page", "100")
+	return fmt.Sprintf("%s/repos/%s/%s/environments?%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), values.Encode())
 }
 
 func (p *GitHubSecretsProvider) environmentURL(name string) string {
-	return p.environmentsURL() + "/" + url.PathEscape(name)
+	return fmt.Sprintf("%s/repos/%s/%s/environments/%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), url.PathEscape(name))
 }
 
 func (p *GitHubSecretsProvider) secretURL(key string) string {
@@ -500,6 +509,21 @@ func (p *GitHubSecretsProvider) githubEnvironment(name string, exists bool, sour
 		Exists:   exists,
 		Source:   source,
 	}
+}
+
+func githubNextLink(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		start := strings.Index(part, "<")
+		end := strings.Index(part, ">")
+		if start >= 0 && end > start {
+			return part[start+1 : end]
+		}
+	}
+	return ""
 }
 
 type repoPublicKeyResponse struct {

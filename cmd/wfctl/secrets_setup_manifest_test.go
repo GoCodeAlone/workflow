@@ -469,6 +469,26 @@ secrets:
 	}
 }
 
+func TestManifestSetupEnvNameRequiresExplicitEnvFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		envName  string
+		explicit bool
+		want     string
+	}{
+		{name: "default local ignored", envName: "local", explicit: false, want: ""},
+		{name: "explicit local kept", envName: "local", explicit: true, want: "local"},
+		{name: "explicit preview kept", envName: "preview", explicit: true, want: "preview"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := manifestSetupEnvName(tt.envName, tt.explicit); got != tt.want {
+				t.Fatalf("manifestSetupEnvName(%q, %v) = %q, want %q", tt.envName, tt.explicit, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildManifestSecretTargetProvidersSkipsRuntimeEnvironmentPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	chdirForTest(t, dir)

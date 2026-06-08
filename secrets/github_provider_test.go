@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -136,11 +137,13 @@ func TestGitHubProvider_EnvironmentScopeUsesEnvironmentEndpoints(t *testing.T) {
 }
 
 func TestGitHubProvider_ListEnvironments(t *testing.T) {
+	var queries []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/repos/owner/repo/environments" {
 			http.NotFound(w, r)
 			return
 		}
+		queries = append(queries, r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"environments": []map[string]any{
@@ -164,6 +167,56 @@ func TestGitHubProvider_ListEnvironments(t *testing.T) {
 	}
 	if !strings.Contains(envs[0].Label, "staging") || !strings.Contains(envs[0].Label, "owner/repo") {
 		t.Fatalf("label = %q, want environment and repo context", envs[0].Label)
+	}
+	if len(queries) != 1 || !strings.Contains(queries[0], "per_page=100") {
+		t.Fatalf("queries = %v, want per_page=100", queries)
+	}
+}
+
+func TestGitHubProvider_ListEnvironmentsFollowsPagination(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/owner/repo/environments" {
+			http.NotFound(w, r)
+			return
+		}
+		paths = append(paths, r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "", "1":
+			w.Header().Set("Link", `<https://api.github.com/repos/owner/repo/environments?per_page=100&page=2>; rel="next"`)
+			json.NewEncoder(w).Encode(map[string]any{
+				"environments": []map[string]any{{"name": "staging"}},
+			})
+		case "2":
+			json.NewEncoder(w).Encode(map[string]any{
+				"environments": []map[string]any{{"name": "production"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	envs, err := p.ListEnvironments(context.Background())
+	if err != nil {
+		t.Fatalf("ListEnvironments: %v", err)
+	}
+	if len(envs) != 2 {
+		t.Fatalf("expected 2 environments, got %d: %v", len(envs), envs)
+	}
+	got := []string{envs[0].Name, envs[1].Name}
+	want := []string{"staging", "production"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("environments = %v, want %v", got, want)
+	}
+	wantPaths := []string{
+		"/repos/owner/repo/environments?per_page=100",
+		"/repos/owner/repo/environments?per_page=100&page=2",
+	}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("paths = %v, want %v", paths, wantPaths)
 	}
 }
 

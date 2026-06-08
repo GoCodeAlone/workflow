@@ -119,6 +119,7 @@ Options:
 				return fmt.Errorf("--auto-gen-keys is not supported with wfctl.yaml manifest-backed secrets setup; use --from-env, --secret NAME=VALUE, or run interactively from a terminal")
 			}
 			manifestNonInteractive := *nonInteractive || !isatty.IsTerminal(os.Stdin.Fd())
+			envExplicit := hasFlag(args, "env")
 			return runSecretsSetupManifestWithIO(&manifestSetupArgs{
 				manifestPath:   target.path,
 				lockfilePath:   *lockFile,
@@ -126,8 +127,8 @@ Options:
 				configPatterns: defaultManifestSetupConfigPatterns(),
 				scope:          *scope,
 				scopeExplicit:  hasFlag(args, "scope"),
-				envName:        *envName,
-				envExplicit:    hasFlag(args, "env"),
+				envName:        manifestSetupEnvName(*envName, envExplicit),
+				envExplicit:    envExplicit,
 				org:            *org,
 				visibility:     *visibility,
 				tokenEnv:       *tokenEnv,
