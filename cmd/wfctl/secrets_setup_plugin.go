@@ -311,7 +311,7 @@ func buildSecretWriter(scope, envName, org, visibility, tokenEnv, configFile str
 		}
 		p, err := secrets.NewGitHubSecretsProvider(repo, tokenEnv)
 		if err != nil {
-			return nil, "", fmt.Errorf("configure GitHub env secrets for %s (%s): %v", repo, source, err)
+			return nil, "", contextualCLIError{err: fmt.Errorf("configure GitHub env secrets for %s (%s): %w", repo, source, err)}
 		}
 		p.SetEnvironment(envName)
 		return p, fmt.Sprintf("github env %q on %s (%s)", envName, repo, source), nil
@@ -323,7 +323,7 @@ func buildSecretWriter(scope, envName, org, visibility, tokenEnv, configFile str
 		}
 		p, err := secrets.NewGitHubSecretsProvider(repo, tokenEnv)
 		if err != nil {
-			return nil, "", fmt.Errorf("configure GitHub repo secrets for %s (%s): %v", repo, source, err)
+			return nil, "", contextualCLIError{err: fmt.Errorf("configure GitHub repo secrets for %s (%s): %w", repo, source, err)}
 		}
 		return p, fmt.Sprintf("github repo %s (%s)", repo, source), nil
 

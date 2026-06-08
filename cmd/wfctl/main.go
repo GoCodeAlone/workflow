@@ -71,6 +71,39 @@ func isHelpRequested(err error) bool {
 	return strings.Contains(err.Error(), "flag: help requested")
 }
 
+type contextualCLIError struct {
+	err error
+}
+
+func (e contextualCLIError) Error() string {
+	if e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e contextualCLIError) Unwrap() error {
+	return e.err
+}
+
+// commandErrorForDisplay strips workflow execution wrappers while preserving
+// errors that intentionally carry concise CLI context.
+func commandErrorForDisplay(err error) error {
+	if err == nil {
+		return nil
+	}
+	for {
+		if _, ok := err.(contextualCLIError); ok {
+			return err
+		}
+		next := errors.Unwrap(err)
+		if next == nil {
+			return err
+		}
+		err = next
+	}
+}
+
 // commands maps each CLI command name to its Go implementation. The command
 // metadata (name, description) is declared in wfctl.yaml; this map provides
 // the runtime functions that are registered in the CLICommandRegistry service
@@ -248,12 +281,7 @@ func main() {
 		// The handler already printed routing errors (unknown/missing command).
 		// Only emit the "error:" prefix for actual command execution failures.
 		if _, isKnown := commands[cmd]; isKnown {
-			// Unwrap to the root cause so users see a concise, actionable message
-			// rather than the full pipeline execution chain.
-			rootErr := dispatchErr
-			for errors.Unwrap(rootErr) != nil {
-				rootErr = errors.Unwrap(rootErr)
-			}
+			rootErr := commandErrorForDisplay(dispatchErr)
 			fmt.Fprintf(os.Stderr, "error: %v\n", rootErr) //nolint:gosec // G705
 		}
 		os.Exit(1)
