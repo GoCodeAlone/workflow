@@ -368,14 +368,6 @@ func releaseDownloads(ghRepo, tag string) ([]releaseAsset, error) {
 	return assets, nil
 }
 
-func releaseChecksums(ghRepo, tag string) (map[string]string, error) {
-	release, err := githubReleaseByTag(ghRepo, tag)
-	if err != nil {
-		return nil, err
-	}
-	return releaseChecksumsFromMetadata(release)
-}
-
 func releaseChecksumsFromMetadata(release *githubReleaseMetadata) (map[string]string, error) {
 	for _, asset := range release.Assets {
 		if asset.Name != "checksums.txt" {
