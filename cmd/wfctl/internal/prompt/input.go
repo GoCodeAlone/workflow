@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -31,7 +30,7 @@ func InputWithSuggestions(label string, masked bool, suggestions []string) (stri
 	out, _ := outputWriter()
 	fmt.Fprint(out, label+": ")
 	if masked {
-		value, err := term.ReadPassword(syscall.Stdin)
+		value, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Fprintln(out)
 		if err != nil {
 			return "", err
