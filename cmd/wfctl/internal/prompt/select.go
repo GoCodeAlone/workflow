@@ -1,7 +1,10 @@
 package prompt
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,17 +20,24 @@ func Select(title string, opts []string) (int, error) {
 		return 0, ErrNotInteractive
 	}
 	out, _ := outputWriter()
-	m := &selectModel{title: title, opts: opts}
-	p := tea.NewProgram(m, tea.WithOutput(out))
-	result, err := p.Run()
+	fmt.Fprintln(out, title)
+	for i, opt := range opts {
+		fmt.Fprintf(out, "  %d. %s\n", i+1, opt)
+	}
+	fmt.Fprint(out, "Choose [1]: ")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		return 0, fmt.Errorf("prompt select: %w", err)
+		return 0, err
 	}
-	fm := result.(*selectModel)
-	if fm.quit {
-		return 0, ErrInterrupted
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return 0, nil
 	}
-	return fm.cursor, nil
+	idx, err := strconv.Atoi(line)
+	if err != nil || idx < 1 || idx > len(opts) {
+		return 0, fmt.Errorf("invalid selection %q", line)
+	}
+	return idx - 1, nil
 }
 
 // selectModel is the bubbletea model for single selection.

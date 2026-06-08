@@ -1,7 +1,10 @@
 package prompt
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,29 +20,60 @@ func MultiSelect(title string, items []Item) ([]int, error) {
 		return nil, ErrNotInteractive
 	}
 	out, _ := outputWriter()
-	selected := make(map[int]bool, len(items))
-	for i, it := range items {
-		if it.Preselected {
-			selected[i] = true
+	fmt.Fprintln(out, title)
+	defaults := make([]int, 0, len(items))
+	for i, item := range items {
+		mark := " "
+		if item.Preselected {
+			mark = "x"
+			defaults = append(defaults, i)
 		}
+		fmt.Fprintf(out, "  %d. [%s] %s\n", i+1, mark, item.Label)
 	}
-	m := &multiSelectModel{title: title, items: items, selected: selected}
-	p := tea.NewProgram(m, tea.WithOutput(out))
-	result, err := p.Run()
+	fmt.Fprint(out, "Choose numbers/ranges (comma-separated, Enter for defaults): ")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		return nil, fmt.Errorf("prompt multiselect: %w", err)
+		return nil, err
 	}
-	fm := result.(*multiSelectModel)
-	if fm.quit {
-		return nil, ErrInterrupted
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return defaults, nil
 	}
-	var indices []int
-	for i := range items {
-		if fm.selected[i] {
-			indices = append(indices, i)
+	return parseIndexSelection(line, len(items))
+}
+
+func parseIndexSelection(line string, count int) ([]int, error) {
+	seen := make(map[int]bool)
+	var out []int
+	for _, raw := range strings.Split(line, ",") {
+		part := strings.TrimSpace(raw)
+		if part == "" {
+			continue
+		}
+		startRaw, endRaw, hasRange := strings.Cut(part, "-")
+		start, err := strconv.Atoi(strings.TrimSpace(startRaw))
+		if err != nil {
+			return nil, fmt.Errorf("invalid selection %q", part)
+		}
+		end := start
+		if hasRange {
+			end, err = strconv.Atoi(strings.TrimSpace(endRaw))
+			if err != nil {
+				return nil, fmt.Errorf("invalid selection %q", part)
+			}
+		}
+		if start < 1 || end < start || end > count {
+			return nil, fmt.Errorf("selection %q out of range 1-%d", part, count)
+		}
+		for n := start; n <= end; n++ {
+			idx := n - 1
+			if !seen[idx] {
+				seen[idx] = true
+				out = append(out, idx)
+			}
 		}
 	}
-	return indices, nil
+	return out, nil
 }
 
 type multiSelectModel struct {

@@ -1,10 +1,11 @@
 package prompt
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"strings"
 
-	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -31,22 +32,23 @@ func TableMultiSelect(title string, columns []TableColumn, items []TableItem) ([
 	}
 	out, _ := outputWriter()
 	m := newTableMultiSelectModel(title, columns, items)
-	p := tea.NewProgram(m, tea.WithOutput(out))
-	result, err := p.Run()
+	fmt.Fprint(out, m.View().Content)
+	fmt.Fprint(out, "Choose numbers/ranges (comma-separated, Enter for defaults): ")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		return nil, fmt.Errorf("prompt table multiselect: %w", err)
+		return nil, err
 	}
-	fm := result.(*tableMultiSelectModel)
-	if fm.quit {
-		return nil, ErrInterrupted
-	}
-	var indices []int
-	for i := range items {
-		if fm.selected[i] {
-			indices = append(indices, i)
+	line = strings.TrimSpace(line)
+	if line == "" {
+		var defaults []int
+		for i, item := range items {
+			if item.Preselected {
+				defaults = append(defaults, i)
+			}
 		}
+		return defaults, nil
 	}
-	return indices, nil
+	return parseIndexSelection(line, len(items))
 }
 
 type tableMultiSelectModel struct {
@@ -54,7 +56,7 @@ type tableMultiSelectModel struct {
 	columns  []TableColumn
 	items    []TableItem
 	selected map[int]bool
-	table    table.Model
+	cursor   int
 	quit     bool
 }
 
@@ -71,12 +73,6 @@ func newTableMultiSelectModel(title string, columns []TableColumn, items []Table
 		items:    items,
 		selected: selected,
 	}
-	m.table = table.New(
-		table.WithColumns(m.tableColumns()),
-		table.WithRows(m.tableRows()),
-		table.WithFocused(true),
-		table.WithHeight(min(max(len(items)+2, 5), 18)), //nolint:mnd
-	)
 	return m
 }
 
@@ -88,53 +84,93 @@ func (m *tableMultiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			m.quit = true
 			return m, tea.Quit
-		case " ":
-			cursor := m.table.Cursor()
-			if m.selected[cursor] {
-				delete(m.selected, cursor)
-			} else {
-				m.selected[cursor] = true
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
 			}
-			m.table.SetRows(m.tableRows())
+		case "down", "j":
+			if m.cursor < len(m.items)-1 {
+				m.cursor++
+			}
+		case " ":
+			if m.selected[m.cursor] {
+				delete(m.selected, m.cursor)
+			} else {
+				m.selected[m.cursor] = true
+			}
 			return m, nil
 		case "enter":
 			return m, tea.Quit
 		}
 	}
-	var cmd tea.Cmd
-	m.table, cmd = m.table.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
 func (m *tableMultiSelectModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(m.title))
 	b.WriteString("\n")
-	b.WriteString(m.table.View())
+	b.WriteString(m.headerRow())
+	b.WriteString("\n")
+	b.WriteString(m.separatorRow())
+	b.WriteString("\n")
+	for i, item := range m.items {
+		cursor := "  "
+		if i == m.cursor {
+			cursor = "> "
+		}
+		mark := "[ ]"
+		if m.selected[i] {
+			mark = "[x]"
+		}
+		b.WriteString(cursor)
+		b.WriteString(padTableCell(mark, 3))
+		for colIdx, col := range m.columns {
+			cell := ""
+			if colIdx < len(item.Cells) {
+				cell = item.Cells[colIdx]
+			}
+			b.WriteString(" ")
+			b.WriteString(padTableCell(cell, col.Width))
+		}
+		b.WriteString("\n")
+	}
 	b.WriteString("\n\n(space to toggle, enter to confirm)\n")
 	return tea.NewView(b.String())
 }
 
-func (m *tableMultiSelectModel) tableColumns() []table.Column {
-	cols := make([]table.Column, 0, len(m.columns)+1)
-	cols = append(cols, table.Column{Title: "Set", Width: 3})
+func (m *tableMultiSelectModel) headerRow() string {
+	var b strings.Builder
+	b.WriteString("  ")
+	b.WriteString(padTableCell("Set", 3))
 	for _, col := range m.columns {
-		cols = append(cols, table.Column{Title: col.Title, Width: col.Width})
+		b.WriteString(" ")
+		b.WriteString(padTableCell(col.Title, col.Width))
 	}
-	return cols
+	return b.String()
 }
 
-func (m *tableMultiSelectModel) tableRows() []table.Row {
-	rows := make([]table.Row, 0, len(m.items))
-	for i, item := range m.items {
-		mark := " "
-		if m.selected[i] {
-			mark = "x"
-		}
-		cells := make([]string, 0, len(item.Cells)+1)
-		cells = append(cells, mark)
-		cells = append(cells, item.Cells...)
-		rows = append(rows, table.Row(cells))
+func (m *tableMultiSelectModel) separatorRow() string {
+	var b strings.Builder
+	b.WriteString("  ")
+	b.WriteString(strings.Repeat("-", 3))
+	for _, col := range m.columns {
+		b.WriteString(" ")
+		b.WriteString(strings.Repeat("-", max(col.Width, 1)))
 	}
-	return rows
+	return b.String()
+}
+
+func padTableCell(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > width {
+		if width <= 1 {
+			return s[:width]
+		}
+		return s[:width-1] + "~"
+	}
+	return s + strings.Repeat(" ", width-len(s))
 }
