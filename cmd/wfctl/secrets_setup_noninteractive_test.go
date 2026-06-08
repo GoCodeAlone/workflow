@@ -212,6 +212,65 @@ func TestNonInteractive_FromEnv(t *testing.T) {
 	}
 }
 
+func TestNonInteractive_PerSecretStoresRouteToDifferentProviders(t *testing.T) {
+	tmp := t.TempDir()
+	primaryDir := filepath.Join(tmp, "primary")
+	secondaryDir := filepath.Join(tmp, "secondary")
+	if err := os.MkdirAll(primaryDir, 0o755); err != nil {
+		t.Fatalf("mkdir primary: %v", err)
+	}
+	if err := os.MkdirAll(secondaryDir, 0o755); err != nil {
+		t.Fatalf("mkdir secondary: %v", err)
+	}
+	cfgPath := filepath.Join(tmp, "app.yaml")
+	cfg := `secrets:
+  entries:
+    - name: A
+      store: primary
+    - name: B
+      store: secondary
+secretStores:
+  primary:
+    provider: file
+    config:
+      path: ` + primaryDir + `
+  secondary:
+    provider: file
+    config:
+      path: ` + secondaryDir + `
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write app.yaml: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runSecretsSetupNonInteractive(&nonInteractiveSetupArgs{
+		configFile:     cfgPath,
+		secretLiterals: []string{"A=av", "B=bv"},
+	}, &out)
+	if err != nil {
+		t.Fatalf("runSecretsSetupNonInteractive: %v", err)
+	}
+
+	a, err := os.ReadFile(filepath.Join(primaryDir, "A"))
+	if err != nil {
+		t.Fatalf("read primary A: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(secondaryDir, "B"))
+	if err != nil {
+		t.Fatalf("read secondary B: %v", err)
+	}
+	if string(a) != "av" || string(b) != "bv" {
+		t.Fatalf("stored values A=%q B=%q", a, b)
+	}
+	if _, err := os.Stat(filepath.Join(primaryDir, "B")); !os.IsNotExist(err) {
+		t.Fatalf("B should not be written to primary store: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(secondaryDir, "A")); !os.IsNotExist(err) {
+		t.Fatalf("A should not be written to secondary store: %v", err)
+	}
+}
+
 // TestNonInteractive_SkipExisting verifies --skip-existing skips secrets
 // that are already set in the store.
 func TestNonInteractive_SkipExisting(t *testing.T) {

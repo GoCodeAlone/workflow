@@ -35,10 +35,11 @@ func runSecretsSetupNonInteractive(a *nonInteractiveSetupArgs, out io.Writer) er
 // runSecretsSetupNonInteractiveCtx executes the non-interactive setup path.
 // It:
 //  1. Loads the workflow config.
-//  2. Resolves the named store (--store > config.defaultStore > "env").
+//  2. Resolves each secret's store (--store > entry.store > env override >
+//     defaultStore > legacy provider > env).
 //  3. Builds a selector from --only / --skip-existing / --all.
 //  4. Builds a valuer from --from-env > stdin-KV > --secret.
-//  5. Runs the engine and prints a summary.
+//  5. Writes each selected secret through its resolved provider and prints a summary.
 func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetupArgs, out io.Writer) error {
 	cfg, err := config.LoadFromFile(a.configFile)
 	if err != nil {
@@ -48,24 +49,6 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 	if cfg.Secrets == nil || len(cfg.Secrets.Entries) == 0 {
 		fmt.Fprintln(out, "No secrets declared in config.")
 		return nil
-	}
-
-	// Resolve which store to use via the 5-priority resolver.
-	defaultStore := ""
-	if cfg.Secrets != nil {
-		defaultStore = cfg.Secrets.DefaultStore
-		if defaultStore == "" {
-			defaultStore = cfg.Secrets.Provider
-		}
-	}
-	storeName, err := resolveSetupStoreName(a.storeName, defaultStore, cfg.SecretStores, false)
-	if err != nil {
-		return err
-	}
-
-	provider, err := getProviderForStore(storeName, cfg)
-	if err != nil {
-		return fmt.Errorf("resolve store %q: %w", storeName, err)
 	}
 
 	// Build value lookup maps (priority: from-env > stdin-KV > --secret).
@@ -86,15 +69,8 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 		secretMap[k] = v
 	}
 
-	// Build the declared list from config entries.
-	type decl struct {
-		name      string
-		sensitive bool
-	}
-	var decls []decl
-	for _, e := range cfg.Secrets.Entries {
-		decls = append(decls, decl{name: e.Name, sensitive: isSecretSensitive(e.Name)})
-	}
+	decls := buildSetupDecls(cfg, "", a.storeName)
+	statuses := querySetupDeclStatuses(ctx, decls, cfg)
 
 	// Selector: --only restricts; --skip-existing filters already-set.
 	onlySet := make(map[string]bool, len(a.only))
@@ -102,14 +78,14 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 		onlySet[n] = true
 	}
 
-	selector := func(ds []decl, statuses []SecretStatus) ([]decl, error) {
+	selector := func(ds []setupDecl, statuses []SecretStatus) ([]setupDecl, error) {
 		setMap := make(map[string]bool, len(statuses))
 		for _, s := range statuses {
 			if s.IsSet {
 				setMap[s.Name] = true
 			}
 		}
-		var out []decl
+		var out []setupDecl
 		for _, d := range ds {
 			if len(onlySet) > 0 && !onlySet[d.name] {
 				continue
@@ -131,7 +107,7 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 	// When --from-env is set, a missing env var is a skip (provided=false)
 	// rather than an error — the caller only wants to set what's available.
 	// When no value source at all is configured, this is a hard error.
-	valuer := func(d decl) (string, bool, error) {
+	valuer := func(d setupDecl) (string, bool, error) {
 		if a.fromEnv {
 			v := os.Getenv(d.name)
 			if v != "" {
@@ -159,13 +135,15 @@ func runSecretsSetupNonInteractiveCtx(ctx context.Context, a *nonInteractiveSetu
 	}
 
 	// Audit: append a JSONL record for each successful Set (never the value).
-	auditFn := func(name, _ string) {
-		_ = writeSecretsAuditRecord(name, storeName) //nolint:errcheck // best-effort audit
+	auditFn := func(name, store string) {
+		_ = writeSecretsAuditRecord(name, store) //nolint:errcheck // best-effort audit
 	}
 
-	report, err := runSetupEngine(ctx, decls,
-		func(d decl) string { return d.name },
-		provider, selector, valuer, auditFn, false)
+	selectedDecls, err := selector(decls, statuses)
+	if err != nil {
+		return err
+	}
+	report, err := runSetupDeclsByStore(ctx, cfg, selectedDecls, valuer, auditFn, false)
 	if err != nil {
 		return err
 	}

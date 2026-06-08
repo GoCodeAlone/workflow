@@ -66,6 +66,10 @@ func (a secretsProviderAdapter) Delete(ctx context.Context, name string) error {
 	return a.p.Delete(ctx, name)
 }
 
+func (a secretsProviderAdapter) SecretTarget() secrets.ProviderTarget {
+	return secrets.DescribeTarget(a.p)
+}
+
 // Check returns the SecretState for the named secret.
 //
 // Resolution order, most-precise first:

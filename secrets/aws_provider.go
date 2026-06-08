@@ -73,6 +73,16 @@ func NewAWSSecretsManagerProviderWithClient(cfg AWSConfig, client HTTPClient) *A
 
 func (p *AWSSecretsManagerProvider) Name() string { return "aws-sm" }
 
+// SecretTarget describes the AWS Secrets Manager region namespace.
+func (p *AWSSecretsManagerProvider) SecretTarget() ProviderTarget {
+	return ProviderTarget{
+		Provider: "aws-secrets-manager",
+		Scope:    "region",
+		Subject:  p.config.Region,
+		Label:    "aws secrets-manager " + p.config.Region,
+	}
+}
+
 func (p *AWSSecretsManagerProvider) Get(ctx context.Context, key string) (string, error) {
 	if key == "" {
 		return "", ErrInvalidKey

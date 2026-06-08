@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +76,50 @@ plugins:
 	}
 }
 
+func TestDiscoverManifestSecretsPreservesConfiguredStoreHint(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	configPath := filepath.Join(dir, "app.yaml")
+
+	if err := os.WriteFile(manifestPath, []byte("version: 1\nplugins: []\n"), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`secretStores:
+  aws-prod:
+    provider: aws-secrets-manager
+    config:
+      region: us-east-1
+secrets:
+  entries:
+    - name: AWS_ACCESS_KEY_ID
+      store: aws-prod
+providers:
+  aws:
+    access_key_id: ${AWS_ACCESS_KEY_ID}
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	secrets, err := discoverManifestSecrets(manifestPath, lockPath, pluginDir, configPath)
+	if err != nil {
+		t.Fatalf("discoverManifestSecrets: %v", err)
+	}
+	if len(secrets) != 1 {
+		t.Fatalf("secrets = %+v, want one AWS secret", secrets)
+	}
+	if secrets[0].StoreHint != "aws-prod" {
+		t.Fatalf("StoreHint = %q, want aws-prod", secrets[0].StoreHint)
+	}
+}
+
 func TestParseManifestSetupFlagsAcceptsSetupSelectors(t *testing.T) {
 	args, err := parseManifestSetupFlags([]string{
 		"--manifest", "wfctl.yaml",
@@ -107,6 +152,29 @@ func TestParseManifestSetupFlagsPreservesAll(t *testing.T) {
 	}
 	if !args.all {
 		t.Fatalf("--all was not preserved: %+v", args)
+	}
+}
+
+func TestParseManifestSetupFlagsTracksExplicitScope(t *testing.T) {
+	args, err := parseManifestSetupFlags([]string{
+		"--manifest", "wfctl.yaml",
+	})
+	if err != nil {
+		t.Fatalf("parseManifestSetupFlags: %v", err)
+	}
+	if args.scopeExplicit {
+		t.Fatalf("default scope should not be treated as explicit: %+v", args)
+	}
+
+	args, err = parseManifestSetupFlags([]string{
+		"--manifest", "wfctl.yaml",
+		"--scope", "org",
+	})
+	if err != nil {
+		t.Fatalf("parseManifestSetupFlags: %v", err)
+	}
+	if !args.scopeExplicit {
+		t.Fatalf("--scope flag was not tracked as explicit: %+v", args)
 	}
 }
 
@@ -178,6 +246,212 @@ func TestBuildManifestMultiSelectItemsShowsStatusSourcesAndDefaults(t *testing.T
 		if !strings.Contains(items[1].Label, want) {
 			t.Fatalf("unset label %q does not contain %q", items[1].Label, want)
 		}
+	}
+}
+
+func TestBuildManifestSecretTargetItemsShowProviderScopes(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{
+			Secret: manifestDiscoveredSecret{
+				PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"},
+				Sources:              []string{"config:digitalocean.wfctl.yaml"},
+			},
+			Store: "github-repo",
+			Label: "github repo GoCodeAlone/gocodealone-dns",
+			Status: SecretStatus{
+				Name:  "DIGITALOCEAN_TOKEN",
+				Store: "github-repo",
+				State: SecretNotSet,
+				IsSet: false,
+			},
+		},
+		{
+			Secret: manifestDiscoveredSecret{
+				PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"},
+				Sources:              []string{"config:digitalocean.wfctl.yaml"},
+			},
+			Store: "github-org",
+			Label: "github org GoCodeAlone",
+			Status: SecretStatus{
+				Name:  "DIGITALOCEAN_TOKEN",
+				Store: "github-org",
+				State: SecretSet,
+				IsSet: true,
+			},
+		},
+		{
+			Secret: manifestDiscoveredSecret{
+				PluginRequiredSecret: PluginRequiredSecret{Name: "AWS_ACCESS_KEY_ID"},
+				Sources:              []string{"config:aws.wfctl.yaml"},
+			},
+			Store: "aws-prod",
+			Label: "aws secrets-manager aws-prod",
+			Status: SecretStatus{
+				Name:  "AWS_ACCESS_KEY_ID",
+				Store: "aws-prod",
+				State: SecretNotSet,
+				IsSet: false,
+			},
+		},
+	}
+
+	items := buildManifestSecretTargetItems(targets, false)
+	if len(items) != 3 {
+		t.Fatalf("items len = %d, want 3", len(items))
+	}
+	if !items[0].Preselected {
+		t.Fatalf("unset repo target should be preselected: %+v", items[0])
+	}
+	if items[1].Preselected {
+		t.Fatalf("set org target should not be preselected: %+v", items[1])
+	}
+	if !items[2].Preselected {
+		t.Fatalf("unset AWS target should be preselected: %+v", items[2])
+	}
+	for _, want := range []string{"DIGITALOCEAN_TOKEN", "github repo GoCodeAlone/gocodealone-dns", "✗ unset"} {
+		if !strings.Contains(items[0].Label, want) {
+			t.Fatalf("repo target label %q does not contain %q", items[0].Label, want)
+		}
+	}
+	for _, want := range []string{"DIGITALOCEAN_TOKEN", "github org GoCodeAlone", "✓ set"} {
+		if !strings.Contains(items[1].Label, want) {
+			t.Fatalf("org target label %q does not contain %q", items[1].Label, want)
+		}
+	}
+	for _, want := range []string{"AWS_ACCESS_KEY_ID", "aws secrets-manager aws-prod", "✗ unset"} {
+		if !strings.Contains(items[2].Label, want) {
+			t.Fatalf("AWS target label %q does not contain %q", items[2].Label, want)
+		}
+	}
+}
+
+func TestSelectManifestSecretTargetsSkipExistingPerTarget(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}}, Store: "repo", Status: SecretStatus{Name: "TOKEN", Store: "repo", IsSet: false}},
+		{Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}}, Store: "org", Status: SecretStatus{Name: "TOKEN", Store: "org", IsSet: true}},
+	}
+
+	selected := selectManifestSecretTargetsForSetup(targets, manifestSecretSelectionOptions{
+		includeExisting: true,
+		skipExisting:    true,
+	})
+	if len(selected) != 1 || selected[0].Store != "repo" {
+		t.Fatalf("selected targets = %+v, want only unset repo target", selected)
+	}
+
+	selected = selectManifestSecretTargetsForSetup(targets, manifestSecretSelectionOptions{
+		includeExisting: true,
+	})
+	if len(selected) != 2 {
+		t.Fatalf("selected targets len = %d, want both targets", len(selected))
+	}
+}
+
+func TestQueryManifestSecretTargetsUsesProviderStatusPerTarget(t *testing.T) {
+	secrets := []manifestDiscoveredSecret{
+		{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+	}
+	providers := []manifestSecretTargetProvider{
+		{
+			Store:    "github-repo",
+			Label:    "github repo GoCodeAlone/example",
+			Provider: newEngineTestProvider(nil),
+		},
+		{
+			Store:    "github-org",
+			Label:    "github org GoCodeAlone",
+			Provider: newEngineTestProvider(map[string]string{"TOKEN": "set"}),
+		},
+	}
+
+	targets := queryManifestSecretTargets(context.Background(), secrets, providers)
+	if len(targets) != 2 {
+		t.Fatalf("targets len = %d, want 2", len(targets))
+	}
+	if targets[0].Status.IsSet {
+		t.Fatalf("repo target status = %+v, want unset", targets[0].Status)
+	}
+	if !targets[1].Status.IsSet {
+		t.Fatalf("org target status = %+v, want set", targets[1].Status)
+	}
+}
+
+func TestQueryManifestSecretTargetsHonorsSecretStoreHint(t *testing.T) {
+	secrets := []manifestDiscoveredSecret{
+		{
+			PluginRequiredSecret: PluginRequiredSecret{Name: "AWS_ACCESS_KEY_ID"},
+			StoreHint:            "aws-prod",
+		},
+	}
+	providers := []manifestSecretTargetProvider{
+		{
+			Store:    "github-repo",
+			Label:    "github repo GoCodeAlone/example",
+			Provider: newEngineTestProvider(nil),
+		},
+		{
+			Store:    "aws-prod",
+			Label:    "aws-secrets-manager aws-prod",
+			Provider: newEngineTestProvider(nil),
+		},
+	}
+
+	targets := queryManifestSecretTargets(context.Background(), secrets, providers)
+	if len(targets) != 1 {
+		t.Fatalf("targets = %+v, want only configured AWS target", targets)
+	}
+	if targets[0].Store != "aws-prod" {
+		t.Fatalf("target store = %q, want aws-prod", targets[0].Store)
+	}
+	if strings.Contains(targets[0].Label, "repo") || strings.Contains(targets[0].Label, "org") {
+		t.Fatalf("AWS target leaked GitHub label semantics: %q", targets[0].Label)
+	}
+}
+
+func TestRunManifestSecretTargetSetupWritesEachSelectedProvider(t *testing.T) {
+	repoProvider := newEngineTestProvider(nil)
+	orgProvider := newEngineTestProvider(nil)
+	targets := []manifestSecretTarget{
+		{
+			Secret:   manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:    "github-repo",
+			Label:    "github repo GoCodeAlone/example",
+			Provider: repoProvider,
+		},
+		{
+			Secret:   manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:    "github-org",
+			Label:    "github org GoCodeAlone",
+			Provider: orgProvider,
+		},
+	}
+	valueCalls := 0
+	var audited []string
+
+	report, err := runManifestSecretTargetSetup(context.Background(), targets,
+		func(secret manifestDiscoveredSecret) (string, bool, error) {
+			valueCalls++
+			return "value", true, nil
+		},
+		func(name, store string) {
+			audited = append(audited, name+"@"+store)
+		},
+		true,
+	)
+	if err != nil {
+		t.Fatalf("runManifestSecretTargetSetup: %v", err)
+	}
+	if valueCalls != 1 {
+		t.Fatalf("valuer calls = %d, want one prompt reused for both targets", valueCalls)
+	}
+	if repoProvider.data["TOKEN"] != "value" || orgProvider.data["TOKEN"] != "value" {
+		t.Fatalf("providers not both set: repo=%q org=%q", repoProvider.data["TOKEN"], orgProvider.data["TOKEN"])
+	}
+	if !reflect.DeepEqual(report.Set, []string{"TOKEN [github repo GoCodeAlone/example]", "TOKEN [github org GoCodeAlone]"}) {
+		t.Fatalf("report.Set = %v", report.Set)
+	}
+	if !reflect.DeepEqual(audited, []string{"TOKEN@github-repo", "TOKEN@github-org"}) {
+		t.Fatalf("audited = %v", audited)
 	}
 }
 

@@ -128,6 +128,36 @@ func (p *GitHubSecretsProvider) Scope() GitHubSecretScope { return p.scope }
 
 func (p *GitHubSecretsProvider) Name() string { return "github" }
 
+// SecretTarget describes the GitHub Actions secret namespace represented by
+// this provider: repository, environment, or organization.
+func (p *GitHubSecretsProvider) SecretTarget() ProviderTarget {
+	switch p.scope {
+	case GitHubScopeOrg:
+		return ProviderTarget{
+			Provider: "github",
+			Scope:    string(GitHubScopeOrg),
+			Subject:  p.org,
+			Label:    "github org " + p.org,
+		}
+	case GitHubScopeEnv:
+		subject := fmt.Sprintf("%s on %s/%s", p.env, p.owner, p.repo)
+		return ProviderTarget{
+			Provider: "github",
+			Scope:    string(GitHubScopeEnv),
+			Subject:  subject,
+			Label:    "github env " + subject,
+		}
+	default:
+		subject := p.owner + "/" + p.repo
+		return ProviderTarget{
+			Provider: "github",
+			Scope:    string(GitHubScopeRepo),
+			Subject:  subject,
+			Label:    "github repo " + subject,
+		}
+	}
+}
+
 // SetEnvironment scopes subsequent operations to a GitHub Actions environment.
 // Empty scope means repository-level secrets. Calling SetEnvironment with a
 // non-empty value flips scope to env.

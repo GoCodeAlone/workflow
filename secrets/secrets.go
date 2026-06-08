@@ -35,6 +35,42 @@ type Provider interface {
 	List(ctx context.Context) ([]string, error)
 }
 
+// ProviderTarget describes the concrete provider namespace a Provider instance
+// reads or writes. It is intentionally value-only and must not include secret
+// values or credential material.
+type ProviderTarget struct {
+	Provider string
+	Scope    string
+	Subject  string
+	Label    string
+}
+
+// TargetDescriber is optional: providers implement it when they can describe
+// their concrete namespace, such as GitHub repo/env/org or AWS region.
+type TargetDescriber interface {
+	SecretTarget() ProviderTarget
+}
+
+// DescribeTarget returns a safe provider-owned target description. Providers
+// that do not implement TargetDescriber fall back to their Name.
+func DescribeTarget(provider Provider) ProviderTarget {
+	if provider == nil {
+		return ProviderTarget{}
+	}
+	if describer, ok := provider.(TargetDescriber); ok {
+		target := describer.SecretTarget()
+		if target.Provider == "" {
+			target.Provider = provider.Name()
+		}
+		if target.Label == "" {
+			target.Label = strings.TrimSpace(target.Provider + " " + target.Subject)
+		}
+		return target
+	}
+	name := provider.Name()
+	return ProviderTarget{Provider: name, Scope: "default", Label: name}
+}
+
 // SecretMeta is presence + freshness for one key. Never carries a value.
 type SecretMeta struct {
 	Name      string
@@ -79,6 +115,21 @@ func NewEnvProvider(prefix string) *EnvProvider {
 }
 
 func (p *EnvProvider) Name() string { return "env" }
+
+// SecretTarget describes the current process environment namespace.
+func (p *EnvProvider) SecretTarget() ProviderTarget {
+	label := "env"
+	subject := p.prefix
+	if subject != "" {
+		label = "env prefix " + subject
+	}
+	return ProviderTarget{
+		Provider: "env",
+		Scope:    "process",
+		Subject:  subject,
+		Label:    label,
+	}
+}
 
 func (p *EnvProvider) Get(_ context.Context, key string) (string, error) {
 	if key == "" {
@@ -177,6 +228,16 @@ func NewFileProvider(dir string) *FileProvider {
 }
 
 func (p *FileProvider) Name() string { return "file" }
+
+// SecretTarget describes the directory-backed file secret namespace.
+func (p *FileProvider) SecretTarget() ProviderTarget {
+	return ProviderTarget{
+		Provider: "file",
+		Scope:    "directory",
+		Subject:  p.dir,
+		Label:    "file " + p.dir,
+	}
+}
 
 func (p *FileProvider) Get(_ context.Context, key string) (string, error) {
 	if key == "" {
