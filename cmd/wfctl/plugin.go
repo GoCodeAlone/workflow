@@ -16,45 +16,46 @@ func runPlugin(args []string) error {
 		printPluginUsage()
 		return nil
 	}
+	subArgs := args[1:]
 	switch args[0] {
 	case "init":
-		return runPluginInit(args[1:])
+		return runPluginInit(subArgs)
 	case "docs":
-		return runPluginDocs(args[1:])
+		return runPluginDocs(subArgs)
 	case "test":
-		return runPluginTest(args[1:])
+		return runPluginTest(subArgs)
 	case "search":
-		return runPluginSearch(args[1:])
+		return runPluginSearch(subArgs)
 	case "add":
-		return runPluginAdd(args[1:])
+		return runPluginAdd(subArgs)
 	case "lock":
-		return runPluginLock(args[1:])
+		return runPluginLock(subArgs)
 	case "install":
-		return runPluginInstall(args[1:])
+		return runPluginInstall(subArgs)
 	case "list":
-		return runPluginList(args[1:])
+		return runPluginList(subArgs)
 	case "update":
-		return runPluginUpdate(args[1:])
+		return runPluginUpdate(subArgs)
 	case "remove":
-		return runPluginRemove(args[1:])
+		return runPluginRemove(subArgs)
 	case "validate":
-		return runPluginValidate(args[1:])
+		return runPluginValidate(subArgs)
 	case "audit":
-		return runPluginAudit(args[1:])
+		return runPluginAudit(subArgs)
 	case "validate-contract":
-		return runPluginValidateContract(args[1:])
+		return runPluginValidateContract(subArgs)
 	case "verify-capabilities":
-		return runPluginVerifyCapabilities(args[1:])
+		return runPluginVerifyCapabilities(subArgs)
 	case "registry-sync":
-		return runPluginRegistrySync(args[1:])
+		return runPluginRegistrySync(subArgs)
 	case "conformance":
-		return runPluginConformance(args[1:])
+		return runPluginConformance(subArgs)
 	case "info":
-		return runPluginInfo(args[1:])
+		return runPluginInfo(subArgs)
 	case "deps":
-		return runPluginDeps(args[1:])
+		return runPluginDeps(subArgs)
 	case "marketplace-verify":
-		return runPluginMarketplaceVerify(args[1:])
+		return runPluginMarketplaceVerify(subArgs)
 	default:
 		return pluginUsage()
 	}
