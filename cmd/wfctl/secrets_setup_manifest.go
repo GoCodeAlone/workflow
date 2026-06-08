@@ -38,6 +38,7 @@ type manifestSetupArgs struct {
 	nonInteractive bool
 	secretLiterals []string
 	only           []string
+	all            bool
 	skipExisting   bool
 }
 
@@ -76,23 +77,32 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 		onlySet[name] = true
 	}
 	selector := func(ds []manifestDiscoveredSecret, statuses []SecretStatus) ([]manifestDiscoveredSecret, error) {
-		setMap := make(map[string]bool, len(statuses))
-		for _, status := range statuses {
-			if status.IsSet {
-				setMap[status.Name] = true
+		if interactive && len(onlySet) == 0 {
+			selectable := ds
+			if a.skipExisting {
+				selectable = selectManifestSecretsForSetup(ds, statuses, manifestSecretSelectionOptions{
+					includeExisting: true,
+					skipExisting:    true,
+				})
 			}
+			if len(selectable) == 0 {
+				return nil, nil
+			}
+			items := buildManifestMultiSelectItems(selectable, statuses, a.all)
+			selectedIdx, err := prompt.MultiSelect(
+				fmt.Sprintf("Select secrets to set for %s (unset selected by default; toggle set secrets to update)", scopeLabel),
+				items,
+			)
+			if err != nil {
+				return nil, err
+			}
+			return manifestSecretsByIndexes(selectable, selectedIdx), nil
 		}
-		var selected []manifestDiscoveredSecret
-		for _, secret := range ds {
-			if len(onlySet) > 0 && !onlySet[secret.Name] {
-				continue
-			}
-			if a.skipExisting && setMap[secret.Name] {
-				continue
-			}
-			selected = append(selected, secret)
-		}
-		return selected, nil
+		return selectManifestSecretsForSetup(ds, statuses, manifestSecretSelectionOptions{
+			onlySet:         onlySet,
+			includeExisting: true,
+			skipExisting:    a.skipExisting,
+		}), nil
 	}
 	var promptErr error
 	valuer := func(secret manifestDiscoveredSecret) (string, bool, error) {
@@ -113,7 +123,8 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 	fmt.Fprintf(out, "Setting up secrets from %s -> %s\n\n", a.manifestPath, scopeLabel)
 	switch {
 	case interactive:
-		fmt.Fprintln(out, "Interactive mode: prompting for secret values. Leave a value empty to skip it.")
+		fmt.Fprintln(out, "Interactive mode: unset secrets are selected by default; toggle existing secrets to update them.")
+		fmt.Fprintln(out, "Leave a value empty to skip it.")
 		fmt.Fprintln(out, "Use --from-env, --secret NAME=VALUE, or --non-interactive for scripted setup.")
 	case a.fromEnv:
 		fmt.Fprintln(out, "Non-interactive mode: reading values from matching environment variables; unset values will be skipped.")
@@ -121,10 +132,12 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 		fmt.Fprintln(out, "Non-interactive mode: using --secret NAME=VALUE or piped KEY=VALUE values; missing values will fail.")
 	}
 	fmt.Fprintln(out)
-	for _, secret := range discovered {
-		fmt.Fprintf(out, "  %s (%s)\n", secret.Name, strings.Join(secret.Sources, ", "))
+	if !interactive {
+		for _, secret := range discovered {
+			fmt.Fprintf(out, "  %s (%s)\n", secret.Name, strings.Join(secret.Sources, ", "))
+		}
+		fmt.Fprintln(out)
 	}
-	fmt.Fprintln(out)
 
 	report, err := runSetupEngine(context.Background(), discovered,
 		func(secret manifestDiscoveredSecret) string { return secret.Name },
@@ -219,6 +232,67 @@ func manifestSecretValue(secret manifestDiscoveredSecret, opts manifestSecretVal
 		return "", false, nil
 	}
 	return "", false, fmt.Errorf("no value for secret %q: set $%s and pass --from-env, use --secret %s=VALUE, or run interactively from a terminal", secret.Name, secret.Name, secret.Name)
+}
+
+type manifestSecretSelectionOptions struct {
+	onlySet         map[string]bool
+	includeExisting bool
+	skipExisting    bool
+}
+
+func selectManifestSecretsForSetup(secrets []manifestDiscoveredSecret, statuses []SecretStatus, opts manifestSecretSelectionOptions) []manifestDiscoveredSecret {
+	statusByName := secretStatusByName(statuses)
+	selected := make([]manifestDiscoveredSecret, 0, len(secrets))
+	for _, secret := range secrets {
+		if len(opts.onlySet) > 0 {
+			if !opts.onlySet[secret.Name] {
+				continue
+			}
+		} else if !opts.includeExisting && statusByName[secret.Name].IsSet {
+			continue
+		}
+		if opts.skipExisting && statusByName[secret.Name].IsSet {
+			continue
+		}
+		selected = append(selected, secret)
+	}
+	return selected
+}
+
+func buildManifestMultiSelectItems(secrets []manifestDiscoveredSecret, statuses []SecretStatus, includeExisting bool) []prompt.Item {
+	statusByName := secretStatusByName(statuses)
+	items := make([]prompt.Item, 0, len(secrets))
+	for _, secret := range secrets {
+		st := statusByName[secret.Name]
+		label := formatStatusLabel(secret.Name, st)
+		if len(secret.Sources) > 0 {
+			label += " (" + strings.Join(secret.Sources, ", ") + ")"
+		}
+		items = append(items, prompt.Item{
+			Label:       label,
+			Preselected: includeExisting || !st.IsSet,
+		})
+	}
+	return items
+}
+
+func secretStatusByName(statuses []SecretStatus) map[string]SecretStatus {
+	statusByName := make(map[string]SecretStatus, len(statuses))
+	for _, status := range statuses {
+		statusByName[status.Name] = status
+	}
+	return statusByName
+}
+
+func manifestSecretsByIndexes(secrets []manifestDiscoveredSecret, indexes []int) []manifestDiscoveredSecret {
+	selected := make([]manifestDiscoveredSecret, 0, len(indexes))
+	for _, i := range indexes {
+		if i < 0 || i >= len(secrets) {
+			continue
+		}
+		selected = append(selected, secrets[i])
+	}
+	return selected
 }
 
 func discoverManifestPlugins(manifestPath, lockfilePath string) ([]string, error) {
@@ -463,6 +537,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 		nonInteractive: *nonInteractive,
 		secretLiterals: []string(secretFlag),
 		only:           only,
+		all:            *allFlag,
 		skipExisting:   *skipExisting,
 	}, nil
 }
