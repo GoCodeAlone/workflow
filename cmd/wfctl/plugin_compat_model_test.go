@@ -67,6 +67,23 @@ func TestPluginCompatResolverEngineVersionStaysReleaseComparable(t *testing.T) {
 	}
 }
 
+func TestPluginCompatResolverUsesLinkedWfctlVersion(t *testing.T) {
+	origVersion := version
+	version = "v0.75.3"
+	t.Cleanup(func() {
+		version = origVersion
+	})
+	t.Setenv("WFCTL_ENGINE_VERSION", "")
+
+	got, comparable := resolvePluginCompatEngineVersion("")
+	if !comparable {
+		t.Fatalf("linked wfctl version comparable = false, got %q", got)
+	}
+	if got != "v0.75.3" {
+		t.Fatalf("linked wfctl version = %q, want v0.75.3", got)
+	}
+}
+
 func TestPluginCompatDigestOmitsEvidenceDigest(t *testing.T) {
 	ev := PluginCompatibilityEvidence{
 		Plugin:               "workflow-plugin-test",

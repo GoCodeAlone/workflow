@@ -178,7 +178,7 @@ func resolvePluginCompatEngineVersion(raw string) (string, bool) {
 		raw = strings.TrimSpace(os.Getenv("WFCTL_ENGINE_VERSION"))
 	}
 	if raw == "" {
-		raw = buildVersion()
+		raw = version
 	}
 	engine, err := CanonicalEngineVersion(raw)
 	if err != nil {

@@ -185,6 +185,33 @@ func TestPluginCompatResolverPseudoLocalVersionIsAdvisory(t *testing.T) {
 	}
 }
 
+func TestPluginCompatResolverLinkedVersionDoesNotWarnNotComparable(t *testing.T) {
+	origVersion := version
+	version = "v0.75.3"
+	t.Cleanup(func() {
+		version = origVersion
+	})
+	t.Setenv("WFCTL_ENGINE_VERSION", "")
+
+	idx := resolverIndex(resolverRecord("v0.2.0", passEvidence("v0.2.0", "v0.75.3")))
+	idx.EvidencePolicy.RequiredFromEngine = "v0.70.0"
+	decision, err := ResolvePluginCompatibility(idx, nil, PluginCompatResolverOptions{
+		CompatMode: PluginCompatModeEnforce,
+		Trust:      CompatibilityTrustFirstParty,
+		OS:         "darwin",
+		Arch:       "arm64",
+	})
+	if err != nil {
+		t.Fatalf("ResolvePluginCompatibility: %v", err)
+	}
+	if decision.Warning != "" {
+		t.Fatalf("decision warning = %q, want no warning", decision.Warning)
+	}
+	if decision.Evidence == nil || decision.Evidence.EngineVersion != "v0.75.3" {
+		t.Fatalf("decision evidence = %#v, want v0.75.3 evidence", decision.Evidence)
+	}
+}
+
 func TestPluginCompatResolverLegacyHostLoadEvidenceNeverSatisfiesIaC(t *testing.T) {
 	// An index containing only legacy-host-load evidence must behave as if no
 	// compatible evidence exists. The resolver already filters by typed-iac mode
