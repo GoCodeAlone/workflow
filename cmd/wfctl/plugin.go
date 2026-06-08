@@ -12,6 +12,10 @@ func runPlugin(args []string) error {
 	if len(args) < 1 {
 		return pluginUsage()
 	}
+	if args[0] == "-h" || args[0] == "--help" {
+		printPluginUsage()
+		return nil
+	}
 	switch args[0] {
 	case "init":
 		return runPluginInit(args[1:])
@@ -57,6 +61,11 @@ func runPlugin(args []string) error {
 }
 
 func pluginUsage() error {
+	printPluginUsage()
+	return fmt.Errorf("plugin subcommand is required")
+}
+
+func printPluginUsage() {
 	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl plugin <subcommand> [options]
 
 Subcommands:
@@ -82,7 +91,6 @@ Subcommands:
 
 Use -plugin-dir to specify a custom plugin directory (replaces deprecated -data-dir).
 `)
-	return fmt.Errorf("plugin subcommand is required")
 }
 
 func runPluginInit(args []string) error {
