@@ -89,10 +89,7 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 				return nil, nil
 			}
 			items := buildManifestMultiSelectItems(selectable, statuses, a.all)
-			selectedIdx, err := prompt.MultiSelect(
-				fmt.Sprintf("Select secrets to set for %s (unset selected by default; toggle set secrets to update)", scopeLabel),
-				items,
-			)
+			selectedIdx, err := prompt.MultiSelect(manifestMultiSelectTitle(scopeLabel, a.skipExisting), items)
 			if err != nil {
 				return nil, err
 			}
@@ -122,6 +119,10 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 
 	fmt.Fprintf(out, "Setting up secrets from %s -> %s\n\n", a.manifestPath, scopeLabel)
 	switch {
+	case interactive && a.skipExisting:
+		fmt.Fprintln(out, "Interactive mode: --skip-existing is set; existing secrets are hidden and unset secrets are selected by default.")
+		fmt.Fprintln(out, "Leave a value empty to skip it.")
+		fmt.Fprintln(out, "Use --from-env, --secret NAME=VALUE, or --non-interactive for scripted setup.")
 	case interactive:
 		fmt.Fprintln(out, "Interactive mode: unset secrets are selected by default; toggle existing secrets to update them.")
 		fmt.Fprintln(out, "Leave a value empty to skip it.")
@@ -274,6 +275,13 @@ func buildManifestMultiSelectItems(secrets []manifestDiscoveredSecret, statuses 
 		})
 	}
 	return items
+}
+
+func manifestMultiSelectTitle(scopeLabel string, skipExisting bool) string {
+	if skipExisting {
+		return fmt.Sprintf("Select unset secrets to set for %s (--skip-existing hides existing secrets)", scopeLabel)
+	}
+	return fmt.Sprintf("Select secrets to set for %s (unset selected by default; toggle set secrets to update)", scopeLabel)
 }
 
 func secretStatusByName(statuses []SecretStatus) map[string]SecretStatus {

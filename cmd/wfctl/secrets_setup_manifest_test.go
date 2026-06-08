@@ -181,6 +181,22 @@ func TestBuildManifestMultiSelectItemsShowsStatusSourcesAndDefaults(t *testing.T
 	}
 }
 
+func TestManifestMultiSelectTitleRespectsSkipExisting(t *testing.T) {
+	normal := manifestMultiSelectTitle("github repo GoCodeAlone/example", false)
+	if !strings.Contains(normal, "toggle set secrets to update") {
+		t.Fatalf("normal title = %q, want update hint", normal)
+	}
+	skipExisting := manifestMultiSelectTitle("github repo GoCodeAlone/example", true)
+	if strings.Contains(skipExisting, "toggle set secrets") {
+		t.Fatalf("skip-existing title = %q, must not offer toggling hidden set secrets", skipExisting)
+	}
+	for _, want := range []string{"--skip-existing", "hides existing secrets"} {
+		if !strings.Contains(skipExisting, want) {
+			t.Fatalf("skip-existing title = %q, want %q", skipExisting, want)
+		}
+	}
+}
+
 func TestSelectManifestSecretsForSetupDefaultsToUnsetButCanUpdateAll(t *testing.T) {
 	secrets := []manifestDiscoveredSecret{
 		{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}},

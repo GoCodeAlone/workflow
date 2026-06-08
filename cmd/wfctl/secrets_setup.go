@@ -131,6 +131,7 @@ Options:
 				nonInteractive: manifestNonInteractive,
 				secretLiterals: []string(secretFlag),
 				only:           only,
+				all:            *allFlag,
 				skipExisting:   *skipExisting,
 			}, nil, os.Stdout)
 		}
