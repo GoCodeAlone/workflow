@@ -2563,7 +2563,15 @@ wfctl secrets sync --from staging --to production
 
 Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY. With `--manifest`, discovers secrets from `wfctl.yaml`, `.wfctl-lock.yaml`, installed plugin `required_secrets[]`, and `${ENV_VAR}` references in workflow configs. Repo/env-scoped GitHub setup uses `secrets.config.repo` or `secretStores.<name>.config.repo` when configured; otherwise it infers the repo from `git remote.origin.url` and prints that assumption in the setup target or error.
 
-**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names. Manifest-backed setup prints the selected GitHub target and whether the repo was configured explicitly or inferred, shows discovered provider/config secrets with set/unset status and their sources, and selects only unset secrets by default. Toggle existing secrets to update them, or pass `--all` to preselect every discovered secret.
+**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names.
+
+Manifest-backed interactive setup uses a compact three-step flow by default:
+
+1. A table lists one row per discovered secret and one column per concrete provider target. Status marks are `○` unset, `✓` set, `!` inaccessible/check failed, and `?` unconfigured.
+2. After selecting secrets, choose the scope/store targets for each selected secret. GitHub targets are explicit GitHub destinations (`github:repo`, `github:env`, `github:org`); local `.env`/file stores appear as file/env targets, not GitHub scopes.
+3. When a secret is selected for multiple targets, enter the first value once, then either reuse it for the other targets or provide a different value per target.
+
+Unset secrets are selected by default. Toggle existing secrets to update them, or pass `--all` to preselect every discovered secret. Pass `--verbose` to include source files, plugin names, and full provider target labels in the interactive rows.
 
 **Non-interactive mode** (auto when stdin is not a TTY, or forced with `--non-interactive` / `--auto-gen-keys`): reads values from the sources below in priority order:
 - `--from-env` — reads `$NAME` for each secret. Recommended for CI; avoids process-table leaks. Secrets whose env var is unset are skipped.
@@ -2595,6 +2603,7 @@ wfctl secrets setup [options]
 | `--all` | `false` | Set all declared secrets; in manifest-backed interactive setup, preselect existing secrets too |
 | `--only` | _(all)_ | Comma-separated list of secret names to set; mutually exclusive with `--all` |
 | `--skip-existing` | `false` | Skip secrets that already have a value in the store |
+| `--verbose` | `false` | In manifest-backed interactive setup, show source files, plugin names, and full provider target details |
 | `--auto-gen-keys` | `false` | Auto-generate random values for config-backed secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive; not supported for manifest-backed `wfctl.yaml` setup |
 | `--scope` | `repo` | GitHub scope for plugin or manifest setup: `repo` \| `env` \| `org` |
 | `--org` | _(none)_ | Organization slug for `--scope org` |

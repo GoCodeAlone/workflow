@@ -66,6 +66,23 @@ func TestMultiSelectZeroValue(t *testing.T) {
 	}
 }
 
+func TestTableMultiSelect_NonTTY(t *testing.T) {
+	_, err := prompt.TableMultiSelect("Pick", []prompt.TableColumn{{Title: "Name", Width: 12}}, []prompt.TableItem{{Cells: []string{"TOKEN"}}})
+	if err != prompt.ErrNotInteractive {
+		t.Fatalf("TableMultiSelect: got %v, want ErrNotInteractive", err)
+	}
+}
+
+func TestTableMultiSelectZeroValue(t *testing.T) {
+	indices, err := prompt.TableMultiSelect("Pick", []prompt.TableColumn{{Title: "Name", Width: 12}}, []prompt.TableItem{{Cells: []string{"TOKEN"}}})
+	if err != prompt.ErrNotInteractive {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(indices) != 0 {
+		t.Errorf("indices = %v, want []", indices)
+	}
+}
+
 func TestInputZeroValue(t *testing.T) {
 	s, err := prompt.Input("label", false)
 	if err != prompt.ErrNotInteractive {

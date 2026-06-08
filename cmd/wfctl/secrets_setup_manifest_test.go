@@ -146,12 +146,16 @@ func TestParseManifestSetupFlagsPreservesAll(t *testing.T) {
 	args, err := parseManifestSetupFlags([]string{
 		"--manifest", "wfctl.yaml",
 		"--all",
+		"--verbose",
 	})
 	if err != nil {
 		t.Fatalf("parseManifestSetupFlags: %v", err)
 	}
 	if !args.all {
 		t.Fatalf("--all was not preserved: %+v", args)
+	}
+	if !args.verbose {
+		t.Fatalf("--verbose was not preserved: %+v", args)
 	}
 }
 
@@ -321,6 +325,355 @@ func TestBuildManifestSecretTargetItemsShowProviderScopes(t *testing.T) {
 	for _, want := range []string{"AWS_ACCESS_KEY_ID", "aws secrets-manager aws-prod", "✗ unset"} {
 		if !strings.Contains(items[2].Label, want) {
 			t.Fatalf("AWS target label %q does not contain %q", items[2].Label, want)
+		}
+	}
+}
+
+func TestManifestSecretTargetScopeLabelUsesProviderDomain(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "GITHUB_TOKEN"}},
+			Store:  "github-repo",
+			Label:  "github repo GoCodeAlone/example",
+		},
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "GITHUB_TOKEN"}},
+			Store:  "github-env:production",
+			Label:  "github env production in GoCodeAlone/example",
+		},
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DOTENV_TOKEN"}},
+			Store:  "dotenv",
+			Label:  "file .env",
+		},
+	}
+
+	got := []string{
+		manifestSecretTargetScopeLabel(targets[0]),
+		manifestSecretTargetScopeLabel(targets[1]),
+		manifestSecretTargetScopeLabel(targets[2]),
+	}
+	want := []string{"github:repo", "github:env", "file"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scope labels = %v, want %v", got, want)
+	}
+	for _, label := range got[:2] {
+		if strings.Contains(label, "local") {
+			t.Fatalf("github scope label leaked local semantics: %q", label)
+		}
+	}
+}
+
+func TestBuildManifestSecretMatrixRowsSummarizesTargets(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{
+			Secret: manifestDiscoveredSecret{
+				PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"},
+				Sources:              []string{"config:digitalocean.wfctl.yaml", "plugin:workflow-plugin-digitalocean"},
+			},
+			Store: "github-repo",
+			Label: "github repo GoCodeAlone/example",
+			Status: SecretStatus{
+				Name:  "DIGITALOCEAN_TOKEN",
+				Store: "github-repo",
+				State: SecretNotSet,
+			},
+		},
+		{
+			Secret: manifestDiscoveredSecret{
+				PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"},
+				Sources:              []string{"config:digitalocean.wfctl.yaml", "plugin:workflow-plugin-digitalocean"},
+			},
+			Store: "github-org:GoCodeAlone",
+			Label: "github org GoCodeAlone",
+			Status: SecretStatus{
+				Name:  "DIGITALOCEAN_TOKEN",
+				Store: "github-org:GoCodeAlone",
+				State: SecretSet,
+				IsSet: true,
+			},
+		},
+		{
+			Secret: manifestDiscoveredSecret{
+				PluginRequiredSecret: PluginRequiredSecret{Name: "HOVER_PASSWORD"},
+				Sources:              []string{"config:hover.wfctl.yaml", "plugin:workflow-plugin-hover"},
+			},
+			Store: "github-repo",
+			Label: "github repo GoCodeAlone/example",
+			Status: SecretStatus{
+				Name:  "HOVER_PASSWORD",
+				Store: "github-repo",
+				State: SecretSet,
+				IsSet: true,
+			},
+		},
+		{
+			Secret: manifestDiscoveredSecret{
+				PluginRequiredSecret: PluginRequiredSecret{Name: "HOVER_PASSWORD"},
+				Sources:              []string{"config:hover.wfctl.yaml", "plugin:workflow-plugin-hover"},
+			},
+			Store: "github-org:GoCodeAlone",
+			Label: "github org GoCodeAlone",
+			Status: SecretStatus{
+				Name:  "HOVER_PASSWORD",
+				Store: "github-org:GoCodeAlone",
+				State: SecretSet,
+				IsSet: true,
+			},
+		},
+	}
+
+	cols, rows, grouped := buildManifestSecretMatrixRows(targets, false, false)
+	if len(cols) != 3 {
+		t.Fatalf("cols = %+v, want secret + 2 scopes", cols)
+	}
+	if cols[1].Title != "github:repo" || cols[2].Title != "github:org" {
+		t.Fatalf("cols = %+v, want github scope headers", cols)
+	}
+	if len(rows) != 2 || len(grouped) != 2 {
+		t.Fatalf("rows=%d grouped=%d, want 2", len(rows), len(grouped))
+	}
+	if rows[0].Cells[0] != "DIGITALOCEAN_TOKEN" || rows[0].Cells[1] != "○" || rows[0].Cells[2] != "✓" {
+		t.Fatalf("first row = %+v", rows[0].Cells)
+	}
+	if !rows[0].Preselected {
+		t.Fatalf("unset row should be preselected: %+v", rows[0])
+	}
+	if rows[1].Preselected {
+		t.Fatalf("all-set row should not be preselected: %+v", rows[1])
+	}
+	for _, cell := range rows[0].Cells {
+		if strings.Contains(cell, "config:") || strings.Contains(cell, "plugin:") || strings.Contains(cell, "GoCodeAlone/example") {
+			t.Fatalf("default matrix row is too verbose: %+v", rows[0].Cells)
+		}
+	}
+
+	_, verboseRows, _ := buildManifestSecretMatrixRows(targets, false, true)
+	if !strings.Contains(strings.Join(verboseRows[0].Cells, " "), "config:digitalocean.wfctl.yaml") {
+		t.Fatalf("verbose row lacks source detail: %+v", verboseRows[0].Cells)
+	}
+}
+
+func TestBuildManifestSecretMatrixRowsDisambiguatesDuplicateScopes(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:  "gh-a:repo",
+			Label:  "github repo GoCodeAlone/app-a",
+			Status: SecretStatus{
+				State: SecretNotSet,
+			},
+		},
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:  "gh-b:repo",
+			Label:  "github repo GoCodeAlone/app-b",
+			Status: SecretStatus{
+				State: SecretSet,
+				IsSet: true,
+			},
+		},
+	}
+
+	cols, rows, _ := buildManifestSecretMatrixRows(targets, false, false)
+	if len(cols) != 3 {
+		t.Fatalf("cols = %+v, want secret + two repo targets", cols)
+	}
+	if cols[1].Title == cols[2].Title {
+		t.Fatalf("duplicate compact scopes were not disambiguated: %+v", cols)
+	}
+	if !strings.HasPrefix(cols[1].Title, "github:repo:") || !strings.HasPrefix(cols[2].Title, "github:repo:") {
+		t.Fatalf("cols = %+v, want compact disambiguated github repo columns", cols)
+	}
+	if rows[0].Cells[1] != "○" || rows[0].Cells[2] != "✓" {
+		t.Fatalf("row = %+v, want per-target status preserved", rows[0].Cells)
+	}
+}
+
+func TestBuildManifestSecretMatrixRowsKeepsTruncatedSubjectsUnique(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:  "gh-a:repo",
+			Label:  "github repo GoCodeAlone/repository-with-shared-prefix-alpha",
+			Status: SecretStatus{
+				State: SecretNotSet,
+			},
+		},
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:  "gh-b:repo",
+			Label:  "github repo GoCodeAlone/repository-with-shared-prefix-beta",
+			Status: SecretStatus{
+				State: SecretSet,
+				IsSet: true,
+			},
+		},
+	}
+
+	cols, rows, _ := buildManifestSecretMatrixRows(targets, false, false)
+	if len(cols) != 3 {
+		t.Fatalf("cols = %+v, want secret + two disambiguated repo targets", cols)
+	}
+	if cols[1].Title == cols[2].Title {
+		t.Fatalf("truncated duplicate subjects collapsed into one matrix column: %+v", cols)
+	}
+	if rows[0].Cells[1] != "○" || rows[0].Cells[2] != "✓" {
+		t.Fatalf("row = %+v, want per-target statuses retained", rows[0].Cells)
+	}
+}
+
+func TestBuildManifestTargetItemsAreCompactByDefault(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{
+			Store: "github-repo",
+			Label: "github repo GoCodeAlone/gocodealone-dns (inferred from git remote.origin.url)",
+			Status: SecretStatus{
+				State: SecretNotSet,
+			},
+		},
+		{
+			Store: "github-org:GoCodeAlone",
+			Label: "github org GoCodeAlone",
+			Status: SecretStatus{
+				State: SecretSet,
+				IsSet: true,
+			},
+		},
+	}
+
+	items := buildManifestTargetItems(targets, false, false)
+	if len(items) != 2 {
+		t.Fatalf("items len = %d, want 2", len(items))
+	}
+	if items[0].Label != "github:repo  unset" {
+		t.Fatalf("compact label = %q", items[0].Label)
+	}
+	if items[1].Label != "github:org   set" {
+		t.Fatalf("compact label = %q", items[1].Label)
+	}
+	if strings.Contains(items[0].Label, "inferred") || strings.Contains(items[0].Label, "gocodealone-dns") {
+		t.Fatalf("compact target label is too verbose: %q", items[0].Label)
+	}
+
+	verbose := buildManifestTargetItems(targets, false, true)
+	if !strings.Contains(verbose[0].Label, "inferred from git remote.origin.url") {
+		t.Fatalf("verbose target label lacks detail: %q", verbose[0].Label)
+	}
+}
+
+func TestRunManifestSecretTargetSetupWithValuesSupportsPerTargetValues(t *testing.T) {
+	repoProvider := newEngineTestProvider(nil)
+	orgProvider := newEngineTestProvider(nil)
+	targets := []manifestSecretTarget{
+		{
+			Secret:   manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:    "github-repo",
+			Label:    "github repo GoCodeAlone/example",
+			Provider: repoProvider,
+		},
+		{
+			Secret:   manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}},
+			Store:    "github-org:GoCodeAlone",
+			Label:    "github org GoCodeAlone",
+			Provider: orgProvider,
+		},
+	}
+	values := map[string]manifestProvidedSecretValue{
+		manifestSecretTargetKey(targets[0]): {Value: "repo-value", Provided: true},
+		manifestSecretTargetKey(targets[1]): {Value: "org-value", Provided: true},
+	}
+
+	report, err := runManifestSecretTargetSetupWithValues(context.Background(), targets, values, nil, true)
+	if err != nil {
+		t.Fatalf("runManifestSecretTargetSetupWithValues: %v", err)
+	}
+	if repoProvider.data["TOKEN"] != "repo-value" {
+		t.Fatalf("repo value = %q", repoProvider.data["TOKEN"])
+	}
+	if orgProvider.data["TOKEN"] != "org-value" {
+		t.Fatalf("org value = %q", orgProvider.data["TOKEN"])
+	}
+	if len(report.Set) != 2 {
+		t.Fatalf("report.Set = %v", report.Set)
+	}
+}
+
+func TestCollectManifestSecretTargetValuesAllowsDifferentPerTargetValue(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN", Sensitive: true}},
+			Store:  "github-repo",
+			Label:  "github repo GoCodeAlone/example",
+		},
+		{
+			Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN", Sensitive: true}},
+			Store:  "github-org:GoCodeAlone",
+			Label:  "github org GoCodeAlone",
+		},
+	}
+	inputs := []string{"repo-value", "org-value"}
+	confirmCalls := 0
+	values, err := collectManifestSecretTargetValues(targets,
+		func(manifestDiscoveredSecret) (string, bool, error) { return "", false, nil },
+		manifestTargetValuePrompt{
+			input: func(label string, masked bool) (string, error) {
+				if !masked {
+					t.Fatalf("secret prompt was not masked for %q", label)
+				}
+				if !strings.Contains(label, "TOKEN for github:") {
+					t.Fatalf("input label = %q, want target-specific scope", label)
+				}
+				v := inputs[0]
+				inputs = inputs[1:]
+				return v, nil
+			},
+			confirm: func(question string, def bool) (bool, error) {
+				confirmCalls++
+				if !strings.Contains(question, "github:org") || !def {
+					t.Fatalf("confirm question=%q def=%v", question, def)
+				}
+				return false, nil
+			},
+		})
+	if err != nil {
+		t.Fatalf("collectManifestSecretTargetValues: %v", err)
+	}
+	if confirmCalls != 1 {
+		t.Fatalf("confirm calls = %d, want 1", confirmCalls)
+	}
+	if got := values[manifestSecretTargetKey(targets[0])].Value; got != "repo-value" {
+		t.Fatalf("repo value = %q", got)
+	}
+	if got := values[manifestSecretTargetKey(targets[1])].Value; got != "org-value" {
+		t.Fatalf("org value = %q", got)
+	}
+}
+
+func TestCollectManifestSecretTargetValuesUsesPreprovidedValueForAllTargets(t *testing.T) {
+	targets := []manifestSecretTarget{
+		{Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}}, Store: "github-repo"},
+		{Secret: manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN"}}, Store: "github-org:GoCodeAlone"},
+	}
+	values, err := collectManifestSecretTargetValues(targets,
+		func(manifestDiscoveredSecret) (string, bool, error) { return "env-value", true, nil },
+		manifestTargetValuePrompt{
+			input: func(string, bool) (string, error) {
+				t.Fatal("input should not be called when value is preprovided")
+				return "", nil
+			},
+			confirm: func(string, bool) (bool, error) {
+				t.Fatal("confirm should not be called when value is preprovided")
+				return false, nil
+			},
+		})
+	if err != nil {
+		t.Fatalf("collectManifestSecretTargetValues: %v", err)
+	}
+	for _, target := range targets {
+		got := values[manifestSecretTargetKey(target)]
+		if !got.Provided || got.Value != "env-value" {
+			t.Fatalf("value for %+v = %+v", target, got)
 		}
 	}
 }
