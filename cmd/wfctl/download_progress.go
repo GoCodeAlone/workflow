@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/mattn/go-isatty"
 )
 
 const downloadProgressInterval = 2 * time.Second
@@ -25,10 +27,15 @@ type downloadProgress struct {
 	total int64
 	read  int64
 	last  time.Time
+	tty   bool
 }
 
 func newDownloadProgress(w io.Writer, total int64) *downloadProgress {
-	p := &downloadProgress{w: w, total: total}
+	return newDownloadProgressWithTerminal(w, total, isatty.IsTerminal(os.Stderr.Fd()))
+}
+
+func newDownloadProgressWithTerminal(w io.Writer, total int64, tty bool) *downloadProgress {
+	p := &downloadProgress{w: w, total: total, tty: tty}
 	p.emit("Download progress")
 	return p
 }
@@ -45,6 +52,9 @@ func (p *downloadProgress) Write(data []byte) (int, error) {
 
 func (p *downloadProgress) finish() {
 	p.emit("Download complete")
+	if p.tty && p.w != nil {
+		fmt.Fprintln(p.w)
+	}
 }
 
 func (p *downloadProgress) emit(prefix string) {
@@ -52,12 +62,18 @@ func (p *downloadProgress) emit(prefix string) {
 		return
 	}
 	p.last = time.Now()
+	line := ""
 	if p.total > 0 {
 		percent := float64(p.read) / float64(p.total) * 100
-		fmt.Fprintf(p.w, "%s: %s/%s (%.0f%%)\n", prefix, formatDownloadBytes(p.read), formatDownloadBytes(p.total), percent)
-		return
+		line = fmt.Sprintf("%s: %s/%s (%.0f%%)", prefix, formatDownloadBytes(p.read), formatDownloadBytes(p.total), percent)
+	} else {
+		line = fmt.Sprintf("%s: %s", prefix, formatDownloadBytes(p.read))
 	}
-	fmt.Fprintf(p.w, "%s: %s\n", prefix, formatDownloadBytes(p.read))
+	if p.tty {
+		fmt.Fprintf(p.w, "\r%s", line)
+	} else {
+		fmt.Fprintln(p.w, line)
+	}
 }
 
 func formatDownloadBytes(n int64) string {

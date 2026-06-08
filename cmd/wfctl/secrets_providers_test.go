@@ -48,6 +48,15 @@ func (f *metadataSecretsProvider) StatAll(_ context.Context) ([]secrets.SecretMe
 	return f.metas, nil
 }
 
+type targetSecretsProvider struct {
+	*plainSecretsProvider
+	target secrets.ProviderTarget
+}
+
+func (f *targetSecretsProvider) SecretTarget() secrets.ProviderTarget {
+	return f.target
+}
+
 // ---------------------------------------------------------------------------
 // Adapter tests
 // ---------------------------------------------------------------------------
@@ -118,6 +127,24 @@ func TestSecretsProviderAdapter_List_MetadataProvider_UpdatedAt(t *testing.T) {
 	}
 	if statuses[0].LastRotated != ts {
 		t.Errorf("LastRotated = %v, want %v", statuses[0].LastRotated, ts)
+	}
+}
+
+func TestSecretsProviderAdapter_SecretTargetUsesProviderContract(t *testing.T) {
+	fp := &targetSecretsProvider{
+		plainSecretsProvider: &plainSecretsProvider{stored: map[string]string{}},
+		target: secrets.ProviderTarget{
+			Provider: "custom",
+			Scope:    "namespace",
+			Subject:  "example",
+			Label:    "custom namespace example",
+		},
+	}
+	adapter := secretsProviderAdapter{fp}
+
+	target := adapter.SecretTarget()
+	if target.Label != "custom namespace example" || target.Scope != "namespace" {
+		t.Fatalf("target = %+v", target)
 	}
 }
 

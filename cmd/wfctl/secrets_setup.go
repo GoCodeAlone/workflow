@@ -123,6 +123,7 @@ Options:
 				pluginDir:      *pluginDir,
 				configPatterns: defaultManifestSetupConfigPatterns(),
 				scope:          *scope,
+				scopeExplicit:  hasFlag(args, "scope"),
 				envName:        *envName,
 				org:            *org,
 				visibility:     *visibility,

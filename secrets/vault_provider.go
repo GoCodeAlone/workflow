@@ -74,6 +74,23 @@ func NewVaultProviderFromClient(client *vault.Client, cfg VaultConfig) *VaultPro
 
 func (p *VaultProvider) Name() string { return "vault" }
 
+// SecretTarget describes the Vault KV namespace used by this provider.
+func (p *VaultProvider) SecretTarget() ProviderTarget {
+	subject := strings.TrimRight(p.config.Address, "/")
+	if p.config.MountPath != "" {
+		subject += "/" + strings.Trim(p.config.MountPath, "/")
+	}
+	if p.config.Namespace != "" {
+		subject += " namespace " + p.config.Namespace
+	}
+	return ProviderTarget{
+		Provider: "vault",
+		Scope:    "mount",
+		Subject:  subject,
+		Label:    "vault " + subject,
+	}
+}
+
 // Get retrieves a secret value from Vault KV v2.
 // The key can be in the format "path" or "path#field".
 // If #field is specified, returns that specific field from the secret data.

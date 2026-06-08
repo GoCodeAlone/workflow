@@ -71,6 +71,21 @@ func TestFormatStatusLabel(t *testing.T) {
 	if !strings.Contains(setWithTime, "✓ set · updated") || !strings.Contains(setWithTime, "3d ago") {
 		t.Errorf("set-with-time label = %q, want '✓ set · updated 3d ago'", setWithTime)
 	}
+
+	noAccess := formatStatusLabel("QUX", SecretStatus{Name: "QUX", State: SecretNoAccess})
+	if !strings.Contains(noAccess, "! no access") {
+		t.Errorf("no-access label = %q, want ! no access", noAccess)
+	}
+
+	fetchError := formatStatusLabel("QUUX", SecretStatus{Name: "QUUX", State: SecretFetchError})
+	if !strings.Contains(fetchError, "! check failed") {
+		t.Errorf("fetch-error label = %q, want ! check failed", fetchError)
+	}
+
+	unconfigured := formatStatusLabel("CORGE", SecretStatus{Name: "CORGE", State: SecretUnconfigured})
+	if !strings.Contains(unconfigured, "! unconfigured") {
+		t.Errorf("unconfigured label = %q, want ! unconfigured", unconfigured)
+	}
 }
 
 func TestFormatRotatedAge(t *testing.T) {
@@ -114,6 +129,55 @@ func TestBuildMultiSelectItems(t *testing.T) {
 	}
 	if !strings.Contains(items[1].Label, "✗ unset") {
 		t.Errorf("UNSET_ONE label = %q", items[1].Label)
+	}
+}
+
+func TestBuildSetupDeclsResolvesPerSecretStores(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		SecretStores: map[string]*config.SecretStoreConfig{
+			"github-repo": {Provider: "github", Config: map[string]any{"repo": "GoCodeAlone/example"}},
+			"aws-prod":    {Provider: "aws-secrets-manager", Config: map[string]any{"region": "us-east-1"}},
+		},
+		Secrets: &config.SecretsConfig{
+			DefaultStore: "github-repo",
+			Entries: []config.SecretEntry{
+				{Name: "GITHUB_TOKEN"},
+				{Name: "AWS_ACCESS_KEY_ID", Store: "aws-prod"},
+			},
+		},
+	}
+
+	decls := buildSetupDecls(cfg, "production", "")
+	if len(decls) != 2 {
+		t.Fatalf("decls len = %d, want 2", len(decls))
+	}
+	if decls[0].store != "github-repo" {
+		t.Fatalf("GITHUB_TOKEN store = %q, want github-repo", decls[0].store)
+	}
+	if decls[1].store != "aws-prod" {
+		t.Fatalf("AWS_ACCESS_KEY_ID store = %q, want aws-prod", decls[1].store)
+	}
+
+	decls = buildSetupDecls(cfg, "production", "github-repo")
+	if decls[1].store != "github-repo" {
+		t.Fatalf("--store override did not override per-secret store: %+v", decls[1])
+	}
+}
+
+func TestBuildMultiSelectItemsShowsResolvedStore(t *testing.T) {
+	decls := []setupDecl{
+		{name: "AWS_ACCESS_KEY_ID", store: "aws-prod"},
+	}
+	statuses := []SecretStatus{
+		{Name: "AWS_ACCESS_KEY_ID", Store: "aws-prod", IsSet: false, State: SecretNotSet},
+	}
+
+	items := buildMultiSelectItems(decls, statuses)
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	if !strings.Contains(items[0].Label, "[aws-prod]") {
+		t.Fatalf("label = %q, want resolved store", items[0].Label)
 	}
 }
 

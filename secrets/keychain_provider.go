@@ -47,6 +47,16 @@ func NewKeychainProvider(service string) (*KeychainProvider, error) {
 // Name returns the provider identifier "keychain".
 func (p *KeychainProvider) Name() string { return "keychain" }
 
+// SecretTarget describes the OS keychain service namespace.
+func (p *KeychainProvider) SecretTarget() ProviderTarget {
+	return ProviderTarget{
+		Provider: "keychain",
+		Scope:    "service",
+		Subject:  p.service,
+		Label:    "keychain service " + p.service,
+	}
+}
+
 // Get retrieves the secret stored under the given key from the OS keychain.
 func (p *KeychainProvider) Get(ctx context.Context, key string) (string, error) {
 	if err := ctx.Err(); err != nil {

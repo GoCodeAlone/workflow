@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
@@ -25,6 +26,7 @@ type setupDecl struct {
 	name        string
 	sensitive   bool
 	description string
+	store       string
 }
 
 // builtinProviderTypes are the provider names a user can pick when no named
@@ -51,34 +53,21 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 		return nil
 	}
 
-	decls := make([]setupDecl, 0, len(cfg.Secrets.Entries))
-	for _, e := range cfg.Secrets.Entries {
-		decls = append(decls, setupDecl{
-			name:        e.Name,
-			sensitive:   isSecretSensitive(e.Name),
-			description: e.Description,
-		})
-	}
-
-	// 1. Resolve the store (prompt when unresolved + interactive).
-	storeName, err := resolveSetupStoreInteractive(a.storeName, cfg)
-	if err != nil {
-		return err
-	}
-
-	// 2. Build the provider + print an access line.
-	provider, err := getProviderForStore(storeName, cfg)
-	if err != nil {
-		return fmt.Errorf("resolve store %q: %w", storeName, err)
-	}
-	printStoreAccessLine(ctx, out, storeName, provider)
+	decls := buildSetupDecls(cfg, a.envName, a.storeName)
 
 	// 3. Query per-entry status and let the user MultiSelect.
-	statuses := queryDeclStatuses(ctx, decls, provider)
+	for _, storeName := range setupDeclStores(decls) {
+		provider, err := getProviderForStore(storeName, cfg)
+		if err != nil {
+			return fmt.Errorf("resolve store %q: %w", storeName, err)
+		}
+		printStoreAccessLine(ctx, out, storeName, provider)
+	}
+	statuses := querySetupDeclStatuses(ctx, decls, cfg)
 	items := buildMultiSelectItems(decls, statuses)
 
 	selectedIdx, err := prompt.MultiSelect(
-		fmt.Sprintf("Select secrets to set in %q (space to toggle, enter to confirm)", storeName),
+		"Select secrets to set (space to toggle, enter to confirm)",
 		items,
 	)
 	if err != nil {
@@ -94,7 +83,7 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 
 	// 4. Confirm before writing.
 	ok, err := prompt.Confirm(
-		fmt.Sprintf("Set %d secret(s) to store %q?", len(selectedIdx), storeName),
+		fmt.Sprintf("Set %d secret(s) to their resolved store(s)?", len(selectedIdx)),
 		true,
 	)
 	if err != nil {
@@ -110,18 +99,15 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 
 	// 5. Build the engine selector (the user's MultiSelect choice) + valuer
 	//    (masked prompt.Input). Reuse the SAME engine + audit as non-interactive.
-	selectedSet := make(map[string]bool, len(selectedIdx))
+	selectedSet := make(map[int]bool, len(selectedIdx))
 	for _, i := range selectedIdx {
-		selectedSet[decls[i].name] = true
+		selectedSet[i] = true
 	}
-	selector := func(ds []setupDecl, _ []SecretStatus) ([]setupDecl, error) {
-		var keep []setupDecl
-		for _, d := range ds {
-			if selectedSet[d.name] {
-				keep = append(keep, d)
-			}
+	selectedDecls := make([]setupDecl, 0, len(selectedIdx))
+	for i, decl := range decls {
+		if selectedSet[i] {
+			selectedDecls = append(selectedDecls, decl)
 		}
-		return keep, nil
 	}
 
 	var promptErr error
@@ -144,13 +130,11 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 		return v, true, nil
 	}
 
-	auditFn := func(name, _ string) {
-		_ = writeSecretsAuditRecord(name, storeName) //nolint:errcheck // best-effort audit
+	auditFn := func(name, store string) {
+		_ = writeSecretsAuditRecord(name, store) //nolint:errcheck // best-effort audit
 	}
 
-	report, err := runSetupEngine(ctx, decls,
-		func(d setupDecl) string { return d.name },
-		provider, selector, valuer, auditFn, false)
+	report, err := runSetupDeclsByStore(ctx, cfg, selectedDecls, valuer, auditFn, false)
 	// If a prompt.Input hit a non-TTY mid-flow, surface ErrNotInteractive so the
 	// caller's fallback triggers. The engine runs with stopOnErr=false, so it
 	// returns (report, nil) even when the valuer reported ErrNotInteractive —
@@ -169,30 +153,39 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 	return nil
 }
 
-// resolveSetupStoreInteractive resolves the store, prompting the user with
-// prompt.Select when the resolver returns unresolved ("" + nil error).
-func resolveSetupStoreInteractive(storeFlag string, cfg *config.WorkflowConfig) (string, error) {
-	defaultStore := ""
-	if cfg.Secrets != nil {
-		defaultStore = cfg.Secrets.DefaultStore
-		if defaultStore == "" {
-			defaultStore = cfg.Secrets.Provider
+func buildSetupDecls(cfg *config.WorkflowConfig, envName, storeOverride string) []setupDecl {
+	if cfg == nil || cfg.Secrets == nil {
+		return nil
+	}
+	decls := make([]setupDecl, 0, len(cfg.Secrets.Entries))
+	for _, e := range cfg.Secrets.Entries {
+		storeName := strings.TrimSpace(storeOverride)
+		if storeName == "" {
+			storeName = ResolveSecretStore(e.Name, envName, cfg)
 		}
+		decls = append(decls, setupDecl{
+			name:        e.Name,
+			sensitive:   isSecretSensitive(e.Name),
+			description: e.Description,
+			store:       storeName,
+		})
 	}
-	name, err := resolveSetupStoreName(storeFlag, defaultStore, cfg.SecretStores, true)
-	if err != nil {
-		return "", err
+	return decls
+}
+
+func setupDeclStores(decls []setupDecl) []string {
+	seen := map[string]bool{}
+	var stores []string
+	for _, decl := range decls {
+		store := strings.TrimSpace(decl.store)
+		if store == "" || seen[store] {
+			continue
+		}
+		seen[store] = true
+		stores = append(stores, store)
 	}
-	if name != "" {
-		return name, nil
-	}
-	// Unresolved + interactive → prompt over store keys + builtin provider types.
-	opts := storePickOptions(cfg.SecretStores)
-	idx, err := prompt.Select("Pick a secret store", opts)
-	if err != nil {
-		return "", err
-	}
-	return opts[idx], nil
+	sort.Strings(stores)
+	return stores
 }
 
 // storePickOptions returns the ordered list of store names a user can pick:
@@ -228,6 +221,40 @@ func queryDeclStatuses(ctx context.Context, decls []setupDecl, provider SecretsP
 	return statuses
 }
 
+func querySetupDeclStatuses(ctx context.Context, decls []setupDecl, cfg *config.WorkflowConfig) []SecretStatus {
+	statuses := make([]SecretStatus, 0, len(decls))
+	providers := map[string]SecretsProvider{}
+	for _, d := range decls {
+		provider, ok := providers[d.store]
+		if !ok {
+			var err error
+			provider, err = getProviderForStore(d.store, cfg)
+			if err != nil {
+				statuses = append(statuses, SecretStatus{
+					Name:  d.name,
+					Store: d.store,
+					State: SecretUnconfigured,
+					Error: err.Error(),
+				})
+				continue
+			}
+			providers[d.store] = provider
+		}
+		state, err := provider.Check(ctx, d.name)
+		status := SecretStatus{
+			Name:  d.name,
+			Store: d.store,
+			State: state,
+			IsSet: state == SecretSet,
+		}
+		if err != nil {
+			status.Error = err.Error()
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
 // buildMultiSelectItems builds the prompt.MultiSelect rows. Unset secrets are
 // preselected; set secrets show their last-updated age when known.
 func buildMultiSelectItems(decls []setupDecl, statuses []SecretStatus) []prompt.Item {
@@ -238,12 +265,60 @@ func buildMultiSelectItems(decls []setupDecl, statuses []SecretStatus) []prompt.
 	items := make([]prompt.Item, 0, len(decls))
 	for _, d := range decls {
 		st := statusByName[d.name]
+		label := formatStatusLabel(d.name, st)
+		if d.store != "" {
+			label += " [" + d.store + "]"
+		}
 		items = append(items, prompt.Item{
-			Label:       formatStatusLabel(d.name, st),
+			Label:       label,
 			Preselected: !st.IsSet, // preselect unset
 		})
 	}
 	return items
+}
+
+func runSetupDeclsByStore(ctx context.Context, cfg *config.WorkflowConfig, decls []setupDecl, valuer func(setupDecl) (string, bool, error), audit func(string, string), stopOnError bool) (setupReport, error) {
+	var report setupReport
+	providers := map[string]SecretsProvider{}
+	for _, decl := range decls {
+		provider, ok := providers[decl.store]
+		if !ok {
+			var err error
+			provider, err = getProviderForStore(decl.store, cfg)
+			if err != nil {
+				report.Failed = append(report.Failed, decl.name)
+				if stopOnError {
+					return report, err
+				}
+				continue
+			}
+			providers[decl.store] = provider
+		}
+		value, provided, err := valuer(decl)
+		if err != nil {
+			report.Failed = append(report.Failed, decl.name)
+			if stopOnError {
+				return report, err
+			}
+			continue
+		}
+		if !provided {
+			report.Skipped = append(report.Skipped, decl.name)
+			continue
+		}
+		if err := provider.Set(ctx, decl.name, value); err != nil {
+			report.Failed = append(report.Failed, decl.name)
+			if stopOnError {
+				return report, err
+			}
+			continue
+		}
+		report.Set = append(report.Set, decl.name)
+		if audit != nil {
+			audit(decl.name, decl.store)
+		}
+	}
+	return report, nil
 }
 
 // formatStatusLabel renders a MultiSelect row label for one secret.
@@ -251,6 +326,14 @@ func buildMultiSelectItems(decls []setupDecl, statuses []SecretStatus) []prompt.
 //	NAME   ✓ set · updated 3d ago
 //	NAME   ✗ unset
 func formatStatusLabel(name string, st SecretStatus) string {
+	switch st.State {
+	case SecretNoAccess:
+		return fmt.Sprintf("%-24s ! no access", name)
+	case SecretFetchError:
+		return fmt.Sprintf("%-24s ! check failed", name)
+	case SecretUnconfigured:
+		return fmt.Sprintf("%-24s ! unconfigured", name)
+	}
 	if st.IsSet {
 		age := formatRotatedAge(st.LastRotated)
 		if age != "" {
