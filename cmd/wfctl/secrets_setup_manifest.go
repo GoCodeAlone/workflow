@@ -1429,6 +1429,9 @@ func addDiscoveredSecretWithStoreHintAndTargets(secretsByName map[string]*manife
 }
 
 func mergePluginSecretTargets(existing []PluginSecretTarget, incoming []PluginSecretTarget) []PluginSecretTarget {
+	if len(incoming) == 0 {
+		return existing
+	}
 	out := append([]PluginSecretTarget(nil), existing...)
 	seen := make(map[string]bool, len(out)+len(incoming))
 	for _, target := range out {
