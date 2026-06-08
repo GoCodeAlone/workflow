@@ -188,32 +188,6 @@ func setupDeclStores(decls []setupDecl) []string {
 	return stores
 }
 
-// resolveSetupStoreInteractive resolves the store, prompting the user with
-// prompt.Select when the resolver returns unresolved ("" + nil error).
-func resolveSetupStoreInteractive(storeFlag string, cfg *config.WorkflowConfig) (string, error) {
-	defaultStore := ""
-	if cfg.Secrets != nil {
-		defaultStore = cfg.Secrets.DefaultStore
-		if defaultStore == "" {
-			defaultStore = cfg.Secrets.Provider
-		}
-	}
-	name, err := resolveSetupStoreName(storeFlag, defaultStore, cfg.SecretStores, true)
-	if err != nil {
-		return "", err
-	}
-	if name != "" {
-		return name, nil
-	}
-	// Unresolved + interactive → prompt over store keys + builtin provider types.
-	opts := storePickOptions(cfg.SecretStores)
-	idx, err := prompt.Select("Pick a secret store", opts)
-	if err != nil {
-		return "", err
-	}
-	return opts[idx], nil
-}
-
 // storePickOptions returns the ordered list of store names a user can pick:
 // configured secretStores keys (sorted) first, then builtin provider types
 // that aren't already a store name.

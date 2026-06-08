@@ -339,7 +339,7 @@ func manifestGitHubSecretStoreTargets(name string, store *config.SecretStoreConf
 	cfg := store.Config
 	tokenEnv := stringConfigValue(cfg, "token_env")
 	if tokenEnv == "" {
-		tokenEnv = "GITHUB_TOKEN"
+		tokenEnv = "GITHUB_TOKEN" //nolint:gosec // G101: env var name, not a credential value
 	}
 	var targets []manifestSecretTargetProvider
 	if repo := stringConfigValue(cfg, "repo"); repo != "" {
@@ -464,7 +464,8 @@ func runManifestSecretTargetSetup(ctx context.Context, targets []manifestSecretT
 		err      error
 	}
 	values := make(map[string]cachedValue)
-	for _, target := range targets {
+	for i := range targets {
+		target := &targets[i]
 		name := target.Secret.Name
 		cached, ok := values[name]
 		if !ok {
@@ -472,7 +473,7 @@ func runManifestSecretTargetSetup(ctx context.Context, targets []manifestSecretT
 			cached = cachedValue{value: value, provided: provided, err: err}
 			values[name] = cached
 		}
-		displayName := manifestSecretTargetDisplayName(target)
+		displayName := manifestSecretTargetDisplayName(*target)
 		if cached.err != nil {
 			report.Failed = append(report.Failed, displayName)
 			if stopOnError {
@@ -631,7 +632,8 @@ func buildManifestMultiSelectItems(secrets []manifestDiscoveredSecret, statuses 
 
 func buildManifestSecretTargetItems(targets []manifestSecretTarget, includeExisting bool) []prompt.Item {
 	items := make([]prompt.Item, 0, len(targets))
-	for _, target := range targets {
+	for i := range targets {
+		target := &targets[i]
 		label := formatStatusLabel(target.Secret.Name, target.Status)
 		if target.Label != "" {
 			label += " [" + target.Label + "]"
@@ -651,7 +653,8 @@ func buildManifestSecretTargetItems(targets []manifestSecretTarget, includeExist
 
 func selectManifestSecretTargetsForSetup(targets []manifestSecretTarget, opts manifestSecretSelectionOptions) []manifestSecretTarget {
 	selected := make([]manifestSecretTarget, 0, len(targets))
-	for _, target := range targets {
+	for i := range targets {
+		target := &targets[i]
 		if len(opts.onlySet) > 0 {
 			if !opts.onlySet[target.Secret.Name] {
 				continue
@@ -662,7 +665,7 @@ func selectManifestSecretTargetsForSetup(targets []manifestSecretTarget, opts ma
 		if opts.skipExisting && target.Status.IsSet {
 			continue
 		}
-		selected = append(selected, target)
+		selected = append(selected, *target)
 	}
 	return selected
 }
