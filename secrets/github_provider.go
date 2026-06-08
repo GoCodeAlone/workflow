@@ -376,7 +376,7 @@ func (p *GitHubSecretsProvider) ListEnvironments(ctx context.Context) ([]Provide
 func (p *GitHubSecretsProvider) ValidateEnvironment(ctx context.Context, name string) (ProviderEnvironment, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return ProviderEnvironment{}, ErrInvalidKey
+		return ProviderEnvironment{}, fmt.Errorf("%w: github environment name is required", ErrInvalidKey)
 	}
 	if err := p.requireRepoEnvironmentTarget(); err != nil {
 		return ProviderEnvironment{}, err

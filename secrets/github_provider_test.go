@@ -184,6 +184,17 @@ func TestGitHubProvider_ValidateEnvironmentNotFound(t *testing.T) {
 	}
 }
 
+func TestGitHubProvider_ValidateEnvironmentEmptyNameHasContext(t *testing.T) {
+	p := &GitHubSecretsProvider{owner: "owner", repo: "repo", token: "token", client: &http.Client{}}
+	_, err := p.ValidateEnvironment(context.Background(), " ")
+	if !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf("ValidateEnvironment error = %v, want ErrInvalidKey", err)
+	}
+	if !strings.Contains(err.Error(), "environment name is required") {
+		t.Fatalf("ValidateEnvironment error = %q, want missing-name context", err)
+	}
+}
+
 func TestGitHubProvider_EnsureEnvironmentCreatesMissing(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

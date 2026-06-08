@@ -58,6 +58,12 @@ type ProviderEnvironment struct {
 
 // EnvironmentManager is optional: providers implement it when they can inspect
 // and create environment-like namespaces used by scoped secrets.
+//
+// ValidateEnvironment must return an error wrapping ErrNotFound when the named
+// environment is absent, and an error wrapping ErrInvalidKey when name is empty
+// or invalid for the provider. EnsureEnvironment must be idempotent: it returns
+// existing environment metadata when present, creates the environment when it is
+// absent, and returns provider metadata for the resulting environment.
 type EnvironmentManager interface {
 	ListEnvironments(ctx context.Context) ([]ProviderEnvironment, error)
 	ValidateEnvironment(ctx context.Context, name string) (ProviderEnvironment, error)
