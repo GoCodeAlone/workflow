@@ -79,6 +79,9 @@ func installFromGitHub(owner, repo, version, destDir string, skipChecksum bool) 
 		return fmt.Errorf("download plugin from GitHub: %w", err)
 	}
 	if !skipChecksum {
+		if _, _, _, _, ok := parseGitHubReleaseDownloadURL(assetURL); !ok {
+			return fmt.Errorf("github asset URL %q is not a GitHub release download URL", assetURL)
+		}
 		expectedSHA, err := lookupChecksumForURL(assetURL)
 		if err != nil {
 			return fmt.Errorf("auto-fetch checksum for %q: %w", assetURL, err)

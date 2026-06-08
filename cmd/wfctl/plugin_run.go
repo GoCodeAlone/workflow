@@ -10,7 +10,7 @@ func runPluginRun(args []string) error {
 	fs := flag.NewFlagSet("plugin run", flag.ContinueOnError)
 	var pluginDirVal string
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultPluginCommandDir(), "Plugin directory")
-	fs.StringVar(&pluginDirVal, "data-dir", defaultPluginCommandDir(), "Plugin directory (deprecated, use -plugin-dir)")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultPluginCommandDir(), "Plugin directory (deprecated, use --plugin-dir)")
 	ensureInstalled := fs.Bool("ensure-installed", false, "Install or update the plugin before dispatching")
 	cfgPath := fs.String("config", "", "Registry config file path")
 	registryName := fs.String("registry", "", "Use a specific registry by name")
@@ -25,9 +25,14 @@ func runPluginRun(args []string) error {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin run [options] <plugin-name-or-github-ref> -- <plugin-command> [args...]\n\nInstall if requested, then dispatch a plugin-provided wfctl command without requiring a Workflow project.\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
-	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
-		fs.Usage()
-		return nil
+	for _, arg := range args {
+		if len(args) != 1 {
+			break
+		}
+		if arg == "-h" || arg == "--help" {
+			fs.Usage()
+			return nil
+		}
 	}
 	runnerArgs, commandArgs, err := splitPluginRunArgs(args)
 	if err != nil {

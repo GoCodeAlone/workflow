@@ -67,10 +67,22 @@ var reservedCLICommands = map[string]struct{}{
 	"wizard":          {},
 }
 
+var staticCLICommandLookup func(string) bool
+
+func init() {
+	staticCLICommandLookup = func(name string) bool {
+		_, ok := commands[name]
+		return ok
+	}
+}
+
 // isReservedCLICommand reports whether name is a reserved static wfctl command.
 func isReservedCLICommand(name string) bool {
 	if _, ok := reservedCLICommands[name]; ok {
 		return true
+	}
+	if staticCLICommandLookup != nil {
+		return staticCLICommandLookup(name)
 	}
 	return false
 }
