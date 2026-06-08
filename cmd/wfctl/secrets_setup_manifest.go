@@ -57,6 +57,7 @@ type manifestSetupArgs struct {
 	only           []string
 	all            bool
 	skipExisting   bool
+	verbose        bool
 }
 
 func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Writer) error {
@@ -83,6 +84,12 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 	}
 	interactive := in == nil && !a.nonInteractive && prompt.CanPrompt()
 
+	preprovidedValuer := func(secret manifestDiscoveredSecret) (string, bool, error) {
+		return manifestPreprovidedSecretValue(secret, manifestSecretValueOptions{
+			fromEnv:   a.fromEnv,
+			secretMap: secretMap,
+		})
+	}
 	var promptErr error
 	valuer := func(secret manifestDiscoveredSecret) (string, bool, error) {
 		value, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
@@ -97,7 +104,7 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 	}
 
 	if interactive && !a.scopeExplicit {
-		return runSecretsSetupManifestTargets(context.Background(), a, discovered, valuer, out, &promptErr)
+		return runSecretsSetupManifestTargets(context.Background(), a, discovered, preprovidedValuer, out, &promptErr)
 	}
 
 	ghProvider, scopeLabel, err := buildSecretWriter(strings.ToLower(strings.TrimSpace(a.scope)), a.envName, a.org, a.visibility, a.tokenEnv, firstConfigPattern(a.configPatterns))
@@ -181,7 +188,7 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 	return nil
 }
 
-func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, discovered []manifestDiscoveredSecret, valuer func(manifestDiscoveredSecret) (string, bool, error), out io.Writer, promptErr *error) error {
+func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, discovered []manifestDiscoveredSecret, preprovidedValuer func(manifestDiscoveredSecret) (string, bool, error), out io.Writer, promptErr *error) error {
 	providers, err := buildManifestSecretTargetProviders(a)
 	if err != nil {
 		return err
@@ -208,22 +215,33 @@ func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, d
 	} else {
 		fmt.Fprintln(out, "Interactive mode: unset secret targets are selected by default; toggle set targets to update them.")
 	}
-	fmt.Fprintln(out, "Leave a value empty to skip every selected target for that secret.")
+	fmt.Fprintln(out, "Select secrets first, then choose which scope/store targets to set for each secret.")
+	fmt.Fprintln(out, "For multiple targets, enter a value once and reuse it or provide target-specific values.")
 	fmt.Fprintln(out, "Use --scope to force a single GitHub target, or configure secretStores for provider-specific targets.")
 	fmt.Fprintln(out)
 
-	items := buildManifestSecretTargetItems(selectable, a.all)
-	selectedIdx, err := prompt.MultiSelect(manifestMultiTargetSelectTitle(a.skipExisting), items)
+	cols, rows, groups := buildManifestSecretMatrixRows(selectable, a.all, a.verbose)
+	secretIdx, err := prompt.TableMultiSelect(manifestSecretMatrixSelectTitle(a.skipExisting, a.verbose), cols, rows)
 	if err != nil {
 		return err
 	}
-	selected := manifestSecretTargetsByIndexes(selectable, selectedIdx)
+	selected, err := selectManifestTargetsBySecretGroups(groups, secretIdx, a.skipExisting, a.verbose)
+	if err != nil {
+		return err
+	}
 	if len(selected) == 0 {
 		fmt.Fprintln(out, "No secret targets selected; nothing to do.")
 		return nil
 	}
 
-	report, err := runManifestSecretTargetSetup(ctx, selected, valuer, func(name, store string) {
+	values, err := collectManifestSecretTargetValues(selected, preprovidedValuer, manifestTargetValuePrompt{
+		input:   prompt.Input,
+		confirm: prompt.Confirm,
+	})
+	if err != nil {
+		return err
+	}
+	report, err := runManifestSecretTargetSetupWithValues(ctx, selected, values, func(name, store string) {
 		_ = writeSecretsAuditRecord(name, store) //nolint:errcheck // best-effort audit
 	}, true)
 	if promptErr != nil && *promptErr != nil {
@@ -240,6 +258,11 @@ func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, d
 	}
 	fmt.Fprintln(out, "\nAll done.")
 	return nil
+}
+
+type manifestSecretTargetGroup struct {
+	Secret  manifestDiscoveredSecret
+	Targets []manifestSecretTarget
 }
 
 func buildManifestSecretTargetProviders(a *manifestSetupArgs) ([]manifestSecretTargetProvider, error) {
@@ -500,6 +523,118 @@ func runManifestSecretTargetSetup(ctx context.Context, targets []manifestSecretT
 	return report, nil
 }
 
+type manifestProvidedSecretValue struct {
+	Value    string
+	Provided bool
+	Err      error
+}
+
+type manifestTargetValuePrompt struct {
+	input   func(label string, masked bool) (string, error)
+	confirm func(question string, def bool) (bool, error)
+}
+
+func collectManifestSecretTargetValues(targets []manifestSecretTarget, fallback func(manifestDiscoveredSecret) (string, bool, error), prompts manifestTargetValuePrompt) (map[string]manifestProvidedSecretValue, error) {
+	if prompts.input == nil {
+		prompts.input = prompt.Input
+	}
+	if prompts.confirm == nil {
+		prompts.confirm = prompt.Confirm
+	}
+	values := make(map[string]manifestProvidedSecretValue, len(targets))
+	groups := groupManifestSecretTargets(targets)
+	for _, group := range groups {
+		if fallback != nil {
+			value, provided, err := fallback(group.Secret)
+			if err != nil {
+				return nil, err
+			}
+			if provided {
+				for i := range group.Targets {
+					values[manifestSecretTargetKey(group.Targets[i])] = manifestProvidedSecretValue{Value: value, Provided: true}
+				}
+				continue
+			}
+		}
+		var first manifestProvidedSecretValue
+		firstSet := false
+		for i := range group.Targets {
+			target := group.Targets[i]
+			key := manifestSecretTargetKey(target)
+			if i == 0 {
+				value, err := promptManifestTargetValue(target, prompts)
+				if err != nil {
+					return nil, err
+				}
+				first = manifestProvidedSecretValue{Value: value, Provided: value != "", Err: nil}
+				firstSet = true
+				values[key] = first
+				continue
+			}
+			if firstSet && first.Provided && first.Err == nil {
+				useSame, err := prompts.confirm(fmt.Sprintf("Use same value for %s at %s?", group.Secret.Name, manifestSecretTargetScopeLabel(target)), true)
+				if err != nil {
+					return nil, err
+				}
+				if useSame {
+					values[key] = first
+					continue
+				}
+			}
+			value, err := promptManifestTargetValue(target, prompts)
+			if err != nil {
+				return nil, err
+			}
+			values[key] = manifestProvidedSecretValue{Value: value, Provided: value != "", Err: nil}
+		}
+	}
+	return values, nil
+}
+
+func promptManifestTargetValue(target manifestSecretTarget, prompts manifestTargetValuePrompt) (string, error) {
+	label := target.Secret.Name + " for " + manifestSecretTargetScopeLabel(target)
+	if target.Label != "" {
+		label += " (" + target.Label + ")"
+	}
+	return prompts.input(label, target.Secret.Sensitive)
+}
+
+func runManifestSecretTargetSetupWithValues(ctx context.Context, targets []manifestSecretTarget, values map[string]manifestProvidedSecretValue, audit func(string, string), stopOnError bool) (setupReport, error) {
+	var report setupReport
+	for i := range targets {
+		target := &targets[i]
+		displayName := manifestSecretTargetDisplayName(*target)
+		value := values[manifestSecretTargetKey(*target)]
+		if value.Err != nil {
+			report.Failed = append(report.Failed, displayName)
+			if stopOnError {
+				return report, value.Err
+			}
+			continue
+		}
+		if !value.Provided {
+			report.Skipped = append(report.Skipped, displayName)
+			continue
+		}
+		if err := target.Provider.Set(ctx, target.Secret.Name, value.Value); err != nil {
+			report.Failed = append(report.Failed, displayName)
+			if stopOnError {
+				return report, err
+			}
+			continue
+		}
+		report.Set = append(report.Set, displayName)
+		if audit != nil {
+			audit(target.Secret.Name, target.Store)
+		}
+	}
+	return report, nil
+}
+
+func manifestSecretTargetKey(target manifestSecretTarget) string {
+	return target.Secret.Name + "\x00" + target.Store
+}
+
 func manifestSecretTargetDisplayName(target manifestSecretTarget) string {
 	label := target.Label
 	if label == "" {
@@ -588,6 +723,18 @@ func manifestSecretValue(secret manifestDiscoveredSecret, opts manifestSecretVal
 	return "", false, fmt.Errorf("no value for secret %q: set $%s and pass --from-env, use --secret %s=VALUE, or run interactively from a terminal", secret.Name, secret.Name, secret.Name)
 }
 
+func manifestPreprovidedSecretValue(secret manifestDiscoveredSecret, opts manifestSecretValueOptions) (string, bool, error) {
+	if opts.fromEnv {
+		if v := os.Getenv(secret.Name); v != "" {
+			return v, true, nil
+		}
+	}
+	if v, ok := opts.secretMap[secret.Name]; ok {
+		return v, true, nil
+	}
+	return "", false, nil
+}
+
 type manifestSecretSelectionOptions struct {
 	onlySet         map[string]bool
 	includeExisting bool
@@ -651,6 +798,30 @@ func buildManifestSecretTargetItems(targets []manifestSecretTarget, includeExist
 	return items
 }
 
+func buildManifestTargetItems(targets []manifestSecretTarget, includeExisting bool, verbose bool) []prompt.Item {
+	items := make([]prompt.Item, 0, len(targets))
+	counts := manifestSecretTargetScopeCounts(targets)
+	for i := range targets {
+		target := &targets[i]
+		label := fmt.Sprintf("%-12s %s", manifestSecretTargetMatrixLabel(*target, counts), shortSecretStateLabel(target.Status))
+		if verbose {
+			if target.Label != "" {
+				label += "  " + target.Label
+			} else if target.Store != "" {
+				label += "  " + target.Store
+			}
+			if len(target.Secret.Sources) > 0 {
+				label += " (" + strings.Join(target.Secret.Sources, ", ") + ")"
+			}
+		}
+		items = append(items, prompt.Item{
+			Label:       label,
+			Preselected: includeExisting || !target.Status.IsSet,
+		})
+	}
+	return items
+}
+
 func selectManifestSecretTargetsForSetup(targets []manifestSecretTarget, opts manifestSecretSelectionOptions) []manifestSecretTarget {
 	selected := make([]manifestSecretTarget, 0, len(targets))
 	for i := range targets {
@@ -668,6 +839,240 @@ func selectManifestSecretTargetsForSetup(targets []manifestSecretTarget, opts ma
 		selected = append(selected, *target)
 	}
 	return selected
+}
+
+func buildManifestSecretMatrixRows(targets []manifestSecretTarget, includeExisting bool, verbose bool) ([]prompt.TableColumn, []prompt.TableItem, []manifestSecretTargetGroup) {
+	groups := groupManifestSecretTargets(targets)
+	counts := manifestSecretTargetScopeCounts(targets)
+	scopes := manifestSecretMatrixScopes(targets, counts)
+	nameWidth := manifestSecretNameColumnWidth(groups)
+	cols := []prompt.TableColumn{{Title: "Secret", Width: nameWidth}}
+	if verbose {
+		cols = append(cols, prompt.TableColumn{Title: "Sources", Width: 38}) //nolint:mnd
+	}
+	for _, scope := range scopes {
+		cols = append(cols, prompt.TableColumn{Title: scope, Width: max(5, min(len(scope)+1, 14))}) //nolint:mnd
+	}
+
+	rows := make([]prompt.TableItem, 0, len(groups))
+	for _, group := range groups {
+		cells := []string{group.Secret.Name}
+		if verbose {
+			cells = append(cells, strings.Join(group.Secret.Sources, ", "))
+		}
+		statusByScope := map[string]SecretStatus{}
+		anyUnset := false
+		for i := range group.Targets {
+			target := group.Targets[i]
+			statusByScope[manifestSecretTargetMatrixLabel(target, counts)] = target.Status
+			if !target.Status.IsSet {
+				anyUnset = true
+			}
+		}
+		for _, scope := range scopes {
+			status, ok := statusByScope[scope]
+			if !ok {
+				cells = append(cells, "-")
+				continue
+			}
+			cells = append(cells, secretStatusMatrixMark(status))
+		}
+		rows = append(rows, prompt.TableItem{
+			Cells:       cells,
+			Preselected: includeExisting || anyUnset,
+		})
+	}
+	return cols, rows, groups
+}
+
+func groupManifestSecretTargets(targets []manifestSecretTarget) []manifestSecretTargetGroup {
+	byName := map[string]int{}
+	groups := make([]manifestSecretTargetGroup, 0)
+	for i := range targets {
+		target := targets[i]
+		name := target.Secret.Name
+		idx, ok := byName[name]
+		if !ok {
+			idx = len(groups)
+			byName[name] = idx
+			groups = append(groups, manifestSecretTargetGroup{Secret: target.Secret})
+		}
+		groups[idx].Targets = append(groups[idx].Targets, target)
+	}
+	return groups
+}
+
+func manifestSecretMatrixScopes(targets []manifestSecretTarget, counts map[string]int) []string {
+	seen := map[string]bool{}
+	scopes := make([]string, 0)
+	for i := range targets {
+		target := targets[i]
+		scope := manifestSecretTargetMatrixLabel(target, counts)
+		if scope == "" || seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		scopes = append(scopes, scope)
+	}
+	return scopes
+}
+
+func manifestSecretNameColumnWidth(groups []manifestSecretTargetGroup) int {
+	width := len("Secret")
+	for _, group := range groups {
+		width = max(width, len(group.Secret.Name))
+	}
+	return min(max(width+1, 18), 36) //nolint:mnd
+}
+
+func selectManifestTargetsBySecretGroups(groups []manifestSecretTargetGroup, indexes []int, skipExisting bool, verbose bool) ([]manifestSecretTarget, error) {
+	selected := make([]manifestSecretTarget, 0)
+	for _, i := range indexes {
+		if i < 0 || i >= len(groups) {
+			continue
+		}
+		group := groups[i]
+		targets := group.Targets
+		if skipExisting {
+			targets = selectManifestSecretTargetsForSetup(targets, manifestSecretSelectionOptions{
+				includeExisting: true,
+				skipExisting:    true,
+			})
+		}
+		if len(targets) == 0 {
+			continue
+		}
+		items := buildManifestTargetItems(targets, false, verbose)
+		selectedIdx, err := prompt.MultiSelect("Select scope/store targets for "+group.Secret.Name, items)
+		if err != nil {
+			return nil, err
+		}
+		selected = append(selected, manifestSecretTargetsByIndexes(targets, selectedIdx)...)
+	}
+	return selected, nil
+}
+
+func manifestSecretTargetScopeLabel(target manifestSecretTarget) string {
+	store := strings.ToLower(strings.TrimSpace(target.Store))
+	label := strings.ToLower(strings.TrimSpace(target.Label))
+	switch {
+	case strings.HasPrefix(store, "github-repo") || strings.HasPrefix(label, "github repo "):
+		return "github:repo"
+	case strings.HasPrefix(store, "github-env") || strings.HasPrefix(label, "github env "):
+		return "github:env"
+	case strings.HasPrefix(store, "github-org") || strings.HasPrefix(label, "github org "):
+		return "github:org"
+	case strings.HasPrefix(label, "aws ") || strings.Contains(label, "aws secrets-manager"):
+		return "aws"
+	case strings.HasPrefix(label, "vault "):
+		return "vault"
+	case strings.HasPrefix(label, "file "):
+		return "file"
+	case strings.HasPrefix(label, "env"):
+		return "env"
+	case strings.HasPrefix(label, "keychain "):
+		return "keychain"
+	}
+	if base, _, ok := strings.Cut(store, ":"); ok {
+		return base
+	}
+	if store != "" {
+		return store
+	}
+	return "target"
+}
+
+func manifestSecretTargetScopeCounts(targets []manifestSecretTarget) map[string]int {
+	counts := map[string]int{}
+	seenTargets := map[string]bool{}
+	for i := range targets {
+		target := targets[i]
+		key := strings.Join([]string{
+			manifestSecretTargetScopeLabel(target),
+			strings.TrimSpace(target.Store),
+			strings.TrimSpace(target.Label),
+		}, "\x00")
+		if seenTargets[key] {
+			continue
+		}
+		seenTargets[key] = true
+		counts[manifestSecretTargetScopeLabel(target)]++
+	}
+	return counts
+}
+
+func manifestSecretTargetMatrixLabel(target manifestSecretTarget, counts map[string]int) string {
+	base := manifestSecretTargetScopeLabel(target)
+	if counts[base] <= 1 {
+		return base
+	}
+	subject := manifestSecretTargetShortSubject(target)
+	if subject == "" {
+		return base
+	}
+	return base + ":" + subject
+}
+
+func manifestSecretTargetShortSubject(target manifestSecretTarget) string {
+	label := strings.TrimSpace(target.Label)
+	for _, prefix := range []string{
+		"github repo ",
+		"github org ",
+		"github env ",
+		"aws secrets-manager ",
+		"vault ",
+		"file ",
+		"keychain service ",
+	} {
+		if rest, ok := strings.CutPrefix(strings.ToLower(label), prefix); ok {
+			label = rest
+			break
+		}
+	}
+	if label == "" {
+		label = strings.TrimSpace(target.Store)
+	}
+	label = strings.NewReplacer(" ", "-", "/", "-", ":", "-").Replace(label)
+	if len(label) > 18 { //nolint:mnd
+		label = label[:18]
+	}
+	return strings.Trim(label, "-")
+}
+
+func secretStatusMatrixMark(status SecretStatus) string {
+	switch status.State {
+	case SecretSet:
+		return "✓"
+	case SecretNoAccess:
+		return "!"
+	case SecretFetchError:
+		return "!"
+	case SecretUnconfigured:
+		return "?"
+	default:
+		if status.IsSet {
+			return "✓"
+		}
+		return "○"
+	}
+}
+
+func shortSecretStateLabel(status SecretStatus) string {
+	switch status.State {
+	case SecretSet:
+		return "set"
+	case SecretNoAccess:
+		return "no-access"
+	case SecretFetchError:
+		return "check-failed"
+	case SecretUnconfigured:
+		return "unconfigured"
+	default:
+		if status.IsSet {
+			return "set"
+		}
+		return "unset"
+	}
 }
 
 func manifestSecretTargetsByIndexes(targets []manifestSecretTarget, indexes []int) []manifestSecretTarget {
@@ -688,11 +1093,15 @@ func manifestMultiSelectTitle(scopeLabel string, skipExisting bool) string {
 	return fmt.Sprintf("Select secrets to set for %s (unset selected by default; toggle set secrets to update)", scopeLabel)
 }
 
-func manifestMultiTargetSelectTitle(skipExisting bool) string {
+func manifestSecretMatrixSelectTitle(skipExisting bool, verbose bool) string {
+	mode := "Select secrets to configure (○ unset, ✓ set, ! inaccessible, ? unconfigured)"
 	if skipExisting {
-		return "Select unset secret provider targets (--skip-existing hides existing targets)"
+		mode = "Select secrets with unset targets (--skip-existing hides existing targets)"
 	}
-	return "Select secret provider targets (unset selected by default; toggle set targets to update)"
+	if verbose {
+		mode += " [verbose]"
+	}
+	return mode
 }
 
 func secretStatusByName(statuses []SecretStatus) map[string]SecretStatus {
@@ -951,6 +1360,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set")
 	allFlag := fs.Bool("all", false, "Set all discovered secrets")
 	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the target scope")
+	verbose := fs.Bool("verbose", false, "Show source files, plugin names, and full provider target details in interactive prompts")
 	var secretFlag multiStringFlag
 	fs.Var(&secretFlag, "secret", "NAME=VALUE literal. Repeatable.")
 	if err := fs.Parse(args); err != nil {
@@ -983,6 +1393,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 		only:           only,
 		all:            *allFlag,
 		skipExisting:   *skipExisting,
+		verbose:        *verbose,
 	}, nil
 }
 
