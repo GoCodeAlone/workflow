@@ -1043,6 +1043,89 @@ func TestQueryManifestSecretTargetsHonorsSecretStoreHint(t *testing.T) {
 	}
 }
 
+func TestQueryManifestSecretTargetsFiltersByPluginTargetCapabilities(t *testing.T) {
+	discovered := []manifestDiscoveredSecret{
+		{
+			PluginRequiredSecret: PluginRequiredSecret{Name: "GITHUB_APP_PRIVATE_KEY"},
+			SecretTargets: []PluginSecretTarget{
+				{Provider: "github", Scopes: []string{"repo", "env"}},
+			},
+		},
+		{
+			PluginRequiredSecret: PluginRequiredSecret{Name: "VAULT_TOKEN"},
+			SecretTargets: []PluginSecretTarget{
+				{Provider: "vault", Scopes: []string{"mount"}},
+			},
+		},
+	}
+	providers := []manifestSecretTargetProvider{
+		{
+			Store:    "github-repo",
+			Label:    "github repo GoCodeAlone/workflow",
+			Provider: targetEngineTestProvider{engineTestProvider: newEngineTestProvider(nil), target: secrets.ProviderTarget{Provider: "github", Scope: "repo"}},
+		},
+		{
+			Store:    "github-org",
+			Label:    "github org GoCodeAlone",
+			Provider: targetEngineTestProvider{engineTestProvider: newEngineTestProvider(nil), target: secrets.ProviderTarget{Provider: "github", Scope: "org"}},
+		},
+		{
+			Store:    "vault-prod",
+			Label:    "vault prod",
+			Provider: targetEngineTestProvider{engineTestProvider: newEngineTestProvider(nil), target: secrets.ProviderTarget{Provider: "vault", Scope: "mount"}},
+		},
+	}
+
+	targets := queryManifestSecretTargets(context.Background(), discovered, providers)
+	if len(targets) != 2 {
+		t.Fatalf("targets = %+v, want github repo + vault only", targets)
+	}
+	if targets[0].Secret.Name != "GITHUB_APP_PRIVATE_KEY" || targets[0].Store != "github-repo" {
+		t.Fatalf("first target = %+v, want GitHub repo", targets[0])
+	}
+	if targets[1].Secret.Name != "VAULT_TOKEN" || targets[1].Store != "vault-prod" {
+		t.Fatalf("second target = %+v, want Vault", targets[1])
+	}
+}
+
+func TestQueryManifestSecretTargetsStoreHintOverridesPluginTargets(t *testing.T) {
+	discovered := []manifestDiscoveredSecret{
+		{
+			PluginRequiredSecret: PluginRequiredSecret{Name: "SHARED_TOKEN"},
+			StoreHint:            "vault-prod",
+			SecretTargets: []PluginSecretTarget{
+				{Provider: "github", Scopes: []string{"repo"}},
+			},
+		},
+	}
+	providers := []manifestSecretTargetProvider{
+		{
+			Store:    "github-repo",
+			Label:    "github repo GoCodeAlone/workflow",
+			Provider: targetEngineTestProvider{engineTestProvider: newEngineTestProvider(nil), target: secrets.ProviderTarget{Provider: "github", Scope: "repo"}},
+		},
+		{
+			Store:    "vault-prod",
+			Label:    "vault prod",
+			Provider: targetEngineTestProvider{engineTestProvider: newEngineTestProvider(nil), target: secrets.ProviderTarget{Provider: "vault", Scope: "mount"}},
+		},
+	}
+
+	targets := queryManifestSecretTargets(context.Background(), discovered, providers)
+	if len(targets) != 1 || targets[0].Store != "vault-prod" {
+		t.Fatalf("targets = %+v, want explicit vault store hint", targets)
+	}
+}
+
+type targetEngineTestProvider struct {
+	*engineTestProvider
+	target secrets.ProviderTarget
+}
+
+func (p targetEngineTestProvider) SecretTarget() secrets.ProviderTarget {
+	return p.target
+}
+
 func TestRunManifestSecretTargetSetupWritesEachSelectedProvider(t *testing.T) {
 	repoProvider := newEngineTestProvider(nil)
 	orgProvider := newEngineTestProvider(nil)

@@ -22,8 +22,9 @@ var manifestEnvRefPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 type manifestDiscoveredSecret struct {
 	PluginRequiredSecret
-	Sources   []string
-	StoreHint string
+	Sources       []string
+	StoreHint     string
+	SecretTargets []PluginSecretTarget
 }
 
 type manifestSecretTarget struct {
@@ -617,6 +618,9 @@ func queryManifestSecretTargets(ctx context.Context, secrets []manifestDiscovere
 			if secret.StoreHint != "" && provider.Store != secret.StoreHint && !strings.HasPrefix(provider.Store, secret.StoreHint+":") {
 				continue
 			}
+			if secret.StoreHint == "" && !manifestSecretTargetAllowed(secret, provider) {
+				continue
+			}
 			state, err := provider.Provider.Check(ctx, secret.Name)
 			status := SecretStatus{
 				Name:  secret.Name,
@@ -637,6 +641,37 @@ func queryManifestSecretTargets(ctx context.Context, secrets []manifestDiscovere
 		}
 	}
 	return targets
+}
+
+func manifestSecretTargetAllowed(secret manifestDiscoveredSecret, provider manifestSecretTargetProvider) bool {
+	if len(secret.SecretTargets) == 0 {
+		return true
+	}
+	target := manifestSecretTargetProviderDescriptor(provider.Provider)
+	providerName := normalizedSecretTargetProvider(target.Provider)
+	scope := strings.ToLower(strings.TrimSpace(target.Scope))
+	for _, allowed := range secret.SecretTargets {
+		if normalizedSecretTargetProvider(allowed.Provider) != providerName {
+			continue
+		}
+		scopes := normalizedSecretTargetScopes(allowed.Scopes)
+		if len(scopes) == 0 {
+			return true
+		}
+		for _, allowedScope := range scopes {
+			if allowedScope == scope {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func manifestSecretTargetProviderDescriptor(provider SecretsProvider) secrets.ProviderTarget {
+	if targeter, ok := provider.(interface{ SecretTarget() secrets.ProviderTarget }); ok {
+		return targeter.SecretTarget()
+	}
+	return secrets.ProviderTarget{Scope: "default"}
 }
 
 func runManifestSecretTargetSetup(ctx context.Context, targets []manifestSecretTarget, valuer func(manifestDiscoveredSecret) (string, bool, error), audit func(string, string), stopOnError bool) (setupReport, error) {
@@ -829,7 +864,7 @@ func discoverManifestSecrets(manifestPath, lockfilePath, pluginDir, configPatter
 			if strings.TrimSpace(required.Name) == "" {
 				continue
 			}
-			addDiscoveredSecret(secretsByName, required, "plugin:"+sourceName)
+			addDiscoveredSecretWithTargets(secretsByName, required, "plugin:"+sourceName, manifest.SecretTargets)
 		}
 	}
 	configFiles, err := expandConfigPatterns(configPatterns)
@@ -1358,7 +1393,15 @@ func addDiscoveredSecret(secretsByName map[string]*manifestDiscoveredSecret, req
 	addDiscoveredSecretWithStoreHint(secretsByName, required, source, "")
 }
 
+func addDiscoveredSecretWithTargets(secretsByName map[string]*manifestDiscoveredSecret, required PluginRequiredSecret, source string, targets []PluginSecretTarget) {
+	addDiscoveredSecretWithStoreHintAndTargets(secretsByName, required, source, "", targets)
+}
+
 func addDiscoveredSecretWithStoreHint(secretsByName map[string]*manifestDiscoveredSecret, required PluginRequiredSecret, source, storeHint string) {
+	addDiscoveredSecretWithStoreHintAndTargets(secretsByName, required, source, storeHint, nil)
+}
+
+func addDiscoveredSecretWithStoreHintAndTargets(secretsByName map[string]*manifestDiscoveredSecret, required PluginRequiredSecret, source, storeHint string, targets []PluginSecretTarget) {
 	name := strings.TrimSpace(required.Name)
 	if name == "" {
 		return
@@ -1375,6 +1418,7 @@ func addDiscoveredSecretWithStoreHint(secretsByName map[string]*manifestDiscover
 	if storeHint != "" && secret.StoreHint == "" {
 		secret.StoreHint = storeHint
 	}
+	secret.SecretTargets = mergePluginSecretTargets(secret.SecretTargets, targets)
 	secret.Sensitive = secret.Sensitive || required.Sensitive || isSecretSensitive(name)
 	for _, existing := range secret.Sources {
 		if existing == source {
@@ -1383,6 +1427,58 @@ func addDiscoveredSecretWithStoreHint(secretsByName map[string]*manifestDiscover
 	}
 	secret.Sources = append(secret.Sources, source)
 	sort.Strings(secret.Sources)
+}
+
+func mergePluginSecretTargets(existing []PluginSecretTarget, incoming []PluginSecretTarget) []PluginSecretTarget {
+	out := append([]PluginSecretTarget(nil), existing...)
+	seen := make(map[string]bool, len(out)+len(incoming))
+	for _, target := range out {
+		seen[pluginSecretTargetKey(target)] = true
+	}
+	for _, target := range incoming {
+		target.Provider = normalizedSecretTargetProvider(target.Provider)
+		target.Scopes = normalizedSecretTargetScopes(target.Scopes)
+		if target.Provider == "" {
+			continue
+		}
+		key := pluginSecretTargetKey(target)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, target)
+	}
+	return out
+}
+
+func pluginSecretTargetKey(target PluginSecretTarget) string {
+	return normalizedSecretTargetProvider(target.Provider) + "\x00" + strings.Join(normalizedSecretTargetScopes(target.Scopes), ",")
+}
+
+func normalizedSecretTargetProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "github-actions", "github_action", "github-actions-secrets":
+		return "github"
+	case "aws", "aws-sm":
+		return "aws-secrets-manager"
+	default:
+		return strings.ToLower(strings.TrimSpace(provider))
+	}
+}
+
+func normalizedSecretTargetScopes(scopes []string) []string {
+	out := make([]string, 0, len(scopes))
+	seen := map[string]bool{}
+	for _, scope := range scopes {
+		scope = strings.ToLower(strings.TrimSpace(scope))
+		if scope == "" || seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		out = append(out, scope)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func sortedManifestSecrets(secretsByName map[string]*manifestDiscoveredSecret) []manifestDiscoveredSecret {
