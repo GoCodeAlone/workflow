@@ -578,7 +578,7 @@ func isKnownArch(s string) bool {
 func downloadsMatchVersion(raw map[string]any, version string) bool {
 	downloadsRaw, _ := raw["downloads"].([]any)
 	if len(downloadsRaw) == 0 {
-		// External plugin manifests need platform downloads so installs can
+		// Non-core plugin manifests need platform downloads so installs can
 		// resolve checksum-pinned release assets. Treat missing downloads as
 		// drift even when the manifest version already matches the latest tag.
 		return false
