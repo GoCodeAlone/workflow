@@ -15,12 +15,13 @@ func Confirm(question string, def bool) (bool, error) {
 	if !isTTY() {
 		return false, ErrNotInteractive
 	}
+	out, _ := outputWriter()
 	hint := "y/N"
 	if def {
 		hint = "Y/n"
 	}
 	m := &confirmModel{question: question, hint: hint, def: def}
-	p := tea.NewProgram(m, tea.WithOutput(outputWriter()))
+	p := tea.NewProgram(m, tea.WithOutput(out))
 	result, err := p.Run()
 	if err != nil {
 		return false, fmt.Errorf("prompt confirm: %w", err)

@@ -23,6 +23,7 @@ func InputWithSuggestions(label string, masked bool, suggestions []string) (stri
 	if !isTTY() {
 		return "", ErrNotInteractive
 	}
+	out, _ := outputWriter()
 	ti := textinput.New()
 	ti.Placeholder = label
 	ti.Focus()
@@ -36,7 +37,7 @@ func InputWithSuggestions(label string, masked bool, suggestions []string) (stri
 	}
 
 	m := &inputModel{label: label, ti: ti}
-	p := tea.NewProgram(m, tea.WithOutput(outputWriter()))
+	p := tea.NewProgram(m, tea.WithOutput(out))
 	result, err := p.Run()
 	if err != nil {
 		return "", fmt.Errorf("prompt input: %w", err)

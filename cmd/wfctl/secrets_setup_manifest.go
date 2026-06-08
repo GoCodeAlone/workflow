@@ -14,7 +14,6 @@ import (
 
 	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/config"
-	"github.com/mattn/go-isatty"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,7 +69,7 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 			}
 		}
 	}
-	interactive := in == nil && !a.nonInteractive && isatty.IsTerminal(os.Stdin.Fd())
+	interactive := in == nil && !a.nonInteractive && prompt.CanPrompt()
 
 	onlySet := make(map[string]bool, len(a.only))
 	for _, name := range a.only {

@@ -30,9 +30,34 @@ type Item struct {
 
 // isTTY reports whether os.Stdin is an interactive terminal.
 func isTTY() bool {
-	return isatty.IsTerminal(os.Stdin.Fd())
+	return CanPrompt()
 }
 
-func outputWriter() io.Writer {
-	return os.Stderr
+// CanPrompt reports whether prompts can safely read input and render output.
+func CanPrompt() bool {
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
+		return false
+	}
+	_, ok := outputWriter()
+	return ok
+}
+
+func outputWriter() (io.Writer, bool) {
+	return chooseOutputWriter(
+		isatty.IsTerminal(os.Stderr.Fd()),
+		isatty.IsTerminal(os.Stdout.Fd()),
+		os.Stderr,
+		os.Stdout,
+	)
+}
+
+func chooseOutputWriter(stderrTTY, stdoutTTY bool, stderr, stdout io.Writer) (io.Writer, bool) {
+	switch {
+	case stderrTTY:
+		return stderr, true
+	case stdoutTTY:
+		return stdout, true
+	default:
+		return nil, false
+	}
 }

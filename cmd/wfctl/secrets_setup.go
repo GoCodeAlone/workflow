@@ -111,6 +111,10 @@ Options:
 			return err
 		}
 		if target.kind == secretsSetupTargetManifest {
+			if *autoGenKeys {
+				return fmt.Errorf("--auto-gen-keys is not supported with wfctl.yaml manifest-backed secrets setup; use --from-env, --secret NAME=VALUE, or run interactively from a terminal")
+			}
+			manifestNonInteractive := *nonInteractive || !isatty.IsTerminal(os.Stdin.Fd())
 			return runSecretsSetupManifestWithIO(&manifestSetupArgs{
 				manifestPath:   target.path,
 				lockfilePath:   *lockFile,
@@ -122,7 +126,7 @@ Options:
 				visibility:     *visibility,
 				tokenEnv:       *tokenEnv,
 				fromEnv:        *fromEnv,
-				nonInteractive: useNonInteractive,
+				nonInteractive: manifestNonInteractive,
 				secretLiterals: []string(secretFlag),
 				only:           only,
 				skipExisting:   *skipExisting,

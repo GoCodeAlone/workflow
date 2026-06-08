@@ -149,6 +149,25 @@ func TestParseManifestSetupFlagsDefaultsConfigPatterns(t *testing.T) {
 	}
 }
 
+func TestRunSecretsSetupRejectsAutoGenKeysForManifestTarget(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "wfctl.yaml"), []byte("version: 1\nplugins: []\n"), 0o644); err != nil {
+		t.Fatalf("write wfctl.yaml: %v", err)
+	}
+
+	err := runSecretsSetup([]string{"--auto-gen-keys"})
+	if err == nil {
+		t.Fatal("expected --auto-gen-keys manifest error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"--auto-gen-keys", "wfctl.yaml", "--from-env"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
 func TestFirstConfigPatternResolvesGlobToExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	chdirForTest(t, dir)

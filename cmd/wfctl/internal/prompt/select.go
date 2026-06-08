@@ -16,8 +16,9 @@ func Select(title string, opts []string) (int, error) {
 	if !isTTY() {
 		return 0, ErrNotInteractive
 	}
+	out, _ := outputWriter()
 	m := &selectModel{title: title, opts: opts}
-	p := tea.NewProgram(m, tea.WithOutput(outputWriter()))
+	p := tea.NewProgram(m, tea.WithOutput(out))
 	result, err := p.Run()
 	if err != nil {
 		return 0, fmt.Errorf("prompt select: %w", err)
