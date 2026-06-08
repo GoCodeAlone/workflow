@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
-	"regexp"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -290,21 +293,210 @@ Options:
 	return nil
 }
 
-// readGitHubRepoFromAppYAML loads app.yaml and returns the configured
-// github repo from secrets.config.repo (or secrets.secretStores.<name>.config.repo).
+// readGitHubRepoFromAppYAML returns the target GitHub repository for repo/env
+// secrets. It first honors explicit YAML configuration
+// (secrets.config.repo or GitHub secretStores.<name>.config.repo), then falls
+// back to the current git remote so repo-local wfctl.yaml setup works for
+// infra-only configs that only contain ${ENV_VAR} references.
 func readGitHubRepoFromAppYAML(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	repo, _, err := readGitHubRepoForSecretsSetup(path)
+	return repo, err
+}
+
+func readGitHubRepoForSecretsSetup(path string) (string, string, error) {
+	if repo, source, err := readGitHubRepoFromWorkflowConfig(path); err != nil {
+		return "", "", err
+	} else if repo != "" {
+		return repo, "configured by " + source, nil
+	}
+
+	dir := "."
+	if strings.TrimSpace(path) != "" {
+		dir = filepath.Dir(path)
+	}
+	repo, err := readGitHubRepoFromGitRemote(dir)
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", path, err)
+		return "", "", fmt.Errorf("could not determine GitHub repo for secrets setup from %s (checked secrets.config.repo, GitHub secretStores.<name>.config.repo, and git remote.origin.url): %w", path, err)
 	}
-	// Lightweight regexp scan — avoids full YAML round-trip and tolerates
-	// either `secrets.config.repo` or `secretStores.<name>.config.repo`.
-	re := regexp.MustCompile(`(?m)^\s*repo:\s*([^\s#]+)`)
-	m := re.FindStringSubmatch(string(data))
-	if len(m) < 2 {
-		return "", fmt.Errorf("could not find `repo:` in %s (expected secrets.config.repo or secretStores.<name>.config.repo)", path)
+	return repo, "inferred from git remote.origin.url", nil
+}
+
+func readGitHubRepoFromWorkflowConfig(path string) (string, string, error) {
+	cfg, err := config.LoadFromFile(path)
+	if err != nil {
+		return "", "", fmt.Errorf("load config %s: %w", path, err)
 	}
-	return strings.Trim(m[1], `"'`), nil
+	if cfg.Secrets != nil {
+		if repo := stringConfigValue(cfg.Secrets.Config, "repo"); repo != "" {
+			return repo, "secrets.config.repo", nil
+		}
+		if cfg.Secrets.DefaultStore != "" {
+			if repo := githubRepoFromSecretStore(cfg.SecretStores[cfg.Secrets.DefaultStore]); repo != "" {
+				return repo, fmt.Sprintf("secretStores.%s.config.repo", cfg.Secrets.DefaultStore), nil
+			}
+		}
+	}
+	if len(cfg.SecretStores) > 0 {
+		names := make([]string, 0, len(cfg.SecretStores))
+		for name := range cfg.SecretStores {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if repo := githubRepoFromSecretStore(cfg.SecretStores[name]); repo != "" {
+				return repo, fmt.Sprintf("secretStores.%s.config.repo", name), nil
+			}
+		}
+	}
+	return "", "", nil
+}
+
+func githubRepoFromSecretStore(store *config.SecretStoreConfig) string {
+	if store == nil || store.Provider != "github" {
+		return ""
+	}
+	return stringConfigValue(store.Config, "repo")
+}
+
+func stringConfigValue(cfg map[string]any, key string) string {
+	if cfg == nil {
+		return ""
+	}
+	value, _ := cfg[key].(string)
+	return strings.TrimSpace(strings.Trim(value, `"'`))
+}
+
+func readGitHubRepoFromGitRemote(dir string) (string, error) {
+	remote, err := gitRemoteOriginURLFromConfig(dir)
+	if err != nil {
+		return "", err
+	}
+	if repo, ok := githubRepoFromRemoteURL(remote); ok {
+		return repo, nil
+	}
+	return "", fmt.Errorf("remote.origin.url is not a GitHub repo URL: %s", remote)
+}
+
+func gitRemoteOriginURLFromConfig(start string) (string, error) {
+	if strings.TrimSpace(start) == "" {
+		start = "."
+	}
+	dir, err := filepath.Abs(start)
+	if err != nil {
+		return "", fmt.Errorf("resolve git search path: %w", err)
+	}
+	if info, statErr := os.Stat(dir); statErr == nil && !info.IsDir() {
+		dir = filepath.Dir(dir)
+	}
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		if info, statErr := os.Stat(gitPath); statErr == nil {
+			configs, configErr := gitConfigCandidates(gitPath, info)
+			if configErr != nil {
+				return "", configErr
+			}
+			for _, configPath := range configs {
+				remote, remoteErr := remoteOriginURLFromGitConfig(configPath)
+				if remoteErr == nil && remote != "" {
+					return remote, nil
+				}
+			}
+			return "", fmt.Errorf("git remote.origin.url is empty")
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("no .git directory found")
+}
+
+func gitConfigCandidates(gitPath string, info os.FileInfo) ([]string, error) {
+	if info.IsDir() {
+		return []string{filepath.Join(gitPath, "config")}, nil
+	}
+	data, err := os.ReadFile(gitPath) //nolint:gosec // repository-local .git file
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", gitPath, err)
+	}
+	line := strings.TrimSpace(string(data))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return nil, fmt.Errorf("unsupported .git file format in %s", gitPath)
+	}
+	gitDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(filepath.Dir(gitPath), gitDir)
+	}
+	candidates := []string{filepath.Join(gitDir, "config")}
+	if commonDirData, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+		commonDir := strings.TrimSpace(string(commonDirData))
+		if !filepath.IsAbs(commonDir) {
+			commonDir = filepath.Join(gitDir, commonDir)
+		}
+		candidates = append(candidates, filepath.Join(commonDir, "config"))
+	}
+	return candidates, nil
+}
+
+func remoteOriginURLFromGitConfig(path string) (string, error) {
+	f, err := os.Open(path) //nolint:gosec // repository-local git config
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	inOrigin := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inOrigin = line == `[remote "origin"]`
+			continue
+		}
+		if !inOrigin || !strings.HasPrefix(line, "url") {
+			continue
+		}
+		_, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		return strings.TrimSpace(value), nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("scan %s: %w", path, err)
+	}
+	return "", nil
+}
+
+func githubRepoFromRemoteURL(remote string) (string, bool) {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return "", false
+	}
+	if strings.HasPrefix(remote, "git@github.com:") {
+		return cleanGitHubRepoPath(strings.TrimPrefix(remote, "git@github.com:"))
+	}
+	if strings.HasPrefix(remote, "github.com/") {
+		return cleanGitHubRepoPath(strings.TrimPrefix(remote, "github.com/"))
+	}
+	if u, err := url.Parse(remote); err == nil && strings.EqualFold(u.Hostname(), "github.com") {
+		return cleanGitHubRepoPath(u.Path)
+	}
+	return "", false
+}
+
+func cleanGitHubRepoPath(path string) (string, bool) {
+	path = strings.Trim(strings.TrimSpace(path), "/")
+	path = strings.TrimSuffix(path, ".git")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	return parts[0] + "/" + parts[1], true
 }
 
 // parseGitHubOrgVisibility canonicalises the --visibility flag.

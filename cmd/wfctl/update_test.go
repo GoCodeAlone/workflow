@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,6 +86,41 @@ func TestRunUpdate_CheckOnly(t *testing.T) {
 	}
 }
 
+func TestRunUpdatePrintsVersionContext(t *testing.T) {
+	origVersion := version
+	version = "v1.2.3"
+	defer func() { version = origVersion }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		rel := githubRelease{
+			TagName: "v9.9.9",
+			HTMLURL: "https://github.com/GoCodeAlone/workflow/releases/tag/v9.9.9",
+			Assets:  []githubAsset{},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(rel)
+	}))
+	defer srv.Close()
+
+	githubReleasesURLOverride = srv.URL
+	defer func() { githubReleasesURLOverride = "" }()
+
+	output, err := captureStdoutStderr(func() error {
+		return runUpdate([]string{"--check"})
+	})
+	if err != nil {
+		t.Fatalf("runUpdate --check: %v\n%s", err, output)
+	}
+	for _, want := range []string{
+		"Current version: v1.2.3",
+		"Latest version: v9.9.9",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestRunUpdate_AlreadyLatest(t *testing.T) {
 	origVersion := version
 	version = "1.2.3"
@@ -107,6 +143,33 @@ func TestRunUpdate_AlreadyLatest(t *testing.T) {
 	if err := runUpdate([]string{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func captureStdoutStderr(fn func() error) (string, error) {
+	origStdout := os.Stdout
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	os.Stdout = w
+	os.Stderr = w
+	defer func() {
+		os.Stdout = origStdout
+		os.Stderr = origStderr
+	}()
+
+	callErr := fn()
+	closeErr := w.Close()
+	data, readErr := io.ReadAll(r)
+	_ = r.Close()
+	if readErr != nil {
+		return "", readErr
+	}
+	if closeErr != nil {
+		return string(data), closeErr
+	}
+	return string(data), callErr
 }
 
 func TestRunUpdate_GitHubAPIError(t *testing.T) {
