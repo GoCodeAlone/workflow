@@ -48,6 +48,7 @@ type manifestSetupArgs struct {
 	scope          string
 	scopeExplicit  bool
 	envName        string
+	envExplicit    bool
 	org            string
 	visibility     string
 	tokenEnv       string
@@ -107,7 +108,7 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 		return runSecretsSetupManifestTargets(context.Background(), a, discovered, preprovidedValuer, out, &promptErr)
 	}
 
-	ghProvider, scopeLabel, err := buildSecretWriter(strings.ToLower(strings.TrimSpace(a.scope)), a.envName, a.org, a.visibility, a.tokenEnv, firstConfigPattern(a.configPatterns))
+	ghProvider, scopeLabel, err := buildSecretWriter(strings.ToLower(strings.TrimSpace(a.scope)), manifestSetupEnvName(a.envName, a.envExplicit), a.org, a.visibility, a.tokenEnv, firstConfigPattern(a.configPatterns))
 	if err != nil {
 		return err
 	}
@@ -167,6 +168,18 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 			fmt.Fprintf(out, "  %s (%s)\n", secret.Name, strings.Join(secret.Sources, ", "))
 		}
 		fmt.Fprintln(out)
+	}
+
+	if err := preflightManifestSecretTargetEnvironments(context.Background(), []manifestSecretTarget{{
+		Store:    "github:" + strings.ToLower(strings.TrimSpace(a.scope)),
+		Label:    scopeLabel,
+		Provider: provider,
+	}}, manifestEnvironmentPreflightOptions{
+		Interactive: interactive,
+		Out:         out,
+		Confirm:     prompt.Confirm,
+	}); err != nil {
+		return err
 	}
 
 	report, err := runSetupEngine(context.Background(), discovered,
@@ -234,6 +247,14 @@ func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, d
 		return nil
 	}
 
+	if err := preflightManifestSecretTargetEnvironments(ctx, selected, manifestEnvironmentPreflightOptions{
+		Interactive: true,
+		Out:         out,
+		Confirm:     prompt.Confirm,
+	}); err != nil {
+		return err
+	}
+
 	values, err := collectManifestSecretTargetValues(selected, preprovidedValuer, manifestTargetValuePrompt{
 		input:   prompt.Input,
 		confirm: prompt.Confirm,
@@ -258,6 +279,115 @@ func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, d
 	}
 	fmt.Fprintln(out, "\nAll done.")
 	return nil
+}
+
+type manifestEnvironmentPreflightOptions struct {
+	Interactive bool
+	Out         io.Writer
+	Confirm     func(question string, def bool) (bool, error)
+}
+
+func preflightManifestSecretTargetEnvironments(ctx context.Context, targets []manifestSecretTarget, opts manifestEnvironmentPreflightOptions) error {
+	seen := map[string]bool{}
+	for i := range targets {
+		target := targets[i]
+		manager, ok := manifestSecretTargetEnvironmentManager(target.Provider)
+		if !ok {
+			continue
+		}
+		envName := manifestSecretTargetEnvironmentName(target)
+		if envName == "" {
+			continue
+		}
+		key := strings.Join([]string{target.Store, manifestSecretTargetScopeLabel(target), envName}, "\x00")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		if _, err := manager.ValidateEnvironment(ctx, envName); err == nil {
+			continue
+		} else if !errors.Is(err, secrets.ErrNotFound) {
+			return err
+		}
+
+		label := manifestEnvironmentPreflightLabel(target, envName)
+		if !opts.Interactive {
+			return fmt.Errorf("provider environment %q is missing for %s in non-interactive setup; create it first or run interactively", envName, label)
+		}
+		confirm := opts.Confirm
+		if confirm == nil {
+			confirm = prompt.Confirm
+		}
+		ok, err := confirm("Create "+label+"?", true)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("provider environment %q is required for %s", envName, label)
+		}
+		if _, err := manager.EnsureEnvironment(ctx, envName); err != nil {
+			return err
+		}
+		if opts.Out != nil {
+			fmt.Fprintf(opts.Out, "  %s: created\n", label)
+		}
+	}
+	return nil
+}
+
+func manifestSecretTargetEnvironmentManager(provider SecretsProvider) (secrets.EnvironmentManager, bool) {
+	if adapter, ok := provider.(secretsProviderAdapter); ok {
+		manager, ok := adapter.p.(secrets.EnvironmentManager)
+		return manager, ok
+	}
+	manager, ok := provider.(secrets.EnvironmentManager)
+	return manager, ok
+}
+
+func manifestSecretTargetEnvironmentName(target manifestSecretTarget) string {
+	if adapter, ok := target.Provider.(secretsProviderAdapter); ok {
+		if namer, ok := adapter.p.(interface{ Environment() string }); ok {
+			if name := strings.TrimSpace(namer.Environment()); name != "" {
+				return name
+			}
+		}
+	}
+	if namer, ok := target.Provider.(interface{ Environment() string }); ok {
+		if name := strings.TrimSpace(namer.Environment()); name != "" {
+			return name
+		}
+	}
+	if describer, ok := target.Provider.(interface{ SecretTarget() secrets.ProviderTarget }); ok {
+		desc := describer.SecretTarget()
+		if desc.Scope == "env" {
+			if name, _, ok := strings.Cut(desc.Subject, " on "); ok {
+				return strings.TrimSpace(name)
+			}
+		}
+	}
+	if name, ok := strings.CutPrefix(target.Store, "github-env:"); ok {
+		return strings.TrimSpace(name)
+	}
+	if _, name, ok := strings.Cut(target.Store, ":env:"); ok {
+		return strings.TrimSpace(name)
+	}
+	return ""
+}
+
+func manifestEnvironmentPreflightLabel(target manifestSecretTarget, envName string) string {
+	if describer, ok := target.Provider.(interface{ SecretTarget() secrets.ProviderTarget }); ok {
+		if label := strings.TrimSpace(describer.SecretTarget().Label); label != "" {
+			return label
+		}
+	}
+	if target.Label != "" {
+		return target.Label
+	}
+	if target.Store != "" {
+		return target.Store + " " + envName
+	}
+	return envName
 }
 
 type manifestSecretTargetGroup struct {
@@ -289,9 +419,17 @@ func buildManifestSecretTargetProviders(a *manifestSetupArgs) ([]manifestSecretT
 		add("github-repo", label, secretsProviderAdapter{p: p})
 		repo, _, _ = readGitHubRepoForSecretsSetup(configPath)
 	}
-	if a.envName != "" {
-		if p, label, err := buildSecretWriter("env", a.envName, a.org, a.visibility, a.tokenEnv, configPath); err == nil {
-			add("github-env:"+a.envName, label, secretsProviderAdapter{p: p})
+	var cfg *config.WorkflowConfig
+	if loaded, err := config.LoadFromFile(configPath); err == nil {
+		cfg = loaded
+	}
+	envNames := append([]string(nil), config.DesiredEnvironmentNames(cfg)...)
+	if a.envExplicit {
+		envNames = appendManifestEnvironmentName(envNames, a.envName)
+	}
+	for _, envName := range envNames {
+		if p, label, err := buildSecretWriter("env", envName, a.org, a.visibility, a.tokenEnv, configPath); err == nil {
+			add("github-env:"+envName, label, secretsProviderAdapter{p: p})
 		}
 	}
 	org := strings.TrimSpace(a.org)
@@ -307,7 +445,7 @@ func buildManifestSecretTargetProviders(a *manifestSetupArgs) ([]manifestSecretT
 		}
 	}
 
-	if cfg, err := config.LoadFromFile(configPath); err == nil && len(cfg.SecretStores) > 0 {
+	if cfg != nil && len(cfg.SecretStores) > 0 {
 		providers = providers[:0]
 		clear(seen)
 		for _, target := range buildConfiguredManifestSecretStoreTargets(cfg) {
@@ -319,6 +457,28 @@ func buildManifestSecretTargetProviders(a *manifestSetupArgs) ([]manifestSecretT
 		return nil, fmt.Errorf("no secret provider targets could be configured from %s; configure GitHub repo/org settings or secretStores", configPath)
 	}
 	return providers, nil
+}
+
+func appendManifestEnvironmentName(names []string, name string) []string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return names
+	}
+	for _, existing := range names {
+		if existing == name {
+			return names
+		}
+	}
+	names = append(names, name)
+	sort.Strings(names)
+	return names
+}
+
+func manifestSetupEnvName(envName string, explicit bool) string {
+	if !explicit {
+		return ""
+	}
+	return strings.TrimSpace(envName)
 }
 
 func buildConfiguredManifestSecretStoreTargets(cfg *config.WorkflowConfig) []manifestSecretTargetProvider {
@@ -374,7 +534,7 @@ func manifestGitHubSecretStoreTargets(name string, store *config.SecretStoreConf
 				Provider: provider,
 			})
 		}
-		if env := stringConfigValue(cfg, "environment"); env != "" {
+		if env := stringConfigValue(cfg, "environment"); env != "" && !config.IsRuntimeEnvironmentPlaceholder(env) {
 			if p, err := buildGitHubEnvSecretsTarget(repo, env, tokenEnv); err == nil {
 				provider := secretsProviderAdapter{p: p}
 				targets = append(targets, manifestSecretTargetProvider{
@@ -1413,6 +1573,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	if *allFlag && len(only) > 0 {
 		return nil, fmt.Errorf("--all and --only are mutually exclusive")
 	}
+	envExplicit := hasFlag(args, "env")
 	return &manifestSetupArgs{
 		manifestPath:   *manifestPath,
 		lockfilePath:   *lockfilePath,
@@ -1420,7 +1581,8 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 		configPatterns: *configPatterns,
 		scope:          *scope,
 		scopeExplicit:  hasFlag(args, "scope"),
-		envName:        *envName,
+		envName:        manifestSetupEnvName(*envName, envExplicit),
+		envExplicit:    envExplicit,
 		org:            *org,
 		visibility:     *visibility,
 		tokenEnv:       *tokenEnv,

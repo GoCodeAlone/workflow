@@ -6,8 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 func TestDiscoverManifestSecrets(t *testing.T) {
@@ -362,6 +365,285 @@ func TestManifestSecretTargetScopeLabelUsesProviderDomain(t *testing.T) {
 			t.Fatalf("github scope label leaked local semantics: %q", label)
 		}
 	}
+}
+
+func TestBuildManifestSecretTargetProvidersUsesYAMLDeclaredEnvironments(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	t.Setenv("GITHUB_TOKEN", "stub")
+	configPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(configPath, []byte(`modules: []
+secrets:
+  provider: github
+  config:
+    repo: GoCodeAlone/workflow
+environments:
+  staging: {}
+ci:
+  deploy:
+    environments:
+      production: {}
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	providers, err := buildManifestSecretTargetProviders(&manifestSetupArgs{
+		configPatterns: configPath,
+		envName:        "local",
+		envExplicit:    false,
+		visibility:     "all",
+		tokenEnv:       "GITHUB_TOKEN",
+	})
+	if err != nil {
+		t.Fatalf("buildManifestSecretTargetProviders: %v", err)
+	}
+
+	stores := manifestTargetProviderStores(providers)
+	want := []string{"github-env:production", "github-env:staging", "github-org:GoCodeAlone", "github-repo"}
+	if !reflect.DeepEqual(stores, want) {
+		t.Fatalf("stores = %v, want %v", stores, want)
+	}
+}
+
+func TestBuildManifestSecretTargetProvidersDoesNotUseDefaultLocalEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	t.Setenv("GITHUB_TOKEN", "stub")
+	configPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(configPath, []byte(`modules: []
+secrets:
+  provider: github
+  config:
+    repo: GoCodeAlone/workflow
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	providers, err := buildManifestSecretTargetProviders(&manifestSetupArgs{
+		configPatterns: configPath,
+		envName:        "local",
+		envExplicit:    false,
+		visibility:     "all",
+		tokenEnv:       "GITHUB_TOKEN",
+	})
+	if err != nil {
+		t.Fatalf("buildManifestSecretTargetProviders: %v", err)
+	}
+
+	stores := manifestTargetProviderStores(providers)
+	want := []string{"github-org:GoCodeAlone", "github-repo"}
+	if !reflect.DeepEqual(stores, want) {
+		t.Fatalf("stores = %v, want %v", stores, want)
+	}
+}
+
+func TestBuildManifestSecretTargetProvidersUsesExplicitEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	t.Setenv("GITHUB_TOKEN", "stub")
+	configPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(configPath, []byte(`modules: []
+secrets:
+  provider: github
+  config:
+    repo: GoCodeAlone/workflow
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	providers, err := buildManifestSecretTargetProviders(&manifestSetupArgs{
+		configPatterns: configPath,
+		envName:        "preview",
+		envExplicit:    true,
+		visibility:     "all",
+		tokenEnv:       "GITHUB_TOKEN",
+	})
+	if err != nil {
+		t.Fatalf("buildManifestSecretTargetProviders: %v", err)
+	}
+
+	stores := manifestTargetProviderStores(providers)
+	want := []string{"github-env:preview", "github-org:GoCodeAlone", "github-repo"}
+	if !reflect.DeepEqual(stores, want) {
+		t.Fatalf("stores = %v, want %v", stores, want)
+	}
+}
+
+func TestManifestSetupEnvNameRequiresExplicitEnvFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		envName  string
+		explicit bool
+		want     string
+	}{
+		{name: "default local ignored", envName: "local", explicit: false, want: ""},
+		{name: "explicit local kept", envName: "local", explicit: true, want: "local"},
+		{name: "explicit preview kept", envName: "preview", explicit: true, want: "preview"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := manifestSetupEnvName(tt.envName, tt.explicit); got != tt.want {
+				t.Fatalf("manifestSetupEnvName(%q, %v) = %q, want %q", tt.envName, tt.explicit, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildManifestSecretTargetProvidersSkipsRuntimeEnvironmentPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	chdirForTest(t, dir)
+	t.Setenv("GITHUB_TOKEN", "stub")
+	configPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(configPath, []byte(`modules: []
+secretStores:
+  github:
+    provider: github
+    config:
+      repo: GoCodeAlone/workflow
+      environment: ${WORKFLOW_ENV}
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	providers, err := buildManifestSecretTargetProviders(&manifestSetupArgs{
+		configPatterns: configPath,
+		visibility:     "all",
+		tokenEnv:       "GITHUB_TOKEN",
+	})
+	if err != nil {
+		t.Fatalf("buildManifestSecretTargetProviders: %v", err)
+	}
+
+	stores := manifestTargetProviderStores(providers)
+	want := []string{"github:repo"}
+	if !reflect.DeepEqual(stores, want) {
+		t.Fatalf("stores = %v, want %v", stores, want)
+	}
+}
+
+func manifestTargetProviderStores(providers []manifestSecretTargetProvider) []string {
+	stores := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		stores = append(stores, provider.Store)
+	}
+	sort.Strings(stores)
+	return stores
+}
+
+func TestPreflightManifestSecretTargetEnvironmentsCreatesMissingInteractiveOnce(t *testing.T) {
+	provider := &manifestEnvironmentTestProvider{env: "staging"}
+	targets := []manifestSecretTarget{
+		{
+			Secret:   manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN_A"}},
+			Store:    "github-env:staging",
+			Provider: provider,
+		},
+		{
+			Secret:   manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN_B"}},
+			Store:    "github-env:staging",
+			Provider: provider,
+		},
+	}
+	var confirms int
+
+	err := preflightManifestSecretTargetEnvironments(context.Background(), targets, manifestEnvironmentPreflightOptions{
+		Interactive: true,
+		Confirm: func(question string, def bool) (bool, error) {
+			confirms++
+			if !strings.Contains(question, "staging") {
+				t.Fatalf("confirm question = %q, want environment name", question)
+			}
+			if !def {
+				t.Fatalf("confirm default = false, want true")
+			}
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	if confirms != 1 || provider.ensureCalls != 1 {
+		t.Fatalf("confirms=%d ensureCalls=%d, want one each", confirms, provider.ensureCalls)
+	}
+}
+
+func TestPreflightManifestSecretTargetEnvironmentsFailsMissingNonInteractive(t *testing.T) {
+	provider := &manifestEnvironmentTestProvider{env: "production"}
+	targets := []manifestSecretTarget{{
+		Secret:   manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "TOKEN_A"}},
+		Store:    "github-env:production",
+		Provider: provider,
+	}}
+
+	err := preflightManifestSecretTargetEnvironments(context.Background(), targets, manifestEnvironmentPreflightOptions{})
+	if err == nil {
+		t.Fatal("expected missing environment error")
+	}
+	if !strings.Contains(err.Error(), "production") || !strings.Contains(err.Error(), "non-interactive") {
+		t.Fatalf("error = %q, want environment and non-interactive guidance", err)
+	}
+	if provider.ensureCalls != 0 {
+		t.Fatalf("ensureCalls = %d, want 0", provider.ensureCalls)
+	}
+}
+
+type manifestEnvironmentTestProvider struct {
+	env           string
+	exists        bool
+	validateCalls int
+	ensureCalls   int
+}
+
+func (p *manifestEnvironmentTestProvider) Get(context.Context, string) (string, error) {
+	return "", secrets.ErrUnsupported
+}
+
+func (p *manifestEnvironmentTestProvider) Set(context.Context, string, string) error {
+	return nil
+}
+
+func (p *manifestEnvironmentTestProvider) Check(context.Context, string) (SecretState, error) {
+	return SecretNotSet, nil
+}
+
+func (p *manifestEnvironmentTestProvider) List(context.Context) ([]SecretStatus, error) {
+	return nil, nil
+}
+
+func (p *manifestEnvironmentTestProvider) Delete(context.Context, string) error {
+	return nil
+}
+
+func (p *manifestEnvironmentTestProvider) SecretTarget() secrets.ProviderTarget {
+	subject := p.env + " on GoCodeAlone/workflow"
+	return secrets.ProviderTarget{
+		Provider: "github",
+		Scope:    "env",
+		Subject:  subject,
+		Label:    "github env " + subject,
+	}
+}
+
+func (p *manifestEnvironmentTestProvider) Environment() string {
+	return p.env
+}
+
+func (p *manifestEnvironmentTestProvider) ListEnvironments(context.Context) ([]secrets.ProviderEnvironment, error) {
+	return nil, nil
+}
+
+func (p *manifestEnvironmentTestProvider) ValidateEnvironment(context.Context, string) (secrets.ProviderEnvironment, error) {
+	p.validateCalls++
+	if !p.exists {
+		return secrets.ProviderEnvironment{}, secrets.ErrNotFound
+	}
+	return secrets.ProviderEnvironment{Provider: "github", Name: p.env, Exists: true}, nil
+}
+
+func (p *manifestEnvironmentTestProvider) EnsureEnvironment(context.Context, string) (secrets.ProviderEnvironment, error) {
+	p.ensureCalls++
+	p.exists = true
+	return secrets.ProviderEnvironment{Provider: "github", Name: p.env, Exists: true}, nil
 }
 
 func TestBuildManifestSecretMatrixRowsSummarizesTargets(t *testing.T) {
