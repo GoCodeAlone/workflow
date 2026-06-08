@@ -97,6 +97,19 @@ func TestParseManifestSetupFlagsAcceptsSetupSelectors(t *testing.T) {
 	}
 }
 
+func TestParseManifestSetupFlagsPreservesAll(t *testing.T) {
+	args, err := parseManifestSetupFlags([]string{
+		"--manifest", "wfctl.yaml",
+		"--all",
+	})
+	if err != nil {
+		t.Fatalf("parseManifestSetupFlags: %v", err)
+	}
+	if !args.all {
+		t.Fatalf("--all was not preserved: %+v", args)
+	}
+}
+
 func TestManifestSecretValueNonInteractiveRequiresValueSource(t *testing.T) {
 	secret := manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}}
 	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
@@ -128,6 +141,104 @@ func TestManifestSecretValueFromEnvMissingSkips(t *testing.T) {
 	if provided || got != "" {
 		t.Fatalf("got value=%q provided=%v, want skipped empty value", got, provided)
 	}
+}
+
+func TestBuildManifestMultiSelectItemsShowsStatusSourcesAndDefaults(t *testing.T) {
+	secrets := []manifestDiscoveredSecret{
+		{
+			PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"},
+			Sources:              []string{"config:digitalocean.wfctl.yaml", "plugin:workflow-plugin-digitalocean"},
+		},
+		{
+			PluginRequiredSecret: PluginRequiredSecret{Name: "HOVER_PASSWORD"},
+			Sources:              []string{"config:hover.wfctl.yaml", "plugin:workflow-plugin-hover"},
+		},
+	}
+	statuses := []SecretStatus{
+		{Name: "DIGITALOCEAN_TOKEN", State: SecretSet, IsSet: true},
+		{Name: "HOVER_PASSWORD", State: SecretNotSet, IsSet: false},
+	}
+
+	items := buildManifestMultiSelectItems(secrets, statuses, false)
+	if len(items) != 2 {
+		t.Fatalf("items len = %d, want 2", len(items))
+	}
+	if items[0].Preselected {
+		t.Fatalf("set secret was preselected: %+v", items[0])
+	}
+	if !items[1].Preselected {
+		t.Fatalf("unset secret was not preselected: %+v", items[1])
+	}
+	for _, want := range []string{"DIGITALOCEAN_TOKEN", "✓ set", "config:digitalocean.wfctl.yaml", "plugin:workflow-plugin-digitalocean"} {
+		if !strings.Contains(items[0].Label, want) {
+			t.Fatalf("set label %q does not contain %q", items[0].Label, want)
+		}
+	}
+	for _, want := range []string{"HOVER_PASSWORD", "✗ unset", "config:hover.wfctl.yaml", "plugin:workflow-plugin-hover"} {
+		if !strings.Contains(items[1].Label, want) {
+			t.Fatalf("unset label %q does not contain %q", items[1].Label, want)
+		}
+	}
+}
+
+func TestManifestMultiSelectTitleRespectsSkipExisting(t *testing.T) {
+	normal := manifestMultiSelectTitle("github repo GoCodeAlone/example", false)
+	if !strings.Contains(normal, "toggle set secrets to update") {
+		t.Fatalf("normal title = %q, want update hint", normal)
+	}
+	skipExisting := manifestMultiSelectTitle("github repo GoCodeAlone/example", true)
+	if strings.Contains(skipExisting, "toggle set secrets") {
+		t.Fatalf("skip-existing title = %q, must not offer toggling hidden set secrets", skipExisting)
+	}
+	for _, want := range []string{"--skip-existing", "hides existing secrets"} {
+		if !strings.Contains(skipExisting, want) {
+			t.Fatalf("skip-existing title = %q, want %q", skipExisting, want)
+		}
+	}
+}
+
+func TestSelectManifestSecretsForSetupDefaultsToUnsetButCanUpdateAll(t *testing.T) {
+	secrets := []manifestDiscoveredSecret{
+		{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}},
+		{PluginRequiredSecret: PluginRequiredSecret{Name: "HOVER_PASSWORD"}},
+	}
+	statuses := []SecretStatus{
+		{Name: "DIGITALOCEAN_TOKEN", State: SecretSet, IsSet: true},
+		{Name: "HOVER_PASSWORD", State: SecretNotSet, IsSet: false},
+	}
+
+	selected := selectManifestSecretsForSetup(secrets, statuses, manifestSecretSelectionOptions{})
+	if got := manifestSecretNames(selected); !reflect.DeepEqual(got, []string{"HOVER_PASSWORD"}) {
+		t.Fatalf("default selected = %v, want only unset secret", got)
+	}
+
+	selected = selectManifestSecretsForSetup(secrets, statuses, manifestSecretSelectionOptions{includeExisting: true})
+	if got := manifestSecretNames(selected); !reflect.DeepEqual(got, []string{"DIGITALOCEAN_TOKEN", "HOVER_PASSWORD"}) {
+		t.Fatalf("includeExisting selected = %v, want all secrets", got)
+	}
+
+	selected = selectManifestSecretsForSetup(secrets, statuses, manifestSecretSelectionOptions{
+		includeExisting: true,
+		skipExisting:    true,
+	})
+	if got := manifestSecretNames(selected); !reflect.DeepEqual(got, []string{"HOVER_PASSWORD"}) {
+		t.Fatalf("skipExisting selected = %v, want only unset secret", got)
+	}
+
+	selected = selectManifestSecretsForSetup(secrets, statuses, manifestSecretSelectionOptions{
+		onlySet: map[string]bool{"DIGITALOCEAN_TOKEN": true},
+	})
+	if got := manifestSecretNames(selected); !reflect.DeepEqual(got, []string{"DIGITALOCEAN_TOKEN"}) {
+		t.Fatalf("explicit only selected = %v, want selected set secret", got)
+	}
+}
+
+func manifestSecretNames(secrets []manifestDiscoveredSecret) []string {
+	names := make([]string, 0, len(secrets))
+	for _, secret := range secrets {
+		names = append(names, secret.Name)
+	}
+	return names
 }
 
 func TestParseManifestSetupFlagsDefaultsConfigPatterns(t *testing.T) {

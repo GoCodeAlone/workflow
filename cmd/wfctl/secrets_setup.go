@@ -43,8 +43,8 @@ func runSecretsSetup(args []string) error {
 	fromEnv := fs.Bool("from-env", false, "Read each secret value from $NAME (recommended for CI; avoids process-table leaks)")
 	var secretFlag multiStringFlag
 	fs.Var(&secretFlag, "secret", "NAME=VALUE literal (WARNING: leaks to process table; use --from-env in CI). Repeatable.")
-	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set (default: all)")
-	allFlag := fs.Bool("all", false, "Set all declared secrets (the default when --only is absent; explicit form)")
+	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set")
+	allFlag := fs.Bool("all", false, "Set all declared secrets; preselect all in manifest interactive mode")
 	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the store")
 	storeName := fs.String("store", "", "Named store to use (overrides config defaultStore)")
 	// Manifest-backed GitHub setup flags. These also keep the legacy --plugin
@@ -64,12 +64,14 @@ Set secrets declared in the config for a given environment.
 Interactive (default when stdin is a TTY):
   Lists each declared secret with its status, lets you select which to set,
   prompts to pick a store when none is configured, and masks sensitive input.
+  Manifest-backed setup selects unset secrets by default; toggle set secrets
+  to update them, or pass --all to preselect every discovered secret.
 
 Non-interactive (--non-interactive, --auto-gen-keys, or when stdin is not a TTY):
   --from-env        Read each value from $NAME. Recommended for CI.
   --secret NAME=VAL Set a specific secret inline (WARNING: leaks to process table).
   Pipe KEY=VALUE    Read KEY=VALUE lines from stdin.
-  --all             Set all declared secrets (default when --only is absent).
+  --all             Set all declared secrets; preselect all in manifest interactive mode.
   --only A,B        Restrict which secrets to set (mutually exclusive with --all).
   --skip-existing   Skip secrets already set in the store.
   --auto-gen-keys   Generate random values for _KEY/_SECRET/_TOKEN/_SIGNING names.
@@ -129,6 +131,7 @@ Options:
 				nonInteractive: manifestNonInteractive,
 				secretLiterals: []string(secretFlag),
 				only:           only,
+				all:            *allFlag,
 				skipExisting:   *skipExisting,
 			}, nil, os.Stdout)
 		}
