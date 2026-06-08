@@ -76,10 +76,10 @@ func TestPluginRegistrySync_NormalizeRepo(t *testing.T) {
 // TestPluginRegistrySync_DownloadsMatchVersion verifies the downloads-vs-version
 // invariant the bash script enforces (sync-versions.sh:46-58).
 func TestPluginRegistrySync_DownloadsMatchVersion(t *testing.T) {
-	t.Run("empty downloads OK", func(t *testing.T) {
+	t.Run("empty downloads rejected", func(t *testing.T) {
 		raw := map[string]any{}
-		if !downloadsMatchVersion(raw, "1.2.3") {
-			t.Error("empty downloads should match (no URLs to verify)")
+		if downloadsMatchVersion(raw, "1.2.3") {
+			t.Error("empty downloads should be treated as drift so --fix can populate release assets")
 		}
 	})
 	t.Run("matching URLs OK", func(t *testing.T) {
