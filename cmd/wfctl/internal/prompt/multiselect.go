@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -24,14 +23,14 @@ func MultiSelect(title string, items []Item) ([]int, error) {
 		}
 	}
 	m := &multiSelectModel{title: title, items: items, selected: selected}
-	p := tea.NewProgram(m, tea.WithOutput(io.Discard))
+	p := tea.NewProgram(m, tea.WithOutput(outputWriter()))
 	result, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("prompt multiselect: %w", err)
 	}
 	fm := result.(*multiSelectModel)
 	if fm.quit {
-		return nil, ErrNotInteractive
+		return nil, ErrInterrupted
 	}
 	var indices []int
 	for i := range items {

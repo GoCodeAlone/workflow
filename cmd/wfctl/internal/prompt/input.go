@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"fmt"
-	"io"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -37,14 +36,14 @@ func InputWithSuggestions(label string, masked bool, suggestions []string) (stri
 	}
 
 	m := &inputModel{label: label, ti: ti}
-	p := tea.NewProgram(m, tea.WithOutput(io.Discard))
+	p := tea.NewProgram(m, tea.WithOutput(outputWriter()))
 	result, err := p.Run()
 	if err != nil {
 		return "", fmt.Errorf("prompt input: %w", err)
 	}
 	fm := result.(*inputModel)
 	if fm.quit {
-		return "", ErrNotInteractive
+		return "", ErrInterrupted
 	}
 	return fm.ti.Value(), nil
 }

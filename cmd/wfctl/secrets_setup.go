@@ -122,6 +122,7 @@ Options:
 				visibility:     *visibility,
 				tokenEnv:       *tokenEnv,
 				fromEnv:        *fromEnv,
+				nonInteractive: useNonInteractive,
 				secretLiterals: []string(secretFlag),
 				only:           only,
 				skipExisting:   *skipExisting,

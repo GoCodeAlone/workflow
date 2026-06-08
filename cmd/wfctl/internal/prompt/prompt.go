@@ -10,6 +10,7 @@ package prompt
 
 import (
 	"errors"
+	"io"
 	"os"
 
 	"github.com/mattn/go-isatty"
@@ -17,6 +18,9 @@ import (
 
 // ErrNotInteractive is returned by all constructors when stdin is not a terminal.
 var ErrNotInteractive = errors.New("prompt: stdin is not a terminal")
+
+// ErrInterrupted is returned when the user aborts an interactive prompt.
+var ErrInterrupted = errors.New("prompt: interrupted")
 
 // Item is a selectable entry for MultiSelect.
 type Item struct {
@@ -27,4 +31,8 @@ type Item struct {
 // isTTY reports whether os.Stdin is an interactive terminal.
 func isTTY() bool {
 	return isatty.IsTerminal(os.Stdin.Fd())
+}
+
+func outputWriter() io.Writer {
+	return os.Stderr
 }

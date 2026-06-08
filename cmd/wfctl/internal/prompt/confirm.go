@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,14 +20,14 @@ func Confirm(question string, def bool) (bool, error) {
 		hint = "Y/n"
 	}
 	m := &confirmModel{question: question, hint: hint, def: def}
-	p := tea.NewProgram(m, tea.WithOutput(io.Discard))
+	p := tea.NewProgram(m, tea.WithOutput(outputWriter()))
 	result, err := p.Run()
 	if err != nil {
 		return false, fmt.Errorf("prompt confirm: %w", err)
 	}
 	fm := result.(*confirmModel)
 	if fm.quit {
-		return false, ErrNotInteractive
+		return false, ErrInterrupted
 	}
 	return fm.answer, nil
 }

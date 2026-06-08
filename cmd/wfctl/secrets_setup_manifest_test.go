@@ -92,6 +92,42 @@ func TestParseManifestSetupFlagsAcceptsSetupSelectors(t *testing.T) {
 	if !args.skipExisting || !args.fromEnv {
 		t.Fatalf("flags not preserved: %+v", args)
 	}
+	if !args.nonInteractive {
+		t.Fatalf("--non-interactive was not preserved: %+v", args)
+	}
+}
+
+func TestManifestSecretValueNonInteractiveRequiresValueSource(t *testing.T) {
+	secret := manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}}
+	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
+		interactive: false,
+		fromEnv:     false,
+		secretMap:   map[string]string{},
+	})
+	if err == nil {
+		t.Fatalf("expected missing value error, got value=%q provided=%v", got, provided)
+	}
+	msg := err.Error()
+	for _, want := range []string{"DIGITALOCEAN_TOKEN", "--from-env", "--secret DIGITALOCEAN_TOKEN=VALUE"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
+func TestManifestSecretValueFromEnvMissingSkips(t *testing.T) {
+	secret := manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}}
+	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
+		interactive: false,
+		fromEnv:     true,
+		secretMap:   map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("manifestSecretValue: %v", err)
+	}
+	if provided || got != "" {
+		t.Fatalf("got value=%q provided=%v, want skipped empty value", got, provided)
+	}
 }
 
 func TestParseManifestSetupFlagsDefaultsConfigPatterns(t *testing.T) {
