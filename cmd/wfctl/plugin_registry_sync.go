@@ -578,9 +578,10 @@ func isKnownArch(s string) bool {
 func downloadsMatchVersion(raw map[string]any, version string) bool {
 	downloadsRaw, _ := raw["downloads"].([]any)
 	if len(downloadsRaw) == 0 {
-		// No downloads → trivially match (registry handles empty download
-		// lists by leaving manifest version as-is).
-		return true
+		// Non-core plugin manifests need platform downloads so installs can
+		// resolve checksum-pinned release assets. Treat missing downloads as
+		// drift even when the manifest version already matches the latest tag.
+		return false
 	}
 	wantSubstr := "/releases/download/v" + version + "/"
 	for _, dl := range downloadsRaw {
