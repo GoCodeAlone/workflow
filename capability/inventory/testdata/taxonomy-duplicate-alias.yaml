@@ -1,0 +1,14 @@
+version: test
+capabilities:
+  - id: http.server
+    category: http
+    name: HTTP Server
+    aliases:
+      moduleTypes:
+        - http.server
+  - id: http.router
+    category: http
+    name: HTTP Router
+    aliases:
+      moduleTypes:
+        - http.server

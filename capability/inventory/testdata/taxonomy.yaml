@@ -1,0 +1,25 @@
+version: test
+capabilities:
+  - id: http.server
+    category: http
+    name: HTTP Server
+    description: Serves HTTP routes
+    lifecycle: released
+    aliases:
+      moduleTypes:
+        - http.server
+    tags:
+      - network
+  - id: auth.authz
+    category: auth
+    name: Authorization
+    description: Enforces permissions and roles
+    lifecycle: released
+    aliases:
+      moduleTypes:
+        - auth.rbac
+      stepTypes:
+        - step.authz_check
+    tags:
+      - cross-cutting
+      - authz-sensitive

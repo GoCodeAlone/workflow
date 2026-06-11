@@ -1,0 +1,230 @@
+version: 2026-06-11
+capabilities:
+  - id: auth.authn
+    category: auth
+    name: Authentication
+    description: Verifies user or service identity.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-auth, workflow-plugin-auth0, workflow-plugin-okta, workflow-plugin-ory-kratos, workflow-plugin-passkey]
+      moduleTypes: [auth.jwt, auth.user_store, auth.middleware]
+      keywords: [authn, authentication, jwt, passkey, oidc]
+    tags: [cross-cutting, auth-sensitive]
+  - id: auth.authz
+    category: auth
+    name: Authorization
+    description: Enforces permissions, roles, or policies.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-authz, workflow-plugin-authz-ui]
+      moduleTypes: [auth.rbac, authz.policy]
+      stepTypes: [step.authz_check]
+      keywords: [authz, authorization, rbac, permissions]
+    tags: [cross-cutting, authz-sensitive]
+  - id: auth.sso
+    category: auth
+    name: Single Sign-On
+    description: Integrates external identity providers.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-sso, workflow-plugin-scalekit, workflow-plugin-entra, workflow-plugin-ory-hydra]
+      keywords: [sso, oidc, saml, entra, scalekit]
+    tags: [cross-cutting, auth-sensitive]
+  - id: tenancy.scope
+    category: tenancy
+    name: Tenant Scope
+    description: Carries tenant identity through routes, storage, and provider resources.
+    lifecycle: local
+    aliases:
+      moduleTypes: [data.tenancy, tenant.registry]
+      keywords: [tenant, tenancy, tenantID, tenantKey, tenantScoped, tenant_id]
+    tags: [cross-cutting, tenant-scoped]
+  - id: secrets.management
+    category: secrets
+    name: Secrets Management
+    description: Declares, resolves, and writes secrets across provider scopes.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-secrets, workflow-plugin-vault, workflow-plugin-aws]
+      moduleTypes: [secrets.store, secrets.vault]
+      stepTypes: [step.secrets_get, step.secrets_set]
+      keywords: [secret, secrets, secretStores, vault]
+    tags: [cross-cutting, secret-backed]
+  - id: platform.github
+    category: platform
+    name: GitHub Provider
+    description: GitHub repository, secret, environment, and CI integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-github]
+      providers: [github]
+      keywords: [github, github:repo, github:org, github:env]
+    tags: [provider, secret-backed]
+  - id: platform.gitlab
+    category: platform
+    name: GitLab Provider
+    description: GitLab project, variable, environment, and CI integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-gitlab]
+      providers: [gitlab]
+      keywords: [gitlab]
+    tags: [provider, secret-backed]
+  - id: platform.aws
+    category: platform
+    name: AWS Provider
+    description: AWS infrastructure, secrets, registry, and deployment integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-aws]
+      providers: [aws]
+      keywords: [aws, s3, secretsmanager, ecr]
+    tags: [provider, secret-backed]
+  - id: platform.azure
+    category: platform
+    name: Azure Provider
+    description: Azure infrastructure and deployment integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-azure]
+      providers: [azure]
+      keywords: [azure, entra]
+    tags: [provider]
+  - id: platform.gcp
+    category: platform
+    name: Google Cloud Provider
+    description: GCP infrastructure and deployment integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-gcp]
+      providers: [gcp, google]
+      keywords: [gcp, google, gcs]
+    tags: [provider]
+  - id: platform.digitalocean
+    category: platform
+    name: DigitalOcean Provider
+    description: DigitalOcean app, DNS, Spaces, registry, and infrastructure integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-digitalocean]
+      providers: [digitalocean, do]
+      keywords: [digitalocean, spaces, app-platform]
+    tags: [provider, secret-backed]
+  - id: ci.generation
+    category: ci
+    name: CI Generation
+    description: Generates provider CI workflows from Workflow config.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-ci-generator]
+      moduleTypes: [ci.generator]
+      stepTypes: [step.ci_generate]
+      keywords: [ci, github-actions, gitlab-ci]
+    tags: [build]
+  - id: iac.provider
+    category: iac
+    name: IaC Provider
+    description: Plans and applies infrastructure resources through provider plugins.
+    lifecycle: released
+    aliases:
+      moduleTypes: [iac.provider]
+      iacServices: [workflow.plugin.external.iac.IaCProviderRequired]
+      keywords: [iac, infrastructure, tofu]
+    tags: [provider]
+  - id: iac.state-backend
+    category: iac
+    name: IaC State Backend
+    description: Stores infrastructure state in local or provider backends.
+    lifecycle: released
+    aliases:
+      moduleTypes: [iac.state]
+      iacStateBackends: [local, s3, gcs, azure_blob]
+      keywords: [state, backend]
+    tags: [provider]
+  - id: observability.health
+    category: observability
+    name: Health Checks
+    description: Exposes health, readiness, and service status.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-observability]
+      moduleTypes: [observability.health, health.check]
+      keywords: [health, readiness, liveness]
+    tags: [ops]
+  - id: observability.tracing
+    category: observability
+    name: Tracing
+    description: Emits distributed traces and telemetry.
+    lifecycle: released
+    aliases:
+      moduleTypes: [observability.tracing]
+      keywords: [trace, tracing, telemetry, opentelemetry]
+    tags: [ops]
+  - id: migrations.schema
+    category: data
+    name: Schema Migrations
+    description: Validates and runs database schema migrations.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-migrations]
+      moduleTypes: [migrate.schema]
+      keywords: [migration, migrations, schema]
+    tags: [data]
+  - id: featureflags.flags
+    category: featureflags
+    name: Feature Flags
+    description: Evaluates feature flags and rollout decisions.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-launchdarkly]
+      moduleTypes: [featureflag.service]
+      stepTypes: [step.featureflag_eval]
+      keywords: [featureflag, featureflags, launchdarkly]
+    tags: [runtime-control]
+  - id: payments.processing
+    category: payments
+    name: Payments
+    description: Integrates payment providers and checkout workflows.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-payments]
+      keywords: [payments, stripe, checkout]
+    tags: [secret-backed]
+  - id: messaging.broker
+    category: messaging
+    name: Message Broker
+    description: Publishes, subscribes, and routes messages.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-messaging-core, workflow-plugin-eventbus, workflow-plugin-broker]
+      moduleTypes: [messaging.broker, messaging.nats, messaging.kafka, messaging.broker.eventbus]
+      keywords: [messaging, eventbus, nats, kafka]
+    tags: [eventing]
+  - id: storage.object
+    category: storage
+    name: Object Storage
+    description: Reads and writes object/blob storage.
+    lifecycle: released
+    aliases:
+      moduleTypes: [storage.s3, storage.gcs, storage.local]
+      keywords: [storage, object, blob, s3, gcs, spaces]
+    tags: [data]
+  - id: storage.database
+    category: storage
+    name: Database Storage
+    description: Provides SQL or embedded persistence.
+    lifecycle: released
+    aliases:
+      moduleTypes: [database.workflow, storage.sqlite, persistence.store]
+      stepTypes: [step.db_query, step.db_exec]
+      keywords: [database, sqlite, postgres, mysql]
+    tags: [data]
+  - id: docs.api
+    category: docs
+    name: API Documentation
+    description: Generates API or Go package documentation.
+    lifecycle: released
+    aliases:
+      moduleTypes: [docs.api]
+      keywords: [docs, documentation, openapi, go-docs]
+    tags: [docs]
