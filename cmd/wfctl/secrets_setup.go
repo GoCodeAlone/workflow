@@ -46,6 +46,7 @@ func runSecretsSetup(args []string) error {
 	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set")
 	allFlag := fs.Bool("all", false, "Set all declared secrets; preselect all in manifest interactive mode")
 	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the store")
+	verbose := fs.Bool("verbose", false, "Show source and target details in manifest-backed interactive setup")
 	storeName := fs.String("store", "", "Named store to use (overrides config defaultStore)")
 	// Manifest-backed GitHub setup flags. These also keep the legacy --plugin
 	// path compatible because runSecrets dispatches --plugin before this path.
@@ -64,8 +65,9 @@ Set secrets declared in the config for a given environment.
 Interactive (default when stdin is a TTY):
   Lists each declared secret with its status, lets you select which to set,
   prompts to pick a store when none is configured, and masks sensitive input.
-  Manifest-backed setup selects unset secrets by default; toggle set secrets
-  to update them, or pass --all to preselect every discovered secret.
+  Manifest-backed setup shows a compact secret x target matrix first, then
+  lets you choose scope/store targets per selected secret. Use --verbose for
+  source files, plugin names, and full provider target labels.
 
 Non-interactive (--non-interactive, --auto-gen-keys, or when stdin is not a TTY):
   --from-env        Read each value from $NAME. Recommended for CI.
@@ -117,6 +119,7 @@ Options:
 				return fmt.Errorf("--auto-gen-keys is not supported with wfctl.yaml manifest-backed secrets setup; use --from-env, --secret NAME=VALUE, or run interactively from a terminal")
 			}
 			manifestNonInteractive := *nonInteractive || !isatty.IsTerminal(os.Stdin.Fd())
+			envExplicit := hasFlag(args, "env")
 			return runSecretsSetupManifestWithIO(&manifestSetupArgs{
 				manifestPath:   target.path,
 				lockfilePath:   *lockFile,
@@ -124,7 +127,8 @@ Options:
 				configPatterns: defaultManifestSetupConfigPatterns(),
 				scope:          *scope,
 				scopeExplicit:  hasFlag(args, "scope"),
-				envName:        *envName,
+				envName:        manifestSetupEnvName(*envName, envExplicit),
+				envExplicit:    envExplicit,
 				org:            *org,
 				visibility:     *visibility,
 				tokenEnv:       *tokenEnv,
@@ -134,6 +138,7 @@ Options:
 				only:           only,
 				all:            *allFlag,
 				skipExisting:   *skipExisting,
+				verbose:        *verbose,
 			}, nil, os.Stdout)
 		}
 		if target.path != "" {
