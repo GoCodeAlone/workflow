@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
@@ -49,6 +50,21 @@ func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
 	wrapped := fmt.Errorf("pipeline failed: %w", flag.ErrHelp)
 	if !isHelpRequested(wrapped) {
 		t.Error("isHelpRequested should return true for wrapped flag.ErrHelp")
+	}
+}
+
+func TestIsPromptCancelledUnwrapsPromptCancellation(t *testing.T) {
+	if !isPromptCancelled(prompt.ErrCancelled) {
+		t.Fatal("prompt.ErrCancelled should be classified as user cancellation")
+	}
+	if !isPromptCancelled(fmt.Errorf("wrapped: %w", prompt.ErrCancelled)) {
+		t.Fatal("wrapped prompt.ErrCancelled should be classified as user cancellation")
+	}
+	if isPromptCancelled(flag.ErrHelp) {
+		t.Fatal("flag.ErrHelp must not be classified as prompt cancellation")
+	}
+	if isPromptCancelled(nil) {
+		t.Fatal("nil must not be classified as prompt cancellation")
 	}
 }
 

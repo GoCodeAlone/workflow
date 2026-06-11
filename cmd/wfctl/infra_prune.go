@@ -233,11 +233,12 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 	}
 
 	if !nonInteractive {
-		fmt.Fprintf(w, "\nProceed? (y/N): ")
-		var ans string
-		_, _ = fmt.Scanln(&ans)
-		if ans != "y" && ans != "Y" {
-			fmt.Fprintln(w, "Aborted.")
+		ok, err := confirmAction("Proceed?", false, w, nil)
+		if err != nil {
+			fmt.Fprintf(w, "prune: confirm: %v\n", err)
+			return 1
+		}
+		if !ok {
 			return 0
 		}
 	}

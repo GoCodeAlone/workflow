@@ -596,11 +596,12 @@ func runPreRotationPrune(ctx context.Context, provider pruneProvider, resourceTy
 	}
 
 	if !nonInteractive {
-		fmt.Fprintf(w, "\nProceed with pre-rotation prune? (y/N): ")
-		var ans string
-		_, _ = fmt.Scanln(&ans)
-		if ans != "y" && ans != "Y" {
-			fmt.Fprintln(w, "Aborted (no rotation attempted; no state mutated).")
+		ok, err := confirmAction("Proceed with pre-rotation prune?", false, w, nil)
+		if err != nil {
+			fmt.Fprintf(w, "rotate-and-prune: confirm: %v\n", err)
+			return 1
+		}
+		if !ok {
 			return 1
 		}
 	}
