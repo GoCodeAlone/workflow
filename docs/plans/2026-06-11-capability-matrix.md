@@ -49,6 +49,8 @@ Source: `docs/plans/2026-06-11-capability-matrix-design.md`
 - Create: `capability/inventory/types.go`
 - Create: `capability/inventory/taxonomy.go`
 - Create: `capability/inventory/taxonomy_test.go`
+- Create: `capability/inventory/testdata/taxonomy.yaml`
+- Create: `capability/inventory/testdata/taxonomy-duplicate.yaml`
 - Create: `data/capabilities/taxonomy.yaml`
 
 **Step 1: Write failing taxonomy tests**
@@ -289,6 +291,10 @@ git commit -m "feat(capability): profile application usage"
 **Files:**
 - Create: `cmd/wfctl/capability.go`
 - Create: `cmd/wfctl/capability_test.go`
+- Create: `cmd/wfctl/testdata/capability/app/wfctl.yaml`
+- Create: `cmd/wfctl/testdata/capability/app/.wfctl-lock.yaml`
+- Create: `cmd/wfctl/testdata/capability/app/workflow.yaml`
+- Create: `cmd/wfctl/testdata/capability/app/plugins/workflow-plugin-authz/plugin.json`
 - Modify: `cmd/wfctl/main.go`
 - Modify: `cmd/wfctl/wfctl.yaml`
 - Modify: `docs/WFCTL.md`
@@ -311,6 +317,10 @@ func TestRunCapabilityAppJSON(t *testing.T) { ... }
 func TestRunCapabilityCheckWarnOnly(t *testing.T) { ... }
 func TestEmbeddedCLIRegistersCapability(t *testing.T) { ... }
 ```
+
+Use the `cmd/wfctl/testdata/capability/app/` fixture for CLI app/check tests.
+Do not use `cmd/wfctl/wfctl.yaml` as a project manifest; it is the embedded
+Workflow config for the CLI itself, not an application `wfctl.yaml`.
 
 **Step 2: Run test to verify it fails**
 
@@ -451,7 +461,12 @@ Run:
 ```bash
 GOWORK=off go run ./cmd/wfctl capability -h
 GOWORK=off go run ./cmd/wfctl capability ecosystem --registry data/registry --repo-root .. --format json
-GOWORK=off go run ./cmd/wfctl capability app --manifest cmd/wfctl/wfctl.yaml --workflow cmd/wfctl/wfctl.yaml --format json
+GOWORK=off go run ./cmd/wfctl capability app \
+  --manifest cmd/wfctl/testdata/capability/app/wfctl.yaml \
+  --workflow cmd/wfctl/testdata/capability/app/workflow.yaml \
+  --plugin-dir cmd/wfctl/testdata/capability/app/plugins \
+  --lock-file cmd/wfctl/testdata/capability/app/.wfctl-lock.yaml \
+  --format json
 ```
 
 Expected:
