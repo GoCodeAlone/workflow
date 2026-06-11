@@ -1,9 +1,7 @@
 package prompt
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -20,26 +18,18 @@ func MultiSelect(title string, items []Item) ([]int, error) {
 		return nil, ErrNotInteractive
 	}
 	out, _ := outputWriter()
-	fmt.Fprintln(out, title)
-	defaults := make([]int, 0, len(items))
-	for i, item := range items {
-		mark := " "
-		if item.Preselected {
-			mark = "x"
-			defaults = append(defaults, i)
-		}
-		fmt.Fprintf(out, "  %d. [%s] %s\n", i+1, mark, item.Label)
-	}
-	fmt.Fprint(out, "Choose numbers/ranges (comma-separated, Enter for defaults): ")
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	finalModel, err := tea.NewProgram(newMultiSelectModel(title, items), tea.WithOutput(out)).Run()
 	if err != nil {
 		return nil, err
 	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return defaults, nil
+	m, ok := finalModel.(*multiSelectModel)
+	if !ok {
+		return nil, fmt.Errorf("prompt: unexpected multiselect model %T", finalModel)
 	}
-	return parseIndexSelection(line, len(items))
+	if m.interrupted {
+		return nil, ErrInterrupted
+	}
+	return m.selectedIndexes(), nil
 }
 
 func parseIndexSelection(line string, count int) ([]int, error) {
@@ -77,11 +67,12 @@ func parseIndexSelection(line string, count int) ([]int, error) {
 }
 
 type multiSelectModel struct {
-	title    string
-	items    []Item
-	cursor   int
-	selected map[int]bool
-	quit     bool
+	title       string
+	items       []Item
+	cursor      int
+	selected    map[int]bool
+	quit        bool
+	interrupted bool
 }
 
 var (
@@ -89,13 +80,28 @@ var (
 	uncheckStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
 
+func newMultiSelectModel(title string, items []Item) *multiSelectModel {
+	selected := make(map[int]bool, len(items))
+	for i, item := range items {
+		if item.Preselected {
+			selected[i] = true
+		}
+	}
+	return &multiSelectModel{
+		title:    title,
+		items:    items,
+		selected: selected,
+	}
+}
+
 func (m *multiSelectModel) Init() tea.Cmd { return nil }
 
 func (m *multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c", "esc", "q":
 			m.quit = true
+			m.interrupted = true
 			return m, tea.Quit
 		case "up", "k":
 			if m.cursor > 0 {
@@ -105,7 +111,10 @@ func (m *multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
-		case " ":
+		case " ", "space":
+			if len(m.items) == 0 {
+				return m, nil
+			}
 			if m.selected[m.cursor] {
 				delete(m.selected, m.cursor)
 			} else {
@@ -116,6 +125,16 @@ func (m *multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *multiSelectModel) selectedIndexes() []int {
+	selected := make([]int, 0, len(m.selected))
+	for i := range m.items {
+		if m.selected[i] {
+			selected = append(selected, i)
+		}
+	}
+	return selected
 }
 
 func (m *multiSelectModel) View() tea.View {
@@ -133,6 +152,6 @@ func (m *multiSelectModel) View() tea.View {
 		}
 		b.WriteString(cursor + check + " " + it.Label + "\n")
 	}
-	b.WriteString("\n(space to toggle, enter to confirm)\n")
+	b.WriteString("\n(up/down move, space toggles, enter confirms, esc cancels)\n")
 	return tea.NewView(b.String())
 }

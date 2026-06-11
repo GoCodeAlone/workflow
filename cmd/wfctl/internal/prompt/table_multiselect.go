@@ -1,13 +1,13 @@
 package prompt
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+const tableSelectColumnWidth = 4
 
 // TableColumn describes a column in a table-based prompt.
 type TableColumn struct {
@@ -31,33 +31,28 @@ func TableMultiSelect(title string, columns []TableColumn, items []TableItem) ([
 		return nil, ErrNotInteractive
 	}
 	out, _ := outputWriter()
-	m := newTableMultiSelectModel(title, columns, items)
-	fmt.Fprint(out, m.View().Content)
-	fmt.Fprint(out, "Choose numbers/ranges (comma-separated, Enter for defaults): ")
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	finalModel, err := tea.NewProgram(newTableMultiSelectModel(title, columns, items), tea.WithOutput(out)).Run()
 	if err != nil {
 		return nil, err
 	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		var defaults []int
-		for i, item := range items {
-			if item.Preselected {
-				defaults = append(defaults, i)
-			}
-		}
-		return defaults, nil
+	m, ok := finalModel.(*tableMultiSelectModel)
+	if !ok {
+		return nil, fmt.Errorf("prompt: unexpected table multiselect model %T", finalModel)
 	}
-	return parseIndexSelection(line, len(items))
+	if m.interrupted {
+		return nil, ErrInterrupted
+	}
+	return m.selectedIndexes(), nil
 }
 
 type tableMultiSelectModel struct {
-	title    string
-	columns  []TableColumn
-	items    []TableItem
-	selected map[int]bool
-	cursor   int
-	quit     bool
+	title       string
+	columns     []TableColumn
+	items       []TableItem
+	selected    map[int]bool
+	cursor      int
+	quit        bool
+	interrupted bool
 }
 
 func newTableMultiSelectModel(title string, columns []TableColumn, items []TableItem) *tableMultiSelectModel {
@@ -81,8 +76,9 @@ func (m *tableMultiSelectModel) Init() tea.Cmd { return nil }
 func (m *tableMultiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c", "esc", "q":
 			m.quit = true
+			m.interrupted = true
 			return m, tea.Quit
 		case "up", "k":
 			if m.cursor > 0 {
@@ -92,7 +88,10 @@ func (m *tableMultiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
-		case " ":
+		case " ", "space":
+			if len(m.items) == 0 {
+				return m, nil
+			}
 			if m.selected[m.cursor] {
 				delete(m.selected, m.cursor)
 			} else {
@@ -104,6 +103,16 @@ func (m *tableMultiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *tableMultiSelectModel) selectedIndexes() []int {
+	selected := make([]int, 0, len(m.selected))
+	for i := range m.items {
+		if m.selected[i] {
+			selected = append(selected, i)
+		}
+	}
+	return selected
 }
 
 func (m *tableMultiSelectModel) View() tea.View {
@@ -124,7 +133,7 @@ func (m *tableMultiSelectModel) View() tea.View {
 			mark = "[x]"
 		}
 		b.WriteString(cursor)
-		b.WriteString(padTableCell(mark, 3))
+		b.WriteString(padTableCell(mark, tableSelectColumnWidth))
 		for colIdx, col := range m.columns {
 			cell := ""
 			if colIdx < len(item.Cells) {
@@ -135,14 +144,14 @@ func (m *tableMultiSelectModel) View() tea.View {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\n\n(space to toggle, enter to confirm)\n")
+	b.WriteString("\n\n(up/down move, space toggles, enter confirms, esc cancels)\n")
 	return tea.NewView(b.String())
 }
 
 func (m *tableMultiSelectModel) headerRow() string {
 	var b strings.Builder
 	b.WriteString("  ")
-	b.WriteString(padTableCell("Set", 3))
+	b.WriteString(padTableCell("Pick", tableSelectColumnWidth))
 	for _, col := range m.columns {
 		b.WriteString(" ")
 		b.WriteString(padTableCell(col.Title, col.Width))
@@ -153,7 +162,7 @@ func (m *tableMultiSelectModel) headerRow() string {
 func (m *tableMultiSelectModel) separatorRow() string {
 	var b strings.Builder
 	b.WriteString("  ")
-	b.WriteString(strings.Repeat("-", 3))
+	b.WriteString(strings.Repeat("-", tableSelectColumnWidth))
 	for _, col := range m.columns {
 		b.WriteString(" ")
 		b.WriteString(strings.Repeat("-", max(col.Width, 1)))
