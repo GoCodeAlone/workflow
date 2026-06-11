@@ -1,0 +1,16 @@
+{
+  "name": "auth",
+  "version": "1.2.3",
+  "author": "GoCodeAlone",
+  "description": "Authentication and authorization plugin",
+  "type": "external",
+  "tier": "community",
+  "license": "MIT",
+  "repository": "https://github.com/GoCodeAlone/workflow-plugin-auth",
+  "capabilities": {
+    "moduleTypes": ["auth.rbac"],
+    "stepTypes": ["step.authz_check"],
+    "triggerTypes": [],
+    "workflowHandlers": []
+  }
+}
