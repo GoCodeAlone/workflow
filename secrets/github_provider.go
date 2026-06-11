@@ -313,6 +313,167 @@ func (p *GitHubSecretsProvider) StatAll(ctx context.Context) ([]SecretMeta, erro
 	return metas, nil
 }
 
+type ghVariableEntry struct {
+	Name      string    `json:"name"`
+	Value     string    `json:"value"`
+	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (p *GitHubSecretsProvider) listVariableEntries(ctx context.Context) ([]ghVariableEntry, error) {
+	nextURL := p.variablesURL()
+	var entries []ghVariableEntry
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		p.setHeaders(req)
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			err := fmt.Errorf("secrets: github list variables: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
+			resp.Body.Close()
+			return nil, err
+		}
+		var result struct {
+			Variables []ghVariableEntry `json:"variables"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("secrets: github list variables decode: %w", err)
+		}
+		resp.Body.Close()
+		entries = append(entries, result.Variables...)
+		nextURL = githubNextLink(resp.Header.Get("Link"))
+	}
+	return entries, nil
+}
+
+// ListVariables returns metadata for GitHub Actions variables in the configured
+// repo, environment, or organization scope. Returned values are redacted.
+func (p *GitHubSecretsProvider) ListVariables(ctx context.Context) ([]VariableMeta, error) {
+	entries, err := p.listVariableEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	metas := make([]VariableMeta, 0, len(entries))
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			continue
+		}
+		ts := entry.UpdatedAt
+		if ts.IsZero() {
+			ts = entry.CreatedAt
+		}
+		metas = append(metas, VariableMeta{
+			Name:      name,
+			Exists:    true,
+			UpdatedAt: ts,
+		})
+	}
+	return metas, nil
+}
+
+// CheckVariable reports whether a GitHub Actions variable exists without
+// returning its value.
+func (p *GitHubSecretsProvider) CheckVariable(ctx context.Context, key string) (VariableMeta, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return VariableMeta{}, ErrInvalidKey
+	}
+	entries, err := p.listVariableEntries(ctx)
+	if err != nil {
+		return VariableMeta{}, err
+	}
+	for _, entry := range entries {
+		if entry.Name != key {
+			continue
+		}
+		ts := entry.UpdatedAt
+		if ts.IsZero() {
+			ts = entry.CreatedAt
+		}
+		return VariableMeta{Name: key, Exists: true, UpdatedAt: ts}, nil
+	}
+	return VariableMeta{Name: key, Exists: false}, nil
+}
+
+// SetVariable creates or updates a GitHub Actions variable in the configured
+// repo, environment, or organization scope.
+func (p *GitHubSecretsProvider) SetVariable(ctx context.Context, key, value string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ErrInvalidKey
+	}
+	meta, err := p.CheckVariable(ctx, key)
+	if err != nil {
+		return err
+	}
+	method := http.MethodPost
+	targetURL := p.variablesURL()
+	payload := map[string]any{
+		"name":  key,
+		"value": value,
+	}
+	if meta.Exists {
+		method = http.MethodPatch
+		targetURL = p.variableURL(key)
+		delete(payload, "name")
+	}
+	if p.scope == GitHubScopeOrg {
+		payload["visibility"] = string(p.orgVisibility)
+		if p.orgVisibility == OrgVisibilitySelected {
+			payload["selected_repository_ids"] = p.selectedRepoIDs
+		}
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	p.setHeaders(req)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusCreated, http.StatusNoContent, http.StatusOK:
+		return nil
+	default:
+		return fmt.Errorf("secrets: github set variable %q: HTTP %d%s", key, resp.StatusCode, readErrorBody(resp))
+	}
+}
+
+// DeleteVariable removes a GitHub Actions variable.
+func (p *GitHubSecretsProvider) DeleteVariable(ctx context.Context, key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ErrInvalidKey
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, p.variableURL(key), nil)
+	if err != nil {
+		return err
+	}
+	p.setHeaders(req)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%w: %s", ErrNotFound, key)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("secrets: github delete variable %q: HTTP %d%s", key, resp.StatusCode, readErrorBody(resp))
+	}
+	return nil
+}
+
 // CheckAccess implements AccessChecker. It verifies the configured credentials
 // have at least read access by fetching the public key. Errors never contain
 // credential material.
@@ -472,6 +633,30 @@ func (p *GitHubSecretsProvider) secretsURL() string {
 		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/secrets", p.base(), p.owner, p.repo, url.PathEscape(p.env))
 	default: // GitHubScopeRepo
 		return fmt.Sprintf("%s/repos/%s/%s/actions/secrets", p.base(), p.owner, p.repo)
+	}
+}
+
+func (p *GitHubSecretsProvider) variablesURL() string {
+	values := url.Values{}
+	values.Set("per_page", "100")
+	switch p.scope {
+	case GitHubScopeOrg:
+		return fmt.Sprintf("%s/orgs/%s/actions/variables?%s", p.base(), url.PathEscape(p.org), values.Encode())
+	case GitHubScopeEnv:
+		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/variables?%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), url.PathEscape(p.env), values.Encode())
+	default:
+		return fmt.Sprintf("%s/repos/%s/%s/actions/variables?%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), values.Encode())
+	}
+}
+
+func (p *GitHubSecretsProvider) variableURL(key string) string {
+	switch p.scope {
+	case GitHubScopeOrg:
+		return fmt.Sprintf("%s/orgs/%s/actions/variables/%s", p.base(), url.PathEscape(p.org), url.PathEscape(key))
+	case GitHubScopeEnv:
+		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/variables/%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), url.PathEscape(p.env), url.PathEscape(key))
+	default:
+		return fmt.Sprintf("%s/repos/%s/%s/actions/variables/%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), url.PathEscape(key))
 	}
 }
 

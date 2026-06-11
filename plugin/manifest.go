@@ -98,6 +98,30 @@ type PluginManifest struct {
 	// MinEngineVersion declares the minimum engine version required to run this plugin.
 	// A semver string without the "v" prefix, e.g. "0.3.30".
 	MinEngineVersion string `json:"minEngineVersion,omitempty" yaml:"minEngineVersion,omitempty"`
+
+	// RequiredConfig declares non-secret provider/application configuration
+	// values needed by the plugin. Sensitive values belong in required_secrets.
+	RequiredConfig []PluginRequiredConfig `json:"required_config,omitempty" yaml:"required_config,omitempty"`
+	// ConfigTargets declares where RequiredConfig values may be stored, such as
+	// GitHub Actions repository, environment, or organization variables.
+	ConfigTargets []PluginConfigTarget `json:"config_targets,omitempty" yaml:"config_targets,omitempty"`
+}
+
+// PluginRequiredConfig is a non-secret setup value required by a plugin.
+type PluginRequiredConfig struct {
+	Name        string `json:"name" yaml:"name"`
+	Key         string `json:"key,omitempty" yaml:"key,omitempty"`
+	Sensitive   bool   `json:"sensitive,omitempty" yaml:"sensitive,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Prompt      string `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+}
+
+// PluginConfigTarget is a provider-owned variable/config store supported by a
+// plugin for RequiredConfig values.
+type PluginConfigTarget struct {
+	Provider    string   `json:"provider" yaml:"provider"`
+	Scopes      []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // CapabilityDecl declares a capability relationship for a plugin in the manifest.

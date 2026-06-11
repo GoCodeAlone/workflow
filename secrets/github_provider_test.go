@@ -136,6 +136,120 @@ func TestGitHubProvider_EnvironmentScopeUsesEnvironmentEndpoints(t *testing.T) {
 	}
 }
 
+func TestGitHubProvider_RepoVariablesUseActionsVariableEndpoints(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/actions/variables":
+			json.NewEncoder(w).Encode(map[string]any{
+				"variables": []map[string]any{{"name": "CLOUDFLARE_ACCOUNT_ID", "value": "abc123"}},
+			})
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo/actions/variables/CLOUDFLARE_ACCOUNT_ID":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	vars, err := p.ListVariables(context.Background())
+	if err != nil {
+		t.Fatalf("ListVariables: %v", err)
+	}
+	if len(vars) != 1 || vars[0].Name != "CLOUDFLARE_ACCOUNT_ID" || vars[0].Value != "" || !vars[0].Exists {
+		t.Fatalf("variables = %+v, want redacted existing variable", vars)
+	}
+	if err := p.SetVariable(context.Background(), "CLOUDFLARE_ACCOUNT_ID", "updated"); err != nil {
+		t.Fatalf("SetVariable: %v", err)
+	}
+	want := []string{
+		"GET /repos/owner/repo/actions/variables",
+		"GET /repos/owner/repo/actions/variables",
+		"PATCH /repos/owner/repo/actions/variables/CLOUDFLARE_ACCOUNT_ID",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("requests = %v, want %v", got, want)
+	}
+}
+
+func TestGitHubProvider_EnvVariablesUseEnvironmentVariableEndpoints(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/environments/staging/variables":
+			json.NewEncoder(w).Encode(map[string]any{"variables": []map[string]any{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/environments/staging/variables":
+			w.WriteHeader(http.StatusCreated)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	p.SetEnvironment("staging")
+	if err := p.SetVariable(context.Background(), "NAMECHEAP_CLIENT_IP", "203.0.113.10"); err != nil {
+		t.Fatalf("SetVariable: %v", err)
+	}
+	want := []string{
+		"GET /repos/owner/repo/environments/staging/variables",
+		"POST /repos/owner/repo/environments/staging/variables",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("requests = %v, want %v", got, want)
+	}
+}
+
+func TestGitHubProvider_ListVariablesFollowsPagination(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/owner/repo/actions/variables" {
+			http.NotFound(w, r)
+			return
+		}
+		paths = append(paths, r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "", "1":
+			w.Header().Set("Link", `<https://api.github.com/repos/owner/repo/actions/variables?per_page=100&page=2>; rel="next"`)
+			json.NewEncoder(w).Encode(map[string]any{
+				"variables": []map[string]any{{"name": "FIRST", "value": "redacted"}},
+			})
+		case "2":
+			json.NewEncoder(w).Encode(map[string]any{
+				"variables": []map[string]any{{"name": "SECOND", "value": "redacted"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	vars, err := p.ListVariables(context.Background())
+	if err != nil {
+		t.Fatalf("ListVariables: %v", err)
+	}
+	if len(vars) != 2 {
+		t.Fatalf("variables = %+v, want 2 entries", vars)
+	}
+	gotNames := []string{vars[0].Name, vars[1].Name}
+	wantNames := []string{"FIRST", "SECOND"}
+	if !reflect.DeepEqual(gotNames, wantNames) {
+		t.Fatalf("names = %v, want %v", gotNames, wantNames)
+	}
+	wantPaths := []string{
+		"/repos/owner/repo/actions/variables?per_page=100",
+		"/repos/owner/repo/actions/variables?per_page=100&page=2",
+	}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("paths = %v, want %v", paths, wantPaths)
+	}
+}
+
 func TestGitHubProvider_ListEnvironments(t *testing.T) {
 	var queries []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

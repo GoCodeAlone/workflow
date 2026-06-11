@@ -56,6 +56,13 @@ type RegistryManifest struct {
 	// for this plugin's required_secrets[] entries, without hard-coding
 	// GitHub repo/org/env semantics into unrelated providers.
 	SecretTargets []PluginSecretTarget `json:"secret_targets,omitempty"`
+	// RequiredConfig mirrors plugin.json `required_config[]`. These entries are
+	// non-secret provider/application configuration values that should be written
+	// to variable/config stores rather than secret stores.
+	RequiredConfig []PluginRequiredConfig `json:"required_config,omitempty"`
+	// ConfigTargets mirrors plugin.json `config_targets[]`, the non-secret
+	// analog to secret_targets[].
+	ConfigTargets []PluginConfigTarget `json:"config_targets,omitempty"`
 }
 
 // RegistryCapabilities describes what module/step/trigger types a plugin provides.

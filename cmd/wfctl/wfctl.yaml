@@ -87,6 +87,8 @@ workflows:
         description: Run Workflow integration tests
       - name: secrets
         description: Manage declared secrets
+      - name: vars
+        description: Manage non-secret provider variables
       - name: ports
         description: Inspect port usage
       - name: security
@@ -273,6 +275,10 @@ pipelines:
     trigger: {type: cli, config: {command: secrets}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: secrets}}
+  cmd-vars:
+    trigger: {type: cli, config: {command: vars}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: vars}}
   cmd-ports:
     trigger: {type: cli, config: {command: ports}}
     steps:

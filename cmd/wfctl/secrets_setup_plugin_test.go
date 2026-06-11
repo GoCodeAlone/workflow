@@ -49,6 +49,63 @@ func TestLoadPluginManifest_HappyPath(t *testing.T) {
 	}
 }
 
+func TestLoadPluginManifest_RequiredConfig(t *testing.T) {
+	dir := t.TempDir()
+	writePluginManifestFile(t, dir, "workflow-plugin-cloudflare", `{
+		"name": "workflow-plugin-cloudflare",
+		"required_secrets": [
+			{"name": "CLOUDFLARE_API_TOKEN", "sensitive": true}
+		],
+		"required_config": [
+			{
+				"name": "CLOUDFLARE_ACCOUNT_ID",
+				"key": "account_id",
+				"sensitive": false,
+				"description": "Cloudflare account ID for account-scoped APIs"
+			}
+		],
+		"config_targets": [
+			{"provider": "github", "scopes": ["repo", "env", "org"]}
+		]
+	}`)
+	m, err := loadPluginManifest("cloudflare", dir)
+	if err != nil {
+		t.Fatalf("loadPluginManifest: %v", err)
+	}
+	if len(m.RequiredConfig) != 1 {
+		t.Fatalf("required_config = %d want 1", len(m.RequiredConfig))
+	}
+	if got := m.RequiredConfig[0]; got.Name != "CLOUDFLARE_ACCOUNT_ID" || got.Key != "account_id" || got.Sensitive {
+		t.Fatalf("required_config[0] = %+v", got)
+	}
+	if len(m.ConfigTargets) != 1 || m.ConfigTargets[0].Provider != "github" {
+		t.Fatalf("config_targets = %+v", m.ConfigTargets)
+	}
+}
+
+func TestRunVarsSetupPluginRejectsSecretConfig(t *testing.T) {
+	dir := t.TempDir()
+	writePluginManifestFile(t, dir, "wp-fake", `{
+		"name": "wp-fake",
+		"required_config": [
+			{"name": "FAKE_TOKEN", "sensitive": true}
+		]
+	}`)
+	var out bytes.Buffer
+	err := runVarsSetupPluginWithIO([]string{
+		"--plugin", "wp-fake",
+		"--plugin-dir", dir,
+		"--scope", "repo",
+		"--config", filepath.Join(t.TempDir(), "missing.yaml"),
+	}, nil, &out)
+	if err == nil {
+		t.Fatal("expected sensitive required_config rejection")
+	}
+	if !strings.Contains(err.Error(), "belongs in required_secrets") {
+		t.Fatalf("error = %v, want required_secrets guidance", err)
+	}
+}
+
 func TestLoadPluginManifest_NormalizedInstallDir(t *testing.T) {
 	dir := t.TempDir()
 	writePluginManifestFile(t, dir, "cloudflare", `{

@@ -199,6 +199,19 @@ wfctl secrets setup --plugin workflow-plugin-hover \
   --scope env --env production
 ```
 
+Provider values that are not credentials belong in plugin.json
+`required_config[]` and should be configured with `wfctl vars setup`. For
+example, Cloudflare account IDs and Namecheap API client IPs are operational
+configuration, not secrets:
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=abc123 wfctl vars setup \
+  --plugin workflow-plugin-cloudflare --from-env
+
+NAMECHEAP_CLIENT_IP=203.0.113.10 wfctl vars setup \
+  --plugin workflow-plugin-namecheap --from-env
+```
+
 For a repo that already has `wfctl.yaml` and `.wfctl-lock.yaml`, use the
 manifest-driven form to discover all installed provider plugin secrets plus
 `${ENV_VAR}` references in config files:
