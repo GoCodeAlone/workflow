@@ -1,0 +1,10 @@
+{
+  "name": "workflow-plugin-nested",
+  "version": "0.1.0",
+  "author": "GoCodeAlone",
+  "description": "Nested plugin fixture that should not be scanned from repo root",
+  "license": "MIT",
+  "moduleTypes": ["http.server"],
+  "stepTypes": [],
+  "triggerTypes": []
+}

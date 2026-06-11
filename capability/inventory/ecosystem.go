@@ -3,7 +3,6 @@ package inventory
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -134,25 +133,32 @@ func collectLocalProviders(builder *inventoryBuilder, repoRoot string, releasedC
 	if strings.TrimSpace(repoRoot) == "" {
 		return 0, nil
 	}
+	entries, err := os.ReadDir(repoRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read local repo root: %w", err)
+	}
 	count := 0
-	err := filepath.WalkDir(repoRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
 		}
-		if !d.IsDir() {
-			return nil
-		}
-		name := d.Name()
+		name := entry.Name()
 		if !strings.HasPrefix(name, "workflow-plugin-") {
-			return nil
+			continue
 		}
-		manifestPath := filepath.Join(path, "plugin.json")
+		manifestPath := filepath.Join(repoRoot, name, "plugin.json")
+		if _, err := os.Stat(manifestPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return count, fmt.Errorf("stat local plugin manifest %s: %w", manifestPath, err)
+		}
 		manifest, err := workflowplugin.LoadManifest(manifestPath)
 		if err != nil {
-			if os.IsNotExist(err) {
-				return filepath.SkipDir
-			}
-			return fmt.Errorf("load local plugin manifest %s: %w", manifestPath, err)
+			return count, fmt.Errorf("load local plugin manifest %s: %w", manifestPath, err)
 		}
 		status := "local-only"
 		if releasedCount > 0 && strings.TrimSpace(manifest.Version) != "" && strings.TrimSpace(manifest.Repository) != "" {
@@ -168,10 +174,6 @@ func collectLocalProviders(builder *inventoryBuilder, repoRoot string, releasedC
 			Raw:           manifestRawCapabilities(manifest),
 		})
 		count++
-		return filepath.SkipDir
-	})
-	if err != nil {
-		return count, fmt.Errorf("walk local plugin repos: %w", err)
 	}
 	return count, nil
 }

@@ -51,6 +51,18 @@ func TestCollectEcosystemUncategorizedRawTypes(t *testing.T) {
 	assertCapabilityEvidence(t, inv, "uncategorized:module:mystery.widget", "moduleTypes[0]")
 }
 
+func TestCollectEcosystemSkipsPluginReposWithoutManifest(t *testing.T) {
+	_, err := CollectEcosystem(EcosystemOptions{
+		RegistryDir:  "testdata/ecosystem/registry",
+		RepoRoot:     "testdata/ecosystem/repos",
+		TaxonomyPath: "testdata/taxonomy.yaml",
+		GeneratedAt:  fixedTime,
+	})
+	if err != nil {
+		t.Fatalf("CollectEcosystem: %v", err)
+	}
+}
+
 func assertProviderStatus(t *testing.T, inv *Inventory, providerName, status string) {
 	t.Helper()
 	for _, cap := range inv.Capabilities {
