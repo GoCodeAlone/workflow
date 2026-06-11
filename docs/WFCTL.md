@@ -2756,6 +2756,54 @@ wfctl secrets setup --manifest wfctl.yaml --config 'infra/*.yaml,deploy.yaml' \
 
 ---
 
+### `vars`
+
+Manage non-secret provider variables and configuration values. Use this for
+values that applications or provider plugins need at runtime but that are not
+credentials, such as a Cloudflare account ID or a Namecheap API client IP.
+Sensitive values still belong in `wfctl secrets`.
+
+```
+wfctl vars <action> [options]
+```
+
+#### `vars setup`
+
+Set non-secret variables declared by an installed plugin's
+`plugin.json required_config[]` block. The command uses the same GitHub
+repo/env/org target model as plugin secret setup, but writes to GitHub Actions
+Variables instead of encrypted Actions Secrets. Environment-scoped GitHub
+variables require the named GitHub Actions environment to exist.
+
+`required_config[]` entries marked `sensitive: true` are rejected; plugin
+authors must model those values in `required_secrets[]` instead.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--plugin` | _(required)_ | Plugin name or installed plugin directory name |
+| `--plugin-dir` | `$WFCTL_PLUGIN_DIR` or `./data/plugins` | Installed plugin directory |
+| `--scope` | `repo` | GitHub variable scope: `repo` \| `env` \| `org` |
+| `--env` | _(none)_ | GitHub Actions environment name for `--scope env` |
+| `--org` | _(none)_ | Organization slug for `--scope org` |
+| `--visibility` | `all` | Org-scope visibility: `all` \| `selected` \| `private` |
+| `--token-env` | `GITHUB_TOKEN` | Env var holding the GitHub PAT |
+| `--config` | `app.yaml` | Config file used to resolve GitHub repo for repo/env scopes |
+| `--from-env` | `false` | Read each variable value from `$NAME` |
+| `--var` | _(none)_ | `NAME=VALUE` literal. Repeatable. |
+| `--non-interactive` | `false` | Do not prompt; skip entries with no provided value |
+
+```bash
+# Configure non-secret provider variables from process env
+CLOUDFLARE_ACCOUNT_ID=abc123 wfctl vars setup \
+  --plugin workflow-plugin-cloudflare --from-env
+
+# Configure an environment-scoped variable
+NAMECHEAP_CLIENT_IP=203.0.113.10 wfctl vars setup \
+  --plugin workflow-plugin-namecheap --scope env --env production --from-env
+```
+
+---
+
 ### `git connect`
 
 Connect a workflow project to a GitHub repository. Writes a `.wfctl.yaml` project file and optionally initializes the git repo.

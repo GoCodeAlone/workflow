@@ -92,6 +92,12 @@ This:
 3. Prompts for each (masked iff `sensitive: true`).
 4. Writes each to the chosen GH scope.
 
+Plugins can also declare non-secret setup values in `required_config[]`. Use
+`wfctl vars setup --plugin <name>` for those entries. For GitHub targets, this
+writes GitHub Actions Variables at repo, environment, or organization scope
+instead of encrypted Actions Secrets. A value marked `sensitive: true` is a
+plugin manifest bug and must be moved to `required_secrets[]`.
+
 Manifest-backed setup can discover all provider plugin secrets from `wfctl.yaml`
 and `.wfctl-lock.yaml`:
 

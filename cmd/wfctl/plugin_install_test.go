@@ -1239,6 +1239,39 @@ func TestRunPluginUpdateCompatUsesOlderPassingVersion(t *testing.T) {
 	}
 }
 
+func TestWriteInstalledManifestPreservesRequiredConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plugin.json")
+	err := writeInstalledManifest(path, &RegistryManifest{
+		Name:        "workflow-plugin-cloudflare",
+		Version:     "v0.1.0",
+		Author:      "GoCodeAlone",
+		Description: "Cloudflare provider",
+		License:     "MIT",
+		RequiredConfig: []PluginRequiredConfig{{
+			Name:        "CLOUDFLARE_ACCOUNT_ID",
+			Key:         "account_id",
+			Description: "Cloudflare account ID",
+		}},
+		ConfigTargets: []PluginConfigTarget{{
+			Provider: "github",
+			Scopes:   []string{"repo", "env", "org"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"required_config"`) {
+		t.Fatalf("installed plugin.json missing required_config:\n%s", string(raw))
+	}
+	if !strings.Contains(string(raw), `"config_targets"`) {
+		t.Fatalf("installed plugin.json missing config_targets:\n%s", string(raw))
+	}
+}
+
 type compatInstallRegistry struct {
 	ConfigPath string
 }
@@ -1439,5 +1472,33 @@ func TestRegistryManifest_UnmarshalPreservesSecretTargets(t *testing.T) {
 	}
 	if m.SecretTargets[0].Provider != "github" || !reflect.DeepEqual(m.SecretTargets[0].Scopes, []string{"repo", "env"}) {
 		t.Errorf("unexpected secret_targets[0]: %+v", m.SecretTargets[0])
+	}
+}
+
+func TestRegistryManifest_UnmarshalPreservesRequiredConfig(t *testing.T) {
+	raw := []byte(`{
+		"name": "workflow-plugin-cloudflare",
+		"version": "0.1.0",
+		"author": "GoCodeAlone",
+		"description": "Cloudflare provider",
+		"type": "external",
+		"tier": "community",
+		"license": "MIT",
+		"required_config": [
+			{"name": "CLOUDFLARE_ACCOUNT_ID", "key": "account_id"}
+		],
+		"config_targets": [
+			{"provider": "github", "scopes": ["repo", "env", "org"]}
+		]
+	}`)
+	var m RegistryManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(m.RequiredConfig) != 1 || m.RequiredConfig[0].Name != "CLOUDFLARE_ACCOUNT_ID" {
+		t.Fatalf("required_config = %+v", m.RequiredConfig)
+	}
+	if len(m.ConfigTargets) != 1 || m.ConfigTargets[0].Provider != "github" {
+		t.Fatalf("config_targets = %+v", m.ConfigTargets)
 	}
 }

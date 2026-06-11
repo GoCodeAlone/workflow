@@ -295,6 +295,37 @@ func TestLoadRegistryManifest_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestLoadRegistryManifestFromPluginJSONPreservesRequiredConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := os.WriteFile(path, []byte(`{
+		"name": "workflow-plugin-cloudflare",
+		"version": "0.1.0",
+		"author": "GoCodeAlone",
+		"description": "Cloudflare provider",
+		"license": "MIT",
+		"required_config": [
+			{"name": "CLOUDFLARE_ACCOUNT_ID", "key": "account_id"}
+		],
+		"config_targets": [
+			{"provider": "github", "scopes": ["repo", "env", "org"]}
+		]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := loadRegistryManifestFromPluginJSON(path, "external", "community")
+	if err != nil {
+		t.Fatalf("loadRegistryManifestFromPluginJSON: %v", err)
+	}
+	if len(got.RequiredConfig) != 1 || got.RequiredConfig[0].Name != "CLOUDFLARE_ACCOUNT_ID" {
+		t.Fatalf("required_config = %+v", got.RequiredConfig)
+	}
+	if len(got.ConfigTargets) != 1 || got.ConfigTargets[0].Provider != "github" {
+		t.Fatalf("config_targets = %+v", got.ConfigTargets)
+	}
+}
+
 // ---- dry-run integration test ----
 
 func TestRunPublish_DryRun(t *testing.T) {

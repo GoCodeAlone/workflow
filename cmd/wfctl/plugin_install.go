@@ -1421,6 +1421,11 @@ type installedPluginJSON struct {
 	// SecretTargets carries through from the registry manifest so
 	// manifest-backed secrets setup can respect provider-specific target models.
 	SecretTargets []PluginSecretTarget `json:"secret_targets,omitempty"`
+	// RequiredConfig carries through non-secret plugin setup requirements so
+	// `wfctl vars setup --plugin <name>` can configure provider variables.
+	RequiredConfig []PluginRequiredConfig `json:"required_config,omitempty"`
+	// ConfigTargets carries through non-secret variable/config target metadata.
+	ConfigTargets []PluginConfigTarget `json:"config_targets,omitempty"`
 }
 
 type installedPluginCapabilities struct {
@@ -1457,6 +1462,8 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 		IaCProvider:     m.IaCProvider,
 		RequiredSecrets: m.RequiredSecrets,
 		SecretTargets:   m.SecretTargets,
+		RequiredConfig:  m.RequiredConfig,
+		ConfigTargets:   m.ConfigTargets,
 	}
 	if m.Capabilities != nil {
 		pj.Capabilities = &installedPluginCapabilities{

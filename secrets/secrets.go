@@ -56,6 +56,28 @@ type ProviderEnvironment struct {
 	Source   string
 }
 
+// VariableMeta is presence + freshness for one non-secret configuration
+// variable. Value is intentionally optional and callers should usually leave it
+// empty in status displays; provider variables are not credentials, but they can
+// still carry operational details that do not belong in logs.
+type VariableMeta struct {
+	Name      string
+	Value     string
+	Exists    bool
+	UpdatedAt time.Time
+}
+
+// VariableProvider is the provider-side analog to Provider for non-sensitive
+// setup values such as GitHub Actions variables. It must not be used for
+// credential material; sensitive plugin requirements belong in Provider.
+type VariableProvider interface {
+	Name() string
+	SetVariable(ctx context.Context, key, value string) error
+	DeleteVariable(ctx context.Context, key string) error
+	ListVariables(ctx context.Context) ([]VariableMeta, error)
+	CheckVariable(ctx context.Context, key string) (VariableMeta, error)
+}
+
 // EnvironmentManager is optional: providers implement it when they can inspect
 // and create environment-like namespaces used by scoped secrets.
 //

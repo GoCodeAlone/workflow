@@ -26,11 +26,29 @@ type PluginRequiredSecret struct {
 	Prompt      string `json:"prompt,omitempty"`
 }
 
+// PluginRequiredConfig mirrors plugin.json `required_config[]` entries for
+// non-secret provider configuration such as account IDs or allowlisted client IPs.
+type PluginRequiredConfig struct {
+	Name        string `json:"name"`
+	Key         string `json:"key,omitempty"`
+	Sensitive   bool   `json:"sensitive,omitempty"`
+	Description string `json:"description,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+}
+
 // PluginSecretTarget declares secret storage targets that a plugin supports for
 // its required_secrets[] entries. Provider is a provider domain such as
 // "github", "vault", or "aws-secrets-manager"; Scopes narrows provider-owned
 // namespaces such as GitHub repo/env/org or Vault mount.
 type PluginSecretTarget struct {
+	Provider    string   `json:"provider"`
+	Scopes      []string `json:"scopes,omitempty"`
+	Description string   `json:"description,omitempty"`
+}
+
+// PluginConfigTarget declares variable/config storage targets that a plugin
+// supports for required_config[] entries.
+type PluginConfigTarget struct {
 	Provider    string   `json:"provider"`
 	Scopes      []string `json:"scopes,omitempty"`
 	Description string   `json:"description,omitempty"`
@@ -42,6 +60,8 @@ type pluginManifest struct {
 	Name            string                 `json:"name"`
 	RequiredSecrets []PluginRequiredSecret `json:"required_secrets,omitempty"`
 	SecretTargets   []PluginSecretTarget   `json:"secret_targets,omitempty"`
+	RequiredConfig  []PluginRequiredConfig `json:"required_config,omitempty"`
+	ConfigTargets   []PluginConfigTarget   `json:"config_targets,omitempty"`
 }
 
 // runSecretsSetupPlugin is the entry-point for `wfctl secrets setup
