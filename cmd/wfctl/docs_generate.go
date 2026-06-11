@@ -245,6 +245,31 @@ func goListAPIPackage(ctx context.Context, source, modulePath, pkgRel string) (g
 	return pkg, nil
 }
 
+func goListAPIPackages(ctx context.Context, source string) ([]goListPackage, error) {
+	cmd := exec.CommandContext(ctx, "go", "list", "-json", "./...") // #nosec G204 -- fixed go command.
+	cmd.Dir = source
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	var packages []goListPackage
+	for dec.More() {
+		var pkg goListPackage
+		if err := dec.Decode(&pkg); err != nil {
+			return nil, err
+		}
+		if pkg.Name == "main" || len(pkg.GoFiles) == 0 {
+			continue
+		}
+		packages = append(packages, pkg)
+	}
+	return packages, nil
+}
+
 func parseDocPackage(listPkg goListPackage) (*doc.Package, *token.FileSet, error) {
 	fset := token.NewFileSet()
 	files := make([]*ast.File, 0, len(listPkg.GoFiles))
@@ -403,12 +428,12 @@ func renderRegistryPluginAPIPackages(ctx context.Context, opts docsGenerateAPIOp
 			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
 			continue
 		}
-		docPkg, err := renderPluginAPIPackage(ctx, checkout, modulePath, manifest)
+		docPkgs, err := renderPluginAPIPackages(ctx, checkout, modulePath, manifest)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
 			continue
 		}
-		rendered = append(rendered, docPkg)
+		rendered = append(rendered, docPkgs...)
 	}
 	return rendered, warnings, nil
 }
@@ -481,38 +506,81 @@ func checkoutDocsPluginRepo(ctx context.Context, manifest *RegistryManifest, cac
 	return dest, nil
 }
 
-func renderPluginAPIPackage(ctx context.Context, checkout, modulePath string, manifest *RegistryManifest) (renderedDocsPackage, error) {
-	listPkg, err := goListAPIPackage(ctx, checkout, modulePath, ".")
+func renderPluginAPIPackages(ctx context.Context, checkout, modulePath string, manifest *RegistryManifest) ([]renderedDocsPackage, error) {
+	listPkgs, err := goListAPIPackages(ctx, checkout)
 	if err != nil {
-		return renderedDocsPackage{}, err
+		return nil, err
 	}
-	docPkg, fset, err := parseDocPackage(listPkg)
-	if err != nil {
-		return renderedDocsPackage{}, err
-	}
+	sortPluginAPIPackages(listPkgs, modulePath)
 	slug, err := safeDocsPluginSlug(manifest.Name)
 	if err != nil {
-		return renderedDocsPackage{}, err
+		return nil, err
 	}
-	route := "plugins/" + slug + "/latest/index.md"
-	synopsis := docPkg.Synopsis(docPkg.Doc)
-	if synopsis == "" {
-		synopsis = listPkg.Doc
+	rendered := make([]renderedDocsPackage, 0, len(listPkgs))
+	for i, listPkg := range listPkgs {
+		docPkg, fset, err := parseDocPackage(listPkg)
+		if err != nil {
+			return nil, err
+		}
+		pkgRel := strings.TrimPrefix(listPkg.ImportPath, strings.TrimRight(modulePath, "/"))
+		pkgRel = strings.Trim(pkgRel, "/")
+		route := pluginAPIDocRoute(slug, pkgRel, i == 0)
+		synopsis := docPkg.Synopsis(docPkg.Doc)
+		if synopsis == "" {
+			synopsis = listPkg.Doc
+		}
+		meta := docsAPIPackageMeta{
+			Subject:          "plugin",
+			Name:             manifest.Name,
+			ImportPath:       listPkg.ImportPath,
+			Version:          manifest.Version,
+			GenerationSource: "release",
+			Repository:       manifest.Repository,
+			Path:             route,
+			Synopsis:         synopsis,
+		}
+		rendered = append(rendered, renderedDocsPackage{
+			Meta: meta,
+			Doc:  renderPackageMarkdown(fset, docPkg, meta, pluginSourceLink(manifest.Repository, manifest.Version, pkgRel), nil),
+		})
 	}
-	meta := docsAPIPackageMeta{
-		Subject:          "plugin",
-		Name:             manifest.Name,
-		ImportPath:       listPkg.ImportPath,
-		Version:          manifest.Version,
-		GenerationSource: "release",
-		Repository:       manifest.Repository,
-		Path:             route,
-		Synopsis:         synopsis,
+	if len(rendered) == 0 {
+		return nil, fmt.Errorf("no non-command Go packages found")
 	}
-	return renderedDocsPackage{
-		Meta: meta,
-		Doc:  renderPackageMarkdown(fset, docPkg, meta, pluginSourceLink(manifest.Repository, manifest.Version), nil),
-	}, nil
+	return rendered, nil
+}
+
+func sortPluginAPIPackages(packages []goListPackage, modulePath string) {
+	modulePath = strings.TrimRight(modulePath, "/")
+	sort.SliceStable(packages, func(i, j int) bool {
+		leftRank := pluginAPIPackageRank(packages[i], modulePath)
+		rightRank := pluginAPIPackageRank(packages[j], modulePath)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return packages[i].ImportPath < packages[j].ImportPath
+	})
+}
+
+func pluginAPIPackageRank(pkg goListPackage, modulePath string) int {
+	switch pkg.ImportPath {
+	case modulePath:
+		return 0
+	case modulePath + "/internal":
+		return 1
+	default:
+		if strings.TrimSpace(pkg.Doc) != "" {
+			return 2
+		}
+		return 3
+	}
+}
+
+func pluginAPIDocRoute(slug, pkgRel string, primary bool) string {
+	if primary {
+		return "plugins/" + slug + "/latest/index.md"
+	}
+	return "plugins/" + slug + "/latest/" + strings.Trim(pkgRel, "/") + "/index.md"
 }
 
 func readGoModulePath(path string) (string, error) {
@@ -718,12 +786,16 @@ func compareDocsVersions(left, right string) int {
 	return strings.Compare(left, right)
 }
 
-func pluginSourceLink(repository, version string) string {
+func pluginSourceLink(repository, version, pkgRel string) string {
 	repository = strings.TrimSuffix(strings.TrimSpace(repository), ".git")
 	if repository == "" {
 		return ""
 	}
-	return repository + "/tree/" + version
+	link := repository + "/tree/" + version
+	if pkgRel != "" && pkgRel != "." {
+		link += "/" + strings.Trim(pkgRel, "/")
+	}
+	return link
 }
 
 func docsContainsString(values []string, want string) bool {
