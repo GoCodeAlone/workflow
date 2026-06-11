@@ -12,10 +12,9 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/featureflag"
-	ldcontext "github.com/launchdarkly/go-sdk-common/v3/ldcontext"
-	"github.com/launchdarkly/go-sdk-common/v3/ldvalue"
+	ldcontext "github.com/launchdarkly/go-sdk-common/v4/ldcontext"
+	"github.com/launchdarkly/go-sdk-common/v4/ldvalue"
 	ld "github.com/launchdarkly/go-server-sdk/v7"
-	"github.com/launchdarkly/go-server-sdk/v7/interfaces"
 	"github.com/launchdarkly/go-server-sdk/v7/ldcomponents"
 )
 
@@ -80,13 +79,13 @@ func (p *Provider) Evaluate(ctx context.Context, key string, evalCtx featureflag
 	ldCtx := buildLDContext(evalCtx)
 
 	// Try JSON variation first (most general)
-	detail, err := p.client.JSONVariationDetail(key, ldCtx, ldvalue.Null())
+	value, detail, err := p.client.JSONVariationDetail(key, ldCtx, ldvalue.Null())
 	if err != nil {
 		return featureflag.FlagValue{}, fmt.Errorf("launchdarkly: evaluate %q: %w", key, err)
 	}
 
-	val := ldValueToGo(detail.Value)
-	flagType := inferFlagType(detail.Value)
+	val := ldValueToGo(value)
+	flagType := inferFlagType(value)
 
 	return featureflag.FlagValue{
 		Key:    key,
