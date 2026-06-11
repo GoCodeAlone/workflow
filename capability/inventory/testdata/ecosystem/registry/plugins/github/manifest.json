@@ -1,0 +1,16 @@
+{
+  "name": "github",
+  "version": "2.0.0",
+  "author": "GoCodeAlone",
+  "description": "GitHub provider plugin",
+  "type": "external",
+  "tier": "community",
+  "license": "MIT",
+  "repository": "https://github.com/GoCodeAlone/workflow-plugin-github",
+  "capabilities": {
+    "moduleTypes": ["mystery.widget"],
+    "stepTypes": [],
+    "triggerTypes": [],
+    "workflowHandlers": []
+  }
+}
