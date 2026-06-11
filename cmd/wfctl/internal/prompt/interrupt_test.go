@@ -42,6 +42,59 @@ func TestPromptModelsMarkCtrlCAsInterrupted(t *testing.T) {
 	}
 }
 
+func TestPromptModelsMarkEscAsInterrupted(t *testing.T) {
+	msg := tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})
+
+	multiSelect := &multiSelectModel{}
+	multiSelect.Update(msg)
+	if !multiSelect.quit {
+		t.Fatal("multiSelectModel did not mark esc as quit")
+	}
+
+	tableMultiSelect := &tableMultiSelectModel{}
+	tableMultiSelect.Update(msg)
+	if !tableMultiSelect.quit {
+		t.Fatal("tableMultiSelectModel did not mark esc as quit")
+	}
+}
+
+func TestMultiSelectModelSelectedIndexes(t *testing.T) {
+	m := newMultiSelectModel("Pick", []Item{
+		{Label: "set", Preselected: true},
+		{Label: "unset"},
+	})
+
+	if got, want := m.selectedIndexes(), []int{0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected indexes = %v, want %v", got, want)
+	}
+
+	m.Update(tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+	m.Update(tea.KeyPressMsg(tea.Key{Text: " ", Code: ' '}))
+	if got, want := m.selectedIndexes(), []int{0, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected indexes after toggle = %v, want %v", got, want)
+	}
+}
+
+func TestTableMultiSelectModelSelectedIndexes(t *testing.T) {
+	m := newTableMultiSelectModel("Pick",
+		[]TableColumn{{Title: "Secret", Width: 12}},
+		[]TableItem{
+			{Cells: []string{"A"}, Preselected: true},
+			{Cells: []string{"B"}},
+		},
+	)
+
+	if got, want := m.selectedIndexes(), []int{0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected indexes = %v, want %v", got, want)
+	}
+
+	m.Update(tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+	m.Update(tea.KeyPressMsg(tea.Key{Text: " ", Code: ' '}))
+	if got, want := m.selectedIndexes(), []int{0, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected indexes after toggle = %v, want %v", got, want)
+	}
+}
+
 func TestParseIndexSelection(t *testing.T) {
 	got, err := parseIndexSelection("1,3-4,3", 5)
 	if err != nil {
@@ -72,6 +125,11 @@ func TestTableMultiSelectModelViewShowsRows(t *testing.T) {
 	for _, want := range []string{"Pick secrets", "Secret", "github:repo", "DIGITALOCEAN_TOKEN", "HOVER_PASSWORD", "[x]", "[ ]"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
+		}
+	}
+	for _, notWant := range []string{"Choose numbers/ranges", "Set "} {
+		if strings.Contains(view, notWant) {
+			t.Fatalf("view contains stale prompt text %q:\n%s", notWant, view)
 		}
 	}
 }
