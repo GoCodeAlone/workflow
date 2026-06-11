@@ -32,16 +32,22 @@ type TaxonomyCapability struct {
 
 // TaxonomyAliases lists raw declaration names that map to a capability.
 type TaxonomyAliases struct {
-	ModuleTypes      []string `json:"moduleTypes,omitempty" yaml:"moduleTypes,omitempty"`
-	StepTypes        []string `json:"stepTypes,omitempty" yaml:"stepTypes,omitempty"`
-	TriggerTypes     []string `json:"triggerTypes,omitempty" yaml:"triggerTypes,omitempty"`
-	WorkflowTypes    []string `json:"workflowTypes,omitempty" yaml:"workflowTypes,omitempty"`
-	WiringHooks      []string `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
-	IaCServices      []string `json:"iacServices,omitempty" yaml:"iacServices,omitempty"`
-	IaCStateBackends []string `json:"iacStateBackends,omitempty" yaml:"iacStateBackends,omitempty"`
-	Providers        []string `json:"providers,omitempty" yaml:"providers,omitempty"`
-	Plugins          []string `json:"plugins,omitempty" yaml:"plugins,omitempty"`
-	Keywords         []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
+	ModuleTypes             []string `json:"moduleTypes,omitempty" yaml:"moduleTypes,omitempty"`
+	BuiltinModuleTypes      []string `json:"builtinModuleTypes,omitempty" yaml:"builtinModuleTypes,omitempty"`
+	StepTypes               []string `json:"stepTypes,omitempty" yaml:"stepTypes,omitempty"`
+	BuiltinStepTypes        []string `json:"builtinStepTypes,omitempty" yaml:"builtinStepTypes,omitempty"`
+	TriggerTypes            []string `json:"triggerTypes,omitempty" yaml:"triggerTypes,omitempty"`
+	BuiltinTriggerTypes     []string `json:"builtinTriggerTypes,omitempty" yaml:"builtinTriggerTypes,omitempty"`
+	WorkflowTypes           []string `json:"workflowTypes,omitempty" yaml:"workflowTypes,omitempty"`
+	BuiltinWorkflowTypes    []string `json:"builtinWorkflowTypes,omitempty" yaml:"builtinWorkflowTypes,omitempty"`
+	WiringHooks             []string `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
+	BuiltinWiringHooks      []string `json:"builtinWiringHooks,omitempty" yaml:"builtinWiringHooks,omitempty"`
+	IaCServices             []string `json:"iacServices,omitempty" yaml:"iacServices,omitempty"`
+	IaCStateBackends        []string `json:"iacStateBackends,omitempty" yaml:"iacStateBackends,omitempty"`
+	BuiltinIaCStateBackends []string `json:"builtinIaCStateBackends,omitempty" yaml:"builtinIaCStateBackends,omitempty"`
+	Providers               []string `json:"providers,omitempty" yaml:"providers,omitempty"`
+	Plugins                 []string `json:"plugins,omitempty" yaml:"plugins,omitempty"`
+	Keywords                []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
 }
 
 // LoadTaxonomy reads and validates a taxonomy YAML file.
@@ -126,16 +132,60 @@ func (c TaxonomyCapability) aliasPairs() []taxonomyAlias {
 		}
 	}
 	add("module", c.Aliases.ModuleTypes)
+	add("module", c.Aliases.BuiltinModuleTypes)
 	add("step", c.Aliases.StepTypes)
+	add("step", c.Aliases.BuiltinStepTypes)
 	add("trigger", c.Aliases.TriggerTypes)
+	add("trigger", c.Aliases.BuiltinTriggerTypes)
 	add("workflow", c.Aliases.WorkflowTypes)
+	add("workflow", c.Aliases.BuiltinWorkflowTypes)
 	add("wiringHook", c.Aliases.WiringHooks)
+	add("wiringHook", c.Aliases.BuiltinWiringHooks)
 	add("iacService", c.Aliases.IaCServices)
 	add("iacStateBackend", c.Aliases.IaCStateBackends)
+	add("iacStateBackend", c.Aliases.BuiltinIaCStateBackends)
 	add("provider", c.Aliases.Providers)
 	add("plugin", c.Aliases.Plugins)
 	add("keyword", c.Aliases.Keywords)
 	return aliases
+}
+
+func (c TaxonomyCapability) hasTag(tag string) bool {
+	for _, candidate := range c.Tags {
+		if strings.EqualFold(strings.TrimSpace(candidate), tag) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c TaxonomyCapability) hasBuiltinAlias(kind, value string) bool {
+	switch kind {
+	case "module":
+		return containsAlias(c.Aliases.BuiltinModuleTypes, value)
+	case "step":
+		return containsAlias(c.Aliases.BuiltinStepTypes, value)
+	case "trigger":
+		return containsAlias(c.Aliases.BuiltinTriggerTypes, value)
+	case "workflow":
+		return containsAlias(c.Aliases.BuiltinWorkflowTypes, value)
+	case "wiringHook":
+		return containsAlias(c.Aliases.BuiltinWiringHooks, value)
+	case "iacStateBackend":
+		return containsAlias(c.Aliases.BuiltinIaCStateBackends, value)
+	default:
+		return false
+	}
+}
+
+func containsAlias(values []string, value string) bool {
+	want := strings.ToLower(strings.TrimSpace(value))
+	for _, candidate := range values {
+		if strings.ToLower(strings.TrimSpace(candidate)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func aliasKey(kind, value string) string {

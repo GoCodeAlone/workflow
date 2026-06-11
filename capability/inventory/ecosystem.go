@@ -210,6 +210,15 @@ func manifestRawCapabilities(manifest *workflowplugin.PluginManifest) []rawCapab
 	raw = appendRaw(raw, "wiringHook", "wiringHooks", "wiringHooks", manifest.WiringHooks)
 	raw = appendRaw(raw, "iacService", "iacServices", "iacServices", manifest.IaCServices)
 	raw = appendRaw(raw, "iacStateBackend", "iacStateBackends", "iacStateBackends", manifest.IaCStateBackends)
+	if strings.TrimSpace(manifest.IaCProvider.Name) != "" {
+		raw = append(raw, rawCapability{
+			Kind:     "provider",
+			Value:    manifest.IaCProvider.Name,
+			JSONPath: "iacProvider.name",
+			Detail:   "iacProvider.name",
+		})
+	}
+	raw = appendRaw(raw, "module", "iacProvider.resourceTypes", "iacProvider.resourceTypes", manifest.IaCProvider.ResourceTypes)
 	for i, cap := range manifest.Capabilities {
 		if strings.TrimSpace(cap.Name) == "" {
 			continue

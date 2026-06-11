@@ -149,6 +149,10 @@ func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPath
 			return count, err
 		}
 		count++
+		workflowTenantEvidence := workflowHasTenantEvidence(cfg)
+		if workflowTenantEvidence {
+			tenancyPresent = true
+		}
 		for i, module := range cfg.Modules {
 			moduleCapabilityID := builder.capabilityIDForRaw("module", module.Type)
 			evidence := Evidence{
@@ -172,7 +176,7 @@ func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPath
 			if authCapabilityID != "" {
 				builder.addKnownUsage(authCapabilityID, "inferred", "medium", evidence)
 			}
-			if isDataModule(module.Type) && !moduleHasTenantEvidence {
+			if isDataModule(module.Type) && !moduleHasTenantEvidence && !workflowTenantEvidence {
 				tenantPolicyFindings = append(tenantPolicyFindings, Finding{
 					Level:        "warning",
 					Code:         "tenant-evidence-missing",
@@ -197,6 +201,17 @@ func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPath
 		}
 	}
 	return count, nil
+}
+
+func workflowHasTenantEvidence(cfg *config.WorkflowConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	return hasTenantEvidence(cfg.Workflows) ||
+		hasTenantEvidence(cfg.Triggers) ||
+		hasTenantEvidence(cfg.Pipelines) ||
+		hasTenantEvidence(cfg.Platform) ||
+		hasTenantEvidence(cfg.Infrastructure)
 }
 
 func loadInstalledProviderIndex(pluginDir string) (map[string]struct{}, int, error) {
@@ -244,22 +259,24 @@ func providerIndexHas(index map[string]struct{}, kind, value string) bool {
 }
 
 type appBuilder struct {
-	tax      *Taxonomy
-	usage    map[string]*Usage
-	findings []Finding
+	tax         *Taxonomy
+	usage       map[string]*Usage
+	findings    []Finding
+	findingKeys map[string]struct{}
 }
 
 func newAppBuilder(tax *Taxonomy) *appBuilder {
 	return &appBuilder{
-		tax:   tax,
-		usage: make(map[string]*Usage),
+		tax:         tax,
+		usage:       make(map[string]*Usage),
+		findingKeys: make(map[string]struct{}),
 	}
 }
 
 func (b *appBuilder) addRawUsage(kind, value, mode, confidence string, evidence Evidence, hasProvider bool) {
 	if taxCap, ok := b.tax.MatchType(kind, value); ok {
 		b.addTaxonomyUsage(taxCap, mode, confidence, evidence)
-		if !hasProvider && (kind == "module" || kind == "step" || kind == "trigger") {
+		if !hasProvider && requiresInstalledProvider(kind, value, taxCap) {
 			b.addFinding(Finding{
 				Level:        "warning",
 				Code:         "missing-provider",
@@ -272,6 +289,9 @@ func (b *appBuilder) addRawUsage(kind, value, mode, confidence string, evidence 
 	}
 	id := "uncategorized:" + strings.ToLower(kind) + ":" + strings.ToLower(strings.TrimSpace(value))
 	b.addUsage(id, "uncategorized", value, mode, confidence, evidence)
+	if kind == "plugin" {
+		return
+	}
 	b.addFinding(Finding{
 		Level:        "warning",
 		Code:         "missing-provider",
@@ -318,6 +338,11 @@ func (b *appBuilder) addUsage(id, category, name, mode, confidence string, evide
 }
 
 func (b *appBuilder) addFinding(finding Finding) {
+	key := findingKey(finding)
+	if _, ok := b.findingKeys[key]; ok {
+		return
+	}
+	b.findingKeys[key] = struct{}{}
 	b.findings = append(b.findings, finding)
 }
 
@@ -350,6 +375,24 @@ func (b *appBuilder) profile() *AppProfile {
 	}
 }
 
+func requiresInstalledProvider(kind, value string, cap *TaxonomyCapability) bool {
+	switch kind {
+	case "module", "step", "trigger":
+	default:
+		return false
+	}
+	return !cap.hasTag("core") && !cap.hasTag("builtin") && !cap.hasBuiltinAlias(kind, value)
+}
+
+func findingKey(finding Finding) string {
+	var evidence []string
+	for _, item := range finding.Evidence {
+		evidence = append(evidence, item.SourceKind+"\x00"+item.SourcePath+"\x00"+item.JSONPath+"\x00"+item.Detail)
+	}
+	sort.Strings(evidence)
+	return finding.Code + "\x00" + finding.CapabilityID + "\x00" + finding.Message + "\x00" + strings.Join(evidence, "\x00")
+}
+
 func hasTenantEvidence(value any) bool {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -368,6 +411,8 @@ func hasTenantEvidence(value any) bool {
 				return true
 			}
 		}
+	case string:
+		return strings.Contains(strings.ToLower(typed), "tenant")
 	}
 	return false
 }

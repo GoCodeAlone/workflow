@@ -7,7 +7,8 @@ capabilities:
     lifecycle: released
     aliases:
       plugins: [workflow-plugin-auth, workflow-plugin-auth0, workflow-plugin-okta, workflow-plugin-ory-kratos, workflow-plugin-passkey]
-      moduleTypes: [auth.jwt, auth.user_store, auth.middleware]
+      moduleTypes: [auth.credential]
+      builtinModuleTypes: [auth.jwt, auth.user-store, auth.user_store, auth.middleware, auth.oauth2, auth.m2m, auth.token-blacklist, security.field-protection]
       keywords: [authn, authentication, jwt, passkey]
     tags: [cross-cutting, auth-sensitive]
   - id: auth.authz
@@ -56,7 +57,8 @@ capabilities:
     description: GitHub repository, secret, environment, and CI integration.
     lifecycle: local
     aliases:
-      plugins: [workflow-plugin-github]
+      plugins: [workflow-plugin-github, github]
+      moduleTypes: [github.app, git.webhook]
       providers: [github]
       keywords: [github, github:repo, github:org, github:env]
     tags: [provider, secret-backed]
@@ -121,15 +123,54 @@ capabilities:
       stepTypes: [step.ci_generate]
       keywords: [ci, github-actions, gitlab-ci]
     tags: [build]
+  - id: config.provider
+    category: config
+    name: Config Provider
+    description: Loads application configuration from defaults, environment, files, or providers.
+    lifecycle: released
+    aliases:
+      builtinModuleTypes: [config.provider]
+      keywords: [config, configuration, environment]
+    tags: [core]
+  - id: deployment.sidecar
+    category: deployment
+    name: Deployment Sidecar
+    description: Attaches runtime sidecars to deployed applications.
+    lifecycle: released
+    aliases:
+      builtinModuleTypes: [sidecar.tailscale]
+      keywords: [sidecar, tailscale]
+    tags: [core, deployment]
+  - id: http.routing
+    category: http
+    name: HTTP Routing
+    description: Serves HTTP routes, middleware, and static assets.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-http]
+      builtinModuleTypes: [http.server, http.router, http.handler, static.fileserver, http.middleware.auth, http.middleware.logging, http.middleware.ratelimit, http.middleware.cors, http.middleware.requestid, http.middleware.securityheaders]
+      workflowTypes: [http]
+      keywords: [http, routing, middleware, static]
+    tags: [core, network]
   - id: iac.provider
     category: iac
     name: IaC Provider
     description: Plans and applies infrastructure resources through provider plugins.
     lifecycle: released
     aliases:
-      moduleTypes: [iac.provider]
+      moduleTypes: [iac.provider, iac.provider.hover]
       iacServices: [workflow.plugin.external.iac.IaCProviderRequired]
       keywords: [iac, infrastructure, tofu]
+    tags: [provider]
+  - id: iac.dns
+    category: iac
+    name: DNS Infrastructure
+    description: Manages DNS zones, records, and registrar delegation.
+    lifecycle: released
+    aliases:
+      providers: [hover]
+      moduleTypes: [infra.dns, infra.dns_delegation]
+      keywords: [dns, delegation, nameserver, registrar]
     tags: [provider]
   - id: iac.state-backend
     category: iac
@@ -137,8 +178,8 @@ capabilities:
     description: Stores infrastructure state in local or provider backends.
     lifecycle: released
     aliases:
-      moduleTypes: [iac.state]
-      iacStateBackends: [local, s3, gcs, azure_blob]
+      builtinModuleTypes: [iac.state]
+      iacStateBackends: [local, s3, gcs, azure_blob, spaces]
       keywords: [state, backend]
     tags: [provider]
   - id: observability.health
@@ -158,6 +199,7 @@ capabilities:
     lifecycle: released
     aliases:
       moduleTypes: [observability.tracing]
+      builtinModuleTypes: [observability.otel, http.middleware.otel]
       keywords: [trace, tracing, telemetry, opentelemetry]
     tags: [ops]
   - id: migrations.schema
@@ -188,6 +230,7 @@ capabilities:
     lifecycle: local
     aliases:
       plugins: [workflow-plugin-payments]
+      moduleTypes: [payments.provider]
       keywords: [payments, stripe, checkout]
     tags: [secret-backed]
   - id: messaging.broker
@@ -197,9 +240,22 @@ capabilities:
     lifecycle: released
     aliases:
       plugins: [workflow-plugin-messaging-core, workflow-plugin-eventbus, workflow-plugin-broker]
-      moduleTypes: [messaging.broker, messaging.nats, messaging.kafka, messaging.broker.eventbus]
+      moduleTypes: [messaging.nats, messaging.kafka, eventbus.broker, eventbus.stream, eventbus.consumer]
+      builtinModuleTypes: [messaging.broker, messaging.broker.eventbus]
+      triggerTypes: [trigger.eventbus.subscribe]
+      stepTypes: [step.eventbus.publish, step.eventbus.consume, step.eventbus.ack]
       keywords: [messaging, eventbus, nats, kafka]
     tags: [eventing]
+  - id: communication.messaging
+    category: communication
+    name: Customer Messaging
+    description: Sends and receives SMS, WhatsApp, voice, and customer notifications.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-twilio]
+      moduleTypes: [twilio.provider]
+      keywords: [twilio, sms, mms, whatsapp, voice, notification]
+    tags: [secret-backed, messaging]
   - id: storage.object
     category: storage
     name: Object Storage
@@ -215,7 +271,8 @@ capabilities:
     description: Provides SQL or embedded persistence.
     lifecycle: released
     aliases:
-      moduleTypes: [database.workflow, storage.sqlite, persistence.store]
+      builtinModuleTypes: [database.workflow, storage.sqlite, persistence.store]
+      moduleTypes: [storage.postgres, database.postgres, database.mysql]
       stepTypes: [step.db_query, step.db_exec]
       keywords: [database, sqlite, postgres, mysql]
     tags: [data]
@@ -226,5 +283,7 @@ capabilities:
     lifecycle: released
     aliases:
       moduleTypes: [docs.api]
+      builtinModuleTypes: [openapi, openapi.generator]
+      wiringHooks: [openapi-route-registration]
       keywords: [docs, documentation, openapi, go-docs]
     tags: [docs]
