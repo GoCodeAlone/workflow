@@ -22,33 +22,38 @@ func collectConfigVariablesFromFile(path string) ([]configVariableEntry, []strin
 	if err != nil {
 		return nil, nil, err
 	}
-	return collectConfigVariables(cfg), collectSensitiveConfigVariables(cfg), nil
+	return collectConfigVariables(cfg)
 }
 
-func collectConfigVariables(cfg *config.WorkflowConfig) []configVariableEntry {
+func collectConfigVariables(cfg *config.WorkflowConfig) ([]configVariableEntry, []string, error) {
 	if cfg == nil {
-		return nil
+		return nil, nil, nil
 	}
 	entriesByName := map[string]configVariableEntry{}
+	sensitiveByName := map[string]struct{}{}
 	for _, mod := range cfg.Modules {
 		if mod.Type != "config.provider" || mod.Config == nil {
 			continue
 		}
 		schema, err := schemaEntriesFromConfigProvider(mod)
 		if err != nil {
-			continue
+			return nil, nil, err
 		}
 		prefixes := envSourcePrefixes(mod.Config)
 		if len(prefixes) == 0 {
 			continue
 		}
 		for key, entry := range schema {
-			if entry.Sensitive || strings.TrimSpace(entry.Env) == "" {
+			if strings.TrimSpace(entry.Env) == "" {
 				continue
 			}
 			for _, prefix := range prefixes {
 				name := prefix + strings.TrimSpace(entry.Env)
 				if name == "" {
+					continue
+				}
+				if entry.Sensitive {
+					sensitiveByName[name] = struct{}{}
 					continue
 				}
 				entriesByName[name] = configVariableEntry{
@@ -61,41 +66,7 @@ func collectConfigVariables(cfg *config.WorkflowConfig) []configVariableEntry {
 			}
 		}
 	}
-	return sortedConfigVariableEntries(entriesByName)
-}
-
-func collectSensitiveConfigVariables(cfg *config.WorkflowConfig) []string {
-	if cfg == nil {
-		return nil
-	}
-	names := map[string]struct{}{}
-	for _, mod := range cfg.Modules {
-		if mod.Type != "config.provider" || mod.Config == nil {
-			continue
-		}
-		schema, err := schemaEntriesFromConfigProvider(mod)
-		if err != nil {
-			continue
-		}
-		prefixes := envSourcePrefixes(mod.Config)
-		if len(prefixes) == 0 {
-			continue
-		}
-		for _, entry := range schema {
-			if !entry.Sensitive || strings.TrimSpace(entry.Env) == "" {
-				continue
-			}
-			for _, prefix := range prefixes {
-				names[prefix+strings.TrimSpace(entry.Env)] = struct{}{}
-			}
-		}
-	}
-	out := make([]string, 0, len(names))
-	for name := range names {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
+	return sortedConfigVariableEntries(entriesByName), sortedStringSet(sensitiveByName), nil
 }
 
 func schemaEntriesFromConfigProvider(mod config.ModuleConfig) (map[string]module.SchemaEntry, error) {
@@ -109,7 +80,7 @@ func schemaEntriesFromConfigProvider(mod config.ModuleConfig) (map[string]module
 func envSourcePrefixes(cfg map[string]any) []string {
 	rawSources, ok := cfg["sources"].([]any)
 	if !ok || len(rawSources) == 0 {
-		return []string{""}
+		return nil
 	}
 	prefixes := map[string]struct{}{}
 	hasEnvSource := false
@@ -132,6 +103,15 @@ func envSourcePrefixes(cfg map[string]any) []string {
 	out := make([]string, 0, len(prefixes))
 	for prefix := range prefixes {
 		out = append(out, prefix)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedStringSet(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
 	}
 	sort.Strings(out)
 	return out

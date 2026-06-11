@@ -52,7 +52,7 @@ Options:
 		if err != nil {
 			return err
 		}
-		return runVarsSetupConfig(*configFile, strings.ToLower(strings.TrimSpace(*scope)), *envName, *org, *orgVisibility, *tokenEnv, values, *fromEnv, *nonInteractive, out)
+		return runVarsSetupConfig(*configFile, strings.ToLower(strings.TrimSpace(*scope)), *envName, *org, *orgVisibility, *tokenEnv, values, *fromEnv, *nonInteractive || in != nil, out)
 	}
 
 	manifest, err := loadPluginManifest(*pluginName, *pluginDir)
@@ -79,17 +79,9 @@ Options:
 		return fmt.Errorf("plugin %q does not declare config target %s:%s", manifest.Name, desc.Provider, desc.Scope)
 	}
 
-	values, err := buildVariableLiteralMap(varFlag)
+	values, err := valuesFromFlagsAndReader(varFlag, in)
 	if err != nil {
 		return err
-	}
-	if in != nil {
-		for _, kv := range readKVLines(in) {
-			k, v, ok := strings.Cut(kv, "=")
-			if ok {
-				values[k] = v
-			}
-		}
 	}
 
 	interactive := in == nil && !*nonInteractive && prompt.CanPrompt()
@@ -173,6 +165,10 @@ func buildVariableLiteralMap(literals []string) (map[string]string, error) {
 		if !found {
 			return nil, fmt.Errorf("--var %q: expected NAME=VALUE format", lit)
 		}
+		k = strings.TrimSpace(k)
+		if k == "" {
+			return nil, fmt.Errorf("--var %q: variable name is required", lit)
+		}
 		values[k] = v
 	}
 	return values, nil
@@ -186,9 +182,14 @@ func valuesFromFlagsAndReader(literals []string, in io.Reader) (map[string]strin
 	if in != nil {
 		for _, kv := range readKVLines(in) {
 			k, v, ok := strings.Cut(kv, "=")
-			if ok {
-				values[k] = v
+			if !ok {
+				continue
 			}
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			values[k] = strings.TrimSpace(v)
 		}
 	}
 	return values, nil

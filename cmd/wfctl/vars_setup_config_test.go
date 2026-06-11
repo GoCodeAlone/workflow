@@ -43,6 +43,12 @@ modules:
         not_provider_var:
           env: DEFAULT_ONLY
           default: value
+  - name: missing-sources
+    type: config.provider
+    config:
+      schema:
+        not_provider_var:
+          env: MISSING_SOURCES
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -62,6 +68,47 @@ modules:
 	}
 	if len(skipped) != 1 || skipped[0] != "APP_CLIENT_SECRET" {
 		t.Fatalf("skipped = %+v, want APP_CLIENT_SECRET", skipped)
+	}
+}
+
+func TestCollectConfigVariablesErrorsOnMalformedSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.yaml")
+	if err := os.WriteFile(path, []byte(`
+modules:
+  - name: bad-config
+    type: config.provider
+    config:
+      sources:
+        - type: env
+      schema:
+        bad_entry: not-a-map
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, _, err := collectConfigVariablesFromFile(path)
+	if err == nil {
+		t.Fatal("expected malformed schema error")
+	}
+}
+
+func TestValuesFromFlagsAndReaderTrimsAndSkipsBlankKeys(t *testing.T) {
+	values, err := valuesFromFlagsAndReader([]string{" FLAG = literal "}, bytes.NewBufferString(`
+ =ignored
+ READER = value
+NO_EQUALS
+`))
+	if err != nil {
+		t.Fatalf("valuesFromFlagsAndReader: %v", err)
+	}
+	if values["FLAG"] != " literal " {
+		t.Fatalf("FLAG = %q", values["FLAG"])
+	}
+	if values["READER"] != "value" {
+		t.Fatalf("READER = %q", values["READER"])
+	}
+	if _, ok := values[""]; ok {
+		t.Fatal("blank key must be skipped")
 	}
 }
 
