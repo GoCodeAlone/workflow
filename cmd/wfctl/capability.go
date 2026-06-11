@@ -53,7 +53,7 @@ Subcommands:
   catalog    Generate docs-facing Workflow capability catalog
   crossrefs  Generate plugin/provider capability cross-reference index
   app        Generate capability profile for an application
-  check      Print warning-only capability findings for an application
+  check      Print detected capabilities and findings for an application
 
 Use "wfctl capability <subcommand> -h" for subcommand options.`)
 }

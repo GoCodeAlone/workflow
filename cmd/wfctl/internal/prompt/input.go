@@ -25,7 +25,6 @@ func InputWithSuggestions(label string, masked bool, suggestions []string) (stri
 	}
 	out, _ := outputWriter()
 	ti := textinput.New()
-	ti.Placeholder = label
 	ti.Focus()
 	if masked {
 		ti.EchoMode = textinput.EchoPassword
