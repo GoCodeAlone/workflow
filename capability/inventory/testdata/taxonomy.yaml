@@ -62,3 +62,13 @@ capabilities:
         - storage.postgres
     tags:
       - data
+  - id: storage.object
+    category: storage
+    name: Object Storage
+    description: Persists blobs and files
+    lifecycle: released
+    aliases:
+      moduleTypes:
+        - storage.s3
+    tags:
+      - data

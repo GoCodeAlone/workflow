@@ -36,7 +36,7 @@ func CollectEcosystem(opts EcosystemOptions) (*Inventory, error) {
 	if err != nil {
 		return nil, err
 	}
-	local, err := collectLocalProviders(builder, opts.RepoRoot, released)
+	local, err := collectLocalProviders(builder, opts.RepoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func collectRegistryProviders(builder *inventoryBuilder, registryDir string) (in
 	return count, nil
 }
 
-func collectLocalProviders(builder *inventoryBuilder, repoRoot string, releasedCount int) (int, error) {
+func collectLocalProviders(builder *inventoryBuilder, repoRoot string) (int, error) {
 	if strings.TrimSpace(repoRoot) == "" {
 		return 0, nil
 	}
@@ -160,15 +160,11 @@ func collectLocalProviders(builder *inventoryBuilder, repoRoot string, releasedC
 		if err != nil {
 			return count, fmt.Errorf("load local plugin manifest %s: %w", manifestPath, err)
 		}
-		status := "local-only"
-		if releasedCount > 0 && strings.TrimSpace(manifest.Version) != "" && strings.TrimSpace(manifest.Repository) != "" {
-			status = "local-only"
-		}
 		builder.addProvider(providerInput{
 			Name:          firstNonEmpty(manifest.Name, name),
 			Kind:          "local-plugin",
 			Version:       manifest.Version,
-			ReleaseStatus: status,
+			ReleaseStatus: "local-only",
 			Source:        firstNonEmpty(manifest.Repository, manifestPath),
 			Path:          manifestPath,
 			Raw:           manifestRawCapabilities(manifest),

@@ -2,6 +2,8 @@ package inventory
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -47,6 +49,62 @@ func TestCheckAppFindsProviderAndTenantPolicyGaps(t *testing.T) {
 	findings := CheckApp(profile)
 	assertProfileFinding(t, findings, "missing-provider", "uncategorized:module:custom.missing")
 	assertProfileFinding(t, findings, "tenant-evidence-missing", "storage.database")
+}
+
+func TestCheckAppSkipsTenantPolicyWhenTenancyAbsent(t *testing.T) {
+	dir := t.TempDir()
+	workflowPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(workflowPath, []byte(`modules:
+  - name: database
+    type: storage.postgres
+    config:
+      dsn: postgres://example
+workflows: {}
+triggers: {}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := CollectApp(context.Background(), AppOptions{
+		WorkflowPaths: []string{workflowPath},
+		TaxonomyPath:  "testdata/taxonomy.yaml",
+		GeneratedAt:   fixedTime,
+	})
+	if err != nil {
+		t.Fatalf("CollectApp: %v", err)
+	}
+	for _, finding := range CheckApp(profile) {
+		if finding.Code == "tenant-evidence-missing" {
+			t.Fatalf("unexpected tenant finding without tenancy: %#v", finding)
+		}
+	}
+}
+
+func TestCheckAppUsesConcreteStorageCapabilityForTenantPolicy(t *testing.T) {
+	dir := t.TempDir()
+	workflowPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(workflowPath, []byte(`modules:
+  - name: tenants
+    type: tenancy.scope
+    config:
+      tenantId: request.tenant_id
+  - name: files
+    type: storage.s3
+    config:
+      bucket: uploads
+workflows: {}
+triggers: {}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := CollectApp(context.Background(), AppOptions{
+		WorkflowPaths: []string{workflowPath},
+		TaxonomyPath:  "testdata/taxonomy.yaml",
+		GeneratedAt:   fixedTime,
+	})
+	if err != nil {
+		t.Fatalf("CollectApp: %v", err)
+	}
+	assertProfileFinding(t, CheckApp(profile), "tenant-evidence-missing", "storage.object")
 }
 
 func assertUsage(t *testing.T, profile *AppProfile, capabilityID, mode string) {

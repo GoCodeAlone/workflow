@@ -138,6 +138,8 @@ func collectLockfileUsage(builder *appBuilder, lockfilePath string) (int, error)
 
 func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPaths []string, providerIndex map[string]struct{}) (int, error) {
 	count := 0
+	tenancyPresent := false
+	var tenantPolicyFindings []Finding
 	for _, workflowPath := range workflowPaths {
 		if strings.TrimSpace(workflowPath) == "" {
 			continue
@@ -148,6 +150,7 @@ func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPath
 		}
 		count++
 		for i, module := range cfg.Modules {
+			moduleCapabilityID := builder.capabilityIDForRaw("module", module.Type)
 			evidence := Evidence{
 				SourceKind: "workflow-config",
 				SourcePath: workflowPath,
@@ -155,7 +158,9 @@ func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPath
 				Detail:     module.Type,
 			}
 			builder.addRawUsage("module", module.Type, "declared", "high", evidence, providerIndexHas(providerIndex, "module", module.Type))
-			if hasTenantEvidence(module.Config) || strings.Contains(strings.ToLower(module.Type), "tenant") {
+			moduleHasTenantEvidence := hasTenantEvidence(module.Config)
+			if moduleHasTenantEvidence || strings.Contains(strings.ToLower(module.Type), "tenant") || moduleCapabilityID == "tenancy.scope" {
+				tenancyPresent = true
 				builder.addKnownUsage("tenancy.scope", "inferred", "medium", Evidence{
 					SourceKind: "workflow-config",
 					SourcePath: workflowPath,
@@ -166,11 +171,11 @@ func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPath
 			if strings.Contains(strings.ToLower(module.Type), "auth") {
 				builder.addKnownUsage("auth.authz", "inferred", "medium", evidence)
 			}
-			if isDataModule(module.Type) && !hasTenantEvidence(module.Config) {
-				builder.addFinding(Finding{
+			if isDataModule(module.Type) && !moduleHasTenantEvidence {
+				tenantPolicyFindings = append(tenantPolicyFindings, Finding{
 					Level:        "warning",
 					Code:         "tenant-evidence-missing",
-					CapabilityID: "storage.database",
+					CapabilityID: moduleCapabilityID,
 					Message:      fmt.Sprintf("module %q uses data storage without tenant evidence", module.Name),
 					Evidence:     []Evidence{evidence},
 				})
@@ -183,6 +188,11 @@ func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPath
 				JSONPath:   "secrets",
 				Detail:     "secrets or secretStores configured",
 			})
+		}
+	}
+	if tenancyPresent {
+		for _, finding := range tenantPolicyFindings {
+			builder.addFinding(finding)
 		}
 	}
 	return count, nil
@@ -268,6 +278,13 @@ func (b *appBuilder) addRawUsage(kind, value, mode, confidence string, evidence 
 		Message:      fmt.Sprintf("%s type %q is used but no installed plugin declares it or taxonomy maps it", kind, value),
 		Evidence:     []Evidence{evidence},
 	})
+}
+
+func (b *appBuilder) capabilityIDForRaw(kind, value string) string {
+	if taxCap, ok := b.tax.MatchType(kind, value); ok {
+		return taxCap.ID
+	}
+	return "uncategorized:" + strings.ToLower(kind) + ":" + strings.ToLower(strings.TrimSpace(value))
 }
 
 func (b *appBuilder) addKnownUsage(id, mode, confidence string, evidence Evidence) {
