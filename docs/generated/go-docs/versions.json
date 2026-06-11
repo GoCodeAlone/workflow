@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-11T07:40:13Z",
+  "subject": "workflow",
+  "subjects": [
+    "workflow"
+  ],
+  "versions": {
+    "workflow": [
+      "local"
+    ]
+  },
+  "packages": [
+    {
+      "subject": "workflow",
+      "name": "capability",
+      "importPath": "github.com/GoCodeAlone/workflow/capability",
+      "version": "local",
+      "generationSource": "local",
+      "repository": "https://github.com/GoCodeAlone/workflow",
+      "path": "workflow/latest/capability/index.md"
+    },
+    {
+      "subject": "workflow",
+      "name": "inventory",
+      "importPath": "github.com/GoCodeAlone/workflow/capability/inventory",
+      "version": "local",
+      "generationSource": "local",
+      "repository": "https://github.com/GoCodeAlone/workflow",
+      "path": "workflow/latest/capability/inventory/index.md",
+      "synopsis": "Package inventory builds generated capability inventories for Workflow plugins, registries, and applications."
+    },
+    {
+      "subject": "workflow",
+      "name": "config",
+      "importPath": "github.com/GoCodeAlone/workflow/config",
+      "version": "local",
+      "generationSource": "local",
+      "repository": "https://github.com/GoCodeAlone/workflow",
+      "path": "workflow/latest/config/index.md"
+    },
+    {
+      "subject": "workflow",
+      "name": "manifest",
+      "importPath": "github.com/GoCodeAlone/workflow/manifest",
+      "version": "local",
+      "generationSource": "local",
+      "repository": "https://github.com/GoCodeAlone/workflow",
+      "path": "workflow/latest/manifest/index.md",
+      "synopsis": "Package manifest provides static analysis of WorkflowConfig to produce infrastructure requirements manifests."
+    },
+    {
+      "subject": "workflow",
+      "name": "plugin",
+      "importPath": "github.com/GoCodeAlone/workflow/plugin",
+      "version": "local",
+      "generationSource": "local",
+      "repository": "https://github.com/GoCodeAlone/workflow",
+      "path": "workflow/latest/plugin/index.md",
+      "synopsis": "Package plugin contains Workflow's plugin manifest, registry, loading, and installation primitives."
+    },
+    {
+      "subject": "workflow",
+      "name": "sdk",
+      "importPath": "github.com/GoCodeAlone/workflow/plugin/external/sdk",
+      "version": "local",
+      "generationSource": "local",
+      "repository": "https://github.com/GoCodeAlone/workflow",
+      "path": "workflow/latest/plugin/external/sdk/index.md",
+      "synopsis": "Package sdk is the public runtime SDK for out-of-process Workflow plugins."
+    },
+    {
+      "subject": "workflow",
+      "name": "sdk",
+      "importPath": "github.com/GoCodeAlone/workflow/plugin/sdk",
+      "version": "local",
+      "generationSource": "local",
+      "repository": "https://github.com/GoCodeAlone/workflow",
+      "path": "workflow/latest/plugin/sdk/index.md",
+      "synopsis": "Package sdk contains authoring tools for Workflow plugins."
+    }
+  ],
+  "warnings": null
+}

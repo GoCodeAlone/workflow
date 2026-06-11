@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,24 +9,33 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+func TestErrCancelledAliasesInterrupted(t *testing.T) {
+	if !errors.Is(ErrInterrupted, ErrCancelled) {
+		t.Fatalf("ErrInterrupted should alias ErrCancelled")
+	}
+	if errors.Is(ErrCancelled, ErrNotInteractive) {
+		t.Fatalf("ErrCancelled must be distinct from ErrNotInteractive")
+	}
+}
+
 func TestPromptModelsMarkCtrlCAsInterrupted(t *testing.T) {
 	msg := tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
 
 	input := &inputModel{}
 	input.Update(msg)
-	if !input.quit {
+	if !input.quit || !input.interrupted {
 		t.Fatal("inputModel did not mark ctrl+c as quit")
 	}
 
 	confirm := &confirmModel{}
 	confirm.Update(msg)
-	if !confirm.quit {
+	if !confirm.quit || !confirm.interrupted {
 		t.Fatal("confirmModel did not mark ctrl+c as quit")
 	}
 
 	selectModel := &selectModel{}
 	selectModel.Update(msg)
-	if !selectModel.quit {
+	if !selectModel.quit || !selectModel.interrupted {
 		t.Fatal("selectModel did not mark ctrl+c as quit")
 	}
 
@@ -45,15 +55,33 @@ func TestPromptModelsMarkCtrlCAsInterrupted(t *testing.T) {
 func TestPromptModelsMarkEscAsInterrupted(t *testing.T) {
 	msg := tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})
 
+	input := &inputModel{}
+	input.Update(msg)
+	if !input.quit || !input.interrupted {
+		t.Fatal("inputModel did not mark esc as quit")
+	}
+
+	confirm := &confirmModel{}
+	confirm.Update(msg)
+	if !confirm.quit || !confirm.interrupted {
+		t.Fatal("confirmModel did not mark esc as quit")
+	}
+
+	selectModel := &selectModel{}
+	selectModel.Update(msg)
+	if !selectModel.quit || !selectModel.interrupted {
+		t.Fatal("selectModel did not mark esc as quit")
+	}
+
 	multiSelect := &multiSelectModel{}
 	multiSelect.Update(msg)
-	if !multiSelect.quit {
+	if !multiSelect.quit || !multiSelect.interrupted {
 		t.Fatal("multiSelectModel did not mark esc as quit")
 	}
 
 	tableMultiSelect := &tableMultiSelectModel{}
 	tableMultiSelect.Update(msg)
-	if !tableMultiSelect.quit {
+	if !tableMultiSelect.quit || !tableMultiSelect.interrupted {
 		t.Fatal("tableMultiSelectModel did not mark esc as quit")
 	}
 }

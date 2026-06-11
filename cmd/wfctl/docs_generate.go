@@ -46,12 +46,14 @@ type docsAPIMetadata struct {
 }
 
 type docsAPIPackageMeta struct {
-	Subject    string `json:"subject"`
-	Name       string `json:"name"`
-	ImportPath string `json:"importPath"`
-	Version    string `json:"version"`
-	Path       string `json:"path"`
-	Synopsis   string `json:"synopsis,omitempty"`
+	Subject          string `json:"subject"`
+	Name             string `json:"name"`
+	ImportPath       string `json:"importPath"`
+	Version          string `json:"version"`
+	GenerationSource string `json:"generationSource"`
+	Repository       string `json:"repository,omitempty"`
+	Path             string `json:"path"`
+	Synopsis         string `json:"synopsis,omitempty"`
 }
 
 type goListPackage struct {
@@ -178,6 +180,12 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 		return fmt.Errorf("docs generate: write versions.json: %w", err)
 	}
 	fmt.Printf("  create  %s\n", metaPath)
+	indexPath := filepath.Join(out, "index.json")
+	// #nosec G306 -- generated documentation metadata is intended to be readable by tooling.
+	if err := os.WriteFile(indexPath, append(metaBytes, '\n'), 0o644); err != nil {
+		return fmt.Errorf("docs generate: write index.json: %w", err)
+	}
+	fmt.Printf("  create  %s\n", indexPath)
 	fmt.Printf("\nGenerated %d Go API package doc(s) in %s\n", len(rendered), out)
 	return nil
 }
@@ -201,12 +209,14 @@ func renderWorkflowAPIPackage(ctx context.Context, source, modulePath, version, 
 		synopsis = listPkg.Doc
 	}
 	meta := docsAPIPackageMeta{
-		Subject:    "workflow",
-		Name:       docPkg.Name,
-		ImportPath: listPkg.ImportPath,
-		Version:    version,
-		Path:       route,
-		Synopsis:   synopsis,
+		Subject:          "workflow",
+		Name:             docPkg.Name,
+		ImportPath:       listPkg.ImportPath,
+		Version:          version,
+		GenerationSource: "local",
+		Repository:       "https://github.com/GoCodeAlone/workflow",
+		Path:             route,
+		Synopsis:         synopsis,
 	}
 	return renderedDocsPackage{
 		Meta: meta,
@@ -490,12 +500,14 @@ func renderPluginAPIPackage(ctx context.Context, checkout, modulePath string, ma
 		synopsis = listPkg.Doc
 	}
 	meta := docsAPIPackageMeta{
-		Subject:    "plugin",
-		Name:       manifest.Name,
-		ImportPath: listPkg.ImportPath,
-		Version:    manifest.Version,
-		Path:       route,
-		Synopsis:   synopsis,
+		Subject:          "plugin",
+		Name:             manifest.Name,
+		ImportPath:       listPkg.ImportPath,
+		Version:          manifest.Version,
+		GenerationSource: "release",
+		Repository:       manifest.Repository,
+		Path:             route,
+		Synopsis:         synopsis,
 	}
 	return renderedDocsPackage{
 		Meta: meta,

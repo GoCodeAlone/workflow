@@ -1,0 +1,632 @@
+{
+  "metadata": {
+    "generator": "wfctl capability catalog",
+    "generatedAt": "2026-06-11T07:40:01Z",
+    "workflowVersion": "dev",
+    "taxonomyVersion": "2026-06-11",
+    "taxonomyDigest": "9af65626d51eafaa32b0ba38d8bfdf77102e3900b8eed1dbafe44f950f3245f6",
+    "registrySource": "data/registry",
+    "localRepoRoot": "../../..",
+    "counts": {
+      "capabilities": 19,
+      "findings": 1949,
+      "hiddenUncategorized": 1775,
+      "localProviders": 87,
+      "releasedProviders": 19
+    }
+  },
+  "capabilities": [
+    {
+      "id": "auth.authn",
+      "category": "auth",
+      "name": "Authentication",
+      "description": "Verifies user or service identity.",
+      "lifecycle": "released",
+      "tags": [
+        "cross-cutting",
+        "auth-sensitive"
+      ],
+      "providers": [
+        {
+          "name": "auth",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:auth.jwt",
+            "module:auth.user-store"
+          ]
+        },
+        {
+          "name": "workflow-plugin-auth",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-auth",
+          "capabilities": [
+            "module:auth.credential"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ci.generation",
+      "category": "ci",
+      "name": "CI Generation",
+      "description": "Generates provider CI workflows from Workflow config.",
+      "lifecycle": "released",
+      "tags": [
+        "build"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-ci-generator",
+          "kind": "local-plugin",
+          "version": "0.3.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-ci-generator",
+          "capabilities": [
+            "step:step.ci_generate"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "communication.messaging",
+      "category": "communication",
+      "name": "Customer Messaging",
+      "description": "Sends and receives SMS, WhatsApp, voice, and customer notifications.",
+      "lifecycle": "released",
+      "tags": [
+        "secret-backed",
+        "messaging"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-twilio",
+          "kind": "local-plugin",
+          "version": "0.2.2",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-twilio",
+          "capabilities": [
+            "module:twilio.provider"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "migrations.schema",
+      "category": "data",
+      "name": "Schema Migrations",
+      "description": "Validates and runs database schema migrations.",
+      "lifecycle": "released",
+      "tags": [
+        "data"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-data-engineering",
+          "kind": "local-plugin",
+          "version": "0.3.3",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
+          "capabilities": [
+            "module:migrate.schema"
+          ],
+          "dependencies": [
+            "bento"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "docs.api",
+      "category": "docs",
+      "name": "API Documentation",
+      "description": "Generates API or Go package documentation.",
+      "lifecycle": "released",
+      "tags": [
+        "docs"
+      ],
+      "providers": [
+        {
+          "name": "observability",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:openapi.generator"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "featureflags.flags",
+      "category": "featureflags",
+      "name": "Feature Flags",
+      "description": "Evaluates feature flags and rollout decisions.",
+      "lifecycle": "released",
+      "tags": [
+        "runtime-control"
+      ],
+      "providers": [
+        {
+          "name": "feature-flags",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:featureflag.service"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "http.routing",
+      "category": "http",
+      "name": "HTTP Routing",
+      "description": "Serves HTTP routes, middleware, and static assets.",
+      "lifecycle": "released",
+      "tags": [
+        "core",
+        "network"
+      ],
+      "providers": [
+        {
+          "name": "http",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:http.handler",
+            "module:http.middleware.auth",
+            "module:http.middleware.cors",
+            "module:http.middleware.logging",
+            "module:http.middleware.ratelimit",
+            "module:http.middleware.requestid",
+            "module:http.middleware.securityheaders",
+            "module:http.router",
+            "module:http.server",
+            "module:static.fileserver",
+            "workflow:http"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "iac.dns",
+      "category": "iac",
+      "name": "DNS Infrastructure",
+      "description": "Manages DNS zones, records, and registrar delegation.",
+      "lifecycle": "released",
+      "tags": [
+        "provider"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-digitalocean",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-digitalocean",
+          "capabilities": [
+            "module:infra.dns"
+          ]
+        },
+        {
+          "name": "workflow-plugin-infra",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-infra",
+          "capabilities": [
+            "module:infra.dns"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "iac.provider",
+      "category": "iac",
+      "name": "IaC Provider",
+      "description": "Plans and applies infrastructure resources through provider plugins.",
+      "lifecycle": "released",
+      "tags": [
+        "provider"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-aws",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-aws",
+          "capabilities": [
+            "iacService:workflow.plugin.external.iac.IaCProviderRequired",
+            "module:iac.provider"
+          ]
+        },
+        {
+          "name": "workflow-plugin-azure",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-azure",
+          "capabilities": [
+            "iacService:workflow.plugin.external.iac.IaCProviderRequired",
+            "module:iac.provider"
+          ]
+        },
+        {
+          "name": "workflow-plugin-digitalocean",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-digitalocean",
+          "capabilities": [
+            "iacService:workflow.plugin.external.iac.IaCProviderRequired",
+            "module:iac.provider"
+          ]
+        },
+        {
+          "name": "workflow-plugin-gcp",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-gcp",
+          "capabilities": [
+            "iacService:workflow.plugin.external.iac.IaCProviderRequired",
+            "module:iac.provider"
+          ]
+        },
+        {
+          "name": "workflow-plugin-hover",
+          "kind": "local-plugin",
+          "version": "0.5.4",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-hover",
+          "capabilities": [
+            "module:iac.provider.hover"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "iac.state-backend",
+      "category": "iac",
+      "name": "IaC State Backend",
+      "description": "Stores infrastructure state in local or provider backends.",
+      "lifecycle": "released",
+      "tags": [
+        "provider"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-aws",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-aws",
+          "capabilities": [
+            "iacStateBackend:s3"
+          ]
+        },
+        {
+          "name": "workflow-plugin-azure",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-azure",
+          "capabilities": [
+            "iacStateBackend:azure_blob"
+          ]
+        },
+        {
+          "name": "workflow-plugin-digitalocean",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-digitalocean",
+          "capabilities": [
+            "iacStateBackend:spaces"
+          ]
+        },
+        {
+          "name": "workflow-plugin-gcp",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-gcp",
+          "capabilities": [
+            "iacStateBackend:gcs"
+          ]
+        },
+        {
+          "name": "workflow-plugin-platform",
+          "kind": "local-plugin",
+          "version": "0.1.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-platform",
+          "capabilities": [
+            "module:iac.state"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "messaging.broker",
+      "category": "messaging",
+      "name": "Message Broker",
+      "description": "Publishes, subscribes, and routes messages.",
+      "lifecycle": "released",
+      "tags": [
+        "eventing"
+      ],
+      "providers": [
+        {
+          "name": "messaging",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:messaging.broker",
+            "module:messaging.broker.eventbus",
+            "module:messaging.kafka",
+            "module:messaging.nats"
+          ]
+        },
+        {
+          "name": "workflow-plugin-eventbus",
+          "kind": "local-plugin",
+          "version": "0.3.7",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-eventbus",
+          "capabilities": [
+            "module:eventbus.broker",
+            "module:eventbus.consumer",
+            "module:eventbus.stream",
+            "step:step.eventbus.ack",
+            "step:step.eventbus.consume",
+            "step:step.eventbus.publish",
+            "trigger:trigger.eventbus.subscribe"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "observability.tracing",
+      "category": "observability",
+      "name": "Tracing",
+      "description": "Emits distributed traces and telemetry.",
+      "lifecycle": "released",
+      "tags": [
+        "ops"
+      ],
+      "providers": [
+        {
+          "name": "observability",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:http.middleware.otel",
+            "module:observability.otel"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "payments.processing",
+      "category": "payments",
+      "name": "Payments",
+      "description": "Integrates payment providers and checkout workflows.",
+      "lifecycle": "local",
+      "tags": [
+        "secret-backed"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-payments",
+          "kind": "local-plugin",
+          "version": "0.4.8",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-payments",
+          "capabilities": [
+            "module:payments.provider"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "platform.digitalocean",
+      "category": "platform",
+      "name": "DigitalOcean Provider",
+      "description": "DigitalOcean app, DNS, Spaces, registry, and infrastructure integration.",
+      "lifecycle": "local",
+      "tags": [
+        "provider",
+        "secret-backed"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-digitalocean",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-digitalocean",
+          "capabilities": [
+            "provider:digitalocean"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "platform.github",
+      "category": "platform",
+      "name": "GitHub Provider",
+      "description": "GitHub repository, secret, environment, and CI integration.",
+      "lifecycle": "local",
+      "tags": [
+        "provider",
+        "secret-backed"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-github",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-github",
+          "capabilities": [
+            "module:git.webhook",
+            "module:github.app"
+          ]
+        },
+        {
+          "name": "workflow-plugin-gitlab",
+          "kind": "local-plugin",
+          "version": "1.0.2",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-gitlab",
+          "capabilities": [
+            "module:git.webhook"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "secrets.management",
+      "category": "secrets",
+      "name": "Secrets Management",
+      "description": "Declares, resolves, and writes secrets across provider scopes.",
+      "lifecycle": "released",
+      "tags": [
+        "cross-cutting",
+        "secret-backed"
+      ],
+      "providers": [
+        {
+          "name": "secrets",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:secrets.vault"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "storage.database",
+      "category": "storage",
+      "name": "Database Storage",
+      "description": "Provides SQL or embedded persistence.",
+      "lifecycle": "released",
+      "tags": [
+        "data"
+      ],
+      "providers": [
+        {
+          "name": "pipeline-steps",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "step:step.db_exec",
+            "step:step.db_query"
+          ]
+        },
+        {
+          "name": "storage",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:database.workflow",
+            "module:persistence.store",
+            "module:storage.sqlite"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "storage.object",
+      "category": "storage",
+      "name": "Object Storage",
+      "description": "Reads and writes object/blob storage.",
+      "lifecycle": "released",
+      "tags": [
+        "data"
+      ],
+      "providers": [
+        {
+          "name": "storage",
+          "kind": "builtin",
+          "version": "1.0.0",
+          "releaseStatus": "released",
+          "source": "https://github.com/GoCodeAlone/workflow",
+          "capabilities": [
+            "module:storage.gcs",
+            "module:storage.local",
+            "module:storage.s3"
+          ]
+        },
+        {
+          "name": "workflow-plugin-aws",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-aws",
+          "capabilities": [
+            "module:storage.s3"
+          ]
+        },
+        {
+          "name": "workflow-plugin-gcp",
+          "kind": "local-plugin",
+          "version": "0.0.0",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-gcp",
+          "capabilities": [
+            "module:storage.gcs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tenancy.scope",
+      "category": "tenancy",
+      "name": "Tenant Scope",
+      "description": "Carries tenant identity through routes, storage, and provider resources.",
+      "lifecycle": "local",
+      "tags": [
+        "cross-cutting",
+        "tenant-scoped"
+      ],
+      "providers": [
+        {
+          "name": "workflow-plugin-data-engineering",
+          "kind": "local-plugin",
+          "version": "0.3.3",
+          "releaseStatus": "local-only",
+          "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
+          "capabilities": [
+            "module:data.tenancy"
+          ],
+          "dependencies": [
+            "bento"
+          ]
+        }
+      ]
+    }
+  ]
+}

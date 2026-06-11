@@ -1,15 +1,11 @@
 package prompt
 
 import (
-	"bufio"
 	"fmt"
-	"os"
-	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"golang.org/x/term"
 )
 
 // Input prompts the user for a single-line text value. When masked is true
@@ -28,28 +24,35 @@ func InputWithSuggestions(label string, masked bool, suggestions []string) (stri
 		return "", ErrNotInteractive
 	}
 	out, _ := outputWriter()
-	fmt.Fprint(out, label+": ")
+	ti := textinput.New()
+	ti.Focus()
 	if masked {
-		// #nosec G115 -- stdin file descriptors are small platform-provided values.
-		value, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(out)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimRight(string(value), "\r\n"), nil
+		ti.EchoMode = textinput.EchoPassword
+		ti.EchoCharacter = '*'
 	}
-	reader := bufio.NewReader(os.Stdin)
-	value, err := reader.ReadString('\n')
+	if len(suggestions) > 0 {
+		ti.ShowSuggestions = true
+		ti.SetSuggestions(suggestions)
+	}
+	finalModel, err := tea.NewProgram(&inputModel{label: label, ti: ti}, tea.WithOutput(out)).Run()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("prompt input: %w", err)
 	}
-	return strings.TrimRight(value, "\r\n"), nil
+	m, ok := finalModel.(*inputModel)
+	if !ok {
+		return "", fmt.Errorf("prompt: unexpected input model %T", finalModel)
+	}
+	if m.interrupted {
+		return "", ErrCancelled
+	}
+	return m.ti.Value(), nil
 }
 
 type inputModel struct {
-	label string
-	ti    textinput.Model
-	quit  bool
+	label       string
+	ti          textinput.Model
+	quit        bool
+	interrupted bool
 }
 
 var labelStyle = lipgloss.NewStyle().Bold(true)
@@ -62,8 +65,9 @@ func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if kp, ok := msg.(tea.KeyPressMsg); ok {
 		switch kp.String() {
-		case "ctrl+c":
+		case "ctrl+c", "esc":
 			m.quit = true
+			m.interrupted = true
 			return m, tea.Quit
 		case "enter":
 			return m, tea.Quit

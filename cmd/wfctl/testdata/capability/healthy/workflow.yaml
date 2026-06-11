@@ -1,0 +1,7 @@
+modules:
+  - name: authz
+    type: auth.rbac
+workflows:
+  signup:
+    steps: []
+triggers: {}

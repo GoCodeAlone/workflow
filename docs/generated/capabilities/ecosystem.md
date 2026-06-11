@@ -1,6 +1,6 @@
 # Workflow Capability Matrix
 
-- Generated: 2026-06-11T06:08:05Z
+- Generated: 2026-06-11T07:40:00Z
 - Workflow version: dev
 - Taxonomy: 2026-06-11
 

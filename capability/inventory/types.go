@@ -42,6 +42,52 @@ type Provider struct {
 	ReleaseStatus string   `json:"releaseStatus,omitempty"`
 	Source        string   `json:"source,omitempty"`
 	Capabilities  []string `json:"capabilities,omitempty"`
+	Dependencies  []string `json:"dependencies,omitempty"`
+}
+
+// Catalog is the docs-facing capability report derived from Inventory.
+type Catalog struct {
+	Metadata     Metadata            `json:"metadata"`
+	Capabilities []CatalogCapability `json:"capabilities"`
+	Findings     []Finding           `json:"findings,omitempty"`
+}
+
+// CatalogCapability is a public capability row intended for docs navigation.
+type CatalogCapability struct {
+	ID          string     `json:"id"`
+	Category    string     `json:"category"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Lifecycle   string     `json:"lifecycle,omitempty"`
+	Tags        []string   `json:"tags,omitempty"`
+	Providers   []Provider `json:"providers,omitempty"`
+}
+
+// CapabilityCrossrefs indexes capability-to-plugin and plugin-to-capability links.
+type CapabilityCrossrefs struct {
+	Metadata     Metadata                       `json:"metadata"`
+	Plugins      map[string]PluginReference     `json:"plugins"`
+	Capabilities map[string]CapabilityReference `json:"capabilities"`
+}
+
+// PluginReference describes one plugin/provider in the cross-reference graph.
+type PluginReference struct {
+	Name            string   `json:"name"`
+	Kind            string   `json:"kind,omitempty"`
+	Version         string   `json:"version,omitempty"`
+	ReleaseStatus   string   `json:"releaseStatus,omitempty"`
+	Source          string   `json:"source,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
+	RawCapabilities []string `json:"rawCapabilities,omitempty"`
+	Dependencies    []string `json:"dependencies,omitempty"`
+}
+
+// CapabilityReference describes one capability's provider names.
+type CapabilityReference struct {
+	ID        string   `json:"id"`
+	Category  string   `json:"category,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	Providers []string `json:"providers,omitempty"`
 }
 
 // AppProfile is the top-level application capability report.

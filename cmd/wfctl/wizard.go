@@ -58,9 +58,10 @@ var (
 
 // wizardModel is the top-level Bubbletea model for the interactive setup wizard.
 type wizardModel struct {
-	screen screenID
-	data   wizardData
-	err    string
+	screen    screenID
+	data      wizardData
+	err       string
+	cancelled bool
 
 	// Screen 1: project info fields (indexed: 0=name, 1=description).
 	infoFields  [2]inputField
@@ -262,6 +263,10 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+c" {
+			m.cancelled = true
+			return m, tea.Quit
+		}
 		switch msg.Code {
 		case tea.KeyEscape:
 			if m.screen > screenProjectInfo {
@@ -272,6 +277,9 @@ func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.screen--
 				m.err = ""
+			} else {
+				m.cancelled = true
+				return m, tea.Quit
 			}
 		case tea.KeyEnter:
 			if m.screen == screenSecretStores && m.storeAddMode {
@@ -1253,7 +1261,7 @@ func runWizard(args []string) error {
 		return fmt.Errorf("wizard: %w", err)
 	}
 
-	if wm, ok := finalModel.(wizardModel); ok && wm.screen != screenDone {
+	if wm, ok := finalModel.(wizardModel); ok && (wm.cancelled || wm.screen != screenDone) {
 		fmt.Fprintf(os.Stderr, "wizard cancelled — no files written\n")
 	}
 	return nil

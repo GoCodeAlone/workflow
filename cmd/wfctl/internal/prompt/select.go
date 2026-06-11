@@ -1,10 +1,7 @@
 package prompt
 
 import (
-	"bufio"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,33 +16,31 @@ func Select(title string, opts []string) (int, error) {
 	if !isTTY() {
 		return 0, ErrNotInteractive
 	}
+	if len(opts) == 0 {
+		return 0, fmt.Errorf("prompt: no options")
+	}
 	out, _ := outputWriter()
-	fmt.Fprintln(out, title)
-	for i, opt := range opts {
-		fmt.Fprintf(out, "  %d. %s\n", i+1, opt)
-	}
-	fmt.Fprint(out, "Choose [1]: ")
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	finalModel, err := tea.NewProgram(&selectModel{title: title, opts: opts}, tea.WithOutput(out)).Run()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("prompt select: %w", err)
 	}
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return 0, nil
+	m, ok := finalModel.(*selectModel)
+	if !ok {
+		return 0, fmt.Errorf("prompt: unexpected select model %T", finalModel)
 	}
-	idx, err := strconv.Atoi(line)
-	if err != nil || idx < 1 || idx > len(opts) {
-		return 0, fmt.Errorf("invalid selection %q", line)
+	if m.interrupted {
+		return 0, ErrCancelled
 	}
-	return idx - 1, nil
+	return m.cursor, nil
 }
 
 // selectModel is the bubbletea model for single selection.
 type selectModel struct {
-	title  string
-	opts   []string
-	cursor int
-	quit   bool
+	title       string
+	opts        []string
+	cursor      int
+	quit        bool
+	interrupted bool
 }
 
 var (
@@ -59,8 +54,9 @@ func (m *selectModel) Init() tea.Cmd { return nil }
 func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c", "esc", "q":
 			m.quit = true
+			m.interrupted = true
 			return m, tea.Quit
 		case "up", "k":
 			if m.cursor > 0 {

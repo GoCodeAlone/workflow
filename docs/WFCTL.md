@@ -91,6 +91,8 @@ graph TD
     audit --> audit-repo["repo"]
 
     capability --> capability-ecosystem["ecosystem"]
+    capability --> capability-catalog["catalog"]
+    capability --> capability-crossrefs["crossrefs"]
     capability --> capability-app["app"]
     capability --> capability-check["check"]
 
@@ -187,7 +189,7 @@ graph TD
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
-| **Capability Inventory** | `capability ecosystem`, `capability app`, `capability check` |
+| **Capability Inventory** | `capability ecosystem`, `capability catalog`, `capability crossrefs`, `capability app`, `capability check` |
 | **Platform Inspection** | `audit plans`, `audit plugins`, `audit repo`, `ports list`, `security audit`, `security generate-network-policies` |
 | **Utilities** | `snippets`, `manifest`, `pipeline`, `update`, `mcp` |
 
@@ -222,6 +224,43 @@ wfctl capability ecosystem --format md --output docs/generated/capabilities/ecos
 | `--format` | `json` | `json` or `md` |
 | `--output` | stdout | Write the artifact to a file |
 
+#### `wfctl capability catalog`
+
+Builds the public docs-facing capability catalog from the ecosystem inventory.
+Raw uncategorized rows are hidden from the catalog but retained in maintainer
+counts and the full ecosystem inventory.
+
+```
+wfctl capability catalog --registry data/registry --repo-root .. --format json
+wfctl capability catalog --format md --output docs/generated/capabilities/catalog.md
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--registry` | `data/registry` | Registry root containing `plugins/*/manifest.json` |
+| `--repo-root` | `..` | Workspace root to scan for local `workflow-plugin-*` repos |
+| `--taxonomy` | `data/capabilities/taxonomy.yaml` | Capability taxonomy YAML |
+| `--format` | `json` | `json` or `md` |
+| `--output` | stdout | Write the artifact to a file |
+
+#### `wfctl capability crossrefs`
+
+Builds a machine-readable plugin/provider cross-reference graph for docs and
+agent lookups.
+
+```
+wfctl capability crossrefs --registry data/registry --repo-root .. --format json
+wfctl capability crossrefs --output docs/generated/capabilities/crossrefs.json
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--registry` | `data/registry` | Registry root containing `plugins/*/manifest.json` |
+| `--repo-root` | `..` | Workspace root to scan for local `workflow-plugin-*` repos |
+| `--taxonomy` | `data/capabilities/taxonomy.yaml` | Capability taxonomy YAML |
+| `--format` | `json` | `json` |
+| `--output` | stdout | Write the artifact to a file |
+
 #### `wfctl capability app`
 
 Builds an application profile from `wfctl.yaml`, `.wfctl-lock.yaml`, installed
@@ -244,14 +283,28 @@ wfctl capability app --workflow workflow.yaml --format md --output capability-pr
 
 #### `wfctl capability check`
 
-Runs the application profile checks and prints findings. This first version is
-warning-only: findings are emitted, but the command exits successfully so teams
-can add it to CI before deciding which findings should become policy failures.
+Runs the application profile checks and prints a concise detected-capability
+summary followed by findings. The command is warning-only: findings are emitted,
+but the command exits successfully so teams can add it to CI before deciding
+which findings should become policy failures. Use `--findings-only` for the
+older warning-only text output.
 
 ```
 wfctl capability check --workflow workflow.yaml
+wfctl capability check --workflow workflow.yaml --findings-only
 wfctl capability check --workflow workflow.yaml --format json
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--manifest` | `wfctl.yaml` | Human-authored plugin manifest |
+| `--workflow` | `workflow.yaml` | Workflow config path; repeat for multiple files |
+| `--plugin-dir` | `.wfctl/plugins` | Installed plugin manifest directory |
+| `--lock-file` | `.wfctl-lock.yaml` | Generated plugin lockfile |
+| `--taxonomy` | `data/capabilities/taxonomy.yaml` | Capability taxonomy YAML |
+| `--format` | `text` | `text` or `json` |
+| `--findings-only` | `false` | Print only warning/error findings in text mode |
+| `--output` | stdout | Write the artifact to a file |
 
 Public docs should consume ecosystem artifacts from
 `docs/generated/capabilities/`. Application profiles can include private plugin

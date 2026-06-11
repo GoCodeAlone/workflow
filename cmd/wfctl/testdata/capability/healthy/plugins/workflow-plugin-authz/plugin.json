@@ -1,0 +1,10 @@
+{
+  "name": "workflow-plugin-authz",
+  "version": "0.4.0",
+  "author": "GoCodeAlone",
+  "description": "Authorization provider",
+  "license": "MIT",
+  "moduleTypes": ["auth.rbac"],
+  "stepTypes": ["step.authz_check"],
+  "triggerTypes": []
+}

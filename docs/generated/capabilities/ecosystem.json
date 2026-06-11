@@ -1,7 +1,7 @@
 {
   "metadata": {
     "generator": "wfctl capability ecosystem",
-    "generatedAt": "2026-06-11T06:08:04Z",
+    "generatedAt": "2026-06-11T07:39:58Z",
     "workflowVersion": "dev",
     "taxonomyVersion": "2026-06-11",
     "taxonomyDigest": "9af65626d51eafaa32b0ba38d8bfdf77102e3900b8eed1dbafe44f950f3245f6",
@@ -710,6 +710,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:migrate.schema"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -1085,6 +1088,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:data.tenancy"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -3872,6 +3878,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "module:botdetect.engine"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -4001,6 +4011,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:catalog.datahub"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -4044,6 +4057,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:catalog.iceberg"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -4087,6 +4103,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:catalog.openmetadata"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -4130,6 +4149,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:catalog.schema_registry"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -4173,6 +4195,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:cdc.source"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -4345,6 +4370,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-compute",
           "capabilities": [
             "module:compute.pool"
+          ],
+          "dependencies": [
+            "workflow-plugin-compute-core"
           ]
         }
       ],
@@ -4388,6 +4416,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-compute",
           "capabilities": [
             "module:compute.provider"
+          ],
+          "dependencies": [
+            "workflow-plugin-compute-core"
           ]
         }
       ],
@@ -4431,6 +4462,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-compute",
           "capabilities": [
             "module:compute.provider_catalog"
+          ],
+          "dependencies": [
+            "workflow-plugin-compute-core"
           ]
         }
       ],
@@ -4990,6 +5024,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "module:economy.ranked"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -5033,6 +5071,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "module:economy.trading"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -5506,6 +5548,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:graph.neo4j"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -7372,6 +7417,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:lakehouse.table"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -7759,6 +7807,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "module:moderation.engine"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -9083,6 +9135,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:quality.checks"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -10811,6 +10866,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:timeseries.clickhouse"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -10854,6 +10912,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:timeseries.druid"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -10897,6 +10958,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:timeseries.influxdb"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -10940,6 +11004,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:timeseries.questdb"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -10983,6 +11050,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "module:timeseries.timescaledb"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -11562,6 +11632,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.account_gate_check"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -18122,6 +18196,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.booster_open"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -18165,6 +18243,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_emit_flags"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18208,6 +18290,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_entropy_extract"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18251,6 +18337,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_flag_confirm"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18294,6 +18384,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_flag_dismiss"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18337,6 +18431,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_review_queue_add"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18380,6 +18478,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_review_queue_get"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18423,6 +18525,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_scan_game"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18466,6 +18572,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_scan_player"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18509,6 +18619,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_scan_recent"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18552,6 +18666,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_score_player"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18595,6 +18713,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_session_analyze"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18638,6 +18760,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_session_record"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -18681,6 +18807,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-botdetect",
           "capabilities": [
             "step:step.botdetect_timing_extract"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-moderation"
           ]
         }
       ],
@@ -19227,6 +19357,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.card_craft"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -19270,6 +19404,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.card_disenchant"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -19313,6 +19451,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.card_grant"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -19442,6 +19584,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.catalog_lineage"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19485,6 +19630,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.catalog_lineage_query"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19528,6 +19676,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.catalog_register"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19571,6 +19722,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.catalog_search"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19614,6 +19768,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.cdc_backpressure"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19657,6 +19814,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.cdc_monitor"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19700,6 +19860,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.cdc_schema_history"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19743,6 +19906,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.cdc_snapshot"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19786,6 +19952,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.cdc_start"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19829,6 +19998,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.cdc_status"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -19872,6 +20044,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.cdc_stop"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -20861,6 +21036,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.collection_get"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -20990,6 +21169,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-compute",
           "capabilities": [
             "step:step.compute_dispatch"
+          ],
+          "dependencies": [
+            "workflow-plugin-compute-core"
           ]
         }
       ],
@@ -21033,6 +21215,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-compute",
           "capabilities": [
             "step:step.compute_map"
+          ],
+          "dependencies": [
+            "workflow-plugin-compute-core"
           ]
         }
       ],
@@ -21076,6 +21261,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-compute",
           "capabilities": [
             "step:step.compute_wait"
+          ],
+          "dependencies": [
+            "workflow-plugin-compute-core"
           ]
         }
       ],
@@ -21549,6 +21737,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.contract_validate"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -29753,6 +29944,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.economy_config_get"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -33954,6 +34149,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.graph_extract_entities"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -33997,6 +34195,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.graph_extract_entities_llm"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -34040,6 +34241,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.graph_import"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -34083,6 +34287,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.graph_link"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -34126,6 +34333,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.graph_query"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -34169,6 +34379,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.graph_write"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -35115,6 +35328,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.lakehouse_compact"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -35158,6 +35374,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.lakehouse_create_table"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -35201,6 +35420,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.lakehouse_evolve_schema"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -35244,6 +35466,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.lakehouse_expire_snapshots"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -35287,6 +35512,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.lakehouse_query"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -35330,6 +35558,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.lakehouse_snapshot"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -35373,6 +35604,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.lakehouse_write"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -40017,6 +40251,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.market_buy"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -40060,6 +40298,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.market_cancel"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -40103,6 +40345,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.market_list"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -40146,6 +40392,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.market_search"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -41049,6 +41299,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.migrate_apply"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -41092,6 +41345,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.migrate_contract"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -41178,6 +41434,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.migrate_expand"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -41221,6 +41480,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.migrate_expand_status"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -41264,6 +41526,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.migrate_plan"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -41307,6 +41572,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.migrate_rollback"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -41350,6 +41618,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.migrate_run"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -41393,6 +41664,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.migrate_status"
+          ],
+          "dependencies": [
+            "bento"
           ]
         },
         {
@@ -41595,6 +41869,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_appeal_resolve"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41638,6 +41916,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_appeal_submit"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41681,6 +41963,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_ban_check"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41724,6 +42010,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_ban_player"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41767,6 +42057,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_chat_filter"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41810,6 +42104,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_chat_report"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41853,6 +42151,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_cheat_evaluate"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41896,6 +42198,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_cheat_signal"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41939,6 +42245,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_mute_check"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -41982,6 +42292,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_player_kick"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -42025,6 +42339,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_reputation_get"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -42068,6 +42386,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_reputation_update"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -42111,6 +42433,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_voice_block"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -42154,6 +42480,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_voice_clip_report"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -42197,6 +42527,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_voice_mute"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -42240,6 +42574,10 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-moderation",
           "capabilities": [
             "step:step.moderation_vote_kick"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-websocket"
           ]
         }
       ],
@@ -60038,6 +60376,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.placement_result"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -60369,6 +60711,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.price_history"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -60786,6 +61132,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.quality_anomaly"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -60829,6 +61178,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.quality_check"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -60872,6 +61224,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.quality_compare"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -60915,6 +61270,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.quality_dbt_test"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -60958,6 +61316,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.quality_ge_validate"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -61001,6 +61362,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.quality_profile"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -61044,6 +61408,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.quality_schema_validate"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -61087,6 +61454,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.quality_soda_check"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -61474,6 +61844,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.queue_join"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -61517,6 +61891,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.queue_leave"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -61560,6 +61938,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.queue_status"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -61603,6 +61985,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.rank_badge_sync"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -61689,6 +62075,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.rating_get"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         },
         {
@@ -61762,6 +62152,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.rating_update"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         },
         {
@@ -67317,6 +67711,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.schema_evolve_pipeline"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -67360,6 +67757,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.schema_evolve_verify"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -67403,6 +67803,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.schema_register"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -67446,6 +67849,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.schema_validate"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -67532,6 +67938,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.season_create"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         },
         {
@@ -67605,6 +68015,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.season_end"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -67691,6 +68105,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.season_leaderboard"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -67820,6 +68238,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.season_rewards_claim"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -71062,6 +71484,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.tenant_demote"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -71105,6 +71530,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.tenant_deprovision"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -71148,6 +71576,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.tenant_evaluate_promotion"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -71191,6 +71622,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.tenant_migrate"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -71234,6 +71668,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.tenant_promote"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -71277,6 +71714,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.tenant_provision"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72223,6 +72663,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.trade_history"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -72266,6 +72710,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.trade_offer_cancel"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -72309,6 +72757,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.trade_offer_create"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -72352,6 +72804,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.trade_offer_get"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -72395,6 +72851,10 @@
           "source": "../../../workflow-plugin-economy/plugin.json",
           "capabilities": [
             "step:step.trade_offer_respond"
+          ],
+          "dependencies": [
+            "workflow-plugin-gameserver",
+            "workflow-plugin-steam"
           ]
         }
       ],
@@ -72481,6 +72941,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_archive"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72524,6 +72987,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_clickhouse_view"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72567,6 +73033,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_continuous_query"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72610,6 +73079,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_downsample"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72653,6 +73125,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_druid_compact"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72696,6 +73171,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_druid_datasource"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72739,6 +73217,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_druid_ingest"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72782,6 +73263,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_druid_query"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72825,6 +73309,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_query"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72868,6 +73355,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_retention"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72911,6 +73401,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_tier_status"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72954,6 +73447,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_write"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -72997,6 +73493,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "step:step.ts_write_batch"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
@@ -80212,6 +80711,9 @@
           "source": "https://github.com/GoCodeAlone/workflow-plugin-data-engineering",
           "capabilities": [
             "trigger:trigger.cdc"
+          ],
+          "dependencies": [
+            "bento"
           ]
         }
       ],
