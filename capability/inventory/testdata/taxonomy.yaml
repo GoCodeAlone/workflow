@@ -20,6 +20,45 @@ capabilities:
         - auth.rbac
       stepTypes:
         - step.authz_check
+      plugins:
+        - workflow-plugin-authz
     tags:
       - cross-cutting
       - authz-sensitive
+  - id: tenancy.scope
+    category: tenancy
+    name: Tenant Scope
+    description: Scopes records and requests by tenant
+    lifecycle: released
+    aliases:
+      moduleTypes:
+        - tenancy.scope
+      keywords:
+        - tenant
+        - tenantId
+    tags:
+      - cross-cutting
+      - tenant-sensitive
+  - id: secrets.management
+    category: security
+    name: Secrets Management
+    description: Manages application secrets
+    lifecycle: released
+    aliases:
+      moduleTypes:
+        - secrets.manager
+      plugins:
+        - workflow-plugin-github
+    tags:
+      - cross-cutting
+      - secrets
+  - id: storage.database
+    category: storage
+    name: Database Storage
+    description: Persists application data in a database
+    lifecycle: released
+    aliases:
+      moduleTypes:
+        - storage.postgres
+    tags:
+      - data
