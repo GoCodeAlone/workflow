@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -1343,6 +1344,10 @@ func TestWriteInstalledManifest_PreservesRequiredSecrets(t *testing.T) {
 			{Name: "HOVER_USERNAME", Sensitive: false, Description: "Hover username", Prompt: "Hover username"},
 			{Name: "HOVER_PASSWORD", Sensitive: true, Description: "Hover password"},
 		},
+		SecretTargets: []PluginSecretTarget{
+			{Provider: "github", Scopes: []string{"repo", "env"}},
+			{Provider: "vault", Scopes: []string{"mount"}},
+		},
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "plugin.json")
@@ -1366,11 +1371,20 @@ func TestWriteInstalledManifest_PreservesRequiredSecrets(t *testing.T) {
 	if !pj.RequiredSecrets[1].Sensitive {
 		t.Errorf("required_secrets[1].sensitive = false; want true (HOVER_PASSWORD)")
 	}
+	if len(pj.SecretTargets) != 2 {
+		t.Fatalf("secret_targets len = %d, want 2", len(pj.SecretTargets))
+	}
+	if pj.SecretTargets[0].Provider != "github" || !reflect.DeepEqual(pj.SecretTargets[0].Scopes, []string{"repo", "env"}) {
+		t.Errorf("unexpected secret_targets[0]: %+v", pj.SecretTargets[0])
+	}
 	// Also assert the raw JSON contains the field — guards against a
 	// future installedPluginJSON refactor that adds Sensitive omitempty
 	// or otherwise hides the field at marshal time.
 	if !strings.Contains(string(raw), "\"required_secrets\":") {
 		t.Errorf("installed plugin.json missing required_secrets[] key:\n%s", string(raw))
+	}
+	if !strings.Contains(string(raw), "\"secret_targets\":") {
+		t.Errorf("installed plugin.json missing secret_targets[] key:\n%s", string(raw))
 	}
 }
 
@@ -1399,5 +1413,31 @@ func TestRegistryManifest_UnmarshalPreservesRequiredSecrets(t *testing.T) {
 	}
 	if m.RequiredSecrets[1].Name != "Y" || !m.RequiredSecrets[1].Sensitive {
 		t.Errorf("unexpected required_secrets[1]: %+v", m.RequiredSecrets[1])
+	}
+}
+
+func TestRegistryManifest_UnmarshalPreservesSecretTargets(t *testing.T) {
+	src := `{
+		"name": "workflow-plugin-github",
+		"version": "0.2.0",
+		"author": "GoCodeAlone",
+		"description": "test",
+		"type": "external",
+		"tier": "community",
+		"license": "MIT",
+		"secret_targets": [
+			{"provider": "github", "scopes": ["repo", "env"], "description": "GitHub Actions secrets"},
+			{"provider": "vault", "scopes": ["mount"]}
+		]
+	}`
+	var m RegistryManifest
+	if err := json.Unmarshal([]byte(src), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(m.SecretTargets) != 2 {
+		t.Fatalf("secret_targets len = %d, want 2", len(m.SecretTargets))
+	}
+	if m.SecretTargets[0].Provider != "github" || !reflect.DeepEqual(m.SecretTargets[0].Scopes, []string{"repo", "env"}) {
+		t.Errorf("unexpected secret_targets[0]: %+v", m.SecretTargets[0])
 	}
 }

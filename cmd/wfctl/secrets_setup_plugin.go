@@ -26,11 +26,22 @@ type PluginRequiredSecret struct {
 	Prompt      string `json:"prompt,omitempty"`
 }
 
+// PluginSecretTarget declares secret storage targets that a plugin supports for
+// its required_secrets[] entries. Provider is a provider domain such as
+// "github", "vault", or "aws-secrets-manager"; Scopes narrows provider-owned
+// namespaces such as GitHub repo/env/org or Vault mount.
+type PluginSecretTarget struct {
+	Provider    string   `json:"provider"`
+	Scopes      []string `json:"scopes,omitempty"`
+	Description string   `json:"description,omitempty"`
+}
+
 // pluginManifest is the slice of plugin.json this command actually
 // reads. Other fields are ignored.
 type pluginManifest struct {
 	Name            string                 `json:"name"`
 	RequiredSecrets []PluginRequiredSecret `json:"required_secrets,omitempty"`
+	SecretTargets   []PluginSecretTarget   `json:"secret_targets,omitempty"`
 }
 
 // runSecretsSetupPlugin is the entry-point for `wfctl secrets setup

@@ -6,10 +6,14 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -72,10 +76,10 @@ func TestPluginRegistrySync_NormalizeRepo(t *testing.T) {
 // TestPluginRegistrySync_DownloadsMatchVersion verifies the downloads-vs-version
 // invariant the bash script enforces (sync-versions.sh:46-58).
 func TestPluginRegistrySync_DownloadsMatchVersion(t *testing.T) {
-	t.Run("empty downloads OK", func(t *testing.T) {
+	t.Run("empty downloads rejected", func(t *testing.T) {
 		raw := map[string]any{}
-		if !downloadsMatchVersion(raw, "1.2.3") {
-			t.Error("empty downloads should match (no URLs to verify)")
+		if downloadsMatchVersion(raw, "1.2.3") {
+			t.Error("empty downloads should be treated as drift so --fix can populate release assets")
 		}
 	})
 	t.Run("matching URLs OK", func(t *testing.T) {
@@ -504,6 +508,71 @@ func TestPluginRegistrySync_LocateExtractedBinary(t *testing.T) {
 
 	if _, err := locateRegistrySyncBinary(dir, "missing-plugin"); err == nil {
 		t.Fatal("expected missing binary error")
+	}
+}
+
+func TestPluginRegistrySync_ReleaseDownloadsUsesGitHubREST(t *testing.T) {
+	oldBaseURL := gitHubAPIBaseURL
+	oldClient := gitHubAPIClient
+	t.Cleanup(func() {
+		gitHubAPIBaseURL = oldBaseURL
+		gitHubAPIClient = oldClient
+	})
+	t.Setenv("RELEASES_TOKEN", "test-token")
+
+	var sawAuth atomic.Bool
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer test-token" {
+			sawAuth.Store(true)
+		}
+		switch r.URL.Path {
+		case "/repos/owner/repo/releases/latest":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"tag_name":"v1.2.3","assets":[]}`)
+		case "/repos/owner/repo/releases/tags/v1.2.3":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{
+				"tag_name":"v1.2.3",
+				"assets":[
+					{"name":"checksums.txt","browser_download_url":"%s/checksums.txt"},
+					{"name":"workflow-plugin-foo-linux-amd64.tar.gz","browser_download_url":"%s/workflow-plugin-foo-linux-amd64.tar.gz"},
+					{"name":"notes.txt","browser_download_url":"%s/notes.txt"}
+				]
+			}`, srv.URL, srv.URL, srv.URL)
+		case "/checksums.txt":
+			fmt.Fprintln(w, strings.Repeat("a", 64)+"  workflow-plugin-foo-linux-amd64.tar.gz")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	gitHubAPIBaseURL = srv.URL
+	gitHubAPIClient = srv.Client()
+
+	latest, err := ghReleaseLatestTag("owner/repo")
+	if err != nil {
+		t.Fatalf("ghReleaseLatestTag: %v", err)
+	}
+	if latest != "v1.2.3" {
+		t.Fatalf("latest tag = %q, want v1.2.3", latest)
+	}
+	if !releaseExists("owner/repo", "v1.2.3") {
+		t.Fatal("releaseExists returned false for REST-backed release")
+	}
+	downloads, err := releaseDownloads("owner/repo", "v1.2.3")
+	if err != nil {
+		t.Fatalf("releaseDownloads: %v", err)
+	}
+	if len(downloads) != 1 {
+		t.Fatalf("downloads len = %d, want 1: %#v", len(downloads), downloads)
+	}
+	got := downloads[0]
+	if got.OS != "linux" || got.Arch != "amd64" || got.URL != srv.URL+"/workflow-plugin-foo-linux-amd64.tar.gz" || got.SHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("download = %#v", got)
+	}
+	if !sawAuth.Load() {
+		t.Fatal("GitHub API request did not include RELEASES_TOKEN bearer auth")
 	}
 }
 

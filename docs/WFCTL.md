@@ -657,6 +657,41 @@ wfctl plugin install --data-dir /opt/plugins my-plugin
 
 Registry installs resolve compatibility before selecting a version. Direct URL installs, local installs, GitHub repository fallback, and lockfile installs do not use registry evidence unless they are backed by registry metadata.
 
+#### `plugin run`
+
+Install a plugin when requested, then dispatch one of its wfctl CLI commands
+without requiring a Workflow project directory.
+
+```
+wfctl plugin run [options] <plugin-name-or-github-ref> -- <plugin-command> [args...]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--plugin-dir` | `$WFCTL_PLUGIN_DIR` or `data/plugins` | Plugin directory |
+| `--data-dir` | `$WFCTL_PLUGIN_DIR` or `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--ensure-installed` | `false` | Install or update the plugin before dispatching |
+| `--registry` | _(all registries)_ | Use a specific registry by name during install |
+| `--config` | _(default registry)_ | Registry config file path during install |
+| `--url` | _(none)_ | Install from a direct download URL when `--ensure-installed` is set |
+| `--local` | _(none)_ | Install from a local plugin directory when `--ensure-installed` is set |
+| `--sha256` | _(none)_ | Expected archive SHA256 for `--url` installs |
+| `--skip-checksum` | `false` | Skip archive integrity verification during install |
+| `--compat-mode` | `enforce` | Compatibility mode for registry installs: `enforce` or `warn` |
+| `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
+| `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
+
+```bash
+wfctl plugin run GoCodeAlone/workflow-plugin-compute@v0.1.8 \
+  --ensure-installed \
+  -- compute agent setup --server https://compute.example.com --invite-url "$INVITE_URL" --non-interactive --json
+```
+
+`plugin run` reuses `plugin install` for installation and checksum enforcement.
+For projectless bootstraps, it suppresses `.wfctl-lock.yaml` writes in the
+current directory; normal `wfctl plugin install` remains the command to pin
+project lockfiles.
+
 #### `plugin lock`
 
 Regenerate `.wfctl-lock.yaml` from `wfctl.yaml` or legacy `requires.plugins[]`.
@@ -2528,7 +2563,17 @@ wfctl secrets sync --from staging --to production
 
 Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY. With `--manifest`, discovers secrets from `wfctl.yaml`, `.wfctl-lock.yaml`, installed plugin `required_secrets[]`, and `${ENV_VAR}` references in workflow configs. Repo/env-scoped GitHub setup uses `secrets.config.repo` or `secretStores.<name>.config.repo` when configured; otherwise it infers the repo from `git remote.origin.url` and prints that assumption in the setup target or error.
 
-**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names. Manifest-backed setup prints the selected GitHub target and whether the repo was configured explicitly or inferred, shows discovered provider/config secrets with set/unset status and their sources, and selects only unset secrets by default. Toggle existing secrets to update them, or pass `--all` to preselect every discovered secret.
+Manifest-backed setup treats static YAML environment declarations as desired provider environments. Top-level `environments`, `ci.deploy.environments`, `platform.environment`, and literal `secretStores.<name>.config.environment` values become environment-scoped targets when the backing provider supports them. Runtime placeholders such as `${WORKFLOW_ENV}` are not treated as literal target names. Missing provider environments fail non-interactive setup; interactive setup asks before creating them.
+
+**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names.
+
+Manifest-backed interactive setup uses a compact three-step flow by default:
+
+1. A table lists one row per discovered secret and one column per concrete provider target. Status marks are `○` unset, `✓` set, `!` inaccessible/check failed, and `?` unconfigured.
+2. After selecting secrets, choose the scope/store targets for each selected secret. GitHub targets are explicit GitHub destinations (`github:repo`, `github:env`, `github:org`); local `.env`/file stores appear as file/env targets, not GitHub scopes.
+3. When a secret is selected for multiple targets, enter the first value once, then either reuse it for the other targets or provide a different value per target.
+
+Unset secrets are selected by default. Toggle existing secrets to update them, or pass `--all` to preselect every discovered secret. Pass `--verbose` to include source files, plugin names, and full provider target labels in the interactive rows.
 
 **Non-interactive mode** (auto when stdin is not a TTY, or forced with `--non-interactive` / `--auto-gen-keys`): reads values from the sources below in priority order:
 - `--from-env` — reads `$NAME` for each secret. Recommended for CI; avoids process-table leaks. Secrets whose env var is unset are skipped.
@@ -2560,6 +2605,7 @@ wfctl secrets setup [options]
 | `--all` | `false` | Set all declared secrets; in manifest-backed interactive setup, preselect existing secrets too |
 | `--only` | _(all)_ | Comma-separated list of secret names to set; mutually exclusive with `--all` |
 | `--skip-existing` | `false` | Skip secrets that already have a value in the store |
+| `--verbose` | `false` | In manifest-backed interactive setup, show source files, plugin names, and full provider target details |
 | `--auto-gen-keys` | `false` | Auto-generate random values for config-backed secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive; not supported for manifest-backed `wfctl.yaml` setup |
 | `--scope` | `repo` | GitHub scope for plugin or manifest setup: `repo` \| `env` \| `org` |
 | `--org` | _(none)_ | Organization slug for `--scope org` |
