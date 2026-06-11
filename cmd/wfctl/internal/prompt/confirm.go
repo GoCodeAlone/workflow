@@ -1,7 +1,9 @@
 package prompt
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -20,17 +22,21 @@ func Confirm(question string, def bool) (bool, error) {
 	if def {
 		hint = "Y/n"
 	}
-	m := &confirmModel{question: question, hint: hint, def: def}
-	p := tea.NewProgram(m, tea.WithOutput(out))
-	result, err := p.Run()
+	fmt.Fprintf(out, "%s [%s] ", question, hint)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		return false, fmt.Errorf("prompt confirm: %w", err)
+		return false, err
 	}
-	fm := result.(*confirmModel)
-	if fm.quit {
-		return false, ErrInterrupted
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "":
+		return def, nil
+	case "y", "yes":
+		return true, nil
+	case "n", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid confirmation %q", strings.TrimSpace(line))
 	}
-	return fm.answer, nil
 }
 
 type confirmModel struct {

@@ -888,6 +888,12 @@ ci:
 
 The optional `environments:` section declares named deployment environments with provider, region, env vars, and exposure config.
 
+Environment names declared here are also treated as desired provider-side
+environments by `wfctl secrets setup --manifest`. For providers that expose
+environment-scoped secret namespaces, such as GitHub Actions environments, the
+setup flow validates the provider environment before writing secrets and can
+create a missing environment during interactive setup.
+
 ### Fields
 
 `environments` is a map keyed by environment name. Each entry:
@@ -981,6 +987,7 @@ secretStores:
 - `secrets.defaultStore` references a named store from `secretStores`
 - `secrets.entries[*].store` routes an individual secret to a specific store
 - `environments[*].secretsProvider` overrides the store name for all secrets in that environment
+- `secretStores.<name>.config.environment`, top-level `environments`, `ci.deploy.environments`, and `platform.environment` contribute static desired environment names for manifest-backed secret setup. Runtime placeholders such as `${WORKFLOW_ENV}` are resolved at runtime and are not treated as literal provider environments.
 
 ---
 

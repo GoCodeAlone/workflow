@@ -51,6 +51,11 @@ type RegistryManifest struct {
 	// would be silently dropped at unmarshal time even when the
 	// upstream manifest declared it.
 	RequiredSecrets []PluginRequiredSecret `json:"required_secrets,omitempty"`
+	// SecretTargets mirrors plugin.json `secret_targets[]`. It tells
+	// manifest-backed secrets setup which provider-owned targets are appropriate
+	// for this plugin's required_secrets[] entries, without hard-coding
+	// GitHub repo/org/env semantics into unrelated providers.
+	SecretTargets []PluginSecretTarget `json:"secret_targets,omitempty"`
 }
 
 // RegistryCapabilities describes what module/step/trigger types a plugin provides.
