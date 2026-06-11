@@ -18,6 +18,8 @@ func DeepMergeConfigs(base, override *WorkflowConfig) *WorkflowConfig {
 		Pipelines: deepMergeMap(base.Pipelines, override.Pipelines),
 		Platform:  deepMergeMap(base.Platform, override.Platform),
 		Sidecars:  deepMergeSidecars(base.Sidecars, override.Sidecars),
+		Vars:      mergeVariableConfigs(base.Vars, override.Vars, true),
+		Variables: mergeVariableConfigs(base.Variables, override.Variables, true),
 		ConfigDir: base.ConfigDir,
 	}
 	if override.ConfigDir != "" {
@@ -107,6 +109,41 @@ func deepMergeMap(base, override map[string]any) map[string]any {
 	return result
 }
 
+func mergeVariableConfigs(base, override *VariablesConfig, overrideWins bool) *VariablesConfig {
+	if base == nil && override == nil {
+		return nil
+	}
+	if base == nil {
+		return copyVariableConfig(override)
+	}
+	if override == nil {
+		return copyVariableConfig(base)
+	}
+	merged := &VariablesConfig{Entries: append([]VariableEntry(nil), base.Entries...)}
+	index := make(map[string]int, len(merged.Entries))
+	for i, entry := range merged.Entries {
+		index[entry.Name] = i
+	}
+	for _, entry := range override.Entries {
+		if i, exists := index[entry.Name]; exists {
+			if overrideWins {
+				merged.Entries[i] = entry
+			}
+			continue
+		}
+		index[entry.Name] = len(merged.Entries)
+		merged.Entries = append(merged.Entries, entry)
+	}
+	return merged
+}
+
+func copyVariableConfig(cfg *VariablesConfig) *VariablesConfig {
+	if cfg == nil {
+		return nil
+	}
+	return &VariablesConfig{Entries: append([]VariableEntry(nil), cfg.Entries...)}
+}
+
 // MergeConfigs merges a config fragment into the primary config.
 // Modules are appended. Workflows and triggers are merged without
 // overwriting existing keys.
@@ -134,6 +171,9 @@ func MergeConfigs(primary, fragment *WorkflowConfig) {
 			}
 		}
 	}
+
+	primary.Vars = mergeVariableConfigs(primary.Vars, fragment.Vars, false)
+	primary.Variables = mergeVariableConfigs(primary.Variables, fragment.Variables, false)
 
 	// Merge sidecars — deduplicate by name, primary wins
 	if len(fragment.Sidecars) > 0 {

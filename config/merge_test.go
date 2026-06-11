@@ -143,6 +143,91 @@ func TestDeepMergeConfigs_PipelineOverride(t *testing.T) {
 	}
 }
 
+func TestDeepMergeConfigs_VariablesOverride(t *testing.T) {
+	base := &WorkflowConfig{
+		Vars: &VariablesConfig{Entries: []VariableEntry{
+			{Name: "PUBLIC_CLIENT_ID", Description: "base"},
+			{Name: "BASE_ONLY", Description: "base only"},
+		}},
+		Variables: &VariablesConfig{Entries: []VariableEntry{
+			{Name: "ALIAS_ID", Description: "base alias"},
+		}},
+	}
+	override := &WorkflowConfig{
+		Vars: &VariablesConfig{Entries: []VariableEntry{
+			{Name: "PUBLIC_CLIENT_ID", Description: "override"},
+			{Name: "OVERRIDE_ONLY", Description: "override only"},
+		}},
+		Variables: &VariablesConfig{Entries: []VariableEntry{
+			{Name: "ALIAS_ID", Description: "override alias"},
+		}},
+	}
+
+	result := DeepMergeConfigs(base, override)
+	varsByName := variableEntriesByName(result.Vars)
+	if varsByName["PUBLIC_CLIENT_ID"].Description != "override" {
+		t.Fatalf("PUBLIC_CLIENT_ID = %+v, want override entry", varsByName["PUBLIC_CLIENT_ID"])
+	}
+	if _, ok := varsByName["BASE_ONLY"]; !ok {
+		t.Fatal("BASE_ONLY should be preserved from base")
+	}
+	if _, ok := varsByName["OVERRIDE_ONLY"]; !ok {
+		t.Fatal("OVERRIDE_ONLY should be appended from override")
+	}
+	aliases := variableEntriesByName(result.Variables)
+	if aliases["ALIAS_ID"].Description != "override alias" {
+		t.Fatalf("ALIAS_ID = %+v, want override alias", aliases["ALIAS_ID"])
+	}
+}
+
+func TestMergeConfigs_VariablesPrimaryWins(t *testing.T) {
+	primary := &WorkflowConfig{
+		Vars: &VariablesConfig{Entries: []VariableEntry{
+			{Name: "PUBLIC_CLIENT_ID", Description: "primary"},
+		}},
+		Variables: &VariablesConfig{Entries: []VariableEntry{
+			{Name: "ALIAS_ID", Description: "primary alias"},
+		}},
+	}
+	fragment := &WorkflowConfig{
+		Vars: &VariablesConfig{Entries: []VariableEntry{
+			{Name: "PUBLIC_CLIENT_ID", Description: "fragment"},
+			{Name: "FRAGMENT_ONLY", Description: "fragment only"},
+		}},
+		Variables: &VariablesConfig{Entries: []VariableEntry{
+			{Name: "ALIAS_ID", Description: "fragment alias"},
+			{Name: "ALIAS_FRAGMENT_ONLY", Description: "fragment alias only"},
+		}},
+	}
+
+	MergeConfigs(primary, fragment)
+	varsByName := variableEntriesByName(primary.Vars)
+	if varsByName["PUBLIC_CLIENT_ID"].Description != "primary" {
+		t.Fatalf("PUBLIC_CLIENT_ID = %+v, want primary entry", varsByName["PUBLIC_CLIENT_ID"])
+	}
+	if _, ok := varsByName["FRAGMENT_ONLY"]; !ok {
+		t.Fatal("FRAGMENT_ONLY should be appended from fragment")
+	}
+	aliases := variableEntriesByName(primary.Variables)
+	if aliases["ALIAS_ID"].Description != "primary alias" {
+		t.Fatalf("ALIAS_ID = %+v, want primary alias", aliases["ALIAS_ID"])
+	}
+	if _, ok := aliases["ALIAS_FRAGMENT_ONLY"]; !ok {
+		t.Fatal("ALIAS_FRAGMENT_ONLY should be appended from fragment")
+	}
+}
+
+func variableEntriesByName(cfg *VariablesConfig) map[string]VariableEntry {
+	out := map[string]VariableEntry{}
+	if cfg == nil {
+		return out
+	}
+	for _, entry := range cfg.Entries {
+		out[entry.Name] = entry
+	}
+	return out
+}
+
 func TestDeepMergeConfigs_NestedMapRecursion(t *testing.T) {
 	base := &WorkflowConfig{
 		Workflows: map[string]any{

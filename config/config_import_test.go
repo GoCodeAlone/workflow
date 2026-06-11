@@ -745,6 +745,76 @@ secrets:
 	}
 }
 
+func TestLoadFromFile_ImportVarsMerge(t *testing.T) {
+	dir := t.TempDir()
+
+	importedYAML := `
+vars:
+  entries:
+    - name: IMPORTED_PUBLIC_ID
+      description: imported
+    - name: SHARED_PUBLIC_ID
+      description: imported shared
+variables:
+  entries:
+    - name: IMPORTED_ALIAS_ID
+      description: imported alias
+`
+	if err := os.WriteFile(filepath.Join(dir, "imported.yaml"), []byte(importedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainYAML := `
+imports:
+  - imported.yaml
+
+vars:
+  entries:
+    - name: MAIN_PUBLIC_ID
+      description: main
+    - name: SHARED_PUBLIC_ID
+      description: main shared
+variables:
+  entries:
+    - name: MAIN_ALIAS_ID
+      description: main alias
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	varByName := make(map[string]VariableEntry)
+	for _, entry := range cfg.Vars.Entries {
+		if _, exists := varByName[entry.Name]; exists {
+			t.Errorf("duplicate vars entry %q", entry.Name)
+		}
+		varByName[entry.Name] = entry
+	}
+	for _, name := range []string{"MAIN_PUBLIC_ID", "IMPORTED_PUBLIC_ID", "SHARED_PUBLIC_ID"} {
+		if _, ok := varByName[name]; !ok {
+			t.Errorf("expected vars entry %q", name)
+		}
+	}
+	if shared := varByName["SHARED_PUBLIC_ID"]; shared.Description != "main shared" {
+		t.Errorf("expected main-wins vars description, got %q", shared.Description)
+	}
+
+	aliasByName := make(map[string]VariableEntry)
+	for _, entry := range cfg.Variables.Entries {
+		aliasByName[entry.Name] = entry
+	}
+	for _, name := range []string{"MAIN_ALIAS_ID", "IMPORTED_ALIAS_ID"} {
+		if _, ok := aliasByName[name]; !ok {
+			t.Errorf("expected variables entry %q", name)
+		}
+	}
+}
+
 func TestLoadFromFile_ImportCIMerge(t *testing.T) {
 	dir := t.TempDir()
 

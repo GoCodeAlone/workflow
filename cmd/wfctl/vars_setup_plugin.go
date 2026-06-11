@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,7 +18,7 @@ func runVarsSetupPlugin(args []string) error {
 
 func runVarsSetupPluginWithIO(args []string, in io.Reader, out io.Writer) error {
 	fs := flag.NewFlagSet("vars setup", flag.ContinueOnError)
-	pluginName := fs.String("plugin", "", "Plugin name (must match a directory under --plugin-dir / $WFCTL_PLUGIN_DIR)")
+	pluginName := fs.String("plugin", "", "Plugin name (must match a directory under --plugin-dir / $WFCTL_PLUGIN_DIR). When omitted, --config is scanned for config.provider env vars.")
 	pluginDir := fs.String("plugin-dir", "", "Plugin install dir (default: $WFCTL_PLUGIN_DIR or ./data/plugins)")
 	scope := fs.String("scope", "repo", "GitHub variable scope: repo | env | org")
 	envName := fs.String("env", "", "Environment name (required with --scope=env)")
@@ -32,11 +31,15 @@ func runVarsSetupPluginWithIO(args []string, in io.Reader, out io.Writer) error 
 	var varFlag multiStringFlag
 	fs.Var(&varFlag, "var", "NAME=VALUE literal. Repeatable.")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: wfctl vars setup --plugin <name> [options]
+		fmt.Fprintf(fs.Output(), `Usage: wfctl vars setup [--plugin <name>] [options]
 
-Set non-secret variables declared by a plugin's plugin.json required_config[] block.
-Sensitive values belong in required_secrets[] and must be configured with
-wfctl secrets setup instead.
+Set non-secret variables declared by either:
+  - a plugin's plugin.json required_config[] block when --plugin is supplied, or
+  - config vars.entries/variables.entries declarations and config.provider
+    schema entries with sensitive:false when --plugin is omitted.
+
+Sensitive values belong in required_secrets[] or secrets setup paths and must be
+configured with wfctl secrets setup instead.
 
 Options:
 `)
@@ -46,7 +49,11 @@ Options:
 		return err
 	}
 	if *pluginName == "" {
-		return errors.New("--plugin <name> is required")
+		values, err := valuesFromFlagsAndReader(varFlag, in)
+		if err != nil {
+			return err
+		}
+		return runVarsSetupConfig(*configFile, strings.ToLower(strings.TrimSpace(*scope)), *envName, *org, *orgVisibility, *tokenEnv, values, *fromEnv, *nonInteractive || in != nil, out)
 	}
 
 	manifest, err := loadPluginManifest(*pluginName, *pluginDir)
@@ -73,17 +80,9 @@ Options:
 		return fmt.Errorf("plugin %q does not declare config target %s:%s", manifest.Name, desc.Provider, desc.Scope)
 	}
 
-	values, err := buildVariableLiteralMap(varFlag)
+	values, err := valuesFromFlagsAndReader(varFlag, in)
 	if err != nil {
 		return err
-	}
-	if in != nil {
-		for _, kv := range readKVLines(in) {
-			k, v, ok := strings.Cut(kv, "=")
-			if ok {
-				values[k] = v
-			}
-		}
 	}
 
 	interactive := in == nil && !*nonInteractive && prompt.CanPrompt()
@@ -102,6 +101,47 @@ Options:
 			return err
 		}
 		fmt.Fprintf(out, "  %s: set\n", cfg.Name)
+	}
+	fmt.Fprintln(out, "\nAll done.")
+	return nil
+}
+
+func runVarsSetupConfig(configFile, scopeStr, envName, org, orgVisibility, tokenEnv string, values map[string]string, fromEnv, nonInteractive bool, out io.Writer) error {
+	entries, skippedSensitive, err := collectConfigVariablesFromFile(configFile)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		fmt.Fprintf(out, "config %q declares no non-secret config variables; nothing to do\n", configFile)
+		if len(skippedSensitive) > 0 {
+			fmt.Fprintf(out, "Skipped sensitive config entries; use wfctl secrets setup for: %s\n", strings.Join(skippedSensitive, ", "))
+		}
+		return nil
+	}
+
+	provider, scopeLabel, err := buildVariableWriter(scopeStr, envName, org, orgVisibility, tokenEnv, configFile)
+	if err != nil {
+		return err
+	}
+
+	interactive := !nonInteractive && prompt.CanPrompt()
+	fmt.Fprintf(out, "Setting up variables from config %q -> %s\n\n", configFile, scopeLabel)
+	if len(skippedSensitive) > 0 {
+		fmt.Fprintf(out, "Sensitive config entries skipped; use wfctl secrets setup for: %s\n\n", strings.Join(skippedSensitive, ", "))
+	}
+	for _, entry := range entries {
+		value, provided, err := configVariableValue(entry, values, fromEnv, interactive)
+		if err != nil {
+			return err
+		}
+		if !provided {
+			fmt.Fprintf(out, "  %s: skipped (no value provided)\n", entry.Name)
+			continue
+		}
+		if err := provider.SetVariable(context.Background(), entry.Name, value); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "  %s: set\n", entry.Name)
 	}
 	fmt.Fprintln(out, "\nAll done.")
 	return nil
@@ -126,7 +166,32 @@ func buildVariableLiteralMap(literals []string) (map[string]string, error) {
 		if !found {
 			return nil, fmt.Errorf("--var %q: expected NAME=VALUE format", lit)
 		}
+		k = strings.TrimSpace(k)
+		if k == "" {
+			return nil, fmt.Errorf("--var %q: variable name is required", lit)
+		}
 		values[k] = v
+	}
+	return values, nil
+}
+
+func valuesFromFlagsAndReader(literals []string, in io.Reader) (map[string]string, error) {
+	values, err := buildVariableLiteralMap(literals)
+	if err != nil {
+		return nil, err
+	}
+	if in != nil {
+		for _, kv := range readKVLines(in) {
+			k, v, ok := strings.Cut(kv, "=")
+			if !ok {
+				continue
+			}
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			values[k] = strings.TrimSpace(v)
+		}
 	}
 	return values, nil
 }
@@ -149,6 +214,32 @@ func pluginConfigValue(cfg PluginRequiredConfig, literals map[string]string, fro
 	}
 	if cfg.Description != "" {
 		label += " - " + cfg.Description
+	}
+	value, err := prompt.Input(label, false)
+	if err != nil {
+		return "", false, err
+	}
+	if value == "" {
+		return "", false, nil
+	}
+	return value, true, nil
+}
+
+func configVariableValue(entry configVariableEntry, literals map[string]string, fromEnv, interactive bool) (string, bool, error) {
+	if fromEnv {
+		if v := os.Getenv(entry.Name); v != "" {
+			return v, true, nil
+		}
+	}
+	if v, ok := literals[entry.Name]; ok {
+		return v, true, nil
+	}
+	if !interactive {
+		return "", false, nil
+	}
+	label := entry.Name
+	if entry.Description != "" {
+		label += " - " + entry.Description
 	}
 	value, err := prompt.Input(label, false)
 	if err != nil {

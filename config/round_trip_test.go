@@ -103,3 +103,52 @@ infra:
 		t.Error("after round-trip: Infra.AutoBootstrap: want true, got nil or false")
 	}
 }
+
+func TestWorkflowConfig_RoundTrip_PreservesVars(t *testing.T) {
+	const src = `
+vars:
+  entries:
+    - name: PUBLIC_CLIENT_ID
+      description: OAuth public client ID
+      required: true
+      default: ""
+variables:
+  entries:
+    - name: FACEBOOK_APP_ID
+      description: Facebook public app ID
+`
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(srcPath, []byte(src), 0o600); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	cfg, err := config.LoadFromFile(srcPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if cfg.Vars == nil || len(cfg.Vars.Entries) != 1 || cfg.Vars.Entries[0].Name != "PUBLIC_CLIENT_ID" {
+		t.Fatalf("cfg.Vars = %+v", cfg.Vars)
+	}
+	if cfg.Variables == nil || len(cfg.Variables.Entries) != 1 || cfg.Variables.Entries[0].Name != "FACEBOOK_APP_ID" {
+		t.Fatalf("cfg.Variables = %+v", cfg.Variables)
+	}
+
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	roundTripPath := filepath.Join(dir, "roundtrip.yaml")
+	if err := os.WriteFile(roundTripPath, out, 0o600); err != nil {
+		t.Fatalf("write roundtrip: %v", err)
+	}
+	cfg2, err := config.LoadFromFile(roundTripPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile (roundtrip): %v", err)
+	}
+	if cfg2.Vars == nil || len(cfg2.Vars.Entries) != 1 || cfg2.Vars.Entries[0].Name != "PUBLIC_CLIENT_ID" {
+		t.Fatalf("round-trip cfg.Vars = %+v", cfg2.Vars)
+	}
+	if cfg2.Variables == nil || len(cfg2.Variables.Entries) != 1 || cfg2.Variables.Entries[0].Name != "FACEBOOK_APP_ID" {
+		t.Fatalf("round-trip cfg.Variables = %+v", cfg2.Variables)
+	}
+}

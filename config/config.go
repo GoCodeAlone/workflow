@@ -158,6 +158,8 @@ type WorkflowConfig struct {
 	CI             *CIConfig                     `json:"ci,omitempty" yaml:"ci,omitempty"`
 	Environments   map[string]*EnvironmentConfig `json:"environments,omitempty" yaml:"environments,omitempty"`
 	Secrets        *SecretsConfig                `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Vars           *VariablesConfig              `json:"vars,omitempty" yaml:"vars,omitempty"`
+	Variables      *VariablesConfig              `json:"variables,omitempty" yaml:"variables,omitempty"`
 	Infra          *InfraConfig                  `json:"infra,omitempty" yaml:"infra,omitempty"`
 	SecretStores   map[string]*SecretStoreConfig `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
 	Services       map[string]*ServiceConfig     `json:"services,omitempty" yaml:"services,omitempty"`
@@ -456,10 +458,32 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 				existingEntries[e.Name] = struct{}{}
 			}
 		}
+		mergeImportedVariables(&cfg.Vars, impCfg.Vars)
+		mergeImportedVariables(&cfg.Variables, impCfg.Variables)
 	}
 
 	cfg.Imports = nil // clear after processing
 	return nil
+}
+
+func mergeImportedVariables(dst **VariablesConfig, imported *VariablesConfig) {
+	if imported == nil {
+		return
+	}
+	if *dst == nil {
+		*dst = &VariablesConfig{}
+	}
+	existing := make(map[string]struct{}, len((*dst).Entries))
+	for _, entry := range (*dst).Entries {
+		existing[entry.Name] = struct{}{}
+	}
+	for _, entry := range imported.Entries {
+		if _, exists := existing[entry.Name]; exists {
+			continue
+		}
+		(*dst).Entries = append((*dst).Entries, entry)
+		existing[entry.Name] = struct{}{}
+	}
 }
 
 func mergeImportedCI(cfg *WorkflowConfig, imported *CIConfig) {
