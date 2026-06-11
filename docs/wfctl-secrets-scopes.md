@@ -92,14 +92,31 @@ This:
 3. Prompts for each (masked iff `sensitive: true`).
 4. Writes each to the chosen GH scope.
 
-Repo-level setup can discover all provider plugin secrets from `wfctl.yaml` and
-`.wfctl-lock.yaml`:
+Manifest-backed setup can discover all provider plugin secrets from `wfctl.yaml`
+and `.wfctl-lock.yaml`:
 
 ```sh
 wfctl secrets setup --manifest wfctl.yaml \
   --config 'infra/*.yaml,deploy.yaml' \
   --scope org --org GoCodeAlone --from-env
 ```
+
+When `--scope` is omitted and stdin is interactive, manifest-backed setup uses
+configured `secretStores` when present; otherwise it offers concrete GitHub
+targets discovered from repo/org/env settings. The first prompt is a compact
+matrix with one row per secret and one column per target:
+
+| mark | meaning |
+|------|---------|
+| `○` | unset |
+| `✓` | already set |
+| `!` | inaccessible or check failed |
+| `?` | unconfigured |
+
+GitHub columns are only GitHub destinations: `github:repo`, `github:env`, and
+`github:org`. Local `.env`, file, keychain, Vault, and AWS stores appear as
+their own provider targets. Use `--verbose` when you need the source config
+file, plugin name, or full target label in the prompt rows.
 
 Pipe a value list to skip the prompt loop in CI:
 

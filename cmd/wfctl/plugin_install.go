@@ -207,7 +207,7 @@ func runPluginInstall(args []string) error {
 		}
 		pluginName = normalizePluginName(ghRepo)
 		destDir := filepath.Join(pluginDirVal, pluginName)
-		if err := installFromGitHub(ghOwner, ghRepo, ghVersion, destDir); err != nil {
+		if err := installFromGitHub(ghOwner, ghRepo, ghVersion, destDir, *skipChecksum); err != nil {
 			return fmt.Errorf("registry: %w; github: %w", registryErr, err)
 		}
 		if err := ensurePluginBinary(destDir, pluginName); err != nil {
@@ -1418,6 +1418,9 @@ type installedPluginJSON struct {
 	// reporting "declares no required_secrets[]" even when the
 	// upstream manifest declared it.
 	RequiredSecrets []PluginRequiredSecret `json:"required_secrets,omitempty"`
+	// SecretTargets carries through from the registry manifest so
+	// manifest-backed secrets setup can respect provider-specific target models.
+	SecretTargets []PluginSecretTarget `json:"secret_targets,omitempty"`
 }
 
 type installedPluginCapabilities struct {
@@ -1453,6 +1456,7 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 		Type:            m.Type,
 		IaCProvider:     m.IaCProvider,
 		RequiredSecrets: m.RequiredSecrets,
+		SecretTargets:   m.SecretTargets,
 	}
 	if m.Capabilities != nil {
 		pj.Capabilities = &installedPluginCapabilities{

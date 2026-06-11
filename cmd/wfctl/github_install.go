@@ -43,7 +43,7 @@ type ghRelease struct {
 
 // installFromGitHub downloads and extracts a plugin directly from a GitHub Release.
 // owner/repo@version is resolved to a tarball asset matching {repo}_{os}_{arch}.tar.gz.
-func installFromGitHub(owner, repo, version, destDir string) error {
+func installFromGitHub(owner, repo, version, destDir string, skipChecksum bool) error {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", owner, repo, version)
 	if version == "" || version == "latest" {
 		apiURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
@@ -77,6 +77,19 @@ func installFromGitHub(owner, repo, version, destDir string) error {
 	data, err := downloadURL(assetURL)
 	if err != nil {
 		return fmt.Errorf("download plugin from GitHub: %w", err)
+	}
+	if !skipChecksum {
+		if _, _, _, _, ok := parseGitHubReleaseDownloadURL(assetURL); !ok {
+			return fmt.Errorf("github asset URL %q is not a GitHub release download URL", assetURL)
+		}
+		expectedSHA, err := lookupChecksumForURL(assetURL)
+		if err != nil {
+			return fmt.Errorf("auto-fetch checksum for %q: %w", assetURL, err)
+		}
+		if err := verifyChecksum(data, expectedSHA); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Checksum verified (auto-fetched from checksums.txt).\n")
 	}
 
 	if err := os.MkdirAll(destDir, 0750); err != nil {

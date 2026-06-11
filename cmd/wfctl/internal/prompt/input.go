@@ -1,11 +1,15 @@
 package prompt
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"golang.org/x/term"
 )
 
 // Input prompts the user for a single-line text value. When masked is true
@@ -24,29 +28,21 @@ func InputWithSuggestions(label string, masked bool, suggestions []string) (stri
 		return "", ErrNotInteractive
 	}
 	out, _ := outputWriter()
-	ti := textinput.New()
-	ti.Placeholder = label
-	ti.Focus()
-	if len(suggestions) > 0 {
-		ti.ShowSuggestions = true
-		ti.SetSuggestions(suggestions)
-	}
+	fmt.Fprint(out, label+": ")
 	if masked {
-		ti.EchoMode = textinput.EchoPassword
-		ti.EchoCharacter = '*'
+		value, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(out)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(string(value), "\r\n"), nil
 	}
-
-	m := &inputModel{label: label, ti: ti}
-	p := tea.NewProgram(m, tea.WithOutput(out))
-	result, err := p.Run()
+	reader := bufio.NewReader(os.Stdin)
+	value, err := reader.ReadString('\n')
 	if err != nil {
-		return "", fmt.Errorf("prompt input: %w", err)
+		return "", err
 	}
-	fm := result.(*inputModel)
-	if fm.quit {
-		return "", ErrInterrupted
-	}
-	return fm.ti.Value(), nil
+	return strings.TrimRight(value, "\r\n"), nil
 }
 
 type inputModel struct {
