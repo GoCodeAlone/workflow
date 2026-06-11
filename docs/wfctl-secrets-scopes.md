@@ -98,6 +98,11 @@ writes GitHub Actions Variables at repo, environment, or organization scope
 instead of encrypted Actions Secrets. A value marked `sensitive: true` is a
 plugin manifest bug and must be moved to `required_secrets[]`.
 
+Applications can use the same variable provider path for non-secret
+`config.provider` schema values. Run `wfctl vars setup --config app.yaml` to
+scan env-backed schema entries where `sensitive: false`; sensitive entries are
+left for the app's secret setup flow.
+
 Manifest-backed setup can discover all provider plugin secrets from `wfctl.yaml`
 and `.wfctl-lock.yaml`:
 

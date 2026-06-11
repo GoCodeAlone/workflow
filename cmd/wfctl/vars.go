@@ -31,10 +31,11 @@ func printVarsUsage() {
 Manage non-secret provider variables and configuration values.
 
 Actions:
-  setup   Configure non-secret variables declared by plugin required_config[]
+  setup   Configure non-secret variables declared by plugin or app config metadata
 
 Examples:
   wfctl vars setup --plugin workflow-plugin-cloudflare --from-env
   wfctl vars setup --plugin workflow-plugin-namecheap --scope env --env production
+  wfctl vars setup --config app.yaml --from-env
 `)
 }

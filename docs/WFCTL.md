@@ -2769,18 +2769,22 @@ wfctl vars <action> [options]
 
 #### `vars setup`
 
-Set non-secret variables declared by an installed plugin's
-`plugin.json required_config[]` block. The command uses the same GitHub
-repo/env/org target model as plugin secret setup, but writes to GitHub Actions
-Variables instead of encrypted Actions Secrets. Environment-scoped GitHub
-variables require the named GitHub Actions environment to exist.
+Set non-secret variables declared by either an installed plugin's
+`plugin.json required_config[]` block or an application's `config.provider`
+schema. The command uses the same GitHub repo/env/org target model as plugin
+secret setup, but writes to GitHub Actions Variables instead of encrypted
+Actions Secrets. Environment-scoped GitHub variables require the named GitHub
+Actions environment to exist.
 
 `required_config[]` entries marked `sensitive: true` are rejected; plugin
 authors must model those values in `required_secrets[]` instead.
+For `config.provider` schemas, entries marked `sensitive: true` are skipped and
+should be configured through `wfctl secrets setup` or the app's documented
+secret flow.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--plugin` | _(required)_ | Plugin name or installed plugin directory name |
+| `--plugin` | _(none)_ | Plugin name or installed plugin directory name. When omitted, `--config` is scanned for `config.provider` env-backed schema entries. |
 | `--plugin-dir` | `$WFCTL_PLUGIN_DIR` or `./data/plugins` | Installed plugin directory |
 | `--scope` | `repo` | GitHub variable scope: `repo` \| `env` \| `org` |
 | `--env` | _(none)_ | GitHub Actions environment name for `--scope env` |
@@ -2800,6 +2804,10 @@ CLOUDFLARE_ACCOUNT_ID=abc123 wfctl vars setup \
 # Configure an environment-scoped variable
 NAMECHEAP_CLIENT_IP=203.0.113.10 wfctl vars setup \
   --plugin workflow-plugin-namecheap --scope env --env production --from-env
+
+# Configure non-secret application config.provider env vars
+AUTH_GOOGLE_CLIENT_ID=client-id SMS_AUTH_ENABLED=false wfctl vars setup \
+  --config app.yaml --scope env --env staging --from-env
 ```
 
 ---
