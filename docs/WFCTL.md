@@ -41,6 +41,7 @@ wfctl update --check  # check for updates without installing
 graph TD
     wfctl --> init
     wfctl --> audit
+    wfctl --> capability
     wfctl --> validate
     wfctl --> inspect
     wfctl --> run
@@ -87,6 +88,11 @@ graph TD
 
     audit --> audit-plans["plans"]
     audit --> audit-plugins["plugins"]
+    audit --> audit-repo["repo"]
+
+    capability --> capability-ecosystem["ecosystem"]
+    capability --> capability-app["app"]
+    capability --> capability-check["check"]
 
     infra --> infra-plan["plan"]
     infra --> infra-derive["derive"]
@@ -181,12 +187,76 @@ graph TD
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
+| **Capability Inventory** | `capability ecosystem`, `capability app`, `capability check` |
 | **Platform Inspection** | `audit plans`, `audit plugins`, `audit repo`, `ports list`, `security audit`, `security generate-network-policies` |
 | **Utilities** | `snippets`, `manifest`, `pipeline`, `update`, `mcp` |
 
 ---
 
 ## Command Reference
+
+### `capability`
+
+Generate machine-readable and human-readable capability inventories for the
+Workflow ecosystem and for individual applications.
+
+```
+wfctl capability <subcommand> [options]
+```
+
+#### `wfctl capability ecosystem`
+
+Builds the ecosystem matrix from the checked-in capability taxonomy, registry
+manifests, and local `workflow-plugin-*` repositories.
+
+```
+wfctl capability ecosystem --registry data/registry --repo-root .. --format json
+wfctl capability ecosystem --format md --output docs/generated/capabilities/ecosystem.md
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--registry` | `data/registry` | Registry root containing `plugins/*/manifest.json` |
+| `--repo-root` | `..` | Workspace root to scan for local `workflow-plugin-*` repos |
+| `--taxonomy` | `data/capabilities/taxonomy.yaml` | Capability taxonomy YAML |
+| `--format` | `json` | `json` or `md` |
+| `--output` | stdout | Write the artifact to a file |
+
+#### `wfctl capability app`
+
+Builds an application profile from `wfctl.yaml`, `.wfctl-lock.yaml`, installed
+plugin manifests, and one or more Workflow config files.
+
+```
+wfctl capability app --workflow workflow.yaml --format json
+wfctl capability app --workflow workflow.yaml --format md --output capability-profile.md
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--manifest` | `wfctl.yaml` | Human-authored plugin manifest |
+| `--workflow` | `workflow.yaml` | Workflow config path; repeat for multiple files |
+| `--plugin-dir` | `.wfctl/plugins` | Installed plugin manifest directory |
+| `--lock-file` | `.wfctl-lock.yaml` | Generated plugin lockfile |
+| `--taxonomy` | `data/capabilities/taxonomy.yaml` | Capability taxonomy YAML |
+| `--format` | `json` | `json` or `md` |
+| `--output` | stdout | Write the artifact to a file |
+
+#### `wfctl capability check`
+
+Runs the application profile checks and prints findings. This first version is
+warning-only: findings are emitted, but the command exits successfully so teams
+can add it to CI before deciding which findings should become policy failures.
+
+```
+wfctl capability check --workflow workflow.yaml
+wfctl capability check --workflow workflow.yaml --format json
+```
+
+Public docs should consume ecosystem artifacts from
+`docs/generated/capabilities/`. Application profiles can include private plugin
+names, secret names, service names, and config paths, so review them before
+publishing outside the owning team.
 
 ### `audit`
 

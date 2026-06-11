@@ -1,0 +1,289 @@
+version: 2026-06-11
+capabilities:
+  - id: auth.authn
+    category: auth
+    name: Authentication
+    description: Verifies user or service identity.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-auth, workflow-plugin-auth0, workflow-plugin-okta, workflow-plugin-ory-kratos, workflow-plugin-passkey]
+      moduleTypes: [auth.credential]
+      builtinModuleTypes: [auth.jwt, auth.user-store, auth.user_store, auth.middleware, auth.oauth2, auth.m2m, auth.token-blacklist, security.field-protection]
+      keywords: [authn, authentication, jwt, passkey]
+    tags: [cross-cutting, auth-sensitive]
+  - id: auth.authz
+    category: auth
+    name: Authorization
+    description: Enforces permissions, roles, or policies.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-authz, workflow-plugin-authz-ui]
+      moduleTypes: [auth.rbac, authz.policy]
+      stepTypes: [step.authz_check]
+      keywords: [authz, authorization, rbac, permissions]
+    tags: [cross-cutting, authz-sensitive]
+  - id: auth.sso
+    category: auth
+    name: Single Sign-On
+    description: Integrates external identity providers.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-sso, workflow-plugin-scalekit, workflow-plugin-entra, workflow-plugin-ory-hydra]
+      keywords: [sso, oidc, saml, entra, scalekit]
+    tags: [cross-cutting, auth-sensitive]
+  - id: tenancy.scope
+    category: tenancy
+    name: Tenant Scope
+    description: Carries tenant identity through routes, storage, and provider resources.
+    lifecycle: local
+    aliases:
+      moduleTypes: [data.tenancy, tenant.registry]
+      keywords: [tenant, tenancy, tenantID, tenantKey, tenantScoped, tenant_id]
+    tags: [cross-cutting, tenant-scoped]
+  - id: secrets.management
+    category: secrets
+    name: Secrets Management
+    description: Declares, resolves, and writes secrets across provider scopes.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-secrets, workflow-plugin-vault]
+      moduleTypes: [secrets.store, secrets.vault]
+      stepTypes: [step.secrets_get, step.secrets_set]
+      keywords: [secret, secrets, secretStores, vault]
+    tags: [cross-cutting, secret-backed]
+  - id: platform.github
+    category: platform
+    name: GitHub Provider
+    description: GitHub repository, secret, environment, and CI integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-github, github]
+      moduleTypes: [github.app, git.webhook]
+      providers: [github]
+      keywords: [github, github:repo, github:org, github:env]
+    tags: [provider, secret-backed]
+  - id: platform.gitlab
+    category: platform
+    name: GitLab Provider
+    description: GitLab project, variable, environment, and CI integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-gitlab]
+      providers: [gitlab]
+      keywords: [gitlab]
+    tags: [provider, secret-backed]
+  - id: platform.aws
+    category: platform
+    name: AWS Provider
+    description: AWS infrastructure, secrets, registry, and deployment integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-aws]
+      providers: [aws]
+      keywords: [aws, secretsmanager, ecr]
+    tags: [provider, secret-backed]
+  - id: platform.azure
+    category: platform
+    name: Azure Provider
+    description: Azure infrastructure and deployment integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-azure]
+      providers: [azure]
+      keywords: [azure]
+    tags: [provider]
+  - id: platform.gcp
+    category: platform
+    name: Google Cloud Provider
+    description: GCP infrastructure and deployment integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-gcp]
+      providers: [gcp, google]
+      keywords: [gcp, google]
+    tags: [provider]
+  - id: platform.digitalocean
+    category: platform
+    name: DigitalOcean Provider
+    description: DigitalOcean app, DNS, Spaces, registry, and infrastructure integration.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-digitalocean]
+      providers: [digitalocean, do]
+      keywords: [digitalocean, app-platform]
+    tags: [provider, secret-backed]
+  - id: ci.generation
+    category: ci
+    name: CI Generation
+    description: Generates provider CI workflows from Workflow config.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-ci-generator]
+      moduleTypes: [ci.generator]
+      stepTypes: [step.ci_generate]
+      keywords: [ci, github-actions, gitlab-ci]
+    tags: [build]
+  - id: config.provider
+    category: config
+    name: Config Provider
+    description: Loads application configuration from defaults, environment, files, or providers.
+    lifecycle: released
+    aliases:
+      builtinModuleTypes: [config.provider]
+      keywords: [config, configuration, environment]
+    tags: [core]
+  - id: deployment.sidecar
+    category: deployment
+    name: Deployment Sidecar
+    description: Attaches runtime sidecars to deployed applications.
+    lifecycle: released
+    aliases:
+      builtinModuleTypes: [sidecar.tailscale]
+      keywords: [sidecar, tailscale]
+    tags: [core, deployment]
+  - id: http.routing
+    category: http
+    name: HTTP Routing
+    description: Serves HTTP routes, middleware, and static assets.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-http]
+      builtinModuleTypes: [http.server, http.router, http.handler, static.fileserver, http.middleware.auth, http.middleware.logging, http.middleware.ratelimit, http.middleware.cors, http.middleware.requestid, http.middleware.securityheaders]
+      workflowTypes: [http]
+      keywords: [http, routing, middleware, static]
+    tags: [core, network]
+  - id: iac.provider
+    category: iac
+    name: IaC Provider
+    description: Plans and applies infrastructure resources through provider plugins.
+    lifecycle: released
+    aliases:
+      moduleTypes: [iac.provider, iac.provider.hover]
+      iacServices: [workflow.plugin.external.iac.IaCProviderRequired]
+      keywords: [iac, infrastructure, tofu]
+    tags: [provider]
+  - id: iac.dns
+    category: iac
+    name: DNS Infrastructure
+    description: Manages DNS zones, records, and registrar delegation.
+    lifecycle: released
+    aliases:
+      providers: [hover]
+      moduleTypes: [infra.dns, infra.dns_delegation]
+      keywords: [dns, delegation, nameserver, registrar]
+    tags: [provider]
+  - id: iac.state-backend
+    category: iac
+    name: IaC State Backend
+    description: Stores infrastructure state in local or provider backends.
+    lifecycle: released
+    aliases:
+      builtinModuleTypes: [iac.state]
+      iacStateBackends: [local, s3, gcs, azure_blob, spaces]
+      keywords: [state, backend]
+    tags: [provider]
+  - id: observability.health
+    category: observability
+    name: Health Checks
+    description: Exposes health, readiness, and service status.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-observability]
+      moduleTypes: [observability.health, health.check]
+      keywords: [health, readiness, liveness]
+    tags: [ops]
+  - id: observability.tracing
+    category: observability
+    name: Tracing
+    description: Emits distributed traces and telemetry.
+    lifecycle: released
+    aliases:
+      moduleTypes: [observability.tracing]
+      builtinModuleTypes: [observability.otel, http.middleware.otel]
+      keywords: [trace, tracing, telemetry, opentelemetry]
+    tags: [ops]
+  - id: migrations.schema
+    category: data
+    name: Schema Migrations
+    description: Validates and runs database schema migrations.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-migrations]
+      moduleTypes: [migrate.schema]
+      keywords: [migration, migrations, schema]
+    tags: [data]
+  - id: featureflags.flags
+    category: featureflags
+    name: Feature Flags
+    description: Evaluates feature flags and rollout decisions.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-launchdarkly]
+      moduleTypes: [featureflag.service]
+      stepTypes: [step.featureflag_eval]
+      keywords: [featureflag, featureflags, launchdarkly]
+    tags: [runtime-control]
+  - id: payments.processing
+    category: payments
+    name: Payments
+    description: Integrates payment providers and checkout workflows.
+    lifecycle: local
+    aliases:
+      plugins: [workflow-plugin-payments]
+      moduleTypes: [payments.provider]
+      keywords: [payments, stripe, checkout]
+    tags: [secret-backed]
+  - id: messaging.broker
+    category: messaging
+    name: Message Broker
+    description: Publishes, subscribes, and routes messages.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-messaging-core, workflow-plugin-eventbus, workflow-plugin-broker]
+      moduleTypes: [messaging.nats, messaging.kafka, eventbus.broker, eventbus.stream, eventbus.consumer]
+      builtinModuleTypes: [messaging.broker, messaging.broker.eventbus]
+      triggerTypes: [trigger.eventbus.subscribe]
+      stepTypes: [step.eventbus.publish, step.eventbus.consume, step.eventbus.ack]
+      keywords: [messaging, eventbus, nats, kafka]
+    tags: [eventing]
+  - id: communication.messaging
+    category: communication
+    name: Customer Messaging
+    description: Sends and receives SMS, WhatsApp, voice, and customer notifications.
+    lifecycle: released
+    aliases:
+      plugins: [workflow-plugin-twilio]
+      moduleTypes: [twilio.provider]
+      keywords: [twilio, sms, mms, whatsapp, voice, notification]
+    tags: [secret-backed, messaging]
+  - id: storage.object
+    category: storage
+    name: Object Storage
+    description: Reads and writes object/blob storage.
+    lifecycle: released
+    aliases:
+      moduleTypes: [storage.s3, storage.gcs, storage.local]
+      keywords: [storage, object, blob, s3, gcs, spaces]
+    tags: [data]
+  - id: storage.database
+    category: storage
+    name: Database Storage
+    description: Provides SQL or embedded persistence.
+    lifecycle: released
+    aliases:
+      builtinModuleTypes: [database.workflow, storage.sqlite, persistence.store]
+      moduleTypes: [storage.postgres, database.postgres, database.mysql]
+      stepTypes: [step.db_query, step.db_exec]
+      keywords: [database, sqlite, postgres, mysql]
+    tags: [data]
+  - id: docs.api
+    category: docs
+    name: API Documentation
+    description: Generates API or Go package documentation.
+    lifecycle: released
+    aliases:
+      moduleTypes: [docs.api]
+      builtinModuleTypes: [openapi, openapi.generator]
+      wiringHooks: [openapi-route-registration]
+      keywords: [docs, documentation, openapi, go-docs]
+    tags: [docs]

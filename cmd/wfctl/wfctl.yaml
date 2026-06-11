@@ -101,8 +101,14 @@ workflows:
         description: Scaffold Workflow assets
       - name: tenant
         description: Tenant registry tooling
+      - name: capability
+        description: Generate capability matrix inventories
 
 pipelines:
+  cmd-capability:
+    trigger: {type: cli, config: {command: capability}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: capability}}
   cmd-audit:
     trigger: {type: cli, config: {command: audit}}
     steps:

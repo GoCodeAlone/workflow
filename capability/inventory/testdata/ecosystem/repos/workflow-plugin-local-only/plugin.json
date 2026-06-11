@@ -1,0 +1,10 @@
+{
+  "name": "workflow-plugin-local-only",
+  "version": "0.1.0",
+  "author": "GoCodeAlone",
+  "description": "Local-only storage plugin",
+  "license": "MIT",
+  "moduleTypes": ["http.server"],
+  "stepTypes": [],
+  "triggerTypes": []
+}

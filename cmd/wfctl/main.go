@@ -157,6 +157,7 @@ var commands = map[string]func([]string) error{
 	"build":           runBuild,
 	"scaffold":        runScaffold,
 	"tenant":          runTenant,
+	"capability":      runCapability,
 }
 
 func main() {

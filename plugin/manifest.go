@@ -69,6 +69,12 @@ type PluginManifest struct {
 	// AND lists its backend names will appear in BOTH manifest fields.
 	IaCServices []string `json:"iacServices,omitempty" yaml:"iacServices,omitempty"`
 
+	// IaCProvider declares provider-specific IaC metadata from plugin.json.
+	// Older manifests may author this under capabilities.iacProvider; the
+	// custom unmarshaller promotes that legacy shape here so callers can rely
+	// on one field.
+	IaCProvider IaCProviderCapability `json:"iacProvider,omitempty" yaml:"iacProvider,omitempty"`
+
 	// StepSchemas provides schema definitions for step types registered by this plugin.
 	// Used by MCP/LSP for hover docs, completions, and output documentation.
 	StepSchemas []*schema.StepSchema `json:"stepSchemas,omitempty" yaml:"stepSchemas,omitempty"`
@@ -99,6 +105,13 @@ type CapabilityDecl struct {
 	Name     string `json:"name" yaml:"name"`
 	Role     string `json:"role" yaml:"role"` // "provider" or "consumer"
 	Priority int    `json:"priority,omitempty" yaml:"priority,omitempty"`
+}
+
+// IaCProviderCapability declares IaC provider metadata in a plugin manifest.
+type IaCProviderCapability struct {
+	Name               string   `json:"name,omitempty" yaml:"name,omitempty"`
+	ResourceTypes      []string `json:"resourceTypes,omitempty" yaml:"resourceTypes,omitempty"`
+	ComputePlanVersion string   `json:"computePlanVersion,omitempty" yaml:"computePlanVersion,omitempty"`
 }
 
 // Dependency declares a versioned dependency on another plugin.
@@ -157,12 +170,13 @@ func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 		// Legacy format: object with configProvider, moduleTypes, stepTypes, triggerTypes.
 		// Merge type lists into the top-level fields so callers see them consistently.
 		var legacyCaps struct {
-			ModuleTypes      []string `json:"moduleTypes"`
-			StepTypes        []string `json:"stepTypes"`
-			TriggerTypes     []string `json:"triggerTypes"`
-			WorkflowTypes    []string `json:"workflowTypes"`
-			IaCStateBackends []string `json:"iacStateBackends"`
-			IaCServices      []string `json:"iacServices"`
+			ModuleTypes      []string               `json:"moduleTypes"`
+			StepTypes        []string               `json:"stepTypes"`
+			TriggerTypes     []string               `json:"triggerTypes"`
+			WorkflowTypes    []string               `json:"workflowTypes"`
+			IaCStateBackends []string               `json:"iacStateBackends"`
+			IaCServices      []string               `json:"iacServices"`
+			IaCProvider      *IaCProviderCapability `json:"iacProvider"`
 		}
 		if err := json.Unmarshal(raw.Capabilities, &legacyCaps); err != nil {
 			return fmt.Errorf("invalid capabilities object: %w", err)
@@ -173,6 +187,15 @@ func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 		m.WorkflowTypes = appendUnique(m.WorkflowTypes, legacyCaps.WorkflowTypes...)
 		m.IaCStateBackends = appendUnique(m.IaCStateBackends, legacyCaps.IaCStateBackends...)
 		m.IaCServices = appendUnique(m.IaCServices, legacyCaps.IaCServices...)
+		if legacyCaps.IaCProvider != nil {
+			if m.IaCProvider.Name == "" {
+				m.IaCProvider.Name = legacyCaps.IaCProvider.Name
+			}
+			if m.IaCProvider.ComputePlanVersion == "" {
+				m.IaCProvider.ComputePlanVersion = legacyCaps.IaCProvider.ComputePlanVersion
+			}
+			m.IaCProvider.ResourceTypes = appendUnique(m.IaCProvider.ResourceTypes, legacyCaps.IaCProvider.ResourceTypes...)
+		}
 
 	default:
 		return fmt.Errorf("capabilities: unsupported JSON type (expected array or object, got %q)", string(raw.Capabilities))

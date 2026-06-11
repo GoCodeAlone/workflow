@@ -1,0 +1,8 @@
+version: test
+capabilities:
+  - id: auth.authz
+    category: auth
+    name: Authorization
+  - id: auth.authz
+    category: auth
+    name: Authorization Duplicate

@@ -1,0 +1,26 @@
+modules:
+  - name: authz
+    type: auth.rbac
+  - name: tenants
+    type: tenancy.scope
+    config:
+      tenantId: request.tenant_id
+  - name: database
+    type: storage.postgres
+    config:
+      dsn: postgres://example
+  - name: missing
+    type: custom.missing
+workflows:
+  signup:
+    steps: []
+triggers: {}
+secrets:
+  defaultStore: github
+  entries:
+    - name: DATABASE_URL
+secretStores:
+  github:
+    provider: github
+    config:
+      repo: GoCodeAlone/example
