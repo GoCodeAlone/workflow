@@ -195,7 +195,7 @@ func writeCapabilityOutput(out io.Writer, outputPath string, data []byte) error 
 		_, err := out.Write(data)
 		return err
 	}
-	return os.WriteFile(outputPath, data, 0o644)
+	return os.WriteFile(outputPath, data, 0o600)
 }
 
 func renderEcosystemMarkdown(out io.Writer, inv *inventory.Inventory) {
@@ -208,7 +208,8 @@ func renderEcosystemMarkdown(out io.Writer, inv *inventory.Inventory) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "| Capability\t| Category\t| Lifecycle\t| Providers\t|")
 	fmt.Fprintln(tw, "|---\t|---\t|---\t|---\t|")
-	for _, cap := range inv.Capabilities {
+	for i := range inv.Capabilities {
+		cap := &inv.Capabilities[i]
 		fmt.Fprintf(tw, "| %s\t| %s\t| %s\t| %s\t|\n", cap.ID, cap.Category, cap.Lifecycle, providerSummary(cap.Providers))
 	}
 	_ = tw.Flush()
@@ -228,7 +229,8 @@ func renderAppMarkdown(out io.Writer, profile *inventory.AppProfile) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "| Capability\t| Mode\t| Confidence\t| Evidence\t|")
 	fmt.Fprintln(tw, "|---\t|---\t|---\t|---\t|")
-	for _, usage := range profile.Usage {
+	for i := range profile.Usage {
+		usage := &profile.Usage[i]
 		fmt.Fprintf(tw, "| %s\t| %s\t| %s\t| %s\t|\n", usage.CapabilityID, usage.Mode, usage.Confidence, evidenceSummary(usage.Evidence))
 	}
 	_ = tw.Flush()
