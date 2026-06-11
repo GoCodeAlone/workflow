@@ -253,6 +253,10 @@ func main() {
 		}
 		if entry := registry.LookupCLICommand(cmd); entry != nil {
 			if err := DispatchCLICommand(entry, os.Args[1:]); err != nil {
+				if isPromptCancelled(err) {
+					fmt.Fprintln(os.Stderr, "Cancelled.")
+					os.Exit(0)
+				}
 				fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705
 				os.Exit(1)
 			}
@@ -277,6 +281,10 @@ func main() {
 	if dispatchErr != nil {
 		// If the user requested help, exit cleanly without printing the engine error.
 		if isHelpRequested(dispatchErr) {
+			os.Exit(0)
+		}
+		if isPromptCancelled(dispatchErr) {
+			fmt.Fprintln(os.Stderr, "Cancelled.")
 			os.Exit(0)
 		}
 		// The handler already printed routing errors (unknown/missing command).

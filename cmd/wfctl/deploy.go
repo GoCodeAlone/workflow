@@ -918,10 +918,12 @@ Options:
 	}
 
 	if !*yes {
-		fmt.Printf("Apply these changes? [y/N] ")
-		var answer string
-		if _, scanErr := fmt.Scanln(&answer); scanErr != nil || (answer != "y" && answer != "Y" && answer != "yes") {
-			return fmt.Errorf("deployment cancelled")
+		ok, err := confirmAction("Apply these changes?", false, os.Stdout, nil)
+		if err != nil {
+			return fmt.Errorf("confirm deployment: %w", err)
+		}
+		if !ok {
+			return nil
 		}
 	}
 	if err := runDirectMigrationDeployGuard(cfg, *target); err != nil {

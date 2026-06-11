@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/config/yamledit"
 	"github.com/GoCodeAlone/workflow/iac/derive"
@@ -167,30 +168,14 @@ func resolveDeriveProviderInteractive(cfg *config.WorkflowConfig, provider, envN
 	case 1:
 		return choices[0], nil
 	}
-	if nonInteractive || !stdinIsTerminal() {
+	if nonInteractive || !prompt.CanPrompt() {
 		return "", fmt.Errorf("multiple iac providers available %v; pass --provider", choices)
 	}
-	fmt.Fprintln(os.Stderr, "Select IaC provider for derived modules:")
-	for i, choice := range choices {
-		fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, choice)
-	}
-	fmt.Fprint(os.Stderr, "Provider: ")
-	var selected int
-	if _, err := fmt.Fscan(os.Stdin, &selected); err != nil {
-		return "", fmt.Errorf("read provider selection: %w", err)
-	}
-	if selected < 1 || selected > len(choices) {
-		return "", fmt.Errorf("invalid provider selection %d", selected)
-	}
-	return choices[selected-1], nil
-}
-
-func stdinIsTerminal() bool {
-	info, err := os.Stdin.Stat()
+	selected, err := prompt.Select("Select IaC provider for derived modules", choices)
 	if err != nil {
-		return false
+		return "", err
 	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return choices[selected], nil
 }
 
 func (a *typedIaCAdapter) RequirementMapper() pb.IaCProviderRequirementMapperClient {

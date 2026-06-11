@@ -2348,7 +2348,7 @@ wfctl ci generate [options]
 | `--phase-config-alias` | _(relativized real path)_ | Logical repo-relative path for the prereq config in generated CI steps |
 | `--interactive` | `false` | Force the interactive wizard even when `--platform` is set |
 
-When `--platform` is absent and stdin is a TTY, an interactive wizard runs to select the platform and other choices. When stdin is not a TTY and `--platform` is also absent, the command fails with a clear error.
+When `--platform` is absent and stdin is a TTY, an interactive wizard runs to select the platform and other choices. Press `Esc` or `Ctrl+C` to cancel the prompt cleanly. When stdin is not a TTY and `--platform` is also absent, the command fails with a clear error.
 
 **Examples:**
 
@@ -2571,7 +2571,7 @@ wfctl secrets set --provider keychain --service buymywishlist STRIPE_SECRET_KEY
 | `--provider` | _(from config)_ | Ad-hoc provider override: `keychain`, `env`, `aws` |
 | `--service` | _(none)_ | Service name / prefix for the selected provider |
 
-When no `--value` or `--from-file` is given and stdin is a TTY, the value is prompted with hidden input (`read -s` style).
+When no `--value` or `--from-file` is given and stdin is a TTY, the value is prompted with hidden input. Press `Esc` or `Ctrl+C` to cancel without setting the secret.
 
 #### `secrets get`
 
@@ -2688,7 +2688,7 @@ Set secrets declared in the config for a given environment. Automatically select
 
 Manifest-backed setup treats static YAML environment declarations as desired provider environments. Top-level `environments`, `ci.deploy.environments`, `platform.environment`, and literal `secretStores.<name>.config.environment` values become environment-scoped targets when the backing provider supports them. Runtime placeholders such as `${WORKFLOW_ENV}` are not treated as literal target names. Missing provider environments fail non-interactive setup; interactive setup asks before creating them.
 
-**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names.
+**Interactive mode** (default when stdin is a TTY): lists each declared secret with its current set/unset status, presents a multi-select to choose which secrets to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names. Press `Esc` or `Ctrl+C` at any prompt to cancel cleanly.
 
 Manifest-backed interactive setup uses a compact three-step flow by default:
 

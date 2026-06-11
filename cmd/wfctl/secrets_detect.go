@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
 	"github.com/mattn/go-isatty"
-	"golang.org/x/term"
 )
 
 // secretFieldPatterns are field name substrings that indicate a secret value.
@@ -205,17 +205,11 @@ Options:
 		}
 		secretValue = strings.TrimRight(string(b), "\n")
 	case isatty.IsTerminal(os.Stdin.Fd()): // interactive: masked prompt
-		fmt.Fprintf(os.Stderr, "Value for %s: ", name)
-		fd, err := stdinFileDescriptor()
+		value, err := prompt.Input("Value for "+name, true)
 		if err != nil {
 			return err
 		}
-		b, err := term.ReadPassword(fd)
-		if err != nil {
-			return fmt.Errorf("read password: %w", err)
-		}
-		fmt.Fprintln(os.Stderr)
-		secretValue = string(b)
+		secretValue = value
 	default:
 		return fmt.Errorf("must provide --value, --from-file, or run interactively (TTY)")
 	}
@@ -511,15 +505,6 @@ func parseGitHubOrgVisibility(s string) (secrets.GitHubOrgVisibility, error) {
 	default:
 		return "", fmt.Errorf("invalid visibility %q (must be all|selected|private)", s)
 	}
-}
-
-func stdinFileDescriptor() (int, error) {
-	fd := os.Stdin.Fd()
-	maxInt := int(^uint(0) >> 1)
-	if fd > uintptr(maxInt) {
-		return 0, fmt.Errorf("stdin file descriptor %d exceeds supported int range", fd)
-	}
-	return int(fd), nil //nolint:gosec // fd is range-checked before conversion.
 }
 
 // secretListJSONEntry is the JSON output shape for a single secret in --json mode.

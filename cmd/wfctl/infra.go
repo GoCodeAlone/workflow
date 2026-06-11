@@ -1398,13 +1398,11 @@ func runInfraApply(args []string) error {
 	}
 
 	if !*autoApprove {
-		fmt.Printf("Apply infrastructure changes from %s? [y/N]: ", cfgFile)
-		var answer string
-		if _, err := fmt.Scanln(&answer); err != nil {
-			return fmt.Errorf("reading input: %w", err)
+		ok, err := confirmAction("Apply infrastructure changes from "+cfgFile+"?", false, os.Stdout, nil)
+		if err != nil {
+			return fmt.Errorf("confirm apply: %w", err)
 		}
-		if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
-			fmt.Println("Cancelled.")
+		if !ok {
 			return nil
 		}
 	}
@@ -1792,13 +1790,11 @@ func runInfraDestroy(args []string) error {
 	}
 
 	if !*autoApprove {
-		fmt.Printf("DESTROY all infrastructure defined in %s? This cannot be undone. [y/N]: ", cfgFile)
-		var answer string
-		if _, err := fmt.Scanln(&answer); err != nil {
-			return fmt.Errorf("reading input: %w", err)
+		ok, err := confirmAction("DESTROY all infrastructure defined in "+cfgFile+"? This cannot be undone.", false, os.Stdout, nil)
+		if err != nil {
+			return fmt.Errorf("confirm destroy: %w", err)
 		}
-		if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
-			fmt.Println("Cancelled.")
+		if !ok {
 			return nil
 		}
 	}
