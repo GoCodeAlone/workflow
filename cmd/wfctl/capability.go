@@ -369,7 +369,8 @@ func renderCapabilityCheckText(out io.Writer, profile *inventory.AppProfile, fin
 	fmt.Fprintln(tw, "Capability\tMode\tConfidence\tEvidence")
 	fmt.Fprintln(tw, "----------\t----\t----------\t--------")
 	if profile != nil {
-		for _, usage := range profile.Usage {
+		for i := range profile.Usage {
+			usage := &profile.Usage[i]
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", usage.CapabilityID, usage.Mode, usage.Confidence, evidenceSummary(usage.Evidence))
 		}
 	}
@@ -393,7 +394,8 @@ func providerSummary(providers []inventory.Provider) string {
 		return ""
 	}
 	names := make([]string, 0, len(providers))
-	for _, provider := range providers {
+	for i := range providers {
+		provider := &providers[i]
 		status := provider.ReleaseStatus
 		if status == "" {
 			status = "unknown"

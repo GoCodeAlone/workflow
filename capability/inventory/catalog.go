@@ -20,7 +20,8 @@ func BuildCatalog(inv *Inventory) *Catalog {
 		Findings:     publicFindings(inv.Findings),
 	}
 	hidden := 0
-	for _, cap := range inv.Capabilities {
+	for i := range inv.Capabilities {
+		cap := &inv.Capabilities[i]
 		if isUncategorizedCapability(cap.ID, cap.Category) {
 			hidden++
 			continue
@@ -59,7 +60,8 @@ func BuildCapabilityCrossrefs(inv *Inventory) *CapabilityCrossrefs {
 	if inv == nil {
 		return refs
 	}
-	for _, cap := range inv.Capabilities {
+	for i := range inv.Capabilities {
+		cap := &inv.Capabilities[i]
 		uncategorized := isUncategorizedCapability(cap.ID, cap.Category)
 		var capRef CapabilityReference
 		if !uncategorized {
@@ -68,7 +70,8 @@ func BuildCapabilityCrossrefs(inv *Inventory) *CapabilityCrossrefs {
 			capRef.Category = cap.Category
 			capRef.Name = cap.Name
 		}
-		for _, provider := range cap.Providers {
+		for j := range cap.Providers {
+			provider := &cap.Providers[j]
 			pluginRef := refs.Plugins[provider.Name]
 			pluginRef.Name = provider.Name
 			pluginRef.Kind = firstNonEmpty(pluginRef.Kind, provider.Kind)
