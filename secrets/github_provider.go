@@ -321,26 +321,35 @@ type ghVariableEntry struct {
 }
 
 func (p *GitHubSecretsProvider) listVariableEntries(ctx context.Context) ([]ghVariableEntry, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.variablesURL(), nil)
-	if err != nil {
-		return nil, err
+	nextURL := p.variablesURL()
+	var entries []ghVariableEntry
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		p.setHeaders(req)
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			err := fmt.Errorf("secrets: github list variables: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
+			resp.Body.Close()
+			return nil, err
+		}
+		var result struct {
+			Variables []ghVariableEntry `json:"variables"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("secrets: github list variables decode: %w", err)
+		}
+		resp.Body.Close()
+		entries = append(entries, result.Variables...)
+		nextURL = githubNextLink(resp.Header.Get("Link"))
 	}
-	p.setHeaders(req)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("secrets: github list variables: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
-	}
-	var result struct {
-		Variables []ghVariableEntry `json:"variables"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("secrets: github list variables decode: %w", err)
-	}
-	return result.Variables, nil
+	return entries, nil
 }
 
 // ListVariables returns metadata for GitHub Actions variables in the configured
@@ -628,18 +637,27 @@ func (p *GitHubSecretsProvider) secretsURL() string {
 }
 
 func (p *GitHubSecretsProvider) variablesURL() string {
+	values := url.Values{}
+	values.Set("per_page", "100")
 	switch p.scope {
 	case GitHubScopeOrg:
-		return fmt.Sprintf("%s/orgs/%s/actions/variables", p.base(), url.PathEscape(p.org))
+		return fmt.Sprintf("%s/orgs/%s/actions/variables?%s", p.base(), url.PathEscape(p.org), values.Encode())
 	case GitHubScopeEnv:
-		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/variables", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), url.PathEscape(p.env))
+		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/variables?%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), url.PathEscape(p.env), values.Encode())
 	default:
-		return fmt.Sprintf("%s/repos/%s/%s/actions/variables", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo))
+		return fmt.Sprintf("%s/repos/%s/%s/actions/variables?%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), values.Encode())
 	}
 }
 
 func (p *GitHubSecretsProvider) variableURL(key string) string {
-	return p.variablesURL() + "/" + url.PathEscape(key)
+	switch p.scope {
+	case GitHubScopeOrg:
+		return fmt.Sprintf("%s/orgs/%s/actions/variables/%s", p.base(), url.PathEscape(p.org), url.PathEscape(key))
+	case GitHubScopeEnv:
+		return fmt.Sprintf("%s/repos/%s/%s/environments/%s/variables/%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), url.PathEscape(p.env), url.PathEscape(key))
+	default:
+		return fmt.Sprintf("%s/repos/%s/%s/actions/variables/%s", p.base(), url.PathEscape(p.owner), url.PathEscape(p.repo), url.PathEscape(key))
+	}
 }
 
 func (p *GitHubSecretsProvider) environmentsURL() string {

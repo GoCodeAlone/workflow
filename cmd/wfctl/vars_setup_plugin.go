@@ -28,7 +28,7 @@ func runVarsSetupPluginWithIO(args []string, in io.Reader, out io.Writer) error 
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	configFile := fs.String("config", "app.yaml", "app.yaml/wfctl.yaml used to resolve the github repo when --scope=repo|env")
 	fromEnv := fs.Bool("from-env", false, "Read each variable value from $NAME")
-	nonInteractive := fs.Bool("non-interactive", false, "Do not prompt; require --from-env, --var, or piped KEY=VALUE values")
+	nonInteractive := fs.Bool("non-interactive", false, "Do not prompt; skip entries without --from-env, --var, or piped KEY=VALUE values")
 	var varFlag multiStringFlag
 	fs.Var(&varFlag, "var", "NAME=VALUE literal. Repeatable.")
 	fs.Usage = func() {
