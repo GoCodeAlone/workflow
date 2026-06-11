@@ -257,9 +257,12 @@ func goListAPIPackages(ctx context.Context, source string) ([]goListPackage, err
 	}
 	dec := json.NewDecoder(bytes.NewReader(out))
 	var packages []goListPackage
-	for dec.More() {
+	for {
 		var pkg goListPackage
 		if err := dec.Decode(&pkg); err != nil {
+			if err == io.EOF {
+				break
+			}
 			return nil, err
 		}
 		if pkg.Name == "main" || len(pkg.GoFiles) == 0 {
