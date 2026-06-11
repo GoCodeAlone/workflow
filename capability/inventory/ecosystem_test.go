@@ -47,8 +47,10 @@ func TestCollectEcosystemUncategorizedRawTypes(t *testing.T) {
 		t.Fatalf("CollectEcosystem: %v", err)
 	}
 
-	assertFinding(t, inv, "uncategorized", "needs-review")
+	assertFinding(t, inv, "uncategorized:module:mystery.widget", "needs-review")
 	assertCapabilityEvidence(t, inv, "uncategorized:module:mystery.widget", "moduleTypes[0]")
+	assertCapabilityEvidenceSource(t, inv, "uncategorized:module:mystery.widget", "registry-manifest")
+	assertCapabilityEvidenceSource(t, inv, "http.server", "plugin-manifest")
 }
 
 func TestCollectEcosystemSkipsPluginReposWithoutManifest(t *testing.T) {
@@ -104,6 +106,22 @@ func assertCapabilityEvidence(t *testing.T, inv *Inventory, capabilityID, detail
 			}
 		}
 		t.Fatalf("capability %q did not include evidence detail %q: %#v", capabilityID, detail, cap.Evidence)
+	}
+	t.Fatalf("capability %q not found", capabilityID)
+}
+
+func assertCapabilityEvidenceSource(t *testing.T, inv *Inventory, capabilityID, sourceKind string) {
+	t.Helper()
+	for _, cap := range inv.Capabilities {
+		if cap.ID != capabilityID {
+			continue
+		}
+		for _, evidence := range cap.Evidence {
+			if evidence.SourceKind == sourceKind {
+				return
+			}
+		}
+		t.Fatalf("capability %q did not include source kind %q: %#v", capabilityID, sourceKind, cap.Evidence)
 	}
 	t.Fatalf("capability %q not found", capabilityID)
 }

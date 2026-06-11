@@ -1,5 +1,18 @@
 version: test
 capabilities:
+  - id: auth.authn
+    category: auth
+    name: Authentication
+    description: Verifies identity
+    lifecycle: released
+    aliases:
+      moduleTypes:
+        - auth.jwt
+      keywords:
+        - auth
+        - jwt
+    tags:
+      - cross-cutting
   - id: http.server
     category: http
     name: HTTP Server

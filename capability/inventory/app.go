@@ -168,8 +168,9 @@ func collectWorkflowUsage(ctx context.Context, builder *appBuilder, workflowPath
 					Detail:     module.Name,
 				})
 			}
-			if strings.Contains(strings.ToLower(module.Type), "auth") {
-				builder.addKnownUsage("auth.authz", "inferred", "medium", evidence)
+			authCapabilityID := inferredAuthCapabilityID(module.Type)
+			if authCapabilityID != "" {
+				builder.addKnownUsage(authCapabilityID, "inferred", "medium", evidence)
 			}
 			if isDataModule(module.Type) && !moduleHasTenantEvidence {
 				tenantPolicyFindings = append(tenantPolicyFindings, Finding{
@@ -227,7 +228,7 @@ func loadInstalledProviderIndex(pluginDir string) (map[string]struct{}, int, err
 			return index, count, err
 		}
 		for _, raw := range manifestRawCapabilities(manifest) {
-			index[raw.Kind+":"+strings.ToLower(raw.Value)] = struct{}{}
+			index[raw.Kind+":"+strings.ToLower(strings.TrimSpace(raw.Value))] = struct{}{}
 		}
 		count++
 	}
@@ -374,4 +375,16 @@ func hasTenantEvidence(value any) bool {
 func isDataModule(moduleType string) bool {
 	lower := strings.ToLower(moduleType)
 	return strings.Contains(lower, "storage") || strings.Contains(lower, "database") || strings.Contains(lower, "postgres")
+}
+
+func inferredAuthCapabilityID(moduleType string) string {
+	lower := strings.ToLower(moduleType)
+	switch {
+	case strings.Contains(lower, "authz"), strings.Contains(lower, "rbac"), strings.Contains(lower, "permission"):
+		return "auth.authz"
+	case strings.Contains(lower, "auth"), strings.Contains(lower, "jwt"), strings.Contains(lower, "sso"), strings.Contains(lower, "oidc"), strings.Contains(lower, "passkey"):
+		return "auth.authn"
+	default:
+		return ""
+	}
 }

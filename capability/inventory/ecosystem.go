@@ -118,6 +118,7 @@ func collectRegistryProviders(builder *inventoryBuilder, registryDir string) (in
 		builder.addProvider(providerInput{
 			Name:          manifest.Name,
 			Kind:          firstNonEmpty(manifest.Type, "registry"),
+			EvidenceKind:  "registry-manifest",
 			Version:       manifest.Version,
 			ReleaseStatus: firstNonEmpty(manifest.Status, "released"),
 			Source:        firstNonEmpty(manifest.Repository, path),
@@ -163,6 +164,7 @@ func collectLocalProviders(builder *inventoryBuilder, repoRoot string) (int, err
 		builder.addProvider(providerInput{
 			Name:          firstNonEmpty(manifest.Name, name),
 			Kind:          "local-plugin",
+			EvidenceKind:  "plugin-manifest",
 			Version:       manifest.Version,
 			ReleaseStatus: "local-only",
 			Source:        firstNonEmpty(manifest.Repository, manifestPath),
@@ -240,6 +242,7 @@ func appendRaw(raw []rawCapability, kind, jsonPrefix, detailPrefix string, value
 type providerInput struct {
 	Name          string
 	Kind          string
+	EvidenceKind  string
 	Version       string
 	ReleaseStatus string
 	Source        string
@@ -287,7 +290,7 @@ func (b *inventoryBuilder) addUnknownCapability(provider providerInput, raw rawC
 	finding := Finding{
 		Level:        "warning",
 		Code:         "needs-review",
-		CapabilityID: "uncategorized",
+		CapabilityID: id,
 		Message:      fmt.Sprintf("raw %s capability %q is not mapped in the taxonomy", raw.Kind, raw.Value),
 		Evidence:     []Evidence{evidence},
 	}
@@ -365,8 +368,12 @@ func mergeProvider(cap *Capability, input providerInput, raw rawCapability) {
 }
 
 func evidenceFor(provider providerInput, raw rawCapability) Evidence {
+	sourceKind := provider.EvidenceKind
+	if sourceKind == "" {
+		sourceKind = provider.Kind
+	}
 	return Evidence{
-		SourceKind: provider.Kind,
+		SourceKind: sourceKind,
 		SourcePath: provider.Path,
 		JSONPath:   raw.JSONPath,
 		Detail:     raw.Detail,
