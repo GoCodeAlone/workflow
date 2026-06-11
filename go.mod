@@ -32,7 +32,7 @@ require (
 	github.com/launchdarkly/go-sdk-common/v4 v4.0.0
 	github.com/launchdarkly/go-server-sdk/v7 v7.15.2
 	github.com/lib/pq v1.10.9
-	github.com/mark3labs/mcp-go v0.46.0
+	github.com/mark3labs/mcp-go v0.54.1
 	github.com/mattn/go-isatty v0.0.22
 	github.com/nats-io/nats.go v1.52.0
 	github.com/prometheus/client_golang v1.23.2
