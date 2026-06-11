@@ -71,6 +71,63 @@ modules:
 	}
 }
 
+func TestCollectConfigVariablesFromTopLevelVars(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deploy.yaml")
+	if err := os.WriteFile(path, []byte(`
+vars:
+  entries:
+    - name: PUBLIC_CLIENT_ID
+      description: OAuth public client ID.
+      required: true
+    - name: OPTIONAL_FLAG
+      default: "false"
+variables:
+  entries:
+    - name: FACEBOOK_APP_ID
+      description: Facebook public app ID.
+    - name: PUBLIC_CLIENT_ID
+      description: Duplicate alias entry should not win.
+modules:
+  - name: app-config
+    type: config.provider
+    config:
+      sources:
+        - type: env
+      schema:
+        google_client_id:
+          env: PUBLIC_CLIENT_ID
+          desc: Schema duplicate should not win over explicit vars entry.
+        secret:
+          env: PRIVATE_SECRET
+          sensitive: true
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	vars, skipped, err := collectConfigVariablesFromFile(path)
+	if err != nil {
+		t.Fatalf("collectConfigVariablesFromFile: %v", err)
+	}
+	byName := map[string]configVariableEntry{}
+	for _, entry := range vars {
+		byName[entry.Name] = entry
+	}
+	for _, name := range []string{"FACEBOOK_APP_ID", "OPTIONAL_FLAG", "PUBLIC_CLIENT_ID"} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("missing variable %s in %+v", name, vars)
+		}
+	}
+	if got := byName["PUBLIC_CLIENT_ID"]; !got.Required || got.Key != "vars.PUBLIC_CLIENT_ID" || got.Description != "OAuth public client ID." {
+		t.Fatalf("PUBLIC_CLIENT_ID = %+v", got)
+	}
+	if got := byName["OPTIONAL_FLAG"]; got.Default != "false" {
+		t.Fatalf("OPTIONAL_FLAG = %+v", got)
+	}
+	if len(skipped) != 1 || skipped[0] != "PRIVATE_SECRET" {
+		t.Fatalf("skipped = %+v, want PRIVATE_SECRET", skipped)
+	}
+}
+
 func TestCollectConfigVariablesErrorsOnMalformedSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.yaml")
 	if err := os.WriteFile(path, []byte(`

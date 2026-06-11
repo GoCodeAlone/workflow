@@ -35,7 +35,8 @@ func runVarsSetupPluginWithIO(args []string, in io.Reader, out io.Writer) error 
 
 Set non-secret variables declared by either:
   - a plugin's plugin.json required_config[] block when --plugin is supplied, or
-  - config.provider schema entries with sensitive:false when --plugin is omitted.
+  - config vars.entries/variables.entries declarations and config.provider
+    schema entries with sensitive:false when --plugin is omitted.
 
 Sensitive values belong in required_secrets[] or secrets setup paths and must be
 configured with wfctl secrets setup instead.

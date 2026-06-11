@@ -31,6 +31,8 @@ func collectConfigVariables(cfg *config.WorkflowConfig) ([]configVariableEntry, 
 	}
 	entriesByName := map[string]configVariableEntry{}
 	sensitiveByName := map[string]struct{}{}
+	addVariableConfigEntries(entriesByName, cfg.Vars)
+	addVariableConfigEntries(entriesByName, cfg.Variables)
 	for _, mod := range cfg.Modules {
 		if mod.Type != "config.provider" || mod.Config == nil {
 			continue
@@ -56,6 +58,9 @@ func collectConfigVariables(cfg *config.WorkflowConfig) ([]configVariableEntry, 
 					sensitiveByName[name] = struct{}{}
 					continue
 				}
+				if _, exists := entriesByName[name]; exists {
+					continue
+				}
 				entriesByName[name] = configVariableEntry{
 					Name:        name,
 					Key:         mod.Name + "." + key,
@@ -67,6 +72,28 @@ func collectConfigVariables(cfg *config.WorkflowConfig) ([]configVariableEntry, 
 		}
 	}
 	return sortedConfigVariableEntries(entriesByName), sortedStringSet(sensitiveByName), nil
+}
+
+func addVariableConfigEntries(entries map[string]configVariableEntry, vars *config.VariablesConfig) {
+	if vars == nil {
+		return
+	}
+	for _, entry := range vars.Entries {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := entries[name]; exists {
+			continue
+		}
+		entries[name] = configVariableEntry{
+			Name:        name,
+			Key:         "vars." + name,
+			Required:    entry.Required,
+			Default:     entry.Default,
+			Description: entry.Description,
+		}
+	}
 }
 
 func schemaEntriesFromConfigProvider(mod config.ModuleConfig) (map[string]module.SchemaEntry, error) {
