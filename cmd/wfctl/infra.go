@@ -1398,7 +1398,7 @@ func runInfraApply(args []string) error {
 	}
 
 	if !*autoApprove {
-		ok, err := confirmAction("Apply infrastructure changes from "+cfgFile+"?", false, os.Stdout, nil)
+		ok, err := confirmAction("Apply infrastructure changes from "+cfgFile+"?", false, os.Stderr, nil)
 		if err != nil {
 			return fmt.Errorf("confirm apply: %w", err)
 		}
@@ -1790,7 +1790,7 @@ func runInfraDestroy(args []string) error {
 	}
 
 	if !*autoApprove {
-		ok, err := confirmAction("DESTROY all infrastructure defined in "+cfgFile+"? This cannot be undone.", false, os.Stdout, nil)
+		ok, err := confirmAction("DESTROY all infrastructure defined in "+cfgFile+"? This cannot be undone.", false, os.Stderr, nil)
 		if err != nil {
 			return fmt.Errorf("confirm destroy: %w", err)
 		}

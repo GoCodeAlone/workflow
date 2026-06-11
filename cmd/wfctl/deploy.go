@@ -918,7 +918,7 @@ Options:
 	}
 
 	if !*yes {
-		ok, err := confirmAction("Apply these changes?", false, os.Stdout, nil)
+		ok, err := confirmAction("Apply these changes?", false, os.Stderr, nil)
 		if err != nil {
 			return fmt.Errorf("confirm deployment: %w", err)
 		}

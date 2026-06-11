@@ -18,7 +18,6 @@ import (
 	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
-	"github.com/mattn/go-isatty"
 )
 
 // secretFieldPatterns are field name substrings that indicate a secret value.
@@ -204,7 +203,7 @@ Options:
 			return fmt.Errorf("read secret value: %w", err)
 		}
 		secretValue = strings.TrimRight(string(b), "\n")
-	case isatty.IsTerminal(os.Stdin.Fd()): // interactive: masked prompt
+	case prompt.CanPrompt(): // interactive: masked prompt
 		value, err := prompt.Input("Value for "+name, true)
 		if err != nil {
 			return err
