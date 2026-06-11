@@ -18,7 +18,7 @@ func confirmAction(question string, def bool, out io.Writer, confirm func(string
 	}
 	ok, err := confirm(question, def)
 	if err != nil {
-		if isPromptCancelled(err) || errors.Is(err, prompt.ErrNotInteractive) {
+		if isPromptCancelled(err) {
 			if out != nil {
 				fmt.Fprintln(out, "Cancelled.")
 			}

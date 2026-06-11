@@ -25,19 +25,19 @@ func TestConfirmActionTreatsPromptCancelAsCleanAbort(t *testing.T) {
 	}
 }
 
-func TestConfirmActionTreatsNonInteractiveAsCleanAbort(t *testing.T) {
+func TestConfirmActionPropagatesNonInteractivePromptError(t *testing.T) {
 	var out bytes.Buffer
 	ok, err := confirmAction("Proceed?", false, &out, func(string, bool) (bool, error) {
 		return false, prompt.ErrNotInteractive
 	})
-	if err != nil {
-		t.Fatalf("confirmAction returned error for non-interactive prompt: %v", err)
-	}
 	if ok {
 		t.Fatal("confirmAction should not approve a non-interactive prompt")
 	}
-	if got := out.String(); !strings.Contains(got, "Cancelled.") {
-		t.Fatalf("cancel output = %q, want Cancelled.", got)
+	if !errors.Is(err, prompt.ErrNotInteractive) {
+		t.Fatalf("confirmAction error = %v, want ErrNotInteractive", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("unexpected output on non-interactive error: %q", out.String())
 	}
 }
 
