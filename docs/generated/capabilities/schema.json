@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://www.gocodealone.tech/schemas/workflow/capability-inventory.schema.json",
+  "title": "Workflow Capability Inventory",
+  "type": "object",
+  "required": ["metadata", "capabilities"],
+  "additionalProperties": false,
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["generator"],
+      "additionalProperties": false,
+      "properties": {
+        "generator": {"type": "string"},
+        "generatedAt": {"type": "string"},
+        "workflowVersion": {"type": "string"},
+        "taxonomyVersion": {"type": "string"},
+        "taxonomyDigest": {"type": "string"},
+        "registrySource": {"type": "string"},
+        "localRepoRoot": {"type": "string"},
+        "counts": {
+          "type": "object",
+          "additionalProperties": {"type": "integer"}
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/capability"}
+    },
+    "findings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/finding"}
+    }
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "required": ["id", "category", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "category": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "lifecycle": {"type": "string"},
+        "tags": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "providers": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/provider"}
+        },
+        "evidence": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidence"}
+        },
+        "findings": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/finding"}
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "required": ["name", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"type": "string"},
+        "version": {"type": "string"},
+        "releaseStatus": {"type": "string"},
+        "source": {"type": "string"},
+        "capabilities": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["sourceKind"],
+      "additionalProperties": false,
+      "properties": {
+        "sourceKind": {"type": "string"},
+        "sourcePath": {"type": "string"},
+        "jsonPath": {"type": "string"},
+        "detail": {"type": "string"}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["level", "code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "level": {"type": "string"},
+        "code": {"type": "string"},
+        "message": {"type": "string"},
+        "capabilityId": {"type": "string"},
+        "evidence": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidence"}
+        }
+      }
+    }
+  }
+}

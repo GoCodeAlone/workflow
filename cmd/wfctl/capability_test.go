@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -106,4 +107,36 @@ func TestEmbeddedCLIRegistersCapability(t *testing.T) {
 		}
 	}
 	t.Fatal("embedded CLI config does not list capability")
+}
+
+func TestCapabilityGeneratedArtifacts(t *testing.T) {
+	data, err := os.ReadFile("../../docs/generated/capabilities/ecosystem.json")
+	if err != nil {
+		t.Fatalf("read ecosystem.json: %v", err)
+	}
+	var inv inventory.Inventory
+	if err := json.Unmarshal(data, &inv); err != nil {
+		t.Fatalf("json.Unmarshal ecosystem.json: %v", err)
+	}
+	if inv.Metadata.TaxonomyDigest == "" {
+		t.Fatal("expected taxonomy digest")
+	}
+	if inv.Metadata.WorkflowVersion == "" {
+		t.Fatal("expected workflow version")
+	}
+	if inv.Metadata.Counts["capabilities"] == 0 {
+		t.Fatalf("expected capabilities count, got %#v", inv.Metadata.Counts)
+	}
+
+	md, err := os.ReadFile("../../docs/generated/capabilities/ecosystem.md")
+	if err != nil {
+		t.Fatalf("read ecosystem.md: %v", err)
+	}
+	text := string(md)
+	if !strings.Contains(text, "# Workflow Capability Matrix") {
+		t.Fatalf("markdown missing title: %s", text)
+	}
+	if !strings.Contains(text, "auth") {
+		t.Fatalf("markdown missing known category: %s", text)
+	}
 }

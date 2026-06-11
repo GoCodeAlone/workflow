@@ -8,7 +8,7 @@ capabilities:
     aliases:
       plugins: [workflow-plugin-auth, workflow-plugin-auth0, workflow-plugin-okta, workflow-plugin-ory-kratos, workflow-plugin-passkey]
       moduleTypes: [auth.jwt, auth.user_store, auth.middleware]
-      keywords: [authn, authentication, jwt, passkey, oidc]
+      keywords: [authn, authentication, jwt, passkey]
     tags: [cross-cutting, auth-sensitive]
   - id: auth.authz
     category: auth
@@ -45,7 +45,7 @@ capabilities:
     description: Declares, resolves, and writes secrets across provider scopes.
     lifecycle: released
     aliases:
-      plugins: [workflow-plugin-secrets, workflow-plugin-vault, workflow-plugin-aws]
+      plugins: [workflow-plugin-secrets, workflow-plugin-vault]
       moduleTypes: [secrets.store, secrets.vault]
       stepTypes: [step.secrets_get, step.secrets_set]
       keywords: [secret, secrets, secretStores, vault]
@@ -78,7 +78,7 @@ capabilities:
     aliases:
       plugins: [workflow-plugin-aws]
       providers: [aws]
-      keywords: [aws, s3, secretsmanager, ecr]
+      keywords: [aws, secretsmanager, ecr]
     tags: [provider, secret-backed]
   - id: platform.azure
     category: platform
@@ -88,7 +88,7 @@ capabilities:
     aliases:
       plugins: [workflow-plugin-azure]
       providers: [azure]
-      keywords: [azure, entra]
+      keywords: [azure]
     tags: [provider]
   - id: platform.gcp
     category: platform
@@ -98,7 +98,7 @@ capabilities:
     aliases:
       plugins: [workflow-plugin-gcp]
       providers: [gcp, google]
-      keywords: [gcp, google, gcs]
+      keywords: [gcp, google]
     tags: [provider]
   - id: platform.digitalocean
     category: platform
@@ -108,7 +108,7 @@ capabilities:
     aliases:
       plugins: [workflow-plugin-digitalocean]
       providers: [digitalocean, do]
-      keywords: [digitalocean, spaces, app-platform]
+      keywords: [digitalocean, app-platform]
     tags: [provider, secret-backed]
   - id: ci.generation
     category: ci
