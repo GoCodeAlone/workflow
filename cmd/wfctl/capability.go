@@ -59,7 +59,7 @@ Use "wfctl capability <subcommand> -h" for subcommand options.`)
 }
 
 func runCapabilityEcosystem(args []string, out io.Writer) error {
-	inv, format, outputPath, err := collectCapabilityEcosystemFromFlags("capability ecosystem", args, out)
+	inv, format, outputPath, err := collectCapabilityEcosystemFromFlags("capability ecosystem", args, out, "output format: json or md")
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func runCapabilityEcosystem(args []string, out io.Writer) error {
 }
 
 func runCapabilityCatalog(args []string, out io.Writer) error {
-	inv, format, outputPath, err := collectCapabilityEcosystemFromFlags("capability catalog", args, out)
+	inv, format, outputPath, err := collectCapabilityEcosystemFromFlags("capability catalog", args, out, "output format: json or md")
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func runCapabilityCatalog(args []string, out io.Writer) error {
 }
 
 func runCapabilityCrossrefs(args []string, out io.Writer) error {
-	inv, format, outputPath, err := collectCapabilityEcosystemFromFlags("capability crossrefs", args, out)
+	inv, format, outputPath, err := collectCapabilityEcosystemFromFlags("capability crossrefs", args, out, "output format: json")
 	if err != nil {
 		return err
 	}
@@ -115,14 +115,14 @@ func runCapabilityCrossrefs(args []string, out io.Writer) error {
 	return writeCapabilityOutput(out, outputPath, buf.Bytes())
 }
 
-func collectCapabilityEcosystemFromFlags(name string, args []string, out io.Writer) (*inventory.Inventory, string, string, error) {
+func collectCapabilityEcosystemFromFlags(name string, args []string, out io.Writer, formatUsage string) (*inventory.Inventory, string, string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
 	var registryDir, repoRoot, taxonomyPath, format, outputPath string
 	fs.StringVar(&registryDir, "registry", defaultCapabilityRegistryPath(), "registry directory")
 	fs.StringVar(&repoRoot, "repo-root", "..", "workspace root containing workflow-plugin-* repos")
 	fs.StringVar(&taxonomyPath, "taxonomy", defaultCapabilityTaxonomyPath(), "capability taxonomy YAML")
-	fs.StringVar(&format, "format", "json", "output format: json or md")
+	fs.StringVar(&format, "format", "json", formatUsage)
 	fs.StringVar(&outputPath, "output", "", "write output to path instead of stdout")
 	if err := fs.Parse(args); err != nil {
 		return nil, "", "", err

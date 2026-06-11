@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"flag"
 	"os"
 	"strings"
 	"testing"
@@ -85,6 +87,21 @@ func TestRunCapabilityCrossrefsJSON(t *testing.T) {
 	}
 	if len(refs.Plugins) == 0 {
 		t.Fatalf("expected plugin refs, got %#v", refs)
+	}
+}
+
+func TestRunCapabilityCrossrefsHelpListsJSONOnly(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{"crossrefs", "-h"}, &out)
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("err = %v, want flag.ErrHelp", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "output format: json") {
+		t.Fatalf("help missing json-only format text:\n%s", text)
+	}
+	if strings.Contains(text, "json or md") {
+		t.Fatalf("help still advertises markdown format:\n%s", text)
 	}
 }
 
