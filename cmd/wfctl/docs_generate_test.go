@@ -196,6 +196,14 @@ func TestDocsGenerateRegistryPlugins(t *testing.T) {
 			t.Fatalf("generated plugin doc missing %q:\n%s", want, doc)
 		}
 	}
+	internalDocPath := filepath.Join(outDir, "plugins", "alpha", "latest", "internal", "index.md")
+	rawInternalDoc, err := os.ReadFile(internalDocPath)
+	if err != nil {
+		t.Fatalf("read generated plugin internal doc: %v", err)
+	}
+	if !strings.Contains(string(rawInternalDoc), "Import path: `github.com/GoCodeAlone/workflow-plugin-alpha/internal`") {
+		t.Fatalf("generated internal plugin doc has wrong import path:\n%s", rawInternalDoc)
+	}
 
 	rawMeta, err := os.ReadFile(filepath.Join(outDir, "versions.json"))
 	if err != nil {
@@ -208,8 +216,15 @@ func TestDocsGenerateRegistryPlugins(t *testing.T) {
 	if got := meta.Versions["plugins/alpha"]; len(got) != 1 || got[0] != "v0.1.0" {
 		t.Fatalf("plugins/alpha versions = %v, want [v0.1.0]", got)
 	}
-	if len(meta.Packages) != 1 || meta.Packages[0].Path != "plugins/alpha/latest/index.md" {
-		t.Fatalf("packages = %+v, want generated alpha plugin route", meta.Packages)
+	if len(meta.Packages) != 2 {
+		t.Fatalf("packages = %+v, want root and internal plugin docs", meta.Packages)
+	}
+	paths := map[string]bool{}
+	for _, pkg := range meta.Packages {
+		paths[pkg.Path] = true
+	}
+	if !paths["plugins/alpha/latest/index.md"] || !paths["plugins/alpha/latest/internal/index.md"] {
+		t.Fatalf("packages = %+v, want generated alpha plugin routes", meta.Packages)
 	}
 	if meta.Packages[0].GenerationSource != "release" {
 		t.Fatalf("plugin generationSource = %q, want release", meta.Packages[0].GenerationSource)
@@ -222,6 +237,72 @@ func TestDocsGenerateRegistryPlugins(t *testing.T) {
 		if !strings.Contains(joinedWarnings, want) {
 			t.Fatalf("warnings missing %q:\n%s", want, joinedWarnings)
 		}
+	}
+}
+
+func TestDocsGenerateRegistryPluginUsesInternalPackageWhenRootHasNoLibrary(t *testing.T) {
+	pluginRepo := createDocsInternalOnlyPluginRepo(t, "github.com/GoCodeAlone/workflow-plugin-provider", "provider", "v0.2.0")
+	registryPath := filepath.Join(t.TempDir(), "registry.json")
+	registry := `{
+  "plugins": [
+    {
+      "name": "workflow-plugin-provider",
+      "version": "v0.2.0",
+      "repository": "https://github.com/GoCodeAlone/workflow-plugin-provider",
+      "source": ` + strconvQuote(pluginRepo) + `
+    }
+  ]
+}`
+	if err := os.WriteFile(registryPath, []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := t.TempDir()
+	_, err := captureStdout(t, func() error {
+		return runDocsGenerate([]string{
+			"--source", ".",
+			"--out", outDir,
+			"--module", "github.com/GoCodeAlone/workflow",
+			"--version", "v0.75.0",
+			"--registry", registryPath,
+			"--cache-dir", filepath.Join(t.TempDir(), "cache"),
+			"--subjects", "plugins",
+		})
+	})
+	if err != nil {
+		t.Fatalf("docs generate registry plugins: %v", err)
+	}
+
+	docPath := filepath.Join(outDir, "plugins", "provider", "latest", "index.md")
+	rawDoc, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read generated provider doc: %v", err)
+	}
+	doc := string(rawDoc)
+	for _, want := range []string{
+		"# package internal",
+		"Import path: `github.com/GoCodeAlone/workflow-plugin-provider/internal`",
+		"Source: https://github.com/GoCodeAlone/workflow-plugin-provider/tree/v0.2.0/internal",
+		"ProviderClient configures the provider integration.",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("generated internal provider doc missing %q:\n%s", want, doc)
+		}
+	}
+
+	rawMeta, err := os.ReadFile(filepath.Join(outDir, "versions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta docsAPIMetadata
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if len(meta.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", meta.Warnings)
+	}
+	if len(meta.Packages) != 1 || meta.Packages[0].Path != "plugins/provider/latest/index.md" {
+		t.Fatalf("packages = %+v, want provider internal package at stable plugin route", meta.Packages)
 	}
 }
 
@@ -341,6 +422,32 @@ func createDocsPluginRepo(t *testing.T, modulePath, packageName, tag string) str
 	}
 	write("go.mod", "module "+modulePath+"\n\ngo 1.26\n")
 	write(packageName+".go", "package "+packageName+"\n\n// PluginName returns the fixture plugin name.\nfunc PluginName() string { return "+strconvQuote(packageName)+" }\n")
+	write("internal/doc.go", "package internal\n\n// InternalClient describes the plugin's internal integration surface.\ntype InternalClient struct{}\n")
+	runDocsTestGit(t, dir, "init")
+	runDocsTestGit(t, dir, "config", "user.email", "docs@example.test")
+	runDocsTestGit(t, dir, "config", "user.name", "Docs Test")
+	runDocsTestGit(t, dir, "add", ".")
+	runDocsTestGit(t, dir, "commit", "-m", "initial")
+	runDocsTestGit(t, dir, "tag", tag)
+	return dir
+}
+
+func createDocsInternalOnlyPluginRepo(t *testing.T, modulePath, packageName, tag string) string {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module "+modulePath+"\n\ngo 1.26\n")
+	write("cmd/"+packageName+"/main.go", "package main\n\nfunc main() {}\n")
+	write("internal/doc.go", "package internal\n\n// ProviderClient configures the provider integration.\ntype ProviderClient struct{}\n")
 	runDocsTestGit(t, dir, "init")
 	runDocsTestGit(t, dir, "config", "user.email", "docs@example.test")
 	runDocsTestGit(t, dir, "config", "user.name", "Docs Test")
