@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	charm.land/bubbles/v2 v2.1.0
-	charm.land/bubbletea/v2 v2.0.2
+	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/GoCodeAlone/go-plugin v1.7.0
 	github.com/GoCodeAlone/modular v1.13.4
@@ -15,7 +15,7 @@ require (
 	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0
 	github.com/GoCodeAlone/yaegi v0.17.2
 	github.com/IBM/sarama v1.47.0
-	github.com/alicebob/miniredis/v2 v2.36.1
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/cucumber/godog v0.15.1
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/expr-lang/expr v1.17.8
@@ -29,8 +29,8 @@ require (
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/itchyny/gojq v0.12.19
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/launchdarkly/go-sdk-common/v3 v3.5.0
-	github.com/launchdarkly/go-server-sdk/v7 v7.14.6
+	github.com/launchdarkly/go-sdk-common/v4 v4.0.0
+	github.com/launchdarkly/go-server-sdk/v7 v7.15.2
 	github.com/lib/pq v1.10.9
 	github.com/mark3labs/mcp-go v0.46.0
 	github.com/mattn/go-isatty v0.0.22
@@ -105,7 +105,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260205113103-524a6607adb8 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
@@ -185,18 +185,16 @@ require (
 	github.com/jcmturner/gofork v1.7.6 // indirect
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
-	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/launchdarkly/ccache v1.1.0 // indirect
 	github.com/launchdarkly/eventsource v1.10.0 // indirect
-	github.com/launchdarkly/go-jsonstream/v3 v3.1.0 // indirect
-	github.com/launchdarkly/go-sdk-events/v3 v3.5.0 // indirect
+	github.com/launchdarkly/go-jsonstream/v4 v4.0.0 // indirect
+	github.com/launchdarkly/go-sdk-events/v3 v3.6.1 // indirect
 	github.com/launchdarkly/go-semver v1.0.3 // indirect
-	github.com/launchdarkly/go-server-sdk-evaluation/v3 v3.0.1 // indirect
+	github.com/launchdarkly/go-server-sdk-evaluation/v4 v4.0.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
-	github.com/mailru/easyjson v0.9.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-runewidth v0.0.23 // indirect
 	github.com/mattn/go-shellwords v1.0.12 // indirect
