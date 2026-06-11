@@ -126,6 +126,24 @@ Names are illustrative; implementation can refine the exact struct shape. The
 required behavior is stable IDs, provider rows, source evidence, release status,
 and confidence for inference.
 
+## Taxonomy Ownership
+
+The product-level capability taxonomy must be explicit and versioned, not hidden
+inside ad hoc string matching. Add a small checked-in taxonomy file such as
+`data/capabilities/taxonomy.yaml` or `capability/inventory/taxonomy.json` with:
+
+- stable capability IDs and categories
+- labels/descriptions suitable for website docs
+- known module/step/trigger/provider aliases that map to each capability
+- policy tags such as `cross-cutting`, `tenant-scoped`, `authz-sensitive`, or
+  `secret-backed`
+- lifecycle flags such as `released`, `local`, `deprecated`, and
+  `needs-review`
+
+The generator uses this taxonomy for curated rows and emits unmapped raw types
+under `uncategorized` with `needs-review` findings. New plugin types should not
+silently create product-level capability names without taxonomy review.
+
 ## Ecosystem Capability Matrix
 
 Add a `wfctl capability ecosystem` command that scans registry and local plugin
@@ -172,6 +190,13 @@ wfctl capability app \
   --format json \
   --output docs/generated/capabilities/app.json
 ```
+
+`--workflow` is illustrative, not a hard single-file contract. The implementation
+must reuse existing `wfctl` config discovery/import/merge behavior where
+available, because applications may compose multiple Workflow config files,
+`*.wfctl.yaml` provider files, imported fragments, and lockfiles. The command
+should support repeatable workflow/config inputs only if existing loaders cannot
+already discover them from `wfctl.yaml`.
 
 It should classify usage as:
 
@@ -225,6 +250,18 @@ Initial generated artifacts:
 The website should render the ecosystem JSON into searchable docs/pages and link
 back to provider/plugin docs. Workflow should not add website-only extraction
 logic.
+
+Generated JSON must include source/version metadata:
+
+- Workflow version or commit used to run generation
+- taxonomy version or digest
+- registry source path/ref when present
+- local plugin repo count and release/local row counts
+- generation timestamp
+
+First implementation should commit the generated Workflow-owned snapshot in this
+repo. A downstream website PR can consume that checked-in artifact; release-tag
+artifact fetching can be added after the website has a stable renderer.
 
 ## CLI User Experience
 
@@ -299,7 +336,9 @@ while keeping the Workflow JSON artifact available for CLI and agents.
 - Inference will produce some false positives, so it must be marked with
   evidence and confidence.
 - Website docs can consume generated JSON/Markdown from Workflow release
-  artifacts or a checked-in generated snapshot.
+  artifacts or a checked-in generated snapshot. First implementation uses the
+  checked-in snapshot to avoid introducing a cross-repo release fetch dependency
+  before the renderer exists.
 - Agents can be instructed to consult the matrix/profile during design review
   once the command exists.
 
@@ -326,6 +365,7 @@ while keeping the Workflow JSON artifact available for CLI and agents.
 - Generated Markdown can be consumed by website docs without custom extraction.
 - Tests cover registry-only, local-only, mixed release state, inferred app
   capability, missing provider, and policy-risk cases.
+- Generated JSON records source/version metadata and taxonomy digest/version.
 
 ## Related Decision
 
