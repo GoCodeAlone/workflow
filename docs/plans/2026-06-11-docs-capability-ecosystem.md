@@ -30,7 +30,7 @@
 |------|-------|-------|--------|
 | 1 | feat(wfctl): add docs capability catalog foundation | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6 | feat/docs-capability-ecosystem |
 
-**Status:** Draft
+**Status:** Locked 2026-06-11T07:23:49Z
 
 ## Global Design Guidance
 
