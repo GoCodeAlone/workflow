@@ -5,6 +5,9 @@
   "description": "Local authorization plugin",
   "license": "MIT",
   "repository": "https://github.com/GoCodeAlone/workflow-plugin-authz",
+  "dependencies": [
+    {"name": "workflow-plugin-auth", "constraint": ">=1.0.0"}
+  ],
   "moduleTypes": ["auth.rbac"],
   "stepTypes": ["step.authz_check"],
   "triggerTypes": []

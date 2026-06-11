@@ -74,6 +74,9 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 		if errors.Is(err, prompt.ErrNotInteractive) {
 			return err
 		}
+		if errors.Is(err, prompt.ErrCancelled) {
+			return err
+		}
 		return fmt.Errorf("select secrets: %w", err)
 	}
 	if len(selectedIdx) == 0 {
@@ -88,6 +91,9 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 	)
 	if err != nil {
 		if errors.Is(err, prompt.ErrNotInteractive) {
+			return err
+		}
+		if errors.Is(err, prompt.ErrCancelled) {
 			return err
 		}
 		return fmt.Errorf("confirm: %w", err)
@@ -118,7 +124,7 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 		}
 		v, err := prompt.Input(label, d.sensitive)
 		if err != nil {
-			if errors.Is(err, prompt.ErrNotInteractive) {
+			if errors.Is(err, prompt.ErrNotInteractive) || errors.Is(err, prompt.ErrCancelled) {
 				promptErr = err
 			}
 			return "", false, err

@@ -57,11 +57,13 @@ func TestDocsGenerateWorkflowPackages(t *testing.T) {
 		Subject       string
 		Versions      map[string][]string `json:"versions"`
 		Packages      []struct {
-			Subject    string `json:"subject"`
-			ImportPath string `json:"importPath"`
-			Version    string `json:"version"`
-			Path       string `json:"path"`
-			Synopsis   string `json:"synopsis"`
+			Subject          string `json:"subject"`
+			ImportPath       string `json:"importPath"`
+			Version          string `json:"version"`
+			GenerationSource string `json:"generationSource"`
+			Repository       string `json:"repository"`
+			Path             string `json:"path"`
+			Synopsis         string `json:"synopsis"`
 		} `json:"packages"`
 		Warnings []string `json:"warnings"`
 	}
@@ -77,8 +79,21 @@ func TestDocsGenerateWorkflowPackages(t *testing.T) {
 	if len(meta.Packages) != 3 {
 		t.Fatalf("packages = %d, want 3 (%+v)", len(meta.Packages), meta.Packages)
 	}
+	if meta.Packages[0].GenerationSource != "local" {
+		t.Fatalf("generationSource = %q, want local", meta.Packages[0].GenerationSource)
+	}
+	if meta.Packages[0].Repository != "https://github.com/GoCodeAlone/workflow" {
+		t.Fatalf("repository = %q, want workflow repo", meta.Packages[0].Repository)
+	}
 	if len(meta.Warnings) != 0 {
 		t.Fatalf("warnings = %v, want none", meta.Warnings)
+	}
+	indexRaw, err := os.ReadFile(filepath.Join(outDir, "index.json"))
+	if err != nil {
+		t.Fatalf("read index.json: %v", err)
+	}
+	if string(indexRaw) != string(rawMeta) {
+		t.Fatal("index.json should match versions.json for website ingestion compatibility")
 	}
 
 	docPath := filepath.Join(outDir, "workflow", "latest", "plugin", "index.md")
@@ -195,6 +210,12 @@ func TestDocsGenerateRegistryPlugins(t *testing.T) {
 	}
 	if len(meta.Packages) != 1 || meta.Packages[0].Path != "plugins/alpha/latest/index.md" {
 		t.Fatalf("packages = %+v, want generated alpha plugin route", meta.Packages)
+	}
+	if meta.Packages[0].GenerationSource != "release" {
+		t.Fatalf("plugin generationSource = %q, want release", meta.Packages[0].GenerationSource)
+	}
+	if meta.Packages[0].Repository != "https://github.com/GoCodeAlone/workflow-plugin-alpha" {
+		t.Fatalf("plugin repository = %q", meta.Packages[0].Repository)
 	}
 	joinedWarnings := strings.Join(meta.Warnings, "\n")
 	for _, want := range []string{"workflow-plugin-missing", "v0.2.0", "workflow-plugin-outside", "trust boundary", "invalid plugin slug", "workflow-plugin-untrusted-source"} {

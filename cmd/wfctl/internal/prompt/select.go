@@ -42,10 +42,11 @@ func Select(title string, opts []string) (int, error) {
 
 // selectModel is the bubbletea model for single selection.
 type selectModel struct {
-	title  string
-	opts   []string
-	cursor int
-	quit   bool
+	title       string
+	opts        []string
+	cursor      int
+	quit        bool
+	interrupted bool
 }
 
 var (
@@ -59,8 +60,9 @@ func (m *selectModel) Init() tea.Cmd { return nil }
 func (m *selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c", "esc", "q":
 			m.quit = true
+			m.interrupted = true
 			return m, tea.Quit
 		case "up", "k":
 			if m.cursor > 0 {

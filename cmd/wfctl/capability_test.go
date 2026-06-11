@@ -43,6 +43,51 @@ func TestRunCapabilityEcosystemJSON(t *testing.T) {
 	}
 }
 
+func TestRunCapabilityCatalogJSON(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"catalog",
+		"--registry", "testdata/capability/registry",
+		"--repo-root", "testdata/capability/repos",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+		"--format", "json",
+	}, &out)
+	if err != nil {
+		t.Fatalf("runCapabilityWithOutput: %v", err)
+	}
+	var catalog inventory.Catalog
+	if err := json.Unmarshal(out.Bytes(), &catalog); err != nil {
+		t.Fatalf("json.Unmarshal: %v\n%s", err, out.String())
+	}
+	if catalog.Metadata.Generator != "wfctl capability catalog" {
+		t.Fatalf("generator = %q", catalog.Metadata.Generator)
+	}
+	if len(catalog.Capabilities) == 0 {
+		t.Fatal("expected catalog capabilities")
+	}
+}
+
+func TestRunCapabilityCrossrefsJSON(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"crossrefs",
+		"--registry", "testdata/capability/registry",
+		"--repo-root", "testdata/capability/repos",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+		"--format", "json",
+	}, &out)
+	if err != nil {
+		t.Fatalf("runCapabilityWithOutput: %v", err)
+	}
+	var refs inventory.CapabilityCrossrefs
+	if err := json.Unmarshal(out.Bytes(), &refs); err != nil {
+		t.Fatalf("json.Unmarshal: %v\n%s", err, out.String())
+	}
+	if len(refs.Plugins) == 0 {
+		t.Fatalf("expected plugin refs, got %#v", refs)
+	}
+}
+
 func TestRunCapabilityAppJSON(t *testing.T) {
 	var out bytes.Buffer
 	err := runCapabilityWithOutput([]string{
@@ -66,7 +111,29 @@ func TestRunCapabilityAppJSON(t *testing.T) {
 	}
 }
 
-func TestRunCapabilityCheckWarnOnly(t *testing.T) {
+func TestRunCapabilityCheckSummarizesDetectedCapabilities(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"check",
+		"--manifest", "testdata/capability/healthy/wfctl.yaml",
+		"--workflow", "testdata/capability/healthy/workflow.yaml",
+		"--plugin-dir", "testdata/capability/healthy/plugins",
+		"--lock-file", "testdata/capability/healthy/.wfctl-lock.yaml",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+	}, &out)
+	if err != nil {
+		t.Fatalf("check should be warning-only, got %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "Capabilities") || !strings.Contains(text, "auth.authz") {
+		t.Fatalf("expected capability summary, got %s", text)
+	}
+	if !strings.Contains(text, "OK no capability findings") {
+		t.Fatalf("expected no-finding status, got %s", text)
+	}
+}
+
+func TestRunCapabilityCheckIncludesFindingsAfterSummary(t *testing.T) {
 	var out bytes.Buffer
 	err := runCapabilityWithOutput([]string{
 		"check",
@@ -79,8 +146,35 @@ func TestRunCapabilityCheckWarnOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("check should be warning-only, got %v", err)
 	}
-	if !strings.Contains(out.String(), "WARN") || !strings.Contains(out.String(), "tenant-evidence-missing") {
-		t.Fatalf("expected warning output, got %s", out.String())
+	text := out.String()
+	if !strings.Contains(text, "Capabilities") || !strings.Contains(text, "auth.authz") {
+		t.Fatalf("expected capability summary, got %s", text)
+	}
+	if !strings.Contains(text, "WARN") || !strings.Contains(text, "tenant-evidence-missing") {
+		t.Fatalf("expected warning output, got %s", text)
+	}
+}
+
+func TestRunCapabilityCheckFindingsOnlyPreservesWarningOnlyOutput(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"check",
+		"--findings-only",
+		"--manifest", "testdata/capability/app/wfctl.yaml",
+		"--workflow", "testdata/capability/app/workflow.yaml",
+		"--plugin-dir", "testdata/capability/app/plugins",
+		"--lock-file", "testdata/capability/app/.wfctl-lock.yaml",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+	}, &out)
+	if err != nil {
+		t.Fatalf("check should be warning-only, got %v", err)
+	}
+	text := out.String()
+	if strings.Contains(text, "Capabilities") {
+		t.Fatalf("findings-only should not print summary, got %s", text)
+	}
+	if !strings.Contains(text, "WARN") || !strings.Contains(text, "tenant-evidence-missing") {
+		t.Fatalf("expected warning output, got %s", text)
 	}
 }
 

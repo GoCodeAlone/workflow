@@ -20,8 +20,11 @@ import (
 // ErrNotInteractive is returned by all constructors when stdin is not a terminal.
 var ErrNotInteractive = errors.New("prompt: stdin is not a terminal")
 
-// ErrInterrupted is returned when the user aborts an interactive prompt.
-var ErrInterrupted = errors.New("prompt: interrupted")
+// ErrCancelled is returned when the user aborts an interactive prompt.
+var ErrCancelled = errors.New("prompt: cancelled")
+
+// ErrInterrupted is kept for compatibility with callers using the older name.
+var ErrInterrupted = ErrCancelled
 
 // Item is a selectable entry for MultiSelect.
 type Item struct {

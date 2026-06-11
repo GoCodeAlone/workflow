@@ -1,9 +1,7 @@
 package prompt
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,29 +20,27 @@ func Confirm(question string, def bool) (bool, error) {
 	if def {
 		hint = "Y/n"
 	}
-	fmt.Fprintf(out, "%s [%s] ", question, hint)
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	finalModel, err := tea.NewProgram(&confirmModel{question: question, hint: hint, def: def}, tea.WithOutput(out)).Run()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("prompt confirm: %w", err)
 	}
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "":
-		return def, nil
-	case "y", "yes":
-		return true, nil
-	case "n", "no":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid confirmation %q", strings.TrimSpace(line))
+	m, ok := finalModel.(*confirmModel)
+	if !ok {
+		return false, fmt.Errorf("prompt: unexpected confirm model %T", finalModel)
 	}
+	if m.interrupted {
+		return false, ErrCancelled
+	}
+	return m.answer, nil
 }
 
 type confirmModel struct {
-	question string
-	hint     string
-	def      bool
-	answer   bool
-	quit     bool
+	question    string
+	hint        string
+	def         bool
+	answer      bool
+	quit        bool
+	interrupted bool
 }
 
 func (m *confirmModel) Init() tea.Cmd { return nil }
@@ -52,8 +48,9 @@ func (m *confirmModel) Init() tea.Cmd { return nil }
 func (m *confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyPressMsg); ok {
 		switch strings.ToLower(msg.String()) {
-		case "ctrl+c":
+		case "ctrl+c", "esc":
 			m.quit = true
+			m.interrupted = true
 			return m, tea.Quit
 		case "y":
 			m.answer = true

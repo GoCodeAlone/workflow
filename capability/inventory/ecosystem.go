@@ -61,13 +61,14 @@ func CollectEcosystem(opts EcosystemOptions) (*Inventory, error) {
 }
 
 type registryManifest struct {
-	Name         string                `json:"name"`
-	Version      string                `json:"version"`
-	Description  string                `json:"description"`
-	Type         string                `json:"type"`
-	Status       string                `json:"status"`
-	Repository   string                `json:"repository"`
-	Capabilities *registryCapabilities `json:"capabilities"`
+	Name         string                      `json:"name"`
+	Version      string                      `json:"version"`
+	Description  string                      `json:"description"`
+	Type         string                      `json:"type"`
+	Status       string                      `json:"status"`
+	Repository   string                      `json:"repository"`
+	Dependencies []workflowplugin.Dependency `json:"dependencies"`
+	Capabilities *registryCapabilities       `json:"capabilities"`
 }
 
 type registryCapabilities struct {
@@ -122,6 +123,7 @@ func collectRegistryProviders(builder *inventoryBuilder, registryDir string) (in
 			Version:       manifest.Version,
 			ReleaseStatus: firstNonEmpty(manifest.Status, "released"),
 			Source:        firstNonEmpty(manifest.Repository, path),
+			Dependencies:  dependencyNames(manifest.Dependencies),
 			Path:          path,
 			Raw:           registryRawCapabilities(manifest.Capabilities),
 		})
@@ -168,6 +170,7 @@ func collectLocalProviders(builder *inventoryBuilder, repoRoot string) (int, err
 			Version:       manifest.Version,
 			ReleaseStatus: "local-only",
 			Source:        firstNonEmpty(manifest.Repository, manifestPath),
+			Dependencies:  dependencyNames(manifest.Dependencies),
 			Path:          manifestPath,
 			Raw:           manifestRawCapabilities(manifest),
 		})
@@ -255,6 +258,7 @@ type providerInput struct {
 	Version       string
 	ReleaseStatus string
 	Source        string
+	Dependencies  []string
 	Path          string
 	Raw           []rawCapability
 }
@@ -363,6 +367,7 @@ func mergeProvider(cap *Capability, input providerInput, raw rawCapability) {
 				cap.Providers[i].Capabilities = append(cap.Providers[i].Capabilities, rawName)
 				sort.Strings(cap.Providers[i].Capabilities)
 			}
+			cap.Providers[i].Dependencies = mergeStrings(cap.Providers[i].Dependencies, input.Dependencies)
 			return
 		}
 	}
@@ -373,7 +378,19 @@ func mergeProvider(cap *Capability, input providerInput, raw rawCapability) {
 		ReleaseStatus: input.ReleaseStatus,
 		Source:        input.Source,
 		Capabilities:  []string{rawName},
+		Dependencies:  append([]string(nil), input.Dependencies...),
 	})
+}
+
+func dependencyNames(deps []workflowplugin.Dependency) []string {
+	names := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		if strings.TrimSpace(dep.Name) != "" {
+			names = append(names, dep.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func evidenceFor(provider providerInput, raw rawCapability) Evidence {
@@ -405,4 +422,15 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func mergeStrings(a, b []string) []string {
+	out := append([]string(nil), a...)
+	for _, value := range b {
+		if strings.TrimSpace(value) != "" && !containsString(out, value) {
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
