@@ -13,6 +13,7 @@ require (
 	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0
 	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0
+	github.com/GoCodeAlone/workflow-plugin-control-plane v0.1.0
 	github.com/GoCodeAlone/yaegi v0.17.2
 	github.com/IBM/sarama v1.47.0
 	github.com/alicebob/miniredis/v2 v2.38.0
@@ -71,7 +72,6 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.8.3 // indirect
-	github.com/GoCodeAlone/workflow-plugin-control-plane v0.1.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/Workiva/go-datastructures v1.1.7 // indirect
