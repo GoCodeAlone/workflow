@@ -116,7 +116,6 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 		}
 	}
 
-	var promptErr error
 	valuer := func(d setupDecl) (string, bool, error) {
 		label := d.name
 		if d.description != "" {
@@ -124,9 +123,6 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 		}
 		v, err := prompt.Input(label, d.sensitive)
 		if err != nil {
-			if errors.Is(err, prompt.ErrNotInteractive) || errors.Is(err, prompt.ErrCancelled) {
-				promptErr = err
-			}
 			return "", false, err
 		}
 		if v == "" {
@@ -141,13 +137,6 @@ func runSecretsSetupInteractive(ctx context.Context, a *interactiveSetupArgs, ou
 	}
 
 	report, err := runSetupDeclsByStore(ctx, cfg, selectedDecls, valuer, auditFn, false)
-	// If a prompt.Input hit a non-TTY mid-flow, surface ErrNotInteractive so the
-	// caller's fallback triggers. The engine runs with stopOnErr=false, so it
-	// returns (report, nil) even when the valuer reported ErrNotInteractive —
-	// hence this check must run regardless of err.
-	if promptErr != nil {
-		return promptErr
-	}
 	if err != nil {
 		return err
 	}
