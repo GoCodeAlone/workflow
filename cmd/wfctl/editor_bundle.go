@@ -354,6 +354,9 @@ func contractDescriptorFromPluginDescriptor(descriptor *pluginContractDescriptor
 			return nil, fmt.Errorf("malformed service_method contract descriptor: serviceName and method are required when moduleType or serviceName is set")
 		}
 	case "message":
+		if err := validateEditorBundleMessageContractDescriptor(descriptor); err != nil {
+			return nil, err
+		}
 		contract.Kind = pb.ContractKind_CONTRACT_KIND_MESSAGE
 		contract.ContractType = descriptor.ContractType
 		contract.ProtoPackage = descriptor.ProtoPackage
@@ -365,6 +368,23 @@ func contractDescriptorFromPluginDescriptor(descriptor *pluginContractDescriptor
 		return nil, nil
 	}
 	return contract, nil
+}
+
+func validateEditorBundleMessageContractDescriptor(descriptor *pluginContractDescriptor) error {
+	for field, value := range map[string]string{
+		"contractType":    descriptor.ContractType,
+		"protoPackage":    descriptor.ProtoPackage,
+		"schemaDigest":    descriptor.SchemaDigest,
+		"protocolVersion": descriptor.ProtocolVersion,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("invalid_message_contract_descriptor: message contract missing %s", field)
+		}
+	}
+	if len(descriptor.MessageNames) == 0 {
+		return fmt.Errorf("invalid_message_contract_descriptor: message contract missing messageNames")
+	}
+	return nil
 }
 
 func pbContractMode(mode string) pb.ContractMode {
