@@ -40,7 +40,7 @@ sets, GitHub Actions, autodev scope lock.
 | 1 | test(wfctl): validate control-plane descriptor bundles | Task 1, Task 2, Task 3, Task 4 | workflow:feat/control-plane-descriptor-validation |
 | 2 | docs: close control-plane descriptor validation phase | Task 5, Task 6 | workflow-compute:docs/control-plane-descriptor-validation |
 
-**Status:** Locked 2026-06-12T15:00:00Z
+**Status:** Complete 2026-06-12T16:55:45Z
 
 ### Task 1: Pin Released Control-Plane Module And Add Fixture Helpers
 
