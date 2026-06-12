@@ -17,6 +17,17 @@ func TestRewriteEnvRefsInStringOnlyMappedRefs(t *testing.T) {
 	}
 }
 
+func TestRewriteEnvRefsInStringDoesNotChainMappings(t *testing.T) {
+	got := rewriteEnvRefsInString("${A}:${B}", map[string]string{
+		"A": "B",
+		"B": "C",
+	})
+	want := "${B}:${C}"
+	if got != want {
+		t.Fatalf("rewrite = %q, want one-pass %q", got, want)
+	}
+}
+
 func TestRewriteEnvRefsInFilePreservesCommentsAndUnrelatedRefs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "infra.yaml")
 	if err := os.WriteFile(path, []byte(`# provider config

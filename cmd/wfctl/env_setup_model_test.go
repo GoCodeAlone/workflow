@@ -23,6 +23,12 @@ func TestParseNameMappings(t *testing.T) {
 	if _, err := parseNameMappings([]string{"NAMECHEAP_API_KEY"}); err == nil {
 		t.Fatal("parseNameMappings accepted missing stored name")
 	}
+	if _, err := parseNameMappings([]string{"A=B", "A=C"}); err == nil {
+		t.Fatal("parseNameMappings accepted duplicate logical name")
+	}
+	if _, err := parseNameMappings([]string{"A=C", "B=C"}); err == nil {
+		t.Fatal("parseNameMappings accepted stored-name collision")
+	}
 }
 
 func TestApplyManifestNameMappingsUsesStoredNameForStatus(t *testing.T) {
@@ -37,8 +43,35 @@ func TestApplyManifestNameMappingsUsesStoredNameForStatus(t *testing.T) {
 	if !status.IsSet || status.Name != "NAMECHEAP_API_KEY" {
 		t.Fatalf("status = %+v, want logical name set via mapped storage", status)
 	}
-	if provider.setCnt["NAMECHEAP_API_KEY"] != 0 {
+	if provider.checkCnt["GCA_NC_API_KEY"] != 1 {
+		t.Fatalf("provider Check(GCA_NC_API_KEY) called %d times, want 1", provider.checkCnt["GCA_NC_API_KEY"])
+	}
+	if provider.checkCnt["NAMECHEAP_API_KEY"] != 0 {
 		t.Fatal("logical name should not be used for provider checks")
+	}
+}
+
+func TestManifestSecretTargetAllowedRequiresVariableProviderForVars(t *testing.T) {
+	input := manifestDiscoveredSecret{
+		PluginRequiredSecret: PluginRequiredSecret{Name: "NAMECHEAP_CLIENT_IP"},
+		Kind:                 envSetupInputVar,
+	}
+	secretOnly := manifestSecretTargetProvider{
+		Store:    "github:repo",
+		Provider: newEngineTestProvider(nil),
+	}
+	if manifestSecretTargetAllowed(input, secretOnly) {
+		t.Fatal("var input should be disallowed when provider lacks VariableProvider support")
+	}
+	withVars := manifestSecretTargetProvider{
+		Store: "github:repo",
+		Provider: &mixedSetupProvider{
+			engineTestProvider: newEngineTestProvider(nil),
+			vars:               map[string]string{},
+		},
+	}
+	if !manifestSecretTargetAllowed(input, withVars) {
+		t.Fatal("var input should be allowed when provider supports VariableProvider")
 	}
 }
 

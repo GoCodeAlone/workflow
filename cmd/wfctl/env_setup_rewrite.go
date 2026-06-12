@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -96,18 +95,15 @@ func rewriteEnvRefsInString(value string, mappings map[string]string) string {
 	if len(mappings) == 0 || !strings.Contains(value, "${") {
 		return value
 	}
-	keys := make([]string, 0, len(mappings))
-	for key := range mappings {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := value
-	for _, logical := range keys {
-		stored := strings.TrimSpace(mappings[logical])
-		if stored == "" || stored == logical {
-			continue
+	return manifestEnvRefPattern.ReplaceAllStringFunc(value, func(ref string) string {
+		match := manifestEnvRefPattern.FindStringSubmatch(ref)
+		if len(match) != 2 {
+			return ref
 		}
-		out = strings.ReplaceAll(out, "${"+logical+"}", "${"+stored+"}")
-	}
-	return out
+		logical := match[1]
+		if stored := strings.TrimSpace(mappings[logical]); stored != "" && stored != logical {
+			return "${" + stored + "}"
+		}
+		return ref
+	})
 }

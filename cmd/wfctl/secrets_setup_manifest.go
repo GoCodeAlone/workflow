@@ -662,6 +662,9 @@ func queryManifestSecretTargets(ctx context.Context, secrets []manifestDiscovere
 
 func manifestSecretTargetAllowed(secret manifestDiscoveredSecret, provider manifestSecretTargetProvider) bool {
 	if secret.Kind == envSetupInputVar {
+		if _, ok := manifestTargetVariableProvider(provider.Provider); !ok {
+			return false
+		}
 		return manifestConfigTargetAllowed(secret.ConfigTargets, provider)
 	}
 	if len(secret.SecretTargets) == 0 {

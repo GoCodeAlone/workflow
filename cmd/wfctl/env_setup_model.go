@@ -25,6 +25,7 @@ func (k envSetupInputKind) String() string {
 
 func parseNameMappings(raw []string) (map[string]string, error) {
 	mappings := make(map[string]string, len(raw))
+	storedNames := make(map[string]string, len(raw))
 	for _, item := range raw {
 		logical, stored, ok := strings.Cut(item, "=")
 		if !ok {
@@ -35,7 +36,14 @@ func parseNameMappings(raw []string) (map[string]string, error) {
 		if logical == "" || stored == "" {
 			return nil, fmt.Errorf("--name-map %q: logical and stored names are required", item)
 		}
+		if existing := mappings[logical]; existing != "" {
+			return nil, fmt.Errorf("--name-map %q: logical name %q is already mapped to %q", item, logical, existing)
+		}
+		if existing := storedNames[stored]; existing != "" {
+			return nil, fmt.Errorf("--name-map %q: stored name %q is already used by logical name %q", item, stored, existing)
+		}
 		mappings[logical] = stored
+		storedNames[stored] = logical
 	}
 	return mappings, nil
 }
