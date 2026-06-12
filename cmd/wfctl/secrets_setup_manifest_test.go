@@ -46,6 +46,9 @@ plugins:
 		"name": "workflow-plugin-namecheap",
 		"required_secrets": [
 			{"name": "NAMECHEAP_API_KEY", "sensitive": true}
+		],
+		"required_config": [
+			{"name": "NAMECHEAP_CLIENT_IP", "description": "allowlisted client IP"}
 		]
 	}`)
 	if err := os.WriteFile(configPath, []byte(`providers:
@@ -67,7 +70,7 @@ plugins:
 		got = append(got, secret.Name)
 		sources[secret.Name] = secret.Sources
 	}
-	want := []string{"CLOUDFLARE_API_TOKEN", "CONFIG_ONLY_TOKEN", "NAMECHEAP_API_KEY"}
+	want := []string{"CLOUDFLARE_API_TOKEN", "CONFIG_ONLY_TOKEN", "NAMECHEAP_API_KEY", "NAMECHEAP_CLIENT_IP"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("secrets = %v, want %v", got, want)
 	}
@@ -76,6 +79,13 @@ plugins:
 	}
 	if !reflect.DeepEqual(sources["CONFIG_ONLY_TOKEN"], []string{"config:infra.yaml"}) {
 		t.Fatalf("config-only sources = %v", sources["CONFIG_ONLY_TOKEN"])
+	}
+	kinds := map[string]envSetupInputKind{}
+	for _, input := range secrets {
+		kinds[input.Name] = input.Kind
+	}
+	if kinds["NAMECHEAP_API_KEY"] != envSetupInputSecret || kinds["NAMECHEAP_CLIENT_IP"] != envSetupInputVar {
+		t.Fatalf("kinds = %+v, want namecheap key secret and client ip var", kinds)
 	}
 }
 
