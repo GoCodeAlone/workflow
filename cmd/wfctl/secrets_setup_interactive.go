@@ -303,6 +303,9 @@ func runSetupDeclsByStore(ctx context.Context, cfg *config.WorkflowConfig, decls
 		value, provided, err := valuer(decl)
 		if err != nil {
 			report.Failed = append(report.Failed, decl.name)
+			if errors.Is(err, prompt.ErrCancelled) || errors.Is(err, prompt.ErrNotInteractive) {
+				return report, err
+			}
 			if stopOnError {
 				return report, err
 			}
