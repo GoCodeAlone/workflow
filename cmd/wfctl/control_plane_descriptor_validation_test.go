@@ -8,6 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	cpdescriptors "github.com/GoCodeAlone/workflow-plugin-control-plane/descriptors"
+	cpdescriptorspb "github.com/GoCodeAlone/workflow-plugin-control-plane/descriptors/pb"
+	cpenvelopes "github.com/GoCodeAlone/workflow-plugin-control-plane/envelopes"
+	cpenvelopespb "github.com/GoCodeAlone/workflow-plugin-control-plane/envelopes/pb"
+	cpregistry "github.com/GoCodeAlone/workflow-plugin-control-plane/registry"
+	cpregistrypb "github.com/GoCodeAlone/workflow-plugin-control-plane/registry/pb"
 )
 
 const controlPlaneModulePath = "github.com/GoCodeAlone/workflow-plugin-control-plane"
@@ -130,6 +137,101 @@ func TestControlPlaneDescriptorBundleRejectsInvalidSchemaDigest(t *testing.T) {
 	}
 }
 
+func TestControlPlaneReleasedValidatorsRejectInvalidInputs(t *testing.T) {
+	cases := []struct {
+		name     string
+		validate func() error
+	}{
+		{
+			name: "route action schema digest malformed",
+			validate: func() error {
+				descriptor := validControlPlaneRouteActionDescriptor()
+				descriptor.InputSchemaDigest = "sha256:not-hex"
+				return cpdescriptors.ValidateRouteActionDescriptor(descriptor)
+			},
+		},
+		{
+			name: "registry raw network provenance ref",
+			validate: func() error {
+				registration := validControlPlaneRegistration()
+				registration.ProvenanceSource = "https://example.test/release"
+				return cpregistry.ValidateDescriptorRegistration(registration)
+			},
+		},
+		{
+			name: "registry empty downgrade floor version",
+			validate: func() error {
+				registration := validControlPlaneRegistration()
+				registration.DowngradeFloorVersion = ""
+				return cpregistry.ValidateDescriptorRegistration(registration)
+			},
+		},
+		{
+			name: "registry stale revocation freshness",
+			validate: func() error {
+				registration := validControlPlaneRegistration()
+				registration.RevocationFreshUntilUnixNano = registration.ValidatedAtUnixNano - 1
+				return cpregistry.ValidateDescriptorRegistration(registration)
+			},
+		},
+		{
+			name: "envelope raw tenant handle",
+			validate: func() error {
+				envelope := validControlPlaneEnvelope()
+				envelope.TenantHandle = "tenant:customer-1"
+				return cpenvelopes.ValidateEnvelope(envelope)
+			},
+		},
+		{
+			name: "envelope raw actor handle",
+			validate: func() error {
+				envelope := validControlPlaneEnvelope()
+				envelope.ActorHandle = "person@example.test"
+				return cpenvelopes.ValidateEnvelope(envelope)
+			},
+		},
+		{
+			name: "envelope raw resource handle",
+			validate: func() error {
+				envelope := validControlPlaneEnvelope()
+				envelope.ResourceHandle = "customer:resource-1"
+				return cpenvelopes.ValidateEnvelope(envelope)
+			},
+		},
+		{
+			name: "provider handoff input schema digest mismatch",
+			validate: func() error {
+				descriptor := validControlPlaneRouteActionDescriptor()
+				descriptor.ProviderHandoff.InputSchemaDigest = "sha256:not64"
+				return cpdescriptors.ValidateRouteActionDescriptor(descriptor)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.validate(); err == nil {
+				t.Fatal("expected released validator to reject invalid input")
+			}
+		})
+	}
+}
+
+func TestControlPlaneDescriptorValidationDoesNotEnterRuntimeDeps(t *testing.T) {
+	cmd := exec.Command("go", "list", "-deps", "./cmd/wfctl")
+	cmd.Dir = filepath.Join("..", "..")
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("list wfctl deps: %v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	if strings.Contains(string(out), controlPlaneModulePath) {
+		t.Fatalf("non-test wfctl deps include %s", controlPlaneModulePath)
+	}
+}
+
 func controlPlaneReleasedModuleDir(t *testing.T) string {
 	t.Helper()
 
@@ -146,6 +248,78 @@ func controlPlaneReleasedModuleDir(t *testing.T) string {
 		t.Fatal("released control-plane module dir is empty")
 	}
 	return moduleDir
+}
+
+func validControlPlaneRouteActionDescriptor() *cpdescriptorspb.RouteActionDescriptor {
+	return &cpdescriptorspb.RouteActionDescriptor{
+		ProtocolVersion:   cpdescriptors.Version,
+		DescriptorId:      "descriptor.admin.deploy",
+		OperationId:       "deploy_app",
+		RouteHandle:       "route://admin/deploy-app",
+		AuthClassRef:      "authclass://admin/deploy",
+		AuditClassRef:     "auditclass://deployment/apply",
+		InputSchemaDigest: controlPlaneDigest("a"),
+		ProviderHandoff: &cpdescriptorspb.ProviderHandoffRef{
+			ProviderPluginId:      "workflow-plugin-digitalocean",
+			ProviderPluginVersion: "v2.0.15",
+			CapabilityId:          "app-platform",
+			CapabilityVersion:     "v1",
+			InputSchemaDigest:     controlPlaneDigest("b"),
+			ActionNonce:           "nonce-001",
+			IdempotencyKey:        "idem-001",
+		},
+		Admin: &cpdescriptorspb.AdminContribution{
+			ResourceRef:                      "resource://app-platform/service",
+			ActionClassRef:                   "actionclass://deployment/apply",
+			RiskRef:                          "risk://destructive",
+			SeverityRef:                      "severity://high",
+			PermissionExplanationTemplateRef: "template://permission/deployment",
+			RenderRef:                        "render://admin/action-form",
+		},
+	}
+}
+
+func validControlPlaneEnvelope() *cpenvelopespb.ControlPlaneEnvelope {
+	return &cpenvelopespb.ControlPlaneEnvelope{
+		ProtocolVersion:    cpenvelopes.Version,
+		EnvelopeId:         "evt-001",
+		Kind:               "audit",
+		TenantHandle:       "opaque-tenant-001",
+		ActorHandle:        "opaque-actor-001",
+		ResourceHandle:     "opaque-resource-001",
+		CorrelationId:      "corr-001",
+		OccurredAtUnixNano: 100,
+		ObservedAtUnixNano: 200,
+		Retention: &cpenvelopespb.RetentionMetadata{
+			RedactionState:             "active",
+			RetentionExpiresAtUnixNano: 1000,
+			CorrelationRekeyId:         "rekey-001",
+		},
+	}
+}
+
+func validControlPlaneRegistration() *cpregistrypb.DescriptorRegistration {
+	return &cpregistrypb.DescriptorRegistration{
+		ProtocolVersion:              cpregistry.Version,
+		DescriptorDigest:             controlPlaneDigest("c"),
+		SchemaDigest:                 controlPlaneDigest("d"),
+		PluginId:                     "workflow-plugin-control-plane",
+		PluginVersion:                "v0.1.0",
+		PluginPackageDigest:          controlPlaneDigest("e"),
+		SigningRootRef:               "trustroot://workflow/control-plane",
+		ProvenanceSource:             "provenance://github/release",
+		AllowlistEpoch:               1,
+		DowngradeFloorVersion:        "v0.1.0",
+		RevocationFreshUntilUnixNano: 300,
+		FetchedAtUnixNano:            100,
+		ValidatedAtUnixNano:          200,
+		ParserCompatibilityVersion:   "v1",
+		TrustRootGeneration:          1,
+	}
+}
+
+func controlPlaneDigest(ch string) string {
+	return "sha256:" + strings.Repeat(ch, 64)
 }
 
 func copyControlPlaneFixtureFile(t *testing.T, srcDir, dstDir, rel string) {
