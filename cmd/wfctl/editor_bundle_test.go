@@ -205,6 +205,71 @@ func TestRunEditorBundleRejectsMalformedServiceMethodContract(t *testing.T) {
 	}
 }
 
+func TestRunEditorBundleRejectsInvalidMessageContractDescriptors(t *testing.T) {
+	cases := map[string]struct {
+		contracts string
+		want      string
+	}{
+		"deterministic missing field order": {
+			contracts: `{
+  "version": "v1",
+  "contracts": [
+    {
+      "kind": "message",
+      "mode": "strict",
+      "protoPackage": "",
+      "messageNames": [],
+      "schemaDigest": "",
+      "protocolVersion": ""
+    }
+  ]
+}`,
+			want: "message contract missing contractType",
+		},
+		"blank message name": {
+			contracts: `{
+  "version": "v1",
+  "contracts": [
+    {
+      "kind": "message",
+      "contractType": "message.bad",
+      "mode": "strict",
+      "protoPackage": "workflow.bad",
+      "messageNames": [" "],
+      "schemaDigest": "sha256:placeholder",
+      "protocolVersion": "v1"
+    }
+  ]
+}`,
+			want: "message contract missing messageNames",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			pluginDir := filepath.Join(dir, "workflow-plugin-bad-message")
+			if err := os.Mkdir(pluginDir, 0755); err != nil {
+				t.Fatalf("mkdir plugin dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"name":"workflow-plugin-bad-message"}`), 0644); err != nil {
+				t.Fatalf("write plugin manifest: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(pluginDir, "plugin.contracts.json"), []byte(tc.contracts), 0644); err != nil {
+				t.Fatalf("write plugin contracts: %v", err)
+			}
+
+			err := runEditorBundle([]string{"--registry=false", "--plugin-dir", pluginDir})
+			if err == nil {
+				t.Fatal("expected invalid message descriptor to fail")
+			}
+			if !strings.Contains(err.Error(), "invalid_message_contract_descriptor") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want invalid_message_contract_descriptor and %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunEditorBundleFailsWhenDSLReferenceCannotLoad(t *testing.T) {
 	orig := loadEditorBundleDSLReferenceFunc
 	t.Cleanup(func() { loadEditorBundleDSLReferenceFunc = orig })

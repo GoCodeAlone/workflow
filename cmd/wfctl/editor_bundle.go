@@ -371,18 +371,26 @@ func contractDescriptorFromPluginDescriptor(descriptor *pluginContractDescriptor
 }
 
 func validateEditorBundleMessageContractDescriptor(descriptor *pluginContractDescriptor) error {
-	for field, value := range map[string]string{
-		"contractType":    descriptor.ContractType,
-		"protoPackage":    descriptor.ProtoPackage,
-		"schemaDigest":    descriptor.SchemaDigest,
-		"protocolVersion": descriptor.ProtocolVersion,
+	for _, required := range []struct {
+		field string
+		value string
+	}{
+		{field: "contractType", value: descriptor.ContractType},
+		{field: "protoPackage", value: descriptor.ProtoPackage},
+		{field: "schemaDigest", value: descriptor.SchemaDigest},
+		{field: "protocolVersion", value: descriptor.ProtocolVersion},
 	} {
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("invalid_message_contract_descriptor: message contract missing %s", field)
+		if strings.TrimSpace(required.value) == "" {
+			return fmt.Errorf("invalid_message_contract_descriptor: message contract missing %s", required.field)
 		}
 	}
 	if len(descriptor.MessageNames) == 0 {
 		return fmt.Errorf("invalid_message_contract_descriptor: message contract missing messageNames")
+	}
+	for _, messageName := range descriptor.MessageNames {
+		if strings.TrimSpace(messageName) == "" {
+			return fmt.Errorf("invalid_message_contract_descriptor: message contract missing messageNames")
+		}
 	}
 	return nil
 }
