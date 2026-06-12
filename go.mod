@@ -13,6 +13,7 @@ require (
 	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0
 	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0
+	github.com/GoCodeAlone/workflow-plugin-control-plane v0.1.0
 	github.com/GoCodeAlone/yaegi v0.17.2
 	github.com/IBM/sarama v1.47.0
 	github.com/alicebob/miniredis/v2 v2.38.0

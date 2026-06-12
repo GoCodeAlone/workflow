@@ -30,6 +30,8 @@ github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0 h1:zoWioqUvuNNDfnjHA1s
 github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0/go.mod h1:GDU/jsD6AddmXKedj0wZwieUIaQsTBSGMzuj+XHXMrw=
 github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0 h1:+2M/ecyCxDiXfJM4ibcERuu/BBeIbLTQNcVgRsllR64=
 github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0/go.mod h1:tlVH1mA5yuU8CB7R7+HXIRaBixZoNid6h+5tew5u3FU=
+github.com/GoCodeAlone/workflow-plugin-control-plane v0.1.0 h1:XtogtQXVBING2iu5jQGzfubi9rOes/erVWH5uwiPsok=
+github.com/GoCodeAlone/workflow-plugin-control-plane v0.1.0/go.mod h1:2c3Ow7rncEZttzq3XddC+mTD0x5CBE4TdPdvbnH4iYk=
 github.com/GoCodeAlone/yaegi v0.17.2 h1:WK6Y6e0t1a6U7r+S2dN3CGWW1PizYD3zO0zneToZPxM=
 github.com/GoCodeAlone/yaegi v0.17.2/go.mod h1:z5Pr6Wse6QJcQvpgxTxzMAevFarH0N37TG88Y9dprx0=
 github.com/IBM/sarama v1.47.0 h1:GcQFEd12+KzfPYeLgN69Fh7vLCtYRhVIx0rO4TZO318=
