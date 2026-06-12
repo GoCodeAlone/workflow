@@ -159,7 +159,7 @@ func runSecretsSetWithReader(args []string, r io.Reader) error {
 	scope := fs.String("scope", "", "GitHub secret scope: repo (default) | env | org")
 	envName := fs.String("env", "", "GitHub Actions environment name (required with --scope=env)")
 	org := fs.String("org", "", "GitHub org name (required with --scope=org)")
-	orgVisibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
+	orgVisibility := fs.String("visibility", "private", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl secrets set <name> [options]
@@ -495,7 +495,9 @@ func cleanGitHubRepoPath(path string) (string, bool) {
 // parseGitHubOrgVisibility canonicalises the --visibility flag.
 func parseGitHubOrgVisibility(s string) (secrets.GitHubOrgVisibility, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", "all":
+	case "":
+		return secrets.OrgVisibilityPrivate, nil
+	case "all":
 		return secrets.OrgVisibilityAll, nil
 	case "selected":
 		return secrets.OrgVisibilitySelected, nil

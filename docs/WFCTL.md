@@ -2734,7 +2734,7 @@ wfctl secrets setup [options]
 | `--auto-gen-keys` | `false` | Auto-generate random values for config-backed secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive; not supported for manifest-backed `wfctl.yaml` setup |
 | `--scope` | `repo` | GitHub scope for plugin or manifest setup: `repo` \| `env` \| `org` |
 | `--org` | _(none)_ | Organization slug for `--scope org` |
-| `--visibility` | `all` | Org-scope visibility: `all` \| `selected` \| `private` |
+| `--visibility` | `private` | Org-scope visibility: `all` \| `selected` \| `private` |
 | `--token-env` | `GITHUB_TOKEN` | Env var holding the GitHub PAT |
 
 ```bash
@@ -2791,7 +2791,7 @@ secret flow.
 | `--scope` | `repo` | GitHub variable scope: `repo` \| `env` \| `org` |
 | `--env` | _(none)_ | GitHub Actions environment name for `--scope env` |
 | `--org` | _(none)_ | Organization slug for `--scope org` |
-| `--visibility` | `all` | Org-scope visibility: `all` \| `selected` \| `private` |
+| `--visibility` | `private` | Org-scope visibility: `all` \| `selected` \| `private` |
 | `--token-env` | `GITHUB_TOKEN` | Env var holding the GitHub PAT |
 | `--config` | `app.yaml` | Config file used to resolve GitHub repo for repo/env scopes |
 | `--from-env` | `false` | Read each variable value from `$NAME` |

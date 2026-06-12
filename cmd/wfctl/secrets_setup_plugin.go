@@ -79,7 +79,7 @@ func runSecretsSetupPluginWithIO(args []string, in io.Reader, out io.Writer) err
 	scope := fs.String("scope", "repo", "GitHub scope: repo | env | org")
 	envName := fs.String("env", "", "Environment name (required with --scope=env)")
 	org := fs.String("org", "", "Organization slug (required with --scope=org)")
-	orgVisibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
+	orgVisibility := fs.String("visibility", "private", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	configFile := fs.String("config", "app.yaml", "app.yaml (used to resolve the github repo when --scope=repo|env)")
 	fromEnv := fs.Bool("from-env", false, "Read each secret value from $NAME (recommended for CI; avoids process-table leaks)")
@@ -330,7 +330,7 @@ func buildSecretWriter(scope, envName, org, visibility, tokenEnv, configFile str
 		if err != nil {
 			return nil, "", err
 		}
-		return p, fmt.Sprintf("github org %q (visibility=%s)", org, visibility), nil
+		return p, fmt.Sprintf("github org %q (visibility=%s)", org, vis), nil
 
 	case "env":
 		if envName == "" {

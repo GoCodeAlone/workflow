@@ -54,7 +54,7 @@ since org secrets are out-of-band of repo config. The PAT in
 # All repos in the org can pull this secret.
 wfctl secrets set SHARED_API \
   --scope org --org GoCodeAlone \
-  --visibility all \
+  --visibility private \
   --value "$(openssl rand -hex 32)"
 
 # Only private + internal repos can pull.
@@ -80,7 +80,7 @@ etc.), use the interactive setup flow:
 
 ```sh
 wfctl secrets setup --plugin workflow-plugin-hover \
-  --scope org --org GoCodeAlone --visibility all
+  --scope org --org GoCodeAlone --visibility private
 ```
 
 This:

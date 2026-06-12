@@ -728,7 +728,7 @@ func TestGitHubProvider_OrgScopeURL(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("GITHUB_TOKEN", "test-token")
-	p, err := NewGitHubOrgSecretsProvider("my-org", "GITHUB_TOKEN", OrgVisibilityAll, nil)
+	p, err := NewGitHubOrgSecretsProvider("my-org", "GITHUB_TOKEN", "", nil)
 	if err != nil {
 		t.Fatalf("NewGitHubOrgSecretsProvider: %v", err)
 	}
@@ -740,8 +740,8 @@ func TestGitHubProvider_OrgScopeURL(t *testing.T) {
 	if !strings.HasPrefix(seenPath, "/orgs/my-org/actions/secrets/") {
 		t.Errorf("PUT path = %q; want /orgs/my-org/actions/secrets/...", seenPath)
 	}
-	if vis, _ := seenPayload["visibility"].(string); vis != "all" {
-		t.Errorf("payload visibility = %q; want all", vis)
+	if vis, _ := seenPayload["visibility"].(string); vis != "private" {
+		t.Errorf("payload visibility = %q; want private", vis)
 	}
 }
 

@@ -23,7 +23,7 @@ func runVarsSetupPluginWithIO(args []string, in io.Reader, out io.Writer) error 
 	scope := fs.String("scope", "repo", "GitHub variable scope: repo | env | org")
 	envName := fs.String("env", "", "Environment name (required with --scope=env)")
 	org := fs.String("org", "", "Organization slug (required with --scope=org)")
-	orgVisibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
+	orgVisibility := fs.String("visibility", "private", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	configFile := fs.String("config", "app.yaml", "app.yaml/wfctl.yaml used to resolve the github repo when --scope=repo|env")
 	fromEnv := fs.Bool("from-env", false, "Read each variable value from $NAME")

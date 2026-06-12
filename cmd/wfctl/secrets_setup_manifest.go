@@ -549,7 +549,7 @@ func manifestGitHubSecretStoreTargets(name string, store *config.SecretStoreConf
 	if org := stringConfigValue(cfg, "org"); org != "" {
 		visibility := stringConfigValue(cfg, "visibility")
 		if visibility == "" {
-			visibility = "all"
+			visibility = "private"
 		}
 		if p, err := buildGitHubOrgSecretsTarget(org, visibility, tokenEnv); err == nil {
 			provider := secretsProviderAdapter{p: p}
@@ -1648,7 +1648,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	scope := fs.String("scope", "repo", "GitHub scope: repo | env | org")
 	envName := fs.String("env", "", "Environment name (required with --scope=env)")
 	org := fs.String("org", "", "Organization slug (required with --scope=org)")
-	visibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
+	visibility := fs.String("visibility", "private", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	fromEnv := fs.Bool("from-env", false, "Read each secret value from $NAME")
 	nonInteractive := fs.Bool("non-interactive", false, "Force non-interactive mode for manifest setup")

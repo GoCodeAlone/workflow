@@ -52,7 +52,7 @@ func runSecretsSetup(args []string) error {
 	// path compatible because runSecrets dispatches --plugin before this path.
 	scope := fs.String("scope", "repo", "GitHub scope for manifest-backed setup: repo | env | org")
 	org := fs.String("org", "", "Organization slug for manifest-backed --scope=org")
-	visibility := fs.String("visibility", "all", "Manifest-backed org-scope visibility: all | selected | private")
+	visibility := fs.String("visibility", "private", "Manifest-backed org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT for manifest-backed setup")
 	lockFile := fs.String("lock-file", ".wfctl-lock.yaml", "wfctl plugin lockfile used when wfctl.yaml is auto-discovered")
 	pluginDir := fs.String("plugin-dir", "", "Plugin install dir used when wfctl.yaml is auto-discovered")
