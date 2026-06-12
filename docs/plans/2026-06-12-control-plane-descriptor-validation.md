@@ -165,7 +165,7 @@ Steps:
    ```bash
    GOWORK=off go test ./cmd/wfctl ./schema ./plugin/external/... -count=1
    GOWORK=off go test ./... -count=1
-   go list -deps ./cmd/wfctl | rg 'github.com/GoCodeAlone/workflow-plugin-control-plane'
+   GOWORK=off go list -deps ./cmd/wfctl | rg 'github.com/GoCodeAlone/workflow-plugin-control-plane'
    git diff --check
    rg -n '/Users/[[:alnum:]_.-]+' docs/plans/2026-06-12-control-plane-descriptor-validation-design.md docs/plans/2026-06-12-control-plane-descriptor-validation-design-review.md docs/plans/2026-06-12-control-plane-descriptor-validation.md docs/WFCTL.md cmd/wfctl/control_plane_descriptor_validation_test.go
    ```
