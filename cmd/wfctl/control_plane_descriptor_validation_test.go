@@ -120,11 +120,8 @@ func TestControlPlaneDescriptorBundleRejectsInvalidSchemaDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read released plugin contracts: %v", err)
 	}
-	corrupted := strings.Replace(string(contracts), `"schemaDigest": "sha256:aa889aa79d7e571b9bac757c1b41858a6140a02d6896fe221f041b8ced608842"`, `"schemaDigest": ""`, 1)
-	if corrupted == string(contracts) {
-		t.Fatal("failed to corrupt released schemaDigest fixture")
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.contracts.json"), []byte(corrupted), 0644); err != nil {
+	corrupted := corruptFirstMessageContractSchemaDigest(t, contracts)
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.contracts.json"), corrupted, 0644); err != nil {
 		t.Fatalf("write corrupted plugin contracts: %v", err)
 	}
 
@@ -220,7 +217,7 @@ func TestControlPlaneReleasedValidatorsRejectInvalidInputs(t *testing.T) {
 func TestControlPlaneDescriptorValidationDoesNotEnterRuntimeDeps(t *testing.T) {
 	cmd := exec.Command("go", "list", "-deps", "./cmd/wfctl")
 	cmd.Dir = filepath.Join("..", "..")
-	cmd.Env = append(os.Environ(), "GOWORK=off")
+	cmd.Env = controlPlaneCommandEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -236,7 +233,7 @@ func controlPlaneReleasedModuleDir(t *testing.T) string {
 	t.Helper()
 
 	cmd := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", controlPlaneModulePath)
-	cmd.Env = append(os.Environ(), "GOWORK=off")
+	cmd.Env = controlPlaneCommandEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -248,6 +245,39 @@ func controlPlaneReleasedModuleDir(t *testing.T) string {
 		t.Fatal("released control-plane module dir is empty")
 	}
 	return moduleDir
+}
+
+func controlPlaneCommandEnv() []string {
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "GOWORK=") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, "GOWORK=off")
+}
+
+func corruptFirstMessageContractSchemaDigest(t *testing.T, data []byte) []byte {
+	t.Helper()
+
+	var file pluginContractDescriptorFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("parse released plugin contracts: %v", err)
+	}
+	for i := range file.Contracts {
+		if normalizePluginContractKind(file.Contracts[i].Kind) != "message" {
+			continue
+		}
+		file.Contracts[i].SchemaDigest = ""
+		corrupted, err := json.MarshalIndent(file, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal corrupted plugin contracts: %v", err)
+		}
+		return append(corrupted, '\n')
+	}
+	t.Fatal("released plugin contracts have no message contract to corrupt")
+	return nil
 }
 
 func validControlPlaneRouteActionDescriptor() *cpdescriptorspb.RouteActionDescriptor {
