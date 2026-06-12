@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/cmd/wfctl/internal/prompt"
 	"github.com/GoCodeAlone/workflow/config"
 )
 
@@ -198,6 +200,41 @@ func TestQueryDeclStatuses(t *testing.T) {
 	}
 	if byName["B"].IsSet {
 		t.Error("B should be unset")
+	}
+}
+
+func TestRunSetupDeclsByStoreStopsOnPromptCancellation(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.WorkflowConfig{
+		SecretStores: map[string]*config.SecretStoreConfig{
+			"localfs": {Provider: "file", Config: map[string]any{"path": tmp}},
+		},
+	}
+	decls := []setupDecl{
+		{name: "FIRST_SECRET", store: "localfs"},
+		{name: "SECOND_SECRET", store: "localfs"},
+	}
+	asked := []string{}
+	valuer := func(d setupDecl) (string, bool, error) {
+		asked = append(asked, d.name)
+		if d.name == "FIRST_SECRET" {
+			return "", false, prompt.ErrCancelled
+		}
+		return "must-not-be-written", true, nil
+	}
+
+	report, err := runSetupDeclsByStore(context.Background(), cfg, decls, valuer, nil, false)
+	if !errors.Is(err, prompt.ErrCancelled) {
+		t.Fatalf("error = %v, want ErrCancelled", err)
+	}
+	if got, want := strings.Join(asked, ","), "FIRST_SECRET"; got != want {
+		t.Fatalf("prompted secrets = %q, want %q", got, want)
+	}
+	if len(report.Set) != 0 {
+		t.Fatalf("set secrets after cancellation = %v, want none", report.Set)
+	}
+	if len(report.Failed) != 1 || report.Failed[0] != "FIRST_SECRET" {
+		t.Fatalf("failed secrets = %v, want FIRST_SECRET only", report.Failed)
 	}
 }
 
