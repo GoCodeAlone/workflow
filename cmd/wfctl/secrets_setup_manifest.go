@@ -171,7 +171,8 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 	}
 	fmt.Fprintln(out)
 	if !interactive {
-		for _, secret := range discovered {
+		for i := range discovered {
+			secret := &discovered[i]
 			fmt.Fprintf(out, "  %s (%s)\n", secret.Name, strings.Join(secret.Sources, ", "))
 		}
 		fmt.Fprintln(out)
@@ -637,7 +638,8 @@ func secretProviderTargetLabel(provider SecretsProvider) string {
 
 func queryManifestSecretTargets(ctx context.Context, secrets []manifestDiscoveredSecret, providers []manifestSecretTargetProvider) []manifestSecretTarget {
 	targets := make([]manifestSecretTarget, 0, len(secrets)*len(providers))
-	for _, secret := range secrets {
+	for i := range secrets {
+		secret := secrets[i]
 		for _, provider := range providers {
 			if secret.StoreHint != "" && provider.Store != secret.StoreHint && !strings.HasPrefix(provider.Store, secret.StoreHint+":") {
 				continue
@@ -1034,7 +1036,8 @@ type manifestSecretSelectionOptions struct {
 func selectManifestSecretsForSetup(secrets []manifestDiscoveredSecret, statuses []SecretStatus, opts manifestSecretSelectionOptions) []manifestDiscoveredSecret {
 	statusByName := secretStatusByName(statuses)
 	selected := make([]manifestDiscoveredSecret, 0, len(secrets))
-	for _, secret := range secrets {
+	for i := range secrets {
+		secret := secrets[i]
 		if len(opts.onlySet) > 0 {
 			if !opts.onlySet[secret.Name] {
 				continue
@@ -1053,7 +1056,8 @@ func selectManifestSecretsForSetup(secrets []manifestDiscoveredSecret, statuses 
 func manifestStatusesFromTargets(targets []manifestSecretTarget) []SecretStatus {
 	statuses := make([]SecretStatus, 0, len(targets))
 	seen := map[string]bool{}
-	for _, target := range targets {
+	for i := range targets {
+		target := &targets[i]
 		name := target.Secret.Name
 		if seen[name] {
 			continue
@@ -1066,11 +1070,13 @@ func manifestStatusesFromTargets(targets []manifestSecretTarget) []SecretStatus 
 
 func targetsForSelectedInputs(targets []manifestSecretTarget, selected []manifestDiscoveredSecret) []manifestSecretTarget {
 	selectedNames := map[string]bool{}
-	for _, input := range selected {
+	for i := range selected {
+		input := &selected[i]
 		selectedNames[input.Name] = true
 	}
 	out := make([]manifestSecretTarget, 0, len(targets))
-	for _, target := range targets {
+	for i := range targets {
+		target := targets[i]
 		if selectedNames[target.Secret.Name] {
 			out = append(out, target)
 		}
@@ -1081,9 +1087,10 @@ func targetsForSelectedInputs(targets []manifestSecretTarget, selected []manifes
 func buildManifestMultiSelectItems(secrets []manifestDiscoveredSecret, statuses []SecretStatus, includeExisting bool) []prompt.Item {
 	statusByName := secretStatusByName(statuses)
 	items := make([]prompt.Item, 0, len(secrets))
-	for _, secret := range secrets {
+	for i := range secrets {
+		secret := &secrets[i]
 		st := statusByName[secret.Name]
-		label := formatStatusLabel(manifestInputDisplayName(secret), st)
+		label := formatStatusLabel(manifestInputDisplayName(*secret), st)
 		if len(secret.Sources) > 0 {
 			label += " (" + strings.Join(secret.Sources, ", ") + ")"
 		}
@@ -1668,19 +1675,6 @@ func normalizedSecretTargetScopes(scopes []string) []string {
 		out = append(out, scope)
 	}
 	sort.Strings(out)
-	return out
-}
-
-func sortedManifestSecrets(secretsByName map[string]*manifestDiscoveredSecret) []manifestDiscoveredSecret {
-	names := make([]string, 0, len(secretsByName))
-	for name := range secretsByName {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	out := make([]manifestDiscoveredSecret, 0, len(names))
-	for _, name := range names {
-		out = append(out, *secretsByName[name])
-	}
 	return out
 }
 
