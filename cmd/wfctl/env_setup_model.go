@@ -48,14 +48,14 @@ func parseNameMappings(raw []string) (map[string]string, error) {
 	return mappings, nil
 }
 
-func applyManifestNameMappings(inputs []manifestDiscoveredSecret, mappings map[string]string) []manifestDiscoveredSecret {
+func applyManifestNameMappings(inputs []manifestDiscoveredSecret, mappings map[string]string) ([]manifestDiscoveredSecret, error) {
 	if len(mappings) == 0 {
 		for i := range inputs {
 			if inputs[i].StorageName == "" {
 				inputs[i].StorageName = inputs[i].Name
 			}
 		}
-		return inputs
+		return inputs, validateManifestInputStorageNames(inputs)
 	}
 	for i := range inputs {
 		logical := inputs[i].Name
@@ -67,7 +67,24 @@ func applyManifestNameMappings(inputs []manifestDiscoveredSecret, mappings map[s
 			inputs[i].StorageName = logical
 		}
 	}
-	return inputs
+	return inputs, validateManifestInputStorageNames(inputs)
+}
+
+func validateManifestInputStorageNames(inputs []manifestDiscoveredSecret) error {
+	seen := map[string]string{}
+	for i := range inputs {
+		input := inputs[i]
+		logical := strings.TrimSpace(input.Name)
+		stored := manifestInputStorageName(input)
+		if stored == "" {
+			continue
+		}
+		if existing := seen[stored]; existing != "" && existing != logical {
+			return fmt.Errorf("provider storage name %q is used by both %q and %q; choose unique --name-map values", stored, existing, logical)
+		}
+		seen[stored] = logical
+	}
+	return nil
 }
 
 func manifestInputStorageName(input manifestDiscoveredSecret) string {

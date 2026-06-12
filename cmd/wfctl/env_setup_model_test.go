@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -32,10 +33,13 @@ func TestParseNameMappings(t *testing.T) {
 }
 
 func TestApplyManifestNameMappingsUsesStoredNameForStatus(t *testing.T) {
-	inputs := applyManifestNameMappings([]manifestDiscoveredSecret{{
+	inputs, err := applyManifestNameMappings([]manifestDiscoveredSecret{{
 		PluginRequiredSecret: PluginRequiredSecret{Name: "NAMECHEAP_API_KEY", Sensitive: true},
 		Kind:                 envSetupInputSecret,
 	}}, map[string]string{"NAMECHEAP_API_KEY": "GCA_NC_API_KEY"})
+	if err != nil {
+		t.Fatalf("applyManifestNameMappings: %v", err)
+	}
 
 	provider := newEngineTestProvider(map[string]string{"GCA_NC_API_KEY": "set"})
 	target := manifestSecretTargetProvider{Store: "github-org", Provider: provider}
@@ -48,6 +52,25 @@ func TestApplyManifestNameMappingsUsesStoredNameForStatus(t *testing.T) {
 	}
 	if provider.checkCnt["NAMECHEAP_API_KEY"] != 0 {
 		t.Fatal("logical name should not be used for provider checks")
+	}
+}
+
+func TestApplyManifestNameMappingsRejectsDiscoveredInputCollision(t *testing.T) {
+	_, err := applyManifestNameMappings([]manifestDiscoveredSecret{
+		{
+			PluginRequiredSecret: PluginRequiredSecret{Name: "NAMECHEAP_API_KEY", Sensitive: true},
+			Kind:                 envSetupInputSecret,
+		},
+		{
+			PluginRequiredSecret: PluginRequiredSecret{Name: "GCA_NC_API_KEY", Sensitive: true},
+			Kind:                 envSetupInputSecret,
+		},
+	}, map[string]string{"NAMECHEAP_API_KEY": "GCA_NC_API_KEY"})
+	if err == nil {
+		t.Fatal("applyManifestNameMappings accepted storage-name collision with discovered logical input")
+	}
+	if !strings.Contains(err.Error(), "GCA_NC_API_KEY") {
+		t.Fatalf("error = %q, want colliding storage name", err)
 	}
 }
 

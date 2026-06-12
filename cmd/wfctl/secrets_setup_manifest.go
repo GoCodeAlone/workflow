@@ -76,7 +76,10 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 		fmt.Fprintln(out, "No plugin required_secrets[], required_config[], or config env references found.")
 		return nil
 	}
-	discovered = applyManifestNameMappings(discovered, a.nameMappings)
+	discovered, err = applyManifestNameMappings(discovered, a.nameMappings)
+	if err != nil {
+		return err
+	}
 
 	secretMap, err := buildSecretLiteralMap(a.secretLiterals)
 	if err != nil {
@@ -932,7 +935,10 @@ func discoverManifestSecrets(manifestPath, lockfilePath, pluginDir, configPatter
 			return nil, err
 		}
 		storeHints := discoverConfigSecretStoreHints(configFile)
-		varRefs, skippedSensitive, _ := collectConfigVariablesFromFile(configFile)
+		varRefs, skippedSensitive, err := collectConfigVariablesFromFile(configFile)
+		if err != nil {
+			return nil, fmt.Errorf("collect config variables from %s: %w", configFile, err)
+		}
 		varNames := map[string]configVariableEntry{}
 		for _, entry := range varRefs {
 			varNames[entry.Name] = entry
@@ -1009,8 +1015,17 @@ func manifestSecretValue(secret manifestDiscoveredSecret, opts manifestSecretVal
 	if opts.fromEnv {
 		return "", false, nil
 	}
-	storedName := manifestInputStorageName(secret)
-	return "", false, fmt.Errorf("no value for %s %q: set $%s and pass --from-env, use --secret %s=VALUE, or run interactively from a terminal", secret.Kind, secret.Name, storedName, storedName)
+	lookupNames := manifestInputValueLookupNames(secret)
+	var envHint string
+	var literalHint string
+	if len(lookupNames) == 1 {
+		envHint = "$" + lookupNames[0]
+		literalHint = "--secret " + lookupNames[0] + "=VALUE"
+	} else {
+		envHint = "$" + strings.Join(lookupNames, " or $")
+		literalHint = "--secret " + strings.Join(lookupNames, "=VALUE or --secret ") + "=VALUE"
+	}
+	return "", false, fmt.Errorf("no value for %s %q: set %s and pass --from-env, use %s, or run interactively from a terminal", secret.Kind, secret.Name, envHint, literalHint)
 }
 
 func manifestPreprovidedSecretValue(secret manifestDiscoveredSecret, opts manifestSecretValueOptions) (string, bool, error) {
