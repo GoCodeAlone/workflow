@@ -493,6 +493,8 @@ The bundle includes core module and step schemas, YAML schemas, snippets, DSL re
 
 When `--plugin-dir` is provided, `plugin.contracts.json` is parsed strictly. Invalid or unreadable descriptor files fail the command instead of producing a partial bundle. Service method contracts are keyed by module type when available, using `service:<module-type>/<service-name>/<method>`, so separate module-scoped services can expose the same service and method names without colliding.
 
+Descriptor-only message contract plugins, including `workflow-plugin-control-plane`, are loaded through `plugin.contracts.json` and descriptor-set references such as `descriptorsets/control_plane.binpb`. This metadata export does not execute the plugin binary or grant host-owned administration, authentication, authorization, persistence, dispatch, credential, trust-root, rollout, approval, or deployment authority.
+
 Examples:
 
 ```bash
