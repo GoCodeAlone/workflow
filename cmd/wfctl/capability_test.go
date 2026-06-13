@@ -45,6 +45,35 @@ func TestRunCapabilityEcosystemJSON(t *testing.T) {
 	}
 }
 
+func TestRunCapabilityEcosystemFiltersJSON(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"ecosystem",
+		"--registry", "testdata/capability/registry",
+		"--repo-root", "testdata/capability/repos",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+		"--capability", "auth.authz",
+		"--provider", "authz",
+		"--format", "json",
+	}, &out)
+	if err != nil {
+		t.Fatalf("runCapabilityWithOutput: %v", err)
+	}
+	var inv inventory.Inventory
+	if err := json.Unmarshal(out.Bytes(), &inv); err != nil {
+		t.Fatalf("json.Unmarshal: %v\n%s", err, out.String())
+	}
+	if len(inv.Capabilities) != 1 {
+		t.Fatalf("expected one capability, got %#v", inv.Capabilities)
+	}
+	if inv.Capabilities[0].ID != "auth.authz" {
+		t.Fatalf("capability = %q", inv.Capabilities[0].ID)
+	}
+	if inv.Metadata.Counts["capabilities"] != 1 {
+		t.Fatalf("filtered capability count = %d", inv.Metadata.Counts["capabilities"])
+	}
+}
+
 func TestRunCapabilityCatalogJSON(t *testing.T) {
 	var out bytes.Buffer
 	err := runCapabilityWithOutput([]string{
@@ -69,6 +98,33 @@ func TestRunCapabilityCatalogJSON(t *testing.T) {
 	}
 }
 
+func TestRunCapabilityCatalogFiltersByCategory(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"catalog",
+		"--registry", "testdata/capability/registry",
+		"--repo-root", "testdata/capability/repos",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+		"--category", "auth",
+		"--format", "json",
+	}, &out)
+	if err != nil {
+		t.Fatalf("runCapabilityWithOutput: %v", err)
+	}
+	var catalog inventory.Catalog
+	if err := json.Unmarshal(out.Bytes(), &catalog); err != nil {
+		t.Fatalf("json.Unmarshal: %v\n%s", err, out.String())
+	}
+	if len(catalog.Capabilities) == 0 {
+		t.Fatal("expected filtered capabilities")
+	}
+	for _, cap := range catalog.Capabilities {
+		if cap.Category != "auth" {
+			t.Fatalf("unexpected category %q in %#v", cap.Category, catalog.Capabilities)
+		}
+	}
+}
+
 func TestRunCapabilityCrossrefsJSON(t *testing.T) {
 	var out bytes.Buffer
 	err := runCapabilityWithOutput([]string{
@@ -87,6 +143,31 @@ func TestRunCapabilityCrossrefsJSON(t *testing.T) {
 	}
 	if len(refs.Plugins) == 0 {
 		t.Fatalf("expected plugin refs, got %#v", refs)
+	}
+}
+
+func TestRunCapabilityCrossrefsFiltersByPluginAlias(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"crossrefs",
+		"--registry", "testdata/capability/registry",
+		"--repo-root", "testdata/capability/repos",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+		"--plugin", "workflow-plugin-authz",
+		"--format", "json",
+	}, &out)
+	if err != nil {
+		t.Fatalf("runCapabilityWithOutput: %v", err)
+	}
+	var refs inventory.CapabilityCrossrefs
+	if err := json.Unmarshal(out.Bytes(), &refs); err != nil {
+		t.Fatalf("json.Unmarshal: %v\n%s", err, out.String())
+	}
+	if len(refs.Plugins) != 1 {
+		t.Fatalf("expected one plugin ref, got %#v", refs.Plugins)
+	}
+	if _, ok := refs.Plugins["workflow-plugin-authz"]; !ok {
+		t.Fatalf("expected workflow-plugin-authz ref, got %#v", refs.Plugins)
 	}
 }
 
@@ -128,6 +209,34 @@ func TestRunCapabilityAppJSON(t *testing.T) {
 	}
 }
 
+func TestRunCapabilityAppFiltersByCapability(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"app",
+		"--manifest", "testdata/capability/app/wfctl.yaml",
+		"--workflow", "testdata/capability/app/workflow.yaml",
+		"--plugin-dir", "testdata/capability/app/plugins",
+		"--lock-file", "testdata/capability/app/.wfctl-lock.yaml",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+		"--capability", "secrets.management",
+		"--usage", "inferred",
+		"--format", "json",
+	}, &out)
+	if err != nil {
+		t.Fatalf("runCapabilityWithOutput: %v", err)
+	}
+	var profile inventory.AppProfile
+	if err := json.Unmarshal(out.Bytes(), &profile); err != nil {
+		t.Fatalf("json.Unmarshal: %v\n%s", err, out.String())
+	}
+	if len(profile.Usage) != 1 {
+		t.Fatalf("expected one usage row, got %#v", profile.Usage)
+	}
+	if profile.Usage[0].CapabilityID != "secrets.management" {
+		t.Fatalf("usage capability = %q", profile.Usage[0].CapabilityID)
+	}
+}
+
 func TestRunCapabilityCheckSummarizesDetectedCapabilities(t *testing.T) {
 	var out bytes.Buffer
 	err := runCapabilityWithOutput([]string{
@@ -147,6 +256,30 @@ func TestRunCapabilityCheckSummarizesDetectedCapabilities(t *testing.T) {
 	}
 	if !strings.Contains(text, "OK no capability findings") {
 		t.Fatalf("expected no-finding status, got %s", text)
+	}
+}
+
+func TestRunCapabilityCheckFiltersFindings(t *testing.T) {
+	var out bytes.Buffer
+	err := runCapabilityWithOutput([]string{
+		"check",
+		"--findings-only",
+		"--manifest", "testdata/capability/app/wfctl.yaml",
+		"--workflow", "testdata/capability/app/workflow.yaml",
+		"--plugin-dir", "testdata/capability/app/plugins",
+		"--lock-file", "testdata/capability/app/.wfctl-lock.yaml",
+		"--taxonomy", "../../capability/inventory/testdata/taxonomy.yaml",
+		"--finding", "tenant-evidence-missing",
+	}, &out)
+	if err != nil {
+		t.Fatalf("check should be warning-only, got %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "tenant-evidence-missing") {
+		t.Fatalf("expected filtered finding, got %s", text)
+	}
+	if strings.Contains(text, "missing-provider") {
+		t.Fatalf("unexpected unfiltered finding, got %s", text)
 	}
 }
 

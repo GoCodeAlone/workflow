@@ -206,6 +206,31 @@ Workflow ecosystem and for individual applications.
 wfctl capability <subcommand> [options]
 ```
 
+All capability subcommands accept the same filter flags. Filters are
+case-insensitive substring matches by default; pass `--exact` for
+case-insensitive exact matching. Repeating one filter flag ORs values within
+that field, while different filter fields are ANDed together.
+
+```
+wfctl capability ecosystem --provider github --category security --format md
+wfctl capability catalog --capability secrets --tag cross-cutting
+wfctl capability crossrefs --plugin workflow-plugin-github
+wfctl capability app --repo workflow.yaml --capability tenancy
+wfctl capability check --finding tenant-evidence-missing --findings-only
+```
+
+| Filter | Applies to | Description |
+|--------|------------|-------------|
+| `--capability` | all | Match capability id, name, or description |
+| `--category` | all | Match capability category |
+| `--provider`, `--plugin` | ecosystem, catalog, crossrefs | Match provider/plugin name, kind, source, version, status, raw capabilities, or dependencies |
+| `--source`, `--repo` | all | Match provider source, repository URL, evidence path, or evidence detail |
+| `--evidence-kind` | all | Match evidence source kind such as `registry-manifest`, `plugin-manifest`, `workflow-config`, `wfctl-manifest`, or `wfctl-lockfile` |
+| `--usage` | app, check | Match usage mode, confidence, evidence kind/path/detail |
+| `--finding` | all | Match finding code, level, or message |
+| `--tag` | ecosystem, catalog | Match taxonomy tags |
+| `--exact` | all | Use exact matching instead of substring matching |
+
 #### `wfctl capability ecosystem`
 
 Builds the ecosystem matrix from the checked-in capability taxonomy, registry
