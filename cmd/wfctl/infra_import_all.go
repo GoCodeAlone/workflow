@@ -224,8 +224,9 @@ func runInfraImportAllWithDeps(ctx context.Context, provider interfaces.IaCProvi
 // importing zones that may not yet be declared.
 //
 // Reuses resourceStateFromImportedState (workflow/cmd/wfctl/infra.go:1198)
-// for ProviderID resolution + AppliedConfig hashing + timestamp normalization
-// so the synthesized state matches the single-resource import path exactly.
+// for AppliedConfig hashing + timestamp normalization, then restores the
+// enumerated cloudID as ProviderID so portfolio exports group by domain even
+// when a provider import returns an opaque durable ID in outputs/applied config.
 func buildResourceStateFromImport(zoneName, cloudID, resourceType, providerType string, imported *interfaces.ResourceState) (interfaces.ResourceState, error) {
 	// Prefix the sanitized zone name with the resource type so that importing
 	// two different types (e.g. infra.dns and infra.dns_delegation) for the
@@ -239,7 +240,14 @@ func buildResourceStateFromImport(zoneName, cloudID, resourceType, providerType 
 		Name: resourceType + "/" + sanitizeImportedZoneName(zoneName),
 		Type: resourceType,
 	}
-	return resourceStateFromImportedState(spec, providerType, imported, cloudID)
+	state, err := resourceStateFromImportedState(spec, providerType, imported, cloudID)
+	if err != nil {
+		return interfaces.ResourceState{}, err
+	}
+	if cloudID != "" {
+		state.ProviderID = cloudID
+	}
+	return state, nil
 }
 
 // sanitizeImportedZoneName converts a zone identifier (typically a FQDN like
