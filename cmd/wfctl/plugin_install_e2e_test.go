@@ -478,23 +478,25 @@ func TestInstalledManifestPreservesCLICommandsAndBuildHooks(t *testing.T) {
 	}
 }
 
-// TestInstalledManifestPreservesIaCProviderComputePlanVersion is the regression
-// test for workflow#699 manifest metadata: writeInstalledManifest used to drop
-// top-level iacProvider.computePlanVersion, so installed IaC provider manifests
-// emitted v1/v2 deprecation warnings even when the registry declared v2.
-func TestInstalledManifestPreservesIaCProviderComputePlanVersion(t *testing.T) {
+// TestInstalledManifestPreservesIaCProviderMetadata is the regression test for
+// installed IaC provider manifests: writeInstalledManifest must preserve both
+// top-level iacProvider metadata and capabilities fields used by provider
+// discovery.
+func TestInstalledManifestPreservesIaCProviderMetadata(t *testing.T) {
 	rm := &RegistryManifest{
 		Name:        "workflow-plugin-digitalocean",
 		Version:     "2.0.0",
 		Author:      "tester",
-		Description: "regression: iacProvider.computePlanVersion preserved post-install",
+		Description: "regression: IaC provider metadata preserved post-install",
 		Type:        "external",
 		Tier:        "community",
 		License:     "MIT",
 		Capabilities: &RegistryCapabilities{
-			ModuleTypes: []string{"iac.provider"},
+			ModuleTypes:   []string{"iac.provider"},
+			ResourceTypes: []string{"infra.dns", "infra.dns_delegation"},
 			IaCProvider: &RegistryIaCProvider{
-				Name: "digitalocean",
+				Name:          "digitalocean",
+				ResourceTypes: []string{"infra.dns", "infra.dns_delegation"},
 			},
 		},
 		IaCProvider: &RegistryIaCProvider{
@@ -513,7 +515,8 @@ func TestInstalledManifestPreservesIaCProviderComputePlanVersion(t *testing.T) {
 		t.Fatalf("read installed plugin.json: %v", err)
 	}
 	var got struct {
-		IaCProvider *RegistryIaCProvider `json:"iacProvider"`
+		Capabilities *installedPluginCapabilities `json:"capabilities"`
+		IaCProvider  *RegistryIaCProvider         `json:"iacProvider"`
 	}
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal installed plugin.json: %v", err)
@@ -523,6 +526,32 @@ func TestInstalledManifestPreservesIaCProviderComputePlanVersion(t *testing.T) {
 	}
 	if got.IaCProvider.ComputePlanVersion != "v2" {
 		t.Fatalf("computePlanVersion = %q, want v2", got.IaCProvider.ComputePlanVersion)
+	}
+	if got.Capabilities == nil {
+		t.Fatal("expected capabilities")
+	}
+	wantResourceTypes := []string{"infra.dns", "infra.dns_delegation"}
+	if len(got.Capabilities.ResourceTypes) != len(wantResourceTypes) {
+		t.Fatalf("capabilities.resourceTypes = %#v, want %#v", got.Capabilities.ResourceTypes, wantResourceTypes)
+	}
+	for i, want := range wantResourceTypes {
+		if got.Capabilities.ResourceTypes[i] != want {
+			t.Fatalf("capabilities.resourceTypes = %#v, want %#v", got.Capabilities.ResourceTypes, wantResourceTypes)
+		}
+	}
+	if got.Capabilities.IaCProvider == nil {
+		t.Fatal("expected capabilities.iacProvider")
+	}
+	if got.Capabilities.IaCProvider.Name != "digitalocean" {
+		t.Fatalf("capabilities.iacProvider.name = %q, want digitalocean", got.Capabilities.IaCProvider.Name)
+	}
+	if len(got.Capabilities.IaCProvider.ResourceTypes) != len(wantResourceTypes) {
+		t.Fatalf("capabilities.iacProvider.resourceTypes = %#v, want %#v", got.Capabilities.IaCProvider.ResourceTypes, wantResourceTypes)
+	}
+	for i, want := range wantResourceTypes {
+		if got.Capabilities.IaCProvider.ResourceTypes[i] != want {
+			t.Fatalf("capabilities.iacProvider.resourceTypes = %#v, want %#v", got.Capabilities.IaCProvider.ResourceTypes, wantResourceTypes)
+		}
 	}
 }
 

@@ -1429,10 +1429,11 @@ type installedPluginJSON struct {
 }
 
 type installedPluginCapabilities struct {
-	ModuleTypes  []string             `json:"moduleTypes,omitempty"`
-	StepTypes    []string             `json:"stepTypes,omitempty"`
-	TriggerTypes []string             `json:"triggerTypes,omitempty"`
-	IaCProvider  *RegistryIaCProvider `json:"iacProvider,omitempty"`
+	ModuleTypes   []string             `json:"moduleTypes,omitempty"`
+	StepTypes     []string             `json:"stepTypes,omitempty"`
+	TriggerTypes  []string             `json:"triggerTypes,omitempty"`
+	ResourceTypes []string             `json:"resourceTypes,omitempty"`
+	IaCProvider   *RegistryIaCProvider `json:"iacProvider,omitempty"`
 	// CLICommands flow through to plugin.json so BuildCLIRegistry can
 	// discover plugin-provided wfctl subcommands after install. Earlier
 	// versions of writeInstalledManifest dropped this field, leaving
@@ -1467,12 +1468,13 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 	}
 	if m.Capabilities != nil {
 		pj.Capabilities = &installedPluginCapabilities{
-			ModuleTypes:  m.Capabilities.ModuleTypes,
-			StepTypes:    m.Capabilities.StepTypes,
-			TriggerTypes: m.Capabilities.TriggerTypes,
-			IaCProvider:  m.Capabilities.IaCProvider,
-			CLICommands:  m.Capabilities.CLICommands,
-			BuildHooks:   m.Capabilities.BuildHooks,
+			ModuleTypes:   m.Capabilities.ModuleTypes,
+			StepTypes:     m.Capabilities.StepTypes,
+			TriggerTypes:  m.Capabilities.TriggerTypes,
+			ResourceTypes: m.Capabilities.ResourceTypes,
+			IaCProvider:   m.Capabilities.IaCProvider,
+			CLICommands:   m.Capabilities.CLICommands,
+			BuildHooks:    m.Capabilities.BuildHooks,
 		}
 	}
 	data, err := json.MarshalIndent(pj, "", "  ")
