@@ -236,6 +236,125 @@ func TestPluginRegistrySync_MetadataSyncProjectsNestedIaCServices(t *testing.T) 
 	}
 }
 
+func TestPluginRegistrySync_MetadataSyncProjectsSecretAndConfigContracts(t *testing.T) {
+	raw := map[string]any{
+		"required_secrets": []any{
+			map[string]any{"name": "OLD_SECRET", "sensitive": true},
+		},
+	}
+	pluginJSON := map[string]any{
+		"required_secrets": []any{
+			map[string]any{"name": "PLUGIN_SECRET", "sensitive": true},
+		},
+		"required_config": []any{
+			map[string]any{"name": "PLUGIN_ACCOUNT_ID", "key": "account_id", "sensitive": false},
+		},
+		"secret_targets": []any{
+			map[string]any{"provider": "github", "scopes": []any{"repo", "env"}},
+		},
+		"config_targets": []any{
+			map[string]any{"provider": "github", "scopes": []any{"repo", "env"}},
+		},
+	}
+
+	syncManifestMetadataFromPluginJSON(raw, pluginJSON)
+
+	if got := raw["required_secrets"].([]any)[0].(map[string]any)["name"]; got != "PLUGIN_SECRET" {
+		t.Fatalf("required_secrets[0].name = %v, want PLUGIN_SECRET", got)
+	}
+	if got := raw["required_config"].([]any)[0].(map[string]any)["name"]; got != "PLUGIN_ACCOUNT_ID" {
+		t.Fatalf("required_config[0].name = %v, want PLUGIN_ACCOUNT_ID", got)
+	}
+	if got := raw["secret_targets"].([]any)[0].(map[string]any)["provider"]; got != "github" {
+		t.Fatalf("secret_targets[0].provider = %v, want github", got)
+	}
+	if got := raw["config_targets"].([]any)[0].(map[string]any)["provider"]; got != "github" {
+		t.Fatalf("config_targets[0].provider = %v, want github", got)
+	}
+}
+
+func TestPluginRegistrySync_DefaultFixesMetadataDriftWithoutVersionDrift(t *testing.T) {
+	restoreRegistrySyncTestHooks(t)
+
+	oldBaseURL := gitHubAPIBaseURL
+	oldClient := gitHubAPIClient
+	t.Cleanup(func() {
+		gitHubAPIBaseURL = oldBaseURL
+		gitHubAPIClient = oldClient
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/releases/latest", "/repos/owner/repo/releases/tags/v1.2.3":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"tag_name":"v1.2.3","assets":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	gitHubAPIBaseURL = srv.URL
+	gitHubAPIClient = srv.Client()
+
+	registrySyncReleaseDownloads = func(string, string) ([]releaseAsset, error) {
+		return []releaseAsset{{
+			Name: "workflow-plugin-foo-linux-amd64.tar.gz",
+			OS:   "linux",
+			Arch: "amd64",
+			URL:  "https://github.com/owner/repo/releases/download/v1.2.3/workflow-plugin-foo-linux-amd64.tar.gz",
+		}}, nil
+	}
+	registrySyncFetchPluginJSON = func(ghRepo, tag string) (map[string]any, error) {
+		if ghRepo != "owner/repo" || tag != "v1.2.3" {
+			t.Fatalf("fetchPluginJSON args = %q %q, want owner/repo v1.2.3", ghRepo, tag)
+		}
+		return map[string]any{
+			"required_config": []any{
+				map[string]any{"name": "FOO_ACCOUNT_ID", "key": "account_id", "sensitive": false},
+			},
+			"config_targets": []any{
+				map[string]any{"provider": "github", "scopes": []any{"repo", "env"}},
+			},
+		}, nil
+	}
+
+	registry := t.TempDir()
+	manifest := filepath.Join(registry, "plugins", "foo", "manifest.json")
+	mustWrite(t, manifest, `{
+  "name": "workflow-plugin-foo",
+  "version": "1.2.3",
+  "author": "GoCodeAlone",
+  "description": "Foo",
+  "source": "github.com/owner/repo",
+  "repository": "https://github.com/owner/repo",
+  "type": "external",
+  "tier": "core",
+  "license": "MIT",
+  "downloads": [{
+    "os": "linux",
+    "arch": "amd64",
+    "url": "https://github.com/owner/repo/releases/download/v1.2.3/workflow-plugin-foo-linux-amd64.tar.gz"
+  }],
+  "required_config": [{"name": "OLD_ACCOUNT", "key": "old_account", "sensitive": false}]
+}`)
+
+	if err := syncDefault(registry, true, "foo", false); err != nil {
+		t.Fatalf("syncDefault returned error: %v", err)
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	required := got["required_config"].([]any)
+	if name := required[0].(map[string]any)["name"]; name != "FOO_ACCOUNT_ID" {
+		t.Fatalf("required_config[0].name = %v, want FOO_ACCOUNT_ID", name)
+	}
+}
+
 func TestPluginRegistrySync_DefaultSkipsBuiltinManifests(t *testing.T) {
 	registry := t.TempDir()
 	mustWrite(t, filepath.Join(registry, "plugins", "admincore", "manifest.json"), `{
@@ -765,10 +884,12 @@ func restoreRegistrySyncTestHooks(t *testing.T) {
 	oldReleaseDownloads := registrySyncReleaseDownloads
 	oldDownloadReleaseAsset := registrySyncDownloadReleaseAsset
 	oldVerifyManifest := registrySyncVerifyManifest
+	oldFetchPluginJSON := registrySyncFetchPluginJSON
 	t.Cleanup(func() {
 		registrySyncReleaseDownloads = oldReleaseDownloads
 		registrySyncDownloadReleaseAsset = oldDownloadReleaseAsset
 		registrySyncVerifyManifest = oldVerifyManifest
+		registrySyncFetchPluginJSON = oldFetchPluginJSON
 	})
 }
 
