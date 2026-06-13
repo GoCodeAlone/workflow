@@ -30,7 +30,7 @@
 |------|-------|-------|--------|
 | 1 | Add unified env setup mapping and safer provider defaults | Task 1, Task 2, Task 3, Task 4, Task 5, Task 6 | feat/unified-env-setup |
 
-**Status:** Locked 2026-06-12T22:54:28Z
+**Status:** Complete 2026-06-13T00:18:23Z
 
 ## Task 1: Provider Defaults
 
