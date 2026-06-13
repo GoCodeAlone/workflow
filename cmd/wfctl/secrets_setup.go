@@ -44,16 +44,16 @@ func runSecretsSetup(args []string) error {
 	var secretFlag multiStringFlag
 	fs.Var(&secretFlag, "secret", "NAME=VALUE literal (WARNING: leaks to process table; use --from-env in CI). Repeatable.")
 	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set")
-	allFlag := fs.Bool("all", false, "Set all declared secrets; preselect all in manifest interactive mode")
+	allFlag := fs.Bool("all", false, "Set all declared secrets; preselect all in environment input interactive mode")
 	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the store")
-	verbose := fs.Bool("verbose", false, "Show source and target details in manifest-backed interactive setup")
+	verbose := fs.Bool("verbose", false, "Show source and target details in environment input setup")
 	storeName := fs.String("store", "", "Named store to use (overrides config defaultStore)")
-	// Manifest-backed GitHub setup flags. These also keep the legacy --plugin
+	// Environment-input GitHub setup flags. These also keep the legacy --plugin
 	// path compatible because runSecrets dispatches --plugin before this path.
-	scope := fs.String("scope", "repo", "GitHub scope for manifest-backed setup: repo | env | org")
-	org := fs.String("org", "", "Organization slug for manifest-backed --scope=org")
-	visibility := fs.String("visibility", "private", "Manifest-backed org-scope visibility: all | selected | private")
-	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT for manifest-backed setup")
+	scope := fs.String("scope", "repo", "GitHub scope for environment input setup: repo | env | org")
+	org := fs.String("org", "", "Organization slug for environment input --scope=org")
+	visibility := fs.String("visibility", "private", "Org-scope visibility: all | selected | private")
+	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT for environment input setup")
 	lockFile := fs.String("lock-file", ".wfctl-lock.yaml", "wfctl plugin lockfile used when wfctl.yaml is auto-discovered")
 	pluginDir := fs.String("plugin-dir", "", "Plugin install dir used when wfctl.yaml is auto-discovered")
 
@@ -62,18 +62,22 @@ func runSecretsSetup(args []string) error {
 
 Set secrets declared in the config for a given environment.
 
+For unified provider secrets, provider variables, and config env references,
+prefer wfctl env setup. This secrets setup command remains supported for
+secret-specific setup and compatibility.
+
 Interactive (default when stdin is a TTY):
   Lists each declared secret with its status, lets you select which to set,
   prompts to pick a store when none is configured, and masks sensitive input.
-  Manifest-backed setup shows a compact secret x target matrix first, then
-  lets you choose scope/store targets per selected secret. Use --verbose for
+  Environment input setup shows a compact input x target matrix first, then
+  lets you choose scope/store targets per selected input. Use --verbose for
   source files, plugin names, and full provider target labels.
 
 Non-interactive (--non-interactive, --auto-gen-keys, or when stdin is not a TTY):
   --from-env        Read each value from $NAME. Recommended for CI.
   --secret NAME=VAL Set a specific secret inline (WARNING: leaks to process table).
   Pipe KEY=VALUE    Read KEY=VALUE lines from stdin.
-  --all             Set all declared secrets; preselect all in manifest interactive mode.
+  --all             Set all declared secrets; preselect all in environment input interactive mode.
   --only A,B        Restrict which secrets to set (mutually exclusive with --all).
   --skip-existing   Skip secrets already set in the store.
   --auto-gen-keys   Generate random values for _KEY/_SECRET/_TOKEN/_SIGNING names.
@@ -116,7 +120,7 @@ Options:
 		}
 		if target.kind == secretsSetupTargetManifest {
 			if *autoGenKeys {
-				return fmt.Errorf("--auto-gen-keys is not supported with wfctl.yaml manifest-backed secrets setup; use --from-env, --secret NAME=VALUE, or run interactively from a terminal")
+				return fmt.Errorf("--auto-gen-keys is not supported with wfctl.yaml secrets setup; use wfctl env setup with --from-env, --secret NAME=VALUE, or run interactively from a terminal")
 			}
 			manifestNonInteractive := *nonInteractive || !isatty.IsTerminal(os.Stdin.Fd())
 			envExplicit := hasFlag(args, "env")

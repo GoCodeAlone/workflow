@@ -149,6 +149,7 @@ var commands = map[string]func([]string) error{
 	"ci":              runCI,
 	"override":        runOverride,
 	"test":            runTest,
+	"env":             runEnv,
 	"secrets":         runSecrets,
 	"vars":            runVars,
 	"ports":           runPorts,

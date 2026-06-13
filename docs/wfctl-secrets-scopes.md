@@ -1,10 +1,10 @@
 # wfctl secrets — GitHub scope reference
 
-`wfctl secrets set`, `wfctl secrets setup --plugin`, and manifest-backed
-`wfctl secrets setup --manifest` write to GitHub Actions destinations. Secret
-inputs use GitHub Actions Secrets. Non-secret config inputs use GitHub Actions
-Variables when the selected provider target supports variables. Each GitHub
-scope requires a different PAT scope and exposes different visibility controls.
+`wfctl secrets set`, `wfctl secrets setup --plugin`, and the unified
+`wfctl env setup` flow write to GitHub Actions destinations. Secret inputs use
+GitHub Actions Secrets. Non-secret config inputs use GitHub Actions Variables
+when the selected provider target supports variables. Each GitHub scope requires
+a different PAT scope and exposes different visibility controls.
 
 | Scope | URL prefix | PAT scopes | Visibility flags |
 |-------|------------|-----------|------------------|
@@ -106,16 +106,16 @@ Applications can use the same variable provider path for non-secret
 scan env-backed schema entries where `sensitive: false`; sensitive entries are
 left for the app's secret setup flow.
 
-Manifest-backed setup can discover both plugin secrets and plugin variables
-from `wfctl.yaml`, `.wfctl-lock.yaml`, and installed plugin manifests:
+`wfctl env setup` can discover both plugin secrets and plugin variables from
+`wfctl.yaml`, `.wfctl-lock.yaml`, and installed plugin manifests:
 
 ```sh
-wfctl secrets setup --manifest wfctl.yaml \
+wfctl env setup --manifest wfctl.yaml \
   --config 'infra/*.yaml,deploy.yaml' \
   --scope org --org GoCodeAlone --from-env
 ```
 
-Manifest setup treats `required_secrets[]` and sensitive config refs as
+Environment input setup treats `required_secrets[]` and sensitive config refs as
 provider secrets, and `required_config[]` plus non-sensitive config refs as
 provider variables. This lets one review/setup flow configure values like
 `NAMECHEAP_API_KEY` and `NAMECHEAP_API_USER` together while still storing the
@@ -125,7 +125,7 @@ Use `--name-map LOGICAL=STORED` to store a logical workflow input under a
 provider-specific name:
 
 ```sh
-GCA_NC_API_KEY=... GCA_NC_API_USER=... wfctl secrets setup \
+GCA_NC_API_KEY=... GCA_NC_API_USER=... wfctl env setup \
   --manifest wfctl.yaml \
   --name-map NAMECHEAP_API_KEY=GCA_NC_API_KEY \
   --name-map NAMECHEAP_API_USER=GCA_NC_API_USER \
@@ -137,10 +137,11 @@ Value lookup also checks the stored name first, then the logical name. When
 `--write-config` is set, matching `${LOGICAL}` references in the scanned config
 files are rewritten to `${STORED}` after setup succeeds.
 
-When `--scope` is omitted and stdin is interactive, manifest-backed setup uses
+When `--scope` is omitted and stdin is interactive, `wfctl env setup` uses
 configured `secretStores` when present; otherwise it offers concrete GitHub
 targets discovered from repo/org/env settings. The first prompt is a compact
-matrix with one row per input and one column per target:
+matrix with one row per input, a `Kind` column (`secret` or `var`), and one
+column per target:
 
 | mark | meaning |
 |------|---------|
@@ -153,6 +154,10 @@ GitHub columns are only GitHub destinations: `github:repo`, `github:env`, and
 `github:org`. Local `.env`, file, keychain, Vault, and AWS stores appear as
 their own provider targets. Use `--verbose` when you need the source config
 file, plugin name, or full target label in the prompt rows.
+
+`wfctl secrets setup --manifest ...` remains supported as a compatibility path
+for secrets setup, and it reaches the same environment input engine. Prefer
+`wfctl env setup` for mixed secret and non-secret setup.
 
 Pipe a value list to skip the prompt loop in CI:
 

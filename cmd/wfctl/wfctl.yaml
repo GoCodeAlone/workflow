@@ -85,6 +85,8 @@ workflows:
         description: Generate and verify environment overrides
       - name: test
         description: Run Workflow integration tests
+      - name: env
+        description: Manage environment input setup
       - name: secrets
         description: Manage declared secrets
       - name: vars
@@ -271,6 +273,10 @@ pipelines:
     trigger: {type: cli, config: {command: test}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: test}}
+  cmd-env:
+    trigger: {type: cli, config: {command: env}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: env}}
   cmd-secrets:
     trigger: {type: cli, config: {command: secrets}}
     steps:

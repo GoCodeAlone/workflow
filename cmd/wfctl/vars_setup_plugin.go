@@ -40,6 +40,9 @@ Set non-secret variables declared by either:
   - config vars.entries/variables.entries declarations and config.provider
     schema entries with sensitive:false when --plugin is omitted.
 
+For mixed secret and variable environment input setup, prefer:
+  wfctl env setup --manifest wfctl.yaml
+
 Sensitive values belong in required_secrets[] or secrets setup paths and must be
 configured with wfctl secrets setup instead.
 
