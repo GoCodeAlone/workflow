@@ -2579,6 +2579,81 @@ wfctl ci init --platform github-actions --config my-app.yaml
 
 ---
 
+### `env`
+
+Manage environment input setup across provider secrets, provider variables, and
+workflow config references.
+
+```
+wfctl env <subcommand> [options]
+```
+
+#### `env setup`
+
+Configure environment inputs discovered from `wfctl.yaml`, `.wfctl-lock.yaml`,
+installed plugin `required_secrets[]`, installed plugin `required_config[]`, and
+workflow config `${ENV_VAR}` references. Sensitive inputs are written as
+provider secrets. Non-secret inputs are written as provider variables when the
+selected provider supports variables.
+
+The setup UI keeps the distinction visible with a `Kind` column:
+
+- `secret` inputs are masked and written through the provider secret API.
+- `var` inputs are non-secret configuration values and written through the
+  provider variable API when available.
+
+```
+wfctl env setup [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--manifest` | `wfctl.yaml` | wfctl plugin manifest to discover plugin inputs |
+| `--lock-file` | `.wfctl-lock.yaml` | Lockfile to include in plugin discovery |
+| `--plugin-dir` | `$WFCTL_PLUGIN_DIR` or `./data/plugins` | Installed plugin directory |
+| `--config` | discovered configs | Workflow config file or comma-separated glob list for env reference discovery |
+| `--kind` | `all` | Input kind to configure: `all`, `secret`, or `var` |
+| `--scope` | `repo` | GitHub scope: `repo`, `env`, or `org` |
+| `--env` | _(none)_ | Environment name for `--scope env` |
+| `--org` | _(none)_ | Organization slug for `--scope org` |
+| `--visibility` | `private` | Org-scope visibility: `all`, `selected`, or `private` |
+| `--token-env` | `GITHUB_TOKEN` | Env var holding the provider token |
+| `--from-env` | `false` | Read values from matching environment variables |
+| `--non-interactive` | `false` | Never prompt |
+| `--secret` | _(none)_ | `NAME=VALUE` literal. **Warning: leaks to process table.** Repeatable. |
+| `--only` | _(all)_ | Comma-separated logical input names to configure |
+| `--all` | `false` | Include inputs that are already set |
+| `--skip-existing` | `false` | Skip inputs already present in the target |
+| `--name-map` | _(none)_ | `LOGICAL=STORED` provider key mapping. Repeatable. |
+| `--write-config` | `false` | Rewrite matching `${LOGICAL}` refs after successful setup |
+| `--verbose` | `false` | Show source files, plugin names, and full provider target labels |
+
+```bash
+# Configure all discovered environment inputs
+wfctl env setup --manifest wfctl.yaml --config 'infra/*.yaml,deploy.yaml'
+
+# Configure only secrets or only non-secret vars
+wfctl env setup --manifest wfctl.yaml --kind secret
+wfctl env setup --manifest wfctl.yaml --kind var
+
+# CI: read values from environment variables
+wfctl env setup --manifest wfctl.yaml --config 'infra/*.yaml' \
+  --scope org --org GoCodeAlone --from-env --non-interactive
+
+# Store provider keys under organization-specific names and update config refs
+GCA_NC_API_KEY=... GCA_NC_API_USER=... wfctl env setup \
+  --manifest wfctl.yaml --config 'infra/*.yaml' --scope org --org GoCodeAlone \
+  --name-map NAMECHEAP_API_KEY=GCA_NC_API_KEY \
+  --name-map NAMECHEAP_API_USER=GCA_NC_API_USER \
+  --write-config --from-env
+```
+
+`wfctl secrets setup --manifest ...` and `wfctl vars setup ...` remain
+supported compatibility paths. Prefer `wfctl env setup` for mixed secret and
+non-secret environment input setup.
+
+---
+
 ### `secrets`
 
 Manage application secret lifecycle. Reads the `secrets:` section of a workflow config.
@@ -2728,15 +2803,17 @@ wfctl secrets sync --from staging --to production
 
 #### `secrets setup`
 
-Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY. With `--manifest`, discovers setup inputs from `wfctl.yaml`, `.wfctl-lock.yaml`, installed plugin `required_secrets[]`, installed plugin `required_config[]`, and `${ENV_VAR}` references in workflow configs. Sensitive inputs are written as provider secrets; non-sensitive config inputs are written as provider variables through the same setup flow. Repo/env-scoped GitHub setup uses `secrets.config.repo` or `secretStores.<name>.config.repo` when configured; otherwise it infers the repo from `git remote.origin.url` and prints that assumption in the setup target or error.
+Set secrets declared in the config for a given environment. Automatically selects interactive or non-interactive mode based on whether stdin is a TTY. For unified provider secrets, provider variables, and config env references, prefer `wfctl env setup`.
 
-Manifest-backed setup treats static YAML environment declarations as desired provider environments. Top-level `environments`, `ci.deploy.environments`, `platform.environment`, and literal `secretStores.<name>.config.environment` values become environment-scoped targets when the backing provider supports them. Runtime placeholders such as `${WORKFLOW_ENV}` are not treated as literal target names. Missing provider environments fail non-interactive setup; interactive setup asks before creating them.
+With `--manifest`, `wfctl secrets setup` remains a supported compatibility path for secrets setup. It discovers setup inputs from `wfctl.yaml`, `.wfctl-lock.yaml`, installed plugin `required_secrets[]`, installed plugin `required_config[]`, and `${ENV_VAR}` references in workflow configs. Sensitive inputs are written as provider secrets; non-sensitive config inputs are written as provider variables through the same setup flow. Repo/env-scoped GitHub setup uses `secrets.config.repo` or `secretStores.<name>.config.repo` when configured; otherwise it infers the repo from `git remote.origin.url` and prints that assumption in the setup target or error.
+
+Environment input setup treats static YAML environment declarations as desired provider environments. Top-level `environments`, `ci.deploy.environments`, `platform.environment`, and literal `secretStores.<name>.config.environment` values become environment-scoped targets when the backing provider supports them. Runtime placeholders such as `${WORKFLOW_ENV}` are not treated as literal target names. Missing provider environments fail non-interactive setup; interactive setup asks before creating them.
 
 **Interactive mode** (default when stdin is a TTY): lists each declared secret or variable with its current set/unset status, presents a multi-select to choose which inputs to set, prompts to pick a store when none is configured (resolves via `--store` > `secrets.defaultStore` > single-store auto-select > interactive pick), and collects values with masked terminal input for sensitive names. Press `Esc` or `Ctrl+C` at any prompt to cancel cleanly.
 
-Manifest-backed interactive setup uses a compact three-step flow by default:
+Environment input interactive setup uses a compact three-step flow by default:
 
-1. A table lists one row per discovered input and one column per concrete provider target. Status marks are `○` unset, `✓` set, `!` inaccessible/check failed, and `?` unconfigured.
+1. A table lists one row per discovered input, a `Kind` column (`secret` or `var`), and one column per concrete provider target. Status marks are `○` unset, `✓` set, `!` inaccessible/check failed, and `?` unconfigured.
 2. After selecting inputs, choose the scope/store targets for each selected input. GitHub targets are explicit GitHub destinations (`github:repo`, `github:env`, `github:org`); local `.env`/file stores appear as file/env targets, not GitHub scopes.
 3. When an input is selected for multiple targets, enter the first value once, then either reuse it for the other targets or provide a different value per target.
 
@@ -2748,9 +2825,9 @@ Unset inputs are selected by default. Toggle existing inputs to update them, or 
 - `--secret NAME=VALUE` — inline literal. **Warning: leaks to process table. Avoid in CI.**
 - `--auto-gen-keys` — generates random values for names ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`.
 
-Manifest-backed setup treats missing values as an error in non-interactive mode unless `--from-env` is set. With `--from-env`, unset environment variables are skipped so CI can set only the values it has. When `--name-map LOGICAL=STORED` is present, setup checks and writes the stored provider key, and value lookup first reads `$STORED` or `--secret STORED=VALUE` before falling back to the logical name.
+Environment input setup treats missing values as an error in non-interactive mode unless `--from-env` is set. With `--from-env`, unset environment variables are skipped so CI can set only the values it has. When `--name-map LOGICAL=STORED` is present, setup checks and writes the stored provider key, and value lookup first reads `$STORED` or `--secret STORED=VALUE` before falling back to the logical name.
 
-Manifest-backed setup discovers provider secrets and variables from `wfctl.yaml` and does not support `--auto-gen-keys`; provide values with `--from-env`, `--secret NAME=VALUE`, piped `KEY=VALUE` input, or an interactive terminal prompt.
+Environment input setup discovers provider secrets and variables from `wfctl.yaml` and does not support `--auto-gen-keys`; provide values with `--from-env`, `--secret NAME=VALUE`, piped `KEY=VALUE` input, or an interactive terminal prompt.
 
 Every successful `Set` call is appended to an audit log at `${XDG_STATE_HOME:-$HOME/.local/state}/wfctl/plugins/wfctl/secrets-audit.jsonl` (secret names only — values are never written).
 
@@ -2762,21 +2839,21 @@ wfctl secrets setup [options]
 |------|---------|-------------|
 | `--env` | `local` | Target environment name (interactive path) |
 | `--config` | `app.yaml` | Workflow config file |
-| `--manifest` | _(none)_ | Use a `wfctl.yaml` plugin manifest to discover repo-level plugin secrets, plugin variables, and config env refs |
+| `--manifest` | _(none)_ | Compatibility path for `wfctl env setup`; use a `wfctl.yaml` plugin manifest to discover repo-level plugin secrets, plugin variables, and config env refs |
 | `--lock-file` | `.wfctl-lock.yaml` | Lockfile to include when `--manifest` is used |
 | `--plugin-dir` | `$WFCTL_PLUGIN_DIR` or `./data/plugins` | Installed plugin directory for `required_secrets[]` and `required_config[]` discovery |
 | `--store` | _(config defaultStore)_ | Named store to use; overrides `secrets.defaultStore` |
 | `--non-interactive` | `false` | Force non-interactive mode (also auto when stdin is not a TTY) |
 | `--from-env` | `false` | Read each secret value from `$NAME`. Recommended for CI. |
 | `--secret` | _(none)_ | `NAME=VALUE` literal. **Warning: leaks to process table.** Repeatable. |
-| `--all` | `false` | Set all declared secrets; in manifest-backed interactive setup, preselect existing secrets too |
+| `--all` | `false` | Set all declared secrets; in environment input interactive setup, preselect existing secrets too |
 | `--only` | _(all)_ | Comma-separated list of secret names to set; mutually exclusive with `--all` |
 | `--skip-existing` | `false` | Skip secrets that already have a value in the store |
-| `--verbose` | `false` | In manifest-backed interactive setup, show source files, plugin names, and full provider target details |
+| `--verbose` | `false` | In environment input interactive setup, show source files, plugin names, and full provider target details |
 | `--name-map` | _(none)_ | `LOGICAL=STORED` provider key mapping. Repeatable. Status checks, reads, and writes use `STORED`. |
-| `--write-config` | `false` | After successful manifest-backed setup, rewrite config `${LOGICAL}` references to mapped `${STORED}` names |
-| `--auto-gen-keys` | `false` | Auto-generate random values for config-backed secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive; not supported for manifest-backed `wfctl.yaml` setup |
-| `--scope` | `repo` | GitHub scope for plugin or manifest setup: `repo` \| `env` \| `org` |
+| `--write-config` | `false` | After successful environment input setup, rewrite config `${LOGICAL}` references to mapped `${STORED}` names |
+| `--auto-gen-keys` | `false` | Auto-generate random values for config-backed secrets ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`; implies non-interactive; not supported for `wfctl.yaml` environment input setup |
+| `--scope` | `repo` | GitHub scope for plugin or environment input setup: `repo` \| `env` \| `org` |
 | `--org` | _(none)_ | Organization slug for `--scope org` |
 | `--visibility` | `private` | Org-scope visibility: `all` \| `selected` \| `private` |
 | `--token-env` | `GITHUB_TOKEN` | Env var holding the GitHub PAT |
@@ -2795,7 +2872,7 @@ wfctl secrets setup --env production --auto-gen-keys
 # Set specific secrets only
 wfctl secrets setup --only DB_URL,STRIPE_KEY --from-env
 
-# Discover provider plugin secrets and vars from wfctl.yaml/.wfctl-lock.yaml plus config ${ENV_VAR} refs
+# Compatibility: discover provider plugin secrets and vars from wfctl.yaml/.wfctl-lock.yaml plus config ${ENV_VAR} refs
 wfctl secrets setup --manifest wfctl.yaml --config 'infra/*.yaml,deploy.yaml' \
   --plugin-dir data/plugins --scope org --org GoCodeAlone --from-env
 

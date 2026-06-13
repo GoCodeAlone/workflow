@@ -65,6 +65,7 @@ type manifestSetupArgs struct {
 	verbose        bool
 	nameMappings   map[string]string
 	writeConfig    bool
+	kind           envSetupInputKind
 }
 
 func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Writer) error {
@@ -79,6 +80,15 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 	discovered, err = applyManifestNameMappings(discovered, a.nameMappings)
 	if err != nil {
 		return err
+	}
+	discovered = filterManifestInputsByKind(discovered, a.kind)
+	if len(discovered) == 0 {
+		if a.kind != "" {
+			fmt.Fprintf(out, "No %s inputs found for environment setup.\n", a.kind)
+			return nil
+		}
+		fmt.Fprintln(out, "No plugin required_secrets[], required_config[], or config env references found.")
+		return nil
 	}
 
 	secretMap, err := buildSecretLiteralMap(a.secretLiterals)
@@ -135,6 +145,7 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 				selectable = selectManifestSecretsForSetup(ds, statuses, manifestSecretSelectionOptions{
 					includeExisting: true,
 					skipExisting:    true,
+					kind:            a.kind,
 				})
 			}
 			if len(selectable) == 0 {
@@ -151,13 +162,14 @@ func runSecretsSetupManifestWithIO(a *manifestSetupArgs, in io.Reader, out io.Wr
 			onlySet:         onlySet,
 			includeExisting: true,
 			skipExisting:    a.skipExisting,
+			kind:            a.kind,
 		}), nil
 	}
 	auditFn := func(name, _ string) {
 		_ = writeSecretsAuditRecord(name, "github:"+strings.ToLower(strings.TrimSpace(a.scope))) //nolint:errcheck // best-effort audit
 	}
 
-	fmt.Fprintf(out, "Setting up secrets from %s -> %s\n\n", a.manifestPath, scopeLabel)
+	fmt.Fprintf(out, "Setting up environment inputs from %s -> %s\n\n", a.manifestPath, scopeLabel)
 	switch {
 	case interactive && a.skipExisting:
 		fmt.Fprintln(out, "Interactive mode: --skip-existing is set; existing secrets are hidden and unset secrets are selected by default.")
@@ -240,19 +252,20 @@ func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, d
 		onlySet:         onlySet,
 		includeExisting: true,
 		skipExisting:    a.skipExisting,
+		kind:            a.kind,
 	})
 	if len(selectable) == 0 {
-		fmt.Fprintln(out, "No unset secrets found in the selected provider targets.")
+		fmt.Fprintln(out, "No unset environment inputs found in the selected provider targets.")
 		return nil
 	}
 
-	fmt.Fprintf(out, "Setting up secrets from %s -> provider targets\n\n", a.manifestPath)
+	fmt.Fprintf(out, "Setting up environment inputs from %s -> provider targets\n\n", a.manifestPath)
 	if a.skipExisting {
-		fmt.Fprintln(out, "Interactive mode: --skip-existing is set; existing secret targets are hidden.")
+		fmt.Fprintln(out, "Interactive mode: --skip-existing is set; existing input targets are hidden.")
 	} else {
-		fmt.Fprintln(out, "Interactive mode: unset secret targets are selected by default; toggle set targets to update them.")
+		fmt.Fprintln(out, "Interactive mode: unset input targets are selected by default; toggle set targets to update them.")
 	}
-	fmt.Fprintln(out, "Select secrets first, then choose which scope/store targets to set for each secret.")
+	fmt.Fprintln(out, "Select inputs first, then choose which scope/store targets to set for each input.")
 	fmt.Fprintln(out, "For multiple targets, enter a value once and reuse it or provide target-specific values.")
 	fmt.Fprintln(out, "Use --scope to force a single GitHub target, or configure secretStores for provider-specific targets.")
 	fmt.Fprintln(out)
@@ -267,7 +280,7 @@ func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, d
 		return err
 	}
 	if len(selected) == 0 {
-		fmt.Fprintln(out, "No secret targets selected; nothing to do.")
+		fmt.Fprintln(out, "No input targets selected; nothing to do.")
 		return nil
 	}
 
@@ -1049,6 +1062,7 @@ type manifestSecretSelectionOptions struct {
 	onlySet         map[string]bool
 	includeExisting bool
 	skipExisting    bool
+	kind            envSetupInputKind
 }
 
 func selectManifestSecretsForSetup(secrets []manifestDiscoveredSecret, statuses []SecretStatus, opts manifestSecretSelectionOptions) []manifestDiscoveredSecret {
@@ -1056,6 +1070,9 @@ func selectManifestSecretsForSetup(secrets []manifestDiscoveredSecret, statuses 
 	selected := make([]manifestDiscoveredSecret, 0, len(secrets))
 	for i := range secrets {
 		secret := secrets[i]
+		if !manifestInputMatchesKind(secret, opts.kind) {
+			continue
+		}
 		if len(opts.onlySet) > 0 {
 			if !opts.onlySet[secret.Name] {
 				continue
@@ -1069,6 +1086,30 @@ func selectManifestSecretsForSetup(secrets []manifestDiscoveredSecret, statuses 
 		selected = append(selected, secret)
 	}
 	return selected
+}
+
+func filterManifestInputsByKind(inputs []manifestDiscoveredSecret, kind envSetupInputKind) []manifestDiscoveredSecret {
+	if kind == "" {
+		return inputs
+	}
+	out := make([]manifestDiscoveredSecret, 0, len(inputs))
+	for i := range inputs {
+		if manifestInputMatchesKind(inputs[i], kind) {
+			out = append(out, inputs[i])
+		}
+	}
+	return out
+}
+
+func manifestInputMatchesKind(input manifestDiscoveredSecret, kind envSetupInputKind) bool {
+	if kind == "" {
+		return true
+	}
+	inputKind := input.Kind
+	if inputKind == "" {
+		inputKind = envSetupInputSecret
+	}
+	return inputKind == kind
 }
 
 func manifestStatusesFromTargets(targets []manifestSecretTarget) []SecretStatus {
@@ -1170,6 +1211,9 @@ func selectManifestSecretTargetsForSetup(targets []manifestSecretTarget, opts ma
 	selected := make([]manifestSecretTarget, 0, len(targets))
 	for i := range targets {
 		target := &targets[i]
+		if !manifestInputMatchesKind(target.Secret, opts.kind) {
+			continue
+		}
 		if len(opts.onlySet) > 0 {
 			if !opts.onlySet[target.Secret.Name] {
 				continue
@@ -1191,7 +1235,10 @@ func buildManifestSecretMatrixRows(targets []manifestSecretTarget, includeExisti
 	labels := manifestSecretTargetMatrixLabels(targets, counts)
 	scopes := manifestSecretMatrixScopes(targets, labels, counts)
 	nameWidth := manifestSecretNameColumnWidth(groups)
-	cols := []prompt.TableColumn{{Title: "Input", Width: nameWidth}}
+	cols := []prompt.TableColumn{
+		{Title: "Input", Width: nameWidth},
+		{Title: "Kind", Width: 6}, //nolint:mnd
+	}
 	if verbose {
 		cols = append(cols, prompt.TableColumn{Title: "Sources", Width: 38}) //nolint:mnd
 	}
@@ -1202,7 +1249,7 @@ func buildManifestSecretMatrixRows(targets []manifestSecretTarget, includeExisti
 	rows := make([]prompt.TableItem, 0, len(groups))
 	for groupIdx := range groups {
 		group := &groups[groupIdx]
-		cells := []string{manifestInputDisplayName(group.Secret)}
+		cells := []string{manifestInputDisplayName(group.Secret), manifestInputKindLabel(group.Secret)}
 		if verbose {
 			cells = append(cells, strings.Join(group.Secret.Sources, ", "))
 		}
@@ -1229,6 +1276,13 @@ func buildManifestSecretMatrixRows(targets []manifestSecretTarget, includeExisti
 		})
 	}
 	return cols, rows, groups
+}
+
+func manifestInputKindLabel(input manifestDiscoveredSecret) string {
+	if input.Kind == envSetupInputVar {
+		return envSetupInputVar.String()
+	}
+	return envSetupInputSecret.String()
 }
 
 func groupManifestSecretTargets(targets []manifestSecretTarget) []manifestSecretTargetGroup {
@@ -1851,8 +1905,9 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	visibility := fs.String("visibility", "private", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	fromEnv := fs.Bool("from-env", false, "Read each secret value from $NAME")
-	nonInteractive := fs.Bool("non-interactive", false, "Force non-interactive mode for manifest setup")
+	nonInteractive := fs.Bool("non-interactive", false, "Force non-interactive environment input setup")
 	onlyFlag := fs.String("only", "", "Comma-separated list of secret names to set")
+	kindFlag := fs.String("kind", "all", "Input kind to configure: all | secret | var")
 	allFlag := fs.Bool("all", false, "Set all discovered secrets")
 	skipExisting := fs.Bool("skip-existing", false, "Skip secrets that already have a value in the target scope")
 	verbose := fs.Bool("verbose", false, "Show source files, plugin names, and full provider target details in interactive prompts")
@@ -1873,6 +1928,10 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 	}
 	if *allFlag && len(only) > 0 {
 		return nil, fmt.Errorf("--all and --only are mutually exclusive")
+	}
+	kind, err := parseEnvSetupKind(*kindFlag)
+	if err != nil {
+		return nil, err
 	}
 	nameMappings, err := parseNameMappings(nameMapFlag)
 	if err != nil {
@@ -1900,6 +1959,7 @@ func parseManifestSetupFlags(args []string) (*manifestSetupArgs, error) {
 		verbose:        *verbose,
 		nameMappings:   nameMappings,
 		writeConfig:    *writeConfig,
+		kind:           kind,
 	}, nil
 }
 

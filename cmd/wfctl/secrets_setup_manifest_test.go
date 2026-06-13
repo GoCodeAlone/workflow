@@ -195,6 +195,56 @@ func TestParseManifestSetupFlagsTracksExplicitScope(t *testing.T) {
 	}
 }
 
+func TestParseManifestSetupFlagsAcceptsKind(t *testing.T) {
+	args, err := parseManifestSetupFlags([]string{
+		"--manifest", "wfctl.yaml",
+		"--kind", "var",
+	})
+	if err != nil {
+		t.Fatalf("parseManifestSetupFlags: %v", err)
+	}
+	if args.kind != envSetupInputVar {
+		t.Fatalf("kind = %q, want var", args.kind)
+	}
+
+	args, err = parseManifestSetupFlags([]string{
+		"--manifest", "wfctl.yaml",
+		"--kind", "all",
+	})
+	if err != nil {
+		t.Fatalf("parseManifestSetupFlags all: %v", err)
+	}
+	if args.kind != "" {
+		t.Fatalf("kind = %q, want all/empty", args.kind)
+	}
+}
+
+func TestParseManifestSetupFlagsRejectsInvalidKind(t *testing.T) {
+	_, err := parseManifestSetupFlags([]string{
+		"--manifest", "wfctl.yaml",
+		"--kind", "token",
+	})
+	if err == nil {
+		t.Fatal("expected invalid kind error")
+	}
+	if !strings.Contains(err.Error(), "--kind") || !strings.Contains(err.Error(), "secret|var|all") {
+		t.Fatalf("error = %q, want kind guidance", err)
+	}
+}
+
+func TestManifestSetupCommandInputUsesPipedStdin(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	if got := manifestSetupCommandInput(reader); got != reader {
+		t.Fatalf("manifestSetupCommandInput(pipe) = %T, want pipe reader", got)
+	}
+}
+
 func TestManifestSecretValueNonInteractiveRequiresValueSource(t *testing.T) {
 	secret := manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}}
 	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
@@ -777,16 +827,16 @@ func TestBuildManifestSecretMatrixRowsSummarizesTargets(t *testing.T) {
 	}
 
 	cols, rows, grouped := buildManifestSecretMatrixRows(targets, false, false)
-	if len(cols) != 3 {
-		t.Fatalf("cols = %+v, want secret + 2 scopes", cols)
+	if len(cols) != 4 {
+		t.Fatalf("cols = %+v, want input + kind + 2 scopes", cols)
 	}
-	if cols[1].Title != "github:repo" || cols[2].Title != "github:org" {
+	if cols[1].Title != "Kind" || cols[2].Title != "github:repo" || cols[3].Title != "github:org" {
 		t.Fatalf("cols = %+v, want github scope headers", cols)
 	}
 	if len(rows) != 2 || len(grouped) != 2 {
 		t.Fatalf("rows=%d grouped=%d, want 2", len(rows), len(grouped))
 	}
-	if rows[0].Cells[0] != "DIGITALOCEAN_TOKEN" || rows[0].Cells[1] != "○" || rows[0].Cells[2] != "✓" {
+	if rows[0].Cells[0] != "DIGITALOCEAN_TOKEN" || rows[0].Cells[1] != "secret" || rows[0].Cells[2] != "○" || rows[0].Cells[3] != "✓" {
 		t.Fatalf("first row = %+v", rows[0].Cells)
 	}
 	if !rows[0].Preselected {
@@ -829,16 +879,16 @@ func TestBuildManifestSecretMatrixRowsDisambiguatesDuplicateScopes(t *testing.T)
 	}
 
 	cols, rows, _ := buildManifestSecretMatrixRows(targets, false, false)
-	if len(cols) != 3 {
-		t.Fatalf("cols = %+v, want secret + two repo targets", cols)
+	if len(cols) != 4 {
+		t.Fatalf("cols = %+v, want input + kind + two repo targets", cols)
 	}
-	if cols[1].Title == cols[2].Title {
+	if cols[2].Title == cols[3].Title {
 		t.Fatalf("duplicate compact scopes were not disambiguated: %+v", cols)
 	}
-	if !strings.HasPrefix(cols[1].Title, "github:repo:") || !strings.HasPrefix(cols[2].Title, "github:repo:") {
+	if !strings.HasPrefix(cols[2].Title, "github:repo:") || !strings.HasPrefix(cols[3].Title, "github:repo:") {
 		t.Fatalf("cols = %+v, want compact disambiguated github repo columns", cols)
 	}
-	if rows[0].Cells[1] != "○" || rows[0].Cells[2] != "✓" {
+	if rows[0].Cells[1] != "secret" || rows[0].Cells[2] != "○" || rows[0].Cells[3] != "✓" {
 		t.Fatalf("row = %+v, want per-target status preserved", rows[0].Cells)
 	}
 }
@@ -865,13 +915,13 @@ func TestBuildManifestSecretMatrixRowsKeepsTruncatedSubjectsUnique(t *testing.T)
 	}
 
 	cols, rows, _ := buildManifestSecretMatrixRows(targets, false, false)
-	if len(cols) != 3 {
-		t.Fatalf("cols = %+v, want secret + two disambiguated repo targets", cols)
+	if len(cols) != 4 {
+		t.Fatalf("cols = %+v, want input + kind + two disambiguated repo targets", cols)
 	}
-	if cols[1].Title == cols[2].Title {
+	if cols[2].Title == cols[3].Title {
 		t.Fatalf("truncated duplicate subjects collapsed into one matrix column: %+v", cols)
 	}
-	if rows[0].Cells[1] != "○" || rows[0].Cells[2] != "✓" {
+	if rows[0].Cells[1] != "secret" || rows[0].Cells[2] != "○" || rows[0].Cells[3] != "✓" {
 		t.Fatalf("row = %+v, want per-target statuses retained", rows[0].Cells)
 	}
 }
@@ -1262,8 +1312,8 @@ func TestManifestMultiSelectTitleRespectsSkipExisting(t *testing.T) {
 
 func TestSelectManifestSecretsForSetupDefaultsToUnsetButCanUpdateAll(t *testing.T) {
 	secrets := []manifestDiscoveredSecret{
-		{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}},
-		{PluginRequiredSecret: PluginRequiredSecret{Name: "HOVER_PASSWORD"}},
+		{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}, Kind: envSetupInputSecret},
+		{PluginRequiredSecret: PluginRequiredSecret{Name: "HOVER_PASSWORD"}, Kind: envSetupInputSecret},
 	}
 	statuses := []SecretStatus{
 		{Name: "DIGITALOCEAN_TOKEN", State: SecretSet, IsSet: true},
@@ -1293,6 +1343,35 @@ func TestSelectManifestSecretsForSetupDefaultsToUnsetButCanUpdateAll(t *testing.
 	})
 	if got := manifestSecretNames(selected); !reflect.DeepEqual(got, []string{"DIGITALOCEAN_TOKEN"}) {
 		t.Fatalf("explicit only selected = %v, want selected set secret", got)
+	}
+}
+
+func TestSelectManifestSecretsForSetupFiltersByKind(t *testing.T) {
+	inputs := []manifestDiscoveredSecret{
+		{PluginRequiredSecret: PluginRequiredSecret{Name: "API_TOKEN"}, Kind: envSetupInputSecret},
+		{PluginRequiredSecret: PluginRequiredSecret{Name: "ACCOUNT_ID"}, Kind: envSetupInputVar},
+		{PluginRequiredSecret: PluginRequiredSecret{Name: "LEGACY_SECRET"}},
+	}
+	statuses := []SecretStatus{
+		{Name: "API_TOKEN", State: SecretNotSet},
+		{Name: "ACCOUNT_ID", State: SecretNotSet},
+		{Name: "LEGACY_SECRET", State: SecretNotSet},
+	}
+
+	selected := selectManifestSecretsForSetup(inputs, statuses, manifestSecretSelectionOptions{
+		kind:            envSetupInputSecret,
+		includeExisting: true,
+	})
+	if got := manifestSecretNames(selected); !reflect.DeepEqual(got, []string{"API_TOKEN", "LEGACY_SECRET"}) {
+		t.Fatalf("secret kind selected = %v, want API_TOKEN and legacy secret default", got)
+	}
+
+	selected = selectManifestSecretsForSetup(inputs, statuses, manifestSecretSelectionOptions{
+		kind:            envSetupInputVar,
+		includeExisting: true,
+	})
+	if got := manifestSecretNames(selected); !reflect.DeepEqual(got, []string{"ACCOUNT_ID"}) {
+		t.Fatalf("var kind selected = %v, want ACCOUNT_ID", got)
 	}
 }
 

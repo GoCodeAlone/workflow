@@ -30,10 +30,15 @@ func printVarsUsage() {
 
 Manage non-secret provider variables and configuration values.
 
+For unified provider secrets, provider variables, and config env references,
+prefer wfctl env setup. This vars command remains supported for non-secret-only
+setup and compatibility.
+
 Actions:
   setup   Configure non-secret variables declared by plugin or app config metadata
 
 Examples:
+  wfctl env setup --manifest wfctl.yaml --kind var
   wfctl vars setup --plugin workflow-plugin-cloudflare --from-env
   wfctl vars setup --plugin workflow-plugin-namecheap --scope env --env production
   wfctl vars setup --config app.yaml --from-env
