@@ -67,7 +67,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with: { go-version-file: go.mod }
-      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
+      - uses: GoCodeAlone/setup-wfctl@526e23ee7d3cae9ba8ba09d87090879e04c7aab2 # v1
 
       # 1. Pre-build gate: static contract + tag format
       - name: Validate plugin contract for publish (pre-build)

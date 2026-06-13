@@ -14,7 +14,7 @@ jobs:
         with:
           go-version: '1.26.4'
       - name: Setup wfctl
-        uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
+        uses: GoCodeAlone/setup-wfctl@526e23ee7d3cae9ba8ba09d87090879e04c7aab2 # v1
       - name: Validate release contract before packaging
         run: wfctl plugin validate-contract --for-publish --tag "${{ "{{" }} github.ref_name {{ "}}" }}" .
       - name: Build plugin binaries

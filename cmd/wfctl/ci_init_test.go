@@ -15,7 +15,7 @@ func TestGenerateGHABootstrap_NoConfig(t *testing.T) {
 	if !strings.Contains(content, "wfctl ci run --phase build,test") {
 		t.Error("expected wfctl ci run --phase build,test in output")
 	}
-	if !strings.Contains(content, "GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1") {
+	if !strings.Contains(content, "GoCodeAlone/setup-wfctl@526e23ee7d3cae9ba8ba09d87090879e04c7aab2 # v1") {
 		t.Error("expected SHA-pinned setup-wfctl action in output")
 	}
 }
