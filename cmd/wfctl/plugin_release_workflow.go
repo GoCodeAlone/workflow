@@ -46,6 +46,13 @@ Options:
 	if !*fix {
 		return fmt.Errorf("release workflow has %d issue(s); rerun with --fix", len(findings))
 	}
+	remainingFindings := releaseWorkflowFindings(updated)
+	if len(remainingFindings) > 0 {
+		for _, finding := range remainingFindings {
+			fmt.Printf("remaining %s: %s\n", finding.Code, finding.Message)
+		}
+		return fmt.Errorf("release workflow still has %d issue(s) after --fix", len(remainingFindings))
+	}
 	if changed {
 		if err := os.WriteFile(*path, []byte(updated), 0o600); err != nil {
 			return fmt.Errorf("write release workflow: %w", err)
@@ -83,8 +90,7 @@ func releaseWorkflowFindings(content string) []releaseWorkflowFinding {
 			Message: "setup-wfctl action uses a mutable major ref instead of a pinned SHA",
 		})
 	}
-	if regexp.MustCompile(`version:\s*['"]?v[0-9]+\.[0-9]+\.[0-9]+`).MatchString(content) ||
-		regexp.MustCompile(`version:\s*v[0-9]+\.[0-9]+\.[0-9]+`).MatchString(content) {
+	if setupWfctlVersionInputPinned(content) {
 		findings = append(findings, releaseWorkflowFinding{
 			Code:    "pinned-wfctl-version",
 			Message: "setup-wfctl pins an explicit wfctl release; use latest unless a workflow documents a compatibility reason",
@@ -109,7 +115,7 @@ func replaceManualWfctlInstallSteps(content string) string {
 	var out []string
 	for i := 0; i < len(lines); {
 		line := lines[i]
-		if !strings.Contains(line, "- name: Install wfctl ") {
+		if !manualWfctlInstallStepName(line) {
 			out = append(out, line)
 			i++
 			continue
@@ -152,8 +158,42 @@ func normalizeWfctlBinaryInvocations(content string) string {
 }
 
 func normalizeSetupWfctlVersionInput(content string) string {
-	reInline := regexp.MustCompile(`with:\s*\{\s*version:\s*['"]?v[0-9]+\.[0-9]+\.[0-9]+['"]?\s*\}`)
-	content = reInline.ReplaceAllString(content, "with: { version: latest }")
-	reBlock := regexp.MustCompile(`version:\s*['"]?v[0-9]+\.[0-9]+\.[0-9]+['"]?`)
-	return reBlock.ReplaceAllString(content, "version: latest")
+	lines := strings.SplitAfter(content, "\n")
+	var out []string
+	inSetupStep := false
+	setupIndent := ""
+	versionRe := regexp.MustCompile(`version:\s*['"]?v[0-9]+\.[0-9]+\.[0-9]+['"]?`)
+	inlineRe := regexp.MustCompile(`with:\s*\{\s*version:\s*['"]?v[0-9]+\.[0-9]+\.[0-9]+['"]?\s*\}`)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") {
+			inSetupStep = false
+			stepIndex := strings.Index(line, "- ")
+			if stepIndex < 0 {
+				setupIndent = ""
+			} else {
+				setupIndent = line[:stepIndex]
+			}
+		} else if setupIndent != "" && !strings.HasPrefix(line, setupIndent+" ") && strings.TrimSpace(line) != "" {
+			inSetupStep = false
+		}
+		if strings.Contains(line, "GoCodeAlone/setup-wfctl@") {
+			inSetupStep = true
+		}
+		if inSetupStep {
+			line = inlineRe.ReplaceAllString(line, "with: { version: latest }")
+			line = versionRe.ReplaceAllString(line, "version: latest")
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "")
+}
+
+func manualWfctlInstallStepName(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return regexp.MustCompile(`^- name:\s*Install wfctl(\s+.*)?$`).MatchString(trimmed)
+}
+
+func setupWfctlVersionInputPinned(content string) bool {
+	return normalizeSetupWfctlVersionInput(content) != content
 }

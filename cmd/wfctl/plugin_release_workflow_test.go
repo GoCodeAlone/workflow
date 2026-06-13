@@ -43,6 +43,21 @@ func TestAuditReleaseWorkflowFixesManualInstall(t *testing.T) {
 	}
 }
 
+func TestAuditReleaseWorkflowFixesManualInstallWithoutVersionSuffix(t *testing.T) {
+	content := strings.Replace(staleReleaseWorkflowFixture(), "Install wfctl v0.63.2", "Install wfctl", 1)
+	updated, findings, changed := auditReleaseWorkflow(content, true)
+	assertReleaseWorkflowFinding(t, findings, "manual-wfctl-install")
+	if !changed {
+		t.Fatal("expected fixed content to change")
+	}
+	if strings.Contains(updated, "Install wfctl") || strings.Contains(updated, "workflow/releases/download/v0.63.2") {
+		t.Fatalf("fixed workflow kept stale install block:\n%s", updated)
+	}
+	if remaining := releaseWorkflowFindings(updated); len(remaining) != 0 {
+		t.Fatalf("fixed workflow still has findings: %#v\n%s", remaining, updated)
+	}
+}
+
 func TestAuditReleaseWorkflowNormalizesSetupAction(t *testing.T) {
 	content := `name: Release
 jobs:
@@ -63,6 +78,30 @@ jobs:
 	}
 	if strings.Contains(updated, "version: v0.61.0") {
 		t.Fatalf("fixed workflow kept stale version:\n%s", updated)
+	}
+}
+
+func TestAuditReleaseWorkflowDoesNotRewriteUnrelatedVersionInputs(t *testing.T) {
+	content := `name: Release
+jobs:
+  release:
+    steps:
+      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: example/tool-action@v1
+        with:
+          version: v2.3.4
+      - run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" .
+`
+	updated, findings, changed := auditReleaseWorkflow(content, true)
+	assertReleaseWorkflowFinding(t, findings, "unpinned-setup-wfctl")
+	if !changed {
+		t.Fatal("expected setup-wfctl ref to change")
+	}
+	if !strings.Contains(updated, "version: v2.3.4") {
+		t.Fatalf("unrelated version input was rewritten:\n%s", updated)
+	}
+	if strings.Contains(updated, "GoCodeAlone/setup-wfctl@v1") {
+		t.Fatalf("setup-wfctl ref was not normalized:\n%s", updated)
 	}
 }
 
