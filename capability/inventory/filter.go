@@ -47,7 +47,7 @@ func FilterInventory(inv *Inventory, opts FilterOptions) *Inventory {
 	}
 	out.Findings = filterFindings(inv.Findings, opts)
 	for i := range out.Capabilities {
-		out.Findings = append(out.Findings, filterFindings(out.Capabilities[i].Findings, opts)...)
+		out.Findings = append(out.Findings, out.Capabilities[i].Findings...)
 	}
 	out.Findings = dedupeFindings(out.Findings)
 	setFilteredCounts(out.Metadata.Counts, len(out.Capabilities), len(out.Findings))
@@ -73,7 +73,7 @@ func FilterAppProfile(profile *AppProfile, opts FilterOptions) *AppProfile {
 	}
 	out.Findings = filterFindings(profile.Findings, opts)
 	for i := range out.Usage {
-		out.Findings = append(out.Findings, filterFindings(out.Usage[i].Findings, opts)...)
+		out.Findings = append(out.Findings, out.Usage[i].Findings...)
 	}
 	out.Findings = dedupeFindings(out.Findings)
 	if out.Metadata.Counts == nil {
@@ -211,10 +211,7 @@ func findingMatches(finding Finding, opts FilterOptions) bool {
 	if len(opts.Capabilities) > 0 && !matchAny(opts.Capabilities, opts.Exact, finding.CapabilityID) {
 		return false
 	}
-	if len(opts.Sources) > 0 && len(filterEvidence(finding.Evidence, opts)) == 0 {
-		return false
-	}
-	if len(opts.EvidenceKind) > 0 && len(filterEvidence(finding.Evidence, opts)) == 0 {
+	if (len(opts.Sources) > 0 || len(opts.EvidenceKind) > 0) && len(filterEvidence(finding.Evidence, opts)) == 0 {
 		return false
 	}
 	return true
