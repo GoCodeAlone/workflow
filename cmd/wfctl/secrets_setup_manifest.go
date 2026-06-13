@@ -255,17 +255,17 @@ func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, d
 		kind:            a.kind,
 	})
 	if len(selectable) == 0 {
-		fmt.Fprintln(out, "No unset secrets found in the selected provider targets.")
+		fmt.Fprintln(out, "No unset environment inputs found in the selected provider targets.")
 		return nil
 	}
 
 	fmt.Fprintf(out, "Setting up environment inputs from %s -> provider targets\n\n", a.manifestPath)
 	if a.skipExisting {
-		fmt.Fprintln(out, "Interactive mode: --skip-existing is set; existing secret targets are hidden.")
+		fmt.Fprintln(out, "Interactive mode: --skip-existing is set; existing input targets are hidden.")
 	} else {
-		fmt.Fprintln(out, "Interactive mode: unset secret targets are selected by default; toggle set targets to update them.")
+		fmt.Fprintln(out, "Interactive mode: unset input targets are selected by default; toggle set targets to update them.")
 	}
-	fmt.Fprintln(out, "Select secrets first, then choose which scope/store targets to set for each secret.")
+	fmt.Fprintln(out, "Select inputs first, then choose which scope/store targets to set for each input.")
 	fmt.Fprintln(out, "For multiple targets, enter a value once and reuse it or provide target-specific values.")
 	fmt.Fprintln(out, "Use --scope to force a single GitHub target, or configure secretStores for provider-specific targets.")
 	fmt.Fprintln(out)
@@ -280,7 +280,7 @@ func runSecretsSetupManifestTargets(ctx context.Context, a *manifestSetupArgs, d
 		return err
 	}
 	if len(selected) == 0 {
-		fmt.Fprintln(out, "No secret targets selected; nothing to do.")
+		fmt.Fprintln(out, "No input targets selected; nothing to do.")
 		return nil
 	}
 

@@ -232,6 +232,19 @@ func TestParseManifestSetupFlagsRejectsInvalidKind(t *testing.T) {
 	}
 }
 
+func TestManifestSetupCommandInputUsesPipedStdin(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	if got := manifestSetupCommandInput(reader); got != reader {
+		t.Fatalf("manifestSetupCommandInput(pipe) = %T, want pipe reader", got)
+	}
+}
+
 func TestManifestSecretValueNonInteractiveRequiresValueSource(t *testing.T) {
 	secret := manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}}
 	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{

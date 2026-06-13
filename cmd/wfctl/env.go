@@ -54,7 +54,7 @@ func runEnvSetup(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return runSecretsSetupManifestWithIO(parsed, nil, out)
+	return runSecretsSetupManifestWithIO(parsed, manifestSetupCommandInput(os.Stdin), out)
 }
 
 func hasHelpArg(args []string) bool {

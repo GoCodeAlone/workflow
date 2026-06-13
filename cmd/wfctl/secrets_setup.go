@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,7 +32,7 @@ func runSecretsSetup(args []string) error {
 			if err != nil {
 				return err
 			}
-			return runSecretsSetupManifestWithIO(manifestArgs, nil, os.Stdout)
+			return runSecretsSetupManifestWithIO(manifestArgs, manifestSetupCommandInput(os.Stdin), os.Stdout)
 		}
 	}
 
@@ -143,7 +144,7 @@ Options:
 				all:            *allFlag,
 				skipExisting:   *skipExisting,
 				verbose:        *verbose,
-			}, nil, os.Stdout)
+			}, manifestSetupCommandInput(os.Stdin), os.Stdout)
 		}
 		if target.path != "" {
 			*configFile = target.path
@@ -185,6 +186,13 @@ Options:
 		}, os.Stdout)
 	}
 	return err
+}
+
+func manifestSetupCommandInput(stdin *os.File) io.Reader {
+	if stdin == nil || isatty.IsTerminal(stdin.Fd()) {
+		return nil
+	}
+	return stdin
 }
 
 type secretsSetupTargetKind string
