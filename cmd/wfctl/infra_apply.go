@@ -459,6 +459,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// goes through wfctlhelpers.ApplyPlanWithHooks (Replace + drift
 	// postcondition + IaCProviderFinalizer fan-out).
 	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	wireApplyProgressIntoHooks(&hooks, plan.Actions)
 	wireDNSGateIntoHooks(&hooks, provider)
 	wireOwnershipGateIntoHooks(&hooks, provider)
 	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
@@ -599,6 +600,23 @@ func infraHealthTargets(specs []interfaces.ResourceSpec, current []interfaces.Re
 
 func shouldWaitForInfraHealth(spec interfaces.ResourceSpec) bool {
 	return spec.Type == "infra.container_service"
+}
+
+func wireApplyProgressIntoHooks(hooks *wfctlhelpers.ApplyPlanHooks, actions []interfaces.PlanAction) {
+	if hooks == nil || len(actions) == 0 {
+		return
+	}
+	total := len(actions)
+	nextIndex := 0
+	prior := hooks.OnBeforeAction
+	hooks.OnBeforeAction = func(ctx context.Context, action interfaces.PlanAction) error {
+		nextIndex++
+		fmt.Printf("  -> [%d/%d] %s %s (%s)\n", nextIndex, total, action.Action, action.Resource.Name, action.Resource.Type)
+		if prior == nil {
+			return nil
+		}
+		return prior(ctx, action)
+	}
 }
 
 func statePersistenceHooks(
@@ -1576,6 +1594,7 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 	// v2 is the only supported dispatch per ADR 0024 + workflow#699.
 	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	wireApplyProgressIntoHooks(&hooks, plan.Actions)
 	wireDNSGateIntoHooks(&hooks, provider)
 	wireOwnershipGateIntoHooks(&hooks, provider)
 	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
