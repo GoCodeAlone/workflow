@@ -71,6 +71,7 @@ type RegistryCapabilities struct {
 	ModuleTypes      []string             `json:"moduleTypes,omitempty"`
 	StepTypes        []string             `json:"stepTypes,omitempty"`
 	TriggerTypes     []string             `json:"triggerTypes,omitempty"`
+	ResourceTypes    []string             `json:"resourceTypes,omitempty"`
 	ServiceMethods   []string             `json:"serviceMethods,omitempty"`
 	WorkflowHandlers []string             `json:"workflowHandlers,omitempty"`
 	IaCProvider      *RegistryIaCProvider `json:"iacProvider,omitempty"`
