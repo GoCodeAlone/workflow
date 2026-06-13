@@ -230,6 +230,9 @@ func TestBuildResourceStateFromImport_PreservesEnumeratedCloudID(t *testing.T) {
 	if state.Outputs["zone_id"] != "opaque-zone-id" {
 		t.Fatalf("zone_id output = %v; want opaque-zone-id", state.Outputs["zone_id"])
 	}
+	if state.AppliedConfig["zone_id"] != "opaque-zone-id" {
+		t.Fatalf("zone_id applied config = %v; want opaque-zone-id", state.AppliedConfig["zone_id"])
+	}
 }
 
 // TestDumpPortfolio_MergesDnsAndDelegationForSameDomain pins the end-to-end
