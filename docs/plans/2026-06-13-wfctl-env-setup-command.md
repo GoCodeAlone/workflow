@@ -29,7 +29,7 @@
 |------|-------|-------|--------|
 | 1 | Add `wfctl env setup` command and aliases | Task 1, Task 2, Task 3 | feat/env-setup-command |
 
-**Status:** Locked 2026-06-13T04:22:12Z
+**Status:** Complete 2026-06-13T05:28:21Z
 
 ## Task 1: Add `wfctl env` Command Group
 
