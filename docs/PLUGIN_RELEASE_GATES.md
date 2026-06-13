@@ -68,7 +68,6 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with: { go-version-file: go.mod }
       - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1
-        with: { version: v0.61.0 }
 
       # 1. Pre-build gate: static contract + tag format
       - name: Validate plugin contract for publish (pre-build)
@@ -97,6 +96,16 @@ jobs:
 ```
 
 Malformed tag → step 1 fails. Stale capabilities or missing ldflag → step 1 fails. Goreleaser mis-writing the tarball plugin.json → step 3 fails. None of these promote the release to public.
+
+`setup-wfctl` defaults to the latest released Workflow CLI and logs the
+resolved version before download. Do not hand-roll `curl` downloads or pin a
+specific wfctl version in plugin release workflows unless the workflow documents
+a compatibility reason. Audit existing release workflows with:
+
+```
+wfctl plugin release-workflow
+wfctl plugin release-workflow --fix
+```
 
 ## What got deleted
 

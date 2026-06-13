@@ -684,6 +684,23 @@ wfctl plugin docs <plugin-dir>
 wfctl plugin docs ./my-plugin/
 ```
 
+#### `plugin release-workflow`
+
+Audit a plugin release workflow for stale wfctl installation patterns. The
+preferred release-gate path is the SHA-pinned `GoCodeAlone/setup-wfctl` action
+with its default `latest` wfctl resolution. Use `--fix` to rewrite known
+hand-rolled install blocks and mutable setup-wfctl refs.
+
+```
+wfctl plugin release-workflow
+wfctl plugin release-workflow --path .github/workflows/release.yml --fix
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--path` | `.github/workflows/release.yml` | Release workflow to audit |
+| `--fix` | `false` | Rewrite known stale wfctl install patterns |
+
 #### `plugin test`
 
 Run a plugin through its full lifecycle in a test harness.
