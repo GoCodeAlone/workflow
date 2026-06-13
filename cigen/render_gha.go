@@ -9,7 +9,7 @@ const (
 	githubActionsCheckoutRef = "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3"
 	githubActionsScriptRef   = "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0"
 	// #nosec G101 -- action commit SHA, not a credential.
-	githubActionsSetupWfctlRef = "GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1"
+	githubActionsSetupWfctlRef = "GoCodeAlone/setup-wfctl@526e23ee7d3cae9ba8ba09d87090879e04c7aab2 # v1"
 )
 
 // RenderGitHubActions generates GitHub Actions workflow YAML files from a CIPlan.

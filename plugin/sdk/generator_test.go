@@ -477,7 +477,7 @@ func TestTemplateGeneratorReleaseWorkflowUsesContractGateAndCurrentActions(t *te
 	}
 	content := string(data)
 	for _, want := range []string{
-		"GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956 # v1",
+		"GoCodeAlone/setup-wfctl@526e23ee7d3cae9ba8ba09d87090879e04c7aab2 # v1",
 		"wfctl plugin validate-contract --for-publish --tag \"${{ github.ref_name }}\" .",
 		"goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2",
 		"version: '~> v2'",

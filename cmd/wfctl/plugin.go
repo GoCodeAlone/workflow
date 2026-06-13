@@ -46,6 +46,8 @@ func runPlugin(args []string) error {
 		return runPluginAudit(subArgs)
 	case "validate-contract":
 		return runPluginValidateContract(subArgs)
+	case "release-workflow":
+		return runPluginReleaseWorkflow(subArgs)
 	case "verify-capabilities":
 		return runPluginVerifyCapabilities(subArgs)
 	case "registry-sync":
@@ -86,6 +88,7 @@ Subcommands:
   validate Validate a plugin manifest from the registry or a local file
   audit    Audit a single plugin source directory
   validate-contract  Validate a plugin source directory against the release contract (workflow#758)
+  release-workflow  Audit/fix plugin release workflow wfctl installation
   verify-capabilities  Spawn plugin binary, verify runtime GetManifest matches plugin.json
   registry-sync  Sync registry manifest versions/capabilities from upstream release tags; subcommands: core, readme (workflow#762)
   conformance Run executable plugin/host conformance checks
