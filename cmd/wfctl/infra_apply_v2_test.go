@@ -582,7 +582,7 @@ type createOutputDriver struct {
 	iactest.NoopDriver
 }
 
-func (createOutputDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+func (*createOutputDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: "id-" + spec.Name}, nil
 }
 
