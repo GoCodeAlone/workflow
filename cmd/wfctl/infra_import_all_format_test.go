@@ -205,6 +205,33 @@ func TestBuildResourceStateFromImport_TypeNamespacedID(t *testing.T) {
 	}
 }
 
+func TestBuildResourceStateFromImport_PreservesEnumeratedCloudID(t *testing.T) {
+	imported := &interfaces.ResourceState{
+		ProviderID: "opaque-zone-id",
+		Type:       "infra.dns",
+		Outputs: map[string]any{
+			"domain":  "example.com",
+			"zone_id": "opaque-zone-id",
+		},
+		AppliedConfig: map[string]any{
+			"domain":  "example.com",
+			"zone_id": "opaque-zone-id",
+		},
+	}
+
+	state, err := buildResourceStateFromImport("example.com", "example.com", "infra.dns", "cloudflare", imported)
+	if err != nil {
+		t.Fatalf("buildResourceStateFromImport: %v", err)
+	}
+
+	if state.ProviderID != "example.com" {
+		t.Fatalf("ProviderID = %q; want enumerated cloudID example.com", state.ProviderID)
+	}
+	if state.Outputs["zone_id"] != "opaque-zone-id" {
+		t.Fatalf("zone_id output = %v; want opaque-zone-id", state.Outputs["zone_id"])
+	}
+}
+
 // TestDumpPortfolio_MergesDnsAndDelegationForSameDomain pins the end-to-end
 // portfolio merge contract (CRITICAL-1 class): when BOTH an infra.dns state
 // and an infra.dns_delegation state for the same domain are present in the

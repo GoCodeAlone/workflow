@@ -239,7 +239,14 @@ func buildResourceStateFromImport(zoneName, cloudID, resourceType, providerType 
 		Name: resourceType + "/" + sanitizeImportedZoneName(zoneName),
 		Type: resourceType,
 	}
-	return resourceStateFromImportedState(spec, providerType, imported, cloudID)
+	state, err := resourceStateFromImportedState(spec, providerType, imported, cloudID)
+	if err != nil {
+		return interfaces.ResourceState{}, err
+	}
+	if cloudID != "" {
+		state.ProviderID = cloudID
+	}
+	return state, nil
 }
 
 // sanitizeImportedZoneName converts a zone identifier (typically a FQDN like
