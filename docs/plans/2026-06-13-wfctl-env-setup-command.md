@@ -29,7 +29,7 @@
 |------|-------|-------|--------|
 | 1 | Add `wfctl env setup` command and aliases | Task 1, Task 2, Task 3 | feat/env-setup-command |
 
-**Status:** Draft
+**Status:** Locked 2026-06-13T04:22:12Z
 
 ## Task 1: Add `wfctl env` Command Group
 
@@ -98,4 +98,3 @@
 - Expected: commands exit 0 for help, tests/lint exit 0, and help/docs consistently center `wfctl env setup`.
 
 **Rollback:** Revert docs and command changes; publish a patch release only after the reverted command surface is verified.
-
