@@ -236,6 +236,43 @@ func TestPluginRegistrySync_MetadataSyncProjectsNestedIaCServices(t *testing.T) 
 	}
 }
 
+func TestPluginRegistrySync_MetadataSyncProjectsSecretAndConfigContracts(t *testing.T) {
+	raw := map[string]any{
+		"required_secrets": []any{
+			map[string]any{"name": "OLD_SECRET", "sensitive": true},
+		},
+	}
+	pluginJSON := map[string]any{
+		"required_secrets": []any{
+			map[string]any{"name": "PLUGIN_SECRET", "sensitive": true},
+		},
+		"required_config": []any{
+			map[string]any{"name": "PLUGIN_ACCOUNT_ID", "key": "account_id", "sensitive": false},
+		},
+		"secret_targets": []any{
+			map[string]any{"provider": "github", "scopes": []any{"repo", "env"}},
+		},
+		"config_targets": []any{
+			map[string]any{"provider": "github", "scopes": []any{"repo", "env"}},
+		},
+	}
+
+	syncManifestMetadataFromPluginJSON(raw, pluginJSON)
+
+	if got := raw["required_secrets"].([]any)[0].(map[string]any)["name"]; got != "PLUGIN_SECRET" {
+		t.Fatalf("required_secrets[0].name = %v, want PLUGIN_SECRET", got)
+	}
+	if got := raw["required_config"].([]any)[0].(map[string]any)["name"]; got != "PLUGIN_ACCOUNT_ID" {
+		t.Fatalf("required_config[0].name = %v, want PLUGIN_ACCOUNT_ID", got)
+	}
+	if got := raw["secret_targets"].([]any)[0].(map[string]any)["provider"]; got != "github" {
+		t.Fatalf("secret_targets[0].provider = %v, want github", got)
+	}
+	if got := raw["config_targets"].([]any)[0].(map[string]any)["provider"]; got != "github" {
+		t.Fatalf("config_targets[0].provider = %v, want github", got)
+	}
+}
+
 func TestPluginRegistrySync_DefaultSkipsBuiltinManifests(t *testing.T) {
 	registry := t.TempDir()
 	mustWrite(t, filepath.Join(registry, "plugins", "admincore", "manifest.json"), `{

@@ -715,6 +715,11 @@ func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) {
 	if iac, ok := pluginJSON["iacProvider"]; ok && iac != nil {
 		raw["iacProvider"] = iac
 	}
+	for _, key := range []string{"required_secrets", "required_config", "secret_targets", "config_targets"} {
+		if value, ok := pluginJSON[key]; ok && value != nil {
+			raw[key] = value
+		}
+	}
 }
 
 func registrySyncStringSliceFromAny(v any) []string {
