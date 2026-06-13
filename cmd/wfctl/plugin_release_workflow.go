@@ -114,7 +114,13 @@ func replaceManualWfctlInstallSteps(content string) string {
 			i++
 			continue
 		}
-		indent := line[:strings.Index(line, "- name:")]
+		nameIndex := strings.Index(line, "- name:")
+		if nameIndex < 0 {
+			out = append(out, line)
+			i++
+			continue
+		}
+		indent := line[:nameIndex]
 		out = append(out,
 			indent+"- name: Setup wfctl\n",
 			indent+"  uses: "+githubActionsSetupWfctlRef+"\n",
