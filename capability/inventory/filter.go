@@ -46,8 +46,8 @@ func FilterInventory(inv *Inventory, opts FilterOptions) *Inventory {
 		out.Capabilities = append(out.Capabilities, cap)
 	}
 	out.Findings = filterFindings(inv.Findings, opts)
-	for _, cap := range out.Capabilities {
-		out.Findings = append(out.Findings, filterFindings(cap.Findings, opts)...)
+	for i := range out.Capabilities {
+		out.Findings = append(out.Findings, filterFindings(out.Capabilities[i].Findings, opts)...)
 	}
 	out.Findings = dedupeFindings(out.Findings)
 	setFilteredCounts(out.Metadata.Counts, len(out.Capabilities), len(out.Findings))
@@ -72,8 +72,8 @@ func FilterAppProfile(profile *AppProfile, opts FilterOptions) *AppProfile {
 		out.Usage = append(out.Usage, usage)
 	}
 	out.Findings = filterFindings(profile.Findings, opts)
-	for _, usage := range out.Usage {
-		out.Findings = append(out.Findings, filterFindings(usage.Findings, opts)...)
+	for i := range out.Usage {
+		out.Findings = append(out.Findings, filterFindings(out.Usage[i].Findings, opts)...)
 	}
 	out.Findings = dedupeFindings(out.Findings)
 	if out.Metadata.Counts == nil {
@@ -106,7 +106,8 @@ func filterUsage(usage Usage, opts FilterOptions) Usage {
 
 func filterProviders(providers []Provider, opts FilterOptions) []Provider {
 	out := make([]Provider, 0, len(providers))
-	for _, provider := range providers {
+	for i := range providers {
+		provider := providers[i]
 		if len(opts.Providers) > 0 && !providerMatches(provider, opts) {
 			continue
 		}
