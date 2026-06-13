@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -105,6 +106,40 @@ func TestApplyWithProviderAndStore_V2RoutesThroughWfctlhelpers(t *testing.T) {
 	}
 	if !v2Called.Load() {
 		t.Error("wfctlhelpers.ApplyPlan was not invoked despite manifest declaring v2")
+	}
+}
+
+func TestApplyWithProviderAndStore_PrintsActionStartProgress(t *testing.T) {
+	v2Provider := &v2DriverProvider{driver: &createOutputDriver{}}
+
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(context.Context, interfaces.IaCProvider, []interfaces.ResourceSpec, []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "first", Type: "infra.test"}},
+			{Action: "create", Resource: interfaces.ResourceSpec{Name: "second", Type: "infra.test"}},
+		}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	stdout, err := captureStdout(t, func() error {
+		return applyWithProviderAndStore(t.Context(), v2Provider, "stub", nil, nil, nil, io.Discard, "test", "", nil)
+	})
+	if err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+
+	start := "  -> [1/2] create first (infra.test)\n"
+	done := "  \u2713 first (infra.test)\n"
+	if !strings.Contains(stdout, start) {
+		t.Fatalf("stdout missing action start progress %q:\n%s", start, stdout)
+	}
+	startIndex := strings.Index(stdout, start)
+	doneIndex := strings.Index(stdout, done)
+	if doneIndex < 0 {
+		t.Fatalf("stdout missing completion line %q:\n%s", done, stdout)
+	}
+	if startIndex > doneIndex {
+		t.Fatalf("action start should print before completion; stdout:\n%s", stdout)
 	}
 }
 
@@ -541,6 +576,14 @@ type v2DriverProvider struct {
 
 func (p *v2DriverProvider) ResourceDriver(string) (interfaces.ResourceDriver, error) {
 	return p.driver, nil
+}
+
+type createOutputDriver struct {
+	iactest.NoopDriver
+}
+
+func (createOutputDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: "id-" + spec.Name}, nil
 }
 
 type v2ImmediatePersistDriver struct {
