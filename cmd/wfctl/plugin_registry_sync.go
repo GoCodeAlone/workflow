@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -191,7 +192,12 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 			}
 		}
 
-		if manifestVersion == targetVersion && downloadsOK {
+		metadataChanged := false
+		if pluginJSON, _ := registrySyncFetchPluginJSON(ghRepo, targetTag); pluginJSON != nil {
+			metadataChanged = syncManifestMetadataFromPluginJSON(raw, pluginJSON)
+		}
+
+		if manifestVersion == targetVersion && downloadsOK && !metadataChanged {
 			fmt.Printf("    OK  %s %s\n", pluginName, manifestVersion)
 		} else {
 			if bumpVersion {
@@ -199,6 +205,9 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 			}
 			if !downloadsOK {
 				fmt.Fprintf(os.Stderr, " MISMATCH  %s: download URLs do not match manifest version %s\n", pluginName, manifestVersion)
+			}
+			if metadataChanged {
+				fmt.Fprintf(os.Stderr, " MISMATCH  %s: registry metadata differs from %s plugin.json\n", pluginName, targetTag)
 			}
 			mismatches++
 			if fix {
@@ -431,6 +440,7 @@ var (
 	registrySyncReleaseDownloads     = releaseDownloads
 	registrySyncDownloadReleaseAsset = downloadReleaseAsset
 	registrySyncVerifyManifest       = verifyPluginManifestAgainstBinaryWithOptions
+	registrySyncFetchPluginJSON      = fetchPluginJSON
 )
 
 func verifyRegistryPluginCapabilities(pluginName, manifestPath, ghRepo, tag string) error {
@@ -647,7 +657,7 @@ func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, target
 
 	// workflow#703 — also sync capabilities + minEngineVersion + iacProvider
 	// from the tagged plugin.json (source-of-truth in the upstream repo).
-	if pluginJSON, _ := fetchPluginJSON(ghRepo, targetTag); pluginJSON != nil {
+	if pluginJSON, _ := registrySyncFetchPluginJSON(ghRepo, targetTag); pluginJSON != nil {
 		syncManifestMetadataFromPluginJSON(raw, pluginJSON)
 	}
 
@@ -688,7 +698,9 @@ func downloadIdentity(goos, goarch, url string) string {
 	return goos + "\x00" + goarch + "\x00" + url
 }
 
-func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) {
+func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) bool {
+	before, _ := json.Marshal(raw)
+
 	var caps map[string]any
 	if caps, ok := pluginJSON["capabilities"]; ok && caps != nil {
 		if capsObj, ok := caps.(map[string]any); ok {
@@ -720,6 +732,9 @@ func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) {
 			raw[key] = value
 		}
 	}
+
+	after, _ := json.Marshal(raw)
+	return !bytes.Equal(before, after)
 }
 
 func registrySyncStringSliceFromAny(v any) []string {
