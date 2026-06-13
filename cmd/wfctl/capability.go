@@ -119,11 +119,13 @@ func collectCapabilityEcosystemFromFlags(name string, args []string, out io.Writ
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
 	var registryDir, repoRoot, taxonomyPath, format, outputPath string
+	var filters capabilityFilterFlags
 	fs.StringVar(&registryDir, "registry", defaultCapabilityRegistryPath(), "registry directory")
 	fs.StringVar(&repoRoot, "repo-root", "..", "workspace root containing workflow-plugin-* repos")
 	fs.StringVar(&taxonomyPath, "taxonomy", defaultCapabilityTaxonomyPath(), "capability taxonomy YAML")
 	fs.StringVar(&format, "format", "json", formatUsage)
 	fs.StringVar(&outputPath, "output", "", "write output to path instead of stdout")
+	registerCapabilityFilterFlags(fs, &filters)
 	if err := fs.Parse(args); err != nil {
 		return nil, "", "", err
 	}
@@ -137,17 +139,23 @@ func collectCapabilityEcosystemFromFlags(name string, args []string, out io.Writ
 	if err != nil {
 		return nil, "", "", err
 	}
+	if opts := filters.Options(); !opts.Empty() {
+		inv = inventory.FilterInventory(inv, opts)
+	}
 	return inv, format, outputPath, nil
 }
 
 func runCapabilityApp(args []string, out io.Writer) error {
-	opts, format, outputPath, err := parseCapabilityAppFlags("capability app", args, out)
+	opts, format, outputPath, filters, err := parseCapabilityAppFlags("capability app", args, out)
 	if err != nil {
 		return err
 	}
 	profile, err := inventory.CollectApp(context.Background(), opts)
 	if err != nil {
 		return err
+	}
+	if filterOpts := filters.Options(); !filterOpts.Empty() {
+		profile = inventory.FilterAppProfile(profile, filterOpts)
 	}
 	var buf bytes.Buffer
 	switch format {
@@ -164,7 +172,7 @@ func runCapabilityApp(args []string, out io.Writer) error {
 }
 
 func runCapabilityCheck(args []string, out io.Writer) error {
-	opts, format, outputPath, findingsOnly, err := parseCapabilityCheckFlags(args, out)
+	opts, format, outputPath, findingsOnly, filters, err := parseCapabilityCheckFlags(args, out)
 	if err != nil {
 		return err
 	}
@@ -172,7 +180,13 @@ func runCapabilityCheck(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if filterOpts := filters.Options(); !filterOpts.Empty() {
+		profile = inventory.FilterAppProfile(profile, filterOpts)
+	}
 	findings := inventory.CheckApp(profile)
+	if filterOpts := filters.Options(); !filterOpts.Empty() {
+		findings = inventory.FilterFindings(findings, filterOpts)
+	}
 	var buf bytes.Buffer
 	switch format {
 	case "text", "":
@@ -191,12 +205,13 @@ func runCapabilityCheck(args []string, out io.Writer) error {
 	return writeCapabilityOutput(out, outputPath, buf.Bytes())
 }
 
-func parseCapabilityCheckFlags(args []string, out io.Writer) (inventory.AppOptions, string, string, bool, error) {
+func parseCapabilityCheckFlags(args []string, out io.Writer) (inventory.AppOptions, string, string, bool, capabilityFilterFlags, error) {
 	fs := flag.NewFlagSet("capability check", flag.ContinueOnError)
 	fs.SetOutput(out)
 	var workflows capabilityStringListFlag
 	var manifestPath, pluginDir, lockfilePath, taxonomyPath, format, outputPath string
 	var findingsOnly bool
+	var filters capabilityFilterFlags
 	fs.StringVar(&manifestPath, "manifest", "wfctl.yaml", "wfctl project manifest")
 	fs.Var(&workflows, "workflow", "workflow config path; repeat for multiple files")
 	fs.StringVar(&pluginDir, "plugin-dir", ".wfctl/plugins", "installed plugin directory")
@@ -205,8 +220,9 @@ func parseCapabilityCheckFlags(args []string, out io.Writer) (inventory.AppOptio
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&outputPath, "output", "", "write output to path instead of stdout")
 	fs.BoolVar(&findingsOnly, "findings-only", false, "print only warning/error findings")
+	registerCapabilityFilterFlags(fs, &filters)
 	if err := fs.Parse(args); err != nil {
-		return inventory.AppOptions{}, "", "", false, err
+		return inventory.AppOptions{}, "", "", false, capabilityFilterFlags{}, err
 	}
 	workflowPaths := []string(workflows)
 	if len(workflowPaths) == 0 {
@@ -219,14 +235,15 @@ func parseCapabilityCheckFlags(args []string, out io.Writer) (inventory.AppOptio
 		LockfilePath:  lockfilePath,
 		TaxonomyPath:  taxonomyPath,
 		GeneratedAt:   time.Now().UTC(),
-	}, format, outputPath, findingsOnly, nil
+	}, format, outputPath, findingsOnly, filters, nil
 }
 
-func parseCapabilityAppFlags(name string, args []string, out io.Writer) (inventory.AppOptions, string, string, error) {
+func parseCapabilityAppFlags(name string, args []string, out io.Writer) (inventory.AppOptions, string, string, capabilityFilterFlags, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(out)
 	var workflows capabilityStringListFlag
 	var manifestPath, pluginDir, lockfilePath, taxonomyPath, format, outputPath string
+	var filters capabilityFilterFlags
 	fs.StringVar(&manifestPath, "manifest", "wfctl.yaml", "wfctl project manifest")
 	fs.Var(&workflows, "workflow", "workflow config path; repeat for multiple files")
 	fs.StringVar(&pluginDir, "plugin-dir", ".wfctl/plugins", "installed plugin directory")
@@ -234,8 +251,9 @@ func parseCapabilityAppFlags(name string, args []string, out io.Writer) (invento
 	fs.StringVar(&taxonomyPath, "taxonomy", defaultCapabilityTaxonomyPath(), "capability taxonomy YAML")
 	fs.StringVar(&format, "format", defaultCapabilityFormat(name), "output format")
 	fs.StringVar(&outputPath, "output", "", "write output to path instead of stdout")
+	registerCapabilityFilterFlags(fs, &filters)
 	if err := fs.Parse(args); err != nil {
-		return inventory.AppOptions{}, "", "", err
+		return inventory.AppOptions{}, "", "", capabilityFilterFlags{}, err
 	}
 	workflowPaths := []string(workflows)
 	if len(workflowPaths) == 0 {
@@ -248,7 +266,7 @@ func parseCapabilityAppFlags(name string, args []string, out io.Writer) (invento
 		LockfilePath:  lockfilePath,
 		TaxonomyPath:  taxonomyPath,
 		GeneratedAt:   time.Now().UTC(),
-	}, format, outputPath, nil
+	}, format, outputPath, filters, nil
 }
 
 func defaultCapabilityFormat(name string) string {
@@ -269,6 +287,46 @@ func (f *capabilityStringListFlag) Set(value string) error {
 		*f = append(*f, value)
 	}
 	return nil
+}
+
+type capabilityFilterFlags struct {
+	capabilities capabilityStringListFlag
+	categories   capabilityStringListFlag
+	providers    capabilityStringListFlag
+	sources      capabilityStringListFlag
+	evidenceKind capabilityStringListFlag
+	usage        capabilityStringListFlag
+	findings     capabilityStringListFlag
+	tags         capabilityStringListFlag
+	exact        bool
+}
+
+func registerCapabilityFilterFlags(fs *flag.FlagSet, flags *capabilityFilterFlags) {
+	fs.Var(&flags.capabilities, "capability", "filter by capability id/name/description; repeat for OR")
+	fs.Var(&flags.categories, "category", "filter by capability category; repeat for OR")
+	fs.Var(&flags.providers, "provider", "filter by provider or plugin name/kind/capability; repeat for OR")
+	fs.Var(&flags.providers, "plugin", "alias for -provider")
+	fs.Var(&flags.sources, "source", "filter by provider source, repository, or evidence path; repeat for OR")
+	fs.Var(&flags.sources, "repo", "alias for -source")
+	fs.Var(&flags.evidenceKind, "evidence-kind", "filter by evidence source kind; repeat for OR")
+	fs.Var(&flags.usage, "usage", "filter app usage by mode, confidence, or evidence detail; repeat for OR")
+	fs.Var(&flags.findings, "finding", "filter findings by code, level, or message; repeat for OR")
+	fs.Var(&flags.tags, "tag", "filter ecosystem/catalog capabilities by tag; repeat for OR")
+	fs.BoolVar(&flags.exact, "exact", false, "use case-insensitive exact matching instead of substring matching")
+}
+
+func (f capabilityFilterFlags) Options() inventory.FilterOptions {
+	return inventory.FilterOptions{
+		Capabilities: []string(f.capabilities),
+		Categories:   []string(f.categories),
+		Providers:    []string(f.providers),
+		Sources:      []string(f.sources),
+		EvidenceKind: []string(f.evidenceKind),
+		Usage:        []string(f.usage),
+		FindingCodes: []string(f.findings),
+		Tags:         []string(f.tags),
+		Exact:        f.exact,
+	}
 }
 
 func writeCapabilityJSON(out io.Writer, value any) error {
