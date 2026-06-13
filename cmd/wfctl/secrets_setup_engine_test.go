@@ -9,12 +9,17 @@ import (
 // engineTestProvider is an in-memory SecretsProvider for engine tests.
 // Distinct from the existing fakeSecretsProvider in infra_bootstrap_env_test.go.
 type engineTestProvider struct {
-	data   map[string]string
-	setCnt map[string]int
+	data     map[string]string
+	setCnt   map[string]int
+	checkCnt map[string]int
 }
 
 func newEngineTestProvider(initial map[string]string) *engineTestProvider {
-	p := &engineTestProvider{data: make(map[string]string), setCnt: make(map[string]int)}
+	p := &engineTestProvider{
+		data:     make(map[string]string),
+		setCnt:   make(map[string]int),
+		checkCnt: make(map[string]int),
+	}
 	for k, v := range initial {
 		p.data[k] = v
 	}
@@ -33,6 +38,7 @@ func (f *engineTestProvider) Set(_ context.Context, name, value string) error {
 	return nil
 }
 func (f *engineTestProvider) Check(_ context.Context, name string) (SecretState, error) {
+	f.checkCnt[name]++
 	if _, ok := f.data[name]; ok {
 		return SecretSet, nil
 	}

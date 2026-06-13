@@ -186,41 +186,45 @@ The older `_dns-managed-by.<domain>` idea is intentionally superseded. A single
 zone-level policy is easier to audit, supports multi-owner delegation, and
 avoids scattering ownership records across every managed DNS name.
 
-## Secret management
+## Secret and variable management
 
-Each provider declares its required secrets in plugin.json's
-`required_secrets[]`. To set them all at once:
-
-```sh
-wfctl secrets setup --plugin workflow-plugin-namecheap \
-  --scope org --org GoCodeAlone
-
-wfctl secrets setup --plugin workflow-plugin-hover \
-  --scope env --env production
-```
-
-Provider values that are not credentials belong in plugin.json
-`required_config[]` and should be configured with `wfctl vars setup`. For
-example, Cloudflare account IDs and Namecheap API client IPs are operational
-configuration, not secrets:
-
-```sh
-CLOUDFLARE_ACCOUNT_ID=abc123 wfctl vars setup \
-  --plugin workflow-plugin-cloudflare --from-env
-
-NAMECHEAP_CLIENT_IP=203.0.113.10 wfctl vars setup \
-  --plugin workflow-plugin-namecheap --from-env
-```
-
-For a repo that already has `wfctl.yaml` and `.wfctl-lock.yaml`, use the
-manifest-driven form to discover all installed provider plugin secrets plus
-`${ENV_VAR}` references in config files:
+Each provider declares credentials in plugin.json `required_secrets[]` and
+non-secret operational values in `required_config[]`. `wfctl secrets setup`
+handles both when run from a `wfctl.yaml` manifest: secret inputs are written to
+provider secrets and non-secret inputs are written to provider variables.
 
 ```sh
 wfctl secrets setup --manifest wfctl.yaml \
   --config 'infra/*.yaml,deploy.yaml' \
   --plugin-dir data/plugins \
   --scope org --org GoCodeAlone --from-env
+```
+
+Cloudflare account IDs, Namecheap API users, and Namecheap API client IPs are
+operational configuration, not secrets. They should be written as provider
+variables, while API keys, tokens, passwords, and TOTP seeds remain provider
+secrets. Plugin-only setup can still be split explicitly:
+
+```sh
+wfctl secrets setup --plugin workflow-plugin-namecheap \
+  --scope org --org GoCodeAlone
+
+NAMECHEAP_API_USER=alice NAMECHEAP_CLIENT_IP=203.0.113.10 wfctl vars setup \
+  --plugin workflow-plugin-namecheap --from-env
+```
+
+Use `--name-map` when a repo or organization stores provider values under local
+names rather than the plugin's logical contract names. Status checks, writes,
+and `--from-env` lookup use the stored name first. Pair it with
+`--write-config` when config files should be rewritten to the stored names:
+
+```sh
+GCA_NC_API_KEY=... GCA_NC_API_USER=... wfctl secrets setup \
+  --manifest wfctl.yaml --config 'infra/*.yaml' \
+  --scope org --org GoCodeAlone \
+  --name-map NAMECHEAP_API_KEY=GCA_NC_API_KEY \
+  --name-map NAMECHEAP_API_USER=GCA_NC_API_USER \
+  --write-config --from-env
 ```
 
 See `docs/wfctl-secrets-scopes.md` for the scope flag matrix.

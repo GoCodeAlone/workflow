@@ -23,13 +23,15 @@ func runVarsSetupPluginWithIO(args []string, in io.Reader, out io.Writer) error 
 	scope := fs.String("scope", "repo", "GitHub variable scope: repo | env | org")
 	envName := fs.String("env", "", "Environment name (required with --scope=env)")
 	org := fs.String("org", "", "Organization slug (required with --scope=org)")
-	orgVisibility := fs.String("visibility", "all", "Org-scope visibility: all | selected | private")
+	orgVisibility := fs.String("visibility", "private", "Org-scope visibility: all | selected | private")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "Env var holding the GitHub PAT")
 	configFile := fs.String("config", "app.yaml", "app.yaml/wfctl.yaml used to resolve the github repo when --scope=repo|env")
 	fromEnv := fs.Bool("from-env", false, "Read each variable value from $NAME")
 	nonInteractive := fs.Bool("non-interactive", false, "Do not prompt; skip entries without --from-env, --var, or piped KEY=VALUE values")
 	var varFlag multiStringFlag
+	var nameMapFlag multiStringFlag
 	fs.Var(&varFlag, "var", "NAME=VALUE literal. Repeatable.")
+	fs.Var(&nameMapFlag, "name-map", "LOGICAL=STORED provider variable name mapping. Repeatable.")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl vars setup [--plugin <name>] [options]
 
@@ -48,12 +50,16 @@ Options:
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	nameMappings, err := parseNameMappings(nameMapFlag)
+	if err != nil {
+		return err
+	}
 	if *pluginName == "" {
 		values, err := valuesFromFlagsAndReader(varFlag, in)
 		if err != nil {
 			return err
 		}
-		return runVarsSetupConfig(*configFile, strings.ToLower(strings.TrimSpace(*scope)), *envName, *org, *orgVisibility, *tokenEnv, values, *fromEnv, *nonInteractive || in != nil, out)
+		return runVarsSetupConfig(*configFile, strings.ToLower(strings.TrimSpace(*scope)), *envName, *org, *orgVisibility, *tokenEnv, values, nameMappings, *fromEnv, *nonInteractive || in != nil, out)
 	}
 
 	manifest, err := loadPluginManifest(*pluginName, *pluginDir)
@@ -89,24 +95,25 @@ Options:
 	fmt.Fprintf(out, "Setting up variables for plugin %q -> %s\n\n", manifest.Name, scopeLabel)
 
 	for _, cfg := range manifest.RequiredConfig {
-		value, provided, err := pluginConfigValue(cfg, values, *fromEnv, interactive)
+		storedName := mappedSetupName(cfg.Name, nameMappings)
+		value, provided, err := pluginConfigValue(cfg, storedName, values, *fromEnv, interactive)
 		if err != nil {
 			return err
 		}
 		if !provided {
-			fmt.Fprintf(out, "  %s: skipped (no value provided)\n", cfg.Name)
+			fmt.Fprintf(out, "  %s: skipped (no value provided)\n", setupNameDisplay(cfg.Name, storedName))
 			continue
 		}
-		if err := provider.SetVariable(context.Background(), cfg.Name, value); err != nil {
+		if err := provider.SetVariable(context.Background(), storedName, value); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "  %s: set\n", cfg.Name)
+		fmt.Fprintf(out, "  %s: set\n", setupNameDisplay(cfg.Name, storedName))
 	}
 	fmt.Fprintln(out, "\nAll done.")
 	return nil
 }
 
-func runVarsSetupConfig(configFile, scopeStr, envName, org, orgVisibility, tokenEnv string, values map[string]string, fromEnv, nonInteractive bool, out io.Writer) error {
+func runVarsSetupConfig(configFile, scopeStr, envName, org, orgVisibility, tokenEnv string, values map[string]string, nameMappings map[string]string, fromEnv, nonInteractive bool, out io.Writer) error {
 	entries, skippedSensitive, err := collectConfigVariablesFromFile(configFile)
 	if err != nil {
 		return err
@@ -130,18 +137,19 @@ func runVarsSetupConfig(configFile, scopeStr, envName, org, orgVisibility, token
 		fmt.Fprintf(out, "Sensitive config entries skipped; use wfctl secrets setup for: %s\n\n", strings.Join(skippedSensitive, ", "))
 	}
 	for _, entry := range entries {
-		value, provided, err := configVariableValue(entry, values, fromEnv, interactive)
+		storedName := mappedSetupName(entry.Name, nameMappings)
+		value, provided, err := configVariableValue(entry, storedName, values, fromEnv, interactive)
 		if err != nil {
 			return err
 		}
 		if !provided {
-			fmt.Fprintf(out, "  %s: skipped (no value provided)\n", entry.Name)
+			fmt.Fprintf(out, "  %s: skipped (no value provided)\n", setupNameDisplay(entry.Name, storedName))
 			continue
 		}
-		if err := provider.SetVariable(context.Background(), entry.Name, value); err != nil {
+		if err := provider.SetVariable(context.Background(), storedName, value); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "  %s: set\n", entry.Name)
+		fmt.Fprintf(out, "  %s: set\n", setupNameDisplay(entry.Name, storedName))
 	}
 	fmt.Fprintln(out, "\nAll done.")
 	return nil
@@ -196,21 +204,26 @@ func valuesFromFlagsAndReader(literals []string, in io.Reader) (map[string]strin
 	return values, nil
 }
 
-func pluginConfigValue(cfg PluginRequiredConfig, literals map[string]string, fromEnv, interactive bool) (string, bool, error) {
+func pluginConfigValue(cfg PluginRequiredConfig, storedName string, literals map[string]string, fromEnv, interactive bool) (string, bool, error) {
+	names := setupLookupNames(cfg.Name, storedName)
 	if fromEnv {
-		if v := os.Getenv(cfg.Name); v != "" {
-			return v, true, nil
+		for _, name := range names {
+			if v := os.Getenv(name); v != "" {
+				return v, true, nil
+			}
 		}
 	}
-	if v, ok := literals[cfg.Name]; ok {
-		return v, true, nil
+	for _, name := range names {
+		if v, ok := literals[name]; ok {
+			return v, true, nil
+		}
 	}
 	if !interactive {
 		return "", false, nil
 	}
 	label := cfg.Prompt
 	if label == "" {
-		label = cfg.Name
+		label = setupNameDisplay(cfg.Name, storedName)
 	}
 	if cfg.Description != "" {
 		label += " - " + cfg.Description
@@ -225,19 +238,24 @@ func pluginConfigValue(cfg PluginRequiredConfig, literals map[string]string, fro
 	return value, true, nil
 }
 
-func configVariableValue(entry configVariableEntry, literals map[string]string, fromEnv, interactive bool) (string, bool, error) {
+func configVariableValue(entry configVariableEntry, storedName string, literals map[string]string, fromEnv, interactive bool) (string, bool, error) {
+	names := setupLookupNames(entry.Name, storedName)
 	if fromEnv {
-		if v := os.Getenv(entry.Name); v != "" {
-			return v, true, nil
+		for _, name := range names {
+			if v := os.Getenv(name); v != "" {
+				return v, true, nil
+			}
 		}
 	}
-	if v, ok := literals[entry.Name]; ok {
-		return v, true, nil
+	for _, name := range names {
+		if v, ok := literals[name]; ok {
+			return v, true, nil
+		}
 	}
 	if !interactive {
 		return "", false, nil
 	}
-	label := entry.Name
+	label := setupNameDisplay(entry.Name, storedName)
 	if entry.Description != "" {
 		label += " - " + entry.Description
 	}
@@ -249,6 +267,28 @@ func configVariableValue(entry configVariableEntry, literals map[string]string, 
 		return "", false, nil
 	}
 	return value, true, nil
+}
+
+func mappedSetupName(logical string, mappings map[string]string) string {
+	if stored := strings.TrimSpace(mappings[logical]); stored != "" {
+		return stored
+	}
+	return strings.TrimSpace(logical)
+}
+
+func setupNameDisplay(logical, stored string) string {
+	if strings.TrimSpace(stored) == "" || stored == logical {
+		return logical
+	}
+	return logical + " -> " + stored
+}
+
+func setupLookupNames(logical, stored string) []string {
+	input := manifestDiscoveredSecret{
+		PluginRequiredSecret: PluginRequiredSecret{Name: logical},
+		StorageName:          stored,
+	}
+	return manifestInputValueLookupNames(input)
 }
 
 func pluginConfigTargetAllowed(allowed []PluginConfigTarget, provider secrets.VariableProvider) bool {

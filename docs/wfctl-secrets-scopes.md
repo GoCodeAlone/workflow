@@ -1,8 +1,10 @@
 # wfctl secrets — GitHub scope reference
 
-`wfctl secrets set` and `wfctl secrets setup --plugin` both write to
-one of three GitHub secret destinations. Each requires a different
-PAT scope and exposes different visibility controls.
+`wfctl secrets set`, `wfctl secrets setup --plugin`, and manifest-backed
+`wfctl secrets setup --manifest` write to GitHub Actions destinations. Secret
+inputs use GitHub Actions Secrets. Non-secret config inputs use GitHub Actions
+Variables when the selected provider target supports variables. Each GitHub
+scope requires a different PAT scope and exposes different visibility controls.
 
 | Scope | URL prefix | PAT scopes | Visibility flags |
 |-------|------------|-----------|------------------|
@@ -49,18 +51,20 @@ Repo is still resolved from `app.yaml`'s `secrets.config.repo`.
 Writes a secret that any selected repo can pull. Bypasses `app.yaml`
 since org secrets are out-of-band of repo config. The PAT in
 `$GITHUB_TOKEN` (or `--token-env`) MUST carry `admin:org`.
+The CLI default visibility is `private`, matching GitHub's private/internal
+repository intent instead of exposing new organization secrets to all repos.
 
 ```sh
-# All repos in the org can pull this secret.
+# Private and internal repos in the org can pull this secret.
 wfctl secrets set SHARED_API \
   --scope org --org GoCodeAlone \
-  --visibility all \
+  --visibility private \
   --value "$(openssl rand -hex 32)"
 
-# Only private + internal repos can pull.
-wfctl secrets set INTERNAL_API \
+# All repos in the org can pull this secret.
+wfctl secrets set BROAD_API \
   --scope org --org GoCodeAlone \
-  --visibility private \
+  --visibility all \
   --value "..."
 
 # Only the listed repo IDs can pull. (selected_repository_ids
@@ -74,16 +78,16 @@ wfctl secrets set CI_SECRET \
 
 ## Plugin-driven setup
 
-If you're configuring a plugin that declares `required_secrets[]` in
-its `plugin.json` (workflow-plugin-namecheap, workflow-plugin-hover,
-etc.), use the interactive setup flow:
+If you're configuring a plugin that declares `required_secrets[]` in its
+`plugin.json` (workflow-plugin-namecheap, workflow-plugin-hover, etc.), use the
+interactive setup flow:
 
 ```sh
 wfctl secrets setup --plugin workflow-plugin-hover \
-  --scope org --org GoCodeAlone --visibility all
+  --scope org --org GoCodeAlone --visibility private
 ```
 
-This:
+Plugin-only setup:
 
 1. Reads `plugin.json` from the installed plugin directory. The directory may be
    the full plugin name, the normalized provider name, or
@@ -92,19 +96,18 @@ This:
 3. Prompts for each (masked iff `sensitive: true`).
 4. Writes each to the chosen GH scope.
 
-Plugins can also declare non-secret setup values in `required_config[]`. Use
-`wfctl vars setup --plugin <name>` for those entries. For GitHub targets, this
-writes GitHub Actions Variables at repo, environment, or organization scope
-instead of encrypted Actions Secrets. A value marked `sensitive: true` is a
-plugin manifest bug and must be moved to `required_secrets[]`.
+Plugins can also declare non-secret setup values in `required_config[]`.
+`wfctl vars setup --plugin <name>` writes only those variable entries. A value
+marked `sensitive: true` is a plugin manifest bug and must be moved to
+`required_secrets[]`.
 
 Applications can use the same variable provider path for non-secret
 `config.provider` schema values. Run `wfctl vars setup --config app.yaml` to
 scan env-backed schema entries where `sensitive: false`; sensitive entries are
 left for the app's secret setup flow.
 
-Manifest-backed setup can discover all provider plugin secrets from `wfctl.yaml`
-and `.wfctl-lock.yaml`:
+Manifest-backed setup can discover both plugin secrets and plugin variables
+from `wfctl.yaml`, `.wfctl-lock.yaml`, and installed plugin manifests:
 
 ```sh
 wfctl secrets setup --manifest wfctl.yaml \
@@ -112,10 +115,32 @@ wfctl secrets setup --manifest wfctl.yaml \
   --scope org --org GoCodeAlone --from-env
 ```
 
+Manifest setup treats `required_secrets[]` and sensitive config refs as
+provider secrets, and `required_config[]` plus non-sensitive config refs as
+provider variables. This lets one review/setup flow configure values like
+`NAMECHEAP_API_KEY` and `NAMECHEAP_API_USER` together while still storing the
+key as a secret and the user/client ID/account ID as variables.
+
+Use `--name-map LOGICAL=STORED` to store a logical workflow input under a
+provider-specific name:
+
+```sh
+GCA_NC_API_KEY=... GCA_NC_API_USER=... wfctl secrets setup \
+  --manifest wfctl.yaml \
+  --name-map NAMECHEAP_API_KEY=GCA_NC_API_KEY \
+  --name-map NAMECHEAP_API_USER=GCA_NC_API_USER \
+  --write-config --from-env
+```
+
+With a name mapping, status checks and writes use the stored provider name.
+Value lookup also checks the stored name first, then the logical name. When
+`--write-config` is set, matching `${LOGICAL}` references in the scanned config
+files are rewritten to `${STORED}` after setup succeeds.
+
 When `--scope` is omitted and stdin is interactive, manifest-backed setup uses
 configured `secretStores` when present; otherwise it offers concrete GitHub
 targets discovered from repo/org/env settings. The first prompt is a compact
-matrix with one row per secret and one column per target:
+matrix with one row per input and one column per target:
 
 | mark | meaning |
 |------|---------|

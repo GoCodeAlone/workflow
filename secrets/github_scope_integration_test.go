@@ -162,9 +162,9 @@ func TestScope_Integration_Matrix(t *testing.T) {
 			extraPayload: nil,
 		},
 		{
-			name: "org-scope all-visibility writes to /orgs/.../actions/secrets",
+			name: "org-scope default visibility writes private to /orgs/.../actions/secrets",
 			buildProv: func(t *testing.T, _ string) *GitHubSecretsProvider {
-				p, err := NewGitHubOrgSecretsProvider("acme", "GITHUB_TOKEN", OrgVisibilityAll, nil)
+				p, err := NewGitHubOrgSecretsProvider("acme", "GITHUB_TOKEN", "", nil)
 				if err != nil {
 					t.Fatalf("NewGitHubOrgSecretsProvider: %v", err)
 				}
@@ -174,7 +174,7 @@ func TestScope_Integration_Matrix(t *testing.T) {
 			value:    "org-value",
 			wantPath: "/orgs/acme/actions/secrets/ORG_SECRET",
 			extraPayload: map[string]any{
-				"visibility": "all",
+				"visibility": "private",
 			},
 		},
 		{

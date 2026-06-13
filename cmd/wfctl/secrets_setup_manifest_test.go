@@ -46,6 +46,9 @@ plugins:
 		"name": "workflow-plugin-namecheap",
 		"required_secrets": [
 			{"name": "NAMECHEAP_API_KEY", "sensitive": true}
+		],
+		"required_config": [
+			{"name": "NAMECHEAP_CLIENT_IP", "description": "allowlisted client IP"}
 		]
 	}`)
 	if err := os.WriteFile(configPath, []byte(`providers:
@@ -67,7 +70,7 @@ plugins:
 		got = append(got, secret.Name)
 		sources[secret.Name] = secret.Sources
 	}
-	want := []string{"CLOUDFLARE_API_TOKEN", "CONFIG_ONLY_TOKEN", "NAMECHEAP_API_KEY"}
+	want := []string{"CLOUDFLARE_API_TOKEN", "CONFIG_ONLY_TOKEN", "NAMECHEAP_API_KEY", "NAMECHEAP_CLIENT_IP"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("secrets = %v, want %v", got, want)
 	}
@@ -76,6 +79,13 @@ plugins:
 	}
 	if !reflect.DeepEqual(sources["CONFIG_ONLY_TOKEN"], []string{"config:infra.yaml"}) {
 		t.Fatalf("config-only sources = %v", sources["CONFIG_ONLY_TOKEN"])
+	}
+	kinds := map[string]envSetupInputKind{}
+	for _, input := range secrets {
+		kinds[input.Name] = input.Kind
+	}
+	if kinds["NAMECHEAP_API_KEY"] != envSetupInputSecret || kinds["NAMECHEAP_CLIENT_IP"] != envSetupInputVar {
+		t.Fatalf("kinds = %+v, want namecheap key secret and client ip var", kinds)
 	}
 }
 
@@ -203,6 +213,27 @@ func TestManifestSecretValueNonInteractiveRequiresValueSource(t *testing.T) {
 	}
 }
 
+func TestManifestSecretValueNonInteractiveMentionsMappedLookupFallback(t *testing.T) {
+	secret := manifestDiscoveredSecret{
+		PluginRequiredSecret: PluginRequiredSecret{Name: "NAMECHEAP_API_KEY"},
+		StorageName:          "GCA_NC_API_KEY",
+	}
+	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
+		interactive: false,
+		fromEnv:     false,
+		secretMap:   map[string]string{},
+	})
+	if err == nil {
+		t.Fatalf("expected missing value error, got value=%q provided=%v", got, provided)
+	}
+	msg := err.Error()
+	for _, want := range []string{"NAMECHEAP_API_KEY", "GCA_NC_API_KEY", "--secret GCA_NC_API_KEY=VALUE", "--secret NAMECHEAP_API_KEY=VALUE"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
 func TestManifestSecretValueFromEnvMissingSkips(t *testing.T) {
 	secret := manifestDiscoveredSecret{PluginRequiredSecret: PluginRequiredSecret{Name: "DIGITALOCEAN_TOKEN"}}
 	got, provided, err := manifestSecretValue(secret, manifestSecretValueOptions{
@@ -215,6 +246,46 @@ func TestManifestSecretValueFromEnvMissingSkips(t *testing.T) {
 	}
 	if provided || got != "" {
 		t.Fatalf("got value=%q provided=%v, want skipped empty value", got, provided)
+	}
+}
+
+func TestDiscoverManifestSecretsFailsOnConfigVariableCollectionError(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	pluginDir := filepath.Join(dir, "plugins")
+	configPath := filepath.Join(dir, "app.yaml")
+
+	if err := os.WriteFile(manifestPath, []byte("version: 1\nplugins: []\n"), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("version: 1\nplugins: {}\n"), 0o600); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`modules:
+  - name: app-config
+    type: config.provider
+    config:
+      sources:
+        - type: env
+      schema:
+        password: not-a-map
+providers:
+  app:
+    password: ${PASSWORD}
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := discoverManifestSecrets(manifestPath, lockPath, pluginDir, configPath)
+	if err == nil {
+		t.Fatal("expected config variable collection error")
+	}
+	if !strings.Contains(err.Error(), "collect config variables") {
+		t.Fatalf("error = %q, want config collection context", err)
 	}
 }
 

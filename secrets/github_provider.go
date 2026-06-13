@@ -104,7 +104,7 @@ func NewGitHubOrgSecretsProvider(org string, tokenEnvVar string, visibility GitH
 		return nil, fmt.Errorf("secrets: env var %q is empty or unset", tokenEnvVar)
 	}
 	if visibility == "" {
-		visibility = OrgVisibilityAll
+		visibility = OrgVisibilityPrivate
 	}
 	switch visibility {
 	case OrgVisibilityAll, OrgVisibilitySelected, OrgVisibilityPrivate:
