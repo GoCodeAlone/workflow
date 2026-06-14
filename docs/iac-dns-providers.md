@@ -239,10 +239,11 @@ secret-set) is tracked in `docs/plans/2026-05-20-dns-providers.md`
 ## Domain Intent Compiler
 
 Use `wfctl dns intent compile` when a domain migration spans hosted DNS and a
-registrar delegation provider. The command reads a domain intent file plus one
-or more `wfctl infra import-all --format portfolio` DNS catalog exports, then
-emits ordinary `infra.dns` and `infra.dns_delegation` resources plus a JSON
-report.
+registrar delegation provider. The command is contributed by
+`workflow-plugin-infra`; core `wfctl` dispatches the top-level `dns` namespace
+to that installed plugin. It reads a domain intent file plus one or more
+`wfctl infra import-all --format portfolio` DNS catalog exports, then emits
+ordinary `infra.dns` and `infra.dns_delegation` resources plus a JSON report.
 
 ```sh
 wfctl dns intent compile \
