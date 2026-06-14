@@ -288,3 +288,23 @@ Unsupported provider pairs and unsafe discard requests are reported as blockers
 and cause the command to exit non-zero. Provider plugins still own the actual
 apply behavior; the compiler only removes repository-local glue for producing
 the concrete IaC resources and report.
+
+For CI and operator workflows that want wfctl to drive the first lifecycle
+steps, use `wfctl dns intent reconcile`:
+
+```sh
+wfctl dns intent reconcile \
+  --intent domains.json \
+  --portfolio 'zones/*.portfolio.json' \
+  --domain example.com \
+  --plugin-dir data/plugins \
+  --mode plan
+```
+
+`reconcile` compiles the intent, validates the generated infra-only config with
+the correct no-entry-points setting, and runs `wfctl infra plan`. With
+`--mode apply --auto-approve`, it runs `wfctl infra apply` after the plan. The
+command preserves the generated config, report, optional bundle, and plan JSON
+paths so CI can upload them as artifacts. Provider-specific preflight and
+post-apply verification still belong in the consuming workflow until wfctl grows
+first-class provider-aware verification.

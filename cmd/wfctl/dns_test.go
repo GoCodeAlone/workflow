@@ -44,36 +44,7 @@ func TestRunDNSIntentHelpReturnsFlagErrHelp(t *testing.T) {
 
 func TestRunDNSIntentCompileWritesConfigAndReport(t *testing.T) {
 	dir := t.TempDir()
-	intentPath := filepath.Join(dir, "domains.json")
-	if err := os.WriteFile(intentPath, []byte(`{
-  "schema": "workflow.domain-intent.v1",
-  "domains": {
-    "example.com": {
-      "registrar": "hover",
-      "dns_host": "cloudflare",
-      "stage_dns": true,
-      "nameserver_cutover": false,
-      "records_policy": "preserve_cloudflare"
-    }
-  }
-}`), 0o644); err != nil {
-		t.Fatalf("write intent: %v", err)
-	}
-	portfolioPath := filepath.Join(dir, "portfolio.json")
-	if err := os.WriteFile(portfolioPath, []byte(`{
-  "schema": "workflow.dns-portfolio.export.v1",
-  "snapshots": [
-    {
-      "id": "cf-example-com",
-      "provider": "cloudflare",
-      "domain": "example.com",
-      "authority": {"name_servers": ["a.ns.cloudflare.com", "b.ns.cloudflare.com"]},
-      "records": [{"type": "A", "name": "@", "value": "192.0.2.10", "ttl": 30}]
-    }
-  ]
-}`), 0o644); err != nil {
-		t.Fatalf("write portfolio: %v", err)
-	}
+	intentPath, portfolioPath := writeDNSIntentFixture(t, dir, false)
 	outputPath := filepath.Join(dir, "out.yaml")
 	reportPath := filepath.Join(dir, "report.json")
 	if err := runDNS([]string{"intent", "compile",
@@ -137,5 +108,149 @@ func TestRunDNSIntentCompileWritesConfigAndReport(t *testing.T) {
 	}
 	if report.Schema != "workflow.domain-intent.report.v1" || report.BlockedDomains != 0 || report.ActionCount != 1 {
 		t.Fatalf("bad report: %+v", report)
+	}
+}
+
+func TestRunDNSIntentReconcilePlansGeneratedConfig(t *testing.T) {
+	dir := t.TempDir()
+	intentPath, portfolioPath := writeDNSIntentFixture(t, dir, false)
+	outputPath := filepath.Join(dir, "out.yaml")
+	reportPath := filepath.Join(dir, "report.json")
+	planPath := filepath.Join(dir, "plan.json")
+	var validateArgs, planArgs, applyArgs []string
+	restore := stubDNSIntentLifecycle(t, &validateArgs, &planArgs, &applyArgs)
+	defer restore()
+
+	if err := runDNS([]string{"intent", "reconcile",
+		"--intent", intentPath,
+		"--portfolio", portfolioPath,
+		"--output", outputPath,
+		"--report", reportPath,
+		"--plan-output", planPath,
+		"--plugin-dir", "data/plugins",
+	}); err != nil {
+		t.Fatalf("runDNS intent reconcile: %v", err)
+	}
+	assertStringSliceEqual(t, validateArgs, []string{"--allow-no-entry-points", "--plugin-dir", "data/plugins", outputPath})
+	assertStringSliceEqual(t, planArgs, []string{"--config", outputPath, "--plugin-dir", "data/plugins", "--output", planPath})
+	if applyArgs != nil {
+		t.Fatalf("apply args = %v, want nil for plan mode", applyArgs)
+	}
+	if _, err := os.Stat(reportPath); err != nil {
+		t.Fatalf("report not written: %v", err)
+	}
+}
+
+func TestRunDNSIntentReconcileApplyRequiresAutoApprove(t *testing.T) {
+	var validateArgs, planArgs, applyArgs []string
+	restore := stubDNSIntentLifecycle(t, &validateArgs, &planArgs, &applyArgs)
+	defer restore()
+
+	err := runDNS([]string{"intent", "reconcile", "--mode", "apply"})
+	if err == nil || !strings.Contains(err.Error(), "--mode apply requires --auto-approve") {
+		t.Fatalf("error = %v, want auto approve requirement", err)
+	}
+	if validateArgs != nil || planArgs != nil || applyArgs != nil {
+		t.Fatalf("lifecycle was called before rejecting apply: validate=%v plan=%v apply=%v", validateArgs, planArgs, applyArgs)
+	}
+}
+
+func TestRunDNSIntentReconcileAppliesGeneratedConfig(t *testing.T) {
+	dir := t.TempDir()
+	intentPath, portfolioPath := writeDNSIntentFixture(t, dir, false)
+	outputPath := filepath.Join(dir, "out.yaml")
+	reportPath := filepath.Join(dir, "report.json")
+	var validateArgs, planArgs, applyArgs []string
+	restore := stubDNSIntentLifecycle(t, &validateArgs, &planArgs, &applyArgs)
+	defer restore()
+
+	if err := runDNS([]string{"intent", "reconcile",
+		"--intent", intentPath,
+		"--portfolio", portfolioPath,
+		"--output", outputPath,
+		"--report", reportPath,
+		"--mode", "apply",
+		"--auto-approve",
+		"--plugin-dir", "data/plugins",
+	}); err != nil {
+		t.Fatalf("runDNS intent reconcile apply: %v", err)
+	}
+	assertStringSliceEqual(t, validateArgs, []string{"--allow-no-entry-points", "--plugin-dir", "data/plugins", outputPath})
+	assertStringSliceEqual(t, planArgs, []string{"--config", outputPath, "--plugin-dir", "data/plugins", "--output", "reports/domain-reconcile-plan.json"})
+	assertStringSliceEqual(t, applyArgs, []string{"--config", outputPath, "--auto-approve", "--plugin-dir", "data/plugins"})
+}
+
+func writeDNSIntentFixture(t *testing.T, dir string, nameserverCutover bool) (string, string) {
+	t.Helper()
+	intentPath := filepath.Join(dir, "domains.json")
+	cutover := "false"
+	if nameserverCutover {
+		cutover = "true"
+	}
+	if err := os.WriteFile(intentPath, []byte(`{
+  "schema": "workflow.domain-intent.v1",
+  "domains": {
+    "example.com": {
+      "registrar": "hover",
+      "dns_host": "cloudflare",
+      "stage_dns": true,
+      "nameserver_cutover": `+cutover+`,
+      "records_policy": "preserve_cloudflare"
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write intent: %v", err)
+	}
+	portfolioPath := filepath.Join(dir, "portfolio.json")
+	if err := os.WriteFile(portfolioPath, []byte(`{
+  "schema": "workflow.dns-portfolio.export.v1",
+  "snapshots": [
+    {
+      "id": "cf-example-com",
+      "provider": "cloudflare",
+      "domain": "example.com",
+      "authority": {"name_servers": ["a.ns.cloudflare.com", "b.ns.cloudflare.com"]},
+      "records": [{"type": "A", "name": "@", "value": "192.0.2.10", "ttl": 30}]
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatalf("write portfolio: %v", err)
+	}
+	return intentPath, portfolioPath
+}
+
+func stubDNSIntentLifecycle(t *testing.T, validateArgs, planArgs, applyArgs *[]string) func() {
+	t.Helper()
+	oldValidate := dnsIntentRunValidate
+	oldPlan := dnsIntentRunInfraPlan
+	oldApply := dnsIntentRunInfraApply
+	dnsIntentRunValidate = func(args []string) error {
+		*validateArgs = append([]string(nil), args...)
+		return nil
+	}
+	dnsIntentRunInfraPlan = func(args []string) error {
+		*planArgs = append([]string(nil), args...)
+		return nil
+	}
+	dnsIntentRunInfraApply = func(args []string) error {
+		*applyArgs = append([]string(nil), args...)
+		return nil
+	}
+	return func() {
+		dnsIntentRunValidate = oldValidate
+		dnsIntentRunInfraPlan = oldPlan
+		dnsIntentRunInfraApply = oldApply
+	}
+}
+
+func assertStringSliceEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("args length = %d, want %d\ngot  %v\nwant %v", len(got), len(want), got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("args[%d] = %q, want %q\ngot  %v\nwant %v", i, got[i], want[i], got, want)
+		}
 	}
 }

@@ -1840,6 +1840,36 @@ Useful flags:
 | `--bundle` | _(none)_ | Optional combined JSON bundle path. |
 | `--state-dir` | `.state/domain-intent/` | Generated filesystem IaC state directory. |
 
+#### `dns intent reconcile`
+
+Compile domain intent, validate the generated infra-only config, and run the
+normal infra plan/apply lifecycle:
+
+```sh
+wfctl dns intent reconcile \
+  --intent domains.json \
+  --portfolio 'zones/*.portfolio.json' \
+  --domain example.com \
+  --plugin-dir data/plugins \
+  --mode plan
+```
+
+The command is a wrapper around `dns intent compile`, `wfctl validate
+--allow-no-entry-points`, and `wfctl infra plan`. With `--mode apply
+--auto-approve`, it runs `wfctl infra apply` after a successful plan. Reports
+and generated config files are written with the same defaults as `compile`;
+`--plan-output` defaults to `reports/domain-reconcile-plan.json`.
+
+Useful flags:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--mode` | `plan` | `plan` writes/prints the infra plan; `apply` also applies changes. |
+| `--auto-approve` | `false` | Required with `--mode apply`; passed through to `infra apply`. |
+| `--plugin-dir` | _(default resolution)_ | Plugin directory passed to validate/plan/apply. |
+| `--plan-output` | `reports/domain-reconcile-plan.json` | Generated infra plan JSON path. |
+| `--allow-empty` | `false` | Allow intent that compiles to zero actions. |
+
 **Protected-resource gate:**
 
 Resources annotated `protected: true` cannot be replaced or deleted by `infra apply` without an explicit per-resource opt-in. When a plan would replace or delete a protected resource, `wfctl` aborts before any provider dispatch and prints the full set of blockers in one pass with a copy-paste-ready flag value:
