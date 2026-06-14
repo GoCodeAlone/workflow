@@ -3,6 +3,7 @@ package intent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -117,6 +118,112 @@ func TestCompileDiscardParkedBlocksNonParkedRecords(t *testing.T) {
 	}
 	if len(bundle.Report.Domains[0].Blockers) == 0 {
 		t.Fatalf("expected blockers: %+v", bundle.Report.Domains[0])
+	}
+}
+
+func TestCompileRejectsDuplicateNormalizedDomains(t *testing.T) {
+	dir := t.TempDir()
+	intentPath := writeTestFile(t, dir, "domains.json", `{
+  "schema": "workflow.domain-intent.v1",
+  "domains": {
+    "Example.COM": {"registrar": "hover", "dns_host": "cloudflare"},
+    "example.com.": {"registrar": "hover", "dns_host": "cloudflare"}
+  }
+}`)
+	portfolioPath := writeTestFile(t, dir, "portfolio.json", `{
+  "schema": "workflow.dns-portfolio.export.v1",
+  "snapshots": [{"id": "cf", "provider": "cloudflare", "domain": "example.com", "authority": {"name_servers": ["a.ns.cloudflare.com"]}}]
+}`)
+
+	_, err := Compile(Options{IntentPath: intentPath, PortfolioGlobs: []string{portfolioPath}})
+	if err == nil || !strings.Contains(err.Error(), "duplicate domain intent") {
+		t.Fatalf("expected duplicate normalized domain error; got %v", err)
+	}
+}
+
+func TestCompileBlocksExpectedCurrentNameserverMismatch(t *testing.T) {
+	dir := t.TempDir()
+	intentPath := writeTestFile(t, dir, "domains.json", `{
+  "schema": "workflow.domain-intent.v1",
+  "domains": {
+    "example.com": {
+      "registrar": "hover",
+      "dns_host": "cloudflare",
+      "nameserver_cutover": true,
+      "expected_current_nameservers": ["ns1.hover.com", "ns2.hover.com"]
+    }
+  }
+}`)
+	portfolioPath := writeTestFile(t, dir, "portfolio.json", `{
+  "schema": "workflow.dns-portfolio.export.v1",
+  "snapshots": [
+    {"id": "cf", "provider": "cloudflare", "domain": "example.com", "authority": {"name_servers": ["a.ns.cloudflare.com", "b.ns.cloudflare.com"]}},
+    {"id": "hover", "provider": "hover", "domain": "example.com", "authority": {"registrar_nameservers": ["ns1.digitalocean.com", "ns2.digitalocean.com"]}}
+  ]
+}`)
+
+	bundle, err := Compile(Options{IntentPath: intentPath, PortfolioGlobs: []string{portfolioPath}})
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if bundle.Report.BlockedDomains != 1 {
+		t.Fatalf("blocked domains = %d, want 1", bundle.Report.BlockedDomains)
+	}
+	got := strings.Join(bundle.Report.Domains[0].Blockers, "\n")
+	if !strings.Contains(got, "did not match expected") {
+		t.Fatalf("expected nameserver mismatch blocker; got %q", got)
+	}
+	if len(bundle.Config.Modules) != 1 {
+		t.Fatalf("blocked compile should only emit state module; got %+v", bundle.Config.Modules)
+	}
+}
+
+func TestCompilePreserveAuthoritativeIgnoresStagedCloudflareByDefault(t *testing.T) {
+	dir := t.TempDir()
+	intentPath := writeTestFile(t, dir, "domains.json", `{
+  "schema": "workflow.domain-intent.v1",
+  "domains": {
+    "example.com": {
+      "registrar": "hover",
+      "dns_host": "cloudflare",
+      "stage_dns": true
+    }
+  }
+}`)
+	portfolioPath := writeTestFile(t, dir, "portfolio.json", `{
+  "schema": "workflow.dns-portfolio.export.v1",
+  "snapshots": [
+    {
+      "id": "cf",
+      "provider": "cloudflare",
+      "domain": "example.com",
+      "authority": {"name_servers": ["a.ns.cloudflare.com", "b.ns.cloudflare.com"]},
+      "records": []
+    },
+    {
+      "id": "hover",
+      "provider": "hover",
+      "domain": "example.com",
+      "authority": {"registrar_nameservers": ["ns1.hover.com", "ns2.hover.com"]},
+      "records": [{"type": "A", "name": "@", "value": "192.0.2.44", "ttl": 900}]
+    }
+  ]
+}`)
+
+	bundle, err := Compile(Options{IntentPath: intentPath, PortfolioGlobs: []string{portfolioPath}})
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	got := moduleByName(bundle.Config.Modules, "cf-example-com")
+	if got == nil {
+		t.Fatalf("missing generated Cloudflare module: %+v", bundle.Config.Modules)
+	}
+	records, ok := got.Config["records"].([]map[string]any)
+	if !ok || len(records) != 1 {
+		t.Fatalf("records = %#v, want one authoritative Hover record", got.Config["records"])
+	}
+	if records[0]["data"] != "192.0.2.44" {
+		t.Fatalf("record data = %#v, want authoritative Hover value", records[0]["data"])
 	}
 }
 

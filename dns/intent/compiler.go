@@ -101,7 +101,11 @@ func Compile(opts Options) (*Bundle, error) {
 	domainFilter := normalizeDomain(opts.DomainFilter)
 	domainMap := make(map[string]DomainIntent, len(intentDoc.Domains))
 	for domain, cfg := range intentDoc.Domains {
-		domainMap[normalizeDomain(domain)] = cfg
+		normalized := normalizeDomain(domain)
+		if _, exists := domainMap[normalized]; exists {
+			return nil, fmt.Errorf("duplicate domain intent after normalization: %s", normalized)
+		}
+		domainMap[normalized] = cfg
 	}
 	if domainFilter != "" {
 		cfg, ok := domainMap[domainFilter]
@@ -204,6 +208,15 @@ func reconcileDomain(domain string, cfg DomainIntent, snapshots []record.Snapsho
 	}
 	if cfg.NameserverCutover && registrar != "hover" {
 		blockers = append(blockers, fmt.Sprintf("registrar %q nameserver cutover is not supported yet", registrar))
+	}
+	if cfg.NameserverCutover && len(cfg.ExpectedCurrentNameservers) > 0 {
+		expected := normalizeNameservers(cfg.ExpectedCurrentNameservers)
+		current, ok := currentRegistrarNameservers(group, registrar)
+		if !ok {
+			blockers = append(blockers, "expected_current_nameservers provided but registrar nameservers are unavailable; import registrar delegation first")
+		} else if !equalStringSlices(current, expected) {
+			blockers = append(blockers, fmt.Sprintf("current registrar nameservers %q did not match expected %q", strings.Join(current, ","), strings.Join(expected, ",")))
+		}
 	}
 
 	plan := recordPlan{}
@@ -400,8 +413,9 @@ func selectSource(group []record.Snapshot) (record.Snapshot, bool) {
 func sourceRank(snapshot record.Snapshot, group []record.Snapshot) int {
 	provider := strings.ToLower(snapshot.Provider)
 	authorityProvider := nameserverProvider(snapshot)
+	groupAuthorityProvider := currentAuthorityProvider(group)
 	switch {
-	case provider == "cloudflare":
+	case provider == "cloudflare" && groupAuthorityProvider == "cloudflare":
 		return 0
 	case authorityProvider != "" && provider == authorityProvider:
 		return 1
@@ -415,9 +429,20 @@ func sourceRank(snapshot record.Snapshot, group []record.Snapshot) int {
 		return 3
 	case provider == "hover":
 		return 4
+	case provider == "cloudflare":
+		return 5
 	default:
 		return 9
 	}
+}
+
+func currentAuthorityProvider(group []record.Snapshot) string {
+	for _, snapshot := range group {
+		if provider := nameserverProvider(snapshot); provider != "" {
+			return provider
+		}
+	}
+	return ""
 }
 
 func hoverDelegatesTo(group []record.Snapshot, provider string) bool {
@@ -471,6 +496,33 @@ func stringSliceFromAuthority(authority map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+func currentRegistrarNameservers(group []record.Snapshot, registrar string) ([]string, bool) {
+	if registrar == "" {
+		return nil, false
+	}
+	snapshot, ok := firstSnapshotByProvider(group, registrar)
+	if !ok {
+		return nil, false
+	}
+	current := normalizeNameservers(stringSliceFromAuthority(snapshot.Authority, "registrar_nameservers"))
+	if len(current) == 0 {
+		current = normalizeNameservers(stringSliceFromAuthority(snapshot.Authority, "live_nameservers"))
+	}
+	return current, len(current) > 0
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func parkedHoverRecords(records []record.Record) bool {
