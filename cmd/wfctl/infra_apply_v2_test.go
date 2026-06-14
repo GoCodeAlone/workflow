@@ -143,6 +143,86 @@ func TestApplyWithProviderAndStore_PrintsActionStartProgress(t *testing.T) {
 	}
 }
 
+func TestApplyWithProviderAndStore_PrintsActionFailureProgress(t *testing.T) {
+	v2Provider := &v2DriverProvider{driver: &createOutputDriver{}}
+
+	origCompute := computeInfraPlan
+	computeInfraPlan = func(context.Context, interfaces.IaCProvider, []interfaces.ResourceSpec, []interfaces.ResourceState) (interfaces.IaCPlan, error) {
+		return interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+			Action:   "create",
+			Resource: interfaces.ResourceSpec{Name: "bad", Type: "infra.test"},
+		}}}, nil
+	}
+	t.Cleanup(func() { computeInfraPlan = origCompute })
+
+	origApply := applyV2ApplyPlanWithHooksFn
+	applyV2ApplyPlanWithHooksFn = func(ctx context.Context, _ interfaces.IaCProvider, plan *interfaces.IaCPlan, hooks wfctlhelpers.ApplyPlanHooks) (*interfaces.ApplyResult, error) {
+		action := plan.Actions[0]
+		if hooks.OnBeforeAction != nil {
+			if err := hooks.OnBeforeAction(ctx, action); err != nil {
+				return nil, err
+			}
+		}
+		outcome := interfaces.ActionOutcome{ActionIndex: 0, Status: interfaces.ActionStatusError, Error: "create failed"}
+		if hooks.OnActionComplete != nil {
+			hooks.OnActionComplete(ctx, action, outcome)
+		}
+		return &interfaces.ApplyResult{
+			Actions: []interfaces.ActionOutcome{outcome},
+			Errors:  []interfaces.ActionError{{Resource: "bad", Action: "create", Error: "create failed"}},
+		}, nil
+	}
+	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = origApply })
+
+	stdout, err := captureStdout(t, func() error {
+		return applyWithProviderAndStore(t.Context(), v2Provider, "stub", nil, nil, nil, io.Discard, "test", "", nil)
+	})
+	if err == nil {
+		t.Fatal("expected aggregate apply error, got nil")
+	}
+	want := "  ✗ bad (infra.test): create failed\n"
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("stdout missing failure progress %q:\n%s", want, stdout)
+	}
+}
+
+func TestWireApplyProgressIntoHooks_ChainsActionCompleteAndLabelsEmptyErrors(t *testing.T) {
+	action := interfaces.PlanAction{
+		Action:   "create",
+		Resource: interfaces.ResourceSpec{Name: "skip-me", Type: "infra.test"},
+	}
+	var priorCalls int
+	hooks := wfctlhelpers.ApplyPlanHooks{
+		OnActionComplete: func(context.Context, interfaces.PlanAction, interfaces.ActionOutcome) {
+			priorCalls++
+		},
+	}
+	wireApplyProgressIntoHooks(&hooks, []interfaces.PlanAction{action})
+
+	stdout, err := captureStdout(t, func() error {
+		hooks.OnActionComplete(context.Background(), action, interfaces.ActionOutcome{
+			ActionIndex: 0,
+			Status:      interfaces.ActionStatusSuccess,
+		})
+		hooks.OnActionComplete(context.Background(), action, interfaces.ActionOutcome{
+			ActionIndex: 0,
+			Status:      interfaces.ActionStatusSkipped,
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("capture stdout: %v", err)
+	}
+
+	if priorCalls != 2 {
+		t.Fatalf("prior OnActionComplete calls = %d, want 2", priorCalls)
+	}
+	want := "  ✗ skip-me (infra.test): skipped\n"
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("stdout missing readable skipped label %q:\n%s", want, stdout)
+	}
+}
+
 // TestApplyWithProviderAndStore_V1FallsThroughToProviderApply +
 // TestApplyWithProviderAndStore_V1Path_DeclarerReturnsEmpty +
 // v1RecordingProvider stub were deleted per workflow#699 — v1 dispatch

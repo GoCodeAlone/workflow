@@ -110,6 +110,11 @@ type ApplyPlanHooks struct {
 	OnBeforeAction    func(context.Context, interfaces.PlanAction) error
 	OnResourceApplied func(context.Context, interfaces.ResourceDriver, interfaces.PlanAction, interfaces.ResourceOutput) error
 	OnResourceDeleted func(context.Context, interfaces.PlanAction) error
+	// OnActionComplete fires after every PlanAction reaches a terminal
+	// outcome and the corresponding ActionOutcome has been appended to the
+	// ApplyResult. It is observational only: unlike mutation/persistence
+	// hooks above, it cannot alter apply control flow.
+	OnActionComplete func(context.Context, interfaces.PlanAction, interfaces.ActionOutcome)
 	// OnPlanComplete fires once after the per-action loop reaches its
 	// natural success-exit return at the end of
 	// applyPlanWithEnvProviderAndHooks, i.e., when the outer function is
@@ -315,12 +320,23 @@ func applyPlanWithEnvProviderAndHooks(
 				if iterErr != nil {
 					errStr = iterErr.Error()
 				}
-				result.Actions = append(result.Actions, interfaces.ActionOutcome{
+				outcome := interfaces.ActionOutcome{
 					//nolint:gosec // ActionIndex is loop counter bound by len(plan.Actions); G115 false positive.
 					ActionIndex: uint32(i),
 					Status:      iterStatus,
 					Error:       errStr,
-				})
+				}
+				result.Actions = append(result.Actions, outcome)
+				if hooks.OnActionComplete != nil {
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								log.Printf("warning: OnActionComplete panicked for %s/%s: %v", action.Resource.Type, action.Resource.Name, r)
+							}
+						}()
+						hooks.OnActionComplete(ctx, action, outcome)
+					}()
+				}
 			}()
 
 			// Honor cancellation at the loop boundary. Drivers should also

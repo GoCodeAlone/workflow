@@ -617,6 +617,41 @@ func wireApplyProgressIntoHooks(hooks *wfctlhelpers.ApplyPlanHooks, actions []in
 		}
 		return prior(ctx, action)
 	}
+	priorComplete := hooks.OnActionComplete
+	hooks.OnActionComplete = func(ctx context.Context, action interfaces.PlanAction, outcome interfaces.ActionOutcome) {
+		if priorComplete != nil {
+			priorComplete(ctx, action, outcome)
+		}
+		if outcome.Status == interfaces.ActionStatusSuccess {
+			return
+		}
+		detail := outcome.Error
+		if detail == "" {
+			detail = applyActionStatusLabel(outcome.Status)
+		}
+		fmt.Printf("  ✗ %s (%s): %s\n", action.Resource.Name, action.Resource.Type, detail)
+	}
+}
+
+func applyActionStatusLabel(status interfaces.ActionStatus) string {
+	switch status {
+	case interfaces.ActionStatusUnspecified:
+		return "unspecified"
+	case interfaces.ActionStatusSuccess:
+		return "success"
+	case interfaces.ActionStatusError:
+		return "error"
+	case interfaces.ActionStatusDeleteFailed:
+		return "delete failed"
+	case interfaces.ActionStatusCompensated:
+		return "compensated"
+	case interfaces.ActionStatusCompensationFailed:
+		return "compensation failed"
+	case interfaces.ActionStatusSkipped:
+		return "skipped"
+	default:
+		return fmt.Sprintf("status %d", status)
+	}
 }
 
 func statePersistenceHooks(
