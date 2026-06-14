@@ -76,6 +76,23 @@ func TestPluginCLIRegistry_ReservedNameRejected(t *testing.T) {
 	}
 }
 
+func TestPluginCLIRegistry_DNSNamespaceCanBePluginOwned(t *testing.T) {
+	dir := t.TempDir()
+	writeCLIPluginNamed(t, dir, "infra", "workflow-plugin-infra", []string{"dns"})
+
+	reg, err := BuildCLIRegistry(dir)
+	if err != nil {
+		t.Fatalf("BuildCLIRegistry should allow plugin-owned dns command: %v", err)
+	}
+	entry, ok := reg["dns"]
+	if !ok {
+		t.Fatalf("expected dns command registered, got %v", reg)
+	}
+	if entry.PluginName != "workflow-plugin-infra" {
+		t.Fatalf("PluginName = %q, want workflow-plugin-infra", entry.PluginName)
+	}
+}
+
 func TestPluginCLIRegistry_ConflictError(t *testing.T) {
 	dir := t.TempDir()
 	writeCLIPlugin(t, dir, "plugin-a", []string{"data"})

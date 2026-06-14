@@ -1810,7 +1810,7 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 
 Generic ownership checks do not replace authentication or provider IAM. They are a pre-dispatch safety gate to avoid accidental cross-owner mutation where provider plugins can read/write ownership metadata. DNS resources are excluded from this generic gate and continue to use `wfctl dns-policy`.
 
-#### `dns intent compile`
+#### Plugin-owned `dns intent compile`
 
 Compile declarative domain intent into concrete DNS IaC resources:
 
@@ -1827,6 +1827,10 @@ from `wfctl infra import-all --format portfolio`. It writes a normal wfctl
 config containing `infra.dns` and `infra.dns_delegation` resources, plus a JSON
 report with per-domain actions and blockers. It exits non-zero when any domain
 is blocked.
+
+This command is contributed by `workflow-plugin-infra` through
+`plugin.json.capabilities.cliCommands`; core `wfctl` only dispatches the
+top-level `dns` namespace to the installed plugin.
 
 Useful flags:
 
