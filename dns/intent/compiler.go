@@ -437,10 +437,17 @@ func sourceRank(snapshot record.Snapshot, group []record.Snapshot) int {
 }
 
 func currentAuthorityProvider(group []record.Snapshot) string {
+	providers := map[string]bool{}
 	for _, snapshot := range group {
 		if provider := nameserverProvider(snapshot); provider != "" {
-			return provider
+			providers[provider] = true
 		}
+	}
+	if len(providers) != 1 {
+		return ""
+	}
+	for provider := range providers {
+		return provider
 	}
 	return ""
 }

@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,24 @@ func TestRunDNSRegistered(t *testing.T) {
 		if !strings.Contains(embedded, want) {
 			t.Fatalf("embedded wfctl config missing %q", want)
 		}
+	}
+}
+
+func TestRunDNSHelpReturnsFlagErrHelp(t *testing.T) {
+	if err := runDNS([]string{"--help"}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("wfctl dns --help error = %v, want flag.ErrHelp", err)
+	}
+	if err := runDNS([]string{}); err == nil || errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("wfctl dns without subcommand should be a usage error, not help: %v", err)
+	}
+}
+
+func TestRunDNSIntentHelpReturnsFlagErrHelp(t *testing.T) {
+	if err := runDNS([]string{"intent", "--help"}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("wfctl dns intent --help error = %v, want flag.ErrHelp", err)
+	}
+	if err := runDNS([]string{"intent"}); err == nil || errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("wfctl dns intent without subcommand should be a usage error, not help: %v", err)
 	}
 }
 

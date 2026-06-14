@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/dns/record"
 )
 
 func TestCompileDiscardParkedProducesCloudflareAndHoverResources(t *testing.T) {
@@ -224,6 +225,32 @@ func TestCompilePreserveAuthoritativeIgnoresStagedCloudflareByDefault(t *testing
 	}
 	if records[0]["data"] != "192.0.2.44" {
 		t.Fatalf("record data = %#v, want authoritative Hover value", records[0]["data"])
+	}
+}
+
+func TestCurrentAuthorityProviderIsOrderIndependent(t *testing.T) {
+	group := []record.Snapshot{
+		{
+			Provider: "cloudflare",
+			Domain:   "example.com",
+			Authority: map[string]any{
+				"name_servers": []any{"a.ns.cloudflare.com", "b.ns.cloudflare.com"},
+			},
+		},
+		{
+			Provider: "hover",
+			Domain:   "example.com",
+			Authority: map[string]any{
+				"registrar_nameservers": []any{"ns1.hover.com", "ns2.hover.com"},
+			},
+		},
+	}
+	reversed := []record.Snapshot{group[1], group[0]}
+	if got := currentAuthorityProvider(group); got != "hover" {
+		t.Fatalf("currentAuthorityProvider(group) = %q, want hover", got)
+	}
+	if got := currentAuthorityProvider(reversed); got != "hover" {
+		t.Fatalf("currentAuthorityProvider(reversed) = %q, want hover", got)
 	}
 }
 

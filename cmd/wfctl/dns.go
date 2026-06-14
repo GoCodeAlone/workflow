@@ -20,7 +20,8 @@ func runDNS(args []string) error {
 	case "intent":
 		return runDNSIntent(args[1:])
 	case "-h", "--help", "help":
-		return dnsUsage()
+		_ = dnsUsage()
+		return flag.ErrHelp
 	default:
 		return fmt.Errorf("dns: unknown subcommand %q", args[0])
 	}
@@ -45,7 +46,8 @@ func runDNSIntent(args []string) error {
 	case "compile":
 		return runDNSIntentCompile(args[1:])
 	case "-h", "--help", "help":
-		return dnsIntentUsage()
+		_ = dnsIntentUsage()
+		return flag.ErrHelp
 	default:
 		return fmt.Errorf("dns intent: unknown subcommand %q", args[0])
 	}
