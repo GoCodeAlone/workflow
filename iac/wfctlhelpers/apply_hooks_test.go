@@ -52,6 +52,38 @@ func TestApplyPlanWithHooks_PersistsBeforeLaterAction(t *testing.T) {
 	}
 }
 
+func TestApplyPlanWithHooks_CallsOnActionCompleteForFailure(t *testing.T) {
+	driver := &hookOrderingDriver{
+		create: func(interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+			return nil, errors.New("create failed")
+		},
+	}
+	provider := &hookProvider{driver: driver}
+	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+		Action:   "create",
+		Resource: interfaces.ResourceSpec{Name: "bad", Type: "infra.test"},
+	}}}
+
+	var observed []interfaces.ActionOutcome
+	result, err := ApplyPlanWithHooks(t.Context(), provider, plan, ApplyPlanHooks{
+		OnActionComplete: func(_ context.Context, _ interfaces.PlanAction, outcome interfaces.ActionOutcome) {
+			observed = append(observed, outcome)
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPlanWithHooks: %v", err)
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("result.Errors len = %d, want 1", len(result.Errors))
+	}
+	if len(observed) != 1 {
+		t.Fatalf("OnActionComplete calls = %d, want 1", len(observed))
+	}
+	if observed[0].Status != interfaces.ActionStatusError || !strings.Contains(observed[0].Error, "create failed") {
+		t.Fatalf("observed outcome = %#v, want error outcome with create failure", observed[0])
+	}
+}
+
 func TestApplyPlanWithHooks_DefaultReplaceDeleteHookRunsBeforeCreateFailure(t *testing.T) {
 	driver := &replaceDeleteHookDriver{}
 	provider := &hookProvider{driver: driver}
