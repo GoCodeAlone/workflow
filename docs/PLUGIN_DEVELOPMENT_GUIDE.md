@@ -723,7 +723,7 @@ Check the plugin's `GetStepTypes()` / `GetModuleTypes()` / `GetTriggerTypes()` r
 
 ### Plugin crashes during execution
 
-Check the engine logs for `[external-plugins]` entries. Plugin stderr is streamed with `plugin "<name>" stderr:` prefixes so progress and diagnostics remain visible in CI logs. If the plugin process exits unexpectedly, the `RemoteStep` or `RemoteModule` proxy will return a gRPC connection error.
+Check the engine logs for `plugin "<name>" stderr:` entries. The default external-plugin logger also adds an `[external-plugins]` prefix, but callers may supply a custom logger. Plugin stderr is streamed so progress and diagnostics remain visible in CI logs. If the plugin process exits unexpectedly, the `RemoteStep` or `RemoteModule` proxy will return a gRPC connection error.
 
 ### Data conversion errors
 

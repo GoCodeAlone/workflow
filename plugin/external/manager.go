@@ -209,6 +209,7 @@ type pluginStderrForwarder struct {
 	name   string
 	logger *log.Logger
 	mu     sync.Mutex
+	buf    string
 }
 
 func newPluginStderrForwarder(name string, logger *log.Logger) *pluginStderrForwarder {
@@ -219,8 +220,10 @@ func (w *pluginStderrForwarder) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	text := strings.ReplaceAll(string(p), "\r\n", "\n")
-	for _, line := range strings.Split(text, "\n") {
+	w.buf += string(p)
+	lines := strings.Split(w.buf, "\n")
+	w.buf = lines[len(lines)-1]
+	for _, line := range lines[:len(lines)-1] {
 		line = strings.TrimRight(line, "\r")
 		if strings.TrimSpace(line) == "" {
 			continue

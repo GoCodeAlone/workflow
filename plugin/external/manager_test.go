@@ -17,12 +17,22 @@ func TestPluginStderrForwarderPrefixesPluginLines(t *testing.T) {
 	logger := log.New(&out, "[external-plugins] ", 0)
 	forwarder := newPluginStderrForwarder("hover", logger)
 
-	n, err := forwarder.Write([]byte("first line\nsecond line\r\n\nthird line"))
+	n, err := forwarder.Write([]byte("first line\nsecond line\r\n\nthird"))
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	if n != len("first line\nsecond line\r\n\nthird line") {
-		t.Fatalf("Write returned n=%d, want %d", n, len("first line\nsecond line\r\n\nthird line"))
+	if n != len("first line\nsecond line\r\n\nthird") {
+		t.Fatalf("Write returned n=%d, want %d", n, len("first line\nsecond line\r\n\nthird"))
+	}
+	if strings.Contains(out.String(), "third") {
+		t.Fatalf("forwarded stderr should not emit partial line:\n%s", out.String())
+	}
+	n, err = forwarder.Write([]byte(" line\n"))
+	if err != nil {
+		t.Fatalf("Write continuation: %v", err)
+	}
+	if n != len(" line\n") {
+		t.Fatalf("Write continuation returned n=%d, want %d", n, len(" line\n"))
 	}
 	got := out.String()
 	for _, want := range []string{
