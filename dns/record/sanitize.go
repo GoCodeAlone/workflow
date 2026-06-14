@@ -24,6 +24,12 @@ import (
 var authorityAllowList = map[string]bool{
 	"registrar_nameservers": true,
 	"live_nameservers":      true,
+	"role":                  true,
+	"dns_host":              true,
+	"name_servers":          true,
+	"original_name_servers": true,
+	"original_registrar":    true,
+	"original_dnshost":      true,
 }
 
 // Sanitize sets p.Sanitized = true.

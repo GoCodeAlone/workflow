@@ -325,8 +325,8 @@ func TestSanitizePreservesExistingExampleIPs(t *testing.T) {
 }
 
 // TestSanitizeStripsUnknownAuthorityKeys pins that Sanitize removes any key
-// from Snapshot.Authority that is NOT in the allow-list
-// {registrar_nameservers, live_nameservers}, while leaving allowed keys intact.
+// from Snapshot.Authority that is not in the allow-list, while leaving allowed
+// delegation and provider-supplied target-authority keys intact.
 // A nil Authority must not panic, and Records sanitization must still work.
 func TestSanitizeStripsUnknownAuthorityKeys(t *testing.T) {
 	// Snapshot with a non-nil Authority containing both allowed and disallowed keys.
@@ -339,6 +339,12 @@ func TestSanitizeStripsUnknownAuthorityKeys(t *testing.T) {
 				Authority: map[string]any{
 					"registrar_nameservers": []any{"ns1.x"},
 					"live_nameservers":      []any{"ns2.x"},
+					"role":                  "target_authoritative_dns",
+					"dns_host":              "Cloudflare",
+					"name_servers":          []any{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"},
+					"original_name_servers": []any{"ns1.hover.com"},
+					"original_registrar":    "Hover",
+					"original_dnshost":      "Hover",
 					"secret_token":          "leak",
 					"domain_id":             "12345",
 				},
@@ -389,6 +395,11 @@ func TestSanitizeStripsUnknownAuthorityKeys(t *testing.T) {
 	}
 	if _, found := auth["domain_id"]; found {
 		t.Error("domain_id was NOT removed; it must be stripped by Sanitize")
+	}
+	for _, key := range []string{"role", "dns_host", "name_servers", "original_name_servers", "original_registrar", "original_dnshost"} {
+		if _, found := auth[key]; !found {
+			t.Errorf("%s was removed; provider-supplied authority metadata must remain", key)
+		}
 	}
 
 	// Nil Authority on second snapshot must not panic (verified by reaching here).

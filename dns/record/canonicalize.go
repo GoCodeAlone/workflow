@@ -11,6 +11,8 @@ import (
 // FromResourceStates converts imported IaC state into a canonical Portfolio.
 // Reads each infra.dns ResourceState's records (Outputs preferred, else
 // AppliedConfig), renaming provider-specific value keys to the canonical "value".
+// If an infra.dns state includes provider-supplied authority metadata in
+// Outputs["authority"], safe keys are copied into Snapshot.Authority.
 // Each infra.dns_delegation state populates Snapshot.Authority with
 // registrar_nameservers and live_nameservers for the matching domain.
 // States of other types are silently skipped.
@@ -71,6 +73,7 @@ func FromResourceStates(states []interfaces.ResourceState) Portfolio {
 				}
 				snap.Records = append(snap.Records, recordFromMap(m))
 			}
+			mergeAuthority(snap, st.Outputs["authority"])
 
 		case "infra.dns_delegation":
 			domain := st.ProviderID
@@ -144,6 +147,39 @@ func pickRecords(outputs, appliedConfig map[string]any) []any {
 		return recs
 	}
 	return nil
+}
+
+func mergeAuthority(snap *Snapshot, raw any) {
+	authority, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	for key, value := range authority {
+		if !authorityAllowList[key] {
+			continue
+		}
+		if snap.Authority == nil {
+			snap.Authority = map[string]any{}
+		}
+		snap.Authority[key] = cloneAuthorityValue(value)
+	}
+}
+
+func cloneAuthorityValue(value any) any {
+	switch v := value.(type) {
+	case []any:
+		cp := make([]any, len(v))
+		copy(cp, v)
+		return cp
+	case []string:
+		cp := make([]any, len(v))
+		for i := range v {
+			cp[i] = v[i]
+		}
+		return cp
+	default:
+		return v
+	}
 }
 
 // recordFromMap converts a provider record map to a canonical Record.

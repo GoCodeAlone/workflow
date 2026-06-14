@@ -17,6 +17,8 @@ Populate `Snapshot.Authority` with delegation NS, merged by `(provider, domain)`
 
 **Consumer read model:** `authority` attaches to the registrar's snapshot (provider=hover). To find where a domain is live, match `registrar_nameservers` to a provider; a Hover snapshot whose `registrar_nameservers` point elsewhere carries staging/placeholder records.
 
+**Provider-supplied target authority:** `infra.dns` states may also carry safe provider authority metadata in `outputs.authority` (for example Cloudflare assigned nameservers for a staged zone). `record.FromResourceStates` copies allow-listed keys from that map into `Snapshot.Authority` so a portfolio can show both current registrar delegation and target-provider cutover inputs. This does not change registrar-source semantics: `registrar_nameservers` and `live_nameservers` still come from delegation states when available.
+
 Alternatives rejected:
 - **Side-file (`--format state`)** — splits the catalog into two inconsistent formats.
 - **NS-as-records** — conflates registrar delegation with in-zone NS records.
@@ -29,5 +31,6 @@ Alternatives rejected:
 - 3-repo cascade (workflow engine + hover plugin + gocodealone-dns) + 2 releases (wfctl + hover v0.5.1). Engine change is ~15 lines + tests.
 - Additive schema use — `Authority` was always present (`omitempty`); no schema break, existing portfolio consumers unaffected.
 - A snapshot now distinguishes live (NS point here) from staging/placeholder (NS elsewhere) records.
+- Provider-assigned nameservers can be preserved for DNS zones staged before registrar cutover, avoiding a dashboard-only lookup for cutover inputs.
 - Revertible per-repo by version pins; reverting canonicalize returns portfolios to records-only.
 - DO delegation not captured (DO NS are self-referential; the registrar Hover holds the real delegation) — future-optional, not built.
