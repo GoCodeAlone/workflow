@@ -275,13 +275,15 @@ func buildBundle(results []compileResult, stateDir string) *Bundle {
 	needCloudflare := false
 	needHover := false
 	report := Report{Schema: ReportSchemaV1}
-	for _, result := range results {
+	for i := range results {
+		result := &results[i]
 		report.Domains = append(report.Domains, result.report)
 		if len(result.report.Blockers) > 0 {
 			report.BlockedDomains++
 		}
 		report.ActionCount += len(result.report.Actions)
-		for _, action := range result.report.Actions {
+		for j := range result.report.Actions {
+			action := &result.report.Actions[j]
 			switch action.Provider {
 			case "cloudflare":
 				needCloudflare = true
@@ -294,7 +296,7 @@ func buildBundle(results []compileResult, stateDir string) *Bundle {
 		modules = append(modules, config.ModuleConfig{
 			Name: "cloudflare",
 			Type: "iac.provider",
-			Config: map[string]any{
+			Config: map[string]any{ //nolint:gosec // Values are env placeholders, not literal credentials.
 				"provider":   "cloudflare",
 				"api_token":  "${CLOUDFLARE_API_TOKEN}",
 				"account_id": "${CLOUDFLARE_ACCOUNT_ID}",
@@ -305,7 +307,7 @@ func buildBundle(results []compileResult, stateDir string) *Bundle {
 		modules = append(modules, config.ModuleConfig{
 			Name: "hover",
 			Type: "iac.provider",
-			Config: map[string]any{
+			Config: map[string]any{ //nolint:gosec // Values are env placeholders, not literal credentials.
 				"provider":            "hover",
 				"username":            "${HOVER_USERNAME}",
 				"password":            "${HOVER_PASSWORD}",
@@ -324,8 +326,8 @@ func buildBundle(results []compileResult, stateDir string) *Bundle {
 			"directory": stateDir,
 		},
 	})
-	for _, result := range results {
-		modules = append(modules, result.modules...)
+	for i := range results {
+		modules = append(modules, results[i].modules...)
 	}
 	return &Bundle{
 		Config: config.WorkflowConfig{Modules: modules},

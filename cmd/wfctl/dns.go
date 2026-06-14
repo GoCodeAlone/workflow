@@ -108,10 +108,12 @@ func runDNSIntentCompile(args []string) error {
 			return err
 		}
 	}
-	for _, domainReport := range bundle.Report.Domains {
+	for i := range bundle.Report.Domains {
+		domainReport := &bundle.Report.Domains[i]
 		if len(domainReport.Blockers) == 0 {
 			actionTypes := make([]string, 0, len(domainReport.Actions))
-			for _, action := range domainReport.Actions {
+			for j := range domainReport.Actions {
+				action := &domainReport.Actions[j]
 				actionTypes = append(actionTypes, action.Type)
 			}
 			fmt.Printf("%s: %s\n", domainReport.Domain, strings.Join(actionTypes, ","))
@@ -130,10 +132,10 @@ func writeFileCreatingParents(path string, data []byte) error {
 		_, err := os.Stdout.Write(data)
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create parent directory for %q: %w", path, err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write %q: %w", path, err)
 	}
 	return nil
