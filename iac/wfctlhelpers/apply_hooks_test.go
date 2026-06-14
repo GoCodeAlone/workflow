@@ -84,6 +84,26 @@ func TestApplyPlanWithHooks_CallsOnActionCompleteForFailure(t *testing.T) {
 	}
 }
 
+func TestApplyPlanWithHooks_OnActionCompletePanicDoesNotAbortApply(t *testing.T) {
+	provider := &hookProvider{driver: &hookOrderingDriver{}}
+	plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+		Action:   "create",
+		Resource: interfaces.ResourceSpec{Name: "ok", Type: "infra.test"},
+	}}}
+
+	result, err := ApplyPlanWithHooks(t.Context(), provider, plan, ApplyPlanHooks{
+		OnActionComplete: func(context.Context, interfaces.PlanAction, interfaces.ActionOutcome) {
+			panic("observer failed")
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPlanWithHooks: %v", err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Status != interfaces.ActionStatusSuccess {
+		t.Fatalf("result.Actions = %#v, want one successful outcome", result.Actions)
+	}
+}
+
 func TestApplyPlanWithHooks_DefaultReplaceDeleteHookRunsBeforeCreateFailure(t *testing.T) {
 	driver := &replaceDeleteHookDriver{}
 	provider := &hookProvider{driver: driver}

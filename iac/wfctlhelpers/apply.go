@@ -328,7 +328,14 @@ func applyPlanWithEnvProviderAndHooks(
 				}
 				result.Actions = append(result.Actions, outcome)
 				if hooks.OnActionComplete != nil {
-					hooks.OnActionComplete(ctx, action, outcome)
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								log.Printf("warning: OnActionComplete panicked for %s/%s: %v", action.Resource.Type, action.Resource.Name, r)
+							}
+						}()
+						hooks.OnActionComplete(ctx, action, outcome)
+					}()
 				}
 			}()
 

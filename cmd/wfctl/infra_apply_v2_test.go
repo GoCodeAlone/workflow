@@ -186,6 +186,43 @@ func TestApplyWithProviderAndStore_PrintsActionFailureProgress(t *testing.T) {
 	}
 }
 
+func TestWireApplyProgressIntoHooks_ChainsActionCompleteAndLabelsEmptyErrors(t *testing.T) {
+	action := interfaces.PlanAction{
+		Action:   "create",
+		Resource: interfaces.ResourceSpec{Name: "skip-me", Type: "infra.test"},
+	}
+	var priorCalls int
+	hooks := wfctlhelpers.ApplyPlanHooks{
+		OnActionComplete: func(context.Context, interfaces.PlanAction, interfaces.ActionOutcome) {
+			priorCalls++
+		},
+	}
+	wireApplyProgressIntoHooks(&hooks, []interfaces.PlanAction{action})
+
+	stdout, err := captureStdout(t, func() error {
+		hooks.OnActionComplete(context.Background(), action, interfaces.ActionOutcome{
+			ActionIndex: 0,
+			Status:      interfaces.ActionStatusSuccess,
+		})
+		hooks.OnActionComplete(context.Background(), action, interfaces.ActionOutcome{
+			ActionIndex: 0,
+			Status:      interfaces.ActionStatusSkipped,
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("capture stdout: %v", err)
+	}
+
+	if priorCalls != 2 {
+		t.Fatalf("prior OnActionComplete calls = %d, want 2", priorCalls)
+	}
+	want := "  ✗ skip-me (infra.test): skipped\n"
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("stdout missing readable skipped label %q:\n%s", want, stdout)
+	}
+}
+
 // TestApplyWithProviderAndStore_V1FallsThroughToProviderApply +
 // TestApplyWithProviderAndStore_V1Path_DeclarerReturnsEmpty +
 // v1RecordingProvider stub were deleted per workflow#699 — v1 dispatch
