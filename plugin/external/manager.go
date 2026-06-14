@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
@@ -164,11 +165,14 @@ func (m *ExternalPluginManager) startPluginLocked(name string) (*pluginLaunch, e
 	// which may not be writable (e.g. /app owned by root, process runs as nonroot).
 	cmd := exec.Command(binaryPath) //nolint:gosec // G204: plugin binary path is from trusted data/plugins directory
 	cmd.Dir = pluginDir
+	pluginStderr := newPluginStderrForwarder(name, m.logger)
 
 	client := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig:  Handshake,
 		Plugins:          goplugin.PluginSet{"plugin": &GRPCPlugin{CallbackServer: m.callbackServer}},
 		Cmd:              cmd,
+		Stderr:           pluginStderr,
+		SyncStderr:       pluginStderr,
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 	})
 
@@ -199,6 +203,31 @@ func (m *ExternalPluginManager) startPluginLocked(name string) (*pluginLaunch, e
 	}
 
 	return &pluginLaunch{client: client, adapter: adapter}, nil
+}
+
+type pluginStderrForwarder struct {
+	name   string
+	logger *log.Logger
+	mu     sync.Mutex
+}
+
+func newPluginStderrForwarder(name string, logger *log.Logger) *pluginStderrForwarder {
+	return &pluginStderrForwarder{name: name, logger: logger}
+}
+
+func (w *pluginStderrForwarder) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	text := strings.ReplaceAll(string(p), "\r\n", "\n")
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		w.logger.Printf("plugin %q stderr: %s", w.name, line)
+	}
+	return len(p), nil
 }
 
 // UnloadPlugin stops the named plugin subprocess and removes it from the internal map.

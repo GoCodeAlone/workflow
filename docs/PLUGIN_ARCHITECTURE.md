@@ -226,7 +226,7 @@ If a plugin process crashes (segfault, panic, OOM kill), the engine detects the 
 
 1. Marks the plugin as "unloaded"
 2. Returns errors for any in-flight requests to that plugin's types
-3. Logs the failure with the plugin's stderr output
+3. Streams plugin stderr with `[external-plugins] plugin "<name>" stderr:` prefixes so failure diagnostics are visible in operator logs
 4. The engine continues running; other plugins and built-in types are unaffected
 
 Crashed plugins can be reloaded via the API (`POST /api/v1/plugins/external/{name}/reload`).

@@ -1,6 +1,7 @@
 package external
 
 import (
+	"bytes"
 	"errors"
 	"log"
 	"os"
@@ -10,6 +11,33 @@ import (
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 )
+
+func TestPluginStderrForwarderPrefixesPluginLines(t *testing.T) {
+	var out bytes.Buffer
+	logger := log.New(&out, "[external-plugins] ", 0)
+	forwarder := newPluginStderrForwarder("hover", logger)
+
+	n, err := forwarder.Write([]byte("first line\nsecond line\r\n\nthird line"))
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if n != len("first line\nsecond line\r\n\nthird line") {
+		t.Fatalf("Write returned n=%d, want %d", n, len("first line\nsecond line\r\n\nthird line"))
+	}
+	got := out.String()
+	for _, want := range []string{
+		`[external-plugins] plugin "hover" stderr: first line`,
+		`[external-plugins] plugin "hover" stderr: second line`,
+		`[external-plugins] plugin "hover" stderr: third line`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("forwarded stderr missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `stderr: `+"\n") {
+		t.Fatalf("forwarded stderr should skip blank lines:\n%s", got)
+	}
+}
 
 func TestExternalPluginManagerStoresCallbackServer(t *testing.T) {
 	manager := NewExternalPluginManager(t.TempDir(), log.Default())
