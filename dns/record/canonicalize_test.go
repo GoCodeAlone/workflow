@@ -111,6 +111,46 @@ func TestFromResourceStates_DelegationPopulatesAuthority(t *testing.T) {
 	}
 }
 
+func TestFromResourceStates_DNSStatePreservesProviderAuthority(t *testing.T) {
+	states := []interfaces.ResourceState{
+		{
+			Type:       "infra.dns",
+			Provider:   "cloudflare",
+			ProviderID: "example.com",
+			Outputs: map[string]any{
+				"records": []any{
+					map[string]any{"type": "A", "name": "example.com", "data": "192.0.2.10", "ttl": 300},
+				},
+				"authority": map[string]any{
+					"role":                  "target_authoritative_dns",
+					"dns_host":              "Cloudflare",
+					"name_servers":          []any{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"},
+					"original_name_servers": []any{"ns1.hover.com", "ns2.hover.com"},
+				},
+			},
+		},
+	}
+	p := record.FromResourceStates(states)
+	if len(p.Snapshots) != 1 {
+		t.Fatalf("want 1 snapshot from DNS state; got %d", len(p.Snapshots))
+	}
+	snap := p.Snapshots[0]
+	if snap.Authority == nil {
+		t.Fatal("Authority missing provider-supplied DNS authority")
+	}
+	if got := snap.Authority["role"]; got != "target_authoritative_dns" {
+		t.Fatalf("Authority[role] = %v; want target_authoritative_dns", got)
+	}
+	nameServers, ok := snap.Authority["name_servers"].([]any)
+	if !ok || len(nameServers) != 2 || nameServers[0] != "ada.ns.cloudflare.com" {
+		t.Fatalf("Authority[name_servers] = %#v; want Cloudflare assigned nameservers", snap.Authority["name_servers"])
+	}
+	original, ok := snap.Authority["original_name_servers"].([]any)
+	if !ok || len(original) != 2 || original[0] != "ns1.hover.com" {
+		t.Fatalf("Authority[original_name_servers] = %#v; want previous nameservers", snap.Authority["original_name_servers"])
+	}
+}
+
 func TestFromResourceStates_MergesBothLayersByDomain(t *testing.T) {
 	states := []interfaces.ResourceState{
 		{
