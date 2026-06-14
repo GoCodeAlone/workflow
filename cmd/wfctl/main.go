@@ -141,6 +141,7 @@ var commands = map[string]func([]string) error{
 	"modernize":       runModernize,
 	"expr-migrate":    runExprMigrate,
 	"infra":           runInfra,
+	"dns":             runDNS,
 	"dns-policy":      runDNSPolicy,
 	"docs":            runDocs,
 	"editor-schemas":  runEditorSchemas,

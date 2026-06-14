@@ -235,3 +235,56 @@ The full DNS provider plan (Namecheap + Hover + dyndns + scoped
 secret-set) is tracked in `docs/plans/2026-05-20-dns-providers.md`
 (workflow#735) — caveman SPEC format with 20 tasks, 16 constraints,
 18 invariants.
+
+## Domain Intent Compiler
+
+Use `wfctl dns intent compile` when a domain migration spans hosted DNS and a
+registrar delegation provider. The command reads a domain intent file plus one
+or more `wfctl infra import-all --format portfolio` DNS catalog exports, then
+emits ordinary `infra.dns` and `infra.dns_delegation` resources plus a JSON
+report.
+
+```sh
+wfctl dns intent compile \
+  --intent domains.json \
+  --portfolio 'zones/*.portfolio.json' \
+  --domain example.com \
+  --output infra/domain-reconcile.generated.wfctl.yaml \
+  --report reports/domain-reconcile-report.json
+```
+
+Intent file shape:
+
+```json
+{
+  "schema": "workflow.domain-intent.v1",
+  "domains": {
+    "example.com": {
+      "registrar": "hover",
+      "dns_host": "cloudflare",
+      "stage_dns": true,
+      "nameserver_cutover": true,
+      "records_policy": "preserve_authoritative",
+      "expected_current_nameservers": ["ns1.hover.com", "ns2.hover.com"]
+    }
+  }
+}
+```
+
+Supported first increment:
+
+- `dns_host: cloudflare` creates or updates `infra.dns` resources from the
+  selected portfolio records and Cloudflare-assigned nameservers.
+- `registrar: hover` with `nameserver_cutover: true` creates
+  `infra.dns_delegation` resources targeting the Cloudflare nameservers.
+- `records_policy: preserve_authoritative` chooses the current authoritative
+  source when available.
+- `records_policy: preserve_cloudflare` keeps the existing Cloudflare snapshot.
+- `records_policy: discard_parked` emits an empty managed Cloudflare zone only
+  when Hover records match the known parking pattern, unless
+  `allow_discard_nonparked` is explicitly set.
+
+Unsupported provider pairs and unsafe discard requests are reported as blockers
+and cause the command to exit non-zero. Provider plugins still own the actual
+apply behavior; the compiler only removes repository-local glue for producing
+the concrete IaC resources and report.

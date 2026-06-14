@@ -1810,6 +1810,36 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 
 Generic ownership checks do not replace authentication or provider IAM. They are a pre-dispatch safety gate to avoid accidental cross-owner mutation where provider plugins can read/write ownership metadata. DNS resources are excluded from this generic gate and continue to use `wfctl dns-policy`.
 
+#### `dns intent compile`
+
+Compile declarative domain intent into concrete DNS IaC resources:
+
+```sh
+wfctl dns intent compile \
+  --intent domains.json \
+  --portfolio 'zones/*.portfolio.json' \
+  --output infra/domain-reconcile.generated.wfctl.yaml \
+  --report reports/domain-reconcile-report.json
+```
+
+The command reads `workflow.domain-intent.v1` JSON plus DNS portfolio exports
+from `wfctl infra import-all --format portfolio`. It writes a normal wfctl
+config containing `infra.dns` and `infra.dns_delegation` resources, plus a JSON
+report with per-domain actions and blockers. It exits non-zero when any domain
+is blocked.
+
+Useful flags:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--intent` | `domains.json` | Domain intent JSON file. |
+| `--portfolio` | `zones/*.portfolio.json` | Comma-separated portfolio paths or globs. |
+| `--domain` | _(all)_ | Compile one domain from the intent file. |
+| `--output` | `infra/domain-reconcile.generated.wfctl.yaml` | Generated wfctl config path. |
+| `--report` | `reports/domain-reconcile-report.json` | Generated JSON report path. |
+| `--bundle` | _(none)_ | Optional combined JSON bundle path. |
+| `--state-dir` | `.state/domain-intent/` | Generated filesystem IaC state directory. |
+
 **Protected-resource gate:**
 
 Resources annotated `protected: true` cannot be replaced or deleted by `infra apply` without an explicit per-resource opt-in. When a plan would replace or delete a protected resource, `wfctl` aborts before any provider dispatch and prints the full set of blockers in one pass with a copy-paste-ready flag value:
