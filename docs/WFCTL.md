@@ -912,6 +912,7 @@ wfctl plugin update [options] <name>
 | `--compat-mode` | `enforce` | Compatibility mode for registry updates: `enforce` or `warn` |
 | `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
 | `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
+| `--quiet` | `false` | Suppress per-download progress output |
 | `--skip-checksum` | `false` | Skip archive integrity verification. Use only for trusted internal URLs |
 
 #### `plugin remove`

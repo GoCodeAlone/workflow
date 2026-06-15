@@ -57,7 +57,14 @@ func TestReadDownloadBodyWithProgressCanBeSuppressedByEnv(t *testing.T) {
 }
 
 func TestDownloadProgressQuietFlagScope(t *testing.T) {
+	t.Setenv("WFCTL_PLUGIN_INSTALL_QUIET", "")
 	restore := setDownloadProgressQuiet(true)
+	restored := false
+	defer func() {
+		if !restored {
+			restore()
+		}
+	}()
 	if !shouldSuppressDownloadProgress() {
 		t.Fatal("quiet scope did not suppress download progress")
 	}
@@ -69,6 +76,7 @@ func TestDownloadProgressQuietFlagScope(t *testing.T) {
 		t.Fatalf("readDownloadBodyWithProgress = %q, want quiet", got)
 	}
 	restore()
+	restored = true
 	if shouldSuppressDownloadProgress() {
 		t.Fatal("quiet scope leaked after restore")
 	}
