@@ -814,6 +814,7 @@ wfctl plugin install [options] <name>[@<version>]
 | `--compat-mode` | `enforce` | Compatibility mode for registry installs: `enforce` or `warn` |
 | `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
 | `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
+| `--quiet` | `false` | Suppress per-download progress output |
 | `--skip-checksum` | `false` | Skip archive integrity verification. Use only for trusted internal URLs |
 
 ```bash
@@ -821,6 +822,10 @@ wfctl plugin install my-plugin
 wfctl plugin install my-plugin@1.2.0
 wfctl plugin install --data-dir /opt/plugins my-plugin
 ```
+
+Set `WFCTL_PLUGIN_INSTALL_QUIET=1` to suppress download progress in CI without
+changing command arguments. High-level install, checksum, and error messages are
+still emitted.
 
 Registry installs resolve compatibility before selecting a version. Direct URL installs, local installs, GitHub repository fallback, and lockfile installs do not use registry evidence unless they are backed by registry metadata.
 

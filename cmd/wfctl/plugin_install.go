@@ -108,6 +108,7 @@ func runPluginInstall(args []string) error {
 	compatMode := fs.String("compat-mode", "", "Compatibility mode for registry installs: enforce or warn")
 	engineVersion := fs.String("engine-version", "", "Workflow engine version for compatibility resolution")
 	forceCompat := fs.Bool("force", false, "Permit known-failing compatibility evidence while still enforcing checksums")
+	quiet := fs.Bool("quiet", false, "Suppress per-download progress output")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl-lock.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -119,6 +120,8 @@ func runPluginInstall(args []string) error {
 	if err := fs.Parse(parsedArgs); err != nil {
 		return err
 	}
+	restoreDownloadProgress := setDownloadProgressQuiet(*quiet)
+	defer restoreDownloadProgress()
 	// Validate flag combinations before doing anything else.
 	if *sha256Flag != "" && *directURL == "" {
 		return fmt.Errorf("--sha256 requires --url (no download URL specified)")
@@ -510,6 +513,7 @@ func runPluginUpdate(args []string) error {
 	engineVersion := fs.String("engine-version", "", "Workflow engine version for compatibility resolution")
 	forceCompat := fs.Bool("force", false, "Permit known-failing compatibility evidence while still enforcing checksums")
 	skipChecksum := fs.Bool("skip-checksum", false, "Skip integrity verification (WARNING: disables supply-chain protection)")
+	quiet := fs.Bool("quiet", false, "Suppress per-download progress output")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin update [options] <name>\n\nUpdate an installed plugin to its latest version.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -517,6 +521,8 @@ func runPluginUpdate(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	restoreDownloadProgress := setDownloadProgressQuiet(*quiet)
+	defer restoreDownloadProgress()
 	if fs.NArg() < 1 {
 		fs.Usage()
 		return fmt.Errorf("plugin name is required")

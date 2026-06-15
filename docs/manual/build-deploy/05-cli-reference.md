@@ -143,6 +143,9 @@ Runs garbage collection and prunes tags beyond `retention.keep_latest`. Preserve
 wfctl plugin install [flags] [<name>[@<version>]]
 ```
 
+Use `--quiet` or `WFCTL_PLUGIN_INSTALL_QUIET=1` in CI to suppress per-download
+progress lines while keeping install status, checksum, and error output.
+
 ### New flag: `--from-config`
 
 ```
