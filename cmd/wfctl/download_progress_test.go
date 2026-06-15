@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 )
@@ -41,4 +42,58 @@ func TestDownloadProgressNonTTYUsesLogLines(t *testing.T) {
 	if !strings.Contains(got, "Download progress:") || !strings.Contains(got, "Download complete:") {
 		t.Fatalf("non-TTY progress output = %q, want progress and completion lines", got)
 	}
+}
+
+func TestReadDownloadBodyWithProgressCanBeSuppressedByEnv(t *testing.T) {
+	t.Setenv("WFCTL_PLUGIN_INSTALL_QUIET", "true")
+
+	got, err := readDownloadBodyWithProgress(strings.NewReader("payload"), int64(len("payload")))
+	if err != nil {
+		t.Fatalf("readDownloadBodyWithProgress: %v", err)
+	}
+	if string(got) != "payload" {
+		t.Fatalf("readDownloadBodyWithProgress = %q, want payload", got)
+	}
+}
+
+func TestDownloadProgressQuietFlagScope(t *testing.T) {
+	t.Setenv("WFCTL_PLUGIN_INSTALL_QUIET", "")
+	restore := setDownloadProgressQuiet(true)
+	restored := false
+	defer func() {
+		if !restored {
+			restore()
+		}
+	}()
+	if !shouldSuppressDownloadProgress() {
+		t.Fatal("quiet scope did not suppress download progress")
+	}
+	got, err := readDownloadBodyWithProgress(strings.NewReader("quiet"), int64(len("quiet")))
+	if err != nil {
+		t.Fatalf("readDownloadBodyWithProgress: %v", err)
+	}
+	if string(got) != "quiet" {
+		t.Fatalf("readDownloadBodyWithProgress = %q, want quiet", got)
+	}
+	restore()
+	restored = true
+	if shouldSuppressDownloadProgress() {
+		t.Fatal("quiet scope leaked after restore")
+	}
+}
+
+func TestReadDownloadBodyWithProgressQuietPropagatesReadErrors(t *testing.T) {
+	restore := setDownloadProgressQuiet(true)
+	defer restore()
+
+	_, err := readDownloadBodyWithProgress(errReader{}, 10)
+	if err == nil {
+		t.Fatal("readDownloadBodyWithProgress returned nil error")
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) {
+	return 0, io.ErrUnexpectedEOF
 }

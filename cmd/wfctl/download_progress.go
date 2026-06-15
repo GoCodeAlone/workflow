@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -12,7 +13,28 @@ import (
 
 const downloadProgressInterval = 2 * time.Second
 
+var downloadProgressQuiet bool
+
+func setDownloadProgressQuiet(quiet bool) func() {
+	previous := downloadProgressQuiet
+	downloadProgressQuiet = previous || quiet
+	return func() {
+		downloadProgressQuiet = previous
+	}
+}
+
+func shouldSuppressDownloadProgress() bool {
+	if downloadProgressQuiet {
+		return true
+	}
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("WFCTL_PLUGIN_INSTALL_QUIET")))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
 func readDownloadBodyWithProgress(r io.Reader, total int64) ([]byte, error) {
+	if shouldSuppressDownloadProgress() {
+		return io.ReadAll(r)
+	}
 	var buf bytes.Buffer
 	tracker := newDownloadProgress(os.Stderr, total)
 	if _, err := io.Copy(io.MultiWriter(&buf, tracker), r); err != nil {
