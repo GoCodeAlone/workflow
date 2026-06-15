@@ -29,7 +29,7 @@ require (
 	github.com/hashicorp/golang-lru v1.0.2
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/itchyny/gojq v0.12.19
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/launchdarkly/go-sdk-common/v4 v4.0.0
 	github.com/launchdarkly/go-server-sdk/v7 v7.15.2
 	github.com/lib/pq v1.10.9
