@@ -935,3 +935,187 @@ func TestInstallFromLockfile_NoClobberInvariant(t *testing.T) {
 		t.Errorf("outer-frame guard missing: Platforms wiped by inner install. got=%#v", entry.Platforms)
 	}
 }
+
+func TestRunPluginInstallLockedRejectsMissingProvenance(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	manifest := `version: 1
+plugins:
+  - name: workflow-plugin-auth
+    version: v1.2.3
+    source: github.com/GoCodeAlone/workflow-plugin-auth
+`
+	if err := os.WriteFile("wfctl.yaml", []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	legacyLock := `version: 1
+generated_at: "2026-01-01T00:00:00Z"
+plugins:
+  workflow-plugin-auth:
+    version: v1.2.3
+    source: github.com/GoCodeAlone/workflow-plugin-auth
+`
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte(legacyLock), 0o600); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	before, err := os.ReadFile(".wfctl-lock.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = runPluginInstall([]string{"--locked", "--plugin-dir", pluginDir})
+	if err == nil {
+		t.Fatal("runPluginInstall --locked succeeded with missing provenance")
+	}
+	if !strings.Contains(err.Error(), "lockfile provenance missing") {
+		t.Fatalf("error = %v, want missing provenance", err)
+	}
+	after, err := os.ReadFile(".wfctl-lock.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("--locked modified lockfile\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestRunPluginInstallLockedRejectsDirectInstallMode(t *testing.T) {
+	err := runPluginInstall([]string{"--locked", "auth"})
+	if err == nil {
+		t.Fatal("expected --locked direct install rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "--locked is only supported") {
+		t.Fatalf("error = %q, want clear --locked mode error", err)
+	}
+}
+
+func TestRunPluginInstallSyncsMissingProvenance(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	manifest := `version: 1
+plugins: []
+`
+	if err := os.WriteFile("wfctl.yaml", []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	legacyLock := `version: 1
+generated_at: "2026-01-01T00:00:00Z"
+plugins: {}
+`
+	if err := os.WriteFile(".wfctl-lock.yaml", []byte(legacyLock), 0o600); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+
+	if err := runPluginInstall([]string{"--plugin-dir", pluginDir}); err != nil {
+		t.Fatalf("runPluginInstall: %v", err)
+	}
+	lockfile, err := config.LoadWfctlLockfile(".wfctl-lock.yaml")
+	if err != nil {
+		t.Fatalf("load lockfile: %v", err)
+	}
+	if err := validateSHA256Hex(lockfile.SourceManifestSHA256); err != nil {
+		t.Fatalf("source_manifest_sha256 = %q, want sha256 hex: %v", lockfile.SourceManifestSHA256, err)
+	}
+	if err := validateSHA256Hex(lockfile.LockfileSHA256); err != nil {
+		t.Fatalf("lockfile_sha256 = %q, want sha256 hex: %v", lockfile.LockfileSHA256, err)
+	}
+}
+
+func TestRunPluginCIPreservesLockfile(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	manifest := `version: 1
+plugins: []
+`
+	if err := os.WriteFile("wfctl.yaml", []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := runPluginLockFromManifest("wfctl.yaml", ".wfctl-lock.yaml"); err != nil {
+		t.Fatalf("runPluginLockFromManifest: %v", err)
+	}
+	before, err := os.ReadFile(".wfctl-lock.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runPluginCI([]string{"--plugin-dir", pluginDir}); err != nil {
+		t.Fatalf("runPluginCI: %v", err)
+	}
+	after, err := os.ReadFile(".wfctl-lock.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("plugin ci modified lockfile\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestRunPluginCIRequiresManifest(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock := &config.WfctlLockfile{
+		Version:     1,
+		GeneratedAt: time.Now(),
+		Plugins: map[string]config.WfctlLockPluginEntry{
+			"workflow-plugin-auth": {
+				Version: "v1.2.3",
+				Source:  "github.com/GoCodeAlone/workflow-plugin-auth",
+			},
+		},
+	}
+	if err := config.SaveWfctlLockfile(lockPath, lock); err != nil {
+		t.Fatalf("save lockfile: %v", err)
+	}
+
+	err := runPluginCI([]string{
+		"--plugin-dir", pluginDir,
+		"--manifest", filepath.Join(dir, "wfctl.yaml"),
+		"--lock-file", lockPath,
+	})
+	if err == nil {
+		t.Fatal("expected missing manifest error, got nil")
+	}
+	if !strings.Contains(err.Error(), "manifest") || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("error = %q, want missing manifest detail", err)
+	}
+}

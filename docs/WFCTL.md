@@ -799,10 +799,11 @@ wfctl plugin search
 
 #### `plugin install`
 
-Download and install a plugin from the registry.
+Download and install a plugin from the registry or install all project plugins
+from `.wfctl-lock.yaml`.
 
 ```
-wfctl plugin install [options] <name>[@<version>]
+wfctl plugin install [options] [<name>[@<version>]]
 ```
 
 | Flag | Default | Description |
@@ -811,6 +812,9 @@ wfctl plugin install [options] <name>[@<version>]
 | `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
 | `-config` | _(default registry)_ | Registry config file path |
 | `-registry` | _(all registries)_ | Use a specific registry by name |
+| `--manifest` | `wfctl.yaml` | wfctl project manifest path for lockfile installs |
+| `--lock-file` | `.wfctl-lock.yaml` | Project plugin lockfile path |
+| `--locked` | `false` | Install from the lockfile without modifying `wfctl.yaml` or `.wfctl-lock.yaml` |
 | `--compat-mode` | `enforce` | Compatibility mode for registry installs: `enforce` or `warn` |
 | `--engine-version` | build version or `WFCTL_ENGINE_VERSION` | Workflow engine version used for compatibility resolution |
 | `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
@@ -821,13 +825,53 @@ wfctl plugin install [options] <name>[@<version>]
 wfctl plugin install my-plugin
 wfctl plugin install my-plugin@1.2.0
 wfctl plugin install --data-dir /opt/plugins my-plugin
+wfctl plugin install
+wfctl plugin install --locked
 ```
 
 Set `WFCTL_PLUGIN_INSTALL_QUIET=1` to suppress download progress in CI without
 changing command arguments. High-level install, checksum, and error messages are
 still emitted.
 
-Registry installs resolve compatibility before selecting a version. Direct URL installs, local installs, GitHub repository fallback, and lockfile installs do not use registry evidence unless they are backed by registry metadata.
+When run without a plugin argument, `plugin install` treats `wfctl.yaml` as the
+source manifest. If `.wfctl-lock.yaml` is missing stale provenance, or was
+generated from different plugin pins, local install regenerates the lockfile and
+then installs from it. Use `--locked` in CI or release workflows: it validates
+that the lockfile matches `wfctl.yaml`, installs exactly from the lock, and never
+writes either file.
+
+`--locked` is only valid for the project lockfile install path. It rejects
+plugin arguments, `--from-config`, `--url`, and `--local` installs so one-off
+installs cannot silently skip lockfile freshness checks.
+
+Registry installs resolve compatibility before selecting a version. Direct URL
+installs, local installs, GitHub repository fallback, and lockfile installs do
+not use registry evidence unless they are backed by registry metadata.
+
+#### `plugin ci`
+
+Install all project plugins from `.wfctl-lock.yaml` without modifying
+`wfctl.yaml` or `.wfctl-lock.yaml`. This is the recommended CI command. The
+command requires the manifest and lockfile to exist and exits non-zero when the
+lockfile provenance does not match the manifest.
+
+```
+wfctl plugin ci [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--plugin-dir` | `data/plugins` | Plugin directory |
+| `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--config` | _(default registry)_ | Registry config file path |
+| `--manifest` | `wfctl.yaml` | wfctl project manifest path |
+| `--lock-file` | `.wfctl-lock.yaml` | Project plugin lockfile path |
+| `--quiet` | `false` | Suppress per-download progress output |
+
+```bash
+wfctl plugin ci
+wfctl plugin ci --plugin-dir data/plugins
+```
 
 #### `plugin run`
 
@@ -867,6 +911,10 @@ project lockfiles.
 #### `plugin lock`
 
 Regenerate `.wfctl-lock.yaml` from `wfctl.yaml` or legacy `requires.plugins[]`.
+New-format lockfiles include provenance fields:
+`source_manifest_sha256` records the canonical direct plugin pins from
+`wfctl.yaml`, and `lockfile_sha256` records the generated lock content. These
+fields let CI detect manual edits or stale locks.
 
 ```
 wfctl plugin lock [options]
@@ -1225,6 +1273,7 @@ wfctl config validate [options] [wfctl.yaml]
 | `--manifest` | `wfctl.yaml` | Path to the wfctl project manifest |
 | `--lock-file` | `.wfctl-lock.yaml` | Path to the plugin lockfile |
 | `--skip-lock` | `false` | Skip lockfile validation |
+| `--locked` | `false` | Require the lockfile provenance to match the manifest |
 
 **Examples:**
 
@@ -1232,6 +1281,7 @@ wfctl config validate [options] [wfctl.yaml]
 wfctl config validate
 wfctl config validate wfctl.yaml
 wfctl config validate --manifest wfctl.yaml --lock-file .wfctl-lock.yaml
+wfctl config validate --locked
 wfctl config validate --skip-lock
 ```
 

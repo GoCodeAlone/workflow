@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -13,9 +15,11 @@ import (
 // It is derived from wfctl.yaml and must not be hand-edited.
 // Plugin keys are sorted alphabetically for deterministic git diffs.
 type WfctlLockfile struct {
-	Version     int                             `yaml:"version"`
-	GeneratedAt time.Time                       `yaml:"generated_at"`
-	Plugins     map[string]WfctlLockPluginEntry `yaml:"plugins"`
+	Version              int                             `yaml:"version"`
+	GeneratedAt          time.Time                       `yaml:"generated_at"`
+	SourceManifestSHA256 string                          `yaml:"source_manifest_sha256,omitempty"`
+	LockfileSHA256       string                          `yaml:"lockfile_sha256,omitempty"`
+	Plugins              map[string]WfctlLockPluginEntry `yaml:"plugins"`
 }
 
 // WfctlLockPluginEntry is the locked record for a single plugin.
@@ -64,6 +68,11 @@ func SaveWfctlLockfile(path string, lf *WfctlLockfile) error {
 	if lf.GeneratedAt.IsZero() {
 		lf.GeneratedAt = time.Now().UTC()
 	}
+	lockDigest, err := WfctlLockfileDigest(lf)
+	if err != nil {
+		return fmt.Errorf("digest lockfile: %w", err)
+	}
+	lf.LockfileSHA256 = lockDigest
 
 	// Build a sorted yaml.Node to ensure deterministic key order.
 	root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -83,6 +92,12 @@ func SaveWfctlLockfile(path string, lf *WfctlLockfile) error {
 
 	addInt("version", lf.Version)
 	addStr("generated_at", lf.GeneratedAt.UTC().Format(time.RFC3339))
+	if lf.SourceManifestSHA256 != "" {
+		addStr("source_manifest_sha256", lf.SourceManifestSHA256)
+	}
+	if lf.LockfileSHA256 != "" {
+		addStr("lockfile_sha256", lf.LockfileSHA256)
+	}
 
 	// Sort plugin keys.
 	names := make([]string, 0, len(lf.Plugins))
@@ -178,4 +193,134 @@ func SaveWfctlLockfile(path string, lf *WfctlLockfile) error {
 		return fmt.Errorf("marshal lockfile: %w", err)
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+// PopulateWfctlLockfileProvenance records the source manifest digest and the
+// lockfile's current content digest. SaveWfctlLockfile refreshes the latter
+// again after any caller-side mutation.
+func PopulateWfctlLockfileProvenance(manifest *WfctlManifest, lf *WfctlLockfile) error {
+	sourceDigest, err := WfctlManifestDigest(manifest)
+	if err != nil {
+		return err
+	}
+	lf.SourceManifestSHA256 = sourceDigest
+	lockDigest, err := WfctlLockfileDigest(lf)
+	if err != nil {
+		return err
+	}
+	lf.LockfileSHA256 = lockDigest
+	return nil
+}
+
+func ValidateWfctlLockfileProvenance(manifest *WfctlManifest, lf *WfctlLockfile) error {
+	if lf.SourceManifestSHA256 == "" || lf.LockfileSHA256 == "" {
+		return fmt.Errorf("lockfile provenance missing; run 'wfctl plugin install' or 'wfctl plugin lock'")
+	}
+	sourceDigest, err := WfctlManifestDigest(manifest)
+	if err != nil {
+		return err
+	}
+	if lf.SourceManifestSHA256 != sourceDigest {
+		return fmt.Errorf("lockfile is stale for wfctl.yaml; run 'wfctl plugin install' or 'wfctl plugin lock'")
+	}
+	lockDigest, err := WfctlLockfileDigest(lf)
+	if err != nil {
+		return err
+	}
+	if lf.LockfileSHA256 != lockDigest {
+		return fmt.Errorf("lockfile checksum mismatch; regenerate with 'wfctl plugin install' or 'wfctl plugin lock'")
+	}
+	return nil
+}
+
+type manifestDigestPlugin struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Source  string `json:"source,omitempty"`
+}
+
+func WfctlManifestDigest(manifest *WfctlManifest) (string, error) {
+	plugins := make([]manifestDigestPlugin, 0, len(manifest.Plugins))
+	for _, plugin := range manifest.Plugins {
+		plugins = append(plugins, manifestDigestPlugin{
+			Name:    plugin.Name,
+			Version: plugin.Version,
+			Source:  plugin.Source,
+		})
+	}
+	sort.Slice(plugins, func(i, j int) bool {
+		if plugins[i].Name != plugins[j].Name {
+			return plugins[i].Name < plugins[j].Name
+		}
+		if plugins[i].Version != plugins[j].Version {
+			return plugins[i].Version < plugins[j].Version
+		}
+		return plugins[i].Source < plugins[j].Source
+	})
+	payload := struct {
+		Version int                    `json:"version"`
+		Plugins []manifestDigestPlugin `json:"plugins"`
+	}{Version: manifest.Version, Plugins: plugins}
+	return canonicalSHA256(payload)
+}
+
+type lockDigestPlugin struct {
+	Name      string               `json:"name"`
+	Version   string               `json:"version"`
+	Source    string               `json:"source"`
+	Platforms []lockDigestPlatform `json:"platforms,omitempty"`
+}
+
+type lockDigestPlatform struct {
+	Name          string                  `json:"name"`
+	URL           string                  `json:"url"`
+	SHA256        string                  `json:"sha256"`
+	Compatibility *WfctlLockCompatibility `json:"compatibility,omitempty"`
+}
+
+func WfctlLockfileDigest(lf *WfctlLockfile) (string, error) {
+	names := make([]string, 0, len(lf.Plugins))
+	for name := range lf.Plugins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	plugins := make([]lockDigestPlugin, 0, len(names))
+	for _, name := range names {
+		entry := lf.Plugins[name]
+		platformKeys := make([]string, 0, len(entry.Platforms))
+		for platform := range entry.Platforms {
+			platformKeys = append(platformKeys, platform)
+		}
+		sort.Strings(platformKeys)
+		platforms := make([]lockDigestPlatform, 0, len(platformKeys))
+		for _, platform := range platformKeys {
+			artifact := entry.Platforms[platform]
+			platforms = append(platforms, lockDigestPlatform{
+				Name:          platform,
+				URL:           artifact.URL,
+				SHA256:        artifact.SHA256,
+				Compatibility: artifact.Compatibility,
+			})
+		}
+		plugins = append(plugins, lockDigestPlugin{
+			Name:      name,
+			Version:   entry.Version,
+			Source:    entry.Source,
+			Platforms: platforms,
+		})
+	}
+	payload := struct {
+		Version int                `json:"version"`
+		Plugins []lockDigestPlugin `json:"plugins"`
+	}{Version: lf.Version, Plugins: plugins}
+	return canonicalSHA256(payload)
+}
+
+func canonicalSHA256(payload any) (string, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:]), nil
 }

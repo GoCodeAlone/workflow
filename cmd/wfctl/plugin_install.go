@@ -103,6 +103,9 @@ func runPluginInstall(args []string) error {
 	directURL := fs.String("url", "", "Install from a direct download URL (tar.gz archive)")
 	localPath := fs.String("local", "", "Install from a local plugin directory")
 	fromConfig := fs.String("from-config", "", "Install all requires.plugins[] from a workflow config file")
+	locked := fs.Bool("locked", false, "Install from lockfile without modifying wfctl.yaml or .wfctl-lock.yaml")
+	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
+	lockPath := fs.String("lock-file", wfctlLockPath, "Path to .wfctl-lock.yaml")
 	sha256Flag := fs.String("sha256", "", "Expected SHA256 hex digest of the downloaded archive (for --url installs)")
 	skipChecksum := fs.Bool("skip-checksum", false, "Skip integrity verification (WARNING: disables supply-chain protection)")
 	compatMode := fs.String("compat-mode", "", "Compatibility mode for registry installs: enforce or warn")
@@ -110,7 +113,7 @@ func runPluginInstall(args []string) error {
 	forceCompat := fs.Bool("force", false, "Permit known-failing compatibility evidence while still enforcing checksums")
 	quiet := fs.Bool("quiet", false, "Suppress per-download progress output")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl-lock.yaml\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local plugin directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Sync wfctl.yaml when needed, then install all plugins from .wfctl-lock.yaml\n  wfctl plugin install --locked             Install all plugins from .wfctl-lock.yaml without writing\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	parsedArgs, err := interspersedPluginInstallArgs(fs, args)
@@ -133,6 +136,9 @@ func runPluginInstall(args []string) error {
 		// Full bypass: ALL checksum verification is skipped, including manifest SHA256
 		// and GitHub checksums.txt auto-fetch. Use only for trusted internal URLs.
 		fmt.Fprintf(os.Stderr, "WARNING: --skip-checksum is set; ALL integrity verification is disabled.\n")
+	}
+	if *locked && (*fromConfig != "" || *directURL != "" || *localPath != "" || fs.NArg() > 0) {
+		return fmt.Errorf("--locked is only supported for lockfile installs; run without plugin arguments, --from-config, --url, or --local")
 	}
 
 	// --from-config: batch install from workflow requires.plugins[].
@@ -165,7 +171,14 @@ func runPluginInstall(args []string) error {
 
 	// No args: install all plugins from .wfctl-lock.yaml lockfile.
 	if fs.NArg() < 1 {
-		return installFromLockfile(pluginDirVal, *cfgPath)
+		if err := prepareProjectLockfileForInstall(*manifestPath, *lockPath, *locked, pluginLockCompatibilityOptions{
+			CompatMode:    *compatMode,
+			EngineVersion: *engineVersion,
+			Force:         *forceCompat,
+		}); err != nil {
+			return err
+		}
+		return installFromLockfileWithOptions(pluginDirVal, *cfgPath, *lockPath, *locked)
 	}
 
 	nameArg := fs.Arg(0)
@@ -281,6 +294,69 @@ func runPluginInstall(args []string) error {
 	updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
 
 	return nil
+}
+
+func runPluginCI(args []string) error {
+	fs := flag.NewFlagSet("plugin ci", flag.ContinueOnError)
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	cfgPath := fs.String("config", "", "Registry config file path")
+	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
+	lockPath := fs.String("lock-file", wfctlLockPath, "Path to .wfctl-lock.yaml")
+	quiet := fs.Bool("quiet", false, "Suppress per-download progress output")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin ci [options]\n\nInstall plugins from .wfctl-lock.yaml without modifying wfctl.yaml or .wfctl-lock.yaml.\n\nOptions:\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return fmt.Errorf("plugin ci does not accept plugin arguments")
+	}
+	restoreDownloadProgress := setDownloadProgressQuiet(*quiet)
+	defer restoreDownloadProgress()
+	if err := prepareProjectLockfileForInstall(*manifestPath, *lockPath, true, pluginLockCompatibilityOptions{}); err != nil {
+		return err
+	}
+	return installFromLockfileWithOptions(pluginDirVal, *cfgPath, *lockPath, true)
+}
+
+func prepareProjectLockfileForInstall(manifestPath, lockPath string, locked bool, compatOpts pluginLockCompatibilityOptions) error {
+	if _, err := os.Stat(manifestPath); err != nil {
+		if os.IsNotExist(err) {
+			if locked {
+				return fmt.Errorf("manifest %s not found; locked plugin install requires wfctl.yaml", manifestPath)
+			}
+			return nil
+		}
+		return fmt.Errorf("stat manifest %s: %w", manifestPath, err)
+	}
+	if err := validateLockfileProvenanceForManifest(manifestPath, lockPath); err == nil {
+		return nil
+	} else if locked {
+		return err
+	} else {
+		fmt.Fprintf(os.Stderr, "warning: %v; regenerating %s from %s\n", err, lockPath, manifestPath)
+	}
+	return runPluginLockFromManifestWithOptions(manifestPath, lockPath, compatOpts)
+}
+
+func validateLockfileProvenanceForManifest(manifestPath, lockPath string) error {
+	manifest, err := config.LoadWfctlManifest(manifestPath)
+	if err != nil {
+		return err
+	}
+	lockfile, err := config.LoadWfctlLockfile(lockPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("lockfile %s not found; run 'wfctl plugin install' or 'wfctl plugin lock'", lockPath)
+		}
+		return err
+	}
+	return config.ValidateWfctlLockfileProvenance(manifest, lockfile)
 }
 
 type boolFlag interface {
