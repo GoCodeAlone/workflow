@@ -19,6 +19,7 @@ func runConfigValidate(args []string) error {
 	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml project manifest")
 	lockPath := fs.String("lock-file", wfctlLockPath, "Path to .wfctl-lock.yaml")
 	skipLock := fs.Bool("skip-lock", false, "Skip lockfile validation")
+	locked := fs.Bool("locked", false, "Require .wfctl-lock.yaml to match wfctl.yaml without updates")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl config validate [options] [wfctl.yaml]
 
@@ -52,6 +53,9 @@ Options:
 	fmt.Printf("  PASS %s (wfctl project manifest)\n", *manifestPath)
 
 	if *skipLock {
+		if *locked {
+			return fmt.Errorf("--skip-lock and --locked are contradictory")
+		}
 		return nil
 	}
 	if err := validateWfctlLockfile(*lockPath); err != nil {
@@ -60,6 +64,12 @@ Options:
 			return nil
 		}
 		return err
+	}
+	if *locked {
+		if err := validateLockfileProvenanceForManifest(*manifestPath, *lockPath); err != nil {
+			return err
+		}
+		fmt.Printf("  PASS %s matches %s (locked)\n", *lockPath, *manifestPath)
 	}
 	fmt.Printf("  PASS %s (wfctl plugin lockfile)\n", *lockPath)
 	return nil

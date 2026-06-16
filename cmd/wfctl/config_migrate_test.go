@@ -173,6 +173,34 @@ plugins:
 	}
 }
 
+func TestConfigValidateLockedRejectsStaleLockfile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	manifest := `version: 1
+plugins:
+  - name: workflow-plugin-foo
+    version: v1.0.0
+    source: github.com/GoCodeAlone/workflow-plugin-foo
+`
+	if err := os.WriteFile("wfctl.yaml", []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := runPluginLockFromManifest("wfctl.yaml", ".wfctl-lock.yaml"); err != nil {
+		t.Fatalf("lock manifest: %v", err)
+	}
+	if err := os.WriteFile("wfctl.yaml", []byte(strings.ReplaceAll(manifest, "v1.0.0", "v1.1.0")), 0o600); err != nil {
+		t.Fatalf("write stale manifest: %v", err)
+	}
+
+	err := runConfigValidate([]string{"--locked"})
+	if err == nil {
+		t.Fatal("config validate --locked succeeded with stale lockfile")
+	}
+	if !strings.Contains(err.Error(), "lockfile is stale") {
+		t.Fatalf("error = %v, want stale lockfile", err)
+	}
+}
+
 func TestConfigValidateAcceptsPositionalManifestAndWarnsOnMissingDefaultLock(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

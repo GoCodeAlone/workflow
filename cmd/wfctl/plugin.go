@@ -32,6 +32,8 @@ func runPlugin(args []string) error {
 		return runPluginLock(subArgs)
 	case "install":
 		return runPluginInstall(subArgs)
+	case "ci":
+		return runPluginCI(subArgs)
 	case "run":
 		return runPluginRun(subArgs)
 	case "list":
@@ -80,7 +82,8 @@ Subcommands:
   docs     Generate documentation for an existing plugin
   test     Run a plugin through its full lifecycle in a test harness
   search   Search the plugin registry
-  install  Install plugins (reads .wfctl-lock.yaml when present)
+  install  Install plugins (syncs wfctl.yaml to .wfctl-lock.yaml when needed)
+  ci       Install plugins from .wfctl-lock.yaml without modifying lockfiles
   run      Install if requested, then run a plugin-provided wfctl command
   list     List installed plugins
   update   Update an installed plugin to its latest version

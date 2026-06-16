@@ -63,6 +63,44 @@ plugins:
 	}
 }
 
+func TestPluginLock_FromManifest_WritesProvenance(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+
+	manifest := `version: 1
+plugins:
+  - name: workflow-plugin-foo
+    version: v1.2.3
+    source: github.com/GoCodeAlone/workflow-plugin-foo
+`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if err := runPluginLockFromManifest(manifestPath, lockPath); err != nil {
+		t.Fatalf("runPluginLockFromManifest: %v", err)
+	}
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lockfile: %v", err)
+	}
+	var parsed struct {
+		SourceManifestSHA256 string `yaml:"source_manifest_sha256"`
+		LockfileSHA256       string `yaml:"lockfile_sha256"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse lockfile: %v", err)
+	}
+	if err := validateSHA256Hex(parsed.SourceManifestSHA256); err != nil {
+		t.Fatalf("source_manifest_sha256 = %q, want sha256 hex: %v\n%s", parsed.SourceManifestSHA256, err, data)
+	}
+	if err := validateSHA256Hex(parsed.LockfileSHA256); err != nil {
+		t.Fatalf("lockfile_sha256 = %q, want sha256 hex: %v\n%s", parsed.LockfileSHA256, err, data)
+	}
+}
+
 func TestPluginLock_FromManifest_DropsExistingTopLevelSHA256(t *testing.T) {
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "wfctl.yaml")

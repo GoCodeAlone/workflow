@@ -25,6 +25,10 @@ import (
 //
 // This is the authoritative install path when .wfctl-lock.yaml (new format) is present.
 func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLockfile) error {
+	return installFromWfctlLockfileWithOptions(pluginDirVal, lockPath, lf, false)
+}
+
+func installFromWfctlLockfileWithOptions(pluginDirVal, lockPath string, lf *config.WfctlLockfile, noWrite bool) error {
 	if len(lf.Plugins) == 0 {
 		fmt.Println("No plugins pinned in .wfctl-lock.yaml.")
 		return nil
@@ -41,7 +45,7 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 	installSkipLockfileUpdate = true
 	defer func() { installSkipLockfileUpdate = false }()
 
-	if lockPath != "" {
+	if lockPath != "" && !noWrite {
 		scrubbed := scrubbedWfctlLockfileTopLevelSHA256(lf)
 		if err := config.SaveWfctlLockfile(lockPath, scrubbed); err != nil {
 			return fmt.Errorf("persist scrubbed lockfile: %w", err)
@@ -123,7 +127,7 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 		// Re-save the scrubbed new-format lockfile after each successful install
 		// so platform metadata remains authoritative even if lower-level install
 		// paths attempt lockfile maintenance.
-		if lockPath != "" {
+		if lockPath != "" && !noWrite {
 			if saveErr := config.SaveWfctlLockfile(lockPath, lf); saveErr != nil {
 				return fmt.Errorf("persist scrubbed lockfile after installing %s: %w", name, saveErr)
 			}
@@ -138,9 +142,11 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 
 func scrubbedWfctlLockfileTopLevelSHA256(lf *config.WfctlLockfile) *config.WfctlLockfile {
 	scrubbed := &config.WfctlLockfile{
-		Version:     lf.Version,
-		GeneratedAt: lf.GeneratedAt,
-		Plugins:     make(map[string]config.WfctlLockPluginEntry, len(lf.Plugins)),
+		Version:              lf.Version,
+		GeneratedAt:          lf.GeneratedAt,
+		SourceManifestSHA256: lf.SourceManifestSHA256,
+		LockfileSHA256:       lf.LockfileSHA256,
+		Plugins:              make(map[string]config.WfctlLockPluginEntry, len(lf.Plugins)),
 	}
 	for name, entry := range lf.Plugins {
 		entry.SHA256 = ""

@@ -120,6 +120,9 @@ func runPluginLockFromManifestWithOptions(manifestPath, lockPath string, compatO
 		newLF.Plugins[p.Name] = entry
 	}
 
+	if err := config.PopulateWfctlLockfileProvenance(m, newLF); err != nil {
+		return fmt.Errorf("calculate lockfile provenance: %w", err)
+	}
 	if err := config.SaveWfctlLockfile(lockPath, newLF); err != nil {
 		return fmt.Errorf("write lockfile: %w", err)
 	}

@@ -87,13 +87,17 @@ func loadPluginLockfile(path string) (*PluginLockfile, error) {
 // it uses installFromWfctlLockfile which supports platform URLs and sha256 verification.
 // Otherwise it falls back to the legacy PluginLockfile behavior.
 func installFromLockfile(pluginDir, cfgPath string) error {
+	return installFromLockfileWithOptions(pluginDir, cfgPath, wfctlLockPath, false)
+}
+
+func installFromLockfileWithOptions(pluginDir, cfgPath, lockPath string, noWrite bool) error {
 	// Try new WfctlLockfile format first.
-	if newLF, err := config.LoadWfctlLockfile(wfctlLockPath); err == nil && newLF.Version > 0 {
-		return installFromWfctlLockfile(pluginDir, wfctlLockPath, newLF)
+	if newLF, err := config.LoadWfctlLockfile(lockPath); err == nil && newLF.Version > 0 {
+		return installFromWfctlLockfileWithOptions(pluginDir, lockPath, newLF, noWrite)
 	}
 
 	// Legacy path.
-	lf, err := loadPluginLockfile(wfctlLockPath)
+	lf, err := loadPluginLockfile(lockPath)
 	if err != nil {
 		return fmt.Errorf("load lockfile: %w", err)
 	}
