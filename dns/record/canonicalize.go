@@ -113,9 +113,117 @@ func FromResourceStates(states []interfaces.ResourceState) Portfolio {
 	})
 
 	for _, k := range order {
-		p.Snapshots = append(p.Snapshots, *snapByKey[k])
+		snap := *snapByKey[k]
+		canonicalizeSnapshot(&snap)
+		p.Snapshots = append(p.Snapshots, snap)
 	}
 	return p
+}
+
+func canonicalizeSnapshot(snap *Snapshot) {
+	sort.SliceStable(snap.Records, func(i, j int) bool {
+		return recordLess(snap.Records[i], snap.Records[j])
+	})
+	sortAuthorityStringSlices(snap.Authority)
+}
+
+func recordLess(a, b Record) bool {
+	for _, cmp := range []struct{ a, b string }{
+		{strings.ToUpper(a.Type), strings.ToUpper(b.Type)},
+		{a.Type, b.Type},
+		{strings.ToLower(a.Name), strings.ToLower(b.Name)},
+		{a.Name, b.Name},
+		{strings.ToLower(a.Value), strings.ToLower(b.Value)},
+		{a.Value, b.Value},
+	} {
+		if cmp.a == cmp.b {
+			continue
+		}
+		return cmp.a < cmp.b
+	}
+	if a.TTL != b.TTL {
+		return a.TTL < b.TTL
+	}
+	if less, ok := optionalIntLess(a.Priority, b.Priority); ok {
+		return less
+	}
+	if less, ok := optionalIntLess(a.Port, b.Port); ok {
+		return less
+	}
+	if less, ok := optionalIntLess(a.Weight, b.Weight); ok {
+		return less
+	}
+	if less, ok := optionalIntLess(a.Flags, b.Flags); ok {
+		return less
+	}
+	if !strings.EqualFold(a.Tag, b.Tag) {
+		return strings.ToLower(a.Tag) < strings.ToLower(b.Tag)
+	}
+	return a.Tag < b.Tag
+}
+
+func optionalIntLess(a, b *int) (bool, bool) {
+	switch {
+	case a == nil && b == nil:
+		return false, false
+	case a == nil:
+		return true, true
+	case b == nil:
+		return false, true
+	case *a != *b:
+		return *a < *b, true
+	default:
+		return false, false
+	}
+}
+
+func sortAuthorityStringSlices(authority map[string]any) {
+	for _, key := range []string{
+		"registrar_nameservers",
+		"live_nameservers",
+		"name_servers",
+		"original_name_servers",
+	} {
+		value, ok := authority[key]
+		if !ok {
+			continue
+		}
+		if sorted, ok := sortedStringAnySlice(value); ok {
+			authority[key] = sorted
+		}
+	}
+}
+
+func sortedStringAnySlice(value any) ([]any, bool) {
+	var values []string
+	switch v := value.(type) {
+	case []any:
+		values = make([]string, len(v))
+		for i, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			values[i] = s
+		}
+	case []string:
+		values = append([]string(nil), v...)
+	default:
+		return nil, false
+	}
+	sort.SliceStable(values, func(i, j int) bool {
+		li := strings.ToLower(values[i])
+		lj := strings.ToLower(values[j])
+		if li == lj {
+			return values[i] < values[j]
+		}
+		return li < lj
+	})
+	out := make([]any, len(values))
+	for i := range values {
+		out[i] = values[i]
+	}
+	return out, true
 }
 
 // sanitizeDomainForID converts a domain string into an ID-safe slug:

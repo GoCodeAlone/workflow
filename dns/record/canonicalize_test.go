@@ -1,6 +1,7 @@
 package record_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/dns/record"
@@ -311,5 +312,74 @@ func TestFromResourceStatesOmitsAbsentOptionalFields(t *testing.T) {
 	if r.Priority != nil || r.Port != nil || r.Weight != nil || r.Flags != nil {
 		t.Errorf("absent optional fields should stay nil; got priority=%v port=%v weight=%v flags=%v",
 			r.Priority, r.Port, r.Weight, r.Flags)
+	}
+}
+
+func TestFromResourceStatesCanonicalizesRecordAndAuthorityOrder(t *testing.T) {
+	states := []interfaces.ResourceState{
+		{
+			Type:       "infra.dns",
+			Provider:   "namecheap",
+			ProviderID: "example.com",
+			Outputs: map[string]any{
+				"records": []any{
+					map[string]any{"type": "TXT", "name": "z", "address": "last", "ttl": 300},
+					map[string]any{"type": "MX", "name": "@", "address": "mail.example.com.", "ttl": 300, "priority": 10},
+					map[string]any{"type": "TXT", "name": "_dmarc", "address": "v=DMARC1; p=none", "ttl": 300},
+					map[string]any{"type": "A", "name": "www", "address": "192.0.2.12", "ttl": 300},
+					map[string]any{"type": "A", "name": "WWW", "address": "192.0.2.11", "ttl": 300},
+					map[string]any{"type": "A", "name": "@", "address": "192.0.2.10", "ttl": 300},
+				},
+				"authority": map[string]any{
+					"name_servers":          []any{"z.ns.example.com", "A.ns.example.com"},
+					"original_name_servers": []string{"ns2.hover.com", "ns1.hover.com"},
+				},
+			},
+		},
+		{
+			Type:       "infra.dns_delegation",
+			Provider:   "namecheap",
+			ProviderID: "example.com",
+			Outputs: map[string]any{
+				"registrar_nameservers": []any{"ns2.registrar.example", "ns1.registrar.example"},
+				"live_nameservers":      []any{"ns2.live.example", "ns1.live.example"},
+			},
+		},
+	}
+
+	p := record.FromResourceStates(states)
+	if len(p.Snapshots) != 1 {
+		t.Fatalf("want 1 snapshot; got %d", len(p.Snapshots))
+	}
+
+	gotRecords := make([]string, len(p.Snapshots[0].Records))
+	for i, r := range p.Snapshots[0].Records {
+		gotRecords[i] = r.Type + " " + r.Name + " " + r.Value
+	}
+	wantRecords := []string{
+		"A @ 192.0.2.10",
+		"A WWW 192.0.2.11",
+		"A www 192.0.2.12",
+		"MX @ mail.example.com.",
+		"TXT _dmarc v=DMARC1; p=none",
+		"TXT z last",
+	}
+	if !reflect.DeepEqual(gotRecords, wantRecords) {
+		t.Fatalf("records order = %#v; want %#v", gotRecords, wantRecords)
+	}
+
+	for key, want := range map[string][]any{
+		"name_servers":          {"A.ns.example.com", "z.ns.example.com"},
+		"original_name_servers": {"ns1.hover.com", "ns2.hover.com"},
+		"registrar_nameservers": {"ns1.registrar.example", "ns2.registrar.example"},
+		"live_nameservers":      {"ns1.live.example", "ns2.live.example"},
+	} {
+		got, ok := p.Snapshots[0].Authority[key].([]any)
+		if !ok {
+			t.Fatalf("Authority[%s] = %#v; want []any", key, p.Snapshots[0].Authority[key])
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Authority[%s] = %#v; want %#v", key, got, want)
+		}
 	}
 }
