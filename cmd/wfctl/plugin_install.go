@@ -328,7 +328,7 @@ func prepareProjectLockfileForInstall(manifestPath, lockPath string, locked bool
 	if _, err := os.Stat(manifestPath); err != nil {
 		if os.IsNotExist(err) {
 			if locked {
-				return fmt.Errorf("manifest %s not found; locked plugin install requires wfctl.yaml", manifestPath)
+				return fmt.Errorf("manifest %s not found; locked plugin install requires an existing manifest", manifestPath)
 			}
 			return nil
 		}

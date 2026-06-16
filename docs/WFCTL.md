@@ -790,7 +790,7 @@ wfctl plugin search [options] [<query>]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-config` | _(default registry)_ | Registry config file path |
+| `--config` | _(default registry)_ | Registry config file path |
 
 ```bash
 wfctl plugin search auth
@@ -810,7 +810,7 @@ wfctl plugin install [options] [<name>[@<version>]]
 |------|---------|-------------|
 | `--plugin-dir` | `data/plugins` | Plugin directory |
 | `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
-| `-config` | _(default registry)_ | Registry config file path |
+| `--config` | _(default registry)_ | Registry config file path |
 | `-registry` | _(all registries)_ | Use a specific registry by name |
 | `--manifest` | `wfctl.yaml` | wfctl project manifest path for lockfile installs |
 | `--lock-file` | `.wfctl-lock.yaml` | Project plugin lockfile path |
@@ -834,7 +834,7 @@ changing command arguments. High-level install, checksum, and error messages are
 still emitted.
 
 When run without a plugin argument, `plugin install` treats `wfctl.yaml` as the
-source manifest. If `.wfctl-lock.yaml` is missing stale provenance, or was
+source manifest. If `.wfctl-lock.yaml` is missing or stale provenance, or was
 generated from different plugin pins, local install regenerates the lockfile and
 then installs from it. Use `--locked` in CI or release workflows: it validates
 that the lockfile matches `wfctl.yaml`, installs exactly from the lock, and never

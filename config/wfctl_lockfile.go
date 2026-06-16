@@ -221,7 +221,7 @@ func ValidateWfctlLockfileProvenance(manifest *WfctlManifest, lf *WfctlLockfile)
 		return err
 	}
 	if lf.SourceManifestSHA256 != sourceDigest {
-		return fmt.Errorf("lockfile is stale for wfctl.yaml; run 'wfctl plugin install' or 'wfctl plugin lock'")
+		return fmt.Errorf("lockfile is stale for the source manifest; run 'wfctl plugin install' or 'wfctl plugin lock'")
 	}
 	lockDigest, err := WfctlLockfileDigest(lf)
 	if err != nil {
